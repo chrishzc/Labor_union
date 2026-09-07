@@ -1,146 +1,106 @@
+"""#251 retirement supersedes #226's characterization of the legacy writer.
+
+The old payload remains decodable, but neither rollback nor force_rebind permits
+binding, token verification, a transaction, or a canonical command bridge.
+"""
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
+from unittest.mock import AsyncMock, Mock
 
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
 
 from line import line_bot
+from shared_kernel.writer_inventory import scan_production_writers
 from subsystems.line.runtime_contracts import LineRuntimeMode
+from subsystems.line.runtime_cutover import LineRuntimeCutoverError, resolve_line_runtime_selection
+
+REPLACEMENT = "/api/v1/line/identity/customer/apply"
+PAYLOAD = {"name": "合成客戶", "phone": "synthetic-phone", "line_user_id": "U-synthetic"}
 
 
-class _FakeCursor:
-    def __init__(self, connection: "_FakeConnection") -> None:
-        self._connection = connection
-        self._last = ""
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, tb) -> None:
-        return None
-
-    def execute(self, sql: str, params=None) -> None:
-        del params
-        normalized = " ".join(sql.split()).upper()
-        if normalized.startswith("SELECT ID, NAME, PHONE, CASE_NO, LINE_USER_ID FROM CLIENTS"):
-            self._last = "client"
-            return
-        if normalized.startswith("SELECT ID FROM BECLASS_RECORDS"):
-            self._last = "survey"
-            return
-        if normalized.startswith("UPDATE CLIENTS SET LINE_USER_ID"):
-            self._last = "update"
-            self._connection.update_attempts += 1
-            if self._connection.fail_on_update:
-                raise RuntimeError("synthetic update failure")
-            self._connection.pending_line_user_id = "U-new"
-            return
-        raise AssertionError(f"unexpected SQL: {normalized}")
-
-    def fetchone(self):
-        if self._last == "client":
-            return {
-                "id": 7,
-                "name": "合成客戶",
-                "phone": "0912345678",
-                "case_no": "SYN-LINE-226",
-                "line_user_id": self._connection.persisted_line_user_id,
-            }
-        if self._last == "survey":
-            return {"id": 11}
-        raise AssertionError(f"fetchone without supported SELECT: {self._last}")
+@pytest.fixture
+def effects(monkeypatch):
+    probes = {
+        "get_db_connection": Mock(side_effect=AssertionError("LINE_BIND_MUTATION_STILL_REACHABLE")),
+        "_trusted_line_user_id": AsyncMock(side_effect=AssertionError("unexpected token verification")),
+        "bind_client": Mock(side_effect=AssertionError("unexpected canonical bridge")),
+        "wake_worker": Mock(side_effect=AssertionError("unexpected worker wakeup")),
+    }
+    for name, probe in probes.items():
+        monkeypatch.setattr(line_bot, name, probe)
+    yield probes
+    for probe in probes.values():
+        probe.assert_not_called()
 
 
-class _FakeConnection:
-    def __init__(self, *, existing_line_user_id: str | None = None, fail_on_update: bool = False) -> None:
-        self.persisted_line_user_id = existing_line_user_id
-        self.pending_line_user_id: str | None = None
-        self.fail_on_update = fail_on_update
-        self.update_attempts = 0
-        self.commit_calls = 0
-        self.close_calls = 0
-
-    def cursor(self, *_args, **_kwargs):
-        return _FakeCursor(self)
-
-    def commit(self) -> None:
-        self.commit_calls += 1
-        self.persisted_line_user_id = self.pending_line_user_id
-        self.pending_line_user_id = None
-
-    def close(self) -> None:
-        self.close_calls += 1
-        # Model the configured PyMySQL connection's non-autocommit transaction:
-        # uncommitted staged state is discarded on close.
-        self.pending_line_user_id = None
-
-
-def _payload(*, force_rebind: bool = False) -> line_bot.LineBindPayload:
-    return line_bot.LineBindPayload(
-        name="合成客戶",
-        phone="0912-345-678",
-        line_user_id="U-new",
-        force_rebind=force_rebind,
-    )
-
-
-def test_line_bind_canonical_fails_closed_before_db(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(line_bot, "line_webhook_runtime_mode", lambda: LineRuntimeMode.CANONICAL)
-
-    def forbidden_connection():
-        raise AssertionError("canonical retired route must not acquire a DB connection")
-
-    monkeypatch.setattr(line_bot, "get_db_connection", forbidden_connection)
-
+def test_legacy_bind_no_db_acquisition(monkeypatch, effects):
+    """Original failure: allowed legacy reaches DB acquisition before retirement."""
+    monkeypatch.setattr(line_bot, "line_webhook_runtime_mode", lambda: LineRuntimeMode.LEGACY)
     with pytest.raises(HTTPException) as caught:
-        asyncio.run(line_bot.line_bind(_payload()))
-
+        asyncio.run(line_bot.line_bind(line_bot.LineBindPayload(**PAYLOAD)))
     assert caught.value.status_code == 410
     assert caught.value.detail["code"] == "legacy_line_route_retired"
-    assert caught.value.detail["replacement"] == "/api/v1/line/identity/customer/apply"
+    assert caught.value.detail["replacement"] == REPLACEMENT
 
 
-def test_line_bind_legacy_success_commits_once_and_closes(monkeypatch: pytest.MonkeyPatch) -> None:
-    connection = _FakeConnection()
+@pytest.mark.parametrize("environment,mode,rollback", [
+    ("development", "canonical", "false"),
+    ("development", "legacy", "false"),
+    ("production", "canonical", "false"),
+    ("production", "legacy", "true"),
+    ("production", "legacy", "false"),
+])
+@pytest.mark.parametrize("extra", [{}, {"force_rebind": True}, {"line_id_token": "synthetic-invalid-token"}])
+def test_bind_retired_in_every_runtime(monkeypatch, effects, environment, mode, rollback, extra):
+    configuration = {"APP_ENV": environment, "LINE_WEBHOOK_RUNTIME_MODE": mode,
+                     "LINE_WORKER_RUNTIME_MODE": mode, "LINE_LEGACY_ROLLBACK_MODE": rollback}
+    for key, value in configuration.items():
+        monkeypatch.setenv(key, value)
+    # Prove the actual runtime policy separately; retirement does not alter it.
+    if environment == "production" and mode == "legacy" and rollback == "false":
+        with pytest.raises(LineRuntimeCutoverError, match="rollback"):
+            resolve_line_runtime_selection(configuration)
+    else:
+        assert resolve_line_runtime_selection(configuration).webhook_mode.value == mode
+    app = FastAPI()
+    app.include_router(line_bot.router)
+    with TestClient(app) as client:
+        response = client.post("/api/line/bind", json={**PAYLOAD, **extra})
+    assert response.status_code == 410
+    detail = response.json()["detail"]
+    assert set(detail) == {"code", "message", "replacement"}
+    assert detail["code"] == "legacy_line_route_retired"
+    assert detail["replacement"] == REPLACEMENT
+    assert isinstance(detail["message"], str) and detail["message"]
+
+
+@pytest.mark.parametrize("database_available", [True, False])
+def test_retirement_never_starts_success_or_failure_transaction(monkeypatch, database_available):
+    connection = Mock()
+    acquire = Mock(return_value=connection) if database_available else Mock(side_effect=RuntimeError("synthetic database unavailable"))
+    monkeypatch.setattr(line_bot, "get_db_connection", acquire)
     monkeypatch.setattr(line_bot, "line_webhook_runtime_mode", lambda: LineRuntimeMode.LEGACY)
-    monkeypatch.setattr(line_bot, "get_db_connection", lambda: connection)
-    monkeypatch.setattr(line_bot, "wake_worker", lambda: None)
-
-    result = asyncio.run(line_bot.line_bind(_payload()))
-
-    assert result["status"] == "state_a"
-    assert connection.update_attempts == 1
-    assert connection.commit_calls == 1
-    assert connection.close_calls == 1
-    assert connection.persisted_line_user_id == "U-new"
+    with pytest.raises(HTTPException) as caught:
+        asyncio.run(line_bot.line_bind(line_bot.LineBindPayload(**PAYLOAD, force_rebind=True)))
+    assert caught.value.status_code == 410
+    acquire.assert_not_called()
+    assert connection.mock_calls == []  # Zero SQL, commit, rollback and close: no transaction acquired.
 
 
-def test_line_bind_legacy_rebind_confirmation_does_not_commit(monkeypatch: pytest.MonkeyPatch) -> None:
-    connection = _FakeConnection(existing_line_user_id="U-existing")
+def test_retirement_does_not_disable_other_legacy_surfaces(monkeypatch):
     monkeypatch.setattr(line_bot, "line_webhook_runtime_mode", lambda: LineRuntimeMode.LEGACY)
-    monkeypatch.setattr(line_bot, "get_db_connection", lambda: connection)
-
-    result = asyncio.run(line_bot.line_bind(_payload()))
-
-    assert result["status"] == "confirm_rebind"
-    assert connection.update_attempts == 0
-    assert connection.commit_calls == 0
-    assert connection.close_calls == 1
-    assert connection.persisted_line_user_id == "U-existing"
+    assert line_bot._require_legacy_line_surface("/unrelated") is None
+    monkeypatch.setattr(line_bot, "line_webhook_runtime_mode", lambda: LineRuntimeMode.CANONICAL)
+    with pytest.raises(HTTPException) as caught:
+        line_bot._require_legacy_line_surface("/unrelated")
+    assert caught.value.status_code == 410
 
 
-def test_line_bind_legacy_precommit_sql_failure_closes_without_committed_change(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    connection = _FakeConnection(fail_on_update=True)
-    monkeypatch.setattr(line_bot, "line_webhook_runtime_mode", lambda: LineRuntimeMode.LEGACY)
-    monkeypatch.setattr(line_bot, "get_db_connection", lambda: connection)
-
-    result = asyncio.run(line_bot.line_bind(_payload()))
-
-    assert result["status"] == "state_c"
-    assert connection.update_attempts == 1
-    assert connection.commit_calls == 0
-    assert connection.close_calls == 1
-    assert connection.persisted_line_user_id is None
+def test_retired_bind_has_no_production_writer_finding():
+    root = Path(__file__).resolve().parents[1]
+    findings = scan_production_writers(root, ("line",))
+    assert not [item for item in findings if item.relative_path == "line/line_bot.py" and item.symbol == "line_bind"]
