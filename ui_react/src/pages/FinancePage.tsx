@@ -16,12 +16,18 @@ import { accountsPayableQueryClient } from '../api/accounts_payable/accounts_pay
 import { adaptAccountsPayablePreview } from '../adapters/finance/accounts_payable_query_adapter';
 import { financeImportBlockerMessage } from '../adapters/finance/finance_import_query_adapter';
 import { FinanceWorkbookSnapshot, financeImportMutationClient, type FinanceImportBatchOutcome, type FinanceImportBatchPreview, type FinanceImportJobAccepted, type FinanceWorkbookIngestionReceipt } from '../api/finance_import/finance_import_mutation_client';
+import { financeImportQueryClient } from '../api/finance_import/finance_import_query_client';
 import { HistoricalClientPaymentWorkbench } from '../components/HistoricalClientPaymentWorkbench';
 import { HistoricalStaffPayoutWorkbench } from '../components/HistoricalStaffPayoutWorkbench';
 import { PaymentDestinationConfigurationPanel } from '../components/PaymentDestinationConfigurationPanel';
 
 type FinanceTab = 'client-receipts' | 'staff-payables' | 'accounts-payable' | 'finance-import' | 'payment-destination';
 type LoadState<T> = { kind: 'idle' | 'loading' } | { kind: 'ready'; data: T } | { kind: 'empty' } | { kind: 'error'; message: string } | { kind: 'unavailable'; message: string };
+type FinanceImportReviewSnapshot = {
+  batchIdentity: string;
+  reviewCount: number;
+  items: Awaited<ReturnType<typeof financeImportQueryClient.listReviewRows>>['items'];
+};
 const FINANCE_OUTCOME_POLL_LIMIT = 10;
 const FINANCE_OUTCOME_POLL_DELAY_MS = 500;
 
@@ -76,6 +82,7 @@ export const FinancePage: React.FC = () => {
   const [financeWorkbook, setFinanceWorkbook] = useState<File | null>(null);
   const [ingestion, setIngestion] = useState<LoadState<FinanceWorkbookIngestionReceipt>>({ kind: 'idle' });
   const [batchPreview, setBatchPreview] = useState<LoadState<FinanceImportBatchPreview>>({ kind: 'idle' });
+  const [sourceReview, setSourceReview] = useState<LoadState<FinanceImportReviewSnapshot>>({ kind: 'idle' });
   const [applyReason, setApplyReason] = useState('已核對銀行流水預覽，確認匯入');
   const [applyConfirmed, setApplyConfirmed] = useState(false);
   const [applyJob, setApplyJob] = useState<LoadState<FinanceImportJobAccepted>>({ kind: 'idle' });
@@ -196,9 +203,33 @@ export const FinancePage: React.FC = () => {
     });
   }, [activeTab, targetMonth, reload]);
 
+  const loadSourceReview = async (batchIdentity: string) => {
+    const request = start('source-review');
+    setSourceReview({ kind: 'loading' });
+    try {
+      const [manifest, page] = await Promise.all([
+        financeImportQueryClient.getManifest(batchIdentity, { signal: request.controller.signal }),
+        financeImportQueryClient.listReviewRows(batchIdentity, { signal: request.controller.signal }),
+      ]);
+      if (!current('source-review', request.sequence, request.controller)) return;
+      if (page.next_after_row_id !== null || page.items.length !== manifest.review_count) {
+        setSourceReview({ kind: 'error', message: '人工確認清單與批次統計不一致，請重新查詢。' });
+        return;
+      }
+      setSourceReview({
+        kind: 'ready',
+        data: { batchIdentity: manifest.batch_identity, reviewCount: manifest.review_count, items: page.items },
+      });
+    } catch (error) {
+      if (current('source-review', request.sequence, request.controller)) {
+        setSourceReview({ kind: 'error', message: financeErrorMessage(error, '人工確認清單載入失敗，請重新查詢。') });
+      }
+    }
+  };
+
   const ingestWorkbook = async () => {
     if (financeWorkbook === null) { setIngestion({ kind: 'error', message: '請先選擇 .xlsx 銀行流水工作簿。' }); return; }
-    setIngestion({ kind: 'loading' }); setBatchPreview({ kind: 'idle' }); setApplyConfirmed(false); setApplyJob({ kind: 'idle' }); setBatchOutcome({ kind: 'idle' });
+    setIngestion({ kind: 'loading' }); setBatchPreview({ kind: 'idle' }); setSourceReview({ kind: 'idle' }); setApplyConfirmed(false); setApplyJob({ kind: 'idle' }); setBatchOutcome({ kind: 'idle' });
     try {
       const snapshot = await FinanceWorkbookSnapshot.fromFile(financeWorkbook);
       const receipt = await financeImportMutationClient.ingest(snapshot, { idempotencyKey: `ui-finance-ingest-${snapshot.sha256}`, correlationId: `ui-finance-ingest-${crypto.randomUUID()}` });
@@ -207,8 +238,12 @@ export const FinancePage: React.FC = () => {
   };
   const previewImportedBatch = async () => {
     if (ingestion.kind !== 'ready') return;
-    setBatchPreview({ kind: 'loading' }); setApplyConfirmed(false); setApplyJob({ kind: 'idle' }); setBatchOutcome({ kind: 'idle' });
-    try { setBatchPreview({ kind: 'ready', data: await financeImportMutationClient.preview(ingestion.data.batch_identity) }); }
+    setBatchPreview({ kind: 'loading' }); setSourceReview({ kind: 'idle' }); setApplyConfirmed(false); setApplyJob({ kind: 'idle' }); setBatchOutcome({ kind: 'idle' });
+    try {
+      const preview = await financeImportMutationClient.preview(ingestion.data.batch_identity);
+      setBatchPreview({ kind: 'ready', data: preview });
+      await loadSourceReview(preview.batch_identity);
+    }
     catch (error) { setBatchPreview({ kind: 'error', message: financeErrorMessage(error, '匯入預覽未完成，請重新執行預覽。') }); }
   };
   const applyImportedBatch = async () => {
@@ -644,6 +679,7 @@ export const FinancePage: React.FC = () => {
                   setFinanceWorkbook(event.target.files?.[0] ?? null);
                   setIngestion({ kind: 'idle' });
                   setBatchPreview({ kind: 'idle' });
+                  setSourceReview({ kind: 'idle' });
                   setApplyJob({ kind: 'idle' });
                   setBatchOutcome({ kind: 'idle' });
                 }}
@@ -692,7 +728,7 @@ export const FinancePage: React.FC = () => {
                   </div>
                   <div className="finance-kpi-item">
                     <span className="finance-kpi-label">待人工確認</span>
-                    <span className="finance-kpi-value orange">{batchPreview.data.counts.manual_review}</span>
+                    <span className="finance-kpi-value orange">{sourceReview.kind === 'ready' ? sourceReview.data.reviewCount : '—'}</span>
                   </div>
                   <div className="finance-kpi-item">
                     <span className="finance-kpi-label">待業務配對</span>
@@ -705,13 +741,70 @@ export const FinancePage: React.FC = () => {
                 </div>
 
                 <div className="finance-scope-note">
-                  可自動入帳 {batchPreview.data.counts.ready_dispatch}｜已存在 {batchPreview.data.counts.existing}｜待人工確認 {batchPreview.data.counts.manual_review}｜待業務配對 {batchPreview.data.counts.business_pending}｜阻擋 {batchPreview.data.counts.blocked}。
+                  可自動入帳 {batchPreview.data.counts.ready_dispatch}｜已存在 {batchPreview.data.counts.existing}｜待人工確認 {sourceReview.kind === 'ready' ? sourceReview.data.reviewCount : '讀取中'}｜待業務配對 {batchPreview.data.counts.business_pending}｜阻擋 {batchPreview.data.counts.blocked}。
                   {batchPreview.data.apply_allowed && batchPreview.data.counts.ready_dispatch > 0
                     ? '可進入匯入確認。'
                     : batchPreview.data.apply_allowed
                       ? '目前沒有可自動入帳的筆數；請先從帳務異常處理完成配對。'
                     : `目前不可匯入：${financeImportBlockerMessage(batchPreview.data.blocking_codes)}`}
                 </div>
+
+                <StateMessage state={sourceReview} empty="目前沒有待人工確認資料。" />
+                {sourceReview.kind === 'ready' && (
+                  <div className="finance-detail-block" data-surface-id="finance.finance-import.manual-review" style={{ marginTop: '12px' }}>
+                    <div className="finance-meta">
+                      <span>批次 <code>{sourceReview.data.batchIdentity}</code>｜待人工確認 {sourceReview.data.reviewCount} 筆</span>
+                      <button
+                        className="finance-btn-secondary"
+                        data-control-id="finance.finance-import.review-reload"
+                        onClick={() => void loadSourceReview(sourceReview.data.batchIdentity)}
+                      >
+                        重新查詢人工確認
+                      </button>
+                    </div>
+                    {sourceReview.data.reviewCount === 0 ? (
+                      <div className="finance-state">目前沒有待人工確認資料。</div>
+                    ) : (
+                      <div className="finance-table-container">
+                        <table className="finance-table">
+                          <thead>
+                            <tr>
+                              <th>來源列</th>
+                              <th>交易日期</th>
+                              <th>方向</th>
+                              <th>金額</th>
+                              <th>分類</th>
+                              <th>處置</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {sourceReview.data.items.map((row) => (
+                              <tr key={row.row_id}>
+                                <td><code>{row.source_sheet}#{row.source_row}</code></td>
+                                <td>{row.transaction_date ?? '—'}</td>
+                                <td>{row.direction}</td>
+                                <td><strong>{row.amount_ntd}</strong></td>
+                                <td>{row.classification_type}</td>
+                                <td>{row.disposition}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {sourceReview.kind === 'error' && (
+                  <button
+                    className="finance-btn-secondary"
+                    style={{ marginTop: '10px' }}
+                    data-control-id="finance.finance-import.review-reload"
+                    onClick={() => void loadSourceReview(batchPreview.data.batch_identity)}
+                  >
+                    重新查詢人工確認
+                  </button>
+                )}
 
                 {batchPreview.data.apply_allowed && batchPreview.data.counts.ready_dispatch > 0 && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '12px' }}>
