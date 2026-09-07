@@ -1,0 +1,56 @@
+name: Issue 219 follow-up focused verification
+
+on:
+  push:
+    branches: [ "fix/issue-219-preserve-sent-lineage" ]
+
+permissions:
+  contents: read
+
+jobs:
+  recipient-lineage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install focused test runner
+        run: python -m pip install pytest
+      - name: Verify projection and local consumer contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          projection_test='tests/domains/external-integration/subsystems/line/modules/matching-coordination-delivery/contract/test_matching_coordination_delivery_projection.py'
+          consumer_test='tests/domains/external-integration/subsystems/line/modules/matching-coordination-delivery/contract/test_matching_coordination_delivery.py'
+          python -m pytest "$projection_test" "$consumer_test" -q
+      - name: Removal control reproduces sent-authority regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          production='infrastructure/mysql/line_matching_coordination_delivery_projection.py'
+          projection_test='tests/domains/external-integration/subsystems/line/modules/matching-coordination-delivery/contract/test_matching_coordination_delivery_projection.py'
+          cp "$production" /tmp/issue219-current.py
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('infrastructure/mysql/line_matching_coordination_delivery_projection.py')
+          text = path.read_text()
+          current = '''        parent_gate = (\n            "(s.status='sent' OR (s.status='draft' AND "\n            + confirmation_gate\n            + "))"\n        )\n'''
+          ablated = '''        parent_gate = (\n            "(s.status IN ('sent','draft') AND "\n            + confirmation_gate\n            + ")"\n        )\n'''
+          assert current in text, 'ISSUE219_CURRENT_SENT_DRAFT_SPLIT_NOT_FOUND'
+          path.write_text(text.replace(current, ablated, 1))
+          PY
+          set +e
+          python -m pytest "$projection_test::test_sent_snapshot_remains_authoritative_without_confirmation_gate" -q >/tmp/issue219-ablation.txt 2>&1
+          status=$?
+          set -e
+          cat /tmp/issue219-ablation.txt
+          if [ "$status" -eq 0 ]; then
+            echo 'ISSUE219_ABLATION_UNEXPECTED_PASS'
+            exit 1
+          fi
+          grep -F 'ValueError: substring not found' /tmp/issue219-ablation.txt
+          cp /tmp/issue219-current.py "$production"
+          python -m pytest "$projection_test" -q
