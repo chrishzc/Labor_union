@@ -22,19 +22,127 @@ jobs:
           ref: ${{ github.ref_name }}
           fetch-depth: 1
 
-      - name: Apply bounded repair if needed
+      - name: Apply exact bounded repair if needed
         shell: bash
         run: |
           set -euo pipefail
-          patch=.lane2/issue-221-service-date-ui.patch
-          if git apply --check "$patch"; then
-            git apply "$patch"
-          elif git apply --reverse --check "$patch"; then
-            echo "repair already materialized in branch head"
-          else
-            echo "patch is neither applicable nor already applied" >&2
-            exit 1
-          fi
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_exact(path: str, old: str, new: str, label: str) -> None:
+              file = Path(path)
+              text = file.read_text(encoding='utf-8')
+              if new in text:
+                  print(f'{label}: already applied')
+                  return
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected one old block, found {count}')
+              file.write_text(text.replace(old, new, 1), encoding='utf-8')
+              print(f'{label}: applied')
+
+          replace_exact(
+              'ui_react/src/pages/OrdersPage.tsx',
+              """      const baseInputsReady = serviceDates?.case_no === order.id
+                && startDate !== null
+                && assignmentFactsReady
+                && (!hasFormalAssignment || actualStart?.case_no === order.id);
+              if (!baseInputsReady) {
+                selectServiceDates(order.id, []);
+                setPrecisionError('正式服務日精算所需的開始日、合約天數或排休類型尚未載入，請關閉後重試。');
+                return;
+              }
+              if (calendarDetail === null) {
+                if (allowRestartedNormalFlow) {
+                  changeServiceDateSelection(order.id, serviceDates.current_dates);
+                  setPrecisionError(null);
+                  return;
+                }
+                selectServiceDates(order.id, []);
+                setPrecisionError('正式服務日精算所需的開始日、合約天數或排休類型尚未載入，請關閉後重試。');
+                return;
+              }
+          """,
+              """      const baseInputsReady = serviceDates?.case_no === order.id
+                && startDate !== null
+                && assignmentFactsReady
+                && (!hasFormalAssignment || actualStart?.case_no === order.id);
+              if (calendarDetail === null && allowRestartedNormalFlow && serviceDates?.case_no === order.id) {
+                changeServiceDateSelection(order.id, serviceDates.current_dates);
+                setPrecisionError(null);
+                return;
+              }
+              if (!baseInputsReady) {
+                selectServiceDates(order.id, []);
+                setPrecisionError('正式服務日精算所需的開始日、合約天數或排休類型尚未載入，請關閉後重試。');
+                return;
+              }
+              if (calendarDetail === null) {
+                selectServiceDates(order.id, []);
+                setPrecisionError('正式服務日精算所需的開始日、合約天數或排休類型尚未載入，請關閉後重試。');
+                return;
+              }
+          """,
+              'historical restart fallback ordering',
+          )
+
+          test_path = 'ui_react/src/tests/domains/orders/subsystems/orders/modules/service-date-confirmation/orders_service_dates_flow.test.tsx'
+          replace_exact(
+              test_path,
+              """    vi.mocked(ordersQueryClient.getOrderSummaries).mockResolvedValue(assignedSummaryPage);
+              vi.mocked(orderStageProjectionClient.getOperationalTimelines).mockResolvedValue(
+                buildOrdersStageProjectionFixture(assignedSummaryPage),
+              );
+              vi.spyOn(ordersQueryClient, 'getActualStart').mockRejectedValue(new Error('query unavailable'));
+              const calculateSpy = vi.spyOn(schedulePrecisionClient, 'calculate');
+          """,
+              """    vi.mocked(ordersQueryClient.getOrderSummaries).mockResolvedValue(assignedSummaryPage);
+              vi.mocked(orderStageProjectionClient.getOperationalTimelines).mockResolvedValue(
+                buildOrdersStageProjectionFixture(assignedSummaryPage),
+              );
+              const projection = await orderCardProjectionClient.getCardProjection('ORD-2026-0801');
+              projection.assignment_segments = {
+                ...projection.assignment_segments,
+                value: [{
+                  assignment_id: { ...projection.assignment_segments, value: 501 },
+                  staff_id: { ...projection.assignment_segments, value: 101 },
+                  staff_name: { ...projection.assignment_segments, value: '林月嬌' },
+                  sequence: { ...projection.assignment_segments, value: 1 },
+                  assigned_start_date: { ...projection.assignment_segments, value: '2026-09-01' },
+                  assigned_end_date: { ...projection.assignment_segments, value: '2026-09-03' },
+                  status: { ...projection.assignment_segments, value: 'active' },
+                }],
+                availability: 'available',
+              };
+              vi.mocked(orderCardProjectionClient.getCardProjection).mockResolvedValueOnce(projection);
+              vi.spyOn(ordersQueryClient, 'getActualStart').mockRejectedValue(new Error('query unavailable'));
+              const calculateSpy = vi.spyOn(schedulePrecisionClient, 'calculate');
+          """,
+              'test 8 typed formal assignment fixture',
+          )
+
+          replace_exact(
+              test_path,
+              """    render(<OrdersPage />);
+              await screen.findByText(serviceOrder.case_no);
+              await openServiceCalendarTab();
+
+              expect(screen.queryByRole('button', { name: '前往請假／代班工作台' })).not.toBeInTheDocument();
+            });
+          """,
+              """    render(<OrdersPage />);
+              await screen.findByText(serviceOrder.case_no);
+              fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]);
+              fireEvent.click(await screen.findByRole('button', { name: /實質服務日曆/ }));
+
+              expect(await screen.findByText('正式服務日精算所需的開始日、合約天數或排休類型尚未載入，請關閉後重試。'))
+                .toHaveAttribute('role', 'alert');
+              expect(screen.queryByRole('button', { name: '前往請假／代班工作台' })).not.toBeInTheDocument();
+            });
+          """,
+              'test 11b fail-closed assertion',
+          )
+          PY
 
       - uses: actions/setup-node@v6
         with:
