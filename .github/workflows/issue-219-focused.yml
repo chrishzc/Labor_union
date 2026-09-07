@@ -1,0 +1,72 @@
+name: Issue 219 focused verification
+
+on:
+  push:
+    branches: [ "fix/issue-219-m3-recipient-lineage" ]
+
+permissions:
+  contents: read
+
+jobs:
+  recipient-lineage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Verify confirmed draft owner lineage materializes immutable LINE facts
+        shell: bash
+        run: |
+          python - <<'PY'
+          from infrastructure.mysql.line_matching_coordination_delivery_projection import MySqlLineMatchingCoordinationDeliveryProjection
+
+          class Cursor:
+              def __init__(self, calls):
+                  self.calls = calls
+                  self.row = None
+              def __enter__(self): return self
+              def __exit__(self, *_): return False
+              def execute(self, statement, parameters=()):
+                  self.calls.append((statement, parameters))
+                  if "FROM matching_schedule_recipient_snapshots r" in statement:
+                      self.row = ({
+                          "snapshot_id": 219,
+                          "recipient_line_user_id": "U-client-219",
+                          "snapshot_fingerprint": "f" * 64,
+                          "plan_id": 17,
+                      } if "s.status IN ('sent','draft')" in statement
+                          and "matching_schedule_confirmation_events" in statement
+                          and "NOT IN ('confirmed','manually_confirmed')" in statement else None)
+                  elif "FROM line_identity_role_bindings" in statement:
+                      self.row = {"binding_status": "bound", "aggregate_version": 3}
+                  elif "FROM line_configuration_current" in statement:
+                      self.row = {"revision": 7}
+                  else:
+                      self.row = None
+              def fetchone(self): return self.row
+
+          class Connection:
+              def __init__(self): self.calls = []
+              def cursor(self): return Cursor(self.calls)
+
+          connection = Connection()
+          command = type("Command", (), {"case_no": "CASE-219"})()
+          receipt = type("Receipt", (), {"decision_event_id": "decision:219"})()
+          payload = MySqlLineMatchingCoordinationDeliveryProjection(connection).project(
+              command,
+              receipt,
+              "match-219:notify:customer",
+              {"recipient_selector": "assignment.client_snapshot", "result_state": "accepted"},
+          )
+          assert payload["recipient_snapshot"]["recipient_identity"] == "U-client-219"
+          assert payload["recipient_snapshot"]["snapshot_id"] == "219"
+          assert payload["binding"] == {"active": True, "revision": 3}
+          assert payload["configuration"] == {"active": True, "revision": 7}
+          assert payload["message"] == {"type": "text", "text": "媒合結果已確認，請查看最新服務安排。"}
+          recipient_sql = connection.calls[0][0]
+          assert "s.status IN ('sent','draft')" in recipient_sql
+          assert "matching_schedule_confirmation_events" in recipient_sql
+          assert "NOT IN ('confirmed','manually_confirmed')" in recipient_sql
+          PY
