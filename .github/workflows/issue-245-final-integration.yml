@@ -30,8 +30,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          expected_parent='5bd9e12de32cc2e4270e56a45f1846e660be8269'
-          expected_main='879fc64a336892fe55472a04b54aedd438b19707'
+          expected_parent='b3da44f25e0aef634cbfed4d8e5ed36e4ca6f511'
+          expected_main='49068f5feac5afb10b0e290150e06135cb4c27ed'
           expected_pr214='7f7d2554de6b490395749d2d8fa146c32c8d9768'
           git fetch --no-tags origin main fix/current-regression-baseline-20260905 dry-run/order-workbench-v2
           test "$(git rev-parse HEAD^)" = "$expected_parent"
@@ -183,7 +183,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          expected_main='879fc64a336892fe55472a04b54aedd438b19707'
+          expected_main='49068f5feac5afb10b0e290150e06135cb4c27ed'
           expected_pr214='7f7d2554de6b490395749d2d8fa146c32c8d9768'
           git fetch --no-tags origin main fix/current-regression-baseline-20260905 dry-run/order-workbench-v2
           test "$(git rev-parse origin/main)" = "$expected_main"
