@@ -59,8 +59,8 @@ def _counts():
             assert cursor.fetchone()['name'] == DATABASE
             tables = ('finance_import_rows', 'finance_import_occurrences',
                       'finance_import_source_reviews', 'finance_import_source_review_occurrences',
-                      'finance_import_dispatch_events', 'finance_import_reconciliation_receipts',
-                      'finance_import_apply_receipts', 'client_ledger_entries', 'staff_payout_events')
+                      'finance_import_dispatch_events', 'finance_import_apply_receipts',
+                      'client_finance_apply_receipts', 'client_ledger_entries', 'staff_payout_events')
             result = {}
             for table in tables:
                 cursor.execute(f'SELECT COUNT(*) AS n FROM {table}')
@@ -162,9 +162,12 @@ def test_t11_source_review_query_apply_and_replay(tmp_path):
         finally:
             connection.close()
         assert applied['finance_import_dispatch_events'] == staged['finance_import_dispatch_events'] + 1
-        assert applied['finance_import_reconciliation_receipts'] == staged['finance_import_reconciliation_receipts'] + 1
-        assert applied['client_ledger_entries'] == before['client_ledger_entries'] + 1
-        assert applied['staff_payout_events'] == before['staff_payout_events']  # This batch contains no staff payout.
+        assert applied['finance_import_apply_receipts'] == staged['finance_import_apply_receipts'] + 1
+        assert applied['client_finance_apply_receipts'] == staged['client_finance_apply_receipts'] + 1
+        assert applied['client_ledger_entries'] == staged['client_ledger_entries'] + 1
+        assert staged['finance_import_source_review_occurrences'] == before['finance_import_source_review_occurrences'] + 1
+        assert applied['finance_import_source_review_occurrences'] == staged['finance_import_source_review_occurrences']
+        assert applied['staff_payout_events'] == staged['staff_payout_events']  # This batch contains no staff payout.
         after_apply_reviews = client.get(url+'/review-rows').json()['data']
         assert after_apply_reviews['source_reviews'] == page['source_reviews']
         assert sum(item['disposition'] == 'manual_review' for item in after_apply_reviews['items']) + len(after_apply_reviews['source_reviews']) == 1
