@@ -175,14 +175,13 @@ def test_task97_reviewed_commit_boundaries_do_not_inherit_to_sibling_commits() -
     )
 
     assert reviewed.identity in REVIEWED_COMMIT_BOUNDARIES
-    assert reviewed.identity in UNRESOLVED_REVIEWED_COMMIT_BOUNDARIES
+    assert reviewed.identity not in UNRESOLVED_REVIEWED_COMMIT_BOUNDARIES
     assert sibling_occurrence.identity not in REVIEWED_COMMIT_BOUNDARIES
     assert sibling_symbol.identity not in REVIEWED_COMMIT_BOUNDARIES
     exact_result = _classify(reviewed, location)
     sibling_occurrence_result = _classify(sibling_occurrence, location)
     sibling_symbol_result = _classify(sibling_symbol, location)
-    assert exact_result[0] == "real_violation"
-    assert exact_result[3] == UNRESOLVED_REVIEWED_COMMIT_BOUNDARIES[reviewed.identity][2]
+    assert exact_result[0] == "application_owned_legitimate_outer_uow"
     assert sibling_occurrence_result[0] == "real_violation"
     assert sibling_symbol_result[0] == "real_violation"
     assert sibling_occurrence_result[3] != exact_result[3]

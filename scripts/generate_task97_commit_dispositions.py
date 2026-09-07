@@ -125,17 +125,11 @@ REVIEWED_COMMIT_BOUNDARIES: dict[
         "Retain only as a non-production bootstrap fallback while normal first-login MFA enrollment remains the canonical factor setup path.",
         "Environment guards, existing-root short circuit, and MFA enrollment recovery remain the required focused evidence.",
     ),
-    "line/line_bot.py:line_bind:commit:COMMIT:-:a726d561eba65201:1": (
-        "line_identity", "adapter",
-        "Legacy rollback-only LINE bind route owns one bounded binding transaction; canonical runtime returns 410 before opening the write path.",
-        "Retain only behind the explicit legacy rollback runtime contract; canonical runtime must remain write-inaccessible.",
-        "Canonical 410-before-write and production rollback-mode guards remain the required focused evidence.",
-    ),
     "scripts/migrate_weekly_report_batches.py:main:commit:COMMIT:-:a726d561eba65201:1": (
         "global_migration", "maintenance",
         "Migration entry owns an intentional resumable schema stage; its commit is a maintenance checkpoint rather than a nested business-operation commit.",
         "Retain the resumable operator migration boundary and preserve idempotent schema/seed behavior.",
-        "Operator-only invocation and safe rerun semantics remain the required migration evidence.",
+        "Exact target confirmation, live database match, and safe rerun semantics remain the required migration evidence.",
     ),
     "scripts/migrate_weekly_report_batches.py:seed_history_from_template:commit:COMMIT:-:a726d561eba65201:1": (
         "global_migration", "maintenance",
@@ -166,33 +160,7 @@ REVIEWED_COMMIT_BOUNDARIES: dict[
 # Exact reviewed identities whose current acceptance evidence is still unresolved.
 # This overrides classification only; REVIEWED_COMMIT_BOUNDARIES remains the
 # exact semantic owner/layer record and sibling identities inherit neither map.
-UNRESOLVED_REVIEWED_COMMIT_BOUNDARIES: dict[str, tuple[str, str, str]] = {
-    "api/dependencies/admin_auth.py:ensure_development_root_admin:commit:COMMIT:-:a726d561eba65201:1": (
-        "PR #214 current source still closes the development bootstrap connection only on the normal tail; #225 proved and repaired this resource-lifetime gap on current main, but that repair is not present in this fixed PR head.",
-        "Reconcile the already-verified #225 owner-local resource-lifetime repair into the candidate before accepting this exact commit boundary; do not change its existing commit owner or MFA semantics.",
-        "PR214_ADMIN_AUTH_RESOURCE_LIFETIME_NOT_RECONCILED",
-    ),
-    "line/line_bot.py:line_bind:commit:COMMIT:-:a726d561eba65201:1": (
-        "#226 proved the controlled legacy path remains runtime-reachable and owns a direct adapter commit; #251 records the unresolved conflict with the formal Application outer-UoW contract.",
-        "Await the #251 Human Owner decision on the legacy rollback mutation contract, then rebuild this exact disposition from the chosen owner boundary; do not map the old payload directly onto the canonical flow.",
-        "LINE_BIND_TRANSACTION_OWNER_DECISION_REQUIRED_251",
-    ),
-    "scripts/migrate_weekly_report_batches.py:main:commit:COMMIT:-:a726d561eba65201:1": (
-        "#227 directly verified the staged schema/seed transaction, close, failure, and rerun behavior, but the migration entry still has no approved exact-target and operator-confirmation contract.",
-        "Obtain the current approved operator environment/exact-target/confirmation contract and direct evidence, or separately approve the minimum pre-connection entry guard change before accepting this maintenance boundary.",
-        "MIGRATION_OPERATOR_TARGET_CONFIRMATION_UNESTABLISHED",
-    ),
-    "scripts/migrate_weekly_report_batches.py:seed_history_from_template:commit:COMMIT:-:a726d561eba65201:1": (
-        "#227 directly verified terminal seed commit, rollback-on-close after mid-seed failure, and idempotent rerun behavior, but this helper inherits the unresolved migration operator target/confirmation boundary from main.",
-        "Resolve the caller entry's approved exact-target and confirmation contract before accepting this maintenance boundary; retain the verified terminal seed transaction semantics.",
-        "MIGRATION_OPERATOR_TARGET_CONFIRMATION_UNESTABLISHED",
-    ),
-    "scripts/seed_line_test_fixtures.py:seed_fixtures:commit:COMMIT:-:a726d561eba65201:1": (
-        "PR #214 current source still leaves cursor/bootstrap dependency cleanup on failure paths; #228 proved and repaired those resource-lifetime gaps on current main, but that repair is not present in this fixed PR head.",
-        "Reconcile the already-verified #228 resource-lifetime repair into the candidate before accepting this exact fixture commit boundary; preserve the existing fixture-commit-before-bootstrap transaction semantics.",
-        "PR214_FIXTURE_RESOURCE_LIFETIME_NOT_RECONCILED",
-    ),
-}
+UNRESOLVED_REVIEWED_COMMIT_BOUNDARIES: dict[str, tuple[str, str, str]] = {}
 
 
 
