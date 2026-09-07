@@ -1,0 +1,66 @@
+name: Issue 244 focused one-off verification
+on:
+  push:
+    branches: [fix/current-regression-baseline-20260905]
+    paths: [.github/workflows/issue-244-focused-once.yml]
+permissions:
+  contents: read
+jobs:
+  focused-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Verify scoped baseline
+        run: |
+          test "$(git rev-parse HEAD^)" = 7d8869de8a0c1b42c22b2c923798911b4f15702b
+          test "$(git diff --name-only HEAD^ HEAD)" = ".github/workflows/issue-244-focused-once.yml"
+      - name: Install exact locked focused dependencies
+        run: |
+          python - <<'PY'
+          import subprocess, tomllib
+          wanted = {'pytest', 'openpyxl', 'pymysql'}
+          with open('uv.lock', 'rb') as stream:
+              packages = {p['name']: p for p in tomllib.load(stream)['package'] if p['name'] in wanted}
+          assert set(packages) == wanted, packages.keys()
+          specs = []
+          for name in sorted(wanted):
+              package = packages[name]
+              assert package['source'] == {'registry': 'https://pypi.org/simple'}, package
+              specs.append(f"{name}=={package['version']}")
+          print('::notice title=Focused dependencies::' + ', '.join(specs), flush=True)
+          subprocess.run(['python','-m','pip','install','--only-binary=:all:',*specs], check=True)
+          PY
+      - name: Execute migration target and writer governance focused tests
+        run: |
+          python -m pytest -q \
+            tests/test_weekly_report_migration_target_confirmation.py \
+            tests/test_task97_commit_dispositions.py \
+            tests/test_writer_inventory_v3_dispositions.py \
+            --junitxml=/tmp/issue-244.xml
+      - name: Publish exact receipt
+        if: always()
+        run: |
+          python - <<'PY'
+          import json, os, pathlib, subprocess, xml.etree.ElementTree as ET
+          path = pathlib.Path('/tmp/issue-244.xml')
+          if not path.exists():
+              raise SystemExit('Focused result NOT_RUN: no receipt')
+          root = ET.parse(path).getroot()
+          suites = list(root.iter('testsuite'))
+          result = {key: sum(int(suite.get(key, 0)) for suite in suites) for key in ('tests','failures','errors','skipped')}
+          result['head'] = subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip()
+          result['tested_product_commit'] = subprocess.check_output(['git','rev-parse','HEAD^'], text=True).strip()
+          result['cases'] = [case.get('name') for case in root.iter('testcase')]
+          print('::notice title=Issue 244 focused receipt::' + json.dumps(result, ensure_ascii=False))
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as stream:
+              stream.write('```json\n' + json.dumps(result, ensure_ascii=False, indent=2) + '\n```\n')
+          if result['failures'] or result['errors'] or result['skipped']:
+              raise SystemExit(1)
+          PY
