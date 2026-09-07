@@ -109,7 +109,7 @@ def test_t11_source_review_query_apply_and_replay(tmp_path):
     _seed_deposit(case_no, token)
     workbook = tmp_path / 't11-source-review.xlsx'
     headers = ['帳號', '交易日', '計息日', '入帳日', '摘要', '幣別', '支出', '存入', '餘額', '銷帳編號', '交易參考編號', '', '更正註記', '存摺備註']
-    account = 'LU-TEST-SOURCE'
+    account = '123456789012'
     pd.DataFrame([headers,
         [account, '2026/09/01 09:08:07', '2026/09/01', '2026/09/01', '轉帳', 'TWD', None, 300, 9000, f'99781699{year:03d}{sequence:03d}', token, 'synthetic', None, 'fixture'],
         [account, '2026/09/02 09:08:07', '2026/09/02', '2026/09/02', '轉帳', 'TWD', None, 300.5, 9300.5, None, token+'-review', 'synthetic invalid amount', None, 'fixture'],
