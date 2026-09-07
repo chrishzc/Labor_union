@@ -1577,17 +1577,17 @@ export const OrdersPage: React.FC = () => {
         && startDate !== null
         && assignmentFactsReady
         && (!hasFormalAssignment || actualStart?.case_no === order.id);
+      if (calendarDetail === null && allowRestartedNormalFlow && serviceDates?.case_no === order.id) {
+        changeServiceDateSelection(order.id, serviceDates.current_dates);
+        setPrecisionError(null);
+        return;
+      }
       if (!baseInputsReady) {
         selectServiceDates(order.id, []);
         setPrecisionError('正式服務日精算所需的開始日、合約天數或排休類型尚未載入，請關閉後重試。');
         return;
       }
       if (calendarDetail === null) {
-        if (allowRestartedNormalFlow) {
-          changeServiceDateSelection(order.id, serviceDates.current_dates);
-          setPrecisionError(null);
-          return;
-        }
         selectServiceDates(order.id, []);
         setPrecisionError('正式服務日精算所需的開始日、合約天數或排休類型尚未載入，請關閉後重試。');
         return;

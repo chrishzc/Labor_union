@@ -530,6 +530,21 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
     vi.mocked(orderStageProjectionClient.getOperationalTimelines).mockResolvedValue(
       buildOrdersStageProjectionFixture(assignedSummaryPage),
     );
+    const projection = await orderCardProjectionClient.getCardProjection('ORD-2026-0801');
+    projection.assignment_segments = {
+      ...projection.assignment_segments,
+      value: [{
+        assignment_id: { ...projection.assignment_segments, value: 501 },
+        staff_id: { ...projection.assignment_segments, value: 101 },
+        staff_name: { ...projection.assignment_segments, value: '林月嬌' },
+        sequence: { ...projection.assignment_segments, value: 1 },
+        assigned_start_date: { ...projection.assignment_segments, value: '2026-09-01' },
+        assigned_end_date: { ...projection.assignment_segments, value: '2026-09-03' },
+        status: { ...projection.assignment_segments, value: 'active' },
+      }],
+      availability: 'available',
+    };
+    vi.mocked(orderCardProjectionClient.getCardProjection).mockResolvedValueOnce(projection);
     vi.spyOn(ordersQueryClient, 'getActualStart').mockRejectedValue(new Error('query unavailable'));
     const calculateSpy = vi.spyOn(schedulePrecisionClient, 'calculate');
 
@@ -847,8 +862,11 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
 
     render(<OrdersPage />);
     await screen.findByText(serviceOrder.case_no);
-    await openServiceCalendarTab();
+    fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]);
+    fireEvent.click(await screen.findByRole('button', { name: /實質服務日曆/ }));
 
+    expect(await screen.findByText('正式服務日精算所需的開始日、合約天數或排休類型尚未載入，請關閉後重試。'))
+      .toHaveAttribute('role', 'alert');
     expect(screen.queryByRole('button', { name: '前往請假／代班工作台' })).not.toBeInTheDocument();
   });
 
