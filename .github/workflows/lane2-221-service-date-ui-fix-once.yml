@@ -1,0 +1,85 @@
+name: lane2-221-service-date-ui-fix-once
+
+on:
+  push:
+    branches:
+      - fix/lane2-221-service-date-ui-regressions
+    paths:
+      - .lane2/issue-221-service-date-ui.patch
+      - .github/workflows/lane2-221-service-date-ui-fix-once.yml
+      - ui_react/src/pages/OrdersPage.tsx
+      - ui_react/src/tests/domains/orders/subsystems/orders/modules/service-date-confirmation/orders_service_dates_flow.test.tsx
+
+permissions:
+  contents: write
+
+jobs:
+  repair-and-verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 1
+
+      - name: Apply bounded repair if needed
+        shell: bash
+        run: |
+          set -euo pipefail
+          patch=.lane2/issue-221-service-date-ui.patch
+          if git apply --check "$patch"; then
+            git apply "$patch"
+          elif git apply --reverse --check "$patch"; then
+            echo "repair already materialized in branch head"
+          else
+            echo "patch is neither applicable nor already applied" >&2
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ui_react/package-lock.json
+
+      - name: Install React dependencies
+        working-directory: ui_react
+        run: npm ci
+
+      - name: Re-test original five failures
+        working-directory: ui_react
+        run: >-
+          npx vitest run
+          src/tests/domains/orders/subsystems/orders/modules/service-date-confirmation/orders_service_dates_flow.test.tsx
+          -t "已有正式指派時 actual-start query 缺失|服務中案件的正式指派投影缺失時 fail closed|歷史訂單重啟後 calendar detail"
+
+      - name: Run full canonical service-date UI suite
+        working-directory: ui_react
+        run: npm test -- src/tests/domains/orders/subsystems/orders/modules/service-date-confirmation/orders_service_dates_flow.test.tsx
+
+      - name: Build React app
+        working-directory: ui_react
+        run: npm run build
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Python syntax sanity
+        run: python -m compileall -q api domains infrastructure scripts subsystems
+
+      - name: Materialize repair on branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add \
+            ui_react/src/pages/OrdersPage.tsx \
+            ui_react/src/tests/domains/orders/subsystems/orders/modules/service-date-confirmation/orders_service_dates_flow.test.tsx
+          if git diff --cached --quiet; then
+            echo "branch head already contains repair"
+            exit 0
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "fix(orders): preserve service-date restart owner gates"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
