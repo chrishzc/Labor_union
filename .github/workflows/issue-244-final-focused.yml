@@ -1,0 +1,72 @@
+name: Issue 244 final focused verification
+
+on:
+  push:
+    branches: [ "fix/current-regression-baseline-20260905" ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue-244-final-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  focused-governance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install locked pytest
+        run: |
+          python - <<'PY'
+          import subprocess, tomllib
+          with open('uv.lock', 'rb') as stream:
+              packages = tomllib.load(stream)['package']
+          pytest = next(package for package in packages if package['name'] == 'pytest')
+          assert pytest['source'] == {'registry': 'https://pypi.org/simple'}
+          subprocess.run(['python', '-m', 'pip', 'install', '--only-binary=:all:', f"pytest=={pytest['version']}"], check=True)
+          PY
+      - name: Run Task97 and writer inventory focused contracts
+        run: |
+          python -m pytest -q \
+            tests/test_task97_commit_dispositions.py \
+            tests/test_writer_inventory_v3_dispositions.py
+
+  focused-migration-target:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install locked focused dependencies
+        run: |
+          python - <<'PY'
+          import subprocess, tomllib
+          with open('uv.lock', 'rb') as stream:
+              packages = tomllib.load(stream)['package']
+          wanted = {'pytest', 'python-dotenv'}
+          selected = {package['name']: package for package in packages if package['name'] in wanted}
+          assert selected.keys() == wanted
+          specs = []
+          for name in sorted(wanted):
+              package = selected[name]
+              assert package['source'] == {'registry': 'https://pypi.org/simple'}
+              specs.append(f"{name}=={package['version']}")
+          subprocess.run(['python', '-m', 'pip', 'install', '--only-binary=:all:', *specs], check=True)
+          PY
+      - name: Run migration target confirmation contract
+        run: python -m pytest -q tests/test_weekly_report_migration_target_confirmation.py
+
+  scoped-readback:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Diff hygiene
+        run: git diff --check HEAD^ HEAD
+      - name: Verify validation harness is the only post-product scope
+        run: |
+          git diff --name-only d488ac99e63a7d065d2b4c5074cf66f6697e5f6e HEAD | sort
