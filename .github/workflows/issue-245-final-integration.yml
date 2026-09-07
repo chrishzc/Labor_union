@@ -30,7 +30,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          expected_parent='674f6f5bf061b2ec7132f7155ecad9337f78cf7d'
+          expected_parent='5bd9e12de32cc2e4270e56a45f1846e660be8269'
           expected_main='879fc64a336892fe55472a04b54aedd438b19707'
           expected_pr214='7f7d2554de6b490395749d2d8fa146c32c8d9768'
           git fetch --no-tags origin main fix/current-regression-baseline-20260905 dry-run/order-workbench-v2
