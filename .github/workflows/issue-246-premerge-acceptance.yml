@@ -48,28 +48,38 @@ jobs:
           git checkout --detach "$expected_candidate"
           test "$(git rev-parse HEAD)" = "$expected_candidate"
 
-      - name: Install exact focused Python dependencies from repository lock
+      - name: Install repository runtime and focused test dependencies from lock
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
-          import subprocess, sys, tomllib
+          import re, subprocess, sys, tomllib
+
+          with open('pyproject.toml', 'rb') as stream:
+              project = tomllib.load(stream)
           with open('uv.lock', 'rb') as stream:
               packages = tomllib.load(stream)['package']
+
+          def normalize_requirement(spec: str) -> str:
+              match = re.match(r'\s*([A-Za-z0-9_.-]+)', spec)
+              assert match, f'invalid dependency spec: {spec!r}'
+              return match.group(1).lower().replace('_', '-')
+
           wanted = {
-              'pytest', 'python-dotenv', 'python-multipart', 'openpyxl', 'pymysql',
-              'fastapi', 'pydantic', 'starlette', 'httpx', 'requests',
-              'jsonschema', 'pandas', 'cryptography', 'pillow'
+              normalize_requirement(spec)
+              for spec in project['project']['dependencies']
           }
+          wanted.update({'pytest', 'httpx2'})
+
           selected = {
-              package['name']: package
+              package['name'].lower().replace('_', '-'): package
               for package in packages
-              if package['name'] in wanted
-              and package.get('source') == {'registry': 'https://pypi.org/simple'}
+              if package.get('source') == {'registry': 'https://pypi.org/simple'}
           }
           missing = wanted - selected.keys()
           assert not missing, f'missing locked packages: {sorted(missing)}'
           specs = [f"{name}=={selected[name]['version']}" for name in sorted(wanted)]
+          print('locked_direct_dependencies=', sorted(wanted))
           subprocess.run(
               [sys.executable, '-m', 'pip', 'install', '--only-binary=:all:', *specs],
               check=True,
