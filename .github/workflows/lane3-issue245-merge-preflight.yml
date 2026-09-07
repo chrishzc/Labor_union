@@ -14,24 +14,56 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Reproduce latest-main merge and report exact conflicts
+      - name: Resolve current-main conflicts with current owners, then probe PR214
         shell: bash
         run: |
-          set -uo pipefail
-          git fetch --no-tags origin main
+          set -euo pipefail
+          task97='document/架構重整/03_追蹤清單與證據/evidence/task97_repository_commit_dispositions_v1.json'
+          intake_test='ui_react/src/tests/domains/orders/subsystems/orders/modules/order-card-projection/order_intake_completion_entry.test.tsx'
+          git fetch --no-tags origin main fix/current-regression-baseline-20260905
           git config user.name lane3-issue245-preflight
           git config user.email lane3-issue245-preflight@example.invalid
+
           set +e
           git merge --no-commit --no-ff origin/main
-          rc=$?
+          main_rc=$?
           set -e
-          echo "MERGE_EXIT=$rc"
-          echo "CONFLICT_PATHS_BEGIN"
+          echo "MAIN_MERGE_EXIT=$main_rc"
+          echo "MAIN_CONFLICTS_BEGIN"
           git diff --name-only --diff-filter=U || true
-          echo "CONFLICT_PATHS_END"
-          echo "UNMERGED_INDEX_BEGIN"
+          echo "MAIN_CONFLICTS_END"
+          if [ "$main_rc" -ne 0 ]; then
+            # These three conflicts were reproduced by run 34085005826. Current
+            # main owns the renamed intake test and wrapper; Task97 is only an
+            # intermediate evidence file and is rebuilt after final integration.
+            git checkout --theirs -- "$task97"
+            git checkout --theirs -- ui_react/src/pages/OrdersManagementPage.tsx
+            git checkout --theirs -- "$intake_test"
+            git add "$task97" ui_react/src/pages/OrdersManagementPage.tsx "$intake_test"
+          fi
+          remaining_main_conflicts="$(git diff --name-only --diff-filter=U)"
+          if [ -n "$remaining_main_conflicts" ]; then
+            echo "UNEXPECTED_MAIN_CONFLICTS"
+            printf '%s\n' "$remaining_main_conflicts"
+            exit 20
+          fi
+          git commit -m 'preflight: merge current main into beta'
+          echo "LOCAL_MAIN_MERGE=$(git rev-parse HEAD)"
+
+          set +e
+          git merge --no-commit --no-ff origin/fix/current-regression-baseline-20260905
+          pr214_rc=$?
+          set -e
+          echo "PR214_MERGE_EXIT=$pr214_rc"
+          echo "PR214_CONFLICTS_BEGIN"
+          git diff --name-only --diff-filter=U || true
+          echo "PR214_CONFLICTS_END"
+          echo "PR214_UNMERGED_INDEX_BEGIN"
           git ls-files -u || true
-          echo "UNMERGED_INDEX_END"
-          if [ "$rc" -ne 0 ]; then
-            exit "$rc"
+          echo "PR214_UNMERGED_INDEX_END"
+          echo "PR214_STAGED_DELTA_BEGIN"
+          git diff --cached --name-status || true
+          echo "PR214_STAGED_DELTA_END"
+          if [ "$pr214_rc" -ne 0 ]; then
+            exit "$pr214_rc"
           fi
