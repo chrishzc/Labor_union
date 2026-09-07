@@ -2,7 +2,7 @@ name: Python syntax
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "fix/current-regression-baseline-20260905" ]
   pull_request:
     branches: [ "main" ]
   workflow_dispatch:
