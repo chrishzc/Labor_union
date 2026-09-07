@@ -38,10 +38,13 @@ jobs:
           set -euo pipefail
           expected_candidate='c5b37b7259a024a729e03914b4e0d42eb061cea1'
           expected_main='49068f5feac5afb10b0e290150e06135cb4c27ed'
+          verifier='.github/workflows/issue-246-premerge-acceptance.yml'
           git fetch --no-tags origin main dry-run/order-workbench-v2
-          test "$(git rev-parse HEAD^)" = "$expected_candidate"
+          git merge-base --is-ancestor "$expected_candidate" "$GITHUB_SHA"
           test "$(git rev-parse origin/main)" = "$expected_main"
           test "$(git rev-parse origin/dry-run/order-workbench-v2)" = "$GITHUB_SHA"
+          changed=$(git -c core.quotepath=false diff --name-only "$expected_candidate...$GITHUB_SHA")
+          test "$changed" = "$verifier"
           git checkout --detach "$expected_candidate"
           test "$(git rev-parse HEAD)" = "$expected_candidate"
 
@@ -55,7 +58,8 @@ jobs:
               packages = tomllib.load(stream)['package']
           wanted = {
               'pytest', 'python-dotenv', 'openpyxl', 'pymysql', 'fastapi',
-              'pydantic', 'starlette', 'httpx', 'requests', 'jsonschema', 'pandas'
+              'pydantic', 'starlette', 'httpx', 'requests', 'jsonschema', 'pandas',
+              'cryptography'
           }
           selected = {
               package['name']: package
