@@ -30,7 +30,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          expected_parent='b0560e9e626eedb7e57436b26971c77739d50cab'
+          expected_parent='674f6f5bf061b2ec7132f7155ecad9337f78cf7d'
           expected_main='879fc64a336892fe55472a04b54aedd438b19707'
           expected_pr214='7f7d2554de6b490395749d2d8fa146c32c8d9768'
           git fetch --no-tags origin main fix/current-regression-baseline-20260905 dry-run/order-workbench-v2
@@ -65,7 +65,7 @@ jobs:
           git config user.name 'Execution Lane 3'
           git config user.email 'execution-lane-3@example.invalid'
           git merge --no-ff --no-edit origin/main
-          test -z "$(git diff --name-only --diff-filter=U)"
+          test -z "$(git -c core.quotepath=false diff --name-only --diff-filter=U)"
           echo "MAIN_MERGE_HEAD=$(git rev-parse HEAD)"
 
       - name: Extract only the verified PR214 residual source and tests
@@ -89,9 +89,10 @@ jobs:
           merge_rc=$?
           set -e
           test "$merge_rc" -eq 1
-          actual_conflicts=$(git diff --name-only --diff-filter=U | sort)
+          actual_conflicts=$(git -c core.quotepath=false diff --name-only --diff-filter=U | sort)
+          printf '%s\n' 'PR214_CONFLICTS_BEGIN' "$actual_conflicts" 'PR214_CONFLICTS_END'
           test "$actual_conflicts" = "$expected_conflicts"
-          actual_delta=$(git diff HEAD --name-only | sort)
+          actual_delta=$(git -c core.quotepath=false diff HEAD --name-only | sort)
           printf '%s\n' 'PR214_MERGE_DELTA_BEGIN' "$actual_delta" 'PR214_MERGE_DELTA_END'
           missing_selected=$(comm -23 <(printf '%s\n' "$selected") <(printf '%s\n' "$actual_delta"))
           test -z "$missing_selected"
@@ -107,7 +108,7 @@ jobs:
           git merge --abort
           cp -a /tmp/issue245-selected/. .
           while IFS= read -r path; do git add "$path"; done <<< "$selected"
-          actual_selected=$(git diff --cached --name-only | sort)
+          actual_selected=$(git -c core.quotepath=false diff --cached --name-only | sort)
           test "$actual_selected" = "$selected"
           git diff --check --cached
           git commit -m 'chore(beta): integrate verified PR214 residual for #245'
