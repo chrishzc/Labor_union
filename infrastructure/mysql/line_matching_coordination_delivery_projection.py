@@ -43,8 +43,6 @@ class MySqlLineMatchingCoordinationDeliveryProjection:
         configuration = self._configuration()
         interaction = None
         if selector == "matching.request.participants":
-            # Keep the raw token only in the transient delivery envelope.  The
-            # LINE consumer stores its hash in the existing interaction owner.
             token = "p6" + hashlib.sha256(
                 f"{reference_id}:{line_user_id}".encode("utf-8")
             ).hexdigest()
@@ -80,8 +78,6 @@ class MySqlLineMatchingCoordinationDeliveryProjection:
             "configuration": configuration,
             "message_kind": "flex" if interaction is not None else "text",
             "message": message,
-            # Persist the handoff schedule so replay reconstructs the exact
-            # delivery fingerprint instead of defaulting to a new wall clock.
             "scheduled_at": datetime.now(timezone.utc).isoformat(),
             "notification_reason": "recipient_unavailable",
         }
@@ -135,15 +131,19 @@ class MySqlLineMatchingCoordinationDeliveryProjection:
             "AND COALESCE(gate_e.confirmation_value,'pending') "
             "NOT IN ('confirmed','manually_confirmed'))"
         )
+        parent_gate = (
+            "(s.status='sent' OR (s.status='draft' AND "
+            + confirmation_gate
+            + "))"
+        )
         sql = (
-                "SELECT r.id AS snapshot_id,r.recipient_line_user_id,"
-                "r.payload_fingerprint AS snapshot_fingerprint,s.plan_id "
+            "SELECT r.id AS snapshot_id,r.recipient_line_user_id,"
+            "r.payload_fingerprint AS snapshot_fingerprint,s.plan_id "
             "FROM matching_schedule_recipient_snapshots r "
             "JOIN matching_schedule_snapshots s ON s.id=r.parent_snapshot_id "
             "LEFT JOIN caregiver_matching_plan_segments p ON p.id=r.segment_id "
-            "WHERE s.case_no=%s AND s.current_marker=1 "
-            "AND s.status IN ('sent','draft') AND "
-            + confirmation_gate
+            "WHERE s.case_no=%s AND s.current_marker=1 AND "
+            + parent_gate
             + " AND "
             + predicate
             + " ORDER BY r.id DESC LIMIT 1"

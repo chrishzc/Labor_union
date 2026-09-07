@@ -19,18 +19,12 @@ class _Cursor:
     def execute(self, statement, parameters=()):
         self.calls.append((statement, parameters))
         if "FROM matching_schedule_recipient_snapshots r" in statement:
-            self.row = (
-                {
-                    "snapshot_id": 219,
-                    "recipient_line_user_id": "U-client-219",
-                    "snapshot_fingerprint": "f" * 64,
-                    "plan_id": 17,
-                }
-                if "s.status IN ('sent','draft')" in statement
-                and "matching_schedule_confirmation_events" in statement
-                and "NOT IN ('confirmed','manually_confirmed')" in statement
-                else None
-            )
+            self.row = {
+                "snapshot_id": 219,
+                "recipient_line_user_id": "U-client-219",
+                "snapshot_fingerprint": "f" * 64,
+                "plan_id": 17,
+            }
         elif "FROM line_identity_role_bindings" in statement:
             self.row = {"binding_status": "bound", "aggregate_version": 3}
         elif "FROM line_configuration_current" in statement:
@@ -50,11 +44,10 @@ class _Connection:
         return _Cursor(self.calls)
 
 
-def test_manually_confirmed_draft_owner_snapshot_materializes_m3_line_payload():
+def _project():
     connection = _Connection()
     command = type("Command", (), {"case_no": "CASE-219"})()
     receipt = type("Receipt", (), {"decision_event_id": "decision:219"})()
-
     payload = MySqlLineMatchingCoordinationDeliveryProjection(connection).project(
         command,
         receipt,
@@ -64,7 +57,11 @@ def test_manually_confirmed_draft_owner_snapshot_materializes_m3_line_payload():
             "result_state": "accepted",
         },
     )
+    return connection, payload
 
+
+def test_manually_confirmed_draft_owner_snapshot_materializes_m3_line_payload():
+    connection, payload = _project()
     assert payload["recipient_snapshot"] == {
         "snapshot_id": "219",
         "snapshot_fingerprint": "f" * 64,
@@ -74,6 +71,24 @@ def test_manually_confirmed_draft_owner_snapshot_materializes_m3_line_payload():
     assert payload["binding"] == {"active": True, "revision": 3}
     assert payload["configuration"] == {"active": True, "revision": 7}
     recipient_sql = connection.calls[0][0]
-    assert "s.status IN ('sent','draft')" in recipient_sql
+    assert "s.status='sent' OR (s.status='draft' AND" in recipient_sql
     assert "matching_schedule_confirmation_events" in recipient_sql
+    assert "NOT IN ('confirmed','manually_confirmed')" in recipient_sql
+
+
+def test_sent_snapshot_remains_authoritative_without_confirmation_gate():
+    connection, _ = _project()
+    recipient_sql = connection.calls[0][0]
+    sent_index = recipient_sql.index("s.status='sent'")
+    draft_index = recipient_sql.index("s.status='draft'")
+    confirmation_index = recipient_sql.index("matching_schedule_confirmation_events")
+    assert sent_index < draft_index < confirmation_index
+    assert "s.status='sent' OR (s.status='draft' AND" in recipient_sql
+
+
+def test_draft_snapshot_is_fail_closed_behind_confirmation_gate():
+    connection, _ = _project()
+    recipient_sql = connection.calls[0][0]
+    assert "s.status='draft' AND NOT EXISTS (" in recipient_sql
+    assert "COALESCE(gate_e.confirmation_value,'pending')" in recipient_sql
     assert "NOT IN ('confirmed','manually_confirmed')" in recipient_sql
