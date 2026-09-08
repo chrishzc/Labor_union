@@ -26,9 +26,10 @@
 2026-09-08 人工要求補齊名冊重要資料後，基本摘要仍維持上述四欄；選取單一月嫂時另以
 `GET /api/v1/staff/{staff_id}/profile` 讀取 Staff-owned `StaffProfile`。此 detail projection
 包含報名時間、完整身分證、行動電話、市話／分機、Email、生日、地址、學歷、完整緊急聯絡人
-電話與內部行政註記。依 `12_Global_效能與UX體感架構.md` §4.0，這個已認證內部管理 UI
+電話、內部行政註記，以及該 Staff 的全部銀行帳戶（銀行代碼、分行代碼、完整帳號與主要帳戶標記）。
+依 `12_Global_效能與UX體感架構.md` §4.0，這個已認證內部管理 UI
 必須直接使用 owner typed Query 提供的完整一般業務值；不得自行新增後端或前端遮罩，除非日後
-有最新人工明確裁決。response 仍不得包含 IP、LINE User ID、銀行帳號、raw workbook／JSON 或
+有最新人工明確裁決。response 仍不得包含 IP、LINE User ID、raw workbook／JSON 或
 credential。只有已登入且 enabled 的管理員可查詢；UI 只在選定單一月嫂後載入，空值顯示
 「尚未登錄」。
 

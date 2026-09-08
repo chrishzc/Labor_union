@@ -5,6 +5,16 @@ from datetime import date, datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class StaffBankAccountView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    account_id: int = Field(gt=0)
+    bank_code: str | None = Field(default=None, max_length=10)
+    branch_code: str | None = Field(default=None, max_length=10)
+    account_no: str | None = Field(default=None, max_length=50)
+    is_primary: bool
+
+
 class StaffProfileView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -23,6 +33,7 @@ class StaffProfileView(BaseModel):
     emergency_contact_name: str | None = Field(default=None, max_length=100)
     emergency_contact_phone: str | None = Field(default=None, max_length=30)
     admin_notes: str | None = Field(default=None, max_length=2000)
+    bank_accounts: tuple[StaffBankAccountView, ...] = Field(max_length=20)
 
 
-__all__ = ["StaffProfileView"]
+__all__ = ["StaffBankAccountView", "StaffProfileView"]

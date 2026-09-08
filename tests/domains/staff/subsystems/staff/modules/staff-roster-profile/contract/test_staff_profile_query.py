@@ -44,6 +44,24 @@ class _Repository:
     def fetch(self, _staff_id):
         return _row()
 
+    def fetch_bank_accounts(self, _staff_id):
+        return (
+            {
+                "id": 3,
+                "bank_code": "812",
+                "branch_code": "0012",
+                "account_no": "123456789012",
+                "is_primary": 1,
+            },
+            {
+                "id": 4,
+                "bank_code": "004",
+                "branch_code": "0001",
+                "account_no": "987654321098",
+                "is_primary": 0,
+            },
+        )
+
 
 def _client():
     app = FastAPI()
@@ -74,6 +92,22 @@ def test_staff_profile_returns_complete_internal_admin_fields():
     assert payload["email"] == "staff@example.test"
     assert payload["address"] == "北區測試路 1 號"
     assert payload["admin_notes"] == "僅供內部排班聯絡"
+    assert payload["bank_accounts"] == [
+        {
+            "account_id": 3,
+            "bank_code": "812",
+            "branch_code": "0012",
+            "account_no": "123456789012",
+            "is_primary": True,
+        },
+        {
+            "account_id": 4,
+            "bank_code": "004",
+            "branch_code": "0001",
+            "account_no": "987654321098",
+            "is_primary": False,
+        },
+    ]
     serialized = response.text
     assert RAW_IDENTITY_CARD in serialized
     assert RAW_EMERGENCY_PHONE in serialized
@@ -82,9 +116,11 @@ def test_staff_profile_returns_complete_internal_admin_fields():
 
 
 class _Cursor:
-    def __init__(self):
+    def __init__(self, *, one=None, many=()):
         self.sql = ""
         self.params = ()
+        self._one = one
+        self._many = many
 
     def __enter__(self):
         return self
@@ -97,25 +133,57 @@ class _Cursor:
         self.params = params
 
     def fetchone(self):
-        return _row()
+        return self._one
+
+    def fetchall(self):
+        return self._many
 
 
 class _Connection:
     def __init__(self):
-        self.cursor_instance = _Cursor()
+        self.cursors = [
+            _Cursor(one=_row()),
+            _Cursor(many=({"id": 3, "bank_code": "812", "branch_code": "0012", "account_no": "123456789012", "is_primary": 1},)),
+        ]
+        self.created_cursors = []
 
     def cursor(self):
-        return self.cursor_instance
+        cursor = self.cursors.pop(0)
+        self.created_cursors.append(cursor)
+        return cursor
 
 
 def test_staff_profile_repository_reads_only_the_bounded_detail_columns():
     connection = _Connection()
-    row = MySqlStaffProfileQueryRepository(connection).fetch(7)
+    repository = MySqlStaffProfileQueryRepository(connection)
+    row = repository.fetch(7)
+    accounts = repository.fetch_bank_accounts(7)
 
     assert row is not None
-    assert connection.cursor_instance.params == (7,)
-    sql = connection.cursor_instance.sql
-    assert "WHERE id=%s LIMIT 1" in sql
-    assert "ip_address" not in sql
-    assert "line_user_id" not in sql
-    assert "account_no" not in sql
+    assert accounts[0]["account_no"] == "123456789012"
+    assert connection.cursors == []
+    profile_cursor, bank_cursor = connection.created_cursors
+    assert profile_cursor.params == (7,)
+    assert "WHERE id=%s LIMIT 1" in profile_cursor.sql
+    assert "ip_address" not in profile_cursor.sql
+    assert "line_user_id" not in profile_cursor.sql
+    assert "account_no" not in profile_cursor.sql
+    assert bank_cursor.params == (7,)
+    assert "FROM staff_bank_accounts WHERE staff_id=%s" in bank_cursor.sql
+    assert "ORDER BY is_primary DESC,id ASC LIMIT 21" in bank_cursor.sql
+
+
+def test_staff_profile_treats_blank_optional_database_values_as_not_recorded():
+    row = _row()
+    row.update({"tel": " ", "tel_ext": "", "admin_notes": ""})
+
+    class _BlankRepository(_Repository):
+        def fetch(self, _staff_id):
+            return row
+
+    profile = StaffProfileQueryApplication(_BlankRepository()).query(7)
+
+    assert profile.identity_card == RAW_IDENTITY_CARD
+    assert profile.telephone is None
+    assert profile.telephone_extension is None
+    assert profile.admin_notes is None

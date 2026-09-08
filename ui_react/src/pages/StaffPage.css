@@ -766,6 +766,29 @@
   display: block;
 }
 
+.staff-profile-subheading { margin-top: 0; }
+
+.staff-bank-list {
+  list-style: none;
+  display: grid;
+  gap: 10px;
+  padding: 0;
+  margin: 0 0 18px;
+}
+
+.staff-bank-list li,
+.staff-bank-empty {
+  display: grid;
+  gap: 5px;
+  padding: 12px 14px;
+  border: 1px solid #dec0b6;
+  border-radius: 10px;
+  background: #fff;
+  overflow-wrap: anywhere;
+}
+
+.staff-bank-list strong { color: #74593f; }
+
 .staff-workbench {
   background: #ffffff;
   border: 1px solid #b49388;

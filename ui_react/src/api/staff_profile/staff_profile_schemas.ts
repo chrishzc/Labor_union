@@ -4,6 +4,14 @@ import { z } from 'zod';
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const ISO_DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
 
+export const StaffBankAccountSchema = z.strictObject({
+  account_id: z.number().int().positive(),
+  bank_code: z.string().max(10).nullable(),
+  branch_code: z.string().max(10).nullable(),
+  account_no: z.string().max(50).nullable(),
+  is_primary: z.boolean(),
+});
+
 export const StaffProfileSchema = z.strictObject({
   staff_id: z.number().int().positive(),
   registered_at: z.string().regex(ISO_DATE_TIME).nullable(),
@@ -20,6 +28,7 @@ export const StaffProfileSchema = z.strictObject({
   emergency_contact_name: z.string().max(100).nullable(),
   emergency_contact_phone: z.string().max(30).nullable(),
   admin_notes: z.string().max(2000).nullable(),
+  bank_accounts: z.array(StaffBankAccountSchema).max(20),
 });
 
 export const StaffProfileResponseSchema = z.strictObject({

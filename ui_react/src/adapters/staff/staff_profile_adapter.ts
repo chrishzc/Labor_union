@@ -12,6 +12,7 @@ export interface StaffProfileViewModel extends StaffProfile {
   educationLabel: string;
   emergencyContactLabel: string;
   adminNotesLabel: string;
+  bankAccountLabels: string[];
 }
 
 const empty = (value: string | null): string => value ?? '尚未登錄';
@@ -38,5 +39,10 @@ export function adaptStaffProfile(profile: StaffProfile): StaffProfileViewModel 
     educationLabel: empty(profile.education),
     emergencyContactLabel: emergency,
     adminNotesLabel: empty(profile.admin_notes),
+    bankAccountLabels: profile.bank_accounts.map((account) => {
+      const location = [account.bank_code, account.branch_code].filter(Boolean).join('／');
+      const accountNumber = account.account_no ?? '帳號尚未登錄';
+      return `${account.is_primary ? '主要帳戶' : '備用帳戶'}｜${location || '銀行／分行尚未登錄'}｜${accountNumber}`;
+    }),
   };
 }

@@ -13,5 +13,5 @@ test_root: ui_react/src/tests/domains/staff/subsystems/staff/modules/staff-roste
 - ui_react/src/tests/domains/staff/subsystems/staff/modules/staff-roster-profile/
 
 ## Oracles
-- The API returns the requested Staff identity and complete personal/contact fields required by the internal roster UI, while IP, LINE User ID, bank data and raw source never cross the response boundary.
-- The Drawer loads the profile only for a selected Staff and renders complete identity and contact facts.
+- The API returns the requested Staff identity and complete personal/contact/bank-account fields required by the internal roster UI, while IP, LINE User ID and raw source never cross the response boundary.
+- The Drawer loads the profile only for a selected Staff and renders complete identity, contact and bank-account facts without source-detail annotations.

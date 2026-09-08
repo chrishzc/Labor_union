@@ -1,5 +1,5 @@
 /** Authenticated Staff personal profile fixture. */
-import type { StaffProfile } from '../../../api/staff_profile/staff_profile_schemas';
+import type { StaffProfile } from '../../../../../../../../api/staff_profile/staff_profile_schemas';
 
 export const STAFF_PROFILE: StaffProfile = {
   staff_id: 11,
@@ -17,4 +17,8 @@ export const STAFF_PROFILE: StaffProfile = {
   emergency_contact_name: '王家人',
   emergency_contact_phone: '0987654321',
   admin_notes: '僅供內部排班聯絡',
+  bank_accounts: [
+    { account_id: 3, bank_code: '812', branch_code: '0012', account_no: '123456789012', is_primary: true },
+    { account_id: 4, bank_code: '004', branch_code: '0001', account_no: '987654321098', is_primary: false },
+  ],
 };

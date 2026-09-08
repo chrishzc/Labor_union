@@ -154,6 +154,10 @@ function displayRelations(values: readonly { value: string; detail: string | nul
   return values.map((item) => item.detail ? item.value + '（' + item.detail + '）' : item.value).join('、') || '（空）';
 }
 
+function displayRelationValues(values: readonly { value: string }[]): string {
+  return values.map((item) => item.value).join('、') || '（空）';
+}
+
 export function StaffCasePreferenceManualPreview({ preview }: { preview: StaffCasePreferenceManualSnapshot }) {
   return <div data-testid="staff-case-preference-manual-preview">
     <h4>六大接案能力變更預覽</h4>
@@ -264,7 +268,7 @@ export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.dr
     {snapshot && <div className="staff-qual-grid">
       {MANUAL_RELATION_KEYS.map((key) => <div key={key} className="staff-qual-card" role="group" aria-label={MANUAL_RELATION_LABELS[key]}>
         <h4>{MANUAL_RELATION_LABELS[key]}</h4>
-        {!editing ? <p>{displayRelations(snapshot.after[key])}</p> : <>
+        {!editing ? <p>{displayRelationValues(snapshot.after[key])}</p> : <>
           {draft[key].map((item, index) => <div key={index}>
             <input aria-label={MANUAL_RELATION_LABELS[key] + '值' + (index + 1)} disabled={locked} value={item.value} onChange={(event) => { setPreview(null); setStatus(''); setPhase('editing'); setDraft((current) => updateManualDraftRow(current, key, index, 'value', event.target.value)); }} />
             <input aria-label={MANUAL_RELATION_LABELS[key] + '說明' + (index + 1)} disabled={locked} value={item.detail ?? ''} onChange={(event) => { setPreview(null); setStatus(''); setPhase('editing'); setDraft((current) => updateManualDraftRow(current, key, index, 'detail', event.target.value)); }} />
@@ -329,9 +333,7 @@ function qualificationEmptyMessage(
 
 function profileItemsText(items: ReadonlyArray<{ value: string; detail: string | null }>): string {
   if (items.length === 0) return '尚未登錄';
-  return items
-    .map((item) => item.detail ? `${item.value}（${item.detail}）` : item.value)
-    .join('、');
+  return items.map((item) => item.value).join('、');
 }
 
 function isAvailabilityOutcomeUnknown(error: unknown): boolean {
@@ -363,7 +365,7 @@ function isEligibleEndPauseBlock(
 export const StaffPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<StaffTab>('roster');
   const [searchQuery, setSearchQuery] = useState('');
-  const [drawerTab, setDrawerTab] = useState<'qualification' | 'preferences' | 'unavailability' | 'lifecycle'>('qualification');
+  const [drawerTab, setDrawerTab] = useState<'qualification' | 'preferences' | 'unavailability'>('qualification');
   const [directory, setDirectory] = useState<DirectoryState>({ status: 'loading', items: [] });
   const [directorySearch, setDirectorySearch] = useState<DirectorySearchState>({ status: 'idle', items: [] });
   const [selectedStaff, setSelectedStaff] = useState<StaffDirectoryCardViewModel | null>(null);
@@ -1084,7 +1086,6 @@ export const StaffPage: React.FC = () => {
                         {casePreferenceSummary.data.topics.map((topic) => (
                           <div key={topic.key} role="group" aria-label={topic.label}>
                             <strong>{topic.label}</strong>：{topic.valuesText}
-                            {topic.otherDetailStatus === 'ready' && topic.detailText && <small> · {topic.detailText}</small>}
                           </div>
                         ))}
                       </div>
@@ -1347,8 +1348,9 @@ export const StaffPage: React.FC = () => {
                   </div>
                 )}
                 {profile.status === 'ready' && (
-                  <div className="staff-qual-grid" style={{ marginBottom: '18px' }} data-surface-id="staff.profile-detail" data-testid="staff-profile-detail">
-                    {[
+                  <div data-surface-id="staff.profile-detail" data-testid="staff-profile-detail">
+                    <div className="staff-qual-grid" style={{ marginBottom: '18px' }}>
+                      {[
                       ['身分證', profile.data.identityCardLabel],
                       ['生日', profile.data.birthdayLabel],
                       ['行動電話', profile.data.phoneLabel],
@@ -1359,12 +1361,23 @@ export const StaffPage: React.FC = () => {
                       ['緊急聯絡人', profile.data.emergencyContactLabel],
                       ['報名日期', profile.data.registeredAtLabel],
                       ['內部行政註記', profile.data.adminNotesLabel],
-                    ].map(([label, value]) => (
-                      <div key={label} className="staff-qual-card" role="group" aria-label={label}>
-                        <h4>{label}</h4>
-                        <p style={{ margin: 0 }}>{value}</p>
-                      </div>
-                    ))}
+                      ].map(([label, value]) => (
+                        <div key={label} className="staff-qual-card" role="group" aria-label={label}>
+                          <h4>{label}</h4>
+                          <p style={{ margin: 0 }}>{value}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <h3 className="staff-profile-subheading">🏦 銀行帳戶</h3>
+                    {profile.data.bankAccountLabels.length === 0 ? (
+                      <p className="staff-bank-empty">尚未登錄</p>
+                    ) : (
+                      <ul className="staff-bank-list" aria-label="銀行帳戶">
+                        {profile.data.bankAccountLabels.map((account, index) => (
+                          <li key={`${index}-${account}`}><strong>帳戶 {index + 1}</strong><span>{account}</span></li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
                 )}
 
@@ -1426,7 +1439,7 @@ export const StaffPage: React.FC = () => {
                               <ul>
                                 {section.items.map((item) => (
                                   <li key={item.code}>
-                                    <strong>{qualificationFactLabel(section.kind, item.code)}</strong>：{item.displayValue}{item.detail ? `（${item.detail}）` : ''}
+                                    <strong>{qualificationFactLabel(section.kind, item.code)}</strong>：{item.displayValue}
                                   </li>
                                 ))}
                               </ul>

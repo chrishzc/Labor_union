@@ -24,5 +24,15 @@ class MySqlStaffProfileQueryRepository:
             )
             return cursor.fetchone()
 
+    def fetch_bank_accounts(self, staff_id: int) -> tuple[Mapping[str, object], ...]:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT id,bank_code,branch_code,account_no,is_primary "
+                "FROM staff_bank_accounts WHERE staff_id=%s "
+                "ORDER BY is_primary DESC,id ASC LIMIT 21",
+                (staff_id,),
+            )
+            return tuple(cursor.fetchall())
+
 
 __all__ = ["MySqlStaffProfileQueryRepository"]

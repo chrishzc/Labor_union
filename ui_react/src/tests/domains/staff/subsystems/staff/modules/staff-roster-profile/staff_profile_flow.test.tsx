@@ -19,6 +19,10 @@ describe('Staff roster profile flow', () => {
     vi.spyOn(staffProfileClient, 'query').mockResolvedValue(STAFF_PROFILE);
     vi.spyOn(staffQualificationMasterClient, 'query').mockResolvedValue({
       ...STAFF_QUALIFICATION_MASTER,
+      service_profile: {
+        ...STAFF_QUALIFICATION_MASTER.service_profile,
+        service_regions: [{ value: '北區', detail: 'T01 six region final' }],
+      },
       sections: STAFF_QUALIFICATION_MASTER.sections.map((section) => (
         section.kind === 'certifications'
           ? {
@@ -31,12 +35,19 @@ describe('Staff roster profile flow', () => {
                 availability_reason: 'staff_certification_record',
               }],
             }
+          : section.kind === 'cooking'
+            ? {
+                ...section,
+                items: section.items.map((item, index) => index === 0
+                  ? { ...item, detail: 'T01 six cooking final' }
+                  : item),
+              }
           : section
       )),
     });
   });
 
-  it('shows complete identity, contact facts, notes, and canonical certifications', async () => {
+  it('shows complete identity, contact facts, bank accounts, and canonical certifications', async () => {
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
     fireEvent.click(screen.getAllByRole('button', { name: /檢視服務人員摘要/ })[0]);
@@ -47,6 +58,12 @@ describe('Staff roster profile flow', () => {
     expect(within(profile).getByRole('group', { name: 'Email' })).toHaveTextContent('staff@example.test');
     expect(within(profile).getByRole('group', { name: '居住地址' })).toHaveTextContent('300 新竹市 北區測試路 1 號');
     expect(within(profile).getByRole('group', { name: '緊急聯絡人' })).toHaveTextContent('王家人／0987654321');
+    expect(within(profile).getByRole('list', { name: '銀行帳戶' })).toHaveTextContent('主要帳戶｜812／0012｜123456789012');
+    expect(within(profile).getByRole('list', { name: '銀行帳戶' })).toHaveTextContent('備用帳戶｜004／0001｜987654321098');
+    expect(screen.getByRole('group', { name: '可承接區域' })).toHaveTextContent('北區');
+    expect(screen.getByRole('group', { name: '可承接區域' })).not.toHaveTextContent('T01 six region final');
+    expect(screen.queryByText(/T01 six/)).not.toBeInTheDocument();
     expect(screen.getByRole('group', { name: '證照' })).toHaveTextContent('資格證明：托育人員證照');
+
   });
 });
