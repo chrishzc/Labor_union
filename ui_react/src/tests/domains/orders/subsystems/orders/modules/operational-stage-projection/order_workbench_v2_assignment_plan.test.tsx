@@ -1,18 +1,29 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { OrderAssignmentPlanPanel } from '../components/OrderAssignmentPlanPanel';
+import { OrderAssignmentPlanPanel } from '../../../../../../../components/OrderAssignmentPlanPanel';
 
 const mocks = vi.hoisted(() => ({
   getAssignmentPlan: vi.fn(),
+  queryPlan: vi.fn(),
 }));
 
-vi.mock('../api/orders/order_query_client', () => ({
+vi.mock('../../../../../../../api/orders/order_query_client', () => ({
   ordersQueryClient: {
     getAssignmentPlan: mocks.getAssignmentPlan,
   },
 }));
 
-vi.mock('../components/ServiceBeforeReplacementActions', () => ({
+vi.mock('../../../../../../../api/scheduling/waiting_deposit_lock_client', () => ({
+  waitingDepositLockClient: { queryPlan: mocks.queryPlan },
+}));
+
+vi.mock('../../../../../../../components/MatchingScheduleAndAssignmentActions', () => ({
+  MatchingScheduleAndAssignmentActions: ({ planId }: { planId: number }) => (
+    <section aria-label="mock 日期表確認與正式排班">matching plan {planId}</section>
+  ),
+}));
+
+vi.mock('../../../../../../../components/ServiceBeforeReplacementActions', () => ({
   ServiceBeforeReplacementActions: ({
     caseNo,
     onCommitted,
@@ -71,6 +82,11 @@ function assignmentPlan() {
 describe('待辦看板 Beta 第 10 階正式指派與排班回讀', () => {
   beforeEach(() => {
     mocks.getAssignmentPlan.mockReset();
+    mocks.queryPlan.mockReset();
+    mocks.queryPlan.mockResolvedValue({
+      planId: 51, status: 'accepted', activeLockId: 61, planVersion: 4,
+      segments: [{ segmentId: 71, sequence: 1, staffId: 8891, assignedStartDate: '2026-09-10', assignedEndDate: '2026-09-13' }],
+    });
     window.location.hash = '';
   });
 
@@ -95,6 +111,7 @@ describe('待辦看板 Beta 第 10 階正式指派與排班回讀', () => {
     expect(within(second).getByText('#8892')).toBeInTheDocument();
     expect(within(second).getByText('2026-09-12、2026-09-13')).toBeInTheDocument();
     expect(screen.queryByText(/待開工|服務進行中/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText('mock 日期表確認與正式排班')).toHaveTextContent('matching plan 51');
   });
 
   it('只有明確點擊服務前更換月嫂後才展開既有 workflow，完成後重新讀取正式指派', async () => {

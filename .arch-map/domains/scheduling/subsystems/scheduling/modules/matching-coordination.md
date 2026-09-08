@@ -30,7 +30,7 @@
   - `ui_react/src/api/matching_coordination/matching_coordination_client.ts` — isolated-tested transport client; no current App route consumer.
   - `ui_react/src/components/MatchingCoordinationWorkbench.tsx` — isolated-tested workbench; no current App route consumer.
   - `api/routes/matches.py`、`api/schemas/matches.py` — `/holiday-work-agreements/preview` 與 Apply contract。
-  - `ui_react/src/api/scheduling/matching_plan_communication_client.ts`、`ui_react/src/components/HolidayWorkAgreementActions.tsx`、`ui_react/src/pages/OrdersPage.tsx` — current Orders matching drawer 的人工協調 UI；不宣稱為 LINE delivery/reply。
+  - `ui_react/src/api/scheduling/matching_plan_communication_client.ts`、`ui_react/src/components/HolidayWorkAgreementActions.tsx`、`ui_react/src/components/OrderFormalRecommendationPanel.tsx` — current Order Workbench V2 的人工協調 UI；不宣稱為 LINE delivery/reply。
   - `db/schema_parts/1032_matching_holiday_work_agreements.sql` — additive immutable agreement and participant records.
   - `scripts/run_holiday_work_agreement_scenario.py` — disposable `lu_test_*` scenario runner；透過 typed public API 驗證任意假日排班拒絕、雙方同意後納入服務日，以及後續拒絕立即撤銷。
 

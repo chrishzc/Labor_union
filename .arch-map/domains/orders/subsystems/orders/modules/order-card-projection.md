@@ -10,7 +10,7 @@
 ## Implementation
 - primary:
   - `ui_react/src/adapters/orders/order_card_projection_adapter.ts`
-  - `ui_react/src/pages/OrdersPage.tsx`
+  - `ui_react/src/pages/OrderWorkbenchV2Page.tsx`
   - `ui_react/src/components/OrdersIntakeRepairCard.tsx`
   - `ui_react/src/pages/OrdersPage.css`
   - `subsystems/orders/card_projection_query.py`
@@ -26,9 +26,8 @@
 
 ## Verification
 - layout_status: `custom_current`
-- test_root: `ui_react/src/tests/orders_page_real_data.test.tsx`
+- test_root: `ui_react/src/tests/order_workbench_v2_page.test.tsx`
 - test_root: `ui_react/src/tests/domains/orders/subsystems/orders/modules/order-card-projection/`
-- test_root: `ui_react/src/tests/challenger_g5_adversarial_suite.test.tsx`
 - test_root: `ui_react/src/tests/orders_no_fake_mutation.test.ts`
 - routing: `.arch-map/tests/domains/orders/subsystems/orders/modules/order-card-projection.md`
 

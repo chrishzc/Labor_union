@@ -5,14 +5,14 @@
 import { StrictMode } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { App } from '../App';
-import { MasterLayout, NAV_ITEMS, PAGE_SECTION_MAP } from '../components/MasterLayout';
+import { App } from '../../../../../../../App';
+import { MasterLayout, NAV_ITEMS, PAGE_SECTION_MAP } from '../../../../../../../components/MasterLayout';
 import {
   fetchPerformanceSnapshot,
   SYSTEM_STATUS_ENDPOINT,
-} from '../api/system/system_status_client';
-import { sessionClient } from '../api/auth/session_client';
-import { SystemStatusPage } from '../pages/SystemStatusPage';
+} from '../../../../../../../api/system/system_status_client';
+import { sessionClient } from '../../../../../../../api/auth/session_client';
+import { SystemStatusPage } from '../../../../../../../pages/SystemStatusPage';
 
 const snapshotEnvelope = (overrides: Record<string, unknown> = {}) => ({
   success: true,
@@ -206,7 +206,7 @@ describe('System Status entry cutover candidate contract', () => {
       <StrictMode>
         <MasterLayout
           currentSection="operations"
-          currentPage="order-tracker"
+          currentPage="order-workbench-v2"
           onSelectSection={() => undefined}
           onSelectPage={() => undefined}
           onLogout={() => undefined}

@@ -7,7 +7,8 @@ const source = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf
 const drawerSource = source('src/components/OrderWorkbenchV2Drawer.tsx');
 const appSource = source('src/App.tsx');
 const layoutSource = source('src/components/MasterLayout.tsx');
-const ordersPageSource = source('src/pages/OrdersPage.tsx');
+const workbenchSource = source('src/pages/OrderWorkbenchV2Page.tsx');
+const schedulingSource = source('src/pages/SchedulingPage.tsx');
 
 describe('Order Workbench V2 parity reconciliation', () => {
   it('routes intake repair, historical restart, replacement, and accounting blockers through existing owner flows', () => {
@@ -22,20 +23,25 @@ describe('Order Workbench V2 parity reconciliation', () => {
     expect(drawerSource).toContain("historicalAccounting.status === 'error'");
   });
 
-  it('uses the workbench as the canonical navigation entry while legacy routes remain for #148', () => {
+  it('uses the workbench as the sole canonical order navigation after #148', () => {
     expect(appSource).toContain("'order-beta': 'order-workbench-v2'");
     expect(appSource).toContain("currentPage === 'order-workbench-v2' && <OrderWorkbenchV2Page />");
     expect(appSource).toContain("return 'order-workbench-v2'");
     expect(layoutSource).toContain("{ id: 'order-workbench-v2', icon: '📌', label: '待辦看板'");
-    expect(layoutSource).toContain("item.id !== 'order-tracker' && item.id !== 'orders'");
-    expect(appSource).toContain("currentPage === 'order-tracker' && <OrderTrackerPage />");
-    expect(appSource).toContain("currentPage === 'orders' && <OrdersManagementPage />");
+    expect(layoutSource).not.toContain("'order-tracker'");
+    expect(layoutSource).not.toContain("'orders'");
+    expect(appSource).not.toContain("currentPage === 'order-tracker'");
+    expect(appSource).not.toContain("currentPage === 'orders'");
+    expect(schedulingSource).toContain('#order-workbench-v2?case_no=');
+    expect(schedulingSource).not.toContain('#orders?case_no=');
   });
 
   it('does not reintroduce the retired handcrafted contract-document presentation', () => {
-    expect(ordersPageSource).toContain('<ContractExternalSigningActions');
-    expect(ordersPageSource).not.toContain('契約草稿預覽（非正式）');
-    expect(ordersPageSource).not.toContain('contractDocView');
-    expect(ordersPageSource).not.toContain('contractDocFullscreen');
+    expect(workbenchSource).toContain('<ContractExternalSigningActions');
+    expect(workbenchSource).not.toContain('<OrderCaregiverContractPanel');
+    expect(workbenchSource).not.toContain('<OrderClientContractPanel');
+    expect(workbenchSource).not.toContain('契約草稿預覽（非正式）');
+    expect(workbenchSource).not.toContain('contractDocView');
+    expect(workbenchSource).not.toContain('contractDocFullscreen');
   });
 });

@@ -1,29 +1,28 @@
 import { useState } from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { CORE_STAGE_CODES, SUBSTATUS_BY_STAGE_STATUS, substatusCodesForStage, type CoreStageCode } from '../api/orders/order_core_stage_projection_schemas';
-import type { OrderCoreStageProjectionQueryParams } from '../api/orders/order_core_stage_projection_client';
-import { OrderWorkbenchV2Page } from '../pages/OrderWorkbenchV2Page';
+import { CORE_STAGE_CODES, SUBSTATUS_BY_STAGE_STATUS, substatusCodesForStage, type CoreStageCode } from '../../../../../../../api/orders/order_core_stage_projection_schemas';
+import type { OrderCoreStageProjectionQueryParams } from '../../../../../../../api/orders/order_core_stage_projection_client';
+import { OrderWorkbenchV2Page } from '../../../../../../../pages/OrderWorkbenchV2Page';
 
 const mocks = vi.hoisted(() => ({ core: vi.fn(), summaries: vi.fn() }));
-function Panel({ onObserved, onPoolReadback, onClose }: { onObserved?: () => void; onPoolReadback?: () => void; onClose?: () => void }) {
+function Panel({ onObserved, onPoolReadback, onCommitted, onClose }: { onObserved?: () => void; onPoolReadback?: () => void; onCommitted?: () => void; onClose?: () => void }) {
   const [draft, setDraft] = useState('');
   return <section>
     <input aria-label="整合測試面板草稿" value={draft} onChange={(event) => setDraft(event.target.value)} />
-    <button type="button" onClick={onObserved ?? onPoolReadback}>模擬正式 owner 回讀完成</button>
+    <button type="button" onClick={onObserved ?? onPoolReadback ?? onCommitted}>模擬正式 owner 回讀完成</button>
     {onClose && <button type="button" onClick={onClose}>關閉整合測試 Drawer</button>}
   </section>;
 }
-vi.mock('../components/OrderCandidateQueryPanel', () => ({ OrderCandidateQueryPanel: Panel }));
-vi.mock('../components/OrderCandidateContactStatusPanel', () => ({ OrderCandidateContactStatusPanel: Panel }));
-vi.mock('../components/OrderFormalRecommendationPanel', () => ({ OrderFormalRecommendationPanel: Panel }));
-vi.mock('../components/OrderCaregiverContractPanel', () => ({ OrderCaregiverContractPanel: Panel }));
-vi.mock('../components/OrderClientContractPanel', () => ({ OrderClientContractPanel: Panel }));
-vi.mock('../components/OrderServiceDatesPanel', () => ({ OrderServiceDatesPanel: Panel }));
-vi.mock('../components/OrderAssignmentPlanPanel', () => ({ OrderAssignmentPlanPanel: Panel }));
-vi.mock('../components/OrderWorkbenchV2Drawer', () => ({ OrderWorkbenchV2Drawer: Panel }));
-vi.mock('../api/orders/order_core_stage_projection_client', () => ({ orderCoreStageProjectionClient: { getCoreStageTimelines: mocks.core } }));
-vi.mock('../api/orders/order_query_client', () => ({ loadAllOrderSummaries: mocks.summaries, ordersQueryClient: { getOrderSummaries: vi.fn() } }));
+vi.mock('../../../../../../../components/OrderCandidateQueryPanel', () => ({ OrderCandidateQueryPanel: Panel }));
+vi.mock('../../../../../../../components/OrderCandidateContactStatusPanel', () => ({ OrderCandidateContactStatusPanel: Panel }));
+vi.mock('../../../../../../../components/OrderFormalRecommendationPanel', () => ({ OrderFormalRecommendationPanel: Panel }));
+vi.mock('../../../../../../../components/ContractExternalSigningActions', () => ({ ContractExternalSigningActions: Panel }));
+vi.mock('../../../../../../../components/OrderServiceDatesPanel', () => ({ OrderServiceDatesPanel: Panel }));
+vi.mock('../../../../../../../components/OrderAssignmentPlanPanel', () => ({ OrderAssignmentPlanPanel: Panel }));
+vi.mock('../../../../../../../components/OrderWorkbenchV2Drawer', () => ({ OrderWorkbenchV2Drawer: Panel }));
+vi.mock('../../../../../../../api/orders/order_core_stage_projection_client', () => ({ orderCoreStageProjectionClient: { getCoreStageTimelines: mocks.core } }));
+vi.mock('../../../../../../../api/orders/order_query_client', () => ({ loadAllOrderSummaries: mocks.summaries, ordersQueryClient: { getOrderSummaries: vi.fn() } }));
 
 const labels: Readonly<Record<CoreStageCode, string>> = {
   intake_validation: '進件與資料完整性驗證', matching_pool: '建立候選月嫂池',
@@ -52,15 +51,19 @@ function page(selected: CoreStageCode) {
 async function selectStage(code: CoreStageCode) {
   await screen.findByText('CASE-REFRESH');
   const strip = screen.getByRole('region', { name: '13 個核心訂單階段' });
-  fireEvent.click(within(strip).getAllByRole('button')[CORE_STAGE_CODES.indexOf(code)]!);
-  return screen.findByLabelText('整合測試面板草稿');
+  fireEvent.click(within(strip).getAllByRole('button')[CORE_STAGE_CODES.indexOf(code) + 1]!);
+  return (await screen.findAllByLabelText('整合測試面板草稿'))[0]!;
 }
 
 describe('Beta owner mutation 到清單與階段的完整 callback 接線', () => {
   beforeEach(() => {
     mocks.core.mockReset(); mocks.summaries.mockReset();
     mocks.summaries.mockResolvedValue({ items: [], next_cursor: null, etag: 'c'.repeat(64) });
-    mocks.core.mockImplementation(async (query: OrderCoreStageProjectionQueryParams) => page(query.stage ?? 'intake_validation'));
+    mocks.core.mockImplementation(async (query: OrderCoreStageProjectionQueryParams) => {
+      const result = page(query.stage ?? 'intake_validation');
+      if (query.stage === undefined) result.substatus_counts = {};
+      return result;
+    });
   });
 
   it.each<CoreStageCode>([
@@ -73,14 +76,14 @@ describe('Beta owner mutation 到清單與階段的完整 callback 接線', () =
     let resolve!: (value: ReturnType<typeof page>) => void;
     mocks.core.mockImplementationOnce(() => new Promise<ReturnType<typeof page>>((done) => { resolve = done; }));
     const queries = mocks.core.mock.calls.length; const summaries = mocks.summaries.mock.calls.length;
-    fireEvent.click(screen.getByRole('button', { name: '模擬正式 owner 回讀完成' }));
+    fireEvent.click(screen.getAllByRole('button', { name: '模擬正式 owner 回讀完成' })[0]!);
     await waitFor(() => expect(mocks.core).toHaveBeenCalledTimes(queries + 1));
-    expect(mocks.core).toHaveBeenLastCalledWith(expect.objectContaining({ branch_type: 'normal', stage: code }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(mocks.core).toHaveBeenLastCalledWith(expect.objectContaining({ stage: code }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(mocks.summaries).toHaveBeenCalledTimes(summaries + 1);
     expect(input).toBeInTheDocument(); expect(input).toHaveValue('保留操作內容'); expect(input).toBeDisabled();
     await act(async () => { resolve(page(code)); });
     await waitFor(() => expect(input).toBeEnabled());
-    expect(screen.getByLabelText('整合測試面板草稿')).toBe(input);
+    expect(screen.getAllByLabelText('整合測試面板草稿')).toContain(input);
     expect(input).toHaveValue('保留操作內容');
   });
 
@@ -91,14 +94,14 @@ describe('Beta owner mutation 到清單與階段的完整 callback 接線', () =
     fireEvent.click(screen.getByRole('button', { name: '模擬正式 owner 回讀完成' }));
     await screen.findByRole('alert'); expect(input).toBeInTheDocument(); expect(input).toBeDisabled();
     expect(input).toHaveValue('不可因錯誤遺失');
-    fireEvent.click(screen.getByRole('button', { name: '重新讀取正式清單' }));
+    fireEvent.click(screen.getByRole('button', { name: '重新整理' }));
     await waitFor(() => expect(input).toBeEnabled());
     expect(screen.queryByRole('alert')).not.toBeInTheDocument(); expect(input).toHaveValue('不可因錯誤遺失');
   });
 
   it('Drawer 內成功 callback 更新清單及摘要而不關閉或重建 Drawer', async () => {
     render(<OrderWorkbenchV2Page />); await screen.findByText('CASE-REFRESH');
-    fireEvent.click(screen.getByRole('button', { name: '開啟唯讀工作 Drawer' }));
+    fireEvent.click(screen.getByRole('button', { name: '開啟案件工作' }));
     const input = await screen.findByLabelText('整合測試面板草稿');
     fireEvent.change(input, { target: { value: 'Drawer 保留' } });
     const queries = mocks.core.mock.calls.length; const summaries = mocks.summaries.mock.calls.length;

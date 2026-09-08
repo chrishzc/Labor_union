@@ -4,8 +4,8 @@ import {
   CORE_STAGE_CODES,
   SUBSTATUS_BY_STAGE_STATUS,
   type CoreStageCode,
-} from '../api/orders/order_core_stage_projection_schemas';
-import { OrderWorkbenchV2Page } from '../pages/OrderWorkbenchV2Page';
+} from '../../../../../../../api/orders/order_core_stage_projection_schemas';
+import { OrderWorkbenchV2Page } from '../../../../../../../pages/OrderWorkbenchV2Page';
 
 const mocks = vi.hoisted(() => ({
   getCoreStageTimelines: vi.fn(),
@@ -18,13 +18,13 @@ const mocks = vi.hoisted(() => ({
   applyTerms: vi.fn(),
 }));
 
-vi.mock('../api/orders/order_core_stage_projection_client', () => ({
+vi.mock('../../../../../../../api/orders/order_core_stage_projection_client', () => ({
   orderCoreStageProjectionClient: {
     getCoreStageTimelines: mocks.getCoreStageTimelines,
   },
 }));
 
-vi.mock('../api/orders/order_query_client', () => ({
+vi.mock('../../../../../../../api/orders/order_query_client', () => ({
   loadAllOrderSummaries: mocks.loadSummaries,
   ordersQueryClient: {
     getOrderSummaries: vi.fn(),
@@ -34,7 +34,7 @@ vi.mock('../api/orders/order_query_client', () => ({
   },
 }));
 
-vi.mock('../api/orders/order_terms_mutation_client', () => ({
+vi.mock('../../../../../../../api/orders/order_terms_mutation_client', () => ({
   orderTermsMutationClient: {
     query: mocks.queryTerms,
     preview: mocks.previewTerms,
@@ -93,13 +93,7 @@ function corePage() {
       source_projection_digest: 'd'.repeat(64),
     }],
     stage_counts: stageCounts,
-    substatus_counts: {
-      intake_pending: 0,
-      intake_in_progress: 1,
-      intake_blocked: 0,
-      data_complete: 0,
-      intake_unavailable: 0,
-    },
+    substatus_counts: {},
     historical_lifecycle_counts: {
       unserved: 0,
       in_service: 0,
@@ -155,7 +149,7 @@ function card(): HTMLElement {
 async function openTermsPanel(): Promise<HTMLElement> {
   render(<OrderWorkbenchV2Page />);
   await waitFor(() => expect(screen.getByText('CASE-TERMS')).toBeInTheDocument());
-  fireEvent.click(within(card()).getByRole('button', { name: '開啟唯讀工作 Drawer' }));
+  fireEvent.click(within(card()).getByRole('button', { name: '開啟案件工作' }));
 
   const dialog = await screen.findByRole('dialog', { name: '案件 CASE-TERMS' });
   const panel = within(dialog).getByRole('heading', { name: '進件條款預覽與套用' }).closest('section');

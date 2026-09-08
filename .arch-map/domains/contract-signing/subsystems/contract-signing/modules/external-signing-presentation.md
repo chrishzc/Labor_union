@@ -10,7 +10,7 @@
 ## Implementation
 - primary: `ui_react/src/components/ContractExternalSigningActions.tsx`
 - client: `ui_react/src/api/orders/contract_external_signing_client.ts`
-- page: `ui_react/src/pages/OrdersPage.tsx`
+- page: `ui_react/src/pages/OrderWorkbenchV2Page.tsx`
 - `api/routes/contract_external_signing.py`
 - `api/dependencies/contract_external_signing.py`
 - `infrastructure/file/libreoffice_contract_renderer.py`

@@ -16,7 +16,8 @@
 - entrypoints:
   - `api/routes/order_cancellation.py`
   - `ui_react/src/api/orders/order_cancellation_client.ts`
-  - `ui_react/src/pages/OrdersPage.tsx`
+  - `ui_react/src/components/OrderCancellationPanel.tsx`
+  - `ui_react/src/components/OrderWorkbenchV2Drawer.tsx`
 
 ## Dependencies
 - outbound: `scheduling/scheduling` — 取消有效 generation 與 assignment 重建。

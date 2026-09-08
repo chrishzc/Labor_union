@@ -19,6 +19,7 @@
 - layout_status: `custom_current`
 - integration_root: `ui_react/src/tests/challenger_auth_navigation.test.tsx`
 - integration_root: `ui_react/src/tests/react_entrypoint_registry.test.ts`
+- integration_root: `ui_react/src/tests/domains/global/subsystems/application-shell/modules/react-application-shell/`
 - routing: `.arch-map/tests/domains/global/subsystems/application-shell/modules/react-application-shell.md`
 
 ## Change triggers

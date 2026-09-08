@@ -16,13 +16,13 @@
 - `api/dependencies/order_information.py`
 - `api/schemas/order_information.py`
 - `ui_react/src/api/orders/order_query_client.ts`
-- `ui_react/src/pages/OrdersPage.tsx`
-- `ui_react/src/pages/OrderTrackerPage.tsx`
+- `ui_react/src/pages/OrderWorkbenchV2Page.tsx`
+- `ui_react/src/components/OrderWorkbenchV2Drawer.tsx`
 
 ## Verification
 - Python test root: `tests/domains/orders/subsystems/orders/modules/order-information/`
 - React client: `ui_react/src/tests/orders_query_client.test.ts`
-- React pages: `ui_react/src/tests/orders_page_real_data.test.tsx`, `ui_react/src/tests/order_tracker_real_data.test.tsx`
+- React page: `ui_react/src/tests/order_workbench_v2_page.test.tsx`
 
 ## Provenance
 - Current route, application, MySQL adapter and React callers observed in source.

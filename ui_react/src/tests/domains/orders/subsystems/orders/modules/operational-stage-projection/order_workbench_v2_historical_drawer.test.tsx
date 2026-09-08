@@ -1,8 +1,8 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { HistoricalOrderAdoptionEvidenceSchema } from '../api/orders/historical_adoption_evidence_schemas';
-import { CORE_STAGE_CODES, SUBSTATUS_BY_STAGE_STATUS, type CoreStageCode } from '../api/orders/order_core_stage_projection_schemas';
-import { OrderWorkbenchV2Drawer } from '../components/OrderWorkbenchV2Drawer';
+import { HistoricalOrderAdoptionEvidenceSchema } from '../../../../../../../api/orders/historical_adoption_evidence_schemas';
+import { CORE_STAGE_CODES, SUBSTATUS_BY_STAGE_STATUS, type CoreStageCode } from '../../../../../../../api/orders/order_core_stage_projection_schemas';
+import { OrderWorkbenchV2Drawer } from '../../../../../../../components/OrderWorkbenchV2Drawer';
 
 const mocks = vi.hoisted(() => ({
   core: vi.fn(),
@@ -19,23 +19,23 @@ const mocks = vi.hoisted(() => ({
   restartApply: vi.fn(),
 }));
 
-vi.mock('../api/orders/order_core_stage_projection_client', () => ({
+vi.mock('../../../../../../../api/orders/order_core_stage_projection_client', () => ({
   orderCoreStageProjectionClient: { getCoreStageTimelines: mocks.core },
 }));
-vi.mock('../api/orders/order_query_client', () => ({
+vi.mock('../../../../../../../api/orders/order_query_client', () => ({
   ordersQueryClient: {
     getOrderDetail: mocks.detail,
     getOrderTerms: mocks.terms,
     getAssignmentPlan: mocks.assignment,
   },
 }));
-vi.mock('../api/orders/historical_adoption_evidence_client', () => ({
+vi.mock('../../../../../../../api/orders/historical_adoption_evidence_client', () => ({
   historicalAdoptionEvidenceClient: { queryByCase: mocks.evidence },
 }));
-vi.mock('../api/orders/historical_operational_baseline_client', () => ({
+vi.mock('../../../../../../../api/orders/historical_operational_baseline_client', () => ({
   historicalOperationalBaselineClient: { queryByCase: mocks.baseline },
 }));
-vi.mock('../api/orders/historical_service_accounting_client', () => ({
+vi.mock('../../../../../../../api/orders/historical_service_accounting_client', () => ({
   historicalServiceAccountingClient: {
     query: mocks.accounting,
     queryPrecisionRestart: mocks.restartQuery,
@@ -43,9 +43,9 @@ vi.mock('../api/orders/historical_service_accounting_client', () => ({
     applyPrecisionRestart: mocks.restartApply,
   },
 }));
-vi.mock('../api/orders/order_intake_completion_client', async () => {
-  const actual = await vi.importActual<typeof import('../api/orders/order_intake_completion_client')>(
-    '../api/orders/order_intake_completion_client',
+vi.mock('../../../../../../../api/orders/order_intake_completion_client', async () => {
+  const actual = await vi.importActual<typeof import('../../../../../../../api/orders/order_intake_completion_client')>(
+    '../../../../../../../api/orders/order_intake_completion_client',
   );
   return {
     ...actual,
@@ -226,7 +226,7 @@ describe('historical Drawer immutable evidence boundary', () => {
     );
 
     expect(within(dialog).getByText(/尚無正式指派/)).toBeInTheDocument();
-    expect(within(dialog).getByText('尚無 actual start')).toBeInTheDocument();
+    expect(within(dialog).getByText('尚未確認')).toBeInTheDocument();
 
     expect(within(evidenceRegion).getByText('2026-09-03 → 2026-09-22')).toBeInTheDocument();
     expect(within(evidenceRegion).getByText('Historical Orders Adoption')).toBeInTheDocument();
@@ -273,7 +273,6 @@ describe('historical Drawer immutable evidence boundary', () => {
     expect(mocks.restartQuery.mock.invocationCallOrder[0]).toBeLessThan(mocks.restartPreview.mock.invocationCallOrder[0]!);
     expect(mocks.restartPreview.mock.invocationCallOrder[0]).toBeLessThan(mocks.restartApply.mock.invocationCallOrder[0]!);
     expect(mocks.detail.mock.invocationCallOrder.at(-1)).toBeGreaterThan(mocks.restartApply.mock.invocationCallOrder[0]!);
-    expect(screen.queryByRole('button', { name: '前往重啟正常流程' })).not.toBeInTheDocument();
     expect(mocks.intakeApply).not.toHaveBeenCalled();
   });
 
@@ -296,8 +295,16 @@ describe('historical Drawer immutable evidence boundary', () => {
 
   it.each(['歷史訂單－服務完成', '歷史訂單－帳務完成'])('%s never exposes intake Apply or a restart rollback', async (status) => {
     mocks.detail.mockResolvedValue(orderDetail(status));
+    mocks.core.mockResolvedValue({
+      items: [{ ...timeline(), lifecycle_status: status }],
+      stage_counts: Object.fromEntries(CORE_STAGE_CODES.map((code) => [code, 0])),
+      substatus_counts: {},
+      historical_lifecycle_counts: { unserved: 0, in_service: 0, service_completed: status === '歷史訂單－服務完成' ? 1 : 0, accounting_completed: status === '歷史訂單－帳務完成' ? 1 : 0 },
+      next_cursor: null,
+      etag: 'b'.repeat(64),
+    });
     render(<OrderWorkbenchV2Drawer caseNo="CASE-FUTURE" branchType="historical" onClose={vi.fn()} />);
-    await screen.findByText(/不提供 intake 或重啟倒退/);
+    await screen.findByText(status);
     expect(screen.queryByRole('button', { name: '前往重啟正常流程' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '確認完成進件補齊' })).not.toBeInTheDocument();
     expect(mocks.restartQuery).not.toHaveBeenCalled();

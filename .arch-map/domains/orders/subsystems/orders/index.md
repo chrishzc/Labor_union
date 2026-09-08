@@ -7,7 +7,6 @@
 將 Orders root facts 組成 read-only Query、zero-write Preview 與 fresh-lock Apply；負責 workflow composition，不重複定義 Domain rules。
 
 ## Modules
-- `order-tracker-presentation` — Orders tracker主清單與retry的business-facing presentation；path: `modules/order-tracker-presentation.md`
 - `historical-adoption` — 既有 Order 的 historical workbook adoption／replay; path: `modules/historical-adoption.md`
 - `historical-service-accounting` — 歷史逐月嫂服務天數、單薪帳務與跨 owner Q/P/A; path: `modules/historical-service-accounting.md`
 - `historical-precision-restart` — 歷史未服務／服務中案件撤銷 current 服務根並回到正常訂單成立的單交易 Q/P/A; path: `modules/historical-precision-restart.md`
@@ -41,5 +40,5 @@
 - layout_status: `custom_current`
 - test_root: `tests/domains/orders/subsystems/orders/`
 - integration_root: `tests/domains/orders/subsystems/orders/integration/`
-- integration_root: `ui_react/src/tests/orders_service_dates_flow.test.tsx`
+- integration_root: `ui_react/src/tests/domains/orders/subsystems/orders/modules/service-date-confirmation/order_workbench_v2_service_dates.test.tsx`
 - fixtures_root: `tests/fixtures/`

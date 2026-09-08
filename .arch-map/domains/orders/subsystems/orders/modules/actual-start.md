@@ -14,7 +14,8 @@
   - `subsystems/orders/actual_start_workflow.py`
   - `infrastructure/mysql/order_actual_start_repository.py`
   - `ui_react/src/api/orders/order_actual_start_client.ts`
-  - `ui_react/src/pages/OrdersPage.tsx`
+  - `ui_react/src/components/OrderActualStartPanel.tsx`
+  - `ui_react/src/components/OrderWorkbenchV2Drawer.tsx`
 
 ## Dependencies
 - outbound: `scheduling/scheduling` — replacement generation 擁有正式服務日期與 assignment lineage。
@@ -33,7 +34,7 @@
 
 ## Provenance
 - Actual Start writer and cross-owner persistence — `source_observed` — `subsystems/orders/actual_start_workflow.py`.
-- OrdersPage eligibility gate — `source_observed` — `ui_react/src/pages/OrdersPage.tsx`。
+- Order Workbench V2 drawer eligibility gate — `source_observed` — `ui_react/src/components/OrderWorkbenchV2Drawer.tsx`。
 - Historical delegation rule — `architecture_declared` — `document/架構重整/01_規格基線/01_Orders_Domain.md`.
 
 ## Change triggers

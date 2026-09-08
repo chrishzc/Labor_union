@@ -17,8 +17,7 @@ import './OrderWorkbenchV2Page.css';
 import { OrderAssignmentPlanPanel } from '../components/OrderAssignmentPlanPanel';
 import { OrderCandidateContactStatusPanel } from '../components/OrderCandidateContactStatusPanel';
 import { OrderCandidateQueryPanel } from '../components/OrderCandidateQueryPanel';
-import { OrderCaregiverContractPanel } from '../components/OrderCaregiverContractPanel';
-import { OrderClientContractPanel } from '../components/OrderClientContractPanel';
+import { ContractExternalSigningActions } from '../components/ContractExternalSigningActions';
 import { OrderFormalRecommendationPanel } from '../components/OrderFormalRecommendationPanel';
 import { OrderGovernmentSubsidyLane } from '../components/OrderGovernmentSubsidyLane';
 import { OrderServiceDatesPanel } from '../components/OrderServiceDatesPanel';
@@ -418,15 +417,15 @@ export const OrderWorkbenchV2Page: FC = () => {
                 {workbenchScope === 'in_progress' && item.branchType === 'normal' && actionStage === 'formal_recommendation' && (
                   <OrderFormalRecommendationPanel key={item.id} caseNo={item.id} onObserved={refreshProjection} />
                 )}
-                {workbenchScope === 'in_progress' && item.branchType === 'normal' && actionStage === 'caregiver_contract' && (
-                  <OrderCaregiverContractPanel key={item.id} caseNo={item.id} onObserved={refreshProjection} />
-                )}
-                {workbenchScope === 'in_progress' && item.branchType === 'normal' && actionStage === 'client_contract' && (
-                  <OrderClientContractPanel key={item.id} caseNo={item.id} onObserved={refreshProjection} />
+                {workbenchScope === 'in_progress' && item.branchType === 'normal'
+                  && (actionStage === 'caregiver_contract'
+                    || actionStage === 'client_contract'
+                    || actionStage === 'confirmed_service_dates') && (
+                  <ContractExternalSigningActions key={`${item.id}:external-signing`} caseNo={item.id} onCommitted={refreshProjection} />
                 )}
                 {workbenchScope === 'in_progress' && item.branchType === 'normal' && actionStage === 'confirmed_service_dates' && (
                   <OrderServiceDatesPanel
-                    key={item.id}
+                    key={`${item.id}:service-dates`}
                     caseNo={item.id}
                     onObserved={refreshProjection}
                   />

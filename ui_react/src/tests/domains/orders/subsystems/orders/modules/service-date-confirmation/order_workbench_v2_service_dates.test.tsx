@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { OrderServiceDatesPanel } from '../components/OrderServiceDatesPanel';
+import { OrderServiceDatesPanel } from '../../../../../../../components/OrderServiceDatesPanel';
 
 const mocks = vi.hoisted(() => ({
   getActualStart: vi.fn(),
@@ -14,20 +14,20 @@ const mocks = vi.hoisted(() => ({
   getServiceDatesDraft: vi.fn(),
 }));
 
-vi.mock('../api/orders/order_query_client', () => ({
+vi.mock('../../../../../../../api/orders/order_query_client', () => ({
   ordersQueryClient: {
     getActualStart: mocks.getActualStart,
     getOrderCalendarDetail: mocks.getOrderCalendarDetail,
   },
 }));
 
-vi.mock('../api/scheduling/schedule_precision_client', () => ({
+vi.mock('../../../../../../../api/scheduling/schedule_precision_client', () => ({
   schedulePrecisionClient: {
     calculate: mocks.calculate,
   },
 }));
 
-vi.mock('../adapters/orders/order_mutation_adapter', () => ({
+vi.mock('../../../../../../../adapters/orders/order_mutation_adapter', () => ({
   fetchServiceDatesQuery: mocks.fetchServiceDatesQuery,
   selectServiceDates: mocks.selectServiceDates,
   updateServiceDatesReason: mocks.updateServiceDatesReason,
@@ -35,7 +35,7 @@ vi.mock('../adapters/orders/order_mutation_adapter', () => ({
   applyServiceDatesFlow: mocks.applyServiceDatesFlow,
 }));
 
-vi.mock('../adapters/orders/order_mutation_flow_store', () => ({
+vi.mock('../../../../../../../adapters/orders/order_mutation_flow_store', () => ({
   orderMutationFlowStore: {
     getServiceDatesDraft: mocks.getServiceDatesDraft,
   },
@@ -177,5 +177,70 @@ describe('待辦看板 Beta 第 9 階服務日期', () => {
     const readback = screen.getByLabelText('正式服務日期回讀');
     expect(within(readback).getByText('#1')).toBeInTheDocument();
     expect(within(readback).getByText('2026-10-01、2026-10-03、2026-10-04')).toBeInTheDocument();
+  });
+
+  it('任一 owner 回讀案件編號不一致時 fail closed，不執行精算或 Preview', async () => {
+    mocks.getActualStart.mockResolvedValueOnce({
+      case_no: 'OTHER-CASE',
+      current_actual_start_date: null,
+      planned_start_date: '2026-10-01',
+      service_data_locked: false,
+      order_version: 11,
+      scheduling_version: 7,
+      scheduling_generation: 1,
+      client_finance_version: 3,
+      payroll_version: 2,
+    });
+
+    render(<OrderServiceDatesPanel caseNo="CASE-SERVICE-DATES" />);
+    fireEvent.click(screen.getByRole('button', { name: '設定並查看服務日期' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('服務日期精算回讀案件編號不一致。');
+    expect(mocks.calculate).not.toHaveBeenCalled();
+    expect(mocks.previewServiceDatesFlow).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: '確認服務日期' })).not.toBeInTheDocument();
+  });
+
+  it('owner Query 或精算失敗時不保留上一輪可操作狀態', async () => {
+    mocks.calculate.mockRejectedValueOnce(new Error('正式精算暫時無法使用'));
+
+    render(<OrderServiceDatesPanel caseNo="CASE-SERVICE-DATES" />);
+    fireEvent.click(screen.getByRole('button', { name: '設定並查看服務日期' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('正式精算暫時無法使用');
+    expect(screen.queryByLabelText('建議服務日期摘要')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '確認服務日期' })).not.toBeInTheDocument();
+  });
+
+  it('使用者改動日期後會使既有 Preview 失效，必須重新 Preview', async () => {
+    render(<OrderServiceDatesPanel caseNo="CASE-SERVICE-DATES" />);
+    fireEvent.click(screen.getByRole('button', { name: '設定並查看服務日期' }));
+    await screen.findByLabelText('建議服務日期摘要');
+
+    fireEvent.click(screen.getByRole('button', { name: '確認服務日期' }));
+    await screen.findByLabelText('服務日期確認內容');
+    fireEvent.click(screen.getByRole('checkbox', { name: '服務日期 2026-10-02' }));
+
+    expect(screen.queryByLabelText('服務日期確認內容')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '完成服務日期確認' })).not.toBeInTheDocument();
+  });
+
+  it('Apply 後缺少正式 owner readback 時顯示失敗且不通知外層成功', async () => {
+    const onObserved = vi.fn();
+    mocks.getServiceDatesDraft.mockReturnValueOnce({ status: 'outcome_unknown', queryView: null });
+
+    render(<OrderServiceDatesPanel caseNo="CASE-SERVICE-DATES" onObserved={onObserved} />);
+    fireEvent.click(screen.getByRole('button', { name: '設定並查看服務日期' }));
+    await screen.findByLabelText('建議服務日期摘要');
+    fireEvent.click(screen.getByRole('button', { name: '確認服務日期' }));
+    await screen.findByLabelText('服務日期確認內容');
+    fireEvent.change(screen.getByRole('textbox', { name: '服務日期確認原因' }), {
+      target: { value: '依正式排程確認' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '完成服務日期確認' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('服務日期已套用，但未取得正式回讀狀態。');
+    expect(onObserved).not.toHaveBeenCalled();
+    expect(screen.queryByText(/服務日期已確認並回讀版本/)).not.toBeInTheDocument();
   });
 });

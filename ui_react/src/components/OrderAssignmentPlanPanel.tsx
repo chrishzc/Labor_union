@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type FC } from 'react';
 import type { AssignmentPlan } from '../api/orders/order_query_schemas';
 import { ordersQueryClient } from '../api/orders/order_query_client';
+import { waitingDepositLockClient, type ActiveWaitingDepositPlan } from '../api/scheduling/waiting_deposit_lock_client';
+import { MatchingScheduleAndAssignmentActions } from './MatchingScheduleAndAssignmentActions';
 import { ServiceBeforeReplacementActions } from './ServiceBeforeReplacementActions';
 
 interface OrderAssignmentPlanPanelProps {
@@ -11,7 +13,7 @@ interface OrderAssignmentPlanPanelProps {
 type ReadState =
   | { status: 'idle' }
   | { status: 'loading' }
-  | { status: 'ready'; data: AssignmentPlan }
+  | { status: 'ready'; data: { assignment: AssignmentPlan; matchingPlan: ActiveWaitingDepositPlan } }
   | { status: 'error'; message: string };
 
 function errorMessage(error: unknown): string {
@@ -29,18 +31,22 @@ export const OrderAssignmentPlanPanel: FC<OrderAssignmentPlanPanelProps> = ({ ca
   const load = async (notify = false) => {
     setState({ status: 'loading' });
     try {
-      const data = await ordersQueryClient.getAssignmentPlan(caseNo);
-      if (data.case_no !== caseNo) {
+      const [assignment, matchingPlan] = await Promise.all([
+        ordersQueryClient.getAssignmentPlan(caseNo),
+        waitingDepositLockClient.queryPlan(caseNo),
+      ]);
+      if (assignment.case_no !== caseNo) {
         throw new Error('正式指派回讀案件編號不一致。');
       }
-      setState({ status: 'ready', data });
+      setState({ status: 'ready', data: { assignment, matchingPlan } });
       if (notify && mounted.current) onObserved?.();
     } catch (error) {
       setState({ status: 'error', message: errorMessage(error) });
     }
   };
 
-  const plan = state.status === 'ready' ? state.data : null;
+  const plan = state.status === 'ready' ? state.data.assignment : null;
+  const matchingPlan = state.status === 'ready' ? state.data.matchingPlan : null;
 
   return (
     <section aria-label={`案件 ${caseNo} 正式指派與排班回讀`}>
@@ -102,6 +108,17 @@ export const OrderAssignmentPlanPanel: FC<OrderAssignmentPlanPanelProps> = ({ ca
             ))
           )}
         </>
+      )}
+
+      {plan !== null && matchingPlan !== null && (matchingPlan.segments ?? []).length > 0 && (
+        <MatchingScheduleAndAssignmentActions
+          caseNo={caseNo}
+          planId={matchingPlan.planId}
+          planSegments={matchingPlan.segments ?? []}
+          waitingLockAcquired={matchingPlan.activeLockId !== null}
+          assignmentExists={plan.assignments.length > 0}
+          onAssignmentCompleted={() => load(true)}
+        />
       )}
     </section>
   );

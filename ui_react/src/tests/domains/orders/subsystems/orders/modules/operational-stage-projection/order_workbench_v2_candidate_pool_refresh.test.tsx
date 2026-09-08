@@ -5,17 +5,17 @@ import {
   SUBSTATUS_BY_STAGE_STATUS,
   substatusCodesForStage,
   type CoreStageCode,
-} from '../api/orders/order_core_stage_projection_schemas';
-import type { OrderCoreStageProjectionQueryParams } from '../api/orders/order_core_stage_projection_client';
-import type { OrderSummaryPage } from '../api/orders/order_query_schemas';
-import { OrderWorkbenchV2Page } from '../pages/OrderWorkbenchV2Page';
+} from '../../../../../../../api/orders/order_core_stage_projection_schemas';
+import type { OrderCoreStageProjectionQueryParams } from '../../../../../../../api/orders/order_core_stage_projection_client';
+import type { OrderSummaryPage } from '../../../../../../../api/orders/order_query_schemas';
+import { OrderWorkbenchV2Page } from '../../../../../../../pages/OrderWorkbenchV2Page';
 
 const mocks = vi.hoisted(() => ({
   getCoreStageTimelines: vi.fn(),
   loadSummaries: vi.fn(),
 }));
 
-vi.mock('../components/OrderCandidateQueryPanel', () => ({
+vi.mock('../../../../../../../components/OrderCandidateQueryPanel', () => ({
   OrderCandidateQueryPanel: ({
     caseNo,
     onPoolReadback,
@@ -29,25 +29,25 @@ vi.mock('../components/OrderCandidateQueryPanel', () => ({
   ),
 }));
 
-vi.mock('../components/OrderServiceDatesPanel', () => ({
+vi.mock('../../../../../../../components/OrderServiceDatesPanel', () => ({
   OrderServiceDatesPanel: ({ onObserved }: { onObserved?: () => void }) => (
     <button type="button" onClick={onObserved}>模擬服務日期回讀完成</button>
   ),
 }));
 
-vi.mock('../components/OrderWorkbenchV2Drawer', () => ({
+vi.mock('../../../../../../../components/OrderWorkbenchV2Drawer', () => ({
   OrderWorkbenchV2Drawer: ({ onClose }: { onClose: () => void }) => (
     <button type="button" onClick={onClose}>關閉測試工作 Drawer</button>
   ),
 }));
 
-vi.mock('../api/orders/order_core_stage_projection_client', () => ({
+vi.mock('../../../../../../../api/orders/order_core_stage_projection_client', () => ({
   orderCoreStageProjectionClient: {
     getCoreStageTimelines: mocks.getCoreStageTimelines,
   },
 }));
 
-vi.mock('../api/orders/order_query_client', () => ({
+vi.mock('../../../../../../../api/orders/order_query_client', () => ({
   loadAllOrderSummaries: mocks.loadSummaries,
   ordersQueryClient: { getOrderSummaries: vi.fn() },
 }));
@@ -90,7 +90,7 @@ function timeline(currentCode: CoreStageCode) {
   return {
     case_no: 'CASE-READBACK',
     base_revision: 1,
-    lifecycle_status: '媒合中',
+    lifecycle_status: '洽談中',
     branch_type: 'normal',
     current_core_stage_code: currentCode,
     current_core_stage_ordinal: CORE_STAGE_CODES.indexOf(currentCode) + 1,
@@ -99,15 +99,15 @@ function timeline(currentCode: CoreStageCode) {
   };
 }
 
-function page(selectedStage: CoreStageCode, items: unknown[]) {
+function page(selectedStage: CoreStageCode | undefined, items: unknown[]) {
   return {
     items,
     stage_counts: Object.fromEntries(
       CORE_STAGE_CODES.map((code) => [code, code === 'matching_pool' ? 1 : 0]),
     ),
-    substatus_counts: Object.fromEntries(
-      substatusCodesForStage(selectedStage).map((code) => [code, 0]),
-    ),
+    substatus_counts: selectedStage === undefined
+      ? {}
+      : Object.fromEntries(substatusCodesForStage(selectedStage).map((code) => [code, 0])),
     next_cursor: null,
     etag: 'b'.repeat(64),
   };
@@ -139,8 +139,8 @@ describe('待辦看板 Beta 候選池回讀後刷新正式投影', () => {
     mocks.loadSummaries.mockReset();
     mocks.loadSummaries.mockResolvedValue({ items: [], next_cursor: null, etag: 'c'.repeat(64) });
     mocks.getCoreStageTimelines.mockImplementation(async (params: OrderCoreStageProjectionQueryParams) => {
-      const selectedStage = params.stage ?? 'intake_validation';
-      return page(selectedStage, [timeline(selectedStage)]);
+      const selectedStage = params.stage;
+      return page(selectedStage, [timeline(selectedStage ?? 'intake_validation')]);
     });
   });
 
@@ -156,7 +156,7 @@ describe('待辦看板 Beta 候選池回讀後刷新正式投影', () => {
 
     await waitFor(() => expect(mocks.getCoreStageTimelines.mock.calls.length).toBeGreaterThan(callsBeforeRefresh));
     expect(mocks.getCoreStageTimelines).toHaveBeenLastCalledWith(
-      expect.objectContaining({ branch_type: 'normal', stage: 'matching_pool' }),
+      expect.objectContaining({ stage: 'matching_pool' }),
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
@@ -201,7 +201,7 @@ describe('待辦看板 Beta 候選池回讀後刷新正式投影', () => {
     mocks.loadSummaries.mockResolvedValueOnce(summaries()).mockResolvedValue(summaries(true));
     render(<OrderWorkbenchV2Page />);
     await screen.findByText('回讀前測試客戶');
-    fireEvent.click(screen.getByRole('button', { name: '開啟唯讀工作 Drawer' }));
+    fireEvent.click(screen.getByRole('button', { name: '開啟案件工作' }));
     const before = mocks.getCoreStageTimelines.mock.calls.length;
     fireEvent.click(screen.getByRole('button', { name: '關閉測試工作 Drawer' }));
 

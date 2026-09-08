@@ -77,7 +77,7 @@ describe('Adversarial Challenge: URL Hash Navigation & Routing', () => {
     ).toBeNull();
   });
 
-  it('[Hash-1] 空 Hash (#) 與空字串應乾淨回退至預設待辦看板 (#order-tracker)', async () => {
+  it('[Hash-1] 空 Hash (#) 與空字串應乾淨回退至正式待辦看板 (#order-workbench-v2)', async () => {
     authenticateSession();
 
     window.location.hash = '#';
@@ -128,7 +128,7 @@ describe('Adversarial Challenge: URL Hash Navigation & Routing', () => {
 
   it('[Hash-4] 未登入狀態下，無論存取何種已知或惡意 Hash，均嚴格阻擋並渲染 LoginPage', async () => {
     const attackHashes = [
-      '#orders',
+      '#order-workbench-v2',
       '#finance',
       '#anomalies',
       '#account-management',
@@ -144,7 +144,7 @@ describe('Adversarial Challenge: URL Hash Navigation & Routing', () => {
       '#null',
       '#constructor',
       '#%20%20%20',
-      '#orders?filter=urgent&sort=desc',
+      '#order-workbench-v2?filter=urgent&sort=desc',
     ];
 
     for (const testHash of attackHashes) {

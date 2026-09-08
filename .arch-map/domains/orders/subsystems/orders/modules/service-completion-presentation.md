@@ -10,7 +10,7 @@
 ## Implementation
 - primary:
   - `ui_react/src/components/OrderServiceCompletionActions.tsx`
-  - `ui_react/src/pages/OrdersPage.tsx`
+  - `ui_react/src/components/OrderWorkbenchV2Drawer.tsx`
 
 ## Contracts
 - `document/架構重整/01_規格基線/01_Orders_Domain.md` — Orders服務完成與lifecycle owner規則。

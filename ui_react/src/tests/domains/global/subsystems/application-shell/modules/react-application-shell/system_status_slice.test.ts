@@ -8,9 +8,9 @@ import React from 'react';
 import {
   fetchPerformanceSnapshot,
   SYSTEM_STATUS_ENDPOINT,
-} from '../api/system/system_status_client';
-import { MasterLayout } from '../components/MasterLayout';
-import { sessionClient } from '../api/auth/session_client';
+} from '../../../../../../../api/system/system_status_client';
+import { MasterLayout } from '../../../../../../../components/MasterLayout';
+import { sessionClient } from '../../../../../../../api/auth/session_client';
 
 function authenticate(): void {
   sessionClient.setSession('system-status-slice-token', {
@@ -100,7 +100,7 @@ describe('System Status Vertical Slice & MasterLayout Indicator', () => {
         MasterLayout,
         {
           currentSection: 'operations',
-          currentPage: 'order-tracker',
+          currentPage: 'order-workbench-v2',
           onSelectSection: () => {},
           onSelectPage: () => {},
           onLogout: () => {},
@@ -143,7 +143,7 @@ describe('System Status Vertical Slice & MasterLayout Indicator', () => {
         MasterLayout,
         {
           currentSection: 'operations',
-          currentPage: 'order-tracker',
+          currentPage: 'order-workbench-v2',
           onSelectSection: () => {},
           onSelectPage: () => {},
           onLogout: () => {},
@@ -186,7 +186,7 @@ describe('System Status Vertical Slice & MasterLayout Indicator', () => {
         MasterLayout,
         {
           currentSection: 'operations',
-          currentPage: 'order-tracker',
+          currentPage: 'order-workbench-v2',
           onSelectSection: () => {},
           onSelectPage: () => {},
           onLogout: () => {},
@@ -209,7 +209,7 @@ describe('System Status Vertical Slice & MasterLayout Indicator', () => {
         MasterLayout,
         {
           currentSection: 'operations',
-          currentPage: 'order-tracker',
+          currentPage: 'order-workbench-v2',
           onSelectSection: () => {},
           onSelectPage: () => {},
           onLogout: () => {},

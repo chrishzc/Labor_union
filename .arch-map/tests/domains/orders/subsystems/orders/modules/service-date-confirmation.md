@@ -4,4 +4,4 @@ architecture: ../../../../../../domains/orders/subsystems/orders/modules/service
 layout_status: custom_current
 
 # Owned verification
-- `orders_service_dates_flow.test.tsx` — OrdersPage service-date confirmation flow；保護 server precision、排休覆寫、唯一確認服務日期、Preview／Confirm／Apply、manual-date fallback 與 workspace applicability。
+- `order_workbench_v2_service_dates.test.tsx` — Order Workbench V2 service-date confirmation flow；保護 server precision、案件一致性、Preview／Confirm／Apply、正式回讀與失敗時 fail closed。

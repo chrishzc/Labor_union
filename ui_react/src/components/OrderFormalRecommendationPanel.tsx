@@ -6,6 +6,7 @@ import { waitingDepositLockClient, type ActiveWaitingDepositPlan, type WaitingDe
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import { ApiHttpError } from '../api/shared/typed_errors';
 import { CustomerProfilesManualActions } from './MatchingManualCommunicationActions';
+import { HolidayWorkAgreementActions } from './HolidayWorkAgreementActions';
 
 interface OrderFormalRecommendationPanelProps {
   caseNo: string;
@@ -98,6 +99,7 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
   };
 
   const current = active.status === 'ready' ? active.data : null;
+  const currentSegments = current?.plan.segments ?? [];
   const canCreate = active.status === 'ready' && (current === null
     || (current.plan.activeLockId === null && current.plan.status === 'proposed' && current.contact.customer_decision !== 'accepted'));
   const canCommunicate = current !== null && current.plan.activeLockId === null
@@ -249,6 +251,14 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
             <button type="button" aria-label={`重新讀取方案 ${current.plan.planId} 履歷推薦送達狀態`} onClick={() => void reload()}>重新讀取履歷推薦狀態</button>
           </div>
           <p>目前決定：{current.contact.customer_decision}</p>
+          {current.contact.plan.status === 'proposed' && currentSegments.length > 0 && (
+            <HolidayWorkAgreementActions
+              caseNo={caseNo}
+              planId={current.plan.planId}
+              segments={currentSegments}
+              onCommitted={reload}
+            />
+          )}
           {current.contact.customer_decision === 'declined' && (
             <div role="alert"><strong>客戶拒絕正式推薦</strong><p>目前正式方案受阻；請依後續 owner 流程處理。</p></div>
           )}

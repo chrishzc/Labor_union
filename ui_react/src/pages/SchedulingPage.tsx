@@ -2866,11 +2866,13 @@ export const SchedulingPage: React.FC = () => {
                   onClick={() => {
                     setCollisionDrawerOpen(false);
                     const targetCase = eligibilityCaseNo.trim() || selectedCaseNo.trim();
-                    window.location.hash = targetCase ? `#orders?case_no=${encodeURIComponent(targetCase)}` : '#orders';
+                    window.location.hash = targetCase
+                      ? `#order-workbench-v2?case_no=${encodeURIComponent(targetCase)}`
+                      : '#order-workbench-v2';
                   }}
                   style={{ padding: '5px 12px', fontSize: '0.82rem', background: '#166534', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 700 }}
                 >
-                  👉 前往「訂單管理」開啟媒合抽屜與 LINE 推播
+                  👉 前往「待辦看板」開啟媒合工作與 LINE 推播
                 </button>
               </div>
             )}

@@ -16,7 +16,7 @@
   - `api/routes/service_date_confirmation.py`
   - `api/dependencies/service_date_confirmation.py`
   - `ui_react/src/adapters/orders/order_mutation_adapter.ts`
-  - `ui_react/src/pages/OrdersPage.tsx`
+  - `ui_react/src/components/OrderServiceDatesPanel.tsx`
 
 ## Dependencies
 - outbound: `scheduling/scheduling` — restart tombstone 的正式重建只呼叫 `infrastructure/mysql/scheduling_replacement_writer.py`。
@@ -34,7 +34,7 @@
   - `git diff --check`
 - test_root: `tests/domains/orders/subsystems/orders/modules/service-date-confirmation/`
 - higher_boundary:
-  - `ui_react/src/tests/domains/orders/subsystems/orders/modules/service-date-confirmation/orders_service_dates_flow.test.tsx`
+  - `ui_react/src/tests/domains/orders/subsystems/orders/modules/service-date-confirmation/order_workbench_v2_service_dates.test.tsx`
 
 ## Provenance
 - Orders owns confirmed-date Q/P/A — `architecture_declared` — `document/架構重整/01_規格基線/01_Orders_Domain.md` §3.4.1。

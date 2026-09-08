@@ -1,19 +1,14 @@
 import { useState } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { OrderCaregiverContractPanel } from '../../../../../../../components/OrderCaregiverContractPanel';
-import { OrderClientContractPanel } from '../../../../../../../components/OrderClientContractPanel';
 import { OrderTermsMutationPanel } from '../../../../../../../components/OrderTermsMutationPanel';
 import { OrderCandidateContactStatusPanel } from '../../../../../../../components/OrderCandidateContactStatusPanel';
 import { OrderAssignmentPlanPanel } from '../../../../../../../components/OrderAssignmentPlanPanel';
 import { OrderFormalRecommendationPanel } from '../../../../../../../components/OrderFormalRecommendationPanel';
 import type { OrderTerms } from '../../../../../../../api/orders/order_query_schemas';
 
-const mocks = vi.hoisted(() => ({ signing: vi.fn(), sendStaff: vi.fn(), sendClient: vi.fn(),
-  termsQuery: vi.fn(), termsPreview: vi.fn(), termsApply: vi.fn(), pool: vi.fn(), willingness: vi.fn(),
+const mocks = vi.hoisted(() => ({ termsQuery: vi.fn(), termsPreview: vi.fn(), termsApply: vi.fn(), pool: vi.fn(), willingness: vi.fn(),
   assignment: vi.fn(), active: vi.fn(), contact: vi.fn(), sendProfiles: vi.fn() }));
-vi.mock('../../../../../../../api/orders/contract_signing_client', () => ({ contractSigningClient: { query: mocks.signing } }));
-vi.mock('../../../../../../../api/orders/contract_signing_mutation_client', () => ({ contractSigningMutationClient: { sendStaff: mocks.sendStaff, sendClient: mocks.sendClient } }));
 vi.mock('../../../../../../../api/orders/order_terms_mutation_client', () => ({ orderTermsMutationClient: { query: mocks.termsQuery, preview: mocks.termsPreview, apply: mocks.termsApply } }));
 vi.mock('../../../../../../../api/scheduling/candidate_contact_pool_client', () => ({ candidateContactPoolClient: { query: mocks.pool, recordWillingness: mocks.willingness } }));
 vi.mock('../../../../../../../api/orders/order_query_client', () => ({ ordersQueryClient: { getAssignmentPlan: mocks.assignment } }));
@@ -22,11 +17,8 @@ vi.mock('../../../../../../../api/scheduling/matching_plan_communication_client'
 vi.mock('../../../../../../../components/ServiceBeforeReplacementActions', () => ({ ServiceBeforeReplacementActions: ({ onCommitted }: { onCommitted: () => Promise<void> }) => (
   <button type="button" onClick={() => void onCommitted()}>模擬正式更換完成</button>
 ) }));
+vi.mock('../../../../../../../components/MatchingScheduleAndAssignmentActions', () => ({ MatchingScheduleAndAssignmentActions: () => null }));
 const CASE = 'CASE-OWNER-CALLBACK';
-function signing(sent: boolean) {
-  return { case_no: CASE, staff_segments: [{ segment_id: 7, staff_id: 8, sent, signed_received: false }],
-    commitment_id: 1, client_document_sent: sent, client_signed_received: false, contract_identity: null, documents: [] };
-}
 function terms(updated = false): OrderTerms {
   return { case_no: CASE, order_version: updated ? 3 : 2, scheduling_version: updated ? 4 : 3,
     scheduling_generation: updated ? 2 : 1, client_finance_version: updated ? 5 : 4, payroll_version: updated ? 6 : 5,
@@ -53,7 +45,6 @@ async function applyTerms() {
 describe('Beta 實際 owner 元件只在正式回讀成立後通知外層', () => {
   beforeEach(() => {
     Object.values(mocks).forEach((mock) => mock.mockReset());
-    mocks.sendStaff.mockResolvedValue({}); mocks.sendClient.mockResolvedValue({});
     mocks.termsPreview.mockResolvedValue({ before: terms().terms, after: terms(true).terms,
       order_version: 2, scheduling_version: 3, client_finance_version: 4, payroll_version: 5, preview_fingerprint: 'a'.repeat(64) });
     mocks.termsApply.mockResolvedValue({ case_no: CASE, order_version: 3, scheduling_version: 4,
@@ -65,29 +56,6 @@ describe('Beta 實際 owner 元件只在正式回讀成立後通知外層', () =
     mocks.active.mockResolvedValue({ planId: 51, status: 'proposed', activeLockId: null, planVersion: 1, segments: [] });
     mocks.contact.mockResolvedValue({ plan: { id: 51, case_no: CASE, communication_version: 4, status: 'proposed', is_active: 1 },
       segments: [], all_willing: true, customer_decision: 'pending', customer_profiles_status: null, customer_profiles_manual_confirmation: null });
-  });
-
-  it.each(['caregiver', 'client'] as const)('%s 契約寄送回讀 true 後才刷新外層', async (kind) => {
-    mocks.signing.mockResolvedValueOnce(signing(false)).mockResolvedValue(signing(true));
-    const onObserved = vi.fn();
-    render(kind === 'caregiver' ? <OrderCaregiverContractPanel caseNo={CASE} onObserved={onObserved} /> : <OrderClientContractPanel caseNo={CASE} onObserved={onObserved} />);
-    fireEvent.click(screen.getByRole('button', { name: kind === 'caregiver' ? '讀取月嫂契約狀態' : '讀取客戶契約狀態' }));
-    fireEvent.change(await screen.findByLabelText(kind === 'caregiver' ? '受控 HTTPS 文件下載網址' : '客戶契約受控 HTTPS 文件下載網址'), { target: { value: 'https://example.test/controlled.pdf' } });
-    expect(onObserved).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: kind === 'caregiver' ? '建立月嫂契約寄送工作' : '建立客戶契約寄送工作' }));
-    await waitFor(() => expect(onObserved).toHaveBeenCalledTimes(1));
-    expect(mocks.signing).toHaveBeenCalledTimes(2);
-  });
-
-  it.each(['caregiver', 'client'] as const)('%s 契約只有 receipt、owner 尚未確認時不回報完成', async (kind) => {
-    mocks.signing.mockResolvedValue(signing(false));
-    const onObserved = vi.fn();
-    render(kind === 'caregiver' ? <OrderCaregiverContractPanel caseNo={CASE} onObserved={onObserved} /> : <OrderClientContractPanel caseNo={CASE} onObserved={onObserved} />);
-    fireEvent.click(screen.getByRole('button', { name: kind === 'caregiver' ? '讀取月嫂契約狀態' : '讀取客戶契約狀態' }));
-    fireEvent.change(await screen.findByLabelText(kind === 'caregiver' ? '受控 HTTPS 文件下載網址' : '客戶契約受控 HTTPS 文件下載網址'), { target: { value: 'https://example.test/controlled.pdf' } });
-    fireEvent.click(screen.getByRole('button', { name: kind === 'caregiver' ? '建立月嫂契約寄送工作' : '建立客戶契約寄送工作' }));
-    await screen.findByText(kind === 'caregiver' ? '月嫂契約回讀尚未觀察到本次操作結果。' : '客戶契約回讀尚未觀察到本次操作結果。');
-    expect(onObserved).not.toHaveBeenCalled();
   });
 
   it('條款 callback 帶動父查詢更新至同一已觀察版本，不抹去完成證據', async () => {
