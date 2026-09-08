@@ -353,7 +353,9 @@ Rich Menu publication history 是唯讀、server-owned 的 numbered query；回�
   `uri | message | postback | richmenuswitch` 內修改各自允許欄位；LIFF URI 只接受 canonical target／runtime
   composition，literal URI、message text、postback data 與 alias 各自驗證長度、scheme／格式及互斥欄位。
   修改須建立新 draft revision 並走 zero-write Preview → 明確確認 → Apply → receipt/readback；processing／
-  published snapshot 唯讀，儲存草稿不得直接呼叫 provider。`configurations/{kind}/safe` 仍禁止輸出 URI／
+  published snapshot 唯讀；管理員可由其對應的 current configuration 內容建立下一個 draft revision，
+  不得因 current revision 已發布就卸載草稿 mutation controls。儲存草稿不得直接呼叫 provider。
+  `configurations/{kind}/safe` 仍禁止輸出 URI／
   action data；只有已認證 Rich Menu 管理工作台的專用 typed draft query 可取得編輯所需欄位。
 - 本機互動預覽固定保留。它以 current server draft snapshot 加上尚未 Apply 的 browser-memory edits，立即
   重繪手機選單並模擬點擊結果；不得寫 DB、建立 receipt／delivery task／publication intent 或呼叫 LINE
@@ -372,8 +374,9 @@ Rich Menu publication history 是唯讀、server-owned 的 numbered query；回�
 - `QueryRichMenuDraft` 與 committed readback 必須依 exact
   `(menu_definition_id, configuration_revision)` 投影 `editable | processing | published` 狀態及 closed
   業務原因。`publishing` 映射為 `processing`，同 revision 同 menu 若同時存在多筆則 `published`
-  優先；舊 revision 不得鎖住 current draft。管理 UI 對 `processing／published` 不掛載草稿 mutation
-  controls；缺 lock、revision／menu mismatch、未知狀態或缺業務原因固定 fail closed，不得讀歷程首筆、
+  優先；舊 revision 不得鎖住 current draft。管理 UI 對 `processing` 不掛載草稿 mutation controls；
+  `published` 只表示該 revision 的 publication snapshot 已固定，仍須掛載建立下一版草稿的 controls，
+  Apply 會建立新 revision 而不得覆寫該 snapshot。缺 lock、revision／menu mismatch、未知狀態或缺業務原因固定 fail closed，不得讀歷程首筆、
   固定首 N 筆或由前端 hardcode 猜測可編輯性。
 - 發布採 create／upload／link／switch／cleanup 的 saga，每一步保存 receipt。
 - retry 從已確認 provider receipt 繼續，不重複建立資產。

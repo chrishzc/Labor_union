@@ -715,7 +715,13 @@ def _translate_identity_errors(call, *arguments):
     try:
         return call(*arguments)
     except LineIdentityNotFoundError as error:
-        raise HTTPException(status_code=404, detail=str(error)) from error
+        raise typed_http_error(
+            404,
+            "not_found",
+            "line_identity_match_not_found",
+            str(error),
+            _correlation_id("identity-match-not-found").value,
+        ) from error
     except LineIdentityAuthenticationError as error:
         raise HTTPException(status_code=401, detail=str(error)) from error
     except LineIdentityConflictError as error:

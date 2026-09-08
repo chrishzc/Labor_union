@@ -174,8 +174,9 @@ receipt 與 authenticated download。不得另建 direct upload、公開 URL 或
 - 手機模擬器點擊每個熱區時，必須使用同一 draft revision 的真實 typed action；管理員可依 `17` §3.5
   修改 action kind 與該 kind 的 allowlisted target／內容。按鈕顯示名稱修改不得改變 action，action 修改也
   不得靠標籤推導；Preview、Apply 與 readback 必須讓編輯器、手機模擬及 server definition 顯示同一結果。
-- 管理端必須使用 server 依 exact menu／revision 投影的 `editable／processing／published` lock；後兩者
-  只顯示人可讀業務原因且不掛載草稿 mutation controls。缺 lock 或 owner projection 漂移時唯讀 fail
+- 管理端必須使用 server 依 exact menu／revision 投影的 `editable／processing／published` lock；
+  `processing` 只顯示人可讀業務原因且不掛載草稿 mutation controls，`published` 則允許以目前內容建立
+  下一個 draft revision，且不得覆寫既有 publication snapshot。缺 lock 或 owner projection 漂移時唯讀 fail
   closed，不得由發布歷程首筆、按鈕標籤或瀏覽器 hardcode 猜測。
 - Rich Menu 本機預覽不是待移除的 demo：它是正式編輯 UX 的零寫入互動層。編輯背景、標籤、action 或
   message text 後，手機畫面立即更新；點擊 message 只在模擬器顯示候選文字，點擊 URI／LIFF 只顯示該

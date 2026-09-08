@@ -34,6 +34,8 @@ class MySqlStaffQualificationMasterRepository:
 
             cursor.execute(_COOKING_SQL, (query.staff_id,))
             cooking_rows = tuple(cursor.fetchall() or ())
+            cursor.execute(_CERTIFICATIONS_SQL, (query.staff_id,))
+            certification_rows = tuple(cursor.fetchall() or ())
             service_regions = _load_relation(cursor, _REGIONS_SQL, query.staff_id, "region_name", "custom_region_detail")
             service_time_slots = _load_relation(cursor, _TIME_SLOTS_SQL, query.staff_id, "slot_name", "custom_slot_detail")
             transportation = _load_values(cursor, _TRANSPORTATION_SQL, query.staff_id, "vehicle_type")
@@ -58,6 +60,10 @@ class MySqlStaffQualificationMasterRepository:
                 for row in cooking_rows
             ),
             massage_certified=_optional_bool(staff_row.get("has_massage_cert")),
+            certifications=tuple(
+                _required_text(row, "certification_type", 191)
+                for row in certification_rows
+            ),
             care_babies=_optional_positive_int(staff_row.get("care_babies")),
             service_regions=service_regions,
             service_time_slots=service_time_slots,
@@ -233,6 +239,10 @@ _BABY_TYPES_SQL = (
 _COOKING_SQL = (
     "SELECT skill_name,custom_skill_detail FROM staff_cooking_skills "
     "WHERE staff_id=%s ORDER BY skill_name"
+)
+_CERTIFICATIONS_SQL = (
+    "SELECT certification_type FROM staff_certifications "
+    "WHERE staff_id=%s ORDER BY certification_type"
 )
 _UNAVAILABILITY_SQL = (
     "SELECT id,block_kind,start_date,end_date,created_at "

@@ -189,7 +189,7 @@ def _draft_error(exc: Exception) -> NoReturn:
 def _draft_publication_lock_view(lock) -> RichMenuDraftPublicationLockView:
     reasons = {
         "processing": "此版本正在發布處理中，為避免變更已送出的內容，目前只能查看。",
-        "published": "此版本已正式發布，為保留發布快照，目前只能查看；請建立新的草稿版本再調整。",
+        "published": "此版本已正式發布；可由目前內容建立下一個草稿版本，既有發布快照不會被覆寫。",
     }
     state = lock.state.value
     return RichMenuDraftPublicationLockView(

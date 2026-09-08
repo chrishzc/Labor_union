@@ -5,10 +5,6 @@ import {
   type ChangeEvent,
   type FC,
 } from 'react';
-// The terminal lane is rendered by both the Beta workbench and the current
-// Orders page.  Keep its existing business-first presentation rules available
-// wherever this shared surface is mounted.
-import '../pages/OrderWorkbenchV2Page.css';
 import {
   orderTerminalAggregateClient,
   type OrderTerminalAggregatePage,

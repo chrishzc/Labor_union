@@ -70,9 +70,10 @@ export const LineRichMenuDraftAppearanceEditor: React.FC<Props> = ({
   );
   const mediaMenuId = menu?.id;
   const publicationState = publicationLock?.state;
+  const canCreateNextDraft = publicationState === 'editable' || publicationState === 'published';
 
   useEffect(() => {
-    if (!mediaMenuId || publicationState !== 'editable') {
+    if (!mediaMenuId || !canCreateNextDraft) {
       setMediaAssets([]);
       setMediaState('idle');
       setMediaMessage(null);
@@ -96,7 +97,7 @@ export const LineRichMenuDraftAppearanceEditor: React.FC<Props> = ({
       current = false;
       controller.abort();
     };
-  }, [draft.revision, mediaClient, mediaMenuId, publicationState]);
+  }, [canCreateNextDraft, draft.revision, mediaClient, mediaMenuId]);
 
   const invalidatePreview = () => {
     setPreview(null);
@@ -195,7 +196,7 @@ export const LineRichMenuDraftAppearanceEditor: React.FC<Props> = ({
     return <div className="line-scope-note">目前沒有可編輯的 Rich Menu 草稿。</div>;
   }
 
-  const readonlyReason = publicationLock?.state === 'editable'
+  const readonlyReason = canCreateNextDraft
     ? null
     : publicationLock?.readonly_reason
       ?? '目前無法確認這個選單版本是否可編輯，已安全切換為唯讀。';

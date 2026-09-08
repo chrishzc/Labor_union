@@ -223,7 +223,7 @@ def test_identity_commands_resolve_to_exact_flow(message, purpose) -> None:
     assert purpose in deliveries.items[0].payload_json
 
 
-def test_staff_apply_creates_manual_review_without_binding_owner() -> None:
+def test_staff_apply_binds_exact_unclaimed_match_without_manual_review() -> None:
     flow = _active_staff_flow()
     identities = PendingIdentityRepository()
     staff = StaffOwnerRepository()
@@ -235,6 +235,8 @@ def test_staff_apply_creates_manual_review_without_binding_owner() -> None:
         staff=staff,
         reviews=reviews,
         delivery_tasks=deliveries,
+        audit=RecordingRepository(),
+        outbox=RecordingRepository(),
     )
     application = LineIdentityApplication(lambda: uow, lambda: NOW)
     proof = StaffIdentityProof("王月嫂", "A123456789", date(1980, 1, 2))
@@ -249,9 +251,12 @@ def test_staff_apply_creates_manual_review_without_binding_owner() -> None:
         CorrelationId("staff-application:1"),
     )
 
-    assert result.review_request_id == LineReviewRequestId(41)
-    assert staff.bind_calls == []
-    assert identities.saved_claims[0].subject_type is LineBindingSubjectType.STAFF
+    assert result.status.value == "bound"
+    assert result.review_request_id is None
+    assert staff.bind_calls == [("12", LineUserId("U-staff"), None)]
+    assert identities.bound_claims[0].subject_type is LineBindingSubjectType.STAFF
+    assert reviews.create_calls == []
+    assert len(uow.outbox.items) == 1
     assert uow.committed is True
     assert len(deliveries.items) == 1
 
@@ -401,13 +406,18 @@ class FlowRepository:
 class PendingIdentityRepository:
     def __init__(self) -> None:
         self.saved_claims = []
+        self.bound_claims = []
+        self.bound = None
 
     def get_by_subject(self, *_):
         return None
 
     def get(self, _, subject_type=None):
         assert subject_type in {None, LineBindingSubjectType.STAFF}
-        return None
+        return self.bound
+
+    def list_by_user(self, _):
+        return () if self.bound is None else (self.bound,)
 
     def save_claim(self, claim, _):
         self.saved_claims.append(claim)
@@ -418,6 +428,21 @@ class PendingIdentityRepository:
             claim.subject_type,
             claim.subject_reference,
         )
+
+    def bind(self, claim, expected_version, *_):
+        assert expected_version == ExpectedVersion(0)
+        self.bound_claims.append(claim)
+        self.bound = LineIdentityBindingSnapshot(
+            claim.line_user_id,
+            LineIdentityBindingStatus.BOUND,
+            ExpectedVersion(1),
+            claim.subject_type,
+            claim.subject_reference,
+        )
+        return self.bound
+
+    def reset_failure_streak(self, *_):
+        return None
 
 
 class StaffOwnerRepository:
@@ -437,7 +462,11 @@ class ConflictingStaffOwnerRepository(StaffOwnerRepository):
 
 
 class ReviewCreationRepository:
+    def __init__(self):
+        self.create_calls = []
+
     def create(self, command):
+        self.create_calls.append(command)
         snapshot = LineReviewSnapshot(
             LineReviewRequestId(41),
             command.review_type,

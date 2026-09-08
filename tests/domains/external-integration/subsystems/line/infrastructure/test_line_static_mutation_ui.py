@@ -40,6 +40,18 @@ def test_identity_ui_previews_every_binding_kind_before_apply() -> None:
     assert "套用 readback" not in submit
 
 
+def test_staff_identity_ui_reports_direct_binding_without_claiming_menu_delivery() -> None:
+    source = _source("identity.html")
+    submit = source.split("async function submitForm", 1)[1].split(
+        "async function applyIdentityPreview", 1
+    )[0]
+
+    assert "資料匹配後會立即完成綁定" in source
+    assert "找不到匹配資訊，請檢查輸入內容是否正確或聯繫工會人員" in submit
+    assert "我們已為您切換專屬圖文選單" not in submit
+    assert "專屬圖文選單將於系統處理完成後套用" in submit
+
+
 def test_mobile_review_ui_uses_preview_apply_and_safe_readback() -> None:
     source = _source("mobile_admin.html")
     decision = source.split("async function previewReviewDecision", 1)[1]

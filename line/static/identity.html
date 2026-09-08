@@ -49,8 +49,8 @@ const definitions = {
     fields: [["name", "姓名", "text"], ["phone", "行動電話", "tel"]]
   },
   staff_verification: {
-    title: "月嫂身分申請",
-    description: "資料核對後會送交工會人員確認，不會立即切換身分。",
+    title: "月嫂身分綁定",
+    description: "請輸入姓名、身分證字號與生日；資料匹配後會立即完成綁定。",
     endpoint: "staff",
     fields: [["name", "姓名", "text"], ["identity_card", "身分證字號", "text"], ["birthday", "生日", "date"]]
   },
@@ -255,6 +255,7 @@ async function submitForm(event, definition, button, previewBox, editButton) {
   showMessage("正在核對並綁定身分資料…");
   const values = Object.fromEntries(new FormData(event.target).entries());
   const payload = {flow_id: flowId, line_id_token: idToken, ...values};
+  const staffMismatchMessage = "找不到匹配資訊，請檢查輸入內容是否正確或聯繫工會人員";
   try {
     // 1. 建立背景預覽
     const previewRes = await fetch(`/api/v1/line/identity/${definition.endpoint}/preview`, {
@@ -262,7 +263,10 @@ async function submitForm(event, definition, button, previewBox, editButton) {
     });
     const previewResult = await previewRes.json();
     if (!previewRes.ok || !previewResult.data) {
-      throw new Error(safeIdentityErrorMessage(previewResult, "找不到相符的身分資料，請確認輸入是否正確。"));
+      throw new Error(safeIdentityErrorMessage(
+        previewResult,
+        definition.endpoint === "staff" ? staffMismatchMessage : "找不到相符的身分資料，請確認輸入是否正確。"
+      ));
     }
     const preview = requireIdentityPreview(previewResult);
 
@@ -278,7 +282,10 @@ async function submitForm(event, definition, button, previewBox, editButton) {
     });
     const applyResult = await applyRes.json();
     if (!applyRes.ok || !applyResult.data) {
-      throw new Error(safeIdentityErrorMessage(applyResult, "身分套用失敗，請稍後再試。"));
+      throw new Error(safeIdentityErrorMessage(
+        applyResult,
+        definition.endpoint === "staff" ? staffMismatchMessage : "身分套用失敗，請稍後再試。"
+      ));
     }
 
     const pending = applyResult.data.status === "pending_review";
@@ -290,7 +297,9 @@ async function submitForm(event, definition, button, previewBox, editButton) {
     );
     previewBox.textContent = [
       `處理結果：${pending ? "等待工會人員確認" : "LINE 身分已成功綁定"}${reviewReference}`,
-      "我們已為您切換專屬圖文選單，請關閉此頁面返回 LINE 聊天室即可開始使用！"
+      pending
+        ? "工會人員確認完成後，系統才會套用月嫂專屬圖文選單。"
+        : "專屬圖文選單將於系統處理完成後套用；請稍後返回 LINE 聊天室查看。"
     ].join("\n");
     previewBox.hidden = false;
     button.disabled = true;

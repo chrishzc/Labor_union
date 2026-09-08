@@ -7,3 +7,5 @@ integration_root: ui_react/src/tests/domains/staff/subsystems/staff/integration/
 
 ## Modules
 - case-preference-manual: tests/domains/staff/subsystems/staff/modules/case-preference-manual/
+- staff-roster-profile: tests/domains/staff/subsystems/staff/modules/staff-roster-profile/
+- staff-qualification-master: tests/test_staff_qualification_master.py

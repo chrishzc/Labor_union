@@ -169,7 +169,9 @@ export const LineRichMenuDraftActionEditor: React.FC<Props> = ({
     (item) => item.menu_definition_id === menu.id
       && item.configuration_revision === draft.revision,
   );
-  const readonlyReason = publicationLock?.state === 'editable'
+  const canCreateNextDraft = publicationLock?.state === 'editable'
+    || publicationLock?.state === 'published';
+  const readonlyReason = canCreateNextDraft
     ? null
     : publicationLock?.readonly_reason
       ?? '目前無法確認這個選單版本是否可編輯，已安全切換為唯讀。';

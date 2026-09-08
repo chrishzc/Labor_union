@@ -16,6 +16,28 @@ afterEach(() => {
 });
 
 describe('Rich Menu publication actions', () => {
+  it('上方準備發布按鈕先取得預覽，不會因非同步確認狀態而無動作', async () => {
+    sessionClient.setSession('root-session', {
+      id: 7, username: 'root-session-test', display_name: '根管理員測試',
+      role: 'system_admin', capabilities: ['line.menu.publish'], is_root: true,
+      access_control_version: 1,
+    });
+    const preview = vi.fn().mockResolvedValue({
+      preview_id: 40, config_revision: '7', config_fingerprint: FINGERPRINT,
+    });
+    const publish = vi.fn();
+    render(<LineRichMenuPublicationActions
+      selectedMenu={{ id: 'union_staff_menu', name: '工會人員專屬選單' }}
+      client={{ preview, publish, retry: vi.fn() }}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: /準備發布至 LINE/ }));
+    await screen.findByText(/發布影響已確認/);
+    expect(preview).toHaveBeenCalledTimes(1);
+    expect(publish).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: /確認排入異步發布/ })).toBeDisabled();
+  });
+
   it('先顯示去敏 Preview，經原因與人工確認後只建立 durable queue receipt', async () => {
     sessionClient.setSession('root-session', {
       id: 7,

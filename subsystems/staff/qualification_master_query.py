@@ -51,6 +51,7 @@ class StaffQualificationSourceRecord:
     special_skills: tuple[str, ...]
     cooking_skills: tuple[tuple[str, str | None], ...]
     massage_certified: bool | None
+    certifications: tuple[str, ...]
     care_babies: int | None
     service_regions: tuple[tuple[str, str | None], ...]
     service_time_slots: tuple[tuple[str, str | None], ...]
@@ -311,26 +312,43 @@ def _cooking_section(source: StaffQualificationSourceRecord) -> QualificationSec
 
 
 def _certifications_section(source: StaffQualificationSourceRecord) -> QualificationSection:
-    availability = "available" if source.massage_certified is not None else "partial"
-    reason = "legacy_massage_certificate_ready" if source.massage_certified is not None else "legacy_certificate_value_missing"
-    item = QualificationFact(
-        code="massage_certificate",
-        value=source.massage_certified,
-        source_identity=f"staff:{source.staff_id}:has_massage_cert",
-        source_version=source.staff_source_version,
-        valid_from=None,
-        valid_until=None,
-        availability=availability,
-        availability_reason=reason,
+    items = tuple(
+        QualificationFact(
+            code=f"certification_{index}",
+            value=certification,
+            source_identity=f"staff_certifications:{source.staff_id}:{index}",
+            source_version=None,
+            valid_from=None,
+            valid_until=None,
+            availability="available",
+            availability_reason="staff_certification_record",
+        )
+        for index, certification in enumerate(source.certifications, start=1)
     )
+    if source.massage_certified is not None:
+        items = (
+            QualificationFact(
+                code="massage_certificate",
+                value=source.massage_certified,
+                source_identity=f"staff:{source.staff_id}:has_massage_cert",
+                source_version=source.staff_source_version,
+                valid_from=None,
+                valid_until=None,
+                availability="available",
+                availability_reason="legacy_massage_certificate_ready",
+            ),
+            *items,
+        )
+    availability = "available" if items else "unavailable"
+    reason = "staff_certifications_ready" if items else "staff_certifications_empty"
     return QualificationSection(
         kind="certifications",
-        owner="staff_master_legacy_certification",
+        owner="staff_certifications",
         availability=availability,
         availability_reason=reason,
-        source_identity=f"staff:{source.staff_id}:has_massage_cert",
+        source_identity=f"staff_certifications:{source.staff_id}",
         source_version=source.staff_source_version,
-        items=(item,),
+        items=items,
     )
 
 

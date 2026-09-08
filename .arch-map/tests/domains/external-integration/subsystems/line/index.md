@@ -13,6 +13,7 @@ Delivery-task query presentation is routed by `modules/delivery-task-presentatio
 Task96 notification baseline producer tests are routed by `modules/notification-baseline-bootstrap.md`.
 M2 feedback owner tests are routed by `modules/feedback.md`.
 M3 committed matching-intent delivery projection tests are routed by `modules/matching-coordination-delivery.md`.
+Rich Menu draft editing and publication preparation tests are routed by `modules/rich-menu-management.md`.
 LINE 管理頁跨客服、選單、身分與通知的唯讀／零假 mutation 契約位於 UI integration root。
 
 # Deferred / higher-boundary

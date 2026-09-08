@@ -1,6 +1,6 @@
 /**
  * File: line_rich_menu_query_flow.test.tsx
- * Description: 驗證 Rich Menu 設定與發布紀錄來自 query client，且未授權 provider action 不進入畫面。
+ * Description: 驗證 Rich Menu 設定與發布紀錄來自 query client，並依 publication state 掛載合法 controls。
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -33,8 +33,8 @@ function dependencies(): {
 
 afterEach(() => vi.restoreAllMocks());
 
-describe('LINE Rich Menu query-only 接線', () => {
-  it('顯示真實 menu label 與 publication，且不暴露 provider action', async () => {
+describe('LINE Rich Menu query 接線', () => {
+  it('顯示真實 menu label 與 publication，published 內容可建立下一版草稿', async () => {
     const fetchSpy = vi.fn().mockRejectedValue(new Error('unexpected network'));
     vi.stubGlobal('fetch', fetchSpy);
     const { customer, identity, configuration, richMenuDraft } = dependencies();
@@ -46,9 +46,10 @@ describe('LINE Rich Menu query-only 接線', () => {
     expect(screen.getByText('已發布')).toBeInTheDocument();
     expect(screen.getAllByText('POSTBACK').length).toBeGreaterThan(0);
     expect(screen.getAllByText('case_progress').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('此版本已正式發布，為保留發布快照，目前只能查看；請建立新的草稿版本再調整。').length).toBeGreaterThan(0);
     expect(screen.queryByText(/https?:\/\//)).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /檢查發布影響|發布至 LINE|上傳圖片|刪除選單|預覽草稿變更|套用並回讀/ })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('選單名稱')).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: '預覽草稿變更' })).toHaveLength(2);
+    expect(screen.queryByRole('button', { name: /準備發布至 LINE|確認排入異步發布/ })).not.toBeInTheDocument();
     expect(richMenuDraft.query).toHaveBeenCalledTimes(1);
     expect(configuration.getRichMenuConfiguration).not.toHaveBeenCalled();
     expect(configuration.listRichMenuPublications).toHaveBeenCalledTimes(1);
@@ -62,7 +63,6 @@ describe('LINE Rich Menu query-only 接線', () => {
     expect(screen.queryByText(/發布工作 ID|設定版本|紀錄 ID|伺服器狀態/)).not.toBeInTheDocument();
     expect(richMenuDraft.preview).not.toHaveBeenCalled();
     expect(richMenuDraft.apply).not.toHaveBeenCalled();
-    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it('processing exact lock 不掛載草稿或 provider mutation controls', async () => {

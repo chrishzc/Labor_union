@@ -404,10 +404,6 @@ button.order-v2-lane {
 }
 
 .order-v2-settlement-summary { display: grid; gap: 6px; padding: 12px 14px; margin: 0 16px 12px; border-radius: 8px; background: #f0f7f4; color: #315c47; font-size: 13px; }
-.order-v2-financial-queries { margin-top: 24px; color: var(--text-secondary, #64748b); }
-.order-v2-financial-queries > summary { cursor: pointer; font-weight: 600; }
-.order-v2-financial-queries > p { font-size: 13px; }
-
 .order-v2-page .tracker-reload-button { flex-shrink: 0; white-space: nowrap; }
 
 .order-v2-page > .orders-page-header > div:first-child { flex: 1 1 360px; min-width: 0; }

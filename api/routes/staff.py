@@ -14,10 +14,12 @@ from api.dependencies.staff_case_preference_summary import (
     get_staff_case_preference_summary_application,
 )
 from api.dependencies.staff_summary import get_staff_summary_application
+from api.dependencies.staff_profile import get_staff_profile_application
 from api.error_contracts import internal_query_error, typed_http_error
 from api.schemas.base import BaseResponse
 from api.schemas.staff_case_preference_summary import StaffCasePreferenceSummaryView
 from api.schemas.staff_summary import StaffSummaryPageView, StaffSummaryView
+from api.schemas.staff_profile import StaffProfileView
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.staff.case_preference_summary_query import (
     StaffCasePreferenceSummaryContractError,
@@ -28,8 +30,54 @@ from subsystems.staff.summary_query import (
     StaffSummaryQueryApplication,
     StaffSummaryQueryRequest,
 )
+from subsystems.staff.profile_query import (
+    StaffProfileContractError,
+    StaffProfileNotFound,
+    StaffProfileQueryApplication,
+)
 
 router = APIRouter(prefix="/api/v1/staff", tags=["Staff 服務人員/月嫂名冊"])
+
+
+@router.get("/{staff_id}/profile", response_model=BaseResponse[StaffProfileView])
+def get_staff_profile(
+    staff_id: int = Path(..., ge=1),
+    correlation_id: Annotated[
+        str | None,
+        Header(alias="X-Correlation-ID", min_length=1, max_length=191),
+    ] = None,
+    principal: AdminPrincipal = Depends(require_admin),
+    application: StaffProfileQueryApplication = Depends(get_staff_profile_application),
+) -> BaseResponse[StaffProfileView]:
+    """Return selected Staff personal facts through a bounded admin projection."""
+    del principal
+    correlation = correlation_id or uuid4().hex
+    try:
+        profile = application.query(staff_id)
+    except StaffProfileNotFound as error:
+        raise typed_http_error(
+            404,
+            "not_found",
+            "staff_profile_not_found",
+            "查無服務人員個人資料。",
+            correlation,
+        ) from error
+    except (OperationalError, ProgrammingError) as error:
+        raise internal_query_error(
+            "staff_profile_query_internal_error",
+            "服務人員個人資料查詢失敗。",
+            correlation,
+        ) from error
+    except StaffProfileContractError as error:
+        raise internal_query_error(
+            "staff_profile_projection_invalid",
+            "服務人員個人資料投影契約無效。",
+            correlation,
+        ) from error
+    return BaseResponse(
+        data=StaffProfileView.model_validate(profile, from_attributes=True),
+        message="成功取得服務人員個人資料",
+    )
 
 
 @router.get("/summaries", response_model=BaseResponse[StaffSummaryPageView])

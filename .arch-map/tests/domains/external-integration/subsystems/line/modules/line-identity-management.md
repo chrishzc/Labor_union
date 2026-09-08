@@ -8,6 +8,7 @@ test_root: tests/domains/external-integration/subsystems/line/modules/line-ident
 - `contract/test_role_scoped_application.py` — shared customer/staff readback, one selected-role state and idempotent role selection.
 - `contract/test_role_scoped_repository.py` — dual-role selection fail-closed, admin exclusivity and revoked-role rejection.
 - `contract/test_binding_failure_streak.py` — one bounded streak and exactly one second-failure Customer Service escalation.
+- `contract/test_line_identity_api_routes.py` — authenticated exact-match API binding and typed not-found response.
 - `regression/test_same_type_replacement.py` — same-type replacement against the shared role-scoped root/event stream.
 - `contract/test_terminal_closure_restore.py` — Orders closure handoff, fresh owner/binding/menu gates, dual-role no-op, replay and typed stale/revocation failures.
 

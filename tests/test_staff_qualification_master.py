@@ -40,6 +40,7 @@ def _source(*, blocks=(), availability_ready=True):
         special_skills=("新生兒照護",),
         cooking_skills=(("葷食", "低油"),),
         massage_certified=True,
+        certifications=("托育人員證照",),
         care_babies=2,
         service_regions=(("北區", None), ("其他", "新竹市")),
         service_time_slots=(("8小時", None),),
@@ -112,6 +113,10 @@ def test_staff_qualification_master_projects_all_owned_sections_and_redacts_pii(
     assert payload["sections"][3]["availability_reason"] == "staff_medical_registry_not_provided"
     assert payload["sections"][4]["availability_reason"] == "qualification_validity_registry_not_provided"
     assert payload["sections"][5]["items"][0]["valid_until"] == "2026-08-30"
+    assert [item["value"] for item in payload["sections"][2]["items"]] == [
+        True,
+        "托育人員證照",
+    ]
     assert payload["service_profile"]["care_babies"] == 2
     assert payload["service_profile"]["service_regions"][1] == {"value": "其他", "detail": "新竹市"}
     assert payload["service_profile"]["baby_types"][1]["value"] == "雙胞胎"
@@ -174,10 +179,11 @@ def test_staff_qualification_master_requires_admin_before_application():
 
 
 class _Cursor:
-    def __init__(self, staff_row, cooking_rows, unavailability_rows):
+    def __init__(self, staff_row, cooking_rows, unavailability_rows, certification_rows=()):
         self._staff_row = staff_row
         self._cooking_rows = cooking_rows
         self._unavailability_rows = unavailability_rows
+        self._certification_rows = certification_rows
         self.executed = []
         self._fetchone_used = False
         self._fetchall_count = 0
@@ -201,6 +207,8 @@ class _Cursor:
         self._fetchall_count += 1
         if "staff_cooking_skills" in self._last_sql:
             return self._cooking_rows
+        if "staff_certifications" in self._last_sql:
+            return self._certification_rows
         if "scheduling_staff_unavailability_blocks" in self._last_sql:
             return self._unavailability_rows
         return []
@@ -231,6 +239,7 @@ def test_staff_qualification_repository_uses_bounded_selects_without_commit():
         },
         [{"skill_name": "葷食", "custom_skill_detail": None}],
         [],
+        [{"certification_type": "托育人員證照"}],
     )
     connection = _Connection(cursor)
     source = MySqlStaffQualificationMasterRepository(connection).fetch(
@@ -240,10 +249,11 @@ def test_staff_qualification_repository_uses_bounded_selects_without_commit():
     assert source.staff_id == 7
     assert source.special_skills == ("新生兒照護",)
     assert source.cooking_skills == (("葷食", None),)
+    assert source.certifications == ("托育人員證照",)
     assert source.unavailability_blocks == ()
     assert source.care_babies == 2
     assert source.service_regions == ()
-    assert len(cursor.executed) == 9
+    assert len(cursor.executed) == 10
     assert all(re.search(r"\b(?:INSERT|UPDATE|DELETE)\b", sql, re.IGNORECASE) is None for sql, _ in cursor.executed)
     assert connection.commit_called is False
 

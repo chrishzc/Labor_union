@@ -38,6 +38,7 @@ import type {
   StaffLifecyclePreview,
 } from '../api/staff_lifecycle/staff_lifecycle_schemas';
 import { staffQualificationMasterClient } from '../api/staff/qualification_master_client';
+import { staffProfileClient } from '../api/staff_profile/staff_profile_client';
 import { StaffQualificationMasterError } from '../api/staff/qualification_master_errors';
 import {
   adaptStaffDirectoryPage,
@@ -59,6 +60,10 @@ import {
   adaptStaffQualificationMaster,
   type StaffQualificationMasterViewModel,
 } from '../adapters/staff/qualification_master_adapter';
+import {
+  adaptStaffProfile,
+  type StaffProfileViewModel,
+} from '../adapters/staff/staff_profile_adapter';
 
 type StaffTab = 'roster' | 'preferences' | 'unavailability';
 type DirectoryState =
@@ -308,6 +313,7 @@ function qualificationFactLabel(
   if (kind === 'skills') return '專長';
   if (kind === 'cooking') return '料理類型';
   if (kind === 'certifications' && code === 'massage_certificate') return '寶寶按摩證照';
+  if (kind === 'certifications') return '資格證明';
   if (kind === 'unavailability') return '不可服務類型';
   return '資格資料';
 }
@@ -372,6 +378,7 @@ export const StaffPage: React.FC = () => {
   const [availabilityAction, setAvailabilityAction] = useState<ActionState<StaffAvailabilityPreview, StaffAvailabilityReceipt, StaffAvailabilityApplyPayload>>(initialActionState);
   const [lifecycle, setLifecycle] = useState<QueryState<StaffLifecycleViewModel>>({ status: 'idle' });
   const [qualification, setQualification] = useState<QueryState<StaffQualificationMasterViewModel>>({ status: 'idle' });
+  const [profile, setProfile] = useState<QueryState<StaffProfileViewModel>>({ status: 'idle' });
   const [casePreferenceSummary, setCasePreferenceSummary] = useState<QueryState<StaffCasePreferenceSummaryViewModel>>({ status: 'idle' });
   const [lifecycleEffectiveAt, setLifecycleEffectiveAt] = useState('');
   const [lifecycleReasonCode, setLifecycleReasonCode] = useState('');
@@ -526,6 +533,7 @@ export const StaffPage: React.FC = () => {
     setEndPauseReason('');
     setLifecycle({ status: 'idle' });
     setQualification({ status: 'idle' });
+    setProfile({ status: 'idle' });
     setCasePreferenceSummary({ status: 'idle' });
     setLifecycleAction({ ...initialActionState(), action: null });
     if (selectedStaffId === null) return;
@@ -533,6 +541,15 @@ export const StaffPage: React.FC = () => {
     const currentStaffId = selectedStaffId;
 
     if (activeTab === 'roster') {
+      setProfile({ status: 'loading' });
+      void staffProfileClient.query(currentStaffId, { signal: controller.signal }).then((value) => {
+        if (isCurrentSlice(generation, controller.signal)) {
+          setProfile({ status: 'ready', data: adaptStaffProfile(value) });
+        }
+      }).catch((error: unknown) => {
+        if (!isCurrentSlice(generation, controller.signal)) return;
+        setProfile({ status: 'error', message: errorMessage(error, '個人與聯絡資料載入失敗。') });
+      });
       setCasePreferenceSummary({ status: 'loading' });
       void staffCasePreferenceSummaryClient.query(currentStaffId, { signal: controller.signal }).then((summary) => {
         if (isCurrentSlice(generation, controller.signal)) {
@@ -1318,6 +1335,38 @@ export const StaffPage: React.FC = () => {
                     )}
                   </div>
                 </div>
+
+                <h3 style={{ margin: '0 0 10px', fontSize: '1.05rem', color: '#7c2d12', fontWeight: 700 }}>
+                  👤 個人與聯絡資料
+                </h3>
+                {profile.status === 'loading' && <p role="status">正在載入個人與聯絡資料…</p>}
+                {profile.status === 'error' && (
+                  <div role="alert">
+                    <p>{profile.message}</p>
+                    <button type="button" className="staff-next-btn" onClick={() => setSliceRetryGeneration((value) => value + 1)}>重試個人資料</button>
+                  </div>
+                )}
+                {profile.status === 'ready' && (
+                  <div className="staff-qual-grid" style={{ marginBottom: '18px' }} data-surface-id="staff.profile-detail" data-testid="staff-profile-detail">
+                    {[
+                      ['身分證', profile.data.identityCardLabel],
+                      ['生日', profile.data.birthdayLabel],
+                      ['行動電話', profile.data.phoneLabel],
+                      ['市話', profile.data.telephoneLabel],
+                      ['Email', profile.data.emailLabel],
+                      ['居住地址', profile.data.addressLabel],
+                      ['學歷', profile.data.educationLabel],
+                      ['緊急聯絡人', profile.data.emergencyContactLabel],
+                      ['報名日期', profile.data.registeredAtLabel],
+                      ['內部行政註記', profile.data.adminNotesLabel],
+                    ].map(([label, value]) => (
+                      <div key={label} className="staff-qual-card" role="group" aria-label={label}>
+                        <h4>{label}</h4>
+                        <p style={{ margin: 0 }}>{value}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
 
                 {qualification.status === 'ready' && (
                   <>

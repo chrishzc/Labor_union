@@ -63,6 +63,21 @@ describe('FinancePage query and guarded import presentation', () => {
     expect(document.querySelector('[data-control-id="finance.finance-import.apply"]')).toBeNull();
   });
 
+  it('places cross-order accounting queries in Finance instead of the order workbench', async () => {
+    const orderWorkbenchSource = readFileSync('src/pages/OrderWorkbenchV2Page.tsx', 'utf8');
+    expect(orderWorkbenchSource).not.toContain('跨訂單帳務查詢');
+    expect(orderWorkbenchSource).not.toContain('OrderGovernmentSubsidyLane');
+    expect(orderWorkbenchSource).not.toContain('OrderTerminalAggregateLane');
+
+    render(<FinancePage />);
+    await waitFor(() => expect(screen.getByText('OBL-C-1')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: '跨訂單帳務' }));
+
+    expect(screen.getByRole('heading', { name: '跨訂單帳務查詢' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /政府補助結算支線/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /完全結案彙總/ })).toBeInTheDocument();
+  });
+
   it('searches all server pages so a new case can be selected for receipt review', async () => {
     render(<FinancePage />);
     await waitFor(() => expect(screen.getByText('OBL-C-1')).toBeInTheDocument());

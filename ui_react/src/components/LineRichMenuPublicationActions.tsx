@@ -244,10 +244,7 @@ export const LineRichMenuPublicationActions: React.FC<LineRichMenuPublicationAct
               type="button"
               className="line-primary-btn"
               disabled={busy || Boolean(publicationAccess)}
-              onClick={() => {
-                setPublishConfirmed(true);
-                void queuePublication();
-              }}
+              onClick={() => void runPreview()}
               style={{
                 padding: '8px 20px',
                 fontSize: '0.9rem',
@@ -259,7 +256,7 @@ export const LineRichMenuPublicationActions: React.FC<LineRichMenuPublicationAct
                 cursor: busy ? 'not-allowed' : 'pointer',
               }}
             >
-              {publishState === 'loading' ? '正在發布至 LINE…' : '🚀 發布至 LINE'}
+              {previewState === 'loading' ? '正在檢查發布影響…' : '🚀 準備發布至 LINE'}
             </button>
             <button
               type="button"

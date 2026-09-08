@@ -329,7 +329,7 @@ class LineIdentityApplication:
                 preview,
             )
 
-    # Kept cohesive so the one-use flow and manual-review claim cannot diverge.
+    # Kept cohesive so the one-use flow and direct staff binding cannot diverge.
     def apply_staff(
         self,
         flow_id,
@@ -350,7 +350,9 @@ class LineIdentityApplication:
                 )
                 candidate = unit_of_work.staff.resolve_staff(proof)
                 if candidate is None:
-                    raise LineIdentityNotFoundError("找不到相符的月嫂資料")
+                    raise LineIdentityNotFoundError(
+                        "找不到匹配資訊，請檢查輸入內容是否正確或聯繫工會人員"
+                    )
                 preview = _with_identity_preview_fingerprint(
                     "staff",
                     flow_id,
@@ -735,8 +737,12 @@ def _staff_preview(unit_of_work, line_user_id, candidate):
         status = LineIdentityPreviewStatus.NOT_FOUND
     elif candidate.currently_bound_line_user_id == line_user_id:
         status = LineIdentityPreviewStatus.ALREADY_BOUND
-    else:
+    elif candidate.currently_bound_line_user_id is not None:
         status = LineIdentityPreviewStatus.REQUIRES_REVIEW
+    elif binding and binding.status is LineIdentityBindingStatus.BOUND:
+        status = LineIdentityPreviewStatus.REQUIRES_REVIEW
+    else:
+        status = LineIdentityPreviewStatus.MATCHED
     return LineIdentityPreview(
         status,
         line_user_id,
@@ -749,20 +755,29 @@ def _staff_preview(unit_of_work, line_user_id, candidate):
 def _apply_staff_candidate(unit_of_work, flow_id, preview, proof, correlation_id):
     candidate = preview.candidate
     if candidate is None:
-        raise LineIdentityNotFoundError("找不到相符的月嫂資料")
+        raise LineIdentityNotFoundError(
+            "找不到匹配資訊，請檢查輸入內容是否正確或聯繫工會人員"
+        )
     if preview.status is LineIdentityPreviewStatus.ALREADY_BOUND:
         return _bind_result(unit_of_work, preview.line_user_id, candidate, correlation_id)
-    result = _create_review(
-        unit_of_work,
-        flow_id,
+    if preview.status is LineIdentityPreviewStatus.REQUIRES_REVIEW:
+        result = _create_review(
+            unit_of_work,
+            flow_id,
+            preview.line_user_id,
+            candidate,
+            LineReviewType.STAFF_VERIFICATION,
+            _staff_proof_fingerprint(proof).value,
+            correlation_id,
+        )
+        _save_pending_claim_if_available(unit_of_work, preview.line_user_id, candidate)
+        return result
+    unit_of_work.staff.bind_staff(
+        candidate.subject_reference,
         preview.line_user_id,
-        candidate,
-        LineReviewType.STAFF_VERIFICATION,
-        _staff_proof_fingerprint(proof).value,
-        correlation_id,
+        candidate.currently_bound_line_user_id,
     )
-    _save_pending_claim_if_available(unit_of_work, preview.line_user_id, candidate)
-    return result
+    return _bind_result(unit_of_work, preview.line_user_id, candidate, correlation_id)
 
 
 def _require_flow(unit_of_work, flow_id, purpose, line_user_id, now):

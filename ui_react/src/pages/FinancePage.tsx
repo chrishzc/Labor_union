@@ -4,6 +4,7 @@
  */
 import React, { useEffect, useRef, useState } from 'react';
 import './FinancePage.css';
+import './OrderWorkbenchV2Page.css';
 import { loadAllOrderSummaries, ordersQueryClient } from '../api/orders/order_query_client';
 import { adaptOrderSummaryPage } from '../adapters/orders/order_summary_adapter';
 import { loadAllStaffDirectoryPages, staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
@@ -19,9 +20,11 @@ import { FinanceWorkbookSnapshot, financeImportMutationClient, type FinanceImpor
 import { financeImportQueryClient } from '../api/finance_import/finance_import_query_client';
 import { HistoricalClientPaymentWorkbench } from '../components/HistoricalClientPaymentWorkbench';
 import { HistoricalStaffPayoutWorkbench } from '../components/HistoricalStaffPayoutWorkbench';
+import { OrderGovernmentSubsidyLane } from '../components/OrderGovernmentSubsidyLane';
+import { OrderTerminalAggregateLane } from '../components/OrderTerminalAggregateLane';
 import { PaymentDestinationConfigurationPanel } from '../components/PaymentDestinationConfigurationPanel';
 
-type FinanceTab = 'client-receipts' | 'staff-payables' | 'accounts-payable' | 'finance-import' | 'payment-destination';
+type FinanceTab = 'client-receipts' | 'staff-payables' | 'accounts-payable' | 'cross-order' | 'finance-import' | 'payment-destination';
 type LoadState<T> = { kind: 'idle' | 'loading' } | { kind: 'ready'; data: T } | { kind: 'empty' } | { kind: 'error'; message: string } | { kind: 'unavailable'; message: string };
 type FinanceImportReviewSnapshot = {
   batchIdentity: string;
@@ -305,7 +308,7 @@ export const FinancePage: React.FC = () => {
       <header className="page-header-banner finance-page-header">
         <div>
           <h1 className="page-title">💰 財務查詢與對帳工作台</h1>
-          <p className="page-subtitle">客戶收款、月嫂應付款、遮罩後的應付帳款與三步銀行流水匯入。</p>
+          <p className="page-subtitle">客戶收款、月嫂應付款、跨訂單帳務、遮罩後的應付帳款與三步銀行流水匯入。</p>
         </div>
         <div className="finance-header-actions">
           <span className="finance-status-pill">
@@ -319,6 +322,7 @@ export const FinancePage: React.FC = () => {
           ['client-receipts', '客戶收款'],
           ['staff-payables', '月嫂應付款'],
           ['accounts-payable', '應付帳款'],
+          ['cross-order', '跨訂單帳務'],
           ['finance-import', '銀行流水匯入'],
           ['payment-destination', '契約收款帳戶'],
         ] as const).map(([id, label]) => (
@@ -334,8 +338,12 @@ export const FinancePage: React.FC = () => {
       </nav>
 
       <div className="finance-toolbar">
-        <span>{activeTab === 'finance-import' ? '上傳檔案 → 預覽 → 匯入完成' : '查詢結果以目前選取頁籤為準'}</span>
-        {activeTab !== 'finance-import' && (
+        <span>{activeTab === 'finance-import'
+          ? '上傳檔案 → 預覽 → 匯入完成'
+          : activeTab === 'cross-order'
+            ? '選擇帳務查詢後載入跨訂單結果'
+            : '查詢結果以目前選取頁籤為準'}</span>
+        {activeTab !== 'finance-import' && activeTab !== 'cross-order' && (
           <button className="finance-reload-btn" onClick={() => setReload((value) => value + 1)}>
             重新載入
           </button>
@@ -455,6 +463,21 @@ export const FinancePage: React.FC = () => {
         </section>
       )}
       {activeTab === 'payment-destination' && <PaymentDestinationConfigurationPanel reload={reload} />}
+
+      {activeTab === 'cross-order' && (
+        <section className="finance-workspace" aria-labelledby="cross-order-finance-heading">
+          <div className="finance-section-heading">
+            <div>
+              <h2 id="cross-order-finance-heading">跨訂單帳務查詢</h2>
+              <p>查詢政府補助結算與完全結案狀態；結果涵蓋各類訂單。</p>
+            </div>
+          </div>
+          <div className="order-v2-side-lanes">
+            <OrderGovernmentSubsidyLane />
+            <OrderTerminalAggregateLane />
+          </div>
+        </section>
+      )}
 
       {activeTab === 'staff-payables' && (
         <section className="finance-workspace">

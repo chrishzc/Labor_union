@@ -1,27 +1,9 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  CORE_STAGE_CODES,
-  SUBSTATUS_BY_STAGE_STATUS,
-  type CoreStageCode,
-} from '../../../../../../../api/orders/order_core_stage_projection_schemas';
-import { OrderWorkbenchV2Page } from '../../../../../../../pages/OrderWorkbenchV2Page';
+import { OrderGovernmentSubsidyLane } from '../../../../../../../components/OrderGovernmentSubsidyLane';
 
 const mocks = vi.hoisted(() => ({
-  getCoreStageTimelines: vi.fn(),
-  loadSummaries: vi.fn(),
   getSubsidyProjections: vi.fn(),
-}));
-
-vi.mock('../../../../../../../api/orders/order_core_stage_projection_client', () => ({
-  orderCoreStageProjectionClient: {
-    getCoreStageTimelines: mocks.getCoreStageTimelines,
-  },
-}));
-
-vi.mock('../../../../../../../api/orders/order_query_client', () => ({
-  loadAllOrderSummaries: mocks.loadSummaries,
-  ordersQueryClient: { getOrderSummaries: vi.fn() },
 }));
 
 vi.mock('../../../../../../../api/orders/order_government_subsidy_projection_client', () => ({
@@ -43,59 +25,6 @@ vi.mock('../../../../../../../api/orders/order_government_subsidy_projection_cli
     getProjections: mocks.getSubsidyProjections,
   },
 }));
-
-function stage(code: CoreStageCode) {
-  const status: 'in_progress' | 'completed' = code === 'intake_validation' ? 'in_progress' : 'completed';
-  return {
-    ordinal: CORE_STAGE_CODES.indexOf(code) + 1,
-    code,
-    label: code,
-    owner: `owner-${code}`,
-    status,
-    substatus_code: SUBSTATUS_BY_STAGE_STATUS[code][status],
-    source: { owner: `owner-${code}`, identity: `${code}:CASE-CORE`, version: 1 },
-    occurred_at: null,
-    blockers: [],
-    warnings: [],
-    available_read_actions: [],
-    availability_reason: null,
-  };
-}
-
-function corePage() {
-  const counts = Object.fromEntries(CORE_STAGE_CODES.map((code) => [code, 0]));
-  counts.intake_validation = 1;
-  return {
-    items: [{
-      case_no: 'CASE-CORE',
-      base_revision: 1,
-      lifecycle_status: '服務中',
-      branch_type: 'normal',
-      current_core_stage_code: 'intake_validation',
-      current_core_stage_ordinal: 1,
-      historical_current_owner_stage_code: null,
-      historical_current_owner_stage_ordinal: null,
-      core_stages: CORE_STAGE_CODES.map(stage),
-      source_projection_digest: 'a'.repeat(64),
-    }],
-    stage_counts: counts,
-    substatus_counts: {
-      intake_pending: 0,
-      intake_in_progress: 1,
-      intake_blocked: 0,
-      data_complete: 0,
-      intake_unavailable: 0,
-    },
-    historical_lifecycle_counts: {
-      unserved: 0,
-      in_service: 0,
-      service_completed: 0,
-      accounting_completed: 0,
-    },
-    next_cursor: null,
-    etag: 'b'.repeat(64),
-  };
-}
 
 function counts(overrides: Record<string, number> = {}) {
   return {
@@ -155,13 +84,9 @@ function subsidyItem(caseNo: string, substatus: 'claim_lineage_missing' | 'submi
   };
 }
 
-describe('待辦看板 Beta Government Subsidy side lane', () => {
+describe('財務中心 Government Subsidy cross-order query', () => {
   beforeEach(() => {
-    mocks.getCoreStageTimelines.mockReset();
-    mocks.loadSummaries.mockReset();
     mocks.getSubsidyProjections.mockReset();
-    mocks.getCoreStageTimelines.mockResolvedValue(corePage());
-    mocks.loadSummaries.mockResolvedValue({ items: [], next_cursor: null, etag: 'c'.repeat(64) });
     mocks.getSubsidyProjections.mockImplementation(async (params) => ({
       items: params.substatus_code === 'submitted'
         ? [subsidyItem('CASE-SUBMITTED', 'submitted')]
@@ -176,7 +101,7 @@ describe('待辦看板 Beta Government Subsidy side lane', () => {
   });
 
   it('由 server projection 顯示計數、資料缺口、owner readback 並以 substatus 重新查詢', async () => {
-    render(<OrderWorkbenchV2Page />);
+    render(<OrderGovernmentSubsidyLane />);
 
     const lane = await screen.findByRole('button', { name: /政府補助結算支線/ });
     fireEvent.click(lane);

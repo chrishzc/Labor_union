@@ -121,4 +121,34 @@ describe('LineRichMenuDraftActionEditor', () => {
     expect(draftClient.preview).not.toHaveBeenCalled();
     expect(draftClient.apply).not.toHaveBeenCalled();
   });
+
+  it('published 工會人員選單可由既有內容建立下一版 action 草稿', async () => {
+    const draftClient = client();
+    render(<LineRichMenuDraftActionEditor
+      draft={{
+        ...DRAFT,
+        definition: {
+          ...DRAFT.definition,
+          menus: [{ ...DRAFT.definition.menus[0], id: 'union_staff_menu', audience_role: 'union_staff' }],
+        },
+        publication_locks: [{
+          menu_definition_id: 'union_staff_menu', configuration_revision: 3,
+          state: 'published', readonly_reason: '此版本已正式發布；可由目前內容建立下一個草稿版本，既有發布快照不會被覆寫。',
+        }],
+      }}
+      menuId="union_staff_menu"
+      client={draftClient}
+      onApplied={vi.fn()}
+    />);
+
+    fireEvent.change(screen.getByLabelText('送出訊息'), { target: { value: '開啟工會客服' } });
+    fireEvent.click(screen.getByRole('button', { name: '預覽草稿變更' }));
+    await waitFor(() => expect(draftClient.preview).toHaveBeenCalledWith(expect.objectContaining({
+      expected_revision: 3,
+      definition: expect.objectContaining({ menus: [expect.objectContaining({
+        id: 'union_staff_menu',
+        buttons: [expect.objectContaining({ action: { type: 'message', text: '開啟工會客服' } })],
+      })] }),
+    })));
+  });
 });

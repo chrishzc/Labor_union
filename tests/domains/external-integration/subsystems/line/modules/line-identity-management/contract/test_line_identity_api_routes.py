@@ -17,6 +17,7 @@ from api.schemas.line_identity import (
     CustomerIdentityRequest,
     ProvisionalRegistrationRequest,
     ProvisionalRegistrationPreviewRequest,
+    StaffIdentityRequest,
 )
 from domains.line.identities import LineReviewRequestId, LineUserId
 from domains.line.identity_binding import LineBindingSubjectType
@@ -53,6 +54,7 @@ from subsystems.line.identity_contracts import (
     LineIdentityPreview,
     LineIdentityPreviewStatus,
 )
+from subsystems.line.identity_application import LineIdentityNotFoundError
 from subsystems.line.review_contracts import (
     ApplyLineReviewDecisionResult,
     LineReviewCommandOutcome,
@@ -137,6 +139,29 @@ def test_customer_apply_wakes_worker_after_committed_application(monkeypatch) ->
     assert response.data.status == "bound"
     assert len(calls) == 1
     assert wakes == [True]
+
+
+def test_staff_mismatch_returns_actionable_typed_message(monkeypatch) -> None:
+    message = "找不到匹配資訊，請檢查輸入內容是否正確或聯繫工會人員"
+    application = SimpleNamespace(
+        preview_staff=lambda *_: (_ for _ in ()).throw(LineIdentityNotFoundError(message))
+    )
+    monkeypatch.setattr(line_identity, "get_line_identity_application", lambda: application)
+    monkeypatch.setattr(line_identity, "_verified_line_user_id", lambda _: LineUserId("U-staff"))
+
+    with pytest.raises(HTTPException) as captured:
+        line_identity.preview_staff(
+            StaffIdentityRequest(
+                flow_id="flow-staff",
+                name="王月嫂",
+                identity_card="A123456789",
+                birthday="1980-01-02",
+            )
+        )
+
+    assert captured.value.status_code == 404
+    assert captured.value.detail["error"]["code"] == "line_identity_match_not_found"
+    assert captured.value.detail["error"]["message"] == message
 
 
 @pytest.mark.parametrize(

@@ -19,9 +19,7 @@ import { OrderCandidateContactStatusPanel } from '../components/OrderCandidateCo
 import { OrderCandidateQueryPanel } from '../components/OrderCandidateQueryPanel';
 import { ContractExternalSigningActions } from '../components/ContractExternalSigningActions';
 import { OrderFormalRecommendationPanel } from '../components/OrderFormalRecommendationPanel';
-import { OrderGovernmentSubsidyLane } from '../components/OrderGovernmentSubsidyLane';
 import { OrderServiceDatesPanel } from '../components/OrderServiceDatesPanel';
-import { OrderTerminalAggregateLane } from '../components/OrderTerminalAggregateLane';
 import { OrderWorkbenchV2Drawer } from '../components/OrderWorkbenchV2Drawer';
 import {
   type OrderWorkbenchScope,
@@ -449,15 +447,6 @@ export const OrderWorkbenchV2Page: FC = () => {
       )}
 
       </section>
-
-      <details className="order-v2-financial-queries">
-        <summary>跨訂單帳務查詢</summary>
-        <p>以下查詢涵蓋各類訂單，不受上方分類與階段篩選影響。</p>
-        <div className="order-v2-side-lanes">
-          <OrderGovernmentSubsidyLane />
-          <OrderTerminalAggregateLane />
-        </div>
-      </details>
 
       {selectedDrawer !== null && (
         <OrderWorkbenchV2Drawer

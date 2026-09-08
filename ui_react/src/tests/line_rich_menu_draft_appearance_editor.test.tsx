@@ -189,26 +189,34 @@ describe('LineRichMenuDraftAppearanceEditor', () => {
     expect(draftClient.query).not.toHaveBeenCalled();
   });
 
-  it('published 版本只顯示業務原因且不掛載外觀 mutation controls', () => {
+  it('published 月嫂選單可由既有快照內容建立下一版外觀草稿', async () => {
     const draftClient = client();
+    const publishedStaffDraft: RichMenuDraft = {
+      ...DRAFT,
+      definition: {
+        ...DRAFT.definition,
+        menus: [{ ...DRAFT.definition.menus[0], id: 'staff_menu', audience_role: 'staff' }],
+      },
+      publication_locks: [{
+        menu_definition_id: 'staff_menu', configuration_revision: 8,
+        state: 'published', readonly_reason: '此版本已正式發布；可由目前內容建立下一個草稿版本，既有發布快照不會被覆寫。',
+      }],
+    };
     render(<LineRichMenuDraftAppearanceEditor
-      draft={{
-        ...DRAFT,
-        publication_locks: [{
-          menu_definition_id: 'customer_menu', configuration_revision: 8,
-          state: 'published', readonly_reason: '此版本已正式發布，為保留發布快照，目前只能查看；請建立新的草稿版本再調整。',
-        }],
-      }}
-      menuId="customer_menu"
+      draft={publishedStaffDraft}
+      menuId="staff_menu"
       client={draftClient}
-      mediaClient={media()}
+      mediaClient={media([])}
       onApplied={vi.fn()}
     />);
 
-    expect(screen.getByText('此版本已正式發布，為保留發布快照，目前只能查看；請建立新的草稿版本再調整。')).toBeInTheDocument();
-    expect(screen.queryByLabelText('選單名稱')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '預覽草稿變更' })).not.toBeInTheDocument();
-    expect(draftClient.preview).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('選單名稱')).toHaveValue('客戶服務選單');
+    fireEvent.change(screen.getByLabelText('選單名稱'), { target: { value: '月嫂新版選單' } });
+    fireEvent.click(screen.getByRole('button', { name: '預覽草稿變更' }));
+    await waitFor(() => expect(draftClient.preview).toHaveBeenCalledWith(expect.objectContaining({
+      expected_revision: 8,
+      definition: expect.objectContaining({ menus: [expect.objectContaining({ id: 'staff_menu', name: '月嫂新版選單' })] }),
+    })));
     expect(draftClient.apply).not.toHaveBeenCalled();
   });
 });
