@@ -41,9 +41,7 @@ package readiness或未完成snapshot不得覆蓋Task 96 terminal register與liv
 
 ## Task 97 repository-local closeout
 
-[任務97架構一致性計畫](97_架構一致性修復與全域驗收計畫.md)及
-[97B current successor](97B_Task97_current_head_stabilization_amendment.md)已依2026-08-30人工Authority完成
-repository-local closeout；aggregate evidence由
+Task 97 已依2026-08-30人工Authority完成 repository-local closeout；已完成的 execution plan 與 current-head stabilization amendment 已自工作樹移除，由 Git 歷史保存。aggregate evidence由
 [repository-local closeout receipt](../03_追蹤清單與證據/evidence/task97_repository_local_closeout_receipt_a48caa8.md)
 保存。Current terminal result為`TASK97_REPOSITORY_LOCAL_COMPLETE`。
 
