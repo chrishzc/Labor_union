@@ -111,7 +111,7 @@ describe('Orders Drawer adapters', () => {
   it('uses the matching communication readback instead of stale active-plan status', () => {
     const view = adaptMatchingWorkbenchDrawer({
       caseNo: 'CASE-COMMUNICATION-1',
-      activePlan: { planId: 26, status: 'proposed', activeLockId: null, communicationVersion: 2 },
+      activePlan: { planId: 26, status: 'proposed', activeLockId: null, planVersion: 2 },
       customerDecision: 'accepted',
     });
 

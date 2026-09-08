@@ -253,7 +253,13 @@ export function ServiceBeforeReplacementActions({
 
       {query && (
         <section aria-label="服務前換人根事實" style={{ border: '1px solid #dec0b6', borderRadius: '10px', padding: '12px' }}>
-          <strong>{query.outcome === 'ready' ? '可以建立換人 successor' : query.outcome === 'blocked' ? '目前不可換人' : '已有實際服務，必須改走請假代班'}</strong>
+          <strong>{query.outcome === 'ready'
+            ? '可以建立換人 successor'
+            : query.blockers.includes('replacement_successor_exists')
+              ? '換人 successor 已建立，不能重複套用'
+              : query.outcome === 'blocked'
+                ? '目前不可換人'
+                : '已有實際服務，必須改走請假代班'}</strong>
           <dl style={{ display: 'grid', gridTemplateColumns: 'max-content 1fr', gap: '4px 12px' }}>
             <dt>後端決定的續跑位置</dt><dd>{stepLabels[query.resume_step]}</dd>
             <dt>正式服務日</dt><dd>{query.actual_service_day_count} 日</dd>

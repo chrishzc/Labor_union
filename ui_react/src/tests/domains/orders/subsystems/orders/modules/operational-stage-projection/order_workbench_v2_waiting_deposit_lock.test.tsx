@@ -1,17 +1,17 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { OrderFormalRecommendationPanel } from '../components/OrderFormalRecommendationPanel';
+import { OrderFormalRecommendationPanel } from '../../../../../../../components/OrderFormalRecommendationPanel';
 
 const mocks = vi.hoisted(() => ({ queryPlan: vi.fn(), queryContactState: vi.fn(), preview: vi.fn(), apply: vi.fn() }));
-vi.mock('../api/scheduling/waiting_deposit_lock_client', () => ({ waitingDepositLockClient: {
+vi.mock('../../../../../../../api/scheduling/waiting_deposit_lock_client', () => ({ waitingDepositLockClient: {
   queryPlan: mocks.queryPlan, preview: mocks.preview, apply: mocks.apply,
 } }));
-vi.mock('../api/scheduling/matching_plan_communication_client', () => ({ matchingPlanCommunicationClient: { queryContactState: mocks.queryContactState } }));
+vi.mock('../../../../../../../api/scheduling/matching_plan_communication_client', () => ({ matchingPlanCommunicationClient: { queryContactState: mocks.queryContactState } }));
 const CASE = 'CASE-DEPOSIT-LOCK';
 let lockId: number | null;
 let accepted: boolean;
 function activePlan() {
-  return { planId: 51, status: accepted ? 'accepted' : 'proposed', activeLockId: lockId, communicationVersion: 5,
+  return { planId: 51, status: accepted ? 'accepted' : 'proposed', activeLockId: lockId, planVersion: 1,
     segments: [{ segmentId: 71, sequence: 1, staffId: 8892, assignedStartDate: '2026-09-01', assignedEndDate: '2026-09-05' }] };
 }
 function contactState() {

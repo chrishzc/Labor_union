@@ -13,6 +13,9 @@ interface DrawerProps {
   children: React.ReactNode;
   footer?: React.ReactNode;
   closeDisabled?: boolean;
+  closeLabel?: string;
+  ariaLabel?: string;
+  className?: string;
 }
 
 export const Drawer: React.FC<DrawerProps> = ({
@@ -23,6 +26,9 @@ export const Drawer: React.FC<DrawerProps> = ({
   children,
   footer,
   closeDisabled = false,
+  closeLabel = 'Close drawer',
+  ariaLabel,
+  className,
 }) => {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -37,11 +43,17 @@ export const Drawer: React.FC<DrawerProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="drawer-backdrop" onClick={closeDisabled ? undefined : onClose}>
+    <div
+      className={`drawer-backdrop${className ? ` ${className}` : ''}`}
+      role={ariaLabel ? 'dialog' : undefined}
+      aria-modal={ariaLabel ? true : undefined}
+      aria-label={ariaLabel}
+      onClick={closeDisabled ? undefined : onClose}
+    >
       <div className={`drawer-container drawer-size-${size}`} onClick={(e) => e.stopPropagation()}>
         <div className="drawer-header">
           <h2 className="drawer-title">{title}</h2>
-          <button className="drawer-close-btn" onClick={onClose} aria-label="Close drawer" disabled={closeDisabled}>
+          <button className="drawer-close-btn" onClick={onClose} aria-label={closeLabel} disabled={closeDisabled}>
             ✕
           </button>
         </div>

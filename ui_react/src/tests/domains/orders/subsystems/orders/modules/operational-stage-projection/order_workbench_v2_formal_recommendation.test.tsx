@@ -1,22 +1,22 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { OrderFormalRecommendationPanel } from '../components/OrderFormalRecommendationPanel';
-import { ApiHttpError } from '../api/shared/typed_errors';
-import type { FormalPlanContactState } from '../api/scheduling/matching_plan_communication_client';
+import { OrderFormalRecommendationPanel } from '../../../../../../../components/OrderFormalRecommendationPanel';
+import { ApiHttpError } from '../../../../../../../api/shared/typed_errors';
+import type { FormalPlanContactState } from '../../../../../../../api/scheduling/matching_plan_communication_client';
 
 const mocks = vi.hoisted(() => ({
   query: vi.fn(), createSingleCaregiverPlan: vi.fn(), queryContactState: vi.fn(),
   recordCustomerDecision: vi.fn(), queryPlan: vi.fn(), getDetail: vi.fn(),
   sendCustomerProfiles: vi.fn(), recordFormalPlanWillingness: vi.fn(),
 }));
-vi.mock('../api/scheduling/candidate_contact_pool_client', () => ({ candidateContactPoolClient: { query: mocks.query } }));
-vi.mock('../api/scheduling/matching_candidate_workflow_client', () => ({ matchingCandidateWorkflowClient: { createSingleCaregiverPlan: mocks.createSingleCaregiverPlan } }));
-vi.mock('../api/scheduling/matching_plan_communication_client', () => ({ matchingPlanCommunicationClient: {
+vi.mock('../../../../../../../api/scheduling/candidate_contact_pool_client', () => ({ candidateContactPoolClient: { query: mocks.query } }));
+vi.mock('../../../../../../../api/scheduling/matching_candidate_workflow_client', () => ({ matchingCandidateWorkflowClient: { createSingleCaregiverPlan: mocks.createSingleCaregiverPlan } }));
+vi.mock('../../../../../../../api/scheduling/matching_plan_communication_client', () => ({ matchingPlanCommunicationClient: {
   queryContactState: mocks.queryContactState, recordCustomerDecision: mocks.recordCustomerDecision,
   sendCustomerProfiles: mocks.sendCustomerProfiles, recordFormalPlanWillingness: mocks.recordFormalPlanWillingness,
 } }));
-vi.mock('../api/scheduling/waiting_deposit_lock_client', () => ({ waitingDepositLockClient: { queryPlan: mocks.queryPlan } }));
-vi.mock('../api/orders/order_query_client', () => ({ ordersQueryClient: { getOrderDetail: mocks.getDetail } }));
+vi.mock('../../../../../../../api/scheduling/waiting_deposit_lock_client', () => ({ waitingDepositLockClient: { queryPlan: mocks.queryPlan } }));
+vi.mock('../../../../../../../api/orders/order_query_client', () => ({ ordersQueryClient: { getOrderDetail: mocks.getDetail } }));
 
 const CASE = 'CASE-RECOMMEND';
 function pool() {
@@ -40,7 +40,7 @@ let exists: boolean;
 let contact: FormalPlanContactState;
 let activeLockId: number | null;
 function activePlan() {
-  return { planId: 51, status: contact.plan.status, activeLockId, communicationVersion: contact.plan.communication_version,
+  return { planId: 51, status: contact.plan.status, activeLockId, planVersion: 1,
     segments: contact.segments.map((segment, index) => ({ segmentId: segment.segment_id, sequence: index + 1,
       staffId: 8892 + index, assignedStartDate: '2026-09-01', assignedEndDate: '2026-09-05' })) };
 }

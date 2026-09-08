@@ -6,7 +6,8 @@ import json
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from decimal import Decimal
 
 import pytest
 from openpyxl import Workbook, load_workbook
@@ -134,6 +135,50 @@ def test_preview_rejects_null_required_owner_fact(monkeypatch, tmp_path):
     result = FullContractPreviewApplication(_Repository(projection)).preview_client("CASE-1")
     assert result.ready_to_print is False
     assert result.blockers == ("contract_pdf_required_mapping_missing",)
+
+
+def test_client_preview_fingerprint_canonicalizes_native_owner_dates_and_amounts(
+    monkeypatch, tmp_path,
+):
+    mapping, template = _approved_mapping(tmp_path)
+    mapping.write_text(
+        json.dumps(
+            {
+                "id": "contract_client_copy",
+                "param_mappings": {
+                    "A1": {"db_key": "service_date", "requiredness": "required"},
+                    "A2": {"db_key": "amount", "requiredness": "required"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "subsystems.contract_signing.full_contract_preview.load_approved_template",
+        lambda key: SimpleNamespace(
+            template_key=key,
+            mapping_sha256="b" * 64,
+            template_sha256="c" * 64,
+            template_filename=template.name,
+        ),
+    )
+    monkeypatch.setattr(
+        "subsystems.contract_signing.full_contract_preview.approved_template_mapping_path",
+        lambda key: mapping,
+    )
+    projection = FullContractOwnerProjection(
+        case_no="CASE-1",
+        scope=ContractPreviewScope.CLIENT,
+        assignment_id=None,
+        facts={"service_date": date(2026, 3, 2), "amount": Decimal("12000.00")},
+        owner_fingerprints={"orders": "a" * 64},
+    )
+
+    result = FullContractPreviewApplication(_Repository(projection)).preview_client("CASE-1")
+
+    assert result.ready_to_print is True
+    assert len(result.preview_fingerprint.value) == 64
+    assert result.field_values == {"A1": date(2026, 3, 2), "A2": Decimal("12000.00")}
 
 
 @pytest.mark.parametrize("value", ["週休1日", "週休2日", "連續服務"])

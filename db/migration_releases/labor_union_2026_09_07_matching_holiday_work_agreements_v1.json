@@ -1,0 +1,57 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-matching-holiday-work-agreements-2026-09-07-v1",
+  "release_metadata": {
+    "release_name": "Labor Union matching holiday-work agreement storage",
+    "application_version": "matching-holiday-work-agreements-v1",
+    "published_at": "2026-09-07",
+    "description": "Preserve existing data while adding immutable, current-plan national-holiday work agreement evidence"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": ["absent", "exact"],
+    "forbidden_owned_object_states": ["partial", "drift"],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-fresh-schema-assembly-2026-08-15-v1"
+  },
+  "artifacts": [{
+    "name": "1032_matching_holiday_work_agreements.sql",
+    "relative_path": "db/schema_parts/1032_matching_holiday_work_agreements.sql",
+    "sha256": "b60a6e1b353728d18d8770c2367ef9d9d4d2107cd0c4cbf5929555ba3eccd59d",
+    "dependencies": [],
+    "data_effect": "schema_only",
+    "rollback_policy": "forward-only-preserve-holiday-work-agreement-evidence",
+    "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+  }],
+  "backfills": [],
+  "verification_contracts": [{
+    "verification_id": "matching-holiday-work-agreement-owned-objects",
+    "phase": "post-schema",
+    "policy": "matching-holiday-work-agreement-tables-constraints-and-immutability-exact",
+    "read_only": true,
+    "blocking": true
+  }],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": ["matching-communication-v1", "schedule-precision-v1"],
+    "required_restart_targets": ["api"],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": ["matching-holiday-work-agreement-owned-objects"]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_09_07_matching_holiday_work_agreements_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_09_07_matching_holiday_work_agreements_v1.descriptors.json",
+    "sha256": "aa7d4ed0767390353a76269aae49d11423a57d1d96171a90d5a05ffb92e6b89f",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": ["--single-transaction", "--routines", "--events", "--triggers", "--hex-blob"],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

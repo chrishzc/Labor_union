@@ -30,7 +30,10 @@ export interface OrderCoreStageProjectionQueryOptions {
   baseUrl?: string;
 }
 
+export type OrderWorkbenchScope = 'in_progress' | 'completed' | 'cancelled';
+
 export interface OrderCoreStageProjectionQueryParams {
+  workbench_scope?: OrderWorkbenchScope;
   page_size?: number;
   after_case_no?: string;
   lifecycle_scope?: 'all' | 'unfinished';
@@ -51,6 +54,7 @@ export interface OrderCoreStageProjectionClient {
 }
 
 const ParamsSchema = z.strictObject({
+  workbench_scope: z.enum(['in_progress', 'completed', 'cancelled']).optional(),
   page_size: z.number().int().min(1).max(200).optional(),
   after_case_no: z.string().trim().min(1).max(50).optional(),
   lifecycle_scope: z.enum(['all', 'unfinished']).optional(),
@@ -62,6 +66,13 @@ const ParamsSchema = z.strictObject({
   branch_type: z.enum(CORE_STAGE_BRANCH_TYPES).optional(),
   historical_lifecycle: z.enum(HISTORICAL_LIFECYCLE_FACETS).optional(),
 }).superRefine((params, context) => {
+  if (params.workbench_scope !== undefined && (
+    params.branch_type !== undefined || params.historical_lifecycle !== undefined
+    || params.lifecycle_scope === 'unfinished'
+    || (params.workbench_scope !== 'in_progress' && (params.stage !== undefined || params.substatus_code !== undefined))
+  )) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['workbench_scope'], message: '訂單分類不可混用支線或不適用的階段篩選' });
+  }
   if (params.substatus_code !== undefined && params.stage === undefined) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
@@ -128,6 +139,7 @@ export async function getOrderCoreStageTimelines(
 ): Promise<OrderCoreStageTimelinePage> {
   const parsed = ParamsSchema.parse(params);
   const query: NonNullable<RequestOptions['params']> = {};
+  if (parsed.workbench_scope !== undefined) query.workbench_scope = parsed.workbench_scope;
   if (parsed.page_size !== undefined) query.page_size = parsed.page_size;
   if (parsed.after_case_no !== undefined) query.after_case_no = parsed.after_case_no;
   if (parsed.lifecycle_scope !== undefined) query.lifecycle_scope = parsed.lifecycle_scope;

@@ -29,6 +29,7 @@ export interface OrdersCardProjectionViewModel {
   depositSettlementState: 'settled' | 'unsettled' | null;
   assignmentSegments: readonly OrdersCardAssignmentViewModel[];
   assignmentSegmentsAvailability: 'available' | 'unavailable' | 'blocked';
+  assignmentSegmentsReason: string | null;
   assignmentSegmentsMessage: string;
 }
 
@@ -135,6 +136,7 @@ export function adaptOrdersCardProjection(projection: OrdersCardProjection, expe
     ],
     assignmentSegments: projection.assignment_segments.value?.map((segment, index) => assignmentRows(segment, `assignment.${index}`)) ?? [],
     assignmentSegmentsAvailability: projection.assignment_segments.availability,
+    assignmentSegmentsReason: projection.assignment_segments.availability_reason,
     assignmentSegmentsMessage: fieldValueText(
       projection.assignment_segments,
       '正式指派分段',

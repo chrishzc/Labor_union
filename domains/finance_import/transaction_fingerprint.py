@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from datetime import date, datetime
 import hashlib
 import json
 import unicodedata
@@ -68,3 +69,22 @@ def build_dedup_fingerprint(normalized_row: dict[str, Any]) -> str:
     payload = json.dumps(values, ensure_ascii=False, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
+
+def canonical_fact_differences(stored: dict[str, Any], incoming: dict[str, Any]) -> tuple[str, ...]:
+    """Compare non-identity bank facts, excluding source location and raw payload."""
+    fields = (
+        "source_reference", "posting_date", "value_date", "currency",
+        "counterparty_name", "counterparty_account", "bank_references",
+    )
+
+    def canonical(value: Any) -> Any:
+        if isinstance(value, (date, datetime)):
+            return value.isoformat()
+        if isinstance(value, dict):
+            return {key: canonical(item) for key, item in value.items()}
+        return _text(value)
+
+    previous = dict(stored)
+    if isinstance(previous["bank_references"], str):
+        previous["bank_references"] = json.loads(previous["bank_references"])
+    return tuple(field for field in fields if canonical(previous[field]) != canonical(incoming[field]))

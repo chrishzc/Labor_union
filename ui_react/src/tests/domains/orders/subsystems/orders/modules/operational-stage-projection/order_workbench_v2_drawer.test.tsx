@@ -1,3 +1,4 @@
+import { OrderWorkbenchV2Drawer } from '../../../../../../../components/OrderWorkbenchV2Drawer';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -7,9 +8,9 @@ import {
   type CoreStageBranchType,
   type CoreStageCode,
   type CoreStageStatus,
-} from '../api/orders/order_core_stage_projection_schemas';
-import type { OrderCoreStageProjectionQueryParams } from '../api/orders/order_core_stage_projection_client';
-import { OrderWorkbenchV2Page } from '../pages/OrderWorkbenchV2Page';
+} from '../../../../../../../api/orders/order_core_stage_projection_schemas';
+import type { OrderCoreStageProjectionQueryParams } from '../../../../../../../api/orders/order_core_stage_projection_client';
+import { OrderWorkbenchV2Page } from '../../../../../../../pages/OrderWorkbenchV2Page';
 
 const clientMocks = vi.hoisted(() => ({
   getCoreStageTimelines: vi.fn(),
@@ -22,13 +23,19 @@ const clientMocks = vi.hoisted(() => ({
   historicalApply: vi.fn(),
 }));
 
-vi.mock('../api/orders/order_core_stage_projection_client', () => ({
+vi.mock('../../../../../../../components/OrderIntakeRepairPanel', () => ({
+  OrderIntakeRepairPanel: ({ caseNo, orderStatus }: { caseNo: string; orderStatus: string }) => (
+    <section aria-label="正式補件入口">{caseNo}：{orderStatus}</section>
+  ),
+}));
+
+vi.mock('../../../../../../../api/orders/order_core_stage_projection_client', () => ({
   orderCoreStageProjectionClient: {
     getCoreStageTimelines: clientMocks.getCoreStageTimelines,
   },
 }));
 
-vi.mock('../api/orders/order_query_client', () => ({
+vi.mock('../../../../../../../api/orders/order_query_client', () => ({
   loadAllOrderSummaries: clientMocks.loadSummaries,
   ordersQueryClient: {
     getOrderSummaries: vi.fn(),
@@ -38,7 +45,7 @@ vi.mock('../api/orders/order_query_client', () => ({
   },
 }));
 
-vi.mock('../api/orders/historical_service_accounting_client', () => ({
+vi.mock('../../../../../../../api/orders/historical_service_accounting_client', () => ({
   historicalServiceAccountingClient: {
     query: clientMocks.historicalQuery,
     preview: clientMocks.historicalPreview,
@@ -231,6 +238,18 @@ describe('待辦看板 Beta 唯讀工作 Drawer', () => {
     clientMocks.loadSummaries.mockResolvedValue(summaryPage());
   });
 
+  it('資料未補齊使 detail 不可用時仍依正式 intake projection 開啟補件入口', async () => {
+    clientMocks.getCoreStageTimelines.mockResolvedValue(page([
+      timeline('CASE-INCOMPLETE', 'intake_validation', { lifecycle: '待補件' }),
+    ]));
+    clientMocks.getOrderDetail.mockRejectedValue(new Error('order_detail_projection_invalid'));
+    clientMocks.getOrderTerms.mockRejectedValue(new Error('terms_unavailable'));
+    clientMocks.getAssignmentPlan.mockRejectedValue(new Error('assignment_unavailable'));
+    render(<OrderWorkbenchV2Drawer caseNo="CASE-INCOMPLETE" branchType="normal" onClose={() => {}} />);
+    expect(await screen.findByRole('region', { name: '正式補件入口' })).toHaveTextContent('CASE-INCOMPLETE：待補件');
+    expect(await screen.findByText('案件資料不可用：order_detail_projection_invalid')).toBeInTheDocument();
+  });
+
   it('由案件卡開啟／關閉，並只用正式 GET owner facts 與 core-stage projection 呈現案件、服務、派案、13 階、notice 與 lineage', async () => {
     const row = timeline('CASE-DRAWER', 'intake_validation', {
       currentStatus: 'blocked',
@@ -240,14 +259,14 @@ describe('待辦看板 Beta 唯讀工作 Drawer', () => {
     clientMocks.getCoreStageTimelines.mockImplementation(async (params: OrderCoreStageProjectionQueryParams) => (
       params.case_no_search === 'CASE-DRAWER'
         ? page([row])
-        : page([row], 'intake_validation')
+        : page([row], params.stage)
     ));
     setOwnerFacts('CASE-DRAWER');
 
     render(<OrderWorkbenchV2Page />);
     await waitFor(() => expect(screen.getByText('CASE-DRAWER')).toBeInTheDocument());
 
-    fireEvent.click(within(cardFor('CASE-DRAWER')).getByRole('button', { name: '開啟唯讀工作 Drawer' }));
+    fireEvent.click(within(cardFor('CASE-DRAWER')).getByRole('button', { name: '開啟案件工作' }));
     const dialog = await screen.findByRole('dialog', { name: '案件 CASE-DRAWER' });
 
     await waitFor(() => expect(within(dialog).getByText('林小芳')).toBeInTheDocument());
@@ -293,8 +312,8 @@ describe('待辦看板 Beta 唯讀工作 Drawer', () => {
     });
     clientMocks.getCoreStageTimelines.mockImplementation(async (params: OrderCoreStageProjectionQueryParams) => {
       if (params.case_no_search === 'CASE-HISTORY') return page([historical]);
-      if (params.branch_type === 'historical') return page([historical]);
-      return page([normal], 'intake_validation');
+      if (params.workbench_scope === 'completed') return page([historical]);
+      return page([normal], params.stage);
     });
     setOwnerFacts('CASE-HISTORY', '正式客戶', 99);
     clientMocks.historicalQuery.mockResolvedValue({
@@ -321,11 +340,13 @@ describe('待辦看板 Beta 唯讀工作 Drawer', () => {
     });
 
     render(<OrderWorkbenchV2Page />);
-    fireEvent.click(await screen.findByRole('button', { name: '歷史訂單' }));
+    fireEvent.click(await screen.findByRole('button', { name: '完成訂單' }));
     await waitFor(() => expect(screen.getByText('CASE-HISTORY')).toBeInTheDocument());
-    fireEvent.click(within(cardFor('CASE-HISTORY')).getByRole('button', { name: '開啟唯讀工作 Drawer' }));
+    fireEvent.click(within(cardFor('CASE-HISTORY')).getByRole('button', { name: '查看案件紀錄' }));
 
     const dialog = await screen.findByRole('dialog', { name: '案件 CASE-HISTORY' });
+    expect(within(dialog).queryByRole('heading', { name: '13 階段正式進度' })).not.toBeInTheDocument();
+    expect(within(dialog).queryByTestId('drawer-core-stage')).not.toBeInTheDocument();
     const assignmentSection = within(dialog).getByRole('heading', { name: '目前正式派案／Assignment projection' }).closest('section');
     if (!(assignmentSection instanceof HTMLElement)) throw new Error('找不到正式派案區');
     const historicalRegion = within(dialog).getByRole('region', { name: '歷史來源證據' });
@@ -341,12 +362,26 @@ describe('待辦看板 Beta 唯讀工作 Drawer', () => {
     expect(clientMocks.historicalApply).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['completed', 'normal', '訂單完成'],
+    ['cancelled', 'cancelled', '訂單取消'],
+  ] as const)('%s 案件抽屜不顯示13步驟', async (scope, branch, lifecycle) => {
+    const row = timeline('CASE-TERMINAL', null, { branch, lifecycle });
+    clientMocks.getCoreStageTimelines.mockResolvedValue(page([row]));
+    setOwnerFacts('CASE-TERMINAL', '測試客戶', 99);
+    render(<OrderWorkbenchV2Drawer caseNo="CASE-TERMINAL" branchType={branch} workbenchScope={scope} onClose={vi.fn()} />);
+    const dialog = await screen.findByRole('dialog', { name: '案件 CASE-TERMINAL' });
+    expect(within(dialog).queryByRole('heading', { name: '13 階段正式進度' })).not.toBeInTheDocument();
+    await waitFor(() => expect(within(dialog).getByRole('heading', { name: '結算狀態' })).toBeInTheDocument());
+    expect(within(dialog).queryByTestId('drawer-core-stage')).not.toBeInTheDocument();
+  });
+
   it('typed query 失敗時只在對應區顯示明確錯誤，仍保留正式 core-stage；Escape 關閉後晚到 response 不會重開 Drawer', async () => {
     const row = timeline('CASE-STRICT', 'intake_validation');
     clientMocks.getCoreStageTimelines.mockImplementation(async (params: OrderCoreStageProjectionQueryParams) => (
       params.case_no_search === 'CASE-STRICT'
         ? page([row])
-        : page([row], 'intake_validation')
+        : page([row], params.stage)
     ));
     clientMocks.getOrderDetail.mockResolvedValue(detail('CASE-STRICT', '嚴格解碼客戶'));
     clientMocks.getOrderTerms.mockRejectedValue(new Error('strict decode: invalid OrderTerms payload'));
@@ -357,7 +392,7 @@ describe('待辦看板 Beta 唯讀工作 Drawer', () => {
 
     render(<OrderWorkbenchV2Page />);
     await waitFor(() => expect(screen.getByText('CASE-STRICT')).toBeInTheDocument());
-    fireEvent.click(within(cardFor('CASE-STRICT')).getByRole('button', { name: '開啟唯讀工作 Drawer' }));
+    fireEvent.click(within(cardFor('CASE-STRICT')).getByRole('button', { name: '開啟案件工作' }));
 
     const dialog = await screen.findByRole('dialog', { name: '案件 CASE-STRICT' });
     await waitFor(() => expect(within(dialog).getByText(/正式服務條款不可用：strict decode: invalid OrderTerms payload/)).toBeInTheDocument());

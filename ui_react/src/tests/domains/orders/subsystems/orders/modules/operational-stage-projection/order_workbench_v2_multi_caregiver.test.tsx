@@ -1,13 +1,13 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { OrderMultiCaregiverPlanPanel } from '../components/OrderMultiCaregiverPlanPanel';
-import { ApiHttpError } from '../api/shared/typed_errors';
-import type { MatchingAvailability, MatchingPlanSegmentInput } from '../api/scheduling/matching_candidate_workflow_client';
+import { OrderMultiCaregiverPlanPanel } from '../../../../../../../components/OrderMultiCaregiverPlanPanel';
+import { ApiHttpError } from '../../../../../../../api/shared/typed_errors';
+import type { MatchingAvailability, MatchingPlanSegmentInput } from '../../../../../../../api/scheduling/matching_candidate_workflow_client';
 
 const mocks = vi.hoisted(() => ({ search: vi.fn(), create: vi.fn(), queryPlan: vi.fn(), detail: vi.fn() }));
-vi.mock('../api/scheduling/matching_candidate_workflow_client', () => ({ matchingCandidateWorkflowClient: { searchSegmentedCaregivers: mocks.search, createMatchingPlan: mocks.create } }));
-vi.mock('../api/scheduling/waiting_deposit_lock_client', () => ({ waitingDepositLockClient: { queryPlan: mocks.queryPlan } }));
-vi.mock('../api/orders/order_query_client', () => ({ ordersQueryClient: { getOrderDetail: mocks.detail } }));
+vi.mock('../../../../../../../api/scheduling/matching_candidate_workflow_client', () => ({ matchingCandidateWorkflowClient: { searchSegmentedCaregivers: mocks.search, createMatchingPlan: mocks.create } }));
+vi.mock('../../../../../../../api/scheduling/waiting_deposit_lock_client', () => ({ waitingDepositLockClient: { queryPlan: mocks.queryPlan } }));
+vi.mock('../../../../../../../api/orders/order_query_client', () => ({ ordersQueryClient: { getOrderDetail: mocks.detail } }));
 const CASE = 'CASE-MULTI-BETA';
 const filters = { region: true, cooking: false, preferred_service_days: true, daily_service_hours: true };
 let created: MatchingPlanSegmentInput[] | null;
@@ -18,7 +18,7 @@ function availability(count: number): MatchingAvailability {
     segment_candidates: [], candidate_options: [], conflicts: [] };
 }
 function observed() {
-  return { planId: 51, status: 'proposed', activeLockId: null, communicationVersion: 1,
+  return { planId: 51, status: 'proposed', activeLockId: null, planVersion: 1,
     segments: (created ?? []).map((segment, index) => ({ segmentId: 71 + index, sequence: index + 1,
       staffId: segment.staff_id, assignedStartDate: segment.start_date, assignedEndDate: segment.end_date })) };
 }

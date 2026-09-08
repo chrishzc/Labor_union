@@ -428,9 +428,14 @@ def _canonical_row(row, issues, batch_id):
 
 def _preview_disposition(row, classification_type, batch_id):
     stored = FinanceImportDisposition(str(row["disposition"]))
-    if int(row["canonical_batch_id"]) == batch_id:
-        return stored
     if classification_type is FinanceClassificationType.NON_BUSINESS_REVIEW:
+        return stored
+    if str(row.get("latest_dispatch_outcome") or "") in {
+        "reconciled",
+        "existing",
+    }:
+        return FinanceImportDisposition.EXISTING
+    if int(row["canonical_batch_id"]) == batch_id:
         return stored
     return FinanceImportDisposition.EXISTING
 
@@ -441,7 +446,7 @@ def _sort_canonical_rows(rows):
 
 
 def _load_integrity_issues(cursor, batch_id):
-    cursor.execute(_ACTIVE_INTEGRITY_SQL, (batch_id,))
+    cursor.execute(_ACTIVE_INTEGRITY_SQL, (batch_id, batch_id))
     issues: dict[int | None, list[str]] = {}
     for row in cursor.fetchall():
         row_id = row["finance_import_row_id"]
@@ -832,7 +837,7 @@ _BATCH_ROWS_SQL = (
     "classification.disposition,"
     "classification.decision_facts_fingerprint,"
     "classification.target_identities,classification.evidence,"
-    "classification.available_actions "
+    "classification.available_actions,dispatch.outcome AS latest_dispatch_outcome "
     "FROM finance_import_occurrences AS occurrence "
     "JOIN finance_import_rows AS bank_fact "
     "ON bank_fact.id=occurrence.finance_import_row_id "
@@ -840,14 +845,21 @@ _BATCH_ROWS_SQL = (
     "ON classification.id=("
     "SELECT MAX(latest.id) FROM finance_import_classification_events AS latest "
     "WHERE latest.finance_import_row_id=bank_fact.id"
-    ") WHERE occurrence.batch_id=%s "
-    "GROUP BY bank_fact.id,bank_fact.credit,bank_fact.debit,classification.id "
+    ") LEFT JOIN finance_import_dispatch_events AS dispatch "
+    "ON dispatch.id=(SELECT MAX(latest_dispatch.id) "
+    "FROM finance_import_dispatch_events AS latest_dispatch "
+    "WHERE latest_dispatch.finance_import_row_id=bank_fact.id) "
+    "WHERE occurrence.batch_id=%s "
+    "GROUP BY bank_fact.id,bank_fact.credit,bank_fact.debit,classification.id,"
+    "dispatch.id,dispatch.outcome "
     "ORDER BY bank_fact.id"
 )
 _ACTIVE_INTEGRITY_SQL = (
     "SELECT current.finance_import_row_id,current.issue_code "
     "FROM finance_import_integrity_events AS current "
-    "WHERE current.batch_id=%s AND current.id=("
+    "WHERE (current.batch_id=%s OR current.finance_import_row_id IN ("
+    "SELECT member.finance_import_row_id FROM finance_import_occurrences AS member "
+    "WHERE member.batch_id=%s)) AND current.id=("
     "SELECT MAX(latest.id) FROM finance_import_integrity_events AS latest "
     "WHERE latest.batch_id=current.batch_id "
     "AND latest.finance_import_row_id<=>current.finance_import_row_id "

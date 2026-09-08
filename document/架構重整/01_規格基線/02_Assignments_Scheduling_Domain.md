@@ -426,6 +426,16 @@ version、idempotency identity 與回讀；不得偽造 LINE delivery 或省略�
 仍必須驗證 recipient／delivery state。客戶接受仍只形成 matching decision，後續鎖定、契約與 execution
 各自遵守其既有 Preview／Apply gate。
 
+國定假日上班協調是與前段意願／客戶媒合決策分離的 Scheduling-owned current fact。它只能對目前
+正式 matching plan 的明確國定假日日期建立：客戶及每一個涵蓋該日的 segment 都必須個別肯認，並保存
+plan version、segment、日期、actor、非空協調依據及 idempotency identity。任何 plan、
+segment、日期或 plan version 改變都使舊 agreement 僅保留歷史證據、不得滿足目前服務日期精算；一般
+履歷送達、月嫂意願或客戶媒合決策的 communication version 變化不重寫方案形狀，也不得使既有
+holiday agreement 失效。
+缺少、拒絕、過期或 readback 不完整時結果固定為國定假日休假。電話、現場、紙本的人工補登可形成這些
+個別肯認，但不得偽造 LINE delivery，也不得把一般 `caregiver_willingness` 或
+`customer_decision` 重新解讀為 holiday agreement。
+
 ## Historical pairing evidence（2026-08-13）
 
 Historical Order Adoption 可保存一或兩位來源月嫂的不可變配對 evidence。月嫂姓名空白、找不到或

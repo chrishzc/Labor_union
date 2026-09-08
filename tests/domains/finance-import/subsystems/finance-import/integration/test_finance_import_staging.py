@@ -34,6 +34,10 @@ class FakeCursor:
                 "matched_identity_ids": [],
                 "resolved_counterparty_account": None,
                 "reconciliation_status": "pending",
+                "source_reference": params[7], "posting_date": params[10],
+                "value_date": params[11], "currency": params[16],
+                "counterparty_name": params[19], "counterparty_account": params[20],
+                "bank_references": params[22], "has_formal_reference": False,
             }
         elif statement.startswith("UPDATE finance_import_rows"):
             row_id = params[-1]
@@ -274,6 +278,8 @@ def test_existing_fingerprint_only_adds_occurrence_and_keeps_existing_state(monk
     cursor = FakeCursor(
         existing_rows={
             fingerprint: {
+                **_row(),
+                "has_formal_reference": True,
                 "id": 77,
                 "classification_type": "manually_adjusted",
                 "matched_identity_ids": "[8]",
@@ -333,3 +339,23 @@ def test_duplicate_fingerprint_in_same_batch_keeps_both_occurrences_and_warns(mo
     assert len(occurrences) == 2
     assert "duplicate_fingerprint_in_same_batch" not in json.loads(occurrences[0][-1])
     assert "duplicate_fingerprint_in_same_batch" in json.loads(occurrences[1][-1])
+
+
+@pytest.mark.parametrize("formally_dispatched", [False, True])
+def test_same_fingerprint_changed_bank_fact_preserves_occurrence_and_blocks(formally_dispatched):
+    original = _row()
+    fingerprint = staging.build_dedup_fingerprint(original)
+    stored = {
+        **original, "id": 77, "classification_type": "non_business_review",
+        "matched_identity_ids": [], "resolved_counterparty_account": None,
+        "reconciliation_status": "pending", "has_formal_reference": formally_dispatched,
+    }
+    incoming = {**original, "posting_date": "2026-07-16"}
+    assert staging.build_dedup_fingerprint(incoming) == fingerprint
+    cursor = FakeCursor(existing_rows={fingerprint: stored})
+    staging.stage_finance_rows(cursor, _normalized([incoming]), {})
+    events = [params for sql, params in cursor.executed if sql.startswith("INSERT INTO finance_import_integrity_events")]
+    assert [event[2] for event in events] == (["fingerprint_collision", "formal_reference_conflict"] if formally_dispatched else ["fingerprint_collision"])
+    assert all(json.loads(event[3])["differing_fields"] == ["posting_date"] for event in events)
+    assert sum(sql.startswith("INSERT INTO finance_import_occurrences") for sql, _ in cursor.executed) == 1
+    assert not any(sql.startswith("UPDATE finance_import_rows") for sql, _ in cursor.executed)

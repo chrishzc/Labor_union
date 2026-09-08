@@ -1,25 +1,25 @@
 import { useState } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { OrderCaregiverContractPanel } from '../components/OrderCaregiverContractPanel';
-import { OrderClientContractPanel } from '../components/OrderClientContractPanel';
-import { OrderTermsMutationPanel } from '../components/OrderTermsMutationPanel';
-import { OrderCandidateContactStatusPanel } from '../components/OrderCandidateContactStatusPanel';
-import { OrderAssignmentPlanPanel } from '../components/OrderAssignmentPlanPanel';
-import { OrderFormalRecommendationPanel } from '../components/OrderFormalRecommendationPanel';
-import type { OrderTerms } from '../api/orders/order_query_schemas';
+import { OrderCaregiverContractPanel } from '../../../../../../../components/OrderCaregiverContractPanel';
+import { OrderClientContractPanel } from '../../../../../../../components/OrderClientContractPanel';
+import { OrderTermsMutationPanel } from '../../../../../../../components/OrderTermsMutationPanel';
+import { OrderCandidateContactStatusPanel } from '../../../../../../../components/OrderCandidateContactStatusPanel';
+import { OrderAssignmentPlanPanel } from '../../../../../../../components/OrderAssignmentPlanPanel';
+import { OrderFormalRecommendationPanel } from '../../../../../../../components/OrderFormalRecommendationPanel';
+import type { OrderTerms } from '../../../../../../../api/orders/order_query_schemas';
 
 const mocks = vi.hoisted(() => ({ signing: vi.fn(), sendStaff: vi.fn(), sendClient: vi.fn(),
   termsQuery: vi.fn(), termsPreview: vi.fn(), termsApply: vi.fn(), pool: vi.fn(), willingness: vi.fn(),
   assignment: vi.fn(), active: vi.fn(), contact: vi.fn(), sendProfiles: vi.fn() }));
-vi.mock('../api/orders/contract_signing_client', () => ({ contractSigningClient: { query: mocks.signing } }));
-vi.mock('../api/orders/contract_signing_mutation_client', () => ({ contractSigningMutationClient: { sendStaff: mocks.sendStaff, sendClient: mocks.sendClient } }));
-vi.mock('../api/orders/order_terms_mutation_client', () => ({ orderTermsMutationClient: { query: mocks.termsQuery, preview: mocks.termsPreview, apply: mocks.termsApply } }));
-vi.mock('../api/scheduling/candidate_contact_pool_client', () => ({ candidateContactPoolClient: { query: mocks.pool, recordWillingness: mocks.willingness } }));
-vi.mock('../api/orders/order_query_client', () => ({ ordersQueryClient: { getAssignmentPlan: mocks.assignment } }));
-vi.mock('../api/scheduling/waiting_deposit_lock_client', () => ({ waitingDepositLockClient: { queryPlan: mocks.active } }));
-vi.mock('../api/scheduling/matching_plan_communication_client', () => ({ matchingPlanCommunicationClient: { queryContactState: mocks.contact, sendCustomerProfiles: mocks.sendProfiles } }));
-vi.mock('../components/ServiceBeforeReplacementActions', () => ({ ServiceBeforeReplacementActions: ({ onCommitted }: { onCommitted: () => Promise<void> }) => (
+vi.mock('../../../../../../../api/orders/contract_signing_client', () => ({ contractSigningClient: { query: mocks.signing } }));
+vi.mock('../../../../../../../api/orders/contract_signing_mutation_client', () => ({ contractSigningMutationClient: { sendStaff: mocks.sendStaff, sendClient: mocks.sendClient } }));
+vi.mock('../../../../../../../api/orders/order_terms_mutation_client', () => ({ orderTermsMutationClient: { query: mocks.termsQuery, preview: mocks.termsPreview, apply: mocks.termsApply } }));
+vi.mock('../../../../../../../api/scheduling/candidate_contact_pool_client', () => ({ candidateContactPoolClient: { query: mocks.pool, recordWillingness: mocks.willingness } }));
+vi.mock('../../../../../../../api/orders/order_query_client', () => ({ ordersQueryClient: { getAssignmentPlan: mocks.assignment } }));
+vi.mock('../../../../../../../api/scheduling/waiting_deposit_lock_client', () => ({ waitingDepositLockClient: { queryPlan: mocks.active } }));
+vi.mock('../../../../../../../api/scheduling/matching_plan_communication_client', () => ({ matchingPlanCommunicationClient: { queryContactState: mocks.contact, sendCustomerProfiles: mocks.sendProfiles } }));
+vi.mock('../../../../../../../components/ServiceBeforeReplacementActions', () => ({ ServiceBeforeReplacementActions: ({ onCommitted }: { onCommitted: () => Promise<void> }) => (
   <button type="button" onClick={() => void onCommitted()}>模擬正式更換完成</button>
 ) }));
 const CASE = 'CASE-OWNER-CALLBACK';
@@ -62,7 +62,7 @@ describe('Beta 實際 owner 元件只在正式回讀成立後通知外層', () =
     mocks.willingness.mockResolvedValue({ status: 'willing', event_id: 18 });
     mocks.assignment.mockResolvedValue({ case_no: CASE, assignments: [], scheduling_version: 4,
       scheduling_generation: 2, contracted_service_days: 3, service_hours_per_day: 8 });
-    mocks.active.mockResolvedValue({ planId: 51, status: 'proposed', activeLockId: null, communicationVersion: 4, segments: [] });
+    mocks.active.mockResolvedValue({ planId: 51, status: 'proposed', activeLockId: null, planVersion: 1, segments: [] });
     mocks.contact.mockResolvedValue({ plan: { id: 51, case_no: CASE, communication_version: 4, status: 'proposed', is_active: 1 },
       segments: [], all_willing: true, customer_decision: 'pending', customer_profiles_status: null, customer_profiles_manual_confirmation: null });
   });

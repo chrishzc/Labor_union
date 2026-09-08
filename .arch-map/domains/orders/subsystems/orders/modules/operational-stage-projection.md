@@ -11,6 +11,12 @@
 - primary:
   - `subsystems/orders/stage_projection_query.py`
   - `subsystems/orders/core_stage_projection_query.py`
+  - `subsystems/orders/core_stage_filter_query.py`
+  - `ui_react/src/api/orders/load_all_core_stage_timelines.ts`
+  - `ui_react/src/api/orders/order_core_stage_projection_client.ts`
+  - `ui_react/src/adapters/orders/order_core_stage_projection_adapter.ts`
+  - `ui_react/src/pages/OrderWorkbenchV2Page.tsx`
+  - `ui_react/src/components/OrderWorkbenchV2Drawer.tsx`
   - `infrastructure/mysql/orders_stage_projection_repository.py`
 - entrypoints:
   - `api/routes/orders_stage_projection.py`
@@ -31,3 +37,9 @@
 
 ## Change triggers
 Reconcile when stage identity, availability semantics, owner facts, API route, or projection test root changes.
+
+## Verification
+layout_status: custom_current
+UI verification follows the same Orders owner hierarchy inside the Vitest source root; Python verification remains in the repository test root.
+- test_root: `tests/domains/orders/subsystems/orders/modules/operational-stage-projection/`
+- test_root: `ui_react/src/tests/domains/orders/subsystems/orders/modules/operational-stage-projection/`

@@ -100,6 +100,20 @@ Orders 不擁有：
 - 本看板是唯讀 Query projection，不得為了排除完成訂單而修改 Orders status、隱藏 blocked／unavailable
   案件或在瀏覽器重算 lifecycle。
 
+#### 3.1.2.1 Beta 看板依作業狀態分類（2026-09-08 人工裁決）
+
+本節只調整 Beta 看板的唯讀查詢與 presentation，覆蓋以 normal／historical 作為主要頁籤的舊做法；不改 lifecycle evaluator、資料來源、歷史採納或任一 mutation owner。
+
+- **WB-STATE-01**：主要分類為「進行中訂單／完成訂單／取消訂單」。Query 依已持久化的 canonical lifecycle 分組，不得在 React 依中文 status、日期或是否由歷史匯入重新判斷。進行中包含 `待補件`、`洽談中`、`訂單成立`、`服務中`、`歷史訂單－未服務`、`歷史訂單－服務中`；完成包含 `訂單完成`、`歷史訂單－服務完成`、`歷史訂單－帳務完成`；取消包含 `訂單取消`。三集合互斥且涵蓋現行 lifecycle enum。
+- **WB-STATE-02**：進行中提供全部案件與十三階段篩選。歷史案件有正式 `historical_current_owner_stage_code` 時依該 current owner stage 納入階段篩選／counts；無 current owner stage 時仍保留在全部案件中，不得把 immutable historical baseline 當成真實完成事件。
+- **WB-STATE-03**：完成及取消清單與案件抽屜不呈現十三步驟導覽／進度。完成代表服務完成，不能冒充客戶、月嫂或補助已結清；仍顯示既有正式結算狀態、提醒與查閱入口。取消保留既有紀錄與具資格驗證的受控重開入口。來源與歷史 evidence 留在案件詳情，不能再形成主要工作分類。
+- **WB-STATE-04**：切換分類不帶入另一分類的 stage／substatus 篩選。沿用本節的完整 continuation、stale request 取消與 partial failure 規則；不得把前 200 筆當作完整結果。所有分類、counts 與 pagination 共用 server predicate。
+- **WB-STATE-05**：既有 `/api/orders/core-stage-timelines` 增加可選 `workbench_scope=in_progress|completed|cancelled`。未指定時維持既有 branch／historical Query 契約，供歷史詳情與既有 consumers 使用。新的工作分類不與 legacy branch／historical facet 合併使用；完成及取消分類不得帶 stage／substatus。此 additive Query 不增加寫入、migration、provider effect 或改變生命週期事實。
+
+驗收：混合一般與歷史案件時，每件只出現在正確分類；歷史未服務案件不因沒有正式步驟而消失；完成／取消頁面及抽屜沒有十三步驟；已完工但未結清案件仍呈現真實結算提醒；分類切換不保留無效篩選；跨頁集合完整、續讀失敗不顯示假完整結果；舊 branch Query 與歷史 evidence 查閱保持可用。
+
+來源：2026-09-08 使用者要求以進行中／完成／取消取代正常／歷史分類並移除完成／取消的十三步驟；完成定義沿用本文件 §3.3，歷史狀態沿用 Historical Orders 已有正式 lifecycle。分類屬 presentation Query contract，不構成新 business state。
+
 ### 3.1.3 訂單管理未完成清單（2026-08-25 人工裁決）
 
 - 訂單管理主清單採與代辦看板相同的候選集合、完整 continuation、identity 去重、deterministic ordering
@@ -339,8 +353,18 @@ consumer 不得修改 Orders 或任何其他 Domain root；binding／menu versio
 
 - 在尚未形成正式 assignment 前，服務日期確認 UI 必須由 server 精算：`週休1日` 預設週日、
   `週休2日` 預設週六與週日；國定假日預設休假，事前請假由人工明示。
+- 國定假日只有在目前正式媒合方案針對該日期明確形成「客戶及該方案全部目標月嫂均同意上班」的
+  version-bound agreement 時，才可列為服務日。agreement 必須綁定 current matching plan／segment、
+  服務日期、客戶與每位目標月嫂的個別肯認、操作者、非空協調依據及 idempotency identity；plan、
+  segment、日期或任一確認變動即失效。缺少、過期、拒絕或無法回讀任一肯認時一律維持休假，並由
+  server 順延，UI 不得以勾選、預設值或重送舊回覆推定同意。
+- 一般月嫂意願或客戶接受正式媒合方案，只證明對該方案的媒合決策；它不等於國定假日上班同意，
+  不得重用為前項 agreement。LINE 不是唯一入口；電話、現場或紙本協調可由具有既有人工媒合權限的
+  內部操作者補登，但仍須保存同一組 current-plan/date-bound 個別肯認，不得偽造 LINE 發送或回覆。
 - 固定週休可由人工覆寫為服務日，並以 `custom_work_dates` 重跑 server 精算；此欄位只覆寫
-  固定週休，不能覆寫國定假日休假或事前請假。取消覆寫後必須恢復該固定週休。
+  固定週休，不能覆寫國定假日休假或事前請假。取消覆寫後必須恢復該固定週休；國定假日的
+  `is_work_day` 只能由前述 agreement 的 owner readback 決定，不得接受任意
+  `custom_holiday_rest_dates` 集合來反轉。
 - UI 不得自行加減、重排或提交服務日；每次覆寫都必須重新取得目標合約天數完全守恆、且全數位於
   server `selectable_dates` 的結果，才可進入既有服務日期 Preview／Apply。
 - 一般案件本節只確認 Orders 的事前服務日期，不得直接切換 `staff_schedule.is_work_day`、建立 assignment

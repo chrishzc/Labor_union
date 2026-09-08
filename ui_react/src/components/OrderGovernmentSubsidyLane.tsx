@@ -102,7 +102,7 @@ export const OrderGovernmentSubsidyLane: FC = () => {
       >
         <span>
           <strong>政府補助結算支線</strong>
-          <small>正式 Government Subsidy owner facts；不改 13 階段。</small>
+          <small>查看補助申請、入款與結算進度。</small>
         </span>
         <b>{open ? '檢視中' : '開啟'}</b>
       </button>

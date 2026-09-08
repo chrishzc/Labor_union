@@ -112,6 +112,31 @@ const ManualCustomerProfilesReceiptSchema = z.strictObject({
   replayed: z.boolean(),
 });
 
+const HolidayWorkParticipantDecisionSchema = z.strictObject({
+  participant_role: z.enum(['customer', 'caregiver']),
+  segment_id: z.number().int().positive().nullable(),
+  decision: z.enum(['accepted', 'declined']),
+});
+const HolidayWorkAgreementPreviewSchema = z.strictObject({
+  case_no: z.string().min(1).max(50),
+  plan_id: z.number().int().positive(),
+  expected_version: z.number().int().nonnegative(),
+  holiday_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  agreement_status: z.enum(['accepted', 'declined']),
+  participant_decisions: z.array(HolidayWorkParticipantDecisionSchema).min(2).max(5),
+  preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+  apply_allowed: z.boolean(),
+});
+const HolidayWorkAgreementReceiptSchema = z.strictObject({
+  agreement_id: z.number().int().positive(),
+  plan_id: z.number().int().positive(),
+  holiday_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  plan_version: z.number().int().nonnegative(),
+  agreement_status: z.enum(['accepted', 'declined']),
+  participant_decisions: z.array(HolidayWorkParticipantDecisionSchema).min(2).max(5),
+  replayed: z.boolean(),
+});
+
 const ManualCustomerProfilesPreviewEnvelopeSchema = z.strictObject({
   success: z.boolean(),
   message: z.string(),
@@ -125,6 +150,12 @@ const ManualCustomerProfilesReceiptEnvelopeSchema = z.strictObject({
   data: ManualCustomerProfilesReceiptSchema.nullable(),
   error: z.string().nullable(),
 });
+const HolidayWorkAgreementPreviewEnvelopeSchema = z.strictObject({
+  success: z.boolean(), message: z.string(), data: HolidayWorkAgreementPreviewSchema.nullable(), error: z.string().nullable(),
+});
+const HolidayWorkAgreementReceiptEnvelopeSchema = z.strictObject({
+  success: z.boolean(), message: z.string(), data: HolidayWorkAgreementReceiptSchema.nullable(), error: z.string().nullable(),
+});
 
 export type CustomerDecisionReceipt = z.infer<typeof CustomerDecisionReceiptSchema>;
 export type FormalPlanContactState = z.infer<typeof FormalPlanContactStateSchema>;
@@ -132,6 +163,9 @@ export type CustomerProfilesNotificationReceipt = z.infer<typeof CustomerProfile
 export type ManualCustomerProfilesPreview = z.infer<typeof ManualCustomerProfilesPreviewSchema>;
 export type ManualCustomerProfilesReceipt = z.infer<typeof ManualCustomerProfilesReceiptSchema>;
 export type ManualMatchingConfirmationMethod = 'phone' | 'in_person' | 'paper' | 'other';
+export type HolidayWorkParticipantDecision = z.infer<typeof HolidayWorkParticipantDecisionSchema>;
+export type HolidayWorkAgreementPreview = z.infer<typeof HolidayWorkAgreementPreviewSchema>;
+export type HolidayWorkAgreementReceipt = z.infer<typeof HolidayWorkAgreementReceiptSchema>;
 
 function canonicalCaseNo(caseNo: string): string {
   const canonical = caseNo.trim();
@@ -252,6 +286,58 @@ export const matchingPlanCommunicationClient = {
     if (decoded.data.case_no !== canonical || decoded.data.plan_id !== preview.plan_id || decoded.data.preview_fingerprint !== preview.preview_fingerprint) {
       throw new Error('客戶履歷人工送達 receipt identity 不一致。');
     }
+    return decoded.data;
+  },
+
+  async previewHolidayWorkAgreement(
+    caseNo: string,
+    planId: number,
+    expectedVersion: number,
+    holidayDate: string,
+    participantDecisions: HolidayWorkParticipantDecision[],
+    reason: string,
+  ): Promise<HolidayWorkAgreementPreview> {
+    const canonical = canonicalCaseNo(caseNo);
+    const actor = sessionClient.getUser()?.username.trim() ?? '';
+    const token = sessionClient.getToken();
+    const canonicalReason = reason.trim();
+    if (!actor || !token) throw new ApiHttpError(401, 'UNAUTHENTICATED', '請先登入。');
+    if (!Number.isInteger(planId) || planId <= 0 || !Number.isInteger(expectedVersion) || expectedVersion < 0) throw new Error('正式媒合方案版本無效，請重新載入。');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(holidayDate)) throw new Error('請選擇國定假日日期。');
+    if (!canonicalReason || canonicalReason.length > 500) throw new Error('請填寫 1 至 500 字的雙方協調依據。');
+    const decoded = decodePayload(
+      HolidayWorkAgreementPreviewEnvelopeSchema,
+      await transport.post(
+        `/api/v1/orders/${encodeURIComponent(canonical)}/matching-plans/${planId}/holiday-work-agreements/preview`,
+        { actor, expected_version: expectedVersion, holiday_date: holidayDate, reason: canonicalReason, participant_decisions: participantDecisions },
+        { token },
+      ),
+    );
+    if (!decoded.success || decoded.data === null) throw new ApiHttpError(422, 'HOLIDAY_WORK_AGREEMENT_PREVIEW_FAILED', decoded.error ?? decoded.message, false, decoded);
+    if (decoded.data.case_no !== canonical || decoded.data.plan_id !== planId || decoded.data.expected_version !== expectedVersion) throw new Error('國定假日協議 Preview identity 不一致。');
+    return decoded.data;
+  },
+
+  async applyHolidayWorkAgreement(preview: HolidayWorkAgreementPreview, reason: string): Promise<HolidayWorkAgreementReceipt> {
+    const canonical = canonicalCaseNo(preview.case_no);
+    const actor = sessionClient.getUser()?.username.trim() ?? '';
+    const token = sessionClient.getToken();
+    if (!actor || !token) throw new ApiHttpError(401, 'UNAUTHENTICATED', '請先登入。');
+    const decoded = decodePayload(
+      HolidayWorkAgreementReceiptEnvelopeSchema,
+      await transport.post(
+        `/api/v1/orders/${encodeURIComponent(canonical)}/matching-plans/${preview.plan_id}/holiday-work-agreements`,
+        {
+          actor, expected_version: preview.expected_version, holiday_date: preview.holiday_date,
+          reason: reason.trim(), participant_decisions: preview.participant_decisions,
+          preview_fingerprint: preview.preview_fingerprint,
+          event_key: `orders-holiday-work-agreement-${preview.plan_id}-${crypto.randomUUID()}`,
+        },
+        { token },
+      ),
+    );
+    if (!decoded.success || decoded.data === null) throw new ApiHttpError(422, 'HOLIDAY_WORK_AGREEMENT_APPLY_FAILED', decoded.error ?? decoded.message, false, decoded);
+    if (decoded.data.plan_id !== preview.plan_id || decoded.data.holiday_date !== preview.holiday_date) throw new Error('國定假日協議 receipt identity 不一致。');
     return decoded.data;
   },
 

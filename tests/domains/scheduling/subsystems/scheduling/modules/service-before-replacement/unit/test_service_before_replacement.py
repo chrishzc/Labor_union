@@ -172,6 +172,48 @@ def test_server_owns_step_two_three_four_and_reuse_proof_is_required():
     assert query_service_before_replacement(_facts(proof=_proof(accepted=True, coverage=False))).resume_step is ReplacementResumeStep.STEP_2
 
 
+def test_r04_committed_successor_is_read_only_and_preserves_its_resume_step():
+    successor = SuccessorRoundFact(
+        CASE,
+        "successor-round:CASE-RPRE-1:14",
+        "replacement-generation:CASE-RPRE-1:9",
+        "replacement-event:CASE-RPRE-1:14",
+        9,
+        14,
+        1,
+        None,
+        ReplacementResumeStep.STEP_4,
+    )
+    facts = _facts(
+        ReplacementScenario.R04,
+        roots=(
+            ReplacementRootIdentity(
+                ReplacementRootKind.SUCCESSOR_ROUND,
+                successor.round_identity,
+                CASE,
+            ),
+        ),
+    )
+    facts = ServiceBeforeReplacementFacts(
+        facts.case_no, facts.scenario, facts.actual_service_dates,
+        facts.prior_generation_identity, facts.prior_event_identity,
+        facts.generation_version, facts.event_version, facts.current_roots,
+        facts.retained_history, facts.candidate_pool_reuse,
+        facts.actual_service_proof_available, facts.actual_service_proof,
+        facts.aggregate_version, facts.prior_aggregate_identity, facts.prior_case_no,
+        facts.replacement_reason, facts.reason_evidence, successor,
+    )
+
+    query = query_service_before_replacement(facts)
+    candidate = preview_service_before_replacement(facts)
+
+    assert query.blockers == ("replacement_successor_exists",)
+    assert query.resume_step is ReplacementResumeStep.STEP_4
+    assert query.successor_round == successor
+    assert candidate.can_apply is False
+    assert candidate.blockers == ("replacement_successor_exists",)
+
+
 def test_preview_rebinds_fresh_reuse_proof_to_new_successor_round():
     candidate = preview_service_before_replacement(_facts(proof=_proof(accepted=True)))
 

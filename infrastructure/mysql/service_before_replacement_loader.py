@@ -16,6 +16,7 @@ from domains.scheduling.service_before_replacement import (
     MatchingZeroCandidateProof,
     ReplacementRootIdentity,
     ReplacementRootKind,
+    ReplacementResumeStep,
     ReplacementScenario,
     ServiceBeforeReplacementFacts,
     SuccessorRoundFact,
@@ -56,8 +57,13 @@ class MySqlServiceBeforeReplacementLoader:
                         lock_staff_occupancy_mutex(cursor, list(locked_staff_ids))
                     )
             successor = (
-                self._successor_round(case_no, base=base, for_update=for_update)
-                if scenario is ReplacementScenario.R07
+                self._successor_round(
+                    case_no,
+                    base=base,
+                    expected_scenario=scenario,
+                    for_update=for_update,
+                )
+                if scenario in (ReplacementScenario.R04, ReplacementScenario.R07)
                 else None
             )
             zero_candidate_proof = (
@@ -65,8 +71,16 @@ class MySqlServiceBeforeReplacementLoader:
                 if scenario is ReplacementScenario.R07 and successor is None
                 else None
             )
-            prior = self._r07_prior(case_no, base, for_update) if successor is not None else base
-            roots = (
+            prior = self._successor_prior(case_no, base, for_update) if successor is not None else base
+            retained_history = ()
+            if scenario is ReplacementScenario.R04 and successor is not None:
+                roots, retained_history = self._completed_r04_roots(
+                    case_no,
+                    successor,
+                    for_update=for_update,
+                )
+            else:
+                roots = (
                 self._scenario_roots(
                     case_no,
                     scenario,
@@ -83,7 +97,7 @@ class MySqlServiceBeforeReplacementLoader:
                     schedules,
                     for_update=for_update,
                 )
-            )
+                )
             actual_dates = self._started_service_dates(base, schedules)
             proof = AuthoritativeActualServiceProof(
                 case_no=case_no,
@@ -91,7 +105,13 @@ class MySqlServiceBeforeReplacementLoader:
                 source_identity=f"scheduling.official-service:{case_no}:generation:{base['generation_id']}",
                 source_version=_required_int(base, "aggregate_version"),
             )
-            reuse = self._candidate_reuse(case_no, base, for_update=for_update)
+            # A committed R-04 successor carries its own immutable resume step;
+            # do not re-evaluate a mutable candidate pool merely to read it.
+            reuse = (
+                None
+                if scenario is ReplacementScenario.R04 and successor is not None
+                else self._candidate_reuse(case_no, base, for_update=for_update)
+            )
             reason = getattr(request, "reason", None) or "service_before_replacement"
             evidence = getattr(request, "evidence", None) or ()
             if not isinstance(evidence, (tuple, list)):
@@ -114,6 +134,7 @@ class MySqlServiceBeforeReplacementLoader:
                     prior, "expected_event_version" if successor is not None else "event_version"
                 ),
                 current_roots=roots,
+                retained_history=retained_history,
                 candidate_pool_reuse=reuse,
                 actual_service_proof_available=True,
                 actual_service_proof=proof,
@@ -974,14 +995,14 @@ class MySqlServiceBeforeReplacementLoader:
             candidate_identity=candidate_identity,
         )
 
-    def _successor_round(self, case_no, *, base=None, for_update):
-        row = self._one("SELECT successor.successor_round_identity,successor.replacement_generation_id,successor.scenario,event.replacement_generation_id AS event_generation_id,event.replacement_generation_identity,event.replacement_event_identity,event.resulting_generation_version,event.resulting_event_version,successor.candidate_count,successor.zero_candidate_disposition FROM scheduling_service_before_replacement_successors successor JOIN scheduling_service_before_replacement_events event ON event.id=successor.replacement_event_id WHERE successor.case_no=%s ORDER BY successor.id DESC LIMIT 1", (case_no,), for_update)
+    def _successor_round(self, case_no, *, base=None, expected_scenario=ReplacementScenario.R07, for_update):
+        row = self._one("SELECT successor.successor_round_identity,successor.replacement_generation_id,successor.scenario,successor.resume_step,event.replacement_generation_id AS event_generation_id,event.replacement_generation_identity,event.replacement_event_identity,event.resulting_generation_version,event.resulting_event_version,successor.candidate_count,successor.zero_candidate_disposition FROM scheduling_service_before_replacement_successors successor JOIN scheduling_service_before_replacement_events event ON event.id=successor.replacement_event_id WHERE successor.case_no=%s ORDER BY successor.id DESC LIMIT 1", (case_no,), for_update)
         if row is None:
             return None
         if base is not None:
             expected_generation_identity = f"replacement-generation:{case_no}:{_required_positive_int(base, 'generation_number')}"
             if (
-                row.get("scenario") != "R-07"
+                row.get("scenario") != expected_scenario.value
                 or _required_positive_int(row, "replacement_generation_id") != _required_positive_int(base, "generation_id")
                 or _required_positive_int(row, "event_generation_id") != _required_positive_int(base, "generation_id")
                 or row.get("replacement_generation_identity") != expected_generation_identity
@@ -989,9 +1010,15 @@ class MySqlServiceBeforeReplacementLoader:
                 or _required_positive_int(row, "resulting_event_version") != _required_int(base, "event_version")
             ):
                 raise ServiceBeforeReplacementSourceUnavailable("replacement_successor_current_binding_drift")
-        return SuccessorRoundFact(case_no, _required_text(row, "successor_round_identity"), _required_text(row, "replacement_generation_identity"), _required_text(row, "replacement_event_identity"), _required_nonnegative_int(row, "resulting_generation_version"), _required_nonnegative_int(row, "resulting_event_version"), _required_nonnegative_int(row, "candidate_count"), row.get("zero_candidate_disposition"))
+        try:
+            resume_step = ReplacementResumeStep(_required_text(row, "resume_step"))
+        except ValueError as error:
+            raise ServiceBeforeReplacementSourceUnavailable(
+                "replacement_successor_resume_step_invalid"
+            ) from error
+        return SuccessorRoundFact(case_no, _required_text(row, "successor_round_identity"), _required_text(row, "replacement_generation_identity"), _required_text(row, "replacement_event_identity"), _required_nonnegative_int(row, "resulting_generation_version"), _required_nonnegative_int(row, "resulting_event_version"), _required_nonnegative_int(row, "candidate_count"), row.get("zero_candidate_disposition"), resume_step)
 
-    def _r07_prior(self, case_no, base, for_update):
+    def _successor_prior(self, case_no, base, for_update):
         row = self._one("SELECT prior_generation_identity,prior_event_identity,expected_aggregate_version,expected_generation_version,expected_event_version,replacement_generation_id,resulting_generation_version,resulting_event_version FROM scheduling_service_before_replacement_events WHERE case_no=%s ORDER BY id DESC LIMIT 1", (case_no,), for_update)
         if row is None:
             raise ServiceBeforeReplacementSourceUnavailable("replacement_successor_prior_unavailable")
@@ -1004,6 +1031,56 @@ class MySqlServiceBeforeReplacementLoader:
         _required_text(row, "prior_generation_identity")
         _required_text(row, "prior_event_identity")
         return row
+
+    def _completed_r04_roots(self, case_no, successor, *, for_update):
+        """Read immutable R-04 dispositions after its old schedule was retired."""
+        rows = self._all(
+            "SELECT root.root_identity,root.root_kind,root.disposition "
+            "FROM scheduling_service_before_replacement_roots root "
+            "JOIN scheduling_service_before_replacement_events event "
+            "ON event.id=root.replacement_event_id "
+            "WHERE root.case_no=%s AND event.replacement_event_identity=%s "
+            "ORDER BY root.disposition,root.canonical_ordinal",
+            (case_no, successor.event_identity),
+            for_update,
+        )
+        current = []
+        history = []
+        seen = set()
+        expected_superseded = {
+            ReplacementRootKind.EFFECTIVE_GENERATION,
+            ReplacementRootKind.ASSIGNMENT,
+            ReplacementRootKind.OFFICIAL_SCHEDULE,
+        }
+        found_superseded = set()
+        for row in rows:
+            try:
+                root_id = _required_text(row, "root_identity")
+                kind = ReplacementRootKind(_required_text(row, "root_kind"))
+                disposition = _required_text(row, "disposition")
+            except ValueError as error:
+                raise ServiceBeforeReplacementSourceUnavailable(
+                    "replacement_successor_root_malformed"
+                ) from error
+            if root_id in seen:
+                raise ServiceBeforeReplacementSourceUnavailable("replacement_successor_root_ambiguous")
+            seen.add(root_id)
+            if disposition == "created" and kind is ReplacementRootKind.SUCCESSOR_ROUND and root_id == successor.round_identity:
+                current.append(ReplacementRootIdentity(kind, root_id, case_no))
+            elif disposition == "superseded" and kind in expected_superseded:
+                found_superseded.add(kind)
+                history.append(ReplacementRootIdentity(kind, root_id, case_no, current=False))
+            elif disposition == "retained":
+                history.append(ReplacementRootIdentity(kind, root_id, case_no, current=False))
+            else:
+                raise ServiceBeforeReplacementSourceUnavailable("replacement_successor_root_binding_drift")
+        if (
+            len(current) != 1
+            or found_superseded != expected_superseded
+            or len(history) < len(expected_superseded)
+        ):
+            raise ServiceBeforeReplacementSourceUnavailable("replacement_successor_root_binding_drift")
+        return tuple(current), tuple(history)
 
     def _one(self, sql, params, for_update):
         rows = self._all(sql, params, for_update)

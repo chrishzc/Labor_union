@@ -29,6 +29,7 @@ from subsystems.orders.core_stage_filter_query import (
     CoreStageProjectionFilterQuery,
     CoreStageSubstatusCode,
     HistoricalLifecycleFacet,
+    WorkbenchScope,
     query_core_stage_page,
 )
 from subsystems.orders.core_stage_projection_query import (
@@ -71,6 +72,7 @@ def get_order_core_stage_timelines(
     warning_only: Annotated[bool, Query()] = False,
     branch_type: Annotated[CoreStageBranchType | None, Query()] = None,
     historical_lifecycle: Annotated[HistoricalLifecycleFacet | None, Query()] = None,
+    workbench_scope: Annotated[WorkbenchScope | None, Query()] = None,
     if_none_match: str | None = Header(None, alias="If-None-Match"),
     principal: AdminPrincipal = Depends(require_system_admin),
     application: OrdersStageProjectionApplication = Depends(get_orders_stage_projection_application),
@@ -90,6 +92,7 @@ def get_order_core_stage_timelines(
                 warning_only=warning_only,
                 branch_type=branch_type,
                 historical_lifecycle=historical_lifecycle,
+                workbench_scope=workbench_scope,
             ),
         )
         view = OrderCoreStageTimelinePageView.model_validate(page, from_attributes=True)

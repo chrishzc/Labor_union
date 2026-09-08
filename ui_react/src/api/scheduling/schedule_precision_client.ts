@@ -9,10 +9,10 @@ import { ApiDecodeError, ApiHttpError } from '../shared/typed_errors';
 
 const DateText = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 export const SchedulePrecisionRequestSchema = z.strictObject({
+  case_no: z.string().min(1).max(50).optional(),
   actual_start_date: DateText,
   target_service_days: z.number().int().positive(),
   service_mode: z.enum(['週休1日', '週休2日', '連續服務']),
-  custom_holiday_rest_dates: z.array(DateText).optional(),
   custom_leave_dates: z.array(DateText).optional(),
   custom_work_dates: z.array(DateText).optional(),
 });

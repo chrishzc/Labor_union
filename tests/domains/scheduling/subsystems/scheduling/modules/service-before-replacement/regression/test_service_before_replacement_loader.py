@@ -11,7 +11,9 @@ import pytest
 from domains.scheduling.service_before_replacement import (
     ReplacementRootIdentity,
     ReplacementRootKind,
+    ReplacementResumeStep,
     ReplacementScenario,
+    SuccessorRoundFact,
 )
 from infrastructure.mysql.service_before_replacement_loader import (
     MySqlServiceBeforeReplacementLoader,
@@ -80,6 +82,68 @@ def test_loader_uses_explicit_scenario_and_only_started_official_moments():
     assert date(2026, 8, 29) not in facts.actual_service_dates
     assert facts.prior_event_identity == "scheduling-rebuild-event:CASE-1:23"
     assert facts.replacement_reason == "人工換人"
+
+
+def test_r04_committed_successor_reads_immutable_history_without_rechecking_retired_schedule():
+    successor = SuccessorRoundFact(
+        "CASE-1",
+        "successor-round:CASE-1:7",
+        "replacement-generation:CASE-1:7",
+        "replacement-event:CASE-1:7",
+        7,
+        9,
+        1,
+        None,
+        ReplacementResumeStep.STEP_4,
+    )
+
+    class Loader(MySqlServiceBeforeReplacementLoader):
+        def _scheduling_base(self, case_no, *, for_update):
+            return ({
+                "service_start_time": time(8), "generation_id": 70,
+                "generation_number": 7, "aggregate_version": 7,
+                "prior_event_identity": successor.event_identity, "event_version": 9,
+            }, ())
+
+        def _successor_round(self, case_no, *, base=None, expected_scenario, for_update):
+            assert expected_scenario is ReplacementScenario.R04
+            return successor
+
+        def _successor_prior(self, case_no, base, for_update):
+            return {
+                "prior_generation_identity": "scheduling-generation:CASE-1:6:6",
+                "prior_event_identity": "scheduling-rebuild-event:CASE-1:6",
+                "expected_aggregate_version": 6,
+                "expected_generation_version": 6,
+                "expected_event_version": 8,
+            }
+
+        def _completed_r04_roots(self, case_no, loaded_successor, *, for_update):
+            assert loaded_successor == successor
+            return (
+                (ReplacementRootIdentity(ReplacementRootKind.SUCCESSOR_ROUND, successor.round_identity, case_no),),
+                tuple(
+                    ReplacementRootIdentity(kind, f"{kind.value}:old", case_no, current=False)
+                    for kind in (
+                        ReplacementRootKind.EFFECTIVE_GENERATION,
+                        ReplacementRootKind.ASSIGNMENT,
+                        ReplacementRootKind.OFFICIAL_SCHEDULE,
+                    )
+                ),
+            )
+
+        def _started_service_dates(self, base, schedules):
+            return ()
+
+    facts = Loader(object(), object()).load_facts(
+        SimpleNamespace(case_no="CASE-1", scenario=ReplacementScenario.R04),
+        for_update=False,
+    )
+
+    assert facts.successor_round == successor
+    assert facts.current_roots[0].root_id == successor.round_identity
+    assert len(facts.retained_history) == 3
+    assert facts.candidate_pool_reuse is None
 
 
 def test_mysql_time_normalizes_driver_timedelta_without_changing_wall_time():

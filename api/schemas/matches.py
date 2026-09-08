@@ -5,7 +5,7 @@
 ================================================================================
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, PositiveInt
@@ -214,3 +214,49 @@ class MatchingCaregiverWillingnessReceiptView(_ClosedModel):
 class MatchingPlanCancellationReceiptView(_ClosedModel):
     status: Literal["cancelled", "idempotent_replay"]
     event_id: PositiveInt
+
+
+class HolidayWorkParticipantDecisionInput(_ClosedModel):
+    participant_role: Literal["customer", "caregiver"]
+    segment_id: PositiveInt | None = None
+    decision: Literal["accepted", "declined"]
+
+
+class HolidayWorkAgreementPreviewRequest(_ClosedModel):
+    actor: str = Field(min_length=1, max_length=191)
+    expected_version: int = Field(ge=0)
+    holiday_date: date
+    reason: str = Field(min_length=1, max_length=500)
+    participant_decisions: list[HolidayWorkParticipantDecisionInput] = Field(min_length=2, max_length=5)
+
+
+class HolidayWorkAgreementApplyRequest(HolidayWorkAgreementPreviewRequest):
+    event_key: str = Field(min_length=1, max_length=191)
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class HolidayWorkParticipantDecisionView(_ClosedModel):
+    participant_role: Literal["customer", "caregiver"]
+    segment_id: PositiveInt | None
+    decision: Literal["accepted", "declined"]
+
+
+class HolidayWorkAgreementPreviewView(_ClosedModel):
+    case_no: str = Field(min_length=1, max_length=50)
+    plan_id: PositiveInt
+    expected_version: int = Field(ge=0)
+    holiday_date: date
+    agreement_status: Literal["accepted", "declined"]
+    participant_decisions: list[HolidayWorkParticipantDecisionView] = Field(min_length=2, max_length=5)
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    apply_allowed: bool
+
+
+class HolidayWorkAgreementReceiptView(_ClosedModel):
+    agreement_id: PositiveInt
+    plan_id: PositiveInt
+    holiday_date: date
+    plan_version: int = Field(ge=0)
+    agreement_status: Literal["accepted", "declined"]
+    participant_decisions: list[HolidayWorkParticipantDecisionView] = Field(min_length=2, max_length=5)
+    replayed: bool

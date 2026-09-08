@@ -8,22 +8,22 @@ import {
   type CoreStageCode,
   type CoreStageStatus,
   type CoreStageSubstatusCode,
-} from '../api/orders/order_core_stage_projection_schemas';
-import type { OrderCoreStageProjectionQueryParams } from '../api/orders/order_core_stage_projection_client';
-import { OrderWorkbenchV2Page } from '../pages/OrderWorkbenchV2Page';
+} from '../../../../../../../api/orders/order_core_stage_projection_schemas';
+import type { OrderCoreStageProjectionQueryParams } from '../../../../../../../api/orders/order_core_stage_projection_client';
+import { OrderWorkbenchV2Page } from '../../../../../../../pages/OrderWorkbenchV2Page';
 
 const clientMocks = vi.hoisted(() => ({
   getCoreStageTimelines: vi.fn(),
   loadSummaries: vi.fn(),
 }));
 
-vi.mock('../api/orders/order_core_stage_projection_client', () => ({
+vi.mock('../../../../../../../api/orders/order_core_stage_projection_client', () => ({
   orderCoreStageProjectionClient: {
     getCoreStageTimelines: clientMocks.getCoreStageTimelines,
   },
 }));
 
-vi.mock('../api/orders/order_query_client', () => ({
+vi.mock('../../../../../../../api/orders/order_query_client', () => ({
   loadAllOrderSummaries: clientMocks.loadSummaries,
   ordersQueryClient: { getOrderSummaries: vi.fn() },
 }));
@@ -170,7 +170,7 @@ function formalServicePage(substatus?: CoreStageSubstatusCode) {
     timeline(caseNo, 'formal_service', 'not_started'));
   const active = ['CASE-ACTIVE-1', 'CASE-ACTIVE-2', 'CASE-ACTIVE-3', 'CASE-ACTIVE-4'].map((caseNo) =>
     timeline(caseNo, 'formal_service', 'in_progress'));
-  const all = [...planned, ...active];
+  const all = [...active, ...planned];
   const items = substatus === 'waiting_to_start'
     ? planned
     : substatus === 'service_in_progress'
@@ -202,7 +202,7 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
       return corePage([
         timeline('CASE-INTAKE', 'intake_validation', 'not_started'),
       ], {
-        selectedStage: 'intake_validation',
+        selectedStage: params.stage,
         stageCounts: { intake_validation: 2, formal_service: 7 },
         substatusCounts: { intake_pending: 2 },
       });
@@ -229,7 +229,7 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
     fireEvent.click(screen.getByRole('button', { name: /待開工 3/ }));
     await waitFor(() => expect(clientMocks.getCoreStageTimelines).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        branch_type: 'normal',
+        workbench_scope: 'in_progress',
         stage: 'formal_service',
         substatus_code: 'waiting_to_start',
       }),
@@ -241,7 +241,7 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
     fireEvent.click(screen.getByRole('button', { name: /服務進行中 4/ }));
     await waitFor(() => expect(clientMocks.getCoreStageTimelines).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        branch_type: 'normal',
+        workbench_scope: 'in_progress',
         stage: 'formal_service',
         substatus_code: 'service_in_progress',
       }),
@@ -251,9 +251,9 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
     expect(screen.queryByText('CASE-PLAN-1')).not.toBeInTheDocument();
   });
 
-  it('搜尋、阻塞、提醒與 normal/historical/cancelled 都傳入正式 query', async () => {
+  it('搜尋、阻塞、提醒與 進行中／完成／取消 都傳入正式 query', async () => {
     clientMocks.getCoreStageTimelines.mockImplementation(async (params: OrderCoreStageProjectionQueryParams) => {
-      if (params.branch_type === 'historical') {
+      if (params.workbench_scope === 'completed') {
         return corePage([
           timeline('CASE-HISTORY', null, 'completed', {
             lifecycle: '歷史訂單－服務完成',
@@ -261,7 +261,7 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
           }),
         ]);
       }
-      if (params.branch_type === 'cancelled') {
+      if (params.workbench_scope === 'cancelled') {
         return corePage([
           timeline('CASE-CANCELLED', null, 'completed', {
             lifecycle: '訂單取消',
@@ -275,7 +275,7 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
           warnings: [{ code: 'intake_warning', message: '請確認聯絡資訊' }],
         }),
       ], {
-        selectedStage: 'intake_validation',
+        selectedStage: params.stage,
         stageCounts: { intake_validation: 1 },
         substatusCounts: { intake_blocked: 1 },
       });
@@ -283,7 +283,7 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
 
     render(<OrderWorkbenchV2Page />);
     await waitFor(() => expect(clientMocks.getCoreStageTimelines).toHaveBeenCalledWith(
-      expect.objectContaining({ branch_type: 'normal', stage: 'intake_validation' }),
+      expect.objectContaining({ workbench_scope: 'in_progress', stage: undefined }),
       expect.any(Object),
     ));
 
@@ -307,21 +307,23 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
       expect.any(Object),
     ));
 
-    fireEvent.click(screen.getByRole('button', { name: '歷史訂單' }));
+    fireEvent.click(screen.getByRole('button', { name: '完成訂單' }));
     await waitFor(() => expect(clientMocks.getCoreStageTimelines).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        branch_type: 'historical',
+        workbench_scope: 'completed',
         stage: undefined,
         substatus_code: undefined,
       }),
       expect.any(Object),
     ));
     await waitFor(() => expect(screen.getByText('CASE-HISTORY')).toBeInTheDocument());
+    expect(screen.queryByRole('region', { name: '13 個核心訂單階段' })).not.toBeInTheDocument();
+    expect(screen.getByText('客戶端：客戶已結清')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '取消訂單' }));
     await waitFor(() => expect(clientMocks.getCoreStageTimelines).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        branch_type: 'cancelled',
+        workbench_scope: 'cancelled',
         stage: undefined,
         substatus_code: undefined,
       }),

@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import date, datetime
+from decimal import Decimal
 from enum import StrEnum
 import hashlib
 import json
@@ -157,7 +159,7 @@ class FullContractPreviewApplication:
                 "owner_fingerprints": dict(sorted(projection.owner_fingerprints.items())),
                 "command_snapshot_date": snapshot_date.isoformat(),
                 "blockers": list(blockers),
-                "field_values": field_values,
+                "field_values": _fingerprint_field_values(field_values),
             }
         )
         return FullContractPreviewResult(
@@ -200,6 +202,28 @@ def _mapped_field_values(
         elif isinstance(key, str) and key:
             values[cell] = facts.get(key)
     return values
+
+
+def _fingerprint_field_values(
+    values: Mapping[str, object | None],
+) -> dict[str, object | None]:
+    """Serialize native read-model scalars only for Preview fingerprinting."""
+    return {
+        cell: _fingerprint_field_value(value)
+        for cell, value in values.items()
+    }
+
+
+def _fingerprint_field_value(value: object | None) -> object | None:
+    if value is None or isinstance(value, (str, bool)):
+        return value
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if isinstance(value, Decimal):
+        return format(value, "f")
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    raise TypeError("contract preview field contains a non-canonical value")
 
 
 def _mapping_blockers(

@@ -101,6 +101,8 @@ export interface CoreStageCaseViewModel {
   currentStage: CoreStageProjection | null;
   historicalCurrentOwnerStage: CoreStageProjection | null;
   statusLabel: string;
+  clientSettlementLabel: string;
+  staffSettlementLabel: string;
   blockers: readonly CoreStageNoticeViewModel[];
   warnings: readonly CoreStageNoticeViewModel[];
   sourceProjectionDigest: string;
@@ -144,8 +146,10 @@ function stageByCode(timeline: OrderCoreStageTimeline, code: CoreStageCode | nul
   return stage;
 }
 
-function currentStageForTimeline(timeline: OrderCoreStageTimeline): CoreStageProjection | null {
-  return stageByCode(timeline, timeline.current_core_stage_code);
+function currentStageForTimeline(timeline: OrderCoreStageTimeline, query: OrderCoreStageProjectionQueryParams = {}): CoreStageProjection | null {
+  if (query.workbench_scope === 'completed' || query.workbench_scope === 'cancelled') return null;
+  return stageByCode(timeline, timeline.current_core_stage_code)
+    ?? (query.workbench_scope === 'in_progress' ? historicalCurrentOwnerStageForTimeline(timeline) : null);
 }
 
 function historicalCurrentOwnerStageForTimeline(timeline: OrderCoreStageTimeline): CoreStageProjection | null {
@@ -167,8 +171,8 @@ function noticesForTimeline(
   })));
 }
 
-function adaptTimeline(timeline: OrderCoreStageTimeline): CoreStageCaseViewModel {
-  const currentStage = currentStageForTimeline(timeline);
+function adaptTimeline(timeline: OrderCoreStageTimeline, query: OrderCoreStageProjectionQueryParams): CoreStageCaseViewModel {
+  const currentStage = currentStageForTimeline(timeline, query);
   const historicalCurrentOwnerStage = historicalCurrentOwnerStageForTimeline(timeline);
   return {
     id: timeline.case_no,
@@ -180,7 +184,9 @@ function adaptTimeline(timeline: OrderCoreStageTimeline): CoreStageCaseViewModel
     historicalCurrentOwnerStage,
     statusLabel: currentStage
       ? coreStageSubstatusLabel(currentStage.substatus_code)
-      : coreStageBranchLabel(timeline.branch_type),
+      : timeline.lifecycle_status,
+    clientSettlementLabel: coreStageSubstatusLabel(stageByCode(timeline, 'client_settlement')!.substatus_code),
+    staffSettlementLabel: coreStageSubstatusLabel(stageByCode(timeline, 'staff_payout')!.substatus_code),
     blockers: noticesForTimeline(timeline, 'blockers'),
     warnings: noticesForTimeline(timeline, 'warnings'),
     sourceProjectionDigest: timeline.source_projection_digest,
@@ -198,6 +204,17 @@ function validateQueryResult(
   page: OrderCoreStageTimelinePage,
   query: OrderCoreStageProjectionQueryParams,
 ): void {
+  if (query.workbench_scope !== undefined) {
+    // Validate the server contract; never move or filter mismatched rows locally.
+    const allowedStatuses = {
+      in_progress: ['待補件', '洽談中', '訂單成立', '服務中', '歷史訂單－未服務', '歷史訂單－服務中'],
+      completed: ['訂單完成', '歷史訂單－服務完成', '歷史訂單－帳務完成'],
+      cancelled: ['訂單取消'],
+    }[query.workbench_scope];
+    if (page.items.some((item) => !allowedStatuses.includes(item.lifecycle_status))) {
+      throw new OrderCoreStageProjectionAdapterError('伺服器回傳的訂單不符合所選分類，請確認服務版本後重新讀取。');
+    }
+  }
   if (query.branch_type !== undefined) {
     const mismatch = page.items.find((item) => item.branch_type !== query.branch_type);
     if (mismatch) {
@@ -229,7 +246,7 @@ function validateQueryResult(
   }
 
   for (const item of page.items) {
-    const current = currentStageForTimeline(item);
+    const current = currentStageForTimeline(item, query);
     if (current?.code !== query.stage) {
       throw new OrderCoreStageProjectionAdapterError(
         `案件 ${item.case_no} 不符合要求的核心階段。`,
@@ -257,7 +274,7 @@ export function adaptOrderCoreStageTimelinePage(
     }));
 
   return {
-    items: page.items.map(adaptTimeline),
+    items: page.items.map((item) => adaptTimeline(item, query)),
     stageCounts: page.stage_counts,
     substatusOptions,
     historicalLifecycleCounts: page.historical_lifecycle_counts,

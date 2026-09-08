@@ -41,8 +41,12 @@ CLIENT_EMAIL = "ops96-sched-c-client@example.test"
 CLIENT_SOURCE_IDENTITY = "OPS96-SCHED-C-CLIENT-001"
 SOURCE_REVISION = "OPS96-SCHED-C-001-r1"
 COMMAND_PREFIX = "ops96-sched-c-001"
+HCM_REPORTED_AT = "2026/06/01"
+STAFF_REPORTED_AT = "2026-08-20"
+MATCHING_AS_OF = "2026-09-01"
 ACTOR = "development-bypass"
 XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+PAYMENT_DESTINATION_DISPLAY = "OPS96 隔離驗收工會收款帳戶"
 
 
 def _require_safe_environment() -> str:
@@ -97,6 +101,7 @@ def _configure_route_a() -> None:
     route_a.SERVICE_DATES = SERVICE_DATES
     route_a.SOURCE_REVISION = SOURCE_REVISION
     route_a.COMMAND_IDENTITY_PREFIX = COMMAND_PREFIX
+    route_a.HCM_REPORTED_AT = HCM_REPORTED_AT
     route_a.DEPOSIT_SOURCE_IDENTITY = "OPS96-SCHED-C-001-DEP-001"
     route_a.STAFF_NAME = STAFF_NAMES[0]
     route_a.STAFF_IDENTITY = STAFF_IDENTITIES[0]
@@ -111,7 +116,7 @@ def _staff_workbook() -> bytes:
         rows.append(
             {
                 "查詢序號": STAFF_SOURCE_IDENTITIES[index],
-                "報名時間": "2026-08-20",
+                "報名時間": STAFF_REPORTED_AT,
                 "IP位址": "",
                 "姓名": STAFF_NAMES[index],
                 "身分證字號": STAFF_IDENTITIES[index],
@@ -144,6 +149,44 @@ def _assert_fresh(client: TestClient) -> bool:
         if isinstance(value, dict) and value.get("case_no") == CASE_NO:
             return False
     raise RuntimeError(f"OPS96_SCHED_C_CASE_NOT_FRESH:{response.status_code}:{response.text[:400]}")
+
+
+def _ensure_client_payment_destination(client: TestClient) -> dict[str, object]:
+    """Create the one Client Finance root through Q/P/A for a fresh fixture."""
+    path = "/api/v1/client-finance/payment-destination"
+    current = _data(client.get(path), "client_payment_destination_query")
+    if current.get("configured"):
+        return current
+    expected_revision = int(current.get("revision", 0))
+    preview = _data(
+        client.post(
+            f"{path}/preview",
+            json={
+                "account_display": PAYMENT_DESTINATION_DISPLAY,
+                "expected_revision": expected_revision,
+            },
+        ),
+        "client_payment_destination_preview",
+    )
+    receipt = _data(
+        client.post(
+            f"{path}/apply",
+            json={
+                "account_display": PAYMENT_DESTINATION_DISPLAY,
+                "expected_revision": expected_revision,
+                "preview_fingerprint": preview["preview_fingerprint"],
+                "reason": "OPS96 隔離契約完成驗收所需的合成收款帳戶設定",
+            },
+            headers={
+                "Idempotency-Key": f"{SCENARIO_ID}:payment-destination",
+                "X-Correlation-ID": f"{SCENARIO_ID}:payment-destination",
+            },
+        ),
+        "client_payment_destination_apply",
+    )
+    if receipt.get("account_display") != PAYMENT_DESTINATION_DISPLAY:
+        raise RuntimeError(f"client_payment_destination_readback_invalid:{receipt}")
+    return receipt
 
 
 def _import_roots(client: TestClient) -> dict[str, object]:
@@ -189,7 +232,12 @@ def _import_roots(client: TestClient) -> dict[str, object]:
     }
 
 
-def _prepare_matching(client: TestClient, staff_ids: list[int]) -> tuple[int, dict[str, object]]:
+def _prepare_matching(
+    client: TestClient,
+    staff_ids: list[int],
+    *,
+    accept_customer: bool = True,
+) -> tuple[int, dict[str, object]]:
     active_response = client.get(f"/api/v1/orders/{CASE_NO}/matching-plans/active")
     if active_response.status_code == 200:
         active = route_a._require_success(active_response, "matching_active_plan_resume")
@@ -249,13 +297,13 @@ def _prepare_matching(client: TestClient, staff_ids: list[int]) -> tuple[int, di
         {"staff_id": staff_ids[1], "start_date": SERVICE_DATES[3], "end_date": SERVICE_DATES[4]},
     ]
     availability = route_a._require_success(
-        client.post(f"/api/v1/orders/{CASE_NO}/caregiver-segment-availability/search", json={"segment_count": 2, "segment_drafts": segments, "as_of": "2026-09-01"}),
+        client.post(f"/api/v1/orders/{CASE_NO}/caregiver-segment-availability/search", json={"segment_count": 2, "segment_drafts": segments, "as_of": MATCHING_AS_OF}),
         "matching_availability",
     )
     if availability.get("feasibility") != "complete" or availability.get("conflicts"):
         raise RuntimeError(f"matching_availability_not_complete:{availability}")
     created = route_a._require_success(
-        client.post(f"/api/v1/orders/{CASE_NO}/matching-plans", json={"segments": segments, "created_by": ACTOR, "as_of": "2026-09-01"}),
+        client.post(f"/api/v1/orders/{CASE_NO}/matching-plans", json={"segments": segments, "created_by": ACTOR, "as_of": MATCHING_AS_OF}),
         "matching_plan_create",
     )
     plan_id = int(created["plan_id"])
@@ -277,7 +325,7 @@ def _prepare_matching(client: TestClient, staff_ids: list[int]) -> tuple[int, di
         preview = route_a._require_success(client.post(f"/api/v1/orders/{CASE_NO}/matching-plans/{plan_id}/resumes/manual-confirmation/preview", json=body), "matching_profiles_preview")
         route_a._require_success(client.post(f"/api/v1/orders/{CASE_NO}/matching-plans/{plan_id}/resumes/manual-confirmation", json={**body, "event_key": f"{SCENARIO_ID}:profiles", "preview_fingerprint": preview["preview_fingerprint"]}), "matching_profiles_apply")
         state = route_a._matching_contact_state(client, plan_id)
-    if state.get("customer_decision") != "accepted":
+    if accept_customer and state.get("customer_decision") != "accepted":
         route_a._require_success(
             client.put(
                 f"/api/v1/orders/{CASE_NO}/matching-plans/{plan_id}/customer-decision",
@@ -285,7 +333,11 @@ def _prepare_matching(client: TestClient, staff_ids: list[int]) -> tuple[int, di
             ),
             "matching_customer_decision",
         )
-    return plan_id, {"plan_id": plan_id, "segments": segments, "status": "accepted"}
+    return plan_id, {
+        "plan_id": plan_id,
+        "segments": segments,
+        "status": "accepted" if accept_customer else "proposed",
+    }
 
 
 def _complete_contract_and_schedule(client: TestClient, plan_id: int) -> dict[str, object]:
@@ -365,7 +417,13 @@ def _complete_contract_and_schedule(client: TestClient, plan_id: int) -> dict[st
     return {"commitment_id": status.get("commitment_id"), "recipient_count": len(recipients), "gate_passed": True}
 
 
-def _apply_assignment_and_start(client: TestClient, plan_id: int, staff_ids: list[int]) -> dict[str, object]:
+def _apply_assignment_and_start(
+    client: TestClient,
+    plan_id: int,
+    staff_ids: list[int],
+    *,
+    confirm_actual_start: bool = True,
+) -> dict[str, object]:
     route_a._ensure_deposit_root(client)
     segments = [
         {"staff_id": staff_ids[0], "assigned_start_date": SERVICE_DATES[0], "assigned_end_date": SERVICE_DATES[2], "official_service_dates": list(SERVICE_DATES[:3])},
@@ -403,6 +461,12 @@ def _apply_assignment_and_start(client: TestClient, plan_id: int, staff_ids: lis
     else:
         lock = {"result": "consumed_by_assignment"}
         lock_preview = {}
+    if not confirm_actual_start:
+        return {
+            "waiting_lock_id": lock.get("lock_id") or lock_preview.get("lock_id"),
+            "assignment": assignment,
+            "actual_start": None,
+        }
     actual_path = f"/api/v1/orders/{CASE_NO}/actual-start"
     actual_query = route_a._require_success(client.get(actual_path), "actual_start_query")
     target_actual_start = "2026-09-01"
@@ -458,6 +522,7 @@ def _apply_leave_substitution(client: TestClient, staff_ids: list[int]) -> dict[
 
 def run() -> dict[str, object]:
     database = _require_safe_environment()
+    browser_replacement_fixture = os.getenv("SCHEDULING_BROWSER_REPLACEMENT_FIXTURE") == "1"
     _configure_route_a()
     # The repository dotenv file may contain deployment artifact placeholders;
     # this disposable runner explicitly selects the source runtime before the
@@ -474,6 +539,7 @@ def run() -> dict[str, object]:
 
             with TestClient(app) as client:
                 fresh = _assert_fresh(client)
+                payment_destination = _ensure_client_payment_destination(client)
                 roots = _import_roots(client) if fresh else {"service_dates": list(SERVICE_DATES), "staff_ids": []}
                 if not roots["staff_ids"]:
                     staff_page = route_a._require_success(client.get("/api/v1/staff/summaries", params={"page_size": 200}), "staff_resume_readback")
@@ -485,8 +551,17 @@ def run() -> dict[str, object]:
                 staff_ids = list(roots["staff_ids"])
                 plan_id, matching = _prepare_matching(client, staff_ids)
                 contract = _complete_contract_and_schedule(client, plan_id)
-                assignment = _apply_assignment_and_start(client, plan_id, staff_ids)
-                leave = _apply_leave_substitution(client, staff_ids)
+                assignment = _apply_assignment_and_start(
+                    client,
+                    plan_id,
+                    staff_ids,
+                    confirm_actual_start=not browser_replacement_fixture,
+                )
+                leave = (
+                    {"result": "not_run_browser_replacement_fixture"}
+                    if browser_replacement_fixture
+                    else _apply_leave_substitution(client, staff_ids)
+                )
                 calendars = []
                 for staff_id in staff_ids:
                     calendars.append(_data(client.get(f"/api/v1/scheduling/staff/{staff_id}/current-calendar", params={"range_start": "2026-09-01", "range_end": "2026-09-30"}), f"calendar_readback_{staff_id}"))
@@ -496,7 +571,7 @@ def run() -> dict[str, object]:
                 os.environ.pop("CONTRACT_DOCUMENT_ARCHIVE_ROOT", None)
             else:
                 os.environ["CONTRACT_DOCUMENT_ARCHIVE_ROOT"] = previous_archive_root
-    result = {"case_no": CASE_NO, "database": database, "service_month": "2026-09", "service_dates": list(SERVICE_DATES), "staff_ids": staff_ids, "staff_names": list(STAFF_NAMES), "matching": matching, "contract_and_schedule": contract, "assignment": assignment, "leave_substitution": leave, "calendar_readback": calendars, "assignment_readback": assignment_readback}
+    result = {"case_no": CASE_NO, "database": database, "service_month": "2026-09", "service_dates": list(SERVICE_DATES), "staff_ids": staff_ids, "staff_names": list(STAFF_NAMES), "payment_destination": payment_destination, "matching": matching, "contract_and_schedule": contract, "assignment": assignment, "leave_substitution": leave, "calendar_readback": calendars, "assignment_readback": assignment_readback, "fixture_status": "assigned_not_started_for_browser_replacement" if browser_replacement_fixture else "full_scheduling_lane_c"}
     print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
     return result
 

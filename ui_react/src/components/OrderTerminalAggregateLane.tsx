@@ -5,6 +5,10 @@ import {
   type ChangeEvent,
   type FC,
 } from 'react';
+// The terminal lane is rendered by both the Beta workbench and the current
+// Orders page.  Keep its existing business-first presentation rules available
+// wherever this shared surface is mounted.
+import '../pages/OrderWorkbenchV2Page.css';
 import {
   orderTerminalAggregateClient,
   type OrderTerminalAggregatePage,
@@ -71,7 +75,7 @@ export const OrderTerminalAggregateLane: FC = () => {
       >
         <span>
           <strong>完全結案彙總</strong>
-          <small>正式 server aggregate；僅顯示完成狀態與缺失組件。</small>
+          <small>查看案件結案狀態與尚待完成的項目。</small>
         </span>
         <b>{open ? '檢視中' : '開啟'}</b>
       </button>

@@ -175,7 +175,7 @@ class ReplacementRootDelta:
 
 @dataclass(frozen=True, slots=True)
 class SuccessorRoundFact:
-    """An already persisted successor round that R-07 may reuse."""
+    """An already persisted successor round that a replacement Query may read back."""
 
     case_no: str
     round_identity: str
@@ -185,6 +185,7 @@ class SuccessorRoundFact:
     event_version: int
     candidate_count: int
     zero_candidate_disposition: str | None = None
+    resume_step: ReplacementResumeStep | None = None
 
     def __post_init__(self) -> None:
         require_canonical_text(self.case_no, "successor round case number", _CASE_MAX)
@@ -197,10 +198,12 @@ class SuccessorRoundFact:
             require_canonical_text(self.zero_candidate_disposition, "zero candidate disposition", _REASON_MAX)
         elif self.zero_candidate_disposition is not None:
             raise ServiceBeforeReplacementError("successor_round_zero_candidate_disposition_invalid")
+        if self.resume_step is not None and not isinstance(self.resume_step, ReplacementResumeStep):
+            raise TypeError("successor round resume step is invalid")
 
     @property
     def canonical_tuple(self) -> tuple[object, ...]:
-        return (self.case_no, self.round_identity, self.generation_identity, self.event_identity, self.generation_version, self.event_version, self.candidate_count, self.zero_candidate_disposition)
+        return (self.case_no, self.round_identity, self.generation_identity, self.event_identity, self.generation_version, self.event_version, self.candidate_count, self.zero_candidate_disposition, None if self.resume_step is None else self.resume_step.value)
 
 
 ExistingSuccessorRound = SuccessorRoundFact
@@ -705,6 +708,12 @@ def _gate_blockers(facts: ServiceBeforeReplacementFacts) -> tuple[str, ...]:
         return ("actual_service_proof_unavailable",)
     if facts.actual_service_proof.service_dates:
         return ("actual_service_exists",)
+    # R-04 removes the former effective schedule as part of the committed
+    # successor.  A later Query must therefore surface that immutable result,
+    # rather than treating the absence of the retired schedule as an outage or
+    # permitting a second replacement.
+    if facts.scenario is ReplacementScenario.R04 and facts.successor_round is not None:
+        return ("replacement_successor_exists",)
     try:
         _validate_required_roots(facts)
     except ServiceBeforeReplacementError as error:
@@ -753,6 +762,13 @@ def _retained_roots(facts: ServiceBeforeReplacementFacts, impacted: Iterable[Rep
 
 
 def _server_resume_step(proof: CandidatePoolReuseProof | None, facts: ServiceBeforeReplacementFacts | None = None) -> ReplacementResumeStep:
+    if (
+        facts is not None
+        and facts.scenario is ReplacementScenario.R04
+        and facts.successor_round is not None
+        and facts.successor_round.resume_step is not None
+    ):
+        return facts.successor_round.resume_step
     if proof is None or facts is None or not proof.bound_to(facts):
         return ReplacementResumeStep.STEP_2
     return ReplacementResumeStep.STEP_4 if proof.accepted_candidate else ReplacementResumeStep.STEP_3

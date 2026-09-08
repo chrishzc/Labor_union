@@ -74,6 +74,8 @@ import {
   CandidateManualInformationActions,
   CustomerProfilesManualActions,
 } from '../components/MatchingManualCommunicationActions';
+import { HolidayWorkAgreementActions } from '../components/HolidayWorkAgreementActions';
+import { OrderTerminalAggregateLane } from '../components/OrderTerminalAggregateLane';
 import {
   ORDER_FILTER_OPTIONS,
   adaptOrderSummaryPage,
@@ -1156,7 +1158,6 @@ export const OrdersPage: React.FC = () => {
       if (
         contactState.plan.status !== 'proposed'
         || contactState.customer_decision !== 'pending'
-        || contactState.plan.communication_version !== activePlan.communicationVersion
       ) {
         throw new Error('目前方案不是可寄送履歷的提案，請重新載入。');
       }
@@ -1191,17 +1192,19 @@ export const OrdersPage: React.FC = () => {
   };
 
   const recordMatchingCustomerAcceptance = async () => {
-    if (!matchingOrder) return;
+    if (!matchingOrder || !matchingDetail) return;
     setCandidateActionKey('customer-decision');
     setCandidateActionError(null);
     setCandidateActionNotice(null);
     try {
-      const activePlan = await waitingDepositLockClient.queryPlan(matchingOrder.id);
-      const contactState = await matchingPlanCommunicationClient.queryContactState(matchingOrder.id, activePlan.planId);
+      const planId = Number(matchingDetail.planId);
+      if (!Number.isInteger(planId) || planId <= 0) {
+        throw new Error('目前方案識別不正確，請重新載入。');
+      }
+      const contactState = await matchingPlanCommunicationClient.queryContactState(matchingOrder.id, planId);
       if (
         contactState.plan.status !== 'proposed'
         || contactState.customer_decision !== 'pending'
-        || contactState.plan.communication_version !== activePlan.communicationVersion
       ) {
         throw new Error('目前方案不是可補登客戶決策的提案，請重新載入。');
       }
@@ -1210,13 +1213,13 @@ export const OrdersPage: React.FC = () => {
       }
       await matchingPlanCommunicationClient.recordCustomerDecision(
         matchingOrder.id,
-        activePlan.planId,
+        planId,
         contactState.plan.communication_version,
         'accepted',
         customerDecisionReason,
       );
-      const observed = await matchingPlanCommunicationClient.queryContactState(matchingOrder.id, activePlan.planId);
-      if (observed.plan.id !== activePlan.planId || observed.customer_decision !== 'accepted') {
+      const observed = await matchingPlanCommunicationClient.queryContactState(matchingOrder.id, planId);
+      if (observed.plan.id !== planId || observed.customer_decision !== 'accepted') {
         throw new Error('客戶決策回讀未取得已接受方案，請重新載入。');
       }
       await handleOpenMatchingDrawer(matchingOrder, { preserveCandidateAction: true });
@@ -1229,25 +1232,28 @@ export const OrdersPage: React.FC = () => {
   };
 
   const recordFormalPlanWillingness = async () => {
-    if (!matchingOrder) return;
+    if (!matchingOrder || !matchingDetail) return;
     setCandidateActionKey('formal-plan-willingness');
     setCandidateActionError(null);
     setCandidateActionNotice(null);
     try {
-      const activePlan = await waitingDepositLockClient.queryPlan(matchingOrder.id);
-      const contactState = await matchingPlanCommunicationClient.queryContactState(matchingOrder.id, activePlan.planId);
+      const planId = Number(matchingDetail.planId);
+      if (!Number.isInteger(planId) || planId <= 0) {
+        throw new Error('目前方案識別不正確，請重新載入。');
+      }
+      const contactState = await matchingPlanCommunicationClient.queryContactState(matchingOrder.id, planId);
       const pendingSegment = contactState.segments.find((segment) => segment.willingness === 'pending');
-      if (activePlan.status !== 'proposed' || !pendingSegment) {
+      if (contactState.plan.status !== 'proposed' || !pendingSegment) {
         throw new Error('目前沒有可補登願意承接的正式方案月嫂區段。');
       }
       await matchingPlanCommunicationClient.recordFormalPlanWillingness(
         matchingOrder.id,
-        activePlan.planId,
+        planId,
         pendingSegment.segment_id,
         contactState.plan.communication_version,
         customerDecisionReason,
       );
-      const observed = await matchingPlanCommunicationClient.queryContactState(matchingOrder.id, activePlan.planId);
+      const observed = await matchingPlanCommunicationClient.queryContactState(matchingOrder.id, planId);
       if (!observed.all_willing) throw new Error('月嫂意願回讀未完成，請重新載入。');
       await handleOpenMatchingDrawer(matchingOrder, { preserveCandidateAction: true });
       setCandidateActionNotice('已回讀確認正式方案月嫂願意承接。');
@@ -1420,7 +1426,6 @@ export const OrdersPage: React.FC = () => {
     targetDays: number;
     serviceMode: '週休1日' | '週休2日' | '連續服務';
     selectableDates: string[];
-    holidayRestDates?: string[];
     leaveDates: string[];
     customWorkDates: string[];
   }) {
@@ -1429,12 +1434,10 @@ export const OrdersPage: React.FC = () => {
     setPrecisionError(null);
     try {
       const result = await schedulePrecisionClient.calculate({
+        case_no: input.caseNo,
         actual_start_date: input.startDate,
         target_service_days: input.targetDays,
         service_mode: input.serviceMode,
-        ...(input.holidayRestDates === undefined
-          ? {}
-          : { custom_holiday_rest_dates: input.holidayRestDates }),
         custom_leave_dates: input.leaveDates,
         ...(input.customWorkDates.length === 0
           ? {}
@@ -1473,7 +1476,7 @@ export const OrdersPage: React.FC = () => {
   }
 
   const runSchedulePrecision = (
-    nextHolidayRestDates = holidayRestDates,
+    _nextHolidayRestDates = holidayRestDates,
     nextLeaveDates = leaveDates,
     caseNo = (contractOrder || dateConfirmOrder)?.id,
     nextCustomWorkDates = customWorkDates,
@@ -1487,7 +1490,13 @@ export const OrdersPage: React.FC = () => {
     }
     const serviceDateQuery = orderMutationFlowStore.getServiceDatesDraft(caseNo)?.queryView;
     const assignmentFactsReady = cardProjection?.caseNo === caseNo
-      && cardProjection.assignmentSegmentsAvailability === 'available';
+      && (
+        cardProjection.assignmentSegmentsAvailability === 'available'
+        || (
+          cardProjection.assignmentSegmentsAvailability === 'unavailable'
+          && cardProjection.assignmentSegmentsReason === 'formal_assignment_segments_missing'
+        )
+      );
     const hasFormalAssignment = assignmentFactsReady
       && cardProjection.assignmentSegments.length > 0;
     const startDate = hasFormalAssignment
@@ -1508,7 +1517,6 @@ export const OrdersPage: React.FC = () => {
       targetDays: serviceDateQuery.contracted_service_days,
       serviceMode: nextPrecisionMode,
       selectableDates: serviceDateQuery.selectable_dates,
-      holidayRestDates: nextHolidayRestDates,
       leaveDates: nextLeaveDates,
       customWorkDates: nextCustomWorkDates,
     });
@@ -1565,7 +1573,13 @@ export const OrdersPage: React.FC = () => {
         ? assignmentProjectionRes.value
         : null;
       const assignmentFactsReady = assignmentProjection?.caseNo === order.id
-        && assignmentProjection.assignmentSegmentsAvailability === 'available';
+        && (
+          assignmentProjection.assignmentSegmentsAvailability === 'available'
+          || (
+            assignmentProjection.assignmentSegmentsAvailability === 'unavailable'
+            && assignmentProjection.assignmentSegmentsReason === 'formal_assignment_segments_missing'
+          )
+        );
       const hasFormalAssignment = assignmentFactsReady
         && assignmentProjection.assignmentSegments.length > 0;
       const actualStartDate = actualStart?.current_actual_start_date ?? actualStart?.planned_start_date ?? null;
@@ -2159,6 +2173,13 @@ export const OrdersPage: React.FC = () => {
           </button>
         </div>
       )}
+
+      <section
+        data-surface-id="orders.terminal-aggregate"
+        style={{ marginBottom: '16px' }}
+      >
+        <OrderTerminalAggregateLane />
+      </section>
 
       {/* Loading & Error States */}
       {loading && (
@@ -2891,6 +2912,14 @@ export const OrdersPage: React.FC = () => {
                         </button>
                       </div>
                     )}
+                    {matchingDetail.status === '提案中' && matchingDetail.planSegments.length > 0 && Number.isInteger(Number(matchingDetail.planId)) && (
+                      <HolidayWorkAgreementActions
+                        caseNo={matchingOrder.id}
+                        planId={Number(matchingDetail.planId)}
+                        segments={matchingDetail.planSegments}
+                        onCommitted={() => handleOpenMatchingDrawer(matchingOrder, { preserveCandidateAction: true })}
+                      />
+                    )}
                     {matchingDetail.status === '已接受' && !matchingDetail.waitingLockAcquired && matchingDetail.assignmentSegments.length === 0 && (
                       <div style={{ display: 'grid', gap: '8px', marginTop: '12px' }}>
                         <button
@@ -3515,21 +3544,11 @@ export const OrdersPage: React.FC = () => {
                           {precisionResult.national_holidays_found.map((holiday) => {
                             const restsOnHoliday = holidayRestDates.includes(holiday.date);
                             return (
-                              <label key={holiday.date} style={{ display: 'flex', gap: '6px', marginTop: '8px', fontSize: '0.8rem', color: '#57423b' }}>
-                                <input
-                                  type="checkbox"
-                                  checked={restsOnHoliday}
-                                  disabled={serviceDatesLocked || precisionCalculating}
-                                  onChange={() => {
-                                    const nextHolidayRestDates = restsOnHoliday
-                                      ? holidayRestDates.filter((date) => date !== holiday.date)
-                                      : [...holidayRestDates, holiday.date].sort();
-                                    setHolidayRestDates(nextHolidayRestDates);
-                                    rerunSchedulePrecision(nextHolidayRestDates, leaveDates, undefined, customWorkDates);
-                                  }}
-                                />
-                                {holiday.name}（{holiday.date}）列為休假日
-                              </label>
+                              <p key={holiday.date} style={{ margin: '8px 0 0', fontSize: '0.8rem', color: '#57423b' }}>
+                                {holiday.name}（{holiday.date}）：{restsOnHoliday
+                                  ? '休假；需客戶與全體月嫂對目前方案完成協議，才可改列服務日。'
+                                  : '已由目前方案的全體協議回讀為服務日。'}
+                              </p>
                             );
                           })}
                         </div>
@@ -3559,6 +3578,8 @@ export const OrdersPage: React.FC = () => {
                                 ? selected
                                   ? `${date} 已選真實服務日，點擊取消`
                                   : `${date} 未選，點擊設為真實服務日`
+                                : holiday
+                                  ? `${date} 國定假日；請至媒合方案留存客戶與全體月嫂的上班協議`
                                 : isLeave
                                   ? `${date} 人工調整休假，點擊取消`
                                   : isCustomWork
@@ -3583,6 +3604,10 @@ export const OrdersPage: React.FC = () => {
                                         ? serviceDatesDraft.selectedDates.filter((value) => value !== date)
                                         : [...serviceDatesDraft.selectedDates, date].sort();
                                       changeServiceDateSelection(caseNo, nextSelectedDates);
+                                      return;
+                                    }
+                                    if (holiday) {
+                                      setPrecisionError('國定假日預設休假；請在媒合方案內留存客戶與全體月嫂對目前方案的上班協議。');
                                       return;
                                     }
                                     if (isLeave) {

@@ -1,0 +1,37 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-matching-holiday-work-agreements-2026-09-07-v1",
+  "descriptors": {
+    "1032_matching_holiday_work_agreements.sql": {
+      "tables": {
+        "matching_holiday_work_agreements": ["id", "plan_id", "holiday_date", "plan_version", "agreement_status", "actor_id", "reason", "idempotency_key", "preview_fingerprint", "created_at_utc"],
+        "matching_holiday_work_agreement_participants": ["id", "agreement_id", "participant_role", "segment_id", "participant_key", "decision", "created_at_utc"]
+      },
+      "parent_columns": {},
+      "indexes": {
+        "matching_holiday_work_agreements.PRIMARY": {"non_unique": 0, "columns": ["id"]},
+        "matching_holiday_work_agreements.uq_matching_holiday_work_agreement_idempotency": {"non_unique": 0, "columns": ["idempotency_key"]},
+        "matching_holiday_work_agreements.idx_matching_holiday_work_agreement_current": {"non_unique": 1, "columns": ["plan_id", "holiday_date", "plan_version", "id"]},
+        "matching_holiday_work_agreement_participants.PRIMARY": {"non_unique": 0, "columns": ["id"]},
+        "matching_holiday_work_agreement_participants.uq_matching_holiday_work_agreement_participant": {"non_unique": 0, "columns": ["agreement_id", "participant_key"]},
+        "matching_holiday_work_agreement_participants.idx_matching_holiday_work_agreement_participant_segment": {"non_unique": 1, "columns": ["segment_id", "agreement_id"]}
+      },
+      "foreign_keys": {
+        "matching_holiday_work_agreements.fk_matching_holiday_work_agreement_plan": {"columns": ["plan_id"], "referenced_table": "caregiver_matching_plans", "referenced_columns": ["id"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"},
+        "matching_holiday_work_agreement_participants.fk_matching_holiday_work_agreement_participant_agreement": {"columns": ["agreement_id"], "referenced_table": "matching_holiday_work_agreements", "referenced_columns": ["id"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"},
+        "matching_holiday_work_agreement_participants.fk_matching_holiday_work_agreement_participant_segment": {"columns": ["segment_id"], "referenced_table": "caregiver_matching_plan_segments", "referenced_columns": ["id"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"}
+      },
+      "checks": {
+        "matching_holiday_work_agreements.chk_matching_holiday_work_agreement_fingerprint": "atom(regexp_like(preview_fingerprint,'^[0-9a-f]{64}$'))",
+        "matching_holiday_work_agreements.chk_matching_holiday_work_agreement_reason": "atom(char_length(trim(reason))>0)",
+        "matching_holiday_work_agreement_participants.chk_matching_holiday_work_agreement_participant_target": "or(and(atom(participant_role='customer'),atom(segment_idisnull),atom(participant_key='customer')),and(atom(participant_role='caregiver'),atom(segment_idisnotnull),atom(participant_key=concat('segment:',cast(segment_idaschar)))))"
+      },
+      "triggers": [
+        "trg_matching_holiday_work_agreements_before_update",
+        "trg_matching_holiday_work_agreements_before_delete",
+        "trg_matching_holiday_work_agreement_participants_before_update",
+        "trg_matching_holiday_work_agreement_participants_before_delete"
+      ]
+    }
+  }
+}

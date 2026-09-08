@@ -9,6 +9,7 @@
 reprocess與必要 owner validation／migration evidence，不再提供 anomaly current fact或corrected-source recovery lineage。
 
 ## Implementation
+- `domains/finance_import/transaction_fingerprint.py` — canonical identity 與非指紋銀行事實差異比較。
 - `subsystems/finance_import/ingestion.py`
 - `infrastructure/mysql/finance_import_owning_domain_composite.py`
 - `api/routes/finance_import.py`

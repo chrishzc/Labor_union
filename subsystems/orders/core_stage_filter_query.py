@@ -43,6 +43,13 @@ CoreStageSubstatusCode = Literal[
     "client_settlement_pending", "client_settlement_in_progress", "client_balance_open", "client_settled", "client_settlement_unavailable",
     "staff_settlement_pending", "staff_settlement_in_progress", "staff_payable_open", "staff_settled", "staff_settlement_unavailable",
 ]
+WorkbenchScope = Literal["in_progress", "completed", "cancelled"]
+_WORKBENCH_STATUSES: Mapping[WorkbenchScope, frozenset[OrderLifecycleStatus]] = {
+    "in_progress": frozenset({OrderLifecycleStatus.PENDING_COMPLETION, OrderLifecycleStatus.DISCUSSION, OrderLifecycleStatus.ESTABLISHED, OrderLifecycleStatus.IN_SERVICE, OrderLifecycleStatus.HISTORICAL_UNSERVED, OrderLifecycleStatus.HISTORICAL_IN_SERVICE}),
+    "completed": frozenset({OrderLifecycleStatus.COMPLETED, OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED, OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED}),
+    "cancelled": frozenset({OrderLifecycleStatus.CANCELLED}),
+}
+
 HistoricalLifecycleFacet = Literal[
     "unserved",
     "in_service",
@@ -95,9 +102,19 @@ class CoreStageProjectionFilterQuery:
     warning_only: bool = False
     branch_type: CoreStageBranchType | None = None
     historical_lifecycle: HistoricalLifecycleFacet | None = None
+    workbench_scope: WorkbenchScope | None = None
 
     def __post_init__(self) -> None:
         StageProjectionQuery(self.page_size, self.after_case_no, self.lifecycle_scope)
+        if self.workbench_scope is not None:
+            if self.workbench_scope not in _WORKBENCH_STATUSES:
+                raise ValueError("workbench_scope is outside the workbench contract")
+            if self.branch_type is not None or self.historical_lifecycle is not None:
+                raise ValueError("workbench_scope cannot be combined with branch filters")
+            if self.lifecycle_scope != OrderLifecycleScope.ALL:
+                raise ValueError("workbench_scope requires lifecycle_scope=all")
+            if self.workbench_scope != "in_progress" and (self.stage is not None or self.substatus_code is not None):
+                raise ValueError("terminal workbench scopes do not support stage filters")
         if self.stage is not None and self.stage not in _CORE_STAGE_CODES:
             raise ValueError("stage is outside the core-stage contract")
         if self.substatus_code is not None:
@@ -190,7 +207,7 @@ def query_core_stage_page(
             if historical_facet is not None:
                 historical_lifecycle_counts[historical_facet] += 1
 
-            current_stage = _current_stage(item)
+            current_stage = _current_stage(item, request.workbench_scope)
             if current_stage is not None:
                 stage_counts[current_stage.code] += 1
                 if request.stage == current_stage.code:
@@ -254,6 +271,8 @@ def _matches_common_filters(
     item: OrderCoreStageTimeline,
     request: CoreStageProjectionFilterQuery,
 ) -> bool:
+    if request.workbench_scope is not None and item.lifecycle_status not in _WORKBENCH_STATUSES[request.workbench_scope]:
+        return False
     if request.branch_type is not None and item.branch_type != request.branch_type:
         return False
     if (
@@ -285,11 +304,16 @@ def _matches_historical_lifecycle(
     ]
 
 
-def _current_stage(item: OrderCoreStageTimeline) -> CoreStageProjection | None:
-    if item.current_core_stage_code is None:
+def _current_stage(item: OrderCoreStageTimeline, scope: WorkbenchScope | None = None) -> CoreStageProjection | None:
+    if scope in {"completed", "cancelled"}:
+        return None
+    code = item.current_core_stage_code
+    if scope == "in_progress" and code is None:
+        code = item.historical_current_owner_stage_code
+    if code is None:
         return None
     for stage in item.core_stages:
-        if stage.code == item.current_core_stage_code:
+        if stage.code == code:
             return stage
     raise CoreStageProjectionContractError("current core stage is missing from timeline")
 
@@ -347,6 +371,7 @@ def _can_reuse_single_source_etag(
         and request.case_no_search is None
         and not request.blocker_only
         and not request.warning_only
+        and request.workbench_scope is None
         and request.branch_type is None
         and request.historical_lifecycle is None
         and len(items) <= request.page_size

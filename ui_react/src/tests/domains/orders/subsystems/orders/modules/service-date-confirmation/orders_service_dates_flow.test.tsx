@@ -258,6 +258,38 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
     expect(applyCallArgs[2].idempotencyKey).toBeTruthy();
   });
 
+  it('2a. 尚未正式指派是預期狀態時，仍可完成服務日期查詢、預覽與套用', async () => {
+    const baseProjection = await orderCardProjectionClient.getCardProjection('ORD-2026-0801');
+    vi.spyOn(orderCardProjectionClient, 'getCardProjection').mockResolvedValue({
+      ...baseProjection,
+      assignment_segments: {
+        ...baseProjection.assignment_segments,
+        value: null,
+        availability: 'unavailable',
+        availability_reason: 'formal_assignment_segments_missing',
+      },
+    });
+    const previewSpy = vi.spyOn(ordersMutationClient, 'previewServiceDates')
+      .mockResolvedValue(realisticServiceDatePreviewView);
+    const applySpy = vi.spyOn(ordersMutationClient, 'applyServiceDates')
+      .mockResolvedValue(realisticServiceDateReceiptView);
+
+    render(React.createElement(OrdersPage));
+    await waitFor(() => expect(screen.getByText('ORD-2026-0801')).toBeInTheDocument());
+    await openServiceCalendarTab();
+    const previewButton = await screen.findByRole('button', { name: '確認服務日期' });
+    expect(previewButton).not.toBeDisabled();
+    fireEvent.click(previewButton);
+    await screen.findByText(/服務週次精算預覽/);
+    fireEvent.change(screen.getByLabelText('確認服務日期原因'), {
+      target: { value: '尚未正式排班前確認服務日期' },
+    });
+    fireEvent.click(await screen.findByRole('button', { name: /儲存排班結果/ }));
+    await screen.findByText(/服務日期已確認成功/);
+    expect(previewSpy).toHaveBeenCalledTimes(1);
+    expect(applySpy).toHaveBeenCalledTimes(1);
+  });
+
   it('3. 草稿失效機制：產生預覽後若使用者更改日期，舊預覽立即失效且無法直接 Apply', async () => {
     vi.spyOn(ordersMutationClient, 'previewServiceDates').mockResolvedValue(
       realisticServiceDatePreviewView
@@ -474,6 +506,7 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
 
     await waitFor(() => expect(calculateSpy).toHaveBeenCalledTimes(1));
     expect(calculateSpy).toHaveBeenCalledWith({
+      case_no: 'ORD-2026-0801',
       actual_start_date: '2026-09-01',
       target_service_days: 5,
       service_mode: '週休2日',
@@ -572,6 +605,7 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
     await waitFor(() => expect(orderMutationFlowStore.getServiceDatesDraft('ORD-2026-0801')?.queryView).not.toBeNull());
     await waitFor(() => expect(calculateSpy).toHaveBeenCalledTimes(1));
     expect(calculateSpy).toHaveBeenCalledWith({
+      case_no: 'ORD-2026-0801',
       actual_start_date: '2026-09-01',
       target_service_days: 3,
       service_mode: '週休2日',
@@ -581,7 +615,7 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
       .not.toBeInTheDocument();
   });
 
-  it('9. 國定假日與事前請假每次都由 server 重算並自動替代，服務日維持 5 天', async () => {
+  it('9. 國定假日不能由服務日曆直接改為上班；事前請假仍由 server 重算並維持 5 天', async () => {
     vi.spyOn(ordersMutationClient, 'getServiceDates').mockResolvedValue({
       ...realisticServiceDateQueryView,
       contracted_service_days: 5,
@@ -608,19 +642,6 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
         { date: '2026-09-07', day_num: 7, is_work_day: true, is_rest_day: false, holiday_name: null },
       ],
     };
-    const resultHolidayWorked = {
-      ...precisionResult(['2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04', '2026-09-05']),
-      national_holidays_found: [
-        { date: '2026-09-03', name: '工會測試假日', is_worked: true },
-      ],
-      day_by_day: [
-        { date: '2026-09-01', day_num: 1, is_work_day: true, is_rest_day: false, holiday_name: null },
-        { date: '2026-09-02', day_num: 2, is_work_day: true, is_rest_day: false, holiday_name: null },
-        { date: '2026-09-03', day_num: 3, is_work_day: true, is_rest_day: false, holiday_name: '工會測試假日' },
-        { date: '2026-09-04', day_num: 4, is_work_day: true, is_rest_day: false, holiday_name: null },
-        { date: '2026-09-05', day_num: 5, is_work_day: true, is_rest_day: false, holiday_name: null },
-      ],
-    };
     const resultWithLeave = {
       ...resultWithHolidayRest,
       national_holidays_found: [
@@ -638,23 +659,22 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
     };
     const calculateSpy = vi.spyOn(schedulePrecisionClient, 'calculate')
       .mockResolvedValueOnce(resultWithHolidayRest)
-      .mockResolvedValueOnce(resultHolidayWorked)
       .mockResolvedValueOnce(resultWithLeave);
 
     render(React.createElement(OrdersPage));
     await waitFor(() => expect(screen.getByText('ORD-2026-0801')).toBeInTheDocument());
     await openServiceCalendarTab(5);
-    const holidayCheckbox = screen.getByRole('checkbox');
-    expect(holidayCheckbox).toBeChecked();
-    fireEvent.click(holidayCheckbox);
-    await waitFor(() => expect(calculateSpy).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /2026-09-03 國定假日/ }));
+    expect(screen.getByText(/國定假日預設休假；請在媒合方案內留存/)).toBeInTheDocument();
+    expect(calculateSpy).toHaveBeenCalledTimes(1);
 
     fireEvent.change(screen.getByLabelText('事前請假日期'), { target: { value: '2026-09-02' } });
     fireEvent.click(screen.getByRole('button', { name: '新增事前請假' }));
-    await waitFor(() => expect(calculateSpy).toHaveBeenCalledTimes(3));
-    expect(calculateSpy.mock.calls[2][0]).toMatchObject({
+    await waitFor(() => expect(calculateSpy).toHaveBeenCalledTimes(2));
+    expect(calculateSpy.mock.calls[1][0]).toMatchObject({
+      case_no: 'ORD-2026-0801',
       target_service_days: 5,
-      custom_holiday_rest_dates: [],
       custom_leave_dates: ['2026-09-02'],
     });
     expect(orderMutationFlowStore.getServiceDatesDraft('ORD-2026-0801')?.selectedDates)

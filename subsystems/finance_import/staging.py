@@ -11,7 +11,10 @@ import json
 from typing import Any, Mapping
 
 from domains.finance_import.transaction_classifier import classify_finance_transaction
-from domains.finance_import.transaction_fingerprint import build_dedup_fingerprint
+from domains.finance_import.transaction_fingerprint import (
+    build_dedup_fingerprint,
+    canonical_fact_differences,
+)
 
 
 def _json_default(value: Any) -> str:
@@ -137,9 +140,14 @@ def stage_finance_rows(
         dedup_fingerprint = build_dedup_fingerprint(row)
         cursor.execute(
             """SELECT id, classification_type, matched_identity_ids,
-                      resolved_counterparty_account, reconciliation_status
+                      resolved_counterparty_account, reconciliation_status,
+                      source_reference, posting_date, value_date, currency,
+                      counterparty_name, counterparty_account, bank_references,
+                      EXISTS(SELECT 1 FROM finance_import_dispatch_events AS dispatch
+                             WHERE dispatch.finance_import_row_id=finance_import_rows.id
+                             AND dispatch.outcome IN ('reconciled','existing')) AS has_formal_reference
                FROM finance_import_rows
-               WHERE dedup_fingerprint=%s""",
+               WHERE dedup_fingerprint=%s FOR UPDATE""",
             (dedup_fingerprint,),
         )
         existing = cursor.fetchone()
@@ -166,6 +174,23 @@ def stage_finance_rows(
                     _json(occurrence_warnings),
                 ),
             )
+            occurrence_id = cursor.lastrowid
+            differences = canonical_fact_differences(dict(existing), dict(row))
+            if differences:
+                codes = ["fingerprint_collision"]
+                if existing["has_formal_reference"]:
+                    codes.append("formal_reference_conflict")
+                for code in codes:
+                    cursor.execute(
+                        "INSERT INTO finance_import_integrity_events "
+                        "(batch_id,finance_import_row_id,issue_code,active,"
+                        "evidence_snapshot,source_event_identity) VALUES (%s,%s,%s,1,%s,%s)",
+                        (
+                            batch_id, existing["id"], code,
+                            _json({"occurrence_id": occurrence_id, "differing_fields": differences}),
+                            f"finance-import:occurrence:{occurrence_id}:{code}",
+                        ),
+                    )
             staged_rows.append(
                 {
                     "row_id": existing["id"],

@@ -13,6 +13,8 @@ from api.schemas.schedule_precision import SchedulePrecisionResultView
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.scheduling import attendance_schedule_query
 from infrastructure.mysql.mysql_adapter import calculate_attendance_schedule
+from infrastructure.mysql.matching_holiday_work_agreement_repository import MySqlMatchingHolidayWorkAgreementRepository
+from infrastructure.mysql.mysql_adapter import get_connection
 
 
 attendance_schedule_query.calculate_attendance_schedule = calculate_attendance_schedule
@@ -30,16 +32,42 @@ def calculate_schedule(
     """精算服務人員出勤日、扣除排休與國定假日順延完工日"""
     del principal
     try:
-        res = attendance_schedule_query.calculate_order_attendance_schedule(
+        baseline = attendance_schedule_query.calculate_order_attendance_schedule(
             actual_start_date=req.actual_start_date,
             target_service_days=req.target_service_days,
             service_mode=req.service_mode,
-            custom_holiday_rest_dates=req.custom_holiday_rest_dates,
             custom_leave_dates=req.custom_leave_dates,
             custom_work_dates=req.custom_work_dates,
             custom_rest_weekdays=req.custom_rest_weekdays,
             monthly_salary_base=req.monthly_salary_base,
         )
+        res = baseline
+        if req.case_no:
+            connection = get_connection()
+            try:
+                approved = set(MySqlMatchingHolidayWorkAgreementRepository(connection).current_accepted_holiday_dates(
+                    req.case_no, req.actual_start_date, baseline["actual_end_date"],
+                ))
+            finally:
+                connection.close()
+            holiday_rest_dates = [
+                item["date"] for item in baseline["national_holidays_found"]
+                if item["date"] not in approved
+            ]
+            # A current dual agreement is the sole holiday override.  Add it
+            # to the service-date calculation ourselves so a caller cannot
+            # turn an arbitrary holiday into work through custom_work_dates.
+            approved_work_dates = sorted(set(req.custom_work_dates or ()) | approved)
+            res = attendance_schedule_query.calculate_order_attendance_schedule(
+                actual_start_date=req.actual_start_date,
+                target_service_days=req.target_service_days,
+                service_mode=req.service_mode,
+                custom_holiday_rest_dates=holiday_rest_dates,
+                custom_leave_dates=req.custom_leave_dates,
+                custom_work_dates=approved_work_dates or None,
+                custom_rest_weekdays=req.custom_rest_weekdays,
+                monthly_salary_base=req.monthly_salary_base,
+            )
         return BaseResponse(
             data=SchedulePrecisionResultView.model_validate(res),
             message="成功完成排班與順延完工日試算",

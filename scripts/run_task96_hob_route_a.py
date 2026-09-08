@@ -41,9 +41,11 @@ DEPOSIT_SOURCE_IDENTITY = "TASK96-DEP-001"
 PAYOUT_SOURCE_IDENTITY = "TASK96-PAYOUT-001"
 SOURCE_REVISION = ""
 COMMAND_IDENTITY_PREFIX = ""
+HCM_REPORTED_AT = "2026/06/01"
 COMPLETION_EVALUATION_AT = "2026-07-07T17:01:00+08:00"
 PAYOUT_DATE = "2026/07/15"
 ACTOR = "development-bypass"
+PAYMENT_DESTINATION_DISPLAY = "TASK96 Route A 隔離驗收工會收款帳戶"
 SERVICE_DATES = (
     "2026-07-01",
     "2026-07-02",
@@ -107,7 +109,7 @@ def _synthetic_staff_identity(case_no: str) -> str:
     return f"A{body}{check_digit}"
 
 
-def _configure_case(case_no: str) -> None:
+def _configure_case(case_no: str, *, service_start: str | None = None) -> None:
     """Bind the runner to one caller-supplied disposable case identity."""
     global CASE_NO, SCENARIO_ID, SOURCE_REVISION, COMMAND_IDENTITY_PREFIX
     global CLIENT_SOURCE_IDENTITY, DEPOSIT_SOURCE_IDENTITY, PAYOUT_SOURCE_IDENTITY
@@ -141,6 +143,8 @@ def _configure_case(case_no: str) -> None:
     STAFF_BANK_ACCOUNT = f"0096{int(staff_digest[10:26], 16) % 1_000_000_000_000:012d}"
     week_offset = int(hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:8], 16) % 52
     start = date(2026, 8, 3) + timedelta(days=(week_offset % 4) * 7)
+    if service_start is not None:
+        start = date.fromisoformat(service_start)
     SERVICE_DATES = tuple(
         (start + timedelta(days=day_offset)).isoformat()
         for day_offset in (0, 1, 2, 3, 4)
@@ -148,6 +152,44 @@ def _configure_case(case_no: str) -> None:
     COMPLETION_EVALUATION_AT = f"{SERVICE_DATES[-1]}T17:01:00+08:00"
     payout_date = date.fromisoformat(SERVICE_DATES[-1]) + timedelta(days=18)
     PAYOUT_DATE = payout_date.strftime("%Y/%m/%d")
+
+
+def _ensure_client_payment_destination(client: TestClient) -> dict[str, object]:
+    """Establish the required Client Finance root through its typed Q/P/A flow."""
+    path = "/api/v1/client-finance/payment-destination"
+    current = _require_success(client.get(path), "client_payment_destination_query")
+    if current.get("configured"):
+        return current
+    expected_revision = int(current.get("revision", 0))
+    preview = _require_success(
+        client.post(
+            f"{path}/preview",
+            json={
+                "account_display": PAYMENT_DESTINATION_DISPLAY,
+                "expected_revision": expected_revision,
+            },
+        ),
+        "client_payment_destination_preview",
+    )
+    receipt = _require_success(
+        client.post(
+            f"{path}/apply",
+            json={
+                "account_display": PAYMENT_DESTINATION_DISPLAY,
+                "expected_revision": expected_revision,
+                "preview_fingerprint": preview["preview_fingerprint"],
+                "reason": "Task 96 Route A 隔離契約完成驗收所需的合成收款帳戶設定",
+            },
+            headers={
+                "Idempotency-Key": f"{SCENARIO_ID}:payment-destination",
+                "X-Correlation-ID": f"{SCENARIO_ID}:payment-destination",
+            },
+        ),
+        "client_payment_destination_apply",
+    )
+    if receipt.get("account_display") != PAYMENT_DESTINATION_DISPLAY:
+        raise RuntimeError(f"client_payment_destination_readback_invalid:{receipt}")
+    return receipt
 
 
 def _canonical_xlsx(frame: pd.DataFrame, sheet_name: str) -> bytes:
@@ -184,7 +226,7 @@ def _hcm_workbook() -> bytes:
     row = {
         "案件狀態": "洽談中",
         "查詢序號(案件編號)": CASE_NO,
-        "報名時間(建檔)": "2026/06/01",
+        "報名時間(建檔)": HCM_REPORTED_AT,
         "IP位址": "192.0.2.96",
         "姓名": CLIENT_NAME,
         "性別": "女",
@@ -445,9 +487,12 @@ def _matching_contact_state(
 def _ensure_candidate_contact_pool(
     client: TestClient,
     staff_id: int,
+    *, skip_information: bool = False, skip_willingness: bool = False,
+    event_suffix: str = "",
 ) -> dict[str, object]:
     """Drive the candidate-pool owner workflow before formal matching."""
     path = f"/api/v1/orders/{CASE_NO}/candidate-contact-pool"
+    event_identity = f"{SCENARIO_ID}{event_suffix}"
     pool = _require_success(client.get(path), "candidate_contact_pool_query")
     candidates = pool.get("candidates")
     if not isinstance(candidates, list):
@@ -462,7 +507,7 @@ def _ensure_candidate_contact_pool(
                 f"{path}/candidates",
                 json={
                     "actor": ACTOR,
-                    "event_key": f"{SCENARIO_ID}:candidate-pool-add:v1",
+                    "event_key": f"{event_identity}:candidate-pool-add:v1",
                     "candidates": [
                         {
                             "staff_id": staff_id,
@@ -491,7 +536,7 @@ def _ensure_candidate_contact_pool(
     information = candidate.get("information")
     if not isinstance(information, dict):
         raise RuntimeError("candidate_contact_pool_information_invalid")
-    if information.get("1") is None and information.get("information_1") is None:
+    if not skip_information and information.get("1") is None and information.get("information_1") is None:
         preview = _require_success(
             client.post(
                 f"{path}/candidates/{candidate_id}/information/manual-confirmation/preview",
@@ -512,7 +557,7 @@ def _ensure_candidate_contact_pool(
                     "confirmation_method": "phone",
                     "reason": "Task 96 Route A 合成人工確認候選訂單資訊",
                     "actor": ACTOR,
-                    "event_key": f"{SCENARIO_ID}:candidate-information-1:v1",
+                    "event_key": f"{event_identity}:candidate-information-1:v1",
                     "expected_version": preview["expected_version"],
                     "preview_fingerprint": preview["preview_fingerprint"],
                 },
@@ -529,13 +574,13 @@ def _ensure_candidate_contact_pool(
         )
         if candidate is None:
             raise RuntimeError("candidate_contact_pool_candidate_missing_after_information")
-    if candidate.get("willingness") != "willing":
+    if not skip_willingness and candidate.get("willingness") != "willing":
         _require_success(
             client.put(
                 f"{path}/candidates/{candidate_id}/willingness",
                 json={
                     "actor": ACTOR,
-                    "event_key": f"{SCENARIO_ID}:candidate-willingness:v1",
+                    "event_key": f"{event_identity}:candidate-willingness:v1",
                     "willingness": "willing",
                     "reason": "Task 96 Route A 合成人工確認接案意願",
                 },
@@ -548,8 +593,17 @@ def _ensure_candidate_contact_pool(
 def _run_stage_02(
     client: TestClient,
     staff_id: int,
+    *, terminal_sop_gap: str | None = None,
 ) -> dict[str, object]:
-    candidate_pool = _ensure_candidate_contact_pool(client, staff_id)
+    candidate_pool = _ensure_candidate_contact_pool(
+        client, staff_id, skip_information=terminal_sop_gap == "caregiver_line_delivery",
+    )
+    if terminal_sop_gap == "caregiver_willingness_reply":
+        if staff_id == 1:
+            raise RuntimeError("pending_candidate_requires_distinct_existing_staff")
+        candidate_pool = _ensure_candidate_contact_pool(
+            client, 1, skip_willingness=True, event_suffix=":pending-candidate",
+        )
     segments = [
         {
             "staff_id": staff_id,
@@ -610,7 +664,7 @@ def _run_stage_02(
             "matching_willingness",
         )
         state = _matching_contact_state(client, plan_id)
-    if state.get("customer_profiles_manual_confirmation") is None:
+    if terminal_sop_gap != "formal_recommendation" and state.get("customer_profiles_manual_confirmation") is None:
         version = int(state["plan"]["communication_version"])
         body = {
             "actor": ACTOR,
@@ -1384,6 +1438,7 @@ def _ensure_payroll_obligation(
 def _ensure_staff_payout(
     client: TestClient,
     staff_id: int,
+    *, require_terminal_completion: bool = True,
 ) -> dict[str, object]:
     query_path = f"/api/v1/staff-payables/{staff_id}"
     query = _require_success(client.get(query_path), "staff_payout_query")
@@ -1397,7 +1452,7 @@ def _ensure_staff_payout(
     obligation = obligations[0]
     if obligation.get("balance_ntd") == 0 and obligation.get("payout_status") == "completed":
         completion = _historical_completion(client)
-        if completion.get("state") != "completed":
+        if require_terminal_completion and completion.get("state") != "completed":
             raise RuntimeError(f"historical_completion_not_terminal:{completion}")
         return {
             "stage": "stage-07-settled",
@@ -1509,13 +1564,13 @@ def _ensure_staff_payout(
         len(settled) != 1
         or settled[0].get("balance_ntd") != 0
         or settled[0].get("payout_status") != "completed"
-        or completion.get("state") != "completed"
+        or (require_terminal_completion and completion.get("state") != "completed")
     ):
         raise RuntimeError(
             f"staff_payout_terminal_readback_mismatch:{json.dumps({'job': job, 'readback': readback, 'completion': completion}, ensure_ascii=False, default=str)}"
         )
     return {
-        "stage": "stage-07-settled",
+        "stage": "stage-07-settled" if require_terminal_completion else "staff-payout-completed",
         "result": "created",
         "batch_identity": batch_identity,
         "finance_import_row_id": finance_import_row_id,
@@ -1526,11 +1581,114 @@ def _ensure_staff_payout(
     }
 
 
-def run_route_a() -> dict[str, object]:
+def complete_government_subsidy(
+    *, expected_incomplete_components: tuple[str, ...] = (),
+) -> dict[str, object]:
+    """Complete this isolated case through claim and bank-receipt owner APIs."""
+    database = _require_safe_environment()
+    from api.main import app
+
+    base = "/api/v1/government-subsidy"
+    jobs = []
+    with TestClient(app) as client:
+        def apply_preview(path: str, body: dict[str, object], operation: str):
+            preview = _require_success(
+                client.post(f"{path}/preview", json=body), f"{operation}_preview"
+            )
+            identity = f"{COMMAND_IDENTITY_PREFIX}:{operation}:v1"
+            accepted = _require_success(
+                client.post(
+                    f"{path}/apply",
+                    json={
+                        **body,
+                        "expected_batch_version": preview["batch_version"],
+                        "preview_fingerprint": preview["preview_fingerprint"],
+                        "reason": "Isolated synthetic terminal aggregate acceptance",
+                    },
+                    headers={"Idempotency-Key": identity, "X-Correlation-ID": identity},
+                ),
+                f"{operation}_apply",
+            )
+            _run_one_durable_job()
+            job = _require_success(
+                client.get(f"/api/v1/jobs/{accepted['job_id']}"), f"{operation}_job"
+            )
+            if job.get("status") != "succeeded":
+                raise RuntimeError(f"{operation}_job_not_succeeded:{job}")
+            jobs.append({"operation": operation, "job_id": accepted["job_id"]})
+
+        service_date = date.fromisoformat(SERVICE_DATES[0])
+        planning = {"intent": {"application_year": service_date.year,
+                               "quarter": (service_date.month - 1) // 3 + 1,
+                               "revision": 1}}
+        candidate = _require_success(
+            client.post(f"{base}/claim-batches/preview", json=planning), "subsidy_plan_scope"
+        )
+        if not candidate["items"] or any(item["case_no"] != CASE_NO for item in candidate["items"]):
+            raise RuntimeError("subsidy_plan_exceeds_single_case_scope")
+        apply_preview(f"{base}/claim-batches", planning, "subsidy_plan")
+        batches = _require_success(client.get(f"{base}/claim-batches"), "subsidy_batches")
+        matching = [batch for batch in batches["batches"]
+                    if batch["batch_identity"] == candidate["batch_identity"]]
+        if len(matching) != 1:
+            raise RuntimeError("subsidy_batch_identity_not_unique")
+        batch = matching[0]
+        batch_path = f"{base}/claim-batches/{batch['batch_id']}"
+        apply_preview(f"{batch_path}/submit", {}, "subsidy_submit")
+        approvals = {"item_approvals": [
+            {"item_id": item["item_id"], "approved_amount_ntd": item["requested_amount_ntd"]}
+            for item in batch["items"]
+        ]}
+        apply_preview(f"{batch_path}/approval", approvals, "subsidy_approval")
+        amount = batch["requested_total_ntd"]
+        row = {"序號": f"{SCENARIO_ID}-GOV", "交易日期": PAYOUT_DATE,
+               "交易時間": "09:08:00", "帳務日期": PAYOUT_DATE,
+               "摘要": "合成政府補助", "支出金額": "", "存入金額": amount,
+               "帳戶餘額": amount, "備註": "新竹市政府 合成驗收補助"}
+        identity = f"{COMMAND_IDENTITY_PREFIX}:subsidy-bank:v1"
+        ingest = _require_success(client.post(
+            "/api/v1/finance-import/workbooks/ingest",
+            files={"workbook": ("terminal224-government.xlsx",
+                                  _canonical_xlsx(pd.DataFrame([row]), "交易明細查詢"),
+                                  XLSX_MEDIA_TYPE)},
+            headers={"Idempotency-Key": identity, "X-Correlation-ID": identity},
+        ), "subsidy_bank_ingest")
+        bank = _require_success(client.post(
+            "/api/v1/finance-import/batches/preview",
+            json={"batch_identity": ingest["batch_identity"]},
+        ), "subsidy_bank_preview")
+        if len(bank["rows"]) != 1 or bank["rows"][0]["classification_type"] != "government_subsidy":
+            raise RuntimeError("subsidy_bank_classification_invalid")
+        row_id = int(bank["rows"][0]["row_identity"].removeprefix("finance-import-row:"))
+        apply_preview(f"{base}/receipts", {"intent": {
+            "finance_import_row_id": row_id, "batch_id": batch["batch_id"],
+            "allocations": [],
+        }}, "subsidy_receipt")
+        readback = _require_success(client.get(batch_path), "subsidy_readback")
+        terminal = _require_success(client.get("/api/orders/terminal-aggregates",
+            params={"page_size": 200, "case_no_search": CASE_NO}), "terminal_readback")
+        if len(terminal["items"]) != 1:
+            raise RuntimeError(f"terminal_identity_not_unique:{terminal}")
+        actual_gaps = {part["code"] for part in terminal["items"][0]["components"]
+                       if not part["completed"]}
+        if actual_gaps != set(expected_incomplete_components):
+            raise RuntimeError(f"terminal_components_mismatch:{terminal}")
+        return {"database": database, "case_no": CASE_NO, "jobs": jobs,
+                "government_subsidy": readback, "terminal_aggregate": terminal}
+
+
+def run_route_a(
+    *, stop_after_contract: bool = False, stop_before_payout: bool = False,
+    skip_service_completion: bool = False,
+    terminal_sop_gap: str | None = None,
+) -> dict[str, object]:
+    if terminal_sop_gap not in {None, "caregiver_line_delivery", "caregiver_willingness_reply", "formal_recommendation"}:
+        raise ValueError("unsupported_terminal_sop_gap")
     database = _require_safe_environment()
     from api.main import app
 
     with TestClient(app) as client:
+        payment_destination = _ensure_client_payment_destination(client)
         hcm_preview, hcm_apply = _preview_apply_workbook(
             client,
             name="hcm",
@@ -1572,17 +1730,36 @@ def run_route_a() -> dict[str, object]:
             client,
             int(selected_staff[0]["id"]),
         )
-        matching = _run_stage_02(client, int(selected_staff[0]["id"]))
+        matching = _run_stage_02(client, int(selected_staff[0]["id"]), terminal_sop_gap=terminal_sop_gap)
         commitment = _run_stage_03(client, int(matching["plan_id"]))
+        if stop_after_contract:
+            return {
+                "scenario_id": SCENARIO_ID,
+                "database": database,
+                "payment_destination": payment_destination,
+                "stage": "stage-03-commitment",
+                "case_no": CASE_NO,
+                "staff_id": selected_staff[0]["id"],
+                "matching": matching,
+                "commitment": commitment,
+            }
         assignment = _run_stage_04(
             client,
             int(matching["plan_id"]),
             int(selected_staff[0]["id"]),
         )
         actual_start = _run_stage_05(client)
-        service_completion = _run_stage_06(client)
+        service_completion = ({"result": "not_run"} if skip_service_completion
+                              else _run_stage_06(client))
         payroll = _ensure_payroll_obligation(client, int(selected_staff[0]["id"]))
-        staff_payout = _ensure_staff_payout(client, int(selected_staff[0]["id"]))
+        if stop_before_payout:
+            return {"database": database, "case_no": CASE_NO,
+                    "staff_id": selected_staff[0]["id"], "stage": "before-staff-payout",
+                    "payroll": payroll, "service_completion": service_completion}
+        staff_payout = _ensure_staff_payout(
+            client, int(selected_staff[0]["id"]),
+            require_terminal_completion=not skip_service_completion,
+        )
         completion = _historical_completion(client)
         final_order = _require_success(
             client.get(f"/api/v1/orders/{CASE_NO}"),
@@ -1591,7 +1768,8 @@ def run_route_a() -> dict[str, object]:
     return {
         "scenario_id": SCENARIO_ID,
         "database": database,
-        "stage": "stage-07-settled",
+        "payment_destination": payment_destination,
+        "stage": "service-confirmation-pending" if skip_service_completion else "stage-07-settled",
         "case_no": CASE_NO,
         "staff_id": selected_staff[0]["id"],
         "hcm": {
@@ -1640,6 +1818,30 @@ if __name__ == "__main__":
         required=True,
         help="caller-supplied case identifier for one disposable lu_test_* run",
     )
+    parser.add_argument(
+        "--stop-after-contract",
+        action="store_true",
+        help="prepare a lawful contract-completed fixture without later service or payout stages",
+    )
+    parser.add_argument(
+        "--government-subsidy-only", action="store_true",
+        help="complete subsidy for one already-settled isolated Route A case",
+    )
+    parser.add_argument("--service-start", help="ISO start date for a new isolated synthetic case")
+    parser.add_argument("--stop-before-payout", action="store_true")
+    parser.add_argument("--expect-staff-payout-gap", action="store_true")
     args = parser.parse_args()
-    _configure_case(args.case_no)
-    print(json.dumps(run_route_a(), ensure_ascii=False, sort_keys=True))
+    if sum((args.stop_after_contract, args.stop_before_payout, args.government_subsidy_only)) > 1:
+        parser.error("stop flags and government-subsidy-only are mutually exclusive")
+    if args.expect_staff_payout_gap and not args.government_subsidy_only:
+        parser.error("expect-staff-payout-gap requires government-subsidy-only")
+    _configure_case(args.case_no, service_start=args.service_start)
+    print(json.dumps(
+        complete_government_subsidy(expected_incomplete_components=("staff_payout",)
+                                    if args.expect_staff_payout_gap else ())
+        if args.government_subsidy_only
+        else run_route_a(stop_after_contract=args.stop_after_contract,
+                         stop_before_payout=args.stop_before_payout),
+        ensure_ascii=False,
+        sort_keys=True,
+    ))

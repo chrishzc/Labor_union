@@ -114,6 +114,7 @@ def test_replayed_manual_review_row_preserves_ready_rows_for_apply() -> None:
         {
             "canonical_batch_id": 4,
             "disposition": "manual_review",
+            "latest_dispatch_outcome": "reconciled",
         },
         FinanceClassificationType.NON_BUSINESS_REVIEW,
         9,
@@ -159,6 +160,33 @@ def test_replayed_manual_review_row_preserves_ready_rows_for_apply() -> None:
     assert tuple(row.row_identity for row in plan.dispatchable_rows) == (
         "finance-import-row:5",
     )
+
+
+@pytest.mark.parametrize(
+    ("outcome", "expected"),
+    [
+        ("reconciled", FinanceImportDisposition.EXISTING),
+        ("existing", FinanceImportDisposition.EXISTING),
+        ("pending", FinanceImportDisposition.BUSINESS_PENDING),
+        ("rejected", FinanceImportDisposition.BUSINESS_PENDING),
+        ("conflict", FinanceImportDisposition.BUSINESS_PENDING),
+    ],
+)
+def test_business_dispatch_projection_preserves_terminal_outcome_meaning(
+    outcome: str,
+    expected: FinanceImportDisposition,
+) -> None:
+    disposition = _preview_disposition(
+        {
+            "canonical_batch_id": 9,
+            "disposition": "business_pending",
+            "latest_dispatch_outcome": outcome,
+        },
+        FinanceClassificationType.CLIENT_RECEIPT,
+        9,
+    )
+
+    assert disposition is expected
 
 
 def test_canonical_rows_follow_the_textual_identity_order_required_by_preview() -> None:

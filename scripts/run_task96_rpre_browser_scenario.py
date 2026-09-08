@@ -125,7 +125,12 @@ def _configure_route() -> None:
     if not case_no or len(case_no) > 50:
         raise RuntimeError("task96_rpre_case_no_invalid")
     DATABASE = database
-    route_a.CASE_NO = case_no
+    # Rebind every synthetic client/staff/finance identity as one coherent
+    # Route-A scenario before applying RPRE-specific dates and command names.
+    # Setting only CASE_NO leaves the imported party identities from a prior
+    # scenario attached to the new order and makes the contract workflow fail
+    # after otherwise valid matching work.
+    route_a._configure_case(case_no)
     route_a.SERVICE_DATES = _configured_service_dates()
     route_a.SCENARIO_ID = f"TASK96-RPRE-{scenario}-{case_no}"
     route_a.SOURCE_REVISION = f"TASK96-RPRE-{scenario}-{case_no}-r1"
@@ -444,8 +449,9 @@ def _read_r03_line_identity_binding(
         with connection.cursor() as cursor:
             cursor.execute(
                 "SELECT line_user_id,binding_status,subject_type,subject_reference,"
-                "aggregate_version FROM line_identity_bindings WHERE line_user_id=%s",
-                (line_user_id,),
+                "aggregate_version FROM line_identity_role_bindings "
+                "WHERE line_user_id=%s AND subject_type=%s",
+                (line_user_id, subject_type),
             )
             rows = tuple(cursor.fetchall() or ())
     finally:
@@ -749,6 +755,19 @@ def _establish_matching_lineage(client: TestClient, *, staff_id: int) -> dict[st
                 "existing": True,
                 "snapshot_id": existing["snapshot"]["snapshot_id"],
             }
+        # A prior run can have committed the immutable initial-criteria
+        # snapshot but stopped before package creation (for example while
+        # establishing a local recipient binding).  Replaying that Apply with
+        # a now-stale preview fingerprint is intentionally rejected.  Reuse
+        # the authoritative current snapshot and continue only with the
+        # missing package decision instead.
+        if existing.get("snapshot") is not None:
+            package = _seed_canonical_matching_package(staff_id=staff_id)
+            return {
+                **package,
+                "initial_criteria_receipt_id": None,
+                "initial_criteria_existing": True,
+            }
     pool = route_a._require_success(
         client.get(
             f"/api/v1/orders/{route_a.CASE_NO}/candidate-contact-pool"
@@ -884,6 +903,11 @@ def run_scenario() -> dict[str, object]:
                     query=query,
                 ),
             }
+        # A fresh disposable database has no client-finance payment
+        # destination.  Establish that independent root with its own Q/P/A
+        # flow before the lawful contract-signing stage below; do not let the
+        # fixture rely on a pre-existing database setting.
+        payment_destination = route_a._ensure_client_payment_destination(client)
         hcm_preview, hcm_apply = route_a._preview_apply_workbook(
             client,
             name="hcm",
@@ -947,13 +971,21 @@ def run_scenario() -> dict[str, object]:
             _ensure_candidate_contact_pool(client, staff_id=staff_id)
             matching = route_a._run_stage_02(client, staff_id)
             commitment = route_a._run_stage_03(client, int(matching["plan_id"]))
+            # The M3 customer-decision receipt is only lawful when its
+            # current customer and staff LINE recipient bindings are present.
+            # These are typed identity Q/P/A records, not fabricated delivery
+            # success; local validation may still retain the resulting outbox.
+            line_identities = _ensure_r03_line_identity_bindings(client)
             if SCENARIO == "R-03":
-                line_identities = _ensure_r03_line_identity_bindings(client)
                 waiting_lock = _acquire_r03_waiting_lock(
                     client,
                     plan_id=int(matching["plan_id"]),
                 )
             else:
+                # Build the immutable schedule recipient snapshot only after
+                # the two role bindings exist.  A snapshot intentionally does
+                # not backfill a later LINE binding, so this ordering is part
+                # of the lawful M3 delivery lineage.
                 assignment = route_a._run_stage_04(
                     client,
                     int(matching["plan_id"]),
@@ -988,6 +1020,7 @@ def run_scenario() -> dict[str, object]:
         "staff_id": staff_id,
         "service_dates": service_dates_apply.get("service_dates")
         or service_dates_apply.get("current_dates"),
+        "payment_destination": payment_destination,
         "hcm": {"ready_count": hcm_preview.get("ready_count"), "inserted_count": hcm_apply.get("inserted_count")},
         "staff": {"created_count": staff_preview.get("created_count"), "applied_created_count": staff_apply.get("created_count")},
         "client_beclass": {"create_count": client_preview.get("create_count"), "created_count": client_apply.get("created_count")},

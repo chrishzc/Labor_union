@@ -328,3 +328,48 @@ def test_partial_unfiltered_page_does_not_reuse_whole_source_etag():
     assert [item.case_no for item in page.items] == ["CASE-001", "CASE-002"]
     assert page.next_cursor == "CASE-002"
     assert page.etag != source_etag
+
+
+@pytest.mark.parametrize("scope,statuses", [
+    ("in_progress", {"待補件", "洽談中", "訂單成立", "服務中", "歷史訂單－未服務", "歷史訂單－服務中"}),
+    ("completed", {"訂單完成", "歷史訂單－服務完成", "歷史訂單－帳務完成"}),
+    ("cancelled", {"訂單取消"}),
+])
+def test_workbench_categories_cover_current_lifecycle_with_stable_pagination(scope, statuses):
+    timelines = tuple(_timeline(f"CASE-{index:03}", lifecycle=status, current_step=None)
+                      for index, status in enumerate(OrderLifecycleStatus))
+    source = _Source({None: _page(*timelines)})
+    first = query_core_stage_page(source, CoreStageProjectionFilterQuery(2, workbench_scope=scope))
+    collected = list(first.items)
+    cursor = first.next_cursor
+    while cursor is not None:
+        page = query_core_stage_page(source, CoreStageProjectionFilterQuery(2, after_case_no=cursor, workbench_scope=scope))
+        assert page.stage_counts == first.stage_counts
+        collected.extend(page.items)
+        cursor = page.next_cursor
+    assert {item.lifecycle_status.value for item in collected} == statuses
+    assert len(collected) == len(statuses)
+    if scope != "in_progress":
+        assert not any(first.stage_counts.values())
+        assert first.substatus_counts == {}
+
+
+@pytest.mark.parametrize("extra", [
+    {"branch_type": "normal"}, {"historical_lifecycle": "unserved"},
+    {"stage": "client_settlement"}, {"substatus_code": "client_settled"},
+])
+def test_terminal_scope_rejects_legacy_or_stage_filters(extra):
+    with pytest.raises(ValueError):
+        CoreStageProjectionFilterQuery(50, workbench_scope="completed", **extra)
+
+
+def test_historical_active_owner_stage_participates_in_workbench_counts_only():
+    source = _Source({None: _page(_timeline("CASE-H", lifecycle=OrderLifecycleStatus.HISTORICAL_IN_SERVICE))})
+    all_active = query_core_stage_page(source, CoreStageProjectionFilterQuery(50, workbench_scope="in_progress"))
+    owner_stage = all_active.items[0].historical_current_owner_stage_code
+    assert owner_stage is not None
+    filtered = query_core_stage_page(source, CoreStageProjectionFilterQuery(50, workbench_scope="in_progress", stage=owner_stage))
+    assert [item.case_no for item in filtered.items] == ["CASE-H"]
+    assert filtered.stage_counts[owner_stage] == 1
+    legacy = query_core_stage_page(source, CoreStageProjectionFilterQuery(50, branch_type="historical"))
+    assert not any(legacy.stage_counts.values())

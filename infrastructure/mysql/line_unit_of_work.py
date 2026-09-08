@@ -54,6 +54,9 @@ from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.matching_notification_repository import (
     MySqlMatchingNotificationRepository,
 )
+from infrastructure.mysql.matching_holiday_work_agreement_repository import (
+    MySqlMatchingHolidayWorkAgreementRepository,
+)
 from infrastructure.mysql.knowledge_retrieval_repository import (
     MySqlKnowledgeQuestionIntakeAdapter,
 )
@@ -114,6 +117,7 @@ class LineMySqlUnitOfWork(MySqlUnitOfWork):
         self.audit = MySqlLineAuditRepository(connection)
         self.outbox = MySqlLineOutboxWriter(connection)
         self.matching_notifications = MySqlMatchingNotificationRepository(connection)
+        self.matching_holiday_work_agreements = MySqlMatchingHolidayWorkAgreementRepository(connection)
         self.matching_schedule_confirmations = MySqlMatchingScheduleConfirmationRepository(connection)
         self.knowledge_questions = MySqlKnowledgeQuestionIntakeAdapter(connection)
         self.customer_service = MySqlCustomerServiceRepository(connection)

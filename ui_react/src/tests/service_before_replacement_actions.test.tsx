@@ -274,6 +274,27 @@ describe('ServiceBeforeReplacementActions', () => {
     expect(screen.getByText(/official-schedule:CASE-RPRE-001，版本 7/)).toBeInTheDocument();
   });
 
+  it('R-04 已完成 successor 的重載明確禁止重複套用並保留 step 4', async () => {
+    vi.mocked(serviceBeforeReplacementClient.query).mockResolvedValue({
+      ...readyQuery,
+      scenario: 'R-04',
+      outcome: 'blocked',
+      impacted_roots: [],
+      retained_roots: [retainedRoot],
+      root_delta: null,
+      resume_step: 'step_4',
+      blockers: ['replacement_successor_exists'],
+    });
+    render(<ServiceBeforeReplacementActions caseNo="CASE-RPRE-001" initialScenario="R-04" />);
+
+    expandReplacementPanel();
+
+    await screen.findByText('換人 successor 已建立，不能重複套用');
+    expect(screen.getByText('步驟 4：沿用已驗證接受結果')).toBeInTheDocument();
+    expect(screen.queryByLabelText('換人原因')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '預覽換人影響' })).not.toBeInTheDocument();
+  });
+
   it('沒有 typed anomaly binding 時不預設猜 R-01，必須由操作者選擇', async () => {
     render(<ServiceBeforeReplacementActions caseNo="CASE-RPRE-001" />);
     expandReplacementPanel();

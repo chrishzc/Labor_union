@@ -1,3 +1,4 @@
+import { loadAllCoreStageTimelines } from '../api/orders/load_all_core_stage_timelines';
 /**
  * File: OrderWorkbenchV2Page.tsx
  * Description: 待辦看板 Beta。唯讀使用正式十三核心階段 query contract，不以前端推導階段或計數。
@@ -10,6 +11,8 @@ import {
   type ChangeEvent,
   type FC,
 } from 'react';
+import './OrdersPage.css';
+import './OrderTrackerPage.css';
 import './OrderWorkbenchV2Page.css';
 import { OrderAssignmentPlanPanel } from '../components/OrderAssignmentPlanPanel';
 import { OrderCandidateContactStatusPanel } from '../components/OrderCandidateContactStatusPanel';
@@ -22,14 +25,13 @@ import { OrderServiceDatesPanel } from '../components/OrderServiceDatesPanel';
 import { OrderTerminalAggregateLane } from '../components/OrderTerminalAggregateLane';
 import { OrderWorkbenchV2Drawer } from '../components/OrderWorkbenchV2Drawer';
 import {
-  orderCoreStageProjectionClient,
+  type OrderWorkbenchScope,
   type OrderCoreStageProjectionQueryParams,
 } from '../api/orders/order_core_stage_projection_client';
 import type {
   CoreStageBranchType,
   CoreStageCode,
   CoreStageSubstatusCode,
-  HistoricalLifecycleFacet,
 } from '../api/orders/order_core_stage_projection_schemas';
 import {
   loadAllOrderSummaries,
@@ -38,9 +40,7 @@ import {
 import {
   adaptOrderCoreStageTimelinePage,
   CORE_STAGE_DEFINITIONS,
-  coreStageBranchLabel,
   coreStageDefinition,
-  HISTORICAL_LIFECYCLE_LABELS,
   ORDER_CORE_STAGE_PROJECTION_UNAVAILABLE,
   type OrderCoreStageWorkbenchViewModel,
 } from '../adapters/orders/order_core_stage_projection_adapter';
@@ -49,13 +49,10 @@ import {
   type OrderSummaryCardViewModel,
 } from '../adapters/orders/order_summary_adapter';
 
-const BRANCH_TYPES: readonly CoreStageBranchType[] = ['normal', 'historical', 'cancelled'];
-const HISTORICAL_LIFECYCLES: readonly HistoricalLifecycleFacet[] = [
-  'unserved',
-  'in_service',
-  'service_completed',
-  'accounting_completed',
-];
+const WORKBENCH_SCOPES: readonly OrderWorkbenchScope[] = ['in_progress', 'completed', 'cancelled'];
+const SCOPE_LABELS: Record<OrderWorkbenchScope, string> = {
+  in_progress: '進行中訂單', completed: '完成訂單', cancelled: '取消訂單',
+};
 
 function summaryUnavailableMessage(summaryLoading: boolean, summaryQueryFailed: boolean): string {
   if (summaryLoading) return '正式案件摘要載入中。';
@@ -66,7 +63,7 @@ function summaryUnavailableMessage(summaryLoading: boolean, summaryQueryFailed: 
 function coreQueryErrorMessage(error: unknown): string {
   const detail = error instanceof Error && error.message.trim()
     ? error.message.trim()
-    : '無法取得正式十三階段資料';
+    : '無法取得訂單資料';
   return `${ORDER_CORE_STAGE_PROJECTION_UNAVAILABLE} 原因：${detail}`;
 }
 
@@ -80,10 +77,9 @@ export const OrderWorkbenchV2Page: FC = () => {
   );
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [summaryQueryFailed, setSummaryQueryFailed] = useState(false);
-  const [selectedStage, setSelectedStage] = useState<CoreStageCode>('intake_validation');
+  const [selectedStage, setSelectedStage] = useState<CoreStageCode | null>(null);
   const [selectedSubstatus, setSelectedSubstatus] = useState<CoreStageSubstatusCode | null>(null);
-  const [branchType, setBranchType] = useState<CoreStageBranchType>('normal');
-  const [selectedHistoricalLifecycle, setSelectedHistoricalLifecycle] = useState<HistoricalLifecycleFacet | null>(null);
+  const [workbenchScope, setWorkbenchScope] = useState<OrderWorkbenchScope>('in_progress');
   const [search, setSearch] = useState('');
   const [onlyBlocked, setOnlyBlocked] = useState(false);
   const [onlyWarning, setOnlyWarning] = useState(false);
@@ -109,17 +105,13 @@ export const OrderWorkbenchV2Page: FC = () => {
     const query: OrderCoreStageProjectionQueryParams = {
       page_size: 200,
       lifecycle_scope: 'all',
-      branch_type: branchType,
-      historical_lifecycle:
-        branchType === 'historical' && selectedHistoricalLifecycle !== null
-          ? selectedHistoricalLifecycle
-          : undefined,
+      workbench_scope: workbenchScope,
       case_no_search: normalizedSearch || undefined,
       blocker_only: onlyBlocked || undefined,
       warning_only: onlyWarning || undefined,
-      stage: branchType === 'normal' ? selectedStage : undefined,
+      stage: workbenchScope === 'in_progress' ? selectedStage ?? undefined : undefined,
       substatus_code:
-        branchType === 'normal' && selectedSubstatus !== null
+        workbenchScope === 'in_progress' && selectedSubstatus !== null
           ? selectedSubstatus
           : undefined,
     };
@@ -133,7 +125,7 @@ export const OrderWorkbenchV2Page: FC = () => {
       setView(null);
     }
 
-    void orderCoreStageProjectionClient.getCoreStageTimelines(query, {
+    void loadAllCoreStageTimelines(query, {
       signal: controller.signal,
     })
       .then((page) => {
@@ -155,12 +147,11 @@ export const OrderWorkbenchV2Page: FC = () => {
 
     return () => controller.abort();
   }, [
-    branchType,
+    workbenchScope,
     normalizedSearch,
     onlyBlocked,
     onlyWarning,
     projectionRefreshKey,
-    selectedHistoricalLifecycle,
     selectedStage,
     selectedSubstatus,
   ]);
@@ -197,123 +188,108 @@ export const OrderWorkbenchV2Page: FC = () => {
     };
   }, [projectionRefreshKey]);
 
-  const selectedDefinition = coreStageDefinition(selectedStage);
-  const selectedStageCount = view?.stageCounts[selectedStage] ?? 0;
+  const selectedDefinition = selectedStage === null ? null : coreStageDefinition(selectedStage);
+  const selectedStageCount = selectedStage === null ? view?.items.length ?? 0 : view?.stageCounts[selectedStage] ?? 0;
   const displayedCount = view?.items.length ?? 0;
-  const historicalTotalCount = view
-    ? HISTORICAL_LIFECYCLES.reduce((sum, facet) => sum + (view.historicalLifecycleCounts?.[facet] ?? 0), 0)
-    : 0;
 
-  const selectBranch = (branch: CoreStageBranchType) => {
-    setBranchType(branch);
+  const selectScope = (scope: OrderWorkbenchScope) => {
+    setWorkbenchScope(scope);
+    setSelectedStage(null);
     setSelectedSubstatus(null);
-    setSelectedHistoricalLifecycle(null);
+    setOnlyBlocked(false);
+    setOnlyWarning(false);
+    setSelectedDrawer(null);
   };
 
-  const selectStage = (stage: CoreStageCode) => {
-    setBranchType('normal');
+  const selectStage = (stage: CoreStageCode | null) => {
     setSelectedStage(stage);
     setSelectedSubstatus(null);
-    setSelectedHistoricalLifecycle(null);
   };
 
   return (
     <div className="order-v2-page">
-      <header className="order-v2-header">
+      <header className="page-header-banner orders-page-header">
         <div>
-          <div className="order-v2-eyebrow">BETA · 正式唯讀查詢</div>
-          <h1>📌 待辦看板 Beta</h1>
-          <p>案件、十三階段與歷史 lifecycle 計數均由正式 server query 回傳；瀏覽器不以日期或舊投影猜測狀態。</p>
+          <h1 className="page-title">📌 待辦看板 <span className="order-v2-beta">Beta</span></h1>
+          <p className="page-subtitle">依案件階段查看待辦、追蹤進度與處理工作。</p>
         </div>
-        <div className="order-v2-summary">
-          <strong>{coreStageBranchLabel(branchType)}</strong><span>目前支線</span>
-          <strong>{displayedCount}</strong><span>目前顯示</span>
-          {branchType === 'normal' && (
-            <><strong>{selectedStageCount}</strong><span>階段總數</span></>
-          )}
-          {branchType === 'historical' && (
-            <><strong>{historicalTotalCount}</strong><span>歷史總數</span></>
-          )}
+        <div className="orders-search-wrapper">
+          <label className="orders-search-input-box">
+            <span className="orders-search-icon" aria-hidden="true">🔍</span>
+            <input
+              aria-label="搜尋案件編號"
+              value={search}
+              onChange={(event: ChangeEvent<HTMLInputElement>) => setSearch(event.target.value)}
+              placeholder="搜尋案件編號"
+            />
+          </label>
+          <button className="tracker-reload-button" type="button" disabled={loading || refreshing} onClick={refreshProjection}>
+            重新整理
+          </button>
         </div>
       </header>
 
-      <nav className="order-v2-branch-filters" aria-label="訂單支線篩選">
-        {BRANCH_TYPES.map((branch) => (
-          <button
-            type="button"
-            key={branch}
-            className={branchType === branch ? 'active' : ''}
-            onClick={() => selectBranch(branch)}
-          >
-            {coreStageBranchLabel(branch)}
+      <nav className="tracker-tabs-stitch order-v2-branch-filters" aria-label="訂單狀態分類">
+        {WORKBENCH_SCOPES.map((scope) => (
+          <button type="button" key={scope}
+            className={`tracker-tab-btn ${workbenchScope === scope ? 'active' : ''}`}
+            aria-pressed={workbenchScope === scope} onClick={() => selectScope(scope)}>
+            {SCOPE_LABELS[scope]}
           </button>
         ))}
       </nav>
 
-      <section className="order-v2-stage-strip" aria-label="13 個核心訂單階段">
-        {CORE_STAGE_DEFINITIONS.map((definition) => (
-          <button
-            key={definition.code}
-            type="button"
-            className={`order-v2-stage ${
-              branchType === 'normal' && selectedStage === definition.code ? 'active' : ''
-            }`}
-            onClick={() => selectStage(definition.code)}
-          >
-            <span className="order-v2-stage-number">{definition.ordinal}</span>
-            <span className="order-v2-stage-label">{definition.shortLabel}</span>
-            <span className="order-v2-stage-count">{view?.stageCounts[definition.code] ?? 0}</span>
-          </button>
-        ))}
-      </section>
+      {workbenchScope === 'in_progress' && (
+        <section className="pipeline-stepper-nav order-v2-stage-strip" aria-label="13 個核心訂單階段">
+          <button type="button" className={`pipeline-step-pill ${selectedStage === null ? 'active' : ''}`}
+            aria-pressed={selectedStage === null} onClick={() => selectStage(null)}>全部進行中</button>
+          {CORE_STAGE_DEFINITIONS.map((definition) => (
+            <button key={definition.code} type="button"
+              className={`pipeline-step-pill ${selectedStage === definition.code ? 'active' : ''}`}
+              aria-pressed={selectedStage === definition.code} onClick={() => selectStage(definition.code)}>
+              <span className="order-v2-stage-number">{definition.ordinal}</span>
+              <span className="order-v2-stage-label">{definition.shortLabel}</span>
+              <span className="pipeline-step-badge">{view?.stageCounts[definition.code] ?? 0}</span>
+            </button>
+          ))}
+        </section>
+      )}
 
-      <section className="order-v2-toolbar">
+      <section className="pipeline-stage-section order-v2-results" aria-label="案件工作清單">
+      <div className="pipeline-stage-header">
         <div>
-          <h2>
-            {branchType === 'normal'
-              ? `${selectedDefinition.ordinal}. ${selectedDefinition.label}`
-              : branchType === 'historical' && selectedHistoricalLifecycle !== null
-                ? `歷史訂單 · ${HISTORICAL_LIFECYCLE_LABELS[selectedHistoricalLifecycle]}`
-                : coreStageBranchLabel(branchType)}
+          <h2 className="pipeline-stage-title">
+            {selectedDefinition ? `${selectedDefinition.ordinal}. ${selectedDefinition.label}` : SCOPE_LABELS[workbenchScope]}
           </h2>
-          <p>
-            {branchType === 'normal'
-              ? selectedDefinition.ownerLabel
-              : branchType === 'historical'
-                ? '由 canonical lifecycle server facet 分類；historical source period 不參與 lifecycle 推導。'
-                : '取消訂單維持獨立終止支線，不套用正常十三階段 current stage。'}
+          <p className="pipeline-stage-desc">
+            {workbenchScope === 'in_progress'
+              ? '查看所有進行中案件，或依作業階段篩選待辦。'
+              : workbenchScope === 'completed'
+                ? '服務已完成；可查閱案件紀錄，並追蹤客戶與月嫂的結算狀態。'
+                : '查閱取消訂單的案件紀錄與後續處理。'}
           </p>
         </div>
-        <div className="order-v2-toolbar-actions">
-          <button type="button" disabled={loading || refreshing} onClick={refreshProjection}>重新讀取正式清單</button>
-          <input
-            aria-label="搜尋案件編號"
-            value={search}
-            onChange={(event: ChangeEvent<HTMLInputElement>) => setSearch(event.target.value)}
-            placeholder="搜尋案件編號"
-          />
-          <label>
-            <input
-              type="checkbox"
-              checked={onlyBlocked}
-              onChange={(event: ChangeEvent<HTMLInputElement>) => setOnlyBlocked(event.target.checked)}
-            /> 只看阻塞
-          </label>
-          <label>
-            <input
-              type="checkbox"
-              checked={onlyWarning}
-              onChange={(event: ChangeEvent<HTMLInputElement>) => setOnlyWarning(event.target.checked)}
-            /> 只看提醒
-          </label>
+{workbenchScope === 'in_progress' && <div className="order-v2-result-filters">
+        <label className="tracker-completed-toggle">
+          <input type="checkbox" checked={onlyBlocked} onChange={(event: ChangeEvent<HTMLInputElement>) => setOnlyBlocked(event.target.checked)} />
+          只看阻塞
+        </label>
+        <label className="tracker-completed-toggle">
+          <input type="checkbox" checked={onlyWarning} onChange={(event: ChangeEvent<HTMLInputElement>) => setOnlyWarning(event.target.checked)} />
+          只看提醒
+        </label>
+      </div>}
+        <div className="order-v2-result-count" aria-live="polite">
+          顯示 <strong>{displayedCount}</strong>
+          <span>／ {selectedStage === null ? displayedCount : selectedStageCount} 筆</span>
         </div>
-      </section>
-
-      {branchType === 'normal' && (
+      </div>
+      {workbenchScope === 'in_progress' && selectedStage !== null && (
         <div className="order-v2-subfilters" aria-label="階段子狀態篩選">
           <button
             type="button"
             className={selectedSubstatus === null ? 'active' : ''}
+            aria-pressed={selectedSubstatus === null}
             onClick={() => setSelectedSubstatus(null)}
           >
             全部 <strong>{selectedStageCount}</strong>
@@ -323,6 +299,7 @@ export const OrderWorkbenchV2Page: FC = () => {
               type="button"
               key={option.code}
               className={selectedSubstatus === option.code ? 'active' : ''}
+              aria-pressed={selectedSubstatus === option.code}
               onClick={() => setSelectedSubstatus(option.code)}
             >
               {option.label} <strong>{option.count}</strong>
@@ -331,69 +308,50 @@ export const OrderWorkbenchV2Page: FC = () => {
         </div>
       )}
 
-      {branchType === 'historical' && (
-        <div className="order-v2-subfilters" aria-label="歷史 lifecycle 篩選">
-          <button
-            type="button"
-            className={selectedHistoricalLifecycle === null ? 'active' : ''}
-            onClick={() => setSelectedHistoricalLifecycle(null)}
-          >
-            全部 <strong>{historicalTotalCount}</strong>
-          </button>
-          {HISTORICAL_LIFECYCLES.map((facet) => (
-            <button
-              type="button"
-              key={facet}
-              className={selectedHistoricalLifecycle === facet ? 'active' : ''}
-              onClick={() => setSelectedHistoricalLifecycle(facet)}
-            >
-              {HISTORICAL_LIFECYCLE_LABELS[facet]} <strong>{view?.historicalLifecycleCounts?.[facet] ?? 0}</strong>
-            </button>
-          ))}
-        </div>
-      )}
-
       {summaryQueryFailed && !loading && !error && (
         <div className="order-v2-summary-warning" role="status">
-          案件摘要查詢失敗；案件仍依正式十三階段 response 顯示，但客戶、日期與月嫂摘要暫時不可用。
+          案件摘要查詢失敗；案件分類仍可查閱，但客戶、日期與月嫂摘要暫時不可用。
         </div>
       )}
 
-      {loading && <div className="order-v2-empty">正在查詢正式十三階段資料…</div>}
+      {loading && <div className="order-v2-empty">正在查詢訂單資料…</div>}
       {error && <div className="order-v2-error" role="alert">{error}</div>}
       {!loading && view !== null && (refreshing || error !== null) && (
-        <div className="order-v2-summary-warning" role="status">正式階段刷新尚未完成；保留上次讀取內容與面板狀態，案件操作暫停。</div>
+        <div className="order-v2-summary-warning" role="status">清單更新尚未完成；目前顯示上次內容，案件操作暫停。</div>
       )}
       {!loading && !error && displayedCount === 0 && (
-        <div className="order-v2-empty">目前沒有符合 server-side 條件的案件。</div>
-      )}
-      {!loading && !error && view?.nextCursor != null && (
-        <div className="order-v2-summary-warning" role="status">
-          結果超過單次查詢上限；目前顯示前 200 筆，請縮小搜尋或篩選條件。
+        <div className="stage-empty-state">
+          <span className="stage-empty-icon" aria-hidden="true">☕</span>
+          <strong className="stage-empty-text">目前沒有符合條件的案件。</strong>
+          <span className="stage-empty-hint">{workbenchScope === 'in_progress' ? '可切換作業階段，或調整搜尋與篩選條件。' : '可調整搜尋條件，或切換訂單分類。'}</span>
         </div>
       )}
-
       {!loading && displayedCount > 0 && (
         <fieldset disabled={refreshing || error !== null} style={{ border: 0, padding: 0, margin: 0 }}>
-        <div className="order-v2-case-grid">
+        <div className="orders-grid order-v2-orders-grid">
           {view?.items.map((item) => {
             const summary = summaryIndex.get(item.id) ?? null;
             const stage = item.currentStage;
+            const actionStage = selectedStage ?? stage?.code;
             return (
-              <article className="order-v2-case-card" key={item.id}>
-                <div className="order-v2-case-topline">
-                  <strong>{item.id}</strong>
-                  <span className={`order-v2-status status-${stage?.status ?? item.branchType}`}>
+              <article className="order-card" key={item.id}>
+                <div className="order-card-top">
+                  <strong className="order-id-badge">{item.id}</strong>
+                  <span className={`order-status-pill order-v2-status status-${stage?.status ?? item.branchType}`}>
                     {item.statusLabel}
                   </span>
                 </div>
 
                 {summary ? (
-                  <dl className="order-v2-business-summary">
-                    <div><dt>客戶</dt><dd>{summary.clientName.trim() || '客戶姓名未登錄'}</dd></div>
-                    <div><dt>服務日期</dt><dd>{summary.serviceRange}</dd></div>
-                    <div><dt>指派月嫂</dt><dd>{summary.assignedDoulaDisplay}</dd></div>
-                  </dl>
+                  <div className="order-card-body">
+                    <div className="order-client-title"><span aria-hidden="true">👤 </span><span>{summary.clientName.trim() || '客戶姓名未登錄'}</span></div>
+                    <div>🪪 身分資格：<span>{summary.identityStatus}</span></div>
+                    <div>📅 約定服務：<span>{summary.serviceRange}</span>（{summary.serviceDaysLabel}）</div>
+                    {summary.contractAmount !== null && (
+                      <div>💰 雇主自付應付額：<strong className="order-id-badge">{summary.contractAmountFormatted}</strong></div>
+                    )}
+                    <div className="order-doula-box">👩‍🍼 指派月嫂：<strong>{summary.assignedDoulaDisplay}</strong></div>
+                  </div>
                 ) : (
                   <div className="order-v2-business-summary unavailable" role="note">
                     <strong>案件摘要不可用</strong>
@@ -401,7 +359,15 @@ export const OrderWorkbenchV2Page: FC = () => {
                   </div>
                 )}
 
-                <div className="order-v2-case-meta">
+                {workbenchScope === 'completed' && (
+                  <div className="order-v2-settlement-summary" aria-label="結算狀態">
+                    <span>客戶端：{item.clientSettlementLabel}</span>
+                    <span>月嫂端：{item.staffSettlementLabel}</span>
+                  </div>
+                )}
+                <details className="order-v2-case-details">
+                  <summary>案件狀態與來源</summary>
+                  <div className="order-v2-case-meta">
                   <span>Lifecycle：{item.lifecycleStatus}</span>
                   <span>支線：{item.branchLabel}</span>
                   <span>Revision：{item.baseRevision}</span>
@@ -413,7 +379,8 @@ export const OrderWorkbenchV2Page: FC = () => {
                   {stage?.occurred_at && (
                     <span>更新：{new Date(stage.occurred_at).toLocaleString('zh-TW')}</span>
                   )}
-                </div>
+                  </div>
+                </details>
 
                 {item.blockers.length > 0 && (
                   <div className="order-v2-notice blocked">
@@ -434,45 +401,47 @@ export const OrderWorkbenchV2Page: FC = () => {
                 {stage?.availability_reason && (
                   <div className="order-v2-technical">projection：{stage.availability_reason}</div>
                 )}
-                {branchType === 'normal' && selectedStage === 'matching_pool' && (
+                <div className="order-card-actions order-v2-card-actions">
+                {workbenchScope === 'in_progress' && item.branchType === 'normal' && actionStage === 'matching_pool' && (
                   <OrderCandidateQueryPanel
                     key={item.id}
                     caseNo={item.id}
                     onPoolReadback={refreshProjection}
                   />
                 )}
-                {branchType === 'normal' && (
-                  selectedStage === 'caregiver_line_delivery'
-                  || selectedStage === 'caregiver_willingness_reply'
+                {workbenchScope === 'in_progress' && item.branchType === 'normal' && (
+                  actionStage === 'caregiver_line_delivery'
+                  || actionStage === 'caregiver_willingness_reply'
                 ) && (
                   <OrderCandidateContactStatusPanel key={item.id} caseNo={item.id} onObserved={refreshProjection} />
                 )}
-                {branchType === 'normal' && selectedStage === 'formal_recommendation' && (
+                {workbenchScope === 'in_progress' && item.branchType === 'normal' && actionStage === 'formal_recommendation' && (
                   <OrderFormalRecommendationPanel key={item.id} caseNo={item.id} onObserved={refreshProjection} />
                 )}
-                {branchType === 'normal' && selectedStage === 'caregiver_contract' && (
+                {workbenchScope === 'in_progress' && item.branchType === 'normal' && actionStage === 'caregiver_contract' && (
                   <OrderCaregiverContractPanel key={item.id} caseNo={item.id} onObserved={refreshProjection} />
                 )}
-                {branchType === 'normal' && selectedStage === 'client_contract' && (
+                {workbenchScope === 'in_progress' && item.branchType === 'normal' && actionStage === 'client_contract' && (
                   <OrderClientContractPanel key={item.id} caseNo={item.id} onObserved={refreshProjection} />
                 )}
-                {branchType === 'normal' && selectedStage === 'confirmed_service_dates' && (
+                {workbenchScope === 'in_progress' && item.branchType === 'normal' && actionStage === 'confirmed_service_dates' && (
                   <OrderServiceDatesPanel
                     key={item.id}
                     caseNo={item.id}
                     onObserved={refreshProjection}
                   />
                 )}
-                {branchType === 'normal' && selectedStage === 'formal_service' && (
+                {workbenchScope === 'in_progress' && item.branchType === 'normal' && actionStage === 'formal_service' && (
                   <OrderAssignmentPlanPanel key={item.id} caseNo={item.id} onObserved={refreshProjection} />
                 )}
                 <button
                   type="button"
-                  className="order-v2-open-drawer"
+                  className="btn-secondary-action"
                   onClick={() => setSelectedDrawer({ caseNo: item.id, branchType: item.branchType })}
                 >
-                  開啟唯讀工作 Drawer
+                  {workbenchScope === 'in_progress' ? '開啟案件工作' : '查看案件紀錄'}
                 </button>
+                </div>
               </article>
             );
           })}
@@ -480,32 +449,23 @@ export const OrderWorkbenchV2Page: FC = () => {
         </fieldset>
       )}
 
-      <section className="order-v2-side-lanes">
-        <button
-          type="button"
-          className={`order-v2-lane ${branchType === 'historical' ? 'active' : ''}`}
-          onClick={() => selectBranch('historical')}
-        >
-          <span><strong>歷史訂單支線</strong><small>使用正式 historical lifecycle facet 與 immutable evidence。</small></span>
-          <b>{branchType === 'historical' ? '檢視中' : '開啟'}</b>
-        </button>
-        <OrderGovernmentSubsidyLane />
-        <OrderTerminalAggregateLane />
-        <button
-          type="button"
-          className={`order-v2-lane ${branchType === 'cancelled' ? 'active' : ''}`}
-          onClick={() => selectBranch('cancelled')}
-        >
-          <span><strong>取消訂單支線</strong><small>使用正式 cancelled branch filter。</small></span>
-          <b>{branchType === 'cancelled' ? '檢視中' : '開啟'}</b>
-        </button>
       </section>
+
+      <details className="order-v2-financial-queries">
+        <summary>跨訂單帳務查詢</summary>
+        <p>以下查詢涵蓋各類訂單，不受上方分類與階段篩選影響。</p>
+        <div className="order-v2-side-lanes">
+          <OrderGovernmentSubsidyLane />
+          <OrderTerminalAggregateLane />
+        </div>
+      </details>
 
       {selectedDrawer !== null && (
         <OrderWorkbenchV2Drawer
           key={selectedDrawer.caseNo}
           caseNo={selectedDrawer.caseNo}
           branchType={selectedDrawer.branchType}
+          workbenchScope={workbenchScope}
           onClose={closeDrawer}
           onObserved={refreshProjection}
         />

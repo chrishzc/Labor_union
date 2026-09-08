@@ -14,6 +14,8 @@
   - `subsystems/scheduling/matching_plan_workflow.py`
   - `subsystems/scheduling/segmented_availability_query.py`
   - `subsystems/scheduling/historical_pending_deposit_matching.py` — Historical Adoption 可用的 typed proposed-plan writer port。
+  - `domains/scheduling/holiday_work_agreement.py` — current plan/version/date-bound 的客戶與全體月嫂國定假日上班協調規則。
+  - `subsystems/scheduling/holiday_work_agreement_workflow.py` — 協調結果 Preview／Apply，fresh-read 現行 proposed plan、全分段與官方國定假日後才可寫入。
 - `subsystems/scheduling/matching_coordination_workflow.py`
 - `subsystems/scheduling/matching_notification_application.py` (zero-pool client decision response owner)
   - `subsystems/scheduling/matching_coordination_application.py` — P3 typed leave/date handoffs
@@ -21,11 +23,16 @@
   - `infrastructure/mysql/matching_coordination_facts_adapter.py`
   - `infrastructure/mysql/historical_pending_deposit_matching_repository.py` — 借用 caller transaction 寫入可由 active Matching Query 讀取的正式 plan／segment roots。
   - `infrastructure/mysql/segmented_availability_repository.py`
+  - `infrastructure/mysql/matching_holiday_work_agreement_repository.py` — immutable current-plan agreement evidence 與 accepted-date readback。
 - entrypoints:
   - `api/routes/matching_coordination.py`
   - `api/schemas/matching_coordination.py`
   - `ui_react/src/api/matching_coordination/matching_coordination_client.ts` — isolated-tested transport client; no current App route consumer.
   - `ui_react/src/components/MatchingCoordinationWorkbench.tsx` — isolated-tested workbench; no current App route consumer.
+  - `api/routes/matches.py`、`api/schemas/matches.py` — `/holiday-work-agreements/preview` 與 Apply contract。
+  - `ui_react/src/api/scheduling/matching_plan_communication_client.ts`、`ui_react/src/components/HolidayWorkAgreementActions.tsx`、`ui_react/src/pages/OrdersPage.tsx` — current Orders matching drawer 的人工協調 UI；不宣稱為 LINE delivery/reply。
+  - `db/schema_parts/1032_matching_holiday_work_agreements.sql` — additive immutable agreement and participant records.
+  - `scripts/run_holiday_work_agreement_scenario.py` — disposable `lu_test_*` scenario runner；透過 typed public API 驗證任意假日排班拒絕、雙方同意後納入服務日，以及後續拒絕立即撤銷。
 
 ## Dependencies
 - outbound: `orders/orders` — case/lifecycle boundary.
@@ -41,7 +48,7 @@
 ## Verification
 - test_root: `tests/domains/scheduling/subsystems/scheduling/modules/matching-coordination/`
 - layout_status: `custom_current`
-- test_root: `ui_react/src/tests/matching_coordination_workbench.test.tsx`
+- test_root: `ui_react/src/tests/domains/scheduling/subsystems/scheduling/modules/matching-coordination/`
 - higher_boundary:
   - tests/integration/ (shared legacy higher-boundary root)
 - layout_gap:
@@ -55,6 +62,7 @@
 - Historical pending-deposit typed port、borrowed-connection adapter 與 owner-local tests — `source_observed` — current source and canonical module test root.
 - Segmented availability query/repository 的 lifecycle gate 與 assignment occupancy filtering — `source_observed` — current Scheduling query and MySQL facts adapter.
 - Scheduling React entry contract — `source_observed` — same architecture-aligned module test root.
+- Holiday-work scenario runner — `source_observed` — public API scenario uses the matching coordination agreement route and service-date readback.
 - Repository test exception — `source_observed` — current flat path with relocation-sensitive schema lookup.
 
 ## Change triggers

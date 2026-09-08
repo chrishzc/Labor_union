@@ -1,5 +1,8 @@
+import type { OrderWorkbenchScope } from '../api/orders/order_core_stage_projection_client';
 import { useCallback, useEffect, useRef, useState, type FC } from 'react';
 import './OrderWorkbenchV2Drawer.css';
+import '../pages/OrdersPage.css';
+import { Drawer } from './Drawer';
 import { historicalAdoptionEvidenceClient } from '../api/orders/historical_adoption_evidence_client';
 import type { HistoricalOrderAdoptionEvidence } from '../api/orders/historical_adoption_evidence_schemas';
 import {
@@ -29,6 +32,7 @@ import { OrderActualStartPanel } from './OrderActualStartPanel';
 interface OrderWorkbenchV2DrawerProps {
   caseNo: string;
   branchType: CoreStageBranchType;
+  workbenchScope?: OrderWorkbenchScope;
   onClose: () => void;
   onObserved?: () => void;
 }
@@ -92,6 +96,7 @@ function lineageIdentity(identity: string | null): string {
 export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
   caseNo,
   branchType,
+  workbenchScope,
   onClose,
   onObserved,
 }) => {
@@ -197,12 +202,6 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
     };
   }, [branchType, caseNo, refreshRevision]);
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') guardedClose(); };
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [guardedClose]);
-
   const restartHistoricalOrderIntoNormalFlow = async () => {
     if (branchType !== 'historical' || historicalRestart.status === 'applying') return;
     setHistoricalRestart({ status: 'applying', message: null });
@@ -253,29 +252,32 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
   const currentHistoricalOwner = timeline.status === 'ready' && branchType === 'historical'
     ? historicalCurrentOwnerStage(timeline.data)
     : null;
+  const terminalStatus = timeline.status === 'ready' && ['訂單完成', '訂單取消', '歷史訂單－服務完成', '歷史訂單－帳務完成'].includes(timeline.data.lifecycle_status);
+  const showProgress = !terminalStatus && workbenchScope !== 'completed' && workbenchScope !== 'cancelled';
   const currentBranch = timeline.status === 'ready' ? timeline.data.branch_type : branchType;
+  const intakeOrderStatus = timeline.status === 'ready'
+    ? timeline.data.lifecycle_status
+    : detail.status === 'ready' ? detail.data.order_status : null;
 
   return (
-    <div
+    <Drawer
+      isOpen
+      onClose={guardedClose}
+      closeDisabled={operationBusy}
+      size="xl"
+      title={`案件 ${caseNo}`}
+      ariaLabel={`案件 ${caseNo}`}
+      closeLabel="關閉工作 Drawer"
       className="order-v2-drawer-backdrop"
-      role="presentation"
-      onMouseDown={(event) => { if (event.target === event.currentTarget) guardedClose(); }}
     >
-      <aside className="order-v2-drawer" role="dialog" aria-modal="true" aria-labelledby="order-v2-drawer-title">
-        <header className="order-v2-drawer-header">
-          <div>
-            <div className="order-v2-eyebrow">工作 Drawer</div>
-            <h2 id="order-v2-drawer-title">案件 {caseNo}</h2>
-            <p>正式 owner facts、immutable historical baseline 與歷史來源 evidence 分開呈現；缺件與 owner mutation 只使用既有正式流程。</p>
-          </div>
-          <button type="button" onClick={guardedClose} disabled={operationBusy} aria-label="關閉工作 Drawer">關閉</button>
-        </header>
-
-        <div className="order-v2-drawer-body">
+      <div className="order-v2-drawer-content">
+        <p className="order-v2-drawer-intro">查看案件資料、服務安排與作業進度。</p>
+        <div className="order-v2-drawer-columns">
+        <div className="order-v2-drawer-main">
           {factsRefreshing && <p role="status">正在更新正式案件資料；保留目前面板狀態。</p>}
           <section className="order-v2-drawer-section" aria-labelledby="order-v2-current-facts">
-            <h3 id="order-v2-current-facts">正式目前 owner facts</h3>
-            <div className="order-v2-drawer-fact-grid">
+            <h3 id="order-v2-current-facts">案件與服務資料</h3>
+            <div className="matching-facts-bar order-v2-drawer-fact-grid">
               <article>
                 <h4>案件／客戶</h4>
                 {detail.status === 'loading' && <p>載入正式案件資料…</p>}
@@ -286,25 +288,32 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
                     <div><dt>客戶 ID</dt><dd>{detail.data.client_id}</dd></div>
                     <div><dt>訂單狀態</dt><dd>{detail.data.order_status}</dd></div>
                     <div><dt>身分類別</dt><dd>{detail.data.identity_status ?? '未登錄'}</dd></div>
-                    <div><dt>實際開始</dt><dd>{detail.data.actual_start_date ?? '尚無 actual start'}</dd></div>
+                    <div><dt>實際開始</dt><dd>{detail.data.actual_start_date ?? '尚未確認'}</dd></div>
                   </dl>
                 )}
               </article>
               <article aria-label="正式服務期間">
                 <h4>正式服務條款</h4>
-                {terms.status === 'loading' && <p>載入 Orders canonical planned period…</p>}
+                {terms.status === 'loading' && <p>正在讀取服務條款…</p>}
                 {terms.status === 'error' && <p className="order-v2-drawer-error">正式服務條款不可用：{terms.message}</p>}
                 {terms.status === 'ready' && (
                   <dl>
                     <div><dt>計畫開始</dt><dd>{terms.data.terms.planned_start_date}</dd></div>
                     <div><dt>合約服務</dt><dd>{terms.data.terms.service_days} 日</dd></div>
                     <div><dt>每日時數</dt><dd>{terms.data.terms.service_hours_per_day} 小時</dd></div>
-                    <div><dt>Order version</dt><dd>{terms.data.order_version}</dd></div>
-                    <div><dt>Scheduling version</dt><dd>{terms.data.scheduling_version}</dd></div>
                   </dl>
                 )}
-                <p className="order-v2-drawer-note">`actual_start_date` 僅代表實際開始，不作為完整服務區間。</p>
-                <p className="order-v2-drawer-note">historical source period 是來源 evidence，不用來推導目前 lifecycle。</p>
+                <details className="order-v2-drawer-technical">
+                  <summary>條款版本與資料說明</summary>
+                  {terms.status === 'ready' && (
+                    <dl>
+                      <div><dt>Order version</dt><dd>{terms.data.order_version}</dd></div>
+                      <div><dt>Scheduling version</dt><dd>{terms.data.scheduling_version}</dd></div>
+                    </dl>
+                  )}
+                  <p className="order-v2-drawer-note">`actual_start_date` 僅代表實際開始，不作為完整服務區間。</p>
+                  <p className="order-v2-drawer-note">historical source period 是來源 evidence，不用來推導目前 lifecycle。</p>
+                </details>
               </article>
             </div>
           </section>
@@ -313,7 +322,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
 
           <section className="order-v2-drawer-section" aria-label="案件受控操作">
             <h3>案件受控操作</h3>
-            <p>先選擇業務操作，再依正式 owner 查詢、預覽與確認；資格與阻擋原因由各正式流程回傳。</p>
+            <p className="order-v2-drawer-note">選擇需要辦理的事項，查看目前條件後預覽並確認。</p>
             <div className="order-v2-drawer-actions">
               <button type="button" disabled={operationBusy || factsRefreshing} onClick={() => setOperation('cancellation')}>取消／補登取消服務事實</button>
               <button type="button" disabled={operationBusy || factsRefreshing} onClick={() => setOperation('reopen')}>受控重開取消案件</button>
@@ -326,13 +335,13 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
           </section>
 
           <fieldset disabled={operationBusy || factsRefreshing} style={{ border: 0, padding: 0, margin: 0 }}>
-          {currentBranch !== 'cancelled' && detail.status === 'ready'
+          {currentBranch !== 'cancelled' && intakeOrderStatus !== null
             && (branchType === 'historical'
-              || detail.data.order_status === '待補件'
+              || intakeOrderStatus === '待補件'
               || (timeline.status === 'ready' && timeline.data.current_core_stage_code === 'intake_validation')) && (
             <OrderIntakeRepairPanel
               caseNo={caseNo}
-              orderStatus={detail.data.order_status}
+              orderStatus={intakeOrderStatus}
               onChanged={refreshFacts}
               onHistoricalRestartRequested={restartHistoricalOrderIntoNormalFlow}
             />
@@ -441,52 +450,6 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
             </section>
           )}
 
-          <section className="order-v2-drawer-section" aria-labelledby="order-v2-progress-heading">
-            <h3 id="order-v2-progress-heading">13 階段正式進度</h3>
-            {timeline.status === 'loading' && <p>載入正式十三階段 projection…</p>}
-            {timeline.status === 'error' && <p className="order-v2-drawer-error">十三階段 projection 不可用：{timeline.message}</p>}
-            {timeline.status === 'ready' && (
-              <ol className="order-v2-drawer-stages">
-                {timeline.data.core_stages.map((stage) => (
-                  <li key={stage.code} data-testid="drawer-core-stage">
-                    <span className={`order-v2-drawer-stage-status status-${stage.status}`}>{stage.ordinal}</span>
-                    <div><strong>{stage.label}</strong><span>{coreStageSubstatusLabel(stage.substatus_code)}</span></div>
-                  </li>
-                ))}
-              </ol>
-            )}
-          </section>
-
-          <section className="order-v2-drawer-section" aria-labelledby="order-v2-notices-heading">
-            <h3 id="order-v2-notices-heading">阻塞與提醒</h3>
-            {timeline.status === 'ready' && blockers.length === 0 && warnings.length === 0 && <p>目前沒有正式 blocker / warning。</p>}
-            {blockers.map((notice) => (
-              <div className="order-v2-notice blocked" key={notice.key}><strong>阻塞 · {notice.stage}</strong><span>{notice.message}</span></div>
-            ))}
-            {warnings.map((notice) => (
-              <div className="order-v2-notice warning" key={notice.key}><strong>提醒 · {notice.stage}</strong><span>{notice.message}</span></div>
-            ))}
-          </section>
-
-          <section className="order-v2-drawer-section" aria-labelledby="order-v2-lineage-heading">
-            <h3 id="order-v2-lineage-heading">Lineage／來源</h3>
-            {timeline.status === 'ready' && (
-              <>
-                <p className="order-v2-technical">source_projection_digest：{timeline.data.source_projection_digest}</p>
-                <div className="order-v2-drawer-lineage">
-                  {timeline.data.core_stages.map((stage) => (
-                    <div key={stage.code}>
-                      <strong>{stage.ordinal}. {stage.label}</strong>
-                      <span>owner：{stage.source.owner}</span>
-                      <span>identity：{lineageIdentity(stage.source.identity)}</span>
-                      <span>version：{stage.source.version ?? '無'}</span>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-          </section>
-
           {branchType === 'historical' && (
             <section className="order-v2-drawer-section historical-evidence" aria-label="歷史來源證據">
               <h3 id="order-v2-history-baseline-heading">Immutable historical baseline</h3>
@@ -547,8 +510,68 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
             </section>
           )}
         </div>
-      </aside>
-    </div>
+        <div className="order-v2-drawer-sidebar">
+          {showProgress && <section className="order-v2-drawer-section" aria-labelledby="order-v2-progress-heading">
+            <h3 id="order-v2-progress-heading">13 階段正式進度</h3>
+            {timeline.status === 'loading' && <p>載入正式十三階段 projection…</p>}
+            {timeline.status === 'error' && <p className="order-v2-drawer-error">十三階段 projection 不可用：{timeline.message}</p>}
+            {timeline.status === 'ready' && (
+              <ol className="order-v2-drawer-stages">
+                {timeline.data.core_stages.map((stage) => (
+                  <li key={stage.code} data-testid="drawer-core-stage">
+                    <span className={`order-v2-drawer-stage-status status-${stage.status}`}>{stage.ordinal}</span>
+                    <div><strong>{stage.label}</strong><span>{coreStageSubstatusLabel(stage.substatus_code)}</span></div>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </section>}
+
+          {!showProgress && timeline.status === 'ready' && (
+            <section className="order-v2-drawer-section" aria-label="結算狀態">
+              <h3>結算狀態</h3>
+              {timeline.data.core_stages.filter((stage) => stage.code === 'client_settlement' || stage.code === 'staff_payout').map((stage) => (
+                <p key={stage.code}>{stage.label}：{coreStageSubstatusLabel(stage.substatus_code)}</p>
+              ))}
+            </section>
+          )}
+          <section className="order-v2-drawer-section" aria-labelledby="order-v2-notices-heading">
+            <h3 id="order-v2-notices-heading">阻塞與提醒</h3>
+            {timeline.status === 'ready' && blockers.length === 0 && warnings.length === 0 && <p>目前沒有正式 blocker / warning。</p>}
+            {blockers.map((notice) => (
+              <div className="order-v2-notice blocked" key={notice.key}><strong>阻塞 · {notice.stage}</strong><span>{notice.message}</span></div>
+            ))}
+            {warnings.map((notice) => (
+              <div className="order-v2-notice warning" key={notice.key}><strong>提醒 · {notice.stage}</strong><span>{notice.message}</span></div>
+            ))}
+          </section>
+
+          <details className="order-v2-drawer-section order-v2-drawer-technical">
+            <summary>技術資料與來源紀錄</summary>
+            <div>
+            <h3 id="order-v2-lineage-heading">Lineage／來源</h3>
+            {timeline.status === 'ready' && (
+              <>
+                <p className="order-v2-technical">source_projection_digest：{timeline.data.source_projection_digest}</p>
+                <div className="order-v2-drawer-lineage">
+                  {timeline.data.core_stages.map((stage) => (
+                    <div key={stage.code}>
+                      <strong>{stage.ordinal}. {stage.label}</strong>
+                      <span>owner：{stage.source.owner}</span>
+                      <span>identity：{lineageIdentity(stage.source.identity)}</span>
+                      <span>version：{stage.source.version ?? '無'}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+            </div>
+          </details>
+
+        </div>
+        </div>
+      </div>
+    </Drawer>
   );
 };
 

@@ -36,8 +36,7 @@ async function readCurrentPlan(caseNo: string, expectedPlanId?: number): Promise
     throw new Error('目前有效方案已變更，請重新載入；不對其他方案執行操作。');
   }
   const contact = await matchingPlanCommunicationClient.queryContactState(caseNo, plan.planId);
-  if (contact.plan.id !== plan.planId || contact.plan.case_no !== caseNo
-    || (plan.communicationVersion !== undefined && plan.communicationVersion !== contact.plan.communication_version)) {
+  if (contact.plan.id !== plan.planId || contact.plan.case_no !== caseNo) {
     throw new Error('正式方案與聯繫狀態回讀不一致，請重新載入。');
   }
   return { plan, contact };

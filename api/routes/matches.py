@@ -37,6 +37,10 @@ from api.schemas.matches import (
     MatchingPlanCancellationReceiptView,
     MatchingPlanReceiptView,
     StaffRecommendationView,
+    HolidayWorkAgreementApplyRequest,
+    HolidayWorkAgreementPreviewRequest,
+    HolidayWorkAgreementPreviewView,
+    HolidayWorkAgreementReceiptView,
 )
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.scheduling.matching_recommendation_application import (
@@ -76,12 +80,24 @@ from subsystems.scheduling.matching_notification_contracts import (
     RequestCaregiverInformationCommand,
     RequestCustomerProfilesCommand,
 )
+from domains.scheduling.holiday_work_agreement import (
+    HolidayWorkAgreementDraft,
+    HolidayWorkDecision,
+    HolidayWorkParticipantDecision,
+)
+from subsystems.scheduling.holiday_work_agreement_workflow import (
+    HolidayWorkAgreementWorkflow,
+)
 
 router = APIRouter(prefix="/api/v1", tags=["Matches 案件配對與 LINE 訊息推播"])
 matching_notifications = MatchingNotificationApplication(
     open_line_unit_of_work,
     lambda: datetime.now(timezone.utc),
     availability_facts_port=_matching_facts_port,
+)
+holiday_work_agreements = HolidayWorkAgreementWorkflow(
+    open_line_unit_of_work,
+    lambda: datetime.now(timezone.utc),
 )
 
 
@@ -135,6 +151,25 @@ class MatchingPlanCancellationRequest(MatchingPlanEventIdentity):
 def _require_matching_actor(principal: AdminPrincipal, actor: str) -> None:
     if str(principal.username or "").strip() != actor.strip():
         raise HTTPException(status_code=403, detail="actor does not match authenticated principal")
+
+
+def _holiday_work_draft(case_no: str, plan_id: int, body: Any) -> HolidayWorkAgreementDraft:
+    return HolidayWorkAgreementDraft(
+        case_no=case_no,
+        plan_id=plan_id,
+        plan_version=body.expected_version,
+        holiday_date=body.holiday_date,
+        participant_decisions=tuple(
+            HolidayWorkParticipantDecision(
+                item.participant_role,
+                item.segment_id,
+                HolidayWorkDecision(item.decision),
+            )
+            for item in body.participant_decisions
+        ),
+        actor_id=body.actor,
+        reason=body.reason,
+    )
 
 
 @router.get(
@@ -251,6 +286,57 @@ def record_matching_customer_decision_route(
                 _response_data(result)
             ),
             message="成功補登客戶配對決策",
+        )
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.post(
+    "/orders/{case_no}/matching-plans/{plan_id}/holiday-work-agreements/preview",
+    response_model=BaseResponse[HolidayWorkAgreementPreviewView],
+)
+def preview_holiday_work_agreement_route(
+    req: HolidayWorkAgreementPreviewRequest,
+    case_no: str,
+    plan_id: int,
+    principal: AdminPrincipal = Depends(require_line_matching_override),
+):
+    _require_matching_actor(principal, req.actor)
+    try:
+        preview = holiday_work_agreements.preview(_holiday_work_draft(case_no, plan_id, req))
+        return BaseResponse(
+            data=HolidayWorkAgreementPreviewView.model_validate(preview.as_dict()),
+            message="已確認國定假日上班協議的目前方案與全體參與者。",
+        )
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.post(
+    "/orders/{case_no}/matching-plans/{plan_id}/holiday-work-agreements",
+    response_model=BaseResponse[HolidayWorkAgreementReceiptView],
+)
+def apply_holiday_work_agreement_route(
+    req: HolidayWorkAgreementApplyRequest,
+    case_no: str,
+    plan_id: int,
+    principal: AdminPrincipal = Depends(require_line_matching_override),
+):
+    _require_matching_actor(principal, req.actor)
+    try:
+        receipt = holiday_work_agreements.apply(
+            _holiday_work_draft(case_no, plan_id, req),
+            PreviewFingerprint(req.preview_fingerprint),
+            IdempotencyKey(req.event_key),
+            CorrelationId(f"matching-holiday-work:{req.event_key}"),
+        )
+        return BaseResponse(
+            data=HolidayWorkAgreementReceiptView.model_validate(receipt),
+            message="國定假日上班協議已保存並可供服務日期精算回讀。",
         )
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error

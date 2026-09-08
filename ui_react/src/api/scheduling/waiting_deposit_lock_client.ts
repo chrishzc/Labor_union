@@ -38,7 +38,7 @@ export interface ActiveWaitingDepositPlan {
   planId: number;
   status: string;
   activeLockId: number | null;
-  communicationVersion?: number;
+  planVersion?: number;
   segments?: ReadonlyArray<{
     segmentId: number;
     sequence: number;
@@ -75,7 +75,7 @@ export const waitingDepositLockClient = {
       planId: data.plan.id,
       status: data.plan.status,
       activeLockId: data.availability_lock?.lock_id ?? null,
-      communicationVersion: data.plan.version,
+      planVersion: data.plan.version,
       segments: data.segments.map((segment) => ({
         segmentId: segment.segment_id,
         sequence: segment.segment_order,

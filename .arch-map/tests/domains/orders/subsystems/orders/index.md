@@ -8,6 +8,9 @@ test_root: tests/domains/orders/subsystems/orders/
 integration_root: tests/domains/orders/subsystems/orders/integration/
 fixtures_root: tests/fixtures/
 modules:
+  operational-stage-projection:
+    test_root: tests/domains/orders/subsystems/orders/modules/operational-stage-projection/
+    index: modules/operational-stage-projection.md
   historical-precision-restart:
     test_root: tests/domains/orders/subsystems/orders/modules/historical-precision-restart/
   historical-service-accounting:

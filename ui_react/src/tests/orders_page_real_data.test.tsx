@@ -15,6 +15,7 @@ import { orderCardProjectionClient } from '../api/orders/order_card_projection_c
 import type { OrdersCardProjection } from '../api/orders/order_card_projection_schemas';
 import { orderCancellationClient } from '../api/orders/order_cancellation_client';
 import { orderStageProjectionClient } from '../api/orders/order_stage_projection_client';
+import { orderTerminalAggregateClient } from '../api/orders/order_terminal_aggregate_client';
 import { orderTermsMutationClient } from '../api/orders/order_terms_mutation_client';
 import { orderActualStartClient } from '../api/orders/order_actual_start_client';
 import { OrderConflictError, OrderValidationError } from '../api/orders/order_query_errors';
@@ -39,6 +40,7 @@ import {
 import {
   realisticOrderReopenPreviewView,
   realisticServiceDateQueryView,
+  realisticServiceDateQueryViewConfirmed,
 } from './fixtures/orders/order_mutation_contract_fixtures';
 import { buildOrdersStageProjectionFixture } from './fixtures/orders_stage_projection_fixtures';
 
@@ -216,7 +218,7 @@ describe('OrdersPage query real-data slice', () => {
     expect(screen.queryByRole('region', { name: '訂單缺件補齊' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /條款與契約/ }));
     expect(await screen.findByLabelText(`${item.case_no} 缺件項目`)).toBeInTheDocument();
-    expect(await screen.findByText('服務資料已鎖定，目前不能完成進件補齊。')).toBeInTheDocument();
+    expect((await screen.findAllByText('服務資料已鎖定，目前不能完成進件補齊。')).length).toBeGreaterThan(0);
     await waitFor(() => expect(ordersQueryClient.getOrderTerms).toHaveBeenCalled());
     expect(screen.getByRole('button', { name: /契約簽署與約定條款/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /實質服務日曆與天數精算/ })).toBeInTheDocument();
@@ -269,6 +271,45 @@ describe('OrdersPage query real-data slice', () => {
     expect(screen.queryByText(/未納入目前摘要／typed view/)).not.toBeInTheDocument();
     expect(screen.getAllByText(/雇主自付應付額/).length).toBeGreaterThan(0);
     expect(screen.queryByText(/合約總額：/)).not.toBeInTheDocument();
+  });
+
+  it('mounts the shared terminal aggregate lane and preserves its server-owned result', async () => {
+    vi.spyOn(orderTerminalAggregateClient, 'getAggregates').mockResolvedValue({
+      items: [
+        {
+          case_no: 'ORD-TERMINAL-CLOSED',
+          applicable: true,
+          fully_closed: true,
+          components: [],
+        },
+        {
+          case_no: 'ORD-TERMINAL-GAP',
+          applicable: true,
+          fully_closed: false,
+          components: [{
+            code: 'client_settlement',
+            owner: 'Client Finance',
+            completed: false,
+            reason: 'client_balance_open',
+          }],
+        },
+      ],
+      next_cursor: null,
+    });
+
+    render(<OrdersPage />);
+    await screen.findByText('ORD-2026-0801');
+
+    fireEvent.click(screen.getByRole('button', { name: /完全結案彙總/ }));
+
+    await waitFor(() => expect(orderTerminalAggregateClient.getAggregates).toHaveBeenCalledWith(
+      { page_size: 200, case_no_search: undefined },
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    ));
+    expect(await screen.findByText('ORD-TERMINAL-CLOSED')).toBeInTheDocument();
+    expect(screen.getByText('所有必要組件已完成。')).toBeInTheDocument();
+    expect(screen.getByText('ORD-TERMINAL-GAP')).toBeInTheDocument();
+    expect(screen.getByText('Client Finance · client_settlement：client_balance_open')).toBeInTheDocument();
   });
 
   it('filters cancelled orders outside the seven operational stages', async () => {
@@ -1336,7 +1377,17 @@ describe('OrdersPage query real-data slice', () => {
   });
 
   it('exposes an editable actual-start Preview while Apply remains reason-gated', async () => {
-    useOperableSummary();
+    const actualStartEligibleSummary = {
+      ...operableSummaryPage,
+      items: operableSummaryPage.items.map((item, index) => (
+        index === 0 ? { ...item, order_status: '訂單成立' } : item
+      )),
+    };
+    vi.mocked(ordersQueryClient.getOrderSummaries).mockResolvedValue(actualStartEligibleSummary);
+    vi.mocked(orderStageProjectionClient.getOperationalTimelines).mockResolvedValue(
+      buildOrdersStageProjectionFixture(actualStartEligibleSummary),
+    );
+    vi.mocked(ordersMutationClient.getServiceDates).mockResolvedValue(realisticServiceDateQueryViewConfirmed);
     render(<OrdersPage />);
     await screen.findByText('ORD-2026-0801');
     fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]);
