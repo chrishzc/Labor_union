@@ -17,7 +17,6 @@
 | [Contract external-signing DB qualification](evidence/2026-08-26_contract_external_signing_successor_db_qualification_receipt.md) | external-signing successor的DB qualification證據。 |
 | [Controlled-file foundation progress](evidence/2026-08-26_controlled_file_storage_foundation_progress_receipt.md) | Controlled Files基礎與尚未完成的Browser／NAS acceptance。 |
 | [LINE legacy non-return regression source](LINE_merge功能未移植_history_20260811.md) | 目前仍由LINE第一版回歸測試讀取；只作禁止舊路徑復活的test oracle，不是產品SSOT。 |
-| [entry-point review queue](evidence/entrypoint_review_queue_v1.jsonl) | current generated entry治理清單；由對應generator／validator維護。 |
 
 上表不是 `evidence/` 的完整檔案清單。日常工作只讀任務直接命中的單一 evidence；不得整個目錄載入上下文，也不得因一份歷史 receipt仍存在就重新開啟 completed工作。
 
