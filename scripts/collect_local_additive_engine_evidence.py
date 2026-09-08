@@ -140,9 +140,29 @@ def _canonical_row_preservation(
             before = migration._table_projection_evidence(
                 config, source, table, source_columns[table]
             )
-            after = migration._table_projection_evidence(
-                config, candidate, table, source_columns[table]
-            )
+            candidate_sources = None
+            if (
+                table == "matching_holiday_work_agreements"
+                and "plan_communication_version" in source_columns[table]
+                and "plan_version" not in source_columns[table]
+                and "plan_version" in candidate_columns[table]
+                and "plan_communication_version" not in candidate_columns[table]
+            ):
+                candidate_sources = {
+                    "plan_communication_version": "plan_version"
+                }
+            if candidate_sources is None:
+                after = migration._table_projection_evidence(
+                    config, candidate, table, source_columns[table]
+                )
+            else:
+                after = migration._table_projection_evidence(
+                    config,
+                    candidate,
+                    table,
+                    source_columns[table],
+                    column_sources=candidate_sources,
+                )
             if before != after:
                 raise EngineEvidenceError(f"candidate changed source rows: {table}")
             counts[table] = int(before["row_count"])

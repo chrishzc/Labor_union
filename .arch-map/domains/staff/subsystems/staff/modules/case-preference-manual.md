@@ -26,3 +26,4 @@ Staff owner Query／Preview／Apply for the six canonical service-capability rel
 - layout_basis: `.arch-map/tests/index.md` permits documented frontend test exceptions; the canonical Staff component oracle remains under `ui_react/src/tests/` and the owner Python oracles remain under the Staff module test root.
 - test_root: `tests/domains/staff/subsystems/staff/modules/case-preference-manual/`
 - test_root: `ui_react/src/tests/domains/staff/subsystems/staff/modules/case-preference-manual/`
+- test_root: `ui_react/src/tests/staff_preferences_flow.test.tsx`

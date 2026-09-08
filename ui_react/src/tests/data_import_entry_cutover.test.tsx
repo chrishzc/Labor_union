@@ -189,7 +189,7 @@ describe('Data Import HCM Result Review entry cutover candidate', () => {
     expectOnlyGet(requests);
   });
 
-  it('referral changes only the local hash and adds no HTTP request', async () => {
+  it('problem action returns focus to the HCM owner workflow without another HTTP request', async () => {
     authenticate();
     const requests = installFetchStub('ready');
 
@@ -197,8 +197,9 @@ describe('Data Import HCM Result Review entry cutover candidate', () => {
     await waitFor(() => expect(screen.getAllByText('匯入結果')).toHaveLength(2));
     const beforeReferral = requests.length;
 
-    fireEvent.click(screen.getByRole('button', { name: '前往異常與匯入警示中心' }));
-    expect(window.location.hash).toBe('#anomalies');
+    fireEvent.click(screen.getByRole('button', { name: '回到 HCM 工作簿修正' }));
+    expect(window.location.hash).toBe('#data-import');
+    expect(document.activeElement).toHaveAttribute('data-control-id', 'imports.hcm-current.open-preview');
     expect(requests).toHaveLength(beforeReferral);
     expect(hcmRequests(requests)).toHaveLength(1);
     expectOnlyGet(requests);

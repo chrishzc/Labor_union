@@ -4,6 +4,7 @@ architecture: ../../../../../domains/external-integration/subsystems/line/index.
 test_root: tests/domains/external-integration/subsystems/line/
 integration_root: tests/domains/external-integration/subsystems/line/integration/
 fixtures_root: tests/fixtures/
+ui_integration_root: ui_react/src/tests/domains/external-integration/subsystems/line/integration/
 
 # Routing notes
 The former `tests/line/` owner tree has moved under the canonical LINE subsystem root. Its existing `domain/`, `infrastructure/`, and `subsystems/` child names are retained as internal layout until later scoped semantic split; they no longer form a competing top-level test architecture. LINE/Scheduling boundary contracts for matching schedule confirmation and staff leave LIFF intake live under this subsystem integration root. Current additional owner-local integration coverage includes delivery-task action routes, safe configuration query/retirement guards, notification-rule mutation/query/replay routes, verified staff service-day media upload, Rich Menu image-upload typed receipt contracts, and the typed LINE admin capabilities/health contract.
@@ -12,6 +13,7 @@ Delivery-task query presentation is routed by `modules/delivery-task-presentatio
 Task96 notification baseline producer tests are routed by `modules/notification-baseline-bootstrap.md`.
 M2 feedback owner tests are routed by `modules/feedback.md`.
 M3 committed matching-intent delivery projection tests are routed by `modules/matching-coordination-delivery.md`.
+LINE 管理頁跨客服、選單、身分與通知的唯讀／零假 mutation 契約位於 UI integration root。
 
 # Deferred / higher-boundary
 - `tests/test_staff_service_day_log_api.py` remains at the LINE/Scheduling boundary because verified LINE identity is used to issue a Scheduling service-day command.

@@ -4,29 +4,23 @@
  */
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { StaffPage } from '../pages/StaffPage';
-import { staffAvailabilityClient } from '../api/staff_availability/staff_availability_client';
-import { staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
-import { staffLifecycleClient } from '../api/staff_lifecycle/staff_lifecycle_client';
-import { staffPreferencesClient } from '../api/staff_preferences/staff_preferences_client';
-import { StaffPreferencesConflictError } from '../api/staff_preferences/staff_preferences_errors';
+import { StaffPage } from '../../../../../../pages/StaffPage';
+import { staffAvailabilityClient } from '../../../../../../api/staff_availability/staff_availability_client';
+import { staffDirectoryClient } from '../../../../../../api/staff_directory/staff_directory_client';
+import { staffLifecycleClient } from '../../../../../../api/staff_lifecycle/staff_lifecycle_client';
+import { staffCasePreferenceManualClient } from '../../../../../../api/staff_case_preferences/staff_case_preferences_client';
 import {
   STAFF_AVAILABILITY_BLOCK,
   STAFF_AVAILABILITY_PREVIEW_RESPONSE,
   STAFF_AVAILABILITY_RECEIPT_RESPONSE,
-} from './fixtures/staff/staff_availability_contract_fixtures';
-import { STAFF_PAGE_ONE } from './fixtures/staff/staff_directory_contract_fixtures';
+} from '../../../../../fixtures/staff/staff_availability_contract_fixtures';
+import { STAFF_PAGE_ONE } from '../../../../../fixtures/staff/staff_directory_contract_fixtures';
 import {
   STAFF_LIFECYCLE_PREVIEW,
   STAFF_LIFECYCLE_PREVIEW_PAYLOAD,
   STAFF_LIFECYCLE_RECEIPT,
   STAFF_LIFECYCLE_VIEW,
-} from './fixtures/staff/staff_lifecycle_contract_fixtures';
-import {
-  STAFF_PREFERENCE_DEFINITIONS,
-  STAFF_PREFERENCE_PROFILE,
-  STAFF_PREFERENCE_PROFILE_PREVIEW,
-} from './fixtures/staff/staff_preferences_contract_fixtures';
+} from '../../../../../fixtures/staff/staff_lifecycle_contract_fixtures';
 
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -38,13 +32,18 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-const STAFF_PREFERENCE_PROFILE_FOR_12 = {
-  ...STAFF_PREFERENCE_PROFILE,
-  staff_id: 12,
-  values: STAFF_PREFERENCE_PROFILE.values.map((item) => item.preference_key === 'preferred_service_days'
-    ? { ...item, value: { kind: 'integer_range' as const, minimum: 10, maximum: 12 } }
-    : item),
-};
+const manualRelations = (region: string) => ({
+  service_regions: [{ value: region, detail: null }], service_periods: [], cooking_skills: [],
+  holiday_availability: [], rest_schedule: [], baby_types: [],
+});
+const manualSnapshot = (staffId: number, region = '北區') => ({
+  staff_id: staffId,
+  before: manualRelations(region),
+  after: manualRelations(region),
+  snapshot_fingerprint: (staffId === 11 ? 'a' : 'b').repeat(64),
+  preview_fingerprint: null,
+});
+const manualPreview = { ...manualSnapshot(11), preview_fingerprint: 'c'.repeat(64) };
 
 async function renderReadyStaff(): Promise<void> {
   render(<StaffPage />);
@@ -55,7 +54,7 @@ async function openPreferences(): Promise<void> {
   await renderReadyStaff();
   fireEvent.click(screen.getByRole('button', { name: /配對偏好/ }));
   fireEvent.change(screen.getByLabelText('查詢服務人員'), { target: { value: '11' } });
-  await waitFor(() => expect(screen.getByDisplayValue('20–30')).toBeInTheDocument());
+  await screen.findByRole('button', { name: '編輯六項偏好' });
 }
 
 async function openAvailability(): Promise<void> {
@@ -83,15 +82,11 @@ describe('Staff action async race guards', () => {
     vi.restoreAllMocks();
     vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue(STAFF_PAGE_ONE);
     vi.spyOn(staffDirectoryClient, 'resetPagination').mockImplementation(() => undefined);
-    vi.spyOn(staffPreferencesClient, 'queryDefinitions').mockResolvedValue(STAFF_PREFERENCE_DEFINITIONS);
-    vi.spyOn(staffPreferencesClient, 'queryProfile').mockResolvedValue(STAFF_PREFERENCE_PROFILE);
-    vi.spyOn(staffPreferencesClient, 'previewProfile').mockResolvedValue(STAFF_PREFERENCE_PROFILE_PREVIEW);
-    vi.spyOn(staffPreferencesClient, 'applyProfile').mockResolvedValue({
-      staff_id: 11,
-      version: 5,
-      values: STAFF_PREFERENCE_PROFILE.values,
-      preview_fingerprint: 'a'.repeat(64),
-      idempotency_key: 'staff-preference-race',
+    vi.spyOn(staffCasePreferenceManualClient, 'query').mockResolvedValue(manualSnapshot(11));
+    vi.spyOn(staffCasePreferenceManualClient, 'preview').mockResolvedValue(manualPreview);
+    vi.spyOn(staffCasePreferenceManualClient, 'apply').mockResolvedValue({
+      staff_id: 11, relations: manualRelations('北區'), snapshot_fingerprint: 'd'.repeat(64),
+      preview_fingerprint: 'c'.repeat(64), idempotency_key: 'staff-preference-race', replayed: false,
     });
     vi.spyOn(staffAvailabilityClient, 'getBlocks').mockResolvedValue([STAFF_AVAILABILITY_BLOCK]);
     vi.spyOn(staffAvailabilityClient, 'previewChange').mockResolvedValue(STAFF_AVAILABILITY_PREVIEW_RESPONSE.data!);
@@ -105,24 +100,23 @@ describe('Staff action async race guards', () => {
 
   it('preferences late Preview after unmount is aborted and cannot update the DOM', async () => {
     await openPreferences();
-    const pending = deferred<typeof STAFF_PREFERENCE_PROFILE_PREVIEW>();
-    vi.mocked(staffPreferencesClient.previewProfile).mockReturnValueOnce(pending.promise);
+    const pending = deferred<typeof manualPreview>();
+    vi.mocked(staffCasePreferenceManualClient.preview).mockReturnValueOnce(pending.promise);
 
-    fireEvent.click(screen.getByRole('button', { name: '編輯核准偏好' }));
-    fireEvent.change(screen.getByLabelText('服務天數下限'), { target: { value: '22' } });
-    fireEvent.click(screen.getByRole('button', { name: '預覽偏好變更' }));
-    await waitFor(() => expect(staffPreferencesClient.previewProfile).toHaveBeenCalledTimes(1));
-    const signal = vi.mocked(staffPreferencesClient.previewProfile).mock.calls[0]?.[2]?.signal;
+    fireEvent.click(screen.getByRole('button', { name: '編輯六項偏好' }));
+    fireEvent.click(screen.getByRole('button', { name: '預覽變更' }));
+    await waitFor(() => expect(staffCasePreferenceManualClient.preview).toHaveBeenCalledTimes(1));
+    const signal = vi.mocked(staffCasePreferenceManualClient.preview).mock.calls[0]?.[2]?.signal;
     expect(signal?.aborted).toBe(false);
 
     cleanup();
     expect(signal?.aborted).toBe(true);
     await act(async () => {
-      pending.resolve(STAFF_PREFERENCE_PROFILE_PREVIEW);
+      pending.resolve(manualPreview);
       await Promise.resolve();
     });
 
-    expect(screen.queryByText(/Preview 指紋/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId('staff-case-preference-manual-preview')).not.toBeInTheDocument();
   });
 
   it('availability late Preview after tab change cannot write the new tab', async () => {
@@ -227,31 +221,21 @@ describe('Staff action async race guards', () => {
   });
 
   it('stale preference refresh late response cannot overwrite a newly selected staff', async () => {
-    const refresh = deferred<typeof STAFF_PREFERENCE_PROFILE>();
-    vi.mocked(staffPreferencesClient).queryProfile
-      .mockResolvedValueOnce(STAFF_PREFERENCE_PROFILE)
-      .mockReturnValueOnce(refresh.promise)
-      .mockResolvedValueOnce(STAFF_PREFERENCE_PROFILE_FOR_12);
-    vi.mocked(staffPreferencesClient).previewProfile.mockResolvedValueOnce(STAFF_PREFERENCE_PROFILE_PREVIEW);
-    vi.mocked(staffPreferencesClient).applyProfile.mockRejectedValueOnce(
-      new StaffPreferencesConflictError('版本已過期')
-    );
-
-    await openPreferences();
-    fireEvent.click(screen.getByRole('button', { name: '編輯核准偏好' }));
-    fireEvent.click(screen.getByRole('button', { name: '預覽偏好變更' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: '套用偏好變更' })).not.toBeDisabled());
-    fireEvent.click(screen.getByRole('button', { name: '套用偏好變更' }));
-    await waitFor(() => expect(screen.getByText('版本已過期')).toBeInTheDocument());
-
-    fireEvent.click(screen.getByRole('button', { name: '重新查詢偏好' }));
-    await waitFor(() => expect(staffPreferencesClient.queryProfile).toHaveBeenCalledTimes(2));
+    const stale = deferred<ReturnType<typeof manualSnapshot>>();
+    vi.mocked(staffCasePreferenceManualClient.query)
+      .mockReturnValueOnce(stale.promise)
+      .mockResolvedValueOnce(manualSnapshot(12, '南區'));
+    await renderReadyStaff();
+    fireEvent.click(screen.getByRole('button', { name: /配對偏好/ }));
+    fireEvent.change(screen.getByLabelText('查詢服務人員'), { target: { value: '11' } });
+    await waitFor(() => expect(staffCasePreferenceManualClient.query).toHaveBeenCalledTimes(1));
+    const staleSignal = vi.mocked(staffCasePreferenceManualClient.query).mock.calls[0]?.[1]?.signal;
     fireEvent.change(screen.getByLabelText('查詢服務人員'), { target: { value: '12' } });
-    await waitFor(() => expect(screen.getByDisplayValue('10–12')).toBeInTheDocument());
-    refresh.resolve(STAFF_PREFERENCE_PROFILE);
-
-    await waitFor(() => expect(screen.getByDisplayValue('10–12')).toBeInTheDocument());
-    expect(screen.queryByDisplayValue('20–30')).not.toBeInTheDocument();
+    expect(await screen.findByText('南區')).toBeInTheDocument();
+    expect(staleSignal?.aborted).toBe(true);
+    stale.resolve(manualSnapshot(11, '北區'));
+    await waitFor(() => expect(screen.getByText('南區')).toBeInTheDocument());
+    expect(screen.queryByText('北區')).not.toBeInTheDocument();
   });
 
   it('post-receipt lifecycle requery late response is ignored after unmount', async () => {

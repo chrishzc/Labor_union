@@ -20,6 +20,7 @@ describe('DataImport HCM result review', () => {
     expect(screen.getAllByText('115000002').length).toBeGreaterThan(0);
     expect(screen.getAllByText(/行動電話/).length).toBeGreaterThan(0);
     expect(screen.getByText('115000003')).toBeInTheDocument();
+    expect(screen.getByText('HCM 最近匯入紀錄與問題檢查').closest('.sr-only')).toBeNull();
     expect(hcmImportResultClient.query).toHaveBeenCalledTimes(1);
     expect(document.querySelector('[data-control-id="imports.hcm-current.open-preview"]')).toBeInTheDocument();
     expect(document.querySelector('[data-control-id="imports.hcm-current.apply"]')).not.toBeInTheDocument();
@@ -27,13 +28,13 @@ describe('DataImport HCM result review', () => {
       .toHaveTextContent('預覽成功後才能確認匯入。');
   });
 
-  it('refresh costs one GET and warning navigation is local', async () => {
+  it('refresh costs one GET and problem action returns focus to HCM import', async () => {
     render(<DataImportPage />);
     await waitFor(() => expect(screen.getByText('115000001')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: '重新整理結果' }));
     await waitFor(() => expect(hcmImportResultClient.query).toHaveBeenCalledTimes(2));
-    fireEvent.click(screen.getByRole('button', { name: '前往異常與匯入警示中心' }));
-    expect(window.location.hash).toBe('#anomalies');
+    fireEvent.click(screen.getByRole('button', { name: '回到 HCM 工作簿修正' }));
+    expect(document.querySelector('[data-control-id="imports.hcm-current.open-preview"]')).toHaveFocus();
     expect(hcmImportResultClient.query).toHaveBeenCalledTimes(2);
   });
 

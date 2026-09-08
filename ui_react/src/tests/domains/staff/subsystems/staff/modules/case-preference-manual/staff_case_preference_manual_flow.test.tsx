@@ -48,22 +48,25 @@ describe('manual preference editor contract', () => {
     } as never);
 
     render(<StaffCasePreferenceManualEditor staffId={531} />);
-    await waitFor(() => expect(query).toHaveBeenCalledWith(531));
+    await waitFor(() => expect(query).toHaveBeenCalledWith(531, expect.objectContaining({ signal: expect.any(AbortSignal) })));
+    fireEvent.click(await screen.findByRole('button', { name: '編輯六項偏好' }));
     for (const label of labels) {
       expect(screen.getByLabelText(`${label}值1`)).toBeEnabled();
       expect(screen.getByLabelText(`${label}說明1`)).toBeEnabled();
     }
     expect(screen.queryAllByRole('spinbutton')).toHaveLength(0);
 
-    const applyButton = screen.getByRole('button', { name: '套用六大能力' });
-    expect(applyButton).toBeDisabled();
+    expect(screen.queryByRole('button', { name: '確認儲存' })).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('可承接區域值1'), { target: { value: '東區' } });
     fireEvent.change(screen.getByLabelText('可承接區域說明1'), { target: { value: '新說明' } });
-    fireEvent.click(screen.getByRole('button', { name: '預覽六大能力' }));
-    await waitFor(() => expect(previewRequest).toHaveBeenCalledWith(531, expect.objectContaining({
-      service_regions: [{ value: '東區', detail: '新說明' }],
-    })));
+    fireEvent.click(screen.getByRole('button', { name: '預覽變更' }));
+    await waitFor(() => expect(previewRequest).toHaveBeenCalledWith(
+      531,
+      expect.objectContaining({ service_regions: [{ value: '東區', detail: '新說明' }] }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    ));
     await waitFor(() => expect(screen.getByText('預覽已完成，尚未寫入。')).toBeInTheDocument());
+    const applyButton = screen.getByRole('button', { name: '確認儲存' });
     expect(applyButton).toBeDisabled();
 
     fireEvent.change(screen.getByLabelText('六大接案能力變更原因'), { target: { value: '人工修正' } });
@@ -74,7 +77,10 @@ describe('manual preference editor contract', () => {
       preview_fingerprint: preview.preview_fingerprint,
       reason: '人工修正',
       service_regions: [{ value: '東區', detail: '新說明' }],
-    }), expect.objectContaining({ idempotencyKey: expect.stringContaining('staff-case-preference-') })));
+    }), expect.objectContaining({
+      idempotencyKey: expect.stringContaining('staff-case-preference-'),
+      signal: expect.any(AbortSignal),
+    })));
   });
 
   it('keeps Apply zero-write before Preview and surfaces a stale owner rejection', async () => {
@@ -83,14 +89,15 @@ describe('manual preference editor contract', () => {
     const apply = vi.spyOn(staffCasePreferenceManualClient, 'apply').mockRejectedValue(new Error('stale_snapshot'));
 
     render(<StaffCasePreferenceManualEditor staffId={531} />);
-    await waitFor(() => expect(query).toHaveBeenCalledWith(531));
+    await waitFor(() => expect(query).toHaveBeenCalledWith(531, expect.objectContaining({ signal: expect.any(AbortSignal) })));
+    fireEvent.click(await screen.findByRole('button', { name: '編輯六項偏好' }));
     fireEvent.change(screen.getByLabelText('六大接案能力變更原因'), { target: { value: '人工修正' } });
-    const applyButton = screen.getByRole('button', { name: '套用六大能力' });
-    expect(applyButton).toBeDisabled();
+    expect(screen.queryByRole('button', { name: '確認儲存' })).not.toBeInTheDocument();
     expect(apply).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: '預覽六大能力' }));
+    fireEvent.click(screen.getByRole('button', { name: '預覽變更' }));
     await waitFor(() => expect(previewRequest).toHaveBeenCalled());
+    const applyButton = screen.getByRole('button', { name: '確認儲存' });
     fireEvent.click(applyButton);
     await waitFor(() => expect(apply).toHaveBeenCalled());
     expect(screen.getByText('stale_snapshot')).toBeInTheDocument();

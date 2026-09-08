@@ -243,6 +243,7 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_09_02_staff_beclass_profile_v1.json",
     "labor_union_2026_09_06_weekly_report_batches_v1.json",
     "labor_union_2026_09_07_matching_holiday_work_agreements_v1.json",
+    "labor_union_2026_09_08_matching_holiday_work_agreement_plan_version_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -2117,6 +2118,12 @@ def _metadata_state_for_artifact(
     *,
     defer_missing_triggers: bool,
 ) -> str:
+    if artifact == "1032_matching_holiday_work_agreements.sql":
+        return _matching_holiday_work_agreement_owner_state(
+            snapshot,
+            descriptor,
+            defer_missing_triggers=defer_missing_triggers,
+        )
     if artifact == "1004_controlled_file_storage_foundation.sql":
         return _controlled_file_storage_foundation_state(
             snapshot,
@@ -2163,6 +2170,76 @@ def _metadata_state_for_artifact(
         snapshot,
         descriptor,
         artifact,
+        defer_missing_triggers=defer_missing_triggers,
+    )
+
+
+def _matching_holiday_work_agreement_owner_state(
+    snapshot: Mapping[str, Any],
+    descriptor: Mapping[str, Any],
+    *,
+    defer_missing_triggers: bool,
+) -> str:
+    """Accept only the canonical table or its single released rename predecessor."""
+    normalized = deepcopy(snapshot)
+    charset_cast = re.compile(
+        r"CAST\(\s*`?segment_id`?\s+AS\s+CHAR\s+"
+        r"(?:CHARACTER\s+SET|CHARSET)\s+utf8mb4\s*\)",
+        re.IGNORECASE,
+    )
+    for table_name, create_sql in normalized.get("show_create_tables", {}).items():
+        normalized["show_create_tables"][table_name] = charset_cast.sub(
+            "CAST(segment_id AS CHAR)", str(create_sql)
+        )
+    for row in normalized.get("constraints", ()):
+        if row.get("check_clause"):
+            row["check_clause"] = charset_cast.sub(
+                "CAST(segment_id AS CHAR)", str(row["check_clause"])
+            )
+    state = _artifact_metadata_state(
+        normalized,
+        descriptor,
+        "1032_matching_holiday_work_agreements.sql",
+        defer_missing_triggers=defer_missing_triggers,
+    )
+    if state != "drift":
+        return state
+
+    table = "matching_holiday_work_agreements"
+    legacy = "plan_communication_version"
+    canonical = "plan_version"
+    columns = {
+        (str(row.get("table_name")), str(row.get("column_name"))): row
+        for row in normalized.get("columns", ())
+    }
+    legacy_column = columns.get((table, legacy))
+    if legacy_column is None or (table, canonical) in columns:
+        return "drift"
+    if (
+        _normalize_column_type_contract(legacy_column.get("column_type"))
+        != "int unsigned"
+        or legacy_column.get("is_nullable") != "NO"
+        or legacy_column.get("column_default") is not None
+        or str(legacy_column.get("extra") or "") != ""
+    ):
+        return "drift"
+
+    predecessor = normalized
+    for row in predecessor.get("columns", ()):
+        if row.get("table_name") == table and row.get("column_name") == legacy:
+            row["column_name"] = canonical
+    for row in predecessor.get("indexes", ()):
+        if row.get("table_name") != table:
+            continue
+        index_columns = tuple(
+            canonical if name == legacy else name
+            for name in str(row.get("columns") or "").split(",")
+        )
+        row["columns"] = ",".join(index_columns)
+    return _artifact_metadata_state(
+        predecessor,
+        descriptor,
+        "1032_matching_holiday_work_agreements.sql",
         defer_missing_triggers=defer_missing_triggers,
     )
 
@@ -3028,6 +3105,27 @@ def _local_capture_backup_rows(
             counts: dict[str, int] = {}
             actual_fingerprints: dict[str, str] = {}
             for table in names:
+                cursor.execute(
+                    "SELECT COUNT(*) AS n FROM information_schema.tables "
+                    "WHERE table_schema=DATABASE() AND table_name=%s",
+                    (table,),
+                )
+                present_row = cursor.fetchone() or {}
+                present = (
+                    present_row.get("n", 0)
+                    if isinstance(present_row, Mapping)
+                    else present_row[0]
+                )
+                if int(present) == 0:
+                    counts[table] = 0
+                    actual_fingerprints[table] = _local_digest(
+                        _local_canonical_json({
+                            "table": table,
+                            "state": "absent_or_empty",
+                            "row_count": 0,
+                        })
+                    )
+                    continue
                 cursor.execute(f"SELECT COUNT(*) AS n FROM `{table}`")
                 row = cursor.fetchone() or {}
                 actual = row.get("n", 0) if isinstance(row, Mapping) else row[0]
@@ -3132,6 +3230,15 @@ def _local_classify_statement(statement: str) -> str:
                 .read_text(encoding="utf-8")
             )[:2]
         }
+        canonical_1033 = re.sub(
+            r"\s+",
+            " ",
+            split_sql(
+                (ROOT / "db" / "schema_parts" /
+                 "1033_matching_holiday_work_agreements.sql")
+                .read_text(encoding="utf-8")
+            )[0].strip(),
+        ).casefold()
         controlled_parent_replacement = (
             normalized.startswith("alter table controlled_file_staging_objects ")
             and "modify column purpose enum(" in normalized
@@ -3159,6 +3266,8 @@ def _local_classify_statement(statement: str) -> str:
             return "matching_outbox_successor"
         if normalized in canonical_1028_alters:
             return "historical_lifecycle_shape_widen"
+        if normalized == canonical_1033:
+            return "matching_holiday_work_agreement_plan_version_rename"
         if re.search(r"\b(drop|modify|change|rename|truncate)\b", normalized):
             raise LocalAdditiveBlocked("destructive ALTER is outside additive allowlist", code="forbidden_sql_effect")
         if not re.search(r"\badd\s+(column|index|unique|constraint|fulltext|spatial)\b", normalized):
@@ -5075,6 +5184,10 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
             "(preview_fingerprint IS NULL OR preview_fingerprint REGEXP '^[0-9a-f]{64}$') "
             "AND (command_fingerprint IS NULL OR command_fingerprint REGEXP '^[0-9a-f]{64}$')"
         )
+    if part_name == "1033_matching_holiday_work_agreements.sql":
+        descriptor["parent_columns"]["matching_holiday_work_agreements"] = {
+            "plan_version": _column_contract("int unsigned", "NO")
+        }
     if part_name == "61_finance_import_reprocessing.sql":
         _remove_retired_reclassification_audit_contract(descriptor)
         descriptor["indexes"][(
@@ -5332,6 +5445,22 @@ def _release_descriptor_metadata_state(
         "checks": released_projection("checks"),
     }
     for kind, expected in projections.items():
+        if (
+            part_name == "1032_matching_holiday_work_agreements.sql"
+            and kind == "checks"
+        ):
+            released_checks = deepcopy(expected)
+            released_checks[(
+                "matching_holiday_work_agreement_participants",
+                "chk_matching_holiday_work_agreement_participant_target",
+            )] = (
+                "or(and(atom(participant_role='customer'),atom(segment_idisnull),"
+                "atom(participant_key='customer')),and(atom(participant_role='caregiver'),"
+                "atom(segment_idisnotnull),atom(participant_key=concat('segment:',"
+                "cast(segment_idaschar)))))"
+            )
+            if released.get(kind) == released_checks:
+                continue
         if released.get(kind) != expected:
             raise UpgradeBlocked(
                 f"release descriptor differs from canonical SQL: {part_name}:{kind}"
@@ -5340,6 +5469,7 @@ def _release_descriptor_metadata_state(
         "1026_task96_scheduling_service_day_attachment_kind.sql",
         "1027_historical_order_pairing_resolution_reused.sql",
         "1028_historical_service_accounting.sql",
+        "1033_matching_holiday_work_agreements.sql",
     }:
         if released.get("parent_columns") != canonical.get("parent_columns"):
             raise UpgradeBlocked(
@@ -7491,6 +7621,32 @@ def _verify_source_column_projection_preserved(
     return after
 
 
+def _verify_matching_holiday_work_agreement_plan_version_rename(
+    config: DatabaseConfig,
+    source: str,
+    candidate: str,
+    source_snapshot: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Compare every legacy value through the one released column rename."""
+    table = "matching_holiday_work_agreements"
+    source_columns = _table_columns(source_snapshot, table)
+    before = _table_projection_evidence(
+        config, source, table, source_columns
+    )
+    after = _table_projection_evidence(
+        config,
+        candidate,
+        table,
+        source_columns,
+        column_sources={"plan_communication_version": "plan_version"},
+    )
+    if after != before:
+        raise UpgradeBlocked(
+            "matching holiday-work agreement plan version values changed"
+        )
+    return after
+
+
 def _verify_matching_records_preservation(
     config: DatabaseConfig,
     source: str,
@@ -7703,6 +7859,13 @@ def verify_candidate(
             and "contract_id" in source_columns
             and "contract_identity" in candidate_columns
         )
+        has_holiday_agreement_plan_version_rename = (
+            table == "matching_holiday_work_agreements"
+            and "plan_communication_version" in source_columns
+            and "plan_version" not in source_columns
+            and "plan_version" in candidate_columns
+            and "plan_communication_version" not in candidate_columns
+        )
         has_knowledge_identity_backfill = (
             table == "knowledge_items"
             and source_objects.get("163_knowledge_runtime.sql") == "partial"
@@ -7714,6 +7877,7 @@ def verify_candidate(
             has_additive_columns
             and not has_contract_identity_rename
             and not has_legacy_system_alert_migration
+            and not has_holiday_agreement_plan_version_rename
         ):
             additive_projection_preservation[table] = (
                 _verify_source_column_projection_preserved(
@@ -7722,6 +7886,12 @@ def verify_candidate(
                     candidate,
                     table,
                     source_snapshot,
+                )
+            )
+        elif has_holiday_agreement_plan_version_rename:
+            additive_projection_preservation[table] = (
+                _verify_matching_holiday_work_agreement_plan_version_rename(
+                    config, source, candidate, source_snapshot
                 )
             )
         elif has_knowledge_identity_backfill:

@@ -5,16 +5,16 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { sessionClient } from '../api/auth/session_client';
-import { FinanceWorkbookSnapshot, financeImportMutationClient, type FinanceImportBatchPreview, type FinanceImportBatchOutcome } from '../api/finance_import/finance_import_mutation_client';
-import { ordersQueryClient } from '../api/orders/order_query_client';
-import { staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
-import { clientReceiptQueryClient } from '../api/client_finance/client_receipt_query_client';
-import { staffPayablesQueryClient } from '../api/staff_payables/staff_payables_query_client';
-import { accountsPayableQueryClient } from '../api/accounts_payable/accounts_payable_query_client';
-import { financeImportBlockerMessage } from '../adapters/finance/finance_import_query_adapter';
-import { FinancePage } from '../pages/FinancePage';
-import { RECEIPT_RESPONSE, STAFF_PAYABLES_RESPONSE, ACCOUNTS_PAYABLE_RESPONSE } from './fixtures/finance/finance_query_contract_fixtures';
+import { sessionClient } from '../../../../../../../api/auth/session_client';
+import { FinanceWorkbookSnapshot, financeImportMutationClient, type FinanceImportBatchPreview, type FinanceImportBatchOutcome } from '../../../../../../../api/finance_import/finance_import_mutation_client';
+import { ordersQueryClient } from '../../../../../../../api/orders/order_query_client';
+import { staffDirectoryClient } from '../../../../../../../api/staff_directory/staff_directory_client';
+import { clientReceiptQueryClient } from '../../../../../../../api/client_finance/client_receipt_query_client';
+import { staffPayablesQueryClient } from '../../../../../../../api/staff_payables/staff_payables_query_client';
+import { accountsPayableQueryClient } from '../../../../../../../api/accounts_payable/accounts_payable_query_client';
+import { financeImportBlockerMessage } from '../../../../../../../adapters/finance/finance_import_query_adapter';
+import { FinancePage } from '../../../../../../../pages/FinancePage';
+import { RECEIPT_RESPONSE, STAFF_PAYABLES_RESPONSE, ACCOUNTS_PAYABLE_RESPONSE } from '../../../../../../fixtures/finance/finance_query_contract_fixtures';
 
 describe('FinancePage query and guarded import presentation', () => {
   beforeEach(() => {
@@ -37,6 +37,7 @@ describe('FinancePage query and guarded import presentation', () => {
     await waitFor(() => expect(screen.getByText('OBL-C-1')).toBeInTheDocument());
     expect(ordersQueryClient.getOrderSummaries).toHaveBeenCalledTimes(1);
     expect(clientReceiptQueryClient.query).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('此為正常案件；歷史人工收款確認只會在歷史案件顯示。')).toBeInTheDocument();
     expect(screen.queryByText(/Account Version|Account version/)).not.toBeInTheDocument();
     expect(staffDirectoryClient.queryPage).not.toHaveBeenCalled();
     expect(screen.queryByText(/未開放/)).not.toBeInTheDocument();
@@ -339,7 +340,8 @@ describe('Finance import preview and replay boundary', () => {
     fireEvent.click(screen.getByRole('button', { name: '銀行流水匯入' }));
     await uploadAndPreview();
     confirmImport();
-    await screen.findByText('未完成正式入帳；請重新預覽，或至帳務異常處理查看業務原因。');
+    await screen.findByText('未完成正式入帳；請重新預覽並查看本頁人工核對清單。');
+    expect(document.getElementById('finance-import-review')).toBeInTheDocument();
     expect(screen.queryByText(/匯入完成：核銷/)).not.toBeInTheDocument();
   });
 

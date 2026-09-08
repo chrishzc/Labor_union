@@ -209,11 +209,15 @@ export const OrderGovernmentSubsidyLane: FC = () => {
                   )}
 
                   <div className="order-v2-case-meta" aria-label="Government Subsidy 唯讀入口">
-                    {item.available_read_actions.map((action) => (
-                      <a key={action.action_id} href={action.path} target="_blank" rel="noreferrer">
-                        {action.action_id}
-                      </a>
-                    ))}
+                    <a href="#reports">前往營運與補助報表</a>
+                    {item.available_read_actions.length > 0 && (
+                      <details>
+                        <summary>查詢來源</summary>
+                        {item.available_read_actions.map((action) => (
+                          <span key={action.action_id}>{action.action_id}</span>
+                        ))}
+                      </details>
+                    )}
                   </div>
                 </article>
               ))}

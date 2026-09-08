@@ -4,9 +4,9 @@
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
-import { StaffPage } from '../pages/StaffPage';
-import { STAFF_PAGE_ONE } from './fixtures/staff/staff_directory_contract_fixtures';
+import { staffDirectoryClient } from '../../../../../../api/staff_directory/staff_directory_client';
+import { StaffPage } from '../../../../../../pages/StaffPage';
+import { STAFF_PAGE_ONE } from '../../../../../fixtures/staff/staff_directory_contract_fixtures';
 
 describe('StaffPage zero fake mutation', () => {
   beforeEach(() => {
@@ -21,12 +21,9 @@ describe('StaffPage zero fake mutation', () => {
     expect(screen.getAllByRole('button', { name: '辦理退役／復職' })[0]).toBeEnabled();
 
     fireEvent.click(screen.getByRole('button', { name: /配對偏好/ }));
-    for (const id of [
-      'staff.preferences.preview',
-      'staff.preferences.apply',
-    ]) {
-      expect(document.querySelector(`[data-control-id="${id}"]`)).toBeDisabled();
-    }
+    expect(screen.getByText('請先選擇服務人員。')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '預覽變更' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '確認儲存' })).not.toBeInTheDocument();
     expect(document.querySelector('[data-control-id="staff.preferences.cooking-skills"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-control-id="staff.preferences.special-notes"]')).not.toBeInTheDocument();
 

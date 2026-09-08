@@ -318,3 +318,42 @@ def test_fresh_zero_rows_checks_only_tables_created_by_target(monkeypatch) -> No
         frozenset({"target_events"}),
         snapshot,
     )
+
+
+def test_row_preservation_maps_the_released_plan_version_rename(monkeypatch) -> None:
+    observed = []
+
+    def projection(_config, database, _table, columns, **kwargs):
+        observed.append((database, kwargs))
+        return {"columns": columns, "row_count": 1, "rows_sha256": "a" * 64}
+
+    monkeypatch.setattr(migration, "_table_projection_evidence", projection)
+    source = {"columns": [
+        {
+            "table_name": "matching_holiday_work_agreements",
+            "column_name": "plan_communication_version",
+        }
+    ]}
+    candidate = {"columns": [
+        {
+            "table_name": "matching_holiday_work_agreements",
+            "column_name": "plan_version",
+        }
+    ]}
+
+    collector._canonical_row_preservation(
+        SimpleNamespace(),
+        "lu_test_source",
+        "lu_test_candidate",
+        frozenset({"matching_holiday_work_agreements"}),
+        source,
+        candidate,
+    )
+
+    assert observed == [
+        ("lu_test_source", {}),
+        (
+            "lu_test_candidate",
+            {"column_sources": {"plan_communication_version": "plan_version"}},
+        ),
+    ]

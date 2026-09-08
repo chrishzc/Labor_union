@@ -5,10 +5,10 @@
 import { StrictMode } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { App } from '../App';
-import { sessionClient } from '../api/auth/session_client';
-import { SYSTEM_STATUS_ENDPOINT } from '../api/system/system_status_client';
-import { VALID_DATA_BROWSER_PAGE } from './fixtures/data_browser/data_browser_query_contract_fixtures';
+import { App } from '../../../../../../../App';
+import { sessionClient } from '../../../../../../../api/auth/session_client';
+import { SYSTEM_STATUS_ENDPOINT } from '../../../../../../../api/system/system_status_client';
+import { VALID_DATA_BROWSER_PAGE } from '../../../../../../fixtures/data_browser/data_browser_query_contract_fixtures';
 
 const DATA_BROWSER_PREFIX = '/api/v1/admin/data-browser/sources/';
 const ORDERS_ENDPOINT = `${DATA_BROWSER_PREFIX}orders`;
@@ -152,7 +152,7 @@ describe('Data Browser Phase5 entry candidate', () => {
     const initialOrders = count(requests, ORDERS_ENDPOINT);
     const initialClients = count(requests, CLIENTS_ENDPOINT);
 
-    fireEvent.click(screen.getByRole('button', { name: /客戶歷史檔案/ }));
+    fireEvent.click(screen.getByRole('button', { name: /客戶目前主檔/ }));
     await waitFor(() => expect(screen.getByText('客戶 client-0001')).toBeInTheDocument());
     expect(count(requests, ORDERS_ENDPOINT)).toBe(initialOrders);
     expect(count(requests, CLIENTS_ENDPOINT)).toBe(initialClients + 1);
@@ -165,6 +165,7 @@ describe('Data Browser Phase5 entry candidate', () => {
     fireEvent.click(screen.getByRole('button', { name: '載入下一頁' }));
     await waitFor(() => expect(count(requests, CLIENTS_ENDPOINT)).toBe(initialClients + 3));
     expect(requests.at(-1)?.query.get('after')).toBe('cursor-clients-1');
+    expect(screen.getByText('目前已載入至最後一頁')).toBeInTheDocument();
 
     fireEvent.click(screen.getAllByRole('button', { name: /檢視詳情/ })[0]);
     const beforeDrawerActions = requests.length;

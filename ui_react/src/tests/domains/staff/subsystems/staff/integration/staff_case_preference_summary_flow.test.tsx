@@ -4,17 +4,17 @@
  */
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { staffCasePreferenceSummaryClient } from '../api/staff_case_preference_summary/staff_case_preference_summary_client';
-import { staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
-import { staffLifecycleClient } from '../api/staff_lifecycle/staff_lifecycle_client';
-import { staffQualificationMasterClient } from '../api/staff/qualification_master_client';
-import { staffCasePreferenceManualClient } from '../api/staff_case_preferences/staff_case_preferences_client';
-import type { StaffCasePreferenceManualSnapshot, StaffCasePreferenceRelations } from '../api/staff_case_preferences/staff_case_preferences_schemas';
-import { StaffCasePreferenceManualEditor, StaffPage } from '../pages/StaffPage';
-import { STAFF_CASE_PREFERENCE_SUMMARY } from './fixtures/staff/staff_case_preference_summary_contract_fixtures';
-import { STAFF_PAGE_ONE } from './fixtures/staff/staff_directory_contract_fixtures';
-import { STAFF_LIFECYCLE_VIEW } from './fixtures/staff/staff_lifecycle_contract_fixtures';
-import { STAFF_QUALIFICATION_MASTER } from './fixtures/staff/staff_qualification_contract_fixtures';
+import { staffCasePreferenceSummaryClient } from '../../../../../../api/staff_case_preference_summary/staff_case_preference_summary_client';
+import { staffDirectoryClient } from '../../../../../../api/staff_directory/staff_directory_client';
+import { staffLifecycleClient } from '../../../../../../api/staff_lifecycle/staff_lifecycle_client';
+import { staffQualificationMasterClient } from '../../../../../../api/staff/qualification_master_client';
+import { staffCasePreferenceManualClient } from '../../../../../../api/staff_case_preferences/staff_case_preferences_client';
+import type { StaffCasePreferenceManualSnapshot, StaffCasePreferenceRelations } from '../../../../../../api/staff_case_preferences/staff_case_preferences_schemas';
+import { StaffCasePreferenceManualEditor, StaffPage } from '../../../../../../pages/StaffPage';
+import { STAFF_CASE_PREFERENCE_SUMMARY } from '../../../../../fixtures/staff/staff_case_preference_summary_contract_fixtures';
+import { STAFF_PAGE_ONE } from '../../../../../fixtures/staff/staff_directory_contract_fixtures';
+import { STAFF_LIFECYCLE_VIEW } from '../../../../../fixtures/staff/staff_lifecycle_contract_fixtures';
+import { STAFF_QUALIFICATION_MASTER } from '../../../../../fixtures/staff/staff_qualification_contract_fixtures';
 
 const MANUAL_RELATIONS: StaffCasePreferenceRelations = {
   service_regions: [{ value: '北區', detail: '偏遠地區需先確認交通' }],
@@ -125,7 +125,7 @@ describe('Staff case preference summary flow', () => {
     expect(staffCasePreferenceManualClient.apply).toHaveBeenCalledWith(11, {
       ...savedRelations, expected_snapshot_fingerprint: 'a'.repeat(64),
       preview_fingerprint: 'b'.repeat(64), reason: '測試六項編輯',
-    }, { idempotencyKey: expect.any(String) });
+    }, expect.objectContaining({ idempotencyKey: expect.any(String), signal: expect.any(AbortSignal) }));
     expect(staffCasePreferenceManualClient.query).toHaveBeenCalledTimes(2);
     expect(screen.getByRole('group', { name: '可承接區域' })).toHaveTextContent('新竹縣');
     expect(screen.getAllByRole('group')).toHaveLength(6);
@@ -146,9 +146,11 @@ describe('Staff case preference summary flow', () => {
     expect(staffCasePreferenceManualClient.apply).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '預覽變更' }));
     expect(await screen.findByRole('button', { name: '確認儲存' })).toBeEnabled();
-    expect(staffCasePreferenceManualClient.preview).toHaveBeenLastCalledWith(11, {
-      ...MANUAL_RELATIONS, service_regions: [{ value: '東區', detail: '偏遠地區需先確認交通' }],
-    });
+    expect(staffCasePreferenceManualClient.preview).toHaveBeenLastCalledWith(
+      11,
+      { ...MANUAL_RELATIONS, service_regions: [{ value: '東區', detail: '偏遠地區需先確認交通' }] },
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('does not report success when the post-apply owner query fails', async () => {

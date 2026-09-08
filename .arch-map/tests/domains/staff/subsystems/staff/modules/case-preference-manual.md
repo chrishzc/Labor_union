@@ -5,6 +5,7 @@
 - layout_basis: `.arch-map/tests/index.md` permits documented frontend test exceptions; the canonical Staff component oracle remains under `ui_react/src/tests/` and the owner Python oracles remain under the Staff module test root.
 - tests/domains/staff/subsystems/staff/modules/case-preference-manual/
 - ui_react/src/tests/domains/staff/subsystems/staff/modules/case-preference-manual/
+- ui_react/src/tests/staff_preferences_flow.test.tsx
 
 ## Oracles
 - Query/Preview perform no writes; Apply parent-locks before relation locks.

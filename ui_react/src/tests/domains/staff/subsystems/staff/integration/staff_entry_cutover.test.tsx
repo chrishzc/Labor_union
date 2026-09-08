@@ -5,30 +5,39 @@
 import { StrictMode } from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { App } from '../App';
-import { sessionClient } from '../api/auth/session_client';
-import { SYSTEM_STATUS_ENDPOINT } from '../api/system/system_status_client';
+import { App } from '../../../../../../App';
+import { sessionClient } from '../../../../../../api/auth/session_client';
+import { SYSTEM_STATUS_ENDPOINT } from '../../../../../../api/system/system_status_client';
 import {
   STAFF_RESPONSE_ONE,
-} from './fixtures/staff/staff_directory_contract_fixtures';
+} from '../../../../../fixtures/staff/staff_directory_contract_fixtures';
 import {
   STAFF_LIFECYCLE_QUERY_RESPONSE,
-} from './fixtures/staff/staff_lifecycle_contract_fixtures';
-import {
-  STAFF_PREFERENCE_DEFINITIONS_RESPONSE,
-  STAFF_PREFERENCE_PROFILE_RESPONSE,
-} from './fixtures/staff/staff_preferences_contract_fixtures';
+} from '../../../../../fixtures/staff/staff_lifecycle_contract_fixtures';
 import {
   STAFF_AVAILABILITY_QUERY_RESPONSE,
-} from './fixtures/staff/staff_availability_contract_fixtures';
-import { STAFF_QUALIFICATION_RESPONSE } from './fixtures/staff/staff_qualification_contract_fixtures';
+} from '../../../../../fixtures/staff/staff_availability_contract_fixtures';
+import { STAFF_QUALIFICATION_RESPONSE } from '../../../../../fixtures/staff/staff_qualification_contract_fixtures';
 
 const STAFF_SUMMARY_ENDPOINT = '/api/v1/staff/summaries';
 const STAFF_LIFECYCLE_ENDPOINT = '/api/v1/staff/11/lifecycle';
 const STAFF_QUALIFICATION_ENDPOINT = '/api/v1/staff/11/qualification-master';
-const PREFERENCE_DEFINITIONS_ENDPOINT = '/api/v1/scheduling/staff-matching-preferences/definitions';
-const PREFERENCE_PROFILE_ENDPOINT = '/api/v1/scheduling/staff-matching-preferences/staff/11';
+const PREFERENCE_MANUAL_ENDPOINT = '/api/v1/staff/case-preference-manual/11';
 const AVAILABILITY_ENDPOINT = '/api/v1/scheduling/staff/11/availability-blocks';
+
+const MANUAL_RELATIONS = {
+  service_regions: [{ value: '北區', detail: null }], service_periods: [], cooking_skills: [],
+  holiday_availability: [], rest_schedule: [], baby_types: [],
+};
+const PREFERENCE_MANUAL_RESPONSE = {
+  success: true,
+  message: 'ok',
+  data: {
+    staff_id: 11, before: MANUAL_RELATIONS, after: MANUAL_RELATIONS,
+    snapshot_fingerprint: 'a'.repeat(64), preview_fingerprint: null,
+  },
+  error: null,
+};
 
 const PERFORMANCE_RESPONSE = {
   success: true,
@@ -95,14 +104,8 @@ function installFetchStub(): FetchRecord[] {
     if (url.pathname === STAFF_QUALIFICATION_ENDPOINT) {
       return jsonResponse(STAFF_QUALIFICATION_RESPONSE);
     }
-    if (url.pathname === PREFERENCE_DEFINITIONS_ENDPOINT) {
-      return jsonResponse(STAFF_PREFERENCE_DEFINITIONS_RESPONSE);
-    }
-    if (url.pathname === PREFERENCE_PROFILE_ENDPOINT) {
-      return jsonResponse({
-        ...STAFF_PREFERENCE_PROFILE_RESPONSE,
-        data: { ...STAFF_PREFERENCE_PROFILE_RESPONSE.data, staff_id: 11 },
-      });
+    if (url.pathname === PREFERENCE_MANUAL_ENDPOINT) {
+      return jsonResponse(PREFERENCE_MANUAL_RESPONSE);
     }
     if (url.pathname === AVAILABILITY_ENDPOINT) {
       return jsonResponse({
@@ -160,13 +163,12 @@ describe('Staff #staff entry cutover candidate', () => {
     await waitFor(() => expect(countPath(requests, STAFF_LIFECYCLE_ENDPOINT)).toBe(1));
     await waitFor(() => expect(countPath(requests, STAFF_QUALIFICATION_ENDPOINT)).toBe(1));
     expect(countPath(requests, STAFF_LIFECYCLE_ENDPOINT)).toBeLessThanOrEqual(1);
-    expect(countPath(requests, PREFERENCE_DEFINITIONS_ENDPOINT)).toBe(0);
-    expect(countPath(requests, PREFERENCE_PROFILE_ENDPOINT)).toBe(0);
+    expect(countPath(requests, PREFERENCE_MANUAL_ENDPOINT)).toBe(0);
     expect(countPath(requests, AVAILABILITY_ENDPOINT)).toBe(0);
     expectOnlyGet(requests);
   });
 
-  it('Preferences tab 對 definitions 與 profile 各發一個 GET', async () => {
+  it('Preferences tab 在 StrictMode cleanup 後只重發一次目前六項 owner snapshot GET', async () => {
     authenticate();
     const requests = installFetchStub();
 
@@ -175,9 +177,8 @@ describe('Staff #staff entry cutover candidate', () => {
     fireEvent.click(screen.getByRole('button', { name: /配對偏好/ }));
     fireEvent.change(screen.getByLabelText('查詢服務人員'), { target: { value: '11' } });
 
-    await waitFor(() => expect(screen.getByDisplayValue('20–30')).toBeInTheDocument());
-    expect(countPath(requests, PREFERENCE_DEFINITIONS_ENDPOINT)).toBe(1);
-    expect(countPath(requests, PREFERENCE_PROFILE_ENDPOINT)).toBe(1);
+    await screen.findByRole('button', { name: '編輯六項偏好' });
+    expect(countPath(requests, PREFERENCE_MANUAL_ENDPOINT)).toBe(2);
     expect(countPath(requests, STAFF_LIFECYCLE_ENDPOINT)).toBe(0);
     expect(countPath(requests, AVAILABILITY_ENDPOINT)).toBe(0);
     expectOnlyGet(requests);

@@ -19,6 +19,8 @@
 ## Verification
 - layout_status: `custom_current`
 - test_root: `ui_react/src/tests/historical_client_payment_workbench.test.tsx`
+- test_root: `ui_react/src/tests/finance_query_transport_identity.test.ts`
+- integration_root: `ui_react/src/tests/domains/client-finance/subsystems/client-finance/modules/historical-payment-settlement-presentation/`
 
 ## Change triggers
 Reconcile when owner-page placement、strict client endpoint、direction／selection、confirmation、fresh readback或test root changes。

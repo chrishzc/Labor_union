@@ -168,15 +168,19 @@ export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.dr
   const [status, setStatus] = useState('');
   const [phase, setPhase] = useState<'loading' | 'ready' | 'editing' | 'previewing' | 'preview_ready' | 'applying' | 'error'>('loading');
   const loadEpoch = useRef(0);
+  const requestControllerRef = useRef<AbortController | null>(null);
   const load = useCallback(async () => {
     const epoch = ++loadEpoch.current;
+    requestControllerRef.current?.abort();
+    const controller = new AbortController();
+    requestControllerRef.current = controller;
     setPhase('loading');
     setSnapshot(null);
     setPreview(null);
     setReason('');
     setStatus('');
     try {
-      const next = await staffCasePreferenceManualClient.query(staffId);
+      const next = await staffCasePreferenceManualClient.query(staffId, { signal: controller.signal });
       if (epoch !== loadEpoch.current) return false;
       setSnapshot(next);
       setDraft(next.after);
@@ -192,16 +196,23 @@ export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.dr
   }, [staffId]);
   useEffect(() => {
     void load();
-    return () => { loadEpoch.current += 1; };
+    return () => {
+      loadEpoch.current += 1;
+      requestControllerRef.current?.abort();
+      requestControllerRef.current = null;
+    };
   }, [load]);
   const doPreview = async () => {
     if (!snapshot || phase !== 'editing') return;
     const epoch = loadEpoch.current;
+    requestControllerRef.current?.abort();
+    const controller = new AbortController();
+    requestControllerRef.current = controller;
     setPhase('previewing');
     setPreview(null);
     setStatus('');
     try {
-      const next = await staffCasePreferenceManualClient.preview(staffId, requestRelations(draft));
+      const next = await staffCasePreferenceManualClient.preview(staffId, requestRelations(draft), { signal: controller.signal });
       if (epoch !== loadEpoch.current) return;
       setPreview(next);
       setPhase('preview_ready');
@@ -216,6 +227,9 @@ export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.dr
   const doApply = async () => {
     if (!snapshot || !preview?.preview_fingerprint || !reason.trim() || phase !== 'preview_ready') return;
     const epoch = loadEpoch.current;
+    requestControllerRef.current?.abort();
+    const controller = new AbortController();
+    requestControllerRef.current = controller;
     setPhase('applying');
     setStatus('');
     try {
@@ -224,7 +238,7 @@ export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.dr
         expected_snapshot_fingerprint: snapshot.snapshot_fingerprint,
         preview_fingerprint: preview.preview_fingerprint,
         reason: reason.trim(),
-      }, { idempotencyKey: nextIntentKey('staff-case-preference-manual') });
+      }, { idempotencyKey: nextIntentKey('staff-case-preference-manual'), signal: controller.signal });
     } catch (error) {
       if (epoch === loadEpoch.current) {
         setPhase('error');
@@ -1656,7 +1670,7 @@ export const StaffPage: React.FC = () => {
                     </div>
                     {availability.status === 'ready' && availability.data.length === 0 && (
                       <div className="staff-unavailability-row" role="row">
-                        <span role="cell">此月嫂目前無請假或暫停接案紀錄，全時段可供派工排班。</span>
+                        <span role="cell">此月嫂目前無請假或暫停接案紀錄；是否可派工仍需依案件日期、既有排班與資格條件查詢。</span>
                         <span role="cell">—</span>
                         <span role="cell">—</span>
                         <span role="cell">無可取消紀錄</span>

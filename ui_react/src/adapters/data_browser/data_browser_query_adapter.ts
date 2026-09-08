@@ -24,11 +24,11 @@ export interface DataBrowserTab {
 
 export const DATA_BROWSER_TABS: readonly DataBrowserTab[] = [
   { tabId: 'orders_archive', sourceId: 'orders', label: '📦 1. 訂單歷程主表' },
-  { tabId: 'clients_archive', sourceId: 'clients', label: '👥 2. 客戶歷史檔案' },
-  { tabId: 'staff_archive', sourceId: 'staff', label: '👩‍🍼 3. 月嫂名冊歷史' },
+  { tabId: 'clients_archive', sourceId: 'clients', label: '👥 2. 客戶目前主檔' },
+  { tabId: 'staff_archive', sourceId: 'staff', label: '👩‍🍼 3. 月嫂目前名冊' },
   { tabId: 'beclass_history', sourceId: 'beclass_intake', label: '📜 4. BeClass 原始進件' },
-  { tabId: 'hcm_history', sourceId: 'hcm_review', label: '🏢 5. HCM 歷史案件' },
-  { tabId: 'bank_facts_history', sourceId: 'bank_facts', label: '🏦 6. 銀行流水根事實' },
+  { tabId: 'hcm_history', sourceId: 'hcm_review', label: '🏢 5. HCM 匯入審核資料' },
+  { tabId: 'bank_facts_history', sourceId: 'bank_facts', label: '🏦 6. 銀行流水紀錄' },
 ] as const;
 
 export interface DataBrowserCellViewModel {

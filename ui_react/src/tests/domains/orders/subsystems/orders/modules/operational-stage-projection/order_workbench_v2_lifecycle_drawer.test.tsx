@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { OrderWorkbenchV2Drawer } from '../components/OrderWorkbenchV2Drawer';
+import { OrderWorkbenchV2Drawer } from '../../../../../../../components/OrderWorkbenchV2Drawer';
 
 const mocks = vi.hoisted(() => ({ core: vi.fn(), detail: vi.fn(), terms: vi.fn(), assignment: vi.fn() }));
 interface OperationProps { caseNo: string; label: string; onObserved?: () => void; onBusyChange?: (busy: boolean) => void }
@@ -15,13 +15,13 @@ function Operation({ label, onObserved, onBusyChange }: OperationProps) {
     {done && <p>此面板已觀察完成</p>}
   </section>;
 }
-vi.mock('../components/OrderCancellationPanel', () => ({ OrderCancellationPanel: (props: Omit<OperationProps, 'label'>) => <Operation {...props} label="cancellation" /> }));
-vi.mock('../components/OrderControlledReopenPanel', () => ({ OrderControlledReopenPanel: (props: Omit<OperationProps, 'label'>) => <Operation {...props} label="reopen" /> }));
-vi.mock('../components/OrderActualStartPanel', () => ({ OrderActualStartPanel: (props: Omit<OperationProps, 'label'>) => <Operation {...props} label="actual-start" /> }));
-vi.mock('../components/OrderWorkbenchV2OwnerContext', () => ({ OrderWorkbenchV2OwnerContext: ({ revision }: { revision: number }) => <p>Owner context revision {revision}</p> }));
-vi.mock('../components/OrderServiceCompletionActions', () => ({ OrderServiceCompletionActions: () => <p>正常完工操作入口</p> }));
-vi.mock('../api/orders/order_core_stage_projection_client', () => ({ orderCoreStageProjectionClient: { getCoreStageTimelines: mocks.core } }));
-vi.mock('../api/orders/order_query_client', () => ({ ordersQueryClient: { getOrderDetail: mocks.detail, getOrderTerms: mocks.terms, getAssignmentPlan: mocks.assignment } }));
+vi.mock('../../../../../../../components/OrderCancellationPanel', () => ({ OrderCancellationPanel: (props: Omit<OperationProps, 'label'>) => <Operation {...props} label="cancellation" /> }));
+vi.mock('../../../../../../../components/OrderControlledReopenPanel', () => ({ OrderControlledReopenPanel: (props: Omit<OperationProps, 'label'>) => <Operation {...props} label="reopen" /> }));
+vi.mock('../../../../../../../components/OrderActualStartPanel', () => ({ OrderActualStartPanel: (props: Omit<OperationProps, 'label'>) => <Operation {...props} label="actual-start" /> }));
+vi.mock('../../../../../../../components/OrderWorkbenchV2OwnerContext', () => ({ OrderWorkbenchV2OwnerContext: ({ revision }: { revision: number }) => <p>Owner context revision {revision}</p> }));
+vi.mock('../../../../../../../components/OrderServiceCompletionActions', () => ({ OrderServiceCompletionActions: () => <p>正常完工操作入口</p> }));
+vi.mock('../../../../../../../api/orders/order_core_stage_projection_client', () => ({ orderCoreStageProjectionClient: { getCoreStageTimelines: mocks.core } }));
+vi.mock('../../../../../../../api/orders/order_query_client', () => ({ ordersQueryClient: { getOrderDetail: mocks.detail, getOrderTerms: mocks.terms, getAssignmentPlan: mocks.assignment } }));
 const CASE = 'CASE-LIFECYCLE-DRAWER';
 function page(cancelled = false) {
   return { items: [{ case_no: CASE, branch_type: cancelled ? 'cancelled' : 'normal',
@@ -42,7 +42,6 @@ describe('Beta Drawer 受控操作整合與跨支線回讀', () => {
 
   it.each([
     ['取消／補登取消服務事實', 'cancellation'],
-    ['受控重開取消案件', 'reopen'],
     ['確認／更正實際開始日', 'actual-start'],
   ])('%s 的明確入口能展開對應正式操作面板', async (entry, label) => {
     render(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="normal" onClose={vi.fn()} />);
@@ -53,6 +52,20 @@ describe('Beta Drawer 受控操作整合與跨支線回讀', () => {
     expect(screen.getByRole('region', { name: `操作面板 ${label}` })).toBeInTheDocument();
   });
 
+  it('受控重開入口只在取消支線顯示', async () => {
+    const normal = render(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="normal" onClose={vi.fn()} />);
+    await waitFor(() => expect(mocks.core).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole('button', { name: '受控重開取消案件' })).not.toBeInTheDocument();
+    normal.unmount();
+
+    mocks.core.mockResolvedValue(page(true));
+    mocks.detail.mockResolvedValue({ case_no: CASE, client_name: '測試客戶', client_id: 1, order_status: '訂單取消', identity_status: null, actual_start_date: '2026-09-01' });
+    render(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="cancelled" onClose={vi.fn()} />);
+    const button = await screen.findByRole('button', { name: '受控重開取消案件' });
+    fireEvent.click(button);
+    expect(screen.getByRole('region', { name: '操作面板 reopen' })).toBeInTheDocument();
+  });
+
   it('結果未明時 close／Escape／backdrop 皆不卸載，不能切換到其他受控操作', async () => {
     const onClose = vi.fn();
     const view = render(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="normal" onClose={onClose} />);
@@ -61,7 +74,7 @@ describe('Beta Drawer 受控操作整合與跨支線回讀', () => {
     fireEvent.click(screen.getByRole('button', { name: '模擬結果未明' }));
     const close = screen.getByRole('button', { name: '關閉工作 Drawer' });
     expect(close).toBeDisabled();
-    expect(screen.getByRole('button', { name: '受控重開取消案件' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '確認／更正實際開始日' })).toBeDisabled();
     fireEvent.click(close); fireEvent.keyDown(document, { key: 'Escape' });
     fireEvent.mouseDown(view.container.querySelector('.order-v2-drawer-backdrop')!);
     expect(onClose).not.toHaveBeenCalled(); expect(screen.getByRole('region', { name: '操作面板 cancellation' })).toBeInTheDocument();

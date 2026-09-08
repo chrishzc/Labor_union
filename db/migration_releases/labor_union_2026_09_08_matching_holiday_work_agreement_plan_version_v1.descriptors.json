@@ -1,0 +1,23 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-matching-holiday-work-agreement-plan-version-2026-09-08-v1",
+  "descriptors": {
+    "1033_matching_holiday_work_agreements.sql": {
+      "tables": {},
+      "parent_columns": {
+        "matching_holiday_work_agreements": {
+          "plan_version": {
+            "column_type": "int unsigned",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          }
+        }
+      },
+      "indexes": {},
+      "foreign_keys": {},
+      "checks": {},
+      "triggers": []
+    }
+  }
+}

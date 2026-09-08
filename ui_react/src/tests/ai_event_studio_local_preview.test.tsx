@@ -12,7 +12,7 @@ describe('AI 事件工作室正式規則 readback', () => {
     vi.restoreAllMocks();
   });
 
-  const mockReadback = () => vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+  const mockReadback = (resolvedRate: number | null = 2 / 3) => vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
     const path = String(input);
     if (path.endsWith('/catalog')) {
       return new Response(JSON.stringify({ data: {
@@ -40,7 +40,7 @@ describe('AI 事件工作室正式規則 readback', () => {
         resolved_count: 2,
         unresolved_count: 1,
         total_count: 3,
-        resolved_rate: 2 / 3,
+        resolved_rate: resolvedRate,
       } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
     if (path.includes('/router/preview')) {
@@ -68,6 +68,7 @@ describe('AI 事件工作室正式規則 readback', () => {
     mockReadback();
     render(React.createElement(AiEventStudio));
 
+    expect(screen.getByText('尚未執行連線測試')).toBeInTheDocument();
     expect(screen.queryByText(/新竹市月子補助計算與收費說明/)).not.toBeInTheDocument();
     expect(screen.queryByText(/客戶資料與服務異動申請/)).not.toBeInTheDocument();
     expect(screen.queryByText(/服務態度與爭議客訴/)).not.toBeInTheDocument();
@@ -80,6 +81,14 @@ describe('AI 事件工作室正式規則 readback', () => {
       expect(screen.getByText('我要改資料')).toBeInTheDocument();
       expect(screen.getByText(/正式 catalog revision 3/)).toBeInTheDocument();
     });
+  });
+
+  it('零樣本回饋不顯示為百分之百滿意', async () => {
+    mockReadback(null);
+    render(React.createElement(AiEventStudio));
+
+    expect(await screen.findByText('尚無回饋')).toBeInTheDocument();
+    expect(screen.queryByText('100%')).not.toBeInTheDocument();
   });
 
   it('server router preview 不再依賴本機規則', async () => {

@@ -4,6 +4,7 @@ architecture: ../../../../../domains/orders/subsystems/orders/index.md
 test_root: tests/domains/orders/subsystems/orders/
 
 integration_root: tests/domains/orders/subsystems/orders/integration/
+integration_root: ui_react/src/tests/order_workbench_v2_historical_drawer.test.tsx
 fixtures_root: tests/fixtures/
 modules:
   operational-stage-projection:

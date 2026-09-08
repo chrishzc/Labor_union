@@ -502,7 +502,7 @@ export const AiEventStudio: React.FC = () => {
                 <div style={{ background: '#fff', padding: '10px', borderRadius: '6px', border: '1px solid #e2e8f0', textAlign: 'center' }}>
                   <div style={{ fontSize: '12px', color: '#2563eb' }}>滿意度</div>
                   <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#2563eb' }}>
-                    {feedbackAggregate.resolved_rate !== null ? `${Math.round(feedbackAggregate.resolved_rate * 100)}%` : '100%'}
+                    {feedbackAggregate.resolved_rate !== null ? `${Math.round(feedbackAggregate.resolved_rate * 100)}%` : '尚無回饋'}
                   </div>
                 </div>
               </div>

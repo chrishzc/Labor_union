@@ -5,14 +5,14 @@
 import { readFileSync } from 'node:fs';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { CustomerServiceClient } from '../api/customer_service/customer_service_client';
-import type { LineIdentityClient } from '../api/line_identity/line_identity_client';
-import type { LineConfigurationQueryClient } from '../api/line_configuration/line_configuration_query_client';
-import type { LineRichMenuDraftClient } from '../api/line_rich_menu_draft/line_rich_menu_draft_client';
-import { LineManagementPage } from '../pages/LineManagementPage';
-import { CUSTOMER_SERVICE_DETAIL_FIXTURE, CUSTOMER_SERVICE_PAGE_FIXTURE, CUSTOMER_SERVICE_SUMMARY_FIXTURE } from './fixtures/customer_service/customer_service_contract_fixtures';
-import { BINDING_PAGE_FIXTURE, BOUND_IDENTITY_FIXTURE } from './fixtures/line_identity/line_identity_contract_fixtures';
-import { LINE_NOTIFICATION_RULES_CATALOG_FIXTURE, LINE_RICH_MENU_CONFIGURATION_FIXTURE, LINE_RICH_MENU_DRAFT_FIXTURE, LINE_RICH_MENU_PUBLICATION_FIXTURE, LINE_RICH_MENU_PUBLICATION_PAGE_FIXTURE } from './fixtures/line_configuration_query_fixtures';
+import type { CustomerServiceClient } from '../../../../../../api/customer_service/customer_service_client';
+import type { LineIdentityClient } from '../../../../../../api/line_identity/line_identity_client';
+import type { LineConfigurationQueryClient } from '../../../../../../api/line_configuration/line_configuration_query_client';
+import type { LineRichMenuDraftClient } from '../../../../../../api/line_rich_menu_draft/line_rich_menu_draft_client';
+import { LineManagementPage } from '../../../../../../pages/LineManagementPage';
+import { CUSTOMER_SERVICE_DETAIL_FIXTURE, CUSTOMER_SERVICE_PAGE_FIXTURE, CUSTOMER_SERVICE_SUMMARY_FIXTURE } from '../../../../../fixtures/customer_service/customer_service_contract_fixtures';
+import { BINDING_PAGE_FIXTURE, BOUND_IDENTITY_FIXTURE } from '../../../../../fixtures/line_identity/line_identity_contract_fixtures';
+import { LINE_NOTIFICATION_RULES_CATALOG_FIXTURE, LINE_RICH_MENU_CONFIGURATION_FIXTURE, LINE_RICH_MENU_DRAFT_FIXTURE, LINE_RICH_MENU_PUBLICATION_FIXTURE, LINE_RICH_MENU_PUBLICATION_PAGE_FIXTURE } from '../../../../../fixtures/line_configuration_query_fixtures';
 
 type CustomerServiceQueryClient = Pick<CustomerServiceClient, 'getSummary' | 'listTickets' | 'getTicketDetail'>;
 type LineIdentityQueryClient = Pick<LineIdentityClient, 'listBindings' | 'getBinding'>;
@@ -94,6 +94,9 @@ describe('LINE 管理頁禁止假 mutation', () => {
     fireEvent.click(screen.getByRole('button', { name: /4\. 通知規則/ }));
     const ruleWorkspace = (await screen.findByRole('heading', { name: /LINE 推播與通知規則目錄/ })).closest('section');
     expect(ruleWorkspace).not.toBeNull();
+    expect(within(ruleWorkspace as HTMLElement).getByText('Webhook 歡迎訊息設定預覽')).toBeInTheDocument();
+    expect(within(ruleWorkspace as HTMLElement).getByText('執行與送達狀態請查通知紀錄')).toBeInTheDocument();
+    expect(within(ruleWorkspace as HTMLElement).queryByText(/Webhook 自動推播中|Webhook自動推播中/)).not.toBeInTheDocument();
     const ruleCard = await within(ruleWorkspace as HTMLElement).findByRole('button', { name: /deposit_notice/ });
     expect(screen.queryByRole('button', { name: /建立新通知規則/ })).not.toBeInTheDocument();
     fireEvent.click(ruleCard);

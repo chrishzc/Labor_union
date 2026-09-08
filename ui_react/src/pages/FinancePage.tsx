@@ -70,7 +70,7 @@ function financeErrorMessage(error: unknown, fallback: string): string {
 
 export const FinancePage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<FinanceTab>('client-receipts');
-  const [cases, setCases] = useState<{ id: string; label: string }[]>([]);
+  const [cases, setCases] = useState<{ id: string; label: string; orderStatus: string }[]>([]);
   const [selectedCase, setSelectedCase] = useState('');
   const [caseQuery, setCaseQuery] = useState('');
   const [receipt, setReceipt] = useState<LoadState<ReturnType<typeof adaptClientReceiptQuery>>>({ kind: 'idle' });
@@ -137,7 +137,7 @@ export const FinancePage: React.FC = () => {
       )
       .then((page) => {
         if (!current('cases', request.sequence, request.controller)) return;
-        const adapted = adaptOrderSummaryPage(page).items.map((item) => ({ id: item.id, label: `${item.id}｜${item.clientName}` }));
+        const adapted = adaptOrderSummaryPage(page).items.map((item) => ({ id: item.id, label: `${item.id}｜${item.clientName}`, orderStatus: item.orderStatus }));
         setCases(adapted);
         setSelectedCase((value) => adapted.some((item) => item.id === value) ? value : adapted[0]?.id ?? '');
         if (adapted.length === 0) setReceipt({ kind: 'empty' });
@@ -347,7 +347,7 @@ export const FinancePage: React.FC = () => {
           <div className="finance-section-heading">
             <div>
               <h2>客戶收款資料</h2>
-              <p>正常收款由銀行流水匯入自動核銷；不唯一或金額不符時由異常審核處理。</p>
+              <p>正常收款由銀行流水匯入自動核銷；不唯一或金額不符時，請到「銀行流水匯入」查看該批次的人工核對清單。</p>
             </div>
           </div>
 
@@ -445,7 +445,11 @@ export const FinancePage: React.FC = () => {
                   </table>
                 </div>
               </div>
-              <HistoricalClientPaymentWorkbench caseNo={selectedCase} />
+              {cases.find((item) => item.id === selectedCase)?.orderStatus.startsWith('歷史訂單－') ? (
+                <HistoricalClientPaymentWorkbench caseNo={selectedCase} />
+              ) : (
+                <div className="finance-state">此為正常案件；歷史人工收款確認只會在歷史案件顯示。</div>
+              )}
             </>
           )}
         </section>
@@ -457,7 +461,7 @@ export const FinancePage: React.FC = () => {
           <div className="finance-section-heading">
             <div>
               <h2>月嫂應付款與付款事件</h2>
-              <p>正常付款由銀行流水匯入自動核銷；不唯一或金額不符時由異常審核處理。</p>
+              <p>正常付款由銀行流水匯入自動核銷；不唯一或金額不符時，請到「銀行流水匯入」查看該批次的人工核對清單。</p>
             </div>
           </div>
 
@@ -774,7 +778,7 @@ export const FinancePage: React.FC = () => {
 
                 <StateMessage state={sourceReview} empty="目前沒有待人工確認資料。" />
                 {sourceReview.kind === 'ready' && (
-                  <div className="finance-detail-block" data-surface-id="finance.finance-import.manual-review" style={{ marginTop: '12px' }}>
+                  <div id="finance-import-review" className="finance-detail-block" data-surface-id="finance.finance-import.manual-review" style={{ marginTop: '12px' }}>
                     <div className="finance-meta">
                       <span>批次 <code>{sourceReview.data.batchIdentity}</code>｜待人工確認 {sourceReview.data.reviewCount} 筆</span>
                       <button
@@ -898,10 +902,10 @@ export const FinancePage: React.FC = () => {
                 <span>
                   {batchOutcome.data.receipt
                     ? `匯入完成：核銷 ${batchOutcome.data.receipt.reconciled_count}、既有 ${batchOutcome.data.receipt.existing_count}、待處理 ${batchOutcome.data.receipt.pending_count}`
-                    : '未完成正式入帳；請重新預覽，或至帳務異常處理查看業務原因。'}
+                    : '未完成正式入帳；請重新預覽並查看本頁人工核對清單。'}
                 </span>
                 {batchOutcome.data.receipt && batchOutcome.data.receipt.pending_count > 0 && (
-                  <a href="#anomalies" className="finance-btn-secondary">前往異常中心</a>
+                  <a href="#finance-import-review" className="finance-btn-secondary">查看人工核對清單</a>
                 )}
               </div>
             )}

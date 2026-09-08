@@ -176,7 +176,8 @@
     "db/schema_parts/1027_historical_order_pairing_resolution_reused.sql": "migration-only",
     "db/schema_parts/1028_historical_service_accounting.sql": "migration-only",
     "db/schema_parts/1030_staff_beclass_profile.sql": "migration-only",
-    "db/schema_parts/1031_weekly_report_batches.sql": "migration-only"
+    "db/schema_parts/1031_weekly_report_batches.sql": "migration-only",
+    "db/schema_parts/1033_matching_holiday_work_agreements.sql": "migration-only"
   },
   "retirement_contracts": {
     "db/schema_parts/1022_task96_retired_anomaly_owner_contracts.sql": {
@@ -268,6 +269,15 @@
       "replay": "preserve release chain applies 1031 only when both owned weekly report objects are absent or exact",
       "rollback": "retain source backup and discard candidate before same-name replacement",
       "unresolved_policy": "partial or drift owned metadata blocks candidate apply pending explicit remediation"
+    },
+    "db/schema_parts/1033_matching_holiday_work_agreements.sql": {
+      "source_object": "released matching_holiday_work_agreements.plan_communication_version predecessor",
+      "successor": "db/schema_parts/1032_matching_holiday_work_agreements.sql",
+      "terminal_schema_evidence": "fresh assembly creates canonical plan_version in part 1032; preserve chain uses 1033 only for the exact legacy rename predecessor",
+      "data_effect": "schema_only; column values and the current-plan index are preserved by the MySQL rename",
+      "replay": "preserve release chain skips 1033 when plan_version is exact and applies it only when the exact legacy column is present alone",
+      "rollback": "retain source backup and discard candidate before same-name replacement",
+      "unresolved_policy": "dual, missing, wrong-type or other metadata drift blocks candidate apply"
     }
   }
 }

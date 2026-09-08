@@ -46,4 +46,5 @@ layout_status: `custom_current`
 - integration_root: `tests/domains/external-integration/subsystems/line/infrastructure/test_line_liff_entrypoint.py`
 - integration_root: `tests/domains/external-integration/subsystems/line/subsystems/test_line_identity_stage4.py`
 - integration_root: `tests/domains/external-integration/subsystems/line/subsystems/test_line_registration_atomicity.py`
+- integration_root: `ui_react/src/tests/domains/external-integration/subsystems/line/integration/`
 - higher_boundary: LINE Identity first-release living baseline由Global schema/release routing分類；Anomalies consumer保留在其canonical integration root。

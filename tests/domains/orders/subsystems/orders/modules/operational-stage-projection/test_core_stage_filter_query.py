@@ -1,5 +1,6 @@
 """Focused tests for Beta core-stage server-side filters, counts, and pagination."""
 
+from dataclasses import replace
 from datetime import datetime, timezone
 
 import pytest
@@ -9,6 +10,7 @@ from subsystems.orders.core_stage_filter_query import (
     CoreStageProjectionFilterQuery,
     query_core_stage_page,
 )
+from subsystems.orders.core_stage_projection_query import CoreStageProjectionContractError
 from subsystems.orders.stage_projection_query import (
     AvailableAction,
     MAXIMUM_PAGE_SIZE,
@@ -352,6 +354,45 @@ def test_workbench_categories_cover_current_lifecycle_with_stable_pagination(sco
     if scope != "in_progress":
         assert not any(first.stage_counts.values())
         assert first.substatus_counts == {}
+
+
+def test_unrelated_cancelled_projection_drift_does_not_disable_active_workbench():
+    active = _timeline("CASE-ACTIVE")
+    cancelled = _timeline(
+        "CASE-CANCELLED-DRIFT",
+        lifecycle=OrderLifecycleStatus.CANCELLED,
+        current_step=None,
+    )
+    settlement = cancelled.stages[-1]
+    cancelled_without_completion = replace(
+        cancelled,
+        stages=cancelled.stages[:-1] + (
+            replace(
+                settlement,
+                settlement=tuple(
+                    item
+                    for item in settlement.settlement
+                    if item.code != "service_completion"
+                ),
+            ),
+        ),
+    )
+    source = _Source({None: _page(active, cancelled_without_completion)})
+
+    page = query_core_stage_page(
+        source,
+        CoreStageProjectionFilterQuery(50, workbench_scope="in_progress"),
+    )
+    assert [item.case_no for item in page.items] == ["CASE-ACTIVE"]
+
+    with pytest.raises(
+        CoreStageProjectionContractError,
+        match="service_completion settlement source is missing",
+    ):
+        query_core_stage_page(
+            source,
+            CoreStageProjectionFilterQuery(50, workbench_scope="cancelled"),
+        )
 
 
 @pytest.mark.parametrize("extra", [

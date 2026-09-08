@@ -241,7 +241,7 @@ export const ReportsPage: React.FC = () => {
           {
             promotionCount: pCount,
             inquiryCount: iCount,
-            annualYtd: true,
+            annualYtd: false,
           },
           controller.signal,
         )

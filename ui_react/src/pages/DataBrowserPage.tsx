@@ -162,19 +162,19 @@ export const DataBrowserPage: React.FC = () => {
           <span className="databrowser-kpi-value" style={{ color: '#ea580c' }}>
             {selectedTab.label}
           </span>
-          <span className="databrowser-kpi-desc">顯示 canonical 完整值</span>
+          <span className="databrowser-kpi-desc">顯示此來源提供的完整欄位</span>
         </div>
         <div className="databrowser-kpi-card">
           <span className="databrowser-kpi-label">目前載入筆數</span>
           <span className="databrowser-kpi-value">{rows.length} 筆</span>
-          <span className="databrowser-kpi-desc">可繼續載入下一頁</span>
+          <span className="databrowser-kpi-desc">{nextCursor ? '還有下一頁可載入' : '目前已載入至最後一頁'}</span>
         </div>
         <div className="databrowser-kpi-card">
-          <span className="databrowser-kpi-label">首筆記錄時間</span>
+          <span className="databrowser-kpi-label">清單首筆時間</span>
           <span className="databrowser-kpi-value" style={{ fontSize: '1.05rem', color: '#74593f' }}>
             {rows[0]?.recordedAt ?? '—'}
           </span>
-          <span className="databrowser-kpi-desc">目前查詢結果中的最早記錄</span>
+          <span className="databrowser-kpi-desc">目前清單第一筆；依來源排序呈現</span>
         </div>
         <div className="databrowser-kpi-card">
           <span className="databrowser-kpi-label">操作方式</span>

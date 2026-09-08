@@ -229,7 +229,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
           ? '此案件先前已重啟正常流程；正式回讀已確認為「訂單成立」。請關閉 Drawer 後從正常訂單支線繼續。'
           : '已重啟正常流程並回讀確認為「訂單成立」。請關閉 Drawer 後從正常訂單支線繼續日期／媒合／排班。',
       });
-      onObserved?.();
+      refreshFacts();
     } catch (error) {
       setHistoricalRestart({ status: 'error', message: errorMessage(error) });
     }
@@ -325,7 +325,9 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
             <p className="order-v2-drawer-note">選擇需要辦理的事項，查看目前條件後預覽並確認。</p>
             <div className="order-v2-drawer-actions">
               <button type="button" disabled={operationBusy || factsRefreshing} onClick={() => setOperation('cancellation')}>取消／補登取消服務事實</button>
-              <button type="button" disabled={operationBusy || factsRefreshing} onClick={() => setOperation('reopen')}>受控重開取消案件</button>
+              {currentBranch === 'cancelled' && (
+                <button type="button" disabled={operationBusy || factsRefreshing} onClick={() => setOperation('reopen')}>受控重開取消案件</button>
+              )}
               <button type="button" disabled={operationBusy || factsRefreshing} onClick={() => setOperation('actual-start')}>確認／更正實際開始日</button>
             </div>
             {operationBusy && <p role="status">操作結果或正式回讀尚未確認，暫時不能關閉或切換操作。</p>}

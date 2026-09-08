@@ -1,0 +1,57 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-matching-holiday-work-agreement-plan-version-2026-09-08-v1",
+  "release_metadata": {
+    "release_name": "Labor Union matching holiday-work agreement plan version bridge",
+    "application_version": "matching-holiday-work-agreement-plan-version-v1",
+    "published_at": "2026-09-08",
+    "description": "Preserve existing holiday-work agreement evidence while renaming the legacy communication-version column to the owning matching-plan version"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": ["absent", "exact"],
+    "forbidden_owned_object_states": ["partial", "drift"],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-matching-holiday-work-agreements-2026-09-07-v1"
+  },
+  "artifacts": [{
+    "name": "1033_matching_holiday_work_agreements.sql",
+    "relative_path": "db/schema_parts/1033_matching_holiday_work_agreements.sql",
+    "sha256": "5c6d94f5e178f2cbbcd28971ff7ea0d199993cc8e6a3c53426fe970200a9c985",
+    "dependencies": [],
+    "data_effect": "schema_only",
+    "rollback_policy": "forward-only-preserve-holiday-work-agreement-evidence",
+    "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+  }],
+  "backfills": [],
+  "verification_contracts": [{
+    "verification_id": "matching-holiday-work-agreement-plan-version-exact",
+    "phase": "post-schema",
+    "policy": "canonical-plan-version-column-and-index-exact-with-values-preserved",
+    "read_only": true,
+    "blocking": true
+  }],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": ["matching-communication-v1", "schedule-precision-v1"],
+    "required_restart_targets": ["api"],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": ["matching-holiday-work-agreement-plan-version-exact"]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_09_08_matching_holiday_work_agreement_plan_version_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_09_08_matching_holiday_work_agreement_plan_version_v1.descriptors.json",
+    "sha256": "a6a55d2e31dfb6d4a94c25bca2d81f936fb2a4924615ad5d82dedbb2180b2114",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": ["--single-transaction", "--routines", "--events", "--triggers", "--hex-blob"],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

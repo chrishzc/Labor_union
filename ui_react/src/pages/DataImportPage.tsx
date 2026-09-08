@@ -381,9 +381,11 @@ export const DataImportPage: React.FC<DataImportPageProps> = ({ initialTab = 'wo
     return () => { window.removeEventListener('beforeunload', preventUnload); document.removeEventListener('click', preventInAppNavigation, true); };
   }, [mutationLocked]);
 
-  const navigateToWarning = () => {
+  const navigateToHcmImport = () => {
     if (mutationLocked) return;
-    window.location.hash = '#anomalies';
+    const importControl = document.querySelector<HTMLElement>('[data-control-id="imports.hcm-current.open-preview"]');
+    importControl?.scrollIntoView?.({ block: 'center' });
+    importControl?.focus();
   };
 
   const selectTab = (tab: DataCenterTab) => {
@@ -425,7 +427,8 @@ export const DataImportPage: React.FC<DataImportPageProps> = ({ initialTab = 'wo
 
       {activeTab === 'data-browser' && <DataBrowserPage />}
 
-      <div className="sr-only">
+      {activeTab === 'workbook-import' && (
+      <div>
         <section className="import-result-workbench" data-surface-id="imports.hcm-results.open">
           <div className="import-result-title-row"><div><span className="import-icon">🏢</span><h2>HCM 最近匯入紀錄與問題檢查</h2></div><span className="import-status-badge ready">唯讀查詢</span></div>
           {state.kind === 'loading' && <div className="import-result-state" role="status">正在載入最近匯入結果…</div>}
@@ -438,7 +441,7 @@ export const DataImportPage: React.FC<DataImportPageProps> = ({ initialTab = 'wo
               {!result.rowOutcomesAvailable ? <div className="import-result-legacy" data-surface-id="imports.hcm-results.legacy-unavailable">歷史匯入摘要；本批次統計如上，新版匯入會在此列出逐列結果。</div> : (
                 <div className="import-result-columns">
                   <section data-surface-id="imports.hcm-results.new-orders"><h3>本次新增訂單</h3>{result.newOrders.length === 0 ? <p>本批次沒有新增訂單。</p> : result.newOrders.map((row) => <div key={row.source_row} className="import-result-row" data-surface-id={`imports.hcm-results.new-order.${encodeURIComponent(row.case_no ?? `row-${row.source_row}`)}`}><strong>{row.case_no ?? `來源列 ${row.source_row}`}</strong><span>{row.outcome}</span></div>)}</section>
-                  <section data-surface-id="imports.hcm-results.problems"><h3>需要檢查</h3>{result.problems.length === 0 ? <p>本批次沒有問題列。</p> : result.problems.map((row) => <div key={row.source_row} className="import-result-problem" data-surface-id={`imports.hcm-results.problem.${encodeURIComponent(row.problem_identity ?? `row-${row.source_row}`)}`}><strong>{row.case_no ?? `來源列 ${row.source_row}`}</strong><span>欄位：{row.problem_fields.join('、') || '無'}</span><span>代碼：{row.issue_codes.join('、') || '無'}</span><button type="button" disabled={mutationLocked} data-control-id={`imports.hcm-results.problem.referral.${encodeURIComponent(row.problem_identity ?? `row-${row.source_row}`)}`} onClick={navigateToWarning}>前往異常與匯入警示中心</button></div>)}</section>
+                  <section data-surface-id="imports.hcm-results.problems"><h3>需要檢查</h3>{result.problems.length === 0 ? <p>本批次沒有問題列。</p> : result.problems.map((row) => <div key={row.source_row} className="import-result-problem" data-surface-id={`imports.hcm-results.problem.${encodeURIComponent(row.problem_identity ?? `row-${row.source_row}`)}`}><strong>{row.case_no ?? `來源列 ${row.source_row}`}</strong><span>欄位：{row.problem_fields.join('、') || '無'}</span><span>代碼：{row.issue_codes.join('、') || '無'}</span><button type="button" disabled={mutationLocked} data-control-id={`imports.hcm-results.problem.referral.${encodeURIComponent(row.problem_identity ?? `row-${row.source_row}`)}`} onClick={navigateToHcmImport}>回到 HCM 工作簿修正</button></div>)}</section>
                   <section data-surface-id="imports.hcm-results.replays"><h3>已存在相同資料</h3>{result.replays.length === 0 ? <p>本批次沒有相同資料。</p> : result.replays.map((row) => <div key={row.source_row} className="import-result-row"><strong>{row.case_no ?? `來源列 ${row.source_row}`}</strong><span>未列為新增</span></div>)}</section>
                 </div>
               )}
@@ -446,6 +449,7 @@ export const DataImportPage: React.FC<DataImportPageProps> = ({ initialTab = 'wo
           ))}
         </section>
       </div>
+      )}
     </div>
   );
 };

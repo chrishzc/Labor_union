@@ -1291,7 +1291,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                   <option value="service_progress">📦 服務進度</option>
                   <option value="profile_update">✏️ 異動申請</option>
                   <option value="contact_union">📞 聯絡工會</option>
-                  <option value="other">⚠️ 爭議客訴</option>
+                  <option value="other">📝 其他問題</option>
                 </select>
               </div>
             </div>
@@ -2216,11 +2216,11 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                       🌟 新好友加入即時歡迎詞與功能導覽 (Onboarding)
                     </h4>
                     <span className="line-status line-status-bound" style={{ fontSize: '0.78rem' }}>
-                      ● Webhook 自動推播中
+                      Webhook 歡迎訊息設定預覽
                     </span>
                   </div>
                   <p style={{ margin: '4px 0 0', fontSize: '0.84rem', color: '#74593f' }}>
-                    當訪客掃描 QR Code 或搜尋 LINE ID 加入好友時，系統 Webhook 將自動秒速推播下方歡迎導覽與 15 分鐘專屬安全登記連結。
+                    下方為新好友事件的歡迎訊息設定內容；實際是否觸發與送達，需以事件及送達紀錄確認。
                   </p>
                 </div>
               </div>
@@ -2258,10 +2258,10 @@ https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px', paddingTop: '10px', borderTop: '1px solid #f5ece9' }}>
                   <span style={{ fontSize: '0.82rem', color: '#74593f' }}>
-                    📅 <strong>多日排程關懷：</strong>已啟用 D+1（登記須知）、D+2（履約保證）、D+3（準備清單）定時引導
+                    📅 <strong>多日排程關懷設定：</strong>D+1（登記須知）、D+2（履約保證）、D+3（準備清單）
                   </span>
                   <span style={{ fontSize: '0.78rem', color: '#16a34a', fontWeight: 700 }}>
-                    ✓ 運作正常 (Active)
+                    執行與送達狀態請查通知紀錄
                   </span>
                 </div>
               </div>

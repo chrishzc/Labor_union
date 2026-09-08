@@ -13,6 +13,10 @@ modules:
     presentation_test_roots:
       - ui_react/src/tests/staff_monthly_schedule_client.test.ts
       - ui_react/src/tests/scheduling_current_page.test.tsx
+  staff-availability:
+    module: modules/staff-availability.md
+    test_root: ui_react/src/tests/domains/scheduling/subsystems/scheduling/modules/staff-availability/
+    layout_status: custom_current
   holiday-maintenance:
     module: modules/holiday-maintenance.md
     test_file: ui_react/src/tests/domains/scheduling/subsystems/scheduling/modules/holiday-maintenance/holiday_csv.test.tsx

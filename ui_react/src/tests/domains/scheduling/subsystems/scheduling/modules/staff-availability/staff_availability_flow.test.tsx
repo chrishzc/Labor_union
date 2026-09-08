@@ -4,15 +4,15 @@
  */
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { staffAvailabilityClient } from '../api/staff_availability/staff_availability_client';
-import { staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
-import { staffQualificationMasterClient } from '../api/staff/qualification_master_client';
-import { staffLifecycleClient } from '../api/staff_lifecycle/staff_lifecycle_client';
+import { staffAvailabilityClient } from '../../../../../../../api/staff_availability/staff_availability_client';
+import { staffDirectoryClient } from '../../../../../../../api/staff_directory/staff_directory_client';
+import { staffQualificationMasterClient } from '../../../../../../../api/staff/qualification_master_client';
+import { staffLifecycleClient } from '../../../../../../../api/staff_lifecycle/staff_lifecycle_client';
 import {
   StaffAvailabilityConflictError,
   StaffAvailabilityUnavailableError,
-} from '../api/staff_availability/staff_availability_errors';
-import { StaffPage } from '../pages/StaffPage';
+} from '../../../../../../../api/staff_availability/staff_availability_errors';
+import { StaffPage } from '../../../../../../../pages/StaffPage';
 import {
   STAFF_AVAILABILITY_APPLY_PAYLOAD,
   STAFF_AVAILABILITY_BLOCK,
@@ -22,10 +22,10 @@ import {
   STAFF_AVAILABILITY_PREVIEW_RESPONSE,
   STAFF_AVAILABILITY_RECEIPT_RESPONSE,
   STAFF_AVAILABILITY_SELECTED_PAUSE_BLOCK,
-} from './fixtures/staff/staff_availability_contract_fixtures';
-import { STAFF_PAGE_ONE } from './fixtures/staff/staff_directory_contract_fixtures';
-import { STAFF_LIFECYCLE_VIEW } from './fixtures/staff/staff_lifecycle_contract_fixtures';
-import { STAFF_QUALIFICATION_MASTER } from './fixtures/staff/staff_qualification_contract_fixtures';
+} from '../../../../../../fixtures/staff/staff_availability_contract_fixtures';
+import { STAFF_PAGE_ONE } from '../../../../../../fixtures/staff/staff_directory_contract_fixtures';
+import { STAFF_LIFECYCLE_VIEW } from '../../../../../../fixtures/staff/staff_lifecycle_contract_fixtures';
+import { STAFF_QUALIFICATION_MASTER } from '../../../../../../fixtures/staff/staff_qualification_contract_fixtures';
 
 describe('Staff availability flow', () => {
   beforeEach(() => {
@@ -50,6 +50,17 @@ describe('Staff availability flow', () => {
     fireEvent.click(screen.getByRole('button', { name: '查詢不可服務期間' }));
     await waitFor(() => expect(screen.getByText(expectedRow)).toBeInTheDocument());
   }
+
+  it('空的不可服務清單不推論為全時段可派工', async () => {
+    vi.mocked(staffAvailabilityClient.getBlocks).mockResolvedValue([]);
+    render(<StaffPage />);
+    await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
+    fireEvent.click(screen.getAllByRole('button', { name: /檢視服務人員摘要/ })[0]);
+    fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
+
+    expect(await screen.findByText(/是否可派工仍需依案件日期、既有排班與資格條件查詢/)).toBeInTheDocument();
+    expect(screen.queryByText(/全時段可供派工排班/)).not.toBeInTheDocument();
+  });
 
   it('Drawer 開啟時自動查詢，日期刷新中的 GET 不會阻斷 Preview POST', async () => {
     let resolveDateRefresh: ((blocks: typeof STAFF_AVAILABILITY_BLOCK[]) => void) | undefined;

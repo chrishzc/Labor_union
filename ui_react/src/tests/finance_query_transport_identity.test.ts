@@ -80,7 +80,13 @@ describe('Finance query transport identity', () => {
         success: true,
         message: 'ok',
         error: null,
-        data: { items: [], next_after_row_id: 99 },
+        data: {
+          batch_identity: 'BATCH-FIN-021',
+          source_reviews: [],
+          next_after_source_review_id: null,
+          items: [],
+          next_after_row_id: 99,
+        },
       }))
       .mockResolvedValueOnce(response({
         success: true,

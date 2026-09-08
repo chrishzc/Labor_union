@@ -5,7 +5,7 @@
 - subsystem: `orders`
 
 ## Responsibility
-將 Orders、Scheduling、Client Finance 與 Payroll 的唯讀根事實整合為營運階段投影；單一 owner fact 不可用時只局部標示 unavailable，不使整頁訂單清單失效。既有七階段／十一 SOP 契約保持相容，待辦看板 Beta 另由同一正式根事實轉成十三核心階段唯讀契約。
+將 Orders、Scheduling、Client Finance 與 Payroll 的唯讀根事實整合為營運階段投影；單一 owner fact 不可用時只局部標示 unavailable，不使整頁訂單清單失效。指定 workbench scope 時先依 canonical lifecycle 排除 scope 外案件，再投影十三核心階段；scope 內資料仍採 fail-closed。既有七階段／十一 SOP 契約保持相容，待辦看板 Beta 另由同一正式根事實轉成十三核心階段唯讀契約。
 
 ## Implementation
 - primary:
@@ -43,3 +43,6 @@ layout_status: custom_current
 UI verification follows the same Orders owner hierarchy inside the Vitest source root; Python verification remains in the repository test root.
 - test_root: `tests/domains/orders/subsystems/orders/modules/operational-stage-projection/`
 - test_root: `ui_react/src/tests/domains/orders/subsystems/orders/modules/operational-stage-projection/`
+- test_root: `ui_react/src/tests/order_workbench_v2_candidate_pool_refresh.test.tsx`
+- test_root: `ui_react/src/tests/order_workbench_v2_mutation_refresh.test.tsx`
+- test_root: `ui_react/src/tests/order_workbench_v2_terms_mutation.test.tsx`

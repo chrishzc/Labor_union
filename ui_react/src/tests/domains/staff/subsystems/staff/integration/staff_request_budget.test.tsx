@@ -4,30 +4,33 @@
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { staffAvailabilityClient } from '../api/staff_availability/staff_availability_client';
-import { staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
-import { staffQualificationMasterClient } from '../api/staff/qualification_master_client';
-import { staffLifecycleClient } from '../api/staff_lifecycle/staff_lifecycle_client';
-import { staffPreferencesClient } from '../api/staff_preferences/staff_preferences_client';
-import { StaffPage } from '../pages/StaffPage';
-import { STAFF_PAGE_ONE } from './fixtures/staff/staff_directory_contract_fixtures';
-import {
-  STAFF_PREFERENCE_APPLY_RECEIPT,
-  STAFF_PREFERENCE_DEFINITIONS,
-  STAFF_PREFERENCE_PROFILE,
-  STAFF_PREFERENCE_PROFILE_PREVIEW,
-} from './fixtures/staff/staff_preferences_contract_fixtures';
+import { staffAvailabilityClient } from '../../../../../../api/staff_availability/staff_availability_client';
+import { staffDirectoryClient } from '../../../../../../api/staff_directory/staff_directory_client';
+import { staffQualificationMasterClient } from '../../../../../../api/staff/qualification_master_client';
+import { staffLifecycleClient } from '../../../../../../api/staff_lifecycle/staff_lifecycle_client';
+import { staffCasePreferenceManualClient } from '../../../../../../api/staff_case_preferences/staff_case_preferences_client';
+import { StaffPage } from '../../../../../../pages/StaffPage';
+import { STAFF_PAGE_ONE } from '../../../../../fixtures/staff/staff_directory_contract_fixtures';
 import {
   STAFF_AVAILABILITY_BLOCK,
   STAFF_AVAILABILITY_PREVIEW_RESPONSE,
   STAFF_AVAILABILITY_RECEIPT_RESPONSE,
-} from './fixtures/staff/staff_availability_contract_fixtures';
+} from '../../../../../fixtures/staff/staff_availability_contract_fixtures';
 import {
   STAFF_LIFECYCLE_PREVIEW,
   STAFF_LIFECYCLE_RECEIPT,
   STAFF_LIFECYCLE_VIEW,
-} from './fixtures/staff/staff_lifecycle_contract_fixtures';
-import { STAFF_QUALIFICATION_MASTER } from './fixtures/staff/staff_qualification_contract_fixtures';
+} from '../../../../../fixtures/staff/staff_lifecycle_contract_fixtures';
+import { STAFF_QUALIFICATION_MASTER } from '../../../../../fixtures/staff/staff_qualification_contract_fixtures';
+
+const manualRelations = {
+  service_regions: [{ value: '北區', detail: null }], service_periods: [], cooking_skills: [],
+  holiday_availability: [], rest_schedule: [], baby_types: [],
+};
+const manualSnapshot = {
+  staff_id: 11, before: manualRelations, after: manualRelations,
+  snapshot_fingerprint: 'a'.repeat(64), preview_fingerprint: null,
+};
 
 describe('Staff request budget', () => {
   beforeEach(() => {
@@ -38,26 +41,28 @@ describe('Staff request budget', () => {
 
   afterEach(() => vi.restoreAllMocks());
 
-  it('preferences uses definitions/profile/preview/apply/requery once each', async () => {
-    vi.spyOn(staffPreferencesClient, 'queryDefinitions').mockResolvedValue(STAFF_PREFERENCE_DEFINITIONS);
-    vi.spyOn(staffPreferencesClient, 'queryProfile')
-      .mockResolvedValueOnce(STAFF_PREFERENCE_PROFILE)
-      .mockResolvedValueOnce({ ...STAFF_PREFERENCE_PROFILE, version: 5, values: STAFF_PREFERENCE_APPLY_RECEIPT.values });
-    vi.spyOn(staffPreferencesClient, 'previewProfile').mockResolvedValue(STAFF_PREFERENCE_PROFILE_PREVIEW);
-    vi.spyOn(staffPreferencesClient, 'applyProfile').mockResolvedValue(STAFF_PREFERENCE_APPLY_RECEIPT);
+  it('preferences uses owner query/preview/apply/requery once each', async () => {
+    vi.spyOn(staffCasePreferenceManualClient, 'query')
+      .mockResolvedValueOnce(manualSnapshot)
+      .mockResolvedValueOnce({ ...manualSnapshot, snapshot_fingerprint: 'c'.repeat(64) });
+    vi.spyOn(staffCasePreferenceManualClient, 'preview').mockImplementation(async (_staff, relations) => ({
+      ...manualSnapshot, after: relations, preview_fingerprint: 'b'.repeat(64),
+    }));
+    vi.spyOn(staffCasePreferenceManualClient, 'apply').mockResolvedValue({
+      staff_id: 11, relations: manualRelations, snapshot_fingerprint: 'c'.repeat(64),
+      preview_fingerprint: 'b'.repeat(64), idempotency_key: 'budget', replayed: false,
+    });
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: /配對偏好/ }));
     fireEvent.change(screen.getByLabelText('查詢服務人員'), { target: { value: '11' } });
-    await waitFor(() => expect(screen.getByDisplayValue('20–30')).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: '編輯核准偏好' }));
-    fireEvent.click(screen.getByRole('button', { name: '預覽偏好變更' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: '套用偏好變更' })).not.toBeDisabled());
-    fireEvent.click(screen.getByRole('button', { name: '套用偏好變更' }));
-    await waitFor(() => expect(staffPreferencesClient.queryProfile).toHaveBeenCalledTimes(2));
-    expect(staffPreferencesClient.queryDefinitions).toHaveBeenCalledTimes(1);
-    expect(staffPreferencesClient.previewProfile).toHaveBeenCalledTimes(1);
-    expect(staffPreferencesClient.applyProfile).toHaveBeenCalledTimes(1);
+    fireEvent.click(await screen.findByRole('button', { name: '編輯六項偏好' }));
+    fireEvent.change(screen.getByLabelText('六大接案能力變更原因'), { target: { value: 'request budget' } });
+    fireEvent.click(screen.getByRole('button', { name: '預覽變更' }));
+    fireEvent.click(await screen.findByRole('button', { name: '確認儲存' }));
+    await waitFor(() => expect(staffCasePreferenceManualClient.query).toHaveBeenCalledTimes(2));
+    expect(staffCasePreferenceManualClient.preview).toHaveBeenCalledTimes(1);
+    expect(staffCasePreferenceManualClient.apply).toHaveBeenCalledTimes(1);
   });
 
   it('availability create uses one range GET plus preview/apply/requery', async () => {

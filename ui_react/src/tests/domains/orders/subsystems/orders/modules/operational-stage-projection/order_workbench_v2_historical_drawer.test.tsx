@@ -81,11 +81,11 @@ function stage(code: CoreStageCode, index: number) {
   };
 }
 
-function timeline() {
+function timeline(lifecycleStatus = '歷史訂單－未服務') {
   return {
     case_no: 'CASE-FUTURE',
     base_revision: 12,
-    lifecycle_status: '歷史訂單－未服務',
+    lifecycle_status: lifecycleStatus,
     branch_type: 'historical',
     current_core_stage_code: null,
     current_core_stage_ordinal: null,
@@ -200,6 +200,14 @@ describe('historical Drawer immutable evidence boundary', () => {
     });
     mocks.restartApply.mockImplementation(async () => {
       mocks.detail.mockResolvedValue(orderDetail('訂單成立'));
+      mocks.core.mockResolvedValue({
+        items: [{ ...timeline('訂單成立'), branch_type: 'normal' }],
+        stage_counts: Object.fromEntries(CORE_STAGE_CODES.map((code) => [code, 0])),
+        substatus_counts: {},
+        historical_lifecycle_counts: { unserved: 0, in_service: 0, service_completed: 0, accounting_completed: 0 },
+        next_cursor: null,
+        etag: 'c'.repeat(64),
+      });
       return {
         case_no: 'CASE-FUTURE', lifecycle_status: '訂單成立', order_version: 13,
         scheduling_version: 5, scheduling_generation: 2, client_finance_version: 2,
@@ -255,6 +263,14 @@ describe('historical Drawer immutable evidence boundary', () => {
 
   it.each(['歷史訂單－未服務', '歷史訂單－服務中'])('%s keeps the blocked intake drawer open and restarts through owner Query / Preview / Apply / readback', async (status) => {
     mocks.detail.mockResolvedValue(orderDetail(status));
+    mocks.core.mockResolvedValue({
+      items: [timeline(status)],
+      stage_counts: Object.fromEntries(CORE_STAGE_CODES.map((code) => [code, 0])),
+      substatus_counts: {},
+      historical_lifecycle_counts: { unserved: status === '歷史訂單－未服務' ? 1 : 0, in_service: status === '歷史訂單－服務中' ? 1 : 0, service_completed: 0, accounting_completed: 0 },
+      next_cursor: null,
+      etag: 'b'.repeat(64),
+    });
     render(<OrderWorkbenchV2Drawer caseNo="CASE-FUTURE" branchType="historical" onClose={vi.fn()} />);
     const restart = await screen.findByRole('button', { name: '前往重啟正常流程' });
     const intake = screen.getByRole('region', { name: '訂單缺件' });
@@ -273,6 +289,7 @@ describe('historical Drawer immutable evidence boundary', () => {
     expect(mocks.restartQuery.mock.invocationCallOrder[0]).toBeLessThan(mocks.restartPreview.mock.invocationCallOrder[0]!);
     expect(mocks.restartPreview.mock.invocationCallOrder[0]).toBeLessThan(mocks.restartApply.mock.invocationCallOrder[0]!);
     expect(mocks.detail.mock.invocationCallOrder.at(-1)).toBeGreaterThan(mocks.restartApply.mock.invocationCallOrder[0]!);
+    await waitFor(() => expect(screen.queryByRole('button', { name: '前往重啟正常流程' })).not.toBeInTheDocument());
     expect(mocks.intakeApply).not.toHaveBeenCalled();
   });
 
@@ -296,7 +313,7 @@ describe('historical Drawer immutable evidence boundary', () => {
   it.each(['歷史訂單－服務完成', '歷史訂單－帳務完成'])('%s never exposes intake Apply or a restart rollback', async (status) => {
     mocks.detail.mockResolvedValue(orderDetail(status));
     mocks.core.mockResolvedValue({
-      items: [{ ...timeline(), lifecycle_status: status }],
+      items: [timeline(status)],
       stage_counts: Object.fromEntries(CORE_STAGE_CODES.map((code) => [code, 0])),
       substatus_counts: {},
       historical_lifecycle_counts: { unserved: 0, in_service: 0, service_completed: status === '歷史訂單－服務完成' ? 1 : 0, accounting_completed: status === '歷史訂單－帳務完成' ? 1 : 0 },

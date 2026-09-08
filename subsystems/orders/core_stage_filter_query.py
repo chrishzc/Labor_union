@@ -193,13 +193,26 @@ def query_core_stage_page(
             single_source_etag = None
 
         for source_item in source_page.items:
-            item = project_core_stage_timeline(source_item)
-            identity_key = item.case_no.casefold()
+            identity_key = source_item.case_no.casefold()
             if last_source_key is not None and identity_key <= last_source_key:
                 raise CoreStageProjectionContractError(
                     "source pages are duplicate or unordered"
                 )
             last_source_key = identity_key
+
+            # A terminal branch outside the requested workbench cannot affect
+            # that workbench.  Filter its canonical lifecycle before deriving
+            # the thirteen-stage view so unrelated historical data drift does
+            # not make the entire active queue unavailable.  Items inside the
+            # requested scope are still projected fail-closed below.
+            if (
+                request.workbench_scope is not None
+                and source_item.lifecycle_status
+                not in _WORKBENCH_STATUSES[request.workbench_scope]
+            ):
+                continue
+
+            item = project_core_stage_timeline(source_item)
 
             if not _matches_common_filters(item, request):
                 continue

@@ -4,13 +4,23 @@ import './AnomaliesPage.css';
 import { Drawer } from '../components/Drawer';
 import { currentAnomalyQueryClient } from '../api/anomalies/current_anomaly_query_client';
 import { anomalyDetailClient } from '../api/anomalies/anomaly_detail_client';
-import type { CurrentAnomalyRecoveryContextView } from '../api/anomalies/anomaly_detail_schemas';
+import type {
+  CurrentAnomalyRecoveryContextView,
+  RecoveryAction,
+} from '../api/anomalies/anomaly_detail_schemas';
+import { lineNotificationTimelineClient } from '../api/line/notification_timeline_client';
+import {
+  lineNotificationManualReplayClient,
+  type LineNotificationManualReplayPreview,
+  type LineNotificationManualReplayReceipt,
+} from '../api/line/notification_manual_replay_client';
 import {
   adaptCurrentAnomalySummary,
   type CurrentAnomalyRowViewModel,
 } from '../adapters/anomalies/current_anomaly_adapter';
 
 const PAGE_SIZE = 50;
+const MANUAL_REPLAY_ACTION = 'manual_replay_failed_notification';
 
 function displayError(error: unknown): string {
   const code = String((error as { code?: unknown })?.code ?? '').toUpperCase();
@@ -38,6 +48,25 @@ function ownerLabel(owner: string): string {
   } as Record<string, string>)[owner] ?? '對應業務流程';
 }
 
+function operationIdentity(prefix: string): string {
+  const suffix = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `${prefix}-${suffix}`;
+}
+
+function sourceBinding(action: RecoveryAction, key: string): string | number | null {
+  return action.source_bindings.find((binding) => binding.key === key)?.value ?? null;
+}
+
+function replayErrorMessage(error: unknown): string {
+  const status = Number((error as { status?: unknown })?.status ?? 0);
+  if (status === 401) return '登入狀態已失效，請重新登入後再操作。';
+  if (status === 403) return '目前帳號沒有重新處理 LINE 通知的權限。';
+  if (status === 404) return '找不到這筆 LINE 通知來源，請重新查詢異常。';
+  if (status === 409) return 'LINE 通知資料已變更，請重新檢查後再操作。';
+  if (status === 422) return '目前 LINE 通知不符合重新發送條件。';
+  return 'LINE 通知重新處理未完成，請重新查詢後再試。';
+}
+
 export const CurrentAnomaliesPage: React.FC = () => {
   const [items, setItems] = useState<CurrentAnomalyRowViewModel[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -47,6 +76,12 @@ export const CurrentAnomaliesPage: React.FC = () => {
   const [detail, setDetail] = useState<CurrentAnomalyRecoveryContextView | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
+  const [replayLoading, setReplayLoading] = useState(false);
+  const [replayPreview, setReplayPreview] = useState<LineNotificationManualReplayPreview | null>(null);
+  const [replayReceipt, setReplayReceipt] = useState<LineNotificationManualReplayReceipt | null>(null);
+  const [replayReason, setReplayReason] = useState('');
+  const [replayConfirmed, setReplayConfirmed] = useState(false);
+  const [replayError, setReplayError] = useState<string | null>(null);
   const requestSequence = useRef(0);
 
   const load = useCallback(async (cursor?: string) => {
@@ -80,6 +115,11 @@ export const CurrentAnomaliesPage: React.FC = () => {
     setSelected(item);
     setDetail(null);
     setDetailError(null);
+    setReplayPreview(null);
+    setReplayReceipt(null);
+    setReplayReason('');
+    setReplayConfirmed(false);
+    setReplayError(null);
     setDetailLoading(true);
     try {
       const current = await anomalyDetailClient.queryCurrentAnomalyRecovery({ issueKey: item.issueKey });
@@ -90,6 +130,58 @@ export const CurrentAnomaliesPage: React.FC = () => {
       setDetailLoading(false);
     }
   }, []);
+
+  const previewManualReplay = useCallback(async (action: RecoveryAction) => {
+    setReplayLoading(true);
+    setReplayError(null);
+    setReplayReceipt(null);
+    try {
+      const caseNo = sourceBinding(action, 'case_no');
+      const sourceEventId = sourceBinding(action, 'source_version');
+      if (typeof caseNo !== 'string' || typeof sourceEventId !== 'number') {
+        throw new Error('manual replay source bindings are incomplete');
+      }
+      const timeline = await lineNotificationTimelineClient.query(caseNo);
+      if (!timeline.records.some((record) => record.source_event_id === sourceEventId)) {
+        throw new Error('manual replay source does not belong to the current case');
+      }
+      const preview = await lineNotificationManualReplayClient.preview(sourceEventId);
+      if (preview.source_event_id !== sourceEventId) {
+        throw new Error('manual replay preview identity mismatch');
+      }
+      setReplayPreview(preview);
+    } catch (caught) {
+      setReplayPreview(null);
+      setReplayError(replayErrorMessage(caught));
+    } finally {
+      setReplayLoading(false);
+    }
+  }, []);
+
+  const applyManualReplay = useCallback(async () => {
+    if (!replayPreview || !replayConfirmed || !replayReason.trim()) return;
+    setReplayLoading(true);
+    setReplayError(null);
+    try {
+      const receipt = await lineNotificationManualReplayClient.apply(
+        replayPreview.source_event_id,
+        {
+          reason: replayReason.trim(),
+          idempotency_key: operationIdentity('anomaly-line-replay-idem'),
+          correlation_id: operationIdentity('anomaly-line-replay-corr'),
+        },
+      );
+      setReplayPreview(null);
+      setReplayConfirmed(false);
+      if (selected) await openDetail(selected);
+      await load();
+      setReplayReceipt(receipt);
+    } catch (caught) {
+      setReplayError(replayErrorMessage(caught));
+    } finally {
+      setReplayLoading(false);
+    }
+  }, [load, openDetail, replayConfirmed, replayPreview, replayReason, selected]);
 
   return (
     <main className="anomalies-page" aria-labelledby="current-anomalies-title">
@@ -128,7 +220,14 @@ export const CurrentAnomaliesPage: React.FC = () => {
 
       <Drawer
         isOpen={selected !== null}
-        onClose={() => { setSelected(null); setDetail(null); setDetailError(null); }}
+        onClose={() => {
+          setSelected(null);
+          setDetail(null);
+          setDetailError(null);
+          setReplayPreview(null);
+          setReplayReceipt(null);
+          setReplayError(null);
+        }}
         title={selected ? `${selected.definitionCode} 詳情` : '異常詳情'}
         size="wide"
       >
@@ -155,9 +254,59 @@ export const CurrentAnomaliesPage: React.FC = () => {
               <article key={action.action_key} className="anomaly-action">
                 <strong>{action.label}</strong>
                 <p>完成操作後，系統會重新查詢最新業務資料並確認問題是否解除。</p>
+                {action.action_key === MANUAL_REPLAY_ACTION ? (
+                  <button
+                    type="button"
+                    onClick={() => void previewManualReplay(action)}
+                    disabled={replayLoading}
+                  >
+                    {replayLoading ? '正在檢查…' : '檢查重新發送'}
+                  </button>
+                ) : <p>目前沒有可用的操作入口。</p>}
                 <details><summary>操作技術詳情</summary><p>{action.owning_domain} · {action.preview_operation} → {action.apply_operation ?? '僅供查詢'}</p><p>完成條件：{action.completion_predicate}</p></details>
               </article>
             ))}
+            {replayError && <div role="alert" className="error-message">{replayError}</div>}
+            {replayPreview && (
+              <section aria-label="LINE 通知重新發送確認" className="anomaly-action">
+                <h3>重新發送檢查結果</h3>
+                <p>來源事件：{replayPreview.source_event_id}｜通知類型：{replayPreview.event_code}</p>
+                <p>符合目前規則：{replayPreview.matching_rule_count} 項</p>
+                {replayPreview.historical_silent || !replayPreview.will_create_new_immutable_source ? (
+                  <p role="alert">這筆通知目前不能建立新的重新發送工作。</p>
+                ) : (
+                  <>
+                    <label htmlFor="anomaly-line-replay-reason">重新發送原因</label>
+                    <textarea
+                      id="anomaly-line-replay-reason"
+                      value={replayReason}
+                      onChange={(event) => setReplayReason(event.target.value)}
+                      maxLength={1000}
+                    />
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={replayConfirmed}
+                        onChange={(event) => setReplayConfirmed(event.target.checked)}
+                      />
+                      我已確認目前收件者與通知規則，並同意建立重新發送工作
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => void applyManualReplay()}
+                      disabled={replayLoading || !replayConfirmed || !replayReason.trim()}
+                    >
+                      確認建立重新發送工作
+                    </button>
+                  </>
+                )}
+              </section>
+            )}
+            {replayReceipt && (
+              <p role="status">
+                已建立重新發送來源 {replayReceipt.replayed_source_event_id}；系統會依目前設定處理，請稍後重新查詢結果。
+              </p>
+            )}
             <button type="button" onClick={() => selected && void openDetail(selected)}>
               重新查詢最新資料
             </button>

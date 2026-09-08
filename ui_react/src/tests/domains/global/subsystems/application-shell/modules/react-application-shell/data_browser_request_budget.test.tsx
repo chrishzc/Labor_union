@@ -4,9 +4,9 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { DataBrowserPage } from '../pages/DataBrowserPage';
-import { dataBrowserQueryClient } from '../api/data_browser/data_browser_query_client';
-import { VALID_DATA_BROWSER_PAGE } from './fixtures/data_browser/data_browser_query_contract_fixtures';
+import { DataBrowserPage } from '../../../../../../../pages/DataBrowserPage';
+import { dataBrowserQueryClient } from '../../../../../../../api/data_browser/data_browser_query_client';
+import { VALID_DATA_BROWSER_PAGE } from '../../../../../../fixtures/data_browser/data_browser_query_contract_fixtures';
 
 describe('Data Browser request budget', () => {
   beforeEach(() => {
@@ -25,7 +25,7 @@ describe('Data Browser request budget', () => {
     render(<DataBrowserPage />);
     await waitFor(() => expect(dataBrowserQueryClient.querySource).toHaveBeenCalledTimes(1));
 
-    fireEvent.click(screen.getByRole('button', { name: /客戶歷史檔案/ }));
+    fireEvent.click(screen.getByRole('button', { name: /客戶目前主檔/ }));
     await waitFor(() => expect(dataBrowserQueryClient.querySource).toHaveBeenCalledTimes(2));
 
     fireEvent.change(screen.getByPlaceholderText(/搜尋案件編號/), { target: { value: '台北市' } });

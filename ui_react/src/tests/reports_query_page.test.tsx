@@ -134,7 +134,7 @@ describe('ReportsPage query-only presentation', () => {
       expect.objectContaining({
         promotionCount: 15,
         inquiryCount: 42,
-        annualYtd: true,
+        annualYtd: false,
       }),
       expect.any(AbortSignal),
     ));

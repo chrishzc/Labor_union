@@ -100,12 +100,12 @@ export const RealLlmSemanticTestPanel: React.FC = () => {
           🧠 Gemini + Knowledge 真實 M2 智能問答工作台
         </h4>
         <span style={{ fontSize: '12px', background: '#f0fdf4', color: '#15803d', padding: '2px 8px', borderRadius: '4px', border: '1px solid #bbf7d0', fontWeight: 600 }}>
-          Gemini 3.1 Flash-Lite 即時連線
+          {running ? '正在執行連線測試' : result ? `本次結果：${result.outcome}` : '尚未執行連線測試'}
         </span>
       </div>
 
       <div className="line-warning" role="status" style={{ marginTop: '12px' }}>
-        💡 本工作台直連 Google Gemini 與工會核准的向量知識庫（29 題常規 QA）。輸入民眾可能詢問的自然語言，系統將即時比對題庫、由 Gemini 智慧挑選最佳解答，並可立即測試滿意度反饋。
+        💡 本工作台使用後端目前儲存的模型設定與核准知識庫進行測試。執行後才會顯示實際 provider、model 與結果；本頁不代表 LINE 已送達。
       </div>
 
       {/* 快捷常見問題一鍵填入 */}

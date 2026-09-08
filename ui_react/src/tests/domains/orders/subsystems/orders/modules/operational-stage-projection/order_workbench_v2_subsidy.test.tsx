@@ -4,8 +4,8 @@ import {
   CORE_STAGE_CODES,
   SUBSTATUS_BY_STAGE_STATUS,
   type CoreStageCode,
-} from '../api/orders/order_core_stage_projection_schemas';
-import { OrderWorkbenchV2Page } from '../pages/OrderWorkbenchV2Page';
+} from '../../../../../../../api/orders/order_core_stage_projection_schemas';
+import { OrderWorkbenchV2Page } from '../../../../../../../pages/OrderWorkbenchV2Page';
 
 const mocks = vi.hoisted(() => ({
   getCoreStageTimelines: vi.fn(),
@@ -13,18 +13,18 @@ const mocks = vi.hoisted(() => ({
   getSubsidyProjections: vi.fn(),
 }));
 
-vi.mock('../api/orders/order_core_stage_projection_client', () => ({
+vi.mock('../../../../../../../api/orders/order_core_stage_projection_client', () => ({
   orderCoreStageProjectionClient: {
     getCoreStageTimelines: mocks.getCoreStageTimelines,
   },
 }));
 
-vi.mock('../api/orders/order_query_client', () => ({
+vi.mock('../../../../../../../api/orders/order_query_client', () => ({
   loadAllOrderSummaries: mocks.loadSummaries,
   ordersQueryClient: { getOrderSummaries: vi.fn() },
 }));
 
-vi.mock('../api/orders/order_government_subsidy_projection_client', () => ({
+vi.mock('../../../../../../../api/orders/order_government_subsidy_projection_client', () => ({
   GOVERNMENT_SUBSIDY_SUBSTATUS_CODES: [
     'claim_lineage_missing',
     'draft',
@@ -192,8 +192,12 @@ describe('待辦看板 Beta Government Subsidy side lane', () => {
 
     expect(await screen.findByText('CASE-GAP')).toBeInTheDocument();
     expect(screen.getByText('正常訂單尚未找到正式 Government Subsidy claim 關聯。')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'government_subsidy.claim_batches.query' }))
-      .toHaveAttribute('href', '/api/v1/government-subsidy/claim-batches');
+    expect(screen.getAllByRole('link', { name: '前往營運與補助報表' }))
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ hash: '#reports' }),
+      ]));
+    expect(screen.getByText('government_subsidy.claim_batches.query')).toBeInTheDocument();
+    expect(document.querySelector('a[href^="/api/v1/government-subsidy/"]')).toBeNull();
     expect(screen.getByText('CASE-SUBMITTED')).toBeInTheDocument();
     expect(screen.getByText('77 小時')).toBeInTheDocument();
     expect(screen.getByText(/23,100/)).toBeInTheDocument();
