@@ -10,7 +10,7 @@ from scripts.seed_validation_dataset import (
     load_dataset,
     require_dataset_database,
 )
-from scripts.seed_ui_validation_dataset import _configure_runtime_database
+from scripts.seed_ui_validation_dataset import _configure_runtime_database, seed
 from scripts.seed_validation_finance_manual_review import _ingestion_key
 
 
@@ -40,11 +40,7 @@ def test_dataset_manifest_is_strict_utf8_json_contract():
         "contract_identity_missing",
         "official_service_dates_incomplete",
     ]
-    assert dataset["expected_after_apply"]["anomaly_scenario"]["timeline_actions"] == [
-        "claim", "resolve", "reopen", "auto_resolve", "reopen"
-    ]
-    assert dataset["expected_after_apply"]["beclass_review_repair"]["workflow_status"] == "resolved"
-    assert dataset["expected_after_apply"]["beclass_review_open"]["workflow_status"] == "open"
+    assert dataset["expected_after_apply"]["beclass_review_open"]["outbox_published"] is True
 
 
 def test_complete_dataset_seed_configures_only_the_requested_database() -> None:
@@ -94,3 +90,33 @@ def test_finance_manual_review_uses_a_stable_scenario_command_identity() -> None
     assert _ingestion_key("finance-manual-review") == (
         "validation-dataset-v1-finance-manual-review:finance-manual-review"
     )
+
+
+def test_complete_dataset_seed_composes_only_current_owner_workflows(monkeypatch) -> None:
+    arguments = type(
+        "Arguments",
+        (),
+        {"host": "127.0.0.1", "port": 3306, "user": "tester", "password": "secret", "database": "lu_test_dataset_v1", "confirm_database": "lu_test_dataset_v1", "manifest": DEFAULT_MANIFEST},
+    )()
+    monkeypatch.setattr(
+        "scripts.seed_validation_dataset.seed_into_integrated_dataset",
+        lambda _arguments: {"case_no": "DSV1-CASE-0001"},
+    )
+    monkeypatch.setattr(
+        "scripts.seed_validation_beclass_review.seed_open_review",
+        lambda: {"review_identity": "beclass-review:2"},
+    )
+    monkeypatch.setattr(
+        "scripts.seed_validation_finance_manual_review.seed",
+        lambda scenario_id: {"row_identity": "finance-import-row:1", "scenario_id": scenario_id},
+    )
+
+    assert seed(arguments) == {
+        "database": "lu_test_dataset_v1",
+        "foundation": {"case_no": "DSV1-CASE-0001"},
+        "beclass_open_review": {"review_identity": "beclass-review:2"},
+        "finance_manual_review": {
+            "row_identity": "finance-import-row:1",
+            "scenario_id": "foundation-finance-manual-review",
+        },
+    }

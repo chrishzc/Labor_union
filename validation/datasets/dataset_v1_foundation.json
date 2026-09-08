@@ -33,31 +33,15 @@
     "payroll_policy_version": "approved-rates-v1"
   },
   "expected_after_apply": {
-    "anomaly_scenario": {
-      "definition_code": "SCHEDULE-006",
-      "workflow_status": "open",
-      "predicate_active": 1,
-      "timeline_actions": ["claim", "resolve", "reopen", "auto_resolve", "reopen"]
-    },
     "finance_manual_review": {
-      "ingestion_idempotency_key": "validation-dataset-v1-finance-manual-review",
+      "ingestion_idempotency_key": "validation-dataset-v1-finance-manual-review:foundation-finance-manual-review",
       "classification_type": "non_business_review",
-      "disposition": "manual_review",
-      "workflow_status": "open",
-      "predicate_active": 1
-    },
-    "beclass_review_repair": {
-      "query_no": "DSV1-BECLASS-0001",
-      "review_version": 1,
-      "workflow_status": "resolved",
-      "predicate_active": 0,
-      "beclass_record_count": 1
+      "disposition": "manual_review"
     },
     "beclass_review_open": {
       "query_no": "DSV1-BECLASS-0002",
       "review_version": 0,
-      "workflow_status": "open",
-      "predicate_active": 1,
+      "outbox_published": true,
       "beclass_record_count": 0
     },
     "contract_completion_completed": false,

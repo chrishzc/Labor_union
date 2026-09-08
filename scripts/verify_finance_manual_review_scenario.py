@@ -34,15 +34,7 @@ def _inspect(connection, batch_identity: str) -> dict[str, object]:
             (batch_identity,),
         )
         events = cursor.fetchall()
-        if not events:
-            return {"events": [], "alert": None}
-        row_identity = events[-1]["row_identity"]
-        cursor.execute(
-            "SELECT workflow_status,predicate_active FROM anomaly_current_alerts "
-            "WHERE definition_code='finance_import_manual_review' AND source_identity=%s",
-            (row_identity,),
-        )
-        return {"events": events, "alert": cursor.fetchone()}
+        return {"events": events}
 
 
 def _checks(observed: dict[str, object]) -> list[dict[str, object]]:
@@ -52,7 +44,6 @@ def _checks(observed: dict[str, object]) -> list[dict[str, object]]:
     return [
         _check("manual_review_opened", (first.get("classification_type"), first.get("disposition")), ("non_business_review", "manual_review")),
         _check("owning_finance_correction", (last.get("classification_type"), last.get("disposition")), ("client_receipt", "create")),
-        _check("manual_review_alert_resolved", observed["alert"], {"workflow_status": "resolved", "predicate_active": 0}),
     ]
 
 

@@ -16,26 +16,23 @@ if str(PROJECT_ROOT) not in sys.path:
 from scripts.seed_validation_dataset import DEFAULT_MANIFEST, require_dataset_database
 
 
+_FINANCE_MANUAL_REVIEW_SCENARIO_ID = "foundation-finance-manual-review"
+
+
 def seed(arguments) -> dict[str, object]:
     _configure_runtime_database(arguments)
-    from scripts.seed_validation_anomaly_scenario import seed as seed_scheduling_anomaly
     from scripts.seed_validation_beclass_review import (
-        seed as seed_beclass_review,
         seed_open_review,
     )
     from scripts.seed_validation_dataset import seed_into_integrated_dataset
     from scripts.seed_validation_finance_manual_review import seed as seed_finance_review
 
     foundation = seed_into_integrated_dataset(arguments)
-    anomaly = seed_scheduling_anomaly()
-    beclass_review = seed_beclass_review()
     beclass_open_review = seed_open_review()
-    finance_review = seed_finance_review()
+    finance_review = seed_finance_review(_FINANCE_MANUAL_REVIEW_SCENARIO_ID)
     return {
         "database": arguments.database,
         "foundation": foundation,
-        "scheduling_anomaly": anomaly,
-        "beclass_review": beclass_review,
         "beclass_open_review": beclass_open_review,
         "finance_manual_review": finance_review,
     }

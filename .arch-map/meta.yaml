@@ -24,3 +24,5 @@ last_reconciled_scope:
   - tests/global
   - tests/scheduling/staff-monthly-calendar
   - payroll/payroll
+  - global/migration/validation-dataset-orchestration
+  - tests/validation-dataset-orchestration

@@ -193,23 +193,23 @@ def _verify_open(review_identity: str, fixture: dict[str, object]) -> dict[str, 
             )
             event_count = int(cursor.fetchone()["count"])
             cursor.execute(
-                "SELECT workflow_status,predicate_active FROM anomaly_current_alerts "
-                "WHERE definition_code='IMPORT-001' AND source_identity=%s",
+                "SELECT COUNT(*) AS count FROM beclass_import_review_outbox outbox "
+                "JOIN beclass_import_review_rows root ON root.id=outbox.review_row_id "
+                "WHERE root.review_identity=%s AND outbox.published_at IS NOT NULL",
                 (review_identity,),
             )
-            alert = cursor.fetchone()
+            published_outbox_count = int(cursor.fetchone()["count"])
             query_no = str(_object(fixture, "source_payload")["query_no"])
             cursor.execute("SELECT COUNT(*) AS count FROM beclass_records WHERE query_no=%s", (query_no,))
             record_count = int(cursor.fetchone()["count"])
     finally:
         connection.close()
-    if alert is None or event_count != 0 or record_count != 0:
+    if published_outbox_count != 1 or event_count != 0 or record_count != 0:
         raise RuntimeError("BeClass validation review scenario did not remain open")
     return {
         "review_identity": review_identity,
         "review_version": 0,
-        "alert_workflow_status": str(alert["workflow_status"]),
-        "alert_predicate_active": int(alert["predicate_active"]),
+        "outbox_published": True,
         "beclass_record_count": record_count,
     }
 

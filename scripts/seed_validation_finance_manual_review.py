@@ -17,11 +17,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from infrastructure.mysql.mysql_adapter import get_connection
-from infrastructure.mysql.anomaly_runtime import build_anomaly_runtime
 from shared_kernel.identities import ActorContext, IdempotencyKey
-from subsystems.finance_import.finance_import_anomaly_consumer import (
-    consume_finance_import_anomaly_events,
-)
 from subsystems.finance_import.ingestion import ingest_finance_workbook
 from scripts.imports.finance_statement_normalizer import normalize_workbook
 
@@ -34,13 +30,11 @@ def seed(scenario_id: str, *, incoming_amount: int | None = None) -> dict[str, o
     _require_dataset_database()
     existing_batch_identity = _existing_batch_identity(scenario_id)
     if existing_batch_identity is not None:
-        delivery = _deliver_anomaly_projection()
-        return _verify_seeded_row(existing_batch_identity, delivery.delivered_count)
+        return _verify_seeded_row(existing_batch_identity)
     with TemporaryDirectory(prefix="lu-validation-finance-") as directory:
         workbook = _write_unresolved_workbook(Path(directory), scenario_id, incoming_amount)
         receipt = _ingest_with_replay(workbook, scenario_id)
-    delivery = _deliver_anomaly_projection()
-    return _verify_seeded_row(receipt.batch_identity, delivery.delivered_count)
+    return _verify_seeded_row(receipt.batch_identity)
 
 
 def _existing_batch_identity(scenario_id: str) -> str | None:
@@ -99,20 +93,7 @@ def _ingest_with_replay(workbook: Path, scenario_id: str):
     return receipt
 
 
-def _deliver_anomaly_projection():
-    connection = get_connection()
-    try:
-        result = consume_finance_import_anomaly_events(
-            connection, runtime=build_anomaly_runtime()
-        )
-    finally:
-        connection.close()
-    if result.failed_count:
-        raise RuntimeError("finance import anomaly projection failed")
-    return result
-
-
-def _verify_seeded_row(batch_identity: str, delivered_count: int) -> dict[str, object]:
+def _verify_seeded_row(batch_identity: str) -> dict[str, object]:
     connection = get_connection()
     try:
         with connection.cursor() as cursor:
@@ -125,25 +106,19 @@ def _verify_seeded_row(batch_identity: str, delivered_count: int) -> dict[str, o
                 (batch_identity,),
             )
             row = cursor.fetchone()
-            cursor.execute(
-                "SELECT workflow_status,predicate_active FROM "
-                "anomaly_current_alerts WHERE definition_code=%s "
-                "AND source_identity=%s",
-                ("finance_import_manual_review", row["row_identity"]),
-            )
-            alert = cursor.fetchone()
     finally:
         connection.close()
-    if row is None or alert is None:
+    if (
+        row is None
+        or row["classification_type"] != "non_business_review"
+        or row["disposition"] != "manual_review"
+    ):
         raise RuntimeError("finance manual-review scenario was not projected")
     return {
         "batch_identity": batch_identity,
         "row_identity": row["row_identity"],
         "classification_type": row["classification_type"],
         "disposition": row["disposition"],
-        "workflow_status": alert["workflow_status"],
-        "predicate_active": int(alert["predicate_active"]),
-        "anomaly_events_delivered": delivered_count,
     }
 
 

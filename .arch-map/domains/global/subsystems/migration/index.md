@@ -15,6 +15,7 @@ qualification、candidate verification 與 developer-local DB maintenance bounda
 - `task96-owner-contract-successors` — Task 96 owner-specific additive roots／exact lineage
   terminal release；path: `modules/task96-owner-contract-successors.md`
 - `task97-production-script-governance` — Task 97 production-script inventory與guard evidence；path: `modules/task97-production-script-governance.md`
+- `validation-dataset-orchestration` — disposable UI validation dataset composition、read-only inspection與replay verification；path: `modules/validation-dataset-orchestration.md`
 
 ## Contracts
 - Fresh bootstrap 與 preserve-data upgrade 分離；source／candidate／receipt／release

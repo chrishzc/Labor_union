@@ -61,14 +61,9 @@ def inspect_dataset(
     expected = _required_object(dataset, "expected_after_apply")
     case_no = _required_text(root, "case_no")
     checks = _read_checks(connection, root, expected, case_no)
-    checks += _anomaly_checks(connection, _required_object(expected, "anomaly_scenario"), case_no)
     checks += _finance_manual_review_checks(
         connection,
         _required_object(expected, "finance_manual_review"),
-    )
-    checks += _beclass_review_repair_checks(
-        connection,
-        _required_object(expected, "beclass_review_repair"),
     )
     checks += _beclass_review_open_checks(
         connection,
@@ -155,35 +150,6 @@ def _claim_check(cursor, family, expected, case_no: str) -> ValidationDatasetChe
     return _check(f"command_claim.{family}", expected, int(cursor.fetchone()["count"]))
 
 
-def _anomaly_checks(connection, expected, case_no: str) -> tuple[ValidationDatasetCheck, ...]:
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT fingerprint,workflow_status,predicate_active FROM anomaly_current_alerts "
-            "WHERE definition_code=%s AND source_identity=%s",
-            (expected["definition_code"], f"case:{case_no}"),
-        )
-        alert = cursor.fetchone()
-        observed = None if alert is None else {
-            "workflow_status": str(alert["workflow_status"]),
-            "predicate_active": int(alert["predicate_active"]),
-        }
-        alert_expected = {
-            "workflow_status": expected["workflow_status"],
-            "predicate_active": expected["predicate_active"],
-        }
-        if alert is None:
-            return (_check("anomaly.current", alert_expected, None),)
-        cursor.execute(
-            "SELECT action FROM anomaly_workflow_events WHERE alert_fingerprint=%s ORDER BY id",
-            (alert["fingerprint"],),
-        )
-        actions = [str(row["action"]) for row in cursor.fetchall()]
-    return (
-        _check("anomaly.current", alert_expected, observed),
-        _check("anomaly.timeline", expected["timeline_actions"], actions),
-    )
-
-
 def _finance_manual_review_checks(connection, expected) -> tuple[ValidationDatasetCheck, ...]:
     with connection.cursor() as cursor:
         cursor.execute(
@@ -195,62 +161,13 @@ def _finance_manual_review_checks(connection, expected) -> tuple[ValidationDatas
             (expected["ingestion_idempotency_key"],),
         )
         row = cursor.fetchone()
-        alert = None
-        if row is not None:
-            cursor.execute(
-                "SELECT workflow_status,predicate_active FROM anomaly_current_alerts "
-                "WHERE definition_code=%s AND source_identity=%s",
-                ("finance_import_manual_review", row["row_identity"]),
-            )
-            alert = cursor.fetchone()
     review_expected = {
         key: expected[key] for key in ("classification_type", "disposition")
     }
     observed_review = None if row is None else {
         key: row[key] for key in review_expected
     }
-    alert_expected = {
-        key: expected[key] for key in ("workflow_status", "predicate_active")
-    }
-    return (
-        _check("finance.manual_review_row", review_expected, observed_review),
-        _check("finance.manual_review_alert", alert_expected, alert),
-    )
-
-
-def _beclass_review_repair_checks(connection, expected) -> tuple[ValidationDatasetCheck, ...]:
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT root.review_identity,event.resulting_version FROM beclass_import_review_rows root "
-            "JOIN beclass_import_review_events event ON event.review_row_id=root.id "
-            "WHERE JSON_UNQUOTE(JSON_EXTRACT(root.source_payload,'$.query_no'))=%s",
-            (expected["query_no"],),
-        )
-        review = cursor.fetchone()
-        review_observed = None if review is None else {
-            "review_version": int(review["resulting_version"]),
-        }
-        if review is None:
-            return (_check("beclass.review_repair", expected, None),)
-        cursor.execute(
-            "SELECT workflow_status,predicate_active FROM anomaly_current_alerts "
-            "WHERE definition_code='IMPORT-001' AND source_identity=%s",
-            (review["review_identity"],),
-        )
-        alert = cursor.fetchone()
-        cursor.execute("SELECT COUNT(*) AS count FROM beclass_records WHERE query_no=%s", (expected["query_no"],))
-        record_count = int(cursor.fetchone()["count"])
-    observed = {
-        **review_observed,
-        "workflow_status": None if alert is None else str(alert["workflow_status"]),
-        "predicate_active": None if alert is None else int(alert["predicate_active"]),
-        "beclass_record_count": record_count,
-    }
-    expected_values = {
-        key: expected[key]
-        for key in ("review_version", "workflow_status", "predicate_active", "beclass_record_count")
-    }
-    return (_check("beclass.review_repair", expected_values, observed),)
+    return (_check("finance.manual_review_row", review_expected, observed_review),)
 
 
 def _beclass_review_open_checks(connection, expected) -> tuple[ValidationDatasetCheck, ...]:
@@ -266,22 +183,22 @@ def _beclass_review_open_checks(connection, expected) -> tuple[ValidationDataset
         if review is None:
             return (_check("beclass.review_open", expected, None),)
         cursor.execute(
-            "SELECT workflow_status,predicate_active FROM anomaly_current_alerts "
-            "WHERE definition_code='IMPORT-001' AND source_identity=%s",
+            "SELECT COUNT(*) AS count FROM beclass_import_review_outbox outbox "
+            "JOIN beclass_import_review_rows root ON root.id=outbox.review_row_id "
+            "WHERE root.review_identity=%s AND outbox.published_at IS NOT NULL",
             (review["review_identity"],),
         )
-        alert = cursor.fetchone()
+        published_outbox_count = int(cursor.fetchone()["count"])
         cursor.execute("SELECT COUNT(*) AS count FROM beclass_records WHERE query_no=%s", (expected["query_no"],))
         record_count = int(cursor.fetchone()["count"])
     observed = {
         "review_version": int(review["event_count"]),
-        "workflow_status": None if alert is None else str(alert["workflow_status"]),
-        "predicate_active": None if alert is None else int(alert["predicate_active"]),
+        "outbox_published": published_outbox_count == 1,
         "beclass_record_count": record_count,
     }
     expected_values = {
         key: expected[key]
-        for key in ("review_version", "workflow_status", "predicate_active", "beclass_record_count")
+        for key in ("review_version", "outbox_published", "beclass_record_count")
     }
     return (_check("beclass.review_open", expected_values, observed),)
 
