@@ -10,7 +10,6 @@
 |---|---|
 | [Task 96 terminal register](../02_決策與退役執行記錄/96_Current_剩餘代辦任務總表.md) | Task 96已達repository-local acceptance；verified LIFF／provider、NAS、production／deployment與1019 preserve-upgrade仍維持明示`not_run`／deferred。 |
 | [正式規格索引](../01_規格基線/15_正式規格索引與裁決總表.md) | current正式規格、owner與裁決入口。 |
-| [LINE／Anomalies整合 aggregate receipt](evidence/PROV-20260830-line-anomalies-slimming-integration-receipt.md) | PR #63 repository-local整合結果及未完成外部邊界。 |
 | [Task 97 repository-local closeout receipt](evidence/task97_repository_local_closeout_receipt_a48caa8.md) | Task 97 aggregate architecture結果；production、DB engine與external acceptance仍不得外推。 |
 | [HCAT／RPRE aggregate receipt](evidence/2026-08-28_task96_hcat_rpre_aggregate_final_receipt.md) | 歷史分類／remediation projection的整合證據與未完成gate。 |
 | [LDU 1003→1012 aggregate receipt](evidence/2026-08-28_task96_ldu_1003_to_1012_final_receipt.md) | 限定於1003→1012的歷史release證據；不得外推為current preserve-upgrade PASS。 |
