@@ -78,7 +78,7 @@ class RichMenuAppearance(BaseModel):
 class RichMenuDefinition(BaseModel):
     id: str = Field(min_length=1, pattern=r"^[a-z0-9][a-z0-9_-]*$")
     name: str = Field(min_length=1, max_length=300)
-    audience_role: Literal["customer", "staff", "union_staff", "union_staff_page"]
+    audience_role: Literal["visitor", "customer", "staff", "union_staff", "union_staff_page"]
     rich_menu_alias_id: str | None = Field(default=None, min_length=1, max_length=32, pattern=r"^[a-zA-Z0-9_-]+$")
     enabled: bool = True
     selected: bool = True
@@ -103,8 +103,8 @@ class RichMenuDefinition(BaseModel):
                 separated = button.bounds.x + button.bounds.width <= other.bounds.x or other.bounds.x + other.bounds.width <= button.bounds.x or button.bounds.y + button.bounds.height <= other.bounds.y or other.bounds.y + other.bounds.height <= button.bounds.y
                 if not separated:
                     raise ValueError(f"buttons {button.id} and {other.id} overlap")
-        if self.set_as_default and self.audience_role != "customer":
-            raise ValueError("only the customer menu can be the default menu")
+        if self.set_as_default and self.audience_role not in {"visitor", "customer"}:
+            raise ValueError("only the visitor or customer menu can be the default menu")
         return self
 
 
@@ -120,7 +120,7 @@ class LineMenusConfig(BaseModel):
         if not self.menus:
             return self
         enabled = [item for item in self.menus if item.enabled]
-        primary_roles = {"customer", "staff", "union_staff"}
+        primary_roles = {"visitor", "customer", "staff", "union_staff"}
         roles = [item.audience_role for item in enabled if item.audience_role in primary_roles]
         if len(roles) != len(set(roles)):
             raise ValueError("only one enabled rich menu is allowed for each audience role")

@@ -2135,7 +2135,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                                 </span>
                               </td>
                               <td>
-                                <span style={{ fontSize: '0.82rem', color: !record.revocationStatus ? '#74593f' : '#b45309' }}>
+                                <span style={{ fontSize: '0.82rem', color: record.status === 'revoked' ? '#15803d' : !record.revocationStatus ? '#74593f' : '#b45309', fontWeight: record.status === 'revoked' ? 500 : 400 }}>
                                   {record.revocationStatusLabel}
                                 </span>
                               </td>

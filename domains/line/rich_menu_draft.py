@@ -19,7 +19,7 @@ from shared_kernel.validation import (
 )
 
 _ACTION_KINDS = frozenset({"uri", "message", "postback", "richmenuswitch"})
-_AUDIENCE_ROLES = frozenset({"customer", "staff", "union_staff", "union_staff_page"})
+_AUDIENCE_ROLES = frozenset({"visitor", "customer", "staff", "union_staff", "union_staff_page"})
 _LIFF_TARGETS = frozenset(
     {
         "?entry=gateway",
@@ -34,6 +34,7 @@ _LIFF_TARGETS = frozenset(
         "?target=staff_payout",
         "?target=staff_review",
         "?target=staff_schedule",
+        "?target=staff_verification",
     }
 )
 _ALIAS_PATTERN = re.compile(r"^[a-z0-9_-]{1,32}$")
@@ -61,7 +62,7 @@ def normalize_rich_menu_draft(definition: Mapping[str, object]) -> dict[str, obj
             raise RichMenuDraftValidationError("Rich Menu IDs must be unique")
         menu_ids.add(menu_id)
         role = str(menu["audience_role"])
-        if bool(menu["enabled"]) and role in {"customer", "staff", "union_staff"}:
+        if bool(menu["enabled"]) and role in {"visitor", "customer", "staff", "union_staff"}:
             if role in enabled_roles:
                 raise RichMenuDraftValidationError("only one enabled menu is allowed per audience role")
             enabled_roles.add(role)
@@ -141,8 +142,8 @@ def _normalize_menu(raw_menu: object, index: int) -> dict[str, object]:
     enabled = _boolean(menu.get("enabled", True), f"{path} enabled")
     selected = _boolean(menu.get("selected", True), f"{path} selected")
     default = _boolean(menu.get("set_as_default", False), f"{path} default")
-    if default and audience != "customer":
-        raise RichMenuDraftValidationError("only customer Rich Menu can be the default")
+    if default and audience not in {"visitor", "customer"}:
+        raise RichMenuDraftValidationError("only visitor or customer Rich Menu can be the default")
     chat_bar_text = require_canonical_text(menu.get("chat_bar_text"), f"{path} chat bar text", 14)
     size = _normalize_size(menu.get("size", {"width": 2500, "height": 843}), path)
     appearance = _normalize_appearance(menu.get("appearance", {}), path)

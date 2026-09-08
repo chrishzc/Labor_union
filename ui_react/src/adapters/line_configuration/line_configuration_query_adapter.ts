@@ -177,6 +177,7 @@ function predicateLabel(value: LineNotificationPredicate): string {
 
 function audienceRoleLabel(value: RichMenuAudienceRole): string {
   switch (value) {
+    case 'visitor': return '訪客';
     case 'customer': return '客戶';
     case 'staff': return '月嫂';
     case 'union_staff': return '工會人員';

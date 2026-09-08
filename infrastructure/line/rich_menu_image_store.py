@@ -78,9 +78,15 @@ def _get_icon_for_label(label: str) -> str:
         return "📊"
     if "修改" in label or "異動" in label:
         return "✏️"
+    if "月嫂" in label:
+        return "👩‍🍼"
+    if "客戶" in label or "產婦" in label:
+        return "👶"
     if "登記" in label or "申請" in label:
         return "📝"
-    if "說明" in label or "FAQ" in label:
+    if "問答" in label or "FAQ" in label:
+        return "💡"
+    if "說明" in label:
         return "🔍"
     if "客服" in label or "諮詢" in label:
         return "💬"
@@ -100,8 +106,6 @@ def _get_icon_for_label(label: str) -> str:
         return "📋"
     if "一般用戶" in label or "會員" in label or "用戶" in label:
         return "👥"
-    if "月嫂" in label:
-        return "👩‍🍼"
     if "工會" in label:
         return "🛡️"
     return "📌"

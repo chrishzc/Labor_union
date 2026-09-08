@@ -212,6 +212,7 @@ const RichMenuAppearanceSchema = z
   });
 
 export const RichMenuAudienceRoleSchema = z.enum([
+  'visitor',
   'customer',
   'staff',
   'union_staff',
@@ -239,11 +240,11 @@ const RichMenuDefinitionSchema = z
   })
   .strict()
   .superRefine((menu, context) => {
-    if (menu.set_as_default === true && menu.audience_role !== 'customer') {
+    if (menu.set_as_default === true && menu.audience_role !== 'customer' && menu.audience_role !== 'visitor') {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['set_as_default'],
-        message: '只有 customer 選單可設為預設',
+        message: '只有 visitor 或 customer 選單可設為預設',
       });
     }
     const buttonIds = new Set<string>();
@@ -356,12 +357,23 @@ export type LineRichMenuPublicationStatus = z.infer<
   typeof LineRichMenuPublicationStatusSchema
 >;
 
+export const LineRichMenuPublicationStepSchema = z
+  .object({
+    step: z.enum(['create', 'upload', 'link', 'switch', 'cleanup']),
+    acknowledged_at: z.string(),
+  })
+  .strict();
+export type LineRichMenuPublicationStep = z.infer<
+  typeof LineRichMenuPublicationStepSchema
+>;
+
 export const LineRichMenuPublicationSchema = z
   .object({
     id: z.number().int().positive(),
     menu_definition_id: z.string().min(1).max(191),
     configuration_revision: z.number().int().nonnegative(),
     status: LineRichMenuPublicationStatusSchema,
+    step_receipts: z.array(LineRichMenuPublicationStepSchema).optional(),
   })
   .strict();
 export type LineRichMenuPublication = z.infer<

@@ -88,15 +88,16 @@ LLM 不得直接產生業務 final answer、不得寫 owner root、不得自選�
 
 ## 7. Rich Menu audience 與 current role
 
-選單 audience 固定為：
+選單 audience 正式區分為四套獨立版本：
 
-- `default_menu`：未完成 role selection 或無有效綁定的一般入口。
-- `staff_menu`：current role 為 staff 且 binding 有效。
-- `union_staff_menu`：已認證的工會內部使用者入口；其業務權限仍由 Access owner 判定。
+- `default_menu`（訪客初始選單，`audience_role: "visitor"`，`set_as_default: true`）：專供未綁定任何身分之訪客使用。具備快速上手功能：「客戶登記與綁定」、「月嫂身分綁定」、「常見問答」、「專人客服諮詢」。
+- `customer_menu`（客戶專屬選單，`audience_role: "customer"`，`set_as_default: false`）：已完成客戶身分綁定專用。具備已綁定客戶專屬入口：「修改登記資料」、「服務說明」、「常見問答」、「專人客服諮詢」（不含初始登記與月嫂綁定）。
+- `staff_menu`（月嫂專屬選單，`audience_role: "staff"`，`set_as_default: false`）：current role 為 staff 且 binding 有效（訂單查詢、排班資訊、請假代班申請、薪資請款明細）。
+- `union_staff_menu`（工會人員專屬選單，`audience_role: "union_staff"`，`set_as_default: false`）：已認證的工會內部使用者入口（待確認審核、客服中心、重大異常通報、即時營運看板）；其業務權限仍由 Access owner 判定。
 
-同一 LINE User 可同時具 customer 與 staff binding；雙角色必須依 `23` 明確選擇 current role，不得由訂單、排班、前一頁、provider 狀態或 local storage 猜測。選定 role 不再 active 時，menu readback 不得沿用 stale audience。
+同一 LINE User 可同時具 customer 與 staff binding；雙角色必須依 `23` 明確選擇 current role，不得由訂單、排班、前一頁、provider 狀態或 local storage 猜測。選定 role 不再 active 時，menu readback 不得沿用 stale audience；解除身分綁定（revocation）後，自動回退並繼承全域預設之訪客選單（`default_menu`）。
 
-Current menu content 與 action 由 MySQL versioned LINE configuration 及 current publication 決定。`config/*.json` 只作 bootstrap source；本文件不硬編舊 menu ID、provider ID 或已退役 deep link。預設選單至少提供「服務登記」與「服務說明」；staff／union-staff menu 只可放置其 owner 已核准的 typed entry。
+Current menu content 與 action 由 MySQL versioned LINE configuration 及 current publication 決定。`config/*.json` 作為 bootstrap source；本文件不硬編舊 menu ID、provider ID 或已退役 deep link。訪客選單至少提供「客戶登記與綁定」與「月嫂身分綁定」；客戶選單提供「修改登記資料」與「服務說明」；staff／union-staff menu 只可放置其 owner 已核准的 typed entry。
 
 ## 8. Rich Menu draft、preview 與 publish
 

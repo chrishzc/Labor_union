@@ -41,6 +41,9 @@ _GROUP_INTENTS = {"工會選單", "開啟客服系統", "月嫂驗證管理"}
 _SERVICE_ALIASES = {
     "服務登記": (None, "registration"),
     "服務說明": (None, "service_help_menu"),
+    "常見問答": (None, "service_help_menu"),
+    "問答": (None, "service_help_menu"),
+    "FAQ": (None, "service_help_menu"),
     "服務流程": (CustomerServiceCategory.SERVICE_FLOW, "service_flow"),
     "流程": (CustomerServiceCategory.SERVICE_FLOW, "service_flow"),
     "怎麼申請": (CustomerServiceCategory.SERVICE_FLOW, "service_flow"),

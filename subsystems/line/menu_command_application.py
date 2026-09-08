@@ -18,7 +18,8 @@ from subsystems.line.ports import LineAuditIntent
 from subsystems.line.rich_menu_binding import RICH_MENU_BINDING_INTENT
 
 
-_CUSTOMER_MENU_COMMANDS = {"一般選單", "一般用戶選單", "切換一般", "切換客戶"}
+_CUSTOMER_MENU_COMMANDS = {"客戶選單", "客戶專區", "切換客戶"}
+_VISITOR_MENU_COMMANDS = {"訪客選單", "切換訪客", "一般選單", "一般用戶選單", "切換一般"}
 _STAFF_MENU_COMMANDS = {"月嫂選單", "月嫂專區", "切換月嫂"}
 _UNION_MENU_COMMANDS = {"工會選單", "工會客服", "切換工會"}
 _MENU_HELP_COMMANDS = {"切換選單", "選單切換", "管理者選單"}
@@ -34,10 +35,13 @@ class LineMenuCommandApplication:
                 inbox,
                 unit_of_work,
                 line_user_id,
-                "default_menu",
+                "customer_menu",
                 "customer-menu",
                 allow_subject=LineBindingSubjectType.CUSTOMER,
             )
+        if command in _VISITOR_MENU_COMMANDS:
+            self._queue_menu(inbox, unit_of_work, line_user_id, "default_menu", "visitor-menu")
+            return True
         if command in _STAFF_MENU_COMMANDS:
             return self._queue_scoped_menu(
                 inbox,
@@ -97,7 +101,8 @@ class LineMenuCommandApplication:
                         "type": "text",
                         "text": (
                             "管理者可切換以下操作視角：\n"
-                            "・切換一般：一般用戶選單\n"
+                            "・切換訪客：訪客初始選單\n"
+                            "・切換客戶：客戶專屬選單\n"
                             "・切換月嫂：月嫂專區選單\n"
                             "・切換工會：工會客服選單\n\n"
                             "此功能只切換下方圖文選單，不會降低您的管理者權限。"

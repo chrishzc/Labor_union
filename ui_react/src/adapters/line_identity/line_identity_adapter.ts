@@ -241,6 +241,10 @@ function replacementBlockerLabel(blocker: string): string {
 export function adaptLineIdentityBinding(
   binding: LineIdentityBindingView
 ): LineIdentityBindingRowViewModel {
+  const revocationStatus =
+    binding.status === 'revoked' && !binding.revocation_status
+      ? 'completed'
+      : binding.revocation_status ?? null;
   return {
     lineUserId: maskLineUserId(binding.line_user_id),
     status: binding.status,
@@ -251,8 +255,8 @@ export function adaptLineIdentityBinding(
     subjectName: binding.subject_name,
     updatedAt: binding.updated_at ?? null,
     revocationRequestId: binding.revocation_request_id ?? null,
-    revocationStatus: binding.revocation_status ?? null,
-    revocationStatusLabel: revocationStatusLabel(binding.revocation_status ?? null),
+    revocationStatus,
+    revocationStatusLabel: revocationStatusLabel(revocationStatus),
     revokedAt: binding.revoked_at ?? null,
   };
 }

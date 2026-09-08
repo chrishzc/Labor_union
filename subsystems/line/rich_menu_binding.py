@@ -22,11 +22,12 @@ from subsystems.line.rich_menu_contracts import LineRichMenuProviderOutcomeType
 
 RICH_MENU_BINDING_INTENT = "line.rich_menu.bind"
 _MENU_BY_SUBJECT = {
-    LineBindingSubjectType.CUSTOMER: "default_menu",
+    LineBindingSubjectType.CUSTOMER: "customer_menu",
     LineBindingSubjectType.STAFF: "staff_menu",
     LineBindingSubjectType.ADMIN: "union_staff_menu",
 }
 _SUBJECT_BY_AUDIENCE = {
+    "visitor": None,
     "customer": LineBindingSubjectType.CUSTOMER,
     "staff": LineBindingSubjectType.STAFF,
     "union_staff": LineBindingSubjectType.ADMIN,
@@ -264,7 +265,7 @@ class LineRichMenuBindingWorker:
         payload = json.loads(payload_json)
         line_user_id = LineUserId(str(payload["line_user_id"]))
         menu_definition_id = str(payload["menu_definition_id"])
-        if menu_definition_id not in _MENU_BY_SUBJECT.values():
+        if menu_definition_id not in _MENU_BY_SUBJECT.values() and menu_definition_id != "default_menu":
             raise ValueError("Rich Menu binding target is invalid")
         provider_menu_id = str(payload.get("provider_menu_id") or "")
         if not provider_menu_id:

@@ -712,12 +712,17 @@ def publish_rich_menu(
     request: Request,
     principal: AdminPrincipal = Depends(require_persisted_admin),
 ):
+    admin_user_id = (
+        principal.id
+        if principal.id is not None
+        else _DEVELOPMENT_PREVIEW_ACTOR_ID
+    )
     actor = admin_actor_context(principal)
     try:
         preview = validate_publication_preview(
             menu_id,
             preview_id=payload.preview_id,
-            previewed_by_admin_user_id=principal.id,
+            previewed_by_admin_user_id=admin_user_id,
         )
         result = queue_publication(
             QueueLineRichMenuPublicationCommand(
@@ -731,7 +736,7 @@ def publish_rich_menu(
                 preview_id=payload.preview_id,
                 preview_config_revision=preview["config_revision"],
                 preview_config_fingerprint=preview["config_fingerprint"],
-                previewed_by_admin_user_id=principal.id,
+                previewed_by_admin_user_id=admin_user_id,
             ),
             reason=payload.reason,
         )

@@ -404,8 +404,8 @@ def _preview_id(actor_id: int, menu_id: str, config_revision: int, fingerprint: 
         separators=(",", ":"),
     )
     receipt_digest = hashlib.sha256(receipt_json.encode("utf-8")).digest()
-    preview_id = int.from_bytes(receipt_digest[:8], "big") & 0x7FFF_FFFF_FFFF_FFFF
-    return preview_id or 1
+    preview_id = (int.from_bytes(receipt_digest[:8], "big") & ((1 << 53) - 1)) or 1
+    return preview_id
 
 
 def _locked_menu(unit_of_work, command: QueueLineRichMenuPublicationCommand):
@@ -651,17 +651,22 @@ def import_legacy_rich_menu_ids() -> int:
         return 0
     config, revision = _current_menu_configuration()
     key_by_role = {
-        "customer": "default_rich_menu_id",
+        "visitor": "default_rich_menu_id",
+        "customer": "customer_rich_menu_id",
         "staff": "staff_rich_menu_id",
         "union_staff": "union_staff_rich_menu_id",
     }
+    has_visitor = any(getattr(m, "audience_role", None) == "visitor" for m in config.menus)
     imported = 0
     conn = get_connection()
     try:
         with (line_unit_of_work_factory or _ConnectionUnitOfWork)(conn) as unit_of_work:
             with conn.cursor(pymysql.cursors.DictCursor) as cursor:
                 for menu in config.menus:
-                    rich_menu_id = str(legacy.get(key_by_role[menu.audience_role]) or "").strip()
+                    key = key_by_role.get(menu.audience_role)
+                    rich_menu_id = str(legacy.get(key) or "").strip()
+                    if not rich_menu_id and menu.audience_role == "customer" and not has_visitor:
+                        rich_menu_id = str(legacy.get("default_rich_menu_id") or "").strip()
                     if not rich_menu_id:
                         continue
                     cursor.execute(
@@ -819,7 +824,8 @@ def _publish_to_line(item: dict[str, Any]) -> tuple[str, int]:
 
 def _write_legacy_id(audience_role: str, rich_menu_id: str) -> None:
     key = {
-        "customer": "default_rich_menu_id",
+        "visitor": "default_rich_menu_id",
+        "customer": "customer_rich_menu_id",
         "staff": "staff_rich_menu_id",
         "union_staff": "union_staff_rich_menu_id",
     }.get(audience_role)
