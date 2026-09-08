@@ -15,9 +15,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { LoginPage } from './pages/LoginPage';
 import { sessionClient } from './api/auth/session_client';
 import { ADMIN_SESSION_UNAUTHORIZED_EVENT } from './api/shared/transport';
-import { OrderTrackerPage } from './pages/OrderTrackerPage';
 import { OrderWorkbenchV2Page } from './pages/OrderWorkbenchV2Page';
-import { OrdersManagementPage } from './pages/OrdersManagementPage';
 import { SchedulingPage } from './pages/SchedulingPage';
 import { StaffPage } from './pages/StaffPage';
 import { DataImportPage } from './pages/DataImportPage';
@@ -148,9 +146,7 @@ export const App: React.FC = () => {
         onLogout={handleLogout}
       >
         {/* Operations Section */}
-        {currentPage === 'order-tracker' && <OrderTrackerPage />}
         {currentPage === 'order-workbench-v2' && <OrderWorkbenchV2Page />}
-        {currentPage === 'orders' && <OrdersManagementPage />}
         {currentPage === 'scheduling' && <SchedulingPage />}
         {currentPage === 'staff' && <StaffPage />}
         {currentPage === 'data-import' && <DataImportPage initialTab="workbook-import" />}
