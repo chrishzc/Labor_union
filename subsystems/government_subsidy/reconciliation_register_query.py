@@ -1,6 +1,6 @@
 """
 File: reconciliation_register_query.py
-Description: 依既有補助公式建立季度、年度及正式送件期間的唯讀核銷資料。
+Description: 依既有補助公式建立成立訂單的季度、年度及正式送件期間唯讀核銷資料。
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ GENERAL_CITIZEN = "\u4e00\u822c\u5e02\u6c11"
 SUBSIDIZED_CITIZEN = "\u88dc\u52a9\u5e02\u6c11"
 IDENTITY_CARD_KEY = "\u8eab\u5206\u8b49\u5b57\u865f"
 CLAIMED_BATCH_STATUSES = ("submitted", "approved", "partially_paid", "paid")
+ESTABLISHED_ORDER_STATUSES = ("訂單成立", "服務中", "訂單完成")
 
 
 def _as_date(value) -> date | None:
@@ -96,6 +97,46 @@ def _fetch_completed_cases(connection_factory: Callable[[], Any]) -> list[dict]:
                 ORDER BY o.case_no
                 """,
                 (GENERAL_CITIZEN, SUBSIDIZED_CITIZEN),
+            )
+            return cursor.fetchall()
+    finally:
+        conn.close()
+
+
+def _fetch_established_cases(
+    period_start: date,
+    period_end: date,
+    connection_factory: Callable[[], Any],
+) -> list[dict]:
+    conn = connection_factory()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT o.case_no, c.identity_status,
+                       COALESCE(o.actual_start_date, o.start_date) AS actual_start_date,
+                       COALESCE(o.actual_end_date, o.end_date) AS actual_end_date,
+                       o.service_days, o.service_hours_per_day,
+                       c.name AS employer_name, c.address AS employer_address,
+                       s.name AS staff_name, br.survey_details
+                FROM orders o
+                JOIN clients c ON c.id = o.client_id
+                LEFT JOIN staff s ON s.id = o.staff_id
+                LEFT JOIN beclass_records br
+                    ON (br.query_no = o.case_no OR br.bound_case_no = o.case_no)
+                WHERE o.status IN (%s, %s, %s)
+                  AND c.identity_status IN (%s, %s)
+                  AND COALESCE(o.actual_end_date, o.end_date) >= %s
+                  AND COALESCE(o.actual_end_date, o.end_date) < %s
+                ORDER BY o.case_no
+                """,
+                (
+                    *ESTABLISHED_ORDER_STATUSES,
+                    GENERAL_CITIZEN,
+                    SUBSIDIZED_CITIZEN,
+                    period_start,
+                    period_end,
+                ),
             )
             return cursor.fetchall()
     finally:
@@ -358,18 +399,26 @@ def _build_workbook(headers: tuple[str, ...], general_rows: list[dict], subsidiz
     return output.getvalue()
 
 
-def _claim_batch_rows(
+def _established_order_rows(
     application_year: int,
     quarter: int | None,
     connection_factory: Callable[[], Any],
 ) -> tuple[list[dict], list[dict]]:
-    rows = [
-        row
-        for source in _fetch_claim_batch_cases(
-            application_year, quarter, connection_factory
-        )
-        if (row := _to_claim_register_row(source)) is not None
-    ]
+    start_month = (quarter - 1) * 3 + 1 if quarter is not None else 1
+    period_start = date(application_year, start_month, 1)
+    if quarter is None or quarter == 4:
+        period_end = date(application_year + 1, 1, 1)
+    else:
+        period_end = date(application_year, start_month + 3, 1)
+    rows = []
+    for source in _fetch_established_cases(period_start, period_end, connection_factory):
+        row = _to_register_row(source)
+        if row is None:
+            continue
+        service_end = row["服務結束"]
+        if not period_start <= service_end < period_end:
+            continue
+        rows.append(row)
     rows.sort(key=lambda row: row["\u5e02\u5e9c\u8a02\u55ae\u865f\u78bc"])
     general, subsidized = _partition_rows(rows)
     return _with_serials(general), _with_serials(subsidized)
@@ -433,9 +482,9 @@ def build_quarterly_subsidy_register(
     quarter: int,
     connection_factory: Callable[[], Any],
 ) -> dict:
-    """Build a register from the selected formal claim-batch year and quarter."""
+    """Build a register for established orders ending in the selected quarter."""
     _validate_year_and_quarter(application_year, quarter)
-    general_rows, subsidized_rows = _claim_batch_rows(
+    general_rows, subsidized_rows = _established_order_rows(
         application_year, quarter, connection_factory
     )
     return {
@@ -449,10 +498,10 @@ def build_annual_subsidy_summary(
     application_year: int,
     connection_factory: Callable[[], Any],
 ) -> dict:
-    """Build an annual summary from that year's formal claim batches."""
+    """Build an annual summary for established orders ending in that year."""
     if not isinstance(application_year, int) or application_year < 1912:
         raise ValueError("application_year must be a Gregorian year")
-    general_rows, subsidized_rows = _claim_batch_rows(
+    general_rows, subsidized_rows = _established_order_rows(
         application_year, None, connection_factory
     )
     return {
@@ -469,10 +518,10 @@ def build_combined_subsidy_register(
 ) -> dict:
     """Build a combined workbook with both quarterly and annual reconciliation sheets."""
     _validate_year_and_quarter(application_year, quarter)
-    q_general, q_subsidized = _claim_batch_rows(
+    q_general, q_subsidized = _established_order_rows(
         application_year, quarter, connection_factory
     )
-    a_general, a_subsidized = _claim_batch_rows(
+    a_general, a_subsidized = _established_order_rows(
         application_year, None, connection_factory
     )
     workbook = Workbook()

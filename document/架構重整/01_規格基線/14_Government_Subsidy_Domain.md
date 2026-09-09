@@ -43,11 +43,11 @@ Government Subsidy 與 Staff Payables 以同一組 root facts 驗證 funding sta
 
 ### 季度／年度核銷查詢投影
 
-季度與年度核銷報表只納入 `subsidy_claim_batches` 已送件以上狀態的 current-revision
-claim items；季度以批次 `application_year + quarter` 選取，年度以 `application_year`
-彙整四季各自的 current revision。服務完成日期只供列內顯示，不得決定所屬季／年度。
-補助時數、單價與申請金額直接投影 item 的 frozen values，不得由查詢層重算；服務人員以
-item-owned `staff_id` 解析。季度 React 明細欄位與既有季度 XLSX 15 欄一致，年度明細與年度
+季度與年度核銷報表只要訂單已因有效訂金核銷進入 `訂單成立`，後續保持在
+`服務中 | 訂單完成` 也持續納入；不得要求先建立、送出或核准政府補助 claim batch。
+已取消與尚在洽談中的訂單不納入。季度以實際服務結束日、尚未有實際日期時以預定服務結束日
+決定所屬年與季；年度報表以同一有效結束日彙整該年。補助時數、單價與金額依訂單的服務天數、
+每日時數與身分別補助上限計算。季度 React 明細欄位與既有季度 XLSX 15 欄一致，年度明細與年度
 XLSX 10 欄一致。雇主身分證若存在，沿用報名資料 `survey_details` 的既有值；目前不得臆造
 `clients` 專用欄位或因此新增 schema。
 

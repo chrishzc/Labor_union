@@ -37,40 +37,36 @@ class FakeConnection:
         self.closed = True
 
 
-def _claim_row(**overrides):
+def _order_row(**overrides):
     row = {
         "case_no": "115000002", "identity_status": "一般市民",
-        "actual_start_date": date(2026, 3, 1), "actual_end_date": date(2026, 4, 2),
+        "actual_start_date": date(2026, 3, 1), "actual_end_date": date(2026, 3, 20),
         "service_days": 20, "service_hours_per_day": Decimal("8"),
         "employer_name": "王小明", "employer_address": "台北市中正區",
         "staff_name": "月嫂甲", "survey_details": {"身分證字號": "A123456789"},
-        "claimed_hours": Decimal("40.25"), "unit_price": Decimal("300"),
-        "requested_amount": Decimal("12075"), "application_year": 2026,
-        "quarter": 1, "claim_status": "submitted",
-        "claim_submitted_at": date(2026, 5, 1),
     }
     row.update(overrides)
     return row
 
 
-def test_quarterly_register_uses_formal_batch_year_quarter_and_item_staff():
+def test_quarterly_register_includes_established_orders_without_claim_batch():
     connection = FakeConnection([
-        _claim_row(),
-        _claim_row(
+        _order_row(),
+        _order_row(
             case_no="115000001", identity_status="補助市民",
             actual_start_date=date(2025, 12, 1), actual_end_date=date(2026, 1, 1),
             employer_name="陳小美", employer_address="新北市板橋區",
             staff_name="月嫂乙", survey_details='{"身分證字號": "B223456789"}',
-            claimed_hours=Decimal("120"), unit_price=Decimal("350"),
-            requested_amount=Decimal("42000"),
+            service_days=15, service_hours_per_day=Decimal("8"),
         ),
+        _order_row(case_no="115000099", actual_end_date=date(2026, 4, 1)),
     ])
     result = register.build_quarterly_subsidy_register(2026, 1, lambda: connection)
 
     assert [row["\u5e02\u5e9c\u8a02\u55ae\u865f\u78bc"] for row in result["general_citizen_rows"]] == ["115000002"]
     assert [row["\u5e02\u5e9c\u8a02\u55ae\u865f\u78bc"] for row in result["subsidized_citizen_rows"]] == ["115000001"]
-    assert result["general_citizen_rows"][0]["補助天數"] == Decimal("5.03")
-    assert result["general_citizen_rows"][0]["補助款金額"] == Decimal("12075")
+    assert result["general_citizen_rows"][0]["補助天數"] == Decimal("5.00")
+    assert result["general_citizen_rows"][0]["補助款金額"] == Decimal("12000")
     assert result["general_citizen_rows"][0]["服務人員"] == "月嫂甲"
     assert result["general_citizen_rows"][0]["身分證字號"] == "A123456789"
     assert result["subsidized_citizen_rows"][0]["\u7c3d\u9818"] == ""
@@ -78,10 +74,13 @@ def test_quarterly_register_uses_formal_batch_year_quarter_and_item_staff():
     assert "INSERT" not in connection.cursor_instance.executed[0][0].upper()
     assert "c.identity_status" in connection.cursor_instance.executed[0][0]
     assert "clients.identity_status" not in connection.cursor_instance.executed[0][0]
-    assert "batch.application_year = %s" in connection.cursor_instance.executed[0][0]
-    assert "batch.quarter = %s" in connection.cursor_instance.executed[0][0]
-    assert "s.id = item.staff_id" in connection.cursor_instance.executed[0][0]
-    assert connection.cursor_instance.executed[0][1][4:7] == (2026, 1, 1)
+    assert "subsidy_claim_batches" not in connection.cursor_instance.executed[0][0]
+    assert "o.status IN (%s, %s, %s)" in connection.cursor_instance.executed[0][0]
+    assert "COALESCE(o.actual_end_date, o.end_date)" in connection.cursor_instance.executed[0][0]
+    assert connection.cursor_instance.executed[0][1] == (
+        "訂單成立", "服務中", "訂單完成", "一般市民", "補助市民",
+        date(2026, 1, 1), date(2026, 4, 1),
+    )
 
     workbook = load_workbook(BytesIO(result["xlsx_bytes"]))
     worksheet = workbook["\u5206\u5b63\u6838\u92b7"]
@@ -91,14 +90,14 @@ def test_quarterly_register_uses_formal_batch_year_quarter_and_item_staff():
     assert worksheet.cell(row=5, column=1).value == "\u88dc\u52a9\u5e02\u6c11"
 
 
-def test_annual_summary_uses_all_quarters_and_repairs_legacy_key():
+def test_annual_summary_uses_established_orders_and_repairs_legacy_key():
     legacy_key = "\u8eab\u5206\u8b49\u5b57\u865f".encode("utf-8").decode("latin1")
     connection = FakeConnection([
-        _claim_row(
+        _order_row(
             case_no="115000010", actual_start_date="2026-07-01",
             actual_end_date="2026-07-20", employer_name="林太太",
             employer_address="桃園市", staff_name="月嫂丙",
-            survey_details={legacy_key: "C123456789"}, quarter=3,
+            survey_details={legacy_key: "C123456789"},
         ),
     ])
 
@@ -106,7 +105,9 @@ def test_annual_summary_uses_all_quarters_and_repairs_legacy_key():
     row = result["general_citizen_rows"][0]
     assert row["\u8eab\u5206\u8b49\u5b57\u865f"] == "C123456789"
     assert result["subsidized_citizen_rows"] == []
-    assert connection.cursor_instance.executed[0][1][4:7] == (2026, None, None)
+    assert connection.cursor_instance.executed[0][1][-2:] == (
+        date(2026, 1, 1), date(2027, 1, 1),
+    )
 
     workbook = load_workbook(BytesIO(result["xlsx_bytes"]))
     worksheet = workbook["\u5e74\u5ea6\u7e3d\u8868"]
@@ -143,7 +144,7 @@ def test_register_caps_subsidy_hours_at_case_total_service_hours():
 
 def test_combined_subsidy_register_has_both_quarterly_and_annual_sheets():
     connection = FakeConnection([
-        _claim_row(case_no="115000001", employer_name="陳小姐", staff_name="王月嫂"),
+        _order_row(case_no="115000001", employer_name="陳小姐", staff_name="王月嫂"),
     ])
 
     result = register.build_combined_subsidy_register(2026, 1, lambda: connection)
