@@ -13,11 +13,10 @@
 
 | 文件 | Current 用途 | 下一個 material gate |
 |---|---|---|
-| [Cloud Run＋單一 Cloud VPN 部署測試計畫](Cloud_Run_單一Cloud_VPN_部署測試計畫.md) | `proposed`，保存隔離環境、故障注入、go/no-go 與 rollback 測試設計。 | 指定隔離 cloud project／NAS DB、operator、budget、rollback 與故障注入範圍；再依當時官方能力更新。 |
-| [Cloud Run Durable Job Worker Supervision](Durable_Job_Worker_Supervision_延後開發計畫.md) | `proposed / deferred`，保存 worker pool、child supervision、lease recovery 與 outage acceptance。 | 指定隔離 cloud test project、OIDC、operator、故障注入與雲端驗收 gate。 |
+| [Cloud Run＋單一 Cloud VPN 部署測試計畫](Cloud_Run_單一Cloud_VPN_部署測試計畫.md) | `proposed`，保存隔離環境、worker supervision、故障注入、go/no-go 與 rollback 測試設計。 | 指定隔離 cloud project／NAS DB、operator、budget、rollback 與故障注入範圍；再依當時官方能力更新。 |
 | [LINE QA 客服知識契約收斂](LINE_QA客服知識契約收斂計畫.md) | `blocked implementation-gap-tracker`；JSONL／XLSX 只作 review input 與 migration evidence，legacy `enabled` 不代表正式 publication。 | 完成逐題 owner／reviewer／source／audience／approved wording／automation boundary review，落地 versioned `published\|retired` catalog、conflict queue、closed-candidate runtime 與 API／React readback 驗收。 |
 
-Deferred 或 blocked 不等於 retired。這三份文件在其 material gate 完成、工作被正式 successor 承接或人工明確取消前，不得只因已有高階正式規格而刪除。
+Deferred 或 blocked 不等於 retired。這兩份文件在其 material gate 完成、工作被正式 successor 承接或人工明確取消前，不得只因已有高階正式規格而刪除。
 
 ## 欄位盤點工作區
 
