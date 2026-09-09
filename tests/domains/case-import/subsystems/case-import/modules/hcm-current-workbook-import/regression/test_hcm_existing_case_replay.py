@@ -55,3 +55,39 @@ def test_matching_source_receipt_replays_without_rebuilding_transient_command(
 
     assert outcome == "exact_replay"
     assert reconciliation_calls == [(connection, "115000001", True)]
+
+
+def test_existing_case_with_different_source_is_skipped_without_review_or_write(monkeypatch) -> None:
+    class Application:
+        def find_receipt(self, _key):
+            return None
+
+    monkeypatch.setattr(
+        import_client_hcm,
+        "_persist_hcm_review",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("ordinary existing-case skip must not create a review")
+        ),
+    )
+    monkeypatch.setattr(
+        import_client_hcm,
+        "_reconcile_without_rolling_back_hcm",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("a skipped row must not trigger reconciliation")
+        ),
+    )
+
+    outcome = import_client_hcm._replay_existing_hcm_case(
+        Application(),
+        SimpleNamespace(case_no="115000001"),
+        CorrelationId("corr-skip"),
+        "changed-source.xlsx",
+        object(),
+        "c" * 64,
+        "資料",
+        2,
+        {"行動電話": "0912345678"},
+        current_uow=True,
+    )
+
+    assert outcome == "skipped_existing"
