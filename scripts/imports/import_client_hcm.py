@@ -223,13 +223,14 @@ def _calculate_service_end_date(start_date, service_days, service_type, holiday_
     return calculate_hcm_service_end_date(start_date, service_days, service_type, holiday_dates)
 
 
-def _result(inserted=0, inserted_with_warning=0, exact_replay=0, review_required=0, failed=0):
+def _result(inserted=0, inserted_with_warning=0, exact_replay=0, review_required=0, failed=0, skipped_existing=0):
     return {
         "inserted": inserted,
         "inserted_with_warning": inserted_with_warning,
         "exact_replay": exact_replay,
         "review_required": review_required,
         "failed": failed,
+        "skipped_existing": skipped_existing,
     }
 
 
@@ -668,7 +669,7 @@ def _report_import_success(counts):
     print(
         "匯入成功：新增 "
         f"{counts['inserted']} 筆，exact replay {counts['exact_replay']} 筆，"
-        f"待確認 {counts['review_required']} 筆。"
+        f"既有案件跳過 {counts['skipped_existing']} 筆，待確認 {counts['review_required']} 筆。"
     )
 
 
@@ -692,16 +693,10 @@ def _replay_existing_hcm_case(
         and stored.receipt.source_fingerprint == fingerprint_case_import_source(intent)
     )
     if not source_matches:
-        _persist_hcm_review(
-            connection,
-            source_digest,
-            source_sheet,
-            ordinal,
-            raw_row,
-            intent.case_no,
-            {"case_import": "case_import_existing_source_conflict"},
-        )
-        return "review_required"
+        # Ordinary workbook intake never overwrites an existing case. A
+        # deliberate correction must enter through the dedicated resubmission
+        # Preview/Apply workflow instead of turning a changed row into a review.
+        return "skipped_existing"
     if not current_uow:
         command = ApplyCaseImport(
             intent,

@@ -90,6 +90,7 @@ class HcmWorkbookReceipt:
     review_required_count: int
     failed_count: int
     replayed_workbook: bool
+    skipped_existing_count: int = 0
     row_outcomes_available: bool = False
     legacy_summary_only: bool = True
     row_outcomes: tuple[HcmWorkbookRowOutcome, ...] = ()
@@ -104,6 +105,7 @@ class HcmWorkbookReceipt:
             "review_required_count": self.review_required_count,
             "failed_count": self.failed_count,
             "replayed_workbook": self.replayed_workbook,
+            "skipped_existing_count": self.skipped_existing_count,
             "row_outcomes_available": self.row_outcomes_available,
             "legacy_summary_only": self.legacy_summary_only,
             "row_outcomes": [item.as_dict() for item in self.row_outcomes],
@@ -298,6 +300,7 @@ def _receipt(digest: str, source_rows: int, outcomes: dict[str, object], replaye
         digest, source_rows, int(outcomes.get("inserted", 0)),
         int(outcomes.get("inserted_with_warning", 0)), int(outcomes.get("exact_replay", 0)),
         int(outcomes.get("review_required", 0)), int(outcomes.get("failed", 0)), replayed,
+        int(outcomes.get("skipped_existing", 0)),
         row_outcomes_available, not row_outcomes_available, row_outcomes if row_outcomes_available else (),
     )
 
@@ -306,7 +309,7 @@ def _assert_terminal_row_outcomes(source_rows: int, outcomes: dict[str, object])
     """A terminal workbook receipt is valid only when every source row has one outcome."""
     terminal_rows = sum(
         int(outcomes.get(name, 0))
-        for name in ("inserted", "inserted_with_warning", "exact_replay", "review_required", "failed")
+        for name in ("inserted", "inserted_with_warning", "exact_replay", "review_required", "failed", "skipped_existing")
     )
     if terminal_rows != source_rows:
         raise ValueError("hcm_import_row_outcomes_not_conserved")
@@ -317,7 +320,7 @@ def _assert_terminal_row_outcomes(source_rows: int, outcomes: dict[str, object])
             raise ValueError("hcm_import_row_outcomes_not_conserved")
         expected = {
             name: int(outcomes.get(name, 0))
-            for name in ("inserted", "inserted_with_warning", "exact_replay", "review_required", "failed")
+            for name in ("inserted", "inserted_with_warning", "exact_replay", "review_required", "failed", "skipped_existing")
         }
         actual = {name: 0 for name in expected}
         for item in parsed:
@@ -332,7 +335,7 @@ def _row_outcome(value) -> HcmWorkbookRowOutcome:
     if not isinstance(value, dict):
         raise ValueError("hcm_import_row_outcome_invalid")
     outcome = str(value.get("outcome") or "")
-    if outcome not in {"inserted", "inserted_with_warning", "exact_replay", "review_required", "failed"}:
+    if outcome not in {"inserted", "inserted_with_warning", "exact_replay", "review_required", "failed", "skipped_existing"}:
         raise ValueError("hcm_import_row_outcome_invalid")
     source_row = value.get("source_row")
     if not isinstance(source_row, int) or isinstance(source_row, bool) or source_row < 1:
@@ -366,6 +369,7 @@ def _receipt_from_payload(payload, *, source_digest: str, replayed: bool) -> Hcm
         int(payload.get("review_required_count", 0)),
         int(payload.get("failed_count", 0)),
         replayed,
+        int(payload.get("skipped_existing_count", 0)),
         available,
         not available,
         rows if available else (),
@@ -376,6 +380,7 @@ def _receipt_from_payload(payload, *, source_digest: str, replayed: bool) -> Hcm
         "exact_replay": receipt.exact_replay_count,
         "review_required": receipt.review_required_count,
         "failed": receipt.failed_count,
+        "skipped_existing": receipt.skipped_existing_count,
         **({"row_outcomes": [item.as_dict() for item in receipt.row_outcomes]} if available else {}),
     })
     return receipt

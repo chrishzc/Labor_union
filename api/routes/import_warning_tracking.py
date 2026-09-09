@@ -148,6 +148,7 @@ def _referral(value):
         "navigation_action": value.navigation_action,
         "action_kind": value.action_kind,
         "target_command": value.target_command,
+        "review_identity": value.review_identity,
     }
 
 

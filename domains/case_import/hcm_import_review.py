@@ -128,12 +128,16 @@ def _hcm_logical_code(issue_code: str) -> str:
         return "HCM-LINK-002"
     if issue_code == "hcm_case_import:case_import_existing_source_conflict":
         return "HCM-CASE-002"
+    if issue_code == "hcm_case_import:case_import_bootstrap_blocked":
+        return "HCM-SYSTEM-001"
     raise UnknownImportWarningIssueError(owning_lane="hcm", issue_code=issue_code)
 
 
 def _hcm_field_path(issue_code: str) -> str:
     if issue_code.startswith("hcm_identity:"):
         return "$client_link"
+    if issue_code == "hcm_case_import:case_import_bootstrap_blocked":
+        return "$case_setup"
     if issue_code.startswith("hcm_case_import:"):
         return "$source_row"
     _, separator, field_path = issue_code.partition(":")
