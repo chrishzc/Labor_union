@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CustomerServiceClient } from '../../../../../../api/customer_service/customer_service_client';
+import { CustomerServiceClientError } from '../../../../../../api/customer_service/customer_service_errors';
 import type { LineIdentityClient } from '../../../../../../api/line_identity/line_identity_client';
 import type { LineConfigurationQueryClient } from '../../../../../../api/line_configuration/line_configuration_query_client';
 import type { LineRichMenuDraftClient } from '../../../../../../api/line_rich_menu_draft/line_rich_menu_draft_client';
@@ -20,6 +21,25 @@ type LineIdentityQueryClient = Pick<LineIdentityClient, 'listBindings' | 'getBin
 afterEach(() => vi.restoreAllMocks());
 
 describe('LINE 管理頁禁止假 mutation', () => {
+  it('查詢失敗先顯示可讀訊息，技術錯誤碼預設收合', async () => {
+    const unavailable = new CustomerServiceClientError('unavailable', 'HTTP_503', 'Service Unavailable', 503, true);
+    const customer: CustomerServiceQueryClient = {
+      getSummary: vi.fn().mockRejectedValue(unavailable),
+      listTickets: vi.fn().mockRejectedValue(unavailable),
+      getTicketDetail: vi.fn().mockRejectedValue(new Error('not used')),
+    };
+
+    render(<LineManagementPage customerService={customer} />);
+
+    const alerts = await screen.findAllByRole('alert');
+    expect(alerts).toHaveLength(2);
+    for (const alert of alerts) {
+      expect(within(alert).getByText('Service Unavailable')).toBeInTheDocument();
+      expect(within(alert).getByText('HTTP_503')).toBeInTheDocument();
+      expect(alert.querySelector('details')).not.toHaveAttribute('open');
+    }
+  });
+
   it('未授權控制項不進入畫面，合法流程在未操作前維持零 mutation', async () => {
     const fetchSpy = vi.fn().mockRejectedValue(new Error('unexpected network'));
     vi.stubGlobal('fetch', fetchSpy);
@@ -79,11 +99,11 @@ describe('LINE 管理頁禁止假 mutation', () => {
     expect(screen.queryByRole('button', { name: /未開放/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '關閉' }));
 
-    fireEvent.click(screen.getByRole('button', { name: /2\. 多角色 Rich Menu/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Rich Menu' }));
     expect((await screen.findAllByText('案件進度')).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: /發布至 LINE|上傳圖片|刪除選單/ })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /3\. LINE 身分綁定/ }));
+    fireEvent.click(screen.getByRole('button', { name: '身分與授權' }));
     await screen.findByText('U123••••cdef');
     expect(screen.queryByRole('button', { name: /產生綁定邀請/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '查看明細' }));
@@ -91,12 +111,14 @@ describe('LINE 管理頁禁止假 mutation', () => {
     expect(screen.queryByRole('button', { name: /觀察解除|改綁其他身分|重試 Rich Menu 回復|人工完成/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '關閉' }));
 
-    fireEvent.click(screen.getByRole('button', { name: /4\. 通知規則/ }));
-    const ruleWorkspace = (await screen.findByRole('heading', { name: /LINE 推播與通知規則目錄/ })).closest('section');
+    fireEvent.click(screen.getByRole('button', { name: '通知與發送' }));
+    const ruleWorkspace = (await screen.findByRole('heading', { name: 'LINE 通知與發送' })).closest('section');
     expect(ruleWorkspace).not.toBeNull();
+    fireEvent.click(within(ruleWorkspace as HTMLElement).getByRole('button', { name: 'Onboarding 訊息' }));
     expect(within(ruleWorkspace as HTMLElement).getByText('Webhook 歡迎訊息設定預覽')).toBeInTheDocument();
     expect(within(ruleWorkspace as HTMLElement).getByText('執行與送達狀態請查通知紀錄')).toBeInTheDocument();
     expect(within(ruleWorkspace as HTMLElement).queryByText(/Webhook 自動推播中|Webhook自動推播中/)).not.toBeInTheDocument();
+    fireEvent.click(within(ruleWorkspace as HTMLElement).getByRole('button', { name: '規則目錄與編輯' }));
     const ruleCard = await within(ruleWorkspace as HTMLElement).findByRole('button', { name: /deposit_notice/ });
     expect(screen.queryByRole('button', { name: /建立新通知規則/ })).not.toBeInTheDocument();
     fireEvent.click(ruleCard);
@@ -104,7 +126,7 @@ describe('LINE 管理頁禁止假 mutation', () => {
     fireEvent.click(screen.getByRole('button', { name: '關閉' }));
 
     expect(screen.queryByRole('button', { name: /智慧客服 FAQ/ })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /5\. 三方服務群組/ }));
+    fireEvent.click(screen.getByRole('button', { name: '三方服務群組' }));
     expect(screen.queryByRole('button', { name: /建立三方群組/ })).not.toBeInTheDocument();
 
     expect(previewResolve).not.toHaveBeenCalled();
@@ -160,7 +182,7 @@ describe('LINE 管理頁禁止假 mutation', () => {
         richMenuDraft={richMenuDraft}
       />
     );
-    fireEvent.click(screen.getByRole('button', { name: /2\. 多角色 Rich Menu/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Rich Menu' }));
     const caseProgressLabel = await screen.findByText('案件進度', { selector: 'span.richmenu-btn-text' });
     fireEvent.click(caseProgressLabel.closest('button') as HTMLButtonElement);
 

@@ -2,7 +2,9 @@
  * Read-only curated common-QA catalog shown inside the AI customer-service studio.
  */
 import React, { useEffect, useMemo, useState } from 'react';
+import { Pencil, Plus, Trash2 } from 'lucide-react';
 import { sessionClient } from '../../api/auth/session_client';
+import { Drawer } from '../../components/Drawer';
 
 interface QaCatalogItem {
   id: string;
@@ -121,9 +123,9 @@ export const CommonQaCatalogPanel: React.FC = () => {
       });
       if (!response.ok) throw new Error('toggle_failed');
       await loadCatalog();
-      setNotice(`✅ 已${!item.enabled ? '啟用' : '停用'}題目：${item.id}`);
+      setNotice(`已${!item.enabled ? '啟用' : '停用'}題目：${item.id}`);
     } catch {
-      setNotice(`❌ 切換題目 ${item.id} 啟用狀態失敗。`);
+      setNotice(`切換題目 ${item.id} 啟用狀態失敗。`);
     }
   };
 
@@ -143,9 +145,9 @@ export const CommonQaCatalogPanel: React.FC = () => {
       });
       if (!response.ok) throw new Error('delete_failed');
       await loadCatalog();
-      setNotice(`✅ 已成功移除題目：${item.id}`);
+      setNotice(`已成功移除題目：${item.id}`);
     } catch {
-      setNotice(`❌ 移除題目 ${item.id} 失敗。`);
+      setNotice(`移除題目 ${item.id} 失敗。`);
     }
   };
 
@@ -197,7 +199,7 @@ export const CommonQaCatalogPanel: React.FC = () => {
           const text = typeof msg === 'object' ? msg?.error?.message : msg;
           throw new Error(text || '新增失敗');
         }
-        setNotice('✅ 已成功新增 QA 題目！');
+        setNotice('已成功新增 QA 題目。');
       } else if (editingItem) {
         const response = await fetch(`/api/v1/line/ai-events/qa-catalog/${editingItem.id}`, {
           method: 'PUT',
@@ -211,13 +213,13 @@ export const CommonQaCatalogPanel: React.FC = () => {
           const text = typeof msg === 'object' ? msg?.error?.message : msg;
           throw new Error(text || '更新失敗');
         }
-        setNotice(`✅ 已成功儲存題目：${editingItem.id}`);
+        setNotice(`已成功儲存題目：${editingItem.id}`);
       }
       closeModal();
       await loadCatalog();
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : '儲存變更失敗';
-      setModalNotice(`❌ ${errMsg}`);
+      setModalNotice(errMsg);
     } finally {
       setIsSaving(false);
     }
@@ -243,10 +245,10 @@ export const CommonQaCatalogPanel: React.FC = () => {
   }, [catalog, query, enabledFilter]);
 
   return (
-    <div className="ai-editor-card" style={{ marginBottom: '16px' }}>
-      <div className="ai-editor-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <h4>📚 常見 QA 題庫</h4>
+    <div className="ai-editor-card qa-catalog-panel">
+      <div className="ai-editor-header qa-catalog-header">
+        <div className="qa-catalog-title">
+          <h2>常見 QA 題庫</h2>
           {catalog && (
             <span className="category-badge">
               共 {catalog.total_count} 筆 · {catalog.enabled_count} 筆已啟用
@@ -255,11 +257,10 @@ export const CommonQaCatalogPanel: React.FC = () => {
         </div>
         <button
           type="button"
-          className="line-tab-btn active"
-          style={{ padding: '6px 12px', fontSize: '13px' }}
+          className="line-primary-btn"
           onClick={openCreateModal}
         >
-          ➕ 新增 QA 題目
+          <Plus aria-hidden="true" />新增 QA
         </button>
       </div>
 
@@ -271,7 +272,7 @@ export const CommonQaCatalogPanel: React.FC = () => {
 
       {catalog && (
         <>
-          <div className="form-group-row" style={{ marginTop: '12px' }}>
+          <div className="form-group-row qa-catalog-filters">
             <div className="form-field-half">
               <label htmlFor="qa-catalog-search">搜尋常見 QA</label>
               <input
@@ -299,53 +300,50 @@ export const CommonQaCatalogPanel: React.FC = () => {
             顯示 {filteredItems.length}／{catalog.total_count} 筆 · 來源 {catalog.source_identity}
           </small>
 
-          <div style={{ maxHeight: '460px', overflowY: 'auto', marginTop: '10px' }}>
+          <div className="qa-catalog-list">
             {filteredItems.map((item) => (
-              <details key={item.id} className="ai-rule-item-card" style={{ marginBottom: '8px' }}>
-                <summary style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <details key={item.id} className="ai-rule-item-card qa-catalog-item">
+                <summary className="qa-catalog-summary">
                   <div>
                     <strong>{item.id} · {item.question}</strong>
-                    <span className="category-badge" style={{ marginLeft: '8px' }}>
+                    <span className="category-badge qa-catalog-category">
                       {item.category} / {item.tag}
                     </span>
                   </div>
-                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                  <div className="qa-catalog-actions">
                     <button
                       type="button"
-                      className={`line-tab-btn ${item.enabled ? 'active' : ''}`}
-                      style={{ padding: '3px 8px', fontSize: '12px' }}
+                      className={`qa-status-toggle ${item.enabled ? 'active' : ''}`}
                       title="點擊切換啟用/停用"
                       onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleToggleStatus(item); }}
                     >
-                      {item.enabled ? '🟢 啟用中' : '⚪ 停用中'}
+                      {item.enabled ? '啟用中' : '停用中'}
                     </button>
                     <button
                       type="button"
                       className="line-secondary-btn"
-                      style={{ padding: '3px 8px', fontSize: '12px' }}
                       title="編輯此題目"
                       onClick={(e) => { e.preventDefault(); e.stopPropagation(); openEditModal(item); }}
                     >
-                      ✏️ 編輯
+                      <Pencil aria-hidden="true" />編輯
                     </button>
                     <button
                       type="button"
-                      className="line-secondary-btn"
-                      style={{ padding: '3px 8px', fontSize: '12px', color: '#d9534f', borderColor: '#d9534f' }}
+                      className="line-danger-btn"
                       title="移除此題目"
                       onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleDeleteItem(item); }}
                     >
-                      🗑️ 移除
+                      <Trash2 aria-hidden="true" />移除
                     </button>
                   </div>
                 </summary>
-                <div style={{ marginTop: '10px', paddingLeft: '4px' }}>
+                <div className="qa-catalog-detail">
                   <div><strong>常見問法：</strong>{item.aliases.length > 0 ? item.aliases.join('、') : '—'}</div>
-                  <div style={{ marginTop: '6px' }}>
+                  <div>
                     <strong>固定答案：</strong>{item.answer || '尚無答案'}
                   </div>
-                  {item.notes && <div style={{ marginTop: '6px' }}><strong>備註：</strong>{item.notes}</div>}
-                  <small style={{ color: '#888', display: 'block', marginTop: '6px' }}>原始來源：{item.source_ref}</small>
+                  {item.notes && <div><strong>備註：</strong>{item.notes}</div>}
+                  <details className="qa-catalog-technical"><summary>技術資訊</summary><small>來源：{item.source_ref}</small></details>
                 </div>
               </details>
             ))}
@@ -356,164 +354,49 @@ export const CommonQaCatalogPanel: React.FC = () => {
         </>
       )}
 
-      {/* 編輯 / 新增 QA Modal */}
-      {(isCreating || editingItem) && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(0,0,0,0.55)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 9999,
-            padding: '16px',
-          }}
-          onClick={closeModal}
-        >
-          <div
-            className="ai-editor-card"
-            style={{
-              width: '100%',
-              maxWidth: '560px',
-              maxHeight: '90vh',
-              overflowY: 'auto',
-              background: '#fff',
-              borderRadius: '16px',
-              padding: '24px',
-              boxShadow: '0 16px 40px rgba(0,0,0,0.2)',
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <h3 style={{ margin: 0 }}>
-                {isCreating ? '➕ 新增 QA 題目' : `✏️ 編輯 QA 題目（${editingItem?.id}）`}
-              </h3>
-              <button
-                type="button"
-                className="line-secondary-btn"
-                style={{ padding: '4px 10px' }}
-                onClick={closeModal}
-              >
-                ✕ 關閉
-              </button>
-            </div>
-
-            <form onSubmit={executeSave} noValidate>
-              {modalNotice && (
-                <div
-                  className="line-warning"
-                  role="alert"
-                  style={{ color: '#c0392b', borderColor: '#e74c3c', background: '#fdf2f2', marginBottom: '14px', fontWeight: 500 }}
-                >
-                  {modalNotice}
-                </div>
-              )}
-
-              <div style={{ marginBottom: '12px' }}>
-                <label style={{ fontWeight: 600, display: 'block', marginBottom: '4px' }}>標準問題（Question）*</label>
-                <input
-                  type="text"
-                  value={formData.question}
-                  placeholder="例如：如果和月嫂合作不適合，可以更換月嫂嗎？"
-                  style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid #ccc' }}
-                  onChange={(e) => setFormData({ ...formData, question: e.target.value })}
-                />
-              </div>
-
-              <div style={{ marginBottom: '12px' }}>
-                <label style={{ fontWeight: 600, display: 'block', marginBottom: '4px' }}>標準回答（Answer）</label>
-                <textarea
-                  rows={4}
-                  value={formData.answer}
-                  placeholder="請輸入核准的標準答案內容（可暫留空待審核）…"
-                  style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid #ccc' }}
-                  onChange={(e) => setFormData({ ...formData, answer: e.target.value })}
-                />
-              </div>
-
-              <div style={{ marginBottom: '12px' }}>
-                <label style={{ fontWeight: 600, display: 'block', marginBottom: '4px' }}>常見問法 / 別名（Aliases，每行一筆）</label>
-                <textarea
-                  rows={3}
-                  value={formData.aliases}
-                  placeholder="可以換月嫂嗎？&#10;跟月嫂觀念不合可以換人嗎？"
-                  style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid #ccc' }}
-                  onChange={(e) => setFormData({ ...formData, aliases: e.target.value })}
-                />
-                <small style={{ color: '#666' }}>多個問句請換行輸入，供語意比對與關鍵字命中。</small>
-              </div>
-
-              <div className="form-group-row" style={{ marginBottom: '12px' }}>
-                <div className="form-field-half">
-                  <label style={{ fontWeight: 600, display: 'block', marginBottom: '4px' }}>業務分類（Category）</label>
-                  <input
-                    type="text"
-                    value={formData.category}
-                    placeholder="例如：月嫂媒合、合約、費用"
-                    style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid #ccc' }}
-                    onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                  />
-                </div>
-                <div className="form-field-half">
-                  <label style={{ fontWeight: 600, display: 'block', marginBottom: '4px' }}>標籤（Tag）</label>
-                  <input
-                    type="text"
-                    value={formData.tag}
-                    placeholder="例如：更換月嫂、試用期"
-                    style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid #ccc' }}
-                    onChange={(e) => setFormData({ ...formData, tag: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              <div style={{ marginBottom: '12px' }}>
-                <label style={{ fontWeight: 600, display: 'block', marginBottom: '4px' }}>內部備註（Notes，選填）</label>
-                <input
-                  type="text"
-                  value={formData.notes}
-                  placeholder="補充說明或審核紀錄"
-                  style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid #ccc' }}
-                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                />
-              </div>
-
-              <div style={{ marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <input
-                  type="checkbox"
-                  id="modal-enabled-checkbox"
-                  checked={formData.enabled}
-                  onChange={(e) => setFormData({ ...formData, enabled: e.target.checked })}
-                />
-                <label htmlFor="modal-enabled-checkbox" style={{ fontWeight: 600, cursor: 'pointer' }}>
-                  立即啟用此題目（enabled=true，允許進入自動回答鏈）
-                </label>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-                <button
-                  type="button"
-                  disabled={isSaving}
-                  className="line-secondary-btn"
-                  style={{ padding: '8px 16px' }}
-                  onClick={closeModal}
-                >
-                  取消
-                </button>
-                <button
-                  type="button"
-                  disabled={isSaving}
-                  className="line-tab-btn active"
-                  style={{ padding: '8px 20px', opacity: isSaving ? 0.7 : 1, cursor: isSaving ? 'not-allowed' : 'pointer' }}
-                  onClick={executeSave}
-                >
-                  {isSaving ? '⏳ 儲存中...' : (isCreating ? '確認新增' : '儲存變更')}
-                </button>
-              </div>
-            </form>
+      <Drawer
+        isOpen={isCreating || editingItem !== null}
+        onClose={closeModal}
+        title={isCreating ? '新增 QA' : `編輯 QA（${editingItem?.id}）`}
+        size="wide"
+        closeDisabled={isSaving}
+        closeLabel="關閉 QA 編輯器"
+        footer={(
+          <div className="line-drawer-footer">
+            <button type="button" disabled={isSaving} className="line-secondary-btn" onClick={closeModal}>取消</button>
+            <button type="button" disabled={isSaving} className="line-primary-btn" onClick={executeSave}>
+              {isSaving ? '儲存中…' : (isCreating ? '新增 QA' : '儲存變更')}
+            </button>
           </div>
-        </div>
-      )}
+        )}
+      >
+        <form className="qa-editor-form" onSubmit={executeSave} noValidate>
+          {modalNotice && <div className="line-error" role="alert">{modalNotice}</div>}
+
+          <label className="qa-editor-field">
+            <span>標準問題 <span aria-hidden="true">*</span></span>
+            <input required type="text" value={formData.question} placeholder="例如：如果和月嫂合作不適合，可以更換月嫂嗎？" onChange={(e) => setFormData({ ...formData, question: e.target.value })} />
+          </label>
+          <label className="qa-editor-field">
+            <span>標準回答</span>
+            <textarea rows={5} value={formData.answer} placeholder="請輸入核准的標準答案內容（可暫留空待審核）…" onChange={(e) => setFormData({ ...formData, answer: e.target.value })} />
+          </label>
+          <label className="qa-editor-field">
+            <span>常見問法／別名（每行一筆）</span>
+            <textarea rows={4} value={formData.aliases} placeholder={'可以換月嫂嗎？\n跟月嫂觀念不合可以換人嗎？'} onChange={(e) => setFormData({ ...formData, aliases: e.target.value })} />
+            <small>多個問句請換行輸入，供語意比對與關鍵字命中。</small>
+          </label>
+          <div className="qa-editor-columns">
+            <label className="qa-editor-field"><span>業務分類</span><input type="text" value={formData.category} placeholder="例如：月嫂媒合、合約、費用" onChange={(e) => setFormData({ ...formData, category: e.target.value })} /></label>
+            <label className="qa-editor-field"><span>標籤</span><input type="text" value={formData.tag} placeholder="例如：更換月嫂、試用期" onChange={(e) => setFormData({ ...formData, tag: e.target.value })} /></label>
+          </div>
+          <label className="qa-editor-field"><span>內部備註（選填）</span><input type="text" value={formData.notes} placeholder="補充說明或審核紀錄" onChange={(e) => setFormData({ ...formData, notes: e.target.value })} /></label>
+          <label className="checkbox-item qa-editor-enabled">
+            <input type="checkbox" checked={formData.enabled} onChange={(e) => setFormData({ ...formData, enabled: e.target.checked })} />
+            <span>立即啟用此題目，允許進入自動回答鏈</span>
+          </label>
+        </form>
+      </Drawer>
     </div>
   );
 };

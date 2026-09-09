@@ -4,11 +4,11 @@
  */
 import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { CustomerServiceClient } from '../api/customer_service/customer_service_client';
-import type { LineIdentityClient } from '../api/line_identity/line_identity_client';
-import { LineManagementPage } from '../pages/LineManagementPage';
-import { CUSTOMER_SERVICE_DETAIL_FIXTURE, CUSTOMER_SERVICE_PAGE_FIXTURE, CUSTOMER_SERVICE_SUMMARY_FIXTURE } from './fixtures/customer_service/customer_service_contract_fixtures';
-import { BINDING_PAGE_FIXTURE, BOUND_IDENTITY_FIXTURE, FIXTURE_LINE_USER_ID, REVOCATION_PREVIEW_FIXTURE, REVOCATION_REQUEST_FIXTURE } from './fixtures/line_identity/line_identity_contract_fixtures';
+import type { CustomerServiceClient } from '../../../../../../api/customer_service/customer_service_client';
+import type { LineIdentityClient } from '../../../../../../api/line_identity/line_identity_client';
+import { LineManagementPage } from '../../../../../../pages/LineManagementPage';
+import { CUSTOMER_SERVICE_DETAIL_FIXTURE, CUSTOMER_SERVICE_PAGE_FIXTURE, CUSTOMER_SERVICE_SUMMARY_FIXTURE } from '../../../../../fixtures/customer_service/customer_service_contract_fixtures';
+import { BINDING_PAGE_FIXTURE, BOUND_IDENTITY_FIXTURE, FIXTURE_LINE_USER_ID, REVOCATION_PREVIEW_FIXTURE, REVOCATION_REQUEST_FIXTURE } from '../../../../../fixtures/line_identity/line_identity_contract_fixtures';
 
 type CustomerServiceQueryClient = Pick<CustomerServiceClient, 'getSummary' | 'listTickets' | 'getTicketDetail'>;
 type LineIdentityQueryClient = Pick<LineIdentityClient, 'listBindings' | 'getBinding' | 'previewRevocation' | 'applyRevocation'>;
@@ -33,19 +33,20 @@ describe('LINE 身分解除 successor', () => {
     };
     const identity: LineIdentityQueryClient = identityCandidate;
     render(<LineManagementPage customerService={customer} lineIdentity={identity} />);
-    fireEvent.click(screen.getByRole('button', { name: /3\. LINE 身分綁定/ }));
+    fireEvent.click(screen.getByRole('button', { name: '身分與授權' }));
     await screen.findByText('U123••••cdef');
     expect(screen.getByText(/正式授權只以 server-side 驗證的 LIFF ID token/)).toBeInTheDocument();
     expect(screen.queryByText(FIXTURE_LINE_USER_ID)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '查看明細' }));
     await screen.findByText('尚未申請解除');
     fireEvent.click(screen.getByRole('button', { name: '檢查解除影響' }));
-    await screen.findByText('可提交解除');
+    await screen.findByText('可解除身分');
+    expect(screen.getByText(/立即停止此身分的系統授權.*自動將 LINE 圖文選單回復成訪客模式/)).toBeInTheDocument();
     expect(screen.getByText('已核對目前綁定狀態與解除影響。')).toBeInTheDocument();
     expect(screen.getByText('Default Rich Menu：已發布')).toBeInTheDocument();
     fireEvent.change(screen.getByRole('textbox', { name: '解除原因' }), { target: { value: '客戶已確認解除 LINE 身分綁定' } });
     fireEvent.click(screen.getByRole('checkbox', { name: '我已確認解除對象與影響範圍' }));
-    fireEvent.click(screen.getByRole('button', { name: '提交解除' }));
+    fireEvent.click(screen.getByRole('button', { name: '解除身分並回復訪客選單' }));
     await screen.findByText('解除申請已受理');
     expect(screen.queryByText('解除申請 #901')).not.toBeInTheDocument();
     expect(screen.getByText(/等待 Rich Menu 回復.*正在等待解除結果回讀/)).toBeInTheDocument();
@@ -77,7 +78,7 @@ describe('LINE 身分解除 successor', () => {
     };
     const identity: LineIdentityQueryClient = identityCandidate;
     render(<LineManagementPage customerService={customer} lineIdentity={identity} />);
-    fireEvent.click(screen.getByRole('button', { name: /3\. LINE 身分綁定/ }));
+    fireEvent.click(screen.getByRole('button', { name: '身分與授權' }));
     await screen.findByText('U123••••cdef');
     fireEvent.click(screen.getByRole('button', { name: '查看明細' }));
     await screen.findByText('LINE 身分明細載入失敗');

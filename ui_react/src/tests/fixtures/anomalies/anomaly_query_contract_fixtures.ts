@@ -218,6 +218,7 @@ export const VALID_IMPORT_WARNING_REFERRAL_VIEW: ImportWarningReferralView = {
   navigation_action: 'hcm_import_center',
   action_kind: 'owner_preview_apply',
   target_command: 'preview_hcm_resubmission',
+  review_identity: 'review-fixture-1',
 };
 
 // ============================================================================

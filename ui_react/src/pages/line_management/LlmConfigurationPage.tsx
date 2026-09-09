@@ -4,6 +4,7 @@
  */
 import React, { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
+import { Bot, Eye, EyeOff, PlugZap, Save } from 'lucide-react';
 import {
   fetchLlmApiKeyStatus,
   replaceLlmApiKey,
@@ -56,6 +57,8 @@ export const LlmConfigurationPage: React.FC = () => {
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testingConnection, setTestingConnection] = useState(false);
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [lastConnectionTestAt, setLastConnectionTestAt] = useState<Date | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -114,6 +117,7 @@ export const LlmConfigurationPage: React.FC = () => {
     setNotice(null);
     try {
       const result = await testLlmConnection();
+      setLastConnectionTestAt(new Date());
       if (result.connected) {
         setNotice(`Gemini 連線成功：${result.model}`);
       } else {
@@ -143,13 +147,15 @@ export const LlmConfigurationPage: React.FC = () => {
   return (
     <section className="llm-config-page" aria-labelledby="llm-config-title">
       <header className="llm-config-header">
-        <div>
-          <p className="llm-config-eyebrow">LINE Hub / AI</p>
-          <h1 id="llm-config-title">AI 模型設定</h1>
-          <p className="llm-config-description">
-            目前固定使用 Google AI Studio 的 Gemini API，並優先採用 Free Tier 的 Flash-Lite 模型。
-            Key 只會送往後端寫入私有 runtime secret；既有 Key 不會回傳至瀏覽器。
-          </p>
+        <div className="llm-config-heading">
+          <span className="llm-config-heading-icon" aria-hidden="true"><Bot /></span>
+          <div>
+            <p className="llm-config-eyebrow">LINE 專區</p>
+            <h1 id="llm-config-title">AI 模型設定</h1>
+            <p className="llm-config-description">
+              管理 Gemini 連線憑證，並確認目前模型是否可正常回應。
+            </p>
+          </div>
         </div>
         <div className={`llm-config-status ${status?.configured ? 'configured' : 'empty'}`}>
           <span className="llm-config-status-dot" aria-hidden="true" />
@@ -166,37 +172,58 @@ export const LlmConfigurationPage: React.FC = () => {
       <div className="llm-config-card">
         <div className="llm-config-card-heading">
           <h2>Google AI Studio / Gemini API</h2>
-          <p>模型：{GEMINI_MODEL}（Free Tier 優先）。儲存後輸入框立即清空；再次提交會覆寫目前設定。</p>
+          <dl className="llm-config-model-facts">
+            <div><dt>供應商</dt><dd>Google AI Studio</dd></div>
+            <div><dt>模型</dt><dd>{GEMINI_MODEL}</dd></div>
+            <div><dt>方案</dt><dd>Free Tier 優先</dd></div>
+          </dl>
         </div>
 
         <form onSubmit={handleSubmit} className="llm-config-form">
           <label htmlFor="llm-api-key">Google AI Studio API Key</label>
-          <input
-            id="llm-api-key"
-            name="llm-api-key"
-            type="password"
-            autoComplete="off"
-            autoCapitalize="none"
-            spellCheck={false}
-            value={apiKey}
-            onChange={(event) => setApiKey(event.target.value)}
-            placeholder="貼上 Gemini API Key"
-            disabled={saving}
-            aria-describedby="llm-api-key-help"
-          />
+          <div className="llm-config-secret-field">
+            <input
+              id="llm-api-key"
+              name="llm-api-key"
+              type={showApiKey ? 'text' : 'password'}
+              autoComplete="off"
+              autoCapitalize="none"
+              spellCheck={false}
+              value={apiKey}
+              onChange={(event) => setApiKey(event.target.value)}
+              placeholder="貼上新的 Gemini API Key"
+              disabled={saving}
+              aria-describedby="llm-api-key-help"
+            />
+            <button
+              className="llm-config-secret-toggle"
+              type="button"
+              aria-label={showApiKey ? '隱藏正在輸入的 API Key' : '顯示正在輸入的 API Key'}
+              aria-pressed={showApiKey}
+              onClick={() => setShowApiKey((visible) => !visible)}
+              disabled={saving || apiKey.length === 0}
+            >
+              {showApiKey ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
+            </button>
+          </div>
           <p id="llm-api-key-help" className="llm-config-help">
-            系統只回報是否已設定與更新時間；不會透過任何管理 API 回傳完整或遮罩後的 Key。
+            {status?.configured
+              ? '目前已有金鑰。基於安全契約，系統不回傳完整內容或末四碼；送出新值會覆寫原設定。'
+              : '金鑰只會送往後端私密儲存，儲存後立即清空。'}
           </p>
 
           <div className="llm-config-actions">
-            <button type="submit" disabled={saving || apiKey.trim().length < 8}>
+            <button className="llm-config-primary-action" type="submit" disabled={saving || apiKey.trim().length < 8}>
+              <Save aria-hidden="true" />
               {saving ? '儲存中…' : status?.configured ? '覆寫 Gemini API Key' : '儲存 Gemini API Key'}
             </button>
             <button
+              className="llm-config-secondary-action"
               type="button"
               onClick={handleConnectionTest}
               disabled={!status?.configured || saving || testingConnection}
             >
+              <PlugZap aria-hidden="true" />
               {testingConnection ? '測試中…' : '測試 Gemini 連線'}
             </button>
           </div>
@@ -204,6 +231,9 @@ export const LlmConfigurationPage: React.FC = () => {
 
         {updatedAt && (
           <p className="llm-config-meta">最後更新：{updatedAt}</p>
+        )}
+        {lastConnectionTestAt && (
+          <p className="llm-config-meta">最近測試：{lastConnectionTestAt.toLocaleString('zh-TW')}</p>
         )}
         {notice && <div className="llm-config-notice success" role="status">{notice}</div>}
         {error && <div className="llm-config-notice error" role="alert">{error}</div>}

@@ -3,6 +3,7 @@
  * Description: 呈現 LINE 身分審核 typed Query／Preview／Apply／receipt／readback 工作台。
  */
 import { useEffect, useRef, useState } from 'react';
+import { BadgeCheck, RefreshCw } from 'lucide-react';
 import {
   adaptLineIdentityReview,
   adaptLineIdentityReviewPage,
@@ -167,10 +168,10 @@ function ReviewQueuePanel(props: ReviewQueuePanelProps) {
     <>
       <div className="line-section-heading">
         <div>
-          <h3>🪪 LINE 身分人工審核</h3>
+          <h3 className="line-heading-with-icon"><BadgeCheck aria-hidden="true" />LINE 身分人工審核</h3>
           <p>只有具審核權限的真人管理員可核准或拒絕；等待時間不會自動做出決定。</p>
         </div>
-        <button type="button" className="line-secondary-btn" onClick={props.onRefresh}>🔄 重新整理審核佇列</button>
+        <button type="button" className="line-secondary-btn" onClick={props.onRefresh}><RefreshCw aria-hidden="true" />重新整理</button>
       </div>
       {summary.status === 'loading' && <div className="line-loading">正在載入審核摘要…</div>}
       {summary.status === 'error' && <div className="line-error" role="alert">{summary.error}</div>}
@@ -183,7 +184,7 @@ function ReviewQueuePanel(props: ReviewQueuePanelProps) {
         </div>
       )}
       <label htmlFor="line-identity-review-type">審核類型</label>
-      <select id="line-identity-review-type" value={reviewType} onChange={(event) => props.onReviewTypeChange(event.target.value as 'all' | LineIdentityReviewType)}>
+      <select className="line-filter-select" id="line-identity-review-type" value={reviewType} onChange={(event) => props.onReviewTypeChange(event.target.value as 'all' | LineIdentityReviewType)}>
         <option value="all">全部待審類型</option>
         <option value="client_rebind">客戶重新綁定</option>
         <option value="staff_verification">月嫂身分驗證</option>
@@ -195,7 +196,8 @@ function ReviewQueuePanel(props: ReviewQueuePanelProps) {
       {page.value && page.value.items.length > 0 && (
         <div className="line-table-scroll">
           <table className="line-data-table">
-            <thead><tr><th>申請</th><th>類型</th><th>對象</th><th>LINE ID</th><th>狀態</th><th>操作</th></tr></thead>
+            <caption className="sr-only">LINE 身分人工審核清單</caption>
+            <thead><tr><th scope="col">申請</th><th scope="col">類型</th><th scope="col">對象</th><th scope="col">LINE ID</th><th scope="col">狀態</th><th scope="col">操作</th></tr></thead>
             <tbody>{page.value.items.map((item) => (
               <tr key={item.requestId}>
                 <td>#{item.requestId}</td><td>{item.reviewTypeLabel}</td>

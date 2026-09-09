@@ -8,13 +8,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
 import { SYSTEM_STATUS_ENDPOINT } from '../api/system/system_status_client';
 import { sessionClient } from '../api/auth/session_client';
-import { detailedHcmResult } from './fixtures/hcm_import_result_fixtures';
 
 vi.mock('../pages/CurrentAnomaliesPage', () => ({
   CurrentAnomaliesPage: () => null,
 }));
 
-const HCM_RESULTS_ENDPOINT = '/api/v1/case-import/hcm/workbooks/results';
+const HCM_RESULTS_ENDPOINT = '/api/v1/import-warning-tracking/tasks';
 const ACTIVE_PREVIEW_CONTROL_IDS = [
   'imports.hcm-current.preview',
   'imports.client-beclass.preview',
@@ -60,22 +59,16 @@ function jsonResponse(body: unknown, status = 200): Response {
 function hcmEnvelope(items: unknown[]): unknown {
   return {
     success: true,
-    message: '成功取得 HCM 匯入結果',
-    data: { items, next_cursor: null },
+    message: '成功取得匯入警示追蹤清單',
+    data: items,
     error: null,
   };
 }
 
-function legacyHcmResult(): typeof detailedHcmResult {
-  return {
-    ...detailedHcmResult,
-    receipt_id: 9,
-    source_content_digest: 'b'.repeat(64),
-    row_outcomes_available: false,
-    legacy_summary_only: true,
-    row_outcomes: [],
-  };
-}
+const activeHcmTasks = [
+  { occurrence_identity: 'warning-phone', owning_lane: 'hcm', logical_code: 'HCM-FIELD-002', field_path: '行動電話', subject: '115000002', issue_codes: ['hcm_field_invalid:行動電話'], tracking_status: 'open', tracking_version: 1, evidence_reference: null, display_message: '行動電話格式錯誤', navigation_action: 'hcm_import_center' },
+  { occurrence_identity: 'warning-system', owning_lane: 'hcm', logical_code: 'HCM-SYSTEM-001', field_path: '$case_setup', subject: '115000150', issue_codes: ['hcm_case_import:case_import_bootstrap_blocked'], tracking_status: 'open', tracking_version: 1, evidence_reference: null, display_message: '案件初始設定尚未完成，請檢查系統費率與案件條件', navigation_action: 'hcm_import_center' },
+];
 
 function typedUnavailableResponse(): unknown {
   return {
@@ -107,7 +100,7 @@ function installFetchStub(mode: FetchMode): FetchRecord[] {
     if (url.pathname === HCM_RESULTS_ENDPOINT) {
       if (mode === 'empty') return jsonResponse(hcmEnvelope([]));
       if (mode === 'unavailable') return jsonResponse(typedUnavailableResponse(), 503);
-      return jsonResponse(hcmEnvelope([detailedHcmResult, legacyHcmResult()]));
+      return jsonResponse(hcmEnvelope(activeHcmTasks));
     }
     throw new Error(`Unexpected API path: ${url.pathname}`);
   });
@@ -158,7 +151,7 @@ describe('Data Import HCM Result Review entry cutover candidate', () => {
 
     render(<StrictMode><App /></StrictMode>);
 
-    await waitFor(() => expect(screen.getAllByText('匯入結果')).toHaveLength(2));
+    await waitFor(() => expect(screen.getByText('HCM 目前待處理異常')).toBeInTheDocument());
     expect(window.location.hash).toBe('#data-import');
     expect(hcmRequests(requests)).toHaveLength(1);
     expect(hcmRequests(requests)[0]?.method).toBe('GET');
@@ -169,37 +162,31 @@ describe('Data Import HCM Result Review entry cutover candidate', () => {
     expectOnlyGet(requests);
   });
 
-  it('renders inserted, warning, problem, exact replay and legacy unavailable without fake success', async () => {
+  it('renders only active problems with plain-language messages', async () => {
     authenticate();
     const requests = installFetchStub('ready');
 
     render(<StrictMode><App /></StrictMode>);
 
-    await waitFor(() => expect(screen.getAllByText('匯入結果')).toHaveLength(2));
-    expect(screen.getByText('本次新增訂單')).toBeInTheDocument();
-    expect(screen.getByText('115000001')).toBeInTheDocument();
-    expect(screen.getAllByText('115000002').length).toBeGreaterThan(0);
-    expect(screen.getByText(/^欄位：行動電話$/)).toBeInTheDocument();
-    expect(screen.getByText(/^代碼：hcm_field_invalid:行動電話$/)).toBeInTheDocument();
-    expect(screen.getByText('115000003')).toBeInTheDocument();
-    expect(screen.getByText('已存在相同資料')).toBeInTheDocument();
-    expect(screen.getByText(/歷史匯入摘要；本批次統計如上/)).toBeInTheDocument();
-    expect(screen.queryByText('本批次沒有新增訂單。')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('案件 115000002')).toBeInTheDocument());
+    expect(screen.getByText('行動電話格式錯誤')).toBeInTheDocument();
+    expect(screen.getByText('案件 115000150')).toBeInTheDocument();
+    expect(screen.queryByText(/hcm_field_invalid/)).not.toBeInTheDocument();
+    expect(screen.queryByText('本次新增訂單')).not.toBeInTheDocument();
     expect(hcmRequests(requests)).toHaveLength(1);
     expectOnlyGet(requests);
   });
 
-  it('problem action returns focus to the HCM owner workflow without another HTTP request', async () => {
+  it('system problem action routes to the anomaly owner workflow without mutation', async () => {
     authenticate();
     const requests = installFetchStub('ready');
 
     render(<StrictMode><App /></StrictMode>);
-    await waitFor(() => expect(screen.getAllByText('匯入結果')).toHaveLength(2));
+    await waitFor(() => expect(screen.getByText('案件 115000150')).toBeInTheDocument());
     const beforeReferral = requests.length;
 
-    fireEvent.click(screen.getByRole('button', { name: '回到 HCM 工作簿修正' }));
-    expect(window.location.hash).toBe('#data-import');
-    expect(document.activeElement).toHaveAttribute('data-control-id', 'imports.hcm-current.open-preview');
+    fireEvent.click(screen.getByRole('button', { name: '檢查系統設定／重新檢查' }));
+    expect(window.location.hash).toBe('#anomalies');
     expect(requests).toHaveLength(beforeReferral);
     expect(hcmRequests(requests)).toHaveLength(1);
     expectOnlyGet(requests);
@@ -210,7 +197,7 @@ describe('Data Import HCM Result Review entry cutover candidate', () => {
     const emptyRequests = installFetchStub('empty');
     render(<StrictMode><App /></StrictMode>);
 
-    await waitFor(() => expect(screen.getByText(/目前沒有可查詢的 HCM 匯入結果/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/目前沒有待處理的 HCM 異常/)).toBeInTheDocument());
     expect(screen.queryByText(/Receipt #/)).not.toBeInTheDocument();
     expect(hcmRequests(emptyRequests)).toHaveLength(1);
     expectOnlyGet(emptyRequests);
@@ -223,9 +210,9 @@ describe('Data Import HCM Result Review entry cutover candidate', () => {
     const unavailableRequests = installFetchStub('unavailable');
     render(<StrictMode><App /></StrictMode>);
 
-    await waitFor(() => expect(document.querySelector('[data-surface-id="imports.hcm-results.error"]')).toHaveTextContent(/HCM 匯入結果目前無法取得/));
+    await waitFor(() => expect(document.querySelector('[data-surface-id="imports.hcm-results.error"]')).toHaveTextContent(/待處理異常暫時無法載入/));
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '重試結果查詢' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '重試查詢' })).toBeInTheDocument();
     expect(screen.queryByText(/Receipt #/)).not.toBeInTheDocument();
     expect(hcmRequests(unavailableRequests)).toHaveLength(1);
     expectOnlyGet(unavailableRequests);
@@ -236,7 +223,7 @@ describe('Data Import HCM Result Review entry cutover candidate', () => {
     const requests = installFetchStub('empty');
 
     render(<StrictMode><App /></StrictMode>);
-    await waitFor(() => expect(screen.getByText(/目前沒有可查詢的 HCM 匯入結果/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/目前沒有待處理的 HCM 異常/)).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: /工作簿資料匯入/ }));
 
     expect(document.querySelector('[data-control-id="imports.hcm-current.open-preview"]')).toBeInTheDocument();

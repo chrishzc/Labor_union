@@ -54,6 +54,7 @@ describe('Anomaly Query Adapter Suite', () => {
     const view = adaptImportWarningReferral(VALID_IMPORT_WARNING_REFERRAL_VIEW);
     expect(view.owningLane).toBe('hcm');
     expect(view.targetCommand).toBe('preview_hcm_resubmission');
+    expect(view.reviewIdentity).toBe('review-fixture-1');
   });
   describe('Constants and Category Tabs', () => {
     it('defines expected CATEGORY_TAB_KEYS in canonical order', () => {

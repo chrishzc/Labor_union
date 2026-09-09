@@ -1,6 +1,6 @@
 /**
  * File: line_identity_maintenance_actions.test.tsx
- * Description: 驗證 LINE 身分更正 Preview／Apply、解除 retry 與人工完成二次確認流程。
+ * Description: 驗證 LINE 身分更正 Preview／Apply，以及解除後自動回復訪客選單的 retry 流程。
  */
 import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -18,7 +18,6 @@ type MaintenanceClient = Pick<
   | 'previewReplacement'
   | 'applyReplacement'
   | 'retryRevocation'
-  | 'manualCompleteRevocation'
 >;
 
 afterEach(() => vi.restoreAllMocks());
@@ -41,11 +40,6 @@ function maintenanceClient(overrides: Partial<MaintenanceClient> = {}): Maintena
       ...REVOCATION_REQUEST_FIXTURE,
       request_id: 91,
       status: 'menu_reset_failed',
-    }),
-    manualCompleteRevocation: vi.fn().mockResolvedValue({
-      ...REVOCATION_REQUEST_FIXTURE,
-      request_id: 91,
-      status: 'manual_completed',
     }),
     ...overrides,
   };
@@ -99,7 +93,7 @@ describe('LINE 身分維護操作', () => {
     expect(document.body.textContent).not.toContain(FIXTURE_LINE_USER_ID);
   });
 
-  it('解除失敗可 retry，但人工完成必須原因加兩項明確確認', async () => {
+  it('解除失敗只提供訪客選單回復，不呈現人工解除分支', async () => {
     const client = maintenanceClient();
     const failedBinding = {
       ...BOUND_IDENTITY_FIXTURE,
@@ -112,33 +106,49 @@ describe('LINE 身分維護操作', () => {
         lineUserId={FIXTURE_LINE_USER_ID}
         binding={failedBinding}
         client={client}
-        canManualComplete
       />
     );
 
-    const manualButton = screen.getByRole('button', { name: '人工完成解除' });
-    expect(manualButton).toBeDisabled();
+    expect(screen.getByText(/身分授權已停止/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /人工.*解除/ })).not.toBeInTheDocument();
     fireEvent.change(screen.getByRole('textbox', { name: '維護原因' }), {
       target: { value: 'provider 回復已永久失敗' },
     });
-    fireEvent.click(screen.getByRole('button', { name: '重新排入 Rich Menu 回復' }));
-    await screen.findByText(/已重新排入 Rich Menu 回復流程/);
+    fireEvent.click(screen.getByRole('button', { name: '重新排入訪客選單回復' }));
+    await screen.findByText(/已用目前最新的訪客／預設選單重新排入回復流程/);
     expect(client.retryRevocation).toHaveBeenCalledWith(
       91,
       { reason: 'provider 回復已永久失敗' },
       expect.any(Object)
     );
+  });
 
-    expect(manualButton).toBeDisabled();
-    fireEvent.click(screen.getByRole('checkbox', { name: '我已確認 LINE 平台永久失敗或重試已耗盡' }));
-    expect(manualButton).toBeDisabled();
-    fireEvent.click(screen.getByRole('checkbox', { name: '我了解人工完成會直接完成解除並清除授權關聯' }));
-    fireEvent.click(manualButton);
+  it('人工解除後仍提供訪客選單修復，並沿用 retry contract', async () => {
+    const client = maintenanceClient();
+    const manuallyCompleted = {
+      ...BOUND_IDENTITY_FIXTURE,
+      status: 'revoked' as const,
+      revocation_request_id: 91,
+      revocation_status: 'manual_completed' as const,
+    };
+    render(
+      <LineIdentityMaintenanceActions
+        lineUserId={FIXTURE_LINE_USER_ID}
+        binding={manuallyCompleted}
+        client={client}
+      />
+    );
 
-    await screen.findByText('人工解除完成');
-    expect(client.manualCompleteRevocation).toHaveBeenCalledWith(
+    expect(screen.getByText(/LINE 圖文選單尚未確認回復/)).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('textbox', { name: '修復原因' }), {
+      target: { value: '訪客選單已重新發布' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '重新排入訪客選單回復' }));
+
+    await screen.findByText(/已用目前最新的訪客／預設選單重新排入回復流程/);
+    expect(client.retryRevocation).toHaveBeenCalledWith(
       91,
-      { reason: 'provider 回復已永久失敗' },
+      { reason: '訪客選單已重新發布' },
       expect.any(Object)
     );
   });
@@ -159,27 +169,7 @@ describe('LINE 身分維護操作', () => {
     );
 
     expect(screen.getByText(/背景服務正在回復 LINE 選單/)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '重新排入 Rich Menu 回復' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '人工完成解除' })).not.toBeInTheDocument();
-  });
-
-  it('沒有 override capability 時不呈現人工完成控制', () => {
-    const failedBinding = {
-      ...BOUND_IDENTITY_FIXTURE,
-      status: 'revocation_pending' as const,
-      revocation_request_id: 91,
-      revocation_status: 'menu_reset_failed' as const,
-    };
-    render(
-      <LineIdentityMaintenanceActions
-        lineUserId={FIXTURE_LINE_USER_ID}
-        binding={failedBinding}
-        client={maintenanceClient()}
-        canManualComplete={false}
-      />
-    );
-
-    expect(screen.getByText(/只提供具 LINE 身分人工處理權限/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '重新排入訪客選單回復' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '人工完成解除' })).not.toBeInTheDocument();
   });
 

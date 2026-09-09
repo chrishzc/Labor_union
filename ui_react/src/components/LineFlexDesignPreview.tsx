@@ -3,6 +3,7 @@
  * Description: 顯示去敏 Flex 設計稿與 owner fact blocker，不產生 provider payload 或任何 mutation。
  */
 import React from 'react';
+import { Pin } from 'lucide-react';
 import {
   adaptLineFlexDesignPreview,
   type LineFlexDesignActionTone,
@@ -54,12 +55,12 @@ export const LineFlexDesignPreview: React.FC<LineFlexDesignPreviewProps> = ({ so
           </div>
         </div>
       </div>
-      <div className="line-warning" role="status" aria-label="正式資料狀態" style={{ textAlign: 'left', marginTop: '14px' }}>
-        <strong style={{ display: 'block', marginBottom: '4px', color: '#a43c12' }}>📌 LINE Flex Message 業務定位與排程說明</strong>
-        <p style={{ margin: '0 0 4px', fontSize: '0.82rem' }}>
+      <div className="line-warning line-flex-owner-note" role="status" aria-label="正式資料狀態">
+        <strong><Pin aria-hidden="true" />LINE Flex Message 業務定位與排程說明</strong>
+        <p>
           正式資料尚未載入：{preview.ownerFactBlocker}
         </p>
-        <small style={{ display: 'block', color: '#74593f', lineHeight: 1.4 }}>
+        <small>
           視覺排版範本已完成去敏核可；動態推播與 Postback 決策事件排定於後續業務模組建置。
         </small>
       </div>

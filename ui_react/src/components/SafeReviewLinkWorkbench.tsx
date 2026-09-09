@@ -4,6 +4,7 @@
  */
 
 import { useState } from 'react';
+import { LockKeyhole } from 'lucide-react';
 import { safeReviewLinkClient, type SafeReviewLinkClient } from '../api/line_safe_review_link/line_safe_review_link_client';
 import { SafeReviewLinkClientError } from '../api/line_safe_review_link/line_safe_review_link_errors';
 import type { SafeReviewLink, SafeReviewLinkReceipt } from '../api/line_safe_review_link/line_safe_review_link_schemas';
@@ -80,7 +81,7 @@ export function SafeReviewLinkWorkbench({ client = safeReviewLinkClient }: Props
     <section className="line-workspace-card" data-control-id="line.safe-review-link.workbench">
       <div className="line-section-heading">
         <div>
-          <h3>🔐 M4 安全審核連結</h3>
+          <h3><LockKeyhole aria-hidden="true" /> M4 安全審核連結</h3>
           <p>管理端／行動端只讀回去敏目標與一次性結果；原 token 不會由回應或畫面保存。</p>
         </div>
       </div>
