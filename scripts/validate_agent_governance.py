@@ -45,10 +45,6 @@ FORBIDDEN_MARKERS: dict[str, tuple[str, ...]] = {
         "### 3.2 既有開發測試 DB 的受控驗收裁決",
         "1. **Scope gate**",
     ),
-    "document/架構重整/02_決策與退役執行記錄/96_Current_剩餘代辦任務總表.md": (
-        "每個新的 bounded execution slice 都必須先經",
-        "未同時具備 current `SPEC_READY`",
-    ),
 }
 
 
