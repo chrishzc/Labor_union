@@ -199,6 +199,8 @@ def _subsidy_claim_amount(
     if not eligible:
         return None, []
     total_staff_hours = sum((Decimal(str(plan["service_hours"])) for plan in eligible), MONEY_ZERO)
+    if total_staff_hours < subsidy_hours:
+        return None, []
     allocations = []
     claim_amount = MONEY_ZERO
     for plan in eligible:
