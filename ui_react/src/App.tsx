@@ -29,6 +29,7 @@ import { FinancePage } from './pages/FinancePage';
 import { HistoricalServiceAccountingPage } from './pages/HistoricalServiceAccountingPage';
 import { CurrentAnomaliesPage } from './pages/CurrentAnomaliesPage';
 import { AccountManagementPage } from './pages/AccountManagementPage';
+import { StorageManagementPage } from './pages/StorageManagementPage';
 import './pages/LineManagementPage.css';
 
 export const HASH_ALIASES: Record<string, PageType> = {
@@ -59,8 +60,15 @@ function getPageFromHash(): PageType {
 export function getMobileAdminReturnPathFromHash(hash: string): string | null {
   const query = hash.includes('?') ? hash.slice(hash.indexOf('?') + 1) : '';
   const returnTarget = new URLSearchParams(query).get('return_target');
-  return returnTarget === 'scheduling_review'
-    ? '/line-mobile-admin?target=scheduling_review'
+  const allowedTargets = new Set([
+    'customer_service',
+    'staff_review',
+    'scheduling_review',
+    'anomalies_center',
+    'dashboard',
+  ]);
+  return returnTarget !== null && allowedTargets.has(returnTarget)
+    ? `/line-mobile-admin?target=${returnTarget}`
     : null;
 }
 
@@ -167,6 +175,7 @@ export const App: React.FC = () => {
         {currentPage === 'anomalies' && <CurrentAnomaliesPage />}
         {currentPage === 'data-browser' && <DataImportPage initialTab="data-browser" />}
         {currentPage === 'account-management' && <AccountManagementPage />}
+        {currentPage === 'storage-management' && <StorageManagementPage />}
       </MasterLayout>
     </ErrorBoundary>
   );

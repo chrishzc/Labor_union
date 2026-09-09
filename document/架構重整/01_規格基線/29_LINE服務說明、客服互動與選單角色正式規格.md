@@ -65,6 +65,8 @@ Client canonical `city`、`address`、`residence_type` 仍由 Client owner 保�
 
 `document/line/QA問答集.xlsx` 與 `document/line/AI客服QA題庫.jsonl` 是內容輸入／migration evidence，不是 runtime Authority。每一個可自動回覆的 answer item 至少具備：
 
+本機／development runtime 在啟動時必須幂等補齊隨系統交付的 29 題為 managed draft，不以管理員先手動匯入作為可用前提，也不得覆寫系統內已編修的 revision。JSONL 只是 bundled migration evidence，runtime 查詢不得直接以它產生候選答案。具備 Knowledge 管理權限的同一位管理員可依次編修、審核與發布；每次 actor 仍必須寫入 audit event 與 reviewer／publisher 欄位。
+
 - stable item identity 與 revision；
 - category、audience／role 與適用條件；
 - source／provenance；
@@ -109,9 +111,11 @@ Current menu content 與 action 由 MySQL versioned LINE configuration 及 curre
 
 ### 7.1 工會人員 LIFF 工作入口
 
-四格可共用同一個 LIFF runtime 與 server-side 身分驗證，但每個入口必須呈現獨立、可辨識的工作 surface；由「客服中心」進入時不得同時顯示月嫂審核或排班工具，由「待辦工作台」進入時也不得把客服案件混成同一清單。第一版沿用已發布選單可能仍持有的 `staff_review`、`customer_service`、`anomalies_center`、`dashboard` target identity，不以 publication 尚未切換為由中斷既有 deep link。
+四格可共用同一個 LIFF runtime 與 server-side 身分驗證，但四個入口均須在顯示或查詢管理內容前驗證 persisted Admin Session，並確認 Session actor 與 current role-scoped LINE admin binding 指向同一人；每個入口仍必須呈現獨立、可辨識的工作 surface。由「客服中心」進入時不得同時顯示月嫂審核或排班工具，由「待辦工作台」進入時也不得把客服案件混成同一清單。第一版沿用已發布選單可能仍持有的 `staff_review`、`customer_service`、`anomalies_center`、`dashboard` target identity，不以 publication 尚未切換為由中斷既有 deep link。
 
-- 「待辦工作台」第一版只列出 canonical pending 月嫂身分驗證並保留其 Preview／Confirm／Apply。既有按案件編號操作的 Scheduling Assignment Plan 是「排班案件工具」，不是待辦數量或 pending review；沒有 owner-backed pending Query 前，不得把客戶訂單異動、排班或其他可能事項加入待辦計數。
+- 「待辦工作台」彙整四組需要工會人員決定的工作入口：Client owner 的客戶資料異動審核、LINE Identity owner 的客戶／月嫂重綁與身分異常審核、Scheduling owner 的請假受理與代班／改期處理，以及 Matching／Scheduling owner 的媒合最終指派與重新媒合。每組清單、狀態、版本、Preview／Confirm／Apply、receipt 與 fresh readback 仍由原 owner 提供；mobile surface 只作 bounded presentation，不建立共用 approval root 或跨 owner writer。
+- 只有具 owner-backed pending Query 的項目可以顯示待辦筆數；既有按案件編號操作的 Scheduling Assignment Plan 在 pending Query 完成前只作「媒合與排班審核工具」入口，不計入待辦數量，也不得以案件總數、前端推算或假資料冒充 pending review。一般月嫂身分資料唯一吻合且尚未綁定時依 `23` 直接完成綁定，不建立人工待辦；工作台中的月嫂項目只代表 canonical review root 已存在的重綁／身分異常案件。
+- 客戶訂單異動目前只建立 Customer Service 人工確認需求，仍留在「客服中心」；客訴／人工 fallback、current LINE 異常與 QA／Knowledge 內容審核分別留在「客服中心」、「異常中心」與 AI 事件工作室，不因待辦工作台彙整而重複列示或重複計數。
 - 「客服中心」只呈現 Customer Service 的 waiting／handling／resolved 查詢、明細與既有回覆流程；不得因共用 LIFF asset 顯示不相干的審核頁籤。
 - 「異常中心」第一版只呈現 Anomalies owner 的 current-only `LINE-006` 清單、合法空狀態、blocking／severity 與最後驗證時間。它不是 generic 異常通報、claim 或 resolve writer；後續處理仍回到 owner action contract。
 - 「營運摘要」第一版以 Global Reporting 的 `operations-report.v3` 顯示 current business week（Asia/Taipei，星期一至 current business date）摘要與 `generated_at`。只顯示 owner query 已提供的案件申請、一般符合、補助符合、不符合待分流、已成立訂單與資料不完整數量，不宣稱即時監控，也不在 LIFF 寫入週報人工指標。
@@ -146,9 +150,11 @@ Ticket 狀態至少為 `waiting → handling → resolved`。resolved 後同一 
 6. local menu preview 不建立 provider task 或成功 receipt；publish 以 durable task 及 terminal readback 判定。
 7. LLM 或 Knowledge 不得直接寫業務 root、繞過 closed tool catalog 或宣稱 provider 成功。
 8. API／React／LINE visible result 對 timeout、conflict、unavailable 與 unknown outcome fail closed。
-9. 工會人員由四個 Rich Menu target 進入時，只看到該入口的工作 surface；共用 LIFF asset 不造成跨入口頁籤混雜。
-10. 待辦數量只來自 pending 月嫂身分驗證；排班案件工具不冒充待辦，客服案件也不重複列入待辦。
+9. 工會人員由四個 Rich Menu target 進入時，均須通過 persisted Admin Session、current LINE admin binding 與同一 actor 核對，之後只看到該入口的工作 surface；共用 LIFF asset 不造成驗證前內容閃現或跨入口頁籤混雜。
+10. 待辦工作台可分組讀取客戶資料異動、客戶／月嫂重綁與身分異常、請假代班／改期，以及媒合指派／重新媒合；每一筆與每一個數量均來自對應 owner 的 pending Query。沒有 pending Query 的排班案件工具不冒充待辦，客服、異常及 QA／Knowledge 工作也不重複列入。
 11. 異常中心只顯示 current `LINE-006` owner query，營運摘要只顯示 current business week `operations-report.v3` 與資料產生時間；兩者皆具合法空狀態且零業務寫入。
+12. 本機／development 首次啟動即可由正式 Knowledge API read back 29 題 managed draft，不需先手動匯入；同一授權管理員可完成編修→審核→發布，空白答案仍必須 fail closed。
+13. 管理端將事件路由規則、真實模型測試與 AI 客服回饋觀測分開呈現。回饋觀測可讀取已去除 LINE identity 的實際問句、回答狀態與核准來源；只有 `unsupported` 列為待補強知識，provider／worker failure 必須另列為系統異常，不得污染題庫缺口統計。這組問句觀測 graph 的保留與刪除由 `18_Global_Deployment與治理正式規格.md` 的 `RET-001..010` 統一治理，最長 30 天；Knowledge catalog、published item、current READY index 與 LINE／客服業務證據不在清理範圍。
 
 ## 11. 來源文件處置（2026-09-09）
 

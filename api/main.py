@@ -60,6 +60,7 @@ from api.routes import (
     staff_historical_workbook,
     finance_reports,
     operations_reports,
+    operational_retention,
     financial_adjustment,
     government_subsidy,
     holidays,
@@ -185,6 +186,8 @@ def _allowed_origins() -> list[str]:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     ensure_development_root_admin()
+    from api.dependencies.knowledge_retrieval import ensure_builtin_knowledge_catalog
+    ensure_builtin_knowledge_catalog()
     ensure_development_line_configuration()
     line_webhook_runtime_mode()
     yield
@@ -355,6 +358,7 @@ app.include_router(data_browser_admin.router)
 app.include_router(system_status.router)
 app.include_router(llm_configuration.router)
 app.include_router(runtime_health.router)
+app.include_router(operational_retention.router)
 app.include_router(private_operations.router)
 app.include_router(admin_entry_targets.router)
 

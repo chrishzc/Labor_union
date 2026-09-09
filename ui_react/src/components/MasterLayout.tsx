@@ -11,6 +11,7 @@ import {
   ClipboardList,
   Database,
   FileBarChart,
+  HardDrive,
   HeartHandshake,
   History,
   KeyRound,
@@ -49,7 +50,8 @@ export type PageType =
   | 'historical-service-accounting'
   | 'anomalies'
   | 'data-browser'
-  | 'account-management';
+  | 'account-management'
+  | 'storage-management';
 
 export const PAGE_SECTION_MAP: Record<PageType, SectionType> = {
   'order-workbench-v2': 'operations',
@@ -70,6 +72,7 @@ export const PAGE_SECTION_MAP: Record<PageType, SectionType> = {
   'anomalies': 'audit',
   'data-browser': 'operations',
   'account-management': 'audit',
+  'storage-management': 'audit',
 };
 
 export interface NavItem {
@@ -101,6 +104,7 @@ export const NAV_ITEMS: NavItem[] = [
   // Audit & System Section
   { id: 'anomalies', icon: ShieldAlert, label: '異常審核', section: 'audit' },
   { id: 'account-management', icon: UserRound, label: '帳號權限', section: 'audit' },
+  { id: 'storage-management', icon: HardDrive, label: '儲存空間管理', section: 'audit' },
 ];
 
 const SECTION_LABELS: Record<SectionType, string> = {

@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import json
-
 import pytest
 
 from domains.knowledge_retrieval.knowledge import KnowledgeAnswerUnsupported
+from domains.knowledge_retrieval.qa_catalog import GovernedQaContent, encode_governed_qa
 from infrastructure.knowledge.chroma_gateway import ChromaKnowledgeGateway
 
 
@@ -52,52 +51,30 @@ class _Client:
         return self.collections[name]
 
 
-def _catalog(tmp_path):
-    path = tmp_path / "qa.jsonl"
-    records = (
-        {
-            "id": "QA-001",
-            "category": "月嫂媒合",
-            "tag": "更換月嫂",
-            "question": "如果和月嫂合作不適合，可以更換月嫂嗎？",
-            "aliases": ["可以換月嫂嗎？", "跟月嫂觀念不合可以換人嗎？"],
-            "answer": "經協調仍無法解決時，會依相關規定辦理服務人員更換。",
-            "status": "ready",
-            "source_ref": "document/line/QA問答集.xlsx",
-        },
-        {
-            "id": "QA-003",
-            "category": "合約",
-            "tag": "試用期",
-            "question": "月嫂服務是否有試用期？",
-            "aliases": ["有試用期嗎？"],
-            "answer": "",
-            "status": "missing",
-            "source_ref": "document/line/QA問答集.xlsx",
-        },
-        {
-            "id": "QA-007",
-            "category": "月嫂資訊",
-            "tag": "服務經驗",
-            "question": "平台的月嫂有服務經驗嗎？",
-            "aliases": ["月嫂有經驗嗎？"],
-            "answer": "待人工確認的回答。",
-            "status": "review_required",
-            "source_ref": "document/line/QA問答集.xlsx",
-        },
+def _published_qa():
+    content = GovernedQaContent(
+        qa_id="QA-001",
+        category="月嫂媒合",
+        tag="更換月嫂",
+        question="如果和月嫂合作不適合，可以更換月嫂嗎？",
+        aliases=("可以換月嫂嗎？", "跟月嫂觀念不合可以換人嗎？"),
+        answer="經協調仍無法解決時，會依相關規定辦理服務人員更換。",
+        source_ref="document/line/QA問答集.xlsx",
     )
-    path.write_text(
-        "\n".join(json.dumps(record, ensure_ascii=False) for record in records) + "\n",
-        encoding="utf-8",
-    )
-    return path
+    return {
+        "source_identity": content.source_identity,
+        "source_version": 3,
+        "source_digest": "published-digest",
+        "title": content.question,
+        "content": encode_governed_qa(content),
+        "source_uri": content.source_ref,
+    }
 
 
 def _gateway(tmp_path, *, llm=None, min_confidence: float = 0.60):
     client = _Client()
     gateway = ChromaKnowledgeGateway(
         str(tmp_path / "chroma"),
-        catalog_path=_catalog(tmp_path),
         llm=llm,
         min_confidence=min_confidence,
     )
@@ -105,10 +82,11 @@ def _gateway(tmp_path, *, llm=None, min_confidence: float = 0.60):
     return gateway, client
 
 
-def test_rebuild_indexes_only_ready_catalog_with_labels_and_aliases(tmp_path) -> None:
+def test_rebuild_indexes_only_supplied_published_knowledge_with_labels_and_aliases(tmp_path) -> None:
     gateway, client = _gateway(tmp_path)
 
-    indexed = gateway.rebuild(1, ())
+    assert gateway.rebuild(1, ()) == ()
+    indexed = gateway.rebuild(1, (_published_qa(),))
 
     assert [item["catalog_id"] for item in indexed] == ["QA-001"]
     document = client.get_collection("union_knowledge_v1").documents[0]
@@ -125,7 +103,7 @@ def test_llm_can_only_select_candidate_and_answer_stays_verbatim(tmp_path) -> No
         return "QA-001"
 
     gateway, _ = _gateway(tmp_path, llm=llm)
-    gateway.rebuild(2, ())
+    gateway.rebuild(2, (_published_qa(),))
 
     answer = gateway.answer("可以換月嫂嗎？", 2)
 
@@ -139,7 +117,7 @@ def test_llm_can_only_select_candidate_and_answer_stays_verbatim(tmp_path) -> No
 
 def test_no_model_or_low_confidence_fails_closed(tmp_path) -> None:
     gateway, _ = _gateway(tmp_path)
-    gateway.rebuild(3, ())
+    gateway.rebuild(3, (_published_qa(),))
 
     with pytest.raises(KnowledgeAnswerUnsupported, match="knowledge_answer_unsupported"):
         gateway.answer("可以換月嫂嗎？", 3)
@@ -148,6 +126,6 @@ def test_no_model_or_low_confidence_fails_closed(tmp_path) -> None:
         raise AssertionError("low-confidence input must not reach the LLM")
 
     guarded_gateway, _ = _gateway(tmp_path, llm=unexpected_llm)
-    guarded_gateway.rebuild(4, ())
+    guarded_gateway.rebuild(4, (_published_qa(),))
     with pytest.raises(KnowledgeAnswerUnsupported, match="knowledge_answer_unsupported"):
         guarded_gateway.answer("火星基地的氧氣供應怎麼算？", 4)

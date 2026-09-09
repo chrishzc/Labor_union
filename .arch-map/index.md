@@ -18,6 +18,7 @@
 - `case-import` — BeClass／HCM intake、review 與 formal case bootstrap；path: `domains/case-import/index.md`
 - `contract-signing` — 核准契約文件版本、簽回 evidence、external-signing session 與 final signed document lineage；path: `domains/contract-signing/index.md`
 - `external-integration` — Access 與 LINE transport／identity／delivery boundaries；path: `domains/external-integration/index.md`
+- `knowledge-retrieval` — reviewable knowledge、publication lifecycle、index 與 cited answer boundary；path: `domains/knowledge-retrieval/index.md`
 
 ## Global modules
 - `react-application-shell` — React navigation、session/auth composition與closed ErrorBoundary recovery；path: `domains/global/subsystems/application-shell/modules/react-application-shell.md`
@@ -70,6 +71,7 @@ Current canonical owner roots are (routing notes; detailed ownership is declared
 - Access — tests/domains/external-integration/subsystems/access/
 - LINE — tests/domains/external-integration/subsystems/line/
 - Contract Signing — tests/domains/contract-signing/subsystems/contract-signing/
+- Knowledge Retrieval — tests/domains/knowledge-retrieval/subsystems/knowledge-retrieval/
 
 `tests/` flat root不是 owner-local 測試的預設目的地。只有 application composition/OpenAPI、真正 cross-domain、release/schema/migration、disposable-MySQL/engine、Task97/governance、或有明確 compatibility/path consumer 的 higher-boundary coverage 才應留在 flat/higher roots。詳細路由見 `tests/index.md`。
 

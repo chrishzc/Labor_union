@@ -1,4 +1,4 @@
-"""Pure state and separation rules for reviewed knowledge publication."""
+"""Pure state rules for reviewed knowledge publication."""
 
 from enum import StrEnum
 
@@ -24,13 +24,3 @@ def next_knowledge_state(current: KnowledgeState, action: str) -> KnowledgeState
     if next_state is None:
         raise KnowledgeTransitionError("knowledge_state_conflict")
     return next_state
-
-
-def require_separate_publisher(creator_id: int, publisher_id: int) -> None:
-    if creator_id == publisher_id:
-        raise KnowledgeTransitionError("knowledge_publisher_separation_required")
-
-
-def require_separate_reviewer(creator_id: int, reviewer_id: int) -> None:
-    if creator_id == reviewer_id:
-        raise KnowledgeTransitionError("knowledge_reviewer_separation_required")

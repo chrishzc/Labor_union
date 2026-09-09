@@ -16,10 +16,7 @@ from domains.knowledge_retrieval.knowledge import (
     source_digest,
     transition_item_status,
 )
-from domains.knowledge_retrieval.publication import (
-    require_separate_publisher,
-    require_separate_reviewer,
-)
+from domains.knowledge_retrieval.qa_catalog import decode_governed_qa
 from domains.line.canonical_payload import canonical_line_payload_json
 from domains.line.delivery import LineDeliveryRequest, LineMessageKind, LineRecipient, LineRecipientType
 from domains.line.identities import LineUserId
@@ -427,6 +424,10 @@ class MySqlKnowledgeRetrievalRepository:
         rows = self._rows(_GET_ITEM, (item_id,))
         return rows[0] if rows else None
 
+    def find_by_source_identity(self, source_identity: str):
+        rows = self._rows(_GET_ITEM_BY_SOURCE_IDENTITY, (source_identity,))
+        return rows[0] if rows else None
+
     def list_jobs(self, limit: int, processing_status: str | None = None):
         return self._rows(_LIST_JOBS, (processing_status, processing_status, limit))
 
@@ -442,6 +443,12 @@ class MySqlKnowledgeRetrievalRepository:
             result["authoritative"] = bool(result["authoritative"])
         result["citations"] = self._rows(_GET_ANSWER_SOURCES, (request_id,))
         return result
+
+    def list_answer_requests(self, limit: int, request_status: str | None = None):
+        return self._rows(
+            _LIST_ANSWER_REQUESTS,
+            (request_status, request_status, limit),
+        )
 
     # A manual retry is a new durable job so its idempotency identity remains immutable.
     def retry_job(self, job_id: int, actor_id: str, idempotency_key: str) -> int:
@@ -488,10 +495,15 @@ class MySqlKnowledgeRetrievalRepository:
                 raise RuntimeError("knowledge_item_version_conflict")
             transition_item_status(KnowledgeItemStatus(item["state"]), target)
             actor_id = _admin_actor_id(command.actor.actor_id)
-            _enforce_actor_separation(item, target, actor_id)
             next_version = command.expected_version.value + 1
             cursor.execute(_CURRENT_CONTENT, (command.item_id, command.expected_version.value))
             version = cursor.fetchone()
+            governed_qa = decode_governed_qa(version["content"])
+            if governed_qa is not None and target in (
+                KnowledgeItemStatus.REVIEWED,
+                KnowledgeItemStatus.PUBLISHED,
+            ):
+                governed_qa.require_publishable()
             cursor.execute(_INSERT_VERSION, (
                 command.item_id, next_version, version["content"], version["source_digest"],
                 event_type, actor_id, command.reason, command.idempotency_key.value,
@@ -670,14 +682,6 @@ def _admin_actor_id(actor_id: str) -> int:
     return value
 
 
-def _enforce_actor_separation(item, target, actor_id: int) -> None:
-    creator_id = int(item["created_by_admin_user_id"])
-    if target is KnowledgeItemStatus.REVIEWED:
-        require_separate_reviewer(creator_id, actor_id)
-    if target is KnowledgeItemStatus.PUBLISHED:
-        require_separate_publisher(creator_id, actor_id)
-
-
 def _transition_projection_update(target, actor_id: int, reason: str):
     if target is KnowledgeItemStatus.REVIEWED:
         return "reviewed_by_admin_user_id=%s,review_reason=%s", (actor_id, reason)
@@ -737,8 +741,7 @@ def _insert_governance_event(
 _INSERT_VERSION = """INSERT INTO knowledge_item_versions
 (item_id,item_version,content,source_digest,event_type,actor_admin_user_id,reason,idempotency_key)
 VALUES (%s,%s,%s,%s,%s,%s,%s,%s)"""
-_LOCK_ITEM = """SELECT id,state,version,created_by_admin_user_id,
-reviewed_by_admin_user_id FROM knowledge_items WHERE id=%s FOR UPDATE"""
+_LOCK_ITEM = "SELECT id,state,version FROM knowledge_items WHERE id=%s FOR UPDATE"
 _CURRENT_CONTENT = "SELECT content,source_digest FROM knowledge_item_versions WHERE item_id=%s AND item_version=%s"
 _CLAIM_JOB = """SELECT * FROM knowledge_jobs WHERE processing_status IN ('pending','retry_pending')
 AND available_at_utc<=%s AND (lease_expires_at_utc IS NULL OR lease_expires_at_utc<=%s)
@@ -748,17 +751,26 @@ v.content,i.content_digest AS source_digest,i.source_uri FROM knowledge_items i
 JOIN knowledge_item_versions v ON v.item_id=i.id AND v.item_version=i.version
 WHERE i.state='published'
 ORDER BY i.id"""
-_LIST_ITEMS = """SELECT id,source_identity,source_trust_tier,title,
+_LIST_ITEMS = """SELECT i.id,i.source_identity,i.source_trust_tier,i.title,
 state AS lifecycle_status,version AS current_version,
-content_digest AS source_digest,source_uri,updated_at AS updated_at_utc
-FROM knowledge_items WHERE (%s IS NULL OR state=%s)
-ORDER BY updated_at DESC,id DESC LIMIT %s"""
+content_digest AS source_digest,source_uri,updated_at AS updated_at_utc,
+v.content
+FROM knowledge_items i
+JOIN knowledge_item_versions v ON v.item_id=i.id AND v.item_version=i.version
+WHERE (%s IS NULL OR state=%s)
+ORDER BY updated_at DESC,i.id DESC LIMIT %s"""
 _GET_ITEM = """SELECT i.id,i.source_identity,i.source_trust_tier,i.title,
 i.state AS lifecycle_status,i.version AS current_version,
 i.content_digest AS source_digest,i.source_uri,i.updated_at AS updated_at_utc,
 v.content FROM knowledge_items i
 JOIN knowledge_item_versions v ON v.item_id=i.id AND v.item_version=i.version
 WHERE i.id=%s"""
+_GET_ITEM_BY_SOURCE_IDENTITY = """SELECT i.id,i.source_identity,i.source_trust_tier,
+i.title,i.state AS lifecycle_status,i.version AS current_version,
+i.content_digest AS source_digest,i.source_uri,i.updated_at AS updated_at_utc,
+v.content FROM knowledge_items i
+JOIN knowledge_item_versions v ON v.item_id=i.id AND v.item_version=i.version
+WHERE i.source_identity=%s"""
 _LIST_JOBS = """SELECT id,job_type,processing_status,answer_request_id,target_index_version,
 attempt_count,max_attempts,last_error_code,created_at_utc,completed_at_utc FROM knowledge_jobs
 WHERE (%s IS NULL OR processing_status=%s) ORDER BY created_at_utc DESC,id DESC LIMIT %s"""
@@ -768,6 +780,18 @@ _GET_ANSWER_REQUEST = """SELECT q.id,q.question,q.request_status,q.correlation_i
 q.completed_at_utc,r.answer_text,r.index_version,r.authoritative,r.line_delivery_task_id,r.answered_at_utc
 FROM knowledge_answer_requests q LEFT JOIN knowledge_answer_receipts r ON r.answer_request_id=q.id
 WHERE q.id=%s"""
+_LIST_ANSWER_REQUESTS = """SELECT q.id,q.question,q.request_status,
+q.created_at_utc,q.completed_at_utc,r.answer_text,r.index_version,
+(SELECT s.source_identity FROM knowledge_answer_sources s
+ WHERE s.answer_receipt_id=r.id ORDER BY s.citation_order LIMIT 1) AS source_identity,
+(SELECT s.source_version FROM knowledge_answer_sources s
+ WHERE s.answer_receipt_id=r.id ORDER BY s.citation_order LIMIT 1) AS source_version,
+(SELECT j.last_error_code FROM knowledge_jobs j
+ WHERE j.answer_request_id=q.id ORDER BY j.id DESC LIMIT 1) AS failure_code
+FROM knowledge_answer_requests q
+LEFT JOIN knowledge_answer_receipts r ON r.answer_request_id=q.id
+WHERE (%s IS NULL OR q.request_status=%s)
+ORDER BY q.created_at_utc DESC,q.id DESC LIMIT %s"""
 _GET_ANSWER_SOURCES = """SELECT s.source_identity,s.source_version,s.safe_excerpt,s.citation_order
 FROM knowledge_answer_sources s JOIN knowledge_answer_receipts r ON r.id=s.answer_receipt_id
 WHERE r.answer_request_id=%s ORDER BY s.citation_order"""

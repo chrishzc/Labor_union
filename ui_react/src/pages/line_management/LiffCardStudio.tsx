@@ -180,16 +180,59 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     audienceRoles: ['visitor', 'customer', 'staff', 'union_staff'],
   },
   {
-    id: 'mobile_admin',
+    id: 'mobile_admin_staff_review',
     type: 'liff',
-    title: '12. mobile_admin.html',
-    subtitle: '手機身分審核中心',
-    badge: '檢查後送出',
-    endpointUrl: '/line-mobile-admin',
-    launchPath: '/line-mobile-admin',
+    title: '12. mobile_admin.html · 待辦工作台',
+    subtitle: '待辦工作台',
+    badge: '月嫂身分待審',
+    endpointUrl: '/line-mobile-admin?target=staff_review',
+    launchPath: '/line-mobile-admin?target=staff_review',
+    previewPath: '/line-mobile-admin?target=staff_review&studio_preview=1',
     authLevel: '後端驗證 LINE 登入憑證與正式管理員綁定',
-    description: '審核決策先顯示變更前後內容與影響，確認後送出並回讀結果。',
-    apiMapping: '身分審核影響檢查、確認與結果回讀已接通',
+    description: '只顯示待處理的月嫂身分審核；排班審查維持案號工具，不混入待辦清單。',
+    apiMapping: '月嫂身分審核 Query／Preview／Apply 與排班案號工具已接通',
+    audienceRoles: ['union_staff'],
+  },
+  {
+    id: 'mobile_admin_customer_service',
+    type: 'liff',
+    title: '13. mobile_admin.html · 客服中心',
+    subtitle: '客服中心',
+    badge: '客服案件',
+    endpointUrl: '/line-mobile-admin?target=customer_service',
+    launchPath: '/line-mobile-admin?target=customer_service',
+    previewPath: '/line-mobile-admin?target=customer_service&studio_preview=1',
+    authLevel: '後端驗證 LINE 登入憑證與正式管理員綁定',
+    description: '只載入客服案件、對話與回覆流程，不與身分審核共用可見工作面。',
+    apiMapping: '客服摘要、案件列表、回覆 Preview／Apply 與結果回讀已接通',
+    audienceRoles: ['union_staff'],
+  },
+  {
+    id: 'mobile_admin_anomalies_center',
+    type: 'liff',
+    title: '14. mobile_admin.html · 異常中心',
+    subtitle: '異常中心',
+    badge: 'LINE-006 唯讀',
+    endpointUrl: '/line-mobile-admin?target=anomalies_center',
+    launchPath: '/line-mobile-admin?target=anomalies_center',
+    previewPath: '/line-mobile-admin?target=anomalies_center&studio_preview=1',
+    authLevel: '後端驗證 LINE 登入憑證與正式管理員綁定；異常資料為去敏唯讀',
+    description: '顯示目前 LINE-006 通知失敗異常與安全摘要；此入口不修改異常或通知 root。',
+    apiMapping: 'LINE-006 current issue bounded typed readback 已接通',
+    audienceRoles: ['union_staff'],
+  },
+  {
+    id: 'mobile_admin_dashboard',
+    type: 'liff',
+    title: '15. mobile_admin.html · 營運摘要',
+    subtitle: '營運摘要',
+    badge: '本週六項統計',
+    endpointUrl: '/line-mobile-admin?target=dashboard',
+    launchPath: '/line-mobile-admin?target=dashboard',
+    previewPath: '/line-mobile-admin?target=dashboard&studio_preview=1',
+    authLevel: '後端驗證 LINE 登入憑證與正式管理員綁定；只回傳本週彙總',
+    description: '依 Asia／Taipei 業務週顯示本週六項營運統計、期間與產生時間。',
+    apiMapping: 'operations-report.v3 本週 bounded summary query 已接通',
     audienceRoles: ['union_staff'],
   },
   {
@@ -424,16 +467,47 @@ function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
     );
   }
 
-  if (item.id === 'mobile_admin') {
+  if (item.id === 'mobile_admin_staff_review') {
     return (
       <div className="mock-admin-view">
-        <div className="mock-step-indicator">工會手機管理</div>
-        <p>登入後依已驗證的管理員身分載入待辦。</p>
-        <div className="mock-btn-group">
-          <button type="button" className="mock-primary-btn" disabled>客服中心</button>
-          <button type="button" className="mock-primary-btn" disabled>月嫂驗證</button>
-        </div>
-        <div className="mock-placeholder-box">審核中心待辦：客服工單、排班審核與月嫂驗證。</div>
+        <div className="mock-step-indicator">待辦工作台</div>
+        <p>目前只列出待處理的月嫂身分審核。</p>
+        <div className="mock-placeholder-box">月嫂身分待審 ｜ 檢查資料後決定通過或退回</div>
+        <button type="button" className="mock-primary-btn" disabled>開啟月嫂驗證</button>
+        <small>排班審查使用案號查詢，不列入待辦清單。</small>
+      </div>
+    );
+  }
+
+  if (item.id === 'mobile_admin_customer_service') {
+    return (
+      <div className="mock-admin-view">
+        <div className="mock-step-indicator">客服中心</div>
+        <p>集中查看待處理客服案件與最近訊息。</p>
+        <div className="mock-placeholder-box">等待處理 ｜ 處理中 ｜ 已解決</div>
+        <button type="button" className="mock-primary-btn" disabled>查看客服案件</button>
+      </div>
+    );
+  }
+
+  if (item.id === 'mobile_admin_anomalies_center') {
+    return (
+      <div className="mock-admin-view">
+        <div className="mock-step-indicator mock-step-danger">異常中心</div>
+        <p>顯示目前 LINE 通知失敗的去敏唯讀摘要。</p>
+        <div className="mock-placeholder-box">LINE-006 ｜ 發生時間 ｜ 安全摘要 ｜ 目前狀態</div>
+        <small>此工作面不會直接修改異常或重送通知。</small>
+      </div>
+    );
+  }
+
+  if (item.id === 'mobile_admin_dashboard') {
+    return (
+      <div className="mock-admin-view">
+        <div className="mock-step-indicator">營運摘要</div>
+        <p>依台北時區顯示本週營運統計。</p>
+        <div className="mock-placeholder-box">申請數 ｜ 成案數 ｜ 服務中 ｜ 待媒合 ｜ 客服案件 ｜ LINE 異常</div>
+        <small>同時標示統計期間與資料產生時間。</small>
       </div>
     );
   }

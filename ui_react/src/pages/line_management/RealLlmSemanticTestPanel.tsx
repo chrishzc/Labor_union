@@ -2,8 +2,9 @@
  * File: RealLlmSemanticTestPanel.tsx
  * Description: 管理端真實 M2 語意測試；只由後端使用已儲存 Gemini secret，不發送 LINE 或建立工單。
  */
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Brain, Rocket } from 'lucide-react';
+import { sessionClient } from '../../api/auth/session_client';
 import {
   testLlmSemantics,
   type LlmSemanticTest,
@@ -42,10 +43,40 @@ function resultMessage(result: LlmSemanticTest): string {
 }
 
 export const RealLlmSemanticTestPanel: React.FC = () => {
-  const [question, setQuestion] = useState('請問新竹市補助可以折抵幾小時？');
+  const [question, setQuestion] = useState('');
+  const [quickQuestions, setQuickQuestions] = useState<string[]>([]);
+  const [catalogNotice, setCatalogNotice] = useState<string | null>(null);
   const [result, setResult] = useState<LlmSemanticTest | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
+
+  useEffect(() => {
+    const headers: Record<string, string> = {};
+    const token = sessionClient.getToken();
+    if (token) headers.Authorization = `Bearer ${token}`;
+    void fetch('/api/v1/knowledge/items?limit=100&lifecycle_status=published', {
+      headers,
+      credentials: 'include',
+    }).then(async (response) => {
+      if (!response.ok) throw new Error('published_knowledge_read_failed');
+      const items = await response.json() as Array<{ content: string }>;
+      const publishedQuestions = items.flatMap((item) => {
+        try {
+          const content = JSON.parse(item.content) as { schema?: string; question?: string; answer?: string };
+          return content.schema === 'line.common_qa.v1' && content.question?.trim() && content.answer?.trim()
+            ? [content.question.trim()]
+            : [];
+        } catch {
+          return [];
+        }
+      });
+      setQuickQuestions(publishedQuestions);
+      setQuestion((current) => current || publishedQuestions[0] || '');
+      setCatalogNotice(publishedQuestions.length === 0 ? '目前沒有已發布的 QA，請先完成審核、發布與索引建置。' : null);
+    }).catch(() => {
+      setCatalogNotice('無法讀取已發布的 Knowledge QA，不提供可能失敗的快捷測試題。');
+    });
+  }, []);
 
   const run = async () => {
     const normalized = question.trim();
@@ -94,13 +125,6 @@ export const RealLlmSemanticTestPanel: React.FC = () => {
     }
   };
 
-  const QUICK_QUESTIONS = [
-    '請問新竹市補助可以折抵幾小時？',
-    '如果和月嫂合作不適合，可以換月嫂嗎？',
-    '月嫂服務收費標準與訂金如何計算？',
-    '月嫂服務是否有試用期？',
-  ];
-
   return (
     <div className="ai-editor-card real-llm-panel">
       <div className="ai-editor-header real-llm-header">
@@ -120,7 +144,7 @@ export const RealLlmSemanticTestPanel: React.FC = () => {
       <div className="real-llm-quick-section">
         <small className="real-llm-quick-label">點擊快捷填入民眾常見問題測試：</small>
         <div className="real-llm-quick-list">
-          {QUICK_QUESTIONS.map((q) => (
+          {quickQuestions.map((q) => (
             <button
               key={q}
               type="button"
@@ -131,12 +155,13 @@ export const RealLlmSemanticTestPanel: React.FC = () => {
             </button>
           ))}
         </div>
+        {catalogNotice && <div className="line-warning line-block-spacing-12" role="status">{catalogNotice}</div>}
       </div>
 
       <div className="sim-input-bar real-llm-input-row">
         <input
           aria-label="Gemini 真實語意測試文字"
-          placeholder="輸入民眾的測試提問 (例：請問補助可以折抵幾小時？)"
+          placeholder="請從已發布題目選擇，或輸入民眾的測試提問"
           value={question}
           onChange={(event) => setQuestion(event.target.value)}
           onKeyDown={(event) => {
@@ -160,9 +185,6 @@ export const RealLlmSemanticTestPanel: React.FC = () => {
       {notice && <div className={`${result?.outcome === 'answered' ? 'line-success' : 'line-warning'} line-block-spacing-12`} role="status">{notice}</div>}
       {result && (
         <div className={`${result.outcome === 'answered' ? 'line-success' : 'line-warning'} line-block-spacing-12`} role="status">
-          <div>provider：{result.provider} · model：{result.model} · outcome：{result.outcome}</div>
-          <div>Knowledge index：{result.index_version ?? '—'} · matched QA：{result.qa_id ?? '—'}</div>
-          {result.source_identity && <small>來源：{result.source_identity}</small>}
           {result.answer_text && <div className="real-llm-answer">{result.answer_text}</div>}
           {result.code && <div>fallback code：{result.code}</div>}
 

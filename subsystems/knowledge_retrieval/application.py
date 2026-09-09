@@ -18,6 +18,22 @@ class KnowledgeApplication:
             unit_of_work.commit()
         return result
 
+    def import_missing(self, commands):
+        """Import one source catalog atomically without overwriting managed revisions."""
+        with self._unit_of_work() as unit_of_work:
+            imported = []
+            skipped = []
+            for command in commands:
+                existing = unit_of_work.knowledge.find_by_source_identity(
+                    command.source_identity
+                )
+                if existing is not None:
+                    skipped.append(int(existing["id"]))
+                    continue
+                imported.append(unit_of_work.knowledge.ingest(command))
+            unit_of_work.commit()
+        return tuple(imported), tuple(skipped)
+
     def review(self, command) -> int:
         with self._unit_of_work() as unit_of_work:
             version = unit_of_work.knowledge.review(command)
@@ -66,6 +82,11 @@ class KnowledgeApplication:
 
     def get_answer_request(self, request_id: int):
         return self._query("get_answer_request", request_id)
+
+    def list_answer_requests(self, limit: int, request_status: str | None = None):
+        with self._unit_of_work() as unit_of_work:
+            result = unit_of_work.knowledge.list_answer_requests(limit, request_status)
+        return result
 
     def retry_job(self, job_id: int, actor_id: str, idempotency_key: str) -> int:
         with self._unit_of_work() as unit_of_work:

@@ -211,7 +211,7 @@ runtime `public_base_url` 產生公開網址。Chrome 已由工作室逐一實�
 - 客戶「已填過／尚未填過」選擇必須保存 canonical flow ID；未填過流程完成登記後才能完成同一 LINE 身分綁定。
 - LINE 管理中心使用 Customer Service bounded API client；成功 payload 轉 typed Pydantic view，transport/schema error 轉 typed client error。
 - Streamlit 只顯示 typed result 與提交 command，不包含 ticket transition 或 SQL 規則。
-- 已綁定且 enabled 的工會人員可由 `line-mobile-admin` LIFF 的獨立 target surface 使用待辦工作台、客服中心、異常中心與營運摘要。第一版待辦只包含月嫂身分審核，客服保留既有查看／回覆，異常與營運只讀取各自 owner 的 current Query；其 server-side ID token、binding、version、receipt 與 outbox 規則不因共用 LIFF runtime 而改變。
+- 已綁定且 enabled 的工會人員可由 `line-mobile-admin` LIFF 的獨立 target surface 使用待辦工作台、客服中心、異常中心與營運摘要。四個入口一律必須同時具 server-verified LIFF identity、current role-scoped LINE admin binding 與既有 persisted Admin Session；Session actor 必須與 LINE admin binding 指向同一人，各 owner 的 Query／Preview／Confirm／Apply 再驗證所需 capability，LINE binding 不簽發或取代 Admin Session。待辦工作台依 `29` 分組呈現 Client 資料異動、LINE Identity 客戶／月嫂重綁與身分異常、Scheduling 請假代班／改期，以及 Matching／Scheduling 媒合指派／重新媒合；各組只呼叫原 owner 的 bounded Query／Preview／Confirm／Apply，不建立 LINE-owned 共用 approval root。客服保留既有查看／回覆，異常與營運只讀取各自 owner 的 current Query，QA／Knowledge 審核留在 AI 事件工作室；其 server-side ID token、binding、version、receipt 與 outbox 規則不因共用 LIFF runtime 而改變。
 
 AI feedback 執行狀態（2026-08-26）：`approved-for-contract-first`。人工已授權補齊正式 feedback owner、
 root facts、privacy、typed Query／record／receipt／readback 與 durable manual-ticket linkage；只有 formal

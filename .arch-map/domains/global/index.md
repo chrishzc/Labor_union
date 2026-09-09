@@ -12,6 +12,8 @@ outbox 與 runtime governance；不擁有各 business Domain 的根事實或公�
   cutover governance；path: `subsystems/migration/index.md`
 - `controlled-files` — cross-domain controlled storage API composition and opaque
   file readback boundary；path: `subsystems/controlled-files/index.md`
+- `runtime-governance` — runtime observability、technical／operational retention、capacity
+  policy 與 bounded maintenance ownership；path: `subsystems/runtime-governance/index.md`
 
 ## External relationships
 - depended_by: `all domains` — schema／release 與跨域 mutation governance。
@@ -19,6 +21,8 @@ outbox 與 runtime governance；不擁有各 business Domain 的根事實或公�
 ## Contracts
 - Global migration／cutover contract —
   `document/架構重整/01_規格基線/10_Global_保留資料Migration與Cutover_Subsystem.md`
+- Global deployment／operational retention contract —
+  `document/架構重整/01_規格基線/18_Global_Deployment與治理正式規格.md`
 
 ## Verification routing
 - default_boundary: Subsystem

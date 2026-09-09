@@ -16,6 +16,7 @@ from domains.knowledge_retrieval.knowledge import (
     KnowledgeAnswer,
     KnowledgeAnswerUnsupported,
 )
+from domains.knowledge_retrieval.qa_catalog import QA_SOURCE_PREFIX
 from infrastructure.knowledge.chroma_gateway import ChromaKnowledgeGateway
 from infrastructure.knowledge.gemini_selector import GeminiCandidateSelector
 from infrastructure.mysql.knowledge_retrieval_unit_of_work import (
@@ -25,7 +26,7 @@ from infrastructure.runtime.llm_api_key_store import LlmApiKeyStore
 
 
 _PROVIDER = "google_ai_studio"
-_CATALOG_MARKER = "AI客服QA題庫.jsonl#"
+_LEGACY_CATALOG_MARKER = "AI客服QA題庫.jsonl#"
 
 
 class CandidateSelectorPort(Protocol):
@@ -203,9 +204,12 @@ def _safe_provider_code(error: Exception) -> str:
 
 
 def _qa_id_from_source(source_identity: str) -> str | None:
-    if _CATALOG_MARKER not in source_identity:
+    if source_identity.startswith(QA_SOURCE_PREFIX):
+        qa_id = source_identity.removeprefix(QA_SOURCE_PREFIX).strip()
+    elif _LEGACY_CATALOG_MARKER in source_identity:
+        qa_id = source_identity.rsplit("#", 1)[-1].strip()
+    else:
         return None
-    qa_id = source_identity.rsplit("#", 1)[-1].strip()
     return qa_id or None
 
 

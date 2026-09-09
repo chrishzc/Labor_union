@@ -17,7 +17,7 @@ import { LiffCardStudio } from '../pages/line_management/LiffCardStudio';
 const EXPECTED_HASHES = [
   'order-workbench-v2', 'scheduling', 'staff', 'data-import', 'reports',
   'line-management', 'line-ai-events', 'line-llm-settings', 'line-liff-studio', 'line-security',
-  'finance', 'historical-service-accounting', 'anomalies', 'account-management',
+  'finance', 'historical-service-accounting', 'anomalies', 'account-management', 'storage-management',
 ] as const;
 
 describe('React entrypoint registry', () => {
@@ -45,6 +45,7 @@ describe('React entrypoint registry', () => {
 
   it('AI 工作頁以分頁顯示正式 catalog、server-owned router preview 與真實模型測試', () => {
     render(React.createElement(AiCustomerServiceStudioPage));
+    expect(screen.getByRole('button', { name: '回饋分析' })).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: '事件規則' }));
     expect(screen.getByRole('searchbox', { name: '搜尋正式事件規則' })).toBeEnabled();
     expect(screen.getByRole('button', { name: '讀取 server router preview' })).toBeEnabled();
@@ -52,13 +53,13 @@ describe('React entrypoint registry', () => {
     expect(screen.getByLabelText('Server router 測試文字')).toHaveValue('我想修改登記資料');
 
     fireEvent.click(screen.getByRole('button', { name: 'AI 測試' }));
-    expect(screen.getByRole('button', { name: '執行真實 AI 智能解答' })).toBeEnabled();
-    expect(screen.getByLabelText('Gemini 真實語意測試文字')).toHaveValue('請問新竹市補助可以折抵幾小時？');
+    expect(screen.getByRole('button', { name: '執行真實 AI 智能解答' })).toBeDisabled();
+    expect(screen.getByLabelText('Gemini 真實語意測試文字')).toHaveValue('');
   });
 
 
 
-  it('LIFF 視覺頁保留 12 個 LIFF 與 4 個 Flex，且只產生 canonical 測試連結', async () => {
+  it('LIFF 視覺頁保留 15 個 LIFF 與 4 個 Flex，且只產生 canonical 測試連結', async () => {
     const runtimeConfigClient = {
       get: vi.fn(async () => ({
         liff_id: 'test-liff-id',
@@ -66,7 +67,7 @@ describe('React entrypoint registry', () => {
       })),
     };
     render(React.createElement(LiffCardStudio, { runtimeConfigClient }));
-    expect(screen.getByRole('button', { name: 'LIFF 表單 (12)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'LIFF 表單 (15)' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Flex 卡片 (4)' })).toBeInTheDocument();
     expect(screen.queryByText(/原始 8 個 LIFF 與 4 個 Flex 功能均保留/)).not.toBeInTheDocument();
     expect(screen.getAllByRole('button')
@@ -83,6 +84,9 @@ describe('React entrypoint registry', () => {
         'staff_baby_log.html',
         'staff_payout.html',
         'identity.html',
+        'mobile_admin.html',
+        'mobile_admin.html',
+        'mobile_admin.html',
         'mobile_admin.html',
       ]);
     expect(screen.queryByText(/15 分鐘.*Token/)).not.toBeInTheDocument();
@@ -140,6 +144,34 @@ describe('React entrypoint registry', () => {
       'href',
       'https://line-test.example.dev/line-order-update?studio_preview=1',
     );
+
+    fireEvent.click(screen.getByText('mobile_admin.html · 待辦工作台'));
+    expect(screen.getByText(/目前只列出待處理的月嫂身分審核/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '在預覽中開啟安全展示頁' })).toHaveAttribute(
+      'href',
+      'https://line-test.example.dev/line-mobile-admin?target=staff_review&studio_preview=1',
+    );
+
+    fireEvent.click(screen.getByText('mobile_admin.html · 客服中心'));
+    expect(screen.getByText(/集中查看待處理客服案件/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '在預覽中開啟安全展示頁' })).toHaveAttribute(
+      'href',
+      'https://line-test.example.dev/line-mobile-admin?target=customer_service&studio_preview=1',
+    );
+
+    fireEvent.click(screen.getByText('mobile_admin.html · 異常中心'));
+    expect(screen.getByText(/LINE 通知失敗的去敏唯讀摘要/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '在預覽中開啟安全展示頁' })).toHaveAttribute(
+      'href',
+      'https://line-test.example.dev/line-mobile-admin?target=anomalies_center&studio_preview=1',
+    );
+
+    fireEvent.click(screen.getByText('mobile_admin.html · 營運摘要'));
+    expect(screen.getByText(/依台北時區顯示本週營運統計/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '在預覽中開啟安全展示頁' })).toHaveAttribute(
+      'href',
+      'https://line-test.example.dev/line-mobile-admin?target=dashboard&studio_preview=1',
+    );
   });
 
   it('LIFF 目錄依正式四種 audience 分類，工會人員不會看到訪客 gateway', async () => {
@@ -150,14 +182,20 @@ describe('React entrypoint registry', () => {
       })),
     };
     render(React.createElement(LiffCardStudio, { runtimeConfigClient }));
-    fireEvent.click(screen.getByRole('button', { name: 'LIFF 表單 (12)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'LIFF 表單 (15)' }));
     const roleFilter = screen.getByRole('combobox', { name: '依適用角色篩選資產' });
     const visibleLiffNames = () => screen.getAllByRole('button')
       .map((button) => button.textContent?.match(/[a-z_]+\.html/)?.[0])
       .filter(Boolean);
 
     fireEvent.change(roleFilter, { target: { value: 'union_staff' } });
-    await waitFor(() => expect(visibleLiffNames()).toEqual(['identity.html', 'mobile_admin.html']));
+    await waitFor(() => expect(visibleLiffNames()).toEqual([
+      'identity.html',
+      'mobile_admin.html',
+      'mobile_admin.html',
+      'mobile_admin.html',
+      'mobile_admin.html',
+    ]));
     expect(screen.queryByText('gateway.html')).not.toBeInTheDocument();
 
     fireEvent.change(roleFilter, { target: { value: 'visitor' } });

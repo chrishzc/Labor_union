@@ -190,6 +190,53 @@ def test_mobile_admin_hides_internal_identity_and_concurrency_metadata() -> None
     assert "LINE 訊息已排入可靠發送佇列" in reply_apply
 
 
+def test_mobile_admin_studio_preview_is_zero_data_and_keeps_formal_auth() -> None:
+    source = _source("mobile_admin.html")
+    initialize = source.split("async function init()", 1)[1].split(
+        "function renderStudioPreview", 1
+    )[0]
+    preview = source.split("function renderStudioPreview", 1)[1].split(
+        "function switchPane", 1
+    )[0]
+    post_json = source.split("async function postJson", 1)[1].split(
+        "async function init()", 1
+    )[0]
+
+    assert 'get("studio_preview") === "1"' in source
+    assert "if (studioPreview)" in initialize
+    assert "renderStudioPreview(target);" in initialize
+    assert "revealMobileAdmin();" in initialize
+    assert initialize.index("renderStudioPreview(target)") < initialize.index(
+        'fetch("/api/v1/line/identity/runtime-config")'
+    )
+    assert "fetch(" not in preview
+    assert "postJson(" not in preview
+    assert 'control.disabled = true' in preview
+    assert "未執行 LINE 登入，也未載入正式資料" in preview
+    assert "正式 LIFF 入口仍需要身分驗證" in preview
+    assert "if (studioPreview) throw new Error" in post_json
+
+
+def test_mobile_admin_heading_is_target_specific_in_preview_and_formal_modes() -> None:
+    source = _source("mobile_admin.html")
+    heading = source.split("function applySurfaceHeading", 1)[1].split(
+        "function requireCustomerPage", 1
+    )[0]
+    preview = source.split("function renderStudioPreview", 1)[1].split(
+        "function switchPane", 1
+    )[0]
+    formal = source.split("function switchPane", 1)[1].split(
+        "async function loadTickets", 1
+    )[0]
+
+    assert 'document.getElementById("title").textContent = copy[0]' in heading
+    assert 'document.title = `${copy[0]}｜工會 LINE`' in heading
+    assert "applySurfaceHeading(target)" in preview
+    assert "applySurfaceHeading(target)" in formal
+    for label in ("待辦工作台", "客服中心", "異常中心", "營運摘要"):
+        assert label in source
+
+
 def test_mobile_admin_query_routes_use_closed_typed_response_models() -> None:
     source = (ROOT / "api" / "routes" / "line_mobile_admin.py").read_text(encoding="utf-8")
 
@@ -228,9 +275,17 @@ def test_mobile_scheduling_review_requires_current_session_fact_and_discards_lat
     assert "schedulingCaseIdentity" in source
     assert "sessionStorage.getItem(\"union_admin_session_token\")" in source
     assert "headers.Authorization" in source
-    assert 'location.assign("/#login?return_target=scheduling_review")' in source
+    assert "supportedTargets.includes(returnTarget)" in source
+    assert 'location.assign(`/admin/#login?return_target=${closedTarget}`)' in source
     assert "const profile = await postJson(\"/api/v1/line/mobile-admin/profile\", {});" in source
-    assert source.index('const profile = await postJson("/api/v1/line/mobile-admin/profile", {});') < source.index('if (!adminSessionToken())')
+    initialize = source.split("async function init()", 1)[1].split(
+        "function renderStudioPreview", 1
+    )[0]
+    assert initialize.index("if (!adminSessionToken())") < initialize.index(
+        'const profile = await postJson("/api/v1/line/mobile-admin/profile", {});'
+    )
+    assert 'id="mobileAdminContent" class="hidden"' in source
+    assert "revealMobileAdmin();" in initialize
     login_redirect = source.split("function redirectToAdminLogin", 1)[1].split(
         "function showStatus", 1
     )[0]
@@ -252,7 +307,7 @@ def test_mobile_admin_customer_and_review_pagination_use_server_metadata() -> No
     review_page = source.split("function requireReviewPage", 1)[1].split(
         "function renderPagination", 1
     )[0]
-    reviews = source.split("async function loadReviews", 1)[1].split(
+    reviews = source.split("async function loadIdentityReviews", 1)[1].split(
         "function reviewCard", 1
     )[0]
 

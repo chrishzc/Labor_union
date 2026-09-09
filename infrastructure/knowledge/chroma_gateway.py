@@ -1,23 +1,21 @@
-"""ChromaDB projection adapter for reviewed knowledge and the curated LINE QA catalog."""
+"""ChromaDB projection adapter for published, governed knowledge only."""
 
 from __future__ import annotations
 
 import json
-from difflib import SequenceMatcher
 from pathlib import Path
+import re
+from pathlib import Path
+import re
+from difflib import SequenceMatcher
 from typing import Callable
 
 from domains.knowledge_retrieval.knowledge import (
     KnowledgeAnswer,
     KnowledgeAnswerUnsupported,
     KnowledgeCitation,
-    source_digest,
 )
-
-
-_DEFAULT_CATALOG_PATH = (
-    Path(__file__).resolve().parents[2] / "document" / "line" / "AI客服QA題庫.jsonl"
-)
+from domains.knowledge_retrieval.qa_catalog import decode_governed_qa
 
 
 class ChromaKnowledgeGateway:
@@ -26,20 +24,18 @@ class ChromaKnowledgeGateway:
         persistence_path: str,
         collection_prefix: str = "union_knowledge",
         *,
-        catalog_path: str | Path | None = None,
         llm: Callable[[str], str] | None = None,
         min_confidence: float = 0.60,
     ) -> None:
         self._persistence_path = persistence_path
         self._collection_prefix = collection_prefix
-        self._catalog_path = Path(catalog_path) if catalog_path is not None else _DEFAULT_CATALOG_PATH
         self._llm = llm
         self._min_confidence = min_confidence
 
     def rebuild(
         self, index_version: int, published_items: tuple[dict, ...]
     ) -> tuple[dict, ...]:
-        indexed_items = tuple(published_items) + self._load_catalog_items()
+        indexed_items = tuple(self._project_published_item(item) for item in published_items)
         client = self._client()
         name = self._collection_name(index_version)
         existing_names = {
@@ -124,73 +120,70 @@ class ChromaKnowledgeGateway:
         )
         return KnowledgeAnswer(answer[:5000], (citation,), index_version)
 
-    def _load_catalog_items(self) -> tuple[dict, ...]:
-        if not self._catalog_path.exists():
-            return ()
-        items: list[dict] = []
-        seen_ids: set[str] = set()
-        with self._catalog_path.open("r", encoding="utf-8") as source:
-            for line_number, raw_line in enumerate(source, start=1):
-                if not raw_line.strip():
-                    continue
-                try:
-                    record = json.loads(raw_line)
-                except json.JSONDecodeError as error:
-                    raise ValueError(
-                        f"knowledge_catalog_invalid:{line_number}"
-                    ) from error
-                if record.get("enabled") is not True and str(record.get("status", "")).strip().lower() != "ready":
-                    continue
-                catalog_id = str(record.get("id", "")).strip()
-                category = str(record.get("category", "")).strip()
-                tag = str(record.get("tag", "")).strip()
-                question = str(record.get("question", "")).strip()
-                answer = str(record.get("answer", "")).strip()
-                aliases = record.get("aliases", [])
-                if (
-                    not catalog_id
-                    or not category
-                    or not tag
-                    or not question
-                    or not answer
-                    or not isinstance(aliases, list)
-                    or any(not isinstance(alias, str) for alias in aliases)
-                    or catalog_id in seen_ids
-                ):
-                    raise ValueError(f"knowledge_catalog_invalid:{line_number}")
-                seen_ids.add(catalog_id)
-                canonical_record = {
-                    "id": catalog_id,
-                    "category": category,
-                    "tag": tag,
-                    "question": question,
-                    "aliases": [alias.strip() for alias in aliases if alias.strip()],
-                    "answer": answer,
-                    "enabled": True,
-                    "source_ref": str(record.get("source_ref", "")).strip(),
-                }
-                encoded = json.dumps(
-                    canonical_record,
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                    sort_keys=True,
-                )
-                items.append(
-                    {
-                        "source_identity": f"{self._catalog_path.as_posix()}#{catalog_id}",
-                        "source_version": 1,
-                        "source_digest": source_digest(encoded),
-                        "title": f"{category} / {tag}",
-                        "content": answer,
-                        "catalog_id": catalog_id,
-                        "category": category,
-                        "tag": tag,
-                        "question": question,
-                        "aliases": tuple(canonical_record["aliases"]),
-                        "source_ref": canonical_record["source_ref"],
-                    }
-                )
-        return tuple(items)
+    def list_index_versions(self) -> tuple[int, ...]:
+        """Return only collections owned by this gateway."""
+        pattern = re.compile(rf"^{re.escape(self._collection_prefix)}_v([0-9]+)$")
+        versions = []
+        for collection in self._client().list_collections():
+            name = str(getattr(collection, "name", collection))
+            match = pattern.fullmatch(name)
+            if match:
+                versions.append(int(match.group(1)))
+        return tuple(sorted(versions))
+
+    def estimate_index_bytes(self, index_version: int) -> int:
+        """Estimate logical payload bytes without exposing stored content."""
+        collection = self._client().get_collection(self._collection_name(index_version))
+        payload = collection.get(include=["documents", "metadatas"])
+        return len(
+            json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8")
+        )
+
+    def delete_index(self, index_version: int) -> bool:
+        """Delete one exact versioned collection; missing is an idempotent no-op."""
+        name = self._collection_name(index_version)
+        existing = {
+            str(getattr(collection, "name", collection))
+            for collection in self._client().list_collections()
+        }
+        if name not in existing:
+            return False
+        self._client().delete_collection(name)
+        return True
+
+    def persistence_bytes(self) -> int:
+        root = Path(self._persistence_path)
+        if not root.exists() or not root.is_dir():
+            return 0
+        resolved_root = root.resolve()
+        total = 0
+        for path in resolved_root.rglob("*"):
+            if path.is_symlink() or not path.is_file():
+                continue
+            try:
+                resolved = path.resolve(strict=True)
+                resolved.relative_to(resolved_root)
+                total += resolved.stat().st_size
+            except (FileNotFoundError, OSError, ValueError):
+                continue
+        return total
+
+    @staticmethod
+    def _project_published_item(item: dict) -> dict:
+        governed_qa = decode_governed_qa(str(item["content"]))
+        if governed_qa is None:
+            return dict(item)
+        governed_qa.require_publishable()
+        return {
+            **item,
+            "content": governed_qa.answer,
+            "catalog_id": governed_qa.qa_id,
+            "category": governed_qa.category,
+            "tag": governed_qa.tag,
+            "question": governed_qa.question,
+            "aliases": governed_qa.aliases,
+            "source_ref": governed_qa.source_ref,
+        }
 
     def _metadata(self, item: dict) -> dict:
         aliases = item.get("aliases") or ()

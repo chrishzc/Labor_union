@@ -13,6 +13,7 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
+from api.dependencies.admin_auth import AdminPrincipal
 from api.routes import line_identity
 from api.routes import line_mobile_admin
 from api.routes.customer_service import router as customer_service_router
@@ -24,8 +25,10 @@ from domains.customer_service.ticket import (
     transition_ticket,
 )
 from domains.line.identities import LineUserId
+from domains.line.identity_binding import LineBindingSubjectType, LineIdentityBindingStatus
 from shared_kernel.migration_release import load_migration_release_manifest
 from subsystems.line.service_help_application import LineServiceHelpApplication
+from subsystems.line.identity_management_contracts import LineIdentityCurrentFactReadbackStatus
 from subsystems.line.webhook_identity_handlers import LineWebhookIdentityHandlers
 
 
@@ -387,10 +390,27 @@ def test_deferred_history_records_legacy_paths_that_must_not_return():
     assert "直接 UPDATE clients" in history
 
 
-def test_mobile_admin_actor_is_not_restricted_by_persisted_role():
-    admin = SimpleNamespace(admin_user_id=7, role="line_viewer")
+def test_mobile_admin_actor_uses_matching_persisted_session_not_role_label(monkeypatch):
+    principal = AdminPrincipal(7, "reviewer", "Reviewer", "line_viewer")
+    fact = SimpleNamespace(
+        root_status=LineIdentityBindingStatus.BOUND,
+        readback_status=LineIdentityCurrentFactReadbackStatus.COMPLETE,
+        root_bindings=(SimpleNamespace(
+            subject_type=LineBindingSubjectType.ADMIN,
+            subject_reference="7",
+        ),),
+    )
+    monkeypatch.setattr(
+        line_mobile_admin,
+        "get_liff_token_verifier",
+        lambda: SimpleNamespace(verify=lambda _: SimpleNamespace(line_user_id="U-admin")),
+    )
 
-    actor = line_mobile_admin._actor_for_admin(admin)
+    actor = line_mobile_admin._mobile_admin_actor(
+        "verified-token",
+        principal,
+        SimpleNamespace(current_fact=lambda line_user_id: fact),
+    )
 
     assert actor.actor_id == "admin:7"
     assert actor.permission_scope == ("line.identity.review",)

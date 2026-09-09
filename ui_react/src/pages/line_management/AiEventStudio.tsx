@@ -6,16 +6,12 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   Bot,
   CheckCircle2,
-  CircleAlert,
   ExternalLink,
   Laptop,
-  Lightbulb,
   Navigation,
   Play,
   Route,
   Tag,
-  ThumbsDown,
-  ThumbsUp,
 } from 'lucide-react';
 import { sessionClient } from '../../api/auth/session_client';
 import '../LineManagementPage.css';
@@ -33,13 +29,6 @@ interface NavigationCatalogEntry {
 interface NavigationCatalog {
   revision: number;
   entries: NavigationCatalogEntry[];
-}
-
-interface FeedbackAggregate {
-  resolved_count: number;
-  unresolved_count: number;
-  total_count: number;
-  resolved_rate: number | null;
 }
 
 interface RouterPreview {
@@ -70,8 +59,6 @@ interface CatalogGroup {
 
 export const AiEventStudio: React.FC = () => {
   const [catalog, setCatalog] = useState<NavigationCatalog | null>(null);
-  const [feedbackAggregate, setFeedbackAggregate] = useState<FeedbackAggregate | null>(null);
-  const [feedbackNotice, setFeedbackNotice] = useState<string | null>(null);
   const [catalogNotice, setCatalogNotice] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedRouteKey, setSelectedRouteKey] = useState<string | null>(null);
@@ -114,21 +101,6 @@ export const AiEventStudio: React.FC = () => {
       })
       .catch(() => {
         if (active) setCatalogNotice('正式 navigation/event catalog 讀取失敗；本頁不以本機示範規則替代。');
-      });
-
-    fetch('/api/v1/line/ai-events/feedback/aggregate', {
-      headers,
-      credentials: 'include',
-    })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error('feedback_readback_failed')))
-      .then((payload: { data?: FeedbackAggregate }) => {
-        if (active && payload.data) {
-          setFeedbackAggregate(payload.data);
-          setFeedbackNotice(null);
-        }
-      })
-      .catch(() => {
-        if (active) setFeedbackNotice('回饋統計讀取失敗，請稍後重新整理。');
       });
 
     return () => { active = false; };
@@ -437,11 +409,6 @@ export const AiEventStudio: React.FC = () => {
                 >
                   <Play aria-hidden="true" />以首選問句模擬此規則
                 </button>
-                {feedbackAggregate && (
-                  <span className="ai-feedback-inline-summary">
-                    即時反饋：共 {feedbackAggregate.total_count} 則（已解決 {feedbackAggregate.resolved_count}）
-                  </span>
-                )}
               </div>
             </div>
           </div>
@@ -452,44 +419,6 @@ export const AiEventStudio: React.FC = () => {
         )}
 
         <div className="ai-simulator-card">
-          <section className="ai-feedback-overview" aria-labelledby="ai-feedback-title">
-            <div className="ai-feedback-header">
-              <h4 id="ai-feedback-title"><ThumbsUp aria-hidden="true" />AI 客服回饋與滿意度</h4>
-              <span className="ai-feedback-badge">
-                用戶即時反饋
-              </span>
-            </div>
-            {feedbackAggregate ? (
-              <div className="ai-feedback-grid">
-                <div className="ai-feedback-metric">
-                  <span>總回饋數</span>
-                  <strong>{feedbackAggregate.total_count}</strong>
-                </div>
-                <div className="ai-feedback-metric is-positive">
-                  <span><ThumbsUp aria-hidden="true" />已解決</span>
-                  <strong>{feedbackAggregate.resolved_count}</strong>
-                </div>
-                <div className="ai-feedback-metric is-negative">
-                  <span><ThumbsDown aria-hidden="true" />未解決</span>
-                  <strong>{feedbackAggregate.unresolved_count}</strong>
-                </div>
-                <div className="ai-feedback-metric is-rate">
-                  <span>滿意度</span>
-                  <strong>
-                    {feedbackAggregate.resolved_rate !== null ? `${Math.round(feedbackAggregate.resolved_rate * 100)}%` : '尚無回饋'}
-                  </strong>
-                </div>
-              </div>
-            ) : feedbackNotice ? (
-              <div className="line-warning" role="status"><CircleAlert aria-hidden="true" />{feedbackNotice}</div>
-            ) : (
-              <div className="ai-feedback-loading" role="status">載入回饋統計中…</div>
-            )}
-            <p className="ai-feedback-help">
-              <Lightbulb aria-hidden="true" />民眾在 LINE 選擇「未解決」後，系統會建立客訴工單並轉由真人客服處理。
-            </p>
-          </section>
-
           <section className="ai-router-simulator" aria-labelledby="ai-router-simulator-title">
             <div className="ai-router-simulator-heading">
               <div>

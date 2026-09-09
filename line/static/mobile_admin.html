@@ -42,11 +42,13 @@ Description: 提供 LINE 工會人員獨立的待辦、客服、異常與營運�
     .metric span { display:block; color:var(--muted); font-size:14px; }
     .metric strong { display:block; font-size:28px; margin-top:6px; }
     .muted { color:var(--muted); line-height:1.5; }
+    .loading-shell { max-width:760px; margin:0 auto; padding:28px 14px; color:var(--muted); }
     .hidden { display:none; }
   </style>
 </head>
 <body>
-<main>
+<div id="authLoading" class="loading-shell" role="status" aria-live="polite">正在確認工會人員身分與內部登入狀態…</div>
+<main id="mobileAdminContent" class="hidden">
   <h1 id="title">工會手機管理</h1>
   <p class="caption" id="subtitle">正在確認您的 LINE 工會人員身分。</p>
   <div class="surface-heading">
@@ -68,10 +70,13 @@ Description: 提供 LINE 工會人員獨立的待辦、客服、異常與營運�
   </section>
   <section id="reviewPane" class="hidden">
     <div class="section-heading">
-      <h2>月嫂身分驗證</h2>
-      <button id="openScheduling" class="secondary" type="button">排班案件工具</button>
+      <h2>工會審核待辦</h2>
+      <button id="openScheduling" class="secondary" type="button">媒合與排班審核工具</button>
     </div>
-    <p class="muted">待辦數量僅包含月嫂身分驗證申請；排班工具須按案件編號查詢，不計入待辦。</p>
+    <p class="muted">依業務 owner 分組顯示；客服、異常與 QA 內容審核不會在這裡重複列入。</p>
+    <h3>客戶資料異動</h3>
+    <div id="profileReviews"></div>
+    <h3>客戶／月嫂身分重綁與異常</h3>
     <div class="toolbar">
       <select id="reviewStatus">
         <option value="pending">待審核</option>
@@ -81,6 +86,10 @@ Description: 提供 LINE 工會人員獨立的待辦、客服、異常與營運�
       <button type="button" id="refreshReviews">重新整理</button>
     </div>
     <div id="reviews"></div>
+    <h3>請假、代班與改期</h3>
+    <div id="leaveReviews"></div>
+    <h3>媒合指派與重新媒合</h3>
+    <p class="muted">目前由正式案件工具依案件編號查詢；在 owner 提供 pending Query 前不顯示或推算待辦數量。</p>
   </section>
   <section id="schedulingPane" class="hidden">
     <div class="section-heading">
@@ -116,6 +125,7 @@ Description: 提供 LINE 工會人員獨立的待辦、客服、異常與營運�
 let idToken = "";
 let target = "customer_service";
 const reviewPreviews = new Map();
+const profileReviewPreviews = new Map();
 const replyPreviews = new Map();
 let schedulingQuery = null;
 let schedulingPreview = null;
@@ -127,10 +137,14 @@ const ticketPageState = {page: 1, pageSize: 0, total: 0};
 const reviewPageState = {page: 1, pageSize: 50, total: 0};
 let ticketQuerySequence = 0;
 let reviewQuerySequence = 0;
+let profileReviewQuerySequence = 0;
+let leaveReviewQuerySequence = 0;
 let anomalyQuerySequence = 0;
 let operationsQuerySequence = 0;
 let anomalyCursor = null;
 let anomalyItems = [];
+let adminLoginRedirectStarted = false;
+const studioPreview = new URLSearchParams(location.search).get("studio_preview") === "1";
 const statusBox = document.getElementById("status");
 const panes = {
   customer_service: document.getElementById("customerPane"),
@@ -142,8 +156,8 @@ const panes = {
 const supportedTargets = Object.freeze(Object.keys(panes));
 const surfaceCopy = Object.freeze({
   customer_service: ["客服中心", "只顯示客服案件與回覆工作。"],
-  staff_review: ["待辦工作台", "目前待辦只包含月嫂身分驗證。"],
-  scheduling_review: ["排班案件工具", "依案件編號查詢、預覽並確認排班調整。"],
+  staff_review: ["待辦工作台", "分組處理資料異動、身分重綁、請假代班與媒合排班。"],
+  scheduling_review: ["媒合與排班審核工具", "依案件編號查詢、預覽並確認排班調整。"],
   anomalies_center: ["異常中心", "顯示目前仍有效的 LINE 通知異常。"],
   dashboard: ["營運摘要", "顯示本週彙整資料與產生時間，不代表即時監控。"],
 });
@@ -170,9 +184,17 @@ function adminSessionToken() {
   return sessionStorage.getItem("union_admin_session_token") || "";
 }
 
-function redirectToAdminLogin() {
+function redirectToAdminLogin(returnTarget=target) {
   // Closed return identity only.  No token or caller-provided URL crosses navigation.
-  location.assign("/#login?return_target=scheduling_review");
+  const closedTarget = supportedTargets.includes(returnTarget)
+    ? returnTarget : "staff_review";
+  adminLoginRedirectStarted = true;
+  location.assign(`/admin/#login?return_target=${closedTarget}`);
+}
+
+function revealMobileAdmin() {
+  document.getElementById("authLoading").classList.add("hidden");
+  document.getElementById("mobileAdminContent").classList.remove("hidden");
 }
 
 function showStatus(message, isError=false) {
@@ -185,6 +207,14 @@ function showEmpty(root, message) {
   empty.className = "info";
   empty.textContent = message;
   root.appendChild(empty);
+}
+
+function applySurfaceHeading(next) {
+  const copy = surfaceCopy[next];
+  document.getElementById("title").textContent = copy[0];
+  document.title = `${copy[0]}｜工會 LINE`;
+  document.getElementById("surfaceLabel").textContent = copy[0];
+  document.getElementById("surfaceDescription").textContent = copy[1];
 }
 
 function requireCustomerPage(data, requestedPage) {
@@ -262,6 +292,7 @@ function reauthenticateLine() {
 }
 
 async function postJson(url, body) {
+  if (studioPreview) throw new Error("安全預覽不會讀取或修改正式資料。");
   const sessionToken = adminSessionToken();
   const headers = {"Content-Type":"application/json"};
   if (sessionToken) headers.Authorization = `Bearer ${sessionToken}`;
@@ -273,7 +304,8 @@ async function postJson(url, body) {
   const result = await response.json().catch(() => ({}));
   if (!response.ok) {
     const code = safeErrorCode(result);
-    if (target === "scheduling_review" && response.status === 401 && !code.startsWith("liff_")) {
+    if (supportedTargets.includes(target)
+        && response.status === 401 && !code.startsWith("liff_")) {
       redirectToAdminLogin();
       throw new Error("內部使用者登入已失效，正在返回既有登入流程。");
     }
@@ -283,9 +315,36 @@ async function postJson(url, body) {
   return result.data;
 }
 
+async function adminJson(url, {method="GET", body=null, headers={}}={}) {
+  if (studioPreview) throw new Error("安全預覽不會讀取或修改正式資料。");
+  const sessionToken = adminSessionToken();
+  if (!sessionToken) {
+    redirectToAdminLogin(target);
+    throw new Error("需要登入內部使用者帳號才能處理跨業務審核。");
+  }
+  const requestHeaders = {...headers, Authorization: `Bearer ${sessionToken}`};
+  const options = {method, headers: requestHeaders};
+  if (body !== null) {
+    requestHeaders["Content-Type"] = "application/json";
+    options.body = JSON.stringify(body);
+  }
+  const response = await fetch(url, options);
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (response.status === 401) redirectToAdminLogin(target);
+    throw new Error(safeErrorMessage(result, "待辦操作失敗"));
+  }
+  return result.data;
+}
+
 async function init() {
   try {
     target = supportedTargets.includes(targetFromUrl()) ? targetFromUrl() : "customer_service";
+    if (studioPreview) {
+      renderStudioPreview(target);
+      revealMobileAdmin();
+      return;
+    }
     const configResponse = await fetch("/api/v1/line/identity/runtime-config");
     const configResult = await configResponse.json();
     const liffId = configResult.data?.liff_id;
@@ -299,41 +358,74 @@ async function init() {
     }
     idToken = liff.getIDToken() || "";
     if (!idToken) throw new Error("無法取得 LINE 登入憑證，請確認 LIFF 已啟用 openid。");
-    const profile = await postJson("/api/v1/line/mobile-admin/profile", {});
-    if (target === "scheduling_review") {
-      if (!adminSessionToken()) {
-        redirectToAdminLogin();
-        return;
-      }
-      document.getElementById("subtitle").textContent = "排班審核需要已登入的內部使用者 Session。";
-      switchPane(target);
+    if (!adminSessionToken()) {
+      redirectToAdminLogin(target);
       return;
     }
-    document.getElementById("subtitle").textContent = `登入人員：${profile.display_name}`;
+    const profile = await postJson("/api/v1/line/mobile-admin/profile", {});
+    document.getElementById("subtitle").textContent = `登入人員：${profile.display_name}；已驗證內部 Session 與 LINE 工會人員身分。`;
     switchPane(target);
+    revealMobileAdmin();
   } catch (error) {
+    if (adminLoginRedirectStarted) return;
+    revealMobileAdmin();
     showStatus(error.message, true);
+  }
+}
+
+function renderStudioPreview(next) {
+  target = next;
+  Object.entries(panes).forEach(([name, pane]) => pane.classList.toggle("hidden", target !== name));
+  applySurfaceHeading(target);
+  document.getElementById("subtitle").textContent = "資產工作室安全預覽；未執行 LINE 登入，也未載入正式資料。";
+  document.getElementById("reauthenticate").classList.add("hidden");
+  document.querySelectorAll("main button, main select, main input, main textarea")
+    .forEach(control => { control.disabled = true; });
+  showStatus("安全預覽模式：所有操作均已停用。正式 LIFF 入口仍需要身分驗證。");
+  if (target === "customer_service") {
+    showEmpty(document.getElementById("tickets"), "安全預覽不載入正式客服案件。");
+  } else if (target === "staff_review") {
+    showEmpty(document.getElementById("profileReviews"), "安全預覽不載入正式客戶資料異動申請。");
+    showEmpty(document.getElementById("reviews"), "安全預覽不載入正式身分重綁與異常申請。");
+    showEmpty(document.getElementById("leaveReviews"), "安全預覽不載入正式請假與代班申請。");
+  } else if (target === "anomalies_center") {
+    showEmpty(document.getElementById("anomalies"), "安全預覽不載入正式 LINE-006 異常。");
+  } else if (target === "dashboard") {
+    document.getElementById("operationsPeriod").textContent = "安全預覽不載入正式統計期間或產生時間。";
+    const labels = ["案件申請", "一般符合", "補助符合", "不符合待分流", "已成立訂單", "資料不完整"];
+    const root = document.getElementById("operationsMetrics");
+    root.replaceChildren();
+    labels.forEach(label => {
+      const metric = document.createElement("article");
+      metric.className = "metric";
+      const name = document.createElement("span");
+      name.textContent = label;
+      const value = document.createElement("strong");
+      value.textContent = "—";
+      metric.append(name, value);
+      root.appendChild(metric);
+    });
   }
 }
 
 function switchPane(next) {
   if (!supportedTargets.includes(next)) return;
-  if (next === "scheduling_review" && !adminSessionToken()) {
-    redirectToAdminLogin();
+  if (studioPreview) { renderStudioPreview(next); return; }
+  if (!adminSessionToken()) {
+    redirectToAdminLogin(next);
     return;
   }
   target = next;
   Object.entries(panes).forEach(([name, pane]) => pane.classList.toggle("hidden", target !== name));
+  applySurfaceHeading(target);
   const copy = surfaceCopy[target];
-  document.getElementById("surfaceLabel").textContent = copy[0];
-  document.getElementById("surfaceDescription").textContent = copy[1];
   showStatus(`${copy[0]}載入中`);
   if (target === "customer_service") loadTickets();
   else if (target === "scheduling_review") {
     renderSchedulingReview();
     showStatus("請輸入案件編號查詢正式排班");
   }
-  else if (target === "staff_review") loadReviews();
+  else if (target === "staff_review") loadReviewWorkbench();
   else if (target === "anomalies_center") loadAnomalies(true);
   else loadOperationsSummary();
 }
@@ -803,7 +895,28 @@ async function applySchedulingReview() {
   } catch (error) { showStatus(error.message, true); }
 }
 
-async function loadReviews() {
+async function loadReviewWorkbench() {
+  const jobs = [
+    ["profileReviews", loadProfileReviews],
+    ["reviews", loadIdentityReviews],
+    ["leaveReviews", loadLeaveReviews],
+  ];
+  const results = await Promise.allSettled(jobs.map(([, loader]) => loader()));
+  let failed = 0;
+  results.forEach((result, index) => {
+    if (result.status === "fulfilled") return;
+    failed += 1;
+    const root = document.getElementById(jobs[index][0]);
+    root.replaceChildren();
+    showEmpty(root, result.reason?.message || "此類待辦暫時無法載入。");
+  });
+  showStatus(
+    failed ? `待辦工作台部分載入失敗（${failed}/${jobs.length}），其他分類仍可使用。` : "待辦工作台已更新",
+    failed === jobs.length,
+  );
+}
+
+async function loadIdentityReviews() {
   const requestedPage = reviewPageState.page;
   const requestedStatus = document.getElementById("reviewStatus").value;
   const querySequence = ++reviewQuerySequence;
@@ -811,7 +924,7 @@ async function loadReviews() {
   try {
     const data = await postJson("/api/v1/line/mobile-admin/identity-reviews", {
       review_status: requestedStatus,
-      review_type: "staff_verification",
+      review_type: null,
       page: requestedPage,
       page_size: reviewPageState.pageSize,
     });
@@ -826,15 +939,22 @@ async function loadReviews() {
     root.replaceChildren();
     renderPagination(root, pageData, page => {
       reviewPageState.page = page;
-      loadReviews();
+      loadIdentityReviews().catch(error => showStatus(error.message, true));
     });
-    showStatus("月嫂身分驗證待辦已更新");
-    if (!pageData.items.length) { showEmpty(root, "目前沒有符合條件的月嫂驗證申請。"); return; }
+    if (!pageData.items.length) { showEmpty(root, "目前沒有符合條件的身分重綁或異常申請。"); return 0; }
     pageData.items.forEach(review => root.appendChild(reviewCard(review)));
+    return pageData.total;
   } catch (error) {
-    if (querySequence === reviewQuerySequence) showStatus(error.message, true);
+    if (querySequence === reviewQuerySequence) throw error;
+    return 0;
   }
 }
+
+const identityReviewTypeLabels = {
+  client_rebind: "客戶重新綁定",
+  staff_verification: "月嫂身分／重綁異常",
+  admin_binding: "工會人員綁定異常",
+};
 
 function reviewCard(review) {
   const card = document.createElement("div");
@@ -843,7 +963,7 @@ function reviewCard(review) {
   const row = document.createElement("div");
   row.className = "row";
   const title = document.createElement("strong");
-  title.textContent = `#${review.request_id} ${review.display_name}`;
+  title.textContent = `#${review.request_id} ${businessLabel(identityReviewTypeLabels, review.review_type, "身分審核")}｜${review.display_name}`;
   const status = document.createElement("span");
   status.className = "pill";
   status.textContent = businessLabel(reviewStatusLabels, review.status, "狀態待確認");
@@ -920,7 +1040,7 @@ function renderReviewPreview(review, previewState) {
 }
 
 async function previewReviewDecision(review, decision) {
-  const reason = document.getElementById(`reason-${review.request_id}`).value.trim() || (decision === "approve" ? "手機端核准月嫂驗證" : "");
+  const reason = document.getElementById(`reason-${review.request_id}`).value.trim() || (decision === "approve" ? "手機端核准身分審核" : "");
   if (!reason) { showStatus("退回申請時請輸入原因。", true); return; }
   try {
     const data = await postJson(`/api/v1/line/mobile-admin/identity-reviews/${review.request_id}/decision/preview`, {
@@ -961,7 +1081,191 @@ async function applyReviewDecision(review) {
       "通知僅排入可靠佇列，尚未證明送達。",
     ].join("\n"));
     reviewPageState.page = 1;
-    loadReviews();
+    loadIdentityReviews().catch(error => showStatus(error.message, true));
+  } catch (error) { showStatus(error.message, true); }
+}
+
+function appendDiffList(card, before, requested) {
+  const keys = [...new Set([...Object.keys(before || {}), ...Object.keys(requested || {})])].sort();
+  if (!keys.length) {
+    const empty = document.createElement("p");
+    empty.className = "muted";
+    empty.textContent = "此申請沒有可顯示的欄位差異。";
+    card.appendChild(empty);
+    return;
+  }
+  keys.forEach(key => {
+    const row = document.createElement("p");
+    row.textContent = `${key}：${before?.[key] ?? "—"} → ${requested?.[key] ?? "—"}`;
+    card.appendChild(row);
+  });
+}
+
+async function loadProfileReviews() {
+  const querySequence = ++profileReviewQuerySequence;
+  const root = document.getElementById("profileReviews");
+  root.replaceChildren();
+  const data = await adminJson("/api/v1/client-profile/requests?status=pending&page=1&page_size=50");
+  if (querySequence !== profileReviewQuerySequence) return 0;
+  if (!data || !Array.isArray(data.items) || !Number.isInteger(data.total)) {
+    throw new Error("客戶資料異動待辦格式不完整。");
+  }
+  if (!data.items.length) {
+    showEmpty(root, "目前沒有待審核的客戶資料異動申請。");
+    return 0;
+  }
+  data.items.forEach(request => root.appendChild(profileReviewCard(request)));
+  return data.total;
+}
+
+function profileReviewCard(request) {
+  const card = document.createElement("div");
+  card.className = "card";
+  const title = document.createElement("strong");
+  title.textContent = `申請 #${request.request_id}｜客戶 #${request.client_id}`;
+  const reasonText = document.createElement("p");
+  reasonText.textContent = `申請原因：${request.reason || "未填寫"}`;
+  card.append(title, reasonText);
+  appendDiffList(card, request.before, request.requested);
+  const reason = document.createElement("textarea");
+  reason.id = `profile-reason-${request.request_id}`;
+  reason.placeholder = "核准備註或退回原因";
+  const actions = document.createElement("div");
+  actions.className = "toolbar";
+  const approve = document.createElement("button");
+  approve.type = "button";
+  approve.textContent = "預覽核准";
+  approve.addEventListener("click", () => previewProfileDecision(request, "approve"));
+  const reject = document.createElement("button");
+  reject.type = "button";
+  reject.className = "danger";
+  reject.textContent = "預覽退回";
+  reject.addEventListener("click", () => previewProfileDecision(request, "reject"));
+  actions.append(approve, reject);
+  const preview = document.createElement("div");
+  preview.id = `profile-preview-${request.request_id}`;
+  preview.className = "preview hidden";
+  card.append(reason, actions, preview);
+  return card;
+}
+
+async function previewProfileDecision(request, decision) {
+  const reason = document.getElementById(`profile-reason-${request.request_id}`).value.trim()
+    || (decision === "approve" ? "手機端核准客戶資料異動" : "");
+  if (!reason) { showStatus("退回資料異動申請時請輸入原因。", true); return; }
+  try {
+    const suffix = decision === "approve" ? "approve/preview" : "reject/preview";
+    const body = {expected_request_version: request.request_version};
+    if (decision === "reject") body.reason = reason;
+    const preview = await adminJson(`/api/v1/client-profile/requests/${request.request_id}/${suffix}`, {method:"POST", body});
+    if (!preview || !Number.isInteger(preview.current_version)
+        || typeof preview.preview_fingerprint !== "string") {
+      throw new Error("客戶資料異動預覽格式不完整。");
+    }
+    const state = {decision, reason, preview};
+    profileReviewPreviews.set(request.request_id, state);
+    const root = document.getElementById(`profile-preview-${request.request_id}`);
+    root.replaceChildren();
+    root.classList.remove("hidden");
+    const summary = document.createElement("p");
+    summary.textContent = decision === "approve" ? "確認後將由 Client owner 套用欄位差異。" : "確認後只退回申請，不修改客戶資料。";
+    const confirm = document.createElement("button");
+    confirm.type = "button";
+    confirm.textContent = decision === "approve" ? "確認核准並套用" : "確認退回";
+    confirm.addEventListener("click", () => applyProfileDecision(request));
+    root.append(summary, confirm);
+    showStatus("客戶資料異動預覽已建立；尚未套用。");
+  } catch (error) { showStatus(error.message, true); }
+}
+
+async function applyProfileDecision(request) {
+  const state = profileReviewPreviews.get(request.request_id);
+  if (!state) { showStatus("資料異動預覽已失效，請重新預覽。", true); return; }
+  const identity = globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : Date.now().toString(36);
+  const common = {
+    expected_request_version: request.request_version,
+    reason: state.reason,
+    preview_fingerprint: state.preview.preview_fingerprint,
+    idempotency_key: `mobile-profile-review:${request.request_id}:${identity}`,
+    correlation_id: `mobile-profile-review:${identity}`,
+  };
+  try {
+    const approve = state.decision === "approve";
+    const data = await adminJson(
+      `/api/v1/client-profile/requests/${request.request_id}/${approve ? "approve/apply" : "reject"}`,
+      {method:"POST", body: approve ? {...common, expected_profile_version: state.preview.current_version} : common},
+    );
+    const readback = approve ? data?.request : data;
+    if (!readback || readback.request_id !== request.request_id || typeof readback.status !== "string") {
+      throw new Error("資料異動審核結果讀回不完整，請勿重複送出。");
+    }
+    profileReviewPreviews.delete(request.request_id);
+    showStatus(approve ? "客戶資料異動已核准套用並完成讀回。" : "客戶資料異動申請已退回，正式資料未修改。");
+    await loadProfileReviews();
+  } catch (error) { showStatus(error.message, true); }
+}
+
+async function loadLeaveReviews() {
+  const querySequence = ++leaveReviewQuerySequence;
+  const root = document.getElementById("leaveReviews");
+  root.replaceChildren();
+  const data = await adminJson("/api/v1/scheduling/staff-leave-requests?status=pending&limit=50");
+  if (querySequence !== leaveReviewQuerySequence) return 0;
+  if (!Array.isArray(data)) throw new Error("請假待辦格式不完整。");
+  if (!data.length) {
+    showEmpty(root, "目前沒有待受理的月嫂請假申請。");
+    return 0;
+  }
+  data.forEach(request => root.appendChild(leaveReviewCard(request)));
+  return data.length;
+}
+
+function leaveReviewCard(request) {
+  const card = document.createElement("div");
+  card.className = "card";
+  const title = document.createElement("strong");
+  title.textContent = `請假 #${request.id}｜${request.staff_name}`;
+  const period = document.createElement("p");
+  period.textContent = `${request.leave_start_date} 至 ${request.leave_end_date}｜${request.request_reason || "未填寫原因"}`;
+  const reason = document.createElement("textarea");
+  reason.id = `leave-reason-${request.id}`;
+  reason.placeholder = "受理備註或退回原因";
+  const actions = document.createElement("div");
+  actions.className = "toolbar";
+  const accept = document.createElement("button");
+  accept.type = "button";
+  accept.textContent = "受理並前往排班處理";
+  accept.addEventListener("click", () => reviewLeaveRequest(request, "accept"));
+  const reject = document.createElement("button");
+  reject.type = "button";
+  reject.className = "danger";
+  reject.textContent = "退回申請";
+  reject.addEventListener("click", () => reviewLeaveRequest(request, "reject"));
+  actions.append(accept, reject);
+  card.append(title, period, reason, actions);
+  return card;
+}
+
+async function reviewLeaveRequest(request, action) {
+  const reason = document.getElementById(`leave-reason-${request.id}`).value.trim()
+    || (action === "accept" ? "手機端受理請假待辦" : "");
+  if (!reason) { showStatus("退回請假申請時請輸入原因。", true); return; }
+  const verb = action === "accept" ? "受理" : "退回";
+  if (!globalThis.confirm(`確認${verb}這筆請假申請？`)) return;
+  const identity = globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : Date.now().toString(36);
+  try {
+    const data = await adminJson(`/api/v1/scheduling/staff-leave-requests/${request.id}/review`, {
+      method: "POST",
+      headers: {"Idempotency-Key": `mobile-leave-review:${request.id}:${identity}`},
+      body: {expected_version: request.aggregate_version, action, reason},
+    });
+    if (!data || data.request_id !== request.id || typeof data.status !== "string") {
+      throw new Error("請假處理結果讀回不完整，請勿重複送出。");
+    }
+    showStatus(action === "accept"
+      ? "請假已受理處理；這不是正式核准，請進入媒合與排班審核工具完成 Preview／Apply。"
+      : "請假申請已退回。正式排班未修改。");
+    await loadLeaveReviews();
   } catch (error) { showStatus(error.message, true); }
 }
 
@@ -1109,7 +1413,7 @@ async function loadOperationsSummary() {
 }
 
 document.getElementById("refreshTickets").addEventListener("click", loadTickets);
-document.getElementById("refreshReviews").addEventListener("click", loadReviews);
+document.getElementById("refreshReviews").addEventListener("click", loadReviewWorkbench);
 document.getElementById("refreshAnomalies").addEventListener("click", () => loadAnomalies(true));
 document.getElementById("refreshOperations").addEventListener("click", loadOperationsSummary);
 document.getElementById("openScheduling").addEventListener("click", () => switchPane("scheduling_review"));
@@ -1128,7 +1432,7 @@ document.getElementById("ticketStatus").addEventListener("change", () => {
 });
 document.getElementById("reviewStatus").addEventListener("change", () => {
   reviewPageState.page = 1;
-  loadReviews();
+  loadIdentityReviews().catch(error => showStatus(error.message, true));
 });
 document.getElementById("reauthenticate").addEventListener("click", reauthenticateLine);
 init();

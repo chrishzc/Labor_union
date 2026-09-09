@@ -62,6 +62,21 @@ def list_knowledge_indexes(
     return list(get_knowledge_application().list_indexes(limit))
 
 
+@router.get("/questions")
+def list_knowledge_questions(
+    limit: int = Query(100, ge=1, le=500),
+    request_status: str | None = Query(
+        default=None,
+        pattern="^(pending|processing|answered|unsupported|failed)$",
+    ),
+    _=Depends(require_knowledge_reader),
+):
+    """Admin readback of customer questions without exposing LINE identities."""
+    return list(
+        get_knowledge_application().list_answer_requests(limit, request_status)
+    )
+
+
 @router.get("/questions/{request_id}")
 def get_knowledge_answer(request_id: int, _=Depends(require_knowledge_reader)):
     result = get_knowledge_application().get_answer_request(request_id)

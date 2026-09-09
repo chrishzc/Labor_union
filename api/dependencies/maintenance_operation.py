@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 import time
 
+from api.dependencies.operational_retention import run_automatic_retention_cycle
 from api.dependencies.runtime_heartbeat import record_runtime_heartbeat
 from api.schemas.private_operations import WorkerRuntimeIdentity
 from infrastructure.mysql.anomaly_runtime import build_anomaly_runtime
@@ -23,6 +24,7 @@ AUDIT_RETENTION_INTERVAL_SECONDS = 24 * 60 * 60
 _operation_lock = threading.Lock()
 _source_scan_state = ArchitectureSourceScanState.start()
 _next_audit_retention_at = 0.0
+_next_operational_retention_at = 0.0
 _anomaly_runtime = build_anomaly_runtime()
 
 
@@ -31,7 +33,8 @@ def run_incident_maintenance_cycle(identity: WorkerRuntimeIdentity) -> int:
     with _operation_lock:
         delivery = consume_architecture_outbox_once(_source_scan_state, runtime=_anomaly_runtime)
         archived_count = _archive_audits_if_due()
-    processed = delivery.delivered_count + archived_count
+        retention_count = _run_operational_retention_if_due()
+    processed = delivery.delivered_count + archived_count + retention_count
     record_runtime_heartbeat(identity, processed)
     return processed
 
@@ -47,3 +50,13 @@ def _archive_audits_if_due() -> int:
     )
     _next_audit_retention_at = now + AUDIT_RETENTION_INTERVAL_SECONDS
     return archived_count
+
+
+def _run_operational_retention_if_due() -> int:
+    global _next_operational_retention_at
+    now = time.monotonic()
+    if now < _next_operational_retention_at:
+        return 0
+    processed = run_automatic_retention_cycle()
+    _next_operational_retention_at = now + AUDIT_RETENTION_INTERVAL_SECONDS
+    return processed

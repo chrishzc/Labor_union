@@ -2,12 +2,13 @@
  * Unified AI customer-service studio: curated common QA plus event-rule workspace.
  */
 import React, { useState } from 'react';
-import { Bot, BookOpenText, FlaskConical, Workflow } from 'lucide-react';
+import { Bot, BookOpenText, FlaskConical, MessageSquareHeart, Workflow } from 'lucide-react';
 import { AiEventStudio } from './AiEventStudio';
 import { CommonQaCatalogPanel } from './CommonQaCatalogPanel';
 import { RealLlmSemanticTestPanel } from './RealLlmSemanticTestPanel';
+import { KnowledgeFeedbackPanel } from './KnowledgeFeedbackPanel';
 
-type StudioTab = 'qa' | 'rules' | 'test';
+type StudioTab = 'qa' | 'rules' | 'test' | 'feedback';
 
 export const AiCustomerServiceStudioPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<StudioTab>('qa');
@@ -35,6 +36,9 @@ export const AiCustomerServiceStudioPage: React.FC = () => {
         <button type="button" className={activeTab === 'test' ? 'active' : ''} aria-current={activeTab === 'test' ? 'page' : undefined} onClick={() => setActiveTab('test')}>
           <FlaskConical aria-hidden="true" />AI 測試
         </button>
+        <button type="button" className={activeTab === 'feedback' ? 'active' : ''} aria-current={activeTab === 'feedback' ? 'page' : undefined} onClick={() => setActiveTab('feedback')}>
+          <MessageSquareHeart aria-hidden="true" />回饋分析
+        </button>
       </nav>
 
       <div className="line-hub-tab-panel">
@@ -45,6 +49,7 @@ export const AiCustomerServiceStudioPage: React.FC = () => {
             <RealLlmSemanticTestPanel />
           </div>
         )}
+        {activeTab === 'feedback' && <KnowledgeFeedbackPanel />}
       </div>
     </section>
   );

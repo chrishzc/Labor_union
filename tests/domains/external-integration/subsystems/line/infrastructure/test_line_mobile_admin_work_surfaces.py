@@ -32,7 +32,15 @@ def test_union_staff_targets_are_isolated_and_have_real_mobile_queries() -> None
     assert 'dashboard: document.getElementById("operationsPane")' in source
     assert "/api/v1/line/mobile-admin/current-anomalies" in source
     assert "/api/v1/line/mobile-admin/operations-summary" in source
-    assert "待辦數量僅包含月嫂身分驗證申請" in source
+    assert "/api/v1/client-profile/requests?status=pending" in source
+    assert "/api/v1/scheduling/staff-leave-requests?status=pending" in source
+    assert "客戶資料異動" in source
+    assert "客戶／月嫂身分重綁與異常" in source
+    assert "請假、代班與改期" in source
+    assert "媒合指派與重新媒合" in source
+    assert 'review_type: null' in source
+    assert "待辦數量僅包含月嫂身分驗證申請" not in source
+    assert "客服、異常與 QA 內容審核不會在這裡重複列入" in source
     assert "不是待確認佇列" in source
 
 
@@ -66,7 +74,7 @@ def test_mobile_anomalies_exposes_only_current_line_notification_issues(monkeypa
         query=lambda request: captured.append(request)
         or SimpleNamespace(items=(issue,), next_cursor=None)
     )
-    monkeypatch.setattr(line_mobile_admin, "_mobile_admin_actor", lambda _: object())
+    monkeypatch.setattr(line_mobile_admin, "_mobile_admin_actor", lambda *_: object())
 
     response = line_mobile_admin.current_anomalies(
         line_mobile_admin._MobileCurrentAnomalyListRequest(
@@ -120,7 +128,7 @@ def test_mobile_operations_summary_is_current_business_week_and_summary_only(
         query=lambda start_date, end_date: captured.append((start_date, end_date))
         or report
     )
-    monkeypatch.setattr(line_mobile_admin, "_mobile_admin_actor", lambda _: object())
+    monkeypatch.setattr(line_mobile_admin, "_mobile_admin_actor", lambda *_: object())
     monkeypatch.setattr(
         line_mobile_admin,
         "SystemBusinessClock",
@@ -152,7 +160,7 @@ def test_mobile_operations_summary_is_current_business_week_and_summary_only(
 def test_mobile_operations_summary_fails_closed_when_owner_query_is_unavailable(
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr(line_mobile_admin, "_mobile_admin_actor", lambda _: object())
+    monkeypatch.setattr(line_mobile_admin, "_mobile_admin_actor", lambda *_: object())
     query = SimpleNamespace(
         query=lambda *_: (_ for _ in ()).throw(RuntimeError("storage unavailable"))
     )

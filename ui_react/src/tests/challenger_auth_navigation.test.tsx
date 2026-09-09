@@ -62,18 +62,23 @@ describe('Adversarial Challenge: URL Hash Navigation & Routing', () => {
     });
   };
 
-  it('[Hash-0] mobile admin 登入返回只接受 closed Scheduling identity', () => {
-    expect(
-      getMobileAdminReturnPathFromHash('#login?return_target=scheduling_review')
-    ).toBe('/line-mobile-admin?target=scheduling_review');
+  it('[Hash-0] mobile admin 登入返回只接受 closed union staff targets', () => {
+    for (const target of [
+      'customer_service',
+      'staff_review',
+      'scheduling_review',
+      'anomalies_center',
+      'dashboard',
+    ]) {
+      expect(
+        getMobileAdminReturnPathFromHash(`#login?return_target=${target}`)
+      ).toBe(`/line-mobile-admin?target=${target}`);
+    }
     expect(
       getMobileAdminReturnPathFromHash('#login?return_target=https://evil.example')
     ).toBeNull();
     expect(
       getMobileAdminReturnPathFromHash('#login?return_target=%2F%2Fevil.example')
-    ).toBeNull();
-    expect(
-      getMobileAdminReturnPathFromHash('#login?return_target=customer_service')
     ).toBeNull();
   });
 
@@ -132,6 +137,7 @@ describe('Adversarial Challenge: URL Hash Navigation & Routing', () => {
       '#finance',
       '#anomalies',
       '#account-management',
+      '#storage-management',
       '#scheduling',
       '#staff',
       '#data-import',

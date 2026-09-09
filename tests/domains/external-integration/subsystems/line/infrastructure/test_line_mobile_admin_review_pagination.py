@@ -9,7 +9,7 @@ import pytest
 from fastapi import HTTPException
 
 from api.routes import line_identity, line_mobile_admin
-from api.dependencies.admin_auth import AdminPrincipal
+from api.dependencies.admin_auth import AdminPrincipal, require_persisted_admin
 from domains.line.identity_binding import LineBindingSubjectType, LineIdentityBindingStatus
 from subsystems.line.identity_management_contracts import LineIdentityCurrentFactReadbackStatus
 from domains.line.review import LineReviewStatus, LineReviewType
@@ -18,6 +18,30 @@ from infrastructure.mysql.line_identity_review_repository import (
     _review_list_statement,
 )
 from subsystems.line.review_contracts import LineReviewListQuery, LineReviewPage
+
+
+def test_every_active_mobile_admin_route_requires_a_persisted_session() -> None:
+    active_paths = {
+        "/api/v1/line/mobile-admin/profile",
+        "/api/v1/line/mobile-admin/current-anomalies",
+        "/api/v1/line/mobile-admin/operations-summary",
+        "/api/v1/line/mobile-admin/customer-service/summary",
+        "/api/v1/line/mobile-admin/customer-service/tickets",
+        "/api/v1/line/mobile-admin/customer-service/tickets/{ticket_id}",
+        "/api/v1/line/mobile-admin/customer-service/tickets/{ticket_id}/reply/preview",
+        "/api/v1/line/mobile-admin/customer-service/tickets/{ticket_id}/reply/apply",
+        "/api/v1/line/mobile-admin/identity-reviews",
+        "/api/v1/line/mobile-admin/identity-reviews/{request_id}/decision/preview",
+        "/api/v1/line/mobile-admin/identity-reviews/{request_id}/decision/apply",
+        "/api/v1/line/mobile-admin/scheduling-review/query",
+        "/api/v1/line/mobile-admin/scheduling-review/preview",
+        "/api/v1/line/mobile-admin/scheduling-review/apply",
+    }
+    routes = {route.path: route for route in line_mobile_admin.router.routes}
+
+    for path in active_paths:
+        dependency_calls = {dependency.call for dependency in routes[path].dependant.dependencies}
+        assert require_persisted_admin in dependency_calls, path
 
 
 def _assignment_plan_query_payload(case_no="CASE-1"):
@@ -112,7 +136,7 @@ def test_mobile_review_route_returns_numbered_envelope_without_cursor(monkeypatc
     application = SimpleNamespace(
         list=lambda query: captured.append(query) or LineReviewPage((), None, 2, 25, 123)
     )
-    monkeypatch.setattr(line_mobile_admin, "_mobile_admin_actor", lambda _: SimpleNamespace())
+    monkeypatch.setattr(line_mobile_admin, "_mobile_admin_actor", lambda *_: SimpleNamespace())
     monkeypatch.setattr(
         line_mobile_admin,
         "get_line_identity_review_application",
@@ -122,7 +146,7 @@ def test_mobile_review_route_returns_numbered_envelope_without_cursor(monkeypatc
         {
             "line_id_token": "verified-token",
             "review_status": "pending",
-            "review_type": "staff_verification",
+            "review_type": None,
             "page": 2,
             "page_size": 25,
         }
@@ -133,7 +157,7 @@ def test_mobile_review_route_returns_numbered_envelope_without_cursor(monkeypatc
     assert captured == [
         LineReviewListQuery(
             statuses=(LineReviewStatus.PENDING,),
-            review_types=(LineReviewType.STAFF_VERIFICATION,),
+            review_types=(),
             page=2,
             page_size=25,
         )
@@ -256,6 +280,33 @@ def test_scheduling_mobile_auth_uses_persisted_session_and_current_role_scoped_f
 
     assert actor.actor_id == "admin:7"
     assert "line.review.decide" in actor.permission_scope
+
+
+def test_mobile_admin_auth_requires_session_actor_to_match_current_line_binding(monkeypatch) -> None:
+    principal = AdminPrincipal(7, "reviewer", "Reviewer", "line_agent")
+    fact = SimpleNamespace(
+        root_status=LineIdentityBindingStatus.BOUND,
+        readback_status=LineIdentityCurrentFactReadbackStatus.COMPLETE,
+        root_bindings=(SimpleNamespace(
+            subject_type=LineBindingSubjectType.ADMIN,
+            subject_reference="8",
+        ),),
+    )
+    monkeypatch.setattr(
+        line_mobile_admin,
+        "get_liff_token_verifier",
+        lambda: SimpleNamespace(verify=lambda _: SimpleNamespace(line_user_id="U-admin")),
+    )
+
+    with pytest.raises(HTTPException) as captured:
+        line_mobile_admin._mobile_admin_actor(
+            "verified-token",
+            principal,
+            SimpleNamespace(current_fact=lambda line_user_id: fact),
+        )
+
+    assert captured.value.status_code == 403
+    assert captured.value.detail["error"]["code"] == "line_admin_binding_not_current"
 
 
 def test_scheduling_mobile_auth_rejects_legacy_or_unpersisted_identity(monkeypatch) -> None:

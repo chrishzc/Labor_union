@@ -133,7 +133,7 @@ class _ReviewListRequest(_LiffAuthRequest):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     review_status: LineReviewStatus | None = LineReviewStatus.PENDING
-    review_type: LineReviewType | None = LineReviewType.STAFF_VERIFICATION
+    review_type: LineReviewType | None = None
     page: int = Field(default=1, ge=1, le=100_000)
     page_size: int = Field(default=50, ge=1, le=100)
 
@@ -253,9 +253,15 @@ def mobile_admin_page():
 
 
 @router.post("/profile", response_model=BaseResponse[_MobileAdminProfileView])
-def profile(payload: _LiffAuthRequest):
-    admin = _linked_admin(payload.line_id_token)
-    return BaseResponse(data=_admin_view(admin))
+def profile(
+    payload: _LiffAuthRequest,
+    principal: AdminPrincipal = Depends(require_persisted_admin),
+    identity_management: LineIdentityManagementApplication = Depends(
+        get_line_identity_management_application
+    ),
+):
+    _mobile_admin_actor(payload.line_id_token, principal, identity_management)
+    return BaseResponse(data=_admin_view(principal))
 
 
 @router.post(
@@ -267,8 +273,12 @@ def current_anomalies(
     application: CurrentIssueQueryApplication = Depends(
         get_current_issue_query_application
     ),
+    principal: AdminPrincipal = Depends(require_persisted_admin),
+    identity_management: LineIdentityManagementApplication = Depends(
+        get_line_identity_management_application
+    ),
 ):
-    _mobile_admin_actor(payload.line_id_token)
+    _mobile_admin_actor(payload.line_id_token, principal, identity_management)
     try:
         page = application.query(
             CurrentIssueListRequest(
@@ -327,8 +337,12 @@ def current_anomalies(
 def operations_summary(
     payload: _LiffAuthRequest,
     query: WeeklyOperationsReportQuery = Depends(get_weekly_operations_report_query),
+    principal: AdminPrincipal = Depends(require_persisted_admin),
+    identity_management: LineIdentityManagementApplication = Depends(
+        get_line_identity_management_application
+    ),
 ):
-    _mobile_admin_actor(payload.line_id_token)
+    _mobile_admin_actor(payload.line_id_token, principal, identity_management)
     start_date, end_date = _current_business_week(SystemBusinessClock().today())
     try:
         report = query.query(start_date, end_date)
@@ -374,14 +388,26 @@ def operations_summary(
 
 
 @router.post("/customer-service/summary", response_model=BaseResponse[CustomerServiceSummaryView])
-def customer_service_summary(payload: _LiffAuthRequest):
-    _mobile_admin_actor(payload.line_id_token)
+def customer_service_summary(
+    payload: _LiffAuthRequest,
+    principal: AdminPrincipal = Depends(require_persisted_admin),
+    identity_management: LineIdentityManagementApplication = Depends(
+        get_line_identity_management_application
+    ),
+):
+    _mobile_admin_actor(payload.line_id_token, principal, identity_management)
     return BaseResponse(data=CustomerServiceApplication(open_line_unit_of_work).summary())
 
 
 @router.post("/customer-service/tickets", response_model=BaseResponse[CustomerServicePageView])
-def customer_service_tickets(payload: _CustomerServiceListRequest):
-    _mobile_admin_actor(payload.line_id_token)
+def customer_service_tickets(
+    payload: _CustomerServiceListRequest,
+    principal: AdminPrincipal = Depends(require_persisted_admin),
+    identity_management: LineIdentityManagementApplication = Depends(
+        get_line_identity_management_application
+    ),
+):
+    _mobile_admin_actor(payload.line_id_token, principal, identity_management)
     page = CustomerServiceApplication(open_line_unit_of_work).list(
         CustomerServiceListQuery(
             status=payload.status,
@@ -395,8 +421,15 @@ def customer_service_tickets(payload: _CustomerServiceListRequest):
 
 
 @router.post("/customer-service/tickets/{ticket_id}", response_model=BaseResponse[CustomerServiceDetailView])
-def customer_service_detail(ticket_id: int, payload: _LiffAuthRequest):
-    _mobile_admin_actor(payload.line_id_token)
+def customer_service_detail(
+    ticket_id: int,
+    payload: _LiffAuthRequest,
+    principal: AdminPrincipal = Depends(require_persisted_admin),
+    identity_management: LineIdentityManagementApplication = Depends(
+        get_line_identity_management_application
+    ),
+):
+    _mobile_admin_actor(payload.line_id_token, principal, identity_management)
     try:
         detail = CustomerServiceApplication(open_line_unit_of_work).detail(ticket_id)
     except CustomerServiceTicketNotFoundError as error:
@@ -411,8 +444,12 @@ def customer_service_detail(ticket_id: int, payload: _LiffAuthRequest):
 def customer_service_reply_preview(
     ticket_id: int,
     payload: _CustomerServiceReplyPreviewRequest,
+    principal: AdminPrincipal = Depends(require_persisted_admin),
+    identity_management: LineIdentityManagementApplication = Depends(
+        get_line_identity_management_application
+    ),
 ):
-    _mobile_admin_actor(payload.line_id_token)
+    _mobile_admin_actor(payload.line_id_token, principal, identity_management)
     identity = CorrelationId(f"mobile-customer-service-reply-preview:{uuid4()}")
     command = PreviewCustomerServiceTicketReply(
         ticket_id,
@@ -451,9 +488,12 @@ def customer_service_reply_preview(
 def customer_service_reply_apply(
     ticket_id: int,
     payload: _CustomerServiceReplyApplyRequest,
+    principal: AdminPrincipal = Depends(require_persisted_admin),
+    identity_management: LineIdentityManagementApplication = Depends(
+        get_line_identity_management_application
+    ),
 ):
-    admin = _linked_admin(payload.line_id_token)
-    actor = _actor_for_admin(admin)
+    actor = _mobile_admin_actor(payload.line_id_token, principal, identity_management)
     identity = CorrelationId(f"mobile-customer-service-reply-apply:{uuid4()}")
     command = ApplyCustomerServiceTicketReply(
         ticket_id,
@@ -463,7 +503,7 @@ def customer_service_reply_apply(
         ExpectedVersion(payload.expected_version),
         PreviewFingerprint(payload.preview_fingerprint),
         actor.actor_id,
-        admin.admin_user_id,
+        principal.id,
         IdempotencyKey(payload.idempotency_key),
         identity,
     )
@@ -503,8 +543,14 @@ def retired_customer_service_reply(ticket_id: int):
 
 
 @router.post("/identity-reviews", response_model=BaseResponse[CanonicalLineReviewNumberedPageResponse])
-def identity_reviews(payload: _ReviewListRequest):
-    _mobile_admin_actor(payload.line_id_token)
+def identity_reviews(
+    payload: _ReviewListRequest,
+    principal: AdminPrincipal = Depends(require_persisted_admin),
+    identity_management: LineIdentityManagementApplication = Depends(
+        get_line_identity_management_application
+    ),
+):
+    _mobile_admin_actor(payload.line_id_token, principal, identity_management)
     page = get_line_identity_review_application().list(
         LineReviewListQuery(
             statuses=(payload.review_status,) if payload.review_status else (),
@@ -532,8 +578,12 @@ def identity_reviews(payload: _ReviewListRequest):
 def identity_review_decision_preview(
     request_id: int,
     payload: _ReviewDecisionPreviewRequest,
+    principal: AdminPrincipal = Depends(require_persisted_admin),
+    identity_management: LineIdentityManagementApplication = Depends(
+        get_line_identity_management_application
+    ),
 ):
-    actor = _mobile_admin_actor(payload.line_id_token)
+    actor = _mobile_admin_actor(payload.line_id_token, principal, identity_management)
     command = PreviewLineReviewDecisionCommand(
         LineReviewRequestId(request_id),
         payload.decision,
@@ -569,8 +619,15 @@ def identity_review_decision_preview(
     "/identity-reviews/{request_id}/decision/apply",
     response_model=BaseResponse[CanonicalLineReviewResponse],
 )
-def identity_review_decision(request_id: int, payload: _ReviewDecisionRequest):
-    actor = _mobile_admin_actor(payload.line_id_token)
+def identity_review_decision(
+    request_id: int,
+    payload: _ReviewDecisionRequest,
+    principal: AdminPrincipal = Depends(require_persisted_admin),
+    identity_management: LineIdentityManagementApplication = Depends(
+        get_line_identity_management_application
+    ),
+):
+    actor = _mobile_admin_actor(payload.line_id_token, principal, identity_management)
     command = DecideLineReviewCommand(
         LineReviewRequestId(request_id),
         payload.decision,
@@ -737,6 +794,25 @@ def _scheduling_mobile_actor(
             "排班審核需要已登入且具備審核能力的內部使用者 Session。",
             "line-mobile-admin:scheduling-capability",
         )
+    _mobile_admin_actor(line_id_token, principal, identity_management)
+    return admin_actor_context(principal)
+
+
+def _mobile_admin_actor(
+    line_id_token: str,
+    principal: AdminPrincipal,
+    identity_management: LineIdentityManagementApplication,
+) -> ActorContext:
+    """Require one persisted human Session matching the current LINE admin fact."""
+
+    if principal.id is None:
+        raise typed_http_error(
+            403,
+            "forbidden",
+            "mobile_admin_session_required",
+            "工會手機管理需要已登入的內部使用者 Session。",
+            "line-mobile-admin:session",
+        )
     line_user_id = _verified_line_user_id(line_id_token)
     try:
         fact = identity_management.current_fact(line_user_id)
@@ -766,11 +842,10 @@ def _scheduling_mobile_actor(
             "LINE 工會人員身分已變更，請重新確認後再操作。",
             "line-mobile-admin:role-scoped-binding",
         )
-    return admin_actor_context(principal)
-
-
-def _mobile_admin_actor(line_id_token: str) -> ActorContext:
-    return _actor_for_admin(_linked_admin(line_id_token))
+    return ActorContext(
+        f"admin:{principal.id}",
+        (LineCapability.IDENTITY_REVIEW.value,),
+    )
 
 
 def _verified_line_user_id(line_id_token: str) -> LineUserId:
@@ -795,50 +870,11 @@ def _verified_line_user_id(line_id_token: str) -> LineUserId:
         ) from error
 
 
-def _actor_for_admin(admin) -> ActorContext:
-    # The approved Access policy treats every enabled internal user alike.
-    # Identity review requires this scope inside its owning application.
-    return ActorContext(f"admin:{admin.admin_user_id}", (LineCapability.IDENTITY_REVIEW.value,))
-
-
-def _linked_admin(line_id_token: str):
-    try:
-        line_user_id = get_liff_token_verifier().verify(line_id_token).line_user_id
-    except InvalidLiffTokenError as error:
-        raise typed_http_error(
-            401,
-            "forbidden",
-            "liff_token_invalid",
-            "LINE 登入狀態已失效或與此 LIFF 不一致，請重新登入 LINE。",
-            "line-mobile-admin:liff-token-invalid",
-        ) from error
-    except LiffVerificationUnavailableError as error:
-        raise typed_http_error(
-            503,
-            "unavailable",
-            "liff_verification_unavailable",
-            "LINE 身分驗證服務暫時無法連線，請稍後再試。",
-            "line-mobile-admin:liff-verification-unavailable",
-            retryable=True,
-        ) from error
-    with open_line_unit_of_work() as unit_of_work:
-        admin = unit_of_work.admins.get_linked_admin(line_user_id)
-    if admin is None:
-        raise typed_http_error(
-            403,
-            "forbidden",
-            "line_admin_binding_not_found",
-            "此 LINE 尚未綁定工會人員身分。",
-            "line-mobile-admin:binding",
-        )
-    return admin
-
-
-def _admin_view(admin) -> dict:
+def _admin_view(principal: AdminPrincipal) -> dict:
     return {
-        "admin_user_id": admin.admin_user_id,
-        "display_name": admin.display_name,
-        "role": admin.role,
+        "admin_user_id": principal.id,
+        "display_name": principal.display_name,
+        "role": principal.role,
     }
 
 

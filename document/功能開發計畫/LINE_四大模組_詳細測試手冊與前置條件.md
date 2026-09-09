@@ -433,7 +433,7 @@ Agent 應先執行：
 1. `GET /api/v1/system/llm/api-key/status`
 2. 若未設定，請測試者自行在 UI 輸入 Google AI Studio key；Agent 不得要求讀回 Key。
 3. `POST /api/v1/system/llm/connection-test`
-4. `GET /api/v1/line/ai-events/qa-catalog`
+4. `GET /api/v1/knowledge/items?limit=500`
 5. 確認 Knowledge READY index 可用。
 6. 在 AI 客服工作室執行一次 `/semantic-test` smoke test。
 
@@ -459,7 +459,7 @@ Agent 回報只包含 `configured/connected/model/status`，不得輸出 secret�
 
 ### Agent 前置
 
-Agent 從 `/qa-catalog` 選 3 筆 `ready` QA，回傳：
+Agent 確認回傳包含系統內建 29 題，並從 `/knowledge/items` 選 3 筆 `published` QA，回傳：
 
 ```text
 QA ID
@@ -972,7 +972,7 @@ B = staff
 | Admin binding | `/admin/preview`, `/admin/apply` |
 | Registration | `/registration/preview`, `/registration/apply` |
 | Binding revoke | `/api/v1/line/identity-bindings/{line_user_id}/revocation/*` |
-| QA catalog | `GET /api/v1/line/ai-events/qa-catalog` |
+| QA catalog | `GET /api/v1/knowledge/items?limit=500` |
 | Real M2 test | `POST /api/v1/line/ai-events/semantic-test` |
 | Gemini status/test | `/api/v1/system/llm/api-key/status`, `/connection-test` |
 | Matching readback | `GET /api/v1/matching/coordination/cases/{case_no}/readback` |
