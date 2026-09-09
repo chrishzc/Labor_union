@@ -83,7 +83,7 @@ LINE、管理權限、部署與治理語彙集中到當時的 `15`～`18`；`19`
 
 `15` 是初始正式收斂入口；`15A`、`15B` 與其他日期較新的正式裁決補充其 current index。
 `16`～`31` 分別補齊帳務衝突、外部整合／權限、Deployment／治理、Entry Point Governance、LINE 服務、Contract、銀行流水、Staff Matching、Access、歷史訂單、LINE 服務說明／客服／選單角色、Controlled File Storage／NAS，以及 Multi-Caregiver Admin UI 等補充契約。
-`document/文件整併工作區` 只保留仍被欄位權威稽核讀取的 `06` 盤點；其餘歷史合併稿由 Git 歷史追溯，不再作為直接施工入口。
+`document/文件整併工作區` 只保留仍被欄位權威稽核讀取的 `06` 盤點，以及仍由正式索引直接引用的 `08_非Markdown附件索引.md`；其餘歷史合併稿由 Git 歷史追溯，不再作為直接施工入口。
 
 `02_決策與退役執行記錄/` 與 `03_追蹤清單與證據/` 各自有獨立的 `README.md`
 索引（含一句話摘要，`02` 另附機器可讀 `doc_type`／`declared_status`）；本節僅
