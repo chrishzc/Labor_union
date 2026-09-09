@@ -1,49 +1,38 @@
 # 功能開發計畫索引
 
-狀態：`current-plans-operational-manual-and-source-review`  
-更新日期：2026-09-02
+狀態：`current-plans-and-operational-manual`  
+更新日期：2026-09-09
 
-本目錄同時保存三類仍有用途的文件：可執行操作／測試手冊、尚未完成的 blocked／deferred計畫，以及尚待逐條搬移的 `source-review`。它們都不取代 `document/架構重整/01_規格基線/` 的正式 owner與產品語意，也不自行授權production mutation、provider外送、部署、付款、credential或資料庫操作。
+本目錄只保存兩類 current 文件：可執行操作／測試手冊，以及尚未完成的 blocked／deferred／proposed 計畫。它們都不取代 `document/架構重整/01_規格基線/` 的正式 owner 與產品語意，也不自行授權 production mutation、provider 外送、部署、付款、credential 或資料庫操作。
 
 ## Current 可執行手冊
 
-- [LINE 四大模組詳細測試手冊與 Agent 前置條件規範](LINE_四大模組_詳細測試手冊與前置條件.md)：保留 M0～M4 的 Agent前置、手機E2E操作、readback、驗收層級與cleanup。它是current操作手冊，不是SSOT；route、schema、owner或正式驗收契約變更時必須同步更新，且不得覆蓋 `17`、`20`、`23`、`26`、`29`。
+- [LINE 四大模組詳細測試手冊與 Agent 前置條件規範](LINE_四大模組_詳細測試手冊與前置條件.md)：保留 M0～M4 的 Agent 前置、手機 E2E 操作、readback、驗收層級與 cleanup。它是 current 操作手冊，不是 SSOT；route、schema、owner 或正式驗收契約變更時必須同步更新，且不得覆蓋 `17`、`20`、`23`、`26`、`29`。
 
-## Active／blocked／deferred計畫
+## Active／blocked／deferred 計畫
 
-| 文件 | Current用途 | 下一個material gate |
+| 文件 | Current 用途 | 下一個 material gate |
 |---|---|---|
-| [Cloud Run＋單一Cloud VPN部署測試計畫](Cloud_Run_單一Cloud_VPN_部署測試計畫.md) | `proposed`，保存隔離環境、故障注入、go/no-go與rollback測試設計。 | 指定隔離cloud project／NAS DB、operator、budget、rollback與故障注入範圍；再依當時官方能力更新。 |
-| [Cloud Run Durable Job Worker Supervision](Durable_Job_Worker_Supervision_延後開發計畫.md) | `proposed / deferred`，保存worker pool、child supervision、lease recovery與outage acceptance。 | 指定隔離cloud test project、OIDC、operator、故障注入與雲端驗收gate。 |
-| [LINE QA客服知識契約收斂](LINE_QA客服知識契約收斂計畫.md) | `blocked / approved-for-read-only-inspection`；workbook只作review input。 | loader可用，且每題owner／category／source／approved answer／automation boundary完成人工review。 |
+| [Cloud Run＋單一 Cloud VPN 部署測試計畫](Cloud_Run_單一Cloud_VPN_部署測試計畫.md) | `proposed`，保存隔離環境、故障注入、go/no-go 與 rollback 測試設計。 | 指定隔離 cloud project／NAS DB、operator、budget、rollback 與故障注入範圍；再依當時官方能力更新。 |
+| [Cloud Run Durable Job Worker Supervision](Durable_Job_Worker_Supervision_延後開發計畫.md) | `proposed / deferred`，保存 worker pool、child supervision、lease recovery 與 outage acceptance。 | 指定隔離 cloud test project、OIDC、operator、故障注入與雲端驗收 gate。 |
+| [LINE QA 客服知識契約收斂](LINE_QA客服知識契約收斂計畫.md) | `blocked implementation-gap-tracker`；JSONL／XLSX 只作 review input 與 migration evidence，legacy `enabled` 不代表正式 publication。 | 完成逐題 owner／reviewer／source／audience／approved wording／automation boundary review，落地 versioned `published\|retired` catalog、conflict queue、closed-candidate runtime 與 API／React readback 驗收。 |
 
-Deferred或blocked不等於retired。這三份文件在其material gate完成、工作被正式successor承接或人工明確取消前，不得只因已有高階正式規格而刪除。
-
-## Source-review 文件
-
-下列歷史文件保存尚未完全搬入正式規格的產品、UI與machine-contract輸入，已恢復但明確為非Authority：
-
-- [LINE Rich Menu多角色圖文選單與互動中心正式規範](LINE_Rich_Menu_多角色圖文選單與互動中心正式規範.md)
-- [LINE Rich Menu本機視覺比對與互動模擬工作室正式規範](LINE_Rich_Menu_本機視覺比對與互動模擬工作室正式規範.md)
-- [NAS檔案庫與資料中心管理介面正式規範](NAS_檔案庫與資料中心管理介面正式規範.md)
-
-檔名、舊front matter或內文中的「正式」「approved」只代表歷史狀態，不建立current Authority。逐節處置與再刪除條件見 [功能開發計畫來源審閱與退役閘門](SOURCE_REVIEW_DISPOSITION.md)。
+Deferred 或 blocked 不等於 retired。這三份文件在其 material gate 完成、工作被正式 successor 承接或人工明確取消前，不得只因已有高階正式規格而刪除。
 
 ## 欄位盤點工作區
 
-`document/文件整併工作區/06_欄位權威性與計算邏輯盤點.md` 及其逐表子目錄已從清理前基準完整恢復。它們依 `15_正式規格索引與裁決總表.md` 只作 field-lineage source：可保存schema現況、writer、derived value、freeze與live-drift證據，但不能覆蓋正式Domain owner。
+`document/文件整併工作區/06_欄位權威性與計算邏輯盤點.md` 及其逐表子目錄依 `15_正式規格索引與裁決總表.md` 只作 field-lineage source：可保存 schema 現況、writer、derived value、freeze 與 live-drift 證據，但不能覆蓋正式 Domain owner。
 
-## 再次退役的必要閘門
+## Source-review closeout（2026-09-09）
 
-任何本批恢復文件再次刪除前，必須同時成立：
+功能開發計畫中的三份 source-review 規格已完成語意處置，不再屬 current working set：
 
-1. 每個條目已標記為「已由正式規格承接」「仍有效待搬移」或「已被後續裁決否定」。
-2. 所有「仍有效待搬移」已搬入唯一owning formal spec並有current source／test或readback驗證。
-3. 所有「已被後續裁決否定」已從code、test、validation JSON、launcher、索引與操作文件consumer移除或改綁。
-4. executable consumers、`15` current index及相關正式規格已同步，且刪除後focused verification通過。
+- `LINE_Rich_Menu_多角色圖文選單與互動中心正式規範.md`：有效的 audience、current role、typed action、draft／publish 邊界已由正式規格 `17`／`23`／`29` 承接；與 current 契約衝突的三選單、角色推測、禁止 `richmenuswitch`、硬編 endpoint／page／component 等舊設計不搬移。
+- `LINE_Rich_Menu_本機視覺比對與互動模擬工作室正式規範.md`：canvas／area／action validation、before／after、role preview context、零 provider 外送、零 publication task、Preview≠publish 與 terminal readback 已由 `17`／`29` 承接；舊 UI layout／示例 wording／特定 screenshot 細節不建立 Authority。
+- `NAS_檔案庫與資料中心管理介面正式規範.md`：仍有效的 Controlled File Storage machine contract 已升格至 `document/架構重整/01_規格基線/30_Controlled_File_Storage_NAS正式規格.md`；Global `00` 只保留跨 Domain 不變量並改指向 `30`。
 
-目前source-review仍有多項「仍有效待搬移」，所以再次刪除狀態為 `BLOCKED`。
+上述歷史來源與完成後的 disposition 記錄退出 working tree，由 Git history 保存。後續修改直接更新唯一 owning formal spec、current implementation、test 或本目錄操作手冊，不恢復舊 source-review Authority。
 
 ## 既有歷史收斂
 
-2026-09-01已移除的LINE backend slimming文件與已完成／superseded的Anomalies execution plans仍維持Git歷史保存；本次恢復不復活其舊baseline、舊priority、舊write set、provider cutover或production Authority。需要稽核時依原清理commit精確取回，不把歷史文件自動升格為current requirement。
+2026-09-01 已移除的 LINE backend slimming 文件與已完成／superseded 的 Anomalies execution plans仍維持 Git 歷史保存；本次 source-review closeout 同樣不復活舊 baseline、舊 priority、舊 write set、provider cutover 或 production Authority。需要稽核時依 Git history 精確取回，不把歷史文件自動升格為 current requirement。

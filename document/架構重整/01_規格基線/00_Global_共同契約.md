@@ -63,7 +63,7 @@ Global 只定義跨 Domain 不得被破壞的不變量與共用技術契約，�
 - 修改採「下載 → 外部工具 → 放回投放區／受控 upload 形成新版本」，不提供原地編輯或 OS file browser 模擬。
 - owner command 發送文件時鎖定 subject、purpose、version、digest，再建立 committed download receipt／delivery task；worker 重新核對相同 identity／digest。
 - metadata 與 NAS bytes 必須有 backup／restore／reconciliation；實體 mount、retention、搬檔、schema、deployment 仍走各自 Authority／DB gate。
-- exact management routes、closed owner／purpose registry、staging／cleanup／reconciliation machine contract 由 `document/功能開發計畫/NAS_檔案庫與資料中心管理介面正式規範.md` 單一擁有；本節不複製 machine fields。
+- exact management routes、closed owner／purpose registry、Preview／Apply、Freeze-Before-Send、staging／cleanup／reconciliation 與 readiness／backup machine contract 由 `30_Controlled_File_Storage_NAS正式規格.md` 單一擁有；本節不複製 machine fields。
 
 ### 2.3 Concurrency／Fingerprint simplification（2026-08-31）
 

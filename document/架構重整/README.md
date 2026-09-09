@@ -8,35 +8,36 @@
 本目錄把既有規格書中已確認的業務場景轉成可實作、可測試的
 `Global → Domain → Subsystem → Module` 架構契約。
 
-`15`～`18` 已於 2026-08-03 經人工整體確認為初始正式架構基線；後續納入 `19`～`26`
-各項正式補充裁決。目前正式規格入口與有效範圍以 `15` 的
-裁決總表為準，涵蓋 `15`～`26`。後續 production code、pytest、schema、資料、外部平台與
-退役作業，必須以個別 Work Package、驗收證據與人工決策記錄追溯；不得把單一基線核准或
-live 現況誤讀成所有後續變更的授權。
+`15`～`18` 已於 2026-08-03 經人工整體確認為初始正式架構基線；後續納入 `19`～`31`
+各項正式補充裁決。目前正式規格入口與有效範圍以 `15` 搭配日期較新的 amendment 為準；
+`15A_20260909_SourceReview_Closeout與ControlledFile正式化裁決.md` supersede `15` 內較舊的
+source-review 待搬移文字並把 `30_Controlled_File_Storage_NAS正式規格.md` 納入 current formal baseline；
+`15B_20260909_MultiCaregiver_Admin_UI_Closeout裁決.md` 完成多月嫂管理端來源收斂並把
+`31_MultiCaregiver_Admin_UI正式規格.md` 納入 current formal baseline。
+後續 production code、pytest、schema、資料、外部平台與退役作業，必須以個別 Work Package、驗收證據與人工決策記錄追溯；不得把單一基線核准或 live 現況誤讀成所有後續變更的授權。
 
 2026-08-03 已把 `document/文件整併工作區` 中尚未收斂的月結、退款、
-LINE、管理權限、部署與治理語彙集中到當時的 `15`～`18`；`19`～`26` 是後續正式補充裁決。
-這些正式文件目前均納入 `15` 的索引與權威順序；核准本身不構成 production mutation 或
-外部副作用授權。
+LINE、管理權限、部署與治理語彙集中到當時的 `15`～`18`；`19`～`31` 是後續正式補充裁決。
+這些正式文件由 `15` 與後續 amendment 共同維持 current 索引／權威順序；核准本身不構成 production mutation 或外部副作用授權。
 
 ## 權威順序
 
 1. 人工最新明確裁決。
-2. 經人工整體確認的正式規格 package；目前由 `15` 索引 `16`～`26`。
+2. 經人工整體確認的正式規格 package；目前由 `15` 加日期較新的 formal amendment 索引 current `16`～`31`。
 3. 既有業務規格、狀態機規則與欄位權威性文件，作為來源追溯。
 4. 本目錄其他分層架構文件。
 5. live DB schema、production code、API 與 UI 僅代表現況，不得用現況漂移推翻規格。
 
-`15`～`26` 明載的 supersede／裁決條款優先於歷史來源；較新的明確裁決優先於較舊摘要。
+`15`～`31` 與其 amendment 明載的 supersede／裁決條款優先於歷史來源；較新的明確裁決優先於較舊摘要。
 任何超出已核准 Inventory v2
 範圍的實作必須停止並另取人工授權；不得讓測試或現況程式自行決定業務規則。
 
 ## 資料夾結構
 
-本目錄依文件性質分為三類子資料夾；分類僅為整理排序，不改變任何文件的規格
+本目錄依文件性質分為四類子資料夾；分類僅為整理排序，不改變任何文件的規格
 內容或權威順序：
 
-- `01_規格基線/` —— 定義 current Global／Domain 架構契約；`15` 是正式索引與裁決入口。
+- `01_規格基線/` —— 定義 current Global／Domain／正式 UI integration 架構契約；`15` 與較新的 formal amendment 是正式索引與裁決入口。
 - `02_決策與退役執行記錄/` —— 只保留current register、仍有約束力的decision，以及
   proposed／blocked／in-progress Work Package。
 - `03_追蹤清單與證據/` —— 只保留current review queue、release／migration gate、aggregate receipt與
@@ -60,6 +61,8 @@ LINE、管理權限、部署與治理語彙集中到當時的 `15`～`18`；`19`
 - `01_規格基線/12_Global_效能與UX體感架構.md`
 - `01_規格基線/14_Government_Subsidy_Domain.md`
 - `01_規格基線/15_正式規格索引與裁決總表.md`
+- `01_規格基線/15A_20260909_SourceReview_Closeout與ControlledFile正式化裁決.md`
+- `01_規格基線/15B_20260909_MultiCaregiver_Admin_UI_Closeout裁決.md`
 - `01_規格基線/16_Staff_Payables與Client_Refund正式規格.md`
 - `01_規格基線/17_External_Integration_LINE_Access正式規格.md`
 - `01_規格基線/18_Global_Deployment與治理正式規格.md`
@@ -69,16 +72,18 @@ LINE、管理權限、部署與治理語彙集中到當時的 `15`～`18`；`19`
 - `01_規格基線/22_銀行流水匯入與帳務異常處理正式規格.md`
 - `01_規格基線/23_LINE身分管理與解除正式規格.md`
 - `01_規格基線/24_Staff_Matching_Preferences與不可服務期間正式規格.md`
+- `01_規格基線/24A_Staff_Roster_Case_Preference_Read_Model正式補充契約.md`
+- `01_規格基線/24B_Staff_Roster_Case_Preference_Ownership_Clarification.md`
 - `01_規格基線/25_Access_Control_Production_Cutover與External_Security_Alert正式規格.md`
 - `01_規格基線/26_LINE四大模組Eraser流程圖轉錄與驗收基線.md`
 - `01_規格基線/27_歷史訂單生命週期與服務天數帳務正式規格.md`
+- `01_規格基線/29_LINE服務說明、客服互動與選單角色正式規格.md`
+- `01_規格基線/30_Controlled_File_Storage_NAS正式規格.md`
+- `01_規格基線/31_MultiCaregiver_Admin_UI正式規格.md`
 
-`15` 是正式收斂入口；`16`～`26` 分別補齊帳務衝突、外部整合／權限及
-Deployment／治理，`19` 定義 API／Streamlit／CLI entry point 的逐項治理，`22` 定義銀行流水、
-帳務異常固定處置與管理端入口，`24` 定義 Staff Matching Preferences 與不可服務期間，`25` 定義
-Access Control production cutover與外部安全告警，`26` 定義LINE四大模組流程圖驗收基線。
-`document/文件整併工作區` 只保留仍被欄位權威稽核讀取的 `06` 盤點；其餘歷史合併稿由 Git
-歷史追溯，不再作為直接施工入口。
+`15` 是初始正式收斂入口；`15A`、`15B` 與其他日期較新的正式裁決補充其 current index。
+`16`～`31` 分別補齊帳務衝突、外部整合／權限、Deployment／治理、Entry Point Governance、LINE 服務、Contract、銀行流水、Staff Matching、Access、歷史訂單、LINE 服務說明／客服／選單角色、Controlled File Storage／NAS，以及 Multi-Caregiver Admin UI 等補充契約。
+`document/文件整併工作區` 只保留仍被欄位權威稽核讀取的 `06` 盤點；其餘歷史合併稿由 Git 歷史追溯，不再作為直接施工入口。
 
 `02_決策與退役執行記錄/` 與 `03_追蹤清單與證據/` 各自有獨立的 `README.md`
 索引（含一句話摘要，`02` 另附機器可讀 `doc_type`／`declared_status`）；本節僅
@@ -87,7 +92,7 @@ Access Control production cutover與外部安全告警，`26` 定義LINE四大�
 已完成且不再擁有 current contract 的歷史規格（08 ADAD／Legacy 邊界、11 架構總審矩陣、
 13 規格實作完成度矩陣）已自目前工作樹移除，需要時依 `04_已完成與上線封存/README.md`
 從 Git 歷史精準取回。
-現行語意由 `15`、個別 Domain／Global 規格、AGENTS.md 與 `03` 的 current evidence 承接。
+現行語意由 `15`、較新的 formal amendment、個別 Domain／Global／正式 UI integration 規格、AGENTS.md 與 `03` 的 current evidence 承接。
 
 ## 實作門檻
 

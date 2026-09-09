@@ -17,11 +17,7 @@ package；T3 才要求 current spec＋package。相同 owner／scenario／scope 
 
 | 文件 | 類型 | 狀態 | 正確用途／下一個 gate |
 |---|---|---|---|
-| [歷史訂單生命週期與服務天數帳務](PROV-20260901-historical-order-lifecycle-accounting-work-package.md) | work-package | `in-progress` | 依正式規格 27 執行 repository-local implementation；DB 套用與 external effect 不在 Authority 內。 |
 | [匯入入口與 Legacy Writer 退役](Import_Entry_and_Legacy_Writer_Retirement_工作包.md) | work-package | `blocked` | Client LIFF 與 writer replacement 未全數閉合；不得直接移除入口。current LIFF 功能由 96 列管。 |
-| [React Phase 6 retirement release gate](PROV-20260817-react-admin-phase6-retirement-release-gate-work-package.md) | work-package | `blocked` | 使用者目前禁止 entry switch／retirement；維持 fail closed。 |
-| [React Phase 6C per-entry readiness gap](PROV-20260817-react-admin-phase6c-per-entry-retirement-readiness-gap.md) | gap-package | `blocked` | 未達逐入口 replacement／regression gate，不得啟動 retirement。 |
-| [Warning Transition Streamlit bridge](PROV-20260822-react-admin-phase3d-warning-transition-streamlit-compatibility-bridge-work-package.md) | work-package | `proposed` | 非目前優先；須另行核准 exact scope 才可施工。 |
 | [Access Control production cutover／external alert](Access_Control_Production_Cutover_and_External_Security_Alert_Work_Package.md) | work-package | `proposed` | production target、external sink、operator 與 rollback scope 未指定；維持 deferred。 |
 
 ## Retained current decisions／validation sources
@@ -34,6 +30,7 @@ package；T3 才要求 current spec＋package。相同 owner／scenario／scope 
   [驗收package](PROV-20260828-historical-payment-and-owner-settlement-work-packages.md)；
 - [Staff Payables completion readback裁決](PROV-20260827-historical-staff-payables-completion-root-spec-gap.md)；
 - [Historical storage／supplement裁決](PROV-20260827-historical-operational-storage-and-supplement-spec-gap.md)；
+- [工會內部管理 UI 完整值顯示裁決](PROV-20260827-internal-admin-ui-unmasked-display-spec-gap.md)：requirement 已核准，surface inventory 尚未完成；
 - [營運前端真實資料優先裁決](PROV-20260822-operations-frontend-real-data-readiness-priority-amendment.md)。
 
 這些文件的current consumer只限既有正式契約、navigation與validation identity；舊execution ledger、
