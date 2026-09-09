@@ -87,6 +87,7 @@ class _Application:
             navigation_action="hcm_import_center",
             action_kind="owner_preview_apply",
             target_command="preview_hcm_resubmission",
+            review_identity="review-1",
         )
 
 
@@ -172,6 +173,7 @@ def test_hcm_referral_is_read_only_typed_owner_context_without_corrected_payload
         "navigation_action": "hcm_import_center",
         "action_kind": "owner_preview_apply",
         "target_command": "preview_hcm_resubmission",
+        "review_identity": "review-1",
     }
     assert "corrected_fields" not in referral
     assert "source_snapshot" not in referral
