@@ -4,7 +4,7 @@
 in-progress Work Package。completed／superseded 文件確認無 current consumer 後自工作樹移除，
 由 Git 歷史保存，不得繼續出現在日常 active 表。
 
-正式業務語意以 `../01_規格基線/` 為準；Task 96 已達 repository-local／remote-CI terminal closeout，完整舊 register 已退出 current task／evidence Authority。`96_Current_剩餘代辦任務總表.md` 現只保留最小 terminal pointer，原因是正式索引 `15` 尚有既有 inbound provenance 連結；它不再是施工清單或治理 validator consumer。2026-08-30 Task 97亦已完成repository-local architecture closeout。舊 session、舊 gap register、已封存 Work Package 與 archive evidence 不得重新建立待辦或完成 gate。
+正式業務語意以 `../01_規格基線/` 為準；Task 96 已達 repository-local／remote-CI terminal closeout，完整舊 register 與 terminal pointer 已退出 current task／evidence Authority；terminal結果與明示external exclusions由正式索引 `15` 的 Git-history provenance 精準路由至 `901b337aa26795ae270baf8662c3286c5014d774`，不再由current working-tree pointer承擔Authority。2026-08-30 Task 97亦已完成repository-local architecture closeout。舊 session、舊 gap register、已封存 Work Package 與 archive evidence 不得重新建立待辦或完成 gate。
 
 依 [Agent 任務分級與交付規範](../00_Agent任務分級與交付規範.md)，本目錄不是每個 implementation
 slice 的日誌區。T1 不建立 Work Package；T2 只有確需跨步驟 coverage／handoff 時才維護一份 living parent
@@ -40,9 +40,9 @@ Access T3／external provider／deployment／cutover仍由上列proposed Access 
 承接；真MySQL fresh／preserve驗證由未來獨立DB acceptance task承接。External caller未知的public entry維持
 typed 410或`blocked_external_evidence`，不得physical delete。
 
-## Task 96 terminal compatibility pointer
+## Task 96 terminal provenance
 
-`96_Current_剩餘代辦任務總表.md` 已收斂為非 Authority 的 terminal pointer，只保留既有 `15` inbound provenance 與明示 external/deferred ceiling。verified LIFF／provider、NAS／external signing、production／deployment／entry switch及1019起 preserve-upgrade若要恢復，必須建立新的current successor與acceptance；不得重新開啟Task 96。當 `15` 後續安全改為 Git-history provenance 時，該 pointer 應直接退出 working tree。
+Task 96 terminal pointer 已在正式索引 `15` 改為 Git-history provenance 後退出 working tree；完整 terminal register 由 Git history `901b337aa26795ae270baf8662c3286c5014d774` 精準保存。verified LIFF／provider、NAS／external signing、production／deployment／entry switch及1019起 preserve-upgrade若要恢復，必須建立新的current successor與acceptance；不得重新開啟Task 96。
 
 ## 2026-08-25 歷史 closeout
 
