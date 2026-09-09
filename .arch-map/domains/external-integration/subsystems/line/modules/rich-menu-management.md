@@ -11,6 +11,7 @@
 - primary:
   - `subsystems/line/configuration_application.py`
   - `subsystems/line/configuration_contracts.py`
+  - `domains/line/rich_menu_draft.py`
   - `subsystems/line/rich_menu_publication_workflow.py`
   - `api/routes/line_rich_menus.py`
   - `ui_react/src/components/LineRichMenuDraftAppearanceEditor.tsx`
