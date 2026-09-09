@@ -705,9 +705,16 @@ Preview／Apply，不得重用 current LIFF command 假裝一般資料更新。
 HCM、Client／Staff BeClass 與其他 Case Import 來源的 review 是公會人員聯絡來源當事人的待辦，
 不是管理端直接修正資料的表單。review root、處理狀態與 disposition 必須保留去敏資訊；不得持久化
 LINE 對話原文、完整聯絡資料或把回覆文字直接當成正式 Client／Order／Staff input。正確資料由
-新來源重新走 typed Preview／Apply。2026-08-15 WP95 進一步裁決：已建 HCM 案件的缺漏、無效欄位與
-同案修正版一律提交完整修正來源，由 HCM owning resubmission Preview／Apply 採納通過驗證且屬
-HCM 欄位權威的差異；不提供警示中心或 Streamlit 單欄編輯，也不得修改 immutable source。
+新來源重新走 typed Preview／Apply。2026-09-09 人工裁決補充：一般 HCM workbook intake 遇到相同案件
+編號時不得以不同內容覆寫，也不得因此建立新的待處理異常；來源完全相同時回傳 exact replay，來源不同時
+以 `skipped_existing` 終止該列並保持零業務寫入。只有操作人由既有 active HCM 異常明確啟動的 owning
+resubmission Preview／Apply，才屬修正命令。該命令仍須提交完整修正來源，並只採納通過驗證且屬 HCM
+欄位權威的差異；不提供警示中心或 Streamlit 單欄編輯，也不得修改 immutable source。
+
+HCM 匯入中心只顯示每個案件最新且尚未解決的一筆 active 異常；成功、exact replay、`skipped_existing`
+與歷史批次不得出現在主清單。畫面使用白話原因，不顯示 internal issue code，並依 owner 分流：HCM 欄位
+錯誤導向 owning resubmission；身份疑義導向身份確認；bootstrap／費率或案件初始設定問題導向系統設定
+與重新檢查，不得誤導為一般 workbook 覆寫。
 
 WP77／WP92 將 HCM 與 Client BeClass 定義為可獨立存在的兩條 intake lane。HCM 案件編號不得重複；
 IP＋姓名精確命中既有 Client、多候選或其他身份關聯歧義時，案件仍依案件編號建立，但不自動綁定 Client，
