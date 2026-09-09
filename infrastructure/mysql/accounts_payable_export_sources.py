@@ -95,7 +95,9 @@ def _staff_fact(row) -> StaffPayableExportFact:
 
 def _staff_status(row) -> StaffPayableStatus:
     projected_status = StaffPayableStatus(str(row["payout_status"]))
-    if projected_status not in {StaffPayableStatus.PAYABLE, StaffPayableStatus.PARTIALLY_PAID}:
+    if projected_status is StaffPayableStatus.PARTIALLY_PAID:
+        return StaffPayableStatus.ANOMALY
+    if projected_status is not StaffPayableStatus.PAYABLE:
         return projected_status
     if _integer(row["primary_account_count"], "primary account count") != 1:
         return StaffPayableStatus.ANOMALY
@@ -221,7 +223,7 @@ WHERE obligations.due_date = %s
   AND obligations.direction = 'payable_to_staff'
   AND obligations.status <> 'cancelled'
   AND obligations.amount_due_ntd > 0
-  AND COALESCE(projection.status, 'payable') IN ('payable', 'partially_paid')
+  AND COALESCE(projection.status, 'payable') = 'payable'
 GROUP BY obligations.obligation_identity,
          obligations.case_no,
          obligations.staff_id,

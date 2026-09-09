@@ -6,7 +6,6 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { clientBeClassWorkbookPreviewClient } from '../api/case_import/client_beclass_workbook/client';
 import { ClientBeClassWorkbookApplyError } from '../api/case_import/client_beclass_workbook/errors';
-import { anomalyQueryClient } from '../api/anomalies/anomaly_query_client';
 import { staffHistoricalWorkbookPreviewClient } from '../api/case_import/staff_historical_workbook/client';
 import { historicalOrderWorkbookPreviewClient } from '../api/orders/historical_order_workbook/client';
 import { historicalReviewRemediationClient } from '../api/orders/historical_review_remediation/client';
@@ -21,6 +20,10 @@ const historicalResultCountsOne = { not_adopted: 0, matching_pending_deposit: 0,
 
 function workbook(contents: string, name = 'import.xlsx'): File {
   return new File([contents], name, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+}
+
+function selectImportKind(name: 'HCM' | '客戶' | '月嫂' | '歷史訂單'): void {
+  fireEvent.click(screen.getByRole('button', { name: new RegExp(`^${name}$`) }));
 }
 
 const historicalReviewContext: HistoricalReviewContext = {
@@ -45,7 +48,6 @@ const historicalReviewContext: HistoricalReviewContext = {
 describe('Data Import case workbook Preview flows', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    vi.spyOn(anomalyQueryClient, 'queryImportWarningTasks').mockResolvedValue([]);
     vi.spyOn(clientBeClassWorkbookPreviewClient, 'preview').mockResolvedValue({ source_content_digest: digest, sheet_identity: identity, source_row_count: 4, create_count: 1, review_required_count: 1, existing_conflict_count: 1, existing_source_count: 1, preview_fingerprint: fingerprint });
     vi.spyOn(clientBeClassWorkbookPreviewClient, 'apply').mockResolvedValue({ source_content_digest: digest, source_row_count: 4, created_count: 1, exact_replay_count: 0, review_required_count: 1, existing_conflict_count: 1, existing_source_count: 1, replayed_workbook: false });
     vi.spyOn(staffHistoricalWorkbookPreviewClient, 'preview').mockResolvedValue({ source_content_digest: digest, source_row_count: 4, created_count: 1, adopted_existing_count: 1, blocked_identity_count: 1, identity_conflict_count: 1, review_required_count: 1, preview_fingerprint: fingerprint });
@@ -56,14 +58,14 @@ describe('Data Import case workbook Preview flows', () => {
 
   it('三張卡可獨立完成Preview、確認與Apply', async () => {
     render(<DataImportPage />);
-    await waitFor(() => expect(anomalyQueryClient.queryImportWarningTasks).toHaveBeenCalledTimes(1));
 
     const cases = [
-      ['選擇客戶 BeClass Workbook', 'imports.client-beclass.preview', 'imports.client-beclass.preview-result'],
-      ['選擇月嫂歷史 Workbook', 'imports.staff-historical.preview', 'imports.staff-historical.preview-result'],
-      ['選擇歷史訂單 Workbook', 'imports.historic-orders.preview', 'imports.historic-orders.preview-result'],
+      ['客戶', '選擇客戶 BeClass Workbook', 'imports.client-beclass.preview', 'imports.client-beclass.preview-result'],
+      ['月嫂', '選擇月嫂歷史 Workbook', 'imports.staff-historical.preview', 'imports.staff-historical.preview-result'],
+      ['歷史訂單', '選擇歷史訂單 Workbook', 'imports.historic-orders.preview', 'imports.historic-orders.preview-result'],
     ] as const;
-    for (const [label, controlId, surfaceId] of cases) {
+    for (const [kind, label, controlId, surfaceId] of cases) {
+      selectImportKind(kind);
       fireEvent.change(screen.getByLabelText(label), { target: { files: [workbook(label)] } });
       fireEvent.click(document.querySelector(`[data-control-id="${controlId}"]`) as HTMLButtonElement);
       await waitFor(() => expect(document.querySelector(`[data-surface-id="${surfaceId}"]`)).toBeInTheDocument());
@@ -85,18 +87,16 @@ describe('Data Import case workbook Preview flows', () => {
     await waitFor(() => expect(clientBeClassWorkbookPreviewClient.apply).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(staffHistoricalWorkbookPreviewClient.apply).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(historicalOrderWorkbookPreviewClient.apply).toHaveBeenCalledTimes(1));
-    expect(screen.getAllByText('匯入完成，有資料需要檢查')).toHaveLength(3);
+    selectImportKind('月嫂');
     expect(screen.getByText(/身分阻擋 1 筆、身分衝突 1 筆、需檢查 1 筆/)).toBeInTheDocument();
+    selectImportKind('歷史訂單');
     expect(screen.getByText(/不採用 1 筆、配對中未付訂金 1 筆、已付訂金未服務 1 筆、歷史服務中 1 筆、歷史服務完成 0 筆/)).toBeInTheDocument();
     const historicalCard = document.querySelector('[data-surface-id="imports.historic-orders.workbench"]') as HTMLElement;
     for (const label of ['不採用', '配對中未付訂金', '已付訂金未服務', '歷史服務中', '歷史服務完成']) {
       expect(within(historicalCard).getByText(label)).toBeInTheDocument();
     }
-    for (const id of ['client-beclass', 'staff-historical', 'historic-orders']) {
-      const card = document.querySelector(`[data-surface-id="imports.${id}.workbench"]`) as HTMLElement;
-      expect(document.querySelector(`[data-control-id="imports.${id}.apply"]`)).toBeDisabled();
-      expect(within(card).getByText('匯入已完成，結果顯示於下方。')).toBeInTheDocument();
-    }
+    expect(document.querySelector('[data-control-id="imports.historic-orders.apply"]')).toBeDisabled();
+    expect(within(historicalCard).getByText('匯入已完成，結果顯示於下方。')).toBeInTheDocument();
   });
 
   it('Apply待定時鎖定換檔與頁內導覽，並以同一冪等識別安全重試', async () => {
@@ -105,6 +105,7 @@ describe('Data Import case workbook Preview flows', () => {
       .mockReturnValueOnce(new Promise((_, reject) => { rejectFirstApply = reject; }))
       .mockResolvedValueOnce({ source_content_digest: digest, source_row_count: 1, created_count: 1, exact_replay_count: 0, review_required_count: 0, existing_conflict_count: 0, existing_source_count: 0, replayed_workbook: false });
     render(<DataImportPage />);
+    selectImportKind('客戶');
     const input = screen.getByLabelText('選擇客戶 BeClass Workbook');
     const previewButton = document.querySelector('[data-control-id="imports.client-beclass.preview"]') as HTMLButtonElement;
     fireEvent.change(input, { target: { files: [workbook('pending')] } });
@@ -154,11 +155,12 @@ describe('Data Import case workbook Preview flows', () => {
     render(<DataImportPage />);
 
     const cases = [
-      ['選擇客戶 BeClass Workbook', 'client-beclass'],
-      ['選擇月嫂歷史 Workbook', 'staff-historical'],
-      ['選擇歷史訂單 Workbook', 'historic-orders'],
+      ['客戶', '選擇客戶 BeClass Workbook', 'client-beclass'],
+      ['月嫂', '選擇月嫂歷史 Workbook', 'staff-historical'],
+      ['歷史訂單', '選擇歷史訂單 Workbook', 'historic-orders'],
     ] as const;
-    for (const [label, id] of cases) {
+    for (const [kind, label, id] of cases) {
+      selectImportKind(kind);
       const card = document.querySelector(`[data-surface-id="imports.${id}.workbench"]`) as HTMLElement;
       fireEvent.change(screen.getByLabelText(label), { target: { files: [workbook(label)] } });
       fireEvent.click(document.querySelector(`[data-control-id="imports.${id}.preview"]`) as HTMLButtonElement);
@@ -173,9 +175,15 @@ describe('Data Import case workbook Preview flows', () => {
 
   it('四類工作簿在尚未選檔時都說明Preview與Apply的下一步', async () => {
     render(<DataImportPage />);
-    await waitFor(() => expect(anomalyQueryClient.queryImportWarningTasks).toHaveBeenCalledTimes(1));
 
-    for (const id of ['hcm-current', 'client-beclass', 'staff-historical', 'historic-orders']) {
+    const cases = [
+      ['HCM', 'hcm-current'],
+      ['客戶', 'client-beclass'],
+      ['月嫂', 'staff-historical'],
+      ['歷史訂單', 'historic-orders'],
+    ] as const;
+    for (const [kind, id] of cases) {
+      selectImportKind(kind);
       const workbench = document.querySelector(`[data-surface-id="imports.${id}.workbench"]`) as HTMLElement;
       expect(within(workbench).getByText('請先選擇 .xlsx 工作簿。')).toBeInTheDocument();
       expect(within(workbench).getByText('預覽成功後才能確認匯入。')).toBeInTheDocument();
@@ -200,6 +208,7 @@ describe('Data Import case workbook Preview flows', () => {
     });
     vi.spyOn(historicalReviewRemediationClient, 'query').mockResolvedValue(historicalReviewContext);
     render(<DataImportPage />);
+    selectImportKind('歷史訂單');
     const card = document.querySelector('[data-surface-id="imports.historic-orders.workbench"]') as HTMLElement;
     fireEvent.change(screen.getByLabelText('選擇歷史訂單 Workbook'), { target: { files: [workbook('historical')] } });
     fireEvent.click(document.querySelector('[data-control-id="imports.historic-orders.preview"]') as HTMLButtonElement);
@@ -216,6 +225,7 @@ describe('Data Import case workbook Preview flows', () => {
 
   it('同檔名不同bytes會清除舊Preview並產生不同snapshot digest', async () => {
     render(<DataImportPage />);
+    selectImportKind('客戶');
     const input = screen.getByLabelText('選擇客戶 BeClass Workbook');
     const button = document.querySelector('[data-control-id="imports.client-beclass.preview"]') as HTMLButtonElement;
     fireEvent.change(input, { target: { files: [workbook('first')] } });

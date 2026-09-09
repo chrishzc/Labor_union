@@ -195,11 +195,7 @@ class AccountsPayableExportWorkflow:
 
 def aggregate_accounts_payable_rows(staff_facts: tuple[StaffPayableExportFact, ...], refund_facts: tuple[ClientRefundExportFact, ...], government_return_facts: tuple[GovernmentOverpaymentReturnExportFact, ...] = ()) -> tuple[AccountsPayableRow, ...]:
     staff_rows = _aggregate_staff_rows(
-        tuple(
-            item
-            for item in staff_facts
-            if item.status in {StaffPayableStatus.PAYABLE, StaffPayableStatus.PARTIALLY_PAID}
-        )
+        tuple(item for item in staff_facts if item.status is StaffPayableStatus.PAYABLE)
     )
     refund_rows = tuple(_refund_row(item) for item in refund_facts if item.payable and not item.anomaly)
     government_return_rows = tuple(_government_return_row(item) for item in government_return_facts)

@@ -3,6 +3,7 @@ from datetime import date
 from infrastructure.mysql.accounts_payable_export_sources import (
     _CLIENT_REFUNDS_SQL,
     _GOVERNMENT_RETURNS_SQL,
+    _STAFF_PAYABLES_SQL,
     _government_return_fact,
     _refund_fact,
     _staff_fact,
@@ -50,7 +51,7 @@ def test_sql_nets_every_canonical_client_refund_reversal_type():
     assert "obligations.obligation_type" in _CLIENT_REFUNDS_SQL
 
 
-def test_partially_paid_staff_export_uses_only_its_remaining_balance():
+def test_legacy_partially_paid_staff_row_is_an_anomaly_not_a_current_export():
     fact = _staff_fact(
         {
             "obligation_identity": "staff:1",
@@ -68,8 +69,9 @@ def test_partially_paid_staff_export_uses_only_its_remaining_balance():
         }
     )
 
-    assert fact.status is StaffPayableStatus.PARTIALLY_PAID
-    assert fact.amount.amount == 1500
+    assert fact.status is StaffPayableStatus.ANOMALY
+    assert "'partially_paid'" not in _STAFF_PAYABLES_SQL
+    assert "= 'payable'" in _STAFF_PAYABLES_SQL
 
 
 def test_government_return_is_a_next_payment_detail_without_payment_reconciliation():

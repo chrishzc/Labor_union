@@ -22,6 +22,54 @@
   color: var(--md-sys-color-on-surface-variant);
   font-size: 0.88rem;
 }
+
+.order-v2-drawer-current-task {
+  display: grid;
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+  padding: var(--space-5);
+  border: 2px solid var(--md-sys-color-primary);
+  border-radius: var(--radius-lg);
+  background: var(--md-sys-color-primary-container);
+}
+
+.order-v2-drawer-current-task > header {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+}
+
+.order-v2-drawer-current-task > header > span {
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  border-radius: var(--radius-full);
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.order-v2-drawer-current-task h3,
+.order-v2-drawer-current-task p {
+  margin: 0;
+}
+
+.order-v2-drawer-current-task h3 { font-size: 1.08rem; }
+.order-v2-drawer-current-task header p {
+  margin-top: 3px;
+  color: var(--md-sys-color-on-primary-container);
+  font-size: 0.82rem;
+}
+
+.order-v2-drawer-current-task > fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.order-v2-drawer-current-task > fieldset > :first-child { margin-top: 0; }
+.order-v2-drawer-current-task > fieldset > :last-child { margin-bottom: 0; }
 .order-v2-drawer-columns {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 340px;
@@ -49,6 +97,20 @@
 .order-v2-drawer-section > h3,
 .order-v2-drawer-section article h4 {
   margin: 0;
+}
+
+.order-v2-more-actions > summary {
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.order-v2-more-actions[open] > summary { margin-bottom: 2px; }
+.order-v2-more-action-workflow {
+  display: grid;
+  gap: var(--space-3);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--md-sys-color-outline-variant);
 }
 
 .order-v2-drawer-section > h3 {
@@ -250,4 +312,6 @@
   .order-v2-drawer-backdrop .drawer-body { padding: var(--space-4); }
   .order-v2-drawer-fact-grid { grid-template-columns: minmax(0, 1fr); }
   .order-v2-drawer-fact-grid > article + article { border-left: 0; border-top: 1px solid var(--md-sys-color-outline-variant); padding: var(--space-3) 0 0; }
+  .order-v2-drawer-current-task { padding: var(--space-4); }
+  .order-v2-drawer-current-task > header { display: grid; }
 }

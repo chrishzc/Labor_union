@@ -2684,7 +2684,16 @@ export const SchedulingPage: React.FC = () => {
 
           {/* Multi-Caregiver Gantt Chart Matrix Table */}
           {filteredStaff.length > 0 && (
-            <div className="gantt-matrix-scroll-wrapper" data-surface-id="scheduling.calendar.grid">
+            <>
+            <p className="gantt-scroll-guidance" id="gantt-scroll-guidance">
+              左右滑動查看整月檔期；月嫂名冊會固定在左側。
+            </p>
+            <div
+              className="gantt-matrix-scroll-wrapper"
+              data-surface-id="scheduling.calendar.grid"
+              tabIndex={0}
+              aria-describedby="gantt-scroll-guidance"
+            >
               <div className="gantt-matrix-table">
                 {/* Header Row: Days 1 ~ 31 */}
                 <div className="gantt-matrix-header-row">
@@ -2818,6 +2827,7 @@ export const SchedulingPage: React.FC = () => {
                 })}
               </div>
             </div>
+            </>
           )}
         </section>
       )}

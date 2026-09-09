@@ -50,5 +50,8 @@ modules:
 - Matching schedule confirmation and staff leave LIFF intake live under the canonical LINE subsystem integration root.
 - Matching is a Scheduling responsibility in the current architecture map; no separate top-level Matching test domain is invented.
 
-# Flat-test audit
-The current flat-test audit found no additional high-confidence Scheduling owner-local tests outside the documented release/schema, LINE external-identity, cross-implementation/MySQL, Anomalies verification, or true cross-owner orchestration boundaries. Admit future cases by direct SUT/current ownership rather than filename alone.
+# Placement refresh — 2026-09-09
+- `tests/domains/scheduling/subsystems/scheduling/modules/staff-monthly-calendar/test_staff_monthly_calendar_service.py` and `tests/domains/scheduling/subsystems/scheduling/modules/staff-monthly-calendar/test_staff_monthly_schedule_route.py` now share the existing monthly-calendar module root. Their direct SUTs are the Scheduling projection and its single-router transport; mocked facts/authentication do not make them application-wide integration tests.
+- `tests/domains/scheduling/subsystems/scheduling/test_staff_leave_intake_domain.py` tests the Scheduling-owned leave-request state rules. LINE ingress remains a separate verification boundary; the filename does not transfer ownership to Staff or LINE.
+
+The three files were moved without content changes. This bounded correction supersedes the earlier blanket flat-test audit claim; it does not assert that all remaining flat tests have been audited. Existing higher-boundary and React `custom_current` exceptions remain unchanged.

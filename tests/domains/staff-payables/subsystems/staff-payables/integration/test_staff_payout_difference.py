@@ -39,17 +39,25 @@ def test_general_payout_remains_exact_only():
         build_staff_payout_candidate((_bank(18_500),), (_payable(),))
 
 
-def test_underpayment_keeps_remaining_obligation_without_recovery():
-    candidate = build_staff_payout_difference_candidate(
-        (_bank(18_500),), (_payable(),), StaffPayoutDifferenceMode.UNDERPAYMENT,
-        bank_accounts=_accounts(), require_primary_account_owner=True,
-    )
+def test_underpayment_cannot_create_a_formal_payout_candidate():
+    with pytest.raises(ValueError, match="staff_payout_difference_mode_invalid"):
+        build_staff_payout_difference_candidate(
+            (_bank(18_500),),
+            (_payable(),),
+            StaffPayoutDifferenceMode.UNDERPAYMENT,
+            bank_accounts=_accounts(),
+            require_primary_account_owner=True,
+        )
 
-    assert candidate.resulting_status is StaffPayableStatus.PARTIALLY_PAID
-    assert candidate.bank_total == MoneyNTD(18_500)
-    assert candidate.obligation_total == MoneyNTD(20_000)
-    assert candidate.allocations[0].amount == MoneyNTD(18_500)
-    assert candidate.recovery is None
+
+def test_underpayment_selection_is_rejected_before_repository_access():
+    with pytest.raises(ValueError, match="invalid_staff_payout_intent"):
+        StaffPayoutSelection(
+            StaffPayoutEventType.PAYOUT,
+            ("bank:1",),
+            ("obligation:1",),
+            difference_mode=StaffPayoutDifferenceMode.UNDERPAYMENT,
+        )
 
 
 def test_overpayment_records_full_outflow_and_separate_recovery():

@@ -33,11 +33,11 @@ class PayoutApplyBody(StaffPayoutApplyFields):
 
 
 class PayoutDifferencePreviewBody(PayoutPreviewBody):
-    mode: Literal["underpayment", "overpayment"]
+    mode: Literal["overpayment"]
 
 
 class PayoutDifferenceApplyBody(PayoutApplyBody):
-    mode: Literal["underpayment", "overpayment"]
+    mode: Literal["overpayment"]
 
 
 class ReturnPreviewBody(_StrictModel):

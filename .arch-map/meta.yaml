@@ -1,11 +1,10 @@
 schema_version: 1
 system: labor-union-admin
-source_revision: 56c4c3765b572f4d934bd9926fd8ba25d7d35f0f
+source_revision: 0792644c5c6bb781b4b73fbdbbb9d66e18726d34
 status: partial
 last_reconciled_scope:
-  - system/navigation
-  - global/navigation
-  - global/reporting
-  - client-finance/client-finance/settlement-remediation-presentation
-  - external-integration/line/navigation
-  - orders/orders/navigation
+  - tests/finance-import
+  - tests/scheduling
+  - tests/scheduling/staff-monthly-calendar
+  - tests/case-import/staff-historical-workbook-adoption
+  - tests/external-integration/line

@@ -14,12 +14,6 @@ import {
 import './OrdersPage.css';
 import './OrderTrackerPage.css';
 import './OrderWorkbenchV2Page.css';
-import { OrderAssignmentPlanPanel } from '../components/OrderAssignmentPlanPanel';
-import { OrderCandidateContactStatusPanel } from '../components/OrderCandidateContactStatusPanel';
-import { OrderCandidateQueryPanel } from '../components/OrderCandidateQueryPanel';
-import { ContractExternalSigningActions } from '../components/ContractExternalSigningActions';
-import { OrderFormalRecommendationPanel } from '../components/OrderFormalRecommendationPanel';
-import { OrderServiceDatesPanel } from '../components/OrderServiceDatesPanel';
 import { OrderWorkbenchV2Drawer } from '../components/OrderWorkbenchV2Drawer';
 import {
   type OrderWorkbenchScope,
@@ -62,6 +56,18 @@ function coreQueryErrorMessage(error: unknown): string {
     ? error.message.trim()
     : '無法取得訂單資料';
   return `${ORDER_CORE_STAGE_PROJECTION_UNAVAILABLE} 原因：${detail}`;
+}
+
+function drawerActionLabel(scope: OrderWorkbenchScope, stage: CoreStageCode | undefined): string {
+  if (scope !== 'in_progress') return '查看案件紀錄';
+  if (stage === 'matching_pool') return '處理：建立候選池';
+  if (stage === 'caregiver_line_delivery' || stage === 'caregiver_willingness_reply') return '處理：聯絡月嫂';
+  if (stage === 'formal_recommendation') return '處理：推薦給客戶';
+  if (stage === 'external_signing_dispatch' || stage === 'external_signing_completion') return '處理：契約簽署';
+  if (stage === 'confirmed_service_dates') return '處理：確認服務日期';
+  if (stage === 'formal_service') return '處理：排班與服務';
+  if (stage === 'service_completion') return '處理：完工確認';
+  return '開啟案件工作';
 }
 
 export const OrderWorkbenchV2Page: FC = () => {
@@ -329,115 +335,50 @@ export const OrderWorkbenchV2Page: FC = () => {
           {view?.items.map((item) => {
             const summary = summaryIndex.get(item.id) ?? null;
             const stage = item.currentStage;
-            const actionStage = selectedStage ?? stage?.code;
+            const primaryNotice = item.blockers[0] ?? item.warnings[0] ?? null;
             return (
               <article className="order-card" key={item.id}>
-                <div className="order-card-top">
-                  <strong className="order-id-badge">{item.id}</strong>
-                  <span className={`order-status-pill order-v2-status status-${stage?.status ?? item.branchType}`}>
-                    {item.statusLabel}
-                  </span>
+                <div className="order-v2-card-primary">
+                  <div className="order-card-top">
+                    <strong className="order-id-badge">{item.id}</strong>
+                    <span className={`order-status-pill order-v2-status status-${stage?.status ?? item.branchType}`}>
+                      {item.statusLabel}
+                    </span>
+                  </div>
+                  {summary ? (
+                    <div className="order-card-body order-v2-card-summary">
+                      <div className="order-client-title"><span aria-hidden="true">👤 </span><span>{summary.clientName.trim() || '客戶姓名未登錄'}</span></div>
+                      <div>📅 約定服務：<span>{summary.serviceRange}</span>（{summary.serviceDaysLabel}）</div>
+                      <div className="order-doula-box">👩‍🍼 指派月嫂：<strong>{summary.assignedDoulaDisplay}</strong></div>
+                    </div>
+                  ) : (
+                    <div className="order-v2-business-summary unavailable" role="note">
+                      <strong>案件摘要不可用</strong>
+                      <span>{summaryUnavailableMessage(summaryLoading, summaryQueryFailed)}</span>
+                    </div>
+                  )}
                 </div>
-
-                {summary ? (
-                  <div className="order-card-body">
-                    <div className="order-client-title"><span aria-hidden="true">👤 </span><span>{summary.clientName.trim() || '客戶姓名未登錄'}</span></div>
-                    <div>🪪 身分資格：<span>{summary.identityStatus}</span></div>
-                    <div>📅 約定服務：<span>{summary.serviceRange}</span>（{summary.serviceDaysLabel}）</div>
-                    {summary.contractAmount !== null && (
-                      <div>💰 雇主自付應付額：<strong className="order-id-badge">{summary.contractAmountFormatted}</strong></div>
-                    )}
-                    <div className="order-doula-box">👩‍🍼 指派月嫂：<strong>{summary.assignedDoulaDisplay}</strong></div>
-                  </div>
-                ) : (
-                  <div className="order-v2-business-summary unavailable" role="note">
-                    <strong>案件摘要不可用</strong>
-                    <span>{summaryUnavailableMessage(summaryLoading, summaryQueryFailed)}</span>
-                  </div>
-                )}
-
-                {workbenchScope === 'completed' && (
-                  <div className="order-v2-settlement-summary" aria-label="結算狀態">
-                    <span>客戶端：{item.clientSettlementLabel}</span>
-                    <span>月嫂端：{item.staffSettlementLabel}</span>
-                  </div>
-                )}
-                <details className="order-v2-case-details">
-                  <summary>案件狀態與來源</summary>
-                  <div className="order-v2-case-meta">
-                  <span>Lifecycle：{item.lifecycleStatus}</span>
-                  <span>支線：{item.branchLabel}</span>
-                  <span>Revision：{item.baseRevision}</span>
-                  {stage && <span>目前階段：{stage.label}</span>}
-                  {stage && <span>Owner：{stage.owner}</span>}
-                  {item.historicalCurrentOwnerStage && (
-                    <span>目前正式 owner progression：{item.historicalCurrentOwnerStage.label}</span>
+                <div className="order-v2-card-task">
+                  {workbenchScope === 'completed' && (
+                    <div className="order-v2-settlement-summary" aria-label="結算狀態">
+                      <span>客戶端：{item.clientSettlementLabel}</span>
+                      <span>月嫂端：{item.staffSettlementLabel}</span>
+                    </div>
                   )}
-                  {stage?.occurred_at && (
-                    <span>更新：{new Date(stage.occurred_at).toLocaleString('zh-TW')}</span>
+                  {primaryNotice && (
+                    <div className={`order-v2-notice ${item.blockers.length > 0 ? 'blocked' : 'warning'}`}>
+                      <strong>{item.blockers.length > 0 ? '阻塞' : '提醒'} · {primaryNotice.stageLabel}</strong>
+                      <span>{primaryNotice.message}</span>
+                      {item.blockers.length + item.warnings.length > 1 && <small>另有 {item.blockers.length + item.warnings.length - 1} 項，請在案件工作中查看。</small>}
+                    </div>
                   )}
-                  </div>
-                </details>
-
-                {item.blockers.length > 0 && (
-                  <div className="order-v2-notice blocked">
-                    <strong>阻塞</strong>
-                    {item.blockers.map((notice, index) => (
-                      <span key={`${notice.id}:${index}`}>{notice.stageLabel}：{notice.message}</span>
-                    ))}
-                  </div>
-                )}
-                {item.warnings.length > 0 && (
-                  <div className="order-v2-notice warning">
-                    <strong>提醒</strong>
-                    {item.warnings.map((notice, index) => (
-                      <span key={`${notice.id}:${index}`}>{notice.stageLabel}：{notice.message}</span>
-                    ))}
-                  </div>
-                )}
-                {stage?.availability_reason && (
-                  <div className="order-v2-technical">projection：{stage.availability_reason}</div>
-                )}
-                <div className="order-card-actions order-v2-card-actions">
-                {workbenchScope === 'in_progress' && item.branchType === 'normal' && actionStage === 'matching_pool' && (
-                  <OrderCandidateQueryPanel
-                    key={item.id}
-                    caseNo={item.id}
-                    onPoolReadback={refreshProjection}
-                  />
-                )}
-                {workbenchScope === 'in_progress' && item.branchType === 'normal' && (
-                  actionStage === 'caregiver_line_delivery'
-                  || actionStage === 'caregiver_willingness_reply'
-                ) && (
-                  <OrderCandidateContactStatusPanel key={item.id} caseNo={item.id} onObserved={refreshProjection} />
-                )}
-                {workbenchScope === 'in_progress' && item.branchType === 'normal' && actionStage === 'formal_recommendation' && (
-                  <OrderFormalRecommendationPanel key={item.id} caseNo={item.id} onObserved={refreshProjection} />
-                )}
-                {workbenchScope === 'in_progress' && item.branchType === 'normal'
-                  && (actionStage === 'external_signing_dispatch'
-                    || actionStage === 'external_signing_completion'
-                    || actionStage === 'confirmed_service_dates') && (
-                  <ContractExternalSigningActions key={`${item.id}:external-signing`} caseNo={item.id} onCommitted={refreshProjection} />
-                )}
-                {workbenchScope === 'in_progress' && item.branchType === 'normal' && actionStage === 'confirmed_service_dates' && (
-                  <OrderServiceDatesPanel
-                    key={`${item.id}:service-dates`}
-                    caseNo={item.id}
-                    onObserved={refreshProjection}
-                  />
-                )}
-                {workbenchScope === 'in_progress' && item.branchType === 'normal' && actionStage === 'formal_service' && (
-                  <OrderAssignmentPlanPanel key={item.id} caseNo={item.id} onObserved={refreshProjection} />
-                )}
-                <button
-                  type="button"
-                  className="btn-secondary-action"
-                  onClick={() => setSelectedDrawer({ caseNo: item.id, branchType: item.branchType })}
-                >
-                  {workbenchScope === 'in_progress' ? '開啟案件工作' : '查看案件紀錄'}
-                </button>
+                  <button
+                    type="button"
+                    className="btn-primary-action order-v2-open-work"
+                    onClick={() => setSelectedDrawer({ caseNo: item.id, branchType: item.branchType })}
+                  >
+                    {drawerActionLabel(workbenchScope, stage?.code)}
+                  </button>
                 </div>
               </article>
             );

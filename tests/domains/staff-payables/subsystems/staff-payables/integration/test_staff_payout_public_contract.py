@@ -5,12 +5,14 @@ Description: 驗證 Staff Payout Preview 以 strict typed candidate 取代 raw d
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
+import pytest
 
 from api.dependencies.admin_auth import require_system_admin
 from api.dependencies.staff_payout import get_staff_payout_application
 from api.routes.staff_payout import _preview_payload, router
 from api.schemas.jobs import JobAcceptedResponse
-from api.schemas.staff_payout import StaffPayoutPreviewView
+from api.schemas.staff_payout import PayoutDifferencePreviewBody, StaffPayoutPreviewView
 from domains.staff_payables.reconciliation import (
     StaffPayableStatus,
     StaffPayoutCandidate,
@@ -58,6 +60,15 @@ def test_preview_candidate_is_a_strict_typed_union_not_raw_dict():
     assert view.candidate.staff_id == 7
     assert view.candidate.events[0].amount.amount == 1000
     assert StaffPayoutPreviewView.model_fields["candidate"].annotation is not dict
+
+
+def test_payout_difference_request_contract_rejects_underpayment():
+    with pytest.raises(ValidationError):
+        PayoutDifferencePreviewBody(
+            finance_import_row_ids=[8],
+            obligation_identities=["obligation:8"],
+            mode="underpayment",
+        )
 
 
 def test_job_accepted_is_queue_receipt_not_payout_completion_receipt():

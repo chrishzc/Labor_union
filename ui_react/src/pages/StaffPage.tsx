@@ -154,10 +154,6 @@ function displayRelations(values: readonly { value: string; detail: string | nul
   return values.map((item) => item.detail ? item.value + '（' + item.detail + '）' : item.value).join('、') || '（空）';
 }
 
-function displayRelationValues(values: readonly { value: string }[]): string {
-  return values.map((item) => item.value).join('、') || '（空）';
-}
-
 export function StaffCasePreferenceManualPreview({ preview }: { preview: StaffCasePreferenceManualSnapshot }) {
   return <div data-testid="staff-case-preference-manual-preview">
     <h4>六大接案能力變更預覽</h4>
@@ -268,7 +264,7 @@ export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.dr
     {snapshot && <div className="staff-qual-grid">
       {MANUAL_RELATION_KEYS.map((key) => <div key={key} className="staff-qual-card" role="group" aria-label={MANUAL_RELATION_LABELS[key]}>
         <h4>{MANUAL_RELATION_LABELS[key]}</h4>
-        {!editing ? <p>{displayRelationValues(snapshot.after[key])}</p> : <>
+        {!editing ? <p>{displayRelations(snapshot.after[key])}</p> : <>
           {draft[key].map((item, index) => <div key={index}>
             <input aria-label={MANUAL_RELATION_LABELS[key] + '值' + (index + 1)} disabled={locked} value={item.value} onChange={(event) => { setPreview(null); setStatus(''); setPhase('editing'); setDraft((current) => updateManualDraftRow(current, key, index, 'value', event.target.value)); }} />
             <input aria-label={MANUAL_RELATION_LABELS[key] + '說明' + (index + 1)} disabled={locked} value={item.detail ?? ''} onChange={(event) => { setPreview(null); setStatus(''); setPhase('editing'); setDraft((current) => updateManualDraftRow(current, key, index, 'detail', event.target.value)); }} />
@@ -333,7 +329,7 @@ function qualificationEmptyMessage(
 
 function profileItemsText(items: ReadonlyArray<{ value: string; detail: string | null }>): string {
   if (items.length === 0) return '尚未登錄';
-  return items.map((item) => item.value).join('、');
+  return items.map((item) => item.detail ? `${item.value}（${item.detail}）` : item.value).join('、');
 }
 
 function isAvailabilityOutcomeUnknown(error: unknown): boolean {
@@ -929,14 +925,14 @@ export const StaffPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="staff-tab-bar sr-only" aria-label="服務人員管理分頁">
-        <button type="button" data-control-id="staff.tab.roster" className={`staff-tab-btn ${activeTab === 'roster' ? 'active' : ''}`} disabled={interactionLocked} onClick={() => changeTab('roster')}>
+      <div className="staff-tab-bar" role="tablist" aria-label="服務人員管理分頁">
+        <button type="button" role="tab" aria-selected={activeTab === 'roster'} data-control-id="staff.tab.roster" className={`staff-tab-btn ${activeTab === 'roster' ? 'active' : ''}`} disabled={interactionLocked} onClick={() => changeTab('roster')}>
           👩‍🍼 服務月嫂名冊與卡片
         </button>
-        <button type="button" data-control-id="staff.tab.preferences" className={`staff-tab-btn ${activeTab === 'preferences' ? 'active' : ''}`} disabled={interactionLocked} onClick={() => changeTab('preferences')}>
+        <button type="button" role="tab" aria-selected={activeTab === 'preferences'} data-control-id="staff.tab.preferences" className={`staff-tab-btn ${activeTab === 'preferences' ? 'active' : ''}`} disabled={interactionLocked} onClick={() => changeTab('preferences')}>
           🎯 配對偏好管理工作台
         </button>
-        <button type="button" data-control-id="staff.tab.unavailability" className={`staff-tab-btn ${activeTab === 'unavailability' ? 'active' : ''}`} disabled={interactionLocked} onClick={() => changeTab('unavailability')}>
+        <button type="button" role="tab" aria-selected={activeTab === 'unavailability'} data-control-id="staff.tab.unavailability" className={`staff-tab-btn ${activeTab === 'unavailability' ? 'active' : ''}`} disabled={interactionLocked} onClick={() => changeTab('unavailability')}>
           🏖️ 長假與暫停接案工作台
         </button>
       </div>
@@ -1067,17 +1063,12 @@ export const StaffPage: React.FC = () => {
                         <div className="staff-phone">📞 {staff.displayPhone}</div>
                       </div>
                     </div>
-                    <span className="staff-unavailable-pill">
-                      {selectedStaffId === staff.id && lifecycle.status === 'ready' ? lifecycle.data.stateLabel : '狀態需選取查詢'}
-                    </span>
+                    {selectedStaffId === staff.id && lifecycle.status === 'ready' && (
+                      <span className="staff-unavailable-pill">{lifecycle.data.stateLabel}</span>
+                    )}
                   </div>
 
-                  <div className="staff-card-chips" aria-label="資格資料提示">
-                    <span className="staff-skill-chip">📋 選取後載入正式資格與料理能力</span>
-                  </div>
-
-                  <div className="staff-card-pref-summary" data-surface-id={`staff.card.case-preference.${staff.id}`}>
-                    {selectedStaffId !== staff.id && <span>🎯 選取後載入接案偏好摘要</span>}
+                  {selectedStaffId === staff.id && <div className="staff-card-pref-summary" data-surface-id={`staff.card.case-preference.${staff.id}`}>
                     {selectedStaffId === staff.id && casePreferenceSummary.status === 'idle' && <span>🎯 接案偏好摘要待查詢</span>}
                     {selectedStaffId === staff.id && casePreferenceSummary.status === 'loading' && <span role="status">🎯 正在載入接案偏好摘要…</span>}
                     {selectedStaffId === staff.id && casePreferenceSummary.status === 'error' && <span>🎯 接案偏好目前無法讀取</span>}
@@ -1086,11 +1077,12 @@ export const StaffPage: React.FC = () => {
                         {casePreferenceSummary.data.topics.map((topic) => (
                           <div key={topic.key} role="group" aria-label={topic.label}>
                             <strong>{topic.label}</strong>：{topic.valuesText}
+                            {topic.otherDetailStatus === 'ready' && topic.detailText && <>；{topic.detailText}</>}
                           </div>
                         ))}
                       </div>
                     )}
-                  </div>
+                  </div>}
 
                   <div className="staff-card-footer">
                     <button

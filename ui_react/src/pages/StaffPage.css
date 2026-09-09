@@ -17,9 +17,7 @@
 .staff-tab-bar {
   display: flex;
   gap: 12px;
-  position: sticky;
-  top: 64px;
-  z-index: 40;
+  position: static;
   background: rgba(255, 248, 246, 0.95);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
@@ -214,24 +212,25 @@
    ========================================================================== */
 .staff-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 20px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
 }
 
 .staff-card {
   background: #ffffff;
   border: 1.5px solid #dec0b6;
   border-radius: 16px;
-  padding: 20px;
+  padding: 14px 16px;
   box-shadow: 0 4px 14px rgba(74, 69, 67, 0.06);
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
+  display: grid;
+  grid-template-columns: minmax(320px, 0.9fr) minmax(240px, 1.2fr) auto;
+  align-items: center;
+  gap: 16px;
   transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
 }
 
 .staff-card:hover {
-  transform: translateY(-3px);
+  transform: translateY(-1px);
   box-shadow: 0 8px 24px rgba(255, 127, 80, 0.12);
   border-color: #ff7f50;
 }
@@ -269,6 +268,8 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .staff-id-badge {
@@ -344,12 +345,14 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
 }
 
 .staff-card-footer {
-  margin-top: auto;
-  padding-top: 12px;
-  border-top: 1px dashed #dec0b6;
+  grid-column: 3;
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
   display: flex;
   gap: 8px;
 }
@@ -981,9 +984,9 @@
    Responsive Breakpoints
    ========================================================================== */
 @media (max-width: 1100px) {
-  .staff-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+  .staff-card { grid-template-columns: minmax(280px, 1fr) auto; }
+  .staff-card-pref-summary { grid-column: 1 / -1; grid-row: 2; }
+  .staff-card-footer { grid-column: 2; grid-row: 1; }
 }
 
 @media (max-width: 768px) {
@@ -997,6 +1000,10 @@
   .staff-qual-grid {
     grid-template-columns: 1fr;
   }
+  .staff-card { grid-template-columns: minmax(0, 1fr); }
+  .staff-card-pref-summary,
+  .staff-card-footer { grid-column: 1; grid-row: auto; }
+  .staff-card-footer { padding-top: 10px; border-top: 1px dashed #dec0b6; }
   .staff-form-card.wide {
     grid-column: auto;
   }

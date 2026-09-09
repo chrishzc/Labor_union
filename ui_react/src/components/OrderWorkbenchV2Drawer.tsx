@@ -14,14 +14,21 @@ import type { HistoricalOperationalBaseline } from '../api/orders/historical_ope
 import { orderCoreStageProjectionClient } from '../api/orders/order_core_stage_projection_client';
 import type {
   CoreStageBranchType,
+  CoreStageCode,
   CoreStageProjection,
   OrderCoreStageTimeline,
 } from '../api/orders/order_core_stage_projection_schemas';
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import type { AssignmentPlan, OrderDetail, OrderTerms } from '../api/orders/order_query_schemas';
-import { coreStageSubstatusLabel } from '../adapters/orders/order_core_stage_projection_adapter';
+import { coreStageDefinition, coreStageSubstatusLabel } from '../adapters/orders/order_core_stage_projection_adapter';
+import { ContractExternalSigningActions } from './ContractExternalSigningActions';
+import { OrderAssignmentPlanPanel } from './OrderAssignmentPlanPanel';
+import { OrderCandidateContactStatusPanel } from './OrderCandidateContactStatusPanel';
+import { OrderCandidateQueryPanel } from './OrderCandidateQueryPanel';
+import { OrderFormalRecommendationPanel } from './OrderFormalRecommendationPanel';
 import { OrderIntakeRepairPanel } from './OrderIntakeRepairPanel';
 import { OrderServiceCompletionActions } from './OrderServiceCompletionActions';
+import { OrderServiceDatesPanel } from './OrderServiceDatesPanel';
 import { OrderTermsMutationPanel } from './OrderTermsMutationPanel';
 import { OrderWorkbenchV2OwnerContext } from './OrderWorkbenchV2OwnerContext';
 import { ServiceBeforeReplacementActions } from './ServiceBeforeReplacementActions';
@@ -96,7 +103,7 @@ function lineageIdentity(identity: string | null): string {
 export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
   caseNo,
   branchType,
-  workbenchScope,
+  workbenchScope = 'in_progress',
   onClose,
   onObserved,
 }) => {
@@ -258,6 +265,25 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
   const intakeOrderStatus = timeline.status === 'ready'
     ? timeline.data.lifecycle_status
     : detail.status === 'ready' ? detail.data.order_status : null;
+  const currentStageCode: CoreStageCode | null = timeline.status === 'ready'
+    ? timeline.data.current_core_stage_code
+    : null;
+  const currentStage = currentStageCode === null ? null : coreStageDefinition(currentStageCode);
+  const currentStageProjection = timeline.status === 'ready' && currentStageCode !== null
+    ? timeline.data.core_stages.find((stage) => stage.code === currentStageCode) ?? null
+    : null;
+  const hasInlineStageAction = currentStageCode !== null && [
+    'intake_validation',
+    'matching_pool',
+    'caregiver_line_delivery',
+    'caregiver_willingness_reply',
+    'formal_recommendation',
+    'external_signing_dispatch',
+    'external_signing_completion',
+    'confirmed_service_dates',
+    'formal_service',
+    'service_completion',
+  ].includes(currentStageCode);
 
   return (
     <Drawer
@@ -272,6 +298,58 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
     >
       <div className="order-v2-drawer-content">
         <p className="order-v2-drawer-intro">查看案件資料、服務安排與作業進度。</p>
+        {currentBranch === 'normal' && workbenchScope === 'in_progress' && !terminalStatus && (
+          <section className="order-v2-drawer-current-task" aria-labelledby="order-v2-current-task-heading">
+            <header>
+              <span>目前待辦</span>
+              <div>
+                <h3 id="order-v2-current-task-heading">
+                  {currentStage ? `${currentStage.ordinal}. ${currentStage.label}` : '正在載入目前階段'}
+                </h3>
+                <p>{currentStageProjection ? coreStageSubstatusLabel(currentStageProjection.substatus_code) : '正在讀取正式階段狀態…'}</p>
+              </div>
+            </header>
+            <fieldset disabled={operationBusy || factsRefreshing}>
+              {currentStageCode === 'intake_validation' && intakeOrderStatus !== null && (
+                <OrderIntakeRepairPanel
+                  caseNo={caseNo}
+                  orderStatus={intakeOrderStatus}
+                  onChanged={refreshFacts}
+                  onHistoricalRestartRequested={restartHistoricalOrderIntoNormalFlow}
+                />
+              )}
+              {currentStageCode === 'intake_validation' && terms.status === 'ready' && (
+                <OrderTermsMutationPanel caseNo={caseNo} query={terms.data} onObserved={refreshFacts} />
+              )}
+              {currentStageCode === 'matching_pool' && (
+                <OrderCandidateQueryPanel caseNo={caseNo} onPoolReadback={refreshFacts} />
+              )}
+              {(currentStageCode === 'caregiver_line_delivery' || currentStageCode === 'caregiver_willingness_reply') && (
+                <OrderCandidateContactStatusPanel caseNo={caseNo} onObserved={refreshFacts} />
+              )}
+              {currentStageCode === 'formal_recommendation' && (
+                <OrderFormalRecommendationPanel caseNo={caseNo} onObserved={refreshFacts} />
+              )}
+              {(currentStageCode === 'external_signing_dispatch'
+                || currentStageCode === 'external_signing_completion'
+                || currentStageCode === 'confirmed_service_dates') && (
+                <ContractExternalSigningActions caseNo={caseNo} onCommitted={refreshFacts} />
+              )}
+              {currentStageCode === 'confirmed_service_dates' && (
+                <OrderServiceDatesPanel caseNo={caseNo} onObserved={refreshFacts} />
+              )}
+              {currentStageCode === 'formal_service' && (
+                <OrderAssignmentPlanPanel caseNo={caseNo} onObserved={refreshFacts} />
+              )}
+              {currentStageCode === 'service_completion' && detail.status === 'ready' && (
+                <OrderServiceCompletionActions caseNo={caseNo} orderStatus={detail.data.order_status} onCompleted={refreshFacts} />
+              )}
+              {currentStageCode !== null && !hasInlineStageAction && (
+                <p className="order-v2-drawer-note">此階段目前沒有可在待辦看板直接執行的操作；請依阻塞與提醒前往對應作業區。</p>
+              )}
+            </fieldset>
+          </section>
+        )}
         <div className="order-v2-drawer-columns">
         <div className="order-v2-drawer-main">
           {factsRefreshing && <p role="status">正在更新正式案件資料；保留目前面板狀態。</p>}
@@ -320,27 +398,48 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
 
           <OrderWorkbenchV2OwnerContext key={caseNo} caseNo={caseNo} revision={refreshRevision} />
 
-          <section className="order-v2-drawer-section" aria-label="案件受控操作">
-            <h3>案件受控操作</h3>
-            <p className="order-v2-drawer-note">選擇需要辦理的事項，查看目前條件後預覽並確認。</p>
+          {(!terminalStatus || currentBranch === 'cancelled') && <details className="order-v2-drawer-section order-v2-more-actions">
+            <summary>更多操作</summary>
+            <p className="order-v2-drawer-note">低頻案件維護操作會先顯示目前條件，再進入預覽與確認。</p>
             <div className="order-v2-drawer-actions">
               <button type="button" disabled={operationBusy || factsRefreshing} onClick={() => setOperation('cancellation')}>取消／補登取消服務事實</button>
               {currentBranch === 'cancelled' && (
                 <button type="button" disabled={operationBusy || factsRefreshing} onClick={() => setOperation('reopen')}>受控重開取消案件</button>
               )}
-              <button type="button" disabled={operationBusy || factsRefreshing} onClick={() => setOperation('actual-start')}>確認／更正實際開始日</button>
+              {currentBranch !== 'cancelled' && (
+                <button type="button" disabled={operationBusy || factsRefreshing} onClick={() => setOperation('actual-start')}>確認／更正實際開始日</button>
+              )}
             </div>
             {operationBusy && <p role="status">操作結果或正式回讀尚未確認，暫時不能關閉或切換操作。</p>}
             {operation === 'cancellation' && <OrderCancellationPanel key={caseNo} caseNo={caseNo} onObserved={refreshFacts} onBusyChange={onOperationBusyChange} />}
             {operation === 'reopen' && <OrderControlledReopenPanel key={caseNo} caseNo={caseNo} onObserved={refreshFacts} onBusyChange={onOperationBusyChange} />}
             {operation === 'actual-start' && <OrderActualStartPanel key={caseNo} caseNo={caseNo} onObserved={refreshFacts} onBusyChange={onOperationBusyChange} />}
-          </section>
+            {currentBranch === 'normal' && !terminalStatus && detail.status === 'ready' && (
+              <div className="order-v2-more-action-workflow" data-surface-id="orders.service-before-replacement.entry">
+                {!replacementExpanded ? (
+                  <button
+                    type="button"
+                    className="btn-secondary-action"
+                    data-control-id="orders.service-before-replacement.open"
+                    onClick={() => setReplacementExpanded(true)}
+                  >
+                    服務前更換月嫂
+                  </button>
+                ) : (
+                  <ServiceBeforeReplacementActions
+                    caseNo={caseNo}
+                    onCommitted={refreshFacts}
+                    onSubstitutionReferral={() => {
+                      window.location.hash = `#scheduling?tab=leave_sub&case_no=${encodeURIComponent(caseNo)}`;
+                    }}
+                  />
+                )}
+              </div>
+            )}
+          </details>}
 
           <fieldset disabled={operationBusy || factsRefreshing} style={{ border: 0, padding: 0, margin: 0 }}>
-          {currentBranch !== 'cancelled' && intakeOrderStatus !== null
-            && (branchType === 'historical'
-              || intakeOrderStatus === '待補件'
-              || (timeline.status === 'ready' && timeline.data.current_core_stage_code === 'intake_validation')) && (
+          {branchType === 'historical' && currentBranch !== 'cancelled' && intakeOrderStatus !== null && (
             <OrderIntakeRepairPanel
               caseNo={caseNo}
               orderStatus={intakeOrderStatus}
@@ -359,37 +458,6 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
             >
               {historicalRestart.message}
             </div>
-          )}
-
-          {currentBranch === 'normal'
-            && timeline.status === 'ready'
-            && timeline.data.current_core_stage_code === 'intake_validation'
-            && terms.status === 'ready' && (
-            <OrderTermsMutationPanel caseNo={caseNo} query={terms.data} onObserved={refreshFacts} />
-          )}
-
-          {currentBranch === 'normal' && detail.status === 'ready' && (
-            <section className="order-v2-drawer-section" data-surface-id="orders.service-before-replacement.entry">
-              <h3>服務前更換月嫂</h3>
-              {!replacementExpanded ? (
-                <button
-                  type="button"
-                  className="btn-secondary-action"
-                  data-control-id="orders.service-before-replacement.open"
-                  onClick={() => setReplacementExpanded(true)}
-                >
-                  服務前更換月嫂
-                </button>
-              ) : (
-                <ServiceBeforeReplacementActions
-                  caseNo={caseNo}
-                  onCommitted={refreshFacts}
-                  onSubstitutionReferral={() => {
-                    window.location.hash = `#scheduling?tab=leave_sub&case_no=${encodeURIComponent(caseNo)}`;
-                  }}
-                />
-              )}
-            </section>
           )}
 
           <section className="order-v2-drawer-section" aria-labelledby="order-v2-assignment-heading">
@@ -414,13 +482,6 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
             )}
           </section>
 
-          {currentBranch === 'normal' && detail.status === 'ready' && (
-            <OrderServiceCompletionActions
-              caseNo={caseNo}
-              orderStatus={detail.data.order_status}
-              onCompleted={refreshFacts}
-            />
-          )}
           </fieldset>
 
           {branchType === 'historical' && (
