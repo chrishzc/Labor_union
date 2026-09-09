@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
@@ -198,6 +199,15 @@ def _actor() -> ActorContext:
 )
 def test_closed_action_union_normalizes_each_supported_kind(action, expected) -> None:
     assert normalize_rich_menu_action(action) == expected
+
+
+def test_current_rich_menu_configuration_uses_only_canonical_liff_targets() -> None:
+    project_root = Path(__file__).resolve().parents[6]
+    definition = json.loads(
+        (project_root / "config/line_menu.json").read_text(encoding="utf-8")
+    )
+
+    assert normalize_rich_menu_draft(definition)["menus"]
 
 
 @pytest.mark.parametrize(
