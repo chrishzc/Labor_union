@@ -23,7 +23,8 @@ v1 的測試目標。雙 tunnel 是獨立可用性升級方案，未經新裁決
 
 - 單一 Cloud VPN 雲端部署簡報（current workspace 未保存該檔，不作 activation gate）：原提案以 10 張投影片確認混合部署、
   API-only DB access、單一 tunnel 的故障語意、成本上限與上線前隔離／復原／追溯主軸。
-- [單一 Cloud VPN 計畫書](../雲端部署/計劃書/單一Cloud VPN計畫書.md)：只作 single-tunnel network／runtime／identity 的歷史設計輸入；其中 UI framework、entrypoint 與舊 runtime 描述不建立 current Authority，管理端固定依 current `18`／`19` 的 React-only 邊界。
+- 單一 Cloud VPN 計畫書（current workspace 已移除，由 Git history 保存）：只作 single-tunnel network／runtime／identity 的歷史設計輸入；其中 UI framework、entrypoint 與舊 runtime 描述不建立 current Authority，管理端固定依 current `18`／`19` 的 React-only 邊界。
+- Cloud Run Durable Job Worker Supervision 延後開發計畫（current workspace 已移除，由 Git history 保存）：其 worker child crash／restart、revision restart／lease recovery 與 outage acceptance 已收斂到本計畫 Wave 1～3／G4～G5，不再形成第二份 current cloud execution plan。
 - Cloud Run Dockerfile 封裝計畫 v2（current workspace 已移除，由 Git history 保存）：只作 image 分離、immutable digest、non-secret runtime config 與 build evidence 的歷史來源；不得作 activation gate。
 - [Global Deployment 與治理正式規格](../架構重整/01_規格基線/18_Global_Deployment與治理正式規格.md)：
   release、recovery、private DB、OIDC 與 no-secret invariants。
@@ -93,6 +94,7 @@ External Application Load Balancer / Cloud Armor / IAP
 
 - 驗證只有 API revision 能取得 DB secret 並通過 mTLS；其餘四類 runtime 的 secret mount、DB route、
   TCP 3306 與 direct DB client 皆被拒絕。
+- 驗證 `union-runtime-workers` Worker Pool 無 public HTTP URL，只能以核准的短效 OIDC identity 呼叫 private API；錯誤 identity／audience 必須 fail closed。
 - 驗證 IAP group 外、未驗證 public caller、錯 OIDC issuer／audience／caller、過期 token 與 local
   shared key 均被拒絕，且 response／log 不洩漏 credential。
 - 驗證 `run.app` 直連、非 allowlist URL、Private Operations、debug 與管理 mutation 被 edge／ingress
@@ -103,7 +105,7 @@ External Application Load Balancer / Cloud Armor / IAP
 - API 以 test DB 執行 authenticated readiness、read-only query 與一個可回滾／去敏的 typed command；
   驗證單一 outer UoW、receipt、audit 與 no hidden commit。
 - Worker Pool 固定一個 instance，驗證 durable／LINE／incident child 各自 heartbeat、restart counter、
-  queue lag 與 child permanent failure 告警；worker 不因 API instance 數量而重複執行。
+  queue lag 與 child failure；可恢復 child crash 必須留下去敏 restart evidence，permanent child failure 必須使 instance failure 可由平台 restart／告警看見。revision shutdown／restart 與 lease recovery 不得造成重複 Domain write；worker 不因 API instance 數量而重複執行。
 - Monitor Job 以 `--once` 透過 API／edge 觀測；它不直接讀 DB。驗證 Scheduler 失敗、worker heartbeat stale、
   API readiness critical、queue lag／DLQ age 與預算門檻均產生去敏 alert。
 - Ingestion producer 僅建立 durable command；不直接正式寫入。Storage／Eventarc fixture 必須去敏且可清理。
@@ -136,7 +138,7 @@ External Application Load Balancer / Cloud Armor / IAP
 | G1 artifact / supply-chain | digest、scan、SBOM、config schema、secret-name inventory 完整 | `NOT_RUN` |
 | G2 network / DB isolation | API-only + mTLS；其餘 runtime、internet 皆拒絕 3306 | `NOT_RUN` |
 | G3 identity / edge | IAP、OIDC negative matrix、URL allowlist、no shared-key fallback | `NOT_RUN` |
-| G4 runtime / observability | worker、monitor、queue／DLQ、structured safe log、alerts | `NOT_RUN` |
+| G4 runtime / observability | worker child／revision restart、lease recovery、monitor、queue／DLQ、structured safe log、alerts；不得重複 Domain write | `NOT_RUN` |
 | G5 outage / recovery | single-tunnel DB outage fail closed、復原後 safe replay | `NOT_RUN` |
 | G6 rollout / rollback | progressive rehearsal、immutable rollback、去敏 receipt | `NOT_RUN` |
 
