@@ -12,7 +12,7 @@
   - `api/routes/staff_service_day_media.py`
   - `api/dependencies/service_day_media.py`
   - `api/schemas/line_staff_self_service.py`
-  - `line/static/staff_schedule.html`
+  - `line/static/staff_baby_log.html`
 - owning mutation: Scheduling service-day-log workflow registers the controlled object and attachment.
 
 ## Verification

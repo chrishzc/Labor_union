@@ -211,7 +211,7 @@ runtime `public_base_url` 產生公開網址。Chrome 已由工作室逐一實�
 - 客戶「已填過／尚未填過」選擇必須保存 canonical flow ID；未填過流程完成登記後才能完成同一 LINE 身分綁定。
 - LINE 管理中心使用 Customer Service bounded API client；成功 payload 轉 typed Pydantic view，transport/schema error 轉 typed client error。
 - Streamlit 只顯示 typed result 與提交 command，不包含 ticket transition 或 SQL 規則。
-- 已綁定且 enabled 的工會人員可由 `line-mobile-admin` LIFF 查看／回覆客服案件與決定月嫂身分審核；其 server-side ID token、binding、version、receipt 與 outbox 規則不因 persisted role／capability 而改變。
+- 已綁定且 enabled 的工會人員可由 `line-mobile-admin` LIFF 的獨立 target surface 使用待辦工作台、客服中心、異常中心與營運摘要。第一版待辦只包含月嫂身分審核，客服保留既有查看／回覆，異常與營運只讀取各自 owner 的 current Query；其 server-side ID token、binding、version、receipt 與 outbox 規則不因共用 LIFF runtime 而改變。
 
 AI feedback 執行狀態（2026-08-26）：`approved-for-contract-first`。人工已授權補齊正式 feedback owner、
 root facts、privacy、typed Query／record／receipt／readback 與 durable manual-ticket linkage；只有 formal
@@ -293,6 +293,17 @@ numbered pagination regression 覆蓋；不得為取得 Chrome 正向頁面而�
 資料異動執行狀態（2026-08-26）：`approved`。人工已授權先由 Client／Staff owner 補齊 root、欄位
 allowlist、version、repository contract 與必要 `lu_test_*` schema release，再依本節完成 LIFF／管理端 E2E。
 所有 schema 工作仍須完整 DB change gates；production DB／`union_db` 與 provider push 不由 schema 授權推導。
+
+### 6.1A 客戶訂單異動申請 LIFF（2026-09-09 人工裁決）
+
+客戶 Rich Menu「修改訂單資訊」改為 verified LIFF URI。它是結構化人工確認申請，不是 Orders writer：
+
+1. Query 只依 server 驗證的 LINE ID token 與 current customer binding 讀取本人有效訂單；不得接受 client-supplied user ID 或跨客戶 case number。
+2. 第一版 allowlist 為服務地址、下廚需求、服務日期／天數、每日服務時段與其他訂單內容。服務地址 intake 包含 Client owner 的 `city`、`address`、`residence_type` current values，但不移轉其 root ownership。
+3. 流程固定為 Query／Preview／human Confirm／Apply。Preview 顯示 before／requested diff 與影響提醒且零寫入；Apply fresh-lock binding 與 selected Order，校驗 order version、Client profile version 所形成的 fingerprint 與 idempotency identity。
+4. Apply 只在 caller-owned outer UoW 建立／延續 Customer Service ticket event，回傳 ticket readback。畫面只能顯示「待工會確認／正式訂單尚未修改」；後續正式改單、費用、排班、媒合與月嫂同意均不在本流程 Authority。
+5. 「修改登記資料」verified applicant allowlist 移除 `city`、`address`、`residence_type`；這三欄改由訂單異動 LIFF 提出影響性申請。Client owner 仍保留 canonical values 與後續核准寫入責任。
+6. stale、binding drift、order 不屬本人、已終結 order、非法欄位、fingerprint mismatch、same-key different-payload 或 transaction failure 固定 fail closed；exact replay 回同一客服需求。
 
 ### 6.2 四個 Flex 原始資產的 presentation contract（2026-08-25 人工原圖同步）
 

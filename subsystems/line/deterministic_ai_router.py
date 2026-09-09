@@ -41,9 +41,16 @@ _GROUP_INTENTS = {"工會選單", "開啟客服系統", "月嫂驗證管理"}
 _SERVICE_ALIASES = {
     "服務登記": (None, "registration"),
     "服務說明": (None, "service_help_menu"),
+    "服務與問答": (None, "service_help_menu"),
     "常見問答": (None, "service_help_menu"),
     "問答": (None, "service_help_menu"),
     "FAQ": (None, "service_help_menu"),
+    "修改訂單資訊": (None, "order_update_menu"),
+    "修改服務地址": (CustomerServiceCategory.OTHER, "order_update_request"),
+    "修改下廚需求": (CustomerServiceCategory.OTHER, "order_update_request"),
+    "修改服務天數": (CustomerServiceCategory.OTHER, "order_update_request"),
+    "修改每日服務時段": (CustomerServiceCategory.OTHER, "order_update_request"),
+    "其他訂單內容": (CustomerServiceCategory.OTHER, "order_update_request"),
     "服務流程": (CustomerServiceCategory.SERVICE_FLOW, "service_flow"),
     "流程": (CustomerServiceCategory.SERVICE_FLOW, "service_flow"),
     "怎麼申請": (CustomerServiceCategory.SERVICE_FLOW, "service_flow"),
@@ -70,7 +77,6 @@ _SERVICE_ALIASES = {
     "改資料": (CustomerServiceCategory.PROFILE_UPDATE, "profile_update"),
     "電話錯誤": (CustomerServiceCategory.PROFILE_UPDATE, "profile_update"),
     "地址錯誤": (CustomerServiceCategory.PROFILE_UPDATE, "profile_update"),
-    "日期要改": (CustomerServiceCategory.PROFILE_UPDATE, "profile_update"),
     "4": (CustomerServiceCategory.PROFILE_UPDATE, "profile_update"),
     "其他問題": (CustomerServiceCategory.OTHER, "other"),
     "其他": (CustomerServiceCategory.OTHER, "other"),
@@ -80,8 +86,8 @@ _SERVICE_ALIASES = {
     "5": (CustomerServiceCategory.OTHER, "other"),
     "6": (CustomerServiceCategory.OTHER, "other"),
 }
-_SAFE_MENU_OPTIONS = ("服務說明", "服務登記", "聯絡工會人員")
-_CLARIFICATION_OPTIONS = ("服務說明", "聯絡工會人員")
+_SAFE_MENU_OPTIONS = ("服務與問答", "服務登記", "聯絡工會人員")
+_CLARIFICATION_OPTIONS = ("服務與問答", "聯絡工會人員")
 
 
 class DeterministicLineRouter:

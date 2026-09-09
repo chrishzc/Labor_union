@@ -58,8 +58,9 @@ Typed errors：
 3. 完成：鎖 request、binding 與 owner projection；驗證仍為原 subject/version；清除 owner User ID、轉 `revoked`、追加 event/audit、完成 request，同交易 commit。
 4. provider 成功後 process crash 可安全 replay；重複 link 同一 menu 後再完成 DB。
 5. 所有 command 使用 caller idempotency key；相同 key 不同 payload回 conflict。stale version 不自動 retry。
-6. 人工完成只供 `line.identity.binding.override`，必須在 nonretryable/重試耗盡後填寫原因並留下 audit。
-7. retryable 錯誤由 outbox next-attempt 驅動；nonretryable 或耗盡時 request 轉 `menu_reset_failed`，管理 UI 顯示 error code/message、retry 與 override 入口，既有 outbox dead-letter／runtime health 監控負責異常警示。
+6. 人工完成只供 `line.identity.binding.override` 的後端緊急處置，必須在 nonretryable/重試耗盡後填寫原因並留下 audit；不得作為一般解除路徑，也不得與正常解除／選單回復並列呈現在管理 UI。它只撤銷系統授權，不得宣稱 LINE 圖文選單已回復。之後重新發布可用的 canonical `default_menu` 時，同一筆人工完成請求可再次排入選單修復；provider 成功後才升為 `completed`。
+7. retryable 錯誤由 outbox next-attempt 驅動；nonretryable 或耗盡時 request 轉 `menu_reset_failed`，管理 UI 顯示 error code/message 與訪客選單回復 retry，既有 outbox dead-letter／runtime health 監控負責異常警示；override 只留在後端緊急處置邊界。
+8. 明確 retry 必須在交易內重讀當下 canonical `default_menu` publication，將該次 durable intent 指向最新 publication/provider ID；不得反覆送出已由 provider 回覆不存在的舊 ID。原失敗 target 保留於既有 outbox attempt／audit 歷史。
 
 ## 6. Rich Menu 與 configuration SSOT
 
@@ -74,9 +75,9 @@ Typed errors：
 
 - `line.identity.binding.read`：查詢所有綁定與歷史狀態。
 - `line.identity.binding.manage`：replacement preview/apply、正常解除及 retry。
-- `line.identity.binding.override`：人工完成 provider 永久失敗的解除。
+- `line.identity.binding.override`：後端緊急處置 provider 永久失敗的解除；不在一般管理 UI 提供操作控制。
 
-LINE 管理中心新增「身分管理」，並將「LINE 下方選單」改名「Rich Menu」、「LINE 表單」改名「LIFF 表單」。解除操作必須顯示預覽、原因、binding version 與 default menu blocker。
+LINE 管理中心新增「身分管理」，並將「LINE 下方選單」改名「Rich Menu」、「LINE 表單」改名「LIFF 表單」。一般管理 UI 只提供一個解除動作：提交後立即停止該 binding 的系統授權，並由同一解除 saga 自動將 Rich Menu 回復成 canonical `default_menu`；失敗狀態只提供重新排入訪客選單回復，不提供人工完成解除按鈕。解除操作必須顯示預覽、原因、binding version 與 default menu blocker。
 
 ## 8. 驗收
 
@@ -111,6 +112,11 @@ LINE 管理中心新增「身分管理」，並將「LINE 下方選單」改名�
    唯一重建的狀態維持 fail closed，留給既有 review／reconciliation 邊界處理。
 5. 舊 `line_identity_bindings` 只得作 migration／compatibility surface，不得成為第二個
    writer 或角色判定來源。
+6. 月嫂身分證明只有在唯一配對且該 staff subject 尚無其他有效 LINE binding 時，
+   才可在同一 outer Unit of Work 直接建立 `bound` binding 與 owner projection；不得建立
+   `staff_verification` 人工審核作為改綁 fallback。owner projection 或 canonical binding 顯示該月嫂
+   已綁定其他 LINE 帳號時必須 fail closed 回傳 typed conflict；Apply 仍以 fresh facts 重新驗證，
+   不得以預覽結果繞過防重。
 
 ### 9.2 目前選定角色
 

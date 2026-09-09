@@ -158,38 +158,39 @@ def test_identity_page_routes_mobile_admin_targets_without_opening_staff_flow() 
     assert 'customer_service: "/line-mobile-admin?target=customer_service"' in mobile_admin_route
     assert 'scheduling_review: "/line-mobile-admin?target=scheduling_review"' in mobile_admin_route
     assert 'staff_review: "/line-mobile-admin?target=staff_review"' in mobile_admin_route
+    assert 'anomalies_center: "/line-mobile-admin?target=anomalies_center"' in mobile_admin_route
+    assert 'dashboard: "/line-mobile-admin?target=dashboard"' in mobile_admin_route
     assert "location.replace(mobileAdminPage);" in initialize_source
     assert initialize_source.index("location.replace(mobileAdminPage);") < initialize_source.index(
         "openStaffPage(staffPage)"
     )
 
 
-def test_liff_targets_route_to_existing_pages_or_fail_closed() -> None:
+def test_liff_targets_route_to_existing_pages() -> None:
     gateway = (ROOT / "line" / "static" / "gateway.html").read_text(encoding="utf-8")
     identity = (ROOT / "line" / "static" / "identity.html").read_text(encoding="utf-8")
     staff_route = identity.split("function requestedStaffPage()", 1)[1].split(
         "function requestedMobileAdminPage()", 1
     )[0]
     standalone_route = identity.split("function requestedStandalonePage()", 1)[1].split(
-        "function requestedUnavailableTarget()", 1
-    )[0]
-    unavailable_route = identity.split("function requestedUnavailableTarget()", 1)[1].split(
         "function hasSensitiveFlowContext()", 1
     )[0]
-    initialize_source = identity.split("async function initialize()", 1)[1]
+    mobile_admin_route = identity.split("function requestedMobileAdminPage()", 1)[1].split(
+        "function requestedStandalonePage()", 1
+    )[0]
 
     assert "staff_leave_apply: '/line-staff-schedule'" in gateway
     assert "profile_update: '/line-profile-guard'" in gateway
     assert 'staff_leave_apply: "/line-staff-schedule"' in staff_route
     assert 'profile_update: "/line-profile-guard"' in standalone_route
-    for target in ("staff_payout", "anomalies_center", "dashboard"):
-        assert f"{target}:" in unavailable_route
-        assert f"/line-identity?target={target}" in gateway
-    assert "showUnavailableTarget(unavailableTarget);" in initialize_source
-    assert initialize_source.index("showUnavailableTarget(unavailableTarget);") < initialize_source.index(
-        "showRegistrationEntry();"
-    )
-    assert "此入口不會改用其他流程" in unavailable_route
+    assert 'staff_baby_log: "/line-staff-baby-log"' in staff_route
+    assert 'staff_payout: "/line-staff-payout"' in staff_route
+    assert "staff_baby_log: '/line-staff-baby-log'" in gateway
+    assert "staff_payout: '/line-staff-payout'" in gateway
+    for target in ("anomalies_center", "dashboard"):
+        assert f"{target}:" in mobile_admin_route
+        assert f"/line-mobile-admin?target={target}" in gateway
+    assert "requestedUnavailableTarget" not in identity
 
 
 def test_active_liff_pages_do_not_accept_query_string_user_id() -> None:
@@ -198,13 +199,15 @@ def test_active_liff_pages_do_not_accept_query_string_user_id() -> None:
         "register.html",
         "staff_order_search.html",
         "staff_schedule.html",
+        "staff_baby_log.html",
+        "staff_payout.html",
         "mobile_admin.html",
     ):
         source = (ROOT / "line" / "static" / name).read_text(encoding="utf-8")
         assert 'get("userId")' not in source
 
 
-def test_staff_schedule_page_uses_strict_leave_and_text_log_flows() -> None:
+def test_staff_schedule_page_uses_strict_leave_flow() -> None:
     source = (ROOT / "line" / "static" / "staff_schedule.html").read_text(
         encoding="utf-8"
     )
@@ -212,22 +215,31 @@ def test_staff_schedule_page_uses_strict_leave_and_text_log_flows() -> None:
     assert "/api/v1/line/staff-self-service/leave-requests/preview" in source
     assert "/api/v1/line/staff-self-service/leave-requests/apply" in source
     assert "/query`" in source
-    assert "/api/v1/line/staff-self-service/service-day-logs/preview" in source
-    assert "/api/v1/line/staff-self-service/service-day-logs/apply" in source
-    assert "/api/v1/line/staff-self-service/service-day-media" in source
-    assert "受控檔案 staging" in source
+    assert "/api/v1/line/staff-self-service/service-day-logs/preview" not in source
     assert 'development_line_user_id: ""' in source
     assert 'params.get("userId")' not in source
     assert '"line_user_id"' not in source
     assert "function requireStaffSchedule" in source
     assert 'id="submitLeave"' in source
     assert 'disabled>預覽請假待辦</button>' in source
-    assert 'id="previewLog" class="primary" type="button" disabled' in source
     assert 'addEventListener("click", submitLeave)' in source
-    assert 'addEventListener("click", previewServiceDayLog)' in source
     assert "重新登入 LINE" in source
     assert 'redirect.searchParams.set("target", "staff_schedule")' in source
     assert 'liff.login({redirectUri: redirect.toString()})' in source
+
+
+def test_staff_baby_log_page_uses_strict_service_day_log_flow() -> None:
+    source = (ROOT / "line" / "static" / "staff_baby_log.html").read_text(encoding="utf-8")
+
+    assert "/api/v1/line/staff-self-service/schedule" in source
+    assert "/api/v1/line/staff-self-service/service-day-logs/preview" in source
+    assert "/api/v1/line/staff-self-service/service-day-logs/apply" in source
+    assert "/api/v1/line/staff-self-service/service-day-media" in source
+    assert "受控檔案 staging" in source
+    assert 'id="previewLog" class="primary" type="button" disabled' in source
+    assert 'addEventListener("click", previewServiceDayLog)' in source
+    assert 'development_line_user_id: ""' in source
+    assert 'redirect.searchParams.set("target", "staff_baby_log")' in source
 
 
 def test_active_liff_pages_offer_manual_reauthentication_without_url_identity() -> None:
@@ -240,6 +252,8 @@ def test_active_liff_pages_offer_manual_reauthentication_without_url_identity() 
     targets = {
         "staff_order_search.html": "staff_order_search",
         "staff_schedule.html": "staff_schedule",
+        "staff_baby_log.html": "staff_baby_log",
+        "staff_payout.html": "staff_payout",
     }
     for name, target in targets.items():
         source = (ROOT / "line" / "static" / name).read_text(encoding="utf-8")
@@ -255,7 +269,8 @@ def test_active_liff_pages_offer_manual_reauthentication_without_url_identity() 
     assert "重新登入 LINE" in mobile_admin
     assert "liff.logout()" in mobile_admin
     assert 'new URL("/line-identity", location.origin)' in mobile_admin
-    assert 'targetFromUrl() === "staff_review" ? "staff_review" : "customer_service"' in mobile_admin
+    assert 'supportedTargets.includes(target) ? target : targetFromUrl()' in mobile_admin
+    assert 'supportedTargets.includes(requested) ? requested : "customer_service"' in mobile_admin
     assert "liff.login({redirectUri: redirect.toString()})" in mobile_admin
     assert "liff.login({redirectUri: location.href})" not in mobile_admin
     assert 'params.get("userId")' not in mobile_admin
@@ -277,3 +292,13 @@ def test_line_profile_guard_page_route_serves_profile_guard_html() -> None:
     response = line_identity.profile_guard_page()
     assert response.status_code == 200
     assert response.path.name == "profile_guard.html"
+
+
+def test_new_staff_page_routes_serve_split_assets() -> None:
+    baby_log = line_identity.staff_baby_log_page()
+    payout = line_identity.staff_payout_page()
+
+    assert baby_log.status_code == 200
+    assert baby_log.path.name == "staff_baby_log.html"
+    assert payout.status_code == 200
+    assert payout.path.name == "staff_payout.html"

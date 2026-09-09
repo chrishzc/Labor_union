@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
 File: mobile_admin.html
-Description: 提供 LINE 工會人員手機端客服、排班審核與月嫂審核，清單採伺服器編號分頁。
+Description: 提供 LINE 工會人員獨立的待辦、客服、異常與營運摘要手機工作入口。
 -->
 <html lang="zh-Hant-TW">
 <head>
@@ -15,9 +15,10 @@ Description: 提供 LINE 工會人員手機端客服、排班審核與月嫂審�
     main { max-width:760px; margin:0 auto; padding:18px 14px 40px; }
     h1 { margin:0 0 8px; font-size:28px; }
     .caption { color:var(--muted); margin:0 0 18px; line-height:1.5; }
-    .tabs { display:flex; gap:8px; margin-bottom:14px; position:sticky; top:0; background:var(--bg); padding:8px 0; z-index:2; }
-    .tab { flex:1; border:1px solid var(--line); background:white; color:var(--ink); border-radius:12px; padding:12px 8px; font-size:16px; font-weight:700; }
-    .tab.active { background:var(--green); border-color:var(--green); color:white; }
+    h2 { margin:0; font-size:20px; }
+    .surface-heading { background:white; border:1px solid var(--line); border-radius:16px; padding:14px; margin-bottom:14px; }
+    .surface-heading p { color:var(--muted); margin:8px 0 0; line-height:1.5; }
+    .section-heading { display:flex; justify-content:space-between; align-items:center; gap:12px; margin:10px 0 12px; }
     .toolbar { display:flex; gap:8px; margin-bottom:12px; }
     select,input,textarea { width:100%; border:1px solid var(--line); border-radius:12px; padding:12px; font-size:16px; background:white; }
     textarea { min-height:104px; resize:vertical; }
@@ -36,6 +37,11 @@ Description: 提供 LINE 工會人員手機端客服、排班審核與月嫂審�
     .preview { background:#ecfdf5; color:#166534; border-radius:12px; padding:12px; margin-top:12px; white-space:pre-wrap; }
     .pagination { display:flex; align-items:center; justify-content:space-between; gap:8px; margin:12px 0; }
     .pagination-summary { color:var(--muted); font-size:14px; text-align:center; flex:1; }
+    .metric-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+    .metric { background:white; border:1px solid var(--line); border-radius:16px; padding:14px; }
+    .metric span { display:block; color:var(--muted); font-size:14px; }
+    .metric strong { display:block; font-size:28px; margin-top:6px; }
+    .muted { color:var(--muted); line-height:1.5; }
     .hidden { display:none; }
   </style>
 </head>
@@ -43,10 +49,9 @@ Description: 提供 LINE 工會人員手機端客服、排班審核與月嫂審�
 <main>
   <h1 id="title">工會手機管理</h1>
   <p class="caption" id="subtitle">正在確認您的 LINE 工會人員身分。</p>
-  <div class="tabs">
-    <button class="tab" id="tabCustomer" type="button">客服中心</button>
-    <button class="tab" id="tabScheduling" type="button">排班審核</button>
-    <button class="tab" id="tabReview" type="button">月嫂驗證</button>
+  <div class="surface-heading">
+    <span class="pill" id="surfaceLabel">工會工作入口</span>
+    <p id="surfaceDescription">正在載入工作內容。</p>
   </div>
   <div id="status" class="info">載入中...</div>
   <button id="reauthenticate" class="secondary hidden" type="button">重新登入 LINE</button>
@@ -62,6 +67,11 @@ Description: 提供 LINE 工會人員手機端客服、排班審核與月嫂審�
     <div id="tickets"></div>
   </section>
   <section id="reviewPane" class="hidden">
+    <div class="section-heading">
+      <h2>月嫂身分驗證</h2>
+      <button id="openScheduling" class="secondary" type="button">排班案件工具</button>
+    </div>
+    <p class="muted">待辦數量僅包含月嫂身分驗證申請；排班工具須按案件編號查詢，不計入待辦。</p>
     <div class="toolbar">
       <select id="reviewStatus">
         <option value="pending">待審核</option>
@@ -73,11 +83,32 @@ Description: 提供 LINE 工會人員手機端客服、排班審核與月嫂審�
     <div id="reviews"></div>
   </section>
   <section id="schedulingPane" class="hidden">
+    <div class="section-heading">
+      <h2>排班案件工具</h2>
+      <button id="backToWorkQueue" class="secondary" type="button">返回待辦工作台</button>
+    </div>
+    <p class="muted">這是依案件編號操作的排班工具，不是待確認佇列。</p>
     <div class="toolbar">
       <input id="scheduleCaseNo" type="text" maxlength="50" placeholder="輸入案件編號，例如 115000008">
       <button type="button" id="loadSchedule">查詢排班</button>
     </div>
     <div id="scheduleReview"></div>
+  </section>
+  <section id="anomaliesPane" class="hidden">
+    <div class="section-heading">
+      <h2>目前通知異常</h2>
+      <button id="refreshAnomalies" type="button">重新整理</button>
+    </div>
+    <p class="muted">目前只顯示系統仍判定有效的 LINE 通知異常，不在此頁直接結案。</p>
+    <div id="anomalies"></div>
+  </section>
+  <section id="operationsPane" class="hidden">
+    <div class="section-heading">
+      <h2>本週營運摘要</h2>
+      <button id="refreshOperations" type="button">重新整理</button>
+    </div>
+    <p class="muted" id="operationsPeriod">正在查詢本週資料。</p>
+    <div id="operationsMetrics" class="metric-grid"></div>
   </section>
 </main>
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
@@ -96,12 +127,26 @@ const ticketPageState = {page: 1, pageSize: 0, total: 0};
 const reviewPageState = {page: 1, pageSize: 50, total: 0};
 let ticketQuerySequence = 0;
 let reviewQuerySequence = 0;
+let anomalyQuerySequence = 0;
+let operationsQuerySequence = 0;
+let anomalyCursor = null;
+let anomalyItems = [];
 const statusBox = document.getElementById("status");
 const panes = {
   customer_service: document.getElementById("customerPane"),
   scheduling_review: document.getElementById("schedulingPane"),
   staff_review: document.getElementById("reviewPane"),
+  anomalies_center: document.getElementById("anomaliesPane"),
+  dashboard: document.getElementById("operationsPane"),
 };
+const supportedTargets = Object.freeze(Object.keys(panes));
+const surfaceCopy = Object.freeze({
+  customer_service: ["客服中心", "只顯示客服案件與回覆工作。"],
+  staff_review: ["待辦工作台", "目前待辦只包含月嫂身分驗證。"],
+  scheduling_review: ["排班案件工具", "依案件編號查詢、預覽並確認排班調整。"],
+  anomalies_center: ["異常中心", "顯示目前仍有效的 LINE 通知異常。"],
+  dashboard: ["營運摘要", "顯示本週彙整資料與產生時間，不代表即時監控。"],
+});
 
 function liffStateParams() {
   const params = new URLSearchParams(location.search);
@@ -117,11 +162,8 @@ function targetFromUrl() {
 }
 
 function targetForIdentityRedirect() {
-  const requested = targetFromUrl();
-  // Keep the existing staff-review redirect contract while allowing the Scheduling tab.
-  return requested === "scheduling_review"
-    ? "scheduling_review"
-    : (targetFromUrl() === "staff_review" ? "staff_review" : "customer_service");
+  const requested = supportedTargets.includes(target) ? target : targetFromUrl();
+  return supportedTargets.includes(requested) ? requested : "customer_service";
 }
 
 function adminSessionToken() {
@@ -243,7 +285,7 @@ async function postJson(url, body) {
 
 async function init() {
   try {
-    target = ["staff_review", "scheduling_review"].includes(targetFromUrl()) ? targetFromUrl() : "customer_service";
+    target = supportedTargets.includes(targetFromUrl()) ? targetFromUrl() : "customer_service";
     const configResponse = await fetch("/api/v1/line/identity/runtime-config");
     const configResult = await configResponse.json();
     const liffId = configResult.data?.liff_id;
@@ -251,7 +293,7 @@ async function init() {
     await liff.init({liffId});
     if (!liff.isLoggedIn()) {
       const redirect = new URL("/line-identity", location.origin);
-      redirect.searchParams.set("target", ["staff_review", "scheduling_review"].includes(targetFromUrl()) ? targetFromUrl() : "customer_service");
+      redirect.searchParams.set("target", target);
       liff.login({redirectUri: redirect.toString()});
       return;
     }
@@ -275,17 +317,25 @@ async function init() {
 }
 
 function switchPane(next) {
+  if (!supportedTargets.includes(next)) return;
+  if (next === "scheduling_review" && !adminSessionToken()) {
+    redirectToAdminLogin();
+    return;
+  }
   target = next;
-  document.getElementById("tabCustomer").classList.toggle("active", target === "customer_service");
-  document.getElementById("tabScheduling").classList.toggle("active", target === "scheduling_review");
-  document.getElementById("tabReview").classList.toggle("active", target === "staff_review");
-  panes.customer_service.classList.toggle("hidden", target !== "customer_service");
-  panes.scheduling_review.classList.toggle("hidden", target !== "scheduling_review");
-  panes.staff_review.classList.toggle("hidden", target !== "staff_review");
-  showStatus(target === "customer_service" ? "客服案件列表" : target === "scheduling_review" ? "排班審核" : "月嫂驗證待確認申請");
+  Object.entries(panes).forEach(([name, pane]) => pane.classList.toggle("hidden", target !== name));
+  const copy = surfaceCopy[target];
+  document.getElementById("surfaceLabel").textContent = copy[0];
+  document.getElementById("surfaceDescription").textContent = copy[1];
+  showStatus(`${copy[0]}載入中`);
   if (target === "customer_service") loadTickets();
-  else if (target === "scheduling_review") renderSchedulingReview();
-  else loadReviews();
+  else if (target === "scheduling_review") {
+    renderSchedulingReview();
+    showStatus("請輸入案件編號查詢正式排班");
+  }
+  else if (target === "staff_review") loadReviews();
+  else if (target === "anomalies_center") loadAnomalies(true);
+  else loadOperationsSummary();
 }
 
 async function loadTickets() {
@@ -311,6 +361,7 @@ async function loadTickets() {
       ticketPageState.page = page;
       loadTickets();
     });
+    showStatus("客服案件已更新");
     if (!pageData.items.length) { showEmpty(root, "目前沒有符合條件的客服案件。"); return; }
     pageData.items.forEach(ticket => root.appendChild(ticketCard(ticket)));
   } catch (error) {
@@ -777,6 +828,7 @@ async function loadReviews() {
       reviewPageState.page = page;
       loadReviews();
     });
+    showStatus("月嫂身分驗證待辦已更新");
     if (!pageData.items.length) { showEmpty(root, "目前沒有符合條件的月嫂驗證申請。"); return; }
     pageData.items.forEach(review => root.appendChild(reviewCard(review)));
   } catch (error) {
@@ -913,11 +965,155 @@ async function applyReviewDecision(review) {
   } catch (error) { showStatus(error.message, true); }
 }
 
-document.getElementById("tabCustomer").addEventListener("click", () => switchPane("customer_service"));
-document.getElementById("tabScheduling").addEventListener("click", () => switchPane("scheduling_review"));
-document.getElementById("tabReview").addEventListener("click", () => switchPane("staff_review"));
+function validDateTime(value) {
+  return typeof value === "string" && !Number.isNaN(Date.parse(value));
+}
+
+function formatDateTime(value) {
+  return new Date(value).toLocaleString("zh-TW", {hour12:false});
+}
+
+function requireAnomalyPage(data) {
+  if (!data || !Array.isArray(data.items) || data.items.length > 50
+      || !(data.next_cursor === null || typeof data.next_cursor === "string")) {
+    throw new Error("異常清單格式不完整，未顯示不完整資料。");
+  }
+  const valid = data.items.every(item => item
+    && /^ci_[0-9a-f]{64}$/.test(item.issue_key)
+    && item.definition_code === "LINE-006"
+    && ["warning", "blocking"].includes(item.severity)
+    && typeof item.blocking === "boolean"
+    && validDateTime(item.episode_started_at)
+    && validDateTime(item.last_verified_at));
+  if (!valid) throw new Error("異常清單包含不支援的資料，已停止顯示。");
+  return data;
+}
+
+function renderAnomalies() {
+  const root = document.getElementById("anomalies");
+  root.replaceChildren();
+  if (!anomalyItems.length) {
+    showEmpty(root, "目前沒有有效的 LINE 通知異常。");
+    return;
+  }
+  anomalyItems.forEach(item => {
+    const card = document.createElement("article");
+    card.className = "card";
+    const row = document.createElement("div");
+    row.className = "row";
+    const title = document.createElement("strong");
+    title.textContent = "LINE 通知失敗";
+    const severity = document.createElement("span");
+    severity.className = "pill";
+    severity.textContent = item.blocking ? "阻擋中" : "需注意";
+    row.append(title, severity);
+    const timing = document.createElement("p");
+    timing.className = "muted";
+    timing.textContent = `發生：${formatDateTime(item.episode_started_at)}｜最後確認：${formatDateTime(item.last_verified_at)}`;
+    card.append(row, timing);
+    root.appendChild(card);
+  });
+  if (anomalyCursor) {
+    const more = document.createElement("button");
+    more.type = "button";
+    more.className = "secondary";
+    more.textContent = "載入更多";
+    more.addEventListener("click", () => loadAnomalies(false));
+    root.appendChild(more);
+  }
+}
+
+async function loadAnomalies(reset) {
+  if (reset) {
+    anomalyCursor = null;
+    anomalyItems = [];
+  }
+  const requestedCursor = anomalyCursor;
+  const querySequence = ++anomalyQuerySequence;
+  document.getElementById("anomalies").replaceChildren();
+  try {
+    const data = requireAnomalyPage(await postJson(
+      "/api/v1/line/mobile-admin/current-anomalies",
+      requestedCursor ? {cursor: requestedCursor} : {},
+    ));
+    if (querySequence !== anomalyQuerySequence || target !== "anomalies_center") return;
+    anomalyItems = reset ? data.items : [...anomalyItems, ...data.items];
+    anomalyCursor = data.next_cursor;
+    renderAnomalies();
+    showStatus("目前通知異常已更新");
+  } catch (error) {
+    if (querySequence === anomalyQuerySequence) showStatus(error.message, true);
+  }
+}
+
+function requireOperationsSummary(data) {
+  const counts = data?.summary;
+  const countKeys = [
+    "application_count",
+    "general_eligible_count",
+    "subsidized_eligible_count",
+    "rejection_unpartitioned_count",
+    "order_established_count",
+    "incomplete_count",
+  ];
+  if (!data || !/^\d{4}-\d{2}-\d{2}$/.test(data.start_date)
+      || !/^\d{4}-\d{2}-\d{2}$/.test(data.end_date)
+      || !validDateTime(data.generated_at) || !counts
+      || !countKeys.every(key => Number.isInteger(counts[key]) && counts[key] >= 0)) {
+    throw new Error("營運摘要格式不完整，未顯示不完整資料。");
+  }
+  return data;
+}
+
+function renderOperationsSummary(data) {
+  document.getElementById("operationsPeriod").textContent = [
+    `統計期間：${data.start_date} 至 ${data.end_date}`,
+    `資料產生：${formatDateTime(data.generated_at)}`,
+  ].join("｜");
+  const labels = [
+    ["application_count", "案件申請"],
+    ["general_eligible_count", "一般符合"],
+    ["subsidized_eligible_count", "補助符合"],
+    ["rejection_unpartitioned_count", "不符合待分流"],
+    ["order_established_count", "已成立訂單"],
+    ["incomplete_count", "資料不完整"],
+  ];
+  const root = document.getElementById("operationsMetrics");
+  root.replaceChildren();
+  labels.forEach(([key, label]) => {
+    const metric = document.createElement("article");
+    metric.className = "metric";
+    const name = document.createElement("span");
+    name.textContent = label;
+    const value = document.createElement("strong");
+    value.textContent = String(data.summary[key]);
+    metric.append(name, value);
+    root.appendChild(metric);
+  });
+}
+
+async function loadOperationsSummary() {
+  const querySequence = ++operationsQuerySequence;
+  document.getElementById("operationsMetrics").replaceChildren();
+  try {
+    const data = requireOperationsSummary(await postJson(
+      "/api/v1/line/mobile-admin/operations-summary",
+      {},
+    ));
+    if (querySequence !== operationsQuerySequence || target !== "dashboard") return;
+    renderOperationsSummary(data);
+    showStatus("本週營運摘要已更新");
+  } catch (error) {
+    if (querySequence === operationsQuerySequence) showStatus(error.message, true);
+  }
+}
+
 document.getElementById("refreshTickets").addEventListener("click", loadTickets);
 document.getElementById("refreshReviews").addEventListener("click", loadReviews);
+document.getElementById("refreshAnomalies").addEventListener("click", () => loadAnomalies(true));
+document.getElementById("refreshOperations").addEventListener("click", loadOperationsSummary);
+document.getElementById("openScheduling").addEventListener("click", () => switchPane("scheduling_review"));
+document.getElementById("backToWorkQueue").addEventListener("click", () => switchPane("staff_review"));
 document.getElementById("loadSchedule").addEventListener("click", loadSchedulingReview);
 document.getElementById("scheduleCaseNo").addEventListener("input", () => {
   schedulingQuerySequence += 1;

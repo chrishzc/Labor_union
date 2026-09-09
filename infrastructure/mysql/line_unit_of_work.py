@@ -89,6 +89,13 @@ from infrastructure.mysql.orders_terminal_closure_source import (
 from infrastructure.mysql.matching_coordination_customer_service_source import (
     MySqlMatchingCoordinationCustomerServiceSource,
 )
+from infrastructure.mysql.staff_payout_self_service_query_repository import (
+    MySqlStaffPayoutSelfServiceRepository,
+)
+from infrastructure.mysql.customer_order_change_repository import (
+    MySqlCustomerOrderChangeRepository,
+)
+from infrastructure.mysql.client_profile_binding_port import MySqlClientBindingPort
 
 
 class LineMySqlUnitOfWork(MySqlUnitOfWork):
@@ -121,6 +128,9 @@ class LineMySqlUnitOfWork(MySqlUnitOfWork):
         self.matching_schedule_confirmations = MySqlMatchingScheduleConfirmationRepository(connection)
         self.knowledge_questions = MySqlKnowledgeQuestionIntakeAdapter(connection)
         self.customer_service = MySqlCustomerServiceRepository(connection)
+        self.customer_order_changes = MySqlCustomerOrderChangeRepository(connection)
+        self.customer_order_change_bindings = MySqlClientBindingPort(connection)
+        self.staff_payout_self_service = MySqlStaffPayoutSelfServiceRepository(connection)
         self.feedback = MySqlLineFeedbackRepository(connection)
         self.safe_review_links = MySqlLineSafeReviewLinkRepository(connection)
         self.matching_coordination_delivery = MySqlLineMatchingCoordinationDeliverySource(connection)

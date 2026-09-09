@@ -18,6 +18,8 @@ class CreateCustomerServiceMessage:
     category: CustomerServiceCategory
     message: str
     event_key: str
+    client_id: int | None = None
+    case_no: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

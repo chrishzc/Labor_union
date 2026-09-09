@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<!--
+File: staff_payout.html
+Description: 提供已驗證月嫂依目標付款月份查詢本人逐案薪資與付款紀錄。
+-->
+<html lang="zh-Hant-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>月嫂薪資請款明細</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Microsoft JhengHei", "Noto Sans TC", sans-serif; background: #f0fdf4; color: #1f2937; }
+    main { max-width: 760px; margin: 0 auto; padding: 24px 16px 44px; }
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    h2 { margin: 0; font-size: 20px; }
+    p { color: #64748b; line-height: 1.6; }
+    .panel, .payment { background: #fff; border: 1px solid #bbf7d0; border-radius: 10px; padding: 16px; margin-top: 14px; }
+    .controls { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: end; }
+    label { display: block; font-weight: 700; margin-bottom: 7px; }
+    input { width: 100%; border: 1px solid #cbd5e1; border-radius: 6px; padding: 11px; font-size: 16px; }
+    button { border: 0; border-radius: 6px; padding: 13px 16px; font-size: 16px; font-weight: 700; }
+    .primary { color: #fff; background: #047857; }
+    .secondary { margin-top: 10px; color: #065f46; background: #d1fae5; }
+    button:disabled { cursor: not-allowed; opacity: .6; }
+    .message { margin-top: 14px; padding: 12px; border-radius: 6px; background: #f1f5f9; color: #334155; overflow-wrap: anywhere; }
+    .error { background: #fee2e2; color: #b91c1c; }
+    .summary { display: flex; justify-content: space-between; gap: 12px; align-items: start; }
+    .amount { color: #047857; font-size: 22px; font-weight: 800; white-space: nowrap; }
+    .status { display: inline-block; margin-top: 7px; padding: 3px 8px; border-radius: 999px; background: #ecfdf5; color: #047857; font-size: 13px; font-weight: 700; }
+    dl { display: grid; grid-template-columns: max-content 1fr; gap: 7px 12px; margin: 14px 0 0; }
+    dt { color: #64748b; }
+    dd { margin: 0; text-align: right; }
+    .transactions { margin: 14px 0 0; padding: 12px 14px; border-left: 3px solid #86efac; background: #f8fafc; }
+    .transactions li { margin-top: 6px; }
+    @media (max-width: 560px) { .controls { grid-template-columns: 1fr; } .summary { display: block; } .amount { margin-top: 8px; } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>薪資請款明細</h1>
+  <p>依目標付款月份顯示本人正式綁定身分可見的逐案應付與付款紀錄。</p>
+
+  <section class="panel" aria-labelledby="queryTitle">
+    <h2 id="queryTitle">選擇付款月份</h2>
+    <div class="controls">
+      <div>
+        <label for="monthInput">目標付款月份</label>
+        <input id="monthInput" type="month">
+      </div>
+      <button id="loadPayouts" class="primary" type="button" disabled>查詢薪資明細</button>
+    </div>
+    <div id="status" class="message" hidden></div>
+    <button id="reauthenticate" class="secondary" type="button" hidden>重新登入 LINE</button>
+  </section>
+
+  <section id="results" aria-live="polite"></section>
+</main>
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<script>
+let lineIdToken = "";
+let flowId = "";
+let identityReady = false;
+
+function identityPayload() {
+  return {flow_id: lineIdToken ? "" : flowId, line_id_token: lineIdToken, development_line_user_id: ""};
+}
+
+function showStatus(text, isError = false) {
+  const box = document.getElementById("status");
+  box.textContent = text;
+  box.className = "message" + (isError ? " error" : "");
+  box.hidden = false;
+}
+
+async function responseData(response) {
+  try { return await response.json(); } catch (_) { return {}; }
+}
+
+function responseMessage(data, fallback) {
+  return data.message || data.detail?.message || data.detail?.error?.message || data.error?.message || fallback;
+}
+
+function responseErrorCode(data) {
+  return data.detail?.error?.code || data.detail?.code || data.error?.code || "";
+}
+
+function showReauthenticationFor(data) {
+  document.getElementById("reauthenticate").hidden = !responseErrorCode(data).startsWith("liff_");
+}
+
+function reauthenticateLine() {
+  try { liff.logout(); } catch (_) {}
+  const redirect = new URL("/line-identity", location.origin);
+  redirect.searchParams.set("target", "staff_payout");
+  liff.login({redirectUri: redirect.toString()});
+}
+
+function requirePayoutPage(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value) ||
+      typeof value.staff_name !== "string" || !Number.isInteger(value.year) ||
+      !Number.isInteger(value.month) || !Array.isArray(value.items)) {
+    throw new Error("薪資明細格式錯誤");
+  }
+  value.items.forEach(item => {
+    if (!item || typeof item !== "object" || typeof item.case_no !== "string" ||
+        typeof item.payment_status !== "string" || !Array.isArray(item.transactions)) {
+      throw new Error("薪資逐案明細格式錯誤");
+    }
+  });
+  return value;
+}
+
+function money(value) {
+  const amount = Number(value);
+  return Number.isFinite(amount) ? new Intl.NumberFormat("zh-TW", {style: "currency", currency: "TWD", maximumFractionDigits: 0}).format(amount) : "—";
+}
+
+function statusLabel(status) {
+  return ({pending: "待付款", payable: "待付款", completed: "已完成", paid: "已付款", anomaly: "需工會確認"})[status] || status;
+}
+
+function detailRow(list, label, value) {
+  const term = document.createElement("dt");
+  term.textContent = label;
+  const detail = document.createElement("dd");
+  detail.textContent = value;
+  list.append(term, detail);
+}
+
+function renderPayouts(page) {
+  const results = document.getElementById("results");
+  results.replaceChildren();
+  if (!page.items.length) {
+    showStatus(`${page.staff_name} 在 ${page.year} 年 ${page.month} 月沒有薪資請款明細。`);
+    return;
+  }
+  showStatus(`${page.staff_name}｜${page.year} 年 ${page.month} 月共 ${page.items.length} 筆逐案明細。`);
+  page.items.forEach(item => {
+    const article = document.createElement("article");
+    article.className = "payment";
+    const summary = document.createElement("div");
+    summary.className = "summary";
+    const titleBox = document.createElement("div");
+    const title = document.createElement("h2");
+    title.textContent = `案件 ${item.case_no}`;
+    const badge = document.createElement("span");
+    badge.className = "status";
+    badge.textContent = statusLabel(item.payment_status);
+    titleBox.append(title, badge);
+    const amount = document.createElement("div");
+    amount.className = "amount";
+    amount.textContent = money(item.total_payable);
+    summary.append(titleBox, amount);
+    const details = document.createElement("dl");
+    detailRow(details, "應付金額", money(item.total_payable));
+    detailRow(details, "已付金額", money(item.amount_paid));
+    detailRow(details, "目標付款日", item.due_date || "尚未核定");
+    detailRow(details, "實際付款日", item.paid_at || "尚未付款");
+    article.append(summary, details);
+    if (item.transactions.length) {
+      const transactions = document.createElement("ul");
+      transactions.className = "transactions";
+      item.transactions.forEach(transaction => {
+        const row = document.createElement("li");
+        row.textContent = `${transaction.occurred_at || "日期未登錄"}｜${statusLabel(transaction.transaction_status)}｜${money(transaction.amount)}`;
+        transactions.appendChild(row);
+      });
+      article.appendChild(transactions);
+    }
+    results.appendChild(article);
+  });
+}
+
+async function loadPayouts() {
+  const value = document.getElementById("monthInput").value;
+  if (!value) { showStatus("請先選擇目標付款月份。", true); return; }
+  const [year, month] = value.split("-").map(Number);
+  const button = document.getElementById("loadPayouts");
+  button.disabled = true;
+  document.getElementById("results").replaceChildren();
+  showStatus("薪資明細載入中...");
+  try {
+    const response = await fetch(`/api/v1/line/staff-self-service/payouts?year=${year}&month=${month}`, {
+      method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(identityPayload()),
+    });
+    const result = await responseData(response);
+    if (!response.ok || result.success === false || !result.data) {
+      showStatus(responseMessage(result, "薪資明細載入失敗。"), true);
+      showReauthenticationFor(result);
+      return;
+    }
+    renderPayouts(requirePayoutPage(result.data));
+  } catch (_) {
+    showStatus("薪資明細無法載入或資料格式不正確，請稍後重試。", true);
+  } finally {
+    button.disabled = !identityReady && !flowId;
+  }
+}
+
+async function init() {
+  const now = new Date();
+  document.getElementById("monthInput").value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  flowId = new URLSearchParams(location.search).get("flow_id") || "";
+  try {
+    const result = await fetch("/api/v1/line/identity/runtime-config").then(response => response.json());
+    const config = result.data || {};
+    if (config.liff_id) {
+      await liff.init({liffId: config.liff_id});
+      if (!liff.isLoggedIn()) {
+        if (flowId) identityReady = true;
+        else { reauthenticateLine(); return; }
+      } else {
+        try { lineIdToken = liff.getIDToken() || ""; } catch (_) {}
+      }
+    }
+  } catch (_) {
+    showStatus("LIFF 初始化失敗，請重新開啟頁面。", true);
+    document.getElementById("reauthenticate").hidden = false;
+  }
+  if (!lineIdToken && !flowId) {
+    showStatus("無法取得 LINE 身分，請從 LINE 圖文選單重新開啟。", true);
+    document.getElementById("reauthenticate").hidden = false;
+    return;
+  }
+  identityReady = true;
+  document.getElementById("loadPayouts").disabled = false;
+  await loadPayouts();
+}
+
+document.getElementById("loadPayouts").addEventListener("click", loadPayouts);
+document.getElementById("reauthenticate").addEventListener("click", reauthenticateLine);
+init();
+</script>
+</body>
+</html>

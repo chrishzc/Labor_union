@@ -76,6 +76,7 @@ from api.routes import (
     line_mobile_admin,
     line_media_assets,
     line_identity_management,
+    line_order_change,
     customer_service,
     line_order_groups,
     line_rich_menus,
@@ -263,6 +264,8 @@ app.include_router(line_mobile_admin.page_router)
 app.include_router(customer_service.router)
 app.include_router(customer_service.escalation_router)
 app.include_router(line_identity_management.router)
+app.include_router(line_order_change.router)
+app.include_router(line_order_change.page_router)
 
 # Existing administration API routers.
 app.include_router(orders.router)

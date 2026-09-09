@@ -159,6 +159,8 @@ def test_all_active_line_pages_reject_query_string_user_identity() -> None:
         "register.html",
         "staff_order_search.html",
         "staff_schedule.html",
+        "staff_baby_log.html",
+        "staff_payout.html",
         "mobile_admin.html",
     ):
         source = _source(name)
@@ -281,7 +283,8 @@ def test_mobile_admin_customer_and_review_pagination_use_server_metadata() -> No
 
 def test_mobile_scheduling_review_forwards_owner_query_preview_apply_and_readback() -> None:
     source = _source("mobile_admin.html")
-    assert 'id="tabScheduling"' in source
+    assert 'id="openScheduling"' in source
+    assert 'id="backToWorkQueue"' in source
     assert 'id="schedulingPane"' in source
     assert 'id="loadSchedule"' in source
     assert "/api/v1/line/mobile-admin/scheduling-review/query" in source

@@ -5,14 +5,17 @@ Description: 提供已綁定工會人員的 LIFF 客服、排班與身分審核 
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from typing import Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
+from pymysql.err import OperationalError
 from pydantic import BaseModel, ConfigDict, Field
 
+from api.dependencies.anomaly_registry import get_current_issue_query_application
 from api.dependencies.admin_auth import (
     admin_actor_context,
     has_required_capability,
@@ -24,11 +27,12 @@ from api.dependencies.line_identity import (
     get_line_identity_review_application,
 )
 from api.dependencies.line_runtime import publish_line_wakeup_best_effort
+from api.dependencies.operations_reports import get_weekly_operations_report_query
 from api.dependencies.assignment_plan import (
     AssignmentPlanApplication,
     get_assignment_plan_application,
 )
-from api.error_contracts import typed_http_error
+from api.error_contracts import internal_query_error, typed_http_error
 from api.routes.assignment_plan import (
     AssignmentPlanSegmentInput,
     _call_endpoint as _call_assignment_plan_endpoint,
@@ -63,8 +67,13 @@ from domains.scheduling.assignment_plan import AssignmentPlanIntent
 from infrastructure.line.liff_token_verifier import InvalidLiffTokenError, LiffVerificationUnavailableError
 from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
 from shared_kernel.fingerprints import PreviewFingerprint
+from shared_kernel.clock import SystemBusinessClock
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from subsystems.access.authentication_session import AdminPrincipal
+from subsystems.anomalies.current_issue_query import (
+    CurrentIssueListRequest,
+    CurrentIssueQueryApplication,
+)
 from subsystems.customer_service.application import (
     CustomerServiceApplication,
     CustomerServiceTicketNotFoundError,
@@ -87,6 +96,7 @@ from subsystems.scheduling.assignment_plan_workflow import (
     AssignmentPlanApplyRequest,
     AssignmentPlanPreviewRequest,
 )
+from subsystems.reporting.weekly_operations_report_query import WeeklyOperationsReportQuery
 
 
 router = APIRouter(prefix="/api/v1/line/mobile-admin", tags=["LINE Mobile Admin"])
@@ -193,6 +203,50 @@ class _MobileAdminProfileView(BaseModel):
     role: str = Field(min_length=1, max_length=100)
 
 
+class _MobileCurrentAnomalyListRequest(_LiffAuthRequest):
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+
+    cursor: str | None = Field(default=None, min_length=1, max_length=2048)
+
+
+class _MobileCurrentAnomalySummaryView(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    issue_key: str = Field(pattern=r"^ci_[0-9a-f]{64}$")
+    definition_code: Literal["LINE-006"]
+    severity: Literal["warning", "blocking"]
+    blocking: bool
+    episode_started_at: datetime
+    last_verified_at: datetime
+
+
+class _MobileCurrentAnomalyPageView(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    items: list[_MobileCurrentAnomalySummaryView] = Field(max_length=50)
+    next_cursor: str | None = Field(default=None, max_length=2048)
+
+
+class _MobileOperationsCountsView(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    application_count: int = Field(ge=0)
+    general_eligible_count: int = Field(ge=0)
+    subsidized_eligible_count: int = Field(ge=0)
+    rejection_unpartitioned_count: int = Field(ge=0)
+    order_established_count: int = Field(ge=0)
+    incomplete_count: int = Field(ge=0)
+
+
+class _MobileOperationsSummaryView(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    start_date: date
+    end_date: date
+    generated_at: datetime
+    summary: _MobileOperationsCountsView
+
+
 @page_router.get("/line-mobile-admin", include_in_schema=False)
 def mobile_admin_page():
     return FileResponse(_PAGE, headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
@@ -202,6 +256,121 @@ def mobile_admin_page():
 def profile(payload: _LiffAuthRequest):
     admin = _linked_admin(payload.line_id_token)
     return BaseResponse(data=_admin_view(admin))
+
+
+@router.post(
+    "/current-anomalies",
+    response_model=BaseResponse[_MobileCurrentAnomalyPageView],
+)
+def current_anomalies(
+    payload: _MobileCurrentAnomalyListRequest,
+    application: CurrentIssueQueryApplication = Depends(
+        get_current_issue_query_application
+    ),
+):
+    _mobile_admin_actor(payload.line_id_token)
+    try:
+        page = application.query(
+            CurrentIssueListRequest(
+                definition_code="LINE-006",
+                limit=50,
+                cursor=payload.cursor,
+            )
+        )
+    except ValueError as error:
+        raise typed_http_error(
+            422,
+            "validation",
+            "mobile_current_anomaly_query_invalid",
+            "目前異常清單的查詢條件已失效，請重新整理。",
+            "line-mobile-admin:current-anomalies",
+        ) from error
+    except OperationalError as error:
+        raise typed_http_error(
+            503,
+            "unavailable",
+            "mobile_current_anomaly_query_unavailable",
+            "目前異常清單暫時無法查詢。",
+            "line-mobile-admin:current-anomalies",
+            retryable=True,
+        ) from error
+    except Exception as error:
+        raise internal_query_error(
+            "mobile_current_anomaly_query_internal_error",
+            "目前異常清單查詢失敗。",
+            "line-mobile-admin:current-anomalies",
+        ) from error
+    return BaseResponse(
+        data={
+            "items": [
+                {
+                    "issue_key": item.issue_key,
+                    "definition_code": item.definition_code,
+                    "severity": item.severity,
+                    "blocking": item.blocking,
+                    "episode_started_at": item.episode_started_at,
+                    "last_verified_at": item.last_verified_at,
+                }
+                for item in page.items
+                if item.definition_code == "LINE-006"
+            ],
+            "next_cursor": page.next_cursor,
+        },
+        message="成功取得目前通知異常",
+    )
+
+
+@router.post(
+    "/operations-summary",
+    response_model=BaseResponse[_MobileOperationsSummaryView],
+)
+def operations_summary(
+    payload: _LiffAuthRequest,
+    query: WeeklyOperationsReportQuery = Depends(get_weekly_operations_report_query),
+):
+    _mobile_admin_actor(payload.line_id_token)
+    start_date, end_date = _current_business_week(SystemBusinessClock().today())
+    try:
+        report = query.query(start_date, end_date)
+    except ValueError as error:
+        raise typed_http_error(
+            422,
+            "validation",
+            "mobile_operations_summary_range_invalid",
+            "本週營運摘要的期間無效。",
+            "line-mobile-admin:operations-summary",
+        ) from error
+    except OperationalError as error:
+        raise typed_http_error(
+            503,
+            "unavailable",
+            "mobile_operations_summary_unavailable",
+            "營運摘要暫時無法查詢。",
+            "line-mobile-admin:operations-summary",
+            retryable=True,
+        ) from error
+    except Exception as error:
+        raise internal_query_error(
+            "mobile_operations_summary_internal_error",
+            "營運摘要查詢失敗。",
+            "line-mobile-admin:operations-summary",
+        ) from error
+    return BaseResponse(
+        data={
+            "start_date": report.start_date,
+            "end_date": report.end_date,
+            "generated_at": report.generated_at,
+            "summary": {
+                "application_count": report.summary.application_count,
+                "general_eligible_count": report.summary.general_eligible_count,
+                "subsidized_eligible_count": report.summary.subsidized_eligible_count,
+                "rejection_unpartitioned_count": report.summary.rejection_unpartitioned_count,
+                "order_established_count": report.summary.order_established_count,
+                "incomplete_count": report.summary.incomplete_count,
+            },
+        },
+        message="成功取得本週營運摘要",
+    )
 
 
 @router.post("/customer-service/summary", response_model=BaseResponse[CustomerServiceSummaryView])
@@ -671,6 +840,10 @@ def _admin_view(admin) -> dict:
         "display_name": admin.display_name,
         "role": admin.role,
     }
+
+
+def _current_business_week(today: date) -> tuple[date, date]:
+    return today - timedelta(days=today.weekday()), today
 
 
 def _review_view(snapshot, *, outcome=None, receipt_identity=None) -> dict:

@@ -357,8 +357,18 @@ class LineIdentityManagementApplication:
         _require_reason(reason)
         with self._unit_of_work_factory() as unit_of_work:
             request = unit_of_work.identity_management.get_request(request_id, lock=True)
-            if request.status is not LineIdentityRevocationStatus.MENU_RESET_FAILED:
+            if request.status not in {
+                LineIdentityRevocationStatus.MENU_RESET_FAILED,
+                LineIdentityRevocationStatus.MANUAL_COMPLETED,
+            }:
                 raise RuntimeError("line_identity_revocation_not_retryable")
+            publication = unit_of_work.identity_management.default_menu_publication()
+            if publication is None:
+                raise RuntimeError("line_identity_default_menu_not_published")
+            request = unit_of_work.identity_management.retarget_menu(
+                request_id,
+                publication,
+            )
             unit_of_work.outbox.append(_menu_reset_intent(request, request.attempt_count + 1))
             unit_of_work.audit.append(_audit("retry", actor.actor_id, request))
             unit_of_work.commit()
@@ -376,6 +386,15 @@ class LineIdentityManagementApplication:
         actor_id = manual_actor.actor_id if manual else "system:line-worker"
         with self._unit_of_work_factory() as unit_of_work:
             request = unit_of_work.identity_management.get_request(request_id, lock=True)
+            if (
+                not manual
+                and request.status is LineIdentityRevocationStatus.MANUAL_COMPLETED
+            ):
+                unit_of_work.identity_management.complete_manual_menu_repair(request_id)
+                unit_of_work.audit.append(_audit("menu_repaired", actor_id, request))
+                result = unit_of_work.identity_management.get_request(request_id)
+                unit_of_work.commit()
+                return result
             if request.status in _COMPLETED_STATUSES:
                 unit_of_work.commit()
                 return request

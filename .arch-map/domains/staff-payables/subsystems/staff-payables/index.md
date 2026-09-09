@@ -20,6 +20,7 @@
 - `payout-remediation-presentation` — 逾期應付款核銷的既有安全 workflow 與 business-first React projection; path: `modules/payout-remediation-presentation.md`
 - `overpayment-recovery-presentation` — 月嫂超額付款追償的既有安全 workflow 與 business-first React projection; path: `modules/overpayment-recovery-presentation.md`
 - `overpayment-recovery` — Staff Payables owner overpayment collection／adjustment；path: `modules/overpayment-recovery.md`
+- `staff-payout-self-service-query` — canonical obligation／payout-ledger read model for verified staff self-service；path: `modules/staff-payout-self-service-query.md`
 
 ## Verification routing
 - default_boundary: Subsystem

@@ -97,12 +97,20 @@ class LineIdentityRevocationWorker:
     ) -> None:
         terminal = not retryable or item.attempt_count + 1 >= item.maximum_attempts
         with self._unit_of_work_factory() as unit_of_work:
-            unit_of_work.identity_management.mark_failure(
-                request_id,
-                code,
-                message,
-                terminal=terminal,
-            )
+            request = unit_of_work.identity_management.get_request(request_id, lock=True)
+            if request.status.value == "manual_completed":
+                unit_of_work.identity_management.mark_manual_menu_repair_failure(
+                    request_id,
+                    code,
+                    message,
+                )
+            else:
+                unit_of_work.identity_management.mark_failure(
+                    request_id,
+                    code,
+                    message,
+                    terminal=terminal,
+                )
             unit_of_work.outbox.complete(
                 CompleteLineOutboxCommand(
                     item,

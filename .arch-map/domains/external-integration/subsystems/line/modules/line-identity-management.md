@@ -11,11 +11,15 @@
 - primary:
   - `domains/line/identity_binding.py`
   - `subsystems/line/identity_application.py`
+  - `subsystems/line/webhook_identity_handlers.py` — webhook identity dispatch 與未注入 canonical Service Help application 時的 bounded guidance fallback。
   - `subsystems/line/identity_management_application.py`
   - `subsystems/line/identity_management_contracts.py`
   - `subsystems/line/staff_retirement_effect.py`
+  - `subsystems/line/identity_revocation_worker.py`
   - `infrastructure/mysql/line_identity_review_repository.py`
   - `infrastructure/mysql/line_identity_management_repository.py`
+  - `infrastructure/mysql/line_identity_owner_adapters.py` — canonical owner-projection adapters, including active role-scoped admin binding readback for staff LIFF.
+  - `infrastructure/mysql/customer_service_repository.py` — shared adapter file containing the canonical staff-subject self-service reader.
   - `subsystems/line/terminal_closure_contracts.py`
   - `subsystems/line/terminal_closure_application.py`
   - `subsystems/line/terminal_closure_worker.py` — canonical LINE worker bridge for the read-only Orders handoff.

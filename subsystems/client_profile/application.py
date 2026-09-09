@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Callable, Mapping, Protocol
 
 from domains.clients.profile import (
+    CLIENT_PROFILE_APPLICANT_FIELDS,
     ClientProfileValidationError,
     requested_before_values,
     validate_changes,
@@ -63,7 +64,11 @@ class ClientProfileApplication:
         changes: Mapping[str, object],
         expected_version: ExpectedVersion,
     ) -> ClientProfilePreview:
-        normalized = validate_changes(changes, city_allowlist=self._city_allowlist)
+        normalized = validate_changes(
+            changes,
+            city_allowlist=self._city_allowlist,
+            allowed_fields=CLIENT_PROFILE_APPLICANT_FIELDS,
+        )
         with self._unit_of_work_factory() as unit_of_work:
             _read_binding(unit_of_work, applicant_identity, client_id)
             profile = _require_profile(unit_of_work.client_profiles.load_profile(client_id))
@@ -80,7 +85,11 @@ class ClientProfileApplication:
         idempotency_key: IdempotencyKey,
         correlation_id: CorrelationId,
     ) -> ClientProfileApplicantReceipt:
-        normalized = validate_changes(changes, city_allowlist=self._city_allowlist)
+        normalized = validate_changes(
+            changes,
+            city_allowlist=self._city_allowlist,
+            allowed_fields=CLIENT_PROFILE_APPLICANT_FIELDS,
+        )
         command_fingerprint = _command_fingerprint(
             "client_profile_change/v1", applicant_identity, normalized, expected_version,
             reason, preview_fingerprint,

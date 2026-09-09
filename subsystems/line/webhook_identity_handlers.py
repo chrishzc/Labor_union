@@ -22,7 +22,7 @@ from subsystems.line.identity_contracts import OpenLineIdentityFlowCommand
 _STAFF_COMMAND = "我是月嫂"
 _ADMIN_COMMANDS = {"綁定system_admin", "綁定工會帳號", "綁定後台帳號"}
 _CUSTOMER_COMMANDS = {"服務登記", "綁定", "查詢訂單", "綁定訂單", "訂單查詢"}
-_SERVICE_HELP_COMMAND = "服務說明"
+_SERVICE_HELP_COMMANDS = {"服務與問答", "服務說明", "常見問答", "問答", "FAQ"}
 _SERVICE_HELP_CATEGORIES = {
     "服務流程": (
         "服務流程如下：\n\n"
@@ -46,7 +46,6 @@ _SERVICE_HELP_CATEGORIES = {
         "若要修改已送出的登記資料，請直接回覆要修改的項目與正確內容。"
         "工會人員核對後會人工補登；此對話不會直接變更正式資料。"
     ),
-    "月嫂身分認證": "若您是月嫂本人，請點選下方「我是月嫂」或直接回覆「我是月嫂」，系統會送出身分確認申請。",
     "其他問題": (
         "請直接輸入您的問題內容。若已經有案件編號，也請一起提供，方便工會人員協助查詢。"
     ),
@@ -56,7 +55,6 @@ _SERVICE_HELP_CATEGORY_KEYS = {
     "收費與補助": "payment-subsidy",
     "查詢服務進度": "service-progress",
     "修改登記資料": "profile-update",
-    "月嫂身分認證": "staff-verification",
     "其他問題": "other",
 }
 
@@ -287,7 +285,7 @@ def _handle_service_help_text(inbox, unit_of_work, line_user_id, text, scheduled
     normalized = text.strip()
     event_identity = inbox.event.event_id.value
     correlation_id = CorrelationId(f"line-event:{event_identity}")
-    if normalized == _SERVICE_HELP_COMMAND:
+    if normalized in _SERVICE_HELP_COMMANDS:
         unit_of_work.delivery_tasks.enqueue(
             _service_help_menu_delivery(
                 line_user_id,

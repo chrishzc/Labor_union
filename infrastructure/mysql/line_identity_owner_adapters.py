@@ -262,7 +262,7 @@ _ADMIN_LINE_COLLISION_SQL = (
 _ADMIN_BIND_SQL = "UPDATE admin_users SET linked_line_user_id=%s WHERE id=%s"
 _ADMIN_LINKED_SQL = (
     "SELECT a.id,a.display_name,a.role FROM admin_users a "
-    "JOIN line_identity_bindings b ON "
+    "JOIN line_identity_role_bindings b ON "
     "CONVERT(b.line_user_id USING utf8mb4) COLLATE utf8mb4_unicode_ci="
     "CONVERT(a.linked_line_user_id USING utf8mb4) COLLATE utf8mb4_unicode_ci "
     "AND b.subject_type='admin' AND "

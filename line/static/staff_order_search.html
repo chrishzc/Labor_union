@@ -31,11 +31,11 @@
 <body>
 <main>
   <h1>訂單查詢</h1>
-  <p>請輸入一般用戶的案件編號或客戶姓名，系統會顯示您已被指派案件的服務登記內容。</p>
+  <p>系統會顯示您已配對的訂單；也可輸入案件編號或客戶姓名縮小結果範圍。</p>
   <section class="panel">
-    <label for="keyword">案件編號或客戶姓名</label>
+    <label for="keyword">篩選案件編號或客戶姓名（選填）</label>
     <input id="keyword" autocomplete="off" placeholder="例如：115000035 或 王小美">
-    <button id="searchBtn">查詢訂單資訊</button>
+    <button id="searchBtn">篩選訂單</button>
     <div id="status" class="message" style="display:none;"></div>
     <button id="reauthenticate" class="secondary" type="button" hidden>重新登入 LINE</button>
   </section>
@@ -168,16 +168,12 @@ async function init() {
     showStatus("LIFF 初始化失敗，請重新開啟頁面。", true);
   } finally {
     searchButton.disabled = false;
-    searchButton.textContent = "查詢訂單資訊";
+    searchButton.textContent = "篩選訂單";
+    if (identityReady || flowId || lineIdToken) await loadOrders();
   }
 }
 
-document.getElementById("searchBtn").addEventListener("click", async () => {
-  const keyword = document.getElementById("keyword").value.trim();
-  if (!keyword) {
-    showStatus("請先輸入案件編號或客戶姓名。", true);
-    return;
-  }
+async function loadOrders(keyword = "") {
   if (!identityReady && !flowId && !lineIdToken) {
     showStatus("LINE 身分尚未載入完成，請稍候再查詢；若仍失敗，請關閉此頁後從 LINE 圖文選單重新開啟。", true);
     return;
@@ -201,6 +197,11 @@ document.getElementById("searchBtn").addEventListener("click", async () => {
     document.getElementById("results").replaceChildren();
     showStatus("訂單查詢結果格式錯誤，請聯絡工會人員。", true);
   }
+}
+
+document.getElementById("searchBtn").addEventListener("click", async () => {
+  const keyword = document.getElementById("keyword").value.trim();
+  await loadOrders(keyword);
 });
 
 document.getElementById("reauthenticate").addEventListener("click", reauthenticateLine);
