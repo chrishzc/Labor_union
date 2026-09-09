@@ -1,7 +1,7 @@
 # 功能開發計畫索引
 
 狀態：`current-plans-operational-manual-and-source-review`  
-更新日期：2026-09-02
+更新日期：2026-09-09
 
 本目錄同時保存三類仍有用途的文件：可執行操作／測試手冊、尚未完成的 blocked／deferred計畫，以及尚待逐條搬移的 `source-review`。它們都不取代 `document/架構重整/01_規格基線/` 的正式 owner與產品語意，也不自行授權production mutation、provider外送、部署、付款、credential或資料庫操作。
 
@@ -15,7 +15,7 @@
 |---|---|---|
 | [Cloud Run＋單一Cloud VPN部署測試計畫](Cloud_Run_單一Cloud_VPN_部署測試計畫.md) | `proposed`，保存隔離環境、故障注入、go/no-go與rollback測試設計。 | 指定隔離cloud project／NAS DB、operator、budget、rollback與故障注入範圍；再依當時官方能力更新。 |
 | [Cloud Run Durable Job Worker Supervision](Durable_Job_Worker_Supervision_延後開發計畫.md) | `proposed / deferred`，保存worker pool、child supervision、lease recovery與outage acceptance。 | 指定隔離cloud test project、OIDC、operator、故障注入與雲端驗收gate。 |
-| [LINE QA客服知識契約收斂](LINE_QA客服知識契約收斂計畫.md) | `blocked / approved-for-read-only-inspection`；workbook只作review input。 | loader可用，且每題owner／category／source／approved answer／automation boundary完成人工review。 |
+| [LINE QA客服知識契約收斂](LINE_QA客服知識契約收斂計畫.md) | `blocked implementation-gap-tracker`；JSONL／XLSX只作review input與migration evidence，legacy `enabled` 不代表正式publication。 | 完成逐題owner／reviewer／source／audience／approved wording／automation boundary review，落地versioned `published\|retired` catalog、conflict queue、closed-candidate runtime與API／React readback驗收。 |
 
 Deferred或blocked不等於retired。這三份文件在其material gate完成、工作被正式successor承接或人工明確取消前，不得只因已有高階正式規格而刪除。
 
