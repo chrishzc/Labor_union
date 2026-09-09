@@ -361,6 +361,8 @@ def _validate_payout_selection(selection) -> None:
         raise ValueError("invalid_staff_payout_intent")
     if selection.difference_mode is not None and not isinstance(selection.difference_mode, StaffPayoutDifferenceMode):
         raise TypeError("staff payout difference mode is invalid")
+    if selection.difference_mode is StaffPayoutDifferenceMode.UNDERPAYMENT:
+        raise ValueError("invalid_staff_payout_intent")
 
 
 def _validate_reopen_selection(selection) -> None:
