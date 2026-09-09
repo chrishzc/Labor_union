@@ -296,6 +296,8 @@ def build_staff_payout_difference_candidate(
 ) -> StaffPayoutCandidate:
     if not isinstance(mode, StaffPayoutDifferenceMode):
         raise TypeError("staff payout difference mode is invalid")
+    if mode is not StaffPayoutDifferenceMode.OVERPAYMENT:
+        raise ValueError("staff_payout_difference_mode_invalid")
     staff_id = _validate_difference_inputs(bank_facts, payable_facts, blocking_anomalies)
     _validate_primary_account_owners(bank_facts, bank_accounts, staff_id, require_primary_account_owner)
     ordered_banks = tuple(sorted(bank_facts, key=lambda item: item.identity))
@@ -361,17 +363,14 @@ def _build_difference_payout(staff_id, ordered_banks, ordered_payables, mode):
     events = tuple(_payout_event(bank_fact) for bank_fact in ordered_banks)
     links = _payout_links(events, allocations)
     recovery = _overpayment_recovery(staff_id, ordered_banks, ordered_payables, bank_total, remaining_total, mode)
-    resulting_status = StaffPayableStatus.PARTIALLY_PAID if mode is StaffPayoutDifferenceMode.UNDERPAYMENT else StaffPayableStatus.RECOVERY_REQUIRED
     return StaffPayoutCandidate(
         staff_id, bank_total, remaining_total, allocations,
         fingerprint_payload(_candidate_payload(staff_id, allocations, events, mode, recovery)),
-        events, links, resulting_status, mode, recovery,
+        events, links, StaffPayableStatus.RECOVERY_REQUIRED, mode, recovery,
     )
 
 
 def _validate_difference_mode(mode, bank_total, remaining_total) -> None:
-    if mode is StaffPayoutDifferenceMode.UNDERPAYMENT and bank_total.amount < remaining_total.amount:
-        return
     if mode is StaffPayoutDifferenceMode.OVERPAYMENT and bank_total.amount > remaining_total.amount:
         return
     raise ValueError("staff_payout_difference_mode_invalid")
@@ -434,7 +433,7 @@ def _validate_difference_inputs(bank_facts, payable_facts, blocking_anomalies) -
     staff_ids = {*(item.staff_id for item in bank_facts), *(item.staff_id for item in payable_facts)}
     if len(staff_ids) != 1:
         raise ValueError("cross_staff_allocation_forbidden")
-    if any(project_staff_payable(item).status not in (StaffPayableStatus.PAYABLE, StaffPayableStatus.PARTIALLY_PAID) for item in payable_facts):
+    if any(project_staff_payable(item).status is not StaffPayableStatus.PAYABLE for item in payable_facts):
         raise ValueError("staff_obligation_not_exactly_settled")
     return next(iter(staff_ids))
 
@@ -568,7 +567,7 @@ def _payable_status(amount_due: MoneyNTD, net_paid: MoneyNTD):
         return StaffPayableStatus.PAYABLE
     if net_paid == amount_due:
         return StaffPayableStatus.COMPLETED
-    return StaffPayableStatus.PARTIALLY_PAID
+    return StaffPayableStatus.ANOMALY
 
 
 def _signed_amount(event: StaffPayoutEvent) -> int:
