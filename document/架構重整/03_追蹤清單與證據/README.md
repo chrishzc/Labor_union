@@ -8,8 +8,7 @@
 
 | 文件 | 用途 |
 |---|---|
-| [Task 96 terminal register](../02_決策與退役執行記錄/96_Current_剩餘代辦任務總表.md) | Task 96已達repository-local acceptance；verified LIFF／provider、NAS、production／deployment與1019 preserve-upgrade仍維持明示`not_run`／deferred。 |
-| [正式規格索引](../01_規格基線/15_正式規格索引與裁決總表.md) | current正式規格、owner與裁決入口。 |
+| [正式規格索引](../01_規格基線/15_正式規格索引與裁決總表.md) | current正式規格、owner、Task 96／97 terminal boundary與裁決入口；Task 96 excluded／deferred項目只能由新的current successor重新啟動。 |
 | [Task 97 repository-local closeout receipt](evidence/task97_repository_local_closeout_receipt_a48caa8.md) | 2026-08-30 Task 97 repository-local完成的歷史 aggregate receipt；只能證明其綁定 source revision 的結案事實，不得作為後續 source revision 或新增 writer 的持續核准 Authority。production、DB engine與external acceptance仍不得外推。 |
 | [HCAT／RPRE aggregate receipt](evidence/2026-08-28_task96_hcat_rpre_aggregate_final_receipt.md) | 歷史分類／remediation projection的整合證據與未完成gate。 |
 | [LDU 1003→1012 aggregate receipt](evidence/2026-08-28_task96_ldu_1003_to_1012_final_receipt.md) | 限定於1003→1012的歷史release證據；不得外推為current preserve-upgrade PASS。 |
