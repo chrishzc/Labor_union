@@ -4,7 +4,7 @@
 
 - 盤點日期：2026-09-09
 - 範圍：`document/` 下目前存在的所有非 `.md` 檔案。
-- 數量：23
+- 數量：22
 - 本索引只負責附件定位、完整性與證據分類；正式規格、current register 與 owning Domain 契約優先於附件內容。
 - 完整性欄改用 repository current tree 的 Git blob SHA；blob identity 改變即需重新盤點該列。
 
@@ -28,13 +28,12 @@
 | `document/資料庫、資料處理/2.staff.xlsx` | `8881fee0fc099b264b10ef89f2c63ad6d55552ac` | `format-fixture`；Staff import |
 | `document/資料庫、資料處理/3.client_beclass.xlsx` | `5c8db9e9de539cbd0af13ea35e75af91199b2e64` | `format-fixture`；Client BeClass import |
 | `document/資料庫、資料處理/假資料_模板.xlsx` | `c11974ed5f845b10d45cc4b02a86ceca17f5b21c` | `test-fixture`；不具 production Authority |
-| `document/資料庫、資料處理/假資料_歷史訂單.xlsx` | `c8bae7774558defdbf5bb8fe16c114efc465826b` | `test-fixture`；不具 production Authority |
+| `document/資料庫、資料處理/假資料_歷史訂單.xlsx` | `c8bae7774558defb5bb8fe16c114efc465826b` | `test-fixture`；不具 production Authority |
 | `document/資料庫、資料處理/台新範例對帳單.xlsx` | `ea3798ce6cce6f2158e26f0eb2003d4372c7cccb` | `format-fixture`；Finance Import |
 | `document/資料庫、資料處理/永豐範例對帳單.xlsx` | `8137aa76df1040819150ba3577d8d6da9b6da461` | `format-fixture`；Finance Import |
 | `document/資料庫、資料處理/歷史對帳單.xlsx` | `0aa035f1990d1d863e47ed89794bc68eef6a850b` | `format-fixture`；Historical Reprocess／Finance Import lineage |
 | `document/資料庫、資料處理/訂單系統.csv` | `bcdf840f24a785a5183ff36ea3e7b8a7257e5292` | `data-lineage-evidence`；Case Import／Orders mapping |
 | `document/資料庫、資料處理/帳務.xlsx` | `17a89a4d253915196f3d0318eb3dd15f2cee0d7f` | `historical-sensitive`；不覆蓋 Client Finance／Staff Payables SSOT |
-| `document/雲端部署/比較圖/Cloud_Run_連線方案比較圖.svg` | `f04f0371b4bbac301bfd86b0e0736d8823167abc` | `design-evidence`；不構成 cloud deployment 授權 |
 
 ## 規則
 
