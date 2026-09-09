@@ -1,6 +1,6 @@
 """
 File: test_hcm_import_warning_occurrences.py
-Description: 驗證 HCM 匯入門檻、通用欄位警示與未知 issue fail-closed。
+Description: 驗證 HCM Current 匯入門檻、欄位警示與未知 issue fail-closed。
 """
 
 from __future__ import annotations

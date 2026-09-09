@@ -11,9 +11,13 @@
 - primary:
   - `subsystems/case_import/hcm_workbook_import.py`
   - `scripts/imports/import_client_hcm.py`
+  - `domains/case_import/hcm_import_review.py`
 - entrypoints:
   - `api/routes/hcm_import.py`
   - `api/dependencies/hcm_import.py`
+  - `api/schemas/hcm_import.py`
+  - `ui_react/src/api/case_import/hcm_workbook_schemas.ts`
+  - `ui_react/src/api/case_import/hcm_resubmission_client.ts`
 
 ## Dependencies
 - outbound: `orders` — HCM reconciliation 只透過 Case Import typed boundary 補入已授權 Orders facts。

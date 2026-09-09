@@ -6,6 +6,8 @@ test_root: ui_react/src/tests/current_anomalies_page.test.tsx
 test_root: ui_react/src/tests/line_notification_manual_replay_client.test.ts
 test_root: ui_react/src/tests/anomaly_query_adapter.test.ts
 test_root: ui_react/src/tests/fixtures/anomalies/anomaly_query_contract_fixtures.ts
+test_root: tests/test_import_warning_tracking.py
+test_root: tests/test_import_warning_tracking_api.py
 integration_root: ui_react/src/tests/anomalies_entry_cutover.test.tsx
 
 # Owned verification

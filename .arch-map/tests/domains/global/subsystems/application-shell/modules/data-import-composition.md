@@ -7,3 +7,8 @@ integration_root: ui_react/src/tests/case_workbook_adapters.test.ts
 integration_root: ui_react/src/tests/data_import_case_workbooks_preview_flow.test.tsx
 integration_root: ui_react/src/tests/data_import_entry_cutover.test.tsx
 integration_root: ui_react/src/tests/data_import_hcm_result_page.test.tsx
+integration_root: ui_react/src/tests/data_import_no_fake_mutation.test.tsx
+integration_root: ui_react/src/tests/data_import_hcm_preview_flow.test.tsx
+integration_root: ui_react/src/tests/hcm_workbook_client.test.ts
+integration_root: ui_react/src/tests/fixtures/hcm_import_result_fixtures.ts
+integration_root: ui_react/src/tests/historical_service_accounting_entry.test.tsx
