@@ -91,7 +91,7 @@ External Application Load Balancer / Cloud Armor / IAP
 
 ### Wave 1：隔離與身分負向測試
 
-- 驗證只有 API revision 能取得 DB secret並通過 mTLS；其餘四類 runtime 的 secret mount、DB route、
+- 驗證只有 API revision 能取得 DB secret 並通過 mTLS；其餘四類 runtime 的 secret mount、DB route、
   TCP 3306 與 direct DB client 皆被拒絕。
 - 驗證 IAP group 外、未驗證 public caller、錯 OIDC issuer／audience／caller、過期 token 與 local
   shared key 均被拒絕，且 response／log 不洩漏 credential。
