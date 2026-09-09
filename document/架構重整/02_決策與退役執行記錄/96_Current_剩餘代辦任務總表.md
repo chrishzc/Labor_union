@@ -39,7 +39,7 @@ Scheduling／Contract／Payroll／Staff Payables的real-MySQL positive lane均�
 | Historical settlement／import | `passed` | canonical owner tests與既有 real-MySQL acceptance涵蓋 Query→Preview→Apply→replay→readback；Historical Import same-workbook self-stale 已修正為 fresh lock／typed conflict。 |
 | React | `passed` | 185 test files／1202 tests；production build passed。 |
 | Python repository | `passed with declared exclusions` | canonical/focused owners passed；全量一次收集到 5059 passed／145 skipped，剩餘是需要另一組 auth profile、獨立 MySQL credentials 或 clean-commit-bound Task97 checks，已各自以正確 profile／focused runner驗證。 |
-| Governance／architecture | `passed` | entry queue 724、review-required 74；Task97 inventory 88；formal baseline valid。commit-bound dispositions與GitHub Actions run `33501045338`均通過。 |
+| Governance／architecture | `passed` | repository-local architecture closure 與 GitHub Actions run `33501045338` 於 Task 96 closeout 時通過；Task97 inventory、formal baseline 與 commit-bound dispositions 僅屬當時 closure evidence，已退休，不作 current approval source。 |
 
 ## 3. Task 96 closure matrix
 
