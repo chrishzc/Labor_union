@@ -82,6 +82,21 @@ def test_hcm_unique_existing_client_candidate_has_a_distinct_link_warning() -> N
     assert (warning.logical_code, warning.field_path) == ("HCM-LINK-001", "$client_link")
 
 
+def test_hcm_bootstrap_failure_projects_system_setup_guidance() -> None:
+    root = build_hcm_import_review_root(
+        source_content_digest="a" * 64,
+        source_sheet="HCM",
+        source_row=6,
+        case_identity="HCM-0006",
+        issue_codes=("hcm_case_import:case_import_bootstrap_blocked",),
+        evidence_snapshot={"has_case_identity": True},
+    )
+
+    warning = build_hcm_warning_occurrences(root)[0]
+
+    assert (warning.logical_code, warning.field_path) == ("HCM-SYSTEM-001", "$case_setup")
+
+
 def test_hcm_unknown_issue_fails_closed_without_exposing_raw_issue() -> None:
     raw_issue = "future_hcm_state:完整姓名不得寫入錯誤"
     root = build_hcm_import_review_root(
