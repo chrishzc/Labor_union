@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CurrentAnomaliesPage } from '../pages/CurrentAnomaliesPage';
 import { currentAnomalyQueryClient } from '../api/anomalies/current_anomaly_query_client';
 import { anomalyDetailClient } from '../api/anomalies/anomaly_detail_client';
+import { anomalyQueryClient } from '../api/anomalies/anomaly_query_client';
 import { lineNotificationTimelineClient } from '../api/line/notification_timeline_client';
 import { lineNotificationManualReplayClient } from '../api/line/notification_manual_replay_client';
 
@@ -11,6 +12,7 @@ const issueKey = `ci_${'b'.repeat(64)}`;
 describe('CurrentAnomaliesPage', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.spyOn(anomalyQueryClient, 'queryImportWarningTasks').mockResolvedValue([]);
     vi.spyOn(currentAnomalyQueryClient, 'queryCurrentAnomalies').mockResolvedValue({
       items: [{
         issue_key: issueKey,
@@ -115,11 +117,58 @@ describe('CurrentAnomaliesPage', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('已建立重新發送來源 201');
   });
 
+  it('shows active HCM reviews and opens the controlled correction in this page', async () => {
+    vi.mocked(anomalyQueryClient.queryImportWarningTasks).mockResolvedValueOnce([{
+      occurrence_identity: 'warning-phone',
+      owning_lane: 'hcm',
+      logical_code: 'HCM-FIELD-002',
+      field_path: '行動電話',
+      subject: '115000002',
+      issue_codes: ['hcm_field_invalid:行動電話'],
+      tracking_status: 'open',
+      tracking_version: 1,
+      evidence_reference: null,
+      display_message: '行動電話格式錯誤',
+      navigation_action: 'hcm_import_center',
+    }]);
+    vi.spyOn(anomalyQueryClient, 'queryImportWarningReferral').mockResolvedValue({
+      occurrence_identity: 'warning-phone', expected_version: 1, owning_lane: 'hcm',
+      logical_code: 'HCM-FIELD-002', field_path: '行動電話', subject: '115000002',
+      display_message: '行動電話格式錯誤', navigation_action: 'hcm_import_center',
+      action_kind: 'owner_preview_apply', target_command: 'preview_hcm_resubmission', review_identity: 'review-2',
+    });
+
+    render(<CurrentAnomaliesPage />);
+    expect(await screen.findByText('案件 115000002')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '檢查並提交修正' }));
+
+    expect(await screen.findByText('修正案件 115000002')).toBeInTheDocument();
+    expect(anomalyQueryClient.queryImportWarningReferral).toHaveBeenCalledWith({
+      occurrenceIdentity: 'warning-phone', expectedVersion: 1,
+    });
+  });
+
   it('maps unexpected list failures to a closed business error', async () => {
     vi.mocked(currentAnomalyQueryClient.queryCurrentAnomalies).mockRejectedValueOnce(new Error('raw database host detail'));
     render(<CurrentAnomaliesPage />);
 
     expect(await screen.findByRole('alert')).toHaveTextContent('目前異常資料暫時無法使用，請稍後重試。');
     expect(screen.queryByText(/raw database host detail/)).not.toBeInTheDocument();
+  });
+
+  it('keeps HCM review usable when the independent LINE anomaly query fails', async () => {
+    vi.mocked(currentAnomalyQueryClient.queryCurrentAnomalies).mockRejectedValueOnce(new Error('LINE projection unavailable'));
+    vi.mocked(anomalyQueryClient.queryImportWarningTasks).mockResolvedValueOnce([{
+      occurrence_identity: 'warning-system', owning_lane: 'hcm', logical_code: 'HCM-SYSTEM-001',
+      field_path: '$case_setup', subject: '115000150', issue_codes: ['case_import_bootstrap_blocked'],
+      tracking_status: 'open', tracking_version: 1, evidence_reference: null,
+      display_message: '案件初始設定尚未完成', navigation_action: 'hcm_import_center',
+    }]);
+
+    render(<CurrentAnomaliesPage />);
+
+    expect(await screen.findByText('案件 115000150')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '前往負責頁面處理' })).toBeEnabled();
+    expect(screen.getByRole('alert')).toHaveTextContent('目前異常資料暫時無法使用');
   });
 });

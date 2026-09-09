@@ -3,6 +3,46 @@
  * Description: 異常頁面列表、詳情抽屜與匯入警示的響應式純樣式。
  */
 
+.anomalies-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  color: #1e1b19;
+}
+
+.anomalies-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 22px 24px;
+  border: 1px solid #f2e2dc;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #fff 0%, #fff8f6 100%);
+  box-shadow: 0 4px 16px rgba(74, 69, 67, 0.05);
+}
+
+.anomalies-page-header h1 { margin: 0; font-size: 1.65rem; }
+.anomalies-page-header p { margin: 8px 0 0; color: #795d43; }
+.anomalies-section { min-width: 0; }
+
+.anomalies-primary-action,
+.anomalies-action-btn {
+  border: 0;
+  border-radius: 9px;
+  background: #ea580c;
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.anomalies-primary-action { padding: 10px 16px; white-space: nowrap; }
+.anomalies-action-btn { align-self: flex-start; padding: 9px 14px; }
+.anomalies-primary-action:hover:not(:disabled),
+.anomalies-action-btn:hover:not(:disabled) { background: #c2410c; }
+.anomalies-primary-action:disabled,
+.anomalies-action-btn:disabled { cursor: not-allowed; opacity: 0.55; }
+
 .anomalies-kpi-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -98,6 +138,10 @@
   flex-direction: column;
   gap: 12px;
   transition: transform 0.15s ease, box-shadow 0.15s ease;
+  width: 100%;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 .anomaly-card:hover {
@@ -228,6 +272,21 @@
   flex-direction: column;
   gap: 10px;
 }
+
+.import-warning-card > p { margin: 0; color: #57423b; line-height: 1.55; }
+
+.anomaly-action {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 16px;
+  border: 1px solid #fed9b8;
+  border-radius: 10px;
+  background: #fffaf7;
+}
+
+.anomaly-action > p { margin: 0; color: #57423b; }
 
 .import-warning-header {
   display: flex;
@@ -479,6 +538,8 @@
 }
 
 @media (max-width: 640px) {
+  .anomalies-page-header { flex-direction: column; padding: 18px; }
+  .anomalies-primary-action { width: 100%; }
   .anomalies-detail-card,
   .anomalies-timeline-card,
   .anomalies-evidence-card,

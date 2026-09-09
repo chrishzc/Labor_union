@@ -176,7 +176,7 @@ function expectOnlyGet(requests: readonly FetchRecord[]): void {
 
 function expectInitialListBudget(requests: readonly FetchRecord[]): void {
   expect(requests.filter(({ path }) => path === ANOMALY_LIST_ENDPOINT)).toHaveLength(1);
-  expect(requests.some(({ path }) => path === WARNING_LIST_ENDPOINT)).toBe(false);
+  expect(requests.filter(({ path }) => path === WARNING_LIST_ENDPOINT)).toHaveLength(1);
 }
 
 describe('Anomalies #anomalies entry cutover query candidate', () => {

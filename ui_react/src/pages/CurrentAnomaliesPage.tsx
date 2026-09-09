@@ -4,6 +4,8 @@ import './AnomaliesPage.css';
 import { Drawer } from '../components/Drawer';
 import { currentAnomalyQueryClient } from '../api/anomalies/current_anomaly_query_client';
 import { anomalyDetailClient } from '../api/anomalies/anomaly_detail_client';
+import { anomalyQueryClient } from '../api/anomalies/anomaly_query_client';
+import type { ImportWarningTaskView } from '../api/anomalies/anomaly_query_schemas';
 import type {
   CurrentAnomalyRecoveryContextView,
   RecoveryAction,
@@ -18,6 +20,7 @@ import {
   adaptCurrentAnomalySummary,
   type CurrentAnomalyRowViewModel,
 } from '../adapters/anomalies/current_anomaly_adapter';
+import { HcmControlledCorrectionWorkbench } from '../components/HcmControlledCorrectionWorkbench';
 
 const PAGE_SIZE = 50;
 const MANUAL_REPLAY_ACTION = 'manual_replay_failed_notification';
@@ -72,6 +75,14 @@ export const CurrentAnomaliesPage: React.FC = () => {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [importItems, setImportItems] = useState<ImportWarningTaskView[]>([]);
+  const [importLoading, setImportLoading] = useState(true);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [hcmCorrection, setHcmCorrection] = useState<{
+    caseNo: string;
+    displayMessage: string;
+    reviewIdentity: string;
+  } | null>(null);
   const [selected, setSelected] = useState<CurrentAnomalyRowViewModel | null>(null);
   const [detail, setDetail] = useState<CurrentAnomalyRecoveryContextView | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -109,7 +120,48 @@ export const CurrentAnomaliesPage: React.FC = () => {
     }
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  const loadImportWarnings = useCallback(async () => {
+    setImportLoading(true);
+    setImportError(null);
+    try {
+      const tasks = await anomalyQueryClient.queryImportWarningTasks({ activeOnly: true, limit: 200 });
+      const seenSubjects = new Set<string>();
+      setImportItems(tasks.filter((task) => {
+        const subjectKey = `${task.owning_lane}:${task.subject}`;
+        if (seenSubjects.has(subjectKey)) return false;
+        seenSubjects.add(subjectKey);
+        return true;
+      }));
+    } catch (caught) {
+      setImportError(displayError(caught));
+    } finally {
+      setImportLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void load(); void loadImportWarnings(); }, [load, loadImportWarnings]);
+
+  const openImportWarning = useCallback(async (task: ImportWarningTaskView) => {
+    if (task.owning_lane !== 'hcm' || !['HCM-FIELD-001', 'HCM-FIELD-002'].includes(task.logical_code)) {
+      window.location.hash = task.navigation_action === 'finance_import_recovery_center' ? '#finance' : '#data-import';
+      return;
+    }
+    setImportError(null);
+    try {
+      const referral = await anomalyQueryClient.queryImportWarningReferral({
+        occurrenceIdentity: task.occurrence_identity,
+        expectedVersion: task.tracking_version,
+      });
+      if (referral.target_command !== 'preview_hcm_resubmission') throw new Error('HCM correction referral unavailable');
+      setHcmCorrection({
+        caseNo: task.subject,
+        displayMessage: task.display_message,
+        reviewIdentity: referral.review_identity,
+      });
+    } catch (caught) {
+      setImportError(displayError(caught));
+    }
+  }, []);
 
   const openDetail = useCallback(async (item: CurrentAnomalyRowViewModel) => {
     setSelected(item);
@@ -185,31 +237,59 @@ export const CurrentAnomaliesPage: React.FC = () => {
 
   return (
     <main className="anomalies-page" aria-labelledby="current-anomalies-title">
-      <header className="page-header">
+      <header className="page-header anomalies-page-header">
         <div>
-          <h1 id="current-anomalies-title">目前異常</h1>
-          <p>只顯示現在仍成立、需要回到資料擁有者處理的問題。</p>
+          <h1 id="current-anomalies-title">異常審核</h1>
+          <p>顯示目前仍成立的問題，並提供可用的業務處理入口。</p>
         </div>
-        <button type="button" onClick={() => void load()} disabled={loading}>重新查詢</button>
+        <button type="button" className="anomalies-primary-action" onClick={() => { void load(); void loadImportWarnings(); }} disabled={loading || importLoading}>重新查詢</button>
       </header>
+
+      <section aria-labelledby="import-anomalies-title" className="anomalies-section">
+        <h2 id="import-anomalies-title" className="anomalies-section-title">匯入資料待檢查</h2>
+        {importError && <div role="alert" className="error-message">匯入待檢查資料暫時無法取得；其他異常仍可使用。{importError}</div>}
+        {!importLoading && importItems.length === 0 && !importError && <p>目前沒有待處理的匯入資料。</p>}
+        <div className="import-warnings-list">
+          {importItems.map((task) => (
+            <article className="import-warning-card" key={task.occurrence_identity}>
+              <div className="import-warning-header">
+                <strong>{task.owning_lane === 'hcm' ? '案件' : '資料'} {task.subject}</strong>
+                <span className="import-warning-status-badge">待處理</span>
+              </div>
+              <p>{task.display_message}</p>
+              <button className="anomalies-action-btn" type="button" onClick={() => void openImportWarning(task)}>
+                {task.owning_lane === 'hcm' && ['HCM-FIELD-001', 'HCM-FIELD-002'].includes(task.logical_code) ? '檢查並提交修正' : '前往負責頁面處理'}
+              </button>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      {hcmCorrection && <HcmControlledCorrectionWorkbench
+        {...hcmCorrection}
+        onCancel={() => setHcmCorrection(null)}
+        onApplied={() => { setHcmCorrection(null); void loadImportWarnings(); }}
+      />}
 
       {error && <div role="alert" className="error-message">{error}</div>}
       {!loading && items.length === 0 && !error && <p>目前沒有異常。</p>}
 
-      <section aria-label="目前異常清單" className="anomaly-list">
+      <section aria-label="其他目前異常清單" className="anomalies-section">
+        <h2 className="anomalies-section-title">其他目前異常</h2>
+        <div className="anomalies-list">
         {items.map((item) => (
           <button
             type="button"
-            className="anomaly-card"
+            className={`anomaly-card ${item.blocking ? 'critical' : 'warning'}`}
             key={item.issueKey}
             onClick={() => void openDetail(item)}
           >
-            <strong>{item.definitionCode}</strong>
+            <span className="anomaly-card-top"><strong className="anomaly-code-tag">{item.definitionCode}</strong><span className={`anomaly-severity-badge ${item.blocking ? 'critical' : 'warning'}`}>{item.blocking ? '阻擋作業' : '需要處理'}</span></span>
             <span>{ownerLabel(item.ownerDomain)}</span>
-            <span>{item.blocking ? '阻擋作業' : '需要處理'}</span>
             <span>最近確認：{new Date(item.lastVerifiedAt).toLocaleString('zh-TW')}</span>
           </button>
         ))}
+        </div>
       </section>
 
       {nextCursor && (
