@@ -154,6 +154,7 @@ def test_hcm_referral_requires_fresh_active_warning_and_never_locks() -> None:
     task = ImportWarningTask(
         "warning-referral", "hcm", "HCM-FIELD-002", "服務時間", "hcm-***-0001",
         ("hcm_field_invalid:服務時間",), ImportWarningTrackingStatus.OPEN, 3, None,
+        source_receipt_identity="review-referral",
     )
 
     class Repository:
@@ -173,8 +174,25 @@ def test_hcm_referral_requires_fresh_active_warning_and_never_locks() -> None:
     assert repository.lock_requests == [False]
     assert referral.target_command == "preview_hcm_resubmission"
     assert referral.subject == "hcm-***-0001"
+    assert referral.review_identity == "review-referral"
     with pytest.raises(ValueError, match="import_warning_version_conflict"):
         application.query_referral("warning-referral", expected_version=2)
+
+
+def test_hcm_bootstrap_warning_uses_plain_system_guidance() -> None:
+    task = ImportWarningTask(
+        "warning-system", "hcm", "HCM-SYSTEM-001", "$case_setup", "115000150",
+        ("hcm_case_import:case_import_bootstrap_blocked",),
+        ImportWarningTrackingStatus.OPEN, 1, None,
+        source_receipt_identity="review-system",
+    )
+
+    result = ImportWarningTrackingApplication(
+        type("Repository", (), {"query_tasks": lambda self, **_kwargs: (task,)})(),
+        object,
+    ).query_tasks()
+
+    assert result[0].display_message == "案件初始設定尚未完成，請檢查系統費率與案件條件"
 
 
 def test_referral_fails_closed_for_completed_or_non_hcm_warning() -> None:
