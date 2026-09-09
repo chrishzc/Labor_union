@@ -1,28 +1,11 @@
 schema_version: 1
 system: labor-union-admin
-source_revision: d9696f8c60c9564d4d13897e6cf59f59b5887a3e
+source_revision: 56c4c3765b572f4d934bd9926fd8ba25d7d35f0f
 status: partial
 last_reconciled_scope:
-  - anomalies/anomalies
-  - external-integration/line
-  - external-integration/access
-  - tests/anomalies
-  - tests/external-integration/line
-  - tests/external-integration/access
-  - system/test-routing
-  - case-import/case-import
-  - tests
-  - tests/case-import
-  - global/migration/task96-owner-contract-successors
-  - government-subsidy/government-subsidy
-  - finance-import/finance-import
-  - scheduling/scheduling
-  - scheduling/scheduling/staff-monthly-calendar
-  - scheduling/scheduling/matching-coordination
-  - scheduling/scheduling/waiting-deposit-lock
-  - orders/orders/historical-precision-restart
-  - tests/global
-  - tests/scheduling/staff-monthly-calendar
-  - payroll/payroll
-  - global/migration/validation-dataset-orchestration
-  - tests/validation-dataset-orchestration
+  - system/navigation
+  - global/navigation
+  - global/reporting
+  - client-finance/client-finance/settlement-remediation-presentation
+  - external-integration/line/navigation
+  - orders/orders/navigation

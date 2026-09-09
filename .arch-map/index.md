@@ -21,7 +21,7 @@
 
 ## Global modules
 - `react-application-shell` — React navigation、session/auth composition與closed ErrorBoundary recovery；path: `domains/global/subsystems/application-shell/modules/react-application-shell.md`
-- `weekly-operations-report` — 跨Domain唯讀營運週報、週界協調與三分頁呈現；path: `domains/global/subsystems/reporting/modules/weekly-operations-report.md`
+- `weekly-operations-report` — 跨Domain營運報表、三分頁呈現及現行批次寫入／期間邏輯的規格差異；path: `domains/global/subsystems/reporting/modules/weekly-operations-report.md`
 
 ## Cross-domain relationships
 - `scheduling -> orders` — Scheduling 以既有 case/order lifecycle 與服務日期邊界作為協調前提。
@@ -76,4 +76,4 @@ Current canonical owner roots are (routing notes; detailed ownership is declared
 ## Navigation notes
 本地圖是 current architecture routing evidence，不是產品需求 Authority、architecture compliance/completion claim 或 source/test 的替代品。任務定位依根目錄 `AGENTS.md`：已知精確 path／symbol 時直接開檔；只有功能或業務詞彙時，先在 `.arch-map/` 做 filename-only bounded search，命中唯一 leaf 就直接讀取，否則才從本頁沿單一 Domain／Subsystem／Module 路徑往下。leaf 已指出 owner、source、adapter 與 focused test 後立即停止導航；只有地圖明確未建模、路徑失效或缺少會改變行為／修改位置／驗證邊界的事實時，才在最可能 owner 目錄做一次 bounded source search。正式規格只在任務實際改動業務語意、owner、public contract、UoW、schema／migration 或其他受管邊界時精準讀取。
 
-`api/`、`ui_react/`、legacy `ui/`、`line/`、`infrastructure/`、`scripts/`、`db/` 是 adapters／runtime／release locations，不因資料夾存在而自動成為 Domain。`contract_integration`、`customer_service`、`knowledge_retrieval`、`bootstrap`、`controlled_files`、`reporting`、`jobs` 等 current source 邊界尚未在第一版完整建模；需要時依 current spec/source scoped 擴張。不得以此地圖復活 legacy `system_map*`／`scripts_map.md` gate。
+`api/`、`ui_react/`、`line/`、`infrastructure/`、`scripts/`、`db/` 是 adapters／runtime／release locations，不因資料夾存在而自動成為 Domain。舊 `ui/` Streamlit tree 已退役並從工作樹移除，不再是入口、rollback 或驗證來源。`contract_integration`、`customer_service`、`knowledge_retrieval`、`bootstrap`、`controlled_files`、`reporting`、`jobs` 等 current source 邊界尚未在第一版完整建模；需要時依 current spec/source scoped 擴張。不得以此地圖復活 legacy `system_map*`／`scripts_map.md` gate。

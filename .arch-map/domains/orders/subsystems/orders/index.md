@@ -23,8 +23,7 @@
 - `service-completion-presentation` — Orders服務完成Preview／Confirm／Apply與closed business presentation; path: `modules/service-completion-presentation.md`
 - `cancellation` — 訂單取消的跨 owner Preview／Apply 與 fresh readback；path: `modules/cancellation.md`
 - `terminal-closure-handoff` — terminal lifecycle event／receipt／outbox 的 LINE Identity typed handoff；path: `modules/terminal-closure-handoff.md`
-- `order-information` — typed order-information Query／Preview 與既有管理端 readback；path: `modules/order-information.md`
-- `order-information` — 服務人員訂單資訊-1／2 typed exact-target Query／Preview；path: `modules/order-information.md`
+- `order-information` — 既有案件訂單資訊的typed Query與管理端readback；path: `modules/order-information.md`
 
 ## Dependencies
 - outbound: `scheduling` — 服務日期／assignment 相關跨域協調只透過明確 contract。

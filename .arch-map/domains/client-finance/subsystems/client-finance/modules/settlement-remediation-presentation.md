@@ -5,14 +5,15 @@
 - subsystem: `client-finance`
 
 ## Responsibility
-呈現客戶逾期應收、一般退款與補助退還三碼的既有exact dispatcher、Query／Preview／Apply、partial-retain與fresh terminal readback。一般畫面只顯示案件、義務類型、日期、金額、可核對銀行流水、處理結果與安全錯誤；account version、obligation identity與bank row identity只保留在預設收合技術詳情。不得合併三碼predicate、推定allocation或以追蹤狀態解除提醒。
+定位既有客戶應收、一般退款與補助退還的owner Query／Preview／Apply工作台及其測試。Source／test仍保留三碼exact dispatcher、partial-retain與fresh terminal readback；這是既有實作證據，不代表三碼仍屬current Anomalies runtime產品。一般畫面呈現案件、義務類型、日期、金額、可核對銀行流水、處理結果與安全錯誤；account version、obligation identity與bank row identity置於預設收合技術詳情。Owner allocation與settlement以Client Finance正式契約為準；Anomalies current範圍以第06份規格為準。
 
 ## Implementation
 - primary: `ui_react/src/components/ClientSettlementRemediationWorkbench.tsx`
 
 ## Contracts
-- `document/架構重整/01_規格基線/16_Staff_Payables與Client_Refund正式規格.md` — Client Finance銀行根事實、Q/P/A與逾期提醒規則。
-- `document/架構重整/02_決策與退役執行記錄/PROV-20260827-client-settlement-anomaly-remediation-spec.md` — 三碼exact dispatcher、partial-retain與terminal predicate。
+- `document/架構重整/01_規格基線/04_Client_Finance_Domain.md` — Client Finance obligations、immutable ledger／allocation及reconciliation Preview／Apply。
+- `document/架構重整/01_規格基線/16_Staff_Payables與Client_Refund正式規格.md` — 客戶退款／補助退還與銀行根事實核銷契約。
+- `document/架構重整/01_規格基線/06_Anomalies_Domain.md` §1–2 — current runtime只保留 `LINE-006`；舊三碼source／test不形成新的Anomalies產品需求。
 - `document/架構重整/01_規格基線/12_Global_效能與UX體感架構.md` — 一般畫面資訊層級與closed error boundary。
 
 ## Verification
@@ -21,4 +22,4 @@
 - routing: `.arch-map/tests/domains/client-finance/subsystems/client-finance/modules/settlement-remediation-presentation.md`
 
 ## Change triggers
-Reconcile when settlement presentation、three-code dispatcher、partial-retain、fresh terminal oracle或focused test location changes。
+Reconcile when settlement presentation、既有dispatcher、partial-retain、fresh terminal oracle、current owner contract／Anomalies範圍或focused test location changes。

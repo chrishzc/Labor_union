@@ -19,6 +19,7 @@
 - `complaint-ingress` — M4 canonical complaint normalization、Customer Service hold／HIGH escalation與masked empathy delivery；path: `modules/complaint-ingress.md`
 - `matching-coordination-delivery` — M3 committed owner-intent至既有 LINE delivery task 的 typed projection與LINE-006 readback；path: `modules/matching-coordination-delivery.md`
 - `mobile-assignment-review` — persisted-human mobile transport轉接既有Scheduling Assignment Plan Q/P/A/readback；path: `modules/mobile-assignment-review.md`
+- `safe-review-link` — 短效一次性review-link transport、masked readback、receipt與committed local intent；不執行provider send；path: `modules/safe-review-link.md`
 - `staff-service-day-media` — 已驗證月嫂餐食照片 controlled-file staging；path: `modules/staff-service-day-media.md`
 - `rich-menu-management` — Rich Menu typed draft editing, publication preparation and role-scoped management presentation; path: `modules/rich-menu-management.md`
 

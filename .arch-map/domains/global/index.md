@@ -7,7 +7,7 @@ outbox 與 runtime governance；不擁有各 business Domain 的根事實或公�
 ## Subsystems
 - `application-shell` — React navigation、session/auth composition與global recovery；path: `subsystems/application-shell/index.md`
 - `local-runtime` — 本機開發 runtime 與 no-auth source-runtime entry；path: `subsystems/local-runtime/index.md`
-- `reporting` — 跨Domain唯讀營運報表協調與typed presentation；path: `subsystems/reporting/index.md`
+- `reporting` — 跨Domain營運報表Query／export、typed presentation與現行週報批次寫入；規格差異見Module；path: `subsystems/reporting/index.md`
 - `migration` — fresh bootstrap、preserve-data upgrade、release qualification 與
   cutover governance；path: `subsystems/migration/index.md`
 - `controlled-files` — cross-domain controlled storage API composition and opaque
