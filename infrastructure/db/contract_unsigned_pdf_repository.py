@@ -7,8 +7,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 import json
+from pathlib import Path
 from typing import Any
 
+from infrastructure.archive.contract_documents import read_archived_contract_document
 from shared_kernel.identities import ActorContext
 from subsystems.contract_signing.unsigned_contract_pdf import (
     StoredUnsignedContractPdf,
@@ -33,11 +35,20 @@ _XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.
 class MySqlContractUnsignedPdfRepository:
     """Borrowed-connection adapter; outer composition owns commit, rollback and close."""
 
-    def __init__(self, connection: Any, *, storage_provider: str = "local") -> None:
+    def __init__(
+        self,
+        connection: Any,
+        *,
+        storage_provider: str = "local",
+        archive_root: Path | None = None,
+        archive_reader=read_archived_contract_document,
+    ) -> None:
         if storage_provider not in {"local", "nas"}:
             raise ValueError("unsigned PDF storage provider is invalid")
         self._connection = connection
         self._storage_provider = storage_provider
+        self._archive_root = archive_root or Path(__file__).resolve().parents[2] / "runtime_data" / "contracts"
+        self._archive_reader = archive_reader
 
     def load_render_source(
         self, case_no: str, document_version_id: int
@@ -46,25 +57,15 @@ class MySqlContractUnsignedPdfRepository:
         if row is None:
             return None
         try:
-            scope = str(row["document_scope"])
-            if scope == "staff_segment":
-                facts = self._one(
-                    _STAFF_FACTS_SQL,
-                    (
-                        int(row["matching_segment_id"]),
-                        int(row["matching_plan_id"]),
-                        case_no,
-                    ),
-                )
-            elif scope == "client_contract":
-                facts = self._one(
-                    _CLIENT_FACTS_SQL,
-                    (int(row["matching_plan_id"]), case_no),
-                )
-            else:
+            if str(row["document_scope"]) not in {"staff_segment", "client_contract"}:
                 raise ValueError("unknown document scope")
-            if facts is None:
-                raise ValueError("render facts missing")
+            content = self._archive_reader(
+                storage_root=self._archive_root,
+                storage_key=str(row["storage_key"]),
+                expected_sha256=str(row["sha256"]),
+            )
+            if len(content) != int(row["file_size"]):
+                raise ValueError("render source size mismatch")
             return UnsignedContractRenderSource(
                 case_no=str(row["case_no"]),
                 document_version_id=int(row["document_version_id"]),
@@ -73,9 +74,10 @@ class MySqlContractUnsignedPdfRepository:
                 template_key=str(row["template_key"]),
                 template_sha256=str(row["template_sha256"]),
                 mapping_sha256=str(row["mapping_sha256"]),
-                facts=dict(facts),
+                source_filename=str(row["original_filename"]),
+                source_content=content,
             )
-        except (KeyError, TypeError, ValueError):
+        except (KeyError, OSError, TypeError, ValueError):
             raise _metadata_error("contract_pdf_render_source_invalid") from None
 
     def load_current_pdf(
@@ -98,6 +100,17 @@ class MySqlContractUnsignedPdfRepository:
             )
         except (KeyError, TypeError, ValueError):
             raise _metadata_error("contract_pdf_persisted_metadata_invalid") from None
+
+    def load_current_pdf_for_source(
+        self, case_no: str, source_document_version_id: int
+    ) -> StoredUnsignedContractPdf | None:
+        row = self._one(
+            _CURRENT_PDF_BY_SOURCE_SQL,
+            (case_no, source_document_version_id),
+        )
+        if row is None:
+            return None
+        return self.load_current_pdf(case_no, int(row["document_version_id"]))
 
     def register_persisted_pdf(
         self,
@@ -272,7 +285,9 @@ class MySqlContractUnsignedPdfRepository:
             return int(cursor.lastrowid)
 
 
-def _admin_user_id(actor_id: str) -> int:
+def _admin_user_id(actor_id: str) -> int | None:
+    if actor_id == "system:local_bypass":
+        return None
     prefix, separator, value = actor_id.partition(":")
     if prefix != "admin" or separator != ":" or not value.isascii() or not value.isdigit():
         raise ValueError("invalid persisted admin actor")
@@ -332,7 +347,8 @@ _CURRENT_PREDICATE = (
 _RENDER_SOURCE_SQL = (
     "SELECT document.case_no,document.id AS document_version_id,document.document_scope,"
     "document.document_role,document.matching_plan_id,document.matching_segment_id,"
-    "document.template_key,document.template_sha256,document.mapping_sha256 "
+    "document.template_key,document.template_sha256,document.mapping_sha256,"
+    "asset.storage_key,asset.original_filename,asset.file_size,asset.sha256 "
     "FROM contract_document_versions document JOIN media_assets asset "
     "ON asset.id=document.media_asset_id "
     "WHERE document.case_no=%s AND document.id=%s "
@@ -340,28 +356,6 @@ _RENDER_SOURCE_SQL = (
     "AND document.source_document_version_id IS NULL "
     "AND asset.category='contract' AND asset.deleted_at IS NULL "
     f"AND asset.mime_type='{_XLSX_MEDIA_TYPE}' AND {_CURRENT_PREDICATE}"
-)
-_STAFF_FACTS_SQL = (
-    "SELECT order_row.case_no,order_row.start_date,order_row.end_date,order_row.service_days,"
-    "client.name AS client_name,client.city,client.address,client.service_time,client.service_type,"
-    "staff.name AS staff_name,staff.phone AS staff_phone "
-    "FROM caregiver_matching_plan_segments segment "
-    "JOIN staff ON staff.id=segment.staff_id "
-    "JOIN orders order_row ON segment.id=%s AND segment.plan_id=%s "
-    "JOIN clients client ON client.case_no=order_row.case_no "
-    "WHERE order_row.case_no=%s"
-)
-_CLIENT_FACTS_SQL = (
-    "SELECT order_row.case_no,order_row.service_days,order_row.service_hours_per_day,"
-    "order_row.floor_fee,client.name AS client_name,client.phone,client.address,"
-    "client.service_time,client.service_type,client.baby_info,client.notes,"
-    "MIN(day_row.service_date) AS committed_service_start_date,"
-    "MAX(day_row.service_date) AS committed_service_end_date "
-    "FROM orders order_row JOIN clients client ON client.case_no=order_row.case_no "
-    "JOIN precontract_service_commitments commitment "
-    "ON commitment.case_no=order_row.case_no AND commitment.matching_plan_id=%s "
-    "JOIN precontract_service_commitment_days day_row ON day_row.commitment_id=commitment.id "
-    "WHERE order_row.case_no=%s"
 )
 _CURRENT_PDF_SQL = (
     "SELECT document.case_no,document.id AS document_version_id,document.document_role,"
@@ -396,6 +390,17 @@ _EXISTING_PDF_BY_FILE_SQL = (
     "AND document.replaces_document_version_id=%s "
     "AND document.document_role='template_generated' "
     "AND asset.mime_type='application/pdf'"
+)
+_CURRENT_PDF_BY_SOURCE_SQL = (
+    "SELECT document.id AS document_version_id FROM contract_document_versions document "
+    "WHERE document.case_no=%s AND document.replaces_document_version_id=%s "
+    "AND document.document_role='template_generated' "
+    "AND NOT EXISTS (SELECT 1 FROM contract_document_versions newer WHERE "
+    "newer.case_no=document.case_no AND newer.document_scope=document.document_scope "
+    "AND newer.document_target_key=document.document_target_key "
+    "AND newer.document_role='template_generated' "
+    "AND newer.version_number>document.version_number) "
+    "ORDER BY document.version_number DESC,document.id DESC LIMIT 1"
 )
 _CASE_LOCK_SQL = "SELECT case_no FROM orders WHERE case_no=%s FOR UPDATE"
 _PERSISTENCE_SOURCE_LOCK_SQL = (

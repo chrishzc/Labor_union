@@ -10,9 +10,9 @@ export const CORE_STAGE_CODES = [
   'caregiver_line_delivery',
   'caregiver_willingness_reply',
   'formal_recommendation',
-  'caregiver_contract',
+  'external_signing_dispatch',
+  'external_signing_completion',
   'deposit_settlement',
-  'client_contract',
   'confirmed_service_dates',
   'formal_service',
   'service_completion',
@@ -42,9 +42,9 @@ export const CORE_STAGE_SUBSTATUS_CODES = [
   'contact_pending', 'contact_in_progress', 'contact_blocked', 'contact_completed', 'contact_unavailable',
   'reply_pending', 'reply_partial', 'reply_blocked', 'reply_complete', 'reply_unavailable',
   'recommendation_pending', 'recommendation_in_progress', 'recommendation_blocked', 'recommendation_completed', 'recommendation_unavailable',
-  'caregiver_contract_pending', 'caregiver_contract_signing', 'caregiver_contract_blocked', 'caregiver_contract_completed', 'caregiver_contract_unavailable',
+  'external_dispatch_pending', 'external_dispatch_preparing', 'external_dispatch_blocked', 'external_dispatch_completed', 'external_dispatch_unavailable',
+  'external_signing_pending', 'external_signing_in_progress', 'external_signing_blocked', 'external_signing_completed', 'external_signing_unavailable',
   'deposit_pending', 'deposit_in_progress', 'deposit_blocked', 'deposit_settled', 'deposit_unavailable',
-  'client_contract_pending', 'client_contract_signing', 'client_contract_blocked', 'client_contract_completed', 'client_contract_unavailable',
   'date_confirmation_pending', 'date_confirmation_in_progress', 'date_confirmation_blocked', 'date_confirmed', 'date_confirmation_unavailable',
   'waiting_to_start', 'service_in_progress', 'service_blocked', 'service_period_completed', 'service_schedule_unavailable',
   'completion_pending', 'completion_in_progress', 'completion_blocked', 'completion_confirmed', 'completion_record_missing',
@@ -74,14 +74,14 @@ export const SUBSTATUS_BY_STAGE_STATUS = {
   formal_recommendation: {
     not_started: 'recommendation_pending', in_progress: 'recommendation_in_progress', blocked: 'recommendation_blocked', completed: 'recommendation_completed', unavailable: 'recommendation_unavailable',
   },
-  caregiver_contract: {
-    not_started: 'caregiver_contract_pending', in_progress: 'caregiver_contract_signing', blocked: 'caregiver_contract_blocked', completed: 'caregiver_contract_completed', unavailable: 'caregiver_contract_unavailable',
+  external_signing_dispatch: {
+    not_started: 'external_dispatch_pending', in_progress: 'external_dispatch_preparing', blocked: 'external_dispatch_blocked', completed: 'external_dispatch_completed', unavailable: 'external_dispatch_unavailable',
+  },
+  external_signing_completion: {
+    not_started: 'external_signing_pending', in_progress: 'external_signing_in_progress', blocked: 'external_signing_blocked', completed: 'external_signing_completed', unavailable: 'external_signing_unavailable',
   },
   deposit_settlement: {
     not_started: 'deposit_pending', in_progress: 'deposit_in_progress', blocked: 'deposit_blocked', completed: 'deposit_settled', unavailable: 'deposit_unavailable',
-  },
-  client_contract: {
-    not_started: 'client_contract_pending', in_progress: 'client_contract_signing', blocked: 'client_contract_blocked', completed: 'client_contract_completed', unavailable: 'client_contract_unavailable',
   },
   confirmed_service_dates: {
     not_started: 'date_confirmation_pending', in_progress: 'date_confirmation_in_progress', blocked: 'date_confirmation_blocked', completed: 'date_confirmed', unavailable: 'date_confirmation_unavailable',
@@ -285,9 +285,9 @@ export const CoreStageCountsSchema = z.strictObject({
   caregiver_line_delivery: NonnegativeIntSchema,
   caregiver_willingness_reply: NonnegativeIntSchema,
   formal_recommendation: NonnegativeIntSchema,
-  caregiver_contract: NonnegativeIntSchema,
+  external_signing_dispatch: NonnegativeIntSchema,
+  external_signing_completion: NonnegativeIntSchema,
   deposit_settlement: NonnegativeIntSchema,
-  client_contract: NonnegativeIntSchema,
   confirmed_service_dates: NonnegativeIntSchema,
   formal_service: NonnegativeIntSchema,
   service_completion: NonnegativeIntSchema,

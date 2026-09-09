@@ -6,6 +6,7 @@ Description: 驗證未簽契約 PDF MySQL adapter 的 current identity、opaque 
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 
@@ -104,7 +105,8 @@ def test_load_current_pdf_constrains_case_document_role_current_and_controlled_o
     assert connection.rollback_calls == 0
 
 
-def test_load_render_source_uses_current_xlsx_document_and_scope_facts():
+def test_load_render_source_reads_the_current_immutable_xlsx_document():
+    workbook = b"PK\x03\x04immutable-workbook"
     connection = _Connection(
         [
             {
@@ -117,36 +119,38 @@ def test_load_render_source_uses_current_xlsx_document_and_scope_facts():
                 "template_key": "staff-contract-v1",
                 "template_sha256": _DIGEST,
                 "mapping_sha256": "b" * 64,
-            },
-            {
-                "case_no": "CASE-1",
-                "start_date": "2026-09-01",
-                "end_date": "2026-09-30",
-                "service_days": 20,
-                "client_name": "客戶",
-                "city": "臺北市",
-                "address": "測試地址",
-                "service_time": "09:00",
-                "service_type": "月嫂",
-                "staff_name": "月嫂",
-                "staff_phone": "0900000000",
+                "storage_key": "contracts/source.xlsx",
+                "original_filename": "CASE-1-staff-contract.xlsx",
+                "file_size": len(workbook),
+                "sha256": _DIGEST,
             },
         ]
     )
+    reads = []
 
-    result = MySqlContractUnsignedPdfRepository(connection).load_render_source("CASE-1", 41)
+    def read_archive(**kwargs):
+        reads.append(kwargs)
+        return workbook
+
+    result = MySqlContractUnsignedPdfRepository(
+        connection,
+        archive_root=Path("/safe/archive"),
+        archive_reader=read_archive,
+    ).load_render_source("CASE-1", 41)
 
     assert result is not None
-    assert result.facts["staff_name"] == "月嫂"
+    assert result.source_content == workbook
+    assert result.source_filename == "CASE-1-staff-contract.xlsx"
+    assert reads == [{
+        "storage_root": Path("/safe/archive"),
+        "storage_key": "contracts/source.xlsx",
+        "expected_sha256": _DIGEST,
+    }]
     source_sql, source_parameters = connection.cursor_instance.executions[0]
-    facts_sql, facts_parameters = connection.cursor_instance.executions[1]
     assert "asset.mime_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'" in source_sql
     assert "document.document_role='template_generated'" in source_sql
     assert "newer.version_number>document.version_number" in source_sql
     assert source_parameters == ("CASE-1", 41)
-    assert "segment.id=%s" in facts_sql
-    assert "segment.plan_id=%s" in facts_sql
-    assert facts_parameters == (12, 9, "CASE-1")
 
 
 def test_invalid_persisted_pdf_metadata_is_typed_and_does_not_leak_locator():
@@ -304,3 +308,25 @@ def test_append_audit_uses_borrowed_transaction_and_excludes_locator_and_digest(
     assert all(_DIGEST not in str(value) for value in parameters)
     assert connection.commit_calls == 0
     assert connection.rollback_calls == 0
+
+
+def test_append_audit_records_explicit_local_bypass_as_system_actor():
+    connection = _Connection([])
+    repository = MySqlContractUnsignedPdfRepository(connection)
+
+    repository.append_durable_download_audit(
+        UnsignedContractPdfDownloadAudit(
+            case_no="CASE-1",
+            document_version_id=41,
+            actor_id="system:local_bypass",
+            correlation_id="corr-local-1",
+            filename="unsigned-contract.pdf",
+            mime_type="application/pdf",
+            size_bytes=18,
+        )
+    )
+
+    sql, parameters = connection.cursor_instance.executions[0]
+    assert "INSERT INTO admin_audit_logs" in sql
+    assert parameters[0] is None
+    assert "contract_unsigned_pdf_downloaded" in parameters

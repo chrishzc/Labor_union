@@ -69,7 +69,7 @@ class _Renderer:
         self.error = error
         self.calls = []
 
-    def render(self, **kwargs):
+    def render_workbook(self, **kwargs):
         self.calls.append(kwargs)
         if self.error is not None:
             raise self.error
@@ -94,7 +94,8 @@ def _source(**changes):
         "template_key": template.template_key,
         "template_sha256": template.template_sha256,
         "mapping_sha256": template.mapping_sha256,
-        "facts": {"case_no": "CASE-1", "staff_name": "安全文字"},
+        "source_filename": "CASE-1-staff-contract.xlsx",
+        "source_content": b"PK\x03\x04immutable-workbook",
     }
     values.update(changes)
     return UnsignedContractRenderSource(**values)
@@ -123,7 +124,7 @@ def _application(*, source=None, stored=None, storage=None, renderer=None, audit
     return UnsignedContractPdfApplication(repository, storage, renderer), repository, storage, renderer
 
 
-def test_prepare_uses_only_current_approved_template_contract():
+def test_prepare_converts_the_current_immutable_approved_workbook():
     application, repository, _storage, renderer = _application(source=_source())
 
     result = application.prepare(
@@ -131,9 +132,10 @@ def test_prepare_uses_only_current_approved_template_contract():
     )
 
     assert repository.render_queries == [("CASE-1", 11)]
-    assert renderer.calls[0]["facts"] == {"case_no": "CASE-1", "staff_name": "安全文字"}
-    assert renderer.calls[0]["template_path"].name == "服務人員契約.xlsx"
-    assert renderer.calls[0]["mapping_path"].name == "contract_staff_service.json"
+    assert renderer.calls == [{
+        "content": b"PK\x03\x04immutable-workbook",
+        "filename": "CASE-1-staff-contract.xlsx",
+    }]
     assert result.case_no == "CASE-1"
     assert result.source_document_version_id == 11
     assert result.content == PDF

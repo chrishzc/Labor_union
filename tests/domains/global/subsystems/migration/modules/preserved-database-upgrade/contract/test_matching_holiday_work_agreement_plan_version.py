@@ -139,6 +139,32 @@ def test_owner_release_keeps_exact_immutable_check_encoding_compatible() -> None
     ) == "exact"
 
 
+def test_owner_release_accepts_mysql_explicit_charset_in_segment_cast() -> None:
+    owner = load_migration_release_manifest(
+        ROOT / "db/migration_releases" / OWNER_MANIFEST,
+        ROOT,
+    )
+    released = owner.owned_object_descriptors(ROOT)[OWNER_ARTIFACT]
+    snapshot = _canonical_owner_snapshot()
+    participant_check = next(
+        row for row in snapshot["constraints"]
+        if row.get("constraint_name")
+        == "chk_matching_holiday_work_agreement_participant_target"
+    )
+    participant_check["check_clause"] = (
+        "(((`participant_role` = _utf8mb4'customer') and (`segment_id` is null) "
+        "and (`participant_key` = _utf8mb4'customer')) or "
+        "((`participant_role` = _utf8mb4'caregiver') and "
+        "(`segment_id` is not null) and (`participant_key` = "
+        "(concat(_utf8mb4'segment:',cast(`segment_id` as char charset utf8mb4)) "
+        "collate utf8mb4_unicode_ci))))"
+    )
+
+    assert migration._release_descriptor_metadata_state(
+        snapshot, OWNER_ARTIFACT, released
+    ) == "exact"
+
+
 def test_plan_version_rename_accepts_only_the_exact_legacy_predecessor() -> None:
     owner = migration._canonical_artifact_descriptor(OWNER_ARTIFACT)
     rename = migration._canonical_artifact_descriptor(RENAME_ARTIFACT)

@@ -47,6 +47,9 @@
   - `db/schema_parts/1033_matching_holiday_work_agreements.sql`
   - `db/migration_releases/labor_union_2026_09_08_matching_holiday_work_agreement_plan_version_v1.json`
   - `db/migration_releases/labor_union_2026_09_08_matching_holiday_work_agreement_plan_version_v1.descriptors.json`
+  - `db/schema_parts/1034_contract_external_signing_final_pdf_completion.sql`
+  - `db/migration_releases/labor_union_2026_09_09_contract_external_signing_final_pdf_completion_v1.json`
+  - `db/migration_releases/labor_union_2026_09_09_contract_external_signing_final_pdf_completion_v1.descriptors.json`
 
 ## Contracts
 - Source read-only、candidate identity、release classification、backup／journal／resume及

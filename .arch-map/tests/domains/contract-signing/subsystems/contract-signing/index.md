@@ -6,6 +6,9 @@ integration_root: tests/domains/contract-signing/subsystems/contract-signing/int
 fixtures_root: tests/fixtures/
 
 modules:
+  external-signing-presentation:
+    layout_status: custom_current
+    index: modules/external-signing-presentation.md
   staff-contract-application:
     layout_status: custom_current
     test_root: tests/test_staff_contract_signing_application.py

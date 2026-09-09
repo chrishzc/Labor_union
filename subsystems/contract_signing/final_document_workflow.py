@@ -116,6 +116,15 @@ class StoredFinalSignedContractReceipt:
     receipt: FinalSignedContractApplyReceipt
 
 
+@dataclass(frozen=True, slots=True)
+class FinalSigningPrerequisiteCommand:
+    case_no: str
+    matching_plan_id: int
+    actor: ActorContext
+    idempotency_key: IdempotencyKey
+    correlation_id: CorrelationId
+
+
 class FinalDocumentWorkflowError(RuntimeError):
     def __init__(
         self,
@@ -156,6 +165,7 @@ class FinalDocumentRepository(Protocol):
         session: ExternalSigningSessionFacts,
         document: FinalContractDocumentReadback,
         *,
+        commitment_id: int,
         resulting_status_version: int,
         applied_at: datetime,
     ) -> None: ...
@@ -184,13 +194,31 @@ class BorrowedControlledFileWorkflow(Protocol):
 
 
 class BorrowedContractCompletionWorkflow(Protocol):
-    def preview(
-        self, case_no: str, intent: ContractCompletionIntent
+    def preview_with_identity(
+        self,
+        case_no: str,
+        intent: ContractCompletionIntent,
+        contract_identity: str,
+        *,
+        fallback_service_dates: tuple,
     ) -> ContractCompletionPreview: ...
 
-    def apply_borrowed(
-        self, request: ContractCompletionApplyRequest
+    def apply_borrowed_with_identity(
+        self, request: ContractCompletionApplyRequest, contract_identity: str
     ) -> ContractCompletionReceipt: ...
+
+
+class FinalSigningPrerequisitePort(Protocol):
+    def preview_service_dates(
+        self, facts: ExternalSigningSessionFacts
+    ) -> tuple: ...
+
+    def establish_prerequisites(
+        self,
+        command: FinalSigningPrerequisiteCommand,
+        facts: ExternalSigningSessionFacts,
+        resulting_status_version: int,
+    ): ...
 
 
 class FinalSignedContractWorkflow:
@@ -199,6 +227,7 @@ class FinalSignedContractWorkflow:
         repository: FinalDocumentRepository,
         controlled_files: BorrowedControlledFileWorkflow,
         contract_completion: BorrowedContractCompletionWorkflow,
+        prerequisites: FinalSigningPrerequisitePort,
         unit_of_work_factory: Callable[[], UnitOfWork],
         clock: BusinessClock,
         token_codec: HmacFinalDocumentPreviewTokenCodec,
@@ -206,6 +235,7 @@ class FinalSignedContractWorkflow:
         self._repository = repository
         self._controlled_files = controlled_files
         self._contract_completion = contract_completion
+        self._prerequisites = prerequisites
         self._unit_of_work_factory = unit_of_work_factory
         self._clock = clock
         self._token_codec = token_codec
@@ -258,8 +288,16 @@ class FinalSignedContractWorkflow:
             except FinalDocumentPreviewTokenError as error:
                 raise FinalDocumentWorkflowError(error.code) from error
 
-            orders_receipt = self._contract_completion.apply_borrowed(
-                _orders_apply(command, completion_preview)
+            resulting_version = session.status_version + 1
+            prerequisites = self._prerequisites.establish_prerequisites(
+                _prerequisite_command(command, session),
+                session,
+                resulting_version,
+            )
+            completion_preview = self._completion_preview(session, file_preview)
+            contract_identity = _contract_identity(file_preview)
+            orders_receipt = self._contract_completion.apply_borrowed_with_identity(
+                _orders_apply(command, completion_preview), contract_identity
             )
             controlled_receipt = self._controlled_files.apply_borrowed(
                 _controlled_apply(command, file_preview)
@@ -272,10 +310,10 @@ class FinalSignedContractWorkflow:
                 contract_identity=orders_receipt.contract_identity,
                 applied_at=now,
             )
-            resulting_version = session.status_version + 1
             self._repository.complete_session_and_recovery(
                 session,
                 document,
+                commitment_id=prerequisites.commitment_id,
                 resulting_status_version=resulting_version,
                 applied_at=now,
             )
@@ -329,11 +367,18 @@ class FinalSignedContractWorkflow:
                 "external_signing_status_version_stale",
                 current_version=session.status_version,
             )
-        completion_preview = self._contract_completion.preview(
-            command.case_no, ContractCompletionIntent.CONFIRM_COMPLETED
-        )
         file_preview = self._controlled_files.preview(command.controlled_file_intent)
+        completion_preview = self._completion_preview(session, file_preview)
         return session, file_preview, completion_preview
+
+    def _completion_preview(self, session, file_preview):
+        fallback_service_dates = self._prerequisites.preview_service_dates(session)
+        return self._contract_completion.preview_with_identity(
+            session.case_no,
+            ContractCompletionIntent.CONFIRM_COMPLETED,
+            _contract_identity(file_preview),
+            fallback_service_dates=fallback_service_dates,
+        )
 
 
 def _blockers(
@@ -379,6 +424,20 @@ def _orders_apply(command, preview):
         idempotency_key=key,
         actor=command.actor,
         reason=command.reason,
+        correlation_id=command.correlation_id,
+    )
+
+
+def _contract_identity(file_preview: ControlledFilePreview) -> str:
+    return f"external-final:{file_preview.candidate.sha256_digest}"
+
+
+def _prerequisite_command(command, session):
+    return FinalSigningPrerequisiteCommand(
+        case_no=session.case_no,
+        matching_plan_id=session.matching_plan_id,
+        actor=command.actor,
+        idempotency_key=_derived_key(command.idempotency_key, "prerequisites"),
         correlation_id=command.correlation_id,
     )
 
@@ -443,6 +502,8 @@ __all__ = [
     "FinalSignedContractApplyReceipt",
     "FinalSignedContractPreview",
     "FinalSignedContractWorkflow",
+    "FinalSigningPrerequisiteCommand",
+    "FinalSigningPrerequisitePort",
     "PreviewFinalSignedContractUpload",
     "StoredFinalSignedContractReceipt",
 ]

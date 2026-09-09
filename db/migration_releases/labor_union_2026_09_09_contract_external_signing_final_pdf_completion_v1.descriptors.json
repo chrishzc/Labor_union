@@ -1,0 +1,15 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-contract-external-signing-final-pdf-completion-2026-09-09-v1",
+  "descriptors": {
+    "1034_contract_external_signing_final_pdf_completion.sql": {
+      "tables": {},
+      "indexes": {},
+      "foreign_keys": {},
+      "checks": {
+        "contract_external_signing_sessions.chk_contract_external_session_state": "or(and(atom(session_state='staff_reporting'),atom(commitment_idisnull)),and(atom(session_statein('staff_reports_complete','client_reported_final_pdf_pending','completed')),atom(commitment_idisnotnull)),atom(session_state='superseded'))"
+      },
+      "triggers": []
+    }
+  }
+}

@@ -54,6 +54,7 @@ SELECT o.case_no,
        GREATEST(COALESCE(willingness.resume_sent_count, 0), COALESCE(communication.resume_sent_count, 0), COALESCE(manual_profile.resume_sent_count, 0)) AS resume_sent_count,
        COALESCE(GREATEST(willingness.resume_sent_at, communication.resume_sent_at, manual_profile.resume_sent_at), willingness.resume_sent_at, communication.resume_sent_at, manual_profile.resume_sent_at) AS resume_sent_at,
        COALESCE(segment_fact.matching_segment_count, 0) AS matching_segment_count,
+       COALESCE(contract_document_fact.staff_contract_document_count, 0) AS staff_contract_document_count,
        COALESCE(signing.staff_contract_sent_count, 0) AS staff_contract_sent_count,
        signing.staff_contract_sent_at,
        COALESCE(signing.staff_contract_signed_count, 0) AS staff_contract_signed_count,
@@ -62,6 +63,11 @@ SELECT o.case_no,
        signing.client_contract_sent_at,
        COALESCE(signing.client_contract_signed_count, 0) AS client_contract_signed_count,
        signing.client_contract_signed_at,
+       external_session.external_signing_session_id,
+       external_session.aggregate_version AS external_signing_status_version,
+       external_session.created_at_utc AS external_signing_handoff_at,
+       final_contract.final_document_id AS final_contract_document_id,
+       final_contract.created_at_utc AS final_contract_completed_at,
        contract_fact.contract_event_id,
        contract_fact.contract_created_at,
        finance.aggregate_version AS finance_version,
@@ -221,6 +227,18 @@ SELECT o.case_no,
          JOIN contract_document_versions document ON document.id = event.document_version_id
         GROUP BY event.matching_plan_id
   ) signing ON signing.matching_plan_id = plan.id
+  LEFT JOIN (
+       SELECT document.matching_plan_id,
+              COUNT(DISTINCT CASE WHEN document.document_scope = 'staff_segment'
+                                   AND document.document_role = 'template_generated'
+                                  THEN document.matching_segment_id END) AS staff_contract_document_count
+         FROM contract_document_versions document
+        GROUP BY document.matching_plan_id
+  ) contract_document_fact ON contract_document_fact.matching_plan_id = plan.id
+  LEFT JOIN contract_external_signing_sessions external_session
+    ON external_session.active_case_key = o.case_no
+  LEFT JOIN contract_final_document_versions final_contract
+    ON final_contract.external_signing_session_id = external_session.id
   LEFT JOIN (
        SELECT case_no, MAX(id) AS contract_event_id, MAX(created_at) AS contract_created_at
          FROM order_contract_flow_events GROUP BY case_no

@@ -46,6 +46,15 @@ class _Repository:
             else None
         )
 
+    def load_staff_projection_for_segment(self, case_no, matching_segment_id):
+        return (
+            self.projection
+            if self.projection
+            and case_no == self.projection.case_no
+            and matching_segment_id == 41
+            else None
+        )
+
 
 def _projection(scope=ContractPreviewScope.CLIENT, assignment_id=None):
     return FullContractOwnerProjection(
@@ -103,6 +112,31 @@ def test_client_preview_uses_exact_target_and_returns_typed_cell_values(monkeypa
     assert result.blockers == ()
     assert result.ready_to_print is True
     assert result.field_values == {"A1": "value"}
+
+
+def test_staff_segment_preview_uses_resolved_assignment_identity(monkeypatch, tmp_path):
+    mapping, template = _approved_mapping(tmp_path)
+    monkeypatch.setattr(
+        "subsystems.contract_signing.full_contract_preview.load_approved_template",
+        lambda key: SimpleNamespace(
+            template_key=key,
+            mapping_sha256="b" * 64,
+            template_sha256="c" * 64,
+            template_filename=template.name,
+        ),
+    )
+    monkeypatch.setattr(
+        "subsystems.contract_signing.full_contract_preview.approved_template_mapping_path",
+        lambda key: mapping,
+    )
+    projection = _projection(ContractPreviewScope.STAFF, assignment_id=171)
+
+    result = FullContractPreviewApplication(_Repository(projection)).preview_staff_segment(
+        "CASE-1", 41
+    )
+
+    assert result.assignment_id == 171
+    assert result.ready_to_print is True
 
 
 def test_preview_rejects_null_required_owner_fact(monkeypatch, tmp_path):

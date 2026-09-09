@@ -111,6 +111,40 @@ def test_fresh_release_boundary_requires_target_but_not_preserve_prefix(
     ) == ["absent", "exact", "absent"]
 
 
+def test_release_boundary_allows_only_declared_zero_effect_successor(
+    monkeypatch,
+) -> None:
+    entries = (
+        {"release_id": "baseline", "artifact": {"name": "1003.sql"}, "descriptor": {}},
+        {
+            "release_id": "owner",
+            "artifact": {"name": "1032_matching_holiday_work_agreements.sql"},
+            "descriptor": {},
+        },
+        {
+            "release_id": "bridge",
+            "artifact": {"name": "1033_matching_holiday_work_agreements.sql"},
+            "descriptor": {},
+        },
+        {"release_id": "future", "artifact": {"name": "1034.sql"}, "descriptor": {}},
+    )
+    states = iter(("exact", "exact", "exact", "absent"))
+    monkeypatch.setattr(migration, "_local_ordered_upgrade_entries", lambda: entries)
+    monkeypatch.setattr(
+        migration,
+        "local_additive_target_state",
+        lambda *_args, **_kwargs: {"state": next(states)},
+    )
+
+    assert collector._verify_release_boundary(
+        SimpleNamespace(),
+        "lu_test_candidate",
+        "owner",
+        applied=True,
+        snapshot={"columns": []},
+    ) == ["exact", "exact", "exact", "absent"]
+
+
 def test_fresh_release_boundary_still_rejects_nonexact_target(monkeypatch) -> None:
     entries = (
         {"release_id": "preserve-only", "artifact": {"name": "1003.sql"}, "descriptor": {}},

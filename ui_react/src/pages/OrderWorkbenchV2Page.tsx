@@ -416,8 +416,8 @@ export const OrderWorkbenchV2Page: FC = () => {
                   <OrderFormalRecommendationPanel key={item.id} caseNo={item.id} onObserved={refreshProjection} />
                 )}
                 {workbenchScope === 'in_progress' && item.branchType === 'normal'
-                  && (actionStage === 'caregiver_contract'
-                    || actionStage === 'client_contract'
+                  && (actionStage === 'external_signing_dispatch'
+                    || actionStage === 'external_signing_completion'
                     || actionStage === 'confirmed_service_dates') && (
                   <ContractExternalSigningActions key={`${item.id}:external-signing`} caseNo={item.id} onCommitted={refreshProjection} />
                 )}

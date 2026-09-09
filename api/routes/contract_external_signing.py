@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 import re
 from typing import Any, Literal, Mapping
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Path as ApiPath, UploadFile
 from fastapi.responses import Response
@@ -37,6 +38,9 @@ from subsystems.contract_signing.external_signing_contracts import (
     PreviewLegacyManualRecoveryReport,
     RecordManualExternalClientSigningReport,
     RecordManualExternalStaffSigningReport,
+)
+from subsystems.contract_signing.external_signing_workflow import (
+    RecordExternalSigningHandoff,
 )
 from subsystems.contract_signing.final_document_workflow import (
     ApplyFinalSignedContractUpload,
@@ -226,6 +230,12 @@ class FinalPreviewBody(BaseModel):
     expected_status_version: int = Field(ge=0)
 
 
+class HandoffBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_status_version: int = Field(ge=0)
+
+
 class FinalApplyBody(FinalPreviewBody):
     expected_staging_version: int = Field(ge=1)
     preview_token: str = Field(pattern=_PREVIEW_TOKEN)
@@ -238,6 +248,34 @@ class UnsignedDocumentView(BaseModel):
     filename: str = Field(min_length=1, max_length=255)
     mime_type: Literal["application/pdf"]
     size_bytes: int = Field(ge=1)
+
+
+class PreparedUnsignedDocumentView(UnsignedDocumentView):
+    replayed: bool
+
+
+class StaffReminderReadinessView(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    matching_segment_id: int = Field(ge=1)
+    document_version_id: int = Field(ge=1)
+    message: str = Field(min_length=1, max_length=1000)
+    blockers: list[str]
+    ready: bool
+
+    @model_validator(mode="after")
+    def require_closed_readiness(self):
+        if self.ready != (not self.blockers):
+            raise ValueError("staff reminder readiness does not match blockers")
+        return self
+
+
+class StaffReminderTaskView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    task_id: int = Field(ge=1)
+    status: Literal["pending", "processing", "sent", "retryable_failed", "failed", "cancelled"]
+    replayed: bool
 
 
 class StaffTargetView(BaseModel):
@@ -253,7 +291,7 @@ class ClientTargetView(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     client_subject_reference: str = Field(min_length=1, max_length=191)
-    document_version_id: int = Field(ge=1)
+    document_version_id: int | None = Field(default=None, ge=1)
     reported: bool
 
 
@@ -270,6 +308,7 @@ class ExternalSigningQueryView(BaseModel):
         "superseded",
     ]
     status_version: int = Field(ge=0)
+    handoff_recorded: bool
     matching_plan_id: int = Field(ge=1)
     commitment_id: int | None = Field(default=None, ge=1)
     unsigned_document: UnsignedDocumentView | None
@@ -345,6 +384,36 @@ def query_external_signing(
     )
 
 
+@router.post("/{case_no}/contract-external-signing/handoff")
+def record_external_signing_handoff(
+    body: HandoffBody,
+    case_no: str = ApiPath(pattern=_CASE),
+    idempotency_key: str = Header(alias="Idempotency-Key", pattern=_IDEMPOTENCY),
+    correlation_id: str = Header(alias="X-Correlation-ID", pattern=_CORRELATION),
+    principal: AdminPrincipal = Depends(require_persisted_admin),
+    application: ContractExternalSigningApplication = Depends(_application),
+):
+    def action():
+        receipt = application.reports.record_handoff(
+            RecordExternalSigningHandoff(
+                case_no=case_no,
+                expected_status_version=ExpectedVersion(body.expected_status_version),
+                actor=admin_actor_context(principal),
+                idempotency_key=IdempotencyKey(idempotency_key),
+                correlation_id=CorrelationId(correlation_id),
+            )
+        )
+        return BaseResponse(
+            data={
+                "session_id": receipt.session_id,
+                "resulting_status_version": receipt.resulting_status_version,
+                "replayed": receipt.replayed,
+            }
+        )
+
+    return _call(action, correlation_id)
+
+
 @router.post(
     "/{case_no}/contract-signing/client/preview",
     response_model=BaseResponse[FullContractPreviewView],
@@ -375,7 +444,7 @@ def preview_full_staff_contract(
     return _call(
         lambda: BaseResponse(
             data=_public_full_preview(
-                application.full_preview.preview_staff(case_no, segment_id)
+                application.full_preview.preview_staff_segment(case_no, segment_id)
             )
         ),
         "full-contract-preview",
@@ -462,18 +531,96 @@ def download_unsigned_pdf(
             CorrelationId(correlation_id),
         )
         filename = Path(result.filename).name.replace('"', "")
+        encoded_filename = quote(filename, safe="")
         return Response(
             content=result.content,
             media_type="application/pdf",
             headers={
                 "Cache-Control": "no-store",
-                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Content-Disposition": (
+                    "attachment; filename=\"unsigned-contract.pdf\"; "
+                    f"filename*=UTF-8''{encoded_filename}"
+                ),
                 "X-Contract-Document-Version": str(result.document_version_id),
                 "X-Correlation-ID": correlation_id,
             },
         )
 
     return _call(action, correlation_id)
+
+
+@router.post(
+    "/{case_no}/contract-external-signing/staff-segments/{segment_id}/unsigned-pdf",
+    response_model=BaseResponse[PreparedUnsignedDocumentView],
+)
+def prepare_staff_unsigned_pdf(
+    case_no: str = ApiPath(pattern=_CASE),
+    segment_id: int = ApiPath(ge=1),
+    idempotency_key: str = Header(alias="Idempotency-Key", pattern=_IDEMPOTENCY),
+    correlation_id: str = Header(alias="X-Correlation-ID", pattern=_CORRELATION),
+    principal: AdminPrincipal = Depends(require_persisted_admin),
+    application: ContractExternalSigningApplication = Depends(_application),
+):
+    return _call(
+        lambda: BaseResponse(
+            data=application.prepare_staff_unsigned(
+                case_no,
+                segment_id,
+                admin_actor_context(principal),
+                IdempotencyKey(idempotency_key),
+                CorrelationId(correlation_id),
+            )
+        ),
+        correlation_id,
+    )
+
+
+@router.get(
+    "/{case_no}/contract-external-signing/staff-segments/{segment_id}/reminder-readiness",
+    response_model=BaseResponse[StaffReminderReadinessView],
+)
+def query_staff_reminder_readiness(
+    case_no: str = ApiPath(pattern=_CASE),
+    segment_id: int = ApiPath(ge=1),
+    _: AdminPrincipal = Depends(require_persisted_admin),
+    application: ContractExternalSigningApplication = Depends(_application),
+):
+    return _call(
+        lambda: BaseResponse(
+            data=application.staff_reminder_readiness(case_no, segment_id)
+        ),
+        "query",
+    )
+
+
+@router.post(
+    "/{case_no}/contract-external-signing/staff-segments/{segment_id}/reminders",
+    response_model=BaseResponse[StaffReminderTaskView],
+)
+def enqueue_staff_reminder(
+    case_no: str = ApiPath(pattern=_CASE),
+    segment_id: int = ApiPath(ge=1),
+    expected_document_version: int = Header(
+        alias="X-Expected-Document-Version", ge=1
+    ),
+    idempotency_key: str = Header(alias="Idempotency-Key", pattern=_IDEMPOTENCY),
+    correlation_id: str = Header(alias="X-Correlation-ID", pattern=_CORRELATION),
+    principal: AdminPrincipal = Depends(require_persisted_admin),
+    application: ContractExternalSigningApplication = Depends(_application),
+):
+    return _call(
+        lambda: BaseResponse(
+            data=application.enqueue_staff_reminder(
+                case_no,
+                segment_id,
+                expected_document_version,
+                admin_actor_context(principal),
+                IdempotencyKey(idempotency_key),
+                CorrelationId(correlation_id),
+            )
+        ),
+        correlation_id,
+    )
 
 
 @router.post("/{case_no}/contract-external-signing/staff-segments/{segment_id}/completion-reports")

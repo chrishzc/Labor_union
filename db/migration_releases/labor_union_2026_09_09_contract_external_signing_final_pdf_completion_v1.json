@@ -1,0 +1,80 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-contract-external-signing-final-pdf-completion-2026-09-09-v1",
+  "release_metadata": {
+    "release_name": "Labor Union contract external-signing final-PDF completion",
+    "application_version": "contract-external-signing-final-pdf-completion-v1",
+    "published_at": "2026-09-09",
+    "description": "Allow final signed PDF acceptance to complete an external-signing session while retaining individual completion reports and client reminders as optional audit evidence"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-matching-holiday-work-agreement-plan-version-2026-09-08-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1034_contract_external_signing_final_pdf_completion.sql",
+      "relative_path": "db/schema_parts/1034_contract_external_signing_final_pdf_completion.sql",
+      "sha256": "4cb80c657b4b04dbc65460fc64aa2081def04f6d215483f7d59978a71c953b65",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "forward-only-preserve-contract-external-signing-sessions",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "contract-external-signing-final-pdf-state-constraint-exact",
+      "phase": "post-schema",
+      "policy": "candidate-owned-check-exact",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": [
+      "contract-external-signing-receipt.v1",
+      "orders-core-stage-projection-v1"
+    ],
+    "required_restart_targets": [
+      "api"
+    ],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": [
+      "contract-external-signing-final-pdf-state-constraint-exact"
+    ]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_09_09_contract_external_signing_final_pdf_completion_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_09_09_contract_external_signing_final_pdf_completion_v1.descriptors.json",
+    "sha256": "1c8249ba9066000fe63d3ff61b55d67d89d657559c0ed0832b008f416f83bb98",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

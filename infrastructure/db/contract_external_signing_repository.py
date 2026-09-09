@@ -62,7 +62,7 @@ class MySqlContractExternalSigningRepository:
         session = self._one(_SESSION_SELECT_SQL + suffix, (session_id,))
         if session is None:
             return None
-        self._require_one(_ORDER_SELECT_SQL + suffix, (session["case_no"],))
+        order = self._require_one(_ORDER_SELECT_SQL + suffix, (session["case_no"],))
         self._require_one(
             _PLAN_SELECT_SQL + suffix,
             (session["matching_plan_id"], session["case_no"]),
@@ -91,7 +91,7 @@ class MySqlContractExternalSigningRepository:
         }
         if any(int(row["segment_id"]) not in document_by_segment for row in segments):
             raise RuntimeError("external_signing_current_staff_documents_missing")
-        client = self._require_one(
+        client = self._one(
             _CLIENT_DOCUMENT_SELECT_SQL + suffix,
             (session["case_no"], session["matching_plan_id"]),
         )
@@ -100,9 +100,22 @@ class MySqlContractExternalSigningRepository:
             int(session["matching_plan_id"]),
             segments,
             document_by_segment,
-            int(client["document_version_id"]),
         )
-        if current_document_set != str(session["current_document_set_sha256"]):
+        legacy_document_set = (
+            None
+            if client is None
+            else _legacy_document_set_fingerprint(
+                str(session["case_no"]),
+                int(session["matching_plan_id"]),
+                segments,
+                document_by_segment,
+                int(client["document_version_id"]),
+            )
+        )
+        if str(session["current_document_set_sha256"]) not in {
+            current_document_set,
+            legacy_document_set,
+        }:
             raise RuntimeError("external_signing_document_set_stale")
         reports = self._all(_REPORT_TARGETS_SELECT_SQL + suffix, (session["id"],))
         staff_reported = tuple(
@@ -126,8 +139,10 @@ class MySqlContractExternalSigningRepository:
                 for row in segments
             ),
             reported_staff_segment_ids=staff_reported,
-            client_subject_reference=str(client["client_id"]),
-            client_document_version_id=int(client["document_version_id"]),
+            client_subject_reference=str(order["client_id"]),
+            client_document_version_id=(
+                None if client is None else int(client["document_version_id"])
+            ),
             commitment_id=_optional_int(session["commitment_id"]),
             client_reported=any(
                 str(row["report_scope"]) == "client" for row in reports
@@ -174,14 +189,11 @@ class MySqlContractExternalSigningRepository:
         client = self._one(
             _CLIENT_DOCUMENT_SELECT_SQL + suffix, (case_no, plan["id"])
         )
-        if client is None:
-            return None
         document_set = _document_set_fingerprint(
             case_no,
             int(plan["id"]),
             segments,
             document_by_segment,
-            int(client["document_version_id"]),
         )
         return ExternalSigningSessionFacts(
             derive_external_signing_session_id(case_no, int(plan["id"]), document_set),
@@ -198,7 +210,7 @@ class MySqlContractExternalSigningRepository:
             ),
             (),
             str(order["client_id"]),
-            int(client["document_version_id"]),
+            None if client is None else int(client["document_version_id"]),
             None,
             False,
             ExternalSigningState.STAFF_REPORTING,
@@ -212,7 +224,12 @@ class MySqlContractExternalSigningRepository:
         return tuple(_legacy_manual_evidence(row, case_no) for row in rows)
 
     def activate_session(
-        self, facts: ExternalSigningSessionFacts, *, actor_id: str
+        self,
+        facts: ExternalSigningSessionFacts,
+        *,
+        actor_id: str,
+        commitment_id: int | None = None,
+        status_version: int = 0,
     ) -> None:
         self._insert(
             _SESSION_ACTIVATE_SQL,
@@ -221,6 +238,8 @@ class MySqlContractExternalSigningRepository:
                 facts.case_no,
                 facts.matching_plan_id,
                 facts.document_set_fingerprint,
+                commitment_id,
+                status_version,
                 actor_id,
             ),
         )
@@ -360,9 +379,7 @@ class MySqlContractExternalSigningRepository:
         prerequisites: StaffCompletionPrerequisites | None,
     ) -> None:
         commitment_id = None if prerequisites is None else prerequisites.commitment_id
-        reminder_id = (
-            None if prerequisites is None else prerequisites.client_reminder_task_id
-        )
+        reminder_id = None
         with self._connection.cursor() as cursor:
             cursor.execute(
                 _SESSION_ADVANCE_SQL,
@@ -463,6 +480,7 @@ class MySqlContractExternalSigningRepository:
         session: ExternalSigningSessionFacts,
         document: FinalContractDocumentReadback,
         *,
+        commitment_id: int,
         resulting_status_version: int,
         applied_at: datetime,
     ) -> None:
@@ -475,11 +493,12 @@ class MySqlContractExternalSigningRepository:
                     document.final_document_id,
                 ),
             )
-            if cursor.rowcount != 1:
+            if cursor.rowcount not in {0, 1}:
                 raise RuntimeError("external_signing_final_recovery_state_conflict")
             cursor.execute(
                 _FINAL_SESSION_COMPLETE_SQL,
                 (
+                    commitment_id,
                     resulting_status_version,
                     session.session_id,
                     session.status_version,
@@ -938,7 +957,6 @@ def _document_set_fingerprint(
     matching_plan_id: int,
     segments: list[Mapping[str, Any]],
     document_by_segment: Mapping[int, int],
-    client_document_version_id: int,
 ) -> str:
     return fingerprint_payload(
         {
@@ -946,6 +964,25 @@ def _document_set_fingerprint(
             "matching_plan_id": matching_plan_id,
             "staff_documents": [
                 [int(row["segment_id"]), document_by_segment[int(row["segment_id"])]]
+                for row in segments
+            ],
+        }
+    ).value
+
+
+def _legacy_document_set_fingerprint(
+    case_no: str,
+    matching_plan_id: int,
+    segments: list[Mapping[str, Any]],
+    document_by_segment: Mapping[int, int],
+    client_document_version_id: int,
+) -> str:
+    return fingerprint_payload(
+        {
+            "case_no": case_no,
+            "matching_plan_id": matching_plan_id,
+            "staff_documents": [
+                [int(row["segment_id"]), document_by_segment[int(row["segment_id"])] ]
                 for row in segments
             ],
             "client_document_id": client_document_version_id,
@@ -970,13 +1007,13 @@ _CURRENT_ACCEPTED_PLAN_SQL = (
 _SESSION_ACTIVATE_SQL = (
     "INSERT INTO contract_external_signing_sessions "
     "(external_signing_session_id,case_no,matching_plan_id,current_document_set_sha256,"
-    "activated_by_actor) VALUES (%s,%s,%s,%s,%s)"
+    "commitment_id,aggregate_version,activated_by_actor) VALUES (%s,%s,%s,%s,%s,%s,%s)"
 )
 _SESSION_INTERNAL_SELECT_SQL = (
     "SELECT id FROM contract_external_signing_sessions "
     "WHERE external_signing_session_id=%s FOR UPDATE"
 )
-_ORDER_SELECT_SQL = "SELECT case_no FROM orders WHERE case_no=%s"
+_ORDER_SELECT_SQL = "SELECT case_no,client_id FROM orders WHERE case_no=%s"
 _PLAN_SELECT_SQL = (
     "SELECT id FROM caregiver_matching_plans WHERE id=%s AND case_no=%s "
     "AND status='accepted' AND is_active=1"
@@ -1102,8 +1139,10 @@ _RECOVERY_FULFILL_SQL = (
 )
 _FINAL_SESSION_COMPLETE_SQL = (
     "UPDATE contract_external_signing_sessions SET session_state='completed',"
-    "aggregate_version=%s WHERE external_signing_session_id=%s "
-    "AND aggregate_version=%s AND session_state='client_reported_final_pdf_pending'"
+    "commitment_id=COALESCE(commitment_id,%s),aggregate_version=%s "
+    "WHERE external_signing_session_id=%s AND aggregate_version=%s "
+    "AND session_state IN ('staff_reporting','staff_reports_complete',"
+    "'client_reported_final_pdf_pending')"
 )
 _FINAL_READBACK_COLUMNS = (
     "document.final_document_id,document.case_no,object.opaque_object_id AS file_id,"

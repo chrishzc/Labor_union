@@ -1,6 +1,6 @@
 {
   "contract": "labor-union-validation-schema/v1",
-  "release_id": "labor-union-validation-schema-2026-09-08-v29",
+  "release_id": "labor-union-validation-schema-2026-09-09-v30",
   "purpose": "Rebuild an isolated lu_test_* schema from version-controlled artifacts only.",
   "base_schema": {
     "path": "db/schema.sql",
@@ -8,13 +8,13 @@
   },
   "schema_parts": {
     "selection": "schema_assembly_active_bootstrap",
-    "expected_count": 158,
-    "ordered_digest_sha256": "4b700cf1033d5801017df668de059de006ae4f2fe4ea57db97a2c604d3b13bfb",
-    "terminal_artifact": "1032_matching_holiday_work_agreements.sql"
+    "expected_count": 159,
+    "ordered_digest_sha256": "cec299e03a276acda8469debdf1f2131ccfcb723b42971a0eca55df475441e15",
+    "terminal_artifact": "1034_contract_external_signing_final_pdf_completion.sql"
   },
   "schema_assembly": {
     "path": "db/schema_assembly/labor_union_fresh_schema_v1.json",
-    "sha256": "9d839b60bd7d3946adffb99eeb5bce63f80a97fcc1c594251335145710c74d68"
+    "sha256": "0c5c6e60833bad3aff86ea5cf11287e33413d001c0ee48a0845d631c315ebfaf"
   },
   "full_release": {
     "path": "db/releases/labor_union_validation_schema_v1.sql",

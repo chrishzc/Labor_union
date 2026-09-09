@@ -16,15 +16,17 @@ import {
   type LegacyRecoveryPreviewInput,
   type LegacyRecoveryQuery,
   type LegacyRecoveryTarget,
+  type StaffReminderReadiness,
 } from '../api/orders/contract_external_signing_client';
 import { ApiHttpError, ApiNetworkError, ApiTimeoutError } from '../api/shared/typed_errors';
+import { contractSigningClient } from '../api/orders/contract_signing_client';
 
 export interface ContractExternalSigningActionsProps {
   caseNo: string;
   onCommitted?: () => Promise<void> | void;
 }
 
-type WorkingOperation = 'query' | 'download' | 'staff_report' | 'client_report' | 'final_preview' | 'final_apply' | 'receipt' | 'readback';
+type WorkingOperation = 'query' | 'prepare_staff' | 'download' | 'handoff' | 'reminder_check' | 'reminder_enqueue' | 'staff_report' | 'client_report' | 'final_preview' | 'final_apply' | 'receipt' | 'readback';
 
 interface RecoveryPreviewState {
   target: LegacyRecoveryTarget;
@@ -82,9 +84,10 @@ function outcomeCouldBeUnknown(error: unknown): boolean {
 }
 
 function stateLabel(query: ContractExternalSigningQuery): string {
+  if (!query.handoff_recorded) return '待送交外部簽署平台';
   switch (query.state) {
-    case 'staff_reporting': return '等待月嫂完成回報';
-    case 'staff_reports_complete': return '月嫂回報完成，等待客戶回報';
+    case 'staff_reporting': return '已送交外部平台，等待最終簽署 PDF';
+    case 'staff_reports_complete': return '已送交外部平台，等待最終簽署 PDF';
     case 'client_reported_final_pdf_pending': return '最終簽署 PDF 待回收';
     case 'completed': return '契約完成';
     case 'superseded': return '此簽約工作已被新版取代';
@@ -172,20 +175,20 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
   const identities = useRef(new Map<string, ExternalSigningCommandIdentity>());
   const requestGeneration = useRef(0);
   const [query, setQuery] = useState<ContractExternalSigningQuery | null>(null);
+  const [preparationSegments, setPreparationSegments] = useState<number[]>([]);
   const [recoveryQuery, setRecoveryQuery] = useState<LegacyRecoveryQuery | null>(null);
   const [uiState, setUiState] = useState<ContractExternalSigningUiState>({ type: 'querying' });
   const [notice, setNotice] = useState<string | null>(null);
-  const [staffReasons, setStaffReasons] = useState<Record<number, string>>({});
-  const [clientReason, setClientReason] = useState('');
   const [recoveryReasons, setRecoveryReasons] = useState<Record<string, string>>({});
-  const [confirmationMethod, setConfirmationMethod] = useState<ExternalSigningConfirmationMethod>('verified_other');
+  const [confirmationMethod] = useState<ExternalSigningConfirmationMethod>('verified_other');
   const [finalFile, setFinalFile] = useState<File | null>(null);
+  const [reminderReadiness, setReminderReadiness] = useState<Record<number, StaffReminderReadiness>>({});
 
   const loadQuery = useCallback(async (signal?: AbortSignal): Promise<ContractExternalSigningQuery> => {
     const generation = ++requestGeneration.current;
     setUiState({ type: 'querying' });
     const value = await contractExternalSigningClient.query(caseNo, { signal });
-    const recovery = value.state === 'superseded'
+    const recovery = value.state === 'superseded' || value.client_target.document_version_id === null
       ? null
       : await contractExternalSigningClient.queryLegacyRecovery(caseNo, { signal });
     if (recovery) assertRecoveryQueryMatchesCurrent(value, recovery);
@@ -199,9 +202,11 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
   useEffect(() => {
     const controller = new AbortController();
     setQuery(null);
+    setPreparationSegments([]);
     setRecoveryQuery(null);
     setNotice(null);
     setFinalFile(null);
+    setReminderReadiness({});
     identities.current.clear();
     void loadQuery(controller.signal).then(async (value) => {
       if (controller.signal.aborted || value.state !== 'completed') return;
@@ -219,7 +224,20 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
       } catch (error) {
         if (!controller.signal.aborted) setUiState({ type: 'error', message: safeErrorMessage(error) });
       }
-    }).catch((error) => {
+    }).catch(async (error) => {
+      if (controller.signal.aborted) return;
+      if (error instanceof ApiHttpError && error.code === 'external_signing_session_facts_unavailable') {
+        try {
+          const legacy = await contractSigningClient.query(caseNo, { signal: controller.signal });
+          if (!controller.signal.aborted && legacy.staff_segments.length > 0) {
+            setPreparationSegments(legacy.staff_segments.map((segment) => segment.segment_id));
+            setUiState({ type: 'ready' });
+            return;
+          }
+        } catch {
+          // Preserve the canonical successor error below.
+        }
+      }
       if (!controller.signal.aborted) setUiState({ type: 'error', message: safeErrorMessage(error) });
     });
     return () => {
@@ -227,6 +245,82 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
       controller.abort();
     };
   }, [caseNo, loadQuery]);
+
+  const prepareStaffUnsigned = async (segmentId: number) => {
+    const identity = currentIdentity(identities.current, `prepare-${segmentId}`);
+    setUiState({ type: 'working', operation: 'prepare_staff' });
+    setNotice(null);
+    try {
+      const prepared = await contractExternalSigningClient.prepareStaffUnsignedPdf(
+        caseNo, segmentId, identity,
+      );
+      identities.current.delete(`prepare-${segmentId}`);
+      setNotice(`${prepared.replayed ? '已重新確認' : '已產生'}月嫂分段 #${segmentId} 未簽 PDF，正在載入簽約工作。`);
+      setPreparationSegments([]);
+      await loadQuery();
+    } catch (error) {
+      setUiState({ type: 'error', message: safeErrorMessage(error) });
+    }
+  };
+
+  const recordHandoff = async () => {
+    if (!query || query.handoff_recorded) return;
+    const identity = currentIdentity(identities.current, 'handoff');
+    setUiState({ type: 'working', operation: 'handoff' });
+    setNotice(null);
+    try {
+      const receipt = await contractExternalSigningClient.recordHandoff(
+        caseNo, query.status_version, identity,
+      );
+      if (
+        receipt.session_id !== query.session_id
+        || receipt.resulting_status_version !== query.status_version + 1
+      ) {
+        throw new Error('外部平台交接結果與目前簽約狀態不一致。');
+      }
+      identities.current.delete('handoff');
+      setNotice(receipt.replayed ? '已重新確認外部平台交接。' : '已記錄送交外部簽署平台。');
+      await loadQuery();
+    } catch (error) {
+      setUiState({ type: 'error', message: safeErrorMessage(error) });
+    }
+  };
+
+  const checkReminderReadiness = async (segmentId: number) => {
+    setUiState({ type: 'working', operation: 'reminder_check' });
+    setNotice(null);
+    try {
+      const readiness = await contractExternalSigningClient.getStaffReminderReadiness(caseNo, segmentId);
+      setReminderReadiness((current) => ({ ...current, [segmentId]: readiness }));
+      setUiState({ type: 'ready' });
+    } catch (error) {
+      setUiState({ type: 'error', message: safeErrorMessage(error) });
+    }
+  };
+
+  const enqueueReminder = async (
+    segmentId: number,
+    staffSubjectReference: string,
+    documentVersionId: number,
+  ) => {
+    const readiness = reminderReadiness[segmentId];
+    if (!readiness?.ready || readiness.document_version_id !== documentVersionId) return;
+    const identity = currentIdentity(identities.current, `reminder-${segmentId}`);
+    setUiState({ type: 'working', operation: 'reminder_enqueue' });
+    setNotice(null);
+    try {
+      const task = await contractExternalSigningClient.enqueueStaffReminder(
+        caseNo, segmentId, documentVersionId, identity,
+      );
+      identities.current.delete(`reminder-${segmentId}`);
+      setNotice(task.replayed
+        ? `月嫂 ${staffSubjectReference} 的 LINE 契約通知工作已存在（工作 #${task.task_id}）。`
+        : `已建立月嫂 ${staffSubjectReference} 的 LINE 契約通知工作 #${task.task_id}；尚未傳送。`);
+      setUiState({ type: 'ready' });
+    } catch (error) {
+      setUiState({ type: 'error', message: safeErrorMessage(error) });
+    }
+  };
 
   const downloadUnsigned = async (documentVersionId: number, targetLabel: string) => {
     if (!query?.unsigned_document) return;
@@ -250,49 +344,6 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
       setUiState({ type: 'ready' });
     } catch (error) {
       setUiState({ type: 'error', message: safeErrorMessage(error) });
-    }
-  };
-
-  const runReport = async (
-    key: string,
-    operation: (identity: ExternalSigningCommandIdentity) => Promise<ExternalSigningReceipt>,
-  ) => {
-    const identity = currentIdentity(identities.current, key);
-    setNotice(null);
-    setUiState({ type: 'working', operation: key.startsWith('staff') ? 'staff_report' : 'client_report' });
-    try {
-      const receipt = await operation(identity);
-      const staffSegmentId = key.startsWith('staff-') ? Number(key.slice('staff-'.length)) : null;
-      const expectedCommand = staffSegmentId === null ? 'record_client_report' : 'record_staff_report';
-      if (
-        receipt.receipt_id !== identity.receiptId
-        || receipt.session_id !== query!.session_id
-        || receipt.command_type !== expectedCommand
-        || receipt.matching_segment_id !== staffSegmentId
-        || receipt.resulting_status_version !== query!.status_version + 1
-      ) {
-        throw new Error('完成回報與原操作或目前狀態不一致；不得視為完成。');
-      }
-      identities.current.delete(key);
-      setNotice(receipt.replayed ? '完成回報已安全重播，正在重新查詢。' : '完成回報已記錄，正在重新查詢。');
-      await loadQuery();
-    } catch (error) {
-      if (outcomeCouldBeUnknown(error)) {
-        const segmentId = key.startsWith('staff-') ? Number(key.slice('staff-'.length)) : null;
-        setUiState({
-          type: 'outcome_unknown',
-          identity,
-          expected: {
-            commandType: segmentId === null ? 'record_client_report' : 'record_staff_report',
-            sessionId: query!.session_id,
-            matchingSegmentId: segmentId,
-            resultingStatusVersion: query!.status_version + 1,
-          },
-          message: '完成回報結果未明；請使用原操作重新確認，不要重送。',
-        });
-      } else {
-        setUiState({ type: 'error', message: safeErrorMessage(error) });
-      }
     }
   };
 
@@ -500,20 +551,14 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
   const allRecoveryStaffReported = recoveryQuery?.targets
     .filter((target) => target.scope === 'staff')
     .every((target) => target.reported) ?? false;
-  const isRecoveryOwnedTarget = (scope: 'staff' | 'client', segmentId: number | null) =>
-    recoveryQuery?.targets.some((target) => (
-      target.scope === scope
-      && target.matching_segment_id === segmentId
-      && !target.reported
-      && hasCompleteLegacyLineage(target)
-    )) ?? false;
+
 
   return (
     <section aria-label="外部平台簽約與最終 PDF" data-control-id="orders.contract-external-signing.actions" style={{ display: 'grid', gap: '14px' }}>
       <header>
         <h3 style={{ margin: 0 }}>📄 外部平台簽約與最終 PDF</h3>
         <p style={{ margin: '6px 0 0', color: '#74593f', fontSize: '0.84rem' }}>
-          系統只保存完成回報與受控最終文件；外部平台狀態、LINE 已送達或畫面提示都不等於契約完成。
+          送交外部平台後，請於雙方完成簽署時上傳最終 PDF；最終 PDF 驗收才會完成契約並開始定金核銷。
         </p>
       </header>
 
@@ -525,6 +570,28 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
             <div>狀態版本 {query.status_version}</div>
           </details>
         </div>
+      )}
+
+      {((query && !query.unsigned_document && query.staff_targets.length > 0)
+        || (!query && preparationSegments.length > 0)) && (
+        <section aria-label="準備月嫂未簽契約 PDF" style={{ border: '1px solid #dec0b6', borderRadius: '10px', padding: '12px', display: 'grid', gap: '8px' }}>
+          <strong>準備月嫂未簽契約 PDF</strong>
+          <div style={{ fontSize: '0.82rem', color: '#74593f' }}>
+            系統會先重新核對目前案件、正式指派與所有必要欄位，再產生受控 PDF；此操作不會送出 LINE。
+          </div>
+          {(query
+            ? query.staff_targets.map((target) => target.matching_segment_id)
+            : preparationSegments).map((segmentId) => (
+            <button
+              key={segmentId}
+              type="button"
+              disabled={busy}
+              onClick={() => void prepareStaffUnsigned(segmentId)}
+            >
+              產生月嫂分段 #{segmentId} 未簽 PDF
+            </button>
+          ))}
+        </section>
       )}
 
       {recoveryQuery && pendingRecoveryTargets.length > 0 && (
@@ -628,109 +695,73 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
           </div>
           <div style={{ display: 'grid', gap: '6px' }}>
             {query.staff_targets.map((target) => (
-              <button
-                key={target.matching_segment_id}
-                type="button"
-                disabled={busy}
-                onClick={() => void downloadUnsigned(target.document_version_id, `月嫂 ${target.staff_subject_reference} `)}
-              >
-                下載月嫂 {target.staff_subject_reference} 未簽契約 PDF
-              </button>
+              <div key={target.matching_segment_id} style={{ display: 'grid', gap: '4px' }}>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void downloadUnsigned(target.document_version_id, `月嫂 ${target.staff_subject_reference} `)}
+                >
+                  下載月嫂 {target.staff_subject_reference} 未簽契約 PDF
+                </button>
+                <button type="button" disabled={busy} onClick={() => void checkReminderReadiness(target.matching_segment_id)}>
+                  檢查月嫂 {target.staff_subject_reference} LINE 通知準備度
+                </button>
+                {reminderReadiness[target.matching_segment_id] && (
+                  <div role="status" style={{ fontSize: '0.82rem' }}>
+                    <div>{reminderReadiness[target.matching_segment_id].message}</div>
+                    <div>{reminderReadiness[target.matching_segment_id].ready
+                      ? '通知內容與收件綁定均已就緒；尚未建立或送出通知。'
+                      : `尚不可建立通知：${reminderReadiness[target.matching_segment_id].blockers.join('、')}`}</div>
+                  </div>
+                )}
+                {reminderReadiness[target.matching_segment_id]?.ready && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void enqueueReminder(
+                      target.matching_segment_id,
+                      target.staff_subject_reference,
+                      target.document_version_id,
+                    )}
+                  >
+                    建立月嫂 {target.staff_subject_reference} LINE 契約通知工作（不立即傳送）
+                  </button>
+                )}
+              </div>
             ))}
-            <button
+            {query.client_target.document_version_id !== null && <button
               type="button"
               disabled={busy}
               onClick={() => void downloadUnsigned(
-                query.client_target.document_version_id,
+                query.client_target.document_version_id!,
                 `客戶 ${query.client_target.client_subject_reference} `,
               )}
             >
               下載客戶 {query.client_target.client_subject_reference} 未簽契約 PDF
-            </button>
+            </button>}
           </div>
-        </section>
-      )}
-
-      {query?.staff_targets.map((target) => (
-        <section key={target.matching_segment_id} aria-label={`月嫂 ${target.staff_subject_reference} 外部簽署回報`} style={{ border: '1px solid #dec0b6', borderRadius: '10px', padding: '12px' }}>
-          <strong>月嫂 {target.staff_subject_reference}</strong>
-          <div style={{ fontSize: '0.82rem', margin: '5px 0' }}>{target.reported ? '完成回報已記錄' : '尚待外部簽署完成回報'}</div>
-          {!target.reported && query.state === 'staff_reporting' && !isRecoveryOwnedTarget('staff', target.matching_segment_id) && (
-            <>
-              <label style={{ display: 'grid', gap: '4px' }}>
-                月嫂完成證據
-                <input
-                  value={staffReasons[target.matching_segment_id] ?? ''}
-                  disabled={busy}
-                  maxLength={500}
-                  onChange={(event) => {
-                    setStaffReasons((current) => ({ ...current, [target.matching_segment_id]: event.target.value }));
-                    identities.current.delete(`staff-${target.matching_segment_id}`);
-                  }}
-                />
-              </label>
-              <button
-                type="button"
-                disabled={busy || !(staffReasons[target.matching_segment_id] ?? '').trim()}
-                onClick={() => void runReport(`staff-${target.matching_segment_id}`, (identity) =>
-                  contractExternalSigningClient.recordStaffCompletionReport(caseNo, target.matching_segment_id, {
-                    expected_status_version: query.status_version,
-                    expected_document_version_id: target.document_version_id,
-                    confirmation_method: confirmationMethod,
-                    reason: staffReasons[target.matching_segment_id] ?? '',
-                  }, identity))}
-              >
-                記錄月嫂 {target.staff_subject_reference} 完成回報
-              </button>
-            </>
+          {!query.handoff_recorded && (
+            <button type="button" disabled={busy} onClick={() => void recordHandoff()}>
+              確認契約已送交外部簽署平台
+            </button>
           )}
         </section>
-      ))}
+      )}
 
       {query && (
-        <label style={{ display: 'grid', gap: '4px', maxWidth: '320px' }}>
-          受控人工確認方式
-          <select value={confirmationMethod} disabled={busy} onChange={(event) => {
-            setConfirmationMethod(event.target.value as ExternalSigningConfirmationMethod);
-            identities.current.clear();
-            if (uiState.type === 'recovery_preview_ready') setUiState({ type: 'ready' });
-          }}>
-            <option value="phone">電話確認</option>
-            <option value="paper">紙本確認</option>
-            <option value="in_person">當面確認</option>
-            <option value="verified_other">其他已驗證方式</option>
-          </select>
-        </label>
+        <details style={{ border: '1px solid #dec0b6', borderRadius: '10px', padding: '10px 12px', color: '#74593f' }}>
+          <summary>選用稽核資料（不影響最終 PDF 驗收）</summary>
+          <div style={{ marginTop: '6px', fontSize: '0.82rem' }}>
+            月嫂個別回報 {query.staff_targets.filter((target) => target.reported).length}/{query.staff_targets.length}；
+            客戶個別回報 {query.client_target.reported ? '已記錄' : '未記錄'}。
+            個別回報只供追溯，不是契約完成門檻。
+          </div>
+        </details>
       )}
 
-      {query?.state === 'staff_reports_complete' && !query.client_target.reported && query.commitment_id !== null && !isRecoveryOwnedTarget('client', null) && (
-        <section aria-label="客戶外部簽署回報" style={{ border: '1px solid #dec0b6', borderRadius: '10px', padding: '12px' }}>
-          <strong>客戶 {query.client_target.client_subject_reference}</strong>
-          <label style={{ display: 'grid', gap: '4px' }}>
-            客戶完成證據
-            <input value={clientReason} disabled={busy} maxLength={500} onChange={(event) => {
-              setClientReason(event.target.value);
-              identities.current.delete('client-report');
-            }} />
-          </label>
-          <button
-            type="button"
-            disabled={busy || !clientReason.trim()}
-            onClick={() => void runReport('client-report', (identity) =>
-              contractExternalSigningClient.recordClientCompletionReport(caseNo, {
-                expected_status_version: query.status_version,
-                expected_document_version_id: query.client_target.document_version_id,
-                expected_commitment_id: query.commitment_id!,
-                confirmation_method: confirmationMethod,
-                reason: clientReason,
-              }, identity))}
-          >
-            記錄客戶完成回報
-          </button>
-        </section>
-      )}
-
-      {query?.state === 'client_reported_final_pdf_pending'
+      {query?.handoff_recorded
+        && query.state !== 'completed'
+        && query.state !== 'superseded'
         && uiState.type !== 'receipt_committed'
         && !(uiState.type === 'outcome_unknown' && uiState.expected.commandType === 'apply_final_signed_contract') && (
         <section aria-label="最終簽署 PDF 納管" style={{ border: '1px solid #dec0b6', borderRadius: '10px', padding: '12px', display: 'grid', gap: '8px' }}>
@@ -765,7 +796,7 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
                   checked={uiState.confirmed}
                   onChange={(event) => setUiState({ ...uiState, confirmed: event.target.checked })}
                 />
-                我已核對案件、檔名、PDF 類型與版本
+                我已核對案件、檔名、PDF 類型、版本，且此 PDF 包含客戶與所有月嫂的完整簽署
               </label>
               <button
                 type="button"

@@ -14,6 +14,7 @@ from subsystems.orders.historical_stage_baseline_overlay import (
 from subsystems.orders.stage_projection_query import (
     OrderOperationalTimeline,
     OrderOperationalTimelinePage,
+    SettlementProjection,
     SopStepProjection,
     SourceLineage,
     StageProjection,
@@ -386,3 +387,43 @@ def test_historical_cancel_has_no_active_operational_stage() -> None:
     assert all(stage.status == "unavailable" for stage in result.stages)
     assert all(step.status == "unavailable" for step in result.sop_steps)
     assert result.stages[0].availability_reason == "historical_order_cancelled"
+
+
+def test_historical_cancel_preserves_settlement_owner_projection() -> None:
+    facts = HistoricalStageBaselineFacts(
+        "CASE-1", 104, OrderLifecycleStatus.CANCELLED, None
+    )
+    settlement = (
+        SettlementProjection(
+            "service_completion",
+            "completed",
+            SourceLineage("Orders", "completion:1", 1),
+            None,
+            None,
+        ),
+        SettlementProjection(
+            "client_settlement",
+            "blocked",
+            SourceLineage("Client Finance", "client-settlement:1", 2),
+            None,
+            None,
+        ),
+        SettlementProjection(
+            "staff_payout",
+            "unavailable",
+            SourceLineage("Staff Payables", None, None),
+            None,
+            "obligation_projection_missing",
+        ),
+    )
+    original = _timeline(lifecycle_status=OrderLifecycleStatus.CANCELLED)
+    original = replace(
+        original,
+        stages=original.stages[:-1]
+        + (replace(original.stages[-1], settlement=settlement),),
+    )
+
+    result = _query(facts, original)
+
+    assert result.stages[-1].status == "unavailable"
+    assert result.stages[-1].settlement == settlement

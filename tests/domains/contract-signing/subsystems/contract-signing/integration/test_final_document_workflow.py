@@ -76,8 +76,12 @@ def test_apply_uses_one_outer_uow_and_required_lock_order() -> None:
     assert uows.instances[0].commits == 1
     assert repository.events == [
         "session:lock",
-        "orders:preview",
         "file:preview",
+        "prerequisites:preview",
+        "orders:preview",
+        "prerequisites:apply",
+        "prerequisites:preview",
+        "orders:preview",
         "orders:apply",
         "file:apply",
         "final:register",
@@ -86,6 +90,7 @@ def test_apply_uses_one_outer_uow_and_required_lock_order() -> None:
     ]
     assert len(controlled.applies) == 1
     assert len(orders.applies) == 1
+    assert orders.applies[0].expected_client_finance_version.value == 5
 
 
 def test_stale_token_rolls_back_before_domain_writes() -> None:
@@ -225,18 +230,40 @@ class FakeOrders:
         self.events = events
         self.applies = []
 
-    def preview(self, case_no, _intent):
+    def preview_with_identity(
+        self, case_no, _intent, contract_identity, *, fallback_service_dates
+    ):
         self.events.append("orders:preview")
+        assert contract_identity.startswith("external-final:")
+        assert fallback_service_dates == (NOW.date(),)
+        account_version = 5 if "prerequisites:apply" in self.events else 4
         return SimpleNamespace(
             candidate=SimpleNamespace(expected_order_version=7),
-            client_finance_impact=SimpleNamespace(expected_account_version=4),
+            client_finance_impact=SimpleNamespace(expected_account_version=account_version),
             fingerprint=PreviewFingerprint("e" * 64),
         )
 
-    def apply_borrowed(self, command):
+    def apply_borrowed_with_identity(self, command, contract_identity):
         self.events.append("orders:apply")
         self.applies.append(command)
-        return SimpleNamespace(contract_identity="CONTRACT-001")
+        return SimpleNamespace(contract_identity=contract_identity)
+
+
+class FakePrerequisites:
+    def __init__(self, events) -> None:
+        self.events = events
+
+    def preview_service_dates(self, facts):
+        self.events.append("prerequisites:preview")
+        assert facts.case_no == "CASE-001"
+        return (NOW.date(),)
+
+    def establish_prerequisites(self, command, facts, resulting_status_version):
+        self.events.append("prerequisites:apply")
+        assert command.case_no == facts.case_no
+        assert command.matching_plan_id == facts.matching_plan_id
+        assert resulting_status_version == facts.status_version + 1
+        return SimpleNamespace(commitment_id=44)
 
 
 class FakeUow:
@@ -276,6 +303,7 @@ def _workflow():
         repository,
         controlled,
         orders,
+        FakePrerequisites(events),
         uows,
         FixedBusinessClock(NOW),
         HmacFinalDocumentPreviewTokenCodec("s" * 32),
@@ -290,13 +318,13 @@ def _session():
         matching_plan_id=9,
         document_set_fingerprint="a" * 64,
         staff_targets=(StaffSigningReportTarget(11, "501", 101),),
-        reported_staff_segment_ids=(11,),
+        reported_staff_segment_ids=(),
         client_subject_reference="301",
         client_document_version_id=201,
-        commitment_id=44,
-        client_reported=True,
-        state=ExternalSigningState.CLIENT_REPORTED_FINAL_PDF_PENDING,
-        status_version=3,
+        commitment_id=None,
+        client_reported=False,
+        state=ExternalSigningState.STAFF_REPORTING,
+        status_version=1,
     )
 
 
@@ -315,7 +343,7 @@ def _preview_command():
     return PreviewFinalSignedContractUpload(
         _session().session_id,
         "CASE-001",
-        ExpectedVersion(3),
+        ExpectedVersion(1),
         _intent(),
     )
 

@@ -63,7 +63,6 @@ class LibreOfficeContractRenderer:
         mapping_path: Path,
         facts: Mapping[str, object],
     ) -> RenderedContract:
-        executable = self._resolve_executable()
         try:
             workbook_content = render_contract_template(
                 template_path=template_path,
@@ -77,6 +76,22 @@ class LibreOfficeContractRenderer:
                 "contract_pdf_renderer_source_invalid",
                 "契約 PDF renderer 的核准來源無法讀取。",
             ) from None
+        return self.render_workbook(content=workbook_content, filename=template_path.name)
+
+    def render_workbook(self, *, content: bytes, filename: str) -> RenderedContract:
+        """Convert one already-rendered immutable XLSX source to PDF."""
+        executable = self._resolve_executable()
+        if not isinstance(content, bytes) or not content:
+            raise ContractRendererError(
+                "contract_pdf_renderer_source_invalid",
+                "契約 PDF renderer 的核准來源無法讀取。",
+            )
+        source_name = Path(filename).name
+        if source_name != filename or not source_name.lower().endswith(".xlsx"):
+            raise ContractRendererError(
+                "contract_pdf_renderer_source_invalid",
+                "契約 PDF renderer 的核准來源無法讀取。",
+            )
         try:
             with tempfile.TemporaryDirectory(prefix="contract-pdf-render-") as directory:
                 workspace = Path(directory)
@@ -84,8 +99,8 @@ class LibreOfficeContractRenderer:
                 output_directory = workspace / "output"
                 profile_directory.mkdir()
                 output_directory.mkdir()
-                source_path = workspace / "contract-source.xlsx"
-                source_path.write_bytes(workbook_content)
+                source_path = workspace / source_name
+                source_path.write_bytes(content)
                 command = self._command(
                     executable=executable,
                     profile_directory=profile_directory,
@@ -122,7 +137,7 @@ class LibreOfficeContractRenderer:
             ) from None
         return RenderedContract.from_pdf_bytes(
             content=content,
-            filename=f"{Path(template_path).stem}.pdf",
+            filename=f"{Path(source_name).stem}.pdf",
             renderer_identity=_RENDERER_IDENTITY,
         )
 

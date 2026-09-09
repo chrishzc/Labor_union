@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import date, datetime, time
 
 import pytest
@@ -58,6 +59,15 @@ class _Repository:
     def load_for_apply(self, _): return self.facts
     def claim_command(self, *_): return self.claim_state
     def find_receipt(self, *_args, **_kwargs): return self.receipt
+    def record_contract_identity(self, case_no, identity):
+        assert case_no == self.facts.order.case_no
+        current = self.facts.order.contract_identity
+        if current is not None and current != identity:
+            raise ValueError("contract_identity_already_recorded")
+        self.facts = replace(
+            self.facts,
+            order=replace(self.facts.order, contract_identity=identity),
+        )
     def append_contract_completion_event(self, *_): self.persisted.append("contract"); return 7
     def persist_client_finance_impact(self, command): self.persisted.append(command)
     def append_lifecycle_event(self, command): self.persisted.append(command); return 8
@@ -124,6 +134,44 @@ def test_apply_borrowed_leaves_commit_to_outer_owner():
     assert receipt.contract_completed is True
     assert repository.persisted[-1].stored_receipt.receipt == receipt
     assert unit_of_work.committed is False
+
+
+def test_preview_and_borrowed_apply_can_bind_the_final_pdf_identity() -> None:
+    facts = _facts()
+    repository = _Repository(
+        replace(facts, order=replace(facts.order, contract_identity=None))
+    )
+    workflow = _workflow(repository)
+    identity = "external-final:" + "a" * 64
+    preview = workflow.preview_with_identity(
+        "CASE-1", ContractCompletionIntent.CONFIRM_COMPLETED, identity
+    )
+
+    receipt = workflow.apply_borrowed_with_identity(_request(preview), identity)
+
+    assert receipt.contract_identity == identity
+    assert repository.facts.order.contract_identity == identity
+
+
+def test_final_pdf_preview_can_project_missing_commitment_dates_without_writing() -> None:
+    initial = _facts(charge_days=0)
+    facts = replace(initial, order=replace(initial.order, contract_identity=None))
+    repository = _Repository(facts)
+    workflow = _workflow(repository)
+    identity = "external-final:" + "b" * 64
+    service_dates = tuple(
+        date(2026, 8, day) for day in range(1, facts.contracted_service_day_count + 1)
+    )
+
+    preview = workflow.preview_with_identity(
+        "CASE-1",
+        ContractCompletionIntent.CONFIRM_COMPLETED,
+        identity,
+        fallback_service_dates=service_dates,
+    )
+
+    assert len(preview.client_finance_impact.actions) > 0
+    assert repository.persisted == []
 
 
 def test_apply_replays_matching_receipt_without_new_writes():

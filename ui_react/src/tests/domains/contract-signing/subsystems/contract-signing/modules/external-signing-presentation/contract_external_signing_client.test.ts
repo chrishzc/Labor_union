@@ -3,12 +3,12 @@
  * Description: 驗證外部簽約 successor client 的 strict schema、PDF 下載、命令 identity 與安全 readback。
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { sessionClient } from '../api/auth/session_client';
-import { transport } from '../api/shared/transport';
+import { sessionClient } from '../../../../../../../api/auth/session_client';
+import { transport } from '../../../../../../../api/shared/transport';
 import {
   contractExternalSigningClient,
   createExternalSigningCommandIdentity,
-} from '../api/orders/contract_external_signing_client';
+} from '../../../../../../../api/orders/contract_external_signing_client';
 
 const sessionId = 'ces_1234567890abcdef1234567890abcdef';
 const query = {
@@ -16,6 +16,7 @@ const query = {
   session_id: sessionId,
   state: 'staff_reporting' as const,
   status_version: 3,
+  handoff_recorded: true,
   matching_plan_id: 17,
   commitment_id: null,
   unsigned_document: {

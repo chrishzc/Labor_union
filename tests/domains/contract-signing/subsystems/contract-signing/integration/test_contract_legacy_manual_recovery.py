@@ -165,7 +165,7 @@ class FakeRepository:
 
 class FakeCompletionPort:
     def establish_prerequisites(self, command, facts, resulting_status_version):
-        return StaffCompletionPrerequisites(44, 77)
+        return StaffCompletionPrerequisites(44)
 
 
 class FakeUow:

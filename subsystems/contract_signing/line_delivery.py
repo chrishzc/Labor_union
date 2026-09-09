@@ -73,6 +73,39 @@ def build_contract_delivery_request(
     )
 
 
+def build_external_platform_reminder_request(
+    recipient: LineRecipient,
+    *,
+    case_no: str,
+    session_id: str,
+    matching_segment_id: int,
+    document_version_id: int,
+    scheduled_at: datetime,
+    idempotency_key: IdempotencyKey,
+    correlation_id: CorrelationId,
+) -> LineDeliveryRequest:
+    payload = canonical_line_payload_json(
+        {"text": external_platform_staff_reminder_text(case_no)}
+    )
+    return LineDeliveryRequest(
+        recipient,
+        LineMessageKind.TEXT,
+        payload,
+        scheduled_at,
+        idempotency_key,
+        correlation_id,
+        "contract_external_signing_session",
+        f"{session_id}:staff:{matching_segment_id}:{document_version_id}",
+    )
+
+
+def external_platform_staff_reminder_text(case_no: str) -> str:
+    return (
+        f"案件 {case_no} 的契約已放到工會既定的外部簽約平台；"
+        "請前往該平台完成簽署，完成後再用 LINE 回報工會。"
+    )
+
+
 def _require_https_url(value: str) -> None:
     if not isinstance(value, str) or not value.startswith("https://"):
         raise ValueError("contract document download URL must use HTTPS")
@@ -80,4 +113,3 @@ def _require_https_url(value: str) -> None:
 
 def _delivery_text(case_no: str, audience_label: str, download_url: str) -> str:
     return f"案件 {case_no} 的{audience_label}已備妥，請由此安全連結查看：{download_url}"
-

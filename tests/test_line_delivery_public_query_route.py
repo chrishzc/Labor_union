@@ -140,8 +140,20 @@ def test_delivery_source_groups_are_safe_and_bounded() -> None:
 
     assert "line_push" in general_push
     assert "customer_service_ticket" in general_push
+    assert "contract_external_signing_session" in general_push
     assert "rich_menu_link" not in general_push
     assert rich_menu_link == ("rich_menu_link",)
+
+    contract = line_tasks._source_aggregate_types(
+        LineDeliveryPublicSourceType.CONTRACT
+    )
+    assert contract == (
+        "contract_document_version",
+        "contract_external_signing_session",
+    )
+    assert line_tasks._public_source_type(
+        "contract_external_signing_session"
+    ) is LineDeliveryPublicSourceType.CONTRACT
 
 
 @pytest.mark.parametrize(

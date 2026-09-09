@@ -13,10 +13,19 @@
 - page: `ui_react/src/pages/OrderWorkbenchV2Page.tsx`
 - `api/routes/contract_external_signing.py`
 - `api/dependencies/contract_external_signing.py`
+- `domains/contract_signing/external_signing.py`
+- `infrastructure/db/contract_external_signing_repository.py`
+- `infrastructure/db/contract_unsigned_pdf_repository.py`
+- `infrastructure/db/external_staff_completion_port.py`
 - `infrastructure/file/libreoffice_contract_renderer.py`
 - `infrastructure/mysql/contract_context_repository.py`
 - `infrastructure/mysql/contract_full_preview_repository.py`
 - `subsystems/contract_signing/full_contract_preview.py`
+- `subsystems/contract_signing/external_signing_workflow.py`
+- `subsystems/contract_signing/final_document_workflow.py`
+- `subsystems/contract_signing/line_delivery.py`
+- `subsystems/contract_signing/unsigned_contract_pdf.py`
+- `subsystems/orders/contract_completion_workflow.py`
 - `subsystems/contract_signing/client_contract_application.py`
 - `subsystems/contract_signing/contract_renderer.py`
 - `subsystems/contract_signing/template_catalog.py`
@@ -29,10 +38,13 @@
 - `document/架構重整/01_規格基線/12_Global_效能與UX體感架構.md`
 
 ## Verification
-- `ui_react/src/tests/contract_external_signing_actions.test.tsx`
-- `ui_react/src/tests/contract_external_signing_client.test.ts`
+- layout_status: `custom_current`
+- test_root: `ui_react/src/tests/domains/contract-signing/subsystems/contract-signing/modules/external-signing-presentation/`
+- `ui_react/src/tests/domains/contract-signing/subsystems/contract-signing/modules/external-signing-presentation/contract_external_signing_actions.test.tsx`
+- `ui_react/src/tests/domains/contract-signing/subsystems/contract-signing/modules/external-signing-presentation/contract_external_signing_client.test.ts`
 - `tests/domains/contract-signing/subsystems/contract-signing/integration/test_full_contract_preview.py`
 - `tests/domains/contract-signing/subsystems/contract-signing/integration/test_contract_external_signing_api.py`
+- integration_root: `tests/domains/contract-signing/subsystems/contract-signing/integration/test_contract_completion_workflow.py`
 - routing: `.arch-map/tests/domains/contract-signing/subsystems/contract-signing/modules/external-signing-presentation.md`
 
 ## Change triggers

@@ -27,8 +27,8 @@ vi.mock('../../../../../../../api/orders/order_query_client', () => ({ loadAllOr
 const labels: Readonly<Record<CoreStageCode, string>> = {
   intake_validation: '進件與資料完整性驗證', matching_pool: '建立候選月嫂池',
   caregiver_line_delivery: '詢問月嫂接案意願', caregiver_willingness_reply: '等待月嫂意願回覆',
-  formal_recommendation: '推薦月嫂給客戶確認', caregiver_contract: '月嫂契約簽署',
-  deposit_settlement: '客戶定金核銷', client_contract: '客戶契約簽署',
+  formal_recommendation: '推薦月嫂給客戶確認', external_signing_dispatch: '建立契約並送交外部簽署平台',
+  deposit_settlement: '客戶定金核銷', external_signing_completion: '雙方外部簽署完成',
   confirmed_service_dates: '正式服務日期確認', formal_service: '正式排班與服務履約',
   service_completion: '完工／服務完成確認', client_settlement: '客戶端結算', staff_payout: '月嫂端結算',
 };
@@ -68,7 +68,7 @@ describe('Beta owner mutation 到清單與階段的完整 callback 接線', () =
 
   it.each<CoreStageCode>([
     'matching_pool', 'caregiver_line_delivery', 'caregiver_willingness_reply', 'formal_recommendation',
-    'caregiver_contract', 'client_contract', 'confirmed_service_dates', 'formal_service',
+    'external_signing_dispatch', 'external_signing_completion', 'confirmed_service_dates', 'formal_service',
   ])('%s 完成正式回讀後重查目前條件與摘要，刷新期間保留同一面板', async (code) => {
     render(<OrderWorkbenchV2Page />);
     const input = await selectStage(code);

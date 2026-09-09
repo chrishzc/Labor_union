@@ -18,6 +18,7 @@
 - layout_status: `custom_current`
 - test_root: `ui_react/src/tests/line_delivery_task_workbench.test.tsx`
 - routing: `.arch-map/tests/domains/external-integration/subsystems/line/modules/delivery-task-presentation.md`
+- integration_root: `tests/test_line_delivery_public_query_route.py`
 
 ## Change triggers
 Reconcile when delivery-task presentation、pagination/filter/stale suppression、closed error或focused test location changes。

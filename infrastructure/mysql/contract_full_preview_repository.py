@@ -144,6 +144,30 @@ class MySqlFullContractProjectionRepository:
             owner_fingerprints=owners,
         )
 
+    def load_staff_projection_for_segment(
+        self, case_no: str, matching_segment_id: int
+    ) -> FullContractOwnerProjection | None:
+        """Resolve the exact converted assignment for one matching segment."""
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT assignment.id AS assignment_id "
+                "FROM caregiver_matching_plan_segments segment "
+                "JOIN caregiver_matching_plans plan ON plan.id=segment.plan_id "
+                "JOIN case_staff_assignments assignment "
+                "ON assignment.case_no=plan.case_no "
+                "AND assignment.staff_id=segment.staff_id "
+                "AND assignment.assigned_start_date=segment.assigned_start_date "
+                "AND assignment.assigned_end_date=segment.assigned_end_date "
+                "AND assignment.status<>'cancelled' "
+                "WHERE plan.case_no=%s AND segment.id=%s "
+                "ORDER BY assignment.id LIMIT 2",
+                (case_no, matching_segment_id),
+            )
+            rows = tuple(cursor.fetchall() or ())
+        if len(rows) != 1:
+            return None
+        return self.load_staff_projection(case_no, int(rows[0]["assignment_id"]))
+
 
 def _common_facts(case: dict[str, object]) -> dict[str, object]:
     """Map typed scalar context fields; raw survey is normalized and excluded."""

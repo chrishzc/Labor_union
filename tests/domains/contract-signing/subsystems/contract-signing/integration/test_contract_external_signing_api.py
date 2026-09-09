@@ -40,6 +40,14 @@ class FakeReports:
         self.command = command
         return SimpleNamespace(replayed=False)
 
+    def record_handoff(self, command):
+        self.command = command
+        return SimpleNamespace(
+            session_id=SESSION_ID,
+            resulting_status_version=1,
+            replayed=False,
+        )
+
     def query_legacy_manual_recovery(self, case_no):
         assert case_no == CASE_NO
         return SimpleNamespace(
@@ -157,6 +165,11 @@ class FakeFullPreview:
         assert case_no == CASE_NO
         return self._result(ContractPreviewScope.STAFF, assignment_id)
 
+    def preview_staff_segment(self, case_no, matching_segment_id):
+        assert case_no == CASE_NO
+        assert matching_segment_id == 71
+        return self._result(ContractPreviewScope.STAFF, 171)
+
 class FakeApplication:
     def __init__(self) -> None:
         self.reports = FakeReports()
@@ -178,6 +191,38 @@ class FakeApplication:
             0,
         )
 
+    def prepare_staff_unsigned(
+        self, case_no, segment_id, actor, idempotency_key, correlation_id
+    ):
+        assert (case_no, segment_id) == (CASE_NO, 71)
+        assert actor.actor_id == "admin:7"
+        assert idempotency_key.value == KEY
+        return {
+            "document_version_id": 91,
+            "filename": "staff-contract.pdf",
+            "mime_type": "application/pdf",
+            "size_bytes": 1234,
+            "replayed": False,
+        }
+
+    def staff_reminder_readiness(self, case_no, segment_id):
+        assert (case_no, segment_id) == (CASE_NO, 71)
+        return {
+            "matching_segment_id": 71,
+            "document_version_id": 81,
+            "message": f"案件 {CASE_NO} 的契約已放到工會既定的外部簽約平台。",
+            "blockers": [],
+            "ready": True,
+        }
+
+    def enqueue_staff_reminder(
+        self, case_no, segment_id, document_version_id, actor, idempotency_key, correlation_id
+    ):
+        assert (case_no, segment_id, document_version_id) == (CASE_NO, 71, 81)
+        assert actor.actor_id == "admin:7"
+        assert idempotency_key.value == KEY
+        return {"task_id": 91, "status": "pending", "replayed": False}
+
     def query_case(self, case_no):
         assert case_no == CASE_NO
         return {
@@ -185,6 +230,7 @@ class FakeApplication:
             "session_id": SESSION_ID,
             "state": "staff_reporting",
             "status_version": 0,
+            "handoff_recorded": False,
             "matching_plan_id": 41,
             "commitment_id": None,
             "unsigned_document": {
@@ -262,7 +308,7 @@ def test_query_returns_only_react_contract_fields() -> None:
     data = response.json()["data"]
     assert set(data) == {
         "case_no", "session_id", "state", "status_version", "matching_plan_id",
-        "commitment_id", "unsigned_document", "staff_targets", "client_target",
+        "handoff_recorded", "commitment_id", "unsigned_document", "staff_targets", "client_target",
     }
     serialized = response.text.lower()
     assert all(term not in serialized for term in ("locator", "digest", "fingerprint", "url", "path"))
@@ -284,13 +330,70 @@ def test_full_contract_preview_has_exact_targets_and_typed_values_without_locato
     assert client_preview.json()["data"]["ready_to_print"] is True
     assert staff_preview.status_code == 200
     assert staff_preview.json()["data"]["scope"] == "staff"
-    assert staff_preview.json()["data"]["assignment_id"] == 71
+    assert staff_preview.json()["data"]["assignment_id"] == 171
     assert all(term not in client_preview.text.lower() for term in ("locator", "url", "path", "storage"))
+
+
+def test_prepare_staff_unsigned_pdf_uses_exact_segment_and_returns_safe_metadata() -> None:
+    response = _client(FakeApplication()).post(
+        f"/api/v1/orders/{CASE_NO}/contract-external-signing/staff-segments/71/unsigned-pdf",
+        headers={
+            "Idempotency-Key": KEY,
+            "X-Correlation-ID": "corr-prepare-staff-001",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "document_version_id": 91,
+        "filename": "staff-contract.pdf",
+        "mime_type": "application/pdf",
+        "size_bytes": 1234,
+        "replayed": False,
+    }
+    assert all(term not in response.text.lower() for term in ("locator", "path", "storage"))
+
+
+def test_staff_reminder_readiness_returns_message_without_enqueuing_delivery() -> None:
+    response = _client(FakeApplication()).get(
+        f"/api/v1/orders/{CASE_NO}/contract-external-signing/staff-segments/71/reminder-readiness"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "matching_segment_id": 71,
+        "document_version_id": 81,
+        "message": f"案件 {CASE_NO} 的契約已放到工會既定的外部簽約平台。",
+        "blockers": [],
+        "ready": True,
+    }
+
+
+def test_staff_reminder_enqueue_uses_exact_document_and_returns_safe_task_identity() -> None:
+    response = _client(FakeApplication()).post(
+        f"/api/v1/orders/{CASE_NO}/contract-external-signing/staff-segments/71/reminders",
+        headers={
+            "Idempotency-Key": KEY,
+            "X-Correlation-ID": "corr-reminder-001",
+            "X-Expected-Document-Version": "81",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "task_id": 91,
+        "status": "pending",
+        "replayed": False,
+    }
+    assert all(
+        term not in response.text.lower()
+        for term in ("line_user_id", "payload_snapshot", "recipient_id")
+    )
 
 
 def test_full_contract_preview_preserves_not_found_target_and_blocker_mapping() -> None:
     application = FakeApplication()
-    application.full_preview.preview_staff = lambda case_no, assignment_id: (_ for _ in ()).throw(
+    application.full_preview.preview_staff_segment = lambda case_no, segment_id: (_ for _ in ()).throw(
         route.FullContractPreviewError(
             "contract_preview_target_not_found", "找不到指定契約預覽對象。", not_found=True
         )
@@ -325,6 +428,29 @@ def test_manual_staff_report_uses_persisted_admin_and_closed_receipt_identity() 
     assert all(term not in serialized for term in ("locator", "fingerprint", "digest", "path", "url"))
     assert application.reports.command.actor.actor_id == "admin:7"
     assert application.reports.command.attestation.evidence_reference == f"manual-evidence:{RECEIPT_ID}"
+
+
+def test_external_platform_handoff_uses_persisted_admin_and_expected_version() -> None:
+    application = FakeApplication()
+    response = _client(application).post(
+        f"/api/v1/orders/{CASE_NO}/contract-external-signing/handoff",
+        headers={
+            "Idempotency-Key": "contract-external.handoff:" + UUID,
+            "X-Correlation-ID": "corr-handoff-1",
+        },
+        json={"expected_status_version": 0},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "session_id": SESSION_ID,
+        "resulting_status_version": 1,
+        "replayed": False,
+    }
+    command = application.reports.command
+    assert command.case_no == CASE_NO
+    assert command.expected_status_version.value == 0
+    assert command.actor.actor_id == "admin:7"
 
 
 def test_local_bypass_can_execute_the_approved_recovery_without_a_root_account(monkeypatch) -> None:
@@ -563,6 +689,30 @@ def test_unsigned_download_is_pdf_and_no_store() -> None:
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["x-contract-document-version"] == "81"
     assert response.headers["x-correlation-id"] == "corr-download"
+
+
+def test_unsigned_download_encodes_non_ascii_filename_in_content_disposition() -> None:
+    application = FakeApplication()
+    application.download_unsigned = lambda *args: SimpleNamespace(
+        document_version_id=81,
+        content=b"%PDF-1.4\n%%EOF",
+        filename="服務人員契約.pdf",
+    )
+
+    response = _client(application).get(
+        f"/api/v1/orders/{CASE_NO}/contract-external-signing/unsigned-pdf",
+        headers={
+            "X-Expected-Document-Version": "81",
+            "X-Correlation-ID": "corr-download-nonascii-1",
+        },
+    )
+
+    assert response.status_code == 200
+    disposition = response.headers["content-disposition"]
+    assert disposition.startswith('attachment; filename="unsigned-contract.pdf"; ')
+    assert "filename*=UTF-8''%E6%9C%8D%E5%8B%99%E4%BA%BA%E5%93%A1%E5%A5%91%E7%B4%84.pdf" in disposition
+    assert response.headers["x-contract-document-version"] == "81"
+    assert response.headers["x-correlation-id"] == "corr-download-nonascii-1"
 
 
 @pytest.mark.parametrize(

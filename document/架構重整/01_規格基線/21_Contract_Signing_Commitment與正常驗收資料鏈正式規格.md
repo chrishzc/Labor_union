@@ -349,6 +349,28 @@ Preview／確認／Apply／receipt/readback，列為 `completed`；外部 LINE �
 因此前述 `SendStaffContract`／`SendClientContract` 僅保留 legacy compatibility identity，不再是新 UI 的
 正式主路徑；`archive locator` 只可留在 repository 內部相容層，current public contract 必須退出。
 
+### 2026-09-09 外部平台自動轉送與最終 PDF 完成裁決
+
+本節覆蓋本章 2026-08-25 裁決中「月嫂逐筆回報 → 客戶逐筆回報 → 最終 PDF」的強制門禁。外部平台會在月嫂簽署後自行轉送客戶，雙方均不負責向本系統回報完成；本系統不得因此停在 `staff_reporting` 或 `client_reported_final_pdf_pending`。
+
+正式主流程改為：
+
+```text
+建立目前 accepted plan 的契約與未簽 PDF
+→ 管理員明確記錄已送交外部簽署平台
+→ 外部平台完成月嫂與客戶簽署
+→ 管理員上傳最終簽署 PDF，Preview 並確認其包含客戶與所有月嫂簽署
+→ Apply 在單一 outer UoW 建立缺少的 commitment、Orders contract identity／completion、
+  最終受控 PDF／receipt 與 Client Finance 訂金 obligation
+→ 進入訂金核銷
+```
+
+1. 外部平台交接為明確、可重播的本機 mutation；只代表操作者已送交，不宣稱 provider delivery 或簽署狀態。
+2. 最終簽署 PDF 的受控 readback 是雙方完成簽署的 aggregate evidence。個別 staff／client completion report 保留為選用、可稽核、replay-safe 的 compatibility evidence，不是 final Apply prerequisite。
+3. Preview 零寫入，綁定 current session、status version、staging version／digest、Orders 與 Client Finance versions。Apply fresh-lock 後由 PDF digest 推導穩定 contract identity，並在同一交易完成 commitment、Orders、Client Finance、controlled file、session 與 receipt；任一步失敗不得留下 partial writes。
+4. 訂金 obligation 由 final Apply 建立；第 8 階段在 final PDF 前不得提前顯示為進行中或完成，final PDF 後依 settlement owner 根事實顯示 blocked／completed。
+5. 既有個別回報、歷史 recovery 與 receipt 仍可查閱，不得回頭成為新主流程門禁。
+
 Runtime gap 狀態（2026-08-26）：`approved`。人工已授權本機實作、必要的 `lu_test_*` schema gate、
 controlled-file adapter 與 LINE sandbox 驗收；current renderer 仍僅產生 XLSX，現有 `media_assets` 與
 `contract_document_versions.storage_key` 尚未驗證為 `00` §2.2 的受控 NAS logical object reference／digest／

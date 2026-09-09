@@ -17,7 +17,7 @@ from domains.contract_signing.external_signing import (
     reduce_staff_completion_report,
 )
 from shared_kernel.fingerprints import PreviewFingerprint
-from shared_kernel.identities import IdempotencyKey
+from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from shared_kernel.ports import UnitOfWork
 from shared_kernel.validation import require_positive_integer
 from subsystems.contract_signing.external_signing_contracts import (
@@ -46,11 +46,25 @@ from shared_kernel.fingerprints import fingerprint_payload
 @dataclass(frozen=True, slots=True)
 class StaffCompletionPrerequisites:
     commitment_id: int
-    client_reminder_task_id: int
 
     def __post_init__(self) -> None:
         require_positive_integer(self.commitment_id, "commitment ID")
-        require_positive_integer(self.client_reminder_task_id, "client reminder task ID")
+
+
+@dataclass(frozen=True, slots=True)
+class RecordExternalSigningHandoff:
+    case_no: str
+    expected_status_version: ExpectedVersion
+    actor: ActorContext
+    idempotency_key: IdempotencyKey
+    correlation_id: CorrelationId
+
+
+@dataclass(frozen=True, slots=True)
+class ExternalSigningHandoffReceipt:
+    session_id: str
+    resulting_status_version: int
+    replayed: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,7 +144,7 @@ class ExternalStaffCompletionPort(Protocol):
 
     def establish_prerequisites(
         self,
-        command: RecordExternalStaffSigningReport,
+        command: object,
         facts: ExternalSigningSessionFacts,
         resulting_status_version: int,
     ) -> StaffCompletionPrerequisites: ...
@@ -154,7 +168,12 @@ class ExternalSigningWorkflowRepository(Protocol):
     ) -> tuple[LegacyManualSigningEvidence, ...]: ...
 
     def activate_session(
-        self, facts: ExternalSigningSessionFacts, *, actor_id: str
+        self,
+        facts: ExternalSigningSessionFacts,
+        *,
+        actor_id: str,
+        commitment_id: int | None = None,
+        status_version: int = 0,
     ) -> None: ...
 
     def find_receipt(
@@ -228,6 +247,43 @@ class ExternalSigningWorkflow:
                 "目前案件尚未具備可啟動的簽約 facts。",
             )
         return _session_query(facts, persisted=False)
+
+    def record_handoff(
+        self, command: RecordExternalSigningHandoff
+    ) -> ExternalSigningHandoffReceipt:
+        """Record the operator-observed handoff without claiming provider state."""
+        with self._unit_of_work_factory() as unit_of_work:
+            active = self._repository.load_active_session_by_case(
+                command.case_no, for_update=True
+            )
+            if active is not None:
+                unit_of_work.commit()
+                return ExternalSigningHandoffReceipt(
+                    active.session_id, active.status_version, True
+                )
+            facts = self._repository.derive_current_session(
+                command.case_no, for_update=True
+            )
+            if facts is None:
+                raise _typed_error(
+                    "external_signing_session_facts_unavailable",
+                    "目前案件尚未具備可送交外部平台的簽約 facts。",
+                )
+            if command.expected_status_version.value != facts.status_version:
+                raise _typed_error(
+                    "external_signing_status_version_stale",
+                    "簽約狀態版本已變更。",
+                )
+            resulting_version = facts.status_version + 1
+            self._repository.activate_session(
+                facts,
+                actor_id=command.actor.actor_id,
+                status_version=resulting_version,
+            )
+            unit_of_work.commit()
+            return ExternalSigningHandoffReceipt(
+                facts.session_id, resulting_version, False
+            )
 
     def preview_final_pdf_readiness(self, session_id: str) -> FinalPdfReadinessPreview:
         facts = self._require_session(session_id, for_update=False)
@@ -759,6 +815,7 @@ def _require_recovery_replay_request_matches(command, snapshot):
 
 
 __all__ = [
+    "ExternalSigningHandoffReceipt",
     "ExternalSigningSessionQuery",
     "ExternalSigningWorkflow",
     "ExternalSigningWorkflowRepository",
@@ -768,5 +825,6 @@ __all__ = [
     "LegacyManualRecoveryQuery",
     "LegacyManualRecoveryTargetQuery",
     "PersistedExternalReport",
+    "RecordExternalSigningHandoff",
     "StaffCompletionPrerequisites",
 ]

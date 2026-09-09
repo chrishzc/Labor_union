@@ -60,6 +60,21 @@ class SendStaffContractCommand:
 
 
 @dataclass(frozen=True, slots=True)
+class PrepareExternalStaffContractCommand:
+    case_no: str
+    matching_segment_id: int
+    actor_id: str
+    idempotency_key: IdempotencyKey
+    correlation_id: CorrelationId
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedExternalStaffContractDocument:
+    source_document_version_id: int
+    replayed: bool
+
+
+@dataclass(frozen=True, slots=True)
 class RecordStaffSignedReturnCommand:
     case_no: str
     matching_segment_id: int
@@ -110,6 +125,7 @@ class StaffContractSigningApplication:
         order_selector: Callable[..., object] | None = None,
         finance_facts_loader: Callable[..., object] | None = None,
         finance_terms_writer: Callable[..., None] | None = None,
+        external_template_facts_loader: Callable[..., tuple[dict[str, object], str]] | None = None,
     ) -> None:
         self._connection_factory = connection_factory
         self._archive_root = archive_root
@@ -120,6 +136,7 @@ class StaffContractSigningApplication:
         self._order_selector = order_selector
         self._finance_facts_loader = finance_facts_loader
         self._finance_terms_writer = finance_terms_writer
+        self._external_template_facts_loader = external_template_facts_loader
 
     def _archive(self, content: bytes, storage_key: str):
         fn = self._archive_document or archive_contract_document
@@ -169,6 +186,62 @@ class StaffContractSigningApplication:
             return existing
         template = load_approved_template("contract_staff_service")
         return self._persist_sent_contract(command, template)
+
+    def prepare_external_document(
+        self, command: PrepareExternalStaffContractCommand
+    ) -> PreparedExternalStaffContractDocument:
+        """Persist the current unsigned XLSX source without creating a LINE task."""
+        if self._external_template_facts_loader is None:
+            raise RuntimeError("contract_external_template_facts_loader_not_configured")
+        template = load_approved_template("contract_staff_service")
+        archive = None
+        try:
+            def persist(connection):
+                nonlocal archive
+                segment = _staff_segment(
+                    connection, command.case_no, command.matching_segment_id
+                )
+                _require_external_staff_segment_applicable(segment)
+                facts, facts_snapshot_sha256 = self._external_template_facts_loader(
+                    connection,
+                    command.case_no,
+                    command.matching_segment_id,
+                    self._now(),
+                )
+                existing = _existing_external_generated_document(
+                    connection,
+                    command.case_no,
+                    command.matching_segment_id,
+                    template,
+                    facts_snapshot_sha256,
+                )
+                if existing is not None:
+                    return PreparedExternalStaffContractDocument(existing, True)
+                content = render_contract_template(
+                    template_path=TEMPLATE_DIRECTORY / template.template_filename,
+                    mapping_path=approved_template_mapping_path(template.template_key),
+                    facts=facts,
+                )
+                archive = self._archive(
+                    content,
+                    _external_staff_template_storage_key(command, content),
+                )
+                document_id = _insert_generated_document(
+                    connection,
+                    command,
+                    segment,
+                    template,
+                    content,
+                    archive,
+                    facts_snapshot_sha256=facts_snapshot_sha256,
+                )
+                return PreparedExternalStaffContractDocument(document_id, False)
+
+            return self._run_in_application_unit_of_work(persist)
+        except Exception:
+            if archive is not None:
+                self._discard(archive.storage_key)
+            raise
 
     def record_signed_return(
         self,
@@ -377,6 +450,15 @@ def _staff_template_storage_key(command: SendStaffContractCommand) -> str:
     return f"{command.case_no}/staff/{command.matching_segment_id}/{command.idempotency_key.value}.xlsx"
 
 
+def _external_staff_template_storage_key(
+    command: PrepareExternalStaffContractCommand, content: bytes
+) -> str:
+    return (
+        f"{command.case_no}/staff/{command.matching_segment_id}/external-"
+        f"{_sha256(content)[:24]}.xlsx"
+    )
+
+
 def _append_command_outcome(connection, command, command_kind, document_id, event_id, result):
     snapshot = {"document_version_id": document_id, "signing_event_id": event_id, **result}
     append_command_receipt(connection, idempotency_key=command.idempotency_key.value, command_kind=command_kind, case_no=command.case_no, document_version_id=document_id, signing_event_id=event_id, correlation_id=command.correlation_id.value, result_snapshot=snapshot)
@@ -399,7 +481,8 @@ def _staff_segment(connection, case_no: str, segment_id: int) -> dict[str, objec
     with connection.cursor() as cursor:
         cursor.execute(
             "SELECT segment.id,segment.plan_id,segment.staff_id,segment.assigned_start_date,"
-            "segment.assigned_end_date FROM caregiver_matching_plan_segments segment "
+            "segment.assigned_end_date,plan.status,plan.is_active "
+            "FROM caregiver_matching_plan_segments segment "
             "JOIN caregiver_matching_plans plan ON plan.id=segment.plan_id "
             "WHERE segment.id=%s AND plan.case_no=%s FOR UPDATE",
             (segment_id, case_no),
@@ -408,6 +491,11 @@ def _staff_segment(connection, case_no: str, segment_id: int) -> dict[str, objec
     if row is None:
         raise ValueError("contract_signing_segment_not_found")
     return row
+
+
+def _require_external_staff_segment_applicable(segment: dict[str, object]) -> None:
+    if str(segment["status"]) != "accepted" or segment["is_active"] != 1:
+        raise ValueError("contract_external_signing_accepted_plan_required")
 
 
 def _staff_template_facts(connection, case_no: str, segment: dict[str, object]) -> dict[str, object]:
@@ -456,9 +544,18 @@ def _line_binding(connection, subject_type: str, subject_reference: str) -> Cont
     )
 
 
-def _insert_generated_document(connection, command, segment, template, content, archive) -> int:
+def _insert_generated_document(
+    connection,
+    command,
+    segment,
+    template,
+    content,
+    archive,
+    *,
+    facts_snapshot_sha256: str | None = None,
+) -> int:
     target_key = f"staff-segment:{segment['id']}"
-    snapshot = _sha256(_canonical_json({"case_no": command.case_no, "segment_id": segment["id"], "staff_id": segment["staff_id"]}).encode())
+    snapshot = facts_snapshot_sha256 or _sha256(_canonical_json({"case_no": command.case_no, "segment_id": segment["id"], "staff_id": segment["staff_id"]}).encode())
     asset_id = _insert_media_asset(connection, command.case_no, archive.storage_key, template.template_filename, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", archive.file_size, archive.sha256)
     with connection.cursor() as cursor:
         cursor.execute(
@@ -476,6 +573,37 @@ def _insert_generated_document(connection, command, segment, template, content, 
             (command.case_no, segment["plan_id"], segment["id"], target_key, template.template_key, template.template_sha256, template.mapping_sha256, snapshot, asset_id, version_number, replaces_document_version_id, command.actor_id),
         )
         return int(cursor.lastrowid)
+
+
+def _existing_external_generated_document(
+    connection,
+    case_no: str,
+    segment_id: int,
+    template,
+    facts_snapshot_sha256: str,
+) -> int | None:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT document.id FROM contract_document_versions document "
+            "JOIN media_assets asset ON asset.id=document.media_asset_id "
+            "WHERE document.case_no=%s AND document.document_scope='staff_segment' "
+            "AND document.document_role='template_generated' "
+            "AND document.matching_segment_id=%s AND document.template_key=%s "
+            "AND document.template_sha256=%s AND document.mapping_sha256=%s "
+            "AND document.facts_snapshot_sha256=%s "
+            "AND asset.mime_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' "
+            "ORDER BY document.version_number DESC,document.id DESC LIMIT 1 FOR UPDATE",
+            (
+                case_no,
+                segment_id,
+                template.template_key,
+                template.template_sha256,
+                template.mapping_sha256,
+                facts_snapshot_sha256,
+            ),
+        )
+        row = cursor.fetchone()
+    return None if row is None else int(row["id"])
 
 
 def _insert_access_grant(connection, command, document_id, binding, *, now):

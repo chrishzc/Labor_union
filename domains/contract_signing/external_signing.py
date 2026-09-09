@@ -52,6 +52,7 @@ class ExternalSigningErrorCode(StrEnum):
     CLIENT_REPORT_ALREADY_RECORDED = "external_client_report_already_recorded"
     CLIENT_REPORT_OUT_OF_ORDER = "external_client_report_out_of_order"
     CLIENT_DOCUMENT_VERSION_STALE = "external_client_report_document_stale"
+    CLIENT_DOCUMENT_MISSING = "external_client_report_document_missing"
     COMMITMENT_STALE = "external_client_report_commitment_stale"
     COMMITMENT_MISSING = "external_signing_commitment_missing"
     FINAL_PDF_NOT_PENDING = "final_signed_contract_not_pending"
@@ -107,7 +108,7 @@ class ExternalSigningSessionFacts:
     staff_targets: tuple[StaffSigningReportTarget, ...]
     reported_staff_segment_ids: tuple[int, ...]
     client_subject_reference: str
-    client_document_version_id: int
+    client_document_version_id: int | None
     commitment_id: int | None
     client_reported: bool
     state: ExternalSigningState
@@ -192,7 +193,9 @@ def reduce_staff_completion_report(
         reported_staff_segment_ids=reported,
         client_reported=False,
         requires_commitment=all_reported,
-        create_client_reminder_intent=all_reported,
+        # The client document and its reminder are prepared only after the
+        # commitment created by this transition is durable.
+        create_client_reminder_intent=False,
     )
 
 
@@ -223,6 +226,11 @@ def reduce_client_completion_report(
             ExternalSigningErrorCode.COMMITMENT_MISSING,
             current_version=facts.status_version,
         )
+    if facts.client_document_version_id is None:
+        raise ExternalSigningRuleError(
+            ExternalSigningErrorCode.CLIENT_DOCUMENT_MISSING,
+            current_version=facts.status_version,
+        )
     if facts.commitment_id != expected_commitment_id:
         raise ExternalSigningRuleError(
             ExternalSigningErrorCode.COMMITMENT_STALE,
@@ -250,16 +258,10 @@ def final_signed_contract_blockers(
         return (ExternalSigningErrorCode.SESSION_SUPERSEDED,)
     if facts.state is ExternalSigningState.COMPLETED:
         return (ExternalSigningErrorCode.FINAL_PDF_ALREADY_APPLIED,)
-    blockers: list[ExternalSigningErrorCode] = []
-    if not facts.all_staff_reported:
-        blockers.append(ExternalSigningErrorCode.STAFF_REPORTS_INCOMPLETE)
-    if not facts.client_reported:
-        blockers.append(ExternalSigningErrorCode.CLIENT_REPORT_OUT_OF_ORDER)
-    if facts.commitment_id is None:
-        blockers.append(ExternalSigningErrorCode.COMMITMENT_MISSING)
-    if facts.state is not ExternalSigningState.CLIENT_REPORTED_FINAL_PDF_PENDING:
-        blockers.append(ExternalSigningErrorCode.FINAL_PDF_NOT_PENDING)
-    return tuple(blockers)
+    # The accepted final PDF is the aggregate evidence that every required
+    # signer completed the external-platform flow. Per-party reports remain
+    # useful audit facts, but are not prerequisites for accepting that file.
+    return ()
 
 
 def _require_mutable_session(facts: ExternalSigningSessionFacts) -> None:
@@ -299,10 +301,13 @@ def _validate_session_identity(facts: ExternalSigningSessionFacts) -> None:
         "client subject reference",
         191,
     )
-    require_positive_integer(
-        facts.client_document_version_id,
-        "client document version ID",
-    )
+    if facts.client_document_version_id is not None:
+        require_positive_integer(
+            facts.client_document_version_id,
+            "client document version ID",
+        )
+    if facts.client_reported and facts.client_document_version_id is None:
+        raise ValueError("reported client requires a document version")
     if facts.commitment_id is not None:
         require_positive_integer(facts.commitment_id, "commitment ID")
     if not isinstance(facts.client_reported, bool):
@@ -336,6 +341,10 @@ def _validate_session_state(facts: ExternalSigningSessionFacts) -> None:
     if facts.state is ExternalSigningState.STAFF_REPORTING:
         if all_reported or facts.client_reported:
             raise ValueError("staff-reporting state facts are inconsistent")
+        return
+    if facts.state is ExternalSigningState.COMPLETED:
+        if facts.commitment_id is None:
+            raise ValueError("completed state requires commitment")
         return
     if not all_reported or facts.commitment_id is None:
         raise ValueError("post-staff-report state requires all reports and commitment")

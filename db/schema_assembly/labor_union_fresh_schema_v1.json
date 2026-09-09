@@ -5,7 +5,7 @@
     "path": "db/schema.sql",
     "sha256": "b9cd84ae5a09a46949b5d4c131659f7f114480306f94e0af1246833d021b1bfb"
   },
-  "active_artifacts_sha256": "4b700cf1033d5801017df668de059de006ae4f2fe4ea57db97a2c604d3b13bfb",
+  "active_artifacts_sha256": "cec299e03a276acda8469debdf1f2131ccfcb723b42971a0eca55df475441e15",
   "active_bootstrap": [
     "db/schema_parts/202_scheduling_staff_leave_intake.sql",
     "db/schema_parts/20_staff_monthly_settlements.sql",
@@ -164,7 +164,8 @@
     "db/schema_parts/216_staff_beclass_profile.sql",
     "db/schema_parts/1029_client_payment_destination_configuration.sql",
     "db/schema_parts/217_weekly_report_batches.sql",
-    "db/schema_parts/1032_matching_holiday_work_agreements.sql"
+    "db/schema_parts/1032_matching_holiday_work_agreements.sql",
+    "db/schema_parts/1034_contract_external_signing_final_pdf_completion.sql"
   ],
   "classifications": {
     "db/schema_parts/1022_task96_retired_anomaly_owner_contracts.sql": "retired",

@@ -204,6 +204,7 @@ _SOURCE_TYPE_GROUPS = {
         "line_push",
         "customer_service_ticket",
         "contract_document_version",
+        "contract_external_signing_session",
         "line_follow_schedule",
         "line_identity",
         "line_review_request",
@@ -219,7 +220,10 @@ _SOURCE_TYPE_GROUPS = {
         "case_staff_assignment",
     ),
     LineDeliveryPublicSourceType.CUSTOMER_SERVICE: ("customer_service_ticket",),
-    LineDeliveryPublicSourceType.CONTRACT: ("contract_document_version",),
+    LineDeliveryPublicSourceType.CONTRACT: (
+        "contract_document_version",
+        "contract_external_signing_session",
+    ),
     LineDeliveryPublicSourceType.FOLLOW_SCHEDULE: ("line_follow_schedule",),
     LineDeliveryPublicSourceType.IDENTITY: (
         "line_identity",

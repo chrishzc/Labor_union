@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from enum import StrEnum
 from typing import Callable, Protocol
 
 from domains.client_finance.obligation_planning import (
+    ClientChargeDay,
     ClientFinanceTermsCandidate,
     ClientFinanceTermsFacts,
     build_client_finance_terms_candidate,
@@ -149,6 +150,7 @@ class ContractCompletionWorkflowRepository(Protocol):
     def load_for_apply(self, case_no: str) -> ContractCompletionWorkflowFacts: ...
     def claim_command(self, request: ContractCompletionApplyRequest, command_fingerprint: PreviewFingerprint) -> ContractCompletionCommandClaimState: ...
     def find_receipt(self, key: IdempotencyKey, *, for_update: bool) -> StoredContractCompletionReceipt | None: ...
+    def record_contract_identity(self, case_no: str, identity: str) -> None: ...
     def append_contract_completion_event(self, request: ContractCompletionApplyRequest, preview: ContractCompletionPreview) -> int: ...
     def append_lifecycle_event(self, command: ContractCompletionLifecycleEventCommand) -> int: ...
     def persist_client_finance_impact(self, command: ContractCompletionClientFinanceCommand) -> None: ...
@@ -177,6 +179,23 @@ class ContractCompletionWorkflow:
     def preview(self, case_no: str, intent: ContractCompletionIntent) -> ContractCompletionPreview:
         return _build_preview(self._repository.load_for_preview(case_no), intent)
 
+    def preview_with_identity(
+        self,
+        case_no: str,
+        intent: ContractCompletionIntent,
+        contract_identity: str,
+        *,
+        fallback_service_dates: tuple[date, ...] = (),
+    ) -> ContractCompletionPreview:
+        facts = self._repository.load_for_preview(case_no)
+        return _build_preview(
+            _with_contract_identity(
+                _with_fallback_service_dates(facts, fallback_service_dates),
+                contract_identity,
+            ),
+            intent,
+        )
+
     def apply(self, request: ContractCompletionApplyRequest) -> ContractCompletionReceipt:
         with self._unit_of_work_factory() as unit_of_work:
             receipt = self.apply_borrowed(request)
@@ -195,6 +214,12 @@ class ContractCompletionWorkflow:
         receipt = _build_receipt(preview)
         self._persist(request, preview, command_fingerprint, receipt)
         return receipt
+
+    def apply_borrowed_with_identity(
+        self, request: ContractCompletionApplyRequest, contract_identity: str
+    ) -> ContractCompletionReceipt:
+        self._repository.record_contract_identity(request.case_no, contract_identity)
+        return self.apply_borrowed(request)
 
     def _claim_or_replay(self, request, command_fingerprint):
         state = self._repository.claim_command(request, command_fingerprint)
@@ -228,6 +253,30 @@ def _build_preview(facts, intent):
     finance_impact = build_client_finance_terms_candidate(facts.client_finance, f"contract-completion:{candidate.contract_identity}")
     fingerprint = fingerprint_payload({"orders": candidate.fingerprint.value, "client_finance": finance_impact.fingerprint.value})
     return ContractCompletionPreview(candidate, finance_impact, fingerprint)
+
+
+def _with_contract_identity(facts, contract_identity):
+    current = facts.order.contract_identity
+    if current is not None and current != contract_identity:
+        raise ValueError("contract_identity_already_recorded")
+    return replace(
+        facts,
+        order=replace(facts.order, contract_identity=contract_identity),
+    )
+
+
+def _with_fallback_service_dates(facts, service_dates):
+    if facts.client_finance.charge_days or not service_dates:
+        return facts
+    if service_dates != tuple(sorted(set(service_dates))):
+        raise ValueError("fallback_service_dates_invalid")
+    return replace(
+        facts,
+        client_finance=replace(
+            facts.client_finance,
+            charge_days=tuple(ClientChargeDay(value, False) for value in service_dates),
+        ),
+    )
 
 
 def _build_receipt(preview):

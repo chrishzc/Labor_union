@@ -34,6 +34,28 @@ const UnsignedDocumentSchema = z.strictObject({
   size_bytes: z.number().int().positive(),
 });
 
+const PreparedUnsignedDocumentSchema = UnsignedDocumentSchema.extend({
+  replayed: z.boolean(),
+});
+
+const StaffReminderReadinessSchema = z.strictObject({
+  matching_segment_id: z.number().int().positive(),
+  document_version_id: z.number().int().positive(),
+  message: z.string().min(1).max(1000),
+  blockers: z.array(z.string()),
+  ready: z.boolean(),
+}).superRefine((value, context) => {
+  if (value.ready !== (value.blockers.length === 0)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['ready'], message: 'reminder readiness does not match blockers' });
+  }
+});
+
+const StaffReminderTaskSchema = z.strictObject({
+  task_id: z.number().int().positive(),
+  status: z.enum(['pending', 'processing', 'sent', 'retryable_failed', 'failed', 'cancelled']),
+  replayed: z.boolean(),
+});
+
 const StaffTargetSchema = z.strictObject({
   matching_segment_id: z.number().int().positive(),
   staff_subject_reference: z.string().min(1).max(191),
@@ -43,7 +65,7 @@ const StaffTargetSchema = z.strictObject({
 
 const ClientTargetSchema = z.strictObject({
   client_subject_reference: z.string().min(1).max(191),
-  document_version_id: z.number().int().positive(),
+  document_version_id: z.number().int().positive().nullable(),
   reported: z.boolean(),
 });
 
@@ -130,6 +152,7 @@ export const ContractExternalSigningQuerySchema = z.strictObject({
   session_id: SessionIdSchema,
   state: ExternalSigningStateSchema,
   status_version: z.number().int().nonnegative(),
+  handoff_recorded: z.boolean(),
   matching_plan_id: z.number().int().positive(),
   commitment_id: z.number().int().positive().nullable(),
   unsigned_document: UnsignedDocumentSchema.nullable(),
@@ -140,15 +163,11 @@ export const ContractExternalSigningQuerySchema = z.strictObject({
   if (new Set(segmentIds).size !== segmentIds.length) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ['staff_targets'], message: 'staff signing targets must be unique' });
   }
-  const allStaffReported = value.staff_targets.every((target) => target.reported);
-  if (value.state === 'staff_reporting' && allStaffReported) {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ['state'], message: 'staff_reporting cannot have every staff report' });
+  if (value.handoff_recorded !== (value.status_version > 0)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['handoff_recorded'], message: 'handoff evidence does not match status version' });
   }
-  if (value.state !== 'staff_reporting' && !allStaffReported && value.state !== 'superseded') {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ['staff_targets'], message: 'post-staff state requires every staff report' });
-  }
-  if (value.client_target.reported !== ['client_reported_final_pdf_pending', 'completed'].includes(value.state)) {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ['client_target', 'reported'], message: 'client report does not match closed state' });
+  if (value.state === 'completed' && value.commitment_id === null) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['commitment_id'], message: 'completed signing requires contract commitment' });
   }
 });
 
@@ -208,6 +227,12 @@ const StagingEnvelopeDataSchema = z.strictObject({
   expires_at: ZonedTimeSchema,
 });
 
+const HandoffReceiptSchema = z.strictObject({
+  session_id: SessionIdSchema,
+  resulting_status_version: z.number().int().positive(),
+  replayed: z.boolean(),
+});
+
 const FinalReadbackSchema = z.strictObject({
   case_no: z.string().min(1).max(50),
   session_id: SessionIdSchema,
@@ -232,6 +257,9 @@ function envelope<T extends z.ZodTypeAny>(data: T) {
 }
 
 export type ContractExternalSigningQuery = z.infer<typeof ContractExternalSigningQuerySchema>;
+export type PreparedUnsignedDocument = z.infer<typeof PreparedUnsignedDocumentSchema>;
+export type StaffReminderReadiness = z.infer<typeof StaffReminderReadinessSchema>;
+export type StaffReminderTask = z.infer<typeof StaffReminderTaskSchema>;
 export type ExternalSigningReceipt = z.infer<typeof ReceiptSchema>;
 export type FinalDocumentPreview = z.infer<typeof PreviewSchema>;
 export type FinalDocumentReadback = z.infer<typeof FinalReadbackSchema>;
@@ -327,9 +355,10 @@ function commandOptions(identity: ExternalSigningCommandIdentity, signal?: Abort
   };
 }
 
-function stagingCommandOptions(identity: ExternalSigningCommandIdentity): RequestOptions {
+function stagingCommandOptions(identity: ExternalSigningCommandIdentity, signal?: AbortSignal): RequestOptions {
   return {
     token: authToken(),
+    signal,
     headers: {
       'Idempotency-Key': identity.idempotencyKey,
       'X-Correlation-ID': identity.correlationId,
@@ -385,6 +414,25 @@ export const contractExternalSigningClient = {
     ).data;
     if (value.case_no !== expectedCaseNo) throw new ApiHttpError(409, 'CONTRACT_CASE_MISMATCH', '外部簽約查詢案件識別不一致。');
     return value;
+  },
+
+  async recordHandoff(
+    caseNo: string,
+    expectedStatusVersion: number,
+    identity: ExternalSigningCommandIdentity,
+    signal?: AbortSignal,
+  ) {
+    if (!Number.isInteger(expectedStatusVersion) || expectedStatusVersion < 0) {
+      throw new Error('外部平台交接狀態版本無效。');
+    }
+    return decodePayload(
+      envelope(HandoffReceiptSchema),
+      await transport.post(
+        `${basePath(caseNo)}/handoff`,
+        { expected_status_version: expectedStatusVersion },
+        stagingCommandOptions(identity, signal),
+      ),
+    ).data;
   },
 
   async queryLegacyRecovery(caseNo: string, options?: { signal?: AbortSignal }): Promise<LegacyRecoveryQuery> {
@@ -480,6 +528,62 @@ export const contractExternalSigningClient = {
     const blob = await response.blob();
     await assertPdfBytes(blob);
     return { blob, filename, mimeType: 'application/pdf' };
+  },
+
+  async prepareStaffUnsignedPdf(
+    caseNo: string,
+    segmentId: number,
+    identity: ExternalSigningCommandIdentity,
+    signal?: AbortSignal,
+  ): Promise<PreparedUnsignedDocument> {
+    if (!Number.isInteger(segmentId) || segmentId <= 0) throw new Error('月嫂分段識別無效。');
+    return decodePayload(
+      envelope(PreparedUnsignedDocumentSchema),
+      await transport.post(
+        `${basePath(caseNo)}/staff-segments/${segmentId}/unsigned-pdf`,
+        {},
+        stagingCommandOptions(identity, signal),
+      ),
+    ).data;
+  },
+
+  async getStaffReminderReadiness(
+    caseNo: string,
+    segmentId: number,
+    signal?: AbortSignal,
+  ): Promise<StaffReminderReadiness> {
+    if (!Number.isInteger(segmentId) || segmentId <= 0) throw new Error('月嫂分段識別無效。');
+    return decodePayload(
+      envelope(StaffReminderReadinessSchema),
+      await transport.get(
+        `${basePath(caseNo)}/staff-segments/${segmentId}/reminder-readiness`,
+        { token: authToken(), signal },
+      ),
+    ).data;
+  },
+
+  async enqueueStaffReminder(
+    caseNo: string,
+    segmentId: number,
+    expectedDocumentVersionId: number,
+    identity: ExternalSigningCommandIdentity,
+    signal?: AbortSignal,
+  ): Promise<StaffReminderTask> {
+    if (!Number.isInteger(segmentId) || segmentId <= 0) throw new Error('月嫂分段識別無效。');
+    if (!Number.isInteger(expectedDocumentVersionId) || expectedDocumentVersionId <= 0) throw new Error('月嫂契約文件版本無效。');
+    const options = stagingCommandOptions(identity, signal);
+    options.headers = {
+      ...options.headers,
+      'X-Expected-Document-Version': String(expectedDocumentVersionId),
+    };
+    return decodePayload(
+      envelope(StaffReminderTaskSchema),
+      await transport.post(
+        `${basePath(caseNo)}/staff-segments/${segmentId}/reminders`,
+        {},
+        options,
+      ),
+    ).data;
   },
 
   async recordStaffCompletionReport(

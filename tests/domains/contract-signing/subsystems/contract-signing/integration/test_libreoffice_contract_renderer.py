@@ -91,6 +91,25 @@ def test_adapter_uses_isolated_profile_fixed_flags_and_sanitized_environment(
     assert result.filename == "approved-template.pdf"
 
 
+def test_adapter_converts_an_already_rendered_immutable_workbook(tmp_path):
+    template, _mapping = _source_files(tmp_path)
+    executable = _executable(tmp_path)
+    observed: dict[str, object] = {}
+    renderer = LibreOfficeContractRenderer(
+        executable=str(executable),
+        runner=_successful_runner(observed),
+    )
+
+    result = renderer.render_workbook(
+        content=template.read_bytes(),
+        filename="CASE-1-staff-contract.xlsx",
+    )
+
+    command = observed["command"]
+    assert Path(command[-1]).name == "CASE-1-staff-contract.xlsx"
+    assert result.filename == "CASE-1-staff-contract.pdf"
+
+
 def test_adapter_discovers_soffice_from_path_without_personal_fallback(tmp_path):
     template, mapping = _source_files(tmp_path)
     executable = _executable(tmp_path)

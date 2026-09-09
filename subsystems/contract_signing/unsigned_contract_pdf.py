@@ -10,7 +10,7 @@ import hashlib
 import hmac
 from pathlib import Path
 import re
-from typing import Mapping, Protocol
+from typing import Protocol
 
 from shared_kernel.identities import ActorContext, CorrelationId
 from shared_kernel.validation import (
@@ -19,16 +19,11 @@ from shared_kernel.validation import (
     require_sha256_hex,
 )
 from subsystems.contract_signing.contract_renderer import (
-    ContractRenderer,
     ContractRendererError,
     PDF_MEDIA_TYPE,
     RenderedContract,
 )
-from subsystems.contract_signing.template_catalog import (
-    TEMPLATE_DIRECTORY,
-    approved_template_mapping_path,
-    load_approved_template,
-)
+from subsystems.contract_signing.template_catalog import load_approved_template
 
 
 _AUTHORIZED_LOCAL_OR_PERSISTED_ACTOR = re.compile(
@@ -86,7 +81,8 @@ class UnsignedContractRenderSource:
     template_key: str
     template_sha256: str
     mapping_sha256: str
-    facts: Mapping[str, object]
+    source_filename: str
+    source_content: bytes
 
     def __post_init__(self) -> None:
         require_canonical_text(self.case_no, "case number", 50)
@@ -97,8 +93,11 @@ class UnsignedContractRenderSource:
         require_canonical_text(self.template_key, "template key", 100)
         require_sha256_hex(self.template_sha256, "template SHA-256")
         require_sha256_hex(self.mapping_sha256, "mapping SHA-256")
-        if not isinstance(self.facts, Mapping):
-            raise TypeError("contract render facts must be a mapping")
+        require_canonical_text(self.source_filename, "contract source filename", 255)
+        if Path(self.source_filename).name != self.source_filename or not self.source_filename.lower().endswith(".xlsx"):
+            raise ValueError("contract source filename must be a safe XLSX name")
+        if not isinstance(self.source_content, bytes) or not self.source_content:
+            raise TypeError("contract source content must be non-empty bytes")
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,12 +180,18 @@ class UnsignedContractPdfStoragePort(Protocol):
     ) -> bytes: ...
 
 
+class UnsignedWorkbookPdfRenderer(Protocol):
+    def render_workbook(
+        self, *, content: bytes, filename: str
+    ) -> RenderedContract: ...
+
+
 class UnsignedContractPdfApplication:
     def __init__(
         self,
         repository: UnsignedContractPdfRepository,
         storage: UnsignedContractPdfStoragePort,
-        renderer: ContractRenderer,
+        renderer: UnsignedWorkbookPdfRenderer,
     ) -> None:
         self._repository = repository
         self._storage = storage
@@ -209,10 +214,9 @@ class UnsignedContractPdfApplication:
         _require_source_identity(command, source)
         template = _load_current_approved_template(source)
         try:
-            rendered = self._renderer.render(
-                template_path=TEMPLATE_DIRECTORY / template.template_filename,
-                mapping_path=approved_template_mapping_path(template.template_key),
-                facts=dict(source.facts),
+            rendered = self._renderer.render_workbook(
+                content=source.source_content,
+                filename=source.source_filename,
             )
         except ContractRendererError as error:
             raise _error(

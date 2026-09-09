@@ -244,6 +244,7 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_09_06_weekly_report_batches_v1.json",
     "labor_union_2026_09_07_matching_holiday_work_agreements_v1.json",
     "labor_union_2026_09_08_matching_holiday_work_agreement_plan_version_v1.json",
+    "labor_union_2026_09_09_contract_external_signing_final_pdf_completion_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -2141,6 +2142,11 @@ def _metadata_state_for_artifact(
             snapshot,
             descriptor,
         )
+    if artifact == "1034_contract_external_signing_final_pdf_completion.sql":
+        return _contract_external_signing_final_pdf_constraint_state(
+            snapshot,
+            descriptor,
+        )
     if artifact == "1013_order_lifecycle_pending_status_constraint.sql":
         return _order_lifecycle_pending_status_constraint_state(
             snapshot,
@@ -3239,6 +3245,15 @@ def _local_classify_statement(statement: str) -> str:
                 .read_text(encoding="utf-8")
             )[0].strip(),
         ).casefold()
+        canonical_1034 = re.sub(
+            r"\s+",
+            " ",
+            split_sql(
+                (ROOT / "db" / "schema_parts" /
+                 "1034_contract_external_signing_final_pdf_completion.sql")
+                .read_text(encoding="utf-8")
+            )[0].strip(),
+        ).casefold()
         controlled_parent_replacement = (
             normalized.startswith("alter table controlled_file_staging_objects ")
             and "modify column purpose enum(" in normalized
@@ -3268,6 +3283,8 @@ def _local_classify_statement(statement: str) -> str:
             return "historical_lifecycle_shape_widen"
         if normalized == canonical_1033:
             return "matching_holiday_work_agreement_plan_version_rename"
+        if normalized == canonical_1034:
+            return "contract_external_signing_state_constraint_replacement"
         if re.search(r"\b(drop|modify|change|rename|truncate)\b", normalized):
             raise LocalAdditiveBlocked("destructive ALTER is outside additive allowlist", code="forbidden_sql_effect")
         if not re.search(r"\badd\s+(column|index|unique|constraint|fulltext|spatial)\b", normalized):
@@ -5061,6 +5078,16 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
             "IS NULL AND expected_version IS NOT NULL AND resulting_version "
             "= expected_version AND case_no IS NOT NULL)"
         )
+    if part_name == "1034_contract_external_signing_final_pdf_completion.sql":
+        descriptor["checks"][(
+            "contract_external_signing_sessions",
+            "chk_contract_external_session_state",
+        )] = _normalize_sql_contract(
+            "(session_state = 'staff_reporting' AND commitment_id IS NULL) OR "
+            "(session_state IN ('staff_reports_complete', "
+            "'client_reported_final_pdf_pending', 'completed') AND "
+            "commitment_id IS NOT NULL) OR session_state = 'superseded'"
+        )
     if part_name == "1013_order_lifecycle_pending_status_constraint.sql":
         descriptor["checks"][(
             "order_lifecycle_state_events",
@@ -5481,8 +5508,19 @@ def _release_descriptor_metadata_state(
             canonical,
             defer_missing_triggers=defer_missing_triggers,
         )
+    if part_name == "1032_matching_holiday_work_agreements.sql":
+        return _matching_holiday_work_agreement_owner_state(
+            snapshot,
+            canonical,
+            defer_missing_triggers=defer_missing_triggers,
+        )
     if part_name == "1008_historical_order_adoption_noop_constraint.sql":
         return _historical_order_adoption_noop_constraint_state(
+            snapshot,
+            canonical,
+        )
+    if part_name == "1034_contract_external_signing_final_pdf_completion.sql":
+        return _contract_external_signing_final_pdf_constraint_state(
             snapshot,
             canonical,
         )
@@ -5644,6 +5682,46 @@ def _historical_order_adoption_noop_constraint_state(
     return "drift"
 
 
+def _contract_external_signing_final_pdf_constraint_state(
+    snapshot: Mapping[str, Any],
+    descriptor: Mapping[str, Any],
+) -> str:
+    ACS = (
+        "contract_external_signing_sessions",
+        "chk_contract_external_session_state",
+    )
+    constraints = {
+        (str(row["table_name"]), str(row["constraint_name"])): row
+        for row in snapshot.get("constraints", ())
+    }
+    row = constraints.get(ACS)
+    if (
+        row is None
+        or row.get("constraint_type") != "CHECK"
+        or str(row.get("enforced") or "YES").upper() != "YES"
+    ):
+        return "drift"
+    show_create_checks: dict[tuple[str, str], str] = {}
+    for create_sql in snapshot.get("show_create_tables", {}).values():
+        show_create_checks.update(_show_create_check_clauses(create_sql))
+    actual = _normalize_check_contract(
+        show_create_checks.get(ACS, row.get("check_clause") or "")
+    )
+    successor = _normalize_check_contract(descriptor["checks"][ACS])
+    predecessor = _normalize_check_contract(_normalize_sql_contract(
+        "(session_state = 'staff_reporting' AND commitment_id IS NULL "
+        "AND client_reminder_task_id IS NULL) OR (session_state IN "
+        "('staff_reports_complete', 'client_reported_final_pdf_pending', "
+        "'completed') AND commitment_id IS NOT NULL AND "
+        "client_reminder_task_id IS NOT NULL) OR session_state = 'superseded'"
+    ))
+    if actual == successor:
+        return "exact"
+    if actual == predecessor:
+        return "absent"
+    return "drift"
+
+
 def _order_lifecycle_pending_status_constraint_state(
     snapshot: Mapping[str, Any],
     descriptor: Mapping[str, Any],
@@ -5770,9 +5848,22 @@ def _contract_external_signing_successor_state(
         for column in columns
     }
     if successor_columns.intersection(present_columns):
-        return _artifact_metadata_state(
+        state = _artifact_metadata_state(
             snapshot,
             descriptor,
+            "1005_contract_external_signing_successor.sql",
+            defer_missing_triggers=defer_missing_triggers,
+        )
+        if state != "drift":
+            return state
+        compatible = deepcopy(descriptor)
+        final_pdf = _canonical_artifact_descriptor(
+            "1034_contract_external_signing_final_pdf_completion.sql"
+        )
+        compatible["checks"].update(final_pdf["checks"])
+        return _artifact_metadata_state(
+            snapshot,
+            compatible,
             "1005_contract_external_signing_successor.sql",
             defer_missing_triggers=defer_missing_triggers,
         )

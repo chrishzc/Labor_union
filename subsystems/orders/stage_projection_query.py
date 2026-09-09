@@ -31,10 +31,12 @@ _ROW_FIELDS = frozenset({
     "matching_plan_status", "matching_created_at", "matching_customer_decision", "matching_customer_decision_at",
     "willingness_contact_attempt_count", "willingness_count", "willingness_replied_count",
     "willingness_accepted_count", "willingness_contacted_at", "willingness_replied_at",
-    "resume_attempt_count", "resume_sent_count", "resume_sent_at", "matching_segment_count", "staff_contract_sent_count",
+    "resume_attempt_count", "resume_sent_count", "resume_sent_at", "matching_segment_count", "staff_contract_document_count", "staff_contract_sent_count",
     "staff_contract_sent_at", "staff_contract_signed_count", "staff_contract_signed_at",
     "client_contract_sent_count", "client_contract_sent_at", "client_contract_signed_count",
     "client_contract_signed_at", "contract_event_id", "contract_created_at",
+    "external_signing_session_id", "external_signing_status_version", "external_signing_handoff_at",
+    "final_contract_document_id", "final_contract_completed_at",
     "finance_version", "deposit_obligation_count", "deposit_open_count", "deposit_updated_at",
     "confirmed_version_id", "confirmed_version", "confirmed_at", "scheduling_version",
     "assignment_count", "assignment_active_count", "assignment_completed_count", "assignment_updated_at",
@@ -415,6 +417,7 @@ def _steps(row: Mapping[str, object], case_no: str, stages: tuple[StageProjectio
     resume_attempt_count = _nonnegative_int(row, "resume_attempt_count")
     resume_sent_count = _nonnegative_int(row, "resume_sent_count")
     segment_count = _nonnegative_int(row, "matching_segment_count")
+    staff_document_count = _nonnegative_int(row, "staff_contract_document_count")
     staff_sent_count = _nonnegative_int(row, "staff_contract_sent_count")
     staff_signed_count = _nonnegative_int(row, "staff_contract_signed_count")
     client_sent_count = _nonnegative_int(row, "client_contract_sent_count")
@@ -425,6 +428,7 @@ def _steps(row: Mapping[str, object], case_no: str, stages: tuple[StageProjectio
         or contacted_count > contact_attempt_count
         or replied_count > contact_attempt_count
         or accepted_count > replied_count
+        or staff_document_count > segment_count
         or staff_sent_count > segment_count
         or staff_signed_count > segment_count
         or client_sent_count > 1
@@ -452,19 +456,21 @@ def _steps(row: Mapping[str, object], case_no: str, stages: tuple[StageProjectio
     )
     pool_status: StageStatus = "completed" if candidate_count else "in_progress" if candidate_pool_id is not None else "unavailable"
     recommendation_status: StageStatus = "completed" if resume_sent_count else "in_progress" if resume_attempt_count or accepted_count else "not_started" if plan_id is not None else "unavailable"
-    staff_contract_status: StageStatus = "completed" if segment_count and staff_signed_count == segment_count else "in_progress" if staff_sent_count or staff_signed_count else "not_started" if plan_id is not None else "unavailable"
-    client_contract_status: StageStatus = "completed" if client_signed_count else "in_progress" if client_sent_count else "not_started" if plan_id is not None else "unavailable"
+    handoff_recorded = row["external_signing_session_id"] is not None
+    final_document_recorded = row["final_contract_document_id"] is not None
+    dispatch_status: StageStatus = "completed" if handoff_recorded else "in_progress" if staff_document_count or staff_sent_count or staff_signed_count else "not_started" if plan_id is not None else "unavailable"
+    signing_status: StageStatus = "completed" if final_document_recorded else "in_progress" if handoff_recorded else "not_started" if plan_id is not None else "unavailable"
     deposit_count = _nonnegative_int(row, "deposit_obligation_count")
-    deposit_status: StageStatus = "completed" if deposit_count and not _nonnegative_int(row, "deposit_open_count") else "blocked" if deposit_count else "unavailable"
+    deposit_status: StageStatus = "completed" if final_document_recorded and deposit_count and not _nonnegative_int(row, "deposit_open_count") else "blocked" if final_document_recorded else "not_started" if handoff_recorded else "unavailable"
     return (
         _step_from_stage(1, "intake_validation", "進件報名與資料完整性驗證", stage["intake_terms"]),
         _standalone_step(2, "matching_pool", "媒合月嫂候選人加入意願池", "Assignments / Scheduling", pool_status, _optional_datetime(row, "matching_created_at"), "matching_plan_lineage_missing" if pool_status == "unavailable" else None),
         _standalone_step(3, "caregiver_line_delivery", "發送訂單資訊詢問月嫂意願（LINE 或人工確認）", "Assignments / LINE Delivery", contact_status, pool_contacted_at, "candidate_contact_pool_missing" if contact_status == "unavailable" else None),
         _standalone_step(4, "caregiver_willingness_reply", "月嫂回傳接案意願", "Assignments / LINE", reply_status, pool_replied_at, "candidate_contact_pool_missing" if reply_status == "unavailable" else None),
         _step_from_stage(5, "formal_recommendation", "寄送月嫂履歷給客戶確認", stage["client_review"]),
-        _standalone_step(6, "caregiver_contract", "產生月嫂服務契約並留存簽回（寄送或人工確認）", "Contract Signing", staff_contract_status, _latest(row, "staff_contract_signed_at", "staff_contract_sent_at"), "staff_contract_signing_lineage_missing" if staff_contract_status == "unavailable" else None),
-        _standalone_step(7, "deposit_settlement", "客戶定金核銷（訂單成立）", "Client Finance", deposit_status, _optional_datetime(row, "deposit_updated_at"), "deposit_obligation_missing" if deposit_status == "unavailable" else None, blockers=(_notice("deposit_not_settled", "定金 obligation 尚未結清。"),) if deposit_status == "blocked" else ()),
-        _standalone_step(8, "client_contract", "產生客戶契約並留存簽回（寄送或人工確認）", "Contract Signing / Orders", client_contract_status, _latest(row, "client_contract_signed_at", "client_contract_sent_at"), "client_contract_signing_lineage_missing" if client_contract_status == "unavailable" else None),
+        _standalone_step(6, "external_signing_dispatch", "建立契約並送交外部簽署平台", "Contract Signing", dispatch_status, _optional_datetime(row, "external_signing_handoff_at"), "external_signing_handoff_missing" if dispatch_status == "unavailable" else None),
+        _standalone_step(7, "external_signing_completion", "雙方完成外部簽署並回收最終 PDF", "Contract Signing / Orders", signing_status, _optional_datetime(row, "final_contract_completed_at"), "external_signing_final_document_missing" if signing_status == "unavailable" else None),
+        _standalone_step(8, "deposit_settlement", "客戶定金核銷（訂單成立）", "Client Finance", deposit_status, _optional_datetime(row, "deposit_updated_at"), "deposit_obligation_missing" if deposit_status == "unavailable" else None, blockers=(_notice("deposit_not_settled", "定金 obligation 尚未結清。"),) if deposit_status == "blocked" else ()),
         _step_from_stage(9, "confirmed_service_dates", "確認事前服務日期（精算）", stage["date_confirmation"]),
         _step_from_stage(10, "formal_service", "轉換正式排班與服務履約", stage["active_service"]),
         _step_from_stage(11, "settlement_close", "完工驗收、時數核對與尾款／薪資結清", stage["settlement_payout"]),

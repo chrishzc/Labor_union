@@ -69,6 +69,10 @@ class FullContractProjectionRepository(Protocol):
         self, case_no: str, assignment_id: int
     ) -> FullContractOwnerProjection | None: ...
 
+    def load_staff_projection_for_segment(
+        self, case_no: str, matching_segment_id: int
+    ) -> FullContractOwnerProjection | None: ...
+
 
 @dataclass(frozen=True, slots=True)
 class FullContractPreviewResult:
@@ -108,6 +112,15 @@ class FullContractPreviewApplication:
         self, case_no: str, assignment_id: int
     ) -> FullContractPreviewResult:
         projection = self._repository.load_staff_projection(case_no, assignment_id)
+        return self._preview(projection, ContractPreviewScope.STAFF, assignment_id)
+
+    def preview_staff_segment(
+        self, case_no: str, matching_segment_id: int
+    ) -> FullContractPreviewResult:
+        projection = self._repository.load_staff_projection_for_segment(
+            case_no, matching_segment_id
+        )
+        assignment_id = None if projection is None else projection.assignment_id
         return self._preview(projection, ContractPreviewScope.STAFF, assignment_id)
 
     def _preview(

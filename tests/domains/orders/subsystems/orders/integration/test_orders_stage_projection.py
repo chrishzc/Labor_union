@@ -71,6 +71,7 @@ def _row(case_no: str = "CASE-001") -> dict[str, object]:
         "resume_sent_count": 1,
         "resume_sent_at": NOW,
         "matching_segment_count": 1,
+        "staff_contract_document_count": 1,
         "staff_contract_sent_count": 1,
         "staff_contract_sent_at": NOW,
         "staff_contract_signed_count": 1,
@@ -79,6 +80,11 @@ def _row(case_no: str = "CASE-001") -> dict[str, object]:
         "client_contract_sent_at": NOW,
         "client_contract_signed_count": 1,
         "client_contract_signed_at": NOW,
+        "external_signing_session_id": "ces_" + "1" * 32,
+        "external_signing_status_version": 2,
+        "external_signing_handoff_at": NOW,
+        "final_contract_document_id": "cfd_" + "2" * 32,
+        "final_contract_completed_at": NOW,
         "contract_event_id": 4,
         "contract_created_at": NOW,
         "finance_version": 5,
@@ -426,6 +432,8 @@ def test_rootless_historical_order_is_isolated_without_guessing_a_business_stage
         "matching_customer_decision_at", "willingness_contacted_at",
         "willingness_replied_at", "resume_sent_at", "staff_contract_sent_at",
         "staff_contract_signed_at", "client_contract_sent_at", "client_contract_signed_at",
+        "external_signing_session_id", "external_signing_status_version", "external_signing_handoff_at",
+        "final_contract_document_id", "final_contract_completed_at",
         "contract_event_id", "contract_created_at", "finance_version", "deposit_updated_at",
         "confirmed_version_id", "confirmed_version", "confirmed_at", "scheduling_version",
         "assignment_updated_at", "assignment_first_service_date", "assignment_last_service_date",
@@ -438,7 +446,7 @@ def test_rootless_historical_order_is_isolated_without_guessing_a_business_stage
         "willingness_contact_attempt_count", "willingness_count", "willingness_replied_count",
         "willingness_accepted_count", "candidate_pool_candidate_count", "candidate_pool_contacted_count",
         "candidate_pool_replied_count", "resume_attempt_count", "resume_sent_count",
-        "matching_segment_count", "staff_contract_sent_count", "staff_contract_signed_count",
+        "matching_segment_count", "staff_contract_document_count", "staff_contract_sent_count", "staff_contract_signed_count",
         "client_contract_sent_count", "client_contract_signed_count", "deposit_obligation_count",
         "deposit_open_count", "assignment_count", "assignment_active_count",
         "assignment_completed_count", "client_obligation_count", "client_open_count",
@@ -548,6 +556,7 @@ def test_out_of_order_service_dates_do_not_skip_the_missing_matching_stage() -> 
         "resume_sent_at": None,
         "matching_segment_count": 0,
         "staff_contract_sent_count": 0,
+        "staff_contract_document_count": 0,
         "staff_contract_sent_at": None,
         "staff_contract_signed_count": 0,
         "staff_contract_signed_at": None,
@@ -603,7 +612,7 @@ def test_page_order_validation_uses_mysql_case_insensitive_cursor_order() -> Non
         ).query(StageProjectionQuery(50))
 
 
-def test_sop_matching_and_two_party_contract_steps_use_distinct_owner_facts() -> None:
+def test_external_signing_steps_use_handoff_and_final_document_owner_facts() -> None:
     row = _row()
     row.update({
         "willingness_replied_count": 1,
@@ -613,10 +622,16 @@ def test_sop_matching_and_two_party_contract_steps_use_distinct_owner_facts() ->
         "candidate_pool_replied_count": 1,
         "resume_attempt_count": 0,
         "resume_sent_count": 0,
+        "staff_contract_document_count": 0,
         "staff_contract_sent_count": 0,
         "staff_contract_sent_at": None,
         "staff_contract_signed_count": 0,
         "staff_contract_signed_at": None,
+        "external_signing_session_id": None,
+        "external_signing_status_version": None,
+        "external_signing_handoff_at": None,
+        "final_contract_document_id": None,
+        "final_contract_completed_at": None,
     })
 
     steps = OrderStageProjectionQueryService(_Repository((row,)), BUSINESS_CLOCK).query(
@@ -627,10 +642,11 @@ def test_sop_matching_and_two_party_contract_steps_use_distinct_owner_facts() ->
     assert steps[3].status == "in_progress"
     assert steps[4].status == "in_progress"
     assert steps[5].status == "not_started"
-    assert steps[7].status == "completed"
+    assert steps[6].status == "not_started"
+    assert steps[7].status == "unavailable"
 
 
-def test_sent_contracts_are_in_progress_until_each_party_signs() -> None:
+def test_generated_contract_is_in_progress_until_external_handoff_is_recorded() -> None:
     row = _row()
     row.update({
         "staff_contract_signed_count": 0,
@@ -639,6 +655,11 @@ def test_sent_contracts_are_in_progress_until_each_party_signs() -> None:
         "client_contract_signed_at": None,
         "contract_event_id": None,
         "contract_created_at": None,
+        "external_signing_session_id": None,
+        "external_signing_status_version": None,
+        "external_signing_handoff_at": None,
+        "final_contract_document_id": None,
+        "final_contract_completed_at": None,
     })
 
     steps = OrderStageProjectionQueryService(_Repository((row,)), BUSINESS_CLOCK).query(
@@ -646,16 +667,20 @@ def test_sent_contracts_are_in_progress_until_each_party_signs() -> None:
     ).items[0].sop_steps
 
     assert steps[5].status == "in_progress"
-    assert steps[7].status == "in_progress"
+    assert steps[6].status == "not_started"
 
 
-def test_manual_signed_contract_evidence_completes_steps_without_line_sent_event() -> None:
+def test_final_pdf_completes_signing_without_individual_report_events() -> None:
     row = _row()
     row.update({
         "staff_contract_sent_count": 0,
         "staff_contract_sent_at": None,
         "client_contract_sent_count": 0,
         "client_contract_sent_at": None,
+        "staff_contract_signed_count": 0,
+        "staff_contract_signed_at": None,
+        "client_contract_signed_count": 0,
+        "client_contract_signed_at": None,
     })
 
     steps = OrderStageProjectionQueryService(_Repository((row,)), BUSINESS_CLOCK).query(
@@ -663,15 +688,16 @@ def test_manual_signed_contract_evidence_completes_steps_without_line_sent_event
     ).items[0].sop_steps
 
     assert steps[5].status == "completed"
-    assert steps[5].label == "產生月嫂服務契約並留存簽回（寄送或人工確認）"
-    assert steps[7].status == "completed"
-    assert steps[7].label == "產生客戶契約並留存簽回（寄送或人工確認）"
+    assert steps[5].label == "建立契約並送交外部簽署平台"
+    assert steps[6].status == "completed"
+    assert steps[6].label == "雙方完成外部簽署並回收最終 PDF"
 
 
 @pytest.mark.parametrize(
     "updates",
     (
         {"matching_segment_count": 1, "staff_contract_signed_count": 2},
+        {"matching_segment_count": 1, "staff_contract_document_count": 2},
         {"client_contract_signed_count": 2},
     ),
 )
@@ -744,6 +770,8 @@ def test_mysql_repository_uses_one_bounded_select_and_never_commits() -> None:
     assert "COUNT(DISTINCT event.segment_id) = COUNT(DISTINCT segment.id)" in connection.last_cursor.sql
     assert "contract_signing_events" in connection.last_cursor.sql
     assert "signing.matching_plan_id = plan.id" in connection.last_cursor.sql
+    assert "final_contract.external_signing_session_id = external_session.id" in connection.last_cursor.sql
+    assert "GROUP BY document.case_no" not in connection.last_cursor.sql
     for required_terms_clause in (
         "o.start_date IS NOT NULL",
         "o.service_days > 0",

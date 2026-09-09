@@ -1,5 +1,5 @@
 -- GENERATED FILE. Do not edit by hand.
--- Release: labor-union-validation-schema-2026-09-07-v28
+-- Release: labor-union-validation-schema-2026-09-09-v30
 -- Replace __LU_TEST_DATABASE__ with an explicitly confirmed lu_test_* database.
 -- Rebuild with: python scripts/build_validation_schema_release.py
 
@@ -21139,3 +21139,21 @@ BEFORE DELETE ON matching_holiday_work_agreement_participants
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'matching holiday work agreement participants cannot be deleted';
 -- END SOURCE: db/schema_parts/1032_matching_holiday_work_agreements.sql
+
+-- BEGIN SOURCE: db/schema_parts/1034_contract_external_signing_final_pdf_completion.sql
+-- File: 1034_contract_external_signing_final_pdf_completion.sql
+-- Purpose: align the external-signing session constraint with final-PDF completion.
+-- Data effect: schema only; existing session rows and optional audit reports are preserved.
+
+ALTER TABLE contract_external_signing_sessions
+    DROP CHECK chk_contract_external_session_state,
+    ADD CONSTRAINT chk_contract_external_session_state CHECK (
+        (session_state = 'staff_reporting' AND commitment_id IS NULL)
+        OR (session_state IN (
+                'staff_reports_complete',
+                'client_reported_final_pdf_pending',
+                'completed'
+            ) AND commitment_id IS NOT NULL)
+        OR session_state = 'superseded'
+    );
+-- END SOURCE: db/schema_parts/1034_contract_external_signing_final_pdf_completion.sql

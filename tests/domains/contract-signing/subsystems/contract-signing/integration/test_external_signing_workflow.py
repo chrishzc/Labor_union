@@ -30,6 +30,7 @@ from subsystems.contract_signing.external_signing_contracts import (
 )
 from subsystems.contract_signing.external_signing_workflow import (
     ExternalSigningWorkflow,
+    RecordExternalSigningHandoff,
     StaffCompletionPrerequisites,
 )
 
@@ -42,7 +43,7 @@ def test_query_and_final_preview_are_zero_write_and_public_safe() -> None:
     preview = workflow.preview_final_pdf_readiness(_facts().session_id)
 
     assert query.required_staff_report_count == 2
-    assert preview.blockers
+    assert preview.blockers == ()
     assert repository.writes == []
     assert repository.loads == [False, False]
     assert not hasattr(query, "document_set_fingerprint")
@@ -75,9 +76,9 @@ def test_last_staff_report_uses_borrowed_completion_port_in_same_uow() -> None:
     )
 
     assert receipt.resulting_state is ExternalSigningState.STAFF_REPORTS_COMPLETE
-    assert receipt.client_reminder_intent_created is True
+    assert receipt.client_reminder_intent_created is False
     assert completion.calls == [(facts.session_id, 2)]
-    assert repository.session_prerequisites == StaffCompletionPrerequisites(44, 77)
+    assert repository.session_prerequisites == StaffCompletionPrerequisites(44)
     assert uows.instances[0].commits == 1
 
 
@@ -148,6 +149,31 @@ def test_query_case_derives_zero_write_virtual_session() -> None:
     assert result.session_id == virtual.session_id
     assert result.persisted is False
     assert repository.writes == []
+
+
+def test_handoff_activates_the_virtual_session_once_at_version_one() -> None:
+    virtual = _virtual_facts()
+    repository = FakeRepository(None, virtual=virtual)
+    uows = FakeUowFactory()
+    workflow = ExternalSigningWorkflow(repository, FakeCompletionPort(), uows)
+    command = RecordExternalSigningHandoff(
+        case_no=virtual.case_no,
+        expected_status_version=ExpectedVersion(0),
+        actor=ActorContext("admin:17"),
+        idempotency_key=IdempotencyKey("external-handoff:case-001"),
+        correlation_id=CorrelationId("corr-handoff-001"),
+    )
+
+    first = workflow.record_handoff(command)
+    replay = workflow.record_handoff(command)
+
+    assert first.session_id == virtual.session_id
+    assert first.resulting_status_version == 1
+    assert first.replayed is False
+    assert replay.resulting_status_version == 1
+    assert replay.replayed is True
+    assert repository.writes == ["activate"]
+    assert [uow.commits for uow in uows.instances] == [1, 1]
 
 
 def test_first_staff_report_lazy_activates_in_outer_uow() -> None:
@@ -221,9 +247,17 @@ class FakeRepository:
     def derive_current_session(self, case_no, *, for_update):
         return self.virtual if self.virtual is not None and self.virtual.case_no == case_no else None
 
-    def activate_session(self, facts, *, actor_id):
+    def activate_session(
+        self, facts, *, actor_id, commitment_id=None, status_version=0
+    ):
         self.writes.append("activate")
-        self.facts = facts
+        self.facts = replace(
+            facts,
+            commitment_id=(
+                facts.commitment_id if commitment_id is None else commitment_id
+            ),
+            status_version=status_version,
+        )
 
     def find_receipt(self, key, *, for_update):
         return self.receipts.get(key.value)
@@ -262,7 +296,7 @@ class FakeCompletionPort:
 
     def establish_prerequisites(self, command, facts, resulting_status_version):
         self.calls.append((facts.session_id, resulting_status_version))
-        return StaffCompletionPrerequisites(44, 77)
+        return StaffCompletionPrerequisites(44)
 
 
 class FakeUow:

@@ -55,7 +55,7 @@ def test_staff_reports_accept_any_target_order_but_each_target_only_once() -> No
     assert captured.value.code is ExternalSigningErrorCode.STAFF_REPORT_ALREADY_RECORDED
 
 
-def test_last_staff_report_requires_commitment_and_client_reminder() -> None:
+def test_last_staff_report_requires_commitment_before_client_document() -> None:
     facts = _facts(reported_staff_segment_ids=(22,), status_version=4)
 
     transition = reduce_staff_completion_report(
@@ -68,7 +68,7 @@ def test_last_staff_report_requires_commitment_and_client_reminder() -> None:
     assert transition.after_state is ExternalSigningState.STAFF_REPORTS_COMPLETE
     assert transition.reported_staff_segment_ids == (11, 22)
     assert transition.requires_commitment is True
-    assert transition.create_client_reminder_intent is True
+    assert transition.create_client_reminder_intent is False
 
 
 def test_client_report_is_rejected_until_all_staff_reports_are_complete() -> None:
@@ -130,12 +130,7 @@ def test_staff_report_rejects_superseded_session() -> None:
 
 
 def test_final_pdf_blockers_are_closed_and_deterministic() -> None:
-    assert final_signed_contract_blockers(_facts()) == (
-        ExternalSigningErrorCode.STAFF_REPORTS_INCOMPLETE,
-        ExternalSigningErrorCode.CLIENT_REPORT_OUT_OF_ORDER,
-        ExternalSigningErrorCode.COMMITMENT_MISSING,
-        ExternalSigningErrorCode.FINAL_PDF_NOT_PENDING,
-    )
+    assert final_signed_contract_blockers(_facts()) == ()
     assert final_signed_contract_blockers(
         _facts(state=ExternalSigningState.SUPERSEDED)
     ) == (ExternalSigningErrorCode.SESSION_SUPERSEDED,)

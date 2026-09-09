@@ -110,6 +110,16 @@ Orders 不擁有：
 - **WB-STATE-04**：切換分類不帶入另一分類的 stage／substatus 篩選。沿用本節的完整 continuation、stale request 取消與 partial failure 規則；不得把前 200 筆當作完整結果。所有分類、counts 與 pagination 共用 server predicate。
 - **WB-STATE-05**：既有 `/api/orders/core-stage-timelines` 增加可選 `workbench_scope=in_progress|completed|cancelled`。未指定時維持既有 branch／historical Query 契約，供歷史詳情與既有 consumers 使用。新的工作分類不與 legacy branch／historical facet 合併使用；完成及取消分類不得帶 stage／substatus。此 additive Query 不增加寫入、migration、provider effect 或改變生命週期事實。
 
+#### 3.1.2.2 第 6–8 核心階段外部簽署順序（2026-09-09 人工裁決）
+
+十三核心階段總數維持不變；第 6–8 階段依實際外部平台流程固定為：
+
+6. `external_signing_dispatch`：系統建立目前 accepted plan 的契約文件，由工會人員明確確認已送交外部簽署平台。
+7. `external_signing_completion`：客戶與所有月嫂在外部平台完成簽署，以本系統驗收並保存的最終簽署 PDF 為完成根事實。
+8. `deposit_settlement`：最終簽署 PDF 完成後才進入客戶定金核銷；未結清保持 blocked，結清才完成。
+
+月嫂或客戶的個別完成回報可留作稽核 evidence，但缺少個別回報不得阻擋最終 PDF 的 Preview／Apply，也不得使第 7 階段永久卡住。外部平台交接必須是明確保存的系統事實；PDF 下載、LINE delivery 或 UI 顯示均不得冒充已送交。第 9–13 階段的 code、順序與 owner 不變。
+
 驗收：混合一般與歷史案件時，每件只出現在正確分類；歷史未服務案件不因沒有正式步驟而消失；完成／取消頁面及抽屜沒有十三步驟；已完工但未結清案件仍呈現真實結算提醒；分類切換不保留無效篩選；跨頁集合完整、續讀失敗不顯示假完整結果；舊 branch Query 與歷史 evidence 查閱保持可用。
 
 來源：2026-09-08 使用者要求以進行中／完成／取消取代正常／歷史分類並移除完成／取消的十三步驟；完成定義沿用本文件 §3.3，歷史狀態沿用 Historical Orders 已有正式 lifecycle。分類屬 presentation Query contract，不構成新 business state。

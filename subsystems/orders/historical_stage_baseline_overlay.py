@@ -279,7 +279,6 @@ def _cancelled_timeline(
             blockers=(),
             warnings=(notice,),
             availability_reason="historical_order_cancelled",
-            settlement=(),
         )
         for stage in timeline.stages
     )

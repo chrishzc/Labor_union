@@ -142,6 +142,7 @@ def test_complete_session_fulfills_recovery_and_cas_without_commit() -> None:
     repository.complete_session_and_recovery(
         _final_session(),
         document,
+        commitment_id=44,
         resulting_status_version=4,
         applied_at=document.applied_at,
     )
@@ -237,12 +238,10 @@ def test_manual_report_persists_manual_columns_without_line_inbox() -> None:
 
 def test_load_session_requires_current_active_accepted_plan_and_document_set() -> None:
     segments = [{"segment_id": 11, "staff_id": "501"}]
-    fingerprint = _document_set_fingerprint(
-        "CASE-001", 9, segments, {11: 101}, 201
-    )
+    fingerprint = _document_set_fingerprint("CASE-001", 9, segments, {11: 101})
     connection = ScriptedConnection([
         _session_row(fingerprint),
-        {"case_no": "CASE-001"},
+        {"case_no": "CASE-001", "client_id": 301},
         {"id": 9},
         segments,
         {"id": 44},

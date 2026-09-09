@@ -20,6 +20,12 @@ from scripts import migrate_preserved_database_additive_schema as migration
 
 SCRATCH_ROOT = migration.ROOT / "scratch"
 SAFE_ARTIFACT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\.sql")
+ZERO_EFFECT_SUCCESSOR_PAIRS = frozenset({
+    (
+        "1032_matching_holiday_work_agreements.sql",
+        "1033_matching_holiday_work_agreements.sql",
+    ),
+})
 
 
 class EngineEvidenceError(ValueError):
@@ -97,7 +103,14 @@ def _verify_release_boundary(
             raise EngineEvidenceError("applied target release is not exact")
     elif target_state != "absent":
         raise EngineEvidenceError("source target release is not the exact predecessor")
-    for state in states[target_index + 1:]:
+    target_artifact = str(entries[target_index]["artifact"]["name"])
+    for offset, state in enumerate(states[target_index + 1:], start=1):
+        future_artifact = str(entries[target_index + offset]["artifact"]["name"])
+        if (
+            state == "exact"
+            and (target_artifact, future_artifact) in ZERO_EFFECT_SUCCESSOR_PAIRS
+        ):
+            continue
         if state not in {"absent", "dependency_pending"}:
             raise EngineEvidenceError(f"future release state is {state}")
     return states

@@ -1,12 +1,11 @@
 """
 File: test_external_staff_completion_port.py
-Description: 驗證 borrowed staff completion adapter 的 commitment、deposit、LINE reminder 與失敗關閉。
+Description: 驗證 borrowed staff completion adapter 的 commitment、deposit 與失敗關閉。
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
-import json
 from types import SimpleNamespace
 
 import pytest
@@ -40,23 +39,7 @@ def test_existing_commitment_replays_and_borrowed_adapter_never_commits(monkeypa
     assert all("INSERT INTO precontract_service_commitments" not in sql for sql, _ in connection.executions)
     assert connection.commit_calls == 0
     assert connection.rollback_calls == 0
-    assert len(captured["deliveries"]) == 2
-
-
-def test_client_reminder_contains_no_url_and_uses_durable_source(monkeypatch) -> None:
-    connection = FakeConnection()
-    captured = _install_success_dependencies(monkeypatch)
-
-    MySqlExternalStaffCompletionPort(connection).establish_prerequisites(
-        _command(), _facts(), 2
-    )
-
-    request = captured["deliveries"][0]
-    payload = json.loads(request.payload_json)
-    assert "http" not in payload["text"].lower()
-    assert "url" not in payload["text"].lower()
-    assert request.source_aggregate_type == "contract_external_signing_session"
-    assert request.source_aggregate_identity == _facts().session_id
+    assert captured["finance_commands"]
 
 
 def test_deposit_uses_a_deterministic_derived_key(monkeypatch) -> None:
@@ -76,30 +59,17 @@ def test_deposit_uses_a_deterministic_derived_key(monkeypatch) -> None:
     assert finance_command.source_event_id == 44
 
 
-def test_missing_order_fails_before_deposit_or_delivery(monkeypatch) -> None:
-    connection = FakeConnection(order=None)
-    captured = _install_success_dependencies(monkeypatch)
-
-    with pytest.raises(RuntimeError, match="order_missing"):
-        MySqlExternalStaffCompletionPort(connection).establish_prerequisites(
-            _command(), _facts(), 2
-        )
-
-    assert captured["finance_commands"] == []
-    assert captured["deliveries"] == []
-
-
-def test_unbound_client_fails_before_deposit_or_delivery(monkeypatch) -> None:
+def test_unbound_client_does_not_block_commitment_or_deposit(monkeypatch) -> None:
     connection = FakeConnection(binding=None)
     captured = _install_success_dependencies(monkeypatch)
 
-    with pytest.raises(ValueError, match="recipient_unbound"):
-        MySqlExternalStaffCompletionPort(connection).establish_prerequisites(
-            _command(), _facts(), 2
-        )
+    result = MySqlExternalStaffCompletionPort(connection).establish_prerequisites(
+        _command(), _facts(), 2
+    )
 
-    assert captured["finance_commands"] == []
-    assert captured["deliveries"] == []
+    assert result == module.StaffCompletionPrerequisites(44)
+    assert len(captured["finance_commands"]) == 1
+    assert not any("line_identity_bindings" in sql for sql, _ in connection.executions)
 
 
 def test_existing_commitment_identity_mismatch_fails_closed(monkeypatch) -> None:
@@ -114,10 +84,9 @@ def test_existing_commitment_identity_mismatch_fails_closed(monkeypatch) -> None
         )
 
     assert captured["finance_commands"] == []
-    assert captured["deliveries"] == []
 
 
-def test_plan_case_mismatch_fails_before_commitment_or_reminder(monkeypatch) -> None:
+def test_plan_case_mismatch_fails_before_commitment(monkeypatch) -> None:
     connection = FakeConnection(plan={"case_no": "OTHER"})
     captured = _install_success_dependencies(monkeypatch)
 
@@ -128,26 +97,16 @@ def test_plan_case_mismatch_fails_before_commitment_or_reminder(monkeypatch) -> 
 
     assert not any(sql.startswith("INSERT") for sql, _ in connection.executions)
     assert captured["finance_commands"] == []
-    assert captured["deliveries"] == []
 
 
 def _install_success_dependencies(monkeypatch):
-    captured = {"finance_commands": [], "deliveries": []}
+    captured = {"finance_commands": []}
     monkeypatch.setattr(module, "select_order", lambda cursor, case_no, lock: {"case_no": case_no})
     monkeypatch.setattr(module, "load_contract_client_finance_facts", lambda cursor, order, lock: object())
     monkeypatch.setattr(module, "build_precontract_deposit_candidate", lambda facts, identity: SimpleNamespace(mutates=True))
     monkeypatch.setattr(module, "precontract_deposit_terms_impact", lambda candidate: "deposit-impact")
     monkeypatch.setattr(module, "persist_client_finance_terms_impact", lambda cursor, command: captured["finance_commands"].append(command))
 
-    class DeliveryRepository:
-        def __init__(self, connection):
-            self.connection = connection
-
-        def enqueue(self, request):
-            captured["deliveries"].append(request)
-            return SimpleNamespace(task_id=SimpleNamespace(value=77))
-
-    monkeypatch.setattr(module, "MySqlLineDeliveryTaskRepository", DeliveryRepository)
     return captured
 
 
