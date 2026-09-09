@@ -24,7 +24,6 @@ export interface OrderIntakeRepairPanelProps {
   caseNo: string;
   orderStatus: string;
   onChanged?: () => Promise<void> | void;
-  onHistoricalRestartRequested?: () => Promise<void> | void;
 }
 
 type IntakeOperation = 'name-preview' | 'name-apply' | 'terms-preview' | 'terms-apply' | 'completion-apply' | null;
@@ -33,7 +32,6 @@ export function OrderIntakeRepairPanel({
   caseNo,
   orderStatus,
   onChanged,
-  onHistoricalRestartRequested,
 }: OrderIntakeRepairPanelProps) {
   const [completion, setCompletion] = useState<IntakeCompletionPreview | null>(null);
   const [clientName, setClientName] = useState('');
@@ -232,22 +230,6 @@ export function OrderIntakeRepairPanel({
               <ul style={{ margin: 0, paddingLeft: '20px' }}>
                 {completion.blockers.map((blocker) => <li key={blocker}>{intakeBlockerMessage(blocker)}</li>)}
               </ul>
-            </div>
-          )}
-
-          {historicalRestartAvailable && completion.blockers.length > 0 && (
-            <div style={{ display: 'grid', gap: '6px' }}>
-              <span style={{ fontSize: '0.82rem', color: '#74593f' }}>
-                此歷史案件不放寬 intake；請改走既有「重啟正常流程」，回到訂單成立後再使用正式日期／媒合／排班流程。
-              </span>
-              <button
-                type="button"
-                className="btn-secondary-action"
-                data-control-id="orders.intake-repair.historical-restart"
-                onClick={() => void onHistoricalRestartRequested?.()}
-              >
-                前往重啟正常流程
-              </button>
             </div>
           )}
 

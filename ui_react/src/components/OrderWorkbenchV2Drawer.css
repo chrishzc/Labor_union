@@ -23,6 +23,43 @@
   font-size: 0.88rem;
 }
 
+.order-v2-drawer-tabs {
+  display: flex;
+  gap: var(--space-5);
+  margin: 0 0 var(--space-5);
+  overflow-x: auto;
+  border-bottom: 1px solid var(--md-sys-color-outline-variant);
+}
+
+.order-v2-drawer-tabs button {
+  flex: 0 0 auto;
+  min-height: 40px;
+  padding: 8px 3px 10px;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  background: transparent;
+  color: var(--md-sys-color-on-surface-variant);
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.order-v2-drawer-tabs button:hover { color: var(--md-sys-color-on-surface); }
+.order-v2-drawer-tabs button.active {
+  border-bottom-color: var(--md-sys-color-primary);
+  color: var(--md-sys-color-primary);
+}
+
+.order-v2-drawer-tab-panel {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.order-v2-drawer-tab-panel [hidden] {
+  display: none !important;
+}
+
 .order-v2-drawer-current-task {
   display: grid;
   gap: var(--space-4);
@@ -72,7 +109,7 @@
 .order-v2-drawer-current-task > fieldset > :last-child { margin-bottom: 0; }
 .order-v2-drawer-columns {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 340px;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-6);
   align-items: start;
 }
@@ -314,4 +351,5 @@
   .order-v2-drawer-fact-grid > article + article { border-left: 0; border-top: 1px solid var(--md-sys-color-outline-variant); padding: var(--space-3) 0 0; }
   .order-v2-drawer-current-task { padding: var(--space-4); }
   .order-v2-drawer-current-task > header { display: grid; }
+  .order-v2-drawer-tabs { gap: var(--space-4); }
 }

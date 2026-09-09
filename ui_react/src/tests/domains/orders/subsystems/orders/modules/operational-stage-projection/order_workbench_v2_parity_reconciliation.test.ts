@@ -13,7 +13,8 @@ const schedulingSource = source('src/pages/SchedulingPage.tsx');
 describe('Order Workbench V2 parity reconciliation', () => {
   it('routes intake repair, historical restart, replacement, and accounting blockers through existing owner flows', () => {
     expect(drawerSource).toContain('<OrderIntakeRepairPanel');
-    expect(drawerSource).toContain('onHistoricalRestartRequested={restartHistoricalOrderIntoNormalFlow}');
+    expect(drawerSource).toContain('aria-label="歷史訂單精算天數重啟"');
+    expect(drawerSource).toContain('void restartHistoricalOrderIntoNormalFlow()');
     expect(drawerSource).toContain('historicalServiceAccountingClient.queryPrecisionRestart(caseNo)');
     expect(drawerSource).toContain('historicalServiceAccountingClient.previewPrecisionRestart(caseNo)');
     expect(drawerSource).toContain('historicalServiceAccountingClient.applyPrecisionRestart(');
@@ -37,7 +38,7 @@ describe('Order Workbench V2 parity reconciliation', () => {
   });
 
   it('does not reintroduce the retired handcrafted contract-document presentation', () => {
-    expect(workbenchSource).toContain('<ContractExternalSigningActions');
+    expect(drawerSource).toContain('<ContractExternalSigningActions');
     expect(workbenchSource).not.toContain('<OrderCaregiverContractPanel');
     expect(workbenchSource).not.toContain('<OrderClientContractPanel');
     expect(workbenchSource).not.toContain('契約草稿預覽（非正式）');

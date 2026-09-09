@@ -349,9 +349,9 @@ describe('待辦看板 Beta 唯讀工作 Drawer', () => {
     expect(within(dialog).queryByTestId('drawer-core-stage')).not.toBeInTheDocument();
     const assignmentSection = within(dialog).getByRole('heading', { name: '目前正式派案／Assignment projection' }).closest('section');
     if (!(assignmentSection instanceof HTMLElement)) throw new Error('找不到正式派案區');
-    const historicalRegion = within(dialog).getByRole('region', { name: '歷史來源證據' });
-
     await waitFor(() => expect(within(assignmentSection).getByText(/月嫂 #99/)).toBeInTheDocument());
+    fireEvent.click(within(dialog).getByRole('tab', { name: '歷史與來源' }));
+    const historicalRegion = within(dialog).getByRole('region', { name: '歷史來源證據' });
     await waitFor(() => expect(within(historicalRegion).getByText(/歷史月嫂/)).toBeInTheDocument());
     expect(within(assignmentSection).queryByText(/歷史月嫂/)).not.toBeInTheDocument();
     expect(within(historicalRegion).getByText(/不代表目前正式服務期間或目前正式派案/)).toBeInTheDocument();
@@ -371,6 +371,7 @@ describe('待辦看板 Beta 唯讀工作 Drawer', () => {
     setOwnerFacts('CASE-TERMINAL', '測試客戶', 99);
     render(<OrderWorkbenchV2Drawer caseNo="CASE-TERMINAL" branchType={branch} workbenchScope={scope} onClose={vi.fn()} />);
     const dialog = await screen.findByRole('dialog', { name: '案件 CASE-TERMINAL' });
+    fireEvent.click(within(dialog).getByRole('tab', { name: '進度與提醒' }));
     expect(within(dialog).queryByRole('heading', { name: '13 階段正式進度' })).not.toBeInTheDocument();
     await waitFor(() => expect(within(dialog).getByRole('heading', { name: '結算狀態' })).toBeInTheDocument());
     expect(within(dialog).queryByTestId('drawer-core-stage')).not.toBeInTheDocument();
@@ -396,6 +397,9 @@ describe('待辦看板 Beta 唯讀工作 Drawer', () => {
 
     const dialog = await screen.findByRole('dialog', { name: '案件 CASE-STRICT' });
     await waitFor(() => expect(within(dialog).getByText(/正式服務條款不可用：strict decode: invalid OrderTerms payload/)).toBeInTheDocument());
+    expect(within(dialog).getByRole('tab', { name: '案件處理' })).toHaveAttribute('aria-selected', 'true');
+    fireEvent.click(within(dialog).getByRole('tab', { name: '進度與提醒' }));
+    expect(within(dialog).getByRole('tab', { name: '進度與提醒' })).toHaveAttribute('aria-selected', 'true');
     expect(within(dialog).getAllByTestId('drawer-core-stage')).toHaveLength(13);
     expect(within(dialog).queryByText('1999-01-01')).not.toBeInTheDocument();
 

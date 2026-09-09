@@ -219,6 +219,7 @@ describe('historical Drawer immutable evidence boundary', () => {
   it('future source period 與 evidence-only staff 保留在來源區，formal owner/assignment 不被覆寫', async () => {
     render(<OrderWorkbenchV2Drawer caseNo="CASE-FUTURE" branchType="historical" onClose={vi.fn()} />);
     const dialog = screen.getByRole('dialog', { name: '案件 CASE-FUTURE' });
+    fireEvent.click(within(dialog).getByRole('tab', { name: '歷史與來源' }));
     const ownerHeading = within(dialog).getByRole('heading', { name: '目前正式 owner progression' });
     const ownerSection = ownerHeading.closest('section');
     if (!(ownerSection instanceof HTMLElement)) throw new Error('找不到目前正式 owner progression 區');
@@ -274,7 +275,7 @@ describe('historical Drawer immutable evidence boundary', () => {
     render(<OrderWorkbenchV2Drawer caseNo="CASE-FUTURE" branchType="historical" onClose={vi.fn()} />);
     const restart = await screen.findByRole('button', { name: '前往重啟正常流程' });
     const intake = screen.getByRole('region', { name: '訂單缺件' });
-    expect(within(intake).getByText('目前不可完成補件')).toBeInTheDocument();
+    expect(await within(intake).findByText('目前不可完成補件')).toBeInTheDocument();
     expect(within(intake).queryByRole('button', { name: '確認完成進件補齊' })).not.toBeInTheDocument();
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     fireEvent.click(restart);
@@ -291,6 +292,32 @@ describe('historical Drawer immutable evidence boundary', () => {
     expect(mocks.detail.mock.invocationCallOrder.at(-1)).toBeGreaterThan(mocks.restartApply.mock.invocationCallOrder[0]!);
     await waitFor(() => expect(screen.queryByRole('button', { name: '前往重啟正常流程' })).not.toBeInTheDocument());
     expect(mocks.intakeApply).not.toHaveBeenCalled();
+  });
+
+  it.each(['歷史訂單－未服務', '歷史訂單－服務中'])('%s keeps the precision restart UI available without intake blockers', async (status) => {
+    mocks.detail.mockResolvedValue(orderDetail(status));
+    mocks.intakeCompletion.mockResolvedValue({
+      case_no: 'CASE-FUTURE',
+      order_status: status,
+      order_version: 12,
+      missing_fields: [],
+      blockers: [],
+      apply_allowed: false,
+    });
+    mocks.core.mockResolvedValue({
+      items: [timeline(status)],
+      stage_counts: Object.fromEntries(CORE_STAGE_CODES.map((code) => [code, 0])),
+      substatus_counts: {},
+      historical_lifecycle_counts: { unserved: status === '歷史訂單－未服務' ? 1 : 0, in_service: status === '歷史訂單－服務中' ? 1 : 0, service_completed: 0, accounting_completed: 0 },
+      next_cursor: null,
+      etag: 'b'.repeat(64),
+    });
+
+    render(<OrderWorkbenchV2Drawer caseNo="CASE-FUTURE" branchType="historical" onClose={vi.fn()} />);
+
+    const restartRegion = await screen.findByRole('region', { name: '歷史訂單精算天數重啟' });
+    expect(within(restartRegion).getByRole('heading', { name: '重啟精算天數' })).toBeInTheDocument();
+    expect(within(restartRegion).getByRole('button', { name: '前往重啟正常流程' })).toBeEnabled();
   });
 
   it('stops before Preview and Apply when the restart owner returns blockers', async () => {
@@ -333,6 +360,7 @@ describe('historical Drawer immutable evidence boundary', () => {
     mocks.detail.mockResolvedValue(orderDetail('歷史訂單－服務完成'));
     mocks.accounting.mockRejectedValue(new Error(blocker));
     render(<OrderWorkbenchV2Drawer caseNo="CASE-FUTURE" branchType="historical" onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole('tab', { name: '歷史與來源' }));
     const evidence = screen.getByRole('region', { name: '歷史來源證據' });
     expect(await within(evidence).findByText(`歷史帳務 Query／blocker：${blocker}`)).toBeInTheDocument();
     expect(screen.getByRole('dialog')).toBeInTheDocument();
