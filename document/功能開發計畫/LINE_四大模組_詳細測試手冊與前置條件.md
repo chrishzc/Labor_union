@@ -422,26 +422,6 @@ POST /api/v1/line/identity-bindings/{line_user_id}/revocation/apply
 
 ---
 
-## M1-07 雙角色隔離
-
-### Agent 前置
-
-- 同一 LINE User 準備 customer + staff 兩種 current binding（使用正式 owner flow；不可偽造 selected role）。
-- 為兩個角色各準備至少一筆可 readback 資料。
-
-### 手機操作
-
-1. 切 customer role，讀客戶功能。
-2. 切 staff role，讀月嫂功能。
-
-### 驗收
-
-- customer 不得讀 staff 私有資料。
-- staff 不得讀其他客戶資料。
-- role change 要有 current role-context/readback。
-
----
-
 # 5. 模組二：AI 客服、QA、Gemini 與安全 fallback
 
 > Current M2 已不是舊版「手動新增 INITIAL_RULES 後直接發布」的模型。正式 QA 來源為 `document/line/AI客服QA題庫.jsonl`；只有 `status=ready` 可自動回答。

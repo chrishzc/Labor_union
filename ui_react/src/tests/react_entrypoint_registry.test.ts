@@ -142,6 +142,40 @@ describe('React entrypoint registry', () => {
     );
   });
 
+  it('LIFF 目錄依正式四種 audience 分類，工會人員不會看到訪客 gateway', async () => {
+    const runtimeConfigClient = {
+      get: vi.fn(async () => ({
+        liff_id: 'test-liff-id',
+        public_base_url: 'https://line-test.example.dev',
+      })),
+    };
+    render(React.createElement(LiffCardStudio, { runtimeConfigClient }));
+    fireEvent.click(screen.getByRole('button', { name: 'LIFF 表單 (12)' }));
+    const roleFilter = screen.getByRole('combobox', { name: '依適用角色篩選資產' });
+    const visibleLiffNames = () => screen.getAllByRole('button')
+      .map((button) => button.textContent?.match(/[a-z_]+\.html/)?.[0])
+      .filter(Boolean);
+
+    fireEvent.change(roleFilter, { target: { value: 'union_staff' } });
+    await waitFor(() => expect(visibleLiffNames()).toEqual(['identity.html', 'mobile_admin.html']));
+    expect(screen.queryByText('gateway.html')).not.toBeInTheDocument();
+
+    fireEvent.change(roleFilter, { target: { value: 'visitor' } });
+    await waitFor(() => expect(visibleLiffNames()).toEqual([
+      'gateway.html', 'register.html', 'bind.html', 'identity.html',
+    ]));
+
+    fireEvent.change(roleFilter, { target: { value: 'customer' } });
+    await waitFor(() => expect(visibleLiffNames()).toEqual([
+      'profile_guard.html', 'profile_update.html', 'order_update.html', 'identity.html',
+    ]));
+
+    fireEvent.change(roleFilter, { target: { value: 'staff' } });
+    await waitFor(() => expect(visibleLiffNames()).toEqual([
+      'staff_order_search.html', 'staff_schedule.html', 'staff_baby_log.html', 'staff_payout.html', 'identity.html',
+    ]));
+  });
+
   it('LIFF 視覺頁使用後端核定的公開測試網址', async () => {
     const runtimeConfigClient = {
       get: vi.fn(async () => ({

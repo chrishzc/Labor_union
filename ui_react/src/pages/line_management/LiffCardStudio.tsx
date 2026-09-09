@@ -16,7 +16,7 @@ import { LineFlexDesignPreview } from '../../components/LineFlexDesignPreview';
 import '../LineManagementPage.css';
 
 export type LiffAssetType = 'liff' | 'flex_card';
-export type LiffAudienceRole = 'client' | 'staff' | 'admin';
+export type LiffAudienceRole = 'visitor' | 'customer' | 'staff' | 'union_staff';
 
 export interface LiffAssetItem {
   id: string;
@@ -46,7 +46,7 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     authLevel: '後端驗證 LINE 登入憑證；網址列 userId 僅供導航，不具授權效果',
     description: '正式入口先詢問是否已登記市府平台：已申請者繼續填寫工會「需求調查表單」，未申請者引導至新竹市到宅坐月子媒合服務平台。',
     apiMapping: '身分開啟、候選綁定檢查與確認流程已接通',
-    audienceRoles: ['client', 'staff', 'admin'],
+    audienceRoles: ['visitor'],
   },
   {
     id: 'register',
@@ -59,7 +59,7 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     authLevel: '後端驗證 LINE 登入憑證；不接受網址列身分',
     description: '登記資料先顯示去敏摘要，明確確認後才送出；完整建立服務需求調查。',
     apiMapping: '登記資料檢查、確認送出與結果回讀已接通',
-    audienceRoles: ['client'],
+    audienceRoles: ['visitor'],
   },
   {
     id: 'bind',
@@ -72,7 +72,7 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     authLevel: '後端驗證 LINE 登入憑證；候選匹配後仍需明確確認',
     description: '正式入口先顯示登記選擇；選擇已登記後才進入候選資料檢查與明確確認，不以姓名、電話或網址列 userId 授權。',
     apiMapping: '候選綁定、資料檢查與確認送出已接通',
-    audienceRoles: ['client'],
+    audienceRoles: ['visitor'],
   },
   {
     id: 'profile_guard',
@@ -85,7 +85,7 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     authLevel: '伺服器端 Token 檢驗 ｜ 阻擋未綁定身分 ｜ 導流服務綁定',
     description: '修改登記資料前置門禁。先向伺服器驗證 LINE 登入憑證與客戶綁定資格：已綁定者放行進入 profile_update，未綁定者堅決阻擋並導流至服務綁定或需求填寫。',
     apiMapping: '門禁查驗：/api/v1/line/client-profile/query ＋ 資格放行 / 阻擋導流',
-    audienceRoles: ['client'],
+    audienceRoles: ['customer'],
   },
   {
     id: 'profile_update',
@@ -98,7 +98,7 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     authLevel: '必須驗證 LINE 登入憑證與正式客戶綁定',
     description: '產婦可查詢目前已登記的個人資料，勾選聯絡電話、預產期或寶寶資訊等欄位並送審；服務地址與訂單條件改由 order_update 申請。',
     apiMapping: '客戶資料異動之查詢、預覽與申請流程已接通',
-    audienceRoles: ['client'],
+    audienceRoles: ['customer'],
   },
   {
     id: 'order_update',
@@ -112,7 +112,7 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     authLevel: '後端驗證 LINE 登入憑證、正式客戶綁定、本人有效訂單與最新版本',
     description: '客戶選擇自己的有效訂單與異動項目，預覽修改前後內容後送出客服需求；不直接修改正式訂單、排班、費用或月嫂意願。',
     apiMapping: '訂單異動 Query／Preview／Apply 與客服案件回讀已接通',
-    audienceRoles: ['client'],
+    audienceRoles: ['customer'],
   },
   {
     id: 'staff_order_search',
@@ -177,7 +177,7 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     authLevel: '後端驗證 LINE 登入憑證；網址列 userId 僅供導航，不具授權效果',
     description: '依已驗證的 LINE 使用者開啟客戶、月嫂或管理員流程；驗證失敗時不顯示資料，並要求重新登入。',
     apiMapping: '身分開啟、綁定檢查與確認流程已接通',
-    audienceRoles: ['client', 'staff', 'admin'],
+    audienceRoles: ['visitor', 'customer', 'staff', 'union_staff'],
   },
   {
     id: 'mobile_admin',
@@ -190,7 +190,7 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     authLevel: '後端驗證 LINE 登入憑證與正式管理員綁定',
     description: '審核決策先顯示變更前後內容與影響，確認後送出並回讀結果。',
     apiMapping: '身分審核影響檢查、確認與結果回讀已接通',
-    audienceRoles: ['admin'],
+    audienceRoles: ['union_staff'],
   },
   {
     id: 'flex_dispatch',
@@ -215,7 +215,7 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     authLevel: '簽約產婦專屬 ｜ 雙選項互動確認（受簽約案件版本保護）',
     description: '【業務定位】月嫂因故請假時自動推播給產婦。提供「同意順延一日」或「由工會派代班」決策按鈕，回覆後經後端排班狀態機核對生效。',
     apiMapping: '模組三排定：LeaveWorkflow.push_extension_confirm() ＋ Postback 順延決策確認',
-    audienceRoles: ['client'],
+    audienceRoles: ['customer'],
     flexDesignSource: LINE_FLEX_DESIGN_SOURCES.flex_leave_confirm,
   },
   {
@@ -228,7 +228,7 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     authLevel: '工會幹部群組專屬 ｜ 去敏高層級告警（僅推播已授權幹部群）',
     description: '【業務定位】重大客訴、連續身分核對異常或重大排班衝突時，自動推播至幹部群組，並附帶一鍵進入手機管理中心審核處理之入口。',
     apiMapping: '模組四排定：AlertDispatchService.broadcast_critical_alert() ＋ 管理中心一鍵處置',
-    audienceRoles: ['admin'],
+    audienceRoles: ['union_staff'],
     flexDesignSource: LINE_FLEX_DESIGN_SOURCES.flex_alert_critical,
   },
   {
@@ -241,7 +241,7 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     authLevel: '簽約產婦專屬 ｜ 條件調解確認（受需求登記保護）',
     description: '【業務定位】當案件無候選月嫂可接單時，系統自動分析並向產婦提出可微調方案（如時數、天數建議），產婦可一鍵確認調整以加速媒合。',
     apiMapping: '模組三排定：ZeroPoolEngine.push_compromise_options() ＋ 方案確認 postback',
-    audienceRoles: ['client'],
+    audienceRoles: ['customer'],
     flexDesignSource: LINE_FLEX_DESIGN_SOURCES.flex_negotiation,
   },
 ];
@@ -478,7 +478,9 @@ export const LiffCardStudio: React.FC<LiffCardStudioProps> = ({
   });
   const [filterRole, setFilterRole] = useState<'all' | LiffAudienceRole>(() => {
     const requested = liffHashParams().get('role');
-    return requested === 'client' || requested === 'staff' || requested === 'admin' ? requested : 'all';
+    return requested === 'visitor' || requested === 'customer' || requested === 'staff' || requested === 'union_staff'
+      ? requested
+      : 'all';
   });
   const [searchQuery, setSearchQuery] = useState(() => liffHashParams().get('q') ?? '');
   const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfigState>({ status: 'loading' });
@@ -572,9 +574,10 @@ export const LiffCardStudio: React.FC<LiffCardStudioProps> = ({
               onChange={(event) => setFilterRole(event.target.value as 'all' | LiffAudienceRole)}
             >
               <option value="all">全部角色</option>
-              <option value="client">產婦／客戶</option>
+              <option value="visitor">訪客／未綁定</option>
+              <option value="customer">產婦／客戶</option>
               <option value="staff">月嫂</option>
-              <option value="admin">工會管理員</option>
+              <option value="union_staff">工會人員</option>
             </select>
           </label>
         </div>
@@ -648,7 +651,7 @@ export const LiffCardStudio: React.FC<LiffCardStudioProps> = ({
       <div className="liff-studio-inspector">
         <div className="liff-inspector-card">
           <h3><ShieldCheck aria-hidden="true" /> 資安與存取摘要</h3>
-          <div className="spec-item"><span>適用角色：</span><strong>{selectedItem.audienceRoles.map((role) => ({ client: '產婦／客戶', staff: '月嫂', admin: '工會管理員' }[role])).join('、')}</strong></div>
+          <div className="spec-item"><span>適用角色：</span><strong>{selectedItem.audienceRoles.map((role) => ({ visitor: '訪客／未綁定', customer: '產婦／客戶', staff: '月嫂', union_staff: '工會人員' }[role])).join('、')}</strong></div>
           <div className="spec-item"><span>驗證摘要：</span><strong>{selectedItem.authLevel}</strong></div>
           <details className="liff-security-details">
             <summary>查看技術與資安細節</summary>

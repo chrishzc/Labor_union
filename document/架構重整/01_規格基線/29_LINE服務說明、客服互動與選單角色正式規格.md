@@ -105,6 +105,8 @@ LLM 不得直接產生業務 final answer、不得寫 owner root、不得自選�
 
 Current menu content 與 action 由 MySQL versioned LINE configuration 及 current publication 決定。`config/*.json` 作為 bootstrap source；本文件不硬編舊 menu ID、provider ID 或已退役 deep link。訪客選單至少提供「客戶登記與綁定」與「月嫂身分綁定」；客戶選單提供「修改登記資料」、「修改訂單資訊」與「服務與問答」；staff／union-staff menu 只可放置其 owner 已核准的 typed entry。
 
+管理端 LIFF 資產目錄沿用同一組正式 audience，不得以舊 `client | staff | admin` 三分法或檔名猜測角色：`gateway`／`register`／`bind` 屬 visitor；`profile_guard`／`profile_update`／`order_update` 屬 customer；`staff_order_search`／`staff_schedule`／`staff_baby_log`／`staff_payout` 屬 staff；`mobile_admin` 屬 union_staff。`identity` 是跨角色身分入口，可出現在四類目錄，但不因此授予任何角色或業務權限。
+
 ### 7.1 工會人員 LIFF 工作入口
 
 四格可共用同一個 LIFF runtime 與 server-side 身分驗證，但每個入口必須呈現獨立、可辨識的工作 surface；由「客服中心」進入時不得同時顯示月嫂審核或排班工具，由「待辦工作台」進入時也不得把客服案件混成同一清單。第一版沿用已發布選單可能仍持有的 `staff_review`、`customer_service`、`anomalies_center`、`dashboard` target identity，不以 publication 尚未切換為由中斷既有 deep link。
