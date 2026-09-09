@@ -1,63 +1,59 @@
-/**
- * File: data_import_hcm_result_page.test.tsx
- * Description: 驗證DataImport只顯示每案最新未解異常，並提供符合原因的處理入口。
- */
+/** HCM import keeps this receipt's review rows in the import card without querying the anomaly page. */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { anomalyQueryClient } from '../api/anomalies/anomaly_query_client';
+import { hcmWorkbookPreviewClient } from '../api/case_import/hcm_workbook_client';
 import { DataImportPage } from '../pages/DataImportPage';
+import { HCM_WORKBOOK_PREVIEW_FIXTURE } from './fixtures/hcm_workbook_contract_fixtures';
 
-const phoneTask = {
-  occurrence_identity: 'warning-phone', owning_lane: 'hcm', logical_code: 'HCM-FIELD-002',
-  field_path: '行動電話', subject: '115000002', issue_codes: ['hcm_field_invalid:行動電話'],
-  tracking_status: 'open' as const, tracking_version: 1, evidence_reference: null,
-  display_message: '行動電話格式錯誤', navigation_action: 'hcm_import_center' as const,
-};
+function workbook(): File {
+  return new File(['hcm-review'], 'hcm-current.xlsx', {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  });
+}
 
-describe('DataImport HCM result review', () => {
+describe('DataImport HCM receipt review', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    vi.spyOn(anomalyQueryClient, 'queryImportWarningTasks').mockResolvedValue([
-      phoneTask,
-      { ...phoneTask, occurrence_identity: 'warning-old', display_message: '較舊異常' },
-      { ...phoneTask, occurrence_identity: 'other-lane', owning_lane: 'finance_import', subject: 'bank-row' },
-    ]);
-  });
-
-  it('renders only the latest active HCM problem for each case', async () => {
-    render(<DataImportPage />);
-    await waitFor(() => expect(screen.getByText('案件 115000002')).toBeInTheDocument());
-    expect(screen.getByText('行動電話格式錯誤')).toBeInTheDocument();
-    expect(screen.queryByText('較舊異常')).not.toBeInTheDocument();
-    expect(screen.queryByText('bank-row')).not.toBeInTheDocument();
-    expect(screen.getByText('HCM 目前待處理異常')).toBeInTheDocument();
-    expect(screen.queryByText(/hcm_field_invalid/)).not.toBeInTheDocument();
-    expect(anomalyQueryClient.queryImportWarningTasks).toHaveBeenCalledTimes(1);
-    expect(document.querySelector('[data-control-id="imports.hcm-current.open-preview"]')).toBeInTheDocument();
-    expect(document.querySelector('[data-control-id="imports.hcm-current.apply"]')).not.toBeInTheDocument();
-    expect(document.querySelector('[data-surface-id="imports.hcm-current.apply-guidance"]'))
-      .toHaveTextContent('預覽成功後才能確認匯入。');
-  });
-
-  it('refreshes active anomalies and opens the controlled correction referral', async () => {
-    vi.spyOn(anomalyQueryClient, 'queryImportWarningReferral').mockResolvedValue({
-      occurrence_identity: 'warning-phone', expected_version: 1, owning_lane: 'hcm',
-      logical_code: 'HCM-FIELD-002', field_path: '行動電話', subject: '115000002',
-      display_message: '行動電話格式錯誤', navigation_action: 'hcm_import_center',
-      action_kind: 'owner_preview_apply', target_command: 'preview_hcm_resubmission', review_identity: 'review-2',
+    vi.spyOn(hcmWorkbookPreviewClient, 'preview').mockResolvedValue(HCM_WORKBOOK_PREVIEW_FIXTURE);
+    vi.spyOn(hcmWorkbookPreviewClient, 'apply').mockResolvedValue({
+      source_content_digest: HCM_WORKBOOK_PREVIEW_FIXTURE.source_content_digest,
+      source_row_count: 1,
+      inserted_count: 0,
+      inserted_with_warning_count: 1,
+      exact_replay_count: 0,
+      review_required_count: 0,
+      failed_count: 0,
+      skipped_existing_count: 0,
+      replayed_workbook: false,
+      row_outcomes_available: true,
+      legacy_summary_only: false,
+      row_outcomes: [{
+        source_row: 2,
+        case_no: '115000002',
+        outcome: 'inserted_with_warning',
+        problem_identity: 'review-2',
+        problem_fields: ['行動電話'],
+        issue_codes: ['hcm_field_invalid:行動電話'],
+        referral_occurrence_identities: [],
+      }],
     });
-    render(<DataImportPage />);
-    await waitFor(() => expect(screen.getByText('案件 115000002')).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: '重新整理結果' }));
-    await waitFor(() => expect(anomalyQueryClient.queryImportWarningTasks).toHaveBeenCalledTimes(2));
-    fireEvent.click(screen.getByRole('button', { name: '提交受控修正' }));
-    await waitFor(() => expect(screen.getByText('修正案件 115000002')).toBeInTheDocument());
-    expect(anomalyQueryClient.queryImportWarningReferral).toHaveBeenCalledTimes(1);
   });
 
-  it('shows the empty state when there are no active HCM anomalies', async () => {
-    vi.mocked(anomalyQueryClient.queryImportWarningTasks).mockResolvedValue([]);
+  it('removes the persistent lower HCM section and shows this run inside the HCM card', async () => {
     render(<DataImportPage />);
-    await waitFor(() => expect(screen.getByText('目前沒有待處理的 HCM 異常。')).toBeInTheDocument());
+    expect(screen.queryByText('HCM 目前待處理異常')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '重新整理結果' })).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('選擇 HCM Current Workbook'), { target: { files: [workbook()] } });
+    fireEvent.click(document.querySelector('[data-control-id="imports.hcm-current.preview"]') as HTMLButtonElement);
+    await screen.findByText('預覽結果');
+    fireEvent.click(screen.getByLabelText('我已核對檔案名稱與預覽筆數'));
+    fireEvent.click(document.querySelector('[data-control-id="imports.hcm-current.apply"]') as HTMLButtonElement);
+
+    expect(await screen.findByText('案件 115000002')).toBeInTheDocument();
+    expect(screen.getByText('行動電話需要檢查。')).toBeInTheDocument();
+    expect(screen.queryByText(/前往異常審核/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /在本頁提交修正/ }));
+    await waitFor(() => expect(screen.getByText('修正案件 115000002')).toBeInTheDocument());
   });
 });

@@ -1,19 +1,26 @@
-/**
- * File: data_import_entry_cutover.test.tsx
- * Description: 驗證資料匯入entry的GET預算、局部查詢重試、四類active控制與真實receipt呈現。
- */
+/** Data Import remains a four-card entry and does not load persistent HCM anomalies. */
 import { StrictMode } from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
-import { SYSTEM_STATUS_ENDPOINT } from '../api/system/system_status_client';
 import { sessionClient } from '../api/auth/session_client';
+import { SYSTEM_STATUS_ENDPOINT } from '../api/system/system_status_client';
+import { DataImportPage } from '../pages/DataImportPage';
 
-vi.mock('../pages/CurrentAnomaliesPage', () => ({
-  CurrentAnomaliesPage: () => null,
-}));
+vi.mock('../pages/CurrentAnomaliesPage', () => ({ CurrentAnomaliesPage: () => null }));
 
-const HCM_RESULTS_ENDPOINT = '/api/v1/import-warning-tracking/tasks';
+function authenticate(): void {
+  sessionClient.setSession('data-import-entry-token', {
+    id: 1,
+    username: 'data-import-entry-admin',
+    display_name: '資料匯入驗證管理員',
+    role: 'system_admin',
+    capabilities: ['system.administration'],
+    is_root: true,
+    access_control_version: 1,
+  });
+}
+
 const ACTIVE_PREVIEW_CONTROL_IDS = [
   'imports.hcm-current.preview',
   'imports.client-beclass.preview',
@@ -28,203 +35,40 @@ const ACTIVE_APPLY_CONTROL_IDS = [
   'imports.historic-orders.apply',
 ] as const;
 
-type FetchRecord = {
-  path: string;
-  method: string;
-};
-
-type FetchMode = 'empty' | 'ready' | 'unavailable';
-
-const PERFORMANCE_RESPONSE = {
-  success: true,
-  message: '成功取得系統效能快照',
-  data: {
-    started_at: '2026-08-20T01:02:03Z',
-    request_count: 1,
-    average_response_time_ms: 1,
-    p50_response_time_upper_bound_ms: 1,
-    p95_response_time_upper_bound_ms: 1,
-    maximum_response_time_ms: 1,
-  },
-  error: null,
-};
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'content-type': 'application/json' },
-  });
-}
-
-function hcmEnvelope(items: unknown[]): unknown {
-  return {
-    success: true,
-    message: '成功取得匯入警示追蹤清單',
-    data: items,
-    error: null,
-  };
-}
-
-const activeHcmTasks = [
-  { occurrence_identity: 'warning-phone', owning_lane: 'hcm', logical_code: 'HCM-FIELD-002', field_path: '行動電話', subject: '115000002', issue_codes: ['hcm_field_invalid:行動電話'], tracking_status: 'open', tracking_version: 1, evidence_reference: null, display_message: '行動電話格式錯誤', navigation_action: 'hcm_import_center' },
-  { occurrence_identity: 'warning-system', owning_lane: 'hcm', logical_code: 'HCM-SYSTEM-001', field_path: '$case_setup', subject: '115000150', issue_codes: ['hcm_case_import:case_import_bootstrap_blocked'], tracking_status: 'open', tracking_version: 1, evidence_reference: null, display_message: '案件初始設定尚未完成，請檢查系統費率與案件條件', navigation_action: 'hcm_import_center' },
-];
-
-function typedUnavailableResponse(): unknown {
-  return {
-    detail: {
-      error: {
-        category: 'unavailable',
-        code: 'HCM_RESULT_QUERY_UNAVAILABLE',
-        message: 'HCM 匯入結果查詢暫時無法使用',
-        field_errors: [],
-        domain_blockers: [],
-        retryable: true,
-        correlation_id: 'hcm-result-entry-test',
-        current_version: null,
-      },
-    },
-  };
-}
-
-function installFetchStub(mode: FetchMode): FetchRecord[] {
-  const requests: FetchRecord[] = [];
-  vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
-    const url = new URL(String(input), 'http://admin.test');
-    const method = String(init?.method ?? 'GET').toUpperCase();
-    requests.push({ path: url.pathname, method });
-
-    if (url.pathname === SYSTEM_STATUS_ENDPOINT) {
-      return jsonResponse(PERFORMANCE_RESPONSE);
-    }
-    if (url.pathname === HCM_RESULTS_ENDPOINT) {
-      if (mode === 'empty') return jsonResponse(hcmEnvelope([]));
-      if (mode === 'unavailable') return jsonResponse(typedUnavailableResponse(), 503);
-      return jsonResponse(hcmEnvelope(activeHcmTasks));
-    }
-    throw new Error(`Unexpected API path: ${url.pathname}`);
-  });
-  return requests;
-}
-
-function authenticate(): void {
-  sessionClient.setSession('data-import-entry-token', {
-    id: 1,
-    username: 'data-import-entry-admin',
-    display_name: '資料匯入驗證管理員',
-    role: 'system_admin',
-    capabilities: ['system.administration'],
-    is_root: true,
-    access_control_version: 1,
-  });
-}
-
-function setDataImportHash(): void {
-  window.history.replaceState(null, '', '#data-import');
-}
-
-function hcmRequests(requests: readonly FetchRecord[]): FetchRecord[] {
-  return requests.filter(({ path }) => path === HCM_RESULTS_ENDPOINT);
-}
-
-function expectOnlyGet(requests: readonly FetchRecord[]): void {
-  expect(requests.length).toBeGreaterThan(0);
-  expect(requests.every(({ method }) => method === 'GET')).toBe(true);
-}
-
-describe('Data Import HCM Result Review entry cutover candidate', () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
-    sessionClient.clearSession();
-    setDataImportHash();
-  });
-
+describe('Data Import entry', () => {
   afterEach(() => {
     sessionClient.clearSession();
     window.history.replaceState(null, '', '#');
     vi.restoreAllMocks();
   });
 
-  it('actual StrictMode initial load uses one HCM GET and refresh adds one GET', async () => {
+  it('does not render or query the retired lower HCM anomaly workbench', async () => {
     authenticate();
-    const requests = installFetchStub('ready');
-
-    render(<StrictMode><App /></StrictMode>);
-
-    await waitFor(() => expect(screen.getByText('HCM 目前待處理異常')).toBeInTheDocument());
-    expect(window.location.hash).toBe('#data-import');
-    expect(hcmRequests(requests)).toHaveLength(1);
-    expect(hcmRequests(requests)[0]?.method).toBe('GET');
-
-    fireEvent.click(screen.getByRole('button', { name: /工作簿資料匯入/ }));
-    fireEvent.click(screen.getByRole('button', { name: '重新整理結果' }));
-    await waitFor(() => expect(hcmRequests(requests)).toHaveLength(2));
-    expectOnlyGet(requests);
-  });
-
-  it('renders only active problems with plain-language messages', async () => {
-    authenticate();
-    const requests = installFetchStub('ready');
-
-    render(<StrictMode><App /></StrictMode>);
-
-    await waitFor(() => expect(screen.getByText('案件 115000002')).toBeInTheDocument());
-    expect(screen.getByText('行動電話格式錯誤')).toBeInTheDocument();
-    expect(screen.getByText('案件 115000150')).toBeInTheDocument();
-    expect(screen.queryByText(/hcm_field_invalid/)).not.toBeInTheDocument();
-    expect(screen.queryByText('本次新增訂單')).not.toBeInTheDocument();
-    expect(hcmRequests(requests)).toHaveLength(1);
-    expectOnlyGet(requests);
-  });
-
-  it('system problem action routes to the anomaly owner workflow without mutation', async () => {
-    authenticate();
-    const requests = installFetchStub('ready');
-
-    render(<StrictMode><App /></StrictMode>);
-    await waitFor(() => expect(screen.getByText('案件 115000150')).toBeInTheDocument());
-    const beforeReferral = requests.length;
-
-    fireEvent.click(screen.getByRole('button', { name: '檢查系統設定／重新檢查' }));
-    expect(window.location.hash).toBe('#anomalies');
-    expect(requests).toHaveLength(beforeReferral);
-    expect(hcmRequests(requests)).toHaveLength(1);
-    expectOnlyGet(requests);
-  });
-
-  it('empty and typed unavailable states never fabricate a receipt', async () => {
-    authenticate();
-    const emptyRequests = installFetchStub('empty');
-    render(<StrictMode><App /></StrictMode>);
-
-    await waitFor(() => expect(screen.getByText(/目前沒有待處理的 HCM 異常/)).toBeInTheDocument());
-    expect(screen.queryByText(/Receipt #/)).not.toBeInTheDocument();
-    expect(hcmRequests(emptyRequests)).toHaveLength(1);
-    expectOnlyGet(emptyRequests);
-
-    sessionClient.clearSession();
     window.history.replaceState(null, '', '#data-import');
-    vi.restoreAllMocks();
-    document.body.innerHTML = '';
-    authenticate();
-    const unavailableRequests = installFetchStub('unavailable');
-    render(<StrictMode><App /></StrictMode>);
+    const requests: string[] = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const path = new URL(String(input), 'http://admin.test').pathname;
+      requests.push(path);
+      if (path === SYSTEM_STATUS_ENDPOINT) {
+        return new Response(JSON.stringify({
+          success: true, message: '成功取得系統效能快照', error: null,
+          data: { started_at: '2026-08-20T01:02:03Z', request_count: 1, average_response_time_ms: 1, p50_response_time_upper_bound_ms: 1, p95_response_time_upper_bound_ms: 1, maximum_response_time_ms: 1 },
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      throw new Error(`Unexpected API path: ${path}`);
+    });
 
-    await waitFor(() => expect(document.querySelector('[data-surface-id="imports.hcm-results.error"]')).toHaveTextContent(/待處理異常暫時無法載入/));
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '重試查詢' })).toBeInTheDocument();
-    expect(screen.queryByText(/Receipt #/)).not.toBeInTheDocument();
-    expect(hcmRequests(unavailableRequests)).toHaveLength(1);
-    expectOnlyGet(unavailableRequests);
+    render(<StrictMode><App /></StrictMode>);
+    await waitFor(() => expect(screen.getByText('📥 批次資料匯入中心')).toBeInTheDocument());
+
+    expect(screen.queryByText('HCM 目前待處理異常')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '重新整理結果' })).not.toBeInTheDocument();
+    expect(document.querySelector('[data-surface-id="imports.hcm-results.open"]')).toBeNull();
+    expect(requests).not.toContain('/api/v1/import-warning-tracking/tasks');
   });
 
-  it('exposes four active Preview controls and explains why Preview or Apply cannot run yet', async () => {
-    authenticate();
-    const requests = installFetchStub('empty');
-
-    render(<StrictMode><App /></StrictMode>);
-    await waitFor(() => expect(screen.getByText(/目前沒有待處理的 HCM 異常/)).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: /工作簿資料匯入/ }));
+  it('exposes four Preview controls and explains why Preview or Apply cannot run yet', () => {
+    render(<DataImportPage />);
 
     expect(document.querySelector('[data-control-id="imports.hcm-current.open-preview"]')).toBeInTheDocument();
     for (const controlId of ACTIVE_PREVIEW_CONTROL_IDS) {
@@ -237,8 +81,5 @@ describe('Data Import HCM Result Review entry cutover candidate', () => {
     }
     expect(screen.getAllByText('請先選擇 .xlsx 工作簿。')).toHaveLength(4);
     expect(screen.getAllByText('預覽成功後才能確認匯入。')).toHaveLength(4);
-    expect(document.querySelector('[data-control-id="imports.hcm-historical.preview"]')).toBeNull();
-    expect(document.querySelector('[data-control-id="imports.bank-statements.preview"]')).toBeNull();
-    expectOnlyGet(requests);
   });
 });

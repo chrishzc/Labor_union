@@ -5,7 +5,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { hcmWorkbookPreviewClient } from '../api/case_import/hcm_workbook_client';
-import { anomalyQueryClient } from '../api/anomalies/anomaly_query_client';
 import { DataImportPage } from '../pages/DataImportPage';
 import { HCM_WORKBOOK_PREVIEW_FIXTURE } from './fixtures/hcm_workbook_contract_fixtures';
 
@@ -18,7 +17,6 @@ function hcmWorkbook(contents: string): File {
 describe('DataImport HCM Preview retirement compatibility', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    vi.spyOn(anomalyQueryClient, 'queryImportWarningTasks').mockResolvedValue([]);
     vi.spyOn(hcmWorkbookPreviewClient, 'preview').mockResolvedValue(HCM_WORKBOOK_PREVIEW_FIXTURE);
     vi.spyOn(hcmWorkbookPreviewClient, 'apply').mockResolvedValue({
       source_content_digest: HCM_WORKBOOK_PREVIEW_FIXTURE.source_content_digest,
@@ -36,9 +34,8 @@ describe('DataImport HCM Preview retirement compatibility', () => {
     });
   });
 
-  it('uses one bounded Preview then confirms Apply and reloads results', async () => {
+  it('uses one bounded Preview then confirms Apply without querying the anomaly page', async () => {
     render(<DataImportPage />);
-    await waitFor(() => expect(screen.getByText(/目前沒有待處理的 HCM 異常/)).toBeInTheDocument());
     const input = screen.getByLabelText('選擇 HCM Current Workbook');
     fireEvent.change(input, { target: { files: [hcmWorkbook('workbook-a')] } });
     fireEvent.click(document.querySelector('[data-control-id="imports.hcm-current.preview"]') as HTMLButtonElement);
@@ -46,14 +43,12 @@ describe('DataImport HCM Preview retirement compatibility', () => {
     await waitFor(() => expect(screen.getByText('預覽結果')).toBeInTheDocument());
     expect(screen.getByText(HCM_WORKBOOK_PREVIEW_FIXTURE.source_row_count)).toBeInTheDocument();
     expect(hcmWorkbookPreviewClient.preview).toHaveBeenCalledTimes(1);
-    expect(anomalyQueryClient.queryImportWarningTasks).toHaveBeenCalledTimes(1);
     const applyButton = document.querySelector('[data-control-id="imports.hcm-current.apply"]') as HTMLButtonElement;
     expect(applyButton).toBeDisabled();
     fireEvent.click(screen.getByLabelText('我已核對檔案名稱與預覽筆數'));
     expect(applyButton).toBeEnabled();
     fireEvent.click(applyButton);
     await waitFor(() => expect(hcmWorkbookPreviewClient.apply).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(anomalyQueryClient.queryImportWarningTasks).toHaveBeenCalledTimes(2));
     expect(screen.getByText('匯入完成')).toBeInTheDocument();
   });
 
@@ -87,7 +82,6 @@ describe('DataImport HCM Preview retirement compatibility', () => {
       .mockReturnValueOnce('00000000-0000-4000-8000-000000000001')
       .mockReturnValueOnce('00000000-0000-4000-8000-000000000002');
     render(<DataImportPage />);
-    await waitFor(() => expect(anomalyQueryClient.queryImportWarningTasks).toHaveBeenCalledTimes(1));
     const input = screen.getByLabelText('選擇 HCM Current Workbook');
     const previewButton = document.querySelector('[data-control-id="imports.hcm-current.preview"]') as HTMLButtonElement;
 
@@ -116,7 +110,6 @@ describe('DataImport HCM Preview retirement compatibility', () => {
 
   it('same-name different bytes clears prior Preview and produces distinct snapshot digests', async () => {
     render(<DataImportPage />);
-    await waitFor(() => expect(anomalyQueryClient.queryImportWarningTasks).toHaveBeenCalledTimes(1));
     const input = screen.getByLabelText('選擇 HCM Current Workbook');
 
     fireEvent.change(input, { target: { files: [hcmWorkbook('workbook-a')] } });
