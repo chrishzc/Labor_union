@@ -16,7 +16,6 @@ EVIDENCE = ROOT / "document" / "架構重整" / "03_追蹤清單與證據" / "ev
 CANDIDATE = EVIDENCE / "writer_inventory_v3_candidate.findings.jsonl"
 RECORDS = EVIDENCE / "writer_inventory_v3_disposition.records.jsonl"
 MANIFEST = EVIDENCE / "writer_inventory_v3_disposition.manifest.json"
-COMMIT_DISPOSITIONS = EVIDENCE.parent / "task97_repository_commit_dispositions_v1.json"
 REVIEW_REFRESH_PATHS = frozenset(
     {"infrastructure/mysql/admin_capability_grant_repository.py"}
 )
@@ -682,21 +681,12 @@ def _load(path: Path) -> list[dict[str, object]]:
 
 def _review(record: dict[str, object]) -> tuple[str, str, str, str]:
     path = str(record["relative_path"])
-    commit_review = (
-        _commit_review(str(record["identity"]))
-        if record.get("operation") == "COMMIT" else None
-    )
-    # A current exact blocker cannot inherit an older accepted review.
-    if commit_review is not None and commit_review[3].startswith("needs_decision:"):
-        return commit_review
     identity_review = EXACT_IDENTITY_REVIEWS.get(str(record["identity"]))
     if identity_review is not None:
         return identity_review
     exact = _task97_exact_review(path, str(record["symbol"]))
     if exact is not None:
         return exact
-    if commit_review is not None:
-        return commit_review
     exact = _exact_source_review(path, str(record["symbol"]), EXACT_SOURCE_RESTRICTED_REVIEWS)
     if exact is not None:
         return exact
@@ -743,41 +733,6 @@ def _exact_source_review(
     if sha256((ROOT / path).read_bytes()).hexdigest() != expected_sha256:
         return None
     return disposition
-
-
-def _commit_review(identity: str) -> tuple[str, str, str, str] | None:
-    """Join an exact per-identity decision without hiding aggregate blockers."""
-    if not COMMIT_DISPOSITIONS.exists():
-        return None
-    artifact = json.loads(COMMIT_DISPOSITIONS.read_text(encoding="utf-8"))
-    if artifact.get("terminal_status") not in {"passed", "blocked"}:
-        return None
-    entry = next(
-        (entry for entry in artifact.get("entries", []) if entry.get("identity") == identity),
-        None,
-    )
-    if entry is None:
-        return None
-    owner = str(entry["owner"])
-    layer = str(entry["layer"])
-    if entry.get("classification") == "real_violation":
-        return (
-            owner,
-            f"blocked Task 97 {layer} commit boundary",
-            str(entry["zero_reference_oracle"]),
-            f"needs_decision:{entry['analysis_basis']} "
-            f"Remediation: {entry['replacement_or_remediation']} "
-            f"Blocker: {entry['blocker']}",
-        )
-    if entry.get("classification") != "application_owned_legitimate_outer_uow":
-        return None
-    disposition = "retain_restricted" if layer in {"maintenance", "worker"} else "retain_canonical"
-    return (
-        owner,
-        f"exact Task 97 accepted {layer} commit boundary",
-        f"task97_repository_commit_dispositions_v1 exact identity {identity}",
-        f"{disposition}:exact commit fingerprint, symbol, owner, and layer are accepted by the current Task 97 receipt; no path-wide inference",
-    )
 
 
 def _task97_exact_review(
@@ -1229,12 +1184,8 @@ def main() -> int:
         if identity in reviewed_identities:
             continue
         reviewed_identities.add(identity)
-        commit_review = (
-            _commit_review(identity) if candidate.get("operation") == "COMMIT" else None
-        )
         if (
             identity not in existing
-            or (commit_review is not None and commit_review[3].startswith("needs_decision:"))
             or existing[identity].get("final_disposition") == "needs_decision"
             or str(candidate["relative_path"]) in REVIEW_REFRESH_PATHS
             or str(candidate["relative_path"]) in EXACT_SOURCE_REVIEWS
