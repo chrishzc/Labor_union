@@ -106,9 +106,28 @@ def _validate_current_candidate() -> int:
     return len(candidate_records)
 
 
+def _require_resolved_retained_owners(records: list[dict[str, object]]) -> None:
+    retained = {"retain_canonical", "retain_restricted"}
+    invalid = [
+        str(record.get("identity"))
+        for record in records
+        if record.get("final_disposition") in retained
+        and (
+            record.get("owner") in {None, "", "owner_review_required"}
+            or "unclassified" in str(record.get("transaction_boundary", "")).lower()
+        )
+    ]
+    if invalid:
+        raise ValueError(
+            "retained writer inventory contains unresolved owner decisions: "
+            f"{len(invalid)}"
+        )
+
+
 def _validate_current_dispositions() -> tuple[int, int]:
     result = validate_dispositions()
     records = _load_records(DISPOSITION_RECORDS_PATH)
+    _require_resolved_retained_owners(records)
     undecided = [
         str(record.get("identity"))
         for record in records
