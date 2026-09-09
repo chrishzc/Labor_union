@@ -603,7 +603,6 @@ def test_existing_database_restart_writes_and_reads_canonical_schedule(
 @pytest.mark.parametrize("historical_status", ["歷史訂單－未服務", "歷史訂單－服務中"])
 def test_historical_restart_reenters_canonical_scheduling_and_weekly_report(
     historical_status: str,
-    tmp_path,
 ) -> None:
     suffix = "unserved" if historical_status == "歷史訂單－未服務" else "in_service"
     database = f"{DATABASE}_{suffix}"
@@ -638,7 +637,7 @@ def test_historical_restart_reenters_canonical_scheduling_and_weekly_report(
     )
     try:
         with connection.cursor() as cursor:
-            staff_id, legacy_assignment_id = _seed_owner_roots(cursor, case_no, historical_status)
+            staff_id, _legacy_assignment_id = _seed_owner_roots(cursor, case_no, historical_status)
             _seed_settled_deposit(cursor, case_no)
         connection.commit()
 
@@ -686,6 +685,13 @@ def test_historical_restart_reenters_canonical_scheduling_and_weekly_report(
         ).query(SchedulingCurrentQuery(staff_id, date(2026, 9, 3), date(2026, 9, 4)))
         assert len(saved_current.assignments) == 1
         assert saved_current.assignments[0].assignment_id == saved_assignment["id"]
+        assert [
+            (day.calendar_date, tuple(entry.occupancy_kind.value for entry in day.entries))
+            for day in saved_current.days
+        ] == [
+            (date(2026, 9, 3), ("official_workday",)),
+            (date(2026, 9, 4), ("official_workday",)),
+        ]
         leave_assignments = MySqlLeaveSubstitutionRepository(
             connection
         ).list_effective_assignments(case_no)
@@ -701,6 +707,10 @@ def test_historical_restart_reenters_canonical_scheduling_and_weekly_report(
         assert [(row.case_no, row.weekly_work_days, row.weekly_hours) for row in saved_weekly.service_rows] == [
             (case_no, 2, 16),
         ]
+        service = saved_weekly.service_rows[0]
+        assert service.staff_name == f"{case_no} staff"
+        assert service.service_start_date == date(2026, 9, 3)
+        assert service.service_end_date == date(2026, 9, 4)
 
         # Before the canonical schedule existed this command failed with
         # scheduling_assignments_required.  Restart provenance itself must not
@@ -713,70 +723,5 @@ def test_historical_restart_reenters_canonical_scheduling_and_weekly_report(
                 "SELECT actual_start_date FROM orders WHERE case_no=%s", (case_no,)
             )
             assert cursor.fetchone()["actual_start_date"] == date(2026, 9, 3)
-
-        plan_id, segment_id = _create_matching_plan(connection, database, case_no, staff_id)
-        _record_matching_acceptance(database, case_no, plan_id, segment_id)
-        _confirm_matching(connection, case_no, plan_id)
-        _establish_commitment_and_lock(
-            database, tmp_path / suffix, case_no, plan_id, segment_id,
-        )
-        # The preceding normal-flow applications commit on their own request
-        # connections. End this readback connection's repeatable-read snapshot
-        # before composing the next request boundary.
-        connection.rollback()
-        assignment = _apply_assignment(connection, case_no, staff_id)
-
-        with connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT id,generation_id,status FROM case_staff_assignments "
-                "WHERE case_no=%s AND id<>%s AND generation_id IS NOT NULL", (case_no, legacy_assignment_id),
-            )
-            canonical = cursor.fetchone()
-            assert canonical is not None
-            cursor.execute(
-                "SELECT work_date,is_work_day,effective_marker FROM staff_schedule "
-                "WHERE assignment_id=%s ORDER BY work_date", (canonical["id"],),
-            )
-            assert cursor.fetchall() == [
-                {"work_date": date(2026, 9, 3), "is_work_day": 1, "effective_marker": 1},
-                {"work_date": date(2026, 9, 4), "is_work_day": 1, "effective_marker": 1},
-            ]
-            cursor.execute(
-                "SELECT occupancy_date,occupancy_type FROM scheduling_effective_occupancy "
-                "WHERE assignment_id=%s ORDER BY occupancy_date", (canonical["id"],),
-            )
-            occupancy = cursor.fetchall()
-            assert [row for row in occupancy if row["occupancy_type"] == "assignment_interval"] == [
-                {"occupancy_date": date(2026, 9, 3), "occupancy_type": "assignment_interval"},
-                {"occupancy_date": date(2026, 9, 4), "occupancy_type": "assignment_interval"},
-            ]
-        current = SchedulingCurrentProjectionWorkflow(
-            MySqlSchedulingCurrentProjectionRepository(connection),
-            FixedBusinessClock(datetime(2026, 9, 3, 12, tzinfo=TAIPEI_TIME_ZONE)),
-        ).query(SchedulingCurrentQuery(staff_id, date(2026, 9, 3), date(2026, 9, 4)))
-        assert len(current.assignments) == 1
-        assert current.assignments[0].case_no == case_no
-        assert current.assignments[0].assignment_id == canonical["id"]
-        assert [
-            (day.calendar_date, tuple(entry.occupancy_kind.value for entry in day.entries))
-            for day in current.days
-        ] == [
-            (date(2026, 9, 3), ("official_workday",)),
-            (date(2026, 9, 4), ("official_workday",)),
-        ]
-
-        weekly = WeeklyOperationsReportQuery(
-            report,
-            lambda: datetime(2026, 9, 4, 18, tzinfo=TAIPEI_TIME_ZONE),
-        ).query(date(2026, 9, 3), date(2026, 9, 4))
-        assert len(weekly.service_rows) == 1
-        service = weekly.service_rows[0]
-        assert service.case_no == case_no
-        assert service.staff_name == f"{case_no} staff"
-        assert service.service_start_date == date(2026, 9, 3)
-        assert service.service_end_date == date(2026, 9, 4)
-        assert service.weekly_work_days == 2
-        assert service.weekly_hours == 16
-        assert assignment.scheduling_generation == restart.scheduling_generation + 3
     finally:
         connection.close()

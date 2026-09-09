@@ -56,6 +56,8 @@ type HistoricalRestartState =
   | { status: 'completed'; message: string }
   | { status: 'error'; message: string };
 
+type DrawerTab = 'work' | 'progress' | 'source';
+
 const loading = <T,>(): ReadState<T> => ({ status: 'loading' });
 
 function errorMessage(error: unknown): string {
@@ -124,6 +126,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
     () => branchType === 'historical' ? loading<HistoricalOperationalBaseline>() : { status: 'skipped' },
   );
   const [historicalRestart, setHistoricalRestart] = useState<HistoricalRestartState>({ status: 'idle', message: null });
+  const [drawerTab, setDrawerTab] = useState<DrawerTab>('work');
   const [replacementExpanded, setReplacementExpanded] = useState(false);
   const [operation, setOperation] = useState<'cancellation' | 'reopen' | 'actual-start' | null>(null);
   const [operationBusy, setOperationBusy] = useState(false);
@@ -296,10 +299,51 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
       closeLabel="關閉工作 Drawer"
       className="order-v2-drawer-backdrop"
     >
-      <div className="order-v2-drawer-content">
+      <div className="order-v2-drawer-content" data-active-tab={drawerTab}>
         <p className="order-v2-drawer-intro">查看案件資料、服務安排與作業進度。</p>
+        <nav className="order-v2-drawer-tabs" role="tablist" aria-label="案件工作分頁">
+          <button
+            id="order-v2-drawer-tab-work"
+            type="button"
+            role="tab"
+            aria-selected={drawerTab === 'work'}
+            aria-controls="order-v2-drawer-tabpanel"
+            className={drawerTab === 'work' ? 'active' : ''}
+            onClick={() => setDrawerTab('work')}
+          >
+            案件處理
+          </button>
+          <button
+            id="order-v2-drawer-tab-progress"
+            type="button"
+            role="tab"
+            aria-selected={drawerTab === 'progress'}
+            aria-controls="order-v2-drawer-tabpanel"
+            className={drawerTab === 'progress' ? 'active' : ''}
+            onClick={() => setDrawerTab('progress')}
+          >
+            進度與提醒
+          </button>
+          <button
+            id="order-v2-drawer-tab-source"
+            type="button"
+            role="tab"
+            aria-selected={drawerTab === 'source'}
+            aria-controls="order-v2-drawer-tabpanel"
+            className={drawerTab === 'source' ? 'active' : ''}
+            onClick={() => setDrawerTab('source')}
+          >
+            {branchType === 'historical' ? '歷史與來源' : '資料來源'}
+          </button>
+        </nav>
+        <div
+          id="order-v2-drawer-tabpanel"
+          className="order-v2-drawer-tab-panel"
+          role="tabpanel"
+          aria-labelledby={`order-v2-drawer-tab-${drawerTab}`}
+        >
         {currentBranch === 'normal' && workbenchScope === 'in_progress' && !terminalStatus && (
-          <section className="order-v2-drawer-current-task" aria-labelledby="order-v2-current-task-heading">
+          <section hidden={drawerTab !== 'work'} className="order-v2-drawer-current-task" aria-labelledby="order-v2-current-task-heading">
             <header>
               <span>目前待辦</span>
               <div>
@@ -315,7 +359,6 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
                   caseNo={caseNo}
                   orderStatus={intakeOrderStatus}
                   onChanged={refreshFacts}
-                  onHistoricalRestartRequested={restartHistoricalOrderIntoNormalFlow}
                 />
               )}
               {currentStageCode === 'intake_validation' && terms.status === 'ready' && (
@@ -350,10 +393,31 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
             </fieldset>
           </section>
         )}
+        {currentBranch === 'historical' && (intakeOrderStatus === '歷史訂單－未服務' || intakeOrderStatus === '歷史訂單－服務中') && (
+          <section hidden={drawerTab !== 'work'} className="order-v2-drawer-current-task" aria-label="歷史訂單精算天數重啟">
+            <header>
+              <span>歷史案件操作</span>
+              <div>
+                <h3>重啟精算天數</h3>
+                <p>先退出歷史分支並回到「訂單成立」；成功後即可沿用正式日期精算、媒合與排班流程。</p>
+              </div>
+            </header>
+            <fieldset disabled={operationBusy || factsRefreshing}>
+              <button
+                type="button"
+                className="btn-secondary-action"
+                data-control-id="orders.intake-repair.historical-restart"
+                onClick={() => void restartHistoricalOrderIntoNormalFlow()}
+              >
+                前往重啟正常流程
+              </button>
+            </fieldset>
+          </section>
+        )}
         <div className="order-v2-drawer-columns">
         <div className="order-v2-drawer-main">
           {factsRefreshing && <p role="status">正在更新正式案件資料；保留目前面板狀態。</p>}
-          <section className="order-v2-drawer-section" aria-labelledby="order-v2-current-facts">
+          <section hidden={drawerTab !== 'work'} className="order-v2-drawer-section" aria-labelledby="order-v2-current-facts">
             <h3 id="order-v2-current-facts">案件與服務資料</h3>
             <div className="matching-facts-bar order-v2-drawer-fact-grid">
               <article>
@@ -396,9 +460,11 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
             </div>
           </section>
 
-          <OrderWorkbenchV2OwnerContext key={caseNo} caseNo={caseNo} revision={refreshRevision} />
+          <div hidden={drawerTab !== 'work'}>
+            <OrderWorkbenchV2OwnerContext key={caseNo} caseNo={caseNo} revision={refreshRevision} />
+          </div>
 
-          {(!terminalStatus || currentBranch === 'cancelled') && <details className="order-v2-drawer-section order-v2-more-actions">
+          {(!terminalStatus || currentBranch === 'cancelled') && <details hidden={drawerTab !== 'work'} className="order-v2-drawer-section order-v2-more-actions">
             <summary>更多操作</summary>
             <p className="order-v2-drawer-note">低頻案件維護操作會先顯示目前條件，再進入預覽與確認。</p>
             <div className="order-v2-drawer-actions">
@@ -438,13 +504,12 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
             )}
           </details>}
 
-          <fieldset disabled={operationBusy || factsRefreshing} style={{ border: 0, padding: 0, margin: 0 }}>
+          <fieldset hidden={drawerTab !== 'work'} disabled={operationBusy || factsRefreshing} style={{ border: 0, padding: 0, margin: 0 }}>
           {branchType === 'historical' && currentBranch !== 'cancelled' && intakeOrderStatus !== null && (
             <OrderIntakeRepairPanel
               caseNo={caseNo}
               orderStatus={intakeOrderStatus}
               onChanged={refreshFacts}
-              onHistoricalRestartRequested={restartHistoricalOrderIntoNormalFlow}
             />
           )}
 
@@ -485,7 +550,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
           </fieldset>
 
           {branchType === 'historical' && (
-            <section className="order-v2-drawer-section" aria-labelledby="order-v2-historical-owner-heading">
+            <section hidden={drawerTab !== 'source'} className="order-v2-drawer-section" aria-labelledby="order-v2-historical-owner-heading">
               <h3 id="order-v2-historical-owner-heading">目前正式 owner progression</h3>
               {timeline.status === 'loading' && <p>載入正式 owner progression…</p>}
               {timeline.status === 'error' && <p className="order-v2-drawer-error">owner progression 不可用：{timeline.message}</p>}
@@ -514,7 +579,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
           )}
 
           {branchType === 'historical' && (
-            <section className="order-v2-drawer-section historical-evidence" aria-label="歷史來源證據">
+            <section hidden={drawerTab !== 'source'} className="order-v2-drawer-section historical-evidence" aria-label="歷史來源證據">
               <h3 id="order-v2-history-baseline-heading">Immutable historical baseline</h3>
               <p className="order-v2-drawer-note">baseline 只表示已接受略過的前置步驟，不是真實 owner event，也不覆寫後續正式 owner facts。</p>
               {historicalBaseline.status === 'loading' && <p>載入 immutable baseline…</p>}
@@ -574,7 +639,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
           )}
         </div>
         <div className="order-v2-drawer-sidebar">
-          {showProgress && <section className="order-v2-drawer-section" aria-labelledby="order-v2-progress-heading">
+          {showProgress && <section hidden={drawerTab !== 'progress'} className="order-v2-drawer-section" aria-labelledby="order-v2-progress-heading">
             <h3 id="order-v2-progress-heading">13 階段正式進度</h3>
             {timeline.status === 'loading' && <p>載入正式十三階段 projection…</p>}
             {timeline.status === 'error' && <p className="order-v2-drawer-error">十三階段 projection 不可用：{timeline.message}</p>}
@@ -591,14 +656,14 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
           </section>}
 
           {!showProgress && timeline.status === 'ready' && (
-            <section className="order-v2-drawer-section" aria-label="結算狀態">
+            <section hidden={drawerTab !== 'progress'} className="order-v2-drawer-section" aria-label="結算狀態">
               <h3>結算狀態</h3>
               {timeline.data.core_stages.filter((stage) => stage.code === 'client_settlement' || stage.code === 'staff_payout').map((stage) => (
                 <p key={stage.code}>{stage.label}：{coreStageSubstatusLabel(stage.substatus_code)}</p>
               ))}
             </section>
           )}
-          <section className="order-v2-drawer-section" aria-labelledby="order-v2-notices-heading">
+          <section hidden={drawerTab !== 'progress'} className="order-v2-drawer-section" aria-labelledby="order-v2-notices-heading">
             <h3 id="order-v2-notices-heading">阻塞與提醒</h3>
             {timeline.status === 'ready' && blockers.length === 0 && warnings.length === 0 && <p>目前沒有正式 blocker / warning。</p>}
             {blockers.map((notice) => (
@@ -609,7 +674,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
             ))}
           </section>
 
-          <details className="order-v2-drawer-section order-v2-drawer-technical">
+          <details hidden={drawerTab !== 'source'} className="order-v2-drawer-section order-v2-drawer-technical">
             <summary>技術資料與來源紀錄</summary>
             <div>
             <h3 id="order-v2-lineage-heading">Lineage／來源</h3>
@@ -633,6 +698,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
 
         </div>
         </div>
+      </div>
       </div>
     </Drawer>
   );
