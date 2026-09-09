@@ -31,6 +31,7 @@ class HcmWorkbookRowOutcomeView(BaseModel):
         "exact_replay",
         "review_required",
         "failed",
+        "skipped_existing",
     ]
     problem_identity: str | None = Field(default=None, max_length=191)
     problem_fields: list[str]
@@ -48,6 +49,7 @@ class HcmWorkbookReceiptView(BaseModel):
     exact_replay_count: int = Field(ge=0)
     review_required_count: int = Field(ge=0)
     failed_count: int = Field(ge=0)
+    skipped_existing_count: int = Field(ge=0)
     replayed_workbook: bool
     row_outcomes_available: bool
     legacy_summary_only: bool

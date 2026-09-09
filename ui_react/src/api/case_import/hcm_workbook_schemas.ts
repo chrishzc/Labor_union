@@ -44,6 +44,7 @@ export const HcmWorkbookRowOutcomeSchema = z
       'exact_replay',
       'review_required',
       'failed',
+      'skipped_existing',
     ]),
     problem_identity: z.string().max(191).nullable(),
     problem_fields: z.array(z.string()),
@@ -63,6 +64,7 @@ export const HcmWorkbookReceiptSchema = z
     exact_replay_count: z.number().int().min(0),
     review_required_count: z.number().int().min(0),
     failed_count: z.number().int().min(0),
+    skipped_existing_count: z.number().int().min(0),
     replayed_workbook: z.boolean(),
     row_outcomes_available: z.boolean(),
     legacy_summary_only: z.boolean(),
@@ -84,3 +86,32 @@ export const HcmWorkbookReceiptEnvelopeSchema = z
 export type HcmWorkbookReceiptEnvelope = z.infer<
   typeof HcmWorkbookReceiptEnvelopeSchema
 >;
+
+export const HcmResubmissionPreviewSchema = z.strictObject({
+  review_identity: z.string().min(1).max(191),
+  case_no: z.string().min(1).max(50),
+  source_field: z.string().min(1).max(191),
+  target_fields: z.array(z.string()).min(1),
+  review_version: z.number().int().nonnegative(),
+  root_fingerprint: HcmSha256Schema,
+  preview_fingerprint: HcmSha256Schema,
+});
+
+export const HcmResubmissionReceiptSchema = z.strictObject({
+  event_identity: z.string().min(1).max(191),
+  review_identity: z.string().min(1).max(191),
+  case_no: z.string().min(1).max(50),
+  target_fields: z.array(z.string()).min(1),
+  resulting_review_version: z.number().int().positive(),
+  replayed: z.boolean(),
+});
+
+export const HcmResubmissionPreviewEnvelopeSchema = z.strictObject({
+  success: z.literal(true), message: z.string(), data: HcmResubmissionPreviewSchema, error: z.null(),
+});
+export const HcmResubmissionReceiptEnvelopeSchema = z.strictObject({
+  success: z.literal(true), message: z.string(), data: HcmResubmissionReceiptSchema, error: z.null(),
+});
+
+export type HcmResubmissionPreview = z.infer<typeof HcmResubmissionPreviewSchema>;
+export type HcmResubmissionReceipt = z.infer<typeof HcmResubmissionReceiptSchema>;

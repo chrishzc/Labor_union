@@ -29,6 +29,7 @@ class ImportWarningTask:
     evidence_reference: str | None
     navigation_action: str | None = None
     display_message: str | None = None
+    source_receipt_identity: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +78,7 @@ class WarningReferralDescriptor:
     navigation_action: str
     action_kind: str
     target_command: str | None
+    review_identity: str
 
 
 class ImportWarningTrackingRepository(Protocol):
@@ -148,6 +150,7 @@ class ImportWarningTrackingApplication:
             navigation_action=navigation_action,
             action_kind=action_kind,
             target_command=target_command,
+            review_identity=_required_hcm_review_identity(task),
         )
 
     def apply(self, request: WarningTransitionRequest) -> WarningTransitionReceipt:
@@ -211,6 +214,7 @@ def _navigation_action(task: ImportWarningTask) -> str | None:
         "HCM-LINK-001",
         "HCM-LINK-002",
         "HCM-BECLASS-001",
+        "HCM-SYSTEM-001",
     }:
         return "hcm_import_center"
     if task.owning_lane == "historical_order" and task.logical_code in {
@@ -255,7 +259,7 @@ def _hcm_referral_action(task: ImportWarningTask) -> tuple[str, str | None] | No
         "HCM-LINK-002",
     }:
         return ("owner_preview_apply", "preview_hcm_resubmission")
-    if task.logical_code == "HCM-BECLASS-001":
+    if task.logical_code in {"HCM-BECLASS-001", "HCM-SYSTEM-001"}:
         return ("wait_for_counterpart", None)
     return None
 
@@ -306,6 +310,7 @@ def _display_message(task: ImportWarningTask) -> str:
         "HCM-LINK-001": "疑似已有客戶，待確認連結",
         "HCM-LINK-002": "無法唯一確認客戶身分",
         "HCM-CASE-002": "HCM 案件內容與現有資料衝突",
+        "HCM-SYSTEM-001": "案件初始設定尚未完成，請檢查系統費率與案件條件",
         "HCM-BECLASS-001": "等待客戶完成 BeClass 資料",
         "STAFF-BECLASS-IDENTITY-001": "缺少身分證",
         "STAFF-BECLASS-NAME-001": "缺少姓名",
@@ -321,6 +326,13 @@ def _display_message(task: ImportWarningTask) -> str:
         "FINANCE-ROW-001": "銀行流水待確認歸屬",
     }
     return messages.get(task.logical_code, "匯入資料待人工確認")
+
+
+def _required_hcm_review_identity(task: ImportWarningTask) -> str:
+    value = str(task.source_receipt_identity or "").strip()
+    if task.owning_lane != "hcm" or not value:
+        raise ValueError("import_warning_referral_unavailable")
+    return value
 
 
 __all__ = [

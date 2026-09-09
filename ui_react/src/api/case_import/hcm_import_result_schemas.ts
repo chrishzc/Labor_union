@@ -10,7 +10,7 @@ const TimestampSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/)
 export const HcmImportRowOutcomeSchema = z.strictObject({
   source_row: z.number().int().positive(),
   case_no: z.string().min(1).max(50).nullable(),
-  outcome: z.enum(['inserted', 'inserted_with_warning', 'exact_replay', 'review_required', 'failed']),
+  outcome: z.enum(['inserted', 'inserted_with_warning', 'exact_replay', 'review_required', 'failed', 'skipped_existing']),
   problem_identity: z.string().min(1).max(191).nullable(),
   problem_fields: z.array(z.string()),
   issue_codes: z.array(z.string()),
@@ -27,6 +27,7 @@ export const HcmImportResultRecordSchema = z.strictObject({
   exact_replay_count: z.number().int().nonnegative(),
   review_required_count: z.number().int().nonnegative(),
   failed_count: z.number().int().nonnegative(),
+  skipped_existing_count: z.number().int().nonnegative(),
   replayed_workbook: z.boolean(),
   row_outcomes_available: z.boolean(),
   legacy_summary_only: z.boolean(),
@@ -48,4 +49,3 @@ export const HcmImportResultEnvelopeSchema = z.strictObject({
 export type HcmImportRowOutcome = z.infer<typeof HcmImportRowOutcomeSchema>;
 export type HcmImportResultRecord = z.infer<typeof HcmImportResultRecordSchema>;
 export type HcmImportResultPage = z.infer<typeof HcmImportResultPageSchema>;
-

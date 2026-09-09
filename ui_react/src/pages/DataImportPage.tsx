@@ -5,12 +5,14 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { adaptClientBeClassWorkbookPreview } from '../adapters/case_import/client_beclass_workbook_adapter';
 import { adaptHcmWorkbookPreview } from '../adapters/case_import/hcm_workbook_adapter';
-import { adaptHcmImportResult, type HcmImportResultViewModel } from '../adapters/case_import/hcm_import_result_adapter';
 import { adaptStaffHistoricalWorkbookPreview } from '../adapters/case_import/staff_historical_workbook_adapter';
 import { adaptHistoricalOrderWorkbookPreview } from '../adapters/orders/historical_order_workbook_adapter';
 import { ClientBeClassWorkbookSnapshot, clientBeClassWorkbookPreviewClient } from '../api/case_import/client_beclass_workbook/client';
 import { HcmWorkbookSnapshot, hcmWorkbookPreviewClient } from '../api/case_import/hcm_workbook_client';
-import { hcmImportResultClient } from '../api/case_import/hcm_import_result_client';
+import { anomalyQueryClient } from '../api/anomalies/anomaly_query_client';
+import type { ImportWarningTaskView } from '../api/anomalies/anomaly_query_schemas';
+import { hcmResubmissionClient } from '../api/case_import/hcm_resubmission_client';
+import type { HcmResubmissionPreview } from '../api/case_import/hcm_workbook_schemas';
 import { StaffHistoricalWorkbookSnapshot, staffHistoricalWorkbookPreviewClient } from '../api/case_import/staff_historical_workbook/client';
 import { HistoricalOrderWorkbookSnapshot, historicalOrderWorkbookPreviewClient } from '../api/orders/historical_order_workbook/client';
 import { HistoricalOrderReviewRemediationWorkbench } from '../components/HistoricalOrderReviewRemediationWorkbench';
@@ -19,7 +21,7 @@ import './DataImportPage.css';
 
 type ResultState =
   | { kind: 'loading' }
-  | { kind: 'ready'; items: HcmImportResultViewModel[] }
+  | { kind: 'ready'; items: ImportWarningTaskView[] }
   | { kind: 'empty' }
   | { kind: 'error'; message: string };
 
@@ -269,6 +271,64 @@ const CaseWorkbookPreviewCard: React.FC<CaseWorkbookPreviewCardProps> = ({
   );
 };
 
+interface HcmCorrectionSelection {
+  task: ImportWarningTaskView;
+  reviewIdentity: string;
+}
+
+const HcmControlledCorrection: React.FC<{
+  selection: HcmCorrectionSelection;
+  onCancel: () => void;
+  onApplied: () => void;
+}> = ({ selection, onCancel, onApplied }) => {
+  const [snapshot, setSnapshot] = useState<HcmWorkbookSnapshot | null>(null);
+  const [preview, setPreview] = useState<HcmResubmissionPreview | null>(null);
+  const [reason, setReason] = useState('修正 HCM 匯入異常');
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const selectFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    setPreview(null);
+    setMessage(null);
+    if (!file) { setSnapshot(null); return; }
+    try { setSnapshot(await HcmWorkbookSnapshot.fromFile(file)); }
+    catch (error) { setSnapshot(null); setMessage(error instanceof Error ? error.message : '無法讀取修正版。'); }
+  };
+
+  const previewCorrection = async () => {
+    if (!snapshot || busy) return;
+    setBusy(true); setMessage(null);
+    try { setPreview(await hcmResubmissionClient.preview(snapshot, selection.reviewIdentity)); }
+    catch (error) { setMessage(error instanceof Error ? error.message : '修正預覽失敗。'); }
+    finally { setBusy(false); }
+  };
+
+  const applyCorrection = async () => {
+    if (!snapshot || !preview || !reason.trim() || busy) return;
+    setBusy(true); setMessage(null);
+    try {
+      await hcmResubmissionClient.apply(snapshot, preview, reason.trim());
+      onApplied();
+    } catch (error) { setMessage(error instanceof Error ? error.message : '修正套用失敗。'); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <section className="import-workbench-card" data-surface-id="imports.hcm-correction.workbench">
+      <div className="import-card-header"><div className="import-card-title-group"><h2>修正案件 {selection.task.subject}</h2><p>{selection.task.display_message}</p></div></div>
+      <p className="import-description">請選擇包含本案件的完整 HCM 修正版。系統會先預覽，且只會更新這項異常對應的欄位。</p>
+      <input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" aria-label="選擇 HCM 修正版" disabled={busy} onChange={(event) => void selectFile(event)} />
+      <button type="button" className="import-preview-btn" disabled={!snapshot || busy} onClick={() => void previewCorrection()}>{busy && !preview ? '預覽中…' : '預覽修正'}</button>
+      {preview && <div className="import-preview-result" role="status"><strong>只會修正：{preview.source_field}</strong><p>案件 {preview.case_no}；套用前仍會重新確認資料版本。</p></div>}
+      {preview && <label>修正原因<input value={reason} maxLength={500} disabled={busy} onChange={(event) => setReason(event.target.value)} /></label>}
+      {preview && <button type="button" className="import-apply-btn" disabled={busy || !reason.trim()} onClick={() => void applyCorrection()}>{busy ? '套用中…' : '確認套用修正'}</button>}
+      <button type="button" disabled={busy} onClick={onCancel}>取消</button>
+      {message && <div className="import-error" role="alert">{message}</div>}
+    </section>
+  );
+};
+
 export type DataCenterTab = 'workbook-import' | 'data-browser';
 
 export interface DataImportPageProps {
@@ -282,6 +342,8 @@ export const DataImportPage: React.FC<DataImportPageProps> = ({ initialTab = 'wo
   const abortRef = useRef<AbortController | null>(null);
   const [historicalReviewIdentities, setHistoricalReviewIdentities] = useState<string[]>([]);
   const [selectedHistoricalReviewIdentity, setSelectedHistoricalReviewIdentity] = useState<string | null>(null);
+  const [hcmCorrection, setHcmCorrection] = useState<HcmCorrectionSelection | null>(null);
+  const [referralError, setReferralError] = useState<string | null>(null);
 
   const loadResults = useCallback(async () => {
     abortRef.current?.abort();
@@ -291,9 +353,14 @@ export const DataImportPage: React.FC<DataImportPageProps> = ({ initialTab = 'wo
     generationRef.current = generation;
     setState({ kind: 'loading' });
     try {
-      const page = await hcmImportResultClient.query({ limit: 20 }, { signal: controller.signal });
+      const tasks = await anomalyQueryClient.queryImportWarningTasks({ activeOnly: true, limit: 200 }, { signal: controller.signal });
       if (controller.signal.aborted || generation !== generationRef.current) return;
-      const items = page.items.map(adaptHcmImportResult);
+      const seenCases = new Set<string>();
+      const items = tasks.filter((task) => {
+        if (task.owning_lane !== 'hcm' || seenCases.has(task.subject)) return false;
+        seenCases.add(task.subject);
+        return true;
+      });
       setState(items.length ? { kind: 'ready', items } : { kind: 'empty' });
     } catch (error) {
       if (controller.signal.aborted || generation !== generationRef.current) return;
@@ -318,7 +385,7 @@ export const DataImportPage: React.FC<DataImportPageProps> = ({ initialTab = 'wo
     (snapshot, options) => hcmWorkbookPreviewClient.preview(snapshot, options),
     (snapshot, fingerprint, options) => hcmWorkbookPreviewClient.apply(snapshot, fingerprint, options),
     adaptHcmWorkbookPreview,
-    (receipt) => applyPresentation(receipt.replayed_workbook, `新增 ${receipt.inserted_count} 筆、含警示 ${receipt.inserted_with_warning_count} 筆、已存在相同資料 ${receipt.exact_replay_count} 筆、需檢查 ${receipt.review_required_count} 筆、失敗 ${receipt.failed_count} 筆。`, receipt.review_required_count > 0 || receipt.failed_count > 0 ? 'needs-review' : receipt.inserted_count === 0 ? 'no-change' : 'applied'),
+    (receipt) => applyPresentation(receipt.replayed_workbook, `新增 ${receipt.inserted_count} 筆、含警示 ${receipt.inserted_with_warning_count} 筆、既有案件跳過 ${receipt.skipped_existing_count} 筆、需檢查 ${receipt.review_required_count} 筆、失敗 ${receipt.failed_count} 筆。`, receipt.review_required_count > 0 || receipt.failed_count > 0 ? 'needs-review' : receipt.inserted_count === 0 ? 'no-change' : 'applied'),
     'HCM 工作簿處理失敗。', 'hcm-current', () => loadResults()
   );
   const clientBeClass = useCaseWorkbookFlow(
@@ -381,11 +448,26 @@ export const DataImportPage: React.FC<DataImportPageProps> = ({ initialTab = 'wo
     return () => { window.removeEventListener('beforeunload', preventUnload); document.removeEventListener('click', preventInAppNavigation, true); };
   }, [mutationLocked]);
 
-  const navigateToHcmImport = () => {
+  const handleHcmProblem = async (task: ImportWarningTaskView) => {
     if (mutationLocked) return;
-    const importControl = document.querySelector<HTMLElement>('[data-control-id="imports.hcm-current.open-preview"]');
-    importControl?.scrollIntoView?.({ block: 'center' });
-    importControl?.focus();
+    setReferralError(null);
+    if (!['HCM-FIELD-001', 'HCM-FIELD-002'].includes(task.logical_code)) {
+      window.location.hash = '#anomalies';
+      return;
+    }
+    try {
+      const referral = await anomalyQueryClient.queryImportWarningReferral({ occurrenceIdentity: task.occurrence_identity, expectedVersion: task.tracking_version });
+      if (referral.target_command !== 'preview_hcm_resubmission') throw new Error('此異常目前不能直接修正。');
+      setHcmCorrection({ task, reviewIdentity: referral.review_identity });
+    } catch (error) {
+      setReferralError(error instanceof Error ? error.message : '無法開啟 HCM 修正。');
+    }
+  };
+
+  const hcmActionLabel = (task: ImportWarningTaskView): string => {
+    if (['HCM-FIELD-001', 'HCM-FIELD-002'].includes(task.logical_code)) return '提交受控修正';
+    if (task.logical_code.startsWith('HCM-LINK-')) return '確認客戶身分';
+    return '檢查系統設定／重新檢查';
   };
 
   const selectTab = (tab: DataCenterTab) => {
@@ -430,24 +512,23 @@ export const DataImportPage: React.FC<DataImportPageProps> = ({ initialTab = 'wo
       {activeTab === 'workbook-import' && (
       <div>
         <section className="import-result-workbench" data-surface-id="imports.hcm-results.open">
-          <div className="import-result-title-row"><div><span className="import-icon">🏢</span><h2>HCM 最近匯入紀錄與問題檢查</h2></div><span className="import-status-badge ready">唯讀查詢</span></div>
-          {state.kind === 'loading' && <div className="import-result-state" role="status">正在載入最近匯入結果…</div>}
-          {state.kind === 'error' && <div className="import-result-state import-result-error" data-surface-id="imports.hcm-results.error" role="status"><strong>最近匯入結果暫時無法載入；不影響上方工作簿預覽與匯入。</strong><p>{state.message}</p><button type="button" data-control-id="imports.hcm-results.retry" onClick={() => void loadResults()}>重試結果查詢</button></div>}
-          {state.kind === 'empty' && <div className="import-result-state" data-surface-id="imports.hcm-results.empty">目前沒有可查詢的 HCM 匯入結果。</div>}
-          {state.kind === 'ready' && state.items.map((result) => (
-            <article key={result.receiptId} className="import-result-batch" data-surface-id={`imports.hcm-results.receipt.${result.receiptId}`}>
-              <header><div><strong>匯入結果</strong><span>{result.completedAt}</span></div></header>
-              <p className="import-result-summary">{result.summary}｜來源 {result.sourceRowCount} 列</p>
-              {!result.rowOutcomesAvailable ? <div className="import-result-legacy" data-surface-id="imports.hcm-results.legacy-unavailable">歷史匯入摘要；本批次統計如上，新版匯入會在此列出逐列結果。</div> : (
-                <div className="import-result-columns">
-                  <section data-surface-id="imports.hcm-results.new-orders"><h3>本次新增訂單</h3>{result.newOrders.length === 0 ? <p>本批次沒有新增訂單。</p> : result.newOrders.map((row) => <div key={row.source_row} className="import-result-row" data-surface-id={`imports.hcm-results.new-order.${encodeURIComponent(row.case_no ?? `row-${row.source_row}`)}`}><strong>{row.case_no ?? `來源列 ${row.source_row}`}</strong><span>{row.outcome}</span></div>)}</section>
-                  <section data-surface-id="imports.hcm-results.problems"><h3>需要檢查</h3>{result.problems.length === 0 ? <p>本批次沒有問題列。</p> : result.problems.map((row) => <div key={row.source_row} className="import-result-problem" data-surface-id={`imports.hcm-results.problem.${encodeURIComponent(row.problem_identity ?? `row-${row.source_row}`)}`}><strong>{row.case_no ?? `來源列 ${row.source_row}`}</strong><span>欄位：{row.problem_fields.join('、') || '無'}</span><span>代碼：{row.issue_codes.join('、') || '無'}</span><button type="button" disabled={mutationLocked} data-control-id={`imports.hcm-results.problem.referral.${encodeURIComponent(row.problem_identity ?? `row-${row.source_row}`)}`} onClick={navigateToHcmImport}>回到 HCM 工作簿修正</button></div>)}</section>
-                  <section data-surface-id="imports.hcm-results.replays"><h3>已存在相同資料</h3>{result.replays.length === 0 ? <p>本批次沒有相同資料。</p> : result.replays.map((row) => <div key={row.source_row} className="import-result-row"><strong>{row.case_no ?? `來源列 ${row.source_row}`}</strong><span>未列為新增</span></div>)}</section>
-                </div>
-              )}
+          <div className="import-result-title-row"><div><span className="import-icon">🏢</span><h2>HCM 目前待處理異常</h2></div><span className="import-status-badge ready">每案僅顯示最新一筆</span></div>
+          {state.kind === 'loading' && <div className="import-result-state" role="status">正在載入待處理異常…</div>}
+          {state.kind === 'error' && <div className="import-result-state import-result-error" data-surface-id="imports.hcm-results.error" role="status"><strong>待處理異常暫時無法載入；不影響上方工作簿預覽與匯入。</strong><p>{state.message}</p><button type="button" data-control-id="imports.hcm-results.retry" onClick={() => void loadResults()}>重試查詢</button></div>}
+          {state.kind === 'empty' && <div className="import-result-state" data-surface-id="imports.hcm-results.empty">目前沒有待處理的 HCM 異常。</div>}
+          {referralError && <div className="import-result-state import-result-error" role="alert">{referralError}</div>}
+          {state.kind === 'ready' && state.items.map((task) => (
+            <article key={task.occurrence_identity} className="import-result-problem" data-surface-id={`imports.hcm-results.problem.${encodeURIComponent(task.occurrence_identity)}`}>
+              <strong>案件 {task.subject}</strong>
+              <span>{task.display_message}</span>
+              <button type="button" disabled={mutationLocked} data-control-id={`imports.hcm-results.problem.referral.${encodeURIComponent(task.occurrence_identity)}`} onClick={() => void handleHcmProblem(task)}>{hcmActionLabel(task)}</button>
             </article>
           ))}
         </section>
+        {hcmCorrection && <HcmControlledCorrection selection={hcmCorrection} onCancel={() => setHcmCorrection(null)} onApplied={() => {
+          setState((current) => current.kind === 'ready' ? { kind: 'ready', items: current.items.filter((item) => item.subject !== hcmCorrection.task.subject) } : current);
+          setHcmCorrection(null);
+        }} />}
       </div>
       )}
     </div>

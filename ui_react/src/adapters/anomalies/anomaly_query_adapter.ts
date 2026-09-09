@@ -150,6 +150,7 @@ export interface ImportWarningReferralViewModel {
   navigationAction: 'hcm_import_center';
   actionKind: 'owner_preview_apply' | 'wait_for_counterpart';
   targetCommand: 'preview_hcm_resubmission' | null;
+  reviewIdentity: string;
 }
 
 // ============================================================================
@@ -351,6 +352,7 @@ export function adaptImportWarningReferral(
     navigationAction: dto.navigation_action,
     actionKind: dto.action_kind,
     targetCommand: dto.target_command,
+    reviewIdentity: dto.review_identity,
   };
 }
 
