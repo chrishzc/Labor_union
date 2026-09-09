@@ -5,7 +5,7 @@
     "path": "db/schema.sql",
     "sha256": "b9cd84ae5a09a46949b5d4c131659f7f114480306f94e0af1246833d021b1bfb"
   },
-  "active_artifacts_sha256": "cec299e03a276acda8469debdf1f2131ccfcb723b42971a0eca55df475441e15",
+  "active_artifacts_sha256": "483938a10fe6661af79dcbef9ebf580dc91c74dfac3b4fd5f5bac7f15be3e9ed",
   "active_bootstrap": [
     "db/schema_parts/202_scheduling_staff_leave_intake.sql",
     "db/schema_parts/20_staff_monthly_settlements.sql",
@@ -163,7 +163,7 @@
     "db/schema_parts/215_historical_service_accounting.sql",
     "db/schema_parts/216_staff_beclass_profile.sql",
     "db/schema_parts/1029_client_payment_destination_configuration.sql",
-    "db/schema_parts/217_weekly_report_batches.sql",
+    "db/schema_parts/218_weekly_report_metrics.sql",
     "db/schema_parts/1032_matching_holiday_work_agreements.sql",
     "db/schema_parts/1034_contract_external_signing_final_pdf_completion.sql"
   ],
@@ -178,7 +178,8 @@
     "db/schema_parts/1028_historical_service_accounting.sql": "migration-only",
     "db/schema_parts/1030_staff_beclass_profile.sql": "migration-only",
     "db/schema_parts/1031_weekly_report_batches.sql": "migration-only",
-    "db/schema_parts/1033_matching_holiday_work_agreements.sql": "migration-only"
+    "db/schema_parts/1033_matching_holiday_work_agreements.sql": "migration-only",
+    "db/schema_parts/1035_weekly_report_metrics.sql": "migration-only"
   },
   "retirement_contracts": {
     "db/schema_parts/1022_task96_retired_anomaly_owner_contracts.sql": {
@@ -264,12 +265,12 @@
     },
     "db/schema_parts/1031_weekly_report_batches.sql": {
       "source_object": "preserve-data additive owner root for weekly report batch and case binding storage",
-      "successor": "db/schema_parts/217_weekly_report_batches.sql",
-      "terminal_schema_evidence": "fresh assembly uses canonical part 217; preserve chain uses 1031 for existing databases",
-      "data_effect": "schema_only; existing business tables and weekly report lineage are preserved",
-      "replay": "preserve release chain applies 1031 only when both owned weekly report objects are absent or exact",
+      "successor": "none; batch settlement and case binding are retired from the current weekly report contract",
+      "terminal_schema_evidence": "fresh assembly omits batch objects and uses Monday-keyed part 218; released 1031 bytes remain immutable for historical release reconstruction",
+      "data_effect": "none in the current release; existing deployed batch rows remain preserved but no current runtime reads or writes them",
+      "replay": "do not add 1031 to a new current release; its immutable historical release remains available only to reconstruct that released version",
       "rollback": "retain source backup and discard candidate before same-name replacement",
-      "unresolved_policy": "partial or drift owned metadata blocks candidate apply pending explicit remediation"
+      "unresolved_policy": "do not drop deployed batch tables without separate destructive-data authority"
     },
     "db/schema_parts/1033_matching_holiday_work_agreements.sql": {
       "source_object": "released matching_holiday_work_agreements.plan_communication_version predecessor",
@@ -279,6 +280,15 @@
       "replay": "preserve release chain skips 1033 when plan_version is exact and applies it only when the exact legacy column is present alone",
       "rollback": "retain source backup and discard candidate before same-name replacement",
       "unresolved_policy": "dual, missing, wrong-type or other metadata drift blocks candidate apply"
+    },
+    "db/schema_parts/1035_weekly_report_metrics.sql": {
+      "source_object": "preserve-data additive owner root for Monday-keyed weekly promotion and inquiry metrics",
+      "successor": "db/schema_parts/218_weekly_report_metrics.sql",
+      "terminal_schema_evidence": "fresh assembly uses canonical part 218; preserve chain uses 1035 for existing databases",
+      "data_effect": "schema_only; existing business and retired batch rows remain unchanged",
+      "replay": "preserve release applies 1035 only when the owned table is absent or exact",
+      "rollback": "retain source backup and discard candidate before same-name replacement",
+      "unresolved_policy": "partial or drift owned metadata blocks candidate apply pending explicit remediation"
     }
   }
 }

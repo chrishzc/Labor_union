@@ -8,6 +8,7 @@ import { subsidyReportQueryClient } from '../api/reports/subsidy_report_query_cl
 import { subsidyReportExportClient } from '../api/reports/subsidy_report_export_client';
 import { weeklyOperationsReportExportClient } from '../api/reports/weekly_operations_report_export_client';
 import { weeklyOperationsReportQueryClient } from '../api/reports/weekly_operations_report_query_client';
+import { weeklyReportMetricsClient } from '../api/reports/weekly_report_metrics_client';
 import { ReportsPage } from '../pages/ReportsPage';
 import { SUBSIDY_REPORT_RESPONSE } from './fixtures/reports/subsidy_report_query_contract_fixtures';
 import { WEEKLY_OPERATIONS_REPORT } from './fixtures/reports/weekly_operations_report_contract_fixtures';
@@ -22,6 +23,12 @@ describe('ReportsPage query-only presentation', () => {
       service_rows: WEEKLY_OPERATIONS_REPORT.service_rows.map((row) => ({ ...row, period_start_date: startDate, period_end_date: endDate })),
     }));
     vi.spyOn(weeklyOperationsReportExportClient, 'download').mockResolvedValue({ blob: new Blob(['xlsx']), filename: 'weekly.xlsx' });
+    vi.spyOn(weeklyReportMetricsClient, 'save').mockImplementation(async (weekStartDate, values) => ({
+      week_start_date: weekStartDate,
+      week_end_date: weekStartDate === '2026-08-17' ? '2026-08-23' : '2026-08-30',
+      ...values,
+      updated_at: '2026-08-24T09:00:00+08:00',
+    }));
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:report');
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
@@ -118,24 +125,25 @@ describe('ReportsPage query-only presentation', () => {
     expect(HTMLAnchorElement.prototype.click).not.toHaveBeenCalled();
   });
 
-  it('可輸入推廣次數與詢問人次並於下載週報時帶入，且季度補助與年度補助無雙分頁下載按鈕', async () => {
+  it('可按星期一所屬週次儲存推廣與詢問，下載只帶查詢日期', async () => {
     render(<ReportsPage />);
     await screen.findByText('CASE-WEEK-001');
 
-    const promoInput = screen.getByLabelText('推廣次數') as HTMLInputElement;
-    const inqInput = screen.getByLabelText('詢問人次') as HTMLInputElement;
+    const promoInput = screen.getAllByLabelText('推廣次數')[0] as HTMLInputElement;
+    const inqInput = screen.getAllByLabelText('詢問人次')[0] as HTMLInputElement;
     fireEvent.change(promoInput, { target: { value: '15' } });
     fireEvent.change(inqInput, { target: { value: '42' } });
+
+    fireEvent.click(screen.getAllByRole('button', { name: '儲存此週' })[0]);
+    await waitFor(() => expect(weeklyReportMetricsClient.save).toHaveBeenCalledWith(
+      '2026-08-17',
+      { promotion_count: 15, inquiry_count: 42 },
+    ));
 
     fireEvent.click(screen.getByRole('button', { name: '下載營運報表 XLSX' }));
     await waitFor(() => expect(weeklyOperationsReportExportClient.download).toHaveBeenCalledWith(
       expect.any(String),
       expect.any(String),
-      expect.objectContaining({
-        promotionCount: 15,
-        inquiryCount: 42,
-        annualYtd: false,
-      }),
       expect.any(AbortSignal),
     ));
 

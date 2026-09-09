@@ -5,6 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { sessionClient } from '../api/auth/session_client';
 import { weeklyOperationsReportExportClient } from '../api/reports/weekly_operations_report_export_client';
+import { weeklyReportMetricsClient } from '../api/reports/weekly_report_metrics_client';
 import {
   weeklyOperationsReportQueryClient,
   validateOperationsReportDateRange,
@@ -93,5 +94,30 @@ describe('weekly operations report clients', () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/operations-reports/weekly/export?start_date=2026-08-20&end_date=2026-08-26');
     expect(artifact.filename).toBe('operations-report-2026-08-20-2026-08-26.xlsx');
     expect(artifact.blob.size).toBeGreaterThan(0);
+  });
+
+  it('查詢與儲存跨週的週指標，保留未登錄與實際零值差異', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(jsonResponse({
+        success: true,
+        message: 'ok',
+        data: WEEKLY_OPERATIONS_REPORT.weekly_metrics,
+        error: null,
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        success: true,
+        message: 'ok',
+        data: WEEKLY_OPERATIONS_REPORT.weekly_metrics[1],
+        error: null,
+      }));
+
+    const metrics = await weeklyReportMetricsClient.list('2026-08-20', '2026-08-26');
+    expect(metrics).toHaveLength(2);
+    expect(metrics[1]?.promotion_count).toBeNull();
+    expect(metrics[1]?.inquiry_count).toBe(0);
+
+    await weeklyReportMetricsClient.save('2026-08-24', { promotion_count: null, inquiry_count: 0 });
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/v1/operations-reports/weekly/metrics/2026-08-24');
+    expect(fetchMock.mock.calls[1]?.[1]?.body).toBe(JSON.stringify({ promotion_count: null, inquiry_count: 0 }));
   });
 });

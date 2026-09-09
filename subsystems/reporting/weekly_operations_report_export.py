@@ -21,7 +21,6 @@ SHEET_NAMES = ("週報案件受理總表", "補助案件統計表", "每周服�
 
 _HEADER_FILL = PatternFill(fill_type="solid", fgColor="D9EAF7")
 _YELLOW_FILL = PatternFill(fill_type="solid", fgColor="FFFF00")
-_LIGHT_GRAY_FILL = PatternFill(fill_type="solid", fgColor="F2F2F2")
 _METRIC_FILL = PatternFill(fill_type="solid", fgColor="FEC2FB")
 _BORDER_THIN = Border(
     left=Side(style="thin", color="D0D0D0"),
@@ -59,8 +58,6 @@ def export_weekly_operations_report(report: WeeklyOperationsReport) -> bytes:
 
 
 def _build_case_sheet(ws, report: WeeklyOperationsReport) -> None:
-    roc_year = report.end_date.year - 1911
-
     # R1: 報表期間註記
     ws.append(("報表期間", report.period_label))
     ws.cell(row=1, column=1).font = Font(bold=True)
@@ -105,90 +102,54 @@ def _build_case_sheet(ws, report: WeeklyOperationsReport) -> None:
             cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
             cell.border = _BORDER_THIN
 
-    # R4: 合計列
-    p_cnt = report.summary.promotion_count if report.summary.promotion_count is not None else "未登錄"
-    i_cnt = report.summary.inquiry_count if report.summary.inquiry_count is not None else "未登錄"
-    g_inelig = report.summary.general_ineligible_count if report.summary.general_ineligible_count is not None else 0
-    s_inelig = report.summary.subsidized_ineligible_count if report.summary.subsidized_ineligible_count is not None else 0
-
-    r4 = [
-        0, f"{roc_year}年度合計", None, "週數", "雇主",
-        p_cnt, i_cnt, report.summary.application_count,
-        report.summary.general_eligible_count, g_inelig,
-        report.summary.subsidized_eligible_count, s_inelig,
-        report.summary.order_established_count, report.summary.negotiating_count,
-        report.summary.cancelled_count, report.summary.rejection_unpartitioned_count,
-        None, None, None, None, None, None, None,
-    ]
-    ws.append(r4)
-    ws.merge_cells("B4:C4")
-    for c in range(1, 24):
-        cell = ws.cell(row=4, column=c)
-        cell.font = Font(bold=True)
-        cell.fill = _YELLOW_FILL
-        cell.alignment = Alignment(horizontal="center", vertical="center")
-        cell.border = _BORDER_THIN
-
-    # R5: 承上年度列
-    r5 = [
-        f"承上年度({roc_year - 1})", None, None, None, None,
-        None, None, None, None, None, None, None,
-        0, None, None, 0,
-        None, None, None, None, None, None, None,
-    ]
-    ws.append(r5)
-    ws.merge_cells("A5:E5")
-    for c in range(1, 24):
-        cell = ws.cell(row=5, column=c)
-        cell.font = Font(bold=True)
-        cell.fill = _LIGHT_GRAY_FILL
-        cell.alignment = Alignment(horizontal="center", vertical="center")
-        cell.border = _BORDER_THIN
-
-    # R6+: 明細列 (依週次分組並進行 D、F、G 欄跨列合併)
-    groups: list[tuple[str, list[WeeklyCaseRow]]] = []
-    current_w: str | None = None
-    current_list: list[WeeklyCaseRow] = []
-    for r in report.case_rows:
-        w = r.week_code or ""
-        if w != current_w:
-            if current_list:
-                groups.append((current_w or "", current_list))
-            current_w = w
-            current_list = [r]
+    # R4+: 依星期一至星期日分組；欄位與雙層表頭維持範例格式。
+    rows_by_week: dict[object, list[WeeklyCaseRow]] = {}
+    undated_rows: list[WeeklyCaseRow] = []
+    for row in report.case_rows:
+        if row.week_start_date is None:
+            undated_rows.append(row)
         else:
-            current_list.append(r)
-    if current_list:
-        groups.append((current_w or "", current_list))
+            rows_by_week.setdefault(row.week_start_date, []).append(row)
 
-    for w_code, group_rows in groups:
+    groups = [
+        (metric.week_start_date, f"{metric.week_start_date.isoformat()} ~ {metric.week_end_date.isoformat()}", metric, rows_by_week.pop(metric.week_start_date, []))
+        for metric in report.weekly_metrics
+    ]
+    groups.extend(
+        (week_start, rows[0].week_label, None, rows)
+        for week_start, rows in sorted(rows_by_week.items())
+    )
+    if undated_rows:
+        groups.append((None, "日期未登錄", None, undated_rows))
+
+    for _, label, metric, actual_rows in groups:
         start_row = ws.max_row + 1
-        metrics = report.weekly_metrics.get(w_code)
-        promo_val = metrics[0] if metrics is not None else None
-        inq_val = metrics[1] if metrics is not None else None
+        promo_val = metric.promotion_count if metric is not None else None
+        inq_val = metric.inquiry_count if metric is not None else None
+        group_rows: list[WeeklyCaseRow | None] = actual_rows or [None]
 
         for idx, row in enumerate(group_rows):
-            p_cell_val = promo_val if idx == 0 and promo_val is not None else None
-            i_cell_val = inq_val if idx == 0 and inq_val is not None else None
-            w_cell_val = row.week_code if idx == 0 else ""
+            p_cell_val = (promo_val if promo_val is not None else "未登錄") if idx == 0 else None
+            i_cell_val = (inq_val if inq_val is not None else "未登錄") if idx == 0 else None
+            w_cell_val = label if idx == 0 else ""
 
             ws.append([
-                row.serial_number,
-                row.month_label,
-                row.application_date_roc or (row.application_date.isoformat() if row.application_date else ""),
+                row.serial_number if row else "",
+                row.month_label if row else "",
+                (row.application_date_roc or (row.application_date.isoformat() if row.application_date else "")) if row else "",
                 w_cell_val,
-                row.applicant_name,
-                p_cell_val, i_cell_val, 1,
-                row.general_eligible, row.general_ineligible,
-                row.subsidized_eligible, row.subsidized_ineligible,
-                row.order_established, row.negotiating,
-                row.cancelled, row.review_rejected,
-                row.service_days if row.service_days is not None else "",
-                row.service_hours_per_day if row.service_hours_per_day is not None else "",
-                row.planned_start_date.isoformat() if row.planned_start_date else "",
-                row.planned_end_date.isoformat() if row.planned_end_date else "",
-                row.service_status,
-                row.district or "",
+                row.applicant_name if row else "",
+                p_cell_val, i_cell_val, 1 if row else 0,
+                row.general_eligible if row else 0, row.general_ineligible if row else 0,
+                row.subsidized_eligible if row else 0, row.subsidized_ineligible if row else 0,
+                row.order_established if row else 0, row.negotiating if row else 0,
+                row.cancelled if row else 0, row.review_rejected if row else 0,
+                row.service_days if row and row.service_days is not None else "",
+                row.service_hours_per_day if row and row.service_hours_per_day is not None else "",
+                row.planned_start_date.isoformat() if row and row.planned_start_date else "",
+                row.planned_end_date.isoformat() if row and row.planned_end_date else "",
+                row.service_status if row else "",
+                (row.district or "") if row else "",
                 "",  # 備註欄保持空白供工會自行操作
             ])
             curr_r = ws.max_row
@@ -198,7 +159,7 @@ def _build_case_sheet(ws, report: WeeklyOperationsReport) -> None:
                 cell.border = _BORDER_THIN
                 if c in (6, 7):
                     cell.fill = _METRIC_FILL
-                    if idx == 0 and (promo_val is not None or inq_val is not None):
+                    if idx == 0:
                         cell.font = Font(bold=True)
 
         end_row = ws.max_row
@@ -210,7 +171,7 @@ def _build_case_sheet(ws, report: WeeklyOperationsReport) -> None:
             ws.cell(row=start_row, column=6).alignment = Alignment(horizontal="center", vertical="center")
             ws.cell(row=start_row, column=7).alignment = Alignment(horizontal="center", vertical="center")
 
-    ws.freeze_panes = "A6"
+    ws.freeze_panes = "A4"
     _auto_fit_columns(ws, min_col=1, max_col=23)
 
 
@@ -354,13 +315,13 @@ def _build_service_sheet(ws, report: WeeklyOperationsReport) -> None:
         _auto_fit_columns(ws, min_col=1, max_col=15)
         return
 
-    # 排序並按 week_code 分組
+    # 依星期一至星期日分組
     groups: dict[str, list] = {}
     for r in report.service_rows:
-        w_code = r.week_code or "1-1"
-        groups.setdefault(w_code, []).append(r)
+        label = r.week_label
+        groups.setdefault(label, []).append(r)
 
-    for w_code, rows in groups.items():
+    for label, rows in groups.items():
         # 每一週區塊開始前插入 15 欄表頭列
         header_row_idx = ws.max_row + 1
         ws.append(SERVICE_HEADERS)
@@ -379,7 +340,7 @@ def _build_service_sheet(ws, report: WeeklyOperationsReport) -> None:
             svc_end_str = r.service_end_date.isoformat() if r.service_end_date else ""
 
             ws.append([
-                w_code,
+                label,
                 idx,
                 r.case_no,
                 r.client_name,

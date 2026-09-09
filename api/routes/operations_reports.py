@@ -13,21 +13,19 @@ from fastapi.responses import StreamingResponse
 from api.dependencies.admin_auth import require_admin
 from api.dependencies.operations_reports import (
     get_weekly_operations_report_query,
-    get_weekly_report_batch_service,
+    get_weekly_report_metrics_service,
 )
 from api.error_contracts import internal_query_error, typed_http_error
 from api.schemas.base import BaseResponse
 from api.schemas.operations_reports import (
-    CloseWeeklyBatchRequest,
-    UnclosedCaseView,
-    UpdateWeeklyBatchRequest,
-    WeeklyBatchView,
+    SaveWeeklyReportMetricRequest,
     WeeklyOperationsReportView,
+    WeeklyReportMetricView,
 )
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.reporting.weekly_operations_report_export import export_weekly_operations_report
 from subsystems.reporting.weekly_operations_report_query import WeeklyOperationsReportQuery
-from subsystems.reporting.weekly_report_batch_service import WeeklyReportBatchService
+from subsystems.reporting.weekly_report_metrics_service import WeeklyReportMetricsService
 
 
 router = APIRouter(prefix="/api/v1/operations-reports", tags=["Operations Reports"])
@@ -42,22 +40,13 @@ def query_weekly_operations_report(
     request: Request,
     start_date: date = Query(...),
     end_date: date = Query(...),
-    promotion_count: int | None = Query(None, ge=0),
-    inquiry_count: int | None = Query(None, ge=0),
-    annual_ytd: bool = Query(False),
     principal: AdminPrincipal = Depends(require_admin),
     query: WeeklyOperationsReportQuery = Depends(get_weekly_operations_report_query),
 ):
     del principal
     try:
-        _reject_legacy_week_start(request)
-        report = query.query(
-            start_date,
-            end_date,
-            promotion_count=promotion_count,
-            inquiry_count=inquiry_count,
-            annual_ytd=annual_ytd,
-        )
+        _reject_retired_weekly_parameters(request)
+        report = query.query(start_date, end_date)
         view = _weekly_report_view(report)
     except ValueError as exc:
         raise typed_http_error(
@@ -81,22 +70,13 @@ def export_weekly_operations_report_xlsx(
     request: Request,
     start_date: date = Query(...),
     end_date: date = Query(...),
-    promotion_count: int | None = Query(None, ge=0),
-    inquiry_count: int | None = Query(None, ge=0),
-    annual_ytd: bool = Query(False),
     principal: AdminPrincipal = Depends(require_admin),
     query: WeeklyOperationsReportQuery = Depends(get_weekly_operations_report_query),
 ):
     del principal
     try:
-        _reject_legacy_week_start(request)
-        report = query.query(
-            start_date,
-            end_date,
-            promotion_count=promotion_count,
-            inquiry_count=inquiry_count,
-            annual_ytd=annual_ytd,
-        )
+        _reject_retired_weekly_parameters(request)
+        report = query.query(start_date, end_date)
         workbook_bytes = export_weekly_operations_report(report)
     except ValueError as exc:
         raise typed_http_error(
@@ -134,6 +114,9 @@ def _case_row_view_dict(row) -> dict[str, object]:
         "planned_end_date": row.planned_end_date,
         "district": row.district,
         "data_quality_codes": list(row.data_quality_codes),
+        "week_start_date": row.week_start_date,
+        "week_end_date": row.week_end_date,
+        "week_label": row.week_label,
     }
 
 
@@ -199,14 +182,16 @@ def _weekly_report_view(report) -> WeeklyOperationsReportView:
                 for partition in report.subsidy_partitions
             ],
             "service_rows": [_service_row_view_dict(row) for row in report.service_rows],
+            "weekly_metrics": [_slots_dict(metric) for metric in report.weekly_metrics],
             "data_quality_issues": [_slots_dict(issue) for issue in report.data_quality_issues],
         },
     )
 
 
-def _reject_legacy_week_start(request: Request) -> None:
-    if "week_start" in request.query_params:
-        raise ValueError("weekly_operations_report_legacy_week_start")
+def _reject_retired_weekly_parameters(request: Request) -> None:
+    retired = {"week_start", "promotion_count", "inquiry_count", "annual_ytd"}
+    if retired.intersection(request.query_params):
+        raise ValueError("weekly_operations_report_retired_parameter")
 
 
 def _slots_dict(value) -> dict[str, object]:
@@ -217,148 +202,67 @@ def _slots_dict(value) -> dict[str, object]:
 
 
 @router.get(
-    "/weekly/batches",
-    response_model=BaseResponse[list[WeeklyBatchView]],
+    "/weekly/metrics",
+    response_model=BaseResponse[list[WeeklyReportMetricView]],
 )
-def list_weekly_batches(
-    year: int = Query(..., ge=1912),
+def list_weekly_report_metrics(
+    start_date: date = Query(...),
+    end_date: date = Query(...),
     principal: AdminPrincipal = Depends(require_admin),
-    service: WeeklyReportBatchService = Depends(get_weekly_report_batch_service),
+    service: WeeklyReportMetricsService = Depends(get_weekly_report_metrics_service),
 ):
     del principal
     try:
-        batches = service.list_batches(year)
         return BaseResponse(
-            data=[
-                WeeklyBatchView(
-                    id=b.id,
-                    year=b.year,
-                    week_code=b.week_code,
-                    cutoff_at=b.cutoff_at,
-                    promotion_count=b.promotion_count,
-                    inquiry_count=b.inquiry_count,
-                    notes=b.notes,
-                    case_count=b.case_count,
-                    created_at=b.created_at,
-                    updated_at=b.updated_at,
-                )
-                for b in batches
-            ]
-        )
-    except Exception as exc:
-        raise internal_query_error(
-            "weekly_batch_list_failed", "週報批次清單查詢失敗。", "weekly-batches"
-        ) from exc
-
-
-@router.get(
-    "/weekly/unclosed-cases",
-    response_model=BaseResponse[list[UnclosedCaseView]],
-)
-def list_unclosed_cases(
-    year: int | None = Query(None, ge=1912),
-    principal: AdminPrincipal = Depends(require_admin),
-    service: WeeklyReportBatchService = Depends(get_weekly_report_batch_service),
-):
-    del principal
-    try:
-        cases = service.get_unclosed_cases(year)
-        return BaseResponse(
-            data=[
-                UnclosedCaseView(
-                    case_no=c.case_no,
-                    applicant_name=c.applicant_name,
-                    created_at=c.created_at,
-                    order_status=c.order_status,
-                    service_days=c.service_days,
-                    service_hours_per_day=c.service_hours_per_day,
-                )
-                for c in cases
-            ]
-        )
-    except Exception as exc:
-        raise internal_query_error(
-            "unclosed_cases_query_failed", "未結算案件查詢失敗。", "unclosed-cases"
-        ) from exc
-
-
-@router.post(
-    "/weekly/batches",
-    response_model=BaseResponse[WeeklyBatchView],
-)
-def close_weekly_batch(
-    payload: CloseWeeklyBatchRequest,
-    principal: AdminPrincipal = Depends(require_admin),
-    service: WeeklyReportBatchService = Depends(get_weekly_report_batch_service),
-):
-    del principal
-    try:
-        batch = service.close_batch(
-            year=payload.year,
-            week_code=payload.week_code,
-            promotion_count=payload.promotion_count,
-            inquiry_count=payload.inquiry_count,
-            case_nos=payload.case_nos,
-            notes=payload.notes,
-        )
-        return BaseResponse(
-            data=WeeklyBatchView(
-                id=batch.id,
-                year=batch.year,
-                week_code=batch.week_code,
-                cutoff_at=batch.cutoff_at,
-                promotion_count=batch.promotion_count,
-                inquiry_count=batch.inquiry_count,
-                notes=batch.notes,
-                case_count=batch.case_count,
-                created_at=batch.created_at,
-                updated_at=batch.updated_at,
-            )
-        )
-    except Exception as exc:
-        raise internal_query_error(
-            "weekly_batch_close_failed", "週報結算失敗。", "weekly-batches"
-        ) from exc
-
-
-@router.patch(
-    "/weekly/batches/{batch_id}",
-    response_model=BaseResponse[WeeklyBatchView],
-)
-def update_weekly_batch_metrics(
-    batch_id: int,
-    payload: UpdateWeeklyBatchRequest,
-    principal: AdminPrincipal = Depends(require_admin),
-    service: WeeklyReportBatchService = Depends(get_weekly_report_batch_service),
-):
-    del principal
-    try:
-        batch = service.update_batch_metrics(
-            batch_id=batch_id,
-            promotion_count=payload.promotion_count,
-            inquiry_count=payload.inquiry_count,
-            week_code=payload.week_code,
-            notes=payload.notes,
-        )
-        return BaseResponse(
-            data=WeeklyBatchView(
-                id=batch.id,
-                year=batch.year,
-                week_code=batch.week_code,
-                cutoff_at=batch.cutoff_at,
-                promotion_count=batch.promotion_count,
-                inquiry_count=batch.inquiry_count,
-                notes=batch.notes,
-                case_count=batch.case_count,
-                created_at=batch.created_at,
-                updated_at=batch.updated_at,
-            )
+            data=[WeeklyReportMetricView.model_validate(_slots_dict(metric)) for metric in service.list_metrics(start_date, end_date)]
         )
     except ValueError as exc:
-        raise typed_http_error(404, "not_found", "batch_not_found", "找不到指定的週報批次。", "weekly-batches") from exc
+        raise typed_http_error(
+            400,
+            "validation",
+            "weekly_report_metric_range_invalid",
+            "起日不得晚於迄日。",
+            "weekly-report-metrics",
+        ) from exc
     except Exception as exc:
         raise internal_query_error(
-            "weekly_batch_update_failed", "週報批次指標更新失敗。", "weekly-batches"
+            "weekly_report_metrics_query_failed",
+            "每週推廣與詢問數值查詢失敗。",
+            "weekly-report-metrics",
+        ) from exc
+
+
+@router.put(
+    "/weekly/metrics/{week_start_date}",
+    response_model=BaseResponse[WeeklyReportMetricView],
+)
+def save_weekly_report_metric(
+    week_start_date: date,
+    payload: SaveWeeklyReportMetricRequest,
+    principal: AdminPrincipal = Depends(require_admin),
+    service: WeeklyReportMetricsService = Depends(get_weekly_report_metrics_service),
+):
+    del principal
+    try:
+        metric = service.save_metric(
+            week_start_date=week_start_date,
+            promotion_count=payload.promotion_count,
+            inquiry_count=payload.inquiry_count,
+        )
+        return BaseResponse(data=WeeklyReportMetricView.model_validate(_slots_dict(metric)))
+    except ValueError as exc:
+        raise typed_http_error(
+            400,
+            "validation",
+            "weekly_report_metric_invalid",
+            "週起日必須是星期一，且數值不得小於零。",
+            "weekly-report-metrics",
+        ) from exc
+    except Exception as exc:
+        raise internal_query_error(
+            "weekly_report_metric_save_failed",
+            "每週推廣與詢問數值儲存失敗。",
+            "weekly-report-metrics",
         ) from exc
 
 

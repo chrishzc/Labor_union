@@ -17,17 +17,10 @@ function filenameFromHeader(value: string | null, fallback: string): string {
   return candidate && candidate.toLowerCase().endsWith('.xlsx') ? candidate : fallback;
 }
 
-export interface WeeklyOperationsReportExportOptions {
-  promotionCount?: number | null;
-  inquiryCount?: number | null;
-  annualYtd?: boolean;
-}
-
 export const weeklyOperationsReportExportClient = {
   async download(
     startDate: string,
     endDate: string,
-    options?: WeeklyOperationsReportExportOptions,
     signal?: AbortSignal,
   ): Promise<WeeklyOperationsReportExportArtifact> {
     validateOperationsReportDateRange(startDate, endDate);
@@ -37,15 +30,6 @@ export const weeklyOperationsReportExportClient = {
       start_date: startDate,
       end_date: endDate,
     });
-    if (options?.promotionCount !== undefined && options.promotionCount !== null) {
-      params.set('promotion_count', String(options.promotionCount));
-    }
-    if (options?.inquiryCount !== undefined && options.inquiryCount !== null) {
-      params.set('inquiry_count', String(options.inquiryCount));
-    }
-    if (options?.annualYtd !== undefined) {
-      params.set('annual_ytd', String(options.annualYtd));
-    }
     const response = await fetch(`/api/v1/operations-reports/weekly/export?${params.toString()}`, {
       method: 'GET',
       headers: { Authorization: `Bearer ${token}` },

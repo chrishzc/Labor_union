@@ -34,8 +34,8 @@ def _snapshot(clause: str) -> dict[str, object]:
     }
 
 
-def test_release_is_latest_hash_bound_and_in_the_fresh_assembly() -> None:
-    assert migration.DEFAULT_RELEASE_MANIFESTS[-1] == MANIFEST
+def test_release_is_hash_bound_and_in_the_current_release_chain_and_fresh_assembly() -> None:
+    assert MANIFEST in migration.DEFAULT_RELEASE_MANIFESTS
     manifest_path = ROOT / "db/migration_releases" / MANIFEST
     manifest = load_migration_release_manifest(manifest_path, ROOT)
     sql_path = ROOT / "db/schema_parts" / ARTIFACT

@@ -512,7 +512,6 @@ def require_current_database(preview: dict[str, object]) -> dict[str, object]:
             "name": entry["artifact"]["name"],
             "release_id": entry["release_id"],
             "release_fingerprint": entry["release_fingerprint"],
-            "state": "exact",
         }
         for entry in entries
     ]
@@ -526,13 +525,27 @@ def require_current_database(preview: dict[str, object]) -> dict[str, object]:
                 "name": item.get("name"),
                 "release_id": item.get("release_id"),
                 "release_fingerprint": item.get("release_fingerprint"),
-                "state": item.get("state"),
             }
             for item in artifacts
         ]
         if isinstance(artifacts, list)
         and all(isinstance(item, dict) for item in artifacts)
         else None
+    )
+    artifact_states_are_current = (
+        isinstance(artifacts, list)
+        and all(
+            isinstance(item, dict)
+            and (
+                item.get("state") == "exact"
+                or (
+                    item.get("name")
+                    in migration.LOCAL_RETIRED_ABSENT_ARTIFACTS
+                    and item.get("state") == "retired_absent"
+                )
+            )
+            for item in artifacts
+        )
     )
     if (
         preview.get("status") != "current"
@@ -541,6 +554,7 @@ def require_current_database(preview: dict[str, object]) -> dict[str, object]:
         or preview.get("release_id") != latest
         or preview.get("release_fingerprint") != latest_fingerprint
         or projected_artifacts != expected_artifacts
+        or not artifact_states_are_current
         or preview.get("pending_releases") != []
     ):
         raise LocalDatabaseUpdateError(

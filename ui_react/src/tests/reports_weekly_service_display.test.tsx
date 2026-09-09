@@ -38,7 +38,7 @@ describe('ReportsPage service-hours display', () => {
     expect(screen.getByText('此期間服務工時無資料。')).toBeInTheDocument();
   });
 
-  it('整個期間沒有可列入資料時明確顯示無資料', async () => {
+  it('整個期間沒有案件資料時仍顯示每週補登值並說明案件無資料', async () => {
     vi.spyOn(weeklyOperationsReportQueryClient, 'query').mockResolvedValue({
       ...WEEKLY_OPERATIONS_REPORT,
       case_rows: [],
@@ -49,7 +49,9 @@ describe('ReportsPage service-hours display', () => {
 
     render(<ReportsPage />);
 
-    expect(await screen.findByText('此期間沒有可列入報表的資料。')).toBeInTheDocument();
+    expect(await screen.findByText('此期間沒有案件受理資料。')).toBeInTheDocument();
+    expect(screen.getAllByText('2026-08-17～2026-08-23')).not.toHaveLength(0);
+    expect(screen.getByText('12')).toBeInTheDocument();
   });
 
   it('營運報表查詢失敗時顯示錯誤而不是空白', async () => {

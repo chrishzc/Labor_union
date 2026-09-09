@@ -16,8 +16,6 @@ export const WeeklyOperationsReportPeriodSchema = z.strictObject({
 });
 
 export const WeeklyOperationsReportSummarySchema = z.strictObject({
-  promotion_count: NonNegativeNullableIntegerSchema,
-  inquiry_count: NonNegativeNullableIntegerSchema,
   application_count: z.number().int().nonnegative(),
   general_eligible_count: z.number().int().nonnegative(),
   general_ineligible_count: NonNegativeNullableIntegerSchema,
@@ -43,6 +41,9 @@ export const WeeklyOperationsCaseRowSchema = z.strictObject({
   planned_end_date: DateSchema.nullable(),
   district: z.string().nullable(),
   data_quality_codes: z.array(z.string()),
+  week_start_date: DateSchema.nullable(),
+  week_end_date: DateSchema.nullable(),
+  week_label: z.string(),
 });
 
 export const WeeklyOperationsServiceRowSchema = z.strictObject({
@@ -69,8 +70,16 @@ export const WeeklyOperationsDataQualityIssueSchema = z.strictObject({
   message: z.string().min(1),
 });
 
+export const WeeklyReportMetricSchema = z.strictObject({
+  week_start_date: DateSchema,
+  week_end_date: DateSchema,
+  promotion_count: NonNegativeNullableIntegerSchema,
+  inquiry_count: NonNegativeNullableIntegerSchema,
+  updated_at: z.string().datetime({ offset: true }).nullable(),
+});
+
 export const WeeklyOperationsReportSchema = z.strictObject({
-  schema_version: z.literal('operations-report.v2'),
+  schema_version: z.literal('operations-report.v3'),
   period: WeeklyOperationsReportPeriodSchema,
   generated_at: z.string().datetime({ offset: true }),
   source_revision: z.string().min(1),
@@ -78,6 +87,7 @@ export const WeeklyOperationsReportSchema = z.strictObject({
   case_rows: z.array(WeeklyOperationsCaseRowSchema),
   subsidy_partitions: z.array(SubsidyReportPartitionSchema).length(2),
   service_rows: z.array(WeeklyOperationsServiceRowSchema),
+  weekly_metrics: z.array(WeeklyReportMetricSchema),
   data_quality_issues: z.array(WeeklyOperationsDataQualityIssueSchema),
 });
 

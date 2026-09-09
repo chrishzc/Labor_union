@@ -1,6 +1,6 @@
 """
 File: operations_reports.py
-Description: 定義營運報表 operations-report.v2 的 strict 去敏 view。
+Description: 定義實際週界營運報表 operations-report.v3 的 strict view。
 """
 
 from datetime import date, datetime
@@ -23,8 +23,6 @@ class WeeklyReportPeriodView(_StrictModel):
 
 
 class WeeklyReportSummaryView(_StrictModel):
-    promotion_count: int | None = Field(default=None, ge=0)
-    inquiry_count: int | None = Field(default=None, ge=0)
     application_count: int = Field(ge=0)
     general_eligible_count: int = Field(ge=0)
     general_ineligible_count: int | None = Field(default=None, ge=0)
@@ -55,6 +53,9 @@ class WeeklyReportCaseRowView(_StrictModel):
     planned_end_date: date | None
     district: str | None
     data_quality_codes: list[str]
+    week_start_date: date | None
+    week_end_date: date | None
+    week_label: str
 
 
 class WeeklyReportServiceRowView(_StrictModel):
@@ -81,8 +82,16 @@ class WeeklyReportDataQualityIssueView(_StrictModel):
     message: str
 
 
+class WeeklyReportMetricView(_StrictModel):
+    week_start_date: date
+    week_end_date: date
+    promotion_count: int | None = Field(default=None, ge=0)
+    inquiry_count: int | None = Field(default=None, ge=0)
+    updated_at: datetime | None
+
+
 class WeeklyOperationsReportView(_StrictModel):
-    schema_version: Literal["operations-report.v2"]
+    schema_version: Literal["operations-report.v3"]
     period: WeeklyReportPeriodView
     generated_at: datetime
     source_revision: str
@@ -90,53 +99,18 @@ class WeeklyOperationsReportView(_StrictModel):
     case_rows: list[WeeklyReportCaseRowView]
     subsidy_partitions: list[GovernmentSubsidyReportPartitionView]
     service_rows: list[WeeklyReportServiceRowView]
+    weekly_metrics: list[WeeklyReportMetricView]
     data_quality_issues: list[WeeklyReportDataQualityIssueView]
 
 
-class WeeklyBatchView(_StrictModel):
-    id: int
-    year: int
-    week_code: str
-    cutoff_at: datetime
-    promotion_count: int
-    inquiry_count: int
-    notes: str | None
-    case_count: int
-    created_at: datetime
-    updated_at: datetime
-
-
-class UnclosedCaseView(_StrictModel):
-    case_no: str
-    applicant_name: str
-    created_at: datetime | None
-    order_status: str | None
-    service_days: int | None
-    service_hours_per_day: int | None
-
-
-class CloseWeeklyBatchRequest(BaseModel):
+class SaveWeeklyReportMetricRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    year: int = Field(..., ge=1912)
-    week_code: str = Field(..., min_length=1, max_length=20)
-    promotion_count: int = Field(0, ge=0)
-    inquiry_count: int = Field(0, ge=0)
-    case_nos: list[str] | None = None
-    notes: str | None = None
-
-
-class UpdateWeeklyBatchRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    promotion_count: int = Field(..., ge=0)
-    inquiry_count: int = Field(..., ge=0)
-    week_code: str | None = Field(None, min_length=1, max_length=20)
-    notes: str | None = None
+    promotion_count: int | None = Field(..., ge=0)
+    inquiry_count: int | None = Field(..., ge=0)
 
 
 __all__ = [
     "WeeklyOperationsReportView",
-    "WeeklyBatchView",
-    "UnclosedCaseView",
-    "CloseWeeklyBatchRequest",
-    "UpdateWeeklyBatchRequest",
+    "WeeklyReportMetricView",
+    "SaveWeeklyReportMetricRequest",
 ]

@@ -242,7 +242,7 @@ describe('Reports #reports cross-owner entry static subgate', () => {
     ].includes(request.path))).toBe(true);
   });
 
-  it('empty report 維持明確空狀態，不以fixture補成假資料', async () => {
+  it('無案件時維持明確空狀態，但仍可管理查詢期間涵蓋的週指標', async () => {
     authenticate();
     const emptyRequests = installFetchStub({
       weeklyResponse: (startDate, endDate) => jsonResponse(weeklyEnvelope(startDate, endDate, emptyWeeklyData())),
@@ -254,7 +254,8 @@ describe('Reports #reports cross-owner entry static subgate', () => {
       </StrictMode>,
     );
 
-    await waitFor(() => expect(screen.getByText('此期間沒有可列入報表的資料。')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('此期間沒有案件受理資料。')).toBeInTheDocument());
+    expect(screen.getByRole('heading', { name: '每週推廣與詢問數值' })).toBeInTheDocument();
     expect(screen.queryByText('CASE-WEEK-001')).not.toBeInTheDocument();
     expect(countPath(emptyRequests, WEEKLY_ENDPOINT)).toBe(1);
     expect(emptyRequests.every((request) => request.method === 'GET')).toBe(true);

@@ -245,6 +245,7 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_09_07_matching_holiday_work_agreements_v1.json",
     "labor_union_2026_09_08_matching_holiday_work_agreement_plan_version_v1.json",
     "labor_union_2026_09_09_contract_external_signing_final_pdf_completion_v1.json",
+    "labor_union_2026_09_09_weekly_report_metrics_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -2826,6 +2827,9 @@ def _local_discover_qualification(
 
 
 LOCAL_ADDITIVE_BASELINE_ARTIFACT = "1003_matching_coordination_successor.sql"
+LOCAL_RETIRED_ABSENT_ARTIFACTS = frozenset({
+    "1031_weekly_report_batches.sql",
+})
 
 
 def _local_ordered_upgrade_entries() -> tuple[dict[str, Any], ...]:
@@ -2922,6 +2926,11 @@ def _local_ordered_chain_plan(
             snapshot=snapshot,
         )["state"]
         if (
+            state == "absent"
+            and artifact["name"] in LOCAL_RETIRED_ABSENT_ARTIFACTS
+        ):
+            state = "retired_absent"
+        if (
             dependency_gap_seen
             and state not in {"absent", "exact"}
             and _local_parent_tables_dependency_pending(snapshot, entry["descriptor"])
@@ -2933,7 +2942,11 @@ def _local_ordered_chain_plan(
             "name": artifact["name"],
             "state": state,
             "data_effect": entry.get("data_effect", "schema_only"),
-            "qualification": "not_required" if state == "exact" else "pending",
+            "qualification": (
+                "not_required"
+                if state in {"exact", "retired_absent"}
+                else "pending"
+            ),
             "blocked_reason": None,
         }
         artifacts.append(projected)
@@ -2961,7 +2974,8 @@ def _local_ordered_chain_plan(
     blocked = next(
         (
             item for item in artifacts
-            if item["state"] not in {"absent", "dependency_pending", "exact"}
+            if item["state"]
+            not in {"absent", "dependency_pending", "exact", "retired_absent"}
         ),
         None,
     )
