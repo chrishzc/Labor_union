@@ -152,8 +152,8 @@ ownership或解除 dependency，必須取得人工裁決。
 1. Phase 3：非 LINE action handlers與typed query／mutation contracts全部接線。
 2. Phase 4：Import、Finance、LINE高副作用流程；LINE缺口不阻塞可獨立的Import／Finance。
 3. Phase 5：entry target control plane、逐entry cutover、dual-run與rollback evidence。
-4. Phase 6：immutable artifact hosting、production runtime gate、逐entry retirement；retention未核准到期前不刪
-   Streamlit。
+4. Phase 6：immutable artifact hosting、production runtime gate、逐entry retirement；Streamlit 已依 current Entry Point Governance 退役，
+   不得再以 retention／rollback evidence 作為 current React entry gate。
 5. 最終驗收：一次focused aggregation、一次full suites、一次API batch、一次UI route sweep，再決定Phase 6
    retirement readiness。
 
