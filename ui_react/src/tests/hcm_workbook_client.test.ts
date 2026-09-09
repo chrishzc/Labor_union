@@ -237,7 +237,7 @@ describe('HCM workbook preview client', () => {
   it('Apply送出fingerprint與冪等headers並嚴格解碼receipt', async () => {
     expect('apply' in hcmWorkbookPreviewClient).toBe(true);
     const snapshot = await HcmWorkbookSnapshot.fromFile(await hcmFile('A'));
-    const receipt = { source_content_digest: snapshot.sha256, source_row_count: 1, inserted_count: 1, inserted_with_warning_count: 0, exact_replay_count: 0, review_required_count: 0, failed_count: 0, replayed_workbook: false, row_outcomes_available: true, legacy_summary_only: false, row_outcomes: [] };
+    const receipt = { source_content_digest: snapshot.sha256, source_row_count: 1, inserted_count: 1, inserted_with_warning_count: 0, exact_replay_count: 0, review_required_count: 0, failed_count: 0, skipped_existing_count: 0, replayed_workbook: false, row_outcomes_available: true, legacy_summary_only: false, row_outcomes: [] };
     const fetchMock = vi.fn().mockResolvedValue(response({ success: true, message: 'ok', data: receipt, error: null }));
     globalThis.fetch = fetchMock;
 
