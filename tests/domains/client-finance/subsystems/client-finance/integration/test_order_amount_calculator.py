@@ -118,13 +118,13 @@ def test_claim_amount_is_weighted_by_actual_hours_at_the_identity_policy_rate():
         _terms("115000004", "一般市民", floor_fee=900),
         [
             {"assignment_id": 4, "staff_id": 7, "actual_hours": 45, "hourly_rate": 300, "floor_fee_amount": 300},
-            {"assignment_id": 5, "staff_id": 9, "actual_hours": 135, "hourly_rate": 400, "floor_fee_amount": 600},
+            {"assignment_id": 5, "staff_id": 9, "actual_hours": 135, "hourly_rate": 320, "floor_fee_amount": 600},
         ],
         SCHEDULE,
     )
 
     assert result["staff_payment_plans"][0]["total_payable"] == 13800
-    assert result["staff_payment_plans"][1]["total_payable"] == 54600
+    assert result["staff_payment_plans"][1]["total_payable"] == 43800
     assert result["subsidy_plan"]["staff_allocations"] == [
         {"assignment_id": 4, "staff_id": 7, "subsidy_hours": 10, "service_unit_price": 300, "subsidy_claim_amount": 3000},
         {"assignment_id": 5, "staff_id": 9, "subsidy_hours": 30, "service_unit_price": 300, "subsidy_claim_amount": 9000},
@@ -137,6 +137,19 @@ def test_claim_stays_unready_until_staff_actual_hours_and_rates_exist():
 
     assert result["subsidy_plan"]["claim_amount_ready"] is False
     assert result["subsidy_plan"]["subsidy_claim_amount"] is None
+
+
+def test_incomplete_assignment_hours_do_not_create_a_full_subsidy_claim():
+    result = calculate_order_amounts(
+        _terms("115000005a", "補助市民", hours_per_day=6),
+        [{"assignment_id": 51, "staff_id": 12, "actual_hours": 6, "hourly_rate": 350}],
+        SCHEDULE,
+    )
+
+    assert result["subsidy_plan"]["subsidy_hours"] == 120
+    assert result["subsidy_plan"]["claim_amount_ready"] is False
+    assert result["subsidy_plan"]["subsidy_claim_amount"] is None
+    assert result["subsidy_plan"]["staff_allocations"] == []
 
 
 def test_subsidy_hours_are_capped_by_total_service_hours():
