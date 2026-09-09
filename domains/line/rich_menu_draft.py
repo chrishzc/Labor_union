@@ -28,6 +28,7 @@ _LIFF_TARGETS = frozenset(
         "?target=customer_service",
         "?target=dashboard",
         "?target=gateway",
+        "?target=order_update",
         "?target=profile_update",
         "?target=staff_leave_apply",
         "?target=staff_order_search",
