@@ -18,7 +18,7 @@
 | [Controlled-file foundation progress](evidence/2026-08-26_controlled_file_storage_foundation_progress_receipt.md) | Controlled Files基礎與尚未完成的Browser／NAS acceptance。 |
 | [LINE legacy non-return regression source](LINE_merge功能未移植_history_20260811.md) | 目前仍由LINE第一版回歸測試讀取；只作禁止舊路徑復活的test oracle，不是產品SSOT。 |
 
-上表不是 `evidence/` 的完整檔案清單。日常工作只讀任務直接命中的單一 evidence；不得整個目錄載入上下文，也不得因一份歷史 receipt仍存在就重新開啟 completed工作。Task 97 已完成；任何仍讀取 Task97 per-identity artifact 的 current script 都只是待退役的技術依賴，不能因此把 Task97 重新視為 current task 或持續核准來源。
+上表不是 `evidence/` 的完整檔案清單。日常工作只讀任務直接命中的單一 evidence；不得整個目錄載入上下文，也不得因一份歷史 receipt仍存在就重新開啟 completed工作。Task 97 已完成；其 aggregate receipt 只供歷史結案追溯，不得重新視為 current task 或持續核准來源。
 
 ## 2026-09-01 清理批次
 
