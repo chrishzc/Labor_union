@@ -14,6 +14,7 @@ export const detailedHcmResult: HcmImportResultRecord = {
   exact_replay_count: 1,
   review_required_count: 0,
   failed_count: 0,
+  skipped_existing_count: 0,
   replayed_workbook: false,
   row_outcomes_available: true,
   legacy_summary_only: false,
@@ -23,4 +24,3 @@ export const detailedHcmResult: HcmImportResultRecord = {
     { source_row: 3, case_no: '115000003', outcome: 'exact_replay', problem_identity: null, problem_fields: [], issue_codes: [], referral_occurrence_identities: [] },
   ],
 };
-

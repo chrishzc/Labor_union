@@ -6,7 +6,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { clientBeClassWorkbookPreviewClient } from '../api/case_import/client_beclass_workbook/client';
 import { ClientBeClassWorkbookApplyError } from '../api/case_import/client_beclass_workbook/errors';
-import { hcmImportResultClient } from '../api/case_import/hcm_import_result_client';
+import { anomalyQueryClient } from '../api/anomalies/anomaly_query_client';
 import { staffHistoricalWorkbookPreviewClient } from '../api/case_import/staff_historical_workbook/client';
 import { historicalOrderWorkbookPreviewClient } from '../api/orders/historical_order_workbook/client';
 import { historicalReviewRemediationClient } from '../api/orders/historical_review_remediation/client';
@@ -45,7 +45,7 @@ const historicalReviewContext: HistoricalReviewContext = {
 describe('Data Import case workbook Preview flows', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    vi.spyOn(hcmImportResultClient, 'query').mockResolvedValue({ items: [], next_cursor: null });
+    vi.spyOn(anomalyQueryClient, 'queryImportWarningTasks').mockResolvedValue([]);
     vi.spyOn(clientBeClassWorkbookPreviewClient, 'preview').mockResolvedValue({ source_content_digest: digest, sheet_identity: identity, source_row_count: 4, create_count: 1, review_required_count: 1, existing_conflict_count: 1, existing_source_count: 1, preview_fingerprint: fingerprint });
     vi.spyOn(clientBeClassWorkbookPreviewClient, 'apply').mockResolvedValue({ source_content_digest: digest, source_row_count: 4, created_count: 1, exact_replay_count: 0, review_required_count: 1, existing_conflict_count: 1, existing_source_count: 1, replayed_workbook: false });
     vi.spyOn(staffHistoricalWorkbookPreviewClient, 'preview').mockResolvedValue({ source_content_digest: digest, source_row_count: 4, created_count: 1, adopted_existing_count: 1, blocked_identity_count: 1, identity_conflict_count: 1, review_required_count: 1, preview_fingerprint: fingerprint });
@@ -56,7 +56,7 @@ describe('Data Import case workbook Preview flows', () => {
 
   it('三張卡可獨立完成Preview、確認與Apply', async () => {
     render(<DataImportPage />);
-    await waitFor(() => expect(hcmImportResultClient.query).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(anomalyQueryClient.queryImportWarningTasks).toHaveBeenCalledTimes(1));
 
     const cases = [
       ['選擇客戶 BeClass Workbook', 'imports.client-beclass.preview', 'imports.client-beclass.preview-result'],
@@ -173,7 +173,7 @@ describe('Data Import case workbook Preview flows', () => {
 
   it('四類工作簿在尚未選檔時都說明Preview與Apply的下一步', async () => {
     render(<DataImportPage />);
-    await waitFor(() => expect(hcmImportResultClient.query).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(anomalyQueryClient.queryImportWarningTasks).toHaveBeenCalledTimes(1));
 
     for (const id of ['hcm-current', 'client-beclass', 'staff-historical', 'historic-orders']) {
       const workbench = document.querySelector(`[data-surface-id="imports.${id}.workbench"]`) as HTMLElement;
