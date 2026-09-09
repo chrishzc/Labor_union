@@ -277,6 +277,56 @@ class MySqlLineIdentityManagementRepository:
             if cursor.rowcount != 1:
                 raise RuntimeError("line_identity_revocation_state_conflict")
 
+    def retarget_menu(
+        self,
+        request_id: int,
+        publication: dict[str, Any],
+    ) -> LineIdentityRevocationRequest:
+        """Point an explicit retry at the canonical publication current at retry time."""
+
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                _REQUEST_RETARGET_SQL,
+                (
+                    int(publication["id"]),
+                    str(publication["line_rich_menu_id"]),
+                    request_id,
+                ),
+            )
+            changed = cursor.rowcount == 1
+        persisted = self.get_request(request_id)
+        if not changed and (
+            persisted.status
+            not in {
+                LineIdentityRevocationStatus.MENU_RESET_FAILED,
+                LineIdentityRevocationStatus.MANUAL_COMPLETED,
+            }
+            or persisted.publication_id != int(publication["id"])
+            or persisted.provider_menu_id != str(publication["line_rich_menu_id"])
+        ):
+            raise RuntimeError("line_identity_revocation_state_conflict")
+        return persisted
+
+    def mark_manual_menu_repair_failure(
+        self,
+        request_id: int,
+        code: str,
+        message: str,
+    ) -> None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                _REQUEST_MANUAL_REPAIR_FAILURE_SQL,
+                (code, message, request_id),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("line_identity_revocation_state_conflict")
+
+    def complete_manual_menu_repair(self, request_id: int) -> None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(_REQUEST_MANUAL_REPAIR_COMPLETE_SQL, (request_id,))
+            if cursor.rowcount != 1:
+                raise RuntimeError("line_identity_revocation_state_conflict")
+
     # Kept cohesive so optimistic request completion and audit fields cannot diverge.
     def complete(
         self,
@@ -570,6 +620,22 @@ _REQUEST_FAILURE_SQL = (
     "UPDATE line_identity_revocation_requests SET request_status=%s,"
     "attempt_count=attempt_count+1,last_error_code=%s,last_error_message=%s "
     "WHERE id=%s AND request_status IN ('pending_menu_reset','menu_reset_failed')"
+)
+_REQUEST_RETARGET_SQL = (
+    "UPDATE line_identity_revocation_requests SET "
+    "canonical_default_menu_publication_id=%s,provider_menu_id=%s "
+    "WHERE id=%s AND request_status IN ('menu_reset_failed','manual_completed')"
+)
+_REQUEST_MANUAL_REPAIR_FAILURE_SQL = (
+    "UPDATE line_identity_revocation_requests SET attempt_count=attempt_count+1,"
+    "last_error_code=%s,last_error_message=%s "
+    "WHERE id=%s AND request_status='manual_completed'"
+)
+_REQUEST_MANUAL_REPAIR_COMPLETE_SQL = (
+    "UPDATE line_identity_revocation_requests SET request_status='completed',"
+    "attempt_count=attempt_count+1,menu_reset_at_utc=CURRENT_TIMESTAMP(6),"
+    "last_error_code=NULL,last_error_message=NULL "
+    "WHERE id=%s AND request_status='manual_completed'"
 )
 _REQUEST_COMPLETE_SQL = (
     "UPDATE line_identity_revocation_requests SET request_status=%s,"

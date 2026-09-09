@@ -104,8 +104,9 @@ def test_service_help_menu_is_a_canonical_flex_delivery():
     request = unit_of_work.delivery_tasks.requests[0]
     assert request.message_kind.value == "flex"
     assert request.idempotency_key.value == "service-help:menu:event-1"
-    assert "聯絡工會人員" not in request.payload_json
+    assert "聯絡工會人員" in request.payload_json
     assert "其他問題" in request.payload_json
+    assert "月嫂身分認證" not in request.payload_json
 
 
 def test_service_help_never_uses_reply_token_before_durable_delivery():
@@ -278,19 +279,38 @@ def test_merge_menu_copy_uses_canonical_entry_and_verified_staff_liff_targets():
         for button in menu_definition["buttons"]
         if button.get("action", {}).get("type") == "message"
     }
+    customer_menu = next(item for item in menu["menus"] if item["id"] == "customer_menu")
+    customer_quadrants = [
+        (button["label"], button["action"]["type"], button["action"].get("text"), button["action"].get("uri"))
+        for button in customer_menu["buttons"]
+    ]
     assert "?entry=registration" in action_uris
     assert "?target=registration" not in action_uris
-    assert "服務說明" in message_texts
+    assert "服務與問答" in message_texts
+    assert "?target=order_update" in action_uris
+    assert "服務說明" not in message_texts
+    assert "常見問答" not in message_texts
+    assert customer_quadrants == [
+        ("修改登記資料", "uri", None, "?target=profile_update"),
+        ("修改訂單資訊", "uri", None, "?target=order_update"),
+        ("服務與問答", "message", "服務與問答", None),
+        ("專人客服諮詢", "message", "專人客服", None),
+    ]
     assert "?target=staff_order_search" in action_uris
     assert "?target=staff_schedule" in action_uris
+    assert "?target=staff_baby_log" in action_uris
+    assert "?target=staff_payout" in action_uris
     assert "flow_id=${encodeURIComponent(flowId)}" in identity
     assert "development_line_user_id" not in staff_orders
     assert "userId" not in staff_orders
 
 
-def test_staff_self_service_exposes_text_log_preview_apply_but_keeps_media_locked():
+def test_staff_self_service_exposes_leave_and_split_service_day_log_flows():
     schedule = (
         PROJECT_ROOT / "line/static/staff_schedule.html"
+    ).read_text(encoding="utf-8")
+    baby_log = (
+        PROJECT_ROOT / "line/static/staff_baby_log.html"
     ).read_text(encoding="utf-8")
 
     preview_route = "/api/v1/line/staff-self-service/leave-requests/preview"
@@ -307,15 +327,17 @@ def test_staff_self_service_exposes_text_log_preview_apply_but_keeps_media_locke
     assert f"fetch(`{readback_route}`, {{\n      method: \"POST\"" in schedule
     assert "body: JSON.stringify(identityPayload())" in schedule
     assert 'fetch("/api/v1/line/staff-self-service/leave-requests", {' not in schedule
-    assert "/api/v1/line/staff-self-service/service-day-logs/preview" in schedule
-    assert "/api/v1/line/staff-self-service/service-day-logs/apply" in schedule
-    assert "/api/v1/line/staff-self-service/service-day-logs/${committed.log_id}/query" in schedule
-    assert "/api/v1/line/staff-self-service/service-day-media" in schedule
-    assert "受控檔案 staging" in schedule
+    assert "/api/v1/line/staff-self-service/service-day-logs/preview" not in schedule
+    assert "/api/v1/line/staff-self-service/service-day-logs/preview" in baby_log
+    assert "/api/v1/line/staff-self-service/service-day-logs/apply" in baby_log
+    assert "/api/v1/line/staff-self-service/service-day-logs/${committed.log_id}/query" in baby_log
+    assert "/api/v1/line/staff-self-service/service-day-media" in baby_log
+    assert "受控檔案 staging" in baby_log
     assert "LINE provider" not in schedule
     assert 'params.get("userId")' not in schedule
     assert 'searchParams.get("userId")' not in schedule
     assert 'development_line_user_id: ""' in schedule
+    assert 'development_line_user_id: ""' in baby_log
 
 
 def test_identity_flow_requires_and_forwards_client_idempotency_key(monkeypatch):

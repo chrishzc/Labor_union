@@ -124,6 +124,21 @@ def test_applicant_preview_is_zero_write_and_apply_creates_pending_request():
         preview.preview_fingerprint, IdempotencyKey("client-profile-key-1"), CorrelationId("corr-1"),
     )
     assert receipt.request.status == "pending"
+
+
+def test_applicant_service_location_change_must_use_order_change_intake():
+    repository = _Repository()
+    application = _application(repository)
+
+    with pytest.raises(ClientProfileValidationError) as raised:
+        application.preview_applicant(
+            "line-user-7",
+            7,
+            {"address": "新竹市北區新地址"},
+            ExpectedVersion(0),
+        )
+
+    assert raised.value.code == "profile_field_not_allowed"
     assert repository.profile["name"] == "王小明"
 
 

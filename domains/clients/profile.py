@@ -12,6 +12,9 @@ CLIENT_PROFILE_FIELDS = (
     "residence_type", "delivery_type", "baby_info", "notes",
 )
 CLIENT_PROFILE_FIELD_SET = frozenset(CLIENT_PROFILE_FIELDS)
+CLIENT_PROFILE_APPLICANT_FIELDS = frozenset(
+    {"name", "gender", "phone", "delivery_type", "baby_info", "notes"}
+)
 VALID_GENDERS = frozenset({"女", "男"})
 VALID_RESIDENCE_TYPES = frozenset({"電梯大樓", "公寓", "透天", "其他"})
 VALID_DELIVERY_TYPES = frozenset({"自然產", "剖腹產", "未定"})
@@ -28,13 +31,17 @@ class ClientProfileValidationError(ValueError):
 
 
 def validate_changes(
-    changes: Mapping[str, object], *, city_allowlist: Collection[str] | None = None
+    changes: Mapping[str, object],
+    *,
+    city_allowlist: Collection[str] | None = None,
+    allowed_fields: Collection[str] | None = None,
 ) -> dict[str, str]:
     if not isinstance(changes, Mapping) or not changes:
         raise ClientProfileValidationError("profile_changes_required")
     normalized: dict[str, str] = {}
+    effective_fields = CLIENT_PROFILE_FIELD_SET if allowed_fields is None else frozenset(allowed_fields)
     for field, value in changes.items():
-        if field not in CLIENT_PROFILE_FIELD_SET:
+        if field not in effective_fields:
             raise ClientProfileValidationError("profile_field_not_allowed", str(field))
         if not isinstance(value, str):
             raise ClientProfileValidationError("profile_value_must_be_text", field)

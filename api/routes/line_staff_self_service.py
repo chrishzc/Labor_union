@@ -14,7 +14,11 @@ from api.schemas.line_staff_self_service import (
     StaffLiffRequest,
     StaffOrderPageView,
     StaffOrderSearchRequest,
+    StaffPayoutPageView,
     StaffScheduleView,
+)
+from subsystems.staff_payables.staff_payout_self_service_query import (
+    StaffPayoutSelfServiceQuery,
 )
 from domains.line.identities import LineUserId
 from domains.line.identity_flow import (
@@ -58,6 +62,29 @@ def monthly_schedule(
         staff = _required_staff(unit_of_work.customer_service.staff_subject(line_user_id.value))
     schedule = get_staff_monthly_calendar_schedule(int(staff["staff_id"]), year, month)
     return BaseResponse(data={**schedule, "staff_name": staff["staff_name"]})
+
+
+@router.post("/payouts", response_model=BaseResponse[StaffPayoutPageView])
+def monthly_payouts(
+    payload: StaffLiffRequest,
+    year: int = Query(ge=1900, le=2100),
+    month: int = Query(ge=1, le=12),
+):
+    line_user_id = _verified_line_user_id(payload)
+    with open_line_unit_of_work() as unit_of_work:
+        staff = _required_staff(unit_of_work.customer_service.staff_subject(line_user_id.value))
+        items = StaffPayoutSelfServiceQuery(
+            unit_of_work.staff_payout_self_service
+        ).query(int(staff["staff_id"]), year, month)
+    return BaseResponse(
+        data=StaffPayoutPageView(
+            staff_id=int(staff["staff_id"]),
+            staff_name=staff["staff_name"],
+            year=year,
+            month=month,
+            items=list(items),
+        )
+    )
 
 
 def _required_staff(staff):

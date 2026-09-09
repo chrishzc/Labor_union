@@ -108,6 +108,8 @@ _PROFILE_UPDATE_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" /
 _PROFILE_GUARD_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "profile_guard.html"
 _STAFF_ORDERS_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "staff_order_search.html"
 _STAFF_SCHEDULE_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "staff_schedule.html"
+_STAFF_BABY_LOG_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "staff_baby_log.html"
+_STAFF_PAYOUT_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "staff_payout.html"
 
 
 _NO_CACHE_HEADERS = {"Cache-Control": "no-cache, no-store, must-revalidate"}
@@ -152,6 +154,16 @@ def staff_orders_page():
 @page_router.get("/line-staff-schedule")
 def staff_schedule_page():
     return FileResponse(_STAFF_SCHEDULE_PAGE, headers=_NO_CACHE_HEADERS)
+
+
+@page_router.get("/line-staff-baby-log")
+def staff_baby_log_page():
+    return FileResponse(_STAFF_BABY_LOG_PAGE, headers=_NO_CACHE_HEADERS)
+
+
+@page_router.get("/line-staff-payout")
+def staff_payout_page():
+    return FileResponse(_STAFF_PAYOUT_PAGE, headers=_NO_CACHE_HEADERS)
 
 
 @public_router.get(

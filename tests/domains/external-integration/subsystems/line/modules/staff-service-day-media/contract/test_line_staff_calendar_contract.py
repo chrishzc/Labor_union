@@ -64,32 +64,35 @@ def test_staff_schedule_page_distinguishes_waiting_lock_rest_and_unavailability(
 
 
 def test_staff_schedule_mutations_use_typed_preview_apply_readback() -> None:
-    source = (ROOT / "line" / "static" / "staff_schedule.html").read_text(
+    schedule = (ROOT / "line" / "static" / "staff_schedule.html").read_text(
+        encoding="utf-8"
+    )
+    baby_log = (ROOT / "line" / "static" / "staff_baby_log.html").read_text(
         encoding="utf-8"
     )
 
-    assert "function requireStaffSchedule" in source
-    assert "replaceChildren" in source
-    assert ".innerHTML" not in source
-    assert "/leave-requests/preview" in source
-    assert "/leave-requests/apply" in source
-    assert "/leave-requests/${result.data.request_id}/query" in source
-    assert source.index("/leave-requests/preview") < source.index("/leave-requests/apply")
-    assert "confirmLeave" in source
-    assert 'idempotencyKey: `staff-leave-${crypto.randomUUID()}`' in source
-    assert '"Idempotency-Key": candidate.idempotencyKey' in source
-    assert "/service-day-logs/preview" in source
-    assert "/service-day-logs/apply" in source
-    assert "/service-day-logs/${committed.log_id}/query" in source
-    assert "送出結果尚未確認。請勿重複送出" in source
-    assert "日誌已送出，但目前無法重新讀取結果。請勿重複送出" in source
-    assert "/service-day-media" in source
-    assert "受控檔案 staging" in source
-    assert "requires_cooking" in source
-    assert "selectServiceDay" in source
-    assert "Preview 指紋" not in source
-    assert 'id="babyLog"' in source and 'placeholder="選擇服務日後填寫" disabled' in source
-    assert 'id="mealPhoto"' in source and 'accept="image/jpeg,image/png" disabled' in source
+    assert "function requireStaffSchedule" in schedule
+    assert ".innerHTML" not in schedule and ".innerHTML" not in baby_log
+    assert "/leave-requests/preview" in schedule
+    assert "/leave-requests/apply" in schedule
+    assert "/leave-requests/${result.data.request_id}/query" in schedule
+    assert schedule.index("/leave-requests/preview") < schedule.index("/leave-requests/apply")
+    assert "confirmLeave" in schedule
+    assert 'idempotencyKey: `staff-leave-${crypto.randomUUID()}`' in schedule
+    assert '"Idempotency-Key": candidate.idempotencyKey' in schedule
+    assert "/service-day-logs/preview" not in schedule
+    assert "/service-day-logs/preview" in baby_log
+    assert "/service-day-logs/apply" in baby_log
+    assert "/service-day-logs/${committed.log_id}/query" in baby_log
+    assert "送出結果尚未確認。請勿重複送出" in baby_log
+    assert "日誌已送出，但目前無法重新讀取結果。請勿重複送出" in baby_log
+    assert "/service-day-media" in baby_log
+    assert "受控檔案 staging" in baby_log
+    assert "requires_cooking" in baby_log
+    assert "selectServiceDay" in baby_log
+    assert "Preview 指紋" not in baby_log
+    assert 'id="babyLog"' in baby_log and 'placeholder="選擇服務日後填寫" disabled' in baby_log
+    assert 'id="mealPhoto"' in baby_log and 'accept="image/jpeg,image/png" disabled' in baby_log
 
 
 def test_staff_self_service_queries_never_commit() -> None:

@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<!--
+File: order_update.html
+Description: 由 verified LIFF 客戶查詢訂單、預覽異動，並送出待工會確認的客服需求。
+-->
+<html lang="zh-Hant-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>修改訂單資訊申請</title>
+  <style>
+    :root {
+      --primary: #e0683a;
+      --primary-dark: #9a3412;
+      --surface: #fffdfc;
+      --surface-soft: #fff1ec;
+      --text: #2f2420;
+      --muted: #74593f;
+      --line: #ead9d2;
+      --danger: #b42318;
+      --success: #16794b;
+      --shadow: 0 14px 38px rgba(78, 49, 36, .12);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      padding: 18px 12px 40px;
+      background: linear-gradient(160deg, #fff6f2 0%, #f8ebe6 100%);
+      color: var(--text);
+      font-family: "Noto Sans TC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main { width: 100%; max-width: 640px; margin: 0 auto; }
+    .hero, .panel {
+      border: 1px solid rgba(224, 104, 58, .13);
+      border-radius: 20px;
+      background: rgba(255, 253, 252, .97);
+      box-shadow: var(--shadow);
+    }
+    .hero { padding: 24px 20px; margin-bottom: 14px; }
+    .eyebrow { margin: 0 0 6px; color: var(--primary-dark); font-size: 13px; font-weight: 800; }
+    h1 { margin: 0 0 10px; font-size: 25px; line-height: 1.3; }
+    .lead { margin: 0; color: var(--muted); line-height: 1.65; }
+    .boundary {
+      margin: 16px 0 0;
+      padding: 12px 14px;
+      border-left: 4px solid var(--primary);
+      border-radius: 8px;
+      background: var(--surface-soft);
+      color: #643728;
+      font-size: 14px;
+      line-height: 1.55;
+    }
+    .panel { padding: 20px; }
+    .section { margin-bottom: 24px; }
+    .section:last-child { margin-bottom: 0; }
+    h2 { margin: 0 0 12px; font-size: 18px; }
+    .help { margin: -5px 0 12px; color: var(--muted); font-size: 13px; line-height: 1.55; }
+    .choice-grid { display: grid; gap: 10px; }
+    .choice {
+      position: relative;
+      display: block;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fff;
+      cursor: pointer;
+    }
+    .choice:has(input:checked) { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(224,104,58,.13); }
+    .choice input { position: absolute; opacity: 0; pointer-events: none; }
+    .choice-title { display: block; font-weight: 800; line-height: 1.45; }
+    .choice-meta { display: block; margin-top: 4px; color: var(--muted); font-size: 13px; line-height: 1.45; }
+    .fields { display: grid; gap: 12px; }
+    label.field { display: block; font-weight: 700; }
+    input, textarea, select {
+      width: 100%;
+      margin-top: 7px;
+      padding: 12px 13px;
+      border: 1px solid #cabdb7;
+      border-radius: 11px;
+      background: #fff;
+      color: var(--text);
+      font: inherit;
+      font-size: 16px;
+    }
+    textarea { min-height: 100px; resize: vertical; }
+    input:focus, textarea:focus, select:focus, button:focus-visible {
+      outline: 3px solid rgba(37, 99, 235, .28);
+      outline-offset: 2px;
+    }
+    button {
+      width: 100%;
+      min-height: 50px;
+      border: 0;
+      border-radius: 13px;
+      padding: 13px 16px;
+      background: var(--primary);
+      color: #fff;
+      font: inherit;
+      font-size: 17px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+    button.secondary { margin-top: 9px; background: #65544c; }
+    button:disabled { cursor: not-allowed; opacity: .5; }
+    .status, .preview, .success {
+      display: none;
+      margin-bottom: 14px;
+      border-radius: 14px;
+      padding: 14px;
+      line-height: 1.6;
+    }
+    .status.notice { display: block; border: 1px solid #b8d7ee; background: #eff8ff; }
+    .status.error { display: block; border: 1px solid #efb3ad; background: #fff1f0; color: var(--danger); }
+    .preview { border: 1px solid #edc3ae; background: #fff8f4; }
+    .preview.show, .success.show { display: block; }
+    .diff { margin: 10px 0; padding: 11px; border-radius: 10px; background: #fff; }
+    .diff strong { display: block; margin-bottom: 5px; }
+    .impact { color: #7c2d12; font-weight: 700; }
+    .success { border: 1px solid #a8dbc4; background: #eefbf5; color: #0f5f3c; }
+    .loader {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(255,255,255,.84);
+      color: var(--primary-dark);
+      font-weight: 800;
+      z-index: 20;
+    }
+    .loader.show { display: flex; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+<main>
+  <header class="hero">
+    <p class="eyebrow">新竹市月子工會</p>
+    <h1>修改訂單資訊申請</h1>
+    <p class="lead">選擇目前訂單與想修改的項目，確認修改前後內容後送出申請。</p>
+    <p class="boundary">送出申請不代表訂單已修改。服務內容、費用、排班或月嫂接案意願可能受到影響，正式結果以工會確認為準。</p>
+  </header>
+
+  <section class="panel" id="formPanel">
+    <div id="status" class="status" role="status" aria-live="polite"></div>
+    <form id="changeForm">
+      <section class="section" aria-labelledby="orderHeading">
+        <h2 id="orderHeading">1. 選擇訂單</h2>
+        <p class="help">只顯示目前仍可提出異動申請的訂單。</p>
+        <div id="orderChoices" class="choice-grid">正在讀取訂單…</div>
+      </section>
+
+      <section class="section" aria-labelledby="kindHeading">
+        <h2 id="kindHeading">2. 選擇修改項目</h2>
+        <div id="kindChoices" class="choice-grid"></div>
+      </section>
+
+      <section class="section" aria-labelledby="detailHeading">
+        <h2 id="detailHeading">3. 填寫申請內容</h2>
+        <div id="fields" class="fields"><p class="help">請先選擇修改項目。</p></div>
+      </section>
+
+      <button type="submit" id="previewButton" disabled>預覽修改內容</button>
+    </form>
+
+    <section id="previewCard" class="preview" aria-live="polite" tabindex="-1">
+      <h2>確認修改前後內容</h2>
+      <div class="diff"><strong>目前內容</strong><span id="beforeText"></span></div>
+      <div class="diff"><strong>申請內容</strong><span id="requestedText"></span></div>
+      <p id="impactText" class="impact"></p>
+      <button type="button" id="applyButton">確認送出申請</button>
+      <button type="button" id="editButton" class="secondary">返回修改</button>
+    </section>
+
+    <section id="successCard" class="success" aria-live="polite" tabindex="-1"></section>
+  </section>
+</main>
+<div id="loader" class="loader" role="status" aria-live="assertive">正在處理，請稍候…</div>
+
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<script>
+  const kinds = [
+    ["service_address", "服務地址", "可能影響交通、樓層費與接案意願"],
+    ["cooking_requirement", "下廚需求", "可能影響服務內容"],
+    ["service_days", "服務日期／天數", "可能影響費用與月嫂檔期"],
+    ["daily_service_window", "每日服務時段", "需確認月嫂是否能配合"],
+    ["other", "其他訂單內容", "由工會協助判定影響範圍"]
+  ];
+  const labels = {
+    service_city: "服務縣市", service_address: "服務地址", residence_type: "居住型態",
+    floor_elevator_notes: "樓層／電梯說明", requires_cooking: "是否需要下廚", cooking_notes: "下廚需求說明",
+    start_date: "服務開始日", end_date: "服務結束日", service_days: "服務天數",
+    service_start_time: "每日開始時間", service_end_time: "每日結束時間",
+    service_end_day_offset: "結束日", details: "申請說明"
+  };
+  let lineIdToken = "";
+  let orders = [];
+  let preview = null;
+  const studioPreview = new URLSearchParams(location.search).get("studio_preview") === "1";
+  const correlationId = `liff-order-change-${Date.now()}`;
+
+  function selectedOrder() {
+    const input = document.querySelector('input[name="order"]:checked');
+    return orders.find(item => item.case_no === input?.value) || null;
+  }
+  function selectedKind() {
+    return document.querySelector('input[name="kind"]:checked')?.value || "";
+  }
+
+  async function init() {
+    renderKinds();
+    if (studioPreview) {
+      orders = [{
+        case_no: "CASE-2026-018",
+        status: "訂單成立",
+        order_version: 7,
+        values: {
+          service_city: "新竹市",
+          service_address: "北區光華街 88 號",
+          residence_type: "電梯大樓",
+          requires_cooking: "需要",
+          start_date: "2026-10-01",
+          end_date: "2026-10-20",
+          service_days: "20",
+          service_start_time: "09:00",
+          service_end_time: "17:00",
+          service_end_day_offset: "0"
+        }
+      }];
+      renderOrders();
+      const applyButton = document.getElementById("applyButton");
+      applyButton.disabled = true;
+      applyButton.textContent = "後台預覽不會送出";
+      showStatus("後台安全預覽：已跳過 LINE 登入；畫面只使用示意資料，不會讀取或修改正式資料。", "notice");
+      return;
+    }
+    setLoading(true);
+    try {
+      const configResponse = await fetch("/api/v1/line/identity/runtime-config");
+      const config = await configResponse.json();
+      const liffId = config.data?.liff_id;
+      if (!configResponse.ok || !liffId) throw new Error("LIFF 尚未完成設定。");
+      await liff.init({liffId});
+      if (!liff.isLoggedIn()) { liff.login({redirectUri: location.href}); return; }
+      lineIdToken = liff.getIDToken() || "";
+      if (!lineIdToken) throw new Error("無法取得 LINE 登入憑證，請重新開啟此頁。");
+      const result = await request("/api/v1/line/order-change/query", {line_id_token: lineIdToken});
+      orders = result.data.items || [];
+      renderOrders();
+      showStatus(orders.length ? "已載入可申請異動的訂單。" : "目前沒有可提出異動申請的訂單。", "notice");
+    } catch (error) {
+      showStatus(error.message || "目前無法載入訂單，請稍後再試。", "error");
+      document.getElementById("orderChoices").textContent = "訂單讀取失敗。";
+    } finally { setLoading(false); }
+  }
+
+  function renderOrders() {
+    const container = document.getElementById("orderChoices");
+    if (!orders.length) { container.textContent = "沒有可申請異動的訂單。"; return; }
+    container.innerHTML = orders.map((order, index) => `
+      <label class="choice">
+        <input type="radio" name="order" value="${escapeHtml(order.case_no)}" ${orders.length === 1 || index === 0 ? "checked" : ""}>
+        <span class="choice-title">案件 ${escapeHtml(order.case_no)}</span>
+        <span class="choice-meta">${escapeHtml(order.status)} ｜ ${escapeHtml(order.values.start_date || "日期未定")} 至 ${escapeHtml(order.values.end_date || "日期未定")}</span>
+      </label>
+    `).join("");
+    container.querySelectorAll("input").forEach(input => input.addEventListener("change", updateReady));
+    updateReady();
+  }
+
+  function renderKinds() {
+    const container = document.getElementById("kindChoices");
+    container.innerHTML = kinds.map(([id, title, meta]) => `
+      <label class="choice">
+        <input type="radio" name="kind" value="${id}">
+        <span class="choice-title">${title}</span>
+        <span class="choice-meta">${meta}</span>
+      </label>
+    `).join("");
+    container.querySelectorAll("input").forEach(input => input.addEventListener("change", renderFields));
+  }
+
+  function renderFields() {
+    const kind = selectedKind();
+    const order = selectedOrder();
+    const current = order?.values || {};
+    const templates = {
+      service_address: `<label class="field">服務縣市<input name="service_city" maxlength="20" value="${escapeHtml(current.service_city || "")}" autocomplete="address-level1" required></label><label class="field">新的服務地址<input name="service_address" maxlength="255" value="${escapeHtml(current.service_address || "")}" autocomplete="street-address" required></label><label class="field">居住型態<input name="residence_type" maxlength="50" value="${escapeHtml(current.residence_type || "")}" required></label><label class="field">樓層／電梯補充說明（選填）<textarea name="floor_elevator_notes" maxlength="500"></textarea></label>`,
+      cooking_requirement: `<label class="field">是否需要下廚<select name="requires_cooking" required><option value="">請選擇</option><option>需要</option><option>不需要</option></select></label><label class="field">需求說明（選填）<textarea name="cooking_notes" maxlength="500"></textarea></label>`,
+      service_days: `<label class="field">新的服務開始日<input type="date" name="start_date" value="${escapeHtml(current.start_date || "")}" required></label><label class="field">新的服務結束日<input type="date" name="end_date" value="${escapeHtml(current.end_date || "")}" required></label><label class="field">新的服務天數<input type="number" name="service_days" min="1" value="${escapeHtml(current.service_days || "")}" inputmode="numeric" required></label>`,
+      daily_service_window: `<label class="field">每日開始時間<input type="time" name="service_start_time" value="${escapeHtml(shortTime(current.service_start_time))}" required></label><label class="field">每日結束時間<input type="time" name="service_end_time" value="${escapeHtml(shortTime(current.service_end_time))}" required></label><label class="field">結束日<select name="service_end_day_offset" required><option value="0">同一天</option><option value="1">隔天</option></select></label>`,
+      other: `<label class="field">請說明想修改的內容<textarea name="details" maxlength="1000" required></textarea></label>`
+    };
+    document.getElementById("fields").innerHTML = templates[kind] || '<p class="help">請先選擇修改項目。</p>';
+    updateReady();
+  }
+
+  document.getElementById("changeForm").addEventListener("submit", async event => {
+    event.preventDefault();
+    const order = selectedOrder();
+    const kind = selectedKind();
+    if (!order || !kind) return;
+    const requested = formRequested();
+    setLoading(true);
+    try {
+      if (studioPreview) {
+        preview = buildStudioPreview(order, kind, requested);
+      } else {
+        const result = await request("/api/v1/line/order-change/preview", {
+          line_id_token: lineIdToken,
+          case_no: order.case_no,
+          expected_order_version: order.order_version,
+          kind,
+          requested
+        });
+        preview = result.data;
+      }
+      showPreview(preview);
+    } catch (error) { showStatus(error.message || "無法建立預覽，請重新載入。", "error"); }
+    finally { setLoading(false); }
+  });
+
+  document.getElementById("editButton").addEventListener("click", () => {
+    preview = null;
+    document.getElementById("previewCard").classList.remove("show");
+    document.getElementById("changeForm").hidden = false;
+    document.getElementById("previewButton").focus();
+  });
+
+  document.getElementById("applyButton").addEventListener("click", async () => {
+    if (!preview || studioPreview) return;
+    setLoading(true);
+    const idempotencyKey = sessionStorage.getItem("line-order-change-idempotency") || crypto.randomUUID();
+    sessionStorage.setItem("line-order-change-idempotency", idempotencyKey);
+    try {
+      const result = await request("/api/v1/line/order-change/apply", {
+        line_id_token: lineIdToken,
+        case_no: preview.case_no,
+        expected_order_version: preview.order_version,
+        kind: preview.kind,
+        requested: preview.requested,
+        preview_fingerprint: preview.preview_fingerprint,
+        idempotency_key: idempotencyKey
+      });
+      sessionStorage.removeItem("line-order-change-idempotency");
+      document.getElementById("previewCard").classList.remove("show");
+      const success = document.getElementById("successCard");
+      success.innerHTML = `<strong>申請已送出</strong><br>客服需求編號：#${escapeHtml(result.data.ticket_id)}<br>案件：${escapeHtml(result.data.case_no)}<br><br>目前狀態：待工會確認。正式訂單尚未修改。`;
+      success.classList.add("show");
+      success.focus();
+    } catch (error) { showStatus(error.message || "申請未送出，請重新預覽。", "error"); }
+    finally { setLoading(false); }
+  });
+
+  function formRequested() {
+    return Object.fromEntries([...document.querySelectorAll("#fields [name]")]
+      .filter(input => input.value.trim() !== "")
+      .map(input => [input.name, input.value.trim()]));
+  }
+  function summarize(values) {
+    const entries = Object.entries(values || {});
+    return entries.length ? entries.map(([key, value]) => `${labels[key] || key}：${value}`).join("；") : "尚無既有內容";
+  }
+  function buildStudioPreview(order, kind, requested) {
+    const beforeFields = {
+      service_address: ["service_city", "service_address", "residence_type"],
+      cooking_requirement: ["requires_cooking"],
+      service_days: ["start_date", "end_date", "service_days"],
+      daily_service_window: ["service_start_time", "service_end_time", "service_end_day_offset"],
+      other: []
+    };
+    const before = Object.fromEntries((beforeFields[kind] || [])
+      .map(field => [field, order.values[field] || "未設定"]));
+    return {
+      case_no: order.case_no,
+      order_version: order.order_version,
+      kind,
+      before,
+      requested,
+      impact_note: `${kinds.find(item => item[0] === kind)?.[2] || "需由工會確認影響範圍"}；此為後台示意預覽，不會送出。`,
+      preview_fingerprint: "studio-preview"
+    };
+  }
+  function showPreview(value) {
+    document.getElementById("beforeText").textContent = summarize(value.before);
+    document.getElementById("requestedText").textContent = summarize(value.requested);
+    document.getElementById("impactText").textContent = value.impact_note;
+    document.getElementById("changeForm").hidden = true;
+    const card = document.getElementById("previewCard");
+    card.classList.add("show");
+    card.focus();
+  }
+  function updateReady() {
+    document.getElementById("previewButton").disabled = !(selectedOrder() && selectedKind());
+  }
+  function shortTime(value) { return String(value || "").slice(0, 5); }
+  function showStatus(message, kind) {
+    const status = document.getElementById("status");
+    status.textContent = message;
+    status.className = `status ${kind}`;
+  }
+  function setLoading(active) { document.getElementById("loader").classList.toggle("show", active); }
+  async function request(url, payload) {
+    const response = await fetch(url, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)});
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const error = new Error(body.detail?.error?.message || body.detail?.message || "操作未完成。");
+      error.status = response.status;
+      error.code = body.detail?.error?.code || "";
+      throw error;
+    }
+    return body;
+  }
+  function escapeHtml(value) {
+    return String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[char]));
+  }
+
+  init();
+</script>
+</body>
+</html>

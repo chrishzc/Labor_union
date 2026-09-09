@@ -108,7 +108,7 @@ Description: 以 server 驗證的 LIFF token 提出 Client 資料異動申請，
     <div id="formArea">
         <div class="logo" id="logo">新竹市月子工會</div>
         <h1>修改登記資料申請</h1>
-        <div class="subtitle">身分由伺服器驗證。你可以修改自己的基本資料；送出後由工會人員核准，核准前不會直接變更資料。</div>
+        <div class="subtitle">身分由伺服器驗證。你可以修改不影響訂單的個人登記資料；服務縣市、服務地址及居住型態請由「修改訂單資訊」提出申請。</div>
         <div id="status" class="status"></div>
         <div id="submissionReadback" class="readback-card" aria-live="polite"></div>
         <form id="changeForm">
@@ -137,8 +137,7 @@ Description: 以 server 驗證的 LIFF token 提出 Client 資料異動申請，
     })();
 
     const fields = [
-        ["name", "姓名"], ["gender", "性別"], ["phone", "聯絡電話"], ["city", "縣市"],
-        ["address", "地址"], ["residence_type", "居住型態"], ["delivery_type", "生產方式"],
+        ["name", "姓名"], ["gender", "性別"], ["phone", "聯絡電話"], ["delivery_type", "生產方式"],
         ["baby_info", "寶寶資訊"], ["notes", "其他事項"]
     ].map(([id, label]) => ({id, label}));
     let lineIdToken = "";

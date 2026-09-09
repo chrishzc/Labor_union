@@ -38,7 +38,7 @@ _CATEGORY_ALIASES = {
     CustomerServiceCategory.SERVICE_FLOW: {"服務流程", "流程", "怎麼申請", "如何登記", "怎麼媒合", "1"},
     CustomerServiceCategory.PAYMENT_SUBSIDY: {"收費與補助", "收費", "費用", "價格", "補助", "政府補助", "要付多少", "2"},
     CustomerServiceCategory.SERVICE_PROGRESS: {"查詢服務進度", "查詢進度", "服務進度", "案件進度", "訂單進度", "目前狀態", "3"},
-    CustomerServiceCategory.PROFILE_UPDATE: {"修改登記資料", "修改資料", "改資料", "電話錯誤", "地址錯誤", "日期要改", "4"},
+    CustomerServiceCategory.PROFILE_UPDATE: {"修改登記資料", "修改資料", "改資料", "電話錯誤", "地址錯誤", "4"},
     CustomerServiceCategory.OTHER: {"其他問題", "其他", "不是以上", "問題", "詢問", "聯絡工會人員", "聯絡工會", "找人", "找專員", "人工客服", "我要問人", "5", "6"},
 }
 
@@ -86,6 +86,12 @@ class LineServiceHelpApplication:
                 return True
             if outcome.route_key == "service_help_menu":
                 self._reply_or_enqueue(inbox, unit_of_work, line_user_id, _service_menu_payload(), "menu", reason_code=outcome.reason_code)
+                return True
+            if outcome.route_key == "order_update_menu":
+                self._reply_or_enqueue(inbox, unit_of_work, line_user_id, _order_update_menu_payload(), "order-update-menu", reason_code=outcome.reason_code)
+                return True
+            if outcome.route_key == "order_update_request":
+                self._create_order_update_ticket(inbox, unit_of_work, line_user_id, normalized)
                 return True
             if outcome.category is None:
                 return False
@@ -253,6 +259,24 @@ class LineServiceHelpApplication:
             unit_of_work.audit.append(_ticket_audit(ticket.ticket_id, line_user_id.value))
         self._reply_or_enqueue(inbox, unit_of_work, line_user_id, payload, category.value)
 
+    def _create_order_update_ticket(self, inbox, unit_of_work, line_user_id, text):
+        ticket = unit_of_work.customer_service.create_or_append(
+            CreateCustomerServiceMessage(
+                line_user_id.value,
+                CustomerServiceCategory.OTHER,
+                text,
+                _event_key(inbox, "order-update"),
+            )
+        )
+        unit_of_work.audit.append(_ticket_audit(ticket.ticket_id, line_user_id.value))
+        self._reply_or_enqueue(
+            inbox,
+            unit_of_work,
+            line_user_id,
+            _text_payload(_ORDER_UPDATE_ACKNOWLEDGEMENT),
+            "order-update",
+        )
+
     def _progress_payload(self, inbox, unit_of_work, line_user_id):
         context = unit_of_work.customer_service.latest_client_case(line_user_id.value)
         if context or self._identity_url is None:
@@ -412,80 +436,92 @@ def _registration_reply(registration_url):
 
 
 def _service_menu_payload():
-    cards = (
-        ("服務流程", "了解登記、資料確認、月嫂媒合到簽約的完整流程。", "#1E3A8A"),
-        ("收費與補助", "查看服務費用、樓層費與補助資格的初步說明。", "#0F766E"),
-        ("查詢服務進度", "查詢已綁定案件的最新狀態與服務期間。", "#7C3AED"),
-        ("修改登記資料", "申請修正姓名、電話、地址、日期等登記內容。", "#BE123C"),
-        ("月嫂身分認證", "月嫂本人可送出身分確認申請，由工會人員審核。", "#B45309", "我是月嫂"),
-        ("其他問題", "不是以上分類時，留下問題讓工會人員協助確認。", "#475569"),
+    actions = (
+        ("如何申請服務？", "服務流程", "secondary"),
+        ("費用與補助怎麼算？", "收費與補助", "secondary"),
+        ("如何查詢目前進度？", "查詢服務進度", "secondary"),
+        ("登記資料填錯怎麼辦？", "修改登記資料", "secondary"),
+        ("找不到答案，聯絡工會", "聯絡工會人員", "primary"),
+        ("詢問其他問題", "其他問題", "secondary"),
     )
+    return _navigation_card_payload(
+        alt_text="服務與問答：請選擇需要的協助",
+        eyebrow="新竹市月子工會",
+        title="服務與問答",
+        description="常見問題與服務入口集中在這裡；涉及個人案件時，系統會先確認您的 LINE 身分。",
+        actions=actions,
+        hint="找不到合適項目時，可選擇「詢問其他問題」。",
+    )
+
+
+def _order_update_menu_payload():
+    actions = (
+        ("修改服務地址", "修改服務地址", "secondary"),
+        ("修改下廚需求", "修改下廚需求", "secondary"),
+        ("修改服務天數", "修改服務天數", "secondary"),
+        ("修改每日服務時段", "修改每日服務時段", "secondary"),
+        ("其他訂單內容", "其他訂單內容", "primary"),
+    )
+    return _navigation_card_payload(
+        alt_text="修改訂單資訊：請選擇要調整的項目",
+        eyebrow="新竹市月子工會",
+        title="修改訂單資訊",
+        description="這些內容可能影響訂單或月嫂接案意願。請選擇項目，由工會人員與您及相關月嫂確認。",
+        actions=actions,
+        hint="送出需求不代表訂單已變更；正式結果以工會確認為準。",
+    )
+
+
+def _navigation_card_payload(*, alt_text, eyebrow, title, description, actions, hint):
     return {
         "type": "flex",
-        "altText": "請選擇服務說明項目",
+        "altText": alt_text,
         "contents": {
-            "type": "carousel",
-            "contents": [_service_help_card(*card) for card in cards],
+            "type": "bubble",
+            "size": "mega",
+            "header": {
+                "type": "box",
+                "layout": "vertical",
+                "backgroundColor": "#FFF1EC",
+                "paddingAll": "20px",
+                "spacing": "sm",
+                "contents": [
+                    {"type": "text", "text": eyebrow, "size": "xs", "weight": "bold", "color": "#9A3412"},
+                    {"type": "text", "text": title, "size": "xl", "weight": "bold", "color": "#1E1B19"},
+                    {"type": "text", "text": description, "size": "sm", "color": "#57423B", "wrap": True},
+                ],
+            },
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "backgroundColor": "#FFFDFC",
+                "paddingAll": "16px",
+                "spacing": "sm",
+                "contents": [_navigation_button(*action) for action in actions],
+            },
+            "footer": {
+                "type": "box",
+                "layout": "vertical",
+                "backgroundColor": "#FFF8F6",
+                "paddingAll": "16px",
+                "contents": [
+                    {"type": "text", "text": hint, "size": "xs", "color": "#74593F", "wrap": True}
+                ],
+            },
         },
     }
 
 
-def _service_help_card(label, description, color, action_text=None):
-    return {
-        "type": "bubble",
-        "size": "micro",
-        "hero": {
-            "type": "box",
-            "layout": "vertical",
-            "backgroundColor": color,
-            "height": "76px",
-            "justifyContent": "center",
-            "alignItems": "center",
-            "contents": [
-                {
-                    "type": "text",
-                    "text": label,
-                    "weight": "bold",
-                    "size": "lg",
-                    "color": "#FFFFFF",
-                    "align": "center",
-                    "wrap": True,
-                }
-            ],
-        },
-        "body": {
-            "type": "box",
-            "layout": "vertical",
-            "spacing": "sm",
-            "contents": [
-                {
-                    "type": "text",
-                    "text": description,
-                    "size": "sm",
-                    "color": "#334155",
-                    "wrap": True,
-                    "maxLines": 4,
-                }
-            ],
-        },
-        "footer": {
-            "type": "box",
-            "layout": "vertical",
-            "contents": [
-                {
-                    "type": "button",
-                    "style": "primary",
-                    "height": "sm",
-                    "color": color,
-                    "action": {
-                        "type": "message",
-                        "label": "選擇",
-                        "text": action_text or label,
-                    },
-                }
-            ],
-        },
+def _navigation_button(label, action_text, style):
+    button = {
+        "type": "button",
+        "style": style,
+        "height": "sm",
+        "action": {"type": "message", "label": label, "text": action_text},
     }
+    if style == "primary":
+        button["color"] = "#E0683A"
+    return button
 
 
 _SERVICE_FLOW_REPLY = "服務流程如下：\n1. 完成服務登記。\n2. 工會確認資料與服務期程。\n3. 系統篩選可配合的月嫂。\n4. 月嫂同意接案後，工會提供資料給您確認。\n5. 雙方確認後，進入媒合與簽約流程。\n\n如您尚未登記，請點選下方「服務登記」。"
@@ -494,6 +530,10 @@ _TICKET_ACKNOWLEDGEMENTS = {
     CustomerServiceCategory.PROFILE_UPDATE: "已收到修改資料需求，工會人員確認後會聯絡您核對要修改的內容。",
     CustomerServiceCategory.OTHER: "已建立客服需求，工會人員將透過 LINE 與您確認問題內容。",
 }
+_ORDER_UPDATE_ACKNOWLEDGEMENT = (
+    "已收到訂單資訊修改需求。此需求可能影響訂單內容或月嫂接案意願，"
+    "目前尚未直接變更正式訂單；工會人員確認後會透過 LINE 與您聯絡。"
+)
 
 
 def _safe_menu_payload(outcome):

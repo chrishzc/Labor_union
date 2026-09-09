@@ -42,6 +42,15 @@ class MySqlCustomerServiceRepository:
     def get_by_event_key(self, event_key: str) -> CustomerServiceTicket | None:
         return self._ticket_for_event(event_key)
 
+    def event_message(self, event_key: str) -> str | None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT message_text FROM customer_service_ticket_events WHERE event_key=%s",
+                (event_key,),
+            )
+            row = cursor.fetchone()
+        return str(row["message_text"]) if row else None
+
     def create_or_append_escalation_ticket(self, command: Any) -> CustomerServiceTicket:
         """Resolve an already-created canonical ticket event without guessing LINE identity.
 
@@ -207,8 +216,10 @@ class MySqlCustomerServiceRepository:
 
     def _create_ticket(self, command) -> CustomerServiceTicket:
         context = self.latest_client_case(command.line_user_id) or {}
+        client_id = command.client_id if command.client_id is not None else context.get("client_id")
+        case_no = command.case_no if command.case_no is not None else context.get("case_no")
         with self._connection.cursor() as cursor:
-            cursor.execute(_TICKET_INSERT_SQL, (command.line_user_id, context.get("client_id"), context.get("case_no"), command.category.value))
+            cursor.execute(_TICKET_INSERT_SQL, (command.line_user_id, client_id, case_no, command.category.value))
             ticket_id = int(cursor.lastrowid)
         return self.get(ticket_id)
 
@@ -294,7 +305,7 @@ _LATEST_CLIENT_CASE_SQL = (
 )
 _STAFF_SUBJECT_SQL = (
     "SELECT CAST(b.subject_reference AS UNSIGNED) AS staff_id,s.name AS staff_name "
-    "FROM line_identity_bindings b "
+    "FROM line_identity_role_bindings b "
     "JOIN staff s ON s.id=CAST(b.subject_reference AS UNSIGNED) "
     "WHERE b.line_user_id=%s AND b.subject_type='staff' AND b.binding_status='bound' "
     "LIMIT 1"

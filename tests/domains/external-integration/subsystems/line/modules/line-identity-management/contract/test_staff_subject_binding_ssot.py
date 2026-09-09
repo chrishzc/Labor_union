@@ -1,6 +1,6 @@
 """
 File: test_staff_subject_binding_ssot.py
-Description: 驗證 Staff LIFF 僅以有效 canonical LINE binding 解析月嫂身分。
+Description: 驗證 Staff LIFF 僅以有效 canonical role-scoped binding 解析月嫂身分。
 """
 
 from infrastructure.mysql.customer_service_repository import (
@@ -24,7 +24,7 @@ class _Cursor:
         self.parameters = parameters
 
     def fetchone(self):
-        return None
+        return {"staff_id": 12, "staff_name": "王月嫂"}
 
 
 class _Connection:
@@ -35,14 +35,17 @@ class _Connection:
         return self._cursor
 
 
-def test_staff_subject_requires_active_canonical_binding() -> None:
+def test_staff_subject_requires_active_canonical_role_scoped_binding() -> None:
     cursor = _Cursor()
     repository = MySqlCustomerServiceRepository(_Connection(cursor))
 
-    assert repository.staff_subject("U-canonical") is None
-
+    assert repository.staff_subject("U-canonical") == {
+        "staff_id": 12,
+        "staff_name": "王月嫂",
+    }
     assert cursor.parameters == ("U-canonical",)
-    assert "FROM line_identity_bindings b" in cursor.sql
+    assert "FROM line_identity_role_bindings b" in cursor.sql
+    assert "FROM line_identity_bindings b" not in cursor.sql
     assert "b.subject_type='staff'" in cursor.sql
     assert "b.binding_status='bound'" in cursor.sql
     assert "s.line_user_id" not in cursor.sql

@@ -17,10 +17,13 @@
 - `notification-baseline-bootstrap` — Task96 M1–M4 versioned notification catalog與development-only source fixture producer；path: `modules/notification-baseline-bootstrap.md`
 - `feedback` — M2 immutable LINE feedback root／receipt／aggregate與Customer Service ticket linkage；path: `modules/feedback.md`
 - `complaint-ingress` — M4 canonical complaint normalization、Customer Service hold／HIGH escalation與masked empathy delivery；path: `modules/complaint-ingress.md`
+- `customer-order-change-intake` — verified LIFF 客戶訂單異動 Query／Preview／Apply，Apply 只建立 Customer Service 人工確認需求；path: `modules/customer-order-change-intake.md`
 - `matching-coordination-delivery` — M3 committed owner-intent至既有 LINE delivery task 的 typed projection與LINE-006 readback；path: `modules/matching-coordination-delivery.md`
-- `mobile-assignment-review` — persisted-human mobile transport轉接既有Scheduling Assignment Plan Q/P/A/readback；path: `modules/mobile-assignment-review.md`
+- `mobile-assignment-review` — persisted-human、target-isolated mobile transport，轉接既有 Scheduling Assignment Plan Q/P/A/readback；path: `modules/mobile-assignment-review.md`
 - `safe-review-link` — 短效一次性review-link transport、masked readback、receipt與committed local intent；不執行provider send；path: `modules/safe-review-link.md`
+- `staff-order-view` — 已驗證月嫂查看自己有效指派的訂單摘要與可選篩選；path: `modules/staff-order-view.md`
 - `staff-service-day-media` — 已驗證月嫂餐食照片 controlled-file staging；path: `modules/staff-service-day-media.md`
+- `staff-payout-view` — 已驗證月嫂依本人綁定與目標付款月份查詢逐案薪資明細；path: `modules/staff-payout-view.md`
 - `rich-menu-management` — Rich Menu typed draft editing, publication preparation and role-scoped management presentation; path: `modules/rich-menu-management.md`
 
 ## Dependencies

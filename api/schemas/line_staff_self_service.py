@@ -4,6 +4,7 @@ Description: 定義已驗證月嫂 LIFF 查詢與請假申請的傳輸模型。"
 from __future__ import annotations
 
 from datetime import date
+from decimal import Decimal
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -17,7 +18,7 @@ class StaffLiffRequest(BaseModel):
 
 
 class StaffOrderSearchRequest(StaffLiffRequest):
-    keyword: str = Field(min_length=1, max_length=100)
+    keyword: str = Field(default="", max_length=100)
 
 
 class StaffOrderView(BaseModel):
@@ -81,6 +82,35 @@ class StaffScheduleView(BaseModel):
     year: int
     month: int
     days: list[StaffScheduleDayView]
+
+
+class StaffPayoutTransactionView(BaseModel):
+    model_config = ConfigDict(extra="forbid", from_attributes=True)
+    transaction_type: str
+    transaction_status: str
+    amount: Decimal
+    occurred_at: date | None = None
+
+
+class StaffPayoutItemView(BaseModel):
+    model_config = ConfigDict(extra="forbid", from_attributes=True)
+    assignment_id: int
+    case_no: str
+    total_payable: Decimal
+    amount_paid: Decimal
+    due_date: date | None = None
+    paid_at: date | None = None
+    payment_status: str
+    transactions: list[StaffPayoutTransactionView]
+
+
+class StaffPayoutPageView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    staff_id: int
+    staff_name: str
+    year: int
+    month: int
+    items: list[StaffPayoutItemView]
 
 
 class StaffLeaveRequestCreate(StaffLiffRequest):

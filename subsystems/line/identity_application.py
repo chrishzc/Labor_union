@@ -368,17 +368,14 @@ class LineIdentityApplication:
                 )
                 result = _apply_staff_candidate(
                     unit_of_work,
-                    flow_id,
                     preview,
-                    proof,
                     correlation_id,
                 )
                 _enqueue_result_message(unit_of_work, result, correlation_id, self._now())
-                if result.status is not LineIdentityApplyStatus.PENDING_REVIEW:
-                    unit_of_work.identities.reset_failure_streak(
-                        line_user_id,
-                        flow_id,
-                    )
+                unit_of_work.identities.reset_failure_streak(
+                    line_user_id,
+                    flow_id,
+                )
                 unit_of_work.commit()
         except LineIdentityNotFoundError:
             self._record_binding_failure(
@@ -735,14 +732,47 @@ def _staff_preview(unit_of_work, line_user_id, candidate):
     version = binding.version if binding else ExpectedVersion(0)
     if candidate is None:
         status = LineIdentityPreviewStatus.NOT_FOUND
-    elif candidate.currently_bound_line_user_id == line_user_id:
-        status = LineIdentityPreviewStatus.ALREADY_BOUND
-    elif candidate.currently_bound_line_user_id is not None:
-        status = LineIdentityPreviewStatus.REQUIRES_REVIEW
-    elif binding and binding.status is LineIdentityBindingStatus.BOUND:
-        status = LineIdentityPreviewStatus.REQUIRES_REVIEW
     else:
-        status = LineIdentityPreviewStatus.MATCHED
+        subject_binding = unit_of_work.identities.get_by_subject(
+            LineBindingSubjectType.STAFF,
+            candidate.subject_reference,
+        )
+        active_statuses = {
+            LineIdentityBindingStatus.PENDING_REVIEW,
+            LineIdentityBindingStatus.BOUND,
+            LineIdentityBindingStatus.REVOCATION_PENDING,
+        }
+        active_binding = (
+            binding if binding is not None and binding.status in active_statuses else None
+        )
+        active_subject_binding = (
+            subject_binding
+            if subject_binding is not None and subject_binding.status in active_statuses
+            else None
+        )
+        if (
+            active_subject_binding is not None
+            and active_subject_binding.line_user_id != line_user_id
+        ) or (
+            candidate.currently_bound_line_user_id is not None
+            and candidate.currently_bound_line_user_id != line_user_id
+        ):
+            raise LineIdentityConflictError("此月嫂已綁定其他 LINE 帳號")
+        if (
+            active_binding is not None
+            and active_binding.subject_reference != candidate.subject_reference
+        ):
+            raise LineIdentityConflictError("此 LINE 帳號已綁定其他月嫂")
+        if (
+            candidate.currently_bound_line_user_id == line_user_id
+            and active_subject_binding is not None
+            and active_subject_binding.status is LineIdentityBindingStatus.BOUND
+        ):
+            status = LineIdentityPreviewStatus.ALREADY_BOUND
+        elif active_binding is not None or active_subject_binding is not None:
+            raise LineIdentityConflictError("月嫂 LINE 綁定資料不一致，請聯繫工會人員")
+        else:
+            status = LineIdentityPreviewStatus.MATCHED
     return LineIdentityPreview(
         status,
         line_user_id,
@@ -752,7 +782,7 @@ def _staff_preview(unit_of_work, line_user_id, candidate):
     )
 
 
-def _apply_staff_candidate(unit_of_work, flow_id, preview, proof, correlation_id):
+def _apply_staff_candidate(unit_of_work, preview, correlation_id):
     candidate = preview.candidate
     if candidate is None:
         raise LineIdentityNotFoundError(
@@ -761,17 +791,7 @@ def _apply_staff_candidate(unit_of_work, flow_id, preview, proof, correlation_id
     if preview.status is LineIdentityPreviewStatus.ALREADY_BOUND:
         return _bind_result(unit_of_work, preview.line_user_id, candidate, correlation_id)
     if preview.status is LineIdentityPreviewStatus.REQUIRES_REVIEW:
-        result = _create_review(
-            unit_of_work,
-            flow_id,
-            preview.line_user_id,
-            candidate,
-            LineReviewType.STAFF_VERIFICATION,
-            _staff_proof_fingerprint(proof).value,
-            correlation_id,
-        )
-        _save_pending_claim_if_available(unit_of_work, preview.line_user_id, candidate)
-        return result
+        raise LineIdentityConflictError("月嫂身分不允許透過人工審核改綁")
     unit_of_work.staff.bind_staff(
         candidate.subject_reference,
         preview.line_user_id,

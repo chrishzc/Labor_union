@@ -17,6 +17,8 @@
   - `ui_react/src/components/LineRichMenuDraftActionEditor.tsx`
   - `ui_react/src/components/LineRichMenuPublicationActions.tsx`
   - `ui_react/src/pages/LineManagementPage.tsx`
+  - `ui_react/src/pages/line_management/LiffCardStudio.tsx`
+  - `config/line_menu.json` — bootstrap definition only; published/current drafts remain versioned persistence.
 
 ## Contracts
 - `document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md` §3.5

@@ -112,16 +112,79 @@ def test_service_help_menu_keeps_all_six_approved_categories() -> None:
     ) is True
 
     payload = json.loads(unit_of_work.delivery_tasks.requests[0].payload_json)
-    cards = payload["contents"]["contents"]
-    assert [card["hero"]["contents"][0]["text"] for card in cards] == [
+    assert payload["contents"]["header"]["contents"][1]["text"] == "服務與問答"
+    buttons = payload["contents"]["body"]["contents"]
+    assert [button["action"]["text"] for button in buttons] == [
         "服務流程",
         "收費與補助",
         "查詢服務進度",
         "修改登記資料",
-        "月嫂身分認證",
+        "聯絡工會人員",
         "其他問題",
     ]
-    assert cards[4]["footer"]["contents"][0]["action"]["text"] == "我是月嫂"
+    assert "月嫂身分認證" not in unit_of_work.delivery_tasks.requests[0].payload_json
+
+
+def test_service_help_and_faq_aliases_share_one_card() -> None:
+    service_uow = _unit_of_work()
+    faq_uow = _unit_of_work()
+    application = LineServiceHelpApplication(lambda: datetime(2026, 8, 21, tzinfo=timezone.utc))
+
+    assert application.handle(
+        _inbox("event-service"), service_uow, LineUserId("U123456789"), "服務與問答"
+    ) is True
+    assert application.handle(
+        _inbox("event-faq"), faq_uow, LineUserId("U123456789"), "常見問答"
+    ) is True
+
+    service_request = service_uow.delivery_tasks.requests[0]
+    faq_request = faq_uow.delivery_tasks.requests[0]
+    service_payload = json.loads(service_request.payload_json)
+    faq_payload = json.loads(faq_request.payload_json)
+    assert service_request.idempotency_key.value == "service-help:menu:event-service"
+    assert faq_request.idempotency_key.value == "service-help:menu:event-faq"
+    assert service_payload == faq_payload
+    assert service_payload["contents"]["header"]["contents"][1]["text"] == "服務與問答"
+    assert [button["action"]["label"] for button in service_payload["contents"]["body"]["contents"]] == [
+        "如何申請服務？",
+        "費用與補助怎麼算？",
+        "如何查詢目前進度？",
+        "登記資料填錯怎麼辦？",
+        "找不到答案，聯絡工會",
+        "詢問其他問題",
+    ]
+    assert "月嫂身分認證" not in service_request.payload_json
+
+
+def test_order_update_menu_creates_human_review_request_without_mutating_order() -> None:
+    menu_uow = _unit_of_work()
+    request_uow = _unit_of_work()
+    application = LineServiceHelpApplication(lambda: datetime(2026, 8, 21, tzinfo=timezone.utc))
+
+    assert application.handle(
+        _inbox("event-order-menu"), menu_uow, LineUserId("U123456789"), "修改訂單資訊"
+    ) is True
+
+    menu_request = menu_uow.delivery_tasks.requests[0]
+    payload = json.loads(menu_request.payload_json)
+    assert payload["contents"]["header"]["contents"][1]["text"] == "修改訂單資訊"
+    assert [button["action"]["label"] for button in payload["contents"]["body"]["contents"]] == [
+        "修改服務地址",
+        "修改下廚需求",
+        "修改服務天數",
+        "修改每日服務時段",
+        "其他訂單內容",
+    ]
+
+    assert application.handle(
+        _inbox("event-order-request"), request_uow, LineUserId("U123456789"), "修改服務地址"
+    ) is True
+    ticket_command = request_uow.customer_service.messages[0]
+    assert ticket_command.category is CustomerServiceCategory.OTHER
+    assert ticket_command.message == "修改服務地址"
+    assert ticket_command.event_key == "line-service-help:order-update:event-order-request"
+    assert "尚未直接變更正式訂單" in request_uow.delivery_tasks.requests[0].payload_json
+    assert len(request_uow.audit.intents) == 1
 
 
 def test_unknown_text_falls_through_to_canonical_knowledge_scheduler() -> None:
