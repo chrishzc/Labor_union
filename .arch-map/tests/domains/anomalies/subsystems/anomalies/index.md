@@ -27,8 +27,6 @@ Access security-alert composition is cross-subsystem: Access owner-local deliver
 - Cross-domain acceptance, Task97, release/migration/schema and disposable-MySQL tests remain at their owning higher boundary.
 - `tests/test_anomaly_reclassification_schema_contract.py` remains at the schema verification boundary.
 - `tests/test_anomaly_bootstrap_import.py` remains at the application-composition/OpenAPI boundary.
-- `tests/test_remote_anomaly_schedule_merge.py` remains higher because it spans Anomalies, Staff, HCM import, and legacy Scheduling UI state.
-- `tests/test_historical_order_adoption_anomaly_consumer.py` remains higher because it also verifies a legacy UI finance-alert surface.
 - Government-subsidy worker wiring remains at its cross-owner delivery boundary.
 - `tests/test_system_alert_service.py` — Anomalies-owned projection/query/claim/resolve contract at the flat higher boundary.
 - `tests/test_system_alert_current_projection_schema.py` — schema/static projection contract; do not move into Access.
