@@ -5,6 +5,9 @@ test_root: tests/subsystems/case_import/
 higher_boundary: tests/domains/case_import/
 fixtures_root: tests/fixtures/
 modules:
+  staff-historical-workbook-adoption:
+    layout_status: current
+    test_root: tests/domains/case-import/subsystems/case-import/modules/staff-historical-workbook-adoption/
   pairing-current-facts:
     layout_status: canonical
     test_root: tests/domains/case-import/subsystems/case-import/modules/pairing-current-facts/
@@ -19,6 +22,9 @@ The following flat tests were relocated into this canonical root:
 - `test_hcm_resubmission_workflow.py`
 
 The source-path assertion in `test_hcm_resubmission.py` was made relocation-safe for the canonical owner root; behavior and production code are unchanged.
+
+# Placement refresh — 2026-09-09
+`tests/domains/case-import/subsystems/case-import/modules/staff-historical-workbook-adoption/test_staff_historical_workbook_parser.py` now lives in the existing module root declared by the architecture leaf. It directly tests `subsystems.case_import.staff_historical_workbook`; sheet selection and input normalization are Case Import responsibilities, not Staff lifecycle or cross-owner adoption acceptance. The file was moved without content changes. The general `tests/subsystems/case_import/` root and existing higher-boundary exceptions remain unchanged.
 
 # Exceptions
 - `tests/test_wp77_import_contracts.py` is a current protected legacy path with an external inventory consumer; status: `layout_gap`.

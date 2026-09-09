@@ -14,5 +14,9 @@ modules:
 # Routing notes
 Current owner-local coverage includes format detection, normalization, bank adapters, application/boundary behavior, dry-run, heuristic receipt matching, ingestion, orchestration, query, reprocessing, staging, correction contracts, and the owning-domain composite used to dispatch reviewed Finance Import candidates to registered owner ports. Relocation-sensitive schema/audit tests and cross-domain, UI, durable-job, or disposable-MySQL verification remain at their higher test boundaries. Tests owned by Case Import or another Domain must use that owner's architecture root rather than recreating a generic `tests/imports/` bucket.
 
-# Flat-test audit
-The current flat-test audit found no additional high-confidence Finance Import owner-local tests outside the documented relocation-sensitive, cross-domain, UI, durable-job, migration/schema, disposable-MySQL/E2E, or other-owner boundaries. Admit future cases by direct SUT/current ownership rather than filename alone.
+# Placement refresh — 2026-09-09
+The following pure Finance Import rule tests now live directly under `tests/domains/finance-import/subsystems/finance-import/`:
+- `test_finance_transaction_fingerprint.py` — normalized bank-fact deduplication fingerprint.
+- `test_finance_transaction_classifier.py` — deterministic transaction classification using supplied identity maps.
+
+Both directly test `domains.finance_import`; classification labels are not evidence of a cross-owner workflow. Their test contents are unchanged. This bounded correction supersedes the earlier blanket flat-test audit claim; it does not assert that all remaining flat tests have been audited. Existing higher-boundary exceptions remain unchanged.

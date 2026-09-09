@@ -21,5 +21,7 @@ LINE 管理頁跨客服、選單、身分與通知的唯讀／零假 mutation �
 - `tests/test_line_customer_service_first_release.py` remains at the release/relocation-sensitive boundary because it spans Customer Service, LINE, migration manifests, schema and static UI artifacts through repo-relative paths.
 - Release/migration/schema, disposable-MySQL/E2E, Task97, legacy UI, and true cross-owner tests remain at their higher verification boundaries.
 
-# Flat-test audit
-The current flat-test audit found no additional high-confidence LINE owner-local tests outside the documented boundary/release-sensitive classes. Admit future cases by direct SUT/current ownership rather than filename alone.
+# Placement refresh — 2026-09-09
+`tests/domains/external-integration/subsystems/line/test_line_postback_intent_registry.py` now lives in the canonical LINE subsystem root. It directly tests postback identity validation and command argument translation with the Scheduling writer replaced by a test double; it is not a cross-owner transaction oracle. The file was moved without content changes.
+
+This bounded correction supersedes the earlier blanket flat-test audit claim; it does not assert that all remaining flat tests have been audited. Existing LINE/Scheduling, release and UI exceptions remain unchanged.
