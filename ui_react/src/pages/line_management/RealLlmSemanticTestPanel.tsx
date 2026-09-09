@@ -3,6 +3,7 @@
  * Description: 管理端真實 M2 語意測試；只由後端使用已儲存 Gemini secret，不發送 LINE 或建立工單。
  */
 import React, { useState } from 'react';
+import { Brain, Rocket } from 'lucide-react';
 import {
   testLlmSemantics,
   type LlmSemanticTest,
@@ -63,12 +64,12 @@ export const RealLlmSemanticTestPanel: React.FC = () => {
     }
   };
 
-  const [feedbackStatus, setFeedbackStatus] = useState<string | null>(null);
+  const [feedbackStatus, setFeedbackStatus] = useState<{ state: 'submitting' | 'success' | 'error'; message: string } | null>(null);
 
   const handleFeedback = async (choice: 'helpful' | 'unresolved') => {
-    setFeedbackStatus(choice === 'helpful' ? '👍 感謝反饋！已記錄為有效解答。' : '🚨 已記錄為未解決，系統已自動通報專人客服工單！');
+    setFeedbackStatus({ state: 'submitting', message: '正在送出回覆滿意度…' });
     try {
-      await fetch('/api/v1/line/feedback', {
+      const response = await fetch('/api/v1/line/feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -81,8 +82,15 @@ export const RealLlmSemanticTestPanel: React.FC = () => {
           development_line_user_id: import.meta.env.VITE_LINE_DEVELOPMENT_USER_ID || 'U99c2e4a3629eb284d19ab0491d356839',
         }),
       });
+      if (!response.ok) throw new Error(`feedback_http_${response.status}`);
+      setFeedbackStatus({
+        state: 'success',
+        message: choice === 'helpful'
+          ? '感謝回饋，已記錄為有效解答。'
+          : '已記錄為未解決，後續處理狀態請至客服工單確認。',
+      });
     } catch {
-      // 保持前端即時體驗
+      setFeedbackStatus({ state: 'error', message: '回饋尚未送出，請確認連線後再試一次。' });
     }
   };
 
@@ -94,41 +102,30 @@ export const RealLlmSemanticTestPanel: React.FC = () => {
   ];
 
   return (
-    <div className="ai-editor-card" style={{ marginBottom: '16px', background: '#ffffff', borderRadius: '8px', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-      <div className="ai-editor-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f1f5f9', paddingBottom: '10px' }}>
-        <h4 style={{ margin: 0, fontSize: '16px', color: '#1e293b', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          🧠 Gemini + Knowledge 真實 M2 智能問答工作台
-        </h4>
-        <span style={{ fontSize: '12px', background: '#f0fdf4', color: '#15803d', padding: '2px 8px', borderRadius: '4px', border: '1px solid #bbf7d0', fontWeight: 600 }}>
+    <div className="ai-editor-card real-llm-panel">
+      <div className="ai-editor-header real-llm-header">
+        <h3 className="real-llm-title">
+          <Brain aria-hidden="true" />Gemini + Knowledge 真實 M2 智能問答工作台
+        </h3>
+        <span className="real-llm-status">
           {running ? '正在執行連線測試' : result ? `本次結果：${result.outcome}` : '尚未執行連線測試'}
         </span>
       </div>
 
-      <div className="line-warning" role="status" style={{ marginTop: '12px' }}>
-        💡 本工作台使用後端目前儲存的模型設定與核准知識庫進行測試。執行後才會顯示實際 provider、model 與結果；本頁不代表 LINE 已送達。
+      <div className="line-warning line-block-spacing-12" role="status">
+        本工作台使用後端目前儲存的模型設定與核准知識庫進行測試。執行後才會顯示實際 provider、model 與結果；本頁不代表 LINE 已送達。
       </div>
 
       {/* 快捷常見問題一鍵填入 */}
-      <div style={{ marginTop: '12px', marginBottom: '8px' }}>
-        <small style={{ color: '#64748b', fontWeight: 600, display: 'block', marginBottom: '6px' }}>💡 點擊快捷填入民眾常見問題測試：</small>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+      <div className="real-llm-quick-section">
+        <small className="real-llm-quick-label">點擊快捷填入民眾常見問題測試：</small>
+        <div className="real-llm-quick-list">
           {QUICK_QUESTIONS.map((q) => (
             <button
               key={q}
               type="button"
               onClick={() => setQuestion(q)}
-              style={{
-                background: '#f8fafc',
-                border: '1px solid #cbd5e1',
-                borderRadius: '16px',
-                padding: '4px 12px',
-                fontSize: '12px',
-                color: '#334155',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = '#e2e8f0'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = '#f8fafc'; }}
+              className="real-llm-quick-button"
             >
               {q}
             </button>
@@ -136,7 +133,7 @@ export const RealLlmSemanticTestPanel: React.FC = () => {
         </div>
       </div>
 
-      <div className="sim-input-bar" style={{ marginTop: '12px' }}>
+      <div className="sim-input-bar real-llm-input-row">
         <input
           aria-label="Gemini 真實語意測試文字"
           placeholder="輸入民眾的測試提問 (例：請問補助可以折抵幾小時？)"
@@ -148,48 +145,52 @@ export const RealLlmSemanticTestPanel: React.FC = () => {
               void run();
             }
           }}
-          style={{ flex: 1, padding: '10px 14px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px' }}
+          className="real-llm-input"
         />
         <button
           type="button"
           className="mock-primary-btn"
           onClick={() => void run()}
           disabled={running || !question.trim()}
-          style={{ padding: '0 20px', fontWeight: 600, fontSize: '14px' }}
         >
-          {running ? 'Gemini 智能檢索中…' : '🚀 執行真實 AI 智能解答'}
+          <Rocket aria-hidden="true" />{running ? 'Gemini 智能檢索中…' : '執行真實 AI 智能解答'}
         </button>
       </div>
 
-      {notice && <div className={result?.outcome === 'answered' ? 'line-success' : 'line-warning'} role="status" style={{ marginTop: '12px' }}>{notice}</div>}
+      {notice && <div className={`${result?.outcome === 'answered' ? 'line-success' : 'line-warning'} line-block-spacing-12`} role="status">{notice}</div>}
       {result && (
-        <div className={result.outcome === 'answered' ? 'line-success' : 'line-warning'} role="status" style={{ marginTop: '12px' }}>
+        <div className={`${result.outcome === 'answered' ? 'line-success' : 'line-warning'} line-block-spacing-12`} role="status">
           <div>provider：{result.provider} · model：{result.model} · outcome：{result.outcome}</div>
           <div>Knowledge index：{result.index_version ?? '—'} · matched QA：{result.qa_id ?? '—'}</div>
           {result.source_identity && <small>來源：{result.source_identity}</small>}
-          {result.answer_text && <div style={{ marginTop: '8px', fontSize: '14px', lineHeight: 1.6 }}>{result.answer_text}</div>}
+          {result.answer_text && <div className="real-llm-answer">{result.answer_text}</div>}
           {result.code && <div>fallback code：{result.code}</div>}
 
           {result.outcome === 'answered' && (
-            <div className="sim-feedback-row" style={{ marginTop: '12px', borderTop: '1px dashed #fed9b8', paddingTop: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <small style={{ color: '#74593f', fontWeight: 600 }}>回覆滿意度調查：本則回覆是否有解答問題？</small>
+            <div className="sim-feedback-row real-llm-feedback-row">
+              <small className="real-llm-feedback-label">回覆滿意度調查：本則回覆是否有解答問題？</small>
               <button
                 type="button"
-                style={{ background: '#ecfdf5', border: '1px solid #10b981', color: '#047857', borderRadius: '4px', padding: '3px 10px', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}
+                className="real-llm-feedback-button is-helpful"
+                disabled={feedbackStatus?.state === 'submitting'}
                 onClick={() => void handleFeedback('helpful')}
               >
-                👍 有幫助
+                有幫助
               </button>
               <button
                 type="button"
-                style={{ background: '#fef2f2', border: '1px solid #ef4444', color: '#b91c1c', borderRadius: '4px', padding: '3px 10px', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}
+                className="real-llm-feedback-button is-unresolved"
+                disabled={feedbackStatus?.state === 'submitting'}
                 onClick={() => void handleFeedback('unresolved')}
               >
-                👎 未解決（通報專人客服）
+                未解決（通報專人客服）
               </button>
               {feedbackStatus && (
-                <span style={{ fontSize: '12px', fontWeight: 600, color: feedbackStatus.includes('👍') ? '#059669' : '#dc2626', marginLeft: '6px' }}>
-                  {feedbackStatus}
+                <span
+                  className={`real-llm-feedback-status is-${feedbackStatus.state}`}
+                  role={feedbackStatus.state === 'error' ? 'alert' : 'status'}
+                >
+                  {feedbackStatus.message}
                 </span>
               )}
             </div>

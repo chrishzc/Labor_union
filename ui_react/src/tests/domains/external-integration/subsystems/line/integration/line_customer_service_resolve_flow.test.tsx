@@ -2,19 +2,19 @@
  * File: line_customer_service_resolve_flow.test.tsx
  * Description: 驗證客服工單 detail 到結案 Preview／Apply、重試與重新讀取流程。
  */
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { CustomerServiceClient } from '../api/customer_service/customer_service_client';
-import type { LineIdentityClient } from '../api/line_identity/line_identity_client';
-import { LineManagementPage } from '../pages/LineManagementPage';
+import type { CustomerServiceClient } from '../../../../../../api/customer_service/customer_service_client';
+import type { LineIdentityClient } from '../../../../../../api/line_identity/line_identity_client';
+import { LineManagementPage } from '../../../../../../pages/LineManagementPage';
 import {
   CUSTOMER_SERVICE_DETAIL_FIXTURE,
   CUSTOMER_SERVICE_PAGE_FIXTURE,
   CUSTOMER_SERVICE_RESOLVE_PREVIEW_FIXTURE,
   CUSTOMER_SERVICE_SUMMARY_FIXTURE,
   CUSTOMER_SERVICE_TICKET_FIXTURE,
-} from './fixtures/customer_service/customer_service_contract_fixtures';
-import { BINDING_PAGE_FIXTURE, BOUND_IDENTITY_FIXTURE } from './fixtures/line_identity/line_identity_contract_fixtures';
+} from '../../../../../fixtures/customer_service/customer_service_contract_fixtures';
+import { BINDING_PAGE_FIXTURE, BOUND_IDENTITY_FIXTURE } from '../../../../../fixtures/line_identity/line_identity_contract_fixtures';
 
 type CustomerServiceQueryClient = CustomerServiceClient;
 type LineIdentityQueryClient = Pick<LineIdentityClient, 'listBindings' | 'getBinding'>;
@@ -53,7 +53,8 @@ describe('客服工單結案 successor', () => {
     await waitFor(() => expect(screen.getByText('#31')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: '查看明細' }));
     await screen.findByText('請協助確認資料更新方式');
-    expect(screen.getByText(CUSTOMER_SERVICE_TICKET_FIXTURE.line_user_id)).toBeInTheDocument();
+    expect(within(screen.getByRole('dialog', { name: '客服工單明細' }))
+      .getByText(CUSTOMER_SERVICE_TICKET_FIXTURE.line_user_id)).toBeInTheDocument();
     fireEvent.change(screen.getByRole('textbox', { name: '結案說明' }), { target: { value: '已由工會人員確認處理完成' } });
     fireEvent.click(screen.getByRole('button', { name: '檢查結案影響' }));
     await screen.findByText('處理中 → 已結案');

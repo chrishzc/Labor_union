@@ -7,7 +7,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { describe, expect, it, vi } from 'vitest';
 import { HASH_ALIASES } from '../App';
 import { NAV_ITEMS } from '../components/MasterLayout';
-import { AiEventStudio } from '../pages/line_management/AiEventStudio';
+import { AiCustomerServiceStudioPage } from '../pages/line_management/AiCustomerServiceStudioPage';
 import {
   AlertGroupSecurity,
   type RuntimeTargetClient,
@@ -43,19 +43,22 @@ describe('React entrypoint registry', () => {
     });
   });
 
-  it('AI 工作頁只顯示正式 catalog 與 server-owned router preview', () => {
-    render(React.createElement(AiEventStudio));
+  it('AI 工作頁以分頁顯示正式 catalog、server-owned router preview 與真實模型測試', () => {
+    render(React.createElement(AiCustomerServiceStudioPage));
+    fireEvent.click(screen.getByRole('button', { name: '事件規則' }));
     expect(screen.getByRole('searchbox', { name: '搜尋正式事件規則' })).toBeEnabled();
     expect(screen.getByRole('button', { name: '讀取 server router preview' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: '🚀 執行真實 AI 智能解答' })).toBeEnabled();
     expect(screen.getByText('舊版 4 筆 INITIAL_RULES 本機示範資料已移除。本頁只接受正式 QA 題庫與 server-owned navigation/event catalog 作為可見來源。')).toBeInTheDocument();
     expect(screen.getByLabelText('Server router 測試文字')).toHaveValue('我想修改登記資料');
+
+    fireEvent.click(screen.getByRole('button', { name: 'AI 測試' }));
+    expect(screen.getByRole('button', { name: '執行真實 AI 智能解答' })).toBeEnabled();
     expect(screen.getByLabelText('Gemini 真實語意測試文字')).toHaveValue('請問新竹市補助可以折抵幾小時？');
   });
 
 
 
-  it('LIFF 視覺頁保留 8 個 LIFF 與 4 個 Flex，且只產生 canonical 測試連結', async () => {
+  it('LIFF 視覺頁保留 12 個 LIFF 與 4 個 Flex，且只產生 canonical 測試連結', async () => {
     const runtimeConfigClient = {
       get: vi.fn(async () => ({
         liff_id: 'test-liff-id',
@@ -63,68 +66,79 @@ describe('React entrypoint registry', () => {
       })),
     };
     render(React.createElement(LiffCardStudio, { runtimeConfigClient }));
-    expect(screen.getByRole('button', { name: 'LIFF 表單 (9)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'LIFF 表單 (12)' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Flex 卡片 (4)' })).toBeInTheDocument();
     expect(screen.queryByText(/原始 8 個 LIFF 與 4 個 Flex 功能均保留/)).not.toBeInTheDocument();
     expect(screen.getAllByRole('button')
-      .map((button) => button.textContent?.match(/\d+\. [a-z_]+\.html/)?.[0])
+      .map((button) => button.textContent?.match(/[a-z_]+\.html/)?.[0])
       .filter(Boolean)).toEqual([
-        '1. gateway.html',
-        '2. register.html',
-        '3. bind.html',
-        '4. profile_guard.html',
-        '5. profile_update.html',
-        '6. staff_order_search.html',
-        '7. staff_schedule.html',
-        '8. identity.html',
-        '9. mobile_admin.html',
+        'gateway.html',
+        'register.html',
+        'bind.html',
+        'profile_guard.html',
+        'profile_update.html',
+        'order_update.html',
+        'staff_order_search.html',
+        'staff_schedule.html',
+        'staff_baby_log.html',
+        'staff_payout.html',
+        'identity.html',
+        'mobile_admin.html',
       ]);
     expect(screen.queryByText(/15 分鐘.*Token/)).not.toBeInTheDocument();
     expect(screen.queryByText(/demo-token/)).not.toBeInTheDocument();
-    await waitFor(() => expect(screen.getByRole('button', { name: /複製正式測試連結/ })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole('link', { name: '在預覽中開啟正式 LIFF 入口' })).toBeInTheDocument());
     expect(screen.getByText('服務確認與導流')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '📝 已申請市府平台' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '🏛️ 未申請市府平台' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '已申請市府平台' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '未申請市府平台' })).toBeDisabled();
     expect(screen.queryByText('開始身分驗證與服務分流')).not.toBeInTheDocument();
     expect(screen.queryByText(/重新渲染 \d+ 次/)).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '🔄 重新整理預覽' }));
-    expect(screen.getByText(/本機預覽已更新/)).toBeInTheDocument();
-    expect(screen.getByText(/不呼叫外部 QR 服務或繪製不可掃描的假碼/)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '開啟正式 LIFF 入口' })).toHaveAttribute(
+    expect(screen.queryByRole('heading', { name: '實機驗收入口' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /複製正式測試連結|重新整理預覽/ })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: /正式 LIFF 入口/ })).toHaveLength(1);
+    expect(screen.getByRole('link', { name: '在預覽中開啟正式 LIFF 入口' })).toHaveAttribute(
       'href',
       'https://line-test.example.dev/line-gateway',
     );
 
-    fireEvent.click(screen.getByText('2. register.html'));
+    fireEvent.click(screen.getByText('register.html'));
     expect(screen.getByText('需求調查表單')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '預覽登記資料' })).toBeDisabled();
-    expect(screen.getByRole('link', { name: '開啟正式 LIFF 入口' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: '在預覽中開啟正式 LIFF 入口' })).toHaveAttribute(
       'href',
       'https://line-test.example.dev/line-registration',
     );
 
-    fireEvent.click(screen.getByText('3. bind.html'));
+    fireEvent.click(screen.getByText('bind.html'));
     expect(screen.getByText('服務綁定與訂單查詢')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '確認綁定' })).toBeDisabled();
     expect(screen.queryByText('服務確認與導流')).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '開啟正式 LIFF 入口' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: '在預覽中開啟正式 LIFF 入口' })).toHaveAttribute(
       'href',
       'https://line-test.example.dev/line-bind',
     );
 
-    fireEvent.click(screen.getByText('4. profile_guard.html'));
+    fireEvent.click(screen.getByText('profile_guard.html'));
     expect(screen.getByText('尚未完成工會服務綁定')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '開啟正式 LIFF 入口' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: '在預覽中開啟正式 LIFF 入口' })).toHaveAttribute(
       'href',
       'https://line-test.example.dev/line-profile-guard',
     );
 
-    fireEvent.click(screen.getByText('5. profile_update.html'));
+    fireEvent.click(screen.getByText('profile_update.html'));
     expect(screen.getByText('修改登記資料申請')).toBeInTheDocument();
     expect(screen.getByText(/正式異動流程已接通後端 API/)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '開啟正式 LIFF 入口' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: '在預覽中開啟正式 LIFF 入口' })).toHaveAttribute(
       'href',
       'https://line-test.example.dev/line-profile-guard',
+    );
+
+    fireEvent.click(screen.getByText('order_update.html'));
+    expect(screen.getByText('修改訂單資訊申請')).toBeInTheDocument();
+    expect(screen.getByText(/正式訂單維持不變並等待工會確認/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '在預覽中開啟安全展示頁' })).toHaveAttribute(
+      'href',
+      'https://line-test.example.dev/line-order-update?studio_preview=1',
     );
   });
 
@@ -136,7 +150,7 @@ describe('React entrypoint registry', () => {
       })),
     };
     render(React.createElement(LiffCardStudio, { runtimeConfigClient }));
-    await waitFor(() => expect(screen.getByRole('link', { name: '開啟正式 LIFF 入口' })).toHaveAttribute(
+    await waitFor(() => expect(screen.getByRole('link', { name: '在預覽中開啟正式 LIFF 入口' })).toHaveAttribute(
       'href',
       'https://line-test.example.dev/line-gateway',
     ));
@@ -149,8 +163,9 @@ describe('React entrypoint registry', () => {
     render(React.createElement(LiffCardStudio, { runtimeConfigClient }));
 
     expect(await screen.findByText(/正式 LIFF 測試網址無法使用：公開網址尚未設定/)).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: '開啟正式 LIFF 入口' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /複製正式測試連結/ })).toBeDisabled();
+    expect(screen.queryByRole('link', { name: '在預覽中開啟正式 LIFF 入口' })).not.toBeInTheDocument();
+    expect(screen.queryByTitle(/正式 LIFF 測試入口 QR Code/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '實機驗收入口' })).not.toBeInTheDocument();
   });
 
   it('群組安全頁以 typed client 完成 enable-disable Preview、確認、Apply 與 receipt/readback', async () => {
@@ -197,7 +212,7 @@ describe('React entrypoint registry', () => {
     expect(groupCard).not.toBeNull();
     fireEvent.click(within(groupCard as HTMLElement).getByRole('button', { name: /停用/ }));
     await waitFor(() => expect(client.previewSetEnabled).toHaveBeenCalledTimes(1));
-    expect(screen.getByText('🔎 異動影響確認')).toBeInTheDocument();
+    expect(screen.getByText('異動影響確認')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('checkbox'));
     fireEvent.click(screen.getByRole('button', { name: '確認套用' }));
     await waitFor(() => expect(client.setEnabled).toHaveBeenCalledTimes(1));

@@ -4,9 +4,9 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
-import { App } from '../App';
-import { sessionClient } from '../api/auth/session_client';
-import { ADMIN_SESSION_UNAUTHORIZED_EVENT } from '../api/shared/transport';
+import { App } from '../../../../../../../App';
+import { sessionClient } from '../../../../../../../api/auth/session_client';
+import { ADMIN_SESSION_UNAUTHORIZED_EVENT } from '../../../../../../../api/shared/transport';
 
 describe('Route Guard & Shell Hash Navigation', () => {
   const originalFetch = globalThis.fetch;
@@ -111,7 +111,7 @@ describe('Route Guard & Shell Hash Navigation', () => {
     expect(
       screen.getByRole('heading', { name: '月子工會管理系統' })
     ).toBeInTheDocument();
-    expect(screen.queryByText('營運作業 (Operations)')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '營運作業' })).not.toBeInTheDocument();
   });
 
   it('未認證時即使存取深層 Hash (如 #finance) 仍受路由守衛攔截', () => {
@@ -146,9 +146,9 @@ describe('Route Guard & Shell Hash Navigation', () => {
     fireEvent.click(screen.getByRole('button', { name: /驗證並登入系統/ }));
 
     await waitFor(() => {
-      expect(screen.getByText('營運作業 (Operations)')).toBeInTheDocument();
-      expect(screen.getByText('帳務作業 (Finance)')).toBeInTheDocument();
-      expect(screen.getByText('稽核與系統 (Audit & System)')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '營運作業' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '帳務作業' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '稽核與系統' })).toBeInTheDocument();
     });
   });
 
@@ -164,7 +164,7 @@ describe('Route Guard & Shell Hash Navigation', () => {
 
     render(<App />);
 
-    expect(screen.getByText('營運作業 (Operations)')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '營運作業' })).toBeInTheDocument();
     expect(screen.getByTitle('排班日曆')).toHaveClass('active');
     expect(screen.queryByTitle('訂單管理')).not.toBeInTheDocument();
 
@@ -240,13 +240,13 @@ describe('Route Guard & Shell Hash Navigation', () => {
       capabilities: ['system.administration'],
     });
     render(<App />);
-    expect(screen.getByText('營運作業 (Operations)')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '營運作業' })).toBeInTheDocument();
 
     act(() => window.dispatchEvent(new CustomEvent(ADMIN_SESSION_UNAUTHORIZED_EVENT, {
       detail: { rejectedToken: 'older-human-token' },
     })));
     expect(sessionClient.getToken()).toBe('current-human-token');
-    expect(screen.getByText('營運作業 (Operations)')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '營運作業' })).toBeInTheDocument();
 
     act(() => window.dispatchEvent(new CustomEvent(ADMIN_SESSION_UNAUTHORIZED_EVENT, {
       detail: { rejectedToken: 'current-human-token' },
@@ -254,7 +254,7 @@ describe('Route Guard & Shell Hash Navigation', () => {
     await waitFor(() => {
       expect(sessionClient.isAuthenticated()).toBe(false);
       expect(window.location.hash).toBe('#login');
-      expect(screen.queryByText('營運作業 (Operations)')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '營運作業' })).not.toBeInTheDocument();
       expect(screen.getByRole('heading', { name: '月子工會管理系統' })).toBeInTheDocument();
     });
   });
@@ -270,7 +270,8 @@ describe('Route Guard & Shell Hash Navigation', () => {
 
     render(<App />);
 
-    const logoutBtn = screen.getByTitle('點擊登出系統');
+    fireEvent.click(screen.getByText('系統管理員'));
+    const logoutBtn = screen.getByRole('button', { name: '登出' });
     await act(async () => {
       fireEvent.click(logoutBtn);
     });

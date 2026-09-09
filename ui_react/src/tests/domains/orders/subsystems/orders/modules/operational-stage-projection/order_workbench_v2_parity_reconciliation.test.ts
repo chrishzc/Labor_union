@@ -27,7 +27,7 @@ describe('Order Workbench V2 parity reconciliation', () => {
     expect(appSource).toContain("'order-beta': 'order-workbench-v2'");
     expect(appSource).toContain("currentPage === 'order-workbench-v2' && <OrderWorkbenchV2Page />");
     expect(appSource).toContain("return 'order-workbench-v2'");
-    expect(layoutSource).toContain("{ id: 'order-workbench-v2', icon: '📌', label: '待辦看板'");
+    expect(layoutSource).toContain("{ id: 'order-workbench-v2', icon: LayoutDashboard, label: '待辦看板'");
     expect(layoutSource).not.toContain("'order-tracker'");
     expect(layoutSource).not.toContain("'orders'");
     expect(appSource).not.toContain("currentPage === 'order-tracker'");

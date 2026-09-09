@@ -4,14 +4,14 @@
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { CustomerServiceClient } from '../api/customer_service/customer_service_client';
-import type { LineConfigurationQueryClient } from '../api/line_configuration/line_configuration_query_client';
-import type { LineNotificationRulesCatalog } from '../api/line_configuration/line_configuration_query_schemas';
-import type { LineIdentityClient } from '../api/line_identity/line_identity_client';
-import { LineManagementPage } from '../pages/LineManagementPage';
-import { CUSTOMER_SERVICE_DETAIL_FIXTURE, CUSTOMER_SERVICE_PAGE_FIXTURE, CUSTOMER_SERVICE_RESOLVE_PREVIEW_FIXTURE, CUSTOMER_SERVICE_SUMMARY_FIXTURE } from './fixtures/customer_service/customer_service_contract_fixtures';
-import { BINDING_PAGE_FIXTURE, BOUND_IDENTITY_FIXTURE, REVOCATION_PREVIEW_FIXTURE, REVOCATION_REQUEST_FIXTURE } from './fixtures/line_identity/line_identity_contract_fixtures';
-import { LINE_NOTIFICATION_RULES_CATALOG_FIXTURE, LINE_RICH_MENU_CONFIGURATION_FIXTURE, LINE_RICH_MENU_PUBLICATION_FIXTURE, LINE_RICH_MENU_PUBLICATION_PAGE_FIXTURE } from './fixtures/line_configuration_query_fixtures';
+import type { CustomerServiceClient } from '../../../../../../api/customer_service/customer_service_client';
+import type { LineConfigurationQueryClient } from '../../../../../../api/line_configuration/line_configuration_query_client';
+import type { LineNotificationRulesCatalog } from '../../../../../../api/line_configuration/line_configuration_query_schemas';
+import type { LineIdentityClient } from '../../../../../../api/line_identity/line_identity_client';
+import { LineManagementPage } from '../../../../../../pages/LineManagementPage';
+import { CUSTOMER_SERVICE_DETAIL_FIXTURE, CUSTOMER_SERVICE_PAGE_FIXTURE, CUSTOMER_SERVICE_RESOLVE_PREVIEW_FIXTURE, CUSTOMER_SERVICE_SUMMARY_FIXTURE } from '../../../../../fixtures/customer_service/customer_service_contract_fixtures';
+import { BINDING_PAGE_FIXTURE, BOUND_IDENTITY_FIXTURE, REVOCATION_PREVIEW_FIXTURE, REVOCATION_REQUEST_FIXTURE } from '../../../../../fixtures/line_identity/line_identity_contract_fixtures';
+import { LINE_NOTIFICATION_RULES_CATALOG_FIXTURE, LINE_RICH_MENU_CONFIGURATION_FIXTURE, LINE_RICH_MENU_PUBLICATION_FIXTURE, LINE_RICH_MENU_PUBLICATION_PAGE_FIXTURE } from '../../../../../fixtures/line_configuration_query_fixtures';
 
 function dependencies(rules: LineNotificationRulesCatalog = LINE_NOTIFICATION_RULES_CATALOG_FIXTURE): {
   customer: CustomerServiceClient;
@@ -35,7 +35,7 @@ describe('LINE 通知規則 query 與 mutation 接線', () => {
     render(<LineManagementPage customerService={customer} lineIdentity={identity} lineConfiguration={configuration} />);
     expect(configuration.getNotificationRules).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: /4\. 通知規則/ }));
+    fireEvent.click(screen.getByRole('button', { name: '通知與發送' }));
     await waitFor(() => expect(screen.getAllByText('deposit_notice').length).toBeGreaterThan(0));
     expect(configuration.getNotificationRules).toHaveBeenCalledTimes(1);
     expect(screen.queryByText('FLOW-04')).not.toBeInTheDocument();
@@ -49,7 +49,7 @@ describe('LINE 通知規則 query 與 mutation 接線', () => {
     const empty = { revision: 0, definition: {} } as const;
     const { customer, identity, configuration } = dependencies(empty);
     render(<LineManagementPage customerService={customer} lineIdentity={identity} lineConfiguration={configuration} />);
-    fireEvent.click(screen.getByRole('button', { name: /4\. 通知規則/ }));
+    fireEvent.click(screen.getByRole('button', { name: '通知與發送' }));
     await screen.findByText('目前尚未設定通知規則');
     expect(screen.queryByText(/Current revision|revision：0/i)).not.toBeInTheDocument();
     expect(screen.queryByText('FLOW-13')).not.toBeInTheDocument();

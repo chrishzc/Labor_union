@@ -4,6 +4,33 @@
  */
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  Baby,
+  Bot,
+  CalendarDays,
+  ClipboardCheck,
+  Eraser,
+  FilePenLine,
+  FileText,
+  GitCompareArrows,
+  Headphones,
+  Info,
+  KeyRound,
+  MapPin,
+  Menu,
+  PackageSearch,
+  RefreshCw,
+  Rocket,
+  Search,
+  Settings,
+  ShieldCheck,
+  Smartphone,
+  Sparkles,
+  Star,
+  TriangleAlert,
+  Users,
+  WalletCards,
+} from 'lucide-react';
+import {
   adaptCustomerServiceDetail,
   adaptCustomerServicePage,
   adaptCustomerServiceResolvePreview,
@@ -122,6 +149,10 @@ import {
 } from '../components/LineUnboundPairingWorkbench';
 import { LineNotificationRulesMutationPanel } from '../components/LineNotificationRulesMutationPanel';
 import { LineRichMenuPublicationActions } from '../components/LineRichMenuPublicationActions';
+import {
+  lineRichMenuPublicationClient,
+  type LineRichMenuPublicationClient,
+} from '../api/line_rich_menu_publication/line_rich_menu_publication_client';
 import { LineRichMenuDraftActionEditor } from '../components/LineRichMenuDraftActionEditor';
 import { LineRichMenuDraftAppearanceEditor } from '../components/LineRichMenuDraftAppearanceEditor';
 import { SafeReviewLinkWorkbench } from '../components/SafeReviewLinkWorkbench';
@@ -133,6 +164,22 @@ import type {
 import './LineManagementPage.css';
 
 type LineTab = 'tickets' | 'richmenu' | 'binding' | 'push_queue' | 'order_groups' | 'runtime';
+type NotificationWorkspaceTab = 'rules' | 'onboarding' | 'delivery';
+type RichMenuWorkspaceTab = 'overview' | 'appearance' | 'actions' | 'publish' | 'history';
+
+function currentHashParams(): URLSearchParams {
+  return new URLSearchParams(window.location.hash.split('?', 2)[1] ?? '');
+}
+
+function hashChoice<T extends string>(params: URLSearchParams, key: string, allowed: readonly T[], fallback: T): T {
+  const value = params.get(key) as T | null;
+  return value !== null && allowed.includes(value) ? value : fallback;
+}
+
+function hashPage(params: URLSearchParams, key: string): number {
+  const value = Number.parseInt(params.get(key) ?? '', 10);
+  return Number.isSafeInteger(value) && value > 0 ? value : 1;
+}
 
 type CustomerServicePageClient = Pick<CustomerServiceClient, 'getSummary' | 'listTickets' | 'getTicketDetail'> &
   Partial<Pick<CustomerServiceClient, 'previewResolve' | 'applyResolve'>>;
@@ -155,10 +202,14 @@ interface LineManagementPageProps {
   lineIdentity?: LineIdentityPageClient;
   lineConfiguration?: LineConfigurationQueryClient;
   richMenuDraft?: LineRichMenuDraftClient;
+  richMenuPublication?: LineRichMenuPublicationClient;
+  richMenuPublicationPollIntervalMs?: number;
   runtimeTarget?: typeof lineRuntimeTargetClient;
   escalation?: typeof customerServiceEscalationClient;
   delivery?: typeof lineDeliveryQueryClient;
   safeReviewLink?: SafeReviewLinkClient;
+  /** Render only the safety and human-escalation workspace inside the canonical Group & Security page. */
+  runtimeOnly?: boolean;
 }
 
 type QueryStatus = 'idle' | 'loading' | 'loaded' | 'error';
@@ -235,12 +286,11 @@ function displayQueryError(error: unknown, fallback: string): string {
 }
 
 const TABS: ReadonlyArray<readonly [LineTab, string, string]> = [
-  ['tickets', '📋 1. 客服工單與案件追蹤', 'line.tab.tickets'],
-  ['richmenu', '📱 2. 多角色 Rich Menu 圖文選單', 'line.tab.richmenu'],
-  ['binding', '🔑 3. LINE 身分綁定與授權', 'line.tab.binding'],
-  ['push_queue', '🔔 4. 通知規則目錄', 'line.tab.push-queue'],
-  ['order_groups', '👥 5. 三方服務群組', 'line.tab.order-groups'],
-  ['runtime', '🛡️ 6. 安全設定與人工升級', 'line.tab.runtime'],
+  ['tickets', '客服與案件', 'line.tab.tickets'],
+  ['richmenu', 'Rich Menu', 'line.tab.richmenu'],
+  ['binding', '身分與授權', 'line.tab.binding'],
+  ['push_queue', '通知與發送', 'line.tab.push-queue'],
+  ['order_groups', '三方服務群組', 'line.tab.order-groups'],
 ];
 
 const SAFE_CONFIGURATION_KINDS: readonly LineSafeConfigKind[] = [
@@ -248,9 +298,25 @@ const SAFE_CONFIGURATION_KINDS: readonly LineSafeConfigKind[] = [
   'customer_service', 'notification_rules',
 ];
 
+function LineErrorMessage({ error }: { error?: string | null }) {
+  const errorText = error ?? '資料讀取失敗，請重新整理後再試。';
+  const technicalMatch = errorText.match(/^([a-z][a-z0-9_]+)\s*[:：]\s*(.+)$/i);
+  return (
+    <div className="line-error" role="alert">
+      <span>{technicalMatch?.[2] ?? errorText}</span>
+      {technicalMatch && (
+        <details className="line-error-technical">
+          <summary>技術資訊</summary>
+          <code>{technicalMatch[1]}</code>
+        </details>
+      )}
+    </div>
+  );
+}
+
 function LoadingOrError({ state, loadingText }: { state: QueryState<unknown>; loadingText: string }) {
   if (state.status === 'loading') return <div className="line-loading">{loadingText}</div>;
-  if (state.status === 'error') return <div className="line-error" role="alert">{state.error}</div>;
+  if (state.status === 'error') return <LineErrorMessage error={state.error} />;
   return null;
 }
 
@@ -284,6 +350,35 @@ function getTypedButtonAction(btn: RichMenuButtonModel) {
   if (action.kind === 'message') return { type: 'MESSAGE', uri: null, text: action.text, data: null, alias: null } as const;
   if (action.kind === 'postback') return { type: 'POSTBACK', uri: null, text: null, data: action.data, alias: null } as const;
   return { type: 'RICHMENU_SWITCH', uri: null, text: null, data: action.data, alias: action.richMenuAliasId } as const;
+}
+
+const CANONICAL_RICH_MENU_ROUTES: Readonly<Record<string, string>> = {
+  'entry:gateway': '/line-gateway',
+  'entry:registration': '/line-bind',
+  'target:gateway': '/line-gateway',
+  'target:profile_update': '/line-profile-guard',
+  'target:staff_order_search': '/line-staff-orders',
+  'target:staff_schedule': '/line-staff-schedule',
+  'target:staff_leave_apply': '/line-staff-schedule',
+  'target:staff_baby_log': '/line-staff-baby-log',
+  'target:staff_payout': '/line-staff-payout',
+  'target:customer_service': '/line-mobile-admin?target=customer_service',
+  'target:scheduling_review': '/line-mobile-admin?target=scheduling_review',
+  'target:staff_review': '/line-mobile-admin?target=staff_review',
+};
+
+export function resolveRichMenuUri(uri: string | null): string | null {
+  if (!uri) return null;
+  try {
+    const parsed = new URL(uri, 'https://line.invalid/line-identity');
+    const entry = parsed.searchParams.get('entry');
+    const target = parsed.searchParams.get('target');
+    if (entry && CANONICAL_RICH_MENU_ROUTES[`entry:${entry}`]) return CANONICAL_RICH_MENU_ROUTES[`entry:${entry}`];
+    if (target && CANONICAL_RICH_MENU_ROUTES[`target:${target}`]) return CANONICAL_RICH_MENU_ROUTES[`target:${target}`];
+    return parsed.origin === 'https://line.invalid' ? `${parsed.pathname}${parsed.search}${parsed.hash}` : parsed.toString();
+  } catch {
+    return uri;
+  }
 }
 
 function mergeRichMenuAppearance(
@@ -334,20 +429,31 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
   lineIdentity = lineIdentityClient,
   lineConfiguration = lineConfigurationQueryClient,
   richMenuDraft = lineRichMenuDraftClient,
+  richMenuPublication = lineRichMenuPublicationClient,
+  richMenuPublicationPollIntervalMs = 1500,
   runtimeTarget = lineRuntimeTargetClient,
   escalation = customerServiceEscalationClient,
   delivery = lineDeliveryQueryClient,
   safeReviewLink = safeReviewLinkClient,
+  runtimeOnly = false,
 }) => {
-  const [activeTab, setActiveTab] = useState<LineTab>('tickets');
+  const initialHashParams = useRef(currentHashParams()).current;
+  const [activeTab, setActiveTab] = useState<LineTab>(runtimeOnly ? 'runtime' : hashChoice<LineTab>(initialHashParams, 'tab', ['tickets', 'richmenu', 'binding', 'push_queue', 'order_groups'], 'tickets'));
+  const [notificationWorkspaceTab, setNotificationWorkspaceTab] = useState<NotificationWorkspaceTab>(hashChoice<NotificationWorkspaceTab>(initialHashParams, 'notice', ['rules', 'onboarding', 'delivery'], 'rules'));
+  const [richMenuWorkspaceTab, setRichMenuWorkspaceTab] = useState<RichMenuWorkspaceTab>(hashChoice<RichMenuWorkspaceTab>(initialHashParams, 'rich', ['overview', 'appearance', 'actions', 'publish', 'history'], 'overview'));
+  const [notificationRuleSearch, setNotificationRuleSearch] = useState(initialHashParams.get('rule_q') ?? '');
+  const [notificationRuleEvent, setNotificationRuleEvent] = useState(initialHashParams.get('rule_event') ?? 'all');
+  const [notificationRuleRecipient, setNotificationRuleRecipient] = useState(initialHashParams.get('rule_recipient') ?? 'all');
+  const [notificationRuleEnabled, setNotificationRuleEnabled] = useState<'all' | 'enabled' | 'disabled'>(hashChoice<'all' | 'enabled' | 'disabled'>(initialHashParams, 'rule_state', ['all', 'enabled', 'disabled'], 'all'));
+  const [notificationRulePage, setNotificationRulePage] = useState(hashPage(initialHashParams, 'rule_page'));
   const [ticketSummary, setTicketSummary] = useState<QueryState<CustomerServiceSummaryModel>>(idleState);
   const [ticketPage, setTicketPage] = useState<QueryState<CustomerServicePageModel>>(idleState);
   const [ticketReload, setTicketReload] = useState(0);
-  const [ticketPageNumber, setTicketPageNumber] = useState(1);
+  const [ticketPageNumber, setTicketPageNumber] = useState(hashPage(initialHashParams, 'ticket_page'));
   const ticketPageSize = 25;
-  const [ticketSearchQuery, setTicketSearchQuery] = useState('');
-  const [ticketStatusFilter, setTicketStatusFilter] = useState<'all' | 'waiting' | 'handling' | 'resolved'>('all');
-  const [ticketCategoryFilter, setTicketCategoryFilter] = useState<string>('all');
+  const [ticketSearchQuery, setTicketSearchQuery] = useState(initialHashParams.get('ticket_q') ?? '');
+  const [ticketStatusFilter, setTicketStatusFilter] = useState<'all' | 'waiting' | 'handling' | 'resolved'>(hashChoice<'all' | 'waiting' | 'handling' | 'resolved'>(initialHashParams, 'ticket_state', ['all', 'waiting', 'handling', 'resolved'], 'all'));
+  const [ticketCategoryFilter, setTicketCategoryFilter] = useState<string>(initialHashParams.get('ticket_category') ?? 'all');
   const [ticketScopeBlocker, setTicketScopeBlocker] = useState<string | null>(null);
   const [ticketDetail, setTicketDetail] = useState<QueryState<CustomerServiceDetailModel>>(idleState);
   const ticketDetailController = useRef<AbortController | null>(null);
@@ -365,10 +471,10 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
   const [bindingPage, setBindingPage] = useState<QueryState<{ items: LineIdentityBindingRowViewModel[]; total: number; page: number; pageSize: number }>>(idleState);
   const [bindingSources, setBindingSources] = useState<readonly string[]>([]);
   const [bindingReload, setBindingReload] = useState(0);
-  const [bindingPageNumber, setBindingPageNumber] = useState(1);
+  const [bindingPageNumber, setBindingPageNumber] = useState(hashPage(initialHashParams, 'binding_page'));
   const bindingPageSize = 25;
-  const [bindingSearchQuery, setBindingSearchQuery] = useState('');
-  const [bindingRoleFilter, setBindingRoleFilter] = useState<'all' | 'customer' | 'staff' | 'admin'>('all');
+  const [bindingSearchQuery, setBindingSearchQuery] = useState(initialHashParams.get('binding_q') ?? '');
+  const [bindingRoleFilter, setBindingRoleFilter] = useState<'active' | 'all' | 'customer' | 'staff' | 'admin'>(hashChoice<'active' | 'all' | 'customer' | 'staff' | 'admin'>(initialHashParams, 'binding_role', ['active', 'all', 'customer', 'staff', 'admin'], 'active'));
   const [bindingDetail, setBindingDetail] = useState<QueryState<LineIdentityBindingRowViewModel>>(idleState);
   const bindingDetailController = useRef<AbortController | null>(null);
   const bindingDetailGeneration = useRef(0);
@@ -394,7 +500,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
 
   const [orderGroups, setOrderGroups] = useState<QueryState<LineOrderGroupPageView>>(idleState);
   const [orderGroupDetail, setOrderGroupDetail] = useState<QueryState<LineOrderGroupDetailView>>(idleState);
-  const [orderGroupPageNumber, setOrderGroupPageNumber] = useState(1);
+  const [orderGroupPageNumber, setOrderGroupPageNumber] = useState(hashPage(initialHashParams, 'group_page'));
   const orderGroupPageSize = 25;
   const [orderGroupReload, setOrderGroupReload] = useState(0);
   const orderGroupListGeneration = useRef(0);
@@ -437,7 +543,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
   const [richMenuDraftSnapshot, setRichMenuDraftSnapshot] = useState<RichMenuDraft | null>(null);
   const [richMenuLocalDefinition, setRichMenuLocalDefinition] = useState<RichMenuDraftDefinition | null>(null);
   const [richMenuPublications, setRichMenuPublications] = useState<QueryState<LineRichMenuPublicationPageModel>>(idleState);
-  const [richMenuPublicationPageNumber, setRichMenuPublicationPageNumber] = useState(1);
+  const [richMenuPublicationPageNumber, setRichMenuPublicationPageNumber] = useState(hashPage(initialHashParams, 'rich_page'));
   const richMenuPublicationPageSize = 25;
   const [richMenuReload, setRichMenuReload] = useState(0);
   const richMenuListGeneration = useRef(0);
@@ -446,6 +552,14 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
   const publicationController = useRef<AbortController | null>(null);
   const publicationGeneration = useRef(0);
   const publicationDetailId = useRef<number | null>(null);
+  const [trackedRichMenuPublication, setTrackedRichMenuPublication] = useState<{
+    id: number;
+    menuDefinitionId: string;
+    configurationRevision: number;
+    status: LineRichMenuPublicationModel['status'];
+    attempts: number;
+    timedOut: boolean;
+  } | null>(null);
 
   // Rich Menu 本機互動沙盒與比對狀態
   const [activeSimLiff, setActiveSimLiff] = useState<{
@@ -459,6 +573,58 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
     Array<{ id: string; sender: 'user' | 'bot'; text: string; time: string }>
   >([]);
   const [isDiffMode, setIsDiffMode] = useState(false);
+
+  useEffect(() => {
+    if (runtimeOnly) return;
+    const route = window.location.hash.replace(/^#\/?/, '').split('?', 1)[0];
+    if (route !== 'line-management' && route !== 'line') return;
+    const params = currentHashParams();
+    const setParam = (key: string, value: string | number, fallback: string | number) => {
+      if (value === fallback || value === '') params.delete(key);
+      else params.set(key, String(value));
+    };
+    setParam('tab', activeTab, 'tickets');
+    setParam('notice', notificationWorkspaceTab, 'rules');
+    setParam('rich', richMenuWorkspaceTab, 'overview');
+    setParam('ticket_q', ticketSearchQuery, '');
+    setParam('ticket_state', ticketStatusFilter, 'all');
+    setParam('ticket_category', ticketCategoryFilter, 'all');
+    setParam('ticket_page', ticketPageNumber, 1);
+    setParam('binding_q', bindingSearchQuery, '');
+    setParam('binding_role', bindingRoleFilter, 'active');
+    setParam('binding_page', bindingPageNumber, 1);
+    setParam('rule_q', notificationRuleSearch, '');
+    setParam('rule_event', notificationRuleEvent, 'all');
+    setParam('rule_recipient', notificationRuleRecipient, 'all');
+    setParam('rule_state', notificationRuleEnabled, 'all');
+    setParam('rule_page', notificationRulePage, 1);
+    setParam('rich_page', richMenuPublicationPageNumber, 1);
+    setParam('group_page', orderGroupPageNumber, 1);
+    const query = params.toString();
+    const nextHash = `#${route}${query ? `?${query}` : ''}`;
+    if (window.location.hash !== nextHash) {
+      window.history.replaceState(window.history.state, '', `${window.location.pathname}${window.location.search}${nextHash}`);
+    }
+  }, [
+    activeTab,
+    bindingPageNumber,
+    bindingRoleFilter,
+    bindingSearchQuery,
+    notificationRuleEnabled,
+    notificationRuleEvent,
+    notificationRulePage,
+    notificationRuleRecipient,
+    notificationRuleSearch,
+    notificationWorkspaceTab,
+    orderGroupPageNumber,
+    richMenuPublicationPageNumber,
+    richMenuWorkspaceTab,
+    runtimeOnly,
+    ticketCategoryFilter,
+    ticketPageNumber,
+    ticketSearchQuery,
+    ticketStatusFilter,
+  ]);
 
   useEffect(() => {
     if (activeTab !== 'tickets') return;
@@ -502,7 +668,10 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
       void lineIdentity.listBindings({
         page: bindingPageNumber,
         page_size: bindingPageSize,
-        subject_type: bindingRoleFilter === 'all' ? undefined : bindingRoleFilter,
+        status: bindingRoleFilter === 'all' ? undefined : 'bound',
+        subject_type: bindingRoleFilter === 'active' || bindingRoleFilter === 'all'
+          ? undefined
+          : bindingRoleFilter,
         search: bindingSearchQuery.trim() || undefined,
       }, { signal: controller.signal })
         .then((page) => {
@@ -572,6 +741,56 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
     }, 0);
     return () => { cancelled = true; window.clearTimeout(timer); controller.abort(); };
   }, [activeTab, lineConfiguration, richMenuDraft, richMenuPublicationPageNumber, richMenuReload]);
+
+  useEffect(() => {
+    const tracked = trackedRichMenuPublication;
+    if (
+      activeTab !== 'richmenu'
+      || !tracked
+      || tracked.timedOut
+      || !['queued', 'publishing'].includes(tracked.status)
+    ) return;
+    if (tracked.attempts >= 80) {
+      setTrackedRichMenuPublication((current) => current?.id === tracked.id
+        ? { ...current, timedOut: true }
+        : current);
+      return;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      void lineConfiguration.getRichMenuPublication(tracked.id, { signal: controller.signal })
+        .then((publication) => {
+          if (controller.signal.aborted) return;
+          const current = adaptLineRichMenuPublication(publication);
+          setTrackedRichMenuPublication((existing) => existing?.id === tracked.id
+            ? {
+                ...existing,
+                status: current.status,
+                attempts: existing.attempts + 1,
+              }
+            : existing);
+          if (!['queued', 'publishing'].includes(current.status)) {
+            setRichMenuPublicationPageNumber(1);
+            setRichMenuReload((value) => value + 1);
+          }
+        })
+        .catch(() => {
+          if (controller.signal.aborted) return;
+          setTrackedRichMenuPublication((existing) => existing?.id === tracked.id
+            ? { ...existing, attempts: existing.attempts + 1 }
+            : existing);
+        });
+    }, richMenuPublicationPollIntervalMs);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [
+    activeTab,
+    lineConfiguration,
+    richMenuPublicationPollIntervalMs,
+    trackedRichMenuPublication,
+  ]);
 
   useEffect(() => {
     if (activeTab !== 'order_groups') return;
@@ -1190,11 +1409,18 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
   };
 
   return (
-    <div className="line-page-wrapper" data-control-id="line.page">
-      <div className="page-header-banner line-page-header"><div><h1 className="page-title">💬 LINE 官方帳號與推播管理中心</h1><p className="page-subtitle">客服工單、身分綁定、Rich Menu、通知與三方群組整合工作區。</p></div><span className="line-query-badge">系統流程已連線</span></div>
-      <div className="line-tab-bar" aria-label="LINE 管理工作區">{TABS.map(([tab, label, id]) => <button key={tab} type="button" data-control-id={id} className={`line-tab-btn ${activeTab === tab ? 'active' : ''}`} onClick={() => setActiveTab(tab)}>{label}</button>)}</div>
+    <div className={`line-page-wrapper${runtimeOnly ? ' line-runtime-embedded' : ''}`} data-control-id="line.page">
+      {!runtimeOnly && <header className="page-header-banner line-page-header">
+        <div>
+          <p className="line-hub-eyebrow">LINE 專區</p>
+          <h1 className="page-title">客服與營運工作台</h1>
+          <p className="page-subtitle">處理客服案件、圖文選單、身分、通知與服務群組。</p>
+        </div>
+        <span className="line-query-badge">系統流程已連線</span>
+      </header>}
+      {!runtimeOnly && <nav className="line-tab-bar" aria-label="客服與營運功能">{TABS.map(([tab, label, id]) => <button key={tab} type="button" data-control-id={id} className={`line-tab-btn ${activeTab === tab ? 'active' : ''}`} aria-current={activeTab === tab ? 'page' : undefined} onClick={() => setActiveTab(tab)}>{label}</button>)}</nav>}
 
-      {activeTab === 'push_queue' && rawRules && <LineNotificationRulesMutationPanel catalog={rawRules} selectedRuleId={selectedRule?.id ?? null} onCommitted={() => setRulesReload((value) => value + 1)} />}
+      {activeTab === 'push_queue' && notificationWorkspaceTab === 'rules' && rawRules && <LineNotificationRulesMutationPanel catalog={rawRules} selectedRuleId={selectedRule?.id ?? null} onCommitted={() => setRulesReload((value) => value + 1)} />}
 
       {activeTab === 'tickets' && (() => {
         const rawList = ticketPage.value?.items ?? [];
@@ -1222,12 +1448,12 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
           <section className="line-table-container">
             <div className="line-section-heading">
               <div>
-                <h3>📋 客服工單與案件關聯追蹤清單</h3>
+                <h2>客服工單與案件追蹤</h2>
                 <p>追蹤來自 LINE 官方帳號之真人諮詢、異動申請、補助計算與客訴工單，提供即時指派、回覆與結案工作流。</p>
               </div>
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <div className="line-inline-actions">
                 <button type="button" className="line-secondary-btn" onClick={() => { setTicketPageNumber(1); setTicketReload((value) => value + 1); }}>
-                  🔄 重新整理
+                  <RefreshCw aria-hidden="true" />重新整理
                 </button>
               </div>
             </div>
@@ -1236,15 +1462,15 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
             {ticketSummary.status === 'loaded' && ticketSummary.value && (
               <div className="line-kpi-grid">
                 <div data-control-id="line.ticket.summary.waiting">
-                  <span>⏳ 待處理工單</span>
+                  <span>待處理工單</span>
                   <strong>{ticketSummary.value.waiting}</strong>
                 </div>
                 <div data-control-id="line.ticket.summary.handling">
-                  <span>🔄 處理中工單</span>
+                  <span>處理中工單</span>
                   <strong>{ticketSummary.value.handling}</strong>
                 </div>
                 <div data-control-id="line.ticket.summary.resolved_today">
-                  <span>✅ 今日已結案</span>
+                  <span>今日已結案</span>
                   <strong>{ticketSummary.value.resolvedToday}</strong>
                 </div>
               </div>
@@ -1253,16 +1479,17 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
             {/* 搜尋與進階篩選工具列 */}
             <div className="line-search-filter-toolbar">
               <div className="line-search-input-wrapper">
-                <span className="line-search-icon">🔍</span>
+                <span className="line-search-icon"><Search aria-hidden="true" /></span>
                 <input
                   type="text"
                   className="line-search-input"
+                  aria-label="搜尋客服工單"
                   placeholder="搜尋工單編號、案件編號 (ORD-*)、客戶或問題..."
                   value={ticketSearchQuery}
                   onChange={(e) => { setTicketPageNumber(1); setTicketSearchQuery(e.target.value); }}
                 />
                 {ticketSearchQuery && (
-                    <button type="button" className="line-search-clear-btn" onClick={() => { setTicketPageNumber(1); setTicketSearchQuery(''); }}>
+                    <button type="button" className="line-search-clear-btn" aria-label="清除客服工單搜尋" onClick={() => { setTicketPageNumber(1); setTicketSearchQuery(''); }}>
                     ✕
                   </button>
                 )}
@@ -1270,41 +1497,56 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
 
               <div className="line-filter-selects">
                 <select
+                  aria-label="篩選客服工單處理狀態"
                   value={ticketStatusFilter}
                    onChange={(e) => { setTicketPageNumber(1); setTicketStatusFilter(e.target.value as 'all' | 'waiting' | 'handling' | 'resolved'); }}
                   className="line-filter-select"
                 >
                   <option value="all">處理狀態 (全部)</option>
-                  <option value="waiting">⏳ 待處理</option>
-                  <option value="handling">🔄 處理中</option>
-                  <option value="resolved">✅ 已結案</option>
+                  <option value="waiting">待處理</option>
+                  <option value="handling">處理中</option>
+                  <option value="resolved">已結案</option>
                 </select>
 
                 <select
+                  aria-label="篩選客服工單問題分類"
                   value={ticketCategoryFilter}
                    onChange={(e) => { setTicketPageNumber(1); setTicketCategoryFilter(e.target.value); }}
                   className="line-filter-select"
                 >
                   <option value="all">問題分類 (全部)</option>
-                  <option value="service_flow">📋 服務流程諮詢</option>
-                  <option value="payment_subsidy">💰 收費與補助</option>
-                  <option value="service_progress">📦 服務進度</option>
-                  <option value="profile_update">✏️ 異動申請</option>
-                  <option value="contact_union">📞 聯絡工會</option>
-                  <option value="other">📝 其他問題</option>
+                  <option value="service_flow">服務流程諮詢</option>
+                  <option value="payment_subsidy">收費與補助</option>
+                  <option value="service_progress">服務進度</option>
+                  <option value="profile_update">異動申請</option>
+                  <option value="contact_union">聯絡工會</option>
+                  <option value="other">其他問題</option>
                 </select>
               </div>
+              {(ticketSearchQuery || ticketStatusFilter !== 'all' || ticketCategoryFilter !== 'all') && (
+                <button
+                  type="button"
+                  className="line-secondary-btn line-clear-filters-btn"
+                  onClick={() => {
+                    setTicketPageNumber(1);
+                    setTicketSearchQuery('');
+                    setTicketStatusFilter('all');
+                    setTicketCategoryFilter('all');
+                  }}
+                >
+                  清除條件
+                </button>
+              )}
             </div>
 
             {ticketSummary.status === 'loading' && <div className="line-loading">正在載入客服摘要…</div>}
-            {ticketSummary.status === 'error' && <div className="line-error" role="alert">{ticketSummary.error}</div>}
+            {ticketSummary.status === 'error' && <LineErrorMessage error={ticketSummary.error} />}
             {ticketPage.status === 'loading' && <div className="line-loading">正在載入客服工單…</div>}
-            {ticketPage.status === 'error' && <div className="line-error" role="alert">{ticketPage.error}</div>}
+            {ticketPage.status === 'error' && <LineErrorMessage error={ticketPage.error} />}
             {ticketScopeBlocker && <div className="line-scope-note" role="status">{ticketScopeBlocker}</div>}
 
             {ticketPage.status !== 'loaded' || ticketScopeBlocker ? null : filteredList.length === 0 ? (
               <div className="line-empty-state">
-                <div>📋</div>
                 <h4>目前沒有符合篩選條件的客服工單</h4>
                 <p>可調整搜尋關鍵字、切換分類或由 LINE 客服入口建立新工單。</p>
               </div>
@@ -1315,30 +1557,31 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                 </div>
                 <div className="line-table-scroll">
                   <table className="line-data-table" data-control-id="line.ticket.table">
+                    <caption className="sr-only">LINE 客服工單與案件清單</caption>
                     <thead>
                       <tr>
-                        <th>工單編號</th>
-                        <th>提問對象</th>
-                        <th>關聯案件</th>
-                        <th>分類</th>
-                        <th>問題摘要與最新對話</th>
-                        <th>時間</th>
-                        <th>狀態</th>
-                        <th style={{ textAlign: 'right' }}>操作</th>
+                        <th scope="col">工單編號</th>
+                        <th scope="col">提問對象</th>
+                        <th scope="col">關聯案件</th>
+                        <th scope="col">分類</th>
+                        <th scope="col">問題摘要與最新對話</th>
+                        <th scope="col">時間</th>
+                        <th scope="col">狀態</th>
+                        <th scope="col" className="line-table-action-cell">操作</th>
                       </tr>
                     </thead>
                     <tbody>
                       {filteredList.map((ticket) => (
                         <tr key={ticket.ticketId}>
-                          <td><strong style={{ fontFamily: 'monospace', color: '#a43c12' }}>#{ticket.ticketIdText}</strong></td>
-                          <td>👤 {ticket.lineUserId}</td>
+                          <td><strong className="line-ticket-id">#{ticket.ticketIdText}</strong></td>
+                          <td>{ticket.lineUserId}</td>
                           <td>
                             {ticket.caseNo ? (
-                              <span style={{ color: '#ff7f50', fontWeight: 600, textDecoration: 'underline' }}>
+                              <span className="line-ticket-case-link">
                                 {ticket.caseNo}
                               </span>
                             ) : (
-                              <span style={{ color: '#999' }}>無關聯</span>
+                              <span className="line-muted-placeholder">無關聯</span>
                             )}
                           </td>
                           <td>
@@ -1346,10 +1589,10 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                               {ticket.categoryLabel}
                             </span>
                           </td>
-                          <td style={{ maxWidth: '280px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <td className="line-truncate-cell">
                             {ticket.issueSummary ?? CUSTOMER_SERVICE_LIST_SUMMARY_UNAVAILABLE}
                           </td>
-                          <td style={{ whiteSpace: 'nowrap', color: '#74593f', fontSize: '0.82rem' }}>
+                          <td className="line-table-date">
                             {ticket.createdAt ?? '—'}
                           </td>
                           <td>
@@ -1357,7 +1600,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                               {ticket.statusLabel}
                             </span>
                           </td>
-                          <td style={{ textAlign: 'right' }}>
+                          <td className="line-table-action-cell">
                             <button
                               type="button"
                               className="line-action-link-btn"
@@ -1365,7 +1608,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                               aria-label="查看明細"
                               onClick={() => openTicket(ticket.ticketId)}
                             >
-                              [ 🔍 查看明細 ]
+                              查看明細
                             </button>
                           </td>
                         </tr>
@@ -1376,7 +1619,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
 
                 {/* 分頁控制列 */}
                 <div className="line-pagination-bar">
-                  <span style={{ fontSize: '0.85rem', color: '#74593f' }}>
+                  <span className="line-card-meta">
                      顯示第 {ticketRangeStart} 至 {ticketRangeEnd} 筆，共 {ticketTotal} 筆工單
                    </span>
                    <div className="line-pagination-controls">
@@ -1402,12 +1645,17 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
               && lock.configuration_revision === richMenuDraftSnapshot.revision,
           )
           : undefined;
+        const activePublicationTracking = activeMenu && richMenuDraftSnapshot
+          && trackedRichMenuPublication?.menuDefinitionId === activeMenu.id
+          && trackedRichMenuPublication.configurationRevision === richMenuDraftSnapshot.revision
+          ? trackedRichMenuPublication
+          : null;
 
         return (
           <section className="line-table-container" data-control-id="line.richmenu.configuration">
             <div className="line-section-heading">
               <div>
-                <h3>📱 多角色 Rich Menu 圖文選單管理中心</h3>
+                <h2>多角色 Rich Menu 管理</h2>
             <p>可編輯草稿的背景、名稱與按鈕動作；草稿保存不會發布，正式發布另須檢查影響並由人員確認。</p>
               </div>
               <button
@@ -1416,9 +1664,29 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                 data-control-id="line.richmenu.refresh"
                 onClick={() => setRichMenuReload((value) => value + 1)}
               >
-                🔄 重新整理
+                <RefreshCw aria-hidden="true" />重新整理
               </button>
             </div>
+
+            <nav className="line-hub-section-tabs richmenu-workspace-tabs" aria-label="Rich Menu 工作區">
+              {([
+                ['overview', '選單概覽'],
+                ['appearance', '外觀編輯'],
+                ['actions', '按鈕動作'],
+                ['publish', '發布'],
+                ['history', '發布歷程'],
+              ] as const).map(([tab, label]) => (
+                <button
+                  key={tab}
+                  type="button"
+                  className={richMenuWorkspaceTab === tab ? 'active' : ''}
+                  aria-current={richMenuWorkspaceTab === tab ? 'page' : undefined}
+                  onClick={() => setRichMenuWorkspaceTab(tab)}
+                >
+                  {label}
+                </button>
+              ))}
+            </nav>
 
             <LoadingOrError state={richMenuConfiguration} loadingText="正在載入 Rich Menu 設定…" />
             {richMenuConfiguration.status === 'loaded' && richMenuConfiguration.value?.isEmpty && (
@@ -1429,9 +1697,9 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
             )}
 
             {/* 工具與模式切換列 */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: '16px' }}>
+            <div className="richmenu-toolbar">
               {/* 角色選單切換列 */}
-              <div className="richmenu-role-tabs" style={{ marginBottom: 0, paddingBottom: 0, borderBottom: 'none' }}>
+              <div className="richmenu-role-tabs richmenu-role-tabs-toolbar">
                 {menus.map((menu) => (
                   <button
                     key={menu.id}
@@ -1448,35 +1716,30 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
               </div>
 
               {/* Diff Mode 與模擬控制 */}
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <div className="richmenu-toolbar-actions">
                 <button
                   type="button"
-                  className={`line-secondary-btn ${isDiffMode ? 'active' : ''}`}
-                  style={{
-                    background: isDiffMode ? '#ff7f50' : '#ffffff',
-                    color: isDiffMode ? '#ffffff' : '#7c2d12',
-                    borderColor: '#ff7f50',
-                    fontWeight: 700,
-                  }}
+                  className={`line-secondary-btn richmenu-diff-toggle ${isDiffMode ? 'active' : ''}`}
                   onClick={() => setIsDiffMode(!isDiffMode)}
                 >
-                  {isDiffMode ? '✨ 關閉版本比對' : '✨ 開啟版本變更比對'}
+                  <GitCompareArrows aria-hidden="true" />
+                  {isDiffMode ? '關閉版本比對' : '開啟版本變更比對'}
                 </button>
                 {simChatMessages.length > 0 && (
                   <button
                     type="button"
-                    className="line-secondary-btn"
-                    style={{ fontSize: '0.8rem', padding: '6px 12px' }}
+                  className="line-secondary-btn richmenu-compact-action"
                     onClick={() => setSimChatMessages([])}
                   >
-                    🧹 清除模擬對話
+                    <Eraser aria-hidden="true" />
+                    清除模擬對話
                   </button>
                 )}
               </div>
             </div>
 
             {/* 本機幾何初檢；正式路由與發布資格只由 server Preview 裁決。 */}
-            {activeMenu && (() => {
+            {activeMenu && (richMenuWorkspaceTab === 'overview' || richMenuWorkspaceTab === 'publish') && (() => {
               const targetW = activeMenu.width;
               const targetH = activeMenu.height;
               let totalArea = 0;
@@ -1518,24 +1781,13 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
 
               return (
                 <div
-                  className="richmenu-safety-banner"
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '12px 18px',
-                    borderRadius: '12px',
-                    marginBottom: '20px',
-                    background: localGeometryPassed ? '#f0fdf4' : '#fffbeb',
-                    border: `1px solid ${localGeometryPassed ? '#86efac' : '#fcd34d'}`,
-                    color: localGeometryPassed ? '#166534' : '#92400e',
-                  }}
+                  className={`richmenu-safety-banner ${localGeometryPassed ? 'is-safe' : 'has-warning'}`}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <span style={{ fontSize: '1.25rem' }}>{localGeometryPassed ? '🛡️' : '⚠️'}</span>
+                  <div className="richmenu-safety-copy">
+                    <span className="richmenu-safety-icon">{localGeometryPassed ? <ShieldCheck aria-hidden="true" /> : <TriangleAlert aria-hidden="true" />}</span>
                     <div>
                       <strong>本機幾何初檢：</strong>
-                      <span style={{ marginLeft: '6px', fontSize: '0.88rem' }}>
+                      <span className="richmenu-safety-description">
                         {localGeometryPassed
                           ? `熱區位於 ${targetW}×${targetH} 畫布內、無重疊並完整覆蓋。`
                           : `需修正：${geometryIssues.join('、')}。`}
@@ -1543,16 +1795,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                       </span>
                     </div>
                   </div>
-                  <span
-                    style={{
-                      fontSize: '0.78rem',
-                      fontWeight: 700,
-                      padding: '4px 10px',
-                      borderRadius: '9999px',
-                      background: localGeometryPassed ? '#bbf7d0' : '#fef08a',
-                      color: localGeometryPassed ? '#14532d' : '#854d0e',
-                    }}
-                  >
+                  <span className="richmenu-safety-status">
                     {localGeometryPassed ? '本機初檢通過' : '需修正幾何'}
                   </span>
                 </div>
@@ -1560,16 +1803,16 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
             })()}
 
             {/* 左右分割工作台 */}
-            {activeMenu && (
-            <div className="richmenu-studio-grid">
+            {activeMenu && richMenuWorkspaceTab !== 'history' && (
+            <div className={`richmenu-studio-grid richmenu-studio-grid-${richMenuWorkspaceTab}`}>
               {/* 左側：3D 手機即時模擬器 */}
-              <div className="richmenu-phone-card">
+              {richMenuWorkspaceTab !== 'publish' && <div className="richmenu-phone-card">
                 <div className="richmenu-phone-card-header">
-                  <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#a43c12' }}>
-                    📱 手機擬真互動沙盒 (點擊下方按鈕測試)
+                  <span className="richmenu-phone-heading">
+                    手機擬真互動沙盒（點擊下方按鈕測試）
                   </span>
                   {activeSimLiff && (
-                    <span style={{ fontSize: '0.75rem', background: '#fed9b8', color: '#7c2d12', padding: '2px 8px', borderRadius: '6px', fontWeight: 700 }}>
+                    <span className="richmenu-preview-badge">
                       正在預覽 LIFF 表單
                     </span>
                   )}
@@ -1581,13 +1824,13 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                   {/* Status Bar */}
                   <div className="richmenu-phone-statusbar">
                     <span>09:41</span>
-                    <span>●●● 5G 🔋</span>
+                    <span>5G · 100%</span>
                   </div>
                   {/* Header */}
                   <div className="richmenu-phone-topbar">
-                    <span style={{ fontSize: '0.8rem', cursor: 'pointer' }}>‹ 聊天</span>
-                    <strong style={{ fontSize: '0.86rem', color: '#fff' }}>新竹市月子工會 (LINE)</strong>
-                    <span style={{ fontSize: '0.8rem' }}>☰</span>
+                    <span className="richmenu-phone-nav-label">‹ 聊天</span>
+                    <strong className="richmenu-phone-brand">新竹市月子工會 (LINE)</strong>
+                    <span className="richmenu-phone-menu-icon"><Menu aria-hidden="true" /></span>
                   </div>
 
                   {/* LIFF 彈窗預覽層 (In-situ LIFF Modal) */}
@@ -1596,10 +1839,10 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                       <div className="phone-liff-header">
                         <div>
                           <span className="phone-liff-badge">{activeSimLiff.badge}</span>
-                          <h4 style={{ margin: '4px 0 0', fontSize: '0.88rem', color: '#1e1b19', fontWeight: 700 }}>
+                          <h4 className="phone-liff-title">
                             {activeSimLiff.title}
                           </h4>
-                          <small style={{ color: '#74593f', fontSize: '0.72rem' }}>{activeSimLiff.subtitle}</small>
+                          <small className="phone-liff-subtitle">{activeSimLiff.subtitle}</small>
                         </div>
                         <button
                           type="button"
@@ -1642,7 +1885,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                     /* 聊天對話區域 */
                     <div className="richmenu-phone-chat">
                       <div className="richmenu-chat-bubble">
-                        <div className="richmenu-bot-avatar">🤖</div>
+                        <div className="richmenu-bot-avatar"><Bot aria-hidden="true" /></div>
                         <div className="richmenu-bubble-content">
                           <strong>工會小幫手</strong>
                           <p>您好！已載入「{activeMenu.audienceRoleLabel}」專屬選單。請點擊下方 {activeMenu.buttons.length} 個按鈕測試互動反應！</p>
@@ -1653,21 +1896,11 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                         <div
                           key={msg.id}
                           className={`richmenu-chat-bubble ${msg.sender === 'user' ? 'user-bubble' : ''}`}
-                          style={{
-                            alignSelf: msg.sender === 'user' ? 'flex-end' : 'flex-start',
-                            flexDirection: msg.sender === 'user' ? 'row-reverse' : 'row',
-                          }}
                         >
-                          {msg.sender === 'bot' && <div className="richmenu-bot-avatar">🤖</div>}
-                          <div
-                            className="richmenu-bubble-content"
-                            style={{
-                              background: msg.sender === 'user' ? '#d9fdd3' : '#ffffff',
-                              border: msg.sender === 'user' ? '1px solid #bbf7d0' : '1px solid #fed9b8',
-                            }}
-                          >
+                          {msg.sender === 'bot' && <div className="richmenu-bot-avatar"><Bot aria-hidden="true" /></div>}
+                          <div className={`richmenu-bubble-content ${msg.sender === 'user' ? 'user-message' : 'bot-message'}`}>
                             {msg.sender === 'bot' && <strong>工會小幫手</strong>}
-                            <p style={{ margin: 0 }}>{msg.text}</p>
+                            <p className="richmenu-message-text">{msg.text}</p>
                           </div>
                         </div>
                       ))}
@@ -1688,21 +1921,20 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                     {activeMenu.buttons.map((btn) => {
                       const label = btn.label;
                       const act = getTypedButtonAction(btn);
-                      let icon = '📌';
-                      if (label.includes('登記')) icon = '📝';
-                      else if (label.includes('修改') || label.includes('異動')) icon = '✏️';
-                      else if (label.includes('說明') || label.includes('FAQ')) icon = '🔍';
-                      else if (label.includes('客服') || label.includes('諮詢')) icon = '💬';
-                      else if (label.includes('訂單')) icon = '📦';
-                      else if (label.includes('排班') || label.includes('日曆')) icon = '📅';
-                      else if (label.includes('請假')) icon = '🏖️';
-                      else if (label.includes('薪資') || label.includes('請款')) icon = '💵';
-                      else if (label.includes('契約') || label.includes('合約')) icon = '📑';
-                      else if (label.includes('評價') || label.includes('滿意度')) icon = '⭐';
-                      else if (label.includes('審核')) icon = '📋';
-                      else if (label.includes('一般用戶')) icon = '👥';
-                      else if (label.includes('月嫂專區')) icon = '👩‍🍼';
-                      else if (label.includes('工會管理')) icon = '🛡️';
+                      let Icon = MapPin;
+                      if (label.includes('登記')) Icon = FileText;
+                      else if (label.includes('修改') || label.includes('異動')) Icon = FilePenLine;
+                      else if (label.includes('說明') || label.includes('FAQ')) Icon = Info;
+                      else if (label.includes('客服') || label.includes('諮詢')) Icon = Headphones;
+                      else if (label.includes('訂單')) Icon = PackageSearch;
+                      else if (label.includes('排班') || label.includes('日曆') || label.includes('請假')) Icon = CalendarDays;
+                      else if (label.includes('薪資') || label.includes('請款')) Icon = WalletCards;
+                      else if (label.includes('契約') || label.includes('合約')) Icon = FileText;
+                      else if (label.includes('評價') || label.includes('滿意度')) Icon = Star;
+                      else if (label.includes('審核')) Icon = ClipboardCheck;
+                      else if (label.includes('一般用戶')) Icon = Users;
+                      else if (label.includes('月嫂專區')) Icon = Baby;
+                      else if (label.includes('工會管理')) Icon = ShieldCheck;
 
                       return (
                         <button
@@ -1718,12 +1950,16 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                           }}
                           onClick={() => {
                             if (act.type === 'URI') {
+                              const resolvedUri = resolveRichMenuUri(act.uri);
                               setSimChatMessages([]);
                               setActiveSimLiff({
                                 title: 'LIFF／網址動作本機預覽',
                                 subtitle: '僅顯示草稿中的目標；不開啟網址、不送出請求。',
                                 badge: '零寫入預覽',
-                                fields: [{ label: '目標', value: act.uri ?? '未設定' }],
+                                fields: [
+                                  { label: '草稿參數', value: act.uri ?? '未設定' },
+                                  { label: '實際開啟路由', value: resolvedUri ?? '未設定' },
+                                ],
                                 actionButtons: [],
                               });
                               return;
@@ -1758,25 +1994,25 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                             return;
                           }}
                         >
-                          <span className="richmenu-btn-icon">{icon}</span>
+                          <span className="richmenu-btn-icon"><Icon aria-hidden="true" /></span>
                           <span className="richmenu-btn-text">{btn.label}</span>
                         </button>
                       );
                     })}
                   </div>
                 </div>
-              </div>
+              </div>}
 
               {/* 右側：選單定義與發布面板 */}
               <div className="richmenu-inspector-column">
                 {/* Card A: 選單定義與動作熱區綁定 */}
-                <div className="richmenu-card">
+                {(richMenuWorkspaceTab === 'overview' || richMenuWorkspaceTab === 'actions') && <div className="richmenu-card">
                   <div className="richmenu-card-header">
                     <div>
-                      <h4 style={{ margin: 0, fontSize: '1.05rem', color: '#1e1b19', fontWeight: 700 }}>
-                        ⚙️ 選單內容與按鈕設定
-                      </h4>
-                      <p style={{ margin: '4px 0 0', fontSize: '0.82rem', color: '#74593f' }}>
+                      <h3 className="line-card-title richmenu-heading-with-icon">
+                        <Settings aria-hidden="true" />選單內容與按鈕設定
+                      </h3>
+                      <p className="line-card-description">
                         {activeMenu.audienceRoleLabel}｜{activeMenu.name}
                       </p>
                     </div>
@@ -1785,51 +2021,53 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                     </span>
                   </div>
 
-                  <div className="line-table-scroll" style={{ marginTop: '12px' }}>
+                  <div className="line-table-scroll richmenu-table-spacing">
                     <table className="line-data-table">
+                      <caption className="sr-only">Rich Menu 按鈕動作與熱區</caption>
                       <thead>
                         <tr>
-                          <th>熱區</th>
-                          <th>按鈕標題</th>
-                          <th>動作類型</th>
-                          <th>目標參數 / 路由</th>
-                          <th>熱區座標</th>
-                          <th style={{ textAlign: 'right' }}>沙盒測試</th>
+                          <th scope="col">熱區</th>
+                          <th scope="col">按鈕標題</th>
+                          <th scope="col">動作與進階資訊</th>
+                          <th scope="col" className="line-align-end">沙盒測試</th>
                         </tr>
                       </thead>
                       <tbody>
                         {activeMenu.buttons.map((btn, idx) => {
                           const act = getTypedButtonAction(btn);
+                          const resolvedUri = act.type === 'URI' ? resolveRichMenuUri(act.uri) : null;
                           return (
                             <tr key={btn.id}>
                               <td>
-                                <span style={{ display: 'inline-block', width: '20px', height: '20px', lineHeight: '20px', textAlign: 'center', background: '#fed9b8', color: '#7c2d12', borderRadius: '50%', fontSize: '0.75rem', fontWeight: 700 }}>
+                                <span className="richmenu-hotspot-index">
                                   {idx + 1}
                                 </span>
                               </td>
                               <td><strong>{btn.label}</strong></td>
                               <td>
-                                <span style={{ fontSize: '0.78rem', padding: '2px 6px', borderRadius: '4px', background: act.type === 'URI' ? '#eff6ff' : '#f0fdf4', color: act.type === 'URI' ? '#1d4ed8' : '#15803d', fontWeight: 700 }}>
+                                <span className={`richmenu-action-kind ${act.type === 'URI' ? 'is-uri' : 'is-local'}`}>
                                   {act.type}
                                 </span>
+                                <details className="richmenu-advanced-details">
+                                  <summary>進階資訊</summary>
+                                  <div>
+                                    <strong>目標參數／路由</strong>
+                                    <code>
+                                      {act.type === 'URI'
+                                        ? (act.uri || '未設定')
+                                        : act.type === 'MESSAGE'
+                                          ? (act.text || '未設定')
+                                          : act.type === 'RICHMENU_SWITCH'
+                                            ? `${act.alias || '未設定 alias'} / ${act.data || '未設定 data'}`
+                                            : (act.data || '未設定')}
+                                    </code>
+                                    {act.type === 'URI' && resolvedUri && <small>實際開啟：{resolvedUri}</small>}
+                                    <strong>熱區座標</strong>
+                                    <code>x:{btn.bounds.x} y:{btn.bounds.y} w:{btn.bounds.width} h:{btn.bounds.height}</code>
+                                  </div>
+                                </details>
                               </td>
-                              <td>
-                                <code style={{ fontSize: '0.75rem', color: '#475569' }}>
-                                  {act.type === 'URI'
-                                    ? (act.uri || '未設定')
-                                    : act.type === 'MESSAGE'
-                                      ? (act.text || '未設定')
-                                      : act.type === 'RICHMENU_SWITCH'
-                                        ? `${act.alias || '未設定 alias'} / ${act.data || '未設定 data'}`
-                                        : (act.data || '未設定')}
-                                </code>
-                              </td>
-                              <td>
-                                <code style={{ fontSize: '0.75rem', color: '#a43c12' }}>
-                                  x:{btn.bounds.x} y:{btn.bounds.y} w:{btn.bounds.width} h:{btn.bounds.height}
-                                </code>
-                              </td>
-                              <td style={{ textAlign: 'right' }}>
+                              <td className="line-align-end">
                                 <button
                                   type="button"
                                   className="line-action-link-btn"
@@ -1838,7 +2076,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                                     if (syntheticBtn) syntheticBtn.click();
                                   }}
                                 >
-                                  📱 模擬點擊
+                                  <Smartphone aria-hidden="true" />模擬點擊
                                 </button>
                               </td>
                             </tr>
@@ -1848,25 +2086,28 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                     </table>
                   </div>
 
-                  <div className="line-scope-note" style={{ marginTop: '14px' }}>
-                    💡 <strong>本機操作預覽</strong>：只顯示草稿中的按鈕動作或實際訊息文字；不猜測動作、不開啟網址、不送出 LINE 訊息。
+                  <div className="line-scope-note line-block-spacing">
+                    <strong>本機操作預覽</strong>：只顯示草稿中的按鈕動作或實際訊息文字；不猜測動作、不開啟網址、不送出 LINE 訊息。
                   </div>
-                </div>
+                </div>}
 
-                {richMenuDraftSnapshot && (
+                {richMenuDraftSnapshot && richMenuWorkspaceTab === 'appearance' && (
+                  <LineRichMenuDraftAppearanceEditor
+                    draft={richMenuDraftSnapshot}
+                    menuId={activeMenu.id}
+                    client={richMenuDraft}
+                    previewDefinition={localDefinition}
+                    onApplied={(readback) => {
+                      setRichMenuLocalDefinition(null);
+                      setRichMenuDraftSnapshot(readback);
+                      setRichMenuConfiguration(loadedState(adaptLineRichMenuDraft(readback)));
+                    }}
+                    onLocalDefinitionChange={updateLocalRichMenuAppearance}
+                  />
+                )}
+
+                {richMenuDraftSnapshot && richMenuWorkspaceTab === 'actions' && (
                   <>
-                    <LineRichMenuDraftAppearanceEditor
-                      draft={richMenuDraftSnapshot}
-                      menuId={activeMenu.id}
-                      client={richMenuDraft}
-                      previewDefinition={localDefinition}
-                      onApplied={(readback) => {
-                        setRichMenuLocalDefinition(null);
-                        setRichMenuDraftSnapshot(readback);
-                        setRichMenuConfiguration(loadedState(adaptLineRichMenuDraft(readback)));
-                      }}
-                      onLocalDefinitionChange={updateLocalRichMenuAppearance}
-                    />
                     <LineRichMenuDraftActionEditor
                       draft={richMenuDraftSnapshot}
                       menuId={activeMenu.id}
@@ -1883,62 +2124,112 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                 )}
 
                 {/* 缺少 active snapshot typed Query 時，Diff 必須 fail closed。 */}
-                {isDiffMode && (
-                  <div className="richmenu-card" style={{ border: '2px dashed #ff7f50', background: '#fffcfb' }}>
+                {richMenuWorkspaceTab === 'publish' && isDiffMode && (
+                  <div className="richmenu-card richmenu-diff-card">
                     <div className="richmenu-card-header">
                       <div>
-                        <h4 style={{ margin: 0, fontSize: '1rem', color: '#c2410c', fontWeight: 700 }}>
-                          ✨ 版本變更比對
-                        </h4>
-                        <p style={{ margin: '2px 0 0', fontSize: '0.8rem', color: '#74593f' }}>
+                        <h3 className="line-card-title richmenu-heading-with-icon richmenu-diff-title">
+                          <Sparkles aria-hidden="true" />版本變更比對
+                        </h3>
+                        <p className="line-card-description compact">
                           線上生效版本與目前草稿配置
                         </p>
                       </div>
-                      <span style={{ fontSize: '0.75rem', background: '#ffedd5', color: '#9a3412', padding: '3px 8px', borderRadius: '6px', fontWeight: 700 }}>
+                      <span className="richmenu-diff-badge">
                         比對模式已開啟
                       </span>
                     </div>
 
-                    <div className="line-scope-note" role="status" style={{ marginTop: '10px' }}>
+                    <div className="line-scope-note line-block-spacing-compact" role="status">
                       尚缺線上生效版本資料，暫不能進行正式版本差異比對；系統不會以按鈕順序或固定文案猜測原本內容。
                     </div>
                   </div>
                 )}
 
                 {/* Card C: 發布操作 */}
-                {activePublicationLock?.state === 'editable' && (
+                {richMenuWorkspaceTab === 'publish'
+                  && !activePublicationTracking
+                  && activePublicationLock?.state === 'editable' && (
                   <LineRichMenuPublicationActions
                     selectedMenu={activeMenu}
                     selectedPublication={selectedPublication.value}
-                    onQueued={() => {
+                    client={richMenuPublication}
+                    onQueued={(queued) => {
+                      setTrackedRichMenuPublication({
+                        id: queued.publicationId,
+                        menuDefinitionId: queued.menuDefinitionId,
+                        configurationRevision: queued.configurationRevision,
+                        status: queued.status,
+                        attempts: 0,
+                        timedOut: false,
+                      });
                       setRichMenuPublicationPageNumber(1);
                       setRichMenuReload((value) => value + 1);
                     }}
                   />
+                )}
+                {richMenuWorkspaceTab === 'publish'
+                  && (activePublicationTracking || activePublicationLock?.state !== 'editable') && (
+                  <section className="richmenu-publish-card" aria-label="Rich Menu 發布狀態">
+                    {activePublicationTracking ? (
+                      <>
+                        <h4 className="richmenu-editor-title">
+                          {activePublicationTracking.status === 'published'
+                            ? '此版本已發布'
+                            : ['queued', 'publishing'].includes(activePublicationTracking.status)
+                              ? '發布處理中'
+                              : '發布未完成'}
+                        </h4>
+                        {activePublicationTracking.status === 'published' ? (
+                          <p>LINE 平台已完成發布。如需再次發布，請先到「外觀編輯」或「按鈕動作」保存變更，建立下一版草稿。</p>
+                        ) : ['queued', 'publishing'].includes(activePublicationTracking.status) ? (
+                          <p role="status">
+                            {activePublicationTracking.timedOut
+                              ? '自動追蹤已停止；發布可能仍在背景處理，請按上方「重新整理」取得最新狀態。'
+                              : '工作已排入，系統正在自動追蹤 LINE 發布結果。'}
+                          </p>
+                        ) : (
+                          <p>發布工作未成功完成，請到「發布歷程」查看失敗狀態與可用的重試操作。</p>
+                        )}
+                      </>
+                    ) : activePublicationLock ? (
+                      <>
+                        <h4 className="richmenu-editor-title">
+                          {activePublicationLock.state === 'published' ? '此版本已發布' : '發布處理中'}
+                        </h4>
+                        <p>{activePublicationLock.readonly_reason}</p>
+                        {activePublicationLock.state === 'published' && (
+                          <p>這不是月嫂或工會人員的權限限制；若要再次發布，請先編輯並保存，建立下一版草稿。</p>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <h4 className="richmenu-editor-title">目前無法判定發布資格</h4>
+                        <p>缺少此選單目前版本的發布狀態，系統已停止發布操作；請重新整理後再試。</p>
+                      </>
+                    )}
+                  </section>
                 )}
               </div>
             </div>
             )}
 
             {/* 發布紀錄歷程 */}
-            <div className="richmenu-history-section" data-control-id="line.richmenu.publications">
-              <div className="line-section-heading" style={{ marginTop: '24px', marginBottom: '12px' }}>
+            {richMenuWorkspaceTab === 'history' && <div className="richmenu-history-section" data-control-id="line.richmenu.publications">
+              <div className="line-section-heading richmenu-history-heading">
                 <div>
-                  <h4 style={{ margin: 0, fontSize: '1rem', color: '#1e1b19', fontWeight: 700 }}>
-                    📜 Rich Menu 發布歷程紀錄
-                  </h4>
-                  <p style={{ margin: '4px 0 0', fontSize: '0.82rem', color: '#74593f' }}>
+                  <h3 className="line-card-title">Rich Menu 發布歷程紀錄</h3>
+                  <p className="line-card-description">
                     顯示每次發布的排程、處理狀態與結果，方便追蹤未完成或失敗項目。
                   </p>
                 </div>
               </div>
 
               {richMenuPublications.status === 'loading' && <div className="line-loading">正在載入 Rich Menu 發布紀錄…</div>}
-              {richMenuPublications.status === 'error' && <div className="line-error" role="alert">{richMenuPublications.error}</div>}
+              {richMenuPublications.status === 'error' && <LineErrorMessage error={richMenuPublications.error} />}
               {richMenuPublications.status === 'loaded' && richMenuPublications.value && (
                 richMenuPublications.value.items.length === 0 ? (
                   <div className="line-empty-state">
-                    <div>📱</div>
                     <h4>目前尚無發布紀錄</h4>
                     <p>由上方發布面板建立預覽並確認排入後，將會在此顯示發布狀態與結果。</p>
                   </div>
@@ -1952,11 +2243,12 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                     </div>
                     <div className="line-table-scroll">
                     <table className="line-data-table">
+                      <caption className="sr-only">Rich Menu 發布歷程</caption>
                       <thead>
                         <tr>
-                          <th>選單</th>
-                          <th>狀態</th>
-                          <th>操作</th>
+                          <th scope="col">選單</th>
+                          <th scope="col">狀態</th>
+                          <th scope="col">操作</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1971,7 +2263,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                                 data-control-id="line.richmenu.publication-detail"
                                 onClick={() => openPublication(publication.id)}
                               >
-                                [ 🔍 查看紀錄 ]
+                                查看紀錄
                               </button>
                             </td>
                           </tr>
@@ -1986,7 +2278,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                   </div>
                 )
               )}
-            </div>
+            </div>}
           </section>
         );
       })()}
@@ -1998,15 +2290,20 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
         const reviewClient = asReviewClient(lineIdentity);
         const unboundPairingClient = asUnboundPairingClient(lineIdentity) ?? lineIdentityClient;
 
-        const customerCount = items.filter((i) => i.subjectType === 'customer').length;
-        const staffCount = items.filter((i) => i.subjectType === 'staff').length;
-        const adminCount = items.filter((i) => i.subjectType === 'admin').length;
+        const activeItems = items.filter((item) => item.status === 'bound');
+        const customerCount = activeItems.filter((i) => i.subjectType === 'customer').length;
+        const staffCount = activeItems.filter((i) => i.subjectType === 'staff').length;
+        const adminCount = activeItems.filter((i) => i.subjectType === 'admin').length;
 
         const filteredBindings = items.map((record, index) => ({
           record,
           lineUserId: bindingSources[index] ?? null,
         })).filter(({ record: item }) => {
-          if (bindingRoleFilter !== 'all' && item.subjectType !== bindingRoleFilter) return false;
+          if (
+            bindingRoleFilter !== 'active'
+            && bindingRoleFilter !== 'all'
+            && item.subjectType !== bindingRoleFilter
+          ) return false;
           if (bindingSearchQuery.trim()) {
             const q = bindingSearchQuery.toLowerCase();
             const matchName = item.subjectName.toLowerCase().includes(q);
@@ -2021,7 +2318,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
           <section className="line-table-container" data-control-id="line.identity.section">
             <div className="line-section-heading">
               <div>
-                <h3>🔑 LINE 身分綁定與授權管理</h3>
+                <h2>LINE 身分與授權</h2>
                 <p>管理產婦客戶、線上月嫂與工會幹部的 LINE 帳號綁定狀態、去敏識別與解除審查。</p>
               </div>
               <button
@@ -2029,7 +2326,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                 className="line-secondary-btn"
                 onClick={() => { setBindingPageNumber(1); setBindingReload((value) => value + 1); }}
               >
-                🔄 重新整理
+                <RefreshCw aria-hidden="true" />重新整理
               </button>
             </div>
 
@@ -2048,15 +2345,15 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                     <strong>{total}</strong>
                   </div>
                   <div>
-                    <span>👥 產婦客戶</span>
+                    <span>產婦客戶</span>
                     <strong>{customerCount}</strong>
                   </div>
                   <div>
-                    <span>👩‍🍼 線上月嫂</span>
+                    <span>線上月嫂</span>
                     <strong>{staffCount}</strong>
                   </div>
                   <div>
-                    <span>🛡️ 工會幹部</span>
+                    <span>工會幹部</span>
                     <strong>{adminCount}</strong>
                   </div>
                 </div>
@@ -2064,10 +2361,11 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                 {/* 搜尋與角色過濾工具列 */}
                 <div className="line-search-filter-toolbar">
                   <div className="line-search-input-wrapper">
-                    <span className="line-search-icon">🔍</span>
+                    <span className="line-search-icon"><Search aria-hidden="true" /></span>
                     <input
                       type="text"
                       className="line-search-input"
+                      aria-label="搜尋身分綁定"
                       placeholder="搜尋實名姓名或 LINE ID…"
                       value={bindingSearchQuery}
                       onChange={(e) => { setBindingPageNumber(1); setBindingSearchQuery(e.target.value); }}
@@ -2076,6 +2374,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                       <button
                         type="button"
                         className="line-search-clear-btn"
+                        aria-label="清除身分綁定搜尋"
                         onClick={() => { setBindingPageNumber(1); setBindingSearchQuery(''); }}
                       >
                         ✕
@@ -2086,20 +2385,35 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                   <div className="line-filter-selects">
                     <select
                       className="line-filter-select"
+                      aria-label="篩選身分角色"
                       value={bindingRoleFilter}
-                       onChange={(e) => { setBindingPageNumber(1); setBindingRoleFilter(e.target.value as 'all' | 'customer' | 'staff' | 'admin'); }}
+                       onChange={(e) => { setBindingPageNumber(1); setBindingRoleFilter(e.target.value as 'active' | 'all' | 'customer' | 'staff' | 'admin'); }}
                     >
-                      <option value="all">全部身分角色</option>
-                      <option value="customer">👥 產婦客戶</option>
-                      <option value="staff">👩‍🍼 線上月嫂</option>
-                      <option value="admin">🛡️ 工會管理員</option>
+                      <option value="active">目前有效身分</option>
+                      <option value="all">全部身分角色（含解除歷史）</option>
+                      <option value="customer">產婦客戶</option>
+                      <option value="staff">線上月嫂</option>
+                      <option value="admin">工會管理員</option>
                     </select>
                   </div>
+                  {(bindingSearchQuery || bindingRoleFilter !== 'active') && (
+                    <button
+                      type="button"
+                      className="line-secondary-btn line-clear-filters-btn"
+                      onClick={() => {
+                        setBindingPageNumber(1);
+                        setBindingSearchQuery('');
+                        setBindingRoleFilter('active');
+                      }}
+                    >
+                      清除條件
+                    </button>
+                  )}
                 </div>
 
                 {filteredBindings.length === 0 ? (
                   <div className="line-empty-state">
-                    <div>🔑</div>
+                    <div><KeyRound aria-hidden="true" /></div>
                     <h4>找不到符合條件的身分綁定</h4>
                     <p>請嘗試清除搜尋關鍵字或變更身分篩選條件。</p>
                   </div>
@@ -2107,39 +2421,40 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                   <>
                     <div className="line-table-scroll">
                       <table className="line-data-table" data-control-id="line.identity.table">
+                        <caption className="sr-only">LINE 身分綁定清單</caption>
                         <thead>
                           <tr>
-                            <th>LINE User ID</th>
-                            <th>實名姓名</th>
-                            <th>身分角色</th>
-                            <th>最後更新時間</th>
-                            <th>綁定狀態</th>
-                            <th>解除狀態</th>
-                            <th style={{ textAlign: 'right' }}>操作</th>
+                            <th scope="col">LINE User ID</th>
+                            <th scope="col">實名姓名</th>
+                            <th scope="col">身分角色</th>
+                            <th scope="col">最後更新時間</th>
+                            <th scope="col">綁定狀態</th>
+                            <th scope="col">解除狀態</th>
+                            <th scope="col" className="line-align-end">操作</th>
                           </tr>
                         </thead>
                         <tbody>
                           {filteredBindings.map(({ record, lineUserId }, index) => (
                             <tr key={`${record.lineUserId}-${record.version}-${index}`}>
                               <td><code>{record.lineUserId}</code></td>
-                              <td><strong>👤 {record.subjectName}</strong></td>
+                              <td><strong>{record.subjectName}</strong></td>
                               <td>
                                 <span className={`line-category-badge category-${record.subjectType === 'staff' ? 'service_progress' : record.subjectType === 'admin' ? 'contact_union' : 'service_flow'}`}>
                                   {record.subjectTypeLabel}
                                 </span>
                               </td>
-                              <td style={{ color: '#74593f', fontSize: '0.82rem' }}>{record.updatedAt ?? '—'}</td>
+                              <td className="line-table-secondary">{record.updatedAt ?? '—'}</td>
                               <td>
                                 <span className={`line-status line-status-${record.status}`}>
                                   {record.statusLabel}
                                 </span>
                               </td>
                               <td>
-                                <span style={{ fontSize: '0.82rem', color: record.status === 'revoked' ? '#15803d' : !record.revocationStatus ? '#74593f' : '#b45309', fontWeight: record.status === 'revoked' ? 500 : 400 }}>
+                                <span className={`identity-revocation-state ${record.status === 'revoked' ? 'is-complete' : !record.revocationStatus ? 'is-empty' : 'is-pending'}`}>
                                   {record.revocationStatusLabel}
                                 </span>
                               </td>
-                              <td style={{ textAlign: 'right' }}>
+                              <td className="line-align-end">
                                 <button
                                   type="button"
                                   className="line-action-link-btn"
@@ -2148,7 +2463,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                                   disabled={lineUserId === null}
                                   onClick={() => { if (lineUserId !== null) openBinding(lineUserId); }}
                                 >
-                                  [ 🔍 查看明細 ]
+                                  查看明細
                                 </button>
                               </td>
                             </tr>
@@ -2158,7 +2473,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                     </div>
 
                     <div className="line-pagination-bar">
-                      <span style={{ fontSize: '0.85rem', color: '#74593f' }}>
+                      <span className="line-pagination-summary">
                         第 {page} 頁，顯示 {filteredBindings.length} 筆，全域總數 {total} 筆
                       </span>
                     </div>
@@ -2189,12 +2504,32 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
       {activeTab === 'push_queue' && (() => {
         const ruleList = rules.value?.rules ?? [];
         const isRulesEmpty = rules.value?.isEmpty ?? false;
+        const normalizedRuleSearch = notificationRuleSearch.trim().toLowerCase();
+        const ruleEvents = Array.from(new Set(ruleList.map((rule) => rule.eventLabel))).sort();
+        const ruleRecipients = Array.from(new Set(ruleList.map((rule) => rule.recipientLabel))).sort();
+        const filteredRuleList = ruleList.filter((rule) => (
+          (!normalizedRuleSearch
+            || ruleName(rule.id).toLowerCase().includes(normalizedRuleSearch)
+            || rule.id.toLowerCase().includes(normalizedRuleSearch)
+            || rule.eventLabel.toLowerCase().includes(normalizedRuleSearch))
+          && (notificationRuleEvent === 'all' || rule.eventLabel === notificationRuleEvent)
+          && (notificationRuleRecipient === 'all' || rule.recipientLabel === notificationRuleRecipient)
+          && (notificationRuleEnabled === 'all'
+            || (notificationRuleEnabled === 'enabled' ? rule.enabled : !rule.enabled))
+        ));
+        const notificationRulePageSize = 12;
+        const notificationRulePageCount = Math.max(1, Math.ceil(filteredRuleList.length / notificationRulePageSize));
+        const safeNotificationRulePage = Math.min(notificationRulePage, notificationRulePageCount);
+        const visibleRuleList = filteredRuleList.slice(
+          (safeNotificationRulePage - 1) * notificationRulePageSize,
+          safeNotificationRulePage * notificationRulePageSize,
+        );
 
         return (
           <section className="line-table-container" data-control-id="line.push_queue.section">
             <div className="line-section-heading">
               <div>
-                <h3>🔔 LINE 推播與通知規則目錄</h3>
+                <h2>LINE 通知與發送</h2>
                 <p>即時監控排班媒合、合約繳費、月嫂請假等事件觸發之 LINE 推播規則、排程頻率與發送佇列。</p>
               </div>
               <button
@@ -2203,38 +2538,44 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                 data-control-id="line.notification-rules.refresh"
                 onClick={() => setRulesReload((value) => value + 1)}
               >
-                🔄 重新整理
+                <RefreshCw aria-hidden="true" />重新整理
               </button>
             </div>
 
+            <nav className="line-hub-section-tabs line-notification-tabs" aria-label="通知與發送功能">
+              <button type="button" className={notificationWorkspaceTab === 'rules' ? 'active' : ''} aria-current={notificationWorkspaceTab === 'rules' ? 'page' : undefined} onClick={() => setNotificationWorkspaceTab('rules')}>規則目錄與編輯</button>
+              <button type="button" className={notificationWorkspaceTab === 'onboarding' ? 'active' : ''} aria-current={notificationWorkspaceTab === 'onboarding' ? 'page' : undefined} onClick={() => setNotificationWorkspaceTab('onboarding')}>Onboarding 訊息</button>
+              <button type="button" className={notificationWorkspaceTab === 'delivery' ? 'active' : ''} aria-current={notificationWorkspaceTab === 'delivery' ? 'page' : undefined} onClick={() => setNotificationWorkspaceTab('delivery')}>發送佇列與歷程</button>
+            </nav>
+
             {/* 0. 新好友加入即時歡迎詞與迎新引導 (Follow Webhook) */}
-            <div className="richmenu-card" style={{ marginBottom: '24px', border: '2px solid #ff7f50', background: 'linear-gradient(180deg, #fffaf6 0%, #ffffff 100%)' }}>
+            {notificationWorkspaceTab === 'onboarding' && <div className="richmenu-card notification-onboarding-card">
               <div className="richmenu-card-header">
                 <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <h4 style={{ margin: 0, fontSize: '1.1rem', color: '#1e1b19', fontWeight: 700 }}>
-                      🌟 新好友加入即時歡迎詞與功能導覽 (Onboarding)
-                    </h4>
-                    <span className="line-status line-status-bound" style={{ fontSize: '0.78rem' }}>
+                  <div className="notification-heading-row">
+                    <h3 className="line-card-title richmenu-heading-with-icon">
+                      <Sparkles aria-hidden="true" />新好友加入即時歡迎詞與功能導覽
+                    </h3>
+                    <span className="line-status line-status-bound notification-preview-status">
                       Webhook 歡迎訊息設定預覽
                     </span>
                   </div>
-                  <p style={{ margin: '4px 0 0', fontSize: '0.84rem', color: '#74593f' }}>
+                  <p className="line-card-description">
                     下方為新好友事件的歡迎訊息設定內容；實際是否觸發與送達，需以事件及送達紀錄確認。
                   </p>
                 </div>
               </div>
 
-              <div style={{ marginTop: '16px', padding: '16px', background: '#ffffff', borderRadius: '8px', border: '1px solid #f0e6e0' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                  <strong style={{ fontSize: '0.92rem', color: '#533f2d' }}>
-                    📱 即時歡迎訊息內容預覽：
+              <div className="notification-preview-panel">
+                <div className="notification-preview-header">
+                  <strong className="richmenu-heading-with-icon">
+                    <Smartphone aria-hidden="true" />即時歡迎訊息內容預覽
                   </strong>
-                  <span style={{ fontSize: '0.75rem', color: '#8c7662', background: '#f5ece9', padding: '2px 8px', borderRadius: '4px' }}>
+                  <span className="notification-trigger-badge">
                     觸發條件：LINE Follow Webhook (加好友 / 解除封鎖)
                   </span>
                 </div>
-                <div style={{ padding: '12px', background: '#faf6f4', borderRadius: '6px', fontSize: '0.88rem', color: '#332920', lineHeight: 1.6, whiteSpace: 'pre-wrap', borderLeft: '4px solid #ff7f50' }}>
+                <div className="notification-message-preview">
 {`您好！歡迎加入【新竹市月子工會】官方服務平台 🤱✨
 我們提供專業、安心、有保障的到府坐月子媒合與母嬰照護服務。
 
@@ -2256,25 +2597,23 @@ https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效
 👇 請點擊下方圖文選單，開啟您的專屬服務！`}
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px', paddingTop: '10px', borderTop: '1px solid #f5ece9' }}>
-                  <span style={{ fontSize: '0.82rem', color: '#74593f' }}>
-                    📅 <strong>多日排程關懷設定：</strong>D+1（登記須知）、D+2（履約保證）、D+3（準備清單）
+                <div className="notification-preview-footer">
+                  <span>
+                    <strong>多日排程關懷設定：</strong>D+1（登記須知）、D+2（履約保證）、D+3（準備清單）
                   </span>
-                  <span style={{ fontSize: '0.78rem', color: '#16a34a', fontWeight: 700 }}>
+                  <span className="notification-delivery-link">
                     執行與送達狀態請查通知紀錄
                   </span>
                 </div>
               </div>
-            </div>
+            </div>}
 
             {/* 1. 通知規則目錄卡片清單 */}
-            <div className="richmenu-card" style={{ marginBottom: '24px' }}>
+            {notificationWorkspaceTab === 'rules' && <div className="richmenu-card notification-rules-card">
               <div className="richmenu-card-header">
                 <div>
-                  <h4 style={{ margin: 0, fontSize: '1.05rem', color: '#1e1b19', fontWeight: 700 }}>
-                    📋 系統推播規則目錄
-                  </h4>
-                  <p style={{ margin: '4px 0 0', fontSize: '0.82rem', color: '#74593f' }}>
+                  <h3 className="line-card-title">系統推播規則目錄</h3>
+                  <p className="line-card-description">
                     共有 {ruleList.length} 項排程與即時通知規則
                   </p>
                 </div>
@@ -2282,17 +2621,51 @@ https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效
 
               <LoadingOrError state={rules} loadingText="正在載入通知規則目錄…" />
 
+              {rules.status === 'loaded' && !isRulesEmpty && <div className="line-search-filter-toolbar notification-rule-toolbar">
+                <label className="line-search-field">
+                  <span className="sr-only">搜尋通知規則</span>
+                  <input
+                    type="search"
+                    className="line-search-input"
+                    value={notificationRuleSearch}
+                    placeholder="搜尋規則名稱、代碼或事件"
+                    onChange={(event) => { setNotificationRuleSearch(event.target.value); setNotificationRulePage(1); }}
+                  />
+                </label>
+                <div className="line-filter-selects">
+                  <select aria-label="依事件篩選通知規則" className="line-filter-select" value={notificationRuleEvent} onChange={(event) => { setNotificationRuleEvent(event.target.value); setNotificationRulePage(1); }}>
+                    <option value="all">全部事件</option>
+                    {ruleEvents.map((eventLabel) => <option key={eventLabel} value={eventLabel}>{eventLabel}</option>)}
+                  </select>
+                  <select aria-label="依接收者篩選通知規則" className="line-filter-select" value={notificationRuleRecipient} onChange={(event) => { setNotificationRuleRecipient(event.target.value); setNotificationRulePage(1); }}>
+                    <option value="all">全部接收者</option>
+                    {ruleRecipients.map((recipientLabel) => <option key={recipientLabel} value={recipientLabel}>{recipientLabel}</option>)}
+                  </select>
+                  <select aria-label="依啟用狀態篩選通知規則" className="line-filter-select" value={notificationRuleEnabled} onChange={(event) => { setNotificationRuleEnabled(event.target.value as typeof notificationRuleEnabled); setNotificationRulePage(1); }}>
+                    <option value="all">全部狀態</option>
+                    <option value="enabled">已啟用</option>
+                    <option value="disabled">已停用</option>
+                  </select>
+                  {(notificationRuleSearch || notificationRuleEvent !== 'all' || notificationRuleRecipient !== 'all' || notificationRuleEnabled !== 'all') && (
+                    <button type="button" className="line-secondary-btn line-clear-filters-btn" onClick={() => { setNotificationRuleSearch(''); setNotificationRuleEvent('all'); setNotificationRuleRecipient('all'); setNotificationRuleEnabled('all'); setNotificationRulePage(1); }}>清除條件</button>
+                  )}
+                </div>
+              </div>}
+
               {rules.status === 'loaded' && isRulesEmpty && (
-                <div className="line-empty-state" data-control-id="line.notification-rules.empty" style={{ marginTop: '16px' }}>
-                  <div>🔔</div>
+                <div className="line-empty-state line-block-spacing" data-control-id="line.notification-rules.empty">
                   <h4>目前尚未設定通知規則</h4>
                   <p>可新增通知規則，儲存前會先檢查影響。</p>
                 </div>
               )}
 
               {rules.status === 'loaded' && !isRulesEmpty && (
-                <div className="line-rule-grid" data-control-id="line.notification-rules.list" style={{ marginTop: '16px' }}>
-                  {ruleList.map((rule) => (
+                <>
+                <div className="line-pagination-summary">顯示 {filteredRuleList.length} 項符合條件的通知規則</div>
+                {visibleRuleList.length === 0 ? (
+                  <div className="line-empty-state compact"><strong>找不到符合條件的通知規則</strong><span>可調整條件或清除篩選。</span></div>
+                ) : <div className="line-rule-grid line-block-spacing" data-control-id="line.notification-rules.list">
+                  {visibleRuleList.map((rule) => (
                     <button
                       key={rule.id}
                       type="button"
@@ -2301,43 +2674,49 @@ https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效
                     >
                       <div className="line-rule-card-header">
                         <span className="line-category-badge category-service_flow">
-                          📌 {rule.eventLabel}
+                          {rule.eventLabel}
                         </span>
                         <span className="line-category-badge category-payment_subsidy">
-                          👤 {rule.recipientLabel}
+                          {rule.recipientLabel}
                         </span>
                       </div>
-                      <strong style={{ fontSize: '0.98rem', color: '#1e1b19', margin: '6px 0 2px', display: 'block', textAlign: 'left' }}>
+                      <strong className="notification-rule-name">
                         {ruleName(rule.id)}
                       </strong>
-                      <span style={{ fontSize: '0.74rem', color: '#8c7662', fontFamily: 'monospace', display: 'block', textAlign: 'left' }}>
+                      <span className="notification-rule-code">
                         代碼：{rule.id}
                       </span>
-                      <small style={{ marginTop: '6px', display: 'block', textAlign: 'left' }}>
-                        ⏱️ {rule.scheduleLabel} ｜ 頻率：{rule.frequencyLabel}
+                      <small className="notification-rule-schedule">
+                        {rule.scheduleLabel} ｜ 頻率：{rule.frequencyLabel}
                       </small>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px', paddingTop: '6px', borderTop: '1px solid #f5ece9' }}>
+                      <div className="notification-rule-footer">
                         <span className={`line-status ${rule.enabled ? 'line-status-bound' : 'line-status-revoked'}`}>
                           {rule.enabled ? '● 已啟用' : '○ 停用中'}
                         </span>
-                        <span style={{ fontSize: '0.78rem', color: '#ff7f50', fontWeight: 700 }}>
-                          [ 🔍 規則明細 ]
+                        <span className="notification-rule-detail-link">
+                          查看規則明細
                         </span>
                       </div>
                     </button>
                   ))}
-                </div>
+                </div>}
+                {notificationRulePageCount > 1 && <div className="line-pagination-actions">
+                  <button type="button" className="line-secondary-btn" disabled={safeNotificationRulePage <= 1} onClick={() => setNotificationRulePage((page) => Math.max(1, page - 1))}>上一頁</button>
+                  <span>第 {safeNotificationRulePage}／{notificationRulePageCount} 頁</span>
+                  <button type="button" className="line-secondary-btn" disabled={safeNotificationRulePage >= notificationRulePageCount} onClick={() => setNotificationRulePage((page) => Math.min(notificationRulePageCount, page + 1))}>下一頁</button>
+                </div>}
+                </>
               )}
-            </div>
+            </div>}
 
             {/* 2. 發送佇列 KPI 與任務清冊 */}
-            <div className="richmenu-card">
+            {notificationWorkspaceTab === 'delivery' && <div className="richmenu-card">
               <div className="richmenu-card-header">
                 <div>
-                  <h4 style={{ margin: 0, fontSize: '1.05rem', color: '#1e1b19', fontWeight: 700 }}>
-                    🚀 LINE 推播發送進度
-                  </h4>
-                  <p style={{ margin: '4px 0 0', fontSize: '0.82rem', color: '#74593f' }}>
+                  <h3 className="line-card-title richmenu-heading-with-icon">
+                    <Rocket aria-hidden="true" />LINE 推播發送進度
+                  </h3>
+                  <p className="line-card-description">
                     查看各類通知的排程、處理進度、失敗與重試狀況。
                   </p>
                 </div>
@@ -2346,30 +2725,30 @@ https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效
               <LoadingOrError state={deliverySummary} loadingText="正在載入發送任務摘要…" />
 
               {deliverySummary.value && (
-                <div className="line-kpi-grid" style={{ marginTop: '16px' }}>
+                <div className="line-kpi-grid line-block-spacing">
                   <div>
                     <span>全部任務</span>
                     <strong>{deliverySummary.value.total}</strong>
                   </div>
                   <div>
-                    <span>⏳ 待執行</span>
+                    <span>待執行</span>
                     <strong>{deliverySummary.value.pending}</strong>
                   </div>
                   <div>
-                    <span>⚙️ 處理中</span>
+                    <span>處理中</span>
                     <strong>{deliverySummary.value.processing}</strong>
                   </div>
                   <div>
-                    <span>✅ 已送出</span>
-                    <strong style={{ color: '#16a34a' }}>{deliverySummary.value.sent}</strong>
+                    <span>已送出</span>
+                    <strong className="line-kpi-success-value">{deliverySummary.value.sent}</strong>
                   </div>
                   <div>
-                    <span>⚠️ 失敗 / 待重試</span>
-                    <strong style={{ color: '#dc2626' }}>{deliverySummary.value.failed + deliverySummary.value.retryable_failed}</strong>
+                    <span>失敗／待重試</span>
+                    <strong className="line-kpi-danger-value">{deliverySummary.value.failed + deliverySummary.value.retryable_failed}</strong>
                   </div>
                   <div>
-                    <span>🤖 發送服務</span>
-                    <strong style={{ fontSize: '1.05rem' }}>{deliverySummary.value.workerLabel}</strong>
+                    <span>發送服務</span>
+                    <strong className="line-kpi-compact-value">{deliverySummary.value.workerLabel}</strong>
                   </div>
                 </div>
               )}
@@ -2383,7 +2762,7 @@ https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效
                 reloadToken={rulesReload}
                 onOpenTask={openDeliveryTask}
               />
-            </div>
+            </div>}
           </section>
         );
       })()}
@@ -2392,7 +2771,7 @@ https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效
         <section className="line-table-container">
           <div className="line-section-heading">
             <div>
-              <h3>👥 三方服務群組管理</h3>
+              <h2>三方服務群組</h2>
               <p>依案件查詢產婦客戶、月嫂與工會幹部的三方 LINE 群組狀態與事件紀錄。</p>
             </div>
             <button
@@ -2400,7 +2779,7 @@ https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效
               className="line-secondary-btn"
               onClick={() => { setOrderGroupPageNumber(1); setOrderGroupReload((value) => value + 1); }}
             >
-              🔄 重新整理
+              <RefreshCw aria-hidden="true" />重新整理
             </button>
           </div>
 
@@ -2409,7 +2788,6 @@ https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效
           {orderGroups.status === 'loaded' && orderGroups.value && (
             (orderGroups.value.items?.length ?? 0) === 0 ? (
               <div className="line-empty-state">
-                <div>👥</div>
                 <h4>目前沒有三方服務群組</h4>
                 <p>訂單完成簽約並建立 LINE 群組後會顯示在這裡。</p>
               </div>
@@ -2417,11 +2795,12 @@ https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效
               <>
               <div className="line-table-scroll">
                 <table className="line-data-table" data-control-id="line.order-groups.table">
+                  <caption className="sr-only">三方服務群組清單</caption>
                   <thead>
                     <tr>
-                      <th>案件編號</th>
-                      <th>群組狀態</th>
-                      <th style={{ textAlign: 'right' }}>操作</th>
+                      <th scope="col">案件編號</th>
+                      <th scope="col">群組狀態</th>
+                      <th scope="col" className="line-align-end">操作</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2433,13 +2812,13 @@ https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效
                             {record.statusLabel}
                           </span>
                         </td>
-                        <td style={{ textAlign: 'right' }}>
+                        <td className="line-align-end">
                           <button
                             type="button"
                             className="line-action-link-btn"
                             onClick={() => openOrderGroup(record.caseNo)}
                           >
-                            [ 🔍 查看明細 ]
+                            查看明細
                           </button>
                         </td>
                       </tr>
@@ -2471,7 +2850,7 @@ https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效
           <section className="line-workspace-card">
             <div className="line-section-heading">
               <div>
-                <h3>🛡️ LINE 安全去敏設定狀態</h3>
+                <h2>LINE 安全狀態</h2>
                 <p>只顯示六種安全設定的使用狀態；敏感定義與 LINE 密鑰不傳送到前端。</p>
               </div>
               <button
@@ -2479,7 +2858,7 @@ https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效
                 className="line-secondary-btn"
                 onClick={refreshRuntime}
               >
-                🔄 重新整理
+                <RefreshCw aria-hidden="true" />重新整理
               </button>
             </div>
 
@@ -2501,19 +2880,18 @@ https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效
           <section className="line-workspace-card">
             <div className="line-section-heading">
               <div>
-                <h3>🚨 異常通知對象與群組</h3>
+                <h3>異常通知對象與群組</h3>
                 <p>查詢並調整群組或管理員通知對象；送出時會自動核對最新狀態並避免重複處理。</p>
               </div>
             </div>
 
-            <div style={{ marginBottom: '14px' }}>
-              <label htmlFor="runtime-reason" style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: '#57423b', marginBottom: '4px' }}>
-                調整原因說明 (Audit Reason)
+            <div className="line-field-stack line-section-bottom">
+              <label htmlFor="runtime-reason" className="line-field-label">
+                調整原因說明
               </label>
               <input
                 id="runtime-reason"
-                className="line-search-input"
-                style={{ width: '100%' }}
+                className="line-search-input line-full-width"
                 value={runtimeReason}
                 onChange={(event) => {
                   setRuntimeReason(event.target.value);
@@ -2530,19 +2908,20 @@ https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效
             {runtimeTargets.value && (
               runtimeTargets.value.length === 0 ? (
                 <div className="line-empty-state">
-                  <div>🚨</div>
                   <h4>目前沒有異常通知對象</h4>
+                  <p>通知對象會由已完成 LINE 綁定的管理員，或正式群組登錄流程建立。</p>
                 </div>
               ) : (
                 <div className="line-table-scroll">
                   <table className="line-data-table">
+                    <caption className="sr-only">LINE 安全設定狀態</caption>
                     <thead>
                       <tr>
-                        <th>類型</th>
-                        <th>顯示名稱</th>
-                        <th>狀態</th>
-                        <th>觸發門檻</th>
-                        <th style={{ textAlign: 'right' }}>操作</th>
+                        <th scope="col">類型</th>
+                        <th scope="col">顯示名稱</th>
+                        <th scope="col">狀態</th>
+                        <th scope="col">觸發門檻</th>
+                        <th scope="col" className="line-align-end">操作</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2560,12 +2939,11 @@ https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效
                             </span>
                           </td>
                           <td>{target.minimumStatusLabel}</td>
-                          <td style={{ textAlign: 'right' }}>
-                            <div className="line-row-actions" style={{ justifyContent: 'flex-end' }}>
+                          <td className="line-align-end">
+                            <div className="line-row-actions line-actions-end">
                               <button
                                 type="button"
-                                className="line-secondary-btn"
-                                style={{ padding: '4px 10px', fontSize: '0.8rem' }}
+                                className="line-secondary-btn line-compact-button"
                                 disabled={runtimeMutation === 'loading' || !runtimeReason.trim()}
                                 onClick={() => void previewRuntimeMutation('toggle', target)}
                               >
@@ -2574,8 +2952,7 @@ https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效
                               {target.targetKind === 'group' && (
                                 <button
                                   type="button"
-                                  className="line-secondary-btn"
-                                  style={{ padding: '4px 10px', fontSize: '0.8rem' }}
+                                  className="line-secondary-btn line-compact-button"
                                   disabled={runtimeMutation === 'loading' || !runtimeReason.trim()}
                                   onClick={() => void previewRuntimeMutation('reset', target)}
                                 >
@@ -2596,8 +2973,8 @@ https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效
 
             {runtimeCandidates.value && (
               runtimeCandidates.value.some((candidate) => candidate.lineLinked) ? (
-              <div className="line-row-actions" style={{ marginTop: '16px', padding: '12px 14px', background: '#fff8f6', borderRadius: '10px', border: '1px solid #fed9b8' }}>
-                <label htmlFor="runtime-candidate" style={{ fontSize: '0.85rem', fontWeight: 700, color: '#57423b' }}>
+              <div className="line-row-actions runtime-candidate-row">
+                <label htmlFor="runtime-candidate" className="line-field-label">
                   新增管理員對象：
                 </label>
                 <select
@@ -2620,23 +2997,22 @@ https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效
                 </select>
                 <button
                   type="button"
-                  className="line-primary-btn"
-                  style={{ padding: '6px 14px', fontSize: '0.85rem' }}
+                  className="line-primary-btn line-compact-button"
                   disabled={selectedRuntimeCandidate === null || !runtimeReason.trim() || runtimeMutation === 'loading'}
                   onClick={() => void previewRuntimeMutation('add')}
                 >
-                  ➕ 預覽新增通知對象
+                  預覽新增通知對象
                 </button>
               </div>
               ) : (
-                <div className="line-scope-note" role="status" style={{ marginTop: '16px' }}>
+                <div className="line-scope-note line-block-spacing" role="status">
                   目前沒有已連結 LINE 且可加入的管理員。
                 </div>
               )
             )}
 
             {runtimePending && (
-              <div className="line-preview-result" style={{ marginTop: '12px' }}>
+              <div className="line-preview-result line-block-spacing-12">
                 <strong>
                   {runtimePending.preview.previous_state === 'absent' ? '尚未建立' : runtimePending.preview.previous_state === 'active' ? '啟用' : '停用'}
                   {' → '}
@@ -2663,8 +3039,8 @@ https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效
               </div>
             )}
 
-            {runtimeReceipt && <div className="line-success" role="status" style={{ marginTop: '12px' }}>{runtimeReceipt.operationLabel}已完成並回讀最新狀態。</div>}
-            {runtimeError && <div className="line-error" role="alert" style={{ marginTop: '12px' }}>{runtimeError}</div>}
+            {runtimeReceipt && <div className="line-success line-block-spacing-12" role="status">{runtimeReceipt.operationLabel}已完成並回讀最新狀態。</div>}
+            {runtimeError && <div className="line-error line-block-spacing-12" role="alert">{runtimeError}</div>}
           </section>
 
           <SafeReviewLinkWorkbench client={safeReviewLink} />
@@ -2673,17 +3049,16 @@ https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效
           <section className="line-workspace-card">
             <div className="line-section-heading">
               <div>
-                <h3>🧑‍💼 人工客服升級工作台</h3>
+                <h2>人工客服升級</h2>
                 <p>可建立升級事件，或以已知 ID 查詢並依 available actions 接手、處理與結案。</p>
               </div>
             </div>
 
-            <div className="line-detail-grid" style={{ marginBottom: '14px' }}>
+            <div className="line-detail-grid line-section-bottom">
               <label>
                 來源類型
                 <select
-                  className="line-filter-select"
-                  style={{ width: '100%', marginTop: '4px' }}
+                  className="line-filter-select line-full-width line-field-top-spacing"
                   value={escalationSourceKind}
                   onChange={(event) => { setEscalationSourceKind(event.target.value as CustomerServiceEscalationCreateRequest['source_kind']); setEscalationPending(null); setEscalationConfirmed(false); }}
                 >
@@ -2696,8 +3071,7 @@ https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效
               <label>
                 觸發原因
                 <select
-                  className="line-filter-select"
-                  style={{ width: '100%', marginTop: '4px' }}
+                  className="line-filter-select line-full-width line-field-top-spacing"
                   value={escalationTrigger}
                   onChange={(event) => { setEscalationTrigger(event.target.value as CustomerServiceEscalationCreateRequest['trigger_code']); setEscalationPending(null); setEscalationConfirmed(false); }}
                 >
@@ -2711,8 +3085,7 @@ https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效
               <label>
                 工單分類
                 <select
-                  className="line-filter-select"
-                  style={{ width: '100%', marginTop: '4px' }}
+                  className="line-filter-select line-full-width line-field-top-spacing"
                   value={escalationCategory}
                   onChange={(event) => { setEscalationCategory(event.target.value as CustomerServiceEscalationCreateRequest['ticket_category']); setEscalationPending(null); setEscalationConfirmed(false); }}
                 >
@@ -2728,9 +3101,9 @@ https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效
                 來源案件／事件參考
                 <input className="line-search-input" value={escalationSourceIdentity} onChange={(event) => { setEscalationSourceIdentity(event.target.value); setEscalationPending(null); setEscalationConfirmed(false); }} />
               </label>
-              <details style={{ gridColumn: '1 / -1' }}>
+              <details className="line-details-full">
                 <summary>進階來源資料</summary>
-                <p style={{ margin: '8px 0', color: '#74593f', fontSize: '0.82rem' }}>
+                <p className="line-advanced-help">
                   這些一致性欄位由來源流程提供；只有人工補登且已核對原始事件時才需填寫。
                 </p>
                 <div className="line-detail-grid">
@@ -2744,31 +3117,29 @@ https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效
                   </label>
                 </div>
               </details>
-              <div style={{ gridColumn: 'span 2' }}>
+              <div className="line-grid-full">
                 {escalationSourceIdentity.trim() && !/^[0-9a-f]{64}$/.test(escalationSourceFingerprint) && (
-                  <div className="line-scope-note" role="status" style={{ marginBottom: '8px' }}>
+                  <div className="line-scope-note line-bottom-spacing" role="status">
                     需先完成來源事件核對並補齊進階來源資料，才能預覽建立。
                   </div>
                 )}
                 <button
                   type="button"
-                  className="line-primary-btn"
-                  style={{ padding: '8px 16px', fontSize: '0.85rem', width: '100%', marginTop: '6px' }}
+                  className="line-primary-btn line-full-action"
                   disabled={!escalationSourceIdentity.trim() || !/^[0-9a-f]{64}$/.test(escalationSourceFingerprint) || escalationMutation === 'loading'}
                   onClick={() => void previewCreateEscalation()}
                 >
-                  🚀 預覽建立人工客服升級
+                  預覽建立人工客服升級
                 </button>
               </div>
             </div>
 
-            <div className="line-row-actions" style={{ marginBottom: '14px' }}>
-              <label htmlFor="escalation-id" style={{ fontSize: '0.85rem', fontWeight: 700, color: '#57423b' }}>升級 ID：</label>
+            <div className="line-row-actions line-section-bottom">
+              <label htmlFor="escalation-id" className="line-field-label">升級 ID：</label>
               <input
                 id="escalation-id"
                 inputMode="numeric"
-                className="line-search-input"
-                style={{ width: '180px' }}
+                className="line-search-input escalation-id-input"
                 value={escalationIdInput}
                 onChange={(event) => setEscalationIdInput(event.target.value)}
               />
@@ -2778,7 +3149,7 @@ https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效
                 disabled={!/^\d+$/.test(escalationIdInput)}
                 onClick={() => void loadEscalation()}
               >
-                🔍 查詢升級明細
+                查詢升級明細
               </button>
             </div>
 
@@ -2799,9 +3170,9 @@ https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效
                   {escalationDetail.value.ownerSelector && <div><span>負責人選擇器</span><strong>{escalationDetail.value.ownerSelector}</strong></div>}
                 </div>
 
-                <details style={{ marginTop: '12px' }}>
+                <details className="line-advanced-section">
                   <summary>進階一致性與結案資料</summary>
-                  <p style={{ margin: '8px 0', color: '#74593f', fontSize: '0.82rem' }}>
+                  <p className="line-advanced-help">
                     接手只需目前升級資料；開始處理或結案前，請依客服工單與結案紀錄補登下列校驗資料。
                   </p>
                   <div className="line-detail-grid">
@@ -2827,7 +3198,7 @@ https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效
                   </div>
                 </details>
 
-                <div className="line-row-actions" style={{ marginTop: '14px' }}>
+                <div className="line-row-actions line-block-spacing">
                   {escalationDetail.value.availableActions.includes('claim') && (
                     <button
                       type="button"
@@ -2835,7 +3206,7 @@ https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效
                       disabled={escalationMutation === 'loading'}
                       onClick={() => void previewAdvanceEscalation('claim')}
                     >
-                      ✋ 預覽接手
+                      預覽接手
                     </button>
                   )}
                   {escalationDetail.value.availableActions.includes('handling') && (
@@ -2845,7 +3216,7 @@ https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效
                       disabled={escalationMutation === 'loading'}
                       onClick={() => void previewAdvanceEscalation('handling')}
                     >
-                      ⚙️ 預覽開始處理
+                      預覽開始處理
                     </button>
                   )}
                   {escalationDetail.value.availableActions.includes('resolve') && (
@@ -2855,7 +3226,7 @@ https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效
                       disabled={escalationMutation === 'loading' || !/^[0-9a-f]{64}$/.test(escalationResolutionDigest)}
                       onClick={() => void previewAdvanceEscalation('resolve')}
                     >
-                      ✅ 預覽解決並解除暫停
+                      預覽解決並解除暫停
                     </button>
                   )}
                 </div>
@@ -2863,7 +3234,7 @@ https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效
             )}
 
             {escalationPending && (
-              <div className="line-preview-result" style={{ marginTop: '12px' }}>
+              <div className="line-preview-result line-block-spacing-12">
                 <strong>
                   {escalationPending.preview.before_workflow_status === 'absent' ? '尚未建立' : escalationPending.preview.before_workflow_status}
                   {' → '}
@@ -2894,8 +3265,8 @@ https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效
               </div>
             )}
 
-            {escalationReceipt && <div className="line-success" role="status" style={{ marginTop: '12px' }}>人工客服升級操作已完成；目前狀態：{escalationReceipt.workflowStatus}。</div>}
-            {escalationError && <div className="line-error" role="alert" style={{ marginTop: '12px' }}>{escalationError}</div>}
+            {escalationReceipt && <div className="line-success line-block-spacing-12" role="status">人工客服升級操作已完成；目前狀態：{escalationReceipt.workflowStatus}。</div>}
+            {escalationError && <div className="line-error line-block-spacing-12" role="alert">{escalationError}</div>}
           </section>
         </div>
       )}
@@ -2938,7 +3309,7 @@ https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效
                   disabled={!bindingRevocationConfirmed || !bindingRevocationReason.trim() || bindingRevocationStatus === 'loading'}
                   onClick={() => void applyBindingRevocation()}
                 >
-                  提交解除
+                  解除身分並回復訪客選單
                 </button>
               )}
             {bindingRevocationAccepted && bindingDetailId.current !== null && (
@@ -2972,7 +3343,7 @@ https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效
                 <div className="line-action-panel">
                   {bindingRevocationPreview.status === 'loading' && <p>正在驗證解除條件…</p>}
                   {bindingRevocationPreview.status === 'error' && (
-                    <div className="line-error" role="alert">{bindingRevocationPreview.error}</div>
+                    <LineErrorMessage error={bindingRevocationPreview.error} />
                   )}
                   {bindingRevocationPreview.value && (
                     <>
@@ -2984,7 +3355,8 @@ https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效
                         <ul>{bindingRevocationPreview.value.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>
                       ) : (
                         <>
-                          <strong>可提交解除</strong>
+                          <strong>可解除身分</strong>
+                          <p>提交後會立即停止此身分的系統授權，並由背景服務自動將 LINE 圖文選單回復成訪客模式。</p>
                           <label htmlFor="binding-revocation-reason">解除原因</label>
                           <textarea
                             id="binding-revocation-reason"
@@ -3011,7 +3383,7 @@ https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效
                   )}
                   {bindingRevocationStatus === 'loading' && <p>正在提交解除申請…</p>}
                   {bindingRevocationStatus === 'error' && (
-                    <div className="line-error" role="alert">{bindingRevocationError}</div>
+                    <LineErrorMessage error={bindingRevocationError} />
                   )}
                   {bindingRevocationAccepted && (
                     <div className="line-success" role="status">
@@ -3075,7 +3447,29 @@ https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效
         </div>
       </Drawer>
 
-      <Drawer isOpen={selectedRule !== null} onClose={() => setSelectedRule(null)} title={selectedRule ? `🔔 ${ruleName(selectedRule.id)}` : '通知規則明細'} footer={<div className="line-drawer-footer"><button type="button" onClick={() => setSelectedRule(null)}>關閉</button></div>}>{selectedRule && <div className="line-drawer-content" data-control-id="line.notification-rule.detail"><div className="line-detail-grid"><div><span>觸發事件</span><strong>{selectedRule.eventLabel}</strong></div><div><span>接收對象</span><strong>{selectedRule.recipientLabel}</strong></div><div><span>範本代碼</span><strong>{selectedRule.templateId}</strong></div><div><span>啟用狀態</span><strong>{selectedRule.enabled ? '已啟用' : '未啟用'}</strong></div></div><div style={{ margin: '16px 0', padding: '12px', background: '#faf6f4', borderRadius: '8px', border: '1px solid #f0e6e0' }}><p style={{ margin: 0, fontSize: '0.9rem', color: '#533f2d' }}><strong>⏱️ 發送排程：</strong>{selectedRule.scheduleLabel}</p><p style={{ margin: '6px 0 0', fontSize: '0.9rem', color: '#533f2d' }}><strong>🔄 發送頻率：</strong>{selectedRule.frequencyLabel}</p>{selectedRule.predicateLabels.length > 0 && <p style={{ margin: '6px 0 0', fontSize: '0.9rem', color: '#533f2d' }}><strong>🎯 觸發條件：</strong>{selectedRule.predicateLabels.join('、')}</p>}<p style={{ margin: '6px 0 0', fontSize: '0.78rem', color: '#8c7662', fontFamily: 'monospace' }}>系統唯一規則識別碼：{selectedRule.id}</p></div></div>}</Drawer>
+      <Drawer
+        isOpen={selectedRule !== null}
+        onClose={() => setSelectedRule(null)}
+        title={selectedRule ? ruleName(selectedRule.id) : '通知規則明細'}
+        footer={<div className="line-drawer-footer"><button type="button" onClick={() => setSelectedRule(null)}>關閉</button></div>}
+      >
+        {selectedRule && (
+          <div className="line-drawer-content" data-control-id="line.notification-rule.detail">
+            <div className="line-detail-grid">
+              <div><span>觸發事件</span><strong>{selectedRule.eventLabel}</strong></div>
+              <div><span>接收對象</span><strong>{selectedRule.recipientLabel}</strong></div>
+              <div><span>範本代碼</span><strong>{selectedRule.templateId}</strong></div>
+              <div><span>啟用狀態</span><strong>{selectedRule.enabled ? '已啟用' : '未啟用'}</strong></div>
+            </div>
+            <div className="notification-rule-detail-panel">
+              <p><strong>發送排程：</strong>{selectedRule.scheduleLabel}</p>
+              <p><strong>發送頻率：</strong>{selectedRule.frequencyLabel}</p>
+              {selectedRule.predicateLabels.length > 0 && <p><strong>觸發條件：</strong>{selectedRule.predicateLabels.join('、')}</p>}
+              <p className="notification-rule-detail-id">系統唯一規則識別碼：{selectedRule.id}</p>
+            </div>
+          </div>
+        )}
+      </Drawer>
 
       <Drawer isOpen={selectedPublication.status !== 'idle'} onClose={closePublication} title="Rich Menu 發布紀錄" footer={<div className="line-drawer-footer"><button type="button" onClick={closePublication}>關閉</button>{selectedPublication.status === 'error' && publicationDetailId.current !== null && <button type="button" onClick={() => openPublication(publicationDetailId.current!)}>重試查詢</button>}</div>}><div className="line-drawer-content"><LoadingOrError state={selectedPublication} loadingText="正在載入發布紀錄明細…" />{selectedPublication.status === 'loaded' && selectedPublication.value && <div className="line-detail-grid"><div><span>選單</span><strong>{richMenuConfiguration.value?.menus.find((menu) => menu.id === selectedPublication.value?.menuDefinitionId)?.name ?? '已發布圖文選單'}</strong></div><div><span>目前狀態</span><strong>{selectedPublication.value.statusLabel}</strong></div></div>}</div></Drawer>
     </div>

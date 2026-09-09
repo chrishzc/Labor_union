@@ -2,7 +2,7 @@
  * File: line_management_page_real_data.test.tsx
  * Description: 驗證 LINE 管理頁以 typed client 呈現六頁籤、客服 KPI 狀態與遮罩身分，不把未知資料偽裝為零。
  */
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CustomerServiceClient } from '../api/customer_service/customer_service_client';
 import type { LineIdentityClient } from '../api/line_identity/line_identity_client';
@@ -59,7 +59,7 @@ function clients(): { customer: CustomerServiceClient; identity: Pick<LineIdenti
 afterEach(() => vi.restoreAllMocks());
 
 describe('LINE 管理頁真實資料呈現', () => {
-  it('呈現六頁籤與客服 typed KPI／列表，不顯示 prototype 工單', async () => {
+  it('呈現去重後五個客服工作分頁與 typed KPI／列表，不顯示 prototype 工單', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('unexpected network')));
     const { customer, identity } = clients();
     render(<LineManagementPage customerService={customer} lineIdentity={identity} />);
@@ -68,7 +68,8 @@ describe('LINE 管理頁真實資料呈現', () => {
     expect(screen.getByText('2')).toBeInTheDocument();
     expect(screen.getByText('請開啟明細查看訊息')).toBeInTheDocument();
     expect(screen.queryByText('TKT-2026-001')).not.toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: /[1-6]\./ })).toHaveLength(6);
+    const workspaceNavigation = screen.getByRole('navigation', { name: '客服與營運功能' });
+    expect(within(workspaceNavigation).getAllByRole('button')).toHaveLength(5);
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
@@ -121,13 +122,56 @@ describe('LINE 管理頁真實資料呈現', () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('unexpected network')));
     const { customer, identity } = clients();
     render(<LineManagementPage customerService={customer} lineIdentity={identity} />);
-    fireEvent.click(screen.getByRole('button', { name: /3\. LINE 身分綁定/ }));
+    fireEvent.click(screen.getByRole('button', { name: '身分與授權' }));
 
     await waitFor(() => expect(screen.getByText('U123••••cdef')).toBeInTheDocument());
     expect(screen.queryByText(BOUND_IDENTITY_FIXTURE.line_user_id)).not.toBeInTheDocument();
     expect(screen.queryByText(REVOCATION_PREVIEW_FIXTURE.provider_menu_id ?? '')).not.toBeInTheDocument();
     expect(identity.listBindings).toHaveBeenCalledTimes(1);
     expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('預設只顯示有效綁定，全部身分才顯示解除歷史且不計入角色 KPI', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('unexpected network')));
+    const { customer, identity } = clients();
+    const revokedStaffBinding = {
+      ...BOUND_IDENTITY_FIXTURE,
+      line_user_id: 'Urevoked567890abcdef1234567890abcd',
+      status: 'revoked' as const,
+      subject_type: 'staff' as const,
+      subject_reference: 'STAFF-FIXTURE-REVOKED',
+      subject_name: '已解除月嫂',
+      revocation_request_id: 902,
+      revocation_status: 'manual_completed' as const,
+      revoked_at: '2026-09-08T07:51:55Z',
+    };
+    vi.mocked(identity.listBindings).mockImplementation(async (query) => ({
+      items: query?.status === 'bound'
+        ? [BOUND_IDENTITY_FIXTURE]
+        : [BOUND_IDENTITY_FIXTURE, revokedStaffBinding],
+      total: query?.status === 'bound' ? 1 : 2,
+      page: 1,
+      page_size: 25,
+    }));
+
+    render(<LineManagementPage customerService={customer} lineIdentity={identity} />);
+    fireEvent.click(screen.getByRole('button', { name: '身分與授權' }));
+
+    await waitFor(() => expect(identity.listBindings).toHaveBeenLastCalledWith(
+      expect.objectContaining({ status: 'bound' }),
+      expect.any(Object),
+    ));
+    expect(screen.queryByText(/已解除月嫂/)).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByDisplayValue('目前有效身分'), { target: { value: 'all' } });
+
+    await screen.findByText(/已解除月嫂/);
+    expect(identity.listBindings).toHaveBeenLastCalledWith(
+      expect.objectContaining({ status: undefined, subject_type: undefined }),
+      expect.any(Object),
+    );
+    expect(screen.getByText('線上月嫂', { selector: '.line-kpi-grid span' }).parentElement)
+      .toHaveTextContent('0');
   });
 
   it('篩選身分後仍以同一列的原始 identity 查詢明細，不得因索引錯位開啟他人資料', async () => {
@@ -153,9 +197,9 @@ describe('LINE 管理頁真實資料呈現', () => {
     vi.mocked(identity.getBinding).mockResolvedValue(staffBinding);
 
     render(<LineManagementPage customerService={customer} lineIdentity={identity} />);
-    fireEvent.click(screen.getByRole('button', { name: /3\. LINE 身分綁定/ }));
+    fireEvent.click(screen.getByRole('button', { name: '身分與授權' }));
     await screen.findByText(/測試月嫂乙/);
-    fireEvent.change(screen.getByDisplayValue('全部身分角色'), { target: { value: 'staff' } });
+    fireEvent.change(screen.getByDisplayValue('目前有效身分'), { target: { value: 'staff' } });
     await waitFor(() => expect(identity.listBindings).toHaveBeenLastCalledWith(
       expect.objectContaining({ subject_type: 'staff' }),
       expect.any(Object),
@@ -173,8 +217,7 @@ describe('LINE 管理頁真實資料呈現', () => {
   it('人工升級預設只顯示業務欄位，技術校驗資料收在進階區', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('unexpected network')));
     const { customer, identity } = clients();
-    render(<LineManagementPage customerService={customer} lineIdentity={identity} />);
-    fireEvent.click(screen.getByRole('button', { name: /6\. 安全設定與人工升級/ }));
+    render(<LineManagementPage customerService={customer} lineIdentity={identity} runtimeOnly />);
 
     const checksumLabel = screen.getByText('來源資料校驗碼');
     expect(checksumLabel).not.toBeVisible();
@@ -205,9 +248,9 @@ describe('LINE 管理頁真實資料呈現', () => {
         customerService={customer}
         lineIdentity={identity}
         runtimeTarget={runtimeTarget}
+        runtimeOnly
       />
     );
-    fireEvent.click(screen.getByRole('button', { name: /6\. 安全設定與人工升級/ }));
 
     await screen.findByText(/目前沒有已連結 LINE 且可加入的管理員/);
     expect(screen.queryByLabelText('新增管理員對象：')).not.toBeInTheDocument();
@@ -231,7 +274,7 @@ describe('LINE 管理頁真實資料呈現', () => {
     }));
 
     render(<LineManagementPage customerService={customer} lineIdentity={identity} />);
-    fireEvent.click(screen.getByRole('button', { name: /5\. 三方服務群組/ }));
+    fireEvent.click(screen.getByRole('button', { name: '三方服務群組' }));
 
     await screen.findByText('#CASE-1');
     expect(lineOrderGroupQueryClient.list).toHaveBeenLastCalledWith(
@@ -277,20 +320,20 @@ describe('LINE 管理頁真實資料呈現', () => {
       setEnabled: vi.fn(),
     } as typeof lineRuntimeTargetClient;
 
-    render(
+    const { unmount } = render(
       <LineManagementPage
         customerService={customer}
         lineIdentity={identity}
         runtimeTarget={runtimeTarget}
+        runtimeOnly
       />
     );
-    fireEvent.click(screen.getByRole('button', { name: /6\. 安全設定與人工升級/ }));
     await screen.findByText('跨分頁測試群組');
     fireEvent.click(screen.getByRole('button', { name: '預覽停用' }));
 
     const requestOptions = vi.mocked(runtimeTarget.previewSetEnabled).mock.calls[0][2];
     expect(requestOptions?.signal?.aborted).toBe(false);
-    fireEvent.click(screen.getByRole('button', { name: /1\. 客服工單與案件追蹤/ }));
+    unmount();
     expect(requestOptions?.signal?.aborted).toBe(true);
 
     resolvePreview({
@@ -303,7 +346,7 @@ describe('LINE 管理頁真實資料呈現', () => {
       apply_ready: true,
     });
     await Promise.resolve();
-    fireEvent.click(screen.getByRole('button', { name: /6\. 安全設定與人工升級/ }));
+    render(<LineManagementPage customerService={customer} lineIdentity={identity} runtimeTarget={runtimeTarget} runtimeOnly />);
     await screen.findByText('跨分頁測試群組');
     expect(screen.queryByText(/尚未建立.*停用/)).not.toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: /我已確認此通知對象異動/ })).not.toBeInTheDocument();
@@ -328,14 +371,14 @@ describe('LINE 管理頁真實資料呈現', () => {
       create: vi.fn(),
     } as typeof customerServiceEscalationClient;
 
-    render(
+    const { unmount } = render(
       <LineManagementPage
         customerService={customer}
         lineIdentity={identity}
         escalation={escalation}
+        runtimeOnly
       />
     );
-    fireEvent.click(screen.getByRole('button', { name: /6\. 安全設定與人工升級/ }));
     fireEvent.change(screen.getByLabelText('來源案件／事件參考'), {
       target: { value: 'ticket-referral-31' },
     });
@@ -347,7 +390,7 @@ describe('LINE 管理頁真實資料呈現', () => {
 
     const requestOptions = vi.mocked(escalation.previewCreate).mock.calls[0][1];
     expect(requestOptions?.signal?.aborted).toBe(false);
-    fireEvent.click(screen.getByRole('button', { name: /1\. 客服工單與案件追蹤/ }));
+    unmount();
     expect(requestOptions?.signal?.aborted).toBe(true);
 
     resolvePreview({
@@ -363,7 +406,7 @@ describe('LINE 管理頁真實資料呈現', () => {
       apply_ready: true,
     });
     await Promise.resolve();
-    fireEvent.click(screen.getByRole('button', { name: /6\. 安全設定與人工升級/ }));
+    render(<LineManagementPage customerService={customer} lineIdentity={identity} escalation={escalation} runtimeOnly />);
     expect(screen.queryByRole('checkbox', { name: /我已確認人工升級影響/ })).not.toBeInTheDocument();
     expect(escalation.create).not.toHaveBeenCalled();
   });
@@ -421,7 +464,8 @@ describe('LINE 管理頁真實資料呈現', () => {
         delivery={delivery}
       />
     );
-    fireEvent.click(screen.getByRole('button', { name: /4\. 通知規則目錄/ }));
+    fireEvent.click(screen.getByRole('button', { name: '通知與發送' }));
+    fireEvent.click(screen.getByRole('button', { name: '發送佇列與歷程' }));
     expect(await screen.findByText(/第 1／2 頁/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '上一頁' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '下一頁' }));
@@ -467,7 +511,8 @@ describe('LINE 管理頁真實資料呈現', () => {
     };
 
     render(<LineManagementPage customerService={customer} lineIdentity={identity} lineConfiguration={lineConfiguration} delivery={delivery} />);
-    fireEvent.click(screen.getByRole('button', { name: /4\. 通知規則目錄/ }));
+    fireEvent.click(screen.getByRole('button', { name: '通知與發送' }));
+    fireEvent.click(screen.getByRole('button', { name: '發送佇列與歷程' }));
     fireEvent.click(await screen.findByRole('button', { name: /查看明細/ }));
 
     await waitFor(() => expect(delivery.detail).toHaveBeenCalledWith(17, expect.objectContaining({ signal: expect.any(AbortSignal) })));
@@ -522,7 +567,8 @@ describe('LINE 管理頁真實資料呈現', () => {
         richMenuDraft={richMenuDraft}
       />
     );
-    fireEvent.click(screen.getByRole('button', { name: /2\. 多角色 Rich Menu/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Rich Menu' }));
+    fireEvent.click(await screen.findByRole('button', { name: '發布歷程' }));
     expect(await screen.findByText(/第 1／2 頁，\s*顯示第 1–25 筆，\s*共 26 筆/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '上一頁' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '下一頁' }));

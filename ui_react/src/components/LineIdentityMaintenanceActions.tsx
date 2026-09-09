@@ -14,7 +14,6 @@ import {
   lineIdentityClient,
   type LineIdentityClient,
 } from '../api/line_identity/line_identity_client';
-import { sessionClient } from '../api/auth/session_client';
 import { LineIdentityClientError } from '../api/line_identity/line_identity_errors';
 import type {
   LineIdentityBindingView,
@@ -26,7 +25,6 @@ type MaintenanceClient = Pick<
   | 'previewReplacement'
   | 'applyReplacement'
   | 'retryRevocation'
-  | 'manualCompleteRevocation'
 >;
 
 interface LineIdentityMaintenanceActionsProps {
@@ -36,7 +34,6 @@ interface LineIdentityMaintenanceActionsProps {
     'status' | 'revocation_request_id' | 'revocation_status'
   >;
   client?: MaintenanceClient;
-  canManualComplete?: boolean;
   onBindingChanged?: (binding: LineIdentityBindingView) => void;
   onRevocationChanged?: (request: LineIdentityRevocationRequestView) => void;
 }
@@ -64,15 +61,9 @@ export function LineIdentityMaintenanceActions({
   lineUserId,
   binding,
   client = lineIdentityClient,
-  canManualComplete,
   onBindingChanged,
   onRevocationChanged,
 }: LineIdentityMaintenanceActionsProps) {
-  const currentUser = sessionClient.getUser();
-  const manualCompleteAllowed = canManualComplete ?? Boolean(
-    currentUser?.role === 'system_admin'
-      || currentUser?.capabilities.includes('line.identity.binding.override')
-  );
   const controller = useRef<AbortController | null>(null);
   const replacementIntent = useRef<{
     idempotencyKey: string;
@@ -86,8 +77,6 @@ export function LineIdentityMaintenanceActions({
   const [replacementError, setReplacementError] = useState<string | null>(null);
   const [replacementResult, setReplacementResult] = useState<string | null>(null);
   const [maintenanceReason, setMaintenanceReason] = useState('');
-  const [failureConfirmed, setFailureConfirmed] = useState(false);
-  const [overrideConfirmed, setOverrideConfirmed] = useState(false);
   const [maintenanceState, setMaintenanceState] = useState<OperationState>('idle');
   const [maintenanceError, setMaintenanceError] = useState<string | null>(null);
   const [maintenanceResult, setMaintenanceResult] = useState<LineIdentityMaintenanceResultViewModel | null>(null);
@@ -170,14 +159,12 @@ export function LineIdentityMaintenanceActions({
     }
   };
 
-  const runMaintenance = async (operation: 'retry' | 'manual_complete') => {
+  const retryMenuRestore = async () => {
     const requestId = binding.revocation_request_id;
     const reason = maintenanceReason.trim();
-    if (!requestId || binding.revocation_status !== 'menu_reset_failed' || !reason) return;
-    if (
-      operation === 'manual_complete'
-      && (!manualCompleteAllowed || !failureConfirmed || !overrideConfirmed)
-    ) return;
+    const retryableStatus = binding.revocation_status === 'menu_reset_failed'
+      || binding.revocation_status === 'manual_completed';
+    if (!requestId || !retryableStatus || !reason) return;
     controller.current?.abort();
     const nextController = new AbortController();
     controller.current = nextController;
@@ -185,11 +172,9 @@ export function LineIdentityMaintenanceActions({
     setMaintenanceError(null);
     setMaintenanceResult(null);
     try {
-      const result = operation === 'retry'
-        ? await client.retryRevocation(requestId, { reason }, { signal: nextController.signal })
-        : await client.manualCompleteRevocation(requestId, { reason }, { signal: nextController.signal });
+      const result = await client.retryRevocation(requestId, { reason }, { signal: nextController.signal });
       if (nextController.signal.aborted) return;
-      setMaintenanceResult(adaptLineIdentityMaintenanceResult(result, operation));
+      setMaintenanceResult(adaptLineIdentityMaintenanceResult(result, 'retry'));
       setMaintenanceState('success');
       onRevocationChanged?.(result);
     } catch (error: unknown) {
@@ -275,7 +260,7 @@ export function LineIdentityMaintenanceActions({
       {binding.revocation_request_id && binding.revocation_status === 'menu_reset_failed' && (
         <section aria-labelledby="line-identity-maintenance-title">
           <h4 id="line-identity-maintenance-title">解除失敗維護</h4>
-          <p>可重新排入 LINE 選單回復；只有確認 LINE 平台永久失敗或重試已耗盡時才能人工完成。</p>
+          <p>身分授權已停止，系統仍需將 LINE 圖文選單自動回復成訪客模式。請先確認「訪客／預設選單」已重新發布，再重新排入回復流程。</p>
           <label htmlFor="line-identity-maintenance-reason">維護原因</label>
           <textarea
             id="line-identity-maintenance-reason"
@@ -287,44 +272,44 @@ export function LineIdentityMaintenanceActions({
           <button
             type="button"
             disabled={!maintenanceReason.trim() || maintenanceState === 'loading'}
-            onClick={() => void runMaintenance('retry')}
+            onClick={() => void retryMenuRestore()}
           >
-            重新排入 Rich Menu 回復
+            重新排入訪客選單回復
           </button>
-          {manualCompleteAllowed ? (
-            <>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={failureConfirmed}
-                  onChange={(event) => setFailureConfirmed(event.target.checked)}
-                />
-                我已確認 LINE 平台永久失敗或重試已耗盡
-              </label>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={overrideConfirmed}
-                  onChange={(event) => setOverrideConfirmed(event.target.checked)}
-                />
-                我了解人工完成會直接完成解除並清除授權關聯
-              </label>
-              <button
-                type="button"
-                disabled={!maintenanceReason.trim() || !failureConfirmed || !overrideConfirmed || maintenanceState === 'loading'}
-                onClick={() => void runMaintenance('manual_complete')}
-              >
-                人工完成解除
-              </button>
-            </>
-          ) : (
-            <p>人工完成只提供具 LINE 身分人工處理權限的系統管理員。</p>
-          )}
           {maintenanceState === 'loading' && <p>正在提交維護操作…</p>}
           {maintenanceError && <div className="line-error" role="alert">{maintenanceError}</div>}
           {maintenanceResult && (
             <div className="line-success" role="status">
               <strong>{maintenanceResult.statusLabel}</strong>
+              <p>{maintenanceResult.notice}</p>
+            </div>
+          )}
+        </section>
+      )}
+
+      {binding.revocation_request_id && binding.revocation_status === 'manual_completed' && (
+        <section aria-labelledby="line-identity-menu-repair-title">
+          <h4 id="line-identity-menu-repair-title">修復 LINE 訪客選單</h4>
+          <p>系統授權已人工解除，但 LINE 圖文選單尚未確認回復。請先重新發布「訪客／預設選單」，再執行修復。</p>
+          <label htmlFor="line-identity-menu-repair-reason">修復原因</label>
+          <textarea
+            id="line-identity-menu-repair-reason"
+            value={maintenanceReason}
+            rows={3}
+            maxLength={1000}
+            onChange={(event) => setMaintenanceReason(event.target.value)}
+          />
+          <button
+            type="button"
+            disabled={!maintenanceReason.trim() || maintenanceState === 'loading'}
+            onClick={() => void retryMenuRestore()}
+          >
+            重新排入訪客選單回復
+          </button>
+          {maintenanceState === 'loading' && <p>正在提交選單修復…</p>}
+          {maintenanceError && <div className="line-error" role="alert">{maintenanceError}</div>}
+          {maintenanceResult && (
+            <div className="line-success" role="status">
               <p>{maintenanceResult.notice}</p>
             </div>
           )}

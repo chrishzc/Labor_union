@@ -1,7 +1,7 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { CommonQaCatalogPanel } from '../pages/line_management/CommonQaCatalogPanel';
+import { CommonQaCatalogPanel } from '../../../../../../pages/line_management/CommonQaCatalogPanel';
 
 
 describe('常見 QA 題庫 panel', () => {
@@ -101,7 +101,7 @@ describe('常見 QA 題庫 panel', () => {
 
     // 2. 開啟編輯並點擊儲存變更
     fireEvent.click(screen.getByTitle('編輯此題目'));
-    expect(screen.getByText(/編輯 QA 題目（QA-001）/)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '編輯 QA（QA-001）' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '儲存變更' }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
       '/api/v1/line/ai-events/qa-catalog/QA-001',
@@ -117,7 +117,7 @@ describe('常見 QA 題庫 panel', () => {
     ));
 
     // 4. 開啟新增
-    fireEvent.click(screen.getByRole('button', { name: '➕ 新增 QA 題目' }));
-    expect(screen.getByRole('heading', { name: '➕ 新增 QA 題目' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '新增 QA' }));
+    expect(screen.getByRole('heading', { name: '新增 QA' })).toBeInTheDocument();
   });
 });

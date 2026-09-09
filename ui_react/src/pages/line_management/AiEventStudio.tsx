@@ -3,8 +3,21 @@
  * Description: 僅顯示 server-owned AI 客服事件／導航規則與正式測試，不再內建本機示範規則。
  */
 import React, { useEffect, useMemo, useState } from 'react';
+import {
+  Bot,
+  CheckCircle2,
+  CircleAlert,
+  ExternalLink,
+  Laptop,
+  Lightbulb,
+  Navigation,
+  Play,
+  Route,
+  Tag,
+  ThumbsDown,
+  ThumbsUp,
+} from 'lucide-react';
 import { sessionClient } from '../../api/auth/session_client';
-import { RealLlmSemanticTestPanel } from './RealLlmSemanticTestPanel';
 import '../LineManagementPage.css';
 
 interface NavigationCatalogEntry {
@@ -58,6 +71,7 @@ interface CatalogGroup {
 export const AiEventStudio: React.FC = () => {
   const [catalog, setCatalog] = useState<NavigationCatalog | null>(null);
   const [feedbackAggregate, setFeedbackAggregate] = useState<FeedbackAggregate | null>(null);
+  const [feedbackNotice, setFeedbackNotice] = useState<string | null>(null);
   const [catalogNotice, setCatalogNotice] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedRouteKey, setSelectedRouteKey] = useState<string | null>(null);
@@ -65,6 +79,8 @@ export const AiEventStudio: React.FC = () => {
   const routerScore = '90';
   const [routerPreview, setRouterPreview] = useState<RouterPreview | null>(null);
   const [routerNotice, setRouterNotice] = useState<string | null>(null);
+  const [routerNoticeKind, setRouterNoticeKind] = useState<'success' | 'info' | 'error' | null>(null);
+  const [routerBusy, setRouterBusy] = useState(false);
   const [liffId, setLiffId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -106,10 +122,13 @@ export const AiEventStudio: React.FC = () => {
     })
       .then((response) => response.ok ? response.json() : Promise.reject(new Error('feedback_readback_failed')))
       .then((payload: { data?: FeedbackAggregate }) => {
-        if (active && payload.data) setFeedbackAggregate(payload.data);
+        if (active && payload.data) {
+          setFeedbackAggregate(payload.data);
+          setFeedbackNotice(null);
+        }
       })
       .catch(() => {
-        // Feedback aggregate 不影響正式規則 readback。
+        if (active) setFeedbackNotice('回饋統計讀取失敗，請稍後重新整理。');
       });
 
     return () => { active = false; };
@@ -158,11 +177,10 @@ export const AiEventStudio: React.FC = () => {
   }, [groupedRules, selectedRouteKey]);
 
   const getTrueLiffUrl = (publicRoute: string | null) => {
-    if (!publicRoute) return null;
-    const effectiveLiffId = liffId || '2010579869-5e4mcSmT';
+    if (!publicRoute || !liffId) return null;
     const queryIdx = publicRoute.indexOf('?');
     const query = queryIdx !== -1 ? publicRoute.slice(queryIdx) : '';
-    return `https://liff.line.me/${effectiveLiffId}${query ? `/${query}` : ''}`;
+    return `https://liff.line.me/${liffId}${query ? `/${query}` : ''}`;
   };
 
   const getLocalTestUrl = (publicRoute: string | null) => {
@@ -177,7 +195,9 @@ export const AiEventStudio: React.FC = () => {
     const score = routerScore.trim() === '' ? null : Number(routerScore);
     const sourceEventId = `studio-router-${Date.now()}`;
     setRouterNotice(null);
+    setRouterNoticeKind(null);
     setRouterPreview(null);
+    setRouterBusy(true);
     try {
       const token = sessionClient.getToken();
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -208,12 +228,17 @@ export const AiEventStudio: React.FC = () => {
         if (cardElement) {
           cardElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
-        setRouterNotice(`🎯 成功命中事件規則【${matchedRoute}】！信心度 ${payload.data.confidence}%`);
+        setRouterNotice(`成功命中事件規則【${matchedRoute}】，信心度 ${payload.data.confidence}%`);
+        setRouterNoticeKind('success');
       } else {
-        setRouterNotice(`ℹ️ 未命中固定事件規則（kind: ${payload.data.kind}），將走語意比對或轉接。`);
+        setRouterNotice(`未命中固定事件規則（kind: ${payload.data.kind}），將走語意比對或轉接。`);
+        setRouterNoticeKind('info');
       }
     } catch {
       setRouterNotice('Server-owned router preview 失敗；未以本機規則替代。');
+      setRouterNoticeKind('error');
+    } finally {
+      setRouterBusy(false);
     }
   };
 
@@ -225,10 +250,10 @@ export const AiEventStudio: React.FC = () => {
     <div className="ai-studio-container">
       <div className="ai-studio-sidebar">
         <div className="ai-sidebar-top">
-          <h3>🤖 AI 客服事件規則庫</h3>
+          <h3><Bot aria-hidden="true" />AI 客服事件規則庫</h3>
         </div>
 
-        <div className="ai-editor-form" style={{ padding: '0 16px 12px' }}>
+        <div className="ai-editor-form ai-rule-search-form">
           <label htmlFor="server-ai-rule-search">搜尋正式規則</label>
           <input
             id="server-ai-rule-search"
@@ -255,41 +280,22 @@ export const AiEventStudio: React.FC = () => {
               <div
                 key={`${rule.routeKey}:${rule.tier}`}
                 id={`rule-card-${rule.routeKey}`}
-                className={`ai-rule-item-card ${isSelected ? 'selected-rule-card' : ''}`}
-                style={{
-                  cursor: 'pointer',
-                  transition: 'all 0.2s ease',
-                  border: isMatched
-                    ? '2px solid #28a745'
-                    : isSelected
-                    ? '2px solid #ff7a59'
-                    : '1px solid #e0e0e0',
-                  boxShadow: isMatched
-                    ? '0 0 12px rgba(40,167,69,0.3)'
-                    : isSelected
-                    ? '0 0 10px rgba(255,122,89,0.25)'
-                    : 'none',
-                  backgroundColor: isMatched
-                    ? '#f6fff8'
-                    : isSelected
-                    ? '#fff9f7'
-                    : '#fff',
-                }}
+                className={`ai-rule-item-card${isSelected ? ' is-selected' : ''}${isMatched ? ' is-matched' : ''}`}
                 onClick={() => setSelectedRouteKey(rule.routeKey)}
               >
-                <div className="ai-card-title-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div className="ai-card-title-row">
                   <div>
-                    <strong style={{ color: isSelected ? '#d9534f' : 'inherit' }}>{rule.routeKey}</strong>
-                    <span className="category-badge" style={{ marginLeft: '6px' }}>{rule.tier}</span>
+                    <strong>{rule.routeKey}</strong>
+                    <span className="category-badge ai-rule-tier">{rule.tier}</span>
                   </div>
                   {isMatched && (
-                    <span style={{ fontSize: '11px', background: '#28a745', color: '#fff', padding: '2px 6px', borderRadius: '4px', fontWeight: 600 }}>
-                      ✨ 命中
+                    <span className="ai-rule-state is-matched">
+                      <CheckCircle2 aria-hidden="true" />命中
                     </span>
                   )}
                   {!isMatched && isSelected && (
-                    <span style={{ fontSize: '11px', background: '#ff7a59', color: '#fff', padding: '2px 6px', borderRadius: '4px', fontWeight: 600 }}>
-                      🎯 檢視中
+                    <span className="ai-rule-state is-selected">
+                      <Navigation aria-hidden="true" />檢視中
                     </span>
                   )}
                 </div>
@@ -298,7 +304,7 @@ export const AiEventStudio: React.FC = () => {
                     <span key={alias} className="tag-chip-sm">{alias}</span>
                   ))}
                   {rule.aliases.length > 4 && (
-                    <span className="tag-chip-sm" style={{ background: '#eee', color: '#666' }}>
+                    <span className="tag-chip-sm ai-rule-more-count">
                       +{rule.aliases.length - 4}
                     </span>
                   )}
@@ -324,118 +330,88 @@ export const AiEventStudio: React.FC = () => {
         </div>
 
         {selectedRule ? (
-          <div className="ai-editor-card" style={{ marginBottom: '16px' }}>
-            <div className="ai-editor-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <h4>🎯 事件規則控制中心：<code>規則「{selectedRule.routeKey}」</code></h4>
-                <span className="category-badge" style={{ fontSize: '13px', padding: '3px 8px' }}>
+          <div className="ai-editor-card ai-rule-detail-card">
+            <div className="ai-editor-header">
+              <div className="ai-editor-heading-group">
+                <h4><Route aria-hidden="true" />事件規則：<code>{selectedRule.routeKey}</code></h4>
+                <span className="category-badge ai-rule-detail-tier">
                   層級：{selectedRule.tier}
                 </span>
               </div>
-              <span style={{ fontSize: '12px', color: '#888' }}>
+              <span className="ai-rule-revision">
                 Rev {selectedRule.revision} · {selectedRule.sourceIdentity}
               </span>
             </div>
 
-            <div style={{ marginTop: '12px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
-                <div style={{ background: '#f8f9fa', padding: '12px', borderRadius: '8px', border: '1px solid #e9ecef' }}>
-                  <strong style={{ display: 'block', marginBottom: '4px', color: '#495057', fontSize: '13px' }}>
-                    📌 路由識別鍵（Route Key）
+            <div className="ai-rule-detail-body">
+              <div className="ai-rule-fact-grid">
+                <div className="ai-rule-fact-card">
+                  <strong><Route aria-hidden="true" />路由識別鍵（Route Key）
                   </strong>
-                  <code style={{ fontSize: '15px', color: '#d9534f', fontWeight: 600 }}>ID: {selectedRule.routeKey}</code>
+                  <code className="ai-route-key">ID: {selectedRule.routeKey}</code>
                 </div>
-                <div style={{ background: '#f8f9fa', padding: '12px', borderRadius: '8px', border: '1px solid #e9ecef' }}>
-                  <strong style={{ display: 'block', marginBottom: '6px', color: '#495057', fontSize: '13px' }}>
-                    🌐 目標導航頁面（Public Route）
+                <div className="ai-rule-fact-card">
+                  <strong><Navigation aria-hidden="true" />目標導航頁面（Public Route）
                   </strong>
                   {selectedRule.publicRoute ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
-                        <code style={{ fontSize: '13px', wordBreak: 'break-all', color: '#0d6efd' }}>
+                    <div className="ai-route-stack">
+                      <div className="ai-route-row">
+                        <code className="ai-public-route">
                           {selectedRule.publicRoute}
                         </code>
-                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                        <div className="ai-route-actions">
                           {getTrueLiffUrl(selectedRule.publicRoute) && (
                             <a
                               href={getTrueLiffUrl(selectedRule.publicRoute)!}
                               target="_blank"
                               rel="noreferrer"
-                              className="line-tab-btn active"
-                              style={{
-                                padding: '4px 10px',
-                                fontSize: '12px',
-                                textDecoration: 'none',
-                                whiteSpace: 'nowrap',
-                                background: '#06c755',
-                                borderColor: '#06c755',
-                                color: '#fff',
-                                fontWeight: 600,
-                              }}
+                              className="ai-route-link is-liff"
                               title="開啟正式 LINE LIFF 網址（https://liff.line.me/...）"
                             >
-                              📲 開啟真實 LIFF
+                              <ExternalLink aria-hidden="true" />開啟真實 LIFF
                             </a>
                           )}
                           <a
                             href={getLocalTestUrl(selectedRule.publicRoute)}
                             target="_blank"
                             rel="noreferrer"
-                            className="line-tab-btn"
-                            style={{
-                              padding: '4px 10px',
-                              fontSize: '12px',
-                              textDecoration: 'none',
-                              whiteSpace: 'nowrap',
-                              background: '#fff',
-                              color: '#334155',
-                              borderColor: '#cbd5e1',
-                            }}
+                            className="ai-route-link"
                             title="以本機 FastAPI 靜態頁面開啟（例如 /line-identity）"
                           >
-                            💻 本機預覽
+                            <Laptop aria-hidden="true" />本機預覽
                           </a>
                         </div>
                       </div>
                       {getTrueLiffUrl(selectedRule.publicRoute) && (
-                        <div style={{ fontSize: '11px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
+                        <div className="ai-liff-url">
                           <span>真實 LIFF 連結：</span>
-                          <code style={{ color: '#059669', wordBreak: 'break-all' }}>
+                          <code>
                             {getTrueLiffUrl(selectedRule.publicRoute)}
                           </code>
                         </div>
                       )}
+                      {!liffId && (
+                        <small className="ai-route-config-note">尚未從 runtime config 取得 LIFF ID，因此不顯示正式 LIFF 連結。</small>
+                      )}
                     </div>
                   ) : (
-                    <span style={{ color: '#888', fontSize: '13px' }}>未設定跳轉頁面（純事件分流）</span>
+                    <span className="ai-route-empty">未設定跳轉頁面（純事件分流）</span>
                   )}
                 </div>
               </div>
 
-              <div style={{ marginBottom: '16px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                  <strong style={{ fontSize: '14px' }}>
-                    🏷️ 觸發別名庫（共 {selectedRule.aliases.length} 組問法）：
+              <div className="ai-alias-section">
+                <div className="ai-alias-header">
+                  <strong><Tag aria-hidden="true" />觸發別名庫（共 {selectedRule.aliases.length} 組問法）
                   </strong>
-                  <small style={{ color: '#666' }}>點擊任一問法即可直接帶入下方模擬器測試</small>
+                  <small>選擇任一問法即可帶入下方模擬器測試</small>
                 </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                <div className="ai-alias-list">
                   {selectedRule.aliases.map((alias) => (
-                    <span
+                    <button
+                      type="button"
                       key={alias}
-                      className="tag-chip-sm"
-                      style={{
-                        fontSize: '13px',
-                        padding: '6px 12px',
-                        cursor: 'pointer',
-                        background: '#eef2ff',
-                        color: '#2563eb',
-                        borderColor: '#bfdbfe',
-                        borderRadius: '6px',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '4px',
-                      }}
+                      className="ai-alias-button"
                       title="點擊將此問句填入下方測試並執行"
                       onClick={() => {
                         setRouterInput(alias);
@@ -443,27 +419,26 @@ export const AiEventStudio: React.FC = () => {
                       }}
                     >
                       問法：{alias}
-                      <span style={{ fontSize: '11px', color: '#93c5fd' }}>▶ 測試</span>
-                    </span>
+                      <span><Play aria-hidden="true" />測試</span>
+                    </button>
                   ))}
                 </div>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '12px', borderTop: '1px dashed #dee2e6' }}>
+              <div className="ai-rule-quick-row">
                 <button
                   type="button"
-                  className="line-tab-btn active"
-                  style={{ padding: '6px 14px', fontSize: '13px' }}
+                  className="line-primary-btn"
                   onClick={() => {
                     const firstAlias = selectedRule.aliases[0] || selectedRule.routeKey;
                     setRouterInput(firstAlias);
                     void executePreview(firstAlias);
                   }}
                 >
-                  🚀 快速以首選問句模擬此規則
+                  <Play aria-hidden="true" />以首選問句模擬此規則
                 </button>
                 {feedbackAggregate && (
-                  <span style={{ fontSize: '12px', color: '#6c757d' }}>
+                  <span className="ai-feedback-inline-summary">
                     即時反饋：共 {feedbackAggregate.total_count} 則（已解決 {feedbackAggregate.resolved_count}）
                   </span>
                 )}
@@ -471,81 +446,80 @@ export const AiEventStudio: React.FC = () => {
             </div>
           </div>
         ) : (
-          <div className="ai-editor-card" style={{ marginBottom: '16px' }}>
+          <div className="ai-editor-card ai-rule-detail-card">
             <div className="line-warning" role="status">請從左側點選一組事件規則進行查看。</div>
           </div>
         )}
 
         <div className="ai-simulator-card">
-          {/* 📊 AI 助理用戶回饋總覽看板 */}
-          <div style={{ background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0', padding: '14px 16px', marginBottom: '16px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-              <h4 style={{ margin: 0, fontSize: '15px', color: '#1e293b' }}>📊 AI 客服回饋機制與滿意度總覽</h4>
-              <span style={{ fontSize: '12px', background: '#e0f2fe', color: '#0369a1', padding: '2px 8px', borderRadius: '12px', fontWeight: 600 }}>
+          <section className="ai-feedback-overview" aria-labelledby="ai-feedback-title">
+            <div className="ai-feedback-header">
+              <h4 id="ai-feedback-title"><ThumbsUp aria-hidden="true" />AI 客服回饋與滿意度</h4>
+              <span className="ai-feedback-badge">
                 用戶即時反饋
               </span>
             </div>
             {feedbackAggregate ? (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px' }}>
-                <div style={{ background: '#fff', padding: '10px', borderRadius: '6px', border: '1px solid #e2e8f0', textAlign: 'center' }}>
-                  <div style={{ fontSize: '12px', color: '#64748b' }}>總回饋數</div>
-                  <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#0f172a' }}>{feedbackAggregate.total_count}</div>
+              <div className="ai-feedback-grid">
+                <div className="ai-feedback-metric">
+                  <span>總回饋數</span>
+                  <strong>{feedbackAggregate.total_count}</strong>
                 </div>
-                <div style={{ background: '#fff', padding: '10px', borderRadius: '6px', border: '1px solid #e2e8f0', textAlign: 'center' }}>
-                  <div style={{ fontSize: '12px', color: '#059669' }}>👍 已解決</div>
-                  <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#059669' }}>{feedbackAggregate.resolved_count}</div>
+                <div className="ai-feedback-metric is-positive">
+                  <span><ThumbsUp aria-hidden="true" />已解決</span>
+                  <strong>{feedbackAggregate.resolved_count}</strong>
                 </div>
-                <div style={{ background: '#fff', padding: '10px', borderRadius: '6px', border: '1px solid #e2e8f0', textAlign: 'center' }}>
-                  <div style={{ fontSize: '12px', color: '#dc2626' }}>👎 未解決</div>
-                  <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#dc2626' }}>{feedbackAggregate.unresolved_count}</div>
+                <div className="ai-feedback-metric is-negative">
+                  <span><ThumbsDown aria-hidden="true" />未解決</span>
+                  <strong>{feedbackAggregate.unresolved_count}</strong>
                 </div>
-                <div style={{ background: '#fff', padding: '10px', borderRadius: '6px', border: '1px solid #e2e8f0', textAlign: 'center' }}>
-                  <div style={{ fontSize: '12px', color: '#2563eb' }}>滿意度</div>
-                  <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#2563eb' }}>
+                <div className="ai-feedback-metric is-rate">
+                  <span>滿意度</span>
+                  <strong>
                     {feedbackAggregate.resolved_rate !== null ? `${Math.round(feedbackAggregate.resolved_rate * 100)}%` : '尚無回饋'}
-                  </div>
+                  </strong>
                 </div>
               </div>
+            ) : feedbackNotice ? (
+              <div className="line-warning" role="status"><CircleAlert aria-hidden="true" />{feedbackNotice}</div>
             ) : (
-              <div style={{ fontSize: '13px', color: '#64748b' }}>載入回饋統計中…</div>
+              <div className="ai-feedback-loading" role="status">載入回饋統計中…</div>
             )}
-            <p style={{ margin: '8px 0 0', fontSize: '12px', color: '#64748b' }}>
-              💡 用戶回饋機制說明：當民眾在 LINE 點選「未解決」時，系統會自動建立客訴工單並升級至真人客服專員介入。
+            <p className="ai-feedback-help">
+              <Lightbulb aria-hidden="true" />民眾在 LINE 選擇「未解決」後，系統會建立客訴工單並轉由真人客服處理。
             </p>
-          </div>
+          </section>
 
-          <RealLlmSemanticTestPanel />
-
-          {/* 視覺隱藏除錯測試框（sr-only），讓版面全由 Gemini 智能工作台取代，同時滿足自動化測試 */}
-          <div
-            style={{
-              position: 'absolute',
-              width: '1px',
-              height: '1px',
-              padding: 0,
-              margin: '-1px',
-              overflow: 'hidden',
-              clip: 'rect(0, 0, 0, 0)',
-              whiteSpace: 'nowrap',
-              border: 0,
-            }}
-          >
+          <section className="ai-router-simulator" aria-labelledby="ai-router-simulator-title">
+            <div className="ai-router-simulator-heading">
+              <div>
+                <h4 id="ai-router-simulator-title"><Navigation aria-hidden="true" />事件路由模擬器</h4>
+                <p>送到正式 server-owned router 預覽端點；不會套用或儲存變更。</p>
+              </div>
+            </div>
+            <label htmlFor="server-router-input">測試問句</label>
+            <div className="ai-router-input-row">
             <input
+              id="server-router-input"
               aria-label="Server router 測試文字"
               value={routerInput}
               onChange={(event) => setRouterInput(event.target.value)}
             />
-            <button type="button" onClick={() => void previewServerRouter()}>
-              讀取 server router preview
+            <button type="button" className="line-primary-btn" disabled={routerBusy || !routerInput.trim()} onClick={() => void previewServerRouter()}>
+              <Play aria-hidden="true" />{routerBusy ? '測試中…' : '讀取 server router preview'}
             </button>
-            {routerNotice && <div>{routerNotice}</div>}
+            </div>
+            {!routerNotice && !routerPreview && <p className="ai-router-empty">尚未執行路由測試。</p>}
+            {routerNotice && <div className={`ai-router-notice is-${routerNoticeKind ?? 'info'}`} role="status">{routerNotice}</div>}
             {routerPreview && (
-              <div>
-                <div>semantic bucket：{routerPreview.semantic_bucket}</div>
-                <div>route：{routerPreview.route_key}</div>
+              <div className="ai-router-result" aria-label="路由測試結果">
+                <div><span>semantic bucket</span><strong>{routerPreview.semantic_bucket}</strong></div>
+                <div><span>route</span><strong>{routerPreview.route_key ?? '未命中固定路由'}</strong></div>
+                <div><span>信心度</span><strong>{routerPreview.confidence}%</strong></div>
+                <div><span>結果類型</span><strong>{routerPreview.kind}</strong></div>
               </div>
             )}
-          </div>
+          </section>
         </div>
       </div>
     </div>

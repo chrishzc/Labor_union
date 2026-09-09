@@ -1,8 +1,8 @@
 /* Nurture Core Design System Tokens - Extracted from Google Stitch */
 :root {
   /* Color Palette */
-  --md-sys-color-primary: #ff7f50;
-  --md-sys-color-primary-hover: #e0683a;
+  --md-sys-color-primary: #c2410c;
+  --md-sys-color-primary-hover: #9a3412;
   --md-sys-color-primary-container: #ffdbcf;
   --md-sys-color-on-primary: #ffffff;
   --md-sys-color-on-primary-container: #6c2000;
@@ -27,6 +27,11 @@
   --md-sys-color-warning-container: #ffedd5;
   --md-sys-color-error: #dc2626;
   --md-sys-color-error-container: #fee2e2;
+  --md-sys-color-info: #0369a1;
+  --md-sys-color-info-container: #e0f2fe;
+  --md-sys-color-disabled: #756b67;
+  --md-sys-color-disabled-container: #eee8e5;
+  --md-sys-color-focus: #9a3412;
 
   /* Typography */
   --font-family-headline: 'Be Vietnam Pro', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -53,6 +58,18 @@
   --space-6: 24px;
   --space-8: 32px;
   --space-10: 40px;
+
+  /* LINE Hub semantic aliases shared by every management surface. */
+  --line-color-primary: var(--md-sys-color-primary);
+  --line-color-primary-hover: var(--md-sys-color-primary-hover);
+  --line-color-text: var(--md-sys-color-on-surface);
+  --line-color-text-muted: var(--md-sys-color-on-surface-variant);
+  --line-color-border: var(--md-sys-color-outline);
+  --line-color-border-subtle: var(--md-sys-color-outline-variant);
+  --line-color-page: var(--md-sys-color-surface);
+  --line-color-card: var(--md-sys-color-surface-container);
+  --line-control-height: 44px;
+  --line-page-max-width: 1480px;
 }
 
 * {
@@ -76,4 +93,49 @@ h1, h2, h3, h4, h5, h6 {
 
 button {
   font-family: inherit;
+}
+
+button,
+input,
+select,
+textarea,
+summary {
+  font: inherit;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible,
+a:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--md-sys-color-focus) 55%, transparent);
+  outline-offset: 2px;
+}
+
+.sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+body.modal-open {
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

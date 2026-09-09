@@ -3,6 +3,7 @@
  * Description: 在瀏覽器記憶體編輯 Rich Menu 顯示欄位，並以專用草稿 Preview、確認、Apply 保存。
  */
 import React, { useEffect, useRef, useState } from 'react';
+import { Eye, Grid2X2, Palette, Save, X } from 'lucide-react';
 import {
   lineRichMenuMediaClient,
   type LineRichMenuMediaClient,
@@ -192,6 +193,18 @@ export const LineRichMenuDraftAppearanceEditor: React.FC<Props> = ({
     }
   };
 
+  const isDirty = JSON.stringify(definition) !== JSON.stringify(draft.definition);
+
+  useEffect(() => {
+    if (!isDirty) return undefined;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warnBeforeUnload);
+    return () => window.removeEventListener('beforeunload', warnBeforeUnload);
+  }, [isDirty]);
+
   if (!menu) {
     return <div className="line-scope-note">目前沒有可編輯的 Rich Menu 草稿。</div>;
   }
@@ -205,10 +218,10 @@ export const LineRichMenuDraftAppearanceEditor: React.FC<Props> = ({
       <section className="richmenu-card" data-control-id="line.richmenu.draft.appearance-editor">
         <div className="richmenu-card-header">
           <div>
-            <h4 style={{ margin: 0, fontSize: '1.05rem', color: '#1e1b19', fontWeight: 700 }}>
-              🎨 修改選單外觀與名稱
+            <h4 className="richmenu-editor-title">
+              <Palette aria-hidden="true" />修改選單外觀與名稱
             </h4>
-            <p style={{ margin: '4px 0 0', fontSize: '0.82rem', color: '#74593f' }}>
+            <p className="richmenu-editor-description">
               此版本保留原始發布內容，目前不提供修改。
             </p>
           </div>
@@ -222,20 +235,25 @@ export const LineRichMenuDraftAppearanceEditor: React.FC<Props> = ({
   const invalid = !menu.name.trim()
     || !menu.chat_bar_text.trim()
     || menu.buttons.some((button) => !button.label.trim());
-
   return (
     <section className="richmenu-card" data-control-id="line.richmenu.draft.appearance-editor">
       <div className="richmenu-card-header">
         <div>
-          <h4 style={{ margin: 0, fontSize: '1.05rem', color: '#1e1b19', fontWeight: 700 }}>
-            🎨 修改選單外觀與名稱
+          <h4 className="richmenu-editor-title">
+            <Palette aria-hidden="true" />修改選單外觀與名稱
           </h4>
-          <p style={{ margin: '4px 0 0', fontSize: '0.82rem', color: '#74593f' }}>
+          <p className="richmenu-editor-description">
             修改先保留在本機；保存草稿不會發布或發送 LINE。
           </p>
         </div>
         <span className="line-category-badge category-service_flow">編輯草稿</span>
       </div>
+
+      {isDirty && (
+        <div className="line-warning richmenu-dirty-state" role="status">
+          尚有未儲存的外觀變更；離開頁面前請先預覽並套用，或取消修改。
+        </div>
+      )}
 
       <div className="richmenu-form-grid">
         <label className="richmenu-form-field">
@@ -269,7 +287,7 @@ export const LineRichMenuDraftAppearanceEditor: React.FC<Props> = ({
         </label>
       </div>
 
-      <fieldset className="richmenu-form-field richmenu-form-field-full" style={{ marginBottom: '14px' }}>
+      <fieldset className="richmenu-form-field richmenu-form-field-full richmenu-form-section-spacing">
         <legend>背景圖片</legend>
         <label className="richmenu-confirm-checkbox-label">
           <input
@@ -313,7 +331,7 @@ export const LineRichMenuDraftAppearanceEditor: React.FC<Props> = ({
 
       <div className="richmenu-buttons-grid-fields">
         <div className="richmenu-buttons-grid-fields-title">
-          🔘 各按鈕顯示名稱配置 (共 {menu.buttons.length} 個熱區)
+          <Grid2X2 aria-hidden="true" />各按鈕顯示名稱配置（共 {menu.buttons.length} 個熱區）
         </div>
         {menu.buttons.map((button, index) => (
           <label key={button.id} className="richmenu-form-field">
@@ -334,7 +352,7 @@ export const LineRichMenuDraftAppearanceEditor: React.FC<Props> = ({
         ))}
       </div>
 
-      <label className="richmenu-form-field richmenu-form-field-full" style={{ marginBottom: '14px' }}>
+      <label className="richmenu-form-field richmenu-form-field-full richmenu-form-section-spacing">
         <span>變更原因</span>
         <input
           className="richmenu-form-input"
@@ -351,7 +369,7 @@ export const LineRichMenuDraftAppearanceEditor: React.FC<Props> = ({
           onClick={() => void requestPreview()}
           disabled={invalid || status === 'previewing' || status === 'applying'}
         >
-          預覽草稿變更
+          <Eye aria-hidden="true" />{status === 'previewing' ? '預覽中…' : '預覽草稿變更'}
         </button>
         <button
           type="button"
@@ -365,13 +383,13 @@ export const LineRichMenuDraftAppearanceEditor: React.FC<Props> = ({
             onLocalDefinitionChange?.(null);
           }}
         >
-          取消修改
+          <X aria-hidden="true" />取消修改
         </button>
       </div>
 
       {preview && (
         <div className="richmenu-preview-callout">
-          <p style={{ margin: 0, fontSize: '0.86rem', fontWeight: 600, color: '#166534' }}>
+          <p className="richmenu-preview-summary">
             預覽完成：已核對目前內容與保存後結果。
           </p>
           <label className="richmenu-confirm-checkbox-label">
@@ -389,16 +407,15 @@ export const LineRichMenuDraftAppearanceEditor: React.FC<Props> = ({
               onClick={() => void apply()}
               disabled={!confirmed || !reason.trim() || status === 'applying'}
             >
-              套用並回讀
+              <Save aria-hidden="true" />套用並回讀
             </button>
           </div>
         </div>
       )}
       {message && (
         <div
-          className={status === 'error' ? 'line-error' : 'line-scope-note'}
+          className={`${status === 'error' ? 'line-error' : 'line-scope-note'} line-block-spacing-12`}
           role={status === 'error' ? 'alert' : 'status'}
-          style={{ marginTop: '12px' }}
         >
           {message}
         </div>

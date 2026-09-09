@@ -68,7 +68,7 @@ describe('AI 事件工作室正式規則 readback', () => {
     mockReadback();
     render(React.createElement(AiEventStudio));
 
-    expect(screen.getByText('尚未執行連線測試')).toBeInTheDocument();
+    expect(screen.getByText('尚未執行路由測試。')).toBeInTheDocument();
     expect(screen.queryByText(/新竹市月子補助計算與收費說明/)).not.toBeInTheDocument();
     expect(screen.queryByText(/客戶資料與服務異動申請/)).not.toBeInTheDocument();
     expect(screen.queryByText(/服務態度與爭議客訴/)).not.toBeInTheDocument();
@@ -76,7 +76,7 @@ describe('AI 事件工作室正式規則 readback', () => {
 
     await waitFor(() => {
       expect(screen.getByText(/舊版 4 筆 INITIAL_RULES 本機示範資料已移除/)).toBeInTheDocument();
-      expect(screen.getByText('profile_update')).toBeInTheDocument();
+      expect(screen.getAllByText('profile_update')).toHaveLength(2);
       expect(screen.getByText('修改登記資料')).toBeInTheDocument();
       expect(screen.getByText('我要改資料')).toBeInTheDocument();
       expect(screen.getByText(/正式 catalog revision 3/)).toBeInTheDocument();
@@ -101,8 +101,8 @@ describe('AI 事件工作室正式規則 readback', () => {
     fireEvent.click(screen.getByRole('button', { name: '讀取 server router preview' }));
 
     await waitFor(() => {
-      expect(screen.getByText(/semantic bucket：route/)).toBeInTheDocument();
-      expect(screen.getByText(/route：profile_update/)).toBeInTheDocument();
+      expect(screen.getByLabelText('路由測試結果')).toHaveTextContent('semantic bucketroute');
+      expect(screen.getByLabelText('路由測試結果')).toHaveTextContent('routeprofile_update');
     });
     expect(fetchSpy).toHaveBeenCalledWith(
       '/api/v1/line/ai-events/router/preview',
@@ -121,8 +121,8 @@ describe('AI 事件工作室正式規則 readback', () => {
     fireEvent.click(screen.getByText('問法：修改登記資料'));
 
     await waitFor(() => {
-      expect(screen.getByText(/🎯 成功命中事件規則【profile_update】/)).toBeInTheDocument();
-      expect(screen.getByText('✨ 命中')).toBeInTheDocument();
+      expect(screen.getByText(/成功命中事件規則【profile_update】/)).toBeInTheDocument();
+      expect(screen.getByText('命中')).toBeInTheDocument();
     });
   });
 });

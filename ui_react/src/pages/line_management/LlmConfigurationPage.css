@@ -2,178 +2,242 @@
   display: flex;
   flex-direction: column;
   gap: 20px;
+  width: 100%;
+  max-width: 1040px;
+  min-width: 0;
   padding: 24px;
-  max-width: 920px;
+  box-sizing: border-box;
 }
 
 .llm-config-header {
   display: flex;
-  justify-content: space-between;
   align-items: flex-start;
+  justify-content: space-between;
   gap: 24px;
 }
 
+.llm-config-heading {
+  display: flex;
+  align-items: flex-start;
+  min-width: 0;
+  gap: 14px;
+}
+
+.llm-config-heading-icon {
+  display: grid;
+  flex: 0 0 46px;
+  width: 46px;
+  height: 46px;
+  place-items: center;
+  border: 1px solid var(--line-ui-border-strong, #fed7aa);
+  border-radius: 14px;
+  background: var(--line-ui-accent-soft, #fff7ed);
+  color: var(--line-ui-accent, #c2410c);
+}
+
+.llm-config-heading-icon svg { width: 23px; height: 23px; }
+
 .llm-config-eyebrow {
-  margin: 0 0 6px;
-  color: var(--color-text-muted, #64748b);
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  margin: 0 0 5px;
+  color: var(--line-ui-accent, #c2410c);
+  font-size: 0.875rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
 }
 
 .llm-config-header h1 {
   margin: 0;
-  font-size: 28px;
+  color: var(--line-ui-text, #292524);
+  font-size: clamp(1.55rem, 3vw, 2rem);
+  line-height: 1.2;
 }
 
 .llm-config-description {
-  margin: 10px 0 0;
-  max-width: 680px;
-  color: var(--color-text-muted, #64748b);
-  line-height: 1.65;
+  max-width: 640px;
+  margin: 8px 0 0;
+  color: var(--line-ui-text-muted, #78716c);
+  line-height: 1.6;
 }
 
 .llm-config-status {
   display: inline-flex;
   align-items: center;
+  flex: 0 0 auto;
+  min-height: 40px;
   gap: 8px;
-  padding: 9px 12px;
-  border: 1px solid #d7dde5;
+  padding: 8px 12px;
+  border: 1px solid var(--line-ui-border, #e7e5e4);
   border-radius: 999px;
-  background: #fff;
+  background: var(--line-ui-surface, #fff);
+  color: var(--line-ui-text, #292524);
   white-space: nowrap;
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 0.875rem;
+  font-weight: 700;
+  box-sizing: border-box;
 }
 
 .llm-config-status-dot {
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  background: #94a3b8;
+  background: #a8a29e;
 }
 
-.llm-config-status.configured .llm-config-status-dot {
-  background: #16a34a;
-}
+.llm-config-status.configured .llm-config-status-dot { background: var(--line-ui-success, #15803d); }
 
 .llm-config-card {
+  min-width: 0;
   padding: 24px;
-  border: 1px solid #dfe4ea;
-  border-radius: 16px;
-  background: #fff;
-  box-shadow: 0 8px 24px rgb(15 23 42 / 6%);
+  border: 1px solid var(--line-ui-border, #e7e5e4);
+  border-radius: var(--line-ui-radius-lg, 16px);
+  background: var(--line-ui-surface, #fff);
+  box-shadow: var(--line-ui-shadow, 0 8px 24px rgb(41 37 36 / 7%));
 }
 
 .llm-config-card-heading h2 {
   margin: 0;
-  font-size: 19px;
+  color: var(--line-ui-text, #292524);
+  font-size: 1.2rem;
 }
 
-.llm-config-card-heading p {
-  margin: 8px 0 0;
-  color: #64748b;
-  line-height: 1.6;
+.llm-config-model-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 16px 0 0;
+}
+
+.llm-config-model-facts div {
+  padding: 12px;
+  border: 1px solid var(--line-ui-border, #e7e5e4);
+  border-radius: 12px;
+  background: var(--line-ui-surface-subtle, #fafaf9);
+}
+
+.llm-config-model-facts dt {
+  color: var(--line-ui-text-muted, #78716c);
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.llm-config-model-facts dd {
+  overflow-wrap: anywhere;
+  margin: 4px 0 0;
+  color: var(--line-ui-text, #292524);
+  font-weight: 750;
 }
 
 .llm-config-form {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  margin-top: 22px;
+  margin-top: 24px;
 }
 
-.llm-config-form label {
-  font-weight: 700;
-}
+.llm-config-form > label { color: var(--line-ui-text, #292524); font-weight: 750; }
+.llm-config-secret-field { position: relative; min-width: 0; }
 
 .llm-config-form input {
   width: 100%;
-  box-sizing: border-box;
-  padding: 12px 14px;
-  border: 1px solid #cbd5e1;
+  min-height: 46px;
+  padding: 11px 52px 11px 14px;
+  border: 1px solid var(--line-ui-border-strong, #d6d3d1);
   border-radius: 10px;
   background: #fff;
-  color: #0f172a;
+  color: var(--line-ui-text, #292524);
   font: inherit;
+  box-sizing: border-box;
 }
 
-.llm-config-form input:focus {
-  outline: 2px solid #94a3b8;
+.llm-config-form input:focus-visible {
+  border-color: var(--line-ui-accent, #c2410c);
+  outline: 3px solid color-mix(in srgb, var(--line-ui-accent, #c2410c) 22%, transparent);
   outline-offset: 2px;
-  border-color: #64748b;
 }
 
-.llm-config-form input:disabled {
-  background: #f8fafc;
-  cursor: not-allowed;
+.llm-config-form input:disabled { background: var(--line-ui-surface-subtle, #fafaf9); cursor: not-allowed; }
+
+.llm-config-secret-toggle {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  display: grid;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--line-ui-text-muted, #78716c);
+  cursor: pointer;
 }
+
+.llm-config-secret-toggle svg { width: 19px; height: 19px; }
+.llm-config-secret-toggle:hover:not(:disabled) { background: var(--line-ui-accent-soft, #fff7ed); color: var(--line-ui-accent, #c2410c); }
+.llm-config-secret-toggle:disabled { opacity: 0.45; cursor: not-allowed; }
 
 .llm-config-help,
 .llm-config-meta {
   margin: 0;
-  color: #64748b;
-  font-size: 13px;
+  color: var(--line-ui-text-muted, #78716c);
+  font-size: 0.875rem;
   line-height: 1.5;
 }
 
 .llm-config-actions {
   display: flex;
   justify-content: flex-end;
-  margin-top: 8px;
+  gap: 10px;
+  margin-top: 10px;
 }
 
 .llm-config-actions button {
-  min-width: 144px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 160px;
+  min-height: 44px;
+  gap: 8px;
   padding: 10px 16px;
-  border: 0;
+  border: 1px solid transparent;
   border-radius: 10px;
-  background: #0f172a;
-  color: #fff;
-  font-weight: 700;
+  font: inherit;
+  font-weight: 750;
   cursor: pointer;
 }
 
-.llm-config-actions button:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
+.llm-config-actions button svg { width: 18px; height: 18px; }
+.llm-config-primary-action { background: var(--line-ui-accent, #c2410c); color: #fff; }
+.llm-config-primary-action:hover:not(:disabled) { background: var(--line-ui-accent-hover, #9a3412); }
+.llm-config-secondary-action { border-color: var(--line-ui-border-strong, #d6d3d1) !important; background: #fff; color: var(--line-ui-text, #292524); }
+.llm-config-secondary-action:hover:not(:disabled) { border-color: var(--line-ui-accent, #c2410c) !important; color: var(--line-ui-accent, #c2410c); }
+.llm-config-actions button:disabled { opacity: 0.55; cursor: not-allowed; }
 
-.llm-config-meta {
-  margin-top: 16px;
-}
+.llm-config-meta { margin-top: 12px; }
+.llm-config-meta + .llm-config-meta { margin-top: 3px; }
 
 .llm-config-notice {
   margin-top: 16px;
   padding: 11px 13px;
   border-radius: 10px;
-  font-size: 14px;
+  font-size: 0.875rem;
   line-height: 1.5;
 }
 
-.llm-config-notice.success {
-  border: 1px solid #bbf7d0;
-  background: #f0fdf4;
-  color: #166534;
-}
-
-.llm-config-notice.error {
-  border: 1px solid #fecaca;
-  background: #fef2f2;
-  color: #991b1b;
-}
+.llm-config-notice.success { border: 1px solid #86efac; background: #f0fdf4; color: #166534; }
+.llm-config-notice.error { border: 1px solid #fca5a5; background: #fef2f2; color: #991b1b; }
 
 @media (max-width: 760px) {
-  .llm-config-page {
-    padding: 16px;
-  }
+  .llm-config-page { padding: 16px; }
+  .llm-config-header { flex-direction: column; }
+  .llm-config-status { align-self: flex-start; white-space: normal; }
+  .llm-config-model-facts { grid-template-columns: 1fr; }
+  .llm-config-actions { flex-direction: column-reverse; }
+  .llm-config-actions button { width: 100%; }
+}
 
-  .llm-config-header {
-    flex-direction: column;
-  }
-
-  .llm-config-status {
-    align-self: flex-start;
-  }
+@media (max-width: 420px) {
+  .llm-config-card { padding: 18px; }
+  .llm-config-heading-icon { flex-basis: 42px; width: 42px; height: 42px; }
 }

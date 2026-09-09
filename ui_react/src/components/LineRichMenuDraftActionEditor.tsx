@@ -3,6 +3,7 @@
  * Description: 編輯 Rich Menu closed typed action，並執行草稿 Preview、確認、Apply 與 readback。
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Eye, Save, X, Zap } from 'lucide-react';
 import type { RichMenuAction } from '../api/line_configuration/line_configuration_query_schemas';
 import type { LineRichMenuDraftClient } from '../api/line_rich_menu_draft/line_rich_menu_draft_client';
 import type {
@@ -42,13 +43,14 @@ const CANONICAL_LIFF_TARGETS = [
   { value: '?target=profile_update', label: '?target=profile_update（修改登記資料）' },
   { value: '?target=staff_order_search', label: '?target=staff_order_search（月嫂案件查詢）' },
   { value: '?target=staff_schedule', label: '?target=staff_schedule（月嫂服務行程）' },
-  { value: '?target=staff_leave_apply', label: '?target=staff_leave_apply（月嫂請假登記）' },
+  { value: '?target=staff_leave_apply', label: '?target=staff_leave_apply（月嫂請假登記，相容入口）' },
+  { value: '?target=staff_baby_log', label: '?target=staff_baby_log（月嫂寶寶日誌）' },
   { value: '?target=customer_service', label: '?target=customer_service（客服管理）' },
   { value: '?target=scheduling_review', label: '?target=scheduling_review（排班審核）' },
-  { value: '?target=staff_review', label: '?target=staff_review（月嫂審核）' },
+  { value: '?target=staff_review', label: '?target=staff_review（待辦工作台）' },
   { value: '?target=staff_payout', label: '?target=staff_payout（薪資請款）' },
-  { value: '?target=anomalies_center', label: '?target=anomalies_center（重大異常通報）' },
-  { value: '?target=dashboard', label: '?target=dashboard（儀表板）' },
+  { value: '?target=anomalies_center', label: '?target=anomalies_center（異常中心）' },
+  { value: '?target=dashboard', label: '?target=dashboard（營運摘要）' },
 ];
 
 export const LineRichMenuDraftActionEditor: React.FC<Props> = ({
@@ -156,10 +158,17 @@ export const LineRichMenuDraftActionEditor: React.FC<Props> = ({
     await applyPreview(preview);
   };
 
-  const saveDirectly = async () => {
-    const candidate = await requestPreview();
-    if (candidate) await applyPreview(candidate);
-  };
+  const isDirty = JSON.stringify(definition) !== JSON.stringify(draft.definition);
+
+  useEffect(() => {
+    if (!isDirty) return undefined;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warnBeforeUnload);
+    return () => window.removeEventListener('beforeunload', warnBeforeUnload);
+  }, [isDirty]);
 
   if (!menu || !button) {
     return <div className="line-scope-note">目前沒有可編輯的 Rich Menu 草稿按鈕。</div>;
@@ -180,8 +189,8 @@ export const LineRichMenuDraftActionEditor: React.FC<Props> = ({
       <section className="richmenu-card" data-control-id="line.richmenu.draft.action-editor">
         <div className="richmenu-card-header">
           <div>
-            <h4 style={{ margin: 0, fontSize: '1.05rem', color: '#1e1b19', fontWeight: 700 }}>⚡ 修改按鈕動作</h4>
-            <p style={{ margin: '4px 0 0', fontSize: '0.82rem', color: '#74593f' }}>此版本保留原始發布內容，目前不提供修改。</p>
+            <h4 className="richmenu-editor-title"><Zap aria-hidden="true" />修改按鈕動作</h4>
+            <p className="richmenu-editor-description">此版本保留原始發布內容，目前不提供修改。</p>
           </div>
           <span className="line-category-badge category-service_flow">唯讀</span>
         </div>
@@ -197,8 +206,8 @@ export const LineRichMenuDraftActionEditor: React.FC<Props> = ({
     <section className="richmenu-card" data-control-id="line.richmenu.draft.action-editor">
       <div className="richmenu-card-header">
         <div>
-          <h4 style={{ margin: 0, fontSize: '1.05rem', color: '#1e1b19', fontWeight: 700 }}>⚡ 修改按鈕動作</h4>
-          <p style={{ margin: '4px 0 0', fontSize: '0.82rem', color: '#74593f' }}>只修改草稿版本；本機模擬不發送 LINE，可直接一鍵套用。</p>
+          <h4 className="richmenu-editor-title"><Zap aria-hidden="true" />修改按鈕動作</h4>
+          <p className="richmenu-editor-description">只修改草稿版本；預覽確認後才能套用，且不會直接發布或發送 LINE。</p>
         </div>
         <span className="line-category-badge category-navigation">編輯草稿</span>
       </div>
@@ -206,6 +215,12 @@ export const LineRichMenuDraftActionEditor: React.FC<Props> = ({
       {legacySwitchBlocked && (
         <div className="line-warning" role="alert">
           此按鈕仍是舊版 Rich Menu switch 動作。使用者端選單切換已停用，請改成訊息、LIFF／網址或 Postback 後再保存。
+        </div>
+      )}
+
+      {isDirty && (
+        <div className="line-warning richmenu-dirty-state" role="status">
+          尚有未儲存的按鈕動作變更；離開頁面前請先預覽並套用，或取消修改。
         </div>
       )}
 
@@ -323,23 +338,14 @@ export const LineRichMenuDraftActionEditor: React.FC<Props> = ({
         </label>
       </div>
 
-      <div className="richmenu-editor-actions" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '16px' }}>
-        <button
-          type="button"
-          className="richmenu-btn-primary"
-          style={{ background: '#059669', color: '#fff', fontWeight: 700, padding: '10px 22px', borderRadius: '8px', border: 0, cursor: 'pointer' }}
-          onClick={() => void saveDirectly()}
-          disabled={legacySwitchBlocked || status === 'previewing' || status === 'applying'}
-        >
-          {status === 'applying' ? '正在套用…' : '💾 儲存並套用變更'}
-        </button>
+      <div className="richmenu-editor-actions richmenu-editor-action-row">
         <button
           type="button"
           className="richmenu-btn-secondary"
           onClick={() => void requestPreview()}
           disabled={legacySwitchBlocked || status === 'previewing' || status === 'applying'}
         >
-          預覽草稿變更
+          <Eye aria-hidden="true" />{status === 'previewing' ? '預覽中…' : '預覽草稿變更'}
         </button>
         <button
           type="button"
@@ -353,13 +359,13 @@ export const LineRichMenuDraftActionEditor: React.FC<Props> = ({
             onLocalDefinitionChange?.(null);
           }}
         >
-          取消修改
+          <X aria-hidden="true" />取消修改
         </button>
       </div>
 
       {preview && (
         <div className="richmenu-preview-callout">
-          <p style={{ margin: 0, fontSize: '0.86rem', fontWeight: 600, color: '#166534' }}>
+          <p className="richmenu-preview-summary">
             預覽完成：已核對目前內容與保存後結果。
           </p>
           <label className="richmenu-confirm-checkbox-label">
@@ -368,7 +374,7 @@ export const LineRichMenuDraftActionEditor: React.FC<Props> = ({
           </label>
           <div>
             <button type="button" className="richmenu-btn-apply" onClick={() => void apply()} disabled={!confirmed || status === 'applying'}>
-              套用並回讀
+              <Save aria-hidden="true" />套用並回讀
             </button>
           </div>
         </div>
@@ -376,9 +382,8 @@ export const LineRichMenuDraftActionEditor: React.FC<Props> = ({
 
       {message && (
         <div
-          className={status === 'error' ? 'line-error' : 'line-scope-note'}
+          className={`${status === 'error' ? 'line-error' : 'line-scope-note'} line-block-spacing-12`}
           role={status === 'error' ? 'alert' : 'status'}
-          style={{ marginTop: '12px' }}
         >
           {message}
         </div>

@@ -325,8 +325,8 @@ export function adaptLineIdentityMaintenanceResult(
     attemptCount: request.attempt_count,
     notice:
       operation === 'retry'
-        ? '已重新排入 Rich Menu 回復流程；請稍後重新查詢確認完成結果。'
-        : '人工完成已受理；請重新查詢綁定狀態確認 owner projection 已清除。',
+        ? '已用目前最新的訪客／預設選單重新排入回復流程；請稍後重新查詢確認完成結果。'
+        : '系統授權已人工解除；LINE 圖文選單尚未確認回復，請重新發布訪客／預設選單後執行修復。',
   };
 }
 

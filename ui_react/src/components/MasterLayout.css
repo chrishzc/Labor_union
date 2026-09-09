@@ -52,7 +52,7 @@
   color: var(--md-sys-color-on-surface-variant);
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
 }
 
 .section-tab-btn:hover {
@@ -89,6 +89,29 @@
   background-color: var(--md-sys-color-success);
 }
 
+.status-dot.pending,
+.status-dot.offline {
+  background-color: #6b7280;
+}
+
+.status-dot.degraded {
+  background-color: #c2410c;
+}
+
+.status-dot.online {
+  background-color: #15803d;
+}
+
+.system-status-label,
+.user-profile-name {
+  font-size: 0.875rem;
+}
+
+.system-status-label,
+.user-profile-name {
+  font-size: 0.875rem;
+}
+
 .notification-btn {
   position: relative;
   background: none;
@@ -105,7 +128,7 @@
   right: 2px;
   background-color: var(--md-sys-color-error);
   color: #ffffff;
-  font-size: 0.7rem;
+  font-size: 0.875rem;
   font-weight: 700;
   padding: 1px 5px;
   border-radius: var(--radius-full);
@@ -139,9 +162,9 @@
   padding: 4px 10px;
   border-radius: var(--radius-full);
   cursor: pointer;
-  font-size: 0.78rem;
+  font-size: 0.875rem;
   font-weight: 600;
-  transition: all 0.2s ease;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
 }
 
 .logout-action-btn:hover {
@@ -222,7 +245,7 @@
   font-weight: 600;
   font-size: 0.9rem;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
 }
 
 .logout-btn-cancel:hover {
@@ -240,7 +263,7 @@
   font-size: 0.9rem;
   cursor: pointer;
   box-shadow: 0 4px 12px rgba(220, 38, 38, 0.25);
-  transition: all 0.2s ease;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
 }
 
 .logout-btn-confirm:hover {
@@ -281,7 +304,7 @@
   justify-content: center;
   cursor: pointer;
   color: var(--md-sys-color-on-surface-variant);
-  transition: all 0.2s ease;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
   position: relative;
   padding: 6px 4px;
   box-sizing: border-box;
@@ -306,7 +329,7 @@
 }
 
 .sidebar-nav-label {
-  font-size: 0.75rem;
+  font-size: 0.875rem;
   margin-top: 4px;
   font-weight: 700;
   white-space: nowrap;
@@ -322,4 +345,294 @@
   margin: 0 auto;
   width: 100%;
   box-sizing: border-box;
+}
+
+/* Responsive and accessibility layer shared by every application section. */
+.top-navbar {
+  height: auto;
+  min-height: 64px;
+  gap: var(--space-3);
+}
+
+.brand-section {
+  border: 0;
+  background: transparent;
+  padding: var(--space-2);
+  text-align: left;
+}
+
+.brand-logo {
+  width: 28px;
+  height: 28px;
+  color: var(--md-sys-color-primary);
+  flex: 0 0 auto;
+}
+
+.section-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  white-space: nowrap;
+  transition: color 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.mobile-menu-toggle,
+.mobile-section-picker {
+  display: none;
+}
+
+.system-status-indicator {
+  white-space: nowrap;
+}
+
+.notification-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 8px;
+  transition: color 0.2s ease, background-color 0.2s ease;
+}
+
+.notification-btn:hover {
+  color: var(--md-sys-color-primary);
+  background: var(--md-sys-color-surface-container-high);
+}
+
+.notification-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+.user-profile-menu {
+  position: relative;
+}
+
+.user-profile-menu > summary {
+  list-style: none;
+  cursor: pointer;
+  min-height: 44px;
+}
+
+.user-profile-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.user-profile-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 120;
+  min-width: 168px;
+  padding: 8px;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--radius-md);
+  background: #ffffff;
+  box-shadow: var(--shadow-md);
+}
+
+.user-profile-popover .logout-action-btn {
+  width: 100%;
+  min-height: 44px;
+  justify-content: flex-start;
+}
+
+.logout-action-btn,
+.logout-btn-cancel,
+.logout-btn-confirm,
+.sidebar-nav-item {
+  transition-property: color, background-color, border-color, box-shadow, transform;
+}
+
+.logout-btn-cancel,
+.logout-btn-confirm {
+  min-height: 44px;
+}
+
+.slim-sidebar {
+  flex: 0 0 104px;
+  z-index: 90;
+}
+
+.sidebar-nav-item.active {
+  box-shadow: inset 4px 0 0 var(--md-sys-color-primary), 0 4px 12px rgba(255, 127, 80, 0.14);
+}
+
+.sidebar-nav-icon {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+}
+
+.main-workspace {
+  max-width: var(--line-page-max-width);
+}
+
+.sidebar-backdrop {
+  display: none;
+}
+
+@media (max-width: 1200px) {
+  .top-navbar {
+    padding-inline: var(--space-4);
+    gap: var(--space-2);
+  }
+
+  .brand-section span,
+  .system-status-label,
+  .user-profile-name {
+    display: none;
+  }
+
+  .section-tab-btn {
+    padding-inline: var(--space-3);
+  }
+
+  .user-profile-capsule {
+    padding: 8px;
+  }
+
+  .main-workspace {
+    padding: var(--space-5);
+  }
+}
+
+@media (max-width: 900px) {
+  .top-navbar {
+    min-height: 56px;
+    padding: 6px 12px;
+  }
+
+  .mobile-menu-toggle {
+    display: inline-grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    flex: 0 0 44px;
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--radius-md);
+    background: #ffffff;
+    color: var(--md-sys-color-on-surface);
+  }
+
+  .mobile-menu-toggle svg {
+    width: 22px;
+    height: 22px;
+  }
+
+  .brand-section,
+  .primary-section-tabs {
+    display: none;
+  }
+
+  .mobile-section-picker {
+    display: block;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .mobile-section-picker select {
+    width: 100%;
+    min-height: 44px;
+    padding: 0 36px 0 12px;
+    border: 1px solid var(--md-sys-color-outline);
+    border-radius: var(--radius-md);
+    color: var(--md-sys-color-on-surface);
+    background: #ffffff;
+    font-weight: 700;
+  }
+
+  .top-navbar-right {
+    gap: 4px;
+  }
+
+  .system-status-indicator {
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .notification-btn,
+  .user-profile-menu > summary {
+    width: 44px;
+    height: 44px;
+    min-height: 44px;
+  }
+
+  .app-body {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .slim-sidebar {
+    position: fixed;
+    top: 56px;
+    left: 0;
+    width: min(320px, 86vw);
+    height: calc(100dvh - 56px);
+    padding: 16px;
+    align-items: stretch;
+    transform: translateX(-105%);
+    transition: transform 0.2s ease;
+    box-shadow: var(--shadow-drawer);
+    overflow-y: auto;
+  }
+
+  .slim-sidebar.open {
+    transform: translateX(0);
+  }
+
+  .sidebar-nav-item {
+    width: 100%;
+    min-height: 52px;
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 12px;
+    padding: 10px 14px;
+  }
+
+  .sidebar-nav-label {
+    margin: 0;
+    font-size: 0.9rem;
+    white-space: normal;
+    text-align: left;
+  }
+
+  .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 56px 0 0;
+    z-index: 80;
+    border: 0;
+    background: rgba(30, 27, 25, 0.35);
+  }
+
+  .main-workspace {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    padding: 16px;
+  }
+}
+
+@media (max-width: 560px) {
+  .system-status-indicator {
+    display: none;
+  }
+
+  .main-workspace {
+    padding: 12px;
+  }
+
+  .logout-modal-card {
+    margin: 16px;
+    padding: 24px 20px;
+  }
+
+  .logout-modal-actions {
+    flex-direction: column-reverse;
+  }
 }

@@ -3,6 +3,7 @@
  * Description: 提供通知規則欄位編輯、零寫入 Preview、人工確認 Save 與安全 Delete 操作。
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Eye, FilePenLine, Plus, Save, Settings, Trash2, TriangleAlert, X } from 'lucide-react';
 import {
   adaptLineNotificationRuleDeleteReceipt,
   adaptLineNotificationRulesDraft,
@@ -300,36 +301,34 @@ export const LineNotificationRulesMutationPanel: React.FC<
   };
 
   return (
-    <section className="richmenu-card" aria-label="LINE 通知規則維護" style={{ marginBottom: '24px' }}>
+    <section className="richmenu-card notification-mutation-panel" aria-label="LINE 通知規則維護">
       <div className="richmenu-card-header">
         <div>
-          <h4 style={{ margin: 0, fontSize: '1.05rem', color: '#1e1b19', fontWeight: 700 }}>
-            ⚙️ 通知規則維護
+          <h4 className="richmenu-editor-title">
+            <Settings aria-hidden="true" />通知規則維護
           </h4>
-          <p style={{ margin: '4px 0 0', fontSize: '0.82rem', color: '#74593f' }}>
+          <p className="richmenu-editor-description">
             已載入最新通知規則｜每次儲存或刪除前都必須重新檢查影響。
           </p>
         </div>
         <button
           type="button"
-          className="line-primary-btn"
-          style={{ padding: '6px 14px', fontSize: '0.82rem' }}
+          className="line-primary-btn line-compact-button"
           disabled={busy}
           onClick={addRule}
         >
-          新增規則
+          <Plus aria-hidden="true" />新增規則
         </button>
       </div>
 
       {draft.rules.length > 0 ? (
-        <div className="line-search-filter-toolbar" style={{ marginTop: '16px', marginBottom: '16px' }}>
-          <label htmlFor="line-notification-rule-selector" style={{ fontSize: '0.85rem', fontWeight: 700, color: '#57423b' }}>
+        <div className="line-search-filter-toolbar notification-rule-selector-row">
+          <label htmlFor="line-notification-rule-selector" className="notification-rule-selector-label">
             要編輯的通知規則：
           </label>
           <select
             id="line-notification-rule-selector"
-            className="line-filter-select"
-            style={{ minWidth: '220px' }}
+            className="line-filter-select notification-rule-selector"
             value={activeRuleId ?? ''}
             disabled={busy}
             onChange={(event) => {
@@ -337,16 +336,16 @@ export const LineNotificationRulesMutationPanel: React.FC<
               setActiveRuleId(event.target.value);
             }}
           >
-            {draft.rules.map((rule) => <option key={rule.id} value={rule.id}>📌 {rule.id}</option>)}
+            {draft.rules.map((rule) => <option key={rule.id} value={rule.id}>{rule.id}</option>)}
           </select>
         </div>
-      ) : <p className="line-scope-note" style={{ marginTop: '12px' }}>目前沒有通知規則；可新增第一筆規則後預覽儲存。</p>}
+      ) : <p className="line-scope-note line-block-spacing-12">目前沒有通知規則；可新增第一筆規則後預覽儲存。</p>}
 
       {activeRule && (
-        <div className="richmenu-drawer-panel" style={{ marginTop: '12px', background: '#fffcfb', border: '1px solid #fed9b8' }}>
-          <fieldset disabled={busy} style={{ border: 'none', padding: 0, margin: 0 }}>
-            <legend style={{ fontSize: '0.92rem', fontWeight: 800, color: '#a43c12', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              📝 規則欄位
+        <div className="richmenu-drawer-panel notification-rule-editor-panel">
+          <fieldset disabled={busy} className="line-fieldset-reset">
+            <legend className="notification-rule-editor-legend">
+              <FilePenLine aria-hidden="true" />規則欄位
             </legend>
 
             <div className="richmenu-drawer-grid">
@@ -449,7 +448,7 @@ export const LineNotificationRulesMutationPanel: React.FC<
 
             {/* 動態子欄位 (秒數 / 次數 / 間隔) */}
             {(activeRule.schedule.kind === 'relative_service_time' || activeRule.frequency?.kind === 'recurring_bounded') && (
-              <div className="richmenu-drawer-grid" style={{ paddingTop: '10px', borderTop: '1px dashed #fed9b8' }}>
+              <div className="richmenu-drawer-grid notification-rule-dependent-fields">
                 {activeRule.schedule.kind === 'relative_service_time' && (
                   <div className="richmenu-drawer-field">
                     <label htmlFor="line-notification-offset-seconds">服務時間後秒數</label>
@@ -520,9 +519,9 @@ export const LineNotificationRulesMutationPanel: React.FC<
             )}
 
             {/* 啟用開關與條件複選 */}
-            <div style={{ marginTop: '12px', padding: '12px 14px', background: '#fff', borderRadius: '10px', border: '1px solid #fed9b8' }}>
-              <div style={{ marginBottom: '10px' }}>
-                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontWeight: 700, color: '#1e1b19' }}>
+            <div className="notification-rule-options-panel">
+              <div className="notification-rule-enabled-row">
+                <label className="notification-rule-check-label">
                   <input
                     type="checkbox"
                     checked={activeRule.enabled ?? false}
@@ -535,15 +534,15 @@ export const LineNotificationRulesMutationPanel: React.FC<
                 </label>
               </div>
 
-              <fieldset style={{ border: 'none', padding: 0, margin: 0 }}>
-                <legend style={{ fontSize: '0.82rem', fontWeight: 700, color: '#74593f', marginBottom: '6px' }}>
+              <fieldset className="line-fieldset-reset">
+                <legend className="notification-rule-predicate-legend">
                   條件
                 </legend>
-                <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+                <div className="notification-rule-predicates">
                   {PREDICATE_OPTIONS.map((option) => {
                     const checked = (activeRule.predicates ?? []).includes(option.value);
                     return (
-                      <label key={option.value} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '0.84rem' }}>
+                      <label key={option.value} className="notification-rule-check-label is-compact">
                         <input
                           type="checkbox"
                           checked={checked}
@@ -565,62 +564,58 @@ export const LineNotificationRulesMutationPanel: React.FC<
         </div>
       )}
 
-      <div className="line-action-row" style={{ marginTop: '16px', display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+      <div className="line-action-row notification-rule-action-row">
         <button
           type="button"
-          className="line-primary-btn"
-          style={{ padding: '8px 16px', fontSize: '0.85rem' }}
+          className="line-secondary-btn"
           disabled={busy || !draftChanged}
           onClick={() => void runPreview('save')}
         >
-          預覽儲存變更
+          <Eye aria-hidden="true" />預覽儲存變更
         </button>
         {activeRule && baselineHasActiveRule && (
           <button
             type="button"
-            className="line-secondary-btn"
-            style={{ padding: '8px 16px', fontSize: '0.85rem', borderColor: '#fca5a5', color: '#dc2626' }}
+            className="line-danger-btn"
             disabled={busy || draftChanged}
             onClick={() => void runPreview('delete')}
           >
-            預覽刪除規則
+            <Trash2 aria-hidden="true" />預覽刪除規則
           </button>
         )}
         {activeRule && !baselineHasActiveRule && (
           <button
             type="button"
             className="line-secondary-btn"
-            style={{ padding: '8px 16px', fontSize: '0.85rem' }}
             disabled={busy}
             onClick={cancelNewRule}
           >
-            取消新增規則
+            <X aria-hidden="true" />取消新增規則
           </button>
         )}
       </div>
 
       {draftChanged && baselineHasActiveRule && (
-        <p className="line-scope-note" style={{ marginTop: '8px', color: '#b45309' }}>
-          ⚠️ 有未儲存編輯時，刪除功能會鎖定；先儲存或重新載入後再刪除。
+        <p className="line-scope-note notification-rule-dirty-note">
+          <TriangleAlert aria-hidden="true" />有未儲存編輯時，刪除功能會鎖定；先儲存或重新載入後再刪除。
         </p>
       )}
 
-      {state === 'loading' && <div className="line-loading" role="status" style={{ marginTop: '12px' }}>正在執行通知規則操作…</div>}
+      {state === 'loading' && <div className="line-loading line-block-spacing-12" role="status">正在執行通知規則操作…</div>}
 
       {previewIntent && (
-        <div className="richmenu-drawer-panel" style={{ marginTop: '16px', background: '#fffaf5', border: '2px solid #ff7f50' }}>
-          <strong style={{ display: 'block', margin: '0 0 10px', fontSize: '1rem', color: '#a43c12', fontWeight: 800 }}>
+        <div className="richmenu-drawer-panel notification-rule-preview-panel">
+          <strong className="notification-rule-preview-title">
             {previewIntent.kind === 'save' ? '儲存預覽已就緒' : '刪除預覽已就緒'}
           </strong>
           <p>套用後規則數：{previewIntent.preview.ruleCount}</p>
           <p>通知規則已通過預覽檢查，請核對啟用狀態與通知對象後套用。</p>
 
-          <div className="richmenu-drawer-field" style={{ marginTop: '10px' }}>
+          <div className="richmenu-drawer-field line-block-spacing-compact">
             <label htmlFor="line-notification-mutation-reason">操作原因</label>
             <textarea
               id="line-notification-mutation-reason"
-              className="richmenu-drawer-input"
-              style={{ minHeight: '70px' }}
+              className="richmenu-drawer-input notification-rule-reason-input"
               value={reason}
               rows={3}
               maxLength={1_000}
@@ -633,8 +628,8 @@ export const LineNotificationRulesMutationPanel: React.FC<
             />
           </div>
 
-          <div style={{ marginTop: '8px', marginBottom: '14px' }}>
-            <label style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontWeight: 700 }}>
+          <div className="notification-rule-confirm-row">
+            <label className="notification-rule-check-label">
               <input
                 type="checkbox"
                 checked={confirmed}
@@ -647,18 +642,17 @@ export const LineNotificationRulesMutationPanel: React.FC<
 
           <button
             type="button"
-            className="line-primary-btn"
-            style={{ padding: '8px 20px', fontSize: '0.88rem' }}
+            className={previewIntent.kind === 'delete' ? 'line-danger-btn' : 'line-primary-btn'}
             disabled={busy || !confirmed || reason.trim().length === 0}
             onClick={() => void applyPreview()}
           >
-            {previewIntent.kind === 'save' ? '確認儲存通知規則' : '確認刪除通知規則'}
+            {previewIntent.kind === 'save' ? <><Save aria-hidden="true" />確認儲存通知規則</> : <><Trash2 aria-hidden="true" />確認刪除通知規則</>}
           </button>
         </div>
       )}
 
-      {state === 'success' && message && <div className="line-success" role="status" style={{ marginTop: '12px' }}>{message}</div>}
-      {state === 'error' && message && <div className="line-error" role="alert" style={{ marginTop: '12px' }}>{message}</div>}
+      {state === 'success' && message && <div className="line-success line-block-spacing-12" role="status">{message}</div>}
+      {state === 'error' && message && <div className="line-error line-block-spacing-12" role="alert">{message}</div>}
     </section>
   );
 };

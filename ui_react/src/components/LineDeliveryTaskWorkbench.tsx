@@ -3,6 +3,7 @@
  * Description: 以 LINE Delivery server page metadata 呈現遮罩任務清單、篩選與抗競態翻頁。
  */
 import React, { useEffect, useRef, useState } from 'react';
+import { Inbox, Search } from 'lucide-react';
 import {
   lineDeliveryQueryClient,
   type LineDeliveryListQuery,
@@ -152,26 +153,27 @@ export const LineDeliveryTaskWorkbench: React.FC<LineDeliveryTaskWorkbenchProps>
       {query.status === 'error' && <p className="line-error" role="alert">{query.message}</p>}
 
       {query.status === 'loaded' && items.length === 0 && (
-        <div className="line-empty-state" style={{ marginTop: '16px' }}>
-          <div>📮</div>
+        <div className="line-empty-state line-block-spacing">
+          <div><Inbox aria-hidden="true" /></div>
           <h4>目前沒有符合篩選條件的發送任務</h4>
           <p>請調整篩選條件；系統不會以假資料補齊清單。</p>
         </div>
       )}
 
       {query.status === 'loaded' && items.length > 0 && (
-        <div className="line-table-scroll" style={{ marginTop: '16px' }}>
+        <div className="line-table-scroll line-block-spacing">
           <table className="line-data-table" data-control-id="line.delivery.table">
-            <thead><tr><th>通知用途</th><th>排程時間</th><th>處理進度</th><th>狀態</th><th style={{ textAlign: 'right' }}>操作</th></tr></thead>
+            <caption className="sr-only">LINE 通知發送任務清單</caption>
+            <thead><tr><th scope="col">通知用途</th><th scope="col">排程時間</th><th scope="col">處理進度</th><th scope="col">狀態</th><th scope="col" className="line-align-end">操作</th></tr></thead>
             <tbody>
               {items.map((task) => (
                 <tr key={task.taskId}>
                   <td><span className="line-category-badge category-service_flow">{task.sourceLabel}</span></td>
-                  <td style={{ color: '#74593f', fontSize: '0.82rem' }}>{task.scheduledAt}</td>
+                  <td className="line-table-secondary">{task.scheduledAt}</td>
                   <td><span aria-label={`已嘗試 ${task.attempts} 次`}>{task.attempts}</span></td>
                   <td><span className={`line-status line-status-${task.status}`}>{task.statusLabel}</span></td>
-                  <td style={{ textAlign: 'right' }}>
-                    <button type="button" className="line-action-link-btn" onClick={() => onOpenTask(task.taskId)}>[ 🔍 查看明細 ]</button>
+                  <td className="line-align-end">
+                    <button type="button" className="line-action-link-btn" onClick={() => onOpenTask(task.taskId)}><Search aria-hidden="true" />查看明細</button>
                   </td>
                 </tr>
               ))}
@@ -183,7 +185,7 @@ export const LineDeliveryTaskWorkbench: React.FC<LineDeliveryTaskWorkbenchProps>
       {query.status === 'loaded' && page && (
         <div className="line-pagination-bar">
           <button type="button" className="line-secondary-btn" disabled={page.page <= 1} onClick={() => setPageNumber((value) => Math.max(1, value - 1))}>上一頁</button>
-          <span aria-live="polite" style={{ fontSize: '0.85rem', color: '#74593f' }}>
+          <span aria-live="polite" className="line-pagination-summary">
             第 {page.page}／{Math.max(1, page.total_pages)} 頁，顯示第 {rangeStart}–{rangeEnd} 筆，共 {page.total} 筆
           </span>
           <button type="button" className="line-secondary-btn" disabled={isLastPage} onClick={() => setPageNumber((value) => value + 1)}>下一頁</button>

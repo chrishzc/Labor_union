@@ -16,7 +16,7 @@ afterEach(() => {
 });
 
 describe('Rich Menu publication actions', () => {
-  it('上方準備發布按鈕先取得預覽，不會因非同步確認狀態而無動作', async () => {
+  it('檢查發布影響按鈕先取得預覽，不會因非同步確認狀態而無動作', async () => {
     sessionClient.setSession('root-session', {
       id: 7, username: 'root-session-test', display_name: '根管理員測試',
       role: 'system_admin', capabilities: ['line.menu.publish'], is_root: true,
@@ -31,7 +31,7 @@ describe('Rich Menu publication actions', () => {
       client={{ preview, publish, retry: vi.fn() }}
     />);
 
-    fireEvent.click(screen.getByRole('button', { name: /準備發布至 LINE/ }));
+    fireEvent.click(screen.getByRole('button', { name: /檢查發布影響/ }));
     await screen.findByText(/發布影響已確認/);
     expect(preview).toHaveBeenCalledTimes(1);
     expect(publish).not.toHaveBeenCalled();
@@ -190,7 +190,7 @@ describe('Rich Menu publication actions', () => {
         client={client}
       />
     );
-    expect(screen.getByText('⚠️ 此選單發布可重新排入')).toBeInTheDocument();
+    expect(screen.getByText('此選單發布可重新排入')).toBeInTheDocument();
     expect(screen.getByText('目前狀態：發布可重試失敗')).toBeInTheDocument();
     expect(screen.queryByText(/發布紀錄 #23/)).not.toBeInTheDocument();
     expect(screen.queryByText(/customer-menu/)).not.toBeInTheDocument();
