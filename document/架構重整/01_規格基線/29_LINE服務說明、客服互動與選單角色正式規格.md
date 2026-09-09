@@ -3,10 +3,10 @@
 ## 1. 文件狀態與範圍
 
 - 狀態：`consolidated-current-baseline`
-- 收斂日期：2026-09-02
+- 收斂日期：2026-09-09
 - 上位契約：`17_External_Integration_LINE_Access正式規格.md`
 - 關聯契約：`20_LINE客服與月嫂自助服務正式規格.md`、`23_LINE身分管理與解除正式規格.md`、`26_LINE四大模組Eraser流程圖轉錄與驗收基線.md`
-- 來源：既有 Service Help 正式條款、功能開發計畫中的 QA／Rich Menu 規格，以及仍保留的 LINE 四大模組操作測試手冊；來源文件只提供 evidence 或執行指引，不另建 Authority。
+- 來源：既有 Service Help 正式條款、已完成 migration 的歷史 QA／Rich Menu 規格，以及仍保留的 QA implementation-gap tracker 與 LINE 四大模組操作測試手冊；歷史來源只保留於 Git history，不另建 Authority。
 
 本文件只補足「使用者如何進入服務說明、回答如何核准發布、何時轉人工、不同身分看到哪一類選單，以及本機 preview 的零外送邊界」。LINE identity、ticket root、delivery task、provider publication 與 M1～M4 transaction 仍由上位正式規格擁有。
 
@@ -128,11 +128,12 @@ Ticket 狀態至少為 `waiting → handling → resolved`。resolved 後同一 
 7. LLM 或 Knowledge 不得直接寫業務 root、繞過 closed tool catalog 或宣稱 provider 成功。
 8. API／React／LINE visible result 對 timeout、conflict、unavailable 與 unknown outcome fail closed。
 
-## 11. 本批來源文件處置（2026-09-02 修正）
+## 11. 來源文件處置（2026-09-09）
 
-- `LINE_QA客服知識契約收斂計畫.md` 已恢復為 current blocked／read-only inspection plan。它不是 SSOT，但仍保存 workbook loader、逐題人工 review、automation boundary、conflict queue 與完成 gate；這些未完成工作未被本文件自動完成或取消，因此不得退役。
-- `LINE_Rich_Menu_多角色圖文選單與互動中心正式規範.md` 與 `LINE_Rich_Menu_本機視覺比對與互動模擬工作室正式規範.md` 已恢復為非 Authority 的 `source-review`。其逐節處置由 `document/功能開發計畫/SOURCE_REVIEW_DISPOSITION.md` 記錄；標記為「仍有效待搬移」的內容尚未進入唯一 owning formal spec 前，不得再次刪除。
+- `LINE_QA客服知識契約收斂計畫.md` 保留為 current blocked `implementation-gap-tracker`。它不是 SSOT；只追蹤逐題 human review、versioned `published|retired` lifecycle、conflict queue、closed-candidate runtime 與 API／React readback 尚未被證明完成的缺口。
+- `LINE_Rich_Menu_多角色圖文選單與互動中心正式規範.md` 已完成 disposition 並退回 Git history。其仍有效的 audience、current-role、draft／publish 與 typed action 邊界已由 `17`、`23` 與本文件承接；舊「三套 menu」「訪客／客戶共用 default」「禁止使用者明確選 role」「禁止 `richmenuswitch`」及硬編 endpoint／page/component 等內容被 current formal contract 否定，不得復活。
+- `LINE_Rich_Menu_本機視覺比對與互動模擬工作室正式規範.md` 已完成 disposition 並退回 Git history。本機 preview 的 canvas／area／action validation、before／after、role preview context、零 provider 外送、零 publication task、Preview≠publish 與 provider readback 已由 `17` 與本文件承接；舊 UI 排版、示例 wording、特定 screenshot／component 細節不建立 Authority。
 - `LINE_四大模組_詳細測試手冊與前置條件.md` 保留在 `document/功能開發計畫/`，作為 current 可執行操作／手機 E2E 驗收手冊。它可保存 Agent 前置、測試資料準備、裝置操作、readback、驗收層級與 cleanup，但不得覆蓋本文件及 `17`、`20`、`23`、`26` 的 owner／語意／transaction 契約；route、schema、owner 或正式驗收條件改變時必須同步更新。
-- `document/line/服務說明規則書.md` 在本批不刪除，但只作已被 `20` 與本文件承接的歷史輸入，不得與 current 正式規格競爭。需要舊 wording 時從 Git history 精確取回，不建立第二套 current owner。
+- `document/line/服務說明規則書.md` 保留為歷史輸入／wording evidence，不與 current formal spec 競爭；需要舊語意時由其內容或 Git history 查核，不建立第二套 owner。
 
-任何上述來源文件再次退役前，必須完成逐條 disposition、搬移所有仍有效內容、移除被否定的 current consumer，並同步 executable consumers、`15` current index與相關正式規格後，以focused tests／readback驗證刪除不造成stale path或規格缺口。
+Rich Menu source-review 已完成；後續若需要新增 layout、endpoint 或 provider capability，直接更新唯一 owning formal spec／current implementation／操作手冊，不恢復已退役的 source-review 規格。
