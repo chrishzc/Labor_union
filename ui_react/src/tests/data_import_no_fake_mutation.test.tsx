@@ -4,7 +4,7 @@
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { hcmImportResultClient } from '../api/case_import/hcm_import_result_client';
+import { anomalyQueryClient } from '../api/anomalies/anomaly_query_client';
 import { DataImportPage } from '../pages/DataImportPage';
 
 describe('DataImportPage zero fake mutation gate', () => {
@@ -14,12 +14,12 @@ describe('DataImportPage zero fake mutation gate', () => {
   beforeEach(() => {
     alertSpy.mockClear();
     confirmSpy.mockClear();
-    vi.spyOn(hcmImportResultClient, 'query').mockResolvedValue({ items: [], next_cursor: null });
+    vi.spyOn(anomalyQueryClient, 'queryImportWarningTasks').mockResolvedValue([]);
   });
 
   it('does not render retired HCM historical or cross-domain bank controls', async () => {
     render(<DataImportPage />);
-    await waitFor(() => expect(screen.getByText(/目前沒有可查詢的 HCM 匯入結果/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/目前沒有待處理的 HCM 異常/)).toBeInTheDocument());
     for (const id of ['imports.hcm-historical.preview', 'imports.hcm-historical.apply', 'imports.bank-statements.preview', 'imports.bank-statements.apply']) {
       expect(document.querySelector(`[data-control-id="${id}"]`), id).toBeNull();
     }
@@ -29,7 +29,7 @@ describe('DataImportPage zero fake mutation gate', () => {
 
   it('exposes active Preview but no Apply control before a successful Preview', async () => {
     render(<DataImportPage />);
-    await waitFor(() => expect(screen.getByText(/目前沒有可查詢的 HCM 匯入結果/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/目前沒有待處理的 HCM 異常/)).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: /工作簿資料匯入/i }));
     expect(document.querySelector('[data-control-id="imports.hcm-current.open-preview"]')).toBeInTheDocument();
     expect(document.querySelector('[data-control-id="imports.hcm-current.preview"]')).toBeDisabled();

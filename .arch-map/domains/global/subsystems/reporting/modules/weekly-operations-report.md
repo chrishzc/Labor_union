@@ -38,6 +38,7 @@
 - layout_status: `custom_current`
 - test_root: `tests/test_weekly_operations_report_contract.py`
 - integration_root: `ui_react/src/tests/reports_query_page.test.tsx`
+- integration_root: `ui_react/src/tests/reports_weekly_service_display.test.tsx`
 - integration_root: `ui_react/src/tests/weekly_operations_report_client.test.ts`
 - integration_root: `ui_react/src/tests/reports_entry_cross_owner_cutover.test.tsx`
 - integration_root: `ui_react/src/tests/fixtures/reports/weekly_operations_report_contract_fixtures.ts`

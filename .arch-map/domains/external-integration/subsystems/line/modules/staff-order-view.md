@@ -10,6 +10,7 @@
 ## Implementation
 - primary:
   - `line/static/staff_order_search.html`
+  - `api/routes/line_staff_self_service.py`
   - `api/routes/line_staff_self_service.py::order_search`
   - `api/schemas/line_staff_self_service.py::StaffOrderSearchRequest`
   - `infrastructure/mysql/customer_service_repository.py::MySqlCustomerServiceRepository.staff_orders`
