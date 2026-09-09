@@ -1,76 +1,23 @@
 ---
-doc_type: current-register
-declared_status: repository-local-and-remote-ci-acceptance-complete
+doc_type: terminal-pointer
+declared_status: superseded
+original_terminal_status: repository-local-and-remote-ci-acceptance-complete
 date: 2026-09-01
 owner: architecture-governance / product-and-domain-owners
 ---
 
-# Task 96 current register
+# Task 96 terminal pointer
 
-## 1. Current decision
+Task 96 已完成 repository-local 與當時 remote-CI closeout；本檔不再是 current task register、施工清單、驗收來源或後續 revision 的 Authority。完整 closeout matrix、當時 focused/full-suite 數字與逐 lane evidence 由 Git history 保存；current owner、contract、entry 與 acceptance 一律以 `../01_規格基線/`、current source／tests／readback及新 successor 為準。
 
-Task 96 在使用者明確排除的 external boundaries 之外，已達repository-local acceptance，且對應
-`origin/main@06b1c72de2a49bebfeb6d75fe6ef077f98fafd4d`的GitHub Actions已通過：source、canonical tests、
-React full test/build、fresh `lu_test_1` bootstrap、LINE configuration baseline，以及
-Scheduling／Contract／Payroll／Staff Payables的real-MySQL positive lane均有current evidence。
+Task 96 closeout 當時明示且不得由 repository-local evidence 外推為通過的 residual 固定包括：
 
-尚未執行且不包含在本次完成判定：
-
-- verified LIFF／ngrok WebView；
+- verified LIFF browser E2E；舊 ngrok／WebView transport 描述不建立 current transport Authority；
 - 真 LINE provider send／Rich Menu sandbox publication；
-- 真 NAS storage；
+- 真 NAS storage／external signing provider；
 - production／deployment／entry switch；
-- 1019 起 preserve-data upgrade（使用者已明確要求本次不修）。
+- 1019 起 preserve-data upgrade qualification。
 
-上述項目是 `deferred/not_run`，不得被文件改寫成通過；也不得反向把已完成的 repository-local source／runtime lane降回「程式不存在」。
+上述 residual 維持 `not_run`／deferred，直到 current formal owner 下建立新的 successor、target 與 acceptance 並取得必要授權。不得重新開啟 Task 96 或用本檔恢復舊 Work Package、priority、write set、DB／provider／deployment Authority。
 
-## 2. Current evidence
-
-| Scope | Result | Evidence boundary |
-|---|---|---|
-| Fresh DB path | `passed` | exact `lu_test_1` 以 canonical fresh bootstrap 建立至 release `labor-union-validation-schema-2026-09-01-v25`；47 base statements、terminal fresh part 214、post-schema verification passed。這是 disposable reset，不是 preserve upgrade。 |
-| LINE configuration baseline | `passed` | canonical 6 kinds applied；notification baseline source-event IDs 1–13 committed；`config/notification_rules.json` 非空並受 validation。 |
-| LINE M1–M4 source | `passed` | M1 dual-role／terminal closure restore；M2 deterministic router／feedback／ticket；M3 zero-pool、雙向 intent／decision／客服 handoff；M4 safe review link、complaint／alert、substitution payable lineage 均有 typed owner source與 canonical focused tests。 |
-| Scheduling lane C | `passed` | real `lu_test_1`：雙段 matching、兩位服務人員契約、客戶契約、schedule confirmation、official assignment、actual-start、leave substitution、calendar／assignment fresh readback。 |
-| Contract automatic values | `passed` | exact-target typed Preview 回 cell-keyed values；既有 Excel browser mirror自動套值、escape、禁止 raw fallback並保留 `window.print()`；server PDF重複支線已移除。 |
-| Payroll／Staff Payables lineage | `passed` | Scheduling substitution→Payroll version→Staff Payables evidence 的 real-MySQL lane與 focused contracts passed。 |
-| Anomalies surface | `passed` | canonical React Anomalies entry重新啟用；LINE-006 current-fact／recheck／delete reconciliation 保持 current-only。真 provider failure receipt仍屬 external ceiling。 |
-| Order information 1／2 | `passed` | typed Case Import named projection與兩份資訊表 mapping／UI rendering contracts passed；不再讀 raw survey dict 作 presentation fallback。 |
-| Historical settlement／import | `passed` | canonical owner tests與既有 real-MySQL acceptance涵蓋 Query→Preview→Apply→replay→readback；Historical Import same-workbook self-stale 已修正為 fresh lock／typed conflict。 |
-| React | `passed` | 185 test files／1202 tests；production build passed。 |
-| Python repository | `passed with declared exclusions` | canonical/focused owners passed；全量一次收集到 5059 passed／145 skipped，剩餘是需要另一組 auth profile、獨立 MySQL credentials 或 clean-commit-bound Task97 checks，已各自以正確 profile／focused runner驗證。 |
-| Governance／architecture | `passed` | repository-local architecture closure 與 GitHub Actions run `33501045338` 於 Task 96 closeout 時通過；Task97 inventory、formal baseline 與 commit-bound dispositions 僅屬當時 closure evidence，已退休，不作 current approval source。 |
-
-## 3. Task 96 closure matrix
-
-| Lane | Repository-local status | External residual |
-|---|---|---|
-| Client Profile | `source/test passed` | verified LIFF Browser `not_run` |
-| Scheduling mobile review | `source/test passed` | LIFF password/MFA WebView `not_run` |
-| Historical Payment Settlement | `source/runtime passed` | broad Browser walkthrough `not_run` |
-| LINE-006／Anomalies | `source/test passed` | actual provider failure scenario `not_run` |
-| LINE M1–M4 | `source/test passed`; baseline／Scheduling C real MySQL passed | verified LIFF、provider send `not_run` |
-| Rich Menu | `source/test passed` | provider sandbox publication `not_run` |
-| Contract Signing／full preview | `source/runtime passed` | NAS／external signing provider `not_run` |
-| Baby Log media | `source/test passed` | true NAS／LIFF upload `not_run` |
-| Order information 1／2 | `source/test passed` | live operator Browser walkthrough `not_run` |
-| Preserve-data upgrade | `deferred by user` | 1019→current qualification `not_run` |
-
-## 4. Bloat audit and accepted reductions
-
-本輪以「是否有 current consumer、是否重複 owner、是否超出人工需求」判斷，而非以檔案行數判斷：
-
-- 刪除無 current consumer 的 2,409-line local qualification receipt。
-- 移除兩個 server-PDF routes、Python／React PDF download clients、React download component及其專屬測試；保留既有正式 unsigned/final PDF workflow。
-- 移除 Form Management 的契約 mapping edit／template delete UI、舊 raw staff context loader與未使用 save helper；approved mapping改為唯讀版本化資產。
-- Client manual signing改用同一份 typed projection，消除舊 SQL facts loader與 Full Preview facts的責任重複。
-- 搬移 cancellation tests至 canonical Orders root並以不同語意檔名保存兩個 unique oracle，消除 flat/canonical duplicate import collision。
-
-其餘大檔目前都有明確 consumer：M1–M4 coordination、safe-link、feedback、controlled-file、order-information、real-MySQL runner與 owner projection。它們可在後續獨立重構，但目前沒有證據支持為了行數拆散 UoW 或 typed owner boundary。
-
-## 5. Terminal boundary
-
-Task 96的repository-local source、runtime lanes、architecture closure、Git hygiene、`origin/main` push與
-GitHub Actions均已完成。verified LIFF／provider、NAS、production／deployment及1019 preserve-upgrade仍按
-本檔第1節維持excluded／deferred／`not_run`；若要恢復，必須建立新的current successor與acceptance，
-不得重新開啟本register當作施工清單。
+本最小 pointer 僅因 `15_正式規格索引與裁決總表.md` 仍有既有 inbound terminal provenance 連結而暫留；日常導航不得載入本檔，後續若該 formal-index inbound 改為 Git-history provenance，本 pointer 應直接退出 working tree。
