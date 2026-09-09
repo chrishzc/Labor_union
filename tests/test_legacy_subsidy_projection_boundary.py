@@ -5,8 +5,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 RUNTIME_ROOTS = ("api", "domains", "infrastructure", "line", "scripts", "subsystems", "ui")
 LEGACY_FIELDS = ("subsidy_refund_receivable", "subsidy_refund_refunded")
 EVIDENCE_ONLY_PATHS = {
-    "scripts/generate_formal_architecture_baseline.py",
-    "scripts/validate_formal_architecture_baseline.py",
     "scripts/generate_writer_inventory_v3_candidate.py",
     "scripts/validate_writer_inventory_v3_candidate.py",
 }
