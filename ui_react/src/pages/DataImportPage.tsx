@@ -526,7 +526,11 @@ export const DataImportPage: React.FC<DataImportPageProps> = ({ initialTab = 'wo
           ))}
         </section>
         {hcmCorrection && <HcmControlledCorrection selection={hcmCorrection} onCancel={() => setHcmCorrection(null)} onApplied={() => {
-          setState((current) => current.kind === 'ready' ? { kind: 'ready', items: current.items.filter((item) => item.subject !== hcmCorrection.task.subject) } : current);
+          setState((current) => {
+            if (current.kind !== 'ready') return current;
+            const items = current.items.filter((item) => item.subject !== hcmCorrection.task.subject);
+            return items.length ? { kind: 'ready', items } : { kind: 'empty' };
+          });
           setHcmCorrection(null);
         }} />}
       </div>
