@@ -23,8 +23,7 @@ v1 的測試目標。雙 tunnel 是獨立可用性升級方案，未經新裁決
 
 - 單一 Cloud VPN 雲端部署簡報（current workspace 未保存該檔，不作 activation gate）：原提案以 10 張投影片確認混合部署、
   API-only DB access、單一 tunnel 的故障語意、成本上限與上線前隔離／復原／追溯主軸。
-- [單一 Cloud VPN 計畫書](../雲端部署/計劃書/單一Cloud VPN計畫書.md)：本計畫的 runtime、網路、
-  identity 與 acceptance 基線。
+- [單一 Cloud VPN 計畫書](../雲端部署/計劃書/單一Cloud VPN計畫書.md)：只作 single-tunnel network／runtime／identity 的歷史設計輸入；其中 UI framework、entrypoint 與舊 runtime 描述不建立 current Authority，管理端固定依 current `18`／`19` 的 React-only 邊界。
 - [Cloud Run Dockerfile 封裝計畫 v2](../雲端部署/計劃書/Cloud_Run_Dockerfile封裝計畫_v2.md)：
   image 分離、immutable digest、non-secret runtime config 與 build evidence。
 - [Global Deployment 與治理正式規格](../架構重整/01_規格基線/18_Global_Deployment與治理正式規格.md)：
@@ -47,6 +46,8 @@ External Application Load Balancer / Cloud Armor / IAP
   → Cloud Run Job: runtime monitor --once
   → Direct VPC egress → HA VPN gateway (one tunnel) → NAS DB VLAN → MySQL mTLS
 ```
+
+`union-admin-ui` 的 current artifact 固定為 React；Streamlit、舊 rollback entry 與已退役 UI runtime 不屬本計畫 current test target。
 
 測試必須證明：
 
