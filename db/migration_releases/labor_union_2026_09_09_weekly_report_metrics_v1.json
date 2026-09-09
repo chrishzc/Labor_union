@@ -1,0 +1,57 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-weekly-report-metrics-2026-09-09-v1",
+  "release_metadata": {
+    "release_name": "Labor Union Monday-keyed weekly report metrics",
+    "application_version": "weekly-report-metrics-v1",
+    "published_at": "2026-09-09",
+    "description": "Preserve existing data while adding independent weekly promotion and inquiry metrics"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": ["absent", "exact"],
+    "forbidden_owned_object_states": ["partial", "drift"],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-matching-holiday-work-agreement-plan-version-2026-09-08-v1"
+  },
+  "artifacts": [{
+    "name": "1035_weekly_report_metrics.sql",
+    "relative_path": "db/schema_parts/1035_weekly_report_metrics.sql",
+    "sha256": "c70e1536a741d9afb90217514b519a86173d020452c615aefe41deb13c6c5b61",
+    "dependencies": [],
+    "data_effect": "schema_only",
+    "rollback_policy": "forward-only-preserve-weekly-report-and-retired-batch-data",
+    "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+  }],
+  "backfills": [],
+  "verification_contracts": [{
+    "verification_id": "weekly-report-metrics-owned-table-exact",
+    "phase": "post-schema",
+    "policy": "Monday-keyed-nullable-nonnegative-weekly-metrics-table-exact",
+    "read_only": true,
+    "blocking": true
+  }],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": ["weekly-operations-report-v3"],
+    "required_restart_targets": ["api"],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": ["weekly-report-metrics-owned-table-exact"]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_09_09_weekly_report_metrics_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_09_09_weekly_report_metrics_v1.descriptors.json",
+    "sha256": "eab3d644db28ba3af952f847cc50fc876937e61949aea5c86b4c6c8d90534f20",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": ["--single-transaction", "--routines", "--events", "--triggers", "--hex-blob"],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

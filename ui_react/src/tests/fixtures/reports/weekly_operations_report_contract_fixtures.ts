@@ -6,7 +6,7 @@ import type { WeeklyOperationsReport } from '../../../api/reports/weekly_operati
 import { SUBSIDY_REPORT_RESPONSE } from './subsidy_report_query_contract_fixtures';
 
 export const WEEKLY_OPERATIONS_REPORT: WeeklyOperationsReport = {
-  schema_version: 'operations-report.v2',
+  schema_version: 'operations-report.v3',
   period: {
     start_date: '2026-08-20',
     end_date: '2026-08-26',
@@ -16,8 +16,6 @@ export const WEEKLY_OPERATIONS_REPORT: WeeklyOperationsReport = {
   generated_at: '2026-08-23T12:00:00+08:00',
   source_revision: 'weekly-operations-fixture-revision',
   summary: {
-    promotion_count: null,
-    inquiry_count: null,
     application_count: 2,
     general_eligible_count: 1,
     general_ineligible_count: null,
@@ -33,7 +31,7 @@ export const WEEKLY_OPERATIONS_REPORT: WeeklyOperationsReport = {
     {
       case_no: 'CASE-WEEK-001',
       applicant_name: '王**',
-      application_date: '2026-08-18',
+      application_date: '2026-08-20',
       identity_status: '一般市民',
       review_result: 'general_eligible',
       order_status: '服務中',
@@ -43,11 +41,14 @@ export const WEEKLY_OPERATIONS_REPORT: WeeklyOperationsReport = {
       planned_end_date: '2026-08-28',
       district: '板橋區',
       data_quality_codes: [],
+      week_start_date: '2026-08-17',
+      week_end_date: '2026-08-23',
+      week_label: '2026-08-17 ~ 2026-08-23',
     },
     {
       case_no: 'CASE-WEEK-LEGACY',
       applicant_name: '李**',
-      application_date: '2026-08-19',
+      application_date: '2026-08-24',
       identity_status: null,
       review_result: 'rejected_unpartitioned',
       order_status: null,
@@ -57,6 +58,9 @@ export const WEEKLY_OPERATIONS_REPORT: WeeklyOperationsReport = {
       planned_end_date: null,
       district: null,
       data_quality_codes: ['historical_order_missing'],
+      week_start_date: '2026-08-24',
+      week_end_date: '2026-08-30',
+      week_label: '2026-08-24 ~ 2026-08-30',
     },
   ],
   subsidy_partitions: SUBSIDY_REPORT_RESPONSE.data.partitions,
@@ -67,8 +71,8 @@ export const WEEKLY_OPERATIONS_REPORT: WeeklyOperationsReport = {
     staff_name: '陳**',
     service_start_date: '2026-08-17',
     service_end_date: '2026-08-28',
-    period_start_date: '2026-08-20',
-    period_end_date: '2026-08-26',
+    period_start_date: '2026-08-17',
+    period_end_date: '2026-08-23',
     service_hours_per_day: 8,
     weekly_work_days: 5,
     weekly_hours: 40,
@@ -76,8 +80,11 @@ export const WEEKLY_OPERATIONS_REPORT: WeeklyOperationsReport = {
     completed: false,
     data_quality_codes: [],
   }],
+  weekly_metrics: [
+    { week_start_date: '2026-08-17', week_end_date: '2026-08-23', promotion_count: 12, inquiry_count: 8, updated_at: '2026-08-23T12:00:00+08:00' },
+    { week_start_date: '2026-08-24', week_end_date: '2026-08-30', promotion_count: null, inquiry_count: 0, updated_at: null },
+  ],
   data_quality_issues: [
-    { code: 'manual_metric_not_recorded', field: 'promotion_count', row_count: 1, message: '推廣次數未登錄' },
     { code: 'historical_order_missing', field: 'order_status', row_count: 1, message: '歷史案件缺少訂單資料' },
   ],
 };

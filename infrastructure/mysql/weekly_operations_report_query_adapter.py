@@ -16,6 +16,10 @@ from subsystems.reporting.weekly_operations_report_query import (
     WeeklyCaseFact,
     WeeklyServiceFact,
 )
+from subsystems.reporting.weekly_report_metrics_service import (
+    WeeklyReportMetric,
+    WeeklyReportMetricsService,
+)
 
 
 class MySqlWeeklyOperationsReportQueryAdapter:
@@ -42,7 +46,6 @@ class MySqlWeeklyOperationsReportQueryAdapter:
                 planned_end_date=_optional_date(row.get("planned_end_date")),
                 seq_num=_optional_int(row.get("seq_num")),
                 hc_query_no=_optional_text(row.get("hc_query_no")),
-                bound_week_code=_optional_text(row.get("bound_week_code")),
             )
             for row in rows
         ]
@@ -61,6 +64,8 @@ class MySqlWeeklyOperationsReportQueryAdapter:
                 service_end_date=_optional_date(row.get("service_end_date")),
                 service_hours_per_day=_optional_int(row.get("service_hours_per_day")),
                 weekly_work_days=int(row["weekly_work_days"]),
+                week_start_date=_date(row["week_start_date"]),
+                week_end_date=_date(row["week_end_date"]),
                 order_status=str(row["order_status"]),
                 assignment_status=str(row["assignment_status"]),
                 weekly_rest_days=_json_rest_days(row.get("weekly_rest_days")),
@@ -79,16 +84,8 @@ class MySqlWeeklyOperationsReportQueryAdapter:
             subsidized=tuple(_subsidy_fact(row) for row in report["subsidized_citizen_rows"]),
         )
 
-    def list_weekly_metrics(self, year: int) -> dict[str, tuple[int, int]]:
-        with self._connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT week_code, promotion_count, inquiry_count FROM weekly_report_batches WHERE year = %s",
-                (year,),
-            )
-            return {
-                row["week_code"]: (int(row["promotion_count"]), int(row["inquiry_count"]))
-                for row in cursor.fetchall()
-            }
+    def list_weekly_metrics(self, start_date: date, end_date: date) -> list[WeeklyReportMetric]:
+        return WeeklyReportMetricsService(self._connection).list_metrics(start_date, end_date)
 
 
 def _subsidy_fact(row: dict[str, object]) -> SubsidyFact:
@@ -111,7 +108,6 @@ def _subsidy_fact(row: dict[str, object]) -> SubsidyFact:
         identity_card=_optional_text(row.get("身分證字號")),
         address=_optional_text(row.get("地址")),
         hc_case_no=str(row.get("hc_case_no") or row["市府訂單號碼"]),
-        annual_seq=str(row["序號"]),
         claim_period_label=quarter_labels.get(quarter, "第一季"),
         reconciliation_status="結案",
         notes="",
@@ -175,13 +171,10 @@ SELECT c.id AS client_id,c.seq_num,c.case_no,c.created_at AS application_created
        c.name AS applicant_name,c.identity_status,c.reject_reason,c.city AS district,
        o.status AS order_status,o.service_days,o.service_hours_per_day,
        o.start_date AS planned_start_date,o.end_date AS planned_end_date,
-       COALESCE(br.query_no, c.case_no) AS hc_query_no,
-       b.week_code AS bound_week_code
+       COALESCE(br.query_no, c.case_no) AS hc_query_no
 FROM clients c
 LEFT JOIN orders o ON o.client_id=c.id AND o.case_no=c.case_no
 LEFT JOIN beclass_records br ON (br.query_no = c.case_no OR br.bound_case_no = c.case_no)
-LEFT JOIN weekly_report_batch_cases bc ON bc.case_no = c.case_no
-LEFT JOIN weekly_report_batches b ON b.id = bc.batch_id
 WHERE c.created_at >= %s AND c.created_at < %s
 ORDER BY c.created_at,c.id
 """
@@ -191,6 +184,8 @@ SELECT a.id AS assignment_id,a.case_no,c.name AS client_name,s.name AS staff_nam
        a.assigned_start_date AS service_start_date,
        a.assigned_end_date AS service_end_date,o.service_hours_per_day,
        COUNT(DISTINCT ss.work_date) AS weekly_work_days,
+       DATE_SUB(ss.work_date, INTERVAL WEEKDAY(ss.work_date) DAY) AS week_start_date,
+       DATE_ADD(DATE_SUB(ss.work_date, INTERVAL WEEKDAY(ss.work_date) DAY), INTERVAL 6 DAY) AS week_end_date,
        o.status AS order_status,a.status AS assignment_status,
        s.weekly_rest_days
 FROM case_staff_assignments a
@@ -203,8 +198,9 @@ JOIN staff s ON s.id=a.staff_id
 WHERE a.status NOT IN ('cancelled','replaced')
   AND ss.work_date >= %s AND ss.work_date <= %s
 GROUP BY a.id,a.case_no,c.name,s.name,a.assigned_start_date,a.assigned_end_date,
-         o.service_hours_per_day,o.status,a.status,s.weekly_rest_days
-ORDER BY a.id
+         o.service_hours_per_day,o.status,a.status,s.weekly_rest_days,
+         week_start_date,week_end_date
+ORDER BY week_start_date,a.id
 """
 
 

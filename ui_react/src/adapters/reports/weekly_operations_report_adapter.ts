@@ -38,6 +38,7 @@ export function adaptWeeklyOperationsReport(source: WeeklyOperationsReport) {
       partitions: adaptSubsidyPartitions(source.subsidy_partitions),
     },
     serviceRows: source.service_rows,
+    weeklyMetrics: source.weekly_metrics,
     dataQualityIssues: source.data_quality_issues,
   };
 }

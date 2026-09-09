@@ -5,14 +5,21 @@ Description: 協調營運週報三分頁根事實、遮罩、彙總與資料品�
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Protocol
 
+from subsystems.reporting.weekly_report_metrics_service import (
+    WeeklyReportMetric,
+    monday_of,
+    sunday_of,
+    week_label,
+)
 
-SCHEMA_VERSION = "operations-report.v2"
-SOURCE_REVISION = "operations_report_query_v3"
+
+SCHEMA_VERSION = "operations-report.v3"
+SOURCE_REVISION = "operations_report_query_v4"
 TIMEZONE = "Asia/Taipei"
 GENERAL_CITIZEN = "一般市民"
 SUBSIDIZED_CITIZEN = "補助市民"
@@ -34,7 +41,6 @@ class WeeklyCaseFact:
     planned_end_date: date | None
     seq_num: int | None = None
     hc_query_no: str | None = None
-    bound_week_code: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +53,8 @@ class WeeklyServiceFact:
     service_end_date: date | None
     service_hours_per_day: int | None
     weekly_work_days: int
+    week_start_date: date
+    week_end_date: date
     order_status: str
     assignment_status: str
     weekly_rest_days: list[int] | None = None
@@ -69,7 +77,6 @@ class SubsidyFact:
     identity_card: str | None
     address: str | None
     hc_case_no: str = ""
-    annual_seq: str = ""
     claim_period_label: str = ""
     reconciliation_status: str = "結案"
     notes: str = ""
@@ -87,6 +94,8 @@ class WeeklyOperationsReportFacts(Protocol):
     def list_service_facts(self, start_date: date, end_date: date) -> list[WeeklyServiceFact]: ...
 
     def list_subsidy_facts(self, start_date: date, end_date: date) -> SubsidyFacts: ...
+
+    def list_weekly_metrics(self, start_date: date, end_date: date) -> list[WeeklyReportMetric]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,7 +124,9 @@ class WeeklyCaseRow:
     serial_number: int = 1
     month_label: str = ""
     application_date_roc: str = ""
-    week_code: str = ""
+    week_start_date: date | None = None
+    week_end_date: date | None = None
+    week_label: str = ""
     general_eligible: int = 0
     general_ineligible: int = 0
     subsidized_eligible: int = 0
@@ -145,7 +156,6 @@ class WeeklySubsidyRow:
     identity_card: str
     address: str
     hc_case_no: str = ""
-    annual_seq: str = ""
     claim_period_label: str = ""
     reconciliation_status: str = "結案"
     notes: str = ""
@@ -173,7 +183,7 @@ class WeeklyServiceRow:
     order_status: str
     completed: bool
     data_quality_codes: tuple[str, ...]
-    week_code: str = ""
+    week_label: str = ""
     week_serial: int = 1
     rest_mode: str = "周休二日"
     rest_days_count: int = 0
@@ -183,8 +193,6 @@ class WeeklyServiceRow:
 
 @dataclass(frozen=True, slots=True)
 class WeeklySummary:
-    promotion_count: int | None
-    inquiry_count: int | None
     application_count: int
     general_eligible_count: int
     general_ineligible_count: int | None
@@ -211,14 +219,7 @@ class WeeklyOperationsReport:
     subsidy_partitions: tuple[WeeklySubsidyPartition, ...]
     service_rows: tuple[WeeklyServiceRow, ...]
     data_quality_issues: tuple[DataQualityIssue, ...]
-    weekly_metrics: dict[str, tuple[int, int]] = field(default_factory=dict)
-
-
-def _week_code(d: date | None) -> str:
-    if d is None:
-        return ""
-    week_num = (d.day - 1) // 7 + 1
-    return f"{d.month}-{week_num}"
+    weekly_metrics: tuple[WeeklyReportMetric, ...]
 
 
 def _roc_date(d: date | None) -> str:
@@ -252,14 +253,10 @@ class WeeklyOperationsReportQuery:
         self,
         start_date: date,
         end_date: date,
-        promotion_count: int | None = None,
-        inquiry_count: int | None = None,
-        annual_ytd: bool = False,
     ) -> WeeklyOperationsReport:
         if start_date > end_date:
             raise ValueError("operations_report_date_range_invalid")
-        query_start = date(end_date.year, 1, 1) if annual_ytd else start_date
-        facts_cases = self._facts.list_case_facts(query_start, end_date)
+        facts_cases = self._facts.list_case_facts(start_date, end_date)
         facts_cases_sorted = sorted(
             facts_cases,
             key=lambda f: (f.created_at or datetime.min, f.client_id)
@@ -275,40 +272,33 @@ class WeeklyOperationsReportQuery:
         case_rows_tuple = tuple(case_rows)
 
         service_candidates = tuple(
-            self._service_row(fact, query_start, end_date, idx)
-            for idx, fact in enumerate(self._facts.list_service_facts(query_start, end_date), start=1)
+            self._service_row(fact, idx)
+            for idx, fact in enumerate(self._facts.list_service_facts(start_date, end_date), start=1)
         )
         service_rows = tuple(row for row in service_candidates if row is not None)
         incomplete_service_count = len(service_candidates) - len(service_rows)
-        subsidies = self._facts.list_subsidy_facts(query_start, end_date)
+        subsidies = self._facts.list_subsidy_facts(start_date, end_date)
         subsidy_partitions = (
             self._subsidy_partition("general", subsidies.general),
             self._subsidy_partition("subsidized", subsidies.subsidized),
         )
-        metrics_getter = getattr(self._facts, "list_weekly_metrics", None)
-        metrics_map = metrics_getter(end_date.year) if callable(metrics_getter) else {}
-        effective_promo = promotion_count
-        effective_inq = inquiry_count
-        if effective_promo is None and metrics_map:
-            effective_promo = sum(p for p, _ in metrics_map.values())
-        if effective_inq is None and metrics_map:
-            effective_inq = sum(i for _, i in metrics_map.values())
+        weekly_metrics = tuple(self._facts.list_weekly_metrics(start_date, end_date))
 
-        issues = self._issues(case_rows_tuple, subsidy_partitions, incomplete_service_count, effective_promo, effective_inq)
+        issues = self._issues(case_rows_tuple, subsidy_partitions, incomplete_service_count)
         return WeeklyOperationsReport(
             schema_version=SCHEMA_VERSION,
-            start_date=query_start,
+            start_date=start_date,
             end_date=end_date,
             timezone=TIMEZONE,
-            period_label=f"{query_start.isoformat()} ~ {end_date.isoformat()}",
+            period_label=f"{start_date.isoformat()} ~ {end_date.isoformat()}",
             generated_at=self._now(),
             source_revision=SOURCE_REVISION,
-            summary=self._summary(case_rows_tuple, promotion_count=effective_promo, inquiry_count=effective_inq),
+            summary=self._summary(case_rows_tuple),
             case_rows=case_rows_tuple,
             subsidy_partitions=subsidy_partitions,
             service_rows=service_rows,
             data_quality_issues=issues,
-            weekly_metrics=metrics_map,
+            weekly_metrics=weekly_metrics,
         )
 
     @staticmethod
@@ -353,7 +343,8 @@ class WeeklyOperationsReportQuery:
         cancelled = 1 if fact.order_status == "訂單取消" and not is_rejected else 0
         review_rej = 1 if is_rejected or fact.order_status == "審核不符合" else 0
 
-        week_code = fact.bound_week_code or _week_code(app_date)
+        week_start_date = monday_of(app_date) if app_date else None
+        week_end_date = sunday_of(app_date) if app_date else None
         roc_date_str = _roc_date(app_date)
         serv_status = _service_status(fact.order_status)
         seq = fact.seq_num if fact.seq_num is not None else serial_number
@@ -374,7 +365,9 @@ class WeeklyOperationsReportQuery:
             serial_number=seq,
             month_label=month_label,
             application_date_roc=roc_date_str,
-            week_code=week_code,
+            week_start_date=week_start_date,
+            week_end_date=week_end_date,
+            week_label=week_label(app_date) if app_date else "",
             general_eligible=gen_elig,
             general_ineligible=gen_inelig,
             subsidized_eligible=sub_elig,
@@ -390,18 +383,15 @@ class WeeklyOperationsReportQuery:
     @staticmethod
     def _service_row(
         fact: WeeklyServiceFact,
-        start_date: date,
-        end_date: date,
         serial: int = 1,
     ) -> WeeklyServiceRow | None:
         hours_per_day = _positive_or_none(fact.service_hours_per_day)
         if hours_per_day is None or fact.service_start_date is None or fact.service_end_date is None:
             return None
-        week_code = _week_code(end_date)
         rest_days = fact.weekly_rest_days or [0, 6]
         rest_mode = "周休二日" if len(rest_days) >= 2 else "休周日"
         rest_count = max(0, 7 - fact.weekly_work_days)
-        is_closed = "結案" if (fact.order_status in ("訂單完成", "歷史訂單－服務完成") or fact.assignment_status == "completed" or (fact.service_end_date and fact.service_end_date <= end_date)) else ""
+        is_closed = "結案" if (fact.order_status in ("訂單完成", "歷史訂單－服務完成") or fact.assignment_status == "completed" or (fact.service_end_date and fact.service_end_date <= fact.week_end_date)) else ""
 
         return WeeklyServiceRow(
             assignment_id=fact.assignment_id,
@@ -410,15 +400,15 @@ class WeeklyOperationsReportQuery:
             staff_name=_canonical_name(fact.staff_name),
             service_start_date=fact.service_start_date,
             service_end_date=fact.service_end_date,
-            period_start_date=start_date,
-            period_end_date=end_date,
+            period_start_date=fact.week_start_date,
+            period_end_date=fact.week_end_date,
             service_hours_per_day=hours_per_day,
             weekly_work_days=fact.weekly_work_days,
             weekly_hours=fact.weekly_work_days * hours_per_day,
             order_status=fact.order_status,
             completed=fact.order_status == "訂單完成" or fact.assignment_status == "completed",
             data_quality_codes=(),
-            week_code=week_code,
+            week_label=week_label(fact.week_start_date),
             week_serial=serial,
             rest_mode=rest_mode,
             rest_days_count=rest_count,
@@ -447,7 +437,6 @@ class WeeklyOperationsReportQuery:
                     identity_card=_canonical_identity_card(fact.identity_card),
                     address=str(fact.address or "").strip() or "—",
                     hc_case_no=fact.hc_case_no or fact.case_no,
-                    annual_seq=fact.annual_seq or str(fact.serial_number),
                     claim_period_label=fact.claim_period_label or "",
                     reconciliation_status=fact.reconciliation_status or "結案",
                     notes=fact.notes or "",
@@ -459,12 +448,8 @@ class WeeklyOperationsReportQuery:
     @staticmethod
     def _summary(
         rows: tuple[WeeklyCaseRow, ...],
-        promotion_count: int | None = None,
-        inquiry_count: int | None = None,
     ) -> WeeklySummary:
         return WeeklySummary(
-            promotion_count=promotion_count,
-            inquiry_count=inquiry_count,
             application_count=len(rows),
             general_eligible_count=sum(row.general_eligible for row in rows),
             general_ineligible_count=sum(row.general_ineligible for row in rows) if any(row.general_ineligible for row in rows) else None,
@@ -482,14 +467,8 @@ class WeeklyOperationsReportQuery:
         case_rows: tuple[WeeklyCaseRow, ...],
         partitions: tuple[WeeklySubsidyPartition, ...],
         incomplete_service_count: int,
-        promotion_count: int | None = None,
-        inquiry_count: int | None = None,
     ) -> tuple[DataQualityIssue, ...]:
         issues = []
-        if promotion_count is None:
-            issues.append(DataQualityIssue("manual_metric_not_recorded", "promotion_count", 0, "推廣次數尚無 canonical root fact。"))
-        if inquiry_count is None:
-            issues.append(DataQualityIssue("manual_metric_not_recorded", "inquiry_count", 0, "詢問人次尚無 canonical root fact。"))
         issues.append(
             DataQualityIssue(
                 "rejection_partition_unknown",

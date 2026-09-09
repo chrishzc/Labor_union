@@ -61,11 +61,22 @@ function assertWeeklyView(view: WeeklyOperationsReport, startDate: string, endDa
     }
   }
   for (const row of view.service_rows) {
-    if (row.period_start_date !== view.period.start_date || row.period_end_date !== view.period.end_date) {
-      throw new WeeklyOperationsReportError('WEEKLY_REPORT_PERIOD_MISMATCH', '服務工時列的 period 不一致。');
+    const weekStart = parseDate(row.period_start_date);
+    const weekEnd = parseDate(row.period_end_date);
+    if (!weekStart || !weekEnd || weekStart.getUTCDay() !== 1 || weekEnd.getUTCDay() !== 0
+      || weekEnd.getTime() - weekStart.getTime() !== 6 * 24 * 60 * 60 * 1000) {
+      throw new WeeklyOperationsReportError('WEEKLY_REPORT_PERIOD_MISMATCH', '服務工時列不是星期一至星期日。');
     }
     if (Math.abs(row.weekly_hours - (row.weekly_work_days * row.service_hours_per_day)) > 0.000001) {
       throw new WeeklyOperationsReportError('WEEKLY_REPORT_AGGREGATE_MISMATCH', '服務工時 aggregate 不一致。');
+    }
+  }
+  for (const metric of view.weekly_metrics) {
+    const weekStart = parseDate(metric.week_start_date);
+    const weekEnd = parseDate(metric.week_end_date);
+    if (!weekStart || !weekEnd || weekStart.getUTCDay() !== 1 || weekEnd.getUTCDay() !== 0
+      || weekEnd.getTime() - weekStart.getTime() !== 6 * 24 * 60 * 60 * 1000) {
+      throw new WeeklyOperationsReportError('WEEKLY_REPORT_PERIOD_MISMATCH', '週指標不是星期一至星期日。');
     }
   }
   return view;
