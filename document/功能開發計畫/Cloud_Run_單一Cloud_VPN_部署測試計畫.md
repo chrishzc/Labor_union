@@ -24,8 +24,7 @@ v1 的測試目標。雙 tunnel 是獨立可用性升級方案，未經新裁決
 - 單一 Cloud VPN 雲端部署簡報（current workspace 未保存該檔，不作 activation gate）：原提案以 10 張投影片確認混合部署、
   API-only DB access、單一 tunnel 的故障語意、成本上限與上線前隔離／復原／追溯主軸。
 - [單一 Cloud VPN 計畫書](../雲端部署/計劃書/單一Cloud VPN計畫書.md)：只作 single-tunnel network／runtime／identity 的歷史設計輸入；其中 UI framework、entrypoint 與舊 runtime 描述不建立 current Authority，管理端固定依 current `18`／`19` 的 React-only 邊界。
-- [Cloud Run Dockerfile 封裝計畫 v2](../雲端部署/計劃書/Cloud_Run_Dockerfile封裝計畫_v2.md)：
-  image 分離、immutable digest、non-secret runtime config 與 build evidence。
+- Cloud Run Dockerfile 封裝計畫 v2（current workspace 已移除，由 Git history 保存）：只作 image 分離、immutable digest、non-secret runtime config 與 build evidence 的歷史來源；不得作 activation gate。
 - [Global Deployment 與治理正式規格](../架構重整/01_規格基線/18_Global_Deployment與治理正式規格.md)：
   release、recovery、private DB、OIDC 與 no-secret invariants。
 - 雙 tunnel 比較計畫（current workspace 未保存該檔，不作 activation gate）：
@@ -92,7 +91,7 @@ External Application Load Balancer / Cloud Armor / IAP
 
 ### Wave 1：隔離與身分負向測試
 
-- 驗證只有 API revision 能取得 DB secret 並通過 mTLS；其餘四類 runtime 的 secret mount、DB route、
+- 驗證只有 API revision 能取得 DB secret並通過 mTLS；其餘四類 runtime 的 secret mount、DB route、
   TCP 3306 與 direct DB client 皆被拒絕。
 - 驗證 IAP group 外、未驗證 public caller、錯 OIDC issuer／audience／caller、過期 token 與 local
   shared key 均被拒絕，且 response／log 不洩漏 credential。
