@@ -30,7 +30,7 @@ package；T3 才要求 current spec＋package。相同 owner／scenario／scope 
   [驗收package](PROV-20260828-historical-payment-and-owner-settlement-work-packages.md)；
 - [Staff Payables completion readback裁決](PROV-20260827-historical-staff-payables-completion-root-spec-gap.md)；
 - [Historical storage／supplement裁決](PROV-20260827-historical-operational-storage-and-supplement-spec-gap.md)；
-- [工會內部管理 UI 完整值顯示裁決](PROV-20260827-internal-admin-ui-unmasked-display-spec-gap.md)：requirement 已核准，surface inventory 尚未完成。
+- [工會內部管理 UI 完整值顯示裁決](PROV-20260827-internal-admin-ui-unmasked-display-spec-gap.md)：requirement 已核准，surface inventory 尚未完成；
 
 這些文件的current consumer只限既有正式契約、navigation與validation identity；舊execution ledger、
 package readiness或未完成snapshot不得覆蓋Task 96 terminal register與live verification。
