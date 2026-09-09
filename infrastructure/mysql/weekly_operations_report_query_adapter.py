@@ -38,14 +38,13 @@ class MySqlWeeklyOperationsReportQueryAdapter:
                 applicant_name=_optional_text(row.get("applicant_name")),
                 identity_status=_optional_text(row.get("identity_status")),
                 reject_reason=_optional_text(row.get("reject_reason")),
-                district=_optional_text(row.get("district")),
+                district=_hsinchu_district_or_address(row.get("city"), row.get("address")),
                 order_status=_optional_text(row.get("order_status")),
                 service_days=_optional_int(row.get("service_days")),
                 service_hours_per_day=_optional_int(row.get("service_hours_per_day")),
                 planned_start_date=_optional_date(row.get("planned_start_date")),
                 planned_end_date=_optional_date(row.get("planned_end_date")),
                 seq_num=_optional_int(row.get("seq_num")),
-                hc_query_no=_optional_text(row.get("hc_query_no")),
             )
             for row in rows
         ]
@@ -74,7 +73,7 @@ class MySqlWeeklyOperationsReportQueryAdapter:
         ]
 
     def list_subsidy_facts(self, start_date: date, end_date: date) -> SubsidyFacts:
-        report = reconciliation_register_query.build_completion_period_subsidy_rows(
+        report = reconciliation_register_query.build_claim_submission_period_subsidy_rows(
             start_date,
             end_date,
             get_connection,
@@ -89,15 +88,13 @@ class MySqlWeeklyOperationsReportQueryAdapter:
 
 
 def _subsidy_fact(row: dict[str, object]) -> SubsidyFact:
-    svc_end = _date(row["服務結束"])
-    quarter = (svc_end.month - 1) // 3 + 1
-    quarter_labels = {1: "第一季", 2: "第二季", 3: "第三季", 4: "第四季"}
+    case_no = str(row["市府訂單號碼"])
     return SubsidyFact(
         serial_number=int(row["序號"]),
-        case_no=str(row["市府訂單號碼"]),
+        case_no=case_no,
         eligibility=str(row["補助資格"]),
         service_start=_date(row["服務開始"]),
-        service_end=svc_end,
+        service_end=_date(row["服務結束"]),
         subsidy_hours=Decimal(row["補助時數"]),
         subsidy_days=Decimal(row["補助天數"]),
         service_days=int(row["服務天數"]),
@@ -107,11 +104,31 @@ def _subsidy_fact(row: dict[str, object]) -> SubsidyFact:
         staff_name=_optional_text(row.get("服務人員")),
         identity_card=_optional_text(row.get("身分證字號")),
         address=_optional_text(row.get("地址")),
-        hc_case_no=str(row.get("hc_case_no") or row["市府訂單號碼"]),
-        claim_period_label=quarter_labels.get(quarter, "第一季"),
-        reconciliation_status="結案",
+        application_roc_year=_case_application_roc_year(case_no),
+        claim_period_label=str(row.get("核銷月份") or ""),
+        reconciliation_status=str(row.get("核銷狀態") or "已送件"),
         notes="",
     )
+
+
+def _case_application_roc_year(case_no: str) -> int | None:
+    return (
+        int(case_no[:3])
+        if len(case_no) == 9 and case_no.isdigit() and case_no[3:6] == "000"
+        else None
+    )
+
+
+def _hsinchu_district_or_address(city: object, address: object) -> str | None:
+    city_text = _optional_text(city) or ""
+    address_text = _optional_text(address) or ""
+    combined = f"{city_text}{address_text}"
+    is_hsinchu = "新竹市" in combined or city_text in {"東區", "北區", "香山", "香山區"}
+    if is_hsinchu:
+        for marker, label in (("東區", "東區"), ("北區", "北區"), ("香山區", "香山"), ("香山", "香山")):
+            if marker in combined:
+                return label
+    return address_text or city_text or None
 
 
 def _optional_text(value: object) -> str | None:
@@ -168,13 +185,11 @@ def _json_rest_days(value: object) -> list[int] | None:
 
 _CASE_FACTS_SQL = """
 SELECT c.id AS client_id,c.seq_num,c.case_no,c.created_at AS application_created_at,
-       c.name AS applicant_name,c.identity_status,c.reject_reason,c.city AS district,
+       c.name AS applicant_name,c.identity_status,c.reject_reason,c.city,c.address,
        o.status AS order_status,o.service_days,o.service_hours_per_day,
-       o.start_date AS planned_start_date,o.end_date AS planned_end_date,
-       COALESCE(br.query_no, c.case_no) AS hc_query_no
+       o.start_date AS planned_start_date,o.end_date AS planned_end_date
 FROM clients c
 LEFT JOIN orders o ON o.client_id=c.id AND o.case_no=c.case_no
-LEFT JOIN beclass_records br ON (br.query_no = c.case_no OR br.bound_case_no = c.case_no)
 WHERE c.created_at >= %s AND c.created_at < %s
 ORDER BY c.created_at,c.id
 """

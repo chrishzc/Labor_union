@@ -19,7 +19,7 @@ from subsystems.reporting.weekly_report_metrics_service import (
 
 
 SCHEMA_VERSION = "operations-report.v3"
-SOURCE_REVISION = "operations_report_query_v4"
+SOURCE_REVISION = "operations_report_query_v5"
 TIMEZONE = "Asia/Taipei"
 GENERAL_CITIZEN = "一般市民"
 SUBSIDIZED_CITIZEN = "補助市民"
@@ -40,7 +40,6 @@ class WeeklyCaseFact:
     planned_start_date: date | None
     planned_end_date: date | None
     seq_num: int | None = None
-    hc_query_no: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,7 +75,7 @@ class SubsidyFact:
     staff_name: str | None
     identity_card: str | None
     address: str | None
-    hc_case_no: str = ""
+    application_roc_year: int | None = None
     claim_period_label: str = ""
     reconciliation_status: str = "結案"
     notes: str = ""
@@ -155,7 +154,7 @@ class WeeklySubsidyRow:
     staff_name: str
     identity_card: str
     address: str
-    hc_case_no: str = ""
+    application_roc_year: int | None = None
     claim_period_label: str = ""
     reconciliation_status: str = "結案"
     notes: str = ""
@@ -233,7 +232,7 @@ def _service_status(order_status: str | None) -> str:
         return ""
     if order_status in ("訂單完成", "歷史訂單－服務完成", "歷史訂單－帳務完成"):
         return "服務中結案"
-    if order_status in ("訂單成立", "待補件"):
+    if order_status in ("訂單成立", "待補件", "歷史訂單－未服務"):
         return "等待服務"
     if order_status in ("服務中", "歷史訂單－服務中"):
         return "服務中"
@@ -338,7 +337,7 @@ class WeeklyOperationsReportQuery:
         sub_elig = 1 if is_subsidized and not is_rejected else 0
         sub_inelig = 1 if is_subsidized and is_rejected else 0
 
-        ord_estab = 1 if fact.order_status in {"訂單成立", "服務中", "訂單完成", "歷史訂單－服務中", "歷史訂單－服務完成", "歷史訂單－帳務完成"} else 0
+        ord_estab = 1 if fact.order_status in {"訂單成立", "服務中", "訂單完成", "歷史訂單－未服務", "歷史訂單－服務中", "歷史訂單－服務完成", "歷史訂單－帳務完成"} else 0
         negotiating = 1 if fact.order_status == "洽談中" else 0
         cancelled = 1 if fact.order_status == "訂單取消" and not is_rejected else 0
         review_rej = 1 if is_rejected or fact.order_status == "審核不符合" else 0
@@ -436,7 +435,7 @@ class WeeklyOperationsReportQuery:
                     staff_name=_canonical_name(fact.staff_name),
                     identity_card=_canonical_identity_card(fact.identity_card),
                     address=str(fact.address or "").strip() or "—",
-                    hc_case_no=fact.hc_case_no or fact.case_no,
+                    application_roc_year=fact.application_roc_year,
                     claim_period_label=fact.claim_period_label or "",
                     reconciliation_status=fact.reconciliation_status or "結案",
                     notes=fact.notes or "",
@@ -480,6 +479,13 @@ class WeeklyOperationsReportQuery:
         for code in sorted({code for row in case_rows for code in row.data_quality_codes}):
             issues.append(DataQualityIssue(code, "case_rows", sum(code in row.data_quality_codes for row in case_rows), "歷史案件根事實待補正。"))
         subsidy_count = sum(len(partition.rows) for partition in partitions)
+        invalid_case_year_count = sum(
+            row.application_roc_year is None
+            for partition in partitions
+            for row in partition.rows
+        )
+        if invalid_case_year_count:
+            issues.append(DataQualityIssue("subsidy_case_no_invalid", "case_no", invalid_case_year_count, "案件編號不是年度＋000＋序號的 9 碼格式，無法判定申請年度。"))
         if subsidy_count and not any(row.claim_period_label for p in partitions for row in p.rows):
             issues.append(DataQualityIssue("subsidy_reconciliation_month_not_recorded", "subsidy_partitions", subsidy_count, "核銷月份 root fact 尚未登錄。"))
         if incomplete_service_count:

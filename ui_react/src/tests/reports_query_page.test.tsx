@@ -2,7 +2,7 @@
  * File: reports_query_page.test.tsx
  * Description: 驗證 ReportsPage 週報三分頁、季度／年度 regression、XLSX 與 stale 狀態清除。
  */
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { subsidyReportQueryClient } from '../api/reports/subsidy_report_query_client';
 import { subsidyReportExportClient } from '../api/reports/subsidy_report_export_client';
@@ -55,12 +55,26 @@ describe('ReportsPage query-only presentation', () => {
     fireEvent.change(screen.getByLabelText('報表範圍'), { target: { value: 'quarterly' } });
     await waitFor(() => expect(subsidyReportQueryClient.query).toHaveBeenCalledTimes(1));
     expect(screen.getByText('CASE-RPT-001')).toBeInTheDocument();
+    const quarterlyTable = screen.getByRole('table', { name: '一般市民季度補助明細' });
+    expect(within(quarterlyTable).getAllByRole('columnheader').map((cell) => cell.textContent)).toEqual([
+      '序號', '市府訂單號碼', '補助資格', '服務開始', '服務結束', '補助時數', '補助天數',
+      '服務天數', '補助款金額', '單價', '雇主', '服務人員', '身分證字號', '地址', '簽領',
+    ]);
+    expect(within(quarterlyTable).getByText('陳**')).toBeInTheDocument();
+    expect(within(quarterlyTable).getByText('A*********')).toBeInTheDocument();
     const quarterlyExport = document.querySelector('[data-control-id="reports.export.quarterly-xlsx"]') as HTMLButtonElement;
     fireEvent.click(quarterlyExport);
     await waitFor(() => expect(subsidyReportExportClient.download).toHaveBeenCalledWith(expect.objectContaining({ kind: 'quarterly' }), expect.any(AbortSignal)));
 
     fireEvent.change(screen.getByLabelText('報表範圍'), { target: { value: 'annual' } });
     await waitFor(() => expect(subsidyReportQueryClient.query).toHaveBeenCalledTimes(2));
+    const annualTable = screen.getByRole('table', { name: '一般市民年度補助明細' });
+    expect(within(annualTable).getAllByRole('columnheader').map((cell) => cell.textContent)).toEqual([
+      '序號', '市府訂單號碼', '補助資格', '服務開始', '服務結束',
+      '服務天數', '補助款金額', '單價', '雇主', '服務人員',
+    ]);
+    expect(within(annualTable).queryByRole('columnheader', { name: '身分證字號' })).not.toBeInTheDocument();
+    expect(within(annualTable).getByText('陳**')).toBeInTheDocument();
     expect(document.querySelector('[data-control-id="reports.export.annual-xlsx"]')).toBeEnabled();
     expect(screen.queryByText(/未開放|後端尚未提供/)).not.toBeInTheDocument();
   });

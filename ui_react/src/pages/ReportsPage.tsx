@@ -49,21 +49,37 @@ function currentTaipeiReportPeriod(): { startDate: string; endDate: string } {
 
 type SubsidyPartitions = ReturnType<typeof adaptSubsidyReport>['partitions'];
 
-const SubsidyPartitionsView: React.FC<{ partitions: SubsidyPartitions }> = ({ partitions }) => <>
+const SubsidyPartitionsView: React.FC<{
+  partitions: SubsidyPartitions;
+  kind?: 'weekly' | 'quarterly' | 'annual';
+}> = ({ partitions, kind = 'weekly' }) => <>
   {partitions.map((partition) => <section key={partition.kind} className="reports-partition">
     <div className="reports-partition-heading">
       <h3>{partition.kind === 'general' ? '一般市民' : '補助市民'}</h3>
       <span>{partition.rowCount}筆｜{partition.totalAmount}</span>
     </div>
     {partition.rows.length === 0 ? <p>此類別目前沒有資料。</p> : <div className="reports-table-container">
-      <table className="reports-table">
+      {kind === 'quarterly' ? <table className="reports-table" aria-label={`${partition.kind === 'general' ? '一般市民' : '補助市民'}季度補助明細`}>
+        <thead><tr><th>序號</th><th>市府訂單號碼</th><th>補助資格</th><th>服務開始</th><th>服務結束</th><th>補助時數</th><th>補助天數</th><th>服務天數</th><th>補助款金額</th><th>單價</th><th>雇主</th><th>服務人員</th><th>身分證字號</th><th>地址</th><th>簽領</th></tr></thead>
+        <tbody>{partition.rows.map((row) => <tr key={`${partition.kind}-${row.serial}-${row.caseNo}`}>
+          <td>{row.serial}</td><td>{row.caseNo}</td><td>{row.eligibility}</td><td>{row.serviceStart}</td><td>{row.serviceEnd}</td>
+          <td>{row.subsidyHours}</td><td>{row.subsidyDays}</td><td>{row.serviceDays}</td><td>{row.amount}</td><td>{row.unitPrice}</td>
+          <td>{row.employer}</td><td>{row.staff}</td><td>{row.identity}</td><td>{row.address}</td><td />
+        </tr>)}</tbody>
+      </table> : kind === 'annual' ? <table className="reports-table" aria-label={`${partition.kind === 'general' ? '一般市民' : '補助市民'}年度補助明細`}>
+        <thead><tr><th>序號</th><th>市府訂單號碼</th><th>補助資格</th><th>服務開始</th><th>服務結束</th><th>服務天數</th><th>補助款金額</th><th>單價</th><th>雇主</th><th>服務人員</th></tr></thead>
+        <tbody>{partition.rows.map((row) => <tr key={`${partition.kind}-${row.serial}-${row.caseNo}`}>
+          <td>{row.serial}</td><td>{row.caseNo}</td><td>{row.eligibility}</td><td>{row.serviceStart}</td><td>{row.serviceEnd}</td>
+          <td>{row.serviceDays}</td><td>{row.amount}</td><td>{row.unitPrice}</td><td>{row.employer}</td><td>{row.staff}</td>
+        </tr>)}</tbody>
+      </table> : <table className="reports-table">
         <thead><tr><th>序號</th><th>案件</th><th>資格</th><th>服務期間</th><th>補助時數／天數</th><th>服務天數</th><th>單價</th><th>補助額</th><th>雇主／人員</th><th>身分／地址</th></tr></thead>
         <tbody>{partition.rows.map((row) => <tr key={`${partition.kind}-${row.serial}-${row.caseNo}`}>
           <td>{row.serial}</td><td>{row.caseNo}</td><td>{row.eligibility}</td><td>{row.serviceRange}</td>
           <td>{row.subsidyHours}／{row.subsidyDays}</td><td>{row.serviceDays}</td><td>{row.unitPrice}</td>
           <td>{row.amount}</td><td>{row.employer}／{row.staff}</td><td>{row.identity}／{row.address}</td>
         </tr>)}</tbody>
-      </table>
+      </table>}
     </div>}
   </section>)}
 </>;
@@ -343,7 +359,7 @@ export const ReportsPage: React.FC = () => {
           <article><span>補助總額</span><strong>{state.data.totalAmount}</strong></article>
         </section>
         <div className="reports-meta">報表產生時間：{state.data.generatedAt}</div>
-        <SubsidyPartitionsView partitions={state.data.partitions} />
+        <SubsidyPartitionsView partitions={state.data.partitions} kind={state.data.kind} />
       </>}
 
     </section>

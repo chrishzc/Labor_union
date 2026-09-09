@@ -139,11 +139,11 @@ def _build_case_sheet(ws, report: WeeklyOperationsReport) -> None:
                 (row.application_date_roc or (row.application_date.isoformat() if row.application_date else "")) if row else "",
                 w_cell_val,
                 row.applicant_name if row else "",
-                p_cell_val, i_cell_val, 1 if row else 0,
-                row.general_eligible if row else 0, row.general_ineligible if row else 0,
-                row.subsidized_eligible if row else 0, row.subsidized_ineligible if row else 0,
-                row.order_established if row else 0, row.negotiating if row else 0,
-                row.cancelled if row else 0, row.review_rejected if row else 0,
+                p_cell_val, i_cell_val, 1 if row else "",
+                row.general_eligible or "" if row else "", row.general_ineligible or "" if row else "",
+                row.subsidized_eligible or "" if row else "", row.subsidized_ineligible or "" if row else "",
+                row.order_established or "" if row else "", row.negotiating or "" if row else "",
+                row.cancelled or "" if row else "", row.review_rejected or "" if row else "",
                 row.service_days if row and row.service_days is not None else "",
                 row.service_hours_per_day if row and row.service_hours_per_day is not None else "",
                 row.planned_start_date.isoformat() if row and row.planned_start_date else "",
@@ -221,8 +221,8 @@ def _build_subsidy_sheet(ws, report: WeeklyOperationsReport) -> None:
     for idx, r in enumerate(general_rows, start=1):
         ws.append([
             idx,
-            r.hc_case_no or r.case_no,
-            f"({roc_year})一般市民",
+            r.case_no,
+            f"({r.application_roc_year if r.application_roc_year is not None else '—'})一般市民",
             idx,
             r.case_no,
             r.service_start.isoformat() if r.service_start else "",
@@ -240,6 +240,8 @@ def _build_subsidy_sheet(ws, report: WeeklyOperationsReport) -> None:
             cell = ws.cell(row=curr_r, column=c)
             cell.alignment = Alignment(horizontal="center", vertical="center")
             cell.border = _BORDER_THIN
+        ws.cell(row=curr_r, column=2).number_format = "@"
+        ws.cell(row=curr_r, column=5).number_format = "@"
 
     gen_end = ws.max_row
     if gen_end >= gen_start:
@@ -263,8 +265,8 @@ def _build_subsidy_sheet(ws, report: WeeklyOperationsReport) -> None:
     for idx, r in enumerate(subsidized_rows, start=1):
         ws.append([
             idx,
-            r.hc_case_no or r.case_no,
-            f"({roc_year})社福補助",
+            r.case_no,
+            f"({r.application_roc_year if r.application_roc_year is not None else '—'})社福補助",
             idx,
             r.case_no,
             r.service_start.isoformat() if r.service_start else "",
@@ -282,6 +284,8 @@ def _build_subsidy_sheet(ws, report: WeeklyOperationsReport) -> None:
             cell = ws.cell(row=curr_r, column=c)
             cell.alignment = Alignment(horizontal="center", vertical="center")
             cell.border = _BORDER_THIN
+        ws.cell(row=curr_r, column=2).number_format = "@"
+        ws.cell(row=curr_r, column=5).number_format = "@"
 
     sub_rows_end = ws.max_row
     if sub_rows_end >= sub_rows_start:

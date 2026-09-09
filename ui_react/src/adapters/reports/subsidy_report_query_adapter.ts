@@ -13,6 +13,8 @@ export function adaptSubsidyPartitions(partitions: readonly SubsidyReportPartiti
       serial: row.serial_number,
       caseNo: row.case_no,
       eligibility: row.eligibility,
+      serviceStart: row.service_start,
+      serviceEnd: row.service_end,
       serviceRange: `${row.service_start} ~ ${row.service_end}`,
       subsidyHours: String(row.subsidy_hours),
       subsidyDays: String(row.subsidy_days),

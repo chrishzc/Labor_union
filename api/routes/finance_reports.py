@@ -254,7 +254,7 @@ def _subsidy_report_view(report, application_year, quarter):
         application_year=application_year,
         quarter=quarter,
         generated_at=datetime.now(TAIPEI_TIME_ZONE),
-        source_revision="reconciliation_register_query_v1",
+        source_revision="reconciliation_register_query_v2",
         total_row_count=sum(item.row_count for item in partitions),
         total_amount_ntd=sum(item.total_amount_ntd for item in partitions),
         partitions=partitions,
@@ -415,4 +415,3 @@ def export_combined_reconciliation(
         ) from exc
     filename = f"reconciliation-and-register-{application_year}-Q{quarter}.xlsx"
     return _xlsx_response(report["xlsx_bytes"], filename)
-

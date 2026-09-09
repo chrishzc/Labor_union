@@ -35,6 +35,8 @@ from subsystems.reporting.weekly_report_metrics_service import (
 from infrastructure.mysql.weekly_operations_report_query_adapter import (
     _CASE_FACTS_SQL,
     _SERVICE_FACTS_SQL,
+    _case_application_roc_year,
+    _hsinchu_district_or_address,
 )
 
 
@@ -65,9 +67,11 @@ class _Facts:
         return SubsidyFacts(
             general=(
                 SubsidyFact(
-                    1, "115000007", "一般市民", date(2026, 8, 10), date(2026, 8, 20),
+                    1, "114000007", "一般市民", date(2026, 8, 10), date(2026, 8, 20),
                     Decimal("40"), Decimal("5"), 20, 12000, 300,
                     "王小美", "陳月嫂", "A123456789", "完整地址",
+                    application_roc_year=114,
+                    claim_period_label="2026-08",
                 ),
             ),
             subsidized=(),
@@ -201,6 +205,30 @@ def test_weekly_query_retains_missing_application_date_as_typed_quality_issue():
 def test_case_source_keeps_date_scoped_rows_inside_requested_window_only():
     assert "OR c.created_at IS NULL" not in _CASE_FACTS_SQL
     assert "c.created_at >= %s AND c.created_at < %s" in _CASE_FACTS_SQL
+    assert "c.city,c.address" in _CASE_FACTS_SQL
+
+
+def test_historical_unserved_is_an_established_order_waiting_for_service():
+    row = WeeklyOperationsReportQuery._case_row(WeeklyCaseFact(
+        9, "115000009", datetime(2026, 8, 24, 9), "歷史客戶", "一般市民", None,
+        "香山", "歷史訂單－未服務", 20, 8, date(2026, 9, 1), date(2026, 9, 20),
+    ))
+
+    assert row.order_established == 1
+    assert row.service_status == "等待服務"
+
+
+def test_hsinchu_district_uses_three_business_labels_and_falls_back_to_full_address():
+    assert _hsinchu_district_or_address("新竹市", "新竹市東區中央路一段 1 號") == "東區"
+    assert _hsinchu_district_or_address("新竹市", "新竹市北區中正路 2 號") == "北區"
+    assert _hsinchu_district_or_address("新竹市", "新竹市香山區中華路 3 號") == "香山"
+    assert _hsinchu_district_or_address("新竹市", "新竹市未分區測試路 4 號") == "新竹市未分區測試路 4 號"
+
+
+def test_subsidy_application_year_only_accepts_year_000_sequence_case_number():
+    assert _case_application_roc_year("114000007") == 114
+    assert _case_application_roc_year("114100007") is None
+    assert _case_application_roc_year("14000007") is None
 
 
 def test_weekly_service_source_excludes_unrestarted_historical_overlays():
@@ -231,11 +259,18 @@ def test_weekly_export_has_fixed_three_sheets_and_summary_without_pii():
     assert "一般市民符合" in case_values[2]
     assert case_values[3][3] == "2026-08-17 ~ 2026-08-23"
     assert case_values[3][5:7] == (12, 34)
+    assert case_values[3][7:16] == (1, 1, None, None, None, 1, None, None, None)
     assert any(row[3] == "2026-08-24 ~ 2026-08-30" for row in case_values[3:])
     workbook_text = " ".join(str(value) for sheet in workbook for row in sheet.values for value in row if value is not None)
     assert "王小美" in workbook_text
     # 補助案件統計表對齊模板：經費統計格式，不包含身分證字號與地址個資
     assert "A123456789" not in workbook_text
+    subsidy_sheet = workbook["補助案件統計表"]
+    assert subsidy_sheet.cell(row=6, column=2).value == "114000007"
+    assert subsidy_sheet.cell(row=6, column=3).value == "(114)一般市民"
+    assert subsidy_sheet.cell(row=6, column=5).value == "114000007"
+    assert subsidy_sheet.cell(row=6, column=2).number_format == "@"
+    assert subsidy_sheet.cell(row=6, column=5).number_format == "@"
 
     # 每周服務中說明：對齊模板 15 欄
     service_values = list(workbook["每周服務中說明"].values)

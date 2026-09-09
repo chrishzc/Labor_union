@@ -1,6 +1,6 @@
 """
 File: test_government_subsidy_report_query_contract.py
-Description: 驗證季度與年度補助查詢及匯出的Session、strict view、PII遮罩與aggregate。
+Description: 驗證季度與年度補助查詢及匯出的Session、strict view、PII欄位與aggregate。
 """
 from datetime import date
 from decimal import Decimal
@@ -48,6 +48,7 @@ def test_quarterly_and_annual_reports_are_strict_and_redacted(monkeypatch):
     assert row["employer_name"] == "王小美"
     assert row["identity_card"] == "A123456789"
     assert row["address"] == "完整地址"
+    assert row["staff_name"] == "陳月嫂"
     assert quarterly.json()["data"]["total_amount_ntd"] == 12000
     assert "A123456789" in quarterly.text
     assert "完整地址" in quarterly.text

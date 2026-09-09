@@ -1,12 +1,12 @@
 """
 File: reconciliation_register_query.py
-Description: 依既有補助公式建立季度、年度及指定完成期間的唯讀核銷資料。
+Description: 依既有補助公式建立季度、年度及正式送件期間的唯讀核銷資料。
 """
 
 from __future__ import annotations
 
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from io import BytesIO
 from typing import Any, Callable
@@ -27,6 +27,7 @@ ANNUAL_HEADERS = (
 GENERAL_CITIZEN = "\u4e00\u822c\u5e02\u6c11"
 SUBSIDIZED_CITIZEN = "\u88dc\u52a9\u5e02\u6c11"
 IDENTITY_CARD_KEY = "\u8eab\u5206\u8b49\u5b57\u865f"
+CLAIMED_BATCH_STATUSES = ("submitted", "approved", "partially_paid", "paid")
 
 
 def _as_date(value) -> date | None:
@@ -47,13 +48,6 @@ def _validate_year_and_quarter(application_year: int, quarter: int) -> None:
         raise ValueError("application_year must be a Gregorian year")
     if quarter not in (1, 2, 3, 4):
         raise ValueError("quarter must be 1, 2, 3, or 4")
-
-
-def _completion_period(application_year: int, claim_quarter: int) -> tuple[int, int, int]:
-    """Return the completion-year months for the selected reconciliation quarter."""
-    _validate_year_and_quarter(application_year, claim_quarter)
-    start_month = (claim_quarter - 1) * 3 + 1
-    return application_year, start_month, start_month + 2
 
 
 def _decode_legacy_key(key: object) -> str:
@@ -92,8 +86,7 @@ def _fetch_completed_cases(connection_factory: Callable[[], Any]) -> list[dict]:
                 SELECT o.case_no, c.identity_status, o.actual_start_date,
                        o.actual_end_date, o.service_days, o.service_hours_per_day,
                        c.name AS employer_name, c.address AS employer_address,
-                       s.name AS staff_name, br.survey_details,
-                       COALESCE(br.query_no, o.case_no) AS hc_query_no
+                       s.name AS staff_name, br.survey_details
                 FROM orders o
                 JOIN clients c ON c.id = o.client_id
                 LEFT JOIN staff s ON s.id = o.staff_id
@@ -103,6 +96,119 @@ def _fetch_completed_cases(connection_factory: Callable[[], Any]) -> list[dict]:
                 ORDER BY o.case_no
                 """,
                 (GENERAL_CITIZEN, SUBSIDIZED_CITIZEN),
+            )
+            return cursor.fetchall()
+    finally:
+        conn.close()
+
+
+def _fetch_claim_submission_period_cases(
+    period_start: date,
+    period_end: date,
+    connection_factory: Callable[[], Any],
+) -> list[dict]:
+    conn = connection_factory()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT o.case_no, c.identity_status,
+                       COALESCE(o.actual_start_date, a.assigned_start_date) AS actual_start_date,
+                       COALESCE(o.actual_end_date, a.assigned_end_date) AS actual_end_date,
+                       o.service_days, o.service_hours_per_day,
+                       c.name AS employer_name, c.address AS employer_address,
+                       s.name AS staff_name, br.survey_details,
+                       item.claimed_hours, item.unit_price,
+                       item.requested_amount, batch.application_year,
+                       batch.quarter, batch.status AS claim_status,
+                       batch.submitted_at AS claim_submitted_at
+                FROM subsidy_claim_batch_items item
+                JOIN subsidy_claim_batches batch ON batch.id = item.batch_id
+                JOIN orders o ON o.case_no = item.case_no
+                JOIN clients c ON c.id = o.client_id
+                JOIN case_staff_assignments a ON a.id = item.assignment_id
+                    AND a.case_no = item.case_no
+                LEFT JOIN staff s ON s.id = item.staff_id
+                LEFT JOIN beclass_records br
+                    ON (br.query_no = o.case_no OR br.bound_case_no = o.case_no)
+                WHERE batch.status IN (%s, %s, %s, %s)
+                  AND batch.submitted_at >= %s
+                  AND batch.submitted_at < %s
+                  AND batch.revision = (
+                      SELECT MAX(latest.revision)
+                      FROM subsidy_claim_batches latest
+                      WHERE latest.application_year = batch.application_year
+                        AND latest.quarter = batch.quarter
+                        AND latest.status IN (%s, %s, %s, %s)
+                  )
+                  AND c.identity_status IN (%s, %s)
+                ORDER BY o.case_no, item.id
+                """,
+                (
+                    *CLAIMED_BATCH_STATUSES,
+                    period_start,
+                    period_end + timedelta(days=1),
+                    *CLAIMED_BATCH_STATUSES,
+                    GENERAL_CITIZEN,
+                    SUBSIDIZED_CITIZEN,
+                ),
+            )
+            return cursor.fetchall()
+    finally:
+        conn.close()
+
+
+def _fetch_claim_batch_cases(
+    application_year: int,
+    quarter: int | None,
+    connection_factory: Callable[[], Any],
+) -> list[dict]:
+    conn = connection_factory()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT o.case_no, c.identity_status,
+                       COALESCE(o.actual_start_date, a.assigned_start_date) AS actual_start_date,
+                       COALESCE(o.actual_end_date, a.assigned_end_date) AS actual_end_date,
+                       o.service_days, o.service_hours_per_day,
+                       c.name AS employer_name, c.address AS employer_address,
+                       s.name AS staff_name, br.survey_details,
+                       item.claimed_hours, item.unit_price,
+                       item.requested_amount, batch.application_year,
+                       batch.quarter, batch.status AS claim_status,
+                       batch.submitted_at AS claim_submitted_at
+                FROM subsidy_claim_batch_items item
+                JOIN subsidy_claim_batches batch ON batch.id = item.batch_id
+                JOIN orders o ON o.case_no = item.case_no
+                JOIN clients c ON c.id = o.client_id
+                JOIN case_staff_assignments a ON a.id = item.assignment_id
+                    AND a.case_no = item.case_no
+                LEFT JOIN staff s ON s.id = item.staff_id
+                LEFT JOIN beclass_records br
+                    ON (br.query_no = o.case_no OR br.bound_case_no = o.case_no)
+                WHERE batch.status IN (%s, %s, %s, %s)
+                  AND batch.application_year = %s
+                  AND (%s IS NULL OR batch.quarter = %s)
+                  AND batch.revision = (
+                      SELECT MAX(latest.revision)
+                      FROM subsidy_claim_batches latest
+                      WHERE latest.application_year = batch.application_year
+                        AND latest.quarter = batch.quarter
+                        AND latest.status IN (%s, %s, %s, %s)
+                  )
+                  AND c.identity_status IN (%s, %s)
+                ORDER BY batch.quarter, o.case_no, item.id
+                """,
+                (
+                    *CLAIMED_BATCH_STATUSES,
+                    application_year,
+                    quarter,
+                    quarter,
+                    *CLAIMED_BATCH_STATUSES,
+                    GENERAL_CITIZEN,
+                    SUBSIDIZED_CITIZEN,
+                ),
             )
             return cursor.fetchall()
     finally:
@@ -129,7 +235,6 @@ def _to_register_row(source: dict) -> dict | None:
         return None
 
     return {
-        "hc_case_no": str(source.get("hc_query_no") or source["case_no"]),
         "市府訂單號碼": str(source["case_no"]),
         "補助資格": source["identity_status"],
         "服務開始": actual_start,
@@ -147,6 +252,56 @@ def _to_register_row(source: dict) -> dict | None:
         "地址": source.get("employer_address") or "",
         "簽領": "",
     }
+
+
+def _to_claim_register_row(source: dict) -> dict | None:
+    actual_start = _as_date(source.get("actual_start_date"))
+    actual_end = _as_date(source.get("actual_end_date"))
+    submitted_at = _as_date(source.get("claim_submitted_at"))
+    claimed_hours = Decimal(str(source.get("claimed_hours") or 0))
+    daily_hours = Decimal(str(source.get("service_hours_per_day") or 0))
+    unit_price = Decimal(str(source.get("unit_price") or 0))
+    requested_amount = Decimal(str(source.get("requested_amount") or 0))
+    if (
+        actual_start is None
+        or actual_end is None
+        or submitted_at is None
+        or claimed_hours <= 0
+        or daily_hours <= 0
+        or unit_price <= 0
+        or requested_amount < 0
+    ):
+        return None
+    subsidy_days = (claimed_hours / daily_hours).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP
+    )
+    return {
+        "市府訂單號碼": str(source["case_no"]),
+        "補助資格": source["identity_status"],
+        "服務開始": actual_start,
+        "服務結束": actual_end,
+        "補助時數": claimed_hours,
+        "補助天數": subsidy_days,
+        "服務天數": int(source.get("service_days") or subsidy_days),
+        "補助款金額": requested_amount,
+        "單價": unit_price,
+        "雇主": source.get("employer_name") or "",
+        "服務人員": source.get("staff_name") or "",
+        "身分證字號": extract_employer_identity_card(source.get("survey_details")),
+        "地址": source.get("employer_address") or "",
+        "簽領": "",
+        "核銷月份": f"{submitted_at.year:04d}-{submitted_at.month:02d}",
+        "核銷狀態": _claim_status_label(source.get("claim_status")),
+    }
+
+
+def _claim_status_label(value: object) -> str:
+    return {
+        "submitted": "已送件",
+        "approved": "已核准",
+        "partially_paid": "部分撥款",
+        "paid": "已撥款",
+    }.get(str(value or ""), "已送件")
 
 
 def _partition_rows(rows: list[dict]) -> tuple[list[dict], list[dict]]:
@@ -203,25 +358,18 @@ def _build_workbook(headers: tuple[str, ...], general_rows: list[dict], subsidiz
     return output.getvalue()
 
 
-def _filtered_rows(
+def _claim_batch_rows(
     application_year: int,
-    claim_quarter: int | None,
+    quarter: int | None,
     connection_factory: Callable[[], Any],
 ) -> tuple[list[dict], list[dict]]:
-    if claim_quarter is not None:
-        completion_year, start_month, end_month = _completion_period(application_year, claim_quarter)
-    rows = []
-    for source in _fetch_completed_cases(connection_factory):
-        row = _to_register_row(source)
-        if not row:
-            continue
-        completion = row["\u670d\u52d9\u7d50\u675f"]
-        if claim_quarter is not None:
-            if completion.year != completion_year or not start_month <= completion.month <= end_month:
-                continue
-        elif completion.year != application_year:
-            continue
-        rows.append(row)
+    rows = [
+        row
+        for source in _fetch_claim_batch_cases(
+            application_year, quarter, connection_factory
+        )
+        if (row := _to_claim_register_row(source)) is not None
+    ]
     rows.sort(key=lambda row: row["\u5e02\u5e9c\u8a02\u55ae\u865f\u78bc"])
     general, subsidized = _partition_rows(rows)
     return _with_serials(general), _with_serials(subsidized)
@@ -253,25 +401,25 @@ def build_year_to_date_subsidy_rows(
     }
 
 
-def build_completion_period_subsidy_rows(
+def build_claim_submission_period_subsidy_rows(
     period_start: date,
     period_end: date,
     connection_factory: Callable[[], Any],
 ) -> dict:
-    """Return owner-calculated rows whose service completion is inside the period."""
+    """Return formal claim items submitted inside the selected inclusive period."""
     if (
         not isinstance(period_start, date)
         or not isinstance(period_end, date)
         or period_start > period_end
     ):
         raise ValueError("period_start must not follow period_end")
-    rows = []
-    for source in _fetch_completed_cases(connection_factory):
-        row = _to_register_row(source)
-        if row is None:
-            continue
-        if period_start <= row["服務結束"] <= period_end:
-            rows.append(row)
+    rows = [
+        row
+        for source in _fetch_claim_submission_period_cases(
+            period_start, period_end, connection_factory
+        )
+        if (row := _to_claim_register_row(source)) is not None
+    ]
     rows.sort(key=lambda row: row["市府訂單號碼"])
     general, subsidized = _partition_rows(rows)
     return {
@@ -285,9 +433,9 @@ def build_quarterly_subsidy_register(
     quarter: int,
     connection_factory: Callable[[], Any],
 ) -> dict:
-    """Build a register for the selected completion-year quarter."""
+    """Build a register from the selected formal claim-batch year and quarter."""
     _validate_year_and_quarter(application_year, quarter)
-    general_rows, subsidized_rows = _filtered_rows(
+    general_rows, subsidized_rows = _claim_batch_rows(
         application_year, quarter, connection_factory
     )
     return {
@@ -301,10 +449,10 @@ def build_annual_subsidy_summary(
     application_year: int,
     connection_factory: Callable[[], Any],
 ) -> dict:
-    """Build a completion-year annual summary, separated by subsidy eligibility."""
+    """Build an annual summary from that year's formal claim batches."""
     if not isinstance(application_year, int) or application_year < 1912:
         raise ValueError("application_year must be a Gregorian year")
-    general_rows, subsidized_rows = _filtered_rows(
+    general_rows, subsidized_rows = _claim_batch_rows(
         application_year, None, connection_factory
     )
     return {
@@ -321,10 +469,10 @@ def build_combined_subsidy_register(
 ) -> dict:
     """Build a combined workbook with both quarterly and annual reconciliation sheets."""
     _validate_year_and_quarter(application_year, quarter)
-    q_general, q_subsidized = _filtered_rows(
+    q_general, q_subsidized = _claim_batch_rows(
         application_year, quarter, connection_factory
     )
-    a_general, a_subsidized = _filtered_rows(
+    a_general, a_subsidized = _claim_batch_rows(
         application_year, None, connection_factory
     )
     workbook = Workbook()
@@ -344,4 +492,3 @@ def build_combined_subsidy_register(
         "annual_subsidized_rows": a_subsidized,
         "xlsx_bytes": output.getvalue(),
     }
-

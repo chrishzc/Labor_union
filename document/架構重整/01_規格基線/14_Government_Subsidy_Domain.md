@@ -41,6 +41,16 @@ Government Subsidy 與 Staff Payables 以同一組 root facts 驗證 funding sta
 - Orders、Scheduling 或 Alert workflow；
 - 政府公文檔案的外部保存機制。
 
+### 季度／年度核銷查詢投影
+
+季度與年度核銷報表只納入 `subsidy_claim_batches` 已送件以上狀態的 current-revision
+claim items；季度以批次 `application_year + quarter` 選取，年度以 `application_year`
+彙整四季各自的 current revision。服務完成日期只供列內顯示，不得決定所屬季／年度。
+補助時數、單價與申請金額直接投影 item 的 frozen values，不得由查詢層重算；服務人員以
+item-owned `staff_id` 解析。季度 React 明細欄位與既有季度 XLSX 15 欄一致，年度明細與年度
+XLSX 10 欄一致。雇主身分證若存在，沿用報名資料 `survey_details` 的既有值；目前不得臆造
+`clients` 專用欄位或因此新增 schema。
+
 ## 2. SSOT
 
 | 概念 | 唯一權威 | 性質 |
