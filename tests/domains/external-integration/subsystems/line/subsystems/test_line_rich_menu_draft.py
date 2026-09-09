@@ -187,6 +187,10 @@ def _actor() -> ActorContext:
             {"type": "uri", "uri_source": "liff", "uri": "?target=staff_schedule"},
         ),
         (
+            {"type": "uri", "uri_source": "liff", "uri": "?target=order_update"},
+            {"type": "uri", "uri_source": "liff", "uri": "?target=order_update"},
+        ),
+        (
             {"type": "richmenuswitch", "rich_menu_alias_id": "staff-menu", "data": "switch:staff"},
             {"type": "richmenuswitch", "rich_menu_alias_id": "staff-menu", "data": "switch:staff"},
         ),
