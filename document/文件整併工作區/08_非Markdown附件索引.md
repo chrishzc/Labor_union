@@ -4,7 +4,7 @@
 
 - 盤點日期：2026-09-09
 - 範圍：`document/` 下目前存在的所有非 `.md` 檔案。
-- 數量：24
+- 數量：23
 - 本索引只負責附件定位、完整性與證據分類；正式規格、current register 與 owning Domain 契約優先於附件內容。
 - 完整性欄改用 repository current tree 的 Git blob SHA；blob identity 改變即需重新盤點該列。
 
@@ -14,7 +14,6 @@
 |---|---|---|
 | `document/line/AI客服QA題庫.jsonl` | `a0912f35c84621628bc5b84f3df98a8074017b03` | `knowledge-source`；publication 前仍須 owner／category／approved-answer review |
 | `document/line/QA問答集.xlsx` | `562f4fa6bab3d2a319be63b1b7a6a7bbea6fef81` | `knowledge-source`；review input，不自行成為 LINE 回覆 Authority |
-| `document/架構重整/03_追蹤清單與證據/evidence/task97_repository_commit_dispositions_v1.json` | `b489e09f6ab6ffa61a7fc233a7ecf6c4c0c25dd0` | `generated-live-evidence`；Task 97 closeout governed artifact；正進行 consumer 退役審查，不得視為新 code 的持續核准 Authority |
 | `document/架構重整/03_追蹤清單與證據/evidence/writer_inventory_v3/writer_inventory_v3_candidate.findings.jsonl` | `f01efb8f02bcde994916bb5cf757022cd3df91a2` | `generated-live-evidence`；production writer inventory v3 candidate set |
 | `document/架構重整/03_追蹤清單與證據/evidence/writer_inventory_v3/writer_inventory_v3_candidate.manifest.json` | `8f00ed5bad6d3ac0257616f3b67905adf7b29ba8` | `generated-live-evidence`；candidate manifest |
 | `document/架構重整/03_追蹤清單與證據/evidence/writer_inventory_v3/writer_inventory_v3_disposition.manifest.json` | `193d16f34e1f988de1d277fa8524953d7e1780db` | `generated-live-evidence`；current disposition summary |
