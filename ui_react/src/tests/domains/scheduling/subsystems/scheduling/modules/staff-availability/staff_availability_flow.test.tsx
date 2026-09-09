@@ -43,7 +43,7 @@ describe('Staff availability flow', () => {
   async function openAvailability(expectedRow = '2026-09-01 ～ 2026-09-30'): Promise<void> {
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: /長假與暫停/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /長假與暫停/ }));
     fireEvent.change(screen.getByLabelText('查詢服務人員'), { target: { value: '11' } });
     fireEvent.change(screen.getByLabelText('開始日期'), { target: { value: '2026-09-01' } });
     fireEvent.change(screen.getByLabelText('結束日期'), { target: { value: '2026-10-31' } });
@@ -150,7 +150,7 @@ describe('Staff availability flow', () => {
       .mockResolvedValueOnce([STAFF_AVAILABILITY_BLOCK]);
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: /長假與暫停/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /長假與暫停/ }));
     fireEvent.change(screen.getByLabelText('查詢服務人員'), { target: { value: '11' } });
     fireEvent.change(screen.getByLabelText('開始日期'), { target: { value: '2026-09-01' } });
     fireEvent.change(screen.getByLabelText('結束日期'), { target: { value: '2026-10-31' } });

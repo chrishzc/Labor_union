@@ -540,12 +540,26 @@
 }
 
 /* Gantt Matrix Table Container */
+.gantt-scroll-guidance {
+  margin: 0 0 8px;
+  color: #74593f;
+  font-size: 0.82rem;
+  font-weight: 650;
+}
+
 .gantt-matrix-scroll-wrapper {
   overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-gutter: stable;
   border: 1.5px solid #e7d5cf;
   border-radius: 16px;
   background: #ffffff;
   box-shadow: 0 4px 18px rgba(74, 69, 67, 0.05);
+}
+
+.gantt-matrix-scroll-wrapper:focus-visible {
+  outline: 3px solid rgba(234, 88, 12, 0.3);
+  outline-offset: 3px;
 }
 
 .gantt-matrix-table {
