@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { OrderAssignmentPlanPanel } from '../../../../../../../components/OrderAssignmentPlanPanel';
+import { ApiHttpError } from '../../../../../../../api/shared/typed_errors';
 
 const mocks = vi.hoisted(() => ({
   getAssignmentPlan: vi.fn(),
@@ -90,6 +91,17 @@ describe('待辦看板 Beta 第 10 階正式指派與排班回讀', () => {
     window.location.hash = '';
   });
 
+  it('無有效媒合方案時仍顯示正式指派回讀，而不是資源錯誤', async () => {
+    mocks.getAssignmentPlan.mockResolvedValue(assignmentPlan());
+    mocks.queryPlan.mockRejectedValue(new ApiHttpError(404, 'resource_not_found', '找不到要求的資源'));
+    render(<OrderAssignmentPlanPanel caseNo="CASE-ASSIGNMENT-PLAN" />);
+    fireEvent.click(screen.getByRole('button', { name: '讀取正式指派與排班' }));
+    expect(await screen.findByText('2 段')).toBeInTheDocument();
+    expect(screen.getByText(/尚無有效媒合方案/)).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('mock 日期表確認與正式排班')).not.toBeInTheDocument();
+  });
+
   it('只使用既有 assignment-plan owner facts 顯示正式指派段與官方服務日', async () => {
     mocks.getAssignmentPlan.mockResolvedValue(assignmentPlan());
 
@@ -98,8 +110,8 @@ describe('待辦看板 Beta 第 10 階正式指派與排班回讀', () => {
 
     await waitFor(() => expect(mocks.getAssignmentPlan).toHaveBeenCalledWith('CASE-ASSIGNMENT-PLAN'));
     expect(await screen.findByText('2 段')).toBeInTheDocument();
-    expect(screen.getByText('#12')).toBeInTheDocument();
-    expect(screen.getByText('#3')).toBeInTheDocument();
+    expect(screen.queryByText('#12')).not.toBeInTheDocument();
+    expect(screen.queryByText('#3')).not.toBeInTheDocument();
     expect(screen.getByText('4 天 × 8 小時')).toBeInTheDocument();
 
     const first = screen.getByLabelText('第 1 段正式指派');

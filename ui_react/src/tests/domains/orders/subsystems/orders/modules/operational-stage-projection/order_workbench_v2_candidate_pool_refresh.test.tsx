@@ -175,11 +175,14 @@ describe('待辦看板 Beta 候選池回讀後刷新正式投影', () => {
     fireEvent.click(await screen.findByRole('button', { name: '處理：建立候選池' }));
     fireEvent.click(await screen.findByRole('button', { name: '模擬 CASE-READBACK 候選池回讀完成' }));
 
+    await waitFor(() => expect(screen.getByRole('button', { name: '關閉測試工作 Drawer' })).toBeEnabled());
+    expect(mocks.loadSummaries).toHaveBeenCalledTimes(2);
+    fireEvent.click(screen.getByRole('button', { name: '關閉測試工作 Drawer' }));
     expect(await screen.findByText('回讀後測試客戶')).toBeInTheDocument();
     expect(screen.getByText('2026-09-10 ~ 2026-09-30')).toBeInTheDocument();
     expect(screen.getByText('回讀後測試月嫂')).toBeInTheDocument();
     expect(screen.queryByText('回讀前測試客戶')).not.toBeInTheDocument();
-    expect(mocks.loadSummaries).toHaveBeenCalledTimes(2);
+    expect(mocks.loadSummaries).toHaveBeenCalledTimes(3);
     expect(originalSignal.aborted).toBe(true);
     expect(mocks.loadSummaries).toHaveBeenLastCalledWith(
       expect.any(Function),
@@ -196,8 +199,11 @@ describe('待辦看板 Beta 候選池回讀後刷新正式投影', () => {
     fireEvent.click(await screen.findByRole('button', { name: '處理：確認服務日期' }));
     fireEvent.click(await screen.findByRole('button', { name: '模擬服務日期回讀完成' }));
 
-    expect(await screen.findByText('2026-09-10 ~ 2026-09-30')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: '關閉測試工作 Drawer' })).toBeEnabled());
     expect(mocks.loadSummaries).toHaveBeenCalledTimes(2);
+    fireEvent.click(screen.getByRole('button', { name: '關閉測試工作 Drawer' }));
+    expect(await screen.findByText('2026-09-10 ~ 2026-09-30')).toBeInTheDocument();
+    expect(mocks.loadSummaries).toHaveBeenCalledTimes(3);
     expect(mocks.getCoreStageTimelines).toHaveBeenLastCalledWith(
       expect.objectContaining({ stage: 'confirmed_service_dates' }),
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
@@ -228,6 +234,8 @@ describe('待辦看板 Beta 候選池回讀後刷新正式投影', () => {
     fireEvent.click(screen.getByRole('button', { name: /2 候選池 1/ }));
     fireEvent.click(await screen.findByRole('button', { name: '處理：建立候選池' }));
     fireEvent.click(await screen.findByRole('button', { name: '模擬 CASE-READBACK 候選池回讀完成' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '關閉測試工作 Drawer' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '關閉測試工作 Drawer' }));
     await screen.findByText('回讀後測試客戶');
 
     await act(async () => { resolveInitial(summaries()); });

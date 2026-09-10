@@ -57,6 +57,7 @@
    2. 4 大頁籤導航列 (Tab Bar)
    ========================================================================== */
 .finance-tab-bar {
+  flex-wrap: wrap;
   margin: 0 0 22px 0;
   padding: 8px 10px;
   border-bottom: 2px solid #dec0b6;
@@ -73,6 +74,8 @@
 }
 
 .finance-tab-bar button {
+  flex-direction: column;
+  white-space: nowrap;
   flex: 1;
   padding: 10px 16px;
   border: 1px solid transparent;
@@ -574,3 +577,6 @@
     grid-template-columns: 1fr 1fr;
   }
 }
+.finance-tab-bar button small { display: block; margin-top: 3px; font-size: .75rem; font-weight: 400; }
+.finance-settings-nav { display: flex; align-items: center; gap: 8px; border-left: 1px solid var(--md-sys-color-outline-variant); padding-left: 12px; }
+.finance-settings-nav > span { font-size: .75rem; color: var(--md-sys-color-on-surface-variant); }

@@ -47,7 +47,14 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
       if (data.actual_start.case_no !== caseNo || data.after_actual_start_date !== date) throw new Error('實際開始日預覽 identity 不一致。');
       if (sequence.current === request) { setPreview(data); setPhase('idle'); }
     } catch (caught) {
-      if (sequence.current === request) { setError(caught instanceof Error ? caught.message : '實際開始日預覽失敗。'); setPhase('idle'); }
+      if (sequence.current === request) {
+        const missingAssignments = (caught instanceof OrderMutationError || caught instanceof ApiHttpError)
+          && caught.code === 'scheduling_assignments_required';
+        setError(missingAssignments
+          ? '尚未建立正式月嫂指派，無法確認實際開始日。請先完成服務安排，再重新查詢；本次未變更日期。'
+          : caught instanceof Error ? caught.message : '實際開始日預覽失敗。');
+        setPhase('idle');
+      }
     }
   };
 

@@ -147,7 +147,7 @@ def main() -> int:
 
     username = args.username or input("管理員帳號：").strip()
     display_name = args.display_name or input("顯示名稱：").strip()
-    password = getpass.getpass("密碼（至少 12 個字元）：")
+    password = getpass.getpass("密碼（至少 10 個字元）：")
     confirmation = getpass.getpass("再次輸入密碼：")
     if password != confirmation:
         print("[Error] 兩次輸入的密碼不同")

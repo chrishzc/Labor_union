@@ -2,8 +2,8 @@
  * File: scheduling_current_page.test.tsx
  * Description: 驗證 Scheduling 投影、typed controls 與 bounded deep-link 行為。
  */
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import { schedulingCurrentClient } from '../api/scheduling/scheduling_current_client';
@@ -18,8 +18,19 @@ import {
 } from './fixtures/scheduling/scheduling_current_contract_fixtures';
 
 describe('SchedulingPage query-only presentation', () => {
+  let intersectNextPage: () => void;
+  let observeNextPage: ReturnType<typeof vi.fn>;
+  afterEach(() => vi.unstubAllGlobals());
   beforeEach(() => {
     vi.restoreAllMocks();
+    observeNextPage = vi.fn();
+    vi.stubGlobal('IntersectionObserver', class {
+      constructor(callback: IntersectionObserverCallback) {
+        intersectNextPage = () => callback([{ isIntersecting: true } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
+      }
+      observe = observeNextPage;
+      disconnect = vi.fn();
+    });
     window.location.hash = '#scheduling';
     vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue({
       items: [
@@ -162,7 +173,9 @@ describe('SchedulingPage query-only presentation', () => {
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '載入更多服務人員' }));
+    expect(observeNextPage).toHaveBeenCalledWith(document.querySelector('[data-control-id="scheduling.staff.next-page"]'));
+    expect(screen.queryByRole('button', { name: '載入更多服務人員' })).not.toBeInTheDocument();
+    act(() => { intersectNextPage(); intersectNextPage(); });
     await waitFor(() => expect(screen.getAllByText('去敏人員乙').length).toBeGreaterThan(0));
     expect(staffDirectoryClient.queryPage).toHaveBeenNthCalledWith(
       2,
@@ -170,6 +183,25 @@ describe('SchedulingPage query-only presentation', () => {
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     expect(screen.queryByRole('button', { name: '載入更多服務人員' })).not.toBeInTheDocument();
+    expect(staffDirectoryClient.queryPage).toHaveBeenCalledTimes(2);
+    expect(document.querySelector('[data-control-id="scheduling.staff.next-page"]')).not.toBeInTheDocument();
+  });
+
+  it('pauses automatic loading after a failure and retries without losing existing rows', async () => {
+    vi.mocked(staffDirectoryClient.queryPage)
+      .mockResolvedValueOnce({ items: [{ id: 11, name: '去敏人員甲', phone: null, education: null }], next_cursor: 11 })
+      .mockRejectedValueOnce(new Error('transport unavailable'))
+      .mockResolvedValueOnce({ items: [{ id: 12, name: '去敏人員乙', phone: null, education: null }], next_cursor: null });
+    render(<SchedulingPage />);
+    await waitFor(() => expect(observeNextPage).toHaveBeenCalled());
+    act(() => intersectNextPage());
+    const retry = await screen.findByRole('button', { name: '重試載入月嫂' });
+    expect(screen.getAllByText('去敏人員甲').length).toBeGreaterThan(0);
+    expect(screen.queryByText(/transport unavailable/)).not.toBeInTheDocument();
+    expect(staffDirectoryClient.queryPage).toHaveBeenCalledTimes(2);
+    fireEvent.click(retry);
+    await waitFor(() => expect(screen.getAllByText('去敏人員乙').length).toBeGreaterThan(0));
+    expect(staffDirectoryClient.queryPage).toHaveBeenCalledTimes(3);
   });
 
   it('renders explicit empty and error states without fake occupancy spans', async () => {

@@ -530,6 +530,12 @@ export const contractExternalSigningClient = {
     return { blob, filename, mimeType: 'application/pdf' };
   },
 
+  async prepareClientUnsignedPdf(caseNo: string, identity: ExternalSigningCommandIdentity): Promise<PreparedUnsignedDocument> {
+    return decodePayload(envelope(PreparedUnsignedDocumentSchema), await transport.post(
+      `${basePath(caseNo)}/client/unsigned-pdf`, {}, stagingCommandOptions(identity),
+    )).data;
+  },
+
   async prepareStaffUnsignedPdf(
     caseNo: string,
     segmentId: number,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import date, datetime
 import re
 from typing import Any
@@ -15,7 +16,8 @@ from infrastructure.mysql.order_terms_read_model import (
     load_preview_facts,
     select_order,
 )
-from domains.client_finance.obligation_planning import build_client_finance_terms_candidate
+from domains.client_finance.obligation_planning import build_client_finance_terms_candidate, ClientChargeDay
+from subsystems.contract_signing.staff_contract_application import _allocate_commitment_service_days
 from subsystems.contract_signing.full_contract_preview import (
     ContractPreviewScope,
     FullContractOwnerProjection,
@@ -75,6 +77,11 @@ class MySqlFullContractProjectionRepository:
             active_assignment_id,
             current[0].get("staff_id") if active_assignment_id is not None else None,
         )
+        if not current:
+            plan = _load_precontract_plan(self._connection, case_no, case)
+            if plan is not None:
+                _extend_precontract_facts(self._connection, case_no, facts, owners, plan)
+        _extend_actual_receipt_dates(self._connection, case_no, facts, owners)
         return FullContractOwnerProjection(
             case_no=case_no,
             scope=ContractPreviewScope.CLIENT,
@@ -164,9 +171,93 @@ class MySqlFullContractProjectionRepository:
                 (case_no, matching_segment_id),
             )
             rows = tuple(cursor.fetchall() or ())
-        if len(rows) != 1:
+        if len(rows) > 1:
             return None
+        if not rows:
+            case = self._context.load_case_facts(case_no)
+            if case is None:
+                return None
+            plan = _load_precontract_plan(self._connection, case_no, case)
+            if plan is None:
+                return None
+            segment = next((row for row in plan["segments"] if int(row["id"]) == matching_segment_id), None)
+            if segment is None:
+                return None
+            dates = tuple(day for owner, day in plan["allocations"] if int(owner["id"]) == matching_segment_id)
+            if not dates:
+                raise ValueError("precontract_service_days_mismatch")
+            facts = _common_facts(case)
+            facts.update({"matching_segment_id": matching_segment_id, "staff_name": segment["staff_name"],
+                          "staff_phone": segment["staff_phone"], "service_type": _canonical_service_mode(case.get("service_type")),
+                          "assignment_start_date": dates[0], "assignment_end_date": dates[-1], "assignment_service_days": len(dates)})
+            owners = {"orders": projection_fingerprint(_owner_values(facts, "order")),
+                      "client": projection_fingerprint(_owner_values(facts, "client")),
+                      "staff": projection_fingerprint(_owner_values(facts, "staff")),
+                      "scheduling": projection_fingerprint({"plan": plan["id"], "segment": matching_segment_id, "dates": dates})}
+            return FullContractOwnerProjection(case_no, ContractPreviewScope.STAFF, None, facts, owners)
         return self.load_staff_projection(case_no, int(rows[0]["assignment_id"]))
+
+
+def _load_precontract_plan(connection, case_no, case):
+    """Read the accepted plan and reuse the existing commitment date allocator."""
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT id FROM caregiver_matching_plans WHERE case_no=%s AND status='accepted' AND is_active=1", (case_no,))
+        plans = tuple(cursor.fetchall() or ())
+        if len(plans) != 1:
+            return None
+        cursor.execute("SELECT segment.id,segment.staff_id,segment.assigned_start_date,segment.assigned_end_date,"
+                       "staff.name AS staff_name,staff.phone AS staff_phone FROM caregiver_matching_plan_segments segment "
+                       "JOIN staff ON staff.id=segment.staff_id WHERE segment.plan_id=%s ORDER BY segment.segment_order,segment.id", (plans[0]["id"],))
+        segments = tuple(cursor.fetchall() or ())
+        if not segments:
+            return None
+        cursor.execute("SELECT holiday_date FROM holidays")
+        holidays = {row["holiday_date"] for row in cursor.fetchall()}
+    allocations = _allocate_commitment_service_days(case, segments, holidays)
+    return {"id": plans[0]["id"], "segments": segments, "allocations": allocations}
+
+
+def _extend_actual_receipt_dates(connection, case_no, facts, owners):
+    """Project actual surviving receipt dates; deadlines never fill receipt cells."""
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT DISTINCT obligation.obligation_type,ledger.occurred_on "
+                       "FROM client_ledger_entries ledger "
+                       "JOIN client_ledger_obligation_allocations allocation ON allocation.ledger_entry_id=ledger.id "
+                       "JOIN client_obligations obligation ON obligation.obligation_identity=allocation.obligation_identity "
+                       "WHERE ledger.case_no=%s AND obligation.case_no=%s AND ledger.entry_type='receipt' "
+                       "AND allocation.amount_ntd>0 AND ledger.amount_ntd>COALESCE((SELECT SUM(reversal.amount_ntd) "
+                       "FROM client_ledger_entries reversal WHERE reversal.reversal_of_entry_id=ledger.id "
+                       "AND reversal.entry_type='reversal'),0) ORDER BY obligation.obligation_type,ledger.occurred_on", (case_no, case_no))
+        rows = tuple(cursor.fetchall() or ())
+    dates = {stage: tuple(sorted({str(row["occurred_on"]) for row in rows
+                                  if row["obligation_type"] == stage and row.get("occurred_on") is not None}))
+             for stage in ("deposit", "first", "second")}
+    for stage, values in dates.items():
+        facts[f"{stage}_receipt_date"] = "、".join(values) or None
+    facts["floor_fee_receipt_date"] = facts["deposit_receipt_date"] if facts.get("floor_fee") else None
+    owners["client_receipt_dates"] = projection_fingerprint(dates)
+
+
+def _extend_precontract_facts(connection, case_no, facts, owners, plan):
+    dates = tuple(day for _, day in plan["allocations"])
+    facts.update({"committed_service_start_date": dates[0], "committed_service_end_date": dates[-1],
+                  "staff_name": "、".join(str(row["staff_name"]) for row in plan["segments"])})
+    owners["scheduling"] = projection_fingerprint({"plan_id": plan["id"], "allocations": plan["allocations"]})
+    with connection.cursor() as cursor:
+        order = select_order(cursor, case_no, lock=False)
+        finance = load_contract_client_finance_facts(cursor, order, lock=False)
+        finance = replace(finance, charge_days=tuple(ClientChargeDay(day, False) for day in dates))
+        destination = _load_client_payment_destination(cursor)
+    candidate = build_client_finance_terms_candidate(finance, f"contract-preview:{case_no}")
+    facts["total_employer_self_pay_payable"] = sum(stage.amount.amount for stage in candidate.stage_plans)
+    facts["client_finance_self_pay_days"] = sum(len(stage.service_dates) for stage in candidate.stage_plans if stage.payment_stage.value != "deposit")
+    for stage in candidate.stage_plans:
+        facts[_stage_fact_key(stage.payment_stage.value, "amount")] = stage.amount.amount
+    facts["first_payment_amount"] = facts.get("first_amount")
+    facts["second_payment_amount"] = facts.get("second_amount")
+    if destination is not None:
+        facts["client_payment_destination_account"] = destination["account_display"]
+    owners["client_finance"] = candidate.fingerprint.value
 
 
 def _common_facts(case: dict[str, object]) -> dict[str, object]:

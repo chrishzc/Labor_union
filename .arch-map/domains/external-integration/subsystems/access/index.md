@@ -12,6 +12,7 @@
 - inbound: `anomalies/anomalies` — central outbox worker supplies the concrete projection sink and invokes the Access-owned bounded delivery transaction。
 
 ## Modules
+- `account-center-presentation` — 帳號清冊、安全操作確認及稽核詳情；path: `modules/account-center-presentation.md`
 - `admin-entry-target-control` — 管理端入口 target 的 file-backed state、CAS／replay 與 artifact health gate；path: `modules/admin-entry-target-control.md`
 - `authentication-session` — admin authentication/session validity, absolute expiry, revocation and enabled-actor checks；path: `modules/authentication-session.md`
 

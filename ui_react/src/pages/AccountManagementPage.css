@@ -216,6 +216,10 @@
 }
 
 .account-form-grid {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
   gap: 14px 18px;
@@ -580,4 +584,3 @@
     grid-template-columns: 1fr;
   }
 }
-

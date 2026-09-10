@@ -339,7 +339,7 @@ export const DataBrowserPage: React.FC = () => {
       <Drawer
         isOpen={selectedRecord !== null}
         onClose={() => setSelectedRecord(null)}
-        size="wide"
+        size="normal"
         title={`📑 完整資料詳情 — ${selectedRecord?.title ?? ''}`}
         footer={
           <div className="databrowser-drawer-footer">

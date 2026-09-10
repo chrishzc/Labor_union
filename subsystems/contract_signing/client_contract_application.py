@@ -39,6 +39,14 @@ discard_uncommitted_contract_document = lambda **_kwargs: None
 
 
 @dataclass(frozen=True, slots=True)
+class PrepareExternalClientContractCommand:
+    case_no: str
+    actor_id: str
+    idempotency_key: IdempotencyKey
+    correlation_id: CorrelationId
+
+
+@dataclass(frozen=True, slots=True)
 class SendClientContractCommand:
     case_no: str
     actor_id: str
@@ -305,6 +313,45 @@ class ClientContractSigningApplication:
         finally:
             connection.close()
 
+    def prepare_external_document(self, command: PrepareExternalClientContractCommand) -> tuple[int, bool]:
+        """Prepare the current accepted-plan source without LINE or completion facts."""
+        template = load_approved_template("contract_client_copy")
+        archive = None
+        try:
+            def persist(connection):
+                nonlocal archive
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT id AS matching_plan_id FROM caregiver_matching_plans "
+                                   "WHERE case_no=%s AND status='accepted' AND is_active=1 FOR UPDATE", (command.case_no,))
+                    plans = tuple(cursor.fetchall() or ())
+                if len(plans) != 1:
+                    raise ValueError("contract_external_signing_accepted_plan_required")
+                facts = dict(plans[0])
+                template_facts = self._template_facts(connection, command.case_no, facts)
+                snapshot = _sha256(_canonical_json(template_facts).encode())
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT d.id,d.facts_snapshot_sha256 FROM contract_document_versions d "
+                                   "WHERE d.case_no=%s AND d.document_scope='client_contract' "
+                                   "AND d.document_role='template_generated' AND d.matching_plan_id=%s "
+                                   "AND d.template_sha256=%s AND d.mapping_sha256=%s "
+                                   "ORDER BY d.version_number DESC LIMIT 1 FOR UPDATE",
+                                   (command.case_no, facts["matching_plan_id"], template.template_sha256, template.mapping_sha256))
+                    existing = cursor.fetchone()
+                if existing and existing["facts_snapshot_sha256"] == snapshot:
+                    return int(existing["id"]), True
+                content = render_contract_template(
+                    template_path=TEMPLATE_DIRECTORY / template.template_filename,
+                    mapping_path=approved_template_mapping_path(template.template_key),
+                    facts=template_facts,
+                )
+                archive = self._archive(content, f"{command.case_no}/client/{command.idempotency_key.value}-{_sha256(content)}-unsigned.xlsx")
+                return _insert_generated_document(connection, command, facts, template, archive, snapshot=snapshot), False
+            return self._run_in_application_unit_of_work(persist)
+        except Exception:
+            if archive is not None:
+                self._discard(archive.storage_key)
+            raise
+
     def _persist_sent_contract(self, command, template):
         archive = None
         try:
@@ -432,8 +479,8 @@ def _line_binding(connection, subject_type: str, subject_reference: str) -> Cont
     )
 
 
-def _insert_generated_document(connection, command, facts, template, archive):
-    snapshot = _facts_snapshot(connection, command.case_no, int(facts["commitment_id"]))
+def _insert_generated_document(connection, command, facts, template, archive, *, snapshot=None):
+    snapshot = snapshot or _facts_snapshot(connection, command.case_no, int(facts["commitment_id"]))
     asset_id = _insert_media_asset(connection, command.case_no, archive.storage_key, template.template_filename, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", archive.file_size, archive.sha256)
     with connection.cursor() as cursor:
         cursor.execute(

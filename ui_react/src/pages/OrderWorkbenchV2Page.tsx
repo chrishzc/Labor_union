@@ -22,7 +22,6 @@ import {
 import type {
   CoreStageBranchType,
   CoreStageCode,
-  CoreStageSubstatusCode,
 } from '../api/orders/order_core_stage_projection_schemas';
 import {
   loadAllOrderSummaries,
@@ -81,7 +80,6 @@ export const OrderWorkbenchV2Page: FC = () => {
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [summaryQueryFailed, setSummaryQueryFailed] = useState(false);
   const [selectedStage, setSelectedStage] = useState<CoreStageCode | null>(null);
-  const [selectedSubstatus, setSelectedSubstatus] = useState<CoreStageSubstatusCode | null>(null);
   const [workbenchScope, setWorkbenchScope] = useState<OrderWorkbenchScope>('in_progress');
   const [search, setSearch] = useState('');
   const [onlyBlocked, setOnlyBlocked] = useState(false);
@@ -90,6 +88,7 @@ export const OrderWorkbenchV2Page: FC = () => {
   const [selectedDrawer, setSelectedDrawer] = useState<{
     caseNo: string;
     branchType: CoreStageBranchType;
+    initialView?: 'work' | 'data';
   } | null>(null);
   const requestSequence = useRef(0);
   const lastResolvedQuery = useRef<string | null>(null);
@@ -113,10 +112,6 @@ export const OrderWorkbenchV2Page: FC = () => {
       blocker_only: onlyBlocked || undefined,
       warning_only: onlyWarning || undefined,
       stage: workbenchScope === 'in_progress' ? selectedStage ?? undefined : undefined,
-      substatus_code:
-        workbenchScope === 'in_progress' && selectedSubstatus !== null
-          ? selectedSubstatus
-          : undefined,
     };
 
     const queryKey = JSON.stringify(query);
@@ -156,7 +151,6 @@ export const OrderWorkbenchV2Page: FC = () => {
     onlyWarning,
     projectionRefreshKey,
     selectedStage,
-    selectedSubstatus,
   ]);
 
   useEffect(() => {
@@ -198,7 +192,6 @@ export const OrderWorkbenchV2Page: FC = () => {
   const selectScope = (scope: OrderWorkbenchScope) => {
     setWorkbenchScope(scope);
     setSelectedStage(null);
-    setSelectedSubstatus(null);
     setOnlyBlocked(false);
     setOnlyWarning(false);
     setSelectedDrawer(null);
@@ -206,15 +199,31 @@ export const OrderWorkbenchV2Page: FC = () => {
 
   const selectStage = (stage: CoreStageCode | null) => {
     setSelectedStage(stage);
-    setSelectedSubstatus(null);
   };
+
+  if (selectedDrawer !== null) return (
+    <>
+      {error !== null && <div role="alert"><p>案件清單更新失敗，請重新整理後繼續。</p><button type="button" onClick={refreshProjection}>重新整理</button></div>}
+      <fieldset disabled={refreshing || error !== null} style={{ border: 0, padding: 0, margin: 0 }}>
+        <OrderWorkbenchV2Drawer
+          key={selectedDrawer.caseNo}
+          caseNo={selectedDrawer.caseNo}
+          branchType={selectedDrawer.branchType}
+          workbenchScope={workbenchScope}
+          initialView={selectedDrawer.initialView}
+          onClose={closeDrawer}
+          onObserved={refreshProjection}
+        />
+      </fieldset>
+    </>
+  );
 
   return (
     <div className="order-v2-page">
       <header className="page-header-banner orders-page-header">
         <div>
-          <h1 className="page-title">📌 待辦看板 <span className="order-v2-beta">Beta</span></h1>
-          <p className="page-subtitle">依案件階段查看待辦、追蹤進度與處理工作。</p>
+          <h1 className="page-title">待辦看板</h1>
+          <p className="page-subtitle">找到需要處理的案件，從目前步驟接著完成。</p>
         </div>
         <div className="orders-search-wrapper">
           <label className="orders-search-input-box">
@@ -287,29 +296,6 @@ export const OrderWorkbenchV2Page: FC = () => {
           <span>／ {selectedStage === null ? displayedCount : selectedStageCount} 筆</span>
         </div>
       </div>
-      {workbenchScope === 'in_progress' && selectedStage !== null && (
-        <div className="order-v2-subfilters" aria-label="階段子狀態篩選">
-          <button
-            type="button"
-            className={selectedSubstatus === null ? 'active' : ''}
-            aria-pressed={selectedSubstatus === null}
-            onClick={() => setSelectedSubstatus(null)}
-          >
-            全部 <strong>{selectedStageCount}</strong>
-          </button>
-          {(view?.substatusOptions ?? []).map((option) => (
-            <button
-              type="button"
-              key={option.code}
-              className={selectedSubstatus === option.code ? 'active' : ''}
-              aria-pressed={selectedSubstatus === option.code}
-              onClick={() => setSelectedSubstatus(option.code)}
-            >
-              {option.label} <strong>{option.count}</strong>
-            </button>
-          ))}
-        </div>
-      )}
 
       {summaryQueryFailed && !loading && !error && (
         <div className="order-v2-summary-warning" role="status">
@@ -359,6 +345,7 @@ export const OrderWorkbenchV2Page: FC = () => {
                   )}
                 </div>
                 <div className="order-v2-card-task">
+                  <div className="order-v2-next-task"><small>目前待辦</small><strong>{stage?.label ?? item.statusLabel}</strong></div>
                   {workbenchScope === 'completed' && (
                     <div className="order-v2-settlement-summary" aria-label="結算狀態">
                       <span>客戶端：{item.clientSettlementLabel}</span>
@@ -372,6 +359,8 @@ export const OrderWorkbenchV2Page: FC = () => {
                       {item.blockers.length + item.warnings.length > 1 && <small>另有 {item.blockers.length + item.warnings.length - 1} 項，請在案件工作中查看。</small>}
                     </div>
                   )}
+                  <div className="order-v2-card-footer">
+                  <button type="button" className="order-v2-view-data" onClick={() => setSelectedDrawer({ caseNo: item.id, branchType: item.branchType, initialView: 'data' })}>查看資料</button>
                   <button
                     type="button"
                     className="btn-primary-action order-v2-open-work"
@@ -379,6 +368,7 @@ export const OrderWorkbenchV2Page: FC = () => {
                   >
                     {drawerActionLabel(workbenchScope, stage?.code)}
                   </button>
+                  </div>
                 </div>
               </article>
             );
@@ -389,16 +379,7 @@ export const OrderWorkbenchV2Page: FC = () => {
 
       </section>
 
-      {selectedDrawer !== null && (
-        <OrderWorkbenchV2Drawer
-          key={selectedDrawer.caseNo}
-          caseNo={selectedDrawer.caseNo}
-          branchType={selectedDrawer.branchType}
-          workbenchScope={workbenchScope}
-          onClose={closeDrawer}
-          onObserved={refreshProjection}
-        />
-      )}
+
     </div>
   );
 };

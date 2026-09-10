@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const workbenchSource = readFileSync(
-  resolve(process.cwd(), 'src/pages/OrderWorkbenchV2Page.tsx'),
+  resolve(process.cwd(), 'src/components/OrderWorkbenchV2Drawer.tsx'),
   'utf8',
 );
 

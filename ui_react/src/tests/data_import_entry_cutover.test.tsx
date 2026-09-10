@@ -1,6 +1,6 @@
 /** Data Import remains a four-card entry and does not load persistent HCM anomalies. */
 import { StrictMode } from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
 import { sessionClient } from '../api/auth/session_client';
@@ -71,15 +71,16 @@ describe('Data Import entry', () => {
     render(<DataImportPage />);
 
     expect(document.querySelector('[data-control-id="imports.hcm-current.open-preview"]')).toBeInTheDocument();
-    for (const controlId of ACTIVE_PREVIEW_CONTROL_IDS) {
+    for (const [index, controlId] of ACTIVE_PREVIEW_CONTROL_IDS.entries()) {
+      fireEvent.click(screen.getByRole('button', { name: ['HCM', '客戶', '月嫂', '歷史訂單'][index] }));
       const control = document.querySelector(`[data-control-id="${controlId}"]`);
       expect(control, controlId).toBeInTheDocument();
       expect(control, controlId).toBeDisabled();
+      expect(screen.getByText('請先選擇 .xlsx 工作簿。')).toBeInTheDocument();
+      expect(screen.getByText('預覽成功後才能確認匯入。')).toBeInTheDocument();
     }
     for (const controlId of ACTIVE_APPLY_CONTROL_IDS) {
       expect(document.querySelector(`[data-control-id="${controlId}"]`), controlId).toBeNull();
     }
-    expect(screen.getAllByText('請先選擇 .xlsx 工作簿。')).toHaveLength(4);
-    expect(screen.getAllByText('預覽成功後才能確認匯入。')).toHaveLength(4);
   });
 });

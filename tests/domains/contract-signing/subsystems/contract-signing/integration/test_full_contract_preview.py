@@ -309,13 +309,14 @@ def test_staff_legacy_funding_split_cells_stay_blank_and_whole_obligation_popula
     canonical = json.loads(canonical_path.read_text(encoding="utf-8"))
     mapping = tmp_path / "mapping.json"
     split_cells = {}
-    for cell in ("B13", "C13", "B15", "C15"):
+    for cell in ("C13", "B15", "C15"):
         descriptor = canonical["param_mappings"][cell]
         assert descriptor["status"] == "not_applicable"
         assert descriptor["db_key"] == ""
         split_cells[cell] = descriptor
     split_cells.update(
         {
+            "B13": canonical["param_mappings"]["B13"],
             "F10": {"db_key": "staff_payable_total", "requiredness": "required"},
             "B19": {"db_key": "staff_payable_total", "requiredness": "required"},
         }
@@ -335,8 +336,9 @@ def test_staff_legacy_funding_split_cells_stay_blank_and_whole_obligation_popula
         facts=facts,
     )
     worksheet = load_workbook(BytesIO(rendered), data_only=False).active
-    for cell in ("B13", "C13", "B15", "C15"):
+    for cell in ("C13", "B15", "C15"):
         assert worksheet[cell].value is None
+    assert worksheet["B13"].value == 42000
     assert worksheet["F10"].value == 42000
     assert worksheet["B19"].value == 42000
 
@@ -369,7 +371,7 @@ def test_real_staff_template_clears_legacy_funding_placeholders():
         facts=facts,
     )
     worksheet = load_workbook(BytesIO(rendered), data_only=False).active
-    assert [worksheet[cell].value for cell in ("B13", "C13", "B15", "C15")] == [None, None, None, None]
+    assert [worksheet[cell].value for cell in ("B13", "C13", "B15", "C15")] == [24000, None, None, None]
 
 
 def test_client_contract_payment_destination_and_floor_fee_due_date_use_client_finance_owner():
@@ -383,7 +385,7 @@ def test_client_contract_payment_destination_and_floor_fee_due_date_use_client_f
         "status": "approved",
     }
     floor_fee_date = mapping["param_mappings"]["C37"]
-    assert floor_fee_date["db_key"] == "deposit_due_date"
+    assert floor_fee_date["db_key"] == "floor_fee_receipt_date"
     assert floor_fee_date["status"] == "approved"
 
 

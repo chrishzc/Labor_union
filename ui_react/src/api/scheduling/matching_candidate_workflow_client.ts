@@ -135,6 +135,24 @@ function result<T>(schema: z.ZodType<T>, raw: unknown, code: string): T {
 }
 
 export const matchingCandidateWorkflowClient = {
+  async searchInquiryCandidates(
+    caseNo: string,
+    filters: MatchingFilterPolicy = defaultMatchingFilterPolicy,
+  ): Promise<MatchingAvailability> {
+    const canonical = canonicalCaseNo(caseNo);
+    const data = result(
+      AvailabilitySchema,
+      await transport.post(
+        `/api/v1/orders/${encodeURIComponent(canonical)}/candidate-contact-pool/availability/search`,
+        { segment_count: 1, segment_drafts: [], as_of: new Date().toISOString().slice(0, 10), filters: MatchingFilterPolicySchema.parse(filters) },
+        authOptions(),
+      ),
+      'CANDIDATE_INQUIRY_SEARCH_FAILED',
+    );
+    if (data.case_no !== canonical) throw new Error('候選詢問案件識別不一致。');
+    return data;
+  },
+
   async searchSegmentedCaregivers(
     caseNo: string,
     segmentCount: 1 | 2 | 3 | 4,

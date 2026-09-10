@@ -483,6 +483,7 @@ Modules：
 正式環境：
 
 - internal key 缺設定 fail closed；
+- 管理帳號建立（含 root bootstrap）及密碼重設的最低密碼長度為 10 個字元；既有密碼 hash 與登入驗證不需重建。此最低長度依 2026-09-10 人工指示調整，不改動 MFA 或 root 權限要求；
 - Bearer session 必須存在、有效、未撤銷且 user enabled；
 - 原始 token 只回傳一次，DB 只保存 hash；
 - session 不設閒置期限；有效請求只保留其既有 absolute deadline，首次登入起最多 8 小時；到達

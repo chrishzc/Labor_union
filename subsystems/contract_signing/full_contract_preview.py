@@ -53,7 +53,10 @@ class FullContractOwnerProjection:
         if not isinstance(self.scope, ContractPreviewScope):
             raise TypeError("contract preview scope is invalid")
         if self.scope is ContractPreviewScope.STAFF:
-            require_positive_integer(self.assignment_id, "assignment id")
+            if self.assignment_id is None:
+                require_positive_integer(self.facts.get("matching_segment_id"), "matching segment id")
+            else:
+                require_positive_integer(self.assignment_id, "assignment id")
         elif self.assignment_id is not None:
             raise ValueError("client preview must not contain assignment id")
         if not isinstance(self.facts, Mapping):
@@ -160,6 +163,14 @@ class FullContractPreviewApplication:
         facts["__today__"] = snapshot_date
         mapping_path = approved_template_mapping_path(template_key)
         blockers = _mapping_blockers(template_key, mapping_path, facts)
+        if not blockers:
+            from subsystems.contract_signing.contract_renderer import external_formula_cells, render_contract_template
+            content = render_contract_template(
+                template_path=mapping_path.parent / template.template_filename,
+                mapping_path=mapping_path, facts=facts,
+            )
+            if external_formula_cells(content):
+                blockers = ("contract_pdf_external_reference_unresolved",)
         field_values = _mapped_field_values(mapping_path, facts)
         fingerprint = fingerprint_payload(
             {

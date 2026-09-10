@@ -25,6 +25,17 @@ _APPROVED_TEMPLATE_IDS = frozenset(
     {"contract_client_copy", "contract_staff_service"}
 )
 _MAPPING_REQUIREDNESS = frozenset({"required", "conditional", "optional"})
+_EXTERNAL_WORKBOOK_REFERENCE = re.compile(r"\[\d+\]")
+
+
+def external_formula_cells(content: bytes) -> tuple[str, ...]:
+    """Detect unresolved external workbook links before an office engine runs."""
+    workbook = load_workbook(BytesIO(content), read_only=True, data_only=False)
+    try:
+        return tuple(f"{sheet.title}!{cell.coordinate}" for sheet in workbook for row in sheet
+                     for cell in row if cell.data_type == 'f' and _EXTERNAL_WORKBOOK_REFERENCE.search(str(cell.value)))
+    finally:
+        workbook.close()
 
 
 class ContractRendererError(RuntimeError):
@@ -120,8 +131,27 @@ def render_contract_template(
             "契約 PDF 欄位映射格式無效。",
         )
     approved_template = mapping.get("id") in _APPROVED_TEMPLATE_IDS
-    workbook = load_workbook(template_path)
+    # Old external-link caches include unrelated historical order data. They
+    # must not be copied into newly archived contract sources.
+    workbook = load_workbook(template_path, keep_links=False)
     worksheet = workbook.active
+    # Approved static contract wording is versioned with the mapping digest.
+    # It replaces the old workbook's missing catalogue links, not owner facts.
+    static_cells = mapping.get('static_cells', {})
+    if not isinstance(static_cells, dict):
+        raise ContractRendererError('contract_pdf_mapping_invalid', '契約固定內容格式無效。')
+    for cell, value in static_cells.items():
+        if not isinstance(cell, str) or not re.fullmatch(r'[A-Z]{1,3}[1-9][0-9]{0,6}', cell) or not isinstance(value, str) or cell in mapping['param_mappings']:
+            raise ContractRendererError('contract_pdf_mapping_invalid', '契約固定內容格式無效。')
+        worksheet[cell] = value
+        worksheet[cell].data_type = 's'
+    row_heights = mapping.get('row_heights', {})
+    if not isinstance(row_heights, dict):
+        raise ContractRendererError('contract_pdf_mapping_invalid', '契約列高設定無效。')
+    for row, height in row_heights.items():
+        if not str(row).isdigit() or not 1 <= int(row) <= 1048576 or isinstance(height, bool) or not isinstance(height, (int, float)) or not 0 < height <= 409:
+            raise ContractRendererError('contract_pdf_mapping_invalid', '契約列高設定無效。')
+        worksheet.row_dimensions[int(row)].height = height
     for cell, descriptor in mapping["param_mappings"].items():
         if not isinstance(descriptor, dict):
             raise ContractRendererError(
@@ -146,6 +176,7 @@ def render_contract_template(
                 requiredness == "conditional"
                 and not mapping_is_applicable(descriptor, facts)
             ):
+                worksheet[cell] = None
                 continue
             raise ContractRendererError(
                 "contract_pdf_required_mapping_unresolved",
@@ -167,6 +198,7 @@ def render_contract_template(
                     "contract_pdf_required_mapping_missing",
                     "契約 PDF 欄位缺少核准的 typed owner source。",
                 )
+            worksheet[cell] = None
             continue
         value = facts[key]
         target = worksheet[cell]

@@ -102,7 +102,7 @@ describe('待辦看板依目前狀態整合歷史訂單', () => {
     expect(await screen.findByText('CASE-C')).toBeInTheDocument();
     expect(screen.getByText('CASE-D')).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: '13 個核心訂單階段' })).not.toBeInTheDocument();
-    expect(mocks.core).toHaveBeenLastCalledWith(expect.objectContaining({ workbench_scope: 'completed', stage: undefined, substatus_code: undefined }), expect.any(Object));
+    expect(mocks.core).toHaveBeenLastCalledWith(expect.objectContaining({ workbench_scope: 'completed', stage: undefined }), expect.any(Object));
     fireEvent.click(screen.getByRole('button', { name: '取消訂單' }));
     await waitFor(() => expect(mocks.core).toHaveBeenLastCalledWith(expect.objectContaining({ workbench_scope: 'cancelled', stage: undefined }), expect.any(Object)));
     expect(screen.queryByRole('region', { name: '13 個核心訂單階段' })).not.toBeInTheDocument();

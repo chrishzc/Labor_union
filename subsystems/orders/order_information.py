@@ -168,6 +168,44 @@ class OrderInformationQueryService:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class CandidateInformationPreview:
+    case_no: str
+    candidate_id: int
+    info_type: int
+    staff_name: str
+    text: str
+    preview_fingerprint: str
+
+
+def build_candidate_information(case_no, candidate_id, info_type, facts, field_issues, recipient_identity):
+    """Reuse sheet projection without inventing an assignment or payroll fact."""
+    require_canonical_text(case_no, "case number", 50)
+    require_positive_integer(candidate_id, "candidate id")
+    if info_type not in (1, 2):
+        raise ValueError("info_type_invalid")
+    template = OrderInformationTemplate.INFO_01 if info_type == 1 else OrderInformationTemplate.INFO_02
+    fields, blockers = _project_fields(template, facts, field_issues)
+    if "order_information_template_invalid" in blockers:
+        raise ValueError("order_information_template_invalid")
+    lines = [f"訂單資訊－{info_type}", "初步接案意願詢問；日期為預計期間，未確認需求請再與工會確認。"]
+    labels = {"f_104_c4": "預計服務開始日期", "f_105_c5": "預計服務結束日期", "f_106_c6": "每日服務時數"}
+    for item in fields:
+        value = "待確認" if item.status in {"missing", "unresolved", "absent"} or _is_missing(item.value) else str(_fingerprint_value(item.value))
+        lines.append(f"{labels.get(item.field_id, item.label)}：{value}")
+    if info_type == 2:
+        lines.extend(("食材準備參考（請另確認需求，非全部必購）：",
+                      "中藥／食材：四物、四君、四神、枸杞、紅棗、黃耆、杜仲、大豐草、黑豆、紅豆、白木耳、紫米、桂圓肉、米酒、麻油",
+                      "肉品：雞腿、雞胸、排骨、豬／牛肉絲、絞肉、雞蛋、魚排",
+                      "蔬菜：青菜、紅蘿蔔、薑、香菇、其他菇類、豆製品"))
+    text = "\n".join(lines)
+    if len(text.encode("utf-16-le")) // 2 > 5000:
+        raise ValueError("candidate_information_message_too_long")
+    fingerprint = projection_fingerprint({"case_no": case_no, "candidate_id": candidate_id,
+                                          "info_type": info_type, "text": text, "recipient": recipient_identity})
+    return CandidateInformationPreview(case_no, candidate_id, info_type, str(facts["staff_name"]), text, fingerprint)
+
+
 def _project_fields(
     template: OrderInformationTemplate,
     facts: Mapping[str, object],

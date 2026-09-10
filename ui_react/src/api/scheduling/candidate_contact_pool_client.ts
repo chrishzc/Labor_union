@@ -126,6 +126,11 @@ const mutationEnvelope = <TSchema extends z.ZodTypeAny>(schema: TSchema) => z.st
 });
 
 export type CandidateContactPool = z.infer<typeof CandidateContactPoolSchema>;
+const InformationPreviewSchema = z.strictObject({
+  case_no: z.string().min(1), candidate_id: z.number().int().positive(), info_type: z.union([z.literal(1), z.literal(2)]),
+  staff_name: z.string().min(1), text: z.string().min(1), preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+});
+export type CandidateInformationPreview = z.infer<typeof InformationPreviewSchema>;
 export type SendCandidateInformationResult = z.infer<typeof SendCandidateInformationResultSchema>;
 export type AddCandidatesResult = z.infer<typeof AddCandidatesResultSchema>;
 export type CandidateWillingnessResult = z.infer<typeof CandidateWillingnessResultSchema>;
@@ -265,10 +270,23 @@ export const candidateContactPoolClient = {
     return envelope.data;
   },
 
+  async previewInformation(caseNo: string, candidateId: number, infoType: 1 | 2): Promise<CandidateInformationPreview> {
+    const canonical = canonicalCaseNo(caseNo);
+    const { token } = mutationIdentity();
+    const envelope = decodePayload(mutationEnvelope(InformationPreviewSchema), await transport.get(
+      `/api/v1/orders/${encodeURIComponent(canonical)}/candidate-contact-pool/candidates/${candidateId}/information/preview?info_type=${infoType}`, { token }));
+    if (!envelope.success || !envelope.data) throw new Error('無法讀取寄送內容。');
+    const data = envelope.data;
+    if (data.case_no !== canonical || data.candidate_id !== candidateId || data.info_type !== infoType) throw new Error('寄送預覽對象不一致。');
+    return data;
+  },
+
   async sendInformation(
     caseNo: string,
     candidateId: number,
     infoType: 1 | 2,
+    previewFingerprint: string,
+    eventKey: string,
   ): Promise<SendCandidateInformationResult> {
     const canonicalCaseNo = caseNo.trim();
     const actor = sessionClient.getUser()?.username.trim() ?? '';
@@ -289,7 +307,8 @@ export const candidateContactPoolClient = {
         {
           info_type: infoType,
           actor,
-          event_key: `orders-candidate-info-${infoType}-${candidateId}-${crypto.randomUUID()}`,
+          preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/).parse(previewFingerprint),
+          event_key: z.string().min(1).max(100).parse(eventKey),
         },
         { token },
       ),

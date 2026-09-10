@@ -1911,6 +1911,7 @@ export const SchedulingPage: React.FC = () => {
   const mountedRef = useRef(true);
   const directoryControllerRef = useRef<AbortController | null>(null);
   const directoryPendingCursorRef = useRef<number | null>(null);
+  const directorySentinelRef = useRef<HTMLDivElement | null>(null);
   const calendarControllerRef = useRef<AbortController | null>(null);
   const caseOptionsControllerRef = useRef<AbortController | null>(null);
   const assignmentOptionsByStaffRef = useRef(new Map<number, readonly StaffAssignmentOption[]>());
@@ -1951,6 +1952,7 @@ export const SchedulingPage: React.FC = () => {
     setDirectoryError(null);
     setDirectoryNextPageError(null);
     setDirectoryNextCursor(null);
+    setDirectoryLoadingMore(false);
     directoryPendingCursorRef.current = null;
 
     try {
@@ -1976,7 +1978,7 @@ export const SchedulingPage: React.FC = () => {
     }
   }, []);
 
-  const loadNextDirectoryPage = async () => {
+  const loadNextDirectoryPage = useCallback(async () => {
     const cursor = directoryNextCursor;
     if (cursor === null || directoryPendingCursorRef.current === cursor) return;
     directoryControllerRef.current?.abort();
@@ -2008,7 +2010,18 @@ export const SchedulingPage: React.FC = () => {
         setDirectoryLoadingMore(false);
       }
     }
-  };
+  }, [directoryNextCursor]);
+
+  useEffect(() => {
+    const sentinel = directorySentinelRef.current;
+    if (activeTab !== 'calendar' || !sentinel || directoryLoading || directoryLoadingMore
+      || directoryNextPageError || directoryNextCursor === null) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) void loadNextDirectoryPage();
+    }, { rootMargin: '0px 0px 240px 0px' });
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [activeTab, directoryLoading, directoryLoadingMore, directoryNextPageError, directoryNextCursor, loadNextDirectoryPage]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2638,22 +2651,6 @@ export const SchedulingPage: React.FC = () => {
               <button onClick={() => void loadDirectory()}>重試摘要查詢</button>
             </div>
           )}
-          {directoryNextPageError && (
-            <div className="scheduling-status error" role="alert">
-              下一頁服務人員摘要載入失敗：{directoryNextPageError}
-            </div>
-          )}
-          {!directoryLoading && directoryNextCursor !== null && (
-            <button
-              type="button"
-              data-control-id="scheduling.staff.next-page"
-              className="scheduling-load-more"
-              disabled={directoryLoadingMore}
-              onClick={() => void loadNextDirectoryPage()}
-            >
-              {directoryLoadingMore ? '正在載入更多服務人員…' : '載入更多服務人員'}
-            </button>
-          )}
           {calendarLoading && (
             <div className="scheduling-status" role="status">正在載入排班月曆…</div>
           )}
@@ -2828,6 +2825,18 @@ export const SchedulingPage: React.FC = () => {
               </div>
             </div>
             </>
+          )}
+          {!directoryLoading && directoryNextCursor !== null && (
+            <div ref={directorySentinelRef} className="scheduling-status" data-control-id="scheduling.staff.next-page">
+              {directoryNextPageError ? (
+                <div role="alert">
+                  <p>更多月嫂暫時無法載入，已載入的班表仍可查看。</p>
+                  <button type="button" onClick={() => void loadNextDirectoryPage()}>重試載入月嫂</button>
+                </div>
+              ) : (
+                <p role="status">{directoryLoadingMore ? '正在載入更多月嫂…' : '向下捲動會自動載入更多月嫂。'}</p>
+              )}
+            </div>
           )}
         </section>
       )}

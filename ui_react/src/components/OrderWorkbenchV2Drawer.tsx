@@ -2,15 +2,12 @@ import type { OrderWorkbenchScope } from '../api/orders/order_core_stage_project
 import { useCallback, useEffect, useRef, useState, type FC } from 'react';
 import './OrderWorkbenchV2Drawer.css';
 import '../pages/OrdersPage.css';
-import { Drawer } from './Drawer';
 import { historicalAdoptionEvidenceClient } from '../api/orders/historical_adoption_evidence_client';
 import type { HistoricalOrderAdoptionEvidence } from '../api/orders/historical_adoption_evidence_schemas';
 import {
   historicalServiceAccountingClient,
   type HistoricalServiceAccountingQuery,
 } from '../api/orders/historical_service_accounting_client';
-import { historicalOperationalBaselineClient } from '../api/orders/historical_operational_baseline_client';
-import type { HistoricalOperationalBaseline } from '../api/orders/historical_operational_baseline_schemas';
 import { orderCoreStageProjectionClient } from '../api/orders/order_core_stage_projection_client';
 import type {
   CoreStageBranchType,
@@ -35,6 +32,8 @@ import { ServiceBeforeReplacementActions } from './ServiceBeforeReplacementActio
 import { OrderCancellationPanel } from './OrderCancellationPanel';
 import { OrderControlledReopenPanel } from './OrderControlledReopenPanel';
 import { OrderActualStartPanel } from './OrderActualStartPanel';
+import { OrderInformationSheets } from './OrderInformationSheets';
+import { OrderContractPreview } from './OrderContractPreview';
 
 interface OrderWorkbenchV2DrawerProps {
   caseNo: string;
@@ -42,6 +41,7 @@ interface OrderWorkbenchV2DrawerProps {
   workbenchScope?: OrderWorkbenchScope;
   onClose: () => void;
   onObserved?: () => void;
+  initialView?: 'work' | 'data';
 }
 
 type ReadState<T> =
@@ -56,7 +56,18 @@ type HistoricalRestartState =
   | { status: 'completed'; message: string }
   | { status: 'error'; message: string };
 
-type DrawerTab = 'work' | 'progress' | 'source';
+type DrawerTab = 'work' | 'data' | 'changes';
+
+const WORK_GROUPS = [
+  { id: 'intake', title: '進件資料', description: '確認基本服務需求；待補資料與可先辦事項分開處理。', stages: ['intake_validation'] },
+  { id: 'matching', title: '候選與詢問', description: '選擇月嫂、分開提供訂單資訊，再記錄接案意願。', stages: ['matching_pool', 'caregiver_line_delivery', 'caregiver_willingness_reply'] },
+  { id: 'recommendation', title: '推薦確認', description: '將願意承接的人選推薦給客戶，確認服務方案。', stages: ['formal_recommendation'] },
+  { id: 'contracts', title: '契約與文件', description: '核對客戶與月嫂契約，辦理送簽與簽回文件。', stages: ['external_signing_dispatch', 'external_signing_completion'] },
+  { id: 'service', title: '服務安排', description: '確認實際服務日期、排班與完工；換人及日期異動另由案件異動辦理。', stages: ['confirmed_service_dates', 'formal_service', 'service_completion'] },
+  { id: 'finance', title: '收款與結算', description: '查看訂金、客戶收款及月嫂付款；核銷統一由帳務中心處理。', stages: ['deposit_settlement', 'client_settlement', 'staff_payout'] },
+] as const;
+type WorkGroup = typeof WORK_GROUPS[number]['id'];
+
 
 const loading = <T,>(): ReadState<T> => ({ status: 'loading' });
 
@@ -91,23 +102,13 @@ function evidencePeriod(evidence: HistoricalOrderAdoptionEvidence): string {
   return `${evidence.source_start_date ?? '開始日未保留'} → ${evidence.source_end_date ?? '結束日未保留'}`;
 }
 
-function baselineSkippedSteps(baseline: HistoricalOperationalBaseline): readonly number[] {
-  const selected = baseline.current_baseline?.selected_step ?? null;
-  return selected === null
-    ? []
-    : Array.from({ length: Math.max(0, selected - 1) }, (_, index) => index + 1);
-}
-
-function lineageIdentity(identity: string | null): string {
-  return identity ?? '無 identity';
-}
-
 export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
   caseNo,
   branchType,
   workbenchScope = 'in_progress',
   onClose,
   onObserved,
+  initialView = 'work',
 }) => {
   const requestSequence = useRef(0);
   const [refreshRevision, setRefreshRevision] = useState(0);
@@ -122,11 +123,17 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
   const [historicalAccounting, setHistoricalAccounting] = useState<ReadState<HistoricalServiceAccountingQuery>>(
     () => branchType === 'historical' ? loading<HistoricalServiceAccountingQuery>() : { status: 'skipped' },
   );
-  const [historicalBaseline, setHistoricalBaseline] = useState<ReadState<HistoricalOperationalBaseline>>(
-    () => branchType === 'historical' ? loading<HistoricalOperationalBaseline>() : { status: 'skipped' },
-  );
   const [historicalRestart, setHistoricalRestart] = useState<HistoricalRestartState>({ status: 'idle', message: null });
-  const [drawerTab, setDrawerTab] = useState<DrawerTab>('work');
+  const [drawerTab, setDrawerTab] = useState<DrawerTab>(initialView);
+  const [selectedGroup, setSelectedGroup] = useState<WorkGroup | null>(null);
+  const [visitedGroups, setVisitedGroups] = useState<WorkGroup[]>([]);
+  const [matchingView, setMatchingView] = useState<'list' | 'search' | 'information'>('list');
+  const [informationKind, setInformationKind] = useState<1 | 2>(1);
+  const [serviceView, setServiceView] = useState<'dates' | 'assignment' | 'completion'>('dates');
+  const [contractView, setContractView] = useState<'overview' | 'signing'>('signing');
+  const [signingOpened, setSigningOpened] = useState(true);
+  const pageHeadingRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => { pageHeadingRef.current?.focus(); }, [caseNo]);
   const [replacementExpanded, setReplacementExpanded] = useState(false);
   const [operation, setOperation] = useState<'cancellation' | 'reopen' | 'actual-start' | null>(null);
   const [operationBusy, setOperationBusy] = useState(false);
@@ -149,7 +156,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
     const controller = new AbortController();
     const current = () => !controller.signal.aborted && requestSequence.current === requestId;
     setFactsRefreshing(true);
-    let pendingReads = branchType === 'historical' ? 7 : 4;
+    let pendingReads = branchType === 'historical' ? 6 : 4;
     const finished = () => {
       pendingReads -= 1;
       if (pendingReads === 0 && current()) setFactsRefreshing(false);
@@ -162,7 +169,6 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
       setAssignmentPlan(loading());
       setHistoricalEvidence(branchType === 'historical' ? loading() : { status: 'skipped' });
       setHistoricalAccounting(branchType === 'historical' ? loading() : { status: 'skipped' });
-      setHistoricalBaseline(branchType === 'historical' ? loading() : { status: 'skipped' });
       setHistoricalRestart({ status: 'idle', message: null });
       setReplacementExpanded(false);
     }
@@ -200,10 +206,6 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
         .then((data) => { if (current()) setHistoricalEvidence({ status: 'ready', data }); })
         .catch((error) => { if (current()) setHistoricalEvidence({ status: 'error', message: errorMessage(error) }); })
         .finally(finished);
-      void historicalOperationalBaselineClient.queryByCase(caseNo, { signal: controller.signal })
-        .then((data) => { if (current()) setHistoricalBaseline({ status: 'ready', data }); })
-        .catch((error) => { if (current()) setHistoricalBaseline({ status: 'error', message: errorMessage(error) }); })
-        .finally(finished);
     }
 
     return () => {
@@ -223,7 +225,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
       const preview = await historicalServiceAccountingClient.previewPrecisionRestart(caseNo);
       const receipt = await historicalServiceAccountingClient.applyPrecisionRestart(
         preview,
-        '工會人員從待辦看板 Beta 工作 Drawer 選擇重啟正常流程',
+        '工會人員從案件處理頁 選擇重啟正常流程',
       );
       if (receipt.lifecycle_status !== '訂單成立') {
         throw new Error('重啟後狀態不是正常「訂單成立」，已停止後續操作。');
@@ -236,8 +238,8 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
       setHistoricalRestart({
         status: 'completed',
         message: receipt.replayed
-          ? '此案件先前已重啟正常流程；正式回讀已確認為「訂單成立」。請關閉 Drawer 後從正常訂單支線繼續。'
-          : '已重啟正常流程並回讀確認為「訂單成立」。請關閉 Drawer 後從正常訂單支線繼續日期／媒合／排班。',
+          ? '此案件先前已重啟正常流程；正式回讀已確認為「訂單成立」。請返回待辦看板後繼續。'
+          : '已重啟正常流程並回讀確認為「訂單成立」。請返回待辦看板後繼續日期／媒合／排班。',
       });
       refreshFacts();
     } catch (error) {
@@ -248,6 +250,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
   const blockers = timeline.status === 'ready'
     ? timeline.data.core_stages.flatMap((stage) => stage.blockers.map((notice) => ({
       key: `${stage.code}:${notice.code}`,
+      stageCode: stage.code,
       stage: stage.label,
       message: notice.message,
     })))
@@ -255,6 +258,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
   const warnings = timeline.status === 'ready'
     ? timeline.data.core_stages.flatMap((stage) => stage.warnings.map((notice) => ({
       key: `${stage.code}:${notice.code}`,
+      stageCode: stage.code,
       stage: stage.label,
       message: notice.message,
     })))
@@ -263,7 +267,6 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
     ? historicalCurrentOwnerStage(timeline.data)
     : null;
   const terminalStatus = timeline.status === 'ready' && ['訂單完成', '訂單取消', '歷史訂單－服務完成', '歷史訂單－帳務完成'].includes(timeline.data.lifecycle_status);
-  const showProgress = !terminalStatus && workbenchScope !== 'completed' && workbenchScope !== 'cancelled';
   const currentBranch = timeline.status === 'ready' ? timeline.data.branch_type : branchType;
   const intakeOrderStatus = timeline.status === 'ready'
     ? timeline.data.lifecycle_status
@@ -272,129 +275,107 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
     ? timeline.data.current_core_stage_code
     : null;
   const currentStage = currentStageCode === null ? null : coreStageDefinition(currentStageCode);
-  const currentStageProjection = timeline.status === 'ready' && currentStageCode !== null
-    ? timeline.data.core_stages.find((stage) => stage.code === currentStageCode) ?? null
-    : null;
-  const hasInlineStageAction = currentStageCode !== null && [
-    'intake_validation',
-    'matching_pool',
-    'caregiver_line_delivery',
-    'caregiver_willingness_reply',
-    'formal_recommendation',
-    'external_signing_dispatch',
-    'external_signing_completion',
-    'confirmed_service_dates',
-    'formal_service',
-    'service_completion',
-  ].includes(currentStageCode);
+  const currentGroup = terminalStatus ? 'finance' : WORK_GROUPS.find((group) => (group.stages as readonly string[]).includes(currentStageCode ?? ''))?.id ?? 'intake';
+  const activeGroup = selectedGroup ?? currentGroup;
+  useEffect(() => {
+    if (timeline.status === 'ready') setSelectedGroup((previous) => previous ?? currentGroup);
+  }, [timeline.status, currentGroup]);
+  const groupDefinition = WORK_GROUPS.find((group) => group.id === activeGroup)!;
+  const openGroup = (group: WorkGroup) => {
+    setVisitedGroups((previous) => Array.from(new Set([...previous, activeGroup, group])));
+    setSelectedGroup(group);
+  };
+  const navigationLocked = operationBusy || historicalRestart.status === 'applying';
+  const selectedTitle = drawerTab === 'data' ? '訂單與服務資料' : drawerTab === 'changes' ? '案件異動' : '案件處理';
 
   return (
-    <Drawer
-      isOpen
-      onClose={guardedClose}
-      closeDisabled={operationBusy}
-      size="xl"
-      title={`案件 ${caseNo}`}
-      ariaLabel={`案件 ${caseNo}`}
-      closeLabel="關閉工作 Drawer"
-      className="order-v2-drawer-backdrop"
-    >
-      <div className="order-v2-drawer-content" data-active-tab={drawerTab}>
-        <p className="order-v2-drawer-intro">查看案件資料、服務安排與作業進度。</p>
-        <nav className="order-v2-drawer-tabs" role="tablist" aria-label="案件工作分頁">
-          <button
-            id="order-v2-drawer-tab-work"
-            type="button"
-            role="tab"
-            aria-selected={drawerTab === 'work'}
-            aria-controls="order-v2-drawer-tabpanel"
-            className={drawerTab === 'work' ? 'active' : ''}
-            onClick={() => setDrawerTab('work')}
-          >
-            案件處理
-          </button>
-          <button
-            id="order-v2-drawer-tab-progress"
-            type="button"
-            role="tab"
-            aria-selected={drawerTab === 'progress'}
-            aria-controls="order-v2-drawer-tabpanel"
-            className={drawerTab === 'progress' ? 'active' : ''}
-            onClick={() => setDrawerTab('progress')}
-          >
-            進度與提醒
-          </button>
-          <button
-            id="order-v2-drawer-tab-source"
-            type="button"
-            role="tab"
-            aria-selected={drawerTab === 'source'}
-            aria-controls="order-v2-drawer-tabpanel"
-            className={drawerTab === 'source' ? 'active' : ''}
-            onClick={() => setDrawerTab('source')}
-          >
-            {branchType === 'historical' ? '歷史與來源' : '資料來源'}
-          </button>
+    <div className="order-case-page" role="region" aria-label={`案件 ${caseNo}`}>
+      <header className="order-case-header">
+        <button type="button" className="order-case-back" disabled={navigationLocked} onClick={guardedClose}>← 返回待辦看板</button>
+        <div className="order-case-heading-row">
+          <div><p className="order-case-eyebrow">案件 {caseNo}</p><h1 ref={pageHeadingRef} tabIndex={-1}>{selectedTitle}</h1></div>
+          <span className="order-case-lifecycle">{intakeOrderStatus ?? '讀取案件中'}</span>
+        </div>
+        <p className="order-case-purpose">{drawerTab === 'data' ? '查閱客戶、約定條款與服務安排，不在此頁執行案件流程。' : drawerTab === 'changes' ? '選擇需要辦理的異動，核對影響後再確認。' : '選擇要辦理的工作；目前進度提供指引，不限制可獨立處理的事項。'}</p>
+        <div className="order-case-context">
+          <span><small>客戶</small>{detail.status === 'ready' ? detail.data.client_name || '未登錄' : '讀取中'}</span>
+          <span><small>約定服務</small>{terms.status === 'ready' ? terms.data.terms.planned_start_date : '讀取中'}</span>
+          <span><small>服務量</small>{terms.status === 'ready' ? `${terms.data.terms.service_days} 日 · 每日 ${terms.data.terms.service_hours_per_day} 小時` : '讀取中'}</span>
+        </div>
+        <nav className="order-case-view-nav" aria-label="案件頁面">
+          {([['work', '案件處理'], ['data', '訂單與服務資料'], ['changes', '案件異動']] as const).map(([id, label]) => (
+            <button type="button" key={id} aria-current={drawerTab === id ? 'page' : undefined} disabled={navigationLocked} onClick={() => setDrawerTab(id)}>{label}</button>
+          ))}
         </nav>
-        <div
-          id="order-v2-drawer-tabpanel"
-          className="order-v2-drawer-tab-panel"
-          role="tabpanel"
-          aria-labelledby={`order-v2-drawer-tab-${drawerTab}`}
-        >
+      </header>
+      {factsRefreshing && <p role="status" className="order-case-read-status">正在更新案件資料…</p>}
+      {timeline.status === 'error' && <div role="alert" className="order-v2-drawer-error">案件進度暫時無法取得，請稍後重新整理。</div>}
+      <div hidden={drawerTab !== 'work'} className="order-case-workspace">
+        <aside className="order-case-stepper" aria-label="案件分步流程">
+          <h2>辦理事項</h2><p>依工作切換，不會變更案件進度。</p>
+          <ol>
+            {WORK_GROUPS.map((group, index) => (
+              <li key={group.id}>
+                <button type="button" disabled={navigationLocked} className={group.id === activeGroup ? 'selected' : ''} aria-current={group.id === activeGroup ? 'page' : undefined} onClick={() => openGroup(group.id)}>
+                  <span className="order-case-step-number">{index + 1}</span>
+                  <span><strong>{group.title}</strong>{timeline.status === 'ready' && group.id === currentGroup && <small>目前待辦</small>}</span>
+                </button>
+              </li>
+            ))}
+          </ol>
+          {timeline.status === 'ready' && !terminalStatus && workbenchScope === 'in_progress' && <details className="order-case-progress"><summary>查看十三階段進度</summary><ol>{timeline.data.core_stages.map((stage) => <li key={stage.code}><span>{stage.ordinal}. {stage.label}</span><small>{stage.status === 'completed' ? '已完成' : stage.code === currentStageCode ? '目前待辦' : stage.status === 'unavailable' ? '暫無資料' : '尚未完成'}</small></li>)}</ol></details>}
+        </aside>
+        <div className="order-case-task-body">
+          <div className="order-case-work-heading"><div><p className="order-case-eyebrow">{currentStage ? `目前進度：${currentStage.label}` : '案件工作區'}</p><h2>{groupDefinition.title}</h2><p>{groupDefinition.description}</p></div></div>
         {currentBranch === 'normal' && workbenchScope === 'in_progress' && !terminalStatus && (
-          <section hidden={drawerTab !== 'work'} className="order-v2-drawer-current-task" aria-labelledby="order-v2-current-task-heading">
-            <header>
-              <span>目前待辦</span>
-              <div>
-                <h3 id="order-v2-current-task-heading">
-                  {currentStage ? `${currentStage.ordinal}. ${currentStage.label}` : '正在載入目前階段'}
-                </h3>
-                <p>{currentStageProjection ? coreStageSubstatusLabel(currentStageProjection.substatus_code) : '正在讀取正式階段狀態…'}</p>
-              </div>
-            </header>
+          <section className="order-v2-drawer-current-task" aria-label="案件工作內容">
+            {[...blockers, ...warnings].filter((notice) => (groupDefinition.stages as readonly string[]).includes(notice.stageCode)).map((notice) => <p className="order-case-review-note" key={notice.key} role="status"><strong>{notice.stage}</strong>：{notice.message}</p>)}
             <fieldset disabled={operationBusy || factsRefreshing}>
-              {currentStageCode === 'intake_validation' && intakeOrderStatus !== null && (
+              {(activeGroup === 'intake' || visitedGroups.includes('intake')) && <div hidden={activeGroup !== 'intake'}>
+              {intakeOrderStatus !== null && (
                 <OrderIntakeRepairPanel
                   caseNo={caseNo}
                   orderStatus={intakeOrderStatus}
                   onChanged={refreshFacts}
                 />
               )}
-              {currentStageCode === 'intake_validation' && terms.status === 'ready' && (
+              {terms.status === 'ready' && (
                 <OrderTermsMutationPanel caseNo={caseNo} query={terms.data} onObserved={refreshFacts} />
               )}
-              {currentStageCode === 'matching_pool' && (
-                <OrderCandidateQueryPanel caseNo={caseNo} onPoolReadback={refreshFacts} />
-              )}
-              {(currentStageCode === 'caregiver_line_delivery' || currentStageCode === 'caregiver_willingness_reply') && (
-                <OrderCandidateContactStatusPanel caseNo={caseNo} onObserved={refreshFacts} />
-              )}
-              {currentStageCode === 'formal_recommendation' && (
+              </div>}
+              {(activeGroup === 'matching' || visitedGroups.includes('matching')) && <div hidden={activeGroup !== 'matching'}>
+                <nav className="order-case-subnav" aria-label="候選與詢問工作"><button type="button" aria-pressed={matchingView === 'list'} onClick={() => setMatchingView('list')}>候選月嫂</button><button type="button" aria-pressed={matchingView === 'search'} onClick={() => setMatchingView('search')}>新增候選月嫂</button><button type="button" aria-pressed={matchingView === 'information'} onClick={() => setMatchingView('information')}>訂單資訊預覽</button></nav>
+                <div hidden={matchingView !== 'list'}><OrderCandidateContactStatusPanel caseNo={caseNo} revision={refreshRevision} onObserved={refreshFacts} onPreviewInformation={(kind) => { setInformationKind(kind); setMatchingView('information'); }} /></div>
+                <div hidden={matchingView !== 'search'}><h3>尋找合適的月嫂</h3><p>查詢後勾選人選，加入同一份候選清單。</p><OrderCandidateQueryPanel caseNo={caseNo} onPoolReadback={refreshFacts} /></div>
+                {matchingView === 'information' && <OrderInformationSheets caseNo={caseNo} initialKind={informationKind} assignments={assignmentPlan.status === 'ready' ? assignmentPlan.data.assignments : []} onOpenCandidates={() => setMatchingView('list')} />}
+              </div>}
+              {(activeGroup === 'recommendation' || visitedGroups.includes('recommendation')) && <div hidden={activeGroup !== 'recommendation'}>
                 <OrderFormalRecommendationPanel caseNo={caseNo} onObserved={refreshFacts} />
-              )}
-              {(currentStageCode === 'external_signing_dispatch'
-                || currentStageCode === 'external_signing_completion'
-                || currentStageCode === 'confirmed_service_dates') && (
-                <ContractExternalSigningActions caseNo={caseNo} onCommitted={refreshFacts} />
-              )}
-              {currentStageCode === 'confirmed_service_dates' && (
+              </div>}
+              {(activeGroup === 'contracts' || visitedGroups.includes('contracts')) && <div hidden={activeGroup !== 'contracts'}>
+                <nav className="order-case-subnav" aria-label="契約工作"><button type="button" aria-pressed={contractView === 'overview'} onClick={() => setContractView('overview')}>契約欄位預覽</button><button type="button" aria-pressed={contractView === 'signing'} onClick={() => { setSigningOpened(true); setContractView('signing'); }}>下載與簽回</button></nav>
+                <div hidden={contractView !== 'overview'}><OrderContractPreview caseNo={caseNo} /></div>
+                {signingOpened && <div hidden={contractView !== 'signing'}><ContractExternalSigningActions caseNo={caseNo} onCommitted={refreshFacts} /></div>}
+              </div>}
+              {(activeGroup === 'service' || visitedGroups.includes('service')) && <div hidden={activeGroup !== 'service'}>
+                <nav className="order-case-subnav" aria-label="服務工作"><button type="button" aria-pressed={serviceView === 'dates'} onClick={() => setServiceView('dates')}>確認日期</button><button type="button" aria-pressed={serviceView === 'assignment'} onClick={() => setServiceView('assignment')}>正式排班</button><button type="button" aria-pressed={serviceView === 'completion'} onClick={() => setServiceView('completion')}>完工確認</button></nav>
+                <div hidden={serviceView !== 'dates'}>
                 <OrderServiceDatesPanel caseNo={caseNo} onObserved={refreshFacts} />
-              )}
-              {currentStageCode === 'formal_service' && (
-                <OrderAssignmentPlanPanel caseNo={caseNo} onObserved={refreshFacts} />
-              )}
-              {currentStageCode === 'service_completion' && detail.status === 'ready' && (
+                </div><div hidden={serviceView !== 'assignment'}>
+                <OrderAssignmentPlanPanel caseNo={caseNo} onObserved={refreshFacts} onOpenReplacement={() => { setDrawerTab('changes'); setReplacementExpanded(true); }} />
+                </div><div hidden={serviceView !== 'completion'}>{detail.status === 'ready' && (
                 <OrderServiceCompletionActions caseNo={caseNo} orderStatus={detail.data.order_status} onCompleted={refreshFacts} />
-              )}
-              {currentStageCode !== null && !hasInlineStageAction && (
-                <p className="order-v2-drawer-note">此階段目前沒有可在待辦看板直接執行的操作；請依阻塞與提醒前往對應作業區。</p>
-              )}
+              )}</div></div>}
+              {activeGroup === 'finance' && <div className="order-case-document-grid"><article><h3>訂金與客戶收款</h3><p>核對訂金、各期款與退款。正常收款依銀行流水核銷。</p><a href={`#finance?tab=client-receipts&case_no=${encodeURIComponent(caseNo)}`}>查看本案客戶收款 →</a></article><article><h3>月嫂付款與結案</h3><p>前往帳務頁選擇月嫂，再核對應付與付款紀錄。</p><a href="#finance?tab=staff-payables">前往月嫂付款 →</a></article><p className="order-case-review-note">銀行流水如需人工核對，請在帳務頁預覽更正內容後確認核銷。</p></div>}
             </fieldset>
           </section>
         )}
+        {terminalStatus && timeline.status === 'ready' && <section className="order-v2-drawer-section" aria-label="結算狀態">
+          <h3>結算狀態</h3>
+          {timeline.data.core_stages.filter((stage) => stage.code === 'client_settlement' || stage.code === 'staff_payout').map((stage) => <p key={stage.code}>{stage.label}：{coreStageSubstatusLabel(stage.substatus_code)}</p>)}
+        </section>}
         {currentBranch === 'historical' && (intakeOrderStatus === '歷史訂單－未服務' || intakeOrderStatus === '歷史訂單－服務中') && (
-          <section hidden={drawerTab !== 'work'} className="order-v2-drawer-current-task" aria-label="歷史訂單精算天數重啟">
+          <section  className="order-v2-drawer-current-task" aria-label="歷史訂單精算天數重啟">
             <header>
               <span>歷史案件操作</span>
               <div>
@@ -414,59 +395,51 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
             </fieldset>
           </section>
         )}
-        <div className="order-v2-drawer-columns">
-        <div className="order-v2-drawer-main">
-          {factsRefreshing && <p role="status">正在更新正式案件資料；保留目前面板狀態。</p>}
-          <section hidden={drawerTab !== 'work'} className="order-v2-drawer-section" aria-labelledby="order-v2-current-facts">
-            <h3 id="order-v2-current-facts">案件與服務資料</h3>
-            <div className="matching-facts-bar order-v2-drawer-fact-grid">
-              <article>
-                <h4>案件／客戶</h4>
-                {detail.status === 'loading' && <p>載入正式案件資料…</p>}
-                {detail.status === 'error' && <p className="order-v2-drawer-error">案件資料不可用：{detail.message}</p>}
-                {detail.status === 'ready' && (
-                  <dl>
-                    <div><dt>客戶</dt><dd>{detail.data.client_name || '未登錄'}</dd></div>
-                    <div><dt>客戶 ID</dt><dd>{detail.data.client_id}</dd></div>
-                    <div><dt>訂單狀態</dt><dd>{detail.data.order_status}</dd></div>
-                    <div><dt>身分類別</dt><dd>{detail.data.identity_status ?? '未登錄'}</dd></div>
-                    <div><dt>實際開始</dt><dd>{detail.data.actual_start_date ?? '尚未確認'}</dd></div>
-                  </dl>
-                )}
-              </article>
-              <article aria-label="正式服務期間">
-                <h4>正式服務條款</h4>
-                {terms.status === 'loading' && <p>正在讀取服務條款…</p>}
-                {terms.status === 'error' && <p className="order-v2-drawer-error">正式服務條款不可用：{terms.message}</p>}
-                {terms.status === 'ready' && (
-                  <dl>
-                    <div><dt>計畫開始</dt><dd>{terms.data.terms.planned_start_date}</dd></div>
-                    <div><dt>合約服務</dt><dd>{terms.data.terms.service_days} 日</dd></div>
-                    <div><dt>每日時數</dt><dd>{terms.data.terms.service_hours_per_day} 小時</dd></div>
-                  </dl>
-                )}
-                <details className="order-v2-drawer-technical">
-                  <summary>條款版本與資料說明</summary>
-                  {terms.status === 'ready' && (
-                    <dl>
-                      <div><dt>Order version</dt><dd>{terms.data.order_version}</dd></div>
-                      <div><dt>Scheduling version</dt><dd>{terms.data.scheduling_version}</dd></div>
-                    </dl>
-                  )}
-                  <p className="order-v2-drawer-note">`actual_start_date` 僅代表實際開始，不作為完整服務區間。</p>
-                  <p className="order-v2-drawer-note">historical source period 是來源 evidence，不用來推導目前 lifecycle。</p>
-                </details>
-              </article>
-            </div>
-          </section>
 
-          <div hidden={drawerTab !== 'work'}>
-            <OrderWorkbenchV2OwnerContext key={caseNo} caseNo={caseNo} revision={refreshRevision} />
-          </div>
-
-          {(!terminalStatus || currentBranch === 'cancelled') && <details hidden={drawerTab !== 'work'} className="order-v2-drawer-section order-v2-more-actions">
-            <summary>更多操作</summary>
-            <p className="order-v2-drawer-note">低頻案件維護操作會先顯示目前條件，再進入預覽與確認。</p>
+          {terminalStatus && <section className="order-v2-drawer-section"><h2>案件處理紀錄</h2><p>此案件目前為「{intakeOrderStatus}」，請由左側流程查閱各步驟狀態，或前往訂單與服務資料。</p></section>}
+          {currentBranch === 'historical' && currentHistoricalOwner && <section className="order-v2-drawer-section"><h2>歷史案件目前進度</h2><p>{currentHistoricalOwner.label}：{coreStageSubstatusLabel(currentHistoricalOwner.substatus_code)}</p></section>}
+          {historicalRestart.message && <p role={historicalRestart.status === 'error' ? 'alert' : 'status'}>{historicalRestart.message}</p>}
+        </div>
+      </div>
+      <div hidden={drawerTab !== 'data'} className="order-case-data-grid">
+        <section className="order-v2-drawer-section"><h2>客戶與訂單</h2>
+          {detail.status === 'error' && <p role="alert">客戶與訂單資料暫時無法取得。</p>}
+          {detail.status === 'ready' && <dl className="order-case-facts">
+            <div><dt>客戶</dt><dd>{detail.data.client_name || '未登錄'}</dd></div>
+            <div><dt>訂單狀態</dt><dd>{detail.data.order_status}</dd></div>
+            <div><dt>身分類別</dt><dd>{detail.data.identity_status ?? '未登錄'}</dd></div>
+            <div><dt>實際開始</dt><dd>{detail.data.actual_start_date ?? '尚未確認'}</dd></div>
+          </dl>}
+        </section>
+        <section className="order-v2-drawer-section"><h2>約定服務</h2>
+          {terms.status === 'error' && <p role="alert">約定服務資料暫時無法取得。</p>}
+          {terms.status === 'ready' && <dl className="order-case-facts">
+            <div><dt>計畫開始</dt><dd>{terms.data.terms.planned_start_date}</dd></div>
+            <div><dt>約定天數</dt><dd>{terms.data.terms.service_days} 日</dd></div>
+            <div><dt>每日時數</dt><dd>{terms.data.terms.service_hours_per_day} 小時</dd></div>
+          </dl>}
+        </section>
+        <section className="order-v2-drawer-section order-case-wide"><h2>已安排的月嫂與服務日期</h2>
+          {assignmentPlan.status === 'loading' && <p>讀取服務安排中…</p>}
+          {assignmentPlan.status === 'error' && <p role="alert">服務安排暫時無法取得。</p>}
+          {assignmentPlan.status === 'ready' && assignmentPlan.data.assignments.length === 0 && <p>尚未正式安排月嫂。</p>}
+          {assignmentPlan.status === 'ready' && assignmentPlan.data.assignments.map((segment) => <article className="order-case-assignment" key={`${segment.sequence}:${segment.staff_id}`}>
+            <strong>第 {segment.sequence} 段 · 月嫂編號 {segment.staff_id}</strong>
+            <span>{segment.assigned_start_date} ～ {segment.assigned_end_date}</span><span>{segment.official_service_dates.length} 個正式服務日</span>
+          </article>)}
+        </section>
+        <div className="order-case-wide"><OrderWorkbenchV2OwnerContext caseNo={caseNo} revision={refreshRevision} /></div>
+        {branchType === 'historical' && <section className="order-v2-drawer-section order-case-wide"><h2>歷史服務資料</h2><p>以下為匯入時保留的資料，不代表目前已確認的服務安排。</p>
+          {historicalEvidence.status === 'error' && <p role="alert">歷史服務資料暫時無法取得：{historicalEvidence.message}</p>}
+          {historicalAccounting.status === 'error' && <p role="alert">歷史帳務資料暫時無法取得：{historicalAccounting.message}</p>}
+          {historicalEvidence.status === 'ready' && <p>歷史服務期間：{evidencePeriod(historicalEvidence.data)}</p>}
+          {historicalEvidence.status === 'ready' && <p>歷史記載月嫂：{historicalEvidence.data.paired_staff.map((staff) => staff.staff_name).join('、') || '未登錄'}</p>}
+          {historicalAccounting.status === 'ready' && <p>歷史約定天數：{historicalAccounting.data.contracted_service_days} 日；月嫂：{historicalAccounting.data.assignments.map((item) => item.staff_name).join('、') || '未登錄'}</p>}
+        </section>}
+      </div>
+      <section hidden={drawerTab !== 'changes'} className="order-v2-drawer-section order-case-changes">
+        <h2>選擇要辦理的異動</h2><p>異動會影響案件或服務安排；請先確認對象，再檢查變更內容。</p>
+        {(!terminalStatus || currentBranch === 'cancelled') ? <>
             <div className="order-v2-drawer-actions">
               <button type="button" disabled={operationBusy || factsRefreshing} onClick={() => setOperation('cancellation')}>取消／補登取消服務事實</button>
               {currentBranch === 'cancelled' && (
@@ -502,205 +475,11 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
                 )}
               </div>
             )}
-          </details>}
 
-          <fieldset hidden={drawerTab !== 'work'} disabled={operationBusy || factsRefreshing} style={{ border: 0, padding: 0, margin: 0 }}>
-          {branchType === 'historical' && currentBranch !== 'cancelled' && intakeOrderStatus !== null && (
-            <OrderIntakeRepairPanel
-              caseNo={caseNo}
-              orderStatus={intakeOrderStatus}
-              onChanged={refreshFacts}
-            />
-          )}
-
-          {historicalRestart.status === 'applying' && (
-            <div role="status" className="order-v2-drawer-note">正在依正式 Historical Orders Query／Preview／Apply 重啟正常流程…</div>
-          )}
-          {(historicalRestart.status === 'completed' || historicalRestart.status === 'error') && historicalRestart.message && (
-            <div
-              role={historicalRestart.status === 'error' ? 'alert' : 'status'}
-              className={historicalRestart.status === 'error' ? 'order-v2-drawer-error' : 'order-v2-drawer-note'}
-            >
-              {historicalRestart.message}
-            </div>
-          )}
-
-          <section className="order-v2-drawer-section" aria-labelledby="order-v2-assignment-heading">
-            <h3 id="order-v2-assignment-heading">目前正式派案／Assignment projection</h3>
-            {assignmentPlan.status === 'loading' && <p>載入正式派案…</p>}
-            {assignmentPlan.status === 'error' && <p className="order-v2-drawer-error">正式派案不可用：{assignmentPlan.message}</p>}
-            {assignmentPlan.status === 'ready' && assignmentPlan.data.assignments.length === 0 && (
-              <p>尚無正式指派。歷史匯入配對證據（若有）顯示於下方歷史來源證據，不等同 Scheduling assignment。</p>
-            )}
-            {assignmentPlan.status === 'ready' && assignmentPlan.data.assignments.length > 0 && (
-              <div className="order-v2-drawer-assignments">
-                {assignmentPlan.data.assignments.map((segment) => (
-                  <article key={`${segment.sequence}:${segment.staff_id}`}>
-                    <strong>Segment {segment.sequence} · 月嫂 #{segment.staff_id}</strong>
-                    <span>{segment.assigned_start_date} → {segment.assigned_end_date}</span>
-                    <span>正式服務日：{segment.official_service_dates.length} 日</span>
-                    <span>assignment_id：{segment.assignment_id ?? '無'}</span>
-                    <span>lineage_source_assignment_ids：{segment.lineage_source_assignment_ids.join(', ') || '無'}</span>
-                  </article>
-                ))}
-              </div>
-            )}
-          </section>
-
-          </fieldset>
-
-          {branchType === 'historical' && (
-            <section hidden={drawerTab !== 'source'} className="order-v2-drawer-section" aria-labelledby="order-v2-historical-owner-heading">
-              <h3 id="order-v2-historical-owner-heading">目前正式 owner progression</h3>
-              {timeline.status === 'loading' && <p>載入正式 owner progression…</p>}
-              {timeline.status === 'error' && <p className="order-v2-drawer-error">owner progression 不可用：{timeline.message}</p>}
-              {timeline.status === 'ready' && currentHistoricalOwner === null && <p>目前沒有尚待處理的正式 owner stage。</p>}
-              {currentHistoricalOwner !== null && (
-                <div>
-                  <strong>{currentHistoricalOwner.ordinal}. {currentHistoricalOwner.label}</strong>
-                  <p>{coreStageSubstatusLabel(currentHistoricalOwner.substatus_code)}</p>
-                  <p className="order-v2-technical">
-                    owner：{currentHistoricalOwner.source.owner} · identity：{lineageIdentity(currentHistoricalOwner.source.identity)}
-                  </p>
-                  {currentHistoricalOwner.availability_reason && (
-                    <p className="order-v2-drawer-note">availability：{currentHistoricalOwner.availability_reason}</p>
-                  )}
-                  {currentHistoricalOwner.available_read_actions.length > 0 && (
-                    <div className="order-v2-drawer-actions" aria-label="正式唯讀入口">
-                      {currentHistoricalOwner.available_read_actions.map((action) => (
-                        <a key={action.action_id} href={action.path} target="_blank" rel="noreferrer">{action.action_id}</a>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-              <p className="order-v2-drawer-note">只顯示 server 已提供的 GET action descriptor；正式 restart 只從上方既有 owner Q/P/A 入口執行。</p>
-            </section>
-          )}
-
-          {branchType === 'historical' && (
-            <section hidden={drawerTab !== 'source'} className="order-v2-drawer-section historical-evidence" aria-label="歷史來源證據">
-              <h3 id="order-v2-history-baseline-heading">Immutable historical baseline</h3>
-              <p className="order-v2-drawer-note">baseline 只表示已接受略過的前置步驟，不是真實 owner event，也不覆寫後續正式 owner facts。</p>
-              {historicalBaseline.status === 'loading' && <p>載入 immutable baseline…</p>}
-              {historicalBaseline.status === 'error' && <p className="order-v2-drawer-error">baseline read model 不可用：{historicalBaseline.message}</p>}
-              {historicalBaseline.status === 'ready' && historicalBaseline.data.current_baseline === null && (
-                <p>目前沒有獨立 historical operational baseline event；採納 receipt lineage 仍顯示於下方。</p>
-              )}
-              {historicalBaseline.status === 'ready' && historicalBaseline.data.current_baseline !== null && (
-                <dl>
-                  <div><dt>Baseline identity</dt><dd>{historicalBaseline.data.current_baseline.baseline_event_identity}</dd></div>
-                  <div><dt>Selected step</dt><dd>{historicalBaseline.data.current_baseline.selected_step}</dd></div>
-                  <div><dt>略過前置步驟</dt><dd>{baselineSkippedSteps(historicalBaseline.data).join(', ') || '無'}</dd></div>
-                </dl>
-              )}
-
-              <h3>歷史來源證據</h3>
-              <p className="order-v2-drawer-note">以下為歷史匯入／帳務 read model 證據，不代表目前正式服務期間或目前正式派案。source period 不等於已發生 actual period，pairing evidence 不等於 formal Scheduling assignment。</p>
-              {historicalAccounting.status === 'error' && (
-                <p className="order-v2-drawer-error">歷史帳務 Query／blocker：{historicalAccounting.message}</p>
-              )}
-              {historicalAccounting.status === 'ready' && (
-                <dl aria-label="既有 historical accounting read model">
-                  <div><dt>來源 identity</dt><dd>{historicalAccounting.data.adoption_source_identity}</dd></div>
-                  <div><dt>歷史合約服務天數</dt><dd>{historicalAccounting.data.contracted_service_days} 日</dd></div>
-                  <div><dt>歷史配對月嫂</dt><dd>{historicalAccounting.data.assignments.map((item) => `${item.staff_name} (#${item.staff_id}, ${item.assignment_identity})`).join('；')}</dd></div>
-                </dl>
-              )}
-              {historicalEvidence.status === 'loading' && <p>載入 historical adoption evidence…</p>}
-              {historicalEvidence.status === 'error' && <p className="order-v2-drawer-error">historical adoption evidence 不可用：{historicalEvidence.message}</p>}
-              {historicalEvidence.status === 'ready' && (
-                <>
-                  <dl>
-                    <div><dt>Receipt</dt><dd>{historicalEvidence.data.receipt_identity}</dd></div>
-                    <div><dt>來源 identity</dt><dd>{historicalEvidence.data.source_identity}</dd></div>
-                    <div><dt>Evidence owner</dt><dd>{historicalEvidence.data.evidence_owner}</dd></div>
-                    <div><dt>歷史匯入服務日期</dt><dd>{evidencePeriod(historicalEvidence.data)}</dd></div>
-                    <div><dt>期間 availability</dt><dd>{historicalEvidence.data.source_period_availability}</dd></div>
-                  </dl>
-                  {historicalEvidence.data.paired_staff.length === 0 ? (
-                    <p>歷史匯入未保留可唯一解析的配對月嫂 evidence。</p>
-                  ) : (
-                    <div className="order-v2-drawer-assignments" aria-label="歷史匯入配對月嫂">
-                      {historicalEvidence.data.paired_staff.map((item) => (
-                        <article key={`${item.caregiver_ordinal}:${item.staff_id}`}>
-                          <strong>歷史匯入配對月嫂 · #{item.staff_id}</strong>
-                          <span>月嫂名稱：{item.staff_name}</span>
-                          <span>resolution：{item.resolution}</span>
-                          <span>來源服務：{item.source_start_date ?? '未保留'} → {item.source_end_date ?? '未保留'}</span>
-                          <span>historical assignment_id：{item.assignment_id ?? '無（evidence-only）'}</span>
-                        </article>
-                      ))}
-                    </div>
-                  )}
-                </>
-              )}
-            </section>
-          )}
-        </div>
-        <div className="order-v2-drawer-sidebar">
-          {showProgress && <section hidden={drawerTab !== 'progress'} className="order-v2-drawer-section" aria-labelledby="order-v2-progress-heading">
-            <h3 id="order-v2-progress-heading">13 階段正式進度</h3>
-            {timeline.status === 'loading' && <p>載入正式十三階段 projection…</p>}
-            {timeline.status === 'error' && <p className="order-v2-drawer-error">十三階段 projection 不可用：{timeline.message}</p>}
-            {timeline.status === 'ready' && (
-              <ol className="order-v2-drawer-stages">
-                {timeline.data.core_stages.map((stage) => (
-                  <li key={stage.code} data-testid="drawer-core-stage">
-                    <span className={`order-v2-drawer-stage-status status-${stage.status}`}>{stage.ordinal}</span>
-                    <div><strong>{stage.label}</strong><span>{coreStageSubstatusLabel(stage.substatus_code)}</span></div>
-                  </li>
-                ))}
-              </ol>
-            )}
-          </section>}
-
-          {!showProgress && timeline.status === 'ready' && (
-            <section hidden={drawerTab !== 'progress'} className="order-v2-drawer-section" aria-label="結算狀態">
-              <h3>結算狀態</h3>
-              {timeline.data.core_stages.filter((stage) => stage.code === 'client_settlement' || stage.code === 'staff_payout').map((stage) => (
-                <p key={stage.code}>{stage.label}：{coreStageSubstatusLabel(stage.substatus_code)}</p>
-              ))}
-            </section>
-          )}
-          <section hidden={drawerTab !== 'progress'} className="order-v2-drawer-section" aria-labelledby="order-v2-notices-heading">
-            <h3 id="order-v2-notices-heading">阻塞與提醒</h3>
-            {timeline.status === 'ready' && blockers.length === 0 && warnings.length === 0 && <p>目前沒有正式 blocker / warning。</p>}
-            {blockers.map((notice) => (
-              <div className="order-v2-notice blocked" key={notice.key}><strong>阻塞 · {notice.stage}</strong><span>{notice.message}</span></div>
-            ))}
-            {warnings.map((notice) => (
-              <div className="order-v2-notice warning" key={notice.key}><strong>提醒 · {notice.stage}</strong><span>{notice.message}</span></div>
-            ))}
-          </section>
-
-          <details hidden={drawerTab !== 'source'} className="order-v2-drawer-section order-v2-drawer-technical">
-            <summary>技術資料與來源紀錄</summary>
-            <div>
-            <h3 id="order-v2-lineage-heading">Lineage／來源</h3>
-            {timeline.status === 'ready' && (
-              <>
-                <p className="order-v2-technical">source_projection_digest：{timeline.data.source_projection_digest}</p>
-                <div className="order-v2-drawer-lineage">
-                  {timeline.data.core_stages.map((stage) => (
-                    <div key={stage.code}>
-                      <strong>{stage.ordinal}. {stage.label}</strong>
-                      <span>owner：{stage.source.owner}</span>
-                      <span>identity：{lineageIdentity(stage.source.identity)}</span>
-                      <span>version：{stage.source.version ?? '無'}</span>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-            </div>
-          </details>
-
-        </div>
-        </div>
-      </div>
-      </div>
-    </Drawer>
+        </> : <p>此案件目前沒有可在這裡辦理的異動。</p>}
+        {branchType === 'historical' && currentBranch !== 'cancelled' && intakeOrderStatus !== null && <OrderIntakeRepairPanel caseNo={caseNo} orderStatus={intakeOrderStatus} onChanged={refreshFacts} />}
+      </section>
+    </div>
   );
 };
 

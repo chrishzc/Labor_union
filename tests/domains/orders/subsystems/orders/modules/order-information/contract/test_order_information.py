@@ -8,10 +8,26 @@ import json
 import pytest
 
 from subsystems.orders.order_information import (
+    build_candidate_information,
     OrderInformationOwnerSnapshot,
     OrderInformationQueryService,
     OrderInformationTemplate,
 )
+
+
+def test_candidate_information_works_without_assignment_or_beclass_and_binds_content():
+    facts = {"case_no": "INQUIRY-1", "staff_name": "測試月嫂", "assigned_start_date": date(2026, 10, 1),
+             "assigned_end_date": date(2026, 10, 5), "floor_fee": 0}
+    first = build_candidate_information("INQUIRY-1", 9, 1, facts, {}, "recipient-a")
+    second = build_candidate_information("INQUIRY-1", 9, 2, facts, {}, "recipient-a")
+    assert "預計服務開始日期：2026-10-01" in first.text
+    assert "服務薪資：待確認" in first.text
+    assert "樓層費：0" in first.text
+    assert "食材準備參考" in second.text
+    assert first.preview_fingerprint != second.preview_fingerprint
+    assert first.preview_fingerprint != build_candidate_information("INQUIRY-1", 10, 1, facts, {}, "recipient-a").preview_fingerprint
+    assert first.preview_fingerprint != build_candidate_information("INQUIRY-1", 9, 1, facts, {}, "recipient-b").preview_fingerprint
+    assert first.preview_fingerprint != build_candidate_information("INQUIRY-1", 9, 1, {**facts, "floor_fee": 100}, {}, "recipient-a").preview_fingerprint
 from infrastructure.mysql.order_information_repository import (
     MySqlOrderInformationRepository,
 )

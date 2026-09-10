@@ -3,6 +3,7 @@
  * Description: 呈現Finance查詢與受控銀行流水 Upload、Preview、durable Apply、terminal receipt 工作區。
  */
 import React, { useEffect, useRef, useState } from 'react';
+import { FinanceImportCorrectionForm } from '../components/FinanceImportCorrectionForm';
 import './FinancePage.css';
 import './OrderWorkbenchV2Page.css';
 import { loadAllOrderSummaries, ordersQueryClient } from '../api/orders/order_query_client';
@@ -72,10 +73,15 @@ function financeErrorMessage(error: unknown, fallback: string): string {
 }
 
 export const FinancePage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<FinanceTab>('client-receipts');
+  const [entry] = useState(() => {
+    const params = new URLSearchParams(window.location.hash.split('?')[1] ?? '');
+    return { tab: params.get('tab'), caseNo: (params.get('case_no') ?? '').slice(0, 50) };
+  });
+  const [activeTab, setActiveTab] = useState<FinanceTab>(entry.tab === 'staff-payables' ? 'staff-payables' : 'client-receipts');
+  const [expandedLane, setExpandedLane] = useState<'subsidy' | 'closure' | null>(null);
   const [cases, setCases] = useState<{ id: string; label: string; orderStatus: string }[]>([]);
-  const [selectedCase, setSelectedCase] = useState('');
-  const [caseQuery, setCaseQuery] = useState('');
+  const [selectedCase, setSelectedCase] = useState(entry.caseNo);
+  const [caseQuery, setCaseQuery] = useState(entry.caseNo);
   const [receipt, setReceipt] = useState<LoadState<ReturnType<typeof adaptClientReceiptQuery>>>({ kind: 'idle' });
   const [staff, setStaff] = useState<{ id: number; label: string }[]>([]);
   const [selectedStaff, setSelectedStaff] = useState<number | null>(null);
@@ -142,7 +148,7 @@ export const FinancePage: React.FC = () => {
         if (!current('cases', request.sequence, request.controller)) return;
         const adapted = adaptOrderSummaryPage(page).items.map((item) => ({ id: item.id, label: `${item.id}｜${item.clientName}`, orderStatus: item.orderStatus }));
         setCases(adapted);
-        setSelectedCase((value) => adapted.some((item) => item.id === value) ? value : adapted[0]?.id ?? '');
+        setSelectedCase((value) => adapted.some((item) => item.id === value) ? value : entry.caseNo && queryText === entry.caseNo ? '' : adapted[0]?.id ?? '');
         if (adapted.length === 0) setReceipt({ kind: 'empty' });
       })
       .catch((error: unknown) => {
@@ -162,7 +168,7 @@ export const FinancePage: React.FC = () => {
   }, [activeTab, selectedCase, reload]);
 
   useEffect(() => {
-    if (activeTab !== 'staff-payables') return;
+    if (activeTab !== 'staff-payables' && activeTab !== 'finance-import') return;
     return schedule('staff', (request) => {
       setPayables({ kind: 'loading' });
       void loadAllStaffDirectoryPages(
@@ -308,7 +314,7 @@ export const FinancePage: React.FC = () => {
       <header className="page-header-banner finance-page-header">
         <div>
           <h1 className="page-title">💰 財務查詢與對帳工作台</h1>
-          <p className="page-subtitle">客戶收款、月嫂應付款、跨訂單帳務、遮罩後的應付帳款與三步銀行流水匯入。</p>
+          <p className="page-subtitle">查詢客戶收款、逐人薪資與每月付款，或核對銀行流水。</p>
         </div>
         <div className="finance-header-actions">
           <span className="finance-status-pill">
@@ -324,7 +330,6 @@ export const FinancePage: React.FC = () => {
           ['accounts-payable', '應付帳款'],
           ['cross-order', '跨訂單帳務'],
           ['finance-import', '銀行流水匯入'],
-          ['payment-destination', '契約收款帳戶'],
         ] as const).map(([id, label]) => (
           <button
             key={id}
@@ -333,8 +338,14 @@ export const FinancePage: React.FC = () => {
             onClick={() => setActiveTab(id)}
           >
             {label}
+            {id === 'staff-payables' && <small aria-hidden="true">逐人薪資明細</small>}
+            {id === 'accounts-payable' && <small aria-hidden="true">每月付款清單</small>}
           </button>
         ))}
+        <div className="finance-settings-nav" role="group" aria-label="帳務設定">
+          <span>設定</span>
+          <button type="button" data-surface-id="finance.tab.payment-destination" className={activeTab === 'payment-destination' ? 'active' : ''} onClick={() => setActiveTab('payment-destination')}>契約收款帳戶</button>
+        </div>
       </nav>
 
       <div className="finance-toolbar">
@@ -473,8 +484,8 @@ export const FinancePage: React.FC = () => {
             </div>
           </div>
           <div className="order-v2-side-lanes">
-            <OrderGovernmentSubsidyLane />
-            <OrderTerminalAggregateLane />
+            <OrderGovernmentSubsidyLane expanded={expandedLane === 'subsidy'} onExpandedChange={(open) => setExpandedLane(open ? 'subsidy' : null)} />
+            <OrderTerminalAggregateLane expanded={expandedLane === 'closure'} onExpandedChange={(open) => setExpandedLane(open ? 'closure' : null)} />
           </div>
         </section>
       )}
@@ -843,7 +854,7 @@ export const FinancePage: React.FC = () => {
                                 <td>{row.direction}</td>
                                 <td><strong>{row.amount_ntd}</strong></td>
                                 <td>{row.classification_type}</td>
-                                <td>{row.disposition}</td>
+                                <td>{row.disposition}{row.available_actions.includes('preview_manual_correction') && <details><summary>更正收款／付款對象</summary><FinanceImportCorrectionForm key={row.row_identity} rowIdentity={row.row_identity} sourceLabel={`${row.source_sheet} 第 ${row.source_row} 列`} staff={staff} /></details>}</td>
                               </tr>
                             ))}
                           </tbody>

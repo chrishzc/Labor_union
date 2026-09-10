@@ -93,7 +93,7 @@ export const OrderCandidateQueryPanel: FC<OrderCandidateQueryPanelProps> = ({ ca
     setSelectedStaffIds(new Set());
     setAddState({ status: 'idle' });
     setQueryState({ status: 'loading' });
-    void matchingCandidateWorkflowClient.searchSegmentedCaregivers(caseNo, 1, [], filters)
+    void matchingCandidateWorkflowClient.searchInquiryCandidates(caseNo, filters)
       .then((data) => setQueryState({ status: 'ready', data }))
       .catch((error) => setQueryState(queryFailure(error)));
   };
@@ -180,7 +180,7 @@ export const OrderCandidateQueryPanel: FC<OrderCandidateQueryPanelProps> = ({ ca
       {queryState.status === 'idle' && (
         <div className="order-v2-notice warning" role="status">
           <strong>尚未查詢</strong>
-          <span>設定媒合條件後，按「查詢符合條件月嫂」。</span>
+          <span>依預計服務期間查詢；尚未填寫的需求待確認，不阻擋初步詢問。</span>
         </div>
       )}
 
@@ -208,15 +208,14 @@ export const OrderCandidateQueryPanel: FC<OrderCandidateQueryPanelProps> = ({ ca
       {queryState.status === 'ready' && (
         <>
           <div className="order-v2-case-meta">
-            <span>Server 計畫期間：{queryState.data.planned_start_date} → {queryState.data.planned_end_date}</span>
-            <span>Feasibility：{queryState.data.feasibility}</span>
+            <span>服務期間：{queryState.data.planned_start_date} ～ {queryState.data.planned_end_date}</span>
           </div>
 
           {candidates.length > 0 ? (
             <>
               <div className="order-v2-notice warning" role="status">
                 <strong>符合 {candidates.length} 位</strong>
-                <span>僅列出 server 標記為完整覆蓋的正式候選。</span>
+                <span>以下月嫂在預計期間無檔期衝突，可先詢問意願；尚未確認的需求待確認，正式服務日期仍須後續確認。</span>
               </div>
               <div className="order-v2-business-summary" aria-label="正式符合條件候選">
                 {candidates.map((candidate) => (
@@ -230,7 +229,7 @@ export const OrderCandidateQueryPanel: FC<OrderCandidateQueryPanelProps> = ({ ca
                     />
                     <span>
                       <strong>{candidate.staff_name}</strong><br />
-                      月嫂 #{candidate.staff_id} · Server 支援 {candidate.supported_day_count}/{candidate.required_day_count} 日
+                      月嫂 #{candidate.staff_id} · 已檢查預計期間 {candidate.supported_day_count}/{candidate.required_day_count} 個日曆日無衝突
                     </span>
                   </label>
                 ))}
@@ -247,7 +246,7 @@ export const OrderCandidateQueryPanel: FC<OrderCandidateQueryPanelProps> = ({ ca
           ) : (
             <div className="order-v2-notice blocked" role="status">
               <strong>沒有符合條件</strong>
-              <span>目前沒有 server 確認的完整候選；不以瀏覽器條件推導人選。</span>
+              <span>目前沒有可完整承接的月嫂，可調整篩選條件後重新查詢。</span>
               {queryState.data.conflicts.map((conflict, index) => (
                 <span key={`${conflict.segment_index}:${conflict.staff_id ?? 'none'}:${conflict.work_date}:${index}`}>
                   {conflict.work_date} · 月嫂 #{conflict.staff_id ?? '未指定'} · {conflict.reason_code}

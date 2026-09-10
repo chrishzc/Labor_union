@@ -28,8 +28,8 @@ const PREVIEW: StaffCasePreferenceManualSnapshot = {
 async function openPreferences(): Promise<void> {
   render(<StaffPage />);
   await screen.findByText('去敏人員甲');
-  fireEvent.click(screen.getByRole('button', { name: /配對偏好/ }));
-  fireEvent.change(screen.getByLabelText('查詢服務人員'), { target: { value: '11' } });
+  fireEvent.click(screen.getByRole('button', { name: '查看 去敏人員甲 的詳情' }));
+  fireEvent.click(screen.getByRole('tab', { name: /接案偏好設定/ }));
   await screen.findByRole('button', { name: '編輯六項偏好' });
 }
 
@@ -53,8 +53,8 @@ describe('Staff current six-relation preference flow', () => {
       .mockResolvedValueOnce(SNAPSHOT);
     render(<StaffPage />);
     await screen.findByText('去敏人員甲');
-    fireEvent.click(screen.getByRole('button', { name: /配對偏好/ }));
-    fireEvent.change(screen.getByLabelText('查詢服務人員'), { target: { value: '11' } });
+    fireEvent.click(screen.getByRole('button', { name: '查看 去敏人員甲 的詳情' }));
+    fireEvent.click(screen.getByRole('tab', { name: /接案偏好設定/ }));
     expect(await screen.findByText('六項偏好暫時失敗')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '重新查詢' }));
     expect(await screen.findByRole('button', { name: '編輯六項偏好' })).toBeEnabled();

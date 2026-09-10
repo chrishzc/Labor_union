@@ -108,7 +108,7 @@ describe('candidateContactPoolClient', () => {
       error: null,
     });
 
-    await expect(candidateContactPoolClient.sendInformation('CASE-POOL-001', 17, 2)).resolves.toEqual({
+    await expect(candidateContactPoolClient.sendInformation('CASE-POOL-001', 17, 2, 'a'.repeat(64), 'test-send-2')).resolves.toEqual({
       status: 'queued',
       event_id: 31,
       line_task_id: 52,
@@ -118,7 +118,8 @@ describe('candidateContactPoolClient', () => {
       expect.objectContaining({
         info_type: 2,
         actor: 'operator-1',
-        event_key: expect.stringMatching(/^orders-candidate-info-2-17-/),
+        event_key: 'test-send-2',
+        preview_fingerprint: 'a'.repeat(64),
       }),
       { token: 'volatile-token' },
     );
@@ -222,7 +223,7 @@ describe('candidateContactPoolClient', () => {
     vi.mocked(sessionClient.getUser).mockReturnValue(null);
     const post = vi.spyOn(transport, 'post');
 
-    await expect(candidateContactPoolClient.sendInformation('CASE-POOL-001', 17, 1)).rejects.toBeInstanceOf(
+    await expect(candidateContactPoolClient.sendInformation('CASE-POOL-001', 17, 1, 'a'.repeat(64), 'test-send-1')).rejects.toBeInstanceOf(
       ApiHttpError,
     );
     expect(post).not.toHaveBeenCalled();
@@ -236,6 +237,6 @@ describe('candidateContactPoolClient', () => {
       error: null,
     });
 
-    await expect(candidateContactPoolClient.sendInformation('CASE-POOL-001', 17, 1)).rejects.toThrow();
+    await expect(candidateContactPoolClient.sendInformation('CASE-POOL-001', 17, 1, 'a'.repeat(64), 'test-send-1')).rejects.toThrow();
   });
 });

@@ -10,15 +10,14 @@ import {
   type OrderTerminalAggregatePage,
 } from '../api/orders/order_terminal_aggregate_client';
 
-function queryErrorMessage(error: unknown): string {
-  const detail = error instanceof Error && error.message.trim()
-    ? error.message.trim()
-    : '無法取得正式完全結案投影';
-  return `完全結案唯讀 projection 查詢失敗；不使用前端推導。原因：${detail}`;
+function queryErrorMessage(_error: unknown): string {
+  return '結案資料暫時無法取得，請重新開啟查詢。';
 }
 
-export const OrderTerminalAggregateLane: FC = () => {
-  const [open, setOpen] = useState(false);
+export const OrderTerminalAggregateLane: FC<{ expanded?: boolean; onExpandedChange?: (open: boolean) => void }> = ({ expanded, onExpandedChange }) => {
+  const [localOpen, setLocalOpen] = useState(false);
+  const open = expanded ?? localOpen;
+  const setOpen = (value: boolean) => { setLocalOpen(value); onExpandedChange?.(value); };
   const [page, setPage] = useState<OrderTerminalAggregatePage | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -66,7 +65,7 @@ export const OrderTerminalAggregateLane: FC = () => {
       <button
         type="button"
         className={`order-v2-lane ${open ? 'active' : ''}`}
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => setOpen(!open)}
         aria-expanded={open}
       >
         <span>
@@ -81,7 +80,7 @@ export const OrderTerminalAggregateLane: FC = () => {
           <section className="order-v2-toolbar">
             <div>
               <h2>完全結案</h2>
-              <p>只讀取 server aggregate；未完成時保留負責 owner 與正式原因。</p>
+              <p>查看案件是否已完成所有必要結案項目。</p>
             </div>
             <div className="order-v2-toolbar-actions">
               <input
@@ -93,7 +92,7 @@ export const OrderTerminalAggregateLane: FC = () => {
             </div>
           </section>
 
-          {loading && <div className="order-v2-empty">正在查詢完全結案 aggregate…</div>}
+          {loading && <div className="order-v2-empty">正在查詢結案狀態…</div>}
           {error && <div className="order-v2-error" role="alert">{error}</div>}
           {!loading && !error && page && page.items.length === 0 && (
             <div className="order-v2-empty">目前沒有符合條件的正常訂單。</div>
@@ -119,16 +118,19 @@ export const OrderTerminalAggregateLane: FC = () => {
 
                     {item.fully_closed ? (
                       <div className="order-v2-business-summary">
-                        <strong>所有必要組件已完成。</strong>
+                        <strong>所有必要結案項目已完成。</strong>
                       </div>
                     ) : (
                       <div className="order-v2-notice blocked">
-                        <strong>未完成組件</strong>
+                        <strong>尚有 {incomplete.length} 項結案工作未完成</strong>
+                        <a href="#order-workbench-v2">前往待辦看板查看案件進度</a>
+                        <details><summary>技術詳情與資料來源</summary>
                         {incomplete.map((component) => (
                           <span key={component.code}>
                             {component.owner} · {component.code}：{component.reason ?? '未完成'}
                           </span>
                         ))}
+                        </details>
                       </div>
                     )}
                   </article>

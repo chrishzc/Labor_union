@@ -45,6 +45,7 @@ describe('Beta Drawer 受控操作整合與跨支線回讀', () => {
     ['確認／更正實際開始日', 'actual-start'],
   ])('%s 的明確入口能展開對應正式操作面板', async (entry, label) => {
     render(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="normal" onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '案件異動' }));
     const button = screen.getByRole('button', { name: entry });
     await waitFor(() => expect(button).toBeEnabled());
     expect(screen.queryByLabelText('受控操作草稿')).not.toBeInTheDocument();
@@ -54,6 +55,7 @@ describe('Beta Drawer 受控操作整合與跨支線回讀', () => {
 
   it('受控重開入口只在取消支線顯示', async () => {
     const normal = render(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="normal" onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '案件異動' }));
     await waitFor(() => expect(mocks.core).toHaveBeenCalledTimes(1));
     expect(screen.queryByRole('button', { name: '受控重開取消案件' })).not.toBeInTheDocument();
     normal.unmount();
@@ -61,6 +63,7 @@ describe('Beta Drawer 受控操作整合與跨支線回讀', () => {
     mocks.core.mockResolvedValue(page(true));
     mocks.detail.mockResolvedValue({ case_no: CASE, client_name: '測試客戶', client_id: 1, order_status: '訂單取消', identity_status: null, actual_start_date: '2026-09-01' });
     render(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="cancelled" onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '案件異動' }));
     const button = await screen.findByRole('button', { name: '受控重開取消案件' });
     fireEvent.click(button);
     expect(screen.getByRole('region', { name: '操作面板 reopen' })).toBeInTheDocument();
@@ -69,22 +72,24 @@ describe('Beta Drawer 受控操作整合與跨支線回讀', () => {
   it('結果未明時 close／Escape／backdrop 皆不卸載，不能切換到其他受控操作', async () => {
     const onClose = vi.fn();
     const view = render(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="normal" onClose={onClose} />);
+    fireEvent.click(screen.getByRole('button', { name: '案件異動' }));
     const entry = screen.getByRole('button', { name: '取消／補登取消服務事實' });
     await waitFor(() => expect(entry).toBeEnabled()); fireEvent.click(entry);
     fireEvent.click(screen.getByRole('button', { name: '模擬結果未明' }));
-    const close = screen.getByRole('button', { name: '關閉工作 Drawer' });
+    const close = screen.getByRole('button', { name: '← 返回待辦看板' });
     expect(close).toBeDisabled();
     expect(screen.getByRole('button', { name: '確認／更正實際開始日' })).toBeDisabled();
     fireEvent.click(close); fireEvent.keyDown(document, { key: 'Escape' });
-    fireEvent.mouseDown(view.container.querySelector('.order-v2-drawer-backdrop')!);
+    expect(view.container.querySelector('.order-v2-drawer-backdrop')).toBeNull();
     expect(onClose).not.toHaveBeenCalled(); expect(screen.getByRole('region', { name: '操作面板 cancellation' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '模擬收據與正式回讀完成' }));
     await waitFor(() => expect(close).toBeEnabled());
-    fireEvent.keyDown(document, { key: 'Escape' }); expect(onClose).toHaveBeenCalledTimes(1);
+    fireEvent.click(close); expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it('取消跨支線後依 exact-case GET 回讀，刷新四個 owner query 與 context，不抹掉面板完成狀態', async () => {
     const onObserved = vi.fn(); render(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="normal" onClose={vi.fn()} onObserved={onObserved} />);
+    fireEvent.click(screen.getByRole('button', { name: '案件異動' }));
     const entry = screen.getByRole('button', { name: '取消／補登取消服務事實' });
     await waitFor(() => expect(entry).toBeEnabled()); fireEvent.click(entry);
     const input = screen.getByLabelText('受控操作草稿'); fireEvent.change(input, { target: { value: '保留收據' } });
@@ -101,7 +106,7 @@ describe('Beta Drawer 受控操作整合與跨支線回讀', () => {
     await act(async () => { resolve(page(true)); });
     await waitFor(() => expect(entry).toBeEnabled());
     expect(screen.queryByText('正常完工操作入口')).not.toBeInTheDocument();
-    expect(screen.getByText('訂單取消')).toBeInTheDocument();
+    expect(screen.getAllByText('訂單取消').length).toBeGreaterThan(0);
     expect(screen.getByLabelText('受控操作草稿')).toBe(input);
   });
 });

@@ -3196,6 +3196,18 @@ def _local_verify_backup_rows(config: Any, source: str, expected: Mapping[str, A
     actual = _local_capture_backup_rows(config, source, counts.keys())
     if actual["data_row_counts"] != dict(counts):
         raise LocalAdditiveBlocked("source backup row fingerprint changed", code="backup_required")
+    # A newly created empty table has no source rows to preserve. Only normalize
+    # the explicit absent baseline; existing tables keep their original checks.
+    normalized_empty_table = False
+    for table, expected_fingerprint in fingerprints.items():
+        absent = _local_digest(_local_canonical_json({
+            "table": table, "state": "absent_or_empty", "row_count": 0,
+        }))
+        if counts.get(table) == 0 and expected_fingerprint == absent and actual["data_fingerprints"].get(table) != absent:
+            actual["data_fingerprints"][table] = absent
+            normalized_empty_table = True
+    if normalized_empty_table:
+        actual["data_fingerprint_sha256"] = _local_data_fingerprint(actual["data_fingerprints"])
     if actual["data_fingerprints"] != dict(fingerprints):
         raise LocalAdditiveBlocked("source backup row fingerprint changed", code="backup_required")
     if actual["data_fingerprint_sha256"] != expected_global:

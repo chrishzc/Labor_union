@@ -43,11 +43,10 @@ describe('Staff availability flow', () => {
   async function openAvailability(expectedRow = '2026-09-01 ～ 2026-09-30'): Promise<void> {
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('tab', { name: /長假與暫停/ }));
-    fireEvent.change(screen.getByLabelText('查詢服務人員'), { target: { value: '11' } });
+    fireEvent.click(screen.getByRole('button', { name: '查看 去敏人員甲 的詳情' }));
+    fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
     fireEvent.change(screen.getByLabelText('開始日期'), { target: { value: '2026-09-01' } });
     fireEvent.change(screen.getByLabelText('結束日期'), { target: { value: '2026-10-31' } });
-    fireEvent.click(screen.getByRole('button', { name: '查詢不可服務期間' }));
     await waitFor(() => expect(screen.getByText(expectedRow)).toBeInTheDocument());
   }
 
@@ -55,7 +54,7 @@ describe('Staff availability flow', () => {
     vi.mocked(staffAvailabilityClient.getBlocks).mockResolvedValue([]);
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
-    fireEvent.click(screen.getAllByRole('button', { name: /檢視服務人員摘要/ })[0]);
+    fireEvent.click(screen.getByRole('button', { name: '查看 去敏人員甲 的詳情' }));
     fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
 
     expect(await screen.findByText(/是否可派工仍需依案件日期、既有排班與資格條件查詢/)).toBeInTheDocument();
@@ -86,20 +85,18 @@ describe('Staff availability flow', () => {
 
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
-    fireEvent.click(screen.getAllByRole('button', { name: /檢視服務人員摘要/ })[0]);
+    fireEvent.click(screen.getByRole('button', { name: '查看 去敏人員甲 的詳情' }));
     fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
 
     await waitFor(() => expect(staffAvailabilityClient.getBlocks).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.getByText('2026-09-01 ～ 2026-09-30')).toBeInTheDocument());
-    expect(screen.queryByRole('button', { name: /預覽新增影響/ })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /新增請假／暫停接案/ }));
-    expect(screen.getByRole('button', { name: /預覽新增影響/ })).toBeVisible();
+    expect(screen.getByRole('button', { name: '預覽新增' })).toBeVisible();
     fireEvent.change(screen.getByLabelText('開始日期'), { target: { value: '2026-10-01' } });
     await waitFor(() => expect(staffAvailabilityClient.getBlocks).toHaveBeenCalledTimes(2));
     const refreshSignal = vi.mocked(staffAvailabilityClient.getBlocks).mock.calls[1][3]?.signal;
 
     fireEvent.change(screen.getByLabelText('新增原因'), { target: { value: '去敏日期刷新驗收' } });
-    fireEvent.click(screen.getByRole('button', { name: /預覽新增影響/ }));
+    fireEvent.click(screen.getByRole('button', { name: '預覽新增' }));
 
     await waitFor(() => expect(staffAvailabilityClient.previewChange).toHaveBeenCalledTimes(1));
     const previewSignal = vi.mocked(staffAvailabilityClient.previewChange).mock.calls[0][2]?.signal;
@@ -118,7 +115,7 @@ describe('Staff availability flow', () => {
     await act(async () => {
       resolveDateRefresh?.([STAFF_AVAILABILITY_BLOCK]);
     });
-    const applyButton = screen.getByRole('button', { name: /確認套用新增/ });
+    const applyButton = screen.getByRole('button', { name: '套用新增' });
     expect(applyButton).not.toBeDisabled();
     fireEvent.click(applyButton);
 
@@ -136,7 +133,7 @@ describe('Staff availability flow', () => {
 
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
-    fireEvent.click(screen.getAllByRole('button', { name: /檢視服務人員摘要/ })[0]);
+    fireEvent.click(screen.getByRole('button', { name: '查看 去敏人員甲 的詳情' }));
     fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
 
     const cancelButton = await screen.findByRole('button', { name: '預覽取消' });
@@ -150,12 +147,8 @@ describe('Staff availability flow', () => {
       .mockResolvedValueOnce([STAFF_AVAILABILITY_BLOCK]);
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('tab', { name: /長假與暫停/ }));
-    fireEvent.change(screen.getByLabelText('查詢服務人員'), { target: { value: '11' } });
-    fireEvent.change(screen.getByLabelText('開始日期'), { target: { value: '2026-09-01' } });
-    fireEvent.change(screen.getByLabelText('結束日期'), { target: { value: '2026-10-31' } });
-    fireEvent.click(screen.getByRole('button', { name: '查詢不可服務期間' }));
-
+    fireEvent.click(screen.getByRole('button', { name: '查看 去敏人員甲 的詳情' }));
+    fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
     await waitFor(() => expect(screen.getByRole('button', { name: '重試不可服務期間' })).toBeInTheDocument());
     expect(screen.queryByText('請先設定日期範圍並查詢。')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '重試不可服務期間' }));
@@ -164,10 +157,9 @@ describe('Staff availability flow', () => {
   });
 
   it('完成 create preview、apply、receipt 與 blocks requery，不計算本地業務值', async () => {
-    vi.mocked(staffAvailabilityClient.getBlocks)
-      .mockResolvedValueOnce([STAFF_AVAILABILITY_BLOCK])
-      .mockResolvedValueOnce([{ ...STAFF_AVAILABILITY_BLOCK, block_id: 93 }]);
     await openAvailability();
+    const queriesBeforeApply = vi.mocked(staffAvailabilityClient.getBlocks).mock.calls.length;
+    vi.mocked(staffAvailabilityClient.getBlocks).mockResolvedValue([{ ...STAFF_AVAILABILITY_BLOCK, block_id: 93 }]);
 
     fireEvent.change(screen.getByLabelText('新增原因'), { target: { value: '去敏暫停接案' } });
     fireEvent.click(screen.getByRole('button', { name: '預覽新增' }));
@@ -198,7 +190,7 @@ describe('Staff availability flow', () => {
       expect.objectContaining({ idempotencyKey: expect.any(String) }),
     );
     expect(vi.mocked(staffAvailabilityClient.applyChange).mock.calls[0][1]).not.toHaveProperty('end_date');
-    await waitFor(() => expect(staffAvailabilityClient.getBlocks).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(staffAvailabilityClient.getBlocks).toHaveBeenCalledTimes(queriesBeforeApply + 1));
     expect(screen.getByText('已觀察最新不可服務期間')).toBeInTheDocument();
   });
 
@@ -257,8 +249,9 @@ describe('Staff availability flow', () => {
     fireEvent.click(previewButton);
     expect(staffAvailabilityClient.previewChange).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(screen.getByRole('button', { name: '查詢不可服務期間' }));
-    await waitFor(() => expect(staffAvailabilityClient.getBlocks).toHaveBeenCalledTimes(2));
+    const queriesBeforeRefresh = vi.mocked(staffAvailabilityClient.getBlocks).mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: '重新查詢不可服務期間' }));
+    await waitFor(() => expect(staffAvailabilityClient.getBlocks).toHaveBeenCalledTimes(queriesBeforeRefresh + 1));
     fireEvent.click(screen.getByRole('button', { name: '預覽新增' }));
     await waitFor(() => expect(staffAvailabilityClient.previewChange).toHaveBeenCalledTimes(2));
   });
@@ -288,14 +281,13 @@ describe('Staff availability flow', () => {
   });
 
   it('只對所選 Staff 的 active open-ended pause 執行 end_pause，receipt 後觀察 server 封閉區間', async () => {
-    vi.mocked(staffAvailabilityClient.getBlocks)
-      .mockResolvedValueOnce([STAFF_AVAILABILITY_SELECTED_PAUSE_BLOCK])
-      .mockResolvedValueOnce([STAFF_AVAILABILITY_CLOSED_PAUSE_BLOCK]);
+    vi.mocked(staffAvailabilityClient.getBlocks).mockResolvedValue([STAFF_AVAILABILITY_SELECTED_PAUSE_BLOCK]);
     vi.mocked(staffAvailabilityClient.previewChange)
       .mockResolvedValueOnce(STAFF_AVAILABILITY_END_PAUSE_PREVIEW_RESPONSE.data!);
     vi.mocked(staffAvailabilityClient.applyChange)
       .mockResolvedValueOnce(STAFF_AVAILABILITY_END_PAUSE_RECEIPT_RESPONSE.data!);
     await openAvailability('2026-10-01 ～ —');
+    vi.mocked(staffAvailabilityClient.getBlocks).mockResolvedValue([STAFF_AVAILABILITY_CLOSED_PAUSE_BLOCK]);
 
     fireEvent.change(screen.getByLabelText('暫停接案紀錄'), { target: { value: '92' } });
     fireEvent.change(screen.getByLabelText('恢復接案日期'), { target: { value: '2026-10-15' } });
@@ -330,7 +322,7 @@ describe('Staff availability flow', () => {
   });
 
   it('另一 Staff、已封閉或非 paused_service block 不得啟用 end_pause Preview', async () => {
-    vi.mocked(staffAvailabilityClient.getBlocks).mockResolvedValueOnce([
+    vi.mocked(staffAvailabilityClient.getBlocks).mockResolvedValue([
       { ...STAFF_AVAILABILITY_SELECTED_PAUSE_BLOCK, staff_id: 12 },
       { ...STAFF_AVAILABILITY_CLOSED_PAUSE_BLOCK, block_id: 93 },
       { ...STAFF_AVAILABILITY_BLOCK, staff_id: 11 },
@@ -345,7 +337,7 @@ describe('Staff availability flow', () => {
   });
 
   it('server Preview 若未回同一 Staff 與 block，固定 fail closed 且不可 Apply', async () => {
-    vi.mocked(staffAvailabilityClient.getBlocks).mockResolvedValueOnce([
+    vi.mocked(staffAvailabilityClient.getBlocks).mockResolvedValue([
       STAFF_AVAILABILITY_SELECTED_PAUSE_BLOCK,
     ]);
     vi.mocked(staffAvailabilityClient.previewChange).mockResolvedValueOnce({

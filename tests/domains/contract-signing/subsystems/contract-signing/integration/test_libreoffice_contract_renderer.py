@@ -38,6 +38,32 @@ def _executable(tmp_path: Path) -> Path:
     return executable
 
 
+def test_external_workbook_formula_never_reaches_office_process(tmp_path):
+    from io import BytesIO
+    workbook = Workbook()
+    workbook.active['D13'] = '=VLOOKUP(A1,[1]old!A:B,2,0)'
+    content = BytesIO()
+    workbook.save(content)
+    renderer = LibreOfficeContractRenderer(executable=str(_executable(tmp_path)), runner=lambda *args, **kwargs: pytest.fail('external reference must not run'))
+    with pytest.raises(ContractRendererError) as error:
+        renderer.render_workbook(content=content.getvalue(), filename='source.xlsx')
+    assert error.value.code == 'contract_pdf_external_reference_unresolved'
+
+
+def test_macos_headless_font_config_uses_existing_system_fonts_and_isolated_cache(tmp_path, monkeypatch):
+    from infrastructure.file import libreoffice_contract_renderer as module
+    monkeypatch.setattr(module.sys, 'platform', 'darwin')
+    monkeypatch.setattr(module.Path, 'is_dir', lambda path: str(path) == '/System/Library/Fonts/Supplemental')
+    monkeypatch.setenv('DB_PASSWORD', 'not-inherited')
+    environment = module._renderer_environment(tmp_path)
+    assert 'DB_PASSWORD' not in environment
+    config = Path(environment['FONTCONFIG_FILE'])
+    assert config.parent == tmp_path
+    text = config.read_text()
+    assert '<dir>/System/Library/Fonts/Supplemental</dir>' in text
+    assert str(tmp_path / 'font-cache') in text
+
+
 def _successful_runner(observed: dict[str, object]):
     def run(command, **kwargs):
         observed["command"] = command

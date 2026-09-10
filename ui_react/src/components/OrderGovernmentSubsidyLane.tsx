@@ -13,7 +13,7 @@ import {
 } from '../api/orders/order_government_subsidy_projection_client';
 
 const SUBSTATUS_LABELS: Readonly<Record<GovernmentSubsidySubstatusCode, string>> = {
-  claim_lineage_missing: 'Claim 關聯缺口',
+  claim_lineage_missing: '待確認補助申請',
   draft: '申請草稿',
   submitted: '已送件',
   approved: '已核准',
@@ -31,15 +31,14 @@ function formatNtd(value: number): string {
   return `NT$ ${value.toLocaleString('zh-TW')}`;
 }
 
-function queryErrorMessage(error: unknown): string {
-  const detail = error instanceof Error && error.message.trim()
-    ? error.message.trim()
-    : '無法取得正式 Government Subsidy projection';
-  return `Government Subsidy 唯讀 projection 查詢失敗；不使用前端推導。原因：${detail}`;
+function queryErrorMessage(_error: unknown): string {
+  return '補助結算資料暫時無法取得，請重新開啟查詢。';
 }
 
-export const OrderGovernmentSubsidyLane: FC = () => {
-  const [open, setOpen] = useState(false);
+export const OrderGovernmentSubsidyLane: FC<{ expanded?: boolean; onExpandedChange?: (open: boolean) => void }> = ({ expanded, onExpandedChange }) => {
+  const [localOpen, setLocalOpen] = useState(false);
+  const open = expanded ?? localOpen;
+  const setOpen = (value: boolean) => { setLocalOpen(value); onExpandedChange?.(value); };
   const [page, setPage] = useState<OrderGovernmentSubsidyProjectionPage | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -97,7 +96,7 @@ export const OrderGovernmentSubsidyLane: FC = () => {
       <button
         type="button"
         className={`order-v2-lane ${open ? 'active' : ''}`}
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => setOpen(!open)}
         aria-expanded={open}
       >
         <span>
@@ -115,7 +114,7 @@ export const OrderGovernmentSubsidyLane: FC = () => {
           <section className="order-v2-toolbar">
             <div>
               <h2>政府補助結算</h2>
-              <p>所有正常訂單均保留 projection；找不到正式 claim 關聯時以資料缺口顯示。</p>
+              <p>查詢案件的補助申請、核准與入款進度；尚未找到申請資料時會標示待確認。</p>
             </div>
             <div className="order-v2-toolbar-actions">
               <input
@@ -147,10 +146,10 @@ export const OrderGovernmentSubsidyLane: FC = () => {
             ))}
           </div>
 
-          {loading && <div className="order-v2-empty">正在查詢 Government Subsidy owner facts…</div>}
+          {loading && <div className="order-v2-empty">正在查詢補助結算資料…</div>}
           {error && <div className="order-v2-error" role="alert">{error}</div>}
           {!loading && !error && page && page.items.length === 0 && (
-            <div className="order-v2-empty">目前沒有符合 server-side 補助條件的正常訂單。</div>
+            <div className="order-v2-empty">目前沒有符合查詢條件的訂單。</div>
           )}
           {!loading && !error && page?.next_cursor != null && (
             <div className="order-v2-summary-warning" role="status">
@@ -170,16 +169,12 @@ export const OrderGovernmentSubsidyLane: FC = () => {
                   </div>
 
                   <dl className="order-v2-business-summary">
-                    <div><dt>身分類別</dt><dd>{item.identity_status ?? 'owner fact 缺漏'}</dd></div>
-                    <div><dt>Claim batch</dt><dd>{item.claim_batch_id ?? '尚無正式關聯'}</dd></div>
+                    <div><dt>身分類別</dt><dd>{item.identity_status ?? '尚待確認'}</dd></div>
                     <div><dt>申報時數</dt><dd>{item.claimed_hours} 小時</dd></div>
-                    <div><dt>Owner 單價</dt><dd>{item.unit_price_ntd === null ? '尚無／多費率' : formatNtd(item.unit_price_ntd)}</dd></div>
+                    <div><dt>補助單價</dt><dd>{item.unit_price_ntd === null ? '尚無／多費率' : formatNtd(item.unit_price_ntd)}</dd></div>
                   </dl>
 
                   <div className="order-v2-case-meta">
-                    <span>Owner：{item.source.owner}</span>
-                    <span>Source：{item.source.identity ?? '無正式 identity'}</span>
-                    <span>Version：{item.source.version ?? '無'}</span>
                     <span>申請：{formatNtd(item.requested_amount_ntd)}</span>
                     <span>核准：{formatNtd(item.approved_amount_ntd)}</span>
                     <span>已入款／折抵：{formatNtd(item.net_allocated_ntd)}</span>
@@ -187,29 +182,29 @@ export const OrderGovernmentSubsidyLane: FC = () => {
                       <span>待處置溢撥：{formatNtd(item.overpayment_remaining_ntd)}</span>
                     )}
                     {item.occurred_at && (
-                      <span>Owner 時點：{new Date(item.occurred_at).toLocaleString('zh-TW')}</span>
+                      <span>資料時間：{new Date(item.occurred_at).toLocaleString('zh-TW')}</span>
                     )}
                   </div>
 
                   {item.blockers.length > 0 && (
                     <div className="order-v2-notice blocked">
                       <strong>阻塞</strong>
-                      {item.blockers.map((notice) => (
-                        <span key={notice.code}>{notice.message}</span>
-                      ))}
+                      <span>補助資料尚有待處理項目，請核對申請與入款紀錄。</span>
                     </div>
                   )}
                   {item.warnings.length > 0 && (
                     <div className="order-v2-notice warning">
                       <strong>提醒</strong>
-                      {item.warnings.map((notice) => (
-                        <span key={notice.code}>{notice.message}</span>
-                      ))}
+                      <span>此案件的補助資料需要進一步確認。</span>
                     </div>
                   )}
 
                   <div className="order-v2-case-meta" aria-label="Government Subsidy 唯讀入口">
                     <a href="#reports">前往營運與補助報表</a>
+                    <details><summary>技術詳情與資料來源</summary>
+                      <p>Owner：{item.source.owner}；Source：{item.source.identity ?? '無'}；Version：{item.source.version ?? '無'}；Claim batch：{item.claim_batch_id ?? '無'}</p>
+                      {[...item.blockers, ...item.warnings].map((notice) => <p key={notice.code}>{notice.code}：{notice.message}</p>)}
+                    </details>
                     {item.available_read_actions.length > 0 && (
                       <details>
                         <summary>查詢來源</summary>

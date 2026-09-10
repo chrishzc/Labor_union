@@ -76,3 +76,15 @@
   .import-kind-selector > div { margin-inline: -4px; padding-inline: 4px; }
   .import-kind-selector button { min-height: 42px; }
 }
+[data-surface-id="finance.historical-service-accounting.page"] :is(input, select, button) {
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 1px solid var(--md-sys-color-outline);
+  border-radius: var(--radius-md);
+  font: inherit;
+  background: var(--md-sys-color-surface);
+}
+[data-surface-id="finance.historical-service-accounting.page"] button { cursor: pointer; margin: 8px 0; }
+[data-surface-id="finance.historical-service-accounting.page"] button:disabled { cursor: not-allowed; color: var(--md-sys-color-on-surface-variant); }
+[data-surface-id="finance.historical-service-accounting.page"] label { display: block; margin: 12px 0 6px; }
+[data-surface-id="finance.historical-service-accounting.page"] :is(input, select, button):focus-visible { outline: 3px solid var(--md-sys-color-primary); outline-offset: 2px; }

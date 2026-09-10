@@ -84,6 +84,21 @@ def search_segmented_caregiver_availability(
     facts_port: SegmentedAvailabilityFactsPort | None = None,
     filter_policy: dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
+    return _search_availability(case_no, segment_count, segment_drafts, as_of, facts_port, filter_policy, inquiry=False)
+
+
+def search_candidate_inquiry_availability(
+    case_no: str,
+    segment_drafts: List[dict],
+    as_of: Any,
+    facts_port: SegmentedAvailabilityFactsPort | None = None,
+    filter_policy: dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    """Check the planned inquiry window, never project official service dates."""
+    return _search_availability(case_no, 1, segment_drafts, as_of, facts_port, filter_policy, inquiry=True)
+
+
+def _search_availability(case_no, segment_count, segment_drafts, as_of, facts_port, filter_policy, *, inquiry):
     """Search for segmented caregiver availability for a single case."""
     if not case_no:
         raise ValueError("case_no is required")
@@ -105,7 +120,17 @@ def search_segmented_caregiver_availability(
         raise ValueError("case not found")
     if order_row["status"] not in {"洽談中", "訂單成立"}:
         raise ValueError("case is not in negotiation stage")
-    if order_row.get("requires_cooking") is None:
+    policy = _filter_policy(filter_policy)
+    if inquiry:
+        # Missing intake answers are pending, not false requirements.  Keep the
+        # source unchanged and apply only filters whose case requirement exists.
+        for key, fact in (("cooking", "requires_cooking"),
+                          ("preferred_service_days", "service_days"), ("daily_service_hours", "service_hours_per_day")):
+            if order_row.get(fact) is None or order_row.get(fact) == "":
+                policy[key] = False
+        if not any(str(order_row.get(key) or "").strip() for key in ("city", "address")):
+            policy["region"] = False
+    if policy["cooking"] and order_row.get("requires_cooking") is None:
         raise ValueError("matching_preference_source_not_ready")
 
     planned_start = _as_optional_date(order_row["start_date"], "planned_start_date")
@@ -115,7 +140,6 @@ def search_segmented_caregiver_availability(
     if (planned_end - planned_start).days + 1 > 60:
         raise ValueError("service period cannot exceed 60 days")
 
-    policy = _filter_policy(filter_policy)
     candidate_rows = loaded_facts["staff_rows"]
     filter_results = {
         int(row["id"]): _staff_filter_results(row, order_row, policy)
@@ -181,8 +205,11 @@ def search_segmented_caregiver_availability(
         )
     )
 
-    required_service_dates = _required_service_dates(
-        loaded_facts.get("confirmed_service_dates") or [], planned_start, planned_end
+    required_service_dates = (
+        tuple(planned_start + timedelta(days=offset) for offset in range((planned_end - planned_start).days + 1))
+        if inquiry else _required_service_dates(
+            loaded_facts.get("confirmed_service_dates") or [], planned_start, planned_end
+        )
     )
     result = derive_segment_availability(
         planned_start_date=planned_start.isoformat(),
