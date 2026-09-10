@@ -1,4 +1,130 @@
-/* Shared Drawer owns the backdrop, header, sizing, scrolling and close control. */
+/* Existing workflow component is presented as a dedicated case page. */
+.order-case-page { max-width: 1360px; margin: 0 auto; color: #302923; padding-bottom: 40px; }
+.order-case-page [hidden] { display: none !important; }
+.order-case-back { border: 0; background: none; padding: 8px 0; color: #84634f; cursor: pointer; font: inherit; }
+.order-case-heading-row { display: flex; justify-content: space-between; align-items: center; gap: 20px; margin-top: 20px; }
+.order-case-heading-row h1 { font-size: 1.8rem; margin: 6px 0; letter-spacing: -.03em; }
+.order-case-heading-row h1:focus { outline: none; }
+.order-case-eyebrow { color: #8d6e5d; font-size: .78rem; letter-spacing: .04em; margin: 0; }
+.order-case-lifecycle { padding: 8px 13px; border-radius: 20px; background: #f2e9df; color: #79533a; font-size: .82rem; }
+.order-case-purpose { margin: 8px 0 20px; color: #7b6e64; line-height: 1.7; }
+.order-case-context { display: flex; flex-wrap: wrap; gap: 20px 36px; padding: 16px 0; border-top: 1px solid #e9ded6; }
+.order-case-context > span { display: grid; gap: 5px; font-size: .88rem; }
+.order-case-context small { color: #938073; font-size: .75rem; }
+.order-case-view-nav { display: flex; flex-wrap: wrap; gap: 24px; border-bottom: 1px solid #e4d6cb; margin: 8px 0 24px; }
+.order-case-view-nav button { border: 0; border-bottom: 3px solid transparent; background: none; padding: 14px 2px; font: inherit; font-weight: 650; color: #806c5d; cursor: pointer; }
+.order-case-view-nav button[aria-current=page] { color: #b64d21; border-bottom-color: #b64d21; }
+.order-case-workspace { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 24px; align-items: start; }
+.order-case-stepper { background: #fffdfa; border: 1px solid #eadfd6; border-radius: 14px; padding: 18px 10px; }
+.order-case-stepper h2 { font-size: .94rem; padding: 0 10px; margin: 0 0 6px; }
+.order-case-stepper > p { font-size: .73rem; color: #8b796b; margin: 0 10px 16px; }
+.order-case-stepper ol { list-style: none; padding: 0; margin: 0; display: grid; gap: 3px; }
+.order-case-stepper button { display: flex; gap: 10px; align-items: flex-start; width: 100%; text-align: left; border: 0; border-radius: 8px; padding: 10px; background: none; color: #67594f; font: inherit; cursor: pointer; }
+.order-case-stepper button.selected { background: #fcebdd; color: #9f421a; }
+.order-case-stepper button > span:last-child { display: grid; gap: 3px; min-width: 0; }
+.order-case-stepper strong { font-size: .79rem; line-height: 1.5; }
+.order-case-stepper small { font-size: .68rem; line-height: 1.5; color: #897768; }
+.order-case-step-number { width: 24px; height: 24px; border: 1px solid #dbcdbf; border-radius: 50%; display: grid; place-items: center; flex-shrink: 0; font-size: .72rem; }
+.order-case-step-number.status-completed { background: #e8f0e5; color: #416846; border-color: #cbdac7; }
+.order-case-task-body { display: grid; gap: 20px; min-width: 0; }
+.order-case-page .order-v2-drawer-current-task { background: #fff; border: 1px solid #eadfd6; border-radius: 14px; padding: 24px; margin: 0; }
+.order-case-page .order-v2-drawer-current-task > header { padding-bottom: 18px; margin-bottom: 20px; border-bottom: 1px solid #eee5dc; }
+.order-case-page .order-v2-drawer-current-task > header > span { display: none; }
+.order-case-page h2, .order-case-page h3 { font-size: 1.1rem; margin-top: 0; }
+.order-case-page h4 { font-size: .96rem; }
+.order-case-page p { line-height: 1.7; }
+.order-case-page .order-v2-drawer-current-task > header p { color: #7b6e64; font-size: .86rem; margin-top: 8px; }
+.order-case-page fieldset { min-width: 0; border: 0; padding: 0; margin: 0; }
+.order-case-page fieldset[aria-label] { display: flex; flex-wrap: wrap; gap: 12px 18px; padding: 16px; border: 1px solid #e8ded4; border-radius: 10px; margin: 14px 0; background: #fcfaf7; }
+.order-case-page legend { font-size: .82rem; font-weight: 650; padding: 0 4px; }
+.order-case-page label { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 7px; font-size: .84rem; line-height: 1.5; }
+.order-case-page input:not([type=checkbox]):not([type=radio]), .order-case-page select, .order-case-page textarea { max-width: 100%; min-height: 40px; padding: 8px 10px; border: 1px solid #d9cbbf; border-radius: 8px; background: #fff; font: inherit; }
+.order-case-page input[type=checkbox] { accent-color: #b95125; width: 16px; height: 16px; }
+.order-case-page button:not(.order-case-back):not(.order-case-stepper button):not(.order-case-view-nav button) { min-height: 40px; padding: 9px 15px; border: 1px solid #d8c7b9; border-radius: 8px; background: #fffaf5; color: #794b2e; font: inherit; font-size: .84rem; cursor: pointer; }
+.order-case-page .order-v2-drawer-current-task > fieldset > section > button { background: #b95125 !important; color: #fff !important; border-color: #b95125 !important; margin-bottom: 18px; }
+.order-case-page button:disabled { opacity: .5; cursor: not-allowed !important; }
+.order-case-page button:focus-visible, .order-case-page a:focus-visible { outline: 3px solid #b95125; outline-offset: 3px; }
+.order-case-page .order-v2-drawer-section { border: 1px solid #eadfd6; border-radius: 14px; padding: 22px; background: #fff; margin: 0; }
+.order-case-page [role=alert] { border-radius: 9px; padding: 14px; margin: 14px 0; background: #fff3ed; color: #914421; }
+.order-case-page section[aria-label$="多月嫂分段方案"] { margin-top: 24px; padding-top: 20px; border-top: 1px solid #e9ded4; }
+.order-case-data-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.order-case-wide { grid-column: 1 / -1; }
+.order-case-facts { display: grid; gap: 14px; margin: 20px 0 0; }
+.order-case-facts > div { display: grid; grid-template-columns: 110px 1fr; gap: 12px; font-size: .88rem; }
+.order-case-facts dt { color: #8a7767; }
+.order-case-facts dd { margin: 0; }
+.order-case-assignment { display: flex; flex-wrap: wrap; gap: 18px; padding: 15px 0; border-top: 1px solid #eee5de; font-size: .88rem; }
+.order-case-read-status { color: #947d6b; font-size: .82rem; }
+.order-case-referral { color: #a94c25; padding: 12px 0; }
+.order-case-changes > p { color: #806d5e; }
+.order-case-work-heading h2 { font-size: 1.4rem; margin: 8px 0; }
+.order-case-work-heading p { color: #806d5e; margin-bottom: 0; }
+.order-case-subnav { display: flex; flex-wrap: wrap; gap: 8px; padding-bottom: 20px; margin-bottom: 22px; border-bottom: 1px solid #e9dfd5; }
+.order-case-page .order-case-subnav button[aria-pressed=true], .order-case-page .order-information-choice button[aria-pressed=true] { border-color: #b95125; color: #a3431b; background: #fff0e6; }
+.order-case-progress { border-top: 1px solid #eadfd6; margin: 18px 10px 0; padding-top: 16px; font-size: .78rem; }
+.order-case-page summary { cursor: pointer; line-height: 1.6; }
+.order-case-progress ol { margin-top: 12px; }
+.order-case-progress li { display: grid; gap: 4px; padding: 8px 0; font-size: .72rem; }
+.order-case-progress small { color: #8a7767; }
+.order-case-document-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; }
+.order-case-document-grid article { padding: 22px; border: 1px solid #e4d8cc; border-radius: 12px; background: #fffdf9; }
+.order-case-document-grid article small { color: #947761; }
+.order-case-document-grid article h3 { margin-top: 10px; }
+.order-case-document-grid article p { font-size: .86rem; color: #7a6a5d; }
+.order-case-document-grid > p { grid-column: 1/-1; }
+.order-case-page a { color: #a44921; text-underline-offset: 4px; }
+.order-case-review-note { color: #836b53; background: #faf5ed; border-left: 3px solid #d0aa80; padding: 12px 14px; font-size: .8rem; }
+.order-case-empty { text-align: center; padding: 32px 16px; border: 1px dashed #dbcabc; border-radius: 12px; background: #fffdf9; }
+.order-case-empty h4 { margin: 0; }
+.order-case-empty p { color: #8b796b; font-size: .84rem; }
+.order-candidate-list-heading { display: flex; gap: 20px; align-items: flex-start; justify-content: space-between; margin-bottom: 20px; }
+.order-candidate-list-heading p { font-size: .84rem; color: #8b796b; }
+.order-candidate-list-heading .order-v2-open-drawer { width: auto; flex-shrink: 0; }
+.order-candidate-cards { display: grid; gap: 18px; }
+.order-candidate-card { border: 1px solid #e4d8cc; padding: 20px; border-radius: 12px; }
+.order-candidate-card > header { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+.order-candidate-card h4 { margin: 0; }
+.order-candidate-card > p { font-size: .84rem; color: #8a7767; }
+.order-candidate-willingness { border-radius: 20px; padding: 5px 10px; font-size: .75rem; background: #f6eee1; color: #896a30; }
+.order-candidate-willingness.willing { background: #eaf2e8; color: #476943; }
+.order-candidate-willingness.unwilling { background: #f3eeee; color: #816a64; }
+.order-candidate-delivery { margin: 18px 0; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
+.order-candidate-delivery > div { padding: 12px; background: #faf7f2; border-radius: 8px; font-size: .8rem; }
+.order-candidate-delivery dd { margin: 6px 0 0; color: #887767; overflow-wrap: anywhere; }
+.order-candidate-card details { border-top: 1px solid #e9dfd5; padding-top: 16px; }
+.order-candidate-card details[open] > summary { margin-bottom: 14px; }
+.order-case-action-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 16px; font-size: .8rem; color: #8a7767; }
+.order-case-action-row .order-v2-open-drawer { width: auto; }
+.order-information-choice { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
+.order-information-choice button { text-align: left; display: grid; gap: 8px; }
+.order-information-choice span { font-size: .76rem; color: #8a7767; }
+.order-case-page .order-information-choice button[aria-pressed="true"],
+.order-case-page .order-case-subnav button[aria-pressed="true"] { background: #f4e4d5; border-color: #a44921; color: #833715; box-shadow: inset 0 -3px #a44921; }
+.order-information-paper { margin: 20px 0; border: 1px solid #e5dbd0; border-radius: 8px; padding: 26px; background: #fff; }
+.order-information-paper > header { text-align: center; padding-bottom: 16px; margin-bottom: 16px; border-bottom: 2px solid #b98f6b; }
+.order-information-paper > header small { color: #947761; }
+.order-information-paper > header h3 { margin: 12px 0; font-size: 1.2rem; }
+.order-information-paper > header p { color: #8a7767; font-size: .82rem; }
+.order-information-paper dl { margin: 0; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); }
+.order-information-paper dl > div { border-bottom: 1px solid #eee5dc; padding: 14px 10px; min-width: 0; }
+.order-information-paper dt { font-size: .78rem; color: #887461; }
+.order-information-paper dd { margin: 7px 0 0; font-size: .87rem; overflow-wrap: anywhere; }
+.order-information-paper dd.is-missing { color: #a08d7d; font-size: .78rem; }
+.order-information-ingredients { margin-top: 24px; }
+.order-information-ingredients p, .order-information-ingredients span { font-size: .8rem; color: #8a7767; }
+.order-information-ingredients > div { display: grid; gap: 10px; }
+@media (max-width: 640px) {
+  .order-case-document-grid, .order-candidate-delivery, .order-information-choice, .order-information-paper dl { grid-template-columns: 1fr; }
+  .order-candidate-list-heading { flex-direction: column; gap: 8px; }
+  .order-information-paper { padding: 16px; }
+  .order-case-page .order-v2-drawer-current-task { padding: 16px; }
+}
+@media (max-width: 900px) {
+  .order-case-workspace { grid-template-columns: 1fr; }
+  .order-case-stepper ol { display: flex; overflow-x: auto; }
+  .order-case-stepper li { flex: 0 0 180px; }
+  .order-case-data-grid { grid-template-columns: 1fr; }
+}
 .order-v2-open-drawer {
   width: 100%;
   min-height: 44px;

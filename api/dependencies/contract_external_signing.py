@@ -197,6 +197,23 @@ class ContractExternalSigningApplication:
             "replayed": source.replayed or persisted.replayed,
         }
 
+    def prepare_client_unsigned(self, case_no, client_documents, actor, idempotency_key, correlation_id):
+        from subsystems.contract_signing.client_contract_application import PrepareExternalClientContractCommand
+        try:
+            source_id, replayed = client_documents.prepare_external_document(
+                PrepareExternalClientContractCommand(case_no, actor.actor_id, idempotency_key, correlation_id))
+        except ValueError as error:
+            if str(error) == "contract_external_signing_accepted_plan_required":
+                raise ExternalSigningTypedError(category="conflict", code="external_signing_accepted_plan_required",
+                    message="請先完成客戶推薦方案確認，再準備客戶契約。") from error
+            raise
+        persisted = self.unsigned_persistence.prepare_and_persist(PrepareAndPersistUnsignedContractPdf(
+            case_no=case_no, source_document_version_id=source_id, actor=actor,
+            idempotency_key=idempotency_key, correlation_id=correlation_id))
+        return {"document_version_id": persisted.document_version_id, "filename": persisted.filename,
+                "mime_type": persisted.mime_type, "size_bytes": persisted.size_bytes,
+                "replayed": replayed or persisted.replayed}
+
     def staff_reminder_readiness(
         self, case_no: str, matching_segment_id: int
     ) -> dict[str, object]:

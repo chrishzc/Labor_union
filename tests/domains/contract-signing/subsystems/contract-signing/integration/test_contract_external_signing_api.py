@@ -334,6 +334,24 @@ def test_full_contract_preview_has_exact_targets_and_typed_values_without_locato
     assert all(term not in client_preview.text.lower() for term in ("locator", "url", "path", "storage"))
 
 
+def test_prepare_client_unsigned_pdf_requires_headers_and_uses_current_actor() -> None:
+    application = FakeApplication()
+    calls = []
+    def prepare(case_no, documents, actor, key, correlation):
+        calls.append((case_no, actor.actor_id, key.value))
+        return {'document_version_id': 92, 'filename': 'client.pdf', 'mime_type': 'application/pdf', 'size_bytes': 100, 'replayed': False}
+    application.prepare_client_unsigned = prepare
+    client = _client(application)
+    client.app.dependency_overrides[route.get_client_contract_signing_application] = lambda: object()
+    path = f'/api/v1/orders/{CASE_NO}/contract-external-signing/client/unsigned-pdf'
+    assert client.post(path).status_code == 422
+    assert not calls
+    response = client.post(path, headers={'Idempotency-Key': KEY, 'X-Correlation-ID': 'client-test:1'})
+    assert response.status_code == 200
+    assert response.json()['data']['document_version_id'] == 92
+    assert calls == [(CASE_NO, 'admin:7', KEY)]
+
+
 def test_prepare_staff_unsigned_pdf_uses_exact_segment_and_returns_safe_metadata() -> None:
     response = _client(FakeApplication()).post(
         f"/api/v1/orders/{CASE_NO}/contract-external-signing/staff-segments/71/unsigned-pdf",

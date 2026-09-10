@@ -67,7 +67,7 @@ describe('Beta server-owned 多月嫂分段方案', () => {
       segment_candidates: availability(2).complete_combinations[0], conflicts: [{ segment_index: 1, staff_id: 101, work_date: '2026-09-07', reason_code: 'occupied' }] });
     render(<OrderMultiCaregiverPlanPanel caseNo={CASE} filters={filters} />);
     fireEvent.click(screen.getByRole('button', { name: '查詢多月嫂完整組合' }));
-    await screen.findByText('後端未回傳可建立的 2 段完整組合。');
+    await screen.findByText('目前沒有可完整銜接的 2 段方案，請調整分段數或媒合條件後再查詢。');
     expect(screen.queryByRole('button', { name: /建立正式/ })).not.toBeInTheDocument();
     expect(mocks.create).not.toHaveBeenCalled();
   });

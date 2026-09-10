@@ -76,6 +76,6 @@ describe('待辦看板 Beta 完全結案彙總', () => {
     const closedCard = screen.getByText('CASE-CLOSED').closest('article');
     if (!(closedCard instanceof HTMLElement)) throw new Error('找不到完全結案案件卡');
     expect(within(closedCard).getByText('完全結案')).toBeInTheDocument();
-    expect(within(closedCard).getByText('所有必要組件已完成。')).toBeInTheDocument();
+    expect(within(closedCard).getByText('所有必要結案項目已完成。')).toBeInTheDocument();
   });
 });

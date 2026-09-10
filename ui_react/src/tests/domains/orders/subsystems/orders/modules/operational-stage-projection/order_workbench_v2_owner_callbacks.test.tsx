@@ -77,9 +77,10 @@ describe('Beta 實際 owner 元件只在正式回讀成立後通知外層', () =
   it('候選意願需同案件同 candidate 的實際 readback，才通知外層', async () => {
     mocks.pool.mockResolvedValueOnce(pool('pending')).mockResolvedValue(pool('willing'));
     const onObserved = vi.fn(); render(<OrderCandidateContactStatusPanel caseNo={CASE} onObserved={onObserved} />);
-    fireEvent.click(screen.getByRole('button', { name: '讀取候選聯絡狀態' }));
+    await screen.findByText('測試月嫂');
+    fireEvent.click(screen.getByText('記錄電話或現場詢問結果'));
     fireEvent.click(await screen.findByRole('button', { name: '記錄 測試月嫂 願意' }));
-    await screen.findByText('意願已記錄並回讀：willing · event #18');
+    await screen.findByText('已記錄意願並重新確認。');
     expect(onObserved).toHaveBeenCalledTimes(1); expect(mocks.pool).toHaveBeenCalledTimes(2);
   });
 

@@ -4,6 +4,7 @@
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import './AccountManagementPage.css';
+import { Drawer } from '../components/Drawer';
 import { accountDirectoryClient } from '../api/access/account_directory_client';
 import { accountCenterClient } from '../api/access/account_center_client';
 import type { AccountMutationReceipt } from '../api/access/account_center_schemas';
@@ -20,6 +21,7 @@ import {
 } from '../adapters/access/audit_query_adapter';
 
 type Tab = 'users' | 'totp' | 'audit';
+type AccountAction = 'enabled' | 'password' | 'mfa' | 'sessions';
 type LoadStatus = 'idle' | 'loading' | 'ready' | 'empty' | 'error';
 
 interface QueryState<T> {
@@ -62,6 +64,7 @@ export const AccountManagementPage: React.FC = () => {
   const [auditState, setAuditState] = useState(initialAuditState);
   const [auditDetailState, setAuditDetailState] = useState(initialAuditDetailState);
   const [commandState, setCommandState] = useState(initialCommandState);
+  const [commandTarget, setCommandTarget] = useState<'create' | { user: AccountDirectoryRow; action: AccountAction } | null>(null);
   const [commandReason, setCommandReason] = useState('');
   const [commandPassword, setCommandPassword] = useState('');
   const [createUsername, setCreateUsername] = useState('');
@@ -79,6 +82,14 @@ export const AccountManagementPage: React.FC = () => {
   const auditDetailController = useRef<AbortController | null>(null);
   const auditActionPrefixRef = useRef('');
   const commandKeys = useRef(new Map<string, string>());
+  const openCommand = (target: NonNullable<typeof commandTarget>) => {
+    setCommandReason('');
+    setCommandPassword('');
+    setCreatePassword('');
+    setCommandState(initialCommandState);
+    setActiveTab('users');
+    setCommandTarget(target);
+  };
 
   const commandKey = (identity: string): string => {
     const existing = commandKeys.current.get(identity);
@@ -113,10 +124,11 @@ export const AccountManagementPage: React.FC = () => {
     try {
       const receipt = await operation(commandKey(identity));
       commandKeys.current.delete(identity);
-      setCommandState({ status: 'ready', data: receipt, error: null });
       setCommandPassword('');
       setCreatePassword('');
       await loadUsers();
+      setCommandState({ status: 'ready', data: receipt, error: null });
+      setCommandTarget(null);
     } catch (error) {
       setCommandState({ status: 'error', data: null, error: errorMessage(error, '帳號操作未完成，請確認資料後再試。') });
     }
@@ -219,8 +231,8 @@ export const AccountManagementPage: React.FC = () => {
           className="account-primary-btn"
           data-control-id="account.user.create"
           aria-describedby="account-command-disabled-reason"
-          onClick={() => void createAccount()}
-          disabled={commandState.status === 'loading' || !commandReason.trim() || !createUsername.trim() || !createDisplayName.trim() || createPassword.length < 12}
+          onClick={() => openCommand('create')}
+          disabled={commandState.status === 'loading' || !['ready', 'empty'].includes(usersState.status)}
         >
           + 建立工作人員帳號
         </button>
@@ -274,14 +286,13 @@ export const AccountManagementPage: React.FC = () => {
             </button>
           </div>
 
-          <div className="account-form-panel" aria-label="帳號中心命令輸入">
+          <Drawer isOpen={commandTarget !== null} onClose={() => { setCommandTarget(null); setCommandPassword(''); setCreatePassword(''); }} closeDisabled={commandState.status === 'loading'} closeLabel="關閉帳號操作" title={commandTarget === 'create' ? '建立工作人員帳號' : '帳號安全操作'}>
             <div className="account-form-panel-header">
-              <h3 className="account-form-panel-title">📝 帳號建立與操作安全參數</h3>
-              <span style={{ fontSize: '0.8rem', color: '#8b7169' }}>
-                填寫後可點擊上方「+ 建立工作人員帳號」或卡片上的操作按鈕
-              </span>
+              <h3 className="account-form-panel-title">{commandTarget === 'create' ? '新帳號資料' : commandTarget ? `${commandTarget.user.displayName}（${commandTarget.user.username}）` : ''}</h3>
+              {commandTarget && commandTarget !== 'create' && <p>本次操作：{({ password: '重設密碼', mfa: '重設驗證器', sessions: '強制登出', enabled: commandTarget.user.enabled ? '停權' : '啟用' })[commandTarget.action]}</p>}
             </div>
-            <div className="account-form-grid">
+            <fieldset className="account-form-grid" disabled={commandState.status === 'loading'}>
+              {commandTarget === 'create' && <>
               <div className="account-field-item">
                 <label htmlFor="account-create-username">新帳號</label>
                 <input
@@ -311,10 +322,11 @@ export const AccountManagementPage: React.FC = () => {
                   onChange={(event) => setCreatePassword(event.target.value)}
                   maxLength={256}
                   autoComplete="new-password"
-                  placeholder="建立帳號密碼 (至少 12 位)"
+                  placeholder="建立帳號密碼 (至少 10 個字元)"
                 />
               </div>
-              <div className="account-field-item">
+              </>}
+              {commandTarget && commandTarget !== 'create' && commandTarget.action === 'password' && <div className="account-field-item">
                 <label htmlFor="account-command-password">重設密碼</label>
                 <input
                   id="account-command-password"
@@ -323,9 +335,9 @@ export const AccountManagementPage: React.FC = () => {
                   onChange={(event) => setCommandPassword(event.target.value)}
                   maxLength={256}
                   autoComplete="new-password"
-                  placeholder="重設密碼使用 (至少 12 位)"
+                  placeholder="重設密碼使用 (至少 10 個字元)"
                 />
-              </div>
+              </div>}
               <div className="account-field-item account-field-item-full">
                 <label htmlFor="account-command-reason">操作原因</label>
                 <input
@@ -336,13 +348,15 @@ export const AccountManagementPage: React.FC = () => {
                   placeholder="請輸入本次操作原因（例如：2026/08 督導人員職務建立與啟用）"
                 />
               </div>
-            </div>
+            </fieldset>
             <p id="account-command-disabled-reason" className="account-query-state">
-              若操作按鈕無法使用，請先填寫操作原因；建立帳號須填齊帳號、顯示名稱與至少 12 位密碼，重設密碼也須輸入至少 12 位新密碼。操作進行中會暫時鎖定其他帳號操作。
+              請填寫本次操作原因。建立或重設密碼至少需要 10 個字元；確認前請核對操作對象。
             </p>
-          </div>
+            {commandState.status === 'error' && <div role="alert">{commandState.error}</div>}
+            <button type="button" className="account-primary-btn" disabled={commandState.status === 'loading' || !commandReason.trim() || (commandTarget === 'create' ? !createUsername.trim() || !createDisplayName.trim() || createPassword.length < 10 : commandTarget?.action === 'password' && commandPassword.length < 10)} onClick={() => { if (commandTarget === 'create') void createAccount(); else if (commandTarget) void mutateAccount(commandTarget.user, commandTarget.action); }}>確認執行</button>
+          </Drawer>
 
-          {commandState.status === 'error' && (
+          {commandState.status === 'error' && commandTarget === null && (
             <div className="account-query-state account-query-error" role="alert">
               <span>{commandState.error}</span>
             </div>
@@ -386,8 +400,8 @@ export const AccountManagementPage: React.FC = () => {
                       type="button"
                       data-control-id="account.user.password-reset"
                       aria-describedby="account-command-disabled-reason"
-                      onClick={() => void mutateAccount(user, 'password')}
-                      disabled={commandState.status === 'loading' || !commandReason.trim() || commandPassword.length < 12}
+                      onClick={() => openCommand({ user, action: 'password' })}
+                      disabled={commandState.status === 'loading'}
                     >
                       重設密碼
                     </button>
@@ -395,8 +409,8 @@ export const AccountManagementPage: React.FC = () => {
                       type="button"
                       data-control-id="account.mfa.reset"
                       aria-describedby="account-command-disabled-reason"
-                      onClick={() => void mutateAccount(user, 'mfa')}
-                      disabled={commandState.status === 'loading' || !commandReason.trim()}
+                      onClick={() => openCommand({ user, action: 'mfa' })}
+                      disabled={commandState.status === 'loading'}
                     >
                       重設 MFA
                     </button>
@@ -404,8 +418,8 @@ export const AccountManagementPage: React.FC = () => {
                       type="button"
                       data-control-id="account.user.session-revoke"
                       aria-describedby="account-command-disabled-reason"
-                      onClick={() => void mutateAccount(user, 'sessions')}
-                      disabled={commandState.status === 'loading' || !commandReason.trim()}
+                      onClick={() => openCommand({ user, action: 'sessions' })}
+                      disabled={commandState.status === 'loading'}
                     >
                       🚪 強制登出
                     </button>
@@ -413,8 +427,8 @@ export const AccountManagementPage: React.FC = () => {
                       type="button"
                       data-control-id={user.enabled ? 'account.user.disable' : 'account.user.enable'}
                       aria-describedby="account-command-disabled-reason"
-                      onClick={() => void mutateAccount(user, 'enabled')}
-                      disabled={commandState.status === 'loading' || !commandReason.trim()}
+                      onClick={() => openCommand({ user, action: 'enabled' })}
+                      disabled={commandState.status === 'loading'}
                     >
                       {user.enabled ? '🔒 停權' : '🔓 啟用'}
                     </button>
@@ -544,6 +558,7 @@ export const AccountManagementPage: React.FC = () => {
               </div>
             </>
           )}
+          <Drawer isOpen={auditDetailState.status !== 'idle'} title="安全稽核明細" closeLabel="關閉稽核明細" onClose={() => { auditDetailController.current?.abort(); auditDetailGeneration.current += 1; setAuditDetailState(initialAuditDetailState); }}>
           {auditDetailState.status === 'loading' && (
             <div className="account-query-state" data-surface-id="account.audit.unavailable">
               載入遮罩明細中…
@@ -571,6 +586,7 @@ export const AccountManagementPage: React.FC = () => {
               )}
             </aside>
           )}
+          </Drawer>
         </section>
       )}
     </div>

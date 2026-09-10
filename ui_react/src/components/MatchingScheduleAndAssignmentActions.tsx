@@ -141,6 +141,7 @@ export const MatchingScheduleAndAssignmentActions: React.FC<Props> = ({
   };
 
   const previewAssignment = async () => {
+    if (assignmentJobId || assignmentBusy) return;
     setAssignmentBusy(true);
     setAssignmentError(null);
     try {
@@ -157,12 +158,14 @@ export const MatchingScheduleAndAssignmentActions: React.FC<Props> = ({
   };
 
   const applyAssignment = async () => {
-    if (!assignmentPreview) return;
+    if (!assignmentPreview || assignmentJobId || assignmentBusy) return;
     setAssignmentBusy(true);
     setAssignmentError(null);
     try {
       const accepted = await assignmentPlanMutationClient.apply(caseNo, assignmentSegments, assignmentPreview, assignmentReason);
       setAssignmentJobId(accepted.job_id);
+      setAssignmentPreview(null);
+      setAssignmentConfirmed(false);
       await observeAssignment(accepted.job_id);
     } catch (error) {
       setAssignmentError(message(error, '無法建立正式排班。'));
@@ -185,13 +188,15 @@ export const MatchingScheduleAndAssignmentActions: React.FC<Props> = ({
         if (observed.status === 'succeeded') {
           const readback = await ordersQueryClient.getAssignmentPlan(caseNo);
           if (readback.assignments.length !== assignmentSegments.length) throw new Error('正式排班完成後回讀分段數不一致。');
-          setAssignmentReadback(true);
           await onAssignmentCompleted();
+          setAssignmentReadback(true);
           return;
         }
         await new Promise((resolve) => window.setTimeout(resolve, 500));
       }
       throw new Error('正式排班仍在處理；請重新查詢結果。');
+    } catch (error) {
+      setAssignmentError(message(error, '正式排班結果尚未完成回讀，請重新查詢原結果。'));
     } finally {
       setAssignmentBusy(false);
     }
@@ -255,7 +260,7 @@ export const MatchingScheduleAndAssignmentActions: React.FC<Props> = ({
       </div>
       {schedule.gate_passed && waitingLockAcquired && !assignmentExists && (
         <div style={{ display: 'grid', gap: '8px', borderTop: '1px solid #dec0b6', paddingTop: '12px' }}>
-          <button type="button" className="matching-action-btn-sm" disabled={assignmentBusy || assignmentSegments.length === 0} onClick={() => void previewAssignment()}>{assignmentBusy ? '處理中…' : '檢查建立正式排班影響'}</button>
+          <button type="button" className="matching-action-btn-sm" disabled={assignmentBusy || assignmentJobId !== null || assignmentSegments.length === 0} onClick={() => void previewAssignment()}>{assignmentBusy ? '處理中…' : '檢查建立正式排班影響'}</button>
           {assignmentPreview && (
             <>
               <div role="status">影響檢查：將建立 {assignmentPreview.assignments.length} 段正式指派並轉換等待訂金鎖。</div>
@@ -267,7 +272,7 @@ export const MatchingScheduleAndAssignmentActions: React.FC<Props> = ({
           {assignmentJobId && !assignmentReadback && (
             <div role="status">{assignmentJob?.status === 'succeeded' ? '正式排班處理已完成，正在核對結果。' : '正式排班處理中。'}</div>
           )}
-          {assignmentJobId && assignmentJob?.status !== 'succeeded' && !assignmentBusy && <button type="button" onClick={() => void observeAssignment(assignmentJobId)}>重新查詢正式排班結果</button>}
+          {assignmentJobId && !assignmentReadback && !assignmentBusy && <button type="button" onClick={() => void observeAssignment(assignmentJobId)}>重新查詢正式排班結果</button>}
           {assignmentReadback && <div role="status" style={{ color: '#166534' }}>正式排班已完成並回讀一致。</div>}
           {assignmentError && <div role="alert" className="mutation-error-banner">{assignmentError}</div>}
         </div>

@@ -24,6 +24,8 @@ from api.dependencies.contract_external_signing import (
 )
 from api.error_contracts import typed_http_error
 from api.schemas.base import BaseResponse
+from api.dependencies.contract_signing import get_client_contract_signing_application
+from subsystems.contract_signing.client_contract_application import ClientContractSigningApplication
 from api.schemas.full_contract_preview import FullContractPreviewView
 from domains.contract_signing.external_signing import ExternalSigningRuleError
 from shared_kernel.fingerprints import PreviewFingerprint
@@ -48,6 +50,7 @@ from subsystems.contract_signing.final_document_workflow import (
     PreviewFinalSignedContractUpload,
 )
 from subsystems.contract_signing.full_contract_preview import FullContractPreviewError
+from subsystems.contract_signing.contract_renderer import ContractRendererError
 from subsystems.contract_signing.unsigned_contract_pdf import UnsignedContractPdfError
 from subsystems.controlled_files.contracts import ControlledFileStorageError
 from subsystems.controlled_files.workflow import (
@@ -511,6 +514,19 @@ def apply_legacy_recovery(
         return BaseResponse(data=_public_receipt(view))
 
     return _call(action, correlation_id)
+
+
+@router.post("/{case_no}/contract-external-signing/client/unsigned-pdf", response_model=BaseResponse[PreparedUnsignedDocumentView])
+def prepare_client_unsigned_pdf(
+    case_no: str = ApiPath(pattern=_CASE),
+    idempotency_key: str = Header(alias="Idempotency-Key", pattern=_IDEMPOTENCY),
+    correlation_id: str = Header(alias="X-Correlation-ID", pattern=_CORRELATION),
+    principal: AdminPrincipal = Depends(require_persisted_admin),
+    application: ContractExternalSigningApplication = Depends(_application),
+    client_documents: ClientContractSigningApplication = Depends(get_client_contract_signing_application),
+):
+    return _call(lambda: BaseResponse(data=application.prepare_client_unsigned(case_no, client_documents,
+        admin_actor_context(principal), IdempotencyKey(idempotency_key), CorrelationId(correlation_id))), correlation_id)
 
 
 @router.get("/{case_no}/contract-external-signing/unsigned-pdf")
@@ -998,6 +1014,8 @@ def _call(action, correlation_id: str):
         return action()
     except HTTPException:
         raise
+    except ContractRendererError as error:
+        raise typed_http_error(503 if error.retryable else 409, 'unavailable' if error.retryable else 'domain_blocked', error.code, str(error), correlation_id, retryable=error.retryable) from error
     except ContractCompletionWorkflowError as error:
         typed = error.error
         raise typed_http_error(409, str(typed.category), typed.code, typed.message, correlation_id, retryable=typed.retryable) from error

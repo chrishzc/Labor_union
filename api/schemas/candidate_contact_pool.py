@@ -35,6 +35,17 @@ class AddCandidatesRequest(_EventIdentity):
 
 class SendCandidateInformationRequest(_EventIdentity):
     info_type: Literal[1, 2]
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class CandidateInformationPreviewView(BaseModel):
+    model_config = ConfigDict(extra="forbid", from_attributes=True)
+    case_no: str
+    candidate_id: int = Field(gt=0)
+    info_type: Literal[1, 2]
+    staff_name: str
+    text: str
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class ManualCandidateInformationPreviewRequest(BaseModel):

@@ -3888,3 +3888,8 @@
     flex-basis: 40px;
   }
 }
+/* Separate daily navigation from occasional configuration without changing routes. */
+.line-nav-group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.line-nav-group-label { font-size: .78rem; font-weight: 700; padding: 0 8px; color: var(--md-sys-color-on-surface-variant); }
+.line-rules-editor-disclosure { margin: 16px 0; border: 1px solid var(--md-sys-color-outline-variant); border-radius: 12px; padding: 12px 16px; }
+.line-rules-editor-disclosure > summary { cursor: pointer; font-weight: 700; }

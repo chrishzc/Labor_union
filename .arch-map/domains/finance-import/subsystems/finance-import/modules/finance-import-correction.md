@@ -11,6 +11,8 @@
 - primary:
   - `infrastructure/mysql/finance_import_repository.py`
   - `ui_react/src/api/finance_import/finance_import_correction_client.ts`
+  - `ui_react/src/components/FinanceImportCorrectionForm.tsx`
+  - `ui_react/src/pages/FinancePage.tsx` — 銀行流水人工核对列的 exact-row 更正入口。
 
 ## Dependencies
 - outbound: `client-finance | staff-payables | government-subsidy` — correction candidate 依 classification 委派 owner command。
@@ -23,6 +25,7 @@
 ## Verification
 - layout_status: `custom_current`
 - test_root: `ui_react/src/tests/finance_import_correction_client.test.ts`
+- test_root: `ui_react/src/tests/domains/finance-import/subsystems/finance-import/modules/finance-import-correction/`
 
 ## Provenance
 - Finance Import correction repository/client ownership — `source_observed` — current source and typed client contract。

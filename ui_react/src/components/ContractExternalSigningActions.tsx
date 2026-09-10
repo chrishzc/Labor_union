@@ -26,7 +26,7 @@ export interface ContractExternalSigningActionsProps {
   onCommitted?: () => Promise<void> | void;
 }
 
-type WorkingOperation = 'query' | 'prepare_staff' | 'download' | 'handoff' | 'reminder_check' | 'reminder_enqueue' | 'staff_report' | 'client_report' | 'final_preview' | 'final_apply' | 'receipt' | 'readback';
+type WorkingOperation = 'query' | 'prepare_client' | 'prepare_staff' | 'download' | 'handoff' | 'reminder_check' | 'reminder_enqueue' | 'staff_report' | 'client_report' | 'final_preview' | 'final_apply' | 'receipt' | 'readback';
 
 interface RecoveryPreviewState {
   target: LegacyRecoveryTarget;
@@ -64,6 +64,10 @@ function safeErrorMessage(error: unknown): string {
   }
   if (error instanceof ApiHttpError) {
     if (error.status === 401 || error.status === 403) return '目前帳號無權處理這筆外部簽約。';
+    if (error.code === 'external_signing_accepted_plan_required') return '請先完成客戶對推薦方案的確認，再準備契約。';
+    if (error.code === 'external_signing_session_facts_unavailable') return '簽約資料尚未備妥，請先確認推薦方案與契約文件。';
+    if (error.code === 'contract_pdf_external_reference_unresolved') return '契約模板缺少舊版引用內容，尚不能產生可簽署 PDF；請先補齊模板。';
+    if (error.code === 'contract_pdf_required_mapping_missing') return '契約必要資料尚未齊全，請先在契約欄位預覽核對案件資料與收款設定。';
     if (error.status === 409) return '簽約資料已變更，請重新查詢後再檢查影響。';
     if (error.retryable || error.status >= 500) return '簽約服務暫時無法使用，請稍後重新查詢。';
     return '這筆操作未通過簽約檢查，請重新查詢目前狀態。';
@@ -190,7 +194,11 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
     const value = await contractExternalSigningClient.query(caseNo, { signal });
     const recovery = value.state === 'superseded' || value.client_target.document_version_id === null
       ? null
-      : await contractExternalSigningClient.queryLegacyRecovery(caseNo, { signal });
+      : await contractExternalSigningClient.queryLegacyRecovery(caseNo, { signal }).catch((error) => {
+          if (error instanceof ApiHttpError && (error.status === 401 || error.status === 403)) throw error;
+          if (!signal?.aborted && generation === requestGeneration.current) setNotice('歷史簽回資料暫時無法查詢；目前契約操作仍可使用。');
+          return null;
+        });
     if (recovery) assertRecoveryQueryMatchesCurrent(value, recovery);
     if (generation !== requestGeneration.current) return value;
     setQuery(value);
@@ -245,6 +253,19 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
       controller.abort();
     };
   }, [caseNo, loadQuery]);
+
+  const prepareClientUnsigned = async () => {
+    const identity = currentIdentity(identities.current, 'prepare-client');
+    setUiState({ type: 'working', operation: 'prepare_client' });
+    setNotice(null);
+    try {
+      const prepared = await contractExternalSigningClient.prepareClientUnsignedPdf(caseNo, identity);
+      identities.current.delete('prepare-client');
+      setNotice(`客戶未簽契約 PDF「${prepared.filename}」已準備完成。`);
+      await loadQuery();
+      await downloadUnsigned(prepared.document_version_id, '客戶');
+    } catch (error) { setUiState({ type: 'error', message: safeErrorMessage(error) }); }
+  };
 
   const prepareStaffUnsigned = async (segmentId: number) => {
     const identity = currentIdentity(identities.current, `prepare-${segmentId}`);
@@ -323,7 +344,6 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
   };
 
   const downloadUnsigned = async (documentVersionId: number, targetLabel: string) => {
-    if (!query?.unsigned_document) return;
     setUiState({ type: 'working', operation: 'download' });
     setNotice(null);
     try {
@@ -556,7 +576,7 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
   return (
     <section aria-label="外部平台簽約與最終 PDF" data-control-id="orders.contract-external-signing.actions" style={{ display: 'grid', gap: '14px' }}>
       <header>
-        <h3 style={{ margin: 0 }}>📄 外部平台簽約與最終 PDF</h3>
+        <h3 style={{ margin: 0 }}>契約下載與簽回</h3>
         <p style={{ margin: '6px 0 0', color: '#74593f', fontSize: '0.84rem' }}>
           送交外部平台後，請於雙方完成簽署時上傳最終 PDF；最終 PDF 驗收才會完成契約並開始定金核銷。
         </p>
@@ -565,19 +585,28 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
       {query && (
         <div role="status" style={{ padding: '10px 12px', border: '1px solid #fed7aa', borderRadius: '10px', background: '#fff8f6' }}>
           <strong>{stateLabel(query)}</strong>
-          <details style={{ fontSize: '0.8rem', color: '#74593f', marginTop: '4px' }}>
-            <summary>技術詳情與資料來源</summary>
-            <div>狀態版本 {query.status_version}</div>
-          </details>
         </div>
       )}
+
+      <div className="order-case-document-grid" aria-label="下載兩種契約">
+        <article><h3>客戶契約 PDF</h3><p>下載未簽署版本，供客戶確認與簽署。</p>
+          <button type="button" disabled={busy || !query?.unsigned_document || query.client_target.document_version_id === null} onClick={() => {
+            if (query?.unsigned_document && query.client_target.document_version_id !== null) void downloadUnsigned(query.client_target.document_version_id, `客戶 ${query.client_target.client_subject_reference} `);
+          }}>下載客戶契約 PDF</button>
+          {query?.state !== 'completed' && <button type="button" disabled={busy} onClick={() => void prepareClientUnsigned()}>準備並下載客戶契約 PDF</button>}
+          {(!query?.unsigned_document || query.client_target.document_version_id === null) && <p>尚無可下載文件時，請先準備契約；需已確認推薦方案，不會發送訊息。</p>}
+        </article>
+        <article><h3>服務人員契約 PDF</h3><p>每位月嫂的契約分別下載。</p>
+          {query?.unsigned_document && query.staff_targets.length > 0 ? query.staff_targets.map((target) => <button key={target.matching_segment_id} type="button" disabled={busy} onClick={() => void downloadUnsigned(target.document_version_id, `月嫂 ${target.staff_subject_reference} `)}>下載服務人員契約 PDF（{target.staff_subject_reference}）</button>) : <><button type="button" disabled>下載服務人員契約 PDF</button><p>{!query ? '尚未取得可下載文件的確認結果。' : '尚無可下載文件。'}若下方有「準備服務人員契約」，請先完成文件準備。</p></>}
+        </article>
+      </div>
 
       {((query && !query.unsigned_document && query.staff_targets.length > 0)
         || (!query && preparationSegments.length > 0)) && (
         <section aria-label="準備月嫂未簽契約 PDF" style={{ border: '1px solid #dec0b6', borderRadius: '10px', padding: '12px', display: 'grid', gap: '8px' }}>
-          <strong>準備月嫂未簽契約 PDF</strong>
+          <strong>準備服務人員契約</strong>
           <div style={{ fontSize: '0.82rem', color: '#74593f' }}>
-            系統會先重新核對目前案件、正式指派與所有必要欄位，再產生受控 PDF；此操作不會送出 LINE。
+            核對案件與服務安排後產生未簽署的契約；此操作不會寄送訊息。
           </div>
           {(query
             ? query.staff_targets.map((target) => target.matching_segment_id)
@@ -588,7 +617,7 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
               disabled={busy}
               onClick={() => void prepareStaffUnsigned(segmentId)}
             >
-              產生月嫂分段 #{segmentId} 未簽 PDF
+              準備服務人員契約 PDF（服務區段 {segmentId}）
             </button>
           ))}
         </section>
@@ -601,10 +630,6 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
             <div style={{ fontSize: '0.82rem', color: '#74593f', marginTop: '4px' }}>
               尚有 {pendingRecoveryTargets.length} 個未完成對象。每筆都必須先核對歷史簽回證據並檢查影響；月嫂完成後才可修復客戶。
             </div>
-            <details style={{ fontSize: '0.78rem', color: '#74593f' }}>
-              <summary>技術詳情與資料來源</summary>
-              <div>Session {recoveryQuery.session_id}｜狀態版本 {recoveryQuery.status_version}｜配對方案 {recoveryQuery.matching_plan_id}</div>
-            </details>
           </header>
 
           {pendingRecoveryTargets.map((target) => {
@@ -621,15 +646,6 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
                 <div style={{ fontSize: '0.8rem', color: '#74593f' }}>
                   {lineageComplete ? '歷史簽回證據完整，可檢查修復影響。' : '找不到完整歷史簽回證據，無法檢查修復影響。'}
                 </div>
-                <details style={{ fontSize: '0.78rem', color: '#74593f' }}>
-                  <summary>簽回證據技術詳情</summary>
-                  <div>
-                    現行文件版本 {target.current_document_version_id}
-                    {lineageComplete
-                      ? `｜歷史文件 ${target.legacy_document_version_id}／事件 ${target.signing_event_id}／receipt ${target.command_receipt_id}／證據 ${target.legacy_media_sha256!.slice(0, 8)}…`
-                      : '｜歷史簽回證據不完整'}
-                  </div>
-                </details>
                 {clientBlocked && <div role="status">需先完成所有月嫂修復，並由系統確認最新簽約狀態。</div>}
                 <label style={{ display: 'grid', gap: '4px' }}>
                   修復原因與人工核對依據
@@ -654,10 +670,6 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
                 {activePreview && (
                   <div style={{ padding: '10px', background: '#fffbeb', borderRadius: '8px', display: 'grid', gap: '6px' }}>
                     <div>現行文件與歷史簽回證據已完成一致性檢查。</div>
-                    <details style={{ fontSize: '0.78rem', color: '#74593f' }}>
-                      <summary>檢查技術詳情</summary>
-                      <div>Preview 已綁定現行文件版本 {activePreview.preview.current_document_version_id} 與歷史證據 {activePreview.preview.legacy_media_sha256.slice(0, 8)}…</div>
-                    </details>
                     {activePreview.preview.blockers.length > 0 && (
                       <ul>{activePreview.preview.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>
                     )}
@@ -696,13 +708,6 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
           <div style={{ display: 'grid', gap: '6px' }}>
             {query.staff_targets.map((target) => (
               <div key={target.matching_segment_id} style={{ display: 'grid', gap: '4px' }}>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void downloadUnsigned(target.document_version_id, `月嫂 ${target.staff_subject_reference} `)}
-                >
-                  下載月嫂 {target.staff_subject_reference} 未簽契約 PDF
-                </button>
                 <button type="button" disabled={busy} onClick={() => void checkReminderReadiness(target.matching_segment_id)}>
                   檢查月嫂 {target.staff_subject_reference} LINE 通知準備度
                 </button>
@@ -729,16 +734,6 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
                 )}
               </div>
             ))}
-            {query.client_target.document_version_id !== null && <button
-              type="button"
-              disabled={busy}
-              onClick={() => void downloadUnsigned(
-                query.client_target.document_version_id!,
-                `客戶 ${query.client_target.client_subject_reference} `,
-              )}
-            >
-              下載客戶 {query.client_target.client_subject_reference} 未簽契約 PDF
-            </button>}
           </div>
           {!query.handoff_recorded && (
             <button type="button" disabled={busy} onClick={() => void recordHandoff()}>
@@ -748,16 +743,6 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
         </section>
       )}
 
-      {query && (
-        <details style={{ border: '1px solid #dec0b6', borderRadius: '10px', padding: '10px 12px', color: '#74593f' }}>
-          <summary>選用稽核資料（不影響最終 PDF 驗收）</summary>
-          <div style={{ marginTop: '6px', fontSize: '0.82rem' }}>
-            月嫂個別回報 {query.staff_targets.filter((target) => target.reported).length}/{query.staff_targets.length}；
-            客戶個別回報 {query.client_target.reported ? '已記錄' : '未記錄'}。
-            個別回報只供追溯，不是契約完成門檻。
-          </div>
-        </details>
-      )}
 
       {query?.handoff_recorded
         && query.state !== 'completed'

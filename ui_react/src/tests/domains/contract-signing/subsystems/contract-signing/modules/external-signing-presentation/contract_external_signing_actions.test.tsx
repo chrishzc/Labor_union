@@ -4,7 +4,7 @@
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiTimeoutError } from '../../../../../../../api/shared/typed_errors';
+import { ApiHttpError, ApiTimeoutError } from '../../../../../../../api/shared/typed_errors';
 import { ContractExternalSigningActions } from '../../../../../../../components/ContractExternalSigningActions';
 import { contractExternalSigningClient } from '../../../../../../../api/orders/contract_external_signing_client';
 
@@ -15,6 +15,7 @@ vi.mock('../../../../../../../api/orders/contract_external_signing_client', asyn
     contractExternalSigningClient: {
       query: vi.fn(),
       prepareStaffUnsignedPdf: vi.fn(),
+      prepareClientUnsignedPdf: vi.fn(),
       getStaffReminderReadiness: vi.fn(),
       enqueueStaffReminder: vi.fn(),
       recordHandoff: vi.fn(),
@@ -233,11 +234,11 @@ describe('ContractExternalSigningActions', () => {
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
 
     render(<ContractExternalSigningActions caseNo="CASE-001" />);
-    fireEvent.click(await screen.findByRole('button', { name: '下載月嫂 STAFF-009 未簽契約 PDF' }));
+    fireEvent.click(await screen.findByRole('button', { name: '下載服務人員契約 PDF（STAFF-009）' }));
     await waitFor(() => expect(contractExternalSigningClient.downloadUnsignedPdf).toHaveBeenCalledWith('CASE-001', 31));
-    fireEvent.click(screen.getByRole('button', { name: '下載月嫂 STAFF-010 未簽契約 PDF' }));
+    fireEvent.click(screen.getByRole('button', { name: '下載服務人員契約 PDF（STAFF-010）' }));
     await waitFor(() => expect(contractExternalSigningClient.downloadUnsignedPdf).toHaveBeenCalledWith('CASE-001', 33));
-    fireEvent.click(screen.getByRole('button', { name: '下載客戶 CLIENT-001 未簽契約 PDF' }));
+    fireEvent.click(screen.getByRole('button', { name: '下載客戶契約 PDF' }));
     await waitFor(() => expect(contractExternalSigningClient.downloadUnsignedPdf).toHaveBeenCalledWith('CASE-001', 32));
 
     expect(contractExternalSigningClient.downloadUnsignedPdf).toHaveBeenCalledTimes(3);
@@ -260,7 +261,7 @@ describe('ContractExternalSigningActions', () => {
       .mockResolvedValueOnce(query);
 
     render(<ContractExternalSigningActions caseNo="CASE-001" />);
-    fireEvent.click(await screen.findByRole('button', { name: '產生月嫂分段 #41 未簽 PDF' }));
+    fireEvent.click(await screen.findByRole('button', { name: '準備服務人員契約 PDF（服務區段 41）' }));
 
     await waitFor(() => expect(contractExternalSigningClient.prepareStaffUnsignedPdf).toHaveBeenCalledWith(
       'CASE-001',
@@ -268,6 +269,29 @@ describe('ContractExternalSigningActions', () => {
       expect.objectContaining({ idempotencyKey: expect.any(String) }),
     ));
     expect(await screen.findByText('已產生月嫂分段 #41 未簽 PDF，正在載入簽約工作。')).toBeInTheDocument();
+  });
+
+  it('prepares and downloads the exact client PDF when there was no old document', async () => {
+    vi.mocked(contractExternalSigningClient.query).mockResolvedValue({
+      ...query, unsigned_document: null,
+      client_target: { ...query.client_target, document_version_id: null },
+    });
+    vi.mocked(contractExternalSigningClient.prepareClientUnsignedPdf).mockResolvedValue({
+      document_version_id: 92, filename: 'new-client.pdf', mime_type: 'application/pdf', size_bytes: 20, replayed: false,
+    });
+    const download = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    vi.stubGlobal('URL', { createObjectURL: vi.fn().mockReturnValue('blob:client'), revokeObjectURL: vi.fn() });
+    render(<ContractExternalSigningActions caseNo="CASE-001" />);
+    fireEvent.click(await screen.findByRole('button', { name: '準備並下載客戶契約 PDF' }));
+    await waitFor(() => expect(contractExternalSigningClient.downloadUnsignedPdf).toHaveBeenCalledWith('CASE-001', 92));
+    expect(download).toHaveBeenCalled();
+  });
+
+  it('explains the missing accepted plan instead of suggesting a version retry', async () => {
+    vi.mocked(contractExternalSigningClient.query).mockRejectedValueOnce(new ApiHttpError(409, 'external_signing_accepted_plan_required', 'plan required'));
+    render(<ContractExternalSigningActions caseNo="CASE-001" />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('請先完成客戶對推薦方案的確認，再準備契約。');
+    expect(screen.getByRole('button', { name: '下載客戶契約 PDF' })).toBeDisabled();
   });
 
   it('shows the URL-less LINE reminder text and readiness without sending it', async () => {
@@ -489,7 +513,7 @@ describe('ContractExternalSigningActions', () => {
       0,
       expect.objectContaining({ idempotencyKey: expect.any(String), receiptId: expect.any(String) }),
     );
-    expect(screen.getByText(/個別回報只供追溯，不是契約完成門檻/)).toBeInTheDocument();
+    expect(screen.queryByText(/選用稽核資料/)).not.toBeInTheDocument();
   });
 
   it('completes one historical staff recovery and enables the client only after fresh server readback', async () => {
@@ -558,7 +582,7 @@ describe('ContractExternalSigningActions', () => {
     expect(screen.getByRole('button', { name: '檢查客戶歷史簽回修復影響' })).toBeDisabled();
     fireEvent.change(screen.getAllByLabelText('修復原因與人工核對依據')[0], { target: { value: '依受控歷史紙本核對完成' } });
     fireEvent.click(screen.getByRole('button', { name: '檢查月嫂歷史簽回修復影響' }));
-    await screen.findByText(/Preview 已綁定現行文件版本 31/);
+    await screen.findByText(/現行文件與歷史簽回證據已完成一致性檢查/);
     fireEvent.click(screen.getByLabelText('我已核對案件、對象、現行文件與歷史簽回證據'));
     fireEvent.click(screen.getByRole('button', { name: '確認套用此筆歷史簽回修復' }));
 
@@ -619,7 +643,7 @@ describe('ContractExternalSigningActions', () => {
     await screen.findByRole('article', { name: '月嫂 STAFF-009 歷史簽回修復' });
     fireEvent.change(screen.getAllByLabelText('修復原因與人工核對依據')[0], { target: { value: '核對完成' } });
     fireEvent.click(screen.getByRole('button', { name: '檢查月嫂歷史簽回修復影響' }));
-    await screen.findByText(/Preview 已綁定現行文件版本 31/);
+    await screen.findByText(/現行文件與歷史簽回證據已完成一致性檢查/);
     fireEvent.click(screen.getByLabelText('我已核對案件、對象、現行文件與歷史簽回證據'));
     fireEvent.click(screen.getByRole('button', { name: '確認套用此筆歷史簽回修復' }));
 
@@ -717,7 +741,8 @@ describe('ContractExternalSigningActions', () => {
       ],
     });
     render(<ContractExternalSigningActions caseNo="CASE-001" />);
-    await screen.findByText(/個別回報只供追溯，不是契約完成門檻/);
+    await waitFor(() => expect(screen.getByRole('button', { name: '下載客戶契約 PDF' })).toBeEnabled());
+    expect(screen.queryByText(/選用稽核資料/)).not.toBeInTheDocument();
 
     expect(screen.queryByLabelText('月嫂完成證據')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /記錄月嫂.*完成回報/ })).not.toBeInTheDocument();

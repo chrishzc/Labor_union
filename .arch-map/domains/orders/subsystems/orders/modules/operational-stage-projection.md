@@ -8,6 +8,7 @@
 將 Orders、Scheduling、Client Finance 與 Payroll 的唯讀根事實整合為營運階段投影；單一 owner fact 不可用時只局部標示 unavailable，不使整頁訂單清單失效。指定 workbench scope 時先依 canonical lifecycle 排除 scope 外案件，再投影十三核心階段；scope 內資料仍採 fail-closed。既有七階段／十一 SOP 契約保持相容，待辦看板 Beta 另由同一正式根事實轉成十三核心階段唯讀契約。
 
 ## Implementation
+- presentation: 待辦看板以卡片進入獨立案件工作畫面；六個工作群組承接既有業務元件，十三階段進度另供展開查閱。群組切換不推進後端階段，已開啟表單保留掛載。案件資料與案件異動分開呈現，不在工會操作頁顯示技術來源。元件沿用原 `OrderWorkbenchV2Drawer` symbol，但不再使用 Drawer overlay；導覽為現有 route 內的本機狀態。
 - primary:
   - `subsystems/orders/stage_projection_query.py`
   - `subsystems/orders/core_stage_projection_query.py`
@@ -17,6 +18,10 @@
   - `ui_react/src/adapters/orders/order_core_stage_projection_adapter.ts`
   - `ui_react/src/pages/OrderWorkbenchV2Page.tsx`
   - `ui_react/src/components/OrderWorkbenchV2Drawer.tsx`
+  - `ui_react/src/components/OrderWorkbenchV2Drawer.css`
+  - `ui_react/src/pages/OrderWorkbenchV2Page.css`
+  - `ui_react/src/components/OrderCandidateQueryPanel.tsx`
+  - `ui_react/src/components/OrderMultiCaregiverPlanPanel.tsx`
   - `infrastructure/mysql/orders_stage_projection_repository.py`
 - entrypoints:
   - `api/routes/orders_stage_projection.py`

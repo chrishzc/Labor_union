@@ -11,6 +11,8 @@ import {
 import { sessionClient } from '../api/auth/session_client';
 import { transport } from '../api/shared/transport';
 import { MatchingScheduleAndAssignmentActions } from '../components/MatchingScheduleAndAssignmentActions';
+import { assignmentPlanMutationClient } from '../api/scheduling/assignment_plan_mutation_client';
+import { ordersQueryClient } from '../api/orders/order_query_client';
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -96,6 +98,30 @@ const sent: MatchingScheduleState = {
 };
 
 describe('M3 日期表 recipient 確認', () => {
+  it('retains the accepted job after parent readback failure and retries only observation', async () => {
+    vi.spyOn(matchingScheduleConfirmationClient, 'query').mockResolvedValue({ ...sent, gate_passed: true });
+    vi.spyOn(assignmentPlanMutationClient, 'preview').mockResolvedValue({ assignments: [{}] } as Awaited<ReturnType<typeof assignmentPlanMutationClient.preview>>);
+    const apply = vi.spyOn(assignmentPlanMutationClient, 'apply').mockResolvedValue({ job_id: 'job-1' } as Awaited<ReturnType<typeof assignmentPlanMutationClient.apply>>);
+    const queryJob = vi.spyOn(assignmentPlanMutationClient, 'queryJob').mockResolvedValue({ status: 'succeeded' } as Awaited<ReturnType<typeof assignmentPlanMutationClient.queryJob>>);
+    vi.spyOn(ordersQueryClient, 'getAssignmentPlan').mockResolvedValue({ assignments: [{}] } as Awaited<ReturnType<typeof ordersQueryClient.getAssignmentPlan>>);
+    const onCompleted = vi.fn().mockRejectedValueOnce(new Error('父頁回讀失敗')).mockResolvedValueOnce(undefined);
+    render(<MatchingScheduleAndAssignmentActions caseNo={sent.case_no} planId={12}
+      planSegments={[{ segmentId: 17, sequence: 1, staffId: 9, assignedStartDate: '2026-08-03', assignedEndDate: '2026-08-05' }]}
+      waitingLockAcquired assignmentExists={false} onAssignmentCompleted={onCompleted} />);
+    fireEvent.click(await screen.findByRole('button', { name: '檢查建立正式排班影響' }));
+    fireEvent.change(await screen.findByLabelText('正式排班原因'), { target: { value: '驗收正式排班' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: '我已核對月嫂、日期、契約與訂金。' }));
+    fireEvent.click(screen.getByRole('button', { name: '確認套用正式排班' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('父頁回讀失敗');
+    expect(screen.queryByText('正式排班已完成並回讀一致。')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '確認套用正式排班' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '檢查建立正式排班影響' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '重新查詢正式排班結果' }));
+    expect(await screen.findByText('正式排班已完成並回讀一致。')).toBeInTheDocument();
+    expect(apply).toHaveBeenCalledTimes(1);
+    expect(queryJob).toHaveBeenCalledTimes(2);
+  });
+
   it('以 authenticated typed client 建立單次 send intent 並驗證 identity readback', async () => {
     vi.spyOn(sessionClient, 'getToken').mockReturnValue('volatile-token');
     const post = vi.spyOn(transport, 'post').mockResolvedValue({

@@ -17,11 +17,12 @@ from domains.line.delivery import (
 )
 from domains.line.identities import LineUserId
 from infrastructure.mysql.line_delivery_task_repository import MySqlLineDeliveryTaskRepository
+from infrastructure.mysql.order_information_repository import MySqlOrderInformationRepository
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.identities import CorrelationId, IdempotencyKey
 from subsystems.scheduling.ports import unconfigured_connection_factory
 from subsystems.scheduling.segmented_availability_query import (
-    search_segmented_caregiver_availability,
+    search_candidate_inquiry_availability,
 )
 
 
@@ -188,13 +189,13 @@ def _close(resource: Any) -> None:
 def _require_full_coverage(case_no: str, staff_id: int, start_date: str, end_date: str) -> dict[str, Any]:
     availability_kwargs = {
         "case_no": case_no,
-        "segment_count": 1,
         "segment_drafts": [{"staff_id": staff_id, "start_date": start_date, "end_date": end_date}],
         "as_of": date.today().isoformat(),
+        "filter_policy": {"region": False, "cooking": False, "preferred_service_days": False, "daily_service_hours": False},
     }
     if segmented_facts_port is not None:
         availability_kwargs["facts_port"] = segmented_facts_port
-    result = search_segmented_caregiver_availability(
+    result = search_candidate_inquiry_availability(
         **availability_kwargs,
     )
     candidate = next(
@@ -623,7 +624,17 @@ def _apply_manual_information_confirmation_in_transaction(
         pass
 
 
-def send_information(case_no: Any, candidate_id: Any, info_type: Any, actor: Any, event_key: Any) -> dict[str, Any]:
+def preview_information(case_no: str, candidate_id: int, info_type: int):
+    case_no = _required_text(case_no, "case_no", 50)
+    candidate_id = _positive_int(candidate_id, "candidate_id")
+    connection = get_connection()
+    try:
+        return MySqlOrderInformationRepository(connection).preview_candidate_information(case_no, candidate_id, info_type)
+    finally:
+        _close(connection)
+
+
+def send_information(case_no: Any, candidate_id: Any, info_type: Any, actor: Any, event_key: Any, preview_fingerprint: str | None = None) -> dict[str, Any]:
     case_no = _required_text(case_no, "case_no", 50)
     candidate_id = _positive_int(candidate_id, "candidate_id")
     actor = _required_text(actor, "actor", 100)
@@ -632,7 +643,7 @@ def send_information(case_no: Any, candidate_id: Any, info_type: Any, actor: Any
         raise ValueError("info_type_invalid")
     return _run_in_application_uow(
         lambda connection, cursor: _send_information_in_transaction(
-            connection, cursor, case_no, candidate_id, info_type, actor, event_key
+            connection, cursor, case_no, candidate_id, info_type, actor, event_key, preview_fingerprint
         )
     )
 
@@ -645,6 +656,7 @@ def _send_information_in_transaction(
     info_type: int,
     actor: str,
     event_key: str,
+    preview_fingerprint: str | None = None,
 ) -> dict[str, Any]:
     try:
         cursor.execute("SELECT p.id AS pool_id, e.staff_id, e.service_start_date, e.service_end_date, s.line_user_id FROM caregiver_candidate_contact_pools p JOIN caregiver_candidate_contact_entries e ON e.pool_id=p.id JOIN staff s ON s.id=e.staff_id WHERE p.case_no=%s AND e.id=%s AND e.active_marker=1 FOR UPDATE", (case_no, candidate_id))
@@ -653,14 +665,19 @@ def _send_information_in_transaction(
         _require_full_coverage(case_no, entry["staff_id"], str(entry["service_start_date"]), str(entry["service_end_date"]))
         recipient = entry.get("line_user_id")
         if not isinstance(recipient, str) or not recipient.strip(): raise ValueError("caregiver_has_no_line_delivery_identity")
-        cursor.execute("SELECT id FROM caregiver_candidate_contact_events WHERE event_key=%s FOR UPDATE", (event_key,))
+        cursor.execute("SELECT id, candidate_id, event_type FROM caregiver_candidate_contact_events WHERE event_key=%s FOR UPDATE", (event_key,))
         existing = cursor.fetchone()
         if isinstance(existing, Mapping):
+            if existing.get("candidate_id") != candidate_id or existing.get("event_type") != f"info_{info_type}_sent":
+                raise ValueError("candidate_information_idempotency_conflict")
             return {"status": "idempotent_replay", "event_id": existing["id"]}
+        preview = MySqlOrderInformationRepository(connection).preview_candidate_information(case_no, candidate_id, info_type, for_update=True)
+        if preview_fingerprint != preview.preview_fingerprint:
+            raise ValueError("candidate_information_preview_stale")
         message = canonical_line_payload_json(
             {
                 "type": "text",
-                "text": f"訂單資訊-{info_type}\n服務期間：{entry['service_start_date']}～{entry['service_end_date']}",
+                "text": preview.text,
             }
         )
         delivery = MySqlLineDeliveryTaskRepository(connection).enqueue(

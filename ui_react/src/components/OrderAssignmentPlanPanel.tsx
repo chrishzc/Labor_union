@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FC } from 'react';
 import type { AssignmentPlan } from '../api/orders/order_query_schemas';
 import { ordersQueryClient } from '../api/orders/order_query_client';
+import { ApiHttpError } from '../api/shared/typed_errors';
 import { waitingDepositLockClient, type ActiveWaitingDepositPlan } from '../api/scheduling/waiting_deposit_lock_client';
 import { MatchingScheduleAndAssignmentActions } from './MatchingScheduleAndAssignmentActions';
 import { ServiceBeforeReplacementActions } from './ServiceBeforeReplacementActions';
@@ -8,12 +9,13 @@ import { ServiceBeforeReplacementActions } from './ServiceBeforeReplacementActio
 interface OrderAssignmentPlanPanelProps {
   caseNo: string;
   onObserved?: () => void;
+  onOpenReplacement?: () => void;
 }
 
 type ReadState =
   | { status: 'idle' }
   | { status: 'loading' }
-  | { status: 'ready'; data: { assignment: AssignmentPlan; matchingPlan: ActiveWaitingDepositPlan } }
+  | { status: 'ready'; data: { assignment: AssignmentPlan; matchingPlan: ActiveWaitingDepositPlan | null } }
   | { status: 'error'; message: string };
 
 function errorMessage(error: unknown): string {
@@ -22,7 +24,7 @@ function errorMessage(error: unknown): string {
     : '正式指派與排班資料讀取失敗';
 }
 
-export const OrderAssignmentPlanPanel: FC<OrderAssignmentPlanPanelProps> = ({ caseNo, onObserved }) => {
+export const OrderAssignmentPlanPanel: FC<OrderAssignmentPlanPanelProps> = ({ caseNo, onObserved, onOpenReplacement }) => {
   const [state, setState] = useState<ReadState>({ status: 'idle' });
   const [replacementOpen, setReplacementOpen] = useState(false);
   const mounted = useRef(false);
@@ -33,7 +35,10 @@ export const OrderAssignmentPlanPanel: FC<OrderAssignmentPlanPanelProps> = ({ ca
     try {
       const [assignment, matchingPlan] = await Promise.all([
         ordersQueryClient.getAssignmentPlan(caseNo),
-        waitingDepositLockClient.queryPlan(caseNo),
+        waitingDepositLockClient.queryPlan(caseNo).catch((error: unknown) => {
+          if (error instanceof ApiHttpError && error.status === 404) return null;
+          throw error;
+        }),
       ]);
       if (assignment.case_no !== caseNo) {
         throw new Error('正式指派回讀案件編號不一致。');
@@ -62,13 +67,13 @@ export const OrderAssignmentPlanPanel: FC<OrderAssignmentPlanPanelProps> = ({ ca
       <button
         type="button"
         className="order-v2-open-drawer"
-        aria-expanded={replacementOpen}
-        onClick={() => setReplacementOpen((current) => !current)}
+        aria-expanded={onOpenReplacement ? undefined : replacementOpen}
+        onClick={() => onOpenReplacement ? onOpenReplacement() : setReplacementOpen((current) => !current)}
       >
         {replacementOpen ? '收合服務前更換月嫂' : '服務前更換月嫂'}
       </button>
 
-      {replacementOpen && (
+      {!onOpenReplacement && replacementOpen && (
         <ServiceBeforeReplacementActions
           caseNo={caseNo}
           onCommitted={() => load(true)}
@@ -80,19 +85,21 @@ export const OrderAssignmentPlanPanel: FC<OrderAssignmentPlanPanelProps> = ({ ca
 
       {state.status === 'error' && <p role="alert">{state.message}</p>}
 
+      {state.status === 'ready' && matchingPlan === null && (
+        <p role="status">尚無有效媒合方案；請至「推薦確認」確認人選。既有正式指派資料仍顯示於下方。</p>
+      )}
+
       {plan !== null && (
         <>
           <dl className="order-v2-business-summary" aria-label="正式指派與排班摘要">
             <div><dt>正式指派</dt><dd>{plan.assignments.length > 0 ? `${plan.assignments.length} 段` : '尚未建立'}</dd></div>
-            <div><dt>排班版本</dt><dd>#{plan.scheduling_version}</dd></div>
-            <div><dt>排班世代</dt><dd>#{plan.scheduling_generation}</dd></div>
             <div><dt>合約服務</dt><dd>{plan.contracted_service_days} 天 × {plan.service_hours_per_day} 小時</dd></div>
           </dl>
 
           {plan.assignments.length === 0 ? (
             <div className="order-v2-notice blocked" role="status">
               <strong>尚無正式指派</strong>
-              <span>Assignment Plan owner 目前未回傳任何正式指派段。</span>
+              <span>此案件尚未安排正式服務人員。</span>
             </div>
           ) : (
             plan.assignments.map((segment) => (

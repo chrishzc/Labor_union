@@ -260,7 +260,7 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
             />
           )}
           {current.contact.customer_decision === 'declined' && (
-            <div role="alert"><strong>客戶拒絕正式推薦</strong><p>目前正式方案受阻；請依後續 owner 流程處理。</p></div>
+            <div role="alert"><strong>客戶拒絕正式推薦</strong><p>目前方案無法繼續，請先確認客戶需求及後續人選。</p></div>
           )}
           {canCommunicate && (
             <>
@@ -322,11 +322,11 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
       {candidates.status === 'ready' && candidates.data.candidates.map((candidate) => (
         <div key={candidate.id}>
           <p>{candidate.staff_name} · 月嫂 #{candidate.staff_id}</p>
-          <p>候選狀態：{candidate.status} · 月嫂意願：{candidate.willingness}</p>
+          <p>月嫂意願：{candidate.willingness === 'willing' ? '願意承接' : candidate.willingness === 'unwilling' ? '不願承接' : '待回覆'}</p>
           <p>候選服務：{candidate.service_start_date} → {candidate.service_end_date}</p>
           {candidate.status === 'active' && candidate.willingness === 'willing' ? (
             <button type="button" className="order-v2-open-drawer" aria-label={`以 ${candidate.staff_name} 建立正式媒合方案`} disabled={busy || !canCreate} onClick={() => void createPlan(candidate)}>建立正式媒合方案</button>
-          ) : <p role="note">不可建立方案：僅 active 且 willing 的 owner candidate 可送入既有正式 route。</p>}
+          ) : <p role="note">尚不可建立方案：人選必須仍在候選名單中，且已確認願意承接。</p>}
         </div>
       ))}
       {busy && <p role="status">正式媒合操作／回讀中…</p>}

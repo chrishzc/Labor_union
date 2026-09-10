@@ -146,11 +146,11 @@ def _timeline(
     )
 
 
-def _matching_pool_cascade_timeline() -> OrderOperationalTimeline:
+def _matching_pool_cascade_timeline(plan_id=1) -> OrderOperationalTimeline:
     """Build the matching-pool gap from current owner root-fact derivation."""
     baseline = _timeline()
     root_facts = {
-        "matching_plan_id": 1,
+        "matching_plan_id": plan_id,
         "candidate_pool_id": None,
         "candidate_pool_candidate_count": 0,
         "candidate_pool_contacted_count": 0,
@@ -267,6 +267,13 @@ def test_legal_independent_owner_gap_matrix_keeps_terminal_aggregate_open(
         assert component.owner == source.source.owner
     else:
         assert component.owner == subsidy.source.owner
+
+
+def test_new_intake_pool_is_not_started_rather_than_unavailable():
+    timeline = _matching_pool_cascade_timeline(plan_id=None)
+    pool = next(item for item in timeline.sop_steps if item.code == "matching_pool")
+    assert pool.status == "not_started"
+    assert pool.availability_reason is None
 
 
 def test_matching_pool_gap_uses_current_owner_cascade_instead_of_contradictory_state():

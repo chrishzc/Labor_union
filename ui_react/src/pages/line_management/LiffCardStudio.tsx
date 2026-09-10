@@ -623,7 +623,7 @@ export const LiffCardStudio: React.FC<LiffCardStudioProps> = ({
           <div>
             <p className="line-hub-eyebrow">LINE 專區</p>
             <h1>LIFF 資產工作室</h1>
-            <p>查找、預覽並驗收正式 LIFF 入口與 Flex 卡片設計。</p>
+            <p>檢視 LIFF 與 Flex 設計稿；正式功能須另以 LINE 身分實測，這裡的預覽不代表已驗收。</p>
           </div>
         </div>
       </header>
@@ -670,8 +670,8 @@ export const LiffCardStudio: React.FC<LiffCardStudioProps> = ({
               className={`liff-asset-card ${item.id === selectedId ? 'active' : ''}`}
               onClick={() => setSelectedId(item.id)}
             >
-              <div className="liff-card-header"><strong>{item.title.replace(/^\d+\.\s*/, '')}</strong><span className="liff-tag">{item.badge}</span></div>
-              <p>{item.subtitle}</p>
+              <div className="liff-card-header"><strong>{item.subtitle}</strong><span className="liff-tag">設計預覽</span></div>
+              <p>{item.title.replace(/^\d+\.\s*/, '')}</p>
             </button>
           ))}
         </div>
@@ -686,7 +686,7 @@ export const LiffCardStudio: React.FC<LiffCardStudioProps> = ({
               <div className="mock-liff-content">
                 <div className="mock-liff-nav"><span>新竹市到宅月子工會</span></div>
                 <div className="mock-liff-body">
-                  <div className="mock-liff-badge">身分由伺服器驗證</div>
+                  <div className="mock-liff-badge">設計預覽・非實際登入狀態</div>
                   <h3 className="mock-liff-title">{selectedItem.subtitle}</h3>
                   <p className="mock-liff-desc">{selectedItem.description}</p>
                   <LiffVisualPreview item={selectedItem} />

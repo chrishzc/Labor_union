@@ -62,8 +62,21 @@ describe('OrderServiceCompletionActions', () => {
     fireEvent.click(apply);
 
     await screen.findByText('服務完成已登記並完成回讀。');
+    expect(screen.queryByRole('button', { name: '確認套用服務完成' })).not.toBeInTheDocument();
     expect(orderServiceCompletionClient.apply).toHaveBeenCalledWith('CASE-001', preview, '已核對最後服務日', expect.any(String));
     await waitFor(() => expect(onCompleted).toHaveBeenCalledOnce());
+  });
+
+  it('does not claim successful readback or retain Apply when parent refresh fails', async () => {
+    render(<OrderServiceCompletionActions caseNo="CASE-001" orderStatus="服務中" onCompleted={async () => { throw new Error('refresh failed'); }} />);
+    fireEvent.click(screen.getByRole('button', { name: '檢查服務完成影響' }));
+    await screen.findByText('服務完成內容已檢查');
+    fireEvent.change(screen.getByLabelText('完工確認原因'), { target: { value: '已核對服務日' } });
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: '確認套用服務完成' }));
+    expect(await screen.findByText(/案件狀態尚未回讀確認/)).toBeInTheDocument();
+    expect(screen.queryByText('服務完成已登記並完成回讀。')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '確認套用服務完成' })).not.toBeInTheDocument();
   });
 
   it('fails closed without exposing provider error details', async () => {

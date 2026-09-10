@@ -247,7 +247,9 @@ describe('待辦看板 Beta 唯讀工作 Drawer', () => {
     clientMocks.getAssignmentPlan.mockRejectedValue(new Error('assignment_unavailable'));
     render(<OrderWorkbenchV2Drawer caseNo="CASE-INCOMPLETE" branchType="normal" onClose={() => {}} />);
     expect(await screen.findByRole('region', { name: '正式補件入口' })).toHaveTextContent('CASE-INCOMPLETE：待補件');
-    expect(await screen.findByText('案件資料不可用：order_detail_projection_invalid')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '訂單與服務資料' }));
+    expect(await screen.findByText('客戶與訂單資料暫時無法取得。')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '案件處理' }));
   });
 
   it('由案件卡開啟／關閉，並只用正式 GET owner facts 與 core-stage projection 呈現案件、服務、派案、13 階、notice 與 lineage', async () => {
@@ -267,20 +269,20 @@ describe('待辦看板 Beta 唯讀工作 Drawer', () => {
     await waitFor(() => expect(screen.getByText('CASE-DRAWER')).toBeInTheDocument());
 
     fireEvent.click(within(cardFor('CASE-DRAWER')).getByRole('button', { name: '開啟案件工作' }));
-    const dialog = await screen.findByRole('dialog', { name: '案件 CASE-DRAWER' });
+    const dialog = await screen.findByRole('region', { name: '案件 CASE-DRAWER' });
 
-    await waitFor(() => expect(within(dialog).getByText('林小芳')).toBeInTheDocument());
-    expect(within(dialog).getByText('2026-10-01')).toBeInTheDocument();
+    await waitFor(() => expect(within(dialog).getAllByText('林小芳').length).toBeGreaterThan(0));
+    fireEvent.click(within(dialog).getByRole('button', { name: '訂單與服務資料' }));
+    expect(within(dialog).getAllByText('2026-10-01').length).toBeGreaterThan(0);
     expect(within(dialog).getByText('20 日')).toBeInTheDocument();
     expect(within(dialog).getByText('2026-10-03')).toBeInTheDocument();
-    expect(within(dialog).getByText('`actual_start_date` 僅代表實際開始，不作為完整服務區間。')).toBeInTheDocument();
-    expect(within(dialog).getByText(/Segment 1 · 月嫂 #42/)).toBeInTheDocument();
-    expect(within(dialog).getByText('lineage_source_assignment_ids：301, 302')).toBeInTheDocument();
-    expect(within(dialog).getAllByTestId('drawer-core-stage')).toHaveLength(13);
-    expect(within(dialog).getByText('正式排班尚未完成')).toBeInTheDocument();
-    expect(within(dialog).getByText('確認服務開始資訊')).toBeInTheDocument();
-    expect(within(dialog).getByText('identity：intake_validation:CASE-DRAWER')).toBeInTheDocument();
-    expect(within(dialog).getByText(`source_projection_digest：${'d'.repeat(64)}`)).toBeInTheDocument();
+    expect(within(dialog).getByText('第 1 段 · 月嫂編號 42')).toBeInTheDocument();
+    expect(within(dialog).getByText('2026-10-01 ～ 2026-10-20')).toBeInTheDocument();
+    expect(within(dialog).queryByText(/lineage_source_assignment_ids/)).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: '案件處理' }));
+    fireEvent.click(within(dialog).getByText('查看十三階段進度'));
+    expect(dialog.querySelectorAll('.order-case-progress li')).toHaveLength(13);
+    expect(within(dialog).queryByText(/source_projection_digest/)).not.toBeInTheDocument();
 
     expect(clientMocks.getCoreStageTimelines).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -300,8 +302,8 @@ describe('待辦看板 Beta 唯讀工作 Drawer', () => {
     expect(clientMocks.historicalPreview).not.toHaveBeenCalled();
     expect(clientMocks.historicalApply).not.toHaveBeenCalled();
 
-    fireEvent.click(within(dialog).getByRole('button', { name: '關閉工作 Drawer' }));
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    fireEvent.click(within(dialog).getByRole('button', { name: '← 返回待辦看板' }));
+    await waitFor(() => expect(screen.queryByRole('region', { name: '案件 CASE-DRAWER' })).not.toBeInTheDocument());
   });
 
   it('歷史支線把歷史配對明確隔離在「歷史來源證據」，不冒充目前正式派案或服務期間', async () => {
@@ -344,19 +346,18 @@ describe('待辦看板 Beta 唯讀工作 Drawer', () => {
     await waitFor(() => expect(screen.getByText('CASE-HISTORY')).toBeInTheDocument());
     fireEvent.click(within(cardFor('CASE-HISTORY')).getByRole('button', { name: '查看案件紀錄' }));
 
-    const dialog = await screen.findByRole('dialog', { name: '案件 CASE-HISTORY' });
+    const dialog = await screen.findByRole('region', { name: '案件 CASE-HISTORY' });
     expect(within(dialog).queryByRole('heading', { name: '13 階段正式進度' })).not.toBeInTheDocument();
     expect(within(dialog).queryByTestId('drawer-core-stage')).not.toBeInTheDocument();
-    const assignmentSection = within(dialog).getByRole('heading', { name: '目前正式派案／Assignment projection' }).closest('section');
+    fireEvent.click(within(dialog).getByRole('button', { name: '訂單與服務資料' }));
+    const assignmentSection = within(dialog).getByRole('heading', { name: '已安排的月嫂與服務日期' }).closest('section');
     if (!(assignmentSection instanceof HTMLElement)) throw new Error('找不到正式派案區');
-    await waitFor(() => expect(within(assignmentSection).getByText(/月嫂 #99/)).toBeInTheDocument());
-    fireEvent.click(within(dialog).getByRole('tab', { name: '歷史與來源' }));
-    const historicalRegion = within(dialog).getByRole('region', { name: '歷史來源證據' });
+    await waitFor(() => expect(within(assignmentSection).getByText(/月嫂編號 99/)).toBeInTheDocument());
+    const historicalRegion = within(dialog).getByRole('heading', { name: '歷史服務資料' }).closest('section')!;
     await waitFor(() => expect(within(historicalRegion).getByText(/歷史月嫂/)).toBeInTheDocument());
     expect(within(assignmentSection).queryByText(/歷史月嫂/)).not.toBeInTheDocument();
-    expect(within(historicalRegion).getByText(/不代表目前正式服務期間或目前正式派案/)).toBeInTheDocument();
-    expect(within(historicalRegion).getByText('excel:legacy-orders:row-17')).toBeInTheDocument();
-    expect(within(historicalRegion).getByText(/歷史月嫂 \(#77, legacy-pairing:77\)/)).toBeInTheDocument();
+    expect(within(historicalRegion).getByText(/不代表目前已確認的服務安排/)).toBeInTheDocument();
+    expect(within(historicalRegion).queryByText('excel:legacy-orders:row-17')).not.toBeInTheDocument();
     expect(clientMocks.historicalQuery).toHaveBeenCalledWith('CASE-HISTORY');
     expect(clientMocks.historicalPreview).not.toHaveBeenCalled();
     expect(clientMocks.historicalApply).not.toHaveBeenCalled();
@@ -370,8 +371,7 @@ describe('待辦看板 Beta 唯讀工作 Drawer', () => {
     clientMocks.getCoreStageTimelines.mockResolvedValue(page([row]));
     setOwnerFacts('CASE-TERMINAL', '測試客戶', 99);
     render(<OrderWorkbenchV2Drawer caseNo="CASE-TERMINAL" branchType={branch} workbenchScope={scope} onClose={vi.fn()} />);
-    const dialog = await screen.findByRole('dialog', { name: '案件 CASE-TERMINAL' });
-    fireEvent.click(within(dialog).getByRole('tab', { name: '進度與提醒' }));
+    const dialog = await screen.findByRole('region', { name: '案件 CASE-TERMINAL' });
     expect(within(dialog).queryByRole('heading', { name: '13 階段正式進度' })).not.toBeInTheDocument();
     await waitFor(() => expect(within(dialog).getByRole('heading', { name: '結算狀態' })).toBeInTheDocument());
     expect(within(dialog).queryByTestId('drawer-core-stage')).not.toBeInTheDocument();
@@ -395,19 +395,17 @@ describe('待辦看板 Beta 唯讀工作 Drawer', () => {
     await waitFor(() => expect(screen.getByText('CASE-STRICT')).toBeInTheDocument());
     fireEvent.click(within(cardFor('CASE-STRICT')).getByRole('button', { name: '開啟案件工作' }));
 
-    const dialog = await screen.findByRole('dialog', { name: '案件 CASE-STRICT' });
-    await waitFor(() => expect(within(dialog).getByText(/正式服務條款不可用：strict decode: invalid OrderTerms payload/)).toBeInTheDocument());
-    expect(within(dialog).getByRole('tab', { name: '案件處理' })).toHaveAttribute('aria-selected', 'true');
-    fireEvent.click(within(dialog).getByRole('tab', { name: '進度與提醒' }));
-    expect(within(dialog).getByRole('tab', { name: '進度與提醒' })).toHaveAttribute('aria-selected', 'true');
-    expect(within(dialog).getAllByTestId('drawer-core-stage')).toHaveLength(13);
+    const dialog = await screen.findByRole('region', { name: '案件 CASE-STRICT' });
+    fireEvent.click(within(dialog).getByRole('button', { name: '訂單與服務資料' }));
+    await waitFor(() => expect(within(dialog).getByText('約定服務資料暫時無法取得。')).toBeInTheDocument());
+    expect(within(dialog).getByRole('button', { name: '訂單與服務資料' })).toHaveAttribute('aria-current', 'page');
     expect(within(dialog).queryByText('1999-01-01')).not.toBeInTheDocument();
 
-    fireEvent.keyDown(document, { key: 'Escape' });
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    fireEvent.click(within(dialog).getByRole('button', { name: '← 返回待辦看板' }));
+    await waitFor(() => expect(screen.queryByRole('region', { name: '案件 CASE-STRICT' })).not.toBeInTheDocument());
     resolveAssignment(assignment('CASE-STRICT', 66));
     await Promise.resolve();
     await Promise.resolve();
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: '案件 CASE-STRICT' })).not.toBeInTheDocument();
   });
 });

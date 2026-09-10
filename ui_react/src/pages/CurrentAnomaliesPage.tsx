@@ -9,6 +9,7 @@ import type { ImportWarningTaskView } from '../api/anomalies/anomaly_query_schem
 import type {
   CurrentAnomalyRecoveryContextView,
   RecoveryAction,
+  AnomalyEvidenceField,
 } from '../api/anomalies/anomaly_detail_schemas';
 import { lineNotificationTimelineClient } from '../api/line/notification_timeline_client';
 import {
@@ -38,6 +39,22 @@ function displayError(error: unknown): string {
 
 function renderEvidence(value: unknown): string {
   return Array.isArray(value) ? value.join('、') : String(value);
+}
+
+const EVIDENCE_LABELS: Readonly<Record<string, string>> = {
+  case_no: '案件編號',
+  notification_reason: '通知未完成原因',
+  applicable_source_count: '相關通知筆數',
+  unresolved_source_count: '待處理通知筆數',
+  root_condition_active: '問題是否仍存在',
+};
+
+function businessEvidence(field: AnomalyEvidenceField): string {
+  if (field.key === 'notification_reason') {
+    return field.value === 'recipient_unavailable' ? '目前無法通知收件者' : '需要確認通知設定，詳見技術資料。';
+  }
+  if (field.kind === 'boolean') return field.value ? '是' : '否';
+  return renderEvidence(field.value);
 }
 
 function ownerLabel(owner: string): string {
@@ -309,7 +326,7 @@ export const CurrentAnomaliesPage: React.FC = () => {
           setReplayError(null);
         }}
         title={selected ? `${selected.definitionCode} 詳情` : '異常詳情'}
-        size="wide"
+        size="normal"
       >
         {detailLoading && <p>正在讀取最新業務資料…</p>}
         {detailError && <div role="alert" className="error-message">{detailError}</div>}
@@ -317,13 +334,19 @@ export const CurrentAnomaliesPage: React.FC = () => {
           <div>
             <p><strong>負責流程：</strong>{ownerLabel(detail.owner_domain)}</p>
             <p><strong>影響：</strong>{detail.blocking ? '目前會阻擋作業' : '目前需要人工確認'}</p>
-            <details><summary>技術詳情與資料來源</summary><p>資料版本：{detail.owner_version}</p><p>負責模組：{detail.owner_domain}</p></details>
+            <details>
+              <summary>技術詳情與資料來源</summary>
+              <p>資料版本：{detail.owner_version}</p><p>負責模組：{detail.owner_domain}</p>
+              <dl>{[...detail.subject.fields, ...detail.details.fields].map((field) => (
+                <React.Fragment key={`${field.kind}:${field.key}`}><dt>{field.key}</dt><dd>{renderEvidence(field.value)}</dd></React.Fragment>
+              ))}</dl>
+            </details>
             <h3>目前可判斷資料</h3>
             <dl>
-              {[...detail.subject.fields, ...detail.details.fields].map((field) => (
+              {[...detail.subject.fields, ...detail.details.fields].filter((field) => EVIDENCE_LABELS[field.key]).map((field) => (
                 <React.Fragment key={`${field.kind}:${field.key}`}>
-                  <dt>{field.key}</dt>
-                  <dd>{renderEvidence(field.value)}</dd>
+                  <dt>{EVIDENCE_LABELS[field.key]}</dt>
+                  <dd>{businessEvidence(field)}</dd>
                 </React.Fragment>
               ))}
             </dl>

@@ -19,6 +19,7 @@
 ## Verification
 - layout_status: `custom_current`
 - test_root: `ui_react/src/tests/order_service_completion_actions.test.tsx`
+- test_root: `ui_react/src/tests/order_workbench_v2_service_completion.test.tsx` — 既有案件入口至完成操作 callback 測試。
 - routing: `.arch-map/tests/domains/orders/subsystems/orders/modules/service-completion-presentation.md`
 
 ## Change triggers

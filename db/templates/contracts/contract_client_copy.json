@@ -3,7 +3,30 @@
   "name": "📜 客戶契約 (真實 Excel 鏡像模板 - 複製版)",
   "desc": "來自 db/templates/contracts/contract_client_copy.xlsx 之真實 Excel 定型化契約範本",
   "template_filename": "contract_client_copy.xlsx",
+  "row_heights": {"64": 42, "116": 48, "117": 36, "118": 36},
+  "static_cells": {
+    "B56": "新生兒照護", "C56": "新生兒照護、嬰兒沐浴、臍帶護理",
+    "B57": "新生兒照顧", "C57": "餵奶、拍嗝、安撫情緒、更換衣物、尿布",
+    "B58": "衛生管理", "C58": "奶瓶消毒、清潔",
+    "B59": "產婦護理", "C59": "協助產婦子宮按摩/疏乳",
+    "B62": "簡單清潔", "C62": "工作範圍內維持基本的乾淨",
+    "B63": "餐後整理", "C63": "餐後餐具收拾（隔夜餐具酌收 $300）",
+    "B64": "廚房清潔", "C64": "保持不油膩乾淨；乙方下班廚餘、垃圾部分可協助處\n理(每日垃圾協助處理1次)",
+    "B65": "浴室清潔", "C65": "維持浴室地板乾淨（不包含馬桶、牆壁、洗臉台與浴室等）",
+    "B69": "新生兒衣物", "C69": "紗布衣、紗布巾貼身衣物以手洗為主(30*30公分(含)",
+    "B70": "機洗衣物", "C70": "8小時服務提供一次機洗服務（以一籃為限）",
+    "B73": "餐點提供", "C73": "4小時服務一日一餐（午或晚）8小時服務二餐(午/晚)協議製作早餐",
+    "B74": "飲食偏好", "C74": "可依甲方需求準備,4小時無甜品製作",
+    "B75": "基本飲品", "C75": "養肝茶、杜仲茶每日熬煮一次",
+    "B76": "基本湯品", "C76": "四物、八珍、十全每日熬煮一次",
+    "B77": "藥膳料理", "C77": "每日烹煮以產婦月餐(三菜1湯)為主，份量最多可加至 3-4 人份",
+    "B80": "生鮮食材", "C80": "每週 2–3 次",
+    "B81": "採買時間", "C81": "採買時間於上班時數內不超過 1 小時",
+    "B82": "其他用品", "C82": "可代購尿布、奶粉；以甲方自行準備為主",
+    "B83": "費用申請", "C83": "所有採購費用收據實報實銷"
+  },
   "param_mappings": {
+    "B39": {"label": "自費服務天數", "db_table": "Client Finance typed stage plan projection", "db_key": "client_finance_self_pay_days", "requiredness": "conditional"},
     "F1": {
       "label": "訂單單號 (F1)",
       "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
@@ -125,9 +148,9 @@
       "requiredness": "conditional"
     },
     "C34": {
-      "label": "訂金日期 (C34)",
-      "db_table": "client_payment_terms (Client Finance typed projection)",
-      "db_key": "deposit_due_date",
+      "label": "訂金實際入帳日期 (C34)",
+      "db_table": "Client Finance actual receipt allocation projection",
+      "db_key": "deposit_receipt_date",
       "requiredness": "conditional"
     },
     "E34": {
@@ -144,9 +167,9 @@
       "requiredness": "conditional"
     },
     "C35": {
-      "label": "第一期應收日期 (C35)",
-      "db_table": "client_payment_terms (Client Finance typed projection)",
-      "db_key": "first_payment_due_date",
+      "label": "第一期實際入帳日期 (C35)",
+      "db_table": "Client Finance actual receipt allocation projection",
+      "db_key": "first_receipt_date",
       "requiredness": "conditional"
     },
     "B36": {
@@ -156,9 +179,9 @@
       "requiredness": "conditional"
     },
     "C36": {
-      "label": "第二期應收日期 (C36)",
-      "db_table": "client_payment_terms (Client Finance typed projection)",
-      "db_key": "second_payment_due_date",
+      "label": "第二期實際入帳日期 (C36)",
+      "db_table": "Client Finance actual receipt allocation projection",
+      "db_key": "second_receipt_date",
       "requiredness": "conditional"
     },
     "D36": {
@@ -176,8 +199,8 @@
     },
     "C37": {
       "label": "樓層費入帳日 (C37)",
-      "db_table": "client_payment_terms.deposit_due_date (Client Finance typed projection; floor fee is due with deposit)",
-      "db_key": "deposit_due_date",
+      "db_table": "Client Finance actual deposit receipt allocation projection",
+      "db_key": "floor_fee_receipt_date",
       "requiredness": "conditional",
       "status": "approved",
       "applicability": "floor_fee_positive"

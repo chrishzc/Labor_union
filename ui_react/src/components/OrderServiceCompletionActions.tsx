@@ -62,7 +62,7 @@ export const OrderServiceCompletionActions: React.FC<Props> = ({
   };
 
   const applyCompletion = async () => {
-    if (!preview || !confirmed || !reason.trim()) return;
+    if (!preview || !confirmed || !reason.trim() || status !== 'previewed') return;
     setStatus('applying');
     setError(null);
     const identity = `${preview.fingerprint}:${reason.trim()}`;
@@ -77,8 +77,10 @@ export const OrderServiceCompletionActions: React.FC<Props> = ({
         key,
       );
       setReceipt(result);
-      setStatus('completed');
+      setPreview(null);
+      setConfirmed(false);
       await onCompleted();
+      setStatus('completed');
     } catch (caught) {
       setError(completionErrorMessage(caught));
       setStatus('failed');
@@ -163,7 +165,7 @@ export const OrderServiceCompletionActions: React.FC<Props> = ({
 
       {receipt && (
         <div role="status" style={{ color: '#166534', fontWeight: 700, marginTop: '10px' }}>
-          服務完成已登記並完成回讀。
+          {status === 'completed' ? '服務完成已登記並完成回讀。' : '服務完成已登記，案件狀態尚未回讀確認，請重新查詢案件。'}
         </div>
       )}
       {error && <div role="alert" style={{ color: '#b91c1c', marginTop: '10px' }}>{error}</div>}

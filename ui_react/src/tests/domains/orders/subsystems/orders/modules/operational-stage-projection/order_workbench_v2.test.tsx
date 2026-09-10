@@ -190,7 +190,7 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
     clientMocks.loadSummaries.mockResolvedValue(summaryPage([]));
   });
 
-  it('直接呈現 server stage/substatus counts，且第 10 階兩個子狀態可獨立查詢', async () => {
+  it('保留正式階段總數與案件摘要，不再提供已移除的小狀態篩選', async () => {
     clientMocks.loadSummaries.mockResolvedValue(summaryPage([
       orderSummary('CASE-PLAN-1', '林小芳', null, '2026-10-01', '2026-10-20'),
       orderSummary('CASE-ACTIVE-1', '王小明', '陳月嫂', '2026-09-01', '2026-09-20'),
@@ -213,12 +213,9 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: /10 排班\/服務 7/ })).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: /10 排班\/服務 7/ }));
 
-    await waitFor(() => expect(screen.getByRole('button', { name: /待開工 3/ })).toBeInTheDocument());
-    expect(screen.getByRole('button', { name: /服務進行中 4/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /服務阻塞 0/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /服務期間已完成 0/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /排班資料不可用 0/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /全部 7/ })).toBeInTheDocument();
+    await screen.findByText('CASE-ACTIVE-1');
+    expect(screen.queryByRole('button', { name: /待開工 3/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /服務進行中 4/ })).not.toBeInTheDocument();
 
     await waitFor(() => {
       expect(within(cardFor('CASE-ACTIVE-1')).getByText('王小明')).toBeInTheDocument();
@@ -226,29 +223,16 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
       expect(within(cardFor('CASE-PLAN-1')).getByText('尚未正式指派')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /待開工 3/ }));
     await waitFor(() => expect(clientMocks.getCoreStageTimelines).toHaveBeenLastCalledWith(
       expect.objectContaining({
         workbench_scope: 'in_progress',
         stage: 'formal_service',
-        substatus_code: 'waiting_to_start',
       }),
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     ));
     await waitFor(() => expect(screen.getByText('CASE-PLAN-1')).toBeInTheDocument());
-    expect(screen.queryByText('CASE-ACTIVE-1')).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /服務進行中 4/ }));
-    await waitFor(() => expect(clientMocks.getCoreStageTimelines).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        workbench_scope: 'in_progress',
-        stage: 'formal_service',
-        substatus_code: 'service_in_progress',
-      }),
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
-    ));
-    await waitFor(() => expect(screen.getByText('CASE-ACTIVE-1')).toBeInTheDocument());
-    expect(screen.queryByText('CASE-PLAN-1')).not.toBeInTheDocument();
+    expect(screen.getByText('CASE-ACTIVE-1')).toBeInTheDocument();
+    expect(clientMocks.getCoreStageTimelines.mock.calls.at(-1)![0]).not.toHaveProperty('substatus_code');
   });
 
   it('搜尋、阻塞、提醒與 進行中／完成／取消 都傳入正式 query', async () => {
@@ -312,7 +296,6 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
       expect.objectContaining({
         workbench_scope: 'completed',
         stage: undefined,
-        substatus_code: undefined,
       }),
       expect.any(Object),
     ));
@@ -325,7 +308,6 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
       expect.objectContaining({
         workbench_scope: 'cancelled',
         stage: undefined,
-        substatus_code: undefined,
       }),
       expect.any(Object),
     ));

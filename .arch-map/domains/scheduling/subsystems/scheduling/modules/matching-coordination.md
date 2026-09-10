@@ -8,11 +8,14 @@
 維護 Scheduling-owned matching coordination 的 candidate/decision/plan/package lineage 與 typed Query／Preview／Apply contract，向 API 暴露可驗證的 current coordination state；React workbench 目前僅保留 isolated-tested、尚未接入 App route 的 transport/presentation。
 
 ## Implementation
+- `api/routes/candidate_contact_pool.py`
+- `api/schemas/candidate_contact_pool.py`
 - primary:
   - `domains/scheduling/matching_coordination.py`
   - `subsystems/scheduling/matching_coordination_contracts.py`
   - `subsystems/scheduling/matching_plan_workflow.py`
   - `subsystems/scheduling/segmented_availability_query.py`
+  - `subsystems/scheduling/candidate_contact_pool_workflow.py` — 初步候選加入及聯絡重新檢查預計期間 availability；不建立正式服務日期。
   - `subsystems/scheduling/historical_pending_deposit_matching.py` — Historical Adoption 可用的 typed proposed-plan writer port。
   - `domains/scheduling/holiday_work_agreement.py` — current plan/version/date-bound 的客戶與全體月嫂國定假日上班協調規則。
   - `subsystems/scheduling/holiday_work_agreement_workflow.py` — 協調結果 Preview／Apply，fresh-read 現行 proposed plan、全分段與官方國定假日後才可寫入。
@@ -25,6 +28,8 @@
   - `infrastructure/mysql/segmented_availability_repository.py`
   - `infrastructure/mysql/matching_holiday_work_agreement_repository.py` — immutable current-plan agreement evidence 與 accepted-date readback。
 - entrypoints:
+  - `api/routes/caregiver_segment_availability.py` — 候選詢問 `/candidate-contact-pool/availability/search` 與正式分段查詢分離；詢問只接受單人查詢。
+  - `ui_react/src/api/scheduling/matching_candidate_workflow_client.ts`、`ui_react/src/components/OrderCandidateQueryPanel.tsx` — 待辦工作台初步候選查詢走預計期間入口；多月嫂正式查詢仍走原入口。
   - `api/routes/matching_coordination.py`
   - `api/schemas/matching_coordination.py`
   - `ui_react/src/api/matching_coordination/matching_coordination_client.ts` — isolated-tested transport client; no current App route consumer.
@@ -35,6 +40,7 @@
   - `scripts/run_holiday_work_agreement_scenario.py` — disposable `lu_test_*` scenario runner；透過 typed public API 驗證任意假日排班拒絕、雙方同意後納入服務日，以及後續拒絕立即撤銷。
 
 ## Dependencies
+- outbound: `orders/order-information` — 候選資訊使用命名投影；預覽與寄送共用相同內容，不建立虛構 assignment。
 - outbound: `orders/orders` — case/lifecycle boundary.
 - outbound: `orders/historical-precision-restart` — restarted `訂單成立` 案件可進入正常媒合；已失效且沒有 generation ownership 的歷史 assignment 不再占用候選檔期。
 - inbound: API transport invokes typed coordination commands, not direct DB writes. The React client/workbench are isolated-tested but have no current App route consumer; current source does not establish a live React/LINE inbound for this module.
@@ -49,6 +55,9 @@
 - test_root: `tests/domains/scheduling/subsystems/scheduling/modules/matching-coordination/`
 - layout_status: `custom_current`
 - test_root: `ui_react/src/tests/domains/scheduling/subsystems/scheduling/modules/matching-coordination/`
+- test_root: `ui_react/src/tests/candidate_contact_pool_client.test.ts`
+- test_root: `ui_react/src/tests/order_workbench_v2_candidate_query.test.tsx` — 既有詢問查詢元件與完整候選回讀測試。
+- test_root: `ui_react/src/tests/order_workbench_v2_candidate_contact_status.test.tsx` — 既有意願確認／回讀元件測試。
 - higher_boundary:
   - tests/integration/ (shared legacy higher-boundary root)
 - layout_gap:

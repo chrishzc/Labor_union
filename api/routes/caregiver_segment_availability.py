@@ -18,6 +18,7 @@ from api.schemas.base import BaseResponse
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.scheduling.segmented_availability_query import (
     search_segmented_caregiver_availability,
+    search_candidate_inquiry_availability,
 )
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.segmented_availability_repository import (
@@ -101,6 +102,10 @@ class CaregiverSegmentAvailabilitySearchRequest(BaseModel):
         if isinstance(value, bool):
             raise ValueError("as_of must be YYYY-MM-DD")
         return _as_iso_date(value, "as_of")
+
+
+class CandidateInquiryAvailabilityRequest(CaregiverSegmentAvailabilitySearchRequest):
+    segment_count: Literal[1] = 1
 
 
 class SingleCaregiverEligibilityRequest(BaseModel):
@@ -249,6 +254,34 @@ def _response_from_service(
         data=CaregiverSegmentAvailabilityResponse(**service_result),
         message=message,
     )
+
+
+@router.post(
+    "/{case_no}/candidate-contact-pool/availability/search",
+    response_model=BaseResponse[CaregiverSegmentAvailabilityResponse],
+)
+def search_candidate_inquiry(
+    request: CandidateInquiryAvailabilityRequest,
+    case_no: str = Path(..., min_length=1),
+    principal: AdminPrincipal = Depends(require_system_admin),
+) -> BaseResponse[CaregiverSegmentAvailabilityResponse]:
+    """Planned-window inquiry only; does not establish formal service dates."""
+    del principal
+    try:
+        result = search_candidate_inquiry_availability(
+            case_no=case_no,
+            segment_drafts=[draft.model_dump(mode="json", exclude_none=True) for draft in request.segment_drafts],
+            as_of=request.as_of,
+            facts_port=MySqlSegmentedAvailabilityFactsRepository(get_connection),
+            filter_policy=request.filters.model_dump(),
+        )
+        return _response_from_service(result, "預計服務期間候選查詢完成；未確認需求待確認。")
+    except ValueError as exc:
+        _raise_availability_value_error(exc, "預計服務期間候選查詢未通過。", "candidate-inquiry-availability")
+    except Exception as exc:
+        raise internal_query_error(
+            "candidate_inquiry_availability_internal_error", "候選詢問檔期查詢失敗。", "candidate-inquiry-availability"
+        ) from exc
 
 
 @router.post(

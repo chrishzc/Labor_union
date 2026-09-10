@@ -58,7 +58,7 @@ const SubsidyPartitionsView: React.FC<{
       <h3>{partition.kind === 'general' ? '一般市民' : '補助市民'}</h3>
       <span>{partition.rowCount}筆｜{partition.totalAmount}</span>
     </div>
-    {partition.rows.length === 0 ? <p>此類別目前沒有資料。</p> : <div className="reports-table-container">
+    {partition.rows.length === 0 ? <p>此類別目前沒有資料。</p> : <div className="reports-table-container" tabIndex={0} role="region" aria-label={`${partition.kind === 'general' ? '一般市民' : '補助市民'}補助明細，可左右捲動`}>
       {kind === 'quarterly' ? <table className="reports-table" aria-label={`${partition.kind === 'general' ? '一般市民' : '補助市民'}季度補助明細`}>
         <thead><tr><th>序號</th><th>市府訂單號碼</th><th>補助資格</th><th>服務開始</th><th>服務結束</th><th>補助時數</th><th>補助天數</th><th>服務天數</th><th>補助款金額</th><th>單價</th><th>雇主</th><th>服務人員</th><th>身分證字號</th><th>地址</th><th>簽領</th></tr></thead>
         <tbody>{partition.rows.map((row) => <tr key={`${partition.kind}-${row.serial}-${row.caseNo}`}>
@@ -114,7 +114,7 @@ const WeeklyCasesView: React.FC<{ report: WeeklyView }> = ({ report }) => <>
     <article><span>資料不完整</span><strong>{displayWeeklyMetric(report.summary.incomplete_count)}</strong></article>
   </section>
   <DataQualityIssues issues={report.dataQualityIssues} />
-  {report.caseRows.length === 0 ? <div className="reports-state">此期間沒有案件受理資料。</div> : <div className="reports-table-container">
+  {report.caseRows.length === 0 ? <div className="reports-state">此期間沒有案件受理資料。</div> : <div className="reports-table-container" tabIndex={0} role="region" aria-label="案件受理資料，可左右捲動">
     <table className="reports-table">
       <thead><tr><th>案件</th><th>申請人</th><th>申請日</th><th>身分</th><th>審核</th><th>訂單狀態</th><th>天數／每日時數</th><th>預計服務期間</th><th>區域</th><th>資料品質</th></tr></thead>
       <tbody>{report.caseRows.map((row) => <tr key={row.case_no}>
@@ -139,7 +139,7 @@ const WeeklySubsidyView: React.FC<{ report: WeeklyView }> = ({ report }) => <>
 </>;
 
 const WeeklyServiceView: React.FC<{ report: WeeklyView }> = ({ report }) => (
-  report.serviceRows.length === 0 ? <div className="reports-state">此期間服務工時無資料。</div> : <div className="reports-table-container">
+  report.serviceRows.length === 0 ? <div className="reports-state">此期間服務工時無資料。</div> : <div className="reports-table-container" tabIndex={0} role="region" aria-label="服務工時資料，可左右捲動">
     <table className="reports-table">
       <thead><tr><th>序號</th><th>市府案號</th><th>雇主</th><th>月嫂</th><th>訂單狀態</th><th>服務開始</th><th>服務結束</th><th>每日服務時數</th><th>每週起始日</th><th>每週結束日</th><th>每週工作日數</th><th>每週工時</th><th>結案</th></tr></thead>
       <tbody>{report.serviceRows.map((row, idx) => <tr key={row.assignment_id}>

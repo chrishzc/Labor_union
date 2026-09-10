@@ -65,7 +65,6 @@ import {
   type StaffProfileViewModel,
 } from '../adapters/staff/staff_profile_adapter';
 
-type StaffTab = 'roster' | 'preferences' | 'unavailability';
 type DirectoryState =
   | { status: 'loading'; items: StaffDirectoryCardViewModel[] }
   | { status: 'ready'; items: StaffDirectoryCardViewModel[]; nextCursor: number | null }
@@ -359,7 +358,6 @@ function isEligibleEndPauseBlock(
 }
 
 export const StaffPage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<StaffTab>('roster');
   const [searchQuery, setSearchQuery] = useState('');
   const [drawerTab, setDrawerTab] = useState<'qualification' | 'preferences' | 'unavailability'>('qualification');
   const [directory, setDirectory] = useState<DirectoryState>({ status: 'loading', items: [] });
@@ -385,7 +383,6 @@ export const StaffPage: React.FC = () => {
     action: null,
   });
   const [showLifecycleForm, setShowLifecycleForm] = useState(false);
-  const [showAvailabilityForm, setShowAvailabilityForm] = useState(false);
   const [rangeStart, setRangeStart] = useState('2026-01-01');
   const [rangeEnd, setRangeEnd] = useState('2026-12-31');
   const [sliceRetryGeneration, setSliceRetryGeneration] = useState(0);
@@ -538,7 +535,6 @@ export const StaffPage: React.FC = () => {
 
     const currentStaffId = selectedStaffId;
 
-    if (activeTab === 'roster') {
       setProfile({ status: 'loading' });
       void staffProfileClient.query(currentStaffId, { signal: controller.signal }).then((value) => {
         if (isCurrentSlice(generation, controller.signal)) {
@@ -576,10 +572,8 @@ export const StaffPage: React.FC = () => {
         if (!isCurrentSlice(generation, controller.signal)) return;
         setQualification({ status: 'error', message: error instanceof Error ? error.message : '資格主檔載入失敗。' });
       });
-    }
-
     return () => controller.abort();
-  }, [activeTab, selectedStaffId, sliceRetryGeneration]);
+  }, [selectedStaffId, sliceRetryGeneration]);
 
   useEffect(() => {
     if (selectedStaffId !== null && drawerTab === 'unavailability') {
@@ -881,18 +875,8 @@ export const StaffPage: React.FC = () => {
             : interactionLocked
               ? '目前有其他操作進行中，請稍候。'
               : null;
-  const cancelPreviewDisabledReason = (block: StaffAvailabilityBlockViewModel): string | null => {
-    if (block.status === 'cancelled') return '此紀錄已取消，不可再次取消。';
-    if (availabilityAction.phase === 'stale') return '資料已變更，請先重新查詢不可服務期間。';
-    if (!cancelReason.trim()) return '請先展開設定並填寫取消原因。';
-    if (interactionLocked) return '目前有其他操作進行中，請稍候。';
-    return null;
-  };
 
-  const changeTab = (nextTab: StaffTab) => {
-    if (nextTab !== activeTab) invalidateSlice();
-    setActiveTab(nextTab);
-  };
+
 
   const changeSelectedStaff = (value: string) => {
     if (selectedStaff !== null) return;
@@ -916,230 +900,7 @@ export const StaffPage: React.FC = () => {
     });
   }, [directorySearch, staffItems, searchQuery]);
 
-  return (
-    <div data-surface-id="staff.page">
-      <div className="page-header-banner staff-page-header">
-        <div>
-          <h1 className="page-title">👥 服務人員與工會成員名冊</h1>
-          <p className="page-subtitle">即時搜尋月嫂、檢視資格主檔、設定接案偏好、維護長假留停與辦理人事異動。</p>
-        </div>
-      </div>
-
-      <div className="staff-tab-bar" role="tablist" aria-label="服務人員管理分頁">
-        <button type="button" role="tab" aria-selected={activeTab === 'roster'} data-control-id="staff.tab.roster" className={`staff-tab-btn ${activeTab === 'roster' ? 'active' : ''}`} disabled={interactionLocked} onClick={() => changeTab('roster')}>
-          👩‍🍼 服務月嫂名冊與卡片
-        </button>
-        <button type="button" role="tab" aria-selected={activeTab === 'preferences'} data-control-id="staff.tab.preferences" className={`staff-tab-btn ${activeTab === 'preferences' ? 'active' : ''}`} disabled={interactionLocked} onClick={() => changeTab('preferences')}>
-          🎯 配對偏好管理工作台
-        </button>
-        <button type="button" role="tab" aria-selected={activeTab === 'unavailability'} data-control-id="staff.tab.unavailability" className={`staff-tab-btn ${activeTab === 'unavailability' ? 'active' : ''}`} disabled={interactionLocked} onClick={() => changeTab('unavailability')}>
-          🏖️ 長假與暫停接案工作台
-        </button>
-      </div>
-
-      <div className="staff-toolbar-card" data-surface-id="staff.toolbar">
-        <div className="staff-search-input-row">
-          <div className="staff-search-input-box">
-            <span className="search-icon" aria-hidden="true">🔍</span>
-            <input
-              type="text"
-              aria-label="即時搜尋月嫂"
-              placeholder="搜尋月嫂姓名、電話或 Staff ID..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-          </div>
-          {searchQuery && (
-            <button
-              type="button"
-              className="staff-clear-btn"
-              onClick={() => setSearchQuery('')}
-            >
-              ✕ 清除搜尋
-            </button>
-          )}
-        </div>
-        <div className="staff-filter-pills-row">
-          <span className="staff-directory-count" role="status">
-            目前已載入 {directory.items.length} 位服務人員
-          </span>
-          <div className="staff-query-selector" data-surface-id="staff.selector" style={{ margin: 0, padding: '4px 10px' }}>
-            <label htmlFor="staff-query-staff" style={{ fontSize: '0.82rem', fontWeight: 600 }}>查詢服務人員</label>
-            <select
-              id="staff-query-staff"
-              data-control-id="staff.selector.staff"
-              disabled={interactionLocked || selectedStaff !== null}
-              value={selectedStaffId ?? ''}
-              onChange={(event) => changeSelectedStaff(event.target.value)}
-              style={{ minHeight: '32px', fontSize: '0.82rem' }}
-            >
-              <option value="">請選擇服務人員</option>
-              {staffItems.map((staff) => <option key={staff.id} value={staff.id}>{staff.displayName}（#{staff.id}）</option>)}
-            </select>
-          </div>
-        </div>
-      </div>
-
-      {activeTab === 'roster' && (
-        <section data-surface-id="staff.directory">
-          {selectedStaffId !== null && qualification.status === 'error' && (
-            <div role="alert" className="staff-directory-message error">
-              資格主檔查詢失敗：{qualification.message}
-              <button type="button" className="staff-next-btn" onClick={() => setSliceRetryGeneration((v) => v + 1)}>
-                重試資格主檔
-              </button>
-            </div>
-          )}
-          {selectedStaffId !== null && selectedStaff === null && qualification.status === 'ready' && (
-            <div className="sr-only" data-surface-id="staff.qualification-master">
-              <p>整體狀態：{qualification.data.overallAvailabilityLabel}</p>
-              {qualification.data.sections.map((section) => {
-                const label = qualificationSectionLabel(section.kind);
-                return (
-                  <div key={section.kind} role="group" aria-label={label}>
-                    <h4>{label} · {section.availabilityLabel}</h4>
-                    {section.items.length === 0 ? (
-                      <small>{qualificationEmptyMessage(section)}</small>
-                    ) : (
-                      <ul>
-                        {section.items.map((item) => (
-                          <li key={item.code}>
-                            <strong>{qualificationFactLabel(section.kind, item.code)}</strong>：{item.displayValue}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {directory.status === 'loading' && (
-            <div className="staff-directory-message" data-control-id="staff.directory.query" role="status">
-              正在載入服務人員摘要名冊…
-            </div>
-          )}
-          {directory.status === 'error' && (
-            <div className="staff-directory-message error" role="alert">
-              載入服務人員名冊失敗：{directory.message}
-              <button type="button" className="staff-next-btn" onClick={() => directory.retryCursor === null ? void loadInitialDirectory() : void loadNextPage()}>
-                {directory.retryCursor === null ? '重試名冊查詢' : '重試載入下一頁'}
-              </button>
-            </div>
-          )}
-          {directory.status === 'ready' && staffItems.length === 0 && (
-            <div className="staff-directory-message" role="status">目前沒有可顯示的服務人員摘要。</div>
-          )}
-
-          {searchQuery.trim() && directorySearch.status === 'loading' && (
-            <div className="staff-directory-message" role="status">正在搜尋完整服務人員名冊…</div>
-          )}
-          {searchQuery.trim() && directorySearch.status === 'error' && (
-            <div className="staff-directory-message error" role="alert">搜尋服務人員失敗：{directorySearch.message}</div>
-          )}
-
-          {directory.status === 'ready' && staffItems.length > 0 && directorySearch.status === 'ready' && filteredStaffItems.length === 0 && (
-            <div className="staff-directory-message" role="status">
-              找不到符合「{searchQuery.trim()}」的服務人員。
-              <button type="button" className="staff-next-btn" onClick={() => setSearchQuery('')}>
-                清除搜尋
-              </button>
-            </div>
-          )}
-
-          {filteredStaffItems.length > 0 && (
-            <div className="staff-grid">
-              {filteredStaffItems.map((staff) => (
-                <article key={staff.id} className="staff-card" data-control-id={`staff.card.${staff.id}`}>
-                  <div className="staff-card-header">
-                    <div className="staff-avatar-name">
-                      <div className="staff-avatar" aria-hidden="true">👩‍🍼</div>
-                      <div>
-                        <div className="staff-name">
-                          {staff.displayName}
-                          <span className="staff-id-badge">#{staff.id}</span>
-                        </div>
-                        <div className="staff-phone">📞 {staff.displayPhone}</div>
-                      </div>
-                    </div>
-                    {selectedStaffId === staff.id && lifecycle.status === 'ready' && (
-                      <span className="staff-unavailable-pill">{lifecycle.data.stateLabel}</span>
-                    )}
-                  </div>
-
-                  {selectedStaffId === staff.id && <div className="staff-card-pref-summary" data-surface-id={`staff.card.case-preference.${staff.id}`}>
-                    {selectedStaffId === staff.id && casePreferenceSummary.status === 'idle' && <span>🎯 接案偏好摘要待查詢</span>}
-                    {selectedStaffId === staff.id && casePreferenceSummary.status === 'loading' && <span role="status">🎯 正在載入接案偏好摘要…</span>}
-                    {selectedStaffId === staff.id && casePreferenceSummary.status === 'error' && <span>🎯 接案偏好目前無法讀取</span>}
-                    {selectedStaffId === staff.id && casePreferenceSummary.status === 'ready' && (
-                      <div>
-                        {casePreferenceSummary.data.topics.map((topic) => (
-                          <div key={topic.key} role="group" aria-label={topic.label}>
-                            <strong>{topic.label}</strong>：{topic.valuesText}
-                            {topic.otherDetailStatus === 'ready' && topic.detailText && <>；{topic.detailText}</>}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>}
-
-                  <div className="staff-card-footer">
-                    <button
-                      type="button"
-                      data-control-id={`staff.drawer.open.${staff.id}`}
-                      className="staff-view-btn"
-                      disabled={interactionLocked}
-                      onClick={() => {
-                        invalidateSlice();
-                        setSelectedStaffId(staff.id);
-                        setSelectedStaff(staff);
-                      }}
-                    >
-                      👩‍🍼 檢視服務人員摘要 ➔
-                    </button>
-                    <button
-                      type="button"
-                      data-control-id={`staff.lifecycle.open.${staff.id}`}
-                      className="sr-only"
-                      disabled={interactionLocked}
-                      onClick={() => {
-                        invalidateSlice();
-                        setSelectedStaffId(staff.id);
-                        setSelectedStaff(staff);
-                        setDrawerTab('unavailability');
-                      }}
-                    >
-                      辦理退役／復職
-                    </button>
-                  </div>
-                </article>
-              ))}
-            </div>
-          )}
-
-          {!searchQuery.trim() && directory.status === 'ready' && directory.nextCursor !== null && (
-            <div className="staff-pagination">
-              <button type="button" data-control-id="staff.directory.next-page" className="staff-next-btn" disabled={interactionLocked} onClick={() => void loadNextPage()}>
-                載入下一頁
-              </button>
-            </div>
-          )}
-          {directory.status === 'loading-more' && <div className="staff-directory-message" role="status">正在載入下一頁摘要…</div>}
-        </section>
-      )}
-
-      {activeTab === 'preferences' && (
-        <section className="staff-workbench" data-surface-id="staff.preferences">
-          <div className="staff-section-header">
-            <div><h2>🎯 六大接案能力人工維護</h2><p>只維護六個 canonical relation；預覽確認後才能套用。</p></div>
-          </div>
-          {selectedStaffId === null && <div className="staff-directory-message">請先選擇服務人員。</div>}
-          {selectedStaffId !== null && <StaffCasePreferenceManualEditor staffId={selectedStaffId} surfaceId="staff.preferences.case-preference-manual" />}
-        </section>
-      )}
-
-      {activeTab === 'unavailability' && (
+  const renderAvailabilityWorkbench = () => (
         <section className="staff-workbench" data-surface-id="staff.unavailability">
           <div className="staff-section-header">
             <div><h2>🏖️ 月嫂長假與暫停接案期間維護</h2><p>查詢後預覽變更，確認無衝突再套用。</p></div>
@@ -1163,11 +924,11 @@ export const StaffPage: React.FC = () => {
             <div className="staff-unavailability-row header" role="row">
               <span role="columnheader">月嫂姓名</span><span role="columnheader">類別</span><span role="columnheader">不可服務區間</span><span role="columnheader">狀態／操作</span>
             </div>
-            {availability.status === 'ready' && availability.data.length === 0 && <div className="staff-unavailability-row" role="row"><span role="cell">此範圍沒有不可服務紀錄。</span><span role="cell">—</span><span role="cell">—</span><span role="cell">無可取消紀錄</span></div>}
+            {availability.status === 'ready' && availability.data.length === 0 && <div className="staff-unavailability-row" role="row"><span role="cell">此範圍沒有不可服務紀錄。是否可派工仍需依案件日期、既有排班與資格條件查詢。</span><span role="cell">—</span><span role="cell">—</span><span role="cell">無可取消紀錄</span></div>}
             {availability.status === 'ready' && availability.data.map((block) => (
               <div className="staff-unavailability-row" role="row" key={block.blockId}>
                 <span role="cell">#{block.staffId}</span><span role="cell">{block.kindLabel}</span><span role="cell">{block.startDate} ～ {block.displayEndDate}</span>
-                <span role="cell" className="staff-action-pair"><span>{block.statusLabel}</span><button type="button" data-control-id="staff.availability.cancel.preview" className="staff-next-btn" disabled={!cancelReason.trim() || block.status === 'cancelled' || interactionLocked || availabilityAction.phase === 'stale'} onClick={() => void previewAvailability({ action: 'cancel', block_id: block.blockId, reason: cancelReason.trim() })}>預覽取消</button></span>
+                <span role="cell" className="staff-action-pair"><span>{block.statusLabel}</span><button type="button" data-control-id="staff.availability.cancel.preview" className="staff-next-btn" disabled={!cancelReason.trim() || block.status === 'cancelled' || interactionLocked || availabilityAction.phase === 'stale'} onClick={() => void previewAvailability({ action: 'cancel', block_id: block.blockId, reason: cancelReason.trim() })}>預覽取消</button>{block.status === 'cancelled' && <small>此紀錄已取消，不可再次取消。</small>}</span>
               </div>
             ))}
             {availability.status === 'idle' && <div className="staff-unavailability-row" role="row"><span role="cell">請先設定日期範圍並查詢。</span><span role="cell">—</span><span role="cell">—</span><span role="cell">查詢後顯示可用操作</span></div>}
@@ -1178,6 +939,7 @@ export const StaffPage: React.FC = () => {
             <button type="button" data-control-id="staff.availability.cancel.apply" className="staff-next-btn" disabled={availabilityAction.phase !== 'preview_ready' || availabilityAction.payload?.action !== 'cancel'} onClick={() => void submitAvailability()}>套用取消</button>
           </div>
           {availabilityAction.preview && <div className="staff-action-status">預覽已完成：不可服務期間變更已通過檢查，請確認後套用。</div>}
+          {availabilityAction.receipt && <div className="staff-action-status" role="status" aria-label="不可服務期間變更結果">不可服務期間已更新：{availabilityAction.receipt.block.start_date} ～ {availabilityAction.receipt.block.end_date ?? '持續中'}</div>}
           {availabilityAction.message && <div className={`staff-action-status ${availabilityAction.phase === 'error' || availabilityAction.phase === 'stale' ? 'error' : ''}`} role="status">{availabilityAction.message}</div>}
           {availabilityAction.phase === 'stale' && <button type="button" className="staff-next-btn" disabled={!rangeStart || !rangeEnd} onClick={() => void queryAvailability()}>重新查詢不可服務期間</button>}
           {availabilityAction.phase === 'outcome_unknown' && <button type="button" className="staff-next-btn" onClick={() => void submitAvailability(true)}>以相同內容重試</button>}
@@ -1261,12 +1023,198 @@ export const StaffPage: React.FC = () => {
             </div>
           </section>
         </section>
-      )}
+  );
+
+  return (
+    <div data-surface-id="staff.page">
+      <div className="page-header-banner staff-page-header">
+        <div>
+          <h1 className="page-title">👥 服務人員與工會成員名冊</h1>
+          <p className="page-subtitle">即時搜尋月嫂、檢視資格主檔、設定接案偏好、維護長假留停與辦理人事異動。</p>
+        </div>
+      </div>
+
+
+      <div className="staff-toolbar-card" data-surface-id="staff.toolbar">
+        <div className="staff-search-input-row">
+          <div className="staff-search-input-box">
+            <span className="search-icon" aria-hidden="true">🔍</span>
+            <input
+              type="text"
+              aria-label="即時搜尋月嫂"
+              placeholder="搜尋月嫂姓名、電話或 Staff ID..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
+          {searchQuery && (
+            <button
+              type="button"
+              className="staff-clear-btn"
+              onClick={() => setSearchQuery('')}
+            >
+              ✕ 清除搜尋
+            </button>
+          )}
+        </div>
+        <div className="staff-filter-pills-row">
+          <span className="staff-directory-count" role="status">
+            目前已載入 {directory.items.length} 位服務人員
+          </span>
+          <div className="staff-query-selector" data-surface-id="staff.selector" style={{ margin: 0, padding: '4px 10px' }}>
+            <label htmlFor="staff-query-staff" style={{ fontSize: '0.82rem', fontWeight: 600 }}>查詢服務人員</label>
+            <select
+              id="staff-query-staff"
+              data-control-id="staff.selector.staff"
+              disabled={interactionLocked || selectedStaff !== null}
+              value={selectedStaffId ?? ''}
+              onChange={(event) => changeSelectedStaff(event.target.value)}
+              style={{ minHeight: '32px', fontSize: '0.82rem' }}
+            >
+              <option value="">請選擇服務人員</option>
+              {staffItems.map((staff) => <option key={staff.id} value={staff.id}>{staff.displayName}（#{staff.id}）</option>)}
+            </select>
+          </div>
+        </div>
+      </div>
+
+        <section data-surface-id="staff.directory">
+          {selectedStaffId !== null && qualification.status === 'error' && (
+            <div role="alert" className="staff-directory-message error">
+              資格主檔查詢失敗：{qualification.message}
+              <button type="button" className="staff-next-btn" onClick={() => setSliceRetryGeneration((v) => v + 1)}>
+                重試資格主檔
+              </button>
+            </div>
+          )}
+          {selectedStaffId !== null && selectedStaff === null && qualification.status === 'ready' && (
+            <div className="sr-only" data-surface-id="staff.qualification-master">
+              <p>整體狀態：{qualification.data.overallAvailabilityLabel}</p>
+              {qualification.data.sections.map((section) => {
+                const label = qualificationSectionLabel(section.kind);
+                return (
+                  <div key={section.kind} role="group" aria-label={label}>
+                    <h4>{label} · {section.availabilityLabel}</h4>
+                    {section.items.length === 0 ? (
+                      <small>{qualificationEmptyMessage(section)}</small>
+                    ) : (
+                      <ul>
+                        {section.items.map((item) => (
+                          <li key={item.code}>
+                            <strong>{qualificationFactLabel(section.kind, item.code)}</strong>：{item.displayValue}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {directory.status === 'loading' && (
+            <div className="staff-directory-message" data-control-id="staff.directory.query" role="status">
+              正在載入服務人員摘要名冊…
+            </div>
+          )}
+          {directory.status === 'error' && (
+            <div className="staff-directory-message error" role="alert">
+              載入服務人員名冊失敗：{directory.message}
+              <button type="button" className="staff-next-btn" onClick={() => directory.retryCursor === null ? void loadInitialDirectory() : void loadNextPage()}>
+                {directory.retryCursor === null ? '重試名冊查詢' : '重試載入下一頁'}
+              </button>
+            </div>
+          )}
+          {directory.status === 'ready' && staffItems.length === 0 && (
+            <div className="staff-directory-message" role="status">目前沒有可顯示的服務人員摘要。</div>
+          )}
+
+          {searchQuery.trim() && directorySearch.status === 'loading' && (
+            <div className="staff-directory-message" role="status">正在搜尋完整服務人員名冊…</div>
+          )}
+          {searchQuery.trim() && directorySearch.status === 'error' && (
+            <div className="staff-directory-message error" role="alert">搜尋服務人員失敗：{directorySearch.message}</div>
+          )}
+
+          {directory.status === 'ready' && staffItems.length > 0 && directorySearch.status === 'ready' && filteredStaffItems.length === 0 && (
+            <div className="staff-directory-message" role="status">
+              找不到符合「{searchQuery.trim()}」的服務人員。
+              <button type="button" className="staff-next-btn" onClick={() => setSearchQuery('')}>
+                清除搜尋
+              </button>
+            </div>
+          )}
+
+          {filteredStaffItems.length > 0 && (
+            <div className="staff-grid">
+              {filteredStaffItems.map((staff) => (
+                <article key={staff.id} className="staff-card" data-control-id={`staff.card.${staff.id}`}>
+                  <div className="staff-card-header">
+                    <div className="staff-avatar-name">
+                      <div className="staff-avatar" aria-hidden="true">👩‍🍼</div>
+                      <div>
+                        <div className="staff-name">
+                          {staff.displayName}
+                          <span className="staff-id-badge">#{staff.id}</span>
+                        </div>
+                        <div className="staff-phone">電話：{staff.phone ?? '未登錄'}</div>
+                        <div className="staff-phone">學歷：{staff.displayEducation}</div>
+                      </div>
+                    </div>
+                  </div>
+
+
+                  <div className="staff-card-footer">
+                    <button
+                      type="button"
+                      data-control-id={`staff.drawer.open.${staff.id}`}
+                      className="staff-view-btn"
+                      aria-label={`查看 ${staff.displayName} 的詳情`}
+                      aria-haspopup="dialog"
+                      disabled={interactionLocked}
+                      onClick={() => {
+                        invalidateSlice();
+                        setSelectedStaffId(staff.id);
+                        setSelectedStaff(staff);
+                        setDrawerTab('qualification');
+                      }}
+                    >
+                      查看詳情 →
+                    </button>
+                    <button
+                      type="button"
+                      data-control-id={`staff.lifecycle.open.${staff.id}`}
+                      className="sr-only"
+                      disabled={interactionLocked}
+                      onClick={() => {
+                        invalidateSlice();
+                        setSelectedStaffId(staff.id);
+                        setSelectedStaff(staff);
+                        setDrawerTab('unavailability');
+                      }}
+                    >
+                      辦理退役／復職
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+
+          {!searchQuery.trim() && directory.status === 'ready' && directory.nextCursor !== null && (
+            <div className="staff-pagination">
+              <button type="button" data-control-id="staff.directory.next-page" className="staff-next-btn" disabled={interactionLocked} onClick={() => void loadNextPage()}>
+                載入下一頁
+              </button>
+            </div>
+          )}
+          {directory.status === 'loading-more' && <div className="staff-directory-message" role="status">正在載入下一頁摘要…</div>}
+        </section>
 
       <Drawer
         isOpen={selectedStaff !== null}
         onClose={() => { if (!interactionLocked) setSelectedStaff(null); }}
-        title={`👩‍🍼 服務人員摘要 - ${selectedStaff?.displayName ?? ''}`}
+        title={`月嫂詳情 — ${selectedStaff?.displayName ?? ''}`}
         size="wide"
         footer={
           <div className="staff-drawer-footer">
@@ -1449,6 +1397,11 @@ export const StaffPage: React.FC = () => {
             {/* Drawer Tab 2: 接案偏好設定 */}
             {drawerTab === 'preferences' && (
               <section className="staff-drawer-section" data-surface-id="staff.drawer.preferences">
+                {casePreferenceSummary.status === 'loading' && <p role="status">正在讀取接案偏好…</p>}
+                {casePreferenceSummary.status === 'error' && <p role="alert">接案偏好摘要暫時無法取得。</p>}
+                {casePreferenceSummary.status === 'ready' && <details><summary>查看接案偏好摘要</summary>
+                  {casePreferenceSummary.data.topics.map((topic) => <p key={topic.key}><strong>{topic.label}</strong>：{topic.valuesText}{topic.otherDetailStatus === 'ready' && topic.detailText ? `；${topic.detailText}` : ''}</p>)}
+                </details>}
                 {selectedStaffId !== null && <StaffCasePreferenceManualEditor staffId={selectedStaffId} />}
               </section>
             )}
@@ -1456,6 +1409,7 @@ export const StaffPage: React.FC = () => {
             {/* Drawer Tab 3: 接案狀態管理 (採用國定假日 QUERY → PREVIEW → APPLY → RECEIPT 工作台模式) */}
             {drawerTab === 'unavailability' && (
               <section className="staff-drawer-section">
+                {renderAvailabilityWorkbench()}
                 {/* 區塊 1: 📇 人事任職狀態與異動辦理 */}
                 <div className="staff-holiday-workbench" data-surface-id="staff.lifecycle">
                   <header className="staff-workbench-header">
@@ -1667,281 +1621,7 @@ export const StaffPage: React.FC = () => {
                   </div>
                 </div>
 
-                {/* 區塊 2: 🏖️ 不接案期間與請假政策維護 (Availability) */}
-                <div className="staff-holiday-workbench" data-surface-id="staff.drawer.unavailability">
-                  <header className="staff-workbench-header">
-                    <div>
-                      <p className="staff-workbench-kicker">查詢 → 預覽 → 確認套用</p>
-                      <h2 className="staff-workbench-title">🏖️ 不接案期間與請假政策維護</h2>
-                      <p className="staff-workbench-desc">不可服務期間以正式日曆資料為準，排班媒合時將自動避開已登記的請假時段。</p>
-                    </div>
-                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                      <button
-                        type="button"
-                        className="staff-primary-btn"
-                        disabled={interactionLocked || availabilityAction.phase === 'stale'}
-                        onClick={() => {
-                          invalidateSlice();
-                          setAvailabilityAction(initialActionState());
-                          setShowAvailabilityForm((prev) => !prev);
-                        }}
-                      >
-                        {showAvailabilityForm ? '✕ 收合設定' : '➕ 新增請假／暫停接案'}
-                      </button>
-                      <span className="staff-unavailable-pill active">
-                        {availability.status === 'ready'
-                          ? '已載入'
-                          : availability.status === 'loading'
-                            ? '載入中'
-                            : availability.status === 'error'
-                              ? '載入失敗'
-                              : '待查詢'}
-                      </span>
-                    </div>
-                  </header>
 
-                  {/* 元數據列 */}
-                  {availability.status === 'ready' && (
-                    <div className="staff-holiday-meta-bar">
-                      <span>已登記不接案紀錄：{availability.data.length} 筆</span>
-                    </div>
-                  )}
-
-                  {availability.status === 'error' && (
-                    <div className="staff-directory-message error" role="alert">
-                      {availability.message}
-                      <button type="button" className="staff-next-btn" onClick={() => void queryAvailability()}>重試不可服務期間</button>
-                    </div>
-                  )}
-
-                  {/* 不可服務期間清單 (Item list) */}
-                  <div className="staff-unavailability-table" role="table" aria-label="不可服務期間">
-                    <div className="staff-unavailability-row header" role="row">
-                      <span role="columnheader">月嫂識別</span>
-                      <span role="columnheader">登記類別</span>
-                      <span role="columnheader">不可服務區間</span>
-                      <span role="columnheader">狀態／操作</span>
-                    </div>
-                    {availability.status === 'ready' && availability.data.length === 0 && (
-                      <div className="staff-unavailability-row" role="row">
-                        <span role="cell">此月嫂目前無請假或暫停接案紀錄；是否可派工仍需依案件日期、既有排班與資格條件查詢。</span>
-                        <span role="cell">—</span>
-                        <span role="cell">—</span>
-                        <span role="cell">無可取消紀錄</span>
-                      </div>
-                    )}
-                    {availability.status === 'ready' && availability.data.map((block) => {
-                      const disabledReason = cancelPreviewDisabledReason(block);
-                      const blockerId = `staff-availability-cancel-blocker-${block.blockId}`;
-                      return (
-                      <div className="staff-unavailability-row" role="row" key={block.blockId}>
-                        <span role="cell">#{block.staffId}</span>
-                        <span role="cell">{block.kindLabel}</span>
-                        <span role="cell">{block.startDate} ～ {block.displayEndDate}</span>
-                        <span role="cell" className="staff-action-pair">
-                          <span>{block.statusLabel}</span>
-                          <button
-                            type="button"
-                            data-control-id="staff.availability.cancel.preview"
-                            className="staff-secondary-btn"
-                            style={{ padding: '4px 10px', fontSize: '0.8rem' }}
-                            disabled={disabledReason !== null}
-                            aria-describedby={disabledReason ? blockerId : undefined}
-                            onClick={() => void previewAvailability({ action: 'cancel', block_id: block.blockId, reason: cancelReason.trim() })}
-                          >
-                            預覽取消
-                          </button>
-                          {disabledReason && <small id={blockerId}>{disabledReason}</small>}
-                        </span>
-                      </div>
-                      );
-                    })}
-                    {availability.status === 'idle' && (
-                      <div className="staff-unavailability-row" role="row">
-                        <span role="cell">正在載入不可服務期間…</span>
-                        <span role="cell">—</span>
-                        <span role="cell">—</span>
-                        <span role="cell">請稍候</span>
-                      </div>
-                    )}
-                    {availability.status === 'loading' && (
-                      <div className="staff-unavailability-row" role="row">
-                        <span role="cell">正在載入不可服務期間…</span>
-                        <span role="cell">—</span>
-                        <span role="cell">—</span>
-                        <span role="cell">請稍候</span>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* 未展開時不掛載 mutation controls，避免螢幕閱讀器或自動化誤觸不可見操作。 */}
-                  {showAvailabilityForm && (
-                    <div className="staff-holiday-op-card">
-                    <h3 className="staff-op-title">
-                      ⚙️ 新增請假／暫停接案政策設定
-                    </h3>
-
-                    <div className="staff-op-grid">
-                      <label className="staff-op-field">
-                        新增類型
-                        <select
-                          aria-label="新增類型"
-                          disabled={interactionLocked || availabilityAction.phase === 'stale'}
-                          value={availabilityKind}
-                          onChange={(event) => {
-                            invalidateSlice();
-                            setAvailabilityKind(event.target.value as 'create_long_leave' | 'create_pause');
-                            setAvailabilityAction(initialActionState());
-                          }}
-                        >
-                          <option value="create_pause">暫停接案（開放式不設定結束日）</option>
-                          <option value="create_long_leave">長假（設定固定起訖日期）</option>
-                        </select>
-                      </label>
-                      <label className="staff-op-field">
-                        開始日期
-                        <input
-                          type="date"
-                          aria-label="開始日期"
-                          data-control-id="staff.availability.range-start"
-                          disabled={interactionLocked || availabilityAction.phase === 'stale'}
-                          value={rangeStart}
-                          onInput={(event) => setRangeStart(event.currentTarget.value)}
-                          onChange={(event) => {
-                            invalidateSlice();
-                            setRangeStart(event.target.value);
-                            setAvailabilityAction(initialActionState());
-                          }}
-                        />
-                      </label>
-                      <label className="staff-op-field">
-                        結束日期 {availabilityKind === 'create_pause' ? '(暫停接案免填)' : '(長假必填)'}
-                        <input
-                          type="date"
-                          aria-label="結束日期"
-                          data-control-id="staff.availability.range-end"
-                          disabled={interactionLocked || availabilityAction.phase === 'stale'}
-                          value={rangeEnd}
-                          onInput={(event) => setRangeEnd(event.currentTarget.value)}
-                          onChange={(event) => {
-                            invalidateSlice();
-                            setRangeEnd(event.target.value);
-                            setAvailabilityAction(initialActionState());
-                          }}
-                        />
-                      </label>
-                      <label className="staff-op-field">
-                        新增原因
-                        <input
-                          type="text"
-                          aria-label="新增原因"
-                          disabled={interactionLocked || availabilityAction.phase === 'stale'}
-                          value={availabilityReason}
-                          placeholder="如出國進修、家庭照顧、個人休養等..."
-                          onChange={(event) => {
-                            invalidateSlice();
-                            setAvailabilityReason(event.target.value);
-                            setAvailabilityAction(initialActionState());
-                          }}
-                        />
-                      </label>
-                    </div>
-
-                    <div className="staff-op-actions">
-                      <button
-                        type="button"
-                        data-control-id="staff.availability.create.preview"
-                        className="staff-secondary-btn"
-                        style={{ flex: 1 }}
-                        disabled={!rangeStart || (availabilityKind === 'create_long_leave' && !rangeEnd) || !availabilityReason.trim() || availabilityAction.phase === 'preview_loading' || interactionLocked || availabilityAction.phase === 'stale'}
-                        onClick={() => void previewAvailability({ action: availabilityKind, reason: availabilityReason.trim(), start_date: rangeStart, ...(availabilityKind === 'create_long_leave' ? { end_date: rangeEnd } : {}) })}
-                      >
-                        {availabilityAction.phase === 'preview_loading' && ['create_long_leave', 'create_pause'].includes(availabilityAction.payload?.action ?? '') ? '⏳ 預覽檢查中…' : '🔍 預覽新增影響'}
-                      </button>
-                      <button
-                        type="button"
-                        data-control-id="staff.availability.create.apply"
-                        className="staff-primary-btn"
-                        style={{ flex: 1 }}
-                        disabled={availabilityAction.phase !== 'preview_ready' || !['create_long_leave', 'create_pause'].includes(availabilityAction.payload?.action ?? '')}
-                        onClick={() => void submitAvailability()}
-                      >
-                        {availabilityAction.phase === 'apply_pending' ? '⏳ 套用中…' : '✍️ 確認套用新增'}
-                      </button>
-                      <button
-                        type="button"
-                        data-control-id="staff.availability.end-pause"
-                        className="staff-secondary-btn"
-                        disabled={availability.status !== 'ready' || !availability.data.some((b) => b.kind === 'paused_service' && b.status === 'effective') || !availabilityReason.trim() || interactionLocked || availabilityAction.phase === 'stale'}
-                        onClick={() => void previewAvailability({ action: 'end_pause', reason: availabilityReason.trim() })}
-                      >
-                        🛑 結束暫停
-                      </button>
-                    </div>
-
-                    {/* 取消操作輸入與確認列 */}
-                    <div style={{ marginTop: '8px', borderTop: '1px dashed #dec0b6', paddingTop: '10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
-                      <label style={{ fontSize: '0.82rem', fontWeight: 600, color: '#57423b', flex: 1, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        取消原因
-                        <input
-                          type="text"
-                          aria-label="取消原因"
-                          disabled={interactionLocked || availabilityAction.phase === 'stale'}
-                          value={cancelReason}
-                          placeholder="欲取消上方任一筆已登記紀錄時，請在此填寫取消原因..."
-                          style={{ flex: 1 }}
-                          onChange={(event) => {
-                            invalidateSlice();
-                            setCancelReason(event.target.value);
-                            setAvailabilityAction(initialActionState());
-                          }}
-                        />
-                      </label>
-                      <button
-                        type="button"
-                        data-control-id="staff.availability.cancel.apply"
-                        className="staff-primary-btn"
-                        disabled={availabilityAction.phase !== 'preview_ready' || availabilityAction.payload?.action !== 'cancel'}
-                        onClick={() => void submitAvailability()}
-                      >
-                        {availabilityAction.phase === 'apply_pending' && availabilityAction.payload?.action === 'cancel' ? '⏳ 套用中…' : '✍️ 確認套用取消'}
-                      </button>
-                    </div>
-
-                    {availabilityAction.preview && (
-                      <div className="staff-action-status" style={{ marginTop: '6px' }}>
-                        ✅ <strong>預覽已產生：</strong>不可服務期間變更已通過檢查，請確認後套用。
-                      </div>
-                    )}
-                    {availabilityAction.receipt && (
-                      <div
-                        className="staff-action-status"
-                        role="status"
-                        aria-label="不可服務期間變更結果"
-                        style={{ marginTop: '6px' }}
-                      >
-                        ✅ <strong>不可服務期間已更新：</strong>
-                        {availabilityAction.receipt.block.start_date} ～ {availabilityAction.receipt.block.end_date ?? '持續中'}
-                      </div>
-                    )}
-                    {availabilityAction.message && (
-                      <div className={`staff-action-status ${availabilityAction.phase === 'error' || availabilityAction.phase === 'stale' ? 'error' : ''}`} role="status" style={{ marginTop: '6px' }}>
-                        {availabilityAction.message}
-                      </div>
-                    )}
-                    {availabilityAction.phase === 'stale' && (
-                      <button type="button" className="staff-secondary-btn" style={{ marginTop: '6px' }} disabled={!rangeStart || !rangeEnd} onClick={() => void queryAvailability()}>
-                        重新查詢不可服務期間
-                      </button>
-                    )}
-                    {availabilityAction.phase === 'outcome_unknown' && (
-                      <button type="button" className="staff-primary-btn" style={{ marginTop: '6px' }} onClick={() => void submitAvailability(true)}>
-                        以相同內容重試
-                      </button>
-                    )}
-                    </div>
-                  )}
-                </div>
               </section>
             )}
           </div>

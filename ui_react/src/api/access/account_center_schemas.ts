@@ -12,7 +12,7 @@ const commandBase = {
 
 export const AccountCreateCommandSchema = z.object({
   username: z.string().min(1).max(100),
-  password: z.string().min(12).max(256),
+  password: z.string().min(10).max(256),
   display_name: z.string().min(1).max(100),
   linked_line_user_id: z.string().max(100).nullable().optional(),
   ...commandBase,
@@ -25,7 +25,7 @@ export const AccountEnabledCommandSchema = z.object({
 }).strict();
 
 export const AccountPasswordResetCommandSchema = z.object({
-  password: z.string().min(12).max(256),
+  password: z.string().min(10).max(256),
   expected_version: z.number().int().min(1),
   ...commandBase,
 }).strict();

@@ -454,7 +454,7 @@ def _steps(row: Mapping[str, object], case_no: str, stages: tuple[StageProjectio
         if candidate_pool_id is not None
         else "unavailable"
     )
-    pool_status: StageStatus = "completed" if candidate_count else "in_progress" if candidate_pool_id is not None else "unavailable"
+    pool_status: StageStatus = "completed" if candidate_count else "in_progress" if candidate_pool_id is not None else "not_started" if plan_id is None else "unavailable"
     recommendation_status: StageStatus = "completed" if resume_sent_count else "in_progress" if resume_attempt_count or accepted_count else "not_started" if plan_id is not None else "unavailable"
     handoff_recorded = row["external_signing_session_id"] is not None
     final_document_recorded = row["final_contract_document_id"] is not None

@@ -11,6 +11,7 @@ from infrastructure.mysql.order_terms_read_model import load_preview_facts
 from subsystems.orders.order_information import (
     OrderInformationOwnerSnapshot,
     projection_fingerprint,
+    build_candidate_information,
 )
 
 
@@ -77,6 +78,22 @@ class MySqlOrderInformationRepository:
             field_issues=field_issues,
         )
 
+    def preview_candidate_information(self, case_no: str, candidate_id: int, info_type: int, *, for_update: bool = False):
+        with self._connection.cursor() as cursor:
+            cursor.execute(_CASE_SQL + (" FOR UPDATE" if for_update else ""), (case_no,))
+            case = cursor.fetchone()
+            cursor.execute("""SELECT s.name AS staff_name, s.line_user_id,
+                e.service_start_date AS assigned_start_date, e.service_end_date AS assigned_end_date
+                FROM caregiver_candidate_contact_entries e
+                JOIN caregiver_candidate_contact_pools p ON p.id=e.pool_id
+                JOIN staff s ON s.id=e.staff_id
+                WHERE p.case_no=%s AND e.id=%s AND e.active_marker=1""", (case_no, candidate_id))
+            candidate = cursor.fetchone()
+        if not isinstance(case, Mapping) or not isinstance(candidate, Mapping):
+            raise ValueError("candidate_contact_not_found")
+        facts, issues = _facts(case, candidate)
+        return build_candidate_information(case_no, candidate_id, info_type, facts, issues, candidate.get("line_user_id"))
+
 
 def _select_assignment(
     assignments: tuple[Mapping[str, object], ...], assignment_id: int | None
@@ -118,6 +135,9 @@ def _facts(
         "floor_fee": case.get("floor_fee"),
         "special_holidays": _special_holidays_text(case.get("custom_rest_dates")),
         "notes": case.get("client_notes"),
+        "service_time": case.get("service_time"),
+        "service_type": case.get("service_type"),
+        "baby_info": case.get("baby_info"),
         **projection.values,
     }
     return facts, projection.issues
@@ -206,6 +226,7 @@ _CASE_IMPORT_FACT_KEYS = (
 
 _CASE_SQL = """
 SELECT o.case_no, o.service_days, o.service_hours_per_day, o.floor_fee, o.custom_rest_dates,
+       c.service_time, c.service_type, c.baby_info,
        c.name AS client_name, c.phone AS client_phone, c.address AS client_address,
        c.notes AS client_notes, b.survey_details AS _case_import_payload
   FROM orders o

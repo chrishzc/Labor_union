@@ -218,32 +218,20 @@ describe('historical Drawer immutable evidence boundary', () => {
 
   it('future source period 與 evidence-only staff 保留在來源區，formal owner/assignment 不被覆寫', async () => {
     render(<OrderWorkbenchV2Drawer caseNo="CASE-FUTURE" branchType="historical" onClose={vi.fn()} />);
-    const dialog = screen.getByRole('dialog', { name: '案件 CASE-FUTURE' });
-    fireEvent.click(within(dialog).getByRole('tab', { name: '歷史與來源' }));
-    const ownerHeading = within(dialog).getByRole('heading', { name: '目前正式 owner progression' });
+    const dialog = screen.getByRole('region', { name: '案件 CASE-FUTURE' });
+    const ownerHeading = await within(dialog).findByRole('heading', { name: '歷史案件目前進度' });
     const ownerSection = ownerHeading.closest('section');
     if (!(ownerSection instanceof HTMLElement)) throw new Error('找不到目前正式 owner progression 區');
-    const evidenceRegion = within(dialog).getByRole('region', { name: '歷史來源證據' });
-
-    await waitFor(() => expect(within(evidenceRegion).getByText('baseline:event:9')).toBeInTheDocument());
-    expect(within(evidenceRegion).getByText('1, 2, 3, 4, 5, 6, 7, 8')).toBeInTheDocument();
-    await waitFor(() => expect(within(ownerSection).getByText('9. 正式服務日期確認')).toBeInTheDocument());
-    expect(within(ownerSection).getByText(/owner：Orders \/ Scheduling/)).toBeInTheDocument();
-    expect(within(ownerSection).getByRole('link', { name: 'orders.terms.query' })).toHaveAttribute(
-      'href',
-      '/api/v1/orders/CASE-FUTURE/terms',
-    );
-
-    expect(within(dialog).getByText(/尚無正式指派/)).toBeInTheDocument();
+    expect(within(ownerSection).getByText(/正式服務日期確認/)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: '訂單與服務資料' }));
+    const evidenceRegion = within(dialog).getByRole('heading', { name: '歷史服務資料' }).closest('section')!;
+    expect(within(dialog).getByText('尚未正式安排月嫂。')).toBeInTheDocument();
     expect(within(dialog).getByText('尚未確認')).toBeInTheDocument();
 
-    expect(within(evidenceRegion).getByText('2026-09-03 → 2026-09-22')).toBeInTheDocument();
-    expect(within(evidenceRegion).getByText('Historical Orders Adoption')).toBeInTheDocument();
-    expect(within(evidenceRegion).getByText(/歷史匯入配對月嫂 · #42/)).toBeInTheDocument();
-    expect(within(evidenceRegion).getByText('月嫂名稱：陳月嫂')).toBeInTheDocument();
+    expect(within(evidenceRegion).getByText(/2026-09-03 → 2026-09-22/)).toBeInTheDocument();
+    expect(within(evidenceRegion).getByText(/陳月嫂/)).toBeInTheDocument();
     expect(within(evidenceRegion).queryByText(/陳\*嫂/)).not.toBeInTheDocument();
-    expect(within(evidenceRegion).getByText('resolution：evidence_only')).toBeInTheDocument();
-    expect(within(evidenceRegion).getByText('historical assignment_id：無（evidence-only）')).toBeInTheDocument();
+    expect(within(evidenceRegion).getByText(/不代表目前已確認的服務安排/)).toBeInTheDocument();
   });
 
   it('strict adoption evidence contract 接受 canonical staff_name 並拒絕舊 masked 欄位', () => {
@@ -274,10 +262,12 @@ describe('historical Drawer immutable evidence boundary', () => {
     });
     render(<OrderWorkbenchV2Drawer caseNo="CASE-FUTURE" branchType="historical" onClose={vi.fn()} />);
     const restart = await screen.findByRole('button', { name: '前往重啟正常流程' });
+    fireEvent.click(screen.getByRole('button', { name: '案件異動' }));
     const intake = screen.getByRole('region', { name: '訂單缺件' });
     expect(await within(intake).findByText('目前不可完成補件')).toBeInTheDocument();
     expect(within(intake).queryByRole('button', { name: '確認完成進件補齊' })).not.toBeInTheDocument();
-    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: '案件 CASE-FUTURE' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '案件處理' }));
     fireEvent.click(restart);
     await screen.findByText(/已重啟正常流程並回讀確認為「訂單成立」/);
     expect(mocks.restartQuery).toHaveBeenCalledWith('CASE-FUTURE');
@@ -285,7 +275,7 @@ describe('historical Drawer immutable evidence boundary', () => {
     expect(mocks.restartApply).toHaveBeenCalledTimes(1);
     expect(mocks.restartApply).toHaveBeenCalledWith(
       expect.objectContaining({ case_no: 'CASE-FUTURE', preview_fingerprint: '1'.repeat(64) }),
-      expect.stringContaining('待辦看板 Beta'),
+      expect.stringContaining('案件處理頁'),
     );
     expect(mocks.restartQuery.mock.invocationCallOrder[0]).toBeLessThan(mocks.restartPreview.mock.invocationCallOrder[0]!);
     expect(mocks.restartPreview.mock.invocationCallOrder[0]).toBeLessThan(mocks.restartApply.mock.invocationCallOrder[0]!);
@@ -348,7 +338,7 @@ describe('historical Drawer immutable evidence boundary', () => {
       etag: 'b'.repeat(64),
     });
     render(<OrderWorkbenchV2Drawer caseNo="CASE-FUTURE" branchType="historical" onClose={vi.fn()} />);
-    await screen.findByText(status);
+    await screen.findAllByText(status);
     expect(screen.queryByRole('button', { name: '前往重啟正常流程' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '確認完成進件補齊' })).not.toBeInTheDocument();
     expect(mocks.restartQuery).not.toHaveBeenCalled();
@@ -360,10 +350,10 @@ describe('historical Drawer immutable evidence boundary', () => {
     mocks.detail.mockResolvedValue(orderDetail('歷史訂單－服務完成'));
     mocks.accounting.mockRejectedValue(new Error(blocker));
     render(<OrderWorkbenchV2Drawer caseNo="CASE-FUTURE" branchType="historical" onClose={vi.fn()} />);
-    fireEvent.click(screen.getByRole('tab', { name: '歷史與來源' }));
-    const evidence = screen.getByRole('region', { name: '歷史來源證據' });
-    expect(await within(evidence).findByText(`歷史帳務 Query／blocker：${blocker}`)).toBeInTheDocument();
-    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '訂單與服務資料' }));
+    const evidence = screen.getByRole('heading', { name: '歷史服務資料' }).closest('section')!;
+    expect(await within(evidence).findByText(`歷史帳務資料暫時無法取得：${blocker}`)).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: '案件 CASE-FUTURE' })).toBeInTheDocument();
     expect(screen.queryByText(/historical_order_not_found/)).not.toBeInTheDocument();
     expect(mocks.accounting).toHaveBeenCalledWith('CASE-FUTURE');
   });
@@ -384,6 +374,7 @@ describe('historical Drawer immutable evidence boundary', () => {
       substatus_counts: {}, next_cursor: null, etag: 'b'.repeat(64),
     });
     render(<OrderWorkbenchV2Drawer caseNo="CASE-FUTURE" branchType="normal" onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '案件異動' }));
     const entry = await screen.findByRole('button', { name: '服務前更換月嫂' });
     await waitFor(() => expect(entry).toBeEnabled());
     expect(screen.queryByText('R-01 候選月嫂尚未定案')).not.toBeInTheDocument();

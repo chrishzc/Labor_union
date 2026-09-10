@@ -208,7 +208,7 @@ export function OrderIntakeRepairPanel({
       <header>
         <strong style={{ color: '#9a3412' }}>缺件</strong>
         <div style={{ color: '#74593f', fontSize: '0.82rem', marginTop: '3px' }}>
-          是否可補件以 Orders intake owner 的即時檢查為準；缺欄位本身不代表仍可回到 intake。
+          系統會依案件目前進度確認可補資料；已進入後續作業的案件，不一定能從進件頁修改。
         </div>
       </header>
 

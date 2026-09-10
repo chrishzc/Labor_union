@@ -50,7 +50,9 @@ describe('Staff roster profile flow', () => {
   it('shows complete identity, contact facts, bank accounts, and canonical certifications', async () => {
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
-    fireEvent.click(screen.getAllByRole('button', { name: /檢視服務人員摘要/ })[0]);
+    expect(screen.queryByRole('tablist', { name: '服務人員管理分頁' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('staff-profile-detail')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '查看 去敏人員甲 的詳情' }));
 
     const profile = await screen.findByTestId('staff-profile-detail');
     expect(within(profile).getByRole('group', { name: '身分證' })).toHaveTextContent('A123456789');
@@ -61,8 +63,9 @@ describe('Staff roster profile flow', () => {
     expect(within(profile).getByRole('list', { name: '銀行帳戶' })).toHaveTextContent('主要帳戶｜812／0012｜123456789012');
     expect(within(profile).getByRole('list', { name: '銀行帳戶' })).toHaveTextContent('備用帳戶｜004／0001｜987654321098');
     expect(screen.getByRole('group', { name: '可承接區域' })).toHaveTextContent('北區');
-    expect(screen.getByRole('group', { name: '可承接區域' })).not.toHaveTextContent('T01 six region final');
-    expect(screen.queryByText(/T01 six/)).not.toBeInTheDocument();
+    // Canonical relation details remain available in the detail drawer, not roster cards.
+    expect(screen.getByRole('group', { name: '可承接區域' })).toHaveTextContent('T01 six region final');
+    expect(within(screen.getAllByRole('article')[0]).queryByText(/T01 six/)).not.toBeInTheDocument();
     expect(screen.getByRole('group', { name: '證照' })).toHaveTextContent('資格證明：托育人員證照');
 
   });

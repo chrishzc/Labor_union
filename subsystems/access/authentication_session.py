@@ -266,8 +266,8 @@ def _attempt_subject_hash(value: str) -> str:
 
 
 def hash_admin_password(password: str) -> str:
-    if len(password) < 12:
-        raise ValueError("管理員密碼至少需要 12 個字元")
+    if len(password) < 10:
+        raise ValueError("管理員密碼至少需要 10 個字元")
     salt = os.urandom(16)
     derived = hashlib.scrypt(
         password.encode("utf-8"),
@@ -394,6 +394,70 @@ def bootstrap_root_admin(
     except pymysql.err.IntegrityError as error:
         unit_of_work.rollback()
         raise ValueError("root bootstrap 衝突") from error
+    except Exception:
+        unit_of_work.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def recover_local_root_credentials(
+    *, connection_factory: ConnectionFactory, target_database: str,
+    expected_account_id: int, expected_version: int, username: str,
+    password: str, reason: str,
+) -> int:
+    """Offline local-test recovery; preserve root designation, roles and MFA."""
+    import os
+    import re
+
+    if os.getenv("APP_ENV", "").lower() not in {"development", "dev", "local", "test"}:
+        raise ValueError("local_root_recovery_environment_required")
+    if not re.fullmatch(r"lu_test_[a-z0-9_]+", target_database):
+        raise ValueError("local_root_recovery_target_required")
+    username = username.strip().lower()
+    if not username or not reason.strip() or expected_account_id <= 0:
+        raise ValueError("local_root_recovery_input_required")
+    password_hash = hash_admin_password(password)
+    conn = connection_factory()
+    unit_of_work = AccessControlUnitOfWork(conn)
+    try:
+        unit_of_work.__enter__()
+        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+            cursor.execute("SELECT DATABASE() AS database_name")
+            if cursor.fetchone()["database_name"] != target_database:
+                raise ValueError("local_root_recovery_target_mismatch")
+            cursor.execute(
+                """SELECT u.id, u.access_control_version, u.enabled
+                FROM admin_root_account r JOIN admin_users u ON u.id=r.admin_user_id
+                WHERE r.singleton_key=1 FOR UPDATE"""
+            )
+            row = cursor.fetchone()
+            if not row or row["id"] != expected_account_id or not row["enabled"]:
+                raise ValueError("local_root_recovery_identity_mismatch")
+            if row["access_control_version"] != expected_version:
+                raise ValueError("admin_version_conflict")
+            cursor.execute("SELECT id FROM admin_users WHERE username=%s AND id<>%s", (username, expected_account_id))
+            if cursor.fetchone():
+                raise ValueError("local_root_recovery_username_in_use")
+            cursor.execute(
+                """UPDATE admin_users SET username=%s, password_hash=%s,
+                access_control_version=access_control_version+1 WHERE id=%s""",
+                (username, password_hash, expected_account_id),
+            )
+            cursor.execute(
+                "UPDATE admin_sessions SET revoked_at=COALESCE(revoked_at,UTC_TIMESTAMP(6)) WHERE admin_user_id=%s",
+                (expected_account_id,),
+            )
+            _record_admin_audit_with_cursor(
+                cursor, principal=None, action="admin.root.local_credentials_recovered",
+                result_status=200,
+                details={"account_id": expected_account_id, "reason": reason.strip()},
+            )
+        unit_of_work.commit()
+        return expected_version + 1
+    except pymysql.err.IntegrityError:
+        unit_of_work.rollback()
+        raise ValueError("local_root_recovery_conflict") from None
     except Exception:
         unit_of_work.rollback()
         raise

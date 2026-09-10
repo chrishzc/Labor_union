@@ -95,6 +95,25 @@ describe('CurrentAnomaliesPage', () => {
     expect(screen.queryByText(/owner facts|closed owner action|通用 resolve/)).not.toBeInTheDocument();
   });
 
+  it('shows business evidence and keeps raw fields in collapsed technical details', async () => {
+    const original = await anomalyDetailClient.queryCurrentAnomalyRecovery({ issueKey });
+    vi.mocked(anomalyDetailClient.queryCurrentAnomalyRecovery).mockResolvedValue({
+      ...original,
+      details: { ...original.details, fields: [
+        { key: 'notification_reason', kind: 'text', value: 'recipient_unavailable' },
+        { key: 'root_condition_active', kind: 'boolean', value: true },
+        { key: 'unresolved_reason_codes', kind: 'code_list', value: ['exact_replay_successor_missing'] },
+      ] },
+    });
+    render(<CurrentAnomaliesPage />);
+    fireEvent.click(await screen.findByRole('button', { name: /LINE-006/ }));
+    expect(await screen.findByText('目前無法通知收件者')).toBeVisible();
+    expect(screen.getByText('問題是否仍存在')).toBeVisible();
+    expect(screen.getByText('recipient_unavailable')).not.toBeVisible();
+    expect(screen.getByText('root_condition_active')).not.toBeVisible();
+    expect(screen.getByText('exact_replay_successor_missing')).not.toBeVisible();
+  });
+
   it('binds the current issue to the LINE owner Preview and confirmed Apply APIs', async () => {
     render(<CurrentAnomaliesPage />);
     fireEvent.click(await screen.findByRole('button', { name: /LINE-006/ }));

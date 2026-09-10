@@ -135,7 +135,8 @@ const assignment = {
 describe('OrderWorkbenchV2Drawer service completion wiring', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.getCoreStageTimelines.mockResolvedValue({ items: [timeline('CASE-142', 'service_completion')] });
+    mocks.getCoreStageTimelines.mockResolvedValueOnce({ items: [timeline('CASE-142', 'service_completion')] })
+      .mockResolvedValue({ items: [{ ...timeline('CASE-142', 'staff_payout'), lifecycle_status: '訂單完成' }] });
     mocks.getOrderDetail
       .mockResolvedValueOnce(detail('CASE-142', '服務中'))
       .mockResolvedValue(detail('CASE-142', '訂單完成'));
@@ -145,13 +146,15 @@ describe('OrderWorkbenchV2Drawer service completion wiring', () => {
 
   it('mounts the existing completion owner action and refreshes owner facts after completion', async () => {
     render(<OrderWorkbenchV2Drawer caseNo="CASE-142" branchType="normal" onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: '完工確認' }));
 
     const completion = await screen.findByRole('button', { name: 'completion:CASE-142:服務中' });
     expect(mocks.getOrderDetail).toHaveBeenCalledTimes(1);
 
     fireEvent.click(completion);
 
-    await screen.findByRole('button', { name: 'completion:CASE-142:訂單完成' });
+    await screen.findByRole('heading', { name: '結算狀態' });
+    expect(screen.queryByRole('button', { name: 'completion:CASE-142:服務中' })).not.toBeInTheDocument();
     await waitFor(() => expect(mocks.getOrderDetail).toHaveBeenCalledTimes(2));
     expect(mocks.getCoreStageTimelines).toHaveBeenCalledTimes(2);
     expect(mocks.getOrderTerms).toHaveBeenCalledTimes(2);

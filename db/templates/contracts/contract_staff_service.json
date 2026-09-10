@@ -3,7 +3,16 @@
   "name": "服務人員契約（真實 Excel 鏡像模板）",
   "desc": "以複製後的服務人員契約 Excel 作為唯讀鏡像模板。",
   "template_filename": "服務人員契約.xlsx",
+  "static_cells": {
+    "A12": "服務費用",
+    "A13": "整筆應付金額",
+    "A14": "",
+    "A15": "",
+    "C11": "",
+    "D11": "依實際服務調整"
+  },
   "param_mappings": {
+    "D13": {"label": "舊表無標題的雇主自費合計（非月嫂報酬）", "db_table": "legacy unlabelled employer amount; not a staff payable", "db_key": "", "requiredness": "optional", "status": "not_applicable"},
     "F1": {"label": "案件編號", "db_table": "orders", "db_key": "case_no", "requiredness": "required"},
     "C4": {"label": "服務人員姓名", "db_table": "staff", "db_key": "staff_name", "requiredness": "required"},
     "B5": {"label": "雇主姓名", "db_table": "clients", "db_key": "client_name", "requiredness": "required"},
@@ -22,7 +31,7 @@
     "B24": {"label": "服務地址", "db_table": "clients", "db_key": "address", "requiredness": "required"},
     "B94": {"label": "服務人員姓名", "db_table": "staff", "db_key": "staff_name", "requiredness": "required"},
     "B96": {"label": "服務人員電話", "db_table": "staff", "db_key": "staff_phone", "requiredness": "required"},
-    "B13": {"label": "補助費用（現行模型無分拆）", "db_table": "Staff Payables whole obligation（legacy funding split absent/not applicable）", "db_key": "", "status": "not_applicable", "requiredness": "conditional", "applicability": "staff_payable_split_present"},
+    "B13": {"label": "整筆應付金額", "db_table": "staff_payables.service_obligation", "db_key": "staff_payable_total", "requiredness": "conditional", "applicability": "staff_payable_obligation_present"},
     "C13": {"label": "補助費用日期（現行模型無分拆）", "db_table": "Staff Payables whole obligation（legacy funding split absent/not applicable）", "db_key": "", "status": "not_applicable", "requiredness": "conditional", "applicability": "staff_payable_split_present"},
     "B15": {"label": "自費金額（現行模型無分拆）", "db_table": "Staff Payables whole obligation（legacy funding split absent/not applicable）", "db_key": "", "status": "not_applicable", "requiredness": "conditional", "applicability": "staff_payable_split_present"},
     "C15": {"label": "自費金額日期（現行模型無分拆）", "db_table": "Staff Payables whole obligation（legacy funding split absent/not applicable）", "db_key": "", "status": "not_applicable", "requiredness": "conditional", "applicability": "staff_payable_split_present"},

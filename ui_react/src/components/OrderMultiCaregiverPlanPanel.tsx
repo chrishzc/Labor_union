@@ -111,7 +111,7 @@ export const OrderMultiCaregiverPlanPanel: FC<Props> = ({ caseNo, filters, onObs
   return (
     <section aria-label={`案件 ${caseNo} 多月嫂分段方案`}>
       <h4>多月嫂接續服務</h4>
-      <p>沿用上方四項媒合篩選；僅選用後端回傳的完整組合，不在瀏覽器拼接人選或服務日期。</p>
+      <p>一位月嫂無法全程承接時，可查詢由多位月嫂接續完成服務的方案。</p>
       <label>服務分段數
         <select aria-label="多月嫂服務分段數" value={segmentCount} disabled={busy} onChange={(event) => setSegmentCount(Number(event.target.value) as 2 | 3 | 4)}>
           <option value={2}>2 段</option><option value={3}>3 段</option><option value={4}>4 段</option>
@@ -122,7 +122,7 @@ export const OrderMultiCaregiverPlanPanel: FC<Props> = ({ caseNo, filters, onObs
       {query.status === 'error' && <p role="alert">{query.message}</p>}
       {query.status === 'ready' && combinations.length === 0 && (
         <div role="status">
-          <p>後端未回傳可建立的 {segmentCount} 段完整組合。</p>
+          <p>目前沒有可完整銜接的 {segmentCount} 段方案，請調整分段數或媒合條件後再查詢。</p>
           {query.data.conflicts.map((conflict, index) => <p key={index}>{conflict.work_date} · 月嫂 #{conflict.staff_id ?? '未指定'} · {conflict.reason_code}</p>)}
         </div>
       )}

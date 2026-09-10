@@ -52,6 +52,8 @@ async function selectStage(code: CoreStageCode) {
   await screen.findByText('CASE-REFRESH');
   const strip = screen.getByRole('region', { name: '13 個核心訂單階段' });
   fireEvent.click(within(strip).getAllByRole('button')[CORE_STAGE_CODES.indexOf(code) + 1]!);
+  const card = (await screen.findByText('CASE-REFRESH')).closest('article')!;
+  fireEvent.click(within(card).getAllByRole('button').at(-1)!);
   return (await screen.findAllByLabelText('整合測試面板草稿'))[0]!;
 }
 

@@ -10,13 +10,16 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 from typing import Mapping
+from xml.sax.saxutils import escape
 
 from subsystems.contract_signing.contract_renderer import (
     ContractRendererError,
     RenderedContract,
     render_contract_template,
+    external_formula_cells,
 )
 
 
@@ -91,6 +94,15 @@ class LibreOfficeContractRenderer:
             raise ContractRendererError(
                 "contract_pdf_renderer_source_invalid",
                 "契約 PDF renderer 的核准來源無法讀取。",
+            )
+        try:
+            unresolved = external_formula_cells(content)
+        except Exception:
+            raise ContractRendererError("contract_pdf_renderer_source_invalid", "契約來源檔案無法讀取。") from None
+        if unresolved:
+            raise ContractRendererError(
+                "contract_pdf_external_reference_unresolved",
+                "契約模板仍引用缺少的舊版表格內容，暫不能產生可簽署 PDF。",
             )
         try:
             with tempfile.TemporaryDirectory(prefix="contract-pdf-render-") as directory:
@@ -250,4 +262,18 @@ def _renderer_environment(workspace: Path) -> dict[str, str]:
         if (value := os.environ.get(key)) is not None
     }
     environment["HOME"] = str(workspace)
+    # The portable headless macOS runtime uses fontconfig, not CoreText's
+    # system font discovery. Expose the existing OS CJK font without copying
+    # fonts, changing the source workbook, or inheriting arbitrary env vars.
+    if sys.platform == 'darwin':
+        font_directory = Path('/System/Library/Fonts/Supplemental')
+        if font_directory.is_dir():
+            configuration = workspace / 'contract-fonts.conf'
+            configuration.write_text(
+                '<?xml version="1.0"?><!DOCTYPE fontconfig SYSTEM "fonts.dtd">'
+                '<fontconfig><dir>' + escape(str(font_directory)) + '</dir><cachedir>'
+                + escape(str(workspace / 'font-cache')) + '</cachedir></fontconfig>',
+                encoding='utf-8',
+            )
+            environment['FONTCONFIG_FILE'] = str(configuration)
     return environment

@@ -1418,9 +1418,12 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
         </div>
         <span className="line-query-badge">系統流程已連線</span>
       </header>}
-      {!runtimeOnly && <nav className="line-tab-bar" aria-label="客服與營運功能">{TABS.map(([tab, label, id]) => <button key={tab} type="button" data-control-id={id} className={`line-tab-btn ${activeTab === tab ? 'active' : ''}`} aria-current={activeTab === tab ? 'page' : undefined} onClick={() => setActiveTab(tab)}>{label}</button>)}</nav>}
-
-      {activeTab === 'push_queue' && notificationWorkspaceTab === 'rules' && rawRules && <LineNotificationRulesMutationPanel catalog={rawRules} selectedRuleId={selectedRule?.id ?? null} onCommitted={() => setRulesReload((value) => value + 1)} />}
+      {!runtimeOnly && <nav className="line-tab-bar" aria-label="客服與營運功能">
+        {(['日常作業', '選單設定'] as const).map((group) => <div key={group} className="line-nav-group" role="group" aria-label={group}>
+          <span className="line-nav-group-label">{group}</span>
+          {TABS.filter(([tab]) => group === '選單設定' ? tab === 'richmenu' : tab !== 'richmenu').map(([tab, label, id]) => <button key={tab} type="button" data-control-id={id} className={`line-tab-btn ${activeTab === tab ? 'active' : ''}`} aria-current={activeTab === tab ? 'page' : undefined} onClick={() => setActiveTab(tab)}>{label}</button>)}
+        </div>)}
+      </nav>}
 
       {activeTab === 'tickets' && (() => {
         const rawList = ticketPage.value?.items ?? [];
@@ -2620,6 +2623,11 @@ https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效
               </div>
 
               <LoadingOrError state={rules} loadingText="正在載入通知規則目錄…" />
+
+              {rawRules && <details className="line-rules-editor-disclosure">
+                <summary>新增或編輯通知規則</summary>
+                <LineNotificationRulesMutationPanel catalog={rawRules} selectedRuleId={selectedRule?.id ?? null} onCommitted={() => setRulesReload((value) => value + 1)} />
+              </details>}
 
               {rules.status === 'loaded' && !isRulesEmpty && <div className="line-search-filter-toolbar notification-rule-toolbar">
                 <label className="line-search-field">

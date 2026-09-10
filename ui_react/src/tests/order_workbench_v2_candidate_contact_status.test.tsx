@@ -63,18 +63,17 @@ describe('待辦看板 Beta 第 3～4 階候選聯絡狀態', () => {
     mocks.query.mockResolvedValue(pool());
     render(<OrderCandidateContactStatusPanel caseNo="CASE-CONTACT" />);
 
-    fireEvent.click(screen.getByRole('button', { name: '讀取候選聯絡狀態' }));
+    // 候選清單在掛載後自動查詢。
 
-    await waitFor(() => expect(mocks.query).toHaveBeenCalledWith('CASE-CONTACT'));
-    expect(await screen.findByText('月嫂甲 · 月嫂 #8892')).toBeInTheDocument();
-    expect(screen.getByText('候選狀態：active')).toBeInTheDocument();
-    expect(screen.getByText('回覆／意願：willing')).toBeInTheDocument();
-    expect(screen.getByText('聯絡資訊 1：sent · 2026-09-03T00:05:00Z')).toBeInTheDocument();
-    expect(screen.getByText('聯絡資訊 2：retryable_failed · 2026-09-03T00:06:00Z')).toBeInTheDocument();
-    expect(screen.getByText('月嫂乙 · 月嫂 #8893')).toBeInTheDocument();
-    expect(screen.getByText('回覆／意願：unwilling')).toBeInTheDocument();
-    expect(screen.getByText('回覆原因：日期不合')).toBeInTheDocument();
-    expect(screen.getAllByText(/聯絡資訊 [12]：尚無紀錄/)).toHaveLength(2);
+    await waitFor(() => expect(mocks.query).toHaveBeenCalledWith('CASE-CONTACT', { signal: expect.any(AbortSignal) }));
+    expect(await screen.findByText('月嫂甲')).toBeInTheDocument();
+    expect(screen.getByText('願意承接')).toBeInTheDocument();
+    expect(screen.getByText('已發送 · 2026-09-03T00:05:00Z')).toBeInTheDocument();
+    expect(screen.getByText('發送未完成 · 2026-09-03T00:06:00Z')).toBeInTheDocument();
+    expect(screen.getByText('月嫂乙')).toBeInTheDocument();
+    expect(screen.getByText('已選定')).toBeInTheDocument();
+    expect(screen.getByText('回覆說明：日期不合')).toBeInTheDocument();
+    expect(screen.getAllByText('尚無紀錄')).toHaveLength(2);
     expect(mocks.sendInformation).not.toHaveBeenCalled();
     expect(mocks.recordWillingness).not.toHaveBeenCalled();
     expect(mocks.addCandidates).not.toHaveBeenCalled();
@@ -86,10 +85,11 @@ describe('待辦看板 Beta 第 3～4 階候選聯絡狀態', () => {
     mocks.recordWillingness.mockResolvedValue({ status: 'recorded', event_id: 45 });
     render(<OrderCandidateContactStatusPanel caseNo="CASE-CONTACT" />);
 
-    fireEvent.click(screen.getByRole('button', { name: '讀取候選聯絡狀態' }));
-    expect(await screen.findByText('月嫂甲 · 月嫂 #8892')).toBeInTheDocument();
+    // 候選清單在掛載後自動查詢。
+    expect(await screen.findByText('月嫂甲')).toBeInTheDocument();
+    fireEvent.click(screen.getAllByText('記錄電話或現場詢問結果')[0]!);
 
-    fireEvent.change(screen.getByLabelText('人工意願原因（月嫂甲）'), {
+    fireEvent.change(screen.getByLabelText('詢問結果備註（月嫂甲）'), {
       target: { value: '已電話確認但日期不合' },
     });
     fireEvent.click(screen.getByRole('button', { name: '記錄 月嫂甲 無意願' }));
@@ -101,8 +101,8 @@ describe('待辦看板 Beta 第 3～4 階候選聯絡狀態', () => {
       '已電話確認但日期不合',
     ));
     await waitFor(() => expect(mocks.query).toHaveBeenCalledTimes(2));
-    expect(await screen.findByText('意願已記錄並回讀：recorded · event #45')).toBeInTheDocument();
-    expect(screen.getByText('回覆原因：已電話確認但日期不合')).toBeInTheDocument();
+    expect(await screen.findByText('已記錄意願並重新確認。')).toBeInTheDocument();
+    expect(screen.getByText('回覆說明：已電話確認但日期不合')).toBeInTheDocument();
 
     const sameWillingnessButton = screen.getByRole('button', { name: '記錄 月嫂甲 無意願' });
     expect(sameWillingnessButton).toBeDisabled();
@@ -117,9 +117,9 @@ describe('待辦看板 Beta 第 3～4 階候選聯絡狀態', () => {
     mocks.recordWillingness.mockResolvedValue({ status: 'recorded', event_id: 46 });
     render(<OrderCandidateContactStatusPanel caseNo="CASE-CONTACT" />);
 
-    fireEvent.click(screen.getByRole('button', { name: '讀取候選聯絡狀態' }));
-    expect(await screen.findByText('月嫂甲 · 月嫂 #8892')).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('人工意願原因（月嫂甲）'), {
+    // 候選清單在掛載後自動查詢。
+    expect(await screen.findByText('月嫂甲')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('詢問結果備註（月嫂甲）'), {
       target: { value: '日期不合' },
     });
     fireEvent.click(screen.getByRole('button', { name: '記錄 月嫂甲 無意願' }));
@@ -135,7 +135,7 @@ describe('待辦看板 Beta 第 3～4 階候選聯絡狀態', () => {
     mocks.query.mockRejectedValue(new Error('candidate pool unavailable'));
     render(<OrderCandidateContactStatusPanel caseNo="CASE-CONTACT" />);
 
-    fireEvent.click(screen.getByRole('button', { name: '讀取候選聯絡狀態' }));
+    // 候選清單在掛載後自動查詢。
 
     expect(await screen.findByText('candidate pool unavailable')).toBeInTheDocument();
     expect(screen.getByText('候選聯絡狀態不可用')).toBeInTheDocument();

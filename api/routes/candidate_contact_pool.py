@@ -12,6 +12,7 @@ from api.dependencies.admin_auth import (
 from api.schemas.base import BaseResponse
 from api.schemas.candidate_contact_pool import (
     AddCandidatesRequest,
+    CandidateInformationPreviewView,
     AddCandidatesResult,
     CandidateContactPoolView,
     CandidateWillingnessRequest,
@@ -73,6 +74,20 @@ def add_candidate_contact_pool_entries(case_no: str, req: AddCandidatesRequest, 
         raise HTTPException(status_code=409, detail=str(error)) from error
 
 
+@router.get(
+    "/orders/{case_no}/candidate-contact-pool/candidates/{candidate_id}/information/preview",
+    response_model=BaseResponse[CandidateInformationPreviewView],
+)
+def preview_candidate_information(case_no: str, candidate_id: int, info_type: int,
+                                  principal: AdminPrincipal = Depends(require_line_matching_sender)):
+    del principal
+    try:
+        return BaseResponse(data=CandidateInformationPreviewView.model_validate(
+            workflow.preview_information(case_no, candidate_id, info_type)), message="已讀取寄送內容")
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
 @router.post(
     "/orders/{case_no}/candidate-contact-pool/candidates/{candidate_id}/information",
     response_model=BaseResponse[SendCandidateInformationResult],
@@ -81,7 +96,7 @@ def send_candidate_information(case_no: str, candidate_id: int, req: SendCandida
     _require_actor(principal, req.actor)
     try:
         result = workflow.send_information(
-            case_no, candidate_id, req.info_type, req.actor, req.event_key
+            case_no, candidate_id, req.info_type, req.actor, req.event_key, req.preview_fingerprint
         )
         return BaseResponse(
             data=SendCandidateInformationResult.model_validate(result),

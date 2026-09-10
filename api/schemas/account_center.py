@@ -16,7 +16,7 @@ class _ClosedModel(BaseModel):
 
 class AccountCreateRequest(_ClosedModel):
     username: str = Field(min_length=1, max_length=100)
-    password: str = Field(min_length=12, max_length=256)
+    password: str = Field(min_length=10, max_length=256)
     display_name: str = Field(min_length=1, max_length=100)
     linked_line_user_id: str | None = Field(default=None, max_length=100)
     reason: str = Field(min_length=1, max_length=500)
@@ -31,7 +31,7 @@ class AccountEnabledRequest(_ClosedModel):
 
 
 class AccountPasswordResetRequest(_ClosedModel):
-    password: str = Field(min_length=12, max_length=256)
+    password: str = Field(min_length=10, max_length=256)
     reason: str = Field(min_length=1, max_length=500)
     expected_version: int = Field(ge=1)
     idempotency_key: str = Field(min_length=1, max_length=191)
