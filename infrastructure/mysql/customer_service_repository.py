@@ -121,6 +121,36 @@ class MySqlCustomerServiceRepository:
             )
         return self.get(ticket_id)
 
+    def resolve_for_requester_resume(
+        self,
+        ticket_id: int,
+        expected_version: int,
+        actor_id: str,
+        resolution_code: str,
+    ) -> CustomerServiceTicket:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE customer_service_tickets SET status='resolved',"
+                "resolved_at_utc=UTC_TIMESTAMP(),version=version+1 "
+                "WHERE id=%s AND version=%s AND status IN ('waiting','handling')",
+                (ticket_id, expected_version),
+            )
+            if cursor.rowcount != 1:
+                raise CustomerServiceVersionConflictError(
+                    "客服需求已更新或不在可由申請人恢復 AI 的狀態"
+                )
+            cursor.execute(
+                _EVENT_INSERT_SQL,
+                (
+                    ticket_id,
+                    f"human-escalation:requester-resume:{ticket_id}:{expected_version}",
+                    "status_changed",
+                    resolution_code,
+                    actor_id,
+                ),
+            )
+        return self.get(ticket_id)
+
     def get(self, ticket_id: int, *, lock: bool = False) -> CustomerServiceTicket:
         suffix = " FOR UPDATE" if lock else ""
         with self._connection.cursor() as cursor:

@@ -10,3 +10,7 @@ The contract test covers the canonical complaint source normalizer, masked
 Customer Service escalation creation in the caller UoW, HIGH urgency/hold
 intent, safe ticket payload, and durable empathy delivery. It does not invoke a
 LINE provider or create Payroll/assignment facts.
+
+The canonical root also retains the M4 escalation state-machine,
+ticket-adapter CAS, and deterministic human-handoff precedence suites because
+the requester-resume flow crosses those three contracts.

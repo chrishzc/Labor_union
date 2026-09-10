@@ -51,57 +51,75 @@ class LineFeedbackApplication:
         )
 
     def apply(self, command: RecordLineFeedback) -> FeedbackReadback:
-        fingerprint = command.command_fingerprint
         with self._unit_of_work_factory() as unit_of_work:
-            existing_receipt = unit_of_work.receipts.get(command.idempotency_key)
-            if existing_receipt is not None and existing_receipt.payload_fingerprint != fingerprint:
-                raise FeedbackConflictError("feedback_idempotency_conflict")
-            existing = unit_of_work.feedback.get(command.actor_id, command.source_response_id)
-            if existing is not None:
-                if existing.command_fingerprint != fingerprint or existing.outcome is not command.outcome:
-                    raise FeedbackConflictError("feedback_terminal_decision_conflict")
-                if existing_receipt is None:
-                    unit_of_work.receipts.append(
-                        IdempotencyReceipt(
-                            command.idempotency_key,
-                            fingerprint,
-                            _receipt_reference(existing),
-                        )
-                    )
-                    unit_of_work.commit()
-                return _readback(existing, replayed=True)
+            result, changed = self._apply_in_unit_of_work(command, unit_of_work)
+            if changed:
+                unit_of_work.commit()
+        return result
 
-            ticket_id = None
-            if command.outcome is FeedbackOutcome.UNRESOLVED:
-                ticket = unit_of_work.customer_service.create_or_append(
-                    CreateCustomerServiceMessage(
-                        line_user_id=command.actor_id,
-                        category=CustomerServiceCategory.OTHER,
-                        message="LINE 回覆未解決，請客服協助。",
-                        event_key=f"line-feedback-ticket:{command.source_response_id}",
+    def apply_in_unit_of_work(
+        self,
+        command: RecordLineFeedback,
+        unit_of_work: FeedbackUnitOfWork,
+    ) -> FeedbackReadback:
+        """Apply feedback inside the canonical LINE event transaction."""
+        result, _ = self._apply_in_unit_of_work(command, unit_of_work)
+        return result
+
+    def _apply_in_unit_of_work(
+        self,
+        command: RecordLineFeedback,
+        unit_of_work: FeedbackUnitOfWork,
+    ) -> tuple[FeedbackReadback, bool]:
+        fingerprint = command.command_fingerprint
+        existing_receipt = unit_of_work.receipts.get(command.idempotency_key)
+        if existing_receipt is not None and existing_receipt.payload_fingerprint != fingerprint:
+            raise FeedbackConflictError("feedback_idempotency_conflict")
+        existing = unit_of_work.feedback.get(command.actor_id, command.source_response_id)
+        if existing is not None:
+            if existing.command_fingerprint != fingerprint or existing.outcome is not command.outcome:
+                raise FeedbackConflictError("feedback_terminal_decision_conflict")
+            if existing_receipt is None:
+                unit_of_work.receipts.append(
+                    IdempotencyReceipt(
+                        command.idempotency_key,
+                        fingerprint,
+                        _receipt_reference(existing),
                     )
                 )
-                ticket_id = int(ticket.ticket_id)
-            root = FeedbackRoot(
-                actor_id=command.actor_id,
-                source_response_id=command.source_response_id,
-                outcome=command.outcome,
-                binding_version=command.binding_version,
-                response_revision=command.response_revision,
-                catalog_revision=command.catalog_revision,
-                rule_revision=command.rule_revision,
-                command_fingerprint=fingerprint,
-                ticket_id=ticket_id,
-                idempotency_key=command.idempotency_key,
-                correlation_id=command.correlation_id,
-                occurred_at=self._now(),
+                return _readback(existing, replayed=True), True
+            return _readback(existing, replayed=True), False
+
+        ticket_id = None
+        if command.outcome is FeedbackOutcome.UNRESOLVED:
+            ticket = unit_of_work.customer_service.create_or_append(
+                CreateCustomerServiceMessage(
+                    line_user_id=command.actor_id,
+                    category=CustomerServiceCategory.OTHER,
+                    message="LINE 回覆未解決，請客服協助。",
+                    event_key=f"line-feedback-ticket:{command.source_response_id}",
+                )
             )
-            unit_of_work.feedback.append(root)
-            unit_of_work.receipts.append(
-                IdempotencyReceipt(command.idempotency_key, fingerprint, _receipt_reference(root))
-            )
-            unit_of_work.commit()
-        return _readback(root, replayed=False)
+            ticket_id = int(ticket.ticket_id)
+        root = FeedbackRoot(
+            actor_id=command.actor_id,
+            source_response_id=command.source_response_id,
+            outcome=command.outcome,
+            binding_version=command.binding_version,
+            response_revision=command.response_revision,
+            catalog_revision=command.catalog_revision,
+            rule_revision=command.rule_revision,
+            command_fingerprint=fingerprint,
+            ticket_id=ticket_id,
+            idempotency_key=command.idempotency_key,
+            correlation_id=command.correlation_id,
+            occurred_at=self._now(),
+        )
+        unit_of_work.feedback.append(root)
+        unit_of_work.receipts.append(
+            IdempotencyReceipt(command.idempotency_key, fingerprint, _receipt_reference(root))
+        )
+        return _readback(root, replayed=False), True
 
     def query(self, actor_id: str, source_response_id: str) -> FeedbackReadback | None:
         """Return the actor-scoped immutable root and its receipt readback."""

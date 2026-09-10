@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import datetime, timedelta
 from typing import Callable
 
@@ -17,7 +18,10 @@ from domains.line.delivery import (
 from domains.line.identity_flow import LineIdentityFlowPurpose
 from domains.line.platform_user import LineFriendEvent, LineFriendEventType
 from shared_kernel.identities import CorrelationId, IdempotencyKey
+from subsystems.line.feedback_contracts import FeedbackOutcome, RecordLineFeedback
 from subsystems.line.identity_contracts import OpenLineIdentityFlowCommand
+from subsystems.line.identity_management_contracts import LineIdentityCurrentFactQuery
+from subsystems.line.navigation_catalog import CATALOG_REVISION
 
 _STAFF_COMMAND = "我是月嫂"
 _ADMIN_COMMANDS = {"綁定system_admin", "綁定工會帳號", "綁定後台帳號"}
@@ -57,6 +61,9 @@ _SERVICE_HELP_CATEGORY_KEYS = {
     "修改登記資料": "profile-update",
     "其他問題": "other",
 }
+_KNOWLEDGE_FEEDBACK_POSTBACK = re.compile(
+    r"^feedback:knowledge:([1-9][0-9]*):(resolved|unresolved)$"
+)
 
 
 class LineWebhookIdentityHandlers:
@@ -73,6 +80,7 @@ class LineWebhookIdentityHandlers:
         knowledge_question_scheduler: Callable[[object, object, object, str], object] | None = None,
         service_help_application: object | None = None,
         menu_command_application: object | None = None,
+        feedback_application: object | None = None,
     ) -> None:
         self._now = now
         self._identity_url = identity_url
@@ -84,6 +92,7 @@ class LineWebhookIdentityHandlers:
         self._knowledge_question_scheduler = knowledge_question_scheduler
         self._service_help_application = service_help_application
         self._menu_command_application = menu_command_application
+        self._feedback_application = feedback_application
 
     def registry(self):
         return {
@@ -188,12 +197,80 @@ class LineWebhookIdentityHandlers:
             self._group_application.handle_membership(inbox, unit_of_work)
 
     def handle_postback(self, inbox, unit_of_work):
+        if self._handle_knowledge_feedback_postback(inbox, unit_of_work):
+            return
+        if (
+            self._service_help_application is not None
+            and self._service_help_application.handle_postback(
+                inbox,
+                unit_of_work,
+                _optional_user_id(inbox),
+                _postback_data(inbox),
+            )
+        ):
+            return
         if self._matching_postback_application is not None:
             self._matching_postback_application.handle(inbox, unit_of_work)
 
+    def _handle_knowledge_feedback_postback(self, inbox, unit_of_work) -> bool:
+        if self._feedback_application is None:
+            return False
+        match = _KNOWLEDGE_FEEDBACK_POSTBACK.fullmatch(_postback_data(inbox))
+        if match is None:
+            return False
+        line_user_id = _optional_user_id(inbox)
+        if line_user_id is None:
+            return True
+        context = unit_of_work.knowledge_questions.feedback_context(
+            int(match.group(1)),
+            line_user_id.value,
+        )
+        if context is None:
+            return True
+        current = unit_of_work.identity_management.current_fact(
+            LineIdentityCurrentFactQuery(line_user_id)
+        )
+        event_identity = inbox.event.event_id.value
+        outcome = FeedbackOutcome(match.group(2))
+        result = self._feedback_application.apply_in_unit_of_work(
+            RecordLineFeedback(
+                actor_id=line_user_id.value,
+                source_response_id=context.source_response_id,
+                outcome=outcome,
+                binding_version=current.root_version or 0,
+                response_revision=context.response_revision,
+                catalog_revision=CATALOG_REVISION,
+                rule_revision=context.rule_revision,
+                idempotency_key=IdempotencyKey(
+                    f"knowledge-feedback:{event_identity}"
+                ),
+                correlation_id=CorrelationId(f"line-event:{event_identity}"),
+            ),
+            unit_of_work,
+        )
+        message = "感謝您的肯定與回饋！"
+        if outcome is FeedbackOutcome.UNRESOLVED:
+            ticket = (
+                f"（工單編號 #{result.root.ticket_id}）"
+                if result.root.ticket_id is not None
+                else ""
+            )
+            message = f"已收到您的回饋，已通報工會專人客服{ticket}。"
+        unit_of_work.delivery_tasks.enqueue(
+            _text_delivery(
+                line_user_id,
+                _text_message_payload(message),
+                event_identity,
+                CorrelationId(f"line-event:{event_identity}"),
+                self._now(),
+                f"knowledge-feedback-ack:{event_identity}",
+            )
+        )
+        return True
+
     def _handle_feedback_resolved(self, inbox, unit_of_work, line_user_id) -> None:
         event_identity = inbox.event.event_id.value
-        correlation_id = CorrelationId(inbox.event.correlation_id.value)
+        correlation_id = CorrelationId(f"line-event:{event_identity}")
         delivery = _text_delivery(
             line_user_id,
             _text_message_payload("感謝您的肯定與回饋！很高興能為您解答 😊 若還有其他疑問，歡迎隨時告訴小幫手。"),
@@ -206,7 +283,7 @@ class LineWebhookIdentityHandlers:
 
     def _handle_feedback_unresolved(self, inbox, unit_of_work, line_user_id) -> None:
         event_identity = inbox.event.event_id.value
-        correlation_id = CorrelationId(inbox.event.correlation_id.value)
+        correlation_id = CorrelationId(f"line-event:{event_identity}")
         ticket_id_str = ""
         if hasattr(unit_of_work, "customer_service") and unit_of_work.customer_service is not None:
             try:
@@ -349,6 +426,15 @@ def _quick_reply_item(label):
             "text": label,
         },
     }
+
+
+def _postback_data(inbox) -> str:
+    payload = json.loads(inbox.event.payload_json)
+    postback = payload.get("postback")
+    if not isinstance(postback, dict):
+        return ""
+    data = postback.get("data")
+    return data.strip() if isinstance(data, str) else ""
 
 
 def _text_message_payload(text):

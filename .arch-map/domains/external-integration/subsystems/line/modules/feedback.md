@@ -22,6 +22,7 @@ The adapter reuses immutable `line_notification_source_events` and `line_command
 - `subsystems/line/service_help_application.py`
 - `infrastructure/mysql/line_feedback_repository.py`
 - `api/dependencies/line_runtime.py`
+- `api/dependencies/line_worker_operation.py`
 - `api/routes/line_ai_events.py`
 - `api/schemas/line_ai_events.py`
 - `api/routes/line_feedback.py`

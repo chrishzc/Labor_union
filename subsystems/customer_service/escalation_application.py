@@ -20,8 +20,21 @@ from domains.customer_service.escalation import (
     EscalationContext,
     TriggerCode,
 )
-from domains.customer_service.ticket import CustomerServiceStatus, transition_ticket
+from domains.customer_service.ticket import (
+    CustomerServiceStatus,
+    CustomerServiceVersionConflictError,
+    transition_ticket,
+)
+from domains.line.canonical_payload import canonical_line_payload_json
+from domains.line.delivery import (
+    LineDeliveryRequest,
+    LineMessageKind,
+    LineRecipient,
+    LineRecipientType,
+)
+from domains.line.identities import LineUserId
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
+from shared_kernel.identities import IdempotencyKey
 from subsystems.customer_service.escalation_contracts import (
     AutomationHoldDecision,
     ClaimHumanEscalation,
@@ -31,6 +44,7 @@ from subsystems.customer_service.escalation_contracts import (
     HumanEscalationReceipt,
     HumanEscalationView,
     HumanEscalationAttemptWindow,
+    ResumeHumanEscalationByRequester,
     ResolveHumanEscalation,
     StartHumanEscalationHandling,
 )
@@ -195,6 +209,22 @@ class HumanEscalationApplication:
                 receipt = self._receipt(updated, "resolve", command.correlation_id.value, replayed=False)
                 for event_type in (EscalationEventType.RESOLVED, EscalationEventType.HOLD_RELEASED):
                     repo.append_event(int(_field(escalation, "id")), event_type, expected_escalation_version=command.expected_escalation_version, resulting_escalation_version=command.expected_escalation_version + 1, expected_ticket_version=command.expected_ticket_version, resulting_ticket_version=int(_field(resolved_ticket, "version")), expected_hold_version=int(_field(escalation, "hold_version", 0)), resulting_hold_version=int(_field(escalation, "hold_version", 0)) + 1, actor_ref=command.actor.actor_id, reason_code=command.resolution_code, reason_evidence_digest=command.resolution_evidence_digest, receipt_id=_receipt_id(event_type.value, command.idempotency_key.value), idempotency_key=f"{command.idempotency_key.value}:{event_type.value}", correlation_id=command.correlation_id.value)
+                delivery_tasks = getattr(uow, "delivery_tasks", None)
+                enqueue = getattr(delivery_tasks, "enqueue", None)
+                if not callable(enqueue):
+                    raise _error(
+                        "unavailable",
+                        "human_escalation_resolution_delivery_unavailable",
+                        retryable=True,
+                    )
+                enqueue(
+                    _admin_resolution_delivery(
+                        resolved_ticket,
+                        command,
+                        int(_field(escalation, "id")),
+                        self._now(),
+                    )
+                )
                 repo.save_receipt(command.idempotency_key.value, fingerprint, receipt)
                 uow.commit()
                 return receipt
@@ -202,6 +232,134 @@ class HumanEscalationApplication:
                 raise
             except Exception as error:
                 raise _error("unavailable", "human_escalation_persistence_unavailable", retryable=True) from error
+
+    def resume_by_requester_in_unit_of_work(
+        self,
+        command: ResumeHumanEscalationByRequester,
+        unit_of_work: object,
+    ) -> HumanEscalationReceipt | None:
+        repo = _repo(unit_of_work)
+        fingerprint = _command_fingerprint(command)
+        replay = _replay_receipt(repo, command.idempotency_key.value, fingerprint)
+        if replay is not None:
+            return replay
+        escalation = _call(
+            repo, "get_active_by_scope", command.hold_scope, lock=True
+        )
+        if escalation is None:
+            return None
+        trigger = TriggerCode(
+            str(
+                getattr(
+                    _field(escalation, "trigger_code"),
+                    "value",
+                    _field(escalation, "trigger_code"),
+                )
+            )
+        )
+        if trigger not in {
+            TriggerCode.EXPLICIT_HUMAN_REQUEST,
+            TriggerCode.EXPLICIT_WRONG_ANSWER,
+            TriggerCode.COMPLAINT,
+        }:
+            raise _error("domain_blocked", "requester_resume_not_permitted")
+        workflow_status = EscalationWorkflowStatus(
+            str(_field(escalation, "workflow_status"))
+        )
+        if workflow_status not in {
+            EscalationWorkflowStatus.OPEN,
+            EscalationWorkflowStatus.CLAIMED,
+            EscalationWorkflowStatus.HANDLING,
+        }:
+            raise _error("domain_blocked", "requester_resume_not_permitted")
+        ticket = _ticket(unit_of_work, escalation, lock=True)
+        if str(_field(ticket, "line_user_id")) != command.requester_line_user_id:
+            raise _error("forbidden", "requester_resume_identity_mismatch")
+        ticket_status = CustomerServiceStatus(str(_field(ticket, "status")))
+        if ticket_status not in {
+            CustomerServiceStatus.WAITING,
+            CustomerServiceStatus.HANDLING,
+        }:
+            raise _error("domain_blocked", "requester_resume_not_permitted")
+        ticket_port = getattr(unit_of_work, "customer_service", None)
+        resolve_ticket = getattr(
+            ticket_port, "resolve_for_requester_resume", None
+        )
+        if not callable(resolve_ticket):
+            raise _error(
+                "unavailable",
+                "human_escalation_persistence_unavailable",
+                retryable=True,
+            )
+        escalation_version = int(_field(escalation, "workflow_version", 0))
+        hold_version = int(_field(escalation, "hold_version", 0))
+        ticket_version = int(_field(ticket, "version"))
+        try:
+            resolved_ticket = resolve_ticket(
+                int(_field(escalation, "ticket_id")),
+                ticket_version,
+                command.actor.actor_id,
+                "requester_resumed_ai",
+            )
+            updated = repo.transition(
+                int(_field(escalation, "id")),
+                workflow_status=EscalationWorkflowStatus.RESOLVED.value,
+                workflow_version=escalation_version + 1,
+                hold_state=AutomationHoldState.RELEASED.value,
+                hold_version=hold_version + 1,
+                ticket_version=int(_field(resolved_ticket, "version")),
+                resolution_code="requester_resumed_ai",
+                resolution_evidence_digest=fingerprint_payload(
+                    {
+                        "hold_scope": command.hold_scope,
+                        "requester": command.requester_line_user_id,
+                    }
+                ).value,
+            )
+            receipt = self._receipt(
+                updated,
+                "requester_resume",
+                command.correlation_id.value,
+                replayed=False,
+            )
+            for event_type in (
+                EscalationEventType.RESOLVED,
+                EscalationEventType.HOLD_RELEASED,
+            ):
+                repo.append_event(
+                    int(_field(escalation, "id")),
+                    event_type,
+                    expected_escalation_version=escalation_version,
+                    resulting_escalation_version=escalation_version + 1,
+                    expected_ticket_version=ticket_version,
+                    resulting_ticket_version=int(_field(resolved_ticket, "version")),
+                    expected_hold_version=hold_version,
+                    resulting_hold_version=hold_version + 1,
+                    actor_ref=command.actor.actor_id,
+                    reason_code="requester_resumed_ai",
+                    reason_evidence_digest=fingerprint,
+                    receipt_id=_receipt_id(
+                        event_type.value, command.idempotency_key.value
+                    ),
+                    idempotency_key=(
+                        f"{command.idempotency_key.value}:{event_type.value}"
+                    ),
+                    correlation_id=command.correlation_id.value,
+                )
+            repo.save_receipt(command.idempotency_key.value, fingerprint, receipt)
+            return receipt
+        except CustomerServiceVersionConflictError as error:
+            raise _error(
+                "conflict", "human_escalation_version_conflict"
+            ) from error
+        except HumanEscalationError:
+            raise
+        except Exception as error:
+            raise _error(
+                "unavailable",
+                "human_escalation_persistence_unavailable",
+                retryable=True,
+            ) from error
 
     def hold_guard(self, hold_scope: str, unit_of_work: object | None = None) -> AutomationHoldDecision:
         if unit_of_work is not None:
@@ -376,6 +534,28 @@ def _verify_preview(uow, command) -> None:
 
 def _optional_int(value) -> int | None:
     return None if value is None else int(value)
+
+
+def _admin_resolution_delivery(ticket, command, escalation_id: int, now: datetime):
+    line_user_id = LineUserId(str(_field(ticket, "line_user_id")))
+    return LineDeliveryRequest(
+        LineRecipient(LineRecipientType.USER, line_user_id),
+        LineMessageKind.TEXT,
+        canonical_line_payload_json(
+            {
+                "type": "text",
+                "text": "客服案件已完成，AI 助理已恢復，您可以繼續提問。",
+            }
+        ),
+        now,
+        IdempotencyKey(
+            f"human-escalation-resolution:{escalation_id}:"
+            f"{command.expected_escalation_version + 1}"
+        ),
+        command.correlation_id,
+        "customer_service_escalation",
+        str(escalation_id),
+    )
 
 
 def _repo(uow):

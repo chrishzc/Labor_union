@@ -4,6 +4,7 @@ Description: 驗證客服、Rich Menu、LIFF 與 durable LINE delivery 第一版
 """
 
 from datetime import datetime, timezone
+from contextlib import nullcontext
 import hashlib
 import inspect
 import json
@@ -13,7 +14,6 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
-from api.dependencies.admin_auth import AdminPrincipal
 from api.routes import line_identity
 from api.routes import line_mobile_admin
 from api.routes.customer_service import router as customer_service_router
@@ -25,10 +25,8 @@ from domains.customer_service.ticket import (
     transition_ticket,
 )
 from domains.line.identities import LineUserId
-from domains.line.identity_binding import LineBindingSubjectType, LineIdentityBindingStatus
 from shared_kernel.migration_release import load_migration_release_manifest
 from subsystems.line.service_help_application import LineServiceHelpApplication
-from subsystems.line.identity_management_contracts import LineIdentityCurrentFactReadbackStatus
 from subsystems.line.webhook_identity_handlers import LineWebhookIdentityHandlers
 
 
@@ -107,7 +105,7 @@ def test_service_help_menu_is_a_canonical_flex_delivery():
     request = unit_of_work.delivery_tasks.requests[0]
     assert request.message_kind.value == "flex"
     assert request.idempotency_key.value == "service-help:menu:event-1"
-    assert "聯絡工會人員" in request.payload_json
+    assert "customer-service:handoff:confirm" in request.payload_json
     assert "其他問題" in request.payload_json
     assert "月嫂身分認證" not in request.payload_json
 
@@ -130,9 +128,16 @@ def test_service_help_never_uses_reply_token_before_durable_delivery():
 
 def test_contact_union_creates_ticket_audit_and_delivery_in_one_uow_boundary():
     unit_of_work = _unit_of_work()
-    application = LineServiceHelpApplication(lambda: datetime(2026, 8, 11, tzinfo=timezone.utc))
+    application = LineServiceHelpApplication(
+        lambda: datetime(2026, 8, 11, tzinfo=timezone.utc)
+    )
 
-    handled = application.handle(_inbox("event-2"), unit_of_work, LineUserId("U123456789"), "聯絡工會人員")
+    handled = application.handle_postback(
+        _inbox("event-2"),
+        unit_of_work,
+        LineUserId("U123456789"),
+        "customer-service:handoff:confirm",
+    )
 
     assert handled is True
     assert unit_of_work.customer_service.messages[0].category is CustomerServiceCategory.OTHER
@@ -284,7 +289,12 @@ def test_merge_menu_copy_uses_canonical_entry_and_verified_staff_liff_targets():
     }
     customer_menu = next(item for item in menu["menus"] if item["id"] == "customer_menu")
     customer_quadrants = [
-        (button["label"], button["action"]["type"], button["action"].get("text"), button["action"].get("uri"))
+        (
+            button["label"],
+            button["action"]["type"],
+            button["action"].get("text"),
+            button["action"].get("uri") or button["action"].get("data"),
+        )
         for button in customer_menu["buttons"]
     ]
     assert "?entry=registration" in action_uris
@@ -297,7 +307,12 @@ def test_merge_menu_copy_uses_canonical_entry_and_verified_staff_liff_targets():
         ("修改登記資料", "uri", None, "?target=profile_update"),
         ("修改訂單資訊", "uri", None, "?target=order_update"),
         ("服務與問答", "message", "服務與問答", None),
-        ("專人客服諮詢", "message", "專人客服", None),
+        (
+            "專人客服諮詢",
+            "postback",
+            None,
+            "customer-service:handoff:confirm",
+        ),
     ]
     assert "?target=staff_order_search" in action_uris
     assert "?target=staff_schedule" in action_uris
@@ -390,30 +405,33 @@ def test_deferred_history_records_legacy_paths_that_must_not_return():
     assert "直接 UPDATE clients" in history
 
 
-def test_mobile_admin_actor_uses_matching_persisted_session_not_role_label(monkeypatch):
-    principal = AdminPrincipal(7, "reviewer", "Reviewer", "line_viewer")
-    fact = SimpleNamespace(
-        root_status=LineIdentityBindingStatus.BOUND,
-        readback_status=LineIdentityCurrentFactReadbackStatus.COMPLETE,
-        root_bindings=(SimpleNamespace(
-            subject_type=LineBindingSubjectType.ADMIN,
-            subject_reference="7",
-        ),),
-    )
+def test_mobile_admin_actor_comes_from_verified_current_line_binding(monkeypatch):
     monkeypatch.setattr(
         line_mobile_admin,
         "get_liff_token_verifier",
-        lambda: SimpleNamespace(verify=lambda _: SimpleNamespace(line_user_id="U-admin")),
+        lambda: SimpleNamespace(
+            verify=lambda _: SimpleNamespace(line_user_id=LineUserId("U-admin"))
+        ),
+    )
+    monkeypatch.setattr(
+        line_mobile_admin,
+        "open_line_unit_of_work",
+        lambda: nullcontext(SimpleNamespace(admins=SimpleNamespace(
+            get_linked_admin=lambda _: SimpleNamespace(
+                admin_user_id=7,
+                display_name="Reviewer",
+                role="line_viewer",
+            )
+        ))),
     )
 
-    actor = line_mobile_admin._mobile_admin_actor(
-        "verified-token",
-        principal,
-        SimpleNamespace(current_fact=lambda line_user_id: fact),
-    )
+    principal, actor = line_mobile_admin._mobile_admin_context("verified-token")
 
+    assert principal.id == 7
+    assert principal.username == "admin:7"
+    assert principal.linked_line_user_id == "U-admin"
     assert actor.actor_id == "admin:7"
-    assert actor.permission_scope == ("line.identity.review",)
+    assert "line.identity.review" in actor.permission_scope
     assert "line_viewer" not in actor.permission_scope
 
 

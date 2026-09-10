@@ -52,6 +52,7 @@ from subsystems.line.human_escalation_delivery import (
 )
 from subsystems.line.event_dispatcher import LineEventDispatcher
 from subsystems.line.follow_schedule_application import enqueue_follow_schedule
+from subsystems.line.feedback_application import LineFeedbackApplication
 from subsystems.line.identity_management_application import IDENTITY_MENU_RESET_INTENT
 from subsystems.line.identity_revocation_worker import LineIdentityRevocationWorker
 from subsystems.line.knowledge_question_application import enqueue_line_knowledge_question
@@ -159,6 +160,7 @@ def _event_consumer(worker_identity: str, now) -> LineWebhookEventConsumer:
             escalation_gateway=HumanEscalationApplication(open_line_unit_of_work, now),
         ),
         menu_command_application=LineMenuCommandApplication(),
+        feedback_application=LineFeedbackApplication(open_line_unit_of_work, now),
     )
     return LineWebhookEventConsumer(
         open_line_unit_of_work,

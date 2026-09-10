@@ -3,15 +3,15 @@ File: test_line_mobile_admin_review_pagination.py
 Description: 驗證 Mobile Admin 月嫂審核採真正 numbered server pagination，且 canonical cursor 查詢不退步。
 """
 
+from contextlib import nullcontext
+from datetime import date
 from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
 
 from api.routes import line_identity, line_mobile_admin
-from api.dependencies.admin_auth import AdminPrincipal, require_persisted_admin
-from domains.line.identity_binding import LineBindingSubjectType, LineIdentityBindingStatus
-from subsystems.line.identity_management_contracts import LineIdentityCurrentFactReadbackStatus
+from api.dependencies.admin_auth import require_persisted_admin
 from domains.line.review import LineReviewStatus, LineReviewType
 from infrastructure.mysql.line_identity_review_repository import (
     MySqlLineIdentityReviewRepository,
@@ -20,7 +20,7 @@ from infrastructure.mysql.line_identity_review_repository import (
 from subsystems.line.review_contracts import LineReviewListQuery, LineReviewPage
 
 
-def test_every_active_mobile_admin_route_requires_a_persisted_session() -> None:
+def test_every_active_mobile_admin_route_rejects_a_web_admin_session_dependency() -> None:
     active_paths = {
         "/api/v1/line/mobile-admin/profile",
         "/api/v1/line/mobile-admin/current-anomalies",
@@ -34,14 +34,110 @@ def test_every_active_mobile_admin_route_requires_a_persisted_session() -> None:
         "/api/v1/line/mobile-admin/identity-reviews/{request_id}/decision/preview",
         "/api/v1/line/mobile-admin/identity-reviews/{request_id}/decision/apply",
         "/api/v1/line/mobile-admin/scheduling-review/query",
+        "/api/v1/line/mobile-admin/scheduling-review/options",
         "/api/v1/line/mobile-admin/scheduling-review/preview",
         "/api/v1/line/mobile-admin/scheduling-review/apply",
+        "/api/v1/line/mobile-admin/client-profile/requests",
+        "/api/v1/line/mobile-admin/client-profile/requests/{request_id}/approve/preview",
+        "/api/v1/line/mobile-admin/client-profile/requests/{request_id}/approve/apply",
+        "/api/v1/line/mobile-admin/client-profile/requests/{request_id}/reject/preview",
+        "/api/v1/line/mobile-admin/client-profile/requests/{request_id}/reject",
+        "/api/v1/line/mobile-admin/staff-leave-requests",
+        "/api/v1/line/mobile-admin/staff-leave-requests/{request_id}/review",
     }
     routes = {route.path: route for route in line_mobile_admin.router.routes}
 
     for path in active_paths:
         dependency_calls = {dependency.call for dependency in routes[path].dependant.dependencies}
-        assert require_persisted_admin in dependency_calls, path
+        assert require_persisted_admin not in dependency_calls, path
+
+
+def test_client_profile_mobile_adapter_authorizes_line_binding_before_owner_query(monkeypatch) -> None:
+    events = []
+    principal = SimpleNamespace(id=7)
+    application = SimpleNamespace()
+
+    def authorize(token, capability):
+        events.append(("authorize", token, capability))
+        return principal, SimpleNamespace(actor_id="admin:7")
+
+    def owner_query(**kwargs):
+        events.append(("owner", kwargs))
+        return "owner-response"
+
+    monkeypatch.setattr(line_mobile_admin, "_mobile_admin_context", authorize)
+    monkeypatch.setattr(line_mobile_admin.client_profile_routes, "list_requests", owner_query)
+
+    response = line_mobile_admin.mobile_client_profile_requests(
+        line_mobile_admin._MobileClientProfileListRequest(
+            line_id_token="verified-token",
+            status="pending",
+            page=1,
+            page_size=50,
+        ),
+        application,
+    )
+
+    assert response == "owner-response"
+    assert events[0] == (
+        "authorize",
+        "verified-token",
+        line_mobile_admin.LineCapability.CUSTOMER_SERVICE_READ,
+    )
+    assert events[1][0] == "owner"
+    assert events[1][1]["_"] is principal
+    assert events[1][1]["application"] is application
+
+
+def test_staff_leave_mobile_adapter_passes_line_bound_principal_and_idempotency(monkeypatch) -> None:
+    principal = SimpleNamespace(id=7)
+    application = SimpleNamespace()
+    captured = {}
+    monkeypatch.setattr(
+        line_mobile_admin,
+        "_mobile_admin_context",
+        lambda token, capability: (
+            captured.update(token=token, capability=capability) or principal,
+            SimpleNamespace(actor_id="admin:7"),
+        ),
+    )
+
+    def owner_review(request_id, body, idempotency_key, owner_principal, owner_application):
+        captured.update(
+            request_id=request_id,
+            body=body,
+            idempotency_key=idempotency_key,
+            principal=owner_principal,
+            application=owner_application,
+        )
+        return "owner-response"
+
+    monkeypatch.setattr(
+        line_mobile_admin.staff_leave_management_routes,
+        "review_staff_leave_request",
+        owner_review,
+    )
+
+    response = line_mobile_admin.mobile_staff_leave_review(
+        19,
+        line_mobile_admin._MobileStaffLeaveReviewRequest(
+            line_id_token="verified-token",
+            expected_version=2,
+            action="accept",
+            reason="手機端受理",
+            idempotency_key="mobile-leave-review:19:one",
+        ),
+        application,
+    )
+
+    assert response == "owner-response"
+    assert captured["token"] == "verified-token"
+    assert captured["capability"] is line_mobile_admin.LineCapability.REVIEW_DECIDE
+    assert captured["request_id"] == 19
+    assert captured["body"].expected_version == 2
+    assert captured["idempotency_key"] == "mobile-leave-review:19:one"
+    assert captured["principal"] is principal
+    assert captured["application"] is application
 
 
 def _assignment_plan_query_payload(case_no="CASE-1"):
@@ -136,7 +232,11 @@ def test_mobile_review_route_returns_numbered_envelope_without_cursor(monkeypatc
     application = SimpleNamespace(
         list=lambda query: captured.append(query) or LineReviewPage((), None, 2, 25, 123)
     )
-    monkeypatch.setattr(line_mobile_admin, "_mobile_admin_actor", lambda *_: SimpleNamespace())
+    monkeypatch.setattr(
+        line_mobile_admin,
+        "_mobile_admin_context",
+        lambda *_: (SimpleNamespace(), SimpleNamespace()),
+    )
     monkeypatch.setattr(
         line_mobile_admin,
         "get_line_identity_review_application",
@@ -257,70 +357,127 @@ def test_mobile_scheduling_review_forwards_query_preview_apply_and_fresh_readbac
     assert captured["queries"] == 2
 
 
-def test_scheduling_mobile_auth_uses_persisted_session_and_current_role_scoped_fact(monkeypatch) -> None:
-    principal = AdminPrincipal(7, "reviewer", "Reviewer", "line_agent")
-    fact = SimpleNamespace(
-        root_status=LineIdentityBindingStatus.BOUND,
-        readback_status=LineIdentityCurrentFactReadbackStatus.COMPLETE,
-        root_bindings=(SimpleNamespace(
-            subject_type=LineBindingSubjectType.ADMIN,
-            subject_reference="7",
-        ),),
+def test_mobile_scheduling_options_project_unfinished_cases_staff_and_dates(monkeypatch) -> None:
+    captured = []
+    orders = SimpleNamespace(
+        query=lambda request: captured.append(request)
+        or SimpleNamespace(
+            items=(
+                SimpleNamespace(case_no="CASE-1", order_status="訂單成立"),
+            ),
+            next_cursor="CASE-1",
+        )
+    )
+    facts = SimpleNamespace(
+        load_case_facts=lambda case_no: {
+            "order": {"case_no": case_no, "status": "訂單成立"},
+            "staff_rows": [
+                {"id": 7, "name": "林月嫂"},
+                {"id": 8, "name": "陳月嫂"},
+            ],
+            "confirmed_service_dates": [
+                {"service_date": date(2026, 9, 1)},
+                {"service_date": date(2026, 9, 3)},
+            ],
+        }
     )
     monkeypatch.setattr(
         line_mobile_admin,
+        "_scheduling_mobile_actor",
+        lambda *_: SimpleNamespace(actor_id="admin:7"),
+    )
+
+    response = line_mobile_admin.scheduling_review_options(
+        line_mobile_admin._SchedulingReviewOptionsRequest.model_validate(
+            {
+                "line_id_token": "verified-token",
+                "case_no": "CASE-1",
+                "after_case_no": "CASE-0",
+                "page_size": 100,
+            }
+        ),
+        orders,
+        facts,
+    )
+
+    assert captured[0].page_size == 100
+    assert captured[0].after_case_no == "CASE-0"
+    assert captured[0].lifecycle_scope.value == "unfinished"
+    assert response.data.model_dump(mode="json") == {
+        "case_options": [
+            {"case_no": "CASE-1", "order_status": "訂單成立"},
+        ],
+        "next_cursor": "CASE-1",
+        "selected_case_no": "CASE-1",
+        "staff_options": [
+            {"staff_id": 7, "staff_name": "林月嫂"},
+            {"staff_id": 8, "staff_name": "陳月嫂"},
+        ],
+        "service_dates": ["2026-09-01", "2026-09-03"],
+    }
+
+
+def test_scheduling_mobile_auth_uses_verified_current_line_binding(monkeypatch) -> None:
+    monkeypatch.setattr(
+        line_mobile_admin,
         "get_liff_token_verifier",
-        lambda: SimpleNamespace(verify=lambda _: SimpleNamespace(line_user_id="U-admin")),
+        lambda: SimpleNamespace(
+            verify=lambda _: SimpleNamespace(line_user_id=line_mobile_admin.LineUserId("U-admin"))
+        ),
     )
-    actor = line_mobile_admin._scheduling_mobile_actor(
-        "verified-token",
-        principal,
-        SimpleNamespace(current_fact=lambda line_user_id: fact),
+    monkeypatch.setattr(
+        line_mobile_admin,
+        "open_line_unit_of_work",
+        lambda: nullcontext(SimpleNamespace(admins=SimpleNamespace(
+            get_linked_admin=lambda _: SimpleNamespace(
+                admin_user_id=7,
+                display_name="Reviewer",
+                role="line_agent",
+            )
+        ))),
     )
+    actor = line_mobile_admin._scheduling_mobile_actor("verified-token")
 
     assert actor.actor_id == "admin:7"
     assert "line.review.decide" in actor.permission_scope
 
 
-def test_mobile_admin_auth_requires_session_actor_to_match_current_line_binding(monkeypatch) -> None:
-    principal = AdminPrincipal(7, "reviewer", "Reviewer", "line_agent")
-    fact = SimpleNamespace(
-        root_status=LineIdentityBindingStatus.BOUND,
-        readback_status=LineIdentityCurrentFactReadbackStatus.COMPLETE,
-        root_bindings=(SimpleNamespace(
-            subject_type=LineBindingSubjectType.ADMIN,
-            subject_reference="8",
-        ),),
-    )
+def test_mobile_admin_auth_rejects_missing_current_line_binding(monkeypatch) -> None:
     monkeypatch.setattr(
         line_mobile_admin,
         "get_liff_token_verifier",
-        lambda: SimpleNamespace(verify=lambda _: SimpleNamespace(line_user_id="U-admin")),
+        lambda: SimpleNamespace(
+            verify=lambda _: SimpleNamespace(line_user_id=line_mobile_admin.LineUserId("U-admin"))
+        ),
+    )
+    monkeypatch.setattr(
+        line_mobile_admin,
+        "open_line_unit_of_work",
+        lambda: nullcontext(SimpleNamespace(admins=SimpleNamespace(get_linked_admin=lambda _: None))),
     )
 
     with pytest.raises(HTTPException) as captured:
-        line_mobile_admin._mobile_admin_actor(
-            "verified-token",
-            principal,
-            SimpleNamespace(current_fact=lambda line_user_id: fact),
-        )
+        line_mobile_admin._mobile_admin_context("verified-token")
 
     assert captured.value.status_code == 403
     assert captured.value.detail["error"]["code"] == "line_admin_binding_not_current"
 
 
-def test_scheduling_mobile_auth_rejects_legacy_or_unpersisted_identity(monkeypatch) -> None:
+def test_scheduling_mobile_auth_rejects_unbound_line_identity(monkeypatch) -> None:
     monkeypatch.setattr(
         line_mobile_admin,
         "get_liff_token_verifier",
-        lambda: SimpleNamespace(verify=lambda _: SimpleNamespace(line_user_id="U-admin")),
+        lambda: SimpleNamespace(
+            verify=lambda _: SimpleNamespace(line_user_id=line_mobile_admin.LineUserId("U-admin"))
+        ),
+    )
+    monkeypatch.setattr(
+        line_mobile_admin,
+        "open_line_unit_of_work",
+        lambda: nullcontext(SimpleNamespace(admins=SimpleNamespace(get_linked_admin=lambda _: None))),
     )
     with pytest.raises(HTTPException) as captured:
-        line_mobile_admin._scheduling_mobile_actor(
-            "verified-token",
-            AdminPrincipal(None, "development-bypass", "Local", "system_admin"),
-            SimpleNamespace(),
-        )
+        line_mobile_admin._scheduling_mobile_actor("verified-token")
 
     assert captured.value.status_code == 403
 

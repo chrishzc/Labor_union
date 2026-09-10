@@ -13,12 +13,17 @@ export default defineConfig({
   server: {
     port: 5173,
     host: true,
+    allowedHosts: ['uncured-dismay-patience.ngrok-free.dev'],
     proxy: {
       '/api': {
         target: apiTarget,
         changeOrigin: true,
       },
       '/line-': {
+        target: apiTarget,
+        changeOrigin: true,
+      },
+      '/webhook': {
         target: apiTarget,
         changeOrigin: true,
       },

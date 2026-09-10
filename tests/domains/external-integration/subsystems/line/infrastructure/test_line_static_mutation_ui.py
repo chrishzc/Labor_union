@@ -252,46 +252,41 @@ def test_mobile_admin_query_routes_use_closed_typed_response_models() -> None:
     ):
         assert f"response_model=BaseResponse[{model}]" in source
     assert "response_model=BaseResponse[_SchedulingReviewPreviewView]" in source
+    assert "response_model=BaseResponse[_SchedulingReviewOptionsView]" in source
     assert "client_finance_impact" not in source
     assert "payroll_impact" not in source
     assert "orders_impact" not in source
 
 
-def test_mobile_scheduling_review_requires_current_session_fact_and_discards_late_forms() -> None:
+def test_mobile_scheduling_review_uses_line_binding_and_discards_late_forms() -> None:
     route = (ROOT / "api" / "routes" / "line_mobile_admin.py").read_text(encoding="utf-8")
     source = _source("mobile_admin.html")
 
-    assert "require_persisted_admin" in route
-    assert "get_line_identity_management_application" in route
-    assert "current_fact" in route
+    assert "require_persisted_admin" not in route
+    assert "get_line_identity_management_application" not in route
+    assert "get_linked_admin" in route
     scheduling_auth = route.split("def _scheduling_mobile_actor", 1)[1].split(
-        "def _mobile_admin_actor", 1
+        "def _mobile_admin_context", 1
     )[0]
     assert "line_identity_bindings" not in scheduling_auth
-    assert "ActorContext(f\"admin:{admin.admin_user_id}\"" not in scheduling_auth
+    assert "LineCapability.REVIEW_DECIDE" in scheduling_auth
     assert "schedulingQuerySequence" in source
     assert "schedulingPreviewSequence" in source
     assert "schedulingFormRevision" in source
     assert "schedulingCaseIdentity" in source
-    assert "sessionStorage.getItem(\"union_admin_session_token\")" in source
-    assert "headers.Authorization" in source
-    assert "supportedTargets.includes(returnTarget)" in source
-    assert 'location.assign(`/admin/#login?return_target=${closedTarget}`)' in source
+    assert "union_admin_session_token" not in source
+    assert "headers.Authorization" not in source
+    assert "/admin/#login" not in source
+    assert "redirectToAdminLogin" not in source
     assert "const profile = await postJson(\"/api/v1/line/mobile-admin/profile\", {});" in source
     initialize = source.split("async function init()", 1)[1].split(
         "function renderStudioPreview", 1
     )[0]
-    assert initialize.index("if (!adminSessionToken())") < initialize.index(
-        'const profile = await postJson("/api/v1/line/mobile-admin/profile", {});'
-    )
+    assert "adminSessionToken" not in initialize
     assert 'id="mobileAdminContent" class="hidden"' in source
     assert "revealMobileAdmin();" in initialize
-    login_redirect = source.split("function redirectToAdminLogin", 1)[1].split(
-        "function showStatus", 1
-    )[0]
-    assert "union_admin_session_token" not in login_redirect
-    assert "idToken" not in login_redirect
-    assert "location.search" not in login_redirect
+    assert 'postJson("/api/v1/line/mobile-admin/client-profile/requests"' in source
+    assert 'postJson("/api/v1/line/mobile-admin/staff-leave-requests"' in source
     assert "querySequence !== schedulingQuerySequence" in source
     assert "formRevision !== schedulingFormRevision" in source
 
@@ -342,6 +337,9 @@ def test_mobile_scheduling_review_forwards_owner_query_preview_apply_and_readbac
     assert 'id="backToWorkQueue"' in source
     assert 'id="schedulingPane"' in source
     assert 'id="loadSchedule"' in source
+    assert '<select id="scheduleCaseNo"' in source
+    assert '<input id="scheduleCaseNo"' not in source
+    assert "/api/v1/line/mobile-admin/scheduling-review/options" in source
     assert "/api/v1/line/mobile-admin/scheduling-review/query" in source
     assert "/api/v1/line/mobile-admin/scheduling-review/preview" in source
     assert "/api/v1/line/mobile-admin/scheduling-review/apply" in source
@@ -352,6 +350,14 @@ def test_mobile_scheduling_review_forwards_owner_query_preview_apply_and_readbac
         "async function loadReviews", 1
     )[0]
     assert "official_service_dates" in preview
+    scheduling_form = source.split("function renderSchedulingReview", 1)[1].split(
+        "function invalidateSchedulingPreview", 1
+    )[0]
+    assert 'schedulingSelect("assigned_start_date"' in scheduling_form
+    assert 'schedulingSelect("assigned_end_date"' in scheduling_form
+    assert "schedulingDateDropdown" in scheduling_form
+    assert 'dropdown.dataset.field = "official_service_dates"' in source
+    assert 'input.type = "checkbox"' in source
     assert "preview_fingerprint" in apply
     assert "expected_order_version" in apply
     assert "expected_scheduling_version" in apply

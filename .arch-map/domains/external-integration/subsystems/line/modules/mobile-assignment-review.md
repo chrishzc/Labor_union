@@ -9,11 +9,10 @@
 LINE Identity pending 重綁／身分異常與 Scheduling pending 請假待辦，並提供 Matching／Scheduling
 媒合與排班案件工具入口；客服中心沿用 Customer Service workflow，異常中心只讀 current `LINE-006`，
 營運摘要只讀 current business week `operations-report.v3`。待辦項目與數量只來自各 owner 的 bounded
-Query；沒有 pending Query 的案件工具不計數。四個工會管理入口均以role-scoped LINE current fact與
-同一 actor 的persisted-human Session驗證，owner查詢與操作再驗證所需capability；Scheduling案件工具薄轉接既有Assignment Plan
+Query；沒有 pending Query 的案件工具不計數。四個工會管理入口均以server-verified LINE token、
+role-scoped LINE current fact與enabled Admin owner驗證，owner查詢與操作再驗證所需capability；Scheduling案件工具薄轉接既有Assignment Plan
 Query／Preview／Apply／readback。此 Module 不建立mobile business state、跨owner approval root或writer。
-缺Admin Session時只導向既有React password／MFA登入，使用closed target return identity回到同一mobile
-route；LINE binding不簽發或傳遞Admin token。
+LINE binding不簽發或傳遞一般後台Admin Session，LIFF也不導向React password／MFA登入。
 
 ## Implementation
 - `api/routes/line_mobile_admin.py`
@@ -27,9 +26,10 @@ route；LINE binding不簽發或傳遞Admin token。
 - outbound: `clients/client-profile` — existing pending request Query與owner Preview／Apply；mobile只作presentation。
 - outbound: `scheduling/leave-substitution` — existing pending leave inbox／受理入口；正式代班仍走owner Preview／Apply。
 - outbound: `scheduling/matching-coordination` — existing案件型Query／Preview／Apply；無pending Query時不顯示數量。
+- outbound: `orders/order-summary` — bounded unfinished Order case options only；mobile不推算可編輯狀態。
 - outbound: `anomalies/anomalies` — current-only `LINE-006` bounded Query.
 - outbound: `global/reporting` — current business week `operations-report.v3` Query projected to six summary counts.
-- outbound: `scheduling/scheduling` — existing Assignment Plan workflow; mobile adapter does not own Scheduling state.
+- outbound: `scheduling/scheduling` — existing Assignment Plan workflow，加上 active Staff 與 confirmed service-date options；mobile adapter does not own Scheduling state.
 
 ## Verification
 - layout_status: `custom_current`

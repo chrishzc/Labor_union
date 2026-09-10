@@ -1,17 +1,15 @@
 """
 File: test_deterministic_ai_router.py
-Description: 驗證 M2 deterministic 路由的優先序、typed closed outcome 與 fail-closed 邊界。
+Description: 驗證 M2 deterministic 路由的真人確認優先序、typed closed outcome 與 fail-closed 邊界。
 """
 
 from domains.customer_service.ticket import CustomerServiceCategory
 from domains.knowledge_retrieval.knowledge import KnowledgeAnswer, KnowledgeCitation
-from shared_kernel.identities import IdempotencyKey
 from subsystems.line.ai_router_contracts import (
     DeterministicAnswer,
     DeterministicRoute,
     RouterOutcomeKind,
     SafeMenu,
-    TicketReferral,
 )
 from subsystems.line.deterministic_ai_router import DeterministicLineRouter, score_band
 
@@ -22,10 +20,10 @@ def test_human_marker_precedes_exact_identity_alias() -> None:
         source_event_id="event-1",
     )
 
-    assert isinstance(outcome, TicketReferral)
-    assert outcome.kind is RouterOutcomeKind.TICKET_REFERRAL
+    assert isinstance(outcome, DeterministicRoute)
+    assert outcome.kind is RouterOutcomeKind.DETERMINISTIC_ROUTE
     assert outcome.category is CustomerServiceCategory.OTHER
-    assert outcome.idempotency_key == IdempotencyKey("line-service-help:other:event-1")
+    assert outcome.route_key == "human_handoff_confirmation"
 
 
 def test_human_marker_precedes_service_registration() -> None:
@@ -34,7 +32,20 @@ def test_human_marker_precedes_service_registration() -> None:
         source_event_id="event-human-registration",
     )
 
+    assert isinstance(outcome, DeterministicRoute)
+    assert outcome.route_key == "human_handoff_confirmation"
+
+
+def test_explicit_confirmation_alias_creates_ticket_referral() -> None:
+    from subsystems.line.ai_router_contracts import TicketReferral
+
+    outcome = DeterministicLineRouter().route(
+        "專人客服", source_event_id="event-confirmed-human"
+    )
+
     assert isinstance(outcome, TicketReferral)
+    assert outcome.kind is RouterOutcomeKind.TICKET_REFERRAL
+    assert outcome.reason_code == "explicit_human_request"
 
 
 def test_only_exact_unmarked_identity_alias_routes_to_identity() -> None:

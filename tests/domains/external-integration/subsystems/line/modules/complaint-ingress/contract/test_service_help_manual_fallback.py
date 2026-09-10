@@ -46,10 +46,12 @@ class _Audit:
 
 
 class _EscalationGateway:
-    def __init__(self, hold_error=None):
+    def __init__(self, hold_error=None, resume_receipt=None):
         self.hold_error = hold_error
+        self.resume_receipt = resume_receipt
         self.hold_calls = []
         self.create_calls = []
+        self.resume_calls = []
 
     def hold_guard(self, hold_scope, unit_of_work):
         self.hold_calls.append((hold_scope, unit_of_work))
@@ -59,6 +61,10 @@ class _EscalationGateway:
     def create_for_ticket(self, command, ticket, unit_of_work):
         self.create_calls.append((command, ticket, unit_of_work))
         return SimpleNamespace(escalation_id=41)
+
+    def resume_by_requester_in_unit_of_work(self, command, unit_of_work):
+        self.resume_calls.append((command, unit_of_work))
+        return self.resume_receipt
 
 
 def _inbox(event_id="event-1"):
@@ -78,7 +84,13 @@ def _unit_of_work():
     )
 
 
-def test_explicit_human_request_creates_typed_ticket_and_durable_delivery() -> None:
+@pytest.mark.parametrize(
+    "message_text",
+    ("幫我轉真人", "我不想要機器人回答，這個機器人好爛"),
+)
+def test_natural_language_human_request_requires_confirmation_without_ticket(
+    message_text: str,
+) -> None:
     unit_of_work = _unit_of_work()
     application = LineServiceHelpApplication(lambda: datetime(2026, 8, 21, tzinfo=timezone.utc))
 
@@ -86,11 +98,17 @@ def test_explicit_human_request_creates_typed_ticket_and_durable_delivery() -> N
         _inbox(),
         unit_of_work,
         LineUserId("U123456789"),
-        "我要找客服",
+        message_text,
     ) is True
 
-    assert unit_of_work.customer_service.messages[0].category is CustomerServiceCategory.OTHER
+    assert unit_of_work.customer_service.messages == []
     assert len(unit_of_work.delivery_tasks.requests) == 1
+    payload = json.loads(unit_of_work.delivery_tasks.requests[0].payload_json)
+    actions = [item["action"] for item in payload["quickReply"]["items"]]
+    assert [action["data"] for action in actions] == [
+        "customer-service:handoff:confirm",
+        "customer-service:handoff:continue-ai",
+    ]
 
 
 def test_reply_token_is_never_used_as_a_precommit_provider_call() -> None:
@@ -114,12 +132,15 @@ def test_service_help_menu_keeps_all_six_approved_categories() -> None:
     payload = json.loads(unit_of_work.delivery_tasks.requests[0].payload_json)
     assert payload["contents"]["header"]["contents"][1]["text"] == "服務與問答"
     buttons = payload["contents"]["body"]["contents"]
-    assert [button["action"]["text"] for button in buttons] == [
+    assert [
+        button["action"].get("text") or button["action"].get("data")
+        for button in buttons
+    ] == [
         "服務流程",
         "收費與補助",
         "查詢服務進度",
         "修改登記資料",
-        "聯絡工會人員",
+        "customer-service:handoff:confirm",
         "其他問題",
     ]
     assert "月嫂身分認證" not in unit_of_work.delivery_tasks.requests[0].payload_json
@@ -216,7 +237,7 @@ def test_explicit_human_referral_maps_masked_escalation_in_same_unit_of_work() -
         escalation_gateway=gateway,
     )
 
-    assert application.handle(_inbox("event-escalate"), unit_of_work, LineUserId("U123456789"), "我要找客服，電話 0912345678") is True
+    assert application.handle(_inbox("event-escalate"), unit_of_work, LineUserId("U123456789"), "專人客服") is True
 
     command, ticket, gateway_uow = gateway.create_calls[0]
     assert isinstance(command, CreateHumanEscalation)
@@ -231,7 +252,7 @@ def test_explicit_human_referral_maps_masked_escalation_in_same_unit_of_work() -
     assert re.fullmatch(r"[0-9a-f]{64}", command.source_fingerprint)
 
 
-def test_answer_rejected_maps_explicit_wrong_answer_trigger() -> None:
+def test_answer_rejected_asks_for_confirmation_without_creating_escalation() -> None:
     unit_of_work = _unit_of_work()
     gateway = _EscalationGateway()
     application = LineServiceHelpApplication(
@@ -239,12 +260,88 @@ def test_answer_rejected_maps_explicit_wrong_answer_trigger() -> None:
         escalation_gateway=gateway,
     )
 
-    application.handle(_inbox("event-wrong"), unit_of_work, LineUserId("U123456789"), "答錯，我要找客服")
+    application.handle(
+        _inbox("event-wrong"),
+        unit_of_work,
+        LineUserId("U123456789"),
+        "答錯，我要找客服",
+    )
 
-    assert gateway.create_calls[0][0].trigger_code is TriggerCode.EXPLICIT_WRONG_ANSWER
+    assert gateway.create_calls == []
+    payload = json.loads(unit_of_work.delivery_tasks.requests[0].payload_json)
+    assert payload["quickReply"]["items"][0]["action"]["data"] == (
+        "customer-service:handoff:confirm:answer-rejected"
+    )
 
 
-def test_active_hold_blocks_ticket_and_all_reply_or_provider_intents() -> None:
+def test_continue_ai_postback_uses_resume_gate_for_a_stale_confirmation() -> None:
+    unit_of_work = _unit_of_work()
+    gateway = _EscalationGateway(resume_receipt=None)
+    application = LineServiceHelpApplication(
+        lambda: datetime(2026, 8, 21, tzinfo=timezone.utc),
+        escalation_gateway=gateway,
+    )
+
+    assert application.handle_postback(
+        _inbox("event-continue-ai"),
+        unit_of_work,
+        LineUserId("U123456789"),
+        "customer-service:handoff:continue-ai",
+    ) is True
+
+    assert len(gateway.resume_calls) == 1
+    payload = json.loads(unit_of_work.delivery_tasks.requests[0].payload_json)
+    assert payload["text"] == "AI 助理目前已啟用，您可以繼續提問。"
+
+
+def test_confirm_postback_creates_hold_and_exposes_resume_action() -> None:
+    unit_of_work = _unit_of_work()
+    gateway = _EscalationGateway()
+    application = LineServiceHelpApplication(
+        lambda: datetime(2026, 8, 21, tzinfo=timezone.utc),
+        escalation_gateway=gateway,
+    )
+
+    assert application.handle_postback(
+        _inbox("event-confirm"),
+        unit_of_work,
+        LineUserId("U123456789"),
+        "customer-service:handoff:confirm",
+    ) is True
+
+    assert len(unit_of_work.customer_service.messages) == 1
+    assert len(gateway.create_calls) == 1
+    payload = json.loads(unit_of_work.delivery_tasks.requests[0].payload_json)
+    assert "AI 自動回答目前暫停" in payload["text"]
+    assert payload["quickReply"]["items"][0]["action"]["data"] == (
+        "customer-service:handoff:resume-ai"
+    )
+
+
+def test_resume_postback_releases_hold_in_caller_uow_and_acknowledges() -> None:
+    unit_of_work = _unit_of_work()
+    gateway = _EscalationGateway(resume_receipt=SimpleNamespace(escalation_id=41))
+    application = LineServiceHelpApplication(
+        lambda: datetime(2026, 8, 21, tzinfo=timezone.utc),
+        escalation_gateway=gateway,
+    )
+
+    assert application.handle_postback(
+        _inbox("event-resume"),
+        unit_of_work,
+        LineUserId("U123456789"),
+        "customer-service:handoff:resume-ai",
+    ) is True
+
+    command, gateway_uow = gateway.resume_calls[0]
+    assert command.requester_line_user_id == "U123456789"
+    assert command.actor.actor_id == "line:U123456789"
+    assert gateway_uow is unit_of_work
+    payload = json.loads(unit_of_work.delivery_tasks.requests[0].payload_json)
+    assert payload["text"] == "已結束真人客服並恢復 AI 助理，您可以繼續提問。"
+
+
+def test_active_hold_appends_to_existing_ticket_without_auto_reply() -> None:
     unit_of_work = _unit_of_work()
     hold_error = HumanEscalationError("domain_blocked", "automation_hold_active", "自動化暫停中")
     gateway = _EscalationGateway(hold_error)
@@ -253,13 +350,16 @@ def test_active_hold_blocks_ticket_and_all_reply_or_provider_intents() -> None:
         escalation_gateway=gateway,
     )
 
-    with pytest.raises(HumanEscalationError) as raised:
-        application.handle(_inbox("event-held"), unit_of_work, LineUserId("U123456789"), "我要找客服")
+    assert application.handle(
+        _inbox("event-held"),
+        unit_of_work,
+        LineUserId("U123456789"),
+        "我想要真人回答",
+    ) is True
 
-    assert raised.value.code == "automation_hold_active"
-    assert unit_of_work.customer_service.messages == []
+    assert len(unit_of_work.customer_service.messages) == 1
     assert unit_of_work.delivery_tasks.requests == []
-    assert unit_of_work.audit.intents == []
+    assert len(unit_of_work.audit.intents) == 1
     assert gateway.create_calls == []
 
 

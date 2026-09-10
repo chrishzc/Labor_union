@@ -9,87 +9,160 @@ Description: 提供 LINE 工會人員獨立的待辦、客服、異常與營運�
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>工會手機管理</title>
   <style>
-    :root { --green:#059669; --red:#BE123C; --ink:#1f2937; --muted:#6b7280; --line:#e5e7eb; --bg:#f8fafc; }
+    :root {
+      --green:#2f6b4f;
+      --green-strong:#174833;
+      --sage:#dde8df;
+      --sage-soft:#edf3ee;
+      --red:#a43d34;
+      --red-soft:#f7e5e1;
+      --ink:#26352c;
+      --muted:#746f66;
+      --line:#ded9cf;
+      --bg:#f7f4ec;
+      --surface:#fffdf8;
+    }
     * { box-sizing:border-box; }
     body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"PingFang TC","Noto Sans TC",sans-serif; background:var(--bg); color:var(--ink); }
-    main { max-width:760px; margin:0 auto; padding:18px 14px 40px; }
-    h1 { margin:0 0 8px; font-size:28px; }
-    .caption { color:var(--muted); margin:0 0 18px; line-height:1.5; }
-    h2 { margin:0; font-size:20px; }
-    .surface-heading { background:white; border:1px solid var(--line); border-radius:16px; padding:14px; margin-bottom:14px; }
-    .surface-heading p { color:var(--muted); margin:8px 0 0; line-height:1.5; }
-    .section-heading { display:flex; justify-content:space-between; align-items:center; gap:12px; margin:10px 0 12px; }
-    .toolbar { display:flex; gap:8px; margin-bottom:12px; }
-    select,input,textarea { width:100%; border:1px solid var(--line); border-radius:12px; padding:12px; font-size:16px; background:white; }
+    main { max-width:680px; margin:0 auto; padding:28px 18px 48px; }
+    h1 { margin:0; color:var(--green-strong); font-size:36px; line-height:1.16; letter-spacing:-.04em; }
+    .caption { color:var(--muted); margin:8px 0 16px; font-size:13px; line-height:1.45; }
+    h2 { margin:0; font-size:22px; }
+    .surface-heading { display:none; }
+    .surface-heading .pill { display:none; }
+    .surface-heading p { color:var(--muted); margin:0; line-height:1.5; }
+    .section-heading { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin:18px 0 14px; }
+    .section-heading .muted { margin:6px 0 0; font-size:14px; }
+    .toolbar { display:flex; gap:10px; margin-bottom:14px; }
+    select,input,textarea { width:100%; border:1px solid var(--line); border-radius:10px; padding:12px; font:inherit; font-size:16px; color:var(--ink); background:var(--surface); }
     textarea { min-height:104px; resize:vertical; }
-    button { border:0; border-radius:12px; padding:12px 14px; font-size:16px; font-weight:700; background:var(--green); color:white; }
-    button.secondary { background:#64748b; }
+    button { min-height:44px; border:0; border-radius:10px; padding:11px 14px; font:inherit; font-size:16px; font-weight:700; background:var(--green); color:white; cursor:pointer; }
+    button.secondary { background:#626a63; }
     button.danger { background:var(--red); }
-    button:disabled { background:#cbd5e1; }
-    .card { background:white; border:1px solid var(--line); border-radius:16px; padding:14px; margin:10px 0; box-shadow:0 2px 10px rgba(15,23,42,.04); }
+    button.quiet { min-height:38px; border:1px solid var(--line); padding:8px 11px; color:var(--green-strong); background:transparent; font-size:14px; white-space:nowrap; }
+    button:disabled { color:#8d8a83; background:#e2ded5; cursor:not-allowed; }
+    .card { background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:16px; margin:10px 0; }
     .row { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }
-    .pill { display:inline-block; border-radius:999px; background:#ecfdf5; color:#047857; padding:4px 8px; font-size:13px; }
+    .pill { display:inline-block; border-radius:999px; background:var(--sage); color:var(--green-strong); padding:4px 8px; font-size:13px; }
     .events { border-top:1px solid var(--line); margin-top:12px; padding-top:10px; }
-    .event { padding:8px 0; border-bottom:1px solid #f1f5f9; }
+    .event { padding:8px 0; border-bottom:1px solid var(--line); }
     .event small { display:block; color:var(--muted); margin-bottom:4px; }
-    .error { background:#fee2e2; color:#b91c1c; border-radius:12px; padding:12px; margin:10px 0; }
-    .info { background:#dbeafe; color:#1d4ed8; border-radius:12px; padding:12px; margin:10px 0; }
-    .preview { background:#ecfdf5; color:#166534; border-radius:12px; padding:12px; margin-top:12px; white-space:pre-wrap; }
+    .error { background:var(--red-soft); color:#7f2f29; border-radius:10px; padding:11px 12px; margin:10px 0; }
+    .info { background:var(--sage); color:var(--green-strong); border-radius:10px; padding:10px 12px; margin:10px 0; font-size:14px; }
+    #status.info { background:transparent; padding:0; margin:0 0 14px; color:var(--muted); font-size:13px; }
+    .preview { background:var(--sage-soft); color:var(--green-strong); border-radius:10px; padding:12px; margin-top:12px; white-space:pre-wrap; }
     .pagination { display:flex; align-items:center; justify-content:space-between; gap:8px; margin:12px 0; }
     .pagination-summary { color:var(--muted); font-size:14px; text-align:center; flex:1; }
-    .metric-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
-    .metric { background:white; border:1px solid var(--line); border-radius:16px; padding:14px; }
-    .metric span { display:block; color:var(--muted); font-size:14px; }
-    .metric strong { display:block; font-size:28px; margin-top:6px; }
+    .metric-grid { border-top:1px solid var(--line); }
+    .metric { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:18px 4px; border-bottom:1px solid var(--line); }
+    .metric span { color:var(--ink); font-size:16px; }
+    .metric strong { color:var(--green); font-size:30px; }
     .muted { color:var(--muted); line-height:1.5; }
     .loading-shell { max-width:760px; margin:0 auto; padding:28px 14px; color:var(--muted); }
+    .compact-filter { max-width:220px; }
+    .workbench-summary { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:14px 4px 22px; border-bottom:1px solid var(--line); }
+    .workbench-total { display:flex; align-items:baseline; gap:9px; color:var(--green-strong); }
+    .workbench-total strong { color:var(--green); font-size:64px; line-height:1; letter-spacing:-.06em; }
+    .workbench-total span { font-size:24px; font-weight:800; }
+    .workstream-list { margin:0 -18px; }
+    .workstream-trigger { width:100%; min-height:108px; display:grid; grid-template-columns:minmax(0,1fr) auto auto; align-items:center; gap:14px; border-radius:0; border-bottom:1px solid var(--line); padding:20px 18px; color:var(--ink); background:transparent; text-align:left; }
+    .workstream-trigger:hover, .workstream-trigger[aria-expanded="true"] { background:var(--sage-soft); }
+    .workstream-trigger:disabled { color:var(--ink); background:transparent; opacity:1; cursor:not-allowed; }
+    .workstream-trigger:focus-visible { outline:3px solid rgba(47,107,79,.35); outline-offset:-3px; }
+    .workstream-copy { min-width:0; }
+    .workstream-copy strong { display:block; color:var(--green-strong); font-size:20px; line-height:1.35; }
+    .workstream-copy small { display:block; margin-top:6px; color:var(--muted); font-size:14px; font-weight:500; }
+    .workstream-count { color:var(--green); font-size:30px; line-height:1; }
+    .workstream-action { color:var(--green); font-size:14px; white-space:nowrap; }
+    .workstream-panel { padding:10px 18px 20px; border-bottom:1px solid var(--line); background:rgba(255,253,248,.62); }
+    .workstream-panel .toolbar { margin-top:8px; }
+    .surface-list { border-top:1px solid var(--line); }
+    .surface-list > .card { border-width:0 0 1px; border-radius:0; margin:0; padding:18px 4px; background:transparent; }
+    .multi-select { width:100%; border:1px solid var(--line); border-radius:10px; background:var(--surface); }
+    .multi-select summary { padding:12px; cursor:pointer; list-style-position:inside; }
+    .multi-select-options { display:grid; gap:2px; max-height:220px; overflow:auto; padding:0 12px 12px; }
+    .multi-select-options label { display:flex; align-items:center; gap:10px; padding:8px 0; }
+    .multi-select-options input { width:auto; margin:0; }
     .hidden { display:none; }
+    @media (max-width:420px) {
+      h1 { font-size:34px; }
+      .section-heading { align-items:center; }
+      .workbench-total strong { font-size:58px; }
+      .workbench-total span { font-size:22px; }
+      .toolbar { align-items:stretch; }
+    }
   </style>
 </head>
 <body>
 <div id="authLoading" class="loading-shell" role="status" aria-live="polite">正在確認工會人員身分與內部登入狀態…</div>
 <main id="mobileAdminContent" class="hidden">
   <h1 id="title">工會手機管理</h1>
-  <p class="caption" id="subtitle">正在確認您的 LINE 工會人員身分。</p>
   <div class="surface-heading">
     <span class="pill" id="surfaceLabel">工會工作入口</span>
     <p id="surfaceDescription">正在載入工作內容。</p>
   </div>
+  <p class="caption" id="subtitle">正在確認您的 LINE 工會人員身分。</p>
   <div id="status" class="info">載入中...</div>
   <button id="reauthenticate" class="secondary hidden" type="button">重新登入 LINE</button>
   <section id="customerPane" class="hidden">
+    <div class="section-heading">
+      <div>
+        <h2>客服案件</h2>
+        <p class="muted">選擇狀態後，逐件回覆與完成處理。</p>
+      </div>
+      <button class="quiet" type="button" id="refreshTickets">重新整理</button>
+    </div>
     <div class="toolbar">
-      <select id="ticketStatus">
+      <select id="ticketStatus" class="compact-filter" aria-label="客服案件狀態">
         <option value="waiting">等待客服</option>
         <option value="handling">處理中</option>
         <option value="resolved">已完成</option>
       </select>
-      <button type="button" id="refreshTickets">重新整理</button>
     </div>
-    <div id="tickets"></div>
+    <div id="tickets" class="surface-list"></div>
   </section>
   <section id="reviewPane" class="hidden">
-    <div class="section-heading">
-      <h2>工會審核待辦</h2>
-      <button id="openScheduling" class="secondary" type="button">媒合與排班審核工具</button>
+    <div class="workbench-summary">
+      <div class="workbench-total"><strong id="reviewTotal">—</strong><span>件待處理</span></div>
+      <button id="refreshReviews" class="quiet" type="button">重新整理</button>
     </div>
-    <p class="muted">依業務 owner 分組顯示；客服、異常與 QA 內容審核不會在這裡重複列入。</p>
-    <h3>客戶資料異動</h3>
-    <div id="profileReviews"></div>
-    <h3>客戶／月嫂身分重綁與異常</h3>
-    <div class="toolbar">
-      <select id="reviewStatus">
-        <option value="pending">待審核</option>
-        <option value="approved">已核准</option>
-        <option value="rejected">已退回</option>
-      </select>
-      <button type="button" id="refreshReviews">重新整理</button>
+    <div class="workstream-list">
+      <button class="workstream-trigger" type="button" aria-expanded="false" aria-controls="identityWorkstream">
+        <span class="workstream-copy"><strong>客戶／月嫂身分重綁與異常</strong><small id="identityReviewMeta">待審核 — 件</small></span>
+        <span class="workstream-count" id="identityReviewCount">—</span>
+        <span class="workstream-action">查看</span>
+      </button>
+      <div id="identityWorkstream" class="workstream-panel hidden">
+        <div class="toolbar">
+          <select id="reviewStatus" class="compact-filter" aria-label="身分審核狀態">
+            <option value="pending">待審核</option>
+            <option value="approved">已核准</option>
+            <option value="rejected">已退回</option>
+          </select>
+        </div>
+        <div id="reviews" class="surface-list"></div>
+      </div>
+      <button class="workstream-trigger" type="button" aria-expanded="false" aria-controls="profileWorkstream">
+        <span class="workstream-copy"><strong>客戶資料異動</strong><small id="profileReviewMeta">待審核 — 件</small></span>
+        <span class="workstream-count" id="profileReviewCount">—</span>
+        <span class="workstream-action">查看</span>
+      </button>
+      <div id="profileWorkstream" class="workstream-panel hidden">
+        <div id="profileReviews" class="surface-list"></div>
+      </div>
+      <button class="workstream-trigger" type="button" aria-expanded="false" aria-controls="leaveWorkstream">
+        <span class="workstream-copy"><strong>請假、代班與改期</strong><small id="leaveReviewMeta">待受理 — 件</small></span>
+        <span class="workstream-count" id="leaveReviewCount">—</span>
+        <span class="workstream-action">查看</span>
+      </button>
+      <div id="leaveWorkstream" class="workstream-panel hidden">
+        <div id="leaveReviews" class="surface-list"></div>
+      </div>
+      <button id="openScheduling" class="workstream-trigger" type="button">
+        <span class="workstream-copy"><strong>媒合指派與重新媒合</strong><small>依案件編號使用正式案件工具</small></span>
+        <span class="workstream-action">開啟</span>
+      </button>
     </div>
-    <div id="reviews"></div>
-    <h3>請假、代班與改期</h3>
-    <div id="leaveReviews"></div>
-    <h3>媒合指派與重新媒合</h3>
-    <p class="muted">目前由正式案件工具依案件編號查詢；在 owner 提供 pending Query 前不顯示或推算待辦數量。</p>
   </section>
   <section id="schedulingPane" class="hidden">
     <div class="section-heading">
@@ -98,25 +171,31 @@ Description: 提供 LINE 工會人員獨立的待辦、客服、異常與營運�
     </div>
     <p class="muted">這是依案件編號操作的排班工具，不是待確認佇列。</p>
     <div class="toolbar">
-      <input id="scheduleCaseNo" type="text" maxlength="50" placeholder="輸入案件編號，例如 115000008">
+      <select id="scheduleCaseNo" aria-label="選擇排班案件">
+        <option value="">正在載入案件…</option>
+      </select>
       <button type="button" id="loadSchedule">查詢排班</button>
     </div>
     <div id="scheduleReview"></div>
   </section>
   <section id="anomaliesPane" class="hidden">
     <div class="section-heading">
-      <h2>目前通知異常</h2>
-      <button id="refreshAnomalies" type="button">重新整理</button>
+      <div>
+        <h2>目前通知異常</h2>
+        <p class="muted">只列出系統仍判定有效的 LINE 通知異常。</p>
+      </div>
+      <button id="refreshAnomalies" class="quiet" type="button">重新整理</button>
     </div>
-    <p class="muted">目前只顯示系統仍判定有效的 LINE 通知異常，不在此頁直接結案。</p>
-    <div id="anomalies"></div>
+    <div id="anomalies" class="surface-list"></div>
   </section>
   <section id="operationsPane" class="hidden">
     <div class="section-heading">
-      <h2>本週營運摘要</h2>
-      <button id="refreshOperations" type="button">重新整理</button>
+      <div>
+        <h2>本週營運摘要</h2>
+        <p class="muted" id="operationsPeriod">正在查詢本週資料。</p>
+      </div>
+      <button id="refreshOperations" class="quiet" type="button">重新整理</button>
     </div>
-    <p class="muted" id="operationsPeriod">正在查詢本週資料。</p>
     <div id="operationsMetrics" class="metric-grid"></div>
   </section>
 </main>
@@ -133,6 +212,8 @@ let schedulingQuerySequence = 0;
 let schedulingPreviewSequence = 0;
 let schedulingFormRevision = 0;
 let schedulingCaseIdentity = "";
+let schedulingOptions = null;
+let schedulingOptionsSequence = 0;
 const ticketPageState = {page: 1, pageSize: 0, total: 0};
 const reviewPageState = {page: 1, pageSize: 50, total: 0};
 let ticketQuerySequence = 0;
@@ -143,7 +224,6 @@ let anomalyQuerySequence = 0;
 let operationsQuerySequence = 0;
 let anomalyCursor = null;
 let anomalyItems = [];
-let adminLoginRedirectStarted = false;
 const studioPreview = new URLSearchParams(location.search).get("studio_preview") === "1";
 const statusBox = document.getElementById("status");
 const panes = {
@@ -180,18 +260,6 @@ function targetForIdentityRedirect() {
   return supportedTargets.includes(requested) ? requested : "customer_service";
 }
 
-function adminSessionToken() {
-  return sessionStorage.getItem("union_admin_session_token") || "";
-}
-
-function redirectToAdminLogin(returnTarget=target) {
-  // Closed return identity only.  No token or caller-provided URL crosses navigation.
-  const closedTarget = supportedTargets.includes(returnTarget)
-    ? returnTarget : "staff_review";
-  adminLoginRedirectStarted = true;
-  location.assign(`/admin/#login?return_target=${closedTarget}`);
-}
-
 function revealMobileAdmin() {
   document.getElementById("authLoading").classList.add("hidden");
   document.getElementById("mobileAdminContent").classList.remove("hidden");
@@ -207,6 +275,37 @@ function showEmpty(root, message) {
   empty.className = "info";
   empty.textContent = message;
   root.appendChild(empty);
+}
+
+function updateReviewTotal() {
+  const countIds = ["identityReviewCount", "profileReviewCount", "leaveReviewCount"];
+  const counts = countIds.map(id => Number.parseInt(document.getElementById(id).dataset.pendingCount || "", 10));
+  document.getElementById("reviewTotal").textContent = counts.every(Number.isInteger)
+    ? String(counts.reduce((sum, count) => sum + count, 0))
+    : "—";
+}
+
+function setWorkstreamCount(countId, metaId, count, label) {
+  const countNode = document.getElementById(countId);
+  const valid = Number.isInteger(count) && count >= 0;
+  countNode.textContent = valid ? String(count) : "—";
+  if (valid) countNode.dataset.pendingCount = String(count);
+  else delete countNode.dataset.pendingCount;
+  document.getElementById(metaId).textContent = `${label} ${valid ? count : "—"} 件`;
+  updateReviewTotal();
+}
+
+function toggleWorkstream(trigger) {
+  const panel = document.getElementById(trigger.getAttribute("aria-controls"));
+  const shouldOpen = trigger.getAttribute("aria-expanded") !== "true";
+  document.querySelectorAll(".workstream-trigger[aria-controls]").forEach(item => {
+    item.setAttribute("aria-expanded", "false");
+    document.getElementById(item.getAttribute("aria-controls")).classList.add("hidden");
+  });
+  if (shouldOpen) {
+    trigger.setAttribute("aria-expanded", "true");
+    panel.classList.remove("hidden");
+  }
 }
 
 function applySurfaceHeading(next) {
@@ -293,9 +392,7 @@ function reauthenticateLine() {
 
 async function postJson(url, body) {
   if (studioPreview) throw new Error("安全預覽不會讀取或修改正式資料。");
-  const sessionToken = adminSessionToken();
   const headers = {"Content-Type":"application/json"};
-  if (sessionToken) headers.Authorization = `Bearer ${sessionToken}`;
   const response = await fetch(url, {
     method: "POST",
     headers,
@@ -304,35 +401,8 @@ async function postJson(url, body) {
   const result = await response.json().catch(() => ({}));
   if (!response.ok) {
     const code = safeErrorCode(result);
-    if (supportedTargets.includes(target)
-        && response.status === 401 && !code.startsWith("liff_")) {
-      redirectToAdminLogin();
-      throw new Error("內部使用者登入已失效，正在返回既有登入流程。");
-    }
     document.getElementById("reauthenticate").classList.toggle("hidden", !code.startsWith("liff_"));
     throw new Error(safeErrorMessage(result, "操作失敗"));
-  }
-  return result.data;
-}
-
-async function adminJson(url, {method="GET", body=null, headers={}}={}) {
-  if (studioPreview) throw new Error("安全預覽不會讀取或修改正式資料。");
-  const sessionToken = adminSessionToken();
-  if (!sessionToken) {
-    redirectToAdminLogin(target);
-    throw new Error("需要登入內部使用者帳號才能處理跨業務審核。");
-  }
-  const requestHeaders = {...headers, Authorization: `Bearer ${sessionToken}`};
-  const options = {method, headers: requestHeaders};
-  if (body !== null) {
-    requestHeaders["Content-Type"] = "application/json";
-    options.body = JSON.stringify(body);
-  }
-  const response = await fetch(url, options);
-  const result = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    if (response.status === 401) redirectToAdminLogin(target);
-    throw new Error(safeErrorMessage(result, "待辦操作失敗"));
   }
   return result.data;
 }
@@ -358,16 +428,11 @@ async function init() {
     }
     idToken = liff.getIDToken() || "";
     if (!idToken) throw new Error("無法取得 LINE 登入憑證，請確認 LIFF 已啟用 openid。");
-    if (!adminSessionToken()) {
-      redirectToAdminLogin(target);
-      return;
-    }
     const profile = await postJson("/api/v1/line/mobile-admin/profile", {});
-    document.getElementById("subtitle").textContent = `登入人員：${profile.display_name}；已驗證內部 Session 與 LINE 工會人員身分。`;
+    document.getElementById("subtitle").textContent = `登入人員：${profile.display_name}；已驗證 LINE 工會人員綁定與權限。`;
     switchPane(target);
     revealMobileAdmin();
   } catch (error) {
-    if (adminLoginRedirectStarted) return;
     revealMobileAdmin();
     showStatus(error.message, true);
   }
@@ -377,19 +442,35 @@ function renderStudioPreview(next) {
   target = next;
   Object.entries(panes).forEach(([name, pane]) => pane.classList.toggle("hidden", target !== name));
   applySurfaceHeading(target);
-  document.getElementById("subtitle").textContent = "資產工作室安全預覽；未執行 LINE 登入，也未載入正式資料。";
+  document.getElementById("subtitle").textContent = "介面安全預覽；未載入正式資料或啟用操作。";
+  document.getElementById("subtitle").dataset.safetyNotice = "未執行 LINE 登入，也未載入正式資料";
+  document.getElementById("subtitle").dataset.authNotice = "正式 LIFF 入口仍需要身分驗證";
   document.getElementById("reauthenticate").classList.add("hidden");
   document.querySelectorAll("main button, main select, main input, main textarea")
     .forEach(control => { control.disabled = true; });
-  showStatus("安全預覽模式：所有操作均已停用。正式 LIFF 入口仍需要身分驗證。");
+  statusBox.className = "hidden";
   if (target === "customer_service") {
-    showEmpty(document.getElementById("tickets"), "安全預覽不載入正式客服案件。");
+    const root = document.getElementById("tickets");
+    root.replaceChildren();
+    showEmpty(root, "安全預覽不載入正式客服案件。");
   } else if (target === "staff_review") {
-    showEmpty(document.getElementById("profileReviews"), "安全預覽不載入正式客戶資料異動申請。");
-    showEmpty(document.getElementById("reviews"), "安全預覽不載入正式身分重綁與異常申請。");
-    showEmpty(document.getElementById("leaveReviews"), "安全預覽不載入正式請假與代班申請。");
+    setWorkstreamCount("identityReviewCount", "identityReviewMeta", 1, "待審核");
+    setWorkstreamCount("profileReviewCount", "profileReviewMeta", 3, "待審核");
+    setWorkstreamCount("leaveReviewCount", "leaveReviewMeta", 2, "待受理");
+    const previewGroups = [
+      ["profileReviews", "安全預覽不載入正式客戶資料異動申請。"],
+      ["reviews", "安全預覽不載入正式身分重綁與異常申請。"],
+      ["leaveReviews", "安全預覽不載入正式請假與代班申請。"],
+    ];
+    previewGroups.forEach(([id, message]) => {
+      const root = document.getElementById(id);
+      root.replaceChildren();
+      showEmpty(root, message);
+    });
   } else if (target === "anomalies_center") {
-    showEmpty(document.getElementById("anomalies"), "安全預覽不載入正式 LINE-006 異常。");
+    const root = document.getElementById("anomalies");
+    root.replaceChildren();
+    showEmpty(root, "安全預覽不載入正式 LINE-006 異常。");
   } else if (target === "dashboard") {
     document.getElementById("operationsPeriod").textContent = "安全預覽不載入正式統計期間或產生時間。";
     const labels = ["案件申請", "一般符合", "補助符合", "不符合待分流", "已成立訂單", "資料不完整"];
@@ -411,10 +492,6 @@ function renderStudioPreview(next) {
 function switchPane(next) {
   if (!supportedTargets.includes(next)) return;
   if (studioPreview) { renderStudioPreview(next); return; }
-  if (!adminSessionToken()) {
-    redirectToAdminLogin(next);
-    return;
-  }
   target = next;
   Object.entries(panes).forEach(([name, pane]) => pane.classList.toggle("hidden", target !== name));
   applySurfaceHeading(target);
@@ -423,7 +500,7 @@ function switchPane(next) {
   if (target === "customer_service") loadTickets();
   else if (target === "scheduling_review") {
     renderSchedulingReview();
-    showStatus("請輸入案件編號查詢正式排班");
+    loadSchedulingCaseOptions();
   }
   else if (target === "staff_review") loadReviewWorkbench();
   else if (target === "anomalies_center") loadAnomalies(true);
@@ -660,21 +737,127 @@ function requireSchedulingQuery(data, caseNo) {
   return data;
 }
 
+function requireSchedulingOptions(data, caseNo=null) {
+  const isoDate = /^\d{4}-\d{2}-\d{2}$/;
+  if (!data || !Array.isArray(data.case_options)
+      || !Array.isArray(data.staff_options) || !Array.isArray(data.service_dates)
+      || (data.next_cursor !== null && typeof data.next_cursor !== "string")
+      || data.case_options.some((item) => !item || typeof item.case_no !== "string" || typeof item.order_status !== "string")
+      || data.staff_options.some((item) => !item || !Number.isInteger(item.staff_id) || typeof item.staff_name !== "string")
+      || data.service_dates.some((value) => typeof value !== "string" || !isoDate.test(value))
+      || (caseNo !== null && data.selected_case_no !== caseNo)) {
+    throw new Error("排班選項格式不完整，未顯示不完整資料。");
+  }
+  return data;
+}
+
+async function loadSchedulingCaseOptions() {
+  const select = document.getElementById("scheduleCaseNo");
+  const requestedValue = select.value;
+  const querySequence = ++schedulingOptionsSequence;
+  select.disabled = true;
+  select.replaceChildren(new Option("正在載入案件…", ""));
+  try {
+    const items = [];
+    const seenCursors = new Set();
+    let afterCaseNo = null;
+    do {
+      const data = requireSchedulingOptions(await postJson(
+        "/api/v1/line/mobile-admin/scheduling-review/options",
+        {after_case_no: afterCaseNo, page_size: 200},
+      ));
+      if (querySequence !== schedulingOptionsSequence || target !== "scheduling_review") return;
+      items.push(...data.case_options);
+      afterCaseNo = data.next_cursor;
+      if (afterCaseNo !== null) {
+        if (seenCursors.has(afterCaseNo)) throw new Error("案件選項分頁重複，請稍後再試。");
+        seenCursors.add(afterCaseNo);
+      }
+    } while (afterCaseNo !== null);
+    select.replaceChildren(new Option(items.length ? "請選擇案件" : "目前沒有可查詢案件", ""));
+    items.forEach((item) => select.add(new Option(`${item.case_no}｜${item.order_status}`, item.case_no)));
+    if (items.some((item) => item.case_no === requestedValue)) select.value = requestedValue;
+    showStatus(items.length ? "請從案件選單查詢正式排班" : "目前沒有可查詢的未完成案件");
+  } catch (error) {
+    if (querySequence === schedulingOptionsSequence) {
+      select.replaceChildren(new Option("案件選項載入失敗", ""));
+      showStatus(error.message, true);
+    }
+  } finally {
+    if (querySequence === schedulingOptionsSequence) select.disabled = false;
+  }
+}
+
 function schedulingSegmentsFromForm() {
   return [...document.querySelectorAll("[data-scheduling-segment]")].map((root) => ({
     staff_id: Number(root.querySelector("[data-field='staff_id']").value),
     assigned_start_date: root.querySelector("[data-field='assigned_start_date']").value,
     assigned_end_date: root.querySelector("[data-field='assigned_end_date']").value,
-    official_service_dates: root.querySelector("[data-field='official_service_dates']").value
-      .split(",").map((value) => value.trim()).filter(Boolean),
+    official_service_dates: [...root.querySelectorAll("[data-field='official_service_dates'] [data-official-date]:checked")]
+      .map((input) => input.value),
   }));
+}
+
+function schedulingSelect(field, label, options, selectedValues, multiple=false) {
+  const select = document.createElement("select");
+  select.dataset.field = field;
+  select.setAttribute("aria-label", label);
+  select.multiple = multiple;
+  if (multiple) select.size = Math.min(Math.max(options.length, 2), 6);
+  else select.add(new Option("請選擇", ""));
+  const selected = new Set(selectedValues.map(String));
+  options.forEach((item) => {
+    const option = new Option(item.label, String(item.value));
+    option.selected = selected.has(String(item.value));
+    select.add(option);
+  });
+  return select;
+}
+
+function withSchedulingLabel(text, control) {
+  const label = document.createElement(control.tagName === "DETAILS" ? "div" : "label");
+  const caption = document.createElement("span");
+  caption.className = "muted";
+  caption.textContent = text;
+  label.append(caption, control);
+  return label;
+}
+
+function schedulingDateDropdown(options, selectedValues) {
+  const dropdown = document.createElement("details");
+  dropdown.className = "multi-select";
+  dropdown.dataset.field = "official_service_dates";
+  const summary = document.createElement("summary");
+  const list = document.createElement("div");
+  list.className = "multi-select-options";
+  const selected = new Set(selectedValues.map(String));
+  const refreshSummary = () => {
+    const count = list.querySelectorAll("[data-official-date]:checked").length;
+    summary.textContent = count ? `已選 ${count} 日` : "請選擇正式服務日";
+  };
+  options.forEach((item) => {
+    const label = document.createElement("label");
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.value = String(item.value);
+    input.dataset.officialDate = "true";
+    input.checked = selected.has(String(item.value));
+    const text = document.createElement("span");
+    text.textContent = item.label;
+    label.append(input, text);
+    list.appendChild(label);
+  });
+  dropdown.addEventListener("change", refreshSummary);
+  dropdown.append(summary, list);
+  refreshSummary();
+  return dropdown;
 }
 
 function renderSchedulingReview() {
   const root = document.getElementById("scheduleReview");
   root.replaceChildren();
   if (!schedulingQuery) {
-    showEmpty(root, "請先輸入案件編號並查詢目前正式排班。");
+    showEmpty(root, "請先從選單選擇案件並查詢目前正式排班。");
     return;
   }
   const summary = document.createElement("div");
@@ -691,35 +874,38 @@ function renderSchedulingReview() {
     card.dataset.schedulingSegment = "true";
     const title = document.createElement("strong");
     title.textContent = `排班段落 ${index + 1}`;
-    const staff = document.createElement("input");
-    staff.type = "number";
-    staff.min = "1";
-    staff.dataset.field = "staff_id";
-    staff.value = assignment.staff_id;
-    staff.setAttribute("aria-label", `排班段落 ${index + 1} 月嫂編號`);
-    const start = document.createElement("input");
-    start.type = "date";
-    start.dataset.field = "assigned_start_date";
-    start.value = assignment.assigned_start_date;
-    start.setAttribute("aria-label", `排班段落 ${index + 1} 起始日`);
-    const end = document.createElement("input");
-    end.type = "date";
-    end.dataset.field = "assigned_end_date";
-    end.value = assignment.assigned_end_date;
-    end.setAttribute("aria-label", `排班段落 ${index + 1} 結束日`);
-    const dates = document.createElement("input");
-    dates.type = "text";
-    dates.dataset.field = "official_service_dates";
-    dates.value = (assignment.official_service_dates || []).join(", ");
-    dates.placeholder = "正式服務日，以逗號分隔";
-    dates.setAttribute("aria-label", `排班段落 ${index + 1} 正式服務日`);
+    const staffOptions = [...schedulingOptions.staff_options];
+    if (!staffOptions.some((item) => item.staff_id === assignment.staff_id)) {
+      staffOptions.unshift({staff_id: assignment.staff_id, staff_name: `目前月嫂 ${assignment.staff_id}`});
+    }
+    const dateValues = [...new Set([
+      ...schedulingOptions.service_dates,
+      assignment.assigned_start_date,
+      assignment.assigned_end_date,
+      ...(assignment.official_service_dates || []),
+    ])].sort();
+    const staff = schedulingSelect(
+      "staff_id",
+      `排班段落 ${index + 1} 月嫂`,
+      staffOptions.map((item) => ({value: item.staff_id, label: `${item.staff_name}（${item.staff_id}）`})),
+      [assignment.staff_id],
+    );
+    const dateOptions = dateValues.map((value) => ({value, label: value}));
+    const start = schedulingSelect("assigned_start_date", `排班段落 ${index + 1} 起始日`, dateOptions, [assignment.assigned_start_date]);
+    const end = schedulingSelect("assigned_end_date", `排班段落 ${index + 1} 結束日`, dateOptions, [assignment.assigned_end_date]);
+    const dates = schedulingDateDropdown(dateOptions, assignment.official_service_dates || []);
     const fields = document.createElement("div");
     fields.style.display = "grid";
     fields.style.gap = "8px";
     fields.style.marginTop = "10px";
-    fields.append(staff, start, end, dates);
+    fields.append(
+      withSchedulingLabel("月嫂", staff),
+      withSchedulingLabel("起始日", start),
+      withSchedulingLabel("結束日", end),
+      withSchedulingLabel("正式服務日（可複選）", dates),
+    );
     card.append(title, fields);
-    [staff, start, end, dates].forEach((field) => field.addEventListener("input", invalidateSchedulingPreview));
+    [staff, start, end, dates].forEach((field) => field.addEventListener("change", invalidateSchedulingPreview));
     root.appendChild(card);
   });
   const reason = document.createElement("textarea");
@@ -791,7 +977,7 @@ function renderSchedulingPreview() {
 
 async function loadSchedulingReview() {
   const caseNo = document.getElementById("scheduleCaseNo").value.trim();
-  if (!caseNo) { showStatus("請先輸入案件編號。", true); return; }
+  if (!caseNo) { showStatus("請先選擇案件。", true); return; }
   const querySequence = ++schedulingQuerySequence;
   schedulingCaseIdentity = caseNo;
   schedulingQuery = null;
@@ -799,11 +985,15 @@ async function loadSchedulingReview() {
   schedulingFormRevision += 1;
   renderSchedulingReview();
   try {
-    const data = await postJson("/api/v1/line/mobile-admin/scheduling-review/query", {case_no: caseNo});
+    const [data, options] = await Promise.all([
+      postJson("/api/v1/line/mobile-admin/scheduling-review/query", {case_no: caseNo}),
+      postJson("/api/v1/line/mobile-admin/scheduling-review/options", {case_no: caseNo, page_size: 1}),
+    ]);
     if (querySequence !== schedulingQuerySequence
         || schedulingCaseIdentity !== caseNo
         || document.getElementById("scheduleCaseNo").value.trim() !== caseNo) return;
     schedulingQuery = requireSchedulingQuery(data, caseNo);
+    schedulingOptions = requireSchedulingOptions(options, caseNo);
     renderSchedulingReview();
     showStatus("已讀回目前正式排班；編輯後請先預覽。 ");
   } catch (error) {
@@ -896,6 +1086,7 @@ async function applySchedulingReview() {
 }
 
 async function loadReviewWorkbench() {
+  // 客服、異常與 QA 內容審核不會在這裡重複列入。
   const jobs = [
     ["profileReviews", loadProfileReviews],
     ["reviews", loadIdentityReviews],
@@ -909,6 +1100,13 @@ async function loadReviewWorkbench() {
     const root = document.getElementById(jobs[index][0]);
     root.replaceChildren();
     showEmpty(root, result.reason?.message || "此類待辦暫時無法載入。");
+    const countTargets = [
+      ["profileReviewCount", "profileReviewMeta", "待審核"],
+      ["identityReviewCount", "identityReviewMeta", "待審核"],
+      ["leaveReviewCount", "leaveReviewMeta", "待受理"],
+    ];
+    const [countId, metaId, label] = countTargets[index];
+    setWorkstreamCount(countId, metaId, null, label);
   });
   showStatus(
     failed ? `待辦工作台部分載入失敗（${failed}/${jobs.length}），其他分類仍可使用。` : "待辦工作台已更新",
@@ -941,8 +1139,17 @@ async function loadIdentityReviews() {
       reviewPageState.page = page;
       loadIdentityReviews().catch(error => showStatus(error.message, true));
     });
-    if (!pageData.items.length) { showEmpty(root, "目前沒有符合條件的身分重綁或異常申請。"); return 0; }
+    if (!pageData.items.length) {
+      if (requestedStatus === "pending") {
+        setWorkstreamCount("identityReviewCount", "identityReviewMeta", 0, "待審核");
+      }
+      showEmpty(root, "目前沒有符合條件的身分重綁或異常申請。");
+      return 0;
+    }
     pageData.items.forEach(review => root.appendChild(reviewCard(review)));
+    if (requestedStatus === "pending") {
+      setWorkstreamCount("identityReviewCount", "identityReviewMeta", pageData.total, "待審核");
+    }
     return pageData.total;
   } catch (error) {
     if (querySequence === reviewQuerySequence) throw error;
@@ -1105,16 +1312,20 @@ async function loadProfileReviews() {
   const querySequence = ++profileReviewQuerySequence;
   const root = document.getElementById("profileReviews");
   root.replaceChildren();
-  const data = await adminJson("/api/v1/client-profile/requests?status=pending&page=1&page_size=50");
+  const data = await postJson("/api/v1/line/mobile-admin/client-profile/requests", {
+    status: "pending", page: 1, page_size: 50,
+  });
   if (querySequence !== profileReviewQuerySequence) return 0;
   if (!data || !Array.isArray(data.items) || !Number.isInteger(data.total)) {
     throw new Error("客戶資料異動待辦格式不完整。");
   }
   if (!data.items.length) {
+    setWorkstreamCount("profileReviewCount", "profileReviewMeta", 0, "待審核");
     showEmpty(root, "目前沒有待審核的客戶資料異動申請。");
     return 0;
   }
   data.items.forEach(request => root.appendChild(profileReviewCard(request)));
+  setWorkstreamCount("profileReviewCount", "profileReviewMeta", data.total, "待審核");
   return data.total;
 }
 
@@ -1157,7 +1368,10 @@ async function previewProfileDecision(request, decision) {
     const suffix = decision === "approve" ? "approve/preview" : "reject/preview";
     const body = {expected_request_version: request.request_version};
     if (decision === "reject") body.reason = reason;
-    const preview = await adminJson(`/api/v1/client-profile/requests/${request.request_id}/${suffix}`, {method:"POST", body});
+    const preview = await postJson(
+      `/api/v1/line/mobile-admin/client-profile/requests/${request.request_id}/${suffix}`,
+      body,
+    );
     if (!preview || !Number.isInteger(preview.current_version)
         || typeof preview.preview_fingerprint !== "string") {
       throw new Error("客戶資料異動預覽格式不完整。");
@@ -1191,9 +1405,9 @@ async function applyProfileDecision(request) {
   };
   try {
     const approve = state.decision === "approve";
-    const data = await adminJson(
-      `/api/v1/client-profile/requests/${request.request_id}/${approve ? "approve/apply" : "reject"}`,
-      {method:"POST", body: approve ? {...common, expected_profile_version: state.preview.current_version} : common},
+    const data = await postJson(
+      `/api/v1/line/mobile-admin/client-profile/requests/${request.request_id}/${approve ? "approve/apply" : "reject"}`,
+      approve ? {...common, expected_profile_version: state.preview.current_version} : common,
     );
     const readback = approve ? data?.request : data;
     if (!readback || readback.request_id !== request.request_id || typeof readback.status !== "string") {
@@ -1209,14 +1423,18 @@ async function loadLeaveReviews() {
   const querySequence = ++leaveReviewQuerySequence;
   const root = document.getElementById("leaveReviews");
   root.replaceChildren();
-  const data = await adminJson("/api/v1/scheduling/staff-leave-requests?status=pending&limit=50");
+  const data = await postJson("/api/v1/line/mobile-admin/staff-leave-requests", {
+    status: "pending", limit: 50,
+  });
   if (querySequence !== leaveReviewQuerySequence) return 0;
   if (!Array.isArray(data)) throw new Error("請假待辦格式不完整。");
   if (!data.length) {
+    setWorkstreamCount("leaveReviewCount", "leaveReviewMeta", 0, "待受理");
     showEmpty(root, "目前沒有待受理的月嫂請假申請。");
     return 0;
   }
   data.forEach(request => root.appendChild(leaveReviewCard(request)));
+  setWorkstreamCount("leaveReviewCount", "leaveReviewMeta", data.length, "待受理");
   return data.length;
 }
 
@@ -1254,10 +1472,11 @@ async function reviewLeaveRequest(request, action) {
   if (!globalThis.confirm(`確認${verb}這筆請假申請？`)) return;
   const identity = globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : Date.now().toString(36);
   try {
-    const data = await adminJson(`/api/v1/scheduling/staff-leave-requests/${request.id}/review`, {
-      method: "POST",
-      headers: {"Idempotency-Key": `mobile-leave-review:${request.id}:${identity}`},
-      body: {expected_version: request.aggregate_version, action, reason},
+    const data = await postJson(`/api/v1/line/mobile-admin/staff-leave-requests/${request.id}/review`, {
+      expected_version: request.aggregate_version,
+      action,
+      reason,
+      idempotency_key: `mobile-leave-review:${request.id}:${identity}`,
     });
     if (!data || data.request_id !== request.id || typeof data.status !== "string") {
       throw new Error("請假處理結果讀回不完整，請勿重複送出。");
@@ -1419,10 +1638,11 @@ document.getElementById("refreshOperations").addEventListener("click", loadOpera
 document.getElementById("openScheduling").addEventListener("click", () => switchPane("scheduling_review"));
 document.getElementById("backToWorkQueue").addEventListener("click", () => switchPane("staff_review"));
 document.getElementById("loadSchedule").addEventListener("click", loadSchedulingReview);
-document.getElementById("scheduleCaseNo").addEventListener("input", () => {
+document.getElementById("scheduleCaseNo").addEventListener("change", () => {
   schedulingQuerySequence += 1;
   schedulingCaseIdentity = document.getElementById("scheduleCaseNo").value.trim();
   schedulingQuery = null;
+  schedulingOptions = null;
   invalidateSchedulingPreview();
   renderSchedulingReview();
 });
@@ -1433,6 +1653,9 @@ document.getElementById("ticketStatus").addEventListener("change", () => {
 document.getElementById("reviewStatus").addEventListener("change", () => {
   reviewPageState.page = 1;
   loadIdentityReviews().catch(error => showStatus(error.message, true));
+});
+document.querySelectorAll(".workstream-trigger[aria-controls]").forEach(trigger => {
+  trigger.addEventListener("click", () => toggleWorkstream(trigger));
 });
 document.getElementById("reauthenticate").addEventListener("click", reauthenticateLine);
 init();

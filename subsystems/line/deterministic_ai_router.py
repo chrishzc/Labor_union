@@ -27,6 +27,7 @@ from subsystems.line.navigation_catalog import (
 
 _HUMAN_MARKERS = (
     "人工",
+    "真人",
     "客服",
     "聯絡工會",
     "找人",
@@ -88,6 +89,7 @@ _SERVICE_ALIASES = {
 }
 _SAFE_MENU_OPTIONS = ("服務與問答", "服務登記", "聯絡工會人員")
 _CLARIFICATION_OPTIONS = ("服務與問答", "聯絡工會人員")
+_CONFIRMED_HUMAN_ALIASES = {"專人客服", "轉接真人客服"}
 
 
 class DeterministicLineRouter:
@@ -107,11 +109,23 @@ class DeterministicLineRouter:
 
         human_reason = _human_reason(normalized)
         if human_reason is not None:
-            return TicketReferral(
+            if normalized in _CONFIRMED_HUMAN_ALIASES:
+                return TicketReferral(
+                    CustomerServiceCategory.OTHER,
+                    human_reason,
+                    source_event_id,
+                    IdempotencyKey(f"line-service-help:other:{source_event_id}"),
+                )
+            return DeterministicRoute(
+                "human_handoff_confirmation",
                 CustomerServiceCategory.OTHER,
+                None,
                 human_reason,
-                source_event_id,
-                IdempotencyKey(f"line-service-help:other:{source_event_id}"),
+                CATALOG_SOURCE_IDENTITY,
+                CATALOG_REVISION,
+                CATALOG_SOURCE_IDENTITY,
+                "confirmation",
+                100,
             )
 
         entry = entry_for_alias(normalized)
@@ -183,9 +197,11 @@ def score_band(score: int | None) -> str:
 
 def _human_reason(text: str) -> str | None:
     if not text:
-        return "empty_input"
+        return None
     if any(marker in text for marker in ("答錯", "不對", "無法解決")):
         return "answer_rejected"
+    if "機器人" in text and any(marker in text for marker in ("不要", "不想要")):
+        return "explicit_human_request"
     if any(marker in text for marker in _HUMAN_MARKERS):
         return "explicit_human_request"
     return None

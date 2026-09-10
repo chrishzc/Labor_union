@@ -5,11 +5,12 @@
 - subsystem: `application-shell`
 
 ## Responsibility
-組成React應用程式的hash navigation、session/auth shell與nested ErrorBoundary。預設crash畫面只提供closed recovery，不顯示render exception message；不得擁有任何Domain business rule、root fact或mutation workflow。
+組成React應用程式的hash navigation、session/auth shell、nested ErrorBoundary，以及開發伺服器的公開Host與API proxy邊界。預設crash畫面只提供closed recovery，不顯示render exception message；不得擁有任何Domain business rule、root fact或mutation workflow。
 
 ## Implementation
 - primary: `ui_react/src/App.tsx`
 - primary: `ui_react/src/components/ErrorBoundary.tsx`
+- primary: `ui_react/vite.config.ts`
 
 ## Contracts
 - `document/架構重整/01_規格基線/12_Global_效能與UX體感架構.md` — Global UI shell、recovery與closed error presentation。

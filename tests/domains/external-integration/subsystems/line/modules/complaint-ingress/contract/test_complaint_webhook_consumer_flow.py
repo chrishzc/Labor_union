@@ -93,6 +93,9 @@ class _Escalations:
         del lock
         return None
 
+    def active_hold(self, _hold_scope):
+        return None
+
     def create(self, command, ticket):
         self.commands.append(command)
         return {
@@ -189,6 +192,39 @@ def _complaint_event(now):
     )
 
 
+def _handoff_postback_event(now):
+    line_user_id = LineUserId("U123456789")
+    event = build_line_webhook_event(
+        provider_event_id="event-handoff-confirm-postback",
+        destination_id=LineDestinationId("destination-1"),
+        event_type="postback",
+        source=LineSourceIdentity(
+            LineSourceType.USER,
+            line_user_id.value,
+            line_user_id,
+        ),
+        occurred_at=now,
+        canonical_payload={
+            "replyToken": "reply-event-handoff-confirm-postback",
+            "postback": {"data": "customer-service:handoff:confirm"},
+        },
+    )
+    lease = LineWebhookLease(
+        event.event_id,
+        "line-worker:test",
+        now,
+        now + timedelta(minutes=1),
+    )
+    return LineWebhookInboxSnapshot(
+        event,
+        LineWebhookProcessingStatus.PROCESSING,
+        ExpectedVersion(1),
+        attempt_count=1,
+        lease=lease,
+        max_attempts=5,
+    )
+
+
 def test_complaint_claimed_inbox_reaches_high_masked_escalation_in_one_business_uow():
     now = datetime(2026, 9, 2, 12, 0, tzinfo=timezone.utc)
     event = _complaint_event(now)
@@ -261,4 +297,32 @@ def test_complaint_claimed_inbox_reaches_high_masked_escalation_in_one_business_
     )
     empathy = json.loads(delivery.payload_json)["text"]
     assert "很抱歉讓您有不好的感受" in empathy
-    assert "暫停自動回覆" in empathy
+    assert "AI 自動回答目前暫停" in empathy
+
+
+def test_handoff_confirmation_postback_reaches_ticket_hold_and_resume_notice():
+    now = datetime(2026, 9, 10, 12, 0, tzinfo=timezone.utc)
+    state = _State(_handoff_postback_event(now))
+    unit_of_work_factory = _UnitOfWorkFactory(state)
+    escalation = HumanEscalationApplication(unit_of_work_factory, lambda: now)
+    handlers = LineWebhookIdentityHandlers(
+        lambda: now,
+        lambda _purpose, _flow_id: "https://example.test/identity",
+        service_help_application=LineServiceHelpApplication(
+            lambda: now, escalation_gateway=escalation
+        ),
+    )
+    consumer = LineWebhookEventConsumer(
+        unit_of_work_factory,
+        LineEventDispatcher(handlers.registry()),
+        "line-worker:test",
+        lambda: now,
+    )
+
+    assert consumer.run_once() == 1
+    assert len(state.customer_service.messages) == 1
+    assert len(state.escalations.commands) == 1
+    payload = json.loads(state.delivery_tasks.requests[0].payload_json)
+    assert payload["quickReply"]["items"][0]["action"]["data"] == (
+        "customer-service:handoff:resume-ai"
+    )

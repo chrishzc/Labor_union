@@ -124,6 +124,21 @@ class ResolveHumanEscalation:
 
 
 @dataclass(frozen=True, slots=True)
+class ResumeHumanEscalationByRequester:
+    hold_scope: str
+    requester_line_user_id: str
+    actor: ActorContext
+    idempotency_key: IdempotencyKey
+    correlation_id: CorrelationId
+
+    def __post_init__(self) -> None:
+        require_canonical_text(self.hold_scope, "hold scope", 191)
+        require_canonical_text(
+            self.requester_line_user_id, "requester LINE user id", 191
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class HumanEscalationView:
     escalation_id: int
     ticket_ref: str
@@ -226,6 +241,7 @@ class HumanEscalationTicketPort(Protocol):
     def create_or_append_escalation_ticket(self, command: CreateHumanEscalation) -> object: ...
     def get(self, ticket_id: int, *, lock: bool = False) -> object: ...
     def resolve_for_escalation(self, ticket_id: int, expected_version: int, actor_id: str, resolution_code: str) -> object: ...
+    def resolve_for_requester_resume(self, ticket_id: int, expected_version: int, actor_id: str, resolution_code: str) -> object: ...
 
 
 class HumanEscalationSourcePort(Protocol):
@@ -250,5 +266,6 @@ __all__ = [
     "AutomationHoldDecision", "ClaimHumanEscalation", "CreateHumanEscalation",
     "HumanEscalationError", "HumanEscalationPersistencePort", "HumanEscalationPreview", "HumanEscalationReceipt",
     "HumanEscalationSourcePort", "HumanEscalationTicketPort", "HumanEscalationView",
-    "ResolveHumanEscalation", "StartHumanEscalationHandling",
+    "ResolveHumanEscalation", "ResumeHumanEscalationByRequester",
+    "StartHumanEscalationHandling",
 ]

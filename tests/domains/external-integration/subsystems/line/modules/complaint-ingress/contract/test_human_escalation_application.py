@@ -1,12 +1,13 @@
 """
 File: test_human_escalation_application.py
-Description: 驗證 M4 escalation 原子流程、重播、hold gate 與 caller-owned UoW gateway。
+Description: 驗證 M4 escalation 原子流程、requester resume、重播、hold gate 與 caller-owned UoW gateway。
 """
 
 from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime, timezone
+import json
 
 import pytest
 
@@ -25,6 +26,7 @@ from subsystems.customer_service.escalation_contracts import (
     ClaimHumanEscalation,
     CreateHumanEscalation,
     HumanEscalationError,
+    ResumeHumanEscalationByRequester,
     ResolveHumanEscalation,
     StartHumanEscalationHandling,
 )
@@ -43,6 +45,7 @@ class _TicketPort:
         self.next_id += 1
         row = {
             "id": self.next_id,
+            "line_user_id": "U123456789",
             "status": CustomerServiceStatus.WAITING,
             "version": 0,
             "category": command.ticket_category,
@@ -69,6 +72,27 @@ class _TicketPort:
         row["actor_id"] = actor_id
         row["resolution_code"] = resolution_code
         return row
+
+    def resolve_for_requester_resume(self, ticket_id: int, expected_version: int, actor_id: str, resolution_code: str):
+        row = self.rows[ticket_id]
+        assert row["version"] == expected_version
+        assert row["status"] in {
+            CustomerServiceStatus.WAITING,
+            CustomerServiceStatus.HANDLING,
+        }
+        row["status"] = CustomerServiceStatus.RESOLVED
+        row["version"] = expected_version + 1
+        row["actor_id"] = actor_id
+        row["resolution_code"] = resolution_code
+        return row
+
+
+class _DeliveryTasks:
+    def __init__(self) -> None:
+        self.requests = []
+
+    def enqueue(self, request):
+        self.requests.append(request)
 
 
 class _EscalationRepo:
@@ -167,6 +191,7 @@ class _Uow:
         self.escalations = repo
         self.customer_service = tickets
         self.escalation_source = source
+        self.delivery_tasks = _DeliveryTasks()
         self.committed = False
 
     def __enter__(self):
@@ -248,6 +273,121 @@ def test_complaint_resolve_uses_customer_service_handling_evidence_not_runtime_g
     assert resolved.resulting_workflow_status is EscalationWorkflowStatus.RESOLVED
     assert resolved.resulting_hold_state is AutomationHoldState.RELEASED
     assert [event.value for _, event, _ in repo.events] == ["created", "claimed", "handling_started", "resolved", "hold_released"]
+
+
+def test_admin_resolve_enqueues_ai_restored_notice_in_the_same_uow():
+    repo, tickets, source = _EscalationRepo(), _TicketPort(), _Source(True)
+    opened_uows = []
+
+    def factory():
+        unit_of_work = _Uow(repo, tickets, source)
+        opened_uows.append(unit_of_work)
+        return unit_of_work
+
+    app = HumanEscalationApplication(factory, now=lambda: _NOW)
+    created = app.create(_command("create-admin-notice"))
+    app.claim(
+        ClaimHumanEscalation(
+            created.escalation_id,
+            0,
+            ActorContext("admin:1"),
+            IdempotencyKey("claim-admin-notice"),
+            CorrelationId("corr-claim-admin-notice"),
+        )
+    )
+    app.start_handling(
+        StartHumanEscalationHandling(
+            created.escalation_id,
+            1,
+            0,
+            ActorContext("admin:1"),
+            IdempotencyKey("handling-admin-notice"),
+            CorrelationId("corr-handling-admin-notice"),
+        )
+    )
+    app.resolve(
+        ResolveHumanEscalation(
+            created.escalation_id,
+            2,
+            1,
+            "handled",
+            _SOURCE_DIGEST,
+            ActorContext("admin:1"),
+            IdempotencyKey("resolve-admin-notice"),
+            CorrelationId("corr-resolve-admin-notice"),
+        )
+    )
+
+    resolve_uow = opened_uows[-1]
+    assert resolve_uow.committed is True
+    assert len(resolve_uow.delivery_tasks.requests) == 1
+    payload = json.loads(resolve_uow.delivery_tasks.requests[0].payload_json)
+    assert payload["text"] == "客服案件已完成，AI 助理已恢復，您可以繼續提問。"
+
+
+@pytest.mark.parametrize(
+    ("workflow_status", "ticket_status"),
+    (
+        (EscalationWorkflowStatus.OPEN, CustomerServiceStatus.WAITING),
+        (EscalationWorkflowStatus.CLAIMED, CustomerServiceStatus.WAITING),
+        (EscalationWorkflowStatus.HANDLING, CustomerServiceStatus.HANDLING),
+    ),
+)
+def test_requester_can_resume_ai_from_any_active_conversation_stage(
+    workflow_status,
+    ticket_status,
+):
+    repo, tickets, source = _EscalationRepo(), _TicketPort(), _Source(True)
+    app = _app(repo, tickets, source)
+    created = app.create(_command("create-requester-resume"))
+    repo.rows[created.escalation_id]["workflow_status"] = workflow_status.value
+    tickets.rows[21]["status"] = ticket_status
+    caller_uow = _Uow(repo, tickets, source)
+
+    receipt = app.resume_by_requester_in_unit_of_work(
+        ResumeHumanEscalationByRequester(
+            hold_scope="conversation:opaque",
+            requester_line_user_id="U123456789",
+            actor=ActorContext("line:U123456789"),
+            idempotency_key=IdempotencyKey(
+                f"requester-resume-{workflow_status.value}"
+            ),
+            correlation_id=CorrelationId(
+                f"corr-requester-resume-{workflow_status.value}"
+            ),
+        ),
+        caller_uow,
+    )
+
+    assert receipt is not None
+    assert receipt.resulting_workflow_status is EscalationWorkflowStatus.RESOLVED
+    assert receipt.resulting_hold_state is AutomationHoldState.RELEASED
+    assert tickets.rows[21]["status"] is CustomerServiceStatus.RESOLVED
+    assert tickets.rows[21]["resolution_code"] == "requester_resumed_ai"
+    assert caller_uow.committed is False
+
+
+def test_requester_resume_rejects_a_different_line_identity_without_mutation():
+    repo, tickets, source = _EscalationRepo(), _TicketPort(), _Source(True)
+    app = _app(repo, tickets, source)
+    created = app.create(_command("create-requester-mismatch"))
+    caller_uow = _Uow(repo, tickets, source)
+
+    with pytest.raises(HumanEscalationError) as raised:
+        app.resume_by_requester_in_unit_of_work(
+            ResumeHumanEscalationByRequester(
+                hold_scope="conversation:opaque",
+                requester_line_user_id="U-other-user",
+                actor=ActorContext("line:U-other-user"),
+                idempotency_key=IdempotencyKey("requester-resume-mismatch"),
+                correlation_id=CorrelationId("corr-requester-resume-mismatch"),
+            ),
+            caller_uow,
+        )
+
+    assert raised.value.code == "requester_resume_identity_mismatch"
+    assert repo.rows[created.escalation_id]["hold_state"] == "active"
+    assert tickets.rows[21]["status"] is CustomerServiceStatus.WAITING
 
 
 def test_resolve_keeps_hold_active_when_source_predicate_is_not_satisfied():

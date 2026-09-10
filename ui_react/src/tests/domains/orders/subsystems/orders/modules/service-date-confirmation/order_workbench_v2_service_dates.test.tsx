@@ -133,8 +133,7 @@ describe('待辦看板 Beta 第 9 階服務日期', () => {
     const onObserved = vi.fn();
     render(<OrderServiceDatesPanel caseNo="CASE-SERVICE-DATES" onObserved={onObserved} />);
 
-    expect(screen.queryByRole('button', { name: '讀取並精算服務日期' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '設定並查看服務日期' }));
+    fireEvent.click(screen.getByRole('button', { name: '精算天數並設定服務日期' }));
 
     await waitFor(() => expect(mocks.calculate).toHaveBeenCalledWith({
       actual_start_date: '2026-10-01',
@@ -145,11 +144,19 @@ describe('待辦看板 Beta 第 9 階服務日期', () => {
       'CASE-SERVICE-DATES',
       ['2026-10-01', '2026-10-02', '2026-10-04'],
     );
+    expect(mocks.updateServiceDatesReason).toHaveBeenCalledWith(
+      'CASE-SERVICE-DATES',
+      '確認正式服務日期',
+    );
     expect(screen.getByLabelText('建議服務日期摘要')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '📅 正式服務日期確認（日曆排盤）' })).toBeInTheDocument();
+    const calendar = screen.getByRole('group', { name: '服務日期月曆' });
+    expect(within(calendar).getByRole('button', { name: '服務日期 2026-10-02' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(calendar).getByRole('button', { name: '服務日期 2026-10-03' })).toHaveAttribute('aria-pressed', 'false');
     expect(screen.queryByRole('button', { name: '預覽服務日期' })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('checkbox', { name: '服務日期 2026-10-02' }));
-    fireEvent.click(screen.getByRole('checkbox', { name: '服務日期 2026-10-03' }));
+    fireEvent.click(within(calendar).getByRole('button', { name: '服務日期 2026-10-02' }));
+    fireEvent.click(within(calendar).getByRole('button', { name: '服務日期 2026-10-03' }));
     expect(mocks.selectServiceDates).toHaveBeenLastCalledWith(
       'CASE-SERVICE-DATES',
       ['2026-10-01', '2026-10-03', '2026-10-04'],
@@ -160,13 +167,8 @@ describe('待辦看板 Beta 第 9 階服務日期', () => {
     expect(await screen.findByText('服務日期確認內容已準備。')).toBeInTheDocument();
     expect(screen.getByLabelText('服務日期確認內容')).toBeInTheDocument();
 
-    fireEvent.change(screen.getByRole('textbox', { name: '服務日期確認原因' }), {
-      target: { value: '依客戶確認調整服務日期' },
-    });
-    expect(mocks.updateServiceDatesReason).toHaveBeenCalledWith(
-      'CASE-SERVICE-DATES',
-      '依客戶確認調整服務日期',
-    );
+    expect(screen.queryByRole('textbox', { name: '服務日期確認原因' })).not.toBeInTheDocument();
+    expect(screen.getByText('系統會自動記錄「確認正式服務日期」，不需另外填寫原因。')).toBeInTheDocument();
 
     expect(screen.queryByRole('button', { name: '套用並回讀服務日期' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '完成服務日期確認' }));
@@ -193,7 +195,7 @@ describe('待辦看板 Beta 第 9 階服務日期', () => {
     });
 
     render(<OrderServiceDatesPanel caseNo="CASE-SERVICE-DATES" />);
-    fireEvent.click(screen.getByRole('button', { name: '設定並查看服務日期' }));
+    fireEvent.click(screen.getByRole('button', { name: '精算天數並設定服務日期' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('服務日期精算回讀案件編號不一致。');
     expect(mocks.calculate).not.toHaveBeenCalled();
@@ -205,7 +207,7 @@ describe('待辦看板 Beta 第 9 階服務日期', () => {
     mocks.calculate.mockRejectedValueOnce(new Error('正式精算暫時無法使用'));
 
     render(<OrderServiceDatesPanel caseNo="CASE-SERVICE-DATES" />);
-    fireEvent.click(screen.getByRole('button', { name: '設定並查看服務日期' }));
+    fireEvent.click(screen.getByRole('button', { name: '精算天數並設定服務日期' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('正式精算暫時無法使用');
     expect(screen.queryByLabelText('建議服務日期摘要')).not.toBeInTheDocument();
@@ -214,12 +216,12 @@ describe('待辦看板 Beta 第 9 階服務日期', () => {
 
   it('使用者改動日期後會使既有 Preview 失效，必須重新 Preview', async () => {
     render(<OrderServiceDatesPanel caseNo="CASE-SERVICE-DATES" />);
-    fireEvent.click(screen.getByRole('button', { name: '設定並查看服務日期' }));
+    fireEvent.click(screen.getByRole('button', { name: '精算天數並設定服務日期' }));
     await screen.findByLabelText('建議服務日期摘要');
 
     fireEvent.click(screen.getByRole('button', { name: '確認服務日期' }));
     await screen.findByLabelText('服務日期確認內容');
-    fireEvent.click(screen.getByRole('checkbox', { name: '服務日期 2026-10-02' }));
+    fireEvent.click(screen.getByRole('button', { name: '服務日期 2026-10-02' }));
 
     expect(screen.queryByLabelText('服務日期確認內容')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '完成服務日期確認' })).not.toBeInTheDocument();
@@ -230,13 +232,10 @@ describe('待辦看板 Beta 第 9 階服務日期', () => {
     mocks.getServiceDatesDraft.mockReturnValueOnce({ status: 'outcome_unknown', queryView: null });
 
     render(<OrderServiceDatesPanel caseNo="CASE-SERVICE-DATES" onObserved={onObserved} />);
-    fireEvent.click(screen.getByRole('button', { name: '設定並查看服務日期' }));
+    fireEvent.click(screen.getByRole('button', { name: '精算天數並設定服務日期' }));
     await screen.findByLabelText('建議服務日期摘要');
     fireEvent.click(screen.getByRole('button', { name: '確認服務日期' }));
     await screen.findByLabelText('服務日期確認內容');
-    fireEvent.change(screen.getByRole('textbox', { name: '服務日期確認原因' }), {
-      target: { value: '依正式排程確認' },
-    });
     fireEvent.click(screen.getByRole('button', { name: '完成服務日期確認' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('服務日期已套用，但未取得正式回讀狀態。');

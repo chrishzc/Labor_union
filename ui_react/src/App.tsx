@@ -57,21 +57,6 @@ function getPageFromHash(): PageType {
   return 'order-workbench-v2';
 }
 
-export function getMobileAdminReturnPathFromHash(hash: string): string | null {
-  const query = hash.includes('?') ? hash.slice(hash.indexOf('?') + 1) : '';
-  const returnTarget = new URLSearchParams(query).get('return_target');
-  const allowedTargets = new Set([
-    'customer_service',
-    'staff_review',
-    'scheduling_review',
-    'anomalies_center',
-    'dashboard',
-  ]);
-  return returnTarget !== null && allowedTargets.has(returnTarget)
-    ? `/line-mobile-admin?target=${returnTarget}`
-    : null;
-}
-
 export const App: React.FC = () => {
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => sessionClient.isAuthenticated());
   const [currentPage, setCurrentPage] = useState<PageType>(() => getPageFromHash());
@@ -121,11 +106,6 @@ export const App: React.FC = () => {
 
   const handleLoginSuccess = (_username: string) => {
     setIsLoggedIn(true);
-    const mobileAdminReturnPath = getMobileAdminReturnPathFromHash(window.location.hash);
-    if (mobileAdminReturnPath) {
-      window.location.replace(mobileAdminReturnPath);
-      return;
-    }
     const targetPage = getPageFromHash();
     window.location.hash = `#${targetPage}`;
   };

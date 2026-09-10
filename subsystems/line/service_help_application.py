@@ -16,7 +16,11 @@ from domains.line.delivery import LineDeliveryRequest, LineMessageKind, LineReci
 from domains.line.identity_flow import LineIdentityFlowPurpose
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from shared_kernel.fingerprints import fingerprint_payload
-from subsystems.customer_service.escalation_contracts import CreateHumanEscalation, HumanEscalationError
+from subsystems.customer_service.escalation_contracts import (
+    CreateHumanEscalation,
+    HumanEscalationError,
+    ResumeHumanEscalationByRequester,
+)
 from subsystems.customer_service.contracts import CreateCustomerServiceMessage
 from subsystems.line.identity_contracts import OpenLineIdentityFlowCommand
 from subsystems.line.ports import LineAuditIntent
@@ -41,6 +45,18 @@ _CATEGORY_ALIASES = {
     CustomerServiceCategory.PROFILE_UPDATE: {"修改登記資料", "修改資料", "改資料", "電話錯誤", "地址錯誤", "4"},
     CustomerServiceCategory.OTHER: {"其他問題", "其他", "不是以上", "問題", "詢問", "聯絡工會人員", "聯絡工會", "找人", "找專員", "人工客服", "我要問人", "5", "6"},
 }
+_HANDOFF_CONFIRM_POSTBACK = "customer-service:handoff:confirm"
+_HANDOFF_WRONG_ANSWER_POSTBACK = "customer-service:handoff:confirm:answer-rejected"
+_HANDOFF_CONTINUE_POSTBACK = "customer-service:handoff:continue-ai"
+_HANDOFF_RESUME_POSTBACK = "customer-service:handoff:resume-ai"
+_RESUME_AI_ALIASES = {
+    "恢復 AI 助理",
+    "恢復AI助理",
+    "恢復 AI",
+    "恢復AI",
+    "繼續使用 AI",
+    "繼續使用AI",
+}
 
 
 class LineServiceHelpApplication:
@@ -57,6 +73,36 @@ class LineServiceHelpApplication:
 
     def handle(self, inbox, unit_of_work, line_user_id, text: str) -> bool:
         normalized = text.strip()
+        if normalized in _RESUME_AI_ALIASES:
+            self._resume_ai(inbox, unit_of_work, line_user_id)
+            return True
+        if self._escalation_gateway is not None:
+            try:
+                self._escalation_gateway.hold_guard(
+                    _conversation_scope(line_user_id), unit_of_work
+                )
+            except HumanEscalationError as error:
+                if error.code != "automation_hold_active":
+                    raise
+                self._append_to_active_ticket(
+                    inbox, unit_of_work, line_user_id, normalized
+                )
+                return True
+        event_id = inbox.event.event_id.value
+        outcome = self._router.route(normalized, source_event_id=event_id)
+        if (
+            isinstance(outcome, DeterministicRoute)
+            and outcome.route_key == "human_handoff_confirmation"
+        ):
+            self._reply_or_enqueue(
+                inbox,
+                unit_of_work,
+                line_user_id,
+                _handoff_confirmation_payload(outcome.reason_code),
+                "handoff-confirmation",
+                reason_code=outcome.reason_code,
+            )
+            return True
         complaint_context = normalize_complaint_text(normalized)
         if complaint_context is not None:
             self._create_complaint_escalation(
@@ -66,10 +112,6 @@ class LineServiceHelpApplication:
                 complaint_context,
             )
             return True
-        if self._escalation_gateway is not None:
-            self._escalation_gateway.hold_guard(_conversation_scope(line_user_id), unit_of_work)
-        event_id = inbox.event.event_id.value
-        outcome = self._router.route(normalized, source_event_id=event_id)
         if isinstance(outcome, TicketReferral):
             self._create_manual_ticket(inbox, unit_of_work, line_user_id, normalized, outcome)
             return True
@@ -131,6 +173,46 @@ class LineServiceHelpApplication:
                 "unavailable",
                 reason_code=outcome.code,
             )
+            return True
+        return False
+
+    def handle_postback(
+        self, inbox, unit_of_work, line_user_id, postback_data: str
+    ) -> bool:
+        if postback_data not in {
+            _HANDOFF_CONFIRM_POSTBACK,
+            _HANDOFF_WRONG_ANSWER_POSTBACK,
+            _HANDOFF_CONTINUE_POSTBACK,
+            _HANDOFF_RESUME_POSTBACK,
+        }:
+            return False
+        if line_user_id is None:
+            return True
+        if postback_data in {
+            _HANDOFF_CONFIRM_POSTBACK,
+            _HANDOFF_WRONG_ANSWER_POSTBACK,
+        }:
+            event_id = inbox.event.event_id.value
+            reason_code = (
+                "answer_rejected"
+                if postback_data == _HANDOFF_WRONG_ANSWER_POSTBACK
+                else "explicit_human_request"
+            )
+            referral = TicketReferral(
+                CustomerServiceCategory.OTHER,
+                reason_code,
+                event_id,
+                IdempotencyKey(f"line-service-help:other:{event_id}"),
+            )
+            self._create_manual_ticket(
+                inbox, unit_of_work, line_user_id, "使用者確認轉接真人客服", referral
+            )
+            return True
+        if postback_data in {
+            _HANDOFF_RESUME_POSTBACK,
+            _HANDOFF_CONTINUE_POSTBACK,
+        }:
+            self._resume_ai(inbox, unit_of_work, line_user_id)
             return True
         return False
 
@@ -216,8 +298,8 @@ class LineServiceHelpApplication:
             inbox,
             unit_of_work,
             line_user_id,
-            _text_payload(
-                "很抱歉讓您有不好的感受，我們已暫停自動回覆，客服專員會盡快協助您。"
+            _handoff_active_payload(
+                "很抱歉讓您有不好的感受，已轉接真人客服。"
             ),
             "complaint-empathy",
         )
@@ -239,9 +321,58 @@ class LineServiceHelpApplication:
             inbox,
             unit_of_work,
             line_user_id,
-            _text_payload(_TICKET_ACKNOWLEDGEMENTS[referral.category]),
+            _handoff_active_payload(
+                "已轉接真人客服，工會人員將透過 LINE 與您確認問題內容。"
+            ),
             "ticket",
         )
+        return int(ticket.ticket_id)
+
+    def _resume_ai(self, inbox, unit_of_work, line_user_id) -> None:
+        if self._escalation_gateway is None:
+            raise HumanEscalationError(
+                "unavailable",
+                "human_escalation_ingress_unavailable",
+                "真人客服狀態目前無法確認，已安全停止。",
+                retryable=True,
+            )
+        event_id = inbox.event.event_id.value
+        receipt = self._escalation_gateway.resume_by_requester_in_unit_of_work(
+            ResumeHumanEscalationByRequester(
+                hold_scope=_conversation_scope(line_user_id),
+                requester_line_user_id=line_user_id.value,
+                actor=ActorContext(f"line:{line_user_id.value}"),
+                idempotency_key=IdempotencyKey(
+                    f"line-requester-resume-ai:{event_id}"
+                ),
+                correlation_id=CorrelationId(f"line-event:{event_id}"),
+            ),
+            unit_of_work,
+        )
+        message = (
+            "已結束真人客服並恢復 AI 助理，您可以繼續提問。"
+            if receipt is not None
+            else "AI 助理目前已啟用，您可以繼續提問。"
+        )
+        self._reply_or_enqueue(
+            inbox,
+            unit_of_work,
+            line_user_id,
+            _text_payload(message),
+            "resume-ai",
+            reason_code="requester_resumed_ai",
+        )
+
+    def _append_to_active_ticket(self, inbox, unit_of_work, line_user_id, text):
+        ticket = unit_of_work.customer_service.create_or_append(
+            CreateCustomerServiceMessage(
+                line_user_id.value,
+                CustomerServiceCategory.OTHER,
+                text,
+                _event_key(inbox, "active-hold"),
+            )
+        )
+        unit_of_work.audit.append(_ticket_audit(ticket.ticket_id, line_user_id.value))
         return int(ticket.ticket_id)
 
     def _handle_category(self, inbox, unit_of_work, line_user_id, category, text):
@@ -406,6 +537,57 @@ def _text_payload(text):
     return {"type": "text", "text": text}
 
 
+def _handoff_confirmation_payload(reason_code: str):
+    confirm_data = (
+        _HANDOFF_WRONG_ANSWER_POSTBACK
+        if reason_code == "answer_rejected"
+        else _HANDOFF_CONFIRM_POSTBACK
+    )
+    return {
+        "type": "text",
+        "text": "是否要轉接真人客服？確認後 AI 自動回答會暫停，後續訊息將加入同一張客服案件。",
+        "quickReply": {
+            "items": [
+                _postback_quick_reply(
+                    "轉接真人客服", confirm_data, "轉接真人客服"
+                ),
+                _postback_quick_reply(
+                    "繼續使用 AI", _HANDOFF_CONTINUE_POSTBACK, "繼續使用 AI"
+                ),
+            ]
+        },
+    }
+
+
+def _handoff_active_payload(prefix: str):
+    return {
+        "type": "text",
+        "text": (
+            f"{prefix}\n\nAI 自動回答目前暫停；接下來的訊息會加入同一張客服案件。"
+            "若要結束真人服務，請點選「恢復 AI 助理」。"
+        ),
+        "quickReply": {
+            "items": [
+                _postback_quick_reply(
+                    "恢復 AI 助理", _HANDOFF_RESUME_POSTBACK, "恢復 AI 助理"
+                )
+            ]
+        },
+    }
+
+
+def _postback_quick_reply(label: str, data: str, display_text: str):
+    return {
+        "type": "action",
+        "action": {
+            "type": "postback",
+            "label": label,
+            "data": data,
+            "displayText": display_text,
+        },
+    }
+
+
 def _progress_payload(context):
     if not context:
         return _text_payload("目前尚未找到您綁定的服務資料。請點選下方「服務登記」取得新的安全綁定入口。")
@@ -513,6 +695,19 @@ def _navigation_card_payload(*, alt_text, eyebrow, title, description, actions, 
 
 
 def _navigation_button(label, action_text, style):
+    if action_text == "聯絡工會人員":
+        return {
+            "type": "button",
+            "style": style,
+            "height": "sm",
+            "color": "#E0683A",
+            "action": {
+                "type": "postback",
+                "label": label,
+                "data": _HANDOFF_CONFIRM_POSTBACK,
+                "displayText": "轉接真人客服",
+            },
+        }
     button = {
         "type": "button",
         "style": style,

@@ -18,6 +18,20 @@ class FeedbackOutcome(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class KnowledgeAnswerFeedbackContext:
+    source_response_id: str
+    response_revision: int
+    rule_revision: int | None
+
+    def __post_init__(self) -> None:
+        require_canonical_text(self.source_response_id, "feedback source response", 191)
+        if self.response_revision < 1:
+            raise ValueError("feedback response revision must be positive")
+        if self.rule_revision is not None and self.rule_revision < 1:
+            raise ValueError("feedback rule revision must be positive")
+
+
+@dataclass(frozen=True, slots=True)
 class RecordLineFeedback:
     actor_id: str
     source_response_id: str
@@ -125,6 +139,7 @@ __all__ = [
     "FeedbackReceipt",
     "FeedbackReadback",
     "FeedbackRoot",
+    "KnowledgeAnswerFeedbackContext",
     "LineFeedbackRepository",
     "RecordLineFeedback",
 ]

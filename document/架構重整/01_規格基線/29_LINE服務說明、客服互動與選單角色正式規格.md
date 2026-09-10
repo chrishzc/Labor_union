@@ -84,7 +84,7 @@ Client canonical `city`、`address`、`residence_type` 仍由 Client owner 保�
 
 路由順序固定為：
 
-1. 明確人工需求、錯誤回報或受保護安全詞。
+1. 明確人工需求、錯誤回報或受保護安全詞；自然語句命中時先要求確認，確認前零 ticket／hold。
 2. exact identity／security／command alias。
 3. group／target context。
 4. Service Help 六類 deterministic dispatch。
@@ -107,14 +107,16 @@ LLM 不得直接產生業務 final answer、不得寫 owner root、不得自選�
 
 Current menu content 與 action 由 MySQL versioned LINE configuration 及 current publication 決定。`config/*.json` 作為 bootstrap source；本文件不硬編舊 menu ID、provider ID 或已退役 deep link。訪客選單至少提供「客戶登記與綁定」與「月嫂身分綁定」；客戶選單提供「修改登記資料」、「修改訂單資訊」與「服務與問答」；staff／union-staff menu 只可放置其 owner 已核准的 typed entry。
 
+`default_menu`／`customer_menu` 的「專人客服諮詢」必須使用 typed postback 表示明確轉接，不依顯示文字猜測 intent；既有已發布版本仍送出 exact「專人客服」訊息時，保留等價相容路徑直到下一次正式 publication。自然語句只回「轉接真人客服／繼續使用 AI」確認；確認後才建立 hold。provider publication 仍需獨立授權，不因本地 source 更新而自動發布。
+
 管理端 LIFF 資產目錄沿用同一組正式 audience，不得以舊 `client | staff | admin` 三分法或檔名猜測角色：`gateway`／`register`／`bind` 屬 visitor；`profile_guard`／`profile_update`／`order_update` 屬 customer；`staff_order_search`／`staff_schedule`／`staff_baby_log`／`staff_payout` 屬 staff；`mobile_admin` 屬 union_staff。`identity` 是跨角色身分入口，可出現在四類目錄，但不因此授予任何角色或業務權限。
 
 ### 7.1 工會人員 LIFF 工作入口
 
-四格可共用同一個 LIFF runtime 與 server-side 身分驗證，但四個入口均須在顯示或查詢管理內容前驗證 persisted Admin Session，並確認 Session actor 與 current role-scoped LINE admin binding 指向同一人；每個入口仍必須呈現獨立、可辨識的工作 surface。由「客服中心」進入時不得同時顯示月嫂審核或排班工具，由「待辦工作台」進入時也不得把客服案件混成同一清單。第一版沿用已發布選單可能仍持有的 `staff_review`、`customer_service`、`anomalies_center`、`dashboard` target identity，不以 publication 尚未切換為由中斷既有 deep link。
+四格可共用同一個 LIFF runtime 與 server-side 身分驗證；四個入口均須在顯示或查詢管理內容前驗證 server-verified LINE token、current role-scoped LINE admin binding、enabled Admin owner 與所需 capability，不得再要求 React／密碼／MFA Admin Session，也不得簽發可供一般後台使用的 Session。每個入口仍必須呈現獨立、可辨識的工作 surface。由「客服中心」進入時不得同時顯示月嫂審核或排班工具，由「待辦工作台」進入時也不得把客服案件混成同一清單。第一版沿用已發布選單可能仍持有的 `staff_review`、`customer_service`、`anomalies_center`、`dashboard` target identity，不以 publication 尚未切換為由中斷既有 deep link。
 
 - 「待辦工作台」彙整四組需要工會人員決定的工作入口：Client owner 的客戶資料異動審核、LINE Identity owner 的客戶／月嫂重綁與身分異常審核、Scheduling owner 的請假受理與代班／改期處理，以及 Matching／Scheduling owner 的媒合最終指派與重新媒合。每組清單、狀態、版本、Preview／Confirm／Apply、receipt 與 fresh readback 仍由原 owner 提供；mobile surface 只作 bounded presentation，不建立共用 approval root 或跨 owner writer。
-- 只有具 owner-backed pending Query 的項目可以顯示待辦筆數；既有按案件編號操作的 Scheduling Assignment Plan 在 pending Query 完成前只作「媒合與排班審核工具」入口，不計入待辦數量，也不得以案件總數、前端推算或假資料冒充 pending review。一般月嫂身分資料唯一吻合且尚未綁定時依 `23` 直接完成綁定，不建立人工待辦；工作台中的月嫂項目只代表 canonical review root 已存在的重綁／身分異常案件。
+- 只有具 owner-backed pending Query 的項目可以顯示待辦筆數；既有 Scheduling Assignment Plan 在 pending Query 完成前只作「媒合與排班審核工具」入口，不計入待辦數量，也不得以案件總數、前端推算或假資料冒充 pending review。其結構化欄位以 owner-backed 下拉選項操作：案件來自 bounded unfinished Orders summary，月嫂與日期來自 Scheduling 的 active Staff 與 confirmed service dates；調整原因維持必填自由文字。一般月嫂身分資料唯一吻合且尚未綁定時依 `23` 直接完成綁定，不建立人工待辦；工作台中的月嫂項目只代表 canonical review root 已存在的重綁／身分異常案件。
 - 客戶訂單異動目前只建立 Customer Service 人工確認需求，仍留在「客服中心」；客訴／人工 fallback、current LINE 異常與 QA／Knowledge 內容審核分別留在「客服中心」、「異常中心」與 AI 事件工作室，不因待辦工作台彙整而重複列示或重複計數。
 - 「客服中心」只呈現 Customer Service 的 waiting／handling／resolved 查詢、明細與既有回覆流程；不得因共用 LIFF asset 顯示不相干的審核頁籤。
 - 「異常中心」第一版只呈現 Anomalies owner 的 current-only `LINE-006` 清單、合法空狀態、blocking／severity 與最後驗證時間。它不是 generic 異常通報、claim 或 resolve writer；後續處理仍回到 owner action contract。
@@ -138,6 +140,8 @@ Current menu content 與 action 由 MySQL versioned LINE configuration 及 curre
 
 Ticket 狀態至少為 `waiting → handling → resolved`。resolved 後同一 requester 的新訊息可依 current policy reopen 或建立新的幂等 ticket；不得靜默遺失。Claim、handling、reply 與 resolve 必須保留 actor、version、reason、event 與 receipt。
 
+確認轉接後的首次回覆必須明示 AI 已暫停、後續訊息會加入同一 ticket，並提供「恢復 AI 助理」。active hold 期間不得自動回答；訊息須保存到同一 ticket。原 requester 可於 `open | claimed | handling` 主動恢復 AI；成功時以 `requester_resumed_ai` 結案並原子解除 hold。客服人員由後台正常 resolve 時也解除 hold並通知 requester。兩者競爭時沿用 owner version／lock，只有先成功者生效；不同 requester 不得解除，且不得以 timeout 自動恢復。
+
 客服回覆仍由 committed durable delivery task 外送。外送失敗不回滾已提交的 ticket 狀態，但不得把未送達顯示成已送達。含個人案件內容的訊息只可送給經 binding 與 authorization 確認的 recipient；群組或公開回答不得洩漏個案資料。
 
 ## 10. 驗收
@@ -145,12 +149,12 @@ Ticket 狀態至少為 `waiting → handling → resolved`。resolved 後同一 
 1. 六類 Service Help 均有 deterministic routing、合法空狀態與 manual fallback。
 2. Gateway 兩個分支導向正確且零未授權業務寫入。
 3. approved answer 只來自 versioned published catalog；draft、conflict 與 unowned item 不會自動回覆。
-4. explicit human／wrong precedence 高於自動回答；相同 escalation identity 不重複開單。
+4. explicit human／wrong precedence 高於自動回答；自然語句確認前零開單／零 hold，Rich Menu 或確認 postback 才轉接；相同 escalation identity 不重複開單。active hold 的訊息加入原 ticket 且零 AI 回答；原 requester 或客服後台可依正式狀態機解除 hold並收到恢復通知，不同 requester、stale version 與重複競爭 fail closed。
 5. customer／staff 雙角色必須明確選擇；不同 audience 不交叉顯示。
 6. local menu preview 不建立 provider task 或成功 receipt；publish 以 durable task 及 terminal readback 判定。
 7. LLM 或 Knowledge 不得直接寫業務 root、繞過 closed tool catalog 或宣稱 provider 成功。
 8. API／React／LINE visible result 對 timeout、conflict、unavailable 與 unknown outcome fail closed。
-9. 工會人員由四個 Rich Menu target 進入時，均須通過 persisted Admin Session、current LINE admin binding 與同一 actor 核對，之後只看到該入口的工作 surface；共用 LIFF asset 不造成驗證前內容閃現或跨入口頁籤混雜。
+9. 工會人員由四個 Rich Menu target 進入時，均須通過 server-verified LINE token、current LINE admin binding、enabled Admin owner 與 capability 核對，之後只看到該入口的工作 surface；不得導向後台登入，共用 LIFF asset 不造成驗證前內容閃現或跨入口頁籤混雜。
 10. 待辦工作台可分組讀取客戶資料異動、客戶／月嫂重綁與身分異常、請假代班／改期，以及媒合指派／重新媒合；每一筆與每一個數量均來自對應 owner 的 pending Query。沒有 pending Query 的排班案件工具不冒充待辦，客服、異常及 QA／Knowledge 工作也不重複列入。
 11. 異常中心只顯示 current `LINE-006` owner query，營運摘要只顯示 current business week `operations-report.v3` 與資料產生時間；兩者皆具合法空狀態且零業務寫入。
 12. 本機／development 首次啟動即可由正式 Knowledge API read back 29 題 managed draft，不需先手動匯入；同一授權管理員可完成編修→審核→發布，空白答案仍必須 fail closed。

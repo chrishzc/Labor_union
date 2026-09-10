@@ -1,5 +1,5 @@
 """File: test_customer_service_escalation_ticket_adapter.py
-Description: 驗證 M4 只解析既有客服 ticket event，並以 CAS 轉移 ticket 狀態。
+Description: 驗證 M4 只解析既有客服 ticket event，並以 CAS 轉移／解除 ticket 狀態。
 """
 
 from __future__ import annotations
@@ -66,3 +66,24 @@ def test_resolve_uses_handling_state_guard():
     repository.resolve_for_escalation(7, 3, "admin:11", "handled")
     assert "status='handling'" in cursor.calls[0][0]
     assert cursor.calls[0][1] == (7, 3)
+
+
+def test_requester_resume_uses_versioned_waiting_or_handling_guard():
+    cursor = _Cursor()
+    repository = MySqlCustomerServiceRepository(_Connection(cursor))
+    repository.get = lambda ticket_id, lock=False: {"ticket_id": ticket_id}  # type: ignore[method-assign]
+
+    repository.resolve_for_requester_resume(
+        7, 3, "line:U123456789", "requester_resumed_ai"
+    )
+
+    assert "version=%s" in cursor.calls[0][0]
+    assert "status IN ('waiting','handling')" in cursor.calls[0][0]
+    assert cursor.calls[0][1] == (7, 3)
+    assert cursor.calls[1][1] == (
+        7,
+        "human-escalation:requester-resume:7:3",
+        "status_changed",
+        "requester_resumed_ai",
+        "line:U123456789",
+    )

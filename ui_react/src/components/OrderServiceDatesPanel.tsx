@@ -24,6 +24,7 @@ interface OrderServiceDatesPanelProps {
 
 type WorkingAction = 'load' | 'preview' | 'apply' | null;
 type ServiceMode = '週休1日' | '週休2日' | '連續服務';
+const AUTOMATIC_CONFIRMATION_REASON = '確認正式服務日期';
 
 function errorMessage(error: unknown): string {
   return error instanceof Error && error.message.trim()
@@ -38,7 +39,6 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
   const [serviceMode, setServiceMode] = useState<ServiceMode | null>(null);
   const [selectedDates, setSelectedDates] = useState<string[]>([]);
   const [preview, setPreview] = useState<ServiceDateConfirmationPreviewView | null>(null);
-  const [reason, setReason] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -73,6 +73,7 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
         .map((day) => day.date);
 
       selectServiceDates(caseNo, calculatedDates);
+      updateServiceDatesReason(caseNo, AUTOMATIC_CONFIRMATION_REASON);
       setQueryView(serviceDates);
       setPrecision(calculated);
       setServiceMode(calendarDetail.service_mode);
@@ -142,10 +143,7 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
     && selectedDates.length === requiredDateCount
     && selectedDates.length > 0
     && working === null;
-  const canApply = preview !== null
-    && reason.trim().length > 0
-    && reason.length <= 500
-    && working === null;
+  const canApply = preview !== null && working === null;
 
   return (
     <section aria-label={`案件 ${caseNo} 服務日期設定`}>
@@ -155,7 +153,7 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
         disabled={working !== null}
         onClick={() => void loadAndCalculate()}
       >
-        {working === 'load' ? '讀取服務日期中…' : '設定並查看服務日期'}
+        {working === 'load' ? '正在精算服務日期…' : '精算天數並設定服務日期'}
       </button>
 
       {error !== null && <p role="alert">{error}</p>}
@@ -170,21 +168,45 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
             <div><dt>合約服務日</dt><dd>{requiredDateCount} 天</dd></div>
           </dl>
 
-          <fieldset>
-            <legend>調整服務日期（已選 {selectedDates.length} / {requiredDateCount}）</legend>
-            {queryView.selectable_dates.map((date) => (
-              <label key={date}>
-                <input
-                  type="checkbox"
-                  aria-label={`服務日期 ${date}`}
-                  checked={selectedDates.includes(date)}
-                  disabled={working !== null}
-                  onChange={(event) => changeDate(date, event.target.checked)}
-                />
-                {date}
-              </label>
-            ))}
-          </fieldset>
+          <div className="service-calendar-workbench-layout">
+            <div className="calendar-matrix-card">
+              <div className="calendar-month-header">
+                <h3 style={{ fontSize: '1.05rem', fontWeight: 750, color: '#0f766e', margin: 0 }}>
+                  📅 正式服務日期確認（日曆排盤）
+                </h3>
+                <span>已選 {selectedDates.length} / {requiredDateCount} 天</span>
+              </div>
+
+              <div
+                className="calendar-days-grid"
+                role="group"
+                aria-label="服務日期月曆"
+                data-surface-id="orders.date.service-date-selection"
+              >
+                {queryView.selectable_dates.length > 0 && Array.from({
+                  length: new Date(`${queryView.selectable_dates[0]}T00:00:00`).getDay(),
+                }).map((_, index) => <div key={`calendar-leading-${index}`} aria-hidden="true" />)}
+                {queryView.selectable_dates.map((date) => {
+                  const selected = selectedDates.includes(date);
+                  return (
+                    <button
+                      key={date}
+                      data-control-id="orders.date.service-date-select"
+                      type="button"
+                      aria-label={`服務日期 ${date}`}
+                      aria-pressed={selected}
+                      className={`calendar-date-cell${selected ? ' selected' : ''}`}
+                      disabled={working !== null}
+                      onClick={() => changeDate(date, !selected)}
+                    >
+                      <span>{date}</span>
+                      {selected && <span className="calendar-date-cell-badge">8hr / 服務</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
 
           <button
             type="button"
@@ -203,20 +225,7 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
             <div><dt>目前版本</dt><dd>{preview.current_version === null ? '首次確認' : `#${preview.current_version}`}</dd></div>
             <div><dt>確認日期</dt><dd>{preview.service_dates.join('、')}</dd></div>
           </dl>
-          <label>
-            服務日期確認原因
-            <input
-              aria-label="服務日期確認原因"
-              value={reason}
-              maxLength={500}
-              disabled={working !== null}
-              onChange={(event) => {
-                setReason(event.target.value);
-                updateServiceDatesReason(caseNo, event.target.value);
-                setSuccess(null);
-              }}
-            />
-          </label>
+          <p>系統會自動記錄「確認正式服務日期」，不需另外填寫原因。</p>
           <button
             type="button"
             className="order-v2-open-drawer"

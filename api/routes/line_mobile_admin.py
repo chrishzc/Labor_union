@@ -19,15 +19,19 @@ from api.dependencies.anomaly_registry import get_current_issue_query_applicatio
 from api.dependencies.admin_auth import (
     admin_actor_context,
     has_required_capability,
-    require_persisted_admin,
 )
+from api.dependencies.client_profile import get_client_profile_application
 from api.dependencies.line_identity import (
     get_liff_token_verifier,
-    get_line_identity_management_application,
     get_line_identity_review_application,
 )
+from api.dependencies.staff_leave_intake import get_staff_leave_intake_application
 from api.dependencies.line_runtime import publish_line_wakeup_best_effort
 from api.dependencies.operations_reports import get_weekly_operations_report_query
+from api.dependencies.order_summary import (
+    OrderSummaryApplication,
+    get_order_summary_application,
+)
 from api.dependencies.assignment_plan import (
     AssignmentPlanApplication,
     get_assignment_plan_application,
@@ -41,6 +45,8 @@ from api.routes.assignment_plan import (
     _query_payload,
 )
 from api.routes.customer_service import _call_update_endpoint
+from api.routes import client_profile as client_profile_routes
+from api.routes import staff_leave_management as staff_leave_management_routes
 from api.schemas.assignment_plan import (
     AssignmentPlanQueryView,
     AssignmentPlanReceiptView,
@@ -54,18 +60,38 @@ from api.schemas.customer_service import (
     CustomerServiceReplyPreviewView,
     CustomerServiceSummaryView,
 )
+from api.schemas.client_profile import (
+    ClientProfileApprovalApplyRequest,
+    ClientProfileApprovalPreviewRequest,
+    ClientProfileApprovalReceiptView,
+    ClientProfilePreviewView,
+    ClientProfileRejectPreviewRequest,
+    ClientProfileRejectRequest,
+    ClientProfileRequestPageView,
+    ClientProfileRequestView,
+)
 from api.schemas.line_identity import (
     CanonicalLineReviewDecisionPreviewResponse,
     CanonicalLineReviewNumberedPageResponse,
     CanonicalLineReviewResponse,
 )
+from api.schemas.staff_leave_management import (
+    StaffLeaveInboxItemView,
+    StaffLeaveReviewReceiptView,
+    StaffLeaveStatus,
+)
 from domains.customer_service.ticket import CustomerServiceCategory, CustomerServiceStatus
 from domains.line.identities import LineReviewRequestId, LineUserId
-from domains.line.identity_binding import LineBindingSubjectType, LineIdentityBindingStatus
 from domains.line.review import LineReviewDecision, LineReviewStatus, LineReviewType
+from domains.orders.lifecycle import OrderLifecycleScope
 from domains.scheduling.assignment_plan import AssignmentPlanIntent
 from infrastructure.line.liff_token_verifier import InvalidLiffTokenError, LiffVerificationUnavailableError
 from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
+from infrastructure.mysql.mysql_adapter import get_connection
+from infrastructure.mysql.segmented_availability_repository import (
+    MySqlSegmentedAvailabilityFactsRepository,
+    SegmentedAvailabilityFactsPort,
+)
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.clock import SystemBusinessClock
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
@@ -83,19 +109,23 @@ from subsystems.customer_service.contracts import (
     CustomerServiceListQuery,
     PreviewCustomerServiceTicketReply,
 )
+from subsystems.client_profile.application import ClientProfileApplication
 from subsystems.line.capabilities import LineCapability
 from subsystems.line.identity_review_application import LineReviewDataConflictError, LineReviewNotFoundError
-from subsystems.line.identity_management_application import LineIdentityManagementApplication
-from subsystems.line.identity_management_contracts import LineIdentityCurrentFactReadbackStatus
 from subsystems.line.review_contracts import (
     DecideLineReviewCommand,
     LineReviewListQuery,
     PreviewLineReviewDecisionCommand,
 )
+from subsystems.orders.summary_query import (
+    OrderSummaryContractError,
+    OrderSummaryQueryRequest,
+)
 from subsystems.scheduling.assignment_plan_workflow import (
     AssignmentPlanApplyRequest,
     AssignmentPlanPreviewRequest,
 )
+from subsystems.scheduling.staff_leave_intake_workflow import StaffLeaveIntakeApplication
 from subsystems.reporting.weekly_operations_report_query import WeeklyOperationsReportQuery
 
 
@@ -106,6 +136,46 @@ _PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "mobile_admin.
 
 class _LiffAuthRequest(BaseModel):
     line_id_token: str = Field(min_length=1, max_length=4096)
+
+
+class _MobileClientProfileListRequest(_LiffAuthRequest):
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+
+    status: str | None = "pending"
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=50, ge=1, le=100)
+
+
+class _MobileClientProfileApprovalPreviewRequest(ClientProfileApprovalPreviewRequest):
+    line_id_token: str = Field(min_length=1, max_length=4096)
+
+
+class _MobileClientProfileApprovalApplyRequest(ClientProfileApprovalApplyRequest):
+    line_id_token: str = Field(min_length=1, max_length=4096)
+
+
+class _MobileClientProfileRejectPreviewRequest(ClientProfileRejectPreviewRequest):
+    line_id_token: str = Field(min_length=1, max_length=4096)
+
+
+class _MobileClientProfileRejectRequest(ClientProfileRejectRequest):
+    line_id_token: str = Field(min_length=1, max_length=4096)
+
+
+class _MobileStaffLeaveListRequest(_LiffAuthRequest):
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+
+    status: StaffLeaveStatus = "pending"
+    limit: int = Field(default=50, ge=1, le=100)
+
+
+class _MobileStaffLeaveReviewRequest(_LiffAuthRequest):
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+
+    expected_version: int = Field(ge=1)
+    action: Literal["accept", "reject", "cancel"]
+    reason: str = Field(default="", max_length=1000)
+    idempotency_key: str = Field(min_length=1, max_length=191)
 
 
 class _CustomerServiceListRequest(_LiffAuthRequest):
@@ -153,6 +223,38 @@ class _SchedulingReviewQueryRequest(_LiffAuthRequest):
     model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
 
     case_no: str = Field(min_length=1, max_length=50)
+
+
+class _SchedulingReviewOptionsRequest(_LiffAuthRequest):
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+
+    case_no: str | None = Field(default=None, min_length=1, max_length=50)
+    after_case_no: str | None = Field(default=None, min_length=1, max_length=50)
+    page_size: int = Field(default=200, ge=1, le=200)
+
+
+class _SchedulingCaseOptionView(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    case_no: str
+    order_status: str
+
+
+class _SchedulingStaffOptionView(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    staff_id: int = Field(gt=0)
+    staff_name: str = Field(min_length=1)
+
+
+class _SchedulingReviewOptionsView(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    case_options: list[_SchedulingCaseOptionView]
+    next_cursor: str | None = None
+    selected_case_no: str | None = None
+    staff_options: list[_SchedulingStaffOptionView]
+    service_dates: list[date]
 
 
 class _SchedulingReviewPreviewRequest(_LiffAuthRequest):
@@ -255,13 +357,164 @@ def mobile_admin_page():
 @router.post("/profile", response_model=BaseResponse[_MobileAdminProfileView])
 def profile(
     payload: _LiffAuthRequest,
-    principal: AdminPrincipal = Depends(require_persisted_admin),
-    identity_management: LineIdentityManagementApplication = Depends(
-        get_line_identity_management_application
-    ),
 ):
-    _mobile_admin_actor(payload.line_id_token, principal, identity_management)
+    principal, _ = _mobile_admin_context(payload.line_id_token)
     return BaseResponse(data=_admin_view(principal))
+
+
+@router.post(
+    "/client-profile/requests",
+    response_model=BaseResponse[ClientProfileRequestPageView],
+)
+def mobile_client_profile_requests(
+    payload: _MobileClientProfileListRequest,
+    application: ClientProfileApplication = Depends(get_client_profile_application),
+):
+    principal, _ = _mobile_admin_context(
+        payload.line_id_token,
+        LineCapability.CUSTOMER_SERVICE_READ,
+    )
+    return client_profile_routes.list_requests(
+        status=payload.status,
+        page=payload.page,
+        page_size=payload.page_size,
+        _=principal,
+        application=application,
+    )
+
+
+@router.post(
+    "/client-profile/requests/{request_id}/approve/preview",
+    response_model=BaseResponse[ClientProfilePreviewView],
+)
+def mobile_client_profile_approval_preview(
+    request_id: int,
+    payload: _MobileClientProfileApprovalPreviewRequest,
+    application: ClientProfileApplication = Depends(get_client_profile_application),
+):
+    principal, _ = _mobile_admin_context(
+        payload.line_id_token,
+        LineCapability.CUSTOMER_SERVICE_HANDLE,
+    )
+    return client_profile_routes.preview_approval(
+        request_id,
+        ClientProfileApprovalPreviewRequest.model_validate(
+            payload.model_dump(exclude={"line_id_token"})
+        ),
+        principal,
+        application,
+    )
+
+
+@router.post(
+    "/client-profile/requests/{request_id}/approve/apply",
+    response_model=BaseResponse[ClientProfileApprovalReceiptView],
+)
+def mobile_client_profile_approval_apply(
+    request_id: int,
+    payload: _MobileClientProfileApprovalApplyRequest,
+    application: ClientProfileApplication = Depends(get_client_profile_application),
+):
+    principal, _ = _mobile_admin_context(
+        payload.line_id_token,
+        LineCapability.CUSTOMER_SERVICE_HANDLE,
+    )
+    return client_profile_routes.apply_approval(
+        request_id,
+        ClientProfileApprovalApplyRequest.model_validate(
+            payload.model_dump(exclude={"line_id_token"})
+        ),
+        principal,
+        application,
+    )
+
+
+@router.post(
+    "/client-profile/requests/{request_id}/reject/preview",
+    response_model=BaseResponse[ClientProfilePreviewView],
+)
+def mobile_client_profile_rejection_preview(
+    request_id: int,
+    payload: _MobileClientProfileRejectPreviewRequest,
+    application: ClientProfileApplication = Depends(get_client_profile_application),
+):
+    principal, _ = _mobile_admin_context(
+        payload.line_id_token,
+        LineCapability.CUSTOMER_SERVICE_HANDLE,
+    )
+    return client_profile_routes.preview_rejection(
+        request_id,
+        ClientProfileRejectPreviewRequest.model_validate(
+            payload.model_dump(exclude={"line_id_token"})
+        ),
+        principal,
+        application,
+    )
+
+
+@router.post(
+    "/client-profile/requests/{request_id}/reject",
+    response_model=BaseResponse[ClientProfileRequestView],
+)
+def mobile_client_profile_rejection_apply(
+    request_id: int,
+    payload: _MobileClientProfileRejectRequest,
+    application: ClientProfileApplication = Depends(get_client_profile_application),
+):
+    principal, _ = _mobile_admin_context(
+        payload.line_id_token,
+        LineCapability.CUSTOMER_SERVICE_HANDLE,
+    )
+    return client_profile_routes.reject_request(
+        request_id,
+        ClientProfileRejectRequest.model_validate(
+            payload.model_dump(exclude={"line_id_token"})
+        ),
+        principal,
+        application,
+    )
+
+
+@router.post(
+    "/staff-leave-requests",
+    response_model=BaseResponse[list[StaffLeaveInboxItemView]],
+)
+def mobile_staff_leave_requests(payload: _MobileStaffLeaveListRequest):
+    principal, _ = _mobile_admin_context(
+        payload.line_id_token,
+        LineCapability.REVIEW_READ,
+    )
+    return staff_leave_management_routes.list_staff_leave_requests(
+        status=payload.status,
+        limit=payload.limit,
+        principal=principal,
+    )
+
+
+@router.post(
+    "/staff-leave-requests/{request_id}/review",
+    response_model=BaseResponse[StaffLeaveReviewReceiptView],
+)
+def mobile_staff_leave_review(
+    request_id: int,
+    payload: _MobileStaffLeaveReviewRequest,
+    application: StaffLeaveIntakeApplication = Depends(get_staff_leave_intake_application),
+):
+    principal, _ = _mobile_admin_context(
+        payload.line_id_token,
+        LineCapability.REVIEW_DECIDE,
+    )
+    return staff_leave_management_routes.review_staff_leave_request(
+        request_id,
+        staff_leave_management_routes.ReviewBody(
+            expected_version=payload.expected_version,
+            action=payload.action,
+            reason=payload.reason,
+        ),
+        payload.idempotency_key,
+        principal,
+        application,
+    )
 
 
 @router.post(
@@ -273,12 +526,8 @@ def current_anomalies(
     application: CurrentIssueQueryApplication = Depends(
         get_current_issue_query_application
     ),
-    principal: AdminPrincipal = Depends(require_persisted_admin),
-    identity_management: LineIdentityManagementApplication = Depends(
-        get_line_identity_management_application
-    ),
 ):
-    _mobile_admin_actor(payload.line_id_token, principal, identity_management)
+    _mobile_admin_context(payload.line_id_token, LineCapability.MONITOR_READ)
     try:
         page = application.query(
             CurrentIssueListRequest(
@@ -337,12 +586,8 @@ def current_anomalies(
 def operations_summary(
     payload: _LiffAuthRequest,
     query: WeeklyOperationsReportQuery = Depends(get_weekly_operations_report_query),
-    principal: AdminPrincipal = Depends(require_persisted_admin),
-    identity_management: LineIdentityManagementApplication = Depends(
-        get_line_identity_management_application
-    ),
 ):
-    _mobile_admin_actor(payload.line_id_token, principal, identity_management)
+    _mobile_admin_context(payload.line_id_token)
     start_date, end_date = _current_business_week(SystemBusinessClock().today())
     try:
         report = query.query(start_date, end_date)
@@ -390,24 +635,16 @@ def operations_summary(
 @router.post("/customer-service/summary", response_model=BaseResponse[CustomerServiceSummaryView])
 def customer_service_summary(
     payload: _LiffAuthRequest,
-    principal: AdminPrincipal = Depends(require_persisted_admin),
-    identity_management: LineIdentityManagementApplication = Depends(
-        get_line_identity_management_application
-    ),
 ):
-    _mobile_admin_actor(payload.line_id_token, principal, identity_management)
+    _mobile_admin_context(payload.line_id_token, LineCapability.CUSTOMER_SERVICE_READ)
     return BaseResponse(data=CustomerServiceApplication(open_line_unit_of_work).summary())
 
 
 @router.post("/customer-service/tickets", response_model=BaseResponse[CustomerServicePageView])
 def customer_service_tickets(
     payload: _CustomerServiceListRequest,
-    principal: AdminPrincipal = Depends(require_persisted_admin),
-    identity_management: LineIdentityManagementApplication = Depends(
-        get_line_identity_management_application
-    ),
 ):
-    _mobile_admin_actor(payload.line_id_token, principal, identity_management)
+    _mobile_admin_context(payload.line_id_token, LineCapability.CUSTOMER_SERVICE_READ)
     page = CustomerServiceApplication(open_line_unit_of_work).list(
         CustomerServiceListQuery(
             status=payload.status,
@@ -424,12 +661,8 @@ def customer_service_tickets(
 def customer_service_detail(
     ticket_id: int,
     payload: _LiffAuthRequest,
-    principal: AdminPrincipal = Depends(require_persisted_admin),
-    identity_management: LineIdentityManagementApplication = Depends(
-        get_line_identity_management_application
-    ),
 ):
-    _mobile_admin_actor(payload.line_id_token, principal, identity_management)
+    _mobile_admin_context(payload.line_id_token, LineCapability.CUSTOMER_SERVICE_READ)
     try:
         detail = CustomerServiceApplication(open_line_unit_of_work).detail(ticket_id)
     except CustomerServiceTicketNotFoundError as error:
@@ -444,12 +677,8 @@ def customer_service_detail(
 def customer_service_reply_preview(
     ticket_id: int,
     payload: _CustomerServiceReplyPreviewRequest,
-    principal: AdminPrincipal = Depends(require_persisted_admin),
-    identity_management: LineIdentityManagementApplication = Depends(
-        get_line_identity_management_application
-    ),
 ):
-    _mobile_admin_actor(payload.line_id_token, principal, identity_management)
+    _mobile_admin_context(payload.line_id_token, LineCapability.CUSTOMER_SERVICE_HANDLE)
     identity = CorrelationId(f"mobile-customer-service-reply-preview:{uuid4()}")
     command = PreviewCustomerServiceTicketReply(
         ticket_id,
@@ -488,12 +717,11 @@ def customer_service_reply_preview(
 def customer_service_reply_apply(
     ticket_id: int,
     payload: _CustomerServiceReplyApplyRequest,
-    principal: AdminPrincipal = Depends(require_persisted_admin),
-    identity_management: LineIdentityManagementApplication = Depends(
-        get_line_identity_management_application
-    ),
 ):
-    actor = _mobile_admin_actor(payload.line_id_token, principal, identity_management)
+    principal, actor = _mobile_admin_context(
+        payload.line_id_token,
+        LineCapability.CUSTOMER_SERVICE_HANDLE,
+    )
     identity = CorrelationId(f"mobile-customer-service-reply-apply:{uuid4()}")
     command = ApplyCustomerServiceTicketReply(
         ticket_id,
@@ -545,12 +773,8 @@ def retired_customer_service_reply(ticket_id: int):
 @router.post("/identity-reviews", response_model=BaseResponse[CanonicalLineReviewNumberedPageResponse])
 def identity_reviews(
     payload: _ReviewListRequest,
-    principal: AdminPrincipal = Depends(require_persisted_admin),
-    identity_management: LineIdentityManagementApplication = Depends(
-        get_line_identity_management_application
-    ),
 ):
-    _mobile_admin_actor(payload.line_id_token, principal, identity_management)
+    _mobile_admin_context(payload.line_id_token, LineCapability.REVIEW_READ)
     page = get_line_identity_review_application().list(
         LineReviewListQuery(
             statuses=(payload.review_status,) if payload.review_status else (),
@@ -578,12 +802,8 @@ def identity_reviews(
 def identity_review_decision_preview(
     request_id: int,
     payload: _ReviewDecisionPreviewRequest,
-    principal: AdminPrincipal = Depends(require_persisted_admin),
-    identity_management: LineIdentityManagementApplication = Depends(
-        get_line_identity_management_application
-    ),
 ):
-    actor = _mobile_admin_actor(payload.line_id_token, principal, identity_management)
+    _, actor = _mobile_admin_context(payload.line_id_token, LineCapability.REVIEW_DECIDE)
     command = PreviewLineReviewDecisionCommand(
         LineReviewRequestId(request_id),
         payload.decision,
@@ -622,12 +842,8 @@ def identity_review_decision_preview(
 def identity_review_decision(
     request_id: int,
     payload: _ReviewDecisionRequest,
-    principal: AdminPrincipal = Depends(require_persisted_admin),
-    identity_management: LineIdentityManagementApplication = Depends(
-        get_line_identity_management_application
-    ),
 ):
-    actor = _mobile_admin_actor(payload.line_id_token, principal, identity_management)
+    _, actor = _mobile_admin_context(payload.line_id_token, LineCapability.REVIEW_DECIDE)
     command = DecideLineReviewCommand(
         LineReviewRequestId(request_id),
         payload.decision,
@@ -658,6 +874,122 @@ def identity_review_decision(
     )
 
 
+def _get_scheduling_review_options_facts() -> SegmentedAvailabilityFactsPort:
+    return MySqlSegmentedAvailabilityFactsRepository(get_connection)
+
+
+@router.post(
+    "/scheduling-review/options",
+    response_model=BaseResponse[_SchedulingReviewOptionsView],
+)
+def scheduling_review_options(
+    payload: _SchedulingReviewOptionsRequest,
+    orders: OrderSummaryApplication = Depends(get_order_summary_application),
+    facts: SegmentedAvailabilityFactsPort = Depends(
+        _get_scheduling_review_options_facts
+    ),
+):
+    """Return bounded owner-backed options for the mobile Scheduling form."""
+
+    _scheduling_mobile_actor(payload.line_id_token)
+    try:
+        page = orders.query(
+            OrderSummaryQueryRequest(
+                payload.page_size,
+                payload.after_case_no,
+                lifecycle_scope=OrderLifecycleScope.UNFINISHED,
+            )
+        )
+        staff_options: list[_SchedulingStaffOptionView] = []
+        service_dates: list[date] = []
+        if payload.case_no is not None:
+            selected = facts.load_case_facts(payload.case_no)
+            order = selected.get("order")
+            if order is None:
+                raise typed_http_error(
+                    404,
+                    "not_found",
+                    "mobile_scheduling_case_not_found",
+                    "找不到所選排班案件。",
+                    "line-mobile-admin:scheduling-options",
+                )
+            if "staff_rows" not in selected:
+                raise typed_http_error(
+                    409,
+                    "conflict",
+                    "mobile_scheduling_case_not_selectable",
+                    "所選案件目前不在可調整排班狀態。",
+                    "line-mobile-admin:scheduling-options",
+                )
+            staff_options = [
+                _SchedulingStaffOptionView(
+                    staff_id=int(item["id"]),
+                    staff_name=str(item.get("name") or f"月嫂 {item['id']}"),
+                )
+                for item in selected["staff_rows"]
+            ]
+            service_dates = [
+                item["service_date"] for item in selected["confirmed_service_dates"]
+            ]
+            if not service_dates:
+                raise typed_http_error(
+                    409,
+                    "conflict",
+                    "official_service_dates_incomplete",
+                    "所選案件尚未建立正式服務日期，無法提供排班選項。",
+                    "line-mobile-admin:scheduling-options",
+                )
+        return BaseResponse(
+            data=_SchedulingReviewOptionsView(
+                case_options=[
+                    _SchedulingCaseOptionView(
+                        case_no=item.case_no,
+                        order_status=item.order_status,
+                    )
+                    for item in page.items
+                ],
+                next_cursor=page.next_cursor,
+                selected_case_no=payload.case_no,
+                staff_options=staff_options,
+                service_dates=service_dates,
+            ),
+            message="成功取得排班下拉選項",
+        )
+    except HTTPException:
+        raise
+    except OrderSummaryContractError as error:
+        raise typed_http_error(
+            409,
+            "conflict",
+            "mobile_scheduling_options_projection_invalid",
+            "排班選項的案件資料不一致，請稍後再試。",
+            "line-mobile-admin:scheduling-options",
+        ) from error
+    except ValueError as error:
+        raise typed_http_error(
+            422,
+            "validation",
+            "mobile_scheduling_options_invalid",
+            "排班選項查詢條件不正確。",
+            "line-mobile-admin:scheduling-options",
+        ) from error
+    except OperationalError as error:
+        raise typed_http_error(
+            503,
+            "unavailable",
+            "mobile_scheduling_options_unavailable",
+            "排班選項暫時無法查詢。",
+            "line-mobile-admin:scheduling-options",
+            retryable=True,
+        ) from error
+    except Exception as error:
+        raise internal_query_error(
+            "mobile_scheduling_options_internal_error",
+            "排班選項查詢失敗。",
+            "line-mobile-admin:scheduling-options",
+        ) from error
+
+
 @router.post(
     "/scheduling-review/query",
     response_model=BaseResponse[AssignmentPlanQueryView],
@@ -665,10 +997,8 @@ def identity_review_decision(
 def scheduling_review_query(
     payload: _SchedulingReviewQueryRequest,
     application: AssignmentPlanApplication = Depends(get_assignment_plan_application),
-    principal: AdminPrincipal = Depends(require_persisted_admin),
-    identity_management: LineIdentityManagementApplication = Depends(get_line_identity_management_application),
 ):
-    _scheduling_mobile_actor(payload.line_id_token, principal, identity_management)
+    _scheduling_mobile_actor(payload.line_id_token)
     correlation = CorrelationId(f"mobile-scheduling-review-query:{payload.case_no}")
     return _call_assignment_plan_endpoint(
         lambda: AssignmentPlanQueryView.model_validate(
@@ -686,10 +1016,8 @@ def scheduling_review_query(
 def scheduling_review_preview(
     payload: _SchedulingReviewPreviewRequest,
     application: AssignmentPlanApplication = Depends(get_assignment_plan_application),
-    principal: AdminPrincipal = Depends(require_persisted_admin),
-    identity_management: LineIdentityManagementApplication = Depends(get_line_identity_management_application),
 ):
-    _scheduling_mobile_actor(payload.line_id_token, principal, identity_management)
+    _scheduling_mobile_actor(payload.line_id_token)
     correlation = CorrelationId(f"mobile-scheduling-review-preview:{uuid4()}")
     request = AssignmentPlanPreviewRequest(
         payload.case_no,
@@ -712,10 +1040,8 @@ def scheduling_review_preview(
 def scheduling_review_apply(
     payload: _SchedulingReviewApplyRequest,
     application: AssignmentPlanApplication = Depends(get_assignment_plan_application),
-    principal: AdminPrincipal = Depends(require_persisted_admin),
-    identity_management: LineIdentityManagementApplication = Depends(get_line_identity_management_application),
 ):
-    actor = _scheduling_mobile_actor(payload.line_id_token, principal, identity_management)
+    actor = _scheduling_mobile_actor(payload.line_id_token)
     correlation = CorrelationId(f"mobile-scheduling-review-apply:{uuid4()}")
     request = AssignmentPlanApplyRequest(
         payload.case_no,
@@ -781,71 +1107,49 @@ def retired_mobile_identity_review_decision(
 
 def _scheduling_mobile_actor(
     line_id_token: str,
-    principal: AdminPrincipal,
-    identity_management: LineIdentityManagementApplication,
 ) -> ActorContext:
-    """Require both the persisted human Session and current role-scoped LINE fact."""
+    """Resolve one current LINE-bound admin with Scheduling review capability."""
 
-    if principal.id is None or not has_required_capability(principal, "line.review.decide"):
-        raise typed_http_error(
-            403,
-            "forbidden",
-            "scheduling_review_capability_required",
-            "排班審核需要已登入且具備審核能力的內部使用者 Session。",
-            "line-mobile-admin:scheduling-capability",
-        )
-    _mobile_admin_actor(line_id_token, principal, identity_management)
-    return admin_actor_context(principal)
+    _, actor = _mobile_admin_context(line_id_token, LineCapability.REVIEW_DECIDE)
+    return actor
 
 
-def _mobile_admin_actor(
+def _mobile_admin_context(
     line_id_token: str,
-    principal: AdminPrincipal,
-    identity_management: LineIdentityManagementApplication,
-) -> ActorContext:
-    """Require one persisted human Session matching the current LINE admin fact."""
+    required_capability: LineCapability | None = None,
+) -> tuple[AdminPrincipal, ActorContext]:
+    """Resolve an enabled Admin owner exclusively from a verified current LINE binding."""
 
-    if principal.id is None:
-        raise typed_http_error(
-            403,
-            "forbidden",
-            "mobile_admin_session_required",
-            "工會手機管理需要已登入的內部使用者 Session。",
-            "line-mobile-admin:session",
-        )
     line_user_id = _verified_line_user_id(line_id_token)
-    try:
-        fact = identity_management.current_fact(line_user_id)
-    except LookupError as error:
-        raise typed_http_error(
-            403,
-            "forbidden",
-            "line_admin_binding_not_found",
-            "此 LINE 尚未綁定目前有效的工會人員身分。",
-            "line-mobile-admin:role-scoped-binding",
-        ) from error
-    admin_bindings = tuple(
-        binding
-        for binding in fact.root_bindings
-        if binding.subject_type is LineBindingSubjectType.ADMIN
-    )
-    if (
-        fact.root_status is not LineIdentityBindingStatus.BOUND
-        or fact.readback_status is not LineIdentityCurrentFactReadbackStatus.COMPLETE
-        or len(admin_bindings) != 1
-        or admin_bindings[0].subject_reference != str(principal.id)
-    ):
+    with open_line_unit_of_work() as unit_of_work:
+        linked_admin = unit_of_work.admins.get_linked_admin(line_user_id)
+    if linked_admin is None:
         raise typed_http_error(
             403,
             "forbidden",
             "line_admin_binding_not_current",
-            "LINE 工會人員身分已變更，請重新確認後再操作。",
+            "此 LINE 尚未綁定目前有效的工會人員身分。",
             "line-mobile-admin:role-scoped-binding",
         )
-    return ActorContext(
-        f"admin:{principal.id}",
-        (LineCapability.IDENTITY_REVIEW.value,),
+    principal = AdminPrincipal(
+        linked_admin.admin_user_id,
+        f"admin:{linked_admin.admin_user_id}",
+        linked_admin.display_name,
+        linked_admin.role,
+        linked_line_user_id=line_user_id.value,
     )
+    if required_capability is not None and not has_required_capability(
+        principal,
+        required_capability.value,
+    ):
+        raise typed_http_error(
+            403,
+            "forbidden",
+            "mobile_admin_capability_required",
+            "此工會人員身分沒有執行目前操作的權限。",
+            "line-mobile-admin:capability",
+        )
+    return principal, admin_actor_context(principal)
 
 
 def _verified_line_user_id(line_id_token: str) -> LineUserId:

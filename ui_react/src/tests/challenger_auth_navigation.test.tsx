@@ -5,7 +5,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import React, { useState } from 'react';
-import { App, getMobileAdminReturnPathFromHash } from '../App';
+import { App } from '../App';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { sessionClient } from '../api/auth/session_client';
 import { PAGE_SECTION_MAP } from '../components/MasterLayout';
@@ -61,26 +61,6 @@ describe('Adversarial Challenge: URL Hash Navigation & Routing', () => {
       capabilities: ['system.administration'],
     });
   };
-
-  it('[Hash-0] mobile admin 登入返回只接受 closed union staff targets', () => {
-    for (const target of [
-      'customer_service',
-      'staff_review',
-      'scheduling_review',
-      'anomalies_center',
-      'dashboard',
-    ]) {
-      expect(
-        getMobileAdminReturnPathFromHash(`#login?return_target=${target}`)
-      ).toBe(`/line-mobile-admin?target=${target}`);
-    }
-    expect(
-      getMobileAdminReturnPathFromHash('#login?return_target=https://evil.example')
-    ).toBeNull();
-    expect(
-      getMobileAdminReturnPathFromHash('#login?return_target=%2F%2Fevil.example')
-    ).toBeNull();
-  });
 
   it('[Hash-1] 空 Hash (#) 與空字串應乾淨回退至正式待辦看板 (#order-workbench-v2)', async () => {
     authenticateSession();

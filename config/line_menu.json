@@ -1,5 +1,5 @@
 {
-  "version": 3,
+  "version": 4,
   "menus": [
     {
       "id": "default_menu",
@@ -15,7 +15,7 @@
         {"id":"client_service","label":"客戶登記與綁定","text_color":"#FFFFFF","background_color":"#1E3A8A","bounds":{"x":0,"y":0,"width":1250,"height":843},"action":{"type":"uri","text":null,"uri":"?entry=registration","uri_source":"liff","data":null},"border_radius":54},
         {"id":"staff_verification","label":"月嫂身分綁定","text_color":"#FFFFFF","background_color":"#EA580C","bounds":{"x":1250,"y":0,"width":1250,"height":843},"action":{"type":"uri","text":null,"uri":"?target=staff_verification","uri_source":"liff","data":null},"border_radius":54},
         {"id":"service_help","label":"服務與問答","text_color":"#FFFFFF","background_color":"#3B82F6","bounds":{"x":0,"y":843,"width":1250,"height":843},"action":{"type":"message","text":"服務與問答","uri":null,"uri_source":"literal","data":null},"border_radius":54},
-        {"id":"help_desk","label":"專人客服諮詢","text_color":"#FFFFFF","background_color":"#10B981","bounds":{"x":1250,"y":843,"width":1250,"height":843},"action":{"type":"message","text":"專人客服","uri":null,"uri_source":"literal","data":null},"border_radius":54}
+        {"id":"help_desk","label":"專人客服諮詢","text_color":"#FFFFFF","background_color":"#10B981","bounds":{"x":1250,"y":843,"width":1250,"height":843},"action":{"type":"postback","text":null,"uri":null,"uri_source":"literal","data":"customer-service:handoff:confirm"},"border_radius":54}
       ]
     },
     {
@@ -32,7 +32,7 @@
         {"id":"profile_update","label":"修改登記資料","text_color":"#FFFFFF","background_color":"#2563EB","bounds":{"x":0,"y":0,"width":1250,"height":843},"action":{"type":"uri","text":null,"uri":"?target=profile_update","uri_source":"liff","data":null},"border_radius":54},
         {"id":"order_update","label":"修改訂單資訊","text_color":"#FFFFFF","background_color":"#0D9488","bounds":{"x":1250,"y":0,"width":1250,"height":843},"action":{"type":"uri","text":null,"uri":"?target=order_update","uri_source":"liff","data":null},"border_radius":54},
         {"id":"customer_service_help","label":"服務與問答","text_color":"#FFFFFF","background_color":"#3B82F6","bounds":{"x":0,"y":843,"width":1250,"height":843},"action":{"type":"message","text":"服務與問答","uri":null,"uri_source":"literal","data":null},"border_radius":54},
-        {"id":"customer_help_desk","label":"專人客服諮詢","text_color":"#FFFFFF","background_color":"#10B981","bounds":{"x":1250,"y":843,"width":1250,"height":843},"action":{"type":"message","text":"專人客服","uri":null,"uri_source":"literal","data":null},"border_radius":54}
+        {"id":"customer_help_desk","label":"專人客服諮詢","text_color":"#FFFFFF","background_color":"#10B981","bounds":{"x":1250,"y":843,"width":1250,"height":843},"action":{"type":"postback","text":null,"uri":null,"uri_source":"literal","data":"customer-service:handoff:confirm"},"border_radius":54}
       ]
     },
     {

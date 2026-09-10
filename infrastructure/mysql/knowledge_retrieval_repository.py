@@ -39,6 +39,7 @@ from subsystems.knowledge_retrieval.contracts import (
     RetireKnowledgeItemCommand,
     ReviewKnowledgeItemCommand,
 )
+from subsystems.line.feedback_contracts import KnowledgeAnswerFeedbackContext
 
 
 KnowledgeAction = Literal["ingest", "review", "publish", "retire"]
@@ -346,6 +347,30 @@ class MySqlKnowledgeRetrievalRepository:
                 for h in reversed(history_rows)
             )
 
+    def feedback_context(
+        self,
+        answer_receipt_id: int,
+        actor_id: str,
+    ) -> KnowledgeAnswerFeedbackContext | None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT receipt.id FROM knowledge_answer_receipts receipt "
+                "JOIN knowledge_answer_requests request "
+                "ON request.id=receipt.answer_request_id "
+                "JOIN line_delivery_tasks task ON task.id=receipt.line_delivery_task_id "
+                "WHERE receipt.id=%s AND request.requester_line_user_id=%s "
+                "AND request.request_status='answered' AND task.processing_status='sent'",
+                (answer_receipt_id, actor_id),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        return KnowledgeAnswerFeedbackContext(
+            source_response_id=f"knowledge-answer-receipt:{int(row['id'])}",
+            response_revision=1,
+            rule_revision=None,
+        )
+
     def complete_index(self, job_id: int, index_version: int, content_set_digest: str):
         with self._connection.cursor() as cursor:
             cursor.execute(
@@ -372,7 +397,7 @@ class MySqlKnowledgeRetrievalRepository:
             )
             receipt_id = int(cursor.lastrowid)
             self._insert_citations(cursor, receipt_id, answer)
-            task_id = self._enqueue_answer_delivery(request_id, request, answer)
+            task_id = self._enqueue_answer_delivery(request_id, receipt_id, request, answer)
             cursor.execute(
                 "UPDATE knowledge_answer_receipts SET line_delivery_task_id=%s WHERE id=%s",
                 (task_id, receipt_id),
@@ -535,30 +560,31 @@ class MySqlKnowledgeRetrievalRepository:
                 (receipt_id, citation.source_identity, citation.source_version, citation.safe_excerpt, order),
             )
 
-    def _enqueue_answer_delivery(self, request_id, request, answer):
+    def _enqueue_answer_delivery(self, request_id, receipt_id, request, answer):
         line_user_id = request["requester_line_user_id"]
         if not line_user_id:
             return None
-        citations = "\n".join(f"來源：{item.source_identity} v{item.source_version}" for item in answer.citations)
         payload = canonical_line_payload_json({
             "type": "text",
-            "text": f"{answer.answer}\n\n{citations}\n\n此內容僅供參考，非正式決策。",
+            "text": _public_line_answer_text(answer.answer),
             "quickReply": {
                 "items": [
                     {
                         "type": "action",
                         "action": {
-                            "type": "message",
+                            "type": "postback",
                             "label": "👍 有幫助",
-                            "text": "有幫助",
+                            "data": f"feedback:knowledge:{receipt_id}:resolved",
+                            "displayText": "有幫助",
                         },
                     },
                     {
                         "type": "action",
                         "action": {
-                            "type": "message",
+                            "type": "postback",
                             "label": "👎 未解決",
-                            "text": "未解決",
+                            "data": f"feedback:knowledge:{receipt_id}:unresolved",
+                            "displayText": "未解決",
                         },
                     },
                 ]
@@ -671,6 +697,13 @@ class MySqlKnowledgeQuestionIntakeAdapter:
     def create_answer_request(self, command):
         return self._repository.create_answer_request(command)
 
+    def feedback_context(
+        self,
+        answer_receipt_id: int,
+        actor_id: str,
+    ) -> KnowledgeAnswerFeedbackContext | None:
+        return self._repository.feedback_context(answer_receipt_id, actor_id)
+
 
 def _admin_actor_id(actor_id: str) -> int:
     try:
@@ -680,6 +713,16 @@ def _admin_actor_id(actor_id: str) -> int:
     if value < 1:
         raise ValueError("knowledge_admin_identity_required")
     return value
+
+
+def _public_line_answer_text(answer: str) -> str:
+    text = answer.strip()
+    prefix = "原始回答為"
+    if text.startswith(prefix):
+        public_text = text[len(prefix):].lstrip("：: ")
+        if public_text:
+            return public_text
+    return text
 
 
 def _transition_projection_update(target, actor_id: int, reason: str):

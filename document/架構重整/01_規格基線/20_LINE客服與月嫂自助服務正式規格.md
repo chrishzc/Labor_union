@@ -47,6 +47,10 @@ waiting → handling → resolved
 
 不允許跳過狀態驗證或以 UI 字串決定 transition。管理 command 必須帶 expected version；stale command 回 conflict。
 
+2026-09-10 人工裁決：自然語句偵測到「找真人／拒絕 AI／回答錯誤」時，只顯示明確確認選項，確認前不得建立 ticket、escalation 或 automation hold。Rich Menu「專人客服諮詢」與確認按鈕屬明確操作，可直接建立或沿用同一使用者＋同一 category 的未完成 ticket，並以一次通知說明 AI 已暫停、後續訊息會加入同一案件及「恢復 AI 助理」入口。active hold 期間的其他訊息只加入原案件，不產生 AI 自動回答。
+
+automation hold 只能由兩條 owner-backed 路徑解除：客服人員完成 `handling → resolved`，或原 LINE requester 明確選擇恢復 AI。requester 可在 escalation `open | claimed | handling` 且 ticket `waiting | handling` 時，以同一交易將 ticket／escalation 結案、hold 標為 released，reason 固定為 `requester_resumed_ai`，並排入恢復確認；不同 LINE identity、非對話型 hold、stale version 或重複競爭必須 fail closed。客服後台 resolve 成功時亦須以 committed durable delivery 通知原 requester「客服已完成，AI 已恢復」。不採用逾時自動解除。
+
 ### 3.3 交易、冪等與 retry
 
 - inbound event：ticket create/append、狀態事件、ack delivery task 同一 LINE Unit of Work commit。
@@ -54,6 +58,7 @@ waiting → handling → resolved
   才可另開新的 Unit of Work，只保存`retryable_failed`／`terminal_failed` inbox completion。禁止把部分ticket、
   binding、outbox或其他業務 mutation與failure completion一起commit。
 - admin reply：鎖定 ticket、驗證 version、保存回覆、更新狀態、audit、delivery task 同交易 commit。
+- requester resume：鎖定 active conversation escalation 與 ticket、核對原 LINE requester、保存 resolved／hold released 事件、receipt 與恢復通知 task，同一 LINE Unit of Work commit。
 - inbound idempotency 使用 LINE event ID；admin mutation 使用 caller idempotency key。
 - provider timeout/5xx 只 retry delivery task；validation、authorization、stale conflict 不自動 retry。
 - retry exhausted 建立 LINE runtime alert，客服資料不得因 provider 暫時失敗回滾。
@@ -211,7 +216,7 @@ runtime `public_base_url` 產生公開網址。Chrome 已由工作室逐一實�
 - 客戶「已填過／尚未填過」選擇必須保存 canonical flow ID；未填過流程完成登記後才能完成同一 LINE 身分綁定。
 - LINE 管理中心使用 Customer Service bounded API client；成功 payload 轉 typed Pydantic view，transport/schema error 轉 typed client error。
 - Streamlit 只顯示 typed result 與提交 command，不包含 ticket transition 或 SQL 規則。
-- 已綁定且 enabled 的工會人員可由 `line-mobile-admin` LIFF 的獨立 target surface 使用待辦工作台、客服中心、異常中心與營運摘要。四個入口一律必須同時具 server-verified LIFF identity、current role-scoped LINE admin binding 與既有 persisted Admin Session；Session actor 必須與 LINE admin binding 指向同一人，各 owner 的 Query／Preview／Confirm／Apply 再驗證所需 capability，LINE binding 不簽發或取代 Admin Session。待辦工作台依 `29` 分組呈現 Client 資料異動、LINE Identity 客戶／月嫂重綁與身分異常、Scheduling 請假代班／改期，以及 Matching／Scheduling 媒合指派／重新媒合；各組只呼叫原 owner 的 bounded Query／Preview／Confirm／Apply，不建立 LINE-owned 共用 approval root。客服保留既有查看／回覆，異常與營運只讀取各自 owner 的 current Query，QA／Knowledge 審核留在 AI 事件工作室；其 server-side ID token、binding、version、receipt 與 outbox 規則不因共用 LIFF runtime 而改變。
+- 已綁定且 enabled 的工會人員可由 `line-mobile-admin` LIFF 的獨立 target surface 使用待辦工作台、客服中心、異常中心與營運摘要。四個入口以 server-verified LIFF identity 與 current role-scoped LINE admin binding 取得既有 Admin owner 的 actor ID、角色與 capability；不得要求另一個 React／密碼／MFA Session，也不得把 LINE 憑證交換成可供一般後台使用的 Admin Session。各 owner 的 Query／Preview／Confirm／Apply 仍須以該 actor 重新驗證所需 capability。待辦工作台依 `29` 分組呈現 Client 資料異動、LINE Identity 客戶／月嫂重綁與身分異常、Scheduling 請假代班／改期，以及 Matching／Scheduling 媒合指派／重新媒合；各組只呼叫原 owner 的 bounded Query／Preview／Confirm／Apply，不建立 LINE-owned 共用 approval root。客服保留既有查看／回覆，異常與營運只讀取各自 owner 的 current Query，QA／Knowledge 審核留在 AI 事件工作室；其 server-side ID token、binding、version、receipt 與 outbox 規則不因共用 LIFF runtime 而改變。
 
 AI feedback 執行狀態（2026-08-26）：`approved-for-contract-first`。人工已授權補齊正式 feedback owner、
 root facts、privacy、typed Query／record／receipt／readback 與 durable manual-ticket linkage；只有 formal
@@ -242,16 +247,13 @@ router只能從closed、versioned typed tool catalog選擇既有核准工具，�
 fresh validation，或把模型文字當provider delivery success；unsupported、ambiguous或tool unavailable一律轉
 durable manual fallback。本段不授權AI provider、Phase 2 implementation或新的business tool。
 
-### 6.5 Scheduling mobile Admin Session（2026-08-31 人工裁決）
+### 6.5 Scheduling mobile LINE 綁定授權（2026-09-09 人工裁決）
 
-Scheduling mobile review沿用既有Admin Auth／React password、MFA與Session contract。LIFF先以server-verified
-LINE token／current admin binding確認入口資格；缺少或失效Admin Session時，只以closed
-`scheduling_review` return identity導向同origin既有React登入，成功後由既有Session lifecycle回到
-`/line-mobile-admin?target=scheduling_review`，再由Scheduling endpoint重新驗capability與current role-scoped
-LINE fact。return target只接受此已知internal route identity；arbitrary URL固定不採用。
+Scheduling mobile review以server-verified LINE token與current role-scoped admin binding確認工會人員，從enabled
+Admin owner讀回actor ID、角色與capability；不得要求React password／MFA／Admin Session，也不得由binding簽發
+一般後台Bearer token。binding失效、owner disabled或缺少Scheduling capability時fail closed。
 
-不得建立LINE-specific Session、mobile帳密／MFA、binding-to-session交換或query-string authentication；Bearer
-token不得進query、fragment、LINE message或postback。mobile adapter不複製refresh／logout／MFA，也不擁有
+LINE token不得進query、fragment、LINE message或postback。mobile adapter不複製Admin Session lifecycle，也不擁有
 Scheduling root；正式mutation仍完整沿用Scheduling Query／Preview／Confirm／Apply、version、lock、fingerprint、
 receipt與fresh readback。
 
