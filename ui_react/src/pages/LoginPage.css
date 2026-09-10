@@ -1,6 +1,18 @@
 /* Pixel-Perfect Nurture Core Login Stylesheet (Stitch Style) */
 
+.login-enrollment-qr {
+  display: flex;
+  justify-content: center;
+  margin: 16px 0;
+}
+.login-enrollment-qr svg {
+  max-width: 100%;
+  height: auto;
+  background: white;
+}
+
 .login-viewport {
+  box-sizing: border-box;
   min-height: 100vh;
   width: 100%;
   display: flex;
@@ -12,15 +24,15 @@
 }
 
 .login-top-brand {
-  position: absolute;
-  top: 24px;
-  left: 32px;
+  align-self: flex-start;
+  margin-bottom: 24px;
   font-weight: 700;
   font-size: 1.1rem;
   color: #795d43;
 }
 
 .login-card-container {
+  box-sizing: border-box;
   width: 100%;
   max-width: 440px;
   background-color: #ffffff;
@@ -213,8 +225,7 @@
 }
 
 .login-footer-copyright {
-  position: absolute;
-  bottom: 20px;
+  margin-top: 24px;
   font-size: 0.8rem;
   color: #8b7169;
   text-align: center;

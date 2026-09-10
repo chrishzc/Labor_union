@@ -70,8 +70,9 @@ describe('待辦看板 Beta 完全結案彙總', () => {
     const openCard = (await screen.findByText('CASE-OPEN')).closest('article');
     if (!(openCard instanceof HTMLElement)) throw new Error('找不到未完全結案案件卡');
     expect(within(openCard).getByText('尚未完全結案')).toBeInTheDocument();
-    expect(within(openCard).getByText('Client Finance · client_settlement：client_balance_open')).toBeInTheDocument();
-    expect(within(openCard).getByText('Government Subsidy · government_subsidy：submitted')).toBeInTheDocument();
+    expect(within(openCard).getByText('客戶帳務尚未結清')).toBeInTheDocument();
+    expect(within(openCard).getByText('政府補助尚未完成')).toBeInTheDocument();
+    expect(within(openCard).queryByText(/client_balance_open|government_subsidy/)).not.toBeInTheDocument();
 
     const closedCard = screen.getByText('CASE-CLOSED').closest('article');
     if (!(closedCard instanceof HTMLElement)) throw new Error('找不到完全結案案件卡');

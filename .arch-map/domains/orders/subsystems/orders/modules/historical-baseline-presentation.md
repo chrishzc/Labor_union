@@ -5,7 +5,7 @@
 - subsystem: `orders`
 
 ## Responsibility
-呈現Orders-owned Historical Operational Baseline唯讀Query。一般畫面只顯示案件、目前作業步驟與closed步驟狀態；Orders identity/version、historical source event/version只留在預設收合技術詳情，typed error code不得穿透。不得提供mutation、推導不存在的owner event或改變stale-request protection。
+呈現Orders-owned Historical Operational Baseline唯讀Query。一般畫面只顯示案件、目前作業步驟與closed步驟狀態；Orders identity/version、historical source event/version不在一般操作畫面顯示，typed error code不得穿透。不得提供mutation、推導不存在的owner event或改變stale-request protection。
 
 ## Implementation
 - primary: `ui_react/src/components/HistoricalOperationalBaselineReadback.tsx`

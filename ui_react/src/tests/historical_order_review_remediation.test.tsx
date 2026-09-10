@@ -105,7 +105,7 @@ describe('HistoricalOrderReviewRemediationWorkbench', () => {
     expect(screen.getByText('更正檔案要求')).toBeInTheDocument();
     expect(screen.getByText(/請上傳單列 \.xlsx/)).toBeInTheDocument();
     expect(screen.queryByText(/review 版本/)).not.toBeInTheDocument();
-    expect(screen.getByText(/historical_status_invalid/)).not.toBeVisible();
+    expect(screen.queryByText(/historical_status_invalid/)).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText(/處理原因/), { target: { value: '電話確認' } });
     fireEvent.change(screen.getByLabelText(/佐證/), { target: { value: 'record:visible-layer' } });
@@ -114,13 +114,13 @@ describe('HistoricalOrderReviewRemediationWorkbench', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Preview 更正結果' }));
 
     await waitFor(() => expect(screen.getByText('預計處理：更正資料可採用')).toBeInTheDocument());
-    expect(screen.getByText(new RegExp(preview.preview_fingerprint))).not.toBeVisible();
+    expect(screen.queryByText(new RegExp(preview.preview_fingerprint))).not.toBeInTheDocument();
     expect(screen.queryByText('corrected_source_adopted')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('checkbox'));
     fireEvent.click(screen.getByRole('button', { name: '確認套用更正' }));
     await waitFor(() => expect(screen.getByText('處理結果：更正資料可採用')).toBeInTheDocument());
-    expect(screen.getByText(/receipt:1/)).not.toBeVisible();
+    expect(screen.queryByText(/receipt:1/)).not.toBeInTheDocument();
     expect(screen.queryByText('corrected_source_adopted')).not.toBeInTheDocument();
   });
 

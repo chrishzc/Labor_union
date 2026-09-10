@@ -5,7 +5,7 @@
 - subsystem: `client-finance`
 
 ## Responsibility
-定位既有客戶應收、一般退款與補助退還的owner Query／Preview／Apply工作台及其測試。Source／test仍保留三碼exact dispatcher、partial-retain與fresh terminal readback；這是既有實作證據，不代表三碼仍屬current Anomalies runtime產品。一般畫面呈現案件、義務類型、日期、金額、可核對銀行流水、處理結果與安全錯誤；account version、obligation identity與bank row identity置於預設收合技術詳情。Owner allocation與settlement以Client Finance正式契約為準；Anomalies current範圍以第06份規格為準。
+定位既有客戶應收、一般退款與補助退還的owner Query／Preview／Apply工作台及其測試。Source／test仍保留三碼exact dispatcher、partial-retain與fresh terminal readback；這是既有實作證據，不代表三碼仍屬current Anomalies runtime產品。一般畫面呈現案件、義務類型、日期、金額、可核對銀行流水、處理結果與安全錯誤；account version、obligation identity與bank row identity不在一般操作畫面顯示。Owner allocation與settlement以Client Finance正式契約為準；Anomalies current範圍以第06份規格為準。
 
 ## Implementation
 - primary: `ui_react/src/components/ClientSettlementRemediationWorkbench.tsx`

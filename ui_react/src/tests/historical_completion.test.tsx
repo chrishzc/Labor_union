@@ -66,8 +66,8 @@ describe('HistoricalCompletionPanel', () => {
 
     await waitFor(() => expect(screen.getByText(/尚有 1 項必要資料/)).toBeInTheDocument());
     expect(screen.getByText(/客戶帳務結清/).closest('li')).toHaveTextContent('客戶帳務');
-    expect(screen.getByText(/client_finance_settlement_open/).closest('details')).not.toHaveAttribute('open');
-    expect(screen.getByText(/source fingerprint/).closest('details')).not.toHaveAttribute('open');
+    expect(screen.queryByText(/client_finance_settlement_open/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/source fingerprint/)).not.toBeInTheDocument();
   });
 
   it('shows completion only when all terminal flags and alerts agree', async () => {

@@ -17,6 +17,7 @@ export const MOCK_STAGE1_REQUEST: AdminPasswordChallengeRequest = {
 };
 
 export const MOCK_STAGE1_RESPONSE: AdminPasswordChallengeResponse = {
+  challenge_type: 'factor_verification',
   challenge_id: 'ch-test-uuid-9999-aaaa-bbbb',
   challenge_token: 'tok-stage1-secret-32chars-minimum-length-abc123',
   expires_at: '2026-08-16T07:38:00Z',

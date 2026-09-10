@@ -5,7 +5,7 @@
 - subsystem: `anomalies`
 
 ## Responsibility
-呈現 `LINE-006` 與 import warning 的 current-only清單、typed detail與closed owner action descriptor。一般畫面只顯示問題代碼、負責流程、影響、去敏判斷資料、業務操作與移除條件；owner domain/version及Preview／Apply／completion predicate只保留在預設收合技術詳情。LINE 通知人工重送先以 detail 綁定的案件與來源版本核對 owner timeline，再呼叫 owner Preview；只有具理由且明確確認後才能 Apply，完成後重查 current facts。不得建立generic resolve、改寫owner predicate或以UI狀態移除current issue。
+呈現 `LINE-006` 與 import warning 的 current-only清單、typed detail與closed owner action descriptor。一般畫面只顯示問題代碼、負責流程、影響、去敏判斷資料、業務操作與移除條件；owner domain/version及Preview／Apply／completion predicate不在一般操作畫面顯示。LINE 通知人工重送先以 detail 綁定的案件與來源版本核對 owner timeline，再呼叫 owner Preview；只有具理由且明確確認後才能 Apply，完成後重查 current facts。不得建立generic resolve、改寫owner predicate或以UI狀態移除current issue。
 
 ## Implementation
 - primary: `ui_react/src/pages/CurrentAnomaliesPage.tsx`

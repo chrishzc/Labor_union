@@ -116,12 +116,14 @@ describe('財務中心 Government Subsidy cross-order query', () => {
     ));
 
     expect(await screen.findByText('CASE-GAP')).toBeInTheDocument();
-    expect(screen.getByText('正常訂單尚未找到正式 Government Subsidy claim 關聯。')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /申請草稿 0/ })).not.toBeInTheDocument();
+    expect(screen.getByText('補助資料尚有待處理項目，請核對申請與入款紀錄。')).toBeInTheDocument();
     expect(screen.getAllByRole('link', { name: '前往營運與補助報表' }))
       .toEqual(expect.arrayContaining([
         expect.objectContaining({ hash: '#reports' }),
       ]));
-    expect(screen.getByText('government_subsidy.claim_batches.query')).toBeInTheDocument();
+    expect(screen.queryByText('government_subsidy.claim_batches.query')).not.toBeInTheDocument();
+    expect(screen.queryByText('技術詳情與資料來源')).not.toBeInTheDocument();
     expect(document.querySelector('a[href^="/api/v1/government-subsidy/"]')).toBeNull();
     expect(screen.getByText('CASE-SUBMITTED')).toBeInTheDocument();
     expect(screen.getByText('77 小時')).toBeInTheDocument();

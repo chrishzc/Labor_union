@@ -295,8 +295,8 @@ describe('GovernmentOverpaymentRecoveryWorkbench', () => {
     const client = { query: vi.fn().mockResolvedValue(query), preview: vi.fn(), apply: vi.fn() };
     const { unmount } = render(<GovernmentOverpaymentRecoveryWorkbench overpaymentIdentity={identity} anomalyFingerprint={anomalyFingerprint} client={client} />);
     await screen.findByText('目前狀態：');
-    expect(screen.getByText(/資料版本：2/)).not.toBeVisible();
-    expect(screen.getByText(/finance-import-row:11/)).not.toBeVisible();
+    expect(screen.queryByText(/資料版本：2/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/finance-import-row:11/)).not.toBeInTheDocument();
     unmount();
 
     const failed = { query: vi.fn().mockRejectedValue(new Error('raw database host detail')), preview: vi.fn(), apply: vi.fn() };

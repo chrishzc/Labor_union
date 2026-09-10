@@ -5,7 +5,7 @@
 - subsystem: `government-subsidy`
 
 ## Responsibility
-呈現GOVSUB-006既有Query／Preview／Confirm／Apply、stale refresh、receipt-only不完成及owner＋current-issue雙重readback。GOVSUB-007 不掛 Anomalies 或本 workbench；其 owner Query 僅以 optional typed recovery projection 提供 committed readback。一般畫面只顯示closed狀態、剩餘金額、合法處置、補助標的、政府退款對象與安全錯誤；owner version與source references只保留在預設收合技術詳情。不得改寫offset／return互斥、terminal predicate或重送Apply。
+呈現GOVSUB-006既有Query／Preview／Confirm／Apply、stale refresh、receipt-only不完成及owner＋current-issue雙重readback。GOVSUB-007 不掛 Anomalies 或本 workbench；其 owner Query 僅以 optional typed recovery projection 提供 committed readback。一般畫面只顯示closed狀態、剩餘金額、合法處置、補助標的、政府退款對象與安全錯誤；owner version與source references不在一般操作畫面顯示。不得改寫offset／return互斥、terminal predicate或重送Apply。
 
 ## Implementation
 - primary: `ui_react/src/components/GovernmentOverpaymentRecoveryWorkbench.tsx`

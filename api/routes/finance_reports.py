@@ -103,11 +103,13 @@ def preview_accounts_payable_summary(
 @router.get("/accounts-payable/export", response_class=XlsxStreamingResponse)
 def export_accounts_payable(
     target_month: str = Query(..., pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
+    principal: AdminPrincipal = Depends(require_admin),
     application: AccountsPayableExportApplication = Depends(
         get_accounts_payable_export_application
     ),
 ):
     """Archive and download the exact same accounts-payable workbook bytes."""
+    del principal
     try:
         receipt = application.export(_target_payment_date(target_month))
     except (TypeError, ValueError) as exc:

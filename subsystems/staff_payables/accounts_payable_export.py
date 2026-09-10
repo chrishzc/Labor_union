@@ -21,9 +21,10 @@ _HEADERS = (
     "銀行名稱",
     "客戶or服務人員姓名",
     "銀行帳號",
-    "銀行代號(碼)",
+    "銀行代號(7碼)",
     "金額",
     "身分證字號(匯款到永豐才要填)",
+    None,
     "案件編號",
     "匯款日期",
 )
@@ -268,12 +269,19 @@ def _government_return_row(item):
 def build_accounts_payable_workbook(rows: tuple[AccountsPayableRow, ...]) -> bytes:
     workbook = Workbook()
     worksheet = workbook.active
-    worksheet.title = "應付匯款清單"
+    worksheet.title = "應付帳款表(每個月給會計)"
+    worksheet.append((None,))
     worksheet.append(_HEADERS)
     _style_headers(worksheet)
     for row in _transfer_rows(rows):
         worksheet.append(row)
-    worksheet.freeze_panes = "A2"
+    worksheet.freeze_panes = "A3"
+    for cells in worksheet.iter_rows(min_row=3):
+        for index in (0, 2, 3, 4, 6, 8):
+            cells[index].data_type = "s"
+            cells[index].number_format = "@"
+        cells[5].number_format = "#,##0"
+        cells[9].number_format = "yyyy/mm/dd"
     _set_column_widths(worksheet)
     output = BytesIO()
     workbook.save(output)
@@ -293,6 +301,7 @@ def _transfer_rows(rows):
             row.bank_code,
             row.amount.amount,
             row.recipient_identity_card if outgoing_bank == "31" else "",
+            None,
             ",".join(row.case_numbers),
             row.payment_date,
         )
@@ -303,15 +312,17 @@ def _outgoing_bank(row):
 
 
 def _style_headers(worksheet) -> None:
-    for cell in worksheet[1]:
+    for cell in worksheet[2]:
+        if cell.value is None:
+            continue
         cell.fill = PatternFill(fill_type="solid", fgColor="FFFF00")
         cell.font = Font(bold=True)
 
 
 def _set_column_widths(worksheet) -> None:
     for column, width in {
-        "A": 24, "B": 14, "C": 22, "D": 22, "E": 16,
-        "F": 14, "G": 30, "H": 16, "I": 14,
+        "A": 22.5, "B": 31.25, "C": 22, "D": 22, "E": 14.75,
+        "F": 11.125, "G": 29.875, "H": 3, "I": 18, "J": 19.125,
     }.items():
         worksheet.column_dimensions[column].width = width
 

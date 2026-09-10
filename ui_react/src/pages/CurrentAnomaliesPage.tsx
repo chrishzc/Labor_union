@@ -51,7 +51,7 @@ const EVIDENCE_LABELS: Readonly<Record<string, string>> = {
 
 function businessEvidence(field: AnomalyEvidenceField): string {
   if (field.key === 'notification_reason') {
-    return field.value === 'recipient_unavailable' ? '目前無法通知收件者' : '需要確認通知設定，詳見技術資料。';
+    return field.value === 'recipient_unavailable' ? '目前無法通知收件者' : '請到 LINE 通知管理確認通知設定。';
   }
   if (field.kind === 'boolean') return field.value ? '是' : '否';
   return renderEvidence(field.value);
@@ -334,13 +334,7 @@ export const CurrentAnomaliesPage: React.FC = () => {
           <div>
             <p><strong>負責流程：</strong>{ownerLabel(detail.owner_domain)}</p>
             <p><strong>影響：</strong>{detail.blocking ? '目前會阻擋作業' : '目前需要人工確認'}</p>
-            <details>
-              <summary>技術詳情與資料來源</summary>
-              <p>資料版本：{detail.owner_version}</p><p>負責模組：{detail.owner_domain}</p>
-              <dl>{[...detail.subject.fields, ...detail.details.fields].map((field) => (
-                <React.Fragment key={`${field.kind}:${field.key}`}><dt>{field.key}</dt><dd>{renderEvidence(field.value)}</dd></React.Fragment>
-              ))}</dl>
-            </details>
+
             <h3>目前可判斷資料</h3>
             <dl>
               {[...detail.subject.fields, ...detail.details.fields].filter((field) => EVIDENCE_LABELS[field.key]).map((field) => (
@@ -366,7 +360,7 @@ export const CurrentAnomaliesPage: React.FC = () => {
                     {replayLoading ? '正在檢查…' : '檢查重新發送'}
                   </button>
                 ) : <p>目前沒有可用的操作入口。</p>}
-                <details><summary>操作技術詳情</summary><p>{action.owning_domain} · {action.preview_operation} → {action.apply_operation ?? '僅供查詢'}</p><p>完成條件：{action.completion_predicate}</p></details>
+
               </article>
             ))}
             {replayError && <div role="alert" className="error-message">{replayError}</div>}

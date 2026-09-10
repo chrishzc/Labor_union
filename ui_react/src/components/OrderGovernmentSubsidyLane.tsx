@@ -134,7 +134,7 @@ export const OrderGovernmentSubsidyLane: FC<{ expanded?: boolean; onExpandedChan
             >
               全部 <strong>{totalCount}</strong>
             </button>
-            {GOVERNMENT_SUBSIDY_SUBSTATUS_CODES.map((code) => (
+            {GOVERNMENT_SUBSIDY_SUBSTATUS_CODES.filter((code) => selectedSubstatus === code || (page?.substatus_counts[code] ?? 0) > 0).map((code) => (
               <button
                 type="button"
                 key={code}
@@ -201,18 +201,6 @@ export const OrderGovernmentSubsidyLane: FC<{ expanded?: boolean; onExpandedChan
 
                   <div className="order-v2-case-meta" aria-label="Government Subsidy 唯讀入口">
                     <a href="#reports">前往營運與補助報表</a>
-                    <details><summary>技術詳情與資料來源</summary>
-                      <p>Owner：{item.source.owner}；Source：{item.source.identity ?? '無'}；Version：{item.source.version ?? '無'}；Claim batch：{item.claim_batch_id ?? '無'}</p>
-                      {[...item.blockers, ...item.warnings].map((notice) => <p key={notice.code}>{notice.code}：{notice.message}</p>)}
-                    </details>
-                    {item.available_read_actions.length > 0 && (
-                      <details>
-                        <summary>查詢來源</summary>
-                        {item.available_read_actions.map((action) => (
-                          <span key={action.action_id}>{action.action_id}</span>
-                        ))}
-                      </details>
-                    )}
                   </div>
                 </article>
               ))}

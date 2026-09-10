@@ -190,30 +190,19 @@ describe('ServiceBeforeReplacementActions', () => {
 
     expect(serviceBeforeReplacementClient.query).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: '換人' })).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.queryByRole('heading', { name: '服務前換人人工修復', hidden: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '服務前更換月嫂', hidden: true })).not.toBeInTheDocument();
     expandReplacementPanel();
-    await screen.findByText('可以建立換人 successor');
+    await screen.findByText('可以辦理更換');
     expect(serviceBeforeReplacementClient.query).toHaveBeenCalledWith('CASE-RPRE-001', 'R-02', expect.any(AbortSignal));
-    expect(screen.getByText('步驟 2：重新建立候選池')).toBeInTheDocument();
+    expect(screen.getByText('重新挑選候選月嫂')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('換人原因'), { target: { value: ' 客戶要求更換月嫂 ' } });
-    fireEvent.change(screen.getByLabelText('證據（每行一筆）'), { target: { value: 'ticket:RPRE-1\ncall-log:20260828\nticket:RPRE-1' } });
+    fireEvent.change(screen.getByLabelText('聯繫紀錄或更換依據'), { target: { value: 'ticket:RPRE-1\ncall-log:20260828\nticket:RPRE-1' } });
     fireEvent.click(screen.getByRole('button', { name: '預覽換人影響' }));
 
     await screen.findByText('預覽完成，尚未寫入');
-    const previewTechnicalDetails = screen.getAllByText('技術詳情與資料來源')[1].closest('details');
-    expect(previewTechnicalDetails).not.toHaveAttribute('open');
-    expect(screen.getByText(`Preview fingerprint`)).toBeInTheDocument();
-    expect(screen.getByText(fingerprint)).toBeInTheDocument();
-    expect(screen.getByText(/generation:7.*event:7.*aggregate:7/)).toBeInTheDocument();
-    expect(screen.getByText(/generation:8.*event:8/)).toBeInTheDocument();
-    expect(screen.getAllByText('expected 7／resulting 8')).toHaveLength(3);
-    expect(screen.getByText('successor_matching')).toBeInTheDocument();
-    expect(screen.getByText(/matching_plan.*matching-plan:11.*current true.*caregiver-bound true/)).toBeInTheDocument();
-    expect(screen.getByText(/recipient_confirmation.*recipient-confirmation:12.*current false.*caregiver-bound true/)).toBeInTheDocument();
-    expect(screen.getByText(/successor_round.*successor-round:22.*current true.*caregiver-bound false/)).toBeInTheDocument();
-    expect(screen.getByText(/Actual-service proof：official-schedule:CASE-RPRE-001，版本 7/)).toBeInTheDocument();
-    expect(screen.getByText('Candidate reuse proof：無')).toBeInTheDocument();
-    expect(screen.getByText('Successor proof：無')).toBeInTheDocument();
+    expect(screen.queryByText('技術詳情與資料來源')).not.toBeInTheDocument();
+    expect(screen.queryByText(fingerprint)).not.toBeInTheDocument();
+    expect(screen.queryByText(/generation:7/)).not.toBeInTheDocument();
     expect(serviceBeforeReplacementClient.preview).toHaveBeenCalledWith(
       'CASE-RPRE-001',
       {
@@ -223,12 +212,12 @@ describe('ServiceBeforeReplacementActions', () => {
       },
       expect.any(AbortSignal),
     );
-    const applyButton = screen.getByRole('button', { name: '確認建立換人 successor' });
+    const applyButton = screen.getByRole('button', { name: '確認更換' });
     expect(applyButton).toBeDisabled();
-    fireEvent.click(screen.getByLabelText('我已核對案件、情境、原因、證據與影響範圍'));
+    fireEvent.click(screen.getByLabelText('我已確認更換原因、聯繫紀錄及影響'));
     fireEvent.click(applyButton);
 
-    await screen.findByText(/換人處理已完成並回讀/);
+    await screen.findByText(/已完成更換/);
     expect(serviceBeforeReplacementClient.apply).toHaveBeenCalledWith(
       'CASE-RPRE-001',
       expect.objectContaining({
@@ -246,7 +235,7 @@ describe('ServiceBeforeReplacementActions', () => {
     );
     expect(onCommitted).toHaveBeenCalledWith(result);
     expect(serviceBeforeReplacementClient.query).toHaveBeenCalledTimes(1);
-    expect(screen.getAllByText(`digest：${fingerprint}`)).toHaveLength(3);
+    expect(screen.queryByText(`digest：${fingerprint}`)).not.toBeInTheDocument();
   });
 
   it('實際服務存在時只顯示請假代班轉介，不顯示 replacement 操作', async () => {
@@ -271,7 +260,7 @@ describe('ServiceBeforeReplacementActions', () => {
     expect(screen.queryByLabelText('換人原因')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '前往請假代班' }));
     expect(onSubstitutionReferral).toHaveBeenCalledWith(referral);
-    expect(screen.getByText(/official-schedule:CASE-RPRE-001，版本 7/)).toBeInTheDocument();
+    expect(screen.getByText('已服務日期：2026-08-01')).toBeInTheDocument();
   });
 
   it('R-04 已完成 successor 的重載明確禁止重複套用並保留 step 4', async () => {
@@ -289,8 +278,8 @@ describe('ServiceBeforeReplacementActions', () => {
 
     expandReplacementPanel();
 
-    await screen.findByText('換人 successor 已建立，不能重複套用');
-    expect(screen.getByText('步驟 4：沿用已驗證接受結果')).toBeInTheDocument();
+    await screen.findByText('已辦理更換，請勿重複提交');
+    expect(screen.getByText('依已確認的推薦結果繼續安排')).toBeInTheDocument();
     expect(screen.queryByLabelText('換人原因')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '預覽換人影響' })).not.toBeInTheDocument();
   });
@@ -298,10 +287,10 @@ describe('ServiceBeforeReplacementActions', () => {
   it('沒有 typed anomaly binding 時不預設猜 R-01，必須由操作者選擇', async () => {
     render(<ServiceBeforeReplacementActions caseNo="CASE-RPRE-001" />);
     expandReplacementPanel();
-    await screen.findByText(/系統不會猜測 R-01/);
+    await screen.findByText(/請依案件實際進度選擇/);
     expect(serviceBeforeReplacementClient.query).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByLabelText('異常情境'), { target: { value: 'R-03' } });
-    await screen.findByText('可以建立換人 successor');
+    fireEvent.change(screen.getByLabelText('目前進度'), { target: { value: 'R-03' } });
+    await screen.findByText('可以辦理更換');
     expect(serviceBeforeReplacementClient.query).toHaveBeenCalledWith('CASE-RPRE-001', 'R-03', expect.any(AbortSignal));
   });
 
@@ -311,13 +300,13 @@ describe('ServiceBeforeReplacementActions', () => {
       .mockResolvedValueOnce({ ...result, status: 'replayed' });
     render(<ServiceBeforeReplacementActions caseNo="CASE-RPRE-001" initialScenario="R-02" />);
     expandReplacementPanel();
-    await screen.findByText('可以建立換人 successor');
+    await screen.findByText('可以辦理更換');
     fireEvent.change(screen.getByLabelText('換人原因'), { target: { value: preview.reason } });
-    fireEvent.change(screen.getByLabelText('證據（每行一筆）'), { target: { value: preview.evidence.join('\n') } });
+    fireEvent.change(screen.getByLabelText('聯繫紀錄或更換依據'), { target: { value: preview.evidence.join('\n') } });
     fireEvent.click(screen.getByRole('button', { name: '預覽換人影響' }));
     await screen.findByText('預覽完成，尚未寫入');
-    fireEvent.click(screen.getByLabelText('我已核對案件、情境、原因、證據與影響範圍'));
-    fireEvent.click(screen.getByRole('button', { name: '確認建立換人 successor' }));
+    fireEvent.click(screen.getByLabelText('我已確認更換原因、聯繫紀錄及影響'));
+    fireEvent.click(screen.getByRole('button', { name: '確認更換' }));
 
     await screen.findByText(/沿用原操作安全地確認結果，不會重複建立換人/);
     const firstCall = vi.mocked(serviceBeforeReplacementClient.apply).mock.calls[0];
@@ -341,44 +330,44 @@ describe('ServiceBeforeReplacementActions', () => {
     view.rerender(<ServiceBeforeReplacementActions caseNo="CASE-RPRE-002" initialScenario="R-02" />);
     await waitFor(() => expect(screen.getByRole('button', { name: '換人' })).toHaveAttribute('aria-expanded', 'false'));
     expandReplacementPanel();
-    await screen.findByText('步驟 4：沿用已驗證接受結果');
+    await screen.findByText('依已確認的推薦結果繼續安排');
     expect(oldSignal?.aborted).toBe(true);
     resolveOld?.(readyQuery);
     await Promise.resolve();
-    expect(screen.getByText('步驟 4：沿用已驗證接受結果')).toBeInTheDocument();
-    expect(screen.queryByText('步驟 2：重新建立候選池')).not.toBeInTheDocument();
+    expect(screen.getByText('依已確認的推薦結果繼續安排')).toBeInTheDocument();
+    expect(screen.queryByText('重新挑選候選月嫂')).not.toBeInTheDocument();
   });
 
   it('owner refresh callback 失敗不會把已完成的 Apply 誤報為失敗', async () => {
     const onCommitted = vi.fn().mockRejectedValue(new Error('parent refresh failed'));
     render(<ServiceBeforeReplacementActions caseNo="CASE-RPRE-001" initialScenario="R-02" onCommitted={onCommitted} />);
     expandReplacementPanel();
-    await screen.findByText('可以建立換人 successor');
+    await screen.findByText('可以辦理更換');
     fireEvent.change(screen.getByLabelText('換人原因'), { target: { value: preview.reason } });
-    fireEvent.change(screen.getByLabelText('證據（每行一筆）'), { target: { value: preview.evidence.join('\n') } });
+    fireEvent.change(screen.getByLabelText('聯繫紀錄或更換依據'), { target: { value: preview.evidence.join('\n') } });
     fireEvent.click(screen.getByRole('button', { name: '預覽換人影響' }));
     await screen.findByText('預覽完成，尚未寫入');
-    fireEvent.click(screen.getByLabelText('我已核對案件、情境、原因、證據與影響範圍'));
-    fireEvent.click(screen.getByRole('button', { name: '確認建立換人 successor' }));
-    await screen.findByText(/換人處理已完成並回讀/);
+    fireEvent.click(screen.getByLabelText('我已確認更換原因、聯繫紀錄及影響'));
+    fireEvent.click(screen.getByRole('button', { name: '確認更換' }));
+    await screen.findByText(/已完成更換/);
     expect(screen.queryByText('parent refresh failed')).not.toBeInTheDocument();
   });
 
   it('Apply 後以 response 內 complete readback 顯示結果，不重查已消耗的舊 scenario', async () => {
     render(<ServiceBeforeReplacementActions caseNo="CASE-RPRE-001" initialScenario="R-02" />);
     expandReplacementPanel();
-    await screen.findByText('可以建立換人 successor');
+    await screen.findByText('可以辦理更換');
     fireEvent.change(screen.getByLabelText('換人原因'), { target: { value: preview.reason } });
-    fireEvent.change(screen.getByLabelText('證據（每行一筆）'), { target: { value: preview.evidence.join('\n') } });
+    fireEvent.change(screen.getByLabelText('聯繫紀錄或更換依據'), { target: { value: preview.evidence.join('\n') } });
     fireEvent.click(screen.getByRole('button', { name: '預覽換人影響' }));
     await screen.findByText('預覽完成，尚未寫入');
-    fireEvent.click(screen.getByLabelText('我已核對案件、情境、原因、證據與影響範圍'));
-    fireEvent.click(screen.getByRole('button', { name: '確認建立換人 successor' }));
-    await screen.findByText(/正式資料已完成回讀/);
+    fireEvent.click(screen.getByLabelText('我已確認更換原因、聯繫紀錄及影響'));
+    fireEvent.click(screen.getByRole('button', { name: '確認更換' }));
+    await screen.findByText(/案件已更新/);
     expect(serviceBeforeReplacementClient.query).toHaveBeenCalledTimes(1);
-    expect(screen.getByText(/本結果不自行推定異常已解除/)).toBeInTheDocument();
-    expect(screen.getAllByText('技術詳情與資料來源').at(-1)?.closest('details')).not.toHaveAttribute('open');
-    expect(screen.getByText('Readback complete：true')).toBeInTheDocument();
+    expect(screen.getByText(/若本案另有待處理異常/)).toBeInTheDocument();
+    expect(screen.queryByText('技術詳情與資料來源')).not.toBeInTheDocument();
+    expect(screen.queryByText('Readback complete：true')).not.toBeInTheDocument();
   });
 
   it('R-07 Apply readback 明確顯示停在 Step 2 且沒有候選，不誤報異常已解除', async () => {
@@ -395,18 +384,18 @@ describe('ServiceBeforeReplacementActions', () => {
     });
     render(<ServiceBeforeReplacementActions caseNo="CASE-RPRE-001" initialScenario="R-07" />);
     expandReplacementPanel();
-    await screen.findByText('可以建立換人 successor');
+    await screen.findByText('可以辦理更換');
     fireEvent.change(screen.getByLabelText('換人原因'), { target: { value: preview.reason } });
-    fireEvent.change(screen.getByLabelText('證據（每行一筆）'), { target: { value: preview.evidence.join('\n') } });
+    fireEvent.change(screen.getByLabelText('聯繫紀錄或更換依據'), { target: { value: preview.evidence.join('\n') } });
     fireEvent.click(screen.getByRole('button', { name: '預覽換人影響' }));
     await screen.findByText('預覽完成，尚未寫入');
-    fireEvent.click(screen.getByLabelText('我已核對案件、情境、原因、證據與影響範圍'));
-    fireEvent.click(screen.getByRole('button', { name: '確認建立換人 successor' }));
+    fireEvent.click(screen.getByLabelText('我已確認更換原因、聯繫紀錄及影響'));
+    fireEvent.click(screen.getByRole('button', { name: '確認更換' }));
 
-    await screen.findByText(/目前仍停在步驟 2：沒有可用候選/);
+    await screen.findByText(/目前沒有可用候選月嫂/);
     expect(screen.queryByText(/blocked_no_candidate/)).not.toBeInTheDocument();
-    expect(screen.getByText(/不代表異常已解除，也不會復活舊月嫂/)).toBeInTheDocument();
-    expect(screen.getByText(/新版候選數：.*0/)).toBeInTheDocument();
+    expect(screen.getByText(/仍需重新尋找合適月嫂；不會自動恢復原月嫂/)).toBeInTheDocument();
+    expect(screen.getByText(/可用候選月嫂：.*0/)).toBeInTheDocument();
     expect(serviceBeforeReplacementClient.query).toHaveBeenCalledTimes(1);
   });
 });
