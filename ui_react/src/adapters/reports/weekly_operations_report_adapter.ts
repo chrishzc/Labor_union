@@ -3,7 +3,7 @@
  * Description: 將營運週報 strict view 映射為三分頁顯示資料，保留 null 與 typed 資料品質狀態。
  */
 import type { WeeklyOperationsReport } from '../../api/reports/weekly_operations_report_schemas';
-import { adaptSubsidyPartitions } from './subsidy_report_query_adapter';
+import { adaptSubsidyRow } from './subsidy_report_query_adapter';
 
 const REVIEW_LABELS: Record<WeeklyOperationsReport['case_rows'][number]['review_result'], string> = {
   general_eligible: '一般符合',
@@ -23,6 +23,19 @@ export function displayWeeklyValue(value: string | number | null): string {
 export function adaptWeeklyOperationsReport(source: WeeklyOperationsReport) {
   const subsidyTotalRows = source.subsidy_partitions.reduce((sum, partition) => sum + partition.row_count, 0);
   const subsidyTotalAmount = source.subsidy_partitions.reduce((sum, partition) => sum + partition.total_amount_ntd, 0);
+  const subsidyPartitions = source.subsidy_partitions.map((partition) => ({
+    kind: partition.citizen_kind,
+    rowCount: partition.row_count,
+    totalAmount: `NT$ ${partition.total_amount_ntd.toLocaleString()}`,
+    rows: partition.rows.map((row) => ({
+      ...adaptSubsidyRow(row),
+      annualIdentity: `(${row.application_roc_year ?? '—'})${partition.citizen_kind === 'general' ? '一般市民' : '社福補助'}`,
+      annualEntry: row.serial_number,
+      notes: row.notes,
+      reconciliationStatus: row.reconciliation_status || '結案',
+      claimPeriodLabel: row.claim_period_label,
+    })),
+  }));
   return {
     period: source.period,
     generatedAt: source.generated_at,
@@ -35,7 +48,7 @@ export function adaptWeeklyOperationsReport(source: WeeklyOperationsReport) {
     subsidy: {
       totalRows: subsidyTotalRows,
       totalAmount: `NT$ ${subsidyTotalAmount.toLocaleString()}`,
-      partitions: adaptSubsidyPartitions(source.subsidy_partitions),
+      partitions: subsidyPartitions,
     },
     serviceRows: source.service_rows,
     weeklyMetrics: source.weekly_metrics,

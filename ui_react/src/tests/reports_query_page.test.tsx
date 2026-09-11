@@ -41,7 +41,16 @@ describe('ReportsPage query-only presentation', () => {
     expect(screen.getAllByRole('tab')).toHaveLength(3);
 
     fireEvent.click(screen.getByRole('tab', { name: '補助案件統計表' }));
-    expect(screen.getByText('CASE-RPT-001')).toBeInTheDocument();
+    const weeklySubsidyTable = screen.getByRole('table', { name: '一般市民補助案件統計明細' });
+    expect(within(weeklySubsidyTable).getAllByRole('columnheader').map((cell) => cell.textContent)).toEqual([
+      '序號', '', '', '年度接案', '訂單號碼', '起日', '訖日', '補助時數', '補助天數', '備註',
+      '補助款金額', '單價', '結案/核銷', '核銷月份',
+    ]);
+    expect(within(weeklySubsidyTable).getAllByText('CASE-RPT-001')).toHaveLength(2);
+    expect(within(weeklySubsidyTable).getByText('(114)一般市民')).toBeInTheDocument();
+    expect(within(weeklySubsidyTable).getByText('第三季')).toBeInTheDocument();
+    expect(within(weeklySubsidyTable).queryByText('王**')).not.toBeInTheDocument();
+    expect(within(weeklySubsidyTable).queryByText('A*********')).not.toBeInTheDocument();
     expect(screen.getAllByText('NT$ 12,000').length).toBeGreaterThan(0);
     expect(screen.getByText('2026-01-01～2026-12-31')).toBeInTheDocument();
     expect(screen.queryByText(/年初至本週/)).not.toBeInTheDocument();

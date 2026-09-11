@@ -160,6 +160,10 @@ def test_weekly_query_is_redacted_and_uses_official_work_days():
     assert data["service_rows"][0]["weekly_hours"] == 40
     assert data["case_rows"][0]["applicant_name"] == "王小美"
     assert data["subsidy_partitions"][0]["rows"][0]["identity_card"] == "A123456789"
+    assert data["subsidy_partitions"][0]["rows"][0]["application_roc_year"] == 114
+    assert data["subsidy_partitions"][0]["rows"][0]["claim_period_label"] == "第三季"
+    assert data["subsidy_partitions"][0]["rows"][0]["reconciliation_status"] == "結案"
+    assert data["subsidy_partitions"][0]["rows"][0]["notes"] == ""
     assert "王小美" in response.text
     assert "A123456789" in response.text
     assert "完整地址" in response.text

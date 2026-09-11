@@ -8,7 +8,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from api.schemas.government_subsidy_report import GovernmentSubsidyReportPartitionView
+from api.schemas.government_subsidy_report import GovernmentSubsidyReportRowView
 
 
 class _StrictModel(BaseModel):
@@ -33,6 +33,20 @@ class WeeklyReportSummaryView(_StrictModel):
     negotiating_count: int = Field(ge=0)
     cancelled_count: int = Field(ge=0)
     incomplete_count: int = Field(ge=0)
+
+
+class WeeklyOperationsSubsidyRowView(GovernmentSubsidyReportRowView):
+    application_roc_year: int | None = Field(default=None, ge=1)
+    claim_period_label: str
+    reconciliation_status: str
+    notes: str
+
+
+class WeeklyOperationsSubsidyPartitionView(_StrictModel):
+    citizen_kind: Literal["general", "subsidized"]
+    row_count: int = Field(ge=0)
+    total_amount_ntd: int = Field(ge=0)
+    rows: list[WeeklyOperationsSubsidyRowView]
 
 
 class WeeklyReportCaseRowView(_StrictModel):
@@ -97,7 +111,7 @@ class WeeklyOperationsReportView(_StrictModel):
     source_revision: str
     summary: WeeklyReportSummaryView
     case_rows: list[WeeklyReportCaseRowView]
-    subsidy_partitions: list[GovernmentSubsidyReportPartitionView]
+    subsidy_partitions: list[WeeklyOperationsSubsidyPartitionView]
     service_rows: list[WeeklyReportServiceRowView]
     weekly_metrics: list[WeeklyReportMetricView]
     data_quality_issues: list[WeeklyReportDataQualityIssueView]

@@ -48,6 +48,8 @@ function currentTaipeiReportPeriod(): { startDate: string; endDate: string } {
 }
 
 type SubsidyPartitions = ReturnType<typeof adaptSubsidyReport>['partitions'];
+type WeeklyView = ReturnType<typeof adaptWeeklyOperationsReport>;
+type WeeklySubsidyPartitions = WeeklyView['subsidy']['partitions'];
 
 function annualSubsidyPeriod(endDate: string): string {
   const year = endDate.slice(0, 4);
@@ -55,7 +57,7 @@ function annualSubsidyPeriod(endDate: string): string {
 }
 
 const SubsidyPartitionsView: React.FC<{
-  partitions: SubsidyPartitions;
+  partitions: SubsidyPartitions | WeeklySubsidyPartitions;
   kind?: 'weekly' | 'quarterly' | 'annual';
 }> = ({ partitions, kind = 'weekly' }) => <>
   {partitions.map((partition) => <section key={partition.kind} className="reports-partition">
@@ -77,19 +79,20 @@ const SubsidyPartitionsView: React.FC<{
           <td>{row.serial}</td><td>{row.caseNo}</td><td>{row.eligibility}</td><td>{row.serviceStart}</td><td>{row.serviceEnd}</td>
           <td>{row.serviceDays}</td><td>{row.amount}</td><td>{row.unitPrice}</td><td>{row.employer}</td><td>{row.staff}</td>
         </tr>)}</tbody>
-      </table> : <table className="reports-table">
-        <thead><tr><th>序號</th><th>案件</th><th>資格</th><th>服務期間</th><th>補助時數／天數</th><th>服務天數</th><th>單價</th><th>補助額</th><th>雇主／人員</th><th>身分／地址</th></tr></thead>
-        <tbody>{partition.rows.map((row) => <tr key={`${partition.kind}-${row.serial}-${row.caseNo}`}>
-          <td>{row.serial}</td><td>{row.caseNo}</td><td>{row.eligibility}</td><td>{row.serviceRange}</td>
-          <td>{row.subsidyHours}／{row.subsidyDays}</td><td>{row.serviceDays}</td><td>{row.unitPrice}</td>
-          <td>{row.amount}</td><td>{row.employer}／{row.staff}</td><td>{row.identity}／{row.address}</td>
-        </tr>)}</tbody>
+      </table> : <table className="reports-table" aria-label={`${partition.kind === 'general' ? '一般市民' : '補助市民'}補助案件統計明細`}>
+        <thead><tr><th>序號</th><th aria-label="案件編號" /><th aria-label="年度與身分" /><th>年度接案</th><th>訂單號碼</th><th>起日</th><th>訖日</th><th>補助時數</th><th>補助天數</th><th>備註</th><th>補助款金額</th><th>單價</th><th>結案/核銷</th><th>核銷月份</th></tr></thead>
+        <tbody>{partition.rows.map((row) => {
+          if (!('annualIdentity' in row)) throw new Error('Weekly subsidy row is missing workbook fields.');
+          return <tr key={`${partition.kind}-${row.serial}-${row.caseNo}`}>
+            <td>{row.serial}</td><td>{row.caseNo}</td><td>{row.annualIdentity}</td><td>{row.annualEntry}</td><td>{row.caseNo}</td>
+            <td>{row.serviceStart}</td><td>{row.serviceEnd}</td><td>{row.subsidyHours}</td><td>{row.subsidyDays}</td>
+            <td>{row.notes}</td><td>{row.amount}</td><td>{row.unitPrice}</td><td>{row.reconciliationStatus}</td><td>{row.claimPeriodLabel}</td>
+          </tr>;
+        })}</tbody>
       </table>}
     </div>}
   </section>)}
 </>;
-
-type WeeklyView = ReturnType<typeof adaptWeeklyOperationsReport>;
 
 const DataQualityIssues: React.FC<{ issues: WeeklyView['dataQualityIssues'] }> = ({ issues }) => (
   issues.length === 0 ? null : <aside className="reports-quality" aria-label="資料品質待補正">

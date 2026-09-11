@@ -219,7 +219,10 @@ describe('Reports #reports cross-owner entry static subgate', () => {
     expect(document.querySelector('[data-control-id="reports.export.full-workbook"]')).toBeEnabled();
     fireEvent.click(screen.getByRole('tab', { name: '補助案件統計表' }));
     expect(screen.getAllByText(/NT\$ 12,000/).length).toBeGreaterThan(0);
-    expect(screen.getByText(/A\*+/)).toBeInTheDocument();
+    expect(screen.getByRole('table', { name: '一般市民補助案件統計明細' })).toBeInTheDocument();
+    expect(screen.getByText('(114)一般市民')).toBeInTheDocument();
+    expect(screen.getByText('第三季')).toBeInTheDocument();
+    expect(screen.queryByText(/A\*+/)).not.toBeInTheDocument();
     expect(screen.getByText('此類別目前沒有資料。')).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText('報表範圍'), { target: { value: 'quarterly' } });

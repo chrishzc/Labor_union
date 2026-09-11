@@ -3,7 +3,7 @@
  * Description: 定義營運週報三分頁、期間、彙總與資料品質問題的 strict canonical view。
  */
 import { z } from 'zod';
-import { SubsidyReportPartitionSchema } from './subsidy_report_query_schemas';
+import { SubsidyReportRowSchema } from './subsidy_report_query_schemas';
 
 const DateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const NonNegativeNullableIntegerSchema = z.number().int().nonnegative().nullable();
@@ -70,6 +70,21 @@ export const WeeklyOperationsDataQualityIssueSchema = z.strictObject({
   message: z.string().min(1),
 });
 
+export const WeeklyOperationsSubsidyRowSchema = z.strictObject({
+  ...SubsidyReportRowSchema.shape,
+  application_roc_year: z.number().int().positive().nullable(),
+  claim_period_label: z.string(),
+  reconciliation_status: z.string(),
+  notes: z.string(),
+});
+
+export const WeeklyOperationsSubsidyPartitionSchema = z.strictObject({
+  citizen_kind: z.enum(['general', 'subsidized']),
+  row_count: z.number().int().nonnegative(),
+  total_amount_ntd: z.number().int().nonnegative(),
+  rows: z.array(WeeklyOperationsSubsidyRowSchema),
+});
+
 export const WeeklyReportMetricSchema = z.strictObject({
   week_start_date: DateSchema,
   week_end_date: DateSchema,
@@ -85,7 +100,7 @@ export const WeeklyOperationsReportSchema = z.strictObject({
   source_revision: z.string().min(1),
   summary: WeeklyOperationsReportSummarySchema,
   case_rows: z.array(WeeklyOperationsCaseRowSchema),
-  subsidy_partitions: z.array(SubsidyReportPartitionSchema).length(2),
+  subsidy_partitions: z.array(WeeklyOperationsSubsidyPartitionSchema).length(2),
   service_rows: z.array(WeeklyOperationsServiceRowSchema),
   weekly_metrics: z.array(WeeklyReportMetricSchema),
   data_quality_issues: z.array(WeeklyOperationsDataQualityIssueSchema),

@@ -63,7 +63,16 @@ export const WEEKLY_OPERATIONS_REPORT: WeeklyOperationsReport = {
       week_label: '2026-08-24 ~ 2026-08-30',
     },
   ],
-  subsidy_partitions: SUBSIDY_REPORT_RESPONSE.data.partitions,
+  subsidy_partitions: SUBSIDY_REPORT_RESPONSE.data.partitions.map((partition) => ({
+    ...partition,
+    rows: partition.rows.map((row) => ({
+      ...row,
+      application_roc_year: 114,
+      claim_period_label: '第三季',
+      reconciliation_status: '結案',
+      notes: '',
+    })),
+  })),
   service_rows: [{
     assignment_id: 701,
     case_no: 'CASE-WEEK-001',

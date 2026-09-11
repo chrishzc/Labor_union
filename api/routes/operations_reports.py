@@ -136,6 +136,10 @@ def _subsidy_row_view_dict(row) -> dict[str, object]:
         "staff_name": row.staff_name,
         "identity_card": row.identity_card,
         "address": row.address,
+        "application_roc_year": row.application_roc_year,
+        "claim_period_label": row.claim_period_label,
+        "reconciliation_status": row.reconciliation_status,
+        "notes": row.notes,
     }
 
 
