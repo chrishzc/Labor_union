@@ -25,21 +25,18 @@ owner。
 
 - Excel、銀行 canonical row、occurrence 或 classification；
 - 客戶應收、客戶退款、client subsidy return；
-- 月嫂薪資或 payout；但全額補助案件的付款日若先於政府季度撥款，Government Subsidy 必須提供可追溯的工會墊付 funding／recovery fact 給 Staff Payables，不能把月嫂 obligation 改寫成客戶退款或 Client Finance receipt。
-
-### Staff payout funding state machine
-
-Government Subsidy 與 Staff Payables 以同一組 root facts 驗證 funding state，而非散落的全額補助特例。輸入為正式月嫂 obligation、到期日、Client Finance 衍生客戶應收、全補助訂單判定、政府 receipt allocation 與既有工會墊付款。全補助訂單僅在補助市民本案時數不超過 120 小時，且樓層費及其他自費項目皆為 0 時成立：
-
-- 未到期：`not_due`；
-- 衍生客戶應收大於 0 的案件到期：`client_receipt_required`；
-- 全額補助且政府 allocation 恰足：`government_funded`；
-- 全額補助到期、政府尚未入帳：`union_advance_due`；
-- 部分／超額 allocation、超額墊付或任何不唯一對應：`review_required`，零自動抵銷。
-
-`union_advance_due` 只建立 Staff Payables 的 typed Preview／Apply 工作項。正式 payout 仍由 Staff Payables 建立；後續政府季度入帳只建立對既有墊付的 recovery link，不得新增第二筆月嫂 payout。
+- 月嫂薪資或 payout；補助資格、claim、政府撥款與 allocation 均不得拆分或直接清償月嫂 obligation；
 - Orders、Scheduling 或 Alert workflow；
 - 政府公文檔案的外部保存機制。
+
+### 客戶代墊與補助退還的跨 Domain 邊界（2026-09-11 人工裁決）
+
+補助市民訂單有兩條互斥路徑：
+
+- **全補助案件**：補助市民的有效正式服務時數不超過 120 小時，且 Client Finance 衍生客戶應付為 0；客戶不出資，月嫂只有一筆整筆 obligation，付款日為結案後第二曆月 15 日。實務申請通常排滿 120 小時。政府 allocation 恰足時為 `government_funded`；付款日到而政府尚未入帳時為 `union_advance_due`，只建立可追溯的 Staff Payables funding／recovery 工作項，不得拆成兩次月嫂 payout。
+- **非全補助的補助市民訂單**：客戶依一般付款條款先代墊完整服務薪資，月嫂仍只有一筆整筆 obligation；服務正式完成後，Client Finance 才可建立對客戶的 `subsidy_return` 義務。
+
+Government Subsidy 只提供 claim item、核准與政府 receipt allocation 的不可變 fact，供 Client Finance 將已退還客戶的補助款連結至後續政府資金回收；不得新增第二筆客戶 payout。政府核准額、allocation、客戶退還額或對應不唯一時為 `review_required`，不得自動抵銷、改寫月嫂義務或把政府入款當成客戶收款。超過 120 小時或仍有任何客戶應付，都不得判定為全補助案件。
 
 ### 季度／年度核銷查詢投影
 
@@ -50,6 +47,26 @@ Government Subsidy 與 Staff Payables 以同一組 root facts 驗證 funding sta
 每日時數與身分別補助上限計算。季度 React 明細欄位與既有季度 XLSX 15 欄一致，年度明細與年度
 XLSX 10 欄一致。雇主身分證若存在，沿用報名資料 `survey_details` 的既有值；目前不得臆造
 `clients` 專用欄位或因此新增 schema。
+
+### 營運報表「補助案件統計表」年度投影
+
+營運報表內的「補助案件統計表」是用途獨立的年度統計投影，不是上述「年度補助」核銷報表的
+縮寫或另一個入口。它必須維持營運報表現有 worksheet 的格式、欄位與統計用途，不得改套
+「報表範圍－年度補助」的 10 欄明細格式。
+
+此表以營運報表 `end_date` 所屬西元年為 `report_year`，固定涵蓋該年 1 月 1 日至 12 月 31 日；
+即使營運報表的 `start_date`／`end_date` 只選一週、跨月或跨年，也不得把本表縮成同一段 selected
+period。跨年時只取 `end_date` 所屬年度，避免同一次匯出混合兩個年度統計。
+
+納入資格只有訂單已因有效訂金進入 `訂單成立` 或其後續有效狀態；正常訂單與具有同等已付訂金
+語意的歷史訂單一律同樣處理，已取消或仍在洽談中的訂單不納入。不得以是否存在、送出、核准
+`subsidy_claim_batches`，是否有 current Scheduling generation，或 claim revision 作為納入門檻。
+月份與年度歸屬只依該列的「核銷月份」標準計算結果判定：先取有效服務結束日（實際服務結束日，
+尚未有實際值時取預定服務結束日），以其西元年作核銷年度，並依月份將 1–3 月、4–6 月、7–9 月、
+10–12 月分別投影為「第一季」、「第二季」、「第三季」、「第四季」。只有核銷年度等於
+`report_year` 的列納入。`submitted_at` 若存在可作正式送件事實顯示，但不得取代此標準計算、訂單
+成立資格，或使沒有 claim batch 的歷史訂單被排除。補助時數、單價與金額仍由 Government Subsidy
+reconciliation formula 計算，Reporting 不得自行重定義。
 
 ## 2. SSOT
 

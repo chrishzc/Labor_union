@@ -43,7 +43,7 @@ describe('ReportsPage query-only presentation', () => {
     fireEvent.click(screen.getByRole('tab', { name: '補助案件統計表' }));
     expect(screen.getByText('CASE-RPT-001')).toBeInTheDocument();
     expect(screen.getAllByText('NT$ 12,000').length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/^\d{4}-\d{2}-\d{2}～\d{4}-\d{2}-\d{2}$/).length).toBeGreaterThan(0);
+    expect(screen.getByText('2026-01-01～2026-12-31')).toBeInTheDocument();
     expect(screen.queryByText(/年初至本週/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: '每周服務中說明' }));
     expect(screen.getByText('王**')).toBeInTheDocument();

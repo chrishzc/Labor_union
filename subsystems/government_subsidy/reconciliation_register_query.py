@@ -1,6 +1,6 @@
 """
 File: reconciliation_register_query.py
-Description: 依既有補助公式建立成立訂單的季度、年度及正式送件期間唯讀核銷資料。
+Description: 依既有補助公式建立成立訂單的季度、年度、營運年度統計及正式送件期間唯讀核銷資料。
 """
 
 from __future__ import annotations
@@ -29,6 +29,18 @@ SUBSIDIZED_CITIZEN = "\u88dc\u52a9\u5e02\u6c11"
 IDENTITY_CARD_KEY = "\u8eab\u5206\u8b49\u5b57\u865f"
 CLAIMED_BATCH_STATUSES = ("submitted", "approved", "partially_paid", "paid")
 ESTABLISHED_ORDER_STATUSES = ("訂單成立", "服務中", "訂單完成")
+OPERATIONS_REPORT_ORDER_STATUSES = ESTABLISHED_ORDER_STATUSES + (
+    "歷史訂單－未服務",
+    "歷史訂單－服務中",
+    "歷史訂單－服務完成",
+    "歷史訂單－帳務完成",
+)
+COMPLETED_ORDER_STATUSES = (
+    "訂單完成",
+    "歷史訂單－服務完成",
+    "歷史訂單－帳務完成",
+)
+RECONCILIATION_QUARTER_LABELS = ("第一季", "第二季", "第三季", "第四季")
 
 
 def _as_date(value) -> date | None:
@@ -107,13 +119,15 @@ def _fetch_established_cases(
     period_start: date,
     period_end: date,
     connection_factory: Callable[[], Any],
+    order_statuses: tuple[str, ...] = ESTABLISHED_ORDER_STATUSES,
 ) -> list[dict]:
+    status_placeholders = ", ".join("%s" for _ in order_statuses)
     conn = connection_factory()
     try:
         with conn.cursor() as cursor:
             cursor.execute(
-                """
-                SELECT o.case_no, c.identity_status,
+                f"""
+                SELECT o.case_no, o.status AS order_status, c.identity_status,
                        COALESCE(o.actual_start_date, o.start_date) AS actual_start_date,
                        COALESCE(o.actual_end_date, o.end_date) AS actual_end_date,
                        o.service_days, o.service_hours_per_day,
@@ -124,14 +138,14 @@ def _fetch_established_cases(
                 LEFT JOIN staff s ON s.id = o.staff_id
                 LEFT JOIN beclass_records br
                     ON (br.query_no = o.case_no OR br.bound_case_no = o.case_no)
-                WHERE o.status IN (%s, %s, %s)
+                WHERE o.status IN ({status_placeholders})
                   AND c.identity_status IN (%s, %s)
                   AND COALESCE(o.actual_end_date, o.end_date) >= %s
                   AND COALESCE(o.actual_end_date, o.end_date) < %s
                 ORDER BY o.case_no
                 """,
                 (
-                    *ESTABLISHED_ORDER_STATUSES,
+                    *order_statuses,
                     GENERAL_CITIZEN,
                     SUBSIDIZED_CITIZEN,
                     period_start,
@@ -292,6 +306,7 @@ def _to_register_row(source: dict) -> dict | None:
         "身分證字號": extract_employer_identity_card(source.get("survey_details")),
         "地址": source.get("employer_address") or "",
         "簽領": "",
+        "訂單狀態": source.get("order_status") or "",
     }
 
 
@@ -403,6 +418,7 @@ def _established_order_rows(
     application_year: int,
     quarter: int | None,
     connection_factory: Callable[[], Any],
+    order_statuses: tuple[str, ...] = ESTABLISHED_ORDER_STATUSES,
 ) -> tuple[list[dict], list[dict]]:
     start_month = (quarter - 1) * 3 + 1 if quarter is not None else 1
     period_start = date(application_year, start_month, 1)
@@ -411,7 +427,12 @@ def _established_order_rows(
     else:
         period_end = date(application_year, start_month + 3, 1)
     rows = []
-    for source in _fetch_established_cases(period_start, period_end, connection_factory):
+    for source in _fetch_established_cases(
+        period_start,
+        period_end,
+        connection_factory,
+        order_statuses,
+    ):
         row = _to_register_row(source)
         if row is None:
             continue
@@ -509,6 +530,44 @@ def build_annual_subsidy_summary(
         "subsidized_citizen_rows": subsidized_rows,
         "xlsx_bytes": _build_workbook(ANNUAL_HEADERS, general_rows, subsidized_rows, "\u5e74\u5ea6\u7e3d\u8868"),
     }
+
+
+def build_operations_report_annual_subsidy_rows(
+    report_year: int,
+    connection_factory: Callable[[], Any],
+) -> dict:
+    """Return the operations-report annual candidate in its dedicated row format."""
+    if not isinstance(report_year, int) or report_year < 1912:
+        raise ValueError("report_year must be a Gregorian year")
+    general_rows, subsidized_rows = _established_order_rows(
+        report_year,
+        None,
+        connection_factory,
+        OPERATIONS_REPORT_ORDER_STATUSES,
+    )
+
+    def operations_row(row: dict) -> dict:
+        result = dict(row)
+        reconciliation_year, reconciliation_period = _operations_reconciliation_period(
+            result["服務結束"]
+        )
+        if reconciliation_year != report_year:
+            raise RuntimeError("operations_report_reconciliation_year_mismatch")
+        result["核銷月份"] = reconciliation_period
+        result["核銷狀態"] = (
+            "結案" if result.get("訂單狀態") in COMPLETED_ORDER_STATUSES else ""
+        )
+        return result
+
+    return {
+        "general_citizen_rows": [operations_row(row) for row in general_rows],
+        "subsidized_citizen_rows": [operations_row(row) for row in subsidized_rows],
+    }
+
+
+def _operations_reconciliation_period(service_end: date) -> tuple[int, str]:
+    quarter_index = (service_end.month - 1) // 3
+    return service_end.year, RECONCILIATION_QUARTER_LABELS[quarter_index]
 
 
 def build_combined_subsidy_register(

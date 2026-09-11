@@ -62,7 +62,11 @@ total_payable = service_salary + floor_fee_allocated + effective_adjustments
 
 ### Staff Obligation Projection
 
-未核銷的 `staff_obligations` current projection 可依新根事實重建；已有正式付款歷史時不得覆寫，改追加 immutable adjustment／reversal obligation event。`staff_payments` 若存在只可由這些 canonical obligation 投影為 compatibility read model，不得回寫 Payroll SSOT。Orders 在第一次形成正式 `actual_end_date` 時，以 `calculate_staff_payment_due_date` 建立 `staff_payment_due_date`。該日期只讀取 Client Finance 的衍生 `client_payable_amount` 與「全補助訂單」判定：金額大於 0 時為結案後次一曆月 15 日；金額為 0 且本案實際服務時數未超過補助市民 120 小時上限、樓層費及其他自費項目皆為 0 時，才是全補助訂單並為結案後第二曆月 15 日。補助資格本身不是付款日分支；第 121 小時起以每小時 350 元、任何樓層費均形成客戶應收。後者不建立 Client Finance 收款核銷；若政府款尚未入帳而月嫂款到期，由 Government Subsidy／工會墊付流程處理。原日形成後不因取消、實際服務日更正或晚形成差額自動改到下一個 15 日。
+未核銷的 `staff_obligations` current projection 可依新根事實重建；已有正式付款歷史時不得覆寫，改追加 immutable adjustment／reversal obligation event。`staff_payments` 若存在只可由這些 canonical obligation 投影為 compatibility read model，不得回寫 Payroll SSOT。
+
+2026-09-11 人工裁決：Payroll 對同一 assignment 只建立一筆 `total_payable` 月嫂應付，不得按「政府補助／雇主自費」資金來源拆成兩筆 obligation 或兩次 payout。非全補助的補助市民訂單由客戶依一般 Client Finance 付款條款先代墊完整服務薪資，服務完成後再退符合資格的補助款；多位月嫂或代班仍各自依其 assignment 與實際服務量形成獨立整筆義務，並非補助分段。
+
+Orders 在第一次形成正式 `actual_end_date` 時，以 `calculate_staff_payment_due_date` 建立唯一 `staff_payment_due_date`。一般案件及非全補助的補助市民訂單為結案後次一曆月 15 日；只有「全補助案件」為結案後第二曆月 15 日。全補助案件必須同時是補助市民、訂單有效正式服務時數不超過 120 小時，且 Client Finance 衍生客戶應付為 0；客戶不需代墊或支付服務薪資。實務申請通常排滿 120 小時，但「剛好 120 小時」不是必要判定條件。補助資格本身、超過 120 小時、或仍有任何客戶應付，都不得套用全補助付款日。原日形成後不因取消、實際服務日更正或晚形成差額自動改到下一個 15 日。非全補助案件的客戶補助退還由 Client Finance 在服務完成後另建 `subsidy_return` 義務，與本 Domain 的月嫂應付完全分離。
 
 ### PAYOUT-002 late obligation disposition（2026-08-31 人工裁決）
 

@@ -1,6 +1,6 @@
 """
 File: weekly_operations_report_query_adapter.py
-Description: 從 MySQL 唯讀取得營運週報案件、effective 正式排班與補助 owner 資料。
+Description: 從 MySQL 唯讀取得營運週報案件、effective 正式排班與當年度補助 owner 資料。
 """
 
 from __future__ import annotations
@@ -73,9 +73,9 @@ class MySqlWeeklyOperationsReportQueryAdapter:
         ]
 
     def list_subsidy_facts(self, start_date: date, end_date: date) -> SubsidyFacts:
-        report = reconciliation_register_query.build_claim_submission_period_subsidy_rows(
-            start_date,
-            end_date,
+        del start_date
+        report = reconciliation_register_query.build_operations_report_annual_subsidy_rows(
+            end_date.year,
             get_connection,
         )
         return SubsidyFacts(
@@ -106,7 +106,7 @@ def _subsidy_fact(row: dict[str, object]) -> SubsidyFact:
         address=_optional_text(row.get("地址")),
         application_roc_year=_case_application_roc_year(case_no),
         claim_period_label=str(row.get("核銷月份") or ""),
-        reconciliation_status=str(row.get("核銷狀態") or "已送件"),
+        reconciliation_status=str(row.get("核銷狀態") or "結案"),
         notes="",
     )
 

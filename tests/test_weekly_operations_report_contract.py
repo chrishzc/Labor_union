@@ -32,6 +32,7 @@ from subsystems.reporting.weekly_report_metrics_service import (
     WeeklyReportMetricsService,
     week_starts_between,
 )
+from infrastructure.mysql import weekly_operations_report_query_adapter as report_adapter
 from infrastructure.mysql.weekly_operations_report_query_adapter import (
     _CASE_FACTS_SQL,
     _SERVICE_FACTS_SQL,
@@ -60,6 +61,14 @@ class _Facts:
                 31, "115000007", "王小美", "陳月嫂", date(2026, 8, 10), date(2026, 9, 4),
                 8, 5, date(2026, 8, 17), date(2026, 8, 23), "服務中", "active",
             ),
+            WeeklyServiceFact(
+                32, "115000009", "林大華", "吳月嫂", date(2026, 8, 17), date(2026, 9, 11),
+                7, 4, date(2026, 8, 17), date(2026, 8, 23), "服務中", "active",
+            ),
+            WeeklyServiceFact(
+                33, "115000010", "陳美玲", "周月嫂", date(2026, 8, 24), date(2026, 9, 18),
+                4, 5, date(2026, 8, 24), date(2026, 8, 30), "服務中", "active",
+            ),
         ]
 
     def list_subsidy_facts(self, start_date, end_date):
@@ -71,7 +80,7 @@ class _Facts:
                     Decimal("40"), Decimal("5"), 20, 12000, 300,
                     "王小美", "陳月嫂", "A123456789", "完整地址",
                     application_roc_year=114,
-                    claim_period_label="2026-08",
+                    claim_period_label="第三季",
                 ),
             ),
             subsidized=(),
@@ -231,6 +240,28 @@ def test_subsidy_application_year_only_accepts_year_000_sequence_case_number():
     assert _case_application_roc_year("14000007") is None
 
 
+def test_weekly_subsidy_uses_end_date_calendar_year_for_annual_candidate(monkeypatch):
+    requested = []
+
+    def build(report_year, connection_factory):
+        requested.append((report_year, connection_factory))
+        return {"general_citizen_rows": [], "subsidized_citizen_rows": []}
+
+    monkeypatch.setattr(
+        report_adapter.reconciliation_register_query,
+        "build_operations_report_annual_subsidy_rows",
+        build,
+    )
+
+    result = report_adapter.MySqlWeeklyOperationsReportQueryAdapter(None).list_subsidy_facts(
+        date(2025, 12, 29),
+        date(2026, 1, 4),
+    )
+
+    assert requested == [(2026, report_adapter.get_connection)]
+    assert result == SubsidyFacts(general=(), subsidized=())
+
+
 def test_weekly_service_source_excludes_unrestarted_historical_overlays():
     assert "JOIN scheduling_generations g" in _SERVICE_FACTS_SQL
     assert "g.effective_marker=1" in _SERVICE_FACTS_SQL
@@ -269,18 +300,29 @@ def test_weekly_export_has_fixed_three_sheets_and_summary_without_pii():
     assert subsidy_sheet.cell(row=6, column=2).value == "114000007"
     assert subsidy_sheet.cell(row=6, column=3).value == "(114)一般市民"
     assert subsidy_sheet.cell(row=6, column=5).value == "114000007"
+    assert subsidy_sheet.cell(row=6, column=14).value == "第三季"
     assert subsidy_sheet.cell(row=6, column=2).number_format == "@"
     assert subsidy_sheet.cell(row=6, column=5).number_format == "@"
 
-    # 每周服務中說明：對齊模板 15 欄
+    # 每周服務中說明：對齊使用者提供的 10 欄範例
     service_values = list(workbook["每周服務中說明"].values)
     assert service_values[0][0] == "服務總表-案件服務中說明(每周)"
     expected_headers = (
-        "週數", "序號", "市府案號", "雇主", "休假模式",
-        "休數", "服務開始", "服務結束", "特殊休假",
-        "每週起始日 ", "每週結束日 ", "服務時數", "每周工作日數 ", "每周工時", "結案",
+        "週數", "序號", "市府案號", "雇主", "每週起始日",
+        "每週結束日", "服務時數", "每周工作日數", "每周工時", "結案",
     )
-    assert service_values[1][:15] == expected_headers
+    assert service_values[1][:10] == expected_headers
+    assert service_values[2][0] == "8-3"
+    assert service_values[2][1:10] == (1, "115000007", "王小美", "2026/8/17", "2026/8/23", 8, 5, 40, None)
+    assert service_values[3][0] is None
+    assert service_values[3][1:10] == (2, "115000009", "林大華", "2026/8/17", "2026/8/23", 7, 4, 28, None)
+    assert service_values[4][:10] == expected_headers
+    assert service_values[5][0:2] == ("8-4", 1)
+    styled_service_sheet = load_workbook(BytesIO(response.content), data_only=True)["每周服務中說明"]
+    assert str(styled_service_sheet["J2"].fill.fgColor.rgb).endswith("F4B6C2")
+    assert "A3:A4" in {str(cell_range) for cell_range in styled_service_sheet.merged_cells.ranges}
+    assert styled_service_sheet.page_setup.orientation == "landscape"
+    assert styled_service_sheet.page_setup.fitToWidth == 1
 
 
 def test_weekly_export_rejects_retired_query_level_metrics():

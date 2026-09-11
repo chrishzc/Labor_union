@@ -49,6 +49,11 @@ function currentTaipeiReportPeriod(): { startDate: string; endDate: string } {
 
 type SubsidyPartitions = ReturnType<typeof adaptSubsidyReport>['partitions'];
 
+function annualSubsidyPeriod(endDate: string): string {
+  const year = endDate.slice(0, 4);
+  return `${year}-01-01～${year}-12-31`;
+}
+
 const SubsidyPartitionsView: React.FC<{
   partitions: SubsidyPartitions;
   kind?: 'weekly' | 'quarterly' | 'annual';
@@ -130,7 +135,7 @@ const WeeklyCasesView: React.FC<{ report: WeeklyView }> = ({ report }) => <>
 
 const WeeklySubsidyView: React.FC<{ report: WeeklyView }> = ({ report }) => <>
   <section className="reports-kpi-grid" data-surface-id="reports.weekly.subsidy-kpis">
-    <article><span>統計範圍</span><strong>{report.period.start_date}～{report.period.end_date}</strong></article>
+    <article><span>統計範圍</span><strong>{annualSubsidyPeriod(report.period.end_date)}</strong></article>
     <article><span>核銷筆數</span><strong>{report.subsidy.totalRows}</strong></article>
     <article><span>補助總額</span><strong>{report.subsidy.totalAmount}</strong></article>
     <article><span>報表期間</span><strong>{report.period.period_label}</strong></article>
@@ -138,20 +143,40 @@ const WeeklySubsidyView: React.FC<{ report: WeeklyView }> = ({ report }) => <>
   <SubsidyPartitionsView partitions={report.subsidy.partitions} />
 </>;
 
-const WeeklyServiceView: React.FC<{ report: WeeklyView }> = ({ report }) => (
-  report.serviceRows.length === 0 ? <div className="reports-state">此期間服務工時無資料。</div> : <div className="reports-table-container" tabIndex={0} role="region" aria-label="服務工時資料，可左右捲動">
-    <table className="reports-table">
-      <thead><tr><th>序號</th><th>市府案號</th><th>雇主</th><th>月嫂</th><th>訂單狀態</th><th>服務開始</th><th>服務結束</th><th>每日服務時數</th><th>每週起始日</th><th>每週結束日</th><th>每週工作日數</th><th>每週工時</th><th>結案</th></tr></thead>
-      <tbody>{report.serviceRows.map((row, idx) => <tr key={row.assignment_id}>
-        <td>{idx + 1}</td><td>{row.case_no}</td><td>{row.client_name}</td><td>{row.staff_name}</td><td>{row.order_status}</td>
-        <td>{displayWeeklyValue(row.service_start_date)}</td><td>{displayWeeklyValue(row.service_end_date)}</td>
-        <td>{row.service_hours_per_day}</td>
-        <td>{displayWeeklyValue(row.period_start_date)}</td><td>{displayWeeklyValue(row.period_end_date)}</td>
-        <td>{row.weekly_work_days}</td><td>{row.weekly_hours}</td><td>{row.completed ? '結案' : '—'}</td>
+function serviceWeekNumber(weekStartDate: string): string {
+  const [, month, day] = weekStartDate.split('-').map(Number);
+  return `${month}-${Math.ceil(day / 7)}`;
+}
+
+function serviceDate(value: string): string {
+  const [year, month, day] = value.split('-').map(Number);
+  return `${year}/${month}/${day}`;
+}
+
+const WeeklyServiceView: React.FC<{ report: WeeklyView }> = ({ report }) => {
+  if (report.serviceRows.length === 0) {
+    return <div className="reports-state">此期間服務工時無資料。</div>;
+  }
+
+  const groups = new Map<string, typeof report.serviceRows>();
+  report.serviceRows.forEach((row) => {
+    const key = `${row.period_start_date}|${row.period_end_date}`;
+    groups.set(key, [...(groups.get(key) ?? []), row]);
+  });
+
+  return <div className="reports-table-container reports-service-tables" tabIndex={0} role="region" aria-label="服務工時資料，可左右捲動">
+    {[...groups.entries()].map(([key, rows]) => <table className="reports-table reports-service-table" key={key}>
+      <thead><tr><th>週數</th><th>序號</th><th>市府案號</th><th>雇主</th><th>每週起始日</th><th>每週結束日</th><th>服務時數</th><th>每周工作日數</th><th>每周工時</th><th>結案</th></tr></thead>
+      <tbody>{rows.map((row, idx) => <tr key={`${row.assignment_id}-${row.period_start_date}`}>
+        {idx === 0 && <td rowSpan={rows.length} className="reports-service-week">{serviceWeekNumber(row.period_start_date)}</td>}
+        <td>{idx + 1}</td><td>{row.case_no}</td><td>{row.client_name}</td>
+        <td>{serviceDate(row.period_start_date)}</td><td>{serviceDate(row.period_end_date)}</td>
+        <td>{row.service_hours_per_day}</td><td>{row.weekly_work_days}</td><td>{row.weekly_hours}</td>
+        <td>{row.completed ? '結案' : ''}</td>
       </tr>)}</tbody>
-    </table>
-  </div>
-);
+    </table>)}
+  </div>;
+};
 
 export const ReportsPage: React.FC = () => {
   const period = currentPeriod();

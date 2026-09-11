@@ -15,7 +15,7 @@
 | 收款／退款／adjustment／reversal | immutable client ledger |
 | transaction allocation | append-only M:N allocations |
 | current balance／settled at | obligation 與 ledger reducer |
-| subsidy advance／recovery | immutable client payout event 與 Government Subsidy receipt-allocation fact 的 M:N settlement link |
+| 客戶代墊／補助退還／資金回收 | 一般服務費 receivable 與 receipt、服務完成後的 immutable `subsidy_return` obligation／payout，以及 Government Subsidy receipt-allocation fact 的 M:N settlement link |
 | `client_payments` | current／compatibility projection |
 | review status | root-derived projection，不可人工直接修改 |
 
@@ -85,7 +85,12 @@ direction amount。
 顯示 schema-drift／unavailable。相同 idempotency identity 的結果重查後，receipt／readback 必須
 保留同一 direction。
 
-補助資格與客戶收費採同一組衍生政策：補助市民（含低收入戶／中低收入戶映射）的月嫂服務薪資與政府請款單價均為每小時 350 元；政府先負擔最多 120 小時，第 121 小時起按每小時 350 元形成客戶應收。這使服務薪資在時數層由「政府補助＋客戶超額自費」完整覆蓋。樓層費不受時數補助抵銷，永遠是客戶應收。故「全補助訂單」只表示本案實際時數未超過 120 且無樓層費或其他自費項目，不能作為客戶身分的別名。
+2026-09-11 人工裁決把補助市民訂單分為兩條互斥路徑：
+
+- **全補助案件**：補助市民訂單的有效正式服務時數不超過 120 小時，且沒有樓層費或其他客戶應付，故衍生 `client_payable_amount = 0`；客戶不需代墊或支付服務薪資，也不建立 `subsidy_return`。實務申請通常排滿 120 小時，但不是必要條件。
+- **非全補助的補助市民訂單**：客戶依正常付款條款先代墊完整服務薪資及其他客戶應付項目；補助額不得在服務前或服務中抵減 client receivable。服務正式完成後，才依補助資格、有效服務時數上限與凍結補助單價另建退給客戶的 `subsidy_return`。
+
+兩條路徑都不得把同一月嫂報酬拆成「政府補助／雇主自費」兩段。超過 120 小時或仍有任何客戶應付，就不是全補助案件。樓層費及其他非補助項目永遠由客戶負擔，且不計入補助退還額。
 
 Modules：
 
@@ -142,15 +147,17 @@ obligation依strictly-newer owner event更新current projection，未被舊event
 功能已啟用，且與客戶服務費 ledger 分離。它是「工會對客戶的應付」，不是
 政府對工會的應收，也不得以 `client_payments.subsidy_refund_*` 作為事實來源。
 
+本節只適用於已由客戶代墊的非全補助案件；全補助案件因客戶未支付服務薪資，不建立 `subsidy_return`。客戶先支付的完整服務薪資是一般 Client Finance receivable／receipt；在正式服務完成前不得建立、預付或核銷 `subsidy_return`。服務完成且客戶服務費已收齊、補助資格可唯一確認後，才建立一筆對客戶的補助退還義務。這筆退款不改寫原客戶收款、不抵銷月嫂應付，也不代表政府已撥款。
+
 ```text
 退還義務
-= min(補助時數上限, 有效正式服務時數) × 一般客戶時薪
+= min(補助時數上限, 有效正式服務時數) × 凍結補助單價
 ```
 
 雙倍日不增加退還額。只有服務完成、客戶服務費收齊且資格符合時建立；帳戶不唯一、
 少退、超退、退匯／沖正都進異常，不改義務。
 
-#### 季度撥款與工會墊付
+#### 季度撥款與客戶補助退還
 
 政府補助的申請與撥款是 Government Subsidy Domain 的季度流程；客戶補助退還仍由本
 Domain 擁有。兩者的金流方向不同，永遠不得互相抵銷或改寫對方 ledger：

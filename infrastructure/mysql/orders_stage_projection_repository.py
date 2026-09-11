@@ -20,6 +20,8 @@ SELECT o.case_no,
        o.updated_at AS order_updated_at,
        import_fact.import_receipt_id,
        import_fact.import_created_at,
+       bootstrap_fact.bootstrap_event_id,
+       bootstrap_fact.bootstrap_created_at,
        CASE WHEN o.start_date IS NOT NULL
                   AND o.service_days > 0
                   AND o.service_hours_per_day > 0
@@ -101,6 +103,11 @@ SELECT o.case_no,
        SELECT case_no, MAX(id) AS import_receipt_id, MAX(created_at) AS import_created_at
          FROM case_import_receipts GROUP BY case_no
   ) import_fact ON import_fact.case_no = o.case_no
+  LEFT JOIN (
+       SELECT case_no, MAX(id) AS bootstrap_event_id,
+              MAX(created_at) AS bootstrap_created_at
+         FROM case_architecture_bootstrap_events GROUP BY case_no
+  ) bootstrap_fact ON bootstrap_fact.case_no = o.case_no
   LEFT JOIN (
        SELECT case_no, MAX(id) AS terms_event_id, MAX(resulting_order_version) AS terms_version,
               MAX(created_at) AS terms_created_at

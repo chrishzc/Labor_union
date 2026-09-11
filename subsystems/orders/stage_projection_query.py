@@ -24,7 +24,8 @@ StageStatus = Literal["not_started", "in_progress", "blocked", "completed", "una
 
 _ROW_FIELDS = frozenset({
     "case_no", "lifecycle_status", "replacement_resume_step", "order_version", "order_updated_at",
-    "import_receipt_id", "import_created_at", "imported_terms_complete",
+    "import_receipt_id", "import_created_at", "bootstrap_event_id", "bootstrap_created_at",
+    "imported_terms_complete",
     "terms_event_id", "terms_version", "terms_created_at", "candidate_pool_id", "candidate_pool_created_at",
     "candidate_pool_candidate_count", "candidate_pool_contacted_count", "candidate_pool_contacted_at",
     "candidate_pool_replied_count", "candidate_pool_replied_at", "matching_plan_id", "matching_plan_version",
@@ -242,14 +243,26 @@ def _stages(row: Mapping[str, object], case_no: str, evaluated_at: datetime) -> 
 
 def _intake_stage(row: Mapping[str, object], case_no: str) -> StageProjection:
     imported = row["import_receipt_id"] is not None
+    bootstrapped = row["bootstrap_event_id"] is not None
+    intake_lineage = imported or bootstrapped
     imported_terms_complete = _binary_flag(row, "imported_terms_complete")
-    terms = row["terms_event_id"] is not None or (imported and imported_terms_complete)
-    source = _source("Case Import / Orders", "case-import-and-terms", _maximum_version(row, "order_version", "terms_version"))
-    if imported and terms:
-        return _stage(1, "intake_terms", "進件與補件", "Case Import / Orders", "completed", source, _latest(row, "import_created_at", "terms_created_at"), actions=(_get("orders.terms.query", f"/api/v1/orders/{case_no}/terms"),))
-    if imported or terms:
-        missing = "orders_terms_missing" if imported else "case_import_receipt_missing"
-        return _stage(1, "intake_terms", "進件與補件", "Case Import / Orders", "in_progress", source, _latest(row, "import_created_at", "terms_created_at"), blockers=(_notice(missing, "進件與條款根事實尚未同時齊備。"),), actions=(_get("orders.terms.query", f"/api/v1/orders/{case_no}/terms"),))
+    terms = row["terms_event_id"] is not None or (
+        intake_lineage and imported_terms_complete
+    )
+    source = _source("Case Import / Orders", "intake-and-terms", _maximum_version(row, "order_version", "terms_version"))
+    occurred_at = _latest(
+        row, "import_created_at", "bootstrap_created_at", "terms_created_at"
+    )
+    if intake_lineage and terms:
+        return _stage(1, "intake_terms", "進件與補件", "Case Import / Orders", "completed", source, occurred_at, actions=(_get("orders.terms.query", f"/api/v1/orders/{case_no}/terms"),))
+    if intake_lineage or terms:
+        missing = "orders_terms_missing" if intake_lineage else "intake_lineage_missing"
+        message = (
+            "進件已建立，但訂單條款根事實尚未齊備。"
+            if intake_lineage
+            else "訂單條款已存在，但尚缺正式進件來源紀錄。"
+        )
+        return _stage(1, "intake_terms", "進件與補件", "Case Import / Orders", "in_progress", source, occurred_at, blockers=(_notice(missing, message),), actions=(_get("orders.terms.query", f"/api/v1/orders/{case_no}/terms"),))
     return _unavailable_stage(1, "intake_terms", "進件與補件", "Case Import / Orders", "case_import_and_terms_lineage_missing")
 
 

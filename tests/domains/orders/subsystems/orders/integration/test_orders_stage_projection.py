@@ -44,6 +44,8 @@ def _row(case_no: str = "CASE-001") -> dict[str, object]:
         "order_updated_at": NOW,
         "import_receipt_id": 1,
         "import_created_at": NOW,
+        "bootstrap_event_id": None,
+        "bootstrap_created_at": None,
         "imported_terms_complete": 1,
         "terms_event_id": 2,
         "terms_version": 2,
@@ -174,6 +176,26 @@ def test_imported_complete_terms_finish_step_one_without_a_terms_change_event() 
 
     assert item.sop_steps[0].status == "completed"
     assert item.sop_steps[2].status == "completed"
+
+
+def test_architecture_bootstrap_is_a_canonical_intake_lineage() -> None:
+    row = _row("BOOTSTRAPPED-STEP1")
+    row.update({
+        "import_receipt_id": None,
+        "import_created_at": None,
+        "bootstrap_event_id": 30,
+        "bootstrap_created_at": NOW,
+        "terms_event_id": None,
+        "terms_version": None,
+        "terms_created_at": None,
+    })
+
+    item = OrderStageProjectionQueryService(_Repository((row,)), BUSINESS_CLOCK).query(
+        StageProjectionQuery(50)
+    ).items[0]
+
+    assert item.stages[0].status == "completed"
+    assert item.sop_steps[0].status == "completed"
 
 
 def test_matching_pool_step_completes_from_candidate_pool_fact_before_customer_acceptance() -> None:
@@ -783,5 +805,6 @@ def test_mysql_repository_uses_one_bounded_select_and_never_commits() -> None:
     ):
         assert required_terms_clause in connection.last_cursor.sql
     assert "AS imported_terms_complete" in connection.last_cursor.sql
+    assert "FROM case_architecture_bootstrap_events" in connection.last_cursor.sql
     assert "LIMIT %s" in connection.last_cursor.sql
     assert not hasattr(connection, "commit")

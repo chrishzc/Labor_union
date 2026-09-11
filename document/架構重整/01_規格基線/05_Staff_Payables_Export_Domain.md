@@ -18,7 +18,7 @@
 | 銀行帳戶 owner | 唯一有效 primary `staff_bank_accounts` |
 | net paid | succeeded payout − return − reversal |
 | balance | obligation − net paid |
-| due date | Orders `staff_payment_due_date`：衍生客戶應收大於 0 為結案後次月 15 日；應收為 0 且本案符合全補助訂單（補助市民、時數不超過 120、樓層費及自費皆為 0）才為結案後第二曆月 15 日 |
+| due date | Orders 唯一 `staff_payment_due_date`：一般及非全補助案件為結案後次一曆月 15 日；補助市民、有效正式服務不超過 120 小時且客戶應付為 0 的全補助案件為結案後第二曆月 15 日 |
 | 同月合併 | Query／export projection |
 
 狀態：
@@ -32,7 +32,7 @@ balance = 0 → completed
 
 不建立正式 `partially_paid`。
 
-全補助訂單的月嫂義務仍屬本 Domain；它只是不經 Client Finance 的客戶收款核銷。補助資格案若有超額時數或樓層費，仍先走客戶收款路徑。付款日到而全補助訂單的政府款尚未入帳時，資金來源以 Government Subsidy 的工會墊付處理；該 funding fact 不得改寫月嫂義務、也不得變成客戶退款。
+2026-09-11 人工裁決：Staff Payables 對每一 assignment 只接收 Payroll 的一筆整筆應付，補助案不得拆成補助薪資／自費薪資或分次 payout。非全補助的補助市民訂單由客戶先代墊完整服務薪資，月嫂整筆應付日為結案後次一曆月 15 日；服務完成後退還客戶的補助款屬 Client Finance，不能改寫或清償月嫂義務。全補助案件固定為補助市民、有效正式服務不超過 120 小時且客戶應付為 0，客戶不出資，月嫂整筆應付日為結案後第二曆月 15 日；實務申請通常排滿 120 小時。到期仍不得因政府款未入帳而把一筆義務拆成多次 payout。
 
 ## 3. Subsystems
 

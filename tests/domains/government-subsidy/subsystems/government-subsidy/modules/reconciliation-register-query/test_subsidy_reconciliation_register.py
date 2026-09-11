@@ -42,6 +42,7 @@ def _order_row(**overrides):
         "case_no": "115000002", "identity_status": "一般市民",
         "actual_start_date": date(2026, 3, 1), "actual_end_date": date(2026, 3, 20),
         "service_days": 20, "service_hours_per_day": Decimal("8"),
+        "order_status": "訂單完成",
         "employer_name": "王小明", "employer_address": "台北市中正區",
         "staff_name": "月嫂甲", "survey_details": {"身分證字號": "A123456789"},
     }
@@ -114,6 +115,52 @@ def test_annual_summary_uses_established_orders_and_repairs_legacy_key():
     values = [cell.value for cell in worksheet["A"]]
     assert "\u88dc\u52a9\u5e02\u6c11" not in values
     assert worksheet.max_column == 10
+
+
+def test_operations_report_annual_rows_include_historical_established_orders_without_claim_batch():
+    connection = FakeConnection([
+        _order_row(
+            case_no="114000003",
+            actual_start_date=date(2025, 12, 20),
+            actual_end_date=date(2026, 1, 8),
+        ),
+    ])
+
+    result = register.build_operations_report_annual_subsidy_rows(
+        2026,
+        lambda: connection,
+    )
+
+    row = result["general_citizen_rows"][0]
+    assert row["市府訂單號碼"] == "114000003"
+    assert row["核銷月份"] == "第一季"
+    assert row["核銷狀態"] == "結案"
+    assert result["subsidized_citizen_rows"] == []
+    sql, params = connection.cursor_instance.executed[0]
+    assert "subsidy_claim_batches" not in sql
+    assert "current_revision" not in sql
+    assert "o.status IN (%s, %s, %s, %s, %s, %s, %s)" in sql
+    assert params == (
+        "訂單成立",
+        "服務中",
+        "訂單完成",
+        "歷史訂單－未服務",
+        "歷史訂單－服務中",
+        "歷史訂單－服務完成",
+        "歷史訂單－帳務完成",
+        "一般市民",
+        "補助市民",
+        date(2026, 1, 1),
+        date(2027, 1, 1),
+    )
+
+
+def test_operations_report_reconciliation_period_uses_service_end_quarter():
+    assert register._operations_reconciliation_period(date(2026, 3, 31)) == (2026, "第一季")
+    assert register._operations_reconciliation_period(date(2026, 4, 1)) == (2026, "第二季")
+    assert register._operations_reconciliation_period(date(2026, 7, 1)) == (2026, "第三季")
+    assert register._operations_reconciliation_period(date(2026, 10, 1)) == (2026, "第四季")
+    assert register._operations_reconciliation_period(date(2027, 1, 1)) == (2027, "第一季")
 
 
 def test_invalid_quarter_is_rejected_before_database_access(monkeypatch):

@@ -5,7 +5,7 @@
 - subsystem: `reporting`
 
 ## Responsibility
-以 canonical `start_date`／`end_date` 協調自選期間內案件、正式補助送件列與 Scheduling 正式工作日，按實際星期一至星期日分週，提供 strict JSON 及同 candidate XLSX；不得把 year-to-date、服務完成年度或非 current claim revision 混入營運報表。
+以 canonical `start_date`／`end_date` 協調自選期間內案件與 Scheduling 正式工作日，按實際星期一至星期日分週；「補助案件統計表」則固定取得 `end_date` 所屬完整年度的 Government Subsidy owner rows，並以既有專用欄位格式提供 strict JSON 及同 candidate XLSX，不得改套獨立「年度補助」報表格式。
 
 ## Implementation
 - primary:
@@ -26,7 +26,7 @@
   - `ui_react/src/api/reports/weekly_report_metrics_client.ts`
 
 ## Dependencies
-- outbound: `government-subsidy/reconciliation-register-query` — 以 owner formula 取得正式送件日落在 selected period 的 current-revision claim item rows。
+- outbound: `government-subsidy/reconciliation-register-query` — 以 owner formula 取得 `end_date` 所屬年度的正常／歷史已付訂金訂單補助統計 rows，不要求 claim batch。
 - outbound: `orders | client | scheduling` — selected-week案件與正式服務facts。
 - inbound: authenticated React Reports page。
 - storage: current `weekly_report_metrics` uses Monday `week_start_date` as its key and nullable promotion／inquiry counts; fresh `218` and preserve `1035` provide the table. Released `1031` batch objects are historical compatibility only and have no current runtime reader／writer.

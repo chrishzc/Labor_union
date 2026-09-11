@@ -9,6 +9,7 @@
 - Client Refund implementation status：`proven`
 - 2026-08-10 金流證據與超收裁決：`approved`
 - 2026-08-11 差額付款與追償可執行契約：`approved`
+- 2026-09-11 客戶代墊、月嫂整筆應付與服務後補助退還：`reconfirmed-by-user`
 - 本文件覆蓋舊稿中「人工月結 aggregate」與「一般客戶退款 deferred／missing」的矛盾。
 - 2026-08-03 原始核准只啟用 Inventory v2 evidence；後續 Commands、schema、pytest 與
   legacy exit 的實作，必須各自依人工核准的 decision／Work Package 授權。
@@ -96,6 +97,8 @@ Modules：
 - 來源必須綁定 assignment 與 rate snapshot；
 - 來源事件重送不得建立第二筆義務；
 - adjustment 建立新不可變 event／allocation，不修改舊義務歷史。
+- 同一 assignment 的 `total_payable` 只形成一筆整筆應付；不得按補助／自費資金來源拆分 obligation、due date 或 payout。
+- 非全補助案件的月嫂付款資格不依賴 Government Subsidy claim／allocation，也不等待 Client Finance 的客戶補助退還；全補助案件的唯一整筆 due date 為結案後第二曆月 15 日，到期仍不得拆成分次 payout。
 
 ### 2.4 Subsystem：Payout Reconciliation
 
@@ -303,7 +306,7 @@ Client Finance 擁有：
 | Operation | 根事實 | 結果 |
 |---|---|---|
 | Customer Refund | 已成立 refund obligation＋正式銀行出款 | 清償退款義務 |
-| Subsidy Return | 已成立 subsidy-return obligation＋正式銀行出款 | 清償客戶預付補助退還義務；季度第一月結案案件的付款日為結案月加兩曆月 15 日 |
+| Subsidy Return | 非全補助案件服務正式完成後成立的 subsidy-return obligation＋正式銀行出款 | 清償客戶代墊補助退還義務；全補助案件因客戶未出資而不建立；季度第一月結案案件的付款日為結案月加兩曆月 15 日 |
 | Receipt Reversal | 既有有效 receipt ledger event 失效 | append reversal 並重開原 receivable |
 
 禁止：

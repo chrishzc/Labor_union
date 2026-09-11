@@ -28,11 +28,16 @@ _BORDER_THIN = Border(
     top=Side(style="thin", color="D0D0D0"),
     bottom=Side(style="thin", color="D0D0D0"),
 )
+_SERVICE_BORDER = Border(
+    left=Side(style="thin", color="4B4B4B"),
+    right=Side(style="thin", color="4B4B4B"),
+    top=Side(style="thin", color="4B4B4B"),
+    bottom=Side(style="thin", color="4B4B4B"),
+)
 
 SERVICE_HEADERS = (
-    "週數", "序號", "市府案號", "雇主", "休假模式",
-    "休數", "服務開始", "服務結束", "特殊休假",
-    "每週起始日 ", "每週結束日 ", "服務時數", "每周工作日數 ", "每周工時", "結案",
+    "週數", "序號", "市府案號", "雇主", "每週起始日",
+    "每週結束日", "服務時數", "每周工作日數", "每周工時", "結案",
 )
 
 
@@ -303,20 +308,21 @@ def _build_subsidy_sheet(ws, report: WeeklyOperationsReport) -> None:
 def _build_service_sheet(ws, report: WeeklyOperationsReport) -> None:
     # R1: 標題
     ws.append(["服務總表-案件服務中說明(每周)"])
-    ws.merge_cells("A1:O1")
+    ws.merge_cells("A1:J1")
     ws.cell(row=1, column=1).font = Font(bold=True, size=14)
     ws.cell(row=1, column=1).alignment = Alignment(horizontal="left", vertical="center")
+    _configure_service_sheet(ws)
 
     if not report.service_rows:
         ws.append(SERVICE_HEADERS)
-        for c in range(1, 16):
+        for c in range(1, 11):
             cell = ws.cell(row=2, column=c)
             cell.font = Font(bold=True)
-            cell.fill = _HEADER_FILL
-            cell.alignment = Alignment(horizontal="center", vertical="center")
-            cell.border = _BORDER_THIN
+            cell.fill = PatternFill(fill_type="solid", fgColor="F4B6C2") if c == 10 else PatternFill()
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            cell.border = _SERVICE_BORDER
+        ws.row_dimensions[2].height = 30
         ws.freeze_panes = "A3"
-        _auto_fit_columns(ws, min_col=1, max_col=15)
         return
 
     # 依星期一至星期日分組
@@ -326,33 +332,26 @@ def _build_service_sheet(ws, report: WeeklyOperationsReport) -> None:
         groups.setdefault(label, []).append(r)
 
     for label, rows in groups.items():
-        # 每一週區塊開始前插入 15 欄表頭列
+        # 每一週區塊開始前插入與範例一致的 10 欄表頭列。
         header_row_idx = ws.max_row + 1
         ws.append(SERVICE_HEADERS)
-        for c in range(1, 16):
+        for c in range(1, 11):
             cell = ws.cell(row=header_row_idx, column=c)
             cell.font = Font(bold=True)
-            cell.fill = _HEADER_FILL
-            cell.alignment = Alignment(horizontal="center", vertical="center")
-            cell.border = _BORDER_THIN
+            cell.fill = PatternFill(fill_type="solid", fgColor="F4B6C2") if c == 10 else PatternFill()
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            cell.border = _SERVICE_BORDER
+        ws.row_dimensions[header_row_idx].height = 30
 
         data_start_row = ws.max_row + 1
         for idx, r in enumerate(rows, start=1):
-            p_start_str = r.period_start_date.isoformat() if r.period_start_date else ""
-            p_end_str = r.period_end_date.isoformat() if r.period_end_date else ""
-            svc_start_str = r.service_start_date.isoformat() if r.service_start_date else ""
-            svc_end_str = r.service_end_date.isoformat() if r.service_end_date else ""
-
+            p_start_str = _service_date(r.period_start_date) if r.period_start_date else ""
+            p_end_str = _service_date(r.period_end_date) if r.period_end_date else ""
             ws.append([
-                label,
+                _service_week_number(r.period_start_date),
                 idx,
                 r.case_no,
                 r.client_name,
-                r.rest_mode or "周休二日",
-                r.rest_days_count,
-                svc_start_str,
-                svc_end_str,
-                r.special_rest or "",
                 p_start_str,
                 p_end_str,
                 r.service_hours_per_day,
@@ -361,10 +360,10 @@ def _build_service_sheet(ws, report: WeeklyOperationsReport) -> None:
                 r.is_closed or ("結案" if r.completed else ""),
             ])
             curr_r = ws.max_row
-            for c in range(1, 16):
+            for c in range(1, 11):
                 cell = ws.cell(row=curr_r, column=c)
                 cell.alignment = Alignment(horizontal="center", vertical="center")
-                cell.border = _BORDER_THIN
+                cell.border = _SERVICE_BORDER
 
         data_end_row = ws.max_row
         if data_end_row >= data_start_row:
@@ -373,7 +372,26 @@ def _build_service_sheet(ws, report: WeeklyOperationsReport) -> None:
             ws.cell(row=data_start_row, column=1).alignment = Alignment(horizontal="center", vertical="center")
 
     ws.freeze_panes = "A3"
-    _auto_fit_columns(ws, min_col=1, max_col=15)
+
+
+def _configure_service_sheet(ws) -> None:
+    widths = (8, 8, 14, 14, 14, 14, 12, 12, 12, 12)
+    for column, width in enumerate(widths, start=1):
+        ws.column_dimensions[get_column_letter(column)].width = width
+    ws.sheet_view.showGridLines = False
+    ws.page_setup.orientation = ws.ORIENTATION_LANDSCAPE
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+
+
+def _service_week_number(week_start_date) -> str:
+    """Return the screenshot's month/week display label without changing week grouping."""
+    return f"{week_start_date.month}-{((week_start_date.day - 1) // 7) + 1}"
+
+
+def _service_date(value) -> str:
+    return f"{value.year}/{value.month}/{value.day}"
 
 
 def _auto_fit_columns(worksheet, min_col: int, max_col: int) -> None:
