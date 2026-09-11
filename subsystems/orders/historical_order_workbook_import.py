@@ -132,6 +132,22 @@ class HistoricalOrderAbsenceCancellation:
 
 
 @dataclass(frozen=True, slots=True)
+class HistoricalOrderWorkbookRowIssue:
+    source_row: int
+    case_no: str | None
+    fields: tuple[str, ...]
+    issue_codes: tuple[str, ...]
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "source_row": self.source_row,
+            "case_no": self.case_no,
+            "fields": list(self.fields),
+            "issue_codes": list(self.issue_codes),
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class HistoricalOrderWorkbookPreview:
     source_content_digest: str
     sheet_identity: str
@@ -146,6 +162,7 @@ class HistoricalOrderWorkbookPreview:
     result_counts: HistoricalOrderResultCounts
     preview_fingerprint: str
     absent_order_cancellations: tuple[HistoricalOrderAbsenceCancellation, ...] = ()
+    row_issues: tuple[HistoricalOrderWorkbookRowIssue, ...] = ()
 
     @property
     def absent_order_cancellation_count(self) -> int:
@@ -166,6 +183,7 @@ class HistoricalOrderWorkbookPreview:
             "status_counts": self.status_counts.as_dict(),
             "result_counts": self.result_counts.as_dict(),
             "preview_fingerprint": self.preview_fingerprint,
+            "row_issues": [item.as_dict() for item in self.row_issues],
         }
 
 
@@ -460,7 +478,6 @@ def _preview(
     row_previews,
     absent_orders=(),
 ) -> HistoricalOrderWorkbookPreview:
-    _assert_workbook_validation(workbook, row_previews)
     _assert_source_schedule_consistency(row_previews, workbook.rows)
     absent_orders = _canonical_absent_orders(absent_orders)
     outcomes = Counter(item.outcome.value for item in row_previews)
@@ -485,7 +502,8 @@ def _preview(
         "result_counts": result_counts.as_dict(),
         "absent_order_cancellations": _absence_snapshot(absent_orders),
     }).value
-    review_rows = 0
+    review_rows = outcomes["review_required"]
+    row_issues = _historical_row_issues(workbook, row_previews)
     return HistoricalOrderWorkbookPreview(
         source_content_digest=workbook.content_digest,
         sheet_identity=workbook.sheet_identity,
@@ -500,37 +518,53 @@ def _preview(
         result_counts=result_counts,
         preview_fingerprint=fingerprint,
         absent_order_cancellations=absent_orders,
+        row_issues=row_issues,
     )
 
 
-def _assert_workbook_validation(
+def _historical_row_issues(
     workbook: HistoricalOrderWorkbook,
     row_previews: tuple[object, ...],
-) -> None:
-    """Fail closed for nonblank contradictory source data.
-
-    Truly blank identity/status/caregiver rows and cancelled rows are business
-    ``not_adopted`` results.  A nonblank value that cannot be interpreted is a
-    source defect and rejects the entire workbook before any write.
-    """
-
+) -> tuple[HistoricalOrderWorkbookRowIssue, ...]:
+    results: list[HistoricalOrderWorkbookRowIssue] = []
     for row, preview in zip(workbook.rows, row_previews, strict=True):
-        issues = set(row.issue_codes)
-        if "historical_status_invalid" in issues:
-            raise ValueError("historical_order_source_status_invalid")
-        if not row.case_no or not row.client_name or row.asserted_status is None:
-            continue
-        if row.asserted_status is HistoricalOrderSourceStatus.CANCELLED:
-            continue
-        if any(
-            code.endswith("_date_invalid") or code.endswith("_date_range_invalid")
-            for code in issues
-        ):
-            raise ValueError("historical_order_date_range_invalid")
+        issues = set(row.issue_codes) | set(getattr(preview, "issue_codes", ()))
+        fields = {
+            field
+            for issue in issues
+            for field in _historical_issue_fields(issue)
+        }
         for pairing in getattr(preview, "pairings", ()):
-            resolution = getattr(pairing.resolution, "value", pairing.resolution)
-            if resolution in {"staff_missing", "staff_ambiguous"}:
-                raise ValueError("historical_order_staff_not_unique")
+            if getattr(pairing, "issue_codes", ()):
+                fields.add(f"第 {pairing.ordinal} 位月嫂姓名")
+        if issues:
+            results.append(
+                HistoricalOrderWorkbookRowIssue(
+                    row.source_row,
+                    row.case_no,
+                    tuple(sorted(fields)) or ("來源資料",),
+                    tuple(sorted(issues)),
+                )
+            )
+    return tuple(results)
+
+
+def _historical_issue_fields(issue_code: str) -> tuple[str, ...]:
+    if issue_code == "historical_case_no_missing":
+        return ("案件編號",)
+    if issue_code == "historical_client_name_missing":
+        return ("客戶姓名",)
+    if issue_code == "historical_status_invalid":
+        return ("訂單狀態",)
+    if "staff" in issue_code:
+        return ("月嫂姓名",)
+    if issue_code.endswith("_start_date_invalid"):
+        return ("開始日期",)
+    if issue_code.endswith("_end_date_invalid"):
+        return ("結束日期",)
+    if issue_code.endswith("_date_range_invalid"):
+        return ("開始日期", "結束日期")
+    return ()
 
 
 def _source_case_nos(workbook: HistoricalOrderWorkbook) -> tuple[str, ...]:

@@ -37,6 +37,107 @@ interface ApplyPresentation {
   outcome: ApplyOutcome;
 }
 
+interface HcmReviewGuidance {
+  message: string;
+  nextStep: string;
+}
+
+interface SourceWorkbookIssue {
+  source_row: number;
+  fields: string[];
+  issue_codes: string[];
+  case_no?: string | null;
+  query_no?: string | null;
+}
+
+function sourceIssueDescription(issue: SourceWorkbookIssue): string {
+  const fieldDescriptions = issue.fields.map((field) => {
+    const fieldCodes = issue.issue_codes.filter((code) => code.endsWith(`:${field}`));
+    if (fieldCodes.some((code) => code.includes('_missing:'))) return `${field}（不可空白）`;
+    if (fieldCodes.some((code) => code.includes('_invalid:'))) return `${field}（格式或內容不符合規則）`;
+    return field;
+  });
+  if (issue.issue_codes.includes('client_beclass_source_payload_conflict')) {
+    return `需核對欄位：${fieldDescriptions.join('、')}（同一查詢序號的來源內容與既有資料不同）。`;
+  }
+  if (issue.issue_codes.some((code) => code.includes('client_case_binding') || code.includes('client_beclass_binding'))) {
+    return `需核對欄位：${fieldDescriptions.join('、')}（無法唯一對應既有客戶與案件）。`;
+  }
+  if (issue.issue_codes.includes('historical_status_invalid')) {
+    return `需修改欄位：${fieldDescriptions.join('、')}（只接受 0、1、2）。`;
+  }
+  if (issue.issue_codes.some((code) => code.includes('staff_not_found'))) {
+    return `需核對欄位：${fieldDescriptions.join('、')}（找不到可唯一對應的月嫂）。`;
+  }
+  if (issue.issue_codes.some((code) => code.includes('staff_ambiguous'))) {
+    return `需核對欄位：${fieldDescriptions.join('、')}（同名月嫂不唯一）。`;
+  }
+  if (issue.issue_codes.some((code) => code.endsWith('_date_range_invalid'))) {
+    return `需修改欄位：${fieldDescriptions.join('、')}（開始日期不可晚於結束日期）。`;
+  }
+  return `需修改或核對欄位：${fieldDescriptions.join('、')}。`;
+}
+
+const SourceWorkbookIssueList: React.FC<{ title: string; issues: SourceWorkbookIssue[] }> = ({ title, issues }) => {
+  if (issues.length === 0) return null;
+  return (
+    <div className="import-source-issue-list" aria-label={title}>
+      <strong>{title}</strong>
+      <p>請依下列位置修改原始工作簿，再重新預覽：</p>
+      {issues.map((issue) => (
+        <div className="import-result-problem" key={`${issue.source_row}-${issue.case_no ?? issue.query_no ?? 'row'}`}>
+          <strong>{issue.case_no ? `案件 ${issue.case_no}` : issue.query_no ? `查詢序號 ${issue.query_no}` : `工作簿第 ${issue.source_row} 列`}</strong>
+          {(issue.case_no || issue.query_no) && <span>工作簿第 {issue.source_row} 列</span>}
+          <span>{sourceIssueDescription(issue)}</span>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+function hcmReviewGuidance(row: HcmWorkbookRowOutcome): HcmReviewGuidance {
+  const fieldIssues = row.issue_codes.filter((code) => code.startsWith('hcm_field_missing:') || code.startsWith('hcm_field_invalid:'));
+  if (fieldIssues.length > 0) {
+    const descriptions = fieldIssues.map((code) => {
+      const [kind, field = '來源資料'] = code.split(':', 2);
+      return `${field}（${kind === 'hcm_field_missing' ? '不可空白' : '格式或內容不符合規則'}）`;
+    });
+    return {
+      message: `需修改欄位：${descriptions.join('、')}。`,
+      nextStep: '請修正原始工作簿後重新預覽。',
+    };
+  }
+
+  if (row.issue_codes.some((code) => code.startsWith('hcm_identity:'))) {
+    return {
+      message: '需核對欄位：查詢序號(案件編號)、姓名、IP位址。系統無法唯一確認這筆資料與既有客戶的身分關聯。',
+      nextStep: '請確認這三個欄位屬於同一人，必要時修正原始工作簿後重新預覽。',
+    };
+  }
+
+  if (row.issue_codes.some((code) => code === 'hcm_case_import:case_import_bootstrap_blocked')) {
+    return {
+      message: '需核對欄位：服務時間、預計服務日期、希望服務天數、服務方式。這些資料目前無法組成可建立的訂單。',
+      nextStep: '請修正原始工作簿後重新預覽。',
+    };
+  }
+
+  if (row.issue_codes.some((code) => code.startsWith('hcm_case_import:'))) {
+    return {
+      message: '此案件的既有資料或匯入狀態有衝突；一般 HCM 匯入不會覆寫既有案件與訂單資料。',
+      nextStep: '請先核對查詢序號(案件編號)；若要更正既有案件，請使用專用更正流程。',
+    };
+  }
+
+  const fields = row.problem_fields.filter((field) => field !== 'case_import' && field !== 'hcm_identity');
+  return {
+    message: fields.length > 0
+      ? `需修改欄位：${fields.join('、')}。`
+      : `來源第 ${row.source_row} 筆資料需要人工檢查。`,
+    nextStep: '請修正原始工作簿後重新預覽。',
+  };
+}
+
 function isOutcomeUnknown(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'retryable' in error && error.retryable === true;
 }
@@ -202,10 +303,11 @@ interface CaseWorkbookPreviewCardProps {
   onConfirm: (confirmed: boolean) => void;
   onApply: () => Promise<void>;
   reviewAction?: React.ReactNode;
+  previewDetail?: React.ReactNode;
 }
 
 const CaseWorkbookPreviewCard: React.FC<CaseWorkbookPreviewCardProps> = ({
-  id, icon, title, inputLabel, openPreviewControlId, rowDetailUnavailableMessage, selectedWorkbook, previewState, applyState, confirmed, mutationLocked, metrics, onSelect, onPreview, onConfirm, onApply, reviewAction,
+  id, icon, title, inputLabel, openPreviewControlId, rowDetailUnavailableMessage, selectedWorkbook, previewState, applyState, confirmed, mutationLocked, metrics, onSelect, onPreview, onConfirm, onApply, reviewAction, previewDetail,
 }) => {
   const previewGuidanceId = `imports-${id}-preview-guidance`;
   const applyGuidanceId = `imports-${id}-apply-guidance`;
@@ -241,6 +343,7 @@ const CaseWorkbookPreviewCard: React.FC<CaseWorkbookPreviewCardProps> = ({
           <h4>預覽結果</h4>
           <dl className="import-preview-metrics">{metrics.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
           {rowDetailUnavailableMessage && <div className="import-row-unavailable">{rowDetailUnavailableMessage}</div>}
+          {previewDetail}
         </div>
       )}
       {previewState.kind === 'ready' && (
@@ -296,7 +399,7 @@ export const DataImportPage: React.FC<DataImportPageProps> = ({ initialTab = 'wo
     (snapshot, options) => hcmWorkbookPreviewClient.preview(snapshot, options),
     (snapshot, fingerprint, options) => hcmWorkbookPreviewClient.apply(snapshot, fingerprint, options),
     adaptHcmWorkbookPreview,
-    (receipt) => applyPresentation(receipt.replayed_workbook, `新增 ${receipt.inserted_count} 筆、含警示 ${receipt.inserted_with_warning_count} 筆、既有案件跳過 ${receipt.skipped_existing_count} 筆、需檢查 ${receipt.review_required_count} 筆、失敗 ${receipt.failed_count} 筆。`, receipt.inserted_with_warning_count > 0 || receipt.review_required_count > 0 || receipt.failed_count > 0 ? 'needs-review' : receipt.inserted_count === 0 ? 'no-change' : 'applied'),
+    (receipt) => applyPresentation(receipt.replayed_workbook, `新增 ${receipt.inserted_count} 筆、含警示 ${receipt.inserted_with_warning_count} 筆、既有案件跳過 ${receipt.skipped_existing_count} 筆（不覆寫既有案件與訂單資料）、需檢查 ${receipt.review_required_count} 筆、失敗 ${receipt.failed_count} 筆。`, receipt.inserted_with_warning_count > 0 || receipt.review_required_count > 0 || receipt.failed_count > 0 ? 'needs-review' : receipt.inserted_count === 0 ? 'no-change' : 'applied'),
     'HCM 工作簿處理失敗。', 'hcm-current', (receipt) => {
       setHcmReviewRows(receipt.row_outcomes.filter((row) => row.problem_identity !== null || row.outcome === 'review_required' || row.outcome === 'failed'));
       setHcmCorrection(null);
@@ -351,25 +454,37 @@ export const DataImportPage: React.FC<DataImportPageProps> = ({ initialTab = 'wo
       {hcmReviewRows.length === 0 ? (
         <p>這次收據沒有提供問題列明細；請修正原始工作簿後重新預覽，畫面不會轉往其他頁面。</p>
       ) : hcmReviewRows.map((row) => {
-        const fields = row.problem_fields.length > 0 ? row.problem_fields.join('、') : `來源第 ${row.source_row} 列`;
         const fieldIssueCodes = row.issue_codes.filter((code) => code.startsWith('hcm_field_missing:') || code.startsWith('hcm_field_invalid:'));
         const canCorrect = row.case_no !== null && row.problem_identity !== null && new Set(fieldIssueCodes.map((code) => code.split(':', 2)[1])).size === 1;
-        const message = row.outcome === 'failed'
-          ? `${fields}匯入失敗，請修正工作簿後重新預覽。`
-          : `${fields}需要檢查。`;
+        const guidance = hcmReviewGuidance(row);
         return (
           <div key={`${row.source_row}-${row.problem_identity ?? row.outcome}`} className="import-result-problem">
             <strong>{row.case_no ? `案件 ${row.case_no}` : `來源第 ${row.source_row} 列`}</strong>
-            <span>{message}</span>
+            {row.case_no && <span>工作簿來源第 {row.source_row} 筆</span>}
+            <span>{row.outcome === 'failed' ? `匯入失敗。${guidance.message}` : guidance.message}</span>
             {canCorrect ? (
-              <button type="button" className="import-referral-btn" onClick={() => setHcmCorrection({ caseNo: row.case_no as string, displayMessage: message, reviewIdentity: row.problem_identity as string })}>🛠️ 在本頁提交修正</button>
+              <button type="button" className="import-referral-btn" onClick={() => setHcmCorrection({ caseNo: row.case_no as string, displayMessage: guidance.message, reviewIdentity: row.problem_identity as string })}>🛠️ 在本頁提交修正</button>
             ) : (
-              <span>請修正原始工作簿後重新預覽。</span>
+              <span>{guidance.nextStep}</span>
             )}
           </div>
         );
       })}
     </div>
+  );
+
+  const clientBeClassRowIssues = clientBeClass.previewState.kind === 'ready' ? clientBeClass.previewState.preview.rowIssues : [];
+  const historicalOrderRowIssues = historicalOrders.previewState.kind === 'ready' ? historicalOrders.previewState.preview.rowIssues : [];
+  const clientBeClassPreviewIssues = (
+    <SourceWorkbookIssueList title="客戶 BeClass 原始資料問題" issues={clientBeClassRowIssues} />
+  );
+  const historicalOrderPreviewIssues = (
+    <SourceWorkbookIssueList title="歷史狀態原始資料問題" issues={historicalOrderRowIssues} />
+  );
+  const historicalOrderReviewActions = historicalReviewAction ?? (
+    historicalOrderRowIssues.length > 0
+      ? <p>問題列已列在上方；請修正原始工作簿後重新預覽。</p>
+      : undefined
   );
 
   const mutationLocked = hcmCurrent.mutationLocked || clientBeClass.mutationLocked || staffHistorical.mutationLocked || historicalOrders.mutationLocked;
@@ -426,9 +541,9 @@ export const DataImportPage: React.FC<DataImportPageProps> = ({ initialTab = 'wo
           </nav>
           <div className="import-cards-grid">
             {activeImportKind === 'hcm-current' && <CaseWorkbookPreviewCard id="hcm-current" icon="📄" title="HCM 案件匯入 (HCM Current)" inputLabel="選擇 HCM Current Workbook" openPreviewControlId="imports.hcm-current.open-preview" rowDetailUnavailableMessage={hcmCurrent.previewState.kind === 'ready' ? hcmCurrent.previewState.preview.rowDetailUnavailableMessage : undefined} selectedWorkbook={hcmCurrent.selectedWorkbook} previewState={hcmCurrent.previewState} applyState={hcmCurrent.applyState} confirmed={hcmCurrent.confirmed} mutationLocked={mutationLocked} metrics={hcmCurrent.previewState.kind === 'ready' ? [['來源列數', hcmCurrent.previewState.preview.sourceRowCount], ['可寫入', hcmCurrent.previewState.preview.readyCount], ['含警示', hcmCurrent.previewState.preview.readyWithWarningCount], ['需人工檢查', hcmCurrent.previewState.preview.reviewRequiredCount]] : []} onSelect={hcmCurrent.selectWorkbook} onPreview={hcmCurrent.previewWorkbook} onConfirm={hcmCurrent.setConfirmed} onApply={hcmCurrent.applyWorkbook} reviewAction={hcmReviewAction} />}
-            {activeImportKind === 'client-beclass' && <CaseWorkbookPreviewCard id="client-beclass" icon="👥" title="客戶 BeClass 問卷匯入" inputLabel="選擇客戶 BeClass Workbook" selectedWorkbook={clientBeClass.selectedWorkbook} previewState={clientBeClass.previewState} applyState={clientBeClass.applyState} confirmed={clientBeClass.confirmed} mutationLocked={mutationLocked} metrics={clientBeClass.previewState.kind === 'ready' ? [['來源列數', clientBeClass.previewState.preview.sourceRowCount], ['可建立', clientBeClass.previewState.preview.createCount], ['需人工檢查', clientBeClass.previewState.preview.reviewRequiredCount], ['既有衝突', clientBeClass.previewState.preview.existingConflictCount], ['既有來源', clientBeClass.previewState.preview.existingSourceCount]] : []} onSelect={clientBeClass.selectWorkbook} onPreview={clientBeClass.previewWorkbook} onConfirm={clientBeClass.setConfirmed} onApply={clientBeClass.applyWorkbook} />}
+            {activeImportKind === 'client-beclass' && <CaseWorkbookPreviewCard id="client-beclass" icon="👥" title="客戶 BeClass 問卷匯入" inputLabel="選擇客戶 BeClass Workbook" selectedWorkbook={clientBeClass.selectedWorkbook} previewState={clientBeClass.previewState} applyState={clientBeClass.applyState} confirmed={clientBeClass.confirmed} mutationLocked={mutationLocked} metrics={clientBeClass.previewState.kind === 'ready' ? [['來源列數', clientBeClass.previewState.preview.sourceRowCount], ['可建立', clientBeClass.previewState.preview.createCount], ['需人工檢查', clientBeClass.previewState.preview.reviewRequiredCount], ['既有衝突', clientBeClass.previewState.preview.existingConflictCount], ['既有來源', clientBeClass.previewState.preview.existingSourceCount]] : []} onSelect={clientBeClass.selectWorkbook} onPreview={clientBeClass.previewWorkbook} onConfirm={clientBeClass.setConfirmed} onApply={clientBeClass.applyWorkbook} previewDetail={clientBeClassPreviewIssues} reviewAction={<p>{clientBeClassRowIssues.length > 0 ? '問題列已列在上方；請修正原始工作簿後重新預覽。' : '請回原始工作簿核對問題資料後重新預覽。'}</p>} />}
             {activeImportKind === 'staff-historical' && <CaseWorkbookPreviewCard id="staff-historical" icon="👩‍🍼" title="月嫂歷史資料匯入" inputLabel="選擇月嫂歷史 Workbook" selectedWorkbook={staffHistorical.selectedWorkbook} previewState={staffHistorical.previewState} applyState={staffHistorical.applyState} confirmed={staffHistorical.confirmed} mutationLocked={mutationLocked} metrics={staffHistorical.previewState.kind === 'ready' ? [['來源列數', staffHistorical.previewState.preview.sourceRowCount], ['新建', staffHistorical.previewState.preview.createdCount], ['採用既有', staffHistorical.previewState.preview.adoptedExistingCount], ['身分阻擋', staffHistorical.previewState.preview.blockedIdentityCount], ['身分衝突', staffHistorical.previewState.preview.identityConflictCount], ['需人工檢查', staffHistorical.previewState.preview.reviewRequiredCount]] : []} onSelect={staffHistorical.selectWorkbook} onPreview={staffHistorical.previewWorkbook} onConfirm={staffHistorical.setConfirmed} onApply={staffHistorical.applyWorkbook} />}
-            {activeImportKind === 'historic-orders' && <CaseWorkbookPreviewCard id="historic-orders" icon="📦" title="歷史訂單認領匯入" inputLabel="選擇歷史訂單 Workbook" selectedWorkbook={historicalOrders.selectedWorkbook} previewState={historicalOrders.previewState} applyState={historicalOrders.applyState} confirmed={historicalOrders.confirmed} mutationLocked={mutationLocked} metrics={historicalOrders.previewState.kind === 'ready' ? [['來源列數', historicalOrders.previewState.preview.sourceRowCount], ['工作簿未列入將取消', historicalOrders.previewState.preview.absentOrderCancellationCount], ['不採用', historicalOrders.previewState.preview.resultCounts.notAdopted], ['配對中未付訂金', historicalOrders.previewState.preview.resultCounts.matchingPendingDeposit], ['已付訂金未服務', historicalOrders.previewState.preview.resultCounts.historicalUnserved], ['歷史服務中', historicalOrders.previewState.preview.resultCounts.historicalInService], ['歷史服務完成', historicalOrders.previewState.preview.resultCounts.historicalServiceCompleted], ['目前資料衝突', historicalOrders.previewState.preview.currentConflictCount]] : []} onSelect={historicalOrders.selectWorkbook} onPreview={historicalOrders.previewWorkbook} onConfirm={historicalOrders.setConfirmed} onApply={historicalOrders.applyWorkbook} reviewAction={historicalReviewAction} />}
+            {activeImportKind === 'historic-orders' && <CaseWorkbookPreviewCard id="historic-orders" icon="📦" title="歷史訂單認領匯入" inputLabel="選擇歷史訂單 Workbook" selectedWorkbook={historicalOrders.selectedWorkbook} previewState={historicalOrders.previewState} applyState={historicalOrders.applyState} confirmed={historicalOrders.confirmed} mutationLocked={mutationLocked} metrics={historicalOrders.previewState.kind === 'ready' ? [['來源列數', historicalOrders.previewState.preview.sourceRowCount], ['工作簿未列入將取消', historicalOrders.previewState.preview.absentOrderCancellationCount], ['不採用', historicalOrders.previewState.preview.resultCounts.notAdopted], ['配對中未付訂金', historicalOrders.previewState.preview.resultCounts.matchingPendingDeposit], ['已付訂金未服務', historicalOrders.previewState.preview.resultCounts.historicalUnserved], ['歷史服務中', historicalOrders.previewState.preview.resultCounts.historicalInService], ['歷史服務完成', historicalOrders.previewState.preview.resultCounts.historicalServiceCompleted], ['目前資料衝突', historicalOrders.previewState.preview.currentConflictCount]] : []} onSelect={historicalOrders.selectWorkbook} onPreview={historicalOrders.previewWorkbook} onConfirm={historicalOrders.setConfirmed} onApply={historicalOrders.applyWorkbook} previewDetail={historicalOrderPreviewIssues} reviewAction={historicalOrderReviewActions} />}
           </div>
           {selectedHistoricalReviewIdentity && <section className="import-workbench-card" aria-label="歷史訂單欄位衝突更正">
             <HistoricalOrderReviewRemediationWorkbench

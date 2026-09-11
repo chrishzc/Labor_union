@@ -14,6 +14,7 @@ export interface ClientBeClassWorkbookPreviewModel {
   existingConflictCount: number;
   existingSourceCount: number;
   previewFingerprint: string;
+  rowIssues: NonNullable<ClientBeClassWorkbookPreview['row_issues']>;
 }
 
 export function adaptClientBeClassWorkbookPreview(
@@ -32,5 +33,6 @@ export function adaptClientBeClassWorkbookPreview(
     existingConflictCount: preview.existing_conflict_count,
     existingSourceCount: preview.existing_source_count,
     previewFingerprint: preview.preview_fingerprint,
+    rowIssues: preview.row_issues ?? [],
   };
 }

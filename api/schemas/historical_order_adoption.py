@@ -6,6 +6,14 @@ Description: 定義訂單狀態與月嫂歷史配對 workbook 的嚴格 Preview�
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
+class HistoricalOrderWorkbookRowIssueView(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    source_row: int = Field(ge=1)
+    case_no: str | None = Field(default=None, max_length=50)
+    fields: list[str]
+    issue_codes: list[str]
+
+
 class HistoricalOrderStatusCountsView(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -55,6 +63,7 @@ class HistoricalOrderWorkbookPreviewView(BaseModel):
     status_counts: HistoricalOrderStatusCountsView
     result_counts: HistoricalOrderResultCountsView
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    row_issues: list[HistoricalOrderWorkbookRowIssueView] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_status_count_conservation(self):

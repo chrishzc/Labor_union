@@ -30,6 +30,7 @@ export interface HistoricalOrderWorkbookPreviewModel {
     historicalServiceCompleted: number;
   };
   previewFingerprint: string;
+  rowIssues: HistoricalOrderWorkbookPreview['row_issues'];
 }
 
 export function adaptHistoricalOrderWorkbookPreview(
@@ -76,5 +77,6 @@ export function adaptHistoricalOrderWorkbookPreview(
       historicalServiceCompleted: preview.result_counts.historical_service_completed,
     },
     previewFingerprint: preview.preview_fingerprint,
+    rowIssues: preview.row_issues,
   };
 }

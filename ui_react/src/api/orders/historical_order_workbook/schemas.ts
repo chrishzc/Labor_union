@@ -62,6 +62,12 @@ export const HistoricalOrderWorkbookPreviewSchema = z
     status_counts: HistoricalOrderStatusCountsSchema,
     result_counts: HistoricalOrderResultCountsSchema,
     preview_fingerprint: HistoricalOrderSha256Schema,
+    row_issues: z.array(z.strictObject({
+      source_row: z.number().int().min(1),
+      case_no: z.string().max(50).nullable(),
+      fields: z.array(z.string()),
+      issue_codes: z.array(z.string()),
+    })).default([]),
   })
   .strict()
   .superRefine(validateStatusCountConservation);

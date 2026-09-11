@@ -6,6 +6,14 @@ Description: 定義 Client BeClass temporary workbook 的 strict Preview 與 App
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class ClientBeClassWorkbookRowIssueView(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    source_row: int = Field(ge=1)
+    query_no: str | None = Field(default=None, max_length=100)
+    fields: list[str]
+    issue_codes: list[str]
+
+
 class ClientBeClassWorkbookPreviewView(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     source_content_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -16,6 +24,7 @@ class ClientBeClassWorkbookPreviewView(BaseModel):
     existing_conflict_count: int = Field(ge=0)
     existing_source_count: int = Field(ge=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    row_issues: list[ClientBeClassWorkbookRowIssueView] = Field(default_factory=list)
 
 
 class ClientBeClassWorkbookReceiptView(BaseModel):

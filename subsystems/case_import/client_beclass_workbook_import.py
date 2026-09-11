@@ -23,6 +23,22 @@ from domains.case_import.beclass_import_review import BeClassImportSourceKind
 
 
 @dataclass(frozen=True, slots=True)
+class ClientBeClassWorkbookRowIssue:
+    source_row: int
+    query_no: str | None
+    fields: tuple[str, ...]
+    issue_codes: tuple[str, ...]
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "source_row": self.source_row,
+            "query_no": self.query_no,
+            "fields": list(self.fields),
+            "issue_codes": list(self.issue_codes),
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class ClientBeClassWorkbookPreview:
     source_content_digest: str
     sheet_identity: str
@@ -32,6 +48,7 @@ class ClientBeClassWorkbookPreview:
     existing_conflict_count: int
     existing_source_count: int
     preview_fingerprint: str
+    row_issues: tuple[ClientBeClassWorkbookRowIssue, ...] = ()
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -43,6 +60,7 @@ class ClientBeClassWorkbookPreview:
             "existing_conflict_count": self.existing_conflict_count,
             "existing_source_count": self.existing_source_count,
             "preview_fingerprint": self.preview_fingerprint,
+            "row_issues": [item.as_dict() for item in self.row_issues],
         }
 
 
@@ -142,8 +160,13 @@ class ClientBeClassWorkbookImportService:
 
     def preview(self, source_path: str) -> ClientBeClassWorkbookPreview:
         workbook = _load_workbook(source_path)
-        outcomes = Counter(self._preview_outcome(row) for _, row in workbook.rows)
-        return _preview_from_outcomes(workbook, outcomes)
+        row_results = tuple(
+            self._preview_row(row_number, row)
+            for row_number, row in workbook.rows
+        )
+        outcomes = Counter(outcome for outcome, _ in row_results)
+        row_issues = tuple(issue for _, issue in row_results if issue is not None)
+        return _preview_from_outcomes(workbook, outcomes, row_issues)
 
     def apply(
         self,
@@ -191,22 +214,40 @@ class ClientBeClassWorkbookImportService:
         finally:
             self._repository.release_lock(key)
 
-    def _preview_outcome(self, row: dict[str, Any]) -> str:
-        if validate_client_beclass_row(row):
-            return "review_required"
+    def _preview_row(
+        self,
+        row_number: int,
+        row: dict[str, Any],
+    ) -> tuple[str, ClientBeClassWorkbookRowIssue | None]:
+        errors = validate_client_beclass_row(row)
         payload = _normalized_payload(row)
+        if errors:
+            return "review_required", ClientBeClassWorkbookRowIssue(
+                row_number,
+                payload.get("query_no"),
+                tuple(sorted(errors)),
+                _client_validation_issue_codes(errors),
+            )
         source_state = self._repository.source_state(payload)
         if source_state == "exact":
-            return "existing_source"
+            return "existing_source", None
         if source_state == "conflict":
-            return "existing_conflict"
+            return "existing_conflict", ClientBeClassWorkbookRowIssue(
+                row_number,
+                payload.get("query_no"),
+                ("查詢序號",),
+                ("client_beclass_source_payload_conflict",),
+            )
         resolution = self._repository.resolve_client_case_binding(
             payload["name"], payload["phone"], for_update=False
         )
-        return (
-            "create"
-            if resolution.status is ClientCaseBindingStatus.UNIQUE
-            else "existing_conflict"
+        if resolution.status is ClientCaseBindingStatus.UNIQUE:
+            return "create", None
+        return "existing_conflict", ClientBeClassWorkbookRowIssue(
+            row_number,
+            payload.get("query_no"),
+            ("查詢序號", "姓名", "行動電話"),
+            (resolution.issue_code,),
         )
 
     # Why: every branch must persist the row receipt and review in the same outer row transaction.
@@ -392,7 +433,11 @@ def _load_workbook(source_path: str) -> _Workbook:
     return _Workbook(digest, sha256(f"sheet:{sheet_index}".encode()).hexdigest(), rows)
 
 
-def _preview_from_outcomes(workbook: _Workbook, outcomes: Counter[str]) -> ClientBeClassWorkbookPreview:
+def _preview_from_outcomes(
+    workbook: _Workbook,
+    outcomes: Counter[str],
+    row_issues: tuple[ClientBeClassWorkbookRowIssue, ...] = (),
+) -> ClientBeClassWorkbookPreview:
     row_contracts = tuple(
         (
             row_number,
@@ -401,8 +446,27 @@ def _preview_from_outcomes(workbook: _Workbook, outcomes: Counter[str]) -> Clien
         )
         for row_number, row in workbook.rows
     )
-    fingerprint = fingerprint_payload({"digest": workbook.digest, "sheet": workbook.sheet_identity, "rows": row_contracts, "outcomes": dict(sorted(outcomes.items()))}).value
-    return ClientBeClassWorkbookPreview(workbook.digest, workbook.sheet_identity, len(workbook.rows), outcomes["create"], outcomes["review_required"], outcomes["existing_conflict"], outcomes["existing_source"], fingerprint)
+    fingerprint = fingerprint_payload({
+        "digest": workbook.digest,
+        "sheet": workbook.sheet_identity,
+        "rows": row_contracts,
+        "outcomes": dict(sorted(outcomes.items())),
+        "row_issues": tuple(
+            (item.source_row, item.query_no, item.fields, item.issue_codes)
+            for item in row_issues
+        ),
+    }).value
+    return ClientBeClassWorkbookPreview(
+        workbook.digest,
+        workbook.sheet_identity,
+        len(workbook.rows),
+        outcomes["create"],
+        outcomes["review_required"],
+        outcomes["existing_conflict"],
+        outcomes["existing_source"],
+        fingerprint,
+        row_issues,
+    )
 
 
 def _normalized_payload(row: dict[str, Any]) -> dict[str, object]:

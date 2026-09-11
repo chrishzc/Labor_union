@@ -239,8 +239,7 @@ def test_preview_rejects_source_schedule_overlap_as_a_validation_error():
     )
 
 
-def test_actual_xlsx_upload_rejects_nonblank_invalid_status_before_apply():
-    """A contradictory nonblank source value rejects the whole workbook."""
+def test_actual_xlsx_preview_keeps_bad_rows_reviewable_without_aborting_good_rows():
     repository = _WorkbookRepository()
     service = HistoricalOrderWorkbookImportService(
         repository,
@@ -256,10 +255,24 @@ def test_actual_xlsx_upload_rejects_nonblank_invalid_status_before_apply():
         files={"workbook": ("historical-preview-matrix.xlsx", upload, _XLSX_MEDIA_TYPE)},
     )
 
-    assert preview_response.status_code == 422
-    assert preview_response.json()["detail"]["error"]["code"] == (
-        "historical_order_source_status_invalid"
-    )
+    assert preview_response.status_code == 200
+    preview = preview_response.json()["data"]
+    assert preview["source_row_count"] == 7
+    assert preview["review_required_count"] == 2
+    assert preview["row_issues"] == [
+        {
+            "source_row": 6,
+            "case_no": "MATRIX-REVIEW",
+            "fields": ["訂單狀態"],
+            "issue_codes": ["historical_status_invalid"],
+        },
+        {
+            "source_row": 8,
+            "case_no": "MATRIX-STAFF",
+            "fields": ["月嫂姓名", "第 1 位月嫂姓名"],
+            "issue_codes": ["historical_staff_ambiguous"],
+        },
+    ]
     assert repository.receipts == {}
 
 
@@ -372,6 +385,11 @@ class _PreviewMatrixWorkflow:
             ("historical_status_invalid",),
         ),
         "MATRIX-CONFLICT": (HistoricalOrderOutcome.CURRENT_CONFLICT, (), ()),
+        "MATRIX-STAFF": (
+            HistoricalOrderOutcome.REVIEW_REQUIRED,
+            (HistoricalPairingResolution.STAFF_AMBIGUOUS,),
+            ("historical_staff_ambiguous",),
+        ),
     }
 
     def preview(self, row):
@@ -384,7 +402,7 @@ class _PreviewMatrixWorkflow:
                 row.actual_start_date,
                 row.actual_end_date,
                 resolution,
-                (),
+                issues if resolution is HistoricalPairingResolution.STAFF_AMBIGUOUS else (),
             )
             for index, resolution in enumerate(resolutions, start=1)
         )
@@ -437,6 +455,7 @@ def _preview_matrix_workbook() -> bytes:
     sheet.append(["客戶丁", "MATRIX-UNMATCHED", None, None, 1, None])
     sheet.append(["客戶戊", "MATRIX-REVIEW", None, None, "無效狀態", None])
     sheet.append(["客戶己", "MATRIX-CONFLICT", None, None, 1, None])
+    sheet.append(["客戶庚", "MATRIX-STAFF", None, None, 1, "同名月嫂"])
     stream = BytesIO()
     workbook.save(stream)
     return stream.getvalue()

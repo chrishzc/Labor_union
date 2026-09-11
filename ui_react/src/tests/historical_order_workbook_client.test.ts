@@ -22,7 +22,7 @@ describe('Historical Orders workbook Preview client', () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ success: true, message: 'ok', data, error: null }), { status: 200, headers: { 'content-type': 'application/json' } }));
     globalThis.fetch = fetchMock;
 
-    await expect(previewHistoricalOrderWorkbook(snapshot)).resolves.toEqual(data);
+    await expect(previewHistoricalOrderWorkbook(snapshot)).resolves.toEqual({ ...data, row_issues: [] });
     expect(fetchMock.mock.calls[0]?.[0]).toBe(HISTORICAL_ORDER_WORKBOOK_PREVIEW_PATH);
     const form = fetchMock.mock.calls[0]?.[1]?.body as FormData;
     expect(Array.from(form.keys())).toEqual(['workbook']);

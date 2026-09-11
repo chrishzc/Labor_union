@@ -48,11 +48,11 @@ const historicalReviewContext: HistoricalReviewContext = {
 describe('Data Import case workbook Preview flows', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    vi.spyOn(clientBeClassWorkbookPreviewClient, 'preview').mockResolvedValue({ source_content_digest: digest, sheet_identity: identity, source_row_count: 4, create_count: 1, review_required_count: 1, existing_conflict_count: 1, existing_source_count: 1, preview_fingerprint: fingerprint });
+    vi.spyOn(clientBeClassWorkbookPreviewClient, 'preview').mockResolvedValue({ source_content_digest: digest, sheet_identity: identity, source_row_count: 4, create_count: 1, review_required_count: 1, existing_conflict_count: 1, existing_source_count: 1, preview_fingerprint: fingerprint, row_issues: [{ source_row: 7, query_no: 'CLIENT-007', fields: ['行動電話'], issue_codes: ['client_field_invalid:行動電話'] }] });
     vi.spyOn(clientBeClassWorkbookPreviewClient, 'apply').mockResolvedValue({ source_content_digest: digest, source_row_count: 4, created_count: 1, exact_replay_count: 0, review_required_count: 1, existing_conflict_count: 1, existing_source_count: 1, replayed_workbook: false });
     vi.spyOn(staffHistoricalWorkbookPreviewClient, 'preview').mockResolvedValue({ source_content_digest: digest, source_row_count: 4, created_count: 1, adopted_existing_count: 1, blocked_identity_count: 1, identity_conflict_count: 1, review_required_count: 1, preview_fingerprint: fingerprint });
     vi.spyOn(staffHistoricalWorkbookPreviewClient, 'apply').mockResolvedValue({ source_content_digest: digest, source_row_count: 4, created_count: 1, adopted_existing_count: 1, blocked_identity_count: 1, identity_conflict_count: 1, review_required_count: 1, preview_fingerprint: fingerprint, exact_replay_count: 0, replayed_workbook: false });
-    vi.spyOn(historicalOrderWorkbookPreviewClient, 'preview').mockResolvedValue({ source_content_digest: digest, sheet_identity: identity, source_row_count: 4, adopted_count: 2, unmatched_case_count: 1, review_required_count: 1, current_conflict_count: 1, assignment_candidate_count: 1, evidence_only_pairing_count: 1, absent_order_cancellation_count: 0, status_counts: { cancelled_0: 1, deposit_paid_1: 1, discussion_2: 1, invalid_or_blank: 1 }, result_counts: historicalResultCounts, preview_fingerprint: fingerprint });
+    vi.spyOn(historicalOrderWorkbookPreviewClient, 'preview').mockResolvedValue({ source_content_digest: digest, sheet_identity: identity, source_row_count: 4, adopted_count: 2, unmatched_case_count: 1, review_required_count: 1, current_conflict_count: 1, assignment_candidate_count: 1, evidence_only_pairing_count: 1, absent_order_cancellation_count: 0, status_counts: { cancelled_0: 1, deposit_paid_1: 1, discussion_2: 1, invalid_or_blank: 1 }, result_counts: historicalResultCounts, preview_fingerprint: fingerprint, row_issues: [{ source_row: 12, case_no: 'CASE-012', fields: ['訂單狀態'], issue_codes: ['historical_status_invalid'] }] });
     vi.spyOn(historicalOrderWorkbookPreviewClient, 'apply').mockResolvedValue({ source_content_digest: digest, source_row_count: 4, adopted_count: 2, unmatched_case_count: 1, review_required_count: 1, current_conflict_count: 0, assignments_created: 1, replayed_rows: 0, replayed_workbook: false, absent_order_cancellation_count: 0, status_counts: { cancelled_0: 1, deposit_paid_1: 1, discussion_2: 1, invalid_or_blank: 1 }, result_counts: historicalResultCounts, review_references: [] });
   });
 
@@ -97,6 +97,25 @@ describe('Data Import case workbook Preview flows', () => {
     }
     expect(document.querySelector('[data-control-id="imports.historic-orders.apply"]')).toBeDisabled();
     expect(within(historicalCard).getByText('匯入已完成，結果顯示於下方。')).toBeInTheDocument();
+  });
+
+  it('客戶與歷史狀態Preview直接顯示原始工作簿列與問題欄位', async () => {
+    render(<DataImportPage />);
+
+    selectImportKind('客戶');
+    fireEvent.change(screen.getByLabelText('選擇客戶 BeClass Workbook'), { target: { files: [workbook('client')] } });
+    fireEvent.click(document.querySelector('[data-control-id="imports.client-beclass.preview"]') as HTMLButtonElement);
+    expect(await screen.findByText('查詢序號 CLIENT-007')).toBeInTheDocument();
+    expect(screen.getByText('工作簿第 7 列')).toBeInTheDocument();
+    expect(screen.getByText('需修改或核對欄位：行動電話（格式或內容不符合規則）。')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /前往異常審核/ })).not.toBeInTheDocument();
+
+    selectImportKind('歷史訂單');
+    fireEvent.change(screen.getByLabelText('選擇歷史訂單 Workbook'), { target: { files: [workbook('historical')] } });
+    fireEvent.click(document.querySelector('[data-control-id="imports.historic-orders.preview"]') as HTMLButtonElement);
+    expect(await screen.findByText('案件 CASE-012')).toBeInTheDocument();
+    expect(screen.getByText('工作簿第 12 列')).toBeInTheDocument();
+    expect(screen.getByText('需修改欄位：訂單狀態（只接受 0、1、2）。')).toBeInTheDocument();
   });
 
   it('Apply待定時鎖定換檔與頁內導覽，並以同一冪等識別安全重試', async () => {

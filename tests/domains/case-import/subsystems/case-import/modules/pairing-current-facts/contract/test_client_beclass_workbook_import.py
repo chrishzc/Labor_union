@@ -190,6 +190,17 @@ def test_preview_is_read_only_and_keeps_invalid_rows_as_review(monkeypatch):
     assert preview.source_row_count == 2
     assert preview.create_count == 1
     assert preview.review_required_count == 1
+    assert tuple(issue.as_dict() for issue in preview.row_issues) == (
+        {
+            "source_row": 3,
+            "query_no": None,
+            "fields": ["姓名", "查詢序號"],
+            "issue_codes": [
+                "client_field_missing:姓名",
+                "client_field_missing:查詢序號",
+            ],
+        },
+    )
     assert repository.created == []
     assert repository.connection.commits == 0
     assert repository.binding_lock_modes == [False]
@@ -310,6 +321,12 @@ def test_existing_query_number_with_changed_payload_creates_review(monkeypatch):
     )
 
     assert preview.existing_conflict_count == 1
+    assert preview.row_issues[0].as_dict() == {
+        "source_row": 2,
+        "query_no": "CHANGED-1",
+        "fields": ["查詢序號"],
+        "issue_codes": ["client_beclass_source_payload_conflict"],
+    }
     assert receipt.existing_conflict_count == 1
     assert receipt.existing_source_count == 0
     assert repository.created == []
