@@ -28,13 +28,16 @@ GENERAL_CITIZEN = "\u4e00\u822c\u5e02\u6c11"
 SUBSIDIZED_CITIZEN = "\u88dc\u52a9\u5e02\u6c11"
 IDENTITY_CARD_KEY = "\u8eab\u5206\u8b49\u5b57\u865f"
 CLAIMED_BATCH_STATUSES = ("submitted", "approved", "partially_paid", "paid")
-ESTABLISHED_ORDER_STATUSES = ("訂單成立", "服務中", "訂單完成")
-OPERATIONS_REPORT_ORDER_STATUSES = ESTABLISHED_ORDER_STATUSES + (
+ESTABLISHED_ORDER_STATUSES = (
+    "訂單成立",
+    "服務中",
+    "訂單完成",
     "歷史訂單－未服務",
     "歷史訂單－服務中",
     "歷史訂單－服務完成",
     "歷史訂單－帳務完成",
 )
+OPERATIONS_REPORT_ORDER_STATUSES = ESTABLISHED_ORDER_STATUSES
 COMPLETED_ORDER_STATUSES = (
     "訂單完成",
     "歷史訂單－服務完成",

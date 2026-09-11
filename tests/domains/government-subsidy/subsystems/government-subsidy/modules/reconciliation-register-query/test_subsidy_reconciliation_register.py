@@ -52,7 +52,9 @@ def _order_row(**overrides):
 
 def test_quarterly_register_includes_established_orders_without_claim_batch():
     connection = FakeConnection([
-        _order_row(),
+        _order_row(
+            order_status="歷史訂單－服務完成",
+        ),
         _order_row(
             case_no="115000001", identity_status="補助市民",
             actual_start_date=date(2025, 12, 1), actual_end_date=date(2026, 1, 1),
@@ -76,10 +78,13 @@ def test_quarterly_register_includes_established_orders_without_claim_batch():
     assert "c.identity_status" in connection.cursor_instance.executed[0][0]
     assert "clients.identity_status" not in connection.cursor_instance.executed[0][0]
     assert "subsidy_claim_batches" not in connection.cursor_instance.executed[0][0]
-    assert "o.status IN (%s, %s, %s)" in connection.cursor_instance.executed[0][0]
+    assert "o.status IN (%s, %s, %s, %s, %s, %s, %s)" in connection.cursor_instance.executed[0][0]
     assert "COALESCE(o.actual_end_date, o.end_date)" in connection.cursor_instance.executed[0][0]
     assert connection.cursor_instance.executed[0][1] == (
-        "訂單成立", "服務中", "訂單完成", "一般市民", "補助市民",
+        "訂單成立", "服務中", "訂單完成",
+        "歷史訂單－未服務", "歷史訂單－服務中",
+        "歷史訂單－服務完成", "歷史訂單－帳務完成",
+        "一般市民", "補助市民",
         date(2026, 1, 1), date(2026, 4, 1),
     )
 
@@ -99,6 +104,7 @@ def test_annual_summary_uses_established_orders_and_repairs_legacy_key():
             actual_end_date="2026-07-20", employer_name="林太太",
             employer_address="桃園市", staff_name="月嫂丙",
             survey_details={legacy_key: "C123456789"},
+            order_status="歷史訂單－帳務完成",
         ),
     ])
 
@@ -106,6 +112,7 @@ def test_annual_summary_uses_established_orders_and_repairs_legacy_key():
     row = result["general_citizen_rows"][0]
     assert row["\u8eab\u5206\u8b49\u5b57\u865f"] == "C123456789"
     assert result["subsidized_citizen_rows"] == []
+    assert connection.cursor_instance.executed[0][1][:7] == register.ESTABLISHED_ORDER_STATUSES
     assert connection.cursor_instance.executed[0][1][-2:] == (
         date(2026, 1, 1), date(2027, 1, 1),
     )
