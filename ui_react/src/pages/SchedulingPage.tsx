@@ -2047,7 +2047,7 @@ export const SchedulingPage: React.FC = () => {
 
     const loadOptions = async () => {
       try {
-        const [summaryPage, coreStagePage, assignmentPages] = await Promise.all([
+        const [summaryPage, coreStagePage] = await Promise.all([
           loadAllOrderSummaries(
             ordersQueryClient.getOrderSummaries.bind(ordersQueryClient),
             { page_size: 200, lifecycle_scope: 'unfinished' },
@@ -2069,9 +2069,6 @@ export const SchedulingPage: React.FC = () => {
           })),
         ]);
         if (!mountedRef.current || controller.signal.aborted) return;
-        const assignedCaseNos = new Set(
-          assignmentPages.flat().map((assignment) => assignment.case_no),
-        );
         const preDepositCaseNos = new Set(
           coreStagePage.items
             .filter((timeline) => (
@@ -2082,8 +2079,7 @@ export const SchedulingPage: React.FC = () => {
         );
         const options = summaryPage.items
           .filter((summary) => (
-            assignedCaseNos.has(summary.case_no)
-            && preDepositCaseNos.has(summary.case_no)
+            preDepositCaseNos.has(summary.case_no)
             && summary.start_date !== null
             && summary.end_date !== null
           ))
