@@ -227,6 +227,16 @@ describe('SchedulingPage query-only presentation', () => {
     expect(screen.queryByRole('option', { name: /CASE-STAGE-10/ })).not.toBeInTheDocument();
   });
 
+  it('排查案件包含尚未建立月嫂指派的洽談中訂單', async () => {
+    vi.mocked(staffAssignmentOptionsClient.getStaffAssignmentOptions).mockResolvedValue([]);
+
+    render(<SchedulingPage />);
+
+    const select = await screen.findByRole('combobox', { name: '資格查詢案件編號' });
+    await waitFor(() => expect(select).toBeEnabled());
+    expect(screen.getByRole('option', { name: /115000003.*排查客戶乙/ })).toBeInTheDocument();
+  });
+
   it('uses page_size 20, continues the staff cursor and keeps a complete month axis', async () => {
     vi.mocked(staffDirectoryClient.queryPage)
       .mockResolvedValueOnce({
