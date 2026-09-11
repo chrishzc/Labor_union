@@ -290,8 +290,9 @@ Group_2_Resolved（痛點已解決者）／Group_3_Ignored（無關者）。
 |---|---|
 | Willing_Pool_Check | 動態計算有效意願池人數 willing_pool |
 | Match_Success | 人數 ≥1 時媒合成功；工會專員後台一鍵指派，推播派案成功通知給雙方 |
-| Zero_Pool_Engine | 人數＝0 時彙整尚未解決的拒接原因，例如多位月嫂反映 07:30 太早 |
-| Client_Compromise_Push | 向客戶提出具體降維協商建議，例如改為 09:00～17:00 即有月嫂可接案 |
+| Zero_Pool_Engine | 已聯繫的非空候選池中，意願人數＝0 且全員完成回應或 provider 成功送達後 24 小時逾期時，彙整尚未解決的結構化調整條件；逾期未回與沒有意願保持不同語意 |
+| Client_Compromise_Push | AI 對調整條件去重後直接向客戶提出具體協商建議，例如改為 09:00～17:00 可重新詢問相關月嫂；不得宣稱修改後必然承接 |
+| Union_Manual_Followup | 已聯繫的非空候選池全員結束且無人願意時，若沒有調整條件，或客戶已回覆可以／無法調整，建立工會 LIFF 人工跟進待辦，並向唯一啟用的工會群組排入一次去敏通知；客戶同意時由工會完成正式修改後再重新詢問月嫂，群組投遞異常不得隱藏待辦 |
 | Client_Compromise_Agree | 客戶同意調整為 09:00；原圖主張系統自動更新訂單並立即完成派案 |
 | Client_Compromise_Disagree | 客戶保留原需求，案件保持於工會待媒合隊列 |
 
@@ -299,6 +300,8 @@ Group_2_Resolved（痛點已解決者）／Group_3_Ignored（無關者）。
 Match_Success（人數 ≥1）／Zero_Pool_Engine（人數＝0）；Zero_Pool_Engine →
 Client_Compromise_Push；Client_Compromise_Push → Client_Compromise_Agree／
 Client_Compromise_Disagree；Client_Compromise_Agree → Match_Success。
+
+Current 裁決補充：初次候選搜尋結果為零不屬於 `Zero_Pool_Engine`，不建立 LINE 通知或人工跟進；工會人員在媒合操作中直接看見零搜尋結果。只有「已實際聯繫的非空候選池」才可進入上述全池完成判定。若存在尚未由客戶回答的調整條件，走 `Client_Compromise_Push`；若沒有調整條件，或客戶已回覆可以／無法調整，走 `Union_Manual_Followup`。客戶回覆可以調整只建立待工會修改任務；工會 LIFF 顯示同意項目與受影響原候選人，第一步由 Orders Terms owner Query／Preview／Apply 並讀回綁定相同 pool、晚於 client answer 的收據，第二步才可預覽及重新發出候選資訊。重送 identity 綁定 client-answer event 與 candidate，重試不得重複；日期變更還須以 current Orders 日期重驗原候選完整 availability、在同一交易更新 contact period／coverage 並留存前後日期事件。沒有直接 owner 欄位的分類 fail closed，不能沿用舊資料假裝閉環。任何尚待回答的確認資訊、尚未完成的候選回應或已出現願意者，都不得進入這兩個終局分支。同一候選可在原訊息的 24 小時期限內以 append-only 新事件更正自己的既有意願，current willing pool 必須依每位候選的最新結構化回覆重算；自己的舊 `willing` 不得阻擋更正，但其他候選已願意時仍 fail closed。
 
 ### 5.3 服務進行中：月嫂調休與客戶順延確認
 
@@ -384,6 +387,8 @@ Step3_Push_Alert → Mobile_Group_Alert。
 
 箭頭：Substitute_Scenario → Desktop_Assign_Sub → Auto_Salary_Split。
 
+2026-09-11 current 裁決：上表是原圖轉錄，其中「薪資／補助拆分」不得解讀為依政府補助與客戶自費分段付款。原月嫂與代班月嫂仍各自依 assignment 的實際服務量形成一筆整筆應付；每位月嫂均不得再拆成補助薪資、自費薪資或兩次 payout。非全補助的補助市民訂單由客戶先依一般付款條款代墊，服務完成後再由 Client Finance 另行退還補助；全補助案件限不超過 120 小時且客戶應付為 0（實務通常排滿 120 小時），月嫂整筆款於結案後第二個月 15 日發放。
+
 ## 7. 全系統四大模組精髓總覽原圖轉錄
 
 ### 7.1 模組一：安全表單與身分自動流動
@@ -451,7 +456,7 @@ typed readback；缺任一 required evidence 即為 implementation `not_run`，�
 | deterministic navigation／event catalog | M2 Nav_Command、Agent_Router | server-owned revision 的 command／event 以 protected alias 命中正確 tier、source citation、durable reply/event receipt；unknown 與 fallback 亦有 typed result。 | alias 漂移、unknown 誤命中受保護 action、revision 不可讀、無 citation／receipt 或只回 HTTP 200，均 failure。 |
 | deterministic semantic confidence／clarification | M2 Agent_Router／Confidence_Gate | deterministic harness 對固定 semantic bucket／confidence 輸出可重現的 answer、clarification 或 manual fallback，含 reason、source revision、reply／ticket readback；不要求 full AI/provider。 | 結果依外部 provider 隨機變化、低信心瞎猜、無 clarification reason、無 fallback／readback 或以 provider send 代替，均 failure。 |
 | feedback root／receipt／aggregate／ticket | M2 AI_Badge_Rating／Feedback_Analytics | feedback 以 owner root／event linkage 持久化並回 receipt；依固定 revision／window 可重算 aggregate；`unresolved` 產生 Customer Service ticket，Query 可讀回。 | local counter、無 root／receipt、aggregate 不可重算、unresolved 無 ticket、raw provider payload 穿透，均 failure。 |
-| zero-pool 具體協商建議與 client decision | M3 Zero_Pool_Engine／Client_Compromise_Push | 人工選 criteria 後 Preview 顯示候選／文案；Apply 只產生 recipient intent／outbox／delivery task／retry／manual fallback 與 mock/local result，且不自動改 assignment。客戶 accept／reject postback token 必須綁定 exact recipient、expiry 與 current criteria／plan version；decision receipt 可讀回。accepted 才形成 owner customer decision 並進入後續 Match_Success；rejected 建立 typed Customer Service ticket，不得由 LINE 直接改單。 | 自動改單、無人工 Apply、無 intent/outbox/result、recipient 不明、decision 不落 receipt、token stale／wrong-recipient 未拒絕、rejected 無 ticket，或以 provider receipt 代替，均 failure。 |
+| zero-pool 具體協商建議與 client decision | M3 Zero_Pool_Engine／Client_Compromise_Push | 候選月嫂以 recipient-bound LIFF 提交固定八項分類；確認資訊可直接詢問客戶，調整條件須等候選池全員完成或 24 小時逾期且無人願意後由 AI 彙整直送。任一願意回應會阻止尚未發送的協調；調整只表示修改後可重新詢問。client response 必須綁定 exact recipient 與 current pool／event；客戶回覆可以調整後由工會待辦與群組通知接手，正式改單仍由 owner fresh Preview／Apply，工會完成修改並重新發出候選資訊後才建立月嫂的新回覆窗口；LINE 不直接改 Orders／Assignment。 | query-string 身分、沒有意願與逾期未回混同、未等候選池即發送調整、已有願意者仍發送、把條件式回應宣稱成承接、要求客戶自行改單、自動改單、未完成修改即重發、recipient 不明或 replay／wrong-recipient 未拒絕，均 failure。 |
 | 派案成功雙方通知 | M3 Match_Success | 已 committed 的 `accepted` customer decision 產生雙方 exact recipient snapshot、owner outbox consumer、兩筆 delivery task／retry／manual fallback；mock/local adapter result 與既有 accepted decision receipt 可讀回。Match_Success 通知是 decision 後的資訊通知，不得再建立第二組 accept／reject token。 | 只有 queue、單方通知、無 consumer、既有 accepted decision receipt 不可讀、重複要求客戶決策或無 fallback/readback，均 failure。 |
 | 請假同意／拒絕與 due-shift rematch | M1 Review_4、M3 Client_Leave_Disagree | Scheduling owner 讀回 leave／availability；通知 intent/outbox/task 可本地完成。Agree 經 owner Apply 更新 end_date／班表；Disagree 建立 substitute ticket，due-shift rematch Preview／Apply 產生新 assignment／recipient readback。 | LINE 直接改 assignment、stale availability 被採用、同意無 owner receipt、拒絕無 ticket、rematch 無 fresh readback，均 failure。 |
 | M4 alert 群組安全直達審核連結 | M4 Mobile_Group_Alert | masked alert intent/outbox/task 指向 canonical review target；short-lived authorization 的 expiry、replay、revocation 與 wrong-actor typed failure 可在 mobile UI readback。 | raw PII、永久／可重放／未撤銷 link、wrong target、無失敗 reason 或僅頁面存在，均 failure。 |

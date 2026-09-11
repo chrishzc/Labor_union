@@ -97,10 +97,11 @@ class LineMessagingApiAdapter:
                 "line_provider_unavailable",
             )
         if 200 <= int(response.status_code) < 300:
+            request_id = response_request_id(response)
             return LineProviderOutcome(
                 LineProviderOutcomeType.SUCCESS,
                 provider_message_id=LineProviderMessageId(
-                    response_request_id(response) or f"reply:{token[:16]}"
+                    f"reply:{request_id or token[:16]}"
                 ),
             )
         return _failure_outcome(response)

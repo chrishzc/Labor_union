@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 import json
 
 import pytest
@@ -17,17 +17,20 @@ from subsystems.orders.order_information import (
 
 def test_candidate_information_works_without_assignment_or_beclass_and_binds_content():
     facts = {"case_no": "INQUIRY-1", "staff_name": "測試月嫂", "assigned_start_date": date(2026, 10, 1),
-             "assigned_end_date": date(2026, 10, 5), "floor_fee": 0}
+             "assigned_end_date": date(2026, 10, 5), "service_hours_per_day": 8,
+             "requires_cooking": False, "service_time": "09:00–17:00", "total_salary": None}
     first = build_candidate_information("INQUIRY-1", 9, 1, facts, {}, "recipient-a")
     second = build_candidate_information("INQUIRY-1", 9, 2, facts, {}, "recipient-a")
     assert "預計服務開始日期：2026-10-01" in first.text
-    assert "服務薪資：待確認" in first.text
-    assert "樓層費：0" in first.text
+    assert "總薪資：待確認" in first.text
+    assert "每日服務時數：8" in first.text
+    assert "服務是否需要下廚：不需要下廚" in first.text
+    assert "樓層費" not in first.text
     assert "食材準備參考" in second.text
     assert first.preview_fingerprint != second.preview_fingerprint
     assert first.preview_fingerprint != build_candidate_information("INQUIRY-1", 10, 1, facts, {}, "recipient-a").preview_fingerprint
     assert first.preview_fingerprint != build_candidate_information("INQUIRY-1", 9, 1, facts, {}, "recipient-b").preview_fingerprint
-    assert first.preview_fingerprint != build_candidate_information("INQUIRY-1", 9, 1, {**facts, "floor_fee": 100}, {}, "recipient-a").preview_fingerprint
+    assert first.preview_fingerprint != build_candidate_information("INQUIRY-1", 9, 1, {**facts, "total_salary": 48000}, {}, "recipient-a").preview_fingerprint
 from infrastructure.mysql.order_information_repository import (
     MySqlOrderInformationRepository,
 )
@@ -58,14 +61,14 @@ def _snapshot():
             "client_name": "客戶甲",
             "assigned_start_date": date(2026, 9, 1),
             "assigned_end_date": date(2026, 9, 20),
-            "service_hours_per_day": 10,
             "service_days": 20,
+            "service_hours_per_day": 10,
+            "requires_cooking": True,
+            "service_time": "08:00–18:00",
             "address": "新竹市",
             "phone": "0900000000",
-            "caregiver_rate": 2400,
-            "service_salary": 48000,
-            "salary_payment_date_1": date(2026, 10, 5),
-            "floor_fee": 0,
+            "total_salary": 48000,
+            "salary_payment_date": date(2026, 10, 5),
             "special_holidays": "2026-09-07、2026-09-14",
             "notes": "請注意寶寶作息",
             "dietary_habits": "葷食",
@@ -100,7 +103,7 @@ def test_info_01_uses_exact_typed_owner_values_and_no_legacy_execution_dates():
     assert values["f_104_c4"] == date(2026, 9, 1)
     assert values["f_105_c5"] == date(2026, 9, 20)
     assert values["f_110_ca"] == 48000
-    assert values["f_109_c9"] == 2400
+    assert values["f_111_cb"] == date(2026, 10, 5)
     assert values["f_114_ce"] == "2026-09-07、2026-09-14"
     assert repository.calls == [("CASE-1", 7)]
 
@@ -164,9 +167,15 @@ def test_templates_declare_typed_owner_and_requiredness_metadata(template_id):
     )
     if template_id == "tpl_info_01":
         by_id = {field["id"]: field for field in template["fields"]}
-        assert by_id["f_109_c9"]["label"] == "服務單價（時薪）"
+        assert by_id["f_110_ca"]["label"] == "總薪資"
+        assert by_id["f_110_ca"]["db_key"] == "total_salary"
+        assert by_id["f_106_c6"]["source"] == "order.service_hours_per_day"
+        assert by_id["f_109_c9"]["source"] == "order.requires_cooking"
+        assert "f_112_cc" not in by_id
         assert by_id["f_114_ce"]["source"] == "order.custom_rest_dates"
         assert by_id["f_115_cf"]["label"] == "注意事項備註"
+    else:
+        assert "f_204_e4" not in {field["id"] for field in template["fields"]}
 
 
 class _Cursor:
@@ -188,6 +197,10 @@ class _Cursor:
                     "case_no": "CASE-1",
                     "service_days": 20,
                     "service_hours_per_day": 10,
+                    "requires_cooking": 1,
+                    "service_start_time": timedelta(hours=8),
+                    "service_end_time": timedelta(hours=18),
+                    "service_end_day_offset": 0,
                     "floor_fee": 0,
                     "custom_rest_dates": '["2026-09-07"]',
                     "client_name": "客戶甲",
@@ -238,6 +251,8 @@ def test_mysql_adapter_projects_case_import_source_before_returning_owner_snapsh
 
     assert snapshot is not None
     assert snapshot.facts["dietary_habits"] == "葷食"
+    assert snapshot.facts["requires_cooking"] is True
+    assert snapshot.facts["service_time"] == "08:00–18:00"
     assert "_case_import_payload" not in snapshot.facts
     assert snapshot.field_issues == {}
     assert "case_import" in snapshot.owner_fingerprints

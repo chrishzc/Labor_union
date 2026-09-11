@@ -531,6 +531,7 @@ def create_matching_plan_version_route(
             created_by=str(principal.username or "").strip(),
             as_of=as_of,
             facts_port=_matching_facts_port,
+            require_willing_candidate=len(segments) == 1,
         )
         return BaseResponse(
             data=MatchingPlanReceiptView.model_validate(result),

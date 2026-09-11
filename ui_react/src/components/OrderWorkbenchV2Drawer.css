@@ -467,6 +467,156 @@
   color: var(--md-sys-color-on-surface);
   font: inherit;
 }
+
+.formal-recommendation,
+.formal-recommendation-plan,
+.formal-recommendation-more-body,
+.formal-recommendation-candidates-body {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.formal-recommendation-plan {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.formal-recommendation-summary {
+  display: flex;
+  gap: var(--space-4);
+  align-items: flex-start;
+  justify-content: space-between;
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--md-sys-color-outline-variant);
+}
+
+.formal-recommendation-summary h3,
+.formal-recommendation-summary p,
+.formal-recommendation-next h4,
+.formal-recommendation-next p,
+.formal-recommendation-empty p,
+.formal-recommendation-candidate p {
+  margin: 0;
+}
+
+.formal-recommendation-summary > div,
+.formal-recommendation-next,
+.formal-recommendation-candidate > div {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.formal-recommendation-eyebrow,
+.formal-recommendation-step {
+  color: var(--md-sys-color-primary);
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.formal-recommendation-status {
+  flex: none;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-on-primary-container);
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.formal-recommendation-next {
+  padding: var(--space-5);
+  border: 1px solid color-mix(in srgb, var(--md-sys-color-primary) 34%, var(--md-sys-color-outline-variant));
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--md-sys-color-primary-container) 38%, var(--md-sys-color-surface));
+}
+
+.formal-recommendation-next label,
+.formal-recommendation-inline-details label {
+  display: grid;
+  gap: 6px;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.formal-recommendation-next textarea,
+.formal-recommendation-inline-details textarea {
+  width: 100%;
+  min-height: 76px;
+  resize: vertical;
+}
+
+.formal-recommendation-primary {
+  min-height: 44px;
+  padding: 10px 18px;
+  border: 1px solid var(--md-sys-color-primary);
+  border-radius: var(--radius-md);
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.formal-recommendation-primary:hover:not(:disabled) {
+  filter: brightness(0.94);
+}
+
+.formal-recommendation-actions,
+.formal-recommendation-technical {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.formal-recommendation-inline-details > summary,
+.formal-recommendation-more > summary,
+.formal-recommendation-candidates > summary {
+  cursor: pointer;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.formal-recommendation-inline-details[open] > summary,
+.formal-recommendation-more[open] > summary,
+.formal-recommendation-candidates[open] > summary {
+  margin-bottom: var(--space-3);
+}
+
+.formal-recommendation-more,
+.formal-recommendation-candidates {
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--md-sys-color-outline-variant);
+}
+
+.formal-recommendation-technical {
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 0.78rem;
+}
+
+.formal-recommendation-candidate {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--radius-md);
+  background: var(--md-sys-color-surface);
+}
+
+.formal-recommendation-candidate span {
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 0.78rem;
+}
+
 @media (max-width: 1000px) {
   .order-v2-drawer-columns { grid-template-columns: minmax(0, 1fr); }
 }
@@ -478,4 +628,7 @@
   .order-v2-drawer-current-task { padding: var(--space-4); }
   .order-v2-drawer-current-task > header { display: grid; }
   .order-v2-drawer-tabs { gap: var(--space-4); }
+  .formal-recommendation-summary,
+  .formal-recommendation-candidate { align-items: stretch; flex-direction: column; }
+  .formal-recommendation-status { align-self: flex-start; }
 }

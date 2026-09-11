@@ -41,7 +41,7 @@ interface KnowledgeIndex {
 }
 
 const lifecycleLabels: Record<LifecycleStatus, string> = {
-  draft: '草稿', reviewed: '已審核', published: '已發布', retired: '已停用',
+  draft: '草稿', reviewed: '待啟用（舊資料）', published: '已發布', retired: '已停用',
 };
 
 const indexLabels: Record<KnowledgeIndex['index_status'], string> = {
@@ -64,9 +64,10 @@ async function apiError(response: Response): Promise<string> {
   const payload = await response.json().catch(() => ({})) as { detail?: string | { code?: string } };
   const code = typeof payload.detail === 'string' ? payload.detail : payload.detail?.code;
   const messages: Record<string, string> = {
-    knowledge_qa_answer_required: '標準回答尚未完成，不能送審或發布。',
+    knowledge_qa_answer_required: '標準回答尚未完成，不能發布。',
     knowledge_item_version_conflict: '內容已被其他人更新，請重新整理後再操作。',
     knowledge_review_required: '目前狀態不能執行這個動作，請重新整理確認。',
+    knowledge_state_conflict: '目前狀態不能執行這個動作，請重新整理確認。',
   };
   return (code && messages[code]) || code || `操作失敗（${response.status}）`;
 }
@@ -152,9 +153,9 @@ export const CommonQaCatalogPanel: React.FC = () => {
     method: 'POST', headers: { ...requestHeaders(), 'Idempotency-Key': operationIdentity('qa-index') }, credentials: 'include',
   }), '已送出索引建立工作；狀態變成 READY 後才會供 AI 客服使用。');
 
-  const transition = (item: ManagedQa, action: 'review' | 'publish' | 'retire') => {
+  const transition = (item: ManagedQa, action: 'publish' | 'retire') => {
     const identity = operationIdentity(`qa-${action}`);
-    const success = action === 'review' ? '已完成審核。' : action === 'publish' ? '已發布；請重建索引後供 AI 使用。' : '已停用；請重建索引以移除舊答案。';
+    const success = action === 'publish' ? '已發布，正在更新 AI 索引；READY 後即啟用。' : '已停用，正在更新 AI 索引以移除舊答案。';
     return runMutation(() => fetch(`/api/v1/knowledge/items/${item.id}/${action}`, {
       method: 'POST',
       headers: { ...requestHeaders(true), 'Idempotency-Key': identity, 'X-Correlation-ID': identity },
@@ -206,7 +207,7 @@ export const CommonQaCatalogPanel: React.FC = () => {
       });
       if (!response.ok) throw new Error(await apiError(response));
       closeEditor(); await loadState();
-      setNotice(editingItem ? '已建立新草稿版本，需重新審核與發布。' : '已新增草稿，審核後即可發布。');
+      setNotice(editingItem ? '已建立新草稿版本，可直接發布啟用。' : '已新增草稿，可直接發布啟用。');
       setNoticeKind('success');
     } catch (error) {
       setModalNotice(error instanceof Error ? error.message : '儲存失敗。');
@@ -221,13 +222,13 @@ export const CommonQaCatalogPanel: React.FC = () => {
           <span className="category-badge">共 {items.length} 筆 · {publishedCount} 筆已發布</span>
         </div>
         <div className="qa-catalog-actions">
-          <button type="button" className="line-secondary-btn" disabled={busy || publishedCount === 0} onClick={() => void requestIndex()}><SearchCheck aria-hidden="true" />建立／重建索引</button>
+          <button type="button" className="line-secondary-btn" disabled={busy || publishedCount === 0} onClick={() => void requestIndex()}><SearchCheck aria-hidden="true" />手動重建索引</button>
           <button type="button" className="line-primary-btn" disabled={busy} onClick={openCreate}><Plus aria-hidden="true" />新增 QA</button>
         </div>
       </div>
 
       <div className="line-warning" role="status">
-        <ShieldCheck aria-hidden="true" /> 系統已內建 29 題基礎題庫。編輯會產生草稿版本；「發布」才代表啟用，「停用」會保留歷程；發布後仍須重建索引。
+        <ShieldCheck aria-hidden="true" /> 系統已載入基礎題庫。編輯會產生草稿版本；「發布」會自動更新索引並啟用，「停用」會保留歷程並自動移除索引中的舊答案。
       </div>
       <div className={`qa-index-status is-${latestIndex?.index_status ?? 'missing'}`} role="status">
         <strong>AI 索引：</strong>{latestIndex ? `v${latestIndex.index_version} · ${indexLabels[latestIndex.index_status]}` : '尚未建立'}
@@ -236,7 +237,7 @@ export const CommonQaCatalogPanel: React.FC = () => {
 
       <div className="form-group-row qa-catalog-filters">
         <div className="form-field-half"><label htmlFor="qa-catalog-search">搜尋常見 QA</label><input id="qa-catalog-search" type="search" value={query} placeholder="題號、分類、問題或別名" onChange={(event) => setQuery(event.target.value)} /></div>
-        <div className="form-field-half"><label htmlFor="qa-catalog-status">治理狀態</label><select id="qa-catalog-status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="ALL">全部</option><option value="draft">草稿</option><option value="reviewed">已審核</option><option value="published">已發布（啟用）</option><option value="retired">已停用</option></select></div>
+        <div className="form-field-half"><label htmlFor="qa-catalog-status">治理狀態</label><select id="qa-catalog-status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="ALL">全部</option><option value="draft">草稿</option><option value="reviewed">待啟用（舊資料）</option><option value="published">已發布（啟用）</option><option value="retired">已停用</option></select></div>
       </div>
       <small>顯示 {filteredItems.length}／{items.length} 筆正式 Knowledge 項目</small>
 
@@ -246,8 +247,7 @@ export const CommonQaCatalogPanel: React.FC = () => {
             <summary className="qa-catalog-summary">
               <div><strong>{item.qa.id} · {item.qa.question}</strong><span className="category-badge qa-catalog-category">{item.qa.category} / {item.qa.tag}</span><span className={`qa-lifecycle-badge is-${item.lifecycle_status}`}>{lifecycleLabels[item.lifecycle_status]} · v{item.current_version}</span></div>
               <div className="qa-catalog-actions">
-                {item.lifecycle_status === 'draft' && <button type="button" className="line-secondary-btn" disabled={busy || !item.qa.answer} onClick={(event) => { event.preventDefault(); void transition(item, 'review'); }}>送審完成</button>}
-                {item.lifecycle_status === 'reviewed' && <button type="button" className="line-primary-btn" disabled={busy} onClick={(event) => { event.preventDefault(); void transition(item, 'publish'); }}>發布啟用</button>}
+                {(item.lifecycle_status === 'draft' || item.lifecycle_status === 'reviewed') && <button type="button" className="line-primary-btn" disabled={busy || !item.qa.answer} onClick={(event) => { event.preventDefault(); void transition(item, 'publish'); }}>發布啟用</button>}
                 {item.lifecycle_status === 'published' && <button type="button" className="line-danger-btn" disabled={busy} onClick={(event) => { event.preventDefault(); void transition(item, 'retire'); }}>停用</button>}
                 <button type="button" className="line-secondary-btn" disabled={busy} title="編輯此題目" onClick={(event) => { event.preventDefault(); openEdit(item); }}><Pencil aria-hidden="true" />編輯</button>
               </div>
@@ -263,7 +263,7 @@ export const CommonQaCatalogPanel: React.FC = () => {
           {modalNotice && <div className="line-error" role="alert">{modalNotice}</div>}
           <label className="qa-editor-field"><span>題目編號 *</span><input required disabled={!isCreating} value={formData.id} placeholder="例如 QA-030" onChange={(event) => setFormData({ ...formData, id: event.target.value })} /></label>
           <label className="qa-editor-field"><span>標準問題 *</span><input required value={formData.question} onChange={(event) => setFormData({ ...formData, question: event.target.value })} /></label>
-          <label className="qa-editor-field"><span>標準回答</span><textarea rows={5} value={formData.answer} placeholder="可先留空；補齊後才能送審。" onChange={(event) => setFormData({ ...formData, answer: event.target.value })} /></label>
+          <label className="qa-editor-field"><span>標準回答</span><textarea rows={5} value={formData.answer} placeholder="可先留空；補齊後才能發布。" onChange={(event) => setFormData({ ...formData, answer: event.target.value })} /></label>
           <label className="qa-editor-field"><span>常見問法／別名（每行一筆）</span><textarea rows={4} value={formData.aliases} onChange={(event) => setFormData({ ...formData, aliases: event.target.value })} /></label>
           <div className="qa-editor-columns"><label className="qa-editor-field"><span>業務分類</span><input value={formData.category} onChange={(event) => setFormData({ ...formData, category: event.target.value })} /></label><label className="qa-editor-field"><span>標籤</span><input value={formData.tag} onChange={(event) => setFormData({ ...formData, tag: event.target.value })} /></label></div>
           <label className="qa-editor-field"><span>內部備註</span><input value={formData.notes} onChange={(event) => setFormData({ ...formData, notes: event.target.value })} /></label>

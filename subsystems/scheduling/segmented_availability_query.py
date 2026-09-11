@@ -137,6 +137,14 @@ def _search_availability(case_no, segment_count, segment_drafts, as_of, facts_po
     planned_end = _as_optional_date(order_row["end_date"], "planned_end_date")
     if planned_start > planned_end:
         raise ValueError("planned_start_date cannot be after planned_end_date")
+    if not inquiry and loaded_facts.get("confirmed_service_dates"):
+        official_dates = tuple(
+            _as_optional_date(row["service_date"], "confirmed_service_date")
+            for row in loaded_facts["confirmed_service_dates"]
+        )
+        effective_dates = (planned_start, planned_end, *official_dates)
+        planned_start = min(effective_dates)
+        planned_end = max(effective_dates)
     if (planned_end - planned_start).days + 1 > 60:
         raise ValueError("service period cannot exceed 60 days")
 
@@ -373,13 +381,7 @@ def _passes_enabled_filters(results, policy):
         return False
     if policy["cooking"] and not results["cooking"]:
         return False
-    keys = set(policy["enabled_preference_keys"])
-    keys.update(
-        key
-        for key in ("preferred_service_days", "daily_service_hours")
-        if policy[key]
-    )
-    return all(results.get(key, False) for key in keys)
+    return True
 
 
 def _cooking_matches(order, staff):

@@ -6,7 +6,7 @@
 
 ## Responsibility
 提供既有案件訂單資訊的 typed Query 與管理端 readback；不改寫 Orders root facts。
-初步候選資訊由 candidate-specific 投影重用相同命名欄位；無正式 assignment 時不虛構指派，未知費用待確認，預覽全文與收件對象綁定後交 Scheduling durable sender。
+初步候選資訊由 candidate-specific 投影重用相同命名欄位；無正式 assignment 時不虛構指派，未知費用待確認，預覽全文與收件對象綁定後交 Scheduling durable sender。資訊一的每日時段、每日時數與是否下廚讀取 current Orders Terms，讓客戶同意調整後的重新詢問不沿用舊表單文字。
 
 ## Implementation
 - `subsystems/orders/order_information.py`

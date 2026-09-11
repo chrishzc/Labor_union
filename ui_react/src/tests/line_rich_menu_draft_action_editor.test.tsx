@@ -79,6 +79,8 @@ describe('LineRichMenuDraftActionEditor', () => {
     const actionType = screen.getByLabelText('動作類型');
     expect(screen.queryByRole('option', { name: /切換 Rich Menu/ })).not.toBeInTheDocument();
     fireEvent.change(actionType, { target: { value: 'uri' } });
+    expect(screen.getByRole('option', { name: '?target=order_tracking（狀態追蹤）' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /anomalies_center|異常中心/ })).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('LIFF target／網址'), { target: { value: '?target=profile_update' } });
     fireEvent.click(screen.getByRole('button', { name: '預覽草稿變更' }));
 

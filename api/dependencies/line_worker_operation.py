@@ -56,6 +56,12 @@ from subsystems.line.feedback_application import LineFeedbackApplication
 from subsystems.line.identity_management_application import IDENTITY_MENU_RESET_INTENT
 from subsystems.line.identity_revocation_worker import LineIdentityRevocationWorker
 from subsystems.line.knowledge_question_application import enqueue_line_knowledge_question
+from subsystems.line.candidate_contact_postback_application import (
+    LineCandidateContactPostbackApplication,
+)
+from subsystems.line.candidate_contact_coordination_worker import (
+    CandidateContactCoordinationWorker,
+)
 from subsystems.line.matching_postback_application import LineMatchingPostbackApplication
 from subsystems.line.media_application import LineMediaArchiveWorker, schedule_line_media_archive
 from subsystems.line.menu_command_application import LineMenuCommandApplication
@@ -144,6 +150,7 @@ def _event_consumer(worker_identity: str, now) -> LineWebhookEventConsumer:
         follow_scheduler=enqueue_follow_schedule,
         media_scheduler=schedule_line_media_archive,
         group_application=LineOrderGroupApplication(now, alert_group_registrar=register_group_alert_target),
+        candidate_contact_postback_application=LineCandidateContactPostbackApplication(),
         matching_postback_application=LineMatchingPostbackApplication(
             MatchingNotificationApplication(
                 open_line_unit_of_work,
@@ -188,6 +195,10 @@ def _additional_workers(worker_identity: str, now, images, provider) -> dict[str
         "matching_coordination_customer_service": MatchingCoordinationCustomerServiceWorker(
             open_line_unit_of_work,
             worker_identity,
+        ),
+        "candidate_contact_coordination": CandidateContactCoordinationWorker(
+            get_connection,
+            now,
         ),
         "human_escalation_deliveries": HumanEscalationDeliveryWorker(
             open_line_unit_of_work,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 import importlib.util
+import json
 import os
 from pathlib import Path
 import sys
@@ -334,6 +335,30 @@ class SeedFixtureResourceLifetimeTests(unittest.TestCase):
                 "client_settlement",
                 "staff_payout",
             ],
+        )
+
+    def test_contact_pool_fixture_seeds_a_valid_delivery_projection_and_repairs_existing_rows(self) -> None:
+        cursor = _FakeCursor()
+        answers = iter(
+            [
+                {"start_date": "2026-09-01", "end_date": "2026-09-14"},
+                {"id": 71},
+                {"id": 83},
+            ]
+        )
+        cursor.fetchone = lambda: next(answers)
+
+        seed_module._seed_contact_pool(cursor, "CASE-1", 9, "contacted")
+
+        statement, parameters = next(
+            (statement, parameters)
+            for statement, parameters in cursor.executions
+            if "'info_1_sent'" in statement
+        )
+        self.assertIn("ON DUPLICATE KEY UPDATE payload=VALUES(payload)", statement)
+        self.assertEqual(
+            json.loads(parameters[-1]),
+            {"fixture": "core_stage", "delivery_status": "sent"},
         )
 
     def test_production_guard_runs_before_connection_acquisition(self) -> None:

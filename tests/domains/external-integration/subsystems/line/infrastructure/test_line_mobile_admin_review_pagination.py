@@ -357,18 +357,16 @@ def test_mobile_scheduling_review_forwards_query_preview_apply_and_fresh_readbac
     assert captured["queries"] == 2
 
 
-def test_mobile_scheduling_options_project_unfinished_cases_staff_and_dates(monkeypatch) -> None:
+def test_mobile_scheduling_options_project_only_assignment_plan_ready_cases_staff_and_dates(monkeypatch) -> None:
     captured = []
-    orders = SimpleNamespace(
-        query=lambda request: captured.append(request)
-        or SimpleNamespace(
-            items=(
-                SimpleNamespace(case_no="CASE-1", order_status="訂單成立"),
-            ),
-            next_cursor="CASE-1",
-        )
-    )
     facts = SimpleNamespace(
+        list_assignment_plan_case_options=lambda after_case_no, page_size: captured.append(
+            (after_case_no, page_size)
+        )
+        or (
+            ({"case_no": "CASE-1", "order_status": "訂單成立"},),
+            "CASE-1",
+        ),
         load_case_facts=lambda case_no: {
             "order": {"case_no": case_no, "status": "訂單成立"},
             "staff_rows": [
@@ -396,13 +394,10 @@ def test_mobile_scheduling_options_project_unfinished_cases_staff_and_dates(monk
                 "page_size": 100,
             }
         ),
-        orders,
         facts,
     )
 
-    assert captured[0].page_size == 100
-    assert captured[0].after_case_no == "CASE-0"
-    assert captured[0].lifecycle_scope.value == "unfinished"
+    assert captured == [("CASE-0", 100)]
     assert response.data.model_dump(mode="json") == {
         "case_options": [
             {"case_no": "CASE-1", "order_status": "訂單成立"},

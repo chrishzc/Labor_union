@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import time, timedelta
 import json
 from typing import Any
 
@@ -50,11 +51,8 @@ class MySqlOrderInformationRepository:
             "scheduling": projection_fingerprint(
                 {key: selected.get(key) for key in _ASSIGNMENT_FACT_KEYS}
             ),
-            "payroll": projection_fingerprint(
-                {"assignment_id": selected.get("assignment_id"), "service_unit_price": facts.get("caregiver_rate")}
-            ),
             "staff_payables": projection_fingerprint(
-                {"assignment_id": selected.get("assignment_id"), "service_salary": facts.get("service_salary"), "salary_payment_date_1": facts.get("salary_payment_date_1")}
+                {"assignment_id": selected.get("assignment_id"), "total_salary": facts.get("total_salary"), "salary_payment_date": facts.get("salary_payment_date")}
             ),
             "case_import": projection_fingerprint(
                 {
@@ -78,7 +76,15 @@ class MySqlOrderInformationRepository:
             field_issues=field_issues,
         )
 
-    def preview_candidate_information(self, case_no: str, candidate_id: int, info_type: int, *, for_update: bool = False):
+    def preview_candidate_information(
+        self,
+        case_no: str,
+        candidate_id: int,
+        info_type: int,
+        *,
+        for_update: bool = False,
+        service_period: tuple[object, object] | None = None,
+    ):
         with self._connection.cursor() as cursor:
             cursor.execute(_CASE_SQL + (" FOR UPDATE" if for_update else ""), (case_no,))
             case = cursor.fetchone()
@@ -91,6 +97,13 @@ class MySqlOrderInformationRepository:
             candidate = cursor.fetchone()
         if not isinstance(case, Mapping) or not isinstance(candidate, Mapping):
             raise ValueError("candidate_contact_not_found")
+        if service_period is not None:
+            start_date, end_date = service_period
+            candidate = {
+                **candidate,
+                "assigned_start_date": start_date,
+                "assigned_end_date": end_date,
+            }
         facts, issues = _facts(case, candidate)
         return build_candidate_information(case_no, candidate_id, info_type, facts, issues, candidate.get("line_user_id"))
 
@@ -119,23 +132,27 @@ def _facts(
     # Case Import is the only boundary allowed to parse the source payload.
     # Consumers receive named facts, never the raw survey mapping.
     projection = project_order_information(case.get("_case_import_payload"))
+    formal_service_time = _formal_service_time(case)
     facts = {
         "case_no": case.get("case_no"),
         "staff_name": assignment.get("staff_name"),
         "client_name": case.get("client_name"),
         "assigned_start_date": assignment.get("assigned_start_date"),
         "assigned_end_date": assignment.get("assigned_end_date"),
-        "service_hours_per_day": case.get("service_hours_per_day"),
         "service_days": case.get("service_days"),
+        "service_hours_per_day": case.get("service_hours_per_day"),
+        "requires_cooking": (
+            None
+            if case.get("requires_cooking") is None
+            else bool(case.get("requires_cooking"))
+        ),
         "address": case.get("client_address"),
         "phone": case.get("client_phone"),
-        "caregiver_rate": assignment.get("hourly_rate"),
-        "service_salary": None,
-        "salary_payment_date_1": None,
-        "floor_fee": case.get("floor_fee"),
+        "total_salary": None,
+        "salary_payment_date": None,
         "special_holidays": _special_holidays_text(case.get("custom_rest_dates")),
         "notes": case.get("client_notes"),
-        "service_time": case.get("service_time"),
+        "service_time": formal_service_time,
         "service_type": case.get("service_type"),
         "baby_info": case.get("baby_info"),
         **projection.values,
@@ -167,14 +184,14 @@ def _load_typed_payroll_facts(
         )
         if len(obligations) == 1:
             obligation = obligations[0]
-            facts["service_salary"] = obligation.contracted_amount.amount
-            facts["salary_payment_date_1"] = obligation.due_date
+            facts["total_salary"] = obligation.contracted_amount.amount
+            facts["salary_payment_date"] = obligation.due_date
             owners["staff_payables"] = projection_fingerprint(
                 {
                     "obligation_identity": obligation.obligation_identity,
                     "assignment_id": assignment_id,
-                    "service_salary": facts["service_salary"],
-                    "salary_payment_date_1": facts["salary_payment_date_1"],
+                    "total_salary": facts["total_salary"],
+                    "salary_payment_date": facts["salary_payment_date"],
                 }
             )
         owners["payroll"] = projection_fingerprint(
@@ -191,12 +208,20 @@ def _load_typed_payroll_facts(
 
 _ORDER_FACT_KEYS = (
     "case_no",
-    "service_hours_per_day",
     "service_days",
-    "floor_fee",
+    "service_hours_per_day",
+    "requires_cooking",
+    "service_time",
     "special_holidays",
 )
-_CLIENT_FACT_KEYS = ("client_name", "phone", "address", "notes")
+_CLIENT_FACT_KEYS = (
+    "client_name",
+    "phone",
+    "address",
+    "notes",
+    "service_type",
+    "baby_info",
+)
 _ASSIGNMENT_FACT_KEYS = (
     "assignment_id",
     "case_no",
@@ -225,7 +250,9 @@ _CASE_IMPORT_FACT_KEYS = (
 )
 
 _CASE_SQL = """
-SELECT o.case_no, o.service_days, o.service_hours_per_day, o.floor_fee, o.custom_rest_dates,
+SELECT o.case_no, o.service_days, o.service_hours_per_day, o.requires_cooking,
+       o.service_start_time, o.service_end_time, o.service_end_day_offset,
+       o.floor_fee, o.custom_rest_dates,
        c.service_time, c.service_type, c.baby_info,
        c.name AS client_name, c.phone AS client_phone, c.address AS client_address,
        c.notes AS client_notes, b.survey_details AS _case_import_payload
@@ -234,6 +261,39 @@ SELECT o.case_no, o.service_days, o.service_hours_per_day, o.floor_fee, o.custom
   LEFT JOIN beclass_records b ON b.bound_case_no=o.case_no
  WHERE o.case_no=%s
 """
+
+
+def _formal_service_time(case: Mapping[str, object]) -> str | None:
+    start = case.get("service_start_time")
+    end = case.get("service_end_time")
+    offset = case.get("service_end_day_offset")
+    if start is None or end is None or offset is None:
+        return None
+    start_text = _clock_text(start)
+    end_text = _clock_text(end)
+    if start_text is None or end_text is None:
+        return None
+    suffix = "（翌日）" if int(offset) == 1 else ""
+    return f"{start_text}–{end_text}{suffix}"
+
+
+def _clock_text(value: object) -> str | None:
+    if isinstance(value, timedelta):
+        seconds = int(value.total_seconds())
+        if seconds < 0 or seconds >= 24 * 60 * 60:
+            return None
+        hours, remainder = divmod(seconds, 60 * 60)
+        minutes = remainder // 60
+        return f"{hours:02d}:{minutes:02d}"
+    if isinstance(value, time):
+        return value.strftime("%H:%M")
+    text = str(value).strip()
+    parts = text.split(":")
+    if len(parts) >= 2 and all(part.isdigit() for part in parts[:2]):
+        hours, minutes = int(parts[0]), int(parts[1])
+        if 0 <= hours <= 23 and 0 <= minutes <= 59:
+            return f"{hours:02d}:{minutes:02d}"
+    return None
 
 
 def _special_holidays_text(value: object) -> str | None:

@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<!-- Customer LIFF response for a recipient-bound candidate information question. -->
+<html lang="zh-Hant-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>回答月嫂問題</title>
+  <style>
+    :root { --primary:#e0683a; --dark:#8f3618; --text:#2d231f; --muted:#715f57; --line:#ead9d2; --soft:#fff3ed; --danger:#a92323; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; padding:16px 12px 38px; background:linear-gradient(160deg,#fff5ef,#fbfaf9); color:var(--text); font-family:"Noto Sans TC",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    main { width:100%; max-width:640px; margin:0 auto; }
+    .card { padding:20px; border:1px solid rgba(224,104,58,.16); border-radius:20px; background:#fff; box-shadow:0 16px 42px rgba(87,47,28,.12); }
+    .eyebrow { margin:0 0 5px; color:var(--dark); font-size:13px; font-weight:800; }
+    h1 { margin:0 0 9px; font-size:24px; }
+    .lead,.help { color:var(--muted); line-height:1.6; }
+    .status { margin:15px 0; padding:12px 13px; border-radius:12px; background:#eff8ff; line-height:1.55; }
+    .status.error { color:var(--danger); background:#fff0f0; }
+    .question { margin:10px 0; padding:13px; border:1px solid var(--line); border-radius:12px; background:var(--soft); line-height:1.6; }
+    label { display:block; margin:18px 0 8px; font-weight:800; }
+    textarea,select { width:100%; min-height:48px; padding:12px; border:1px solid #cbbcb4; border-radius:11px; background:#fff; color:var(--text); font:inherit; font-size:16px; }
+    textarea { min-height:130px; resize:vertical; }
+    textarea:focus,select:focus,button:focus-visible { outline:3px solid rgba(224,104,58,.25); outline-offset:2px; }
+    button { width:100%; min-height:50px; margin-top:14px; padding:13px 16px; border:0; border-radius:13px; background:var(--primary); color:#fff; font:inherit; font-size:17px; font-weight:800; cursor:pointer; }
+    button:disabled { opacity:.5; cursor:not-allowed; }
+    .boundary { margin-top:14px; padding:11px 12px; border-left:4px solid var(--primary); border-radius:8px; background:var(--soft); color:#623824; font-size:13px; line-height:1.55; }
+    [hidden] { display:none!important; }
+  </style>
+</head>
+<body>
+<main><section class="card">
+  <p class="eyebrow">新竹市月子工會</p>
+  <h1>回答月嫂問題</h1>
+  <p class="lead">助理會把你的回答直接轉交提出問題的月嫂。</p>
+  <div id="status" class="status" role="status" aria-live="polite">正在確認案件與身分…</div>
+  <form id="answerForm" hidden>
+    <div id="questions"></div>
+    <div id="decisionField" hidden>
+      <label for="decision">這些條件可以調整嗎？</label>
+      <select id="decision"><option value="">請選擇</option><option value="can_adjust">可以，請工會協助修改</option><option value="cannot_adjust">目前無法調整</option></select>
+    </div>
+    <label for="answer" id="answerLabel">你的回答</label>
+    <textarea id="answer" maxlength="1000" required placeholder="請直接回答上面的問題"></textarea>
+    <p class="boundary">送出回答不會直接修改訂單；工會人員會依你的選擇接續處理。</p>
+    <button id="submitButton" type="submit">送出回答</button>
+  </form>
+</section></main>
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<script>
+  const reference = new URLSearchParams(location.search).get("ref") || "";
+  let lineIdToken = "";
+  async function initialize() {
+    if (!/^[0-9a-f]{64}$/.test(reference)) return show("連結無效，請回到 LINE 重新開啟。", true);
+    try {
+      const configResponse = await fetch("/api/v1/line/identity/runtime-config");
+      const config = await configResponse.json();
+      const liffId = config.data?.liff_id;
+      if (!configResponse.ok || !liffId) throw new Error("LIFF 尚未完成設定。");
+      await liff.init({liffId});
+      if (!liff.isLoggedIn()) { liff.login({redirectUri: location.href}); return; }
+      lineIdToken = liff.getIDToken() || "";
+      if (!lineIdToken) throw new Error("無法取得 LINE 登入憑證。");
+      const result = await request("/api/v1/line/candidate-contact/customer/query", {line_id_token:lineIdToken,interaction_reference:reference});
+      if (result.data.status !== "open") throw new Error("這個問題已經回答或案件已結束。");
+      const isAdjustment = result.data.request_kind === "condition_adjustment";
+      document.querySelector("h1").textContent = isAdjustment ? "確認可調整的媒合條件" : "回答月嫂問題";
+      document.querySelector(".lead").textContent = isAdjustment
+        ? "目前原條件尚無月嫂願意承接。請確認這些條件能否修改。"
+        : "助理會把你的回答直接轉交提出問題的月嫂。";
+      document.getElementById("questions").innerHTML = result.data.issues.map(item => `<div class="question"><strong>${escapeHtml(item.label)}</strong><br>${escapeHtml(item.detail)}${item.candidate_count ? `<br><small>${item.candidate_count} 位月嫂可在修改後重新詢問</small>` : ""}</div>`).join("");
+      document.getElementById("decisionField").hidden = !isAdjustment;
+      document.getElementById("answerLabel").textContent = isAdjustment ? "補充說明（選填）" : "你的回答";
+      document.getElementById("answer").required = !isAdjustment;
+      document.getElementById("answer").placeholder = isAdjustment ? "可補充能調整的方式" : "請直接回答上面的問題";
+      document.getElementById("answerForm").dataset.kind = result.data.request_kind;
+      document.getElementById("answerForm").hidden = false;
+      show(`案件編號：${result.data.case_no}`, false);
+    } catch (error) { show(error.message || "目前無法開啟問題。", true); }
+  }
+  document.getElementById("answerForm").addEventListener("submit", async event => {
+    event.preventDefault();
+    const answer = document.getElementById("answer").value.trim();
+    const isAdjustment = document.getElementById("answerForm").dataset.kind === "condition_adjustment";
+    const decision = document.getElementById("decision").value || null;
+    if (!isAdjustment && !answer) return show("請填寫回答。", true);
+    if (isAdjustment && !decision) return show("請選擇是否可以調整。", true);
+    const button = document.getElementById("submitButton"); button.disabled = true;
+    try {
+      const result = await request("/api/v1/line/candidate-contact/customer/submit", {line_id_token:lineIdToken,interaction_reference:reference,answer,decision,idempotency_key:`candidate-contact-customer:${crypto.randomUUID()}`});
+      document.getElementById("answerForm").hidden = true;
+      if (isAdjustment && decision === "can_adjust") {
+        show("已通知工會人員。工會完成正式資料修改後，會重新詢問月嫂。", false);
+      } else if (isAdjustment) {
+        show("已通知工會人員接手處理。", false);
+      } else {
+        show("回答已送給月嫂，謝謝你。", false);
+      }
+    } catch (error) { show(error.message || "回答未送出，請稍後再試。", true); button.disabled = false; }
+  });
+  async function request(url, body) {
+    const response = await fetch(url, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+    const result = await response.json();
+    if (!response.ok) throw new Error(apiErrorMessage(result));
+    return result;
+  }
+  function apiErrorMessage(result) {
+    const candidates = [
+      result?.error?.message,
+      result?.detail?.error?.message,
+      result?.detail?.message,
+      result?.detail
+    ];
+    for (const candidate of candidates) {
+      if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+    }
+    const fieldErrors = result?.detail?.error?.field_errors || result?.detail;
+    if (Array.isArray(fieldErrors)) {
+      const messages = fieldErrors
+        .map(item => typeof item?.msg === "string" ? item.msg.trim() : "")
+        .filter(Boolean);
+      if (messages.length) return messages.join("；");
+    }
+    return "目前無法確認案件與身分，請稍後重新開啟此頁。";
+  }
+  function show(message,error) { const node=document.getElementById("status"); node.textContent=message; node.className=error?"status error":"status"; }
+  function escapeHtml(value) { const node=document.createElement("span"); node.textContent=String(value); return node.innerHTML; }
+  initialize();
+</script>
+</body>
+</html>

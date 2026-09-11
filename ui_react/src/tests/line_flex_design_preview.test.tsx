@@ -1,6 +1,6 @@
 /**
  * File: line_flex_design_preview.test.tsx
- * Description: 驗證 4 個 Flex 設計預覽皆去敏、零寫入，並明示缺少 owner fact 的業務 blocker。
+ * Description: 驗證 4 個 Flex 設計預覽皆去敏、零寫入，並如實區分正式資料是否已接通。
  */
 import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
@@ -14,7 +14,7 @@ import { LineFlexDesignPreview } from '../components/LineFlexDesignPreview';
 import { LiffCardStudio } from '../pages/line_management/LiffCardStudio';
 
 describe('LINE Flex design preview', () => {
-  it('4 個既有 Flex 資產都顯示去敏設計與 owner fact blocker', () => {
+  it('4 個既有 Flex 資產都顯示去敏設計與目前正式資料狀態', () => {
     const runtimeConfigClient: LineIdentityRuntimeConfigClient = {
       get: vi.fn(() => new Promise<LineIdentityRuntimeConfig>(() => undefined)),
     };
@@ -25,13 +25,15 @@ describe('LINE Flex design preview', () => {
       ['派案通知卡設計稿', '案件編號：【寄送前依正式案件資料帶入】'],
       ['服務日順延確認卡設計稿', '正式請假日期與順延後結束日會在寄送前核對。'],
       ['重大異常通報卡設計稿', '案件與告警摘要會以去敏方式提供'],
-      ['媒合條件溝通卡設計稿', '由正式候選聯繫結果彙整可調整條件，不以樣本原因或時間造假。'],
+      ['媒合條件協調卡', '由正式候選聯繫結果彙整可調整條件與可重新詢問人數。'],
     ] as const;
 
     for (const [title, safeText] of expected) {
       fireEvent.click(screen.getByRole('button', { name: new RegExp(title) }));
       expect(screen.getByText(safeText)).toBeInTheDocument();
-      expect(screen.getByRole('status', { name: '正式資料狀態' })).toHaveTextContent('尚未載入');
+      expect(screen.getByRole('status', { name: '正式資料狀態' })).toHaveTextContent(
+        title === '媒合條件協調卡' ? '正式資料已接通' : '正式資料尚未載入',
+      );
     }
 
     expect(screen.queryByText(/demo[-_ ]?token|client[_ -]?id|line[_ -]?user[_ -]?id/i)).not.toBeInTheDocument();

@@ -233,7 +233,10 @@ def test_mobile_admin_heading_is_target_specific_in_preview_and_formal_modes() -
     assert 'document.title = `${copy[0]}｜工會 LINE`' in heading
     assert "applySurfaceHeading(target)" in preview
     assert "applySurfaceHeading(target)" in formal
-    for label in ("待辦工作台", "客服中心", "異常中心", "營運摘要"):
+    assert ".section-heading > div { flex:1 1 0; min-width:0; }" in source
+    assert "select,input,textarea { width:100%; min-width:0;" in source
+    assert ".toolbar > input, .toolbar > select { flex:1 1 0; width:auto; }" in source
+    for label in ("待辦工作台", "客服中心", "狀態追蹤", "營運摘要"):
         assert label in source
 
 
@@ -333,7 +336,7 @@ def test_mobile_admin_customer_and_review_pagination_use_server_metadata() -> No
 
 def test_mobile_scheduling_review_forwards_owner_query_preview_apply_and_readback() -> None:
     source = _source("mobile_admin.html")
-    assert 'id="openScheduling"' in source
+    assert 'id="openScheduling"' not in source
     assert 'id="backToWorkQueue"' in source
     assert 'id="schedulingPane"' in source
     assert 'id="loadSchedule"' in source

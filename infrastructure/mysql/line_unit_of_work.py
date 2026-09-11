@@ -96,6 +96,9 @@ from infrastructure.mysql.customer_order_change_repository import (
     MySqlCustomerOrderChangeRepository,
 )
 from infrastructure.mysql.client_profile_binding_port import MySqlClientBindingPort
+from infrastructure.mysql.candidate_contact_pool_line_reply_repository import (
+    MySqlCandidateContactPoolLineReplyRepository,
+)
 
 
 class LineMySqlUnitOfWork(MySqlUnitOfWork):
@@ -126,6 +129,7 @@ class LineMySqlUnitOfWork(MySqlUnitOfWork):
         self.matching_notifications = MySqlMatchingNotificationRepository(connection)
         self.matching_holiday_work_agreements = MySqlMatchingHolidayWorkAgreementRepository(connection)
         self.matching_schedule_confirmations = MySqlMatchingScheduleConfirmationRepository(connection)
+        self.candidate_contact_pool_replies = MySqlCandidateContactPoolLineReplyRepository(connection)
         self.knowledge_questions = MySqlKnowledgeQuestionIntakeAdapter(connection)
         self.customer_service = MySqlCustomerServiceRepository(connection)
         self.customer_order_changes = MySqlCustomerOrderChangeRepository(connection)

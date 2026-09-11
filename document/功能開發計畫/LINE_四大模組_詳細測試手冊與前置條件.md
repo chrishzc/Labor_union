@@ -45,9 +45,23 @@
 |---|---|---|---|---|
 | **M1-01 狀態 A** | 舊客完全命中 (陳雅婷 / `0912345678`) | `MOBILE_PASS` | 2026-09-07 | ✅ **實測通過**：`bind.html` 輸入後自動完成綁定，顯示案號【`CASE-2026-M301`】，無需重填問卷。 |
 | **M1-01 狀態 B** | 有案號缺問卷 (李詩涵 / `0933111222`) | `MOBILE_PASS` | 2026-09-07 | ✅ **實測通過**：提示找到市府案號【`CASE-2026-STATE-B`】，自動預填姓名/手機/案號無縫跳轉 `register.html`，Email 必填檢核與一鍵送出均正常。 |
-| **M1-01 狀態 C** | 名冊未同步/查無案號 (訪客臨時登記) | `PREPARED` | - | 前置資料就緒，待手機實測。 |
-| **M1-01 狀態 D** | 連續失敗協處 (2 次失敗自動開工單) | `PREPARED` | - | 前置資料就緒，待手機實測。 |
-| **M1-06** | 管理後台正式解除 (Rich Menu 回復) | `PREPARED` | - | ✅ 預設 Rich Menu 發布任務記錄已補齊，解除影響檢查 blocker 已清除，待管理後台送出。 |
+| **M1-01 狀態 C** | 名冊未同步/查無案號 (訪客臨時登記) | `MOBILE_PASS` | 2026-09-10 | ✅ 測試者確認手機實測通過。 |
+| **M1-01 狀態 D** | 連續失敗協處 (2 次失敗自動開工單) | `MOBILE_PASS` | 2026-09-10 | ✅ 測試者確認手機實測通過。 |
+| **M1-02** | 需求調查表一鍵送出與防呆檢核 | `MOBILE_PASS` | 2026-09-10 | ✅ 測試者確認手機實測通過。 |
+| **M1-03** | 客戶身分綁定 | `MOBILE_PASS` | 2026-09-10 | ✅ 測試者確認手機實測通過。 |
+| **M1-04** | 月嫂身分綁定（王美華 / staff `1`） | `MOBILE_PASS / PROVIDER_PASS` | 2026-09-10 | ✅ 手機完成正式綁定；canonical binding=`bound`、subject=`staff:1`，最新 Rich Menu binding outbox 已完成且無錯誤，LINE user menu readback 與新月嫂專屬選單一致。 |
+| **M1-05** | 管理角色綁定 | `MOBILE_PASS` | 2026-09-10 | ✅ 測試者確認手機實測通過。 |
+| **M1-06** | 管理後台正式解除 (Rich Menu 回復) | `MOBILE_PASS / PROVIDER_PASS` | 2026-09-10 | ✅ 首次回復因舊 provider menu ID 回覆 `404 richmenu not found` 而失敗；重新發布訪客選單（publication `#20`）後走正式 retry，binding=`revoked`、revocation=`completed`，LINE user Rich Menu readback 與新訪客選單一致。另重新發布客戶（`#21`）、月嫂（`#22`）、工會幹部（`#23`）選單，四套 provider existence readback 均為 HTTP 200，LINE 全域預設亦指向新訪客選單；測試者確認手機實測通過。 |
+| **M2-01** | 確定性 Tier 1 | `MOBILE_PASS` | 2026-09-10 | ✅ 測試者確認手機實測通過。 |
+| **M2-02** | 正式 QA + Gemini 語意選擇 | `MOBILE_PASS` | 2026-09-10 | ✅ 測試者確認手機實測通過。 |
+| **M2-03** | 非 ready QA 不得自動回答 | `MOBILE_PASS` | 2026-09-10 | ✅ 測試者確認手機實測通過。 |
+| **M2-04** | 模糊問題與 unsupported | `MOBILE_PASS` | 2026-09-10 | ✅ 測試者確認手機實測通過。 |
+| **M2-05** | 明確轉真人 | `MOBILE_PASS` | 2026-09-10 | ✅ 測試者確認手機實測通過。 |
+| **M2-06** | Feedback | `MOBILE_PASS` | 2026-09-10 | ✅ 測試者確認手機實測通過。 |
+| **M3-01** | Criteria snapshot / term diff | `REPO_LOCAL_PASS / USER_VERIFIED` | 2026-09-11 | ✅ 使用者已驗證；initial criteria、criteria diff、受影響 recipient 精確重送及 stale fail-closed 聚焦測試亦通過。 |
+| **M3-02** | Caregiver willingness | `REPO_LOCAL_PASS / USER_VERIFIED` | 2026-09-11 | ✅ 使用者已驗證：月嫂已在 LINE 回覆願意；willingness event、receipt、lineage/readback 聚焦測試亦通過。 |
+| **M3-03** | Zero Pool 協商 | `REPO_LOCAL_PASS / MOBILE_PASS` | 2026-09-11 | ✅ 手機實測通過：Zero Pool 會自動詢問客戶；客戶同意調整後，工會可完成正式訂單條件修改，並以更新後內容再次詢問原月嫂。既有 zero-pool preview/apply、接受／不接受、stale fail-closed、outbox/owner handoff 聚焦測試亦通過。 |
+| **M3-04** | Match Success 雙方 recipient | `REPO_LOCAL_PASS / MOBILE_NOT_RUN` | 2026-09-10 | ✅ accepted decision 僅建立 conversion request，並精確投影 customer／caregiver 兩個不同 recipient intent；雙手機與真 LINE provider 未執行。 |
 
 ---
 
@@ -659,15 +673,20 @@ POST /api/v1/matching/coordination/caregiver-willingness/apply
 
 ---
 
-## M3-03 Zero Pool 協商
+## M3-03 已聯繫零意願分流
 
 ### Agent 前置
 
-準備一筆 current matching package，確保合法計算結果為 zero pool；不得直接 INSERT zero-pool event。
+準備一筆 current matching package 與**非空且已實際聯繫**的候選池；不得直接 INSERT zero-pool event。初次搜尋結果為零不是本案例，不應產生 LINE 通知。
+
+本案例分成互斥的兩條 current 路徑：
+
+- 全員完成或逾時、無人願意，但至少有一筆「調整條件」：AI 彙整去重後詢問客戶。
+- 全員完成或逾時、無人願意，且沒有調整條件：不詢問客戶；工會 LIFF 顯示人工跟進待辦，並向唯一啟用的工會群組排入一次去敏 Flex 通知。
 
 ### 手機操作（帳號 A）
 
-收到替代條件 proposal，選擇：
+有調整條件時，帳號 A 收到替代條件 proposal，選擇：
 
 - 接受調整。
 - 保留原需求。
@@ -686,6 +705,8 @@ POST /api/v1/matching/coordination/customer-decision/apply
 - proposal → customer decision 有完整 lineage。
 - 不接受時不應偷偷改原訂單條件。
 - 接受時後續變更必須交由正確 owner，不由 Matching 跨 owner 直寫。
+- 無調整條件時，客戶不應收到協商訊息；工會待辦須顯示案件編號、聯繫人數、沒有意願與逾時分計數，以及群組通知狀態。
+- 同一 pool response round 不重複排入群組通知；新增候選、新的候選資訊、願意回應、調整條件或案件終結會使 current 人工待辦消失，並取消尚未送出的通知。
 
 ---
 

@@ -57,7 +57,7 @@ Agent 任務分級、交付與治理路由以 `document/架構重整/00_Agent任
 
 owner／aggregate version 是 business mutation 的主要 optimistic concurrency control。`PreviewFingerprint` 只用於真正跨 request 的 `Preview → human Confirm → Apply`；新增 fingerprint／digest／snapshot token 前，必須指出具體 race、現有 version 為何不足及唯一 failure meaning。stale／version conflict 必須是 typed conflict，不得以 generic 500 或 blind retry 掩蓋。
 
-DB 變更須 additive、可追溯，並區分 fresh bootstrap、preserve-data upgrade、fixture reset 與 production migration。一般任務不包含 `union_db`、production、reset、replacement、`--switch` 或 destructive operation Authority。DB 任務依 `10_Global_保留資料Migration與Cutover_Subsystem.md#9-agent-與開發者-db-變更執行門` 執行並回報 `PASS | BLOCKED | NOT_RUN`。
+DB 變更須 additive、可追溯，並區分 fresh bootstrap、preserve-data upgrade、fixture reset 與 production migration。本機 `APP_ENV=development` 且連線目標為 localhost 時，`union_db` 與 `lu_test_*` 都可在 current task 明確 scope 內直接異動；已有 owner Query／Preview／Apply 時仍須走正式 writer 並保存 before／after 與 receipt。一般任務不包含 production、external provider、reset、replacement、`--switch` 或 destructive operation Authority。DB 任務依 `10_Global_保留資料Migration與Cutover_Subsystem.md#9-agent-與開發者-db-變更執行門` 執行並回報 `PASS | BLOCKED | NOT_RUN`。
 
 ## 5. 驗證、文件與資料
 

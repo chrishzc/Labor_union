@@ -1,5 +1,5 @@
 {
-  "version": 4,
+  "version": 5,
   "menus": [
     {
       "id": "default_menu",
@@ -61,11 +61,11 @@
       "set_as_default": false,
       "chat_bar_text": "工會管理",
       "size": {"width": 2500, "height": 1686},
-      "appearance": {"background_color": "#ECFDF5", "image_mode": "generated", "image_path": "line/union_staff_menu_v2.png", "image_asset_id": null},
+      "appearance": {"background_color": "#ECFDF5", "image_mode": "generated", "image_path": "line/union_staff_menu_v3.jpg", "image_asset_id": null},
       "buttons": [
         {"id":"staff_review","label":"待辦工作台","text_color":"#FFFFFF","background_color":"#047857","bounds":{"x":0,"y":0,"width":1250,"height":843},"action":{"type":"uri","text":null,"uri":"?target=staff_review","uri_source":"liff","data":null},"border_radius":54},
         {"id":"customer_service","label":"客服中心","text_color":"#FFFFFF","background_color":"#059669","bounds":{"x":1250,"y":0,"width":1250,"height":843},"action":{"type":"uri","text":null,"uri":"?target=customer_service","uri_source":"liff","data":null},"border_radius":54},
-        {"id":"anomalies_center","label":"異常中心","text_color":"#FFFFFF","background_color":"#DC2626","bounds":{"x":0,"y":843,"width":1250,"height":843},"action":{"type":"uri","text":null,"uri":"?target=anomalies_center","uri_source":"liff","data":null},"border_radius":54},
+        {"id":"order_tracking","label":"狀態追蹤","text_color":"#FFFFFF","background_color":"#4F46E5","bounds":{"x":0,"y":843,"width":1250,"height":843},"action":{"type":"uri","text":null,"uri":"?target=order_tracking","uri_source":"liff","data":null},"border_radius":54},
         {"id":"ops_dashboard","label":"營運摘要","text_color":"#FFFFFF","background_color":"#2563EB","bounds":{"x":1250,"y":843,"width":1250,"height":843},"action":{"type":"uri","text":null,"uri":"?target=dashboard","uri_source":"liff","data":null},"border_radius":54}
       ]
     }

@@ -6,6 +6,7 @@ Description: 實作 LINE Delivery 任務的 MySQL 讀寫、租約、重試與查
 from __future__ import annotations
 
 from datetime import timedelta
+import json
 from typing import Any
 
 from pymysql.err import IntegrityError
@@ -37,6 +38,7 @@ from subsystems.line.delivery_contracts import (
     ClaimLineDeliveryTasksQuery,
     EnqueueLineDeliveryResult,
     LineDeliveryCommandOutcome,
+    LineReplyOpportunity,
     RecordLineDeliveryAttemptCommand,
     RecordLineDeliveryAttemptResult,
     provider_attempt_outcome,
@@ -81,6 +83,32 @@ class MySqlLineDeliveryTaskRepository:
             cursor.execute(_SELECT_SQL, (task_id.value,))
             row = optional_row(cursor.fetchone())
         return None if row is None else _snapshot(row)
+
+    def reply_opportunity(
+        self,
+        correlation_id: CorrelationId,
+    ) -> LineReplyOpportunity | None:
+        event_identity = _line_event_identity(correlation_id)
+        if event_identity is None:
+            return None
+        with self._connection.cursor() as cursor:
+            cursor.execute(_REPLY_OPPORTUNITY_SQL, (event_identity,))
+            row = optional_row(cursor.fetchone())
+        if row is None:
+            return None
+        try:
+            payload = json.loads(canonical_json_value(row["payload_snapshot"]))
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            return None
+        reply_token = payload.get("replyToken") if isinstance(payload, dict) else None
+        if not isinstance(reply_token, str) or not reply_token.strip():
+            return None
+        if payload.get("mode") == "standby":
+            return None
+        return LineReplyOpportunity(
+            reply_token.strip(),
+            aware_utc(row["received_at_utc"]) + timedelta(seconds=45),
+        )
 
     def claim(
         self,
@@ -165,7 +193,10 @@ class MySqlLineDeliveryTaskRepository:
             plan = plan_delivery_attempt(
                 policy,
                 completed_attempts=completed_attempts,
-                outcome=provider_attempt_outcome(command.provider_outcome),
+                outcome=provider_attempt_outcome(
+                    command.provider_outcome,
+                    retry_allowed=command.retry_allowed,
+                ),
                 completed_at=command.completed_at,
                 retry_after_seconds=command.provider_outcome.retry_after_seconds,
             )
@@ -685,6 +716,10 @@ _SELECT_SQL = f"SELECT {_SELECT_COLUMNS} FROM line_delivery_tasks WHERE id=%s"
 _SELECT_BY_KEY_SQL = (
     f"SELECT {_SELECT_COLUMNS} FROM line_delivery_tasks WHERE idempotency_key=%s"
 )
+_REPLY_OPPORTUNITY_SQL = (
+    "SELECT payload_snapshot,received_at_utc FROM line_inbox_events "
+    "WHERE event_identity=%s AND event_type='message' AND source_type='user'"
+)
 _CLAIM_CANDIDATES_SQL = (
     f"SELECT {_SELECT_COLUMNS} FROM line_delivery_tasks WHERE "
     "source_aggregate_type<>'legacy_line_task' AND "
@@ -755,6 +790,15 @@ _CANCEL_NOTIFICATION_RULE_TASKS_SQL = (
     "WHERE id IN ({placeholders}) AND processing_status IN "
     "('pending','retryable_failed','processing')"
 )
+
+
+def _line_event_identity(correlation_id: CorrelationId) -> str | None:
+    prefix = "line-event:"
+    value = correlation_id.value
+    if not value.startswith(prefix):
+        return None
+    identity = value[len(prefix):].strip()
+    return identity or None
 _ADMIN_ATTEMPTS_SQL = (
     "SELECT attempt_number,outcome,provider_outcome_type,provider_message_id,"
     "error_code,error_message,retry_after_seconds,started_at_utc,completed_at_utc,"

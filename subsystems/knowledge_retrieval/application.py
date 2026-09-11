@@ -1,4 +1,4 @@
-"""Knowledge review/publication and durable answer-request orchestration."""
+"""Knowledge publication and durable answer-request orchestration."""
 
 from __future__ import annotations
 
@@ -35,6 +35,7 @@ class KnowledgeApplication:
         return tuple(imported), tuple(skipped)
 
     def review(self, command) -> int:
+        """Preserved internal compatibility; current UI publishes drafts directly."""
         with self._unit_of_work() as unit_of_work:
             version = unit_of_work.knowledge.review(command)
             unit_of_work.commit()
@@ -46,11 +47,32 @@ class KnowledgeApplication:
             unit_of_work.commit()
         return version
 
+    def publish_and_request_index(self, command) -> tuple[int, int]:
+        return self._transition_and_request_index("publish", command)
+
+    def publish_many_and_request_index(self, commands) -> tuple[tuple[int, ...], int | None]:
+        commands = tuple(commands)
+        if not commands:
+            return (), None
+        with self._unit_of_work() as unit_of_work:
+            versions = tuple(
+                unit_of_work.knowledge.publish(command) for command in commands
+            )
+            job_id = unit_of_work.knowledge.request_index_build(
+                commands[0].actor.actor_id,
+                f"{commands[0].idempotency_key.value}:index",
+            )
+            unit_of_work.commit()
+        return versions, job_id
+
     def retire(self, command) -> int:
         with self._unit_of_work() as unit_of_work:
             version = unit_of_work.knowledge.retire(command)
             unit_of_work.commit()
         return version
+
+    def retire_and_request_index(self, command) -> tuple[int, int]:
+        return self._transition_and_request_index("retire", command)
 
     def request_index_build(self, actor_id: str, idempotency_key: str) -> int:
         with self._unit_of_work() as unit_of_work:
@@ -93,6 +115,17 @@ class KnowledgeApplication:
             result = unit_of_work.knowledge.retry_job(job_id, actor_id, idempotency_key)
             unit_of_work.commit()
         return result
+
+    def _transition_and_request_index(self, action: str, command) -> tuple[int, int]:
+        """Persist the lifecycle change and its required index job atomically."""
+        with self._unit_of_work() as unit_of_work:
+            version = getattr(unit_of_work.knowledge, action)(command)
+            job_id = unit_of_work.knowledge.request_index_build(
+                command.actor.actor_id,
+                f"{command.idempotency_key.value}:index",
+            )
+            unit_of_work.commit()
+        return version, job_id
 
     def _query(self, method: str, *args):
         with self._unit_of_work() as unit_of_work:

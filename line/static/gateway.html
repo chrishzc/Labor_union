@@ -169,6 +169,7 @@
     }
     const liffStateParams = parseLiffStateParams();
     const targetPage = urlParams.get('target') || liffStateParams.get('target');
+    const interactionReference = urlParams.get('ref') || liffStateParams.get('ref') || '';
     const targetPaths = {
         gateway: '/line-gateway',
         registration: '/line-bind',
@@ -183,9 +184,16 @@
         staff_review: '/line-mobile-admin?target=staff_review',
         staff_verification: '/line-identity?target=staff_verification',
         staff_payout: '/line-staff-payout',
+        order_tracking: '/line-mobile-admin?target=order_tracking',
         anomalies_center: '/line-mobile-admin?target=anomalies_center',
         dashboard: '/line-mobile-admin?target=dashboard'
     };
+    if (targetPage === 'candidate_contact' && /^[0-9a-f]{64}$/.test(interactionReference)) {
+        targetPaths.candidate_contact = `/line-candidate-contact?ref=${encodeURIComponent(interactionReference)}`;
+    }
+    if (targetPage === 'candidate_contact_customer' && /^[0-9a-f]{64}$/.test(interactionReference)) {
+        targetPaths.candidate_contact_customer = `/line-candidate-contact-customer?ref=${encodeURIComponent(interactionReference)}`;
+    }
     const actions = [
         {
             path: '/line-bind',

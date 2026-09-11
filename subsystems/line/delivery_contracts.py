@@ -24,6 +24,7 @@ from shared_kernel.validation import (
 
 _LEASE_OWNER_MAXIMUM_LENGTH = 191
 _PROVIDER_ERROR_MAXIMUM_LENGTH = 500
+_REPLY_TOKEN_MAXIMUM_LENGTH = 512
 _MAXIMUM_CLAIM_BATCH_SIZE = 100
 
 
@@ -38,6 +39,20 @@ class LineProviderOutcomeType(StrEnum):
     REJECTED = "rejected"
     UNAVAILABLE = "unavailable"
     TIMEOUT = "timeout"
+
+
+@dataclass(frozen=True, slots=True)
+class LineReplyOpportunity:
+    reply_token: str
+    expires_at: datetime
+
+    def __post_init__(self) -> None:
+        require_canonical_text(
+            self.reply_token,
+            "LINE reply token",
+            _REPLY_TOKEN_MAXIMUM_LENGTH,
+        )
+        _require_aware_datetime(self.expires_at)
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,11 +105,14 @@ class RecordLineDeliveryAttemptCommand:
     completed_at: datetime
     idempotency_key: IdempotencyKey
     correlation_id: CorrelationId
+    retry_allowed: bool = True
 
     def __post_init__(self) -> None:
         if self.task.task_id != self.lease.task_id:
             raise ValueError("LINE attempt lease does not belong to the task")
         _require_aware_datetime(self.completed_at)
+        if not isinstance(self.retry_allowed, bool):
+            raise TypeError("LINE attempt retry_allowed must be bool")
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,10 +131,14 @@ class CancelLineDeliveryTaskCommand:
 
 def provider_attempt_outcome(
     provider_outcome: LineProviderOutcome,
+    *,
+    retry_allowed: bool = True,
 ) -> LineDeliveryAttemptOutcome:
     if provider_outcome.outcome_type is LineProviderOutcomeType.SUCCESS:
         return LineDeliveryAttemptOutcome.SUCCESS
     if provider_outcome.outcome_type is LineProviderOutcomeType.REJECTED:
+        return LineDeliveryAttemptOutcome.TERMINAL_FAILURE
+    if not retry_allowed:
         return LineDeliveryAttemptOutcome.TERMINAL_FAILURE
     return LineDeliveryAttemptOutcome.RETRYABLE_FAILURE
 
@@ -176,6 +198,7 @@ __all__ = [
     "LineDeliveryCommandOutcome",
     "LineProviderOutcome",
     "LineProviderOutcomeType",
+    "LineReplyOpportunity",
     "RecordLineDeliveryAttemptCommand",
     "RecordLineDeliveryAttemptResult",
     "provider_attempt_outcome",

@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<!-- Candidate contact LIFF: structured questions, conditional adjustments, or no interest. -->
+<html lang="zh-Hant-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>提出疑問或無法承接</title>
+  <style>
+    :root {
+      --green: #06c755;
+      --green-dark: #08783b;
+      --ink: #17231c;
+      --muted: #607067;
+      --line: #d9e5dc;
+      --soft: #f2faf5;
+      --danger: #a92323;
+      --surface: #ffffff;
+      --shadow: 0 16px 42px rgba(19, 72, 42, .12);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      padding: 16px 12px 38px;
+      background: linear-gradient(165deg, #effaf3 0%, #f9fbfa 55%, #eef7f1 100%);
+      color: var(--ink);
+      font-family: "Noto Sans TC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main { width: 100%; max-width: 640px; margin: 0 auto; }
+    .hero, .panel {
+      border: 1px solid rgba(8, 120, 59, .12);
+      border-radius: 20px;
+      background: rgba(255,255,255,.97);
+      box-shadow: var(--shadow);
+    }
+    .hero { padding: 22px 20px; margin-bottom: 13px; }
+    .eyebrow { margin: 0 0 5px; color: var(--green-dark); font-size: 13px; font-weight: 800; }
+    h1 { margin: 0 0 9px; font-size: 24px; line-height: 1.35; }
+    .lead, .help { color: var(--muted); line-height: 1.6; }
+    .lead { margin: 0; }
+    .case-line { margin: 13px 0 0; padding: 10px 12px; border-radius: 10px; background: var(--soft); font-weight: 700; }
+    .panel { padding: 18px; }
+    .status { margin-bottom: 14px; padding: 12px 13px; border-radius: 12px; background: #eef7ff; line-height: 1.55; }
+    .status.error { color: var(--danger); background: #fff0f0; }
+    fieldset { margin: 0; padding: 0; border: 0; }
+    legend { margin-bottom: 4px; font-size: 18px; font-weight: 800; }
+    .help { margin: 0 0 13px; font-size: 13px; }
+    .choices { display: grid; gap: 10px; }
+    .issue-card {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--surface);
+      overflow: hidden;
+    }
+    .issue-card.selected { border-color: var(--green); box-shadow: 0 0 0 2px rgba(6,199,85,.12); }
+    .issue-head { display: flex; gap: 11px; align-items: flex-start; padding: 14px; cursor: pointer; }
+    .issue-head input { width: 20px; height: 20px; margin: 1px 0 0; accent-color: var(--green); }
+    .issue-title { display: block; font-weight: 800; }
+    .issue-desc { display: block; margin-top: 3px; color: var(--muted); font-size: 13px; }
+    .issue-fields { display: none; padding: 0 14px 14px 45px; }
+    .issue-card.selected .issue-fields { display: grid; gap: 9px; }
+    select, textarea {
+      width: 100%;
+      padding: 11px 12px;
+      border: 1px solid #b8c9bd;
+      border-radius: 10px;
+      background: #fff;
+      color: var(--ink);
+      font: inherit;
+      font-size: 16px;
+    }
+    textarea { min-height: 82px; resize: vertical; }
+    select:focus, textarea:focus, input:focus-visible, button:focus-visible {
+      outline: 3px solid rgba(6,199,85,.23);
+      outline-offset: 2px;
+    }
+    .no-interest { margin-top: 14px; border-color: #e0caca; }
+    .no-interest.selected { border-color: #ad4b4b; box-shadow: 0 0 0 2px rgba(169,35,35,.1); }
+    .boundary { margin: 16px 0; padding: 12px 13px; border-left: 4px solid var(--green); border-radius: 8px; background: var(--soft); color: #31543f; font-size: 13px; line-height: 1.55; }
+    button {
+      width: 100%; min-height: 50px; border: 0; border-radius: 13px;
+      padding: 13px 16px; background: var(--green); color: #fff;
+      font: inherit; font-size: 17px; font-weight: 800; cursor: pointer;
+    }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .success { padding: 18px; border-radius: 14px; background: var(--soft); color: var(--green-dark); line-height: 1.7; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+<main>
+  <header class="hero">
+    <p class="eyebrow">新竹市月子工會</p>
+    <h1>提出疑問或無法承接</h1>
+    <p class="lead">可提出需要確認的資訊或希望客戶調整的條件；若單純不想承接，請選擇「沒有意願」。</p>
+    <p id="caseLine" class="case-line">正在確認案件與身分…</p>
+  </header>
+  <section class="panel">
+    <div id="status" class="status" role="status" aria-live="polite">正在載入表單…</div>
+    <form id="responseForm" hidden>
+      <fieldset>
+        <legend>選擇項目</legend>
+        <p class="help">前七項可以複選。每一項請分別選擇「確認資訊」或「調整條件」。</p>
+        <div id="choices" class="choices"></div>
+        <label class="issue-card no-interest" id="noInterestCard">
+          <span class="issue-head">
+            <input type="checkbox" id="noInterest">
+            <span><span class="issue-title">8. 沒有意願</span><span class="issue-desc">沒有疑問，也不考慮承接這個案子。</span></span>
+          </span>
+        </label>
+      </fieldset>
+      <p class="boundary">「調整條件」只代表客戶修改後可以再詢問您，不會直接把您標示為願意承接。</p>
+      <button type="submit" id="submitButton">送出回應</button>
+    </form>
+    <div id="success" class="success" hidden tabindex="-1"></div>
+  </section>
+</main>
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<script>
+  const categories = [
+    ["service_region", "服務地區", "服務縣市、區域或詳細地點"],
+    ["service_dates", "服務日期／檔期", "開始日、結束日或部分日期"],
+    ["daily_service_window", "每日服務時段", "每天可配合的開始與結束時間"],
+    ["daily_service_hours", "每日服務時數", "每天可服務的時數"],
+    ["cooking_requirement", "下廚需求", "料理內容或是否需要下廚"],
+    ["transport_parking_floor", "交通、停車或樓層", "停車、交通、電梯或樓層問題"],
+    ["personal_reason", "個人因素", "只填本次媒合必要內容，避免敏感細節"]
+  ];
+  const params = new URLSearchParams(location.search);
+  const reference = params.get("ref") || "";
+  const studioPreview = params.get("studio_preview") === "1";
+  let lineIdToken = "";
+
+  function renderChoices() {
+    document.getElementById("choices").innerHTML = categories.map((item, index) => `
+      <section class="issue-card" data-category="${item[0]}">
+        <label class="issue-head">
+          <input type="checkbox" class="issue-toggle" value="${item[0]}">
+          <span><span class="issue-title">${index + 1}. ${item[1]}</span><span class="issue-desc">${item[2]}</span></span>
+        </label>
+        <div class="issue-fields">
+          <label><span class="issue-desc">這一項要做什麼？</span>
+            <select class="issue-mode" aria-label="${item[1]}的處理方式">
+              <option value="information_question">確認資訊</option>
+              <option value="condition_adjustment">調整條件</option>
+            </select>
+          </label>
+          <label><span class="issue-desc">請具體說明</span>
+            <textarea class="issue-detail" maxlength="500" aria-label="${item[1]}的問題或調整內容" placeholder="例如：請問地址附近是否有停車位？"></textarea>
+          </label>
+        </div>
+      </section>`).join("");
+  }
+
+  function bindInteractions() {
+    const noInterest = document.getElementById("noInterest");
+    document.querySelectorAll(".issue-toggle").forEach(input => {
+      input.addEventListener("change", () => {
+        input.closest(".issue-card").classList.toggle("selected", input.checked);
+        if (input.checked) {
+          noInterest.checked = false;
+          document.getElementById("noInterestCard").classList.remove("selected");
+        }
+      });
+    });
+    noInterest.addEventListener("change", () => {
+      document.getElementById("noInterestCard").classList.toggle("selected", noInterest.checked);
+      if (noInterest.checked) {
+        document.querySelectorAll(".issue-toggle").forEach(input => {
+          input.checked = false;
+          input.closest(".issue-card").classList.remove("selected");
+        });
+      }
+    });
+  }
+
+  async function initialize() {
+    renderChoices();
+    bindInteractions();
+    if (studioPreview) {
+      document.getElementById("caseLine").textContent = "案件編號：CASE-2026-018";
+      showStatus("安全預覽模式：不會讀取或送出正式資料。", false);
+      document.getElementById("responseForm").hidden = false;
+      document.getElementById("submitButton").disabled = true;
+      return;
+    }
+    if (!/^[0-9a-f]{64}$/.test(reference)) return showStatus("連結無效，請回到案件卡片重新開啟。", true);
+    try {
+      const configResponse = await fetch("/api/v1/line/identity/runtime-config");
+      const config = await configResponse.json();
+      const liffId = config.data?.liff_id;
+      if (!configResponse.ok || !liffId) throw new Error("LIFF 尚未完成設定。");
+      await liff.init({liffId});
+      if (!liff.isLoggedIn()) { liff.login({redirectUri: location.href}); return; }
+      lineIdToken = liff.getIDToken() || "";
+      if (!lineIdToken) throw new Error("無法取得 LINE 登入憑證，請重新開啟此頁。");
+      const result = await request("/api/v1/line/candidate-contact/query", {
+        line_id_token: lineIdToken,
+        interaction_reference: reference
+      });
+      document.getElementById("caseLine").textContent = `案件編號：${result.data.case_no}・月嫂：${result.data.staff_name}`;
+      if (result.data.status !== "open") throw new Error("這次回應已完成或已超過 24 小時期限。");
+      document.getElementById("responseForm").hidden = false;
+      showStatus(`請於 ${new Date(result.data.deadline_at).toLocaleString("zh-TW")} 前送出。`, false);
+    } catch (error) { showStatus(error.message || "目前無法開啟表單。", true); }
+  }
+
+  document.getElementById("responseForm").addEventListener("submit", async event => {
+    event.preventDefault();
+    const noInterest = document.getElementById("noInterest").checked;
+    const issues = [];
+    for (const card of document.querySelectorAll(".issue-card[data-category]")) {
+      if (!card.querySelector(".issue-toggle").checked) continue;
+      const detail = card.querySelector(".issue-detail").value.trim();
+      if (!detail) { card.querySelector(".issue-detail").focus(); return showStatus("請填寫每個已選項目的具體內容。", true); }
+      issues.push({category: card.dataset.category, mode: card.querySelector(".issue-mode").value, detail});
+    }
+    if (!noInterest && !issues.length) return showStatus("請至少選擇一個項目，或選擇「沒有意願」。", true);
+    const button = document.getElementById("submitButton");
+    button.disabled = true;
+    try {
+      const result = await request("/api/v1/line/candidate-contact/submit", {
+        line_id_token: lineIdToken,
+        interaction_reference: reference,
+        no_interest: noInterest,
+        issues,
+        idempotency_key: `candidate-contact-liff:${crypto.randomUUID()}`
+      });
+      document.getElementById("responseForm").hidden = true;
+      document.getElementById("success").hidden = false;
+      document.getElementById("success").textContent = result.data.customer_message_queued
+        ? "已送出。需要確認的資訊會由助理直接詢問客戶。"
+        : "已送出，謝謝您的回應。";
+      document.getElementById("success").focus();
+    } catch (error) { showStatus(error.message || "回應未送出，請稍後再試。", true); button.disabled = false; }
+  });
+
+  async function request(url, body) {
+    const response = await fetch(url, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+    const result = await response.json();
+    if (!response.ok) throw new Error(apiErrorMessage(result));
+    return result;
+  }
+  function apiErrorMessage(result) {
+    const candidates = [
+      result?.error?.message,
+      result?.detail?.error?.message,
+      result?.detail?.message,
+      result?.detail
+    ];
+    for (const candidate of candidates) {
+      if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+    }
+    const fieldErrors = result?.detail?.error?.field_errors || result?.detail;
+    if (Array.isArray(fieldErrors)) {
+      const messages = fieldErrors
+        .map(item => typeof item?.msg === "string" ? item.msg.trim() : "")
+        .filter(Boolean);
+      if (messages.length) return messages.join("；");
+    }
+    return "目前無法確認案件與身分，請稍後重新開啟此頁。";
+  }
+  function showStatus(message, error) {
+    const status = document.getElementById("status");
+    status.textContent = message;
+    status.className = error ? "status error" : "status";
+  }
+  initialize();
+</script>
+</body>
+</html>

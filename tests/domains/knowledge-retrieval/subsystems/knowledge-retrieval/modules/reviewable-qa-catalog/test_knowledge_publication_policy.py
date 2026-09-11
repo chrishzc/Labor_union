@@ -1,19 +1,18 @@
-from domains.knowledge_retrieval.publication import KnowledgeState, KnowledgeTransitionError, next_knowledge_state
-from infrastructure.mysql.knowledge_retrieval_repository import MySqlKnowledgeRetrievalRepository, _answer
+from domains.knowledge_retrieval.publication import KnowledgeState, next_knowledge_state
+from infrastructure.mysql.knowledge_retrieval_repository import (
+    MySqlKnowledgeRetrievalRepository,
+    _answer,
+    _unsupported_faq_payload,
+)
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from subsystems.knowledge_retrieval.answer_query import _format_cited_answer
-from subsystems.knowledge_retrieval.contracts import ReviewKnowledgeItemCommand
+from subsystems.knowledge_retrieval.contracts import PublishKnowledgeItemCommand
 
 
-def test_knowledge_requires_review_before_publication():
-    assert next_knowledge_state(KnowledgeState.DRAFT, "review") is KnowledgeState.REVIEWED
+def test_knowledge_draft_publishes_without_review():
+    assert next_knowledge_state(KnowledgeState.DRAFT, "publish") is KnowledgeState.PUBLISHED
+    # Preserved rows in the old intermediate state remain publishable.
     assert next_knowledge_state(KnowledgeState.REVIEWED, "publish") is KnowledgeState.PUBLISHED
-    try:
-        next_knowledge_state(KnowledgeState.DRAFT, "publish")
-    except KnowledgeTransitionError as error:
-        assert str(error) == "knowledge_state_conflict"
-    else:
-        raise AssertionError("draft knowledge must not publish without review")
 
 
 class _TransitionCursor:
@@ -48,6 +47,7 @@ class _QuestionRowsCursor:
             "question": "這個問題有答案嗎？",
             "request_status": "unsupported",
             "source_identity": None,
+            "feedback_outcome": None,
             "failure_code": None,
         },)
 
@@ -57,23 +57,23 @@ class _QuestionRowsConnection:
     def cursor(self): return self.cursor_instance
 
 
-def test_content_creator_may_review_their_own_qa_with_audited_actor() -> None:
+def test_content_creator_may_publish_their_own_qa_with_audited_actor() -> None:
     connection = _TransitionConnection()
-    command = ReviewKnowledgeItemCommand(
+    command = PublishKnowledgeItemCommand(
         41,
         ExpectedVersion(1),
         ActorContext("7"),
-        "owner reviewed bundled content",
-        IdempotencyKey("review-same-actor-41"),
-        CorrelationId("review-same-actor-41"),
+        "owner published bundled content",
+        IdempotencyKey("publish-same-actor-41"),
+        CorrelationId("publish-same-actor-41"),
     )
 
-    version = MySqlKnowledgeRetrievalRepository(connection).review(command)
+    version = MySqlKnowledgeRetrievalRepository(connection).publish(command)
 
     assert version == 2
     projection_updates = [entry for entry in connection.cursor_instance.executions if "UPDATE knowledge_items SET" in entry[0]]
     assert len(projection_updates) == 1
-    assert "reviewed_by_admin_user_id=%s" in projection_updates[0][0]
+    assert "published_by_admin_user_id=%s" in projection_updates[0][0]
     assert projection_updates[0][1][2] == 7
 
 
@@ -89,7 +89,19 @@ def test_question_observation_exposes_gap_without_line_identity() -> None:
     sql, parameters = connection.cursor_instance.executed
     assert "requester_line_user_id" not in sql
     assert "last_error_code" in sql
+    assert "feedback_outcome" in sql
+    assert "source_response_id" in sql
     assert parameters == ("unsupported", "unsupported", 50)
+
+
+def test_unsupported_question_routes_to_common_faq_topics() -> None:
+    payload = _unsupported_faq_payload()
+
+    assert "沒有答案" not in payload["text"]
+    assert "常見問答" in payload["text"]
+    assert [
+        item["action"]["text"] for item in payload["quickReply"]["items"]
+    ] == ["服務流程", "收費與補助", "查詢服務進度", "修改登記資料", "其他問題"]
 
 
 def test_published_answer_has_versioned_citations_and_non_authoritative_boundary():

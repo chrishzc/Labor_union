@@ -5,6 +5,7 @@ Description: 執行 LINE 耐久投遞，並在 provider 呼叫前重新確認任
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Callable
 
@@ -14,6 +15,7 @@ from subsystems.line.delivery_contracts import (
     ClaimLineDeliveryTasksQuery,
     LineProviderOutcome,
     LineProviderOutcomeType,
+    LineReplyOpportunity,
     RecordLineDeliveryAttemptCommand,
 )
 from subsystems.line.ports import LineMessagingProviderPort, LineUnitOfWorkPort
@@ -67,6 +69,74 @@ class LineDeliveryWorker:
         return tasks
 
     def _send(self, task: LineDeliveryTaskSnapshot) -> LineProviderOutcome:
+        reply = self._reply_opportunity(task)
+        if reply is not None and self._now() < reply.expires_at:
+            return self._reply(task, reply)
+        try:
+            return self._provider.send(task.request)
+        except Exception as error:
+            return LineProviderOutcome(
+                LineProviderOutcomeType.UNAVAILABLE,
+                error_code="line_provider_exception",
+                error_message=str(error)[:500] or "LINE provider exception",
+            )
+
+    def _reply_opportunity(
+        self,
+        task: LineDeliveryTaskSnapshot,
+    ) -> LineReplyOpportunity | None:
+        if (
+            task.request.source_aggregate_type != "knowledge_answer_request"
+            or task.completed_attempts != 0
+        ):
+            return None
+        with self._unit_of_work_factory() as unit_of_work:
+            resolver = getattr(unit_of_work.delivery_tasks, "reply_opportunity", None)
+            return (
+                resolver(task.request.correlation_id)
+                if callable(resolver)
+                else None
+            )
+
+    def _reply(
+        self,
+        task: LineDeliveryTaskSnapshot,
+        opportunity: LineReplyOpportunity,
+    ) -> LineProviderOutcome:
+        try:
+            message = json.loads(task.request.payload_json)
+            outcome = self._provider.reply(opportunity.reply_token, message)
+        except (TypeError, ValueError, json.JSONDecodeError) as error:
+            return LineProviderOutcome(
+                LineProviderOutcomeType.REJECTED,
+                error_code="line_reply_payload_invalid",
+                error_message=str(error)[:500] or "LINE reply payload is invalid",
+            )
+        except Exception as error:
+            return LineProviderOutcome(
+                LineProviderOutcomeType.UNAVAILABLE,
+                error_code="line_reply_outcome_uncertain",
+                error_message=str(error)[:500] or "LINE reply outcome is uncertain",
+            )
+        if outcome.outcome_type is LineProviderOutcomeType.RATE_LIMITED:
+            return self._send_push(task)
+        if (
+            outcome.outcome_type is LineProviderOutcomeType.UNAVAILABLE
+            and (outcome.error_code or "").startswith("line_http_")
+        ):
+            return self._send_push(task)
+        if outcome.outcome_type in {
+            LineProviderOutcomeType.TIMEOUT,
+            LineProviderOutcomeType.UNAVAILABLE,
+        }:
+            return LineProviderOutcome(
+                outcome.outcome_type,
+                error_code="line_reply_outcome_uncertain",
+                error_message="LINE reply outcome is uncertain; push fallback suppressed",
+            )
+        return outcome
+
+    def _send_push(self, task: LineDeliveryTaskSnapshot) -> LineProviderOutcome:
         try:
             return self._provider.send(task.request)
         except Exception as error:
@@ -112,6 +182,7 @@ class LineDeliveryWorker:
             self._now(),
             _attempt_key(task),
             task.request.correlation_id,
+            retry_allowed=outcome.error_code != "line_reply_outcome_uncertain",
         )
         with self._unit_of_work_factory() as unit_of_work:
             result = unit_of_work.delivery_tasks.record_attempt(command)

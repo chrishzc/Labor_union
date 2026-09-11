@@ -216,7 +216,7 @@ runtime `public_base_url` 產生公開網址。Chrome 已由工作室逐一實�
 - 客戶「已填過／尚未填過」選擇必須保存 canonical flow ID；未填過流程完成登記後才能完成同一 LINE 身分綁定。
 - LINE 管理中心使用 Customer Service bounded API client；成功 payload 轉 typed Pydantic view，transport/schema error 轉 typed client error。
 - Streamlit 只顯示 typed result 與提交 command，不包含 ticket transition 或 SQL 規則。
-- 已綁定且 enabled 的工會人員可由 `line-mobile-admin` LIFF 的獨立 target surface 使用待辦工作台、客服中心、異常中心與營運摘要。四個入口以 server-verified LIFF identity 與 current role-scoped LINE admin binding 取得既有 Admin owner 的 actor ID、角色與 capability；不得要求另一個 React／密碼／MFA Session，也不得把 LINE 憑證交換成可供一般後台使用的 Admin Session。各 owner 的 Query／Preview／Confirm／Apply 仍須以該 actor 重新驗證所需 capability。待辦工作台依 `29` 分組呈現 Client 資料異動、LINE Identity 客戶／月嫂重綁與身分異常、Scheduling 請假代班／改期，以及 Matching／Scheduling 媒合指派／重新媒合；各組只呼叫原 owner 的 bounded Query／Preview／Confirm／Apply，不建立 LINE-owned 共用 approval root。客服保留既有查看／回覆，異常與營運只讀取各自 owner 的 current Query，QA／Knowledge 審核留在 AI 事件工作室；其 server-side ID token、binding、version、receipt 與 outbox 規則不因共用 LIFF runtime 而改變。
+- 已綁定且 enabled 的工會人員可由 `line-mobile-admin` LIFF 的獨立 target surface 使用待辦工作台、客服中心、狀態追蹤與營運摘要。四個入口以 server-verified LIFF identity 與 current role-scoped LINE admin binding 取得既有 Admin owner 的 actor ID、角色與 capability；不得要求另一個 React／密碼／MFA Session，也不得把 LINE 憑證交換成可供一般後台使用的 Admin Session。各 owner 的 Query／Preview／Confirm／Apply 仍須以該 actor 重新驗證所需 capability。待辦工作台依 `29` 分組呈現 Client 資料異動、LINE Identity 客戶／月嫂重綁與身分異常、Scheduling 請假代班／改期，以及 Matching／Scheduling 媒合指派／重新媒合；各組只呼叫原 owner 的 bounded Query／Preview／Confirm／Apply，不建立 LINE-owned 共用 approval root。客服保留既有查看／回覆；狀態追蹤只讀取 Orders 的 current operational-stage projection，依案件編號查詢未完成訂單的目前階段、最後更新與下一步，不建立或改寫訂單 root；營運摘要仍只讀取其 owner 的 current Query。舊 `anomalies_center` target 僅作既有連結相容別名並導向 `order_tracking`。QA／Knowledge 審核留在 AI 事件工作室；其 server-side ID token、binding、version、receipt 與 outbox 規則不因共用 LIFF runtime 而改變。
 
 AI feedback 執行狀態（2026-08-26）：`approved-for-contract-first`。人工已授權補齊正式 feedback owner、
 root facts、privacy、typed Query／record／receipt／readback 與 durable manual-ticket linkage；只有 formal
@@ -314,10 +314,23 @@ allowlist、version、repository contract 與必要 `lu_test_*` schema release�
 
 | Asset | 原圖節點／業務作用 | Current owner source | 設計預覽邊界 |
 |---|---|---|---|
-| flex_dispatch | M1 Staff_Order_View 與 M3 派案意願調查：讓候選月嫂去敏查閱正式案件資訊並表達願意／不願意 | Scheduling Candidate Contact Pool、Orders case projection；LINE 只 render／deliver | 不代表已建立聯繫事件、delivery task 或送達；不得攜帶客戶姓名、電話、詳細地址 |
+| flex_dispatch | M1 Staff_Order_View 與 M3 派案意願調查：讓候選月嫂去敏查閱正式案件資訊；主動作為「願意承接」，另一動作固定為「提出疑問或無法承接」並開啟 recipient-bound LIFF | Scheduling Candidate Contact Pool、Orders case projection；LINE 只 render／deliver | 不代表已建立聯繫事件、delivery task 或送達；不得攜帶客戶姓名、電話、詳細地址；LIFF 不接受 query-string LINE 身分 |
 | flex_leave_confirm | M1 Client_Extension_Push 與 M3 Client_Leave_Notice：請客戶確認月嫂請假後順延或不同意並轉代班 | Scheduling leave request／canonical leave receipt／assignment service dates | 點擊只可形成 recipient-bound typed decision；卡片文字不得直接改 end_date、班表或代班 |
 | flex_alert_critical | M4 Step3_Push_Alert：將 committed HIGH escalation 的去敏摘要與安全處理入口通知已設定的幹部群 | Customer Service escalation；runtime alert target owner只提供 current recipient target；LINE負責delivery | 不顯示完整姓名、電話或 raw 摘要；不代表群組已設定、task 已送達或案件已被 claim |
-| flex_negotiation | M3 Zero_Pool_Engine／Client_Compromise_Push：呈現由 current criteria 與拒接 lineage 得出的人工選定調整方案 | Scheduling Matching Coordination criteria／willingness／zero-candidate preview | 不自動產生或套用條件、不直接改 Orders；客戶回覆後仍走 fresh owner Preview／Apply |
+| flex_negotiation | M3 Zero_Pool_Engine／Client_Compromise_Push：無人願意承接且候選池已完成回應時，由 AI 彙整 current criteria 與結構化回應後直接詢問客戶 | Scheduling Matching Coordination criteria／willingness／zero-candidate preview | 不自動套用條件、不直接改 Orders；客戶回覆後仍走 fresh owner Preview／Apply |
+
+2026-09-10 人工裁決，`flex_dispatch` 的候選回應契約固定如下：
+
+1. LIFF 固定提供服務地區、服務日期／檔期、每日服務時段、每日服務時數、下廚需求、交通／停車／樓層、個人因素，以及互斥的「沒有意願」八項。前七項可複選，且每項須標示為「確認資訊」或「調整條件」並提供結構化說明；第八項不要求自由文字。
+2. 「確認資訊」不是拒絕；AI 可直接使用已知 owner facts 回覆月嫂，資訊不足時直接向客戶詢問，不需工會人員先行核准。客戶回答後，月嫂須依最新資訊重新表達意願。
+3. 「調整條件」只代表條件修改後可重新詢問，不代表月嫂已承諾承接。只在候選池全員完成或逾期且仍無人願意承接時，AI 才彙整去重後一次詢問客戶；任一月嫂先表示願意時，不再發送尚未送出的其他問題或調整要求。
+4. 每次要求月嫂作出選擇的 LINE 訊息，以 provider 成功送達時間起算 24 小時；期限內未回覆記為獨立的「逾期未回」，算本輪完成但不得改寫成「沒有意願」。所有人提早完成時立即判斷，不等待滿 24 小時。
+5. AI 可直接發送確認與調整詢問，但不得直接修改 Orders／Assignments。客戶明確接受後仍由 owner workflow fresh-read／Preview／Apply；完成正式條件變更後，只重新詢問受該 criteria 影響的月嫂。
+6. 「初次搜尋沒有任何候選月嫂」與「已聯繫的非空候選池無人願意」是兩個不同狀態。前者不建立 LINE 通知或人工跟進項目，工會人員在媒合操作中直接看見搜尋結果為零；不得以空搜尋結果觸發客戶協商。
+7. 非空候選池全員已明確沒有意願或自 provider 成功送達後逾時，且無人願意、沒有尚待回答的確認資訊，並且沒有結構化調整條件，或客戶已對彙整條件回覆「可以調整／目前無法調整」時，Scheduling 衍生一筆工會人工跟進待辦。該待辦顯示於已驗證工會人員的 LIFF「媒合指派與重新媒合」，並透過唯一啟用的工會通知群組排入一次去敏 Flex 通知；內容只含案件編號、人數摘要與「待修改後重新詢問／客戶無法調整／無可協調條件」的高階原因，不含姓名、電話、地址、調整細節或拒絕自由文字。
+8. 人工跟進待辦以 current candidate-contact events 衍生，不另建競爭 root。每個 pool response round 只能排入一次群組通知；群組未設定、設定衝突或投遞失敗時，待辦仍須留在 LIFF 並顯示通知狀態。新增候選、工會完成正式條件修改後發出新的候選資訊、出現願意者、出現新一輪可協調條件，或案件離開洽談中時，該 current 待辦不再成立，尚未送出的群組通知必須取消。
+9. 同一 recipient-bound 聯繫在原 24 小時期限內，候選月嫂可更正自己的既有意願；每次更正均追加 immutable event，current projection 只採該候選人的最新結構化回覆。自己的既有 `willing` 不得把更正入口鎖死；但池內其他候選人已為 `willing`、案件或候選已失效、期限已過、recipient 不符時仍須拒絕且零寫入。
+10. 客戶對已彙整的調整條件回覆「目前無法調整」後，該批條件不再是可繼續協調的 current adjustment；不得再次推送同一批客戶協調卡，應由上述工會人工跟進與群組通知接手。回覆「可以調整」也不得要求不熟悉系統的客戶自行改單；系統建立「待工會修改後重新詢問」人工待辦並通知工會群組。工會待辦 LIFF 必須顯示該次客戶同意的結構化條件與受影響原候選人，並以兩個可恢復步驟完成：先呼叫 Orders Terms owner 的 fresh Query／Preview／Apply 且讀回正式收據，再預覽並向勾選的受影響月嫂發出新一輪候選資訊。後端只有查到晚於該次客戶同意、且 correlation 綁定相同 pool 的正式修改收據時才可開放重送；重送使用該客戶答覆事件與候選人組成穩定 idempotency identity。服務日期變更時，Scheduling 在重送交易內以 current Orders 起訖日 fresh-read、重驗該原候選完整可服務期間，更新候選聯繫期間及 coverage fingerprint 並追加前後日期事件後才排入新卡；任一步失敗整筆 rollback，不得沿用舊期間。新投遞建立新的 24 小時回覆窗口並解除舊待辦。若調整分類沒有可安全修改且可重新驗證的正式欄位（例如服務地區、交通／停車／樓層綜合項目或個人原因），LIFF 必須阻擋直接重送並轉由相應 owner／重新建立候選聯繫，不得代寫或把客戶同意誤報為已完成修改或月嫂願意承接。
 
 工作室可持有 closed asset identity、design revision、去敏固定文案與 owner-fact availability
 狀態，並在 owner facts 缺失時顯示明確 blocker。它不是 Flex 素材資料庫、provider payload API
@@ -359,6 +372,11 @@ projection composition、postback、delivery、provider 或 26 的 deferred-afte
   idempotency與typed receipt，resolve後才解除hold。
 - `reply_provider` direct path已由durable delivery task取代；Service Help只enqueue，不在webhook transaction呼叫
   provider。LINE provider仍只能由已提交task的worker執行；本規格不授權AI provider、deployment或新的外部副作用。
+- 2026-09-11 人工授權：一對一文字事件產生的 Knowledge answer／unsupported 最終回覆，已提交的
+  delivery task在原 webhook `replyToken` 可用期限內必須優先使用不計月額度的 Reply API；只有尚未嘗試
+  Reply且token不存在或已逾安全期限，或provider明確回覆 rate limit／server error 且確認本次未接受時，才可
+  改用既有Push。Invalid／used token、Reply timeout與transport unavailable都可能位於「已送出但尚未記錄」
+  crash window，禁止立即Push造成重複答案；所有其他主動、排程及人工客服通知維持Push。
 - runtime／LINE管理畫面的audit清單只能使用closed bounded typed view；具owner permission的普通業務值
   不遮罩，但raw details、token、secret、credential、storage locator或額外欄位一律在API client boundary
   fail closed，不得穿透Streamlit／React render。

@@ -1,4 +1,4 @@
-"""Capability-protected knowledge review, publication, indexing, and query APIs."""
+"""Capability-protected knowledge publication, indexing, and query APIs."""
 
 from __future__ import annotations
 
@@ -22,7 +22,6 @@ from subsystems.knowledge_retrieval.contracts import (
     IngestKnowledgeSourceCommand,
     PublishKnowledgeItemCommand,
     RetireKnowledgeItemCommand,
-    ReviewKnowledgeItemCommand,
 )
 
 router = APIRouter(prefix="/api/v1/knowledge", tags=["Knowledge Retrieval"])
@@ -104,23 +103,6 @@ def ingest_knowledge_item(
     return {"item_id": result[0], "created": result[1]}
 
 
-@router.post("/items/{item_id}/review")
-def review_knowledge_item(
-    item_id: int,
-    body: KnowledgeTransitionBody,
-    request: Request,
-    idempotency_key: str = Header(..., alias="Idempotency-Key"),
-    correlation_id: str = Header(..., alias="X-Correlation-ID"),
-    principal=Depends(require_knowledge_manager),
-):
-    command = _transition_command(
-        ReviewKnowledgeItemCommand, item_id, body, idempotency_key, correlation_id, principal
-    )
-    version = _call_knowledge(lambda: get_knowledge_application().review(command))
-    _set_knowledge_audit(request, "review", "knowledge_item", item_id, body.reason)
-    return {"item_id": item_id, "version": version}
-
-
 @router.post("/items/{item_id}/publish")
 def publish_knowledge_item(
     item_id: int,
@@ -133,9 +115,16 @@ def publish_knowledge_item(
     command = _transition_command(
         PublishKnowledgeItemCommand, item_id, body, idempotency_key, correlation_id, principal
     )
-    version = _call_knowledge(lambda: get_knowledge_application().publish(command))
+    version, index_job_id = _call_knowledge(
+        lambda: get_knowledge_application().publish_and_request_index(command)
+    )
     _set_knowledge_audit(request, "publish", "knowledge_item", item_id, body.reason)
-    return {"item_id": item_id, "version": version}
+    return {
+        "item_id": item_id,
+        "version": version,
+        "index_job_id": index_job_id,
+        "index_status": "requested",
+    }
 
 
 @router.post("/items/{item_id}/retire")
@@ -150,9 +139,16 @@ def retire_knowledge_item(
     command = _transition_command(
         RetireKnowledgeItemCommand, item_id, body, idempotency_key, correlation_id, principal
     )
-    version = _call_knowledge(lambda: get_knowledge_application().retire(command))
+    version, index_job_id = _call_knowledge(
+        lambda: get_knowledge_application().retire_and_request_index(command)
+    )
     _set_knowledge_audit(request, "retire", "knowledge_item", item_id, body.reason)
-    return {"item_id": item_id, "version": version}
+    return {
+        "item_id": item_id,
+        "version": version,
+        "index_job_id": index_job_id,
+        "index_status": "requested",
+    }
 
 
 @router.post("/indexes")

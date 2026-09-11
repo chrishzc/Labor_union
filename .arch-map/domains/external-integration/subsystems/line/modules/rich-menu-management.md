@@ -33,6 +33,7 @@
 - test_root: `ui_react/src/tests/line_rich_menu_draft_appearance_editor.test.tsx`
 - test_root: `ui_react/src/tests/line_rich_menu_publication_actions.test.tsx`
 - test_root: `ui_react/src/tests/line_rich_menu_query_flow.test.tsx`
+- test_root: `ui_react/src/tests/line_flex_design_preview.test.tsx`
 - integration_root: `ui_react/src/tests/line_management_page_real_data.test.tsx`
 - routing: `.arch-map/tests/domains/external-integration/subsystems/line/modules/rich-menu-management.md`
 

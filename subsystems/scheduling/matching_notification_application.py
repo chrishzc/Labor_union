@@ -689,6 +689,14 @@ def _validate_availability(
         ],
         as_of=datetime.now().date().isoformat(),
         facts_port=facts_port,
+        # The formal plan already owns the selected recipients. Revalidate
+        # schedule occupancy without reapplying candidate-search preferences.
+        filter_policy={
+            "region": False,
+            "cooking": False,
+            "preferred_service_days": False,
+            "daily_service_hours": False,
+        },
     )
     if result.get("feasibility") != "complete" or result.get("conflicts"):
         raise MatchingDecisionNotReadyError("matching plan is no longer fully available")

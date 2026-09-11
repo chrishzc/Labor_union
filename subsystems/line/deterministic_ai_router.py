@@ -89,6 +89,10 @@ _SERVICE_ALIASES = {
 }
 _SAFE_MENU_OPTIONS = ("服務與問答", "服務登記", "聯絡工會人員")
 _CLARIFICATION_OPTIONS = ("服務與問答", "聯絡工會人員")
+_SUBSIDY_SCOPE_CLARIFICATION_OPTIONS = (
+    "一般市民補助",
+    "低收／中低收入戶社福補助",
+)
 _CONFIRMED_HUMAN_ALIASES = {"專人客服", "轉接真人客服"}
 
 
@@ -126,6 +130,13 @@ class DeterministicLineRouter:
                 CATALOG_SOURCE_IDENTITY,
                 "confirmation",
                 100,
+            )
+
+        if _is_ambiguous_subsidy_scope(normalized):
+            return Clarification(
+                "subsidy_scope",
+                _SUBSIDY_SCOPE_CLARIFICATION_OPTIONS,
+                "subsidy_scope_ambiguous",
             )
 
         entry = entry_for_alias(normalized)
@@ -205,6 +216,29 @@ def _human_reason(text: str) -> str | None:
     if any(marker in text for marker in _HUMAN_MARKERS):
         return "explicit_human_request"
     return None
+
+
+def _is_ambiguous_subsidy_scope(text: str) -> bool:
+    compact = "".join(text.split())
+    if "補助" not in compact:
+        return False
+    if any(scope in compact for scope in ("社福", "低收入", "中低收入", "低收", "中低收")):
+        return False
+    if any(scope in compact for scope in ("市府", "市民", "一般市民", "一般產婦")):
+        return False
+    requested_fact = (
+        "多少",
+        "金額",
+        "幾元",
+        "時數",
+        "幾小時",
+        "小時",
+        "資格",
+        "符合",
+        "可以申請",
+        "能申請",
+    )
+    return any(marker in compact for marker in requested_fact)
 
 
 def _safe_menu(reason_code: str) -> SafeMenu:

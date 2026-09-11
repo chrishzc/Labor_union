@@ -3,12 +3,14 @@ Description: 管理候選聯繫池 workflow 與其 typed state，不建立正式
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from typing import Any, Callable, Mapping
+from urllib.parse import urlencode
 
-from domains.line.canonical_payload import canonical_line_payload_json
 from domains.line.delivery import (
     LineDeliveryRequest,
     LineMessageKind,
@@ -21,6 +23,7 @@ from infrastructure.mysql.order_information_repository import MySqlOrderInformat
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.identities import CorrelationId, IdempotencyKey
 from subsystems.scheduling.ports import unconfigured_connection_factory
+from subsystems.scheduling.matching_line_cards import candidate_contact_information_card
 from subsystems.scheduling.segmented_availability_query import (
     search_candidate_inquiry_availability,
 )
@@ -302,6 +305,7 @@ def _add_candidates_in_transaction(
             cursor.execute("INSERT INTO caregiver_candidate_contact_pools (case_no, created_by) VALUES (%s,%s)", (case_no, actor))
             pool_id = _positive_int(cursor.lastrowid, "pool_id")
         created_ids = []
+        new_candidate_created = False
         for candidate in validated:
             cursor.execute("SELECT id FROM caregiver_candidate_contact_entries WHERE pool_id=%s AND staff_id=%s AND active_marker=1 FOR UPDATE", (pool_id, candidate["staff_id"]))
             existing = cursor.fetchone()
@@ -310,7 +314,10 @@ def _add_candidates_in_transaction(
                 continue
             cursor.execute("INSERT INTO caregiver_candidate_contact_entries (pool_id, staff_id, service_start_date, service_end_date, coverage_fingerprint, active_marker) VALUES (%s,%s,%s,%s,%s,1)", (pool_id, candidate["staff_id"], candidate["case_period_start"], candidate["case_period_end"], candidate["coverage_fingerprint"]))
             created_ids.append(_positive_int(cursor.lastrowid, "candidate_id"))
+            new_candidate_created = True
         cursor.execute("INSERT INTO caregiver_candidate_contact_events (pool_id, candidate_id, event_type, event_key, actor, payload) VALUES (%s,NULL,'candidates_added',%s,%s,%s)", (pool_id, event_key, actor, json.dumps({"candidate_ids": created_ids}, sort_keys=True)))
+        if new_candidate_created:
+            _cancel_pending_manual_followup(cursor, pool_id)
         return {"pool_id": pool_id, "candidate_ids": created_ids, "status": "recorded"}
     finally:
         pass
@@ -613,6 +620,7 @@ def _apply_manual_information_confirmation_in_transaction(
             ),
         )
         event_id = _positive_int(cursor.lastrowid, "event_id")
+        _cancel_pending_manual_followup(cursor, state.pool_id)
         return {
             "status": "recorded",
             "event_id": event_id,
@@ -634,6 +642,47 @@ def preview_information(case_no: str, candidate_id: int, info_type: int):
         _close(connection)
 
 
+def preview_recontact_information(case_no: str, candidate_id: int, info_type: int):
+    """Preview current Orders dates and recheck the original candidate against them."""
+
+    case_no = _required_text(case_no, "case_no", 50)
+    candidate_id = _positive_int(candidate_id, "candidate_id")
+    if info_type not in {1, 2}:
+        raise ValueError("info_type_invalid")
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT orders.status,orders.start_date,orders.end_date,entry.staff_id "
+                "FROM orders JOIN caregiver_candidate_contact_pools pool "
+                "ON pool.case_no=orders.case_no "
+                "JOIN caregiver_candidate_contact_entries entry ON entry.pool_id=pool.id "
+                "WHERE orders.case_no=%s AND entry.id=%s "
+                "AND entry.active_marker=1 AND entry.status='active'",
+                (case_no, candidate_id),
+            )
+            row = cursor.fetchone()
+        if not isinstance(row, Mapping):
+            raise ValueError("candidate_contact_not_found")
+        if row.get("status") != "洽談中":
+            raise ValueError("candidate_contact_order_not_negotiating")
+        service_period = _current_service_period(row)
+        _require_full_coverage(
+            case_no,
+            int(row["staff_id"]),
+            service_period[0].isoformat(),
+            service_period[1].isoformat(),
+        )
+        return MySqlOrderInformationRepository(connection).preview_candidate_information(
+            case_no,
+            candidate_id,
+            info_type,
+            service_period=service_period,
+        )
+    finally:
+        _close(connection)
+
+
 def send_information(case_no: Any, candidate_id: Any, info_type: Any, actor: Any, event_key: Any, preview_fingerprint: str | None = None) -> dict[str, Any]:
     case_no = _required_text(case_no, "case_no", 50)
     candidate_id = _positive_int(candidate_id, "candidate_id")
@@ -648,6 +697,35 @@ def send_information(case_no: Any, candidate_id: Any, info_type: Any, actor: Any
     )
 
 
+def send_recontact_information(
+    case_no: Any,
+    candidate_id: Any,
+    info_type: Any,
+    actor: Any,
+    event_key: Any,
+    preview_fingerprint: str | None = None,
+) -> dict[str, Any]:
+    case_no = _required_text(case_no, "case_no", 50)
+    candidate_id = _positive_int(candidate_id, "candidate_id")
+    actor = _required_text(actor, "actor", 100)
+    event_key = _required_text(event_key, "event_key", 93)
+    if info_type not in {1, 2}:
+        raise ValueError("info_type_invalid")
+    return _run_in_application_uow(
+        lambda connection, cursor: _send_information_in_transaction(
+            connection,
+            cursor,
+            case_no,
+            candidate_id,
+            info_type,
+            actor,
+            event_key,
+            preview_fingerprint,
+            refresh_period_from_order=True,
+        )
+    )
+
+
 def _send_information_in_transaction(
     connection: Any,
     cursor: Any,
@@ -657,12 +735,18 @@ def _send_information_in_transaction(
     actor: str,
     event_key: str,
     preview_fingerprint: str | None = None,
+    refresh_period_from_order: bool = False,
 ) -> dict[str, Any]:
     try:
-        cursor.execute("SELECT p.id AS pool_id, e.staff_id, e.service_start_date, e.service_end_date, s.line_user_id FROM caregiver_candidate_contact_pools p JOIN caregiver_candidate_contact_entries e ON e.pool_id=p.id JOIN staff s ON s.id=e.staff_id WHERE p.case_no=%s AND e.id=%s AND e.active_marker=1 FOR UPDATE", (case_no, candidate_id))
+        cursor.execute("SELECT p.id AS pool_id, e.staff_id, e.service_start_date, e.service_end_date, "
+                       "e.coverage_fingerprint,"
+                       "s.line_user_id,o.status AS order_status,o.start_date AS order_start_date,"
+                       "o.end_date AS order_end_date FROM caregiver_candidate_contact_pools p "
+                       "JOIN caregiver_candidate_contact_entries e ON e.pool_id=p.id "
+                       "JOIN staff s ON s.id=e.staff_id JOIN orders o ON o.case_no=p.case_no "
+                       "WHERE p.case_no=%s AND e.id=%s AND e.active_marker=1 FOR UPDATE", (case_no, candidate_id))
         entry = cursor.fetchone()
         if not isinstance(entry, Mapping): raise ValueError("candidate_contact_not_found")
-        _require_full_coverage(case_no, entry["staff_id"], str(entry["service_start_date"]), str(entry["service_end_date"]))
         recipient = entry.get("line_user_id")
         if not isinstance(recipient, str) or not recipient.strip(): raise ValueError("caregiver_has_no_line_delivery_identity")
         cursor.execute("SELECT id, candidate_id, event_type FROM caregiver_candidate_contact_events WHERE event_key=%s FOR UPDATE", (event_key,))
@@ -671,19 +755,89 @@ def _send_information_in_transaction(
             if existing.get("candidate_id") != candidate_id or existing.get("event_type") != f"info_{info_type}_sent":
                 raise ValueError("candidate_information_idempotency_conflict")
             return {"status": "idempotent_replay", "event_id": existing["id"]}
-        preview = MySqlOrderInformationRepository(connection).preview_candidate_information(case_no, candidate_id, info_type, for_update=True)
+        if refresh_period_from_order:
+            if entry.get("order_status") != "洽談中":
+                raise ValueError("candidate_contact_order_not_negotiating")
+            service_period = _current_service_period(entry)
+        else:
+            service_period = (entry["service_start_date"], entry["service_end_date"])
+        coverage = _require_full_coverage(
+            case_no,
+            entry["staff_id"],
+            str(service_period[0]),
+            str(service_period[1]),
+        )
+        preview = MySqlOrderInformationRepository(connection).preview_candidate_information(
+            case_no,
+            candidate_id,
+            info_type,
+            for_update=True,
+            service_period=service_period if refresh_period_from_order else None,
+        )
         if preview_fingerprint != preview.preview_fingerprint:
             raise ValueError("candidate_information_preview_stale")
-        message = canonical_line_payload_json(
-            {
-                "type": "text",
-                "text": preview.text,
-            }
+        refreshed_coverage_fingerprint = (
+            _coverage_fingerprint(case_no, coverage)
+            if refresh_period_from_order
+            else None
+        )
+        if refresh_period_from_order and (
+            service_period != (entry["service_start_date"], entry["service_end_date"])
+            or refreshed_coverage_fingerprint != entry.get("coverage_fingerprint")
+        ):
+            cursor.execute(
+                "UPDATE caregiver_candidate_contact_entries "
+                "SET service_start_date=%s,service_end_date=%s,coverage_fingerprint=%s "
+                "WHERE id=%s AND service_start_date=%s AND service_end_date=%s",
+                (
+                    service_period[0],
+                    service_period[1],
+                    refreshed_coverage_fingerprint,
+                    candidate_id,
+                    entry["service_start_date"],
+                    entry["service_end_date"],
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("candidate_contact_period_conflict")
+            cursor.execute(
+                "INSERT INTO caregiver_candidate_contact_events "
+                "(pool_id,candidate_id,event_type,event_key,actor,payload) "
+                "VALUES (%s,%s,'willingness_changed',%s,%s,%s)",
+                (
+                    entry["pool_id"],
+                    candidate_id,
+                    f"{event_key}:period",
+                    actor,
+                    json.dumps(
+                        {
+                            "response_kind": "candidate_period_refreshed",
+                            "before_start_date": str(entry["service_start_date"]),
+                            "before_end_date": str(entry["service_end_date"]),
+                            "after_start_date": str(service_period[0]),
+                            "after_end_date": str(service_period[1]),
+                            "before_coverage_fingerprint": str(
+                                entry.get("coverage_fingerprint") or ""
+                            ),
+                            "after_coverage_fingerprint": refreshed_coverage_fingerprint,
+                        },
+                        sort_keys=True,
+                    ),
+                ),
+            )
+        message = candidate_contact_information_card(
+            case_no,
+            info_type,
+            preview.text,
+            hashlib.sha256(event_key.encode("utf-8")).hexdigest(),
+            _candidate_contact_liff_url(
+                hashlib.sha256(event_key.encode("utf-8")).hexdigest()
+            ),
         )
         delivery = MySqlLineDeliveryTaskRepository(connection).enqueue(
             LineDeliveryRequest(
                 LineRecipient(LineRecipientType.USER, LineUserId(recipient.strip())),
-                LineMessageKind.TEXT,
+                LineMessageKind.FLEX,
                 message,
                 datetime.now(timezone.utc),
                 IdempotencyKey(event_key),
@@ -695,9 +849,34 @@ def _send_information_in_transaction(
         task_id = delivery.task_id.value
         cursor.execute("INSERT INTO caregiver_candidate_contact_events (pool_id,candidate_id,event_type,event_key,actor,payload) VALUES (%s,%s,%s,%s,%s,%s)", (entry["pool_id"], candidate_id, f"info_{info_type}_sent", event_key, actor, json.dumps({"line_task_id": task_id, "delivery_status": "queued"}, sort_keys=True)))
         event_id = _positive_int(cursor.lastrowid, "event_id")
+        _cancel_pending_manual_followup(cursor, int(entry["pool_id"]))
         return {"status": "queued", "event_id": event_id, "line_task_id": task_id}
     finally:
         pass
+
+
+def _current_service_period(row: Mapping[str, object]) -> tuple[date, date]:
+    start = row.get("order_start_date", row.get("start_date"))
+    end = row.get("order_end_date", row.get("end_date"))
+    if type(start) is not date or type(end) is not date or start > end:
+        raise ValueError("candidate_contact_current_service_period_invalid")
+    return start, end
+
+
+def _candidate_contact_liff_url(interaction_reference: str) -> str:
+    liff_id = os.getenv("LINE_LIFF_ID", "").strip()
+    if liff_id and liff_id != "your_liff_id_here":
+        return (
+            f"https://liff.line.me/{liff_id}/?"
+            + urlencode({"target": "candidate_contact", "ref": interaction_reference})
+        )
+    public_base = (
+        os.getenv("LINE_PUBLIC_BASE_URL", "").strip()
+        or os.getenv("BASE_URL", "").strip()
+    ).rstrip("/")
+    if public_base.startswith("https://"):
+        return f"{public_base}/line-candidate-contact?{urlencode({'ref': interaction_reference})}"
+    raise ValueError("candidate_contact_liff_not_configured")
 
 
 def record_willingness(case_no: Any, candidate_id: Any, willingness: Any, reason: Any, actor: Any, event_key: Any) -> dict[str, Any]:
@@ -730,9 +909,42 @@ def _record_willingness_in_transaction(
         existing = cursor.fetchone()
         if isinstance(existing, Mapping): return {"status":"idempotent_replay", "event_id":existing["id"]}
         cursor.execute("INSERT INTO caregiver_candidate_contact_events (pool_id,candidate_id,event_type,event_key,actor,payload) VALUES (%s,%s,'willingness_changed',%s,%s,%s)", (row["pool_id"], candidate_id, event_key, actor, json.dumps({"willingness": willingness, "reason": reason}, ensure_ascii=False, sort_keys=True)))
-        event_id = _positive_int(cursor.lastrowid, "event_id"); return {"status":"recorded", "event_id":event_id}
+        event_id = _positive_int(cursor.lastrowid, "event_id")
+        if willingness == "willing":
+            _cancel_pending_candidate_coordination(cursor, int(row["pool_id"]))
+        return {"status":"recorded", "event_id":event_id}
     finally:
         pass
+
+
+def _cancel_pending_candidate_coordination(cursor: Any, pool_id: int) -> None:
+    cursor.execute(
+        "UPDATE line_delivery_tasks SET processing_status='cancelled',"
+        "error_code='candidate_contact_pool_resolved',"
+        "error_message='candidate contact pool already has a willing caregiver',"
+        "lease_owner=NULL,lease_acquired_at_utc=NULL,lease_expires_at_utc=NULL "
+        "WHERE processing_status IN ('pending','retryable_failed') AND (("
+        "source_aggregate_type='candidate_contact_adjustment' "
+        "AND source_aggregate_identity=CAST(%s AS CHAR)) OR ("
+        "source_aggregate_type='candidate_contact_question' "
+        "AND CAST(source_aggregate_identity AS UNSIGNED) IN ("
+        "SELECT id FROM caregiver_candidate_contact_events WHERE pool_id=%s)))",
+        (pool_id, pool_id),
+    )
+    _cancel_pending_manual_followup(cursor, pool_id)
+
+
+def _cancel_pending_manual_followup(cursor: Any, pool_id: int) -> None:
+    cursor.execute(
+        "UPDATE line_delivery_tasks SET processing_status='cancelled',"
+        "error_code='candidate_contact_pool_changed',"
+        "error_message='candidate contact pool changed before manual follow-up delivery',"
+        "lease_owner=NULL,lease_acquired_at_utc=NULL,lease_expires_at_utc=NULL "
+        "WHERE source_aggregate_type='candidate_contact_manual_followup' "
+        "AND CAST(SUBSTRING_INDEX(source_aggregate_identity,':',1) AS UNSIGNED)=%s "
+        "AND processing_status IN ('pending','retryable_failed')",
+        (pool_id,),
+    )
 
 
 def _candidate_projection(events: list[dict[str, Any]]):
@@ -745,7 +957,8 @@ def _candidate_projection(events: list[dict[str, Any]]):
             continue
         payload = _event_payload(event["payload"])
         if event_type == "willingness_changed":
-            willingness, reason = payload["willingness"], payload.get("reason")
+            if payload.get("willingness") in {"pending", "willing", "unwilling"}:
+                willingness, reason = payload["willingness"], payload.get("reason")
             continue
         information[event_type[5]] = {
             "status": payload["delivery_status"],

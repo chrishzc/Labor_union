@@ -269,10 +269,16 @@ def _seed_contact_pool(cursor, case_no: str, staff_id: int, progress: str) -> No
     candidate_id = cursor.fetchone()["id"]
     if progress in {"contacted", "replied"}:
         cursor.execute(
-            "INSERT IGNORE INTO caregiver_candidate_contact_events "
+            "INSERT INTO caregiver_candidate_contact_events "
             "(pool_id,candidate_id,event_type,event_key,actor,payload) "
-            "VALUES (%s,%s,'info_1_sent',%s,'system:seed',%s)",
-            (pool_id, candidate_id, f"line-stage-contact:{case_no}:{staff_id}", json.dumps({"fixture": "core_stage"})),
+            "VALUES (%s,%s,'info_1_sent',%s,'system:seed',%s) "
+            "ON DUPLICATE KEY UPDATE payload=VALUES(payload)",
+            (
+                pool_id,
+                candidate_id,
+                f"line-stage-contact:{case_no}:{staff_id}",
+                json.dumps({"fixture": "core_stage", "delivery_status": "sent"}),
+            ),
         )
     if progress == "replied":
         cursor.execute(

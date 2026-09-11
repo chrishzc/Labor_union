@@ -80,6 +80,7 @@ from subsystems.line.delivery_contracts import (
     ClaimLineDeliveryTasksQuery,
     EnqueueLineDeliveryResult,
     LineProviderOutcome,
+    LineReplyOpportunity,
     RecordLineDeliveryAttemptCommand,
     RecordLineDeliveryAttemptResult,
 )
@@ -564,6 +565,11 @@ class LineDeliveryTaskRepositoryPort(Protocol):
 
     def get(self, task_id: LineDeliveryTaskId) -> LineDeliveryTaskSnapshot | None: ...
 
+    def reply_opportunity(
+        self,
+        correlation_id: CorrelationId,
+    ) -> LineReplyOpportunity | None: ...
+
     def claim(
         self,
         query: ClaimLineDeliveryTasksQuery,
@@ -842,6 +848,8 @@ class LineAuditPort(Protocol):
 class LineMessagingProviderPort(Protocol):
     def send(self, request: LineDeliveryRequest) -> LineProviderOutcome: ...
 
+    def reply(self, reply_token: str, message: dict[str, Any]) -> LineProviderOutcome: ...
+
 
 class LiffTokenVerifierPort(Protocol):
     def verify(self, id_token: str) -> VerifiedLiffIdentity: ...
@@ -976,6 +984,7 @@ class LineUnitOfWorkPort(UnitOfWork, Protocol):
     audit: LineAuditPort
     outbox: LineOutboxRepositoryPort
     matching_notifications: object
+    candidate_contact_pool_replies: object
     knowledge_questions: object
     customer_service: object
     feedback: LineFeedbackRepository

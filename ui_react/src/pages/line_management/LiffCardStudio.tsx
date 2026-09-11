@@ -27,6 +27,7 @@ export interface LiffAssetItem {
   endpointUrl: string;
   launchPath?: string;
   previewPath?: string;
+  launchNote?: string;
   authLevel: string;
   description: string;
   apiMapping: string;
@@ -115,9 +116,22 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     audienceRoles: ['customer'],
   },
   {
+    id: 'candidate_contact_customer',
+    type: 'liff',
+    title: '7. candidate_contact_customer.html',
+    subtitle: '客戶確認可調整的媒合條件',
+    badge: '案件專屬回覆',
+    endpointUrl: '/line-candidate-contact-customer?ref={案件專屬識別碼}',
+    authLevel: '後端驗證 LINE 登入憑證、正式客戶綁定、案件與協調事件；只允許通知收件人回覆',
+    description: '原條件沒有月嫂願意承接時，列出月嫂提出的可協調項目；客戶回覆後交由工會處理，不要求客戶自行操作訂單。',
+    apiMapping: '客戶協調 Query／Submit、工會人工跟進與群組通知已接通',
+    audienceRoles: ['customer'],
+    launchNote: '此頁必須由客戶收到的案件協調卡帶入專屬識別碼，無法從管理頁建立通用正式入口。',
+  },
+  {
     id: 'staff_order_search',
     type: 'liff',
-    title: '7. staff_order_search.html',
+    title: '8. staff_order_search.html',
     subtitle: '月嫂安全查單',
     badge: '正式指派資料',
     endpointUrl: '/line-staff-orders',
@@ -130,7 +144,7 @@ const ASSET_ITEMS: LiffAssetItem[] = [
   {
     id: 'staff_schedule',
     type: 'liff',
-    title: '8. staff_schedule.html',
+    title: '9. staff_schedule.html',
     subtitle: '月嫂月曆、不可服務期間與請假',
     badge: '正式排班月曆',
     endpointUrl: '/line-staff-schedule',
@@ -143,7 +157,7 @@ const ASSET_ITEMS: LiffAssetItem[] = [
   {
     id: 'staff_baby_log',
     type: 'liff',
-    title: '9. staff_baby_log.html',
+    title: '10. staff_baby_log.html',
     subtitle: '正式服務日寶寶日誌與餐食照片',
     badge: '服務日受控登錄',
     endpointUrl: '/line-staff-baby-log',
@@ -156,7 +170,7 @@ const ASSET_ITEMS: LiffAssetItem[] = [
   {
     id: 'staff_payout',
     type: 'liff',
-    title: '10. staff_payout.html',
+    title: '11. staff_payout.html',
     subtitle: '本人逐案薪資請款與付款紀錄',
     badge: '正式綁定唯讀',
     endpointUrl: '/line-staff-payout',
@@ -167,9 +181,23 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     audienceRoles: ['staff'],
   },
   {
+    id: 'candidate_contact',
+    type: 'liff',
+    title: '12. candidate_contact.html',
+    subtitle: '候選月嫂提出疑問或回覆無法承接',
+    badge: '24 小時案件回覆',
+    endpointUrl: '/line-candidate-contact?ref={案件專屬識別碼}',
+    launchPath: '/line-candidate-contact',
+    previewPath: '/line-candidate-contact?studio_preview=1',
+    authLevel: '後端驗證 LINE 登入憑證、候選月嫂身分、案件收件人與 24 小時回覆期限',
+    description: '候選月嫂可針對服務地區、日期、時段、時數、下廚、交通或個人因素提出資訊問題、調整條件，或直接回覆沒有意願。',
+    apiMapping: '月嫂回覆 Query／Submit、最新意願投影與客戶協調通知已接通',
+    audienceRoles: ['staff'],
+  },
+  {
     id: 'identity',
     type: 'liff',
-    title: '11. identity.html',
+    title: '13. identity.html',
     subtitle: '通用身分認證與服務入口',
     badge: '伺服器已驗證',
     endpointUrl: '/line-identity',
@@ -182,7 +210,7 @@ const ASSET_ITEMS: LiffAssetItem[] = [
   {
     id: 'mobile_admin_staff_review',
     type: 'liff',
-    title: '12. mobile_admin.html · 待辦工作台',
+    title: '14. mobile_admin.html · 待辦工作台',
     subtitle: '待辦工作台',
     badge: '月嫂身分待審',
     endpointUrl: '/line-mobile-admin?target=staff_review',
@@ -196,7 +224,7 @@ const ASSET_ITEMS: LiffAssetItem[] = [
   {
     id: 'mobile_admin_customer_service',
     type: 'liff',
-    title: '13. mobile_admin.html · 客服中心',
+    title: '15. mobile_admin.html · 客服中心',
     subtitle: '客服中心',
     badge: '客服案件',
     endpointUrl: '/line-mobile-admin?target=customer_service',
@@ -208,23 +236,23 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     audienceRoles: ['union_staff'],
   },
   {
-    id: 'mobile_admin_anomalies_center',
+    id: 'mobile_admin_order_tracking',
     type: 'liff',
-    title: '14. mobile_admin.html · 異常中心',
-    subtitle: '異常中心',
-    badge: 'LINE-006 唯讀',
-    endpointUrl: '/line-mobile-admin?target=anomalies_center',
-    launchPath: '/line-mobile-admin?target=anomalies_center',
-    previewPath: '/line-mobile-admin?target=anomalies_center&studio_preview=1',
-    authLevel: '後端驗證 LINE 登入憑證與正式管理員綁定；異常資料為去敏唯讀',
-    description: '顯示目前 LINE-006 通知失敗異常與安全摘要；此入口不修改異常或通知 root。',
-    apiMapping: 'LINE-006 current issue bounded typed readback 已接通',
+    title: '16. mobile_admin.html · 狀態追蹤',
+    subtitle: '狀態追蹤',
+    badge: 'Orders 唯讀',
+    endpointUrl: '/line-mobile-admin?target=order_tracking',
+    launchPath: '/line-mobile-admin?target=order_tracking',
+    previewPath: '/line-mobile-admin?target=order_tracking&studio_preview=1',
+    authLevel: '後端驗證 LINE 登入憑證與正式管理員綁定；訂單進度為唯讀',
+    description: '依案件編號查詢未完成訂單目前階段、最後更新與下一步；此入口不修改訂單。',
+    apiMapping: 'Orders operational-stage projection bounded typed readback 已接通',
     audienceRoles: ['union_staff'],
   },
   {
     id: 'mobile_admin_dashboard',
     type: 'liff',
-    title: '15. mobile_admin.html · 營運摘要',
+    title: '17. mobile_admin.html · 營運摘要',
     subtitle: '營運摘要',
     badge: '本週六項統計',
     endpointUrl: '/line-mobile-admin?target=dashboard',
@@ -277,13 +305,13 @@ const ASSET_ITEMS: LiffAssetItem[] = [
   {
     id: 'flex_negotiation',
     type: 'flex_card',
-    title: '媒合條件溝通卡設計稿（模組三：服務條件調解）',
-    subtitle: '【模組三】零媒合服務條件調解建議 ｜ 條件確認卡',
-    badge: '模組三範本',
-    endpointUrl: '排定於模組三：月嫂派案與媒合 Subsystem',
-    authLevel: '簽約產婦專屬 ｜ 條件調解確認（受需求登記保護）',
-    description: '【業務定位】當案件無候選月嫂可接單時，系統自動分析並向產婦提出可微調方案（如時數、天數建議），產婦可一鍵確認調整以加速媒合。',
-    apiMapping: '模組三排定：ZeroPoolEngine.push_compromise_options() ＋ 方案確認 postback',
+    title: '媒合條件協調卡（模組三：服務條件調解）',
+    subtitle: '【模組三】候選皆無法承接 ｜ 客戶條件協調卡',
+    badge: '正式流程已接通',
+    endpointUrl: '候選回覆彙整 → 客戶 LINE 耐久投遞 → 案件專屬 LIFF 回覆',
+    authLevel: '正式綁定客戶專屬 ｜ 候選最新意願與條件彙整 ｜ 收件人驗證',
+    description: '【業務定位】候選月嫂皆無法承接且有人提出可調整條件時，系統彙整實際回覆並通知客戶確認；客戶同意後由工會修改正式資料，再重新詢問相關月嫂。',
+    apiMapping: '候選聯繫結果彙整、客戶 Flex 投遞、工會人工跟進與群組通知已接通',
     audienceRoles: ['customer'],
     flexDesignSource: LINE_FLEX_DESIGN_SOURCES.flex_negotiation,
   },
@@ -414,6 +442,25 @@ function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
     );
   }
 
+  if (item.id === 'candidate_contact_customer') {
+    return (
+      <div className="mock-form-inputs">
+        <div className="mock-step-indicator">媒合條件協調</div>
+        <p>目前原條件尚無月嫂願意承接，請確認月嫂提出的條件能否修改。</p>
+        <div className="mock-placeholder-box">
+          <strong>可協調項目</strong>
+          <small>實際內容由候選月嫂最新回覆彙整，並顯示可重新詢問的人數。</small>
+        </div>
+        <label>這些條件可以調整嗎？</label>
+        <select disabled defaultValue=""><option value="">請選擇</option><option>可以，請工會協助修改</option><option>目前無法調整</option></select>
+        <label>補充說明（選填）</label>
+        <textarea rows={2} placeholder="可補充能調整的方式" readOnly />
+        <button type="button" className="mock-primary-btn" disabled>送出回答</button>
+        <small>送出後會通知工會人員；工會完成正式資料修改後才會重新詢問月嫂。</small>
+      </div>
+    );
+  }
+
   if (item.id === 'staff_order_search') {
     return (
       <div className="mock-form-inputs">
@@ -467,6 +514,24 @@ function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
     );
   }
 
+  if (item.id === 'candidate_contact') {
+    return (
+      <div className="mock-form-inputs">
+        <div className="mock-step-indicator">候選月嫂案件回覆</div>
+        <p>可複選需要確認的資訊或希望客戶調整的條件，也可以直接選擇沒有意願。</p>
+        <div className="mock-change-options">
+          <span><CheckSquare aria-hidden="true" /> 服務地區</span>
+          <span><CheckSquare aria-hidden="true" /> 服務日期／檔期</span>
+          <span><CheckSquare aria-hidden="true" /> 每日服務時段／時數</span>
+          <span><CheckSquare aria-hidden="true" /> 下廚、交通或個人因素</span>
+          <span><CheckSquare aria-hidden="true" /> 沒有意願</span>
+        </div>
+        <button type="button" className="mock-primary-btn" disabled>送出回應</button>
+        <small>調整條件只表示修改後可重新詢問，不會直接標示為願意承接。</small>
+      </div>
+    );
+  }
+
   if (item.id === 'mobile_admin_staff_review') {
     return (
       <div className="mock-admin-view">
@@ -490,13 +555,13 @@ function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
     );
   }
 
-  if (item.id === 'mobile_admin_anomalies_center') {
+  if (item.id === 'mobile_admin_order_tracking') {
     return (
       <div className="mock-admin-view">
-        <div className="mock-step-indicator mock-step-danger">異常中心</div>
-        <p>顯示目前 LINE 通知失敗的去敏唯讀摘要。</p>
-        <div className="mock-placeholder-box">LINE-006 ｜ 發生時間 ｜ 安全摘要 ｜ 目前狀態</div>
-        <small>此工作面不會直接修改異常或重送通知。</small>
+        <div className="mock-step-indicator">狀態追蹤</div>
+        <p>查詢未完成訂單的目前階段、最後更新與下一步。</p>
+        <div className="mock-placeholder-box">案件編號 ｜ 目前進度 ｜ 最後更新 ｜ 下一步</div>
+        <small>此工作面只讀取進度，不會直接修改訂單。</small>
       </div>
     );
   }
@@ -710,7 +775,7 @@ export const LiffCardStudio: React.FC<LiffCardStudioProps> = ({
                     )
                   ) : (
                     <div className="line-warning liff-preview-warning" role="status">
-                      入口與正式服務尚待建立；設計與功能需求保留，不導向不存在的頁面。
+                      {selectedItem.launchNote ?? '入口與正式服務尚待建立；設計與功能需求保留，不導向不存在的頁面。'}
                     </div>
                   )}
                 </div>

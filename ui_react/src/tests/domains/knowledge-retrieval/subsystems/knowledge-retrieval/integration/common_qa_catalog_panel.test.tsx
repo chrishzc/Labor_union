@@ -41,24 +41,23 @@ describe('正式 Knowledge QA 管理 panel', () => {
     expect(screen.queryByText(/QA-001 · QA-001 的標準問題/)).not.toBeInTheDocument();
   });
 
-  it('直接以內建題庫審核、發布、停用、編修與重建索引', async () => {
+  it('草稿可直接發布，並可停用、編修與重建索引', async () => {
     const fetchMock = mockKnowledgeApi();
     render(React.createElement(CommonQaCatalogPanel));
     await waitFor(() => expect(screen.getByText(/共 3 筆/)).toBeInTheDocument());
 
-    expect(screen.getByText(/系統已內建 29 題基礎題庫/)).toBeInTheDocument();
+    expect(screen.getByText(/系統已載入基礎題庫/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /匯入/ })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '送審完成' }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/v1/knowledge/items/1/review', expect.objectContaining({ method: 'POST' })));
-
-    fireEvent.click(screen.getByRole('button', { name: '發布啟用' }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/v1/knowledge/items/2/publish', expect.objectContaining({ method: 'POST' })));
+    expect(screen.queryByRole('button', { name: '送審完成' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button', { name: '發布啟用' })[0]);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/v1/knowledge/items/1/publish', expect.objectContaining({ method: 'POST' })));
+    expect(await screen.findByText('已發布，正在更新 AI 索引；READY 後即啟用。')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '停用' }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/v1/knowledge/items/3/retire', expect.objectContaining({ method: 'POST' })));
 
-    fireEvent.click(screen.getByRole('button', { name: /建立／重建索引/ }));
+    fireEvent.click(screen.getByRole('button', { name: /手動重建索引/ }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/v1/knowledge/indexes', expect.objectContaining({ method: 'POST' })));
 
     fireEvent.click(screen.getAllByTitle('編輯此題目')[0]);

@@ -193,6 +193,14 @@ class RefusalHistoryTransportView(MatchingCoordinationSchema):
         "due_date_outside_window",
         "criteria_source_stale",
         "candidate_expired",
+        "service_region",
+        "service_dates",
+        "daily_service_window",
+        "daily_service_hours",
+        "cooking_requirement",
+        "transport_parking_floor",
+        "personal_reason",
+        "no_interest",
     ]
     affected_criteria: tuple[str, ...]
     originally_willing: bool
@@ -303,6 +311,14 @@ class RefusalRoutingTransportView(MatchingCoordinationSchema):
         "due_date_outside_window",
         "criteria_source_stale",
         "candidate_expired",
+        "service_region",
+        "service_dates",
+        "daily_service_window",
+        "daily_service_hours",
+        "cooking_requirement",
+        "transport_parking_floor",
+        "personal_reason",
+        "no_interest",
     ]
     source_snapshot_id: str = Field(min_length=1, max_length=191)
     diff_fingerprint: Sha256

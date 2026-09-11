@@ -50,13 +50,17 @@ _HANDOFF_WRONG_ANSWER_POSTBACK = "customer-service:handoff:confirm:answer-reject
 _HANDOFF_CONTINUE_POSTBACK = "customer-service:handoff:continue-ai"
 _HANDOFF_RESUME_POSTBACK = "customer-service:handoff:resume-ai"
 _RESUME_AI_ALIASES = {
-    "恢復 AI 助理",
-    "恢復AI助理",
-    "恢復 AI",
-    "恢復AI",
-    "繼續使用 AI",
-    "繼續使用AI",
+    "恢復ai助理",
+    "恢復ai",
+    "繼續使用ai",
+    "恢復機器人",
+    "恢復機器人回答",
+    "繼續讓機器人回答",
 }
+
+
+def _normalized_resume_command(text: str) -> str:
+    return "".join(text.split()).casefold()
 
 
 class LineServiceHelpApplication:
@@ -73,7 +77,7 @@ class LineServiceHelpApplication:
 
     def handle(self, inbox, unit_of_work, line_user_id, text: str) -> bool:
         normalized = text.strip()
-        if normalized in _RESUME_AI_ALIASES:
+        if _normalized_resume_command(normalized) in _RESUME_AI_ALIASES:
             self._resume_ai(inbox, unit_of_work, line_user_id)
             return True
         if self._escalation_gateway is not None:

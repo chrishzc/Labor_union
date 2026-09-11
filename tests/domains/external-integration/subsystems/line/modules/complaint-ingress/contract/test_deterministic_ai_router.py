@@ -6,6 +6,7 @@ Description: 驗證 M2 deterministic 路由的真人確認優先序、typed clos
 from domains.customer_service.ticket import CustomerServiceCategory
 from domains.knowledge_retrieval.knowledge import KnowledgeAnswer, KnowledgeCitation
 from subsystems.line.ai_router_contracts import (
+    Clarification,
     DeterministicAnswer,
     DeterministicRoute,
     RouterOutcomeKind,
@@ -72,6 +73,29 @@ def test_unknown_input_is_safe_menu_and_never_provider_or_domain_command() -> No
     assert isinstance(outcome, SafeMenu)
     assert outcome.score_band == "lt_50"
     assert outcome.kind is RouterOutcomeKind.SAFE_MENU
+
+
+def test_unscoped_subsidy_amount_question_requires_program_clarification() -> None:
+    outcome = DeterministicLineRouter().route(
+        "補助多少",
+        source_event_id="event-subsidy-scope",
+    )
+
+    assert isinstance(outcome, Clarification)
+    assert outcome.question_key == "subsidy_scope"
+    assert outcome.options == ("一般市民補助", "低收／中低收入戶社福補助")
+    assert outcome.reason_code == "subsidy_scope_ambiguous"
+
+
+def test_social_welfare_subsidy_question_is_not_reclassified_as_general_subsidy() -> None:
+    outcome = DeterministicLineRouter().route(
+        "低收入戶社福補助多少",
+        source_event_id="event-social-welfare-subsidy",
+    )
+
+    assert not (
+        isinstance(outcome, Clarification) and outcome.question_key == "subsidy_scope"
+    )
 
 
 def test_published_cited_knowledge_can_be_projected_as_non_authoritative_answer() -> None:

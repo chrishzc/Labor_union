@@ -1,4 +1,4 @@
-"""Pure state rules for reviewed knowledge publication."""
+"""Pure state rules for direct knowledge publication."""
 
 from enum import StrEnum
 
@@ -16,7 +16,8 @@ class KnowledgeTransitionError(ValueError):
 
 def next_knowledge_state(current: KnowledgeState, action: str) -> KnowledgeState:
     transitions = {
-        (KnowledgeState.DRAFT, "review"): KnowledgeState.REVIEWED,
+        (KnowledgeState.DRAFT, "publish"): KnowledgeState.PUBLISHED,
+        # Existing preserved rows may still be in the retired review state.
         (KnowledgeState.REVIEWED, "publish"): KnowledgeState.PUBLISHED,
         (KnowledgeState.PUBLISHED, "retire"): KnowledgeState.RETIRED,
     }

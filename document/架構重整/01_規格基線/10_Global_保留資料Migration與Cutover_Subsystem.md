@@ -362,17 +362,19 @@ metadata 證明零新增效果時，才可 bounded retry；DDL 中斷必須先�
 每次 DB 變更交付輸出一張 gate table，狀態只用 `PASS | BLOCKED | NOT_RUN` 並附 evidence path／command。
 任一必要 gate 為 `BLOCKED`／`NOT_RUN` 時，總結固定 `DB_CHANGE_NOT_READY`。
 
-### 9.1 既有開發測試 DB 的受控驗收
+### 9.1 既有開發 DB 的受控驗收
 
 依 2026-08-21 人工裁決，一般 API／UI／Domain 驗收不再強制 disposable DB 或 non-root：
 
-- 只允許 `APP_ENV=development` 或等價 validation profile，database 必須符合 `lu_test_*`；每次先回讀
-  environment、host、database 與 credential class，target 不符即 fail closed。
+- 只允許 `APP_ENV=development` 或等價 validation profile；database 可為 `lu_test_*`，或 localhost 上的
+  `union_db`。每次先回讀 environment、host、database 與 credential class，target 不符即 fail closed。
 - 可使用目前 development credential（包括 root）執行 approved package 明列的 Q／P／A、API、browser、
   worker replay 與 scenario-owned 測試資料 mutation。使用唯一 scenario identity、before／after readback、
   receipt 與 scoped cleanup；不得碰其他 rows。
-- 仍禁止 `union_db`、production DB／provider、未核准 DDL／migration／seed／backfill、reset、source
-  replacement、`--switch`、全庫清理與其他破壞性操作。
+- localhost development 的 `union_db` 可在 current task 明確 business scenario 與 row scope 內直接異動；
+  已有 owner Query／Preview／Apply 時須使用正式 writer 並保存 before／after、idempotency 與 receipt。
+- 仍禁止 production DB／provider、未核准 DDL／migration／seed／backfill、reset、source replacement、
+  `--switch`、全庫清理與其他超出 current scope 的破壞性操作。
 - schema／migration 仍須完整通過 disposable fresh-bootstrap 與 preserve-data candidate gates；既有 DB
   runtime 不能取代。
 - 本裁決不擴張 package 的業務 scope、owner、public contract、external effect 或 write set；更嚴格的

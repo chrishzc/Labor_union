@@ -37,26 +37,31 @@ class CanonicalLineWorkerRuntime:
         self._additional_workers = dict(additional_workers or {})
 
     def run_once(self) -> dict[str, int]:
-        counts = {
-            "inbox_events": self._event_consumer.run_once(),
-            "delivery_tasks": self._delivery_worker.run_once(),
-        }
-        for name, worker in self._additional_workers.items():
-            counts[name] = worker.run_once()
-        self._record_heartbeat(counts)
-        return counts
+        try:
+            counts = {
+                "inbox_events": self._event_consumer.run_once(),
+                "delivery_tasks": self._delivery_worker.run_once(),
+            }
+            for name, worker in self._additional_workers.items():
+                counts[name] = worker.run_once()
+            self._record_heartbeat(counts)
+            return counts
+        except Exception as error:
+            self._record_failure_safely(error)
+            raise
 
     def run_forever(self, stop_event: threading.Event | None = None) -> None:
         stop_event = stop_event or threading.Event()
         while not stop_event.is_set():
             try:
                 self.run_once()
+            except Exception:
+                stop_event.wait(5.0)
+                continue
+            try:
                 self._wait_for_work(stop_event)
             except Exception as error:
-                try:
-                    self._record_failure(error)
-                except Exception as heartbeat_error:
-                    print(f"[LINE Worker] Heartbeat unavailable: {heartbeat_error}")
+                self._record_failure_safely(error)
                 stop_event.wait(5.0)
 
     def _wait_for_work(self, stop_event: threading.Event) -> None:
@@ -91,6 +96,12 @@ class CanonicalLineWorkerRuntime:
             error,
         )
         self._heartbeat_writer(heartbeat)
+
+    def _record_failure_safely(self, error: Exception) -> None:
+        try:
+            self._record_failure(error)
+        except Exception as heartbeat_error:
+            print(f"[LINE Worker] Heartbeat unavailable: {heartbeat_error}")
 
 
 def _heartbeat(worker_identity, now, counts, error: Exception | None = None):

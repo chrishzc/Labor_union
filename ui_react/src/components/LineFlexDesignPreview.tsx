@@ -1,6 +1,6 @@
 /**
  * File: LineFlexDesignPreview.tsx
- * Description: 顯示去敏 Flex 設計稿與 owner fact blocker，不產生 provider payload 或任何 mutation。
+ * Description: 顯示去敏 Flex 設計稿與正式資料接通狀態，不產生 provider payload 或任何 mutation。
  */
 import React from 'react';
 import { Pin } from 'lucide-react';
@@ -55,13 +55,13 @@ export const LineFlexDesignPreview: React.FC<LineFlexDesignPreviewProps> = ({ so
           </div>
         </div>
       </div>
-      <div className="line-warning line-flex-owner-note" role="status" aria-label="正式資料狀態">
+      <div className={`${preview.ownerFactStatus === 'connected' ? 'line-success' : 'line-warning'} line-flex-owner-note`} role="status" aria-label="正式資料狀態">
         <strong><Pin aria-hidden="true" />LINE Flex Message 業務定位與排程說明</strong>
         <p>
-          正式資料尚未載入：{preview.ownerFactBlocker}
+          {preview.ownerFactStatus === 'connected' ? '正式資料已接通：' : '正式資料尚未載入：'}{preview.ownerFactNote}
         </p>
         <small>
-          視覺排版範本已完成去敏核可；動態推播與 Postback 決策事件排定於後續業務模組建置。
+          {preview.lifecycleNote}
         </small>
       </div>
     </div>

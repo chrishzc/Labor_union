@@ -191,7 +191,12 @@ def build_candidate_information(case_no, candidate_id, info_type, facts, field_i
     lines = [f"訂單資訊－{info_type}", "初步接案意願詢問；日期為預計期間，未確認需求請再與工會確認。"]
     labels = {"f_104_c4": "預計服務開始日期", "f_105_c5": "預計服務結束日期", "f_106_c6": "每日服務時數"}
     for item in fields:
-        value = "待確認" if item.status in {"missing", "unresolved", "absent"} or _is_missing(item.value) else str(_fingerprint_value(item.value))
+        if item.status in {"missing", "unresolved", "absent"} or _is_missing(item.value):
+            value = "待確認"
+        elif item.field_id == "f_109_c9" and isinstance(item.value, bool):
+            value = "需要下廚" if item.value else "不需要下廚"
+        else:
+            value = str(_fingerprint_value(item.value))
         lines.append(f"{labels.get(item.field_id, item.label)}：{value}")
     if info_type == 2:
         lines.extend(("食材準備參考（請另確認需求，非全部必購）：",

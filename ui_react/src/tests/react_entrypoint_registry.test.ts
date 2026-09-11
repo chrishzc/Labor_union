@@ -59,7 +59,7 @@ describe('React entrypoint registry', () => {
 
 
 
-  it('LIFF 視覺頁保留 15 個 LIFF 與 4 個 Flex，且只產生 canonical 測試連結', async () => {
+  it('LIFF 視覺頁保留 17 個正式 LIFF 與 4 個 Flex，且只產生 canonical 測試連結', async () => {
     const runtimeConfigClient = {
       get: vi.fn(async () => ({
         liff_id: 'test-liff-id',
@@ -67,7 +67,7 @@ describe('React entrypoint registry', () => {
       })),
     };
     render(React.createElement(LiffCardStudio, { runtimeConfigClient }));
-    expect(screen.getByRole('button', { name: 'LIFF 表單 (15)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'LIFF 表單 (17)' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Flex 卡片 (4)' })).toBeInTheDocument();
     expect(screen.queryByText(/原始 8 個 LIFF 與 4 個 Flex 功能均保留/)).not.toBeInTheDocument();
     expect(screen.getAllByRole('button')
@@ -79,10 +79,12 @@ describe('React entrypoint registry', () => {
         'profile_guard.html',
         'profile_update.html',
         'order_update.html',
+        'candidate_contact_customer.html',
         'staff_order_search.html',
         'staff_schedule.html',
         'staff_baby_log.html',
         'staff_payout.html',
+        'candidate_contact.html',
         'identity.html',
         'mobile_admin.html',
         'mobile_admin.html',
@@ -145,6 +147,18 @@ describe('React entrypoint registry', () => {
       'https://line-test.example.dev/line-order-update?studio_preview=1',
     );
 
+    fireEvent.click(screen.getByText('candidate_contact_customer.html'));
+    expect(screen.getByText('媒合條件協調')).toBeInTheDocument();
+    expect(screen.getByText(/必須由客戶收到的案件協調卡帶入專屬識別碼/)).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /正式 LIFF 入口|安全展示頁/ })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('candidate_contact.html'));
+    expect(screen.getByText('候選月嫂案件回覆')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '在預覽中開啟安全展示頁' })).toHaveAttribute(
+      'href',
+      'https://line-test.example.dev/line-candidate-contact?studio_preview=1',
+    );
+
     fireEvent.click(screen.getByText('mobile_admin.html · 待辦工作台'));
     expect(screen.getByText(/目前只列出待處理的月嫂身分審核/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '在預覽中開啟安全展示頁' })).toHaveAttribute(
@@ -159,11 +173,11 @@ describe('React entrypoint registry', () => {
       'https://line-test.example.dev/line-mobile-admin?target=customer_service&studio_preview=1',
     );
 
-    fireEvent.click(screen.getByText('mobile_admin.html · 異常中心'));
-    expect(screen.getByText(/LINE 通知失敗的去敏唯讀摘要/)).toBeInTheDocument();
+    fireEvent.click(screen.getByText('mobile_admin.html · 狀態追蹤'));
+    expect(screen.getByText(/查詢未完成訂單的目前階段/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '在預覽中開啟安全展示頁' })).toHaveAttribute(
       'href',
-      'https://line-test.example.dev/line-mobile-admin?target=anomalies_center&studio_preview=1',
+      'https://line-test.example.dev/line-mobile-admin?target=order_tracking&studio_preview=1',
     );
 
     fireEvent.click(screen.getByText('mobile_admin.html · 營運摘要'));
@@ -182,7 +196,7 @@ describe('React entrypoint registry', () => {
       })),
     };
     render(React.createElement(LiffCardStudio, { runtimeConfigClient }));
-    fireEvent.click(screen.getByRole('button', { name: 'LIFF 表單 (15)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'LIFF 表單 (17)' }));
     const roleFilter = screen.getByRole('combobox', { name: '依適用角色篩選資產' });
     const visibleLiffNames = () => screen.getAllByRole('button')
       .map((button) => button.textContent?.match(/[a-z_]+\.html/)?.[0])
@@ -205,46 +219,12 @@ describe('React entrypoint registry', () => {
 
     fireEvent.change(roleFilter, { target: { value: 'customer' } });
     await waitFor(() => expect(visibleLiffNames()).toEqual([
-      'profile_guard.html', 'profile_update.html', 'order_update.html', 'identity.html',
+      'profile_guard.html', 'profile_update.html', 'order_update.html', 'candidate_contact_customer.html', 'identity.html',
     ]));
 
     fireEvent.change(roleFilter, { target: { value: 'staff' } });
     await waitFor(() => expect(visibleLiffNames()).toEqual([
-      'staff_order_search.html', 'staff_schedule.html', 'staff_baby_log.html', 'staff_payout.html', 'identity.html',
-    ]));
-  });
-
-  it('LIFF 目錄依正式四種 audience 分類，工會人員不會看到訪客 gateway', async () => {
-    const runtimeConfigClient = {
-      get: vi.fn(async () => ({
-        liff_id: 'test-liff-id',
-        public_base_url: 'https://line-test.example.dev',
-      })),
-    };
-    render(React.createElement(LiffCardStudio, { runtimeConfigClient }));
-    fireEvent.click(screen.getByRole('button', { name: 'LIFF 表單 (12)' }));
-    const roleFilter = screen.getByRole('combobox', { name: '依適用角色篩選資產' });
-    const visibleLiffNames = () => screen.getAllByRole('button')
-      .map((button) => button.textContent?.match(/[a-z_]+\.html/)?.[0])
-      .filter(Boolean);
-
-    fireEvent.change(roleFilter, { target: { value: 'union_staff' } });
-    await waitFor(() => expect(visibleLiffNames()).toEqual(['identity.html', 'mobile_admin.html']));
-    expect(screen.queryByText('gateway.html')).not.toBeInTheDocument();
-
-    fireEvent.change(roleFilter, { target: { value: 'visitor' } });
-    await waitFor(() => expect(visibleLiffNames()).toEqual([
-      'gateway.html', 'register.html', 'bind.html', 'identity.html',
-    ]));
-
-    fireEvent.change(roleFilter, { target: { value: 'customer' } });
-    await waitFor(() => expect(visibleLiffNames()).toEqual([
-      'profile_guard.html', 'profile_update.html', 'order_update.html', 'identity.html',
-    ]));
-
-    fireEvent.change(roleFilter, { target: { value: 'staff' } });
-    await waitFor(() => expect(visibleLiffNames()).toEqual([
-      'staff_order_search.html', 'staff_schedule.html', 'staff_baby_log.html', 'staff_payout.html', 'identity.html',
+      'staff_order_search.html', 'staff_schedule.html', 'staff_baby_log.html', 'staff_payout.html', 'candidate_contact.html', 'identity.html',
     ]));
   });
 

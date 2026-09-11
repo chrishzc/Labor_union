@@ -76,6 +76,7 @@ class LineWebhookIdentityHandlers:
         follow_scheduler: Callable[[object, object, object], int] | None = None,
         media_scheduler: Callable[[object, object], bool] | None = None,
         group_application: object | None = None,
+        candidate_contact_postback_application: object | None = None,
         matching_postback_application: object | None = None,
         knowledge_question_scheduler: Callable[[object, object, object, str], object] | None = None,
         service_help_application: object | None = None,
@@ -88,6 +89,7 @@ class LineWebhookIdentityHandlers:
         self._follow_scheduler = follow_scheduler
         self._media_scheduler = media_scheduler
         self._group_application = group_application
+        self._candidate_contact_postback_application = candidate_contact_postback_application
         self._matching_postback_application = matching_postback_application
         self._knowledge_question_scheduler = knowledge_question_scheduler
         self._service_help_application = service_help_application
@@ -207,6 +209,11 @@ class LineWebhookIdentityHandlers:
                 _optional_user_id(inbox),
                 _postback_data(inbox),
             )
+        ):
+            return
+        if (
+            self._candidate_contact_postback_application is not None
+            and self._candidate_contact_postback_application.handle(inbox, unit_of_work)
         ):
             return
         if self._matching_postback_application is not None:

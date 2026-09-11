@@ -39,6 +39,7 @@ export type PageType =
   | 'order-workbench-v2'
   | 'scheduling'
   | 'staff'
+  | 'clients'
   | 'data-import'
   | 'reports'
   | 'line-management'
@@ -49,7 +50,6 @@ export type PageType =
   | 'finance'
   | 'historical-service-accounting'
   | 'anomalies'
-  | 'data-browser'
   | 'account-management'
   | 'storage-management';
 
@@ -57,6 +57,7 @@ export const PAGE_SECTION_MAP: Record<PageType, SectionType> = {
   'order-workbench-v2': 'operations',
   'scheduling': 'operations',
   'staff': 'operations',
+  'clients': 'operations',
   'data-import': 'operations',
   'reports': 'operations',
 
@@ -70,7 +71,6 @@ export const PAGE_SECTION_MAP: Record<PageType, SectionType> = {
   'historical-service-accounting': 'finance',
 
   'anomalies': 'audit',
-  'data-browser': 'operations',
   'account-management': 'audit',
   'storage-management': 'audit',
 };
@@ -87,6 +87,7 @@ export const NAV_ITEMS: NavItem[] = [
   { id: 'order-workbench-v2', icon: LayoutDashboard, label: '待辦看板', section: 'operations' },
   { id: 'scheduling', icon: CalendarDays, label: '排班日曆', section: 'operations' },
   { id: 'staff', icon: UsersRound, label: '月嫂名冊', section: 'operations' },
+  { id: 'clients', icon: HeartHandshake, label: '客戶名冊', section: 'operations' },
   { id: 'data-import', icon: Database, label: '資料中心', section: 'operations' },
   { id: 'reports', icon: FileBarChart, label: '營運報表', section: 'operations' },
 
@@ -196,7 +197,7 @@ export const MasterLayout: React.FC<MasterLayoutProps> = ({
   }, [showLogoutModal]);
 
   const visibleNavItems = NAV_ITEMS.filter((item) => item.section === currentSection);
-  const sidebarCurrentPage = currentPage === 'data-browser' ? 'data-import' : currentPage;
+  const sidebarCurrentPage = currentPage;
   const currentUser = sessionClient.getUser();
 
   const handleSectionClick = (section: SectionType) => {

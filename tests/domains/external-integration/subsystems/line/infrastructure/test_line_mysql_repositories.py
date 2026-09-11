@@ -5,7 +5,7 @@ Description: 驗證 LINE MySQL adapters 的交易、cleanup claim、owner 邊界
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from pymysql.err import IntegrityError
@@ -214,6 +214,30 @@ def test_delivery_claim_binds_all_three_clock_predicates() -> None:
     parameters = cursor.executed[0][1]
     assert parameters[0] == parameters[1] == parameters[2]
     assert parameters[3] == 10
+
+
+def test_delivery_reply_opportunity_reads_one_time_token_from_source_webhook() -> None:
+    cursor = ScriptedCursor(
+        one_rows=(
+            {
+                "payload_snapshot": (
+                    '{"mode":"active","replyToken":"reply-token-1",'
+                    '"type":"message"}'
+                ),
+                "received_at_utc": NOW.replace(tzinfo=None),
+            },
+        )
+    )
+    repository = MySqlLineDeliveryTaskRepository(FakeConnection(cursor))
+
+    opportunity = repository.reply_opportunity(
+        CorrelationId("line-event:event-knowledge-1")
+    )
+
+    assert opportunity is not None
+    assert opportunity.reply_token == "reply-token-1"
+    assert opportunity.expires_at == NOW + timedelta(seconds=45)
+    assert cursor.executed[0][1] == ("event-knowledge-1",)
 
 
 def _delivery_admin_row(*, missing: str | None = None, extra: bool = False) -> dict[str, object]:

@@ -3736,17 +3736,23 @@
 .knowledge-question-list { display: grid; gap: 10px; }
 .knowledge-question-card { padding: 14px; border: 1px solid var(--line-color-border-subtle); border-left: 4px solid #94a3b8; border-radius: 10px; background: #fff; }
 .knowledge-question-card.is-answered { border-left-color: #16a34a; }
-.knowledge-question-card.is-unsupported { border-left-color: #dc2626; background: #fffafa; }
+.knowledge-question-card.is-awaiting_feedback { border-left-color: #2563eb; background: #f8fbff; }
+.knowledge-question-card.is-needs_improvement { border-left-color: #dc2626; background: #fffafa; }
+.knowledge-question-card.is-unsupported { border-left-color: #64748b; background: #f8fafc; }
 .knowledge-question-card.is-failed { border-left-color: #d97706; background: #fffbeb; }
 .knowledge-question-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .knowledge-question-heading strong { line-height: 1.55; }
 .knowledge-question-meta { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 7px; color: var(--line-color-text-muted); }
 .knowledge-question-answer { margin: 10px 0 0; padding: 10px 12px; border-radius: 8px; background: #f0fdf4; line-height: 1.6; }
+.knowledge-feedback-waiting,
 .knowledge-gap-reason,
 .knowledge-system-failure { margin: 10px 0 0; line-height: 1.6; }
+.knowledge-feedback-waiting { color: #1d4ed8; }
 .knowledge-gap-reason { color: #991b1b; }
 .knowledge-system-failure { color: #92400e; }
-.qa-lifecycle-badge.is-unsupported { color: #991b1b; background: #fee2e2; }
+.qa-lifecycle-badge.is-awaiting_feedback { color: #1d4ed8; background: #dbeafe; }
+.qa-lifecycle-badge.is-needs_improvement { color: #991b1b; background: #fee2e2; }
+.qa-lifecycle-badge.is-unsupported { color: #475569; background: #e2e8f0; }
 .qa-lifecycle-badge.is-failed { color: #92400e; background: #fef3c7; }
 .qa-lifecycle-badge.is-answered { color: #166534; background: #dcfce7; }
 

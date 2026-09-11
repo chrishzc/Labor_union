@@ -7,6 +7,8 @@
 處理 LINE webhook、identity binding/review、LIFF/self-service transport、rich menu／message delivery與committed delivery worker composition；擁有 identity root／owner projections／current-fact interpretation，business mutation回owning Subsystem。
 
 ## Modules
+- `worker-runtime-monitoring` — canonical worker cycle orchestration、success／failure heartbeat 與 runtime health classification；path: `modules/worker-runtime-monitoring.md`
+- `delivery-provider-transport` — committed delivery task 共用的 provider outcome contract 與 LINE Messaging API transport adapter；path: `modules/delivery-provider-transport.md`
 - `delivery-task-presentation` — LINE delivery task查詢工作台的business-facing presentation；path: `modules/delivery-task-presentation.md`
 - `line-identity-management` — canonical LINE identity binding and review persistence; path: `modules/line-identity-management.md`
 - `line-identity-maintenance-presentation` — LINE identity更正與解除維護的business-facing presentation；path: `modules/line-identity-maintenance-presentation.md`
@@ -49,6 +51,8 @@ layout_status: `custom_current`
 - test_root: `tests/domains/external-integration/subsystems/line/`
 - integration_root: `tests/domains/external-integration/subsystems/line/integration/`.
 - integration_root: `tests/domains/external-integration/subsystems/line/infrastructure/test_line_mysql_repositories.py`
+- integration_root: `tests/domains/external-integration/subsystems/line/subsystems/test_line_application_contracts.py`
+- integration_root: `tests/domains/external-integration/subsystems/line/subsystems/test_line_runtime_stage3.py`
 - integration_root: `tests/domains/external-integration/subsystems/line/infrastructure/test_line_liff_entrypoint.py`
 - integration_root: `tests/domains/external-integration/subsystems/line/subsystems/test_line_identity_stage4.py`
 - integration_root: `tests/domains/external-integration/subsystems/line/subsystems/test_line_registration_atomicity.py`

@@ -574,7 +574,9 @@ Data Browser generic PATCH 代替。
 
 ### 4.8 Subsystem：Data Browser masked query
 
-Data Browser只提供system admin對六個stable public source identities的bounded唯讀查詢；UI tab只是presentation，
+Data Browser只提供system admin對六個stable public source identities的bounded唯讀相容查詢；自2026-09-11
+起不再是canonical React日常入口，`#data-browser`依第33份正式規格導向案件中心客戶名冊。既有archive query
+仍不得成為writer；UI tab只是legacy presentation evidence，
 不得把table literal升格為權威。canonical mapping固定為：
 
 | UI tab | Public source identity | Cursor／row identity | Masked view |
@@ -592,8 +594,8 @@ columns/cells、row identity、source identity、version fingerprint與next curs
 masking或identity drift使整個request失敗，不可回partial raw row。Query只執行stable-order SELECT，0 commit、0 mutation、
 0 source-correction call；Global correlation boundary與typed 401／403／404／422／500涵蓋此route。
 
-legacy raw table metadata與source-correction Preview／Apply不屬此query slice，仍保持not-ready；本契約不授權generic
-PATCH、raw row、任意table／SQL、source repair或entry cutover。
+legacy raw table metadata與source-correction Preview／Apply維持退役；本契約不授權generic PATCH、raw row、
+任意table／SQL或source repair。canonical名冊entry、欄位owner路由與cutover以第33份正式規格為準。
 
 ## 5. Domain：Case Import
 

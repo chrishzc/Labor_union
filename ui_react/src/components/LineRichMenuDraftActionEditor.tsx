@@ -49,7 +49,7 @@ const CANONICAL_LIFF_TARGETS = [
   { value: '?target=scheduling_review', label: '?target=scheduling_review（排班審核）' },
   { value: '?target=staff_review', label: '?target=staff_review（待辦工作台）' },
   { value: '?target=staff_payout', label: '?target=staff_payout（薪資請款）' },
-  { value: '?target=anomalies_center', label: '?target=anomalies_center（異常中心）' },
+  { value: '?target=order_tracking', label: '?target=order_tracking（狀態追蹤）' },
   { value: '?target=dashboard', label: '?target=dashboard（營運摘要）' },
 ];
 

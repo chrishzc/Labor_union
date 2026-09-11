@@ -111,6 +111,28 @@ def test_natural_language_human_request_requires_confirmation_without_ticket(
     ]
 
 
+def test_unscoped_subsidy_amount_asks_which_program_the_customer_means() -> None:
+    unit_of_work = _unit_of_work()
+    application = LineServiceHelpApplication(
+        lambda: datetime(2026, 8, 21, tzinfo=timezone.utc)
+    )
+
+    assert application.handle(
+        _inbox("event-subsidy-scope"),
+        unit_of_work,
+        LineUserId("U123456789"),
+        "補助多少",
+    ) is True
+
+    assert unit_of_work.customer_service.messages == []
+    payload = json.loads(unit_of_work.delivery_tasks.requests[0].payload_json)
+    assert payload["text"] == "為了正確協助您，請選擇較接近的項目。"
+    assert [item["action"]["label"] for item in payload["quickReply"]["items"]] == [
+        "一般市民補助",
+        "低收／中低收入戶社福補助",
+    ]
+
+
 def test_reply_token_is_never_used_as_a_precommit_provider_call() -> None:
     unit_of_work = _unit_of_work()
     application = LineServiceHelpApplication(lambda: datetime(2026, 8, 21, tzinfo=timezone.utc))
@@ -337,6 +359,37 @@ def test_resume_postback_releases_hold_in_caller_uow_and_acknowledges() -> None:
     assert command.requester_line_user_id == "U123456789"
     assert command.actor.actor_id == "line:U123456789"
     assert gateway_uow is unit_of_work
+    payload = json.loads(unit_of_work.delivery_tasks.requests[0].payload_json)
+    assert payload["text"] == "已結束真人客服並恢復 AI 助理，您可以繼續提問。"
+
+
+@pytest.mark.parametrize(
+    "resume_text",
+    ("恢復ai", "恢復機器人", "恢復機器人回答", "繼續讓機器人回答"),
+)
+def test_resume_message_alias_releases_hold_before_active_hold_guard(
+    resume_text: str,
+) -> None:
+    unit_of_work = _unit_of_work()
+    gateway = _EscalationGateway(
+        HumanEscalationError("domain_blocked", "automation_hold_active", "自動化暫停中"),
+        resume_receipt=SimpleNamespace(escalation_id=41),
+    )
+    application = LineServiceHelpApplication(
+        lambda: datetime(2026, 8, 21, tzinfo=timezone.utc),
+        escalation_gateway=gateway,
+    )
+
+    assert application.handle(
+        _inbox("event-lowercase-resume"),
+        unit_of_work,
+        LineUserId("U123456789"),
+        resume_text,
+    ) is True
+
+    assert len(gateway.resume_calls) == 1
+    assert gateway.hold_calls == []
+    assert unit_of_work.customer_service.messages == []
     payload = json.loads(unit_of_work.delivery_tasks.requests[0].payload_json)
     assert payload["text"] == "已結束真人客服並恢復 AI 助理，您可以繼續提問。"
 

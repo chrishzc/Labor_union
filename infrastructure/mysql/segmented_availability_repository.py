@@ -13,6 +13,10 @@ from typing import Any, Callable, Protocol
 class SegmentedAvailabilityFactsPort(Protocol):
     def load_case_facts(self, case_no: str) -> dict[str, Any]: ...
 
+    def list_assignment_plan_case_options(
+        self, after_case_no: str | None, page_size: int
+    ) -> tuple[tuple[dict[str, Any], ...], str | None]: ...
+
 
 class MySqlSegmentedAvailabilityFactsRepository:
     def __init__(self, connection_factory: Callable[[], Any]):
@@ -32,6 +36,36 @@ class MySqlSegmentedAvailabilityFactsRepository:
                 cursor.close()
             connection.close()
 
+    def list_assignment_plan_case_options(
+        self, after_case_no: str | None, page_size: int
+    ) -> tuple[tuple[dict[str, Any], ...], str | None]:
+        """List only cases that have the owner facts required by Assignment Plan."""
+
+        cursor_case_no = _case_option_cursor(after_case_no)
+        result_limit = _case_option_limit(page_size)
+        connection = self._connection_factory()
+        cursor = None
+        try:
+            cursor = connection.cursor()
+            cursor.execute(
+                "SELECT o.case_no,o.status AS order_status FROM orders o "
+                "WHERE o.case_no>%s AND o.status IN ('洽談中','訂單成立') "
+                "AND EXISTS ("
+                "SELECT 1 FROM confirmed_service_date_versions v "
+                "JOIN confirmed_service_date_days d ON d.confirmed_version_id=v.id "
+                "WHERE v.case_no=o.case_no AND v.is_current=1"
+                ") ORDER BY o.case_no LIMIT %s",
+                (cursor_case_no, result_limit),
+            )
+            rows = tuple(dict(row) for row in (cursor.fetchall() or ()))
+        finally:
+            if cursor is not None:
+                cursor.close()
+            connection.close()
+        items = rows[:page_size]
+        next_cursor = str(items[-1]["case_no"]) if len(rows) > page_size else None
+        return items, next_cursor
+
     def _load_order(self, cursor: Any, case_no: str) -> dict[str, Any] | None:
         cursor.execute(
             "SELECT o.case_no, o.status, o.start_date, o.end_date,"
@@ -47,11 +81,8 @@ class MySqlSegmentedAvailabilityFactsRepository:
     def _load_negotiation_facts(self, cursor: Any, order: dict[str, Any]) -> dict[str, Any]:
         confirmed_service_dates = self._load_confirmed_service_dates(cursor, order["case_no"])
         window_start, window_end = _availability_window(order, confirmed_service_dates)
-        planning_order = dict(order)
-        planning_order["start_date"] = window_start
-        planning_order["end_date"] = window_end
         return {
-            "order": planning_order,
+            "order": dict(order),
             "confirmed_service_dates": confirmed_service_dates,
             "staff_rows": self._load_active_staff(cursor),
             "assignments": self._load_assignments(cursor, window_start, window_end),
@@ -190,6 +221,26 @@ def _availability_window(
     ]
     bounds = starts + dates
     return min(bounds).isoformat(), max(bounds).isoformat()
+
+
+def _case_option_cursor(after_case_no: str | None) -> str:
+    if after_case_no is None:
+        return ""
+    if not isinstance(after_case_no, str):
+        raise TypeError("after_case_no must be a string or None")
+    if not after_case_no or after_case_no.strip() != after_case_no:
+        raise ValueError("after_case_no must be canonical")
+    if len(after_case_no) > 50:
+        raise ValueError("after_case_no exceeds database identity length")
+    return after_case_no
+
+
+def _case_option_limit(page_size: int) -> int:
+    if isinstance(page_size, bool) or not isinstance(page_size, int):
+        raise TypeError("page_size must be an integer")
+    if not 1 <= page_size <= 200:
+        raise ValueError("page_size is outside the bounded query policy")
+    return page_size + 1
 
 
 def _as_date(value: Any) -> date:

@@ -6,16 +6,11 @@ Description: 驗證受控 Windows launcher smoke 的安全契約。
 from __future__ import annotations
 
 from io import BytesIO
-from pathlib import Path
 
 import pytest
 
 from scripts import smoke_local_development_launcher as smoke
 from infrastructure.http.private_operations_client import ReactAdminArtifactAttestation
-
-
-ROOT = Path(__file__).resolve().parents[1]
-
 
 class _ProcessStub:
     def __init__(self, return_code: int | None = None) -> None:
@@ -32,7 +27,7 @@ def test_wait_until_ready_rejects_a_worker_that_exits_early(monkeypatch) -> None
         smoke._wait_until_ready({"line-worker": _ProcessStub(1)}, timeout_seconds=1)
 
 
-def test_run_smoke_cleans_partially_started_services(monkeypatch) -> None:
+def test_run_smoke_cleans_partially_started_services(monkeypatch, tmp_path) -> None:
     process = _ProcessStub()
     handle = BytesIO()
     stopped: list[dict[str, _ProcessStub]] = []
@@ -44,6 +39,7 @@ def test_run_smoke_cleans_partially_started_services(monkeypatch) -> None:
 
     monkeypatch.setattr(smoke, "_require_free_port", lambda port: None)
     monkeypatch.setattr(smoke, "_clear_previous_logs", lambda: None)
+    monkeypatch.setattr(smoke, "ROOT", tmp_path)
     monkeypatch.setattr(
         smoke,
         "inspect_profile",
@@ -76,31 +72,6 @@ def test_service_commands_skip_unconfigured_line_worker(monkeypatch) -> None:
 
     assert all("worker" not in name for name in commands)
     assert "runtime-monitor" not in commands
-
-
-def test_windows_launcher_generates_key_without_nested_python_quotes() -> None:
-    source = (ROOT / "scripts/launchers/start_local_development.bat").read_text(
-        encoding="utf-8"
-    )
-
-    assert "RandomNumberGenerator]::Create()" in source
-    assert "in ('\"%PY%\" -c \"import secrets" not in source
-
-
-def test_windows_launcher_waits_for_api_and_ui_before_workers() -> None:
-    source = (ROOT / "scripts/launchers/start_local_development.bat").read_text(
-        encoding="utf-8"
-    )
-
-    api_start = source.index('start "FastAPI Server"')
-    api_ready = source.index('call :WAIT_FOR_HTTP "http://127.0.0.1:8000/health"')
-    ui_start = source.index('start "React Admin UI"')
-    ui_ready = source.index(
-        'call :WAIT_FOR_HTTP "http://127.0.0.1:5173/admin/"'
-    )
-    first_worker = source.index('start "LINE Worker"')
-
-    assert api_start < api_ready < ui_start < ui_ready < first_worker
 
 
 def test_artifact_runtime_smoke_compares_local_and_private_attestation(monkeypatch) -> None:

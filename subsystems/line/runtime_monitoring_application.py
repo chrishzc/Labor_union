@@ -207,12 +207,27 @@ def _line_runtime_observations(
 ) -> list[RuntimeHealthObservation]:
     heartbeat = runtime.latest_heartbeat()
     worker_age = None if heartbeat is None else (now - heartbeat.heartbeat_at).total_seconds()
-    worker_healthy = (
+    stale_after_seconds = float(os.getenv("LINE_WORKER_STALE_SECONDS", "90"))
+    worker_available = (
         heartbeat is not None
         and heartbeat.stopped_at is None
         and worker_age is not None
-        and worker_age <= 60
+        and worker_age <= stale_after_seconds
     )
+    worker_error_code = None if heartbeat is None else heartbeat.last_error_code
+    worker_failed = worker_available and worker_error_code is not None
+    if not worker_available:
+        worker_status = RuntimeHealthStatus.CRITICAL
+        worker_message = "LINE Worker heartbeat 過期或不存在"
+    elif worker_failed:
+        worker_status = RuntimeHealthStatus.CRITICAL
+        worker_message = "LINE Worker 存活，但最近工作週期失敗"
+    else:
+        worker_status = RuntimeHealthStatus.HEALTHY
+        worker_message = "LINE Worker heartbeat 正常"
+    worker_details: dict[str, object] = {"age_seconds": worker_age}
+    if worker_failed:
+        worker_details["last_error_code"] = worker_error_code
     counts = runtime.queue_counts()
     backlog = sum(counts.get(name, 0) for name in ("inbox_pending", "delivery_pending", "legacy_pending"))
     queue_warning = backlog >= int(os.getenv("MONITOR_QUEUE_WARNING", "100"))
@@ -221,9 +236,9 @@ def _line_runtime_observations(
         RuntimeHealthObservation(
             "line_worker",
             "LINE Worker",
-            RuntimeHealthStatus.HEALTHY if worker_healthy else RuntimeHealthStatus.CRITICAL,
-            "LINE Worker heartbeat 正常" if worker_healthy else "LINE Worker heartbeat 過期或不存在",
-            {"age_seconds": worker_age},
+            worker_status,
+            worker_message,
+            worker_details,
             now,
         ),
         RuntimeHealthObservation(

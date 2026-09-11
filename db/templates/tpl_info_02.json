@@ -1,12 +1,11 @@
 {
   "id": "tpl_info_02",
   "name": "2. 訂單資訊-2 (給服務人員的產婦照顧與飲食習慣細節)",
-  "desc": "提供給月嫂閱讀之過敏體質、飲食酒油喜忌、洗澡水、哺乳方式、停車位與加收樓層費照顧細節",
+  "desc": "提供給月嫂閱讀之過敏體質、飲食酒油喜忌、洗澡水、哺乳方式、停車位與照顧細節",
   "fields": [
     {"id": "f_201_e1", "label": "客戶名稱", "type": "db_link", "db_key": "client_name", "owner": "clients", "source": "client.name", "requiredness": "required", "status": "resolved", "width": "half"},
     {"id": "f_202_e2", "label": "聯絡電話", "type": "db_link", "db_key": "phone", "owner": "clients", "source": "client.phone", "requiredness": "required", "status": "resolved", "width": "half"},
     {"id": "f_203_e3", "label": "案件編號", "type": "db_link", "db_key": "case_no", "owner": "orders", "source": "order.case_no", "requiredness": "required", "status": "resolved", "width": "half"},
-    {"id": "f_204_e4", "label": "樓層費用 (透天加收)", "type": "db_link", "db_key": "floor_fee", "owner": "orders", "source": "order.floor_fee", "requiredness": "required", "status": "resolved", "width": "half"},
     {"id": "f_205_e5", "label": "服務地址", "type": "db_link", "db_key": "address", "owner": "clients", "source": "client.address", "requiredness": "required", "status": "resolved", "width": "full"},
     {"id": "f_206_e6", "label": "飲食習慣(含是否可接受中藥)", "type": "db_link", "db_key": "dietary_habits", "owner": "case_import", "source": "case_import.order_information.dietary_habits", "requiredness": "required", "status": "resolved", "width": "full"},
     {"id": "f_207_e7", "label": "若遇無法媒合到葷食服務人員時，請問餐食部分是否可以接受蛋奶素餐食？", "type": "db_link", "db_key": "vegetarian_preference", "owner": "case_import", "source": "case_import.order_information.vegetarian_preference", "requiredness": "required", "status": "resolved", "width": "full"},

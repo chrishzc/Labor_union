@@ -44,7 +44,13 @@ function activePlan() {
     segments: contact.segments.map((segment, index) => ({ segmentId: segment.segment_id, sequence: index + 1,
       staffId: 8892 + index, assignedStartDate: '2026-09-01', assignedEndDate: '2026-09-05' })) };
 }
+async function openCandidatePicker() {
+  const summary = await screen.findByText(/^(選擇推薦月嫂|更換推薦人選)$/);
+  const picker = summary.closest('details');
+  if (picker && !picker.open) fireEvent.click(summary);
+}
 async function loadCandidates() {
+  await openCandidatePicker();
   fireEvent.click(screen.getByRole('button', { name: '讀取正式推薦候選' }));
   await screen.findByText('月嫂甲 · 月嫂 #8892');
 }
@@ -53,7 +59,7 @@ async function createFormalPlan() {
   const button = screen.getByRole('button', { name: '以 月嫂甲 建立正式媒合方案' });
   await waitFor(() => expect(button).toBeEnabled());
   fireEvent.click(button);
-  await screen.findByText('正式媒合方案已建立：#51 · created');
+  await screen.findByText('正式媒合方案已建立：#51');
 }
 async function openExisting(onObserved = vi.fn()) {
   exists = true;
@@ -87,6 +93,8 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
 
   it('在目前 proposed 方案保留國定假日雙方協調入口', async () => {
     await openExisting();
+    const more = screen.getByText('其他處理').closest('details');
+    expect(more).not.toHaveAttribute('open');
     expect(screen.getByText('國定假日上班雙方協調')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '檢查國定假日上班協議' })).toBeInTheDocument();
   });
@@ -94,16 +102,17 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
   it('只让 active 且 willing 候選建立既有正式方案，並以 active-plan 與 contact-state 回讀', async () => {
     render(<OrderFormalRecommendationPanel caseNo={CASE} />);
     await loadCandidates();
-    expect(screen.getAllByText(/不可建立方案/)).toHaveLength(2);
+    expect(screen.getAllByText('目前不可選擇')).toHaveLength(2);
     expect(screen.queryByRole('button', { name: '以 月嫂乙 建立正式媒合方案' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '以 月嫂丙 建立正式媒合方案' })).not.toBeInTheDocument();
     const create = screen.getByRole('button', { name: '以 月嫂甲 建立正式媒合方案' });
     await waitFor(() => expect(create).toBeEnabled());
     fireEvent.click(create);
-    await screen.findByText('正式媒合方案已建立：#51 · created');
+    await screen.findByText('正式媒合方案已建立：#51');
     expect(mocks.createSingleCaregiverPlan).toHaveBeenCalledWith(CASE, { staff_id: 8892, start_date: '2026-09-01', end_date: '2026-09-05' });
     expect(mocks.queryContactState).toHaveBeenCalledWith(CASE, 51);
-    expect(screen.getByText('manually_confirmed')).toBeInTheDocument();
+    expect(screen.getAllByText('履歷已送達').length).toBeGreaterThan(0);
+    expect(screen.queryByText('manually_confirmed')).not.toBeInTheDocument();
     expect(mocks.createSingleCaregiverPlan).toHaveBeenCalledTimes(1);
   });
 
@@ -114,7 +123,7 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
     onObserved.mockClear();
     fireEvent.change(screen.getByLabelText('方案 51 客戶決策依據'), { target: { value: '電話核對正式推薦。' } });
     fireEvent.click(screen.getByRole('button', { name: decision === 'accepted' ? '記錄方案 51 客戶接受' : '記錄方案 51 客戶拒絕' }));
-    await screen.findByText(`目前決定：${decision}`);
+    await waitFor(() => expect(screen.getAllByText(decision === 'accepted' ? '客戶已接受' : '客戶已拒絕').length).toBeGreaterThan(0));
     expect(mocks.recordCustomerDecision).toHaveBeenCalledWith(CASE, 51, 4, decision, '電話核對正式推薦。');
     expect(mocks.queryContactState).toHaveBeenCalledTimes(3);
     expect(onObserved).toHaveBeenCalledTimes(1);
@@ -125,6 +134,7 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
   it('沒有既有方案且候選 query 不可用時，不建立方案或記錄決策', async () => {
     mocks.query.mockRejectedValue(new Error('candidate pool unavailable'));
     render(<OrderFormalRecommendationPanel caseNo={CASE} />);
+    await openCandidatePicker();
     fireEvent.click(screen.getByRole('button', { name: '讀取正式推薦候選' }));
     await screen.findByText('candidate pool unavailable');
     expect(mocks.createSingleCaregiverPlan).not.toHaveBeenCalled();
@@ -136,17 +146,18 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
     contact.customer_profiles_status = null;
     const onObserved = await openExisting();
     fireEvent.change(screen.getByLabelText('方案 51 履歷傳送備註'), { target: { value: '請核對兩份正式履歷。' } });
-    fireEvent.click(screen.getByRole('button', { name: '寄送月嫂履歷給客戶' }));
-    await screen.findByText('履歷發送工作已建立：#81（pending）；尚不代表 LINE 已送達。');
+    fireEvent.click(screen.getByRole('button', { name: '寄送履歷給客戶' }));
+    await screen.findByText('履歷發送工作已建立：#81（狀態：等待系統寄送）；尚不代表 LINE 已送達。');
     expect(mocks.sendCustomerProfiles).toHaveBeenCalledWith(CASE, 51, 4, '請核對兩份正式履歷。');
     expect(mocks.createSingleCaregiverPlan).not.toHaveBeenCalled();
     expect(onObserved).toHaveBeenCalledTimes(1);
-    expect(screen.queryByRole('button', { name: '寄送月嫂履歷給客戶' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '寄送履歷給客戶' })).not.toBeInTheDocument();
   });
 
   it('既有方案不依賴候選池成功，候選池失敗仍可讀取正式方案', async () => {
     await openExisting();
     mocks.query.mockRejectedValue(new Error('candidate pool unavailable'));
+    await openCandidatePicker();
     fireEvent.click(screen.getByRole('button', { name: '讀取正式推薦候選' }));
     await screen.findByText('candidate pool unavailable');
     expect(screen.getByText('目前正式媒合方案：#51')).toBeInTheDocument();
@@ -159,16 +170,17 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
     await openExisting();
     await loadCandidates();
     expect(screen.getByRole('button', { name: '以 月嫂甲 建立正式媒合方案' })).toBeDisabled();
-    expect(screen.queryByRole('button', { name: '寄送月嫂履歷給客戶' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '寄送履歷給客戶' })).not.toBeInTheDocument();
     expect(mocks.createSingleCaregiverPlan).not.toHaveBeenCalled();
   });
 
   it('active-plan 403 不當成沒有方案，不容許新建', async () => {
     mocks.queryPlan.mockRejectedValue(new ApiHttpError(403, 'forbidden', '無讀取權限'));
     render(<OrderFormalRecommendationPanel caseNo={CASE} />);
-    await screen.findByText('目前正式方案不可用：無讀取權限');
-    await loadCandidates();
-    expect(screen.getByRole('button', { name: '以 月嫂甲 建立正式媒合方案' })).toBeDisabled();
+    await screen.findByText('目前無法讀取推薦進度');
+    expect(screen.getByText('無讀取權限')).toBeInTheDocument();
+    expect(screen.queryByText('選擇推薦月嫂')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '以 月嫂甲 建立正式媒合方案' })).not.toBeInTheDocument();
     expect(mocks.createSingleCaregiverPlan).not.toHaveBeenCalled();
   });
 
@@ -177,7 +189,7 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
     await openExisting();
     fireEvent.change(screen.getByLabelText('方案 51 履歷傳送備註'), { target: { value: '核對履歷' } });
     contact.plan.communication_version = 6;
-    fireEvent.click(screen.getByRole('button', { name: '寄送月嫂履歷給客戶' }));
+    fireEvent.click(screen.getByRole('button', { name: '寄送履歷給客戶' }));
     await screen.findByText('正式方案版本已變更，請重新讀取後確認。');
     expect(mocks.sendCustomerProfiles).not.toHaveBeenCalled();
   });
@@ -187,7 +199,7 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
     await openExisting();
     mocks.queryPlan.mockResolvedValue({ ...activePlan(), planId: 52 });
     fireEvent.change(screen.getByLabelText('方案 51 履歷傳送備註'), { target: { value: '核對履歷' } });
-    fireEvent.click(screen.getByRole('button', { name: '寄送月嫂履歷給客戶' }));
+    fireEvent.click(screen.getByRole('button', { name: '寄送履歷給客戶' }));
     await screen.findByText('目前有效方案已變更，請重新載入；不對其他方案執行操作。');
     expect(mocks.sendCustomerProfiles).not.toHaveBeenCalled();
   });
@@ -197,7 +209,7 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
     mocks.sendCustomerProfiles.mockResolvedValue({ intent_id: 81, delivery_status: 'pending' });
     const onObserved = await openExisting();
     fireEvent.change(screen.getByLabelText('方案 51 履歷傳送備註'), { target: { value: '核對履歷' } });
-    fireEvent.click(screen.getByRole('button', { name: '寄送月嫂履歷給客戶' }));
+    fireEvent.click(screen.getByRole('button', { name: '寄送履歷給客戶' }));
     await screen.findByText('操作後正式方案回讀尚未確認預期結果，請重新讀取；不重送操作。');
     expect(onObserved).not.toHaveBeenCalled();
     expect(mocks.sendCustomerProfiles).toHaveBeenCalledTimes(1);
@@ -210,12 +222,23 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
         segments: contact.segments.map((segment) => ({ ...segment, willingness: 'willing' })) };
     });
     const onObserved = await openExisting();
-    expect(screen.getByRole('button', { name: '記錄方案 51 客戶接受' })).toBeDisabled();
-    fireEvent.change(screen.getByLabelText('方案 51 客戶決策依據'), { target: { value: '第二段月嫂電話確認。' } });
-    fireEvent.click(screen.getByRole('button', { name: '確認分段 72 月嫂願意承接' }));
+    expect(screen.queryByRole('button', { name: '記錄方案 51 客戶接受' })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('方案 51 月嫂意願確認依據'), { target: { value: '第二段月嫂電話確認。' } });
+    fireEvent.click(screen.getByRole('button', { name: '確認月嫂 #8893 願意承接' }));
     await screen.findByText('正式方案月嫂意願已回讀確認。');
     expect(mocks.recordFormalPlanWillingness).toHaveBeenCalledWith(CASE, 51, 72, 4, '第二段月嫂電話確認。');
-    expect(screen.getByRole('button', { name: '記錄方案 51 客戶接受' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '記錄方案 51 客戶接受' })).toBeDisabled();
+    expect(screen.getByLabelText('方案 51 客戶決策依據')).toHaveValue('');
     expect(onObserved).toHaveBeenCalledTimes(1);
+  });
+
+  it('將正常續辦集中為單一主要動作，例外處理與更換人選預設收合', async () => {
+    contact.customer_profiles_status = null;
+    await openExisting();
+    expect(screen.getByRole('button', { name: '寄送履歷給客戶' })).toBeEnabled();
+    expect(screen.getByLabelText('方案 51 履歷傳送備註')).toHaveValue('請查收正式推薦月嫂履歷。');
+    expect(screen.getByText('其他處理').closest('details')).not.toHaveAttribute('open');
+    expect(screen.getByText('更換推薦人選').closest('details')).not.toHaveAttribute('open');
+    expect(screen.queryByText(/^pending$/)).not.toBeInTheDocument();
   });
 });

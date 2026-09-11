@@ -72,6 +72,8 @@ class FileSystemRichMenuImageStore:
 
 
 def _get_icon_for_label(label: str) -> str:
+    if "追蹤" in label or "進度" in label:
+        return "🔎"
     if "通報" in label or "異常" in label or "警報" in label:
         return "🚨"
     if "看板" in label or "報表" in label or "數據" in label or "營運" in label:

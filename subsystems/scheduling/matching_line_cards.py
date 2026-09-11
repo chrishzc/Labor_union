@@ -22,6 +22,44 @@ def caregiver_information_card(
     )
 
 
+def candidate_contact_information_card(
+    case_no: str,
+    info_type: int,
+    information_text: str,
+    interaction_reference: str,
+    response_url: str,
+) -> str:
+    """Render the candidate-pool information projection with bound reply actions."""
+    if not isinstance(case_no, str) or not case_no.strip():
+        raise ValueError("candidate order number is required")
+    if info_type not in {1, 2}:
+        raise ValueError("candidate information type is invalid")
+    if not isinstance(information_text, str) or not information_text.strip():
+        raise ValueError("candidate information text is required")
+    if not isinstance(interaction_reference, str) or not interaction_reference.strip():
+        raise ValueError("candidate interaction reference is required")
+    if not isinstance(response_url, str) or not response_url.startswith("https://"):
+        raise ValueError("candidate response URL must use HTTPS")
+    title = f"訂單編號：{case_no.strip()}"
+    body = [
+        _title(title),
+        {
+            "type": "text",
+            "text": information_text.strip(),
+            "size": "sm",
+            "wrap": True,
+        },
+        _notice("請確認檔期與條件後回覆是否願意承接。"),
+    ]
+    actions = [
+        _candidate_contact_button("願意承接", interaction_reference, "willing", "#06C755"),
+        _candidate_contact_liff_button(
+            "提出疑問或無法承接", response_url, "#6B7280"
+        ),
+    ]
+    return canonical_line_payload_json(_bubble_payload(title, body, actions))
+
+
 def customer_profiles_card(
     case_no: str,
     profiles: Sequence[Mapping[str, object]],
@@ -142,10 +180,41 @@ def _postback_button(label, token, decision, color):
     }
 
 
+def _candidate_contact_button(label, reference, willingness, color):
+    return {
+        "type": "button",
+        "style": "primary",
+        "color": color,
+        "action": {
+            "type": "postback",
+            "label": label,
+            "data": f"candidate-contact:{reference}:{willingness}",
+            "displayText": label,
+        },
+    }
+
+
+def _candidate_contact_liff_button(label, uri, color):
+    return {
+        "type": "button",
+        "style": "primary",
+        "color": color,
+        "action": {
+            "type": "uri",
+            "label": label,
+            "uri": uri,
+        },
+    }
+
+
 def _list_text(value):
     if isinstance(value, (list, tuple)):
         return "、".join(str(item) for item in value if item) or "未提供"
     return str(value or "未提供")
 
 
-__all__ = ["caregiver_information_card", "customer_profiles_card"]
+__all__ = [
+    "candidate_contact_information_card",
+    "caregiver_information_card",
+    "customer_profiles_card",
+]

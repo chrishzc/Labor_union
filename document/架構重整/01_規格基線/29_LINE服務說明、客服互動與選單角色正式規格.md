@@ -8,7 +8,7 @@
 - 關聯契約：`20_LINE客服與月嫂自助服務正式規格.md`、`23_LINE身分管理與解除正式規格.md`、`26_LINE四大模組Eraser流程圖轉錄與驗收基線.md`
 - 來源：既有 Service Help 正式條款、已完成 migration 的歷史 QA／Rich Menu 規格，以及仍保留的 QA implementation-gap tracker 與 LINE 四大模組操作測試手冊；歷史來源只保留於 Git history，不另建 Authority。
 
-本文件只補足「使用者如何進入服務說明、回答如何核准發布、何時轉人工、不同身分看到哪一類選單，以及本機 preview 的零外送邊界」。LINE identity、ticket root、delivery task、provider publication 與 M1～M4 transaction 仍由上位正式規格擁有。
+本文件只補足「使用者如何進入服務說明、回答如何發布啟用、何時轉人工、不同身分看到哪一類選單，以及本機 preview 的零外送邊界」。LINE identity、ticket root、delivery task、provider publication 與 M1～M4 transaction 仍由上位正式規格擁有。
 
 ## 2. Owner 與非目標
 
@@ -38,6 +38,7 @@
 
 - 服務流程：只可回覆已核准、版本化的流程說明與下一個安全入口。
 - 收費與補助：只可使用已核准 wording；不得承諾個案最終金額、資格或核定結果。需要個案值時轉 owning API 或人工。
+- 餐飲食材：月嫂料理所需食材由客戶或家人自行購買、事先準備並負擔費用；月嫂不負責外出採買、代買或代墊食材費。FAQ 必須使用此統一 wording，不得沿用舊資料中的採買時間或個案說法。
 - 查詢服務進度：必須先確認有效 role-scoped binding，只讀該使用者被授權的最新案件／服務投影；未綁定或 identity 不唯一時只提供綁定／登記指引。
 - 修改登記資料：只處理不影響訂單內容或月嫂接案意願的個人／聯絡／登記資料，建立或延續 Customer Service／owner correction workflow，不在聊天室直接改 root。可修改欄位仍受 owning contract allowlist 約束；銀行帳戶僅為分類例示，不代表 current flow 已授權該欄位。
 - 聯絡工會人員：建立或延續 Customer Service ticket。
@@ -61,24 +62,24 @@ Client canonical `city`、`address`、`residence_type` 仍由 Client owner 保�
 - Registration Preview 零正式寫入；Apply 可依 current owner contract 建立 provisional registration 及其合法 intake roots。不得沿用「Client／BeClass 一律不得新增」的舊驗收，也不得由前端自行決定建立結果。
 - 後續 verify、provisional registration、binding 與人工 review 依 `17`、`23` 與 `26` 的 owner contract 執行；任何資料庫 mutation 都必須走 typed application boundary。
 
-## 5. 核准回答 catalog
+## 5. 可發布回答 catalog
 
 `document/line/QA問答集.xlsx` 與 `document/line/AI客服QA題庫.jsonl` 是內容輸入／migration evidence，不是 runtime Authority。每一個可自動回覆的 answer item 至少具備：
 
-本機／development runtime 在啟動時必須幂等補齊隨系統交付的 29 題為 managed draft，不以管理員先手動匯入作為可用前提，也不得覆寫系統內已編修的 revision。JSONL 只是 bundled migration evidence，runtime 查詢不得直接以它產生候選答案。具備 Knowledge 管理權限的同一位管理員可依次編修、審核與發布；每次 actor 仍必須寫入 audit event 與 reviewer／publisher 欄位。
+本機／development runtime 在啟動時必須幂等補齊隨系統交付的 54 題，並在全新或仍為未編修 v1 草稿時還原 Git 追蹤 JSONL 內的 `enabled` 狀態及建立索引；不以管理員先手動匯入作為可用前提，也不得覆寫系統內已編修的 revision。JSONL 是可隨 repository 攜帶的 bundled migration／bootstrap evidence，runtime 查詢仍不得直接以它產生候選答案。具備 Knowledge 發布權限的管理員可將完整草稿直接發布啟用；每次 actor 仍必須寫入 audit event 與 publisher 欄位。
 
 - stable item identity 與 revision；
 - category、audience／role 與適用條件；
 - source／provenance；
-- 人工核准 wording；
-- owner 與最後審核者；
-- `published | retired` lifecycle；
+- 明確的對外 wording；
+- owner 與最後發布者；
+- `draft | published | retired` lifecycle；
 - automation boundary 與 manual-fallback reason；
 - 不含 secret、credential 或不必要 PII。
 
-空白、重複、來源不足、互相衝突、無 owner、過期或含個案承諾的列不得自動發布。Current AI 客服題庫輸入位於 `document/line/AI客服QA題庫.jsonl`；只有完成 review 且為 `ready`／published 的 item 可成為自動回答候選。Knowledge／FAQ 回答固定 `authoritative=false`；它可提供一般資訊，不能取代 owner Query、資格判定或 command receipt。
+空白、重複、來源不足、互相衝突、無 owner、過期或含個案承諾的列不得發布。Current AI 客服題庫輸入位於 `document/line/AI客服QA題庫.jsonl`；只有通過 publishability 檢查且為 published 的 item 可成為自動回答候選。Knowledge／FAQ 回答固定 `authoritative=false`；它可提供一般資訊，不能取代 owner Query、資格判定或 command receipt。
 
-更新流程固定為「來源輸入 → normalize／deduplicate → human review → versioned publish → read-only answer query」。Workbook、crawler、模型或前端不得自我核准或覆寫 current published revision。
+更新流程固定為「來源輸入 → normalize／deduplicate → versioned publish → durable index job → READY index → read-only answer query」。Workbook、crawler 或模型不得自行發布或覆寫 current published revision；前端只能透過具發布權限、版本檢查與 audit 的 typed command 發布。Publish／retire 必須在同一 outer Unit of Work 寫入 lifecycle 變更與對應 index job；不能只把既有索引標為 stale 後要求管理員再按一次。畫面只有在 index terminal readback 為 READY 後才能宣稱 AI 已實際啟用該版本。
 
 ## 6. Router precedence 與 LLM 邊界
 
@@ -89,8 +90,8 @@ Client canonical `city`、`address`、`residence_type` 仍由 Client owner 保�
 3. group／target context。
 4. Service Help 六類 deterministic dispatch。
 5. 已核准的 FAQ／Knowledge answer。
-6. 只有另有明確 provider 與 tool-catalog Authority 時，才可使用 LLM semantic router。Current M2 語意路徑固定為：READY Knowledge index 取回 closed 候選 → 模型只回候選 QA ID 或 `UNSUPPORTED` → server 讀取該候選的核准 answer；模型不得自由撰寫政策答案或執行候選外工具。
-7. 無唯一結果、來源不足、非法候選 ID、index／model unavailable、tool unavailable 或任何 ambiguity 時，建立／延續 durable manual fallback。
+6. READY Knowledge index 取回 closed 候選後，若 current 問句只唯一精確命中一個已發布 question／alias，server 直接讀取該候選的核准 answer；多個精確命中必須 fail closed。沒有唯一精確命中時，只有另有明確 provider 與 tool-catalog Authority 才可讓模型回傳候選 QA ID 或 `UNSUPPORTED`。模型不得自由撰寫政策答案或執行候選外工具。
+7. 已完成查詢但無唯一 FAQ 候選、來源不足或模型回傳 `UNSUPPORTED` 時，不顯示「沒有答案」作為終點；必須直接送出「常見問答」主題選單，讓使用者改選服務流程、收費與補助、服務進度、資料修改或其他問題。index／model unavailable、tool unavailable、非法候選 ID 或其他系統異常仍 fail closed，不得冒充正常 FAQ 回答。
 
 LLM 不得直接產生業務 final answer、不得寫 owner root、不得自選新工具、不得繞過 authentication／authorization、不得把模型文字當 receipt 或 provider 成功。本文件不授權任何 AI provider、credential、費用、production deployment 或真實外送測試。
 
@@ -101,7 +102,7 @@ LLM 不得直接產生業務 final answer、不得寫 owner root、不得自選�
 - `default_menu`（訪客初始選單，`audience_role: "visitor"`，`set_as_default: true`）：專供未綁定任何身分之訪客使用。具備快速上手功能：「客戶登記與綁定」、「月嫂身分綁定」、「服務與問答」、「專人客服諮詢」。
 - `customer_menu`（客戶專屬選單，`audience_role: "customer"`，`set_as_default: false`）：已完成客戶身分綁定專用。四格固定為左上「修改登記資料」、右上「修改訂單資訊」、左下「服務與問答」、右下「專人客服諮詢」（不含初始登記與月嫂綁定）；右上必須是 server-built LIFF URI，不是 message action。
 - `staff_menu`（月嫂專屬選單，`audience_role: "staff"`，`set_as_default: false`）：current role 為 staff 且 binding 有效（訂單查詢、排班資訊、請假代班申請、薪資請款明細）。
-- `union_staff_menu`（工會人員專屬選單，`audience_role: "union_staff"`，`set_as_default: false`）：已認證的工會內部使用者入口，四格為「待辦工作台」、「客服中心」、「異常中心」、「營運摘要」；其業務權限仍由 Access owner 判定。
+- `union_staff_menu`（工會人員專屬選單，`audience_role: "union_staff"`，`set_as_default: false`）：已認證的工會內部使用者入口，四格為「待辦工作台」、「客服中心」、「狀態追蹤」、「營運摘要」；其業務權限仍由 Access owner 判定。LINE 異常仍由既有工會群組通知承接，不再占用 Rich Menu 格位。
 
 同一 LINE User 可同時具 customer 與 staff binding；雙角色必須依 `23` 明確選擇 current role，不得由訂單、排班、前一頁、provider 狀態或 local storage 猜測。選定 role 不再 active 時，menu readback 不得沿用 stale audience；解除身分綁定（revocation）後，自動回退並繼承全域預設之訪客選單（`default_menu`）。
 
@@ -113,13 +114,13 @@ Current menu content 與 action 由 MySQL versioned LINE configuration 及 curre
 
 ### 7.1 工會人員 LIFF 工作入口
 
-四格可共用同一個 LIFF runtime 與 server-side 身分驗證；四個入口均須在顯示或查詢管理內容前驗證 server-verified LINE token、current role-scoped LINE admin binding、enabled Admin owner 與所需 capability，不得再要求 React／密碼／MFA Admin Session，也不得簽發可供一般後台使用的 Session。每個入口仍必須呈現獨立、可辨識的工作 surface。由「客服中心」進入時不得同時顯示月嫂審核或排班工具，由「待辦工作台」進入時也不得把客服案件混成同一清單。第一版沿用已發布選單可能仍持有的 `staff_review`、`customer_service`、`anomalies_center`、`dashboard` target identity，不以 publication 尚未切換為由中斷既有 deep link。
+四格可共用同一個 LIFF runtime 與 server-side 身分驗證；四個入口均須在顯示或查詢管理內容前驗證 server-verified LINE token、current role-scoped LINE admin binding、enabled Admin owner 與所需 capability，不得再要求 React／密碼／MFA Admin Session，也不得簽發可供一般後台使用的 Session。每個入口仍必須呈現獨立、可辨識的工作 surface。由「客服中心」進入時不得同時顯示月嫂審核或排班工具，由「待辦工作台」進入時也不得把客服案件混成同一清單。Current target 為 `staff_review`、`customer_service`、`order_tracking`、`dashboard`；已發布舊選單可能仍持有的 `anomalies_center` 在下一次 publication 完成前相容導向 `order_tracking`，不得出現死連結或重新顯示異常清單。
 
 - 「待辦工作台」彙整四組需要工會人員決定的工作入口：Client owner 的客戶資料異動審核、LINE Identity owner 的客戶／月嫂重綁與身分異常審核、Scheduling owner 的請假受理與代班／改期處理，以及 Matching／Scheduling owner 的媒合最終指派與重新媒合。每組清單、狀態、版本、Preview／Confirm／Apply、receipt 與 fresh readback 仍由原 owner 提供；mobile surface 只作 bounded presentation，不建立共用 approval root 或跨 owner writer。
-- 只有具 owner-backed pending Query 的項目可以顯示待辦筆數；既有 Scheduling Assignment Plan 在 pending Query 完成前只作「媒合與排班審核工具」入口，不計入待辦數量，也不得以案件總數、前端推算或假資料冒充 pending review。其結構化欄位以 owner-backed 下拉選項操作：案件來自 bounded unfinished Orders summary，月嫂與日期來自 Scheduling 的 active Staff 與 confirmed service dates；調整原因維持必填自由文字。一般月嫂身分資料唯一吻合且尚未綁定時依 `23` 直接完成綁定，不建立人工待辦；工作台中的月嫂項目只代表 canonical review root 已存在的重綁／身分異常案件。
-- 客戶訂單異動目前只建立 Customer Service 人工確認需求，仍留在「客服中心」；客訴／人工 fallback、current LINE 異常與 QA／Knowledge 內容審核分別留在「客服中心」、「異常中心」與 AI 事件工作室，不因待辦工作台彙整而重複列示或重複計數。
+- 只有具 owner-backed pending Query 的項目可以顯示待辦筆數；既有 Scheduling Assignment Plan 在 pending Query 完成前只作獨立的「正式排班重建工具」，不計入待辦數量，也不得以案件總數、前端推算或假資料冒充 pending review。此工具只處理已具 current confirmed service dates、尚未開始服務，且需要建立或重建正式月嫂指派的案件；它不是 Orders Terms 修改後的下一步，也不處理服務中代班或完成訂單。案件選項由 Scheduling purpose-specific bounded Query 以 canonical Orders `洽談中／訂單成立` 狀態及 current confirmed service dates 組成，月嫂與日期來自 Scheduling 的 active Staff 與 confirmed service dates；調整原因維持必填自由文字。一般月嫂身分資料唯一吻合且尚未綁定時依 `23` 直接完成綁定，不建立人工待辦；工作台中的月嫂項目只代表 canonical review root 已存在的重綁／身分異常案件。
+- 客戶訂單異動目前只建立 Customer Service 人工確認需求，仍留在「客服中心」；客訴／人工 fallback 與 QA／Knowledge 內容管理分別留在「客服中心」與 AI 事件工作室，不因待辦工作台彙整而重複列示或重複計數。current LINE 異常由工會群組通知承接，不在 Rich Menu 另設清單入口。
 - 「客服中心」只呈現 Customer Service 的 waiting／handling／resolved 查詢、明細與既有回覆流程；不得因共用 LIFF asset 顯示不相干的審核頁籤。
-- 「異常中心」第一版只呈現 Anomalies owner 的 current-only `LINE-006` 清單、合法空狀態、blocking／severity 與最後驗證時間。它不是 generic 異常通報、claim 或 resolve writer；後續處理仍回到 owner action contract。
+- 「狀態追蹤」第一版只讀呈現未完成訂單的案件編號、canonical lifecycle、十三核心階段目前位置、已完成階段數、最後更新時間及 owner-backed 下一步。可用案件編號搜尋、重新整理及分頁載入；不得在此修改訂單、媒合、排班、財務或客服 root。候選池已有月嫂回覆願意但尚未建立正式媒合方案時，下一步固定提示工會建立正式媒合方案並寄送月嫂履歷；「前往待辦工作台」只切換既有工作入口，不構成 mutation。
 - 「營運摘要」第一版以 Global Reporting 的 `operations-report.v3` 顯示 current business week（Asia/Taipei，星期一至 current business date）摘要與 `generated_at`。只顯示 owner query 已提供的案件申請、一般符合、補助符合、不符合待分流、已成立訂單與資料不完整數量，不宣稱即時監控，也不在 LIFF 寫入週報人工指標。
 
 四個 surface 對合法零筆必須顯示可理解空狀態；token／binding 無效、owner query unavailable 或 response contract 不完整時 fail closed，不得以假資料、桌面頁面 iframe、local counter 或 fallback writer 補空。本階段只建立／調整本機 configuration draft source 與應用程式入口，不授權 Rich Menu provider publication。
@@ -148,21 +149,21 @@ Ticket 狀態至少為 `waiting → handling → resolved`。resolved 後同一 
 
 1. 六類 Service Help 均有 deterministic routing、合法空狀態與 manual fallback。
 2. Gateway 兩個分支導向正確且零未授權業務寫入。
-3. approved answer 只來自 versioned published catalog；draft、conflict 與 unowned item 不會自動回覆。
+3. enabled answer 只來自 versioned published catalog；draft、conflict 與 unowned item 不會自動回覆。
 4. explicit human／wrong precedence 高於自動回答；自然語句確認前零開單／零 hold，Rich Menu 或確認 postback 才轉接；相同 escalation identity 不重複開單。active hold 的訊息加入原 ticket 且零 AI 回答；原 requester 或客服後台可依正式狀態機解除 hold並收到恢復通知，不同 requester、stale version 與重複競爭 fail closed。
 5. customer／staff 雙角色必須明確選擇；不同 audience 不交叉顯示。
 6. local menu preview 不建立 provider task 或成功 receipt；publish 以 durable task 及 terminal readback 判定。
 7. LLM 或 Knowledge 不得直接寫業務 root、繞過 closed tool catalog 或宣稱 provider 成功。
 8. API／React／LINE visible result 對 timeout、conflict、unavailable 與 unknown outcome fail closed。
 9. 工會人員由四個 Rich Menu target 進入時，均須通過 server-verified LINE token、current LINE admin binding、enabled Admin owner 與 capability 核對，之後只看到該入口的工作 surface；不得導向後台登入，共用 LIFF asset 不造成驗證前內容閃現或跨入口頁籤混雜。
-10. 待辦工作台可分組讀取客戶資料異動、客戶／月嫂重綁與身分異常、請假代班／改期，以及媒合指派／重新媒合；每一筆與每一個數量均來自對應 owner 的 pending Query。沒有 pending Query 的排班案件工具不冒充待辦，客服、異常及 QA／Knowledge 工作也不重複列入。
-11. 異常中心只顯示 current `LINE-006` owner query，營運摘要只顯示 current business week `operations-report.v3` 與資料產生時間；兩者皆具合法空狀態且零業務寫入。
-12. 本機／development 首次啟動即可由正式 Knowledge API read back 29 題 managed draft，不需先手動匯入；同一授權管理員可完成編修→審核→發布，空白答案仍必須 fail closed。
-13. 管理端將事件路由規則、真實模型測試與 AI 客服回饋觀測分開呈現。回饋觀測可讀取已去除 LINE identity 的實際問句、回答狀態與核准來源；只有 `unsupported` 列為待補強知識，provider／worker failure 必須另列為系統異常，不得污染題庫缺口統計。這組問句觀測 graph 的保留與刪除由 `18_Global_Deployment與治理正式規格.md` 的 `RET-001..010` 統一治理，最長 30 天；Knowledge catalog、published item、current READY index 與 LINE／客服業務證據不在清理範圍。
+10. 待辦工作台可分組讀取客戶資料異動、客戶／月嫂重綁與身分異常、請假代班／改期，以及媒合指派／重新媒合；每一筆與每一個數量均來自對應 owner 的 pending Query。沒有 pending Query 的排班案件工具不冒充待辦，客服、異常及 QA／Knowledge 管理工作也不重複列入。
+11. 狀態追蹤只顯示 owner-backed 未完成訂單投影，具案件編號搜尋、合法空狀態與零業務寫入；月嫂已願意且正式媒合方案尚未建立時須顯示建立方案並寄送履歷的下一步。營運摘要只顯示 current business week `operations-report.v3` 與資料產生時間。舊 `anomalies_center` target 僅相容導向狀態追蹤，畫面不得再載入異常清單。
+12. 本機／development 首次啟動即可由正式 Knowledge API read back Git 所攜 54 題及其初始 `enabled` 狀態，不需先手動匯入；只有全新或內容未編修的 v1 草稿可套用 portable enabled state，既有 revision 不得被 bootstrap 覆寫。具發布權限的管理員可完成編修→發布，空白答案仍必須 fail closed。發布與停用都必須自動建立 durable index job，不得要求第二次人工操作；停用保留歷程，READY readback 後不得再由索引選中舊答案。
+13. 管理端將事件路由規則、真實模型測試與 AI 客服回饋觀測分開呈現。回饋觀測可讀取已去除 LINE identity 的實際問句、Knowledge 處理結果、核准來源及該回答的 terminal feedback。`已回答` 只由 `resolved` 回饋導出，`待補強` 只由 `unresolved` 回饋導出；已送出回答但尚無回饋必須顯示「等待用戶回饋」，`unsupported` 必須另列為「未提供答案」，provider／worker failure 必須另列為系統異常。任何一種處理狀態都不得冒充用戶回饋或污染另一分類。這組問句觀測 graph 的保留與刪除由 `18_Global_Deployment與治理正式規格.md` 的 `RET-001..010` 統一治理，最長 30 天；Knowledge catalog、published item、current READY index 與 LINE／客服業務證據不在清理範圍。
 
 ## 11. 來源文件處置（2026-09-09）
 
-- `LINE_QA客服知識契約收斂計畫.md` 保留為 current blocked `implementation-gap-tracker`。它不是 SSOT；只追蹤逐題 human review、versioned `published|retired` lifecycle、conflict queue、closed-candidate runtime 與 API／React readback 尚未被證明完成的缺口。
+- `LINE_QA客服知識契約收斂計畫.md` 保留為 current blocked `implementation-gap-tracker`。它不是 SSOT；只追蹤逐題內容完整性、versioned `draft|published|retired` lifecycle、conflict queue、closed-candidate runtime 與 API／React readback 尚未被證明完成的缺口。
 - `LINE_Rich_Menu_多角色圖文選單與互動中心正式規範.md` 已完成 disposition 並退回 Git history。其仍有效的 audience、current-role、draft／publish 與 typed action 邊界已由 `17`、`23` 與本文件承接；舊「三套 menu」「訪客／客戶共用 default」「禁止使用者明確選 role」「禁止 `richmenuswitch`」及硬編 endpoint／page/component 等內容被 current formal contract 否定，不得復活。
 - `LINE_Rich_Menu_本機視覺比對與互動模擬工作室正式規範.md` 已完成 disposition 並退回 Git history。本機 preview 的 canvas／area／action validation、before／after、role preview context、零 provider 外送、零 publication task、Preview≠publish 與 provider readback 已由 `17` 與本文件承接；舊 UI 排版、示例 wording、特定 screenshot／component 細節不建立 Authority。
 - `LINE_四大模組_詳細測試手冊與前置條件.md` 保留在 `document/功能開發計畫/`，作為 current 可執行操作／手機 E2E 驗收手冊。它可保存 Agent 前置、測試資料準備、裝置操作、readback、驗收層級與 cleanup，但不得覆蓋本文件及 `17`、`20`、`23`、`26` 的 owner／語意／transaction 契約；route、schema、owner 或正式驗收條件改變時必須同步更新。

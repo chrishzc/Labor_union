@@ -103,9 +103,6 @@ echo ==========================================
 echo [Notice] start_local_development.bat is for local development only; it is not a production deployment entrypoint.
 echo [Notice] Production readiness validation is intentionally not run by this development launcher.
 
-call :ENSURE_INTERNAL_SERVICE_KEY
-if errorlevel 1 exit /b !ERRORLEVEL!
-
 :: 4. Supervise all local runtime children in one owned process tree.
 echo [Step 5] Starting owned Windows runtime supervision...
 @REM supervise_local_runtime.ps1 owns api.main:app, React/Vite, monitor and workers.
@@ -116,6 +113,8 @@ powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0su
 set "SUPERVISOR_EXIT=!ERRORLEVEL!"
 if not "!SUPERVISOR_EXIT!"=="0" (
     echo [Error] Local runtime supervision stopped with exit code !SUPERVISOR_EXIT!.
+    echo [Action] Keep this window open and copy the final RUNTIME_EVENT or worker error.
+    pause
     exit /b !SUPERVISOR_EXIT!
 )
 echo [Ready] Local runtime supervision ended cleanly.
@@ -130,11 +129,3 @@ exit /b !ERRORLEVEL!
 echo [Smoke] Phase6B-RUN artifact health only; no child, Docker, DB, provider or observation write.
 "%PY%" -m scripts.smoke_local_development_launcher --artifact-runtime
 exit /b !ERRORLEVEL!
-
-:ENSURE_INTERNAL_SERVICE_KEY
-if not defined APP_ENV set "APP_ENV=development"
-if defined INTERNAL_SERVICE_SHARED_KEY exit /b 0
-for /f "delims=" %%K in ('powershell.exe -NoProfile -NonInteractive -Command "$bytes = New-Object byte[] 32; $random = [Security.Cryptography.RandomNumberGenerator]::Create(); $random.GetBytes($bytes); $random.Dispose(); [Convert]::ToBase64String($bytes)"') do set "INTERNAL_SERVICE_SHARED_KEY=%%K"
-if defined INTERNAL_SERVICE_SHARED_KEY exit /b 0
-echo [Error] Failed to generate the local internal service key.
-exit /b 1

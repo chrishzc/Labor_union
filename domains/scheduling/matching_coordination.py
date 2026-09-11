@@ -86,6 +86,14 @@ class StableRejectionReason(StrEnum):
     DUE_DATE_OUTSIDE_WINDOW = "due_date_outside_window"
     CRITERIA_SOURCE_STALE = "criteria_source_stale"
     CANDIDATE_EXPIRED = "candidate_expired"
+    SERVICE_REGION = "service_region"
+    SERVICE_DATES = "service_dates"
+    DAILY_SERVICE_WINDOW = "daily_service_window"
+    DAILY_SERVICE_HOURS = "daily_service_hours"
+    COOKING_REQUIREMENT = "cooking_requirement"
+    TRANSPORT_PARKING_FLOOR = "transport_parking_floor"
+    PERSONAL_REASON = "personal_reason"
+    NO_INTEREST = "no_interest"
 
 
 class RefusalRoutingGroup(StrEnum):

@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import re
-from pathlib import Path
-import re
 from difflib import SequenceMatcher
 from typing import Callable
 
@@ -16,6 +14,9 @@ from domains.knowledge_retrieval.knowledge import (
     KnowledgeCitation,
 )
 from domains.knowledge_retrieval.qa_catalog import decode_governed_qa
+
+
+_MAX_RETRIEVAL_CANDIDATES = 50
 
 
 class ChromaKnowledgeGateway:
@@ -67,7 +68,10 @@ class ChromaKnowledgeGateway:
         query_texts = [question]
         if history:
             query_texts.append(f"{history[-1]['question']} {question}")
-        result = collection.query(query_texts=query_texts, n_results=min(5, count))
+        result = collection.query(
+            query_texts=query_texts,
+            n_results=min(_MAX_RETRIEVAL_CANDIDATES, count),
+        )
         raw_docs = result.get("documents") or []
         raw_metas = result.get("metadatas") or []
         documents_list: list[str] = []
@@ -88,25 +92,37 @@ class ChromaKnowledgeGateway:
         candidates = tuple(
             metadata
             for document, metadata in zip(documents, metadatas, strict=True)
-            if self._candidate_confidence(question, document, metadata)
+            if _subsidy_scope_compatible(question, metadata)
+            and self._candidate_confidence(question, document, metadata)
             >= self._min_confidence
         )
-        if not candidates or self._llm is None:
+        if not candidates:
             raise KnowledgeAnswerUnsupported("knowledge_answer_unsupported")
 
-        selected_id = str(
-            self._llm(self._selection_prompt(question, candidates, history=history))
-        ).strip()
-        if selected_id == "UNSUPPORTED":
-            raise KnowledgeAnswerUnsupported("knowledge_answer_unsupported")
-        selected = next(
-            (
-                candidate
-                for candidate in candidates
-                if str(candidate["candidate_id"]) == selected_id
-            ),
-            None,
+        exact_candidates = tuple(
+            candidate
+            for candidate in candidates
+            if self._is_exact_candidate(question, candidate)
         )
+        if len(exact_candidates) > 1:
+            raise KnowledgeAnswerUnsupported("knowledge_answer_unsupported")
+        selected = exact_candidates[0] if exact_candidates else None
+        if selected is None:
+            if self._llm is None:
+                raise KnowledgeAnswerUnsupported("knowledge_answer_unsupported")
+            selected_id = str(
+                self._llm(self._selection_prompt(question, candidates, history=history))
+            ).strip()
+            if selected_id == "UNSUPPORTED":
+                raise KnowledgeAnswerUnsupported("knowledge_answer_unsupported")
+            selected = next(
+                (
+                    candidate
+                    for candidate in candidates
+                    if str(candidate["candidate_id"]) == selected_id
+                ),
+                None,
+            )
         if selected is None:
             raise KnowledgeAnswerUnsupported("knowledge_answer_unsupported")
 
@@ -224,6 +240,17 @@ class ChromaKnowledgeGateway:
         return max((self._similarity(question, term) for term in terms), default=0.0)
 
     @staticmethod
+    def _is_exact_candidate(question: str, metadata: dict) -> bool:
+        normalized_question = _normalize(question)
+        terms = (
+            str(metadata.get("question", "")),
+            *ChromaKnowledgeGateway._aliases(metadata),
+        )
+        return bool(normalized_question) and any(
+            normalized_question == _normalize(term) for term in terms
+        )
+
+    @staticmethod
     def _similarity(left: str, right: str) -> float:
         normalized_left = _normalize(left)
         normalized_right = _normalize(right)
@@ -236,7 +263,10 @@ class ChromaKnowledgeGateway:
                 len(normalized_left), len(normalized_right)
             )
             return 0.75 + (0.25 * length_ratio)
-        return SequenceMatcher(None, normalized_left, normalized_right).ratio()
+        return max(
+            SequenceMatcher(None, normalized_left, normalized_right).ratio(),
+            _cjk_bigram_coverage(normalized_left, normalized_right),
+        )
 
     @staticmethod
     def _selection_prompt(
@@ -306,6 +336,78 @@ class ChromaKnowledgeGateway:
 
 def _normalize(value: str) -> str:
     return "".join(character.casefold() for character in value if character.isalnum())
+
+
+def _cjk_bigram_coverage(question: str, candidate_term: str) -> float:
+    """Match compact Chinese intent labels even when natural speech inserts words."""
+    query_cjk = "".join(character for character in question if "\u4e00" <= character <= "\u9fff")
+    term_cjk = "".join(character for character in candidate_term if "\u4e00" <= character <= "\u9fff")
+    if len(query_cjk) < 4 or len(term_cjk) < 4:
+        return 0.0
+    query_bigrams = {query_cjk[index : index + 2] for index in range(len(query_cjk) - 1)}
+    term_bigrams = {term_cjk[index : index + 2] for index in range(len(term_cjk) - 1)}
+    return len(query_bigrams & term_bigrams) / len(term_bigrams)
+
+
+_SOCIAL_WELFARE_MARKERS = (
+    "社福",
+    "低收入",
+    "中低收入",
+    "低收",
+    "中低收",
+)
+_GENERAL_CITIZEN_MARKERS = ("市府", "一般市民", "一般產婦", "市民補助")
+_SUBSIDY_DECISION_MARKERS = (
+    "多少",
+    "金額",
+    "幾元",
+    "時數",
+    "幾小時",
+    "小時",
+    "資格",
+    "符合",
+    "可以申請",
+    "能申請",
+)
+
+
+def _subsidy_scope_compatible(question: str, metadata: dict) -> bool:
+    query_scope = _query_subsidy_scope(question)
+    if query_scope is None:
+        return True
+    if query_scope == "ambiguous":
+        return False
+    candidate_text = " ".join(
+        (
+            str(metadata.get("question", "")),
+            str(metadata.get("category", "")),
+            str(metadata.get("tag", "")),
+            *ChromaKnowledgeGateway._aliases(metadata),
+            str(metadata.get("answer", "")),
+        )
+    )
+    return _explicit_subsidy_scope(candidate_text) == query_scope
+
+
+def _query_subsidy_scope(value: str) -> str | None:
+    normalized = _normalize(value)
+    if "補助" not in normalized:
+        return None
+    explicit = _explicit_subsidy_scope(normalized)
+    if explicit is not None:
+        return explicit
+    if any(marker in normalized for marker in _SUBSIDY_DECISION_MARKERS):
+        return "ambiguous"
+    return None
+
+
+def _explicit_subsidy_scope(value: str) -> str | None:
+    normalized = _normalize(value)
+    if any(marker in normalized for marker in _SOCIAL_WELFARE_MARKERS):
+        return "social_welfare"
+    if any(marker in normalized for marker in _GENERAL_CITIZEN_MARKERS):
+        return "general_citizen"
+    return None
 
 
 __all__ = ["ChromaKnowledgeGateway"]

@@ -69,7 +69,10 @@ class KnowledgeAnswer:
 
 def transition_item_status(current: KnowledgeItemStatus, target: KnowledgeItemStatus) -> KnowledgeItemStatus:
     allowed = {
-        KnowledgeItemStatus.DRAFT: {KnowledgeItemStatus.REVIEWED},
+        KnowledgeItemStatus.DRAFT: {
+            KnowledgeItemStatus.REVIEWED,
+            KnowledgeItemStatus.PUBLISHED,
+        },
         KnowledgeItemStatus.REVIEWED: {KnowledgeItemStatus.PUBLISHED, KnowledgeItemStatus.DRAFT},
         KnowledgeItemStatus.PUBLISHED: {KnowledgeItemStatus.RETIRED},
     }

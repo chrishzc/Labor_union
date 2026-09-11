@@ -13,6 +13,7 @@ from subsystems.scheduling.ports import (
 from subsystems.scheduling.segmented_availability_query import (
     search_segmented_caregiver_availability,
 )
+from subsystems.scheduling.candidate_contact_pool_workflow import query_pool
 
 
 get_connection = unconfigured_connection_factory
@@ -222,6 +223,7 @@ def create_matching_plan_version(
     as_of: Any,
     *,
     facts_port: SegmentedAvailabilityFactsPort,
+    require_willing_candidate: bool = False,
 ) -> dict[str, Any]:
     """Create or reuse a proposed matching plan version for one case.
 
@@ -241,9 +243,20 @@ def create_matching_plan_version(
         "as_of": as_of_value,
     }
     availability_kwargs["facts_port"] = facts_port
-    availability = search_segmented_caregiver_availability(
-        **availability_kwargs,
-    )
+    if require_willing_candidate:
+        availability = search_segmented_caregiver_availability(
+            **availability_kwargs,
+            filter_policy={
+                "region": False,
+                "cooking": False,
+                "preferred_service_days": False,
+                "daily_service_hours": False,
+            },
+        )
+    else:
+        availability = search_segmented_caregiver_availability(
+            **availability_kwargs,
+        )
 
     complete_combinations = availability.get("complete_combinations")
     if not isinstance(complete_combinations, list):
@@ -269,7 +282,7 @@ def create_matching_plan_version(
     return _run_in_application_uow(
         lambda connection, cursor: _create_matching_plan_version_in_transaction(
             connection, cursor, case_no_value, normalized_segments, created_by_value,
-            target_signature,
+            target_signature, require_willing_candidate,
         )
     )
 
@@ -281,6 +294,7 @@ def _create_matching_plan_version_in_transaction(
     normalized_segments: list[dict[str, Any]],
     created_by_value: str,
     target_signature: tuple[tuple[int, int, str, str], ...],
+    require_willing_candidate: bool = False,
 ) -> dict[str, Any]:
     try:
         cursor.execute(
@@ -295,6 +309,13 @@ def _create_matching_plan_version_in_transaction(
 
         if order_row["status"] not in {"洽談中", "訂單成立"}:
             raise ValueError("case is not in negotiation stage")
+
+        if require_willing_candidate:
+            _require_current_willing_candidate(
+                connection,
+                case_no_value,
+                normalized_segments,
+            )
 
         _normalize_db_date(order_row["start_date"], "start_date")
         _normalize_db_date(order_row["end_date"], "end_date")
@@ -467,3 +488,23 @@ def _create_matching_plan_version_in_transaction(
         }
     finally:
         pass
+
+
+def _require_current_willing_candidate(connection, case_no, segments):
+    if len(segments) != 1:
+        raise ValueError("willing candidate selection requires exactly one segment")
+    segment = segments[0]
+    state = query_pool(case_no, connection=connection, for_update=True)
+    matches = tuple(
+        candidate
+        for candidate in state.candidates
+        if candidate.status in {"active", "selected"}
+        and candidate.willingness == "willing"
+        and candidate.staff_id == segment["staff_id"]
+        and candidate.service_start_date.isoformat()
+        == segment["assigned_start_date"]
+        and candidate.service_end_date.isoformat()
+        == segment["assigned_end_date"]
+    )
+    if len(matches) != 1:
+        raise ValueError("current willing candidate is required")

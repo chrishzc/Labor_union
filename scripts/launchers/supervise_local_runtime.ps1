@@ -77,6 +77,48 @@ function Write-RuntimeEvent {
     Write-Host ("RUNTIME_EVENT " + ($payload | ConvertTo-Json -Compress))
 }
 
+function Initialize-InternalServiceSharedKey {
+    $configured = [Environment]::GetEnvironmentVariable(
+        "INTERNAL_SERVICE_SHARED_KEY",
+        [EnvironmentVariableTarget]::Process
+    )
+    if ([string]::IsNullOrWhiteSpace($configured)) {
+        $dotenv = Join-Path $ProjectRoot ".env"
+        if (Test-Path -LiteralPath $dotenv -PathType Leaf) {
+            foreach ($line in @(Get-Content -LiteralPath $dotenv -ErrorAction Stop)) {
+                if ($line -match '^\s*INTERNAL_SERVICE_SHARED_KEY\s*=\s*(.*?)\s*$') {
+                    $configured = $Matches[1].Trim().Trim('"').Trim("'")
+                }
+            }
+        }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($configured)) {
+        if ($configured.Trim().Length -lt 32) {
+            throw "INTERNAL_SERVICE_SHARED_KEY must contain at least 32 characters"
+        }
+        $env:INTERNAL_SERVICE_SHARED_KEY = $configured.Trim()
+        return
+    }
+
+    $bytes = New-Object byte[] 32
+    $random = [Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $random.GetBytes($bytes)
+    }
+    finally {
+        $random.Dispose()
+    }
+    $env:INTERNAL_SERVICE_SHARED_KEY = [Convert]::ToBase64String($bytes)
+}
+
+function Assert-PrivateApiAuthentication {
+    & $PythonPath -c "from infrastructure.http.private_operations_client import PrivateOperationsClient; PrivateOperationsClient('runtime-supervisor').check()"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Private API authentication handshake failed with exit code $LASTEXITCODE"
+    }
+    Write-RuntimeEvent -Event "ready" -Label "Private API Authentication" -Detail "authenticated no-effect check passed"
+}
+
 function Get-ProcessSnapshot {
     param([int]$ProcessId)
     try {
@@ -567,11 +609,13 @@ try {
         exit 0
     }
 
+    Initialize-InternalServiceSharedKey
     Write-RuntimeEvent -Event "supervision_started" -Detail ("api_port=" + $ApiPort + ";react_port=" + $ReactPort)
     $api = Start-Owned -Label "FastAPI" -FilePath $PythonPath -ArgumentList @(
         "-m", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "$ApiPort"
     )
     Wait-HttpReady -Url "http://127.0.0.1:$ApiPort/health" -Label "FastAPI"
+    Assert-PrivateApiAuthentication
     Refresh-OwnedIdentityRegistry
 
     if ($env:REACT_ADMIN_RUNTIME_PROFILE -eq "artifact-runtime") {

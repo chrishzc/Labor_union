@@ -79,6 +79,16 @@ def test_provider_outcome_requires_success_identity() -> None:
     )
     assert provider_attempt_outcome(outcome).value == "success"
 
+    uncertain_reply = LineProviderOutcome(
+        LineProviderOutcomeType.TIMEOUT,
+        error_code="line_reply_outcome_uncertain",
+        error_message="LINE reply outcome is uncertain",
+    )
+    assert provider_attempt_outcome(
+        uncertain_reply,
+        retry_allowed=False,
+    ).value == "terminal_failure"
+
 
 def test_human_capabilities_are_distinct_from_internal_authentication() -> None:
     capability_values = {item.value for item in LineCapability}

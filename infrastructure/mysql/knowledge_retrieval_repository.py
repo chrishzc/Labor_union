@@ -1,4 +1,4 @@
-"""MySQL SSOT for reviewed knowledge, durable jobs, and answer receipts."""
+"""MySQL SSOT for published knowledge, durable jobs, and answer receipts."""
 
 from __future__ import annotations
 
@@ -228,6 +228,7 @@ class MySqlKnowledgeRetrievalRepository:
             return self._revise_existing(command, digest, actor_id), True
 
     def review(self, command) -> int:
+        """Preserved internal compatibility; current UI publishes drafts directly."""
         return self._transition(command, KnowledgeItemStatus.REVIEWED, "reviewed")
 
     def publish(self, command) -> int:
@@ -524,10 +525,7 @@ class MySqlKnowledgeRetrievalRepository:
             cursor.execute(_CURRENT_CONTENT, (command.item_id, command.expected_version.value))
             version = cursor.fetchone()
             governed_qa = decode_governed_qa(version["content"])
-            if governed_qa is not None and target in (
-                KnowledgeItemStatus.REVIEWED,
-                KnowledgeItemStatus.PUBLISHED,
-            ):
+            if governed_qa is not None and target is KnowledgeItemStatus.PUBLISHED:
                 governed_qa.require_publishable()
             cursor.execute(_INSERT_VERSION, (
                 command.item_id, next_version, version["content"], version["source_digest"],
@@ -603,12 +601,7 @@ class MySqlKnowledgeRetrievalRepository:
         line_user_id = request["requester_line_user_id"]
         if not line_user_id:
             return None
-        payload = canonical_line_payload_json(
-            {
-                "type": "text",
-                "text": "目前沒有可引用的已核准答案，請聯絡工會人員協助確認。",
-            }
-        )
+        payload = canonical_line_payload_json(_unsupported_faq_payload())
         delivery = LineDeliveryRequest(
             LineRecipient(LineRecipientType.USER, LineUserId(str(line_user_id))),
             LineMessageKind.TEXT,
@@ -725,6 +718,23 @@ def _public_line_answer_text(answer: str) -> str:
     return text
 
 
+def _unsupported_faq_payload() -> dict[str, Any]:
+    topics = ("服務流程", "收費與補助", "查詢服務進度", "修改登記資料", "其他問題")
+    return {
+        "type": "text",
+        "text": "請從下方常見問答選擇主題，或換一種方式輸入您的問題。",
+        "quickReply": {
+            "items": [
+                {
+                    "type": "action",
+                    "action": {"type": "message", "label": topic, "text": topic},
+                }
+                for topic in topics
+            ]
+        },
+    }
+
+
 def _transition_projection_update(target, actor_id: int, reason: str):
     if target is KnowledgeItemStatus.REVIEWED:
         return "reviewed_by_admin_user_id=%s,review_reason=%s", (actor_id, reason)
@@ -829,6 +839,12 @@ q.created_at_utc,q.completed_at_utc,r.answer_text,r.index_version,
  WHERE s.answer_receipt_id=r.id ORDER BY s.citation_order LIMIT 1) AS source_identity,
 (SELECT s.source_version FROM knowledge_answer_sources s
  WHERE s.answer_receipt_id=r.id ORDER BY s.citation_order LIMIT 1) AS source_version,
+(SELECT JSON_UNQUOTE(JSON_EXTRACT(e.facts_snapshot,'$.outcome'))
+ FROM line_notification_source_events e
+ WHERE e.source_domain='line_feedback'
+ AND e.source_aggregate_type='line_feedback'
+ AND JSON_UNQUOTE(JSON_EXTRACT(e.facts_snapshot,'$.source_response_id'))=CAST(r.id AS CHAR)
+ ORDER BY e.occurred_at_utc DESC,e.id DESC LIMIT 1) AS feedback_outcome,
 (SELECT j.last_error_code FROM knowledge_jobs j
  WHERE j.answer_request_id=q.id ORDER BY j.id DESC LIMIT 1) AS failure_code
 FROM knowledge_answer_requests q

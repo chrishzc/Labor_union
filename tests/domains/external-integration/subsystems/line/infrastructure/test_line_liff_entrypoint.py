@@ -158,6 +158,7 @@ def test_identity_page_routes_mobile_admin_targets_without_opening_staff_flow() 
     assert 'customer_service: "/line-mobile-admin?target=customer_service"' in mobile_admin_route
     assert 'scheduling_review: "/line-mobile-admin?target=scheduling_review"' in mobile_admin_route
     assert 'staff_review: "/line-mobile-admin?target=staff_review"' in mobile_admin_route
+    assert 'order_tracking: "/line-mobile-admin?target=order_tracking"' in mobile_admin_route
     assert 'anomalies_center: "/line-mobile-admin?target=anomalies_center"' in mobile_admin_route
     assert 'dashboard: "/line-mobile-admin?target=dashboard"' in mobile_admin_route
     assert "location.replace(mobileAdminPage);" in initialize_source
@@ -187,7 +188,7 @@ def test_liff_targets_route_to_existing_pages() -> None:
     assert 'staff_payout: "/line-staff-payout"' in staff_route
     assert "staff_baby_log: '/line-staff-baby-log'" in gateway
     assert "staff_payout: '/line-staff-payout'" in gateway
-    for target in ("anomalies_center", "dashboard"):
+    for target in ("order_tracking", "anomalies_center", "dashboard"):
         assert f"{target}:" in mobile_admin_route
         assert f"/line-mobile-admin?target={target}" in gateway
     assert "requestedUnavailableTarget" not in identity
