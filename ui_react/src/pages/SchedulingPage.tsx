@@ -6,6 +6,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './SchedulingPage.css';
 import { staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
 import { loadAllOrderSummaries, ordersQueryClient } from '../api/orders/order_query_client';
+import { loadAllCoreStageTimelines } from '../api/orders/load_all_core_stage_timelines';
 import { adaptStaffDirectoryPage } from '../adapters/staff/staff_directory_adapter';
 import type { StaffDirectoryCardViewModel } from '../adapters/staff/staff_directory_adapter';
 import { schedulingCurrentClient } from '../api/scheduling/scheduling_current_client';
@@ -2046,10 +2047,14 @@ export const SchedulingPage: React.FC = () => {
 
     const loadOptions = async () => {
       try {
-        const [summaryPage, assignmentPages] = await Promise.all([
+        const [summaryPage, coreStagePage, assignmentPages] = await Promise.all([
           loadAllOrderSummaries(
             ordersQueryClient.getOrderSummaries.bind(ordersQueryClient),
             { page_size: 200, lifecycle_scope: 'unfinished' },
+            { signal: controller.signal },
+          ),
+          loadAllCoreStageTimelines(
+            { workbench_scope: 'in_progress', page_size: 200 },
             { signal: controller.signal },
           ),
           Promise.all(staffList.map(async (staff) => {
@@ -2067,9 +2072,18 @@ export const SchedulingPage: React.FC = () => {
         const assignedCaseNos = new Set(
           assignmentPages.flat().map((assignment) => assignment.case_no),
         );
+        const preDepositCaseNos = new Set(
+          coreStagePage.items
+            .filter((timeline) => (
+              timeline.current_core_stage_ordinal !== null
+              && timeline.current_core_stage_ordinal < 8
+            ))
+            .map((timeline) => timeline.case_no),
+        );
         const options = summaryPage.items
           .filter((summary) => (
             assignedCaseNos.has(summary.case_no)
+            && preDepositCaseNos.has(summary.case_no)
             && summary.start_date !== null
             && summary.end_date !== null
           ))

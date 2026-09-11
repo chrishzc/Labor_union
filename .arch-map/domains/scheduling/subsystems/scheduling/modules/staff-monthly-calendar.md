@@ -20,6 +20,7 @@
 
 ## Dependencies
 - outbound: `scheduling/current-service-projection` — 正式 assignment 與 daily schedule 是 current service 的主要投影。
+- outbound: `orders/operational-stage-projection` — 排查案件選項依十三核心階段的正式 current ordinal 限定在第 8「訂金」之前。
 - outbound: `orders/historical-precision-restart` — precision restart event 使舊歷史指派區段失效，不得再覆蓋 restarted case。
 - inbound: Scheduling UI — 只透過 typed monthly endpoint 讀取投影，不直接讀 persistence facts。
 
@@ -38,6 +39,7 @@
 ## Provenance
 - Scheduling ownership 與 typed API boundary — `architecture_declared` — repository `AGENTS.md` 與 Scheduling subsystem parent map。
 - backend/API/frontend implementation paths — `source_observed` — current query、route、schema、client、adapter 與 page imports。
+- 排查案件的 pre-deposit 邊界 — `source_observed` — `SchedulingPage.tsx` 讀取完整 Orders core-stage timeline，且只保留 `current_core_stage_ordinal < 8`。
 - canonical Python test root — `architecture_declared` — Scheduling owner hierarchy 與 Arch Map test placement contract。
 - React test paths — `source_observed` — current project colocated React test harness layout。
 

@@ -17,12 +17,21 @@ import {
   SCHEDULING_PROJECTION_READY,
 } from './fixtures/scheduling/scheduling_current_contract_fixtures';
 
+const coreStageProjectionMocks = vi.hoisted(() => ({
+  loadAll: vi.fn(),
+}));
+
+vi.mock('../api/orders/load_all_core_stage_timelines', () => ({
+  loadAllCoreStageTimelines: coreStageProjectionMocks.loadAll,
+}));
+
 describe('SchedulingPage query-only presentation', () => {
   let intersectNextPage: () => void;
   let observeNextPage: ReturnType<typeof vi.fn>;
   afterEach(() => vi.unstubAllGlobals());
   beforeEach(() => {
     vi.restoreAllMocks();
+    coreStageProjectionMocks.loadAll.mockReset();
     observeNextPage = vi.fn();
     vi.stubGlobal('IntersectionObserver', class {
       constructor(callback: IntersectionObserverCallback) {
@@ -56,6 +65,12 @@ describe('SchedulingPage query-only presentation', () => {
       ],
       next_cursor: null,
       etag: 'a'.repeat(64),
+    });
+    coreStageProjectionMocks.loadAll.mockResolvedValue({
+      items: [
+        { case_no: 'CASE-SCH-001', current_core_stage_ordinal: 10 },
+        { case_no: '115000003', current_core_stage_ordinal: 7 },
+      ],
     });
     vi.spyOn(staffAssignmentOptionsClient, 'getStaffAssignmentOptions').mockImplementation(async (staffId) => [
       {
@@ -144,11 +159,72 @@ describe('SchedulingPage query-only presentation', () => {
       expect.objectContaining({ lifecycle_scope: 'unfinished' }),
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
+    expect(coreStageProjectionMocks.loadAll).toHaveBeenCalledWith(
+      { workbench_scope: 'in_progress', page_size: 200 },
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
 
     expect(schedulingCurrentClient.queryCurrentCalendar).toHaveBeenCalledWith(
       expect.objectContaining({ staffId: 12 }),
       expect.objectContaining({ signal: expect.any(AbortSignal) })
     );
+  });
+
+  it('排查案件只保留第 8 訂金階段之前的訂單', async () => {
+    const summary = (caseNo: string, clientName: string) => ({
+      case_no: caseNo,
+      client_name: clientName,
+      order_status: '洽談中',
+      staff_name: '去敏人員甲',
+      identity_status: 'verified',
+      start_date: '2026-08-01',
+      end_date: '2026-08-10',
+      actual_start_date: null,
+      actual_end_date: null,
+      service_days: 10,
+      total_employer_self_pay_payable: 10000,
+    });
+    vi.mocked(ordersQueryClient.getOrderSummaries).mockResolvedValue({
+      items: [
+        summary('CASE-STAGE-7', '簽署完成前'),
+        summary('CASE-STAGE-8', '訂金階段'),
+        summary('CASE-STAGE-9', '日期確認階段'),
+        summary('CASE-STAGE-10', '排班服務階段'),
+      ],
+      next_cursor: null,
+      etag: 'd'.repeat(64),
+    });
+    vi.mocked(staffAssignmentOptionsClient.getStaffAssignmentOptions).mockResolvedValue(
+      ['CASE-STAGE-7', 'CASE-STAGE-8', 'CASE-STAGE-9', 'CASE-STAGE-10'].map((caseNo, index) => ({
+        id: index + 1,
+        case_no: caseNo,
+        staff_id: 11,
+        status: 'planned',
+        assigned_start_date: '2026-08-01',
+        assigned_end_date: '2026-08-10',
+        order_status: '洽談中',
+        actual_start_date: null,
+        actual_end_date: null,
+        staff_name: '去敏人員甲',
+      })),
+    );
+    coreStageProjectionMocks.loadAll.mockResolvedValue({
+      items: [
+        { case_no: 'CASE-STAGE-7', current_core_stage_ordinal: 7 },
+        { case_no: 'CASE-STAGE-8', current_core_stage_ordinal: 8 },
+        { case_no: 'CASE-STAGE-9', current_core_stage_ordinal: 9 },
+        { case_no: 'CASE-STAGE-10', current_core_stage_ordinal: 10 },
+      ],
+    });
+
+    render(<SchedulingPage />);
+
+    const select = await screen.findByRole('combobox', { name: '資格查詢案件編號' });
+    await waitFor(() => expect(select).toBeEnabled());
+    expect(screen.getByRole('option', { name: /CASE-STAGE-7/ })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /CASE-STAGE-8/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /CASE-STAGE-9/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /CASE-STAGE-10/ })).not.toBeInTheDocument();
   });
 
   it('uses page_size 20, continues the staff cursor and keeps a complete month axis', async () => {
