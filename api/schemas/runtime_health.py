@@ -6,7 +6,9 @@ Description: 定義 runtime health 與 LINE alert target 的封閉 HTTP schema�
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from shared_kernel.fingerprints import PreviewFingerprint
 
 
 class RuntimeHealthRecordResponse(BaseModel):
@@ -175,6 +177,11 @@ class AlertTargetMutationPreviewResponse(BaseModel):
     current_version: str
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     apply_ready: Literal[True]
+
+    @field_validator("preview_fingerprint", mode="before")
+    @classmethod
+    def preview_fingerprint_value(cls, value):
+        return value.value if isinstance(value, PreviewFingerprint) else value
 
 
 class _ClosedProbeModel(BaseModel):
