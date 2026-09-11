@@ -98,7 +98,7 @@ export const OrderWorkbenchV2Page: FC = () => {
     refreshProjection();
   }, [refreshProjection]);
 
-  const normalizedSearch = search.trim();
+  const normalizedSearch = search.trim().toLocaleLowerCase();
 
   useEffect(() => {
     const requestId = requestSequence.current + 1;
@@ -108,7 +108,6 @@ export const OrderWorkbenchV2Page: FC = () => {
       page_size: 200,
       lifecycle_scope: 'all',
       workbench_scope: workbenchScope,
-      case_no_search: normalizedSearch || undefined,
       blocker_only: onlyBlocked || undefined,
       warning_only: onlyWarning || undefined,
       stage: workbenchScope === 'in_progress' ? selectedStage ?? undefined : undefined,
@@ -146,7 +145,6 @@ export const OrderWorkbenchV2Page: FC = () => {
     return () => controller.abort();
   }, [
     workbenchScope,
-    normalizedSearch,
     onlyBlocked,
     onlyWarning,
     projectionRefreshKey,
@@ -185,9 +183,16 @@ export const OrderWorkbenchV2Page: FC = () => {
     };
   }, [projectionRefreshKey]);
 
+  const displayedItems = (view?.items ?? []).filter((item) => {
+    if (!normalizedSearch) return true;
+    if (item.id.toLocaleLowerCase().includes(normalizedSearch)) return true;
+    const clientName = summaryIndex.get(item.id)?.clientName ?? '';
+    return clientName.toLocaleLowerCase().includes(normalizedSearch);
+  });
+
   const selectedDefinition = selectedStage === null ? null : coreStageDefinition(selectedStage);
   const selectedStageCount = selectedStage === null ? view?.items.length ?? 0 : view?.stageCounts[selectedStage] ?? 0;
-  const displayedCount = view?.items.length ?? 0;
+  const displayedCount = displayedItems.length;
 
   const selectScope = (scope: OrderWorkbenchScope) => {
     setWorkbenchScope(scope);
@@ -229,10 +234,10 @@ export const OrderWorkbenchV2Page: FC = () => {
           <label className="orders-search-input-box">
             <span className="orders-search-icon" aria-hidden="true">🔍</span>
             <input
-              aria-label="搜尋案件編號"
+              aria-label="搜尋案件編號或姓名"
               value={search}
               onChange={(event: ChangeEvent<HTMLInputElement>) => setSearch(event.target.value)}
-              placeholder="搜尋案件編號"
+              placeholder="搜尋案件編號或姓名"
             />
           </label>
           <button className="tracker-reload-button" type="button" disabled={loading || refreshing} onClick={refreshProjection}>
@@ -318,7 +323,7 @@ export const OrderWorkbenchV2Page: FC = () => {
       {!loading && displayedCount > 0 && (
         <fieldset disabled={refreshing || error !== null} style={{ border: 0, padding: 0, margin: 0 }}>
         <div className="orders-grid order-v2-orders-grid">
-          {view?.items.map((item) => {
+          {displayedItems.map((item) => {
             const summary = summaryIndex.get(item.id) ?? null;
             const stage = item.currentStage;
             const primaryNotice = item.blockers[0] ?? item.warnings[0] ?? null;
