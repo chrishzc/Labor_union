@@ -75,8 +75,6 @@ from subsystems.government_subsidy.overpayment_query import (
 
 _GENERAL_CITIZEN = "一般市民"
 _SUBSIDIZED_CITIZEN = "補助市民"
-_GENERAL_CITIZEN_UNIT_PRICE_NTD = 300
-_SUBSIDIZED_CITIZEN_UNIT_PRICE_NTD = 350
 
 
 def _advance_overpayment(cursor, request, candidate, event_type, evidence_reference):
@@ -926,8 +924,15 @@ def _quarter_date_range(intent):
 
 
 def _planning_source(row):
-    identity_status = str(row["identity_status"])
-    unit_price = _subsidy_unit_price(identity_status)
+    unit_price = row["subsidy_unit_price_ntd"]
+    if unit_price is None:
+        raise ValueError("government_subsidy_claim_facts_invalid")
+    try:
+        unit_price = int(unit_price)
+    except (TypeError, ValueError) as error:
+        raise ValueError("government_subsidy_claim_facts_invalid") from error
+    if unit_price <= 0:
+        raise ValueError("government_subsidy_claim_facts_invalid")
     return ClaimPlanningSourceItem(
         OfficialAssignmentServiceFacts(
             int(row["assignment_id"]),
@@ -939,14 +944,6 @@ def _planning_source(row):
         ),
         MoneyNTD(unit_price),
     )
-
-
-def _subsidy_unit_price(identity_status):
-    if identity_status == _GENERAL_CITIZEN:
-        return _GENERAL_CITIZEN_UNIT_PRICE_NTD
-    if identity_status == _SUBSIDIZED_CITIZEN:
-        return _SUBSIDIZED_CITIZEN_UNIT_PRICE_NTD
-    raise ValueError("government_subsidy_claim_facts_invalid")
 
 
 def _load_batch_page_ids(cursor, after_batch_id, limit):
@@ -1925,6 +1922,7 @@ _CLAIM_PLANNING_SOURCE_SELECT_SQL = (
     "SELECT a.id AS assignment_id,a.case_no,a.staff_id,"
     "COUNT(DISTINCT s.work_date) AS official_service_day_count,"
     "o.service_hours_per_day,c.identity_status,"
+    "rate.hourly_rate_ntd AS subsidy_unit_price_ntd,"
     "CASE WHEN a.status NOT IN ('cancelled','replaced') "
     "AND g.effective_marker=1 THEN 1 ELSE 0 END AS assignment_effective "
     "FROM case_staff_assignments a "
@@ -1933,11 +1931,13 @@ _CLAIM_PLANNING_SOURCE_SELECT_SQL = (
     "AND s.generation_id=a.generation_id "
     "JOIN orders o ON o.case_no=a.case_no "
     "JOIN clients c ON c.id=o.client_id "
+    "LEFT JOIN assignment_payroll_rate_snapshots rate "
+    "ON rate.assignment_id=a.id "
     "WHERE s.effective_marker=1 AND s.is_work_day=1 "
     "AND s.work_date >= %s AND s.work_date < %s "
     "AND c.identity_status IN (%s,%s) "
     "GROUP BY a.id,a.case_no,a.staff_id,o.service_hours_per_day,"
-    "c.identity_status,a.status,g.effective_marker ORDER BY a.id"
+    "c.identity_status,rate.hourly_rate_ntd,a.status,g.effective_marker ORDER BY a.id"
 )
 _CLAIM_PLANNING_LOCK_SQL = (
     "SELECT a.id,s.id FROM case_staff_assignments a "

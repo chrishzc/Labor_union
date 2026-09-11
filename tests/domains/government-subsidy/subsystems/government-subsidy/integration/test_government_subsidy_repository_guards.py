@@ -8,9 +8,12 @@ from datetime import date, datetime, timezone
 import pytest
 
 from infrastructure.mysql.government_subsidy_repository import (
+    _CLAIM_PLANNING_SOURCE_SELECT_SQL,
     MySqlGovernmentSubsidyRepository,
     _overpayment_outbox_lineage,
+    _planning_source,
 )
+from shared_kernel.money import MoneyNTD
 from shared_kernel.clock import FixedBusinessClock
 
 
@@ -238,3 +241,39 @@ def test_overpayment_lineage_requires_projection_for_source_transaction():
     assert _overpayment_outbox_lineage(connection.cursor_value, "over-1") == (4, 9, 11)
     statement = " ".join(connection.cursor_value.statement.split()).lower()
     assert "event.transaction_id=transaction.id" in statement
+
+
+def test_claim_planning_source_uses_assignment_frozen_rate_not_identity_price():
+    source = _planning_source(
+        {
+            "assignment_id": 91,
+            "case_no": "CASE-450",
+            "staff_id": 7,
+            "official_service_day_count": 5,
+            "service_hours_per_day": 8,
+            "identity_status": "一般市民",
+            "subsidy_unit_price_ntd": 450,
+            "assignment_effective": 1,
+        }
+    )
+
+    assert source.assignment.official_service_hours == 40
+    assert source.unit_price_ntd == MoneyNTD(450)
+    assert "LEFT JOIN assignment_payroll_rate_snapshots rate" in _CLAIM_PLANNING_SOURCE_SELECT_SQL
+    assert "rate.hourly_rate_ntd AS subsidy_unit_price_ntd" in _CLAIM_PLANNING_SOURCE_SELECT_SQL
+
+
+def test_claim_planning_source_rejects_missing_assignment_frozen_rate():
+    with pytest.raises(ValueError, match="government_subsidy_claim_facts_invalid"):
+        _planning_source(
+            {
+                "assignment_id": 91,
+                "case_no": "CASE-450",
+                "staff_id": 7,
+                "official_service_day_count": 5,
+                "service_hours_per_day": 8,
+                "identity_status": "一般市民",
+                "subsidy_unit_price_ntd": None,
+                "assignment_effective": 1,
+            }
+        )

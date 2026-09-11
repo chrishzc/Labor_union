@@ -4,6 +4,7 @@ from domains.government_subsidy.claims import (
     ClaimPlanningFacts,
     ClaimPlanningIntent,
     ClaimPlanningSourceItem,
+    build_claim_planning_candidate,
 )
 from domains.government_subsidy.ledger import (
     ClaimBatchFacts,
@@ -114,3 +115,20 @@ def test_claim_plan_apply_replays_matching_idempotent_receipt_without_writes():
 
     assert second == first
     assert repository.writes == ["batch", "outbox", "receipt"]
+
+
+def test_claim_plan_calculates_frozen_450_rate_for_40_official_hours():
+    assignment = OfficialAssignmentServiceFacts(1, "CASE-450", 7, 5, 8, True)
+    source = ClaimPlanningSourceItem(assignment, MoneyNTD(450))
+
+    candidate = build_claim_planning_candidate(
+        ClaimPlanningFacts(
+            ClaimPlanningIntent(ClaimBatchIdentity(2026, 3, 1)),
+            (source,),
+        )
+    )
+
+    assert candidate.items[0].claimed_hours == 40
+    assert candidate.items[0].unit_price_ntd == MoneyNTD(450)
+    assert candidate.items[0].requested_amount_ntd == MoneyNTD(18000)
+    assert candidate.requested_total_ntd == MoneyNTD(18000)

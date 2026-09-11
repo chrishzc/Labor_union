@@ -17,8 +17,7 @@
 .registry-editor { background: white; border: 1px solid #ead3c8; border-radius: 12px; padding: 16px; margin-bottom: 14px; }
 .registry-editor h3 { margin: 0 0 12px; color: #7c2d12; }
 .registry-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
-.registry-fields label, .registry-reason { display: grid; gap: 5px; font-size: .88rem; color: #65483b; }
-.registry-reason { margin-top: 12px; }
+.registry-fields label { display: grid; gap: 5px; font-size: .88rem; color: #65483b; }
 .registry-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 .registry-actions button { min-width: 88px; }
 .registry-actions button:last-child { background: #9a3412; color: white; }
