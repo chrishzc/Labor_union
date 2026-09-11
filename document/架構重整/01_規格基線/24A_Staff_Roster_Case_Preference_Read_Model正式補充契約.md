@@ -26,10 +26,10 @@
 2026-09-08 人工要求補齊名冊重要資料後，基本摘要仍維持上述四欄；選取單一月嫂時另以
 `GET /api/v1/staff/{staff_id}/profile` 讀取 Staff-owned `StaffProfile`。此 detail projection
 包含報名時間、完整身分證、行動電話、市話／分機、Email、生日、地址、學歷、完整緊急聯絡人
-電話、內部行政註記，以及該 Staff 的全部銀行帳戶（銀行代碼、分行代碼、完整帳號與主要帳戶標記）。
-依 `12_Global_效能與UX體感架構.md` §4.0，這個已認證內部管理 UI
-必須直接使用 owner typed Query 提供的完整一般業務值；不得自行新增後端或前端遮罩，除非日後
-有最新人工明確裁決。response 仍不得包含 IP、LINE User ID、raw workbook／JSON 或
+電話、內部行政註記，以及該 Staff 的全部銀行帳戶（銀行代碼、分行代碼、帳號末四碼、主要與有效標記）。
+2026-09-11 Issue #276為較新人工明確裁決：完整銀行帳號只允許進入Staff Bank owner的授權add／replace
+command與current persistence；Query、event、receipt、log及error一律只回末四碼。其餘已認證內部管理UI的一般
+業務值仍依 `12_Global_效能與UX體感架構.md` §4.0使用owner typed Query提供的完整值。response不得包含IP、LINE User ID、raw workbook／JSON或
 credential。只有已登入且 enabled 的管理員可查詢；UI 只在選定單一月嫂後載入，空值顯示
 「尚未登錄」。
 
@@ -166,10 +166,10 @@ UI 規則：
 
 ## 6. Read / write boundary
 
-本契約是 read-only。
+接案偏好投影仍是 read-only；Staff個人資料與銀行帳戶修改由第33份正式規格另行擁有。
 
 - #104 不定義偏好編輯 UI。
-- #104 不提供 `POST` / `PUT` / `PATCH` write route。
+- #104 不提供接案偏好的 `POST` / `PUT` / `PATCH` write route。
 - 後續若要編輯上述 roots，必須交回各 root 的正式 owner，另行定義 Preview / Apply、validation、audit、version 與 idempotency 契約。
 - roster UI 不得直接寫 canonical relation tables。
 - BeClass historical facts 不因 roster 顯示需求而自動成為可編輯資料。

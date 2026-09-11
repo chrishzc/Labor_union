@@ -22,6 +22,17 @@ class MySqlClientProfileRepository:
             )
             return cursor.fetchone()
 
+    def load_profile_by_case_no(self, case_no: str, *, for_update: bool = False) -> dict[str, Any] | None:
+        suffix = " FOR UPDATE" if for_update else ""
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT c.id AS client_id,o.case_no,c.client_profile_version,c.name,c.gender,c.phone,c.city,c.address,"
+                "c.residence_type,c.delivery_type,c.baby_info,c.notes FROM orders o "
+                "JOIN clients c ON c.id=o.client_id WHERE o.case_no=%s" + suffix,
+                (case_no,),
+            )
+            return cursor.fetchone()
+
     def load_request(self, request_id: int, *, for_update: bool = False) -> dict[str, Any] | None:
         suffix = " FOR UPDATE" if for_update else ""
         with self._connection.cursor() as cursor:
@@ -150,6 +161,81 @@ class MySqlClientProfileRepository:
                 "(idempotency_key,command_fingerprint,preview_fingerprint,result_json) "
                 "VALUES (%s,%s,%s,%s)",
                 (idempotency_key, command_fingerprint, preview_fingerprint, _json(result)),
+            )
+
+    def claim_admin_command(self, *, case_no: str, idempotency_key: str, command_fingerprint: str, correlation_id: str) -> None:
+        family = "client_profile_admin_change/v1"
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT IGNORE INTO application_command_claims "
+                "(idempotency_key,command_family,aggregate_identity,command_fingerprint,correlation_id) "
+                "VALUES (%s,%s,%s,%s,%s)",
+                (idempotency_key, family, case_no, command_fingerprint, correlation_id),
+            )
+            if cursor.rowcount == 1:
+                return
+            cursor.execute(
+                "SELECT command_family,aggregate_identity,command_fingerprint "
+                "FROM application_command_claims WHERE idempotency_key=%s FOR UPDATE",
+                (idempotency_key,),
+            )
+            claim = cursor.fetchone()
+        if (
+            claim is None
+            or claim["command_family"] != family
+            or claim["aggregate_identity"] != case_no
+            or claim["command_fingerprint"] != command_fingerprint
+        ):
+            raise RuntimeError("idempotency_mismatch")
+
+    def find_admin_receipt(self, key: str, *, for_update: bool = False) -> dict[str, Any] | None:
+        suffix = " FOR UPDATE" if for_update else ""
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT request_fingerprint AS command_fingerprint,preview_fingerprint,result_snapshot "
+                "FROM admin_command_receipts WHERE command_family=%s AND idempotency_key=%s" + suffix,
+                ("client_profile_admin_change/v1", key),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        return {**row, "result": _decode_json(row.get("result_snapshot"), {})}
+
+    def apply_admin_change(self, *, client_id: int, expected_version: int, before: Mapping[str, str], requested: Mapping[str, str], actor_id: str, reason: str, idempotency_key: str, correlation_id: str) -> int:
+        fields = tuple(sorted(requested))
+        assignments = ",".join(f"{field}=%s" for field in fields)
+        resulting_version = expected_version + 1
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE clients SET " + assignments + ",client_profile_version=%s "
+                "WHERE id=%s AND client_profile_version=%s",
+                tuple(requested[field] for field in fields)
+                + (resulting_version, client_id, expected_version),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("client_profile_version_stale")
+            cursor.execute(
+                "INSERT INTO client_profile_admin_change_events "
+                "(client_id,expected_version,resulting_version,actor_id,reason,idempotency_key,"
+                "correlation_id,before_values_json,after_values_json) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (
+                    client_id, expected_version, resulting_version, actor_id, reason,
+                    idempotency_key, correlation_id, _json(before), _json(requested),
+                ),
+            )
+        return resulting_version
+
+    def save_admin_receipt(self, *, idempotency_key: str, command_fingerprint: str, preview_fingerprint: str, actor_id: str, reason: str, result: Mapping[str, Any]) -> None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO admin_command_receipts "
+                "(command_family,idempotency_key,request_fingerprint,preview_fingerprint,actor,reason,result_snapshot) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                (
+                    "client_profile_admin_change/v1", idempotency_key,
+                    command_fingerprint, preview_fingerprint, actor_id, reason, _json(result),
+                ),
             )
 
 

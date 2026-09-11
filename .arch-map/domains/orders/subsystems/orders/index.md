@@ -24,6 +24,7 @@
 - `cancellation` — 訂單取消的跨 owner Preview／Apply 與 fresh readback；path: `modules/cancellation.md`
 - `terminal-closure-handoff` — terminal lifecycle event／receipt／outbox 的 LINE Identity typed handoff；path: `modules/terminal-closure-handoff.md`
 - `order-information` — 既有案件訂單資訊的typed Query與管理端readback；path: `modules/order-information.md`
+- `order-terms` — Orders Terms Query／Preview／fresh-lock Apply 與跨 owner 影響回執；path: `modules/order-terms.md`
 
 ## Dependencies
 - outbound: `scheduling` — 服務日期／assignment 相關跨域協調只透過明確 contract。

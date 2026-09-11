@@ -19,6 +19,7 @@ import { OrderWorkbenchV2Page } from './pages/OrderWorkbenchV2Page';
 import { SchedulingPage } from './pages/SchedulingPage';
 import { StaffPage } from './pages/StaffPage';
 import { DataImportPage } from './pages/DataImportPage';
+import { ClientRegistryPage } from './pages/ClientRegistryPage';
 import { LineManagementPage } from './pages/LineManagementPage';
 import { AiCustomerServiceStudioPage } from './pages/line_management/AiCustomerServiceStudioPage';
 import { LlmConfigurationPage } from './pages/line_management/LlmConfigurationPage';
@@ -33,7 +34,8 @@ import { StorageManagementPage } from './pages/StorageManagementPage';
 import './pages/LineManagementPage.css';
 
 export const HASH_ALIASES: Record<string, PageType> = {
-  databrowser: 'data-browser',
+  databrowser: 'clients',
+  'data-browser': 'clients',
   line: 'line-management',
   'line-management': 'line-management',
   'line-ai': 'line-ai-events',
@@ -137,7 +139,8 @@ export const App: React.FC = () => {
         {currentPage === 'order-workbench-v2' && <OrderWorkbenchV2Page />}
         {currentPage === 'scheduling' && <SchedulingPage />}
         {currentPage === 'staff' && <StaffPage />}
-        {currentPage === 'data-import' && <DataImportPage initialTab="workbook-import" />}
+        {currentPage === 'clients' && <ClientRegistryPage />}
+        {currentPage === 'data-import' && <DataImportPage />}
         {currentPage === 'reports' && <ReportsPage />}
 
         {/* LINE Hub Section */}
@@ -153,7 +156,6 @@ export const App: React.FC = () => {
 
         {/* Audit & System Section */}
         {currentPage === 'anomalies' && <CurrentAnomaliesPage />}
-        {currentPage === 'data-browser' && <DataImportPage initialTab="data-browser" />}
         {currentPage === 'account-management' && <AccountManagementPage />}
         {currentPage === 'storage-management' && <StorageManagementPage />}
       </MasterLayout>

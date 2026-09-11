@@ -8,3 +8,4 @@
 
 ## Oracle
 - exact accepted mapping、missing／ambiguous／conflict與incomplete fail-closed。
+- `test_beclass_correction_workflow.py` — effective correction version、exact replay、original evidence preservation與stale conflict。

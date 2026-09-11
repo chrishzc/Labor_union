@@ -10,6 +10,8 @@
 ## Implementation
 - primary: `ui_react/src/App.tsx`
 - primary: `ui_react/src/components/ErrorBoundary.tsx`
+- primary: `ui_react/src/components/MasterLayout.tsx`
+- composed page: `ui_react/src/pages/ClientRegistryPage.tsx`
 - primary: `ui_react/vite.config.ts`
 
 ## Contracts
@@ -25,3 +27,7 @@
 
 ## Change triggers
 Reconcile when React shell navigation、session/auth composition、ErrorBoundary recovery、closed crash presentation或higher-boundary test location changes。
+
+## Registry entry transition
+- Canonical `#clients` exposes 客戶名冊 beside `#staff`; legacy `#data-browser`／`#databrowser` redirect to `#clients`.
+- Data Import no longer composes the six-source Data Browser tab; the archived server API remains read-only for compatibility.

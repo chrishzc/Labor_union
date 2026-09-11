@@ -43,6 +43,8 @@ class _Repository:
         }
         self.requests = {}
         self.receipts = {}
+        self.admin_receipts = {}
+        self.admin_claims = {}
         self.next_id = 1
 
     def load_profile(self, client_id, *, for_update=False):
@@ -85,6 +87,32 @@ class _Repository:
 
     def save_receipt(self, **kwargs):
         self.receipts[kwargs["idempotency_key"]] = {
+            "command_fingerprint": kwargs["command_fingerprint"],
+            "preview_fingerprint": kwargs["preview_fingerprint"],
+            "result": dict(kwargs["result"]),
+        }
+
+    def load_profile_by_case_no(self, case_no, *, for_update=False):
+        return dict(self.profile) if case_no == "CASE-001" else None
+
+    def claim_admin_command(self, **kwargs):
+        key = kwargs["idempotency_key"]
+        fingerprint = kwargs["command_fingerprint"]
+        if key in self.admin_claims and self.admin_claims[key] != fingerprint:
+            raise ValueError("idempotency_mismatch")
+        self.admin_claims[key] = fingerprint
+
+    def find_admin_receipt(self, key, *, for_update=False):
+        return self.admin_receipts.get(key)
+
+    def apply_admin_change(self, **kwargs):
+        assert kwargs["expected_version"] == self.profile["client_profile_version"]
+        self.profile.update(kwargs["requested"])
+        self.profile["client_profile_version"] += 1
+        return self.profile["client_profile_version"]
+
+    def save_admin_receipt(self, **kwargs):
+        self.admin_receipts[kwargs["idempotency_key"]] = {
             "command_fingerprint": kwargs["command_fingerprint"],
             "preview_fingerprint": kwargs["preview_fingerprint"],
             "result": dict(kwargs["result"]),
@@ -181,3 +209,29 @@ def test_rejection_requires_supplied_preview_and_exact_replay():
     assert result.status == "rejected"
     replay = application.reject_request(1, actor, "資料不完整", ExpectedVersion(0), rejection.preview_fingerprint, IdempotencyKey("reject-key-1"), CorrelationId("corr-6"))
     assert replay.status == "rejected"
+
+
+def test_admin_profile_change_uses_case_identity_and_exact_idempotent_replay():
+    repository = _Repository()
+    application = _application(repository)
+    preview = application.preview_admin(
+        "CASE-001", {"name": "王小美"}, ExpectedVersion(0)
+    )
+    actor = ActorContext("admin:9", ("data_browser.write",))
+    receipt = application.apply_admin(
+        "CASE-001", {"name": "王小美"}, ExpectedVersion(0), actor, "人工核對",
+        preview.preview_fingerprint, IdempotencyKey("admin-profile-1"), CorrelationId("admin-profile-corr-1"),
+    )
+    assert receipt.resulting_version == 1
+    assert receipt.readback.values["name"] == "王小美"
+    replay = application.apply_admin(
+        "CASE-001", {"name": "王小美"}, ExpectedVersion(0), actor, "人工核對",
+        preview.preview_fingerprint, IdempotencyKey("admin-profile-1"), CorrelationId("admin-profile-corr-1"),
+    )
+    assert replay.replayed is True
+    assert repository.profile["client_profile_version"] == 1
+    with pytest.raises((ClientProfileRequestConflictError, ValueError)):
+        application.apply_admin(
+            "CASE-001", {"name": "另一人"}, ExpectedVersion(0), actor, "人工核對",
+            preview.preview_fingerprint, IdempotencyKey("admin-profile-1"), CorrelationId("admin-profile-corr-2"),
+        )

@@ -15,7 +15,7 @@ import {
 import { LiffCardStudio } from '../pages/line_management/LiffCardStudio';
 
 const EXPECTED_HASHES = [
-  'order-workbench-v2', 'scheduling', 'staff', 'data-import', 'reports',
+  'order-workbench-v2', 'scheduling', 'staff', 'clients', 'data-import', 'reports',
   'line-management', 'line-ai-events', 'line-llm-settings', 'line-liff-studio', 'line-security',
   'finance', 'historical-service-accounting', 'anomalies', 'account-management', 'storage-management',
 ] as const;
@@ -27,9 +27,9 @@ describe('React entrypoint registry', () => {
     expect(new Set(pages)).toEqual(new Set(EXPECTED_HASHES));
   });
 
-  it('舊 Data Browser hash 保留為資料中心第三分頁的相容入口', () => {
-    expect(HASH_ALIASES).toMatchObject({ databrowser: 'data-browser' });
-    expect(NAV_ITEMS.some((item) => item.id === 'data-browser')).toBe(false);
+  it('舊 Data Browser hash 導向新的客戶名冊', () => {
+    expect(HASH_ALIASES).toMatchObject({ databrowser: 'clients', 'data-browser': 'clients' });
+    expect(NAV_ITEMS.find((item) => item.id === 'clients')?.label).toBe('客戶名冊');
     expect(NAV_ITEMS.find((item) => item.id === 'data-import')?.label).toBe('資料中心');
   });
 

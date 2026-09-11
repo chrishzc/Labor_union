@@ -209,15 +209,12 @@ def build_preassignment_terms_candidate(
     current_terms: OrderTerms,
     proposed_terms: OrderTerms,
 ) -> SchedulingGenerationCandidate:
-    """Build an empty generation only when Terms do not alter schedule shape."""
+    """Build an empty generation; start-date shifts remain assignment-free."""
     if facts.segments:
         raise ValueError("preassignment scheduling facts must not contain segments")
     if facts.service_started:
         raise ValueError("preassignment_service_started_conflict")
-    if (
-        proposed_terms.planned_start_date != current_terms.planned_start_date
-        or proposed_terms.service_days != current_terms.service_days
-    ):
+    if proposed_terms.service_days != current_terms.service_days:
         raise ValueError("scheduling_segments_required")
     return SchedulingGenerationCandidate(
         case_no=facts.case_no,

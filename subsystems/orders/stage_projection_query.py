@@ -198,10 +198,14 @@ def _timeline(row: object, evaluated_at: datetime) -> OrderOperationalTimeline:
     order_version = _nonnegative_int(row, "order_version")
     stages = _stages(row, case_no, evaluated_at)
     steps = _steps(row, case_no, stages)
-    current_step_ordinal = _current_step(
-        lifecycle_status,
-        steps,
-        replacement_resume_step,
+    current_step_ordinal = (
+        None
+        if all(stage.status == "unavailable" for stage in stages)
+        else _current_step(
+            lifecycle_status,
+            steps,
+            replacement_resume_step,
+        )
     )
     current_stage_code = (
         None
@@ -327,7 +331,22 @@ def _contract_stage(row: Mapping[str, object], case_no: str) -> StageProjection:
     deposits = _nonnegative_int(row, "deposit_obligation_count")
     open_deposits = _nonnegative_int(row, "deposit_open_count")
     source = _source("Contract Signing / Client Finance", "contract-and-deposit", _maximum_version(row, "order_version", "finance_version"))
-    if contract and deposits and not open_deposits:
+    terms_changed_after_contract = (
+        contract
+        and row["terms_created_at"] is not None
+        and row["contract_created_at"] is not None
+        and _optional_datetime(row, "terms_created_at")
+        > _optional_datetime(row, "contract_created_at")
+    )
+    if terms_changed_after_contract:
+        status: StageStatus = "blocked"
+        blockers = (
+            _notice(
+                "contract_terms_changed_reconfirmation_required",
+                "目前服務條件晚於既有契約，需重新產生或確認契約版本。",
+            ),
+        )
+    elif contract and deposits and not open_deposits:
         status: StageStatus = "completed"
         blockers = ()
     elif contract or deposits:
@@ -335,7 +354,7 @@ def _contract_stage(row: Mapping[str, object], case_no: str) -> StageProjection:
         blockers = (_notice("deposit_not_settled", "客戶定金 obligation 尚未結清。"),) if open_deposits else ()
     else:
         return _unavailable_stage(4, "contract_deposit", "雙邊簽約與定金", "Contract Signing / Client Finance", "contract_and_deposit_lineage_missing")
-    return _stage(4, "contract_deposit", "雙邊簽約與定金", "Contract Signing / Client Finance", status, source, _latest(row, "contract_created_at", "deposit_updated_at"), blockers=blockers, actions=(_get("orders.contract_completion.query", f"/api/v1/orders/{case_no}/contract-completion"),))
+    return _stage(4, "contract_deposit", "雙邊簽約與定金", "Contract Signing / Client Finance", status, source, _latest(row, "terms_created_at", "contract_created_at", "deposit_updated_at"), blockers=blockers, actions=(_get("orders.contract_completion.query", f"/api/v1/orders/{case_no}/contract-completion"),))
 
 
 def _date_stage(row: Mapping[str, object], case_no: str) -> StageProjection:

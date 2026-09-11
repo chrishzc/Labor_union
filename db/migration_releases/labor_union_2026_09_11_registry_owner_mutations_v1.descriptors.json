@@ -1,0 +1,81 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-registry-owner-mutations-2026-09-11-v1",
+  "descriptors": {
+    "1036_registry_owner_mutations.sql": {
+      "tables": {
+        "client_profile_admin_change_events": ["id", "client_id", "expected_version", "resulting_version", "actor_id", "reason", "idempotency_key", "correlation_id", "before_values_json", "after_values_json", "created_at_utc"],
+        "beclass_record_correction_states": ["beclass_record_id", "aggregate_version", "effective_values_json", "updated_by", "updated_at_utc"],
+        "beclass_record_correction_events": ["id", "beclass_record_id", "expected_version", "resulting_version", "actor_id", "reason", "idempotency_key", "correlation_id", "before_values_json", "after_values_json", "created_at_utc"],
+        "staff_profile_change_events": ["id", "staff_id", "expected_version", "resulting_version", "actor_id", "reason", "idempotency_key", "correlation_id", "before_values_json", "after_values_json", "created_at_utc"],
+        "staff_bank_account_states": ["staff_id", "aggregate_version", "updated_by", "updated_at_utc"],
+        "staff_bank_account_events": ["id", "staff_id", "account_id", "operation", "expected_version", "resulting_version", "bank_code", "branch_code", "account_last4", "was_primary", "is_primary", "was_active", "is_active", "actor_id", "reason", "idempotency_key", "correlation_id", "created_at_utc"]
+      },
+      "parent_columns": {
+        "staff": {
+          "staff_profile_version": {
+            "column_type": "bigint unsigned",
+            "is_nullable": "NO",
+            "column_default": "0",
+            "extra": ""
+          }
+        },
+        "staff_bank_accounts": {
+          "is_active": {
+            "column_type": "tinyint(1)",
+            "is_nullable": "NO",
+            "column_default": "1",
+            "extra": ""
+          }
+        }
+      },
+      "indexes": {
+        "staff_bank_accounts.uq_staff_bank_accounts_account_no": {"non_unique": 0, "columns": ["account_no"]},
+        "client_profile_admin_change_events.PRIMARY": {"non_unique": 0, "columns": ["id"]},
+        "client_profile_admin_change_events.uq_client_profile_admin_event_key": {"non_unique": 0, "columns": ["idempotency_key"]},
+        "client_profile_admin_change_events.uq_client_profile_admin_event_version": {"non_unique": 0, "columns": ["client_id", "resulting_version"]},
+        "beclass_record_correction_states.PRIMARY": {"non_unique": 0, "columns": ["beclass_record_id"]},
+        "beclass_record_correction_events.PRIMARY": {"non_unique": 0, "columns": ["id"]},
+        "beclass_record_correction_events.uq_beclass_correction_event_key": {"non_unique": 0, "columns": ["idempotency_key"]},
+        "beclass_record_correction_events.uq_beclass_correction_event_version": {"non_unique": 0, "columns": ["beclass_record_id", "resulting_version"]},
+        "staff_profile_change_events.PRIMARY": {"non_unique": 0, "columns": ["id"]},
+        "staff_profile_change_events.uq_staff_profile_event_key": {"non_unique": 0, "columns": ["idempotency_key"]},
+        "staff_profile_change_events.uq_staff_profile_event_version": {"non_unique": 0, "columns": ["staff_id", "resulting_version"]},
+        "staff_bank_account_states.PRIMARY": {"non_unique": 0, "columns": ["staff_id"]},
+        "staff_bank_account_events.PRIMARY": {"non_unique": 0, "columns": ["id"]},
+        "staff_bank_account_events.uq_staff_bank_event_key": {"non_unique": 0, "columns": ["idempotency_key"]},
+        "staff_bank_account_events.uq_staff_bank_event_version": {"non_unique": 0, "columns": ["staff_id", "resulting_version"]}
+      },
+      "foreign_keys": {
+        "client_profile_admin_change_events.fk_client_profile_admin_event_client": {"columns": ["client_id"], "referenced_table": "clients", "referenced_columns": ["id"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"},
+        "beclass_record_correction_states.fk_beclass_correction_state_record": {"columns": ["beclass_record_id"], "referenced_table": "beclass_records", "referenced_columns": ["id"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"},
+        "beclass_record_correction_events.fk_beclass_correction_event_record": {"columns": ["beclass_record_id"], "referenced_table": "beclass_records", "referenced_columns": ["id"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"},
+        "staff_profile_change_events.fk_staff_profile_event_staff": {"columns": ["staff_id"], "referenced_table": "staff", "referenced_columns": ["id"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"},
+        "staff_bank_account_states.fk_staff_bank_state_staff": {"columns": ["staff_id"], "referenced_table": "staff", "referenced_columns": ["id"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"},
+        "staff_bank_account_events.fk_staff_bank_event_staff": {"columns": ["staff_id"], "referenced_table": "staff", "referenced_columns": ["id"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"},
+        "staff_bank_account_events.fk_staff_bank_event_account": {"columns": ["account_id"], "referenced_table": "staff_bank_accounts", "referenced_columns": ["id"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"}
+      },
+      "checks": {
+        "client_profile_admin_change_events.chk_client_profile_admin_event_version": "atom(resulting_version=expected_version+1)",
+        "client_profile_admin_change_events.chk_client_profile_admin_event_payload": "and(atom(json_type(before_values_json)='OBJECT'),atom(json_type(after_values_json)='OBJECT'))",
+        "beclass_record_correction_states.chk_beclass_correction_state_payload": "atom(json_type(effective_values_json)='OBJECT')",
+        "beclass_record_correction_events.chk_beclass_correction_event_version": "atom(resulting_version=expected_version+1)",
+        "beclass_record_correction_events.chk_beclass_correction_event_payload": "and(atom(json_type(before_values_json)='OBJECT'),atom(json_type(after_values_json)='OBJECT'))",
+        "staff_profile_change_events.chk_staff_profile_event_version": "atom(resulting_version=expected_version+1)",
+        "staff_profile_change_events.chk_staff_profile_event_payload": "and(atom(json_type(before_values_json)='OBJECT'),atom(json_type(after_values_json)='OBJECT'))",
+        "staff_bank_account_events.chk_staff_bank_event_version": "atom(resulting_version=expected_version+1)",
+        "staff_bank_account_events.chk_staff_bank_event_last4": "or(atom(account_last4isnull),atom(regexp_like(account_last4,'^[0-9]{4}$')))"
+      },
+      "triggers": [
+        "trg_client_profile_admin_change_events_before_update",
+        "trg_client_profile_admin_change_events_before_delete",
+        "trg_beclass_record_correction_events_before_update",
+        "trg_beclass_record_correction_events_before_delete",
+        "trg_staff_profile_change_events_before_update",
+        "trg_staff_profile_change_events_before_delete",
+        "trg_staff_bank_account_events_before_update",
+        "trg_staff_bank_account_events_before_delete"
+      ]
+    }
+  }
+}

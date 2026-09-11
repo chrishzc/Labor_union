@@ -5,7 +5,7 @@
     "path": "db/schema.sql",
     "sha256": "b9cd84ae5a09a46949b5d4c131659f7f114480306f94e0af1246833d021b1bfb"
   },
-  "active_artifacts_sha256": "483938a10fe6661af79dcbef9ebf580dc91c74dfac3b4fd5f5bac7f15be3e9ed",
+  "active_artifacts_sha256": "5c548e3a92af08b078435365940b552de3105fe46e35c8dbf3d24f9992c8c7b6",
   "active_bootstrap": [
     "db/schema_parts/202_scheduling_staff_leave_intake.sql",
     "db/schema_parts/20_staff_monthly_settlements.sql",
@@ -162,6 +162,7 @@
     "db/schema_parts/214_historical_order_pairing_resolution_reused.sql",
     "db/schema_parts/215_historical_service_accounting.sql",
     "db/schema_parts/216_staff_beclass_profile.sql",
+    "db/schema_parts/219_registry_owner_mutations.sql",
     "db/schema_parts/1029_client_payment_destination_configuration.sql",
     "db/schema_parts/218_weekly_report_metrics.sql",
     "db/schema_parts/1032_matching_holiday_work_agreements.sql",
@@ -179,7 +180,8 @@
     "db/schema_parts/1030_staff_beclass_profile.sql": "migration-only",
     "db/schema_parts/1031_weekly_report_batches.sql": "migration-only",
     "db/schema_parts/1033_matching_holiday_work_agreements.sql": "migration-only",
-    "db/schema_parts/1035_weekly_report_metrics.sql": "migration-only"
+    "db/schema_parts/1035_weekly_report_metrics.sql": "migration-only",
+    "db/schema_parts/1036_registry_owner_mutations.sql": "migration-only"
   },
   "retirement_contracts": {
     "db/schema_parts/1022_task96_retired_anomaly_owner_contracts.sql": {
@@ -287,6 +289,15 @@
       "terminal_schema_evidence": "fresh assembly uses canonical part 218; preserve chain uses 1035 for existing databases",
       "data_effect": "schema_only; existing business and retired batch rows remain unchanged",
       "replay": "preserve release applies 1035 only when the owned table is absent or exact",
+      "rollback": "retain source backup and discard candidate before same-name replacement",
+      "unresolved_policy": "partial or drift owned metadata blocks candidate apply pending explicit remediation"
+    },
+    "db/schema_parts/1036_registry_owner_mutations.sql": {
+      "source_object": "preserve-data additive bridge for Issue #276 Client, Case Import and Staff registry owner state",
+      "successor": "db/schema_parts/219_registry_owner_mutations.sql",
+      "terminal_schema_evidence": "fresh assembly uses canonical part 219; preserve chain uses 1036 for existing databases",
+      "data_effect": "schema_only; existing business rows and immutable history remain preserved",
+      "replay": "preserve release applies 1036 only when all owned parent columns, tables, metadata and triggers are absent or exact",
       "rollback": "retain source backup and discard candidate before same-name replacement",
       "unresolved_policy": "partial or drift owned metadata blocks candidate apply pending explicit remediation"
     }

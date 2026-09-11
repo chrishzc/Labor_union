@@ -16,6 +16,9 @@ modules:
     test_root: tests/domains/orders/subsystems/orders/modules/historical-service-accounting/
   order-information:
     test_root: tests/domains/orders/subsystems/orders/modules/order-information/
+  order-terms:
+    layout_status: custom_current
+    test_root: tests/test_order_terms_preassignment_correction.py
   historical-adoption:
     test_root: tests/domains/orders/subsystems/orders/modules/historical-adoption/
   historical-stage-baseline:

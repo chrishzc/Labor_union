@@ -361,6 +361,8 @@ require_knowledge_reindexer = require_integration_capability(
 )
 require_system_config_manager = require_capability("system.configuration.manage")
 require_system_admin = require_capability("system.administration")
+require_registry_reader = require_capability("data_browser.read")
+require_registry_writer = require_capability("data_browser.write")
 require_historical_order_review_remediator = require_capability(
     "orders.historical_review.remediate"
 )

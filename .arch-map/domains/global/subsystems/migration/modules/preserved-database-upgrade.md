@@ -53,12 +53,11 @@
   - `db/schema_parts/1034_contract_external_signing_final_pdf_completion.sql`
   - `db/migration_releases/labor_union_2026_09_09_contract_external_signing_final_pdf_completion_v1.json`
   - `db/migration_releases/labor_union_2026_09_09_contract_external_signing_final_pdf_completion_v1.descriptors.json`
-  - `db/schema_parts/1034_contract_external_signing_final_pdf_completion.sql`
-  - `db/migration_releases/labor_union_2026_09_09_contract_external_signing_final_pdf_completion_v1.json`
-  - `db/migration_releases/labor_union_2026_09_09_contract_external_signing_final_pdf_completion_v1.descriptors.json`
-  - `db/schema_parts/1034_contract_external_signing_final_pdf_completion.sql`
-  - `db/migration_releases/labor_union_2026_09_09_contract_external_signing_final_pdf_completion_v1.json`
-  - `db/migration_releases/labor_union_2026_09_09_contract_external_signing_final_pdf_completion_v1.descriptors.json`
+- current Issue 276 registry owner release:
+  - `db/schema_parts/219_registry_owner_mutations.sql` (fresh bootstrap successor)
+  - `db/schema_parts/1036_registry_owner_mutations.sql`
+  - `db/migration_releases/labor_union_2026_09_11_registry_owner_mutations_v1.json`
+  - `db/migration_releases/labor_union_2026_09_11_registry_owner_mutations_v1.descriptors.json`
 
 ## Contracts
 - Source read-only、candidate identity、release classification、backup／journal／resume及
@@ -69,6 +68,7 @@
 - test_root: `tests/domains/global/subsystems/migration/modules/preserved-database-upgrade/`
 - integration_root: `tests/test_collect_local_additive_engine_evidence.py`
 - integration_root: `tests/test_order_lifecycle_pending_status_constraint_schema.py`
+- contract: `tests/domains/global/subsystems/migration/modules/preserved-database-upgrade/contract/test_registry_owner_mutations_schema.py`
 
 ## Provenance
 - Preserve-data upgrade is a Global Migration capability distinct from fresh reset —

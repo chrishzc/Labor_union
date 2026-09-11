@@ -15,6 +15,7 @@ from domains.client_finance.obligation_planning import (
     build_client_finance_terms_impact,
 )
 from domains.orders.lifecycle import build_terms_lifecycle_impact
+from domains.orders.service_date_confirmation import ConfirmedServiceDateCandidate
 from domains.orders.terms import (
     is_unique_cooking_requirement_correction,
     validate_terms_change,
@@ -48,6 +49,8 @@ class TermsWorkflowFacts:
     client_finance: Any
     payroll: Any
     lifecycle: Any
+    confirmed_service_date_version: int | None = None
+    confirmed_service_dates: tuple[Any, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +82,8 @@ class OrderTermsPreview:
     payroll_impact: Any
     lifecycle_impact: Any
     planned_end_date: Any
+    confirmed_service_date_candidate: ConfirmedServiceDateCandidate | None
+    confirmed_service_date_current_version: int | None
     fingerprint: Any
 
 
@@ -365,6 +370,12 @@ class OrderTermsWorkflow:
                 lifecycle_status=preview.lifecycle_impact.after_status,
             )
         )
+        if preview.confirmed_service_date_candidate is not None:
+            self._repository.replace_confirmed_service_dates(
+                preview.confirmed_service_date_candidate,
+                request,
+                command_fingerprint,
+            )
         self._repository.save_receipt(
             OrderTermsReceiptPersistenceCommand(
                 key=request.idempotency_key,
@@ -403,6 +414,10 @@ def _scheduling_candidate(facts, proposed_terms):
             segment,
             assigned_start_date=segment.assigned_start_date + timedelta(days=day_shift),
             assigned_end_date=segment.assigned_end_date + timedelta(days=day_shift),
+            official_service_dates=tuple(
+                value + timedelta(days=day_shift)
+                for value in segment.official_service_dates
+            ),
         )
         for segment in facts.scheduling.segments
     )
@@ -421,7 +436,17 @@ def _preview_result(
     payroll,
     lifecycle,
 ):
-    planned_end_date = _planned_end_date(scheduling, facts.planned_end_date)
+    planned_end_date = _planned_end_date(
+        scheduling,
+        facts.planned_end_date,
+        facts.order.terms,
+        proposed_terms,
+    )
+    confirmed_service_date_candidate = _confirmed_service_date_candidate(
+        facts,
+        proposed_terms,
+        scheduling,
+    )
     return OrderTermsPreview(
         before=facts.order.terms,
         after=proposed_terms,
@@ -435,6 +460,8 @@ def _preview_result(
         payroll_impact=payroll,
         lifecycle_impact=lifecycle,
         planned_end_date=planned_end_date,
+        confirmed_service_date_candidate=confirmed_service_date_candidate,
+        confirmed_service_date_current_version=facts.confirmed_service_date_version,
         fingerprint=fingerprint_payload(
             _preview_fingerprint_payload(
                 facts,
@@ -444,6 +471,7 @@ def _preview_result(
                 payroll,
                 lifecycle,
                 planned_end_date,
+                confirmed_service_date_candidate,
             )
         ),
     )
@@ -457,6 +485,7 @@ def _preview_fingerprint_payload(
     payroll,
     lifecycle,
     planned_end_date,
+    confirmed_service_date_candidate,
 ):
     return {
         "case_no": facts.order.case_no,
@@ -470,6 +499,14 @@ def _preview_fingerprint_payload(
         "payroll": payroll.fingerprint.value,
         "lifecycle": lifecycle.fingerprint.value,
         "planned_end_date": planned_end_date.isoformat(),
+        "confirmed_service_dates": (
+            None
+            if confirmed_service_date_candidate is None
+            else {
+                "current_version": facts.confirmed_service_date_version,
+                "replacement_fingerprint": confirmed_service_date_candidate.fingerprint.value,
+            }
+        ),
     }
 
 
@@ -499,13 +536,43 @@ def _build_receipt(preview):
     )
 
 
-def _planned_end_date(scheduling, current_planned_end_date):
+def _planned_end_date(
+    scheduling,
+    current_planned_end_date,
+    current_terms,
+    proposed_terms,
+):
     service_dates = tuple(
         value for item in scheduling.assignments for value in item.service_dates
     )
     if service_dates:
         return max(service_dates)
-    return current_planned_end_date
+    return current_planned_end_date + (
+        proposed_terms.planned_start_date - current_terms.planned_start_date
+    )
+
+
+def _confirmed_service_date_candidate(facts, proposed_terms, scheduling):
+    if facts.confirmed_service_date_version is None:
+        return None
+    if facts.order.terms.service_days != proposed_terms.service_days:
+        raise ValueError("confirmed_service_dates_reconfirmation_required")
+    day_shift = (
+        proposed_terms.planned_start_date - facts.order.terms.planned_start_date
+    ).days
+    if day_shift == 0:
+        return None
+    shifted_dates = tuple(
+        value + timedelta(days=day_shift)
+        for value in facts.confirmed_service_dates
+    )
+    return ConfirmedServiceDateCandidate(
+        case_no=facts.order.case_no,
+        order_version=facts.order.version + 1,
+        scheduling_version=scheduling.resulting_aggregate_version,
+        service_dates=shifted_dates,
+        contracted_service_days=proposed_terms.service_days,
+    )
 
 
 def _client_finance_impact_mutates(candidate):

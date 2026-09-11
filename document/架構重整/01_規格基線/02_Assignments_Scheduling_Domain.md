@@ -415,6 +415,7 @@ Scheduling／Matching 擁有 case-owned Candidate Contact Pool。它只擁有候
 - 初步意願詢問以預計起訖期間檢查檔期，不要求 BeClass 或正式服務日期精算完成；未填需求仍為未知、顯示待確認，不得寫成 false。已填需求才參與啟用的查詢篩選。加入／聯絡時重新檢查占用與不可服務期間，不重新套用使用者查詢偏好；詢問 coverage 不形成正式服務日、工時、薪資、assignment 或方案資格。正式 matching plan 仍須原有正式日期及完整 fresh-fact gates。
 - 發送資訊-1／資訊-2 是詢問接案意願的唯一聯繫動作；不得另建沒有資料效果的「聯繫與確認意願」命令。
 - 每位候選人的意願及兩種資訊寄送紀錄獨立、append-only 且以 candidate entry／event key 冪等；不得由同案其他候選人覆蓋。
+- 客戶同意日期調整、且 Orders Terms 已以同日差平移未指派案件的 planned 起訖日後，重新聯繫原候選人必須在同一 Scheduling transaction 以 current Orders 起訖日重驗完整 coverage；通過後更新 candidate contact period／coverage fingerprint、追加前後日期事件並排入新資訊卡，任一步失敗皆 rollback。這不建立正式服務日或 assignment。
 - 管理員僅能從 `willing` 候選人選定一位，重新檢查可用性後建立一個 segment 的正式 matching plan。
 - 多位月嫂共同服務仍是顯式 multi-caregiver fallback plan，不能由候選聯繫池直接轉換。
 - 選定、撤回或取消不得刪除候選聯繫歷史。正式 plan 後的日期表、客戶與月嫂雙方確認及 assignment gate 僅針對該正式 plan recipients。

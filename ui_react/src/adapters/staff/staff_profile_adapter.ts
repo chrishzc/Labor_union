@@ -41,8 +41,9 @@ export function adaptStaffProfile(profile: StaffProfile): StaffProfileViewModel 
     adminNotesLabel: empty(profile.admin_notes),
     bankAccountLabels: profile.bank_accounts.map((account) => {
       const location = [account.bank_code, account.branch_code].filter(Boolean).join('／');
-      const accountNumber = account.account_no ?? '帳號尚未登錄';
-      return `${account.is_primary ? '主要帳戶' : '備用帳戶'}｜${location || '銀行／分行尚未登錄'}｜${accountNumber}`;
+      const accountNumber = account.account_last4 ? `帳號末四碼 ${account.account_last4}` : '帳號尚未登錄';
+      const status = account.is_active ? '有效' : '已停用';
+      return `${account.is_primary ? '主要帳戶' : '備用帳戶'}｜${status}｜${location || '銀行／分行尚未登錄'}｜${accountNumber}`;
     }),
   };
 }

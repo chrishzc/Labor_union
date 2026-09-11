@@ -5,6 +5,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import './StaffPage.css';
 import { Drawer } from '../components/Drawer';
+import { StaffRegistryEditor } from '../components/StaffRegistryEditor';
 import {
   loadAllStaffDirectoryPages,
   staffDirectoryClient,
@@ -1318,6 +1319,10 @@ export const StaffPage: React.FC = () => {
                         ))}
                       </ul>
                     )}
+                    <StaffRegistryEditor
+                      profile={profile.data}
+                      onUpdated={() => setSliceRetryGeneration((value) => value + 1)}
+                    />
                   </div>
                 )}
 

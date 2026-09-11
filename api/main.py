@@ -36,6 +36,7 @@ from api.routes import (
     beclass_import_review,
     client_beclass_import,
     client_profile,
+    client_registry,
     case_architecture_bootstrap,
     client_deposit_reversal,
     client_receipt_reconciliation,
@@ -122,6 +123,7 @@ from api.routes import (
     staff_matching_preferences,
     staff_case_preference_manual,
     staff_retirement,
+    staff_registry_mutation,
     staff,
     staff_qualification_master,
     staff_availability,
@@ -313,6 +315,7 @@ app.include_router(caregiver_segment_availability.router)
 app.include_router(caregiver_availability_locks.router)
 app.include_router(clients.router)
 app.include_router(staff.router)
+app.include_router(staff_registry_mutation.router)
 app.include_router(staff_qualification_master.router)
 app.include_router(staff_retirement.router)
 app.include_router(staff_availability.router)
@@ -338,6 +341,7 @@ app.include_router(hcm_import.router)
 app.include_router(client_beclass_import.router)
 app.include_router(client_profile.router)
 app.include_router(client_profile.review_router)
+app.include_router(client_registry.router)
 app.include_router(historical_order_adoption.router)
 app.include_router(historical_calendar_assignment_remediation.router)
 app.include_router(historical_service_accounting.router)

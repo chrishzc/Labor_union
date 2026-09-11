@@ -14,7 +14,6 @@ import { StaffHistoricalWorkbookSnapshot, staffHistoricalWorkbookPreviewClient }
 import { HistoricalOrderWorkbookSnapshot, historicalOrderWorkbookPreviewClient } from '../api/orders/historical_order_workbook/client';
 import { HistoricalOrderReviewRemediationWorkbench } from '../components/HistoricalOrderReviewRemediationWorkbench';
 import { HcmControlledCorrectionWorkbench } from '../components/HcmControlledCorrectionWorkbench';
-import { DataBrowserPage } from './DataBrowserPage';
 import './DataImportPage.css';
 
 type CasePreviewState<T> =
@@ -428,7 +427,6 @@ interface HcmCorrectionSelection {
   reviewIdentity: string;
 }
 
-export type DataCenterTab = 'workbook-import' | 'data-browser';
 type WorkbookImportKind = 'hcm-current' | 'client-beclass' | 'staff-historical' | 'historic-orders';
 
 const WORKBOOK_IMPORT_OPTIONS: ReadonlyArray<{ kind: WorkbookImportKind; label: string; shortLabel: string }> = [
@@ -438,12 +436,7 @@ const WORKBOOK_IMPORT_OPTIONS: ReadonlyArray<{ kind: WorkbookImportKind; label: 
   { kind: 'historic-orders', label: '歷史訂單認領', shortLabel: '歷史訂單' },
 ];
 
-export interface DataImportPageProps {
-  initialTab?: DataCenterTab;
-}
-
-export const DataImportPage: React.FC<DataImportPageProps> = ({ initialTab = 'workbook-import' }) => {
-  const [activeTab, setActiveTab] = useState<DataCenterTab>(initialTab);
+export const DataImportPage: React.FC = () => {
   const [activeImportKind, setActiveImportKind] = useState<WorkbookImportKind>('hcm-current');
   const [historicalReviewIdentities, setHistoricalReviewIdentities] = useState<string[]>([]);
   const [selectedHistoricalReviewIdentity, setSelectedHistoricalReviewIdentity] = useState<string | null>(null);
@@ -559,19 +552,8 @@ export const DataImportPage: React.FC<DataImportPageProps> = ({ initialTab = 'wo
     return () => { window.removeEventListener('beforeunload', preventUnload); document.removeEventListener('click', preventInAppNavigation, true); };
   }, [mutationLocked]);
 
-  const selectTab = (tab: DataCenterTab) => {
-    setActiveTab(tab);
-    window.location.hash = tab === 'data-browser' ? '#data-browser' : '#data-import';
-  };
-
   return (
     <div data-surface-id="imports.page" className="import-page-container">
-      <div className="datacenter-tabs-container">
-        <button type="button" className={`datacenter-tab-btn ${activeTab === 'workbook-import' ? 'active' : ''}`} onClick={() => selectTab('workbook-import')}>📥 工作簿資料匯入 (Data Import)<span className="datacenter-tab-pill">4 種類型</span></button>
-        <button type="button" className={`datacenter-tab-btn ${activeTab === 'data-browser' ? 'active' : ''}`} onClick={() => selectTab('data-browser')}>📊 數據瀏覽 (Data Browser)<span className="datacenter-tab-pill">唯讀</span></button>
-      </div>
-
-      {activeTab === 'workbook-import' && (
         <div>
           <header className="page-header-banner import-result-header">
             <div><h1 className="page-title">📥 批次資料匯入中心</h1><p className="page-subtitle">選擇工作簿、預覽核對，確認後即可完成匯入；本次需要檢查的 HCM 資料會留在匯入卡片內。</p></div>
@@ -615,10 +597,6 @@ export const DataImportPage: React.FC<DataImportPageProps> = ({ initialTab = 'wo
             setHcmCorrection(null);
           }} />}
         </div>
-      )}
-
-      {activeTab === 'data-browser' && <DataBrowserPage />}
-
     </div>
   );
 };

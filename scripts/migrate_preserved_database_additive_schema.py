@@ -246,6 +246,7 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_09_08_matching_holiday_work_agreement_plan_version_v1.json",
     "labor_union_2026_09_09_contract_external_signing_final_pdf_completion_v1.json",
     "labor_union_2026_09_09_weekly_report_metrics_v1.json",
+    "labor_union_2026_09_11_registry_owner_mutations_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -4967,6 +4968,22 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
                 "'assignment_conflict')",
                 "NO",
             )
+        }
+    if part_name == "1036_registry_owner_mutations.sql":
+        descriptor["parent_columns"]["staff"] = {
+            "staff_profile_version": _column_contract(
+                "bigint unsigned", "NO", "0"
+            )
+        }
+        descriptor["parent_columns"]["staff_bank_accounts"] = {
+            "is_active": _column_contract("tinyint(1)", "NO", "1")
+        }
+        descriptor["indexes"][(
+            "staff_bank_accounts",
+            "uq_staff_bank_accounts_account_no",
+        )] = {
+            "non_unique": 0,
+            "columns": ("account_no",),
         }
     if part_name == "1028_historical_service_accounting.sql":
         historical_statuses = (

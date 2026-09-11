@@ -166,6 +166,22 @@ def test_missing_owner_fact_is_local_unavailable_and_never_copies_prior_stage() 
     assert item.stages[3].status == "completed"
 
 
+def test_terms_changed_after_contract_requires_explicit_contract_reconfirmation() -> None:
+    row = _row("TERMS-CHANGED-AFTER-CONTRACT")
+    row["contract_created_at"] = datetime(2026, 8, 21, 7, 59)
+    row["terms_created_at"] = datetime(2026, 8, 21, 8, 1)
+
+    item = OrderStageProjectionQueryService(
+        _Repository((row,)), BUSINESS_CLOCK
+    ).query(StageProjectionQuery(50)).items[0]
+
+    contract_stage = item.stages[3]
+    assert contract_stage.status == "blocked"
+    assert tuple(blocker.code for blocker in contract_stage.blockers) == (
+        "contract_terms_changed_reconfirmation_required",
+    )
+
+
 def test_imported_complete_terms_finish_step_one_without_a_terms_change_event() -> None:
     row = _row("HCM-IMPORTED-STEP3")
     row.update({"terms_event_id": None, "terms_version": None, "terms_created_at": None})

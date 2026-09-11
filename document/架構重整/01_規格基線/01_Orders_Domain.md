@@ -508,6 +508,14 @@ Calendar-week views use Sunday through Saturday. A modification never overwrites
 confirmed versions or prior schedule-confirmation events; it creates a new current lineage which
 must be previewed, sent, and confirmed again before formal assignment can proceed.
 
+尚未建立任何 Scheduling segment 且服務尚未開始時，Orders Terms 可在 `service_days` 不變的前提下
+修改 planned start；planned end 以相同日差平移，並建立空的下一代 Scheduling generation，不得要求或
+虛構 assignment。若已有 current confirmed service dates，Apply 必須保留原日期間隔並以相同日差建立
+新的 immutable current version，讓新版本取代舊版本；同一 transaction 同步保存版本 receipt 並使既有
+matching schedule snapshot 失效。`service_days` 改變無法唯一推導新逐日日期，必須先由使用者提供完整
+replacement dates，且已有 segments 時仍須可重新分配，否則 fail closed。若要重新聯繫既有候選人，
+Scheduling 仍須以修改後 current Orders 起訖日及 current confirmed dates 重驗其完整檔期。
+
 ### Confirmed Service Dates (2026-08-12)
 
 Orders owns the `Confirm Service Dates` Preview/Apply command. The candidate must contain

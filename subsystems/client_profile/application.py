@@ -13,6 +13,7 @@ from domains.clients.profile import (
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from .contracts import (
+    ClientProfileAdminReceipt,
     ClientProfileApprovalReceipt,
     ClientProfileApplicantReceipt,
     ClientProfileBindingError,
@@ -35,6 +36,11 @@ class ClientProfileRepository(Protocol):
     def approve_request(self, *, request_id: int, expected_request_version: int, client_id: int, expected_profile_version: int, before: Mapping[str, str], requested: Mapping[str, str], actor_id: str, reason: str, idempotency_key: str, correlation_id: str, preview_fingerprint: str, command_fingerprint: str) -> Mapping[str, Any]: ...
     def reject_request(self, *, request_id: int, expected_request_version: int, reason: str, actor_id: str, idempotency_key: str, correlation_id: str, preview_fingerprint: str, command_fingerprint: str) -> Mapping[str, Any]: ...
     def save_receipt(self, *, idempotency_key: str, command_fingerprint: str, preview_fingerprint: str, result: Mapping[str, Any]) -> None: ...
+    def load_profile_by_case_no(self, case_no: str, *, for_update: bool = False) -> Mapping[str, Any] | None: ...
+    def claim_admin_command(self, *, case_no: str, idempotency_key: str, command_fingerprint: str, correlation_id: str) -> None: ...
+    def find_admin_receipt(self, key: str, *, for_update: bool = False) -> Mapping[str, Any] | None: ...
+    def apply_admin_change(self, *, client_id: int, expected_version: int, before: Mapping[str, str], requested: Mapping[str, str], actor_id: str, reason: str, idempotency_key: str, correlation_id: str) -> int: ...
+    def save_admin_receipt(self, *, idempotency_key: str, command_fingerprint: str, preview_fingerprint: str, actor_id: str, reason: str, result: Mapping[str, Any]) -> None: ...
 
 
 class ClientProfileUnitOfWork(Protocol):
@@ -56,6 +62,120 @@ class ClientProfileApplication:
             _read_binding(unit_of_work, applicant_identity, client_id)
             profile = _require_profile(unit_of_work.client_profiles.load_profile(client_id))
         return _profile_view(profile)
+
+    def query_admin(self, case_no: str) -> ClientProfileView:
+        case_identity = _case_no(case_no)
+        with self._unit_of_work_factory() as unit_of_work:
+            profile = _require_profile(
+                unit_of_work.client_profiles.load_profile_by_case_no(case_identity)
+            )
+        return _profile_view(profile)
+
+    def preview_admin(
+        self,
+        case_no: str,
+        changes: Mapping[str, object],
+        expected_version: ExpectedVersion,
+    ) -> ClientProfilePreview:
+        case_identity = _case_no(case_no)
+        normalized = validate_changes(changes, city_allowlist=self._city_allowlist)
+        with self._unit_of_work_factory() as unit_of_work:
+            profile = _require_profile(
+                unit_of_work.client_profiles.load_profile_by_case_no(case_identity)
+            )
+        return _preview(profile, normalized, expected_version)
+
+    def apply_admin(
+        self,
+        case_no: str,
+        changes: Mapping[str, object],
+        expected_version: ExpectedVersion,
+        actor: ActorContext,
+        reason: str,
+        preview_fingerprint: PreviewFingerprint,
+        idempotency_key: IdempotencyKey,
+        correlation_id: CorrelationId,
+    ) -> ClientProfileAdminReceipt:
+        case_identity = _case_no(case_no)
+        normalized = validate_changes(changes, city_allowlist=self._city_allowlist)
+        clean_reason = reason.strip()
+        if not clean_reason:
+            raise ClientProfileValidationError("profile_reason_required")
+        command_fingerprint = _command_fingerprint(
+            "client_profile_admin_change/v1",
+            case_identity,
+            {"changes": normalized, "actor": actor.actor_id},
+            expected_version,
+            clean_reason,
+            preview_fingerprint,
+        )
+        with self._unit_of_work_factory() as unit_of_work:
+            repository = unit_of_work.client_profiles
+            repository.claim_admin_command(
+                case_no=case_identity,
+                idempotency_key=idempotency_key.value,
+                command_fingerprint=command_fingerprint.value,
+                correlation_id=correlation_id.value,
+            )
+            replay = repository.find_admin_receipt(
+                idempotency_key.value, for_update=True
+            )
+            if replay is not None:
+                _require_replay(replay, command_fingerprint)
+                current = _require_profile(
+                    repository.load_profile_by_case_no(case_identity)
+                )
+                result = replay.get("result", replay)
+                unit_of_work.commit()
+                return ClientProfileAdminReceipt(
+                    case_identity,
+                    int(result["resulting_version"]),
+                    tuple(str(item) for item in result["changed_fields"]),
+                    PreviewFingerprint(str(replay["preview_fingerprint"])),
+                    idempotency_key.value,
+                    True,
+                    current,
+                )
+            profile = _require_profile(
+                repository.load_profile_by_case_no(case_identity, for_update=True)
+            )
+            preview = _preview(profile, normalized, expected_version)
+            _require_preview(preview.preview_fingerprint, preview_fingerprint)
+            resulting_version = repository.apply_admin_change(
+                client_id=profile.client_id,
+                expected_version=expected_version.value,
+                before=preview.before,
+                requested=preview.requested,
+                actor_id=actor.actor_id,
+                reason=clean_reason,
+                idempotency_key=idempotency_key.value,
+                correlation_id=correlation_id.value,
+            )
+            result = {
+                "case_no": case_identity,
+                "client_id": profile.client_id,
+                "resulting_version": resulting_version,
+                "changed_fields": sorted(normalized),
+            }
+            repository.save_admin_receipt(
+                idempotency_key=idempotency_key.value,
+                command_fingerprint=command_fingerprint.value,
+                preview_fingerprint=preview_fingerprint.value,
+                actor_id=actor.actor_id,
+                reason=clean_reason,
+                result=result,
+            )
+            unit_of_work.commit()
+            fresh = _require_profile(repository.load_profile(profile.client_id))
+        return ClientProfileAdminReceipt(
+            case_identity,
+            resulting_version,
+            tuple(sorted(normalized)),
+            preview_fingerprint,
+            idempotency_key.value,
+            False,
+            fresh,
+        )
 
     def preview_applicant(
         self,
@@ -367,3 +487,10 @@ def _rejection_command_fingerprint(request_id, actor, reason, request_version, p
 def _require_replay(receipt: Mapping[str, Any], command_fingerprint: PreviewFingerprint) -> None:
     if str(receipt.get("command_fingerprint", "")) != command_fingerprint.value:
         raise ClientProfileRequestConflictError("idempotency_key_reused_with_different_payload")
+
+
+def _case_no(value: str) -> str:
+    case_no = str(value or "").strip()
+    if not case_no or len(case_no) > 50:
+        raise ClientProfileValidationError("case_no_invalid")
+    return case_no

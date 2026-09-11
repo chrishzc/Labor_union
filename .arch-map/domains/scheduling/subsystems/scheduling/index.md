@@ -9,6 +9,7 @@
 ## Modules
 - `attendance-schedule-precision` — 依服務方式、假日與人工調整精算逐日服務日期；path: `modules/attendance-schedule-precision.md`
 - `matching-coordination` — 候選／決策／plan/package coordination; path: `modules/matching-coordination.md`
+- `schedule-generation` — 版本化 assignment／buffer generation candidate 與未指派條款影響；path: `modules/schedule-generation.md`
 - `staff-monthly-calendar` — 月嫂月份正式排班、占用與唯讀歷史指派投影；path: `modules/staff-monthly-calendar.md`
 - `matching-schedule-confirmation` — current 日期版本的 recipient snapshot／LINE delivery intent／postback readback／正式排班 gate; path: `modules/matching-schedule-confirmation.md`
 - `leave-substitution` — 請假／代班 Query／Preview／Apply 與 committed Staff Payables readback; path: `modules/leave-substitution.md`

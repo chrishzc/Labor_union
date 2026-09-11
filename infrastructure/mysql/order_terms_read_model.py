@@ -180,6 +180,9 @@ def _assemble_facts(
     generation_row = _select_generation(cursor, aggregate_row, lock)
     assignment_rows = _select_assignments(cursor, generation_row, lock)
     schedule_rows = _select_schedules(cursor, generation_row, lock)
+    confirmed_service_date_version, confirmed_service_dates = (
+        _select_confirmed_service_dates(cursor, str(order_row["case_no"]), lock)
+    )
     client_finance = _load_client_finance(cursor, order_row, schedule_rows, lock)
     payroll = _load_payroll(cursor, order_row, assignment_rows, lock)
     lifecycle = _load_lifecycle(cursor, order_row, lock)
@@ -194,6 +197,28 @@ def _assemble_facts(
         client_finance,
         payroll,
         lifecycle,
+        confirmed_service_date_version,
+        confirmed_service_dates,
+    )
+
+
+def _select_confirmed_service_dates(cursor: Any, case_no: str, lock: bool):
+    lock_clause = " FOR UPDATE" if lock else ""
+    cursor.execute(
+        "SELECT id,version FROM confirmed_service_date_versions "
+        "WHERE case_no=%s AND is_current=1" + lock_clause,
+        (case_no,),
+    )
+    current = cursor.fetchone()
+    if not isinstance(current, Mapping):
+        return None, ()
+    cursor.execute(
+        "SELECT service_date FROM confirmed_service_date_days "
+        "WHERE confirmed_version_id=%s ORDER BY ordinal" + lock_clause,
+        (current["id"],),
+    )
+    return int(current["version"]), tuple(
+        row["service_date"] for row in cursor.fetchall()
     )
 
 
@@ -268,6 +293,8 @@ def _facts_from_rows(
     client_finance,
     payroll,
     lifecycle,
+    confirmed_service_date_version,
+    confirmed_service_dates,
 ) -> TermsWorkflowFacts:
     service_dates_by_assignment = _service_dates_by_assignment(schedule_rows)
     segments = _segments(assignment_rows, service_dates_by_assignment)
@@ -292,6 +319,8 @@ def _facts_from_rows(
         client_finance=client_finance,
         payroll=payroll,
         lifecycle=lifecycle,
+        confirmed_service_date_version=confirmed_service_date_version,
+        confirmed_service_dates=confirmed_service_dates,
     )
 
 

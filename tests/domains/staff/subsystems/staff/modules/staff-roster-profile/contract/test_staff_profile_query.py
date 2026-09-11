@@ -5,7 +5,7 @@ from datetime import date, datetime
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api.dependencies.admin_auth import require_admin
+from api.dependencies.admin_auth import require_registry_reader
 from api.dependencies.staff_profile import get_staff_profile_application
 from api.exception_handlers import CorrelationBoundaryMiddleware, install_typed_error_handlers
 from api.routes.staff import router
@@ -23,6 +23,9 @@ RAW_EMERGENCY_PHONE = "0987654321"
 def _row():
     return {
         "id": 7,
+        "name": "王小美",
+        "staff_profile_version": 2,
+        "bank_accounts_version": 3,
         "registered_at": datetime(2026, 1, 2, 3, 4, 5),
         "identity_card": RAW_IDENTITY_CARD,
         "phone": "0912345678",
@@ -50,15 +53,17 @@ class _Repository:
                 "id": 3,
                 "bank_code": "812",
                 "branch_code": "0012",
-                "account_no": "123456789012",
+                "account_last4": "9012",
                 "is_primary": 1,
+                "is_active": 1,
             },
             {
                 "id": 4,
                 "bank_code": "004",
                 "branch_code": "0001",
-                "account_no": "987654321098",
+                "account_last4": "1098",
                 "is_primary": 0,
+                "is_active": 0,
             },
         )
 
@@ -68,7 +73,7 @@ def _client():
     app.include_router(router)
     app.add_middleware(CorrelationBoundaryMiddleware)
     install_typed_error_handlers(app)
-    app.dependency_overrides[require_admin] = lambda: AdminPrincipal(
+    app.dependency_overrides[require_registry_reader] = lambda: AdminPrincipal(
         9, "staff-reader", "Staff Reader", "system_admin"
     )
     app.dependency_overrides[get_staff_profile_application] = lambda: (
@@ -86,6 +91,9 @@ def test_staff_profile_returns_complete_internal_admin_fields():
     assert response.status_code == 200
     payload = response.json()["data"]
     assert payload["staff_id"] == 7
+    assert payload["name"] == "王小美"
+    assert payload["profile_version"] == 2
+    assert payload["bank_accounts_version"] == 3
     assert payload["identity_card"] == "A123456789"
     assert payload["emergency_contact_phone"] == "0987654321"
     assert payload["birthday"] == "1980-01-02"
@@ -97,15 +105,17 @@ def test_staff_profile_returns_complete_internal_admin_fields():
             "account_id": 3,
             "bank_code": "812",
             "branch_code": "0012",
-            "account_no": "123456789012",
+            "account_last4": "9012",
             "is_primary": True,
+            "is_active": True,
         },
         {
             "account_id": 4,
             "bank_code": "004",
             "branch_code": "0001",
-            "account_no": "987654321098",
+            "account_last4": "1098",
             "is_primary": False,
+            "is_active": False,
         },
     ]
     serialized = response.text
@@ -113,6 +123,8 @@ def test_staff_profile_returns_complete_internal_admin_fields():
     assert RAW_EMERGENCY_PHONE in serialized
     assert "ip_address" not in payload
     assert "line_user_id" not in payload
+    assert "123456789012" not in serialized
+    assert "987654321098" not in serialized
 
 
 class _Cursor:
@@ -143,7 +155,7 @@ class _Connection:
     def __init__(self):
         self.cursors = [
             _Cursor(one=_row()),
-            _Cursor(many=({"id": 3, "bank_code": "812", "branch_code": "0012", "account_no": "123456789012", "is_primary": 1},)),
+            _Cursor(many=({"id": 3, "bank_code": "812", "branch_code": "0012", "account_last4": "9012", "is_primary": 1, "is_active": 1},)),
         ]
         self.created_cursors = []
 
@@ -160,7 +172,7 @@ def test_staff_profile_repository_reads_only_the_bounded_detail_columns():
     accounts = repository.fetch_bank_accounts(7)
 
     assert row is not None
-    assert accounts[0]["account_no"] == "123456789012"
+    assert accounts[0]["account_last4"] == "9012"
     assert connection.cursors == []
     profile_cursor, bank_cursor = connection.created_cursors
     assert profile_cursor.params == (7,)
@@ -170,7 +182,8 @@ def test_staff_profile_repository_reads_only_the_bounded_detail_columns():
     assert "account_no" not in profile_cursor.sql
     assert bank_cursor.params == (7,)
     assert "FROM staff_bank_accounts WHERE staff_id=%s" in bank_cursor.sql
-    assert "ORDER BY is_primary DESC,id ASC LIMIT 21" in bank_cursor.sql
+    assert "RIGHT(account_no,4) AS account_last4" in bank_cursor.sql
+    assert "ORDER BY is_active DESC,is_primary DESC,id ASC LIMIT 21" in bank_cursor.sql
 
 
 def test_staff_profile_treats_blank_optional_database_values_as_not_recorded():

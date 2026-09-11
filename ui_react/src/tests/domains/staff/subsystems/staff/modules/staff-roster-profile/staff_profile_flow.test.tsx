@@ -60,8 +60,10 @@ describe('Staff roster profile flow', () => {
     expect(within(profile).getByRole('group', { name: 'Email' })).toHaveTextContent('staff@example.test');
     expect(within(profile).getByRole('group', { name: '居住地址' })).toHaveTextContent('300 新竹市 北區測試路 1 號');
     expect(within(profile).getByRole('group', { name: '緊急聯絡人' })).toHaveTextContent('王家人／0987654321');
-    expect(within(profile).getByRole('list', { name: '銀行帳戶' })).toHaveTextContent('主要帳戶｜812／0012｜123456789012');
-    expect(within(profile).getByRole('list', { name: '銀行帳戶' })).toHaveTextContent('備用帳戶｜004／0001｜987654321098');
+    expect(within(profile).getByRole('list', { name: '銀行帳戶' })).toHaveTextContent('主要帳戶｜有效｜812／0012｜帳號末四碼 9012');
+    expect(within(profile).getByRole('list', { name: '銀行帳戶' })).toHaveTextContent('備用帳戶｜已停用｜004／0001｜帳號末四碼 1098');
+    expect(profile).not.toHaveTextContent('123456789012');
+    expect(profile).not.toHaveTextContent('987654321098');
     expect(screen.getByRole('group', { name: '可承接區域' })).toHaveTextContent('北區');
     // Canonical relation details remain available in the detail drawer, not roster cards.
     expect(screen.getByRole('group', { name: '可承接區域' })).toHaveTextContent('T01 six region final');

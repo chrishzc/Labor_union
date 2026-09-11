@@ -21,6 +21,13 @@
 - `domains/case_import/cooking_requirement.py`
 - `subsystems/case_import/hcm_beclass_reconciliation.py`
 - `infrastructure/mysql/hcm_beclass_reconciliation_adapter.py`
+- `domains/case_import/beclass_correction.py`
+- `subsystems/case_import/beclass_correction_workflow.py`
+- `infrastructure/mysql/beclass_correction_repository.py`
+- `POST /api/v1/admin/registries/clients/{case_no}/beclass/{preview|apply}`
+
+## Correction boundary
+- Effective corrections resolve only the unique `bound_case_no`; `query_no` remains immutable source provenance and original BeClass fields remain unchanged.
 
 ## Consumers
 - Case Import／Client owner follow-up only；不再有 Anomalies runtime consumer。

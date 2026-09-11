@@ -124,6 +124,30 @@ class MySqlOrderTermsRepository:
             if cursor.rowcount != 1:
                 raise RuntimeError("order_version_conflict")
 
+    def replace_confirmed_service_dates(
+        self,
+        candidate,
+        request: OrderTermsApplyRequest,
+        command_fingerprint: PreviewFingerprint,
+    ) -> None:
+        from infrastructure.mysql.matching_schedule_confirmation_repository import (
+            MySqlMatchingScheduleConfirmationRepository,
+        )
+        from infrastructure.mysql.service_date_confirmation_repository import (
+            MySqlServiceDateConfirmationRepository,
+        )
+
+        MySqlServiceDateConfirmationRepository(self._connection).save(
+            candidate,
+            actor=request.actor.actor_id,
+            reason=request.reason,
+            idempotency_key=request.idempotency_key.value,
+            command_fingerprint=command_fingerprint.value,
+        )
+        MySqlMatchingScheduleConfirmationRepository(
+            self._connection
+        ).invalidate_current_snapshot(candidate.case_no)
+
     def persist_client_finance_impact(
         self,
         command: ClientFinanceImpactPersistenceCommand,

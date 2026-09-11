@@ -9,7 +9,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query
 from pymysql.err import OperationalError, ProgrammingError
 
-from api.dependencies.admin_auth import require_admin
+from api.dependencies.admin_auth import require_admin, require_registry_reader
 from api.dependencies.staff_case_preference_summary import (
     get_staff_case_preference_summary_application,
 )
@@ -46,7 +46,7 @@ def get_staff_profile(
         str | None,
         Header(alias="X-Correlation-ID", min_length=1, max_length=191),
     ] = None,
-    principal: AdminPrincipal = Depends(require_admin),
+    principal: AdminPrincipal = Depends(require_registry_reader),
     application: StaffProfileQueryApplication = Depends(get_staff_profile_application),
 ) -> BaseResponse[StaffProfileView]:
     """Return selected Staff personal facts through a bounded admin projection."""

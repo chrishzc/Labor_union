@@ -10,6 +10,6 @@
 - Government Subsidy owner validation／migration readback only；不再有 Anomalies runtime consumer。
 
 ## Verification
-- test_root: `tests/domains/government-subsidy/subsystems/government-subsidy/integration/`
+- verification_boundary: subsystem integration（沿用 parent subsystem 的 `integration_root`，本 module 不宣告重複 owner root）。
 - GOVSUB-007 focused owner evidence: `test_government_subsidy_overpayment.py`、`test_government_subsidy_overpayment_workflow.py`。
 - 不存在 dedicated `current-anomaly-facts` module test root；retired-code correctness 不回指 Anomalies consumer coverage。

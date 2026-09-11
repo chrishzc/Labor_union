@@ -8,10 +8,12 @@ test_root: tests/domains/staff/subsystems/staff/modules/staff-roster-profile/
 test_root: ui_react/src/tests/domains/staff/subsystems/staff/modules/staff-roster-profile/
 
 ## Canonical roots
-- layout_basis: backend contract owns authenticated complete-value projection and bounded SQL; the mirrored React module root owns selected-Staff rendering.
+- layout_basis: backend contract owns authenticated profile mutation and masked bank projection/commands; the mirrored React module root owns selected-Staff rendering and owner-routed editing.
 - tests/domains/staff/subsystems/staff/modules/staff-roster-profile/
 - ui_react/src/tests/domains/staff/subsystems/staff/modules/staff-roster-profile/
 
 ## Oracles
-- The API returns the requested Staff identity and complete personal/contact/bank-account fields required by the internal roster UI, while IP, LINE User ID and raw source never cross the response boundary.
-- The Drawer loads the profile only for a selected Staff and renders complete identity, contact and bank-account facts without source-detail annotations.
+- The API returns the requested Staff identity and personal/contact fields while bank accounts expose only last4, primary and active state; IP, LINE User ID, full account number and raw source never cross a query/event/receipt boundary.
+- `contract/test_staff_registry_mutations.py` protects Profile and Bank version conflicts, exact replay, collision handling and safe preview/readback.
+- The Drawer loads a selected Staff, labels each owner, and performs separate cancel／preview／apply operations followed by server readback.
+- `staff_registry_editor.test.tsx` protects one in-flight bank command, a stable idempotency key, post-error server requery and complete-account input clearing.

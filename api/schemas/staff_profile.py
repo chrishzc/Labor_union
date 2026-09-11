@@ -11,14 +11,18 @@ class StaffBankAccountView(BaseModel):
     account_id: int = Field(gt=0)
     bank_code: str | None = Field(default=None, max_length=10)
     branch_code: str | None = Field(default=None, max_length=10)
-    account_no: str | None = Field(default=None, max_length=50)
+    account_last4: str | None = Field(default=None, min_length=4, max_length=4, pattern=r"^[0-9]{4}$")
     is_primary: bool
+    is_active: bool
 
 
 class StaffProfileView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     staff_id: int = Field(gt=0)
+    name: str = Field(min_length=1, max_length=100)
+    profile_version: int = Field(ge=0)
+    bank_accounts_version: int = Field(ge=0)
     registered_at: datetime | None = None
     identity_card: str | None = Field(default=None, max_length=20)
     phone: str | None = Field(default=None, max_length=20)

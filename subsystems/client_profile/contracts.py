@@ -105,8 +105,20 @@ class ClientProfileApprovalReceipt:
     readback: ClientProfileView
 
 
+@dataclass(frozen=True, slots=True)
+class ClientProfileAdminReceipt:
+    case_no: str
+    resulting_version: int
+    changed_fields: tuple[str, ...]
+    preview_fingerprint: PreviewFingerprint
+    idempotency_key: str
+    replayed: bool
+    readback: ClientProfileView
+
+
 __all__ = [
     "ClientProfileApprovalReceipt",
+    "ClientProfileAdminReceipt",
     "ClientProfileApplicantReceipt",
     "ClientBindingEvidence",
     "ClientBindingPort",

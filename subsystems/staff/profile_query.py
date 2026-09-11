@@ -24,13 +24,17 @@ class StaffBankAccount:
     account_id: int
     bank_code: str | None
     branch_code: str | None
-    account_no: str | None
+    account_last4: str | None
     is_primary: bool
+    is_active: bool
 
 
 @dataclass(frozen=True, slots=True)
 class StaffProfile:
     staff_id: int
+    name: str
+    profile_version: int
+    bank_accounts_version: int
     registered_at: datetime | None
     identity_card: str | None
     phone: str | None
@@ -79,6 +83,9 @@ def _profile(
 ) -> StaffProfile:
     fields = {
         "id",
+        "name",
+        "staff_profile_version",
+        "bank_accounts_version",
         "registered_at",
         "identity_card",
         "phone",
@@ -98,6 +105,9 @@ def _profile(
         raise StaffProfileContractError("staff profile row fields or identity are invalid")
     return StaffProfile(
         staff_id=staff_id,
+        name=_required_text(row["name"], "name", 100),
+        profile_version=_non_negative_version(row["staff_profile_version"], "staff_profile_version"),
+        bank_accounts_version=_non_negative_version(row["bank_accounts_version"], "bank_accounts_version"),
         registered_at=_optional_datetime(row["registered_at"], "registered_at"),
         identity_card=_optional_text(row["identity_card"], "identity_card", 20),
         phone=_optional_text(row["phone"], "phone", 20),
@@ -121,7 +131,7 @@ def _profile(
 
 
 def _bank_account(row: Mapping[str, object]) -> StaffBankAccount:
-    fields = {"id", "bank_code", "branch_code", "account_no", "is_primary"}
+    fields = {"id", "bank_code", "branch_code", "account_last4", "is_primary", "is_active"}
     if set(row) != fields:
         raise StaffProfileContractError("staff profile bank account fields are invalid")
     account_id = row["id"]
@@ -138,9 +148,38 @@ def _bank_account(row: Mapping[str, object]) -> StaffBankAccount:
         account_id=account_id,
         bank_code=_optional_text(row["bank_code"], "bank_code", 10),
         branch_code=_optional_text(row["branch_code"], "branch_code", 10),
-        account_no=_optional_text(row["account_no"], "account_no", 50),
+        account_last4=_optional_last4(row["account_last4"]),
         is_primary=is_primary,
+        is_active=_boolean(row["is_active"], "is_active"),
     )
+
+
+def _required_text(value: object, field: str, maximum: int) -> str:
+    text = _optional_text(value, field, maximum)
+    if text is None:
+        raise StaffProfileContractError(f"staff profile {field} is required")
+    return text
+
+
+def _non_negative_version(value: object, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise StaffProfileContractError(f"staff profile {field} is invalid")
+    return value
+
+
+def _boolean(value: object, field: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in (0, 1):
+        return bool(value)
+    raise StaffProfileContractError(f"staff profile {field} is invalid")
+
+
+def _optional_last4(value: object) -> str | None:
+    text = _optional_text(value, "account_last4", 4)
+    if text is not None and (len(text) != 4 or not text.isdigit()):
+        raise StaffProfileContractError("staff profile account_last4 is invalid")
+    return text
 
 
 def _optional_text(value: object, field: str, maximum: int) -> str | None:
