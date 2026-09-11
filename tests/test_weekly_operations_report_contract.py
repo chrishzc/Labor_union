@@ -307,6 +307,12 @@ def test_weekly_export_has_fixed_three_sheets_and_summary_without_pii():
     assert subsidy_sheet.cell(row=6, column=14).value == "第三季"
     assert subsidy_sheet.cell(row=6, column=2).number_format == "@"
     assert subsidy_sheet.cell(row=6, column=5).number_format == "@"
+    assert subsidy_sheet.cell(row=1, column=6).value == "114市民總計:"
+    assert subsidy_sheet.cell(row=1, column=7).value == 1
+    assert subsidy_sheet.cell(row=1, column=11).value == 12000
+    assert subsidy_sheet.cell(row=2, column=6).value == "115市民總計:"
+    assert subsidy_sheet.cell(row=2, column=7).value == 0
+    assert subsidy_sheet.cell(row=2, column=11).value == 0
 
     # 每周服務中說明：對齊使用者提供的 10 欄範例
     service_values = list(workbook["每周服務中說明"].values)

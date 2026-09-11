@@ -14,6 +14,7 @@ from openpyxl.utils import get_column_letter
 from subsystems.reporting.weekly_operations_report_query import (
     WeeklyCaseRow,
     WeeklyOperationsReport,
+    WeeklySubsidyRow,
 )
 
 
@@ -191,17 +192,22 @@ def _build_subsidy_sheet(ws, report: WeeklyOperationsReport) -> None:
         else:
             general_rows.extend(partition.rows)
 
-    total_gen = len(general_rows)
     total_sub = len(subsidized_rows)
+    previous_gen_count, previous_gen_amount = _subsidy_year_totals(general_rows, roc_year - 1)
+    current_gen_count, current_gen_amount = _subsidy_year_totals(general_rows, roc_year)
+    previous_sub_count, previous_sub_amount = _subsidy_year_totals(subsidized_rows, roc_year - 1)
+    current_sub_count, current_sub_amount = _subsidy_year_totals(subsidized_rows, roc_year)
 
     # R1~R4: 看板區
-    ws.append([None, None, None, None, None, f"{roc_year - 1}市民總計:", 0, "案", None, None, " "])
-    ws.append([f"{roc_year}年度 服務補助案件暨經費 統計明細", None, None, None, None, f"{roc_year}市民總計:", total_gen, "案", "合計", None, None])
-    ws.append([None, None, None, None, None, f"{roc_year - 1}社福總計:", 0, "案"])
-    ws.append([None, None, None, None, None, f"{roc_year}社福總計:", total_sub, "案", "合計", None, None])
+    ws.append([None, None, None, None, None, f"{roc_year - 1}市民總計:", previous_gen_count, "案", "合計", None, previous_gen_amount])
+    ws.append([f"{roc_year}年度 服務補助案件暨經費 統計明細", None, None, None, None, f"{roc_year}市民總計:", current_gen_count, "案", "合計", None, current_gen_amount])
+    ws.append([None, None, None, None, None, f"{roc_year - 1}社福總計:", previous_sub_count, "案", "合計", None, previous_sub_amount])
+    ws.append([None, None, None, None, None, f"{roc_year}社福總計:", current_sub_count, "案", "合計", None, current_sub_amount])
 
     ws.merge_cells("A2:E2")
+    ws.merge_cells("I1:J1")
     ws.merge_cells("I2:J2")
+    ws.merge_cells("I3:J3")
     ws.merge_cells("I4:J4")
 
     ws.cell(row=2, column=1).font = Font(bold=True, size=14)
@@ -222,7 +228,6 @@ def _build_subsidy_sheet(ws, report: WeeklyOperationsReport) -> None:
         cell.border = _BORDER_THIN
 
     # 一般市民明細 (從 R6 起)
-    gen_start = 6
     for idx, r in enumerate(general_rows, start=1):
         ws.append([
             idx,
@@ -248,12 +253,8 @@ def _build_subsidy_sheet(ws, report: WeeklyOperationsReport) -> None:
         ws.cell(row=curr_r, column=2).number_format = "@"
         ws.cell(row=curr_r, column=5).number_format = "@"
 
-    gen_end = ws.max_row
-    if gen_end >= gen_start:
-        ws.cell(row=2, column=11, value=f"=SUM(K{gen_start}:K{gen_end})")
-    else:
-        ws.cell(row=2, column=11, value=0)
-    ws.cell(row=2, column=11).font = Font(bold=True)
+    for row_number in range(1, 5):
+        ws.cell(row=row_number, column=11).font = Font(bold=True)
 
     # 社福市民區塊
     sub_start = ws.max_row + 2
@@ -294,15 +295,20 @@ def _build_subsidy_sheet(ws, report: WeeklyOperationsReport) -> None:
 
     sub_rows_end = ws.max_row
     if sub_rows_end >= sub_rows_start:
-        ws.cell(row=4, column=11, value=f"=SUM(K{sub_rows_start}:K{sub_rows_end})")
         ws.cell(row=sep_row, column=11, value=f"=SUM(K{sub_rows_start}:K{sub_rows_end})")
     else:
-        ws.cell(row=4, column=11, value=0)
         ws.cell(row=sep_row, column=11, value=0)
-    ws.cell(row=4, column=11).font = Font(bold=True)
 
     ws.freeze_panes = "A6"
     _auto_fit_columns(ws, min_col=1, max_col=14)
+
+
+def _subsidy_year_totals(
+    rows: list[WeeklySubsidyRow],
+    application_roc_year: int,
+) -> tuple[int, int]:
+    matched = [row for row in rows if row.application_roc_year == application_roc_year]
+    return len(matched), sum(row.subsidy_amount_ntd for row in matched)
 
 
 def _build_service_sheet(ws, report: WeeklyOperationsReport) -> None:
