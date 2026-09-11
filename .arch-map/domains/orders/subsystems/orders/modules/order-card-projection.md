@@ -30,6 +30,7 @@
 - test_root: `ui_react/src/tests/order_workbench_v2_page.test.tsx`
 - test_root: `ui_react/src/tests/order_workbench_v2_terminal_aggregate.test.tsx`
 - test_root: `ui_react/src/tests/domains/orders/subsystems/orders/modules/order-card-projection/`
+- test_root: `ui_react/src/tests/fixtures/orders_real_data_fixtures.ts`
 - test_root: `ui_react/src/tests/orders_no_fake_mutation.test.ts`
 - routing: `.arch-map/tests/domains/orders/subsystems/orders/modules/order-card-projection.md`
 

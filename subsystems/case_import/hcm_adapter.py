@@ -100,7 +100,7 @@ def build_approved_case_architecture_bootstrap_intent(
         CLIENT_PAYMENT_POLICY_VERSION,
         MoneyNTD(rate),
         deposit_days,
-        created_at.date() + timedelta(days=3),
+        min(created_at.date() + timedelta(days=3), start_date),
         start_date,
     )
     return CaseArchitectureBootstrapIntent(case_no, terms, PAYROLL_POLICY_VERSION)
@@ -121,7 +121,8 @@ def calculate_hcm_service_end_date(
     if service_days < 1:
         return None
     rest_weekdays = {
-        "週休1日": {6},
+        "休周六": {5},
+        "休周日": {6},
         "週休2日": {5, 6},
         "連續服務": set(),
     }.get(service_type, set())

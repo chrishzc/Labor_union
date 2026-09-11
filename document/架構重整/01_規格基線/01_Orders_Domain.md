@@ -466,10 +466,12 @@ key＋same canonical workbook 僅 replay terminal receipt；same key＋different
 Scheduling canonical cancel-old／create-new replacement 處理。`assignment_candidate` 與
 `evidence_only_pairing`是`adopted`子分類，不得重複計入source-row aggregate。
 
-HCM Current仍由Case Import編排whole-workbook outer UoW。若HCM來源`exact IP + exact normalized name`
-命中既有Client，Orders端固定0 mutation並接受`review_only`結果，不得建立partial Order；只有未命中duplicate
-identity、但尚無唯一Client BeClass對方的合法案件，才可依既有條款建立Order並讓
-`requires_cooking = NULL`。archive成功不等於Orders commit，rollback後的archive compensation由Case Import擁有。
+HCM Current仍由Case Import編排whole-workbook outer UoW。HCM案件身分以非空且合法的案件編號為唯一鍵；
+不同案件編號即使姓名或IP相同仍建立新的Client／Order，姓名／IP重複只可形成非阻擋人工警示，不得自動
+合併或阻擋。只有案件編號已存在才依same-source exact replay／conflict處理且不得覆寫既有資料。尚無唯一
+Client BeClass對方的合法案件仍建立Order並讓`requires_cooking = NULL`。完整HCM案件的訂金到期日與四種
+canonical服務方式／排休日語意由第17份正式規格§5.2.1擁有；archive成功不等於Orders commit，rollback後
+的archive compensation由Case Import擁有。
 
 ### 3.8 Historical Operational Baseline（2026-08-27 人工裁決）
 

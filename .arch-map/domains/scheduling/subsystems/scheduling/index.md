@@ -7,6 +7,7 @@
 將 Scheduling、matching、leave/substitution facts 組成 typed Query／Preview／Apply，維持 fresh owner facts、lock order、idempotency 與 cross-domain coordination。
 
 ## Modules
+- `attendance-schedule-precision` — 依服務方式、假日與人工調整精算逐日服務日期；path: `modules/attendance-schedule-precision.md`
 - `matching-coordination` — 候選／決策／plan/package coordination; path: `modules/matching-coordination.md`
 - `staff-monthly-calendar` — 月嫂月份正式排班、占用與唯讀歷史指派投影；path: `modules/staff-monthly-calendar.md`
 - `matching-schedule-confirmation` — current 日期版本的 recipient snapshot／LINE delivery intent／postback readback／正式排班 gate; path: `modules/matching-schedule-confirmation.md`

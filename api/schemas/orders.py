@@ -254,7 +254,7 @@ class ScheduleCalculationRequest(BaseModel):
     case_no: Optional[str] = Field(None, min_length=1, max_length=50, description="目前案件；用於回讀國定假日上班協議")
     actual_start_date: date = Field(..., description="實際服務開始日")
     target_service_days: int = Field(20, ge=1, description="目標服務天數")
-    service_mode: str = Field("週休1日", description="排休模式: 週休1日/週休2日/連續服務")
+    service_mode: str = Field("休周日", description="排休模式: 休周六/休周日/週休2日/連續服務")
     custom_leave_dates: Optional[List[date]] = Field(None, description="自訂請假日期列表")
     custom_work_dates: Optional[List[date]] = Field(None, description="覆蓋固定週休的人工服務日期列表")
     custom_rest_weekdays: Optional[List[int]] = Field(None, description="固定排休星期列表")

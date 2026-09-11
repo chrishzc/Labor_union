@@ -86,27 +86,30 @@ SCENARIOS = [
     # C1: 連續服務 never skips a weekday and no holiday falls in range,
     # so 5 service days is just 5 consecutive calendar days.
     ("C1_continuous_no_holiday", date(2026, 3, 2), 5, "連續服務", frozenset(), date(2026, 3, 6)),
-    # C2: 週休1日 only skips Sunday. Mon 3/2 .. Sat 3/7 has no Sunday in it,
+    # C2: 休周日 only skips Sunday. Mon 3/2 .. Sat 3/7 has no Sunday in it,
     # so all 6 days count and end date is Sat 3/7.
-    ("C2_weekly1_no_sunday_in_range", date(2026, 3, 2), 6, "週休1日", frozenset(), date(2026, 3, 7)),
+    ("C2_rest_sunday", date(2026, 3, 2), 6, "休周日", frozenset(), date(2026, 3, 7)),
+    # C2b: 休周六 preserves the opposite one-day rest choice. Saturday is
+    # skipped and Sunday is the sixth service day.
+    ("C2b_rest_saturday", date(2026, 3, 2), 6, "休周六", frozenset(), date(2026, 3, 8)),
     # C3: 週休2日 skips Sat+Sun. Mon 3/2..Fri 3/6 = 5 days, then Sat 3/7 and
     # Sun 3/8 are skipped, so day 6 lands on Mon 3/9.
     ("C3_weekly2_skips_weekend", date(2026, 3, 2), 6, "週休2日", frozenset(), date(2026, 3, 9)),
-    # C4: 週休1日 starting the Monday right before the 6-day Spring Festival
+    # C4: 休周日 starting the Monday right before the 6-day Spring Festival
     # holiday block (2/17 Tue .. 2/22 Sun). Only 2/16 counts before the
     # block; the block itself is entirely holiday (its one Sunday, 2/22, is
     # already a holiday so it changes nothing extra); next working days are
     # 2/23 (Mon) and 2/24 (Tue) -> day 3.
-    ("C4_weekly1_across_spring_festival", date(2026, 2, 16), 3, "週休1日", HOLIDAYS_2026, date(2026, 2, 24)),
+    ("C4_rest_sunday_across_spring_festival", date(2026, 2, 16), 3, "休周日", HOLIDAYS_2026, date(2026, 2, 24)),
     # C5: same window as C4 but 連續服務 (no weekday skip at all) - result is
     # identical here because the only weekend day in the window (2/22) was
     # already a holiday, so weekday-skipping made no difference in C4 either.
     ("C5_continuous_across_spring_festival", date(2026, 2, 16), 3, "連續服務", HOLIDAYS_2026, date(2026, 2, 24)),
-    # C6: 週休1日 starting on a Saturday (2/14). Saturday is a working day
-    # under 週休1日 (only Sunday rests), so 2/14 is day 1, 2/15 (Sun) is
+    # C6: 休周日 starting on a Saturday (2/14). Saturday is a working day
+    # under 休周日 (only Sunday rests), so 2/14 is day 1, 2/15 (Sun) is
     # skipped, 2/16 (Mon) day 2, 2/17 (Tue) day 3. No holiday_dates passed,
     # so 2/17 being a real holiday is irrelevant here.
-    ("C6_weekly1_starts_saturday", date(2026, 2, 14), 3, "週休1日", frozenset(), date(2026, 2, 17)),
+    ("C6_rest_sunday_starts_saturday", date(2026, 2, 14), 3, "休周日", frozenset(), date(2026, 2, 17)),
     # C7: same start/day-count but 週休2日 - Saturday now also rests, so
     # 2/14 (Sat) and 2/15 (Sun) both skip, day 1 is 2/16 (Mon), day 2 is
     # 2/17 (Tue), day 3 is 2/18 (Wed).
@@ -147,7 +150,7 @@ def test_logic_a_and_logic_b_agree_on_default_holiday_handling():
     so if this test fails, real orders imported via Excel and orders
     checked via the Preview UI would land on different end dates for the
     same input, which is a genuine cross-module bug worth flagging."""
-    start, days, mode = date(2026, 2, 16), 3, "週休1日"
+    start, days, mode = date(2026, 2, 16), 3, "休周日"
 
     logic_a_result = _calculate_service_end_date(start, days, mode, HOLIDAYS_2026)
     logic_b_result = calculate_order_attendance_schedule(
@@ -224,7 +227,7 @@ def test_logic_b_custom_rest_weekdays_overrides_service_mode_default():
     result = calculate_order_attendance_schedule(
         actual_start_date=start,
         target_service_days=6,
-        service_mode="週休1日",  # would normally only skip Sunday
+        service_mode="休周日",  # would normally only skip Sunday
         custom_holiday_rest_dates=[],
         custom_rest_weekdays=[5, 6],  # force Sat+Sun rest instead
     )

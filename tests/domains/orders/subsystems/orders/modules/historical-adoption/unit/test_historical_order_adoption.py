@@ -323,7 +323,7 @@ def test_historical_actual_start_rebuild_uses_order_rest_days_and_holidays():
     assert calculate_service_dates(
         date(2026, 8, 8),
         3,
-        "週休1日",
+        "休周日",
         (date(2026, 8, 10),),
     ) == (
         date(2026, 8, 8),

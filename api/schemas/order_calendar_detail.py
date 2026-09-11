@@ -9,7 +9,7 @@ class OrderCalendarDetailView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     case_no: str
-    service_mode: Literal["週休1日", "週休2日", "連續服務"]
+    service_mode: Literal["休周六", "休周日", "週休2日", "連續服務"]
 
 
 __all__ = ["OrderCalendarDetailView"]

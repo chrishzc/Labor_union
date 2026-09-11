@@ -5,7 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping, Protocol
 
-SUPPORTED_SERVICE_MODES = frozenset({"週休2日", "週休1日", "連續服務"})
+SUPPORTED_SERVICE_MODES = frozenset({"休周六", "休周日", "週休2日", "連續服務"})
+_LEGACY_SERVICE_MODE_ALIASES = {
+    "週休1日": "休周日",
+    "週休一日": "休周日",
+    "週休二日": "週休2日",
+    "周休二日": "週休2日",
+}
 _EXPECTED_FIELDS = frozenset({"case_no", "service_mode"})
 
 
@@ -53,6 +59,8 @@ def _validated_detail(row: Mapping[str, object], expected_case_no: str) -> Order
         raise OrderCalendarDetailContractError("unexpected projection fields")
     case_no = row.get("case_no")
     service_mode = row.get("service_mode")
+    if isinstance(service_mode, str):
+        service_mode = _LEGACY_SERVICE_MODE_ALIASES.get(service_mode, service_mode)
     if case_no != expected_case_no:
         raise OrderCalendarDetailContractError("case identity drift")
     if service_mode not in SUPPORTED_SERVICE_MODES:
@@ -66,4 +74,3 @@ __all__ = [
     "OrderCalendarDetailNotFoundError",
     "OrderCalendarDetailQueryService",
 ]
-

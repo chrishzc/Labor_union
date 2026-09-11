@@ -11,10 +11,12 @@
 - primary:
   - `domains/orders/service_date_confirmation.py`
   - `subsystems/orders/service_date_confirmation_workflow.py`
+  - `subsystems/orders/calendar_detail_query.py`
   - `infrastructure/mysql/service_date_confirmation_repository.py`
 - entrypoints:
   - `api/routes/service_date_confirmation.py`
   - `api/dependencies/service_date_confirmation.py`
+  - `api/schemas/order_calendar_detail.py`
   - `ui_react/src/adapters/orders/order_mutation_adapter.ts`
   - `ui_react/src/components/OrderServiceDatesPanel.tsx`
 

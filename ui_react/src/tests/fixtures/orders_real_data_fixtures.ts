@@ -79,7 +79,7 @@ export const realisticOrderDetail: OrderDetail = {
 
 export const realisticOrderCalendarDetail: OrderCalendarDetail = {
   case_no: 'ORD-2026-0801',
-  service_mode: '週休1日',
+  service_mode: '休周日',
 };
 
 export const realisticOrderTerms: OrderTerms = {

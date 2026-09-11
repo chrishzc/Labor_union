@@ -22,6 +22,14 @@ def test_query_returns_validated_calendar_detail() -> None:
     assert detail.service_mode == "週休2日"
 
 
+def test_query_preserves_rest_saturday_and_canonicalizes_legacy_weekly_one() -> None:
+    saturday = _service({"case_no": "CASE-1", "service_mode": "休周六"}).query("CASE-1")
+    legacy_sunday = _service({"case_no": "CASE-2", "service_mode": "週休1日"}).query("CASE-2")
+
+    assert saturday.service_mode == "休周六"
+    assert legacy_sunday.service_mode == "休周日"
+
+
 @pytest.mark.parametrize("case_no", ["", " CASE-1", "CASE-1 ", "x" * 51])
 def test_query_rejects_noncanonical_case_number(case_no: str) -> None:
     with pytest.raises(ValueError):

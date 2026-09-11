@@ -655,9 +655,18 @@ timestamps、unknown boolean 不覆寫。銀行與關聯集合同樣採empty-onl
 - HCM Current採`WHOLE_WORKBOOK + archive_required`。原始workbook以content digest為immutable archive
   identity；archive寫入與完整性驗證失敗時Apply固定unavailable且0 Domain／DB write。archive成功後若
   outer transaction rollback，必須compensating delete；delete失敗建立operational anomaly，不得偽造成功。
-- HCM來源若`exact IP + exact normalized name`命中既有Client，固定`review_only`：保存privacy-safe
-  source review／receipt／outbox，0 Client／Order mutation，且不得同時建立partial case。合法HCM案件只因
-  尚無唯一Client BeClass對方時，仍依既有lane建立Client／Order並讓`requires_cooking = NULL`；兩種情境不得混用。
+- HCM Current 的案件身分唯一鍵是非空且合法的`查詢序號(案件編號)`。相同姓名、IP位址或兩者同時
+  重複但案件編號不同，代表可合法重複申請／不同年度申請，必須建立新的Client／Order，不得自動綁定、
+  合併或阻擋；可保存privacy-safe非阻擋警示供工會後續核對。只有案件編號已存在時才依same-source
+  exact replay／conflict規則處理，且不得覆寫既有Client／Order。尚無唯一Client BeClass對方時，仍建立
+  Client／Order並讓`requires_cooking = NULL`。
+- HCM Current 完整案件的訂金到期日固定為`min(報名時間日期 + 3 calendar days, 預計服務日期)`；
+  急件不得只因報名距預計開工不足3天而阻擋Client／Order及case architecture bootstrap建立。
+- HCM `服務方式` canonical值固定為`連續服務 | 休周六 | 休周日 | 週休2日`；legacy `週休1日`／
+  `週休一日`正規化為`休周日`，`周休二日`／`週休二日`正規化為`週休2日`。`休周六`只排除星期六、
+  `休周日`只排除星期日、`週休2日`排除星期六與星期日、`連續服務`不排除固定weekday；國定假日及
+  人工覆寫仍依其正式規則處理。任何預計結束日、正式服務日、Scheduling、合約及天數／費用精算
+  consumer都必須保留此weekday差異，不得再把`休周六`與`休周日`合併成`週休1日`。
 - Client BeClass、Staff Historical、Historical Orders各採`ROW_ATOMIC_RESUMABLE + archive_required`。
   每個workbook必須有durable `running → row_committed* → terminal_receipt`與
   `retryable_interrupted | terminal_failed`；same key＋same canonical workbook只可replay terminal receipt
@@ -819,7 +828,8 @@ accepted lineage均由同一owner readback驗證；runtime DB engine仍須依cur
   直接寫 `clients`。
 - `服務方式` 是 Client root fact，canonical persistence 為 `clients.service_type`；Orders 不新增
   `service_type`。`end_date` 仍由 Orders terms／lifecycle 依其正式 root facts 衍生，Client correction
-  不得直接寫入或重算它。
+  不得直接寫入或重算它。canonical服務方式、legacy alias與各自排休日依本規格 §5.2.1，所有需要
+  服務日曆的owner consumer必須使用相同typed語意。
 - canonical HCM review identity／version 完整取代 legacy warning occurrence／current-task identity；
   legacy association 只供 provenance read，不得成為新 Apply 的 mutation root。
 - Preview 零寫入，`preview_fingerprint` 必須覆蓋 source、canonical review、Client、Orders

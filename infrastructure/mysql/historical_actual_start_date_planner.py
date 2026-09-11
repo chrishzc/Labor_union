@@ -440,8 +440,8 @@ def _persist_rate_snapshots(cursor, candidate, result, policy) -> None:
 
 def _canonical_service_mode(value: str) -> str:
     aliases = {
-        "週休一日": "週休1日",
-        "休周日": "週休1日",
+        "週休一日": "休周日",
+        "週休1日": "休周日",
         "週休二日": "週休2日",
         "周休二日": "週休2日",
     }

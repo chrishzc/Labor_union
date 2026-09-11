@@ -62,7 +62,7 @@ export type OrderDetail = z.infer<typeof OrderDetailSchema>;
 
 export const OrderCalendarDetailSchema = z.strictObject({
   case_no: z.string().min(1),
-  service_mode: z.enum(['週休1日', '週休2日', '連續服務']),
+  service_mode: z.enum(['休周六', '休周日', '週休2日', '連續服務']),
 });
 export type OrderCalendarDetail = z.infer<typeof OrderCalendarDetailSchema>;
 

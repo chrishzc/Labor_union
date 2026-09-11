@@ -15,7 +15,10 @@ GENDER_VALUES = {"男", "女"}
 IDENTITY_STATUS_VALUES = {"一般市民", "補助市民", "低收入戶", "中低收入戶", "非市民"}
 RESIDENCE_TYPE_VALUES = {"公寓", "透天", "大樓", "公寓大廈"}
 DELIVERY_TYPE_VALUES = {"自然產", "剖腹產"}
-SERVICE_TYPE_VALUES = {"連續服務", "週休1日", "週休2日", "周休二日", "休周日"}
+SERVICE_TYPE_VALUES = {
+    "連續服務", "休周六", "休周日", "週休2日",
+    "週休1日", "週休一日", "周休二日",
+}
 PHONE_PATTERN = re.compile(r"^09\d{8}$")
 DATE_PATTERN = re.compile(r"^\d{4}/\d{2}/\d{2}$")
 
@@ -194,7 +197,7 @@ def validate_hcm_row(row: dict[str, Any]) -> dict[str, str]:
         errors["服務方式"] = "不可空值"
     elif str(service_type).strip() not in SERVICE_TYPE_VALUES:
         errors["服務方式"] = (
-            f"值不在允許範圍內（連續服務,週休1日,週休2日）：{service_type}"
+            f"值不在允許範圍內（連續服務,休周六,休周日,週休2日）：{service_type}"
         )
 
     if _is_blank(row.get("寶寶資訊")):

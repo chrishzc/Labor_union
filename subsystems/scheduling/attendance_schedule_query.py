@@ -21,7 +21,7 @@ calculate_attendance_schedule: AttendanceScheduleCalculator = _unconfigured_calc
 def calculate_order_attendance_schedule(
     actual_start_date: date,
     target_service_days: int = 20,
-    service_mode: str = "週休1日",
+    service_mode: str = "休周日",
     custom_holiday_rest_dates: Optional[List[date]] = None,
     custom_leave_dates: Optional[List[date]] = None,
     custom_work_dates: Optional[List[date]] = None,

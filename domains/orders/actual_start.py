@@ -451,14 +451,15 @@ def calculate_service_dates(
 
     _require_date(actual_start_date, "actual start date")
     require_positive_integer(service_days, "service days")
-    if service_mode not in {"週休1日", "週休2日", "連續服務"}:
+    if service_mode not in {"休周六", "休周日", "週休2日", "連續服務"}:
         raise ValueError("service mode is unsupported")
     if holiday_dates != tuple(sorted(set(holiday_dates))):
         raise ValueError("holiday dates must be canonically ordered")
     if any(type(value) is not date for value in holiday_dates):
         raise TypeError("holiday dates must contain dates")
     rest_weekdays = {
-        "週休1日": {6},
+        "休周六": {5},
+        "休周日": {6},
         "週休2日": {5, 6},
         "連續服務": set(),
     }[service_mode]

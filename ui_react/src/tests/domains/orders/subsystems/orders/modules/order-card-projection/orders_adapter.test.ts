@@ -86,7 +86,7 @@ describe('Orders Drawer adapters', () => {
       },
     });
     expect(view.actualStartDate).toBe('2026-09-03');
-    expect(view.serviceMode).toBe('週休1日');
+    expect(view.serviceMode).toBe('休周日');
     expect(view.serviceRangeText).toBe('2026-09-03 ~ 2026-10-07');
     expect(view.calculatedServiceDaysText).toBe('30 天（目標 30 天）');
     expect(view.restDaysCountText).toBe('5 天');

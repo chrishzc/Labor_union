@@ -23,7 +23,7 @@ interface OrderServiceDatesPanelProps {
 }
 
 type WorkingAction = 'load' | 'preview' | 'apply' | null;
-type ServiceMode = '週休1日' | '週休2日' | '連續服務';
+type ServiceMode = '休周六' | '休周日' | '週休2日' | '連續服務';
 const AUTOMATIC_CONFIRMATION_REASON = '確認正式服務日期';
 
 function errorMessage(error: unknown): string {

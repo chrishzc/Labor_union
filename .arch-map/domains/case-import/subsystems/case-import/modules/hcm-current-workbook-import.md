@@ -10,7 +10,9 @@
 ## Implementation
 - primary:
   - `subsystems/case_import/hcm_workbook_import.py`
+  - `subsystems/case_import/hcm_adapter.py`
   - `scripts/imports/import_client_hcm.py`
+  - `domains/case_import/client_import_validation.py`
   - `domains/case_import/hcm_import_review.py`
 - entrypoints:
   - `api/routes/hcm_import.py`

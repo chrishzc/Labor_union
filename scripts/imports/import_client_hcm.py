@@ -788,8 +788,8 @@ def normalize_hcm_row(row):
     svc_type = record.get("service_type")
     if svc_type == "周休二日":
         record["service_type"] = "週休2日"
-    elif svc_type in ["休周日", "休周六"]:
-        record["service_type"] = "週休1日"
+    elif svc_type in ["週休1日", "週休一日"]:
+        record["service_type"] = "休周日"
         
     return record
 

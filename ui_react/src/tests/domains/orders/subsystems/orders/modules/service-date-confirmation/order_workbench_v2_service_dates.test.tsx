@@ -101,7 +101,7 @@ describe('待辦看板 Beta 第 9 階服務日期', () => {
     });
     mocks.getOrderCalendarDetail.mockResolvedValue({
       case_no: 'CASE-SERVICE-DATES',
-      service_mode: '週休1日',
+      service_mode: '休周六',
     });
     mocks.fetchServiceDatesQuery.mockResolvedValue(initialQuery);
     mocks.calculate.mockResolvedValue({
@@ -138,7 +138,7 @@ describe('待辦看板 Beta 第 9 階服務日期', () => {
     await waitFor(() => expect(mocks.calculate).toHaveBeenCalledWith({
       actual_start_date: '2026-10-01',
       target_service_days: 3,
-      service_mode: '週休1日',
+      service_mode: '休周六',
     }));
     expect(mocks.selectServiceDates).toHaveBeenLastCalledWith(
       'CASE-SERVICE-DATES',

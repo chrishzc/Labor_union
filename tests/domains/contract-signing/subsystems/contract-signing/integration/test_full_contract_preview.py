@@ -28,6 +28,7 @@ from infrastructure.mysql.contract_full_preview_repository import (
     _project_subsidy_coverage,
     _special_holidays_text,
 )
+from subsystems.contract_signing.staff_contract_application import _rest_weekdays
 
 
 class _Repository:
@@ -215,14 +216,24 @@ def test_client_preview_fingerprint_canonicalizes_native_owner_dates_and_amounts
     assert result.field_values == {"A1": date(2026, 3, 2), "A2": Decimal("12000.00")}
 
 
-@pytest.mark.parametrize("value", ["週休1日", "週休2日", "連續服務"])
+@pytest.mark.parametrize("value", ["休周六", "休周日", "週休2日", "連續服務"])
 def test_client_service_type_is_an_exact_canonical_rest_mode(value):
     assert _canonical_service_mode(value) == value
 
 
-@pytest.mark.parametrize("value", [None, "care", "居家", "週休一日"])
-def test_legacy_or_ambiguous_service_type_is_not_reinterpreted(value):
+@pytest.mark.parametrize("value", [None, "care", "居家"])
+def test_ambiguous_service_type_is_not_reinterpreted(value):
     assert _canonical_service_mode(value) is None
+
+
+@pytest.mark.parametrize("value", ["週休1日", "週休一日"])
+def test_legacy_weekly_one_is_canonicalized_to_rest_sunday(value):
+    assert _canonical_service_mode(value) == "休周日"
+
+
+def test_staff_contract_allocation_preserves_selected_single_rest_weekday():
+    assert _rest_weekdays("休周六") == frozenset({5})
+    assert _rest_weekdays("休周日") == frozenset({6})
 
 
 @pytest.mark.parametrize(

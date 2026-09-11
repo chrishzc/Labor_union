@@ -311,7 +311,10 @@ def get_table_data(table_name: str) -> list[dict]:
                     rest_days = []
                     rest_items = rest_map.get(sid, [])
                     for rest_type in rest_items:
-                        if rest_type in ('週休一日', '週休1日'):
+                        if rest_type == '休周六':
+                            if 'Saturday' not in rest_days:
+                                rest_days.append('Saturday')
+                        elif rest_type in ('休周日', '週休一日', '週休1日'):
                             if 'Sunday' not in rest_days:
                                 rest_days.append('Sunday')
                         elif rest_type in ('週休二日', '週休2日'):
@@ -643,7 +646,7 @@ def get_order_details() -> list[dict]:
                 r['govt_claim_date'] = to_str_date(r.get('govt_claim_date'))
 
                 r['custom_leave_dates'] = r.get('custom_leave_dates') or ""
-                r['service_mode'] = r.get('service_mode') or "週休1日"
+                r['service_mode'] = r.get('service_mode') or "休周日"
                 r['service_hours_per_day'] = safe_int(r.get('service_hours_per_day', 9))
                 days = safe_int(r.get('service_days', 20))
                 hrs = safe_int(r.get('service_hours_per_day', 9))
@@ -831,7 +834,7 @@ def get_order_matches(case_no: str) -> list[dict]:
 def calculate_attendance_schedule(
     actual_start_date, 
     target_service_days: int, 
-    service_mode: str = '週休1日', 
+    service_mode: str = '休周日',
     custom_rest_weekdays: list = None,
     custom_leave_dates: set = None,
     custom_work_dates: set = None,
@@ -891,8 +894,10 @@ def calculate_attendance_schedule(
     if custom_rest_weekdays is not None:
         rest_weekdays = set(custom_rest_weekdays)
     else:
-        if service_mode == '週休1日':
-            rest_weekdays = {6}       # 預設週日 (Sunday == 6)
+        if service_mode == '休周六':
+            rest_weekdays = {5}       # 週六 (Saturday == 5)
+        elif service_mode in ('休周日', '週休1日', '週休一日'):
+            rest_weekdays = {6}       # 週日 (Sunday == 6); legacy 週休1日同義
         elif service_mode == '週休2日':
             rest_weekdays = {5, 6}    # 預設週六、週日 (Saturday == 5, Sunday == 6)
         else:

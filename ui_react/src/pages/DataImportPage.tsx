@@ -110,8 +110,8 @@ function hcmReviewGuidance(row: HcmWorkbookRowOutcome): HcmReviewGuidance {
 
   if (row.issue_codes.some((code) => code.startsWith('hcm_identity:'))) {
     return {
-      message: '需核對欄位：查詢序號(案件編號)、姓名、IP位址。系統無法唯一確認這筆資料與既有客戶的身分關聯。',
-      nextStep: '請確認這三個欄位屬於同一人，必要時修正原始工作簿後重新預覽。',
+      message: '案件已依查詢序號(案件編號)匯入；姓名或 IP 位址與既有資料相同，不會合併或阻擋新案件。',
+      nextStep: '這可能是同一人再次申請或不同人共用網路；請由承辦人員視需要複核。',
     };
   }
 
@@ -151,8 +151,8 @@ function hcmReviewGuidance(row: HcmWorkbookRowOutcome): HcmReviewGuidance {
         nextStep: '請核對身分類別；若原始資料正確，請修正系統付款規則後重新預覽。',
       },
       hcm_bootstrap_deposit_due_after_service_start: {
-        message: '報名時間距預計服務日期不足 3 天；依目前規則計算的訂金期限會晚於開工日。',
-        nextStep: '原始資料不一定有錯，請確認是否應以專用流程處理急件，或調整付款規則後重新預覽。',
+        message: '這是舊版付款規則留下的結果；目前急件會把訂金期限提前到預計服務日期，不再阻擋建案。',
+        nextStep: '請用原始工作簿重新預覽；若仍被阻擋，再核對其他建案規則。',
       },
       hcm_bootstrap_payment_start_mismatch: {
         message: '系統算出的第一期付款日與預計服務日期不一致。',
@@ -173,7 +173,7 @@ function hcmReviewGuidance(row: HcmWorkbookRowOutcome): HcmReviewGuidance {
     };
     if (reasonCode && bootstrapGuidance[reasonCode]) return bootstrapGuidance[reasonCode];
     return {
-      message: '這筆來源資料通過基本欄位檢查，但被系統建案規則擋下；常見原因是薪資費率未生效、報名距開工不足 3 天，或既有初始化資料不一致。',
+      message: '這筆來源資料通過基本欄位檢查，但被系統建案規則擋下；常見原因是薪資費率未生效或既有初始化資料不一致。',
       nextStep: '原始工作簿不一定有錯，請先核對薪資費率、付款期限與既有案件狀態後再重新預覽。',
     };
   }

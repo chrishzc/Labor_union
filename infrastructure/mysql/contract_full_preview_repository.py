@@ -24,7 +24,13 @@ from subsystems.contract_signing.full_contract_preview import (
     projection_fingerprint,
 )
 
-_CANONICAL_SERVICE_MODES = frozenset({"週休1日", "週休2日", "連續服務"})
+_CANONICAL_SERVICE_MODES = frozenset({"休周六", "休周日", "週休2日", "連續服務"})
+_LEGACY_SERVICE_MODE_ALIASES = {
+    "週休1日": "休周日",
+    "週休一日": "休周日",
+    "週休二日": "週休2日",
+    "周休二日": "週休2日",
+}
 
 
 class MySqlFullContractProjectionRepository:
@@ -633,7 +639,10 @@ def _stage_fact_key(stage: str, suffix: str) -> str:
 
 
 def _canonical_service_mode(value: object) -> str | None:
-    return value if isinstance(value, str) and value in _CANONICAL_SERVICE_MODES else None
+    if not isinstance(value, str):
+        return None
+    canonical = _LEGACY_SERVICE_MODE_ALIASES.get(value, value)
+    return canonical if canonical in _CANONICAL_SERVICE_MODES else None
 
 
 def _special_holidays_text(value: object) -> str | None:
