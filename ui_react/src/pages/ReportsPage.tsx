@@ -94,15 +94,6 @@ const SubsidyPartitionsView: React.FC<{
   </section>)}
 </>;
 
-const DataQualityIssues: React.FC<{ issues: WeeklyView['dataQualityIssues'] }> = ({ issues }) => (
-  issues.length === 0 ? null : <aside className="reports-quality" aria-label="資料品質待補正">
-    <h3>資料品質待補正</h3>
-    <ul>{issues.map((issue) => <li key={`${issue.code}-${issue.field}`}>
-      <strong>{issue.message}</strong><span>{issue.field}｜{issue.row_count} 筆｜{issue.code}</span>
-    </li>)}</ul>
-  </aside>
-);
-
 const WeeklyCasesView: React.FC<{ report: WeeklyView }> = ({ report }) => <>
   <section className="reports-weekly-metrics" aria-label="每週推廣與詢問數值">
     {report.weeklyMetrics.map((metric) => <article key={metric.week_start_date}>
@@ -121,16 +112,15 @@ const WeeklyCasesView: React.FC<{ report: WeeklyView }> = ({ report }) => <>
     <article><span>已成立訂單</span><strong>{displayWeeklyMetric(report.summary.order_established_count)}</strong></article>
     <article><span>資料不完整</span><strong>{displayWeeklyMetric(report.summary.incomplete_count)}</strong></article>
   </section>
-  <DataQualityIssues issues={report.dataQualityIssues} />
   {report.caseRows.length === 0 ? <div className="reports-state">此期間沒有案件受理資料。</div> : <div className="reports-table-container" tabIndex={0} role="region" aria-label="案件受理資料，可左右捲動">
     <table className="reports-table">
-      <thead><tr><th>案件</th><th>申請人</th><th>申請日</th><th>身分</th><th>審核</th><th>訂單狀態</th><th>天數／每日時數</th><th>預計服務期間</th><th>區域</th><th>資料品質</th></tr></thead>
+      <thead><tr><th>案件</th><th>申請人</th><th>申請日</th><th>身分</th><th>審核</th><th>訂單狀態</th><th>天數／每日時數</th><th>預計服務期間</th><th>區域</th></tr></thead>
       <tbody>{report.caseRows.map((row) => <tr key={row.case_no}>
         <td>{row.case_no}</td><td>{row.applicant_name}</td><td>{displayWeeklyValue(row.application_date)}</td>
         <td>{displayWeeklyValue(row.identity_status)}</td><td>{row.reviewLabel}</td><td>{displayWeeklyValue(row.order_status)}</td>
         <td>{displayWeeklyValue(row.service_days)}／{displayWeeklyValue(row.service_hours_per_day)}</td>
         <td>{displayWeeklyValue(row.planned_start_date)}～{displayWeeklyValue(row.planned_end_date)}</td>
-        <td>{displayWeeklyValue(row.district)}</td><td>{row.data_quality_codes.length ? row.data_quality_codes.join('、') : '—'}</td>
+        <td>{displayWeeklyValue(row.district)}</td>
       </tr>)}</tbody>
     </table>
   </div>}
