@@ -135,7 +135,20 @@ def _fetch_established_cases(
                        COALESCE(o.actual_end_date, o.end_date) AS actual_end_date,
                        o.service_days, o.service_hours_per_day,
                        c.name AS employer_name, c.address AS employer_address,
-                       s.name AS staff_name, br.survey_details
+                       COALESCE(
+                           s.name,
+                           (
+                               SELECT assigned_staff.name
+                               FROM case_staff_assignments csa
+                               JOIN staff assigned_staff ON assigned_staff.id = csa.staff_id
+                               WHERE csa.case_no = o.case_no
+                                 AND csa.status IN ('planned', 'active', 'completed')
+                               ORDER BY csa.assignment_sequence DESC
+                               LIMIT 1
+                           ),
+                           ''
+                       ) AS staff_name,
+                       br.survey_details
                 FROM orders o
                 JOIN clients c ON c.id = o.client_id
                 LEFT JOIN staff s ON s.id = o.staff_id
