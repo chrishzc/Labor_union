@@ -45,8 +45,16 @@ describe('Client registry owner editing', () => {
     fireEvent.change(phone, { target: { value: '0933333333' } });
     fireEvent.click(within(profile).getByRole('button', { name: '預覽變更' }));
     await waitFor(() => expect(mocks.preview).toHaveBeenCalledWith('CASE-001', 'profile', { phone: '0933333333' }, 2));
-    fireEvent.change(within(profile).getByLabelText('異動原因'), { target: { value: '電話核對' } });
-    fireEvent.click(within(profile).getByRole('button', { name: '確認儲存' }));
+
+    const reason = within(profile).getByLabelText(/異動原因/);
+    const save = within(profile).getByRole('button', { name: '確認儲存' });
+    expect(reason).toBeRequired();
+    expect(save).toBeDisabled();
+    expect(within(profile).getByText('請填寫異動原因後即可確認儲存。')).toBeInTheDocument();
+
+    fireEvent.change(reason, { target: { value: '電話核對' } });
+    expect(save).toBeEnabled();
+    fireEvent.click(save);
     await waitFor(() => expect(mocks.apply).toHaveBeenCalledTimes(1));
     expect(mocks.apply.mock.calls[0][6]).toMatch(/^client-profile-/);
     await screen.findByText('客戶主檔已儲存。');
