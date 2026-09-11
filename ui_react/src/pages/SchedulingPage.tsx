@@ -568,7 +568,7 @@ function HolidayPolicyWorkspace() {
               設為預設雙薪（200% 薪資計算）
             </label>
 
-            <label style={{ display: 'grid', gap: '6px', fontSize: '0.84rem', fontWeight: 700, color: '#9a3412' }}>
+            <label style={{ display: 'grid', gap: '6px', fontSize: '0.84rem', fontWeight: 700, color: '#57423b' }}>
               變更原因與審核註記
               <textarea
                 aria-label="套用原因"
