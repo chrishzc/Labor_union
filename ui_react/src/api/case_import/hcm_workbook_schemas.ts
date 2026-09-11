@@ -50,6 +50,7 @@ export const HcmWorkbookRowOutcomeSchema = z
     problem_fields: z.array(z.string()),
     issue_codes: z.array(z.string()),
     referral_occurrence_identities: z.array(z.string()),
+    reason_codes: z.array(z.string()).optional(),
   })
   .strict();
 

@@ -491,12 +491,29 @@ def _import_row(
                 case_no,
                 errors,
             )
-        return _row_outcome(outcome, ordinal, str(case_no), errors, problem_identity, detailed)
+        return _row_outcome(
+            outcome,
+            ordinal,
+            str(case_no),
+            errors,
+            problem_identity,
+            detailed,
+            reason_codes=_case_import_reason_codes(error),
+        )
     except Exception:
         raise
 
 
-def _row_outcome(outcome, source_row, case_no, errors, problem_identity, detailed):
+def _row_outcome(
+    outcome,
+    source_row,
+    case_no,
+    errors,
+    problem_identity,
+    detailed,
+    *,
+    reason_codes=(),
+):
     if not detailed:
         return outcome
     return {
@@ -506,8 +523,35 @@ def _row_outcome(outcome, source_row, case_no, errors, problem_identity, detaile
         "problem_identity": problem_identity,
         "problem_fields": sorted(str(field) for field in errors),
         "issue_codes": list(_hcm_review_issue_codes(errors)) if errors else [],
+        "reason_codes": list(reason_codes),
         "referral_occurrence_identities": [],
     }
+
+
+_HCM_BOOTSTRAP_REASON_CODES = {
+    "No effective Payroll rate policy exists for the case.": "hcm_bootstrap_rate_policy_missing",
+    "The requested Payroll rate policy is not effective for the case.": "hcm_bootstrap_rate_policy_not_effective",
+    "client identity has no confirmed payroll policy mapping": "hcm_bootstrap_identity_policy_unmapped",
+    "planned service start date is required": "hcm_bootstrap_planned_start_missing",
+    "deposit service days exceed contracted service days": "hcm_bootstrap_deposit_days_exceed_service_days",
+    "deposit service days do not match identity policy": "hcm_bootstrap_deposit_days_identity_mismatch",
+    "deposit due date cannot follow service start": "hcm_bootstrap_deposit_due_after_service_start",
+    "first payment due date must equal planned start date": "hcm_bootstrap_payment_start_mismatch",
+    "second payment due date is formed after first settlement": "hcm_bootstrap_unexpected_second_payment",
+    "payroll policy kind does not match client identity": "hcm_bootstrap_payroll_policy_identity_mismatch",
+    "Existing bootstrap state is partial or conflicts with root facts.": "hcm_bootstrap_existing_state_conflict",
+}
+
+
+def _case_import_reason_codes(error):
+    if error.error.code != "case_import_bootstrap_blocked":
+        return ()
+    message = str(error.error.message)
+    if message.startswith("service days "):
+        return ("hcm_bootstrap_service_days_invalid",)
+    if message.startswith("service hours per day "):
+        return ("hcm_bootstrap_service_hours_invalid",)
+    return (_HCM_BOOTSTRAP_REASON_CODES.get(message, "hcm_bootstrap_rule_blocked"),)
 
 
 def _persist_hcm_review(

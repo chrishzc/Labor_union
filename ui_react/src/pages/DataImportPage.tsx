@@ -116,9 +116,65 @@ function hcmReviewGuidance(row: HcmWorkbookRowOutcome): HcmReviewGuidance {
   }
 
   if (row.issue_codes.some((code) => code === 'hcm_case_import:case_import_bootstrap_blocked')) {
+    const reasonCode = row.reason_codes?.[0];
+    const bootstrapGuidance: Record<string, HcmReviewGuidance> = {
+      hcm_bootstrap_rate_policy_missing: {
+        message: '原始工作簿資料可成立，但系統找不到符合此案件身分類別的薪資費率規則。',
+        nextStep: '請先在系統補齊適用的薪資費率規則，再重新預覽；不需要為此修改工作簿。',
+      },
+      hcm_bootstrap_rate_policy_not_effective: {
+        message: '原始工作簿資料可成立，但目前薪資費率規則不適用於這筆案件的預計服務日期。',
+        nextStep: '請先核對薪資費率規則的生效日期，再重新預覽；不需要為此修改工作簿。',
+      },
+      hcm_bootstrap_identity_policy_unmapped: {
+        message: '「身分類別」目前無法對應到系統的薪資與訂金規則。',
+        nextStep: '請核對工作簿的身分類別是否為系統支援值；若內容正確，請補齊系統規則後重新預覽。',
+      },
+      hcm_bootstrap_planned_start_missing: {
+        message: '缺少可用的「預計服務日期」，因此無法建立訂單。',
+        nextStep: '請補正工作簿的預計服務日期後重新預覽。',
+      },
+      hcm_bootstrap_service_days_invalid: {
+        message: '「希望服務天數」必須是大於 0 的整數，目前無法建立訂單。',
+        nextStep: '請修正工作簿的希望服務天數後重新預覽。',
+      },
+      hcm_bootstrap_service_hours_invalid: {
+        message: '「服務時間」換算出的每日服務時數無效，目前無法建立訂單。',
+        nextStep: '請修正工作簿的服務時間後重新預覽。',
+      },
+      hcm_bootstrap_deposit_days_exceed_service_days: {
+        message: '希望服務天數少於此身分類別所需的訂金服務天數，因此無法建立付款條件。',
+        nextStep: '請核對希望服務天數與身分類別；若原始資料正確，需調整系統付款規則後再重新預覽。',
+      },
+      hcm_bootstrap_deposit_days_identity_mismatch: {
+        message: '此案件的訂金天數與身分類別所套用的付款規則不一致。',
+        nextStep: '請核對身分類別；若原始資料正確，請修正系統付款規則後重新預覽。',
+      },
+      hcm_bootstrap_deposit_due_after_service_start: {
+        message: '報名時間距預計服務日期不足 3 天；依目前規則計算的訂金期限會晚於開工日。',
+        nextStep: '原始資料不一定有錯，請確認是否應以專用流程處理急件，或調整付款規則後重新預覽。',
+      },
+      hcm_bootstrap_payment_start_mismatch: {
+        message: '系統算出的第一期付款日與預計服務日期不一致。',
+        nextStep: '請先核對系統付款規則，再重新預覽；不需要為此修改工作簿。',
+      },
+      hcm_bootstrap_unexpected_second_payment: {
+        message: '這筆案件產生了匯入流程目前不接受的第二期付款日。',
+        nextStep: '請先核對系統付款規則，再重新預覽；不需要為此修改工作簿。',
+      },
+      hcm_bootstrap_payroll_policy_identity_mismatch: {
+        message: '系統找到的薪資費率規則與案件身分類別不一致。',
+        nextStep: '請先修正薪資費率規則的身分類別，再重新預覽；不需要為此修改工作簿。',
+      },
+      hcm_bootstrap_existing_state_conflict: {
+        message: '此案件已有部分訂單、付款、薪資或排班初始化資料，且彼此不一致，系統不會自動覆寫。',
+        nextStep: '請使用既有案件的專用更正流程處理，不要反覆修改或重傳工作簿。',
+      },
+    };
+    if (reasonCode && bootstrapGuidance[reasonCode]) return bootstrapGuidance[reasonCode];
     return {
-      message: '需核對欄位：服務時間、預計服務日期、希望服務天數、服務方式。這些資料目前無法組成可建立的訂單。',
-      nextStep: '請修正原始工作簿後重新預覽。',
+      message: '這筆來源資料通過基本欄位檢查，但被系統建案規則擋下；常見原因是薪資費率未生效、報名距開工不足 3 天，或既有初始化資料不一致。',
+      nextStep: '原始工作簿不一定有錯，請先核對薪資費率、付款期限與既有案件狀態後再重新預覽。',
     };
   }
 

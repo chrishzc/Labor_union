@@ -41,9 +41,6 @@ export function adaptHistoricalOrderWorkbookPreview(
   if (terminalReviewCount < 0 || terminalReviewCount > preview.review_required_count) {
     throw new HistoricalOrderWorkbookContractError('historical_order_row_outcomes_not_conserved', 'Historical Orders Preview主要結果計數不守恆。');
   }
-  if (preview.assignment_candidate_count + preview.evidence_only_pairing_count > preview.adopted_count) {
-    throw new HistoricalOrderWorkbookContractError('historical_order_pairing_counts_exceed_adopted', 'Historical Orders配對分類超過已認領筆數。');
-  }
   const statusTotal = Object.values(preview.status_counts).reduce((total, count) => total + count, 0);
   if (statusTotal !== preview.source_row_count) {
     throw new HistoricalOrderWorkbookContractError('historical_order_status_counts_not_conserved', 'Historical Orders狀態判定計數不守恆。');

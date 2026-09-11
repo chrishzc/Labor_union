@@ -17,11 +17,11 @@ describe('DataImport HCM receipt review', () => {
     vi.spyOn(hcmWorkbookPreviewClient, 'preview').mockResolvedValue(HCM_WORKBOOK_PREVIEW_FIXTURE);
     vi.spyOn(hcmWorkbookPreviewClient, 'apply').mockResolvedValue({
       source_content_digest: HCM_WORKBOOK_PREVIEW_FIXTURE.source_content_digest,
-      source_row_count: 3,
+      source_row_count: 4,
       inserted_count: 0,
       inserted_with_warning_count: 1,
       exact_replay_count: 0,
-      review_required_count: 2,
+      review_required_count: 3,
       failed_count: 0,
       skipped_existing_count: 0,
       replayed_workbook: false,
@@ -50,6 +50,15 @@ describe('DataImport HCM receipt review', () => {
         problem_identity: 'review-4',
         problem_fields: ['case_import'],
         issue_codes: ['hcm_case_import:case_import_bootstrap_blocked'],
+        reason_codes: ['hcm_bootstrap_deposit_due_after_service_start'],
+        referral_occurrence_identities: [],
+      }, {
+        source_row: 5,
+        case_no: '115000005',
+        outcome: 'review_required',
+        problem_identity: 'review-5',
+        problem_fields: ['case_import'],
+        issue_codes: ['hcm_case_import:case_import_bootstrap_blocked'],
         referral_occurrence_identities: [],
       }],
     });
@@ -69,7 +78,9 @@ describe('DataImport HCM receipt review', () => {
     expect(await screen.findByText('案件 115000002')).toBeInTheDocument();
     expect(screen.getByText('需修改欄位：行動電話（格式或內容不符合規則）。')).toBeInTheDocument();
     expect(screen.getByText('需核對欄位：查詢序號(案件編號)、姓名、IP位址。系統無法唯一確認這筆資料與既有客戶的身分關聯。')).toBeInTheDocument();
-    expect(screen.getByText('需核對欄位：服務時間、預計服務日期、希望服務天數、服務方式。這些資料目前無法組成可建立的訂單。')).toBeInTheDocument();
+    expect(screen.getByText('報名時間距預計服務日期不足 3 天；依目前規則計算的訂金期限會晚於開工日。')).toBeInTheDocument();
+    expect(screen.getByText('原始資料不一定有錯，請確認是否應以專用流程處理急件，或調整付款規則後重新預覽。')).toBeInTheDocument();
+    expect(screen.getByText(/常見原因是薪資費率未生效、報名距開工不足 3 天/)).toBeInTheDocument();
     expect(screen.queryByText(/case_import|hcm_identity/)).not.toBeInTheDocument();
     expect(screen.getByText(/既有案件跳過 0 筆（不覆寫既有案件與訂單資料）/)).toBeInTheDocument();
     expect(screen.queryByText(/前往異常審核/)).not.toBeInTheDocument();

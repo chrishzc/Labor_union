@@ -7,6 +7,7 @@ import { sessionClient } from '../api/auth/session_client';
 import { HISTORICAL_ORDER_WORKBOOK_APPLY_PATH, HISTORICAL_ORDER_WORKBOOK_PREVIEW_PATH, HISTORICAL_ORDER_WORKBOOK_TIMEOUT_MS, HistoricalOrderWorkbookSnapshot, applyHistoricalOrderWorkbook, previewHistoricalOrderWorkbook } from '../api/orders/historical_order_workbook/client';
 import { HistoricalOrderWorkbookApplyError, HistoricalOrderWorkbookPreviewError, HistoricalOrderWorkbookUnauthenticatedError } from '../api/orders/historical_order_workbook/errors';
 import { HistoricalOrderWorkbookPreviewSchema, HistoricalOrderWorkbookReceiptSchema } from '../api/orders/historical_order_workbook/schemas';
+import { adaptHistoricalOrderWorkbookPreview } from '../adapters/orders/historical_order_workbook_adapter';
 
 function setSession(): void {
   sessionClient.setSession('historical-order-preview-token', { id: 1, username: 'tester', display_name: '測試', role: 'operator', linked_line_user_id: null, capabilities: [], is_root: false, access_control_version: 1 });
@@ -27,6 +28,23 @@ describe('Historical Orders workbook Preview client', () => {
     const form = fetchMock.mock.calls[0]?.[1]?.body as FormData;
     expect(Array.from(form.keys())).toEqual(['workbook']);
     expect(HISTORICAL_ORDER_WORKBOOK_TIMEOUT_MS).toBe(120_000);
+  });
+
+  it('一筆已認領來源列可包含多個歷史月嫂配對', () => {
+    const preview = {
+      source_content_digest: 'a'.repeat(64), sheet_identity: 'b'.repeat(64), source_row_count: 1,
+      adopted_count: 1, unmatched_case_count: 0, review_required_count: 0, current_conflict_count: 0,
+      assignment_candidate_count: 2, evidence_only_pairing_count: 1, absent_order_cancellation_count: 0,
+      status_counts: { cancelled_0: 0, deposit_paid_1: 1, discussion_2: 0, invalid_or_blank: 0 },
+      result_counts: { not_adopted: 0, matching_pending_deposit: 0, historical_unserved: 1, historical_in_service: 0, historical_service_completed: 0 },
+      preview_fingerprint: 'c'.repeat(64), row_issues: [],
+    };
+
+    expect(adaptHistoricalOrderWorkbookPreview(preview)).toMatchObject({
+      adoptedCount: 1,
+      assignmentCandidateCount: 2,
+      evidenceOnlyPairingCount: 1,
+    });
   });
 
   it('Apply送出fingerprint form與冪等headers並回傳typed receipt', async () => {

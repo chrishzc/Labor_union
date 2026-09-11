@@ -67,6 +67,7 @@ class HcmWorkbookRowOutcome:
     problem_fields: tuple[str, ...]
     issue_codes: tuple[str, ...]
     referral_occurrence_identities: tuple[str, ...]
+    reason_codes: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -77,6 +78,7 @@ class HcmWorkbookRowOutcome:
             "problem_fields": list(self.problem_fields),
             "issue_codes": list(self.issue_codes),
             "referral_occurrence_identities": list(self.referral_occurrence_identities),
+            "reason_codes": list(self.reason_codes),
         }
 
 
@@ -348,6 +350,7 @@ def _row_outcome(value) -> HcmWorkbookRowOutcome:
         tuple(str(item) for item in value.get("problem_fields", ())),
         tuple(str(item) for item in value.get("issue_codes", ())),
         tuple(str(item) for item in value.get("referral_occurrence_identities", ())),
+        tuple(str(item) for item in value.get("reason_codes", ())),
     )
 
 

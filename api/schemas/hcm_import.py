@@ -37,6 +37,7 @@ class HcmWorkbookRowOutcomeView(BaseModel):
     problem_fields: list[str]
     issue_codes: list[str]
     referral_occurrence_identities: list[str]
+    reason_codes: list[str] = Field(default_factory=list)
 
 
 class HcmWorkbookReceiptView(BaseModel):
