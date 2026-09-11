@@ -8,6 +8,8 @@ import re
 from difflib import SequenceMatcher
 from typing import Callable
 
+from chromadb.errors import NotFoundError
+
 from domains.knowledge_retrieval.knowledge import (
     KnowledgeAnswer,
     KnowledgeAnswerUnsupported,
@@ -164,7 +166,10 @@ class ChromaKnowledgeGateway:
         }
         if name not in existing:
             return False
-        self._client().delete_collection(name)
+        try:
+            self._client().delete_collection(name)
+        except NotFoundError:
+            return False
         return True
 
     def persistence_bytes(self) -> int:

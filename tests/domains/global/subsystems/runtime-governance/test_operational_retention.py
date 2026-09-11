@@ -6,9 +6,12 @@ import os
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from chromadb.errors import NotFoundError
 
+from infrastructure.knowledge.chroma_gateway import ChromaKnowledgeGateway
 from infrastructure.runtime.operational_retention import (
     ManagedLogRetentionSource,
     MySqlKnowledgeRetentionSource,
@@ -110,6 +113,7 @@ class FakeCursor:
     def __init__(self, locked_row):
         self.locked_row = locked_row
         self.statements = []
+        self.executions = []
 
     def __enter__(self):
         return self
@@ -119,6 +123,7 @@ class FakeCursor:
 
     def execute(self, statement, parameters):
         self.statements.append(statement)
+        self.executions.append((statement, parameters))
 
     def fetchall(self):
         return (self.locked_row,) if self.locked_row is not None else ()
@@ -337,6 +342,47 @@ def test_mysql_source_deletes_request_graph_in_fk_order_and_checks_index_before_
     assert index_source._delete_one(_row_candidate("index", preview_row, 25)) is False
     assert chroma.deleted_versions == []
     assert index_connection.rollbacks == 1
+
+
+def test_mysql_source_removes_index_metadata_when_vector_collection_is_already_missing() -> None:
+    index_row = {
+        "id": 9,
+        "occurred_at_utc": NOW,
+        "state": "stale",
+        "receipt_version": 0,
+        "source_version": 0,
+        "job_version": 0,
+    }
+
+    class MissingOnDeleteClient:
+        def __init__(self) -> None:
+            self.delete_names = []
+
+        def list_collections(self):
+            return (SimpleNamespace(name="union_knowledge_v9"),)
+
+        def delete_collection(self, name: str) -> None:
+            self.delete_names.append(name)
+            raise NotFoundError("collection was already deleted")
+
+    connection = FakeConnection(index_row)
+    client = MissingOnDeleteClient()
+    gateway = ChromaKnowledgeGateway("ignored")
+    gateway._client = lambda: client
+    source = MySqlKnowledgeRetentionSource(
+        lambda: connection,
+        gateway,
+        high_water_bytes=None,
+        low_water_bytes=None,
+    )
+
+    assert source._delete_one(_row_candidate("index", index_row, 25)) is True
+    assert client.delete_names == ["union_knowledge_v9"]
+    assert (
+        "DELETE FROM knowledge_indexes WHERE index_version=%s",
+        ("9",),
+    ) in connection.fake_cursor.executions
+    assert connection.commits == 1
 
 
 def test_same_idempotency_key_replays_terminal_receipt_without_second_delete() -> None:
