@@ -395,7 +395,7 @@ export const AccountManagementPage: React.FC = () => {
                     <div><strong>帳號：</strong><code>{user.username}</code></div>
                     <div><strong>Root：</strong>{user.isRoot ? '是' : '否'}</div>
                   </div>
-                  <div className="account-card-actions">
+                  {user.isRoot ? <p>Root 帳號受保護；重設帳密、驗證器或撤銷登入須透過離線維運，不可在此停權。</p> : <div className="account-card-actions">
                     <button
                       type="button"
                       data-control-id="account.user.password-reset"
@@ -432,7 +432,7 @@ export const AccountManagementPage: React.FC = () => {
                     >
                       {user.enabled ? '🔒 停權' : '🔓 啟用'}
                     </button>
-                  </div>
+                  </div>}
                 </div>
               ))}
             </div>

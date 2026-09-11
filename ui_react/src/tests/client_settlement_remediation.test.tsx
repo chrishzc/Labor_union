@@ -74,8 +74,8 @@ describe('client settlement anomaly remediation', () => {
     const onResolved = vi.fn();
     render(<ClientSettlementRemediationWorkbench target={{ kind: 'refund', caseNo: 'CASE-1', accountVersion: 3 }} client={client} onResolved={onResolved} />);
     await waitFor(() => expect(screen.getByText(/第 1 筆｜一般退款/)).toBeInTheDocument());
-    expect(screen.getByText(/義務識別：refund:1/)).not.toBeVisible();
-    expect(screen.getByText(/來源資料列：11/)).not.toBeVisible();
+    expect(screen.queryByText(/義務識別：refund:1/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/來源資料列：11/)).not.toBeInTheDocument();
     const checkboxes = screen.getAllByRole('checkbox');
     fireEvent.click(checkboxes[0]); fireEvent.click(checkboxes[2]);
     fireEvent.change(screen.getByLabelText('人工核對理由'), { target: { value: '客戶以電話確認退款帳戶，已核對銀行流水' } });

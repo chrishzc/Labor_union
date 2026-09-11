@@ -348,7 +348,7 @@ export const GovernmentOverpaymentRecoveryWorkbench: React.FC<Props> = ({
       <div data-surface-id="government-overpayment-recovery-root-evidence">
         <div>目前狀態：<strong>{statusLabel(query.status)}</strong></div>
         <div>目前剩餘：<strong>{query.remaining_amount_ntd.toLocaleString('zh-TW')} 元</strong></div>
-        <details><summary>技術詳情與資料來源</summary><div>資料版本：{query.overpayment_version}</div><div>來源：{query.source_bank_fact_reference}／{query.source_transaction_reference}</div></details>
+
         {query.blockers.length > 0 && <div role="alert">阻擋原因：{query.blockers.map(blockerLabel).join('、')}</div>}
       </div>
 

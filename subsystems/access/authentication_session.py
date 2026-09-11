@@ -465,6 +465,73 @@ def recover_local_root_credentials(
         conn.close()
 
 
+def reset_local_root_mfa(
+    *, connection_factory: ConnectionFactory, target_database: str,
+    expected_account_id: int, expected_version: int, reason: str,
+) -> int:
+    """Offline local-test MFA recovery, preserving credentials and root identity."""
+    import os
+    import re
+
+    if os.getenv("APP_ENV", "").lower() not in {"development", "dev", "local", "test"}:
+        raise ValueError("local_root_recovery_environment_required")
+    if not re.fullmatch(r"lu_test_[a-z0-9_]+", target_database):
+        raise ValueError("local_root_recovery_target_required")
+    if not reason.strip() or expected_account_id <= 0:
+        raise ValueError("local_root_recovery_input_required")
+    # Fail before revoking the existing factor if enrollment cannot encrypt a new one.
+    totp_cipher_from_environment()
+    conn = connection_factory()
+    unit_of_work = AccessControlUnitOfWork(conn)
+    try:
+        unit_of_work.__enter__()
+        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+            cursor.execute("SELECT DATABASE() AS database_name")
+            if cursor.fetchone()["database_name"] != target_database:
+                raise ValueError("local_root_recovery_target_mismatch")
+            cursor.execute(
+                """SELECT u.id, u.access_control_version, u.enabled
+                FROM admin_root_account r JOIN admin_users u ON u.id=r.admin_user_id
+                WHERE r.singleton_key=1 FOR UPDATE"""
+            )
+            row = cursor.fetchone()
+            if not row or row["id"] != expected_account_id or not row["enabled"]:
+                raise ValueError("local_root_recovery_identity_mismatch")
+            if row["access_control_version"] != expected_version:
+                raise ValueError("admin_version_conflict")
+            cursor.execute("UPDATE admin_users SET access_control_version=access_control_version+1 WHERE id=%s", (expected_account_id,))
+            cursor.execute(
+                """UPDATE admin_totp_factors SET factor_state='revoked', revoked_at=UTC_TIMESTAMP(6)
+                WHERE admin_user_id=%s AND factor_state IN ('active','enrollment_pending')""",
+                (expected_account_id,),
+            )
+            cursor.execute(
+                "UPDATE admin_sessions SET revoked_at=COALESCE(revoked_at,UTC_TIMESTAMP(6)) WHERE admin_user_id=%s",
+                (expected_account_id,),
+            )
+            cursor.execute(
+                """UPDATE admin_totp_recovery_codes c JOIN admin_totp_factors f ON f.id=c.factor_id
+                SET c.consumed_at=COALESCE(c.consumed_at,UTC_TIMESTAMP(6)) WHERE f.admin_user_id=%s""",
+                (expected_account_id,),
+            )
+            for table in ("admin_password_login_challenges", "admin_mfa_enrollment_challenges"):
+                cursor.execute(
+                    f"UPDATE {table} SET consumed_at=COALESCE(consumed_at,UTC_TIMESTAMP(6)) WHERE admin_user_id=%s",
+                    (expected_account_id,),
+                )
+            _record_admin_audit_with_cursor(
+                cursor, principal=None, action="admin.account.mfa_reset", result_status=200,
+                details={"account_id": expected_account_id, "reason": reason.strip(), "source": "local_root_offline_recovery"},
+            )
+        unit_of_work.commit()
+        return expected_version + 1
+    except Exception:
+        unit_of_work.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 def list_account_center_users(*, connection_factory: ConnectionFactory) -> list[AdminPrincipal]:
     """Return account metadata only; encrypted factors and password hashes never leave storage."""
     conn = connection_factory()

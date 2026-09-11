@@ -175,17 +175,7 @@ export function HistoricalCompletionPanel({
           <button type="button" onClick={() => setAction({ kind: 'idle' })}>重新預覽</button>
         </p>
       )}
-      <details>
-        <summary>技術詳情與資料來源</summary>
-        <p>owner 版本 {projection.owner_versions.length} 項；Staff Payables source vector {projection.owner_source_versions.length} 項。</p>
-        {projection.active_alerts.map((alert) => (
-          <p key={`${alert.owner}:${alert.field_path}:${alert.code}:technical`}>
-            {alert.code}｜{alert.field_path}｜{alert.referral}｜{alert.message}
-          </p>
-        ))}
-        <p>source fingerprint：{projection.source_fingerprint}</p>
-        <p>projection fingerprint：{projection.projection_fingerprint}</p>
-      </details>
+
     </section>
   );
 }

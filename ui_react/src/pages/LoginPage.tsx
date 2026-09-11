@@ -3,6 +3,7 @@
  * @description 登入頁面元件，實作雙階段帳密挑戰與 TOTP 動態碼驗證流程、錯誤處理與機密安全防護。
  */
 import React, { useState } from 'react';
+import { QRCodeSVG } from 'qrcode.react';
 import './LoginPage.css';
 import { sessionClient } from '../api/auth/session_client';
 import {
@@ -186,6 +187,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   const [challengeToken, setChallengeToken] = useState<string | null>(null);
   const [challengeExpiresAt, setChallengeExpiresAt] = useState<string | null>(null);
   const [totpDigits, setTotpDigits] = useState(['', '', '', '', '', '']);
+  const [provisioningUri, setProvisioningUri] = useState<string | null>(null);
+  const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
 
   const handleStage1Submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -216,6 +219,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       setChallengeId(challenge.challenge_id);
       setChallengeToken(challenge.challenge_token);
       setChallengeExpiresAt(challenge.expires_at);
+      setProvisioningUri(challenge.challenge_type === 'mfa_enrollment' ? challenge.provisioning_uri! : null);
+      setRecoveryCodes([]);
       // Immediately wipe password from state
       setPassword('');
       setAuthStage('stage2');
@@ -282,6 +287,16 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
 
     setIsLoading(true);
     try {
+      if (provisioningUri) {
+        const result = await sessionClient.verifyEnrollment(challengeId, challengeToken, fullCode);
+        setRecoveryCodes(result.recovery_codes);
+        setProvisioningUri(null);
+        setChallengeId(null);
+        setChallengeToken(null);
+        setChallengeExpiresAt(null);
+        setTotpDigits(['', '', '', '', '', '']);
+        return;
+      }
       await sessionClient.verifyPasswordChallenge(
         challengeId,
         challengeToken,
@@ -315,6 +330,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   };
 
   const handleBackToStage1 = () => {
+    setProvisioningUri(null);
+    setRecoveryCodes([]);
     setErrorMessage(null);
     setChallengeId(null);
     setChallengeToken(null);
@@ -415,7 +432,15 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
         )}
 
         {/* Stage 2: TOTP 2FA Verification */}
-        {authStage === 'stage2' && (
+        {authStage === 'stage2' && recoveryCodes.length > 0 && (
+          <section aria-label="保存復原碼">
+            <h1 className="login-main-title">驗證器綁定完成</h1>
+            <p>請將以下一次性復原碼保存到安全位置，離開後不再顯示。不要分享給他人。</p>
+            <ul>{recoveryCodes.map(code => <li key={code}><code>{code}</code></li>)}</ul>
+            <button className="login-submit-btn" onClick={handleBackToStage1}>已保存復原碼，返回登入</button>
+          </section>
+        )}
+        {authStage === 'stage2' && recoveryCodes.length === 0 && (
           <>
             <div
               className="login-brand-badge"
@@ -425,7 +450,20 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
             >
               🛡️
             </div>
-            <h1 className="login-main-title">雙重身分驗證 (2FA)</h1>
+            <h1 className="login-main-title">{provisioningUri ? '綁定您的驗證器' : '雙重身分驗證 (2FA)'}</h1>
+            {provisioningUri && <section aria-label="驗證器設定">
+              <p>在手機驗證器選擇「新增帳戶／掃描 QR Code」，掃描下方圖片。</p>
+              <div className="login-enrollment-qr">
+                <QRCodeSVG value={provisioningUri} size={220} level="M" marginSize={4} title="驗證器綁定 QR Code" role="img" aria-label="驗證器綁定 QR Code" />
+              </div>
+              <p>帳戶名稱：{username}</p>
+              <details>
+              <summary>無法掃描？手動輸入設定金鑰</summary>
+              <p>在驗證器選擇手動新增，類型選擇「以時間為基準」。</p>
+              <label htmlFor="totp-setup-key">設定金鑰（請勿分享）</label>
+              <input id="totp-setup-key" className="login-text-input" readOnly value={new URL(provisioningUri).searchParams.get('secret') || ''} />
+              </details>
+            </section>}
             <p className="login-desc-subtitle">請開啟 Authenticator 隨身驗證器，輸入 6 位動態碼</p>
 
             {errorMessage && (
@@ -450,6 +488,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                   <input
                     key={idx}
                     id={`totp-${idx}`}
+                    aria-label={`驗證碼第 ${idx + 1} 位`}
                     className="totp-digit-box"
                     type="text"
                     maxLength={1}
@@ -462,7 +501,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
               </div>
 
               <button className="login-submit-btn" type="submit" disabled={isLoading}>
-                {isLoading ? '驗證中...' : '驗證並登入系統 (Verify & Login)'}
+                {isLoading ? '驗證中...' : provisioningUri ? '確認綁定驗證器' : '驗證並登入系統 (Verify & Login)'}
               </button>
 
               <button

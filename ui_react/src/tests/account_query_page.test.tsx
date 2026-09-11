@@ -21,6 +21,9 @@ describe('AccountManagementPage query slice', () => {
     render(<AccountManagementPage />);
     await waitFor(() => expect(screen.getByText(/根帳號/, { exact: false })).toBeInTheDocument());
     expect(accountDirectoryClient.query).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(/Root 帳號受保護/)).toBeVisible();
+    expect(screen.queryByRole('button', {name: '重設密碼'})).toBeNull();
+    expect(screen.queryByRole('button', {name: /強制登出|停權|重設 MFA/})).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /建立工作人員帳號/ }));
     expect(screen.getByRole('dialog', { name: '建立工作人員帳號' })).toBeVisible();
     expect(screen.getByRole('button', { name: '確認執行' })).toBeDisabled();
@@ -44,6 +47,7 @@ describe('AccountManagementPage query slice', () => {
   });
 
   it('confirms only the selected account operation and refreshes the directory', async () => {
+    vi.mocked(accountDirectoryClient.query).mockResolvedValue(ACCOUNT_DIRECTORY_FIXTURE.map(user => ({...user, is_root: false})));
     const revoke = vi.spyOn(accountCenterClient, 'revokeSessions').mockResolvedValue({
       operation: 'account-sessions-revoke', target_account_id: 1,
       resulting_access_control_version: 3, receipt_identity: 'a'.repeat(64), replayed: false,

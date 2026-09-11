@@ -12,11 +12,13 @@ import { staffDirectoryClient } from '../../../../../../../api/staff_directory/s
 import { clientReceiptQueryClient } from '../../../../../../../api/client_finance/client_receipt_query_client';
 import { staffPayablesQueryClient } from '../../../../../../../api/staff_payables/staff_payables_query_client';
 import { accountsPayableQueryClient } from '../../../../../../../api/accounts_payable/accounts_payable_query_client';
+import { accountsPayableExportClient } from '../../../../../../../api/accounts_payable/accounts_payable_export_client';
 import { financeImportBlockerMessage } from '../../../../../../../adapters/finance/finance_import_query_adapter';
 import { FinancePage } from '../../../../../../../pages/FinancePage';
 import { RECEIPT_RESPONSE, STAFF_PAYABLES_RESPONSE, ACCOUNTS_PAYABLE_RESPONSE } from '../../../../../../fixtures/finance/finance_query_contract_fixtures';
 
 describe('FinancePage query and guarded import presentation', () => {
+  afterEach(() => vi.unstubAllGlobals());
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.spyOn(ordersQueryClient, 'getOrderSummaries').mockResolvedValue({ items: [{ case_no: 'CASE-FIN-001', client_name: '去敏客戶', order_status: '服務中', staff_name: null, identity_status: null, start_date: null, end_date: null, actual_start_date: null, actual_end_date: null, service_days: null, total_employer_self_pay_payable: null }], next_cursor: null, etag: 'c'.repeat(64) });
@@ -30,6 +32,45 @@ describe('FinancePage query and guarded import presentation', () => {
     expect(financeImportBlockerMessage(['fingerprint_collision', 'future_blocker']))
       .toBe('存在可能重複的銀行交易、預覽資料仍有待確認項目');
     expect(financeImportBlockerMessage([])).toBe('預覽未通過，請重新檢查。');
+  });
+
+  it('shows full mock payment details and downloads through the authenticated export endpoint', async () => {
+    const data = ACCOUNTS_PAYABLE_RESPONSE.data;
+    vi.mocked(accountsPayableQueryClient.query).mockResolvedValue({ ...data, rows: data.rows.map(row => ({
+      ...row, bank_account: '000012345678', recipient_identity_card: 'MOCK-ID-001',
+    })) });
+    vi.spyOn(sessionClient, 'getToken').mockReturnValue('mock-download-token');
+    const fetchMock = vi.fn().mockResolvedValue(new Response(new Blob(['mock-xlsx-bytes']), {
+      headers: { 'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'content-disposition': 'attachment; filename="mock-payables.xlsx"' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const createUrl = vi.fn().mockReturnValue('blob:mock-payables');
+    vi.stubGlobal('URL', Object.assign(class extends URL {}, { createObjectURL: createUrl, revokeObjectURL: vi.fn() }));
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    render(<FinancePage />);
+    fireEvent.click(screen.getByRole('button', { name: '應付帳款' }));
+    expect(await screen.findByText(/000012345678/)).toBeInTheDocument();
+    expect(screen.getByText('MOCK-ID-001')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '下載應付帳款 Excel' }));
+    expect(await screen.findByText('已送出下載：mock-payables.xlsx')).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/accounts-payable/export?target_month='),
+      expect.objectContaining({ headers: { Authorization: 'Bearer mock-download-token' } }));
+    expect(createUrl).toHaveBeenCalledTimes(1);
+    expect(anchorClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects unauthenticated, failed archive, and non-workbook downloads', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    vi.spyOn(sessionClient, 'getToken').mockReturnValue(null);
+    await expect(accountsPayableExportClient.download('2026-09')).rejects.toMatchObject({ status: 401 });
+    expect(fetchMock).not.toHaveBeenCalled();
+    vi.mocked(sessionClient.getToken).mockReturnValue('mock-token');
+    fetchMock.mockResolvedValueOnce(new Response('', { status: 503 }));
+    await expect(accountsPayableExportClient.download('2026-09')).rejects.toMatchObject({ status: 503 });
+    fetchMock.mockResolvedValueOnce(new Response('{}', { headers: { 'content-type': 'application/json' } }));
+    await expect(accountsPayableExportClient.download('2026-09')).rejects.toThrow('下載格式不正確');
   });
 
   it('loads only the active tab and requires a selected workbook before import controls appear', async () => {
@@ -53,7 +94,8 @@ describe('FinancePage query and guarded import presentation', () => {
     await waitFor(() => expect(screen.getByText(/\*{8}9012/)).toBeInTheDocument());
     expect(accountsPayableQueryClient.query).toHaveBeenCalledTimes(1);
     expect(screen.queryByText('123456789012')).not.toBeInTheDocument();
-    expect(document.querySelector('[data-control-id="finance.accounts-payable.export-xlsx"]')).toBeNull();
+    expect(document.querySelector('[data-control-id="finance.accounts-payable.export-xlsx"]')).toBeEnabled();
+    expect(screen.queryByText(/敏感資料已遮罩|去敏保護啟用/)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '銀行流水匯入' }));
     expect(screen.getByText('上傳檔案 → 預覽 → 匯入完成')).toBeInTheDocument();
@@ -71,9 +113,9 @@ describe('FinancePage query and guarded import presentation', () => {
 
     render(<FinancePage />);
     await waitFor(() => expect(screen.getByText('OBL-C-1')).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: '跨訂單帳務' }));
+    fireEvent.click(screen.getByRole('button', { name: '補助與結案查詢' }));
 
-    expect(screen.getByRole('heading', { name: '跨訂單帳務查詢' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '補助與結案查詢' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /政府補助結算支線/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /完全結案彙總/ })).toBeInTheDocument();
   });

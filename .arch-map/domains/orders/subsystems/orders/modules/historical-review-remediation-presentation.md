@@ -5,7 +5,7 @@
 - subsystem: `orders`
 
 ## Responsibility
-呈現歷史訂單review更正的既有Query／Preview／Confirm／Apply與fresh owner readback。一般畫面只顯示案件、欄位衝突、檔案要求、業務處置與安全錯誤；版本、digest、fingerprint、receipt identity及issue code只保留在預設收合的技術詳情。不得改寫Orders review、remediation disposition或原警示解除predicate。
+呈現歷史訂單review更正的既有Query／Preview／Confirm／Apply與fresh owner readback。一般畫面只顯示案件、欄位衝突、檔案要求、業務處置與安全錯誤；版本、digest、fingerprint、receipt identity及issue code不在一般操作畫面顯示。不得改寫Orders review、remediation disposition或原警示解除predicate。
 
 ## Implementation
 - primary: `ui_react/src/components/HistoricalOrderReviewRemediationWorkbench.tsx`

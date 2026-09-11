@@ -102,14 +102,9 @@ export function HistoricalOperationalBaselineReadback({
       <span>目前作業基準</span>
       <span>{current === null ? '尚未設定' : `作業步驟 ${current.selected_step}`}</span>
     </div>
-    <details className="anomaly-recovery-technical-details">
-      <summary>技術詳情與資料來源</summary>
-      <div>Orders identity：<code>{baseline.order_identity}</code></div>
-      <div>Orders version：<code>{baseline.current_orders_version}</code></div>
-      <div>歷史來源：<code>{baseline.historical_provenance.source_event_identity}</code>（v{baseline.historical_provenance.source_version}）</div>
-    </details>
+
     {current === null ? <div className="anomalies-detail-empty">尚未設定歷史案件作業基準。</div> : <div>
-      <h4>作業步驟投影</h4>
+      <h4>作業進度</h4>
       <ul aria-label="歷史案件作業步驟">
         {current.step_projection.map((step) => <li key={step.step}>作業步驟 {step.step}：{stepStateLabel(step.state)}</li>)}
       </ul>

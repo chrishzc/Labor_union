@@ -15,6 +15,7 @@ import { adaptClientReceiptQuery } from '../adapters/finance/client_receipt_quer
 import { staffPayablesQueryClient } from '../api/staff_payables/staff_payables_query_client';
 import { adaptStaffPayablesQuery } from '../adapters/finance/staff_payables_query_adapter';
 import { accountsPayableQueryClient } from '../api/accounts_payable/accounts_payable_query_client';
+import { accountsPayableExportClient } from '../api/accounts_payable/accounts_payable_export_client';
 import { adaptAccountsPayablePreview } from '../adapters/finance/accounts_payable_query_adapter';
 import { financeImportBlockerMessage } from '../adapters/finance/finance_import_query_adapter';
 import { FinanceWorkbookSnapshot, financeImportMutationClient, type FinanceImportBatchOutcome, type FinanceImportBatchPreview, type FinanceImportJobAccepted, type FinanceWorkbookIngestionReceipt } from '../api/finance_import/finance_import_mutation_client';
@@ -89,6 +90,7 @@ export const FinancePage: React.FC = () => {
   const [historicalStaffCase, setHistoricalStaffCase] = useState('');
   const [targetMonth, setTargetMonth] = useState(currentMonth);
   const [accountsPayable, setAccountsPayable] = useState<LoadState<ReturnType<typeof adaptAccountsPayablePreview>>>({ kind: 'idle' });
+  const [payableDownload, setPayableDownload] = useState<LoadState<string>>({ kind: 'idle' });
   const [financeWorkbook, setFinanceWorkbook] = useState<File | null>(null);
   const [ingestion, setIngestion] = useState<LoadState<FinanceWorkbookIngestionReceipt>>({ kind: 'idle' });
   const [batchPreview, setBatchPreview] = useState<LoadState<FinanceImportBatchPreview>>({ kind: 'idle' });
@@ -118,6 +120,32 @@ export const FinancePage: React.FC = () => {
   };
   const current = (key: string, sequence: number, controller: AbortController) =>
     sequences.current.get(key) === sequence && !controller.signal.aborted;
+  useEffect(() => {
+    controllers.current.get('payable-download')?.abort();
+    setPayableDownload({ kind: 'idle' });
+  }, [targetMonth, activeTab]);
+
+  const downloadPayables = async () => {
+    const { controller, sequence } = start('payable-download');
+    setPayableDownload({ kind: 'loading' });
+    try {
+      const artifact = await accountsPayableExportClient.download(targetMonth, controller.signal);
+      if (!current('payable-download', sequence, controller)) return;
+      const url = URL.createObjectURL(artifact.blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = artifact.filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setPayableDownload({ kind: 'ready', data: artifact.filename });
+    } catch (error) {
+      if (current('payable-download', sequence, controller)) {
+        setPayableDownload({ kind: 'error', message: financeErrorMessage(error, '應付帳款下載失敗，請稍後再試。') });
+      }
+    }
+  };
   const schedule = (
     key: string,
     execute: (request: { controller: AbortController; sequence: number }) => void,
@@ -328,7 +356,7 @@ export const FinancePage: React.FC = () => {
           ['client-receipts', '客戶收款'],
           ['staff-payables', '月嫂應付款'],
           ['accounts-payable', '應付帳款'],
-          ['cross-order', '跨訂單帳務'],
+          ['cross-order', '補助與結案查詢'],
           ['finance-import', '銀行流水匯入'],
         ] as const).map(([id, label]) => (
           <button
@@ -479,7 +507,7 @@ export const FinancePage: React.FC = () => {
         <section className="finance-workspace" aria-labelledby="cross-order-finance-heading">
           <div className="finance-section-heading">
             <div>
-              <h2 id="cross-order-finance-heading">跨訂單帳務查詢</h2>
+              <h2 id="cross-order-finance-heading">補助與結案查詢</h2>
               <p>查詢政府補助結算與完全結案狀態；結果涵蓋各類訂單。</p>
             </div>
           </div>
@@ -613,7 +641,7 @@ export const FinancePage: React.FC = () => {
           <div className="finance-section-heading">
             <div>
               <h2>應付帳款預覽</h2>
-              <p>畫面只顯示遮罩後資料，不會顯示完整銀行帳號與身分證。</p>
+              <p>核對當月付款資料，下載 Excel 交給會計。下載時會保存一份相同檔案，不會執行付款。</p>
             </div>
           </div>
 
@@ -627,10 +655,15 @@ export const FinancePage: React.FC = () => {
                 onChange={(event) => setTargetMonth(event.target.value)}
               />
             </label>
-            <span className="finance-status-pill" style={{ marginLeft: 'auto' }}>
-              🛡️ 去敏保護啟用
-            </span>
+            <button type="button" className="finance-btn-primary" data-control-id="finance.accounts-payable.export-xlsx"
+              disabled={accountsPayable.kind !== 'ready' || payableDownload.kind === 'loading'}
+              onClick={() => void downloadPayables()}>
+              {payableDownload.kind === 'loading' ? '正在準備下載…' : '下載應付帳款 Excel'}
+            </button>
           </div>
+
+          {payableDownload.kind === 'error' && <div role="alert" className="finance-state error">{payableDownload.message}</div>}
+          {payableDownload.kind === 'ready' && <div role="status">已送出下載：{payableDownload.data}</div>}
 
           <StateMessage state={accountsPayable} empty="本月沒有應付帳款。" />
 
@@ -653,7 +686,6 @@ export const FinancePage: React.FC = () => {
 
               <div className="finance-meta">
                 <span>付款日 {accountsPayable.data.targetPaymentDate}｜{accountsPayable.data.rowCount}筆｜{accountsPayable.data.totalAmount}</span>
-                <span className="finance-badge finance-badge-paid">敏感資料已遮罩</span>
               </div>
 
               <table className="finance-table">
@@ -662,8 +694,8 @@ export const FinancePage: React.FC = () => {
                     <th>日期</th>
                     <th>類型</th>
                     <th>受款人</th>
-                    <th>銀行帳號（遮罩）</th>
-                    <th>身分資料（遮罩）</th>
+                    <th>銀行代號／帳號</th>
+                    <th>身分證字號</th>
                     <th>金額</th>
                     <th>案件</th>
                   </tr>

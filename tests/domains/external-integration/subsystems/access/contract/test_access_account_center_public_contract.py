@@ -84,6 +84,42 @@ def test_create_reset_and_bootstrap_password_minimum(length, accepted) -> None:
             hash_admin_password(password)
 
 
+@pytest.mark.parametrize("failure", [None, "encryption", "target", "version", "audit"])
+def test_local_root_mfa_reset_is_scoped_atomic_and_preserves_password(monkeypatch, failure):
+    monkeypatch.setenv("APP_ENV", "development")
+    conn = MagicMock()
+    factory = MagicMock(return_value=conn)
+    cursor = conn.cursor.return_value.__enter__.return_value
+    cursor.fetchone.side_effect = [
+        {"database_name": "wrong" if failure == "target" else "lu_test_recovery"},
+        {"id": 1, "enabled": 1, "access_control_version": 9 if failure == "version" else 2},
+    ]
+    monkeypatch.setattr(authentication, "totp_cipher_from_environment",
+                        MagicMock(side_effect=ValueError("no key") if failure == "encryption" else None))
+    monkeypatch.setattr(authentication, "_record_admin_audit_with_cursor",
+                        MagicMock(side_effect=RuntimeError("audit failed") if failure == "audit" else None))
+    args = dict(connection_factory=factory, target_database="lu_test_recovery",
+                expected_account_id=1, expected_version=2, reason="authorized offline reset")
+    if failure:
+        with pytest.raises((ValueError, RuntimeError)):
+            authentication.reset_local_root_mfa(**args)
+        conn.commit.assert_not_called()
+        if failure == "encryption":
+            factory.assert_not_called()
+        else:
+            conn.rollback.assert_called_once()
+    else:
+        assert authentication.reset_local_root_mfa(**args) == 3
+        conn.commit.assert_called_once()
+        updates = [call.args for call in cursor.execute.call_args_list if call.args[0].startswith("UPDATE")]
+        assert len(updates) == 6
+        assert all(args[1] == (1,) for args in updates)
+        assert "password_hash" not in str(updates)
+        assert "username" not in str(updates)
+        assert "admin_totp_recovery_codes" in str(updates)
+        assert "admin_mfa_enrollment_challenges" in str(updates)
+
+
 def test_account_directory_projection_excludes_roles_and_personal_metadata(monkeypatch) -> None:
     monkeypatch.setattr(
         account_center,

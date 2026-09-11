@@ -110,8 +110,12 @@ def test_export_keeps_the_main_fixed_transfer_columns_for_client_subsidy_return(
     workbook = load_workbook(BytesIO(build_accounts_payable_workbook(rows)))
     values = list(workbook.active.values)
 
-    assert values[0] == (
-        "月份-銀行代碼-流水號", "銀行名稱", "客戶or服務人員姓名", "銀行帳號", "銀行代號(碼)", "金額", "身分證字號(匯款到永豐才要填)", "案件編號", "匯款日期",
+    assert workbook.active.title == "應付帳款表(每個月給會計)"
+    assert values[0] == (None,) * 10
+    assert values[1] == (
+        "月份-銀行代碼-流水號", "銀行名稱", "客戶or服務人員姓名", "銀行帳號", "銀行代號(7碼)", "金額", "身分證字號(匯款到永豐才要填)", None, "案件編號", "匯款日期",
     )
-    assert values[1][:-1] == ("8-633-1", "台新銀行", "林客戶", "998", "004", 120, None, "CASE-R")
-    assert values[1][-1].date() == date(2026, 8, 31)
+    assert values[2][:-1] == ("8-633-1", "台新銀行", "林客戶", "998", "004", 120, None, None, "CASE-R")
+    assert values[2][-1].date() == date(2026, 8, 31)
+    assert workbook.active['E3'].data_type == 's'
+    assert workbook.active['F3'].data_type == 'n'

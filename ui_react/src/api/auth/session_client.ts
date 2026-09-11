@@ -85,6 +85,11 @@ let inMemoryToken: string | null = getInitialToken();
 let inMemoryUser: AdminPublic | null = getInitialUser();
 
 export const sessionClient = {
+  async verifyEnrollment(challengeId: string, challengeToken: string, code: string) {
+    const body = z.object({challenge_token: z.string().min(32).max(256), totp_code: z.string().regex(/^[0-9]{6}$/)}).parse({challenge_token: challengeToken, totp_code: code});
+    const raw = await transport.post(`/api/v1/admin/auth/enrollment/challenges/${encodeURIComponent(challengeId)}/verify`, body);
+    return decodeEnvelope(z.object({recovery_codes: z.array(z.string().min(1)).min(1)}), raw);
+  },
   /**
    * 取得當前記憶體中的存取權杖 (Bearer Token)
    */

@@ -91,7 +91,7 @@ describe('CurrentAnomaliesPage', () => {
     expect(await screen.findByText('重新發送失敗的LINE通知')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '檢查重新發送' })).toBeEnabled();
     expect(screen.getAllByText('LINE 管理').length).toBeGreaterThan(0);
-    expect(screen.getByText(/資料版本：3/)).not.toBeVisible();
+    expect(screen.queryByText(/資料版本：3/)).not.toBeInTheDocument();
     expect(screen.queryByText(/owner facts|closed owner action|通用 resolve/)).not.toBeInTheDocument();
   });
 
@@ -109,9 +109,9 @@ describe('CurrentAnomaliesPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: /LINE-006/ }));
     expect(await screen.findByText('目前無法通知收件者')).toBeVisible();
     expect(screen.getByText('問題是否仍存在')).toBeVisible();
-    expect(screen.getByText('recipient_unavailable')).not.toBeVisible();
-    expect(screen.getByText('root_condition_active')).not.toBeVisible();
-    expect(screen.getByText('exact_replay_successor_missing')).not.toBeVisible();
+    expect(screen.queryByText('recipient_unavailable')).not.toBeInTheDocument();
+    expect(screen.queryByText('root_condition_active')).not.toBeInTheDocument();
+    expect(screen.queryByText('exact_replay_successor_missing')).not.toBeInTheDocument();
   });
 
   it('binds the current issue to the LINE owner Preview and confirmed Apply APIs', async () => {

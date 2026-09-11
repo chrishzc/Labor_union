@@ -14,6 +14,10 @@ function queryErrorMessage(_error: unknown): string {
   return '結案資料暫時無法取得，請重新開啟查詢。';
 }
 
+function pendingLabel(code: string): string {
+  return ({ client_settlement: '客戶帳務尚未結清', government_subsidy: '政府補助尚未完成' } as Record<string, string>)[code] ?? '尚有結案工作待確認';
+}
+
 export const OrderTerminalAggregateLane: FC<{ expanded?: boolean; onExpandedChange?: (open: boolean) => void }> = ({ expanded, onExpandedChange }) => {
   const [localOpen, setLocalOpen] = useState(false);
   const open = expanded ?? localOpen;
@@ -124,13 +128,7 @@ export const OrderTerminalAggregateLane: FC<{ expanded?: boolean; onExpandedChan
                       <div className="order-v2-notice blocked">
                         <strong>尚有 {incomplete.length} 項結案工作未完成</strong>
                         <a href="#order-workbench-v2">前往待辦看板查看案件進度</a>
-                        <details><summary>技術詳情與資料來源</summary>
-                        {incomplete.map((component) => (
-                          <span key={component.code}>
-                            {component.owner} · {component.code}：{component.reason ?? '未完成'}
-                          </span>
-                        ))}
-                        </details>
+                        <ul>{incomplete.map((component) => <li key={component.code}>{pendingLabel(component.code)}</li>)}</ul>
                       </div>
                     )}
                   </article>

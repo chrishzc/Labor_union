@@ -17,9 +17,19 @@ export type AdminPasswordChallengeRequest = z.infer<
 >;
 
 export const AdminPasswordChallengeResponseSchema = z.object({
+  challenge_type: z.enum(['factor_verification', 'mfa_enrollment']),
+  provisioning_uri: z.string().nullable().optional(),
   challenge_id: z.string().min(1),
   challenge_token: z.string().min(32).max(256),
   expires_at: z.string().datetime({ offset: true }),
+}).superRefine((value, ctx) => {
+  if (value.challenge_type !== 'mfa_enrollment') return;
+  try {
+    const uri = new URL(value.provisioning_uri || '');
+    if (uri.protocol !== 'otpauth:' || uri.hostname !== 'totp' || !/^[A-Z2-7]+=*$/i.test(uri.searchParams.get('secret') || '')) throw new Error();
+  } catch {
+    ctx.addIssue({code: 'custom', message: '缺少有效的驗證器綁定資料'});
+  }
 });
 export type AdminPasswordChallengeResponse = z.infer<
   typeof AdminPasswordChallengeResponseSchema

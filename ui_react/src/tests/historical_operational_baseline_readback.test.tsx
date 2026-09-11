@@ -25,11 +25,8 @@ describe('HistoricalOperationalBaselineReadback Orders owner', () => {
     expect(screen.getByText('作業步驟 1：歷史資料已確認')).toBeInTheDocument();
     expect(screen.getByText('作業步驟 2：歷史資料已確認')).toBeInTheDocument();
     expect(screen.getByText('作業步驟 3：目前進行中')).toBeInTheDocument();
-    const technical = screen.getByText('技術詳情與資料來源').closest('details');
-    expect(technical).not.toHaveAttribute('open');
-    expect(technical).toHaveTextContent('order:CASE-HOB-1');
-    expect(technical).toHaveTextContent('Orders version：4');
-    expect(technical).toHaveTextContent('historical-orders:source:1');
+    expect(screen.queryByText('技術詳情與資料來源')).not.toBeInTheDocument();
+    expect(screen.queryByText(/order:CASE-HOB-1|Orders version：4|historical-orders:source:1/)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /resolve|reconcile|排除|確認套用/i })).not.toBeInTheDocument();
     expect(Object.keys(client)).toEqual(['queryByCase']);
   });
@@ -71,7 +68,7 @@ describe('HistoricalOperationalBaselineReadback Orders owner', () => {
 
     await waitFor(() => expect(queryByCase).toHaveBeenCalledTimes(2));
     resolveFirst?.(HISTORICAL_OPERATIONAL_BASELINE_VIEW);
-    await waitFor(() => expect(screen.getByText('order:CASE-HOB-2')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('CASE-HOB-2')).toBeInTheDocument());
     expect(screen.getByLabelText('歷史案件作業基準')).toHaveAttribute('data-baseline-step', '3');
   });
 });

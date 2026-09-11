@@ -1,6 +1,6 @@
 /**
  * File: accounts_payable_query_adapter.ts
- * Description: 將masked Accounts Payable preview映射為唯讀會計清單。
+ * Description: 將授權的 Accounts Payable preview 原值映射為唯讀會計清單。
  */
 import type { AccountsPayablePreview } from '../../api/accounts_payable/accounts_payable_query_schemas';
 

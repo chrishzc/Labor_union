@@ -210,6 +210,18 @@
   color: #57423b;
 }
 
+.finance-filter-bar label {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.finance-filter-bar .finance-select,
+.finance-filter-bar .finance-input {
+  min-width: 0;
+  max-width: 100%;
+  flex: 1 1 auto;
+}
+
 .finance-input,
 .finance-select,
 .finance-section-heading select,

@@ -20,7 +20,7 @@ describe('Account Management mutation boundary', () => {
   });
 
   it('enables create and reset confirmation at 10 characters, but not 9', async () => {
-    vi.spyOn(accountDirectoryClient, 'query').mockResolvedValue(ACCOUNT_DIRECTORY_FIXTURE);
+    vi.spyOn(accountDirectoryClient, 'query').mockResolvedValue(ACCOUNT_DIRECTORY_FIXTURE.map(user => ({...user, is_root: false})));
     render(<AccountManagementPage />);
     await screen.findByText('root-user');
     fireEvent.click(screen.getByRole('button', { name: /建立工作人員帳號/ }));
@@ -41,7 +41,7 @@ describe('Account Management mutation boundary', () => {
   });
 
   it('opens target-specific forms without mutations and keeps confirmation disabled without a reason', async () => {
-    vi.spyOn(accountDirectoryClient, 'query').mockResolvedValue(ACCOUNT_DIRECTORY_FIXTURE);
+    vi.spyOn(accountDirectoryClient, 'query').mockResolvedValue(ACCOUNT_DIRECTORY_FIXTURE.map(user => ({...user, is_root: false})));
     const calls = [vi.spyOn(accountCenterClient, 'create'), vi.spyOn(accountCenterClient, 'resetPassword'), vi.spyOn(accountCenterClient, 'resetMfa'), vi.spyOn(accountCenterClient, 'revokeSessions'), vi.spyOn(accountCenterClient, 'setEnabled')];
     render(<AccountManagementPage />);
     await waitFor(() => expect(screen.getByText('root-user')).toBeInTheDocument());

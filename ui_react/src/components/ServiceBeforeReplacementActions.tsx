@@ -33,21 +33,33 @@ type UiState =
   | { type: 'error'; message: string };
 
 const scenarioLabels: Record<ServiceBeforeReplacementScenario, string> = {
-  'R-01': 'R-01 候選月嫂尚未定案',
-  'R-02': 'R-02 已接受媒合方案',
-  'R-03': 'R-03 已鎖檔／承諾／簽回',
-  'R-04': 'R-04 已指派但尚未服務',
-  'R-07': 'R-07 新一輪暫無候選人',
+  'R-01': '候選月嫂尚未定案',
+  'R-02': '客戶已接受推薦月嫂',
+  'R-03': '已保留檔期或簽署契約',
+  'R-04': '已安排月嫂，尚未開始服務',
+  'R-07': '重新媒合後仍沒有合適人選',
 };
 
 const stepLabels = {
-  step_2: '步驟 2：重新建立候選池',
-  step_3: '步驟 3：沿用已驗證候選池',
-  step_4: '步驟 4：沿用已驗證接受結果',
+  step_2: '重新挑選候選月嫂',
+  step_3: '從已確認的候選月嫂繼續媒合',
+  step_4: '依已確認的推薦結果繼續安排',
 } as const;
 
 function canonicalEvidence(value: string): string[] {
   return [...new Set(value.split('\n').map((item) => item.trim()).filter(Boolean))].sort();
+}
+
+function blockerLabel(code: string): string {
+  const labels: Record<string, string> = {
+    actual_service_exists: '已開始服務，請改由請假代班處理。',
+    replacement_actual_service_exists: '已開始服務，請改由請假代班處理。',
+    actual_service_proof_unavailable: '尚無法確認已服務日期，請先核對服務紀錄。',
+    replacement_successor_exists: '此筆更換已完成，請重新查詢案件。',
+    candidate_pool_reuse_unbound: '候選月嫂資料已變更，請重新確認人選。',
+    successor_round_stale: '媒合進度已更新，請重新查詢。',
+  };
+  return labels[code] ?? '更換所需資料尚未完整或已變更，請核對案件後重新查詢。';
 }
 
 function errorMessage(error: unknown, fallback: string): string {
@@ -111,7 +123,7 @@ export function ServiceBeforeReplacementActions({
       setUiState({ type: 'ready' });
     } catch (error) {
       if (operationGeneration.current !== generation || requestedCaseNo !== caseNo) return;
-      setUiState({ type: 'error', message: errorMessage(error, '無法取得服務前換人根事實。') });
+      setUiState({ type: 'error', message: errorMessage(error, '無法取得更換條件。') });
     }
   }, [caseNo]);
 
@@ -211,7 +223,7 @@ export function ServiceBeforeReplacementActions({
     if (uiState.type !== 'preview_ready' || !uiState.confirmed) return;
     const request = buildApplyRequest(uiState.preview);
     if (request === null) {
-      setUiState({ type: 'error', message: '後端預覽尚未提供可執行的完整版本與根事實。' });
+      setUiState({ type: 'error', message: '更換資料尚未完整，請重新查詢後再預覽。' });
       return;
     }
     await apply(request, createServiceBeforeReplacementCommandIdentity());
@@ -231,62 +243,41 @@ export function ServiceBeforeReplacementActions({
         {expanded ? '收合換人' : '換人'}
       </button>
 
-      {expanded && <div>
+      {expanded && <div style={{ display: 'grid', gap: '16px', maxWidth: '760px' }}>
         <header>
-          <h3 style={{ margin: 0 }}>服務前換人人工修復</h3>
-          <p style={{ margin: '4px 0 0' }}>案件 {caseNo}。修復只建立新版 successor，不會改寫舊月嫂歷史。</p>
+          <h3 style={{ margin: 0 }}>服務前更換月嫂</h3>
+          <p style={{ margin: '4px 0 0' }}>案件 {caseNo}。先確認更換影響；原月嫂的歷史紀錄會保留。</p>
         </header>
 
       <label style={{ display: 'grid', gap: '4px', maxWidth: '420px' }}>
-        異常情境
+        目前進度
         <select
           value={scenario}
           disabled={busy || uiState.type === 'outcome_unknown'}
           onChange={(event) => setScenario(event.target.value as ServiceBeforeReplacementScenario | '')}
         >
-          <option value="">請選擇 RPRE 異常情境</option>
+          <option value="">請選擇案件目前進度</option>
           {Object.entries(scenarioLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
         </select>
       </label>
 
-      {scenario === '' && <div role="status">請依異常事件的正式 binding 或實際案件狀況明確選擇情境；系統不會猜測 R-01。</div>}
+      {scenario === '' && <div role="status">請依案件實際進度選擇，接著查看可辦理的更換方式。</div>}
 
       {query && (
-        <section aria-label="服務前換人根事實" style={{ border: '1px solid #dec0b6', borderRadius: '10px', padding: '12px' }}>
+        <section aria-label="更換條件" style={{ border: '1px solid #dec0b6', borderRadius: '10px', padding: '12px' }}>
           <strong>{query.outcome === 'ready'
-            ? '可以建立換人 successor'
+            ? '可以辦理更換'
             : query.blockers.includes('replacement_successor_exists')
-              ? '換人 successor 已建立，不能重複套用'
+              ? '已辦理更換，請勿重複提交'
               : query.outcome === 'blocked'
                 ? '目前不可換人'
                 : '已有實際服務，必須改走請假代班'}</strong>
           <dl style={{ display: 'grid', gridTemplateColumns: 'max-content 1fr', gap: '4px 12px' }}>
-            <dt>後端決定的續跑位置</dt><dd>{stepLabels[query.resume_step]}</dd>
-            <dt>正式服務日</dt><dd>{query.actual_service_day_count} 日</dd>
-            <dt>受影響根事實</dt><dd>{query.impacted_roots.length} 筆</dd>
-            <dt>保留歷史</dt><dd>{query.retained_roots.length} 筆</dd>
+            <dt>更換後下一步</dt><dd>{stepLabels[query.resume_step]}</dd>
+            <dt>已服務天數</dt><dd>{query.actual_service_day_count} 日</dd>
           </dl>
-          <details>
-            <summary>技術詳情與資料來源</summary>
-            {query.actual_service_proof && (
-              <div>正式服務 proof：{query.actual_service_proof.source_identity}，版本 {query.actual_service_proof.source_version}</div>
-            )}
-            {query.candidate_pool_reuse_proof && (
-              <div>
-                候選池 reuse proof：{query.candidate_pool_reuse_proof.pool_identity}／{query.candidate_pool_reuse_proof.round_identity}；
-                coverage {query.candidate_pool_reuse_proof.coverage_version}、availability {query.candidate_pool_reuse_proof.availability_version}、willingness {query.candidate_pool_reuse_proof.willingness_version}；
-                generation {query.candidate_pool_reuse_proof.generation_version}、event {query.candidate_pool_reuse_proof.event_version}；
-                candidate {query.candidate_pool_reuse_proof.candidate_identity}；{query.candidate_pool_reuse_proof.fresh ? 'fresh' : 'not fresh'}；
-                fingerprint {query.candidate_pool_reuse_proof.fingerprint}
-              </div>
-            )}
-            <strong>受影響 roots</strong>
-            <ul>{query.impacted_roots.map((root) => <li key={root.root_id}>{root.kind}｜{root.root_id}</li>)}</ul>
-            <strong>保留 roots</strong>
-            <ul>{query.retained_roots.map((root) => <li key={root.root_id}>{root.kind}｜{root.root_id}</li>)}</ul>
-          </details>
           {query.actual_service_dates.length > 0 && <p>已服務日期：{query.actual_service_dates.join('、')}</p>}
-          {query.blockers.length > 0 && <ul>{query.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>}
+          {query.blockers.length > 0 && <ul>{[...new Set(query.blockers.map(blockerLabel))].map((message) => <li key={message}>{message}</li>)}</ul>}
           {query.outcome === 'substitution_referral' && (
             onSubstitutionReferral
               ? <button type="button" onClick={() => void onSubstitutionReferral(query)}>前往請假代班</button>
@@ -305,8 +296,9 @@ export function ServiceBeforeReplacementActions({
             }} />
           </label>
           <label style={{ display: 'grid', gap: '4px' }}>
-            證據（每行一筆）
-            <textarea value={evidenceText} disabled={busy} onChange={(event) => {
+            聯繫紀錄或更換依據
+            <span style={{ fontSize: '0.875rem' }}>請填寫實際聯繫日期、回覆內容或相關紀錄編號；多筆紀錄請分行填寫。</span>
+            <textarea aria-label="聯繫紀錄或更換依據" value={evidenceText} disabled={busy} onChange={(event) => {
               setEvidenceText(event.target.value);
               if (uiState.type === 'preview_ready') setUiState({ type: 'ready' });
             }} />
@@ -320,60 +312,9 @@ export function ServiceBeforeReplacementActions({
       {uiState.type === 'preview_ready' && (
         <section aria-label="服務前換人預覽" style={{ border: '1px solid #f2a27b', borderRadius: '10px', padding: '12px' }}>
           <strong>{uiState.preview.outcome === 'ready' ? '預覽完成，尚未寫入' : '此預覽不可套用'}</strong>
-          <p>後續處理位置：{stepLabels[uiState.preview.resume_step]}</p>
-          <p>將停用目前關聯 {uiState.preview.superseded_roots.length} 筆，建立新版正式資料 {uiState.preview.created_roots.length} 筆。</p>
-          <details>
-            <summary>技術詳情與資料來源</summary>
-            <dl style={{ display: 'grid', gridTemplateColumns: 'max-content 1fr', gap: '4px 12px' }}>
-            <dt>Prior generation／event／aggregate</dt>
-            <dd>{uiState.preview.prior_generation_identity ?? '—'}／{uiState.preview.prior_event_identity ?? '—'}／{uiState.preview.prior_aggregate_identity ?? '—'}</dd>
-            <dt>Replacement generation／event</dt>
-            <dd>{uiState.preview.replacement_generation_identity}／{uiState.preview.replacement_event_identity}</dd>
-            <dt>Successor round</dt><dd>{uiState.preview.successor_round_identity}</dd>
-            <dt>Generation version</dt><dd>expected {uiState.preview.expected_generation_version}／resulting {uiState.preview.resulting_generation_version}</dd>
-            <dt>Event version</dt><dd>expected {uiState.preview.expected_event_version}／resulting {uiState.preview.resulting_event_version}</dd>
-            <dt>Aggregate version</dt><dd>expected {uiState.preview.expected_aggregate_version}／resulting {uiState.preview.resulting_aggregate_version}</dd>
-            <dt>Projection kind</dt><dd>{uiState.preview.projection_kind}</dd>
-            <dt>Preview fingerprint</dt><dd>{uiState.preview.preview_fingerprint}</dd>
-            </dl>
-            {uiState.preview.actual_service_proof ? (
-            <div>
-              Actual-service proof：{uiState.preview.actual_service_proof.source_identity}，版本 {uiState.preview.actual_service_proof.source_version}；
-              日期 {uiState.preview.actual_service_proof.service_dates.join('、') || '無'}；fingerprint {uiState.preview.actual_service_proof.fingerprint}
-            </div>
-            ) : <div>Actual-service proof：無</div>}
-            {uiState.preview.candidate_pool_reuse_proof ? (
-            <div>
-              Candidate reuse proof：pool {uiState.preview.candidate_pool_reuse_proof.pool_identity}／round {uiState.preview.candidate_pool_reuse_proof.round_identity}／
-              successor {uiState.preview.candidate_pool_reuse_proof.successor_round_identity}／candidate {uiState.preview.candidate_pool_reuse_proof.candidate_identity}；
-              coverage {uiState.preview.candidate_pool_reuse_proof.coverage_version}／availability {uiState.preview.candidate_pool_reuse_proof.availability_version}／willingness {uiState.preview.candidate_pool_reuse_proof.willingness_version}／
-              generation {uiState.preview.candidate_pool_reuse_proof.generation_version}／event {uiState.preview.candidate_pool_reuse_proof.event_version}；
-              same-round {String(uiState.preview.candidate_pool_reuse_proof.same_round)}／coverage-valid {String(uiState.preview.candidate_pool_reuse_proof.coverage_valid)}／
-              availability-valid {String(uiState.preview.candidate_pool_reuse_proof.availability_valid)}／willingness-valid {String(uiState.preview.candidate_pool_reuse_proof.willingness_valid)}／
-              fresh {String(uiState.preview.candidate_pool_reuse_proof.fresh)}／accepted {String(uiState.preview.candidate_pool_reuse_proof.accepted_candidate)}；
-              fingerprint {uiState.preview.candidate_pool_reuse_proof.fingerprint}
-            </div>
-            ) : <div>Candidate reuse proof：無</div>}
-            {uiState.preview.successor_round ? (
-            <div>
-              Successor proof：{uiState.preview.successor_round.round_identity}／{uiState.preview.successor_round.generation_identity}／{uiState.preview.successor_round.event_identity}；
-              generation {uiState.preview.successor_round.generation_version}／event {uiState.preview.successor_round.event_version}／candidates {uiState.preview.successor_round.candidate_count}／
-              disposition {uiState.preview.successor_round.zero_candidate_disposition ?? '—'}；fingerprint {uiState.preview.successor_round.fingerprint}
-            </div>
-            ) : <div>Successor proof：無</div>}
-            <strong>完整 Preview roots</strong>
-            {([
-              ['retained', uiState.preview.retained_roots],
-              ['superseded', uiState.preview.superseded_roots],
-              ['created', uiState.preview.created_roots],
-            ] as const).map(([label, roots]) => (
-              <div key={label}>
-                <strong>{label} roots</strong>
-                <ul>{roots.map((root) => <li key={root.root_id}>{root.kind}｜{root.root_id}｜current {String(root.current)}｜caregiver-bound {String(root.caregiver_bound)}</li>)}</ul>
-              </div>
-            ))}
-          </details>
-          {uiState.preview.blockers.length > 0 && <ul>{uiState.preview.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>}
+          <p>更換後下一步：{stepLabels[uiState.preview.resume_step]}</p>
+          <p>確認後將依目前進度更新月嫂安排，原有紀錄保留供查閱。</p>
+          {uiState.preview.blockers.length > 0 && <ul>{[...new Set(uiState.preview.blockers.map(blockerLabel))].map((message) => <li key={message}>{message}</li>)}</ul>}
           {uiState.preview.outcome === 'ready' && (
             <>
               <label>
@@ -382,9 +323,9 @@ export function ServiceBeforeReplacementActions({
                   checked={uiState.confirmed}
                   onChange={(event) => setUiState({ ...uiState, confirmed: event.target.checked })}
                 />
-                我已核對案件、情境、原因、證據與影響範圍
+                我已確認更換原因、聯繫紀錄及影響
               </label>
-              <button type="button" disabled={!uiState.confirmed} onClick={() => void startApply()}>確認建立換人 successor</button>
+              <button type="button" disabled={!uiState.confirmed} onClick={() => void startApply()}>確認更換</button>
             </>
           )}
         </section>
@@ -405,39 +346,17 @@ export function ServiceBeforeReplacementActions({
       )}
       {uiState.type === 'observed' && (
         <div role="status">
-          <strong>換人處理已完成並回讀（{uiState.result.status === 'replayed' ? '已確認既有結果' : '已套用'}）</strong>
-          <div>正式資料已完成回讀；若要處理另一種情境，請重新選擇情境後查詢。</div>
-          <div>異常追蹤狀態需回到異常處理頁確認；本結果不自行推定異常已解除。</div>
-          <div>後端完成位置：{stepLabels[uiState.result.readback.resume_step]}</div>
-          <div>新版候選數：{uiState.result.readback.candidate_count}</div>
+          <strong>已完成更換（{uiState.result.status === 'replayed' ? '已確認既有結果' : '已套用'}）</strong>
+          <div>案件已更新。請依下方下一步繼續處理。</div>
+          <div>若本案另有待處理異常，請回到異常處理頁確認。</div>
+          <div>下一步：{stepLabels[uiState.result.readback.resume_step]}</div>
+          <div>可用候選月嫂：{uiState.result.readback.candidate_count}</div>
           {uiState.result.readback.zero_candidate_disposition === 'blocked_no_candidate' ? (
             <div role="status">
-              <strong>目前仍停在步驟 2：沒有可用候選</strong>
-              <div>這次只完成換人 lineage 記錄，不代表異常已解除，也不會復活舊月嫂。</div>
+              <strong>目前沒有可用候選月嫂</strong>
+              <div>更換已登記，仍需重新尋找合適月嫂；不會自動恢復原月嫂。</div>
             </div>
           ) : null}
-          <details>
-            <summary>技術詳情與資料來源</summary>
-            <div>Generation／event／aggregate：{uiState.result.readback.generation_version}／{uiState.result.readback.event_version}／{uiState.result.readback.aggregate_version}</div>
-            <div>Generation identity：{uiState.result.readback.generation_identity}</div>
-            <div>Event identity：{uiState.result.readback.event_identity}</div>
-            <div>Successor round：{uiState.result.readback.successor_round_identity}</div>
-            <div>Outbox：{uiState.result.readback.outbox_identity}</div>
-            <div>Readback complete：{uiState.result.readback.complete ? 'true' : 'false'}</div>
-            <div>Matching package lineage／event：{uiState.result.readback.matching_package_lineage_id ?? '—'}／{uiState.result.readback.matching_event_id ?? '—'}</div>
-            <div>Receipt：{uiState.result.receipt.receipt_identity}</div>
-            <div>Command fingerprint：{uiState.result.receipt.command_fingerprint}</div>
-            <div>Preview fingerprint：{uiState.result.receipt.preview_fingerprint}</div>
-            <strong>完整 receipt／readback roots 與 digests</strong>
-            {(['retained', 'superseded', 'created'] as const).map((kind, index) => (
-              <div key={kind}>
-                <strong>{kind}</strong>
-                <div>digest：{uiState.result.readback.root_set_digests[index]}</div>
-                <div>count：{uiState.result.readback.root_set_counts[index]}</div>
-                <ul>{uiState.result.readback[`${kind}_root_ids`].map((identity) => <li key={identity}>{identity}</li>)}</ul>
-              </div>
-            ))}
-          </details>
         </div>
       )}
       </div>}
