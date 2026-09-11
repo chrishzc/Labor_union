@@ -37,6 +37,8 @@ describe('ReportsPage query-only presentation', () => {
     render(<ReportsPage />);
     await screen.findByText('CASE-WEEK-001');
     expect(screen.getByRole('region', { name: '營運與補助報表查詢工作區' })).toBeInTheDocument();
+    expect(screen.queryByRole('complementary', { name: '資料品質待補正' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: '資料品質' })).not.toBeInTheDocument();
     expect(screen.getAllByText('未登錄／待補正').length).toBeGreaterThan(1);
     expect(screen.getAllByRole('tab')).toHaveLength(3);
 
