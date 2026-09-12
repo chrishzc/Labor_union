@@ -28,7 +28,7 @@ _ROW_FIELDS = frozenset({
     "imported_terms_complete",
     "terms_event_id", "terms_version", "terms_created_at", "candidate_pool_id", "candidate_pool_created_at",
     "candidate_pool_candidate_count", "candidate_pool_contacted_count", "candidate_pool_contacted_at",
-    "candidate_pool_replied_count", "candidate_pool_replied_at", "matching_plan_id", "matching_plan_version",
+    "candidate_pool_replied_count", "candidate_pool_willing_count", "candidate_pool_replied_at", "matching_plan_id", "matching_plan_version",
     "matching_plan_status", "matching_created_at", "matching_customer_decision", "matching_customer_decision_at",
     "willingness_contact_attempt_count", "willingness_count", "willingness_replied_count",
     "willingness_accepted_count", "willingness_contacted_at", "willingness_replied_at",
@@ -433,6 +433,44 @@ def _settlement_part(code: str, owner: str, identity: object, version: int | Non
     return SettlementProjection(code, "completed", _source(owner, str(identity), version), at, None)  # type: ignore[arg-type]
 
 
+def _candidate_contact_statuses(
+    candidate_pool_id: int | None,
+    candidate_count: int,
+    contacted_count: int,
+    replied_count: int,
+    willing_count: int,
+    contacted_at: datetime | None,
+) -> tuple[StageStatus, StageStatus, tuple[ProjectionNotice, ...]]:
+    contact_status: StageStatus = (
+        "completed"
+        if willing_count or (candidate_count and contacted_count >= candidate_count and contacted_at is not None)
+        else "in_progress"
+        if contacted_count or replied_count
+        else "not_started"
+        if candidate_pool_id is not None
+        else "unavailable"
+    )
+    if candidate_pool_id is None:
+        reply_status: StageStatus = "unavailable"
+    elif willing_count:
+        reply_status = "completed"
+    elif candidate_count and replied_count >= candidate_count:
+        reply_status = "blocked"
+    elif replied_count:
+        reply_status = "in_progress"
+    else:
+        reply_status = "not_started"
+    reply_blockers = (
+        (_notice(
+            "candidate_pool_no_willing_caregiver",
+            "候選池所有有效候選皆已回覆無意願，需補充候選人後再繼續。",
+        ),)
+        if reply_status == "blocked"
+        else ()
+    )
+    return contact_status, reply_status, reply_blockers
+
+
 def _steps(row: Mapping[str, object], case_no: str, stages: tuple[StageProjection, ...]) -> tuple[SopStepProjection, ...]:
     stage = {item.code: item for item in stages}
     plan_id = row["matching_plan_id"]
@@ -440,6 +478,7 @@ def _steps(row: Mapping[str, object], case_no: str, stages: tuple[StageProjectio
     candidate_count = _nonnegative_int(row, "candidate_pool_candidate_count")
     pool_contacted_count = _nonnegative_int(row, "candidate_pool_contacted_count")
     pool_replied_count = _nonnegative_int(row, "candidate_pool_replied_count")
+    pool_willing_count = _nonnegative_int(row, "candidate_pool_willing_count")
     pool_contacted_at = _optional_datetime(row, "candidate_pool_contacted_at")
     pool_replied_at = _optional_datetime(row, "candidate_pool_replied_at")
     contact_attempt_count = _nonnegative_int(row, "willingness_contact_attempt_count")
@@ -456,7 +495,8 @@ def _steps(row: Mapping[str, object], case_no: str, stages: tuple[StageProjectio
     client_signed_count = _nonnegative_int(row, "client_contract_signed_count")
     if (
         pool_contacted_count > candidate_count
-        or pool_replied_count > candidate_count
+        or pool_replied_count > pool_contacted_count
+        or pool_willing_count > pool_replied_count
         or contacted_count > contact_attempt_count
         or replied_count > contact_attempt_count
         or accepted_count > replied_count
@@ -468,23 +508,13 @@ def _steps(row: Mapping[str, object], case_no: str, stages: tuple[StageProjectio
         or client_signed_count > 1
     ):
         raise OrderStageProjectionContractError("SOP owner fact counts are inconsistent")
-    contact_status: StageStatus = (
-        "completed"
-        if candidate_count and pool_contacted_count >= candidate_count and pool_contacted_at is not None
-        else "in_progress"
-        if pool_contacted_count
-        else "not_started"
-        if candidate_pool_id is not None
-        else "unavailable"
-    )
-    reply_status: StageStatus = (
-        "completed"
-        if candidate_count and pool_replied_count >= candidate_count
-        else "in_progress"
-        if pool_replied_count
-        else "not_started"
-        if candidate_pool_id is not None
-        else "unavailable"
+    contact_status, reply_status, reply_blockers = _candidate_contact_statuses(
+        candidate_pool_id,
+        candidate_count,
+        pool_contacted_count,
+        pool_replied_count,
+        pool_willing_count,
+        pool_contacted_at,
     )
     pool_status: StageStatus = "completed" if candidate_count else "in_progress" if candidate_pool_id is not None else "not_started" if plan_id is None else "unavailable"
     recommendation_status: StageStatus = "completed" if resume_sent_count else "in_progress" if resume_attempt_count or accepted_count else "not_started" if plan_id is not None else "unavailable"
@@ -498,7 +528,7 @@ def _steps(row: Mapping[str, object], case_no: str, stages: tuple[StageProjectio
         _step_from_stage(1, "intake_validation", "進件報名與資料完整性驗證", stage["intake_terms"]),
         _standalone_step(2, "matching_pool", "媒合月嫂候選人加入意願池", "Assignments / Scheduling", pool_status, _optional_datetime(row, "matching_created_at"), "matching_plan_lineage_missing" if pool_status == "unavailable" else None),
         _standalone_step(3, "caregiver_line_delivery", "發送訂單資訊詢問月嫂意願（LINE 或人工確認）", "Assignments / LINE Delivery", contact_status, pool_contacted_at, "candidate_contact_pool_missing" if contact_status == "unavailable" else None),
-        _standalone_step(4, "caregiver_willingness_reply", "月嫂回傳接案意願", "Assignments / LINE", reply_status, pool_replied_at, "candidate_contact_pool_missing" if reply_status == "unavailable" else None),
+        _standalone_step(4, "caregiver_willingness_reply", "月嫂回傳接案意願", "Assignments / LINE", reply_status, pool_replied_at, "candidate_contact_pool_missing" if reply_status == "unavailable" else None, blockers=reply_blockers),
         _step_from_stage(5, "formal_recommendation", "寄送月嫂履歷給客戶確認", stage["client_review"]),
         _standalone_step(6, "external_signing_dispatch", "建立契約並送交外部簽署平台", "Contract Signing", dispatch_status, _optional_datetime(row, "external_signing_handoff_at"), "external_signing_handoff_missing" if dispatch_status == "unavailable" else None),
         _standalone_step(7, "external_signing_completion", "雙方完成外部簽署並回收最終 PDF", "Contract Signing / Orders", signing_status, _optional_datetime(row, "final_contract_completed_at"), "external_signing_final_document_missing" if signing_status == "unavailable" else None),
@@ -507,6 +537,8 @@ def _steps(row: Mapping[str, object], case_no: str, stages: tuple[StageProjectio
         _step_from_stage(10, "formal_service", "轉換正式排班與服務履約", stage["active_service"]),
         _step_from_stage(11, "settlement_close", "完工驗收、時數核對與尾款／薪資結清", stage["settlement_payout"]),
     )
+
+
 def _step_from_stage(ordinal: int, code: str, label: str, stage: StageProjection) -> SopStepProjection:
     return SopStepProjection(ordinal, code, label, stage.owner, stage.status, stage.occurred_at, stage.blockers, stage.warnings, stage.available_actions, stage.availability_reason)
 
