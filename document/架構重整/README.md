@@ -1,7 +1,8 @@
 # 後端分層架構重整規格
 
-> 快速入口：先閱讀 [00_開發者與Agent導覽.md](00_開發者與Agent導覽.md)，再依需求進入正式規格與
-> 對應 Work Package。本 README 說明文件權威與目錄分工；快速導覽不取代本文件定義的權威順序。
+> 快速入口：先閱讀 [00_開發者與Agent導覽.md](00_開發者與Agent導覽.md)，依任務需要定位正式規格。
+> 是否需要 Work Package 與最小交付，依 [Agent 任務分級與交付規範](00_Agent任務分級與交付規範.md) 判定。
+> 本 README 說明文件權威與目錄分工；快速導覽不取代本文件定義的權威順序。
 
 ## 目的
 
@@ -14,7 +15,7 @@
 source-review 待搬移文字並把 `30_Controlled_File_Storage_NAS正式規格.md` 納入 current formal baseline；
 `15B_20260909_MultiCaregiver_Admin_UI_Closeout裁決.md` 完成多月嫂管理端來源收斂並把
 `31_MultiCaregiver_Admin_UI正式規格.md` 納入 current formal baseline。
-後續 production code、pytest、schema、資料、外部平台與退役作業，必須以個別 Work Package、驗收證據與人工決策記錄追溯；不得把單一基線核准或 live 現況誤讀成所有後續變更的授權。
+後續 production code、pytest、schema、資料、外部平台與退役作業，依 [Agent 任務分級與交付規範](00_Agent任務分級與交付規範.md) 的 T0–T3 分級決定必要交付與追溯方式，不一律建立個別 Work Package。驗收與執行授權仍須對應 current task；不得把單一基線核准或 live 現況誤讀成所有後續變更的授權。
 
 2026-08-03 已把 `document/文件整併工作區` 中尚未收斂的月結、退款、
 LINE、管理權限、部署與治理語彙集中到當時的 `15`～`18`；`19`～`31` 是後續正式補充裁決。
@@ -92,11 +93,11 @@ LINE、管理權限、部署與治理語彙集中到當時的 `15`～`18`；`19`
 已完成且不再擁有 current contract 的歷史規格（08 ADAD／Legacy 邊界、11 架構總審矩陣、
 13 規格實作完成度矩陣）已自目前工作樹移除，需要時依 `04_已完成與上線封存/README.md`
 從 Git 歷史精準取回。
-現行語意由 `15`、較新的 formal amendment、個別 Domain／Global／正式 UI integration 規格、AGENTS.md 與 `03` 的 current evidence 承接。
+現行業務語意由 `15`、較新的 formal amendment 與個別 Domain／Global／正式 UI integration 規格承接；工作路由依 AGENTS.md 與任務分級規範，`03` 的 current evidence 只供驗證與追溯。
 
 ## 實作門檻
 
-每個 Domain 必須先具備：
+建立或修改 Domain 契約時，確認 current scope 所涉及的下列面向：
 
 - 明確的責任與 non-goals；
 - 根事實、不可變事件、目前投影及查詢模型的 SSOT；
@@ -106,4 +107,4 @@ LINE、管理權限、部署與治理語彙集中到當時的 `15`～`18`；`19`
 - production writer inventory 與 legacy 退出策略；
 - Module、Subsystem、Domain、Global 四層 pytest 責任。
 
-所有 Domain 完成後，才能依相依順序切出實作批次。程式與測試可在同一個已確認契約下平行撰寫；任一層測試失敗時，該層整體視為未完成並回到該層契約與實作共同修正。
+依既有且足夠的契約實作或局部修正時，只核對 current task 的 owner 與直接依賴，不以所有 Domain 重新完成規格檢核為前置條件。是否建立 Work Package、最小交付與驗證範圍依上述 T0–T3 規範，不另設整體重整 gate。程式與測試可在同一個已確認契約下平行撰寫；測試失敗時釐清受影響的契約或實作，只有實際 failure signal 或整合風險才擴大驗證。

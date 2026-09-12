@@ -2,11 +2,11 @@
 
 ## Current authority
 
-1. 使用者最新明確裁決。
-2. `AGENTS.md` 的工作範圍與停止條件。
-3. `.arch-map/index.md` 與最接近的 Module／Subsystem leaf。
-4. `01_規格基線/15_正式規格索引與裁決總表.md` 指向的 current 正式規格。
-5. Current source、schema、focused test 與實際 readback。
+使用者最新明確裁決優先。正式業務語意依 `01_規格基線/15_正式規格索引與裁決總表.md` 與較新的 formal amendment 指向的 current owner spec；既有業務規格、狀態機與欄位權威依正式規格保留來源追溯。
+
+`AGENTS.md` 與 [Agent 任務分級與交付規範](./00_Agent任務分級與交付規範.md) 決定工作範圍、停止條件與最小交付，不取代正式業務語意。
+
+`.arch-map/` 只提供導航 evidence，閱讀順序不是權威順序。Current source、schema、focused test 與實際 readback 只提供現況或驗證 evidence，不能反向創造需求或覆蓋正式規格。
 
 歷史計畫、舊 Work Package、封存 evidence、已刪檔名與 Git history 只供追溯，不是 current implementation authority。
 
@@ -17,7 +17,7 @@
 只有功能或業務描述時：
 
 1. 在 `.arch-map/` 做 filename-only bounded search。
-2. 讀最接近的 leaf。
+2. 命中唯一最接近的 leaf 時直接讀取；候選不明時才讀 `.arch-map/index.md`，沿單一 Domain → Subsystem → Module 最短路徑定位。
 3. leaf 已列出 owner、implementation、adapter 與 focused test 後停止。
 4. 只有路徑失效或缺少會改變實作決策的事實時，才在 owning directory 做一次 bounded source search。
 

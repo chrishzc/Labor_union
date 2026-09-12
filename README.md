@@ -6,16 +6,33 @@
 
 ## 本機啟動
 
-先建立 Python 與 React 依賴：
+以下命令從 repository root 執行。先以 Python 3.11 以上建立 `.venv`；已有環境時沿用，不重建。尚未建立時，Windows 執行 `python -m venv .venv`，macOS／Linux 執行 `python3 -m venv .venv`。
+
+開發／測試環境需安裝 `requirements.txt` 的 runtime pins，以及 `pyproject.toml` 既有的 `dev` 群組（含 `pytest`）。`--group` 需要 pip 25.1 以上；下列命令先滿足此前提，再一併安裝 runtime 與開發依賴。
+
+Windows 依賴安裝：
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m pip install "pip>=25.1"
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt --group dev
 cd ui_react
 npm ci
 cd ..
 ```
 
-Windows：
+macOS／Linux 依賴安裝：
+
+```bash
+./.venv/bin/python -m pip install "pip>=25.1"
+./.venv/bin/python -m pip install -r requirements.txt --group dev
+cd ui_react
+npm ci
+cd ..
+```
+
+只需執行應用而不跑 Python 測試時，可省略 `--group dev`；僅安裝 runtime pins 不包含測試依賴。Dependency group 的命令語意見 [pip 官方說明](https://pip.pypa.io/en/stable/user_guide/#dependency-groups)。
+
+Windows 啟動：
 
 ```powershell
 .\scripts\launchers\start_local_development.bat --dry-run
@@ -71,7 +88,7 @@ document/架構重整/   正式規格、仍有效決策與必要證據
 ## Agent 與開發者閱讀順序
 
 1. 先讀 `AGENTS.md`。
-2. 只有功能描述時，先從 `.arch-map/index.md` 定位最接近的 leaf。
+2. 已知精確 path／symbol 時直接開檔；只有功能描述時，先在 `.arch-map/` 做 filename-only bounded search，命中唯一 leaf 就直接讀取，候選不明時才讀 `.arch-map/index.md` 並沿單一最短路徑定位。
 3. leaf 已指出 owner、source、adapter 與 focused test 後停止擴大搜尋。
 4. 只有修改 owner、SSOT、public contract、Unit of Work、schema／migration 或跨 Domain invariant 時，才讀對應正式規格。
 5. 正式規格索引為 `document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md`。
