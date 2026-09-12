@@ -40,11 +40,21 @@ class LineDeliveryWorker:
         self._batch_size = batch_size
 
     def run_once(self) -> int:
-        claimed = self._claim()
-        for task in claimed:
+        # Preserve the existing claim contract's bounds for each cycle.
+        budget = ClaimLineDeliveryTasksQuery(
+            self._worker_identity, self._now(), self._batch_size
+        )
+        processed = 0
+        # Do not spend later tasks' leases waiting for earlier provider calls.
+        for _ in range(budget.batch_size):
+            claimed = self._claim()
+            if not claimed:
+                break
+            task, = claimed
+            processed += 1
+            validation_failure = self._manual_replay_validation_failure(task)
             if not self._still_sendable(task):
                 continue
-            validation_failure = self._manual_replay_validation_failure(task)
             outcome = (
                 LineProviderOutcome(
                     LineProviderOutcomeType.REJECTED,
@@ -55,13 +65,13 @@ class LineDeliveryWorker:
                 else self._send(task)
             )
             self._record(task, outcome)
-        return len(claimed)
+        return processed
 
     def _claim(self):
         query = ClaimLineDeliveryTasksQuery(
             self._worker_identity,
             self._now(),
-            self._batch_size,
+            1,
         )
         with self._unit_of_work_factory() as unit_of_work:
             tasks = unit_of_work.delivery_tasks.claim(query)
@@ -120,11 +130,8 @@ class LineDeliveryWorker:
             )
         if outcome.outcome_type is LineProviderOutcomeType.RATE_LIMITED:
             return self._send_push(task)
-        if (
-            outcome.outcome_type is LineProviderOutcomeType.UNAVAILABLE
-            and (outcome.error_code or "").startswith("line_http_")
-        ):
-            return self._send_push(task)
+        # A 5xx response can follow an accepted reply.  A push retry key cannot
+        # deduplicate that separate reply request, so do not fall back to push.
         if outcome.outcome_type in {
             LineProviderOutcomeType.TIMEOUT,
             LineProviderOutcomeType.UNAVAILABLE,
@@ -147,7 +154,7 @@ class LineDeliveryWorker:
             )
 
     def _still_sendable(self, task: LineDeliveryTaskSnapshot) -> bool:
-        """Re-read the leased task so cancellation cannot race through to LINE."""
+        """Confirm the current task still holds the same unexpired lease."""
         if task.lease is None:
             return False
         with self._unit_of_work_factory() as unit_of_work:
@@ -158,6 +165,8 @@ class LineDeliveryWorker:
             and current.lease is not None
             and current.lease.owner == task.lease.owner
             and current.lease.acquired_at == task.lease.acquired_at
+            and current.lease.expires_at == task.lease.expires_at
+            and self._now() < current.lease.expires_at
         )
 
     def _manual_replay_validation_failure(

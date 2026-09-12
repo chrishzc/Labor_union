@@ -5,6 +5,7 @@ Description: 保存 verified platform user、friend events 與 one-use LIFF iden
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 from uuid import uuid4
 
@@ -63,7 +64,8 @@ class MySqlLinePlatformUserRepository:
             snapshot = self._locked_or_initial(cursor, event.line_user_id)
             resulting = _friend_event_result(snapshot, event)
             self._persist_friend_event(cursor, snapshot, resulting, event)
-            _update_legacy_line_user_projection(cursor, event)
+            if snapshot.last_event_at is None or event.occurred_at >= snapshot.last_event_at:
+                _update_legacy_line_user_projection(cursor, event)
         return resulting
 
     def _locked_or_initial(self, cursor, line_user_id):
@@ -198,6 +200,9 @@ class MySqlLineIdentityFlowRepository:
 
 
 def _friend_event_result(snapshot, event):
+    if snapshot.last_event_at is not None and event.occurred_at < snapshot.last_event_at:
+        # Keep a receipt/version for the late event, without rewinding current facts.
+        return replace(snapshot, version=ExpectedVersion(snapshot.version.value + 1))
     followed_at = event.occurred_at if event.event_type is LineFriendEventType.FOLLOW else None
     return LinePlatformUserSnapshot(
         event.line_user_id,
