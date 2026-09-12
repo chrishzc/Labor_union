@@ -8,9 +8,12 @@ import { OrderFormalRecommendationPanel } from '../../../../../../../components/
 import type { OrderTerms } from '../../../../../../../api/orders/order_query_schemas';
 
 const mocks = vi.hoisted(() => ({ termsQuery: vi.fn(), termsPreview: vi.fn(), termsApply: vi.fn(), pool: vi.fn(), willingness: vi.fn(),
-  assignment: vi.fn(), active: vi.fn(), contact: vi.fn(), previewConfirmation: vi.fn(), sendConfirmation: vi.fn() }));
+  createWillingnessCommand: vi.fn(), assignment: vi.fn(), active: vi.fn(), contact: vi.fn(), previewConfirmation: vi.fn(), sendConfirmation: vi.fn() }));
 vi.mock('../../../../../../../api/orders/order_terms_mutation_client', () => ({ orderTermsMutationClient: { query: mocks.termsQuery, preview: mocks.termsPreview, apply: mocks.termsApply } }));
-vi.mock('../../../../../../../api/scheduling/candidate_contact_pool_client', () => ({ candidateContactPoolClient: { query: mocks.pool, recordWillingness: mocks.willingness } }));
+vi.mock('../../../../../../../api/scheduling/candidate_contact_pool_client', () => ({
+  createCandidateWillingnessCommand: mocks.createWillingnessCommand,
+  candidateContactPoolClient: { query: mocks.pool, recordWillingness: mocks.willingness },
+}));
 vi.mock('../../../../../../../api/orders/order_query_client', () => ({ ordersQueryClient: { getAssignmentPlan: mocks.assignment } }));
 vi.mock('../../../../../../../api/scheduling/waiting_deposit_lock_client', () => ({ waitingDepositLockClient: { queryPlan: mocks.active } }));
 vi.mock('../../../../../../../api/scheduling/matching_plan_communication_client', () => ({ matchingPlanCommunicationClient: {
@@ -30,9 +33,9 @@ function terms(updated = false): OrderTerms {
       service_hours_per_day: 8, requires_cooking: false, floor_fee_ntd: 0,
       service_time: { start_time: '09:00:00', end_time: '17:00:00', end_day_offset: 0 } } };
 }
-function pool(willingness: 'pending' | 'willing') {
+function pool(willingness: 'pending' | 'willing', latestEventId: number | null = null) {
   return { case_no: CASE, pool_id: 9, candidates: [{ id: 17, staff_id: 8, staff_name: '測試月嫂', status: 'active',
-    willingness, reason: null, information: { '1': null, '2': null } }] };
+    willingness, reason: null, latest_willingness_event_id: latestEventId, information: { '1': null, '2': null } }] };
 }
 function TermsHarness({ onObserved }: { onObserved: () => void }) {
   const [query, setQuery] = useState(terms());
@@ -54,7 +57,10 @@ describe('Beta 實際 owner 元件只在正式回讀成立後通知外層', () =
     mocks.termsApply.mockResolvedValue({ case_no: CASE, order_version: 3, scheduling_version: 4,
       client_finance_version: 5, payroll_version: 6, official_service_day_count: 3 });
     mocks.termsQuery.mockResolvedValue(terms(true));
-    mocks.willingness.mockResolvedValue({ status: 'willing', event_id: 18 });
+    mocks.createWillingnessCommand.mockImplementation((caseNo, candidateId, willingness, reason) => ({
+      caseNo, candidateId, willingness, reason, actor: 'operator-1', eventKey: 'owner-callback-willingness-key',
+    }));
+    mocks.willingness.mockResolvedValue({ status: 'recorded', event_id: 18 });
     mocks.assignment.mockResolvedValue({ case_no: CASE, assignments: [], scheduling_version: 4,
       scheduling_generation: 2, contracted_service_days: 3, service_hours_per_day: 8 });
     mocks.active.mockResolvedValue({ planId: 51, status: 'proposed', activeLockId: null, planVersion: 1, segments: [] });
@@ -87,12 +93,12 @@ describe('Beta 實際 owner 元件只在正式回讀成立後通知外層', () =
   });
 
   it('候選意願需同案件同 candidate 的實際 readback，才通知外層', async () => {
-    mocks.pool.mockResolvedValueOnce(pool('pending')).mockResolvedValue(pool('willing'));
+    mocks.pool.mockResolvedValueOnce(pool('pending')).mockResolvedValue(pool('willing', 18));
     const onObserved = vi.fn(); render(<OrderCandidateContactStatusPanel caseNo={CASE} onObserved={onObserved} />);
     await screen.findByText('測試月嫂');
     fireEvent.click(screen.getByText('記錄電話或現場詢問結果'));
     fireEvent.click(await screen.findByRole('button', { name: '記錄 測試月嫂 願意' }));
-    await screen.findByText('已記錄意願並重新確認。');
+    await screen.findByText('回覆已儲存。');
     expect(onObserved).toHaveBeenCalledTimes(1); expect(mocks.pool).toHaveBeenCalledTimes(2);
   });
 

@@ -49,6 +49,7 @@ class PaymentDestinationReceipt:
 class StoredPaymentDestinationReceipt:
     command_fingerprint: PreviewFingerprint
     receipt: PaymentDestinationReceipt
+    actor_id: str
 
 
 class PaymentDestinationRepository(Protocol):
@@ -91,8 +92,14 @@ class PaymentDestinationConfigurationApplication:
         with self._unit_of_work_factory() as unit:
             stored = self._repository.find_receipt(request.idempotency_key)
             if stored is not None:
-                if stored.command_fingerprint != command:
+                if stored.command_fingerprint != command or stored.actor_id != request.actor.actor_id:
                     raise PaymentDestinationConfigurationError("client_payment_destination_idempotency_conflict", "相同操作識別碼已用於不同內容。")
+                if (
+                    stored.receipt.account_display != candidate
+                    or stored.receipt.resulting_revision != request.expected_revision + 1
+                    or stored.receipt.preview_fingerprint != request.preview_fingerprint
+                ):
+                    raise PaymentDestinationConfigurationError("client_payment_destination_receipt_conflict", "收款帳戶收據與原操作內容不一致。")
                 return stored.receipt
             current = self._repository.load_current(lock=True)
             revision = 0 if current is None else current.revision
@@ -109,4 +116,3 @@ class PaymentDestinationConfigurationApplication:
 
 def _preview_fingerprint(account_display: str, expected_revision: int) -> PreviewFingerprint:
     return fingerprint_payload({"account_display": account_display, "expected_revision": expected_revision})
-

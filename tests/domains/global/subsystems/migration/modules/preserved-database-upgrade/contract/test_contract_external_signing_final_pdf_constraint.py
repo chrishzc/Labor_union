@@ -55,7 +55,7 @@ def test_release_is_hash_bound_and_in_the_current_release_chain_and_fresh_assemb
     assembly = json.loads((
         ROOT / "db/schema_assembly/labor_union_fresh_schema_v1.json"
     ).read_text(encoding="utf-8"))
-    assert assembly["active_bootstrap"][-1].endswith(ARTIFACT)
+    assert any(path.endswith(ARTIFACT) for path in assembly["active_bootstrap"])
 
 
 def test_released_descriptor_matches_the_canonical_successor() -> None:
@@ -97,6 +97,22 @@ def test_only_the_released_predecessor_or_successor_is_accepted() -> None:
     assert migration.local_additive_descriptor_state(
         _snapshot("commitment_id IS NOT NULL"), canonical, ARTIFACT
     ) == "drift"
+
+
+def test_missing_final_pdf_table_is_absent_but_missing_check_is_partial() -> None:
+    canonical = migration._canonical_artifact_descriptor(ARTIFACT)
+
+    assert migration._contract_external_signing_final_pdf_constraint_state(
+        {"columns": [], "constraints": [], "show_create_tables": {}}, canonical
+    ) == "absent"
+    assert migration._contract_external_signing_final_pdf_constraint_state(
+        {
+            "columns": [{"table_name": CHECK_KEY[0]}],
+            "constraints": [],
+            "show_create_tables": {},
+        },
+        canonical,
+    ) == "partial"
 
 
 def test_successor_makes_reports_and_client_reminder_non_blocking() -> None:

@@ -15,6 +15,7 @@
   - `infrastructure/mysql/order_actual_start_repository.py`
   - `ui_react/src/api/orders/order_actual_start_client.ts`
   - `ui_react/src/components/OrderActualStartPanel.tsx`
+  - `ui_react/src/adapters/orders/order_mutation_flow_store.ts` — per-case original command／receipt recovery。
   - `ui_react/src/components/OrderWorkbenchV2Drawer.tsx`
 
 ## Dependencies
@@ -31,6 +32,7 @@
 - layout_status: custom_current
 - test_root: `ui_react/src/tests/domains/orders/subsystems/orders/modules/actual-start/`
 - higher_boundary: `tests/domains/orders/subsystems/orders/integration/test_order_actual_start_workflow.py`
+- test_root: `ui_react/src/tests/order_workbench_v2_actual_start.test.tsx` — existing drawer mutation／recovery integration。
 
 ## Provenance
 - Actual Start writer and cross-owner persistence — `source_observed` — `subsystems/orders/actual_start_workflow.py`.

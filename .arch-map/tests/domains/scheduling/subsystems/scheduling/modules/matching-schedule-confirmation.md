@@ -3,6 +3,7 @@ parent_subsystem: scheduling
 architecture: ../../../../../../domains/scheduling/subsystems/scheduling/modules/matching-schedule-confirmation.md
 layout_status: custom_current
 test_root: ui_react/src/tests/matching_schedule_confirmation_actions.test.tsx
+direct_api_test_root: tests/domains/scheduling/subsystems/scheduling/modules/matching-schedule-confirmation/
 
 # Higher-boundary verification
 - `tests/domains/external-integration/subsystems/line/integration/test_matching_schedule_confirmation.py` — Scheduling snapshot/repository 與 LINE delivery integration。

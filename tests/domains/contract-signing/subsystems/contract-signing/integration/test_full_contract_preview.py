@@ -25,6 +25,7 @@ from infrastructure.mysql.contract_full_preview_repository import (
     _canonical_service_mode,
     _due_date_from_due_month,
     _load_approved_subsidy_claim,
+    _load_precontract_plan,
     _project_subsidy_coverage,
     _special_holidays_text,
 )
@@ -442,6 +443,80 @@ class _Cursor:
 
     def fetchall(self):
         return self.rows
+
+
+class _PrecontractCursor:
+    def __init__(self, confirmed_dates=()):
+        self.rows = ()
+        self.confirmed_dates = confirmed_dates
+
+    def execute(self, statement, _parameters=None):
+        if "FROM caregiver_matching_plans plan" in statement:
+            assert "matching_response_events" in statement
+            assert "response.response_value" in statement
+            self.rows = ({"id": 51},)
+        elif "FROM caregiver_matching_plan_segments segment" in statement:
+            self.rows = ({
+                "id": 71,
+                "staff_id": 8892,
+                "assigned_start_date": date(2026, 9, 1),
+                "assigned_end_date": date(2026, 9, 5),
+                "staff_name": "月嫂甲",
+                "staff_phone": "0900000000",
+            },)
+        elif "SELECT holiday_date FROM holidays" in statement:
+            self.rows = ()
+        elif "FROM confirmed_service_date_versions version" in statement:
+            self.rows = tuple({"service_date": value} for value in self.confirmed_dates)
+        else:
+            raise AssertionError(statement)
+
+    def fetchall(self):
+        return self.rows
+
+
+class _PrecontractConnection:
+    def __init__(self, confirmed_dates=()):
+        self.cursor_instance = _PrecontractCursor(confirmed_dates)
+
+    class _Context:
+        def __init__(self, cursor):
+            self.cursor = cursor
+
+        def __enter__(self):
+            return self.cursor
+
+        def __exit__(self, *_args):
+            return False
+
+    def cursor(self):
+        return self._Context(self.cursor_instance)
+
+
+def test_precontract_preview_accepts_active_proposed_plan_with_latest_customer_acceptance():
+    result = _load_precontract_plan(
+        _PrecontractConnection(),
+        "CASE-1",
+        {"start_date": date(2026, 9, 1), "service_days": 5, "service_type": "連續服務"},
+    )
+
+    assert result["id"] == 51
+    assert tuple(day for _, day in result["allocations"]) == tuple(
+        date(2026, 9, day) for day in range(1, 6)
+    )
+
+
+def test_precontract_preview_rejects_service_dates_changed_after_plan_acceptance():
+    with pytest.raises(FullContractPreviewError) as captured:
+        _load_precontract_plan(
+            _PrecontractConnection(
+                tuple(date(2026, 9, day) for day in (1, 2, 3, 4, 6))
+            ),
+            "CASE-1",
+            {"start_date": date(2026, 9, 1), "service_days": 5, "service_type": "連續服務"},
+        )
+
+    assert captured.value.code == "contract_preview_service_dates_stale"
 
 
 def test_government_claim_item_projection_requires_one_exact_approved_item():

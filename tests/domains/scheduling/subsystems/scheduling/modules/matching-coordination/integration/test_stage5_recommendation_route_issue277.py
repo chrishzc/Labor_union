@@ -153,6 +153,11 @@ def test_stage5_willing_candidate_payload_reaches_matching_plan_route(monkeypatc
                     "assigned_end_date": "2026-12-20",
                 }
             ],
+            "actor": kwargs["created_by"],
+            "as_of": kwargs["as_of"],
+            "event_key": kwargs["event_key"],
+            "command_fingerprint": "a" * 64,
+            "replayed": False,
         }
 
     monkeypatch.setattr(matches, "create_matching_plan_version", create_matching_plan_version)
@@ -173,6 +178,7 @@ def test_stage5_willing_candidate_payload_reaches_matching_plan_route(monkeypatc
             ],
             "created_by": "operator",
             "as_of": "2026-09-11",
+            "event_key": "matching-plan:CASE-2026-S05:create",
         },
     )
 
@@ -218,6 +224,7 @@ def test_stage5_stale_candidate_is_a_typed_conflict_not_request_validation(monke
             ],
             "created_by": "operator",
             "as_of": "2026-09-11",
+            "event_key": "matching-plan:CASE-2026-S05:stale",
         },
     )
 

@@ -2,7 +2,7 @@
  * File: ContractExternalSigningActions.tsx
  * Description: 呈現外部簽約 successor closed states、完成回報與最終 PDF 確認、Apply、receipt/readback。
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import {
   contractExternalSigningClient,
   createExternalSigningCommandIdentity,
@@ -16,10 +16,19 @@ import {
   type LegacyRecoveryPreviewInput,
   type LegacyRecoveryQuery,
   type LegacyRecoveryTarget,
+  type PreparedUnsignedDocument,
   type StaffReminderReadiness,
 } from '../api/orders/contract_external_signing_client';
 import { ApiHttpError, ApiNetworkError, ApiTimeoutError } from '../api/shared/typed_errors';
 import { contractSigningClient } from '../api/orders/contract_signing_client';
+import { sessionClient } from '../api/auth/session_client';
+import {
+  orderMutationFlowStore,
+  type ExternalSigningHandoffCommand,
+  type ExternalSigningHandoffFlowState,
+  type ExternalSigningUnsignedPreparationCommand,
+  type ExternalSigningUnsignedPreparationFlowState,
+} from '../adapters/orders/order_mutation_flow_store';
 
 export interface ContractExternalSigningActionsProps {
   caseNo: string;
@@ -109,6 +118,47 @@ function currentIdentity(
   return created;
 }
 
+const subscribeExternalSigningHandoff = (listener: () => void) => orderMutationFlowStore.subscribe(listener);
+let handoffOperationSequence = 0;
+let unsignedPreparationOperationSequence = 0;
+
+function nextHandoffOperationToken(): number {
+  handoffOperationSequence += 1;
+  return handoffOperationSequence;
+}
+
+function nextUnsignedPreparationOperationToken(): number {
+  unsignedPreparationOperationSequence += 1;
+  return unsignedPreparationOperationSequence;
+}
+
+function handoffReceiptMatches(
+  command: ExternalSigningHandoffCommand,
+  receipt: { session_id: string; resulting_status_version: number },
+): boolean {
+  return receipt.session_id === command.sessionId
+    && receipt.resulting_status_version === command.expectedStatusVersion + 1;
+}
+
+function unsignedPreparationReadbackMatches(
+  command: ExternalSigningUnsignedPreparationCommand,
+  receipt: PreparedUnsignedDocument,
+  fresh: ContractExternalSigningQuery,
+): boolean {
+  if (
+    fresh.case_no !== command.caseNo
+    || (command.sessionId !== null && fresh.session_id !== command.sessionId)
+  ) return false;
+  if (command.kind === 'client') {
+    return fresh.client_target.document_version_id === receipt.document_version_id;
+  }
+  return command.segmentId !== null
+    && fresh.staff_targets.some((target) => (
+      target.matching_segment_id === command.segmentId
+      && target.document_version_id === receipt.document_version_id
+    ));
+}
+
 function recoveryTargetKey(target: LegacyRecoveryTarget): string {
   return target.scope === 'staff' ? `staff-${target.matching_segment_id}` : 'client';
 }
@@ -178,6 +228,10 @@ function assertRecoveryPreviewMatches(
 export function ContractExternalSigningActions({ caseNo, onCommitted }: ContractExternalSigningActionsProps) {
   const identities = useRef(new Map<string, ExternalSigningCommandIdentity>());
   const requestGeneration = useRef(0);
+  const unsignedDownloadController = useRef<AbortController | null>(null);
+  const reminderReadinessController = useRef<AbortController | null>(null);
+  const activeHandoffOperation = useRef<{ caseNo: string; operationToken: number } | null>(null);
+  const activeUnsignedPreparationOperation = useRef<{ caseNo: string; operationToken: number } | null>(null);
   const [query, setQuery] = useState<ContractExternalSigningQuery | null>(null);
   const [preparationSegments, setPreparationSegments] = useState<number[]>([]);
   const [recoveryQuery, setRecoveryQuery] = useState<LegacyRecoveryQuery | null>(null);
@@ -187,6 +241,14 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
   const [confirmationMethod] = useState<ExternalSigningConfirmationMethod>('verified_other');
   const [finalFile, setFinalFile] = useState<File | null>(null);
   const [reminderReadiness, setReminderReadiness] = useState<Record<number, StaffReminderReadiness>>({});
+  const handoffFlow = useSyncExternalStore(
+    subscribeExternalSigningHandoff,
+    () => orderMutationFlowStore.getExternalSigningHandoff(caseNo),
+  );
+  const unsignedPreparationFlow = useSyncExternalStore(
+    subscribeExternalSigningHandoff,
+    () => orderMutationFlowStore.getExternalSigningUnsignedPreparation(caseNo),
+  );
 
   const loadQuery = useCallback(async (signal?: AbortSignal): Promise<ContractExternalSigningQuery> => {
     const generation = ++requestGeneration.current;
@@ -208,6 +270,8 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
   }, [caseNo]);
 
   useEffect(() => {
+    unsignedDownloadController.current?.abort();
+    reminderReadinessController.current?.abort();
     const controller = new AbortController();
     setQuery(null);
     setPreparationSegments([]);
@@ -249,72 +313,383 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
       if (!controller.signal.aborted) setUiState({ type: 'error', message: safeErrorMessage(error) });
     });
     return () => {
+      const activeHandoff = activeHandoffOperation.current;
+      const savedHandoff = activeHandoff && orderMutationFlowStore.getExternalSigningHandoff(activeHandoff.caseNo);
+      if (activeHandoff && savedHandoff?.operationToken === activeHandoff.operationToken) {
+        if (savedHandoff.status === 'applying') {
+          orderMutationFlowStore.setExternalSigningHandoff(activeHandoff.caseNo, {
+            ...savedHandoff,
+            status: 'outcome_unknown',
+            error: '外部平台交接請求在畫面離開時仍未確認；請以原操作重新確認。',
+          });
+        } else if (savedHandoff.status === 'observing') {
+          orderMutationFlowStore.setExternalSigningHandoff(activeHandoff.caseNo, {
+            ...savedHandoff,
+            status: 'observation_failed',
+            error: '外部平台交接收據已收到，但畫面離開前尚未完成狀態讀取；只能重新讀取。',
+          });
+        }
+      }
+      activeHandoffOperation.current = null;
+      const activePreparation = activeUnsignedPreparationOperation.current;
+      const savedPreparation = activePreparation && orderMutationFlowStore.getExternalSigningUnsignedPreparation(activePreparation.caseNo);
+      if (activePreparation && savedPreparation?.operationToken === activePreparation.operationToken) {
+        if (savedPreparation.status === 'applying') {
+          orderMutationFlowStore.setExternalSigningUnsignedPreparation(activePreparation.caseNo, {
+            ...savedPreparation,
+            status: 'outcome_unknown',
+            error: '未簽契約準備請求在畫面離開時仍未確認；請以原操作重新確認。',
+          });
+        } else if (savedPreparation.status === 'observing') {
+          orderMutationFlowStore.setExternalSigningUnsignedPreparation(activePreparation.caseNo, {
+            ...savedPreparation,
+            status: 'observation_failed',
+            error: '未簽契約準備收據已收到，但畫面離開前尚未完成狀態讀取；只能重新讀取。',
+          });
+        }
+      }
+      activeUnsignedPreparationOperation.current = null;
       requestGeneration.current += 1;
       controller.abort();
+      unsignedDownloadController.current?.abort();
+      reminderReadinessController.current?.abort();
     };
   }, [caseNo, loadQuery]);
 
-  const prepareClientUnsigned = async () => {
-    const identity = currentIdentity(identities.current, 'prepare-client');
-    setUiState({ type: 'working', operation: 'prepare_client' });
-    setNotice(null);
-    try {
-      const prepared = await contractExternalSigningClient.prepareClientUnsignedPdf(caseNo, identity);
-      identities.current.delete('prepare-client');
-      setNotice(`客戶未簽契約 PDF「${prepared.filename}」已準備完成。`);
-      await loadQuery();
-      await downloadUnsigned(prepared.document_version_id, '客戶');
-    } catch (error) { setUiState({ type: 'error', message: safeErrorMessage(error) }); }
+  const ownsHandoffOperation = (caseNumber: string, operationToken: number): boolean => {
+    const active = activeHandoffOperation.current;
+    return active?.caseNo === caseNumber
+      && active.operationToken === operationToken
+      && orderMutationFlowStore.getExternalSigningHandoff(caseNumber)?.operationToken === operationToken;
   };
 
-  const prepareStaffUnsigned = async (segmentId: number) => {
-    const identity = currentIdentity(identities.current, `prepare-${segmentId}`);
-    setUiState({ type: 'working', operation: 'prepare_staff' });
+  const releaseHandoffOperation = (operationToken: number) => {
+    if (activeHandoffOperation.current?.operationToken === operationToken) {
+      activeHandoffOperation.current = null;
+    }
+  };
+
+  const ownsUnsignedPreparationOperation = (caseNumber: string, operationToken: number): boolean => {
+    const active = activeUnsignedPreparationOperation.current;
+    return active?.caseNo === caseNumber
+      && active.operationToken === operationToken
+      && orderMutationFlowStore.getExternalSigningUnsignedPreparation(caseNumber)?.operationToken === operationToken;
+  };
+
+  const releaseUnsignedPreparationOperation = (operationToken: number) => {
+    if (activeUnsignedPreparationOperation.current?.operationToken === operationToken) {
+      activeUnsignedPreparationOperation.current = null;
+    }
+  };
+
+  const observeUnsignedPreparation = async (
+    state: ExternalSigningUnsignedPreparationFlowState,
+    request: number,
+  ) => {
+    if (state.receipt === null) throw new Error('未簽契約準備尚未收到收據，不能只讀取狀態。');
+    const { command, receipt } = state;
+    if (!ownsUnsignedPreparationOperation(command.caseNo, state.operationToken)) return;
+    orderMutationFlowStore.setExternalSigningUnsignedPreparation(command.caseNo, { ...state, status: 'observing', error: null });
+    let fresh: ContractExternalSigningQuery;
+    try {
+      fresh = await contractExternalSigningClient.query(command.caseNo);
+    } catch (error) {
+      if (!(command.kind === 'staff'
+        && error instanceof ApiHttpError
+        && error.code === 'external_signing_session_facts_unavailable')) throw error;
+      const legacy = await contractSigningClient.query(command.caseNo);
+      if (!ownsUnsignedPreparationOperation(command.caseNo, state.operationToken)) return;
+      const segmentObserved = command.segmentId !== null
+        && legacy.staff_segments.some((segment) => segment.segment_id === command.segmentId);
+      const documentObserved = legacy.documents.some((document) => (
+        document.document_version_id === receipt.document_version_id
+        && document.scope === 'staff'
+      ));
+      if (!segmentObserved || !documentObserved) {
+        throw new Error('月嫂未簽契約收據尚未出現在正式契約狀態；只能重新讀取。');
+      }
+      orderMutationFlowStore.clearExternalSigningUnsignedPreparation(command.caseNo);
+      if (request !== requestGeneration.current) return;
+      setQuery(null);
+      setPreparationSegments(legacy.staff_segments.map((segment) => segment.segment_id));
+      setUiState({ type: 'ready' });
+      setNotice(`${receipt.replayed ? '已重新確認' : '已產生'}月嫂分段 #${command.segmentId} 未簽 PDF。`);
+      return;
+    }
+    if (!ownsUnsignedPreparationOperation(command.caseNo, state.operationToken)) return;
+    if (!unsignedPreparationReadbackMatches(command, receipt, fresh)) {
+      throw new Error('未簽契約準備收據與原案件、簽約工作或服務區段不一致；只能重新讀取。');
+    }
+    orderMutationFlowStore.clearExternalSigningUnsignedPreparation(command.caseNo);
+    if (request !== requestGeneration.current) return;
+    setQuery(fresh);
+    setPreparationSegments([]);
+    setUiState({ type: 'ready' });
+    setNotice(command.kind === 'client'
+      ? `客戶未簽契約 PDF「${receipt.filename}」已準備完成。`
+      : `${receipt.replayed ? '已重新確認' : '已產生'}月嫂分段 #${command.segmentId} 未簽 PDF。`);
+  };
+
+  const submitUnsignedPreparation = async (
+    command: ExternalSigningUnsignedPreparationCommand,
+    recovery: boolean,
+    downloadAfterObserved: boolean,
+  ) => {
+    const request = requestGeneration.current;
+    const operationToken = nextUnsignedPreparationOperationToken();
+    activeUnsignedPreparationOperation.current = { caseNo: command.caseNo, operationToken };
+    orderMutationFlowStore.setExternalSigningUnsignedPreparation(command.caseNo, {
+      status: 'applying', operationToken, command, receipt: null, error: null,
+    });
+    let receipt: PreparedUnsignedDocument;
+    try {
+      receipt = command.kind === 'client'
+        ? await contractExternalSigningClient.prepareClientUnsignedPdf(command.caseNo, command.identity)
+        : await contractExternalSigningClient.prepareStaffUnsignedPdf(command.caseNo, command.segmentId!, command.identity);
+    } catch (error) {
+      if (!ownsUnsignedPreparationOperation(command.caseNo, operationToken)) return;
+      if (!recovery && error instanceof ApiHttpError && !error.retryable) {
+        orderMutationFlowStore.clearExternalSigningUnsignedPreparation(command.caseNo);
+        if (request === requestGeneration.current) setUiState({ type: 'error', message: safeErrorMessage(error) });
+      } else {
+        const message = recovery
+          ? '原未簽契約準備結果仍未確認；請恢復原帳號權限後以原操作重新確認。'
+          : '未簽契約準備結果尚未確認；請以原操作重新確認。';
+        orderMutationFlowStore.setExternalSigningUnsignedPreparation(command.caseNo, {
+          status: 'outcome_unknown', operationToken, command, receipt: null, error: message,
+        });
+        if (request === requestGeneration.current) setUiState({ type: 'error', message });
+      }
+      releaseUnsignedPreparationOperation(operationToken);
+      return;
+    }
+    if (!ownsUnsignedPreparationOperation(command.caseNo, operationToken)) return;
+    const received: ExternalSigningUnsignedPreparationFlowState = {
+      status: 'observation_failed', operationToken, command, receipt, error: null,
+    };
+    orderMutationFlowStore.setExternalSigningUnsignedPreparation(command.caseNo, received);
+    try {
+      await observeUnsignedPreparation(received, request);
+      if (downloadAfterObserved && command.kind === 'client' && request === requestGeneration.current) {
+        await downloadUnsigned(receipt.document_version_id, '客戶');
+      }
+    } catch (error) {
+      if (!ownsUnsignedPreparationOperation(command.caseNo, operationToken)) return;
+      const message = safeErrorMessage(error);
+      const saved = orderMutationFlowStore.getExternalSigningUnsignedPreparation(command.caseNo);
+      if (saved?.receipt) orderMutationFlowStore.setExternalSigningUnsignedPreparation(command.caseNo, {
+        ...saved, status: 'observation_failed', error: message,
+      });
+      if (request === requestGeneration.current) setUiState({ type: 'error', message });
+    }
+    releaseUnsignedPreparationOperation(operationToken);
+  };
+
+  const prepareUnsigned = async (kind: 'client' | 'staff', segmentId: number | null) => {
+    if (unsignedPreparationFlow || (!query && kind === 'client')) return;
+    const actor = sessionClient.getUser()?.username.trim() ?? '';
+    if (!actor) {
+      setUiState({ type: 'error', message: '請先登入後再準備未簽契約。' });
+      return;
+    }
+    const command: ExternalSigningUnsignedPreparationCommand = {
+      kind, caseNo, sessionId: query?.session_id ?? null, segmentId, actor,
+      identity: createExternalSigningCommandIdentity(kind === 'client' ? 'prepare-client' : `prepare-${segmentId}`),
+    };
+    setUiState({ type: 'working', operation: kind === 'client' ? 'prepare_client' : 'prepare_staff' });
+    setNotice(null);
+    await submitUnsignedPreparation(command, false, kind === 'client');
+  };
+
+  const retryUnsignedPreparationOriginal = async () => {
+    if (unsignedPreparationFlow?.status !== 'outcome_unknown') return;
+    const actor = sessionClient.getUser()?.username.trim() ?? '';
+    if (!actor || actor !== unsignedPreparationFlow.command.actor) {
+      setUiState({ type: 'error', message: '原未簽契約準備必須由原帳號重新確認；未確認結果會保留。' });
+      return;
+    }
+    setUiState({ type: 'working', operation: unsignedPreparationFlow.command.kind === 'client' ? 'prepare_client' : 'prepare_staff' });
+    setNotice(null);
+    await submitUnsignedPreparation(unsignedPreparationFlow.command, true, false);
+  };
+
+  const retryUnsignedPreparationReadback = async () => {
+    if (unsignedPreparationFlow?.status !== 'observation_failed' || unsignedPreparationFlow.receipt === null) return;
+    const request = requestGeneration.current;
+    const operationToken = nextUnsignedPreparationOperationToken();
+    const state: ExternalSigningUnsignedPreparationFlowState = {
+      ...unsignedPreparationFlow, status: 'observing', operationToken, error: null,
+    };
+    activeUnsignedPreparationOperation.current = { caseNo, operationToken };
+    orderMutationFlowStore.setExternalSigningUnsignedPreparation(caseNo, state);
+    setUiState({ type: 'working', operation: 'readback' });
     setNotice(null);
     try {
-      const prepared = await contractExternalSigningClient.prepareStaffUnsignedPdf(
-        caseNo, segmentId, identity,
-      );
-      identities.current.delete(`prepare-${segmentId}`);
-      setNotice(`${prepared.replayed ? '已重新確認' : '已產生'}月嫂分段 #${segmentId} 未簽 PDF，正在載入簽約工作。`);
-      setPreparationSegments([]);
-      await loadQuery();
+      await observeUnsignedPreparation(state, request);
     } catch (error) {
-      setUiState({ type: 'error', message: safeErrorMessage(error) });
+      if (!ownsUnsignedPreparationOperation(caseNo, operationToken)) return;
+      const message = safeErrorMessage(error);
+      const saved = orderMutationFlowStore.getExternalSigningUnsignedPreparation(caseNo);
+      if (saved?.receipt) orderMutationFlowStore.setExternalSigningUnsignedPreparation(caseNo, {
+        ...saved, status: 'observation_failed', error: message,
+      });
+      if (request === requestGeneration.current) setUiState({ type: 'error', message });
     }
+    releaseUnsignedPreparationOperation(operationToken);
+  };
+
+  const observeHandoff = async (state: ExternalSigningHandoffFlowState, request: number) => {
+    if (state.receipt === null) throw new Error('外部平台交接尚未收到收據，不能只讀取狀態。');
+    const { command, receipt } = state;
+    if (!handoffReceiptMatches(command, receipt)) {
+      throw new Error('外部平台交接收據與原案件、簽約工作或版本不一致；不能視為完成。');
+    }
+    if (!ownsHandoffOperation(command.caseNo, state.operationToken)) return;
+    orderMutationFlowStore.setExternalSigningHandoff(command.caseNo, { ...state, status: 'observing', error: null });
+    const fresh = await contractExternalSigningClient.query(command.caseNo);
+    if (!ownsHandoffOperation(command.caseNo, state.operationToken)) return;
+    if (
+      fresh.case_no !== command.caseNo
+      || fresh.session_id !== command.sessionId
+      || !fresh.handoff_recorded
+      || fresh.status_version < receipt.resulting_status_version
+    ) {
+      throw new Error('交接收據後回讀與原案件、簽約工作或版本不一致；只能重新讀取。');
+    }
+    orderMutationFlowStore.clearExternalSigningHandoff(command.caseNo);
+    if (request !== requestGeneration.current) return;
+    setQuery(fresh);
+    setUiState({ type: 'ready' });
+    setNotice(receipt.replayed ? '已重新確認外部平台交接。' : '已記錄送交外部簽署平台。');
+  };
+
+  const submitHandoff = async (command: ExternalSigningHandoffCommand, recovery: boolean) => {
+    const request = requestGeneration.current;
+    const operationToken = nextHandoffOperationToken();
+    activeHandoffOperation.current = { caseNo: command.caseNo, operationToken };
+    orderMutationFlowStore.setExternalSigningHandoff(command.caseNo, { status: 'applying', operationToken, command, receipt: null, error: null });
+    let receipt: ExternalSigningHandoffFlowState['receipt'];
+    try {
+      receipt = await contractExternalSigningClient.recordHandoff(
+        command.caseNo,
+        command.expectedStatusVersion,
+        command.identity,
+      );
+    } catch (error) {
+      if (!ownsHandoffOperation(command.caseNo, operationToken)) return;
+      if (!recovery && error instanceof ApiHttpError && !error.retryable) {
+        orderMutationFlowStore.clearExternalSigningHandoff(command.caseNo);
+        if (request === requestGeneration.current) setUiState({ type: 'error', message: safeErrorMessage(error) });
+      } else {
+        const message = recovery
+          ? '原外部平台交接結果仍未確認；請恢復原帳號權限後以原操作重新確認。'
+          : '外部平台交接結果尚未確認；請以原操作重新確認。';
+        orderMutationFlowStore.setExternalSigningHandoff(command.caseNo, {
+          status: 'outcome_unknown',
+          operationToken,
+          command,
+          receipt: null,
+          error: message,
+        });
+        if (request === requestGeneration.current) setUiState({ type: 'error', message });
+      }
+      releaseHandoffOperation(operationToken);
+      return;
+    }
+    if (!ownsHandoffOperation(command.caseNo, operationToken)) return;
+    const received: ExternalSigningHandoffFlowState = {
+      status: 'observation_failed',
+      operationToken,
+      command,
+      receipt,
+      error: handoffReceiptMatches(command, receipt)
+        ? null
+        : '外部平台交接收據與原案件、簽約工作或版本不一致；只能重新讀取。',
+    };
+    orderMutationFlowStore.setExternalSigningHandoff(command.caseNo, received);
+    if (!handoffReceiptMatches(command, receipt)) {
+      if (request === requestGeneration.current) setUiState({ type: 'error', message: received.error! });
+      releaseHandoffOperation(operationToken);
+      return;
+    }
+    try {
+      await observeHandoff(received, request);
+    } catch (error) {
+      if (!ownsHandoffOperation(command.caseNo, operationToken)) return;
+      const message = safeErrorMessage(error);
+      const saved = orderMutationFlowStore.getExternalSigningHandoff(command.caseNo);
+      if (saved?.receipt) orderMutationFlowStore.setExternalSigningHandoff(command.caseNo, { ...saved, status: 'observation_failed', error: message });
+      if (request === requestGeneration.current) setUiState({ type: 'error', message });
+    }
+    releaseHandoffOperation(operationToken);
   };
 
   const recordHandoff = async () => {
-    if (!query || query.handoff_recorded) return;
-    const identity = currentIdentity(identities.current, 'handoff');
+    if (!query || query.handoff_recorded || handoffFlow) return;
+    const actor = sessionClient.getUser()?.username.trim() ?? '';
+    if (!actor) {
+      setUiState({ type: 'error', message: '請先登入後再記錄外部平台交接。' });
+      return;
+    }
+    const command: ExternalSigningHandoffCommand = {
+      caseNo,
+      sessionId: query.session_id,
+      expectedStatusVersion: query.status_version,
+      actor,
+      identity: createExternalSigningCommandIdentity('handoff'),
+    };
     setUiState({ type: 'working', operation: 'handoff' });
     setNotice(null);
-    try {
-      const receipt = await contractExternalSigningClient.recordHandoff(
-        caseNo, query.status_version, identity,
-      );
-      if (
-        receipt.session_id !== query.session_id
-        || receipt.resulting_status_version !== query.status_version + 1
-      ) {
-        throw new Error('外部平台交接結果與目前簽約狀態不一致。');
-      }
-      identities.current.delete('handoff');
-      setNotice(receipt.replayed ? '已重新確認外部平台交接。' : '已記錄送交外部簽署平台。');
-      await loadQuery();
-    } catch (error) {
-      setUiState({ type: 'error', message: safeErrorMessage(error) });
+    await submitHandoff(command, false);
+  };
+
+  const retryHandoffOriginal = async () => {
+    if (handoffFlow?.status !== 'outcome_unknown') return;
+    const actor = sessionClient.getUser()?.username.trim() ?? '';
+    if (!actor || actor !== handoffFlow.command.actor) {
+      setUiState({ type: 'error', message: '原外部平台交接必須由原帳號重新確認；未確認結果會保留。' });
+      return;
     }
+    setUiState({ type: 'working', operation: 'handoff' });
+    setNotice(null);
+    await submitHandoff(handoffFlow.command, true);
+  };
+
+  const retryHandoffReadback = async () => {
+    if (handoffFlow?.status !== 'observation_failed' || handoffFlow.receipt === null) return;
+    const request = requestGeneration.current;
+    const operationToken = nextHandoffOperationToken();
+    const state: ExternalSigningHandoffFlowState = { ...handoffFlow, status: 'observing', operationToken, error: null };
+    activeHandoffOperation.current = { caseNo: caseNo, operationToken };
+    orderMutationFlowStore.setExternalSigningHandoff(caseNo, state);
+    setUiState({ type: 'working', operation: 'readback' });
+    setNotice(null);
+    try {
+      await observeHandoff(state, request);
+    } catch (error) {
+      if (!ownsHandoffOperation(caseNo, operationToken)) return;
+      const message = safeErrorMessage(error);
+      const saved = orderMutationFlowStore.getExternalSigningHandoff(caseNo);
+      if (saved?.receipt) orderMutationFlowStore.setExternalSigningHandoff(caseNo, { ...saved, status: 'observation_failed', error: message });
+      if (request === requestGeneration.current) setUiState({ type: 'error', message });
+    }
+    releaseHandoffOperation(operationToken);
   };
 
   const checkReminderReadiness = async (segmentId: number) => {
+    reminderReadinessController.current?.abort();
+    const controller = new AbortController();
+    reminderReadinessController.current = controller;
+    const generation = requestGeneration.current;
     setUiState({ type: 'working', operation: 'reminder_check' });
     setNotice(null);
     try {
-      const readiness = await contractExternalSigningClient.getStaffReminderReadiness(caseNo, segmentId);
+      const readiness = await contractExternalSigningClient.getStaffReminderReadiness(caseNo, segmentId, controller.signal);
+      if (controller.signal.aborted || generation !== requestGeneration.current) return;
       setReminderReadiness((current) => ({ ...current, [segmentId]: readiness }));
       setUiState({ type: 'ready' });
     } catch (error) {
+      if (controller.signal.aborted || generation !== requestGeneration.current) return;
       setUiState({ type: 'error', message: safeErrorMessage(error) });
     }
   };
@@ -344,13 +719,19 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
   };
 
   const downloadUnsigned = async (documentVersionId: number, targetLabel: string) => {
+    unsignedDownloadController.current?.abort();
+    const controller = new AbortController();
+    unsignedDownloadController.current = controller;
+    const generation = requestGeneration.current;
     setUiState({ type: 'working', operation: 'download' });
     setNotice(null);
     try {
       const artifact = await contractExternalSigningClient.downloadUnsignedPdf(
         caseNo,
         documentVersionId,
+        controller.signal,
       );
+      if (controller.signal.aborted || generation !== requestGeneration.current) return;
       const url = URL.createObjectURL(artifact.blob);
       try {
         const link = document.createElement('a');
@@ -363,6 +744,7 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
       setNotice(`${targetLabel}未簽契約 PDF「${artifact.filename}」已下載。`);
       setUiState({ type: 'ready' });
     } catch (error) {
+      if (controller.signal.aborted || generation !== requestGeneration.current) return;
       setUiState({ type: 'error', message: safeErrorMessage(error) });
     }
   };
@@ -593,7 +975,8 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
           <button type="button" disabled={busy || !query?.unsigned_document || query.client_target.document_version_id === null} onClick={() => {
             if (query?.unsigned_document && query.client_target.document_version_id !== null) void downloadUnsigned(query.client_target.document_version_id, `客戶 ${query.client_target.client_subject_reference} `);
           }}>下載客戶契約 PDF</button>
-          {query?.state !== 'completed' && <button type="button" disabled={busy} onClick={() => void prepareClientUnsigned()}>準備並下載客戶契約 PDF</button>}
+          {query?.state !== 'completed' && <button type="button" disabled={busy || !!unsignedPreparationFlow || !query} onClick={() => void prepareUnsigned('client', null)}>準備並下載客戶契約 PDF</button>}
+          {!query && preparationSegments.length > 0 && <p>請先準備服務人員契約，再準備客戶契約。</p>}
           {(!query?.unsigned_document || query.client_target.document_version_id === null) && <p>尚無可下載文件時，請先準備契約；需已確認推薦方案，不會發送訊息。</p>}
         </article>
         <article><h3>服務人員契約 PDF</h3><p>每位月嫂的契約分別下載。</p>
@@ -614,8 +997,8 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
             <button
               key={segmentId}
               type="button"
-              disabled={busy}
-              onClick={() => void prepareStaffUnsigned(segmentId)}
+              disabled={busy || !!unsignedPreparationFlow}
+              onClick={() => void prepareUnsigned('staff', segmentId)}
             >
               準備服務人員契約 PDF（服務區段 {segmentId}）
             </button>
@@ -735,7 +1118,7 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
               </div>
             ))}
           </div>
-          {!query.handoff_recorded && (
+          {!query.handoff_recorded && !handoffFlow && (
             <button type="button" disabled={busy} onClick={() => void recordHandoff()}>
               確認契約已送交外部簽署平台
             </button>
@@ -801,6 +1184,30 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
         <div role="alert">
           <div>{uiState.message}</div>
           <button type="button" onClick={() => void reconcileUnknown()}>重新確認原操作結果</button>
+        </div>
+      )}
+      {handoffFlow?.status === 'outcome_unknown' && (
+        <div role="alert">
+          <div>{handoffFlow.error ?? '外部平台交接結果尚未確認。'}</div>
+          <button type="button" onClick={() => void retryHandoffOriginal()}>以原交接操作重新確認</button>
+        </div>
+      )}
+      {handoffFlow?.status === 'observation_failed' && handoffFlow.receipt !== null && (
+        <div role="status">
+          <div>{handoffFlow.error ?? '交接收據已收到，但目前狀態尚未讀取成功。'}</div>
+          <button type="button" onClick={() => void retryHandoffReadback()}>重新讀取交接狀態</button>
+        </div>
+      )}
+      {unsignedPreparationFlow?.status === 'outcome_unknown' && (
+        <div role="alert">
+          <div>{unsignedPreparationFlow.error ?? '未簽契約準備結果尚未確認。'}</div>
+          <button type="button" onClick={() => void retryUnsignedPreparationOriginal()}>以原未簽契約準備操作重新確認</button>
+        </div>
+      )}
+      {unsignedPreparationFlow?.status === 'observation_failed' && unsignedPreparationFlow.receipt !== null && (
+        <div role="status">
+          <div>{unsignedPreparationFlow.error ?? '未簽契約準備收據已收到，但目前狀態尚未讀取成功。'}</div>
+          <button type="button" onClick={() => void retryUnsignedPreparationReadback()}>重新讀取未簽契約準備狀態</button>
         </div>
       )}
       {uiState.type === 'receipt_committed' && (

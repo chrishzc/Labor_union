@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState, type FC } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type FC } from 'react';
 import { ordersQueryClient } from '../api/orders/order_query_client';
-import { matchingCandidateWorkflowClient, type MatchingAvailability, type MatchingFilterPolicy } from '../api/scheduling/matching_candidate_workflow_client';
+import { sessionClient } from '../api/auth/session_client';
+import { matchingCandidateWorkflowClient, type MatchingAvailability, type MatchingFilterPolicy, type MatchingPlanSegmentInput } from '../api/scheduling/matching_candidate_workflow_client';
 import { waitingDepositLockClient } from '../api/scheduling/waiting_deposit_lock_client';
 import { ApiHttpError } from '../api/shared/typed_errors';
+import { orderMutationFlowStore, type FormalPlanCreationFlowState } from '../adapters/orders/order_mutation_flow_store';
 
 interface Props {
   caseNo: string;
@@ -16,6 +18,32 @@ type QueryState =
   | { status: 'ready'; data: MatchingAvailability }
   | { status: 'error'; message: string };
 
+const subscribeFormalPlanCreation = (listener: () => void) => orderMutationFlowStore.subscribe(listener);
+
+function hasExactSegments(
+  observed: ReadonlyArray<{ sequence: number; staffId: number; assignedStartDate: string; assignedEndDate: string }> | undefined,
+  command: MatchingPlanSegmentInput[],
+): boolean {
+  const ordered = [...(observed ?? [])].sort((left, right) => left.sequence - right.sequence);
+  return ordered.length === command.length && ordered.every((segment, index) => (
+    segment.staffId === command[index]?.staff_id
+    && segment.assignedStartDate === command[index]?.start_date
+    && segment.assignedEndDate === command[index]?.end_date
+  ));
+}
+
+function hasExactReceiptSegments(
+  receiptSegments: ReadonlyArray<{ segment_order: number; staff_id: number; assigned_start_date: string; assigned_end_date: string }>,
+  command: MatchingPlanSegmentInput[],
+): boolean {
+  const ordered = [...receiptSegments].sort((left, right) => left.segment_order - right.segment_order);
+  return ordered.length === command.length && ordered.every((segment, index) => (
+    segment.staff_id === command[index]?.staff_id
+    && segment.assigned_start_date === command[index]?.start_date
+    && segment.assigned_end_date === command[index]?.end_date
+  ));
+}
+
 /** Present only complete combinations returned by the existing Scheduling owner. */
 export const OrderMultiCaregiverPlanPanel: FC<Props> = ({ caseNo, filters, onObserved, onBusyChange }) => {
   const [segmentCount, setSegmentCount] = useState<2 | 3 | 4>(2);
@@ -26,7 +54,16 @@ export const OrderMultiCaregiverPlanPanel: FC<Props> = ({ caseNo, filters, onObs
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const sequence = useRef(0);
+  const searchController = useRef<AbortController | null>(null);
   const filterKey = JSON.stringify(filters);
+  const formalPlanCreation = useSyncExternalStore(
+    subscribeFormalPlanCreation,
+    () => orderMutationFlowStore.getFormalPlanCreation(caseNo, 'multi'),
+  );
+  const creationProtected = formalPlanCreation?.status === 'applying'
+    || formalPlanCreation?.status === 'outcome_unknown'
+    || formalPlanCreation?.status === 'observation_failed'
+    || formalPlanCreation?.status === 'observing';
 
   useEffect(() => {
     sequence.current += 1;
@@ -34,7 +71,11 @@ export const OrderMultiCaregiverPlanPanel: FC<Props> = ({ caseNo, filters, onObs
     setAttempted(false);
     setMessage(null);
     setError(null);
-    return () => { sequence.current += 1; };
+    return () => {
+      sequence.current += 1;
+      searchController.current?.abort();
+      searchController.current = null;
+    };
   }, [caseNo, filterKey, segmentCount]);
 
   const busy = saving || query.status === 'loading';
@@ -43,22 +84,27 @@ export const OrderMultiCaregiverPlanPanel: FC<Props> = ({ caseNo, filters, onObs
 
   const search = async () => {
     if (savingRef.current) return;
+    searchController.current?.abort();
+    const controller = new AbortController();
+    searchController.current = controller;
     const request = ++sequence.current;
     setQuery({ status: 'loading' });
     setAttempted(false);
     setMessage(null);
     setError(null);
     try {
-      const data = await matchingCandidateWorkflowClient.searchSegmentedCaregivers(caseNo, segmentCount, [], filters);
+      const data = await matchingCandidateWorkflowClient.searchSegmentedCaregivers(caseNo, segmentCount, [], filters, { signal: controller.signal });
       if (data.case_no !== caseNo) throw new Error('多月嫂候選查詢案件識別不一致。');
-      if (request === sequence.current) setQuery({ status: 'ready', data });
+      if (request === sequence.current && searchController.current === controller) setQuery({ status: 'ready', data });
     } catch (caught) {
-      if (request === sequence.current) setQuery({ status: 'error', message: caught instanceof Error ? caught.message : '多月嫂候選查詢失敗。' });
+      if (request === sequence.current && searchController.current === controller) {
+        setQuery({ status: 'error', message: caught instanceof Error ? caught.message : '多月嫂候選查詢失敗。' });
+      }
     }
   };
 
   const create = async (combination: MatchingAvailability['complete_combinations'][number]) => {
-    if (savingRef.current || attempted || query.status !== 'ready'
+    if (savingRef.current || attempted || creationProtected || query.status !== 'ready'
       || !query.data.complete_combinations.includes(combination) || combination.length !== segmentCount) return;
     savingRef.current = true;
     setSaving(true);
@@ -84,24 +130,121 @@ export const OrderMultiCaregiverPlanPanel: FC<Props> = ({ caseNo, filters, onObs
         start_date: segment.start_date,
         end_date: segment.end_date,
       }));
-      const receipt = await matchingCandidateWorkflowClient.createMatchingPlan(caseNo, segments);
-      const observed = await waitingDepositLockClient.queryPlan(caseNo);
-      const observedSegments = [...(observed.segments ?? [])].sort((left, right) => left.sequence - right.sequence);
-      if (receipt.case_no !== caseNo || observed.planId !== receipt.plan_id
-        || observedSegments.length !== segments.length || observedSegments.some((segment, index) => (
-          segment.staffId !== segments[index]?.staff_id
-          || segment.assignedStartDate !== segments[index]?.start_date
-          || segment.assignedEndDate !== segments[index]?.end_date
-        ))) throw new Error('多月嫂方案建立後正式分段回讀不一致；不重送建立操作。');
+      const command = {
+        caseNo,
+        kind: 'multi' as const,
+        actor: sessionClient.getUser()?.username.trim() ?? '',
+        asOf: new Date().toISOString().slice(0, 10),
+        key: `orders-multi-plan-${crypto.randomUUID()}`,
+        segments,
+      };
+      if (!command.actor) throw new ApiHttpError(401, 'UNAUTHENTICATED', '請先登入。');
+      orderMutationFlowStore.setFormalPlanCreation(caseNo, { status: 'applying', command, receipt: null, error: null });
+      let receipt: FormalPlanCreationFlowState['receipt'];
+      try {
+        receipt = await matchingCandidateWorkflowClient.createMatchingPlan(command);
+      } catch (caught) {
+        const message = caught instanceof Error ? caught.message : '多月嫂方案建立結果未確定。';
+        orderMutationFlowStore.setFormalPlanCreation(caseNo, { status: 'outcome_unknown', command, receipt: null, error: message });
+        throw caught;
+      }
+      const saved: FormalPlanCreationFlowState = { status: 'observation_failed', command, receipt, error: null };
+      orderMutationFlowStore.setFormalPlanCreation(caseNo, saved);
       if (request !== sequence.current) return;
-      setMessage(`正式 ${segments.length} 段多月嫂方案 #${receipt.plan_id} 已建立並完成回讀；請從正式方案續辦各段意願與客戶推薦。`);
-      onObserved?.();
+      await observeCreation(saved, request);
     } catch (caught) {
-      if (request === sequence.current) setError(caught instanceof Error ? caught.message : '多月嫂方案建立／回讀失敗。');
+      const message = caught instanceof Error ? caught.message : '多月嫂方案建立／回讀失敗。';
+      if (request === sequence.current) setError(message);
     } finally {
       savingRef.current = false;
       if (request === sequence.current) setSaving(false);
     }
+  };
+
+  const observeCreation = async (state: FormalPlanCreationFlowState, request: number) => {
+    const { command, receipt } = state;
+    const observationToken = crypto.randomUUID();
+    const ownsObservation = () => orderMutationFlowStore.getFormalPlanCreation(caseNo, 'multi')?.observationToken === observationToken;
+    orderMutationFlowStore.setFormalPlanCreation(caseNo, { ...state, status: 'observing', error: null, observationToken });
+    try {
+      if (receipt === null || receipt.case_no !== command.caseNo || receipt.actor !== command.actor
+        || receipt.as_of !== command.asOf || receipt.event_key !== command.key
+        || !hasExactReceiptSegments(receipt.segments, command.segments)) {
+        throw new Error('多月嫂方案收據 identity 不一致；只能重新讀取。');
+      }
+      const observed = await waitingDepositLockClient.queryPlan(command.caseNo);
+      if (!ownsObservation()) return;
+      if (observed.planId !== receipt.plan_id || observed.planVersion === undefined || observed.planVersion < receipt.version
+        || !hasExactSegments(observed.segments, command.segments)) {
+        throw new Error('多月嫂方案建立收據與正式分段回讀不一致；只能重新讀取。');
+      }
+      if (request !== sequence.current) {
+        orderMutationFlowStore.setFormalPlanCreation(caseNo, { ...state, status: 'observation_failed', error: '案件畫面已切換；保留收據，只能重新讀取原案件結果。' });
+        return;
+      }
+      orderMutationFlowStore.clearFormalPlanCreation(caseNo, 'multi');
+      setMessage(`正式 ${command.segments.length} 段多月嫂方案 #${receipt.plan_id} 已建立並完成回讀；請從正式方案續辦各段意願與客戶推薦。`);
+      onObserved?.();
+    } catch (caught) {
+      if (ownsObservation()) {
+        const message = caught instanceof Error ? caught.message : '多月嫂方案正式回讀失敗。';
+        orderMutationFlowStore.setFormalPlanCreation(caseNo, { ...state, status: 'observation_failed', error: message });
+      }
+      throw caught;
+    }
+  };
+
+  const retryCreationReadback = () => {
+    if (savingRef.current) return;
+    const saved = orderMutationFlowStore.getFormalPlanCreation(caseNo, 'multi');
+    if ((saved?.status !== 'observation_failed' && saved?.status !== 'observing') || saved.receipt === null) return;
+    const request = sequence.current;
+    void (async () => {
+      savingRef.current = true;
+      setSaving(true);
+      try {
+        await observeCreation(saved, request);
+      } catch (caught) {
+        const message = caught instanceof Error ? caught.message : '多月嫂方案正式回讀失敗。';
+        if (request === sequence.current) setError(message);
+      } finally {
+        savingRef.current = false;
+        if (request === sequence.current) setSaving(false);
+      }
+    })();
+  };
+
+  const confirmOriginalCreation = () => {
+    if (savingRef.current) return;
+    const saved = orderMutationFlowStore.getFormalPlanCreation(caseNo, 'multi');
+    if (saved?.status !== 'outcome_unknown') return;
+    const request = sequence.current;
+    void (async () => {
+      savingRef.current = true;
+      setSaving(true);
+      try {
+        let receipt: FormalPlanCreationFlowState['receipt'];
+        try {
+          receipt = await matchingCandidateWorkflowClient.queryMatchingPlanReceipt(saved.command);
+        } catch (caught) {
+          if (!(caught instanceof ApiHttpError) || caught.status !== 404) throw caught;
+          receipt = await matchingCandidateWorkflowClient.createMatchingPlan(saved.command);
+        }
+        const received: FormalPlanCreationFlowState = { ...saved, status: 'observation_failed', receipt, error: null };
+        orderMutationFlowStore.setFormalPlanCreation(caseNo, received);
+        await observeCreation(received, request);
+      } catch (caught) {
+        const message = caught instanceof Error ? caught.message : '目前正式方案查詢失敗。';
+        const current = orderMutationFlowStore.getFormalPlanCreation(caseNo, 'multi');
+        if (current?.status === 'outcome_unknown' && current.command.key === saved.command.key) {
+          orderMutationFlowStore.setFormalPlanCreation(caseNo, { ...current, error: message });
+        }
+        if (request === sequence.current) setError(message);
+      } finally {
+        savingRef.current = false;
+        if (request === sequence.current) setSaving(false);
+      }
+    })();
   };
 
   const combinations = query.status === 'ready'
@@ -129,12 +272,24 @@ export const OrderMultiCaregiverPlanPanel: FC<Props> = ({ caseNo, filters, onObs
       {combinations.map((combination, index) => (
         <article key={index} aria-label={`完整組合 ${index + 1}`}>
           {combination.map((segment) => <p key={segment.segment_index}>第 {segment.segment_index + 1} 段 · 月嫂 #{segment.staff_id} · {segment.start_date} → {segment.end_date}</p>)}
-          <button type="button" disabled={busy || attempted} onClick={() => void create(combination)}>以完整組合 {index + 1} 建立正式 {segmentCount} 段方案</button>
+          <button type="button" disabled={busy || attempted || creationProtected} onClick={() => void create(combination)}>以完整組合 {index + 1} 建立正式 {segmentCount} 段方案</button>
         </article>
       ))}
       {saving && <p role="status">建立並回讀正式多月嫂方案中…</p>}
       {message && <p role="status">{message}</p>}
       {error && <p role="alert">{error} 請重新查詢正式狀態後確認，不自動重試。</p>}
+      {formalPlanCreation?.status === 'outcome_unknown' && (
+        <section aria-label="多月嫂方案建立結果未確定">
+          <p role="alert">尚未確認是否建立成功。</p>
+          <button type="button" data-control-id="orders.multi-plan-creation.reconcile-original" disabled={saving} onClick={confirmOriginalCreation}>確認建立結果</button>
+        </section>
+      )}
+      {(formalPlanCreation?.status === 'observation_failed' || formalPlanCreation?.status === 'observing') && (
+        <section aria-label="多月嫂方案建立回讀失敗">
+          <p role="alert">方案已建立，請重新讀取最新狀態。</p>
+          <button type="button" data-control-id="orders.multi-plan-creation.readback" disabled={saving} onClick={retryCreationReadback}>重新讀取</button>
+        </section>
+      )}
     </section>
   );
 };

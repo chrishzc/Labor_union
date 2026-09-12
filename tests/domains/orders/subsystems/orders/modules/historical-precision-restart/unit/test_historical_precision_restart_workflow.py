@@ -15,7 +15,9 @@ from subsystems.orders.historical_precision_restart_workflow import (
     ApplyHistoricalPrecisionRestart,
     HistoricalPrecisionRestartContext,
     HistoricalPrecisionRestartError,
+    HistoricalPrecisionRestartReceipt,
     HistoricalPrecisionRestartWorkflow,
+    StoredHistoricalPrecisionRestartReceipt,
 )
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 
@@ -58,6 +60,58 @@ class _Unit:
 
     def commit(self):
         pytest.fail("stale command must not commit")
+
+
+class _CommittedUnit:
+    def __init__(self):
+        self.commits = 0
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        return False
+
+    def commit(self):
+        self.commits += 1
+
+
+class _PersistingRepository(_Repository):
+    def __init__(self, case_no):
+        super().__init__()
+        self.context = replace(
+            self.context,
+            facts=replace(self.context.facts, case_no=case_no),
+        )
+        self.receipts = {}
+        self.persist_count = 0
+        self.claim_fingerprints = {}
+
+    def find_receipt(self, key):
+        return self.receipts.get(key)
+
+    def claim(self, request, command_fingerprint):
+        self.claim_fingerprints[request.idempotency_key] = command_fingerprint
+        return None
+
+    def persist(self, request, preview):
+        self.persist_count += 1
+        facts = self.context.facts
+        receipt = HistoricalPrecisionRestartReceipt(
+            facts.case_no,
+            "訂單成立",
+            facts.order_version + 1,
+            facts.scheduling_version + 1,
+            facts.scheduling_generation + 1,
+            facts.client_finance_version,
+            facts.payroll_version,
+            facts.historical_day_revision,
+            preview.fingerprint,
+        )
+        self.receipts[request.idempotency_key] = StoredHistoricalPrecisionRestartReceipt(
+            self.claim_fingerprints[request.idempotency_key], receipt,
+        )
+        return receipt
 
 
 def _workflow(repository):

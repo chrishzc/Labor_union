@@ -38,8 +38,11 @@ from subsystems.contract_signing.external_signing_contracts import (
     VerifiedReporterBindingSnapshot,
 )
 from subsystems.contract_signing.external_signing_workflow import (
+    ExternalSigningHandoffReceipt,
     PersistedExternalReport,
+    RecordExternalSigningHandoff,
     StaffCompletionPrerequisites,
+    StoredExternalSigningHandoffReceipt,
 )
 from subsystems.contract_signing.final_document_workflow import (
     FinalContractDocumentReadback,
@@ -151,6 +154,9 @@ class MySqlContractExternalSigningRepository:
             status_version=int(session["aggregate_version"]),
         )
 
+    def lock_case(self, case_no: str) -> bool:
+        return self._one(_HANDOFF_CASE_LOCK_SQL, (case_no,)) is not None
+
     def load_active_session_by_case(
         self, case_no: str, *, for_update: bool
     ) -> ExternalSigningSessionFacts | None:
@@ -249,6 +255,39 @@ class MySqlContractExternalSigningRepository:
     ) -> StoredExternalSigningReportReceipt | None:
         row = self._one(_RECEIPT_BY_KEY_SQL + _lock_suffix(for_update), (key.value,))
         return None if row is None else _stored_receipt(row)
+
+    def find_handoff_receipt(
+        self, key: IdempotencyKey, *, for_update: bool
+    ) -> StoredExternalSigningHandoffReceipt | None:
+        row = self._one(
+            _HANDOFF_RECEIPT_BY_KEY_SQL + _lock_suffix(for_update),
+            (_handoff_storage_key(key),),
+        )
+        return (
+            None
+            if row is None
+            else _stored_handoff_receipt(row, expected_idempotency_key=key.value)
+        )
+
+    def save_handoff_receipt(
+        self,
+        key: IdempotencyKey,
+        stored: StoredExternalSigningHandoffReceipt,
+        command: RecordExternalSigningHandoff,
+    ) -> None:
+        self._insert(
+            _HANDOFF_RECEIPT_INSERT_SQL,
+            (
+                _handoff_storage_key(key),
+                stored.command_fingerprint.value,
+                "record_external_signing_handoff",
+                command.case_no,
+                None,
+                None,
+                command.correlation_id.value,
+                _canonical_json(_handoff_receipt_snapshot(stored.receipt, key)),
+            ),
+        )
 
     def find_source_receipt(
         self, source_event_identity: str, *, for_update: bool
@@ -617,6 +656,45 @@ def _stored_receipt(row: Mapping[str, object]) -> StoredExternalSigningReportRec
     except (TypeError, ValueError):
         raise _stored_fact_error(
             "external_signing_recovery_snapshot_lineage_invalid"
+    ) from None
+
+
+def _stored_handoff_receipt(
+    row: Mapping[str, object], *, expected_idempotency_key: str
+) -> StoredExternalSigningHandoffReceipt:
+    if row.get("command_kind") != "record_external_signing_handoff":
+        raise _conflict(
+            "contract_signature_idempotency_conflict",
+            "相同命令識別已被其他簽約命令使用。",
+        )
+    snapshot = _json_mapping(row.get("result_snapshot"))
+    if snapshot is None:
+        raise _stored_fact_error("external_signing_handoff_receipt_snapshot_invalid")
+    session_id = snapshot.get("session_id")
+    resulting_status_version = snapshot.get("resulting_status_version")
+    stored_idempotency_key = snapshot.get("idempotency_key")
+    if (
+        not isinstance(session_id, str)
+        or not session_id
+        or type(resulting_status_version) is not int
+        or resulting_status_version < 1
+        or not isinstance(stored_idempotency_key, str)
+        or stored_idempotency_key != expected_idempotency_key
+    ):
+        raise _conflict(
+            "contract_signature_idempotency_conflict",
+            "外部簽約交接 receipt 的命令識別不一致。",
+        )
+    try:
+        return StoredExternalSigningHandoffReceipt(
+            PreviewFingerprint(row["command_fingerprint"]),
+            ExternalSigningHandoffReceipt(
+                session_id, resulting_status_version, False
+            ),
+        )
+    except (KeyError, TypeError, ValueError):
+        raise _stored_fact_error(
+            "external_signing_handoff_receipt_snapshot_invalid"
         ) from None
 
 
@@ -854,6 +932,21 @@ def _receipt_snapshot(receipt: ExternalSigningReportReceipt) -> dict[str, object
     }
 
 
+def _handoff_receipt_snapshot(
+    receipt: ExternalSigningHandoffReceipt, key: IdempotencyKey
+) -> dict[str, object]:
+    return {
+        "idempotency_key": key.value,
+        "resulting_status_version": receipt.resulting_status_version,
+        "session_id": receipt.session_id,
+    }
+
+
+def _handoff_storage_key(key: IdempotencyKey) -> str:
+    """Fit the generic receipt column without changing the public 191-char key."""
+    return "handoff:sha256:" + hashlib.sha256(key.value.encode("utf-8")).hexdigest()
+
+
 def _final_receipt_snapshot(
     receipt: FinalSignedContractApplyReceipt,
 ) -> dict[str, object]:
@@ -1001,8 +1094,11 @@ _ACTIVE_SESSION_BY_CASE_SQL = (
 )
 _CURRENT_ORDER_SQL = "SELECT case_no,client_id FROM orders WHERE case_no=%s"
 _CURRENT_ACCEPTED_PLAN_SQL = (
-    "SELECT id FROM caregiver_matching_plans WHERE case_no=%s "
-    "AND status='accepted' AND is_active=1"
+    "SELECT plan.id FROM caregiver_matching_plans plan WHERE plan.case_no=%s "
+    "AND plan.is_active=1 AND (plan.status='accepted' OR (plan.status='proposed' AND "
+    "(SELECT response.response_value FROM matching_response_events response "
+    "WHERE response.plan_id=plan.id AND response.response_type='customer_decision' "
+    "ORDER BY response.occurred_at_utc DESC,response.id DESC LIMIT 1)='accepted'))"
 )
 _SESSION_ACTIVATE_SQL = (
     "INSERT INTO contract_external_signing_sessions "
@@ -1015,8 +1111,11 @@ _SESSION_INTERNAL_SELECT_SQL = (
 )
 _ORDER_SELECT_SQL = "SELECT case_no,client_id FROM orders WHERE case_no=%s"
 _PLAN_SELECT_SQL = (
-    "SELECT id FROM caregiver_matching_plans WHERE id=%s AND case_no=%s "
-    "AND status='accepted' AND is_active=1"
+    "SELECT plan.id FROM caregiver_matching_plans plan WHERE plan.id=%s AND plan.case_no=%s "
+    "AND plan.is_active=1 AND (plan.status='accepted' OR (plan.status='proposed' AND "
+    "(SELECT response.response_value FROM matching_response_events response "
+    "WHERE response.plan_id=plan.id AND response.response_type='customer_decision' "
+    "ORDER BY response.occurred_at_utc DESC,response.id DESC LIMIT 1)='accepted'))"
 )
 _SEGMENTS_SELECT_SQL = (
     "SELECT id AS segment_id,staff_id FROM caregiver_matching_plan_segments "
@@ -1077,6 +1176,11 @@ _RECEIPT_BY_KEY_SQL = (
     "SELECT command_fingerprint,result_snapshot FROM contract_external_signing_receipts "
     "WHERE idempotency_key=%s"
 )
+_HANDOFF_CASE_LOCK_SQL = "SELECT case_no FROM orders WHERE case_no=%s FOR UPDATE"
+_HANDOFF_RECEIPT_BY_KEY_SQL = (
+    "SELECT command_kind,command_fingerprint,result_snapshot "
+    "FROM contract_signing_command_receipts WHERE idempotency_key=%s"
+)
 _RECEIPT_BY_SOURCE_SQL = (
     "SELECT receipt.command_fingerprint,receipt.result_snapshot "
     "FROM contract_external_completion_reports report "
@@ -1110,6 +1214,11 @@ _RECEIPT_INSERT_SQL = (
     "command_fingerprint,preview_fingerprint,expected_status_version,result_status_version,"
     "completion_report_id,final_document_version_id,result_snapshot,outcome_state,actor_ref,"
     "correlation_id,applied_at_utc) VALUES (%s,%s,%s,%s,%s,%s,NULL,%s,%s,%s,NULL,%s,'recorded',%s,%s,%s)"
+)
+_HANDOFF_RECEIPT_INSERT_SQL = (
+    "INSERT INTO contract_signing_command_receipts "
+    "(idempotency_key,command_fingerprint,command_kind,case_no,document_version_id,"
+    "signing_event_id,correlation_id,result_snapshot) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)"
 )
 _CONTROLLED_FILE_SELECT_SQL = (
     "SELECT id,opaque_object_id,owner_type,subject_reference,purpose,filename,"

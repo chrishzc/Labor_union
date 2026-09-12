@@ -45,6 +45,9 @@ class MySqlOrderAutoCompletionRepository:
         return AutoCompletionClaimState.MATCHED if actual == expected else AutoCompletionClaimState.MISMATCH
 
     def find_receipt(self, key: IdempotencyKey):
+        # claim_command already serializes this identity. Locking a missing
+        # immutable receipt would hold an index gap before the Orders root lock,
+        # deadlocking different commands when the winner inserts its receipt.
         with self._connection.cursor() as cursor:
             cursor.execute(_RECEIPT_SELECT_SQL, (key.value,))
             row = cursor.fetchone()
@@ -209,7 +212,7 @@ _CLAIM_SELECT_SQL = "SELECT command_family,aggregate_identity,command_fingerprin
 _LIFECYCLE_EVENT_INSERT_SQL = "INSERT INTO order_lifecycle_state_events (case_no,trigger_event,before_status,after_status,actor,business_date,expected_version,idempotency_key,facts_snapshot) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)"
 _ORDER_UPDATE_SQL = "UPDATE orders SET status=%s,lifecycle_version=%s WHERE case_no=%s AND lifecycle_version=%s"
 _OUTBOX_INSERT_SQL = "INSERT INTO orders_domain_outbox (case_no,lifecycle_event_id,intent_key,intent_type,payload_snapshot) VALUES (%s,%s,%s,%s,%s)"
-_RECEIPT_SELECT_SQL = "SELECT idempotency_key,command_fingerprint,case_no,lifecycle_event_id,order_version,result_snapshot FROM order_auto_completion_apply_receipts WHERE idempotency_key=%s FOR UPDATE"
+_RECEIPT_SELECT_SQL = "SELECT idempotency_key,command_fingerprint,case_no,lifecycle_event_id,order_version,result_snapshot FROM order_auto_completion_apply_receipts WHERE idempotency_key=%s"
 _RECEIPT_INSERT_SQL = "INSERT INTO order_auto_completion_apply_receipts (idempotency_key,command_fingerprint,case_no,lifecycle_event_id,order_version,completion_instant,evaluation_at,result_snapshot) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)"
 
 

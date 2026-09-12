@@ -10,8 +10,12 @@
 ## Implementation
 - primary:
   - `subsystems/orders/terms_workflow.py`
+  - `subsystems/orders/order_intake_terms_bootstrap.py`
   - `infrastructure/mysql/order_terms_read_model.py`
   - `infrastructure/mysql/order_terms_repository.py`
+  - `infrastructure/mysql/order_intake_terms_bootstrap_repository.py`
+- entrypoints:
+  - `api/routes/order_terms.py` — Orders Terms Query／Preview／Apply HTTP transport 與輸入驗證。
 
 ## Dependencies
 - outbound: `scheduling/schedule-generation` — 由 Scheduling typed candidate 判定排班 generation 影響；Orders 不自行寫入 assignment。
@@ -26,10 +30,12 @@
 ## Verification
 - layout_status: `custom_current`
 - test_root: `tests/test_order_terms_preassignment_correction.py`
+- test_root: `tests/domains/orders/subsystems/orders/modules/intake-terms-bootstrap/unit/`
 
 ## Provenance
 - Workflow owner and cross-owner transaction boundary — `architecture_declared` — Orders formal spec and current source.
 - Preassignment start-date、confirmed-service-date replacement projection and focused regression — `source_observed` — current workflow, MySQL adapter and test listed above.
+- Intake terms bootstrap and intake completion owner-local unit regression — `source_observed` — current bootstrap workflow and canonical unit root.
 
 ## Change triggers
 Reconcile when Orders Terms public contract, cross-owner impact, transaction boundary, preassignment generation semantics, receipt, or focused test root changes.

@@ -10,8 +10,12 @@ import { ApiHttpError } from '../shared/typed_errors';
 
 const CustomerDecisionReceiptSchema = z.strictObject({
   event_id: z.number().int().positive(),
+  case_no: z.string().min(1).max(50),
+  plan_id: z.number().int().positive(),
+  segment_id: z.null(),
+  event_key: z.string().min(1).max(191),
   communication_version: z.number().int().nonnegative(),
-  source: z.enum(['admin', 'manual', 'line']),
+  source: z.literal('admin'),
   willingness: z.null(),
   customer_decision: z.enum(['accepted', 'declined', 'contact_requested']),
 });
@@ -43,8 +47,12 @@ const FormalPlanContactStateSchema = z.strictObject({
 
 const CaregiverWillingnessReceiptSchema = z.strictObject({
   event_id: z.number().int().positive(),
+  case_no: z.string().min(1).max(50),
+  plan_id: z.number().int().positive(),
+  segment_id: z.number().int().positive(),
+  event_key: z.string().min(1).max(191),
   communication_version: z.number().int().nonnegative(),
-  source: z.enum(['admin', 'manual', 'line']),
+  source: z.literal('admin'),
   willingness: z.literal('willing'),
   customer_decision: z.null(),
 });
@@ -194,6 +202,7 @@ const HolidayWorkAgreementReceiptEnvelopeSchema = z.strictObject({
 });
 
 export type CustomerDecisionReceipt = z.infer<typeof CustomerDecisionReceiptSchema>;
+export type CaregiverWillingnessReceipt = z.infer<typeof CaregiverWillingnessReceiptSchema>;
 export type FormalPlanContactState = z.infer<typeof FormalPlanContactStateSchema>;
 export type CustomerProfilesNotificationReceipt = z.infer<typeof CustomerProfilesNotificationReceiptSchema>;
 export type CustomerConfirmationPreview = z.infer<typeof CustomerConfirmationPreviewSchema>;
@@ -299,6 +308,7 @@ export const matchingPlanCommunicationClient = {
     caseNo: string,
     planId: number,
     expectedVersion: number,
+    options?: { signal?: AbortSignal },
   ): Promise<CustomerConfirmationPreview> {
     const canonical = canonicalCaseNo(caseNo);
     const token = sessionClient.getToken();
@@ -309,7 +319,7 @@ export const matchingPlanCommunicationClient = {
       CustomerConfirmationPreviewEnvelopeSchema,
       await transport.get(
         `/api/v1/orders/${encodeURIComponent(canonical)}/matching-plans/${planId}/customer-confirmation/preview?expected_version=${expectedVersion}`,
-        { token },
+        { token, signal: options?.signal },
       ),
     );
     if (!decoded.success || decoded.data === null) {
@@ -441,22 +451,29 @@ export const matchingPlanCommunicationClient = {
     segmentId: number,
     expectedVersion: number,
     reason: string,
-  ): Promise<void> {
+    eventKey?: string,
+    expectedActor?: string,
+  ): Promise<CaregiverWillingnessReceipt> {
     const canonical = canonicalCaseNo(caseNo);
     const actor = sessionClient.getUser()?.username.trim() ?? '';
     const token = sessionClient.getToken();
     const canonicalReason = reason.trim();
+    const canonicalEventKey = eventKey?.trim() || `orders-formal-plan-willingness-${planId}-${segmentId}-${crypto.randomUUID()}`;
     if (!Number.isInteger(planId) || planId <= 0 || !Number.isInteger(segmentId) || segmentId <= 0) throw new Error('正式媒合方案或區段識別無效。');
     if (!Number.isInteger(expectedVersion) || expectedVersion < 0) throw new Error('正式媒合方案版本無效，請重新載入。');
     if (!actor || !token) throw new ApiHttpError(401, 'UNAUTHENTICATED', '請先登入。');
+    if (expectedActor !== undefined && expectedActor.trim() !== actor) {
+      throw new ApiHttpError(409, 'FORMAL_MANUAL_RESPONSE_ACTOR_CHANGED', '目前登入帳號與原正式人工回覆不一致。');
+    }
     if (!canonicalReason || canonicalReason.length > 500) throw new Error('請填寫 1 至 500 字的月嫂確認依據。');
+    if (canonicalEventKey.length > 100) throw new Error('月嫂意願操作識別無效，請重新載入。');
     const decoded = decodePayload(
       WillingnessEnvelopeSchema,
       await transport.put(
         `/api/v1/orders/${encodeURIComponent(canonical)}/matching-plans/${planId}/segments/${segmentId}/willingness`,
         {
           actor,
-          event_key: `orders-formal-plan-willingness-${planId}-${segmentId}-${crypto.randomUUID()}`,
+          event_key: canonicalEventKey,
           willingness: 'willing',
           expected_version: expectedVersion,
           reason: canonicalReason,
@@ -467,7 +484,17 @@ export const matchingPlanCommunicationClient = {
     if (!decoded.success || decoded.data === null) {
       throw new ApiHttpError(422, 'FORMAL_PLAN_WILLINGNESS_FAILED', decoded.error ?? decoded.message, false, decoded);
     }
-    if (decoded.data.communication_version < expectedVersion) throw new Error('月嫂意願回條版本倒退，請重新載入。');
+    if (decoded.data.case_no !== canonical
+      || decoded.data.plan_id !== planId
+      || decoded.data.segment_id !== segmentId
+      || decoded.data.event_key !== canonicalEventKey
+      || decoded.data.communication_version !== expectedVersion + 1
+      || decoded.data.source !== 'admin'
+      || decoded.data.willingness !== 'willing'
+      || decoded.data.customer_decision !== null) {
+      throw new Error('月嫂意願回條 identity 不一致，請重新讀取。');
+    }
+    return decoded.data;
   },
 
   async recordCustomerDecision(
@@ -476,15 +503,22 @@ export const matchingPlanCommunicationClient = {
     expectedVersion: number,
     decision: 'accepted' | 'declined' | 'contact_requested',
     reason: string,
+    eventKey?: string,
+    expectedActor?: string,
   ): Promise<CustomerDecisionReceipt> {
     const canonical = canonicalCaseNo(caseNo);
     const actor = sessionClient.getUser()?.username.trim() ?? '';
     const token = sessionClient.getToken();
     const canonicalReason = reason.trim();
+    const canonicalEventKey = eventKey?.trim() || `orders-customer-decision-${planId}-${crypto.randomUUID()}`;
     if (!Number.isInteger(planId) || planId <= 0) throw new Error('正式媒合方案識別必須是正整數。');
     if (!Number.isInteger(expectedVersion) || expectedVersion < 0) throw new Error('正式媒合方案版本無效，請重新載入。');
     if (!actor || !token) throw new ApiHttpError(401, 'UNAUTHENTICATED', '請先登入。');
+    if (expectedActor !== undefined && expectedActor.trim() !== actor) {
+      throw new ApiHttpError(409, 'FORMAL_MANUAL_RESPONSE_ACTOR_CHANGED', '目前登入帳號與原正式人工回覆不一致。');
+    }
     if (!canonicalReason || canonicalReason.length > 500) throw new Error('請填寫 1 至 500 字的客戶決策依據。');
+    if (canonicalEventKey.length > 100) throw new Error('客戶決策操作識別無效，請重新載入。');
 
     const decoded = decodePayload(
       EnvelopeSchema,
@@ -492,7 +526,7 @@ export const matchingPlanCommunicationClient = {
         `/api/v1/orders/${encodeURIComponent(canonical)}/matching-plans/${planId}/customer-decision`,
         {
           actor,
-          event_key: `orders-customer-decision-${planId}-${crypto.randomUUID()}`,
+          event_key: canonicalEventKey,
           decision,
           expected_version: expectedVersion,
           reason: canonicalReason,
@@ -503,8 +537,17 @@ export const matchingPlanCommunicationClient = {
     if (!decoded.success || decoded.data === null) {
       throw new ApiHttpError(422, 'MATCHING_CUSTOMER_DECISION_FAILED', decoded.error ?? decoded.message, false, decoded);
     }
-    if (decoded.data.communication_version < expectedVersion) {
-      throw new Error('客戶決策回條版本倒退，請重新載入。');
+    if (decoded.data.communication_version !== expectedVersion + 1) {
+      throw new Error('客戶決策回條版本倒退或跳號，請重新載入。');
+    }
+    if (decoded.data.case_no !== canonical
+      || decoded.data.plan_id !== planId
+      || decoded.data.segment_id !== null
+      || decoded.data.event_key !== canonicalEventKey
+      || decoded.data.source !== 'admin'
+      || decoded.data.willingness !== null
+      || decoded.data.customer_decision !== decision) {
+      throw new Error('客戶決策回條 identity 不一致，請重新讀取。');
     }
     return decoded.data;
   },

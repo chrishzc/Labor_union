@@ -5,6 +5,8 @@ Description: 協調媒合日期表的 LINE 發送、人工快照及逐一確認�
 
 from typing import Callable
 
+from shared_kernel.validation import require_canonical_text
+
 class MatchingScheduleConfirmationWorkflow:
     def __init__(self, repository, unit_of_work_factory: Callable[[], object]):
         self._repository = repository
@@ -14,6 +16,8 @@ class MatchingScheduleConfirmationWorkflow:
         return self._repository.query(case_no, plan_id)
 
     def send(self, case_no, plan_id, actor, key):
+        actor = require_canonical_text(actor, "actor", 100)
+        key = require_canonical_text(key, "idempotency key", 191)
         with self._unit_of_work_factory() as unit_of_work:
             result = self._repository.send(case_no, plan_id, actor, key)
             unit_of_work.commit()
@@ -23,6 +27,8 @@ class MatchingScheduleConfirmationWorkflow:
         return self._repository.preview_manual(case_no, plan_id)
 
     def prepare_manual(self, case_no, plan_id, actor, reason, expected_version, fingerprint, key):
+        actor = require_canonical_text(actor, "actor", 100)
+        key = require_canonical_text(key, "idempotency key", 191)
         normalized_reason = reason.strip()
         if not normalized_reason:
             raise ValueError("manual_schedule_confirmation_reason_required")
@@ -34,6 +40,8 @@ class MatchingScheduleConfirmationWorkflow:
             return result
 
     def confirm(self, recipient_id, value, actor, reason, key):
+        actor = require_canonical_text(actor, "actor", 100)
+        key = require_canonical_text(key, "idempotency key", 191)
         normalized_reason = reason.strip()
         if value in {"rejected", "manually_confirmed", "manually_revoked"} and not normalized_reason:
             raise ValueError("schedule_confirmation_reason_required")

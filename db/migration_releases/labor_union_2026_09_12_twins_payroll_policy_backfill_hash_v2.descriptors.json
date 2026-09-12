@@ -1,0 +1,101 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-twins-payroll-policy-2026-09-12-v2",
+  "descriptors": {
+    "1037_twins_payroll_policy.sql": {
+      "tables": {},
+      "parent_columns": {
+        "payroll_rate_policies": {
+          "policy_kind": {
+            "column_type": "enum('citizen','subsidized_citizen','non_citizen','twins')",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          }
+        },
+        "assignment_payroll_rate_snapshots": {
+          "policy_kind": {
+            "column_type": "enum('citizen','subsidized_citizen','non_citizen','twins')",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          }
+        },
+        "case_architecture_bootstrap_events": {
+          "payroll_policy_kind": {
+            "column_type": "enum('citizen','subsidized_citizen','non_citizen','twins')",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          }
+        },
+        "case_payroll_rate_policy_snapshots": {
+          "policy_kind": {
+            "column_type": "enum('citizen','subsidized_citizen','non_citizen','twins')",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          }
+        }
+      },
+      "indexes": {},
+      "foreign_keys": {
+        "assignment_payroll_rate_snapshots.fk_assignment_payroll_rate_policy": {
+          "columns": [
+            "policy_version",
+            "policy_kind"
+          ],
+          "referenced_table": "payroll_rate_policies",
+          "referenced_columns": [
+            "policy_version",
+            "policy_kind"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "case_architecture_bootstrap_events.fk_case_architecture_bootstrap_payroll_policy": {
+          "columns": [
+            "payroll_policy_version",
+            "payroll_policy_kind"
+          ],
+          "referenced_table": "payroll_rate_policies",
+          "referenced_columns": [
+            "policy_version",
+            "policy_kind"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "case_payroll_rate_policy_snapshots.fk_case_payroll_policy_definition": {
+          "columns": [
+            "policy_version",
+            "policy_kind"
+          ],
+          "referenced_table": "payroll_rate_policies",
+          "referenced_columns": [
+            "policy_version",
+            "policy_kind"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        }
+      },
+      "checks": {},
+      "triggers": [],
+      "views": {}
+    },
+    "1038_twins_payroll_order_details_view.sql": {
+      "tables": {},
+      "parent_columns": {},
+      "indexes": {},
+      "foreign_keys": {},
+      "checks": {},
+      "triggers": [],
+      "views": {
+        "v_order_details": {
+          "definition_sha256": "ab3ef0e5c827433b3b9b3f7d66e5ad5c84ad0f57d4b0f61d898fbdb290d3a0dd"
+        }
+      }
+    }
+  }
+}

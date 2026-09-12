@@ -55,7 +55,7 @@ class StoredFinanceImportReceipt:
 
 class FinanceImportRepository(Protocol):
     def load(self, batch_identity: str, *, for_update: bool) -> FinanceImportBatchFacts: ...
-    def find_receipt(self, key: IdempotencyKey) -> StoredFinanceImportReceipt | None: ...
+    def find_receipt(self, key: IdempotencyKey, *, for_update: bool = False) -> StoredFinanceImportReceipt | None: ...
     def append_dispatch_audit(self, plan: FinanceImportPlan, results: tuple[FinanceImportDispatchResult, ...]) -> None: ...
     def append_outbox(self, plan: FinanceImportPlan, results: tuple[FinanceImportDispatchResult, ...]) -> None: ...
     def advance_batch_version(self, batch_identity: str, expected_version: int, resulting_version: int) -> None: ...
@@ -93,15 +93,21 @@ class FinanceImportWorkflow:
         with self._unit_of_work_factory() as unit_of_work:
             replay = self._find_replay(request, command_fingerprint)
             if replay is not None: return replay
-            plan = self._fresh_plan(request); results = self._dispatch(plan, request); receipt = _build_receipt(plan, results)
+            facts = self._repository.load(request.batch_identity, for_update=True)
+            # The initial non-locking receipt read can miss a concurrent winner.  Once
+            # this transaction owns the batch lock, use a locking read so its latest
+            # immutable same-command receipt wins over a stale preview comparison.
+            replay = self._find_replay(request, command_fingerprint, for_update=True)
+            if replay is not None: return replay
+            plan = self._fresh_plan(request, facts); results = self._dispatch(plan, request); receipt = _build_receipt(plan, results)
             self._persist(request, plan, results, command_fingerprint, receipt); unit_of_work.commit(); return receipt
-    def _find_replay(self, request, command_fingerprint):
-        stored = self._repository.find_receipt(request.idempotency_key)
+    def _find_replay(self, request, command_fingerprint, *, for_update=False):
+        stored = self._repository.find_receipt(request.idempotency_key, for_update=for_update)
         if stored is None: return None
         if stored.command_fingerprint == command_fingerprint: return stored.receipt
         raise _workflow_error(request.correlation_id, ErrorCategory.IDEMPOTENCY_MISMATCH, "idempotency_conflict", "Idempotency key was used by another Finance Import command.")
-    def _fresh_plan(self, request):
-        facts = self._repository.load(request.batch_identity, for_update=True); _validate_batch_version(request, facts)
+    def _fresh_plan(self, request, facts):
+        _validate_batch_version(request, facts)
         plan = self._build_resolved_plan(facts); _validate_plan_is_applicable(request, plan)
         if plan.fingerprint != request.preview_fingerprint: raise _stale_error(request, facts.batch_version)
         return plan

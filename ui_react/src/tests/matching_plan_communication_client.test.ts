@@ -20,8 +20,9 @@ describe('matchingPlanCommunicationClient', () => {
       message: 'ok',
       data: {
         event_id: 31,
+        case_no: 'CASE-1', plan_id: 12, segment_id: null, event_key: 'decision-accepted-key',
         communication_version: 4,
-        source: 'manual',
+        source: 'admin',
         willingness: null,
         customer_decision: 'accepted',
       },
@@ -29,7 +30,7 @@ describe('matchingPlanCommunicationClient', () => {
     });
 
     await expect(matchingPlanCommunicationClient.recordCustomerDecision(
-      'CASE-1', 12, 3, 'accepted', '電話已確認接受方案。',
+      'CASE-1', 12, 3, 'accepted', '電話已確認接受方案。', 'decision-accepted-key',
     )).resolves.toMatchObject({ event_id: 31, customer_decision: 'accepted' });
     expect(put).toHaveBeenCalledWith(
       '/api/v1/orders/CASE-1/matching-plans/12/customer-decision',
@@ -38,14 +39,15 @@ describe('matchingPlanCommunicationClient', () => {
     );
   });
 
-  it('fails closed when the response version regresses', async () => {
+  it('fails closed when the receipt version is not the original version plus one', async () => {
     vi.spyOn(transport, 'put').mockResolvedValue({
       success: true,
       message: 'ok',
       data: {
         event_id: 31,
+        case_no: 'CASE-1', plan_id: 12, segment_id: null, event_key: 'decision-accepted-key',
         communication_version: 2,
-        source: 'manual',
+        source: 'admin',
         willingness: null,
         customer_decision: 'accepted',
       },
@@ -53,7 +55,7 @@ describe('matchingPlanCommunicationClient', () => {
     });
 
     await expect(matchingPlanCommunicationClient.recordCustomerDecision(
-      'CASE-1', 12, 3, 'accepted', '電話已確認接受方案。',
+      'CASE-1', 12, 3, 'accepted', '電話已確認接受方案。', 'decision-accepted-key',
     )).rejects.toThrow('版本倒退');
   });
 

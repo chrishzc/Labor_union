@@ -26,7 +26,9 @@ function preview(allowed = true) {
 }
 async function open(onObserved = vi.fn()) {
   render(<OrderFormalRecommendationPanel caseNo={CASE} onObserved={onObserved} />);
-  await screen.findByText(`目前決定：${accepted ? 'accepted' : 'pending'}`);
+  await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(
+    accepted ? '客戶已接受' : '確認資訊已送達',
+  ));
   return onObserved;
 }
 

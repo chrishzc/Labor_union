@@ -24,6 +24,8 @@ const CandidateInformationDeliverySchema = z.strictObject({
     'cancelled',
   ]),
   sent_at: IsoDateTimeSchema,
+  event_id: z.number().int().positive().nullable(),
+  line_task_id: z.number().int().positive().nullable(),
 });
 
 const CandidateContactSchema = z.strictObject({
@@ -36,6 +38,7 @@ const CandidateContactSchema = z.strictObject({
   staff_name: z.string().min(1).max(100),
   willingness: z.enum(['pending', 'willing', 'unwilling']),
   reason: z.string().max(500).nullable(),
+  latest_willingness_event_id: z.number().int().positive().nullable(),
   information: z.strictObject({
     '1': CandidateInformationDeliverySchema.nullable(),
     '2': CandidateInformationDeliverySchema.nullable(),
@@ -144,6 +147,34 @@ export interface CandidateContactInput {
   end_date: string;
 }
 
+/** Immutable candidate-pool add command retained only while its outcome is unresolved. */
+export interface CandidateAddCommand {
+  caseNo: string;
+  candidates: CandidateContactInput[];
+  actor: string;
+  eventKey: string;
+}
+
+/** Immutable candidate-information send command retained only while its outcome is unresolved. */
+export interface CandidateInformationSendCommand {
+  caseNo: string;
+  candidateId: number;
+  infoType: 1 | 2;
+  previewFingerprint: string;
+  actor: string;
+  eventKey: string;
+}
+
+/** Immutable manual willingness command used for unknown-outcome recovery. */
+export interface CandidateWillingnessCommand {
+  caseNo: string;
+  candidateId: number;
+  willingness: 'willing' | 'unwilling';
+  reason: string;
+  actor: string;
+  eventKey: string;
+}
+
 export interface CandidateContactPoolQueryOptions {
   signal?: AbortSignal;
 }
@@ -163,6 +194,118 @@ function canonicalCaseNo(caseNo: string): string {
     throw new Error('案件編號必須是 1 至 50 字元。');
   }
   return canonical;
+}
+
+function parseCandidateInputs(candidates: readonly CandidateContactInput[]): CandidateContactInput[] {
+  if (candidates.length < 1 || candidates.length > 50) {
+    throw new Error('必須選擇 1 至 50 位候選月嫂。');
+  }
+  const candidateSchema = z.strictObject({
+    staff_id: z.number().int().positive(),
+    start_date: IsoDateSchema,
+    end_date: IsoDateSchema,
+  }).refine((candidate) => candidate.start_date <= candidate.end_date, {
+    message: '候選服務結束日不得早於開始日。',
+    path: ['end_date'],
+  });
+  return z.array(candidateSchema).min(1).max(50).parse(candidates);
+}
+
+function canonicalCandidateAddCommand(command: CandidateAddCommand): CandidateAddCommand {
+  const actor = command.actor.trim();
+  const eventKey = command.eventKey.trim();
+  if (!actor || actor.length > 100 || !eventKey || eventKey.length > 100) {
+    throw new Error('候選池原操作識別不完整。');
+  }
+  return {
+    caseNo: canonicalCaseNo(command.caseNo),
+    candidates: parseCandidateInputs(command.candidates),
+    actor,
+    eventKey,
+  };
+}
+
+export function createCandidateAddCommand(
+  caseNo: string,
+  candidates: readonly CandidateContactInput[],
+): CandidateAddCommand {
+  const canonical = canonicalCaseNo(caseNo);
+  const { actor } = mutationIdentity();
+  return {
+    caseNo: canonical,
+    candidates: parseCandidateInputs(candidates),
+    actor,
+    eventKey: `orders-candidate-pool-add-${crypto.randomUUID()}`,
+  };
+}
+
+export function createCandidateInformationSendCommand(
+  caseNo: string,
+  candidateId: number,
+  infoType: 1 | 2,
+  previewFingerprint: string,
+): CandidateInformationSendCommand {
+  const canonical = canonicalCaseNo(caseNo);
+  const { actor } = mutationIdentity();
+  if (!Number.isInteger(candidateId) || candidateId <= 0) {
+    throw new Error('候選聯繫識別必須是正整數。');
+  }
+  return {
+    caseNo: canonical,
+    candidateId,
+    infoType,
+    previewFingerprint: z.string().regex(/^[0-9a-f]{64}$/).parse(previewFingerprint),
+    actor,
+    eventKey: `candidate-info-${candidateId}-${infoType}-${crypto.randomUUID()}`,
+  };
+}
+
+function canonicalCandidateWillingnessCommand(
+  command: CandidateWillingnessCommand,
+): CandidateWillingnessCommand {
+  const actor = command.actor.trim();
+  const eventKey = command.eventKey.trim();
+  if (!Number.isInteger(command.candidateId) || command.candidateId <= 0) {
+    throw new Error('候選聯繫識別必須是正整數。');
+  }
+  if (!actor || actor.length > 100 || !eventKey || eventKey.length > 100) {
+    throw new Error('候選意願原操作識別不完整。');
+  }
+  if (command.willingness !== 'willing' && command.willingness !== 'unwilling') {
+    throw new Error('候選意願值不合法。');
+  }
+  if (typeof command.reason !== 'string') {
+    throw new Error('候選意願備註必須是文字。');
+  }
+  const reason = command.reason.trim();
+  if (reason.length > 500 || (command.willingness === 'unwilling' && !reason)) {
+    throw new Error('無意願時必須填寫 500 字內拒絕理由。');
+  }
+  return {
+    caseNo: canonicalCaseNo(command.caseNo),
+    candidateId: command.candidateId,
+    willingness: command.willingness,
+    reason: reason || '人工補登願意',
+    actor,
+    eventKey,
+  };
+}
+
+export function createCandidateWillingnessCommand(
+  caseNo: string,
+  candidateId: number,
+  willingness: 'willing' | 'unwilling',
+  reason: string,
+): CandidateWillingnessCommand {
+  const { actor } = mutationIdentity();
+  return canonicalCandidateWillingnessCommand({
+    caseNo,
+    candidateId,
+    willingness,
+    reason,
+    actor,
+    eventKey: `orders-candidate-willingness-${candidateId}-${crypto.randomUUID()}`,
+  });
 }
 
 export const candidateContactPoolClient = {
@@ -201,31 +344,24 @@ export const candidateContactPoolClient = {
   },
 
   async addCandidates(
-    caseNo: string,
-    candidates: CandidateContactInput[],
+    commandOrCaseNo: CandidateAddCommand | string,
+    legacyCandidates?: CandidateContactInput[],
   ): Promise<AddCandidatesResult> {
-    const canonical = canonicalCaseNo(caseNo);
+    const command = typeof commandOrCaseNo === 'string'
+      ? createCandidateAddCommand(commandOrCaseNo, legacyCandidates ?? [])
+      : canonicalCandidateAddCommand(commandOrCaseNo);
     const { actor, token } = mutationIdentity();
-    if (candidates.length < 1 || candidates.length > 50) {
-      throw new Error('必須選擇 1 至 50 位候選月嫂。');
+    if (actor !== command.actor) {
+      throw new Error('登入操作者已變更，不能重新送出原候選池操作。');
     }
-    const candidateSchema = z.strictObject({
-      staff_id: z.number().int().positive(),
-      start_date: IsoDateSchema,
-      end_date: IsoDateSchema,
-    }).refine((candidate) => candidate.start_date <= candidate.end_date, {
-      message: '候選服務結束日不得早於開始日。',
-      path: ['end_date'],
-    });
-    const parsedCandidates = z.array(candidateSchema).min(1).max(50).parse(candidates);
     const envelope = decodePayload(
       mutationEnvelope(AddCandidatesResultSchema),
       await transport.post(
-        `/api/v1/orders/${encodeURIComponent(canonical)}/candidate-contact-pool/candidates`,
+        `/api/v1/orders/${encodeURIComponent(command.caseNo)}/candidate-contact-pool/candidates`,
         {
-          candidates: parsedCandidates,
-          actor,
-          event_key: `orders-candidate-pool-add-${crypto.randomUUID()}`,
+          candidates: command.candidates,
+          actor: command.actor,
+          event_key: command.eventKey,
         },
         { token },
       ),
@@ -237,29 +373,32 @@ export const candidateContactPoolClient = {
   },
 
   async recordWillingness(
-    caseNo: string,
-    candidateId: number,
-    willingness: 'willing' | 'unwilling',
-    reason: string,
+    commandOrCaseNo: CandidateWillingnessCommand | string,
+    legacyCandidateId?: number,
+    legacyWillingness?: 'willing' | 'unwilling',
+    legacyReason?: string,
   ): Promise<CandidateWillingnessResult> {
-    const canonical = canonicalCaseNo(caseNo);
+    const command = typeof commandOrCaseNo === 'string'
+      ? createCandidateWillingnessCommand(
+        commandOrCaseNo,
+        legacyCandidateId ?? 0,
+        legacyWillingness ?? 'willing',
+        legacyReason ?? '',
+      )
+      : canonicalCandidateWillingnessCommand(commandOrCaseNo);
     const { actor, token } = mutationIdentity();
-    if (!Number.isInteger(candidateId) || candidateId <= 0) {
-      throw new Error('候選聯繫識別必須是正整數。');
-    }
-    const canonicalReason = reason.trim();
-    if (canonicalReason.length > 500 || (willingness === 'unwilling' && !canonicalReason)) {
-      throw new Error('無意願時必須填寫 500 字內拒絕理由。');
+    if (actor !== command.actor) {
+      throw new Error('登入操作者已變更，不能重送原意願操作。');
     }
     const envelope = decodePayload(
       mutationEnvelope(CandidateWillingnessResultSchema),
       await transport.put(
-        `/api/v1/orders/${encodeURIComponent(canonical)}/candidate-contact-pool/candidates/${candidateId}/willingness`,
+        `/api/v1/orders/${encodeURIComponent(command.caseNo)}/candidate-contact-pool/candidates/${command.candidateId}/willingness`,
         {
-          willingness,
-          reason: canonicalReason || '人工補登願意',
-          actor,
-          event_key: `orders-candidate-willingness-${candidateId}-${crypto.randomUUID()}`,
+          willingness: command.willingness,
+          reason: command.reason,
+          actor: command.actor,
+          event_key: command.eventKey,
         },
         { token },
       ),
@@ -270,45 +409,42 @@ export const candidateContactPoolClient = {
     return envelope.data;
   },
 
-  async previewInformation(caseNo: string, candidateId: number, infoType: 1 | 2): Promise<CandidateInformationPreview> {
+  async previewInformation(
+    caseNo: string,
+    candidateId: number,
+    infoType: 1 | 2,
+    options?: { signal?: AbortSignal },
+  ): Promise<CandidateInformationPreview> {
     const canonical = canonicalCaseNo(caseNo);
     const { token } = mutationIdentity();
     const envelope = decodePayload(mutationEnvelope(InformationPreviewSchema), await transport.get(
-      `/api/v1/orders/${encodeURIComponent(canonical)}/candidate-contact-pool/candidates/${candidateId}/information/preview?info_type=${infoType}`, { token }));
+      `/api/v1/orders/${encodeURIComponent(canonical)}/candidate-contact-pool/candidates/${candidateId}/information/preview?info_type=${infoType}`,
+      { token, signal: options?.signal },
+    ));
     if (!envelope.success || !envelope.data) throw new Error('無法讀取寄送內容。');
     const data = envelope.data;
     if (data.case_no !== canonical || data.candidate_id !== candidateId || data.info_type !== infoType) throw new Error('寄送預覽對象不一致。');
     return data;
   },
 
-  async sendInformation(
-    caseNo: string,
-    candidateId: number,
-    infoType: 1 | 2,
-    previewFingerprint: string,
-    eventKey: string,
-  ): Promise<SendCandidateInformationResult> {
-    const canonicalCaseNo = caseNo.trim();
-    const actor = sessionClient.getUser()?.username.trim() ?? '';
-    const token = sessionClient.getToken();
-    if (!canonicalCaseNo || canonicalCaseNo.length > 50) {
-      throw new Error('案件編號必須是 1 至 50 字元。');
+  async sendInformation(command: CandidateInformationSendCommand): Promise<SendCandidateInformationResult> {
+    const canonical = canonicalCaseNo(command.caseNo);
+    const { actor, token } = mutationIdentity();
+    if (actor !== command.actor) {
+      throw new Error('登入操作者已變更，不能重新送出原寄送操作。');
     }
-    if (!Number.isInteger(candidateId) || candidateId <= 0) {
+    if (!Number.isInteger(command.candidateId) || command.candidateId <= 0) {
       throw new Error('候選聯繫識別必須是正整數。');
-    }
-    if (!actor || !token) {
-      throw new ApiHttpError(401, 'UNAUTHENTICATED', '請先登入。');
     }
     const envelope = decodePayload(
       SendCandidateInformationEnvelopeSchema,
       await transport.post(
-        `/api/v1/orders/${encodeURIComponent(canonicalCaseNo)}/candidate-contact-pool/candidates/${candidateId}/information`,
+        `/api/v1/orders/${encodeURIComponent(canonical)}/candidate-contact-pool/candidates/${command.candidateId}/information`,
         {
-          info_type: infoType,
-          actor,
-          preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/).parse(previewFingerprint),
-          event_key: z.string().min(1).max(100).parse(eventKey),
+          info_type: command.infoType,
+          actor: command.actor,
+          preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/).parse(command.previewFingerprint),
+          event_key: z.string().min(1).max(100).parse(command.eventKey),
         },
         { token },
       ),

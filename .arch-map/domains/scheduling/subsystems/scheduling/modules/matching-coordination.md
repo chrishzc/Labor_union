@@ -47,9 +47,12 @@
   - `api/schemas/matching_coordination.py`
   - `ui_react/src/api/matching_coordination/matching_coordination_client.ts` — isolated-tested transport client; no current App route consumer.
   - `ui_react/src/components/MatchingCoordinationWorkbench.tsx` — isolated-tested workbench; no current App route consumer.
-  - `api/routes/matches.py`、`api/schemas/matches.py` — `/holiday-work-agreements/preview`、Stage 5 customer confirmation 與到期履歷 download contract。
+  - `api/routes/matches.py`、`api/schemas/matches.py` — `/holiday-work-agreements/preview`、Stage 5 customer confirmation、matching-plan create immutable receipt Query 與到期履歷 download contract。
   - `ui_react/src/api/scheduling/matching_plan_communication_client.ts`、`ui_react/src/components/HolidayWorkAgreementActions.tsx`、`ui_react/src/components/OrderFormalRecommendationPanel.tsx` — current Order Workbench V2 的人工協調 UI；不宣稱為 LINE delivery/reply。
   - `db/schema_parts/1032_matching_holiday_work_agreements.sql` — additive immutable agreement and participant records.
+  - `db/schema_parts/222_matching_plan_create_receipts.sql` — fresh-bootstrap immutable receipt root for formal matching-plan create commands; preserve upgrade uses byte-equivalent migration-only part `1039`.
+  - `db/schema_parts/1039_matching_plan_create_receipts.sql` — preserve-only byte-equivalent bridge for the same receipt root; it is not a second writer or a fresh-bootstrap table.
+  - `scripts/run_contract_signing_normal_chain.py` — disposable normal-chain scenario calls the typed matching-plan create command with an explicit immutable event key.
   - `scripts/run_holiday_work_agreement_scenario.py` — disposable `lu_test_*` scenario runner；透過 typed public API 驗證任意假日排班拒絕、雙方同意後納入服務日，以及後續拒絕立即撤銷。
 
 ## Dependencies
@@ -66,9 +69,14 @@
 
 ## Verification
 - test_root: `tests/domains/scheduling/subsystems/scheduling/modules/matching-coordination/`
+- test_root: `tests/domains/scheduling/subsystems/scheduling/modules/matching-coordination/unit/test_matching_plan_create_receipts.py` — immutable command fingerprint, replay, receipt metadata and read-only receipt Query tests.
+- test_root: `tests/domains/external-integration/subsystems/line/subsystems/test_line_matching_notification_application_stage7.py` — existing direct test double for `matching_notification_application` manual response protocol.
+- test_root: `tests/test_task97_typed_matching_receipts.py` — 既有正式媒合 API response schema、人工回覆 identity 與拒絕未知欄位測試。
+- integration_root: `tests/test_caregiver_matching_plan_service.py` — flat legacy public workflow tests remain at this path because their schema lookup is relocation-sensitive; the autouse caller fixture supplies the currently required create-command event key without restoring a production bypass.
 - layout_status: `custom_current`
 - test_root: `ui_react/src/tests/domains/scheduling/subsystems/scheduling/modules/matching-coordination/`
 - test_root: `ui_react/src/tests/candidate_contact_pool_client.test.ts`
+- test_root: `ui_react/src/tests/matching_plan_communication_client.test.ts` — 既有正式媒合人工回覆與收據識別 transport 測試。
 - test_root: `ui_react/src/tests/order_workbench_v2_candidate_query.test.tsx` — 既有詢問查詢元件與完整候選回讀測試。
 - test_root: `ui_react/src/tests/order_workbench_v2_candidate_contact_status.test.tsx` — 既有意願確認／回讀元件測試。
 - higher_boundary:

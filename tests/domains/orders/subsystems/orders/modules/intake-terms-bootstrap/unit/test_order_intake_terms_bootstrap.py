@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
+from threading import Barrier
 
 import pytest
 
@@ -397,7 +399,7 @@ class _Repository:
         self.load_calls.append((case_no, for_update))
         if for_update:
             self.for_update_calls.append(True)
-        return self.case if case_no == _CASE else None
+        return self.case if case_no == self.case.case_no else None
 
     def update_missing_terms(
         self,
@@ -439,7 +441,7 @@ class _Repository:
         )
         return self.case.lifecycle_version
 
-    def load_receipt(self, family, key):
+    def load_receipt(self, family, key, *, for_update=True):
         stored = self.receipts.get((family, key))
         if stored is None:
             return None

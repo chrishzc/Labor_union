@@ -113,7 +113,39 @@ def test_willing_candidate_plan_uses_schedule_only_availability(monkeypatch):
     monkeypatch.setattr(
         matching_plan_workflow,
         "_run_in_application_uow",
-        lambda _operation: {"result": "created"},
+        lambda operation: operation(object(), object()),
+    )
+    monkeypatch.setattr(
+        matching_plan_workflow,
+        "_lock_matching_plan_case_root",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        matching_plan_workflow,
+        "_load_matching_plan_create_receipt",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        matching_plan_workflow,
+        "_create_matching_plan_version_in_transaction",
+        lambda *_args: {
+            "plan_id": 1,
+            "case_no": "M3-CUST-20260910-01",
+            "version": 1,
+            "status": "proposed",
+            "result": "created",
+            "segments": [{
+                "segment_order": 1,
+                "staff_id": 1,
+                "assigned_start_date": "2026-12-21",
+                "assigned_end_date": "2027-01-09",
+            }],
+        },
+    )
+    monkeypatch.setattr(
+        matching_plan_workflow,
+        "_save_matching_plan_create_receipt",
+        lambda *_args: None,
     )
 
     matching_plan_workflow.create_matching_plan_version(
@@ -123,6 +155,61 @@ def test_willing_candidate_plan_uses_schedule_only_availability(monkeypatch):
         "2026-09-11",
         facts_port=object(),
         require_willing_candidate=True,
+        event_key="test-willing-candidate-schedule-only",
+    )
+
+    assert captured["filter_policy"] == {
+        "region": False,
+        "cooking": False,
+        "preferred_service_days": False,
+        "daily_service_hours": False,
+    }
+    assert captured["include_candidate_options"] is False
+
+
+def test_multi_caregiver_plan_fresh_check_does_not_reapply_discovery_preferences(monkeypatch):
+    captured = {}
+    segments = [
+        {
+            "staff_id": 1,
+            "assigned_start_date": "2026-12-21",
+            "assigned_end_date": "2026-12-22",
+        },
+        {
+            "staff_id": 2,
+            "assigned_start_date": "2026-12-23",
+            "assigned_end_date": "2026-12-24",
+        },
+    ]
+
+    def fake_search(**kwargs):
+        captured.update(kwargs)
+        return {
+            "feasibility": "complete",
+            "conflicts": [],
+            "complete_combinations": [[
+                {
+                    "segment_index": index,
+                    "staff_id": segment["staff_id"],
+                    "start_date": segment["assigned_start_date"],
+                    "end_date": segment["assigned_end_date"],
+                }
+                for index, segment in enumerate(segments)
+            ]],
+        }
+
+    monkeypatch.setattr(
+        matching_plan_workflow,
+        "search_segmented_caregiver_availability",
+        fake_search,
+    )
+
+    matching_plan_workflow._validate_current_availability(
+        "MULTI-1",
+        segments,
+        "2026-09-12",
+        object(),
+        False,
     )
 
     assert captured["filter_policy"] == {
@@ -210,22 +297,59 @@ def test_current_willing_candidate_creates_plan_without_candidate_display_dates(
         "_run_in_application_uow",
         lambda operation: operation(object(), object()),
     )
+    monkeypatch.setattr(
+        matching_plan_workflow,
+        "_lock_matching_plan_case_root",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        matching_plan_workflow,
+        "_load_matching_plan_create_receipt",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        matching_plan_workflow,
+        "_load_matching_plan_create_receipt",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        matching_plan_workflow,
+        "_save_matching_plan_create_receipt",
+        lambda *_args: None,
+    )
 
-    assert matching_plan_workflow.create_matching_plan_version(
+    result = matching_plan_workflow.create_matching_plan_version(
         "CASE-2026-S05",
         segments,
         "operator",
         "2026-09-11",
         facts_port=_FormalPlanFacts(),
         require_willing_candidate=True,
-    ) == {"result": "created"}
+        event_key="test-willing-candidate-without-display-dates",
+    )
+    assert result["result"] == "created"
 
 
 def test_formal_plan_still_rejects_current_schedule_conflict(monkeypatch):
     monkeypatch.setattr(
         matching_plan_workflow,
         "_run_in_application_uow",
-        lambda _operation: pytest.fail("conflicted plan must not enter persistence"),
+        lambda operation: operation(object(), object()),
+    )
+    monkeypatch.setattr(
+        matching_plan_workflow,
+        "_lock_matching_plan_case_root",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        matching_plan_workflow,
+        "_load_matching_plan_create_receipt",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        matching_plan_workflow,
+        "_create_matching_plan_version_in_transaction",
+        lambda *_args: pytest.fail("conflicted plan must not enter persistence"),
     )
 
     with pytest.raises(ValueError, match="submitted segments must match a complete combination"):
@@ -242,6 +366,7 @@ def test_formal_plan_still_rejects_current_schedule_conflict(monkeypatch):
             "2026-09-11",
             facts_port=_FormalPlanFacts(occupied=True),
             require_willing_candidate=True,
+            event_key="test-formal-plan-schedule-conflict",
         )
 
 

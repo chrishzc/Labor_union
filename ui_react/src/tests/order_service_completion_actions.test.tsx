@@ -6,14 +6,20 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiHttpError } from '../api/shared/typed_errors';
 import { orderServiceCompletionClient } from '../api/orders/order_service_completion_client';
+import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_store';
 import { OrderServiceCompletionActions } from '../components/OrderServiceCompletionActions';
+
+const readback = vi.hoisted(() => ({ detail: vi.fn(), terms: vi.fn() }));
+vi.mock('../api/orders/order_query_client', () => ({
+  ordersQueryClient: { getOrderDetail: readback.detail, getOrderTerms: readback.terms },
+}));
 
 vi.mock('../api/orders/order_service_completion_client', () => ({
   orderServiceCompletionClient: { preview: vi.fn(), apply: vi.fn() },
 }));
 
 const preview = {
-  case_no: 'CASE-001',
+  case_no: '115000001',
   expected_order_version: 4,
   resulting_order_version: 5,
   current_status: '服務中',
@@ -24,7 +30,7 @@ const preview = {
 };
 
 const receipt = {
-  case_no: 'CASE-001',
+  case_no: '115000001',
   idempotency_key: 'completion-key',
   order_version: 5,
   lifecycle_event_id: 77,
@@ -35,13 +41,16 @@ const receipt = {
 
 describe('OrderServiceCompletionActions', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
+    orderMutationFlowStore.clearAll();
+    readback.detail.mockImplementation(async (caseNo: string) => ({ case_no: caseNo, order_status: '訂單完成' }));
+    readback.terms.mockImplementation(async (caseNo: string) => ({ case_no: caseNo, order_version: 5 }));
     vi.mocked(orderServiceCompletionClient.preview).mockResolvedValue(preview);
     vi.mocked(orderServiceCompletionClient.apply).mockResolvedValue(receipt);
   });
 
   it('keeps non-service cases read-only with business guidance', () => {
-    render(<OrderServiceCompletionActions caseNo="CASE-001" orderStatus="訂單完成" onCompleted={vi.fn()} />);
+    render(<OrderServiceCompletionActions caseNo="115000001" orderStatus="訂單完成" onCompleted={vi.fn()} />);
     expect(screen.getByText(/客戶帳務與服務人員款項流程/)).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/Client Finance|Staff Payables|owner|lifecycle controls/i);
     expect(orderServiceCompletionClient.preview).not.toHaveBeenCalled();
@@ -49,7 +58,7 @@ describe('OrderServiceCompletionActions', () => {
 
   it('preserves Preview confirmation gating and completion readback', async () => {
     const onCompleted = vi.fn();
-    render(<OrderServiceCompletionActions caseNo="CASE-001" orderStatus="服務中" onCompleted={onCompleted} />);
+    render(<OrderServiceCompletionActions caseNo="115000001" orderStatus="服務中" onCompleted={onCompleted} />);
     expect(screen.getByText(/核對正式排班/)).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/lifecycle controls|fingerprint|idempotency|receipt/i);
 
@@ -63,7 +72,7 @@ describe('OrderServiceCompletionActions', () => {
 
     await screen.findByText('服務完成已登記並完成回讀。');
     expect(screen.queryByRole('button', { name: '確認套用服務完成' })).not.toBeInTheDocument();
-    expect(orderServiceCompletionClient.apply).toHaveBeenCalledWith('CASE-001', preview, '已核對最後服務日', expect.any(String));
+    expect(orderServiceCompletionClient.apply).toHaveBeenCalledWith('115000001', preview, '已核對最後服務日', expect.any(String));
     await waitFor(() => expect(onCompleted).toHaveBeenCalledOnce());
   });
 

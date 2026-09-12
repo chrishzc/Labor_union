@@ -4,12 +4,30 @@ import { OrderCandidateContactStatusPanel } from '../../../../../../../component
 import { OrderInformationSheets } from '../../../../../../../components/OrderInformationSheets';
 import { candidateContactPoolClient as client } from '../../../../../../../api/scheduling/candidate_contact_pool_client';
 
-vi.mock('../../../../../../../api/scheduling/candidate_contact_pool_client', () => ({ candidateContactPoolClient: { query: vi.fn(), previewInformation: vi.fn(), sendInformation: vi.fn() } }));
+const { createInformationCommand } = vi.hoisted(() => ({ createInformationCommand: vi.fn() }));
+vi.mock('../../../../../../../api/scheduling/candidate_contact_pool_client', () => ({
+  createCandidateInformationSendCommand: createInformationCommand,
+  candidateContactPoolClient: { query: vi.fn(), previewInformation: vi.fn(), sendInformation: vi.fn() },
+}));
 beforeEach(() => {
   vi.resetAllMocks();
-  vi.mocked(client.query).mockResolvedValue({ case_no: 'CASE-1', pool_id: 1, candidates: [{ id: 3, staff_id: 2, staff_name: '測試月嫂', status: 'active', willingness: 'pending', information: { '1': null, '2': null }, service_start_date: '2026-10-01', service_end_date: '2026-10-02' }] } as never);
+  let sentKind: 1 | 2 | null = null;
+  vi.mocked(client.query).mockImplementation(async () => ({ case_no: 'CASE-1', pool_id: 1, candidates: [{
+    id: 3, staff_id: 2, staff_name: '測試月嫂', status: 'active', willingness: 'pending', reason: null,
+    latest_willingness_event_id: null,
+    information: {
+      '1': sentKind === 1 ? { status: 'queued', sent_at: '2026-10-01T00:00:00Z', event_id: 4, line_task_id: 5 } : null,
+      '2': sentKind === 2 ? { status: 'queued', sent_at: '2026-10-01T00:00:00Z', event_id: 4, line_task_id: 5 } : null,
+    }, service_start_date: '2026-10-01', service_end_date: '2026-10-02', created_at: '2026-09-01T00:00:00Z',
+  }] } as never));
+  createInformationCommand.mockImplementation((caseNo, candidateId, infoType, previewFingerprint) => ({
+    caseNo, candidateId, infoType, previewFingerprint, actor: 'operator-1', eventKey: `information-${infoType}-key`,
+  }));
   vi.mocked(client.previewInformation).mockImplementation(async (caseNo, candidateId, kind) => ({ case_no: caseNo, candidate_id: candidateId, info_type: kind, staff_name: '測試月嫂', text: `資訊${kind}：服務報酬待確認`, preview_fingerprint: String(kind).repeat(64) }));
-  vi.mocked(client.sendInformation).mockResolvedValue({ status: 'queued', event_id: 4, line_task_id: 5 });
+  vi.mocked(client.sendInformation).mockImplementation(async (command) => {
+    sentKind = command.infoType;
+    return { status: 'queued', event_id: 4, line_task_id: 5 };
+  });
 });
 
 it.each([1, 2] as const)('previews information %i independently and sends exactly that preview', async (kind) => {
@@ -18,7 +36,10 @@ it.each([1, 2] as const)('previews information %i independently and sends exactl
   await screen.findByText(`資訊${kind}：服務報酬待確認`);
   expect(client.sendInformation).not.toHaveBeenCalled();
   fireEvent.click(screen.getByText('確認寄送'));
-  await waitFor(() => expect(client.sendInformation).toHaveBeenCalledWith('CASE-1', 3, kind, String(kind).repeat(64), expect.any(String)));
+  await waitFor(() => expect(client.sendInformation).toHaveBeenCalledWith({
+    caseNo: 'CASE-1', candidateId: 3, infoType: kind, previewFingerprint: String(kind).repeat(64),
+    actor: 'operator-1', eventKey: `information-${kind}-key`,
+  }));
   expect(client.sendInformation).toHaveBeenCalledTimes(1);
 });
 

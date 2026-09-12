@@ -74,6 +74,11 @@ const FormalPlanSchema = z.strictObject({
   version: z.number().int().positive(),
   status: z.literal('proposed'),
   result: z.enum(['created', 'existing']),
+  actor: z.string().min(1).max(191),
+  as_of: IsoDateSchema,
+  event_key: z.string().min(1).max(191),
+  command_fingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+  replayed: z.boolean(),
   segments: z.array(z.strictObject({
     segment_order: z.number().int().positive(),
     staff_id: z.number().int().positive(),
@@ -93,12 +98,20 @@ export type MatchingAvailability = z.infer<typeof AvailabilitySchema>;
 export type FormalMatchingPlan = z.infer<typeof FormalPlanSchema>;
 export type MatchingSegmentDraft = z.infer<typeof SegmentDraftSchema>;
 export type MatchingPlanSegmentInput = z.infer<typeof PlanSegmentInputSchema>;
+export type FormalMatchingPlanCreateCommand = Readonly<{
+  caseNo: string;
+  segments: MatchingPlanSegmentInput[];
+  actor: string;
+  asOf: string;
+  key: string;
+}>;
 export type MatchingFilterPolicy = Readonly<{
   region: boolean;
   cooking: boolean;
   preferred_service_days: boolean;
   daily_service_hours: boolean;
 }>;
+type MatchingQueryOptions = Pick<RequestOptions, 'signal'>;
 
 export const defaultMatchingFilterPolicy: MatchingFilterPolicy = Object.freeze({
   region: true,
@@ -134,10 +147,41 @@ function result<T>(schema: z.ZodType<T>, raw: unknown, code: string): T {
   return decoded.data as T;
 }
 
+function canonicalCreateCommand(command: FormalMatchingPlanCreateCommand): FormalMatchingPlanCreateCommand {
+  const caseNo = canonicalCaseNo(command.caseNo);
+  const actor = command.actor.trim();
+  const key = command.key.trim();
+  const asOf = IsoDateSchema.parse(command.asOf);
+  const segments = z.array(PlanSegmentInputSchema).min(1).max(4).parse(command.segments);
+  if (!actor || actor.length > 191) throw new Error('建立正式媒合方案的操作人不正確。');
+  if (!key || key.length > 191) throw new Error('建立正式媒合方案的原操作識別不正確。');
+  for (const segment of segments) {
+    if (segment.start_date > segment.end_date) throw new Error('服務分段結束日不得早於開始日。');
+  }
+  return { caseNo, actor, key, asOf, segments };
+}
+
+function assertPlanReceiptIdentity(command: FormalMatchingPlanCreateCommand, data: FormalMatchingPlan): FormalMatchingPlan {
+  if (data.case_no !== command.caseNo
+    || data.actor !== command.actor
+    || data.as_of !== command.asOf
+    || data.event_key !== command.key
+    || data.segments.length !== command.segments.length
+    || data.segments.some((segment, index) => (
+      segment.staff_id !== command.segments[index]?.staff_id
+      || segment.assigned_start_date !== command.segments[index]?.start_date
+      || segment.assigned_end_date !== command.segments[index]?.end_date
+    ))) {
+    throw new Error('正式媒合方案收據 identity 不一致。');
+  }
+  return data;
+}
+
 export const matchingCandidateWorkflowClient = {
   async searchInquiryCandidates(
     caseNo: string,
     filters: MatchingFilterPolicy = defaultMatchingFilterPolicy,
+    options?: MatchingQueryOptions,
   ): Promise<MatchingAvailability> {
     const canonical = canonicalCaseNo(caseNo);
     const data = result(
@@ -145,7 +189,7 @@ export const matchingCandidateWorkflowClient = {
       await transport.post(
         `/api/v1/orders/${encodeURIComponent(canonical)}/candidate-contact-pool/availability/search`,
         { segment_count: 1, segment_drafts: [], as_of: new Date().toISOString().slice(0, 10), filters: MatchingFilterPolicySchema.parse(filters) },
-        authOptions(),
+        { ...authOptions(), signal: options?.signal },
       ),
       'CANDIDATE_INQUIRY_SEARCH_FAILED',
     );
@@ -158,6 +202,7 @@ export const matchingCandidateWorkflowClient = {
     segmentCount: 1 | 2 | 3 | 4,
     segmentDrafts: MatchingSegmentDraft[] = [],
     filters: MatchingFilterPolicy = defaultMatchingFilterPolicy,
+    options?: MatchingQueryOptions,
   ): Promise<MatchingAvailability> {
     const canonical = canonicalCaseNo(caseNo);
     const drafts = z.array(SegmentDraftSchema).max(segmentCount).parse(segmentDrafts);
@@ -177,7 +222,7 @@ export const matchingCandidateWorkflowClient = {
           as_of: new Date().toISOString().slice(0, 10),
           filters: parsedFilters,
         },
-        authOptions(),
+        { ...authOptions(), signal: options?.signal },
       ),
       'MATCHING_AVAILABILITY_SEARCH_FAILED',
     );
@@ -196,44 +241,45 @@ export const matchingCandidateWorkflowClient = {
     return this.searchSegmentedCaregivers(caseNo, 1, [dates], filters);
   },
 
-  async createMatchingPlan(
-    caseNo: string,
-    candidates: MatchingPlanSegmentInput[],
-  ): Promise<FormalMatchingPlan> {
-    const canonical = canonicalCaseNo(caseNo);
+  async createMatchingPlan(command: FormalMatchingPlanCreateCommand): Promise<FormalMatchingPlan> {
+    const canonical = canonicalCreateCommand(command);
     const actor = sessionClient.getUser()?.username.trim() ?? '';
     if (!actor) throw new ApiHttpError(401, 'UNAUTHENTICATED', '請先登入。');
-    const segments = z.array(PlanSegmentInputSchema).min(1).max(4).parse(candidates);
-    for (const segment of segments) {
-      if (segment.start_date > segment.end_date) throw new Error('服務分段結束日不得早於開始日。');
+    if (actor !== canonical.actor) {
+      throw new ApiHttpError(409, 'FORMAL_MATCHING_PLAN_ACTOR_CHANGED', '登入操作人已變更，不能以原建立操作重新確認。');
     }
     const data = result(
       FormalPlanSchema,
       await transport.post(
-        `/api/v1/orders/${encodeURIComponent(canonical)}/matching-plans`,
+        `/api/v1/orders/${encodeURIComponent(canonical.caseNo)}/matching-plans`,
         {
-          segments,
-          created_by: actor,
-          as_of: new Date().toISOString().slice(0, 10),
+          segments: canonical.segments,
+          created_by: canonical.actor,
+          as_of: canonical.asOf,
+          event_key: canonical.key,
         },
         authOptions(),
       ),
       'FORMAL_MATCHING_PLAN_CREATE_FAILED',
     );
-    if (data.case_no !== canonical || data.segments.length !== segments.length || data.segments.some((segment, index) => (
-      segment.staff_id !== segments[index]?.staff_id
-      || segment.assigned_start_date !== segments[index]?.start_date
-      || segment.assigned_end_date !== segments[index]?.end_date
-    ))) {
-      throw new Error('正式媒合方案回讀 identity 不一致。');
-    }
-    return data;
+    return assertPlanReceiptIdentity(canonical, data);
   },
 
-  async createSingleCaregiverPlan(
-    caseNo: string,
-    candidate: MatchingPlanSegmentInput,
-  ): Promise<FormalMatchingPlan> {
-    return this.createMatchingPlan(caseNo, [candidate]);
+  async createSingleCaregiverPlan(command: FormalMatchingPlanCreateCommand): Promise<FormalMatchingPlan> {
+    if (command.segments.length !== 1) throw new Error('單月嫂正式方案必須剛好一個服務分段。');
+    return this.createMatchingPlan(command);
+  },
+
+  async queryMatchingPlanReceipt(command: FormalMatchingPlanCreateCommand): Promise<FormalMatchingPlan> {
+    const canonical = canonicalCreateCommand(command);
+    const data = result(
+      FormalPlanSchema,
+      await transport.get(
+        `/api/v1/orders/${encodeURIComponent(canonical.caseNo)}/matching-plans/receipts/${encodeURIComponent(canonical.key)}`,
+        authOptions(),
+      ),
+      'FORMAL_MATCHING_PLAN_RECEIPT_READ_FAILED',
+    );
+    return assertPlanReceiptIdentity(canonical, data);
   },
 };

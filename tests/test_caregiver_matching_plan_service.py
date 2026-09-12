@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import date, timedelta
 
 import pytest
@@ -9,6 +10,20 @@ from subsystems.scheduling.segmented_availability import derive_segment_availabi
 
 
 _FACTS_PORT = object()
+
+
+@pytest.fixture(autouse=True)
+def _current_matching_plan_create_event_key(monkeypatch, request):
+    """Exercise the public workflow through its now-required command identity."""
+    create = service.create_matching_plan_version
+    event_key = "test-matching-plan-create-" + hashlib.sha256(
+        request.node.nodeid.encode("utf-8")
+    ).hexdigest()
+
+    def invoke(*args, **kwargs):
+        return create(*args, event_key=kwargs.pop("event_key", event_key), **kwargs)
+
+    monkeypatch.setattr(service, "create_matching_plan_version", invoke)
 
 
 class MatchingPlanServiceCursor:
@@ -42,6 +57,10 @@ class MatchingPlanServiceCursor:
 
         if "SELECT o.case_no" in statement and "FROM orders o" in statement:
             self.current = self.fixtures.get("order")
+            return
+
+        if "FROM matching_plan_create_receipts" in statement:
+            self.current = self.fixtures.get("receipt")
             return
 
         if "SELECT id, version, status, is_active" in statement and "caregiver_matching_plans" in statement:
@@ -293,13 +312,16 @@ def test_create_matching_plan_version_created_for_1_2_3_4_segments(monkeypatch):
         captured: dict[str, object] = {}
 
         def fake_search_segmented(
-            *, case_no, segment_count, segment_drafts, as_of, facts_port
+            *, case_no, segment_count, segment_drafts, as_of, facts_port,
+            include_candidate_options, filter_policy,
         ):
             captured["case_no"] = case_no
             captured["as_of"] = as_of
             captured["segment_drafts"] = segment_drafts
             captured["segment_count"] = segment_count
             captured["facts_port"] = facts_port
+            captured["include_candidate_options"] = include_candidate_options
+            captured["filter_policy"] = filter_policy
             return _complete_result(segments)
 
         monkeypatch.setattr(service, "search_segmented_caregiver_availability", fake_search_segmented)
@@ -349,6 +371,13 @@ def test_create_matching_plan_version_created_for_1_2_3_4_segments(monkeypatch):
             {"staff_id": segment["staff_id"], "start_date": segment["assigned_start_date"], "end_date": segment["assigned_end_date"]}
             for segment in segments
         ]
+        assert captured["include_candidate_options"] is False
+        assert captured["filter_policy"] == {
+            "region": False,
+            "cooking": False,
+            "preferred_service_days": False,
+            "daily_service_hours": False,
+        }
         _assert_sql_is_parameterized(connection.cursor_obj.executed, ["SELECT", "UPDATE", "INSERT"])
         _assert_for_update_on_table(connection.cursor_obj.executed, "WHERE o.case_no = %s")
         _assert_for_update_on_table(connection.cursor_obj.executed, "FROM caregiver_matching_plans")
@@ -460,8 +489,10 @@ def test_reusing_identical_active_proposed_plan_is_idempotent_no_commit(monkeypa
     assert result["result"] == "existing"
     assert result["version"] == 3
     assert result["plan_id"] == plan_id
-    assert connection.commits == 0
-    assert connection.rollbacks == 1
+    # A first keyed command records its immutable receipt even when its plan
+    # result is an already-current proposed plan.
+    assert connection.commits == 1
+    assert connection.rollbacks == 0
     assert connection.closed_count == 1
     assert connection.cursor_obj.closed_count == 1
     assert len(captured) == 1
@@ -612,7 +643,13 @@ def test_partial_or_mismatch_availability_rejects_without_tx(monkeypatch):
         }
 
     monkeypatch.setattr(service, "search_segmented_caregiver_availability", fake_search)
-    monkeypatch.setattr(service, "get_connection", lambda: pytest.fail("should not open tx"))
+    connection = MatchingPlanServiceConnection({
+        "order": {
+            "case_no": "C-012", "status": "洽談中",
+            "start_date": "2026-07-01", "end_date": "2026-07-02",
+        },
+    })
+    monkeypatch.setattr(service, "get_connection", lambda: connection)
     with pytest.raises(ValueError, match="complete combination"):
         service.create_matching_plan_version(
             "C-012",
@@ -621,6 +658,9 @@ def test_partial_or_mismatch_availability_rejects_without_tx(monkeypatch):
             "2026-07-02",
             facts_port=_FACTS_PORT,
         )
+    assert connection.commits == 0
+    assert connection.rollbacks == 1
+    assert all("INSERT INTO caregiver_matching_plans" not in sql for sql, _ in connection.cursor_obj.executed)
 
     def fake_search_mismatch(**_kwargs):
         return {
@@ -640,7 +680,13 @@ def test_partial_or_mismatch_availability_rejects_without_tx(monkeypatch):
         }
 
     monkeypatch.setattr(service, "search_segmented_caregiver_availability", fake_search_mismatch)
-    monkeypatch.setattr(service, "get_connection", lambda: pytest.fail("should not open tx"))
+    connection = MatchingPlanServiceConnection({
+        "order": {
+            "case_no": "C-019", "status": "洽談中",
+            "start_date": "2026-07-01", "end_date": "2026-07-02",
+        },
+    })
+    monkeypatch.setattr(service, "get_connection", lambda: connection)
     with pytest.raises(ValueError, match="complete combination"):
         service.create_matching_plan_version(
             "C-013",
@@ -674,9 +720,18 @@ def test_conflicts_rejects_without_tx(monkeypatch):
         },
     )
 
-    monkeypatch.setattr(service, "get_connection", lambda: pytest.fail("should not open tx"))
+    connection = MatchingPlanServiceConnection({
+        "order": {
+            "case_no": "C-019", "status": "洽談中",
+            "start_date": "2026-07-01", "end_date": "2026-07-02",
+        },
+    })
+    monkeypatch.setattr(service, "get_connection", lambda: connection)
     with pytest.raises(ValueError, match="complete combination"):
         service.create_matching_plan_version("C-019", _segments(2), "admin", "2026-07-02", facts_port=_FACTS_PORT)
+    assert connection.commits == 0
+    assert connection.rollbacks == 1
+    assert all("INSERT INTO caregiver_matching_plans" not in sql for sql, _ in connection.cursor_obj.executed)
 
 
 def test_reject_when_case_not_found_or_not_in_negotiation(monkeypatch):
@@ -988,8 +1043,8 @@ def test_pymysql_connection_existing_returns_existing_and_rolls_back(monkeypatch
     assert result["result"] == "existing"
     assert result["version"] == 1
     assert result["plan_id"] == 9301
-    assert connection.commits == 0
-    assert connection.rollbacks == 1
+    assert connection.commits == 1
+    assert connection.rollbacks == 0
     assert connection.closed_count == 1
     assert connection.open is False
     assert connection.cursor_obj.closed_count == 1

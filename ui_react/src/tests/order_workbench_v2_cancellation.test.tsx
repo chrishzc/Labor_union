@@ -3,30 +3,31 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { OrderCancellationPanel } from '../components/OrderCancellationPanel';
 import { ApiHttpError } from '../api/shared/typed_errors';
 import type { OrderCancellationQuery, OrderCancellationReceipt, ServiceDay } from '../api/orders/order_cancellation_client';
+import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_store';
 
 const mocks = vi.hoisted(() => ({ query: vi.fn(), preview: vi.fn(), apply: vi.fn(), receipt: vi.fn() }));
 vi.mock('../api/orders/order_cancellation_client', () => ({ orderCancellationClient: mocks }));
 const CASE = 'CASE-BETA-CANCEL';
 const fingerprint = 'c'.repeat(64);
 let facts: OrderCancellationQuery;
-function query(): OrderCancellationQuery {
-  return { case_no: CASE, lifecycle_status: '訂單成立', actual_start_date: null, contracted_service_days: 20,
+function query(caseNo = CASE): OrderCancellationQuery {
+  return { case_no: caseNo, lifecycle_status: '訂單成立', actual_start_date: null, contracted_service_days: 20,
     service_hours_per_day: 8, service_started: false, historical_mid_service_confirmation_available: false,
     service_data_locked: false, order_version: 2, scheduling_version: 3, scheduling_generation: 1,
     client_finance_version: 4, payroll_version: 5, confirmed_service_days: [], caregiver_options: [{ staff_id: 8, display_name: '測試月嫂' }] };
 }
 // Component-boundary doubles expose the owner fields consumed by this panel;
 // decoding remains covered by the existing cancellation client contract tests.
-function preview(days: ServiceDay[] = []) {
+function preview(days: ServiceDay[] = [], caseNo = CASE) {
   return { cancellation_date: '2026-09-05', actual_start_date: facts.actual_start_date, actual_end_date: null,
     confirmed_service_days: days, official_service_day_count: days.length, official_service_hours: days.length * 8,
     order_version: 2, scheduling_version: 3, scheduling_generation: 1, client_finance_version: 4, payroll_version: 5,
-    scheduling: { case_no: CASE }, client_finance_impact: { case_no: CASE, actions: [{ payment_stage: 'deposit', direction: 'refund_due', direction_amount_ntd: 1000 }], blockers: [] },
-    payroll_impact: { case_no: CASE, actions: [], blockers: [] },
-    lifecycle_impact: { case_no: CASE, before_status: facts.lifecycle_status, after_status: '訂單取消' }, preview_fingerprint: fingerprint };
+    scheduling: { case_no: caseNo }, client_finance_impact: { case_no: caseNo, actions: [{ payment_stage: 'deposit', direction: 'refund_due', direction_amount_ntd: 1000 }], blockers: [] },
+    payroll_impact: { case_no: caseNo, actions: [], blockers: [] },
+    lifecycle_impact: { case_no: caseNo, before_status: facts.lifecycle_status, after_status: '訂單取消' }, preview_fingerprint: fingerprint };
 }
-function receipt(): OrderCancellationReceipt {
-  return { case_no: CASE, lifecycle_status: '訂單取消', order_version: 3, scheduling_version: 4, scheduling_generation: 2,
+function receipt(caseNo = CASE): OrderCancellationReceipt {
+  return { case_no: caseNo, lifecycle_status: '訂單取消', order_version: 3, scheduling_version: 4, scheduling_generation: 2,
     client_finance_version: 5, payroll_version: 6, actual_end_date: null, official_service_day_count: 0,
     official_service_hours: 0, cancelled_assignment_ids: [], created_assignment_keys: [], preview_fingerprint: fingerprint };
 }
@@ -49,6 +50,7 @@ async function apply() {
 
 describe('Beta 取消與歷史取消服務補登', () => {
   beforeEach(() => {
+    orderMutationFlowStore.clearAll();
     Object.values(mocks).forEach((mock) => mock.mockReset());
     facts = query();
     mocks.query.mockImplementation(async () => structuredClone(facts));
@@ -62,14 +64,14 @@ describe('Beta 取消與歷史取消服務補登', () => {
     await open();
     expect(screen.queryByRole('button', { name: '新增實際服務日' })).not.toBeInTheDocument();
     await confirmPreview();
-    expect(mocks.preview).toHaveBeenCalledWith(CASE, []);
+    expect(mocks.preview).toHaveBeenCalledWith(CASE, [], expect.any(AbortSignal));
     expect(screen.getByText('客戶 deposit：refund_due NT$ 1000')).toBeInTheDocument();
     await apply();
     await screen.findByText('訂單取消已完成正式回讀：訂單取消');
     expect(mocks.apply).toHaveBeenCalledWith(CASE, {
       confirmed_service_days: [], expected_order_version: 2, expected_scheduling_version: 3,
       expected_client_finance_version: 4, expected_payroll_version: 5, preview_fingerprint: fingerprint, reason: '客戶電話確認取消。',
-    }, { idempotencyKey: expect.any(String) });
+    }, expect.objectContaining({ idempotencyKey: expect.any(String), actor: '' }));
     expect(onObserved).toHaveBeenCalledTimes(1);
     expect(onBusyChange).toHaveBeenCalledWith(true);
     expect(onBusyChange).toHaveBeenLastCalledWith(false);
@@ -85,7 +87,7 @@ describe('Beta 取消與歷史取消服務補登', () => {
     expect(mocks.preview).not.toHaveBeenCalled();
     fireEvent.change(screen.getByLabelText('取消實際服務日原因 1'), { target: { value: '核對實際出勤' } });
     await confirmPreview();
-    expect(mocks.preview).toHaveBeenCalledWith(CASE, [{ service_date: '2026-09-02', staff_id: 8, reason: '核對實際出勤' }]);
+    expect(mocks.preview).toHaveBeenCalledWith(CASE, [{ service_date: '2026-09-02', staff_id: 8, reason: '核對實際出勤' }], expect.any(AbortSignal));
     fireEvent.click(screen.getByRole('button', { name: '移除取消實際服務日 1' }));
     expect(screen.queryByRole('button', { name: '確認取消／補登' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '檢查取消影響' }));
@@ -99,7 +101,7 @@ describe('Beta 取消與歷史取消服務補登', () => {
     const view = render(<OrderCancellationPanel caseNo={CASE} />); await open();
     await screen.findByText('後端允許補登歷史取消的實際服務事實；不是重新取消或重開。');
     expect(screen.getByRole('button', { name: '檢查取消影響' })).toBeEnabled();
-    await confirmPreview(); expect(mocks.preview).toHaveBeenCalledWith(CASE, facts.confirmed_service_days);
+    await confirmPreview(); expect(mocks.preview).toHaveBeenCalledWith(CASE, facts.confirmed_service_days, expect.any(AbortSignal));
     view.unmount(); facts.historical_mid_service_confirmation_available = false;
     render(<OrderCancellationPanel caseNo={CASE} />); await open();
     expect(screen.getByRole('button', { name: '檢查取消影響' })).toBeDisabled();

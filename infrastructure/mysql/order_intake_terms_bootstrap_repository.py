@@ -142,8 +142,15 @@ class MySqlOrderIntakeTermsBootstrapRepository:
                 raise RuntimeError("order_intake_completion_write_conflict")
         return expected_lifecycle_version + 1
 
-    def load_receipt(self, family: str, key: str):
-        return self._receipts.load_receipt(family, key)
+    def load_receipt(self, family: str, key: str, *, for_update: bool = True):
+        if for_update:
+            return self._receipts.load_receipt(family, key)
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT request_fingerprint,result_snapshot FROM admin_command_receipts "
+                "WHERE command_family=%s AND idempotency_key=%s", (family, key),
+            )
+            return cursor.fetchone()
 
     def save_receipt(
         self,

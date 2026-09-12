@@ -11,7 +11,10 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, Dict, List, Literal
-from subsystems.scheduling.matching_plan_workflow import create_matching_plan_version
+from subsystems.scheduling.matching_plan_workflow import (
+    create_matching_plan_version,
+    get_matching_plan_create_receipt,
+)
 from subsystems.scheduling.matching_communication_workflow import (
     cancel_matching_plan,
     get_active_matching_plan_state,
@@ -615,6 +618,7 @@ def create_matching_plan_version_route(
     segments: List[Dict[str, Any]] = Body(...),
     created_by: str = Body(...),
     as_of: str = Body(...),
+    event_key: str = Body(..., min_length=1, max_length=191),
     principal: AdminPrincipal = Depends(require_system_admin),
 ):
     """建立或冪等取得正式多月嫂配對計畫版本。"""
@@ -625,6 +629,7 @@ def create_matching_plan_version_route(
             segments=segments,
             created_by=str(principal.username or "").strip(),
             as_of=as_of,
+            event_key=event_key,
             facts_port=_matching_facts_port,
             require_willing_candidate=len(segments) == 1,
         )
@@ -636,6 +641,14 @@ def create_matching_plan_version_route(
         message = str(error)
         if message == "case not found":
             status_code = 404
+        elif message == "matching plan create idempotency key does not match original command":
+            raise typed_http_error(
+                409,
+                "conflict",
+                "matching_plan_create_idempotency_mismatch",
+                "原建立媒合方案操作與目前內容不一致，請重新讀取後再處理。",
+                f"matching-plan-create:{case_no}",
+            ) from error
         elif message in {
             "case is not in negotiation stage",
             "case is not editable while an accepted plan exists",
@@ -658,6 +671,25 @@ def create_matching_plan_version_route(
         raise HTTPException(status_code=status_code, detail=message) from error
     except Exception:
         raise HTTPException(status_code=500, detail="建立多月嫂配對計畫版本失敗")
+
+
+@router.get(
+    "/orders/{case_no}/matching-plans/receipts/{event_key}",
+    response_model=BaseResponse[MatchingPlanReceiptView],
+)
+def get_matching_plan_create_receipt_route(
+    case_no: str = Path(..., description="案件編號"),
+    event_key: str = Path(..., min_length=1, max_length=191, description="原建立媒合方案操作識別"),
+    principal: AdminPrincipal = Depends(require_system_admin),
+):
+    """Read the immutable create receipt; callers must still read current plan state separately."""
+    try:
+        result = get_matching_plan_create_receipt(case_no, event_key)
+        return BaseResponse(data=MatchingPlanReceiptView.model_validate(result), message="已讀取建立媒合方案原操作收據")
+    except ValueError as error:
+        if str(error) == "matching plan create receipt not found":
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        raise HTTPException(status_code=422, detail=str(error)) from error
 
 
 @router.get(
@@ -872,8 +904,14 @@ def _manual_profiles_receipt_data(result) -> dict[str, Any]:
 
 
 def _response_data(result) -> dict[str, Any]:
+    if result.idempotency_key is None:
+        raise ValueError("matching response receipt is missing persisted event identity")
     return {
         "event_id": result.event_id,
+        "case_no": result.plan.case_no,
+        "plan_id": result.plan.plan_id,
+        "segment_id": result.segment_id,
+        "event_key": result.idempotency_key.value,
         "communication_version": result.plan.version,
         "source": result.source.value,
         "willingness": (

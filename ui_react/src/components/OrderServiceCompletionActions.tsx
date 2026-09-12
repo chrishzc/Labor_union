@@ -2,13 +2,14 @@
  * File: OrderServiceCompletionActions.tsx
  * Description: 提供管理員依 AutoComplete owner command 完成服務的 Preview、確認、Apply 與 receipt UI。
  */
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import {
   orderServiceCompletionClient,
   type OrderServiceCompletionPreview,
-  type OrderServiceCompletionReceipt,
 } from '../api/orders/order_service_completion_client';
+import { orderMutationFlowStore, type CompletionCommand } from '../adapters/orders/order_mutation_flow_store';
+import { ordersQueryClient } from '../api/orders/order_query_client';
 import { ApiHttpError, ApiNetworkError, ApiTimeoutError } from '../api/shared/typed_errors';
 
 interface Props {
@@ -17,7 +18,10 @@ interface Props {
   onCompleted: () => void | Promise<void>;
 }
 
-type MutationStatus = 'idle' | 'previewing' | 'previewed' | 'applying' | 'completed' | 'failed';
+type MutationStatus = 'idle' | 'previewing' | 'previewed' | 'applying' | 'completed' | 'failed'
+  | 'outcome_unknown' | 'observation_failed' | 'observing';
+
+const subscribeCompletion = (listener: () => void) => orderMutationFlowStore.subscribe(listener);
 
 function completionErrorMessage(caught: unknown): string {
   if (caught instanceof ApiTimeoutError || caught instanceof ApiNetworkError) {
@@ -32,59 +36,135 @@ function completionErrorMessage(caught: unknown): string {
   return '無法處理服務完成，請重新查詢後再試。';
 }
 
-export const OrderServiceCompletionActions: React.FC<Props> = ({
+const ServiceCompletionForCase: React.FC<Props> = ({
   caseNo,
   orderStatus,
   onCompleted,
 }) => {
-  const [status, setStatus] = useState<MutationStatus>('idle');
+  const [localStatus, setStatus] = useState<MutationStatus>('idle');
+  const flow = useSyncExternalStore(subscribeCompletion, () => orderMutationFlowStore.getCompletion(caseNo));
+  const status = flow?.status ?? localStatus;
+  const receipt = flow?.receipt ?? null;
   const [preview, setPreview] = useState<OrderServiceCompletionPreview | null>(null);
-  const [receipt, setReceipt] = useState<OrderServiceCompletionReceipt | null>(null);
   const [reason, setReason] = useState('');
   const [confirmed, setConfirmed] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const idempotencyKeys = useRef(new Map<string, string>());
+  const [localError, setError] = useState<string | null>(null);
+  const error = flow?.error ?? localError;
+  const working = useRef(false);
+  const mounted = useRef(true);
+  const observationSequence = useRef(0);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      observationSequence.current += 1;
+      const current = orderMutationFlowStore.getCompletion(caseNo);
+      if (current?.status === 'observing' && current.receipt) {
+        orderMutationFlowStore.setCompletion(caseNo, {
+          ...current, status: 'observation_failed', error: '服務完成已登記，請只重新讀取案件結果。',
+        });
+      }
+    };
+  }, []);
 
   const previewCompletion = async () => {
+    if (working.current || orderMutationFlowStore.getCompletion(caseNo)) return;
+    working.current = true;
     setStatus('previewing');
     setError(null);
     setPreview(null);
-    setReceipt(null);
     setConfirmed(false);
     try {
       const result = await orderServiceCompletionClient.preview(caseNo);
+      if (!mounted.current) return;
       setPreview(result);
       setStatus('previewed');
     } catch (caught) {
+      if (!mounted.current) return;
       setError(completionErrorMessage(caught));
       setStatus('failed');
+    } finally {
+      working.current = false;
+    }
+  };
+
+  const observeCompletion = async () => {
+    const observation = ++observationSequence.current;
+    const current = orderMutationFlowStore.getCompletion(caseNo);
+    if (!current?.receipt) return;
+    orderMutationFlowStore.setCompletion(caseNo, { ...current, status: 'observing', error: null });
+    try {
+      const [detail, terms] = await Promise.all([
+        ordersQueryClient.getOrderDetail(caseNo),
+        ordersQueryClient.getOrderTerms(caseNo),
+      ]);
+      if (observation !== observationSequence.current) return;
+      if (detail.case_no !== caseNo || terms.case_no !== caseNo
+        || detail.order_status !== '訂單完成' || terms.order_version < current.receipt.order_version) {
+        throw new Error('服務完成尚未取得對應案件狀態與版本。');
+      }
+      if (mounted.current) await onCompleted();
+      if (observation !== observationSequence.current) return;
+      orderMutationFlowStore.setCompletion(caseNo, { ...current, status: 'completed', error: null });
+    } catch {
+      if (observation !== observationSequence.current) return;
+      orderMutationFlowStore.setCompletion(caseNo, {
+        ...current, status: 'observation_failed', error: '服務完成已登記，請只重新讀取案件結果。',
+      });
+    }
+  };
+
+  const sendCompletion = async (command: CompletionCommand) => {
+    const current = orderMutationFlowStore.getCompletion(caseNo);
+    if (working.current || current?.receipt || current?.status === 'applying') return;
+    const recoveringUnknown = current?.status === 'outcome_unknown' && current.command !== null;
+    working.current = true;
+    orderMutationFlowStore.setCompletion(caseNo, { status: 'applying', command, receipt: null, error: null });
+    setError(null);
+    try {
+      const result = await orderServiceCompletionClient.apply(caseNo, command.preview, command.reason, command.key);
+      // Preserve the receipt even when its original view has been unmounted.
+      orderMutationFlowStore.setCompletion(caseNo, {
+        status: 'observation_failed', command: null, receipt: result, error: null,
+      });
+      if (!mounted.current) return;
+      setPreview(null);
+      setConfirmed(false);
+      await observeCompletion();
+    } catch (caught) {
+      const rejected = caught instanceof ApiHttpError && caught.status >= 400 && caught.status < 500
+        && caught.status !== 408 && caught.status !== 429 && !caught.retryable;
+      if (rejected && !recoveringUnknown) {
+        orderMutationFlowStore.clearCompletion(caseNo);
+        if (mounted.current) {
+          setError(completionErrorMessage(caught));
+          setPreview(null);
+          setStatus('failed');
+        }
+      } else {
+        orderMutationFlowStore.setCompletion(caseNo, {
+          status: 'outcome_unknown', command, receipt: null,
+          error: recoveringUnknown
+            ? '服務完成結果仍未確認；請恢復權限後以原操作重新確認。'
+            : '服務完成結果尚未確認，請以原操作重新確認。',
+        });
+      }
+    } finally {
+      working.current = false;
     }
   };
 
   const applyCompletion = async () => {
-    if (!preview || !confirmed || !reason.trim() || status !== 'previewed') return;
-    setStatus('applying');
+    if (!preview || !confirmed || !reason.trim() || status !== 'previewed' || working.current) return;
+    const command = { preview, reason: reason.trim(), key: `ui-order-service-completion-${crypto.randomUUID()}` };
+    await sendCompletion(command);
+  };
+
+  const retryObservation = async () => {
+    if (!receipt || working.current || status !== 'observation_failed') return;
+    working.current = true;
     setError(null);
-    const identity = `${preview.fingerprint}:${reason.trim()}`;
-    const key = idempotencyKeys.current.get(identity)
-      ?? `ui-order-service-completion-${crypto.randomUUID()}`;
-    idempotencyKeys.current.set(identity, key);
-    try {
-      const result = await orderServiceCompletionClient.apply(
-        caseNo,
-        preview,
-        reason,
-        key,
-      );
-      setReceipt(result);
-      setPreview(null);
-      setConfirmed(false);
-      await onCompleted();
-      setStatus('completed');
-    } catch (caught) {
-      setError(completionErrorMessage(caught));
-      setStatus('failed');
-    }
+    try { await observeCompletion(); } finally { working.current = false; }
   };
 
   return (
@@ -112,7 +192,7 @@ export const OrderServiceCompletionActions: React.FC<Props> = ({
           <button
             type="button"
             className="btn-secondary-action"
-            disabled={status === 'previewing' || status === 'applying'}
+            disabled={status === 'previewing' || status === 'applying' || status === 'outcome_unknown' || receipt !== null}
             onClick={() => void previewCompletion()}
           >
             {status === 'previewing' ? '正在檢查完成影響…' : '檢查服務完成影響'}
@@ -132,7 +212,7 @@ export const OrderServiceCompletionActions: React.FC<Props> = ({
                   rows={2}
                   maxLength={500}
                   value={reason}
-                  disabled={status === 'applying'}
+                  disabled={status === 'applying' || status === 'outcome_unknown'}
                   onChange={(event) => {
                     setReason(event.target.value);
                     setConfirmed(false);
@@ -144,7 +224,7 @@ export const OrderServiceCompletionActions: React.FC<Props> = ({
                 <input
                   type="checkbox"
                   checked={confirmed}
-                  disabled={status === 'applying'}
+                  disabled={status === 'applying' || status === 'outcome_unknown'}
                   onChange={(event) => setConfirmed(event.target.checked)}
                 />
                 我已核對正式服務日與完成時刻，確認將訂單標記為服務完成。
@@ -153,7 +233,7 @@ export const OrderServiceCompletionActions: React.FC<Props> = ({
                 type="button"
                 className="btn-primary-action"
                 style={{ marginTop: '10px' }}
-                disabled={!confirmed || !reason.trim() || status === 'applying'}
+                disabled={!confirmed || !reason.trim() || status !== 'previewed'}
                 onClick={() => void applyCompletion()}
               >
                 {status === 'applying' ? '服務完成套用中…' : '確認套用服務完成'}
@@ -161,6 +241,19 @@ export const OrderServiceCompletionActions: React.FC<Props> = ({
             </div>
           )}
         </>
+      )}
+      {status === 'outcome_unknown' && (
+        <button type="button" className="btn-secondary-action" onClick={() => {
+          if (flow?.command) void sendCompletion(flow.command);
+        }}>
+          以原操作重新確認服務完成
+        </button>
+      )}
+      {(status === 'observation_failed' || status === 'observing') && (
+        <button type="button" className="btn-secondary-action" disabled={status === 'observing'}
+          onClick={() => void retryObservation()}>
+          {status === 'observing' ? '正在讀取服務完成結果…' : '只重新讀取服務完成結果'}
+        </button>
       )}
 
       {receipt && (
@@ -172,3 +265,7 @@ export const OrderServiceCompletionActions: React.FC<Props> = ({
     </div>
   );
 };
+
+export const OrderServiceCompletionActions: React.FC<Props> = (props) => (
+  <ServiceCompletionForCase key={props.caseNo} {...props} />
+);

@@ -118,16 +118,19 @@ def test_manual_staff_attestation_accepts_a_plan_before_availability_lock_exists
     })
 
 
-def test_external_unsigned_document_requires_current_accepted_plan():
+def test_external_unsigned_document_accepts_latest_manual_customer_acceptance():
     staff_signing._require_external_staff_segment_applicable({
         "status": "accepted", "is_active": 1,
+    })
+    staff_signing._require_external_staff_segment_applicable({
+        "status": "proposed", "is_active": 1, "customer_decision": "accepted",
     })
 
     with pytest.raises(
         ValueError, match="contract_external_signing_accepted_plan_required"
     ):
         staff_signing._require_external_staff_segment_applicable({
-            "status": "proposed", "is_active": 1,
+            "status": "proposed", "is_active": 1, "customer_decision": "pending",
         })
 
 

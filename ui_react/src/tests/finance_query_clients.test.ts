@@ -36,4 +36,15 @@ describe('finance query clients', () => {
     await expect(accountsPayableQueryClient.query('2026-08')).resolves.toBeDefined();
     await expect(accountsPayableQueryClient.query('2026-08')).rejects.toThrow(/total_amount_ntd/);
   });
+
+  it('rejects a staff payables response for a different staff owner', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(response({
+      ...STAFF_PAYABLES_RESPONSE,
+      data: { ...STAFF_PAYABLES_RESPONSE.data, staff_id: 12 },
+    }));
+
+    await expect(staffPayablesQueryClient.query(11)).rejects.toMatchObject({
+      code: 'STAFF_PAYABLES_IDENTITY_MISMATCH',
+    });
+  });
 });

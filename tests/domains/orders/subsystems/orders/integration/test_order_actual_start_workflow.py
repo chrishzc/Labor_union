@@ -3,7 +3,8 @@ File: test_order_actual_start_workflow.py
 Description: 驗證實際開工 command 契約及非 AutoComplete workflow 的 lifecycle 邊界。
 """
 
-from datetime import date, datetime
+from dataclasses import replace
+from datetime import date, datetime, time
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
@@ -17,19 +18,29 @@ from shared_kernel.identities import (
     IdempotencyKey,
 )
 from shared_kernel.fingerprints import PreviewFingerprint
+from shared_kernel.clock import FixedBusinessClock, TAIPEI_TIME_ZONE
+from shared_kernel.errors import ErrorCategory
+from shared_kernel.money import MoneyNTD
 from domains.orders.lifecycle import OrderLifecycleRootFacts, OrderLifecycleStatus, _lifecycle_status
 from domains.orders.actual_start import (
     ActualStartBlocker,
     ActualStartCandidateError,
     ActualStartAssignmentFacts,
     ActualStartOrderFacts,
+    ActualStartReconfirmationFacts,
+    ActualStartReconfirmationState,
     ActualStartSchedulingFacts,
     build_actual_start_candidate,
 )
-from domains.orders.terms import ServiceTimeTerms
-from subsystems.orders.actual_start_workflow import ActualStartApplyRequest
+from domains.orders.terms import OrderAggregateFacts, OrderTerms, ServiceTimeTerms
+from domains.client_finance.obligation_planning import ClientFinanceTermsSourceFacts, ClientPaymentTerms
+from domains.payroll.calculation import PayrollPolicyKind
+from domains.scheduling.generation import AssignmentIdentityResolution, EffectiveAssignmentSegment, SchedulingGenerationFacts
+from subsystems.payroll.terms_impact import CasePayrollPolicyTerms, PayrollTermsSourceFacts, SourceAssignmentPayrollTerms
+from subsystems.orders.actual_start_workflow import ActualStartApplyRequest, ActualStartWorkflow, ActualStartWorkflowContext, ActualStartWorkflowError
+from subsystems.orders.terms_workflow import CommandClaimState, OrderTermsReceipt, SchedulingReplacementResult, TermsWorkflowFacts
 from infrastructure.mysql.order_actual_start_repository import (
-    _is_effective_staff_date_conflict,
+    _is_effective_staff_date_conflict, _receipt_payload, _stored_receipt,
 )
 
 

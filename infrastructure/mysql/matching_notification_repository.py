@@ -260,7 +260,14 @@ class MySqlMatchingNotificationRepository:
                 CustomerMatchingDecision(response_value)
                 if response_type == "customer_decision" else None
             ),
+            segment_id=segment_id,
+            idempotency_key=idempotency_key,
         )
+
+    def get_response_result(
+        self, idempotency_key: IdempotencyKey, fingerprint: str,
+    ) -> MatchingResponseResult | None:
+        return self._existing_response(idempotency_key, fingerprint)
 
     def caregiver_card_facts(self, plan_id: int, segment_id: int) -> dict[str, object]:
         with self._connection.cursor() as cursor:
@@ -550,6 +557,8 @@ def _response_result(row):
         MatchingResponseSource(str(row["response_source"])),
         CaregiverWillingness(response_value) if response_type == "caregiver_willingness" else None,
         CustomerMatchingDecision(response_value) if response_type == "customer_decision" else None,
+        segment_id=(int(row["segment_id"]) if row["segment_id"] is not None else None),
+        idempotency_key=IdempotencyKey(str(row["idempotency_key"])),
     )
 
 

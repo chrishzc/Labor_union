@@ -222,6 +222,7 @@ def _create_matching_plan(arguments, staff_id: int):
         "wp56-validation",
         "2026-08-01",
         facts_port=MySqlSegmentedAvailabilityFactsRepository(connect),
+        event_key=f"wp56-matching-plan-create:{CASE_NO}",
     )
 
 

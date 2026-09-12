@@ -61,7 +61,8 @@ class ServiceDateConfirmationReceipt:
 
 class ServiceDateConfirmationRepository(Protocol):
     def load(self, case_no: str, *, lock: bool = False) -> ServiceDateConfirmationFacts: ...
-    def replay(self, idempotency_key: str, command_fingerprint: str) -> ServiceDateConfirmationReceipt | None: ...
+    def replay(self, idempotency_key: str, command_fingerprint: str, *, actor: str,
+               reason: str, for_update: bool = False) -> ServiceDateConfirmationReceipt | None: ...
     def save(self, candidate: ConfirmedServiceDateCandidate, *, actor: str, reason: str,
              idempotency_key: str, command_fingerprint: str) -> ServiceDateConfirmationReceipt: ...
     def persist_restarted_scheduling(self, command: SchedulingReplacementCommand) -> int: ...
@@ -107,11 +108,27 @@ class ServiceDateConfirmationWorkflow:
               reason: str, idempotency_key: str) -> ServiceDateConfirmationReceipt:
         command_fingerprint = _command_fingerprint(case_no, service_dates, expected_order_version,
                                                    expected_scheduling_version, preview_fingerprint)
-        replay = self._repository.replay(idempotency_key, command_fingerprint)
+        replay = self._repository.replay(
+            idempotency_key,
+            command_fingerprint,
+            actor=actor,
+            reason=reason,
+        )
         if replay is not None:
             return replay
         with self._unit_of_work_factory() as unit_of_work:
             facts = self._repository.load(case_no, lock=True)
+            # Another identical command may have committed while this one waited
+            # for the Orders lock. Read its receipt from current committed facts.
+            replay = self._repository.replay(
+                idempotency_key,
+                command_fingerprint,
+                actor=actor,
+                reason=reason,
+                for_update=True,
+            )
+            if replay is not None:
+                return replay
             if (facts.order_version, facts.scheduling_version) != (
                 expected_order_version,
                 expected_scheduling_version,
@@ -241,6 +258,7 @@ def _candidate(facts, service_dates):
         facts.scheduling_version,
         selected_dates,
         facts.contracted_service_days,
+        facts.current_version,
     )
 
 

@@ -5,6 +5,7 @@ Description: 驗證訂單受控重開 HTTP Preview 與 Apply 端點行為、三�
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, datetime
 from typing import Any
 

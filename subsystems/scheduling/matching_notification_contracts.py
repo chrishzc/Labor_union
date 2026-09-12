@@ -219,6 +219,20 @@ class RecordManualMatchingResponseCommand:
     def __post_init__(self) -> None:
         require_canonical_text(self.reason, "manual matching reason", _REASON_MAXIMUM_LENGTH)
         _require_matching_version(self.plan, self.expected_version)
+        if (
+            self.caregiver_willingness is not None
+            and not isinstance(self.caregiver_willingness, CaregiverWillingness)
+        ):
+            raise TypeError(
+                "manual matching caregiver willingness must be CaregiverWillingness or None"
+            )
+        if (
+            self.customer_decision is not None
+            and not isinstance(self.customer_decision, CustomerMatchingDecision)
+        ):
+            raise TypeError(
+                "manual matching customer decision must be CustomerMatchingDecision or None"
+            )
         _validate_manual_response(self)
 
 
@@ -437,9 +451,15 @@ class MatchingResponseResult:
     source: MatchingResponseSource
     caregiver_willingness: CaregiverWillingness | None = None
     customer_decision: CustomerMatchingDecision | None = None
+    segment_id: int | None = None
+    idempotency_key: IdempotencyKey | None = None
 
     def __post_init__(self) -> None:
         require_positive_integer(self.event_id, "matching response event ID")
+        if self.segment_id is not None:
+            require_positive_integer(self.segment_id, "matching response segment ID")
+        if self.idempotency_key is not None and not isinstance(self.idempotency_key, IdempotencyKey):
+            raise TypeError("matching response idempotency key must be IdempotencyKey or None")
 
 
 def _caregiver_information_payload(

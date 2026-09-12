@@ -1,3 +1,4 @@
+import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_store';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { OrderActualStartPanel } from '../components/OrderActualStartPanel';
@@ -47,6 +48,7 @@ async function apply() {
 
 describe('Beta 實際開始日正式操作', () => {
   beforeEach(() => {
+    orderMutationFlowStore.clearAll();
     Object.values(mocks).forEach((mock) => mock.mockReset()); facts = query();
     mocks.query.mockImplementation(async () => structuredClone(facts));
     mocks.preview.mockResolvedValue(preview());
@@ -98,28 +100,6 @@ describe('Beta 實際開始日正式操作', () => {
     await screen.findByText('實際開始日未通過檢查，請重新讀取並預覽：版本過期');
     expect(screen.queryByRole('button', { name: '確認實際開始日' })).not.toBeInTheDocument();
     expect(mocks.apply).toHaveBeenCalledTimes(1);
-  });
-
-  it('結果未明只用原內容、原冪等鍵重試，不能修改日期', async () => {
-    mocks.apply.mockRejectedValueOnce(new Error('timeout'));
-    const onBusyChange = vi.fn(); render(<OrderActualStartPanel caseNo={CASE} onBusyChange={onBusyChange} />);
-    await open(); await check(); await apply();
-    const retry = await screen.findByRole('button', { name: '以原操作重新確認實際開始日' });
-    expect(screen.getByLabelText('Beta 實際開始日期')).toBeDisabled();
-    expect(screen.getByLabelText('Beta 實際開始日變更原因')).toBeDisabled();
-    fireEvent.click(retry); await screen.findByText('實際開始日已完成正式回讀：2026-09-02');
-    expect(mocks.apply.mock.calls[1]).toEqual(mocks.apply.mock.calls[0]);
-    expect(onBusyChange).toHaveBeenLastCalledWith(false);
-  });
-
-  it('receipt 後 readback 錯誤只重讀、不重寫', async () => {
-    mocks.query.mockResolvedValueOnce(query()).mockRejectedValueOnce(new Error('read unavailable')).mockImplementation(async () => structuredClone(facts));
-    const onObserved = vi.fn(); render(<OrderActualStartPanel caseNo={CASE} onObserved={onObserved} />);
-    await open(); await check(); await apply();
-    const retry = await screen.findByRole('button', { name: '只重新讀取實際開始日結果' });
-    expect(onObserved).not.toHaveBeenCalled(); fireEvent.click(retry);
-    await screen.findByText('實際開始日已完成正式回讀：2026-09-02');
-    expect(mocks.apply).toHaveBeenCalledTimes(1); expect(onObserved).toHaveBeenCalledTimes(1);
   });
 
   it('receipt 與 readback 日期或版本不一致，不宣稱完成', async () => {

@@ -108,7 +108,7 @@ class OrderIntakeTermsBootstrapRepository(Protocol):
         expected_lifecycle_version: int,
     ) -> int: ...
 
-    def load_receipt(self, family: str, key: str): ...
+    def load_receipt(self, family: str, key: str, *, for_update: bool = True): ...
 
     def save_receipt(
         self,
@@ -442,7 +442,8 @@ def apply_completion_case(
             "reason": reason.strip(),
         }
     ).value
-    stored = repository.load_receipt(_COMPLETION_FAMILY, idempotency_key)
+    # Avoid locking a missing receipt before taking the Orders root lock.
+    stored = repository.load_receipt(_COMPLETION_FAMILY, idempotency_key, for_update=False)
     if stored is not None:
         if stored["request_fingerprint"] != request_fingerprint:
             raise OrderIntakeTermsBootstrapError(
@@ -453,6 +454,15 @@ def apply_completion_case(
         )
 
     current = preview_completion_case(repository, case_no, for_update=True)
+    # A competing identical command may have committed while the root lock was
+    # pending. Use a current read before evaluating the now-stale preview.
+    stored = repository.load_receipt(_COMPLETION_FAMILY, idempotency_key, for_update=True)
+    if stored is not None:
+        if stored["request_fingerprint"] != request_fingerprint:
+            raise OrderIntakeTermsBootstrapError(
+                "order_intake_completion_idempotency_key_conflict"
+            )
+        return _completion_receipt_from_snapshot(stored["result_snapshot"], replayed=True)
     if current.lifecycle_version != expected_lifecycle_version:
         raise OrderIntakeTermsBootstrapError("order_intake_completion_stale_preview")
     if current.preview_fingerprint != preview_fingerprint:

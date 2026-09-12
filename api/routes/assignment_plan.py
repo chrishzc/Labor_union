@@ -13,7 +13,7 @@ import uuid
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pymysql.err import OperationalError, ProgrammingError
 
 from api.dependencies.admin_auth import require_system_admin
@@ -103,6 +103,13 @@ class AssignmentPlanApplyBody(AssignmentPlanPreviewBody):
         pattern=r"^[0-9a-f]{64}$",
     )
     reason: str = Field(min_length=1, max_length=500)
+
+    @field_validator("reason")
+    @classmethod
+    def _require_canonical_reason(cls, value: str) -> str:
+        if value != value.strip():
+            raise ValueError("reason must be canonical non-empty text")
+        return value
 
 
 @router.get(

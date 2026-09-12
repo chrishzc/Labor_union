@@ -36,12 +36,13 @@ const response = <T extends z.ZodTypeAny>(schema: T) => z.strictObject({ success
 export type HistoricalClientPaymentQuery = z.infer<typeof QuerySchema>;
 export type HistoricalClientPaymentPreview = z.infer<typeof PreviewSchema>;
 export type HistoricalClientPaymentReadback = z.infer<typeof ReadbackSchema>;
+export type HistoricalClientPaymentReceipt = z.infer<typeof ReceiptSchema>;
 export type HistoricalClientPaymentIntent = {
   case_no: string; direction: 'receivable_from_client' | 'payable_to_client'; confirmation_kind: 'paid' | 'settled';
   obligation_identities: string[]; payment_date: string | null; payment_date_unknown_reason: string | null;
   source_availability: 'missing' | 'ambiguous' | 'unrecoverable'; evidence_reference: string | null;
 };
-export type HistoricalClientPaymentOptions = { signal?: AbortSignal; timeoutMs?: number; baseUrl?: string };
+export type HistoricalClientPaymentOptions = { signal?: AbortSignal; timeoutMs?: number; baseUrl?: string; expectedActor?: string };
 
 export class HistoricalClientPaymentClientError extends Error {
   public readonly code: string;
@@ -53,9 +54,10 @@ export class HistoricalClientPaymentClientError extends Error {
 }
 
 function requestOptions(input: HistoricalClientPaymentOptions = {}, headers: Record<string, string> = {}): RequestOptions {
+  const { expectedActor: _expectedActor, ...transportInput } = input;
   const token = sessionClient.getToken();
   if (!token) throw new HistoricalClientPaymentClientError('HISTORICAL_CLIENT_UNAUTHENTICATED', '請先登入。', 401);
-  return { ...input, token, headers, timeoutMs: input.timeoutMs ?? 30_000 };
+  return { ...transportInput, token, headers, timeoutMs: transportInput.timeoutMs ?? 30_000 };
 }
 function decode<T extends z.ZodTypeAny>(schema: T, raw: unknown): z.output<T> {
   try { return decodePayload(response(schema), raw).data; }
@@ -78,6 +80,10 @@ export const historicalClientPaymentClient = {
   },
   async apply(intent: HistoricalClientPaymentIntent, preview: HistoricalClientPaymentPreview, reason: string, idempotencyKey: string, options: HistoricalClientPaymentOptions = {}) {
     try {
+      const actor = sessionClient.getUser()?.username.trim() ?? '';
+      if (!actor || (options.expectedActor !== undefined && options.expectedActor.trim() !== actor)) {
+        throw new HistoricalClientPaymentClientError('HISTORICAL_CLIENT_ACTOR_CHANGED', '目前登入帳號與原歷史付款操作不一致。', 409);
+      }
       return decode(ReceiptSchema, await transport.post<unknown>('/api/v1/client-payments/historical-payments/apply', {
         ...intent, expected_account_version: preview.account_version, expected_adoption_receipt_id: preview.adoption_receipt_id,
         preview_fingerprint: preview.preview_fingerprint, reason,

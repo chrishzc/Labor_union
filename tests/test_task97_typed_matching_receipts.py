@@ -71,6 +71,11 @@ def _response_model(path: str, method: str):
             "/api/v1/orders/{case_no}/matching-plans",
             BaseResponse[MatchingPlanReceiptView],
         ),
+        (
+            "GET",
+            "/api/v1/orders/{case_no}/matching-plans/receipts/{event_key}",
+            BaseResponse[MatchingPlanReceiptView],
+        ),
     ),
 )
 def test_matching_plan_mutations_publish_closed_receipts(method, path, expected):
@@ -91,23 +96,31 @@ def test_matching_plan_mutations_publish_closed_receipts(method, path, expected)
         ),
         (
             MatchingCustomerDecisionReceiptView,
-            {
-                "event_id": 2,
-                "communication_version": 3,
-                "source": "admin",
-                "willingness": None,
-                "customer_decision": "accepted",
-            },
+                {
+                    "event_id": 2,
+                    "case_no": "115000297",
+                    "plan_id": 6,
+                    "segment_id": None,
+                    "event_key": "manual-customer-decision-97",
+                    "communication_version": 3,
+                    "source": "admin",
+                    "willingness": None,
+                    "customer_decision": "accepted",
+                },
         ),
         (
             MatchingCaregiverWillingnessReceiptView,
-            {
-                "event_id": 4,
-                "communication_version": 5,
-                "source": "admin",
-                "willingness": "willing",
-                "customer_decision": None,
-            },
+                {
+                    "event_id": 4,
+                    "case_no": "115000297",
+                    "plan_id": 6,
+                    "segment_id": 8,
+                    "event_key": "manual-caregiver-willingness-97",
+                    "communication_version": 5,
+                    "source": "admin",
+                    "willingness": "willing",
+                    "customer_decision": None,
+                },
         ),
         (
             ManualMatchingProfilesPreviewView,
@@ -154,6 +167,11 @@ def test_matching_plan_mutations_publish_closed_receipts(method, path, expected)
                         "assigned_end_date": "2026-09-28",
                     }
                 ],
+                "actor": "operator",
+                "as_of": "2026-09-11",
+                "event_key": "matching-plan:CASE-97:create",
+                "command_fingerprint": "a" * 64,
+                "replayed": False,
             },
         ),
     ),

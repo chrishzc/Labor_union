@@ -73,7 +73,17 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
   const [status, setStatus] = useState<'idle' | 'previewing' | 'applying'>('idle');
   const [error, setError] = useState<string | null>(null);
   const mounted = useRef(false);
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const previewGeneration = useRef(0);
+  const previewAbort = useRef<AbortController | null>(null);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      previewGeneration.current += 1;
+      previewAbort.current?.abort();
+      previewAbort.current = null;
+    };
+  }, []);
   const currentQuery = readback ?? query;
   const queryRevision = [
     caseNo,
@@ -96,6 +106,9 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
   useEffect(() => {
     if (previousQueryRevision.current === queryRevision) return;
     previousQueryRevision.current = queryRevision;
+    previewGeneration.current += 1;
+    previewAbort.current?.abort();
+    previewAbort.current = null;
     if (queryRevision === observedRevision) return;
     setDraft(draftFromQuery(query));
     setPreview(null);
@@ -142,16 +155,35 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
 
   const previewTerms = async () => {
     if (!draftReady || currentQuery.service_data_locked) return;
+    const generation = ++previewGeneration.current;
+    previewAbort.current?.abort();
+    const controller = new AbortController();
+    previewAbort.current = controller;
+    const isCurrentPreview = () => (
+      mounted.current
+      && previewGeneration.current === generation
+      && previewAbort.current === controller
+    );
     setStatus('previewing');
     setError(null);
     setReceipt(null);
     try {
-      setPreview(await orderTermsMutationClient.preview(caseNo, proposedTermsPayload()));
+      const nextPreview = await orderTermsMutationClient.preview(
+        caseNo,
+        proposedTermsPayload(),
+        { signal: controller.signal },
+      );
+      if (!isCurrentPreview()) return;
+      setPreview(nextPreview);
     } catch (caught) {
+      if (!isCurrentPreview() || controller.signal.aborted) return;
       setPreview(null);
       setError(conflictMessage(caught) ?? errorMessage(caught, '無法檢查訂單條款變更影響。'));
     } finally {
-      setStatus('idle');
+      if (isCurrentPreview()) {
+        previewAbort.current = null;
+        setStatus('idle');
+      }
     }
   };
 

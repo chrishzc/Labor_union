@@ -5,7 +5,7 @@
     "path": "db/schema.sql",
     "sha256": "b9cd84ae5a09a46949b5d4c131659f7f114480306f94e0af1246833d021b1bfb"
   },
-  "active_artifacts_sha256": "bd3a22913f28a285e6df8ed6bb2a662f3254513868533618914ac89df11e644b",
+  "active_artifacts_sha256": "a84fb5f4ac01e496352c627da3bb92bdd655791e9bb8422704175985eae5a725",
   "active_bootstrap": [
     "db/schema_parts/202_scheduling_staff_leave_intake.sql",
     "db/schema_parts/20_staff_monthly_settlements.sql",
@@ -168,7 +168,8 @@
     "db/schema_parts/1032_matching_holiday_work_agreements.sql",
     "db/schema_parts/1034_contract_external_signing_final_pdf_completion.sql",
     "db/schema_parts/220_twins_payroll_policy.sql",
-    "db/schema_parts/221_twins_payroll_order_details_view.sql"
+    "db/schema_parts/221_twins_payroll_order_details_view.sql",
+    "db/schema_parts/222_matching_plan_create_receipts.sql"
   ],
   "classifications": {
     "db/schema_parts/1022_task96_retired_anomaly_owner_contracts.sql": "retired",
@@ -185,7 +186,8 @@
     "db/schema_parts/1035_weekly_report_metrics.sql": "migration-only",
     "db/schema_parts/1036_registry_owner_mutations.sql": "migration-only",
     "db/schema_parts/1037_twins_payroll_policy.sql": "migration-only",
-    "db/schema_parts/1038_twins_payroll_order_details_view.sql": "migration-only"
+    "db/schema_parts/1038_twins_payroll_order_details_view.sql": "migration-only",
+    "db/schema_parts/1039_matching_plan_create_receipts.sql": "migration-only"
   },
   "retirement_contracts": {
     "db/schema_parts/1022_task96_retired_anomaly_owner_contracts.sql": {
@@ -322,6 +324,15 @@
       "replay": "CREATE OR REPLACE VIEW deterministically converges the owned view definition",
       "rollback": "retain source backup and discard the candidate before any entry switch",
       "unresolved_policy": "non-exact final view definition blocks candidate verification"
+    },
+    "db/schema_parts/1039_matching_plan_create_receipts.sql": {
+      "source_object": "preserve-data additive bridge for matching-plan create immutable receipts",
+      "successor": "db/schema_parts/222_matching_plan_create_receipts.sql",
+      "terminal_schema_evidence": "fresh assembly creates the canonical receipt table in part 222; preserve chain applies part 1039 to deployed schemas",
+      "data_effect": "schema_only; no historical matching-plan command is inferred or backfilled into a receipt",
+      "replay": "preserve release applies 1039 only when its complete owned receipt metadata is absent or exact",
+      "rollback": "retain source backup and discard candidate before same-name replacement",
+      "unresolved_policy": "partial or drift receipt metadata blocks candidate apply pending explicit remediation"
     }
   }
 }

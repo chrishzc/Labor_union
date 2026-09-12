@@ -1,0 +1,79 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-matching-plan-create-receipts-2026-09-12-v1",
+  "release_metadata": {
+    "release_name": "Labor Union matching-plan create immutable receipts",
+    "application_version": "matching-plan-create-receipts-v1",
+    "published_at": "2026-09-12",
+    "description": "Add immutable idempotency receipts for new formal matching-plan create commands without inferring or backfilling historical commands"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-twins-payroll-policy-2026-09-12-v2"
+  },
+  "artifacts": [
+    {
+      "name": "1039_matching_plan_create_receipts.sql",
+      "relative_path": "db/schema_parts/1039_matching_plan_create_receipts.sql",
+      "sha256": "9e033eeb6919b30994e1c39d29ae059ce635865b1dc55691ec9c202186df0812",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "forward-only-preserve-matching-plan-create-receipts",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "matching-plan-create-receipts-owned-objects",
+      "phase": "post-schema",
+      "policy": "matching-plan-create-receipt-table-constraints-and-immutability-exact",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": [
+      "matching-plan-create-receipts-v1"
+    ],
+    "required_restart_targets": [
+      "api"
+    ],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": [
+      "matching-plan-create-receipts-owned-objects"
+    ]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_09_12_matching_plan_create_receipts_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_09_12_matching_plan_create_receipts_v1.descriptors.json",
+    "sha256": "3d67becad041f74672b41232c218bc6586d429ffbdff02c0ccd87a5400e9fe59",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

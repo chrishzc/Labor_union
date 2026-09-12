@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import {
   intakeBlockerMessage,
   intakeRepairErrorMessage,
@@ -9,6 +9,14 @@ import {
   type IntakeTermsPreview,
 } from '../api/orders/order_intake_completion_client';
 import { ordersQueryClient } from '../api/orders/order_query_client';
+import { ApiHttpError } from '../api/shared/typed_errors';
+import {
+  orderMutationFlowStore,
+  type IntakeRepairCommand,
+  type IntakeRepairFlowState,
+  type IntakeRepairOperation,
+  type IntakeRepairReceipt,
+} from '../adapters/orders/order_mutation_flow_store';
 
 const FIELD_LABELS: Record<IntakeMissingField, string> = {
   client_name: '客戶姓名',
@@ -27,6 +35,36 @@ export interface OrderIntakeRepairPanelProps {
 }
 
 type IntakeOperation = 'name-preview' | 'name-apply' | 'terms-preview' | 'terms-apply' | 'completion-apply' | null;
+type IntakeReadback = {
+  completion: IntakeCompletionPreview;
+  detail: {
+    case_no: string;
+    client_name: string;
+    start_date: string | null;
+    service_days: number;
+  } | null;
+};
+const subscribeIntakeRepair = (listener: () => void) => orderMutationFlowStore.subscribe(listener);
+
+function isDefinitiveRejection(error: unknown): boolean {
+  return error instanceof ApiHttpError
+    && error.status >= 400
+    && error.status < 500
+    && error.status !== 408
+    && error.status !== 429;
+}
+
+function viewOperation(operation: IntakeRepairOperation): Exclude<IntakeOperation, null | 'name-preview' | 'terms-preview'> {
+  if (operation === 'client_name') return 'name-apply';
+  if (operation === 'terms') return 'terms-apply';
+  return 'completion-apply';
+}
+
+function successMessage(operation: IntakeRepairOperation): string {
+  if (operation === 'client_name') return '客戶姓名已補齊並完成回讀。';
+  if (operation === 'terms') return '服務開始日／天數已補齊並完成回讀。';
+  return '進件缺件已完成，案件已回讀最新狀態。';
+}
 
 export function OrderIntakeRepairPanel({
   caseNo,
@@ -44,32 +82,73 @@ export function OrderIntakeRepairPanel({
   const [operation, setOperation] = useState<IntakeOperation>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const nameFlow = useSyncExternalStore(
+    subscribeIntakeRepair,
+    () => orderMutationFlowStore.getIntakeRepair(caseNo, 'client_name'),
+  );
+  const termsFlow = useSyncExternalStore(
+    subscribeIntakeRepair,
+    () => orderMutationFlowStore.getIntakeRepair(caseNo, 'terms'),
+  );
+  const completionFlow = useSyncExternalStore(
+    subscribeIntakeRepair,
+    () => orderMutationFlowStore.getIntakeRepair(caseNo, 'completion'),
+  );
+  const mounted = useRef(true);
+  const activeCaseNo = useRef(caseNo);
+  const sequence = useRef(0);
+  const readbackController = useRef<AbortController | null>(null);
+  const previewController = useRef<AbortController | null>(null);
+  const flows = [nameFlow, termsFlow, completionFlow].filter(
+    (flow): flow is IntakeRepairFlowState => flow !== undefined,
+  );
+  const protectedFlow = flows.find((flow) => flow.status !== 'observed');
+  const controlsLocked = operation !== null || protectedFlow !== undefined;
+  const visibleError = protectedFlow?.error ?? error;
 
-  const refresh = useCallback(async (signal?: AbortSignal) => {
+  const refresh = useCallback(async (
+    signal?: AbortSignal,
+    requireDetail = false,
+  ): Promise<IntakeReadback | undefined> => {
     setLoading(true);
     setError(null);
-    const currentCompletion = await orderIntakeCompletionClient.previewCompletion(caseNo, { signal });
-    if (signal?.aborted) return;
-    setCompletion(currentCompletion);
-    // Only editable missing fields consume detail to prefill the repair form.
-    // Blockers and completed intake are fully described by the owner preview.
-    if (currentCompletion.blockers.length === 0 && currentCompletion.missing_fields.length > 0) {
-      const [detailResult] = await Promise.allSettled([
-        ordersQueryClient.getOrderDetail(caseNo, { signal }),
-      ]);
+    try {
+      const currentCompletion = await orderIntakeCompletionClient.previewCompletion(caseNo, { signal });
       if (signal?.aborted) return;
-      if (detailResult.status === 'fulfilled' && detailResult.value.case_no === caseNo) {
-        const detail = detailResult.value;
-        setClientName(detail.client_name.startsWith('待補姓名') ? '' : detail.client_name);
-        setStartDate(detail.start_date ?? '');
-        setServiceDays(detail.service_days > 0 ? String(detail.service_days) : '');
+      if (currentCompletion.case_no !== caseNo) throw new Error('進件補件回讀案件識別不一致。');
+      setCompletion(currentCompletion);
+      // Only editable missing fields consume detail to prefill the repair form.
+      // Blockers and completed intake are fully described by the owner preview.
+      let detail: IntakeReadback['detail'] = null;
+      if (currentCompletion.blockers.length === 0 && (requireDetail || currentCompletion.missing_fields.length > 0)) {
+        const [detailResult] = await Promise.allSettled([
+          ordersQueryClient.getOrderDetail(caseNo, { signal }),
+        ]);
+        if (signal?.aborted) return;
+        if (detailResult.status === 'fulfilled') {
+          if (detailResult.value.case_no !== caseNo) throw new Error('進件補件明細回讀案件識別不一致。');
+          detail = detailResult.value;
+          setClientName(detail.client_name.startsWith('待補姓名') ? '' : detail.client_name);
+          setStartDate(detail.start_date ?? '');
+          setServiceDays(detail.service_days > 0 ? String(detail.service_days) : '');
+        } else if (requireDetail) {
+          throw detailResult.reason;
+        }
       }
+      return { completion: currentCompletion, detail };
+    } finally {
+      if (!signal?.aborted) setLoading(false);
     }
-    setLoading(false);
   }, [caseNo]);
 
   useEffect(() => {
+    activeCaseNo.current = caseNo;
+    sequence.current += 1;
+    readbackController.current?.abort();
+    previewController.current?.abort();
+    previewController.current = null;
     const controller = new AbortController();
+    setOperation(null);
     setCompletion(null);
     setNamePreview(null);
     setTermsPreview(null);
@@ -84,105 +163,275 @@ export function OrderIntakeRepairPanel({
         }
       });
     });
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      readbackController.current?.abort();
+      previewController.current?.abort();
+    };
   }, [refresh]);
 
-  const afterMutation = async (message: string) => {
-    setNamePreview(null);
-    setTermsPreview(null);
-    setNotice(message);
-    await onChanged?.();
-    await refresh();
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      sequence.current += 1;
+    };
+  }, []);
+
+  const isActive = (request: number, requestCaseNo: string) => (
+    mounted.current && activeCaseNo.current === requestCaseNo && sequence.current === request
+  );
+
+  const receiptMatchesCommand = (command: IntakeRepairCommand, receipt: IntakeRepairReceipt): boolean => {
+    if (receipt.case_no !== caseNo || receipt.preview_fingerprint !== command.preview.preview_fingerprint) return false;
+    if (command.operation === 'client_name') {
+      return 'client_name' in receipt
+        && receipt.client_name === command.preview.after_client_name
+        && receipt.lifecycle_version === command.preview.lifecycle_version;
+    }
+    if (command.operation === 'terms') {
+      return 'start_date' in receipt
+        && receipt.start_date === command.preview.after_start_date
+        && receipt.service_days === command.preview.after_service_days
+        && receipt.lifecycle_version === command.preview.lifecycle_version + 1;
+    }
+    return 'status' in receipt
+      && receipt.status === command.preview.target_status
+      && receipt.lifecycle_version === command.preview.lifecycle_version + 1;
+  };
+
+  const readbackMatchesCommand = (
+    command: IntakeRepairCommand,
+    receipt: IntakeRepairReceipt,
+    readback: IntakeReadback,
+  ): boolean => {
+    if (readback.completion.case_no !== caseNo || readback.completion.lifecycle_version < receipt.lifecycle_version) return false;
+    if (command.operation === 'client_name') {
+      return 'client_name' in receipt
+        && readback.detail?.client_name === receipt.client_name
+        && !readback.completion.missing_fields.includes('client_name');
+    }
+    if (command.operation === 'terms') {
+      return 'start_date' in receipt
+        && readback.detail?.start_date === receipt.start_date
+        && readback.detail.service_days === receipt.service_days
+        && !readback.completion.missing_fields.includes('start_date')
+        && !readback.completion.missing_fields.includes('service_days');
+    }
+    return 'status' in receipt
+      && readback.completion.current_status === receipt.status
+      && readback.completion.missing_fields.length === 0;
+  };
+
+  const preserveReadbackOnly = (state: IntakeRepairFlowState, message: string) => {
+    const saved = orderMutationFlowStore.getIntakeRepair(caseNo, state.command.operation);
+    if (saved?.receipt) {
+      orderMutationFlowStore.setIntakeRepair(caseNo, {
+        ...saved,
+        status: 'observation_failed',
+        error: message,
+      });
+    }
+  };
+
+  const observe = async (
+    state: IntakeRepairFlowState,
+    request: number,
+  ) => {
+    const { command, receipt } = state;
+    if (!receipt || !receiptMatchesCommand(command, receipt)) {
+      throw new Error('進件補件收據識別不一致，已停止重新套用。');
+    }
+    readbackController.current?.abort();
+    const controller = new AbortController();
+    readbackController.current = controller;
+    orderMutationFlowStore.setIntakeRepair(caseNo, { ...state, status: 'observing', error: null });
+    try {
+      await onChanged?.();
+      if (controller.signal.aborted || !isActive(request, caseNo)) {
+        preserveReadbackOnly(state, '案件已切換；保留收據，只能重新讀取補件結果。');
+        return;
+      }
+      const readback = await refresh(controller.signal, true);
+      if (controller.signal.aborted || !isActive(request, caseNo)) {
+        preserveReadbackOnly(state, '案件已切換；保留收據，只能重新讀取補件結果。');
+        return;
+      }
+      if (!readback || !readbackMatchesCommand(command, receipt, readback)) {
+        throw new Error('進件補件已收到收據，但正式回讀尚未觀察到相同版本與已補資料。');
+      }
+      orderMutationFlowStore.clearIntakeRepair(caseNo, command.operation);
+      setNamePreview(null);
+      setTermsPreview(null);
+      setNotice(successMessage(command.operation));
+    } finally {
+      if (readbackController.current === controller) readbackController.current = null;
+    }
+  };
+
+  const runApply = async (command: IntakeRepairCommand, retry = false) => {
+    const existing = orderMutationFlowStore.getIntakeRepair(caseNo, command.operation);
+    if (retry) {
+      if (existing?.status !== 'outcome_unknown') return;
+    } else if (protectedFlow || existing) {
+      return;
+    }
+    const recoveringUnknown = retry && existing?.status === 'outcome_unknown';
+    const request = sequence.current;
+    setOperation(viewOperation(command.operation));
+    setError(null);
+    orderMutationFlowStore.setIntakeRepair(caseNo, {
+      status: 'applying',
+      command,
+      receipt: null,
+      error: null,
+    });
+    let receipt: IntakeRepairReceipt;
+    try {
+      if (command.operation === 'client_name') {
+        receipt = await orderIntakeCompletionClient.applyClientName(
+          caseNo, command.preview, command.reason, command.idempotencyKey,
+        );
+      } else if (command.operation === 'terms') {
+        receipt = await orderIntakeCompletionClient.applyTerms(
+          caseNo, command.preview, command.reason, command.idempotencyKey,
+        );
+      } else {
+        receipt = await orderIntakeCompletionClient.applyCompletion(
+          caseNo, command.preview, command.reason, command.idempotencyKey,
+        );
+      }
+    } catch (caught) {
+      if (isDefinitiveRejection(caught) && !recoveringUnknown) {
+        orderMutationFlowStore.clearIntakeRepair(caseNo, command.operation);
+        if (isActive(request, caseNo)) setError(intakeRepairErrorMessage(caught));
+      } else {
+        const message = recoveringUnknown
+          ? '補件套用結果仍未確認；請恢復權限後使用相同內容與原操作識別重新確認。'
+          : '補件套用結果未明；保留原操作，只能使用相同內容與原操作識別重新確認。';
+        orderMutationFlowStore.setIntakeRepair(caseNo, {
+          status: 'outcome_unknown', command, receipt: null, error: message,
+        });
+        if (isActive(request, caseNo)) setError(message);
+      }
+      if (isActive(request, caseNo)) setOperation(null);
+      return;
+    }
+    const received: IntakeRepairFlowState = {
+      status: 'observation_failed', command, receipt, error: null,
+    };
+    orderMutationFlowStore.setIntakeRepair(caseNo, received);
+    if (!isActive(request, caseNo)) return;
+    try {
+      await observe(received, request);
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : '補件已收到收據，但正式回讀失敗。';
+      const saved = orderMutationFlowStore.getIntakeRepair(caseNo, command.operation);
+      if (saved?.receipt) {
+        orderMutationFlowStore.setIntakeRepair(caseNo, {
+          ...saved, status: 'observation_failed', error: message,
+        });
+      }
+      if (isActive(request, caseNo)) setError(message);
+    } finally {
+      if (isActive(request, caseNo)) setOperation(null);
+    }
+  };
+
+  const retryObservation = async (state: IntakeRepairFlowState) => {
+    if (state.status !== 'observation_failed' || !state.receipt || protectedFlow !== state) return;
+    const request = sequence.current;
+    setOperation(viewOperation(state.command.operation));
+    setError(null);
+    try {
+      await observe(state, request);
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : '補件正式回讀失敗。';
+      const saved = orderMutationFlowStore.getIntakeRepair(caseNo, state.command.operation);
+      if (saved?.receipt) {
+        orderMutationFlowStore.setIntakeRepair(caseNo, {
+          ...saved, status: 'observation_failed', error: message,
+        });
+      }
+      if (isActive(request, caseNo)) setError(message);
+    } finally {
+      if (isActive(request, caseNo)) setOperation(null);
+    }
   };
 
   const previewName = async () => {
+    if (protectedFlow) return;
+    previewController.current?.abort();
+    const controller = new AbortController();
+    previewController.current = controller;
     setOperation('name-preview');
+    setNamePreview(null);
     setError(null);
     setNotice(null);
     try {
-      setNamePreview(await orderIntakeCompletionClient.previewClientName(caseNo, clientName));
+      const preview = await orderIntakeCompletionClient.previewClientName(caseNo, clientName, { signal: controller.signal });
+      if (controller.signal.aborted) return;
+      if (preview.case_no !== caseNo) throw new Error('姓名補件預覽案件識別不一致。');
+      setNamePreview(preview);
     } catch (caught) {
+      if (controller.signal.aborted) return;
       setNamePreview(null);
       setError(intakeRepairErrorMessage(caught));
     } finally {
-      setOperation(null);
+      if (!controller.signal.aborted) setOperation(null);
     }
   };
 
   const applyName = async () => {
     if (!namePreview || !reason.trim()) return;
-    setOperation('name-apply');
-    setError(null);
-    try {
-      await orderIntakeCompletionClient.applyClientName(
-        caseNo,
-        namePreview,
-        reason,
-        operationKey(caseNo, 'client-name'),
-      );
-      await afterMutation('客戶姓名已補齊並完成回讀。');
-    } catch (caught) {
-      setError(intakeRepairErrorMessage(caught));
-    } finally {
-      setOperation(null);
-    }
+    await runApply({
+      operation: 'client_name', preview: namePreview, reason: reason.trim(),
+      idempotencyKey: operationKey(caseNo, 'client-name'),
+    });
   };
 
   const previewTerms = async () => {
+    if (protectedFlow) return;
     const parsedDays = Number(serviceDays);
     if (!startDate || !Number.isInteger(parsedDays) || parsedDays <= 0) {
       setError('請輸入有效的服務開始日與正整數服務天數。');
       return;
     }
+    previewController.current?.abort();
+    const controller = new AbortController();
+    previewController.current = controller;
     setOperation('terms-preview');
+    setTermsPreview(null);
     setError(null);
     setNotice(null);
     try {
-      setTermsPreview(await orderIntakeCompletionClient.previewTerms(caseNo, startDate, parsedDays));
+      const preview = await orderIntakeCompletionClient.previewTerms(caseNo, startDate, parsedDays, { signal: controller.signal });
+      if (controller.signal.aborted) return;
+      if (preview.case_no !== caseNo) throw new Error('日期／天數補件預覽案件識別不一致。');
+      setTermsPreview(preview);
     } catch (caught) {
+      if (controller.signal.aborted) return;
       setTermsPreview(null);
       setError(intakeRepairErrorMessage(caught));
     } finally {
-      setOperation(null);
+      if (!controller.signal.aborted) setOperation(null);
     }
   };
 
   const applyTerms = async () => {
     if (!termsPreview || !reason.trim()) return;
-    setOperation('terms-apply');
-    setError(null);
-    try {
-      await orderIntakeCompletionClient.applyTerms(
-        caseNo,
-        termsPreview,
-        reason,
-        operationKey(caseNo, 'terms'),
-      );
-      await afterMutation('服務開始日／天數已補齊並完成回讀。');
-    } catch (caught) {
-      setError(intakeRepairErrorMessage(caught));
-    } finally {
-      setOperation(null);
-    }
+    await runApply({
+      operation: 'terms', preview: termsPreview, reason: reason.trim(),
+      idempotencyKey: operationKey(caseNo, 'terms'),
+    });
   };
 
   const applyCompletion = async () => {
     if (!completion || !completion.apply_allowed || completion.missing_fields.length > 0 || !reason.trim()) return;
-    setOperation('completion-apply');
-    setError(null);
-    try {
-      await orderIntakeCompletionClient.applyCompletion(
-        caseNo,
-        completion,
-        reason,
-        operationKey(caseNo, 'completion'),
-      );
-      await afterMutation('進件缺件已完成，案件已回讀最新狀態。');
-    } catch (caught) {
-      setError(intakeRepairErrorMessage(caught));
-    } finally {
-      setOperation(null);
-    }
+    await runApply({
+      operation: 'completion', preview: completion, reason: reason.trim(),
+      idempotencyKey: operationKey(caseNo, 'completion'),
+    });
   };
 
   const historicalRestartAvailable = orderStatus === '歷史訂單－未服務' || orderStatus === '歷史訂單－服務中';
@@ -191,7 +440,7 @@ export function OrderIntakeRepairPanel({
   const missingName = completion?.missing_fields.includes('client_name') ?? false;
   const missingTerms = completion?.missing_fields.some((field) => field === 'start_date' || field === 'service_days') ?? false;
   const shouldRender = loading
-    || error !== null
+    || visibleError !== null
     || completion === null
     || completion.missing_fields.length > 0
     || completion.apply_allowed
@@ -213,7 +462,7 @@ export function OrderIntakeRepairPanel({
       </header>
 
       {loading && <div role="status">正在檢查目前可用的補件流程…</div>}
-      {error && <div role="alert" style={{ color: '#991b1b' }}>{error}</div>}
+      {visibleError && <div role="alert" style={{ color: '#991b1b' }}>{visibleError}</div>}
       {notice && <div role="status" style={{ color: '#166534' }}>{notice}</div>}
 
       {completion && !loading && (
@@ -245,7 +494,7 @@ export function OrderIntakeRepairPanel({
               <input
                 value={reason}
                 maxLength={500}
-                disabled={operation !== null}
+                disabled={controlsLocked}
                 onChange={(event) => setReason(event.target.value)}
               />
             </label>
@@ -258,11 +507,11 @@ export function OrderIntakeRepairPanel({
                 <input
                   value={clientName}
                   maxLength={100}
-                  disabled={operation !== null}
+                  disabled={controlsLocked}
                   onChange={(event) => { setClientName(event.target.value); setNamePreview(null); }}
                 />
               </label>
-              <button type="button" className="btn-secondary-action" disabled={operation !== null || !clientName.trim()} onClick={() => void previewName()}>
+              <button type="button" className="btn-secondary-action" disabled={controlsLocked || !clientName.trim()} onClick={() => void previewName()}>
                 {operation === 'name-preview' ? '正在檢查姓名補件…' : '檢查姓名補件影響'}
               </button>
               {namePreview && (
@@ -273,7 +522,7 @@ export function OrderIntakeRepairPanel({
                   <button
                     type="button"
                     className="btn-primary-action"
-                    disabled={operation !== null || !namePreview.apply_allowed || !reason.trim()}
+                    disabled={controlsLocked || !namePreview.apply_allowed || !reason.trim()}
                     onClick={() => void applyName()}
                   >
                     {operation === 'name-apply' ? '正在套用姓名補件…' : '確認套用姓名補件'}
@@ -288,14 +537,14 @@ export function OrderIntakeRepairPanel({
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                 <label style={{ display: 'grid', gap: '4px', fontSize: '0.82rem' }}>
                   服務開始日
-                  <input type="date" value={startDate} disabled={operation !== null} onChange={(event) => { setStartDate(event.target.value); setTermsPreview(null); }} />
+                  <input type="date" value={startDate} disabled={controlsLocked} onChange={(event) => { setStartDate(event.target.value); setTermsPreview(null); }} />
                 </label>
                 <label style={{ display: 'grid', gap: '4px', fontSize: '0.82rem' }}>
                   服務天數
-                  <input type="number" min="1" value={serviceDays} disabled={operation !== null} onChange={(event) => { setServiceDays(event.target.value); setTermsPreview(null); }} />
+                  <input type="number" min="1" value={serviceDays} disabled={controlsLocked} onChange={(event) => { setServiceDays(event.target.value); setTermsPreview(null); }} />
                 </label>
               </div>
-              <button type="button" className="btn-secondary-action" disabled={operation !== null || !startDate || Number(serviceDays) <= 0} onClick={() => void previewTerms()}>
+              <button type="button" className="btn-secondary-action" disabled={controlsLocked || !startDate || Number(serviceDays) <= 0} onClick={() => void previewTerms()}>
                 {operation === 'terms-preview' ? '正在檢查日期／天數補件…' : '檢查日期／天數補件影響'}
               </button>
               {termsPreview && (
@@ -306,7 +555,7 @@ export function OrderIntakeRepairPanel({
                   <button
                     type="button"
                     className="btn-primary-action"
-                    disabled={operation !== null || !termsPreview.apply_allowed || !reason.trim()}
+                    disabled={controlsLocked || !termsPreview.apply_allowed || !reason.trim()}
                     onClick={() => void applyTerms()}
                   >
                     {operation === 'terms-apply' ? '正在套用日期／天數補件…' : '確認套用日期／天數補件'}
@@ -320,14 +569,36 @@ export function OrderIntakeRepairPanel({
             <button
               type="button"
               className="btn-primary-action"
-              disabled={operation !== null || !reason.trim()}
+              disabled={controlsLocked || !reason.trim()}
               onClick={() => void applyCompletion()}
             >
               {operation === 'completion-apply' ? '正在完成進件補齊…' : '確認完成進件補齊'}
             </button>
           )}
+
         </>
       )}
+      {protectedFlow?.status === 'applying' || protectedFlow?.status === 'observing' ? (
+        <div role="status">補件套用／回讀中…</div>
+      ) : null}
+      {protectedFlow?.status === 'outcome_unknown' ? (
+        <button
+          type="button"
+          className="btn-primary-action"
+          onClick={() => void runApply(protectedFlow.command, true)}
+        >
+          以原操作重新確認補件
+        </button>
+      ) : null}
+      {protectedFlow?.status === 'observation_failed' ? (
+        <button
+          type="button"
+          className="btn-secondary-action"
+          onClick={() => void retryObservation(protectedFlow)}
+        >
+          只重新讀取補件結果
+        </button>
+      ) : null}
     </section>
   );
 }

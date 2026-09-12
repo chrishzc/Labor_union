@@ -98,6 +98,9 @@ export const orderServiceCompletionClient = {
     reason: string,
     idempotencyKey: string,
   ): Promise<OrderServiceCompletionReceipt> {
+    if (preview.case_no !== caseNo) {
+      throw new ApiDecodeError('服務完成 Preview 案件 identity 不一致。');
+    }
     const raw = await transport.post<unknown>(
       `/api/v1/orders/${encodeURIComponent(caseNo)}/service-completion/apply`,
       {
@@ -109,8 +112,13 @@ export const orderServiceCompletionClient = {
       options(idempotencyKey),
     );
     const result = decode(ReceiptSchema, raw, ' Apply');
-    if (result.case_no !== caseNo) {
-      throw new ApiDecodeError('服務完成 receipt 案件 identity 不一致。');
+    if (
+      result.case_no !== caseNo || result.idempotency_key !== idempotencyKey ||
+      result.order_version !== preview.resulting_order_version ||
+      Date.parse(result.evaluation_at) !== Date.parse(preview.evaluation_at) ||
+      Date.parse(result.completion_instant) !== Date.parse(preview.completion_instant)
+    ) {
+      throw new ApiDecodeError('服務完成 receipt identity 不一致。');
     }
     return result;
   },

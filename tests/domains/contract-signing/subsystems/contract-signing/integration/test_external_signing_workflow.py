@@ -172,7 +172,7 @@ def test_handoff_activates_the_virtual_session_once_at_version_one() -> None:
     assert first.replayed is False
     assert replay.resulting_status_version == 1
     assert replay.replayed is True
-    assert repository.writes == ["activate"]
+    assert repository.writes == ["activate", "handoff_receipt"]
     assert [uow.commits for uow in uows.instances] == [1, 1]
 
 
@@ -234,6 +234,9 @@ class FakeRepository:
         self.binding_locks: list[bool] = []
         self.writes: list[str] = []
         self.receipts = {}
+        self.handoff_receipts = {}
+        self.handoff_operations = []
+        self.case_exists = True
         self.session_prerequisites = None
         self._report_number = 0
 
@@ -241,8 +244,18 @@ class FakeRepository:
         self.loads.append(for_update)
         return self.facts if self.facts is not None and session_id == self.facts.session_id else None
 
+    def lock_case(self, case_no):
+        self.handoff_operations.append(("case_lock", case_no))
+        return self.case_exists
+
     def load_active_session_by_case(self, case_no, *, for_update):
-        return self.facts if self.facts is not None and self.facts.case_no == case_no else None
+        return (
+            self.facts
+            if self.facts is not None
+            and self.facts.case_no == case_no
+            and self.facts.state is not ExternalSigningState.SUPERSEDED
+            else None
+        )
 
     def derive_current_session(self, case_no, *, for_update):
         return self.virtual if self.virtual is not None and self.virtual.case_no == case_no else None
@@ -261,6 +274,14 @@ class FakeRepository:
 
     def find_receipt(self, key, *, for_update):
         return self.receipts.get(key.value)
+
+    def find_handoff_receipt(self, key, *, for_update):
+        self.handoff_operations.append(("receipt_lookup", key.value))
+        return self.handoff_receipts.get(key.value)
+
+    def save_handoff_receipt(self, key, stored, command):
+        self.writes.append("handoff_receipt")
+        self.handoff_receipts[key.value] = stored
 
     def find_source_receipt(self, source_event_identity, *, for_update):
         return None

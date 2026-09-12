@@ -57,12 +57,16 @@ const envelope = <T extends z.ZodTypeAny>(schema: T) => z.object({ success: z.bo
 export type AssignmentPlanSegmentInput = z.infer<typeof SegmentInputSchema>;
 export type AssignmentPlanPreview = z.infer<typeof PreviewSchema>;
 export type AssignmentPlanJob = z.infer<typeof JobSchema>;
+export interface AssignmentPlanCommandIdentity {
+  idempotencyKey: string;
+  correlationId: string;
+}
 
-function options(idempotencyKey?: string): RequestOptions {
+function options(command?: AssignmentPlanCommandIdentity): RequestOptions {
   const token = sessionClient.getToken();
   if (!token) throw new ApiHttpError(401, 'UNAUTHENTICATED', '請先登入。');
-  const headers: Record<string, string> = { 'X-Correlation-ID': `assignment-plan-${crypto.randomUUID()}` };
-  if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
+  const headers: Record<string, string> = { 'X-Correlation-ID': command?.correlationId ?? `assignment-plan-${crypto.randomUUID()}` };
+  if (command?.idempotencyKey) headers['Idempotency-Key'] = command.idempotencyKey;
   return { token, headers };
 }
 
@@ -74,13 +78,13 @@ function decode<T>(schema: z.ZodType<T>, raw: unknown, operation: string): T {
 }
 
 export const assignmentPlanMutationClient = {
-  async preview(caseNo: string, segments: AssignmentPlanSegmentInput[]): Promise<AssignmentPlanPreview> {
-    const raw = await transport.post<unknown>(`/api/v1/orders/${encodeURIComponent(caseNo)}/assignment-plan/preview`, { segments: SegmentInputSchema.array().min(1).max(4).parse(segments) }, options());
+  async preview(caseNo: string, segments: AssignmentPlanSegmentInput[], signal?: AbortSignal): Promise<AssignmentPlanPreview> {
+    const raw = await transport.post<unknown>(`/api/v1/orders/${encodeURIComponent(caseNo)}/assignment-plan/preview`, { segments: SegmentInputSchema.array().min(1).max(4).parse(segments) }, { ...options(), ...(signal ? { signal } : {}) });
     const result = decode(PreviewSchema, raw, 'Preview');
     if (result.case_no !== caseNo) throw new ApiDecodeError('正式排班 Preview 案件 identity 不一致。');
     return result;
   },
-  async apply(caseNo: string, segments: AssignmentPlanSegmentInput[], preview: AssignmentPlanPreview, reason: string): Promise<{ job_id: string; status_url: string }> {
+  async apply(caseNo: string, segments: AssignmentPlanSegmentInput[], preview: AssignmentPlanPreview, reason: string, command: AssignmentPlanCommandIdentity): Promise<{ job_id: string; status_url: string }> {
     const raw = await transport.post<unknown>(`/api/v1/orders/${encodeURIComponent(caseNo)}/assignment-plan/apply`, {
       segments,
       expected_order_version: preview.order_version,
@@ -89,7 +93,7 @@ export const assignmentPlanMutationClient = {
       expected_payroll_version: preview.payroll_version,
       preview_fingerprint: preview.preview_fingerprint,
       reason: reason.trim(),
-    }, options(`assignment-plan-${caseNo}-${crypto.randomUUID()}`));
+    }, options(command));
     return decode(AcceptedSchema, raw, 'Apply');
   },
   async queryJob(jobId: string): Promise<AssignmentPlanJob> {

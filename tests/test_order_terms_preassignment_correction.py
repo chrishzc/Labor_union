@@ -8,7 +8,9 @@ from datetime import date, datetime, time, timezone
 from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError
 
+from api.routes.order_terms import OrderTermsApplyBody
 from domains.client_finance.obligation_planning import (
     ClientFinanceTermsSourceFacts,
     ClientPaymentTerms,
@@ -100,6 +102,18 @@ class _Repository:
         return self.facts
 
 
+class _PreviewReadRepository:
+    """Preview deliberately exposes no Terms persistence port."""
+
+    def __init__(self, facts):
+        self.facts = facts
+        self.reads = 0
+
+    def load_for_preview(self, _case_no):
+        self.reads += 1
+        return self.facts
+
+
 class _PersistenceRepository(_Repository):
     def __init__(self, facts):
         super().__init__(facts)
@@ -137,24 +151,49 @@ class _Clock:
         return datetime(2026, 8, 23, tzinfo=timezone.utc)
 
 
+class _UnitOfWork:
+    def __init__(self):
+        self.committed = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+    def commit(self):
+        self.committed = True
+
+
 class _AssignedPersistenceRepository(_Repository):
     def __init__(self, facts):
         super().__init__(facts)
         self.claimed = False
         self.stored_receipt = None
+        self.claims = {}
+        self.stored_receipts = {}
+        self.pending_order_terms = None
         self.writes = []
 
     def preflight_impacted_staff_ids(self, _case_no):
         return (3,)
 
-    def claim_command(self, _request, _command_fingerprint):
-        if self.claimed:
+    def claim_command(self, request, command_fingerprint):
+        if self.claimed and not self.claims:
             return terms_workflow.CommandClaimState.MATCHED
-        self.claimed = True
-        return terms_workflow.CommandClaimState.CREATED
+        key = request.idempotency_key.value
+        claimed_fingerprint = self.claims.get(key)
+        if claimed_fingerprint is None:
+            self.claims[key] = command_fingerprint
+            return terms_workflow.CommandClaimState.CREATED
+        if claimed_fingerprint == command_fingerprint:
+            return terms_workflow.CommandClaimState.MATCHED
+        return terms_workflow.CommandClaimState.MISMATCH
 
-    def find_receipt(self, _key, *, for_update):
+    def find_receipt(self, key, *, for_update):
         assert for_update is True
+        if self.claims:
+            return self.stored_receipts.get(key.value)
         return self.stored_receipt
 
     def load_for_apply(self, _case_no, staff_ids):
@@ -186,8 +225,9 @@ class _AssignedPersistenceRepository(_Repository):
         self.writes.append("lifecycle")
         return 15
 
-    def update_order_terms(self, _command):
+    def update_order_terms(self, command):
         self.writes.append("order_terms")
+        self.pending_order_terms = command
 
     def replace_confirmed_service_dates(self, _candidate, _request, _fingerprint):
         self.writes.append("confirmed_service_dates")
@@ -195,6 +235,30 @@ class _AssignedPersistenceRepository(_Repository):
     def save_receipt(self, command):
         self.writes.append("receipt")
         self.stored_receipt = command.stored_receipt
+        self.stored_receipts[command.key.value] = command.stored_receipt
+        if self.pending_order_terms is not None:
+            receipt = command.stored_receipt.receipt
+            self.facts = replace(
+                self.facts,
+                order=replace(
+                    self.facts.order,
+                    terms=self.pending_order_terms.terms,
+                    version=receipt.order_version,
+                ),
+                scheduling=replace(
+                    self.facts.scheduling,
+                    aggregate_version=receipt.scheduling_version,
+                    generation_number=receipt.scheduling_generation,
+                ),
+                client_finance=replace(
+                    self.facts.client_finance,
+                    account_version=receipt.client_finance_version,
+                ),
+                payroll=replace(
+                    self.facts.payroll,
+                    payroll_version=receipt.payroll_version,
+                ),
+            )
 
 
 def _assigned_facts():

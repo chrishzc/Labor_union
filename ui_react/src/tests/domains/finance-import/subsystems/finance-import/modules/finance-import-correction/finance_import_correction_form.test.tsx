@@ -10,7 +10,7 @@ vi.mock('../../../../../../../api/finance_import/finance_import_correction_clien
 beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(clientReceiptQueryClient.query).mockResolvedValue({ case_no: 'CASE-1', obligations: [{ obligation_identity: 'obligation:1', payment_stage: 'deposit', amount_due_ntd: 100 }] } as never);
-  vi.mocked(corrections.preview).mockResolvedValue({ candidate: { row_identity: 'row:1', classification_type: 'client_receipt', bank_amount_ntd: 100, allocations: [{ obligation_identity: 'obligation:1', amount_ntd: 100 }] }, preview_fingerprint: 'a'.repeat(64) } as never);
+  vi.mocked(corrections.preview).mockResolvedValue({ candidate: { row_identity: 'row:1', batch_identity: 'batch:1', classification_type: 'client_receipt', bank_amount_ntd: 100, allocations: [{ obligation_identity: 'obligation:1', amount_ntd: 100 }] }, preview_fingerprint: 'a'.repeat(64) } as never);
   vi.mocked(corrections.apply).mockResolvedValue({ job_id: 'job:1' } as never);
 });
 
@@ -29,7 +29,7 @@ it('requires explicit confirmation and a matching terminal receipt before declar
   expect(corrections.apply).not.toHaveBeenCalled();
   fireEvent.click(screen.getByText('確認更正並核銷'));
   expect(await screen.findByText(/尚未完成核銷/)).toBeInTheDocument();
-  vi.mocked(corrections.queryOutcome).mockResolvedValue({ status: 'succeeded', receipt: { row_identity: 'row:1', preview_fingerprint: 'a'.repeat(64) } } as never);
+  vi.mocked(corrections.queryOutcome).mockResolvedValue({ status: 'succeeded', receipt: { row_identity: 'row:1', batch_identity: 'batch:1', preview_fingerprint: 'a'.repeat(64) } } as never);
   fireEvent.click(screen.getByText('重新查詢更正結果'));
   expect(await screen.findByText('帳務更正完成，已確認核銷收據。')).toBeInTheDocument();
   expect(corrections.apply).toHaveBeenCalledTimes(1);

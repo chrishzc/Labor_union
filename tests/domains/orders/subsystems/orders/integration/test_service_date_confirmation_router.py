@@ -42,7 +42,7 @@ class InMemoryServiceDateConfirmationRepository:
             current_version=1,
             current_dates=(date(2026, 8, 1), date(2026, 8, 2), date(2026, 8, 3)),
         )
-        self.receipts: dict[str, tuple[str, ServiceDateConfirmationReceipt]] = {}
+        self.receipts: dict[str, tuple[str, str, str, ServiceDateConfirmationReceipt]] = {}
         self.next_version = 2
         self.committed = False
         self.rolled_back = False
@@ -55,10 +55,18 @@ class InMemoryServiceDateConfirmationRepository:
             raise ValueError("service_date_confirmation_case_not_found")
         return self.facts
 
-    def replay(self, idempotency_key: str, command_fingerprint: str) -> ServiceDateConfirmationReceipt | None:
+    def replay(
+        self,
+        idempotency_key: str,
+        command_fingerprint: str,
+        *,
+        actor: str,
+        reason: str,
+        for_update: bool = False,
+    ) -> ServiceDateConfirmationReceipt | None:
         if idempotency_key in self.receipts:
-            saved_fp, receipt = self.receipts[idempotency_key]
-            if saved_fp != command_fingerprint:
+            saved_fp, saved_actor, saved_reason, receipt = self.receipts[idempotency_key]
+            if (saved_fp, saved_actor, saved_reason) != (command_fingerprint, actor, reason):
                 raise ValueError("service_date_confirmation_idempotency_conflict")
             return receipt
         return None
@@ -82,7 +90,7 @@ class InMemoryServiceDateConfirmationRepository:
             service_dates=candidate.service_dates,
             fingerprint=candidate.fingerprint,
         )
-        self.receipts[idempotency_key] = (command_fingerprint, receipt)
+        self.receipts[idempotency_key] = (command_fingerprint, actor, reason, receipt)
         self.next_version += 1
         return receipt
 
@@ -122,6 +130,7 @@ def _create_app(
     repo: InMemoryServiceDateConfirmationRepository,
     snapshot_invalidation: InMemorySchedulingSnapshotInvalidationPort,
     authenticate: bool = True,
+    principal: AdminPrincipal | None = None,
 ):
     app = FastAPI()
     app.include_router(router)
@@ -142,7 +151,7 @@ def _create_app(
         return JSONResponse(status_code=422, content={"detail": errors})
 
     if authenticate:
-        app.dependency_overrides[require_system_admin] = lambda: AdminPrincipal(
+        app.dependency_overrides[require_system_admin] = lambda: principal or AdminPrincipal(
             id=1, username="admin_tester", display_name="Admin Tester", role="system_admin"
         )
     app.dependency_overrides[get_service_date_confirmation_workflow] = (
@@ -386,7 +395,11 @@ def test_apply_service_dates_idempotency_and_conflict():
     assert error["code"] == "service_date_confirmation_idempotency_conflict"
 
 
-def test_apply_service_dates_stale_versions():
+@pytest.mark.parametrize(
+    "stale_field",
+    ("expected_order_version", "expected_scheduling_version"),
+)
+def test_apply_service_dates_stale_versions(stale_field):
     repo = InMemoryServiceDateConfirmationRepository()
     client = TestClient(_create_app(repo, InMemorySchedulingSnapshotInvalidationPort()))
 
@@ -396,14 +409,15 @@ def test_apply_service_dates_stale_versions():
     )
     fingerprint = preview_res.json()["data"]["preview_fingerprint"]
 
-    # Stale order version
+    # Each owning version must independently reject stale commands.
     res_stale = client.post(
         "/api/v1/orders/CASE-SD-001/service-dates/apply",
         headers={"Idempotency-Key": "key-stale-1", "X-Correlation-ID": "corr-stale"},
         json={
             "service_dates": ["2026-08-03", "2026-08-04", "2026-08-05"],
-            "expected_order_version": 99,
+            "expected_order_version": 2,
             "expected_scheduling_version": 3,
+            stale_field: 99,
             "preview_fingerprint": fingerprint,
             "reason": "版本過期測試",
         },
@@ -412,6 +426,8 @@ def test_apply_service_dates_stale_versions():
     error = res_stale.json()["detail"]["error"]
     assert error["category"] == "conflict"
     assert error["code"] == "service_date_confirmation_stale_version"
+    assert repo.receipts == {}
+    assert repo.committed is False
 
 
 def test_service_dates_mysql_retryable_error():

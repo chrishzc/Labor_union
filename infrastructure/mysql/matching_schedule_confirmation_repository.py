@@ -61,9 +61,30 @@ class MySqlMatchingScheduleConfirmationRepository:
         }
 
     def prepare_manual(self, case_no, plan_id, actor, reason, expected_version, fingerprint, key):
-        del key
         with self.connection.cursor() as cursor:
+            request_fingerprint = fingerprint_payload({"operation": "prepare_manual", "case_no": case_no, "plan_id": plan_id, "actor": actor, "reason": reason, "expected_version": expected_version, "preview_fingerprint": fingerprint}).value
+            replay = self._command_replay(
+                cursor,
+                "matching_schedule_confirmation_manual/v1",
+                key,
+                request_fingerprint,
+                case_no,
+                plan_id,
+            )
+            if replay is not None:
+                return replay
             root, payloads = self._manual_source(cursor, case_no, plan_id, lock=True)
+            replay = self._command_replay(
+                cursor,
+                "matching_schedule_confirmation_manual/v1",
+                key,
+                request_fingerprint,
+                case_no,
+                plan_id,
+                for_update=True,
+            )
+            if replay is not None:
+                return replay
             if root["version"] != expected_version:
                 raise ValueError("manual_schedule_confirmation_preview_stale")
             expected = _manual_preview_fingerprint(case_no, plan_id, root, payloads)
@@ -77,7 +98,18 @@ class MySqlMatchingScheduleConfirmationRepository:
             current = cursor.fetchone()
             if current:
                 if current["status"] == "draft" and current["snapshot_fingerprint"] == expected:
-                    return self.query(case_no, plan_id)
+                    result = self.query(case_no, plan_id)
+                    self._save_command_receipt(
+                        cursor,
+                        "matching_schedule_confirmation_manual/v1",
+                        key,
+                        request_fingerprint,
+                        fingerprint,
+                        actor,
+                        reason,
+                        result,
+                    )
+                    return result
                 raise ValueError("manual_schedule_confirmation_current_snapshot_conflict")
             cursor.execute(
                 "INSERT INTO matching_schedule_snapshots "
@@ -93,21 +125,56 @@ class MySqlMatchingScheduleConfirmationRepository:
                     {**payload, "manual_preparation": {"actor": actor, "reason": reason}},
                     delivery_status="blocked",
                 )
-        return self.query(case_no, plan_id)
+            result = self.query(case_no, plan_id)
+            self._save_command_receipt(cursor, "matching_schedule_confirmation_manual/v1", key, request_fingerprint, fingerprint, actor, reason, result)
+            return result
 
     def send(self, case_no, plan_id, actor, key):
         with self.connection.cursor() as cursor:
+            request_fingerprint = fingerprint_payload({"operation": "send", "case_no": case_no, "plan_id": plan_id, "actor": actor}).value
+            replay = self._command_replay(
+                cursor,
+                "matching_schedule_confirmation_send/v1",
+                key,
+                request_fingerprint,
+                case_no,
+                plan_id,
+            )
+            if replay is not None:
+                return replay
             cursor.execute("SELECT id,version FROM confirmed_service_date_versions WHERE case_no=%s AND is_current=1 FOR UPDATE", (case_no,))
             version = cursor.fetchone()
             if not version:
                 raise ValueError("confirmed_service_dates_required")
+            replay = self._command_replay(
+                cursor,
+                "matching_schedule_confirmation_send/v1",
+                key,
+                request_fingerprint,
+                case_no,
+                plan_id,
+                for_update=True,
+            )
+            if replay is not None:
+                return replay
             cursor.execute("SELECT id FROM caregiver_matching_plans WHERE id=%s AND case_no=%s AND is_active=1", (plan_id, case_no))
             if not cursor.fetchone():
                 raise ValueError("active_matching_plan_required")
             cursor.execute("SELECT id,status FROM matching_schedule_snapshots WHERE case_no=%s AND plan_id=%s AND confirmed_version_id=%s AND current_marker=1 FOR UPDATE", (case_no, plan_id, version["id"]))
             current = cursor.fetchone()
             if current and current["status"] == "sent":
-                return self.query(case_no, plan_id)
+                result = self.query(case_no, plan_id)
+                self._save_command_receipt(
+                    cursor,
+                    "matching_schedule_confirmation_send/v1",
+                    key,
+                    request_fingerprint,
+                    request_fingerprint,
+                    actor,
+                    "",
+                    result,
+                )
+                return result
             cursor.execute("UPDATE matching_schedule_snapshots SET current_marker=NULL,status='invalidated',invalidated_at_utc=UTC_TIMESTAMP(6) WHERE case_no=%s AND current_marker=1", (case_no,))
             self._require_active_lifecycle(cursor, plan_id)
             payloads = self._payloads(cursor, case_no, plan_id, version["id"])
@@ -118,7 +185,42 @@ class MySqlMatchingScheduleConfirmationRepository:
             for payload in payloads:
                 recipient_id = self._store_recipient(cursor, snapshot_id, payload)
                 self._enqueue(cursor, recipient_id, snapshot_id, payload, key)
-        return self.query(case_no, plan_id)
+            result = self.query(case_no, plan_id)
+            self._save_command_receipt(cursor, "matching_schedule_confirmation_send/v1", key, request_fingerprint, digest, actor, "", result)
+            return result
+
+    @staticmethod
+    def _command_replay(
+        cursor,
+        family,
+        key,
+        request_fingerprint,
+        case_no,
+        plan_id,
+        *,
+        for_update=False,
+    ):
+        cursor.execute(
+            "SELECT request_fingerprint,result_snapshot FROM admin_command_receipts "
+            "WHERE command_family=%s AND idempotency_key=%s"
+            + (" FOR UPDATE" if for_update else ""),
+            (family, key),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        if row["request_fingerprint"] != request_fingerprint:
+            raise ValueError("matching_schedule_confirmation_idempotency_conflict")
+        result = row["result_snapshot"]
+        if isinstance(result, str):
+            result = json.loads(result)
+        if not isinstance(result, dict) or result.get("case_no") != case_no or result.get("plan_id") != plan_id:
+            raise ValueError("matching_schedule_confirmation_idempotency_conflict")
+        return result
+
+    @staticmethod
+    def _save_command_receipt(cursor, family, key, request_fingerprint, preview_fingerprint, actor, reason, result):
+        cursor.execute("INSERT INTO admin_command_receipts (command_family,idempotency_key,request_fingerprint,preview_fingerprint,actor,reason,result_snapshot) VALUES (%s,%s,%s,%s,%s,%s,%s)", (family, key, request_fingerprint, preview_fingerprint, actor, reason, json.dumps(result, ensure_ascii=False, sort_keys=True, default=str)))
 
     def confirm(self, recipient_id, value, actor, reason, key):
         if value not in ("confirmed", "rejected", "manually_confirmed", "manually_revoked"):
@@ -128,7 +230,28 @@ class MySqlMatchingScheduleConfirmationRepository:
             target = cursor.fetchone()
             if not target or target["current_marker"] != 1:
                 raise ValueError("schedule_snapshot_stale")
-            cursor.execute("INSERT INTO matching_schedule_confirmation_events (recipient_snapshot_id,confirmation_value,source,actor_id,reason,idempotency_key) VALUES (%s,%s,'admin',%s,%s,%s) ON DUPLICATE KEY UPDATE id=id", (recipient_id, value, actor, reason or None, key))
+            normalized_reason = reason or None
+            cursor.execute(
+                "INSERT INTO matching_schedule_confirmation_events "
+                "(recipient_snapshot_id,confirmation_value,source,actor_id,reason,idempotency_key) "
+                "VALUES (%s,%s,'admin',%s,%s,%s) "
+                "ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id)",
+                (recipient_id, value, actor, normalized_reason, key),
+            )
+            cursor.execute(
+                "SELECT recipient_snapshot_id,confirmation_value,source,actor_id,reason,idempotency_key "
+                "FROM matching_schedule_confirmation_events WHERE id=LAST_INSERT_ID() FOR UPDATE",
+            )
+            existing = cursor.fetchone()
+            if not existing or (
+                existing["recipient_snapshot_id"] != recipient_id
+                or existing["confirmation_value"] != value
+                or existing["source"] != "admin"
+                or existing["actor_id"] != actor
+                or existing["reason"] != normalized_reason
+                or existing["idempotency_key"] != key
+            ):
+                raise ValueError("schedule_confirmation_idempotency_conflict")
         return self.query(target["case_no"], target["plan_id"])
 
     def confirm_line_postback(self, token, decision, line_user_id, event_key):

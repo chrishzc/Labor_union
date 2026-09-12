@@ -66,6 +66,8 @@
   - `scripts/backfill_twins_payroll_rate_snapshots.py`
   - `db/migration_releases/labor_union_2026_09_11_twins_payroll_policy_v1.json`
   - `db/migration_releases/labor_union_2026_09_11_twins_payroll_policy_v1.descriptors.json`
+  - `db/migration_releases/labor_union_2026_09_12_twins_payroll_policy_backfill_hash_v2.json` — current preserve-chain successor; repeats the immutable 1037／1038 schema contracts and binds the audited current backfill bytes. The 2026-09-11 v1 manifest／descriptor remains archived and is intentionally excluded from default selection because its protected backfill digest no longer matches the current artifact.
+  - `db/migration_releases/labor_union_2026_09_12_twins_payroll_policy_backfill_hash_v2.descriptors.json`
 
 ## Contracts
 - Source read-only、candidate identity、release classification、backup／journal／resume及
@@ -75,6 +77,7 @@
 - layout_status: `custom_current`
 - test_root: `tests/domains/global/subsystems/migration/modules/preserved-database-upgrade/`
 - integration_root: `tests/test_collect_local_additive_engine_evidence.py`
+- integration_root: `tests/test_local_database_maintenance.py`
 - integration_root: `tests/test_order_lifecycle_pending_status_constraint_schema.py`
 - contract: `tests/domains/global/subsystems/migration/modules/preserved-database-upgrade/contract/test_registry_owner_mutations_schema.py`
 

@@ -155,6 +155,7 @@ def _matching_pool_cascade_timeline(plan_id=1) -> OrderOperationalTimeline:
         "candidate_pool_candidate_count": 0,
         "candidate_pool_contacted_count": 0,
         "candidate_pool_replied_count": 0,
+        "candidate_pool_willing_count": 0,
         "candidate_pool_contacted_at": None,
         "candidate_pool_replied_at": None,
         "willingness_contact_attempt_count": 0,

@@ -481,7 +481,10 @@ def _staff_segment(connection, case_no: str, segment_id: int) -> dict[str, objec
     with connection.cursor() as cursor:
         cursor.execute(
             "SELECT segment.id,segment.plan_id,segment.staff_id,segment.assigned_start_date,"
-            "segment.assigned_end_date,plan.status,plan.is_active "
+            "segment.assigned_end_date,plan.status,plan.is_active,"
+            "COALESCE((SELECT response.response_value FROM matching_response_events response "
+            "WHERE response.plan_id=plan.id AND response.response_type='customer_decision' "
+            "ORDER BY response.occurred_at_utc DESC,response.id DESC LIMIT 1),'') AS customer_decision "
             "FROM caregiver_matching_plan_segments segment "
             "JOIN caregiver_matching_plans plan ON plan.id=segment.plan_id "
             "WHERE segment.id=%s AND plan.case_no=%s FOR UPDATE",
@@ -494,7 +497,11 @@ def _staff_segment(connection, case_no: str, segment_id: int) -> dict[str, objec
 
 
 def _require_external_staff_segment_applicable(segment: dict[str, object]) -> None:
-    if str(segment["status"]) != "accepted" or segment["is_active"] != 1:
+    accepted = str(segment["status"]) == "accepted" or (
+        str(segment["status"]) == "proposed"
+        and str(segment.get("customer_decision", "")) == "accepted"
+    )
+    if not accepted or segment["is_active"] != 1:
         raise ValueError("contract_external_signing_accepted_plan_required")
 
 

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 
 import pytest
 
@@ -137,7 +139,7 @@ class _Repository:
     def load_case(self, case_no, *, for_update):
         if for_update:
             self.for_update_calls.append(True)
-        return self.case if case_no == _CASE else None
+        return self.case if case_no == self.case.case_no else None
 
     def update_missing_client_name(self, case_no, client_name):
         self.update_calls.append((case_no, client_name))

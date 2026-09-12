@@ -77,6 +77,9 @@ describe('contractExternalSigningClient', () => {
       staff_targets: [query.staff_targets[0], { ...query.staff_targets[0] }],
     }));
     await expect(contractExternalSigningClient.query('CASE-001')).rejects.toThrow();
+
+    vi.mocked(get).mockResolvedValueOnce(envelope({ ...query, case_no: 'CASE-002' }));
+    await expect(contractExternalSigningClient.query('CASE-001')).rejects.toThrow(/案件識別不一致/);
   });
 
   it('records a staff completion report with expected versions and stable command identity', async () => {

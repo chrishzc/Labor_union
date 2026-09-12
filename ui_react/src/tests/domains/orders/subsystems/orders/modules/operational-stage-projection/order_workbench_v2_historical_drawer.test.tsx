@@ -377,10 +377,10 @@ describe('historical Drawer immutable evidence boundary', () => {
     fireEvent.click(screen.getByRole('button', { name: '案件異動' }));
     const entry = await screen.findByRole('button', { name: '服務前更換月嫂' });
     await waitFor(() => expect(entry).toBeEnabled());
-    expect(screen.queryByText('R-01 候選月嫂尚未定案')).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: '候選月嫂尚未定案' })).not.toBeInTheDocument();
     fireEvent.click(entry);
     const replacementEntry = await screen.findByRole('button', { name: '換人' });
     fireEvent.click(replacementEntry);
-    expect(await screen.findByText('R-01 候選月嫂尚未定案')).toBeInTheDocument();
+    expect(await screen.findByRole('option', { name: '候選月嫂尚未定案' })).toHaveValue('R-01');
   });
 });

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import secrets
+from dataclasses import replace
 from datetime import datetime, timedelta
 from typing import Callable
 
@@ -334,8 +335,18 @@ class MatchingNotificationApplication:
         require_line_capability(command.actor, LineCapability.MATCHING_OVERRIDE)
         with self._unit_of_work_factory() as unit_of_work:
             state = _required_state(unit_of_work, command.plan.case_no, command.plan.plan_id, True)
+            replay = _manual_response_replay(unit_of_work, command, state)
+            if replay is not None:
+                _require_manual_response_receipt(
+                    replay,
+                    command,
+                    receipt_may_have_current_version=True,
+                )
+                unit_of_work.commit()
+                return replay
             _require_expected_state(state, command.plan.version)
             result = _append_manual_response(unit_of_work, command, state, self._now())
+            _require_manual_response_receipt(result, command)
             unit_of_work.commit()
         return result
 
@@ -509,6 +520,8 @@ def _required_state(unit_of_work, case_no, plan_id, lock):
     state = unit_of_work.matching_notifications.get_contact_state(case_no, plan_id, lock=lock)
     if state is None:
         raise LookupError("matching plan not found")
+    if state.plan.case_no != case_no or state.plan.plan_id != plan_id:
+        raise LookupError("matching contact state does not match the requested plan")
     return state
 
 
@@ -624,6 +637,88 @@ def _append_line_response(unit_of_work, interaction, state, decision, line_user_
 
 
 # This stays cohesive so both manual decision types share the same audited write path.
+def _manual_response_replay(unit_of_work, command, state):
+    if command.caregiver_willingness is not None:
+        value = command.caregiver_willingness.value
+    else:
+        value = command.customer_decision.value
+    result = unit_of_work.matching_notifications.get_response_result(
+        command.idempotency_key,
+        _response_fingerprint(
+            state.plan.plan_id,
+            command.segment_id,
+            value,
+            "admin",
+            actor_id=command.actor.actor_id,
+            reason=command.reason,
+            expected_version=command.expected_version.value,
+        ),
+    )
+    if result is None:
+        return None
+    _require_manual_response_receipt(
+        result,
+        command,
+        receipt_may_have_current_version=True,
+    )
+    return replace(
+        result,
+        plan=MatchingPlanReference(
+            result.plan.case_no,
+            result.plan.plan_id,
+            command.expected_version.value + 1,
+        ),
+    )
+
+
+def _require_manual_response_receipt(
+    result,
+    command,
+    *,
+    receipt_may_have_current_version: bool = False,
+) -> None:
+    if not isinstance(result, MatchingResponseResult):
+        raise MatchingCommunicationConflictError(
+            "matching response receipt does not match command identity"
+        )
+    if (
+        result.plan.case_no != command.plan.case_no
+        or result.plan.plan_id != command.plan.plan_id
+        or result.segment_id != command.segment_id
+        or result.idempotency_key != command.idempotency_key
+    ):
+        raise MatchingCommunicationConflictError(
+            "matching response receipt does not match command identity"
+        )
+    if (
+        result.source is not MatchingResponseSource.ADMIN
+        or (
+            command.caregiver_willingness is not None
+            and (
+                result.caregiver_willingness is not command.caregiver_willingness
+                or result.customer_decision is not None
+            )
+        )
+        or (
+            command.customer_decision is not None
+            and (
+                result.customer_decision is not command.customer_decision
+                or result.caregiver_willingness is not None
+            )
+        )
+    ):
+        raise MatchingCommunicationConflictError(
+            "matching response receipt does not match command response"
+        )
+    if (
+        not receipt_may_have_current_version
+        and result.plan.version != command.plan.version + 1
+    ):
+        raise MatchingCommunicationConflictError(
+            "matching response receipt does not match command plan"
+        )
+
+
 def _append_manual_response(unit_of_work, command, state, occurred_at):
     if command.caregiver_willingness is not None:
         segment = next(
@@ -664,6 +759,7 @@ def _append_manual_response(unit_of_work, command, state, occurred_at):
             "admin",
             actor_id=command.actor.actor_id,
             reason=command.reason,
+            expected_version=command.expected_version.value,
         ),
         occurred_at=occurred_at,
     )
@@ -765,16 +861,20 @@ def _response_fingerprint(
     *,
     actor_id,
     reason=None,
+    expected_version=None,
 ):
+    payload = {
+        "plan_id": plan_id,
+        "segment_id": segment_id,
+        "decision": decision,
+        "source": source,
+        "actor_id": actor_id,
+        "reason": reason,
+    }
+    if expected_version is not None:
+        payload["expected_version"] = expected_version
     return fingerprint_payload(
-        {
-            "plan_id": plan_id,
-            "segment_id": segment_id,
-            "decision": decision,
-            "source": source,
-            "actor_id": actor_id,
-            "reason": reason,
-        }
+        payload
     ).value
 
 

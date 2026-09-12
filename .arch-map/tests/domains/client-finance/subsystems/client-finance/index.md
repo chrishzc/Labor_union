@@ -5,6 +5,10 @@ test_root: tests/domains/client-finance/subsystems/client-finance/
 integration_root: tests/domains/client-finance/subsystems/client-finance/integration/
 fixtures_root: tests/fixtures/
 modules:
+  receipt-reconciliation:
+    layout_status: custom_current
+    test_root: tests/domains/client-finance/subsystems/client-finance/integration/test_client_receipt_overage.py
+    architecture: ../../../../../domains/client-finance/subsystems/client-finance/modules/receipt-reconciliation.md
   historical-service-accounting:
     test_root: tests/domains/client-finance/subsystems/client-finance/modules/historical-service-accounting/
   obligation-planning:

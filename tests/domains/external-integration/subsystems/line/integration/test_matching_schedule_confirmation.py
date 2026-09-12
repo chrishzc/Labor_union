@@ -94,6 +94,59 @@ class _UnitOfWork:
         return None
 
 
+class _ConfirmationEventCursor:
+    """In-memory event table for case_no 115000281 confirmation replay behavior."""
+
+    def __init__(self) -> None:
+        self.events_by_key = {}
+        self._last_event = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+    def execute(self, statement, parameters=None):
+        if statement.startswith("SELECT s.case_no"):
+            return
+        if statement.startswith("INSERT INTO matching_schedule_confirmation_events"):
+            recipient_id, value, actor, reason, key = parameters
+            self._last_event = self.events_by_key.setdefault(
+                key,
+                {
+                    "recipient_snapshot_id": recipient_id,
+                    "confirmation_value": value,
+                    "source": "admin",
+                    "actor_id": actor,
+                    "reason": reason,
+                    "idempotency_key": key,
+                },
+            )
+            return
+        if statement.startswith("SELECT recipient_snapshot_id,confirmation_value"):
+            return
+        raise AssertionError(f"unexpected statement: {statement}")
+
+    def fetchone(self):
+        if self._last_event is not None:
+            event, self._last_event = self._last_event, None
+            return event
+        return {
+            "case_no": "115000281",
+            "plan_id": 281,
+            "current_marker": 1,
+        }
+
+
+class _ConfirmationEventConnection:
+    def __init__(self) -> None:
+        self.cursor_instance = _ConfirmationEventCursor()
+
+    def cursor(self):
+        return self.cursor_instance
+
+
 @pytest.mark.parametrize("value", ["rejected", "manually_confirmed", "manually_revoked"])
 def test_manual_schedule_updates_require_a_reason(value):
     workflow = MatchingScheduleConfirmationWorkflow(_Repository(), _UnitOfWork)
@@ -107,6 +160,94 @@ def test_manual_schedule_preparation_requires_a_reason():
 
     with pytest.raises(ValueError, match="manual_schedule_confirmation_reason_required"):
         workflow.prepare_manual("CASE-68", 18, "admin", " ", 1, "f" * 64, "key-68")
+
+
+def test_schedule_send_and_manual_preparation_require_current_confirmed_dates():
+    for operation in (
+        lambda repository: repository.send("115000281", 281, "admin", "schedule-send-281"),
+        lambda repository: repository.prepare_manual(
+            "115000281", 281, "admin", "recorded", 1, "f" * 64, "schedule-manual-281"
+        ),
+    ):
+        repository = MySqlMatchingScheduleConfirmationRepository(
+            _QueryConnection(_QueryCursor(one_rows=[None, None], many_rows=[]))
+        )
+
+        with pytest.raises(ValueError, match="confirmed_service_dates_required"):
+            operation(repository)
+
+
+def test_manual_schedule_preparation_rejects_an_old_confirmed_date_version_before_write():
+    cursor = _QueryCursor(
+        one_rows=[
+            None,
+            {"id": 9, "version": 3},
+            {"id": 281},
+            None,
+            {"line_user_id": "U-customer"},
+            None,
+        ],
+        many_rows=[
+            [{"service_date": date(2026, 8, 8)}],
+            [],
+        ],
+    )
+    repository = MySqlMatchingScheduleConfirmationRepository(_QueryConnection(cursor))
+
+    with pytest.raises(ValueError, match="manual_schedule_confirmation_preview_stale"):
+        repository.prepare_manual(
+            "115000281", 281, "admin", "recorded", 2, "f" * 64, "schedule-stale-281"
+        )
+
+
+def test_schedule_confirmation_rejects_an_invalid_value_before_persistence():
+    repository = MySqlMatchingScheduleConfirmationRepository(object())
+
+    with pytest.raises(ValueError, match="schedule_confirmation_value_invalid"):
+        repository.confirm(28101, "unexpected", "admin", "", "confirm-invalid-281")
+
+
+def test_schedule_confirmation_requires_a_current_recipient_snapshot():
+    repository = MySqlMatchingScheduleConfirmationRepository(
+        _QueryConnection(
+            _QueryCursor(
+                one_rows=[{"case_no": "115000281", "plan_id": 281, "current_marker": None}],
+                many_rows=[],
+            )
+        )
+    )
+
+    with pytest.raises(ValueError, match="schedule_snapshot_stale"):
+        repository.confirm(28101, "confirmed", "admin", "", "confirm-stale-281")
+
+
+@pytest.mark.parametrize(
+    ("changed_recipient_id", "changed_value"),
+    [(28102, "confirmed"), (28101, "rejected")],
+)
+def test_schedule_confirmation_same_key_replays_only_the_identical_recipient_event(
+    changed_recipient_id, changed_value
+):
+    connection = _ConfirmationEventConnection()
+    repository = MySqlMatchingScheduleConfirmationRepository(connection)
+    repository.query = lambda case_no, plan_id: {"case_no": case_no, "plan_id": plan_id}
+
+    first = repository.confirm(28101, "confirmed", "admin-281", "recorded", "confirm-115000281")
+    replay = repository.confirm(28101, "confirmed", "admin-281", "recorded", "confirm-115000281")
+    persisted_events = {
+        key: dict(event) for key, event in connection.cursor_instance.events_by_key.items()
+    }
+
+    assert replay == first == {"case_no": "115000281", "plan_id": 281}
+    with pytest.raises(ValueError, match="schedule_confirmation_idempotency_conflict"):
+        repository.confirm(
+            changed_recipient_id,
+            changed_value,
+            "admin-281",
+            "recorded",
+            "confirm-115000281",
+        )
+    assert connection.cursor_instance.events_by_key == persisted_events
 
 
 def test_schedule_send_requires_every_recipient_to_have_line_binding():

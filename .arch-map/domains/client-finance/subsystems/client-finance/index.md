@@ -15,6 +15,7 @@
 - `document/架構重整/01_規格基線/00_Global_共同契約.md` — outer UoW
 
 ## Modules
+- `receipt-reconciliation` — 客戶銀行收款的精確核銷、明示超收處理與 owner Preview／Apply；path: `modules/receipt-reconciliation.md`
 - `obligation-planning` — plans canonical Client Finance stage obligations, including date-only replacement without customer cash impact; path: `modules/obligation-planning.md`
 - `historical-payment-settlement` — adopted pre-system historical Client payment evidence and exact obligation settlement overlay; path: `modules/historical-payment-settlement.md`
 - `historical-service-accounting` — 歷史服務天數驅動的客戶應收、退款／補收差額; path: `modules/historical-service-accounting.md`

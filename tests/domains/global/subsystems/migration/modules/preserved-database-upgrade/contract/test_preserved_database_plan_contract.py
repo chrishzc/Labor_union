@@ -115,6 +115,42 @@ def test_plan_remains_ready_after_restore_candidate_exists(monkeypatch) -> None:
     assert plan["candidate_precondition"] == "source_data_must_match_before_apply"
 
 
+def test_post_schema_verifier_accepts_only_declared_retired_absence(
+    monkeypatch,
+) -> None:
+    contract = SimpleNamespace(
+        phase="post-schema", verification_id="retired-artifact-owner",
+    )
+    manifest = SimpleNamespace(
+        schema_artifacts=(
+            SimpleNamespace(
+                artifact=SimpleNamespace(
+                    name="153_retire_empty_legacy_field_inventory.sql"
+                )
+            ),
+        ),
+        verification_contracts=(contract,),
+    )
+    monkeypatch.setattr(
+        runner,
+        "RELEASE_MANIFEST",
+        SimpleNamespace(manifests=(manifest,)),
+    )
+
+    validator = runner._post_schema_verification_validators({
+        "153_retire_empty_legacy_field_inventory.sql": "absent",
+    })[contract.verification_id]
+    assert validator()["owned_objects"] == {
+        "153_retire_empty_legacy_field_inventory.sql": "absent",
+    }
+
+    failing = runner._post_schema_verification_validators({
+        "153_retire_empty_legacy_field_inventory.sql": "drift",
+    })[contract.verification_id]
+    with pytest.raises(runner.UpgradeBlocked, match="not exact"):
+        failing()
+
+
 def test_complete_restart_records_shutdown_after_all_read_smokes(tmp_path, monkeypatch) -> None:
     class Contract:
         phase = "post-restart"
@@ -283,6 +319,12 @@ def test_default_catalog_runs_only_the_current_declared_backfill() -> None:
     assert tuple(item.backfill_id for item in runner.RELEASE_MANIFEST.backfills) == (
         "twins-payroll-rate-snapshots-v1",
     )
+    assert runner.RELEASE_MANIFEST.manifests[-2].release_id == (
+        "labor-union-twins-payroll-policy-2026-09-12-v2"
+    )
+    assert runner.RELEASE_MANIFEST.backfills[0].artifact.sha256 == (
+        "5281b8a96620f081494c3339327013c00ff94cbdabea9d0a878851570b2882dd"
+    )
 
 
 def test_rehearsal_worker_starts_as_project_module(tmp_path) -> None:
@@ -368,6 +410,40 @@ def test_owned_view_contract_distinguishes_absent_exact_and_drift(
     assert runner._descriptor_presence_state(descriptor, {}, set(), views) == "exact"
     monkeypatch.setattr(runner, "_view_definition_digest", lambda _definition: "0" * 64)
     assert runner._descriptor_presence_state(descriptor, {}, set(), views) == "drift"
+
+
+def test_legacy_view_owner_accepts_only_the_selected_1038_successor(
+    monkeypatch,
+) -> None:
+    legacy = runner.RELEASE_MANIFEST.descriptors["999_v_order_details_view.sql"]
+    successor = runner.RELEASE_MANIFEST.descriptors[
+        "1038_twins_payroll_order_details_view.sql"
+    ]
+    views = [{"table_name": "v_order_details", "view_definition": "SELECT 1"}]
+
+    monkeypatch.setattr(
+        runner,
+        "OWNED_OBJECTS",
+        {
+            "999_v_order_details_view.sql": legacy,
+            "1038_twins_payroll_order_details_view.sql": successor,
+        },
+    )
+    monkeypatch.setattr(
+        runner,
+        "_view_definition_digest",
+        lambda _definition: successor["views"]["v_order_details"]["definition_sha256"],
+    )
+    states = runner._owned_classification(
+        {"columns": [], "triggers": [], "views": views}
+    )
+    assert states["999_v_order_details_view.sql"] == "exact"
+    assert states["1038_twins_payroll_order_details_view.sql"] == "exact"
+
+    monkeypatch.setattr(runner, "_view_definition_digest", lambda _definition: "0" * 64)
+    assert runner._owned_classification(
+        {"columns": [], "triggers": [], "views": views}
+    )["999_v_order_details_view.sql"] == "drift"
 
 
 @pytest.mark.parametrize(

@@ -184,6 +184,11 @@ class MatchingPlanReceiptView(_ClosedModel):
         min_length=1,
         max_length=4,
     )
+    actor: str = Field(min_length=1, max_length=191)
+    as_of: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    event_key: str = Field(min_length=1, max_length=191)
+    command_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    replayed: bool
 
 
 class MatchingNotificationReceiptView(_ClosedModel):
@@ -220,6 +225,10 @@ class ManualMatchingProfilesReceiptView(_ClosedModel):
 
 class MatchingCustomerDecisionReceiptView(_ClosedModel):
     event_id: PositiveInt
+    case_no: str = Field(min_length=1, max_length=50)
+    plan_id: PositiveInt
+    segment_id: None
+    event_key: str = Field(min_length=1, max_length=191)
     communication_version: int = Field(ge=0)
     source: Literal["admin"]
     willingness: None
@@ -228,6 +237,10 @@ class MatchingCustomerDecisionReceiptView(_ClosedModel):
 
 class MatchingCaregiverWillingnessReceiptView(_ClosedModel):
     event_id: PositiveInt
+    case_no: str = Field(min_length=1, max_length=50)
+    plan_id: PositiveInt
+    segment_id: PositiveInt
+    event_key: str = Field(min_length=1, max_length=191)
     communication_version: int = Field(ge=0)
     source: Literal["admin"]
     willingness: Literal["willing", "unwilling"]

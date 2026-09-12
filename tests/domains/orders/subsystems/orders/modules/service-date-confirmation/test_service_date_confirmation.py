@@ -3,7 +3,10 @@ File: test_service_date_confirmation.py
 Description: 驗證服務日期確認 Candidate、restart Scheduling handoff 與可選日期邊界。
 """
 
+from dataclasses import replace
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
+from threading import Barrier, Lock
 
 import pytest
 
@@ -44,7 +47,7 @@ class _RestartRepository:
     def load(self, _case_no, *, lock=False):
         return self.facts
 
-    def replay(self, _key, _fingerprint):
+    def replay(self, _key, _fingerprint, *, actor, reason, for_update=False):
         return self.replay_receipt
 
     def save(self, candidate, **_kwargs):

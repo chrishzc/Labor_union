@@ -2,10 +2,14 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { OrderMultiCaregiverPlanPanel } from '../../../../../../../components/OrderMultiCaregiverPlanPanel';
 import { ApiHttpError } from '../../../../../../../api/shared/typed_errors';
+import { sessionClient } from '../../../../../../../api/auth/session_client';
 import type { MatchingAvailability, MatchingPlanSegmentInput } from '../../../../../../../api/scheduling/matching_candidate_workflow_client';
+import { orderMutationFlowStore } from '../../../../../../../adapters/orders/order_mutation_flow_store';
 
-const mocks = vi.hoisted(() => ({ search: vi.fn(), create: vi.fn(), queryPlan: vi.fn(), detail: vi.fn() }));
-vi.mock('../../../../../../../api/scheduling/matching_candidate_workflow_client', () => ({ matchingCandidateWorkflowClient: { searchSegmentedCaregivers: mocks.search, createMatchingPlan: mocks.create } }));
+const mocks = vi.hoisted(() => ({ search: vi.fn(), create: vi.fn(), queryReceipt: vi.fn(), queryPlan: vi.fn(), detail: vi.fn() }));
+vi.mock('../../../../../../../api/scheduling/matching_candidate_workflow_client', () => ({ matchingCandidateWorkflowClient: {
+  searchSegmentedCaregivers: mocks.search, createMatchingPlan: mocks.create, queryMatchingPlanReceipt: mocks.queryReceipt,
+} }));
 vi.mock('../../../../../../../api/scheduling/waiting_deposit_lock_client', () => ({ waitingDepositLockClient: { queryPlan: mocks.queryPlan } }));
 vi.mock('../../../../../../../api/orders/order_query_client', () => ({ ordersQueryClient: { getOrderDetail: mocks.detail } }));
 const CASE = 'CASE-MULTI-BETA';
@@ -22,6 +26,13 @@ function observed() {
     segments: (created ?? []).map((segment, index) => ({ segmentId: 71 + index, sequence: index + 1,
       staffId: segment.staff_id, assignedStartDate: segment.start_date, assignedEndDate: segment.end_date })) };
 }
+function planReceipt(command: { caseNo: string; actor: string; asOf: string; key: string; segments: MatchingPlanSegmentInput[] }) {
+  created = command.segments;
+  return { plan_id: 51, case_no: command.caseNo, version: 1, status: 'proposed' as const, result: 'created' as const,
+    actor: command.actor, as_of: command.asOf, event_key: command.key, command_fingerprint: 'a'.repeat(64), replayed: false,
+    segments: command.segments.map((segment, index) => ({ segment_order: index + 1, staff_id: segment.staff_id,
+      assigned_start_date: segment.start_date, assigned_end_date: segment.end_date })) };
+}
 async function search(count = 2) {
   fireEvent.change(screen.getByLabelText('多月嫂服務分段數'), { target: { value: String(count) } });
   fireEvent.click(screen.getByRole('button', { name: '查詢多月嫂完整組合' }));
@@ -30,7 +41,10 @@ async function search(count = 2) {
 
 describe('Beta server-owned 多月嫂分段方案', () => {
   beforeEach(() => {
+    vi.restoreAllMocks();
     Object.values(mocks).forEach((mock) => mock.mockReset());
+    orderMutationFlowStore.clearAll();
+    vi.spyOn(sessionClient, 'getUser').mockReturnValue({ username: 'operator-1' } as never);
     created = null;
     mocks.search.mockImplementation(async (_caseNo, count) => availability(count));
     mocks.detail.mockResolvedValue({ case_no: CASE, order_status: '訂單成立' });
@@ -38,24 +52,21 @@ describe('Beta server-owned 多月嫂分段方案', () => {
       if (created === null) throw new ApiHttpError(404, 'not_found', 'no plan');
       return observed();
     });
-    mocks.create.mockImplementation(async (_caseNo, segments: MatchingPlanSegmentInput[]) => {
-      created = segments;
-      return { plan_id: 51, case_no: CASE, version: 1, status: 'proposed', result: 'created',
-        segments: segments.map((segment, index) => ({ segment_order: index + 1, staff_id: segment.staff_id,
-          assigned_start_date: segment.start_date, assigned_end_date: segment.end_date })) };
-    });
+    mocks.create.mockImplementation(async (command) => planReceipt(command));
   });
 
   it.each([2, 3, 4])('%i 段只傳送 server 完整組合，沿用四項 filter 並回讀每段 identity/日期', async (count) => {
     const onObserved = vi.fn();
     render(<OrderMultiCaregiverPlanPanel caseNo={CASE} filters={filters} onObserved={onObserved} />);
     const create = await search(count);
-    expect(mocks.search).toHaveBeenCalledWith(CASE, count, [], filters);
+    expect(mocks.search).toHaveBeenCalledWith(CASE, count, [], filters, expect.objectContaining({ signal: expect.any(AbortSignal) }));
     fireEvent.click(create);
     await screen.findByText(new RegExp(`正式 ${count} 段多月嫂方案 #51 已建立並完成回讀`));
-    expect(mocks.create).toHaveBeenCalledWith(CASE, availability(count).complete_combinations[0]!.map((segment) => ({
-      staff_id: segment.staff_id, start_date: segment.start_date, end_date: segment.end_date,
-    })));
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({
+      caseNo: CASE, actor: 'operator-1', segments: availability(count).complete_combinations[0]!.map((segment) => ({
+        staff_id: segment.staff_id, start_date: segment.start_date, end_date: segment.end_date,
+      })), asOf: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/), key: expect.stringMatching(/^orders-multi-plan-/),
+    }));
     expect(mocks.create).toHaveBeenCalledTimes(1);
     expect(mocks.queryPlan).toHaveBeenCalledTimes(2);
     expect(onObserved).toHaveBeenCalledTimes(1);
@@ -89,7 +100,7 @@ describe('Beta server-owned 多月嫂分段方案', () => {
     const onObserved = vi.fn();
     render(<OrderMultiCaregiverPlanPanel caseNo={CASE} filters={filters} onObserved={onObserved} />);
     fireEvent.click(await search());
-    await screen.findByRole('alert');
+    await screen.findByText(/多月嫂方案建立收據與正式分段回讀不一致/);
     expect(onObserved).not.toHaveBeenCalled();
     expect(mocks.create).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('button', { name: /以完整組合/ })).toBeDisabled();

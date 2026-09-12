@@ -1,7 +1,9 @@
 """Orders cancellation Preview/Apply cross-owner persistence contract."""
 
 from datetime import date, datetime, time
+from dataclasses import replace
 
+import pytest
 from domains.client_finance.obligation_planning import ClientFinanceTermsSourceFacts, ClientPaymentTerms
 from domains.orders.cancellation import CancellationAssignmentFacts, CancellationOrderFacts, CancellationSchedulingFacts, ConfirmedServiceDay
 from domains.orders.lifecycle import OrderLifecycleRootFacts, OrderLifecycleStatus
@@ -11,15 +13,16 @@ from domains.scheduling.generation import AssignmentIdentityResolution
 from shared_kernel.clock import FixedBusinessClock
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from shared_kernel.money import MoneyNTD
-from subsystems.orders.cancellation_workflow import CancellationWorkflowFacts, OrderCancellationApplyRequest, OrderCancellationWorkflow
+from subsystems.orders.cancellation_workflow import CancellationWorkflowError, CancellationWorkflowFacts, OrderCancellationApplyRequest, OrderCancellationWorkflow
 from subsystems.orders.terms_workflow import CommandClaimState, SchedulingReplacementResult
 from subsystems.payroll.terms_impact import PayrollTermsSourceFacts, SourceAssignmentPayrollTerms
 
 
 class _UnitOfWork:
+    def __init__(self, repository): self.repository = repository
     def __enter__(self): return self
     def __exit__(self, *_): return False
-    def commit(self): self.committed = True
+    def commit(self): self.repository.commits += 1
 
 
 class _Repository:
@@ -27,6 +30,7 @@ class _Repository:
         self.facts = facts
         self.receipt = None
         self.persisted = []
+        self.commits = 0
 
     def load_for_preview(self, *_): return self.facts
     def preflight_impacted_staff_ids(self, *_): return (7,)
@@ -57,7 +61,11 @@ def _facts():
 
 
 def _workflow(repository):
-    return OrderCancellationWorkflow(repository, _UnitOfWork, FixedBusinessClock(datetime(2026, 8, 2, 9, 0).astimezone()))
+    return OrderCancellationWorkflow(
+        repository,
+        lambda: _UnitOfWork(repository),
+        FixedBusinessClock(datetime(2026, 8, 2, 9, 0).astimezone()),
+    )
 
 
 def _request(preview):

@@ -9,7 +9,7 @@ from enum import Enum
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pymysql.err import OperationalError
 
 from api.dependencies.admin_auth import require_system_admin
@@ -37,6 +37,7 @@ from shared_kernel.identities import (
     IdempotencyKey,
 )
 from shared_kernel.money import MoneyNTD
+from shared_kernel.validation import require_canonical_text
 from subsystems.orders.terms_workflow import (
     OrderTermsApplyRequest,
     TermsWorkflowError,
@@ -92,6 +93,11 @@ class OrderTermsApplyBody(OrderTermsPreviewRequest):
         pattern=r"^[0-9a-f]{64}$",
     )
     reason: str = Field(min_length=1, max_length=500)
+
+    @field_validator("reason")
+    @classmethod
+    def validate_reason(cls, value: str) -> str:
+        return require_canonical_text(value, "terms change reason", 500)
 
 
 @router.get(

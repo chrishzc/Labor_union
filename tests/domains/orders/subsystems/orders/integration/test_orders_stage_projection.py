@@ -56,6 +56,7 @@ def _row(case_no: str = "CASE-001") -> dict[str, object]:
         "candidate_pool_contacted_count": 1,
         "candidate_pool_contacted_at": NOW,
         "candidate_pool_replied_count": 1,
+        "candidate_pool_willing_count": 1,
         "candidate_pool_replied_at": NOW,
         "matching_plan_id": 3,
         "matching_plan_version": 1,
@@ -271,9 +272,10 @@ def test_candidate_pool_steps_do_not_require_a_formal_matching_plan() -> None:
     assert [step.status for step in item.sop_steps[1:4]] == ["completed"] * 3
 
 
-def test_line_delivery_step_never_completes_without_contact_timestamp() -> None:
+def test_line_delivery_step_never_completes_without_contact_timestamp_or_willing_reply() -> None:
     row = _row("LINE-DELIVERY-TIMESTAMP-MISSING")
     row.update({
+        "candidate_pool_willing_count": 0,
         "matching_segment_count": 1,
         "willingness_count": 1,
         "willingness_replied_count": 1,
@@ -398,6 +400,7 @@ def test_established_order_ignores_old_matching_gap_without_replacement_lineage(
         "candidate_pool_contacted_count": 0,
         "candidate_pool_contacted_at": None,
         "candidate_pool_replied_count": 0,
+        "candidate_pool_willing_count": 0,
         "candidate_pool_replied_at": None,
         "assignment_count": 0,
         "assignment_updated_at": None,
@@ -422,6 +425,8 @@ def test_service_before_replacement_resume_step_is_the_only_established_reentry(
         "lifecycle_status": OrderLifecycleStatus.ESTABLISHED.value,
         "replacement_resume_step": "step_3",
         "candidate_pool_contacted_count": 0,
+        "candidate_pool_replied_count": 0,
+        "candidate_pool_willing_count": 0,
         "candidate_pool_contacted_at": None,
         "assignment_count": 0,
         "assignment_updated_at": None,
@@ -483,7 +488,7 @@ def test_rootless_historical_order_is_isolated_without_guessing_a_business_stage
     for field in (
         "willingness_contact_attempt_count", "willingness_count", "willingness_replied_count",
         "willingness_accepted_count", "candidate_pool_candidate_count", "candidate_pool_contacted_count",
-        "candidate_pool_replied_count", "resume_attempt_count", "resume_sent_count",
+        "candidate_pool_replied_count", "candidate_pool_willing_count", "resume_attempt_count", "resume_sent_count",
         "matching_segment_count", "staff_contract_document_count", "staff_contract_sent_count", "staff_contract_signed_count",
         "client_contract_sent_count", "client_contract_signed_count", "deposit_obligation_count",
         "deposit_open_count", "assignment_count", "assignment_active_count",
@@ -582,6 +587,7 @@ def test_out_of_order_service_dates_do_not_skip_the_missing_matching_stage() -> 
         "candidate_pool_contacted_count": 0,
         "candidate_pool_contacted_at": None,
         "candidate_pool_replied_count": 0,
+        "candidate_pool_willing_count": 0,
         "candidate_pool_replied_at": None,
         "willingness_contact_attempt_count": 0,
         "willingness_count": 0,
@@ -653,6 +659,7 @@ def test_page_order_validation_uses_mysql_case_insensitive_cursor_order() -> Non
 def test_external_signing_steps_use_handoff_and_final_document_owner_facts() -> None:
     row = _row()
     row.update({
+        "candidate_pool_willing_count": 0,
         "willingness_replied_count": 1,
         "matching_segment_count": 2,
         "candidate_pool_candidate_count": 2,

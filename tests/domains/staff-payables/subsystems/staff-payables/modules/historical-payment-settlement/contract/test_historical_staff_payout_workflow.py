@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date
 
 import pytest
@@ -39,23 +40,23 @@ class _UnitOfWork:
 class _Repository:
     def __init__(self, facts: HistoricalStaffPayoutFacts) -> None:
         self.facts = facts
-        self.stored = None
+        self.stored: dict[str, object] = {}
         self.calls: list[object] = []
         self.projections = (
             HistoricalStaffPayoutProjection("staff-obligation:1", 1800, 4),
         )
 
     def load(self, case_no, staff_id, *, for_update):
-        assert (case_no, staff_id) == ("H-STAFF-1", 9)
+        assert (case_no, staff_id) == ("115000387", 9)
         self.calls.append(("load", for_update))
         return self.facts
 
-    def find_receipt(self, _key):
+    def find_receipt(self, key):
         self.calls.append("find_receipt")
-        return self.stored
+        return self.stored.get(key.value)
 
     def load_projections(self, case_no, staff_id):
-        assert (case_no, staff_id) == ("H-STAFF-1", 9)
+        assert (case_no, staff_id) == ("115000387", 9)
         self.calls.append("load_projections")
         return self.projections
 
@@ -68,16 +69,17 @@ class _Repository:
 
     def upsert_projections(self, event_id, _candidate, version):
         self.calls.append(("projections", event_id, version))
+        self.facts = replace(self.facts, staff_payables_version=version)
 
     def append_source_outbox(self, event_id, _candidate, event_identity):
         self.calls.append(("outbox", event_id, event_identity))
 
-    def save_receipt(self, _key, stored):
+    def save_receipt(self, key, stored):
         self.calls.append("receipt")
-        self.stored = stored
+        self.stored[key.value] = stored
 
 
-def _obligation(*, version=4, staff_id=9, case_no="H-STAFF-1", direction="payable_to_staff"):
+def _obligation(*, version=4, staff_id=9, case_no="115000387", direction="payable_to_staff"):
     return HistoricalStaffObligation(
         "staff-obligation:1",
         case_no,
@@ -91,7 +93,7 @@ def _obligation(*, version=4, staff_id=9, case_no="H-STAFF-1", direction="payabl
 
 def _facts(*, version=6, adopted=True, bank=(), obligation=None):
     return HistoricalStaffPayoutFacts(
-        "H-STAFF-1",
+        "115000387",
         9,
         version,
         42 if adopted else None,
@@ -103,7 +105,7 @@ def _facts(*, version=6, adopted=True, bank=(), obligation=None):
 
 def _intent():
     return HistoricalStaffPayoutIntent(
-        "H-STAFF-1",
+        "115000387",
         9,
         HistoricalStaffConfirmationKind.PAID,
         ("staff-obligation:1",),
@@ -114,13 +116,13 @@ def _intent():
     )
 
 
-def _request(preview, *, version=6):
+def _request(preview, *, version=6, key="historical-staff:1"):
     return ApplyHistoricalStaffPayout(
         _intent(),
         ExpectedVersion(version),
         42,
         preview.candidate.fingerprint,
-        IdempotencyKey("historical-staff:1"),
+        IdempotencyKey(key),
         ActorContext("payables:8"),
         "Confirm adopted pre-system payout.",
         CorrelationId("historical-staff-correlation"),
@@ -132,7 +134,7 @@ def test_query_preview_apply_writes_one_staff_owner_transaction() -> None:
     unit = _UnitOfWork()
     workflow = HistoricalStaffPayoutWorkflow(repository, lambda: unit)
 
-    queried = workflow.query("H-STAFF-1", 9)
+    queried = workflow.query("115000387", 9)
     preview = workflow.preview(_intent())
     receipt = workflow.apply(_request(preview))
 
@@ -206,7 +208,7 @@ def test_new_or_changed_staff_obligation_reopens_owner_readback() -> None:
     assert historical_staff_owner_is_terminal((_obligation(version=5),), (exact,)) is False
     second = HistoricalStaffObligation(
         "staff-obligation:2",
-        "H-STAFF-1",
+        "115000387",
         9,
         600,
         1,
@@ -220,7 +222,7 @@ def test_fresh_readback_recomputes_staff_owner_terminal_from_current_obligations
     repository = _Repository(_facts())
     workflow = HistoricalStaffPayoutWorkflow(repository, _UnitOfWork)
 
-    assert workflow.readback("H-STAFF-1", 9).owner_terminal is True
+    assert workflow.readback("115000387", 9).owner_terminal is True
     repository.facts = _facts(obligation=_obligation(version=5))
-    assert workflow.readback("H-STAFF-1", 9).owner_terminal is False
+    assert workflow.readback("115000387", 9).owner_terminal is False
     assert repository.calls[-2:] == [("load", False), "load_projections"]

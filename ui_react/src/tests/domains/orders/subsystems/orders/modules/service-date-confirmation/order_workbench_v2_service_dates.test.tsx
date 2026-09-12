@@ -11,7 +11,10 @@ const mocks = vi.hoisted(() => ({
   updateServiceDatesReason: vi.fn(),
   previewServiceDatesFlow: vi.fn(),
   applyServiceDatesFlow: vi.fn(),
+  retryServiceDatesApplyFlow: vi.fn(),
+  retryServiceDatesObservationFlow: vi.fn(),
   getServiceDatesDraft: vi.fn(),
+  subscribe: vi.fn(),
 }));
 
 vi.mock('../../../../../../../api/orders/order_query_client', () => ({
@@ -33,11 +36,14 @@ vi.mock('../../../../../../../adapters/orders/order_mutation_adapter', () => ({
   updateServiceDatesReason: mocks.updateServiceDatesReason,
   previewServiceDatesFlow: mocks.previewServiceDatesFlow,
   applyServiceDatesFlow: mocks.applyServiceDatesFlow,
+  retryServiceDatesApplyFlow: mocks.retryServiceDatesApplyFlow,
+  retryServiceDatesObservationFlow: mocks.retryServiceDatesObservationFlow,
 }));
 
 vi.mock('../../../../../../../adapters/orders/order_mutation_flow_store', () => ({
   orderMutationFlowStore: {
     getServiceDatesDraft: mocks.getServiceDatesDraft,
+    subscribe: mocks.subscribe,
   },
 }));
 
@@ -127,6 +133,7 @@ describe('待辦看板 Beta 第 9 階服務日期', () => {
       status: 'observed',
       queryView: observedQuery,
     });
+    mocks.subscribe.mockReturnValue(() => undefined);
   });
 
   it('以查看與調整服務日期、確認、完成確認的主流程沿用既有 Preview/Apply 並回讀', async () => {
@@ -229,7 +236,11 @@ describe('待辦看板 Beta 第 9 階服務日期', () => {
 
   it('Apply 後缺少正式 owner readback 時顯示失敗且不通知外層成功', async () => {
     const onObserved = vi.fn();
-    mocks.getServiceDatesDraft.mockReturnValueOnce({ status: 'outcome_unknown', queryView: null });
+    mocks.getServiceDatesDraft.mockImplementation(() => (
+      mocks.applyServiceDatesFlow.mock.calls.length > 0
+        ? { status: 'outcome_unknown', queryView: null }
+        : { status: 'observed', queryView: observedQuery }
+    ));
 
     render(<OrderServiceDatesPanel caseNo="CASE-SERVICE-DATES" onObserved={onObserved} />);
     fireEvent.click(screen.getByRole('button', { name: '精算天數並設定服務日期' }));

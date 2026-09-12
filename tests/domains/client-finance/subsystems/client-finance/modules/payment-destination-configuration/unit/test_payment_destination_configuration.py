@@ -1,13 +1,18 @@
 from contextlib import AbstractContextManager
+from dataclasses import replace
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 
 import pytest
 
+from domains.client_finance.payment_destination import ClientPaymentDestination
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from subsystems.client_finance.payment_destination_configuration import (
     PaymentDestinationApplyRequest,
     PaymentDestinationConfigurationApplication,
     PaymentDestinationConfigurationError,
+    StoredPaymentDestinationReceipt,
 )
 
 
@@ -18,11 +23,24 @@ class _Unit(AbstractContextManager):
 
 
 class _Repo:
-    current = None
-    receipt = None
-    def load_current(self, *, lock=False): return self.current
-    def find_receipt(self, key): return self.receipt
-    def persist(self, request, receipt, command): self.current = type("Current", (), {"account_display": receipt.account_display, "revision": receipt.resulting_revision})(); self.saved = (request, receipt, command)
+    def __init__(self):
+        self.current = None
+        self.receipts = {}
+        self.persist_calls = 0
+
+    def load_current(self, *, lock=False):
+        return self.current
+
+    def find_receipt(self, key):
+        return self.receipts.get(key.value)
+
+    def persist(self, request, receipt, command):
+        self.current = ClientPaymentDestination(receipt.account_display, receipt.resulting_revision)
+        self.saved = (request, receipt, command)
+        self.persist_calls += 1
+        self.receipts[request.idempotency_key.value] = StoredPaymentDestinationReceipt(
+            command, receipt, request.actor.actor_id,
+        )
 
 
 def test_payment_destination_query_preview_apply_and_readback():

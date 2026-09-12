@@ -67,6 +67,14 @@ class ClientReconciliationWorkflow:
                 return replay.receipt
             preview=_preview(request.selection, self._repository.load(request.selection, for_update=True))
             if preview.account_version != request.expected_account_version.value or preview.fingerprint != request.preview_fingerprint: raise _error(request.correlation_id, ErrorCategory.CONFLICT, CLIENT_FINANCE_CANDIDATE_STALE, current=preview.account_version)
+            if preview.candidate.status is ReconciliationStatus.REVIEW_REQUIRED:
+                raise ClientReconciliationError(TypedError(
+                    ErrorCategory.DOMAIN_BLOCKED,
+                    preview.candidate.blockers[0],
+                    "Client receipt requires review before reconciliation.",
+                    request.correlation_id,
+                    domain_blockers=preview.candidate.blockers,
+                ))
             receipt=_receipt(request, preview)
             self._repository.append_ledger_entries(preview.candidate); self._repository.append_allocations(preview.candidate)
             self._repository.update_projection(request.selection, receipt.account_version)

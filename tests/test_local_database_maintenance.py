@@ -469,6 +469,33 @@ def test_preview_treats_an_absent_pure_retirement_as_complete(monkeypatch) -> No
     assert preview["exact_parts"] == ["153.sql"]
 
 
+def test_preview_treats_an_absent_local_retirement_as_complete(monkeypatch) -> None:
+    monkeypatch.setattr(
+        update.migration,
+        "LOCAL_RETIRED_ABSENT_ARTIFACTS",
+        frozenset({"1031.sql"}),
+    )
+    monkeypatch.setattr(update.migration, "build_plan", lambda *_args, **_kwargs: {
+        "release_id": "release",
+        "source_objects": {"1031.sql": "absent", "161.sql": "absent"},
+    })
+
+    preview = update.build_preview(object(), "union_db", "candidate")
+
+    assert preview["parts_to_apply"] == ["161.sql"]
+    assert preview["exact_parts"] == ["1031.sql"]
+
+
+def test_candidate_exactness_accepts_only_declared_local_retired_absence() -> None:
+    assert update.migration._candidate_schema_is_exact({
+        "1031_weekly_report_batches.sql": "absent",
+        "1039_matching_plan_create_receipts.sql": "exact",
+    })
+    assert not update.migration._candidate_schema_is_exact({
+        "unrelated.sql": "absent",
+    })
+
+
 def test_cli_reports_a_bounded_blocked_error(monkeypatch, capsys) -> None:
     def blocked_update(**_arguments):
         raise update.LocalDatabaseUpdateError("catalog mismatch")

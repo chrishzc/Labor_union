@@ -2,15 +2,19 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { OrderFormalRecommendationPanel } from '../../../../../../../components/OrderFormalRecommendationPanel';
 import { ApiHttpError } from '../../../../../../../api/shared/typed_errors';
+import { sessionClient } from '../../../../../../../api/auth/session_client';
 import type { FormalPlanContactState } from '../../../../../../../api/scheduling/matching_plan_communication_client';
+import { orderMutationFlowStore } from '../../../../../../../adapters/orders/order_mutation_flow_store';
 
 const mocks = vi.hoisted(() => ({
-  query: vi.fn(), createSingleCaregiverPlan: vi.fn(), queryContactState: vi.fn(),
+  query: vi.fn(), createSingleCaregiverPlan: vi.fn(), queryMatchingPlanReceipt: vi.fn(), queryContactState: vi.fn(),
   recordCustomerDecision: vi.fn(), queryPlan: vi.fn(), getDetail: vi.fn(),
   sendCustomerConfirmation: vi.fn(), previewCustomerConfirmation: vi.fn(), recordFormalPlanWillingness: vi.fn(),
 }));
 vi.mock('../../../../../../../api/scheduling/candidate_contact_pool_client', () => ({ candidateContactPoolClient: { query: mocks.query } }));
-vi.mock('../../../../../../../api/scheduling/matching_candidate_workflow_client', () => ({ matchingCandidateWorkflowClient: { createSingleCaregiverPlan: mocks.createSingleCaregiverPlan } }));
+vi.mock('../../../../../../../api/scheduling/matching_candidate_workflow_client', () => ({ matchingCandidateWorkflowClient: {
+  createSingleCaregiverPlan: mocks.createSingleCaregiverPlan, queryMatchingPlanReceipt: mocks.queryMatchingPlanReceipt,
+} }));
 vi.mock('../../../../../../../api/scheduling/matching_plan_communication_client', () => ({ matchingPlanCommunicationClient: {
   queryContactState: mocks.queryContactState, recordCustomerDecision: mocks.recordCustomerDecision,
   sendCustomerConfirmation: mocks.sendCustomerConfirmation, previewCustomerConfirmation: mocks.previewCustomerConfirmation,
@@ -19,7 +23,7 @@ vi.mock('../../../../../../../api/scheduling/matching_plan_communication_client'
 vi.mock('../../../../../../../api/scheduling/waiting_deposit_lock_client', () => ({ waitingDepositLockClient: { queryPlan: mocks.queryPlan } }));
 vi.mock('../../../../../../../api/orders/order_query_client', () => ({ ordersQueryClient: { getOrderDetail: mocks.getDetail } }));
 
-const CASE = 'CASE-RECOMMEND';
+const CASE = '115000285';
 function pool() {
   return { pool_id: 9, case_no: CASE, candidates: [
     { id: 17, staff_id: 8892, staff_name: '月嫂甲', status: 'active', willingness: 'willing' },
@@ -33,9 +37,15 @@ function contactState(): FormalPlanContactState {
     segments: [{ segment_id: 71, willingness: 'willing' }], all_willing: true,
     customer_decision: 'pending', customer_profiles_status: 'manually_confirmed', customer_profiles_manual_confirmation: null };
 }
-function plan() {
-  return { plan_id: 51, case_no: CASE, version: 1, status: 'proposed', result: 'created',
-    segments: [{ segment_order: 1, staff_id: 8892, assigned_start_date: '2026-09-01', assigned_end_date: '2026-09-05' }] };
+function plan(command?: { caseNo: string; actor: string; asOf: string; key: string; segments?: Array<{ staff_id: number; start_date: string; end_date: string }> }) {
+  const segments = command?.segments ?? [{ staff_id: 8892, start_date: '2026-09-01', end_date: '2026-09-05' }];
+  return { plan_id: 51, case_no: command?.caseNo ?? CASE, version: 1, status: 'proposed', result: 'created',
+    actor: command?.actor ?? 'operator-1', as_of: command?.asOf ?? '2026-09-12', event_key: command?.key ?? 'formal-plan-test-key',
+    command_fingerprint: 'a'.repeat(64), replayed: false,
+    segments: segments.map((segment, index) => ({
+      segment_order: index + 1, staff_id: segment.staff_id,
+      assigned_start_date: segment.start_date, assigned_end_date: segment.end_date,
+    })) };
 }
 let exists: boolean;
 let contact: FormalPlanContactState;
@@ -71,7 +81,10 @@ async function openExisting(onObserved = vi.fn()) {
 
 describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
   beforeEach(() => {
+    vi.restoreAllMocks();
     Object.values(mocks).forEach((mock) => mock.mockReset());
+    orderMutationFlowStore.clearAll();
+    vi.spyOn(sessionClient, 'getUser').mockReturnValue({ username: 'operator-1' } as never);
     exists = false; contact = contactState(); activeLockId = null;
     mocks.query.mockResolvedValue(pool());
     mocks.getDetail.mockResolvedValue({ case_no: CASE, order_status: '訂單成立' });
@@ -87,11 +100,11 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
       caregiver_resumes: [{ staff_id: 8892, staff_name: '月嫂甲', ready: true, filename: 'resume-A.pdf', version: 3, blocker: null }],
       blockers: [], send_allowed: true,
     }));
-    mocks.createSingleCaregiverPlan.mockImplementation(async () => { exists = true; return plan(); });
+    mocks.createSingleCaregiverPlan.mockImplementation(async (command) => { exists = true; return plan(command); });
     mocks.recordCustomerDecision.mockImplementation(async (_caseNo, _planId, _version, decision) => {
       contact = { ...contact, customer_decision: decision, plan: { ...contact.plan,
         communication_version: 5, status: decision === 'accepted' ? 'accepted' : 'proposed' } };
-      return { event_id: 91, communication_version: 5, source: 'manual', willingness: null, customer_decision: decision };
+      return { event_id: 91, case_no: CASE, plan_id: 51, segment_id: null, event_key: 'test-decision-key', communication_version: 5, source: 'admin', willingness: null, customer_decision: decision };
     });
     mocks.sendCustomerConfirmation.mockImplementation(async () => {
       contact = { ...contact, customer_profiles_status: 'pending', plan: { ...contact.plan, communication_version: 5 } };
@@ -117,7 +130,10 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
     await waitFor(() => expect(create).toBeEnabled());
     fireEvent.click(create);
     await screen.findByText('正式媒合方案已建立：#51');
-    expect(mocks.createSingleCaregiverPlan).toHaveBeenCalledWith(CASE, { staff_id: 8892, start_date: '2026-09-01', end_date: '2026-09-05' });
+    expect(mocks.createSingleCaregiverPlan).toHaveBeenCalledWith(expect.objectContaining({
+      caseNo: CASE, actor: 'operator-1', segments: [{ staff_id: 8892, start_date: '2026-09-01', end_date: '2026-09-05' }],
+      asOf: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/), key: expect.stringMatching(/^orders-single-plan-/),
+    }));
     expect(mocks.queryContactState).toHaveBeenCalledWith(CASE, 51);
     expect(screen.getAllByText('確認資訊已送達').length).toBeGreaterThan(0);
     expect(screen.queryByText('manually_confirmed')).not.toBeInTheDocument();
@@ -140,11 +156,10 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
     await waitFor(() => expect(create).toBeEnabled());
     fireEvent.click(create);
 
-    await waitFor(() => expect(mocks.createSingleCaregiverPlan).toHaveBeenCalledWith(CASE, {
-      staff_id: 1,
-      start_date: '2026-12-01',
-      end_date: '2026-12-20',
-    }));
+    await waitFor(() => expect(mocks.createSingleCaregiverPlan).toHaveBeenCalledWith(expect.objectContaining({
+      caseNo: CASE,
+      segments: [{ staff_id: 1, start_date: '2026-12-01', end_date: '2026-12-20' }],
+    })));
   });
 
   it.each(['accepted', 'declined'] as const)('以目前 communication version 記錄客戶 %s，之後正式回讀及通知父頁', async (decision) => {
@@ -155,11 +170,30 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
     fireEvent.change(screen.getByLabelText('方案 51 客戶決策依據'), { target: { value: '電話核對正式推薦。' } });
     fireEvent.click(screen.getByRole('button', { name: decision === 'accepted' ? '記錄方案 51 客戶接受' : '記錄方案 51 客戶拒絕' }));
     await waitFor(() => expect(screen.getAllByText(decision === 'accepted' ? '客戶已接受' : '客戶已拒絕').length).toBeGreaterThan(0));
-    expect(mocks.recordCustomerDecision).toHaveBeenCalledWith(CASE, 51, 4, decision, '電話核對正式推薦。');
+    expect(mocks.recordCustomerDecision).toHaveBeenCalledWith(
+      CASE, 51, 4, decision, '電話核對正式推薦。', expect.stringMatching(/^orders-formal-manual-customer-decision-51-/), 'operator-1',
+    );
     expect(mocks.queryContactState).toHaveBeenCalledTimes(3);
     expect(onObserved).toHaveBeenCalledTimes(1);
     if (decision === 'declined') expect(screen.getByText('客戶拒絕正式推薦')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '記錄方案 51 客戶接受' })).not.toBeInTheDocument();
+  });
+
+  it('電話已談妥時不要求先寄送客戶確認資訊，仍可用既有人工入口記錄接受', async () => {
+    contact.customer_profiles_status = null;
+    await openExisting();
+
+    fireEvent.change(screen.getByLabelText('方案 51 客戶決策依據'), {
+      target: { value: '電話已確認客戶接受此人選。' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '記錄方案 51 客戶接受' }));
+
+    await waitFor(() => expect(screen.getAllByText('客戶已接受').length).toBeGreaterThan(0));
+    expect(mocks.sendCustomerConfirmation).not.toHaveBeenCalled();
+    expect(mocks.recordCustomerDecision).toHaveBeenCalledWith(
+      CASE, 51, 4, 'accepted', '電話已確認客戶接受此人選。',
+      expect.stringMatching(/^orders-formal-manual-customer-decision-51-/), 'operator-1',
+    );
   });
 
   it('沒有既有方案且候選 query 不可用時，不建立方案或記錄決策', async () => {
@@ -272,16 +306,24 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
 
   it('多段方案逐段補登意願，保留同一 plan 並以更新後 version 續辦', async () => {
     contact = { ...contact, all_willing: false, segments: [{ segment_id: 71, willingness: 'willing' }, { segment_id: 72, willingness: 'pending' }] };
-    mocks.recordFormalPlanWillingness.mockImplementation(async () => {
+    mocks.recordFormalPlanWillingness.mockImplementation(async (_caseNo, _planId, segmentId, _version, _reason, eventKey) => {
       contact = { ...contact, all_willing: true, plan: { ...contact.plan, communication_version: 5 },
         segments: contact.segments.map((segment) => ({ ...segment, willingness: 'willing' })) };
+      return {
+        event_id: 92, case_no: CASE, plan_id: 51, segment_id: segmentId,
+        event_key: eventKey, communication_version: 5, source: 'admin',
+        willingness: 'willing', customer_decision: null,
+      };
     });
     const onObserved = await openExisting();
     expect(screen.queryByRole('button', { name: '記錄方案 51 客戶接受' })).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('方案 51 月嫂意願確認依據'), { target: { value: '第二段月嫂電話確認。' } });
     fireEvent.click(screen.getByRole('button', { name: '確認月嫂 #8893 願意承接' }));
     await screen.findByText('正式方案月嫂意願已回讀確認。');
-    expect(mocks.recordFormalPlanWillingness).toHaveBeenCalledWith(CASE, 51, 72, 4, '第二段月嫂電話確認。');
+    expect(mocks.recordFormalPlanWillingness).toHaveBeenCalledWith(
+      CASE, 51, 72, 4, '第二段月嫂電話確認。',
+      expect.stringMatching(/^orders-formal-manual-willingness-51-72-/), 'operator-1',
+    );
     expect(screen.getByRole('button', { name: '記錄方案 51 客戶接受' })).toBeDisabled();
     expect(screen.getByLabelText('方案 51 客戶決策依據')).toHaveValue('');
     expect(onObserved).toHaveBeenCalledTimes(1);

@@ -81,6 +81,8 @@ class CandidateInformationDeliveryView(BaseModel):
         "cancelled",
     ]
     sent_at: datetime
+    event_id: int | None = Field(default=None, gt=0)
+    line_task_id: int | None = Field(default=None, gt=0)
 
 
 class CandidateInformationMap(BaseModel):
@@ -108,6 +110,7 @@ class CandidateContactView(BaseModel):
     staff_name: str = Field(min_length=1, max_length=100)
     willingness: Literal["pending", "willing", "unwilling"]
     reason: str | None = Field(default=None, max_length=500)
+    latest_willingness_event_id: int | None = Field(default=None, gt=0)
     information: CandidateInformationMap
 
     @model_validator(mode="after")

@@ -49,6 +49,8 @@ def _positive_int(value: Any, field: str) -> int:
 class CandidateInformationDelivery:
     status: str
     sent_at: datetime
+    event_id: int | None = None
+    line_task_id: int | None = None
 
     def __post_init__(self) -> None:
         if self.status not in {
@@ -63,6 +65,10 @@ class CandidateInformationDelivery:
             raise ValueError("information_delivery_status_invalid")
         if not isinstance(self.sent_at, datetime):
             raise TypeError("sent_at_invalid")
+        if self.event_id is not None:
+            _positive_int(self.event_id, "information_event_id")
+        if self.line_task_id is not None:
+            _positive_int(self.line_task_id, "information_line_task_id")
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,6 +138,7 @@ class CandidateContactEntryState:
     willingness: str
     reason: str | None
     information: CandidateInformationState
+    latest_willingness_event_id: int | None = None
 
     def __post_init__(self) -> None:
         _positive_int(self.id, "candidate_id")
@@ -157,6 +164,8 @@ class CandidateContactEntryState:
             raise ValueError("unwilling_reason_required")
         if not isinstance(self.information, CandidateInformationState):
             raise TypeError("information_invalid")
+        if self.latest_willingness_event_id is not None:
+            _positive_int(self.latest_willingness_event_id, "latest_willingness_event_id")
 
 
 @dataclass(frozen=True, slots=True)
@@ -315,7 +324,37 @@ def _add_candidates_in_transaction(
             cursor.execute("INSERT INTO caregiver_candidate_contact_entries (pool_id, staff_id, service_start_date, service_end_date, coverage_fingerprint, active_marker) VALUES (%s,%s,%s,%s,%s,1)", (pool_id, candidate["staff_id"], candidate["case_period_start"], candidate["case_period_end"], candidate["coverage_fingerprint"]))
             created_ids.append(_positive_int(cursor.lastrowid, "candidate_id"))
             new_candidate_created = True
-        cursor.execute("INSERT INTO caregiver_candidate_contact_events (pool_id, candidate_id, event_type, event_key, actor, payload) VALUES (%s,NULL,'candidates_added',%s,%s,%s)", (pool_id, event_key, actor, json.dumps({"candidate_ids": created_ids}, sort_keys=True)))
+        payload = {
+            "candidate_ids": created_ids,
+            "candidate_coverage_fingerprints": [
+                {
+                    "staff_id": candidate["staff_id"],
+                    "coverage_fingerprint": candidate["coverage_fingerprint"],
+                }
+                for candidate in validated
+            ],
+        }
+        cursor.execute(
+            "SELECT id,pool_id,candidate_id,event_type,actor,payload "
+            "FROM caregiver_candidate_contact_events WHERE event_key=%s FOR UPDATE",
+            (event_key,),
+        )
+        existing_event = cursor.fetchone()
+        if isinstance(existing_event, Mapping):
+            if (
+                existing_event.get("pool_id") == pool_id
+                and existing_event.get("candidate_id") is None
+                and existing_event.get("event_type") == "candidates_added"
+                and existing_event.get("actor") == actor
+                and _event_payload(existing_event.get("payload")) == payload
+            ):
+                return {
+                    "pool_id": pool_id,
+                    "candidate_ids": created_ids,
+                    "status": "recorded",
+                }
+            raise ValueError("candidate_contact_idempotency_conflict")
+        cursor.execute("INSERT INTO caregiver_candidate_contact_events (pool_id, candidate_id, event_type, event_key, actor, payload) VALUES (%s,NULL,'candidates_added',%s,%s,%s)", (pool_id, event_key, actor, json.dumps(payload, sort_keys=True)))
         if new_candidate_created:
             _cancel_pending_manual_followup(cursor, pool_id)
         return {"pool_id": pool_id, "candidate_ids": created_ids, "status": "recorded"}
@@ -387,7 +426,7 @@ def query_pool(
                 raise TypeError("candidate service dates must be date values")
             if type(created_at) is not datetime:
                 raise TypeError("candidate created_at must be a datetime value")
-            willingness, reason, information = _typed_candidate_projection(
+            willingness, reason, latest_willingness_event_id, information = _typed_candidate_projection(
                 by_candidate.get(entry["id"], [])
             )
             candidates.append(
@@ -402,6 +441,7 @@ def query_pool(
                     willingness=willingness,
                     reason=reason,
                     information=information,
+                    latest_willingness_event_id=latest_willingness_event_id,
                 )
             )
         return CandidateContactPoolState(
@@ -744,17 +784,33 @@ def _send_information_in_transaction(
                        "o.end_date AS order_end_date FROM caregiver_candidate_contact_pools p "
                        "JOIN caregiver_candidate_contact_entries e ON e.pool_id=p.id "
                        "JOIN staff s ON s.id=e.staff_id JOIN orders o ON o.case_no=p.case_no "
-                       "WHERE p.case_no=%s AND e.id=%s AND e.active_marker=1 FOR UPDATE", (case_no, candidate_id))
+                       "WHERE p.case_no=%s AND e.id=%s AND e.active_marker=1 "
+                       "AND e.status='active' FOR UPDATE", (case_no, candidate_id))
         entry = cursor.fetchone()
         if not isinstance(entry, Mapping): raise ValueError("candidate_contact_not_found")
+        if entry.get("order_status") != "洽談中":
+            raise ValueError("candidate_contact_order_not_negotiating")
         recipient = entry.get("line_user_id")
         if not isinstance(recipient, str) or not recipient.strip(): raise ValueError("caregiver_has_no_line_delivery_identity")
-        cursor.execute("SELECT id, candidate_id, event_type FROM caregiver_candidate_contact_events WHERE event_key=%s FOR UPDATE", (event_key,))
+        cursor.execute("SELECT id,pool_id,candidate_id,event_type,actor,payload FROM caregiver_candidate_contact_events WHERE event_key=%s FOR UPDATE", (event_key,))
         existing = cursor.fetchone()
         if isinstance(existing, Mapping):
-            if existing.get("candidate_id") != candidate_id or existing.get("event_type") != f"info_{info_type}_sent":
+            if (
+                existing.get("pool_id") != entry.get("pool_id")
+                or existing.get("candidate_id") != candidate_id
+                or existing.get("event_type") != f"info_{info_type}_sent"
+                or existing.get("actor") != actor
+                or _event_payload(existing.get("payload")).get("preview_fingerprint")
+                != preview_fingerprint
+            ):
                 raise ValueError("candidate_information_idempotency_conflict")
-            return {"status": "idempotent_replay", "event_id": existing["id"]}
+            existing_payload = _event_payload(existing.get("payload"))
+            task_id = existing_payload.get("line_task_id")
+            return {
+                "status": "idempotent_replay",
+                "event_id": existing["id"],
+                "line_task_id": _positive_int(task_id, "line_task_id") if task_id is not None else None,
+            }
         if refresh_period_from_order:
             if entry.get("order_status") != "洽談中":
                 raise ValueError("candidate_contact_order_not_negotiating")
@@ -847,7 +903,7 @@ def _send_information_in_transaction(
             )
         )
         task_id = delivery.task_id.value
-        cursor.execute("INSERT INTO caregiver_candidate_contact_events (pool_id,candidate_id,event_type,event_key,actor,payload) VALUES (%s,%s,%s,%s,%s,%s)", (entry["pool_id"], candidate_id, f"info_{info_type}_sent", event_key, actor, json.dumps({"line_task_id": task_id, "delivery_status": "queued"}, sort_keys=True)))
+        cursor.execute("INSERT INTO caregiver_candidate_contact_events (pool_id,candidate_id,event_type,event_key,actor,payload) VALUES (%s,%s,%s,%s,%s,%s)", (entry["pool_id"], candidate_id, f"info_{info_type}_sent", event_key, actor, json.dumps({"line_task_id": task_id, "delivery_status": "queued", "preview_fingerprint": preview_fingerprint}, sort_keys=True)))
         event_id = _positive_int(cursor.lastrowid, "event_id")
         _cancel_pending_manual_followup(cursor, int(entry["pool_id"]))
         return {"status": "queued", "event_id": event_id, "line_task_id": task_id}
@@ -883,7 +939,8 @@ def record_willingness(case_no: Any, candidate_id: Any, willingness: Any, reason
     case_no = _required_text(case_no, "case_no", 50); candidate_id = _positive_int(candidate_id, "candidate_id")
     actor = _required_text(actor, "actor", 100); event_key = _required_text(event_key, "event_key", 100)
     if willingness not in {"willing", "unwilling"}: raise ValueError("willingness_invalid")
-    reason = _required_text(reason, "reason", 500) if willingness == "unwilling" else (str(reason or "").strip() or "人工補登願意")
+    if not isinstance(reason, str): raise ValueError("reason_invalid")
+    reason = _required_text(reason, "reason", 500) if willingness == "unwilling" else (reason.strip() or "人工補登願意")
     return _run_in_application_uow(
         lambda connection, cursor: _record_willingness_in_transaction(
             connection, cursor, case_no, candidate_id, willingness, reason, actor, event_key
@@ -902,13 +959,33 @@ def _record_willingness_in_transaction(
     event_key: str,
 ) -> dict[str, Any]:
     try:
-        cursor.execute("SELECT p.id AS pool_id FROM caregiver_candidate_contact_pools p JOIN caregiver_candidate_contact_entries e ON e.pool_id=p.id WHERE p.case_no=%s AND e.id=%s AND e.active_marker=1 FOR UPDATE", (case_no, candidate_id))
+        cursor.execute(
+            "SELECT p.id AS pool_id,o.status AS order_status "
+            "FROM caregiver_candidate_contact_pools p "
+            "JOIN caregiver_candidate_contact_entries e ON e.pool_id=p.id "
+            "JOIN orders o ON o.case_no=p.case_no "
+            "WHERE p.case_no=%s AND e.id=%s AND e.active_marker=1 "
+            "AND e.status='active' FOR UPDATE",
+            (case_no, candidate_id),
+        )
         row = cursor.fetchone()
         if not isinstance(row, Mapping): raise ValueError("candidate_contact_not_found")
-        cursor.execute("SELECT id FROM caregiver_candidate_contact_events WHERE event_key=%s FOR UPDATE", (event_key,))
+        if row.get("order_status") != "洽談中":
+            raise ValueError("candidate_contact_order_not_negotiating")
+        payload = {"willingness": willingness, "reason": reason}
+        cursor.execute("SELECT id,pool_id,candidate_id,event_type,actor,payload FROM caregiver_candidate_contact_events WHERE event_key=%s FOR UPDATE", (event_key,))
         existing = cursor.fetchone()
-        if isinstance(existing, Mapping): return {"status":"idempotent_replay", "event_id":existing["id"]}
-        cursor.execute("INSERT INTO caregiver_candidate_contact_events (pool_id,candidate_id,event_type,event_key,actor,payload) VALUES (%s,%s,'willingness_changed',%s,%s,%s)", (row["pool_id"], candidate_id, event_key, actor, json.dumps({"willingness": willingness, "reason": reason}, ensure_ascii=False, sort_keys=True)))
+        if isinstance(existing, Mapping):
+            if (
+                existing.get("pool_id") == row["pool_id"]
+                and existing.get("candidate_id") == candidate_id
+                and existing.get("event_type") == "willingness_changed"
+                and existing.get("actor") == actor
+                and _event_payload(existing.get("payload")) == payload
+            ):
+                return {"status":"idempotent_replay", "event_id":existing["id"]}
+            raise ValueError("candidate_contact_idempotency_conflict")
+        cursor.execute("INSERT INTO caregiver_candidate_contact_events (pool_id,candidate_id,event_type,event_key,actor,payload) VALUES (%s,%s,'willingness_changed',%s,%s,%s)", (row["pool_id"], candidate_id, event_key, actor, json.dumps(payload, ensure_ascii=False, sort_keys=True)))
         event_id = _positive_int(cursor.lastrowid, "event_id")
         if willingness == "willing":
             _cancel_pending_candidate_coordination(cursor, int(row["pool_id"]))
@@ -925,7 +1002,7 @@ def _cancel_pending_candidate_coordination(cursor: Any, pool_id: int) -> None:
         "lease_owner=NULL,lease_acquired_at_utc=NULL,lease_expires_at_utc=NULL "
         "WHERE processing_status IN ('pending','retryable_failed') AND (("
         "source_aggregate_type='candidate_contact_adjustment' "
-        "AND source_aggregate_identity=CAST(%s AS CHAR)) OR ("
+        "AND CAST(source_aggregate_identity AS UNSIGNED)=%s) OR ("
         "source_aggregate_type='candidate_contact_question' "
         "AND CAST(source_aggregate_identity AS UNSIGNED) IN ("
         "SELECT id FROM caregiver_candidate_contact_events WHERE pool_id=%s)))",
@@ -949,6 +1026,7 @@ def _cancel_pending_manual_followup(cursor: Any, pool_id: int) -> None:
 
 def _candidate_projection(events: list[dict[str, Any]]):
     willingness, reason = "pending", None
+    latest_willingness_event_id: int | None = None
     information: dict[str, dict[str, Any] | None] = {"1": None, "2": None}
     relevant_types = {"willingness_changed", "info_1_sent", "info_2_sent"}
     for event in events:
@@ -959,18 +1037,23 @@ def _candidate_projection(events: list[dict[str, Any]]):
         if event_type == "willingness_changed":
             if payload.get("willingness") in {"pending", "willing", "unwilling"}:
                 willingness, reason = payload["willingness"], payload.get("reason")
+                latest_willingness_event_id = _positive_int(
+                    event["id"], "latest_willingness_event_id"
+                )
             continue
         information[event_type[5]] = {
             "status": payload["delivery_status"],
             "sent_at": event["occurred_at"].isoformat(),
+            "event_id": event["id"],
+            "line_task_id": payload.get("line_task_id"),
         }
-    return willingness, reason, information
+    return willingness, reason, latest_willingness_event_id, information
 
 
 def _typed_candidate_projection(
     events: list[dict[str, Any]],
-) -> tuple[str, str | None, CandidateInformationState]:
-    willingness, reason, information = _candidate_projection(events)
+) -> tuple[str, str | None, int | None, CandidateInformationState]:
+    willingness, reason, latest_willingness_event_id, information = _candidate_projection(events)
     typed_information: dict[str, CandidateInformationDelivery | None] = {
         "1": None,
         "2": None,
@@ -986,10 +1069,16 @@ def _typed_candidate_projection(
         typed_information[key] = CandidateInformationDelivery(
             status=value["status"],
             sent_at=sent_at,
+            event_id=_positive_int(value["event_id"], "information_event_id"),
+            line_task_id=(
+                _positive_int(value["line_task_id"], "information_line_task_id")
+                if value["line_task_id"] is not None else None
+            ),
         )
     return (
         willingness,
         reason,
+        latest_willingness_event_id,
         CandidateInformationState(
             information_1=typed_information["1"],
             information_2=typed_information["2"],

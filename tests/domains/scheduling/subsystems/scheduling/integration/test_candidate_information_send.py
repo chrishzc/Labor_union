@@ -12,7 +12,7 @@ from subsystems.scheduling import candidate_contact_pool_workflow as workflow
 class Cursor:
     lastrowid = 8
     def __init__(self):
-        self.reads = iter([{"pool_id": 1, "staff_id": 2, "service_start_date": "2026-10-01", "service_end_date": "2026-10-02", "line_user_id": "U" + "a" * 32}, None])
+        self.reads = iter([{"pool_id": 1, "staff_id": 2, "service_start_date": "2026-10-01", "service_end_date": "2026-10-02", "line_user_id": "U" + "a" * 32, "order_status": "洽談中"}, None])
         self.writes = []
         self.statements = []
     def execute(self, sql, args):
@@ -21,6 +21,21 @@ class Cursor:
             self.writes.append((sql, args))
     def fetchone(self):
         return next(self.reads)
+
+
+def test_manual_willingness_cancellation_compares_numeric_identity_without_collation():
+    cursor = Cursor()
+
+    workflow._cancel_pending_candidate_coordination(cursor, 48)
+
+    cancellation_sql, cancellation_args = next(
+        (sql, args)
+        for sql, args in cursor.statements
+        if "source_aggregate_type='candidate_contact_adjustment'" in sql
+    )
+    assert "CAST(source_aggregate_identity AS UNSIGNED)=%s" in cancellation_sql
+    assert "source_aggregate_identity=CAST(%s AS CHAR)" not in cancellation_sql
+    assert cancellation_args == (48, 48)
 
 
 @pytest.mark.parametrize("kind", [1, 2])

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import json
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
@@ -14,14 +15,20 @@ from subsystems.scheduling.segmented_availability_query import (
     search_segmented_caregiver_availability,
 )
 from subsystems.scheduling.candidate_contact_pool_workflow import query_pool
+from shared_kernel.fingerprints import fingerprint_payload
 
 
 get_connection = unconfigured_connection_factory
 
 _STRICT_YMD = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_EVENT_KEY = re.compile(r"^.{1,191}$", re.DOTALL)
 
 
-def _run_in_application_uow(operation: Callable[[Any, Any], dict[str, Any]]) -> dict[str, Any]:
+def _run_in_application_uow(
+    operation: Callable[[Any, Any], dict[str, Any]],
+    *,
+    commit: bool = True,
+) -> dict[str, Any]:
     """Own matching-plan persistence in one Application transaction."""
     connection = cursor = None
     cursor_closed = {"closed": False}
@@ -32,7 +39,11 @@ def _run_in_application_uow(operation: Callable[[Any, Any], dict[str, Any]]) -> 
         unit_of_work = connection
         cursor = connection.cursor()
         result = operation(connection, cursor)
-        if result.get("result") != "existing" and result.get("status") != "idempotent_replay":
+        if not commit:
+            unit_of_work.rollback()
+        elif result.get("event_key") is not None:
+            unit_of_work.commit()
+        elif result.get("result") != "existing" and result.get("status") != "idempotent_replay":
             unit_of_work.commit()
         else:
             unit_of_work.rollback()
@@ -72,6 +83,15 @@ def _normalize_created_by(created_by: Any) -> str:
     normalized = created_by.strip()
     if not normalized:
         raise ValueError("created_by is required")
+    return normalized
+
+
+def _normalize_event_key(event_key: Any) -> str:
+    if not isinstance(event_key, str):
+        raise ValueError("event_key is required")
+    normalized = event_key.strip()
+    if not _EVENT_KEY.fullmatch(normalized):
+        raise ValueError("event_key is required")
     return normalized
 
 
@@ -216,6 +236,28 @@ def _as_sql_payload(segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
+def _create_command_fingerprint(
+    case_no: str,
+    segments: list[dict[str, Any]],
+    actor: str,
+    as_of: str,
+) -> str:
+    return fingerprint_payload({
+        "case_no": case_no,
+        "segments": [
+            {
+                "segment_order": index,
+                "staff_id": segment["staff_id"],
+                "assigned_start_date": segment["assigned_start_date"],
+                "assigned_end_date": segment["assigned_end_date"],
+            }
+            for index, segment in enumerate(segments, start=1)
+        ],
+        "actor": actor,
+        "as_of": as_of,
+    }).value
+
+
 def create_matching_plan_version(
     case_no: Any,
     segments: Any,
@@ -224,6 +266,7 @@ def create_matching_plan_version(
     *,
     facts_port: SegmentedAvailabilityFactsPort,
     require_willing_candidate: bool = False,
+    event_key: Any,
 ) -> dict[str, Any]:
     """Create or reuse a proposed matching plan version for one case.
 
@@ -236,32 +279,53 @@ def create_matching_plan_version(
     as_of_value = _normalize_ymd(as_of, "as_of")
     normalized_segments = _normalize_segments(segments)
 
+    event_key_value = _normalize_event_key(event_key)
+    command_fingerprint = _create_command_fingerprint(
+        case_no_value, normalized_segments, created_by_value, as_of_value,
+    )
+    return _run_in_application_uow(
+        lambda connection, cursor: _create_matching_plan_version_with_receipt(
+            connection,
+            cursor,
+            case_no_value,
+            normalized_segments,
+            created_by_value,
+            as_of_value,
+            event_key_value,
+            command_fingerprint,
+            facts_port,
+            require_willing_candidate,
+        )
+    )
+
+
+def _validate_current_availability(
+    case_no_value: str,
+    normalized_segments: list[dict[str, Any]],
+    as_of_value: str,
+    facts_port: SegmentedAvailabilityFactsPort,
+    require_willing_candidate: bool,
+) -> None:
+    del require_willing_candidate
     availability_kwargs = {
         "case_no": case_no_value,
         "segment_count": len(normalized_segments),
         "segment_drafts": _as_sql_payload(normalized_segments),
         "as_of": as_of_value,
+        "include_candidate_options": False,
+        "filter_policy": {
+            "region": False,
+            "cooking": False,
+            "preferred_service_days": False,
+            "daily_service_hours": False,
+        },
     }
     availability_kwargs["facts_port"] = facts_port
-    if require_willing_candidate:
-        # A willing candidate already supplies the exact selected segment.
-        # Revalidate its current schedule occupancy without producing the
-        # candidate-display projection, which needs later official
-        # service-date facts that Stage 5 has not created yet.
-        availability = search_segmented_caregiver_availability(
-            **availability_kwargs,
-            include_candidate_options=False,
-            filter_policy={
-                "region": False,
-                "cooking": False,
-                "preferred_service_days": False,
-                "daily_service_hours": False,
-            },
-        )
-    else:
-        availability = search_segmented_caregiver_availability(
-            **availability_kwargs,
-        )
+    # The selected segments already came from a preference-aware query (or an
+    # auditable manual selection).  Apply must fresh-check schedule occupancy,
+    # not reintroduce optional discovery filters that can reject the exact
+    # combination the UI just offered.
+    availability = search_segmented_caregiver_availability(**availability_kwargs)
 
     complete_combinations = availability.get("complete_combinations")
     if not isinstance(complete_combinations, list):
@@ -284,12 +348,59 @@ def create_matching_plan_version(
     if not matched:
         raise ValueError("submitted segments must match a complete combination")
 
-    return _run_in_application_uow(
-        lambda connection, cursor: _create_matching_plan_version_in_transaction(
-            connection, cursor, case_no_value, normalized_segments, created_by_value,
-            target_signature, require_willing_candidate,
-        )
+    return None
+
+
+def _create_matching_plan_version_with_receipt(
+    connection: Any,
+    cursor: Any,
+    case_no_value: str,
+    normalized_segments: list[dict[str, Any]],
+    created_by_value: str,
+    as_of_value: str,
+    event_key: str,
+    command_fingerprint: str,
+    facts_port: SegmentedAvailabilityFactsPort,
+    require_willing_candidate: bool,
+) -> dict[str, Any]:
+    # Lock the case root before the idempotency row.  A concurrent command with
+    # this key must see a committed original receipt before it rechecks current
+    # availability, otherwise the original plan can make its own replay stale.
+    _lock_matching_plan_case_root(cursor, case_no_value)
+    replay = _load_matching_plan_create_receipt(cursor, event_key, for_update=True)
+    if replay is not None:
+        if replay["command_fingerprint"] != command_fingerprint:
+            raise ValueError("matching plan create idempotency key does not match original command")
+        if replay["case_no"] != case_no_value:
+            raise ValueError("matching plan create idempotency key does not match original command")
+        return {**replay, "replayed": True}
+
+    _validate_current_availability(
+        case_no_value,
+        normalized_segments,
+        as_of_value,
+        facts_port,
+        require_willing_candidate,
     )
+    result = _create_matching_plan_version_in_transaction(
+        connection,
+        cursor,
+        case_no_value,
+        normalized_segments,
+        created_by_value,
+        _segments_signature(normalized_segments),
+        require_willing_candidate,
+    )
+    receipt = {
+        **result,
+        "actor": created_by_value,
+        "as_of": as_of_value,
+        "event_key": event_key,
+        "command_fingerprint": command_fingerprint,
+        "replayed": False,
+    }
+    _save_matching_plan_create_receipt(cursor, receipt)
+    return receipt
 
 
 def _create_matching_plan_version_in_transaction(
@@ -302,18 +413,7 @@ def _create_matching_plan_version_in_transaction(
     require_willing_candidate: bool = False,
 ) -> dict[str, Any]:
     try:
-        cursor.execute(
-            "SELECT o.case_no, o.status, o.start_date, o.end_date\n"
-            "FROM orders o\n"
-            "WHERE o.case_no = %s FOR UPDATE",
-            (case_no_value,),
-        )
-        order_row = cursor.fetchone()
-        if order_row is None:
-            raise ValueError("case not found")
-
-        if order_row["status"] not in {"洽談中", "訂單成立"}:
-            raise ValueError("case is not in negotiation stage")
+        _lock_matching_plan_case_root(cursor, case_no_value)
 
         if require_willing_candidate:
             _require_current_willing_candidate(
@@ -321,9 +421,6 @@ def _create_matching_plan_version_in_transaction(
                 case_no_value,
                 normalized_segments,
             )
-
-        _normalize_db_date(order_row["start_date"], "start_date")
-        _normalize_db_date(order_row["end_date"], "end_date")
 
         cursor.execute(
             "SELECT id, version, status, is_active\n"
@@ -493,6 +590,133 @@ def _create_matching_plan_version_in_transaction(
         }
     finally:
         pass
+
+
+def _lock_matching_plan_case_root(cursor: Any, case_no_value: str) -> None:
+    cursor.execute(
+        "SELECT o.case_no, o.status, o.start_date, o.end_date\n"
+        "FROM orders o\n"
+        "WHERE o.case_no = %s FOR UPDATE",
+        (case_no_value,),
+    )
+    order_row = cursor.fetchone()
+    if order_row is None:
+        raise ValueError("case not found")
+    if order_row["status"] not in {"洽談中", "訂單成立"}:
+        raise ValueError("case is not in negotiation stage")
+    _normalize_db_date(order_row["start_date"], "start_date")
+    _normalize_db_date(order_row["end_date"], "end_date")
+
+
+def get_matching_plan_create_receipt(case_no: Any, event_key: Any) -> dict[str, Any]:
+    case_no_value = _normalize_case_no(case_no)
+    event_key_value = _normalize_event_key(event_key)
+
+    def read_receipt(_connection: Any, cursor: Any) -> dict[str, Any]:
+        receipt = _load_matching_plan_create_receipt(cursor, event_key_value, for_update=False)
+        if receipt is None or receipt["case_no"] != case_no_value:
+            raise ValueError("matching plan create receipt not found")
+        return receipt
+
+    return _run_in_application_uow(read_receipt, commit=False)
+
+
+def _load_matching_plan_create_receipt(
+    cursor: Any,
+    event_key: str,
+    *,
+    for_update: bool,
+) -> dict[str, Any] | None:
+    cursor.execute(
+        "SELECT case_no, plan_id, plan_version, plan_status, actor, as_of, "
+        "idempotency_key, command_fingerprint, result_kind, ordered_segments, result_snapshot "
+        "FROM matching_plan_create_receipts WHERE idempotency_key = %s"
+        + (" FOR UPDATE" if for_update else ""),
+        (event_key,),
+    )
+    row = cursor.fetchone()
+    if row is None:
+        return None
+    raw_snapshot = row["result_snapshot"]
+    try:
+        snapshot = raw_snapshot if isinstance(raw_snapshot, dict) else json.loads(raw_snapshot)
+    except (TypeError, json.JSONDecodeError) as error:
+        raise ValueError("matching plan create receipt is invalid") from error
+    if not isinstance(snapshot, dict):
+        raise ValueError("matching plan create receipt is invalid")
+    required = {
+        "case_no", "plan_id", "version", "status", "result", "segments",
+        "actor", "as_of", "event_key", "command_fingerprint", "replayed",
+    }
+    if set(snapshot) != required or snapshot["replayed"] is not False:
+        raise ValueError("matching plan create receipt is invalid")
+    try:
+        stored_segments = (
+            row["ordered_segments"]
+            if isinstance(row["ordered_segments"], list)
+            else json.loads(row["ordered_segments"])
+        )
+        receipt_segments = _receipt_command_segments(snapshot["segments"])
+    except (KeyError, TypeError, json.JSONDecodeError, ValueError) as error:
+        raise ValueError("matching plan create receipt is invalid") from error
+    if (
+        snapshot["case_no"] != row["case_no"]
+        or snapshot["plan_id"] != row["plan_id"]
+        or snapshot["version"] != row["plan_version"]
+        or snapshot["status"] != row["plan_status"]
+        or snapshot["actor"] != row["actor"]
+        or snapshot["as_of"] != _normalize_db_date(row["as_of"], "as_of")
+        or snapshot["event_key"] != row["idempotency_key"]
+        or snapshot["command_fingerprint"] != row["command_fingerprint"]
+        or snapshot["result"] != row["result_kind"]
+        or stored_segments != snapshot["segments"]
+        or snapshot["command_fingerprint"] != _create_command_fingerprint(
+            snapshot["case_no"], receipt_segments, snapshot["actor"], snapshot["as_of"],
+        )
+    ):
+        raise ValueError("matching plan create receipt is invalid")
+    return snapshot
+
+
+def _save_matching_plan_create_receipt(cursor: Any, receipt: dict[str, Any]) -> None:
+    cursor.execute(
+        "INSERT INTO matching_plan_create_receipts "
+        "(idempotency_key, command_fingerprint, case_no, plan_id, plan_version, "
+        "plan_status, actor, as_of, result_kind, ordered_segments, result_snapshot) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+        (
+            receipt["event_key"],
+            receipt["command_fingerprint"],
+            receipt["case_no"],
+            receipt["plan_id"],
+            receipt["version"],
+            receipt["status"],
+            receipt["actor"],
+            receipt["as_of"],
+            receipt["result"],
+            json.dumps(receipt["segments"], ensure_ascii=False, separators=(",", ":")),
+            json.dumps(receipt, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+        ),
+    )
+
+
+def _receipt_command_segments(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        raise ValueError("receipt segments are invalid")
+    drafts = []
+    for index, segment in enumerate(value, start=1):
+        if not isinstance(segment, dict) or set(segment) != {
+            "segment_order", "staff_id", "assigned_start_date", "assigned_end_date",
+        }:
+            raise ValueError("receipt segments are invalid")
+        if segment["segment_order"] != index:
+            raise ValueError("receipt segments are invalid")
+        drafts.append({
+            "staff_id": segment["staff_id"],
+            "assigned_start_date": segment["assigned_start_date"],
+            "assigned_end_date": segment["assigned_end_date"],
+        })
+    return _normalize_segments(drafts)
 
 
 def _require_current_willing_candidate(connection, case_no, segments):

@@ -1,12 +1,15 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { OrderCandidateContactStatusPanel } from '../components/OrderCandidateContactStatusPanel';
+import type { CandidateContactPool } from '../api/scheduling/candidate_contact_pool_client';
 
 const mocks = vi.hoisted(() => ({
   query: vi.fn(),
   sendInformation: vi.fn(),
   recordWillingness: vi.fn(),
   addCandidates: vi.fn(),
+  createCandidateWillingnessCommand: vi.fn(),
+  createCandidateInformationSendCommand: vi.fn(),
 }));
 
 vi.mock('../api/scheduling/candidate_contact_pool_client', () => ({
@@ -16,9 +19,15 @@ vi.mock('../api/scheduling/candidate_contact_pool_client', () => ({
     recordWillingness: mocks.recordWillingness,
     addCandidates: mocks.addCandidates,
   },
+  createCandidateInformationSendCommand: mocks.createCandidateInformationSendCommand,
+  createCandidateWillingnessCommand: mocks.createCandidateWillingnessCommand,
 }));
 
-function pool(firstWillingness = 'willing', firstReason: string | null = null) {
+function pool(
+  firstWillingness: CandidateContactPool['candidates'][number]['willingness'] = 'willing',
+  firstReason: string | null = null,
+  latestWillingnessEventId: number | null = null,
+): CandidateContactPool {
   return {
     pool_id: 9,
     case_no: 'CASE-CONTACT',
@@ -33,9 +42,10 @@ function pool(firstWillingness = 'willing', firstReason: string | null = null) {
         staff_name: '月嫂甲',
         willingness: firstWillingness,
         reason: firstReason,
+        latest_willingness_event_id: latestWillingnessEventId,
         information: {
-          '1': { status: 'sent', sent_at: '2026-09-03T00:05:00Z' },
-          '2': { status: 'retryable_failed', sent_at: '2026-09-03T00:06:00Z' },
+          '1': { status: 'sent', sent_at: '2026-09-03T00:05:00Z', event_id: 41, line_task_id: 51 },
+          '2': { status: 'retryable_failed', sent_at: '2026-09-03T00:06:00Z', event_id: null, line_task_id: null },
         },
       },
       {
@@ -48,6 +58,7 @@ function pool(firstWillingness = 'willing', firstReason: string | null = null) {
         staff_name: '月嫂乙',
         willingness: 'unwilling',
         reason: '日期不合',
+        latest_willingness_event_id: null,
         information: { '1': null, '2': null },
       },
     ],
@@ -57,6 +68,22 @@ function pool(firstWillingness = 'willing', firstReason: string | null = null) {
 describe('待辦看板 Beta 第 3～4 階候選聯絡狀態', () => {
   beforeEach(() => {
     Object.values(mocks).forEach((mock) => mock.mockReset());
+    mocks.createCandidateWillingnessCommand.mockImplementation((caseNo, candidateId, willingness, reason) => ({
+      caseNo,
+      candidateId,
+      willingness,
+      reason,
+      actor: 'operator-1',
+      eventKey: 'candidate-willingness-test-key',
+    }));
+    mocks.createCandidateInformationSendCommand.mockImplementation((caseNo, candidateId, infoType, previewFingerprint) => ({
+      caseNo,
+      candidateId,
+      infoType,
+      previewFingerprint,
+      actor: 'operator-1',
+      eventKey: 'candidate-information-test-key',
+    }));
   });
 
   it('只讀既有候選池 owner facts，原樣顯示聯絡、回覆與意願狀態，不觸發 mutation', async () => {
@@ -80,7 +107,7 @@ describe('待辦看板 Beta 第 3～4 階候選聯絡狀態', () => {
   });
 
   it('人工意願寫入後回讀 owner facts，更新畫面並阻止再次記錄相同意願', async () => {
-    const readback = pool('unwilling', '已電話確認但日期不合');
+    const readback = pool('unwilling', '已電話確認但日期不合', 45);
     mocks.query.mockResolvedValueOnce(pool()).mockResolvedValueOnce(readback);
     mocks.recordWillingness.mockResolvedValue({ status: 'recorded', event_id: 45 });
     render(<OrderCandidateContactStatusPanel caseNo="CASE-CONTACT" />);
@@ -94,14 +121,16 @@ describe('待辦看板 Beta 第 3～4 階候選聯絡狀態', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: '記錄 月嫂甲 無意願' }));
 
-    await waitFor(() => expect(mocks.recordWillingness).toHaveBeenCalledWith(
-      'CASE-CONTACT',
-      17,
-      'unwilling',
-      '已電話確認但日期不合',
-    ));
+    await waitFor(() => expect(mocks.recordWillingness).toHaveBeenCalledWith({
+      caseNo: 'CASE-CONTACT',
+      candidateId: 17,
+      willingness: 'unwilling',
+      reason: '已電話確認但日期不合',
+      actor: 'operator-1',
+      eventKey: 'candidate-willingness-test-key',
+    }));
     await waitFor(() => expect(mocks.query).toHaveBeenCalledTimes(2));
-    expect(await screen.findByText('已記錄意願並重新確認。')).toBeInTheDocument();
+    expect(await screen.findByText('回覆已儲存。')).toBeInTheDocument();
     expect(screen.getByText('回覆說明：已電話確認但日期不合')).toBeInTheDocument();
 
     const sameWillingnessButton = screen.getByRole('button', { name: '記錄 月嫂甲 無意願' });
@@ -124,8 +153,8 @@ describe('待辦看板 Beta 第 3～4 階候選聯絡狀態', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: '記錄 月嫂甲 無意願' }));
 
-    expect(await screen.findByText('人工意願回讀與本次寫入不一致。')).toBeInTheDocument();
-    expect(screen.queryByText(/意願已記錄並回讀/)).not.toBeInTheDocument();
+    expect(await screen.findByText('目前無法確認回覆是否已儲存，請重新讀取最新結果。')).toBeInTheDocument();
+    expect(screen.queryByText('回覆已儲存。')).not.toBeInTheDocument();
     expect(mocks.query).toHaveBeenCalledTimes(2);
     expect(mocks.recordWillingness).toHaveBeenCalledTimes(1);
     expect(mocks.sendInformation).not.toHaveBeenCalled();

@@ -29,6 +29,7 @@
 - `/api/v1/orders/{case_no}/cancellation/{preview,apply}` — `api/routes/order_cancellation.py`。
 
 ## Verification
+- layout_status: custom_current
 - test_root: `tests/domains/orders/subsystems/orders/modules/cancellation/`
 - static:
   - `.venv/bin/python -m pytest tests/domains/orders/subsystems/orders/modules/cancellation/ tests/domains/orders/subsystems/orders/integration/test_cancelled_order_reentry_guard.py tests/domains/orders/subsystems/orders/integration/test_order_cancellation_cross_domain_chain.py`
@@ -36,6 +37,9 @@
 - higher_boundary: tests/domains/orders/subsystems/orders/integration/
 - higher_boundary:
   - `ui_react/src/tests/orders_page_real_data.test.tsx`
+- test_root: `ui_react/src/tests/order_workbench_v2_cancellation.test.tsx`
+- test_root: `ui_react/src/tests/order_workbench_v2_reopen.test.tsx`
+- test_root: `ui_react/src/tests/order_cancellation_client.test.ts`
 
 ## Provenance
 - Cancellation workflow ownership — `architecture_declared` — Orders §3.5 and existing Orders subsystem map.

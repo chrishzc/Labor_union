@@ -9,10 +9,12 @@ from shared_kernel.migration_release import load_migration_release_manifest
 
 
 ROOT = Path(__file__).resolve().parents[8]
-MANIFEST = ROOT / "db/migration_releases/labor_union_2026_09_11_twins_payroll_policy_v1.json"
+ARCHIVED_MANIFEST = ROOT / "db/migration_releases/labor_union_2026_09_11_twins_payroll_policy_v1.json"
+MANIFEST = ROOT / "db/migration_releases/labor_union_2026_09_12_twins_payroll_policy_backfill_hash_v2.json"
 
 
 def test_twins_payroll_release_is_registered_and_exact():
+    archived = json.loads(ARCHIVED_MANIFEST.read_text(encoding="utf-8"))
     manifest = load_migration_release_manifest(MANIFEST, ROOT)
     descriptors = manifest.owned_object_descriptors(ROOT)
     descriptor = descriptors["1037_twins_payroll_policy.sql"]
@@ -23,7 +25,15 @@ def test_twins_payroll_release_is_registered_and_exact():
         "1038_twins_payroll_order_details_view.sql"
     )
     assert manifest.backfills[0].backfill_id == "twins-payroll-rate-snapshots-v1"
-    assert migration.DEFAULT_RELEASE_MANIFESTS[-1] == MANIFEST.name
+    assert manifest.backfills[0].artifact.sha256 == (
+        "5281b8a96620f081494c3339327013c00ff94cbdabea9d0a878851570b2882dd"
+    )
+    assert MANIFEST.name in migration.DEFAULT_RELEASE_MANIFESTS
+    assert ARCHIVED_MANIFEST.name not in migration.DEFAULT_RELEASE_MANIFESTS
+    assert archived["release_id"] == "labor-union-twins-payroll-policy-2026-09-11-v1"
+    assert archived["backfills"][0]["artifact"]["sha256"] == (
+        "73af1fe90a1f13844181a59f07dc0ca52e5fb1e79ee380257ca524192e3f27d7"
+    )
     assert set(descriptor["parent_columns"]) == {
         "payroll_rate_policies", "assignment_payroll_rate_snapshots",
         "case_architecture_bootstrap_events", "case_payroll_rate_policy_snapshots",

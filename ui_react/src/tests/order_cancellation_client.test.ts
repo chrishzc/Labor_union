@@ -87,6 +87,7 @@ describe('orderCancellationClient', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.spyOn(sessionClient, 'getToken').mockReturnValue('token');
+    vi.spyOn(sessionClient, 'getUser').mockReturnValue({ username: 'operator-a' } as never);
   });
 
   it('queries and strictly decodes cancellation root facts', async () => {
@@ -175,7 +176,7 @@ describe('orderCancellationClient', () => {
       preview_fingerprint: 'a'.repeat(64),
       reason: '客戶電話確認取消',
     };
-    await expect(orderCancellationClient.apply('CASE-1', payload, { idempotencyKey: 'cancel-case-1' }))
+    await expect(orderCancellationClient.apply('CASE-1', payload, { idempotencyKey: 'cancel-case-1', actor: 'operator-a' }))
       .resolves.toEqual(receiptFixture);
     expect(post).toHaveBeenCalledWith(
       '/api/v1/orders/CASE-1/cancellation/apply',

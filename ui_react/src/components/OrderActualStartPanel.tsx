@@ -1,13 +1,14 @@
-import { useEffect, useRef, useState, type FC } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type FC } from 'react';
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import type { ActualStart } from '../api/orders/order_query_schemas';
-import { orderActualStartClient, type ActualStartApplyPayload, type ActualStartPreview, type ActualStartReceipt } from '../api/orders/order_actual_start_client';
+import { orderActualStartClient, type ActualStartPreview } from '../api/orders/order_actual_start_client';
 import { OrderMutationError } from '../api/orders/order_mutation_errors';
 import { ApiHttpError } from '../api/shared/typed_errors';
+import { orderMutationFlowStore, type ActualStartCommand } from '../adapters/orders/order_mutation_flow_store';
 
 interface Props { caseNo: string; onObserved?: () => void; onBusyChange?: (busy: boolean) => void }
-type Attempt = { payload: ActualStartApplyPayload; idempotencyKey: string; receipt: ActualStartReceipt | null };
 type Phase = 'idle' | 'loading' | 'previewing' | 'applying' | 'outcome_unknown' | 'observation_failed' | 'observed';
+const subscribeActualStart = (listener: () => void) => orderMutationFlowStore.subscribe(listener);
 
 export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyChange }) => {
   const [query, setQuery] = useState<ActualStart | null>(null);
@@ -16,38 +17,75 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
   const [preview, setPreview] = useState<ActualStartPreview | null>(null);
   const [phase, setPhase] = useState<Phase>('idle');
   const [error, setError] = useState<string | null>(null);
-  const attempt = useRef<Attempt | null>(null);
-  const inFlight = useRef(false);
+  const flow = useSyncExternalStore(subscribeActualStart, () => orderMutationFlowStore.getActualStart(caseNo));
+  const inFlight = useRef(new Set<string>());
   const sequence = useRef(0);
-  const unresolved = phase === 'applying' || phase === 'outcome_unknown' || phase === 'observation_failed';
+  const observationSequence = useRef(0);
+  const mounted = useRef(true);
+  const activeCaseNo = useRef(caseNo);
+  const flowPhase = flow?.status;
+  const unresolved = flowPhase === 'applying' || flowPhase === 'outcome_unknown' || flowPhase === 'observation_failed' || flowPhase === 'observing'
+    || phase === 'applying' || phase === 'outcome_unknown' || phase === 'observation_failed';
   const busy = unresolved || phase === 'loading' || phase === 'previewing';
   useEffect(() => { onBusyChange?.(unresolved); }, [unresolved, onBusyChange]);
-  useEffect(() => () => { sequence.current += 1; onBusyChange?.(false); }, [onBusyChange]);
+  useEffect(() => {
+    const previousCaseNo = activeCaseNo.current;
+    if (previousCaseNo !== caseNo) {
+      observationSequence.current += 1;
+      inFlight.current.delete(previousCaseNo);
+      const saved = orderMutationFlowStore.getActualStart(previousCaseNo);
+      if (saved?.status === 'observing' && saved.receipt) {
+        orderMutationFlowStore.setActualStart(previousCaseNo, {
+          ...saved, status: 'observation_failed', error: '實際開始日回讀尚未完成，請只重新讀取結果。',
+        });
+      }
+    }
+    activeCaseNo.current = caseNo;
+    sequence.current += 1;
+    setQuery(null); setDate(''); setReason(''); setPreview(null); setPhase('idle'); setError(null);
+  }, [caseNo]);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      sequence.current += 1;
+      observationSequence.current += 1;
+      const saved = orderMutationFlowStore.getActualStart(activeCaseNo.current);
+      if (saved?.status === 'observing' && saved.receipt) {
+        orderMutationFlowStore.setActualStart(activeCaseNo.current, {
+          ...saved, status: 'observation_failed', error: '實際開始日回讀尚未完成，請只重新讀取結果。',
+        });
+      }
+      onBusyChange?.(false);
+    };
+  }, [onBusyChange]);
+  const isActive = (request: number, requestCaseNo: string) => mounted.current && activeCaseNo.current === requestCaseNo && sequence.current === request;
 
   const load = async () => {
-    if (inFlight.current || unresolved) return;
+    if (unresolved) return;
+    if (flow?.status === 'observed') orderMutationFlowStore.clearActualStart(caseNo);
     const request = ++sequence.current;
     setPhase('loading'); setError(null); setPreview(null);
     try {
       const data = await ordersQueryClient.getActualStart(caseNo);
       if (data.case_no !== caseNo) throw new Error('實際開始日查詢案件識別不一致。');
-      if (sequence.current !== request) return;
+      if (!isActive(request, caseNo)) return;
       setQuery(data); setDate(data.current_actual_start_date ?? data.planned_start_date); setPhase('idle');
     } catch (caught) {
-      if (sequence.current === request) { setQuery(null); setError(caught instanceof Error ? caught.message : '實際開始日查詢失敗。'); setPhase('idle'); }
+      if (isActive(request, caseNo)) { setQuery(null); setError(caught instanceof Error ? caught.message : '實際開始日查詢失敗。'); setPhase('idle'); }
     }
   };
 
   const check = async () => {
-    if (!query || query.service_data_locked || busy || inFlight.current) return;
+    if (!query || query.service_data_locked || busy) return;
     const request = ++sequence.current;
     setPhase('previewing'); setPreview(null); setError(null);
     try {
       const data = await orderActualStartClient.preview(caseNo, { new_actual_start_date: date });
       if (data.actual_start.case_no !== caseNo || data.after_actual_start_date !== date) throw new Error('實際開始日預覽 identity 不一致。');
-      if (sequence.current === request) { setPreview(data); setPhase('idle'); }
+      if (isActive(request, caseNo)) { setPreview(data); setPhase('idle'); }
     } catch (caught) {
-      if (sequence.current === request) {
+      if (isActive(request, caseNo)) {
         const missingAssignments = (caught instanceof OrderMutationError || caught instanceof ApiHttpError)
           && caught.code === 'scheduling_assignments_required';
         setError(missingAssignments
@@ -58,28 +96,42 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
     }
   };
 
-  const observe = async (saved: Attempt, request: number) => {
-    const receipt = saved.receipt;
-    if (!receipt || receipt.case_no !== caseNo || receipt.preview_fingerprint !== saved.payload.preview_fingerprint) {
+  const observe = async (command: ActualStartCommand, request: number) => {
+    const observation = ++observationSequence.current;
+    const saved = orderMutationFlowStore.getActualStart(caseNo);
+    const receipt = saved?.receipt;
+    if (!saved || !receipt || receipt.case_no !== caseNo || receipt.preview_fingerprint !== command.payload.preview_fingerprint) {
       throw new Error('實際開始日收據 identity 不一致，已停止操作。');
     }
-    const data = await ordersQueryClient.getActualStart(caseNo);
-    if (data.case_no !== caseNo || data.current_actual_start_date !== saved.payload.new_actual_start_date
+    orderMutationFlowStore.setActualStart(caseNo, { ...saved, status: 'observing', error: null });
+    let data: ActualStart;
+    try {
+      data = await ordersQueryClient.getActualStart(caseNo);
+    } catch (caught) {
+      if (observation !== observationSequence.current) return;
+      throw caught;
+    }
+    if (observation !== observationSequence.current) return;
+    if (data.case_no !== caseNo || data.current_actual_start_date !== command.payload.new_actual_start_date
       || data.order_version < receipt.order_version || data.scheduling_version < receipt.scheduling_version) {
       throw new Error('實際開始日已回傳收據，但正式回讀尚未觀察到該版本與日期。');
     }
-    if (sequence.current !== request) return;
+    orderMutationFlowStore.setActualStart(caseNo, { ...saved, status: 'observed', error: null });
+    if (!isActive(request, caseNo)) return;
     setQuery(data); setDate(data.current_actual_start_date ?? data.planned_start_date);
-    setPreview(null); setReason(''); setPhase('observed'); attempt.current = null;
+    setPreview(null); setReason(''); setPhase('observed');
     onBusyChange?.(false); onObserved?.();
   };
 
   const apply = async (retry = false) => {
-    if (inFlight.current) return;
+    if (inFlight.current.has(caseNo)) return;
     if (!retry && (!preview || !query || query.service_data_locked || !reason.trim() || busy
       || preview.client_finance_impact.blockers.length > 0 || preview.payroll_impact.blockers.length > 0)) return;
-    if (retry && phase !== 'outcome_unknown') return;
-    const saved = attempt.current ?? (preview ? {
+    const existing = orderMutationFlowStore.getActualStart(caseNo);
+    if (retry && existing?.status !== 'outcome_unknown') return;
+    if (existing?.status === 'applying' || existing?.receipt) return;
+    const recoveringUnknown = existing?.status === 'outcome_unknown' && existing.command !== null;
+    const command = existing?.command ?? (preview ? {
       payload: {
         new_actual_start_date: preview.after_actual_start_date,
         expected_order_version: preview.order_version,
@@ -90,45 +142,65 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
         reason: reason.trim(),
       },
       idempotencyKey: `beta-actual-start-${crypto.randomUUID()}`,
-      receipt: null,
     } : null);
-    if (!saved) return;
-    attempt.current = saved;
-    inFlight.current = true;
+    if (!command) return;
+    inFlight.current.add(caseNo);
     const request = sequence.current;
     setPhase('applying'); setError(null); onBusyChange?.(true);
+    orderMutationFlowStore.setActualStart(caseNo, { status: 'applying', command, receipt: null, error: null });
     try {
-      saved.receipt = await orderActualStartClient.apply(caseNo, saved.payload, { idempotencyKey: saved.idempotencyKey });
+      const receipt = await orderActualStartClient.apply(caseNo, command.payload, { idempotencyKey: command.idempotencyKey });
+      orderMutationFlowStore.setActualStart(caseNo, { status: 'observation_failed', command, receipt, error: null });
     } catch (caught) {
-      if (sequence.current === request) {
-        const rejected = (caught instanceof ApiHttpError || caught instanceof OrderMutationError)
-          && caught.status >= 400 && caught.status < 500 && caught.status !== 408 && caught.status !== 429;
-        if (rejected) {
-          attempt.current = null; setPreview(null); setQuery(null); setPhase('idle'); onBusyChange?.(false);
+      const rejected = (caught instanceof ApiHttpError || caught instanceof OrderMutationError)
+        && caught.status >= 400 && caught.status < 500 && caught.status !== 408 && caught.status !== 429;
+      if (rejected && !recoveringUnknown) {
+        orderMutationFlowStore.clearActualStart(caseNo);
+        if (isActive(request, caseNo)) {
+          setPreview(null); setQuery(null); setPhase('idle'); onBusyChange?.(false);
           setError(`實際開始日未通過檢查，請重新讀取並預覽：${caught.message}`);
-        } else {
+        }
+      } else {
+        orderMutationFlowStore.setActualStart(caseNo, { status: 'outcome_unknown', command, receipt: null,
+          error: recoveringUnknown
+            ? '實際開始日結果仍未確認；請恢復權限後以原操作重新確認。'
+            : '實際開始日套用結果未明；保留原操作，只能使用相同內容與原冪等鍵重新確認。' });
+        if (isActive(request, caseNo)) {
           setPhase('outcome_unknown');
-          setError('實際開始日套用結果未明；保留原操作，只能使用相同內容與原冪等鍵重新確認。');
+          setError(recoveringUnknown
+            ? '實際開始日結果仍未確認；請恢復權限後以原操作重新確認。'
+            : '實際開始日套用結果未明；保留原操作，只能使用相同內容與原冪等鍵重新確認。');
         }
       }
-      inFlight.current = false;
+      inFlight.current.delete(caseNo);
       return;
     }
     try {
-      await observe(saved, request);
+      await observe(command, request);
     } catch (caught) {
-      if (sequence.current === request) { setPhase('observation_failed'); setError(caught instanceof Error ? caught.message : '實際開始日回讀失敗。'); }
-    } finally { inFlight.current = false; }
+      const saved = orderMutationFlowStore.getActualStart(caseNo);
+      if (saved?.status === 'observing' && saved.receipt) {
+        orderMutationFlowStore.setActualStart(caseNo, { ...saved, status: 'observation_failed', error: caught instanceof Error ? caught.message : '實際開始日回讀失敗。' });
+      }
+      if (isActive(request, caseNo)) { setPhase('observation_failed'); setError(caught instanceof Error ? caught.message : '實際開始日回讀失敗。'); }
+    } finally { inFlight.current.delete(caseNo); }
   };
 
   const retryObservation = async () => {
-    if (inFlight.current || phase !== 'observation_failed' || !attempt.current?.receipt) return;
-    inFlight.current = true;
+    const current = orderMutationFlowStore.getActualStart(caseNo);
+    if (inFlight.current.has(caseNo) || current?.status !== 'observation_failed' || !current.receipt) return;
+    inFlight.current.add(caseNo);
     const request = sequence.current;
     setPhase('applying'); setError(null);
-    try { await observe(attempt.current, request); }
-    catch (caught) { if (sequence.current === request) { setPhase('observation_failed'); setError(caught instanceof Error ? caught.message : '實際開始日回讀失敗。'); } }
-    finally { inFlight.current = false; }
+    try { await observe(current.command, request); }
+    catch (caught) {
+      const saved = orderMutationFlowStore.getActualStart(caseNo);
+      if (saved?.status === 'observing' && saved.receipt) {
+        orderMutationFlowStore.setActualStart(caseNo, { ...saved, status: 'observation_failed', error: caught instanceof Error ? caught.message : '實際開始日回讀失敗。' });
+      }
+      if (isActive(request, caseNo)) { setPhase('observation_failed'); setError(caught instanceof Error ? caught.message : '實際開始日回讀失敗。'); }
+    }
+    finally { inFlight.current.delete(caseNo); }
   };
 
   return (
@@ -166,11 +238,11 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
         </>
       )}
       {phase === 'previewing' && <p role="status">檢查實際開始日影響中…</p>}
-      {phase === 'applying' && <p role="status">實際開始日套用／回讀中…</p>}
-      {phase === 'outcome_unknown' && <button type="button" onClick={() => void apply(true)}>以原操作重新確認實際開始日</button>}
-      {phase === 'observation_failed' && <button type="button" onClick={() => void retryObservation()}>只重新讀取實際開始日結果</button>}
-      {phase === 'observed' && <p role="status">實際開始日已完成正式回讀：{query?.current_actual_start_date}</p>}
-      {error && <p role="alert">{error}</p>}
+      {(flowPhase === 'applying' || flowPhase === 'observing' || phase === 'applying') && <p role="status">實際開始日套用／回讀中…</p>}
+      {(flowPhase === 'outcome_unknown' || phase === 'outcome_unknown') && <button type="button" onClick={() => void apply(true)}>以原操作重新確認實際開始日</button>}
+      {(flowPhase === 'observation_failed' || phase === 'observation_failed') && <button type="button" onClick={() => void retryObservation()}>只重新讀取實際開始日結果</button>}
+      {(flowPhase === 'observed' || phase === 'observed') && <p role="status">實際開始日已完成正式回讀{query?.current_actual_start_date ? `：${query.current_actual_start_date}` : '。'}</p>}
+      {(flow?.error ?? error) && <p role="alert">{flow?.error ?? error}</p>}
     </section>
   );
 };

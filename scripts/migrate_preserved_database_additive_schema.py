@@ -123,7 +123,7 @@ def _post_schema_verification_validators(
             contract_id: str = verification_id,
         ) -> Mapping[str, Any]:
             states = {name: owned_objects.get(name) for name in names}
-            if not states or any(state != "exact" for state in states.values()):
+            if not states or not _candidate_schema_is_exact(states):
                 raise UpgradeBlocked(
                     "post-schema owned objects are not exact: " + str(states)
                 )
@@ -343,7 +343,8 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_09_09_contract_external_signing_final_pdf_completion_v1.json",
     "labor_union_2026_09_09_weekly_report_metrics_v1.json",
     "labor_union_2026_09_11_registry_owner_mutations_v1.json",
-    "labor_union_2026_09_11_twins_payroll_policy_v1.json",
+    "labor_union_2026_09_12_twins_payroll_policy_backfill_hash_v2.json",
+    "labor_union_2026_09_12_matching_plan_create_receipts_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -641,7 +642,7 @@ def _configure_default_release_manifests() -> None:
         (release_directory / name for name in DEFAULT_RELEASE_MANIFESTS),
         include_backfills=True,
         backfill_release_ids=frozenset(
-            {"labor-union-twins-payroll-policy-2026-09-11-v1"}
+            {"labor-union-twins-payroll-policy-2026-09-12-v2"}
         ),
     )
 
@@ -1015,7 +1016,10 @@ def _require_dedicated_rehearsal_databases(source: str, candidate: str) -> None:
 def _candidate_schema_is_exact(states: Mapping[str, str]) -> bool:
     return all(
         state == "exact" or (
-            name in PURE_RETIREMENT_ARTIFACTS and state == "absent"
+            name in (
+                PURE_RETIREMENT_ARTIFACTS
+                | LOCAL_RETIRED_ABSENT_ARTIFACTS
+            ) and state == "absent"
         )
         for name, state in states.items()
     )
@@ -1245,6 +1249,28 @@ def _show_create_owned_table_names() -> set[str]:
     }
 
 
+def _snapshot_scope_for_owned_part(
+    owned_part: str,
+) -> tuple[set[str], set[str], set[str]]:
+    """Read the released and canonical metadata needed for one live part."""
+    published = OWNED_OBJECTS[owned_part]
+    canonical = _canonical_artifact_descriptor(owned_part)
+    tables: set[str] = set()
+    triggers: set[str] = set()
+    views: set[str] = set()
+    for descriptor in (published, canonical):
+        tables.update(descriptor.get("tables", {}))
+        tables.update(descriptor.get("parent_columns", {}))
+        for contract_name in ("indexes", "foreign_keys", "checks"):
+            tables.update(
+                table_name
+                for table_name, _ in descriptor.get(contract_name, {})
+            )
+        triggers.update(descriptor.get("triggers", {}))
+        views.update(descriptor.get("views", {}))
+    return tables, triggers, views
+
+
 def _schema_snapshot(
     config: DatabaseConfig,
     database: str,
@@ -1255,16 +1281,9 @@ def _schema_snapshot(
     scoped_triggers: set[str] | None = None
     scoped_views: set[str] | None = None
     if owned_part is not None:
-        expected = OWNED_OBJECTS[owned_part]
-        scoped_tables = set(expected.get("tables", {}))
-        scoped_tables.update(expected.get("parent_columns", {}))
-        for contract_name in ("indexes", "foreign_keys", "checks"):
-            scoped_tables.update(
-                table_name
-                for table_name, _ in expected.get(contract_name, {})
-            )
-        scoped_triggers = set(expected.get("triggers", {}))
-        scoped_views = set(expected.get("views", {}))
+        scoped_tables, scoped_triggers, scoped_views = (
+            _snapshot_scope_for_owned_part(owned_part)
+        )
     connection = config.connect(database)
     try:
         with connection.cursor() as cursor:
@@ -1778,6 +1797,29 @@ def _owned_classification(
     legacy_knowledge_state = _legacy_knowledge_schema_state(snapshot)
     result: dict[str, str] = {}
     for part, expected in OWNED_OBJECTS.items():
+        if part == "999_v_order_details_view.sql":
+            state = _descriptor_presence_state(
+                expected,
+                present_columns,
+                present_triggers,
+                snapshot.get("views", ()),
+                defer_missing_triggers=defer_missing_triggers,
+            )
+            successor = OWNED_OBJECTS.get(
+                "1038_twins_payroll_order_details_view.sql"
+            )
+            if (
+                state == "drift"
+                and successor is not None
+                and _twins_payroll_order_details_view_state(
+                    snapshot.get("views", ()), successor
+                ) == "exact"
+            ):
+                # The selected 1038 release intentionally replaces this view.
+                # Its exact descriptor is the only accepted later definition.
+                state = "exact"
+            result[part] = state
+            continue
         if part == "1038_twins_payroll_order_details_view.sql":
             result[part] = _twins_payroll_order_details_view_state(
                 snapshot.get("views", ()), expected
@@ -5952,9 +5994,14 @@ def _contract_external_signing_final_pdf_constraint_state(
         for row in snapshot.get("constraints", ())
     }
     row = constraints.get(ACS)
+    if row is None:
+        table_present = any(
+            str(column.get("table_name")) == ACS[0]
+            for column in snapshot.get("columns", ())
+        )
+        return "partial" if table_present else "absent"
     if (
-        row is None
-        or row.get("constraint_type") != "CHECK"
+        row.get("constraint_type") != "CHECK"
         or str(row.get("enforced") or "YES").upper() != "YES"
     ):
         return "drift"
@@ -6423,11 +6470,10 @@ def _artifact_metadata_state(
             or str(row.get("enforced") or "YES").upper() != "YES"
             or _normalize_check_contract(actual_clause) not in {
                 _normalize_check_contract(expected_clause),
-                *(
-                    [_normalize_check_contract(allowed_later_checks[key])]
-                    if key in allowed_later_checks
-                    else []
-                ),
+                *[
+                    _normalize_check_contract(clause)
+                    for clause in allowed_later_checks.get(key, ())
+                ],
             }
         ):
             return "drift"
@@ -6679,7 +6725,7 @@ def _allowed_later_artifact_indexes(
 
 def _allowed_later_artifact_checks(
     part_name: str,
-) -> dict[tuple[str, str], str]:
+) -> dict[tuple[str, str], tuple[str, ...]]:
     """Return checks whose exact shape is owned by a declared successor."""
     if part_name == "104_order_lifecycle_state_history.sql":
         pending_status_successor = _canonical_artifact_descriptor(
@@ -6688,10 +6734,14 @@ def _allowed_later_artifact_checks(
         historical_accounting_successor = _canonical_artifact_descriptor(
             "1028_historical_service_accounting.sql"
         )
-        return {
-            **pending_status_successor["checks"],
-            **historical_accounting_successor["checks"],
-        }
+        allowed: dict[tuple[str, str], list[str]] = {}
+        for successor in (
+            pending_status_successor["checks"],
+            historical_accounting_successor["checks"],
+        ):
+            for key, clause in successor.items():
+                allowed.setdefault(key, []).append(clause)
+        return {key: tuple(clauses) for key, clauses in allowed.items()}
     if part_name == "1003_matching_coordination_successor.sql":
         # 1023 intentionally evolves this existing CHECK while adding its own
         # safe-link roots. Derive the clause from the hash-bound SQL artifact so
@@ -6707,7 +6757,9 @@ def _allowed_later_artifact_checks(
             opening = statement.upper().find("CHECK", position) + len("CHECK")
             clause, _ = _extract_parenthesized(statement, statement.find("(", opening))
             return {
-                ("matching_coordination_outbox", "chk_matching_outbox_target"): clause
+                ("matching_coordination_outbox", "chk_matching_outbox_target"): (
+                    clause,
+                )
             }
     return {}
 
@@ -7105,29 +7157,43 @@ def apply_schema(
             if cursor.fetchone()["db"] != candidate:
                 raise UpgradeBlocked("mutation connection is not candidate")
             for part in SCHEMA_PARTS:
-                statements = schema_statements_for_state(
-                    part, states.get(part.name, "absent"), before
+                part_before = _schema_snapshot(
+                    config, candidate, owned_part=part.name
                 )
-                if states.get(part.name) == "exact":
+                before_state = _owned_classification(part_before)[part.name]
+                if (
+                    before_state == "exact"
+                    or (
+                        part.name in LOCAL_RETIRED_ABSENT_ARTIFACTS
+                        and before_state == "absent"
+                    )
+                ):
                     steps.append(
                         {
                             "part": part.name,
                             "index": 0,
-                            "status": "exact",
-                            "outcome": "existing_part_skipped",
+                            "status": (
+                                "retired_absent"
+                                if before_state == "absent"
+                                else "exact"
+                            ),
+                            "outcome": (
+                                "retired_absent_skipped"
+                                if before_state == "absent"
+                                else "existing_part_skipped"
+                            ),
                             "verified_at": _now(),
                         }
                     )
                     write_receipt(operation_receipt_path, receipt)
                     continue
-                part_before = _schema_snapshot(
-                    config, candidate, owned_part=part.name
-                )
-                before_state = _owned_classification(part_before)[part.name]
                 if before_state == "drift":
                     raise UpgradeBlocked(
                         f"candidate schema drift before {part.name}"
                     )
+                statements = schema_statements_for_state(
+                    part, before_state, part_before
+                )
                 part_steps: list[dict[str, Any]] = []
                 for index, statement in enumerate(statements, start=1):
                     step = {

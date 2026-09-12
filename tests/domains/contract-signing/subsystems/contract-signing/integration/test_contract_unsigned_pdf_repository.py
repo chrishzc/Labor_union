@@ -251,6 +251,56 @@ def test_register_persisted_pdf_uses_exact_controlled_lineage_without_commit():
     assert connection.rollback_calls == 0
 
 
+def test_register_persisted_pdf_replays_the_existing_document_for_the_same_controlled_file():
+    connection = _Connection([{"document_version_id": 52}])
+    repository = MySqlContractUnsignedPdfRepository(connection, storage_provider="nas")
+    readback = ControlledFileReadback(
+        file_id="cf_" + "d" * 32,
+        owner=ControlledFileOwner.CONTRACT_SIGNING,
+        purpose=ControlledFilePurpose.UNSIGNED_CONTRACT,
+        subject_reference="CASE-1",
+        filename="unsigned.pdf",
+        logical_folder="contracts/unsigned",
+        version=1,
+        sha256_digest=_DIGEST,
+        mime_type="application/pdf",
+        size_bytes=18,
+        status="active",
+        applied_at=datetime(2026, 8, 26, tzinfo=timezone.utc),
+    )
+    receipt = ControlledFileApplyReceipt(
+        "cfr_" + "e" * 32,
+        ControlledFileApplyOutcome.REPLAYED,
+        readback,
+    )
+    source = UnsignedContractPdfPersistenceSource(
+        case_no="CASE-1",
+        document_version_id=41,
+        document_scope="staff_segment",
+        matching_plan_id=9,
+        matching_segment_id=12,
+        document_target_key="staff-segment:12",
+        template_key="staff-contract-v1",
+        template_sha256="a" * 64,
+        mapping_sha256="b" * 64,
+        facts_snapshot_sha256="d" * 64,
+        version_number=3,
+        is_current=True,
+    )
+
+    result = repository.register_persisted_pdf(
+        source=source,
+        controlled_file_receipt=receipt,
+        renderer_identity="libreoffice-headless-v1",
+        actor=ActorContext("admin:7"),
+    )
+
+    assert result == 52
+    assert len(connection.cursor_instance.executions) == 1
+    assert connection.commit_calls == 0
+    assert connection.rollback_calls == 0
+
+
 def test_lock_source_uses_case_then_source_then_current_target_lock_order():
     connection = _Connection(
         [

@@ -22,6 +22,7 @@
 - `order-card-projection` — Orders 管理端案件投影的 typed adaptation 與營運／技術資訊層級; path: `modules/order-card-projection.md`
 - `service-completion-presentation` — Orders服務完成Preview／Confirm／Apply與closed business presentation; path: `modules/service-completion-presentation.md`
 - `cancellation` — 訂單取消的跨 owner Preview／Apply 與 fresh readback；path: `modules/cancellation.md`
+- `controlled-reopen` — 訂單受控重開的 Preview／fresh Apply／receipt；path: `modules/controlled-reopen.md`
 - `terminal-closure-handoff` — terminal lifecycle event／receipt／outbox 的 LINE Identity typed handoff；path: `modules/terminal-closure-handoff.md`
 - `order-information` — 既有案件訂單資訊的typed Query與管理端readback；path: `modules/order-information.md`
 - `order-terms` — Orders Terms Query／Preview／fresh-lock Apply 與跨 owner 影響回執；path: `modules/order-terms.md`

@@ -1,0 +1,132 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-twins-payroll-policy-2026-09-12-v2",
+  "release_metadata": {
+    "release_name": "Labor Union twins Payroll policy backfill hash replacement",
+    "application_version": "twins-payroll-policy-v2",
+    "published_at": "2026-09-12",
+    "description": "Immutable successor that selects the current audited twins Payroll snapshot backfill bytes while retaining the 2026-09-11 release record unchanged"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-registry-owner-mutations-2026-09-11-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1037_twins_payroll_policy.sql",
+      "relative_path": "db/schema_parts/1037_twins_payroll_policy.sql",
+      "sha256": "091b928d9d6758c3eef112d485205f69c66dc6361d7c1fbba540e978b047c18e",
+      "dependencies": [],
+      "data_effect": "system_seed",
+      "rollback_policy": "forward-only-preserve-existing-payroll-snapshots",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    },
+    {
+      "name": "1038_twins_payroll_order_details_view.sql",
+      "relative_path": "db/schema_parts/1038_twins_payroll_order_details_view.sql",
+      "sha256": "09f17ca94dca83847c6d57ea34df5c450e71374788784f473e6ea4e1574fd18a",
+      "dependencies": [
+        "1037_twins_payroll_policy.sql"
+      ],
+      "data_effect": "schema_only",
+      "rollback_policy": "discard-candidate-before-entry-switch",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [
+    {
+      "backfill_id": "twins-payroll-rate-snapshots-v1",
+      "artifact": {
+        "name": "backfill_twins_payroll_rate_snapshots.py",
+        "relative_path": "scripts/backfill_twins_payroll_rate_snapshots.py",
+        "sha256": "5281b8a96620f081494c3339327013c00ff94cbdabea9d0a878851570b2882dd",
+        "dependencies": [
+          "1038_twins_payroll_order_details_view.sql"
+        ]
+      },
+      "dry_run_arguments": [
+        "--dry-run",
+        "--target-database",
+        "{candidate}",
+        "--receipt-path",
+        "{plan}"
+      ],
+      "apply_arguments": [
+        "--apply",
+        "--target-database",
+        "{candidate}",
+        "--backup-receipt",
+        "{backup}",
+        "--plan-receipt",
+        "{plan}",
+        "--receipt-path",
+        "{receipt}",
+        "--confirm-apply",
+        "{candidate}"
+      ],
+      "verify_arguments": [
+        "--verify",
+        "--target-database",
+        "{candidate}",
+        "--receipt-path",
+        "{receipt}"
+      ],
+      "transaction_boundary": "script-owned-candidate-transaction",
+      "receipt_contract": "twins-payroll-rate-snapshot-backfill/v1",
+      "archive_policy": "operation-receipt-sibling-artifacts"
+    }
+  ],
+  "verification_contracts": [
+    {
+      "verification_id": "twins-payroll-policy-enums-and-approved-rate-exact",
+      "phase": "post-schema",
+      "policy": "Payroll enums and seed are exact and v_order_details reads only the case-owned Payroll snapshot",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": [
+      "twins-payroll-policy-v1"
+    ],
+    "required_restart_targets": [
+      "api"
+    ],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": [
+      "twins-payroll-policy-enums-and-approved-rate-exact"
+    ]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_09_12_twins_payroll_policy_backfill_hash_v2.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_09_12_twins_payroll_policy_backfill_hash_v2.descriptors.json",
+    "sha256": "01f50ea74214225cacc6563b41a45f382cc02eba1f559882d470c7f823486e7d",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

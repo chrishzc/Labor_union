@@ -256,7 +256,7 @@ describe('待辦看板 Beta 第 1 階訂單條款操作', () => {
         floor_fee_ntd: 0,
         service_time: { start_time: '08:00:00', end_time: '17:00:00', end_day_offset: 0 },
       },
-    }));
+    }, expect.objectContaining({ signal: expect.anything() })));
     expect(within(panel).getByText(/版本：Order 12 · Scheduling 13 · Client Finance 5 · Payroll 6/)).toBeInTheDocument();
 
     fireEvent.change(within(panel).getByLabelText('Beta 條款變更原因'), { target: { value: '客戶確認延長一天' } });

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date
 
 import pytest
@@ -40,23 +41,23 @@ class _UnitOfWork:
 class _Repository:
     def __init__(self, facts: HistoricalClientPaymentFacts) -> None:
         self.facts = facts
-        self.stored = None
+        self.stored: dict[str, object] = {}
         self.calls: list[object] = []
         self.projections = (
             HistoricalClientPaymentProjection("client-obligation:1", 1200, 3),
         )
 
     def load(self, case_no, *, for_update):
-        assert case_no == "H-CLIENT-1"
+        assert case_no == "115000386"
         self.calls.append(("load", for_update))
         return self.facts
 
-    def find_receipt(self, _key):
+    def find_receipt(self, key):
         self.calls.append("find_receipt")
-        return self.stored
+        return self.stored.get(key.value)
 
     def load_projections(self, case_no):
-        assert case_no == "H-CLIENT-1"
+        assert case_no == "115000386"
         self.calls.append("load_projections")
         return self.projections
 
@@ -69,19 +70,20 @@ class _Repository:
 
     def upsert_projections(self, event_id, _candidate, version):
         self.calls.append(("projections", event_id, version))
+        self.facts = replace(self.facts, account_version=version)
 
     def append_source_outbox(self, event_id, _candidate, event_identity):
         self.calls.append(("outbox", event_id, event_identity))
 
-    def save_receipt(self, _key, stored):
+    def save_receipt(self, key, stored):
         self.calls.append("receipt")
-        self.stored = stored
+        self.stored[key.value] = stored
 
 
 def _obligation(*, version=3, direction=HistoricalClientDirection.RECEIVABLE_FROM_CLIENT, kind="first"):
     return HistoricalClientObligation(
         "client-obligation:1",
-        "H-CLIENT-1",
+        "115000386",
         kind,
         direction,
         1200,
@@ -92,7 +94,7 @@ def _obligation(*, version=3, direction=HistoricalClientDirection.RECEIVABLE_FRO
 
 def _facts(*, version=7, adopted=True, bank=(), obligation=None):
     return HistoricalClientPaymentFacts(
-        "H-CLIENT-1",
+        "115000386",
         version,
         41 if adopted else None,
         adopted,
@@ -103,7 +105,7 @@ def _facts(*, version=7, adopted=True, bank=(), obligation=None):
 
 def _intent(direction=HistoricalClientDirection.RECEIVABLE_FROM_CLIENT):
     return HistoricalClientPaymentIntent(
-        "H-CLIENT-1",
+        "115000386",
         direction,
         HistoricalClientConfirmationKind.PAID,
         ("client-obligation:1",),
@@ -132,7 +134,7 @@ def test_query_preview_apply_writes_one_client_owner_transaction() -> None:
     unit = _UnitOfWork()
     workflow = HistoricalClientPaymentWorkflow(repository, lambda: unit)
 
-    queried = workflow.query("H-CLIENT-1")
+    queried = workflow.query("115000386")
     preview = workflow.preview(_intent())
     receipt = workflow.apply(_request(preview))
 
@@ -206,7 +208,7 @@ def test_new_or_changed_client_obligation_reopens_owner_readback() -> None:
     assert historical_client_owner_is_terminal((_obligation(version=4),), (exact,)) is False
     second = HistoricalClientObligation(
         "client-obligation:2",
-        "H-CLIENT-1",
+        "115000386",
         "second",
         HistoricalClientDirection.RECEIVABLE_FROM_CLIENT,
         800,
@@ -220,7 +222,7 @@ def test_fresh_readback_recomputes_client_owner_terminal_from_current_obligation
     repository = _Repository(_facts())
     workflow = HistoricalClientPaymentWorkflow(repository, _UnitOfWork)
 
-    assert workflow.readback("H-CLIENT-1").owner_terminal is True
+    assert workflow.readback("115000386").owner_terminal is True
     repository.facts = _facts(obligation=_obligation(version=4))
-    assert workflow.readback("H-CLIENT-1").owner_terminal is False
+    assert workflow.readback("115000386").owner_terminal is False
     assert repository.calls[-2:] == [("load", False), "load_projections"]

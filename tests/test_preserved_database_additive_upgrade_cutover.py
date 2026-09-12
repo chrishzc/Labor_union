@@ -261,7 +261,7 @@ def test_exact_part_replay_is_idempotently_skipped(
 ) -> None:
     schema_part = tmp_path / "part.sql"
     schema_part.write_text("ALTER TABLE sample ADD COLUMN added INT;", "utf-8")
-    _configure_fake_apply(monkeypatch, schema_part, ["exact", "exact"])
+    _configure_fake_apply(monkeypatch, schema_part, ["exact", "exact", "exact"])
     plan_path, operation_path = _write_fake_apply_receipts(
         tmp_path, schema_part
     )
@@ -276,6 +276,42 @@ def test_exact_part_replay_is_idempotently_skipped(
     assert receipt["status"] == "schema_applied"
     assert cursor.executed == []
     assert receipt["schema_steps"][0]["outcome"] == "existing_part_skipped"
+
+
+def test_part_that_becomes_exact_before_its_turn_is_skipped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    schema_part = tmp_path / "part.sql"
+    schema_part.write_text("ALTER TABLE sample ADD COLUMN added INT;", "utf-8")
+    _configure_fake_apply(
+        monkeypatch, schema_part, ["absent", "exact", "exact"]
+    )
+    plan_path, operation_path = _write_fake_apply_receipts(
+        tmp_path, schema_part
+    )
+    cursor = _FakeApplyCursor("candidate_db")
+
+    receipt = apply_schema(
+        _FakeApplyConfig(cursor),
+        "source_db",
+        "candidate_db",
+        plan_path,
+        operation_path,
+    )
+
+    assert receipt["status"] == "schema_applied"
+    assert cursor.executed == []
+    assert receipt["schema_steps"][0]["outcome"] == "existing_part_skipped"
+
+
+def test_scoped_snapshot_includes_canonical_parent_metadata() -> None:
+    part = "1017_client_hcm_correction_versioning.sql"
+
+    published = migration.OWNED_OBJECTS[part]
+    scoped_tables, _triggers, _views = migration._snapshot_scope_for_owned_part(part)
+
+    assert "clients" not in published.get("parent_columns", {})
+    assert "clients" in scoped_tables
 
 
 def test_artifact_receipt_verifies_once_after_all_statements(

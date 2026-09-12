@@ -10,6 +10,7 @@
 ## Implementation
 - primary: `ui_react/src/components/ContractExternalSigningActions.tsx`
 - client: `ui_react/src/api/orders/contract_external_signing_client.ts`
+- recovery state: `ui_react/src/adapters/orders/order_mutation_flow_store.ts` (per-case external-signing handoff and unsigned-PDF preparation unknown outcomes; received receipts permit owner readback only)
 - `ui_react/src/api/orders/contract_full_preview_client.ts`
 - `ui_react/src/components/OrderContractPreview.tsx`
 - page: `ui_react/src/pages/OrderWorkbenchV2Page.tsx`

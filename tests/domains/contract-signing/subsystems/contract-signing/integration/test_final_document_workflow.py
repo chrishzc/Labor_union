@@ -5,6 +5,7 @@ Description: 驗證最終 PDF Preview、opaque token、單一交易、重播與 
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -146,10 +147,11 @@ class FakeRepository:
         self.writes = []
         self.receipts = {}
         self.document = None
+        self.session = _session()
 
     def load_final_session(self, case_no, session_id, *, for_update):
         self.events.append("session:lock" if for_update else "session:read")
-        facts = _session()
+        facts = self.session
         return facts if (case_no, session_id) == (facts.case_no, facts.session_id) else None
 
     def find_final_receipt(self, key, *, for_update):

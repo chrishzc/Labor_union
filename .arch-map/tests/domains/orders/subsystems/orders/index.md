@@ -46,6 +46,8 @@ modules:
     test_root: ui_react/src/tests/order_service_completion_actions.test.tsx
   cancellation:
     test_root: tests/domains/orders/subsystems/orders/integration/
+  controlled-reopen:
+    test_root: tests/domains/orders/subsystems/orders/integration/test_order_reopen_workflow.py
   terminal-closure-handoff:
     layout_status: custom_current
     test_root: tests/domains/external-integration/subsystems/line/modules/line-identity-management/contract/

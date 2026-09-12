@@ -1,15 +1,17 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HistoricalStaffPayoutWorkbench } from '../components/HistoricalStaffPayoutWorkbench';
 import { historicalStaffPayoutClient } from '../api/staff_payables/historical_staff_payout_client';
+import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_store';
+import { sessionClient } from '../api/auth/session_client';
 
 const obligation = {
   obligation_identity: 'staff-obligation:1', case_no: 'CASE-1', staff_id: 7, amount_due_ntd: 8000,
   payroll_version: 3, direction: 'payable_to_staff' as const, status: 'open' as const,
 };
-
 describe('HistoricalStaffPayoutWorkbench', () => {
-  afterEach(() => vi.restoreAllMocks());
+  beforeEach(() => sessionClient.setSession('historical-staff-payout', { id: 1, username: 'tester', display_name: '測試', role: 'operator', linked_line_user_id: null, capabilities: [], is_root: false, access_control_version: 1 }));
+  afterEach(() => { sessionClient.clearSession(); act(() => orderMutationFlowStore.clearAll()); vi.restoreAllMocks(); });
 
   it('keeps the exact staff and case through Query, Preview, Apply and fresh readback', async () => {
     vi.spyOn(historicalStaffPayoutClient, 'query').mockResolvedValue({
@@ -37,6 +39,6 @@ describe('HistoricalStaffPayoutWorkbench', () => {
     fireEvent.click(screen.getByRole('button', { name: '確認並提交' }));
 
     await waitFor(() => expect(apply).toHaveBeenCalledTimes(1));
-    expect(await screen.findByText(/Fresh readback：Staff Payables 已結清/)).toBeInTheDocument();
+    expect(await screen.findByText(/已重新讀取付款結果：本月嫂款項已結清/)).toBeInTheDocument();
   });
 });

@@ -50,6 +50,7 @@ from subsystems.scheduling.matching_notification_contracts import (
     ManualMatchingConfirmationMethod,
     MatchingNotificationAudience,
     MatchingContactState,
+    MatchingResponseResult,
     MatchingSegmentContact,
     NotifyAssignmentConversionCommand,
     PreviewManualCustomerProfilesCommand,
@@ -69,6 +70,9 @@ class _MatchingRepository:
         self.manual_profile_arguments = None
 
     def get_intent_result(self, key, fingerprint):
+        return None
+
+    def get_response_result(self, key, fingerprint):
         return None
 
     def get_contact_state(self, case_no, plan_id, *, lock=False):
@@ -112,12 +116,17 @@ class _MatchingRepository:
 
     def append_response(self, **arguments):
         self.response_arguments = arguments
-        return SimpleNamespace(
-            event_id=51,
-            plan=arguments["plan"],
-            source=arguments["source"],
-            caregiver_willingness=None,
+        return MatchingResponseResult(
+            51,
+            MatchingPlanReference(
+                arguments["plan"].case_no,
+                arguments["plan"].plan_id,
+                arguments["plan"].version + 1,
+            ),
+            arguments["source"],
             customer_decision=CustomerMatchingDecision(arguments["response_value"]),
+            segment_id=arguments["segment_id"],
+            idempotency_key=arguments["idempotency_key"],
         )
 
 

@@ -104,13 +104,18 @@ describe('issue #277 stage-5 customer recommendation ordering', () => {
     });
   });
 
-  it('requires profile delivery before customer accept or decline can be recorded', async () => {
+  it('保留履歷寄送，但電話已確認時可直接使用人工客戶決策入口', async () => {
     render(<OrderFormalRecommendationPanel caseNo={CASE_NO} />);
 
     const send = await screen.findByRole('button', { name: '寄送確認資訊給客戶' });
     await waitFor(() => expect(send).toBeEnabled());
-    expect(screen.queryByRole('button', { name: '記錄方案 51 客戶接受' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '記錄方案 51 客戶拒絕' })).not.toBeInTheDocument();
+    const directAccept = screen.getByRole('button', { name: '記錄方案 51 客戶接受' });
+    expect(directAccept).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('方案 51 客戶決策依據'), {
+      target: { value: '電話已確認客戶接受。' },
+    });
+    expect(directAccept).toBeEnabled();
+    fireEvent.change(screen.getByLabelText('方案 51 客戶決策依據'), { target: { value: '' } });
 
     fireEvent.click(send);
 

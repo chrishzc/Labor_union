@@ -29,7 +29,10 @@ class MySqlClientPaymentDestinationRepository:
     def find_receipt(self, key: IdempotencyKey) -> StoredPaymentDestinationReceipt | None:
         with self._connection.cursor() as cursor:
             cursor.execute(
-                "SELECT command_fingerprint,result_snapshot FROM client_payment_destination_configuration_receipts WHERE idempotency_key=%s FOR UPDATE",
+                "SELECT receipt.command_fingerprint,receipt.result_snapshot,destination_event.actor "
+                "FROM client_payment_destination_configuration_receipts receipt "
+                "JOIN client_payment_destination_configuration_events destination_event ON destination_event.id=receipt.event_id "
+                "WHERE receipt.idempotency_key=%s FOR UPDATE",
                 (key.value,),
             )
             row = cursor.fetchone()
@@ -41,7 +44,7 @@ class MySqlClientPaymentDestinationRepository:
             int(snapshot["resulting_revision"]),
             PreviewFingerprint(str(snapshot["preview_fingerprint"])),
         )
-        return StoredPaymentDestinationReceipt(PreviewFingerprint(str(row["command_fingerprint"])), receipt)
+        return StoredPaymentDestinationReceipt(PreviewFingerprint(str(row["command_fingerprint"])), receipt, str(row["actor"]))
 
     def persist(self, request, receipt, command_fingerprint) -> None:
         with self._connection.cursor() as cursor:
@@ -59,4 +62,3 @@ class MySqlClientPaymentDestinationRepository:
                 "INSERT INTO client_payment_destination_configuration_receipts (idempotency_key,event_id,command_fingerprint,result_snapshot) VALUES (%s,%s,%s,%s)",
                 (request.idempotency_key.value, event_id, command_fingerprint.value, snapshot),
             )
-

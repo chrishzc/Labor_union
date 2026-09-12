@@ -8,6 +8,14 @@ import { matchingCandidateWorkflowClient } from '../api/scheduling/matching_cand
 import { transport } from '../api/shared/transport';
 
 const envelope = (data: unknown) => ({ success: true, message: 'ok', data, error: null });
+const formalPlanReceipt = (overrides: Record<string, unknown> = {}) => ({
+  actor: 'operator-1',
+  as_of: '2026-09-12',
+  event_key: 'formal-plan-original-key',
+  command_fingerprint: 'a'.repeat(64),
+  replayed: false,
+  ...overrides,
+});
 
 describe('matchingCandidateWorkflowClient', () => {
   beforeEach(() => {
@@ -126,7 +134,7 @@ describe('matchingCandidateWorkflowClient', () => {
   });
 
   it('creates one formal segment and rejects response identity drift', async () => {
-    const post = vi.spyOn(transport, 'post').mockResolvedValueOnce(envelope({
+    const post = vi.spyOn(transport, 'post').mockResolvedValueOnce(envelope(formalPlanReceipt({
       plan_id: 51,
       case_no: 'CASE-MATCH-1',
       version: 2,
@@ -138,22 +146,24 @@ describe('matchingCandidateWorkflowClient', () => {
         assigned_start_date: '2026-09-01',
         assigned_end_date: '2026-09-05',
       }],
-    }));
+    })));
 
     await expect(matchingCandidateWorkflowClient.createSingleCaregiverPlan(
-      'CASE-MATCH-1',
-      { staff_id: 8892, start_date: '2026-09-01', end_date: '2026-09-05' },
+      { caseNo: 'CASE-MATCH-1', actor: 'operator-1', asOf: '2026-09-12', key: 'formal-plan-original-key',
+        segments: [{ staff_id: 8892, start_date: '2026-09-01', end_date: '2026-09-05' }] },
     )).resolves.toMatchObject({ plan_id: 51, result: 'created' });
     expect(post).toHaveBeenCalledWith(
       '/api/v1/orders/CASE-MATCH-1/matching-plans',
       expect.objectContaining({
         segments: [{ staff_id: 8892, start_date: '2026-09-01', end_date: '2026-09-05' }],
         created_by: 'operator-1',
+        as_of: '2026-09-12',
+        event_key: 'formal-plan-original-key',
       }),
       { token: 'volatile-token' },
     );
 
-    vi.mocked(transport.post).mockResolvedValueOnce(envelope({
+    vi.mocked(transport.post).mockResolvedValueOnce(envelope(formalPlanReceipt({
       plan_id: 52,
       case_no: 'CASE-OTHER',
       version: 1,
@@ -165,11 +175,14 @@ describe('matchingCandidateWorkflowClient', () => {
         assigned_start_date: '2026-09-01',
         assigned_end_date: '2026-09-05',
       }],
-    }));
-    await expect(matchingCandidateWorkflowClient.createSingleCaregiverPlan(
-      'CASE-MATCH-1',
-      { staff_id: 8892, start_date: '2026-09-01', end_date: '2026-09-05' },
-    )).rejects.toThrow('identity 不一致');
+    })));
+    await expect(matchingCandidateWorkflowClient.createSingleCaregiverPlan({
+      caseNo: 'CASE-MATCH-1',
+      actor: 'operator-1',
+      asOf: '2026-09-12',
+      key: 'formal-plan-original-key',
+      segments: [{ staff_id: 8892, start_date: '2026-09-01', end_date: '2026-09-05' }],
+    })).rejects.toThrow('identity 不一致');
   });
 
   it('uses a server-selected two-segment combination without browser date calculation', async () => {
@@ -183,21 +196,24 @@ describe('matchingCandidateWorkflowClient', () => {
         { segment_index: 1, staff_id: 8893, start_date: '2026-09-04', end_date: '2026-09-05' },
       ]],
       segment_candidates: [], candidate_options: [], conflicts: [],
-    })).mockResolvedValueOnce(envelope({
+    })).mockResolvedValueOnce(envelope(formalPlanReceipt({
       plan_id: 52, case_no: 'CASE-MATCH-2', version: 1, status: 'proposed', result: 'created',
       segments: [
         { segment_order: 1, staff_id: 8892, assigned_start_date: '2026-09-01', assigned_end_date: '2026-09-03' },
         { segment_order: 2, staff_id: 8893, assigned_start_date: '2026-09-04', assigned_end_date: '2026-09-05' },
       ],
-    }));
+    })));
 
     await expect(matchingCandidateWorkflowClient.searchSegmentedCaregivers('CASE-MATCH-2', 2)).resolves.toMatchObject({
       complete_combinations: [expect.arrayContaining([expect.objectContaining({ staff_id: 8892 })])],
     });
-    const plan = await matchingCandidateWorkflowClient.createMatchingPlan('CASE-MATCH-2', [
-      { staff_id: 8892, start_date: '2026-09-01', end_date: '2026-09-03' },
-      { staff_id: 8893, start_date: '2026-09-04', end_date: '2026-09-05' },
-    ]);
+    const plan = await matchingCandidateWorkflowClient.createMatchingPlan({
+      caseNo: 'CASE-MATCH-2', actor: 'operator-1', asOf: '2026-09-12', key: 'formal-plan-original-key',
+      segments: [
+        { staff_id: 8892, start_date: '2026-09-01', end_date: '2026-09-03' },
+        { staff_id: 8893, start_date: '2026-09-04', end_date: '2026-09-05' },
+      ],
+    });
     expect(plan).toMatchObject({ plan_id: 52 });
     expect(plan.segments).toHaveLength(2);
     expect(post).toHaveBeenNthCalledWith(

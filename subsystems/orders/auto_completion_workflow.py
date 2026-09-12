@@ -170,6 +170,13 @@ class AutoCompleteOrderService:
             if replay is not None:
                 return replay
             facts = self._locked_facts(request)
+            if int(facts["locked_order"]["lifecycle_version"]) != request.expected_order_version.value:
+                raise _error(
+                    request,
+                    ErrorCategory.CONFLICT,
+                    "order_version_conflict",
+                    "The Orders lifecycle version changed before Apply.",
+                )
             candidate = _candidate_or_block(
                 request,
                 facts,

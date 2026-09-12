@@ -9,7 +9,9 @@
 
 ## Implementation
 - primary:
+  - `ui_react/src/api/orders/order_service_completion_client.ts`
   - `ui_react/src/components/OrderServiceCompletionActions.tsx`
+  - `ui_react/src/adapters/orders/order_mutation_flow_store.ts` — per-case completion command／receipt recovery state。
   - `ui_react/src/components/OrderWorkbenchV2Drawer.tsx`
 
 ## Contracts
@@ -19,6 +21,7 @@
 ## Verification
 - layout_status: `custom_current`
 - test_root: `ui_react/src/tests/order_service_completion_actions.test.tsx`
+- test_root: `ui_react/src/tests/order_service_completion_client.test.ts`
 - test_root: `ui_react/src/tests/order_workbench_v2_service_completion.test.tsx` — 既有案件入口至完成操作 callback 測試。
 - routing: `.arch-map/tests/domains/orders/subsystems/orders/modules/service-completion-presentation.md`
 

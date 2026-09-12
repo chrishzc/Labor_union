@@ -21,6 +21,7 @@ from subsystems.contract_signing.staff_contract_application import _allocate_com
 from subsystems.contract_signing.full_contract_preview import (
     ContractPreviewScope,
     FullContractOwnerProjection,
+    FullContractPreviewError,
     projection_fingerprint,
 )
 
@@ -207,7 +208,15 @@ class MySqlFullContractProjectionRepository:
 def _load_precontract_plan(connection, case_no, case):
     """Read the accepted plan and reuse the existing commitment date allocator."""
     with connection.cursor() as cursor:
-        cursor.execute("SELECT id FROM caregiver_matching_plans WHERE case_no=%s AND status='accepted' AND is_active=1", (case_no,))
+        cursor.execute(
+            "SELECT plan.id FROM caregiver_matching_plans plan "
+            "WHERE plan.case_no=%s AND plan.is_active=1 AND (plan.status='accepted' OR ("
+            "plan.status='proposed' AND COALESCE((SELECT response.response_value "
+            "FROM matching_response_events response WHERE response.plan_id=plan.id "
+            "AND response.response_type='customer_decision' "
+            "ORDER BY response.occurred_at_utc DESC,response.id DESC LIMIT 1),'')='accepted'))",
+            (case_no,),
+        )
         plans = tuple(cursor.fetchall() or ())
         if len(plans) != 1:
             return None
@@ -219,7 +228,20 @@ def _load_precontract_plan(connection, case_no, case):
             return None
         cursor.execute("SELECT holiday_date FROM holidays")
         holidays = {row["holiday_date"] for row in cursor.fetchall()}
+        cursor.execute(
+            "SELECT day.service_date FROM confirmed_service_date_versions version "
+            "JOIN confirmed_service_date_days day ON day.confirmed_version_id=version.id "
+            "WHERE version.case_no=%s AND version.is_current=1 ORDER BY day.ordinal",
+            (case_no,),
+        )
+        confirmed_service_dates = tuple(row["service_date"] for row in cursor.fetchall())
     allocations = _allocate_commitment_service_days(case, segments, holidays)
+    allocated_service_dates = tuple(day for _, day in allocations)
+    if confirmed_service_dates and allocated_service_dates != confirmed_service_dates:
+        raise FullContractPreviewError(
+            "contract_preview_service_dates_stale",
+            "正式服務日期已變更；原月嫂意願與客戶接受方案不可繼續產生契約。",
+        )
     return {"id": plans[0]["id"], "segments": segments, "allocations": allocations}
 
 

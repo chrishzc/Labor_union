@@ -38,7 +38,12 @@ from subsystems.contract_signing.external_signing_contracts import (
     StoredExternalSigningReportReceipt,
     VerifiedReporterBindingSnapshot,
 )
-from subsystems.contract_signing.external_signing_workflow import PersistedExternalReport
+from subsystems.contract_signing.external_signing_workflow import (
+    ExternalSigningHandoffReceipt,
+    PersistedExternalReport,
+    RecordExternalSigningHandoff,
+    StoredExternalSigningHandoffReceipt,
+)
 from subsystems.contract_signing.final_document_workflow import (
     FinalContractDocumentReadback,
     FinalSignedContractApplyReceipt,

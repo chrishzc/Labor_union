@@ -80,12 +80,12 @@ class MySqlServiceDateConfirmationRepository:
 
         return self.load(case_no, lock=for_update)
 
-    def replay(self, idempotency_key, command_fingerprint):
+    def replay(self, idempotency_key, command_fingerprint, *, actor, reason, for_update=False):
         with self._connection.cursor() as cursor:
             cursor.execute(
                 "SELECT r.command_fingerprint,v.* FROM confirmed_service_date_receipts r "
                 "JOIN confirmed_service_date_versions v ON v.id=r.confirmed_version_id "
-                "WHERE r.idempotency_key=%s",
+                "WHERE r.idempotency_key=%s" + (" FOR UPDATE" if for_update else ""),
                 (idempotency_key,),
             )
             row = cursor.fetchone()
@@ -93,7 +93,12 @@ class MySqlServiceDateConfirmationRepository:
                 return None
             if row["command_fingerprint"] != command_fingerprint:
                 raise ValueError("service_date_confirmation_idempotency_conflict")
-            dates = self._dates(cursor, row["id"])
+            if (
+                row["confirmed_by_actor_id"] != actor
+                or row["reason"] != reason
+            ):
+                raise ValueError("service_date_confirmation_idempotency_conflict")
+            dates = self._dates(cursor, row["id"], lock=for_update)
         return _receipt(row, dates)
 
     def save(self, candidate, *, actor, reason, idempotency_key, command_fingerprint):

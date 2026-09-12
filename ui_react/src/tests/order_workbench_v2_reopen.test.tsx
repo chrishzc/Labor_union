@@ -10,8 +10,8 @@ const mocks = vi.hoisted(() => ({ preview: vi.fn(), apply: vi.fn(), detail: vi.f
 vi.mock('../api/orders/order_mutation_client', () => ({ ordersMutationClient: { previewReopen: mocks.preview, applyReopen: mocks.apply } }));
 vi.mock('../api/orders/order_query_client', () => ({ ordersQueryClient: { getOrderDetail: mocks.detail } }));
 const CASE = 'CASE-BETA-REOPEN'; const fingerprint = 'b'.repeat(64);
-function preview(): OrderReopenPreviewView {
-  return { case_no: CASE, order_version: 3, client_finance_version: 5, payroll_version: 6, cancellation_event_id: 31,
+function preview(caseNo = CASE): OrderReopenPreviewView {
+  return { case_no: caseNo, order_version: 3, client_finance_version: 5, payroll_version: 6, cancellation_event_id: 31,
     before_status: '訂單取消', after_status: '訂單成立', requires_fresh_scheduling_preview: true,
     restored_assignment_ids: [], restored_schedule_ids: [], restored_lock_ids: [], preview_fingerprint: fingerprint };
 }

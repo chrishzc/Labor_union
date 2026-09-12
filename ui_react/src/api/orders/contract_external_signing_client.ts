@@ -559,13 +559,17 @@ export const contractExternalSigningClient = {
     signal?: AbortSignal,
   ): Promise<StaffReminderReadiness> {
     if (!Number.isInteger(segmentId) || segmentId <= 0) throw new Error('月嫂分段識別無效。');
-    return decodePayload(
+    const value = decodePayload(
       envelope(StaffReminderReadinessSchema),
       await transport.get(
         `${basePath(caseNo)}/staff-segments/${segmentId}/reminder-readiness`,
         { token: authToken(), signal },
       ),
     ).data;
+    if (value.matching_segment_id !== segmentId) {
+      throw new ApiHttpError(409, 'CONTRACT_REMINDER_SEGMENT_MISMATCH', '月嫂契約通知準備度分段識別不一致。');
+    }
+    return value;
   },
 
   async enqueueStaffReminder(

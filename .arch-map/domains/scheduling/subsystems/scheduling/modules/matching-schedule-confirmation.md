@@ -14,6 +14,7 @@
   - `infrastructure/mysql/matching_schedule_confirmation_repository.py`
 - entrypoints:
   - `api/routes/matching_schedule_confirmation.py`
+  - `api/routes/assignment_plan.py`
   - `ui_react/src/api/scheduling/matching_schedule_confirmation_client.ts`
   - `ui_react/src/components/MatchingScheduleAndAssignmentActions.tsx`
   - `ui_react/src/components/OrderAssignmentPlanPanel.tsx`
@@ -31,6 +32,7 @@
 
 ## Verification
 - test_root: `ui_react/src/tests/matching_schedule_confirmation_actions.test.tsx`
+- direct_api_test_root: `tests/domains/scheduling/subsystems/scheduling/modules/matching-schedule-confirmation/`
 - layout_status: `custom_current`
 - higher-boundary integration:
   - `tests/domains/external-integration/subsystems/line/integration/test_matching_schedule_confirmation.py`

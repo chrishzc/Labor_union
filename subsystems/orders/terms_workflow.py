@@ -30,6 +30,7 @@ from shared_kernel.errors import TypedError
 from shared_kernel.errors import ErrorCategory
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.ports import UnitOfWork
+from shared_kernel.validation import require_canonical_text
 from subsystems.payroll.terms_impact import (
     build_payroll_terms_impact,
     build_preassignment_payroll_noop,
@@ -66,6 +67,10 @@ class OrderTermsApplyRequest:
     actor: Any
     reason: str
     correlation_id: Any
+
+    def __post_init__(self) -> None:
+        require_canonical_text(self.case_no, "case number", 50)
+        require_canonical_text(self.reason, "terms change reason", 500)
 
 
 @dataclass(frozen=True, slots=True)
@@ -267,6 +272,13 @@ class OrderTermsWorkflow:
         return None
 
     def _fresh_preview(self, request, facts, staff_ids):
+        if facts.order.case_no != request.case_no:
+            raise _workflow_error(
+                request,
+                ErrorCategory.CONFLICT,
+                "order_case_mismatch",
+                "The locked Orders root belongs to another case.",
+            )
         _validate_locked_staff_set(request, facts, staff_ids)
         _validate_versions(request, facts)
         preview = self._build_preview(facts, request.proposed_terms)
@@ -626,6 +638,13 @@ def _command_fingerprint(request):
 
 
 def _matched_receipt(request, command_fingerprint, stored):
+    if stored.receipt.case_no != request.case_no:
+        raise _workflow_error(
+            request,
+            ErrorCategory.CONFLICT,
+            "receipt_case_mismatch",
+            "The stored receipt belongs to another case.",
+        )
     if stored.command_fingerprint == command_fingerprint:
         return stored.receipt
     raise _workflow_error(request, ErrorCategory.IDEMPOTENCY_MISMATCH, "idempotency_mismatch", "Idempotency key was already used with a different command.")

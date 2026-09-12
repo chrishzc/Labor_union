@@ -4,7 +4,12 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { sessionClient } from '../api/auth/session_client';
-import { candidateContactPoolClient } from '../api/scheduling/candidate_contact_pool_client';
+import {
+  candidateContactPoolClient,
+  createCandidateAddCommand,
+  createCandidateWillingnessCommand,
+  type CandidateInformationSendCommand,
+} from '../api/scheduling/candidate_contact_pool_client';
 import { ApiHttpError } from '../api/shared/typed_errors';
 import { transport } from '../api/shared/transport';
 
@@ -18,8 +23,9 @@ const candidate = {
   staff_name: '測試月嫂',
   willingness: 'willing',
   reason: null,
+  latest_willingness_event_id: 21,
   information: {
-    '1': { status: 'sent', sent_at: '2026-08-23T10:05:00' },
+    '1': { status: 'sent', sent_at: '2026-08-23T10:05:00', event_id: 21, line_task_id: 52 },
     '2': null,
   },
 } as const;
@@ -29,6 +35,11 @@ const fixture = {
   case_no: 'CASE-POOL-001',
   candidates: [candidate],
 };
+
+const informationCommand = (infoType: 1 | 2): CandidateInformationSendCommand => ({
+  caseNo: 'CASE-POOL-001', candidateId: 17, infoType, previewFingerprint: 'a'.repeat(64),
+  actor: 'operator-1', eventKey: `test-send-${infoType}`,
+});
 
 const successEnvelope = (data: unknown) => ({
   success: true,
@@ -108,7 +119,7 @@ describe('candidateContactPoolClient', () => {
       error: null,
     });
 
-    await expect(candidateContactPoolClient.sendInformation('CASE-POOL-001', 17, 2, 'a'.repeat(64), 'test-send-2')).resolves.toEqual({
+    await expect(candidateContactPoolClient.sendInformation(informationCommand(2))).resolves.toEqual({
       status: 'queued',
       event_id: 31,
       line_task_id: 52,
@@ -171,25 +182,35 @@ describe('candidateContactPoolClient', () => {
     );
   });
 
-  it('adds availability-checked candidates with actor and event identity', async () => {
+  it('adds availability-checked candidates with an explicit stable actor and event identity', async () => {
     const post = vi.spyOn(transport, 'post').mockResolvedValue(successEnvelope({
       pool_id: 9,
       candidate_ids: [17],
       status: 'recorded',
     }));
 
-    await expect(candidateContactPoolClient.addCandidates('CASE-POOL-001', [{
+    const command = createCandidateAddCommand('CASE-POOL-001', [{
       staff_id: 8892,
       start_date: '2026-09-01',
       end_date: '2026-09-05',
-    }])).resolves.toEqual({ pool_id: 9, candidate_ids: [17], status: 'recorded' });
-    expect(post).toHaveBeenCalledWith(
+    }]);
+    await expect(candidateContactPoolClient.addCandidates(command)).resolves.toEqual({ pool_id: 9, candidate_ids: [17], status: 'recorded' });
+    await expect(candidateContactPoolClient.addCandidates(command)).resolves.toEqual({ pool_id: 9, candidate_ids: [17], status: 'recorded' });
+    const expectedBody = {
+      candidates: [{ staff_id: 8892, start_date: '2026-09-01', end_date: '2026-09-05' }],
+      actor: command.actor,
+      event_key: command.eventKey,
+    };
+    expect(post).toHaveBeenNthCalledWith(
+      1,
       '/api/v1/orders/CASE-POOL-001/candidate-contact-pool/candidates',
-      expect.objectContaining({
-        candidates: [{ staff_id: 8892, start_date: '2026-09-01', end_date: '2026-09-05' }],
-        actor: 'operator-1',
-        event_key: expect.stringMatching(/^orders-candidate-pool-add-/),
-      }),
+      expectedBody,
+      { token: 'volatile-token' },
+    );
+    expect(post).toHaveBeenNthCalledWith(
+      2,
+      '/api/v1/orders/CASE-POOL-001/candidate-contact-pool/candidates',
+      expectedBody,
       { token: 'volatile-token' },
     );
   });
@@ -200,22 +221,22 @@ describe('candidateContactPoolClient', () => {
       event_id: 45,
     }));
 
-    await expect(candidateContactPoolClient.recordWillingness(
-      'CASE-POOL-001', 17, 'willing', '',
-    )).resolves.toEqual({ status: 'recorded', event_id: 45 });
+    const command = createCandidateWillingnessCommand('CASE-POOL-001', 17, 'willing', '');
+    await expect(candidateContactPoolClient.recordWillingness(command)).resolves.toEqual({ status: 'recorded', event_id: 45 });
     expect(put).toHaveBeenCalledWith(
       '/api/v1/orders/CASE-POOL-001/candidate-contact-pool/candidates/17/willingness',
       expect.objectContaining({
         willingness: 'willing',
         reason: '人工補登願意',
         actor: 'operator-1',
+        event_key: command.eventKey,
       }),
       { token: 'volatile-token' },
     );
 
-    await expect(candidateContactPoolClient.recordWillingness(
+    expect(() => createCandidateWillingnessCommand(
       'CASE-POOL-001', 17, 'unwilling', ' ',
-    )).rejects.toThrow('必須填寫');
+    )).toThrow('必須填寫');
     expect(put).toHaveBeenCalledTimes(1);
   });
 
@@ -223,7 +244,7 @@ describe('candidateContactPoolClient', () => {
     vi.mocked(sessionClient.getUser).mockReturnValue(null);
     const post = vi.spyOn(transport, 'post');
 
-    await expect(candidateContactPoolClient.sendInformation('CASE-POOL-001', 17, 1, 'a'.repeat(64), 'test-send-1')).rejects.toBeInstanceOf(
+    await expect(candidateContactPoolClient.sendInformation(informationCommand(1))).rejects.toBeInstanceOf(
       ApiHttpError,
     );
     expect(post).not.toHaveBeenCalled();
@@ -237,6 +258,6 @@ describe('candidateContactPoolClient', () => {
       error: null,
     });
 
-    await expect(candidateContactPoolClient.sendInformation('CASE-POOL-001', 17, 1, 'a'.repeat(64), 'test-send-1')).rejects.toThrow();
+    await expect(candidateContactPoolClient.sendInformation(informationCommand(1))).rejects.toThrow();
   });
 });

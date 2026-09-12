@@ -317,6 +317,29 @@ describe('ServiceBeforeReplacementActions', () => {
     expect(secondCall[2]).toBe(firstCall[2]);
   });
 
+  it('receipt／readback 對帳未明時只使用原 payload 與原 key 對帳', async () => {
+    vi.mocked(serviceBeforeReplacementClient.apply)
+      .mockRejectedValueOnce(new ApiHttpError(503, 'replacement_outcome_unknown', 'receipt/readback identity mismatch', true))
+      .mockResolvedValueOnce({ ...result, status: 'replayed' });
+    render(<ServiceBeforeReplacementActions caseNo="CASE-RPRE-001" initialScenario="R-02" />);
+    expandReplacementPanel();
+    await screen.findByText('可以辦理更換');
+    fireEvent.change(screen.getByLabelText('換人原因'), { target: { value: preview.reason } });
+    fireEvent.change(screen.getByLabelText('聯繫紀錄或更換依據'), { target: { value: preview.evidence.join('\n') } });
+    fireEvent.click(screen.getByRole('button', { name: '預覽換人影響' }));
+    await screen.findByText('預覽完成，尚未寫入');
+    fireEvent.click(screen.getByLabelText('我已確認更換原因、聯繫紀錄及影響'));
+    fireEvent.click(screen.getByRole('button', { name: '確認更換' }));
+
+    await screen.findByText(/沿用原操作安全地確認結果，不會重複建立換人/);
+    const firstCall = vi.mocked(serviceBeforeReplacementClient.apply).mock.calls[0];
+    fireEvent.click(screen.getByRole('button', { name: '重新確認原操作結果' }));
+    await screen.findByText(/已確認既有結果/);
+    const secondCall = vi.mocked(serviceBeforeReplacementClient.apply).mock.calls[1];
+    expect(secondCall[1]).toEqual(firstCall[1]);
+    expect(secondCall[2]).toBe(firstCall[2]);
+  });
+
   it('切換案件會中止舊 Query，舊回應不得覆蓋新案件', async () => {
     let resolveOld: ((value: ServiceBeforeReplacementQuery) => void) | undefined;
     const oldQuery = new Promise<ServiceBeforeReplacementQuery>((resolve) => { resolveOld = resolve; });
@@ -604,7 +627,7 @@ describe('RPRE cryptographic response verification', () => {
     await expect(verifyServiceBeforeReplacementPreview({ ...validPreview, preview_fingerprint: fingerprint }, preview.case_no, request)).rejects.toThrow(/preview fingerprint mismatch/);
   });
 
-  it('重算 sha256_newline_v1 並綁定 case、preview 與 idempotency identity', async () => {
+  it('重算 sha256_newline_v1 並綁定 case、preview、idempotency 與 receipt/readback identity', async () => {
     const groups = [result.receipt.retained_root_ids, result.receipt.superseded_root_ids, result.receipt.created_root_ids];
     const digests = await Promise.all(groups.map((group) => sha256([...group].sort().join('\n'))));
     expect(digests).toEqual([
@@ -652,5 +675,22 @@ describe('RPRE cryptographic response verification', () => {
       receipt: { ...validResult.receipt, command_fingerprint: fingerprint },
     }, result.receipt.case_no, request, identity, actorBinding)).rejects.toThrow(/command fingerprint mismatch/);
     await expect(verifyServiceBeforeReplacementApply(validResult, result.receipt.case_no, request, { ...identity, idempotencyKey: 'different-key' }, actorBinding)).rejects.toThrow(/identity mismatch/);
+    const readbackIdentityFailure = await decodeAndVerifyServiceBeforeReplacementApplyResponse(
+      {
+        success: true,
+        message: 'ok',
+        data: { ...validResult, readback: { ...validResult.readback, case_no: 'CASE-RPRE-OTHER' } },
+        error: null,
+      },
+      result.receipt.case_no,
+      request,
+      identity,
+      actorBinding,
+    ).catch((error: unknown) => error);
+    expect(readbackIdentityFailure).toMatchObject({
+      status: 503,
+      code: 'replacement_outcome_unknown',
+      retryable: true,
+    });
   });
 });

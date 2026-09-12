@@ -31,21 +31,23 @@ const response = <T extends z.ZodTypeAny>(schema: T) => z.strictObject({ success
 export type HistoricalStaffPayoutQuery = z.infer<typeof QuerySchema>;
 export type HistoricalStaffPayoutPreview = z.infer<typeof PreviewSchema>;
 export type HistoricalStaffPayoutReadback = z.infer<typeof ReadbackSchema>;
+export type HistoricalStaffPayoutReceipt = z.infer<typeof ReceiptSchema>;
 export type HistoricalStaffPayoutIntent = { case_no: string; staff_id: number; confirmation_kind: 'paid' | 'settled'; obligation_identities: string[]; payment_date: string | null; payment_date_unknown_reason: string | null; source_availability: 'missing' | 'ambiguous' | 'unrecoverable'; evidence_reference: string | null };
-export type HistoricalStaffPayoutOptions = { signal?: AbortSignal; timeoutMs?: number; baseUrl?: string };
+export type HistoricalStaffPayoutOptions = { signal?: AbortSignal; timeoutMs?: number; baseUrl?: string; expectedActor?: string };
 export class HistoricalStaffPayoutClientError extends Error {
   public readonly code: string; public readonly status?: number; public readonly retryable: boolean;
   constructor(code: string, message: string, status?: number, retryable = false) { super(message); this.code = code; this.status = status; this.retryable = retryable; }
 }
 function requestOptions(input: HistoricalStaffPayoutOptions = {}, headers: Record<string, string> = {}): RequestOptions {
+  const { expectedActor: _expectedActor, ...transportInput } = input;
   const token = sessionClient.getToken(); if (!token) throw new HistoricalStaffPayoutClientError('HISTORICAL_STAFF_UNAUTHENTICATED', '請先登入。', 401);
-  return { ...input, token, headers, timeoutMs: input.timeoutMs ?? 30_000 };
+  return { ...transportInput, token, headers, timeoutMs: transportInput.timeoutMs ?? 30_000 };
 }
 function decode<T extends z.ZodTypeAny>(schema: T, raw: unknown): z.output<T> { try { return decodePayload(response(schema), raw).data; } catch { throw new HistoricalStaffPayoutClientError('HISTORICAL_STAFF_SCHEMA_MISMATCH', '回應不符合 Staff Payables strict 契約。'); } }
 function mapped(error: unknown): never { if (error instanceof HistoricalStaffPayoutClientError) throw error; if (error instanceof ApiHttpError) throw new HistoricalStaffPayoutClientError(error.code, error.message, error.status, error.retryable); throw new HistoricalStaffPayoutClientError('HISTORICAL_STAFF_OUTCOME_UNKNOWN', error instanceof Error ? error.message : '結果目前無法確認。', undefined, true); }
 export const historicalStaffPayoutClient = {
   async query(caseNo: string, staffId: number, options: HistoricalStaffPayoutOptions = {}): Promise<HistoricalStaffPayoutQuery> { try { return decode(QuerySchema, await transport.get<unknown>(`/api/v1/staff-payables/historical-payouts/${encodeURIComponent(caseNo)}/${staffId}`, requestOptions(options))); } catch (error) { return mapped(error); } },
   async preview(intent: HistoricalStaffPayoutIntent, options: HistoricalStaffPayoutOptions = {}): Promise<HistoricalStaffPayoutPreview> { try { return decode(PreviewSchema, await transport.post<unknown>('/api/v1/staff-payables/historical-payouts/preview', intent, requestOptions(options))); } catch (error) { return mapped(error); } },
-  async apply(intent: HistoricalStaffPayoutIntent, preview: HistoricalStaffPayoutPreview, reason: string, idempotencyKey: string, options: HistoricalStaffPayoutOptions = {}) { try { return decode(ReceiptSchema, await transport.post<unknown>('/api/v1/staff-payables/historical-payouts/apply', { ...intent, expected_staff_payables_version: preview.staff_payables_version, expected_adoption_receipt_id: preview.adoption_receipt_id, preview_fingerprint: preview.preview_fingerprint, reason }, requestOptions(options, { 'Idempotency-Key': idempotencyKey, 'X-Correlation-ID': `historical-staff-${crypto.randomUUID()}` }))); } catch (error) { return mapped(error); } },
+  async apply(intent: HistoricalStaffPayoutIntent, preview: HistoricalStaffPayoutPreview, reason: string, idempotencyKey: string, options: HistoricalStaffPayoutOptions = {}) { try { const actor = sessionClient.getUser()?.username.trim() ?? ''; if (!actor || (options.expectedActor !== undefined && options.expectedActor.trim() !== actor)) throw new HistoricalStaffPayoutClientError('HISTORICAL_STAFF_ACTOR_CHANGED', '目前登入帳號與原歷史付款操作不一致。', 409); return decode(ReceiptSchema, await transport.post<unknown>('/api/v1/staff-payables/historical-payouts/apply', { ...intent, expected_staff_payables_version: preview.staff_payables_version, expected_adoption_receipt_id: preview.adoption_receipt_id, preview_fingerprint: preview.preview_fingerprint, reason }, requestOptions(options, { 'Idempotency-Key': idempotencyKey, 'X-Correlation-ID': `historical-staff-${crypto.randomUUID()}` }))); } catch (error) { return mapped(error); } },
   async readback(caseNo: string, staffId: number, options: HistoricalStaffPayoutOptions = {}): Promise<HistoricalStaffPayoutReadback> { try { return decode(ReadbackSchema, await transport.get<unknown>(`/api/v1/staff-payables/historical-payouts/${encodeURIComponent(caseNo)}/${staffId}/readback`, requestOptions(options))); } catch (error) { return mapped(error); } },
 };

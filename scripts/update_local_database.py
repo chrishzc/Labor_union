@@ -229,7 +229,10 @@ def build_preview(config, source: str, candidate: str) -> dict[str, object]:
         LOCAL_RESUMABLE_PARTIAL_ARTIFACTS,
     )
     states = plan["source_objects"]
-    completed_retirements = migration.PURE_RETIREMENT_ARTIFACTS
+    completed_retirements = (
+        migration.PURE_RETIREMENT_ARTIFACTS
+        | migration.LOCAL_RETIRED_ABSENT_ARTIFACTS
+    )
     return {
         "status": "preview",
         "source_database": source,

@@ -91,7 +91,7 @@ def test_104_accepts_exact_historical_accounting_check_successor() -> None:
     )
 
     assert {
-        key: allowed_successors[key]
+        key: allowed_successors[key][-1]
         for key in check_keys
     } == {
         key: historical_descriptor["checks"][key]

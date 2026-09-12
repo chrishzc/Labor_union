@@ -84,9 +84,12 @@ class MySqlFinanceImportRepository:
                 for_update,
             )
 
-    def find_receipt(self, key):
+    def find_receipt(self, key, *, for_update=False):
         with _mysql_cursor(self._connection) as cursor:
-            cursor.execute(_APPLY_RECEIPT_SELECT_SQL, (key.value,))
+            cursor.execute(
+                _APPLY_RECEIPT_SELECT_SQL + (" FOR UPDATE" if for_update else ""),
+                (key.value,),
+            )
             row = cursor.fetchone()
         return None if row is None else _stored_apply_receipt(row)
 

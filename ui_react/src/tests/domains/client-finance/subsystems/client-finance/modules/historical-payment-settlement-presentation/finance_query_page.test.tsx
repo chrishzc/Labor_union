@@ -176,7 +176,13 @@ function importResponse(data: unknown, status = 200): Response {
 
 function installImportHttp(
   plans: FinanceImportBatchPreview[],
-  options: { loseFirstApply?: boolean; statuses?: FinanceImportBatchOutcome['status'][] } = {},
+  options: {
+    loseFirstApply?: boolean;
+    firstApplyStatus?: 408 | 429 | 503;
+    loseFirstOutcome?: boolean;
+    outcomeReceiptOverride?: Partial<NonNullable<FinanceImportBatchOutcome['receipt']>>;
+    statuses?: FinanceImportBatchOutcome['status'][];
+  } = {},
 ) {
   const applyRequests: { body: unknown; key: string | null; correlation: string | null }[] = [];
   let index = -1;
@@ -243,17 +249,23 @@ function installImportHttp(
       applyRequests.push({ body: JSON.parse(String(init?.body)),
         key: headers.get('Idempotency-Key'), correlation: headers.get('X-Correlation-ID') });
       if (options.loseFirstApply && applyRequests.length === 1) throw new TypeError('Failed to fetch');
+      if (options.firstApplyStatus && applyRequests.length === 1) {
+        return importResponse({ detail: { code: 'finance_import_temporarily_unavailable', message: 'temporary', retryable: true } }, options.firstApplyStatus);
+      }
       return importResponse({ job_id: 'finance-test-job', status_url: '/api/v1/jobs/finance-test-job',
         replayed: applyRequests.length > 1 }, 202);
     }
     if (path.endsWith('/jobs/finance-test-job/batch-outcome')) {
+      const attempt = observed++;
+      if (options.loseFirstOutcome && attempt === 0) throw new TypeError('Failed to fetch');
       const statuses = options.statuses ?? ['succeeded'];
-      const status = statuses[Math.min(observed++, statuses.length - 1)];
+      const status = statuses[Math.min(attempt, statuses.length - 1)];
       return importResponse({ job_id: 'finance-test-job', status, attempt_count: 1, max_attempts: 3,
         result_reference: status === 'succeeded' ? 'finance_import_batch:fixture' : null,
         receipt: status === 'succeeded' ? { batch_identity: plan.batch_identity,
           resulting_batch_version: 14, preview_fingerprint: plan.preview_fingerprint,
-          reconciled_count: 3, existing_count: 2, pending_count: 5 } : null });
+          reconciled_count: 3, existing_count: 2, pending_count: 5,
+          ...options.outcomeReceiptOverride } : null });
     }
     throw new Error(`Unexpected Finance test request: ${path}`);
   });

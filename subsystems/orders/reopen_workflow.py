@@ -11,6 +11,7 @@ from shared_kernel.clock import BusinessClock
 from shared_kernel.errors import ErrorCategory, TypedError
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
+from shared_kernel.validation import require_canonical_text
 from subsystems.orders.terms_workflow import CommandClaimState
 
 
@@ -41,6 +42,10 @@ class OrderReopenApplyRequest:
     actor: ActorContext
     reason: str
     correlation_id: CorrelationId
+
+    def __post_init__(self) -> None:
+        require_canonical_text(self.case_no, "case number", 50)
+        require_canonical_text(self.reason, "reopen reason", 500)
 
 
 @dataclass(frozen=True, slots=True)

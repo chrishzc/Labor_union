@@ -15,6 +15,7 @@ class ConfirmedServiceDateCandidate:
     scheduling_version: int
     service_dates: tuple[date, ...]
     contracted_service_days: int
+    current_confirmed_version: int | None = None
 
     def __post_init__(self) -> None:
         if not self.case_no.strip():
@@ -33,6 +34,7 @@ class ConfirmedServiceDateCandidate:
                 "case_no": self.case_no,
                 "order_version": self.order_version,
                 "scheduling_version": self.scheduling_version,
+                "current_confirmed_version": self.current_confirmed_version,
                 "service_dates": [value.isoformat() for value in self.service_dates],
                 "week_grouping_policy": "calendar_week_sunday_to_saturday_v1",
             }
@@ -56,4 +58,3 @@ def group_service_dates_by_calendar_week(
         }
         for index, (week_start, dates) in enumerate(sorted(grouped.items()), start=1)
     )
-

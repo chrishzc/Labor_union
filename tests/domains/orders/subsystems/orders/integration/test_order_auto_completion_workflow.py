@@ -42,8 +42,30 @@ class _Repository:
     def save_receipt(self, receipt): self.writes.append("receipt"); self.receipt = type("Stored", (), {"command_fingerprint": receipt.command_fingerprint, "receipt": receipt})()
 
 
-def _request(evaluation_at="2026-08-04T17:00:00+08:00", preview_fingerprint=None):
-    return AutoCompletionApplyRequest("G05-CASE", ExpectedVersion(3), datetime.fromisoformat(evaluation_at), IdempotencyKey("g05-unit-key"), ActorContext("g05-test"), "scheduled completion evaluation", CorrelationId("g05-unit"), preview_fingerprint)
+class _ReplayRepository(_Repository):
+    def __init__(self, facts):
+        super().__init__(facts)
+        self.claims = {}
+        self.receipts = {}
+
+    def claim_command(self, request, fingerprint):
+        key = request.idempotency_key.value
+        prior = self.claims.get(key)
+        if prior is None:
+            self.claims[key] = fingerprint
+            return AutoCompletionClaimState.CREATED
+        return AutoCompletionClaimState.MATCHED if prior == fingerprint else AutoCompletionClaimState.MISMATCH
+
+    def find_receipt(self, key):
+        return self.receipts.get(key.value)
+
+    def save_receipt(self, receipt):
+        super().save_receipt(receipt)
+        self.receipts[receipt.idempotency_key.value] = self.receipt
+
+
+def _request(evaluation_at="2026-08-04T17:00:00+08:00", preview_fingerprint=None, *, case_no="G05-CASE", key="g05-unit-key", expected_version=3, reason="scheduled completion evaluation"):
+    return AutoCompletionApplyRequest(case_no, ExpectedVersion(expected_version), datetime.fromisoformat(evaluation_at), IdempotencyKey(key), ActorContext("g05-test"), reason, CorrelationId("g05-unit"), preview_fingerprint)
 
 
 def _facts(*, blockers=(), status="服務中", cancellation=False, completion="2026-08-04T17:00:00+08:00"):

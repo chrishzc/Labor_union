@@ -22,6 +22,8 @@
 - layout_status: `custom_current`
 - test_root: `ui_react/src/tests/historical_client_payment_workbench.test.tsx`
 - test_root: `ui_react/src/tests/finance_query_transport_identity.test.ts`
+- test_root: `ui_react/src/tests/finance_query_clients.test.ts`
+- test_root: `ui_react/src/tests/finance_request_lifecycle.test.tsx`
 - integration_root: `ui_react/src/tests/domains/client-finance/subsystems/client-finance/modules/historical-payment-settlement-presentation/`
 
 ## Change triggers

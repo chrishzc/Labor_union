@@ -5,7 +5,7 @@ Description: 編排外部簽約回報的唯讀查詢、fresh-lock Apply、重播
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Callable, Protocol
 
 from domains.contract_signing.external_signing import (
@@ -65,6 +65,12 @@ class ExternalSigningHandoffReceipt:
     session_id: str
     resulting_status_version: int
     replayed: bool
+
+
+@dataclass(frozen=True, slots=True)
+class StoredExternalSigningHandoffReceipt:
+    command_fingerprint: PreviewFingerprint
+    receipt: ExternalSigningHandoffReceipt
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,6 +157,8 @@ class ExternalStaffCompletionPort(Protocol):
 
 
 class ExternalSigningWorkflowRepository(Protocol):
+    def lock_case(self, case_no: str) -> bool: ...
+
     def load_session(
         self, session_id: str, *, for_update: bool
     ) -> ExternalSigningSessionFacts | None: ...
@@ -179,6 +187,17 @@ class ExternalSigningWorkflowRepository(Protocol):
     def find_receipt(
         self, key: IdempotencyKey, *, for_update: bool
     ) -> StoredExternalSigningReportReceipt | None: ...
+
+    def find_handoff_receipt(
+        self, key: IdempotencyKey, *, for_update: bool
+    ) -> StoredExternalSigningHandoffReceipt | None: ...
+
+    def save_handoff_receipt(
+        self,
+        key: IdempotencyKey,
+        stored: StoredExternalSigningHandoffReceipt,
+        command: RecordExternalSigningHandoff,
+    ) -> None: ...
 
     def find_source_receipt(
         self, source_event_identity: str, *, for_update: bool
@@ -252,14 +271,49 @@ class ExternalSigningWorkflow:
         self, command: RecordExternalSigningHandoff
     ) -> ExternalSigningHandoffReceipt:
         """Record the operator-observed handoff without claiming provider state."""
+        fingerprint = _handoff_command_fingerprint(command)
         with self._unit_of_work_factory() as unit_of_work:
+            # The case root is the serialization point for this handoff. A receipt
+            # row does not exist on the first request, so locking only that lookup
+            # would leave two first-time requests free to create competing sessions.
+            if not self._repository.lock_case(command.case_no):
+                raise _typed_error(
+                    "external_signing_session_facts_unavailable",
+                    "目前案件尚未具備可送交外部平台的簽約 facts。",
+                )
+            stored = self._repository.find_handoff_receipt(
+                command.idempotency_key, for_update=True
+            )
+            if stored is not None:
+                if stored.command_fingerprint != fingerprint:
+                    raise _typed_error(
+                        "contract_signature_idempotency_conflict",
+                        "相同命令識別對應不同外部簽約交接內容。",
+                    )
+                unit_of_work.commit()
+                return replace(stored.receipt, replayed=True)
             active = self._repository.load_active_session_by_case(
                 command.case_no, for_update=True
             )
             if active is not None:
-                unit_of_work.commit()
-                return ExternalSigningHandoffReceipt(
-                    active.session_id, active.status_version, True
+                if command.expected_status_version.value != active.status_version:
+                    raise _typed_error(
+                        "external_signing_status_version_stale",
+                        "簽約狀態版本已變更。",
+                    )
+                if active.state is ExternalSigningState.COMPLETED:
+                    raise _typed_error(
+                        "external_signing_session_completed",
+                        "已完成的外部簽約 session 不可重複交接。",
+                    )
+                if active.state is ExternalSigningState.SUPERSEDED:
+                    raise _typed_error(
+                        "external_signing_session_superseded",
+                        "已被取代的外部簽約 session 不可重複交接。",
+                    )
+                raise _typed_error(
+                    "external_signing_handoff_already_recorded",
+                    "外部簽約交接已記錄，請使用原命令識別查詢 receipt。",
                 )
             facts = self._repository.derive_current_session(
                 command.case_no, for_update=True
@@ -268,6 +322,24 @@ class ExternalSigningWorkflow:
                 raise _typed_error(
                     "external_signing_session_facts_unavailable",
                     "目前案件尚未具備可送交外部平台的簽約 facts。",
+                )
+            persisted = self._repository.load_session(
+                facts.session_id, for_update=True
+            )
+            if persisted is not None:
+                if persisted.state is ExternalSigningState.COMPLETED:
+                    raise _typed_error(
+                        "external_signing_session_completed",
+                        "已完成的外部簽約 session 不可重複交接。",
+                    )
+                if persisted.state is ExternalSigningState.SUPERSEDED:
+                    raise _typed_error(
+                        "external_signing_session_superseded",
+                        "已被取代的外部簽約 session 不可重複交接。",
+                    )
+                raise _typed_error(
+                    "external_signing_handoff_already_recorded",
+                    "外部簽約交接已記錄，請使用原命令識別查詢 receipt。",
                 )
             if command.expected_status_version.value != facts.status_version:
                 raise _typed_error(
@@ -279,6 +351,16 @@ class ExternalSigningWorkflow:
                 facts,
                 actor_id=command.actor.actor_id,
                 status_version=resulting_version,
+            )
+            self._repository.save_handoff_receipt(
+                command.idempotency_key,
+                StoredExternalSigningHandoffReceipt(
+                    fingerprint,
+                    ExternalSigningHandoffReceipt(
+                        facts.session_id, resulting_version, False
+                    ),
+                ),
+                command,
             )
             unit_of_work.commit()
             return ExternalSigningHandoffReceipt(
@@ -555,6 +637,18 @@ def _typed_error(code: str, message: str) -> ExternalSigningTypedError:
     )
 
 
+def _handoff_command_fingerprint(
+    command: RecordExternalSigningHandoff,
+) -> PreviewFingerprint:
+    return fingerprint_payload(
+        {
+            "case_no": command.case_no,
+            "expected_status_version": command.expected_status_version.value,
+            "kind": "record_external_signing_handoff.v1",
+        }
+    )
+
+
 def _is_staff(command) -> bool:
     return isinstance(
         command,
@@ -816,6 +910,7 @@ def _require_recovery_replay_request_matches(command, snapshot):
 
 __all__ = [
     "ExternalSigningHandoffReceipt",
+    "StoredExternalSigningHandoffReceipt",
     "ExternalSigningSessionQuery",
     "ExternalSigningWorkflow",
     "ExternalSigningWorkflowRepository",

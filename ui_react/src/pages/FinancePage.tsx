@@ -311,10 +311,16 @@ export const FinancePage: React.FC = () => {
       financeApplyCommandByPreview.current.set(previewFingerprint, command);
       const accepted = await financeImportMutationClient.apply(batchPreview.data, command.reason, { idempotencyKey: `ui-finance-apply-${previewFingerprint}`, correlationId: command.correlationId });
       setApplyJob({ kind: 'ready', data: accepted });
-      await observeApplyOutcome(accepted.job_id);
+      await observeApplyOutcome(accepted.job_id, {
+        batchIdentity: batchPreview.data.batch_identity,
+        previewFingerprint: batchPreview.data.preview_fingerprint,
+      });
     } catch (error) { setApplyJob({ kind: 'error', message: financeErrorMessage(error, '正式匯入未受理，請重新預覽後再試。') }); }
   };
-  const observeApplyOutcome = async (jobId: string) => {
+  const observeApplyOutcome = async (
+    jobId: string,
+    expected?: { batchIdentity: string; previewFingerprint: string },
+  ) => {
     const request = start('batch-outcome');
     setBatchOutcome({ kind: 'loading' });
     try {
@@ -322,6 +328,17 @@ export const FinancePage: React.FC = () => {
         const outcome = await financeImportMutationClient.queryBatchOutcome(jobId, request.controller.signal);
         if (!current('batch-outcome', request.sequence, request.controller)) return;
         if (outcome.status === 'succeeded' || outcome.status === 'failed' || outcome.status === 'cancelled') {
+          if (
+            outcome.status === 'succeeded'
+            && (!outcome.receipt
+              || (expected !== undefined && (
+                outcome.receipt.batch_identity !== expected.batchIdentity
+                || outcome.receipt.preview_fingerprint !== expected.previewFingerprint
+              )))
+          ) {
+            setBatchOutcome({ kind: 'error', message: '匯入結果與原批次預覽不一致；請勿重新提交，請重新查詢結果。' });
+            return;
+          }
           setBatchOutcome({ kind: 'ready', data: outcome });
           setReload((value) => value + 1);
           if (batchPreview.kind === 'ready') await loadSourceReview(batchPreview.data.batch_identity);
@@ -953,7 +970,10 @@ export const FinancePage: React.FC = () => {
                   <button
                     className="finance-btn-secondary"
                     data-control-id="finance.finance-import.receipt"
-                    onClick={() => void observeApplyOutcome(applyJob.data.job_id)}
+                    onClick={() => void observeApplyOutcome(applyJob.data.job_id, batchPreview.kind === 'ready' ? {
+                      batchIdentity: batchPreview.data.batch_identity,
+                      previewFingerprint: batchPreview.data.preview_fingerprint,
+                    } : undefined)}
                   >
                     重新查詢匯入結果
                   </button>

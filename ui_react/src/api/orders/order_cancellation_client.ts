@@ -238,6 +238,8 @@ export type ServiceDay = z.infer<typeof ServiceDaySchema>;
 
 interface ApplyOptions {
   idempotencyKey: string;
+  /** The initial authenticated actor is frozen for a recovery POST. */
+  actor?: string;
   signal?: AbortSignal;
 }
 
@@ -294,6 +296,11 @@ export const orderCancellationClient = {
     const idempotencyKey = source.idempotencyKey.trim();
     if (!idempotencyKey || idempotencyKey.length > 191) {
       throw new Error('Idempotency-Key 必須為 1 至 191 字元。');
+    }
+    const retainedActor = source.actor?.trim();
+    const currentActor = sessionClient.getUser()?.username.trim() ?? '';
+    if (retainedActor !== undefined && (!retainedActor || retainedActor !== currentActor)) {
+      throw new Error('登入管理員已變更；不得以原取消命令重新套用。');
     }
     const raw = await transport.post(
       `/api/v1/orders/${encodeURIComponent(caseNo)}/cancellation/apply`,

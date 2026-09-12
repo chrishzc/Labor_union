@@ -65,9 +65,14 @@ const envelope = <T extends z.ZodTypeAny>(schema: T) => z.object({
 export type MatchingScheduleState = z.infer<typeof StateSchema>;
 export type MatchingScheduleManualPreview = z.infer<typeof ManualPreviewSchema>;
 
-function requestOptions(idempotencyKey?: string): RequestOptions {
+export interface ScheduleCommandIdentity { idempotencyKey: string; expectedActor: string }
+
+function requestOptions(idempotencyKey?: string, expectedActor?: string): RequestOptions {
   const token = sessionClient.getToken();
   if (!token) throw new ApiHttpError(401, 'UNAUTHENTICATED', '請先登入。');
+  if (expectedActor !== undefined && sessionClient.getUser()?.username.trim() !== expectedActor) {
+    throw new ApiHttpError(409, 'SCHEDULE_COMMAND_ACTOR_CHANGED', '請以原操作帳號重新確認日期表結果。');
+  }
   const headers: Record<string, string> = {};
   if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
   return { token, headers };
@@ -90,34 +95,34 @@ function assertIdentity<T extends { case_no: string; plan_id: number }>(value: T
 }
 
 export const matchingScheduleConfirmationClient = {
-  async query(caseNo: string, planId: number): Promise<MatchingScheduleState> {
-    const raw = await transport.get<unknown>(planPath(caseNo, planId), requestOptions());
+  async query(caseNo: string, planId: number, signal?: AbortSignal): Promise<MatchingScheduleState> {
+    const raw = await transport.get<unknown>(planPath(caseNo, planId), { ...requestOptions(), ...(signal ? { signal } : {}) });
     return assertIdentity(decode(StateSchema, raw, '查詢'), caseNo, planId);
   },
-  async send(caseNo: string, planId: number): Promise<MatchingScheduleState> {
+  async send(caseNo: string, planId: number, identity?: ScheduleCommandIdentity): Promise<MatchingScheduleState> {
     const raw = await transport.post<unknown>(
       `${planPath(caseNo, planId)}/send`,
       undefined,
-      requestOptions(`matching-schedule-send-${caseNo}-${planId}-${crypto.randomUUID()}`),
+      requestOptions(identity?.idempotencyKey ?? `matching-schedule-send-${caseNo}-${planId}-${crypto.randomUUID()}`, identity?.expectedActor),
     );
     return assertIdentity(decode(StateSchema, raw, '發送'), caseNo, planId);
   },
-  async previewManual(caseNo: string, planId: number): Promise<MatchingScheduleManualPreview> {
-    const raw = await transport.post<unknown>(`${planPath(caseNo, planId)}/manual-preview`, undefined, requestOptions());
+  async previewManual(caseNo: string, planId: number, signal?: AbortSignal): Promise<MatchingScheduleManualPreview> {
+    const raw = await transport.post<unknown>(`${planPath(caseNo, planId)}/manual-preview`, undefined, { ...requestOptions(), ...(signal ? { signal } : {}) });
     return assertIdentity(decode(ManualPreviewSchema, raw, '人工 Preview'), caseNo, planId);
   },
-  async applyManual(caseNo: string, planId: number, preview: MatchingScheduleManualPreview, reason: string): Promise<MatchingScheduleState> {
+  async applyManual(caseNo: string, planId: number, preview: MatchingScheduleManualPreview, reason: string, identity?: ScheduleCommandIdentity): Promise<MatchingScheduleState> {
     const raw = await transport.post<unknown>(`${planPath(caseNo, planId)}/manual-apply`, {
       confirmed_service_date_version: preview.confirmed_service_date_version,
       preview_fingerprint: preview.preview_fingerprint,
       reason: reason.trim(),
-    }, requestOptions(`manual-schedule-${caseNo}-${planId}-${crypto.randomUUID()}`));
+    }, requestOptions(identity?.idempotencyKey ?? `manual-schedule-${caseNo}-${planId}-${crypto.randomUUID()}`, identity?.expectedActor));
     return assertIdentity(decode(StateSchema, raw, '人工 Apply'), caseNo, planId);
   },
-  async confirmManual(recipientId: number, reason: string): Promise<MatchingScheduleState> {
+  async confirmManual(recipientId: number, reason: string, identity?: ScheduleCommandIdentity): Promise<MatchingScheduleState> {
     const raw = await transport.put<unknown>(`/api/v1/orders/schedule-confirmation/recipients/${recipientId}`, {
       value: 'manually_confirmed', reason: reason.trim(),
-    }, requestOptions(`manual-schedule-recipient-${recipientId}-${crypto.randomUUID()}`));
+    }, requestOptions(identity?.idempotencyKey ?? `manual-schedule-recipient-${recipientId}-${crypto.randomUUID()}`, identity?.expectedActor));
     return decode(StateSchema, raw, '人工確認');
   },
 };
