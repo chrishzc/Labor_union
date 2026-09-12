@@ -204,6 +204,7 @@ def test_delivery_provider_call_occurs_between_claim_and_record_transactions() -
         provider,
         "worker:1",
         lambda: NOW + timedelta(seconds=1),
+        batch_size=1,
     )
 
     assert worker.run_once() == 1
@@ -225,6 +226,7 @@ def test_fresh_knowledge_answer_uses_free_reply_instead_of_push() -> None:
         provider,
         "worker:1",
         lambda: NOW + timedelta(seconds=1),
+        batch_size=1,
     )
 
     assert worker.run_once() == 1
@@ -247,6 +249,7 @@ def test_expired_knowledge_reply_opportunity_uses_push_fallback() -> None:
         provider,
         "worker:1",
         lambda: NOW + timedelta(seconds=1),
+        batch_size=1,
     )
 
     assert worker.run_once() == 1
@@ -274,13 +277,14 @@ def test_rejected_reply_does_not_duplicate_a_possibly_already_used_token() -> No
         provider,
         "worker:1",
         lambda: NOW + timedelta(seconds=1),
+        batch_size=1,
     )
 
     assert worker.run_once() == 1
     assert actions == ["claim", "commit", "reply", "record", "commit"]
 
 
-def test_reply_http_server_error_uses_push_fallback() -> None:
+def test_reply_http_server_error_is_uncertain_without_push_fallback() -> None:
     task = _claimed_knowledge_delivery_task()
     actions: list[str] = []
     repository = DeliveryRepository(
@@ -301,10 +305,13 @@ def test_reply_http_server_error_uses_push_fallback() -> None:
         provider,
         "worker:1",
         lambda: NOW + timedelta(seconds=1),
+        batch_size=1,
     )
 
     assert worker.run_once() == 1
-    assert actions == ["claim", "commit", "reply", "push", "record", "commit"]
+    assert actions == ["claim", "commit", "reply", "record", "commit"]
+    assert repository.recorded.provider_outcome.error_code == "line_reply_outcome_uncertain"
+    assert repository.recorded.retry_allowed is False
 
 
 def test_uncertain_reply_does_not_push_a_possibly_duplicate_answer() -> None:
@@ -328,6 +335,7 @@ def test_uncertain_reply_does_not_push_a_possibly_duplicate_answer() -> None:
         provider,
         "worker:1",
         lambda: NOW + timedelta(seconds=1),
+        batch_size=1,
     )
 
     assert worker.run_once() == 1
