@@ -35,22 +35,22 @@ jobs:
           import json
           from pathlib import Path
           import subprocess
-          
+
           needles = (
-              "DataBrowserPage", "api.routes.clients", "api/routes/clients.py",
+              "DataBrowserPage", "api.routes.clients", "api/routes/clients.py", "/api/v1/clients",
               "client_full_list_endpoint_retired", "client_identity_status_direct_update_retired",
               "api.routes.schedule", "api/routes/schedule.py", "/api/v1/schedule/save",
-              "SaveScheduleRequest", "legacy_daily_schedule_writer_retired",
-              "patch_data_browser_row", "preview_source_correction", "apply_source_correction",
-              "data_browser_write_retired", "create_or_get_match_record",
-              "legacy_match_record_writer_retired", "MatchCreateRequest",
+              "SaveScheduleRequest", "ScheduleDateItem", "api.schemas.schedule", "api/schemas/schedule.py",
+              "legacy_daily_schedule_writer_retired", "patch_data_browser_row",
+              "preview_source_correction", "apply_source_correction", "data_browser_write_retired",
+              "create_or_get_match_record", "legacy_match_record_writer_retired", "MatchCreateRequest",
           )
           paths = subprocess.check_output(["git", "ls-files", "-z"]).decode().split("\0")
           print("AUDIT_COMMIT", subprocess.check_output(["git", "rev-parse", "HEAD"]).decode().strip())
           for path in paths:
-              if not path or Path(path).suffix not in {".py", ".ts", ".tsx", ".js", ".jsx", ".css", ".html", ".md"}:
+              if not path or path == ".github/workflows/python-app.yml" or Path(path).name in {"package-lock.json", "uv.lock"}:
                   continue
-              if not path.startswith(("api/", "subsystems/", "ui_react/", "tests/", "line/", "scripts/", "document/架構重整/01_規格基線/", ".arch-map/")):
+              if Path(path).suffix not in {".py", ".ts", ".tsx", ".js", ".jsx", ".css", ".html", ".md", ".json", ".toml", ".yml", ".yaml"}:
                   continue
               text = Path(path).read_text(encoding="utf-8")
               hits = {needle: [i for i, line in enumerate(text.splitlines(), 1) if needle in line] for needle in needles if needle in text}
@@ -60,6 +60,10 @@ jobs:
                           for alias in node.names:
                               if alias.name in {"clients", "schedule", "match_records", "data_browser_admin"}:
                                   hits.setdefault("import:" + alias.name, []).append(node.lineno)
+                      if isinstance(node, ast.ImportFrom) and node.module == "api.schemas":
+                          for alias in node.names:
+                              if alias.name == "schedule":
+                                  hits.setdefault("import:schedule_schema", []).append(node.lineno)
               if path.startswith("ui_react/src/") and "/tests/" not in path:
                   for loader in ("import.meta.glob", "require.context"):
                       if loader in text:
