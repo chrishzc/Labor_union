@@ -27,50 +27,108 @@ jobs:
       - name: Check tracked Python files for syntax errors
         shell: bash
         run: git ls-files -z -- '*.py' | xargs -0 -r python -m py_compile
-      - name: Temporary read-only P1 reference audit
+      - name: Temporary focused P1 cleanup verification
         shell: bash
         run: |
+          git fetch --no-tags --depth=1 origin 73a270379480eda580860940fe08417d27888b84
+          python tests/test_client_entry_retirement.py -v
           python - <<'PY'
           import ast
           import json
+          import re
           from pathlib import Path
           import subprocess
 
-          needles = (
-              "DataBrowserPage", "api.routes.clients", "api/routes/clients.py", "/api/v1/clients",
-              "client_full_list_endpoint_retired", "client_identity_status_direct_update_retired",
-              "api.routes.schedule", "api/routes/schedule.py", "/api/v1/schedule/save",
-              "SaveScheduleRequest", "ScheduleDateItem", "api.schemas.schedule", "api/schemas/schedule.py",
-              "legacy_daily_schedule_writer_retired", "patch_data_browser_row",
-              "preview_source_correction", "apply_source_correction", "data_browser_write_retired",
-              "create_or_get_match_record", "legacy_match_record_writer_retired", "MatchCreateRequest",
-          )
-          paths = subprocess.check_output(["git", "ls-files", "-z"]).decode().split("\0")
-          print("AUDIT_COMMIT", subprocess.check_output(["git", "rev-parse", "HEAD"]).decode().strip())
+          base = '73a270379480eda580860940fe08417d27888b84'
+          def original(path):
+              return subprocess.check_output(['git', 'show', f'{base}:{path}']).decode('utf-8')
+          def current(path):
+              return Path(path).read_text(encoding='utf-8')
+          def verified(label, condition):
+              assert condition, label
+              print('PASS', label)
+
+          removed = {
+              'api/routes/clients.py', 'api/routes/schedule.py', 'api/schemas/schedule.py',
+              'ui_react/src/pages/DataBrowserPage.tsx', 'ui_react/src/pages/DataBrowserPage.css',
+              'ui_react/src/tests/data_browser_no_fake_mutation.test.tsx',
+              'ui_react/src/tests/data_browser_page_real_data.test.tsx',
+              'ui_react/src/tests/domains/global/subsystems/application-shell/modules/react-application-shell/data_browser_request_budget.test.tsx',
+          }
+          modified = {
+              'api/main.py', 'api/routes/data_browser_admin.py', 'api/routes/match_records.py',
+              'api/schemas/matches.py', 'config/production_writer_inventory.v1.json',
+              'tests/test_client_entry_retirement.py', 'tests/test_data_browser_admin_route.py',
+          }
+          changed = set(subprocess.check_output(['git', 'diff', '--name-only', base, 'HEAD']).decode().splitlines())
+          verified('exact approved write set', changed == removed | modified | {'.github/workflows/python-app.yml'})
+          verified('eight obsolete files removed', all(not Path(p).exists() for p in removed))
+          subprocess.run(['git', 'diff', '--check', base, 'HEAD'], check=True)
+          print('PASS git diff --check')
+
+          expected = original('api/main.py').replace('http://localhost:8501', 'http://localhost:5173').replace('http://127.0.0.1:8501', 'http://127.0.0.1:5173')
+          for line in ('    clients,\n', '    schedule,\n', 'app.include_router(clients.router)\n', 'app.include_router(schedule.router)\n'):
+              assert expected.count(line) == 1
+              expected = expected.replace(line, '')
+          verified('main differs only by CORS default and two retired router registrations', current('api/main.py') == expected)
+
+          expected = original('api/routes/data_browser_admin.py').split('\n\n@router.patch(', 1)[0].rstrip() + '\n'
+          verified('both Data Browser GET implementations preserved byte-for-byte', current('api/routes/data_browser_admin.py') == expected)
+          expected = original('api/routes/match_records.py').split('\n@router.post(', 1)[0].rstrip() + '\n'
+          expected = expected.replace('APIRouter, Depends, HTTPException, Path', 'APIRouter, Depends, Path').replace('MatchCreateRequest, OrderMatchRecordView', 'OrderMatchRecordView')
+          verified('match history GET preserved with only unused imports removed', current('api/routes/match_records.py') == expected)
+          expected = original('api/schemas/matches.py').replace('class MatchCreateRequest(BaseModel):\n    staff_id: int = Field(..., description="月嫂 staff_id")\n\n', '')
+          verified('only retired MatchCreateRequest removed from shared schema', current('api/schemas/matches.py') == expected)
+
+          old_inventory = json.loads(original('config/production_writer_inventory.v1.json'))
+          expected = original('config/production_writer_inventory.v1.json')
+          for rule in old_inventory['gone_route_rules']:
+              if rule['relative_path'] in {'api/routes/schedule.py', 'api/routes/match_records.py'}:
+                  block = '\n'.join('    ' + line for line in json.dumps(rule, indent=2).splitlines()) + ',\n'
+                  assert expected.count(block) == 1
+                  expected = expected.replace(block, '')
+          verified('inventory changed only by removing two deleted-route rules', current('config/production_writer_inventory.v1.json') == expected)
+
+          def routes(path):
+              tree = ast.parse(current(path))
+              return {(d.func.attr, ast.literal_eval(d.args[0]))
+                      for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+                      for d in n.decorator_list
+                      if isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute)
+                      and isinstance(d.func.value, ast.Name) and d.func.value.id == 'router'}
+          verified('Data Browser route set is GET-only', routes('api/routes/data_browser_admin.py') == {('get', '/sources/{source_id}'), ('get', '/{table}')})
+          verified('match records expose history GET only', routes('api/routes/match_records.py') == {('get', '/{case_no}/matches')})
+
+          bad = []
+          paths = subprocess.check_output(['git', 'ls-files', '-z']).decode().split('\0')
           for path in paths:
-              if not path or path == ".github/workflows/python-app.yml" or Path(path).name in {"package-lock.json", "uv.lock"}:
+              if not path or Path(path).suffix not in {'.py', '.ts', '.tsx', '.js', '.jsx', '.css', '.html'}:
                   continue
-              if Path(path).suffix not in {".py", ".ts", ".tsx", ".js", ".jsx", ".css", ".html", ".md", ".json", ".toml", ".yml", ".yaml"}:
-                  continue
-              text = Path(path).read_text(encoding="utf-8")
-              hits = {needle: [i for i, line in enumerate(text.splitlines(), 1) if needle in line] for needle in needles if needle in text}
-              if path.endswith(".py"):
-                  for node in ast.walk(ast.parse(text, filename=path)):
-                      if isinstance(node, ast.ImportFrom) and node.module == "api.routes":
-                          for alias in node.names:
-                              if alias.name in {"clients", "schedule", "match_records", "data_browser_admin"}:
-                                  hits.setdefault("import:" + alias.name, []).append(node.lineno)
-                      if isinstance(node, ast.ImportFrom) and node.module == "api.schemas":
-                          for alias in node.names:
-                              if alias.name == "schedule":
-                                  hits.setdefault("import:schedule_schema", []).append(node.lineno)
-              if path.startswith("ui_react/src/") and "/tests/" not in path:
-                  for loader in ("import.meta.glob", "require.context"):
-                      if loader in text:
-                          hits[loader] = [i for i, line in enumerate(text.splitlines(), 1) if loader in line]
-              if path.startswith("document/架構重整/01_規格基線/") and "410" in text:
-                  hits["410"] = [i for i, line in enumerate(text.splitlines(), 1) if "410" in line]
-              if hits:
-                  print(json.dumps({"path": path, "matches": hits}, ensure_ascii=False, sort_keys=True))
-          print("AUDIT_END")
+              text = current(path)
+              if path.endswith('.py'):
+                  for node in ast.walk(ast.parse(text)):
+                      if isinstance(node, ast.ImportFrom):
+                          module = node.module or ''
+                          if module in {'api.routes.clients', 'api.routes.schedule', 'api.schemas.schedule'}:
+                              bad.append(path)
+                          if module == 'api.routes' and any(a.name in {'clients', 'schedule'} for a in node.names):
+                              bad.append(path)
+                          if module == 'api.schemas.matches' and any(a.name == 'MatchCreateRequest' for a in node.names):
+                              bad.append(path)
+                      if isinstance(node, ast.Import) and any(a.name in {'api.routes.clients', 'api.routes.schedule', 'api.schemas.schedule'} for a in node.names):
+                          bad.append(path)
+              if path.startswith('ui_react/') and re.search(r"(?:from\s*|import\s*\(?\s*)['\"][^'\"]*[/]DataBrowserPage(?:\.tsx|\.css)?['\"]", text):
+                  bad.append(path)
+          verified('no remaining imports of removed API modules, request type, or React page/CSS', not bad)
+          for path in (
+              'ui_react/src/App.tsx', 'ui_react/src/pages/ClientRegistryPage.tsx',
+              'ui_react/src/pages/ClientRosterPage.tsx', 'ui_react/src/pages/OrderWorkbenchV2Page.tsx',
+              'ui_react/src/pages/OrdersPage.css', 'ui_react/src/pages/OrderTrackerPage.css',
+              'ui_react/src/api/data_browser/data_browser_query_client.ts',
+              'ui_react/src/adapters/data_browser/data_browser_query_adapter.ts',
+              'tests/test_data_browser_privacy.py', 'tests/test_data_browser_query_contract.py',
+          ):
+              assert current(path) == original(path), path
+          print('PASS current UI, active CSS, archive client/adapter and query/privacy tests unchanged')
+          print('P1_VERIFICATION_END')
           PY
