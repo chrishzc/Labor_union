@@ -33,3 +33,13 @@ jobs:
           python -m unittest discover
           -s tests/domains/external-integration/subsystems/line/subsystems
           -p test_line_m4_workflow_regressions.py -v
+      - name: Verify existing alert delivery contracts (temporary)
+        shell: bash
+        run: |
+          python - <<'PY'
+          import runpy
+          tests = runpy.run_path('tests/domains/external-integration/subsystems/line/modules/complaint-ingress/contract/test_human_escalation_delivery.py')
+          tests['test_masked_alert_is_projected_then_canonical_delivery_records_provider_outcome']()
+          tests['test_missing_target_is_a_durable_manual_fallback']()
+          print('2 existing alert delivery contract tests passed')
+          PY
