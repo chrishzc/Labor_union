@@ -40,9 +40,13 @@ class LineDeliveryWorker:
         self._batch_size = batch_size
 
     def run_once(self) -> int:
+        # Preserve the existing claim contract's bounds for each cycle.
+        budget = ClaimLineDeliveryTasksQuery(
+            self._worker_identity, self._now(), self._batch_size
+        )
         processed = 0
         # Do not spend later tasks' leases waiting for earlier provider calls.
-        for _ in range(self._batch_size):
+        for _ in range(budget.batch_size):
             claimed = self._claim()
             if not claimed:
                 break
