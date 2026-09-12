@@ -39,6 +39,7 @@ SELECT o.case_no,
        COALESCE(candidate_pool.contacted_count, 0) AS candidate_pool_contacted_count,
        candidate_pool.contacted_at AS candidate_pool_contacted_at,
        COALESCE(candidate_pool.replied_count, 0) AS candidate_pool_replied_count,
+       COALESCE(candidate_pool.willing_count, 0) AS candidate_pool_willing_count,
        candidate_pool.replied_at AS candidate_pool_replied_at,
        plan.id AS matching_plan_id,
        plan.version AS matching_plan_version,
@@ -118,15 +119,67 @@ SELECT o.case_no,
               pool.id AS pool_id,
               pool.created_at AS pool_created_at,
               COUNT(DISTINCT entry.id) AS candidate_count,
-              COUNT(DISTINCT CASE WHEN event.event_type IN ('info_1_sent', 'info_2_sent') THEN entry.id END) AS contacted_count,
-              MAX(CASE WHEN event.event_type IN ('info_1_sent', 'info_2_sent') THEN event.occurred_at END) AS contacted_at,
-              COUNT(DISTINCT CASE WHEN event.event_type = 'willingness_changed' THEN entry.id END) AS replied_count,
-              MAX(CASE WHEN event.event_type = 'willingness_changed' THEN event.occurred_at END) AS replied_at
+              COUNT(DISTINCT CASE
+                  WHEN (
+                      event.event_type = 'willingness_changed'
+                      AND JSON_UNQUOTE(JSON_EXTRACT(event.payload, '$.willingness')) IN ('willing', 'unwilling')
+                  ) OR (
+                      event.event_type IN ('info_1_sent', 'info_2_sent')
+                      AND (
+                          candidate_delivery.processing_status = 'sent'
+                          OR JSON_UNQUOTE(JSON_EXTRACT(event.payload, '$.delivery_status')) = 'manually_confirmed'
+                      )
+                  )
+                  THEN entry.id
+              END) AS contacted_count,
+              MAX(CASE
+                  WHEN (
+                      event.event_type = 'willingness_changed'
+                      AND JSON_UNQUOTE(JSON_EXTRACT(event.payload, '$.willingness')) IN ('willing', 'unwilling')
+                  ) OR (
+                      event.event_type IN ('info_1_sent', 'info_2_sent')
+                      AND (
+                          candidate_delivery.processing_status = 'sent'
+                          OR JSON_UNQUOTE(JSON_EXTRACT(event.payload, '$.delivery_status')) = 'manually_confirmed'
+                      )
+                  )
+                  THEN COALESCE(candidate_delivery.sent_at_utc, event.occurred_at)
+              END) AS contacted_at,
+              COUNT(DISTINCT CASE
+                  WHEN event.event_type = 'willingness_changed'
+                   AND JSON_UNQUOTE(JSON_EXTRACT(event.payload, '$.willingness')) IN ('willing', 'unwilling')
+                  THEN entry.id
+              END) AS replied_count,
+              COUNT(DISTINCT CASE
+                  WHEN event.event_type = 'willingness_changed'
+                   AND JSON_UNQUOTE(JSON_EXTRACT(event.payload, '$.willingness')) = 'willing'
+                   AND NOT EXISTS (
+                       SELECT 1
+                         FROM caregiver_candidate_contact_events newer
+                        WHERE newer.pool_id = event.pool_id
+                          AND newer.candidate_id = event.candidate_id
+                          AND newer.event_type = 'willingness_changed'
+                          AND JSON_UNQUOTE(JSON_EXTRACT(newer.payload, '$.willingness')) IN ('willing', 'unwilling')
+                          AND (
+                              newer.occurred_at > event.occurred_at
+                              OR (newer.occurred_at = event.occurred_at AND newer.id > event.id)
+                          )
+                   )
+                  THEN entry.id
+              END) AS willing_count,
+              MAX(CASE
+                  WHEN event.event_type = 'willingness_changed'
+                   AND JSON_UNQUOTE(JSON_EXTRACT(event.payload, '$.willingness')) IN ('willing', 'unwilling')
+                  THEN event.occurred_at
+              END) AS replied_at
          FROM caregiver_candidate_contact_pools pool
          LEFT JOIN caregiver_candidate_contact_entries entry
            ON entry.pool_id = pool.id AND entry.active_marker = 1
          LEFT JOIN caregiver_candidate_contact_events event
            ON event.pool_id = pool.id AND event.candidate_id = entry.id
+         LEFT JOIN line_delivery_tasks candidate_delivery
+           ON event.event_type IN ('info_1_sent', 'info_2_sent')
+          AND candidate_delivery.id = CAST(JSON_UNQUOTE(JSON_EXTRACT(event.payload, '$.line_task_id')) AS UNSIGNED)
         GROUP BY pool.case_no, pool.id, pool.created_at
   ) candidate_pool ON candidate_pool.case_no = o.case_no
   LEFT JOIN caregiver_matching_plans plan
