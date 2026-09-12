@@ -20,6 +20,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - name: Set up Python 3.11
         uses: actions/setup-python@v6
         with:
@@ -27,3 +29,41 @@ jobs:
       - name: Check tracked Python files for syntax errors
         shell: bash
         run: git ls-files -z -- '*.py' | xargs -0 -r python -m py_compile
+      - name: Inspect three remaining cleanup candidates
+        shell: bash
+        run: |
+          python - <<'PY'
+          import re
+          import subprocess
+          from pathlib import Path
+          groups = {
+              'system_status_page': re.compile(r'SystemStatusPage|system_status_entry_cutover'),
+              'finance_retired_entry': re.compile(r'ClientTransactionCreate|StaffTransactionCreate|create_client_transaction|create_staff_transaction|backfill_client_payment_due_dates|client-payments/(?:transaction|due-dates/backfill)|staff-payments/transaction|use_client_finance_preview_apply|use_staff_payables_preview_apply'),
+              'line_retired_review': re.compile(r'line_reviews|retired_line_review_route|review-requests|legacy_line_review_route_retired'),
+          }
+          allowed_roots = ('api/', 'ui_react/', 'tests/', 'scripts/', 'config/', 'subsystems/', 'domains/', 'infrastructure/', 'line/', '.arch-map/')
+          for name in subprocess.check_output(['git', 'ls-files', '-z'], text=True).split('\0'):
+              path = Path(name)
+              if not name.startswith(allowed_roots) or path.suffix not in {'.py', '.ts', '.tsx', '.js', '.css', '.json', '.md', '.html'}:
+                  continue
+              if path.name in {'package-lock.json', 'package.json'}:
+                  continue
+              text = path.read_text(encoding='utf-8')
+              for group, pattern in groups.items():
+                  hits = [str(i) for i, line in enumerate(text.splitlines(), 1) if pattern.search(line)]
+                  if hits:
+                      print('CANDIDATE_REF', group, name, ','.join(hits))
+          for name in (
+              'document/架構重整/01_規格基線/12_Global_效能與UX體感架構.md',
+              'document/架構重整/01_規格基線/19_Global_Entry_Point_Governance.md',
+              'document/架構重整/01_規格基線/16_Staff_Payables與Client_Refund正式規格.md',
+              'document/架構重整/01_規格基線/23_LINE身分管理與解除正式規格.md',
+          ):
+              for number, line in enumerate(Path(name).read_text(encoding='utf-8').splitlines(), 1):
+                  if re.search(r'system-status|系統狀態|410|legacy.*(?:writer|入口|route)', line):
+                      print('CONTRACT_REF', name, number, line)
+          print('CANDIDATE_AUDIT_HEAD', subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip())
+          PY
+          git diff --exit-code
+          git status --short
+          git diff --check
