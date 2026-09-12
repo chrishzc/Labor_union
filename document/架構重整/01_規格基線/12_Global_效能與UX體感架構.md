@@ -114,10 +114,12 @@ masked archive Query，不再提供日常六來源 tab、raw table metadata 或 
 前端反遮罩或擴大 Query 欄位繞過 owner 契約。
 
 分頁切換屬 local navigation，不得重送 mutation、清空尚未送出的合法草稿或讓舊 response 覆蓋新分頁。
-每個分頁使用可程式判讀的 tab／tabpanel 關聯、鍵盤焦點與明確 selected state。NAS 的資料夾與
-檔案投影及其操作沿用正式 storage 契約；本次僅同步入口描述，不新增 metadata 顯示、檔案操作
-或介面實作要求。一般畫面不得顯示實體 NAS path、digest 全值、Preview fingerprint、raw cursor
-或其他非業務必要雜訊。
+每個分頁使用可程式判讀的 tab／tabpanel 關聯、鍵盤焦點與明確 selected state。NAS 維持既有
+資料夾與檔案名稱的檔案總管式投影；不在畫面另列資料夾層級、用途、所屬案件／人員、版本、大小、
+更新時間或異常狀態等管理欄位。後端為安全讀取、對帳與版本治理所需的 metadata 仍由正式 storage
+契約管理，但不因此成為 UI 顯示需求。本次入口同步不變更 NAS 版型、互動與視覺細節的既有
+授權範圍，也不新增 metadata 顯示、檔案操作或介面實作要求。一般畫面不得顯示實體 NAS path、
+digest 全值、Preview fingerprint、raw cursor 或其他非業務必要雜訊。
 
 ## 4. 網路關卡：傳最少且可快取的 typed data
 
