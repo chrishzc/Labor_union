@@ -14,9 +14,11 @@ state, so this worker does not invent one.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable, Mapping
+from urllib.parse import urljoin, urlsplit
 
 from domains.line.canonical_payload import canonical_line_payload_json
 from domains.line.delivery import (
@@ -28,6 +30,7 @@ from domains.line.delivery import (
 )
 from domains.line.identities import LineGroupId, LineRoomId, LineUserId
 from shared_kernel.identities import CorrelationId, IdempotencyKey
+from subsystems.line.navigation_catalog import entry_for_alias
 from subsystems.line.outbox_contracts import ClaimLineOutboxQuery, CompleteLineOutboxCommand, LineOutboxWorkItem
 
 
@@ -178,7 +181,7 @@ def _request(item: HumanEscalationOutboxItem, now: datetime) -> tuple[LineDelive
         raise HumanEscalationDeliveryError("human_escalation_bounded_payload_invalid")
     message = canonical_line_payload_json({
         "type": "text",
-        "text": f"客服人工升級（{category}）：{safe_summary}",
+        "text": f"客服人工升級（{category}）：{safe_summary}\n開啟客服處理：{_mobile_review_url()}",
     })
     request = LineDeliveryRequest(
         LineRecipient(kind, recipient_identity), LineMessageKind.TEXT, message, now,
@@ -187,6 +190,19 @@ def _request(item: HumanEscalationOutboxItem, now: datetime) -> tuple[LineDelive
         _SOURCE_TYPE, item.aggregate_identity,
     )
     return request, dict(target)
+
+
+def _mobile_review_url() -> str:
+    base = (os.getenv("LINE_PUBLIC_BASE_URL") or os.getenv("BASE_URL") or "").strip()
+    parsed = urlsplit(base)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.username or parsed.password:
+        raise HumanEscalationDeliveryError("human_escalation_review_entry_unconfigured")
+    entry = entry_for_alias("開啟客服系統")
+    if entry is None or entry.public_route is None:
+        raise HumanEscalationDeliveryError("human_escalation_review_entry_unconfigured")
+    # Navigation only: no token or personal data, and the existing page still
+    # verifies the requesting administrator's LINE identity for every action.
+    return urljoin(base, entry.public_route)
 
 
 def _item(raw: LineOutboxWorkItem) -> HumanEscalationOutboxItem:

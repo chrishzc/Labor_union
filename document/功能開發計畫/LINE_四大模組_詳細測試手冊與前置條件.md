@@ -2,6 +2,7 @@
 
 > **文件版本**：v2.0（2026-09-02）  
 > **對齊程式版本**：`main @ 0988f6c430472343662aa1f8989ab2af9732bde3`  
+> **M4 修訂**：2026-09-13（Asia/Taipei），PR #300，基線 `main @ 2a95ceca7a413d76e3a5dd1862fd78165c60be2f`。同群組重新啟用、客服通知與安全連結修正須使用該 PR 的程式版本；未合併／部署前，不代表現行測試環境已更新。本次不變更下方既有手機實測紀錄。  
 > **適用範圍**：LINE 官方帳號、LIFF、FastAPI、MySQL、React 管理後台、M1～M4 repository-local 與手機 E2E 驗收。  
 > **權威依據**：`document/架構重整/01_規格基線/26_LINE四大模組Eraser流程圖轉錄與驗收基線.md`  
 > **目的**：讓 Agent 先完成可自動化的測試前置資料與 readback，測試者拿手機後只執行真正需要 LINE／LIFF／Rich Menu 的最後操作。
@@ -749,33 +750,37 @@ POST /api/v1/matching/coordination/conversion/apply
 
 ### Agent 前置
 
-- 確認測試管理員 capability。
-- `GET /api/v1/admin/line/runtime-alert-targets/alert-group-context`
-- 若已有舊測試群組，先用正式 reset preview/apply，而非直接清 DB。
+- 確認操作帳號已綁定啟用中的管理員，具 `line.alert.manage` capability。
+- 使用 `GET /api/v1/runtime/line-alert-targets` 讀取 target ID、state 與 current version。
+- 若要測試停用後重綁，以正式 reset Preview／Apply 停用，不直接清 DB。未要求 reset 時，不先停用正在使用的群組。
 
 ### 手機操作
 
-在測試 LINE 群組使用 current 群組設定指令／流程。
+由上述管理員在已加入官方帳號的測試 LINE 群組，重新傳送：
+
+```text
+設定異常通知群組
+```
+
+PR #300 的同群組重綁行為：同群組目前停用且沒有其他群組啟用時，重新啟用原 target ID，保留歷史、receipt 與 audit；同群組已啟用時不重複建立。若其他群組已啟用，回報衝突而不替換它。
+
+測試一次「設定 → reset → 再次傳送設定指令」並 readback。同一舊 Webhook event 的重送只重播原 receipt，不得把後續 reset 取消；重新綁定必須由新的一則指令觸發。
 
 ### Current owner
 
-管理 API：
+管理 API（由 `api/routes/runtime_health.py` 提供）：
 
 ```text
-GET  /api/v1/admin/line/runtime-alert-targets/alert-group-context
-POST /api/v1/admin/line/runtime-alert-targets/group/preview
-POST /api/v1/admin/line/runtime-alert-targets/group/apply
-POST /api/v1/admin/line/runtime-alert-targets/group-reset/preview
-POST /api/v1/admin/line/runtime-alert-targets/group-reset/apply
+GET   /api/v1/runtime/line-alert-targets
+POST  /api/v1/runtime/line-alert-targets/group/reset/preview
+POST  /api/v1/runtime/line-alert-targets/group/reset
+POST  /api/v1/runtime/line-alert-targets/{target_id}/preview
+PATCH /api/v1/runtime/line-alert-targets/{target_id}
 ```
 
-LINE ingress：
+首次註冊及手機同群組重綁由群組訊息 Webhook → `LineOrderGroupApplication` → `RuntimeAlertTargetApplication.register_group` 承接；不呼叫舊手冊的 `/api/v1/line/system/alert-group`。
 
-```text
-POST /api/v1/line/system/alert-group
-```
-
-Current persistence owner 為 `line_alert_notification_targets` 等 runtime alert tables，不再以舊版 `system_settings.alert_group_id` 作為唯一驗收依據。
+Current persistence owner 為 `line_alert_notification_targets` 等 runtime alert tables，不再以舊版 `system_settings.alert_group_id` 作為唯一驗收依據。重新綁定後，原 row 數量與 target ID 不變，state 為 `active`，版本、receipt 與 audit 可讀回；真 LINE 回覆仍需獨立手機驗收。
 
 ---
 
@@ -783,17 +788,20 @@ Current persistence owner 為 `line_alert_notification_targets` 等 runtime aler
 
 ### Agent 前置
 
-- 確認 alert target 已 ready。
-- 確認 Customer Service readback 可用。
+- 確認 alert target 已 ready。啟用一個群組並另有管理員通知對象時，PR #300 應仍選到該唯一群組。
+- 確認 Customer Service readback 可用；本案例測新客訴建立時，測試帳號不應仍處於前一案例的 active hold。有 hold 時先走正式結案或申請人恢復 AI 流程，不直接清資料。
+- 確認既有 `LINE_PUBLIC_BASE_URL` 或 `BASE_URL` 是手機可開啟的 HTTPS origin；客服告警使用它建立手機管理入口。缺設定時應讀回 `human_escalation_review_entry_unconfigured`，不是成功告警。
 - 不先建立假 HIGH escalation。
 
 ### 手機操作
 
-帳號 A 輸入明確客訴，例如：
+帳號 A 輸入符合 current `complaint.v1` 前綴的客訴，例如：
 
 ```text
-我要退費，服務態度很差，請主管處理。
+我要客訴，服務態度很差，請主管處理。
 ```
+
+原範例「我要退費，服務態度很差，請主管處理。」不在 closed complaint catalog／prefix 內，不可用它保證觸發 HIGH 客訴。此修訂校正測試輸入，不擴大情緒辨識或讓 LLM 自行判斷客訴。
 
 ### 驗收
 
@@ -809,7 +817,9 @@ complaint
 ```
 
 - HIGH escalation 必須由 owner 產生，不可由 fixture 預先 INSERT。
-- 群組內容需去識別化。
+- 群組內容需去識別化，並可開啟既有 `/line-mobile-admin?target=customer_service`；該 URL 只提供導航，不能代替管理員身分驗證。
+- 重用已結案的同帳號／同分類工單時，重新開啟的 `handling` 工單應可沿版本檢查完成 escalation 接手，不能 Preview 通過卻永遠 Apply 失敗。
+- 正式客服結案後的客戶通知應完成 delivery readback；其來源為 `customer_service_ticket`，不能覆寫群組告警的 `alert_status`。來源 escalation lineage 仍保留於原 idempotency key。
 
 ---
 
@@ -818,6 +828,8 @@ complaint
 ### Agent 前置
 
 Agent 準備一筆**合法待審 root fact**，例如由正式 profile/rebind flow 建立 pending review；不得直接偽造「已核准」結果。
+
+一般 mobile admin 導航連結與短效一次性 Safe Review Link 分開驗收。PR #300 的客服告警附的是既有 mobile admin 入口，不宣稱它是一個已簽發的一次性 token。
 
 ### 手機操作
 
@@ -831,6 +843,8 @@ Agent 準備一筆**合法待審 root fact**，例如由正式 profile/rebind fl
 - token/actor/版本錯誤時 fail closed。
 - Preview 不應直接寫正式資料。
 - Apply 有 receipt/readback。
+- Safe Review Link 簽發時記錄 runtime 告警目標的 owner ID／opaque version；兌換時鎖定重讀。群組停用、換群或同群組重新啟用造成版本改變後，即使前端仍提交舊 `current_target_version`，舊連結也不能兌換。
+- 舊連結沒有 immutable issued-event target snapshot 時應重新簽發，不把缺少 evidence 當成有效；此檢查不取代實際審核 owner 在 Preview／Apply 的業務資料版本檢查。
 
 ---
 
@@ -855,7 +869,9 @@ Agent：
 
 ### 驗收
 
-Current leave root 包含 `staff_leave_requests`；後續 substitution 必須走 Scheduling/Leave owner，不以直接 UPDATE schedule 作為 pass。
+LIFF 請假待辦的 current root 為 `scheduling_staff_leave_request_aggregates`，搭配其 events／receipts；後續 substitution 必須走 Scheduling/Leave owner，不以直接 UPDATE schedule 作為 pass。
+
+**目前缺口（PR #300 未修復）**：請假提交及管理員受理只建立／更新待辦，尚未接上「通知 client A 並接收順延決策」。這條手機流程保留為 `BLOCKED / NOT_RUN`，不能用待辦建立成功或管理員自行完成代班取代原驗收。正式代班 Apply 及 Payroll readback 可分開測試，但不證明此缺口已完成。
 
 ---
 
@@ -877,6 +893,7 @@ Agent 執行 repository-local readback：
 - 原月嫂與代班月嫂各自有正確 payable obligation。
 - 金額來源可追到 assignment/service facts。
 - 不再以舊版泛稱 `payroll_items` 是否有兩列作為唯一驗收。
+- 正式代班完成後，可用 `GET /api/v1/orders/{case_no}/leave-substitution/{batch_key}/payables-lineage` 核對；未完成正式代班 Apply 時，不能把缺少應付款直接判成 Payroll bug。
 
 ---
 
@@ -896,7 +913,7 @@ Agent 執行 repository-local readback：
 
 ```text
 請替我準備 M3-03 Zero Pool 手機測試。
-建立一筆 development-only 測試案件與必要 client/staff root facts，必要時做 architecture bootstrap。
+建立一筆 development-only 測試案件與必要 client/staff root facts，必要時完成 architecture bootstrap。
 使用 current Matching owner 建 initial criteria 與合法候選狀態，讓系統自然進入 zero-pool proposal；不要直接 INSERT matching_coordination_events/outbox。
 停在產婦手機即將收到／處理 proposal 的前一步，回傳測試包。
 ```
@@ -999,9 +1016,9 @@ B = staff
 | Matching readback | `GET /api/v1/matching/coordination/cases/{case_no}/readback` |
 | Matching operations | `/criteria/*`, `/criteria-diff/*`, `/caregiver-willingness/*`, `/zero-pool/*`, `/customer-decision/*`, `/conversion/*` |
 | Case architecture bootstrap | `/api/v1/cases/{case_no}/architecture-bootstrap/*` |
-| Alert target | `/api/v1/admin/line/runtime-alert-targets/*` |
+| Alert target | `/api/v1/runtime/line-alert-targets`；同群組重綁見 M4-01 |
 | Customer Service | current `customer_service_tickets` + escalation owner |
-| Leave root | `staff_leave_requests` |
+| Leave root | `scheduling_staff_leave_request_aggregates`（手機順延決策缺口見 M4-04） |
 | Payroll SSOT | `staff_obligations` / `staff_obligation_events` 等 current Payroll owner |
 
 ---

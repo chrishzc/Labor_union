@@ -19,6 +19,18 @@ class FakeRepository:
         self.receipts = {}
         self.events = []
         self.outbox = []
+        self.runtime_target = {
+            "id": 1, "target_type": "group", "enabled": True,
+            "minimum_status": "warning",
+            "updated_at_utc": datetime(2026, 9, 1, tzinfo=timezone.utc),
+        }
+
+    def find_active_group_targets(self, *, for_update):
+        return (dict(self.runtime_target),) if self.runtime_target["enabled"] else ()
+
+    def issued_runtime_target(self, link_pk):
+        return next((args[-1].get("runtime_target") for pk, args in self.events
+                     if pk == link_pk and args[0] == "issued"), None)
 
     def get_link(self, link_id, *, for_update=False):
         row = self.links.get(link_id)
@@ -51,7 +63,9 @@ class FakeRepository:
 
 
 class FakeUnitOfWork:
-    def __init__(self, repo): self.safe_review_links = repo
+    def __init__(self, repo):
+        self.safe_review_links = repo
+        self.runtime_monitor = repo
     def __enter__(self): return self
     def __exit__(self, *_): return False
     def commit(self): pass

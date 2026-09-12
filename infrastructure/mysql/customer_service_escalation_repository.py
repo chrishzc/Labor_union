@@ -351,9 +351,13 @@ class MySqlCustomerServiceEscalationRepository:
             cursor.execute(sql)
             fetchall = getattr(cursor, "fetchall", None)
             rows = tuple(fetchall() or ()) if callable(fetchall) else ()
-        if len(rows) != 1:
+        # Groups sort before admin targets, so two groups still fail closed.
+        # Additional enabled admins must not hide the unique configured group.
+        group_rows = tuple(row for row in rows if row["target_type"] == "group")
+        candidates = group_rows or rows
+        if len(candidates) != 1:
             return None
-        row = rows[0]
+        row = candidates[0]
         target_type = str(row["target_type"])
         identity = row.get("group_id") if target_type == "group" else row.get("linked_line_user_id")
         if not identity:
