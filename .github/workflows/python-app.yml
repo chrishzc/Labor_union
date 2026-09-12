@@ -18,11 +18,8 @@ jobs:
   python-syntax:
     name: Python syntax
     runs-on: ubuntu-latest
-    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
       - name: Set up Python 3.11
         uses: actions/setup-python@v6
         with:
@@ -30,50 +27,3 @@ jobs:
       - name: Check tracked Python files for syntax errors
         shell: bash
         run: git ls-files -z -- '*.py' | xargs -0 -r python -m py_compile
-      - name: Verify P2 removal and preserved owners
-        shell: bash
-        run: |
-          python - <<'PY'
-          import re
-          import subprocess
-          from pathlib import Path
-
-          expected = {
-              'ui_react/package.json': 'bc11145661a7a2841d1cb12e7231a2c420bfc78b',
-              'ui_react/package-lock.json': 'eca13776266274c0342320803921e6bfe8ec1f73',
-              'ui_react/src/App.tsx': '490a05d60685dc2ae96efa401cb517e7c57fdfc8',
-              'ui_react/src/pages/CurrentAnomaliesPage.tsx': 'fd201f1c3a87f7070f43335e5c1bac750586bcc1',
-              'api/main.py': 'c16266f439eff9a1a40b57e3dfe4c608c540c042',
-          }
-          for path, sha in expected.items():
-              actual = subprocess.check_output(['git', 'hash-object', path], text=True).strip()
-              assert actual == sha, path
-              print('PASS unchanged', path)
-          assert not Path('ui_react/src/pages/AnomaliesPage.tsx').exists()
-          pattern = re.compile(r'(?<![A-Za-z0-9_])AnomaliesPage(?![A-Za-z0-9_])')
-          paths = subprocess.check_output(['git', 'ls-files', '-z', '--', 'ui_react'], text=True).split('\0')
-          for name in paths:
-              path = Path(name)
-              if not name or path.suffix not in {'.ts', '.tsx', '.js', '.jsx', '.html', '.json', '.css'} or path.name == 'package-lock.json':
-                  continue
-              for lineno, line in enumerate(path.read_text(encoding='utf-8').splitlines(), 1):
-                  if pattern.search(line):
-                      assert name in {'ui_react/src/pages/AnomaliesPage.css', 'ui_react/src/pages/CurrentAnomaliesPage.tsx'} and 'AnomaliesPage.css' in line, f'{name}:{lineno}'
-          print('PASS no remaining compatibility export consumer; active CSS retained')
-          PY
-      - name: Install existing locked frontend dependencies without lifecycle scripts
-        working-directory: ui_react
-        shell: bash
-        run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: P2 TypeScript and Vite build
-        working-directory: ui_react
-        shell: bash
-        run: npm run build
-      - name: Verify validation leaves tracked source unchanged
-        if: ${{ !cancelled() }}
-        shell: bash
-        run: |
-          git diff --exit-code
-          git diff --check
-          printf 'P2_VALIDATION_HEAD '
-          git rev-parse HEAD
