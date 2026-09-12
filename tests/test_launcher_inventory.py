@@ -37,6 +37,7 @@ def test_retired_or_moved_legacy_launcher_paths_do_not_return() -> None:
         "reset_DB.bat",
         "start.bat",
         "start_fastapi_ngrok.py",
+        "scripts/launchers/start_fastapi_ngrok.py",
         "update_DB.bat",
         "scripts/bootstrap_admin_dev_env.ps1",
         "scripts/install_durable_job_worker_task.ps1",

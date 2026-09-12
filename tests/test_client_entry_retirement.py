@@ -1,47 +1,49 @@
-"""Verify retired Client entries are typed, fail closed, and perform no DB work."""
+"""Verify obsolete Client entries are removed while their owners stay mounted."""
 
+import ast
 from pathlib import Path
-
-import pytest
-from fastapi import HTTPException
-
-from api.routes import clients
+import unittest
 
 
-def test_unbounded_client_list_is_a_typed_gone_boundary() -> None:
-    with pytest.raises(HTTPException) as captured:
-        clients.get_all_clients()
-
-    assert captured.value.status_code == 410
-    error = captured.value.detail["error"]
-    assert error["code"] == "client_full_list_endpoint_retired"
-    assert error["domain_blockers"] == [
-        "replacement_identifier:/api/v1/admin/data-browser/sources/clients"
-    ]
-    assert error["retryable"] is False
+ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_direct_identity_status_update_is_a_typed_gone_boundary() -> None:
-    with pytest.raises(HTTPException) as captured:
-        clients.update_client_identity_status(client_id=17)
+class ClientEntryRetirementTests(unittest.TestCase):
+    def test_retired_client_module_is_removed(self) -> None:
+        self.assertFalse((ROOT / "api/routes/clients.py").exists())
 
-    assert captured.value.status_code == 410
-    error = captured.value.detail["error"]
-    assert error["code"] == "client_identity_status_direct_update_retired"
-    assert error["domain_blockers"] == [
-        "replacement_identifier:/api/v1/case-import/hcm/resubmissions/preview",
-        "replacement_identifier:/api/v1/case-import/hcm/resubmissions/apply",
-    ]
+    def test_application_does_not_import_or_mount_retired_client_router(self) -> None:
+        tree = ast.parse((ROOT / "api/main.py").read_text(encoding="utf-8"))
+        imported = {
+            alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module == "api.routes"
+            for alias in node.names
+        }
+        self.assertNotIn("clients", imported)
+        self.assertNotIn("clients.router", {
+            ast.unparse(node.args[0])
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "include_router"
+            and node.args
+        })
+
+    def test_replacement_owner_and_archive_queries_remain_mounted(self) -> None:
+        tree = ast.parse((ROOT / "api/main.py").read_text(encoding="utf-8"))
+        mounted = {
+            ast.unparse(node.args[0])
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "include_router"
+            and node.args
+        }
+        self.assertTrue({
+            "client_registry.router", "hcm_import.router", "data_browser_admin.router",
+        }.issubset(mounted))
 
 
-def test_retired_client_router_has_no_database_or_raw_contract_path() -> None:
-    source = (
-        Path(__file__).resolve().parents[1] / "api" / "routes" / "clients.py"
-    ).read_text(encoding="utf-8")
-
-    assert "mysql_adapter" not in source
-    assert "get_table_data" not in source
-    assert "UPDATE clients" not in source
-    assert ".commit(" not in source
-    assert ".rollback(" not in source
-    assert "Dict[str, Any]" not in source
+if __name__ == "__main__":
+    unittest.main()

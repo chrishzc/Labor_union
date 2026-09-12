@@ -12,7 +12,7 @@
 
 效能判斷只使用可量測 evidence：
 
-- browser／Streamlit interaction timing；
+- browser／React interaction timing；
 - API server timing、status、payload bytes 與 correlation id；
 - DB query count、duration、rows examined 與 lock wait；
 - cache hit／miss／age／invalidation reason；
@@ -37,12 +37,14 @@ job），使人工需要改善時可辨識方向。
 
 ### 2.1 管理端查看入口
 
-系統管理員在 Streamlit 導覽列開啟「🩺 系統狀態」，由
-`GET /api/v1/system/status/performance-snapshot` 讀取記憶體快照。此 read-only endpoint 使用
-既有 `system.administration` capability，不要求 `admin.audit.read`。目前畫面顯示 API service
-本次啟動後的樣本數、平均、p50／p95 的固定 latency-bucket 上限及最大值；它不顯示 URL、
-案件、人員、request／response payload 或逐筆 timestamp。服務重啟後快照歸零，因此它不是
-歷史趨勢報表；cache、DB 與 job 的可重跑彙總則隨各 benchmark evidence artifact 人工比較。
+管理端入口依 `19_Global_Entry_Point_Governance.md` 使用 React；獨立 `system-status` 頁面
+已退出正式導航與 render branches，既有 snapshot Query 與 shell 右上角狀態指示器仍保留。
+`GET /api/v1/system/status/performance-snapshot` 繼續提供記憶體快照；本次入口同步不改變
+其認證與授權契約，也不新增畫面、指標或監控能力。API 快照包含本次啟動後的樣本數、平均、
+p50／p95 的固定 latency-bucket 上限及最大值；不包含 URL、案件、人員、request／response
+payload 或逐筆 timestamp。不得把 API 可查欄位等同於右上角指示器必須逐項顯示。
+服務重啟後快照歸零，因此它不是歷史趨勢報表；cache、DB 與 job 的可重跑彙總仍隨各
+benchmark evidence artifact 人工比較，不因舊獨立頁面退出而刪除查詢契約。
 
 ## 3. 前端關卡：先回應，再取得權威結果
 
@@ -94,31 +96,29 @@ timeout 不等於失敗；前端以相同 idempotency key Query receipt／retry�
   使用者測試與 production telemetry 調整。
 - request 被新 Query 取代時應取消或忽略舊 response；不得讓較舊 response 覆蓋新 view。
 
-Streamlit 先使用 placeholder、`session_state` 的 local draft／stable idempotency identity、
-集中 API client 與明確 loading state；未來替換前端沿用同一 server contract。
+現行 React 元件保存 local draft／stable idempotency identity，使用既有 typed API client 與
+明確 loading state；server contract 不因前端呈現而改變，不再依賴 Streamlit `session_state`。
 
-### 3.4 資料中心資訊架構（2026-08-25 人工裁決）
+### 3.4 資料中心資訊架構（依 2026-09-11 名冊裁決同步）
 
-管理端以單一「資料中心」作為營運區入口，取代側邊欄分離的「資料匯入」與「數據瀏覽」。
-入口內固定提供三個同層分頁：
+2026-08-25 的三分頁規劃中，六來源「數據瀏覽」日常入口已由
+`33_案件與月嫂整合名冊正式規格.md` 的名冊裁決取代；不得將舊規劃當作復活六來源頁面的要求。
+資料中心的 `NAS 檔案` 與 `資料匯入` 沿用各自既有 owner 契約；HCM、Client BeClass、
+Staff historical、Historical Orders 與其他 owner-specific typed Preview／Apply 匯入流程不變。
 
-1. `NAS 檔案`：以接近檔案總管的簡單投影顯示資料夾與其中的檔案；
-2. `資料匯入`：完整保留既有 HCM、Client BeClass、Staff historical、Historical Orders 與其他
-   owner-specific typed Preview／Apply 匯入流程；
-3. `數據瀏覽`：完整保留既有六來源去敏、唯讀 Query 與明細抽屜。
-
-2026-08-27 人工已將「工會內部管理 UI 的一般業務資料去敏」改為完整值顯示；上列「去敏」是施工前
-現況描述，不再是目標契約。後續由
-`PROV-20260827-internal-admin-ui-unmasked-display-spec-gap.md` 逐 surface 固定 permission、完整值欄位與
-負向驗收後分批替換。未完成該 package 前不得以臨時前端反遮罩、raw payload 或擴大 Query 欄位繞過
-typed owner contract。
+日常資料修正使用以 `case_no` 為中心的客戶名冊與以 `staff_id` 為中心的月嫂名冊，各 owner
+仍獨立 Query／Preview／Confirm／Apply。舊六來源 Data Browser 只保留 authenticated、bounded
+masked archive Query，不再提供日常六來源 tab、raw table metadata 或 generic writer。
+`#data-browser` 相容深連結顯示客戶名冊；其餘現行入口與 aliases 依規格 19，不要求網址立即改寫。
+一般業務值與銀行帳號等特殊欄位依各 owner current typed contract 顯示，不得透過 raw payload、
+前端反遮罩或擴大 Query 欄位繞過 owner 契約。
 
 分頁切換屬 local navigation，不得重送 mutation、清空尚未送出的合法草稿或讓舊 response 覆蓋新分頁。
-每個分頁使用可程式判讀的 tab／tabpanel 關聯、鍵盤焦點與明確 selected state。NAS 分頁目前只規劃
+每個分頁使用可程式判讀的 tab／tabpanel 關聯、鍵盤焦點與明確 selected state。NAS 維持既有
 資料夾與檔案名稱的檔案總管式投影；不在畫面另列資料夾層級、用途、所屬案件／人員、版本、大小、
 更新時間或異常狀態等管理欄位。後端為安全讀取、對帳與版本治理所需的 metadata 仍由正式 storage
-契約管理，但不因此成為 UI 顯示需求。版型、互動與視覺細節等待使用者另行提供介面設計；本次只
-固定資料中心入口、三分頁與資料夾／檔案投影概念，不授權先行實作。一般畫面不得顯示實體 NAS path、
+契約管理，但不因此成為 UI 顯示需求。本次入口同步不變更 NAS 版型、互動與視覺細節的既有
+授權範圍，也不新增 metadata 顯示、檔案操作或介面實作要求。一般畫面不得顯示實體 NAS path、
 digest 全值、Preview fingerprint、raw cursor 或其他非業務必要雜訊。
 
 ## 4. 網路關卡：傳最少且可快取的 typed data
@@ -345,7 +345,8 @@ worker unavailable 才回 typed unavailable。UI 不得依 error message 字串�
   只有在辨識、下載、追蹤或客服溝通確實需要時才可保留。
 - 成功訊息使用「已排入／處理中／已完成並回讀」等業務語意；外部 provider 工作僅能顯示
   「已排入，尚未代表送達／發布完成」，不得以 task／receipt 存在冒充外部成功。
-- UX 收斂進度（2026-08-26）：LINE Rich Menu 一般畫面已移除 `typed action`、`server Preview`、
+- UX 收斂進度（2026-08-26；其中 Data Browser／System Status 的舊頁面描述已由 §3.4／§2.1
+  的現行入口取代，不構成復活舊頁面的要求）：LINE Rich Menu 一般畫面已移除 `typed action`、`server Preview`、
   provider request、Diff Mode、Active DB Snapshot、Before 與內部草稿 revision；Chrome 實點保留
   本機預覽、明確業務 blocker 與零發送邊界。Staff 名冊搜尋零結果改顯示可清除的明確空狀態；
   接案狀態 Drawer 對已取消紀錄明示「不可再次取消」，未填取消原因、資料已變更或操作進行中也以
@@ -448,7 +449,7 @@ worker unavailable 才回 typed unavailable。UI 不得依 error message 字串�
 1. Slice 0 建立 telemetry、payload projection、pagination、single-flight、cache／job ports；
    Redis、WebSocket、SSE 與 HTTP/3 不作初始強制依賴。
 2. 各 Domain Query 建立 bounded read models、version token、必要 indexes 與 query budgets。
-3. Streamlit 先完成 skeleton／placeholder、loading state、draft preservation、single-flight
+3. React 元件沿用 skeleton／placeholder、loading state、draft preservation、single-flight
    與 request supersession。
 4. 以實測選出高成本重複 Query，再逐一加入 cache；每一項都要有 invalidation test。
 5. 以實測選出超過互動 budget 的 report／export／scan，再導入 durable job。

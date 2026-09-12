@@ -18,26 +18,6 @@ from jsonschema import Draft202012Validator, ValidationError
 
 
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
-DATA_BROWSER_PATH = "/api/v1/admin/data-browser/{table}"
-DATA_BROWSER_TABLES = (
-    "actual_hours_adjustments",
-    "beclass_records",
-    "case_staff_assignments",
-    "client_payment_transactions",
-    "client_payments",
-    "clients",
-    "holidays",
-    "line_confirmation_requests",
-    "matching_records",
-    "orders",
-    "payment_migration_reviews",
-    "staff",
-    "staff_bank_accounts",
-    "staff_bookings",
-    "staff_payment_transactions",
-    "staff_payments",
-    "staff_schedule",
-)
 BUILTIN_VALUES: dict[str, Any] = {
     "year": 2026,
     "month": 7,
@@ -109,45 +89,40 @@ def _expand_operations(
 
             fixture = _operation_fixture(fixtures, method, template_path)
             parameters = list(shared_parameters or []) + list(operation.get("parameters", []) or [])
-            expansions = DATA_BROWSER_TABLES if method == "GET" and template_path == DATA_BROWSER_PATH else (None,)
-            for table_name in expansions:
-                path_values = dict(fixture.get("path", {}))
-                query_values = dict(fixture.get("query", {}))
-                if table_name is not None:
-                    path_values["table"] = table_name
+            path_values = dict(fixture.get("path", {}))
+            query_values = dict(fixture.get("query", {}))
+            missing: list[str] = []
+            resolved_path = template_path
+            for parameter in parameters:
+                name = parameter.get("name")
+                location = parameter.get("in")
+                required = bool(parameter.get("required"))
+                if location == "path":
+                    value = path_values.get(name, BUILTIN_VALUES.get(name))
+                    if value is None:
+                        missing.append(str(name))
+                    else:
+                        resolved_path = resolved_path.replace(
+                            "{" + str(name) + "}",
+                            quote(str(value), safe=""),
+                        )
+                elif location == "query" and required:
+                    value = query_values.get(name, BUILTIN_VALUES.get(name))
+                    if value is None:
+                        missing.append(str(name))
+                    else:
+                        query_values[name] = value
 
-                missing: list[str] = []
-                resolved_path = template_path
-                for parameter in parameters:
-                    name = parameter.get("name")
-                    location = parameter.get("in")
-                    required = bool(parameter.get("required"))
-                    if location == "path":
-                        value = path_values.get(name, BUILTIN_VALUES.get(name))
-                        if value is None:
-                            missing.append(str(name))
-                        else:
-                            resolved_path = resolved_path.replace(
-                                "{" + str(name) + "}",
-                                quote(str(value), safe=""),
-                            )
-                    elif location == "query" and required:
-                        value = query_values.get(name, BUILTIN_VALUES.get(name))
-                        if value is None:
-                            missing.append(str(name))
-                        else:
-                            query_values[name] = value
-
-                expanded.append(
-                    {
-                        "method": method,
-                        "template_path": template_path,
-                        "resolved_path": resolved_path,
-                        "query": query_values,
-                        "operation": operation,
-                        "missing": sorted(set(missing)),
-                    }
-                )
+            expanded.append(
+                {
+                    "method": method,
+                    "template_path": template_path,
+                    "resolved_path": resolved_path,
+                    "query": query_values,
+                    "operation": operation,
+                    "missing": sorted(set(missing)),
+                }
+            )
     return expanded
 
 

@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from subsystems.access.data_browser_maintenance import EDITABLE_COLUMNS
+from api.routes import data_browser_admin
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -15,4 +15,6 @@ def test_data_browser_projects_client_identity_status_with_the_expected_label():
 
 
 def test_client_identity_status_is_read_only_in_data_browser():
-    assert "identity_status" not in EDITABLE_COLUMNS["clients"]
+    assert [(route.path, route.methods) for route in data_browser_admin.router.routes] == [
+        ("/api/v1/admin/data-browser/sources/{source_id}", {"GET"}),
+    ]

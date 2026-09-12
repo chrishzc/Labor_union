@@ -45,7 +45,6 @@ from api.routes import (
     contract_external_signing,
     client_payments,
     client_payment_destination,
-    clients,
     contracts,
     controlled_files,
     data_browser_admin,
@@ -117,7 +116,6 @@ from api.routes import (
     payroll,
     payroll_rebuild,
     private_operations,
-    schedule,
     jobs,
     scheduling_current,
     scheduling_eligibility_collision,
@@ -183,7 +181,7 @@ def _allowed_origins() -> list[str]:
     configured = os.getenv("ALLOWED_ORIGINS", "").strip()
     if configured:
         return [origin.strip() for origin in configured.split(",") if origin.strip()]
-    return ["http://localhost:8501", "http://127.0.0.1:8501"]
+    return ["http://localhost:5173", "http://127.0.0.1:5173"]
 
 
 @asynccontextmanager
@@ -304,7 +302,6 @@ app.include_router(matches.router)
 app.include_router(candidate_contact_pool.router)
 app.include_router(match_records.router)
 
-app.include_router(schedule.router)
 app.include_router(jobs.router)
 app.include_router(scheduling_current.router)
 app.include_router(scheduling_eligibility_collision.router)
@@ -316,7 +313,6 @@ app.include_router(multi_caregiver_schedule.router)
 app.include_router(multi_caregiver_schedule_read.router)
 app.include_router(caregiver_segment_availability.router)
 app.include_router(caregiver_availability_locks.router)
-app.include_router(clients.router)
 app.include_router(staff.router)
 app.include_router(staff_registry_mutation.router)
 app.include_router(staff_qualification_master.router)

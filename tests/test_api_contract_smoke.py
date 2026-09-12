@@ -70,18 +70,37 @@ def test_default_expansion_is_get_only():
     assert [target["method"] for target in targets] == ["GET"]
 
 
-def test_data_browser_path_expands_every_table():
-    openapi = _openapi(api_contract_smoke.DATA_BROWSER_PATH)
-    openapi["paths"][api_contract_smoke.DATA_BROWSER_PATH]["get"]["parameters"] = [
+def test_archive_query_uses_explicit_source_fixture_and_bounds():
+    path = "/api/v1/admin/data-browser/sources/{source_id}"
+    openapi = _openapi(path)
+    openapi["paths"][path]["get"]["parameters"] = [
+        {"name": "source_id", "in": "path", "required": True, "schema": {"type": "string"}}
+    ]
+    fixtures = {"operations": {f"GET {path}": {"path": {"source_id": "staff"}, "query": {"limit": 1}}}}
+
+    targets = api_contract_smoke._expand_operations(openapi, fixtures, [], [], False)
+
+    assert len(targets) == 1
+    assert targets[0]["method"] == "GET"
+    assert targets[0]["resolved_path"] == "/api/v1/admin/data-browser/sources/staff"
+    assert targets[0]["query"] == {"limit": 1}
+    assert targets[0]["missing"] == []
+
+
+def test_old_raw_table_schema_does_not_trigger_automatic_probes():
+    path = "/api/v1/admin/data-browser/{table}"
+    openapi = _openapi(path)
+    openapi["paths"][path]["get"]["parameters"] = [
         {"name": "table", "in": "path", "required": True, "schema": {"type": "string"}}
     ]
-
     targets = api_contract_smoke._expand_operations(openapi, {}, [], [], False)
+    session = FakeSession(FakeResponse(200, {}))
 
-    assert len(targets) == len(api_contract_smoke.DATA_BROWSER_TABLES)
-    assert {target["resolved_path"].rsplit("/", 1)[-1] for target in targets} == set(
-        api_contract_smoke.DATA_BROWSER_TABLES
-    )
+    assert len(targets) == 1
+    assert targets[0]["missing"] == ["table"]
+    result = api_contract_smoke._run_one(session, "http://test", targets[0], openapi, 1, "public", [])
+    assert result.kind == "SKIP_MISSING_FIXTURE"
+    assert session.calls == []
 
 
 def test_missing_required_fixture_is_skipped_without_request():
@@ -202,7 +221,7 @@ def test_openapi_component_references_resolve_from_the_document_root():
     assert error is None
 
 
-def test_matching_records_integer_options_are_caught_by_openapi_schema():
+def test_nested_integer_options_are_caught_by_openapi_schema():
     openapi = {
         "openapi": "3.1.0",
         "paths": {},
@@ -239,8 +258,8 @@ def test_matching_records_integer_options_are_caught_by_openapi_schema():
     }
     target = {
         "method": "GET",
-        "template_path": "/api/v1/admin/data-browser/{table}",
-        "resolved_path": "/api/v1/admin/data-browser/matching_records",
+        "template_path": "/api/v1/test/options",
+        "resolved_path": "/api/v1/test/options",
         "query": {},
         "operation": operation,
         "missing": [],
@@ -251,7 +270,7 @@ def test_matching_records_integer_options_are_caught_by_openapi_schema():
             {
                 "success": True,
                 "message": "ok",
-                "data": {"valid_options": {"caregiver_accepted": [0, 1]}},
+                "data": {"valid_options": {"accepted": [0, 1]}},
             },
         )
     )
