@@ -11,7 +11,6 @@ import pymysql
 import os
 import asyncio
 import sys
-import requests
 from typing import Any, Dict, Optional
 from dotenv import load_dotenv
 from fastapi.responses import FileResponse
@@ -49,21 +48,6 @@ def get_setting(key: str, default: str = "") -> str:
     """從環境變數讀取設定，取代舊版 admin.settings_manager"""
     env_key = key.upper()
     return os.getenv(env_key, default)
-
-def _notify_development_reviewer(request_type: str, request_id: str | int) -> None:
-    """Push one review event to the local dev supervisor; never affect webhook success."""
-    notify_url = os.getenv("DEV_REVIEW_NOTIFY_URL", "").strip()
-    if not notify_url:
-        return
-    try:
-        response = requests.post(
-            notify_url,
-            json={"type": request_type, "request_id": str(request_id)},
-            timeout=1,
-        )
-        response.raise_for_status()
-    except requests.RequestException as exc:
-        print(f"[LINE Review] Development notification failed: {exc}")
 
 
 def _liff_url(query: str = "") -> str:
