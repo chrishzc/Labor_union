@@ -76,11 +76,11 @@ class MySqlCustomerServiceRepository:
             cursor.execute(
                 "UPDATE customer_service_tickets SET status='handling',"
                 "assigned_to_admin_user_id=COALESCE(%s,assigned_to_admin_user_id),"
-                "version=version+1 WHERE id=%s AND version=%s AND status='waiting'",
+                "version=version+1 WHERE id=%s AND version=%s AND status IN ('waiting','handling')",
                 (admin_id, ticket_id, expected_version),
             )
             if cursor.rowcount != 1:
-                raise CustomerServiceVersionConflictError("客服需求已更新或不在等待狀態")
+                raise CustomerServiceVersionConflictError("客服需求已更新或不在等待／處理狀態")
             cursor.execute(
                 _EVENT_INSERT_SQL,
                 (
