@@ -40,11 +40,17 @@ class LineDeliveryWorker:
         self._batch_size = batch_size
 
     def run_once(self) -> int:
-        claimed = self._claim()
-        for task in claimed:
+        claimed_count = 0
+        # Delivery is serial: acquire each lease only when its task can run.
+        for _ in range(self._batch_size):
+            claimed = self._claim()
+            if not claimed:
+                break
+            task, = claimed
+            claimed_count += 1
+            validation_failure = self._manual_replay_validation_failure(task)
             if not self._still_sendable(task):
                 continue
-            validation_failure = self._manual_replay_validation_failure(task)
             outcome = (
                 LineProviderOutcome(
                     LineProviderOutcomeType.REJECTED,
@@ -55,13 +61,13 @@ class LineDeliveryWorker:
                 else self._send(task)
             )
             self._record(task, outcome)
-        return len(claimed)
+        return claimed_count
 
     def _claim(self):
         query = ClaimLineDeliveryTasksQuery(
             self._worker_identity,
             self._now(),
-            self._batch_size,
+            1,
         )
         with self._unit_of_work_factory() as unit_of_work:
             tasks = unit_of_work.delivery_tasks.claim(query)
@@ -120,11 +126,6 @@ class LineDeliveryWorker:
             )
         if outcome.outcome_type is LineProviderOutcomeType.RATE_LIMITED:
             return self._send_push(task)
-        if (
-            outcome.outcome_type is LineProviderOutcomeType.UNAVAILABLE
-            and (outcome.error_code or "").startswith("line_http_")
-        ):
-            return self._send_push(task)
         if outcome.outcome_type in {
             LineProviderOutcomeType.TIMEOUT,
             LineProviderOutcomeType.UNAVAILABLE,
@@ -147,7 +148,7 @@ class LineDeliveryWorker:
             )
 
     def _still_sendable(self, task: LineDeliveryTaskSnapshot) -> bool:
-        """Re-read the leased task so cancellation cannot race through to LINE."""
+        """Re-read cancellation and lease ownership immediately before delivery."""
         if task.lease is None:
             return False
         with self._unit_of_work_factory() as unit_of_work:
@@ -158,6 +159,8 @@ class LineDeliveryWorker:
             and current.lease is not None
             and current.lease.owner == task.lease.owner
             and current.lease.acquired_at == task.lease.acquired_at
+            and current.lease.expires_at == task.lease.expires_at
+            and self._now() < current.lease.expires_at
         )
 
     def _manual_replay_validation_failure(
