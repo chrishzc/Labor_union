@@ -1,6 +1,6 @@
 """
 File: data_browser_admin.py
-Description: 提供 legacy table 管理與六來源 canonical Data Browser query。
+Description: 提供 bounded 唯讀 Data Browser archive query，不提供原始資料表入口。
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
@@ -8,11 +8,7 @@ from api.dependencies.admin_auth import require_system_admin
 from api.error_contracts import internal_query_error, typed_http_error
 from api.schemas.base import BaseResponse
 from api.schemas.errors import GlobalTypedErrorResponseView
-from api.schemas.data_browser import (
-    DataBrowserTableResponse,
-    DataBrowserPageView,
-)
-from infrastructure.mysql import mysql_adapter as db_service
+from api.schemas.data_browser import DataBrowserPageView
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.data_browser_query_repository import (
     DataBrowserQueryRepository,
@@ -84,26 +80,3 @@ def get_data_browser_source(
         ) from error
     finally:
         connection.close()
-
-@router.get("/{table}", response_model=BaseResponse[DataBrowserTableResponse])
-def get_data_browser_table(
-    table: str = Path(..., description="資料表名稱"),
-    principal: AdminPrincipal = Depends(require_system_admin),
-):
-    """取得資料表動態主鍵、資料列、欄位清單與權限 SSOT"""
-    try:
-        data = data_browser_maintenance.get_data_browser_table_schema(
-            table,
-            data_reader=db_service.get_table_data,
-            columns_reader=db_service.get_table_columns,
-            primary_keys=db_service.TABLE_PRIMARY_KEYS,
-        )
-        return BaseResponse(data=data, message=f"成功取得資料表 {table} 中繼資料與權限 SSOT")
-    except ValueError as ve:
-        raise HTTPException(status_code=422, detail=str(ve))
-    except Exception as error:
-        raise internal_query_error(
-            "data_browser_query_internal_error",
-            "資料表查詢失敗。",
-            "data-browser-query",
-        ) from error
