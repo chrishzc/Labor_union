@@ -20,6 +20,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - name: Set up Python 3.11
         uses: actions/setup-python@v6
         with:
@@ -27,3 +29,28 @@ jobs:
       - name: Check tracked Python files for syntax errors
         shell: bash
         run: git ls-files -z -- '*.py' | xargs -0 -r python -m py_compile
+      - name: Inspect retired supervisor dependencies without running services
+        shell: bash
+        run: |
+          python - <<'PY'
+          import re
+          import subprocess
+          from pathlib import Path
+          pattern = re.compile(r'start_fastapi_ngrok|ngrok-development|DevLineConsoleReviewer|DevReviewNotificationServer|run_streamlit|DEV_REVIEW_NOTIFY_URL|ENABLE_LINE_REVIEW_CONSOLE|_notify_development_reviewer')
+          roots = ('scripts/', 'tests/', 'api/', 'line/', 'config/', 'subsystems/', 'infrastructure/', 'ui_react/', '.arch-map/')
+          suffixes = {'.py', '.sh', '.bat', '.ps1', '.json', '.yaml', '.yml', '.md', '.ts', '.tsx', '.toml'}
+          names = subprocess.check_output(['git', 'ls-files', '-z'], text=True).split('\0')
+          for name in names:
+              path = Path(name)
+              if not name.startswith(roots) or path.suffix not in suffixes or path.name == 'package-lock.json':
+                  continue
+              hits = [str(n) for n, line in enumerate(path.read_text(encoding='utf-8').splitlines(), 1) if pattern.search(line)]
+              if hits:
+                  print('SUPERVISOR_REF', name, ','.join(hits))
+              if name.startswith('tests/') and any(word in path.name.lower() for word in ('launcher', 'streamlit', 'preflight')):
+                  print('FOCUSED_TEST_PATH', name)
+          print('AUDIT_CHECKOUT', subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip())
+          PY
+          git diff --exit-code
+          git diff --check
+          git status --short
