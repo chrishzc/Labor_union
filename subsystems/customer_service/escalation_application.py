@@ -553,8 +553,8 @@ def _admin_resolution_delivery(ticket, command, escalation_id: int, now: datetim
             f"{command.expected_escalation_version + 1}"
         ),
         command.correlation_id,
-        "customer_service_escalation",
-        str(escalation_id),
+        "customer_service_ticket",
+        str(_field(ticket, "ticket_id")),
     )
 
 
