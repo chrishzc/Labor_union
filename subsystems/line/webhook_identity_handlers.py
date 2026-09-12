@@ -108,9 +108,11 @@ class LineWebhookIdentityHandlers:
 
     def handle_follow(self, inbox, unit_of_work):
         line_user_id = _required_user_id(inbox)
-        unit_of_work.platform_users.apply_friend_event(
+        current = unit_of_work.platform_users.apply_friend_event(
             _friend_event(inbox, line_user_id, LineFriendEventType.FOLLOW)
         )
+        if current.last_event_at != inbox.event.occurred_at:
+            return
         if self._follow_scheduler is not None:
             self._follow_scheduler(inbox, unit_of_work, line_user_id)
         self._open_and_notify(
@@ -122,10 +124,11 @@ class LineWebhookIdentityHandlers:
 
     def handle_unfollow(self, inbox, unit_of_work):
         line_user_id = _required_user_id(inbox)
-        unit_of_work.platform_users.apply_friend_event(
+        current = unit_of_work.platform_users.apply_friend_event(
             _friend_event(inbox, line_user_id, LineFriendEventType.UNFOLLOW)
         )
-        unit_of_work.delivery_tasks.cancel_pending_for_recipient(line_user_id)
+        if current.last_event_at == inbox.event.occurred_at:
+            unit_of_work.delivery_tasks.cancel_pending_for_recipient(line_user_id)
 
     def handle_message(self, inbox, unit_of_work):
         if self._group_application is not None and self._group_application.handle_message(
@@ -289,24 +292,20 @@ class LineWebhookIdentityHandlers:
         unit_of_work.delivery_tasks.enqueue(delivery)
 
     def _handle_feedback_unresolved(self, inbox, unit_of_work, line_user_id) -> None:
+        from domains.customer_service.ticket import CustomerServiceCategory
+        from subsystems.customer_service.contracts import CreateCustomerServiceMessage
+
         event_identity = inbox.event.event_id.value
         correlation_id = CorrelationId(f"line-event:{event_identity}")
-        ticket_id_str = ""
-        if hasattr(unit_of_work, "customer_service") and unit_of_work.customer_service is not None:
-            try:
-                from domains.customer_service.ticket import CustomerServiceCategory
-                from subsystems.customer_service.contracts import CreateCustomerServiceMessage
-                ticket = unit_of_work.customer_service.create_or_append(
-                    CreateCustomerServiceMessage(
-                        line_user_id=line_user_id.value,
-                        category=CustomerServiceCategory.OTHER,
-                        message="LINE 知識庫問答用戶回饋未解決，請真人客服接手協助。",
-                        event_key=f"line-feedback-ticket:{event_identity}",
-                    )
-                )
-                ticket_id_str = f"（工單編號 #{ticket.ticket_id}）"
-            except Exception:
-                pass
+        ticket = unit_of_work.customer_service.create_or_append(
+            CreateCustomerServiceMessage(
+                line_user_id=line_user_id.value,
+                category=CustomerServiceCategory.OTHER,
+                message="LINE 知識庫問答用戶回饋未解決，請真人客服接手協助。",
+                event_key=f"line-feedback-ticket:{event_identity}",
+            )
+        )
+        ticket_id_str = f"（工單編號 #{ticket.ticket_id}）"
 
         delivery = _text_delivery(
             line_user_id,
