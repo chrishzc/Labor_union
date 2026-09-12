@@ -16,7 +16,7 @@ from domains.bootstrap.case_architecture import (
     BootstrapDomainError,
     PayrollPolicyKind,
     RatePolicyFacts,
-    policy_kind_for_identity,
+    payroll_policy_kind_for_case,
 )
 from domains.case_import.case_import import (
     CaseImportCandidate,
@@ -26,6 +26,7 @@ from domains.case_import.case_import import (
     HcmIdentityFacts,
     ProvisionalRegistrationFacts,
 )
+from domains.case_import.order_information import project_order_information
 from infrastructure.mysql.case_architecture_bootstrap_repository import (
     MySqlCaseArchitectureBootstrapRepository,
 )
@@ -82,9 +83,22 @@ class MySqlCaseImportRepository:
     def load(self, intent, *, for_update):
         with _mysql_cursor(self._connection) as cursor:
             exists = _case_exists(cursor, intent.case_no, lock=for_update)
-            policy = _load_rate_policy(cursor, intent, lock=for_update)
+            multi_birth_count = _load_multi_birth_count(
+                cursor, intent, lock=for_update
+            )
+            policy = _load_rate_policy(
+                cursor,
+                intent,
+                multi_birth_count,
+                lock=for_update,
+            )
             registration = _load_provisional_registration(cursor, intent, lock=for_update)
-        return CaseImportFacts(exists, policy, registration)
+        return CaseImportFacts(
+            exists,
+            policy,
+            registration,
+            multi_birth_count,
+        )
 
     def claim_command(self, command, command_fingerprint):
         with _mysql_cursor(self._connection) as cursor:
@@ -276,12 +290,35 @@ def _load_provisional_registration(cursor, intent, *, lock):
     )
 
 
-def _load_rate_policy(cursor, intent, *, lock):
+def _load_multi_birth_count(cursor, intent, *, lock) -> str | None:
+    if intent.provisional_registration_id is None:
+        return None
+    suffix = " FOR UPDATE" if lock else ""
+    cursor.execute(
+        "SELECT record.survey_details FROM provisional_client_registrations registration "
+        "JOIN beclass_records record ON record.id=registration.beclass_record_id "
+        "WHERE registration.id=%s" + suffix,
+        (intent.provisional_registration_id,),
+    )
+    row = cursor.fetchone()
+    if not isinstance(row, Mapping):
+        return None
+    projection = project_order_information(row["survey_details"])
+    if projection.issues.get("multi_birth_count") is not None:
+        return None
+    value = projection.values["multi_birth_count"]
+    return value if isinstance(value, str) else None
+
+
+def _load_rate_policy(cursor, intent, multi_birth_count, *, lock):
     if intent.bootstrap is None:
         return None
     identity = str(_client_attribute(intent, "identity_status"))
     try:
-        policy_kind = policy_kind_for_identity(identity)
+        policy_kind = payroll_policy_kind_for_case(
+            identity,
+            multi_birth_count,
+        )
     except BootstrapDomainError as error:
         raise CaseImportDomainError(
             CaseImportIssue.BOOTSTRAP_BLOCKED,

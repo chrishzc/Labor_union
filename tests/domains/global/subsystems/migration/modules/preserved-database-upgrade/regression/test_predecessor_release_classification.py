@@ -71,3 +71,29 @@ def test_1013_accepts_exact_historical_accounting_check_successor() -> None:
     assert migration.local_additive_descriptor_state(
         snapshot, descriptor, ORDER_LIFECYCLE_ARTIFACT
     ) == "drift"
+
+
+def test_104_accepts_exact_historical_accounting_check_successor() -> None:
+    predecessor = "104_order_lifecycle_state_history.sql"
+    historical_descriptor = migration._canonical_artifact_descriptor(
+        HISTORICAL_ACCOUNTING_ARTIFACT
+    )
+    allowed_successors = migration._allowed_later_artifact_checks(predecessor)
+    check_keys = (
+        (
+            "order_lifecycle_state_events",
+            "chk_order_lifecycle_state_event_before_status",
+        ),
+        (
+            "order_lifecycle_state_events",
+            "chk_order_lifecycle_state_event_after_status",
+        ),
+    )
+
+    assert {
+        key: allowed_successors[key]
+        for key in check_keys
+    } == {
+        key: historical_descriptor["checks"][key]
+        for key in check_keys
+    }

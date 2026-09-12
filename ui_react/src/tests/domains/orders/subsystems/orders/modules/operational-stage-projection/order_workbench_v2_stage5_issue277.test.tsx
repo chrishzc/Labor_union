@@ -5,7 +5,8 @@ import { OrderFormalRecommendationPanel } from '../../../../../../../components/
 const mocks = vi.hoisted(() => ({
   queryPlan: vi.fn(),
   queryContactState: vi.fn(),
-  sendCustomerProfiles: vi.fn(),
+  previewCustomerConfirmation: vi.fn(),
+  sendCustomerConfirmation: vi.fn(),
 }));
 
 vi.mock('../../../../../../../api/scheduling/waiting_deposit_lock_client', () => ({
@@ -16,7 +17,8 @@ vi.mock('../../../../../../../api/scheduling/waiting_deposit_lock_client', () =>
 vi.mock('../../../../../../../api/scheduling/matching_plan_communication_client', () => ({
   matchingPlanCommunicationClient: {
     queryContactState: mocks.queryContactState,
-    sendCustomerProfiles: mocks.sendCustomerProfiles,
+    previewCustomerConfirmation: mocks.previewCustomerConfirmation,
+    sendCustomerConfirmation: mocks.sendCustomerConfirmation,
   },
 }));
 vi.mock('../../../../../../../api/scheduling/candidate_contact_pool_client', () => ({
@@ -71,6 +73,7 @@ function contactState() {
     all_willing: true,
     customer_decision: 'pending',
     customer_profiles_status: customerProfilesStatus,
+    customer_confirmation_status: customerProfilesStatus,
     customer_profiles_manual_confirmation: null,
   };
 }
@@ -82,7 +85,14 @@ describe('issue #277 stage-5 customer recommendation ordering', () => {
     communicationVersion = 4;
     mocks.queryPlan.mockImplementation(async () => activePlan());
     mocks.queryContactState.mockImplementation(async () => structuredClone(contactState()));
-    mocks.sendCustomerProfiles.mockImplementation(async () => {
+    mocks.previewCustomerConfirmation.mockImplementation(async (_caseNo, _planId, expectedVersion) => ({
+      case_no: CASE_NO, plan_id: 51, expected_version: expectedVersion,
+      order_information_1_ready: true, order_information_2_ready: true,
+      weekly_service_ready: true, weekly_service_row_count: 3,
+      caregiver_resumes: [{ staff_id: 8892, staff_name: '測試月嫂', ready: true, filename: 'resume-A.pdf', version: 1, blocker: null }],
+      blockers: [], send_allowed: true,
+    }));
+    mocks.sendCustomerConfirmation.mockImplementation(async () => {
       customerProfilesStatus = 'pending';
       communicationVersion = 5;
       return {
@@ -97,20 +107,21 @@ describe('issue #277 stage-5 customer recommendation ordering', () => {
   it('requires profile delivery before customer accept or decline can be recorded', async () => {
     render(<OrderFormalRecommendationPanel caseNo={CASE_NO} />);
 
-    const send = await screen.findByRole('button', { name: '寄送履歷給客戶' });
-    expect(send).toBeEnabled();
+    const send = await screen.findByRole('button', { name: '寄送確認資訊給客戶' });
+    await waitFor(() => expect(send).toBeEnabled());
     expect(screen.queryByRole('button', { name: '記錄方案 51 客戶接受' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '記錄方案 51 客戶拒絕' })).not.toBeInTheDocument();
 
     fireEvent.click(send);
 
-    await waitFor(() => expect(mocks.sendCustomerProfiles).toHaveBeenCalledWith(
+    await waitFor(() => expect(mocks.sendCustomerConfirmation).toHaveBeenCalledWith(
       CASE_NO,
       51,
       4,
-      '請查收正式推薦月嫂履歷。',
+      '請查收正式推薦月嫂的完整確認資訊。',
+      expect.stringMatching(/^orders-customer-confirmation-51-/),
     ));
-    await screen.findByText('履歷發送工作已建立：#81（狀態：等待系統寄送）；尚不代表 LINE 已送達。');
+    await screen.findByText('確認資訊發送工作已建立：#81（狀態：等待系統寄送）；尚不代表 LINE 已送達。');
 
     const accept = screen.getByRole('button', { name: '記錄方案 51 客戶接受' });
     const decline = screen.getByRole('button', { name: '記錄方案 51 客戶拒絕' });

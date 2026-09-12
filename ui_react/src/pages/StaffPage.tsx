@@ -387,7 +387,10 @@ export const StaffPage: React.FC = () => {
   const [rangeStart, setRangeStart] = useState('2026-01-01');
   const [rangeEnd, setRangeEnd] = useState('2026-12-31');
   const [sliceRetryGeneration, setSliceRetryGeneration] = useState(0);
+  const [resumeNavigationRequested, setResumeNavigationRequested] = useState(false);
+  const [resumeNavigationMessage, setResumeNavigationMessage] = useState<string | null>(null);
   const mountedRef = useRef(false);
+  const resumeEditorRef = useRef<HTMLDivElement | null>(null);
   const initialRequestedRef = useRef(false);
   const requestGenerationRef = useRef(0);
   const activeControllerRef = useRef<AbortController | null>(null);
@@ -575,6 +578,30 @@ export const StaffPage: React.FC = () => {
       });
     return () => controller.abort();
   }, [selectedStaffId, sliceRetryGeneration]);
+
+  useEffect(() => {
+    if (!resumeNavigationRequested || drawerTab !== 'qualification') return undefined;
+    if (profile.status === 'error') {
+      setResumeNavigationRequested(false);
+      setResumeNavigationMessage('個人資料尚未載入，請先重試個人資料。');
+      return undefined;
+    }
+    if (profile.status !== 'ready') return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      const target = resumeEditorRef.current;
+      if (target === null) return;
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      target.focus({ preventScroll: true });
+      setResumeNavigationRequested(false);
+      setResumeNavigationMessage('已移至月嫂履歷 PDF。');
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [drawerTab, profile.status, resumeNavigationRequested, selectedStaffId]);
+
+  useEffect(() => {
+    setResumeNavigationRequested(false);
+    setResumeNavigationMessage(null);
+  }, [selectedStaff?.id]);
 
   useEffect(() => {
     if (selectedStaffId !== null && drawerTab === 'unavailability') {
@@ -1225,6 +1252,24 @@ export const StaffPage: React.FC = () => {
       >
         {selectedStaff && (
           <div className="staff-drawer-content">
+            <div className="staff-resume-shortcut">
+              <div>
+                <strong>月嫂履歷 PDF</strong>
+                <span>查看目前版本、下載或上傳新版履歷</span>
+                {resumeNavigationMessage && <span role="status">{resumeNavigationMessage}</span>}
+              </div>
+              <button
+                type="button"
+                className="staff-next-btn"
+                onClick={() => {
+                  setResumeNavigationMessage('正在開啟月嫂履歷 PDF…');
+                  setResumeNavigationRequested(true);
+                  setDrawerTab('qualification');
+                }}
+              >
+                {resumeNavigationRequested ? '正在開啟…' : '管理履歷 PDF'}
+              </button>
+            </div>
             <div className="staff-drawer-tabs-nav" role="tablist" aria-label="月嫂個人檔案分頁">
               <button
                 type="button"
@@ -1319,10 +1364,12 @@ export const StaffPage: React.FC = () => {
                         ))}
                       </ul>
                     )}
-                    <StaffRegistryEditor
-                      profile={profile.data}
-                      onUpdated={() => setSliceRetryGeneration((value) => value + 1)}
-                    />
+                    <div ref={resumeEditorRef} tabIndex={-1} className="staff-resume-editor-anchor">
+                      <StaffRegistryEditor
+                        profile={profile.data}
+                        onUpdated={() => setSliceRetryGeneration((value) => value + 1)}
+                      />
+                    </div>
                   </div>
                 )}
 

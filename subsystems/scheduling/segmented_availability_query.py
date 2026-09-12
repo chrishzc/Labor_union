@@ -83,8 +83,18 @@ def search_segmented_caregiver_availability(
     as_of: Any,
     facts_port: SegmentedAvailabilityFactsPort | None = None,
     filter_policy: dict[str, Any] | None = None,
+    include_candidate_options: bool = True,
 ) -> Dict[str, Any]:
-    return _search_availability(case_no, segment_count, segment_drafts, as_of, facts_port, filter_policy, inquiry=False)
+    return _search_availability(
+        case_no,
+        segment_count,
+        segment_drafts,
+        as_of,
+        facts_port,
+        filter_policy,
+        inquiry=False,
+        include_candidate_options=include_candidate_options,
+    )
 
 
 def search_candidate_inquiry_availability(
@@ -95,10 +105,29 @@ def search_candidate_inquiry_availability(
     filter_policy: dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """Check the planned inquiry window, never project official service dates."""
-    return _search_availability(case_no, 1, segment_drafts, as_of, facts_port, filter_policy, inquiry=True)
+    return _search_availability(
+        case_no,
+        1,
+        segment_drafts,
+        as_of,
+        facts_port,
+        filter_policy,
+        inquiry=True,
+        include_candidate_options=True,
+    )
 
 
-def _search_availability(case_no, segment_count, segment_drafts, as_of, facts_port, filter_policy, *, inquiry):
+def _search_availability(
+    case_no,
+    segment_count,
+    segment_drafts,
+    as_of,
+    facts_port,
+    filter_policy,
+    *,
+    inquiry,
+    include_candidate_options,
+):
     """Search for segmented caregiver availability for a single case."""
     if not case_no:
         raise ValueError("case_no is required")
@@ -213,12 +242,20 @@ def _search_availability(case_no, segment_count, segment_drafts, as_of, facts_po
         )
     )
 
-    required_service_dates = (
-        tuple(planned_start + timedelta(days=offset) for offset in range((planned_end - planned_start).days + 1))
-        if inquiry else _required_service_dates(
-            loaded_facts.get("confirmed_service_dates") or [], planned_start, planned_end
+    required_service_dates = ()
+    if include_candidate_options:
+        required_service_dates = (
+            tuple(
+                planned_start + timedelta(days=offset)
+                for offset in range((planned_end - planned_start).days + 1)
+            )
+            if inquiry
+            else _required_service_dates(
+                loaded_facts.get("confirmed_service_dates") or [],
+                planned_start,
+                planned_end,
+            )
         )
-    )
     result = derive_segment_availability(
         planned_start_date=planned_start.isoformat(),
         planned_end_date=planned_end.isoformat(),
@@ -235,10 +272,18 @@ def _search_availability(case_no, segment_count, segment_drafts, as_of, facts_po
         "feasibility": "complete" if result["complete_combinations"] else "partial",
         "complete_combinations": result["complete_combinations"],
         "segment_candidates": result["segment_candidates"],
-        "candidate_options": _candidate_options(result["segment_candidates"], candidate_rows,
-                                                  required_service_dates, segment_drafts,
-                                                  int(order_row.get("scheduling_version") or 0),
-                                                  filter_results),
+        "candidate_options": (
+            _candidate_options(
+                result["segment_candidates"],
+                candidate_rows,
+                required_service_dates,
+                segment_drafts,
+                int(order_row.get("scheduling_version") or 0),
+                filter_results,
+            )
+            if include_candidate_options
+            else []
+        ),
         "conflicts": result["conflicts"],
     }
 

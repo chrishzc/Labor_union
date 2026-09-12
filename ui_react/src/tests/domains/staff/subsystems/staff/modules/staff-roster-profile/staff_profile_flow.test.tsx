@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { staffDirectoryClient } from '../../../../../../../api/staff_directory/staff_directory_client';
 import { staffLifecycleClient } from '../../../../../../../api/staff_lifecycle/staff_lifecycle_client';
 import { staffProfileClient } from '../../../../../../../api/staff_profile/staff_profile_client';
+import { staffResumeClient } from '../../../../../../../api/staff_profile/staff_resume_client';
 import { staffQualificationMasterClient } from '../../../../../../../api/staff/qualification_master_client';
 import { StaffPage } from '../../../../../../../pages/StaffPage';
 import { STAFF_PAGE_ONE } from '../../../../../../fixtures/staff/staff_directory_contract_fixtures';
@@ -13,10 +14,12 @@ import { STAFF_QUALIFICATION_MASTER } from '../../../../../../fixtures/staff/sta
 
 describe('Staff roster profile flow', () => {
   beforeEach(() => {
+    vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(() => undefined);
     vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue(STAFF_PAGE_ONE);
     vi.spyOn(staffDirectoryClient, 'resetPagination').mockImplementation(() => undefined);
     vi.spyOn(staffLifecycleClient, 'query').mockResolvedValue(STAFF_LIFECYCLE_VIEW);
     vi.spyOn(staffProfileClient, 'query').mockResolvedValue(STAFF_PROFILE);
+    vi.spyOn(staffResumeClient, 'current').mockResolvedValue(null);
     vi.spyOn(staffQualificationMasterClient, 'query').mockResolvedValue({
       ...STAFF_QUALIFICATION_MASTER,
       service_profile: {
@@ -53,6 +56,14 @@ describe('Staff roster profile flow', () => {
     expect(screen.queryByRole('tablist', { name: '服務人員管理分頁' })).not.toBeInTheDocument();
     expect(screen.queryByTestId('staff-profile-detail')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '查看 去敏人員甲 的詳情' }));
+
+    fireEvent.click(await screen.findByRole('tab', { name: '🎯 接案偏好設定' }));
+    expect(screen.getByRole('tab', { name: '🎯 接案偏好設定' })).toHaveAttribute('aria-selected', 'true');
+    const resumeShortcut = await screen.findByRole('button', { name: '管理履歷 PDF' });
+    fireEvent.click(resumeShortcut);
+    expect(await screen.findByRole('heading', { name: '月嫂履歷 PDF' })).toBeInTheDocument();
+    await waitFor(() => expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalled());
+    expect(screen.getByText('已移至月嫂履歷 PDF。')).toBeInTheDocument();
 
     const profile = await screen.findByTestId('staff-profile-detail');
     expect(within(profile).getByRole('group', { name: '身分證' })).toHaveTextContent('A123456789');

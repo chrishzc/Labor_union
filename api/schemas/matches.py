@@ -141,7 +141,33 @@ class FormalPlanContactStateView(_ClosedModel):
     all_willing: bool
     customer_decision: Literal["pending", "accepted", "declined", "contact_requested"]
     customer_profiles_status: DeliveryStatus | None
+    customer_confirmation_status: DeliveryStatus | None
     customer_profiles_manual_confirmation: ManualProfilesEvidenceView | None
+
+
+class CustomerConfirmationResumePreviewView(_ClosedModel):
+    staff_id: PositiveInt
+    staff_name: str = Field(min_length=1, max_length=100)
+    ready: bool
+    filename: str | None = Field(default=None, min_length=1, max_length=255)
+    version: PositiveInt | None = None
+    blocker: str | None = Field(default=None, min_length=1)
+
+
+class CustomerConfirmationPreviewView(_ClosedModel):
+    case_no: str = Field(min_length=1, max_length=50)
+    plan_id: PositiveInt
+    expected_version: int = Field(ge=0)
+    order_information_1_ready: bool
+    order_information_2_ready: bool
+    weekly_service_ready: bool
+    weekly_service_row_count: int = Field(ge=0)
+    caregiver_resumes: list[CustomerConfirmationResumePreviewView] = Field(
+        min_length=1,
+        max_length=4,
+    )
+    blockers: list[str]
+    send_allowed: bool
 
 
 class MatchingPlanSegmentReceiptView(_ClosedModel):

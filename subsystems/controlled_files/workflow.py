@@ -309,6 +309,11 @@ class ControlledFileWorkflowRepository(Protocol):
 
     def list_readbacks(self) -> tuple[ControlledFileReadback, ...]: ...
 
+    def find_current_readback(
+        self, owner: ControlledFileOwner, purpose: ControlledFilePurpose,
+        subject_reference: str, object_key: str,
+    ) -> ControlledFileReadback | None: ...
+
     def get_download_reference(
         self, file_id: str
     ) -> ControlledFileDownloadReference | None: ...
@@ -441,6 +446,13 @@ class ControlledFileWorkflow:
 
     def list_readbacks(self) -> tuple[ControlledFileReadback, ...]:
         return self._repository.list_readbacks()
+
+    def find_current_readback(
+        self, owner: ControlledFileOwner, purpose: ControlledFilePurpose,
+        subject_reference: str, object_key: str,
+    ) -> ControlledFileReadback | None:
+        _validate_owner_fields(owner, purpose, subject_reference, object_key, "current-read")
+        return self._repository.find_current_readback(owner, purpose, subject_reference, object_key)
 
     def download(self, file_id: str) -> ControlledFileContent:
         if _FILE_ID.fullmatch(file_id) is None:

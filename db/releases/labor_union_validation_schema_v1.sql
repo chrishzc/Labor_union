@@ -1,5 +1,5 @@
 -- GENERATED FILE. Do not edit by hand.
--- Release: labor-union-validation-schema-2026-09-11-v32
+-- Release: labor-union-validation-schema-2026-09-12-v33
 -- Replace __LU_TEST_DATABASE__ with an explicitly confirmed lu_test_* database.
 -- Rebuild with: python scripts/build_validation_schema_release.py
 
@@ -21354,3 +21354,278 @@ ALTER TABLE contract_external_signing_sessions
         OR session_state = 'superseded'
     );
 -- END SOURCE: db/schema_parts/1034_contract_external_signing_final_pdf_completion.sql
+
+-- BEGIN SOURCE: db/schema_parts/220_twins_payroll_policy.sql
+-- Add the canonical twins Payroll policy to fresh schema assembly.
+
+ALTER TABLE assignment_payroll_rate_snapshots
+    DROP FOREIGN KEY fk_assignment_payroll_rate_policy;
+
+ALTER TABLE case_architecture_bootstrap_events
+    DROP FOREIGN KEY fk_case_architecture_bootstrap_payroll_policy;
+
+ALTER TABLE case_payroll_rate_policy_snapshots
+    DROP FOREIGN KEY fk_case_payroll_policy_definition;
+
+ALTER TABLE payroll_rate_policies
+    MODIFY COLUMN policy_kind ENUM(
+        'citizen',
+        'subsidized_citizen',
+        'non_citizen',
+        'twins'
+    ) NOT NULL;
+
+INSERT INTO payroll_rate_policies (
+    policy_version,
+    policy_kind,
+    hourly_rate_ntd,
+    effective_from,
+    effective_until
+)
+SELECT 'approved-rates-v1', 'twins', 450, '1900-01-01', NULL
+WHERE NOT EXISTS (
+    SELECT 1 FROM payroll_rate_policies
+    WHERE policy_version = 'approved-rates-v1'
+      AND policy_kind = 'twins'
+);
+
+ALTER TABLE assignment_payroll_rate_snapshots
+    MODIFY COLUMN policy_kind ENUM(
+        'citizen',
+        'subsidized_citizen',
+        'non_citizen',
+        'twins'
+    ) NOT NULL;
+
+ALTER TABLE case_architecture_bootstrap_events
+    MODIFY COLUMN payroll_policy_kind ENUM(
+        'citizen',
+        'subsidized_citizen',
+        'non_citizen',
+        'twins'
+    ) NOT NULL;
+
+ALTER TABLE case_payroll_rate_policy_snapshots
+    MODIFY COLUMN policy_kind ENUM(
+        'citizen',
+        'subsidized_citizen',
+        'non_citizen',
+        'twins'
+    ) NOT NULL;
+
+ALTER TABLE assignment_payroll_rate_snapshots
+    ADD CONSTRAINT fk_assignment_payroll_rate_policy
+        FOREIGN KEY (policy_version, policy_kind)
+        REFERENCES payroll_rate_policies(policy_version, policy_kind)
+        ON UPDATE RESTRICT ON DELETE RESTRICT;
+
+ALTER TABLE case_architecture_bootstrap_events
+    ADD CONSTRAINT fk_case_architecture_bootstrap_payroll_policy
+        FOREIGN KEY (payroll_policy_version, payroll_policy_kind)
+        REFERENCES payroll_rate_policies(policy_version, policy_kind)
+        ON UPDATE RESTRICT ON DELETE RESTRICT;
+
+ALTER TABLE case_payroll_rate_policy_snapshots
+    ADD CONSTRAINT fk_case_payroll_policy_definition
+        FOREIGN KEY (policy_version, policy_kind)
+        REFERENCES payroll_rate_policies(policy_version, policy_kind)
+        ON UPDATE RESTRICT ON DELETE RESTRICT;
+-- END SOURCE: db/schema_parts/220_twins_payroll_policy.sql
+
+-- BEGIN SOURCE: db/schema_parts/221_twins_payroll_order_details_view.sql
+-- Fresh-schema successor for the Payroll columns in v_order_details.
+-- Keep this definition synchronized with preserve release 1038.
+CREATE OR REPLACE VIEW v_order_details AS
+SELECT
+    o.case_no AS case_no,
+    o.status AS order_status,
+    o.lifecycle_version,
+    o.cancel_reason,
+    o.line_group_id,
+    o.actual_start_date,
+    o.actual_end_date,
+    o.contract_identity,
+    c.id AS client_id,
+    c.name AS client_name,
+    c.phone AS client_phone,
+    c.service_type AS service_mode,
+    s.id AS staff_id,
+    s.name AS staff_name,
+    s.phone AS staff_phone,
+    o.service_days,
+    o.service_hours_per_day,
+    c.identity_status,
+    o.floor_fee,
+    o.deposit_date,
+    o.start_date,
+    o.end_date,
+    (o.service_days * o.service_hours_per_day) AS total_hours,
+    CASE
+        WHEN c.identity_status = '一般市民' THEN 40
+        WHEN c.identity_status = '補助市民' THEN 120
+        ELSE 0
+    END AS subsidy_hours,
+    GREATEST(
+        0,
+        (o.service_days * o.service_hours_per_day) -
+        CASE
+            WHEN c.identity_status = '一般市民' THEN 40
+            WHEN c.identity_status = '補助市民' THEN 120
+            ELSE 0
+        END
+    ) AS self_pay_hours,
+    CASE
+        WHEN c.identity_status = '非市民' THEN 350
+        ELSE 300
+    END AS employer_unit_price,
+    CASE
+        WHEN c.identity_status = '補助市民' THEN 0
+        ELSE 5
+    END AS deposit_days,
+    (
+        CASE WHEN c.identity_status = '補助市民' THEN 0 ELSE 5 END *
+        CASE WHEN c.identity_status = '非市民' THEN 350 ELSE 300 END *
+        o.service_hours_per_day
+    ) AS deposit_amount,
+    (
+        CASE WHEN c.identity_status = '補助市民' THEN 0 ELSE 5 END *
+        CASE WHEN c.identity_status = '非市民' THEN 350 ELSE 300 END *
+        o.service_hours_per_day + COALESCE(o.floor_fee, 0)
+    ) AS initial_payment_payable,
+    CASE
+        WHEN o.status NOT IN ('洽談中', '訂單取消') THEN o.start_date
+        ELSE NULL
+    END AS first_payment_date,
+    CASE
+        WHEN o.status NOT IN ('洽談中', '訂單取消') THEN
+            GREATEST(
+                0,
+                o.service_days -
+                CASE WHEN c.identity_status = '補助市民' THEN 0 ELSE 5 END
+            )
+        ELSE NULL
+    END AS remaining_days,
+    CASE
+        WHEN o.status NOT IN ('洽談中', '訂單取消') THEN
+            LEAST(
+                15,
+                GREATEST(
+                    0,
+                    o.service_days -
+                    CASE WHEN c.identity_status = '補助市民' THEN 0 ELSE 5 END
+                )
+            )
+        ELSE NULL
+    END AS first_payment_days,
+    CASE
+        WHEN o.status NOT IN ('洽談中', '訂單取消') THEN
+            LEAST(
+                15,
+                GREATEST(
+                    0,
+                    o.service_days -
+                    CASE WHEN c.identity_status = '補助市民' THEN 0 ELSE 5 END
+                )
+            ) * o.service_hours_per_day *
+            CASE WHEN c.identity_status = '非市民' THEN 350 ELSE 300 END
+        ELSE NULL
+    END AS first_payment_amount,
+    CASE
+        WHEN o.status NOT IN ('洽談中', '訂單取消') AND
+             (
+                o.service_days -
+                CASE WHEN c.identity_status = '補助市民' THEN 0 ELSE 5 END - 15
+             ) > 0 THEN DATE_ADD(o.start_date, INTERVAL 15 DAY)
+        ELSE NULL
+    END AS second_payment_date,
+    CASE
+        WHEN o.status NOT IN ('洽談中', '訂單取消') THEN
+            GREATEST(
+                0,
+                o.service_days -
+                CASE WHEN c.identity_status = '補助市民' THEN 0 ELSE 5 END - 15
+            )
+        ELSE NULL
+    END AS second_payment_days,
+    CASE
+        WHEN o.status NOT IN ('洽談中', '訂單取消') THEN
+            GREATEST(
+                0,
+                o.service_days -
+                CASE WHEN c.identity_status = '補助市民' THEN 0 ELSE 5 END - 15
+            ) * o.service_hours_per_day *
+            CASE WHEN c.identity_status = '非市民' THEN 350 ELSE 300 END
+        ELSE NULL
+    END AS second_payment_amount,
+    (
+        (
+            CASE WHEN c.identity_status = '補助市民' THEN 0 ELSE 5 END *
+            CASE WHEN c.identity_status = '非市民' THEN 350 ELSE 300 END *
+            o.service_hours_per_day + COALESCE(o.floor_fee, 0)
+        ) +
+        COALESCE(
+            CASE
+                WHEN o.status NOT IN ('洽談中', '訂單取消') THEN
+                    LEAST(
+                        15,
+                        GREATEST(
+                            0,
+                            o.service_days -
+                            CASE WHEN c.identity_status = '補助市民' THEN 0 ELSE 5 END
+                        )
+                    ) * o.service_hours_per_day *
+                    CASE WHEN c.identity_status = '非市民' THEN 350 ELSE 300 END
+                ELSE 0
+            END,
+            0
+        ) +
+        COALESCE(
+            CASE
+                WHEN o.status NOT IN ('洽談中', '訂單取消') THEN
+                    GREATEST(
+                        0,
+                        o.service_days -
+                        CASE WHEN c.identity_status = '補助市民' THEN 0 ELSE 5 END - 15
+                    ) * o.service_hours_per_day *
+                    CASE WHEN c.identity_status = '非市民' THEN 350 ELSE 300 END
+                ELSE 0
+            END,
+            0
+        )
+    ) AS total_employer_self_pay_payable,
+    payroll_rate.hourly_rate_ntd AS service_unit_price,
+    CASE
+        WHEN o.status NOT IN ('洽談中', '訂單取消') THEN
+            (o.service_days * o.service_hours_per_day) *
+            payroll_rate.hourly_rate_ntd
+        ELSE NULL
+    END AS service_salary,
+    CASE
+        WHEN o.status NOT IN ('洽談中', '訂單取消') AND
+             o.end_date IS NOT NULL AND c.identity_status = '補助市民' THEN
+            DATE_ADD(LAST_DAY(DATE_ADD(o.end_date, INTERVAL 1 MONTH)), INTERVAL 15 DAY)
+        WHEN o.status NOT IN ('洽談中', '訂單取消') AND o.end_date IS NOT NULL THEN
+            DATE_ADD(LAST_DAY(o.end_date), INTERVAL 15 DAY)
+        ELSE NULL
+    END AS salary_payment_date_1,
+    CASE
+        WHEN o.status NOT IN ('洽談中', '訂單取消') THEN
+            CASE
+                WHEN c.identity_status = '一般市民' THEN 40
+                WHEN c.identity_status = '補助市民' THEN 120
+                ELSE 0
+            END * payroll_rate.hourly_rate_ntd
+        ELSE NULL
+    END AS subsidy_salary,
+    CASE
+        WHEN o.status NOT IN ('洽談中', '訂單取消') AND
+             c.identity_status != '非市民' AND o.end_date IS NOT NULL THEN
+            DATE_ADD(LAST_DAY(o.end_date), INTERVAL 5 DAY)
+        ELSE NULL
+    END AS govt_claim_date
+FROM orders o
+JOIN clients c ON o.client_id = c.id
+LEFT JOIN staff s ON o.staff_id = s.id
+LEFT JOIN case_payroll_rate_policy_snapshots payroll_rate
+    ON payroll_rate.case_no = o.case_no;
+-- END SOURCE: db/schema_parts/221_twins_payroll_order_details_view.sql

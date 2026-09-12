@@ -76,6 +76,36 @@ def customer_profiles_card(
     return canonical_line_payload_json(payload)
 
 
+def customer_confirmation_card(
+    case_no: str,
+    profiles: Sequence[Mapping[str, object]],
+    order_information_1: Sequence[Mapping[str, object]],
+    order_information_2: Sequence[Mapping[str, object]],
+    weekly_service_rows: Sequence[Mapping[str, object]],
+    resume_urls: Mapping[int, str],
+    interaction_token: str,
+    note: str,
+) -> str:
+    """One durable LINE package: canonical sheets, plan weekly rows, and PDFs."""
+    unique_profiles: dict[int, Mapping[str, object]] = {}
+    for profile in profiles:
+        staff_id = int(profile["id"])
+        unique_profiles.setdefault(staff_id, profile)
+    bubbles = [_profile_bubble(profile, resume_urls.get(staff_id)) for staff_id, profile in unique_profiles.items()]
+    bubbles.extend((
+        _text_bubble("訂單資訊－1", _package_text(order_information_1)),
+        _text_bubble("訂單資訊－2", _package_text(order_information_2)),
+        _text_bubble("每周服務中說明", _weekly_text(weekly_service_rows)),
+        _customer_decision_bubble(case_no, interaction_token, note),
+    ))
+    if len(bubbles) > 12:
+        raise ValueError("customer confirmation package exceeds LINE carousel limit")
+    return canonical_line_payload_json({
+        "type": "flex", "altText": f"案件 {case_no} 的完整確認資訊",
+        "contents": {"type": "carousel", "contents": bubbles},
+    })
+
+
 def _caregiver_fact_rows(kind, facts):
     common = (
         ("案件編號", facts.get("case_no")),
@@ -92,7 +122,7 @@ def _caregiver_fact_rows(kind, facts):
     )
 
 
-def _profile_bubble(profile):
+def _profile_bubble(profile, resume_url=None):
     name = str(profile.get("name") or "月嫂")
     rows = (
         ("居住地", profile.get("city") or "未提供"),
@@ -102,7 +132,32 @@ def _profile_bubble(profile):
         ("技能與偏好", _list_text(profile.get("special_skills"))),
     )
     body = [_title(name), *(_fact_row(label, value) for label, value in rows)]
-    return _bubble(body)
+    footer = None
+    if resume_url:
+        footer = [{"type": "button", "style": "primary", "action": {
+            "type": "uri", "label": "下載履歷 PDF", "uri": str(resume_url),
+        }}]
+    return _bubble(body, footer)
+
+
+def _text_bubble(title, text):
+    return _bubble([_title(title), {"type": "text", "text": text, "size": "sm", "wrap": True}])
+
+
+def _package_text(items):
+    return "\n\n".join(str(item.get("text") or "") for item in items) or "目前無法產生資料。"
+
+
+def _weekly_text(rows):
+    return "\n\n".join(
+        "\n".join((
+            f"週數：{row.get('week_number')}", f"序號：{row.get('serial_number')}",
+            f"市府案號：{row.get('case_no')}", f"雇主：{row.get('employer_name')}",
+            f"每週起始日：{row.get('week_start_date')}", f"每週結束日：{row.get('week_end_date')}",
+            f"服務時數：{row.get('service_hours_per_day')}", f"每周工作日數：{row.get('weekly_work_days')}",
+            f"每周工時：{row.get('weekly_hours')}",
+        )) for row in rows
+    ) or "目前無法產生每周服務中說明。"
 
 
 def _customer_decision_bubble(case_no, token, note):
@@ -217,4 +272,5 @@ __all__ = [
     "candidate_contact_information_card",
     "caregiver_information_card",
     "customer_profiles_card",
+    "customer_confirmation_card",
 ]

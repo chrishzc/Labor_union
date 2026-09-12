@@ -7,6 +7,7 @@ from typing import Annotated
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query
+from pydantic import BaseModel
 from pymysql.err import OperationalError, ProgrammingError
 
 from api.dependencies.admin_auth import require_admin, require_registry_reader
@@ -15,11 +16,17 @@ from api.dependencies.staff_case_preference_summary import (
 )
 from api.dependencies.staff_summary import get_staff_summary_application
 from api.dependencies.staff_profile import get_staff_profile_application
+from api.dependencies.controlled_files import get_controlled_file_workflow
 from api.error_contracts import internal_query_error, typed_http_error
 from api.schemas.base import BaseResponse
 from api.schemas.staff_case_preference_summary import StaffCasePreferenceSummaryView
 from api.schemas.staff_summary import StaffSummaryPageView, StaffSummaryView
 from api.schemas.staff_profile import StaffProfileView
+from subsystems.controlled_files.workflow import (
+    ControlledFileOwner,
+    ControlledFilePurpose,
+    ControlledFileWorkflow,
+)
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.staff.case_preference_summary_query import (
     StaffCasePreferenceSummaryContractError,
@@ -37,6 +44,17 @@ from subsystems.staff.profile_query import (
 )
 
 router = APIRouter(prefix="/api/v1/staff", tags=["Staff 服務人員/月嫂名冊"])
+
+
+class StaffResumeItemView(BaseModel):
+    file_id: str
+    filename: str
+    version: int
+
+
+class StaffResumeView(BaseModel):
+    staff_id: int
+    resume: StaffResumeItemView | None
 
 
 @router.get("/{staff_id}/profile", response_model=BaseResponse[StaffProfileView])
@@ -77,6 +95,38 @@ def get_staff_profile(
     return BaseResponse(
         data=StaffProfileView.model_validate(profile, from_attributes=True),
         message="成功取得服務人員個人資料",
+    )
+
+
+@router.get("/{staff_id}/resume", response_model=BaseResponse[StaffResumeView])
+def get_staff_resume(
+    staff_id: int = Path(..., ge=1),
+    principal: AdminPrincipal = Depends(require_registry_reader),
+    profile_application: StaffProfileQueryApplication = Depends(get_staff_profile_application),
+    workflow: ControlledFileWorkflow = Depends(get_controlled_file_workflow),
+) -> BaseResponse[StaffResumeView]:
+    """Return only the current logical STAFF_RESUME for one existing staff member."""
+    del principal
+    try:
+        profile_application.query(staff_id)
+    except StaffProfileNotFound as error:
+        raise HTTPException(status_code=404, detail="查無服務人員個人資料。") from error
+    current = workflow.find_current_readback(
+        ControlledFileOwner.STAFF, ControlledFilePurpose.STAFF_RESUME,
+        str(staff_id), "resume",
+    )
+    return BaseResponse(
+        data=StaffResumeView(
+            staff_id=staff_id,
+            resume=(
+                StaffResumeItemView(
+                    file_id=current.file_id,
+                    filename=current.filename,
+                    version=current.version,
+                ) if current is not None else None
+            ),
+        ),
+        message="成功取得目前月嫂履歷",
     )
 
 

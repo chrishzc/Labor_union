@@ -25,12 +25,14 @@ class PayrollPolicyKind(StrEnum):
     CITIZEN = "citizen"
     SUBSIDIZED_CITIZEN = "subsidized_citizen"
     NON_CITIZEN = "non_citizen"
+    TWINS = "twins"
 
 
 _HOURLY_RATE_BY_POLICY = {
     PayrollPolicyKind.CITIZEN: MoneyNTD(300),
     PayrollPolicyKind.SUBSIDIZED_CITIZEN: MoneyNTD(350),
     PayrollPolicyKind.NON_CITIZEN: MoneyNTD(320),
+    PayrollPolicyKind.TWINS: MoneyNTD(450),
 }
 
 

@@ -7,6 +7,7 @@
 編排 typed source intake、validation、review、dedupe、Preview／Apply 與 bootstrap；來源不完整或 ambiguous 時 fail closed／review，不猜 owner roots。
 
 ## Modules
+- `case-architecture-bootstrap` — formal case Payroll／Finance／Scheduling bootstrap; path: `modules/case-architecture-bootstrap.md`
 - `hcm-current-workbook-import` — HCM Current workbook Preview／Apply、既有案件 exact replay 與 reconciliation；path: `modules/hcm-current-workbook-import.md`
 - `staff-historical-workbook-adoption` — 月嫂歷史 workbook Preview／Apply、review intake、idempotency 與 receipt；path: `modules/staff-historical-workbook-adoption.md`
 

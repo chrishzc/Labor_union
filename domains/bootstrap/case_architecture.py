@@ -20,6 +20,7 @@ _HOURLY_RATE_BY_POLICY = {
     "citizen": MoneyNTD(300),
     "subsidized_citizen": MoneyNTD(350),
     "non_citizen": MoneyNTD(320),
+    "twins": MoneyNTD(450),
 }
 
 
@@ -34,6 +35,7 @@ class PayrollPolicyKind(StrEnum):
     CITIZEN = "citizen"
     SUBSIDIZED_CITIZEN = "subsidized_citizen"
     NON_CITIZEN = "non_citizen"
+    TWINS = "twins"
 
 
 class BootstrapMutation(StrEnum):
@@ -153,6 +155,7 @@ class CaseRootFacts:
     service_days: int
     service_hours_per_day: int
     source_identity_status: str
+    multi_birth_count: str | None = None
 
     def __post_init__(self) -> None:
         require_canonical_text(
@@ -166,6 +169,12 @@ class CaseRootFacts:
             "source identity status",
             _IDENTITY_MAXIMUM_LENGTH,
         )
+        if self.multi_birth_count is not None:
+            require_canonical_text(
+                self.multi_birth_count,
+                "multi-birth count",
+                _IDENTITY_MAXIMUM_LENGTH,
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -297,6 +306,19 @@ def policy_kind_for_identity(identity_status: str) -> PayrollPolicyKind:
     return policy_kind
 
 
+def payroll_policy_kind_for_case(
+    identity_status: str,
+    multi_birth_count: str | None,
+) -> PayrollPolicyKind:
+    if is_twin_case(multi_birth_count):
+        return PayrollPolicyKind.TWINS
+    return policy_kind_for_identity(identity_status)
+
+
+def is_twin_case(multi_birth_count: str | None) -> bool:
+    return multi_birth_count == "雙胞胎"
+
+
 def _validate_case_identity(facts, intent) -> None:
     if facts.order.case_no == intent.case_no:
         return
@@ -348,8 +370,9 @@ def _require_rate_policy(facts, intent) -> RatePolicyFacts:
             BootstrapIssue.RATE_POLICY_NOT_FOUND,
             "No effective Payroll rate policy exists for the case.",
         )
-    expected_kind = policy_kind_for_identity(
-        facts.order.source_identity_status
+    expected_kind = payroll_policy_kind_for_case(
+        facts.order.source_identity_status,
+        facts.order.multi_birth_count,
     )
     if rate_policy.policy_version != intent.payroll_policy_version:
         _raise_rate_policy_not_found()
@@ -405,6 +428,7 @@ def _candidate_fingerprint(
             "case_no": intent.case_no,
             "order_version": order.order_version,
             "source_identity_status": order.source_identity_status,
+            "multi_birth_count": order.multi_birth_count,
             "client_payment_terms": _client_terms_payload(
                 intent.client_payment_terms
             ),

@@ -14,10 +14,13 @@
   - `domains/scheduling/matching_coordination.py`
   - `domains/scheduling/candidate_contact_response.py` — 候選確認資訊、條件調整、沒有意願與受影響 criteria 的 typed 規則。
   - `subsystems/scheduling/matching_coordination_contracts.py`
+  - `subsystems/scheduling/matching_notification_contracts.py` — formal matching contact、customer confirmation preview 與 durable notification typed contracts。
   - `subsystems/scheduling/matching_plan_workflow.py`
   - `subsystems/scheduling/segmented_availability_query.py`
   - `subsystems/scheduling/candidate_contact_pool_workflow.py` — 初步候選加入及聯絡重新檢查預計期間 availability；客戶同意日期調整後的重新聯絡會以 current Orders 日期重驗完整 coverage，在同一交易更新 contact period／fingerprint、留存前後日期事件並排入新卡，但不建立正式服務日期。
   - `subsystems/scheduling/matching_line_cards.py` — 候選資訊與正式媒合的 pure Flex renderer。
+  - `subsystems/scheduling/proposed_weekly_service_projection.py` — proposed formal plan 以 Monday–Sunday 與實際 work dates 語意產生每周服務中投影；不讀 effective schedule。
+  - `subsystems/scheduling/customer_confirmation_download.py` — 由 confirmation package 簽發、到期即失效且檔案範圍受限的客戶履歷下載 reference。
   - `subsystems/line/candidate_contact_postback_application.py` — 將候選資訊卡片回覆轉交給 recipient-bound owner adapter。
   - `subsystems/line/candidate_contact_response_application.py` — 驗證 candidate/customer LIFF recipient，追加結構化回應並建立直接協調 delivery task。
   - `subsystems/line/candidate_contact_coordination_worker.py` — 以 provider sent time 處理 24 小時逾期、willing short-circuit、全池完成後的調整彙整，以及「非空已聯繫池全員終結、零調整條件或客戶已回覆可以／無法調整」的工會人工跟進衍生查詢與一次性群組通知；另投影 exact accepted adjustment、受影響候選與 post-answer Orders Terms receipt gate，供工會完成正式修改後再重新詢問月嫂。
@@ -33,6 +36,7 @@
   - `infrastructure/mysql/segmented_availability_repository.py`
   - `infrastructure/mysql/candidate_contact_pool_line_reply_repository.py` — 以已送出資訊事件和 staff LINE identity 重新驗證回覆後，追加意願事件；原 24 小時內本人可用新事件更正自己的意願，current projection 採每位候選最新回覆，其他候選已願意時仍拒絕。
   - `infrastructure/mysql/matching_holiday_work_agreement_repository.py` — immutable current-plan agreement evidence 與 accepted-date readback。
+  - `infrastructure/mysql/matching_notification_repository.py` — current Stage 5 confirmation package 的 plan/履歷/order-information/proposed-weekly preflight projection。
 - entrypoints:
   - `api/routes/caregiver_segment_availability.py` — 候選詢問 `/candidate-contact-pool/availability/search` 與正式分段查詢分離；詢問只接受單人查詢。
   - `api/routes/line_candidate_contact.py`、`api/schemas/line_candidate_contact.py` — recipient-bound candidate/customer query/submit contract 與 LIFF page。
@@ -43,7 +47,7 @@
   - `api/schemas/matching_coordination.py`
   - `ui_react/src/api/matching_coordination/matching_coordination_client.ts` — isolated-tested transport client; no current App route consumer.
   - `ui_react/src/components/MatchingCoordinationWorkbench.tsx` — isolated-tested workbench; no current App route consumer.
-  - `api/routes/matches.py`、`api/schemas/matches.py` — `/holiday-work-agreements/preview` 與 Apply contract。
+  - `api/routes/matches.py`、`api/schemas/matches.py` — `/holiday-work-agreements/preview`、Stage 5 customer confirmation 與到期履歷 download contract。
   - `ui_react/src/api/scheduling/matching_plan_communication_client.ts`、`ui_react/src/components/HolidayWorkAgreementActions.tsx`、`ui_react/src/components/OrderFormalRecommendationPanel.tsx` — current Order Workbench V2 的人工協調 UI；不宣稱為 LINE delivery/reply。
   - `db/schema_parts/1032_matching_holiday_work_agreements.sql` — additive immutable agreement and participant records.
   - `scripts/run_holiday_work_agreement_scenario.py` — disposable `lu_test_*` scenario runner；透過 typed public API 驗證任意假日排班拒絕、雙方同意後納入服務日，以及後續拒絕立即撤銷。

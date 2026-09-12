@@ -96,6 +96,9 @@ def run_manifest_verifications(
 
 def _post_schema_verification_validators(
     owned_objects: Mapping[str, Any],
+    *,
+    config: DatabaseConfig | SeparateDatabaseConfig | None = None,
+    candidate: str | None = None,
 ) -> dict[str, Callable[[], Mapping[str, Any]]]:
     """Bind each released post-schema contract to its owned artifacts."""
 
@@ -117,16 +120,109 @@ def _post_schema_verification_validators(
 
         def validate(
             names: tuple[str, ...] = selected_names,
+            contract_id: str = verification_id,
         ) -> Mapping[str, Any]:
             states = {name: owned_objects.get(name) for name in names}
             if not states or any(state != "exact" for state in states.values()):
                 raise UpgradeBlocked(
                     "post-schema owned objects are not exact: " + str(states)
                 )
-            return {"status": "passed", "owned_objects": states}
+            evidence: dict[str, Any] = {
+                "status": "passed", "owned_objects": states,
+            }
+            if contract_id == "twins-payroll-policy-enums-and-approved-rate-exact":
+                if config is None or candidate is None:
+                    raise UpgradeBlocked(
+                        "twins Payroll post-schema verification requires candidate access"
+                    )
+                evidence["approved_twins_policy"] = (
+                    _verify_twins_payroll_policy_seed(config, candidate)
+                )
+            return evidence
 
         validators[verification_id] = validate
     return validators
+
+
+def _verify_twins_payroll_policy_seed(
+    config: DatabaseConfig | SeparateDatabaseConfig,
+    candidate: str,
+) -> Mapping[str, Any]:
+    """Verify the immutable approved twins rate inserted by release 1037."""
+    connection = config.connect(candidate)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT hourly_rate_ntd, effective_from, effective_until "
+                "FROM payroll_rate_policies "
+                "WHERE policy_version=%s AND policy_kind=%s",
+                ("approved-rates-v1", "twins"),
+            )
+            row = cursor.fetchone()
+    finally:
+        connection.close()
+    if not isinstance(row, Mapping):
+        raise UpgradeBlocked("approved twins Payroll policy is missing")
+    if (
+        int(row.get("hourly_rate_ntd") or 0) != 450
+        or str(row.get("effective_from")) != "1900-01-01"
+        or row.get("effective_until") is not None
+    ):
+        raise UpgradeBlocked("approved twins Payroll policy is not canonical")
+    return {
+        "policy_version": "approved-rates-v1",
+        "policy_kind": "twins",
+        "hourly_rate_ntd": 450,
+        "effective_from": "1900-01-01",
+        "effective_until": None,
+    }
+
+
+def _payroll_rate_policy_rows(
+    config: DatabaseConfig | SeparateDatabaseConfig,
+    database: str,
+    *,
+    exclude_twins_policy: bool,
+) -> list[dict[str, Any]]:
+    """Read the complete immutable Payroll policy projection in key order."""
+    connection = config.connect(database)
+    try:
+        with connection.cursor() as cursor:
+            sql = (
+                "SELECT policy_version, policy_kind, hourly_rate_ntd, "
+                "effective_from, effective_until, created_at "
+                "FROM payroll_rate_policies"
+            )
+            parameters: tuple[str, ...] = ()
+            if exclude_twins_policy:
+                sql += " WHERE NOT (policy_version=%s AND policy_kind=%s)"
+                parameters = ("approved-rates-v1", "twins")
+            cursor.execute(sql + " ORDER BY policy_version, policy_kind", parameters)
+            return [dict(row) for row in cursor.fetchall()]
+    finally:
+        connection.close()
+
+
+def _verify_twins_payroll_policy_seed_preserves_source(
+    config: DatabaseConfig | SeparateDatabaseConfig,
+    source: str,
+    candidate: str,
+) -> Mapping[str, Any]:
+    """Allow only the released twins seed row while preserving every source policy."""
+    source_rows = _payroll_rate_policy_rows(
+        config, source, exclude_twins_policy=False
+    )
+    candidate_source_rows = _payroll_rate_policy_rows(
+        config, candidate, exclude_twins_policy=True
+    )
+    if candidate_source_rows != source_rows:
+        raise UpgradeBlocked("preserved Payroll policy rows changed")
+    seeded_policy = _verify_twins_payroll_policy_seed(config, candidate)
+    return {
+        "mode": "verified_system_seed_and_source_policy_preservation",
+        "preserved_source_row_count": len(source_rows),
+        "seeded_policy": seeded_policy,
+    }
 
 
 def restart_and_run_read_smoke(
@@ -247,6 +343,7 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_09_09_contract_external_signing_final_pdf_completion_v1.json",
     "labor_union_2026_09_09_weekly_report_metrics_v1.json",
     "labor_union_2026_09_11_registry_owner_mutations_v1.json",
+    "labor_union_2026_09_11_twins_payroll_policy_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -413,7 +510,10 @@ RELEASE_MANIFEST = _legacy_release_selection()
 
 
 def configure_release_manifests(
-    manifest_paths: Iterable[Path], *, include_backfills: bool = True,
+    manifest_paths: Iterable[Path],
+    *,
+    include_backfills: bool = True,
+    backfill_release_ids: frozenset[str] | None = None,
 ) -> None:
     """Select a validated, ordered manifest chain for the current process."""
 
@@ -442,7 +542,13 @@ def configure_release_manifests(
             item for manifest in manifests for item in manifest.schema_artifacts
         ),
         backfills=(
-            tuple(item for manifest in manifests for item in manifest.backfills)
+            tuple(
+                item
+                for manifest in manifests
+                if backfill_release_ids is None
+                or manifest.release_id in backfill_release_ids
+                for item in manifest.backfills
+            )
             if include_backfills
             else ()
         ),
@@ -533,7 +639,10 @@ def _configure_default_release_manifests() -> None:
     release_directory = ROOT / "db" / "migration_releases"
     configure_release_manifests(
         (release_directory / name for name in DEFAULT_RELEASE_MANIFESTS),
-        include_backfills=False,
+        include_backfills=True,
+        backfill_release_ids=frozenset(
+            {"labor-union-twins-payroll-policy-2026-09-11-v1"}
+        ),
     )
 
 
@@ -1669,6 +1778,20 @@ def _owned_classification(
     legacy_knowledge_state = _legacy_knowledge_schema_state(snapshot)
     result: dict[str, str] = {}
     for part, expected in OWNED_OBJECTS.items():
+        if part == "1038_twins_payroll_order_details_view.sql":
+            result[part] = _twins_payroll_order_details_view_state(
+                snapshot.get("views", ()), expected
+            )
+            continue
+        if expected.get("views"):
+            result[part] = _descriptor_presence_state(
+                expected,
+                present_columns,
+                present_triggers,
+                snapshot.get("views", ()),
+                defer_missing_triggers=defer_missing_triggers,
+            )
+            continue
         if {"indexes", "foreign_keys", "checks"} <= set(expected):
             result[part] = _release_descriptor_metadata_state(
                 snapshot,
@@ -1685,15 +1808,6 @@ def _owned_classification(
                 "reclassification_events" in trigger for trigger in present_triggers
             )
             result[part] = "partial" if has_retired_table or has_retired_trigger else "absent"
-            continue
-        if expected.get("views"):
-            result[part] = _descriptor_presence_state(
-                expected,
-                present_columns,
-                present_triggers,
-                snapshot.get("views", ()),
-                defer_missing_triggers=defer_missing_triggers,
-            )
             continue
         if (
             part in {
@@ -1770,6 +1884,25 @@ def _owned_classification(
             defer_missing_triggers=defer_missing_triggers,
         )
     return result
+
+
+def _twins_payroll_order_details_view_state(
+    present_views: Iterable[Mapping[str, Any]],
+    descriptor: Mapping[str, Any],
+) -> str:
+    actual = {
+        str(view["table_name"]): _view_definition_digest(view["view_definition"])
+        for view in present_views
+    }.get("v_order_details")
+    if actual is None:
+        return "absent"
+    target = descriptor["views"]["v_order_details"]["definition_sha256"]
+    if actual == target:
+        return "exact"
+    predecessor = "4d8fc34c1d50b85d0cd426a0ce3f5fc9d1eee8eede8d6c46943e4cae94577aba"
+    if actual == predecessor:
+        return "absent"
+    return "drift"
 
 
 def _descriptor_presence_state(
@@ -2074,6 +2207,48 @@ def _modified_parent_predecessor_absent_state(
                 },
             },
         },
+        "1037_twins_payroll_policy.sql": {
+            "payroll_rate_policies": {
+                "policy_kind": {
+                    "column_type": (
+                        "enum('citizen','subsidized_citizen','non_citizen')"
+                    ),
+                    "is_nullable": "NO",
+                    "column_default": None,
+                    "extra": "",
+                },
+            },
+            "assignment_payroll_rate_snapshots": {
+                "policy_kind": {
+                    "column_type": (
+                        "enum('citizen','subsidized_citizen','non_citizen')"
+                    ),
+                    "is_nullable": "NO",
+                    "column_default": None,
+                    "extra": "",
+                },
+            },
+            "case_architecture_bootstrap_events": {
+                "payroll_policy_kind": {
+                    "column_type": (
+                        "enum('citizen','subsidized_citizen','non_citizen')"
+                    ),
+                    "is_nullable": "NO",
+                    "column_default": None,
+                    "extra": "",
+                },
+            },
+            "case_payroll_rate_policy_snapshots": {
+                "policy_kind": {
+                    "column_type": (
+                        "enum('citizen','subsidized_citizen','non_citizen')"
+                    ),
+                    "is_nullable": "NO",
+                    "column_default": None,
+                    "extra": "",
+                },
+            },
+        },
     }.get(artifact)
     if predecessor_columns is None:
         return None
@@ -2109,7 +2284,7 @@ def _modified_parent_predecessor_absent_state(
         successor_only,
         artifact,
         defer_missing_triggers=defer_missing_triggers,
-    ) == "absent":
+    ) in {"absent", "exact"}:
         return "absent"
     return None
 
@@ -4985,6 +5160,44 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
             "non_unique": 0,
             "columns": ("account_no",),
         }
+    if part_name == "1037_twins_payroll_policy.sql":
+        policy_kind = _column_contract(
+            "enum('citizen','subsidized_citizen','non_citizen','twins')",
+            "NO",
+        )
+        descriptor["parent_columns"] = {
+            "payroll_rate_policies": {"policy_kind": policy_kind},
+            "assignment_payroll_rate_snapshots": {"policy_kind": policy_kind},
+            "case_architecture_bootstrap_events": {
+                "payroll_policy_kind": policy_kind
+            },
+            "case_payroll_rate_policy_snapshots": {
+                "policy_kind": policy_kind
+            },
+        }
+        descriptor["foreign_keys"] = {
+            ("assignment_payroll_rate_snapshots", "fk_assignment_payroll_rate_policy"): {
+                "columns": ("policy_version", "policy_kind"),
+                "referenced_table": "payroll_rate_policies",
+                "referenced_columns": ("policy_version", "policy_kind"),
+                "update_rule": "RESTRICT",
+                "delete_rule": "RESTRICT",
+            },
+            ("case_architecture_bootstrap_events", "fk_case_architecture_bootstrap_payroll_policy"): {
+                "columns": ("payroll_policy_version", "payroll_policy_kind"),
+                "referenced_table": "payroll_rate_policies",
+                "referenced_columns": ("policy_version", "policy_kind"),
+                "update_rule": "RESTRICT",
+                "delete_rule": "RESTRICT",
+            },
+            ("case_payroll_rate_policy_snapshots", "fk_case_payroll_policy_definition"): {
+                "columns": ("policy_version", "policy_kind"),
+                "referenced_table": "payroll_rate_policies",
+                "referenced_columns": ("policy_version", "policy_kind"),
+                "update_rule": "RESTRICT",
+                "delete_rule": "RESTRICT",
+            },
+        }
     if part_name == "1028_historical_service_accounting.sql":
         historical_statuses = (
             "enum('待補件','洽談中','訂單成立','服務中','訂單完成','訂單取消',"
@@ -5540,6 +5753,7 @@ def _release_descriptor_metadata_state(
         "1027_historical_order_pairing_resolution_reused.sql",
         "1028_historical_service_accounting.sql",
         "1033_matching_holiday_work_agreements.sql",
+        "1037_twins_payroll_policy.sql",
     }:
         if released.get("parent_columns") != canonical.get("parent_columns"):
             raise UpgradeBlocked(
@@ -6468,10 +6682,16 @@ def _allowed_later_artifact_checks(
 ) -> dict[tuple[str, str], str]:
     """Return checks whose exact shape is owned by a declared successor."""
     if part_name == "104_order_lifecycle_state_history.sql":
-        successor = _canonical_artifact_descriptor(
+        pending_status_successor = _canonical_artifact_descriptor(
             "1013_order_lifecycle_pending_status_constraint.sql"
         )
-        return dict(successor["checks"])
+        historical_accounting_successor = _canonical_artifact_descriptor(
+            "1028_historical_service_accounting.sql"
+        )
+        return {
+            **pending_status_successor["checks"],
+            **historical_accounting_successor["checks"],
+        }
     if part_name == "1003_matching_coordination_successor.sql":
         # 1023 intentionally evolves this existing CHECK while adding its own
         # safe-link roots. Derive the clause from the hash-bound SQL artifact so
@@ -7299,23 +7519,29 @@ def run_candidate_post_schema(
     if server_identity(config, candidate)["database"] != candidate:
         raise UpgradeBlocked("post-schema target is not candidate")
     if _uses_catalog_post_schema_contract():
-        if getattr(RELEASE_MANIFEST, "backfills", ()):
-            raise UpgradeBlocked(
-                "manifest backfill execution is not supported by this runner"
-            )
+        backfill_receipts = _run_manifest_backfills(
+            config,
+            candidate,
+            operation_receipt_path,
+            mysql_container=mysql_container,
+        )
         owned_objects = receipt.get("owned_objects")
         verification_receipts = ()
         if isinstance(owned_objects, Mapping):
             verification_receipts = run_manifest_verifications(
                 RELEASE_MANIFEST.verification_contracts,
                 phase="post-schema",
-                validators=_post_schema_verification_validators(owned_objects),
+                validators=_post_schema_verification_validators(
+                    owned_objects,
+                    config=config,
+                    candidate=candidate,
+                ),
             )
         receipt.update(
             status="backfilled",
             phase="post_schema_complete",
             backfilled_at=_now(),
-            backfills=(),
+            backfills=backfill_receipts,
             post_schema_verification_receipts=tuple(
                 {
                     "verification_id": item.verification_id,
@@ -7453,6 +7679,105 @@ def run_candidate_post_schema(
     )
     write_receipt(operation_receipt_path, receipt)
     return receipt
+
+
+def _run_manifest_backfills(
+    config: DatabaseConfig | SeparateDatabaseConfig,
+    candidate: str,
+    operation_receipt_path: Path,
+    *,
+    mysql_container: str | None,
+) -> tuple[dict[str, Any], ...]:
+    backfills = tuple(getattr(RELEASE_MANIFEST, "backfills", ()))
+    if not backfills:
+        return ()
+    artifact_dir = operation_receipt_path.expanduser().resolve().parent
+    backup_path = artifact_dir / f"{candidate}.pre_backfill.sql"
+    backup = _candidate_preddl_dump(
+        config,
+        candidate,
+        backup_path,
+        mysql_container=mysql_container,
+    )
+    candidate_config = _candidate_connection_config(config, candidate)
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "DB_HOST": candidate_config.host,
+            "DB_PORT": str(candidate_config.port),
+            "DB_USER": candidate_config.user,
+            "DB_PASSWORD": candidate_config.password,
+            "DB_DATABASE": candidate,
+        }
+    )
+    receipts: list[dict[str, Any]] = []
+    for backfill in backfills:
+        safe_id = re.sub(r"[^A-Za-z0-9_.-]", "_", backfill.backfill_id)
+        plan_path = artifact_dir / f"{candidate}.{safe_id}.plan.json"
+        apply_path = artifact_dir / f"{candidate}.{safe_id}.apply.json"
+        verify_path = artifact_dir / f"{candidate}.{safe_id}.verify.json"
+        artifact_path = (ROOT / backfill.artifact.relative_path).resolve()
+        if artifact_path.suffix.casefold() != ".py":
+            raise UpgradeBlocked("manifest backfill artifact must be Python")
+        phase_results: dict[str, dict[str, Any]] = {}
+        for mode, arguments, receipt_path in (
+            ("dry-run", backfill.dry_run_arguments, plan_path),
+            ("apply", backfill.apply_arguments, apply_path),
+            ("verify", backfill.verify_arguments, verify_path),
+        ):
+            replacements = {
+                "{backup}": str(backup_path),
+                "{candidate}": candidate,
+                "{plan}": str(plan_path),
+                "{receipt}": str(receipt_path),
+            }
+            command = [
+                sys.executable,
+                str(artifact_path),
+                *(replacements.get(argument, argument) for argument in arguments),
+            ]
+            completed = subprocess.run(
+                command,
+                cwd=ROOT,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=environment,
+                check=False,
+            )
+            if completed.returncode != 0:
+                raise UpgradeBlocked(
+                    f"manifest backfill {backfill.backfill_id} {mode} failed"
+                )
+            result = read_receipt(receipt_path)
+            expected_status = {
+                "dry-run": "planned",
+                "apply": "committed",
+                "verify": "verified",
+            }[mode]
+            if (
+                result.get("contract") != backfill.receipt_contract
+                or result.get("mode") != mode
+                or result.get("database") != candidate
+                or result.get("receipt_status") != expected_status
+            ):
+                raise UpgradeBlocked(
+                    f"manifest backfill {backfill.backfill_id} {mode} receipt invalid"
+                )
+            phase_results[mode] = {
+                "path": str(receipt_path),
+                "sha256": _sha256_file(receipt_path),
+                "dataset_fingerprint": result.get("dataset_fingerprint"),
+                "receipt_status": expected_status,
+            }
+        receipts.append(
+            {
+                "backfill_id": backfill.backfill_id,
+                "receipt_contract": backfill.receipt_contract,
+                "candidate_pre_backfill_dump": backup,
+                "phases": phase_results,
+            }
+        )
+    return tuple(receipts)
 
 
 def _uses_catalog_post_schema_contract() -> bool:
@@ -7903,6 +8228,100 @@ def _knowledge_source_identity_rows(
         connection.close()
 
 
+def _verified_manifest_backfill_receipt(
+    operation_receipt: Mapping[str, Any], backfill_id: str
+) -> Mapping[str, Any] | None:
+    matches = [
+        item
+        for item in (operation_receipt.get("backfills") or ())
+        if item.get("backfill_id") == backfill_id
+    ]
+    if len(matches) != 1:
+        return None
+    phase = (matches[0].get("phases") or {}).get("verify") or {}
+    path_value = phase.get("path")
+    if not path_value:
+        return None
+    path = Path(str(path_value)).expanduser().resolve()
+    if not path.is_file() or _sha256_file(path) != phase.get("sha256"):
+        raise UpgradeBlocked("twins Payroll verify receipt changed")
+    result = read_receipt(path)
+    if (
+        result.get("contract") != "twins-payroll-rate-snapshot-backfill/v1"
+        or result.get("mode") != "verify"
+        or result.get("receipt_status") != "verified"
+        or result.get("unresolved")
+        or result.get("insertions")
+    ):
+        raise UpgradeBlocked("twins Payroll verify receipt is invalid")
+    return result
+
+
+def _assignment_payroll_snapshot_rows(
+    config: DatabaseConfig,
+    database: str,
+) -> list[dict[str, Any]]:
+    connection = config.connect(database)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT assignment_id,policy_version,policy_kind,hourly_rate_ntd,"
+                "source_identity_status,created_at "
+                "FROM assignment_payroll_rate_snapshots ORDER BY assignment_id"
+            )
+            return [dict(row) for row in cursor.fetchall()]
+    finally:
+        connection.close()
+
+
+def _verify_twins_assignment_snapshot_backfill(
+    config: DatabaseConfig,
+    source: str,
+    candidate: str,
+    verify_receipt: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    source_rows = _assignment_payroll_snapshot_rows(config, source)
+    candidate_rows = _assignment_payroll_snapshot_rows(config, candidate)
+    source_by_id = {int(row["assignment_id"]): row for row in source_rows}
+    candidate_by_id = {int(row["assignment_id"]): row for row in candidate_rows}
+    if any(candidate_by_id.get(identity) != row for identity, row in source_by_id.items()):
+        raise UpgradeBlocked("preserved assignment Payroll snapshots changed")
+    added_ids = sorted(set(candidate_by_id) - set(source_by_id))
+    allowed_cases = set(verify_receipt.get("twin_cases") or ())
+    if not added_ids:
+        return {"mode": "verified_noop_twins_snapshot_backfill", "added_ids": []}
+    connection = config.connect(candidate)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT id,case_no FROM case_staff_assignments WHERE id IN ("
+                + ",".join(["%s"] * len(added_ids))
+                + ") ORDER BY id",
+                tuple(added_ids),
+            )
+            assignment_cases = {
+                int(row["id"]): str(row["case_no"]) for row in cursor.fetchall()
+            }
+    finally:
+        connection.close()
+    for assignment_id in added_ids:
+        row = candidate_by_id[assignment_id]
+        if (
+            row.get("policy_kind") != "twins"
+            or int(row.get("hourly_rate_ntd") or 0) != 450
+            or row.get("source_identity_status")
+            != "twins-preserve-backfill:case-policy"
+            or assignment_cases.get(assignment_id) not in allowed_cases
+        ):
+            raise UpgradeBlocked("added assignment Payroll snapshot is not canonical")
+    return {
+        "mode": "verified_additive_twins_snapshot_backfill",
+        "source_row_count": len(source_rows),
+        "candidate_row_count": len(candidate_rows),
+        "added_ids": added_ids,
+    }
+
+
 def verify_candidate(
     config: DatabaseConfig,
     source: str,
@@ -7953,6 +8372,24 @@ def verify_candidate(
             or actual.get("primary_key_sha256")
             != evidence.get("primary_key_sha256")
         ):
+            if table == "payroll_rate_policies":
+                additive_projection_preservation[table] = (
+                    _verify_twins_payroll_policy_seed_preserves_source(
+                        config, source, candidate
+                    )
+                )
+                continue
+            if table == "assignment_payroll_rate_snapshots":
+                twins_verify = _verified_manifest_backfill_receipt(
+                    receipt, "twins-payroll-rate-snapshots-v1"
+                )
+                if twins_verify is not None:
+                    additive_projection_preservation[table] = (
+                        _verify_twins_assignment_snapshot_backfill(
+                            config, source, candidate, twins_verify
+                        )
+                    )
+                    continue
             if not (
                 verified_lifecycle_backfill
                 and table in DECLARED_LIFECYCLE_BACKFILL_TABLES

@@ -45,7 +45,7 @@ def test_release_is_hash_bound_latest_and_linked_to_fresh_assembly() -> None:
         ROOT / "db/schema_assembly/labor_union_fresh_schema_v1.json"
     ).read_text(encoding="utf-8"))
 
-    assert migration.DEFAULT_RELEASE_MANIFESTS[-1] == MANIFEST
+    assert migration.DEFAULT_RELEASE_MANIFESTS[-2] == MANIFEST
     assert raw["source_baseline"]["baseline_id"] == (
         "labor-union-weekly-report-metrics-2026-09-09-v1"
     )

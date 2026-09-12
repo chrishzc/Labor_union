@@ -8,6 +8,7 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query
+from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, Dict, List, Literal
 from subsystems.scheduling.matching_plan_workflow import create_matching_plan_version
@@ -23,11 +24,12 @@ from api.dependencies.admin_auth import (
     require_system_admin,
 )
 from api.schemas.base import BaseResponse
-from api.error_contracts import internal_query_error
+from api.error_contracts import internal_query_error, typed_http_error
 from api.schemas.matches import (
     MatchAssignRequest,
     MatchReplyRequest,
     ActiveMatchingPlanStateView,
+    CustomerConfirmationPreviewView,
     FormalPlanContactStateView,
     ManualMatchingProfilesPreviewView,
     ManualMatchingProfilesReceiptView,
@@ -80,6 +82,11 @@ from subsystems.scheduling.matching_notification_contracts import (
     RequestCaregiverInformationCommand,
     RequestCustomerProfilesCommand,
 )
+from subsystems.scheduling.customer_confirmation_download import verify_resume_download_token
+from api.dependencies.controlled_files import get_controlled_file_workflow
+from subsystems.controlled_files.workflow import (
+    ControlledFileOwner, ControlledFilePurpose, ControlledFileWorkflow,
+)
 from domains.scheduling.holiday_work_agreement import (
     HolidayWorkAgreementDraft,
     HolidayWorkDecision,
@@ -122,6 +129,10 @@ class MatchingPlanWillingnessRequest(MatchingPlanEventIdentity):
 class MatchingPlanResumeRequest(MatchingPlanEventIdentity):
     note: str = Field(..., min_length=1, max_length=1000)
     expected_version: int = Field(..., ge=0)
+
+
+class MatchingPlanCustomerConfirmationRequest(MatchingPlanResumeRequest):
+    """Semantic Stage 5 request; preserves the established event identity."""
 
 
 class ManualMatchingProfilesPreviewRequest(BaseModel):
@@ -197,6 +208,33 @@ def get_matching_plan_contact_state_route(
         raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@router.get(
+    "/orders/{case_no}/matching-plans/{plan_id}/customer-confirmation/preview",
+    response_model=BaseResponse[CustomerConfirmationPreviewView],
+)
+def preview_matching_plan_customer_confirmation_route(
+    case_no: str,
+    plan_id: int,
+    expected_version: int = Query(..., ge=0),
+    principal: AdminPrincipal = Depends(require_line_matching_reader),
+):
+    try:
+        preview = matching_notifications.preview_customer_confirmation(
+            admin_actor_context(principal),
+            MatchingPlanReference(case_no, plan_id, expected_version),
+        )
+        return BaseResponse(
+            data=CustomerConfirmationPreviewView.model_validate(
+                _customer_confirmation_preview_data(preview)
+            ),
+            message="成功檢查客戶確認資訊",
+        )
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
 
 
 @router.get(
@@ -419,6 +457,63 @@ def send_matching_plan_resumes_route(
 
 
 @router.post(
+    "/orders/{case_no}/matching-plans/{plan_id}/customer-confirmation",
+    response_model=BaseResponse[MatchingNotificationReceiptView],
+)
+def send_matching_plan_customer_confirmation_route(
+    req: MatchingPlanCustomerConfirmationRequest,
+    case_no: str,
+    plan_id: int,
+    principal: AdminPrincipal = Depends(require_line_matching_sender),
+):
+    _require_matching_actor(principal, req.actor)
+    try:
+        return BaseResponse(
+            data=MatchingNotificationReceiptView.model_validate(
+                _notification_data(
+                    matching_notifications.request_customer_confirmation(
+                        RequestCustomerProfilesCommand(
+                            MatchingPlanReference(case_no, plan_id, req.expected_version),
+                            req.note, admin_actor_context(principal),
+                            ExpectedVersion(req.expected_version), IdempotencyKey(req.event_key),
+                            CorrelationId(f"matching-api:{req.event_key}"),
+                        )
+                    )
+                )
+            ),
+            message="已建立完整客戶確認資訊的可靠發送任務",
+        )
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.get("/matching-confirmation-files/{token}")
+def download_matching_confirmation_resume(
+    token: str,
+    workflow: ControlledFileWorkflow = Depends(get_controlled_file_workflow),
+):
+    """Customer-facing, expiring, file-scoped reference issued in a package."""
+    try:
+        claim = verify_resume_download_token(token, now=datetime.now(timezone.utc))
+        file_id, staff_id = str(claim["file_id"]), int(claim["staff_id"])
+        readback = workflow.readback(file_id)
+        if (readback.owner is not ControlledFileOwner.STAFF
+                or readback.purpose is not ControlledFilePurpose.STAFF_RESUME
+                or readback.subject_reference != str(staff_id)):
+            raise ValueError("confirmation file identity is invalid")
+        content = workflow.download(file_id)
+    except (ValueError, KeyError) as error:
+        raise HTTPException(status_code=404, detail="確認資訊附件不存在或連結已失效。") from error
+    safe_filename = content.filename.replace('"', "").replace("\r", "").replace("\n", "")
+    return Response(content=content.content, media_type="application/pdf", headers={
+        "Content-Disposition": f'attachment; filename="{safe_filename}"',
+        "Cache-Control": "private, no-store",
+    })
+
+
+@router.post(
     "/orders/{case_no}/matching-plans/{plan_id}/resumes/manual-confirmation/preview",
     response_model=BaseResponse[ManualMatchingProfilesPreviewView],
 )
@@ -547,6 +642,17 @@ def create_matching_plan_version_route(
             "case has an active availability lock",
         }:
             status_code = 409
+        elif message in {
+            "submitted segments must match a complete combination",
+            "current willing candidate is required",
+        }:
+            raise typed_http_error(
+                409,
+                "conflict",
+                "matching_candidate_no_longer_available",
+                "候選月嫂或檔期已變更，請重新讀取後再選擇。",
+                f"matching-plan-create:{case_no}",
+            ) from error
         else:
             status_code = 422
         raise HTTPException(status_code=status_code, detail=message) from error
@@ -662,12 +768,41 @@ def _contact_state_data(state) -> dict[str, Any]:
             state.customer_profiles_status.value
             if state.customer_profiles_status else None
         ),
+        "customer_confirmation_status": (
+            state.customer_profiles_status.value
+            if state.customer_profiles_status else None
+        ),
         "customer_profiles_manual_confirmation": (
             _manual_profiles_evidence_data(
                 state.customer_profiles_manual_confirmation
             )
             if state.customer_profiles_manual_confirmation else None
         ),
+    }
+
+
+def _customer_confirmation_preview_data(preview) -> dict[str, Any]:
+    return {
+        "case_no": preview.plan.case_no,
+        "plan_id": preview.plan.plan_id,
+        "expected_version": preview.plan.version,
+        "order_information_1_ready": preview.order_information_1_ready,
+        "order_information_2_ready": preview.order_information_2_ready,
+        "weekly_service_ready": preview.weekly_service_ready,
+        "weekly_service_row_count": preview.weekly_service_row_count,
+        "caregiver_resumes": [
+            {
+                "staff_id": item.staff_id,
+                "staff_name": item.staff_name,
+                "ready": item.ready,
+                "filename": item.filename,
+                "version": item.version,
+                "blocker": item.blocker,
+            }
+            for item in preview.caregiver_resumes
+        ],
+        "blockers": list(preview.blockers),
+        "send_allowed": preview.send_allowed,
     }
 
 

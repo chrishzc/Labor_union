@@ -5,7 +5,7 @@
     "path": "db/schema.sql",
     "sha256": "b9cd84ae5a09a46949b5d4c131659f7f114480306f94e0af1246833d021b1bfb"
   },
-  "active_artifacts_sha256": "5c548e3a92af08b078435365940b552de3105fe46e35c8dbf3d24f9992c8c7b6",
+  "active_artifacts_sha256": "bd3a22913f28a285e6df8ed6bb2a662f3254513868533618914ac89df11e644b",
   "active_bootstrap": [
     "db/schema_parts/202_scheduling_staff_leave_intake.sql",
     "db/schema_parts/20_staff_monthly_settlements.sql",
@@ -166,7 +166,9 @@
     "db/schema_parts/1029_client_payment_destination_configuration.sql",
     "db/schema_parts/218_weekly_report_metrics.sql",
     "db/schema_parts/1032_matching_holiday_work_agreements.sql",
-    "db/schema_parts/1034_contract_external_signing_final_pdf_completion.sql"
+    "db/schema_parts/1034_contract_external_signing_final_pdf_completion.sql",
+    "db/schema_parts/220_twins_payroll_policy.sql",
+    "db/schema_parts/221_twins_payroll_order_details_view.sql"
   ],
   "classifications": {
     "db/schema_parts/1022_task96_retired_anomaly_owner_contracts.sql": "retired",
@@ -181,7 +183,9 @@
     "db/schema_parts/1031_weekly_report_batches.sql": "migration-only",
     "db/schema_parts/1033_matching_holiday_work_agreements.sql": "migration-only",
     "db/schema_parts/1035_weekly_report_metrics.sql": "migration-only",
-    "db/schema_parts/1036_registry_owner_mutations.sql": "migration-only"
+    "db/schema_parts/1036_registry_owner_mutations.sql": "migration-only",
+    "db/schema_parts/1037_twins_payroll_policy.sql": "migration-only",
+    "db/schema_parts/1038_twins_payroll_order_details_view.sql": "migration-only"
   },
   "retirement_contracts": {
     "db/schema_parts/1022_task96_retired_anomaly_owner_contracts.sql": {
@@ -300,6 +304,24 @@
       "replay": "preserve release applies 1036 only when all owned parent columns, tables, metadata and triggers are absent or exact",
       "rollback": "retain source backup and discard candidate before same-name replacement",
       "unresolved_policy": "partial or drift owned metadata blocks candidate apply pending explicit remediation"
+    },
+    "db/schema_parts/1037_twins_payroll_policy.sql": {
+      "source_object": "Payroll rate policy enum values and immutable approved policy catalog",
+      "successor": "db/schema_parts/220_twins_payroll_policy.sql",
+      "terminal_schema_evidence": "fresh assembly uses canonical part 220 and preserve chain applies 1037 to existing schemas",
+      "data_effect": "system_seed; existing payroll policies and immutable snapshots remain unchanged",
+      "replay": "preserve release applies 1037 only when every owned enum is the exact predecessor or the target is exact",
+      "rollback": "retain source backup and discard the candidate; existing snapshots are never rewritten",
+      "unresolved_policy": "partial or drift enum and foreign-key metadata blocks candidate apply pending explicit remediation"
+    },
+    "db/schema_parts/1038_twins_payroll_order_details_view.sql": {
+      "source_object": "v_order_details Payroll columns derived from client identity fallbacks",
+      "successor": "db/schema_parts/221_twins_payroll_order_details_view.sql",
+      "terminal_schema_evidence": "fresh assembly applies canonical part 221 after legacy view part 999 and preserve chain replaces the same view with 1038",
+      "data_effect": "schema_only; Payroll rate columns read the immutable case Payroll snapshot and remain NULL when owner terms are absent",
+      "replay": "CREATE OR REPLACE VIEW deterministically converges the owned view definition",
+      "rollback": "retain source backup and discard the candidate before any entry switch",
+      "unresolved_policy": "non-exact final view definition blocks candidate verification"
     }
   }
 }

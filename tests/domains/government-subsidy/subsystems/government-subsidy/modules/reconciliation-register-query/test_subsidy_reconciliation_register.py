@@ -45,8 +45,11 @@ def _order_row(**overrides):
         "order_status": "訂單完成",
         "employer_name": "王小明", "employer_address": "台北市中正區",
         "staff_name": "月嫂甲", "survey_details": {"身分證字號": "A123456789"},
+        "payroll_hourly_rate_ntd": Decimal("300"),
     }
     row.update(overrides)
+    if "payroll_hourly_rate_ntd" not in overrides and row["identity_status"] == "補助市民":
+        row["payroll_hourly_rate_ntd"] = Decimal("350")
     return row
 
 
@@ -78,6 +81,7 @@ def test_quarterly_register_includes_established_orders_without_claim_batch():
     assert "c.identity_status" in connection.cursor_instance.executed[0][0]
     assert "clients.identity_status" not in connection.cursor_instance.executed[0][0]
     assert "subsidy_claim_batches" not in connection.cursor_instance.executed[0][0]
+    assert "LEFT JOIN case_payroll_rate_policy_snapshots" in connection.cursor_instance.executed[0][0]
     assert "o.status IN (%s, %s, %s, %s, %s, %s, %s)" in connection.cursor_instance.executed[0][0]
     assert "COALESCE(o.actual_end_date, o.end_date)" in connection.cursor_instance.executed[0][0]
     assert connection.cursor_instance.executed[0][1] == (
@@ -124,12 +128,34 @@ def test_annual_summary_uses_established_orders_and_repairs_legacy_key():
     assert worksheet.max_column == 10
 
 
-def test_operations_report_annual_rows_include_historical_established_orders_without_claim_batch():
+def test_operations_report_annual_rows_select_current_and_prior_year_carry_in_without_claim_batch():
     connection = FakeConnection([
+        _order_row(
+            case_no="115000001",
+            actual_end_date=date(2026, 3, 20),
+        ),
+        _order_row(
+            case_no="115000002",
+            identity_status="補助市民",
+            actual_end_date=date(2027, 1, 15),
+        ),
         _order_row(
             case_no="114000003",
             actual_start_date=date(2025, 12, 20),
-            actual_end_date=date(2026, 1, 8),
+            actual_end_date=date(2026, 5, 10),
+            order_status="歷史訂單－服務完成",
+        ),
+        _order_row(
+            case_no="114000004",
+            actual_end_date=date(2025, 12, 20),
+        ),
+        _order_row(
+            case_no="113000005",
+            actual_end_date=date(2026, 5, 10),
+        ),
+        _order_row(
+            case_no="115100006",
+            actual_end_date=date(2026, 5, 10),
         ),
     ])
 
@@ -138,11 +164,13 @@ def test_operations_report_annual_rows_include_historical_established_orders_wit
         lambda: connection,
     )
 
-    row = result["general_citizen_rows"][0]
-    assert row["市府訂單號碼"] == "114000003"
-    assert row["核銷月份"] == "第一季"
-    assert row["核銷狀態"] == "結案"
-    assert result["subsidized_citizen_rows"] == []
+    general_rows = result["general_citizen_rows"]
+    assert [row["市府訂單號碼"] for row in general_rows] == ["114000003", "115000001"]
+    assert [row["核銷月份"] for row in general_rows] == ["第二季", "第一季"]
+    assert general_rows[0]["核銷狀態"] == "結案"
+    subsidized_rows = result["subsidized_citizen_rows"]
+    assert [row["市府訂單號碼"] for row in subsidized_rows] == ["115000002"]
+    assert subsidized_rows[0]["核銷月份"] == "第一季"
     sql, params = connection.cursor_instance.executed[0]
     assert "subsidy_claim_batches" not in sql
     assert "current_revision" not in sql
@@ -157,8 +185,6 @@ def test_operations_report_annual_rows_include_historical_established_orders_wit
         "歷史訂單－帳務完成",
         "一般市民",
         "補助市民",
-        date(2026, 1, 1),
-        date(2027, 1, 1),
     )
 
 
@@ -188,12 +214,41 @@ def test_register_caps_subsidy_hours_at_case_total_service_hours():
         "case_no": "115000011", "identity_status": "一般市民",
         "actual_start_date": date(2026, 1, 1), "actual_end_date": date(2026, 1, 3),
         "service_days": 3, "service_hours_per_day": 9,
+        "payroll_hourly_rate_ntd": Decimal("300"),
         "employer_name": "王小明", "employer_address": "台北市", "staff_name": "月嫂甲",
         "survey_details": {},
     })
 
     assert row["補助時數"] == Decimal("27")
     assert row["補助款金額"] == Decimal("8100")
+
+
+def test_register_uses_case_payroll_snapshot_as_subsidy_unit_price():
+    row = register._to_register_row({
+        "case_no": "I288-TEST-20260911", "identity_status": "一般市民",
+        "actual_start_date": date(2026, 9, 8), "actual_end_date": date(2026, 9, 11),
+        "service_days": 5, "service_hours_per_day": Decimal("8"),
+        "payroll_hourly_rate_ntd": Decimal("450"),
+        "employer_name": "廖婉蓉", "employer_address": "", "staff_name": "測試服務員",
+        "survey_details": {"特殊計費:胎數": "雙胞胎"},
+    })
+
+    assert row["補助時數"] == Decimal("40")
+    assert row["單價"] == Decimal("450")
+    assert row["補助款金額"] == Decimal("18000")
+
+
+def test_register_rejects_missing_payroll_snapshot_instead_of_using_identity_price():
+    try:
+        register._to_register_row({
+            "case_no": "115000012", "identity_status": "一般市民",
+            "actual_start_date": date(2026, 1, 1), "actual_end_date": date(2026, 1, 3),
+            "service_days": 3, "service_hours_per_day": 9,
+        })
+    except ValueError as exc:
+        assert str(exc) == "government_subsidy_payroll_rate_snapshot_missing"
+    else:
+        raise AssertionError("missing Payroll snapshot must fail closed")
 
 
 def test_combined_subsidy_register_has_both_quarterly_and_annual_sheets():

@@ -46,7 +46,10 @@ Government Subsidy 只提供 claim item、核准與政府 receipt allocation 的
 一律同樣納入，不得要求先建立、送出或核准政府補助 claim batch。
 已取消與尚在洽談中的訂單不納入。季度以實際服務結束日、尚未有實際日期時以預定服務結束日
 決定所屬年與季；年度報表以同一有效結束日彙整該年。補助時數、單價與金額依訂單的服務天數、
-每日時數與身分別補助上限計算。季度 React 明細欄位與既有季度 XLSX 15 欄一致，年度明細與年度
+每日時數與身分別補助上限計算。尚未形成 claim item 時，單價直接使用該案件已凍結的 Payroll
+費率快照；雙胞胎案件因此使用 450，不得由 Government Subsidy 另行以身分別費率覆蓋。
+案件 Payroll 快照缺失時必須 fail closed，不得退回身分別 300／350 單價；
+正式 claim item 已形成後則固定使用 item 自身的送件單價快照。季度 React 明細欄位與既有季度 XLSX 15 欄一致，年度明細與年度
 XLSX 10 欄一致。雇主身分證若存在，沿用報名資料 `survey_details` 的既有值；目前不得臆造
 `clients` 專用欄位或因此新增 schema。
 

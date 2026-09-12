@@ -45,7 +45,7 @@ type PendingAction =
 
 function publicFailureMessage(error: unknown): string {
   if (error instanceof LineRuntimeTargetError) {
-    return error.message;
+    return `${error.publicCode ?? error.code}：${error.message}`;
   }
   return 'LINE 通知群組操作失敗，請重新登入或稍後再試。';
 }
@@ -289,13 +289,15 @@ export const AlertGroupSecurity: React.FC<AlertGroupSecurityProps> = ({
                 <div><span>通知範圍</span><strong>{minimumStatusLabel(target.minimum_status)}</strong></div>
                 <div><span>更新時間</span><strong>{target.updated_at}</strong></div>
               </div>
-              <div className="line-actions line-block-spacing">
-                <button type="button" className="line-secondary-btn" onClick={() => void previewToggle(target)} disabled={busy}>
-                  檢查{target.state === 'active' ? '停用' : '啟用'}影響
-                </button>
-              </div>
+              {target.target_kind === 'admin_user' && (
+                <div className="line-actions line-block-spacing">
+                  <button type="button" className="line-secondary-btn" onClick={() => void previewToggle(target)} disabled={busy}>
+                    檢查{target.state === 'active' ? '停用' : '啟用'}影響
+                  </button>
+                </div>
+              )}
               {target.target_kind === 'group' && target.state !== 'active' && (
-                <p className="field-hint">群組目前未啟用，因此不能重設；請先完成啟用流程。</p>
+                <p className="field-hint">此群組已解除，不會由網頁或 webhook 靜默重新啟用；請在新的 LINE 群組走正式登錄流程。</p>
               )}
             </article>
           ))}
@@ -331,9 +333,9 @@ export const AlertGroupSecurity: React.FC<AlertGroupSecurityProps> = ({
         {groupTarget && (
         <div className="alert-security-reset-row">
           <div>
-            <strong>重設異常通知群組</strong>
+            <strong>解除目前異常通知群組</strong>
             <p className="field-hint">
-              不直接清除資料；固定先檢查影響、明確確認、套用，再重新查詢結果。
+              會保留歷史紀錄，將目前唯一有效群組解除為停用；固定先檢查影響、明確確認、套用，再重新查詢結果。
             </p>
           </div>
           <button
@@ -342,12 +344,12 @@ export const AlertGroupSecurity: React.FC<AlertGroupSecurityProps> = ({
             onClick={() => void previewGroupReset(groupTarget)}
             disabled={busy || groupTarget.state !== 'active'}
           >
-            <RotateCcw aria-hidden="true" />檢查重設影響
+            <RotateCcw aria-hidden="true" />預覽解除群組
           </button>
         </div>
         )}
         {groupTarget && groupTarget.state !== 'active' && (
-          <p className="field-hint">群組目前未啟用，因此不能重設；請先完成啟用流程。</p>
+          <p className="field-hint">此群組已解除；請在新的 LINE 群組走正式登錄流程。</p>
         )}
       </section>
 
@@ -355,18 +357,20 @@ export const AlertGroupSecurity: React.FC<AlertGroupSecurityProps> = ({
         <div className="line-workspace-card alert-security-preview-card">
           <h3 className="alert-security-preview-title"><SearchCheck aria-hidden="true" />異動影響確認</h3>
           <div className="line-detail-grid alert-security-detail-grid">
-            <div><span>操作</span><strong>{pending.kind === 'group_reset' ? '重設告警群組' : '變更通知啟用狀態'}</strong></div>
+            <div><span>操作</span><strong>{pending.kind === 'group_reset' ? '解除目前群組' : '變更通知啟用狀態'}</strong></div>
             <div><span>對象</span><strong>{pending.target.display_label}</strong></div>
             <div><span>目前狀態</span><strong>{stateLabel(pending.preview.previous_state)}</strong></div>
             <div><span>變更後狀態</span><strong>{stateLabel(pending.preview.resulting_state)}</strong></div>
           </div>
           <label className="checkbox-item line-block-spacing">
             <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />
-            我已核對目前狀態、變更後狀態與影響範圍，確認套用此異動。
+            {pending.kind === 'group_reset'
+              ? '我已核對目前群組將從有效通知群組解除，確認套用此異動。'
+              : '我已核對目前狀態、變更後狀態與影響範圍，確認套用此異動。'}
           </label>
           <div className="line-actions line-block-spacing">
             <button type="button" className="mock-primary-btn" onClick={() => void applyPending()} disabled={!confirmed || busy}>
-              {busy ? '套用中…' : '確認套用'}
+              {busy ? '套用中…' : pending.kind === 'group_reset' ? '確認解除群組' : '確認套用'}
             </button>
             <button type="button" className="line-secondary-btn" onClick={clearCandidate} disabled={busy}>取消</button>
           </div>
@@ -375,7 +379,7 @@ export const AlertGroupSecurity: React.FC<AlertGroupSecurityProps> = ({
 
       {receipt && (
         <div className="line-success" role="status">
-          <strong className="alert-security-receipt-title"><CheckCircle2 aria-hidden="true" />通知對象已更新</strong>
+          <strong className="alert-security-receipt-title"><CheckCircle2 aria-hidden="true" />{receipt.operation === 'group_reset' ? '通知群組已解除' : '通知對象已更新'}</strong>
           <div>{stateLabel(receipt.previous_state)} → {stateLabel(receipt.resulting_state)}</div>
           {readbackMessage && <div>{readbackMessage}</div>}
         </div>

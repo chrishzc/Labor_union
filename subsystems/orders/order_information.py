@@ -184,11 +184,33 @@ def build_candidate_information(case_no, candidate_id, info_type, facts, field_i
     require_positive_integer(candidate_id, "candidate id")
     if info_type not in (1, 2):
         raise ValueError("info_type_invalid")
-    template = OrderInformationTemplate.INFO_01 if info_type == 1 else OrderInformationTemplate.INFO_02
-    fields, blockers = _project_fields(template, facts, field_issues)
+    text, blockers = build_order_information_message(
+        info_type, facts, field_issues,
+        "初步接案意願詢問；日期為預計期間，未確認需求請再與工會確認。",
+    )
     if "order_information_template_invalid" in blockers:
         raise ValueError("order_information_template_invalid")
-    lines = [f"訂單資訊－{info_type}", "初步接案意願詢問；日期為預計期間，未確認需求請再與工會確認。"]
+    fingerprint = projection_fingerprint({"case_no": case_no, "candidate_id": candidate_id,
+                                          "info_type": info_type, "text": text, "recipient": recipient_identity})
+    return CandidateInformationPreview(case_no, candidate_id, info_type, str(facts["staff_name"]), text, fingerprint)
+
+
+def build_order_information_message(
+    info_type: int,
+    facts: Mapping[str, object],
+    field_issues: Mapping[str, str],
+    introduction: str,
+) -> tuple[str, tuple[str, ...]]:
+    """Render the canonical sheet fields for any bounded recipient workflow.
+
+    Candidate contact and formal matching differ only in audience wording and
+    their authoritative segment source; both use this one field formatter.
+    """
+    if info_type not in (1, 2):
+        raise ValueError("info_type_invalid")
+    template = OrderInformationTemplate.INFO_01 if info_type == 1 else OrderInformationTemplate.INFO_02
+    fields, blockers = _project_fields(template, facts, field_issues)
+    lines = [f"訂單資訊－{info_type}", introduction]
     labels = {"f_104_c4": "預計服務開始日期", "f_105_c5": "預計服務結束日期", "f_106_c6": "每日服務時數"}
     for item in fields:
         if item.status in {"missing", "unresolved", "absent"} or _is_missing(item.value):
@@ -206,9 +228,7 @@ def build_candidate_information(case_no, candidate_id, info_type, facts, field_i
     text = "\n".join(lines)
     if len(text.encode("utf-16-le")) // 2 > 5000:
         raise ValueError("candidate_information_message_too_long")
-    fingerprint = projection_fingerprint({"case_no": case_no, "candidate_id": candidate_id,
-                                          "info_type": info_type, "text": text, "recipient": recipient_identity})
-    return CandidateInformationPreview(case_no, candidate_id, info_type, str(facts["staff_name"]), text, fingerprint)
+    return text, blockers
 
 
 def _project_fields(
@@ -306,5 +326,6 @@ __all__ = [
     "OrderInformationRepository",
     "OrderInformationResult",
     "OrderInformationTemplate",
+    "build_order_information_message",
     "projection_fingerprint",
 ]

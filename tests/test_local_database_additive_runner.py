@@ -1309,6 +1309,87 @@ def test_modified_parent_release_rejects_noncanonical_predecessor(
     ) == "drift"
 
 
+def _twins_payroll_policy_predecessor_snapshot(descriptor):
+    predecessor_policy_kind = {
+        "column_type": "enum('citizen','subsidized_citizen','non_citizen')",
+        "is_nullable": "NO",
+        "column_default": None,
+        "extra": "",
+    }
+    columns = [
+        {
+            "table_name": table,
+            "column_name": column,
+            **predecessor_policy_kind,
+        }
+        for table, column in (
+            ("payroll_rate_policies", "policy_kind"),
+            ("assignment_payroll_rate_snapshots", "policy_kind"),
+            ("case_architecture_bootstrap_events", "payroll_policy_kind"),
+            ("case_payroll_rate_policy_snapshots", "policy_kind"),
+        )
+    ]
+    constraints = []
+    key_columns = []
+    foreign_keys = []
+    for (table, name), contract in descriptor["foreign_keys"].items():
+        constraints.append({
+            "table_name": table,
+            "constraint_name": name,
+            "constraint_type": "FOREIGN KEY",
+        })
+        for column, referenced_column in zip(
+            contract["columns"], contract["referenced_columns"], strict=True,
+        ):
+            key_columns.append({
+                "table_name": table,
+                "constraint_name": name,
+                "column_name": column,
+                "referenced_table_name": contract["referenced_table"],
+                "referenced_column_name": referenced_column,
+            })
+        foreign_keys.append({
+            "table_name": table,
+            "constraint_name": name,
+            "update_rule": contract["update_rule"],
+            "delete_rule": contract["delete_rule"],
+        })
+    return {
+        "columns": columns,
+        "indexes": [],
+        "constraints": constraints,
+        "key_columns": key_columns,
+        "foreign_keys": foreign_keys,
+        "triggers": [],
+        "show_create_tables": {},
+        "views": [],
+    }
+
+
+def test_twins_payroll_release_recognizes_exact_predecessor_as_absent() -> None:
+    artifact = "1037_twins_payroll_policy.sql"
+    descriptor = migration._canonical_artifact_descriptor(artifact)
+    snapshot = _twins_payroll_policy_predecessor_snapshot(descriptor)
+
+    assert migration.local_additive_descriptor_state(
+        snapshot, descriptor, artifact
+    ) == "absent"
+    assert migration._release_descriptor_metadata_state(
+        snapshot, artifact, migration.OWNED_OBJECTS[artifact]
+    ) == "absent"
+
+
+def test_twins_payroll_release_rejects_noncanonical_predecessor() -> None:
+    artifact = "1037_twins_payroll_policy.sql"
+    descriptor = migration._canonical_artifact_descriptor(artifact)
+    snapshot = _twins_payroll_policy_predecessor_snapshot(descriptor)
+    snapshot["columns"][0]["column_type"] = "enum('citizen','non_citizen')"
+
+    assert migration.local_additive_descriptor_state(
+        snapshot, descriptor, artifact
+    ) == "drift"
+
+
 def test_local_descriptor_state_does_not_defer_missing_owned_trigger() -> None:
     artifact = "1001_line_rich_menu_publication_step_saga.sql"
     descriptor = migration._canonical_artifact_descriptor(artifact)

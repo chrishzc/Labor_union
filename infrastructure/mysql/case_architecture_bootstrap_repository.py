@@ -17,8 +17,9 @@ from domains.bootstrap.case_architecture import (
     CaseRootFacts,
     PayrollPolicyKind,
     RatePolicyFacts,
-    policy_kind_for_identity,
+    payroll_policy_kind_for_case,
 )
+from domains.case_import.order_information import project_order_information
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import IdempotencyKey
 from shared_kernel.money import MoneyNTD
@@ -140,7 +141,11 @@ class MySqlCaseArchitectureBootstrapRepository:
 
 def _load_facts(cursor, intent, *, lock):
     order_row = _select_order(cursor, intent.case_no, lock)
-    policy_kind = policy_kind_for_identity(str(order_row["identity_status"]))
+    order = _order_facts(order_row)
+    policy_kind = payroll_policy_kind_for_case(
+        order.source_identity_status,
+        order.multi_birth_count,
+    )
     policy_row = _select_rate_policy(
         cursor,
         intent.payroll_policy_version,
@@ -149,7 +154,7 @@ def _load_facts(cursor, intent, *, lock):
     )
     presence = _load_presence(cursor, intent.case_no, lock)
     return CaseArchitectureBootstrapFacts(
-        order=_order_facts(order_row),
+        order=order,
         payroll_rate_policy=_rate_policy(policy_row),
         presence=presence,
     )
@@ -310,7 +315,16 @@ def _order_facts(row):
         service_days=int(row["service_days"]),
         service_hours_per_day=int(row["service_hours_per_day"]),
         source_identity_status=str(row["identity_status"]),
+        multi_birth_count=_multi_birth_count(row.get("survey_details")),
     )
+
+
+def _multi_birth_count(survey_details) -> str | None:
+    projection = project_order_information(survey_details)
+    if projection.issues.get("multi_birth_count") is not None:
+        return None
+    value = projection.values["multi_birth_count"]
+    return value if isinstance(value, str) else None
 
 
 def _require_order_numeric_root(row, field_name) -> None:
@@ -571,8 +585,14 @@ def _lock_suffix(lock: bool) -> str:
 _ORDER_SELECT_SQL = (
     "SELECT o.case_no,o.lifecycle_version,o.start_date,o.service_days,"
     "o.service_hours_per_day,o.service_start_time,o.service_end_time,"
-    "o.service_end_day_offset,c.identity_status FROM orders o "
+    "o.service_end_day_offset,c.identity_status,record.survey_details "
+    "FROM orders o "
     "JOIN clients c ON c.id=o.client_id AND c.case_no=o.case_no "
+    "LEFT JOIN beclass_records record ON record.id=("
+    "SELECT source.id FROM beclass_records source "
+    "WHERE source.bound_case_no=o.case_no OR "
+    "(source.bound_case_no IS NULL AND source.query_no=o.case_no) "
+    "ORDER BY source.bound_case_no IS NOT NULL DESC,source.id LIMIT 1) "
     "WHERE o.case_no=%s"
 )
 

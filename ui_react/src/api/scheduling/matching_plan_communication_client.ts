@@ -31,6 +31,7 @@ const FormalPlanContactStateSchema = z.strictObject({
   all_willing: z.boolean(),
   customer_decision: z.enum(['pending', 'accepted', 'declined', 'contact_requested']),
   customer_profiles_status: z.string().nullable(),
+  customer_confirmation_status: z.string().nullable().optional(),
   customer_profiles_manual_confirmation: z.strictObject({
     event_ids: z.array(z.number().int().positive()).min(1).max(4),
     confirmation_method: z.enum(['phone', 'in_person', 'paper', 'other']),
@@ -63,6 +64,34 @@ const CustomerProfilesNotificationReceiptSchema = z.strictObject({
   }
 });
 
+const CustomerConfirmationPreviewSchema = z.strictObject({
+  case_no: z.string().min(1).max(50),
+  plan_id: z.number().int().positive(),
+  expected_version: z.number().int().nonnegative(),
+  order_information_1_ready: z.boolean(),
+  order_information_2_ready: z.boolean(),
+  weekly_service_ready: z.boolean(),
+  weekly_service_row_count: z.number().int().nonnegative(),
+  caregiver_resumes: z.array(z.strictObject({
+    staff_id: z.number().int().positive(),
+    staff_name: z.string().min(1).max(100),
+    ready: z.boolean(),
+    filename: z.string().min(1).max(255).nullable(),
+    version: z.number().int().positive().nullable(),
+    blocker: z.string().min(1).nullable(),
+  })).min(1).max(4),
+  blockers: z.array(z.string().min(1)),
+  send_allowed: z.boolean(),
+}).superRefine((preview, context) => {
+  const everyComponentReady = preview.order_information_1_ready
+    && preview.order_information_2_ready
+    && preview.weekly_service_ready
+    && preview.caregiver_resumes.every((resume) => resume.ready);
+  if (preview.send_allowed !== (preview.blockers.length === 0 && everyComponentReady)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: '確認資訊檢查結果不一致。' });
+  }
+});
+
 const EnvelopeSchema = z.strictObject({
   success: z.boolean(),
   message: z.string(),
@@ -88,6 +117,13 @@ const CustomerProfilesNotificationEnvelopeSchema = z.strictObject({
   success: z.boolean(),
   message: z.string(),
   data: CustomerProfilesNotificationReceiptSchema.nullable(),
+  error: z.string().nullable(),
+});
+
+const CustomerConfirmationPreviewEnvelopeSchema = z.strictObject({
+  success: z.boolean(),
+  message: z.string(),
+  data: CustomerConfirmationPreviewSchema.nullable(),
   error: z.string().nullable(),
 });
 
@@ -160,6 +196,7 @@ const HolidayWorkAgreementReceiptEnvelopeSchema = z.strictObject({
 export type CustomerDecisionReceipt = z.infer<typeof CustomerDecisionReceiptSchema>;
 export type FormalPlanContactState = z.infer<typeof FormalPlanContactStateSchema>;
 export type CustomerProfilesNotificationReceipt = z.infer<typeof CustomerProfilesNotificationReceiptSchema>;
+export type CustomerConfirmationPreview = z.infer<typeof CustomerConfirmationPreviewSchema>;
 export type ManualCustomerProfilesPreview = z.infer<typeof ManualCustomerProfilesPreviewSchema>;
 export type ManualCustomerProfilesReceipt = z.infer<typeof ManualCustomerProfilesReceiptSchema>;
 export type ManualMatchingConfirmationMethod = 'phone' | 'in_person' | 'paper' | 'other';
@@ -224,6 +261,63 @@ export const matchingPlanCommunicationClient = {
     );
     if (!decoded.success || decoded.data === null) {
       throw new ApiHttpError(422, 'CUSTOMER_PROFILES_SEND_FAILED', decoded.error ?? decoded.message, false, decoded);
+    }
+    return decoded.data;
+  },
+
+  async sendCustomerConfirmation(
+    caseNo: string,
+    planId: number,
+    expectedVersion: number,
+    note: string,
+    eventKey: string,
+  ): Promise<CustomerProfilesNotificationReceipt> {
+    const canonical = canonicalCaseNo(caseNo);
+    const actor = sessionClient.getUser()?.username.trim() ?? '';
+    const token = sessionClient.getToken();
+    const canonicalNote = note.trim();
+    if (!Number.isInteger(planId) || planId <= 0) throw new Error('正式媒合方案識別必須是正整數。');
+    if (!Number.isInteger(expectedVersion) || expectedVersion < 0) throw new Error('正式媒合方案版本無效，請重新載入。');
+    if (!actor || !token) throw new ApiHttpError(401, 'UNAUTHENTICATED', '請先登入。');
+    if (!canonicalNote || canonicalNote.length > 1000) throw new Error('請填寫 1 至 1000 字的確認資訊備註。');
+    if (!eventKey.trim() || eventKey.length > 100) throw new Error('確認資訊操作識別無效，請重新載入。');
+    const decoded = decodePayload(
+      CustomerProfilesNotificationEnvelopeSchema,
+      await transport.post(
+        `/api/v1/orders/${encodeURIComponent(canonical)}/matching-plans/${planId}/customer-confirmation`,
+        { actor, event_key: eventKey, expected_version: expectedVersion, note: canonicalNote },
+        { token },
+      ),
+    );
+    if (!decoded.success || decoded.data === null) {
+      throw new ApiHttpError(422, 'CUSTOMER_CONFIRMATION_SEND_FAILED', decoded.error ?? decoded.message, false, decoded);
+    }
+    return decoded.data;
+  },
+
+  async previewCustomerConfirmation(
+    caseNo: string,
+    planId: number,
+    expectedVersion: number,
+  ): Promise<CustomerConfirmationPreview> {
+    const canonical = canonicalCaseNo(caseNo);
+    const token = sessionClient.getToken();
+    if (!Number.isInteger(planId) || planId <= 0) throw new Error('正式媒合方案識別必須是正整數。');
+    if (!Number.isInteger(expectedVersion) || expectedVersion < 0) throw new Error('正式媒合方案版本無效，請重新載入。');
+    if (!token) throw new ApiHttpError(401, 'UNAUTHENTICATED', '請先登入。');
+    const decoded = decodePayload(
+      CustomerConfirmationPreviewEnvelopeSchema,
+      await transport.get(
+        `/api/v1/orders/${encodeURIComponent(canonical)}/matching-plans/${planId}/customer-confirmation/preview?expected_version=${expectedVersion}`,
+        { token },
+      ),
+    );
+    if (!decoded.success || decoded.data === null) {
+      throw new ApiHttpError(422, 'CUSTOMER_CONFIRMATION_PREVIEW_FAILED', decoded.error ?? decoded.message, false, decoded);
+    }
+    if (decoded.data.case_no !== canonical || decoded.data.plan_id !== planId
+      || decoded.data.expected_version !== expectedVersion) {
+      throw new Error('客戶確認資訊檢查 identity 不一致。');
     }
     return decoded.data;
   },

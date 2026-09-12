@@ -21,16 +21,17 @@
 - `line/static/profile_update.html`
 - `ui_react/src/api/client_registry/`
 - `ui_react/src/pages/ClientRegistryPage.tsx`
+- `ui_react/src/pages/ClientRosterPage.tsx`
 
 ## Entrypoints
-- `GET /api/v1/admin/registries/clients`
+- `GET /api/v1/admin/registries/clients` — bounded selector with optional query, baby-info, service-days, cooking and allowlisted sort filters.
 - `GET /api/v1/admin/registries/clients/{case_no}`
 - `POST /api/v1/admin/registries/clients/{case_no}/profile/{preview|apply}`
 - Client registry case mapping enters through canonical `orders.case_no -> clients.id`; Client Profile remains the only writer.
 
 ## Verification
 - layout_status: `custom_current`
-- layout_basis: Backend contract tests own Client Profile and BeClass query/mutation boundaries; the mirrored React root owns the case-centered registry interaction.
+- layout_basis: Backend contract tests own Client Profile and BeClass query/mutation boundaries; the mirrored React root owns the case-centered registry editing and bounded read-only roster interaction.
 - test_root: `tests/domains/clients/subsystems/client-profile/modules/profile-change/`
 - test_root: `ui_react/src/tests/domains/clients/subsystems/client-profile/modules/profile-change/`
 

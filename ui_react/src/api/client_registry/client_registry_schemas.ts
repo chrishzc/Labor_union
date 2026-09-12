@@ -2,6 +2,9 @@ import { z } from 'zod';
 import { OrderTermsSchema } from '../orders/order_query_schemas';
 
 const nullableText = z.string().nullable();
+const optionalNullableText = z.string().nullish().transform((value) => value ?? null);
+const optionalNullablePositiveInt = z.number().int().positive().nullish().transform((value) => value ?? null);
+const optionalNullableBoolean = z.boolean().nullish().transform((value) => value ?? null);
 const profileValues = z.strictObject({
   name: nullableText, gender: nullableText, phone: nullableText, city: nullableText,
   address: nullableText, residence_type: nullableText, delivery_type: nullableText,
@@ -16,7 +19,8 @@ const fieldCapabilities = z.record(z.string(), z.strictObject({ owner: z.enum(['
 
 export const ClientRegistrySummarySchema = z.strictObject({
   client_id: z.number().int().positive(), case_no: z.string().min(1), name: nullableText,
-  phone: nullableText, city: nullableText, planned_start_date: nullableText, order_status: nullableText,
+  phone: nullableText, city: nullableText, baby_info: optionalNullableText, service_days: optionalNullablePositiveInt,
+  requires_cooking: optionalNullableBoolean, planned_start_date: nullableText, order_status: nullableText,
 });
 export const ClientRegistryPageSchema = z.strictObject({
   items: z.array(ClientRegistrySummarySchema), next_cursor: z.string().nullable(),
@@ -48,6 +52,8 @@ export const RegistryMutationPreviewResponseSchema = response(RegistryMutationPr
 export const RegistryMutationReceiptResponseSchema = response(RegistryMutationReceiptSchema);
 
 export type ClientRegistryPage = z.infer<typeof ClientRegistryPageSchema>;
+export type ClientRegistrySortBy = 'case_no' | 'customer_name' | 'service_days' | 'expected_start_date';
+export type ClientRegistrySortOrder = 'asc' | 'desc';
 export type ClientRegistryDetail = z.infer<typeof ClientRegistryDetailSchema>;
 export type RegistryMutationPreview = z.infer<typeof RegistryMutationPreviewSchema>;
 export type RegistryMutationReceipt = z.infer<typeof RegistryMutationReceiptSchema>;

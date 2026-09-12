@@ -25,6 +25,7 @@ from domains.scheduling.matching_communication import (
     MatchingCommunicationStaleError,
     MatchingDecisionNotReadyError,
     MatchingNotificationKind,
+    MatchingPlanReference,
     MatchingRecipientMismatchError,
     MatchingResponseSource,
     record_caregiver_willingness,
@@ -39,10 +40,17 @@ from subsystems.line.capabilities import (
 from subsystems.line.delivery_contracts import LineDeliveryCommandOutcome
 from subsystems.scheduling.matching_line_cards import (
     caregiver_information_card,
+    customer_confirmation_card,
     customer_profiles_card,
+)
+from subsystems.scheduling.customer_confirmation_download import (
+    confirmation_download_url,
+    issue_resume_download_token,
 )
 from subsystems.scheduling.matching_notification_contracts import (
     ApplyManualCustomerProfilesCommand,
+    CustomerConfirmationPreview,
+    CustomerConfirmationResumePreview,
     ManualCustomerProfilesPreview,
     ManualCustomerProfilesReceipt,
     MatchingContactState,
@@ -96,6 +104,59 @@ class MatchingNotificationApplication:
             raise LookupError("matching plan not found")
         return state
 
+    def preview_customer_confirmation(
+        self,
+        actor: ActorContext,
+        plan: MatchingPlanReference,
+    ) -> CustomerConfirmationPreview:
+        """Return the complete, read-only Stage 5 readiness projection."""
+        require_line_capability(actor, LineCapability.MATCHING_READ)
+        with self._unit_of_work_factory() as unit_of_work:
+            state = _required_state(
+                unit_of_work, plan.case_no, plan.plan_id, False
+            )
+            _require_expected_state(state, plan.version)
+            blockers: list[str] = []
+            if not state.plan_is_active or state.plan_status != "proposed":
+                blockers.append("正式媒合方案已失效或不再處於推薦階段。")
+            if state.order_status != "洽談中":
+                blockers.append("案件已不在洽談中，不能寄送確認資訊。")
+            if not state.all_willing:
+                blockers.append("仍有月嫂尚未確認願意承接正式方案。")
+            if state.customer_profiles_are_available:
+                blockers.append("確認資訊已建立，不可重複寄送。")
+            if state.customer_line_user_id is None:
+                blockers.append("客戶尚未完成 LINE 綁定。")
+            try:
+                self._availability_validator(state)
+            except ValueError:
+                blockers.append("目前正式方案的月嫂檔期已變更，請重新確認。")
+
+            raw = unit_of_work.matching_notifications.customer_confirmation_preview(
+                plan.case_no, plan.plan_id
+            )
+            blockers.extend(str(item) for item in raw["blockers"])
+            resumes = tuple(
+                CustomerConfirmationResumePreview(
+                    staff_id=int(item["staff_id"]),
+                    staff_name=str(item["staff_name"]),
+                    ready=bool(item["ready"]),
+                    filename=(str(item["filename"]) if item["filename"] is not None else None),
+                    version=(int(item["version"]) if item["version"] is not None else None),
+                    blocker=(str(item["blocker"]) if item["blocker"] is not None else None),
+                )
+                for item in raw["caregiver_resumes"]
+            )
+        return CustomerConfirmationPreview(
+            plan=state.plan,
+            order_information_1_ready=bool(raw["order_information_1_ready"]),
+            order_information_2_ready=bool(raw["order_information_2_ready"]),
+            weekly_service_ready=bool(raw["weekly_service_ready"]),
+            weekly_service_row_count=int(raw["weekly_service_row_count"]),
+            caregiver_resumes=resumes,
+            blockers=tuple(dict.fromkeys(blockers)),
+        )
+
     def request_caregiver_information(
         self,
         command: RequestCaregiverInformationCommand,
@@ -127,6 +188,23 @@ class MatchingNotificationApplication:
                 unit_of_work.commit()
                 return replay
             result = self._create_customer_notification(unit_of_work, command)
+            unit_of_work.commit()
+        return result
+
+    def request_customer_confirmation(
+        self,
+        command: RequestCustomerProfilesCommand,
+    ) -> MatchingNotificationResult:
+        """Create one all-or-nothing customer confirmation package."""
+        require_line_capability(command.actor, LineCapability.MATCHING_SEND)
+        with self._unit_of_work_factory() as unit_of_work:
+            replay = unit_of_work.matching_notifications.get_intent_result(
+                command.idempotency_key, command.fingerprint.value,
+            )
+            if replay is not None:
+                unit_of_work.commit()
+                return replay
+            result = self._create_customer_confirmation(unit_of_work, command)
             unit_of_work.commit()
         return result
 
@@ -323,6 +401,49 @@ class MatchingNotificationApplication:
             payload_json,
             token,
             "customer_decision",
+        )
+
+    def _create_customer_confirmation(self, unit_of_work, command):
+        state = _required_state(unit_of_work, command.plan.case_no, command.plan.plan_id, True)
+        _require_sendable_state(state, command.plan.version)
+        self._availability_validator(state)
+        if not state.all_willing:
+            raise MatchingDecisionNotReadyError("all caregivers must be willing")
+        if state.customer_profiles_are_available:
+            raise MatchingCommunicationConflictError("customer confirmation is already available")
+        if state.customer_line_user_id is None:
+            raise MatchingDecisionNotReadyError("customer has no LINE binding")
+        package = unit_of_work.matching_notifications.customer_confirmation_package(
+            command.plan.case_no, command.plan.plan_id,
+        )
+        profiles = package["profiles"]
+        if not 1 <= len(profiles) <= 4:
+            raise MatchingDecisionNotReadyError("customer profile count must be between 1 and 4")
+        now = self._now()
+        resume_urls = {
+            int(item["staff_id"]): confirmation_download_url(issue_resume_download_token(
+                case_no=command.plan.case_no, plan_id=command.plan.plan_id,
+                staff_id=int(item["staff_id"]), file_id=str(item["file_id"]), now=now,
+            )) for item in package["caregiver_resumes"]
+        }
+        token = self._token_factory()
+        payload_json = customer_confirmation_card(
+            command.plan.case_no, profiles, package["order_information_1"],
+            package["order_information_2"], package["weekly_service_rows"],
+            resume_urls, token, command.note,
+        )
+        snapshot = {
+            "package_type": "customer_confirmation",
+            "case_no": command.plan.case_no, "note": command.note,
+            "order_information_1": package["order_information_1"],
+            "order_information_2": package["order_information_2"],
+            "weekly_service_rows": package["weekly_service_rows"],
+            "caregiver_resumes": package["caregiver_resumes"],
+        }
+        return self._append_notification(
+            unit_of_work, command, state.customer_line_user_id, None,
+            MatchingNotificationKind.CUSTOMER_PROFILES, snapshot, payload_json,
+            token, "customer_decision",
         )
 
     # Intent, one-time action, delivery task, and projection are one transaction.
@@ -689,6 +810,7 @@ def _validate_availability(
         ],
         as_of=datetime.now().date().isoformat(),
         facts_port=facts_port,
+        include_candidate_options=False,
         # The formal plan already owns the selected recipients. Revalidate
         # schedule occupancy without reapplying candidate-search preferences.
         filter_policy={

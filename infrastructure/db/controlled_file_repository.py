@@ -301,6 +301,15 @@ class MySqlControlledFileWorkflowRepository:
             rows = cursor.fetchall()
         return tuple(_readback(row) for row in rows)
 
+    def find_current_readback(self, owner, purpose, subject_reference, object_key):
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                _CURRENT_READBACK_SELECT_SQL,
+                (owner.value, purpose.value, subject_reference, object_key),
+            )
+            row = cursor.fetchone()
+        return None if row is None else _readback(row)
+
     def get_download_reference(
         self, file_id: str
     ) -> ControlledFileDownloadReference | None:
@@ -760,6 +769,11 @@ _READBACK_COLUMNS = (
 )
 _READBACK_SELECT_SQL = "SELECT " + _READBACK_COLUMNS + " FROM controlled_file_objects o WHERE o.opaque_object_id=%s"
 _READBACK_LIST_SQL = "SELECT " + _READBACK_COLUMNS + " FROM controlled_file_objects o ORDER BY o.id DESC LIMIT 100"
+_CURRENT_READBACK_SELECT_SQL = (
+    "SELECT " + _READBACK_COLUMNS + " FROM controlled_file_objects o "
+    "WHERE o.owner_type=%s AND o.purpose=%s AND o.subject_reference=%s "
+    "AND o.object_key=%s ORDER BY o.version_number DESC LIMIT 1"
+)
 _DOWNLOAD_SELECT_SQL = (
     "SELECT " + _READBACK_COLUMNS + ",s.staging_id FROM controlled_file_objects o "
     "JOIN controlled_file_staging_objects s ON s.id=o.source_staging_id "

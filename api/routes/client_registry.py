@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query
@@ -62,6 +62,11 @@ router = APIRouter(prefix="/api/v1/admin/registries/clients", tags=["Client Regi
 @router.get("", response_model=BaseResponse[ClientRegistryPageView])
 def list_client_registry(
     query: str | None = Query(default=None, max_length=100),
+    has_baby_info: bool | None = Query(default=None),
+    service_days: int | None = Query(default=None, gt=0),
+    requires_cooking: bool | None = Query(default=None),
+    sort_by: Literal["case_no", "customer_name", "service_days", "expected_start_date"] | None = Query(default=None),
+    sort_order: Literal["asc", "desc"] | None = Query(default=None),
     limit: int = Query(default=25, ge=1, le=100),
     after: str | None = Query(default=None, min_length=1, max_length=50),
     principal: AdminPrincipal = Depends(require_registry_reader),
@@ -69,7 +74,16 @@ def list_client_registry(
 ):
     del principal
     try:
-        result = application.list(query=query, limit=limit, after=after)
+        result = application.list(
+            query=query,
+            has_baby_info=has_baby_info,
+            service_days=service_days,
+            requires_cooking=requires_cooking,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            limit=limit,
+            after=after,
+        )
         return BaseResponse(
             data=ClientRegistryPageView.model_validate(result, from_attributes=True),
             message="成功取得客戶名冊",

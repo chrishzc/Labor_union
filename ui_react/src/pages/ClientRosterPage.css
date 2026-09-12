@@ -1,0 +1,20 @@
+.client-roster-page { padding: 24px; color: #432c23; }
+.client-roster-page--embedded { padding: 0; }
+.client-roster-page h1 { margin: 0; color: #7c2d12; }
+.client-roster-page header p { margin: 6px 0 20px; color: #74593f; }
+.client-roster-filters { display: grid; grid-template-columns: minmax(190px, 2fr) repeat(3, minmax(130px, 1fr)) auto; gap: 12px; align-items: end; padding: 14px; border: 1px solid #ead3c8; border-radius: 12px; background: #fffdfa; }
+.client-roster-filters label { display: grid; gap: 5px; color: #65483b; font-size: .88rem; }
+.client-roster-filters input, .client-roster-filters select { min-width: 0; border: 1px solid #cfa99a; border-radius: 8px; padding: 9px 10px; background: white; color: #432c23; }
+.client-roster-filter-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.client-roster-page button { border: 1px solid #b45309; border-radius: 8px; padding: 9px 13px; background: #fff7ed; color: #7c2d12; cursor: pointer; white-space: nowrap; }
+.client-roster-filter-actions button:first-child { background: #9a3412; color: white; }
+.client-roster-message { margin-top: 16px; padding: 10px; border-radius: 8px; background: #fff7ed; }
+.client-roster-table-wrap { margin-top: 16px; overflow: auto; border: 1px solid #ead3c8; border-radius: 12px; background: white; }
+.client-roster-table-wrap table { width: 100%; min-width: 1050px; border-collapse: collapse; text-align: left; }
+.client-roster-table-wrap caption { padding: 11px 14px; text-align: left; color: #74593f; }
+.client-roster-table-wrap th, .client-roster-table-wrap td { padding: 11px 13px; border-top: 1px solid #f1ddd5; vertical-align: top; }
+.client-roster-table-wrap th { position: sticky; top: 0; background: #fff7ed; color: #7c2d12; white-space: nowrap; }
+.client-roster-table-wrap th button { padding: 0; border: 0; background: transparent; font: inherit; font-weight: 700; }
+.client-roster-table-wrap tbody tr:hover { background: #fffaf7; }
+@media (max-width: 920px) { .client-roster-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .client-roster-page { padding: 16px; } .client-roster-filters { grid-template-columns: 1fr; } }

@@ -58,6 +58,14 @@
   - `db/schema_parts/1036_registry_owner_mutations.sql`
   - `db/migration_releases/labor_union_2026_09_11_registry_owner_mutations_v1.json`
   - `db/migration_releases/labor_union_2026_09_11_registry_owner_mutations_v1.descriptors.json`
+- current twins Payroll policy release:
+  - `db/schema_parts/220_twins_payroll_policy.sql` (fresh bootstrap successor)
+  - `db/schema_parts/221_twins_payroll_order_details_view.sql` (fresh view successor)
+  - `db/schema_parts/1037_twins_payroll_policy.sql`
+  - `db/schema_parts/1038_twins_payroll_order_details_view.sql`
+  - `scripts/backfill_twins_payroll_rate_snapshots.py`
+  - `db/migration_releases/labor_union_2026_09_11_twins_payroll_policy_v1.json`
+  - `db/migration_releases/labor_union_2026_09_11_twins_payroll_policy_v1.descriptors.json`
 
 ## Contracts
 - Source read-only、candidate identity、release classification、backup／journal／resume及

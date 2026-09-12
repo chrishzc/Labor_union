@@ -36,6 +36,7 @@ import './pages/LineManagementPage.css';
 export const HASH_ALIASES: Record<string, PageType> = {
   databrowser: 'clients',
   'data-browser': 'clients',
+  'client-roster': 'clients',
   line: 'line-management',
   'line-management': 'line-management',
   'line-ai': 'line-ai-events',

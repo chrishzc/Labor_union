@@ -244,8 +244,13 @@ def create_matching_plan_version(
     }
     availability_kwargs["facts_port"] = facts_port
     if require_willing_candidate:
+        # A willing candidate already supplies the exact selected segment.
+        # Revalidate its current schedule occupancy without producing the
+        # candidate-display projection, which needs later official
+        # service-date facts that Stage 5 has not created yet.
         availability = search_segmented_caregiver_availability(
             **availability_kwargs,
+            include_candidate_options=False,
             filter_policy={
                 "region": False,
                 "cooking": False,

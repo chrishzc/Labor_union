@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState, type FC } from 'react';
 import { candidateContactPoolClient, type CandidateContactPool } from '../api/scheduling/candidate_contact_pool_client';
 import { matchingCandidateWorkflowClient } from '../api/scheduling/matching_candidate_workflow_client';
-import { matchingPlanCommunicationClient, type FormalPlanContactState } from '../api/scheduling/matching_plan_communication_client';
+import { matchingPlanCommunicationClient, type CustomerConfirmationPreview, type FormalPlanContactState } from '../api/scheduling/matching_plan_communication_client';
 import { waitingDepositLockClient, type ActiveWaitingDepositPlan, type WaitingDepositPreview } from '../api/scheduling/waiting_deposit_lock_client';
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import { ApiHttpError } from '../api/shared/typed_errors';
-import { CustomerProfilesManualActions } from './MatchingManualCommunicationActions';
 import { HolidayWorkAgreementActions } from './HolidayWorkAgreementActions';
 
 interface OrderFormalRecommendationPanelProps {
@@ -24,7 +23,7 @@ function profileStatusLabel(status: string | null): string {
   if (status === null) return '尚未寄送';
   if (status === 'pending') return '等待系統寄送';
   if (status === 'processing') return '寄送中';
-  if (status === 'sent' || status === 'manually_confirmed') return '履歷已送達';
+  if (status === 'sent' || status === 'manually_confirmed') return '確認資訊已送達';
   if (status === 'retryable_failed') return '寄送暫時失敗';
   if (status === 'failed') return '寄送失敗';
   if (status === 'cancelled') return '寄送已取消';
@@ -70,7 +69,10 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
   const activeCase = useRef<string | null>(null);
   const [willingnessReason, setWillingnessReason] = useState('');
   const [decisionReason, setDecisionReason] = useState('');
-  const [resumeNote, setResumeNote] = useState('請查收正式推薦月嫂履歷。');
+  const [resumeNote, setResumeNote] = useState('請查收正式推薦月嫂的完整確認資訊。');
+  const [confirmationPreview, setConfirmationPreview] = useState<ReadState<CustomerConfirmationPreview>>({ status: 'idle' });
+  const [confirmationPreviewGeneration, setConfirmationPreviewGeneration] = useState(0);
+  const confirmationActionIdentity = useRef<{ signature: string; key: string } | null>(null);
   const [lockPreview, setLockPreview] = useState<WaitingDepositPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -82,7 +84,10 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
     setCandidates({ status: 'idle' });
     setWillingnessReason('');
     setDecisionReason('');
-    setResumeNote('請查收正式推薦月嫂履歷。');
+    setResumeNote('請查收正式推薦月嫂的完整確認資訊。');
+    setConfirmationPreview({ status: 'idle' });
+    setConfirmationPreviewGeneration(0);
+    confirmationActionIdentity.current = null;
     setLockPreview(null);
     setError(null);
     setNotice(null);
@@ -124,6 +129,33 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
     || (current.plan.activeLockId === null && current.plan.status === 'proposed' && current.contact.customer_decision !== 'accepted'));
   const canCommunicate = current !== null && current.plan.activeLockId === null
     && current.contact.plan.status === 'proposed' && current.contact.customer_decision === 'pending';
+  const confirmationPreviewEligible = current !== null && canCommunicate && current.contact.all_willing
+    && current.contact.customer_profiles_status === null;
+  const confirmationPlanId = current?.plan.planId ?? null;
+  const confirmationVersion = current?.contact.plan.communication_version ?? null;
+
+  useEffect(() => {
+    if (!confirmationPreviewEligible || confirmationPlanId === null || confirmationVersion === null) {
+      setConfirmationPreview({ status: 'idle' });
+      return undefined;
+    }
+    let cancelled = false;
+    setConfirmationPreview({ status: 'loading' });
+    void matchingPlanCommunicationClient.previewCustomerConfirmation(caseNo, confirmationPlanId, confirmationVersion)
+      .then((data) => {
+        if (!cancelled) setConfirmationPreview({ status: 'ready', data });
+      })
+      .catch((caught) => {
+        if (!cancelled) setConfirmationPreview({ status: 'error', message: errorMessage(caught) });
+      });
+    return () => { cancelled = true; };
+  }, [
+    caseNo,
+    confirmationPreviewEligible,
+    confirmationPreviewGeneration,
+    confirmationPlanId,
+    confirmationVersion,
+  ]);
 
   const perform = async (operation: () => Promise<void>) => {
     if (busyRef.current || activeCase.current !== caseNo) return;
@@ -193,13 +225,29 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
     if (fresh.plan.activeLockId !== null || fresh.contact.plan.status !== 'proposed'
       || fresh.contact.customer_decision !== 'pending' || !fresh.contact.all_willing
       || fresh.contact.customer_profiles_status !== null || !resumeNote.trim()) {
-      throw new Error('目前方案尚不可寄送或已有履歷任務，請依正式聯繫狀態續辦。');
+      throw new Error('目前方案尚不可寄送或已有確認資訊任務，請依正式聯繫狀態續辦。');
     }
-    const receipt = await matchingPlanCommunicationClient.sendCustomerProfiles(
+    if (confirmationPreview.status !== 'ready'
+      || confirmationPreview.data.plan_id !== fresh.plan.planId
+      || confirmationPreview.data.expected_version !== fresh.contact.plan.communication_version) {
+      throw new Error('確認資訊檢查結果已過期，請重新檢查後再寄送。');
+    }
+    if (!confirmationPreview.data.send_allowed) {
+      throw new Error(confirmationPreview.data.blockers[0] ?? '確認資訊尚未完整，不能寄送。');
+    }
+    const signature = `${caseNo}:${fresh.plan.planId}:${fresh.contact.plan.communication_version}:${resumeNote.trim()}`;
+    if (confirmationActionIdentity.current?.signature !== signature) {
+      confirmationActionIdentity.current = {
+        signature,
+        key: `orders-customer-confirmation-${fresh.plan.planId}-${globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)}`,
+      };
+    }
+    const receipt = await matchingPlanCommunicationClient.sendCustomerConfirmation(
       caseNo, fresh.plan.planId, fresh.contact.plan.communication_version, resumeNote.trim(),
+      confirmationActionIdentity.current.key,
     );
     await observe(fresh.plan.planId, (data) => data.contact.customer_profiles_status !== null,
-      `履歷發送工作已建立：#${receipt.intent_id}（狀態：${profileStatusLabel(receipt.delivery_status)}）；尚不代表 LINE 已送達。`);
+      `確認資訊發送工作已建立：#${receipt.intent_id}（狀態：${profileStatusLabel(receipt.delivery_status)}）；尚不代表 LINE 已送達。`);
   });
 
   const recordWillingness = (segmentId: number) => perform(async () => {
@@ -255,13 +303,16 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
   const pendingWillingnessCount = current?.contact.segments.filter(
     (segment) => segment.willingness === 'pending',
   ).length ?? 0;
+  const confirmationDeliveryStatus = current?.contact.customer_confirmation_status
+    ?? current?.contact.customer_profiles_status
+    ?? null;
   const visibleStatus = current === null
     ? '尚未選定月嫂'
     : current.contact.customer_decision !== 'pending'
       ? decisionLabel(current.contact.customer_decision)
       : pendingWillingnessCount > 0
         ? `待確認 ${pendingWillingnessCount} 位月嫂意願`
-        : profileStatusLabel(current.contact.customer_profiles_status);
+        : profileStatusLabel(confirmationDeliveryStatus);
 
   return (
     <section className="formal-recommendation" aria-label={`案件 ${caseNo} 正式推薦媒合方案`}>
@@ -314,13 +365,62 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
           {canCommunicate && current.contact.all_willing && current.contact.customer_profiles_status === null && (
             <section className="formal-recommendation-next" aria-labelledby={`profiles-${current.plan.planId}`}>
               <p className="formal-recommendation-step">下一步</p>
-              <h4 id={`profiles-${current.plan.planId}`}>寄送月嫂履歷給客戶</h4>
-              <p>人選與服務日期已確認。系統會寄送目前正式方案中的月嫂履歷。</p>
-              <button className="formal-recommendation-primary" type="button" disabled={!resumeNote.trim()} onClick={() => void sendProfiles()}>寄送履歷給客戶</button>
+              <h4 id={`profiles-${current.plan.planId}`}>寄送確認資訊給客戶</h4>
+              <p>寄送前會一次檢查完整內容；任何一項缺少都不會建立 LINE 寄送工作。</p>
+              {confirmationPreview.status === 'loading' && <p role="status">正在檢查四項確認資訊…</p>}
+              {confirmationPreview.status === 'error' && (
+                <div className="formal-recommendation-readiness-error" role="alert">
+                  <p>目前無法檢查確認資訊：{confirmationPreview.message}</p>
+                  <button type="button" onClick={() => setConfirmationPreviewGeneration((value) => value + 1)}>重新檢查</button>
+                </div>
+              )}
+              {confirmationPreview.status === 'ready' && (
+                <>
+                  <ul className="formal-recommendation-readiness" aria-label="本次確認資訊內容">
+                    <li data-ready={confirmationPreview.data.order_information_1_ready}>
+                      <span aria-hidden="true">{confirmationPreview.data.order_information_1_ready ? '✓' : '✕'}</span>
+                      <span>訂單資訊－1</span>
+                      <strong>{confirmationPreview.data.order_information_1_ready ? '已就緒' : '尚未就緒'}</strong>
+                    </li>
+                    <li data-ready={confirmationPreview.data.order_information_2_ready}>
+                      <span aria-hidden="true">{confirmationPreview.data.order_information_2_ready ? '✓' : '✕'}</span>
+                      <span>訂單資訊－2</span>
+                      <strong>{confirmationPreview.data.order_information_2_ready ? '已就緒' : '尚未就緒'}</strong>
+                    </li>
+                    <li data-ready={confirmationPreview.data.weekly_service_ready}>
+                      <span aria-hidden="true">{confirmationPreview.data.weekly_service_ready ? '✓' : '✕'}</span>
+                      <span>每周服務中說明</span>
+                      <strong>{confirmationPreview.data.weekly_service_ready ? `${confirmationPreview.data.weekly_service_row_count} 週已就緒` : '尚未就緒'}</strong>
+                    </li>
+                    {confirmationPreview.data.caregiver_resumes.map((resume) => (
+                      <li key={resume.staff_id} data-ready={resume.ready}>
+                        <span aria-hidden="true">{resume.ready ? '✓' : '✕'}</span>
+                        <span>{resume.staff_name}履歷 PDF</span>
+                        <strong>{resume.ready ? `${resume.filename}（版本 ${resume.version}）` : '尚未上傳'}</strong>
+                      </li>
+                    ))}
+                  </ul>
+                  {confirmationPreview.data.blockers.length > 0 && (
+                    <div className="formal-recommendation-blockers" role="alert">
+                      <strong>尚不能寄送</strong>
+                      <ul>{confirmationPreview.data.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>
+                    </div>
+                  )}
+                  {confirmationPreview.data.send_allowed && <p className="formal-recommendation-ready" role="status">四項確認資訊均已就緒，可以一次寄送。</p>}
+                </>
+              )}
+              <button
+                className="formal-recommendation-primary"
+                type="button"
+                disabled={!resumeNote.trim() || confirmationPreview.status !== 'ready' || !confirmationPreview.data.send_allowed}
+                onClick={() => void sendProfiles()}
+              >
+                寄送確認資訊給客戶
+              </button>
               <details className="formal-recommendation-inline-details">
                 <summary>調整寄送訊息</summary>
-                <label>履歷傳送備註
-                  <textarea aria-label={`方案 ${current.plan.planId} 履歷傳送備註`} value={resumeNote} maxLength={1000} onChange={(event) => setResumeNote(event.target.value)} />
+                <label>確認資訊備註
+                  <textarea aria-label={`方案 ${current.plan.planId} 確認資訊備註`} value={resumeNote} maxLength={1000} onChange={(event) => setResumeNote(event.target.value)} />
                 </label>
               </details>
             </section>
@@ -330,7 +430,7 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
             <section className="formal-recommendation-next" aria-labelledby={`decision-${current.plan.planId}`}>
               <p className="formal-recommendation-step">下一步</p>
               <h4 id={`decision-${current.plan.planId}`}>記錄客戶回覆</h4>
-              <p>履歷狀態：{profileStatusLabel(current.contact.customer_profiles_status)}</p>
+              <p>確認資訊狀態：{profileStatusLabel(confirmationDeliveryStatus)}</p>
               <label>客戶回覆依據
                 <textarea aria-label={`方案 ${current.plan.planId} 客戶決策依據`} value={decisionReason} maxLength={500} placeholder="例如：9/11 電話確認客戶接受此人選" onChange={(event) => setDecisionReason(event.target.value)} />
               </label>
@@ -373,19 +473,10 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
                   onCommitted={reload}
                 />
               )}
-              {canCommunicate && current.contact.all_willing && current.contact.customer_profiles_status === null && (
-                <CustomerProfilesManualActions
-                  key={current.plan.planId}
-                  caseNo={caseNo}
-                  planId={current.plan.planId}
-                  currentStatus={current.contact.customer_profiles_status}
-                  onCommitted={() => observe(current.plan.planId, (data) => data.contact.customer_profiles_status !== null, '客戶履歷人工送達已完成正式回讀。')}
-                />
-              )}
               <div className="formal-recommendation-technical">
-                <span>履歷狀態：{profileStatusLabel(current.contact.customer_profiles_status)}</span>
+                <span>確認資訊狀態：{profileStatusLabel(confirmationDeliveryStatus)}</span>
                 <span>{decisionLabel(current.contact.customer_decision)}</span>
-                <button type="button" aria-label={`重新讀取方案 ${current.plan.planId} 履歷推薦送達狀態`} onClick={() => void reload()}>重新同步狀態</button>
+                <button type="button" aria-label={`重新讀取方案 ${current.plan.planId} 確認資訊送達狀態`} onClick={() => void reload()}>重新同步狀態</button>
               </div>
             </div>
           </details>

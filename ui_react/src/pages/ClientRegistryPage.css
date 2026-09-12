@@ -1,6 +1,13 @@
+.client-registry-hub { padding: 24px; color: #432c23; }
+.client-registry-hub__header h1 { margin: 0; color: #7c2d12; }
+.client-registry-hub__header p { margin: 6px 0 18px; color: #74593f; }
+.client-registry-tabs { display: flex; gap: 6px; margin-bottom: 18px; border-bottom: 1px solid #ead3c8; }
+.client-registry-tabs button { margin-bottom: -1px; padding: 10px 16px; border: 1px solid transparent; border-radius: 9px 9px 0 0; background: transparent; color: #74593f; cursor: pointer; font-weight: 700; }
+.client-registry-tabs button[aria-selected="true"] { border-color: #ead3c8 #ead3c8 white; background: white; color: #9a3412; }
 .client-registry-page { padding: 24px; color: #432c23; }
+.client-registry-hub .client-registry-page { padding: 0; }
 .client-registry-page > header { display: flex; gap: 24px; justify-content: space-between; align-items: end; margin-bottom: 20px; }
-.client-registry-page h1 { margin: 0; color: #7c2d12; }
+.client-registry-page > header h2 { margin: 0; color: #7c2d12; }
 .client-registry-page header p { margin: 6px 0 0; color: #74593f; }
 .client-registry-page form { display: flex; gap: 8px; max-width: 100%; width: min(420px, 100%); }
 .client-registry-page form input { flex: 1 1 auto; width: 0; }
@@ -29,4 +36,4 @@
 .registry-editor .order-v2-drawer-section input,
 .registry-editor .order-v2-drawer-section select,
 .registry-editor .order-v2-drawer-section textarea { box-sizing: border-box; max-width: 100%; width: 100%; }
-@media (max-width: 820px) { .client-registry-page > header { align-items: stretch; flex-direction: column; } .client-registry-layout { grid-template-columns: 1fr; } .client-registry-layout aside { max-height: 260px; } .registry-editor .order-v2-drawer-section > div[style*="grid-template-columns"] { grid-template-columns: minmax(0, 1fr) !important; } }
+@media (max-width: 820px) { .client-registry-hub { padding: 16px; } .client-registry-page > header { align-items: stretch; flex-direction: column; } .client-registry-layout { grid-template-columns: 1fr; } .client-registry-layout aside { max-height: 260px; } .registry-editor .order-v2-drawer-section > div[style*="grid-template-columns"] { grid-template-columns: minmax(0, 1fr) !important; } }

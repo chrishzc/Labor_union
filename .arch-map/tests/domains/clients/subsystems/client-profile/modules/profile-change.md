@@ -6,7 +6,7 @@ test_root: tests/domains/clients/subsystems/client-profile/modules/profile-chang
 test_root: ui_react/src/tests/domains/clients/subsystems/client-profile/modules/profile-change/
 
 ## Canonical roots
-- layout_basis: Backend contract tests own Client Profile and BeClass query/mutation boundaries; the mirrored React root owns the case-centered registry interaction.
+- layout_basis: Backend contract tests own Client Profile and BeClass query/mutation boundaries; the mirrored React root owns the case-centered registry editing and bounded read-only roster interaction.
 - tests/domains/clients/subsystems/client-profile/modules/profile-change/
 - ui_react/src/tests/domains/clients/subsystems/client-profile/modules/profile-change/
 
@@ -15,3 +15,5 @@ test_root: ui_react/src/tests/domains/clients/subsystems/client-profile/modules/
 - `contract/test_client_registry_query.py` — case-centered bounded composition, binding result, owner/editability metadata and cursor contract.
 - `contract/test_client_binding_port.py` — verified binding evidence and role scope boundary.
 - `ui_react/.../client_registry_page.test.tsx` — case selection, zero-write cancel, owner preview/apply, stable idempotency key and server readback refresh.
+- `ui_react/.../client_roster_page.test.tsx` — server query filters/sort, roster-only data display and absence of mutation controls.
+- `ui_react/.../client_registry_client.test.ts` — structured query serialization and omitted versus explicit false filters.

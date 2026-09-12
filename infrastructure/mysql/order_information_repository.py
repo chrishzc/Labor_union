@@ -13,6 +13,7 @@ from subsystems.orders.order_information import (
     OrderInformationOwnerSnapshot,
     projection_fingerprint,
     build_candidate_information,
+    build_order_information_message,
 )
 
 
@@ -106,6 +107,39 @@ class MySqlOrderInformationRepository:
             }
         facts, issues = _facts(case, candidate)
         return build_candidate_information(case_no, candidate_id, info_type, facts, issues, candidate.get("line_user_id"))
+
+    def preview_matching_plan_information(
+        self, case_no: str, plan_id: int, info_type: int, *, for_update: bool = False,
+    ) -> tuple[dict[str, object], ...]:
+        """Use the existing sheet formatter for every formal-plan segment.
+
+        A formal plan has no candidate-pool identity, so it supplies its own
+        authoritative period and staff facts without pretending to be a
+        candidate contact record.
+        """
+        with self._connection.cursor() as cursor:
+            cursor.execute(_CASE_SQL + (" FOR UPDATE" if for_update else ""), (case_no,))
+            case = cursor.fetchone()
+            cursor.execute(_FORMAL_PLAN_SEGMENTS_SQL, (plan_id, case_no))
+            segments = tuple(cursor.fetchall() or ())
+        if not isinstance(case, Mapping) or not segments:
+            raise ValueError("matching_plan_information_not_found")
+        result: list[dict[str, object]] = []
+        for segment in segments:
+            facts, issues = _facts(case, segment)
+            text, blockers = build_order_information_message(
+                info_type, facts, issues,
+                "正式推薦方案資訊；服務期間以目前正式媒合方案為準。",
+            )
+            if blockers:
+                raise ValueError(blockers[0])
+            result.append({
+                "segment_id": int(segment["assignment_id"]),
+                "staff_id": int(segment["staff_id"]),
+                "staff_name": str(segment["staff_name"]),
+                "text": text,
+            })
+        return tuple(result)
 
 
 def _select_assignment(
@@ -314,6 +348,16 @@ SELECT a.id AS assignment_id, a.case_no, a.staff_id,
   JOIN staff s ON s.id=a.staff_id
  WHERE a.case_no=%s AND a.status<>'cancelled'
  ORDER BY a.assignment_sequence, a.id
+"""
+
+_FORMAL_PLAN_SEGMENTS_SQL = """
+SELECT segment.id AS assignment_id,segment.staff_id,segment.assigned_start_date,
+       segment.assigned_end_date,staff.name AS staff_name
+  FROM caregiver_matching_plans plan
+  JOIN caregiver_matching_plan_segments segment ON segment.plan_id=plan.id
+  JOIN staff ON staff.id=segment.staff_id
+ WHERE plan.id=%s AND plan.case_no=%s
+ ORDER BY segment.segment_order,segment.id
 """
 
 

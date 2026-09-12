@@ -94,6 +94,30 @@ class _Facts:
         ]
 
 
+class _QuarterlySubsidyFacts(_Facts):
+    def list_subsidy_facts(self, start_date, end_date):
+        def subsidy_fact(case_no, service_end, amount, application_roc_year, eligibility):
+            return SubsidyFact(
+                1, case_no, eligibility, date(2026, 1, 1), service_end,
+                Decimal("40"), Decimal("5"), 20, amount, 300,
+                "王小美", "陳月嫂", None, None,
+                application_roc_year=application_roc_year,
+                claim_period_label="第一季",
+            )
+
+        return SubsidyFacts(
+            general=(
+                subsidy_fact("115000001", date(2026, 3, 20), 12000, 115, "一般市民"),
+                subsidy_fact("115000002", date(2026, 3, 22), 6000, 115, "一般市民"),
+                subsidy_fact("115000003", date(2026, 9, 20), 42000, 115, "一般市民"),
+                subsidy_fact("114000005", date(2026, 5, 10), 10000, 114, "一般市民"),
+            ),
+            subsidized=(
+                subsidy_fact("115000004", date(2027, 1, 15), 18000, 115, "補助市民"),
+            ),
+        )
+
+
 class _MetricsService:
     def __init__(self):
         self.saved = []
@@ -333,6 +357,44 @@ def test_weekly_export_has_fixed_three_sheets_and_summary_without_pii():
     assert "A3:A4" in {str(cell_range) for cell_range in styled_service_sheet.merged_cells.ranges}
     assert styled_service_sheet.page_setup.orientation == "landscape"
     assert styled_service_sheet.page_setup.fitToWidth == 1
+
+
+def test_weekly_export_appends_current_application_year_quarter_amount_summary():
+    app = _app()
+    app.dependency_overrides[get_weekly_operations_report_query] = lambda: WeeklyOperationsReportQuery(
+        _QuarterlySubsidyFacts(),
+        lambda: datetime(2026, 8, 23, 12, tzinfo=TAIPEI_TIME_ZONE),
+    )
+
+    response = TestClient(app).get(
+        "/api/v1/operations-reports/weekly/export",
+        params={"start_date": "2026-08-20", "end_date": "2026-08-26"},
+    )
+
+    assert response.status_code == 200
+    worksheet = load_workbook(BytesIO(response.content), data_only=True)["補助案件統計表"]
+    footer_title_row = next(
+        row for row in range(1, worksheet.max_row + 1)
+        if worksheet.cell(row=row, column=1).value == "季度金額統計"
+    )
+    last_detail_row = max(
+        row for row in range(1, worksheet.max_row + 1)
+        if worksheet.cell(row=row, column=2).value in {
+            "115000001", "115000002", "115000003", "115000004", "114000005",
+        }
+    )
+    assert footer_title_row > last_detail_row
+    footer_amounts = {
+        worksheet.cell(row=row, column=1).value: worksheet.cell(row=row, column=11).value
+        for row in range(footer_title_row + 1, worksheet.max_row + 1)
+    }
+    assert footer_amounts == {
+        "115年第1季": 18000,
+        "115年第2季": 0,
+        "115年第3季": 42000,
+        "115年第4季": 0,
+        "116年第1季": 18000,
+    }
 
 
 def test_weekly_export_rejects_retired_query_level_metrics():

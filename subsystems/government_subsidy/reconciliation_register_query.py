@@ -102,11 +102,14 @@ def _fetch_completed_cases(connection_factory: Callable[[], Any]) -> list[dict]:
                 SELECT o.case_no, c.identity_status, o.actual_start_date,
                        o.actual_end_date, o.service_days, o.service_hours_per_day,
                        c.name AS employer_name, c.address AS employer_address,
-                       s.name AS staff_name, br.survey_details
+                       s.name AS staff_name, br.survey_details,
+                       payroll_policy.hourly_rate_ntd AS payroll_hourly_rate_ntd
                 FROM orders o
                 JOIN clients c ON c.id = o.client_id
                 LEFT JOIN staff s ON s.id = o.staff_id
                 LEFT JOIN beclass_records br ON (br.query_no = o.case_no OR br.bound_case_no = o.case_no)
+                LEFT JOIN case_payroll_rate_policy_snapshots payroll_policy
+                    ON payroll_policy.case_no = o.case_no
                 WHERE o.actual_end_date IS NOT NULL
                   AND c.identity_status IN (%s, %s)
                 ORDER BY o.case_no
@@ -119,12 +122,21 @@ def _fetch_completed_cases(connection_factory: Callable[[], Any]) -> list[dict]:
 
 
 def _fetch_established_cases(
-    period_start: date,
-    period_end: date,
+    period_start: date | None,
+    period_end: date | None,
     connection_factory: Callable[[], Any],
     order_statuses: tuple[str, ...] = ESTABLISHED_ORDER_STATUSES,
 ) -> list[dict]:
+    if (period_start is None) != (period_end is None):
+        raise ValueError("period_start and period_end must both be provided or omitted")
     status_placeholders = ", ".join("%s" for _ in order_statuses)
+    period_clause = ""
+    period_params: tuple[date, ...] = ()
+    if period_start is not None and period_end is not None:
+        period_clause = """
+                  AND COALESCE(o.actual_end_date, o.end_date) >= %s
+                  AND COALESCE(o.actual_end_date, o.end_date) < %s"""
+        period_params = (period_start, period_end)
     conn = connection_factory()
     try:
         with conn.cursor() as cursor:
@@ -148,24 +160,25 @@ def _fetch_established_cases(
                            ),
                            ''
                        ) AS staff_name,
-                       br.survey_details
+                       br.survey_details,
+                       payroll_policy.hourly_rate_ntd AS payroll_hourly_rate_ntd
                 FROM orders o
                 JOIN clients c ON c.id = o.client_id
                 LEFT JOIN staff s ON s.id = o.staff_id
                 LEFT JOIN beclass_records br
                     ON (br.query_no = o.case_no OR br.bound_case_no = o.case_no)
+                LEFT JOIN case_payroll_rate_policy_snapshots payroll_policy
+                    ON payroll_policy.case_no = o.case_no
                 WHERE o.status IN ({status_placeholders})
                   AND c.identity_status IN (%s, %s)
-                  AND COALESCE(o.actual_end_date, o.end_date) >= %s
-                  AND COALESCE(o.actual_end_date, o.end_date) < %s
+                {period_clause}
                 ORDER BY o.case_no
                 """,
                 (
                     *order_statuses,
                     GENERAL_CITIZEN,
                     SUBSIDIZED_CITIZEN,
-                    period_start,
-                    period_end,
+                    *period_params,
                 ),
             )
             return cursor.fetchall()
@@ -286,12 +299,20 @@ def _fetch_claim_batch_cases(
         conn.close()
 
 
-def _subsidy_terms(eligibility: str, total_service_hours: Decimal) -> tuple[Decimal, Decimal]:
+def _subsidy_terms(
+    eligibility: str,
+    total_service_hours: Decimal,
+    payroll_hourly_rate_ntd: object | None = None,
+) -> tuple[Decimal, Decimal]:
     if eligibility == GENERAL_CITIZEN:
-        return min(Decimal("40"), total_service_hours), Decimal("300")
-    if eligibility == SUBSIDIZED_CITIZEN:
-        return min(Decimal("120"), total_service_hours), Decimal("350")
-    return Decimal("0"), Decimal("0")
+        subsidy_hours = min(Decimal("40"), total_service_hours)
+    elif eligibility == SUBSIDIZED_CITIZEN:
+        subsidy_hours = min(Decimal("120"), total_service_hours)
+    else:
+        return Decimal("0"), Decimal("0")
+    if payroll_hourly_rate_ntd is None:
+        raise ValueError("government_subsidy_payroll_rate_snapshot_missing")
+    return subsidy_hours, Decimal(str(payroll_hourly_rate_ntd))
 
 
 def _to_register_row(source: dict) -> dict | None:
@@ -300,9 +321,17 @@ def _to_register_row(source: dict) -> dict | None:
     daily_hours = Decimal(str(source.get("service_hours_per_day") or 0))
     service_days = Decimal(str(source.get("service_days") or 0))
     subsidy_hours, unit_price = _subsidy_terms(
-        source.get("identity_status"), service_days * daily_hours,
+        source.get("identity_status"),
+        service_days * daily_hours,
+        source.get("payroll_hourly_rate_ntd"),
     )
-    if not actual_start or not actual_end or subsidy_hours <= 0 or daily_hours <= 0:
+    if (
+        not actual_start
+        or not actual_end
+        or subsidy_hours <= 0
+        or daily_hours <= 0
+        or unit_price <= 0
+    ):
         return None
 
     return {
@@ -555,30 +584,57 @@ def build_operations_report_annual_subsidy_rows(
     """Return the operations-report annual candidate in its dedicated row format."""
     if not isinstance(report_year, int) or report_year < 1912:
         raise ValueError("report_year must be a Gregorian year")
-    general_rows, subsidized_rows = _established_order_rows(
-        report_year,
+    general_rows, subsidized_rows = _operations_report_order_rows(
+        report_year, connection_factory
+    )
+
+    return {
+        "general_citizen_rows": general_rows,
+        "subsidized_citizen_rows": subsidized_rows,
+    }
+
+
+def _operations_report_order_rows(
+    report_year: int,
+    connection_factory: Callable[[], Any],
+) -> tuple[list[dict], list[dict]]:
+    """Select the operations-report's annual cases by application and reconciliation year."""
+    report_roc_year = report_year - 1911
+    rows = []
+    for source in _fetch_established_cases(
+        None,
         None,
         connection_factory,
         OPERATIONS_REPORT_ORDER_STATUSES,
-    )
-
-    def operations_row(row: dict) -> dict:
-        result = dict(row)
+    ):
+        row = _to_register_row(source)
+        if row is None:
+            continue
+        application_roc_year = _case_application_roc_year(row["市府訂單號碼"])
         reconciliation_year, reconciliation_period = _operations_reconciliation_period(
-            result["服務結束"]
+            row["服務結束"]
         )
-        if reconciliation_year != report_year:
-            raise RuntimeError("operations_report_reconciliation_year_mismatch")
-        result["核銷月份"] = reconciliation_period
-        result["核銷狀態"] = (
-            "結案" if result.get("訂單狀態") in COMPLETED_ORDER_STATUSES else ""
+        if application_roc_year != report_roc_year and not (
+            application_roc_year == report_roc_year - 1
+            and reconciliation_year == report_year
+        ):
+            continue
+        row["核銷月份"] = reconciliation_period
+        row["核銷狀態"] = (
+            "結案" if row.get("訂單狀態") in COMPLETED_ORDER_STATUSES else ""
         )
-        return result
+        rows.append(row)
+    rows.sort(key=lambda row: row["市府訂單號碼"])
+    general, subsidized = _partition_rows(rows)
+    return _with_serials(general), _with_serials(subsidized)
 
-    return {
-        "general_citizen_rows": [operations_row(row) for row in general_rows],
-        "subsidized_citizen_rows": [operations_row(row) for row in subsidized_rows],
-    }
+
+def _case_application_roc_year(case_no: str) -> int | None:
+    return (
+        int(case_no[:3])
+        if len(case_no) == 9 and case_no.isdigit() and case_no[3:6] == "000"
+        else None
+    )
 
 
 def _operations_reconciliation_period(service_end: date) -> tuple[int, str]:

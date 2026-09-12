@@ -279,29 +279,10 @@ def test_schema_applied_receipt_resumes_post_schema_phase(tmp_path, monkeypatch)
     assert result == {"status": "backfilled"}
 
 
-def test_default_catalog_does_not_replay_historical_post_schema_backfills(
-    tmp_path, monkeypatch
-) -> None:
-    receipt_path = tmp_path / "operation.json"
-    runner.write_receipt(receipt_path, {
-        "status": "schema_applied", "candidate_database": "candidate",
-    })
-    monkeypatch.setattr(
-        runner, "server_identity", lambda *_: {"database": "candidate"}
+def test_default_catalog_runs_only_the_current_declared_backfill() -> None:
+    assert tuple(item.backfill_id for item in runner.RELEASE_MANIFEST.backfills) == (
+        "twins-payroll-rate-snapshots-v1",
     )
-    monkeypatch.setattr(
-        runner,
-        "_candidate_preddl_dump",
-        lambda *_args, **_kwargs: pytest.fail("legacy backfill must not run"),
-    )
-
-    result = runner.run_candidate_post_schema(
-        runner.DatabaseConfig("host", 1, "user", "password"),
-        "source", "candidate", receipt_path,
-    )
-
-    assert result["status"] == "backfilled"
-    assert result["backfills"] == ()
 
 
 def test_rehearsal_worker_starts_as_project_module(tmp_path) -> None:

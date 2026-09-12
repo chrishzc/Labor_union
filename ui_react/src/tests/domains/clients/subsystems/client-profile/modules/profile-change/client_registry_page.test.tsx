@@ -32,6 +32,10 @@ describe('Client registry owner editing', () => {
 
   it('cancels without writing and applies a preview with one stable idempotency key', async () => {
     render(<ClientRegistryPage />);
+    expect(screen.getByRole('tab', { name: '客戶清單' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.queryByRole('heading', { name: '客戶主檔' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: '名冊資料' }));
+    expect(screen.getByRole('tab', { name: '名冊資料' })).toHaveAttribute('aria-selected', 'true');
     fireEvent.click(await screen.findByRole('button', { name: /CASE-001/ }));
     const profile = (await screen.findByRole('heading', { name: '客戶主檔' })).closest('section') as HTMLElement;
     const phone = within(profile).getByLabelText('手機');

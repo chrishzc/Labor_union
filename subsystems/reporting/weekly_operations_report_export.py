@@ -299,6 +299,22 @@ def _build_subsidy_sheet(ws, report: WeeklyOperationsReport) -> None:
     else:
         ws.cell(row=sep_row, column=11, value=0)
 
+    ws.append([])
+    ws.append(["季度金額統計"])
+    summary_title_row = ws.max_row
+    ws.cell(row=summary_title_row, column=1).font = Font(bold=True)
+    for reconciliation_year, quarter, amount in _subsidy_quarter_totals(
+        general_rows + subsidized_rows, roc_year
+    ):
+        ws.append([f"{reconciliation_year - 1911}年第{quarter}季"])
+        summary_row = ws.max_row
+        ws.merge_cells(f"A{summary_row}:J{summary_row}")
+        ws.cell(row=summary_row, column=11, value=amount)
+        for column in range(1, 12):
+            cell = ws.cell(row=summary_row, column=column)
+            cell.border = _BORDER_THIN
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+
     ws.freeze_panes = "A6"
     _auto_fit_columns(ws, min_col=1, max_col=14)
 
@@ -309,6 +325,26 @@ def _subsidy_year_totals(
 ) -> tuple[int, int]:
     matched = [row for row in rows if row.application_roc_year == application_roc_year]
     return len(matched), sum(row.subsidy_amount_ntd for row in matched)
+
+
+def _subsidy_quarter_totals(
+    rows: list[WeeklySubsidyRow],
+    report_roc_year: int,
+) -> list[tuple[int, int, int]]:
+    report_year = report_roc_year + 1911
+    totals = {(report_year, quarter): 0 for quarter in range(1, 5)}
+    for row in rows:
+        if row.application_roc_year != report_roc_year or row.service_end is None:
+            continue
+        reconciliation_year = row.service_end.year
+        quarter = (row.service_end.month - 1) // 3 + 1
+        totals[(reconciliation_year, quarter)] = (
+            totals.get((reconciliation_year, quarter), 0) + row.subsidy_amount_ntd
+        )
+    return [
+        (reconciliation_year, quarter, amount)
+        for (reconciliation_year, quarter), amount in sorted(totals.items())
+    ]
 
 
 def _build_service_sheet(ws, report: WeeklyOperationsReport) -> None:

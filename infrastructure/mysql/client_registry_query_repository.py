@@ -14,13 +14,30 @@ _CLIENT_FIELDS = (
 _BECLASS_FIELDS = (
     "name", "email", "phone", "tel", "ext", "city", "zip_code", "address", "admin_notes",
 )
+_SORT_COLUMNS = {
+    "case_no": "o.case_no",
+    "customer_name": "c.name",
+    "service_days": "o.service_days",
+    "expected_start_date": "o.start_date",
+}
 
 
 class MySqlClientRegistryQueryRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
 
-    def list_page(self, *, query: str | None, limit: int, after: str | None):
+    def list_page(
+        self,
+        *,
+        query: str | None,
+        has_baby_info: bool | None,
+        service_days: int | None,
+        requires_cooking: bool | None,
+        sort_by: str | None,
+        sort_order: str | None,
+        limit: int,
+        after: str | None,
+    ):
         where = ["o.case_no IS NOT NULL"]
         parameters: list[object] = []
         if after is not None:
@@ -29,14 +46,33 @@ class MySqlClientRegistryQueryRepository:
         if query is not None:
             where.append("CONCAT_WS(' ',o.case_no,COALESCE(c.name,''),COALESCE(c.phone,'')) LIKE %s")
             parameters.append(f"%{query}%")
+        if has_baby_info is True:
+            where.append("COALESCE(TRIM(c.baby_info), '') <> ''")
+        elif has_baby_info is False:
+            where.append("COALESCE(TRIM(c.baby_info), '') = ''")
+        if service_days is not None:
+            where.append("o.service_days = %s")
+            parameters.append(service_days)
+        if requires_cooking is not None:
+            where.append("o.requires_cooking = %s")
+            parameters.append(requires_cooking)
+        if sort_by is None:
+            order_by = "o.case_no ASC"
+        else:
+            column = _SORT_COLUMNS[sort_by]
+            direction = "DESC" if sort_order == "desc" else "ASC"
+            order_by = f"{column} {direction}"
+            if column != "o.case_no":
+                order_by += ", o.case_no ASC"
         parameters.append(limit + 1)
         with self._connection.cursor() as cursor:
             cursor.execute(
-                "SELECT c.id AS client_id,o.case_no,c.name,c.phone,c.city,"
+                "SELECT c.id AS client_id,o.case_no,c.name,c.phone,c.city,c.baby_info,"
+                "o.service_days,o.requires_cooking,"
                 "o.start_date AS planned_start_date,o.status AS order_status "
                 "FROM orders o JOIN clients c ON c.id=o.client_id WHERE "
                 + " AND ".join(where)
-                + " ORDER BY o.case_no ASC LIMIT %s",
+                + " ORDER BY " + order_by + " LIMIT %s",
                 tuple(parameters),
             )
             rows = tuple(cursor.fetchall() or ())

@@ -8,12 +8,16 @@ import { OrderFormalRecommendationPanel } from '../../../../../../../components/
 import type { OrderTerms } from '../../../../../../../api/orders/order_query_schemas';
 
 const mocks = vi.hoisted(() => ({ termsQuery: vi.fn(), termsPreview: vi.fn(), termsApply: vi.fn(), pool: vi.fn(), willingness: vi.fn(),
-  assignment: vi.fn(), active: vi.fn(), contact: vi.fn(), sendProfiles: vi.fn() }));
+  assignment: vi.fn(), active: vi.fn(), contact: vi.fn(), previewConfirmation: vi.fn(), sendConfirmation: vi.fn() }));
 vi.mock('../../../../../../../api/orders/order_terms_mutation_client', () => ({ orderTermsMutationClient: { query: mocks.termsQuery, preview: mocks.termsPreview, apply: mocks.termsApply } }));
 vi.mock('../../../../../../../api/scheduling/candidate_contact_pool_client', () => ({ candidateContactPoolClient: { query: mocks.pool, recordWillingness: mocks.willingness } }));
 vi.mock('../../../../../../../api/orders/order_query_client', () => ({ ordersQueryClient: { getAssignmentPlan: mocks.assignment } }));
 vi.mock('../../../../../../../api/scheduling/waiting_deposit_lock_client', () => ({ waitingDepositLockClient: { queryPlan: mocks.active } }));
-vi.mock('../../../../../../../api/scheduling/matching_plan_communication_client', () => ({ matchingPlanCommunicationClient: { queryContactState: mocks.contact, sendCustomerProfiles: mocks.sendProfiles } }));
+vi.mock('../../../../../../../api/scheduling/matching_plan_communication_client', () => ({ matchingPlanCommunicationClient: {
+  queryContactState: mocks.contact,
+  previewCustomerConfirmation: mocks.previewConfirmation,
+  sendCustomerConfirmation: mocks.sendConfirmation,
+} }));
 vi.mock('../../../../../../../components/ServiceBeforeReplacementActions', () => ({ ServiceBeforeReplacementActions: ({ onCommitted }: { onCommitted: () => Promise<void> }) => (
   <button type="button" onClick={() => void onCommitted()}>模擬正式更換完成</button>
 ) }));
@@ -55,7 +59,15 @@ describe('Beta 實際 owner 元件只在正式回讀成立後通知外層', () =
       scheduling_generation: 2, contracted_service_days: 3, service_hours_per_day: 8 });
     mocks.active.mockResolvedValue({ planId: 51, status: 'proposed', activeLockId: null, planVersion: 1, segments: [] });
     mocks.contact.mockResolvedValue({ plan: { id: 51, case_no: CASE, communication_version: 4, status: 'proposed', is_active: 1 },
-      segments: [], all_willing: true, customer_decision: 'pending', customer_profiles_status: null, customer_profiles_manual_confirmation: null });
+      segments: [], all_willing: true, customer_decision: 'pending', customer_profiles_status: null,
+      customer_confirmation_status: null, customer_profiles_manual_confirmation: null });
+    mocks.previewConfirmation.mockResolvedValue({
+      case_no: CASE, plan_id: 51, expected_version: 4,
+      order_information_1_ready: true, order_information_2_ready: true,
+      weekly_service_ready: true, weekly_service_row_count: 1,
+      caregiver_resumes: [{ staff_id: 8, staff_name: '測試月嫂', ready: true, filename: 'resume.pdf', version: 1, blocker: null }],
+      blockers: [], send_allowed: true,
+    });
   });
 
   it('條款 callback 帶動父查詢更新至同一已觀察版本，不抹去完成證據', async () => {
@@ -95,13 +107,14 @@ describe('Beta 實際 owner 元件只在正式回讀成立後通知外層', () =
 
   it('履歷命令已送出後卸載，晚回來的 receipt 不通知另一個畫面', async () => {
     let resolve!: (value: { intent_id: number; delivery_status: string }) => void;
-    mocks.sendProfiles.mockImplementation(() => new Promise((done) => { resolve = done; }));
+    mocks.sendConfirmation.mockImplementation(() => new Promise((done) => { resolve = done; }));
     const onObserved = vi.fn(); const view = render(<OrderFormalRecommendationPanel caseNo={CASE} onObserved={onObserved} />);
-    fireEvent.change(await screen.findByLabelText('方案 51 履歷傳送備註'), { target: { value: '人工核對履歷。' } });
-    fireEvent.click(screen.getByRole('button', { name: '寄送月嫂履歷給客戶' }));
-    await waitFor(() => expect(mocks.sendProfiles).toHaveBeenCalledTimes(1));
+    fireEvent.change(await screen.findByLabelText('方案 51 確認資訊備註'), { target: { value: '人工核對履歷。' } });
+    await waitFor(() => expect(screen.getByRole('button', { name: '寄送確認資訊給客戶' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '寄送確認資訊給客戶' }));
+    await waitFor(() => expect(mocks.sendConfirmation).toHaveBeenCalledTimes(1));
     view.unmount();
     await act(async () => { resolve({ intent_id: 81, delivery_status: 'pending' }); });
-    expect(onObserved).not.toHaveBeenCalled(); expect(mocks.sendProfiles).toHaveBeenCalledTimes(1);
+    expect(onObserved).not.toHaveBeenCalled(); expect(mocks.sendConfirmation).toHaveBeenCalledTimes(1);
   });
 });

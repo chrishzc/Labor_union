@@ -5,10 +5,21 @@ import {
   ClientRegistryDetailResponseSchema, ClientRegistryPageResponseSchema,
   RegistryMutationPreviewResponseSchema, RegistryMutationReceiptResponseSchema,
   type BeClassChanges, type ClientProfileChanges, type ClientRegistryDetail,
-  type ClientRegistryPage, type RegistryMutationPreview, type RegistryMutationReceipt,
+  type ClientRegistryPage, type ClientRegistrySortBy, type ClientRegistrySortOrder,
+  type RegistryMutationPreview, type RegistryMutationReceipt,
 } from './client_registry_schemas';
 
 type Owner = 'profile' | 'beclass';
+export interface ClientRegistryListQuery {
+  query?: string;
+  hasBabyInfo?: boolean;
+  serviceDays?: number;
+  requiresCooking?: boolean;
+  sortBy?: ClientRegistrySortBy;
+  sortOrder?: ClientRegistrySortOrder;
+  limit?: number;
+  after?: string;
+}
 const token = () => {
   const value = sessionClient.getToken();
   if (!value) throw new Error('請先登入管理後台。');
@@ -23,8 +34,20 @@ const decode = <T>(schema: { safeParse(value: unknown): { success: true; data: {
 const key = (scope: string) => `${scope}-${globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
 
 export const clientRegistryClient = {
-  async list(query?: string): Promise<ClientRegistryPage> {
-    const raw = await transport.get('/api/v1/admin/registries/clients', { token: token(), params: { query: query?.trim() || undefined, limit: 100 } });
+  async list(request: ClientRegistryListQuery = {}): Promise<ClientRegistryPage> {
+    const raw = await transport.get('/api/v1/admin/registries/clients', {
+      token: token(),
+      params: {
+        query: request.query?.trim() || undefined,
+        has_baby_info: request.hasBabyInfo,
+        service_days: request.serviceDays,
+        requires_cooking: request.requiresCooking,
+        sort_by: request.sortBy,
+        sort_order: request.sortOrder,
+        limit: request.limit ?? 100,
+        after: request.after?.trim() || undefined,
+      },
+    });
     return decode(ClientRegistryPageResponseSchema, raw, '客戶名冊回應結構異常');
   },
   async query(caseNo: string): Promise<ClientRegistryDetail> {

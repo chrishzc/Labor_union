@@ -101,6 +101,46 @@ class RequestCustomerProfilesCommand:
 
 
 @dataclass(frozen=True, slots=True)
+class CustomerConfirmationResumePreview:
+    staff_id: int
+    staff_name: str
+    ready: bool
+    filename: str | None = None
+    version: int | None = None
+    blocker: str | None = None
+
+    def __post_init__(self) -> None:
+        require_positive_integer(self.staff_id, "matching confirmation staff ID")
+        require_canonical_text(self.staff_name, "matching confirmation staff name", 100)
+        if self.ready:
+            if not self.filename or self.version is None or self.version <= 0 or self.blocker is not None:
+                raise ValueError("ready matching confirmation resume preview is incomplete")
+        elif not self.blocker:
+            raise ValueError("blocked matching confirmation resume preview requires a blocker")
+
+
+@dataclass(frozen=True, slots=True)
+class CustomerConfirmationPreview:
+    plan: MatchingPlanReference
+    order_information_1_ready: bool
+    order_information_2_ready: bool
+    weekly_service_ready: bool
+    weekly_service_row_count: int
+    caregiver_resumes: tuple[CustomerConfirmationResumePreview, ...]
+    blockers: tuple[str, ...]
+
+    @property
+    def send_allowed(self) -> bool:
+        return not self.blockers
+
+    def __post_init__(self) -> None:
+        if self.weekly_service_row_count < 0:
+            raise ValueError("matching confirmation weekly row count is invalid")
+        if not self.caregiver_resumes:
+            raise ValueError("matching confirmation preview requires caregivers")
+
+
+@dataclass(frozen=True, slots=True)
 class PreviewManualCustomerProfilesCommand:
     plan: MatchingPlanReference
     confirmation_method: ManualMatchingConfirmationMethod
@@ -443,6 +483,8 @@ def _require_matching_version(
 __all__ = [
     "ApplyManualCustomerProfilesCommand",
     "AssignmentConversionNotificationResult",
+    "CustomerConfirmationPreview",
+    "CustomerConfirmationResumePreview",
     "ManualCustomerProfilesEvidence",
     "ManualCustomerProfilesPreview",
     "ManualCustomerProfilesReceipt",

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 from hashlib import sha256
-from datetime import datetime
+from datetime import datetime, date
 from typing import Any, Mapping
 
 from domains.line.delivery import LineDeliveryStatus
@@ -32,6 +32,11 @@ from subsystems.scheduling.matching_notification_contracts import (
     MatchingNotificationResult,
     MatchingResponseResult,
     MatchingSegmentContact,
+)
+from infrastructure.mysql.order_information_repository import MySqlOrderInformationRepository
+from subsystems.scheduling.proposed_weekly_service_projection import (
+    ProposedServiceSegment,
+    project_proposed_weekly_service,
 )
 
 
@@ -271,6 +276,87 @@ class MySqlMatchingNotificationRepository:
             rows = cursor.fetchall() or ()
         return tuple(_profile_row(row) for row in rows)
 
+    def customer_confirmation_package(
+        self, case_no: str, plan_id: int,
+    ) -> dict[str, object]:
+        """Compose all Stage 5 facts before a delivery intent can be written."""
+        with self._connection.cursor() as cursor:
+            cursor.execute(_CONFIRMATION_SCHEDULE_FACTS_SQL, (plan_id, case_no))
+            segments = tuple(dict(row) for row in (cursor.fetchall() or ()))
+            cursor.execute(_CUSTOMER_PROFILE_FACTS_SQL, (plan_id,))
+            profiles = tuple(_profile_row(row) for row in (cursor.fetchall() or ()))
+            cursor.execute(_CURRENT_RESUMES_SQL, (plan_id,))
+            resume_rows = tuple(dict(row) for row in (cursor.fetchall() or ()))
+        if not segments:
+            raise LookupError("matching plan segments not found")
+        resumes = _current_resumes(segments, resume_rows)
+        information = MySqlOrderInformationRepository(self._connection)
+        info_1 = information.preview_matching_plan_information(case_no, plan_id, 1, for_update=True)
+        info_2 = information.preview_matching_plan_information(case_no, plan_id, 2, for_update=True)
+        weekly = _proposed_weekly_rows(segments)
+        return {
+            "profiles": profiles,
+            "order_information_1": info_1,
+            "order_information_2": info_2,
+            "weekly_service_rows": weekly,
+            "caregiver_resumes": resumes,
+        }
+
+    def customer_confirmation_preview(
+        self, case_no: str, plan_id: int,
+    ) -> dict[str, object]:
+        """Read the same canonical Stage 5 sources without creating an intent."""
+        with self._connection.cursor() as cursor:
+            cursor.execute(_CONFIRMATION_SCHEDULE_FACTS_SQL, (plan_id, case_no))
+            segments = tuple(dict(row) for row in (cursor.fetchall() or ()))
+            cursor.execute(_CUSTOMER_PROFILE_FACTS_SQL, (plan_id,))
+            profiles = tuple(_profile_row(row) for row in (cursor.fetchall() or ()))
+            cursor.execute(_CURRENT_RESUMES_SQL, (plan_id,))
+            resume_rows = tuple(dict(row) for row in (cursor.fetchall() or ()))
+        if not segments:
+            raise LookupError("matching plan segments not found")
+
+        blockers: list[str] = []
+        if not 1 <= len(profiles) <= 4 or len(profiles) != len(segments):
+            blockers.append("正式推薦月嫂資料不完整，請重新讀取目前方案。")
+
+        resumes, resume_blockers = _resume_previews(segments, resume_rows)
+        blockers.extend(resume_blockers)
+
+        information = MySqlOrderInformationRepository(self._connection)
+        info_1_ready = True
+        try:
+            information.preview_matching_plan_information(case_no, plan_id, 1)
+        except (LookupError, ValueError):
+            info_1_ready = False
+            blockers.append("訂單資訊－1 尚未就緒。")
+
+        info_2_ready = True
+        try:
+            information.preview_matching_plan_information(case_no, plan_id, 2)
+        except (LookupError, ValueError):
+            info_2_ready = False
+            blockers.append("訂單資訊－2 尚未就緒。")
+
+        weekly_row_count = 0
+        weekly_ready = True
+        try:
+            weekly_row_count = len(_proposed_weekly_rows(segments))
+            if weekly_row_count == 0:
+                raise ValueError("weekly service projection is empty")
+        except (LookupError, TypeError, ValueError):
+            weekly_ready = False
+            blockers.append("每周服務中說明尚未就緒。")
+
+        return {
+            "order_information_1_ready": info_1_ready,
+            "order_information_2_ready": info_2_ready,
+            "weekly_service_ready": weekly_ready,
+            "weekly_service_row_count": weekly_row_count,
+            "caregiver_resumes": resumes,
+            "blockers": tuple(dict.fromkeys(blockers)),
+        }
+
     def _plan_row(self, cursor, case_no, plan_id, lock):
         suffix = " FOR UPDATE" if lock else ""
         cursor.execute(_PLAN_SQL + suffix, (plan_id, case_no))
@@ -476,6 +562,119 @@ def _profile_row(row):
     return value
 
 
+def _current_resumes(segments, rows):
+    expected = {int(segment["staff_id"]): str(segment["staff_name"]) for segment in segments}
+    by_staff = {int(row["staff_id"]): row for row in rows if row.get("file_id")}
+    missing = [name for staff_id, name in expected.items() if staff_id not in by_staff]
+    if missing:
+        raise MatchingCommunicationConflictError(
+            f"月嫂 {'、'.join(missing)} 尚未上傳履歷 PDF，請先至人員管理完成履歷上傳。"
+        )
+    result = []
+    for staff_id, name in expected.items():
+        row = by_staff[staff_id]
+        if str(row.get("mime_type")) != "application/pdf":
+            raise MatchingCommunicationConflictError(
+                f"月嫂 {name} 的目前履歷不是 PDF，請先至人員管理重新上傳。"
+            )
+        result.append({
+            "staff_id": staff_id, "staff_name": name,
+            "file_id": str(row["file_id"]), "filename": str(row["filename"]),
+            "version": int(row["version_number"]),
+        })
+    return tuple(result)
+
+
+def _resume_previews(segments, rows):
+    expected = {int(segment["staff_id"]): str(segment["staff_name"]) for segment in segments}
+    by_staff = {int(row["staff_id"]): row for row in rows if row.get("file_id")}
+    result = []
+    blockers = []
+    for staff_id, name in expected.items():
+        row = by_staff.get(staff_id)
+        if row is None:
+            blocker = f"月嫂 {name} 尚未上傳履歷 PDF，請先至人員管理完成履歷上傳。"
+            result.append({
+                "staff_id": staff_id,
+                "staff_name": name,
+                "ready": False,
+                "filename": None,
+                "version": None,
+                "blocker": blocker,
+            })
+            blockers.append(blocker)
+            continue
+        if str(row.get("mime_type")) != "application/pdf":
+            blocker = f"月嫂 {name} 的目前履歷不是 PDF，請先至人員管理重新上傳。"
+            result.append({
+                "staff_id": staff_id,
+                "staff_name": name,
+                "ready": False,
+                "filename": str(row["filename"]),
+                "version": int(row["version_number"]),
+                "blocker": blocker,
+            })
+            blockers.append(blocker)
+            continue
+        result.append({
+            "staff_id": staff_id,
+            "staff_name": name,
+            "ready": True,
+            "filename": str(row["filename"]),
+            "version": int(row["version_number"]),
+            "blocker": None,
+        })
+    return tuple(result), tuple(blockers)
+
+
+def _proposed_weekly_rows(segments):
+    special_dates = _json_dates(segments[0].get("custom_rest_dates"))
+    projection = project_proposed_weekly_service(
+        ProposedServiceSegment(
+            segment_id=int(item["segment_id"]), staff_id=int(item["staff_id"]),
+            start_date=_date(item["assigned_start_date"]), end_date=_date(item["assigned_end_date"]),
+            weekly_rest_days=frozenset(_json_ints(item.get("weekly_rest_days"))),
+            service_hours_per_day=int(item["service_hours_per_day"]),
+            special_rest_dates=special_dates,
+        ) for item in segments
+    )
+    source = {int(item["segment_id"]): item for item in segments}
+    return tuple({
+        "week_number": f"{row.week_start_date.month}-{((row.week_start_date.day - 1) // 7) + 1}",
+        "serial_number": index,
+        "case_no": str(source[row.segment_id]["case_no"]),
+        "employer_name": str(source[row.segment_id]["client_name"]),
+        "staff_name": str(source[row.segment_id]["staff_name"]),
+        "week_start_date": row.week_start_date.isoformat(),
+        "week_end_date": row.week_end_date.isoformat(),
+        "service_hours_per_day": int(source[row.segment_id]["service_hours_per_day"]),
+        "weekly_work_days": row.weekly_work_days,
+        "weekly_hours": row.weekly_hours,
+    } for index, row in enumerate(projection, start=1))
+
+
+def _json_ints(value):
+    try:
+        parsed = json.loads(value) if isinstance(value, str) else value
+    except json.JSONDecodeError:
+        parsed = ()
+    return tuple(int(item) for item in (parsed or ()) if str(item).isdigit() and 0 <= int(item) <= 6)
+
+
+def _json_dates(value):
+    try:
+        parsed = json.loads(value) if isinstance(value, str) else value
+    except json.JSONDecodeError:
+        parsed = ()
+    return frozenset(_date(item) for item in (parsed or ()))
+
+
+def _date(value):
+    if isinstance(value, date):
+        return value
+    return date.fromisoformat(str(value)[:10])
+
+
 _PLAN_SQL = """SELECT p.id,p.case_no,p.communication_version,p.status,p.is_active,
 o.status AS order_status,c.line_user_id AS client_line_user_id
 FROM caregiver_matching_plans p JOIN orders o ON o.case_no=p.case_no
@@ -556,6 +755,25 @@ _CUSTOMER_PROFILE_FACTS_SQL = """SELECT st.id,st.name,st.city,st.has_massage_cer
 st.care_babies,st.service_regions,st.special_skills
 FROM caregiver_matching_plan_segments s JOIN staff st ON st.id=s.staff_id
 WHERE s.plan_id=%s ORDER BY s.segment_order"""
+_CONFIRMATION_SCHEDULE_FACTS_SQL = """SELECT segment.id AS segment_id,segment.staff_id,
+segment.assigned_start_date,segment.assigned_end_date,plan.case_no,client.name AS client_name,
+staff.name AS staff_name,staff.weekly_rest_days,orders.custom_rest_dates,orders.service_hours_per_day
+FROM caregiver_matching_plans plan JOIN caregiver_matching_plan_segments segment ON segment.plan_id=plan.id
+JOIN orders ON orders.case_no=plan.case_no JOIN clients client ON client.id=orders.client_id
+JOIN staff ON staff.id=segment.staff_id WHERE plan.id=%s AND plan.case_no=%s
+ORDER BY segment.segment_order,segment.id"""
+_CURRENT_RESUMES_SQL = """SELECT segment.staff_id,object.opaque_object_id AS file_id,object.filename,
+object.version_number,object.content_type AS mime_type
+FROM caregiver_matching_plan_segments segment
+LEFT JOIN controlled_file_objects object ON object.owner_type='staff'
+ AND object.purpose='staff_resume'
+ AND CAST(object.subject_reference AS BINARY)=CAST(segment.staff_id AS BINARY)
+ AND object.object_key='resume'
+ AND NOT EXISTS (SELECT 1 FROM controlled_file_objects newer
+   WHERE newer.owner_type=object.owner_type AND newer.purpose=object.purpose
+   AND newer.subject_reference=object.subject_reference AND newer.object_key=object.object_key
+   AND newer.version_number>object.version_number)
+WHERE segment.plan_id=%s ORDER BY segment.segment_order"""
 
 
 __all__ = ["MySqlMatchingNotificationRepository"]

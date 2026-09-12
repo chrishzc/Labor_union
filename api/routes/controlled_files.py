@@ -173,29 +173,63 @@ def stage_controlled_file(
     principal: AdminPrincipal = Depends(require_persisted_admin),
     workflow: ControlledFileRouteWorkflow = Depends(get_controlled_file_route_workflow),
 ):
+    content = document.file.read()
     return _call_workflow(
-        lambda: BaseResponse(
-            data=_staging_view(
-                workflow.stage(
-                    StageControlledFile(
-                        owner=owner,
-                        purpose=purpose,
-                        subject_reference=subject_reference,
-                        object_key=object_key,
-                        logical_folder=logical_folder,
-                        filename=document.filename or "upload.bin",
-                        mime_type=document.content_type or "application/octet-stream",
-                        content=document.file.read(),
-                        idempotency_key=IdempotencyKey(idempotency_key),
-                        actor=admin_actor_context(principal),
-                        correlation_id=CorrelationId(correlation_id),
-                    )
-                )
-            ),
-            message="檔案已進入受控 staging",
+        lambda: _stage_controlled_file_response(
+            workflow, owner, purpose, subject_reference, object_key, logical_folder,
+            document.filename or "upload.bin", document.content_type, content,
+            idempotency_key, principal, correlation_id,
         ),
         correlation_id,
     )
+
+
+def _stage_controlled_file_response(
+    workflow, owner, purpose, subject_reference, object_key, logical_folder,
+    filename, mime_type, content, idempotency_key, principal, correlation_id,
+):
+    _validate_staff_resume_upload(owner, purpose, mime_type, content)
+    return BaseResponse(
+        data=_staging_view(
+            workflow.stage(
+                StageControlledFile(
+                    owner=owner,
+                    purpose=purpose,
+                    subject_reference=subject_reference,
+                    object_key=object_key,
+                    logical_folder=logical_folder,
+                    filename=filename,
+                    mime_type=mime_type or "application/octet-stream",
+                    content=content,
+                    idempotency_key=IdempotencyKey(idempotency_key),
+                    actor=admin_actor_context(principal),
+                    correlation_id=CorrelationId(correlation_id),
+                )
+            )
+        ),
+        message="檔案已進入受控 staging",
+    )
+
+
+def _validate_staff_resume_upload(
+    owner: ControlledFileOwner,
+    purpose: ControlledFilePurpose,
+    mime_type: str | None,
+    content: bytes,
+) -> None:
+    """Keep the STAFF_RESUME boundary strict without changing other file purposes.
+
+    ``UploadFile.content_type`` is client supplied, so a PDF signature is also
+    required.  This intentionally is not a PDF parser: controlled files keep
+    the uploaded original bytes and the feature does not inspect resume text.
+    """
+    if owner is not ControlledFileOwner.STAFF or purpose is not ControlledFilePurpose.STAFF_RESUME:
+        return
+    if mime_type != "application/pdf" or not content.startswith(b"%PDF-"):
+        raise ControlledFileWorkflowError(
+            "staff_resume_pdf_required",
+            "月嫂履歷只接受內容為 PDF 的 application/pdf 檔案。",
+        )
 
 
 @router.post("/files/preview", response_model=BaseResponse[ControlledFilePreviewView])
@@ -421,7 +455,7 @@ def _workflow_http_error(error: ControlledFileWorkflowError, correlation_id: str
             "找不到指定的受控檔案資源。",
             correlation_id,
         )
-    if code.endswith("_invalid"):
+    if code.endswith("_invalid") or code == "staff_resume_pdf_required":
         return typed_http_error(
             422,
             "validation",

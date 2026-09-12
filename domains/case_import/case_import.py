@@ -176,10 +176,15 @@ class CaseImportFacts:
     case_exists: bool
     payroll_rate_policy: RatePolicyFacts | None
     provisional_registration: ProvisionalRegistrationFacts | None = None
+    multi_birth_count: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.case_exists, bool):
             raise TypeError("case existence must be bool")
+        if self.multi_birth_count is not None and not isinstance(
+            self.multi_birth_count, str
+        ):
+            raise TypeError("multi-birth count must be text or None")
 
 
 @dataclass(frozen=True, slots=True)
@@ -275,6 +280,7 @@ def _build_bootstrap_candidate(facts, intent):
             order.service_days,
             order.service_hours_per_day,
             _required_attribute(intent.client_attributes, "identity_status"),
+            facts.multi_birth_count,
         ),
         facts.payroll_rate_policy,
         BootstrapPresence(),

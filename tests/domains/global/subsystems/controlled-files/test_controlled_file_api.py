@@ -174,3 +174,41 @@ def test_public_projections_never_expose_storage_locator() -> None:
     assert "storage_locator" not in body
     assert "object_reference" not in body
     assert "download_url" not in body
+
+
+def test_staff_resume_stage_requires_pdf_media_type_and_signature() -> None:
+    workflow = _workflow()
+    client = _client(workflow)
+    form = {
+        "owner": "staff",
+        "purpose": "staff_resume",
+        "subject_reference": "123",
+        "object_key": "resume",
+        "logical_folder": "staff/123/resume",
+    }
+
+    wrong_type = client.post(
+        "/api/v1/storage/staging",
+        files={"document": ("resume.pdf", b"%PDF-valid", "image/png")},
+        data=form,
+        headers={"Idempotency-Key": "staff-resume-wrong-type", "X-Correlation-ID": "staff-resume-wrong-type"},
+    )
+    wrong_content = client.post(
+        "/api/v1/storage/staging",
+        files={"document": ("resume.pdf", b"not-a-pdf", "application/pdf")},
+        data=form,
+        headers={"Idempotency-Key": "staff-resume-wrong-content", "X-Correlation-ID": "staff-resume-wrong-content"},
+    )
+    valid = client.post(
+        "/api/v1/storage/staging",
+        files={"document": ("resume.pdf", b"%PDF-valid", "application/pdf")},
+        data=form,
+        headers={"Idempotency-Key": "staff-resume-valid", "X-Correlation-ID": "staff-resume-valid"},
+    )
+
+    assert wrong_type.status_code == 422
+    assert wrong_type.json()["detail"]["error"]["code"] == "staff_resume_pdf_required"
+    assert wrong_content.status_code == 422
+    assert wrong_content.json()["detail"]["error"]["code"] == "staff_resume_pdf_required"
+    assert valid.status_code == 200
+    workflow.stage.assert_called_once()
