@@ -1,7 +1,7 @@
 """Data Browser routes must reuse the formal administrator dependency."""
 
 import pytest
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from api.dependencies import admin_auth
@@ -64,31 +64,15 @@ def test_admin_router_allows_any_authenticated_enabled_internal_role(monkeypatch
     assert response.status_code == 200
 
 
-def test_patch_is_retired_and_redirects_to_owning_domain():
-    with pytest.raises(HTTPException) as error:
-        data_browser_admin.patch_data_browser_row(
-            table="orders",
-            row_id_str="TEST_ROUTE_001",
-            principal=_principal(),
-        )
-
-    assert error.value.status_code == 410
-    assert error.value.detail["code"] == "data_browser_write_retired"
-    assert "Preview/Apply" in error.value.detail["replacement"]
-
-
 @pytest.mark.parametrize(
-    "operation",
-    (data_browser_admin.preview_source_correction, data_browser_admin.apply_source_correction),
+    ("method", "path"),
+    (
+        ("PATCH", "/api/v1/admin/data-browser/orders/TEST_ROUTE_001"),
+        ("POST", "/api/v1/admin/data-browser/clients/1/source-correction/preview"),
+        ("POST", "/api/v1/admin/data-browser/clients/1/source-correction/apply"),
+    ),
 )
-def test_source_correction_is_retired(operation):
-    with pytest.raises(HTTPException) as error:
-        operation("clients", 1, _principal())
+def test_retired_writers_are_no_longer_registered(method, path):
+    response = _client().request(method, path, json={})
 
-    assert error.value.status_code == 410
-    assert error.value.detail == {
-        "code": "data_browser_write_retired",
-        "table": "clients",
-        "row_id": 1,
-        "replacement": "Use the owning Domain typed Preview/Apply command.",
-    }
+    assert response.status_code == 404
