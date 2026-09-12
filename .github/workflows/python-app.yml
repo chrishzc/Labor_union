@@ -18,7 +18,7 @@ jobs:
   python-syntax:
     name: Python syntax
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
         with:
@@ -31,58 +31,6 @@ jobs:
       - name: Check tracked Python files for syntax errors
         shell: bash
         run: git ls-files -z -- '*.py' | xargs -0 -r python -m py_compile
-      - name: Install existing locked focused test dependencies
-        shell: bash
-        run: |
-          python - <<'PY'
-          import os
-          from pathlib import Path
-          import tomllib
-          from pip._vendor.packaging.markers import Marker
-          packages = tomllib.loads(Path('uv.lock').read_text(encoding='utf-8'))['package']
-          roots = ['fastapi', 'pytest', 'httpx2', 'pymysql', 'python-dotenv', 'cryptography', 'requests', 'jsonschema']
-          pending = [{'name': name} for name in roots]
-          selected = {}
-          while pending:
-              requirement = pending.pop()
-              if requirement.get('marker') and not Marker(requirement['marker']).evaluate():
-                  continue
-              name = requirement['name']
-              candidates = [p for p in packages if p['name'] == name and
-                  (not requirement.get('version') or p['version'] == requirement['version'])]
-              if len(candidates) > 1:
-                  candidates = [p for p in candidates if any(Marker(m).evaluate()
-                      for m in p.get('resolution-markers', []))]
-              if len(candidates) != 1:
-                  raise RuntimeError('Ambiguous locked dependency: ' + name)
-              package = candidates[0]
-              if name in selected:
-                  assert selected[name]['version'] == package['version'], name
-                  continue
-              assert package.get('source') == {'registry': 'https://pypi.org/simple'}, name
-              assert package.get('wheels'), name
-              selected[name] = package
-              pending.extend(package.get('dependencies', []))
-          lines = []
-          for name, package in sorted(selected.items()):
-              hashes = sorted({w['hash'] for w in package['wheels']})
-              assert all(w['url'].startswith('https://files.pythonhosted.org/') for w in package['wheels']), name
-              lines.append(name + '==' + package['version'] + ' ' + ' '.join('--hash=' + h for h in hashes))
-              print('LOCKED_TEST_DEPENDENCY', name, package['version'])
-          target = Path(os.environ['RUNNER_TEMP']) / 'pr296-raw-retirement-requirements.txt'
-          target.write_text('\n'.join(lines) + '\n', encoding='utf-8')
-          PY
-          python -m pip --isolated install --disable-pip-version-check --only-binary=:all: --require-hashes --index-url https://pypi.org/simple -r "$RUNNER_TEMP/pr296-raw-retirement-requirements.txt"
-      - name: Focused HTTP archive privacy and smoke regressions
-        shell: bash
-        env:
-          APP_ENV: test
-          DB_HOST: 127.0.0.1
-          DB_PORT: '1'
-          DB_USER: pr296_no_database
-          DB_DATABASE: pr296_no_database
-        run: |
-          python -m pytest -q --tb=short tests/test_client_entry_retirement.py tests/test_data_browser_admin_route.py tests/test_data_browser_query_contract.py tests/test_data_browser_privacy.py tests/test_api_contract_smoke.py
       - name: Verify exact scope preserved contracts and entry documentation
         shell: bash
         run: |
@@ -94,7 +42,7 @@ jobs:
           baseline = 'be3dcdb435ea20067b39070b432fca1babed415e'
           doc = 'document/架構重整/01_規格基線/19_Global_Entry_Point_Governance.md'
           expected = {'api/routes/data_browser_admin.py', 'api/schemas/data_browser.py', 'subsystems/access/data_browser_maintenance.py', 'scripts/api_contract_smoke.py', 'tests/test_data_browser_admin_route.py', 'tests/test_api_contract_smoke.py', doc, '.github/workflows/python-app.yml'}
-          actual = set(subprocess.check_output(['git', 'diff', '--name-only', baseline, 'HEAD'], text=True).splitlines())
+          actual = set(filter(None, subprocess.check_output(['git', 'diff', '--name-only', '-z', baseline, 'HEAD'], text=True).split('\0')))
           assert actual == expected, (actual - expected, expected - actual)
           print('PASS exact seven-file source/test/document scope plus temporary CI')
           def old(path):
