@@ -18,8 +18,11 @@ jobs:
   python-syntax:
     name: Python syntax
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - name: Set up Python 3.11
         uses: actions/setup-python@v6
         with:
@@ -27,3 +30,23 @@ jobs:
       - name: Check tracked Python files for syntax errors
         shell: bash
         run: git ls-files -z -- '*.py' | xargs -0 -r python -m py_compile
+      - name: Locate raw Data Browser retirement dependencies
+        shell: bash
+        run: |
+          python - <<'PY'
+          import re
+          import subprocess
+          from pathlib import Path
+          symbols = re.compile(r'\b(?:get_data_browser_table_schema|DataBrowserTableResponse|DataBrowserPatchRequest|DataBrowserSourceCorrection\w*|DataBrowserFieldChangeView|DataBrowserCorrectionValue|DATA_BROWSER_PATH|DATA_BROWSER_TABLES|api_contract_smoke)\b')
+          raw_path = '/api/v1/admin/data-browser/{table}'
+          for name in subprocess.check_output(['git', 'ls-files', '-z'], text=True).split('\0'):
+              path = Path(name)
+              if not name or path.suffix not in {'.py', '.ts', '.tsx', '.json', '.yaml', '.yml'} or name.startswith(('.github/', 'document/', 'validation/')) or path.name == 'package-lock.json':
+                  continue
+              for number, line in enumerate(path.read_text(encoding='utf-8').splitlines(), 1):
+                  found = sorted(set(symbols.findall(line)))
+                  if found or raw_path in line:
+                      print('RETIREMENT_REF', f'{name}:{number}', ','.join(found) or 'raw_http_path')
+          PY
+          git diff --exit-code
+          git diff --check
