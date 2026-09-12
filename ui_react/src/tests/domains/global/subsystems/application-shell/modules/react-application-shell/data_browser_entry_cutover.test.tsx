@@ -1,18 +1,32 @@
 /**
  * File: data_browser_entry_cutover.test.tsx
- * Description: 驗證 Data Browser entry 的 StrictMode GET 預算、去敏空狀態與唯讀控制邊界。
+ * Description: 驗證舊 Data Browser 深連結導向現行客戶名冊，不再載入六來源頁面或舊寫入控制。
  */
 import { StrictMode } from 'react';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../../../../../../App';
 import { sessionClient } from '../../../../../../../api/auth/session_client';
+import type { ClientRegistryPage } from '../../../../../../../api/client_registry/client_registry_schemas';
 import { SYSTEM_STATUS_ENDPOINT } from '../../../../../../../api/system/system_status_client';
-import { VALID_DATA_BROWSER_PAGE } from '../../../../../../fixtures/data_browser/data_browser_query_contract_fixtures';
 
-const DATA_BROWSER_PREFIX = '/api/v1/admin/data-browser/sources/';
-const ORDERS_ENDPOINT = `${DATA_BROWSER_PREFIX}orders`;
-const CLIENTS_ENDPOINT = `${DATA_BROWSER_PREFIX}clients`;
+const CLIENT_REGISTRY_ENDPOINT = '/api/v1/admin/registries/clients';
+const DATA_BROWSER_PREFIX = '/api/v1/admin/data-browser';
+const REGISTRY_PAGE: ClientRegistryPage = {
+  items: [{
+    client_id: 1,
+    case_no: 'CASE-001',
+    name: '測試客戶',
+    phone: null,
+    city: null,
+    baby_info: null,
+    service_days: 26,
+    requires_cooking: false,
+    planned_start_date: null,
+    order_status: '待處理',
+  }],
+  next_cursor: null,
+};
 
 interface RecordedRequest {
   path: string;
@@ -20,48 +34,18 @@ interface RecordedRequest {
   query: URLSearchParams;
 }
 
-type DataBrowserMode = 'pages' | 'empty' | 'unavailable';
+type RegistryMode = 'rows' | 'empty' | 'unavailable';
 
 function envelope(data: object): Response {
   return new Response(JSON.stringify({
     success: true,
-    message: '成功取得資料來源',
+    message: '成功取得查詢結果',
     data,
     error: null,
   }), {
     status: 200,
     headers: { 'content-type': 'application/json' },
   });
-}
-
-function pageFor(sourceId: 'orders' | 'clients', query: URLSearchParams): object {
-  const after = query.get('after');
-  const isNextPage = after !== null;
-  const rowIdentity = sourceId === 'orders'
-    ? (isNextPage ? '115000002' : '115000001')
-    : (isNextPage ? 'client-0002' : 'client-0001');
-  const title = sourceId === 'orders'
-    ? `訂單 ${rowIdentity}`
-    : `客戶 ${rowIdentity}`;
-  const baseItem = VALID_DATA_BROWSER_PAGE.items[0];
-  return {
-    source_id: sourceId,
-    items: [{
-      ...baseItem,
-      source_id: sourceId,
-      row_identity: rowIdentity,
-      display_title: title,
-      detail_cells: baseItem.detail_cells.map((cell) => ({
-        ...cell,
-        field_id: sourceId === 'orders' ? cell.field_id : `client_${cell.field_id}`,
-      })),
-      summary_cells: baseItem.summary_cells.map((cell) => ({
-        ...cell,
-        field_id: sourceId === 'orders' ? cell.field_id : `client_${cell.field_id}`,
-      })),
-    }],
-    next_cursor: isNextPage ? null : `cursor-${sourceId}-1`,
-  };
 }
 
 function authenticate(): void {
@@ -76,7 +60,7 @@ function authenticate(): void {
   });
 }
 
-function installFetchStub(mode: DataBrowserMode = 'pages'): RecordedRequest[] {
+function installFetchStub(mode: RegistryMode = 'rows'): RecordedRequest[] {
   const requests: RecordedRequest[] = [];
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
     const url = new URL(String(input), 'http://localhost');
@@ -94,30 +78,31 @@ function installFetchStub(mode: DataBrowserMode = 'pages'): RecordedRequest[] {
       });
     }
 
-    if (url.pathname.startsWith(DATA_BROWSER_PREFIX)) {
+    if (url.pathname === CLIENT_REGISTRY_ENDPOINT) {
       if (mode === 'empty') {
-        return envelope({ source_id: 'orders', items: [], next_cursor: null });
+        return envelope({ items: [], next_cursor: null });
       }
       if (mode === 'unavailable') {
-        return new Response(JSON.stringify({ detail: 'Data Browser unavailable' }), {
+        return new Response(JSON.stringify({ detail: 'Client registry unavailable' }), {
           status: 503,
           headers: { 'content-type': 'application/json' },
         });
       }
-      const sourceId = url.pathname.endsWith('/clients') ? 'clients' : 'orders';
-      return envelope(pageFor(sourceId, url.searchParams));
+      if (url.searchParams.get('query') === 'CASE-002') {
+        return envelope({
+          items: [{ ...REGISTRY_PAGE.items[0], case_no: 'CASE-002', name: '篩選測試客戶' }],
+          next_cursor: null,
+        });
+      }
+      return envelope(REGISTRY_PAGE);
     }
 
-    throw new Error(`unexpected GET ${url.pathname}`);
+    throw new Error(`unexpected ${method} ${url.pathname}`);
   });
   return requests;
 }
 
-function count(requests: RecordedRequest[], path: string): number {
-  return requests.filter((request) => request.path === path).length;
-}
-
-describe('Data Browser Phase5 entry candidate', () => {
+describe('Retired Data Browser entry redirects to the client registry', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     sessionClient.clearSession();
@@ -130,84 +115,65 @@ describe('Data Browser Phase5 entry candidate', () => {
     vi.restoreAllMocks();
   });
 
-  it('actual StrictMode 初始 Data Browser query 必須只有一個 GET', async () => {
+  it.each(['#data-browser', '#databrowser'])('%s 在 StrictMode 導向名冊而非六來源頁面', async (hash) => {
+    act(() => window.history.replaceState(null, '', hash));
     authenticate();
     const requests = installFetchStub();
     render(<StrictMode><App /></StrictMode>);
 
-    await waitFor(() => expect(screen.getByText('訂單 115000001')).toBeInTheDocument());
-    expect(window.location.hash).toBe('#data-browser');
-    expect(screen.getByTitle('資料中心')).toHaveClass('active');
-    expect(count(requests, ORDERS_ENDPOINT)).toBe(1);
-    expect(count(requests, SYSTEM_STATUS_ENDPOINT)).toBe(1);
-  });
-
-  it('source/search/next 各只增加一個 GET，Drawer/copy 不增加請求且不暴露假更正操作', async () => {
-    authenticate();
-    const requests = installFetchStub();
-    vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined);
-    render(<StrictMode><App /></StrictMode>);
-
-    await waitFor(() => expect(screen.getByText('訂單 115000001')).toBeInTheDocument());
-    const initialOrders = count(requests, ORDERS_ENDPOINT);
-    const initialClients = count(requests, CLIENTS_ENDPOINT);
-
-    fireEvent.click(screen.getByRole('button', { name: /客戶目前主檔/ }));
-    await waitFor(() => expect(screen.getByText('客戶 client-0001')).toBeInTheDocument());
-    expect(count(requests, ORDERS_ENDPOINT)).toBe(initialOrders);
-    expect(count(requests, CLIENTS_ENDPOINT)).toBe(initialClients + 1);
-
-    fireEvent.change(screen.getByPlaceholderText(/搜尋案件編號/), { target: { value: '台北市' } });
-    fireEvent.click(screen.getByRole('button', { name: '查詢' }));
-    await waitFor(() => expect(count(requests, CLIENTS_ENDPOINT)).toBe(initialClients + 2));
-    expect(requests.at(-1)?.query.get('query')).toBe('台北市');
-
-    fireEvent.click(screen.getByRole('button', { name: '載入下一頁' }));
-    await waitFor(() => expect(count(requests, CLIENTS_ENDPOINT)).toBe(initialClients + 3));
-    expect(requests.at(-1)?.query.get('after')).toBe('cursor-clients-1');
-    expect(screen.getByText('目前已載入至最後一頁')).toBeInTheDocument();
-
-    fireEvent.click(screen.getAllByRole('button', { name: /檢視詳情/ })[0]);
-    const beforeDrawerActions = requests.length;
-    expect(screen.getByText(/完整資料詳情/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '複製完整資料' }));
-    await waitFor(() => expect(screen.getByText('已複製完整資料')).toBeInTheDocument());
-    expect(requests.length).toBe(beforeDrawerActions);
-
-    expect(screen.getByText(/此頁只提供完整資料查詢/)).toBeInTheDocument();
-    for (const controlId of [
-      'data-browser.patch',
-      'data-browser.source-correction.preview',
-      'data-browser.source-correction.apply',
-    ]) {
-      const control = document.querySelector(`[data-control-id="${controlId}"]`);
-      expect(control).not.toBeInTheDocument();
-    }
+    await waitFor(() => expect(screen.getByText('CASE-001')).toBeInTheDocument());
+    expect(window.location.hash).toBe('#clients');
+    expect(screen.getByRole('heading', { name: '客戶名冊', level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '客戶清單' })).toHaveAttribute('aria-selected', 'true');
+    expect(requests.some((request) => request.path === CLIENT_REGISTRY_ENDPOINT)).toBe(true);
+    expect(requests.some((request) => request.path.startsWith(DATA_BROWSER_PREFIX))).toBe(false);
+    expect(document.querySelector('[data-control-id^="data-browser."]')).toBeNull();
     expect(requests.every((request) => request.method === 'GET')).toBe(true);
-    expect(screen.queryByText(/RAW JSON|更正成功|套用成功/)).not.toBeInTheDocument();
   });
 
-  it('typed empty 與 unavailable 只呈現真實狀態，不製造資料列或成功提示', async () => {
+  it('名冊搜尋使用正式 Query，依 server 回應顯示結果而不呼叫舊入口或 mutation', async () => {
     authenticate();
-    installFetchStub('empty');
+    const requests = installFetchStub();
+    render(<StrictMode><App /></StrictMode>);
+    await waitFor(() => expect(screen.getByText('CASE-001')).toBeInTheDocument());
+
+    fireEvent.change(screen.getByRole('textbox', { name: '搜尋客戶名冊清單' }), {
+      target: { value: ' CASE-002 ' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '套用篩選' }));
+
+    await waitFor(() => expect(screen.getByText('CASE-002')).toBeInTheDocument());
+    expect(screen.getByText('篩選測試客戶')).toBeInTheDocument();
+    expect(screen.queryByText('CASE-001')).not.toBeInTheDocument();
+    expect(requests.some((request) => request.path === CLIENT_REGISTRY_ENDPOINT
+      && request.query.get('query') === 'CASE-002')).toBe(true);
+    expect(requests.some((request) => request.path.startsWith(DATA_BROWSER_PREFIX))).toBe(false);
+    expect(requests.every((request) => request.method === 'GET')).toBe(true);
+    expect(document.querySelector('[data-control-id^="data-browser."]')).toBeNull();
+  });
+
+  it('空名冊只顯示空狀態，不製造資料列或恢復舊頁面', async () => {
+    authenticate();
+    const requests = installFetchStub('empty');
     render(<StrictMode><App /></StrictMode>);
 
-    await waitFor(() => expect(screen.getByText('此來源目前沒有符合條件的完整資料。')).toBeInTheDocument());
-    expect(screen.queryByText(/訂單 115000001|已成功載入/)).not.toBeInTheDocument();
-    expect(document.querySelector('[data-surface-id^="data-browser.row."]')).toBeNull();
+    await waitFor(() => expect(screen.getByText('目前沒有可顯示的案件。')).toBeInTheDocument());
+    expect(window.location.hash).toBe('#clients');
+    expect(screen.queryByText('CASE-001')).not.toBeInTheDocument();
+    expect(requests.some((request) => request.path.startsWith(DATA_BROWSER_PREFIX))).toBe(false);
+  });
 
-    cleanupEntry();
+  it('名冊 Query 失敗顯示錯誤，不冒充空名冊或成功載入', async () => {
     authenticate();
-    installFetchStub('unavailable');
+    const requests = installFetchStub('unavailable');
     render(<StrictMode><App /></StrictMode>);
-    await waitFor(() => expect(screen.getByText(/載入失敗/)).toBeInTheDocument());
-    expect(screen.queryByText('此來源目前沒有符合條件的完整資料。')).not.toBeInTheDocument();
-    expect(screen.queryByText(/訂單 115000001|已成功載入/)).not.toBeInTheDocument();
+
+    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument());
+    expect(window.location.hash).toBe('#clients');
+    expect(screen.getByRole('alert')).not.toBeEmptyDOMElement();
+    expect(screen.queryByText('目前沒有可顯示的案件。')).not.toBeInTheDocument();
+    expect(screen.queryByText('CASE-001')).not.toBeInTheDocument();
+    expect(requests.some((request) => request.path.startsWith(DATA_BROWSER_PREFIX))).toBe(false);
+    expect(requests.every((request) => request.method === 'GET')).toBe(true);
   });
 });
-
-function cleanupEntry(): void {
-  cleanup();
-  act(() => window.history.replaceState(null, '', '#data-browser'));
-  vi.restoreAllMocks();
-}
