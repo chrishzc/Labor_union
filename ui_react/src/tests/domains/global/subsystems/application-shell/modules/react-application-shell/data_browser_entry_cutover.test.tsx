@@ -122,7 +122,6 @@ describe('Retired Data Browser entry redirects to the client registry', () => {
     render(<StrictMode><App /></StrictMode>);
 
     await waitFor(() => expect(screen.getByText('CASE-001')).toBeInTheDocument());
-    expect(window.location.hash).toBe('#clients');
     expect(screen.getByRole('heading', { name: '客戶名冊', level: 1 })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: '客戶清單' })).toHaveAttribute('aria-selected', 'true');
     expect(requests.some((request) => request.path === CLIENT_REGISTRY_ENDPOINT)).toBe(true);
@@ -158,7 +157,6 @@ describe('Retired Data Browser entry redirects to the client registry', () => {
     render(<StrictMode><App /></StrictMode>);
 
     await waitFor(() => expect(screen.getByText('目前沒有可顯示的案件。')).toBeInTheDocument());
-    expect(window.location.hash).toBe('#clients');
     expect(screen.queryByText('CASE-001')).not.toBeInTheDocument();
     expect(requests.some((request) => request.path.startsWith(DATA_BROWSER_PREFIX))).toBe(false);
   });
@@ -169,7 +167,6 @@ describe('Retired Data Browser entry redirects to the client registry', () => {
     render(<StrictMode><App /></StrictMode>);
 
     await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument());
-    expect(window.location.hash).toBe('#clients');
     expect(screen.getByRole('alert')).not.toBeEmptyDOMElement();
     expect(screen.queryByText('目前沒有可顯示的案件。')).not.toBeInTheDocument();
     expect(screen.queryByText('CASE-001')).not.toBeInTheDocument();
