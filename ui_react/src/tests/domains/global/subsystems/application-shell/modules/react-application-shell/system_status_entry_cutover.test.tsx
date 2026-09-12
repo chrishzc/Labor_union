@@ -3,7 +3,7 @@
  * Description: 驗證系統狀態獨立入口已切除，同時保留既有 snapshot 查詢與右上角狀態指示。
  */
 import { StrictMode } from 'react';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../../../../../../App';
 import { MasterLayout, NAV_ITEMS, PAGE_SECTION_MAP } from '../../../../../../../components/MasterLayout';
@@ -12,7 +12,6 @@ import {
   SYSTEM_STATUS_ENDPOINT,
 } from '../../../../../../../api/system/system_status_client';
 import { sessionClient } from '../../../../../../../api/auth/session_client';
-import { SystemStatusPage } from '../../../../../../../pages/SystemStatusPage';
 
 const snapshotEnvelope = (overrides: Record<string, unknown> = {}) => ({
   success: true,
@@ -48,7 +47,7 @@ function authenticate(): void {
   });
 }
 
-describe('System Status entry cutover candidate contract', () => {
+describe('System Status entry cutover contract', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     sessionClient.clearSession();
@@ -120,21 +119,16 @@ describe('System Status entry cutover candidate contract', () => {
       code: 'SYSTEM_STATUS_UNAUTHENTICATED',
     });
     expect(fetchSpy).not.toHaveBeenCalled();
-
-    render(<SystemStatusPage />);
-    await waitFor(() => expect(screen.getByTestId('system-status.query.error')).toBeInTheDocument());
-    expect(screen.getByRole('alert')).toHaveTextContent('請先完成管理員登入後再查詢系統狀態。');
   });
 
-  it('初次載入只發出一次 GET，且不因頁面載入產生其他 HTTP method', async () => {
+  it('單次 snapshot Query 只發出一次 authenticated GET，不產生其他 HTTP method', async () => {
     authenticate();
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       jsonResponse(snapshotEnvelope())
     );
 
-    render(<SystemStatusPage />);
+    await expect(fetchPerformanceSnapshot()).resolves.toMatchObject({ request_count: 17 });
 
-    await waitFor(() => expect(screen.getByTestId('system-status.query.success')).toBeInTheDocument());
     expect(fetchSpy).toHaveBeenCalledOnce();
     expect(fetchSpy).toHaveBeenCalledWith(
       SYSTEM_STATUS_ENDPOINT,
@@ -220,52 +214,5 @@ describe('System Status entry cutover candidate contract', () => {
       SYSTEM_STATUS_ENDPOINT,
       expect.objectContaining({ method: 'GET' })
     );
-  });
-
-  it('成功畫面只呈現 typed server snapshot，不以本地狀態或 fallback 冒充成功', async () => {
-    authenticate();
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      jsonResponse(snapshotEnvelope({
-        request_count: 0,
-        average_response_time_ms: null,
-        p50_response_time_upper_bound_ms: null,
-        p95_response_time_upper_bound_ms: null,
-        maximum_response_time_ms: null,
-      }))
-    );
-
-    render(<SystemStatusPage />);
-
-    await waitFor(() => expect(screen.getByTestId('system-status.query.success')).toBeInTheDocument());
-    expect(screen.getByTestId('system-status.metric.started-at')).toHaveTextContent(
-      '2026-08-20T01:02:03Z'
-    );
-    expect(screen.getByTestId('system-status.metric.request-count')).toHaveTextContent('0');
-    expect(screen.getByTestId('system-status.metric.average-response-time')).toHaveTextContent('未提供');
-    expect(screen.getByTestId('system-status.metric.p95-response-time')).toHaveTextContent('未提供');
-    expect(screen.queryByText(/系統在線|服務正常/)).not.toBeInTheDocument();
-  });
-
-  it('錯誤時不顯示 optimistic success，明確重試後才接受第二次 server snapshot', async () => {
-    authenticate();
-    const fetchSpy = vi.spyOn(globalThis, 'fetch')
-      .mockRejectedValueOnce(new TypeError('system status unavailable'))
-      .mockResolvedValueOnce(jsonResponse(snapshotEnvelope({ request_count: 3 })));
-
-    render(<SystemStatusPage />);
-
-    await waitFor(() => expect(screen.getByTestId('system-status.query.error')).toBeInTheDocument());
-    expect(screen.getByRole('alert')).toHaveTextContent(
-      '請確認系統服務已啟動後再試；此畫面未取得資料，不代表服務一定中斷。'
-    );
-    expect(screen.getByRole('alert')).not.toHaveTextContent('system status unavailable');
-    expect(screen.queryByTestId('system-status.query.success')).not.toBeInTheDocument();
-    expect(screen.queryByText(/系統在線|服務正常/)).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: '重試查詢' }));
-
-    await waitFor(() => expect(screen.getByTestId('system-status.query.success')).toBeInTheDocument());
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
-    expect(screen.getByTestId('system-status.metric.request-count')).toHaveTextContent('3');
   });
 });
