@@ -183,7 +183,7 @@ def _allowed_origins() -> list[str]:
     configured = os.getenv("ALLOWED_ORIGINS", "").strip()
     if configured:
         return [origin.strip() for origin in configured.split(",") if origin.strip()]
-    return ["http://localhost:8501", "http://127.0.0.1:8501"]
+    return ["http://localhost:5173", "http://127.0.0.1:5173"]
 
 
 @asynccontextmanager
