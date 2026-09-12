@@ -59,25 +59,6 @@
         "save_*",
         "update_*"
       ],
-      "relative_path": "api/routes/schedule.py",
-      "symbols": [
-        "save_schedule"
-      ]
-    },
-    {
-      "forbidden_calls": [
-        "adjust_*",
-        "apply_*",
-        "cancel_*",
-        "create_*",
-        "db_service.*",
-        "generate_*",
-        "get_connection",
-        "record_*",
-        "reconfirm_*",
-        "save_*",
-        "update_*"
-      ],
       "relative_path": "api/routes/client_payments.py",
       "symbols": [
         "backfill_client_payment_due_dates",
@@ -125,25 +106,6 @@
         "reply_matching_inquiry",
         "send_resume_to_client",
         "send_resume_for_case"
-      ]
-    },
-    {
-      "forbidden_calls": [
-        "adjust_*",
-        "apply_*",
-        "cancel_*",
-        "create_*",
-        "db_service.*",
-        "generate_*",
-        "get_connection",
-        "record_*",
-        "reconfirm_*",
-        "save_*",
-        "update_*"
-      ],
-      "relative_path": "api/routes/match_records.py",
-      "symbols": [
-        "create_or_get_match_record"
       ]
     },
     {
