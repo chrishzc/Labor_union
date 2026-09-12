@@ -124,7 +124,9 @@ class DeliveryRegressionTests(unittest.TestCase):
                 repository = DeliveryRepository(knowledge=True)
                 provider = Mock()
                 provider.reply.return_value = LineProviderOutcome(
-                    LineProviderOutcomeType.UNAVAILABLE, error_code=f"line_http_{status}"
+                    LineProviderOutcomeType.UNAVAILABLE,
+                    error_code=f"line_http_{status}",
+                    error_message=f"LINE provider returned HTTP {status}",
                 )
                 worker = LineDeliveryWorker(
                     lambda: Uow(delivery_tasks=repository), provider, "worker:regression",
@@ -140,7 +142,9 @@ class DeliveryRegressionTests(unittest.TestCase):
         repository = DeliveryRepository(knowledge=True)
         provider = Mock()
         provider.reply.return_value = LineProviderOutcome(
-            LineProviderOutcomeType.RATE_LIMITED, error_code="line_http_429"
+            LineProviderOutcomeType.RATE_LIMITED,
+            error_code="line_http_429",
+            error_message="LINE provider returned HTTP 429",
         )
         provider.send.return_value = _success()
         worker = LineDeliveryWorker(
@@ -185,6 +189,20 @@ class DeliveryRegressionTests(unittest.TestCase):
         self.assertEqual(worker.run_once(), 2)
         self.assertEqual(provider.send.call_count, 2)
         self.assertIs(repository.tasks[3].status, LineDeliveryStatus.PENDING)
+
+    def test_invalid_cycle_limits_still_fail_before_claiming(self):
+        for limit in (0, -1, True, 101):
+            with self.subTest(limit=limit):
+                repository = DeliveryRepository()
+                provider = Mock()
+                worker = LineDeliveryWorker(
+                    lambda: Uow(delivery_tasks=repository), provider, "worker:regression",
+                    lambda: repository.clock, batch_size=limit,
+                )
+                with self.assertRaises((TypeError, ValueError)):
+                    worker.run_once()
+                self.assertEqual(repository.claims, [])
+                provider.send.assert_not_called()
 
     def test_expired_lease_after_validation_is_not_sent(self):
         repository = DeliveryRepository()
