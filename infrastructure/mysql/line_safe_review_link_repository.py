@@ -19,6 +19,23 @@ class MySqlLineSafeReviewLinkRepository:
             )
             return cursor.fetchone()
 
+    def issued_runtime_target(self, link_pk: int) -> dict | None:
+        """Read the owner snapshot saved in the immutable issuance event."""
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT event_payload FROM line_safe_review_link_events "
+                "WHERE link_id=%s AND event_type='issued'",
+                (link_pk,),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        payload = row["event_payload"]
+        if isinstance(payload, (str, bytes)):
+            payload = json.loads(payload)
+        target = payload.get("runtime_target") if isinstance(payload, dict) else None
+        return target if isinstance(target, dict) else None
+
     def insert_link(self, **values) -> int:
         with self._connection.cursor() as cursor:
             cursor.execute(
