@@ -13,24 +13,28 @@
 
 ## 2. Current React entries
 
-Current navigation identity 包含：
+下列清單記錄現行 navigation 與 render branch 的共同 identity，不另行定義業務功能或復活已退役入口：
 
-- `order-tracker`
-- `orders`
+- `order-workbench-v2`
 - `scheduling`
 - `staff`
+- `clients`
 - `data-import`
 - `reports`
 - `line-management`
 - `line-ai-events`
+- `line-llm-settings`
 - `line-liff-studio`
 - `line-security`
 - `finance`
+- `historical-service-accounting`
 - `anomalies`
 - `account-management`
-- `system-status`
+- `storage-management`
 
-`data-browser` 保留為 React compatibility hash identity，實際 render 同一個 `DataImportPage` 的 data-browser 分頁；不建立第二份 UI owner。
+依 `33_案件與月嫂整合名冊正式規格.md` 的名冊裁決，`data-browser` 相容深連結顯示客戶名冊，不再開啟 `DataImportPage` 的六來源分頁。现行 `databrowser` 與 `client-roster` aliases 亦映射至 `clients`，使用同一個 `ClientRegistryPage`；此為頁面解析，不要求網址立即改寫。
+
+`order-tracker`、`orders` 與獨立 `system-status` 已不在上述正式導航及 render branches。系統狀態的既有 snapshot Query 與 shell 指示器仍保留，不因獨立頁面退出而刪除。
 
 ## 3. Removed Streamlit surface
 
@@ -48,7 +52,7 @@ Current navigation identity 包含：
 
 ## 4. API 與 CLI entry
 
-本裁決只簡化已退役的 Streamlit surface。API endpoint 與 operator CLI 仍需依 current objective 個別判定：
+API endpoint 與 operator CLI 需依 current objective 個別判定：
 
 - current owner 與實際用途；
 - public／operator contract；
@@ -57,6 +61,8 @@ Current navigation identity 包含：
 - focused regression 或直接 readback。
 
 不得因 UI 已改為 React，自動刪除仍被 React、worker、provider 或操作人員使用的 API／CLI。
+
+Data Browser 依規格 33 保留 `GET /api/v1/admin/data-browser/sources/{source_id}` 的 authenticated、bounded archive Query。舊 `GET /api/v1/admin/data-browser/{table}` raw table metadata 與 generic PATCH／source-correction 不屬此保留範圍；其路由已移除，不提供原始 rows、欄位或舊 editable metadata，也不新增相容 writer。Smoke 工具使用現行 OpenAPI 與明確 fixture，不自動展開原始資料表。
 
 ## 5. Standard local runtime
 
