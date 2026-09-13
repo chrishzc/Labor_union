@@ -89,6 +89,7 @@ describe('issue #277 stage-5 customer recommendation ordering', () => {
       case_no: CASE_NO, plan_id: 51, expected_version: expectedVersion,
       order_information_1_ready: true, order_information_2_ready: true,
       weekly_service_ready: true, weekly_service_row_count: 3,
+      order_information_1: [], order_information_2: [], weekly_service_rows: [],
       caregiver_resumes: [{ staff_id: 8892, staff_name: '測試月嫂', ready: true, filename: 'resume-A.pdf', version: 1, blocker: null }],
       blockers: [], send_allowed: true,
     }));

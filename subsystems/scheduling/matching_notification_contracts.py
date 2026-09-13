@@ -120,12 +120,49 @@ class CustomerConfirmationResumePreview:
 
 
 @dataclass(frozen=True, slots=True)
+class CustomerConfirmationInformationPreview:
+    segment_id: int
+    staff_id: int
+    staff_name: str
+    text: str
+
+    def __post_init__(self) -> None:
+        require_positive_integer(self.segment_id, "matching information segment ID")
+        require_positive_integer(self.staff_id, "matching information staff ID")
+        require_canonical_text(self.staff_name, "matching information staff name", 100)
+        require_canonical_text(self.text, "matching information text", 5000)
+
+
+@dataclass(frozen=True, slots=True)
+class CustomerConfirmationWeeklyServicePreview:
+    serial_number: int
+    staff_name: str
+    week_start_date: str
+    week_end_date: str
+    service_hours_per_day: int
+    weekly_work_days: int
+    weekly_hours: int
+
+    def __post_init__(self) -> None:
+        require_positive_integer(self.serial_number, "weekly service serial number")
+        require_canonical_text(self.staff_name, "weekly service staff name", 100)
+        require_canonical_text(self.week_start_date, "weekly service start date", 10)
+        require_canonical_text(self.week_end_date, "weekly service end date", 10)
+        require_positive_integer(self.service_hours_per_day, "weekly service hours per day")
+        if self.weekly_work_days < 0 or self.weekly_hours < 0:
+            raise ValueError("matching confirmation weekly service values are invalid")
+
+
+@dataclass(frozen=True, slots=True)
 class CustomerConfirmationPreview:
     plan: MatchingPlanReference
     order_information_1_ready: bool
     order_information_2_ready: bool
     weekly_service_ready: bool
     weekly_service_row_count: int
+    order_information_1: tuple[CustomerConfirmationInformationPreview, ...]
+    order_information_2: tuple[CustomerConfirmationInformationPreview, ...]
+    weekly_service_rows: tuple[CustomerConfirmationWeeklyServicePreview, ...]
     caregiver_resumes: tuple[CustomerConfirmationResumePreview, ...]
     blockers: tuple[str, ...]
 
@@ -503,8 +540,10 @@ def _require_matching_version(
 __all__ = [
     "ApplyManualCustomerProfilesCommand",
     "AssignmentConversionNotificationResult",
+    "CustomerConfirmationInformationPreview",
     "CustomerConfirmationPreview",
     "CustomerConfirmationResumePreview",
+    "CustomerConfirmationWeeklyServicePreview",
     "ManualCustomerProfilesEvidence",
     "ManualCustomerProfilesPreview",
     "ManualCustomerProfilesReceipt",

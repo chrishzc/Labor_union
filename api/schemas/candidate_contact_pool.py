@@ -48,6 +48,24 @@ class CandidateInformationPreviewView(BaseModel):
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+class CandidateWeeklyServiceRowView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    serial_number: int = Field(gt=0)
+    staff_name: str = Field(min_length=1, max_length=100)
+    week_start_date: date
+    week_end_date: date
+    service_hours_per_day: int = Field(gt=0)
+    weekly_work_days: int = Field(ge=0, le=7)
+    weekly_hours: int = Field(ge=0)
+
+
+class CandidateWeeklyServicePreviewView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    case_no: str = Field(min_length=1, max_length=50)
+    candidate_id: int = Field(gt=0)
+    rows: list[CandidateWeeklyServiceRowView]
+
+
 class ManualCandidateInformationPreviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

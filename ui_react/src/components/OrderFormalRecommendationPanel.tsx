@@ -653,8 +653,8 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
             <section className="formal-recommendation-next" aria-labelledby={`profiles-${current.plan.planId}`}>
               <p className="formal-recommendation-step">下一步</p>
               <h4 id={`profiles-${current.plan.planId}`}>寄送確認資訊給客戶</h4>
-              <p>寄送前會一次檢查完整內容；任何一項缺少都不會建立 LINE 寄送工作。</p>
-              {confirmationPreview.status === 'loading' && <p role="status">正在檢查四項確認資訊…</p>}
+              <p>寄送前會檢查必要內容；履歷未附時仍可寄送確認訊息，請由公會人員另行透過 LINE 傳送履歷。</p>
+              {confirmationPreview.status === 'loading' && <p role="status">正在檢查確認資訊…</p>}
               {confirmationPreview.status === 'error' && (
                 <div className="formal-recommendation-readiness-error" role="alert">
                   <p>目前無法檢查確認資訊：{confirmationPreview.message}</p>
@@ -680,20 +680,43 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
                       <strong>{confirmationPreview.data.weekly_service_ready ? `${confirmationPreview.data.weekly_service_row_count} 週已就緒` : '尚未就緒'}</strong>
                     </li>
                     {confirmationPreview.data.caregiver_resumes.map((resume) => (
-                      <li key={resume.staff_id} data-ready={resume.ready}>
-                        <span aria-hidden="true">{resume.ready ? '✓' : '✕'}</span>
+                      <li key={resume.staff_id} data-ready={resume.ready} data-optional={!resume.ready}>
+                        <span aria-hidden="true">{resume.ready ? '✓' : '!'}</span>
                         <span>{resume.staff_name}履歷 PDF</span>
-                        <strong>{resume.ready ? `${resume.filename}（版本 ${resume.version}）` : '尚未上傳'}</strong>
+                        <strong>{resume.ready ? `${resume.filename}（版本 ${resume.version}）` : '未附；由公會另行 LINE 傳送'}</strong>
                       </li>
                     ))}
                   </ul>
+                  <div className="formal-recommendation-package-previews" aria-label="寄送內容預覽">
+                    <details><summary>預覽訂單資訊－1</summary>
+                      {(confirmationPreview.data.order_information_1 ?? []).map((item) => <article key={item.segment_id}><h5>{item.staff_name}</h5><pre>{item.text}</pre></article>)}
+                    </details>
+                    <details><summary>預覽訂單資訊－2</summary>
+                      {(confirmationPreview.data.order_information_2 ?? []).map((item) => <article key={item.segment_id}><h5>{item.staff_name}</h5><pre>{item.text}</pre></article>)}
+                    </details>
+                    <details><summary>預覽每周服務中說明</summary>
+                      <div className="formal-recommendation-weekly-preview"><table>
+                        <thead><tr><th>週次</th><th>服務人員</th><th>期間</th><th>工作日</th><th>時數</th></tr></thead>
+                        <tbody>{(confirmationPreview.data.weekly_service_rows ?? []).map((item) => <tr key={item.serial_number}>
+                          <td>第 {item.serial_number} 週</td><td>{item.staff_name}</td><td>{item.week_start_date}～{item.week_end_date}</td>
+                          <td>{item.weekly_work_days} 日</td><td>{item.weekly_hours} 小時</td>
+                        </tr>)}</tbody>
+                      </table></div>
+                    </details>
+                  </div>
                   {confirmationPreview.data.blockers.length > 0 && (
                     <div className="formal-recommendation-blockers" role="alert">
                       <strong>尚不能寄送</strong>
                       <ul>{confirmationPreview.data.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>
                     </div>
                   )}
-                  {confirmationPreview.data.send_allowed && <p className="formal-recommendation-ready" role="status">四項確認資訊均已就緒，可以一次寄送。</p>}
+                  {confirmationPreview.data.send_allowed && (
+                    <p className="formal-recommendation-ready" role="status">
+                      {confirmationPreview.data.caregiver_resumes.every((resume) => resume.ready)
+                        ? '必要確認資訊與履歷均已就緒，可以寄送。'
+                        : '必要確認資訊已就緒；未附履歷請由公會人員另行透過 LINE 傳送。'}
+                    </p>
+                  )}
                 </>
               )}
               <button

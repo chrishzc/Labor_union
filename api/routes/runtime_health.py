@@ -18,6 +18,9 @@ from api.schemas.runtime_health import (
     AlertTargetEnabledRequest,
     AlertTargetMutationResponse,
     AlertTargetMutationPreviewResponse,
+    AlertTargetPreferencesPayload,
+    AlertTargetPreferencesRequest,
+    AlertTargetPreferencesResponse,
     AlertTargetViewResponse,
     ResetLineAlertGroupApplyRequest,
     ResetLineAlertGroupRequest,
@@ -285,6 +288,45 @@ def preview_set_target_enabled(
     return BaseResponse(
         data=AlertTargetMutationPreviewResponse.model_validate(result, from_attributes=True),
         message="LINE 告警對象狀態 Preview 已建立；尚未寫入",
+    )
+
+
+@router.get("/line-alert-targets/{target_id}/preferences", response_model=BaseResponse[AlertTargetPreferencesResponse])
+def get_target_preferences(
+    target_id: int,
+    _=Depends(require_line_monitor_reader),
+):
+    try:
+        prefs = _app().get_target_preferences(target_id)
+    except RuntimeAlertTargetError as error:
+        raise _target_error(error, f"pref-get-{target_id}") from error
+    return BaseResponse(
+        data=AlertTargetPreferencesResponse(
+            target_id=target_id,
+            preferences=AlertTargetPreferencesPayload(**prefs),
+        ),
+        message="取得 LINE 告警對象訊息分類設定成功",
+    )
+
+
+@router.patch("/line-alert-targets/{target_id}/preferences", response_model=BaseResponse[AlertTargetPreferencesResponse])
+def update_target_preferences(
+    target_id: int,
+    payload: AlertTargetPreferencesRequest,
+    request: Request,
+    principal=Depends(require_line_alert_manager),
+):
+    try:
+        saved = _app().save_target_preferences(target_id, payload.preferences.model_dump())
+    except RuntimeAlertTargetError as error:
+        raise _target_error(error, f"pref-patch-{target_id}") from error
+    _set_alert_target_audit(request, "update_preferences", target_id)
+    return BaseResponse(
+        data=AlertTargetPreferencesResponse(
+            target_id=target_id,
+            preferences=AlertTargetPreferencesPayload(**saved),
+        ),
+        message="更新 LINE 告警對象訊息分類設定成功",
     )
 
 

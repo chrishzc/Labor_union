@@ -82,6 +82,32 @@ describe('candidateContactPoolClient', () => {
     });
   });
 
+  it('previews candidate weekly service through the bounded typed endpoint', async () => {
+    const signal = new AbortController().signal;
+    const preview = {
+      case_no: 'CASE-POOL-001',
+      candidate_id: 17,
+      rows: [{
+        serial_number: 1,
+        staff_name: '測試月嫂',
+        week_start_date: '2026-08-31',
+        week_end_date: '2026-09-06',
+        service_hours_per_day: 8,
+        weekly_work_days: 5,
+        weekly_hours: 40,
+      }],
+    };
+    const get = vi.spyOn(transport, 'get').mockResolvedValue(successEnvelope(preview));
+
+    await expect(
+      candidateContactPoolClient.previewWeeklyService('CASE-POOL-001', 17, { signal }),
+    ).resolves.toEqual(preview);
+    expect(get).toHaveBeenCalledWith(
+      '/api/v1/orders/CASE-POOL-001/candidate-contact-pool/candidates/17/weekly-service/preview',
+      { signal, token: 'volatile-token' },
+    );
+  });
+
   it('rejects case identity drift and nested extra fields', async () => {
     vi.spyOn(transport, 'get').mockResolvedValueOnce(successEnvelope({
       ...fixture,

@@ -69,7 +69,11 @@ def _partial_status(case_no, row):
 
 
 def _bootstrap_status(case_no, row):
-    return _status(case_no, row, ready=False, recommendation=_recommendation(row))
+    rec = _recommendation(row)
+    blockers = ()
+    if rec is None and row.get("start_date") is None:
+        blockers = ("missing_start_date",)
+    return _status(case_no, row, ready=False, recommendation=rec, blockers=blockers)
 
 
 def _status(case_no, row, ready, recommendation=None, blockers=()):
@@ -86,7 +90,18 @@ def _architecture_readiness(row):
 
 
 def _recommendation(row):
-    return build_approved_case_architecture_bootstrap_intent(str(row["case_no"]), str(row["identity_status"]), row["client_created_at"], row["start_date"])
+    if (
+        row.get("start_date") is None
+        or row.get("identity_status") is None
+        or row.get("client_created_at") is None
+    ):
+        return None
+    return build_approved_case_architecture_bootstrap_intent(
+        str(row["case_no"]),
+        str(row["identity_status"]),
+        row["client_created_at"],
+        row["start_date"],
+    )
 
 
 def _integer_or_zero(value):

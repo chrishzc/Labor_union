@@ -18,7 +18,7 @@ from domains.line.delivery import (
     LineRecipient,
     LineRecipientType,
 )
-from domains.line.identities import LineUserId
+from domains.line.identities import LineGroupId, LineUserId
 from domains.scheduling.matching_communication import (
     CaregiverWillingness,
     CustomerMatchingDecision,
@@ -51,7 +51,9 @@ from subsystems.scheduling.customer_confirmation_download import (
 from subsystems.scheduling.matching_notification_contracts import (
     ApplyManualCustomerProfilesCommand,
     CustomerConfirmationPreview,
+    CustomerConfirmationInformationPreview,
     CustomerConfirmationResumePreview,
+    CustomerConfirmationWeeklyServicePreview,
     ManualCustomerProfilesPreview,
     ManualCustomerProfilesReceipt,
     MatchingContactState,
@@ -154,6 +156,36 @@ class MatchingNotificationApplication:
             order_information_2_ready=bool(raw["order_information_2_ready"]),
             weekly_service_ready=bool(raw["weekly_service_ready"]),
             weekly_service_row_count=int(raw["weekly_service_row_count"]),
+            order_information_1=tuple(
+                CustomerConfirmationInformationPreview(
+                    segment_id=int(item["segment_id"]),
+                    staff_id=int(item["staff_id"]),
+                    staff_name=str(item["staff_name"]),
+                    text=str(item["text"]),
+                )
+                for item in raw["order_information_1"]
+            ),
+            order_information_2=tuple(
+                CustomerConfirmationInformationPreview(
+                    segment_id=int(item["segment_id"]),
+                    staff_id=int(item["staff_id"]),
+                    staff_name=str(item["staff_name"]),
+                    text=str(item["text"]),
+                )
+                for item in raw["order_information_2"]
+            ),
+            weekly_service_rows=tuple(
+                CustomerConfirmationWeeklyServicePreview(
+                    serial_number=int(item["serial_number"]),
+                    staff_name=str(item["staff_name"]),
+                    week_start_date=str(item["week_start_date"]),
+                    week_end_date=str(item["week_end_date"]),
+                    service_hours_per_day=int(item["service_hours_per_day"]),
+                    weekly_work_days=int(item["weekly_work_days"]),
+                    weekly_hours=int(item["weekly_hours"]),
+                )
+                for item in raw["weekly_service_rows"]
+            ),
             caregiver_resumes=resumes,
             blockers=tuple(dict.fromkeys(blockers)),
         )
@@ -326,6 +358,10 @@ class MatchingNotificationApplication:
         unit_of_work.delivery_tasks.enqueue(
             _response_confirmation(result, line_user_id, correlation_id, occurred_at)
         )
+        if decision == "accepted":
+            _enqueue_match_success_group_notification(
+                unit_of_work, result.plan, correlation_id, occurred_at
+            )
         return result
 
     def record_manual_response(
@@ -850,6 +886,72 @@ def _response_confirmation(result, recipient, correlation_id, scheduled_at):
         correlation_id,
         "matching_response_event",
         str(result.event_id),
+    )
+
+
+def _enqueue_match_success_group_notification(
+    unit_of_work,
+    plan: MatchingPlanReference,
+    correlation_id: CorrelationId,
+    scheduled_at: datetime,
+) -> None:
+    runtime_monitor = getattr(unit_of_work, "runtime_monitor", None)
+    if runtime_monitor is None:
+        return
+    targets_fn = getattr(runtime_monitor, "find_active_group_targets", None)
+    if not callable(targets_fn):
+        return
+    targets = targets_fn(for_update=False)
+    if not targets:
+        return
+    target = targets[0]
+    group_id = str(target.get("group_id") if hasattr(target, "get") else getattr(target, "group_id", "")).strip()
+    if not group_id:
+        return
+    payload = {
+        "type": "flex",
+        "altText": f"【案件媒合成功通知】案號：{plan.case_no}",
+        "contents": {
+            "type": "bubble",
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "spacing": "md",
+                "contents": [
+                    {
+                        "type": "text",
+                        "text": "🎉 案件媒合成功通知",
+                        "weight": "bold",
+                        "size": "xl",
+                        "color": "#047857",
+                    },
+                    {
+                        "type": "text",
+                        "text": f"案件編號：{plan.case_no}",
+                        "size": "sm",
+                        "color": "#666666",
+                    },
+                    {
+                        "type": "text",
+                        "text": "客戶已確認同意配對方案！請工會專員接手進行後續簽約與服務確認流程。",
+                        "size": "sm",
+                        "wrap": True,
+                    },
+                ],
+            },
+        },
+    }
+    unit_of_work.delivery_tasks.enqueue(
+        LineDeliveryRequest(
+            LineRecipient(LineRecipientType.GROUP, LineGroupId(group_id)),
+            LineMessageKind.FLEX,
+            canonical_line_payload_json(payload),
+            scheduled_at,
+            IdempotencyKey(f"matching-group-success:{plan.case_no}:{plan.plan_id}"),
+            correlation_id,
+            "matching_plan_decision",
+            str(plan.plan_id),
+        )
     )
 
 

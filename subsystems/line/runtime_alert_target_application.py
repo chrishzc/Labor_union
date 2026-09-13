@@ -53,6 +53,33 @@ class RuntimeAlertTargetApplication:
     def add_admin_target(self, command: AddLineAlertAdminTargetCommand) -> LineAlertTargetMutationReceipt:
         return self._apply(command, operation="admin_target_add")
 
+    def get_target_preferences(self, target_id: int) -> dict[str, bool]:
+        with self._unit_of_work_factory() as unit_of_work:
+            try:
+                return unit_of_work.runtime_monitor.get_target_preferences(target_id)
+            except LookupError as error:
+                raise RuntimeAlertTargetError(
+                    "not_found", "line_alert_target_not_found", "LINE 告警對象不存在"
+                ) from error
+
+    def save_target_preferences(self, target_id: int, preferences: dict[str, bool]) -> dict[str, bool]:
+        unit_of_work = self._unit_of_work_factory()
+        unit_of_work.__enter__()
+        try:
+            result = unit_of_work.runtime_monitor.save_target_preferences(target_id, preferences)
+            unit_of_work.commit()
+            return result
+        except LookupError as error:
+            unit_of_work.rollback()
+            raise RuntimeAlertTargetError(
+                "not_found", "line_alert_target_not_found", "LINE 告警對象不存在"
+            ) from error
+        except Exception:
+            unit_of_work.rollback()
+            raise
+        finally:
+            unit_of_work.__exit__(None, None, None)
+
     def preview(self, command) -> LineAlertTargetMutationPreview:
         operation = _operation(command)
         with self._unit_of_work_factory() as unit_of_work:

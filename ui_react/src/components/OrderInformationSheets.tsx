@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { queryOrderInformation, type OrderInformation } from '../api/orders/order_information_client';
 import type { AssignmentPlan } from '../api/orders/order_query_schemas';
-import { candidateContactPoolClient, type CandidateContactPool, type CandidateInformationPreview } from '../api/scheduling/candidate_contact_pool_client';
+import { candidateContactPoolClient, type CandidateContactPool, type CandidateInformationPreview, type CandidateWeeklyServicePreview } from '../api/scheduling/candidate_contact_pool_client';
 
 const INFO_FIELDS = {
   1: [
@@ -26,7 +26,7 @@ const INFO_FIELDS = {
 export function OrderInformationSheets({ caseNo, assignments, initialKind = 1, onOpenCandidates }: {
   caseNo: string; assignments: AssignmentPlan['assignments']; initialKind?: 1 | 2; onOpenCandidates?: () => void;
 }) {
-  const [kind, setKind] = useState<1 | 2>(initialKind);
+  const [kind, setKind] = useState<1 | 2 | 'weekly'>(initialKind);
   const [assignmentId, setAssignmentId] = useState<number | null>(null);
   const [result, setResult] = useState<OrderInformation | null>(null);
   const [loading, setLoading] = useState(false);
@@ -34,6 +34,7 @@ export function OrderInformationSheets({ caseNo, assignments, initialKind = 1, o
   const [candidates, setCandidates] = useState<CandidateContactPool['candidates']>([]);
   const [candidateId, setCandidateId] = useState<number | null>(null);
   const [candidatePreview, setCandidatePreview] = useState<CandidateInformationPreview | null>(null);
+  const [weeklyPreview, setWeeklyPreview] = useState<CandidateWeeklyServicePreview | null>(null);
   const targets = assignments.filter((item) => item.assignment_id != null);
   const selectedId = assignmentId ?? (targets.length === 1 ? targets[0]!.assignment_id! : null);
   const selectedCandidateId = candidateId ?? (candidates.length === 1 ? candidates[0]!.id : null);
@@ -50,7 +51,7 @@ export function OrderInformationSheets({ caseNo, assignments, initialKind = 1, o
 
   useEffect(() => {
     setCandidatePreview(null);
-    if (targets.length || selectedCandidateId === null) return;
+    if (targets.length || selectedCandidateId === null || kind === 'weekly') return;
     const controller = new AbortController();
     setLoading(true); setError(false);
     void candidateContactPoolClient.previewInformation(caseNo, selectedCandidateId, kind, { signal: controller.signal })
@@ -62,7 +63,7 @@ export function OrderInformationSheets({ caseNo, assignments, initialKind = 1, o
 
   useEffect(() => {
     setResult(null);
-    if (selectedId === null) return;
+    if (selectedId === null || kind === 'weekly') return;
     setError(false);
     const controller = new AbortController();
     setLoading(true);
@@ -73,10 +74,23 @@ export function OrderInformationSheets({ caseNo, assignments, initialKind = 1, o
     return () => controller.abort();
   }, [caseNo, kind, selectedId]);
 
+  useEffect(() => {
+    setWeeklyPreview(null);
+    if (kind !== 'weekly' || targets.length || selectedCandidateId === null) return;
+    const controller = new AbortController();
+    setLoading(true); setError(false);
+    void candidateContactPoolClient.previewWeeklyService(caseNo, selectedCandidateId, { signal: controller.signal })
+      .then((data) => { if (!controller.signal.aborted) setWeeklyPreview(data); })
+      .catch(() => { if (!controller.signal.aborted) setError(true); })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [caseNo, kind, selectedCandidateId, targets.length]);
+
   return <section className="order-information-sheets" aria-label="訂單資訊預覽">
     <div className="order-information-choice" aria-label="選擇訂單資訊">
       <button type="button" aria-pressed={kind === 1} onClick={() => setKind(1)}><strong>訂單資訊－1</strong><span>服務條件與薪資 · 初步詢問</span></button>
       <button type="button" aria-pressed={kind === 2} onClick={() => setKind(2)}><strong>訂單資訊－2</strong><span>照護與飲食需求 · 分開確認</span></button>
+      <button type="button" aria-pressed={kind === 'weekly'} onClick={() => setKind('weekly')}><strong>每周服務中說明</strong><span>預計工作日與每周時數</span></button>
     </div>
     {targets.length > 1 && <label>預覽哪一段服務
       <select value={selectedId ?? ''} onChange={(event) => setAssignmentId(event.target.value ? Number(event.target.value) : null)}>
@@ -84,14 +98,14 @@ export function OrderInformationSheets({ caseNo, assignments, initialKind = 1, o
         {targets.map((item) => <option key={item.assignment_id} value={item.assignment_id!}>第 {item.sequence} 段 · 月嫂 {item.staff_id} · {item.assigned_start_date}～{item.assigned_end_date}</option>)}
       </select>
     </label>}
-    <p className="order-case-review-note">資訊－1／－2 可分開詢問。不必等 BeClass 完成；初步詢問使用預計期間，尚未確定的資料顯示「待確認」。</p>
+    <p className="order-case-review-note">三份內容都可在寄送前預覽。初步詢問使用預計期間；薪資與發薪日會明確標示為預估值。</p>
     {!targets.length && candidates.length > 0 && <label>預覽收件月嫂<select value={selectedCandidateId ?? ''} onChange={(event) => setCandidateId(event.target.value ? Number(event.target.value) : null)}><option value="">請選擇月嫂</option>{candidates.map((item) => <option key={item.id} value={item.id}>{item.staff_name} · {item.service_start_date}～{item.service_end_date}</option>)}</select></label>}
-    {selectedId === null && !candidatePreview && !loading && <p role="status">{targets.length > 1 ? '請選擇服務區段以查閱本案資料。' : candidates.length ? '請選擇月嫂，查閱本次詢問內容。' : '請先在候選月嫂清單加入要詢問的人選，即可預覽與分開寄送兩份資訊。'}</p>}
+    {selectedId === null && !candidatePreview && !weeklyPreview && !loading && <p role="status">{targets.length > 1 ? '請選擇服務區段以查閱本案資料。' : candidates.length ? '請選擇月嫂，查閱本次詢問內容。' : '請先在候選月嫂清單加入要詢問的人選，即可預覽完整資訊。'}</p>}
     {loading && <p role="status">正在讀取本案資訊…</p>}
     {error && <p role="alert">本案資訊暫時無法讀取；下方僅顯示欄位，不代表資料已完整。</p>}
     {result && !result.can_render && <p role="status">部分資料尚未齊全，請核對標示為「待補」的欄位。</p>}
-    {candidatePreview && <article className="order-information-paper"><h3>給 {candidatePreview.staff_name} 的訂單資訊－{kind}</h3><pre style={{ whiteSpace: 'pre-wrap', font: 'inherit' }}>{candidatePreview.text}</pre></article>}
-    {targets.length > 0 && <article className="order-information-paper">
+    {candidatePreview && kind !== 'weekly' && <article className="order-information-paper"><h3>給 {candidatePreview.staff_name} 的訂單資訊－{kind}</h3><pre style={{ whiteSpace: 'pre-wrap', font: 'inherit' }}>{candidatePreview.text}</pre></article>}
+    {targets.length > 0 && kind !== 'weekly' && <article className="order-information-paper">
       <header><small>案件 {caseNo}</small><h3>給服務人員的訂單資訊－{kind}</h3><p>{kind === 1 ? '先確認服務條件與接案意願' : '確認個別照護需求與服務準備'}</p></header>
       <dl>{INFO_FIELDS[kind].map(([id, label]) => {
         const field = result?.fields.find((item) => item.field_id === id);
@@ -100,6 +114,12 @@ export function OrderInformationSheets({ caseNo, assignments, initialKind = 1, o
       })}</dl>
       {kind === 2 && <section className="order-information-ingredients"><h4>食材準備參考</h4><p>依原表保留供核對，不代表本案已同意或需要全部採買。</p><div><span>中藥／食材：四物、四君、四神、枸杞、紅棗、黃耆、杜仲、大豐草、黑豆、紅豆、白木耳、紫米、桂圓肉、米酒、麻油</span><span>肉品：雞腿、雞胸、排骨、豬／牛肉絲、絞肉、雞蛋、魚排</span><span>蔬菜：青菜、紅蘿蔔、薑、香菇、其他菇類、豆製品</span></div></section>}
     </article>}
-    <div className="order-case-action-row">{onOpenCandidates && <button type="button" onClick={onOpenCandidates}>到候選月嫂清單寄送資訊－{kind}</button>}<span>從個別月嫂的寄送入口確認收件人與內容後，才會建立寄送任務。</span></div>
+    {kind === 'weekly' && targets.length > 0 && <p role="status">正式方案建立後，可在「推薦月嫂」步驟預覽方案的每周服務內容。</p>}
+    {weeklyPreview && <article className="order-information-paper"><header><h3>每周服務中說明</h3><p>依目前候選服務期間推算，尚未建立正式排班。</p></header>
+      <div className="formal-recommendation-weekly-preview"><table><thead><tr><th>週次</th><th>服務人員</th><th>期間</th><th>工作日</th><th>時數</th></tr></thead><tbody>
+        {weeklyPreview.rows.map((item) => <tr key={item.serial_number}><td>第 {item.serial_number} 週</td><td>{item.staff_name}</td><td>{item.week_start_date}～{item.week_end_date}</td><td>{item.weekly_work_days} 日</td><td>{item.weekly_hours} 小時</td></tr>)}
+      </tbody></table></div>
+    </article>}
+    <div className="order-case-action-row">{onOpenCandidates && kind !== 'weekly' && <button type="button" onClick={onOpenCandidates}>到候選月嫂清單寄送資訊－{kind}</button>}<span>從個別月嫂的寄送入口確認收件人與內容後，才會建立寄送任務。</span></div>
   </section>;
 }

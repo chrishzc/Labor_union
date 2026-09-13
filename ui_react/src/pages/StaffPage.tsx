@@ -360,7 +360,7 @@ function isEligibleEndPauseBlock(
 
 export const StaffPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
-  const [drawerTab, setDrawerTab] = useState<'qualification' | 'preferences' | 'unavailability'>('qualification');
+  const [drawerTab, setDrawerTab] = useState<'management' | 'qualification' | 'preferences' | 'unavailability'>('qualification');
   const [directory, setDirectory] = useState<DirectoryState>({ status: 'loading', items: [] });
   const [directorySearch, setDirectorySearch] = useState<DirectorySearchState>({ status: 'idle', items: [] });
   const [selectedStaff, setSelectedStaff] = useState<StaffDirectoryCardViewModel | null>(null);
@@ -387,10 +387,7 @@ export const StaffPage: React.FC = () => {
   const [rangeStart, setRangeStart] = useState('2026-01-01');
   const [rangeEnd, setRangeEnd] = useState('2026-12-31');
   const [sliceRetryGeneration, setSliceRetryGeneration] = useState(0);
-  const [resumeNavigationRequested, setResumeNavigationRequested] = useState(false);
-  const [resumeNavigationMessage, setResumeNavigationMessage] = useState<string | null>(null);
   const mountedRef = useRef(false);
-  const resumeEditorRef = useRef<HTMLDivElement | null>(null);
   const initialRequestedRef = useRef(false);
   const requestGenerationRef = useRef(0);
   const activeControllerRef = useRef<AbortController | null>(null);
@@ -578,30 +575,6 @@ export const StaffPage: React.FC = () => {
       });
     return () => controller.abort();
   }, [selectedStaffId, sliceRetryGeneration]);
-
-  useEffect(() => {
-    if (!resumeNavigationRequested || drawerTab !== 'qualification') return undefined;
-    if (profile.status === 'error') {
-      setResumeNavigationRequested(false);
-      setResumeNavigationMessage('個人資料尚未載入，請先重試個人資料。');
-      return undefined;
-    }
-    if (profile.status !== 'ready') return undefined;
-    const frame = window.requestAnimationFrame(() => {
-      const target = resumeEditorRef.current;
-      if (target === null) return;
-      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      target.focus({ preventScroll: true });
-      setResumeNavigationRequested(false);
-      setResumeNavigationMessage('已移至月嫂履歷 PDF。');
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [drawerTab, profile.status, resumeNavigationRequested, selectedStaffId]);
-
-  useEffect(() => {
-    setResumeNavigationRequested(false);
-    setResumeNavigationMessage(null);
-  }, [selectedStaff?.id]);
 
   useEffect(() => {
     if (selectedStaffId !== null && drawerTab === 'unavailability') {
@@ -1252,25 +1225,16 @@ export const StaffPage: React.FC = () => {
       >
         {selectedStaff && (
           <div className="staff-drawer-content">
-            <div className="staff-resume-shortcut">
-              <div>
-                <strong>月嫂履歷 PDF</strong>
-                <span>查看目前版本、下載或上傳新版履歷</span>
-                {resumeNavigationMessage && <span role="status">{resumeNavigationMessage}</span>}
-              </div>
+            <div className="staff-drawer-tabs-nav" role="tablist" aria-label="月嫂個人檔案分頁">
               <button
                 type="button"
-                className="staff-next-btn"
-                onClick={() => {
-                  setResumeNavigationMessage('正在開啟月嫂履歷 PDF…');
-                  setResumeNavigationRequested(true);
-                  setDrawerTab('qualification');
-                }}
+                role="tab"
+                aria-selected={drawerTab === 'management'}
+                className={`staff-drawer-tab-btn ${drawerTab === 'management' ? 'active' : ''}`}
+                onClick={() => setDrawerTab('management')}
               >
-                {resumeNavigationRequested ? '正在開啟…' : '管理履歷 PDF'}
+                ✏️ 個資與履歷管理
               </button>
-            </div>
-            <div className="staff-drawer-tabs-nav" role="tablist" aria-label="月嫂個人檔案分頁">
               <button
                 type="button"
                 role="tab"
@@ -1300,7 +1264,28 @@ export const StaffPage: React.FC = () => {
               </button>
             </div>
 
-            {/* Drawer Tab 1: 完整資格主檔 */}
+            {/* Drawer Tab 1: 個資與履歷管理 */}
+            {drawerTab === 'management' && (
+              <section className="staff-drawer-section" data-surface-id="staff.drawer.management">
+                <h2 className="staff-management-title">個資、履歷與銀行帳戶管理</h2>
+                <p className="staff-management-description">編輯功能集中於本分頁；完整資格主檔維持唯讀瀏覽。</p>
+                {profile.status === 'loading' && <p role="status">正在載入個人資料管理功能…</p>}
+                {profile.status === 'error' && (
+                  <div role="alert">
+                    <p>{profile.message}</p>
+                    <button type="button" className="staff-next-btn" onClick={() => setSliceRetryGeneration((value) => value + 1)}>重試個人資料</button>
+                  </div>
+                )}
+                {profile.status === 'ready' && (
+                  <StaffRegistryEditor
+                    profile={profile.data}
+                    onUpdated={() => setSliceRetryGeneration((value) => value + 1)}
+                  />
+                )}
+              </section>
+            )}
+
+            {/* Drawer Tab 2: 完整資格主檔 */}
             {drawerTab === 'qualification' && (
               <section className="staff-drawer-section" data-surface-id="staff.qualification-master">
                 {/* 基本資料摘要卡片 */}
@@ -1364,12 +1349,6 @@ export const StaffPage: React.FC = () => {
                         ))}
                       </ul>
                     )}
-                    <div ref={resumeEditorRef} tabIndex={-1} className="staff-resume-editor-anchor">
-                      <StaffRegistryEditor
-                        profile={profile.data}
-                        onUpdated={() => setSliceRetryGeneration((value) => value + 1)}
-                      />
-                    </div>
                   </div>
                 )}
 
@@ -1446,7 +1425,7 @@ export const StaffPage: React.FC = () => {
               </section>
             )}
 
-            {/* Drawer Tab 2: 接案偏好設定 */}
+            {/* Drawer Tab 3: 接案偏好設定 */}
             {drawerTab === 'preferences' && (
               <section className="staff-drawer-section" data-surface-id="staff.drawer.preferences">
                 {casePreferenceSummary.status === 'loading' && <p role="status">正在讀取接案偏好…</p>}
@@ -1458,7 +1437,7 @@ export const StaffPage: React.FC = () => {
               </section>
             )}
 
-            {/* Drawer Tab 3: 接案狀態管理 (採用國定假日 QUERY → PREVIEW → APPLY → RECEIPT 工作台模式) */}
+            {/* Drawer Tab 4: 接案狀態管理 (採用國定假日 QUERY → PREVIEW → APPLY → RECEIPT 工作台模式) */}
             {drawerTab === 'unavailability' && (
               <section className="staff-drawer-section">
                 {renderAvailabilityWorkbench()}

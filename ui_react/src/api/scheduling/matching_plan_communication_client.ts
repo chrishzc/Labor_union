@@ -8,6 +8,8 @@ import { decodePayload } from '../shared/runtime_decoder';
 import { transport } from '../shared/transport';
 import { ApiHttpError } from '../shared/typed_errors';
 
+const IsoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
 const CustomerDecisionReceiptSchema = z.strictObject({
   event_id: z.number().int().positive(),
   case_no: z.string().min(1).max(50),
@@ -80,6 +82,20 @@ const CustomerConfirmationPreviewSchema = z.strictObject({
   order_information_2_ready: z.boolean(),
   weekly_service_ready: z.boolean(),
   weekly_service_row_count: z.number().int().nonnegative(),
+  order_information_1: z.array(z.strictObject({
+    segment_id: z.number().int().positive(), staff_id: z.number().int().positive(),
+    staff_name: z.string().min(1).max(100), text: z.string().min(1).max(5000),
+  })),
+  order_information_2: z.array(z.strictObject({
+    segment_id: z.number().int().positive(), staff_id: z.number().int().positive(),
+    staff_name: z.string().min(1).max(100), text: z.string().min(1).max(5000),
+  })),
+  weekly_service_rows: z.array(z.strictObject({
+    serial_number: z.number().int().positive(), staff_name: z.string().min(1).max(100),
+    week_start_date: IsoDateSchema, week_end_date: IsoDateSchema,
+    service_hours_per_day: z.number().int().positive(),
+    weekly_work_days: z.number().int().min(0).max(7), weekly_hours: z.number().int().nonnegative(),
+  })),
   caregiver_resumes: z.array(z.strictObject({
     staff_id: z.number().int().positive(),
     staff_name: z.string().min(1).max(100),
@@ -93,8 +109,7 @@ const CustomerConfirmationPreviewSchema = z.strictObject({
 }).superRefine((preview, context) => {
   const everyComponentReady = preview.order_information_1_ready
     && preview.order_information_2_ready
-    && preview.weekly_service_ready
-    && preview.caregiver_resumes.every((resume) => resume.ready);
+    && preview.weekly_service_ready;
   if (preview.send_allowed !== (preview.blockers.length === 0 && everyComponentReady)) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: '確認資訊檢查結果不一致。' });
   }

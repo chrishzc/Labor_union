@@ -177,6 +177,8 @@ def test_staff_profile_repository_reads_only_the_bounded_detail_columns():
     profile_cursor, bank_cursor = connection.created_cursors
     assert profile_cursor.params == (7,)
     assert "WHERE id=%s LIMIT 1" in profile_cursor.sql
+    assert "CAST(COALESCE" in profile_cursor.sql
+    assert "AS UNSIGNED) AS bank_accounts_version" in profile_cursor.sql
     assert "ip_address" not in profile_cursor.sql
     assert "line_user_id" not in profile_cursor.sql
     assert "account_no" not in profile_cursor.sql

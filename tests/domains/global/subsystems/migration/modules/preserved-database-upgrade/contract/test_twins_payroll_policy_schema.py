@@ -176,6 +176,29 @@ def test_twins_view_replacement_accepts_only_the_known_predecessor_or_target(
     assert migration._twins_payroll_order_details_view_state(view, descriptor) == "drift"
 
 
+def test_twins_view_metadata_state_and_canonical_descriptor(monkeypatch):
+    canonical = migration._canonical_artifact_descriptor(
+        "1038_twins_payroll_order_details_view.sql"
+    )
+    assert "views" in canonical
+    assert "v_order_details" in canonical["views"]
+
+    target_hash = canonical["views"]["v_order_details"]["definition_sha256"]
+    monkeypatch.setattr(
+        migration,
+        "_view_definition_digest",
+        lambda _definition: target_hash,
+    )
+    snapshot = {"views": [{"table_name": "v_order_details", "view_definition": "definition"}]}
+    state = migration._metadata_state_for_artifact(
+        snapshot,
+        canonical,
+        "1038_twins_payroll_order_details_view.sql",
+        defer_missing_triggers=False,
+    )
+    assert state == "exact"
+
+
 def test_backfill_inserts_only_missing_twin_assignment_snapshots(monkeypatch):
     twin_payload = {"特殊計費:胎數": "雙胞胎"}
     monkeypatch.setattr(

@@ -2134,6 +2134,11 @@ def local_additive_target_state(
         "checks": [row for row in snapshot.get("constraints", ()) if row.get("table_name") in owned_tables and row.get("constraint_type") == "CHECK"],
         "triggers": [row for row in snapshot.get("triggers", ()) if row.get("event_object_table") in owned_tables],
     }
+    if descriptor.get("views"):
+        target["views"] = [
+            row for row in snapshot.get("views", ())
+            if row.get("table_name") in descriptor.get("views", {})
+        ]
     return {
         "state": state,
         "targeted_fingerprint": _sha256_bytes(_canonical_json(target)),
@@ -2338,6 +2343,11 @@ def _metadata_state_for_artifact(
     *,
     defer_missing_triggers: bool,
 ) -> str:
+    if artifact == "1038_twins_payroll_order_details_view.sql":
+        return _twins_payroll_order_details_view_state(
+            snapshot.get("views", ()),
+            descriptor,
+        )
     if artifact == "1032_matching_holiday_work_agreements.sql":
         return _matching_holiday_work_agreement_owner_state(
             snapshot,
@@ -5522,6 +5532,8 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
             "non_unique": 0,
             "columns": ("id", "status"),
         }
+    if part_name in OWNED_OBJECTS and "views" in OWNED_OBJECTS[part_name]:
+        descriptor["views"] = OWNED_OBJECTS[part_name]["views"]
     return descriptor
 
 
@@ -5801,6 +5813,11 @@ def _release_descriptor_metadata_state(
             raise UpgradeBlocked(
                 f"release descriptor differs from canonical SQL: {part_name}:parent_columns"
             )
+    if part_name == "1038_twins_payroll_order_details_view.sql":
+        return _twins_payroll_order_details_view_state(
+            snapshot.get("views", ()),
+            canonical,
+        )
     if part_name == "1005_contract_external_signing_successor.sql":
         return _contract_external_signing_successor_state(
             snapshot,

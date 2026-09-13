@@ -151,6 +151,23 @@ class CustomerConfirmationResumePreviewView(_ClosedModel):
     blocker: str | None = Field(default=None, min_length=1)
 
 
+class CustomerConfirmationInformationPreviewView(_ClosedModel):
+    segment_id: PositiveInt
+    staff_id: PositiveInt
+    staff_name: str = Field(min_length=1, max_length=100)
+    text: str = Field(min_length=1, max_length=5000)
+
+
+class CustomerConfirmationWeeklyServicePreviewView(_ClosedModel):
+    serial_number: PositiveInt
+    staff_name: str = Field(min_length=1, max_length=100)
+    week_start_date: date
+    week_end_date: date
+    service_hours_per_day: PositiveInt
+    weekly_work_days: int = Field(ge=0, le=7)
+    weekly_hours: int = Field(ge=0)
+
+
 class CustomerConfirmationPreviewView(_ClosedModel):
     case_no: str = Field(min_length=1, max_length=50)
     plan_id: PositiveInt
@@ -159,6 +176,9 @@ class CustomerConfirmationPreviewView(_ClosedModel):
     order_information_2_ready: bool
     weekly_service_ready: bool
     weekly_service_row_count: int = Field(ge=0)
+    order_information_1: list[CustomerConfirmationInformationPreviewView]
+    order_information_2: list[CustomerConfirmationInformationPreviewView]
+    weekly_service_rows: list[CustomerConfirmationWeeklyServicePreviewView]
     caregiver_resumes: list[CustomerConfirmationResumePreviewView] = Field(
         min_length=1,
         max_length=4,

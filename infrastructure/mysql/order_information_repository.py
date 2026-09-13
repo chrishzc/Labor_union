@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import time, timedelta
+from datetime import date, time, timedelta
 import json
 from typing import Any
 
 from domains.case_import.order_information import project_order_information
+from domains.payroll.payment_due_date import calculate_staff_payment_due_date
+from domains.orders.floor_fee import allocate_largest_remainder
 from infrastructure.mysql.order_terms_read_model import load_preview_facts
+from shared_kernel.money import MoneyNTD
 from subsystems.orders.order_information import (
     OrderInformationOwnerSnapshot,
     projection_fingerprint,
@@ -124,9 +127,11 @@ class MySqlOrderInformationRepository:
             segments = tuple(cursor.fetchall() or ())
         if not isinstance(case, Mapping) or not segments:
             raise ValueError("matching_plan_information_not_found")
+        estimates = _matching_plan_payroll_estimates(case, segments)
         result: list[dict[str, object]] = []
         for segment in segments:
-            facts, issues = _facts(case, segment)
+            segment_facts = {**segment, **estimates[int(segment["assignment_id"])]}
+            facts, issues = _facts(case, segment_facts)
             text, blockers = build_order_information_message(
                 info_type, facts, issues,
                 "正式推薦方案資訊；服務期間以目前正式媒合方案為準。",
@@ -182,8 +187,8 @@ def _facts(
         ),
         "address": case.get("client_address"),
         "phone": case.get("client_phone"),
-        "total_salary": None,
-        "salary_payment_date": None,
+        "total_salary": assignment.get("estimated_total_salary"),
+        "salary_payment_date": assignment.get("estimated_salary_payment_date"),
         "special_holidays": _special_holidays_text(case.get("custom_rest_dates")),
         "notes": case.get("client_notes"),
         "service_time": formal_service_time,
@@ -192,6 +197,80 @@ def _facts(
         **projection.values,
     }
     return facts, projection.issues
+
+
+def _matching_plan_payroll_estimates(
+    case: Mapping[str, object],
+    segments: tuple[Mapping[str, object], ...],
+) -> dict[int, dict[str, str]]:
+    """Project explicitly labelled estimates without creating Payroll facts."""
+    hourly_rate = _positive_integer(case.get("payroll_hourly_rate_ntd"))
+    hours_per_day = _positive_integer(case.get("service_hours_per_day"))
+    contracted_days = _positive_integer(case.get("service_days"))
+    if hourly_rate is None or hours_per_day is None or contracted_days is None:
+        raise ValueError("matching_plan_payroll_estimate_source_missing")
+    service_days = {
+        str(int(item["assignment_id"])): _inclusive_day_count(
+            item.get("assigned_start_date"), item.get("assigned_end_date")
+        )
+        for item in segments
+    }
+    total_planned_days = sum(service_days.values())
+    if total_planned_days != contracted_days:
+        raise ValueError("matching_plan_payroll_estimate_service_days_mismatch")
+    floor_allocations = allocate_largest_remainder(
+        MoneyNTD(int(case.get("floor_fee") or 0)), service_days
+    )
+    planned_end = max(_required_date(item.get("assigned_end_date")) for item in segments)
+    client_hourly_rate = _positive_integer(
+        case.get("client_hourly_rate_ntd"), allow_zero=True
+    )
+    if client_hourly_rate is None:
+        raise ValueError("matching_plan_client_payment_estimate_source_missing")
+    client_payable = contracted_days * hours_per_day * client_hourly_rate + int(case.get("floor_fee") or 0)
+    full_subsidy = (
+        str(case.get("client_identity_status") or "").strip() == "補助市民"
+        and contracted_days * hours_per_day <= 120
+        and client_payable == 0
+    )
+    due_date = calculate_staff_payment_due_date(
+        planned_end, client_payable, full_subsidy
+    )
+    return {
+        int(item["assignment_id"]): {
+            "estimated_total_salary": (
+                f"預估 {service_days[str(int(item['assignment_id']))] * hours_per_day * hourly_rate + floor_allocations[str(int(item['assignment_id']))].amount} 元"
+            ),
+            "estimated_salary_payment_date": f"預估 {due_date.isoformat()}",
+        }
+        for item in segments
+    }
+
+
+def _positive_integer(value: object, *, allow_zero: bool = False) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed >= (0 if allow_zero else 1) else None
+
+
+def _required_date(value: object) -> date:
+    if isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(str(value))
+    except (TypeError, ValueError) as error:
+        raise ValueError("matching_plan_payroll_estimate_date_invalid") from error
+
+
+def _inclusive_day_count(start: object, end: object) -> int:
+    start_date, end_date = _required_date(start), _required_date(end)
+    if start_date > end_date:
+        raise ValueError("matching_plan_payroll_estimate_date_invalid")
+    return (end_date - start_date).days + 1
 
 
 def _load_typed_payroll_facts(
@@ -286,13 +365,18 @@ _CASE_IMPORT_FACT_KEYS = (
 _CASE_SQL = """
 SELECT o.case_no, o.service_days, o.service_hours_per_day, o.requires_cooking,
        o.service_start_time, o.service_end_time, o.service_end_day_offset,
-       o.floor_fee, o.custom_rest_dates,
+       o.floor_fee, o.custom_rest_dates, o.staff_payment_due_date,
        c.service_time, c.service_type, c.baby_info,
+       c.identity_status AS client_identity_status,
        c.name AS client_name, c.phone AS client_phone, c.address AS client_address,
-       c.notes AS client_notes, b.survey_details AS _case_import_payload
+       c.notes AS client_notes, b.survey_details AS _case_import_payload,
+       payment_terms.client_hourly_rate_ntd,
+       payroll_policy.hourly_rate_ntd AS payroll_hourly_rate_ntd
   FROM orders o
   JOIN clients c ON c.id=o.client_id
   LEFT JOIN beclass_records b ON b.bound_case_no=o.case_no
+  LEFT JOIN client_payment_terms payment_terms ON payment_terms.case_no=o.case_no
+  LEFT JOIN case_payroll_rate_policy_snapshots payroll_policy ON payroll_policy.case_no=o.case_no
  WHERE o.case_no=%s
 """
 

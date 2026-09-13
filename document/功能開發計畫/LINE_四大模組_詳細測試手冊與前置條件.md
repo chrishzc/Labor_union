@@ -1,9 +1,9 @@
 # LINE 四大模組詳細測試手冊與 Agent 前置條件規範
 
-> **文件版本**：v2.2（2026-09-13，M4 影響文件核對）  
-> **原始對齊程式版本**：`main @ 0988f6c430472343662aa1f8989ab2af9732bde3`；M4 修正的 source 基準為 PR #299 `4eb58e07e94660308ba8afd05d39931f0301fdf1`。開始測試前須確認實際執行版本已包含修正，PR 存在不等於 main 已合併或環境已部署。  
-> **適用範圍**：LINE 官方帳號、LIFF、FastAPI、MySQL、React 管理後台、M1～M4 repository-local 與手機 E2E 驗收。  
-> **權威依據**：`document/架構重整/01_規格基線/26_LINE四大模組Eraser流程圖轉錄與驗收基線.md`；同目錄規格 17、20 的 owner 邊界，以及 2026-09-13 使用者同群重新綁定指示。現有實作與本手冊不得自行取消規格 26 的 required flow acceptance。  
+> **文件版本**：v2.3（2026-09-13，M2/M3/M4 全情境對齊與使用者八點業務裁決更新）
+> **原始對齊程式版本**：`main @ 0988f6c430472343662aa1f8989ab2af9732bde3`；包含 PR #299 及後續對齊修訂。開始測試前須確認實際執行版本已包含修正，PR 存在不等於 main 已合併或環境已部署。
+> **適用範圍**：LINE 官方帳號、LIFF、FastAPI、MySQL、React 管理後台、M1～M4 repository-local 與手機 E2E 驗收。
+> **權威依據**：`document/架構重整/01_規格基線/26_LINE四大模組Eraser流程圖轉錄與驗收基線.md`；同目錄規格 17、20 的 owner 邊界，以及 2026-09-13 使用者八點業務裁決（未解決客服工單回覆、月嫂履歷推薦卡兩大按鈕、Match_Success 群組通知、Zero-Pool 拒絕降維群組通知、確認實際服務時間、月嫂檔期試算通知專員）。現有實作與本手冊不得自行取消規格 26 的 required flow acceptance。
 > **目的**：讓 Agent 先完成可自動化的測試前置資料與 readback，測試者拿手機後只執行真正需要 LINE／LIFF／Rich Menu 的最後操作。
 
 ---
@@ -57,11 +57,18 @@
 | **M2-03** | 非 ready QA 不得自動回答 | `MOBILE_PASS` | 2026-09-10 | ✅ 測試者確認手機實測通過。 |
 | **M2-04** | 模糊問題與 unsupported | `MOBILE_PASS` | 2026-09-10 | ✅ 測試者確認手機實測通過。 |
 | **M2-05** | 明確轉真人 | `MOBILE_PASS` | 2026-09-10 | ✅ 測試者確認手機實測通過。 |
-| **M2-06** | Feedback | `MOBILE_PASS` | 2026-09-10 | ✅ 測試者確認手機實測通過。 |
+| **M2-06** | Feedback 閉環 | `MOBILE_PASS` | 2026-09-13 | ✅ **實測更新**：點擊「未解決」回覆已更新為「已收到您的回饋{ticket}。AI 問答系統已暫時關閉，您可以直接在此對話中留下訊息等待真人客服回應。」；點擊「有幫助」記錄正面評分功能依指示暫不排入實作。 |
 | **M3-01** | Criteria snapshot / term diff | `REPO_LOCAL_PASS / USER_VERIFIED` | 2026-09-11 | ✅ 使用者已驗證；initial criteria、criteria diff、受影響 recipient 精確重送及 stale fail-closed 聚焦測試亦通過。 |
-| **M3-02** | Caregiver willingness | `REPO_LOCAL_PASS / USER_VERIFIED` | 2026-09-11 | ✅ 使用者已驗證：月嫂已在 LINE 回覆願意；willingness event、receipt、lineage/readback 聚焦測試亦通過。 |
-| **M3-03** | Zero Pool 協商 | `REPO_LOCAL_PASS / MOBILE_PASS` | 2026-09-11 | ✅ 手機實測通過：Zero Pool 會自動詢問客戶；客戶同意調整後，工會可完成正式訂單條件修改，並以更新後內容再次詢問原月嫂。既有 zero-pool preview/apply、接受／不接受、stale fail-closed、outbox/owner handoff 聚焦測試亦通過。 |
-| **M3-04** | Match Success 雙方 recipient | `REPO_LOCAL_PASS / MOBILE_NOT_RUN` | 2026-09-10 | ✅ accepted decision 僅建立 conversion request，並精確投影 customer／caregiver 兩個不同 recipient intent；雙手機與真 LINE provider 未執行。 |
+| **M3-02** | Caregiver willingness (月嫂意願) | `REPO_LOCAL_PASS / USER_VERIFIED` | 2026-09-11 | ✅ 使用者已驗證：月嫂已在 LINE 回覆願意；willingness event、receipt、lineage/readback 聚焦測試亦通過。 |
+| **M3-02B** | 月嫂履歷推薦卡與客戶決策分支 | `REPO_LOCAL_PASS / PREPARED` | 2026-09-13 | ✅ **實測準備完成**：工會送出月嫂推薦，客戶手機收到月嫂履歷卡（輪播卡附履歷下載），末卡具備兩顆按鈕：`[接受此配對]` (postback: `accepted`) 與 `[專人協助／進一步了解]` (postback: `contact_requested`)。點擊「專人協助」轉專員人工溝通挽回，不直接退回待媒合池；若客戶堅持不同意再由專員從後台手動更換月嫂。 |
+| **M3-03** | Zero Pool 協商與拒絕降維 | `REPO_LOCAL_PASS / MOBILE_PASS` | 2026-09-13 | ✅ **實測更新**：Zero Pool 自動詢問客戶替代條件；若客戶拒絕降維（回覆無法調整條件），系統自動向工會管理群組發送 `【媒合需要人工處理】` 告警卡，專員人工介入協調。 |
+| **M3-04** | Match_Success 群組簽約通知 | `REPO_LOCAL_PASS / PREPARED` | 2026-09-13 | ✅ **實測更新**：取消對客戶與月嫂雙向 Push（節省 Push 費用）；改為在客戶接受配對後，向工會管理群組推播 `【案件媒合成功通知】`，由工會專員接手線上簽約。 |
+| **M4-01** | 異常通知群組設定與 CAS 鎖定 | `REPO_LOCAL_PASS / PREPARED` | 2026-09-13 | ✅ 支援管理員指令綁定單一異常群組、CAS 防併發及後台重設。 |
+| **M4-02** | 客訴 → Hold → HIGH escalation → Alert | `REPO_LOCAL_PASS / PREPARED` | 2026-09-13 | ✅ 客訴建立 HIGH 工單、觸發案件進入 Hold 狀態並向群組推播告警。 |
+| **M4-03** | Mobile Admin / Safe Review Link | `REPO_LOCAL_PASS / PREPARED` | 2026-09-13 | ✅ 群組告警卡附安全短效連結，一次性兌換與版本失效防護。 |
+| **M4-04** | 月嫂請假與代班協調 | `REPO_LOCAL_PASS / PREPARED` | 2026-09-13 | ✅ 月嫂提出請假待辦，工會受理並於案件行事曆完成代班排班。 |
+| **M4-05** | 代班後 Payroll / Staff Payables | `REPO_LOCAL_PASS / PREPARED` | 2026-09-13 | ✅ Scheduling 代班排定後自動投影 Payroll 責任分拆，薪資可追溯至排班事實。 |
+| **M4-06** | 服務前時間確認與檔期試算 | `REPO_LOCAL_PASS / PREPARED` | 2026-09-13 | ✅ **規格裁決對齊**：產婦無「預產期變更」流程，直接由「確認實際服務時間（Actual Service Dates）」承接；月嫂提前上工確認不用問月嫂，系統先試算提早後排班有無衝突並通知工會專員，取消「月嫂同意提早」與「月嫂檔期衝突」之自動訊息。 |
 
 ---
 
@@ -231,6 +238,33 @@ Agent 已完成:
 
 如果 Agent 無法建立某個 root fact，必須回 `BLOCKED`，不得假造資料。
 
+## 2.5 LINE 官方帳號 Push 額度節省策略與客服問答 LIFF 設計
+
+LINE 官方帳號在生產環境中依「每月主動發送的 Push 訊息則數」計費（免費用量有限，超額需付費）。為避免 AI 客服與自動通知迅速吃光額度，本系統落實三大額度防禦支柱：
+
+### 2.5.1 額度防禦支柱一：客服問答專屬 LIFF（Push 消耗降為 0）
+
+- **計費痛點**：用戶若在 LINE 聊天室中與 AI 進行多輪對話，每次回答若超過 Webhook Reply Token 限制或採用非同步推播，每一句都會被計為 1 則付費 Push 費用。
+- **解法**：
+  1. 在各身分專屬 Rich Menu（訪客、客戶、月嫂）常設「常見問題／客服中心」按鈕，點擊開啟專屬 LIFF 頁面。
+  2. 用戶在 LIFF 網頁中：
+     - 瀏覽分類知識庫與常見問題（純 HTTP GET，0 LINE 訊息成本）。
+     - 透過搜尋框輸入問題，直接呼叫後端 API 檢索確定性知識與語意答案（純 REST API 傳輸，0 額度成本）。
+     - 若答案未解決，直接於 LIFF 內填寫諮詢表單送出（直接寫入 `customer_service_messages` 工單，0 額度成本）。
+  3. **成效**：用戶的所有探索、問答、回饋與工單填寫都在 LIFF 內完成，**完全不消耗任何 LINE 官方帳號 Push 額度**。
+
+### 2.5.2 額度防禦支柱二：聊天室即時 Webhook 嚴格遵守 Reply Token
+
+- **規則**：用戶若直接在聊天室打字提問，後端 Webhook 處理時**僅允許使用該次請求提供的 `replyToken` 進行一次性即時回覆（Reply Message 完全免費）**。
+- **限制**：若 AI 回答超過時效（Reply Token 過期）或需要後續跟進，**嚴禁**轉為非同步 Push 發送；改為留存工單並回覆一次性提示，告知用戶轉入真人客服待辦或引導開啟客服 LIFF。
+
+### 2.5.3 額度防禦支柱三：群組通知取代雙向多對一 Push
+
+- **業務裁決**：
+  1. **Match_Success 媒合成功**：原圖規劃推播雙方（客戶 1 則 + 月嫂 1 則 = 2 則付費 Push）。依最新裁決**取消雙向 Push**，改為向唯一啟用的「工會管理群組」發送 1 則 Flex 卡片通知，由工會專員接手線上簽約。
+  2. **Zero-Pool 拒絕降維**：客戶回覆無法調整條件時，不反覆向客戶推播，而是向「工會管理群組」推播人工介入協調卡片。
+  3. **成效**：大幅減少對終端用戶的付費 Push 則數，同時集中管理群組協調。
+
 ---
 
 # 3. 模組零：新好友 Onboarding（前導，不列入四大模組核心分數）
@@ -276,11 +310,11 @@ Agent 已完成:
 3. **分支 2（已申請市府平台 ➔ 身分先行 bind.html）**：
    - **【狀態 A：舊客完全命中】（✅ MOBILE_PASS 2026-09-07 驗收通過）**：
      - 輸入測試客戶 1：姓名：`陳雅婷`、手機：`0912345678`
-     - 預期效果：系統自動完成綁定，顯示案件編號【`CASE-2026-M301`】，提示無需重填問卷，回到聊天室直接啟用【客戶專屬選單】。
+     - 預期效果：系統自動完成綁定，顯示案件編號【`115000101`】（9 碼查詢序號），提示無需重填問卷，回到聊天室直接啟用【客戶專屬選單】。
      - **實測結果**：手機實測通過，點擊送出後直接成功綁定並帶出案號，無需重填問卷。
    - **【狀態 B：有案號但缺問卷】（✅ MOBILE_PASS 2026-09-07 驗收通過）**：
      - 輸入測試客戶 3：姓名：`李詩涵`、手機：`0933111222`
-     - 預期效果：系統識別已向市府申請並取得案號【`CASE-2026-STATE-B`】但尚未填寫工會需求問卷 ➔ 彈出提示「已為您找到案件編號【CASE-2026-STATE-B】，即將無縫載入需求調查表單...」➔ 自動跳轉 `register.html`，頂部提示已連結案件編號，鎖定姓名與電話，由產婦填寫完整 60 題需求問卷後一鍵送出！
+     - 預期效果：系統識別已向市府申請並取得案號【`115000999`】但尚未填寫工會需求問卷 ➔ 彈出提示「已為您找到案件編號【115000999】，即將無縫載入需求調查表單...」➔ 自動跳轉 `register.html`，頂部提示已連結案件編號，鎖定姓名與電話，由產婦填寫完整 60 題需求問卷後一鍵送出！
      - **實測結果**：手機實測通過，自動預填案號與個資，Email 欄位必填檢核生效，一鍵送出後直接建立完整登記資料與綁定。
    - **【狀態 C：名冊未同步 / 查無案號】**：
      - 輸入全新訪客（例如姓名：`王小明`、手機：`0988776655`）
@@ -569,16 +603,20 @@ asdfghjk
 
 ---
 
-## M2-06 Feedback
+## M2-06 Feedback 閉環
 
 ### 手機操作
 
-對回答點「未解決」。
+1. 於問答卡片末尾點擊「未解決」。
+2. （註：「有幫助」正面評分記錄功能依使用者指示目前暫不排入實作，本案例專注「未解決」閉環）。
 
 ### 驗收
 
+- 系統回覆文案必須包含：
+  `已收到您的回饋（工單編號：...）。AI 問答系統已暫時關閉，您可以直接在此對話中留下訊息等待真人客服回應。`
 - feedback durable readback 可見。
-- unresolved 可形成正式 customer-service follow-up，而不是只有前端計數。
+- `unresolved` 正式形成 Customer Service ticket/escalation，而不是只有前端計數。
+- 用戶後續在對話中的發言將進入真人客服工單對話鏈。
 
 ---
 
@@ -673,73 +711,96 @@ POST /api/v1/matching/coordination/caregiver-willingness/apply
 
 ---
 
-## M3-03 已聯繫零意願分流
+## M3-02B 月嫂履歷推薦卡與客戶決策分支
+
+本案例為原圖核心節點「工會傳送月嫂履歷給客戶確認，客戶點選接受或尋求專人協助」的完整 E2E 驗收流程。
+
+### Agent 前置
+
+1. 準備一筆已完成月嫂意願確認的測試案件（例如 `CASE-2026-M301`），候選月嫂具備姓名、居住縣市、服務時段、技能偏好與證書資訊。
+2. 透過工會端 API 發出月嫂推薦與客戶履歷確認卡：
+   ```text
+   POST /api/v1/matches/plans/{case_no}/{plan_id}/customer-confirmation
+   ```
+   （由 `customer_profiles_card` / `customer_confirmation_card` 渲染送達）
+3. 停在客戶手機收到輪播卡狀態，Agent 不得預先代為點擊 postback。
+
+### 手機操作（帳號 A 客戶端）
+
+1. 打開個人 LINE 對話視窗，查收輪播卡片（Carousel）：
+   - 卡片 1～N：月嫂簡介卡（顯示月嫂姓名、居住地、證書、技能、偏好，附「下載履歷 PDF」安全按鈕）。
+   - 最後一張卡片：【請確認配對方案】決策卡，附帶兩顆行動按鈕：
+     - 按鈕 1：`[接受此配對]` (綠色，postback: `matching:{token}:accepted`)
+     - 按鈕 2：`[專人協助／進一步了解]` (藍色，postback: `matching:{token}:contact_requested`)
+2. 測試分支 1（專人協助）：
+   - 客戶點擊 `[專人協助／進一步了解]`。
+   - 手機收到即時回覆確認：「已收到您的配對選擇，工會人員會依流程與您聯繫。」
+   - 後台案件狀態轉為 `contact_requested`（顯示「客戶希望進一步聯絡」）。
+   - **核心業務不變量**：系統**不得**直接退回待媒合池，亦不得取消候選；由工會專員進行真人致電溝通挽回。若客戶溝通後回心轉意同意，由專員直接推進後續；若客戶堅持不同意，再由專員於後台系統操作手動更換月嫂。
+3. 測試分支 2（接受配對）：
+   - 客戶點擊 `[接受此配對]`。
+   - 手機收到即時回覆確認：「已收到您的配對選擇，工會人員會依流程與您聯繫。」
+   - 後台案件決策寫入 `accepted`，觸發後續 M3-04 群組簽約通知。
+
+### 驗收
+
+- 輪播卡不可超過 LINE Carousel 12 張上限，履歷下載連結必須為有效安全的受控下載 URL。
+- 客戶決策卡**嚴格只有 2 顆按鈕**（取消原圖分支 C，分支 B 改為轉專人），不得出現多餘的「拒絕」直接落入死胡同。
+- Postback 處理 `contact_requested` 時，資料庫記錄狀態 `contact_requested`，UI 面板正確渲染「客戶希望進一步聯絡」。
+
+---
+
+## M3-03 已聯繫零意願分流與拒絕降維協調
 
 ### Agent 前置
 
 準備一筆 current matching package 與**非空且已實際聯繫**的候選池；不得直接 INSERT zero-pool event。初次搜尋結果為零不是本案例，不應產生 LINE 通知。
 
-本案例分成互斥的兩條 current 路徑：
+本案例分成三條完整的分流路徑：
 
-- 全員完成或逾時、無人願意，但至少有一筆「調整條件」：AI 彙整去重後詢問客戶。
-- 全員完成或逾時、無人願意，且沒有調整條件：不詢問客戶；工會 LIFF 顯示人工跟進待辦，並向唯一啟用的工會群組排入一次去敏 Flex 通知。
+- **分流 1（無條件可協調）**：全員完成或逾時、無人願意，且沒有任何月嫂提出調整條件：不發送訊息騷擾客戶；工會待辦顯示人工跟進，並向唯一啟用的工會群組發送 `【媒合需要人工處理】` Flex 通知。
+- **分流 2（有條件協調，客戶同意調整）**：全員完成或逾時、無人願意，但至少有一位提出調整條件：AI 彙整去重後向客戶手機發送協商卡片。客戶點選「可以調整」後，工會端待辦顯示「客戶同意調整，待工會修改」，專員於訂單管理修改條件後重新詢問月嫂。
+- **分流 3（有條件協調，客戶拒絕降維）**：客戶於協商卡片點選「無法調整」（保留原條件）：系統**不得**直接退案或卡住，而是立即向工會管理群組發送 `【媒合需要人工處理】` Flex 卡片（標題：「媒合需要人工處理」，內文：「客戶目前無法調整條件，請由工會人員接手處理。」），附帶「開啟待辦工作台」按鈕，由專員人工介入協調。
 
-### 手機操作（帳號 A）
+### 手機操作（帳號 A 客戶端）
 
-有調整條件時，帳號 A 收到替代條件 proposal，選擇：
-
-- 接受調整。
-- 保留原需求。
-
-### Current API
-
-```text
-POST /api/v1/matching/coordination/zero-pool/preview
-POST /api/v1/matching/coordination/zero-pool/apply
-POST /api/v1/matching/coordination/customer-decision/preview
-POST /api/v1/matching/coordination/customer-decision/apply
-```
+1. 有調整條件時，帳號 A 收到替代條件 proposal 卡片。
+2. 測試分流 3 時，點擊 `[保留原需求／無法調整]`。
 
 ### 驗收
 
-- proposal → customer decision 有完整 lineage。
-- 不接受時不應偷偷改原訂單條件。
-- 接受時後續變更必須交由正確 owner，不由 Matching 跨 owner 直寫。
-- 無調整條件時，客戶不應收到協商訊息；工會待辦須顯示案件編號、聯繫人數、沒有意願與逾時分計數，以及群組通知狀態。
-- 同一 pool response round 不重複排入群組通知；新增候選、新的候選資訊、願意回應、調整條件或案件終結會使 current 人工待辦消失，並取消尚未送出的通知。
+- 拒絕降維時，客戶端不中斷，後端產生 `adjustment_customer_answer` (decision: `cannot_adjust`)。
+- Worker 自動於工會管理群組推播 Flex 通知，專員於後台待辦清單可見該案號與「manual_resolution」行動需求。
 
 ---
 
-## M3-04 Match Success 雙方 recipient
+## M3-04 Match Success 群組簽約通知
 
-### 設備
+> **2026-09-13 裁決更新**：依使用者指示與 Push 額度節省策略，取消原圖對「客戶 + 月嫂」雙向推播之付費 Push 訊息；改為在客戶接受配對後，向唯一啟用之工會幹部群組推播 `【案件媒合成功通知】`，由工會專員接手線上簽約。
 
-本案例建議使用 **2 個不同 LINE User ID**。
+### 設備與群組
+
+- 手機帳號 A（客戶）。
+- 工會幹部 LINE 群組（已綁定為單一異常與通知群組）。
 
 ### Agent 前置
 
-- 帳號 A 對應 client。
-- 帳號 B 對應 staff。
-- Agent 準備到 conversion/assignment 前一狀態。
+1. 準備一筆處於客戶履歷確認中的案件。
+2. 確認工會幹部群組已設定啟用（`line_alert_notification_targets` target_type='group', enabled=TRUE）。
 
 ### 手機驗收
 
-完成 final decision 後確認：
+1. 客戶手機 A 於決策卡點擊 `[接受此配對]`。
+2. 客戶手機 A 收到一次性回覆：「已收到您的配對選擇，工會人員會依流程與您聯繫。」
+3. **工會幹部群組**收到 Flex 推播卡片：
+   - 標題：`🎉 案件媒合成功通知`
+   - 內文：`案件編號：CASE-XXXX`、`客戶已確認同意配對方案！請工會專員接手進行後續簽約與服務確認流程。`
+4. 月嫂與客戶**不會**收到額外的付費 Push 訊息（雙方推播已被群組通知取代，節省 Push 額度）。
 
-- A 收到 client 版本通知。
-- B 收到 staff 版本通知。
-- recipient 不可交換。
+### 驗收
 
-### Owner/API
-
-```text
-POST /api/v1/matching/coordination/conversion/preview
-POST /api/v1/matching/coordination/conversion/apply
-```
-
-並 readback Matching outbox → LINE delivery task/result。
-
-只有 repository local task 但未真的送到手機時，標 `REPO_LOCAL_PASS / MOBILE_NOT_RUN`，不可標完整通過。
+- 群組通知具備唯一性與冪等保護（`matching-group-success:{case_no}:{plan_id}`），同一決策不重複洗版。
+- 工會專員於 Web 後台可直接接續辦理線上合約簽署。
 
 ---
 
@@ -933,6 +994,27 @@ Agent 執行 repository-local readback：
 
 ---
 
+## M4-06 服務前時間確認與檔期試算
+
+> **2026-09-13 裁決更新**：
+> 1. 產婦端無「預產期變更」流程，直接由「確認實際服務時間（Actual Service Dates）」承接（由 `actual_start_workflow` 擁有）。
+> 2. 月嫂提前上工確認**不用問月嫂**（取消原圖自動推播「月嫂同意提早」與「月嫂檔期衝突」訊息），改為由系統先試算提早後排班有無衝突，並直接通知工會專員人工協調。
+
+### 業務邊界與不可變量
+
+- **SSOT 邊界**：訂單服務日期由 `order_actual_start_events` 與 `order_actual_start_apply_receipts` 唯一管理（`reconfirm_order_actual_start_route`）。
+- **取消自動協商推播**：不再由 Bot 向月嫂自動發送「是否可提前上工」推播，避免月嫂漏讀或造成誤解，同時節省 Push 額度。
+- **試算與專員協調**：產婦提出實際生產與服務開始時間後，系統後端比對月嫂排班行事曆：
+  - 若無衝突，工會專員於 Web 後台直接確認實際服務起日。
+  - 若有衝突，系統產出衝突警告通知工會專員，由專員人工致電協調或調度代班。
+
+### 驗收
+
+- 系統不建立未授權的月嫂提早推播訊息。
+- 實際服務開始日異動由正式 `actual_start` writer 執行並留存 before/after 與 Apply receipt。
+
+---
+
 # 8. Agent 快速前置 Prompt 範本
 
 ## 8.1 任一案例
@@ -970,6 +1052,15 @@ Agent 執行 repository-local readback：
 請替我把目前測試 LINE 帳號安全重置給下一個角色使用。
 先讀 current binding，走 revocation preview/apply 與 Rich Menu reset；禁止直接 DELETE line identity binding。
 完成後回傳 binding/current-fact readback 與是否已恢復 default menu。
+```
+
+## 8.5 M3-02B 客戶月嫂履歷推薦卡與決策
+
+```text
+請替我準備 M3-02B 客戶月嫂履歷推薦卡手機實測。
+建立一筆 development 測試案件與已完成意願調查的月嫂候選人，包含姓名、技能、證書與履歷。
+透過正式端點 POST /api/v1/matches/plans/{case_no}/{plan_id}/customer-confirmation 送出履歷推薦卡。
+停在客戶手機即將收到輪播卡與兩顆按鈕的狀態，回傳手機測試包。
 ```
 
 ---

@@ -1,3 +1,8 @@
+/**
+ * File: OrderTermsMutationPanel.tsx
+ * Description: 訂單條款預覽與套用面板，支援常用班次快捷與30分鐘時段下拉並自動計算時數。
+ */
+
 import { useEffect, useRef, useState, type FC } from 'react';
 import {
   orderTermsMutationClient,
@@ -23,18 +28,114 @@ interface OrderTermsDraft {
   endDayOffset: '0' | '1';
 }
 
+export const COMMON_SHIFT_PRESETS = [
+  { label: '9h (09:00~18:00)', startTime: '09:00', endTime: '18:00', endDayOffset: '0' as const },
+  { label: '9h 早班 (08:30~17:30)', startTime: '08:30', endTime: '17:30', endDayOffset: '0' as const },
+  { label: '8h (09:00~17:00)', startTime: '09:00', endTime: '17:00', endDayOffset: '0' as const },
+  { label: '12h 白班 (08:00~20:00)', startTime: '08:00', endTime: '20:00', endDayOffset: '0' as const },
+  { label: '12h 夜班 (20:00~08:00 隔日)', startTime: '20:00', endTime: '08:00', endDayOffset: '1' as const },
+  { label: '24h 全日 (09:00~09:00 隔日)', startTime: '09:00', endTime: '09:00', endDayOffset: '1' as const },
+] as const;
+
+export const STANDARD_TIME_OPTIONS: readonly string[] = Array.from({ length: 48 }, (_, i) => {
+  const h = String(Math.floor(i / 2)).padStart(2, '0');
+  const m = i % 2 === 0 ? '00' : '30';
+  return `${h}:${m}`;
+});
+
+export function getTimeOptions(currentValue?: string): readonly string[] {
+  if (!currentValue || !/^\d{2}:\d{2}$/.test(currentValue)) {
+    return STANDARD_TIME_OPTIONS;
+  }
+  if (STANDARD_TIME_OPTIONS.includes(currentValue)) {
+    return STANDARD_TIME_OPTIONS;
+  }
+  return [...STANDARD_TIME_OPTIONS, currentValue].sort();
+}
+
+export function calculateDailyServiceHours(
+  startTime: string,
+  endTime: string,
+  endDayOffset: '0' | '1',
+): number | null {
+  if (!/^\d{2}:\d{2}$/.test(startTime) || !/^\d{2}:\d{2}$/.test(endTime)) {
+    return null;
+  }
+  const [startH, startM] = startTime.split(':').map(Number);
+  const [endH, endM] = endTime.split(':').map(Number);
+  if (
+    startH < 0 || startH > 23 || startM < 0 || startM > 59 ||
+    endH < 0 || endH > 23 || endM < 0 || endM > 59
+  ) {
+    return null;
+  }
+  const startMinutes = startH * 60 + startM;
+  let endMinutes = endH * 60 + endM;
+  if (endDayOffset === '1') {
+    endMinutes += 24 * 60;
+  }
+  const diffMinutes = endMinutes - startMinutes;
+  if (diffMinutes <= 0) {
+    return null;
+  }
+  const hours = diffMinutes / 60;
+  return Number.isInteger(hours) && hours > 0 && hours <= 24 ? hours : null;
+}
+
+export function validateServiceTimeWindow(
+  startTime: string,
+  endTime: string,
+  endDayOffset: '0' | '1',
+): string | null {
+  if (!startTime || !endTime) return null;
+  if (!/^\d{2}:\d{2}$/.test(startTime) || !/^\d{2}:\d{2}$/.test(endTime)) {
+    return '服務時段格式須為 HH:MM。';
+  }
+  const [startH, startM] = startTime.split(':').map(Number);
+  const [endH, endM] = endTime.split(':').map(Number);
+  if (
+    startH < 0 || startH > 23 || startM < 0 || startM > 59 ||
+    endH < 0 || endH > 23 || endM < 0 || endM > 59
+  ) {
+    return '服務時段時間數值無效。';
+  }
+  const startMinutes = startH * 60 + startM;
+  let endMinutes = endH * 60 + endM;
+  if (endDayOffset === '1') {
+    endMinutes += 24 * 60;
+  }
+  const diffMinutes = endMinutes - startMinutes;
+  if (diffMinutes <= 0) {
+    return '每日結束時間須晚於開始時間；若為跨日服務，請將「結束日偏移」設為隔日。';
+  }
+  if (diffMinutes > 24 * 60) {
+    return '單日服務時數不可超過 24 小時。';
+  }
+  if (diffMinutes % 60 !== 0) {
+    return `每日服務時數須為整數小時（目前計算為 ${(diffMinutes / 60).toFixed(1)} 小時）。`;
+  }
+  return null;
+}
+
 function draftFromQuery(query: OrderTerms): OrderTermsDraft {
+  const startTime = query.terms.service_time.start_time?.slice(0, 5) ?? '';
+  const endTime = query.terms.service_time.end_time?.slice(0, 5) ?? '';
+  const endDayOffset = query.terms.service_time.end_day_offset === 1 ? '1' : '0';
+  const calculated = calculateDailyServiceHours(startTime, endTime, endDayOffset);
+
   return {
     plannedStartDate: query.terms.planned_start_date,
     serviceDays: String(query.terms.service_days),
-    serviceHoursPerDay: String(query.terms.service_hours_per_day),
+    serviceHoursPerDay: calculated !== null
+      ? String(calculated)
+      : String(query.terms.service_hours_per_day),
     requiresCooking: query.terms.requires_cooking === null
       ? ''
       : query.terms.requires_cooking ? 'yes' : 'no',
     floorFeeNtd: String(query.terms.floor_fee_ntd),
-    startTime: query.terms.service_time.start_time?.slice(0, 5) ?? '',
-    endTime: query.terms.service_time.end_time?.slice(0, 5) ?? '',
-    endDayOffset: query.terms.service_time.end_day_offset === 1 ? '1' : '0',
+    startTime,
+    endTime,
+    endDayOffset,
   };
 }
 
@@ -120,7 +221,40 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
   }, [query, queryRevision, observedRevision]);
 
   const updateDraft = <K extends keyof OrderTermsDraft>(key: K, value: OrderTermsDraft[K]) => {
-    setDraft((current) => ({ ...current, [key]: value }));
+    setDraft((current) => {
+      const next = { ...current, [key]: value };
+      if (key === 'startTime' || key === 'endTime' || key === 'endDayOffset') {
+        const calculated = calculateDailyServiceHours(next.startTime, next.endTime, next.endDayOffset);
+        if (calculated !== null) {
+          next.serviceHoursPerDay = String(calculated);
+        } else if (next.startTime && next.endTime) {
+          next.serviceHoursPerDay = '';
+        }
+      }
+      return next;
+    });
+    setPreview(null);
+    setReceipt(null);
+    setError(null);
+  };
+
+  const isPresetActive = (preset: typeof COMMON_SHIFT_PRESETS[number]) => (
+    draft.startTime === preset.startTime
+    && draft.endTime === preset.endTime
+    && draft.endDayOffset === preset.endDayOffset
+  );
+
+  const applyPreset = (preset: typeof COMMON_SHIFT_PRESETS[number]) => {
+    setDraft((current) => {
+      const calculated = calculateDailyServiceHours(preset.startTime, preset.endTime, preset.endDayOffset);
+      return {
+        ...current,
+        startTime: preset.startTime,
+        endTime: preset.endTime,
+        endDayOffset: preset.endDayOffset,
+        serviceHoursPerDay: calculated !== null ? String(calculated) : current.serviceHoursPerDay,
+      };
+    });
     setPreview(null);
     setReceipt(null);
     setError(null);
@@ -141,6 +275,8 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
     },
   });
 
+  const timeValidationError = validateServiceTimeWindow(draft.startTime, draft.endTime, draft.endDayOffset);
+
   const draftReady = /^\d{4}-\d{2}-\d{2}$/.test(draft.plannedStartDate)
     && Number.isInteger(Number(draft.serviceDays))
     && Number(draft.serviceDays) > 0
@@ -150,7 +286,8 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
     && Number.isInteger(Number(draft.floorFeeNtd))
     && Number(draft.floorFeeNtd) >= 0
     && /^\d{2}:\d{2}$/.test(draft.startTime)
-    && /^\d{2}:\d{2}$/.test(draft.endTime);
+    && /^\d{2}:\d{2}$/.test(draft.endTime)
+    && timeValidationError === null;
   const locked = currentQuery.service_data_locked || status !== 'idle';
 
   const previewTerms = async () => {
@@ -253,7 +390,16 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
           <input aria-label="Beta 服務天數" type="number" min="1" value={draft.serviceDays} disabled={locked} onChange={(event) => updateDraft('serviceDays', event.target.value)} />
         </label>
         <label>每日服務時數
-          <input aria-label="Beta 每日服務時數" type="number" min="1" value={draft.serviceHoursPerDay} disabled={locked} onChange={(event) => updateDraft('serviceHoursPerDay', event.target.value)} />
+          <input
+            aria-label="Beta 每日服務時數"
+            type="number"
+            min="1"
+            max="24"
+            value={draft.serviceHoursPerDay}
+            readOnly
+            disabled={locked}
+            title="由每日開始時間、結束時間與結束日偏移自動計算"
+          />
         </label>
         <label>下廚料理需求
           <select aria-label="Beta 下廚料理需求" value={draft.requiresCooking} disabled={locked} onChange={(event) => updateDraft('requiresCooking', event.target.value as OrderTermsDraft['requiresCooking'])}>
@@ -265,11 +411,60 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
         <label>樓層加給（NTD）
           <input aria-label="Beta 樓層加給" type="number" min="0" value={draft.floorFeeNtd} disabled={locked} onChange={(event) => updateDraft('floorFeeNtd', event.target.value)} />
         </label>
+        <div style={{ gridColumn: 'span 2', display: 'flex', flexDirection: 'column', gap: '6px', padding: '10px 12px', background: '#faf6f0', borderRadius: '8px', border: '1px solid #ebdcd0', marginTop: '4px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
+            <span style={{ fontSize: '0.82rem', fontWeight: 600, color: '#6d4c3d' }}>常用班次快捷填入：</span>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+              {COMMON_SHIFT_PRESETS.map((preset) => (
+                <button
+                  key={preset.label}
+                  type="button"
+                  disabled={locked}
+                  className="btn-secondary-action"
+                  style={{
+                    fontSize: '0.78rem',
+                    padding: '3px 8px',
+                    borderRadius: '4px',
+                    background: isPresetActive(preset) ? '#fed7aa' : '#ffffff',
+                    border: '1px solid #d4c5b9',
+                    color: '#431407',
+                    fontWeight: isPresetActive(preset) ? 600 : 400,
+                    cursor: locked ? 'not-allowed' : 'pointer',
+                  }}
+                  onClick={() => applyPreset(preset)}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
         <label>每日開始時間
-          <input aria-label="Beta 每日開始時間" type="time" value={draft.startTime} disabled={locked} onChange={(event) => updateDraft('startTime', event.target.value)} />
+          <select
+            aria-label="Beta 每日開始時間"
+            value={draft.startTime}
+            disabled={locked}
+            onChange={(event) => updateDraft('startTime', event.target.value)}
+          >
+            <option value="">請選擇開始時間</option>
+            {getTimeOptions(draft.startTime).map((time) => (
+              <option key={time} value={time}>{time}</option>
+            ))}
+          </select>
         </label>
         <label>每日結束時間
-          <input aria-label="Beta 每日結束時間" type="time" value={draft.endTime} disabled={locked} onChange={(event) => updateDraft('endTime', event.target.value)} />
+          <select
+            aria-label="Beta 每日結束時間"
+            value={draft.endTime}
+            disabled={locked}
+            onChange={(event) => updateDraft('endTime', event.target.value)}
+          >
+            <option value="">請選擇結束時間</option>
+            {getTimeOptions(draft.endTime).map((time) => (
+              <option key={time} value={time}>{time}</option>
+            ))}
+          </select>
         </label>
         <label>結束日偏移
           <select aria-label="Beta 結束日偏移" value={draft.endDayOffset} disabled={locked} onChange={(event) => updateDraft('endDayOffset', event.target.value as OrderTermsDraft['endDayOffset'])}>
@@ -278,6 +473,10 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
           </select>
         </label>
       </div>
+
+      {timeValidationError && (
+        <p className="order-v2-drawer-error" role="status" style={{ marginTop: '6px' }}>{timeValidationError}</p>
+      )}
 
       <div className="order-v2-drawer-actions" style={{ marginTop: '12px' }}>
         <button type="button" disabled={locked || !draftReady} onClick={() => void previewTerms()}>
@@ -289,6 +488,9 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
         <div style={{ marginTop: '12px' }}>
           <strong>條款變更前後</strong>
           <p>服務天數：{preview.before.service_days} 天 → {preview.after.service_days} 天</p>
+          {preview.before.service_hours_per_day !== preview.after.service_hours_per_day && (
+            <p>每日時數：{preview.before.service_hours_per_day} 小時 → {preview.after.service_hours_per_day} 小時</p>
+          )}
           <p>時段：{preview.before.service_time.start_time}～{preview.before.service_time.end_time} → {preview.after.service_time.start_time}～{preview.after.service_time.end_time}</p>
           <p>版本：Order {preview.order_version} · Scheduling {preview.scheduling_version} · Client Finance {preview.client_finance_version} · Payroll {preview.payroll_version}</p>
           <label>變更原因（稽核必填）

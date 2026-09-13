@@ -71,6 +71,7 @@ describe('Beta 實際 owner 元件只在正式回讀成立後通知外層', () =
       case_no: CASE, plan_id: 51, expected_version: 4,
       order_information_1_ready: true, order_information_2_ready: true,
       weekly_service_ready: true, weekly_service_row_count: 1,
+      order_information_1: [], order_information_2: [], weekly_service_rows: [],
       caregiver_resumes: [{ staff_id: 8, staff_name: '測試月嫂', ready: true, filename: 'resume.pdf', version: 1, blocker: null }],
       blockers: [], send_allowed: true,
     });

@@ -86,7 +86,7 @@ def customer_confirmation_card(
     interaction_token: str,
     note: str,
 ) -> str:
-    """One durable LINE package: canonical sheets, plan weekly rows, and PDFs."""
+    """One durable LINE package with optional resume download actions."""
     unique_profiles: dict[int, Mapping[str, object]] = {}
     for profile in profiles:
         staff_id = int(profile["id"])
@@ -216,8 +216,7 @@ def _caregiver_actions(token):
 def _customer_actions(token):
     return [
         _postback_button("接受此配對", token, "accepted", "#06C755"),
-        _postback_button("希望先聯絡", token, "contact_requested", "#1677FF"),
-        _postback_button("不接受此配對", token, "declined", "#888888"),
+        _postback_button("專人協助／進一步了解", token, "contact_requested", "#1677FF"),
     ]
 
 

@@ -82,8 +82,6 @@ export const OrderWorkbenchV2Page: FC = () => {
   const [selectedStage, setSelectedStage] = useState<CoreStageCode | null>(null);
   const [workbenchScope, setWorkbenchScope] = useState<OrderWorkbenchScope>('in_progress');
   const [search, setSearch] = useState('');
-  const [onlyBlocked, setOnlyBlocked] = useState(false);
-  const [onlyWarning, setOnlyWarning] = useState(false);
   const [projectionRefreshKey, setProjectionRefreshKey] = useState(0);
   const [selectedDrawer, setSelectedDrawer] = useState<{
     caseNo: string;
@@ -108,8 +106,6 @@ export const OrderWorkbenchV2Page: FC = () => {
       page_size: 200,
       lifecycle_scope: 'all',
       workbench_scope: workbenchScope,
-      blocker_only: onlyBlocked || undefined,
-      warning_only: onlyWarning || undefined,
       stage: workbenchScope === 'in_progress' ? selectedStage ?? undefined : undefined,
     };
 
@@ -145,8 +141,6 @@ export const OrderWorkbenchV2Page: FC = () => {
     return () => controller.abort();
   }, [
     workbenchScope,
-    onlyBlocked,
-    onlyWarning,
     projectionRefreshKey,
     selectedStage,
   ]);
@@ -197,8 +191,6 @@ export const OrderWorkbenchV2Page: FC = () => {
   const selectScope = (scope: OrderWorkbenchScope) => {
     setWorkbenchScope(scope);
     setSelectedStage(null);
-    setOnlyBlocked(false);
-    setOnlyWarning(false);
     setSelectedDrawer(null);
   };
 
@@ -286,16 +278,6 @@ export const OrderWorkbenchV2Page: FC = () => {
                 : '查閱取消訂單的案件紀錄與後續處理。'}
           </p>
         </div>
-{workbenchScope === 'in_progress' && <div className="order-v2-result-filters">
-        <label className="tracker-completed-toggle">
-          <input type="checkbox" checked={onlyBlocked} onChange={(event: ChangeEvent<HTMLInputElement>) => setOnlyBlocked(event.target.checked)} />
-          只看阻塞
-        </label>
-        <label className="tracker-completed-toggle">
-          <input type="checkbox" checked={onlyWarning} onChange={(event: ChangeEvent<HTMLInputElement>) => setOnlyWarning(event.target.checked)} />
-          只看提醒
-        </label>
-      </div>}
         <div className="order-v2-result-count" aria-live="polite">
           顯示 <strong>{displayedCount}</strong>
           <span>／ {selectedStage === null ? displayedCount : selectedStageCount} 筆</span>

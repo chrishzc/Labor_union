@@ -88,6 +88,21 @@ export const LineRuntimeAdminCandidatesResponseSchema = envelope(z.array(LineRun
 export const LineRuntimeTargetReceiptResponseSchema = envelope(LineRuntimeTargetReceiptSchema);
 export const LineRuntimeTargetPreviewResponseSchema = envelope(LineRuntimeTargetPreviewSchema);
 
+export const LineRuntimeTargetPreferencesSchema = z.strictObject({
+  customer_service: z.boolean(),
+  dispatch_matching: z.boolean(),
+  staff_leave_urgent: z.boolean(),
+  system_health: z.boolean(),
+  contract_signing: z.boolean(),
+});
+
+export const LineRuntimeTargetPreferencesResponsePayloadSchema = z.strictObject({
+  target_id: z.number().int().positive(),
+  preferences: LineRuntimeTargetPreferencesSchema,
+});
+
+export const LineRuntimeTargetPreferencesResponseSchema = envelope(LineRuntimeTargetPreferencesResponsePayloadSchema);
+
 export type LineRuntimeTarget = z.infer<typeof LineRuntimeTargetSchema>;
 export type LineRuntimeAdminCandidate = z.infer<typeof LineRuntimeAdminCandidateSchema>;
 export type LineRuntimeAdminTargetRequest = z.infer<typeof LineRuntimeAdminTargetRequestSchema>;
@@ -98,3 +113,4 @@ export type LineRuntimeTargetEnabledRequest = z.infer<typeof LineRuntimeTargetEn
 export type LineRuntimeTargetEnabledApplyRequest = z.infer<typeof LineRuntimeTargetEnabledApplyRequestSchema>;
 export type LineRuntimeTargetReceipt = z.infer<typeof LineRuntimeTargetReceiptSchema>;
 export type LineRuntimeTargetPreview = z.infer<typeof LineRuntimeTargetPreviewSchema>;
+export type LineRuntimeTargetPreferences = z.infer<typeof LineRuntimeTargetPreferencesSchema>;

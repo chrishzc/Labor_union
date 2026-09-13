@@ -10,6 +10,11 @@ from types import ModuleType, SimpleNamespace
 import unittest
 from unittest.mock import patch
 
+from domains.case_import.order_information import (
+    ORDER_INFORMATION_KEYS,
+    project_order_information,
+)
+
 
 class _Value:
     def __init__(self, *args, **kwargs) -> None:
@@ -126,6 +131,74 @@ class _FakeConnection:
         self.closed = True
 
 
+class SeedFixtureCanonicalMatchingFactsTests(unittest.TestCase):
+    def test_order_information_survey_fixture_populates_all_owner_projection_fields(self) -> None:
+        cursor = _FakeCursor()
+
+        seed_module._seed_order_information_survey(cursor, "CASE-1", 99)
+
+        insert = next(
+            (statement, parameters)
+            for statement, parameters in cursor.executions
+            if statement.startswith("INSERT INTO beclass_records")
+        )
+        payload = json.loads(insert[1][1])
+        self.assertEqual(len(payload), 15)
+        projection = project_order_information(payload)
+        self.assertEqual(projection.issues, {})
+        self.assertTrue(all(projection.values[key] for key in ORDER_INFORMATION_KEYS))
+        self.assertEqual(insert[1][0], "LINE-ORDER-INFO-CASE-1")
+        self.assertEqual(insert[1][2:], (99, "CASE-1"))
+
+    def test_order_information_survey_fixture_repairs_existing_bound_source(self) -> None:
+        cursor = _FakeCursor()
+        cursor.fetchone = lambda: {"id": 73}
+
+        seed_module._seed_order_information_survey(cursor, "CASE-1", 99)
+
+        update = cursor.executions[-1]
+        self.assertTrue(update[0].startswith("UPDATE beclass_records"))
+        self.assertEqual(update[1][1], 73)
+
+    def test_seed_writes_every_canonical_matching_fact_for_each_fixture_staff(self) -> None:
+        cursor = _FakeCursor()
+        cursor.fetchall = lambda: [
+            {"id": 41, "preference_key": "preferred_service_days"},
+            {"id": 42, "preference_key": "daily_service_hours"},
+        ]
+        profile_versions = iter(({"version": 1}, {"version": 1}))
+        cursor.fetchone = lambda: next(profile_versions)
+
+        seed_module._seed_staff_matching_facts(
+            cursor,
+            {"staff_1": 1, "staff_2": 2},
+        )
+
+        statements = [statement for statement, _parameters in cursor.executions]
+        self.assertEqual(sum("INSERT INTO staff_regions" in item for item in statements), 4)
+        self.assertEqual(sum("INSERT INTO staff_cooking_skills" in item for item in statements), 2)
+        self.assertEqual(
+            sum("INSERT INTO staff_matching_preference_profiles" in item for item in statements),
+            2,
+        )
+        preference_payloads = {
+            parameters[2]
+            for statement, parameters in cursor.executions
+            if "INSERT INTO staff_matching_preference_values" in statement
+        }
+        self.assertEqual(
+            preference_payloads,
+            {
+                json.dumps(
+                    {"minimum": 1, "maximum": 30},
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+                json.dumps({"values": [9]}, ensure_ascii=False, sort_keys=True),
+            },
+        )
+
+
 class _Dependency:
     def __init__(
         self,
@@ -181,6 +254,10 @@ class SeedFixtureResourceLifetimeTests(unittest.TestCase):
             seed_module, "_seed_post_bootstrap_owner_facts", lambda *_args: None
         )
         self.post_bootstrap.start()
+        self.matching_facts = patch.object(
+            seed_module, "_seed_staff_matching_facts", lambda *_args: None
+        )
+        self.matching_facts.start()
         self.readback = patch.object(
             seed_module,
             "_verify_fixture_readback",
@@ -198,6 +275,7 @@ class SeedFixtureResourceLifetimeTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.readback.stop()
+        self.matching_facts.stop()
         self.post_bootstrap.stop()
         self.environment.stop()
 
@@ -215,8 +293,7 @@ class SeedFixtureResourceLifetimeTests(unittest.TestCase):
         self.assertEqual(
             Counter(item["status"] for item in scenarios),
             Counter({
-                "待補件": 1,
-                "洽談中": 2,
+                "洽談中": 3,
                 "訂單成立": 1,
                 "服務中": 2,
                 "訂單完成": 2,
@@ -228,17 +305,91 @@ class SeedFixtureResourceLifetimeTests(unittest.TestCase):
             }),
         )
         by_case = {item["case_no"]: item for item in scenarios}
-        self.assertEqual(by_case["CASE-2026-M304"]["identity_status"], "補助市民")
-        self.assertEqual(len(by_case["CASE-2026-M306"]["staff_keys"]), 2)
-        self.assertEqual(by_case["CASE-2026-M307"]["payment"][2], "待結算")
-        self.assertEqual(by_case["CASE-2026-M308"]["payment"][2], "已結清")
-        self.assertEqual(by_case["CASE-2026-M310"]["assignment_status"], "cancelled")
+        self.assertEqual(by_case["115000101"]["status"], "洽談中")
+        self.assertEqual(by_case["115000104"]["identity_status"], "補助市民")
+        self.assertEqual(len(by_case["115000106"]["staff_keys"]), 2)
+        self.assertEqual(by_case["115000107"]["payment"][2], "待結算")
+        self.assertEqual(by_case["115000108"]["payment"][2], "已結清")
+        self.assertEqual(by_case["115000110"]["assignment_status"], "cancelled")
+        self.assertEqual(by_case["115000205"]["staff_keys"], ("staff_6",))
+
+    def test_matching_pool_primary_candidate_has_no_fixture_assignment_overlap(self) -> None:
+        matching_case = next(
+            item
+            for item in seed_module._CORE_STAGE_SCENARIOS
+            if item["case_no"] == "115000302"
+        )
+        matching_dates = set(
+            seed_module._inclusive_dates(
+                matching_case["start_date"], matching_case["end_date"]
+            )
+        )
+        conflicts: list[str] = []
+        for scenario in seed_module._ORDER_SCENARIOS:
+            staff_keys = tuple(scenario.get("staff_keys", ()))
+            statuses = tuple(scenario.get("assignment_statuses", ()))
+            periods = tuple(scenario.get("assignment_periods", ())) or tuple(
+                (
+                    scenario["start_date"],
+                    scenario["end_date"],
+                    scenario["service_days"],
+                )
+                for _staff_key in staff_keys
+            )
+            for index, (staff_key, period) in enumerate(
+                zip(staff_keys, periods, strict=True)
+            ):
+                status = (
+                    statuses[index]
+                    if statuses
+                    else scenario.get("assignment_status", "planned")
+                )
+                if (
+                    staff_key == "staff_1"
+                    and status not in {"cancelled", "replaced"}
+                    and matching_dates.intersection(
+                        seed_module._inclusive_dates(period[0], period[1])
+                    )
+                ):
+                    conflicts.append(str(scenario["case_no"]))
+        self.assertEqual(conflicts, [])
+
+    def test_fixture_staff_change_removes_derived_rows_before_assignment_update(self) -> None:
+        cursor = _FakeCursor()
+        cursor.fetchone = lambda: {"id": 71, "staff_id": 1}
+        scenario = next(
+            item
+            for item in seed_module._ORDER_SCENARIOS
+            if item["case_no"] == "115000205"
+        )
+
+        seed_module._seed_scenario_order(
+            cursor,
+            scenario,
+            99,
+            {f"staff_{index}": index for index in range(1, 7)},
+        )
+
+        statements = [statement for statement, _parameters in cursor.executions]
+        assignment_write_index = next(
+            index
+            for index, statement in enumerate(statements)
+            if statement.startswith("INSERT INTO case_staff_assignments")
+        )
+        child_delete_indexes = [
+            index
+            for index, statement in enumerate(statements)
+            if statement.startswith("DELETE FROM scheduling_")
+            or statement.startswith("DELETE FROM staff_schedule")
+        ]
+        self.assertEqual(len(child_delete_indexes), 3)
+        self.assertTrue(all(index < assignment_write_index for index in child_delete_indexes))
 
     def test_historical_restart_fixture_seeds_supported_service_mode(self) -> None:
         cursor = _FakeCursor()
         scenario = next(
             item for item in seed_module._ORDER_SCENARIOS
-            if item["case_no"] == "CASE-2026-H305"
+            if item["case_no"] == "115000205"
         )
 
         seed_module._seed_scenario_client(cursor, scenario)
@@ -288,9 +439,9 @@ class SeedFixtureResourceLifetimeTests(unittest.TestCase):
     def test_terminal_orders_are_seeded_from_their_real_pre_transition_state(self) -> None:
         by_case = {item["case_no"]: item for item in seed_module._ALL_ORDER_SCENARIOS}
         for case_no, expected_order_status, expected_assignment_status in (
-            ("CASE-2026-S12", "洽談中", "completed"),
-            ("CASE-2026-M310", "洽談中", "planned"),
-            ("CASE-2026-H304", "洽談中", "completed"),
+            ("115000312", "洽談中", "completed"),
+            ("115000110", "洽談中", "planned"),
+            ("115000204", "洽談中", "completed"),
         ):
             with self.subTest(case_no=case_no):
                 cursor = _FakeCursor()
@@ -358,7 +509,7 @@ class SeedFixtureResourceLifetimeTests(unittest.TestCase):
         self.assertIn("ON DUPLICATE KEY UPDATE payload=VALUES(payload)", statement)
         self.assertEqual(
             json.loads(parameters[-1]),
-            {"fixture": "core_stage", "delivery_status": "sent"},
+            {"fixture": "core_stage", "delivery_status": "manually_confirmed"},
         )
 
     def test_production_guard_runs_before_connection_acquisition(self) -> None:

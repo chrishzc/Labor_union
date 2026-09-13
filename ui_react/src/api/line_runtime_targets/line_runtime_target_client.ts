@@ -17,6 +17,8 @@ import {
   LineRuntimeTargetEnabledApplyRequestSchema,
   LineRuntimeTargetPreviewResponseSchema,
   LineRuntimeTargetReceiptResponseSchema,
+  LineRuntimeTargetPreferencesResponseSchema,
+  LineRuntimeTargetPreferencesSchema,
   LineRuntimeTargetsResponseSchema,
   type LineRuntimeAdminCandidate,
   type LineRuntimeAdminTargetRequest,
@@ -26,6 +28,7 @@ import {
   type LineRuntimeTarget,
   type LineRuntimeTargetEnabledRequest,
   type LineRuntimeTargetEnabledApplyRequest,
+  type LineRuntimeTargetPreferences,
   type LineRuntimeTargetPreview,
   type LineRuntimeTargetReceipt,
 } from './line_runtime_target_schemas';
@@ -165,9 +168,53 @@ export async function setLineRuntimeTargetEnabled(targetId: number, request: Lin
   return mutation('toggle', request.enabled ? 'enable' : 'disable', targetId, 'PATCH', `/api/v1/runtime/line-alert-targets/${targetId}`, LineRuntimeTargetEnabledApplyRequestSchema, request, source);
 }
 
+export async function getLineRuntimeTargetPreferences(
+  targetId: number,
+  source: LineRuntimeTargetOptions,
+): Promise<LineRuntimeTargetPreferences> {
+  if (!Number.isInteger(targetId) || targetId < 1) {
+    throw new LineRuntimeTargetError('LINE_RUNTIME_TARGET_VALIDATION', 'target_id 必須是正整數。');
+  }
+  try {
+    const raw = await transport.get<unknown>(
+      `/api/v1/runtime/line-alert-targets/${targetId}/preferences`,
+      requestOptions(source, source.correlationId),
+    );
+    const decoded = decode(LineRuntimeTargetPreferencesResponseSchema, raw);
+    return decoded.preferences;
+  } catch (error) {
+    throw mapLineRuntimeTargetError(error, 'list');
+  }
+}
+
+export async function updateLineRuntimeTargetPreferences(
+  targetId: number,
+  preferences: LineRuntimeTargetPreferences,
+  source: LineRuntimeTargetMutationOptions = {},
+): Promise<LineRuntimeTargetPreferences> {
+  if (!Number.isInteger(targetId) || targetId < 1) {
+    throw new LineRuntimeTargetError('LINE_RUNTIME_TARGET_VALIDATION', 'target_id 必須是正整數。');
+  }
+  try {
+    const validatedPrefs = validate(LineRuntimeTargetPreferencesSchema, preferences);
+    const correlationId = `pref-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
+    const raw = await transport.patch<unknown>(
+      `/api/v1/runtime/line-alert-targets/${targetId}/preferences`,
+      { preferences: validatedPrefs },
+      requestOptions(source, correlationId),
+    );
+    const decoded = decode(LineRuntimeTargetPreferencesResponseSchema, raw);
+    return decoded.preferences;
+  } catch (error) {
+    throw mapLineRuntimeTargetError(error, 'toggle');
+  }
+}
+
 export const lineRuntimeTargetClient = {
   listTargets: listLineRuntimeTargets,
   listAdminCandidates: listLineRuntimeAdminCandidates,
+  getPreferences: getLineRuntimeTargetPreferences,
+  updatePreferences: updateLineRuntimeTargetPreferences,
   previewAddAdminTarget: previewAddLineRuntimeAdminTarget,
   previewResetGroup: previewResetLineRuntimeGroup,
   previewSetEnabled: previewSetLineRuntimeTargetEnabled,

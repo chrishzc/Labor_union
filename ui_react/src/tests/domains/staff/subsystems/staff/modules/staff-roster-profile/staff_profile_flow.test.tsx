@@ -14,7 +14,6 @@ import { STAFF_QUALIFICATION_MASTER } from '../../../../../../fixtures/staff/sta
 
 describe('Staff roster profile flow', () => {
   beforeEach(() => {
-    vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(() => undefined);
     vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue(STAFF_PAGE_ONE);
     vi.spyOn(staffDirectoryClient, 'resetPagination').mockImplementation(() => undefined);
     vi.spyOn(staffLifecycleClient, 'query').mockResolvedValue(STAFF_LIFECYCLE_VIEW);
@@ -59,12 +58,12 @@ describe('Staff roster profile flow', () => {
 
     fireEvent.click(await screen.findByRole('tab', { name: '🎯 接案偏好設定' }));
     expect(screen.getByRole('tab', { name: '🎯 接案偏好設定' })).toHaveAttribute('aria-selected', 'true');
-    const resumeShortcut = await screen.findByRole('button', { name: '管理履歷 PDF' });
-    fireEvent.click(resumeShortcut);
+    fireEvent.click(await screen.findByRole('tab', { name: '✏️ 個資與履歷管理' }));
+    expect(screen.getByRole('tab', { name: '✏️ 個資與履歷管理' })).toHaveAttribute('aria-selected', 'true');
     expect(await screen.findByRole('heading', { name: '月嫂履歷 PDF' })).toBeInTheDocument();
-    await waitFor(() => expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalled());
-    expect(screen.getByText('已移至月嫂履歷 PDF。')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '個資、履歷與銀行帳戶管理' })).toBeInTheDocument();
 
+    fireEvent.click(screen.getByRole('tab', { name: '📋 完整資格主檔' }));
     const profile = await screen.findByTestId('staff-profile-detail');
     expect(within(profile).getByRole('group', { name: '身分證' })).toHaveTextContent('A123456789');
     expect(within(profile).getByRole('group', { name: '生日' })).toHaveTextContent('1980-01-02');

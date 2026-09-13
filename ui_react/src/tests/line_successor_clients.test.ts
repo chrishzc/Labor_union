@@ -273,4 +273,55 @@ describe('LINE runtime alert target successor', () => {
         outcomeUnknown: false,
       });
   });
+
+  it('getPreferences 與 updatePreferences 呼叫封閉路由並驗證 typed 偏好設定', async () => {
+    const preferencesFixture = {
+      customer_service: true,
+      dispatch_matching: true,
+      staff_leave_urgent: true,
+      system_health: false,
+      contract_signing: true,
+    };
+    const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (init?.method === 'PATCH') {
+        const body = JSON.parse(init.body as string);
+        return Promise.resolve(response({
+          success: true,
+          message: '更新成功',
+          data: {
+            target_id: 8,
+            preferences: body.preferences,
+          },
+          error: null,
+        }));
+      }
+      return Promise.resolve(response({
+        success: true,
+        message: '查詢成功',
+        data: {
+          target_id: 8,
+          preferences: preferencesFixture,
+        },
+        error: null,
+      }));
+    });
+    globalThis.fetch = fetchMock;
+
+    const loaded = await lineRuntimeTargetClient.getPreferences(8, { correlationId: 'pref-test-1' });
+    expect(loaded).toEqual(preferencesFixture);
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/runtime/line-alert-targets/8/preferences',
+      expect.objectContaining({ method: 'GET' }),
+    );
+
+    const updated = await lineRuntimeTargetClient.updatePreferences(8, {
+      ...preferencesFixture,
+      system_health: true,
+    });
+    expect(updated.system_health).toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/runtime/line-alert-targets/8/preferences',
+      expect.objectContaining({ method: 'PATCH' }),
+    );
+  });
 });

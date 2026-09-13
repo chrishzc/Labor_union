@@ -97,6 +97,9 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
       case_no: CASE, plan_id: 51, expected_version: expectedVersion,
       order_information_1_ready: true, order_information_2_ready: true,
       weekly_service_ready: true, weekly_service_row_count: 1,
+      order_information_1: [{ segment_id: 71, staff_id: 8892, staff_name: '月嫂甲', text: '訂單資訊－1\n總薪資：預估 48000 元' }],
+      order_information_2: [{ segment_id: 71, staff_id: 8892, staff_name: '月嫂甲', text: '訂單資訊－2\n飲食習慣：清淡' }],
+      weekly_service_rows: [{ serial_number: 1, staff_name: '月嫂甲', week_start_date: '2026-09-01', week_end_date: '2026-09-07', service_hours_per_day: 8, weekly_work_days: 5, weekly_hours: 40 }],
       caregiver_resumes: [{ staff_id: 8892, staff_name: '月嫂甲', ready: true, filename: 'resume-A.pdf', version: 3, blocker: null }],
       blockers: [], send_allowed: true,
     }));
@@ -210,7 +213,7 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
   it('重新開頁直接續辦既有方案並發送確認資訊，不建立替代方案或冒充 LINE 送達', async () => {
     contact.customer_profiles_status = null;
     const onObserved = await openExisting();
-    await screen.findByText('四項確認資訊均已就緒，可以一次寄送。');
+    await screen.findByText('必要確認資訊與履歷均已就緒，可以寄送。');
     fireEvent.change(screen.getByLabelText('方案 51 確認資訊備註'), { target: { value: '請核對完整確認資訊。' } });
     fireEvent.click(screen.getByRole('button', { name: '寄送確認資訊給客戶' }));
     await screen.findByText('確認資訊發送工作已建立：#81（狀態：等待系統寄送）；尚不代表 LINE 已送達。');
@@ -287,14 +290,14 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
     contact.customer_profiles_status = null;
     mocks.sendCustomerConfirmation.mockRejectedValueOnce(new Error('連線中斷，結果尚未確認。'));
     await openExisting();
-    await screen.findByText('四項確認資訊均已就緒，可以一次寄送。');
+    await screen.findByText('必要確認資訊與履歷均已就緒，可以寄送。');
     fireEvent.change(screen.getByLabelText('方案 51 確認資訊備註'), { target: { value: '核對完整確認資訊' } });
 
     const send = screen.getByRole('button', { name: '寄送確認資訊給客戶' });
     fireEvent.click(send);
     await screen.findByText('連線中斷，結果尚未確認。');
     fireEvent.click(screen.getByRole('button', { name: '再試一次' }));
-    await screen.findByText('四項確認資訊均已就緒，可以一次寄送。');
+    await screen.findByText('必要確認資訊與履歷均已就緒，可以寄送。');
     fireEvent.click(screen.getByRole('button', { name: '寄送確認資訊給客戶' }));
     await screen.findByText('確認資訊發送工作已建立：#81（狀態：等待系統寄送）；尚不代表 LINE 已送達。');
 
@@ -335,29 +338,39 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '寄送確認資訊給客戶' })).toBeEnabled());
     expect(screen.getByLabelText('方案 51 確認資訊備註')).toHaveValue('請查收正式推薦月嫂的完整確認資訊。');
     expect(screen.getByRole('list', { name: '本次確認資訊內容' })).toHaveTextContent('resume-A.pdf（版本 3）');
+    fireEvent.click(screen.getByText('預覽訂單資訊－1'));
+    expect(screen.getByText(/總薪資：預估 48000 元/)).toBeInTheDocument();
+    fireEvent.click(screen.getByText('預覽每周服務中說明'));
+    expect(screen.getByRole('table')).toHaveTextContent('40 小時');
     expect(screen.getByText('其他處理').closest('details')).not.toHaveAttribute('open');
     expect(screen.getByText('更換推薦人選').closest('details')).not.toHaveAttribute('open');
     expect(screen.queryByText(/^pending$/)).not.toBeInTheDocument();
   });
 
-  it('缺任一月嫂履歷時直接顯示 blocker 並禁止寄送', async () => {
+  it('缺月嫂履歷時顯示人工傳送提醒但仍允許寄送確認資訊', async () => {
     contact.customer_profiles_status = null;
     mocks.previewCustomerConfirmation.mockResolvedValue({
       case_no: CASE, plan_id: 51, expected_version: 4,
       order_information_1_ready: true, order_information_2_ready: true,
       weekly_service_ready: true, weekly_service_row_count: 1,
+      order_information_1: [{ segment_id: 71, staff_id: 8892, staff_name: '月嫂甲', text: '訂單資訊－1' }],
+      order_information_2: [{ segment_id: 71, staff_id: 8892, staff_name: '月嫂甲', text: '訂單資訊－2' }],
+      weekly_service_rows: [{ serial_number: 1, staff_name: '月嫂甲', week_start_date: '2026-09-01', week_end_date: '2026-09-07', service_hours_per_day: 8, weekly_work_days: 5, weekly_hours: 40 }],
       caregiver_resumes: [{
         staff_id: 8892, staff_name: '月嫂甲', ready: false, filename: null, version: null,
-        blocker: '月嫂 月嫂甲 尚未上傳履歷 PDF，請先至人員管理完成履歷上傳。',
+        blocker: '月嫂 月嫂甲 未附履歷；確認資訊仍可寄送，請由公會人員另行透過 LINE 傳送履歷。',
       }],
-      blockers: ['月嫂 月嫂甲 尚未上傳履歷 PDF，請先至人員管理完成履歷上傳。'],
-      send_allowed: false,
+      blockers: [],
+      send_allowed: true,
     });
 
     await openExisting();
 
-    expect(await screen.findByText('月嫂 月嫂甲 尚未上傳履歷 PDF，請先至人員管理完成履歷上傳。')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '寄送確認資訊給客戶' })).toBeDisabled();
-    expect(mocks.sendCustomerConfirmation).not.toHaveBeenCalled();
+    expect(await screen.findByText('未附；由公會另行 LINE 傳送')).toBeInTheDocument();
+    expect(screen.getByText('必要確認資訊已就緒；未附履歷請由公會人員另行透過 LINE 傳送。')).toBeInTheDocument();
+    const send = screen.getByRole('button', { name: '寄送確認資訊給客戶' });
+    expect(send).toBeEnabled();
+    fireEvent.click(send);
+    await waitFor(() => expect(mocks.sendCustomerConfirmation).toHaveBeenCalled());
   });
 });

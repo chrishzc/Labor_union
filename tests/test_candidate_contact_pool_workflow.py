@@ -104,7 +104,7 @@ def test_candidate_projection_ignores_irrelevant_legacy_event_payloads():
         },
     ]
 
-    willingness, reason, information = _candidate_projection(events)
+    willingness, reason, _, information = _candidate_projection(events)
 
     assert willingness == "pending"
     assert reason is None
@@ -198,7 +198,7 @@ def test_manual_information_preview_binds_candidate_version_and_evidence():
 
 def test_candidate_projection_preserves_manual_confirmation_as_distinct_delivery_fact():
     occurred_at = datetime(2026, 8, 24, 11, 0, tzinfo=timezone.utc)
-    _, _, information = _candidate_projection(
+    _, _, _, information = _candidate_projection(
         [
             {
                 "event_type": "info_1_sent",

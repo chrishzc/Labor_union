@@ -484,7 +484,7 @@ def send_matching_plan_customer_confirmation_route(
                     )
                 )
             ),
-            message="已建立完整客戶確認資訊的可靠發送任務",
+            message="已建立客戶確認資訊的可靠發送任務",
         )
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
@@ -822,6 +822,36 @@ def _customer_confirmation_preview_data(preview) -> dict[str, Any]:
         "order_information_2_ready": preview.order_information_2_ready,
         "weekly_service_ready": preview.weekly_service_ready,
         "weekly_service_row_count": preview.weekly_service_row_count,
+        "order_information_1": [
+            {
+                "segment_id": item.segment_id,
+                "staff_id": item.staff_id,
+                "staff_name": item.staff_name,
+                "text": item.text,
+            }
+            for item in preview.order_information_1
+        ],
+        "order_information_2": [
+            {
+                "segment_id": item.segment_id,
+                "staff_id": item.staff_id,
+                "staff_name": item.staff_name,
+                "text": item.text,
+            }
+            for item in preview.order_information_2
+        ],
+        "weekly_service_rows": [
+            {
+                "serial_number": item.serial_number,
+                "staff_name": item.staff_name,
+                "week_start_date": item.week_start_date,
+                "week_end_date": item.week_end_date,
+                "service_hours_per_day": item.service_hours_per_day,
+                "weekly_work_days": item.weekly_work_days,
+                "weekly_hours": item.weekly_hours,
+            }
+            for item in preview.weekly_service_rows
+        ],
         "caregiver_resumes": [
             {
                 "staff_id": item.staff_id,

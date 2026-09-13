@@ -7,7 +7,7 @@ import { candidateContactPoolClient as client } from '../../../../../../../api/s
 const { createInformationCommand } = vi.hoisted(() => ({ createInformationCommand: vi.fn() }));
 vi.mock('../../../../../../../api/scheduling/candidate_contact_pool_client', () => ({
   createCandidateInformationSendCommand: createInformationCommand,
-  candidateContactPoolClient: { query: vi.fn(), previewInformation: vi.fn(), sendInformation: vi.fn() },
+  candidateContactPoolClient: { query: vi.fn(), previewInformation: vi.fn(), previewWeeklyService: vi.fn(), sendInformation: vi.fn() },
 }));
 beforeEach(() => {
   vi.resetAllMocks();
@@ -24,6 +24,10 @@ beforeEach(() => {
     caseNo, candidateId, infoType, previewFingerprint, actor: 'operator-1', eventKey: `information-${infoType}-key`,
   }));
   vi.mocked(client.previewInformation).mockImplementation(async (caseNo, candidateId, kind) => ({ case_no: caseNo, candidate_id: candidateId, info_type: kind, staff_name: '測試月嫂', text: `資訊${kind}：服務報酬待確認`, preview_fingerprint: String(kind).repeat(64) }));
+  vi.mocked(client.previewWeeklyService).mockResolvedValue({ case_no: 'CASE-1', candidate_id: 3, rows: [{
+    serial_number: 1, staff_name: '測試月嫂', week_start_date: '2026-09-28', week_end_date: '2026-10-04',
+    service_hours_per_day: 8, weekly_work_days: 2, weekly_hours: 16,
+  }] });
   vi.mocked(client.sendInformation).mockImplementation(async (command) => {
     sentKind = command.infoType;
     return { status: 'queued', event_id: 4, line_task_id: 5 };
@@ -49,4 +53,14 @@ it('previews a candidate without creating or requiring an assignment', async () 
   fireEvent.click(screen.getByText('訂單資訊－2'));
   expect(await screen.findByText('資訊2：服務報酬待確認')).toBeInTheDocument();
   expect(client.sendInformation).not.toHaveBeenCalled();
+});
+
+it('previews weekly service in the same earlier information step', async () => {
+  render(<OrderInformationSheets caseNo="CASE-1" assignments={[]} />);
+  await screen.findByText('資訊1：服務報酬待確認');
+
+  fireEvent.click(screen.getByText('每周服務中說明'));
+
+  expect(await screen.findByRole('table')).toHaveTextContent('16 小時');
+  expect(client.previewWeeklyService).toHaveBeenCalledWith('CASE-1', 3, expect.objectContaining({ signal: expect.any(AbortSignal) }));
 });

@@ -309,6 +309,16 @@ class MySqlMatchingNotificationRepository:
             "caregiver_resumes": resumes,
         }
 
+    def candidate_weekly_service_preview(
+        self, case_no: str, candidate_id: int,
+    ) -> tuple[dict[str, object], ...]:
+        with self._connection.cursor() as cursor:
+            cursor.execute(_CANDIDATE_WEEKLY_FACTS_SQL, (candidate_id, case_no))
+            row = cursor.fetchone()
+        if not isinstance(row, Mapping):
+            raise LookupError("candidate contact not found")
+        return _proposed_weekly_rows((dict(row),))
+
     def customer_confirmation_preview(
         self, case_no: str, plan_id: int,
     ) -> dict[str, object]:
@@ -327,28 +337,31 @@ class MySqlMatchingNotificationRepository:
         if not 1 <= len(profiles) <= 4 or len(profiles) != len(segments):
             blockers.append("正式推薦月嫂資料不完整，請重新讀取目前方案。")
 
-        resumes, resume_blockers = _resume_previews(segments, resume_rows)
-        blockers.extend(resume_blockers)
+        resumes, _resume_notices = _resume_previews(segments, resume_rows)
 
         information = MySqlOrderInformationRepository(self._connection)
         info_1_ready = True
+        info_1 = ()
         try:
-            information.preview_matching_plan_information(case_no, plan_id, 1)
+            info_1 = information.preview_matching_plan_information(case_no, plan_id, 1)
         except (LookupError, ValueError):
             info_1_ready = False
             blockers.append("訂單資訊－1 尚未就緒。")
 
         info_2_ready = True
+        info_2 = ()
         try:
-            information.preview_matching_plan_information(case_no, plan_id, 2)
+            info_2 = information.preview_matching_plan_information(case_no, plan_id, 2)
         except (LookupError, ValueError):
             info_2_ready = False
             blockers.append("訂單資訊－2 尚未就緒。")
 
         weekly_row_count = 0
         weekly_ready = True
+        weekly = ()
         try:
-            weekly_row_count = len(_proposed_weekly_rows(segments))
+            weekly = _proposed_weekly_rows(segments)
+            weekly_row_count = len(weekly)
             if weekly_row_count == 0:
                 raise ValueError("weekly service projection is empty")
         except (LookupError, TypeError, ValueError):
@@ -360,6 +373,9 @@ class MySqlMatchingNotificationRepository:
             "order_information_2_ready": info_2_ready,
             "weekly_service_ready": weekly_ready,
             "weekly_service_row_count": weekly_row_count,
+            "order_information_1": info_1,
+            "order_information_2": info_2,
+            "weekly_service_rows": weekly,
             "caregiver_resumes": resumes,
             "blockers": tuple(dict.fromkeys(blockers)),
         }
@@ -574,18 +590,13 @@ def _profile_row(row):
 def _current_resumes(segments, rows):
     expected = {int(segment["staff_id"]): str(segment["staff_name"]) for segment in segments}
     by_staff = {int(row["staff_id"]): row for row in rows if row.get("file_id")}
-    missing = [name for staff_id, name in expected.items() if staff_id not in by_staff]
-    if missing:
-        raise MatchingCommunicationConflictError(
-            f"月嫂 {'、'.join(missing)} 尚未上傳履歷 PDF，請先至人員管理完成履歷上傳。"
-        )
     result = []
     for staff_id, name in expected.items():
-        row = by_staff[staff_id]
+        row = by_staff.get(staff_id)
+        if row is None:
+            continue
         if str(row.get("mime_type")) != "application/pdf":
-            raise MatchingCommunicationConflictError(
-                f"月嫂 {name} 的目前履歷不是 PDF，請先至人員管理重新上傳。"
-            )
+            continue
         result.append({
             "staff_id": staff_id, "staff_name": name,
             "file_id": str(row["file_id"]), "filename": str(row["filename"]),
@@ -602,7 +613,7 @@ def _resume_previews(segments, rows):
     for staff_id, name in expected.items():
         row = by_staff.get(staff_id)
         if row is None:
-            blocker = f"月嫂 {name} 尚未上傳履歷 PDF，請先至人員管理完成履歷上傳。"
+            blocker = f"月嫂 {name} 未附履歷；確認資訊仍可寄送，請由公會人員另行透過 LINE 傳送履歷。"
             result.append({
                 "staff_id": staff_id,
                 "staff_name": name,
@@ -614,7 +625,7 @@ def _resume_previews(segments, rows):
             blockers.append(blocker)
             continue
         if str(row.get("mime_type")) != "application/pdf":
-            blocker = f"月嫂 {name} 的目前履歷不是 PDF，請先至人員管理重新上傳。"
+            blocker = f"月嫂 {name} 未附有效 PDF 履歷；確認資訊仍可寄送，請由公會人員另行透過 LINE 傳送履歷。"
             result.append({
                 "staff_id": staff_id,
                 "staff_name": name,
@@ -667,7 +678,24 @@ def _json_ints(value):
         parsed = json.loads(value) if isinstance(value, str) else value
     except json.JSONDecodeError:
         parsed = ()
-    return tuple(int(item) for item in (parsed or ()) if str(item).isdigit() and 0 <= int(item) <= 6)
+    weekday_names = {
+        "週一": 0,
+        "週二": 1,
+        "週三": 2,
+        "週四": 3,
+        "週五": 4,
+        "週六": 5,
+        "週日": 6,
+        "週天": 6,
+    }
+    result = []
+    for item in parsed or ():
+        text = str(item).strip()
+        if text in weekday_names:
+            result.append(weekday_names[text])
+        elif text.isdigit() and 0 <= int(text) <= 6:
+            result.append(int(text))
+    return tuple(dict.fromkeys(result))
 
 
 def _json_dates(value):
@@ -771,6 +799,15 @@ FROM caregiver_matching_plans plan JOIN caregiver_matching_plan_segments segment
 JOIN orders ON orders.case_no=plan.case_no JOIN clients client ON client.id=orders.client_id
 JOIN staff ON staff.id=segment.staff_id WHERE plan.id=%s AND plan.case_no=%s
 ORDER BY segment.segment_order,segment.id"""
+_CANDIDATE_WEEKLY_FACTS_SQL = """SELECT entry.id AS segment_id,entry.staff_id,
+entry.service_start_date AS assigned_start_date,entry.service_end_date AS assigned_end_date,
+pool.case_no,client.name AS client_name,staff.name AS staff_name,staff.weekly_rest_days,
+orders.custom_rest_dates,orders.service_hours_per_day
+FROM caregiver_candidate_contact_entries entry
+JOIN caregiver_candidate_contact_pools pool ON pool.id=entry.pool_id
+JOIN orders ON orders.case_no=pool.case_no JOIN clients client ON client.id=orders.client_id
+JOIN staff ON staff.id=entry.staff_id
+WHERE entry.id=%s AND pool.case_no=%s AND entry.active_marker=1"""
 _CURRENT_RESUMES_SQL = """SELECT segment.staff_id,object.opaque_object_id AS file_id,object.filename,
 object.version_number,object.content_type AS mime_type
 FROM caregiver_matching_plan_segments segment

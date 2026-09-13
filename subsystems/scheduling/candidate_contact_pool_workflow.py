@@ -20,6 +20,7 @@ from domains.line.delivery import (
 from domains.line.identities import LineUserId
 from infrastructure.mysql.line_delivery_task_repository import MySqlLineDeliveryTaskRepository
 from infrastructure.mysql.order_information_repository import MySqlOrderInformationRepository
+from infrastructure.mysql.matching_notification_repository import MySqlMatchingNotificationRepository
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.identities import CorrelationId, IdempotencyKey
 from subsystems.scheduling.ports import unconfigured_connection_factory
@@ -682,6 +683,34 @@ def preview_information(case_no: str, candidate_id: int, info_type: int):
         _close(connection)
 
 
+def preview_weekly_service(case_no: str, candidate_id: int):
+    case_no = _required_text(case_no, "case_no", 50)
+    candidate_id = _positive_int(candidate_id, "candidate_id")
+    connection = get_connection()
+    try:
+        rows = MySqlMatchingNotificationRepository(
+            connection
+        ).candidate_weekly_service_preview(case_no, candidate_id)
+        return {
+            "case_no": case_no,
+            "candidate_id": candidate_id,
+            "rows": tuple(
+                {
+                    "serial_number": row["serial_number"],
+                    "staff_name": row["staff_name"],
+                    "week_start_date": row["week_start_date"],
+                    "week_end_date": row["week_end_date"],
+                    "service_hours_per_day": row["service_hours_per_day"],
+                    "weekly_work_days": row["weekly_work_days"],
+                    "weekly_hours": row["weekly_hours"],
+                }
+                for row in rows
+            ),
+        }
+    finally:
+        _close(connection)
+
+
 def preview_recontact_information(case_no: str, candidate_id: int, info_type: int):
     """Preview current Orders dates and recheck the original candidate against them."""
 
@@ -1041,12 +1070,15 @@ def _candidate_projection(events: list[dict[str, Any]]):
                     event["id"], "latest_willingness_event_id"
                 )
             continue
-        information[event_type[5]] = {
+        info_dict: dict[str, Any] = {
             "status": payload["delivery_status"],
             "sent_at": event["occurred_at"].isoformat(),
-            "event_id": event["id"],
-            "line_task_id": payload.get("line_task_id"),
         }
+        if "id" in event and event["id"] is not None:
+            info_dict["event_id"] = event["id"]
+        if payload.get("line_task_id") is not None:
+            info_dict["line_task_id"] = payload.get("line_task_id")
+        information[event_type[5]] = info_dict
     return willingness, reason, latest_willingness_event_id, information
 
 
@@ -1072,7 +1104,7 @@ def _typed_candidate_projection(
             event_id=_positive_int(value["event_id"], "information_event_id"),
             line_task_id=(
                 _positive_int(value["line_task_id"], "information_line_task_id")
-                if value["line_task_id"] is not None else None
+                if value.get("line_task_id") is not None else None
             ),
         )
     return (

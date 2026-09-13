@@ -5,6 +5,7 @@ Description: 投影 runtime health 並委派 LINE alert target 唯一 registrati
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from typing import Iterable, Protocol
 
@@ -180,6 +181,9 @@ class RuntimeLineAlertProjector:
         queued = 0
         for target in repository.pending_alert_targets(event_id):
             resolved_type, resolved_id = _resolve_target(target)
+            if not _category_enabled(target, "system_health"):
+                repository.append_alert_intent(event_id, int(target["id"]), None, "skipped", resolved_type, resolved_id, "category_system_health_disabled")
+                continue
             if not resolved_id or not _meets_threshold(str(target["resulting_status"]), str(target["minimum_status"])):
                 repository.append_alert_intent(event_id, int(target["id"]), None, "skipped", resolved_type, resolved_id, "target_unavailable_or_below_threshold")
                 continue
@@ -230,6 +234,24 @@ def _message(target):
     occurred = target["occurred_at_utc"]
     stamp = occurred.isoformat(sep=" ", timespec="seconds") if isinstance(occurred, datetime) else str(occurred)
     return f"【{heading}】\n元件：{target['check_name']}\n狀態：{status}\n說明：{target['message']}\n時間：{stamp} UTC"
+
+
+def _category_enabled(target, category: str) -> bool:
+    target_type = str(target.get("target_type") if hasattr(target, "get") else target[1])
+    raw_pref = target.get("preferences_json") if hasattr(target, "get") else None
+    if raw_pref:
+        if isinstance(raw_pref, str):
+            try:
+                parsed = json.loads(raw_pref)
+                if isinstance(parsed, dict) and category in parsed:
+                    return bool(parsed[category])
+            except Exception:
+                pass
+        elif isinstance(raw_pref, dict) and category in raw_pref:
+            return bool(raw_pref[category])
+    if category == "system_health":
+        return target_type == "admin_user"
+    return True
 
 
 __all__ = ["RuntimeLineAlertProjector", "register_group_alert_target"]

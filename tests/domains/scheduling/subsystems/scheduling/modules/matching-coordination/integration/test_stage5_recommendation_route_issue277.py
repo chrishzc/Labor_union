@@ -5,7 +5,35 @@ from types import SimpleNamespace
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api.routes import matches
+from api.routes import candidate_contact_pool, matches
+from api.schemas.candidate_contact_pool import CandidateWeeklyServicePreviewView
+
+
+def test_candidate_weekly_service_preview_route_returns_typed_rows(monkeypatch):
+    monkeypatch.setattr(
+        candidate_contact_pool.workflow,
+        "preview_weekly_service",
+        lambda case_no, candidate_id: {
+            "case_no": case_no,
+            "candidate_id": candidate_id,
+            "rows": [{
+                "serial_number": 1,
+                "staff_name": "王美華",
+                "week_start_date": "2026-10-05",
+                "week_end_date": "2026-10-11",
+                "service_hours_per_day": 8,
+                "weekly_work_days": 5,
+                "weekly_hours": 40,
+            }],
+        },
+    )
+
+    response = candidate_contact_pool.preview_candidate_weekly_service(
+        "CASE-001", 8, SimpleNamespace(username="reader")
+    )
+
+    assert isinstance(response.data, CandidateWeeklyServicePreviewView)
+    assert response.data.rows[0].weekly_hours == 40
 
 
 def test_stage5_customer_profiles_payload_reaches_route_without_request_validation(monkeypatch):
@@ -73,6 +101,9 @@ def test_stage5_customer_confirmation_preview_exposes_complete_send_readiness(mo
                 order_information_2_ready=True,
                 weekly_service_ready=True,
                 weekly_service_row_count=3,
+                order_information_1=(SimpleNamespace(segment_id=71, staff_id=12, staff_name="王小美", text="訂單資訊－1\n總薪資：預估 48000 元"),),
+                order_information_2=(SimpleNamespace(segment_id=71, staff_id=12, staff_name="王小美", text="訂單資訊－2\n飲食習慣：清淡"),),
+                weekly_service_rows=(SimpleNamespace(serial_number=1, staff_name="王小美", week_start_date="2026-09-14", week_end_date="2026-09-20", service_hours_per_day=8, weekly_work_days=5, weekly_hours=40),),
                 caregiver_resumes=(SimpleNamespace(
                     staff_id=12,
                     staff_name="王小美",
@@ -114,6 +145,9 @@ def test_stage5_customer_confirmation_preview_exposes_complete_send_readiness(mo
         "order_information_2_ready": True,
         "weekly_service_ready": True,
         "weekly_service_row_count": 3,
+        "order_information_1": [{"segment_id": 71, "staff_id": 12, "staff_name": "王小美", "text": "訂單資訊－1\n總薪資：預估 48000 元"}],
+        "order_information_2": [{"segment_id": 71, "staff_id": 12, "staff_name": "王小美", "text": "訂單資訊－2\n飲食習慣：清淡"}],
+        "weekly_service_rows": [{"serial_number": 1, "staff_name": "王小美", "week_start_date": "2026-09-14", "week_end_date": "2026-09-20", "service_hours_per_day": 8, "weekly_work_days": 5, "weekly_hours": 40}],
         "caregiver_resumes": [{
             "staff_id": 12,
             "staff_name": "王小美",

@@ -19,8 +19,9 @@ class MySqlStaffProfileQueryRepository:
     def fetch(self, staff_id: int) -> Mapping[str, object] | None:
         with self._connection.cursor() as cursor:
             cursor.execute(
-                f"SELECT {_PROFILE_COLUMNS},COALESCE((SELECT aggregate_version FROM staff_bank_account_states "
-                "WHERE staff_id=staff.id),0) AS bank_accounts_version FROM staff WHERE id=%s LIMIT 1",
+                f"SELECT {_PROFILE_COLUMNS},CAST(COALESCE((SELECT aggregate_version FROM staff_bank_account_states "
+                "WHERE staff_id=staff.id),0) AS UNSIGNED) AS bank_accounts_version "
+                "FROM staff WHERE id=%s LIMIT 1",
                 (staff_id,),
             )
             return cursor.fetchone()

@@ -699,35 +699,16 @@
   gap: 16px;
 }
 
-.staff-resume-shortcut {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 14px 16px;
-  border: 1.5px solid #fdba74;
-  border-radius: 12px;
-  background: #fff7ed;
+.staff-management-title {
+  margin: 0 0 4px;
+  color: #7c2d12;
+  font-size: 1.1rem;
 }
 
-.staff-resume-shortcut > div {
-  display: grid;
-  gap: 4px;
-}
-
-.staff-resume-shortcut strong {
-  color: #9a3412;
-}
-
-.staff-resume-shortcut span {
+.staff-management-description {
+  margin: 0 0 16px;
   color: #74593f;
-  font-size: 0.84rem;
-}
-
-.staff-resume-editor-anchor:focus {
-  outline: 3px solid rgba(249, 115, 22, 0.32);
-  outline-offset: 4px;
+  font-size: 0.88rem;
 }
 
 .staff-drawer-profile-banner {

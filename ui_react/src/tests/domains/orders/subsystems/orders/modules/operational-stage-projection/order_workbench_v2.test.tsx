@@ -209,6 +209,8 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
     });
 
     render(<OrderWorkbenchV2Page />);
+    expect(screen.queryByRole('checkbox', { name: '只看阻塞' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: '只看提醒' })).not.toBeInTheDocument();
 
     await waitFor(() => expect(screen.getByRole('button', { name: /10 排班\/服務 7/ })).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: /10 排班\/服務 7/ }));
@@ -235,7 +237,7 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
     expect(clientMocks.getCoreStageTimelines.mock.calls.at(-1)![0]).not.toHaveProperty('substatus_code');
   });
 
-  it('搜尋、阻塞、提醒與 進行中／完成／取消 都傳入正式 query', async () => {
+  it('搜尋與 進行中／完成／取消 都傳入正式 query，且不顯示無用途篩選', async () => {
     clientMocks.getCoreStageTimelines.mockImplementation(async (params: OrderCoreStageProjectionQueryParams) => {
       if (params.workbench_scope === 'completed') {
         return corePage([
@@ -276,18 +278,6 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
     });
     await waitFor(() => expect(clientMocks.getCoreStageTimelines).toHaveBeenLastCalledWith(
       expect.objectContaining({ case_no_search: 'CASE-SEARCH' }),
-      expect.any(Object),
-    ));
-
-    fireEvent.click(screen.getByRole('checkbox', { name: '只看阻塞' }));
-    await waitFor(() => expect(clientMocks.getCoreStageTimelines).toHaveBeenLastCalledWith(
-      expect.objectContaining({ blocker_only: true }),
-      expect.any(Object),
-    ));
-
-    fireEvent.click(screen.getByRole('checkbox', { name: '只看提醒' }));
-    await waitFor(() => expect(clientMocks.getCoreStageTimelines).toHaveBeenLastCalledWith(
-      expect.objectContaining({ blocker_only: true, warning_only: true }),
       expect.any(Object),
     ));
 

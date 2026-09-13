@@ -6,6 +6,10 @@ import {
   type CoreStageCode,
 } from '../../../../../../../api/orders/order_core_stage_projection_schemas';
 import { OrderWorkbenchV2Page } from '../../../../../../../pages/OrderWorkbenchV2Page';
+import {
+  calculateDailyServiceHours,
+  validateServiceTimeWindow,
+} from '../../../../../../../components/OrderTermsMutationPanel';
 
 const mocks = vi.hoisted(() => ({
   getCoreStageTimelines: vi.fn(),
@@ -324,5 +328,135 @@ describe('待辦看板 Beta 第 1 階訂單條款操作', () => {
     );
     expect(within(panel).queryByRole('button', { name: '確認套用訂單條款' })).not.toBeInTheDocument();
     expect(mocks.queryTerms).not.toHaveBeenCalled();
+  });
+
+  it('每日服務時數欄位為 readOnly，由開始與結束時間自動推算，且變更時段時自動更新時數', async () => {
+    const panel = await openTermsPanel();
+    const hoursInput = within(panel).getByLabelText('Beta 每日服務時數');
+    expect(hoursInput).toHaveAttribute('readonly');
+    // Fixture start: 08:00, end: 17:00 (offset 0) -> 9 hours
+    expect(hoursInput).toHaveValue(9);
+
+    // Change start time to 09:00 (09:00~17:00 = 8 hours)
+    fireEvent.change(within(panel).getByLabelText('Beta 每日開始時間'), { target: { value: '09:00' } });
+    expect(hoursInput).toHaveValue(8);
+
+    // Change end time to 18:00 (09:00~18:00 = 9 hours)
+    fireEvent.change(within(panel).getByLabelText('Beta 每日結束時間'), { target: { value: '18:00' } });
+    expect(hoursInput).toHaveValue(9);
+
+    // Change end time earlier than start time on same day -> invalid
+    fireEvent.change(within(panel).getByLabelText('Beta 每日結束時間'), { target: { value: '08:00' } });
+    expect(within(panel).getByText('每日結束時間須晚於開始時間；若為跨日服務，請將「結束日偏移」設為隔日。')).toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: '檢查訂單條款變更' })).toBeDisabled();
+
+    // Switch offset to 隔日 -> 09:00 to 08:00 (+1 day) = 23 hours
+    fireEvent.change(within(panel).getByLabelText('Beta 結束日偏移'), { target: { value: '1' } });
+    expect(hoursInput).toHaveValue(23);
+    expect(within(panel).queryByText('每日結束時間須晚於開始時間；若為跨日服務，請將「結束日偏移」設為隔日。')).not.toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: '檢查訂單條款變更' })).not.toBeDisabled();
+  });
+
+  it('當原始資料 service_hours_per_day 與時段不一致時，依開始結束時間自動修正顯示', async () => {
+    // Simulate raw query having service_hours_per_day: 8 while service_time is 09:00~18:00 (9 hours)
+    mocks.getOrderTerms.mockResolvedValueOnce({
+      ...orderTerms(),
+      terms: {
+        ...orderTerms().terms,
+        service_hours_per_day: 8,
+        service_time: { start_time: '09:00:00', end_time: '18:00:00', end_day_offset: 0 },
+      },
+    });
+    const panel = await openTermsPanel();
+    const hoursInput = within(panel).getByLabelText('Beta 每日服務時數');
+    // Auto-calculated from 09:00 to 18:00 -> 9 hours, not 8
+    expect(hoursInput).toHaveValue(9);
+  });
+
+  it('點擊常用班次快捷按鈕時可一鍵帶入起訖時段、偏移與計算時數', async () => {
+    const panel = await openTermsPanel();
+    const hoursInput = within(panel).getByLabelText('Beta 每日服務時數');
+    const startSelect = within(panel).getByLabelText('Beta 每日開始時間');
+    const endSelect = within(panel).getByLabelText('Beta 每日結束時間');
+    const offsetSelect = within(panel).getByLabelText('Beta 結束日偏移');
+
+    // Click 12h 白班
+    fireEvent.click(within(panel).getByRole('button', { name: '12h 白班 (08:00~20:00)' }));
+    expect(startSelect).toHaveValue('08:00');
+    expect(endSelect).toHaveValue('20:00');
+    expect(offsetSelect).toHaveValue('0');
+    expect(hoursInput).toHaveValue(12);
+
+    // Click 12h 夜班
+    fireEvent.click(within(panel).getByRole('button', { name: '12h 夜班 (20:00~08:00 隔日)' }));
+    expect(startSelect).toHaveValue('20:00');
+    expect(endSelect).toHaveValue('08:00');
+    expect(offsetSelect).toHaveValue('1');
+    expect(hoursInput).toHaveValue(12);
+
+    // Click 24h 全日
+    fireEvent.click(within(panel).getByRole('button', { name: '24h 全日 (09:00~09:00 隔日)' }));
+    expect(startSelect).toHaveValue('09:00');
+    expect(endSelect).toHaveValue('09:00');
+    expect(offsetSelect).toHaveValue('1');
+    expect(hoursInput).toHaveValue(24);
+  });
+});
+
+describe('calculateDailyServiceHours 純函式計算', () => {
+  it('同日標準時段計算正確整數時數', () => {
+    expect(calculateDailyServiceHours('09:00', '18:00', '0')).toBe(9);
+    expect(calculateDailyServiceHours('09:00', '17:00', '0')).toBe(8);
+    expect(calculateDailyServiceHours('08:30', '17:30', '0')).toBe(9);
+    expect(calculateDailyServiceHours('08:00', '20:00', '0')).toBe(12);
+  });
+
+  it('跨日（隔日）時段計算正確整數時數與 24 小時全日服務', () => {
+    expect(calculateDailyServiceHours('20:00', '08:00', '1')).toBe(12);
+    expect(calculateDailyServiceHours('09:00', '09:00', '1')).toBe(24);
+    expect(calculateDailyServiceHours('18:00', '06:00', '1')).toBe(12);
+  });
+
+  it('同日結束時間早於或等於開始時間時回傳 null', () => {
+    expect(calculateDailyServiceHours('18:00', '09:00', '0')).toBeNull();
+    expect(calculateDailyServiceHours('09:00', '09:00', '0')).toBeNull();
+  });
+
+  it('非整數小時回傳 null', () => {
+    expect(calculateDailyServiceHours('09:00', '17:30', '0')).toBeNull();
+    expect(calculateDailyServiceHours('08:00', '12:15', '0')).toBeNull();
+  });
+
+  it('單日時數超過 24 小時回傳 null', () => {
+    expect(calculateDailyServiceHours('08:00', '17:00', '1')).toBeNull();
+  });
+
+  it('格式錯誤或無效時間回傳 null', () => {
+    expect(calculateDailyServiceHours('', '18:00', '0')).toBeNull();
+    expect(calculateDailyServiceHours('invalid', '18:00', '0')).toBeNull();
+    expect(calculateDailyServiceHours('25:00', '18:00', '0')).toBeNull();
+  });
+});
+
+describe('validateServiceTimeWindow 驗證與提示', () => {
+  it('合法時段回傳 null', () => {
+    expect(validateServiceTimeWindow('09:00', '18:00', '0')).toBeNull();
+    expect(validateServiceTimeWindow('20:00', '08:00', '1')).toBeNull();
+  });
+
+  it('同日結束時間早於開始時間時提示隔日', () => {
+    expect(validateServiceTimeWindow('18:00', '09:00', '0')).toBe(
+      '每日結束時間須晚於開始時間；若為跨日服務，請將「結束日偏移」設為隔日。',
+    );
+  });
+
+  it('超過 24 小時提示上限', () => {
+    expect(validateServiceTimeWindow('08:00', '17:00', '1')).toBe('單日服務時數不可超過 24 小時。');
+  });
+
+  it('非整數小時提示計算時數', () => {
+    expect(validateServiceTimeWindow('09:00', '17:30', '0')).toBe(
+      '每日服務時數須為整數小時（目前計算為 8.5 小時）。',
+    );
   });
 });

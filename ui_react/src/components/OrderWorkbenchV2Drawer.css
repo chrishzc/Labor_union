@@ -562,11 +562,26 @@
   color: var(--md-sys-color-error);
 }
 
+.formal-recommendation-readiness > li[data-optional="true"] > :first-child {
+  color: var(--md-sys-color-warning);
+}
+
 .formal-recommendation-readiness > li > strong {
   overflow-wrap: anywhere;
   text-align: right;
   font-size: 0.78rem;
 }
+
+.formal-recommendation-package-previews { display: grid; gap: 8px; margin-top: 12px; }
+.formal-recommendation-package-previews details { border: 1px solid var(--md-sys-color-outline-variant); border-radius: 8px; background: var(--md-sys-color-surface); }
+.formal-recommendation-package-previews summary { cursor: pointer; padding: 10px 12px; font-weight: 700; color: var(--md-sys-color-primary); }
+.formal-recommendation-package-previews article { padding: 0 12px 12px; }
+.formal-recommendation-package-previews h5 { margin: 4px 0 8px; }
+.formal-recommendation-package-previews pre { margin: 0; white-space: pre-wrap; font: inherit; line-height: 1.6; }
+.formal-recommendation-weekly-preview { overflow-x: auto; padding: 0 12px 12px; }
+.formal-recommendation-weekly-preview table { width: 100%; border-collapse: collapse; }
+.formal-recommendation-weekly-preview th,
+.formal-recommendation-weekly-preview td { padding: 8px; border-bottom: 1px solid var(--md-sys-color-outline-variant); text-align: left; white-space: nowrap; }
 
 .formal-recommendation-blockers,
 .formal-recommendation-readiness-error {

@@ -75,6 +75,9 @@ class _MatchingRepository:
     def get_response_result(self, key, fingerprint):
         return None
 
+    def interaction(self, token_hash):
+        return getattr(self, "_interaction_data", None)
+
     def get_contact_state(self, case_no, plan_id, *, lock=False):
         return self.state
 
@@ -157,9 +160,13 @@ class _UnitOfWork:
         self,
         state,
         delivery_outcomes: tuple[LineDeliveryCommandOutcome, ...] = (),
+        active_group_targets=(),
     ) -> None:
         self.matching_notifications = _MatchingRepository(state)
         self.delivery_tasks = _DeliveryRepository(delivery_outcomes)
+        self.runtime_monitor = SimpleNamespace(
+            find_active_group_targets=lambda **_: active_group_targets
+        )
         self.committed = False
 
     def __enter__(self):
@@ -474,3 +481,45 @@ def test_assignment_conversion_mixed_delivery_outcomes_fail_without_commit() -> 
 
     assert len(unit_of_work.delivery_tasks.requests) == 2
     assert unit_of_work.committed is False
+
+
+def test_record_line_response_accepted_enqueues_match_success_group_notification() -> None:
+    state = _state()
+    unit_of_work = _UnitOfWork(
+        state,
+        active_group_targets=({"group_id": "C-group-target"},),
+    )
+    unit_of_work.matching_notifications._interaction_data = {
+        "case_no": "CASE-1",
+        "plan_id": 10,
+        "recipient_line_user_id": "U-customer",
+        "interaction_status": "active",
+        "expires_at_utc": datetime(2026, 8, 10, tzinfo=timezone.utc),
+        "action_scope": "customer_decision",
+        "segment_id": None,
+    }
+    application = MatchingNotificationApplication(
+        lambda: unit_of_work,
+        lambda: NOW,
+        availability_validator=lambda state: None,
+    )
+
+    result = application.record_line_response_in_unit_of_work(
+        unit_of_work,
+        token="token-12345678901234567890",
+        decision="accepted",
+        line_user_id=LineUserId("U-customer"),
+        idempotency_key=IdempotencyKey("matching-postback:event-1"),
+        correlation_id=CorrelationId("line-event:event-1"),
+        occurred_at=NOW,
+    )
+
+    assert result.customer_decision is CustomerMatchingDecision.ACCEPTED
+    assert len(unit_of_work.delivery_tasks.requests) == 2
+    customer_confirmation, group_notification = unit_of_work.delivery_tasks.requests
+    assert customer_confirmation.recipient.identity.value == "U-customer"
+    assert customer_confirmation.message_kind == LineMessageKind.TEXT
+    assert group_notification.recipient.recipient_type == LineRecipientType.GROUP
+    assert group_notification.recipient.identity.value == "C-group-target"
+    assert group_notification.message_kind == LineMessageKind.FLEX
+    assert "案件媒合成功通知" in group_notification.payload_json

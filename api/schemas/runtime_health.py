@@ -96,6 +96,29 @@ class AlertAdminCandidateResponse(BaseModel):
     line_linked: bool
 
 
+class AlertTargetPreferencesPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    customer_service: bool = True
+    dispatch_matching: bool = True
+    staff_leave_urgent: bool = True
+    system_health: bool = False
+    contract_signing: bool = True
+
+
+class AlertTargetPreferencesRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    preferences: AlertTargetPreferencesPayload
+
+
+class AlertTargetPreferencesResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    target_id: int = Field(gt=0)
+    preferences: AlertTargetPreferencesPayload
+
+
 class SafeReviewLinkIssueRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
 

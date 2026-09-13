@@ -265,7 +265,7 @@ class LineWebhookIdentityHandlers:
                 if result.root.ticket_id is not None
                 else ""
             )
-            message = f"已收到您的回饋，已通報工會專人客服{ticket}。"
+            message = f"已收到您的回饋{ticket}。AI 問答系統已暫時關閉，您可以直接在此對話中留下訊息等待真人客服回應。"
         unit_of_work.delivery_tasks.enqueue(
             _text_delivery(
                 line_user_id,

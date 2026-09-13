@@ -37,43 +37,60 @@ from subsystems.bootstrap.case_architecture_workflow import (
 
 
 _ORDER_SCENARIOS: tuple[dict[str, object], ...] = (
-    {"case_no": "CASE-2026-M301", "name": "陳雅婷", "phone": "0912345678", "identity_status": "一般市民", "status": "待補件", "service_days": 30, "start_date": "2026-10-05", "end_date": "2026-11-03", "staff_keys": (), "scenario": "待補件（LINE 舊客完整命中）"},
-    {"case_no": "CASE-2026-M302", "name": "林怡君", "phone": "0922333444", "identity_status": "一般市民", "status": "洽談中", "service_days": 20, "start_date": "2026-11-01", "end_date": "2026-11-20", "staff_keys": (), "scenario": "洽談中（資料完整）"},
-    {"case_no": "CASE-2026-M303", "name": "測試客戶－一般待收訂金", "phone": "0988000303", "identity_status": "一般市民", "status": "洽談中", "service_days": 20, "start_date": "2026-10-01", "end_date": "2026-10-20", "staff_keys": (), "payment": (54000, 0, "待收訂金"), "scenario": "洽談中－一般案／待收訂金"},
-    {"case_no": "CASE-2026-M304", "name": "測試客戶－補助成立", "phone": "0988000304", "identity_status": "補助市民", "status": "訂單成立", "service_days": 20, "start_date": "2026-11-05", "end_date": "2026-11-24", "staff_keys": (), "payment": (48000, 9600, "訂金已收"), "scenario": "訂單成立－補助案／訂金已收"},
-    {"case_no": "CASE-2026-M305", "name": "測試客戶－服務中", "phone": "0988000305", "identity_status": "一般市民", "status": "服務中", "service_days": 30, "start_date": "2026-09-01", "end_date": "2026-09-30", "actual_start_date": "2026-09-01", "staff_keys": ("staff_1",), "assignment_status": "active", "service_mode": "連續服務", "scenario": "服務中－單一月嫂"},
-    {"case_no": "CASE-2026-M306", "name": "測試客戶－多人服務", "phone": "0988000306", "identity_status": "一般市民", "status": "服務中", "service_days": 20, "start_date": "2026-09-05", "end_date": "2026-09-24", "actual_start_date": "2026-09-05", "staff_keys": ("staff_2", "staff_3"), "assignment_statuses": ("active", "planned"), "assignment_periods": (("2026-09-05", "2026-09-14", 10), ("2026-09-15", "2026-09-24", 10)), "service_mode": "連續服務", "scenario": "服務中－多月嫂分段"},
-    {"case_no": "CASE-2026-M307", "name": "測試客戶－完成待結算", "phone": "0988000307", "identity_status": "一般市民", "status": "訂單完成", "service_days": 20, "start_date": "2026-06-01", "end_date": "2026-06-20", "actual_start_date": "2026-06-01", "actual_end_date": "2026-06-20", "staff_keys": ("staff_1",), "assignment_status": "completed", "service_mode": "連續服務", "payment": (54000, 36000, "待結算"), "scenario": "訂單完成－待結算"},
-    {"case_no": "CASE-2026-M308", "name": "測試客戶－完成已結清", "phone": "0988000308", "identity_status": "一般市民", "status": "訂單完成", "service_days": 20, "start_date": "2026-05-01", "end_date": "2026-05-20", "actual_start_date": "2026-05-01", "actual_end_date": "2026-05-20", "staff_keys": ("staff_2",), "assignment_status": "completed", "service_mode": "連續服務", "payment": (54000, 54000, "已結清"), "scenario": "訂單完成－已結清"},
-    {"case_no": "CASE-2026-M309", "name": "測試客戶－成立前取消", "phone": "0988000309", "identity_status": "一般市民", "status": "訂單取消", "service_days": 20, "start_date": "2026-12-01", "end_date": "2026-12-20", "staff_keys": (), "cancel_reason": "測試情境：成立前取消", "scenario": "訂單取消－成立前"},
-    {"case_no": "CASE-2026-M310", "name": "測試客戶－排班後取消", "phone": "0988000310", "identity_status": "一般市民", "status": "訂單取消", "service_days": 20, "start_date": "2026-09-15", "end_date": "2026-10-04", "staff_keys": ("staff_6",), "assignment_status": "cancelled", "service_mode": "連續服務", "cancel_reason": "測試情境：成立並排班後取消", "scenario": "訂單取消－成立／排班後"},
-    {"case_no": "CASE-2026-H301", "name": "測試客戶－歷史完成待結算", "phone": "0988001301", "identity_status": "一般市民", "status": "歷史訂單－服務完成", "service_days": 20, "start_date": "2025-11-30", "end_date": "2025-12-19", "actual_start_date": "2025-12-01", "actual_end_date": "2025-12-20", "staff_keys": ("staff_1",), "assignment_status": "completed", "assignment_periods": (("2025-12-01", "2025-12-20", 20),), "service_mode": "連續服務", "payment": (54000, 36000, "歷史待結算"), "scenario": "歷史訂單－服務完成／待帳務結算"},
-    {"case_no": "CASE-2026-H302", "name": "測試客戶－歷史服務中", "phone": "0988001302", "identity_status": "一般市民", "status": "歷史訂單－服務中", "service_days": 20, "start_date": "2026-08-31", "end_date": "2026-09-19", "actual_start_date": "2026-09-01", "actual_end_date": "2026-09-20", "staff_keys": ("staff_5",), "assignment_status": "active", "assignment_periods": (("2026-09-01", "2026-09-20", 20),), "service_mode": "連續服務", "scenario": "歷史訂單－服務中／可重啟正常流程"},
-    {"case_no": "CASE-2026-H303", "name": "測試客戶－歷史服務完成", "phone": "0988001303", "identity_status": "補助市民", "status": "歷史訂單－服務完成", "service_days": 20, "start_date": "2025-09-30", "end_date": "2025-10-19", "actual_start_date": "2025-10-01", "actual_end_date": "2025-10-20", "staff_keys": ("staff_1", "staff_2"), "assignment_status": "completed", "assignment_periods": (("2025-10-01", "2025-10-10", 10), ("2025-10-11", "2025-10-20", 10)), "service_mode": "連續服務", "payment": (48000, 32000, "歷史待結算"), "scenario": "歷史訂單－服務完成／待結算"},
-    {"case_no": "CASE-2026-H304", "name": "測試客戶－歷史帳務完成", "phone": "0988001304", "identity_status": "一般市民", "status": "歷史訂單－帳務完成", "service_days": 20, "start_date": "2025-08-31", "end_date": "2025-09-19", "actual_start_date": "2025-09-01", "actual_end_date": "2025-09-20", "staff_keys": ("staff_2",), "assignment_status": "completed", "assignment_periods": (("2025-09-01", "2025-09-20", 20),), "service_mode": "連續服務", "payment": (54000, 54000, "已結清"), "scenario": "歷史訂單－帳務完成／唯讀"},
-    {"case_no": "CASE-2026-H305", "name": "測試客戶－歷史未服務", "phone": "0988001305", "identity_status": "一般市民", "status": "歷史訂單－未服務", "service_days": 20, "start_date": "2026-12-01", "end_date": "2026-12-20", "staff_keys": ("staff_1",), "service_mode": "連續服務", "scenario": "歷史訂單－未服務／可重啟正常流程"},
+    {"case_no": "115000101", "name": "陳雅婷", "phone": "0912345678", "identity_status": "一般市民", "status": "洽談中", "service_days": 30, "start_date": "2026-10-05", "end_date": "2026-11-03", "staff_keys": (), "scenario": "洽談中（LINE 舊客完整命中／Orders Terms 可測）"},
+    {"case_no": "115000102", "name": "林怡君", "phone": "0922333444", "identity_status": "一般市民", "status": "洽談中", "service_days": 20, "start_date": "2026-11-01", "end_date": "2026-11-20", "staff_keys": (), "scenario": "洽談中（資料完整）"},
+    {"case_no": "115000103", "name": "測試客戶－一般待收訂金", "phone": "0988000303", "identity_status": "一般市民", "status": "洽談中", "service_days": 20, "start_date": "2026-10-01", "end_date": "2026-10-20", "staff_keys": (), "payment": (54000, 0, "待收訂金"), "scenario": "洽談中－一般案／待收訂金"},
+    {"case_no": "115000104", "name": "測試客戶－補助成立", "phone": "0988000304", "identity_status": "補助市民", "status": "訂單成立", "service_days": 20, "start_date": "2026-11-05", "end_date": "2026-11-24", "staff_keys": (), "payment": (48000, 9600, "訂金已收"), "scenario": "訂單成立－補助案／訂金已收"},
+    {"case_no": "115000105", "name": "測試客戶－服務中", "phone": "0988000305", "identity_status": "一般市民", "status": "服務中", "service_days": 30, "start_date": "2026-09-01", "end_date": "2026-09-30", "actual_start_date": "2026-09-01", "staff_keys": ("staff_1",), "assignment_status": "active", "service_mode": "連續服務", "scenario": "服務中－單一月嫂"},
+    {"case_no": "115000106", "name": "測試客戶－多人服務", "phone": "0988000306", "identity_status": "一般市民", "status": "服務中", "service_days": 20, "start_date": "2026-09-05", "end_date": "2026-09-24", "actual_start_date": "2026-09-05", "staff_keys": ("staff_2", "staff_3"), "assignment_statuses": ("active", "planned"), "assignment_periods": (("2026-09-05", "2026-09-14", 10), ("2026-09-15", "2026-09-24", 10)), "service_mode": "連續服務", "scenario": "服務中－多月嫂分段"},
+    {"case_no": "115000107", "name": "測試客戶－完成待結算", "phone": "0988000307", "identity_status": "一般市民", "status": "訂單完成", "service_days": 20, "start_date": "2026-06-01", "end_date": "2026-06-20", "actual_start_date": "2026-06-01", "actual_end_date": "2026-06-20", "staff_keys": ("staff_1",), "assignment_status": "completed", "service_mode": "連續服務", "payment": (54000, 36000, "待結算"), "scenario": "訂單完成－待結算"},
+    {"case_no": "115000108", "name": "測試客戶－完成已結清", "phone": "0988000308", "identity_status": "一般市民", "status": "訂單完成", "service_days": 20, "start_date": "2026-05-01", "end_date": "2026-05-20", "actual_start_date": "2026-05-01", "actual_end_date": "2026-05-20", "staff_keys": ("staff_2",), "assignment_status": "completed", "service_mode": "連續服務", "payment": (54000, 54000, "已結清"), "scenario": "訂單完成－已結清"},
+    {"case_no": "115000109", "name": "測試客戶－成立前取消", "phone": "0988000309", "identity_status": "一般市民", "status": "訂單取消", "service_days": 20, "start_date": "2026-12-01", "end_date": "2026-12-20", "staff_keys": (), "cancel_reason": "測試情境：成立前取消", "scenario": "訂單取消－成立前"},
+    {"case_no": "115000110", "name": "測試客戶－排班後取消", "phone": "0988000310", "identity_status": "一般市民", "status": "訂單取消", "service_days": 20, "start_date": "2026-09-15", "end_date": "2026-10-04", "staff_keys": ("staff_6",), "assignment_status": "cancelled", "service_mode": "連續服務", "cancel_reason": "測試情境：成立並排班後取消", "scenario": "訂單取消－成立／排班後"},
+    {"case_no": "115000201", "name": "測試客戶－歷史完成待結算", "phone": "0988001301", "identity_status": "一般市民", "status": "歷史訂單－服務完成", "service_days": 20, "start_date": "2025-11-30", "end_date": "2025-12-19", "actual_start_date": "2025-12-01", "actual_end_date": "2025-12-20", "staff_keys": ("staff_1",), "assignment_status": "completed", "assignment_periods": (("2025-12-01", "2025-12-20", 20),), "service_mode": "連續服務", "payment": (54000, 36000, "歷史待結算"), "scenario": "歷史訂單－服務完成／待帳務結算"},
+    {"case_no": "115000202", "name": "測試客戶－歷史服務中", "phone": "0988001302", "identity_status": "一般市民", "status": "歷史訂單－服務中", "service_days": 20, "start_date": "2026-08-31", "end_date": "2026-09-19", "actual_start_date": "2026-09-01", "actual_end_date": "2026-09-20", "staff_keys": ("staff_5",), "assignment_status": "active", "assignment_periods": (("2026-09-01", "2026-09-20", 20),), "service_mode": "連續服務", "scenario": "歷史訂單－服務中／可重啟正常流程"},
+    {"case_no": "115000203", "name": "測試客戶－歷史服務完成", "phone": "0988001303", "identity_status": "補助市民", "status": "歷史訂單－服務完成", "service_days": 20, "start_date": "2025-09-30", "end_date": "2025-10-19", "actual_start_date": "2025-10-01", "actual_end_date": "2025-10-20", "staff_keys": ("staff_1", "staff_2"), "assignment_status": "completed", "assignment_periods": (("2025-10-01", "2025-10-10", 10), ("2025-10-11", "2025-10-20", 10)), "service_mode": "連續服務", "payment": (48000, 32000, "歷史待結算"), "scenario": "歷史訂單－服務完成／待結算"},
+    {"case_no": "115000204", "name": "測試客戶－歷史帳務完成", "phone": "0988001304", "identity_status": "一般市民", "status": "歷史訂單－帳務完成", "service_days": 20, "start_date": "2025-08-31", "end_date": "2025-09-19", "actual_start_date": "2025-09-01", "actual_end_date": "2025-09-20", "staff_keys": ("staff_2",), "assignment_status": "completed", "assignment_periods": (("2025-09-01", "2025-09-20", 20),), "service_mode": "連續服務", "payment": (54000, 54000, "已結清"), "scenario": "歷史訂單－帳務完成／唯讀"},
+    {"case_no": "115000205", "name": "測試客戶－歷史未服務", "phone": "0988001305", "identity_status": "一般市民", "status": "歷史訂單－未服務", "service_days": 20, "start_date": "2026-12-01", "end_date": "2026-12-20", "staff_keys": ("staff_6",), "service_mode": "連續服務", "scenario": "歷史訂單－未服務／可重啟正常流程"},
 )
 
 
 _CORE_STAGE_SCENARIOS: tuple[dict[str, object], ...] = (
-    {"case_no": "CASE-2026-S01", "name": "階段測試－01進件", "phone": "0988010001", "identity_status": "一般市民", "status": "待補件", "service_days": 20, "start_date": "2026-12-01", "end_date": "2026-12-20", "staff_keys": (), "stage_code": "intake_validation", "scenario": "核心階段01－進件與資料完整性驗證"},
-    {"case_no": "CASE-2026-S02", "name": "階段測試－02候選池", "phone": "0988010002", "identity_status": "一般市民", "status": "洽談中", "service_days": 20, "start_date": "2026-12-01", "end_date": "2026-12-20", "staff_keys": (), "stage_code": "matching_pool", "scenario": "核心階段02－建立候選月嫂池"},
-    {"case_no": "CASE-2026-S03", "name": "階段測試－03詢問", "phone": "0988010003", "identity_status": "一般市民", "status": "洽談中", "service_days": 20, "start_date": "2026-12-01", "end_date": "2026-12-20", "staff_keys": (), "stage_code": "caregiver_line_delivery", "scenario": "核心階段03－詢問月嫂接案意願"},
-    {"case_no": "CASE-2026-S04", "name": "階段測試－04回覆", "phone": "0988010004", "identity_status": "一般市民", "status": "洽談中", "service_days": 20, "start_date": "2026-12-01", "end_date": "2026-12-20", "staff_keys": (), "stage_code": "caregiver_willingness_reply", "scenario": "核心階段04－等待月嫂意願回覆"},
-    {"case_no": "CASE-2026-S05", "name": "階段測試－05推薦", "phone": "0988010005", "identity_status": "一般市民", "status": "洽談中", "service_days": 20, "start_date": "2026-12-01", "end_date": "2026-12-20", "staff_keys": (), "stage_code": "formal_recommendation", "scenario": "核心階段05－推薦月嫂給客戶確認"},
-    {"case_no": "CASE-2026-S06", "name": "階段測試－06送簽", "phone": "0988010006", "identity_status": "一般市民", "status": "洽談中", "service_days": 20, "start_date": "2026-12-01", "end_date": "2026-12-20", "staff_keys": (), "stage_code": "external_signing_dispatch", "scenario": "核心階段06－建立契約並送交外部簽署平台"},
-    {"case_no": "CASE-2026-S07", "name": "階段測試－07簽署", "phone": "0988010007", "identity_status": "一般市民", "status": "洽談中", "service_days": 20, "start_date": "2026-12-01", "end_date": "2026-12-20", "staff_keys": (), "stage_code": "external_signing_completion", "scenario": "核心階段07－雙方外部簽署完成"},
-    {"case_no": "CASE-2026-S08", "name": "階段測試－08定金", "phone": "0988010008", "identity_status": "一般市民", "status": "洽談中", "service_days": 20, "start_date": "2026-12-01", "end_date": "2026-12-20", "staff_keys": (), "stage_code": "deposit_settlement", "scenario": "核心階段08－客戶定金核銷"},
-    {"case_no": "CASE-2026-S09", "name": "階段測試－09日期", "phone": "0988010009", "identity_status": "一般市民", "status": "訂單成立", "service_days": 20, "start_date": "2026-12-01", "end_date": "2026-12-20", "staff_keys": (), "stage_code": "confirmed_service_dates", "scenario": "核心階段09－正式服務日期確認"},
-    {"case_no": "CASE-2026-S10", "name": "階段測試－10服務", "phone": "0988010010", "identity_status": "一般市民", "status": "服務中", "service_days": 20, "start_date": "2026-09-01", "end_date": "2026-09-20", "actual_start_date": "2026-09-01", "staff_keys": ("staff_4",), "assignment_status": "active", "service_mode": "連續服務", "stage_code": "formal_service", "scenario": "核心階段10－正式排班與服務履約"},
-    {"case_no": "CASE-2026-S11", "name": "階段測試－11完工", "phone": "0988010011", "identity_status": "一般市民", "status": "服務中", "service_days": 20, "start_date": "2024-01-01", "end_date": "2024-01-20", "actual_start_date": "2024-01-01", "actual_end_date": "2024-01-20", "staff_keys": ("staff_1",), "assignment_status": "completed", "service_mode": "連續服務", "stage_code": "service_completion", "scenario": "核心階段11－完工／服務完成確認"},
-    {"case_no": "CASE-2026-S12", "name": "階段測試－12客戶結算", "phone": "0988010012", "identity_status": "一般市民", "status": "訂單完成", "service_days": 20, "start_date": "2024-02-01", "end_date": "2024-02-20", "actual_start_date": "2024-02-01", "actual_end_date": "2024-02-20", "staff_keys": ("staff_1",), "assignment_status": "completed", "service_mode": "連續服務", "stage_code": "client_settlement", "scenario": "核心階段12－客戶端結算"},
-    {"case_no": "CASE-2026-S13", "name": "階段測試－13月嫂結算", "phone": "0988010013", "identity_status": "一般市民", "status": "訂單完成", "service_days": 20, "start_date": "2024-03-01", "end_date": "2024-03-20", "actual_start_date": "2024-03-01", "actual_end_date": "2024-03-20", "staff_keys": ("staff_2",), "assignment_status": "completed", "service_mode": "連續服務", "stage_code": "staff_payout", "scenario": "核心階段13－月嫂端結算"},
+    {"case_no": "115000301", "name": "階段測試－01進件", "phone": "0988010001", "identity_status": "一般市民", "status": "待補件", "service_days": 20, "start_date": "2026-12-01", "end_date": "2026-12-20", "staff_keys": (), "stage_code": "intake_validation", "scenario": "核心階段01－進件與資料完整性驗證"},
+    {"case_no": "115000302", "name": "階段測試－02候選池", "phone": "0988010002", "identity_status": "一般市民", "status": "洽談中", "service_days": 20, "start_date": "2026-12-01", "end_date": "2026-12-20", "staff_keys": (), "stage_code": "matching_pool", "scenario": "核心階段02－建立候選月嫂池"},
+    {"case_no": "115000303", "name": "階段測試－03詢問", "phone": "0988010003", "identity_status": "一般市民", "status": "洽談中", "service_days": 20, "start_date": "2026-12-01", "end_date": "2026-12-20", "staff_keys": (), "stage_code": "caregiver_line_delivery", "scenario": "核心階段03－詢問月嫂接案意願"},
+    {"case_no": "115000304", "name": "階段測試－04回覆", "phone": "0988010004", "identity_status": "一般市民", "status": "洽談中", "service_days": 20, "start_date": "2026-12-01", "end_date": "2026-12-20", "staff_keys": (), "stage_code": "caregiver_willingness_reply", "scenario": "核心階段04－等待月嫂意願回覆"},
+    {"case_no": "115000305", "name": "階段測試－05推薦", "phone": "0988010005", "identity_status": "一般市民", "status": "洽談中", "service_days": 20, "start_date": "2026-12-01", "end_date": "2026-12-20", "staff_keys": (), "stage_code": "formal_recommendation", "scenario": "核心階段05－推薦月嫂給客戶確認"},
+    {"case_no": "115000306", "name": "階段測試－06送簽", "phone": "0988010006", "identity_status": "一般市民", "status": "洽談中", "service_days": 20, "start_date": "2026-12-01", "end_date": "2026-12-20", "staff_keys": (), "stage_code": "external_signing_dispatch", "scenario": "核心階段06－建立契約並送交外部簽署平台"},
+    {"case_no": "115000307", "name": "階段測試－07簽署", "phone": "0988010007", "identity_status": "一般市民", "status": "洽談中", "service_days": 20, "start_date": "2026-12-01", "end_date": "2026-12-20", "staff_keys": (), "stage_code": "external_signing_completion", "scenario": "核心階段07－雙方外部簽署完成"},
+    {"case_no": "115000308", "name": "階段測試－08定金", "phone": "0988010008", "identity_status": "一般市民", "status": "洽談中", "service_days": 20, "start_date": "2026-12-01", "end_date": "2026-12-20", "staff_keys": (), "stage_code": "deposit_settlement", "scenario": "核心階段08－客戶定金核銷"},
+    {"case_no": "115000309", "name": "階段測試－09日期", "phone": "0988010009", "identity_status": "一般市民", "status": "訂單成立", "service_days": 20, "start_date": "2026-12-01", "end_date": "2026-12-20", "staff_keys": (), "stage_code": "confirmed_service_dates", "scenario": "核心階段09－正式服務日期確認"},
+    {"case_no": "115000310", "name": "階段測試－10服務", "phone": "0988010010", "identity_status": "一般市民", "status": "服務中", "service_days": 20, "start_date": "2026-09-01", "end_date": "2026-09-20", "actual_start_date": "2026-09-01", "staff_keys": ("staff_4",), "assignment_status": "active", "service_mode": "連續服務", "stage_code": "formal_service", "scenario": "核心階段10－正式排班與服務履約"},
+    {"case_no": "115000311", "name": "階段測試－11完工", "phone": "0988010011", "identity_status": "一般市民", "status": "服務中", "service_days": 20, "start_date": "2024-01-01", "end_date": "2024-01-20", "actual_start_date": "2024-01-01", "actual_end_date": "2024-01-20", "staff_keys": ("staff_1",), "assignment_status": "completed", "service_mode": "連續服務", "stage_code": "service_completion", "scenario": "核心階段11－完工／服務完成確認"},
+    {"case_no": "115000312", "name": "階段測試－12客戶結算", "phone": "0988010012", "identity_status": "一般市民", "status": "訂單完成", "service_days": 20, "start_date": "2024-02-01", "end_date": "2024-02-20", "actual_start_date": "2024-02-01", "actual_end_date": "2024-02-20", "staff_keys": ("staff_1",), "assignment_status": "completed", "service_mode": "連續服務", "stage_code": "client_settlement", "scenario": "核心階段12－客戶端結算"},
+    {"case_no": "115000313", "name": "階段測試－13月嫂結算", "phone": "0988010013", "identity_status": "一般市民", "status": "訂單完成", "service_days": 20, "start_date": "2024-03-01", "end_date": "2024-03-20", "actual_start_date": "2024-03-01", "actual_end_date": "2024-03-20", "staff_keys": ("staff_2",), "assignment_status": "completed", "service_mode": "連續服務", "stage_code": "staff_payout", "scenario": "核心階段13－月嫂端結算"},
 )
 
 
 _ALL_ORDER_SCENARIOS = _ORDER_SCENARIOS + _CORE_STAGE_SCENARIOS
 _SUPPORTED_SERVICE_MODES = frozenset({"週休1日", "週休2日", "連續服務"})
+_ORDER_INFORMATION_SURVEY_FIXTURE = {
+    "月子餐點調理喜好/飲食習慣": "葷食，可接受中藥調理",
+    "呈上題，若遇無法媒合到葷食服務人員時，是否可以接受蛋奶素服務人員？": "可以接受蛋奶素",
+    "2.餐飲含酒比例": "半酒",
+    "3.料理用油:(可接受種類)": "苦茶油、麻油及一般食用油",
+    "5媽咪有無過敏體質": "無已知過敏",
+    "特殊照護時應注意事項": "依客戶現場需求協助產婦與新生兒照護",
+    "餐點喜忌備註": "清淡少鹽",
+    "烹煮工具": "炒鍋、電鍋、微波爐",
+    "洗澡水準備": "一般溫水",
+    "哺乳方式": "母乳與配方奶混合",
+    "特殊計費:甲方同意需另支付當日薪資1倍予乙方。": "已知悉並同意",
+    "特殊計費:胎數": "單胞胎",
+    "透天服務樓層方式(會加收樓層費)": "大樓電梯，無樓層費",
+    "提供服務人員轎車停車位": "可提供停車位",
+    "服務時間內是否有其他寶寶": "無",
+}
 
 
 def _seed_scenario_client(cursor, scenario: dict[str, object]) -> int:
@@ -88,7 +105,10 @@ def _seed_scenario_client(cursor, scenario: dict[str, object]) -> int:
     if existing is None:
         cursor.execute("SELECT id FROM clients WHERE name=%s AND phone=%s", (name, phone))
         existing = cursor.fetchone()
-    values = (name, phone, str(scenario["identity_status"]), scenario["service_days"], str(scenario["start_date"])[:7], scenario["start_date"], f"LINE 訂單全情境測試：{scenario['scenario']}", service_mode, case_no)
+    start_date_val = scenario.get("start_date")
+    due_month_val = str(start_date_val)[:7] if start_date_val else "2026-12"
+    created_date_val = start_date_val if start_date_val else "2026-10-01"
+    values = (name, phone, str(scenario["identity_status"]), scenario["service_days"], due_month_val, start_date_val, f"LINE 訂單全情境測試：{scenario['scenario']}", service_mode, case_no)
     if existing:
         client_id = int(existing["id"])
         cursor.execute(
@@ -96,7 +116,7 @@ def _seed_scenario_client(cursor, scenario: dict[str, object]) -> int:
             "service_time='9小時日間',service_days=%s,due_month=%s,service_start_date=%s,notes=%s,residence_type='大樓',"
             "delivery_type='自然產',service_type=%s,baby_info='單胞胎',case_no=%s,line_user_id=NULL,"
             "admin_notes='ORDER_SCENARIO_FIXTURE',created_at=DATE_SUB(%s,INTERVAL 60 DAY) WHERE id=%s",
-            (*values, scenario["start_date"], client_id),
+            (*values, created_date_val, client_id),
         )
         return client_id
     cursor.execute(
@@ -104,7 +124,7 @@ def _seed_scenario_client(cursor, scenario: dict[str, object]) -> int:
         "notes,residence_type,delivery_type,service_type,baby_info,case_no,line_user_id,admin_notes,created_at) "
         "VALUES (%s,'female',%s,'新竹市','東區測試路100號',%s,'9小時日間',%s,%s,%s,%s,'大樓','自然產',%s,"
         "'單胞胎',%s,NULL,'ORDER_SCENARIO_FIXTURE',DATE_SUB(%s,INTERVAL 60 DAY))",
-        (*values, scenario["start_date"]),
+        (*values, created_date_val),
     )
     return int(cursor.lastrowid)
 
@@ -140,6 +160,8 @@ def _seed_scenario_order(cursor, scenario: dict[str, object], client_id: int, st
     assignment_periods = tuple(scenario.get("assignment_periods", ()))
     assignment_statuses = tuple(scenario.get("assignment_statuses", ()))
     for sequence, staff_key in enumerate(staff_keys, start=1):
+        candidate_key = f"line-order-scenario:{scenario['case_no']}:{sequence}"
+        target_staff_id = staff_ids[str(staff_key)]
         assigned_start, assigned_end, assigned_days = (
             assignment_periods[sequence - 1]
             if assignment_periods
@@ -153,12 +175,31 @@ def _seed_scenario_order(cursor, scenario: dict[str, object], client_id: int, st
             else scenario.get("assignment_status", "planned")
         )
         cursor.execute(
+            "SELECT id,staff_id FROM case_staff_assignments WHERE candidate_key=%s",
+            (candidate_key,),
+        )
+        existing_assignment = cursor.fetchone()
+        if (
+            existing_assignment is not None
+            and int(existing_assignment["staff_id"]) != target_staff_id
+        ):
+            assignment_id = int(existing_assignment["id"])
+            for derived_table in (
+                "scheduling_effective_occupancy",
+                "scheduling_buffer_days",
+                "staff_schedule",
+            ):
+                cursor.execute(
+                    f"DELETE FROM {derived_table} WHERE assignment_id=%s",
+                    (assignment_id,),
+                )
+        cursor.execute(
             "INSERT INTO case_staff_assignments (case_no,generation_id,candidate_key,staff_id,assignment_sequence,assigned_start_date,"
             "assigned_end_date,planned_hours,actual_hours,hourly_rate,status) VALUES (%s,NULL,%s,%s,%s,%s,%s,%s,%s,300,%s) "
-            "ON DUPLICATE KEY UPDATE staff_id=VALUES(staff_id),assigned_start_date=VALUES(assigned_start_date),"
+            "ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id),staff_id=VALUES(staff_id),assigned_start_date=VALUES(assigned_start_date),"
             "assigned_end_date=VALUES(assigned_end_date),planned_hours=VALUES(planned_hours),actual_hours=VALUES(actual_hours),"
             "hourly_rate=VALUES(hourly_rate),status=VALUES(status)",
-            (scenario["case_no"], f"line-order-scenario:{scenario['case_no']}:{sequence}", staff_ids[str(staff_key)], sequence, assigned_start, assigned_end, int(assigned_days) * 9, int(assigned_days) * 9 if assignment_status == "completed" else None, assignment_status),
+            (scenario["case_no"], candidate_key, target_staff_id, sequence, assigned_start, assigned_end, int(assigned_days) * 9, int(assigned_days) * 9 if assignment_status == "completed" else None, assignment_status),
         )
 
     payment = scenario.get("payment")
@@ -187,6 +228,35 @@ def _seed_scenario_order(cursor, scenario: dict[str, object], client_id: int, st
 
 def _sha(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _seed_order_information_survey(cursor, case_no: str, client_id: int) -> None:
+    """建立可由 Case Import owner 投影的去識別化 BeClass 測試來源。"""
+    cursor.execute(
+        "SELECT id FROM beclass_records WHERE client_id=%s AND bound_case_no=%s "
+        "ORDER BY id LIMIT 1",
+        (client_id, case_no),
+    )
+    existing = cursor.fetchone()
+    survey_details = json.dumps(
+        _ORDER_INFORMATION_SURVEY_FIXTURE,
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    if existing:
+        cursor.execute(
+            "UPDATE beclass_records SET survey_details=%s,"
+            "admin_notes='ORDER_INFORMATION_SURVEY_FIXTURE' WHERE id=%s",
+            (survey_details, existing["id"]),
+        )
+        return
+    cursor.execute(
+        "INSERT INTO beclass_records "
+        "(query_no,client_id,bound_case_no,name,phone,survey_details,admin_notes) "
+        "SELECT %s,id,case_no,name,phone,%s,'ORDER_INFORMATION_SURVEY_FIXTURE' "
+        "FROM clients WHERE id=%s AND case_no=%s",
+        (f"LINE-ORDER-INFO-{case_no}", survey_details, client_id, case_no),
+    )
 
 
 def _seed_import_receipt(cursor, case_no: str, client_id: int) -> None:
@@ -277,7 +347,7 @@ def _seed_contact_pool(cursor, case_no: str, staff_id: int, progress: str) -> No
                 pool_id,
                 candidate_id,
                 f"line-stage-contact:{case_no}:{staff_id}",
-                json.dumps({"fixture": "core_stage", "delivery_status": "sent"}),
+                json.dumps({"fixture": "core_stage", "delivery_status": "manually_confirmed"}),
             ),
         )
     if progress == "replied":
@@ -287,6 +357,66 @@ def _seed_contact_pool(cursor, case_no: str, staff_id: int, progress: str) -> No
             "VALUES (%s,%s,'willingness_changed',%s,'system:seed',%s)",
             (pool_id, candidate_id, f"line-stage-reply:{case_no}:{staff_id}", json.dumps({"willingness": "willing"})),
         )
+
+
+def _seed_staff_matching_facts(cursor, staff_ids: dict[str, int]) -> None:
+    """補齊媒合資格 Query 使用的 canonical Staff facts。"""
+    cursor.execute(
+        "SELECT id,preference_key FROM staff_matching_preference_definitions "
+        "WHERE preference_key IN ('preferred_service_days','daily_service_hours') "
+        "AND status='active' AND is_filterable=1"
+    )
+    definitions = {
+        str(row["preference_key"]): int(row["id"])
+        for row in (cursor.fetchall() or [])
+    }
+    required_definitions = {"preferred_service_days", "daily_service_hours"}
+    if set(definitions) != required_definitions:
+        raise RuntimeError(
+            "fixture matching preference definitions missing: "
+            f"{sorted(required_definitions - set(definitions))}"
+        )
+
+    for staff_id in sorted(set(staff_ids.values())):
+        for region in ("新竹市", "新竹縣"):
+            cursor.execute(
+                "INSERT INTO staff_regions (staff_id,region_name,custom_region_detail) "
+                "VALUES (%s,%s,NULL) ON DUPLICATE KEY UPDATE custom_region_detail=NULL",
+                (staff_id, region),
+            )
+        cursor.execute(
+            "INSERT INTO staff_cooking_skills (staff_id,skill_name,custom_skill_detail) "
+            "VALUES (%s,'葷食',NULL) ON DUPLICATE KEY UPDATE custom_skill_detail=NULL",
+            (staff_id,),
+        )
+        cursor.execute(
+            "INSERT INTO staff_matching_preference_profiles "
+            "(staff_id,version,created_by,updated_by) VALUES (%s,1,'system:seed','system:seed') "
+            "ON DUPLICATE KEY UPDATE version=GREATEST(version,1),updated_by='system:seed'",
+            (staff_id,),
+        )
+        cursor.execute(
+            "SELECT version FROM staff_matching_preference_profiles WHERE staff_id=%s",
+            (staff_id,),
+        )
+        profile_version = int(cursor.fetchone()["version"])
+        for preference_key, payload in (
+            ("preferred_service_days", {"minimum": 1, "maximum": 30}),
+            ("daily_service_hours", {"values": [9]}),
+        ):
+            cursor.execute(
+                "INSERT INTO staff_matching_preference_values "
+                "(staff_id,definition_id,value_json,profile_version,updated_by) "
+                "VALUES (%s,%s,%s,%s,'system:seed') ON DUPLICATE KEY UPDATE "
+                "value_json=VALUES(value_json),profile_version=VALUES(profile_version),"
+                "updated_by=VALUES(updated_by)",
+                (
+                    staff_id,
+                    definitions[preference_key],
+                    json.dumps(payload, ensure_ascii=False, sort_keys=True),
+                    profile_version,
+                ),
+            )
 
 
 def _seed_matching_plan(cursor, case_no: str) -> int:
@@ -1300,22 +1430,22 @@ def _seed_post_bootstrap_owner_facts(
     try:
         cursor = connection.cursor(pymysql.cursors.DictCursor)
         import_cases = {
-            "CASE-2026-M302", "CASE-2026-M303", "CASE-2026-M304", "CASE-2026-M305",
-            "CASE-2026-M306", "CASE-2026-M307", "CASE-2026-M308", "CASE-2026-M309",
-            "CASE-2026-M310",
-            *(f"CASE-2026-S{ordinal:02d}" for ordinal in range(2, 14)),
+            "115000102", "115000103", "115000104", "115000105",
+            "115000106", "115000107", "115000108", "115000109",
+            "115000110",
+            *(f"1150003{ordinal:02d}" for ordinal in range(2, 14)),
         }
         for case_no in sorted(import_cases):
             _seed_import_receipt(cursor, case_no, scenario_client_ids[case_no])
-        _seed_contact_pool(cursor, "CASE-2026-S02", staff_ids["staff_1"], "empty")
-        _seed_contact_pool(cursor, "CASE-2026-S03", staff_ids["staff_1"], "candidate")
-        _seed_contact_pool(cursor, "CASE-2026-S04", staff_ids["staff_1"], "contacted")
-        _seed_contact_pool(cursor, "CASE-2026-S05", staff_ids["staff_1"], "replied")
+        _seed_contact_pool(cursor, "115000302", staff_ids["staff_1"], "empty")
+        _seed_contact_pool(cursor, "115000303", staff_ids["staff_1"], "candidate")
+        _seed_contact_pool(cursor, "115000304", staff_ids["staff_1"], "contacted")
+        _seed_contact_pool(cursor, "115000305", staff_ids["staff_1"], "replied")
 
         fully_matched_cases = {
-            "CASE-2026-M303", "CASE-2026-M304", "CASE-2026-M305", "CASE-2026-M306",
-            "CASE-2026-M307", "CASE-2026-M308", "CASE-2026-M310",
-            *(f"CASE-2026-S{ordinal:02d}" for ordinal in range(6, 14)),
+            "115000103", "115000104", "115000105", "115000106",
+            "115000107", "115000108", "115000110",
+            *(f"1150003{ordinal:02d}" for ordinal in range(6, 14)),
         }
         by_case = {str(item["case_no"]): item for item in _ALL_ORDER_SCENARIOS}
         plans = {}
@@ -1323,20 +1453,20 @@ def _seed_post_bootstrap_owner_facts(
             staff_keys = tuple(by_case[case_no].get("staff_keys", ()))
             evidence_staff_id = staff_ids[str(staff_keys[0])] if staff_keys else staff_ids["staff_1"]
             plans[case_no] = _seed_accepted_matching_evidence(cursor, case_no, evidence_staff_id)
-        signing_handoff_cases = fully_matched_cases - {"CASE-2026-S06"}
-        final_contract_cases = signing_handoff_cases - {"CASE-2026-S07"}
+        signing_handoff_cases = fully_matched_cases - {"115000306"}
+        final_contract_cases = signing_handoff_cases - {"115000307"}
         for case_no in sorted(signing_handoff_cases):
             completed = case_no in final_contract_cases
             _seed_external_signing(cursor, case_no, plans[case_no], completed=completed)
 
-        deposit_open_cases = {"CASE-2026-M303", "CASE-2026-S08"}
+        deposit_open_cases = {"115000103", "115000308"}
         deposit_settled_cases = final_contract_cases - deposit_open_cases
         for case_no in sorted(deposit_open_cases):
             _seed_client_obligation(cursor, case_no, "deposit", settled=False)
         for case_no in sorted(deposit_settled_cases):
             _seed_client_obligation(cursor, case_no, "deposit", settled=True)
-        fully_client_settled_cases = {"CASE-2026-M308", "CASE-2026-S13"}
-        for case_no in sorted(deposit_settled_cases - {"CASE-2026-M310"}):
+        fully_client_settled_cases = {"115000108", "115000313"}
+        for case_no in sorted(deposit_settled_cases - {"115000110"}):
             for obligation_type in ("first", "second"):
                 _seed_client_obligation(
                     cursor,
@@ -1348,10 +1478,10 @@ def _seed_post_bootstrap_owner_facts(
             _seed_contract_completion(cursor, case_no)
 
         scheduled_cases = {
-            "CASE-2026-M305", "CASE-2026-M306", "CASE-2026-M307", "CASE-2026-M308",
-            "CASE-2026-M310", "CASE-2026-H301", "CASE-2026-H302", "CASE-2026-H303",
-            "CASE-2026-H304", "CASE-2026-H305", "CASE-2026-S10", "CASE-2026-S11",
-            "CASE-2026-S12", "CASE-2026-S13",
+            "115000105", "115000106", "115000107", "115000108",
+            "115000110", "115000201", "115000202", "115000203",
+            "115000204", "115000205", "115000310", "115000311",
+            "115000312", "115000313",
         }
         assignments_by_case = {
             case_no: _seed_service_schedule(cursor, by_case[case_no])
@@ -1359,30 +1489,30 @@ def _seed_post_bootstrap_owner_facts(
         }
 
         for case_no in (
-            "CASE-2026-M305", "CASE-2026-M306", "CASE-2026-M307", "CASE-2026-M308",
-            "CASE-2026-S10", "CASE-2026-S11", "CASE-2026-S12", "CASE-2026-S13",
+            "115000105", "115000106", "115000107", "115000108",
+            "115000310", "115000311", "115000312", "115000313",
         ):
             _seed_service_start(cursor, case_no)
-        for case_no in ("CASE-2026-M307", "CASE-2026-M308", "CASE-2026-S12", "CASE-2026-S13"):
+        for case_no in ("115000107", "115000108", "115000312", "115000313"):
             _seed_completion_receipt(cursor, case_no)
         for case_no, settled in (
-            ("CASE-2026-M307", False),
-            ("CASE-2026-M308", True),
-            ("CASE-2026-S12", True),
-            ("CASE-2026-S13", False),
+            ("115000107", False),
+            ("115000108", True),
+            ("115000312", True),
+            ("115000313", False),
         ):
             assignment_id = assignments_by_case[case_no][0]
             cursor.execute("SELECT staff_id FROM case_staff_assignments WHERE id=%s", (assignment_id,))
             staff_id = int(cursor.fetchone()["staff_id"])
             _seed_staff_obligation(cursor, case_no, assignment_id, staff_id, settled=settled)
 
-        _seed_cancellation_event(cursor, "CASE-2026-M309", "洽談中", "測試情境：成立前取消")
-        _seed_cancellation_event(cursor, "CASE-2026-M310", "訂單成立", "測試情境：成立並排班後取消")
+        _seed_cancellation_event(cursor, "115000109", "洽談中", "測試情境：成立前取消")
+        _seed_cancellation_event(cursor, "115000110", "訂單成立", "測試情境：成立並排班後取消")
 
         for scenario in _ORDER_SCENARIOS:
             if str(scenario["status"]).startswith("歷史訂單"):
                 _seed_historical_adoption(cursor, scenario)
-        _seed_historical_accounting_completion(cursor, "CASE-2026-H304")
+        _seed_historical_accounting_completion(cursor, "115000204")
         connection.commit()
     except Exception:
         connection.rollback()
@@ -1402,6 +1532,18 @@ def _verify_fixture_readback() -> dict[str, dict[str, int]]:
     from subsystems.orders.core_stage_filter_query import (
         CoreStageProjectionFilterQuery,
         query_core_stage_page,
+    )
+    from infrastructure.mysql.scheduling_eligibility_collision_repository import (
+        MySqlSchedulingEligibilityCollisionRepository,
+    )
+    from shared_kernel.clock import SystemBusinessClock
+    from subsystems.scheduling.eligibility_collision_query import (
+        AvailabilityState,
+        CoverageState,
+        EligibilityState,
+        QualificationCheckState,
+        SchedulingEligibilityCollisionQuery,
+        SchedulingEligibilityCollisionQueryWorkflow,
     )
 
     dependency = get_orders_stage_projection_application()
@@ -1430,7 +1572,7 @@ def _verify_fixture_readback() -> dict[str, dict[str, int]]:
         item.case_no: item
         for page in (active, completed, cancelled)
         for item in page.items
-        if item.case_no.startswith("CASE-2026-")
+        if item.case_no.startswith("115000")
     }
     stage_counts = {str(item["stage_code"]): 0 for item in _CORE_STAGE_SCENARIOS}
     for item in fixture_items.values():
@@ -1492,16 +1634,16 @@ def _verify_fixture_readback() -> dict[str, dict[str, int]]:
         cursor.execute(
             "SELECT a.case_no,COUNT(DISTINCT s.work_date) AS scheduled_days,MAX(a.generation_id IS NULL) AS missing_generation "
             "FROM case_staff_assignments a LEFT JOIN staff_schedule s ON s.assignment_id=a.id AND s.generation_id=a.generation_id "
-            "AND s.effective_marker=1 AND s.is_work_day=1 WHERE a.case_no LIKE 'CASE-2026-%' "
+            "AND s.effective_marker=1 AND s.is_work_day=1 WHERE a.case_no LIKE '115000%' "
             "AND a.status NOT IN ('cancelled','replaced') GROUP BY a.case_no"
         )
         schedule_roots = {row["case_no"]: row for row in cursor.fetchall()}
         schedule_mismatches = {
             case_no: schedule_roots.get(case_no)
             for case_no in {
-                "CASE-2026-M305", "CASE-2026-M306", "CASE-2026-M307", "CASE-2026-M308",
-                "CASE-2026-H301", "CASE-2026-H302", "CASE-2026-H303", "CASE-2026-H304",
-                "CASE-2026-H305", "CASE-2026-S10", "CASE-2026-S11", "CASE-2026-S12", "CASE-2026-S13",
+                "115000105", "115000106", "115000107", "115000108",
+                "115000201", "115000202", "115000203", "115000204",
+                "115000205", "115000310", "115000311", "115000312", "115000313",
             }
             if schedule_roots.get(case_no) is None
             or int(schedule_roots[case_no]["scheduled_days"]) != int(next(item["service_days"] for item in _ALL_ORDER_SCENARIOS if item["case_no"] == case_no))
@@ -1511,16 +1653,16 @@ def _verify_fixture_readback() -> dict[str, dict[str, int]]:
             "SELECT a.case_no,COUNT(DISTINCT occupancy.occupancy_date) AS occupied_days "
             "FROM case_staff_assignments a JOIN scheduling_effective_occupancy occupancy "
             "ON occupancy.assignment_id=a.id AND occupancy.generation_id=a.generation_id "
-            "WHERE a.case_no LIKE 'CASE-2026-%' AND a.status NOT IN ('cancelled','replaced') "
+            "WHERE a.case_no LIKE '115000%' AND a.status NOT IN ('cancelled','replaced') "
             "GROUP BY a.case_no"
         )
         occupancy_roots = {row["case_no"]: int(row["occupied_days"]) for row in cursor.fetchall()}
         occupancy_mismatches = {
             case_no: occupancy_roots.get(case_no)
             for case_no in {
-                "CASE-2026-M305", "CASE-2026-M306", "CASE-2026-M307", "CASE-2026-M308",
-                "CASE-2026-H301", "CASE-2026-H302", "CASE-2026-H303", "CASE-2026-H304",
-                "CASE-2026-H305", "CASE-2026-S10", "CASE-2026-S11", "CASE-2026-S12", "CASE-2026-S13",
+                "115000105", "115000106", "115000107", "115000108",
+                "115000201", "115000202", "115000203", "115000204",
+                "115000205", "115000310", "115000311", "115000312", "115000313",
             }
             if occupancy_roots.get(case_no) != int(next(
                 item["service_days"] for item in _ALL_ORDER_SCENARIOS if item["case_no"] == case_no
@@ -1528,39 +1670,72 @@ def _verify_fixture_readback() -> dict[str, dict[str, int]]:
         }
         cursor.execute(
             "SELECT case_no,after_status FROM order_lifecycle_state_events WHERE case_no IN "
-            "('CASE-2026-M307','CASE-2026-M308','CASE-2026-M309','CASE-2026-M310','CASE-2026-H301',"
-            "'CASE-2026-H303','CASE-2026-H304','CASE-2026-S12','CASE-2026-S13')"
+            "('115000107','115000108','115000109','115000110','115000201','115000202',"
+            "'115000203','115000204','115000205','115000312','115000313')"
         )
         lifecycle_events = {(row["case_no"], row["after_status"]) for row in cursor.fetchall()}
         required_events = {
-            ("CASE-2026-M307", "訂單完成"), ("CASE-2026-M308", "訂單完成"),
-            ("CASE-2026-M309", "訂單取消"), ("CASE-2026-M310", "訂單取消"),
-            ("CASE-2026-H301", "歷史訂單－服務完成"),
-            ("CASE-2026-H302", "歷史訂單－服務中"),
-            ("CASE-2026-H303", "歷史訂單－服務完成"),
-            ("CASE-2026-H304", "歷史訂單－服務完成"),
-            ("CASE-2026-H304", "歷史訂單－帳務完成"),
-            ("CASE-2026-H305", "歷史訂單－未服務"),
-            ("CASE-2026-S12", "訂單完成"), ("CASE-2026-S13", "訂單完成"),
+            ("115000107", "訂單完成"), ("115000108", "訂單完成"),
+            ("115000109", "訂單取消"), ("115000110", "訂單取消"),
+            ("115000201", "歷史訂單－服務完成"),
+            ("115000202", "歷史訂單－服務中"),
+            ("115000203", "歷史訂單－服務完成"),
+            ("115000204", "歷史訂單－服務完成"),
+            ("115000204", "歷史訂單－帳務完成"),
+            ("115000205", "歷史訂單－未服務"),
+            ("115000312", "訂單完成"), ("115000313", "訂單完成"),
         }
         cursor.execute(
-            "SELECT (EXISTS(SELECT 1 FROM historical_service_day_projections WHERE case_no='CASE-2026-H304') "
-            "+ EXISTS(SELECT 1 FROM historical_client_payment_projections WHERE case_no='CASE-2026-H304') "
-            "+ EXISTS(SELECT 1 FROM historical_staff_payout_projections WHERE case_no='CASE-2026-H304')) AS root_count"
+            "SELECT (EXISTS(SELECT 1 FROM historical_service_day_projections WHERE case_no='115000204') "
+            "+ EXISTS(SELECT 1 FROM historical_client_payment_projections WHERE case_no='115000204') "
+            "+ EXISTS(SELECT 1 FROM historical_staff_payout_projections WHERE case_no='115000204')) AS root_count"
         )
         historical_accounting_root_count = int(cursor.fetchone()["root_count"])
+        cursor.execute(
+            "SELECT id FROM staff WHERE name='王美華' AND identity_card='A234567890'"
+        )
+        matching_staff = cursor.fetchone()
+        if matching_staff is None:
+            raise RuntimeError("fixture matching staff missing: 王美華")
+        clock = SystemBusinessClock()
+        eligibility_projection = SchedulingEligibilityCollisionQueryWorkflow(
+            MySqlSchedulingEligibilityCollisionRepository(connection),
+            clock,
+        ).query(
+            SchedulingEligibilityCollisionQuery(
+                "115000302",
+                clock.today(),
+                int(matching_staff["id"]),
+            )
+        )
+        matching_result = eligibility_projection.staff[0]
+        matching_candidate_ready = (
+            matching_result.eligibility is EligibilityState.ELIGIBLE
+            and matching_result.availability is AvailabilityState.AVAILABLE
+            and matching_result.coverage.status is CoverageState.COMPLETE
+            and all(
+                check.status is QualificationCheckState.PASS
+                for check in matching_result.qualification_checks
+            )
+            and not matching_result.collisions
+            and not matching_result.partial_data
+        )
         if (
             schedule_mismatches
             or occupancy_mismatches
             or not required_events.issubset(lifecycle_events)
             or historical_accounting_root_count != 3
+            or not matching_candidate_ready
         ):
             raise RuntimeError(
                 "fixture owner-root mismatch: "
                 f"schedule_mismatches={schedule_mismatches}, "
                 f"occupancy_mismatches={occupancy_mismatches}, "
                 f"missing_lifecycle_events={sorted(required_events - lifecycle_events)}, "
-                f"historical_accounting_root_count={historical_accounting_root_count}"
+                f"historical_accounting_root_count={historical_accounting_root_count}, "
+                f"matching_candidate_ready={matching_candidate_ready}, "
+                f"matching_partial_data={matching_result.partial_data}, "
+                f"matching_collision_count={len(matching_result.collisions)}"
             )
     finally:
         try:
@@ -1571,7 +1746,10 @@ def _verify_fixture_readback() -> dict[str, dict[str, int]]:
     return {
         "stage_counts": stage_counts,
         "historical_lifecycle_counts": historical_counts,
-        "owner_root_counts": {"historical_accounting": historical_accounting_root_count},
+        "owner_root_counts": {
+            "historical_accounting": historical_accounting_root_count,
+            "matching_candidate_ready": int(matching_candidate_ready),
+        },
     }
 
 
@@ -1591,8 +1769,27 @@ def seed_fixtures(verbose: bool = True) -> dict[str, object]:
             str(scenario["case_no"]): _seed_scenario_client(cursor, scenario)
             for scenario in _ALL_ORDER_SCENARIOS
         }
-        c1_id = scenario_client_ids["CASE-2026-M301"]
-        c2_id = scenario_client_ids["CASE-2026-M302"]
+        for scenario in _ALL_ORDER_SCENARIOS:
+            case_no = str(scenario["case_no"])
+            if case_no != "115000301":
+                _seed_order_information_survey(
+                    cursor,
+                    case_no,
+                    scenario_client_ids[case_no],
+                )
+        cursor.execute(
+            "SELECT id FROM clients WHERE case_no='M3-CUST-20260910-01' "
+            "AND name='江家綺'",
+        )
+        preserved_customer = cursor.fetchone()
+        if preserved_customer:
+            _seed_order_information_survey(
+                cursor,
+                "M3-CUST-20260910-01",
+                int(preserved_customer["id"]),
+            )
+        c1_id = scenario_client_ids["115000101"]
+        c2_id = scenario_client_ids["115000102"]
 
         # Client 3: 李詩涵 (【狀態 B：有案號但缺問卷】專用測試資料)
         cursor.execute("SELECT id FROM clients WHERE name = '李詩涵' AND phone = '0933111222'")
@@ -1600,7 +1797,7 @@ def seed_fixtures(verbose: bool = True) -> dict[str, object]:
         if existing_c3:
             c3_id = existing_c3['id']
             cursor.execute(
-                "UPDATE clients SET case_no='CASE-2026-STATE-B', city='新竹市', address='東區科學園路1號', "
+                "UPDATE clients SET case_no='115000999', city='新竹市', address='東區科學園路1號', "
                 "identity_status='一般市民', service_days=NULL, due_month='2026-12', service_start_date=NULL, "
                 "notes=NULL, baby_info=NULL, residence_type=NULL, delivery_type=NULL, service_type=NULL, "
                 "admin_notes='STATE_B_UNFILLED_SURVEY', created_at=NOW(), line_user_id=NULL WHERE id = %s", (c3_id,)
@@ -1612,7 +1809,7 @@ def seed_fixtures(verbose: bool = True) -> dict[str, object]:
                 "delivery_type, service_type, baby_info, case_no, line_user_id, admin_notes, created_at) "
                 "VALUES ('李詩涵', 'female', '0933111222', '新竹市', '東區科學園路1號', '一般市民', "
                 "NULL, '2026-12', NULL, NULL, NULL, NULL, "
-                "NULL, NULL, NULL, 'CASE-2026-STATE-B', NULL, 'STATE_B_UNFILLED_SURVEY', NOW())",
+                "NULL, NULL, NULL, '115000999', NULL, 'STATE_B_UNFILLED_SURVEY', NOW())",
             )
             c3_id = cursor.lastrowid
 
@@ -1696,6 +1893,7 @@ def seed_fixtures(verbose: bool = True) -> dict[str, object]:
 
         # 3. 訂單案件與直接可見的月嫂／帳務變體。
         staff_ids = {"staff_1": int(s1_id), "staff_2": int(s2_id), **extra_staff_ids}
+        _seed_staff_matching_facts(cursor, staff_ids)
         for scenario in _ALL_ORDER_SCENARIOS:
             _seed_scenario_order(
                 cursor,
@@ -1738,7 +1936,7 @@ def seed_fixtures(verbose: bool = True) -> dict[str, object]:
 
         # 清理測試中可能產生的重複客戶資料
         cursor.execute(
-            "SELECT id FROM clients WHERE id NOT IN (%s, %s, %s) AND (phone IN ('0912345678', '0922333444', '0933111222') OR name IN ('陳雅婷', '林怡君', '李詩涵'))",
+            "SELECT id FROM clients WHERE id NOT IN (%s, %s, %s) AND name <> '江家綺' AND case_no <> 'M3-CUST-20260910-01' AND (phone IN ('0912345678', '0922333444', '0933111222') OR name IN ('陳雅婷', '林怡君', '李詩涵'))",
             (c1_id, c2_id, c3_id)
         )
         fetchall = getattr(cursor, "fetchall", None)
@@ -1753,9 +1951,9 @@ def seed_fixtures(verbose: bool = True) -> dict[str, object]:
             cursor.execute(f"DELETE FROM client_profile_change_requests WHERE client_id IN ({format_strings})", tuple(extra_client_ids))
             cursor.execute(f"DELETE FROM clients WHERE id IN ({format_strings})", tuple(extra_client_ids))
 
-        cursor.execute("UPDATE clients SET line_user_id=NULL")
+        cursor.execute("UPDATE clients SET line_user_id=NULL WHERE case_no <> 'M3-CUST-20260910-01' AND name <> '江家綺'")
         cursor.execute("UPDATE staff SET line_user_id=NULL")
-        cursor.execute("UPDATE provisional_client_registrations SET active_line_user_id=NULL")
+        cursor.execute("UPDATE provisional_client_registrations SET active_line_user_id=NULL WHERE client_id NOT IN (SELECT id FROM clients WHERE name='江家綺')")
 
         conn.commit()
     finally:
@@ -1803,9 +2001,9 @@ def seed_fixtures(verbose: bool = True) -> dict[str, object]:
 
     result = {
         "status": "ready",
-        "client_1": {"id": c1_id, "name": "陳雅婷", "phone": "0912345678", "case_no": "CASE-2026-M301"},
-        "client_2": {"id": c2_id, "name": "林怡君", "phone": "0922333444", "case_no": "CASE-2026-M302"},
-        "client_3": {"id": c3_id, "name": "李詩涵", "phone": "0933111222", "case_no": "CASE-2026-STATE-B"},
+        "client_1": {"id": c1_id, "name": "陳雅婷", "phone": "0912345678", "case_no": "115000101"},
+        "client_2": {"id": c2_id, "name": "林怡君", "phone": "0922333444", "case_no": "115000102"},
+        "client_3": {"id": c3_id, "name": "李詩涵", "phone": "0933111222", "case_no": "115000999"},
         "staff_1": {"id": s1_id, "name": "王美華", "identity_card": "A234567890", "birthday": "1980-05-15", "phone": "0923456789"},
         "staff_2": {"id": s2_id, "name": "張淑芬", "identity_card": "B234567891", "birthday": "1982-08-20", "phone": "0934567890"},
         "order_scenarios": [
@@ -1827,13 +2025,13 @@ def seed_fixtures(verbose: bool = True) -> dict[str, object]:
         print("📱 測試客戶 1 (【狀態 A：舊客完全命中】/ M3 主測)：")
         print("   - 姓名：陳雅婷")
         print("   - 手機：0912345678")
-        print("   - 案件：CASE-2026-M301 (服務期間 2026-10-05 ~ 2026-11-03)")
-        print("   - 預期效果：bind.html 輸入後自動完成綁定，顯示 CASE-2026-M301，無需重填問卷！")
+        print("   - 案件：115000101 (服務期間 2026-10-05 ~ 2026-11-03)")
+        print("   - 預期效果：bind.html 輸入後自動完成綁定，顯示 115000101，無需重填問卷！")
         print("--------------------------------------------------------------------------------")
         print("📱 測試客戶 3 (【狀態 B：有案號但缺問卷】專用測試)：")
         print("   - 姓名：李詩涵")
         print("   - 手機：0933111222")
-        print("   - 案件：CASE-2026-STATE-B")
+        print("   - 案件：115000999")
         print("   - 預期效果：bind.html 輸入後提示找到案號，自動預填 姓名+電話+案號 跳轉問卷！")
         print("--------------------------------------------------------------------------------")
         print("📱 測試月嫂 1 (M1-04 / M3 主測)：")

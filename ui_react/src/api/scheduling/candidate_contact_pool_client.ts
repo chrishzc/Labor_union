@@ -134,6 +134,16 @@ const InformationPreviewSchema = z.strictObject({
   staff_name: z.string().min(1), text: z.string().min(1), preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
 });
 export type CandidateInformationPreview = z.infer<typeof InformationPreviewSchema>;
+const WeeklyServicePreviewSchema = z.strictObject({
+  case_no: z.string().min(1).max(50), candidate_id: z.number().int().positive(),
+  rows: z.array(z.strictObject({
+    serial_number: z.number().int().positive(), staff_name: z.string().min(1).max(100),
+    week_start_date: IsoDateSchema, week_end_date: IsoDateSchema,
+    service_hours_per_day: z.number().int().positive(), weekly_work_days: z.number().int().min(0).max(7),
+    weekly_hours: z.number().int().nonnegative(),
+  })),
+});
+export type CandidateWeeklyServicePreview = z.infer<typeof WeeklyServicePreviewSchema>;
 export type SendCandidateInformationResult = z.infer<typeof SendCandidateInformationResultSchema>;
 export type AddCandidatesResult = z.infer<typeof AddCandidatesResultSchema>;
 export type CandidateWillingnessResult = z.infer<typeof CandidateWillingnessResultSchema>;
@@ -425,6 +435,22 @@ export const candidateContactPoolClient = {
     const data = envelope.data;
     if (data.case_no !== canonical || data.candidate_id !== candidateId || data.info_type !== infoType) throw new Error('寄送預覽對象不一致。');
     return data;
+  },
+
+  async previewWeeklyService(
+    caseNo: string,
+    candidateId: number,
+    options?: { signal?: AbortSignal },
+  ): Promise<CandidateWeeklyServicePreview> {
+    const canonical = canonicalCaseNo(caseNo);
+    const { token } = mutationIdentity();
+    const envelope = decodePayload(mutationEnvelope(WeeklyServicePreviewSchema), await transport.get(
+      `/api/v1/orders/${encodeURIComponent(canonical)}/candidate-contact-pool/candidates/${candidateId}/weekly-service/preview`,
+      { token, signal: options?.signal },
+    ));
+    if (!envelope.success || !envelope.data) throw new Error('無法讀取每周服務中說明。');
+    if (envelope.data.case_no !== canonical || envelope.data.candidate_id !== candidateId) throw new Error('每周服務預覽對象不一致。');
+    return envelope.data;
   },
 
   async sendInformation(command: CandidateInformationSendCommand): Promise<SendCandidateInformationResult> {

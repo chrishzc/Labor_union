@@ -203,6 +203,9 @@ class _Cursor:
                     "service_end_day_offset": 0,
                     "floor_fee": 0,
                     "custom_rest_dates": '["2026-09-07"]',
+                    "client_identity_status": "一般市民",
+                    "client_hourly_rate_ntd": 300,
+                    "payroll_hourly_rate_ntd": 300,
                     "client_name": "客戶甲",
                     "client_phone": "0900000000",
                     "client_address": "新竹市",
@@ -211,6 +214,16 @@ class _Cursor:
                         {"月子餐點調理喜好/飲食習慣：": "葷食"},
                         ensure_ascii=False,
                     ),
+                }
+            ]
+        elif "FROM caregiver_matching_plans plan" in statement:
+            self.rows = [
+                {
+                    "assignment_id": 17,
+                    "staff_id": 9,
+                    "assigned_start_date": date(2026, 9, 1),
+                    "assigned_end_date": date(2026, 9, 20),
+                    "staff_name": "月嫂甲",
                 }
             ]
         elif "FROM case_staff_assignments" in statement:
@@ -256,6 +269,16 @@ def test_mysql_adapter_projects_case_import_source_before_returning_owner_snapsh
     assert "_case_import_payload" not in snapshot.facts
     assert snapshot.field_issues == {}
     assert "case_import" in snapshot.owner_fingerprints
+
+
+def test_formal_plan_information_one_uses_labelled_order_estimates_before_payable_exists():
+    rows = MySqlOrderInformationRepository(_Connection()).preview_matching_plan_information(
+        "CASE-1", 51, 1
+    )
+
+    assert len(rows) == 1
+    assert "總薪資：預估 60000 元" in rows[0]["text"]
+    assert "預計發薪日：預估 2026-10-15" in rows[0]["text"]
 
 
 def test_case_import_projection_keeps_missing_and_ambiguous_answers_field_local():

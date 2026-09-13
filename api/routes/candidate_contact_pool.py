@@ -13,6 +13,7 @@ from api.schemas.base import BaseResponse
 from api.schemas.candidate_contact_pool import (
     AddCandidatesRequest,
     CandidateInformationPreviewView,
+    CandidateWeeklyServicePreviewView,
     AddCandidatesResult,
     CandidateContactPoolView,
     CandidateWillingnessRequest,
@@ -85,6 +86,27 @@ def preview_candidate_information(case_no: str, candidate_id: int, info_type: in
         return BaseResponse(data=CandidateInformationPreviewView.model_validate(
             workflow.preview_information(case_no, candidate_id, info_type)), message="已讀取寄送內容")
     except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.get(
+    "/orders/{case_no}/candidate-contact-pool/candidates/{candidate_id}/weekly-service/preview",
+    response_model=BaseResponse[CandidateWeeklyServicePreviewView],
+)
+def preview_candidate_weekly_service(
+    case_no: str,
+    candidate_id: int,
+    principal: AdminPrincipal = Depends(require_line_matching_reader),
+):
+    del principal
+    try:
+        return BaseResponse(
+            data=CandidateWeeklyServicePreviewView.model_validate(
+                workflow.preview_weekly_service(case_no, candidate_id)
+            ),
+            message="已讀取每周服務中說明",
+        )
+    except (LookupError, ValueError) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
 
 

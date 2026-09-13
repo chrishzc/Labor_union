@@ -430,6 +430,12 @@ version、idempotency identity 與回讀；不得偽造 LINE delivery 或省略�
 仍必須驗證 recipient／delivery state。客戶接受仍只形成 matching decision，後續鎖定、契約與 execution
 各自遵守其既有 Preview／Apply gate。
 
+2026-09-14 人工裁決：正式方案寄送客戶確認資訊時，月嫂履歷 PDF 是 optional attachment，缺少履歷、
+受控檔案儲存尚未配置或目前履歷不是有效 PDF 都不得阻擋其餘確認資訊與客戶決策入口。系統須在內部
+操作介面明確提醒未附履歷，送出的 LINE 卡片省略該履歷下載按鈕；公會人員可沿用既有方式另行以 LINE
+手工傳送履歷，但不得把這個系統外動作偽造成受控檔案 delivery。訂單資訊－1、訂單資訊－2、每周服務中
+說明、方案有效性、全體月嫂意願、客戶 LINE 綁定與檔期 fresh validation 仍是寄送 blocker。
+
 國定假日上班協調是與前段意願／客戶媒合決策分離的 Scheduling-owned current fact。它只能對目前
 正式 matching plan 的明確國定假日日期建立：客戶及每一個涵蓋該日的 segment 都必須個別肯認，並保存
 plan version、segment、日期、actor、非空協調依據及 idempotency identity。任何 plan、
