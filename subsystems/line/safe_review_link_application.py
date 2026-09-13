@@ -6,6 +6,7 @@ import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import Callable
 
+from subsystems.line.runtime_alert_target_application import _target_view
 from subsystems.line.safe_review_link_contracts import (
     IssueSafeReviewLink,
     QuerySafeReviewLink,
@@ -40,6 +41,7 @@ class SafeReviewLinkApplication:
             if existing is not None:
                 _check_fingerprint(existing, fingerprint)
                 return _receipt_from_row(existing), ""
+            runtime_target = _locked_runtime_target(uow)
             now = _utc(self._now())
             link_pk = repo.insert_link(
                 link_id=command.link_id,
@@ -54,9 +56,13 @@ class SafeReviewLinkApplication:
                 idempotency_key=command.idempotency_key.value,
                 correlation_id=command.correlation_id.value,
             )
+            # The runtime owner's opaque version cannot be replaced by the
+            # caller's numeric version. Preserve it in the existing immutable
+            # issuance event, in the same transaction as the link root.
             repo.insert_event(link_pk, "issued", command.actor.actor_id, "issued", command.target_version,
                               command.idempotency_key.value, command.correlation_id.value,
-                              {"target": command.canonical_internal_target})
+                              {"target": command.canonical_internal_target,
+                               "runtime_alert_target": runtime_target})
             repo.insert_outbox(link_pk, command.idempotency_key.value, command.correlation_id.value,
                                {"link_id": command.link_id, "target": command.canonical_internal_target,
                                 "source_alert_identity": command.source_alert_identity})
@@ -89,7 +95,7 @@ class SafeReviewLinkApplication:
                 return _receipt_from_row(existing)
             row = repo.get_link(command.link_id, for_update=True)
             if row is None:
-                raise SafeReviewLinkError("not_found", "safe review link not found")
+                raise SafeReviewLinkError("safe_review_link_not_found", "safe review link not found")
             status = SafeReviewLinkState(str(row["status"]))
             now = _utc(self._now())
             if status is SafeReviewLinkState.ISSUED and now >= _utc(row["expires_at_utc"]):
@@ -119,6 +125,14 @@ class SafeReviewLinkApplication:
                 raise SafeReviewLinkError("safe_review_link_target_stale", "review target is stale")
             if command.current_target_version != int(row["target_version"]):
                 raise SafeReviewLinkError("safe_review_link_version_conflict", "review target version is stale")
+            issued_target = repo.get_issued_runtime_target(int(row["id"]))
+            if not isinstance(issued_target, dict):
+                raise SafeReviewLinkError("safe_review_link_target_stale", "link lacks verified runtime target evidence; issue a new link")
+            current_target = _locked_runtime_target(uow)
+            if issued_target.get("target_id") != current_target["target_id"]:
+                raise SafeReviewLinkError("safe_review_link_target_stale", "runtime alert target changed")
+            if issued_target.get("current_version") != current_target["current_version"]:
+                raise SafeReviewLinkError("safe_review_link_version_conflict", "runtime alert target version changed")
             repo.transition(row["id"], "redeemed", now)
             repo.insert_event(row["id"], "redeemed", command.actor.actor_id, "redeemed", row["target_version"],
                               command.idempotency_key.value, command.correlation_id.value, {})
@@ -158,6 +172,15 @@ class SafeReviewLinkApplication:
             repo.insert_receipt(command.idempotency_key.value, fingerprint, "revoked", _receipt_payload(receipt), row["id"])
             return receipt
         return _mutate(self._unit_of_work_factory, mutate)
+
+
+def _locked_runtime_target(uow) -> dict:
+    """Use the runtime owner's current-fact interpretation under the caller UoW."""
+    rows = uow.runtime_monitor.find_active_group_targets(for_update=True)
+    if len(rows) != 1:
+        raise SafeReviewLinkError("safe_review_link_target_stale", "a unique active runtime alert group is required")
+    target = _target_view(rows[0])
+    return {"target_id": target.target_id, "current_version": target.current_version}
 
 
 def _mutate(unit_of_work_factory, operation):

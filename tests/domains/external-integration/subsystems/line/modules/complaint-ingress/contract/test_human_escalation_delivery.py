@@ -2,6 +2,8 @@
 
 from datetime import datetime, timedelta, timezone
 import json
+import os
+from unittest.mock import patch
 
 from domains.line.delivery import (
     LineAttemptPlan,
@@ -173,6 +175,7 @@ def _work_item(outbox_id=17, escalation_ref="escalation:7", payload=None):
     )
 
 
+@patch.dict(os.environ, {"LINE_PUBLIC_BASE_URL": "https://example.test"})
 def test_masked_alert_is_projected_then_canonical_delivery_records_provider_outcome():
     item = _work_item()
     outbox, delivery, escalations = _Outbox(item), _Delivery(), _Escalations()
@@ -194,6 +197,7 @@ def test_masked_alert_is_projected_then_canonical_delivery_records_provider_outc
     request_payload = json.loads(delivery.task.request.payload_json)
     assert request_payload["type"] == "text"
     assert "complaint_explicit" in request_payload["text"]
+    assert "https://example.test/line-mobile-admin?target=customer_service" in request_payload["text"]
     assert "Ctask96M4Alert0901" in delivery.task.request.recipient.identity.value
     assert "source_digest" not in request_payload["text"]
 

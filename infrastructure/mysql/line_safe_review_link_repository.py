@@ -19,6 +19,22 @@ class MySqlLineSafeReviewLinkRepository:
             )
             return cursor.fetchone()
 
+    def get_issued_runtime_target(self, link_pk: int):
+        """Read the server-observed target/version; never reconstruct it from a caller."""
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT event_payload FROM line_safe_review_link_events "
+                "WHERE link_id=%s AND event_type='issued' ORDER BY id LIMIT 1",
+                (link_pk,),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        payload = row["event_payload"]
+        if isinstance(payload, (str, bytes)):
+            payload = json.loads(payload)
+        return payload.get("runtime_alert_target") if isinstance(payload, dict) else None
+
     def insert_link(self, **values) -> int:
         with self._connection.cursor() as cursor:
             cursor.execute(

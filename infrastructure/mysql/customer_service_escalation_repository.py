@@ -351,9 +351,17 @@ class MySqlCustomerServiceEscalationRepository:
             cursor.execute(sql)
             fetchall = getattr(cursor, "fetchall", None)
             rows = tuple(fetchall() or ()) if callable(fetchall) else ()
-        if len(rows) != 1:
+        # Groups sort first, so two rows are enough to detect a singleton
+        # violation. An additional admin target must not hide a valid group.
+        groups = tuple(row for row in rows if row["target_type"] == "group")
+        if groups:
+            if len(groups) != 1:
+                return None
+            row = groups[0]
+        elif len(rows) == 1:
+            row = rows[0]
+        else:
             return None
-        row = rows[0]
         target_type = str(row["target_type"])
         identity = row.get("group_id") if target_type == "group" else row.get("linked_line_user_id")
         if not identity:

@@ -40,14 +40,18 @@ class LineDeliveryWorker:
         self._batch_size = batch_size
 
     def run_once(self) -> int:
-        claimed_count = 0
-        # Delivery is serial: acquire each lease only when its task can run.
-        for _ in range(self._batch_size):
+        # Preserve the existing claim contract's bounds for each cycle.
+        budget = ClaimLineDeliveryTasksQuery(
+            self._worker_identity, self._now(), self._batch_size
+        )
+        processed = 0
+        # Do not spend later tasks' leases waiting for earlier provider calls.
+        for _ in range(budget.batch_size):
             claimed = self._claim()
             if not claimed:
                 break
             task, = claimed
-            claimed_count += 1
+            processed += 1
             validation_failure = self._manual_replay_validation_failure(task)
             if not self._still_sendable(task):
                 continue
@@ -61,7 +65,7 @@ class LineDeliveryWorker:
                 else self._send(task)
             )
             self._record(task, outcome)
-        return claimed_count
+        return processed
 
     def _claim(self):
         query = ClaimLineDeliveryTasksQuery(
@@ -126,6 +130,8 @@ class LineDeliveryWorker:
             )
         if outcome.outcome_type is LineProviderOutcomeType.RATE_LIMITED:
             return self._send_push(task)
+        # A 5xx response can follow an accepted reply.  A push retry key cannot
+        # deduplicate that separate reply request, so do not fall back to push.
         if outcome.outcome_type in {
             LineProviderOutcomeType.TIMEOUT,
             LineProviderOutcomeType.UNAVAILABLE,
@@ -148,7 +154,7 @@ class LineDeliveryWorker:
             )
 
     def _still_sendable(self, task: LineDeliveryTaskSnapshot) -> bool:
-        """Re-read cancellation and lease ownership immediately before delivery."""
+        """Confirm the current task still holds the same unexpired lease."""
         if task.lease is None:
             return False
         with self._unit_of_work_factory() as unit_of_work:
