@@ -9,6 +9,7 @@ import base64
 import hashlib
 import hmac
 import json
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -204,6 +205,7 @@ def test_delivery_provider_call_occurs_between_claim_and_record_transactions() -
         provider,
         "worker:1",
         lambda: NOW + timedelta(seconds=1),
+        batch_size=1,
     )
 
     assert worker.run_once() == 1
@@ -225,6 +227,7 @@ def test_fresh_knowledge_answer_uses_free_reply_instead_of_push() -> None:
         provider,
         "worker:1",
         lambda: NOW + timedelta(seconds=1),
+        batch_size=1,
     )
 
     assert worker.run_once() == 1
@@ -247,6 +250,7 @@ def test_expired_knowledge_reply_opportunity_uses_push_fallback() -> None:
         provider,
         "worker:1",
         lambda: NOW + timedelta(seconds=1),
+        batch_size=1,
     )
 
     assert worker.run_once() == 1
@@ -274,13 +278,15 @@ def test_rejected_reply_does_not_duplicate_a_possibly_already_used_token() -> No
         provider,
         "worker:1",
         lambda: NOW + timedelta(seconds=1),
+        batch_size=1,
     )
 
     assert worker.run_once() == 1
     assert actions == ["claim", "commit", "reply", "record", "commit"]
 
 
-def test_reply_http_server_error_uses_push_fallback() -> None:
+@pytest.mark.parametrize("status_code", [500, 502, 503, 504])
+def test_reply_http_server_error_does_not_push_or_retry(status_code) -> None:
     task = _claimed_knowledge_delivery_task()
     actions: list[str] = []
     repository = DeliveryRepository(
@@ -292,8 +298,8 @@ def test_reply_http_server_error_uses_push_fallback() -> None:
         actions,
         reply_outcome=LineProviderOutcome(
             LineProviderOutcomeType.UNAVAILABLE,
-            error_code="line_http_500",
-            error_message="LINE provider returned HTTP 500",
+            error_code=f"line_http_{status_code}",
+            error_message=f"LINE provider returned HTTP {status_code}",
         ),
     )
     worker = LineDeliveryWorker(
@@ -301,10 +307,13 @@ def test_reply_http_server_error_uses_push_fallback() -> None:
         provider,
         "worker:1",
         lambda: NOW + timedelta(seconds=1),
+        batch_size=1,
     )
 
     assert worker.run_once() == 1
-    assert actions == ["claim", "commit", "reply", "push", "record", "commit"]
+    assert actions == ["claim", "commit", "reply", "record", "commit"]
+    assert repository.recorded.provider_outcome.error_code == "line_reply_outcome_uncertain"
+    assert repository.recorded.retry_allowed is False
 
 
 def test_uncertain_reply_does_not_push_a_possibly_duplicate_answer() -> None:
@@ -328,6 +337,7 @@ def test_uncertain_reply_does_not_push_a_possibly_duplicate_answer() -> None:
         provider,
         "worker:1",
         lambda: NOW + timedelta(seconds=1),
+        batch_size=1,
     )
 
     assert worker.run_once() == 1
@@ -581,3 +591,128 @@ def _claimed_knowledge_delivery_task():
     )
     lease = LineDeliveryLease(task_id, "worker:1", NOW, NOW + timedelta(minutes=1))
     return LineDeliveryTaskSnapshot(task_id, request, LineDeliveryStatus.PROCESSING, 0, lease)
+
+
+def test_serial_delivery_uses_fresh_leases_and_preserves_cycle_budget() -> None:
+    clock = [NOW]
+    actions = []
+
+    class QueueRepository:
+        def __init__(self):
+            self.pending = list(range(1, 31))
+            self.current = {}
+            self.records = []
+            self.queries = []
+
+        def claim(self, query):
+            self.queries.append(query)
+            selected = self.pending[:query.batch_size]
+            del self.pending[:query.batch_size]
+            tasks = []
+            for value in selected:
+                task_id = LineDeliveryTaskId(value)
+                task = replace(
+                    _claimed_delivery_task(),
+                    task_id=task_id,
+                    lease=LineDeliveryLease(
+                        task_id, query.lease_owner, query.now,
+                        query.now + timedelta(seconds=60),
+                    ),
+                )
+                self.current[task_id] = task
+                tasks.append(task)
+            return tuple(tasks)
+
+        def get(self, task_id):
+            return self.current.get(task_id)
+
+        def record_attempt(self, command):
+            assert command.completed_at <= command.lease.expires_at
+            self.records.append(command)
+            self.current[command.task.task_id] = replace(
+                command.task, status=LineDeliveryStatus.SENT,
+            )
+
+    class SlowProvider:
+        def send(self, request):
+            clock[0] += timedelta(seconds=9)
+            return LineProviderOutcome(
+                LineProviderOutcomeType.SUCCESS,
+                provider_message_id=LineProviderMessageId("sent"),
+            )
+
+    repository = QueueRepository()
+    worker = LineDeliveryWorker(
+        lambda: TrackingUow(repository, actions),
+        SlowProvider(), "worker:1", lambda: clock[0], batch_size=25,
+    )
+
+    assert worker.run_once() == 25
+    assert len(repository.records) == 25
+    assert repository.pending == list(range(26, 31))
+    assert all(query.batch_size == 1 for query in repository.queries)
+    assert clock[0] == NOW + timedelta(seconds=225)
+    assert [record.lease.acquired_at for record in repository.records] == [
+        NOW + timedelta(seconds=9 * index) for index in range(25)
+    ]
+
+
+@pytest.mark.parametrize("elapsed", [60, 61])
+def test_expired_delivery_lease_never_calls_provider(elapsed) -> None:
+    task = _claimed_delivery_task()
+    actions = []
+    repository = DeliveryRepository(task, actions)
+    worker = LineDeliveryWorker(
+        lambda: TrackingUow(repository, actions),
+        SuccessfulProvider(actions), "worker:1",
+        lambda: NOW + timedelta(seconds=elapsed), batch_size=1,
+    )
+
+    assert worker.run_once() == 1
+    assert "provider" not in actions
+    assert repository.recorded is None
+
+
+def test_cancellation_during_fresh_validation_prevents_delivery() -> None:
+    task = _claimed_delivery_task()
+    actions = []
+    repository = DeliveryRepository(task, actions)
+
+    def validate(_task_id):
+        repository.task = replace(task, status=LineDeliveryStatus.CANCELLED)
+        return None
+
+    def unit_of_work():
+        unit = TrackingUow(repository, actions)
+        unit.notification_rules = SimpleNamespace(
+            manual_replay_delivery_validation_failure=validate,
+        )
+        return unit
+
+    worker = LineDeliveryWorker(
+        unit_of_work, SuccessfulProvider(actions), "worker:1",
+        lambda: NOW + timedelta(seconds=1), batch_size=1,
+    )
+    assert worker.run_once() == 1
+    assert "provider" not in actions
+    assert repository.recorded is None
+
+
+def test_reply_rate_limit_retains_existing_push_behavior() -> None:
+    task = _claimed_knowledge_delivery_task()
+    actions = []
+    repository = DeliveryRepository(
+        task, actions,
+        LineReplyOpportunity("reply-token", NOW + timedelta(seconds=45)),
+    )
+    provider = ReplyCapableProvider(
+        actions, LineProviderOutcome(
+            LineProviderOutcomeType.RATE_LIMITED, error_code="line_http_429",
+        ),
+    )
+    worker = LineDeliveryWorker(
+        lambda: TrackingUow(repository, actions), provider, "worker:1",
+        lambda: NOW + timedelta(seconds=1), batch_size=1,
+    )
+    assert worker.run_once() == 1
+    assert actions == ["claim", "commit", "reply", "push", "record", "commit"]
