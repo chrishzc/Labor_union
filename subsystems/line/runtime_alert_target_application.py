@@ -80,7 +80,7 @@ class RuntimeAlertTargetApplication:
         actor_id: str,
         event_id: str,
     ) -> bool:
-        """在既有 worker UoW 內註冊，不自行 commit；禁止 disabled row 靜默復活。"""
+        """以新的已授權群組指令重新啟用原紀錄；重播不重做 mutation。"""
         key = IdempotencyKey(f"line-alert-registration:{event_id}")
         correlation = CorrelationId(f"line-event:{event_id}")
         fingerprint = fingerprint_payload(
@@ -99,10 +99,17 @@ class RuntimeAlertTargetApplication:
             _check_receipt(existing, fingerprint.value)
             return bool(_receipt_result(existing).get("created", False))
         active = repo.find_active_group_targets(for_update=True)
+        if len(active) > 1:
+            raise RuntimeAlertTargetError(
+                "conflict", "line_alert_group_singleton_violation", "active LINE 告警群組狀態需人工復原"
+            )
         if active:
-            if any(str(row.get("group_id")) == group_id for row in active):
-                current = _target_view(next(row for row in active if str(row.get("group_id")) == group_id))
-                result = _registration_result(current, False, key.value, correlation.value, self._now())
+            if str(active[0].get("group_id")) == group_id:
+                current = _target_view(active[0])
+                result = _registration_result(
+                    current, False, key.value, correlation.value, self._now(),
+                    previous_state=current.state, expected_version=current.current_version,
+                )
                 repo.save_admin_command_receipt(
                     _COMMAND_FAMILY, key.value, fingerprint.value, actor_id,
                     "LINE 群組告警註冊重播", result,
@@ -113,18 +120,25 @@ class RuntimeAlertTargetApplication:
                 "conflict", "line_alert_group_already_active", "已有其他 LINE 告警群組啟用"
             )
         historical = repo.find_group_target(group_id, for_update=True)
+        previous_state, expected_version = "absent", "absent"
+        reason = "LINE 群組告警註冊"
         if historical is not None:
-            raise RuntimeAlertTargetError(
-                "conflict", "line_alert_target_registration_conflict", "既有停用群組不可由 webhook 靜默重新啟用"
-            )
-        target_id = repo.insert_group_target(group_id, "LINE 工會異常通知群組", actor_id)
+            before = _target_view(historical)
+            previous_state, expected_version = before.state, before.current_version
+            target_id = before.target_id
+            repo.update_alert_target_enabled(target_id, True)
+            reason = "LINE 群組告警重新綁定"
+        else:
+            target_id = repo.insert_group_target(group_id, "LINE 工會異常通知群組", actor_id)
         current = _target_view(repo.get_alert_target(target_id, for_update=True))
-        result = _registration_result(current, True, key.value, correlation.value, self._now())
-        repo.save_admin_command_receipt(
-            _COMMAND_FAMILY, key.value, fingerprint.value, actor_id,
-            "LINE 群組告警註冊", result,
+        result = _registration_result(
+            current, True, key.value, correlation.value, self._now(),
+            previous_state=previous_state, expected_version=expected_version,
         )
-        _save_registration_audit(repo, actor_id, current, result, "LINE 群組告警註冊")
+        repo.save_admin_command_receipt(
+            _COMMAND_FAMILY, key.value, fingerprint.value, actor_id, reason, result,
+        )
+        _save_registration_audit(repo, actor_id, current, result, reason)
         return True
 
     def _apply(self, command, *, operation: str) -> LineAlertTargetMutationReceipt:
@@ -463,14 +477,18 @@ def _build_receipt(row, previous_state, operation, correlation_id, committed_at)
     )
 
 
-def _registration_result(view, created, idempotency_key, correlation_id, committed_at):
+def _registration_result(
+    view, created, idempotency_key, correlation_id, committed_at,
+    *, previous_state="absent", expected_version="absent",
+):
     return {
         "receipt_id": _receipt_id("group_registration", idempotency_key),
         "command_family": _COMMAND_FAMILY,
         "operation": "group_registration",
         "created": created,
         "target_id": view.target_id,
-        "previous_state": "disabled",
+        "previous_state": previous_state,
+        "expected_version": expected_version,
         "resulting_state": "active",
         "current_version": view.current_version,
         "correlation_id": correlation_id,
@@ -482,9 +500,9 @@ def _save_registration_audit(repo, actor_id, current, result, reason):
     repo.save_alert_target_admin_audit(actor_id, "line.alert_target.register", current.target_id, {
         "receipt_id": result["receipt_id"],
         "reason": reason,
-        "expected_version": "absent",
+        "expected_version": result["expected_version"],
         "resulting_version": current.current_version,
-        "previous_state": "absent",
+        "previous_state": result["previous_state"],
         "resulting_state": "active",
         "correlation_id": result["correlation_id"],
     })
