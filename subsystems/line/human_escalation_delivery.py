@@ -14,9 +14,11 @@ state, so this worker does not invent one.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable, Mapping
+from urllib.parse import urlsplit
 
 from domains.line.canonical_payload import canonical_line_payload_json
 from domains.line.delivery import (
@@ -28,6 +30,7 @@ from domains.line.delivery import (
 )
 from domains.line.identities import LineGroupId, LineRoomId, LineUserId
 from shared_kernel.identities import CorrelationId, IdempotencyKey
+from subsystems.line.navigation_catalog import entry_for_alias
 from subsystems.line.outbox_contracts import ClaimLineOutboxQuery, CompleteLineOutboxCommand, LineOutboxWorkItem
 
 
@@ -176,9 +179,25 @@ def _request(item: HumanEscalationOutboxItem, now: datetime) -> tuple[LineDelive
     category = str(payload.get("category", ""))
     if not safe_summary or not category or "line_user_id" in safe_summary.lower():
         raise HumanEscalationDeliveryError("human_escalation_bounded_payload_invalid")
+    base_url = (os.getenv("LINE_PUBLIC_BASE_URL", "").strip() or os.getenv("BASE_URL", "").strip()).rstrip("/")
+    parsed = urlsplit(base_url)
+    if (
+        parsed.scheme not in {"http", "https"} or not parsed.netloc
+        or parsed.username is not None or parsed.password is not None
+        or parsed.query or parsed.fragment
+    ):
+        raise HumanEscalationDeliveryError("human_escalation_management_url_unavailable")
+    entry = entry_for_alias("開啟客服系統")
+    if entry is None or entry.public_route is None:
+        raise HumanEscalationDeliveryError("human_escalation_management_entry_unavailable")
+    # This is navigation, not an authentication token or a one-time review link.
+    # The existing mobile-admin entry still verifies LINE identity and binding.
     message = canonical_line_payload_json({
         "type": "text",
-        "text": f"客服人工升級（{category}）：{safe_summary}",
+        "text": (
+            f"客服人工升級（{category}）：{safe_summary}\n"
+            f"請開啟工會客服系統處理：\n{base_url}{entry.public_route}"
+        ),
     })
     request = LineDeliveryRequest(
         LineRecipient(kind, recipient_identity), LineMessageKind.TEXT, message, now,
