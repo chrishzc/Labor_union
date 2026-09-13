@@ -1,13 +1,15 @@
 # 功能開發計畫索引
 
 狀態：`current-plans-and-operational-manual`  
-更新日期：2026-09-09
+更新日期：2026-09-13
 
 本目錄只保存兩類 current 文件：可執行操作／測試手冊，以及尚未完成的 blocked／deferred／proposed 計畫。它們都不取代 `document/架構重整/01_規格基線/` 的正式 owner 與產品語意，也不自行授權 production mutation、provider 外送、部署、付款、credential 或資料庫操作。
 
 ## Current 可執行手冊
 
 - [LINE 四大模組詳細測試手冊與 Agent 前置條件規範](LINE_四大模組_詳細測試手冊與前置條件.md)：保留 M0～M4 的 Agent 前置、手機 E2E 操作、readback、驗收層級與 cleanup。它是 current 操作手冊，不是 SSOT；route、schema、owner 或正式驗收契約變更時必須同步更新，且不得覆蓋 `17`、`20`、`23`、`26`、`29`。
+
+2026-09-13 v2.2 的 M4 對照基準為 PR #299 的程式版本 `4eb58e07e94660308ba8afd05d39931f0301fdf1`，包含同群重新綁定、客服工單再次接手、告警與客戶結案通知分離、Safe Review Link 的 runtime owner 版本重驗。執行前須核對實際 Git ref／部署版本，不能因 PR 存在推定 main 或測試環境已更新。普通手機管理導航不等於一次性審核連結；月嫂請假 intake-only 邊界也不取消規格 `26` §9 的客戶同意／拒絕及通知鏈。手冊保留這些 required acceptance 的 `NOT_RUN`／具體 `BLOCKED`，沒有把現有實作缺口改列 superseded，也不改寫既有手機驗收紀錄。
 
 ## Active／blocked／deferred 計畫
 
