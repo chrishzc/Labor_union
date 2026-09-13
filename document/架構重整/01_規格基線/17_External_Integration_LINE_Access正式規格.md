@@ -14,6 +14,7 @@
   Scheduling Matching Coordination Phase A–D、M4 runtime target／human escalation ownership 已核准；
   後續人工已核准 M1-A、M2-A、M3-A～D、M4-A 的 exact production implementation slice；這不擴張為
   provider、deployment、production DB、未另行核准 schema 或其他外部副作用授權。
+- 2026-09-13 使用者明確要求同一異常通知群組可重新綁定；本次修訂限既有 runtime target owner，詳見文末同群重綁修訂。PR #299 source 不代表 main 已合併、部署或手機／provider 驗收。
 
 ## 2. Global Integration Boundary
 
@@ -29,8 +30,9 @@
 6. provider event 與 downstream Domain command 使用不同的 idempotency identity。
 7. 相同 event key＋相同 canonical payload 為 exact replay；相同 key＋不同 payload 為 conflict，
    必須 quarantine。
-8. provider timeout／5xx 可 bounded retry；invalid signature、mapping ambiguity 與業務 blocker
-   不可自動猜測。
+8. provider timeout／5xx 可 bounded retry，但不得覆蓋各操作的 uncertain-outcome 限制；
+   LINE Reply 的不確定結果依第 20 份規格及本文件 §3.3，不可自動補送 Push 或重試回答。
+   invalid signature、mapping ambiguity 與業務 blocker 不可自動猜測。
 9. Domain decision audit 與 Domain mutation 同交易；HTTP access／diagnostic audit 可 best-effort，
    但不得冒充 Domain audit。
 
@@ -39,9 +41,9 @@
 - `ExternalSignatureVerifier`
 - `ExternalEventNormalizer`
 - `DurableInboxRepository`
+- `DurableDeliveryQueue`
 - `ExternalEventConsumer`
 - `DomainCommandGateway`
-- `DurableDeliveryQueue`
 - `ProviderDeliveryGateway`
 - `ExternalEvidenceArchive`
 - `IntegrationClock`
@@ -165,6 +167,13 @@ duplicate idempotency key 必須回既有 task／receipt，不得只回 `None`�
 retry 使用 bounded exponential backoff；非 retryable 4xx、invalid recipient、
 content validation failure 直接 failed＋alert。
 
+2026-09-13 已有投遞契約的修正對照：Reply HTTP 5xx 本身不是「確定未接受」的證據；
+不確定結果使用既有 `line_reply_outcome_uncertain`，禁止立即 Push 與自動重試該回答。
+Push 的 retry key 不會對先前 Reply 去重；這不改變其他主動通知的既有 Push retry 契約。
+PR #299 worker 改為逐筆取得即將執行任務的租約，保留每輪預設 25 筆；發送前檢查
+相同、未過期 lease 與取消狀態，避免整批任務等待時共同耗盡租約。這是 source 行為，
+不是對任意執行時間、MySQL 競爭或真實 provider 已完成驗收的宣告。
+
 #### M4 Safe Review Link（2026-09-01 current Task96 contract）
 
 M4 的 `Mobile_Group_Alert` 由 LINE Integration 擁有 review-link transport persistence；
@@ -195,6 +204,16 @@ target 或 version 不一致必須 fail closed 並由 owner Query／人工 revie
 typed failure，不回 token／PII。若現有 persistence 無法承擔此 root，僅允許依 DB change gate
 提出 additive schema；本節不授權新 public route、production／`union_db`、provider 或
 deployment。
+
+2026-09-13 source 對照：PR #299 的新 Issue 在同一 UoW 鎖定唯一 active runtime group，
+將 owner `target_id`／opaque `current_version` 保存於既有 immutable `issued` event 的
+`runtime_alert_target`；首次 Redeem 重讀該 evidence 與目前 owner facts。公開數字
+`target_version`／`current_target_version` 的相等檢查不能代替這組 server-owned evidence，
+也不代表已驗證 profile／assignment 等業務 root version。缺 evidence 的舊連結須重新簽發；
+群組更換、停用或重新啟用後版本不同時拒絕首次兌換，exact command replay只回原receipt。
+本修正未新增 schema。客服告警中的一般 mobile-admin URL 不是一次性 link，不能取代
+第 26 份規格 §9／§9.1 的 alert → canonical review target → mobile failure/readback 驗收；
+該完整鏈仍須直接證明，不能因本段 source 修正標為 passed 或 superseded。
 
 #### LINE Configuration typed／redacted query（2026-08-20）
 
@@ -301,6 +320,11 @@ State：
 Friend: unknown → active ↔ blocked
 Review: pending → approved | rejected | cancelled
 ```
+
+2026-09-13 好友事件修正對照：`follow`／`unfollow` 是使用者與官方帳號的好友狀態事件，
+不是私人好友聊天。晚到且發生時間早於 `last_event_at` 的事件仍保留事件及版本紀錄，
+但不倒退 canonical／legacy 好友狀態。舊 follow 不新建歡迎通知或綁定 flow，舊 unfollow
+不取消目前通知；一般 message 不因時間較舊而被丟棄。event id 去重不能取代不同事件的時間判斷。
 
 正式 approve／reject 必須：
 
@@ -1032,3 +1056,22 @@ M3 的 service-date Apply 必須在單一 outer UoW 內 fresh-lock owner service
 本 amendment 的 initial freeze 不單獨授權 mutation；後續人工裁決已核准 M1-A、M2-A、M3-A～D、M4-A
 的 exact production implementation slice。LINE／AI provider、deployment、production DB、未另行核准的
 schema／DDL與 external side effect 仍不在授權範圍。
+
+## 2026-09-13 同群告警重新綁定修訂與修正證據邊界
+
+依使用者「異常通知群組設定能改成能在同一個群組重新綁定」的明確指示，已綁定且通過
+既有告警管理授權的管理員，在停用的原群組重新送出「設定異常通知群組」，可由既有
+`RuntimeAlertTargetApplication.register_group` 將同一 target row 重新啟用；保留 target id、
+通知門檻與歷史，並在 caller UoW 內保存正確前後狀態／版本、receipt及audit。
+
+同群已啟用時不重做 target mutation；已處理 event 的 exact replay只回原receipt，不因重送
+使後來停用的群組復活。另一個群組已啟用時不得自動覆蓋，多群啟用仍回singleton conflict。
+registration、reset、enable／disable沿用既有advisory serialization、owner及交易邊界；
+管理端仍走 `/api/v1/runtime/line-alert-targets` 的既有Preview／Apply，不新增入口或清除歷史。
+這項同群重綁變更不使舊Safe Review Link復活，也不授權重送既存失敗／結果未知的通知。
+
+本次原始碼及回歸證據固定對照PR #299 `4eb58e07e94660308ba8afd05d39931f0301fdf1`。
+53項指定回歸（29項M4、24項原LINE修正）不是所有M1～M4直接流程已通過；完整pytest、
+真實MySQL鎖／整合、手機、provider及部署仍分別核對。第20份規格§5.3的intake-only邊界
+不取消第26份規格§9的客戶同意／拒絕、通知及rematch；一般mobile-admin導航也不取消
+`R4-SAFE-LINK`。缺直接證據者保留NOT_RUN／具體BLOCKED，不由程式現況推導supersession。
