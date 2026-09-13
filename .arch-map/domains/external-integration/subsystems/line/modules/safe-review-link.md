@@ -51,7 +51,7 @@ An exact command replay returns its existing receipt, not a new redemption.
 Provider send is outside this module's effect ceiling.
 
 The ordinary `/line-mobile-admin?target=customer_service` URL now included in
-Customer Service alerts is authenticated navigation, not a issued one-time
+Customer Service alerts is authenticated navigation, not an issued one-time
 Safe Review Link. Its presence does not prove the alert-to-one-time-link
 acceptance in specification 26 §9 / §9.1. That end-to-end flow and the business
 review's Preview/Apply/readback must be verified separately.
