@@ -250,9 +250,19 @@ class Uow:
         self.hooks = []
 
     def __enter__(self):
+        self.committed = False
+        runtime = getattr(self, "runtime_monitor", None)
+        self.runtime_before = None if runtime is None else copy.deepcopy({
+            name: getattr(runtime, name)
+            for name in ("rows", "receipts", "audits", "updates", "inserts")
+        })
         return self
 
-    def __exit__(self, *_):
+    def __exit__(self, error_type, *_):
+        # Model the existing caller-owned runtime transaction for rollback tests.
+        if self.runtime_before is not None and (error_type is not None or not self.committed):
+            for name, value in self.runtime_before.items():
+                setattr(self.runtime_monitor, name, value)
         hooks, self.hooks = self.hooks, []
         for hook in hooks:
             hook()
@@ -337,6 +347,35 @@ class GroupRegistrationTests(unittest.TestCase):
         self.assertEqual(error.exception.code, "line_alert_target_serialization_unavailable")
         self.assertEqual((self.repo.updates, self.repo.inserts), (0, 0))
         self.assertEqual(self.repo.receipts, {})
+
+    def test_same_event_cannot_be_repurposed_for_another_group(self):
+        self.register()
+        before = copy.deepcopy((self.repo.rows, self.repo.receipts, self.repo.audits))
+        with self.assertRaises(RuntimeAlertTargetError) as error:
+            self.register(group_id="C-other")
+        self.assertEqual(error.exception.code, "line_alert_target_idempotency_mismatch")
+        self.assertEqual((self.repo.rows, self.repo.receipts, self.repo.audits), before)
+
+    def test_audit_failure_rolls_back_reactivation_and_receipt_before_release(self):
+        self.repo.rows = {1: group(1, False)}
+        before = copy.deepcopy(self.repo.rows)
+        unit = Uow(runtime_monitor=self.repo)
+        release = self.repo.release_alert_target_lock
+        def observe_release():
+            self.assertFalse(unit.committed)
+            self.assertEqual(self.repo.rows, before)
+            self.assertEqual(self.repo.receipts, {})
+            return release()
+        with patch.object(self.repo, "release_alert_target_lock", side_effect=observe_release):
+            with patch.object(self.repo, "save_alert_target_admin_audit", side_effect=RuntimeError("synthetic audit failure")):
+                with self.assertRaisesRegex(RuntimeError, "synthetic audit failure"):
+                    with unit:
+                        self.app.register_group(unit, "C-group-1", ACTOR.actor_id, "event:audit")
+                        unit.commit()
+        self.assertEqual((self.repo.updates, self.repo.inserts), (0, 0))
+        self.assertEqual(self.repo.audits, [])
+        self.assertEqual(self.repo.releases, 1)
+        self.assertFalse(self.repo.locked)
 
 
 class LinkRepo:
@@ -472,6 +511,33 @@ class SafeLinkFreshTargetTests(unittest.TestCase):
         self.assertEqual(error.exception.code, "safe_review_link_expired")
         self.assertEqual(self.links.links[self.issue.link_id]["status"], "expired")
 
+    def test_issue_replay_preserves_original_owner_snapshot_without_new_intent(self):
+        self.app.issue(self.issue)
+        original = copy.deepcopy((self.links.events, self.links.outbox, self.links.receipts))
+        self.runtime.rows[1]["updated_at_utc"] += timedelta(seconds=1)
+        receipt, token = self.app.issue(self.issue)
+        self.assertTrue(receipt.replayed)
+        self.assertEqual(token, "")
+        self.assertEqual((self.links.events, self.links.outbox, self.links.receipts), original)
+
+    def test_threshold_change_is_stale_even_with_same_timestamp(self):
+        self.app.issue(self.issue)
+        self.runtime.rows[1]["minimum_status"] = "warning"
+        with self.assertRaises(SafeReviewLinkError) as error:
+            self.app.redeem(self.redeem)
+        self.assertEqual(error.exception.code, "safe_review_link_version_conflict")
+        self.assertEqual(len(self.links.events), 1)
+        self.assertNotIn(self.redeem.idempotency_key.value, self.links.receipts)
+
+    def test_different_command_cannot_redeem_an_already_used_link(self):
+        self.app.issue(self.issue)
+        self.app.redeem(self.redeem)
+        self.assertEqual(self.runtime.read_locks, [True, True])
+        with self.assertRaises(SafeReviewLinkError) as error:
+            self.app.redeem(replace(self.redeem, idempotency_key=IdempotencyKey("redeem:other")))
+        self.assertEqual(error.exception.code, "safe_review_link_replayed")
+        self.assertEqual(len(self.links.events), 2)
+
 
 class DeliveryRepo:
     def __init__(self, request, resulting_status):
@@ -539,6 +605,11 @@ class ResolutionDeliveryTests(unittest.TestCase):
         worker = LineDeliveryWorker(lambda: Uow(delivery_tasks=repository, escalations=escalations), provider, "worker:m4", lambda: NOW, batch_size=1)
         self.assertEqual(worker.run_once(), 1)
         escalations.record_alert_delivery_outcome.assert_called_once_with("escalation:9", "line-delivery-attempt:1:1", "sent")
+
+    def test_resolution_key_retains_escalation_lineage_with_ticket_source(self):
+        request = self.request()
+        self.assertEqual((request.source_aggregate_type, request.source_aggregate_identity), ("customer_service_ticket", "31"))
+        self.assertEqual(request.idempotency_key.value, "human-escalation-resolution:9:3")
 
 
 class AlertNavigationTests(unittest.TestCase):
