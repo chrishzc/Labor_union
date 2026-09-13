@@ -1,9 +1,9 @@
 # LINE 四大模組詳細測試手冊與 Agent 前置條件規範
 
-> **文件版本**：v2.1（2026-09-13，M4 測試方法補正）  
-> **原始對齊程式版本**：`main @ 0988f6c430472343662aa1f8989ab2af9732bde3`；本次 M4 補正對照 PR #299，程式修正至 `87cea26b866ed78617536e7ff772b48ca293ad1e`。開始測試前須確認實際執行版本已包含修正，PR 存在不等於 main 已合併或環境已部署。  
+> **文件版本**：v2.2（2026-09-13，M4 影響文件核對）  
+> **原始對齊程式版本**：`main @ 0988f6c430472343662aa1f8989ab2af9732bde3`；M4 修正的 source 基準為 PR #299 `4eb58e07e94660308ba8afd05d39931f0301fdf1`。開始測試前須確認實際執行版本已包含修正，PR 存在不等於 main 已合併或環境已部署。  
 > **適用範圍**：LINE 官方帳號、LIFF、FastAPI、MySQL、React 管理後台、M1～M4 repository-local 與手機 E2E 驗收。  
-> **權威依據**：`document/架構重整/01_規格基線/26_LINE四大模組Eraser流程圖轉錄與驗收基線.md`；M4 依同目錄規格 17 的告警／安全連結契約、規格 20 §5.3 的請假待辦契約，以及 2026-09-13 使用者同群重新綁定指示補正。  
+> **權威依據**：`document/架構重整/01_規格基線/26_LINE四大模組Eraser流程圖轉錄與驗收基線.md`；同目錄規格 17、20 的 owner 邊界，以及 2026-09-13 使用者同群重新綁定指示。現有實作與本手冊不得自行取消規格 26 的 required flow acceptance。  
 > **目的**：讓 Agent 先完成可自動化的測試前置資料與 readback，測試者拿手機後只執行真正需要 LINE／LIFF／Rich Menu 的最後操作。
 
 ---
@@ -745,7 +745,9 @@ POST /api/v1/matching/coordination/conversion/apply
 
 # 7. 模組四：管理端、群組告警、客訴與代班財務
 
-本節補正測試方法與已確認的 M4 程式問題；不變更 §0.3 已記錄的手機驗收結果，也不把新增自動化回歸測試當作手機或真 provider 通過。
+本節補正測試方法與已確認的 M4 程式問題；不變更 §0.3 已記錄的手機驗收結果，也不把新增自動化回歸測試當作手機或真 provider 通過。PR #299 記錄的 53 項回歸為 29 項 M4 加上 24 項投遞／好友／客服回歸，執行於 run `34733277249` / job `103659935152`；資料庫／交易／provider 使用替身，部分 adapter SQL 在 SQLite 執行，不證明 MySQL 鎖或完整 M4 閉環。
+
+規格 26 §9 的「請假同意／拒絕與 due-shift rematch」及「M4 alert 群組安全直達審核連結」仍是 required acceptance。以下列出現行可操作路徑與缺少的直接證據；缺口保留 `NOT_RUN`，實際無入口／consumer 時記 `BLOCKED` 並說明原因，不得僅因程式尚未接通而標為 superseded 或 passed。
 
 ## M4-01 異常通知群組設定
 
@@ -763,9 +765,9 @@ POST /api/v1/matching/coordination/conversion/apply
 設定異常通知群組
 ```
 
-驗證「第一次綁定 → 正式 reset 停用 → 在同一群組重新輸入指令」：重新綁定沿用同一筆 target，不建立重複群組紀錄，也不重設原通知門檻。已啟用的同群重複設定不重做 mutation；舊 Webhook event 重播不得把已停用的群組復活。
+驗證「第一次綁定 → 正式 reset 停用 → 在同一群組重新輸入指令」：重新綁定沿用同一筆 target，不建立重複群組紀錄，也不重設原通知門檻。已啟用的同群重複設定不重做 mutation；已處理的舊 Webhook event 重播不得把已停用的群組復活。
 
-若另一個群組已啟用，應回報 `line_alert_group_already_active`，不得自動覆蓋。需要切換時，由管理員先正式 reset 目前群組，再於目標群組送出新的設定指令。
+若另一個群組已啟用，應回報 `line_alert_group_already_active`，不得自動覆蓋。需要切換時，由管理員先正式 reset 目前群組，再於目標群組送出新的設定指令。多個啟用群組是 `line_alert_group_singleton_violation`，不是任選一群。
 
 ### Current owner
 
@@ -789,8 +791,8 @@ Current persistence owner 為 `line_alert_notification_targets` 等 runtime aler
 
 ### Agent 前置
 
-- 確認 alert target 已 ready；一個啟用群組與管理員通知對象可以並存，客服告警優先選取唯一啟用群組。
-- 確認 `LINE_PUBLIC_BASE_URL` 或 `BASE_URL` 指向可供手機開啟的本站 HTTPS 位址。缺少管理入口設定時會回報 `human_escalation_management_url_unavailable`，不能把未形成可用入口的告警當作通過。
+- 確認 alert target 已 ready；一個啟用群組與管理員通知對象可以並存，客服告警優先選取唯一啟用群組。沒有群組時只保留既有單一管理員行為；多個管理員不任選一人。
+- 確認 `LINE_PUBLIC_BASE_URL` 或 `BASE_URL` 指向可供手機開啟的本站 HTTPS 位址。缺少／無效設定時會回報 `human_escalation_management_url_unavailable`；catalog「開啟客服系統」缺失時為 `human_escalation_management_entry_unavailable`。URL 格式通過不等於手機可連線，須分別記錄。
 - 確認 Customer Service readback 可用，記錄測試帳號是否已有工單或 active hold。已有 active hold 的追加訊息與新客訴 ingress 分開驗收。
 - 不先建立假 HIGH escalation。
 
@@ -820,8 +822,8 @@ complaint
 - HIGH escalation 必須由 owner 產生，不可由 fixture 預先 INSERT。
 - 群組內容需去識別化，並包含本站 `/line-mobile-admin?target=customer_service` 導航。這不是授權 token，進入後仍須驗證管理員身分。
 - 已結案工單收到新訊息後，可沿原工單重新進入 handling；新的 escalation 應能完成 claim／handling，而不是 Preview 成功、Apply 卻因僅接受 waiting 而失敗。過期版本仍應拒絕。
-- 工會完成客服結案後，客戶應收到恢復 AI 的通知，且 delivery 有 terminal readback。該通知屬於 `customer_service_ticket`，不得覆寫原群組告警的 delivery outcome。
-- 分別記錄工單／hold、群組告警與客戶結案通知結果；收到其中一則訊息不代表整條鏈通過。
+- 工會完成客服結案後，客戶應收到恢復 AI 的通知，且 delivery 有 terminal readback。該通知屬於 `customer_service_ticket` 與 ticket id；群組告警才使用 `customer_service_escalation` 與 `escalation:<id>`，兩者不得互相覆寫 outcome。
+- 分別記錄工單／hold、群組告警與客戶結案通知結果；收到其中一則訊息不代表整條鏈通過。原本已失敗或結果未知的任務不因更新程式自動恢復，未讀回結果前不得盲目重送。
 
 ---
 
@@ -838,24 +840,35 @@ Agent 準備一筆**合法待審 root fact**，例如由正式 profile/rebind fl
 3. 查看去敏摘要/diff，Preview approve/reject。
 4. 人工確認後由對應 owner Apply，讀回 receipt。
 
-### Safe Review Link 另行驗收
+### Safe Review Link：required acceptance 另列證據
 
-短效一次性 Safe Review Link 與一般 mobile-admin 導航是不同契約，不因告警附了導航 URL 就把一次性 token 流程標為通過。
+短效一次性 Safe Review Link 與一般 mobile-admin 導航是不同契約。規格 26 §9 / §9.1 的 `R4-SAFE-LINK` 仍要求 alert intent／outbox／task 指向 canonical review target，並在 mobile UI 證明 expiry、replay、revocation、wrong actor 等失敗結果。PR #299 的普通導航與版本回歸測試沒有證明這條完整鏈；本輪該直接流程仍為 `NOT_RUN`，不得改列 optional 或以頁面存在替代。
 
-Current API 為 `/api/v1/runtime/line-safe-review-links` 的 issue／query／redeem／revoke。Issue 時由伺服器在同一交易中讀取並鎖定唯一啟用的 runtime alert group，將 owner target id 與 opaque current_version 保存到既有 issued event；Redeem 必須重新讀取 owner facts，不以頁面送來的數字版本取代。群組變更、停用、同群停用後重新啟用，皆應使原連結無法兌換。修正前缺少伺服器版本 evidence 的舊連結必須重新簽發，不能猜測版本補過。
+現行 API：
+
+```text
+POST /api/v1/runtime/line-safe-review-links
+GET  /api/v1/runtime/line-safe-review-links/{link_id}
+POST /api/v1/runtime/line-safe-review-links/{link_id}/redeem
+POST /api/v1/runtime/line-safe-review-links/{link_id}/revoke
+```
+
+新的 Issue 在同一交易中讀取並鎖定唯一啟用 runtime alert group，將 server-owned `target_id` 與 opaque `current_version` 保存到既有 immutable `issued` event 的 `runtime_alert_target` 欄位。第一次 Redeem 重讀 owner facts並比對該 evidence；body 的數字 `target_version` / `current_target_version` 仍須一致，但不是 runtime owner 的版本，也不是 profile／assignment 等業務 owner 的版本證明。
+
+群組更換、停用或同群重新啟用造成版本變更時，原連結不得首次兌換成功。修正前缺少伺服器版本 evidence 的舊連結須重新簽發，不能猜測或補造 evidence；exact command replay 只讀回已存在 receipt，不產生第二次兌換。此描述不授權實際簽發、撤銷或改變告警設定，測試操作仍依該次明確範圍執行。
 
 ### 驗收
 
 - token／actor／capability／target／版本錯誤時 fail closed；連結過期、撤銷與非同命令重播亦須拒絕。
 - 實際改變 runtime target 後，以舊頁面原樣提交也不得通過；目標未變時可兌換，同一 idempotency key 可讀回原收據而不重做 mutation。
 - Safe Review Link 只處理已定義的 transport／runtime target 邊界；profile、assignment 等業務版本仍由各 owner 的正式 Preview／Apply 檢查。
-- Preview 不應直接寫正式資料；Apply 有 receipt/readback。
+- 業務 Preview 不應直接寫正式資料；Apply 有 receipt/readback。一般導航、link API 與業務核准各自記錄結果，不能相互替代。
 
 ---
 
 ## M4-04 月嫂請假與代班
 
-依規格 20 §5.3，本案例是「月嫂提交待辦 → 工會受理 → 案件行事曆正式排班處理」，不是月嫂提交後就自動改班或自動發送客戶順延決策卡。原圖自動協調敘述以 current owner-safe 流程取代。
+規格 20 §5.3 明定 LIFF intake 只建立 Scheduling 待辦，不直接改正式班表；目前已追到的操作路徑是「月嫂提交待辦 → 工會受理 → 案件行事曆正式排班處理」。這個 owner 邊界並未取消規格 26 §9 的客戶同意／拒絕、通知及 due-shift rematch 驗收。v2.1「原圖自動協調敘述以 current owner-safe 流程取代」欠缺明確取消依據，本版撤回該判斷。
 
 ### Agent 一鍵前置
 
@@ -866,15 +879,21 @@ Agent：
 3. 建 current assignment/scheduling root facts。
 4. bootstrap 案件架構。
 5. 確認 staff A 有可請假的 service day。
-6. 確認操作角色：受理待辦需管理員，正式 `leave-substitution` API 目前需 `system_admin`。
+6. 核對目前使用者可通過請假受理與正式 `leave-substitution` 端點的既有授權檢查；不可只由 `require_system_admin` 函式名稱推導新的角色／升權需求。
 7. 停在「staff A 可從手機提出請假」的狀態，不預先建立代班結果。
 
-### 手機與管理後台操作
+### 現行可操作路徑：手機與管理後台
 
 1. staff A 從班表／請假頁面填寫日期與原因，Preview 後確認 Apply；readback 應為 pending 待辦。
 2. 工會於請假待辦受理，readback 為 `accepted_for_processing`；這不等於正式排班已變更。
 3. 工會完成必要聯繫後，在既有案件行事曆選取原服務日，處理順延或 staff B 代班，Preview 並確認正式 Apply。
 4. 正式處理時連結該請假 request id 與版本；成功後待辦成為 resolved，保存代班 receipt linkage，並排入 staff A 的完成通知。
+
+### 仍需證明的客戶決策／通知鏈
+
+規格 26 §9 的「請假同意／拒絕與 due-shift rematch」要求 Scheduling 讀回 leave／availability、notification intent／outbox／task；Agree 經 owner Apply更新 end_date／班表，Disagree 建立 substitute ticket，due-shift rematch 經 fresh Preview／Apply形成相應 readback。
+
+目前 intake 提交／受理本身不建立客戶順延決策卡，PR #299 也未接通這一段。不得在月嫂提交後無條件期待客戶立即收到卡片，但也不得因此刪掉此驗收項。客戶端接收、同意／拒絕、owner receipt、拒絕後 ticket及後續通知逐項保留 `NOT_RUN`；若待測版本沒有可操作入口或 consumer，回報具體 `BLOCKED`。工會人工聯繫與日曆 Apply可證明其自身流程，不能假裝已驗證 LINE 客戶決策鏈。
 
 ### Current API 與驗收
 
@@ -888,7 +907,7 @@ POST /api/v1/orders/{case_no}/leave-substitution/preview
 POST /api/v1/orders/{case_no}/leave-substitution/apply
 ```
 
-Current intake root 為 `scheduling_staff_leave_request_aggregates`，並有 events／receipts。正式 substitution 必須走 Scheduling/Leave owner；確認正式 service-day／assignment 變化、linked request、receipt 與完成通知，不以直接 UPDATE schedule 作為 pass。僅建立或受理待辦而尚未正式 Apply 時，不應期待 Payroll 已產生代班款項。
+Current intake root 為 `scheduling_staff_leave_request_aggregates`，並有 events／receipts。正式 substitution 必須走 Scheduling/Leave owner；確認正式 service-day／assignment 變化、linked request、receipt 與完成通知，不以直接 UPDATE schedule 作為 pass。僅建立或受理待辦而尚未正式 Apply 時，不應期待 Payroll 已產生代班款項。現行路徑與上述尚缺的決策链分開記錄，不把單段成功升格為 M4-04 全項通過。
 
 ---
 
@@ -896,7 +915,7 @@ Current intake root 為 `scheduling_staff_leave_request_aggregates`，並有 eve
 
 ### Agent 前置
 
-可直接沿用 M4-04 已完成的測試案件；Agent 不得另造假的 payroll result。
+可直接沿用 M4-04 已完成正式代班 Apply 的測試案件；這不代表 M4-04 客戶決策鏈亦已通過。Agent 不得另造假的 payroll result。
 
 Agent 執行 repository-local readback：
 
@@ -910,6 +929,7 @@ Agent 執行 repository-local readback：
 - 原月嫂與代班月嫂各自有正確 payable obligation。
 - 金額來源可追到 assignment/service facts。
 - 不再以舊版泛稱 `payroll_items` 是否有兩列作為唯一驗收。
+- 規格 26 §9 要求 Scheduling → Payroll → Staff Payables evidence／anomaly projection 的 exact subject、版本與 owner receipt。只有 typed GET或兩列金額不能代替跨域驗收；本輪未驗證的金額及實際資料鏈仍為 `NOT_RUN`。
 
 ---
 
@@ -920,7 +940,7 @@ Agent 執行 repository-local readback：
 ```text
 請替我準備 LINE 手機測試案例 <TEST-ID>。
 限制：只能使用 development/test 環境，不觸發 production，不替我執行手機上的最終決策。
-先讀 current main 的 owner/API/schema；能用 Preview/Apply 就不能直接 SQL。
+先確認本次待驗證 Git ref 與實際執行版本，再讀該版本的 owner/API/schema；能用 Preview/Apply 就不能直接 SQL。
 若沒有正式建立訂單 API，可以建立 PRECONDITION_FIXTURE，但不得直接寫被測流程的 event/outbox/receipt/result。
 完成後請只回傳「手機測試包」：case_no、client/staff 測試識別、目前狀態、你已做的前置、我手機接下來要點的 3~5 步、預期結果、cleanup。
 ```
@@ -940,7 +960,8 @@ Agent 執行 repository-local readback：
 請替我準備 M4-04 請假代班手機測試。
 建立 development test order、client A、staff A、staff B、assignment 與可請假的 service day，必要時完成 architecture bootstrap。
 不得直接製造 leave/substitution/payroll 成功結果。
-停在 staff A 可以從 LINE 送出請假待辦的狀態，回傳月嫂手機、工會受理與案件行事曆正式 Preview／Apply 各自的操作及 readback 點；不要預期提交待辦本身會自動詢問客戶。
+停在 staff A 可以從 LINE 送出請假申請的狀態，回傳月嫂手機、工會受理及案件行事曆正式處理各自的操作與 readback 點。
+另列規格 26 客戶同意／拒絕與通知鏈可執行的入口和證據；尚未接通時標 NOT_RUN/BLOCKED，不以人工聯繫代替該項通過。
 ```
 
 ## 8.4 重用單一 LINE 帳號
@@ -1008,6 +1029,7 @@ B = staff
 → M3 zero pool/customer decision
 → M3 match success 雙 recipient
 → M4 staff leave／工會受理／案件行事曆 substitution
+→ 客戶同意／拒絕及通知鏈另依 M4-04 缺口記錄，不自動視為通過
 ```
 
 這樣不需要為每個案例重新人工建立訂單或手動改資料庫；Agent 應先把案件準備到「手機下一步就能操作」的狀態。
@@ -1033,6 +1055,7 @@ B = staff
 | Matching operations | `/criteria/*`, `/criteria-diff/*`, `/caregiver-willingness/*`, `/zero-pool/*`, `/customer-decision/*`, `/conversion/*` |
 | Case architecture bootstrap | `/api/v1/cases/{case_no}/architecture-bootstrap/*` |
 | Alert target | `/api/v1/runtime/line-alert-targets`；同群重新啟用見 M4-01 |
+| Safe Review Link | `/api/v1/runtime/line-safe-review-links`；首次簽發／兌換重驗 runtime group owner，與普通導航分開驗收 |
 | Customer Service | current `customer_service_tickets` + escalation owner |
 | Leave intake root | `scheduling_staff_leave_request_aggregates` + events／receipts |
 | Formal leave/substitution | `/api/v1/orders/{case_no}/leave-substitution/preview`、`/apply` |
@@ -1042,7 +1065,7 @@ B = staff
 
 ## 文件維護規則
 
-- 此文件描述的是 **current 可操作測試方法**，不是保存舊版 API 的歷史文件；尚在 PR 的修正依文件版本註記核對，不推定 main 或測試環境已更新。
+- 此文件描述的是 **current 可操作測試方法與尚缺的 required acceptance evidence**，不是保存舊版 API 的歷史文件；尚在 PR 的修正依文件版本註記核對，不推定 main 或測試環境已更新。
 - main 若修改 route/schema/owner，應同步更新此手冊。
-- Eraser 原始業務流程仍以正式基線保存；如果原圖與 current owner-safe implementation 不同，本手冊應寫 current 驗收方法，並標示 supersession，而不是要求測試者呼叫已不存在的 API。
+- Eraser 原始業務流程及有效驗收以正式基線保存。只有最新明確指示或正式契約已取代原要求時才標 superseded；實作缺漏、普通導航、人工聯繫或局部測試通過，都不構成取消原驗收的依據。失效 API 應修正為現行入口，無入口的要求保留缺口，不要求測試者呼叫虛構 API。
 - 禁止在此手冊寫任何 API Key、LINE Channel Secret、access token、管理員真密碼或 production credential。
