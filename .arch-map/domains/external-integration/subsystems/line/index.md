@@ -51,7 +51,7 @@
 既有 owner `subsystems/line/runtime_alert_target_application.py::register_group` 承接
 `order_group_application.py` 中已驗證管理員送出的「設定異常通知群組」。正式 reset 保留
 歷史並停用 target；其後同群的新指令可重新啟用原 row，保留 target id／minimum_status，
-並保存前後 state／version 的 receipt及audit。此変更不授權清除歷史或自動取代另一啟用群組。
+並保存前後 state／version 的 receipt及audit。此變更不授權清除歷史或自動取代另一啟用群組。
 
 同群已 active 時不重做 target mutation；已處理的舊 event 重播只回既有 receipt，不把
 後來停用的群組復活。另一群 active 或多群 active 時拒絕；沿用 advisory lock、caller UoW、
@@ -63,10 +63,11 @@
 `delivery_worker.py` 每次只 claim 即將處理的一筆，保留每輪預設25筆上限；送出前確認
 同一未過期lease及取消狀態。Reply 5xx不確定結果不得立即Push，亦不自動重試該不確定回答。
 
-`line_platform_identity_repository.py`及`line_identity_repository.py`保存晚到的好友事件，
-但不倒退最新好友狀態；`webhook_identity_handlers.py`的舊follow不新建歡迎訊息／flow，
-舊unfollow不取消目前通知，一般message仍處理。文字「未解決」建單失敗須傳回consumer
-rollback／retry，不能排入成功通報；這不改變Feedback owner的root／receipt契約。
+`infrastructure/mysql/line_platform_identity_repository.py`保存晚到的好友事件與版本紀錄，
+同一 adapter 內的 canonical 狀態與 legacy `line_users` 投影都不倒退；
+`webhook_identity_handlers.py`的舊follow不新建歡迎訊息／flow，舊unfollow不取消目前通知，
+一般message仍處理。文字「未解決」建單失敗須傳回consumer rollback／retry，不能排入
+成功通報；這不改變Feedback owner的root／receipt契約。
 
 ## Verification routing
 layout_status: `custom_current`
