@@ -1,0 +1,61 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-historical-manual-beclass-origin-2026-09-14-v1",
+  "release_metadata": {
+    "release_name": "Labor Union historical manual BeClass origin",
+    "application_version": "historical-manual-beclass-origin-v1",
+    "published_at": "2026-09-14",
+    "description": "Preserve imported BeClass evidence while allowing historical cases without an import row to receive audited admin-entered effective data"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": ["absent", "exact"],
+    "forbidden_owned_object_states": ["partial", "drift"],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-order-service-hours-half-precision-2026-09-14-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1041_historical_manual_beclass_origin.sql",
+      "relative_path": "db/schema_parts/1041_historical_manual_beclass_origin.sql",
+      "sha256": "e2dfcd01793e7cfdf5020564f4554793088313da488777514f27d5e67c86d450",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "forward-only-preserve-imported-beclass-evidence",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "beclass-record-origin-column-exact",
+      "phase": "post-schema",
+      "policy": "beclass_records.record_origin distinguishes imported evidence from admin-manual historical containers",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": ["historical-manual-beclass-origin-v1"],
+    "required_restart_targets": ["api"],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": ["beclass-record-origin-column-exact"]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_09_14_historical_manual_beclass_origin_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_09_14_historical_manual_beclass_origin_v1.descriptors.json",
+    "sha256": "6ba9ac9ef368e7945c81a4130b11b2561f4bd6f6ac0a0616df76cb8e1d124e76",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": ["--single-transaction", "--routines", "--events", "--triggers", "--hex-blob"],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

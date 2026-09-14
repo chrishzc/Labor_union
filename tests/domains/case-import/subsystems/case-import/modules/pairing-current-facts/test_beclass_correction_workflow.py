@@ -6,7 +6,11 @@ import pytest
 
 from infrastructure.mysql.beclass_correction_repository import MySqlBeClassCorrectionRepository
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
-from subsystems.case_import.beclass_correction_workflow import BeClassCorrectionConflict, BeClassCorrectionWorkflow
+from subsystems.case_import.beclass_correction_workflow import (
+    BeClassCorrectionConflict,
+    BeClassCorrectionSnapshot,
+    BeClassCorrectionWorkflow,
+)
 
 
 class _Uow(AbstractContextManager):
@@ -21,17 +25,18 @@ class _Uow(AbstractContextManager):
 
 
 class _Repository:
-    def __init__(self):
+    def __init__(self, *, manual=False):
         self.original = {"name": "原始姓名", "phone": "0911111111"}
         self.corrections = {}
         self.version = 0
+        self.manual = manual
         self.claims = {}
         self.receipts = {}
 
     def load(self, case_no, *, for_update):
         if case_no != "CASE-001":
             return None
-        return {"beclass_record_id": 12, "case_no": case_no, "aggregate_version": self.version, "original": dict(self.original), "corrections": dict(self.corrections)}
+        return {"beclass_record_id": None if self.manual and self.version == 0 else 12, "case_no": case_no, "aggregate_version": self.version, "original": dict(self.original), "corrections": dict(self.corrections), "source_kind": "admin_manual" if self.manual else "imported"}
 
     def claim(self, *, key, command_fingerprint, **_):
         previous = self.claims.setdefault(key.value, command_fingerprint.value)
@@ -44,7 +49,7 @@ class _Repository:
     def persist(self, *, snapshot, after, **_):
         self.corrections = dict(after)
         self.version = snapshot.version + 1
-        return self.version
+        return 12, self.version
 
     def save_receipt(self, *, key, command_fingerprint, result, **_):
         self.receipts[key.value] = {"request_fingerprint": command_fingerprint.value, "result": dict(result)}
@@ -84,10 +89,37 @@ def test_beclass_correction_accepts_only_canonical_multi_birth_count():
         )
 
 
+def test_historical_manual_beclass_can_be_created_without_an_imported_record():
+    repository = _Repository(manual=True)
+    repository.original = {"name": None, "phone": None, "multi_birth_count": None}
+    workflow = BeClassCorrectionWorkflow(repository, _Uow)
+    preview = workflow.preview(
+        "CASE-001",
+        {"name": "歷史客戶", "multi_birth_count": "雙胞胎"},
+        ExpectedVersion(0),
+    )
+
+    receipt = workflow.apply(
+        "CASE-001",
+        {"name": "歷史客戶", "multi_birth_count": "雙胞胎"},
+        ExpectedVersion(0),
+        preview.preview_fingerprint,
+        IdempotencyKey("manual-beclass-1"),
+        ActorContext("admin:9"),
+        "歷史案件後台補登",
+        CorrelationId("manual-beclass-corr-1"),
+    )
+
+    assert receipt.beclass_record_id == 12
+    assert receipt.readback.source_kind == "admin_manual"
+    assert receipt.readback.effective["multi_birth_count"] == "雙胞胎"
+
+
 class _SqlCursor:
-    def __init__(self):
-        self.responses = iter([
-            ({"beclass_record_id": 12, "case_no": "CASE-001", "name": "原始姓名", "email": None, "phone": "0911111111", "tel": None, "ext": None, "city": None, "zip_code": None, "address": None, "admin_notes": None},),
+    def __init__(self, responses=None):
+        self.responses = iter(responses or [
+            {"case_no": "CASE-001", "status": "歷史訂單－服務完成"},
+            ({"beclass_record_id": 12, "case_no": "CASE-001", "record_origin": "imported", "name": "原始姓名", "email": None, "phone": "0911111111", "tel": None, "ext": None, "city": None, "zip_code": None, "address": None, "admin_notes": None},),
             {"aggregate_version": 3, "effective_values_json": '{"phone":"0922222222"}'},
         ])
         self.statements = []
@@ -111,8 +143,8 @@ class _SqlCursor:
 
 
 class _SqlConnection:
-    def __init__(self):
-        self.cursor_instance = _SqlCursor()
+    def __init__(self, responses=None):
+        self.cursor_instance = _SqlCursor(responses)
 
     def cursor(self):
         return self.cursor_instance
@@ -124,7 +156,94 @@ def test_beclass_mysql_correction_locks_unique_bound_case_not_import_query_numbe
     snapshot = MySqlBeClassCorrectionRepository(connection).load("CASE-001", for_update=True)
 
     statements = [statement for statement, _ in connection.cursor_instance.statements]
-    assert "WHERE bound_case_no=%s" in statements[0]
-    assert "ORDER BY id LIMIT 2 FOR UPDATE" in statements[0]
+    assert "FROM orders WHERE case_no=%s FOR UPDATE" in statements[0]
+    assert "WHERE bound_case_no=%s" in statements[1]
+    assert "ORDER BY id LIMIT 2 FOR UPDATE" in statements[1]
     assert "query_no" not in " ".join(statements)
     assert snapshot["corrections"] == {"phone": "0922222222"}
+
+
+def test_beclass_mysql_correction_exposes_empty_manual_source_for_historical_order():
+    connection = _SqlConnection([
+        {"case_no": "CASE-HISTORY", "status": "歷史訂單－帳務完成"},
+        (),
+    ])
+
+    snapshot = MySqlBeClassCorrectionRepository(connection).load(
+        "CASE-HISTORY", for_update=False
+    )
+
+    assert snapshot == {
+        "beclass_record_id": None,
+        "case_no": "CASE-HISTORY",
+        "aggregate_version": 0,
+        "original": {
+            "name": None, "email": None, "phone": None, "tel": None,
+            "ext": None, "city": None, "zip_code": None, "address": None,
+            "admin_notes": None, "multi_birth_count": None,
+        },
+        "corrections": {},
+        "source_kind": "admin_manual",
+    }
+
+
+def test_beclass_mysql_correction_does_not_create_manual_source_for_current_order():
+    connection = _SqlConnection([
+        {"case_no": "CASE-CURRENT", "status": "洽談中"},
+        (),
+    ])
+
+    assert MySqlBeClassCorrectionRepository(connection).load(
+        "CASE-CURRENT", for_update=False
+    ) is None
+
+
+def test_beclass_mysql_correction_creates_a_marked_manual_container_on_first_apply():
+    class _PersistCursor:
+        lastrowid = 44
+
+        def __init__(self):
+            self.statements = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def execute(self, statement, parameters):
+            self.statements.append((" ".join(statement.split()), parameters))
+
+    class _PersistConnection:
+        def __init__(self):
+            self.cursor_instance = _PersistCursor()
+
+        def cursor(self):
+            return self.cursor_instance
+
+    connection = _PersistConnection()
+    snapshot = BeClassCorrectionSnapshot(
+        None,
+        "CASE-HISTORY",
+        0,
+        {"name": None},
+        {"name": None},
+        "admin_manual",
+    )
+
+    result = MySqlBeClassCorrectionRepository(connection).persist(
+        snapshot=snapshot,
+        after={"name": "歷史客戶"},
+        actor=ActorContext("admin:9"),
+        reason="歷史案件後台補登",
+        key=IdempotencyKey("manual-beclass-1"),
+        correlation_id=CorrelationId("manual-beclass-corr-1"),
+    )
+
+    assert result == (44, 1)
+    first_statement, first_parameters = connection.cursor_instance.statements[0]
+    assert "INSERT INTO beclass_records (bound_case_no,record_origin)" in first_statement
+    assert "'admin_manual'" in first_statement
+    assert first_parameters == ("CASE-HISTORY",)
+    assert connection.cursor_instance.statements[1][1][0] == 44
+    assert connection.cursor_instance.statements[2][1][0] == 44

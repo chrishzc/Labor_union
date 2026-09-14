@@ -42,7 +42,7 @@ const OrderInformationSection: React.FC<{ detail: ClientRegistryDetail }> = ({ d
   if (section.status !== 'ready' || !section.values) {
     return <section className="registry-editor"><h3>照護與特殊計費資料</h3><p>{section.status === 'duplicate_binding' ? '同一案件綁定多筆 BeClass，無法判定訂單資訊來源。' : '此案件尚未綁定 BeClass 紀錄，沒有可顯示的訂單資訊。'}</p></section>;
   }
-  return <section className="registry-editor"><h3>照護與特殊計費資料</h3><small>資料來源：BeClass 原始訂單資訊（唯讀）</small><dl className="registry-information-fields">{Object.entries(orderInformationLabels).map(([field, label]) => <div key={field}><dt>{label}</dt><dd className={section.field_issues[field] ? 'source-issue' : undefined}>{section.field_issues[field] ? '來源內容無法判定' : displayOrderInformationValue(section.values?.[field as keyof typeof section.values] ?? null)}</dd></div>)}</dl></section>;
+  return <section className="registry-editor"><h3>照護與特殊計費資料</h3><small>資料來源：{detail.beclass.source_kind === 'admin_manual' ? '後台人工補登（目前未登錄的欄位顯示為空）' : 'BeClass 原始訂單資訊（唯讀）'}</small><dl className="registry-information-fields">{Object.entries(orderInformationLabels).map(([field, label]) => <div key={field}><dt>{label}</dt><dd className={section.field_issues[field] ? 'source-issue' : undefined}>{section.field_issues[field] ? '來源內容無法判定' : displayOrderInformationValue(section.values?.[field as keyof typeof section.values] ?? null)}</dd></div>)}</dl></section>;
 };
 
 const ClientRegistryEditor: React.FC = () => {
@@ -96,7 +96,7 @@ const ClientRegistryEditor: React.FC = () => {
       const version = owner === 'profile' ? detail.client.version : detail.beclass.version ?? 0;
       await clientRegistryClient.apply(detail.case_no, owner, changed[owner] as ClientProfileChanges | BeClassChanges, version, approvedPreview.preview_fingerprint, auditReason(owner), action.idempotencyKey);
       await loadDetail(detail.case_no);
-      setMessage(owner === 'profile' ? '客戶主檔已儲存。' : 'BeClass 有效資料已儲存，原始匯入值未被覆寫。');
+      setMessage(owner === 'profile' ? '客戶主檔已儲存。' : detail.beclass.source_kind === 'admin_manual' ? '案件補登資料已儲存。' : 'BeClass 有效資料已儲存，原始匯入值未被覆寫。');
     } catch (error) { setActions((value) => ({ ...value, [owner]: { ...value[owner], message: error instanceof Error ? error.message : '儲存結果未確認，可用相同預覽安全重試。', loading: false } })); }
   };
   const editor = (owner: Owner, labels: Record<string, string>, draft: Draft, setDraft: React.Dispatch<React.SetStateAction<Draft>>) => {
@@ -107,7 +107,12 @@ const ClientRegistryEditor: React.FC = () => {
       setDraft((current) => ({ ...current, [field]: value }));
       setActions((current) => ({ ...current, [owner]: initialAction }));
     };
-    return <section className="registry-editor"><h3>{owner === 'profile' ? '客戶主檔' : 'BeClass 有效資料'}</h3><small>資料來源：{owner === 'profile' ? 'Client Profile owner' : 'Case Import / BeClass correction owner'}</small><div className="registry-fields">{Object.entries(labels).map(([field, label]) => {
+    const sourceLabel = owner === 'profile'
+      ? 'Client Profile owner'
+      : detail?.beclass.source_kind === 'admin_manual'
+        ? '後台人工補登（無 BeClass 匯入紀錄）'
+        : 'Case Import / BeClass correction owner';
+    return <section className="registry-editor"><h3>{owner === 'profile' ? '客戶主檔' : 'BeClass 有效資料'}</h3><small>資料來源：{sourceLabel}</small><div className="registry-fields">{Object.entries(labels).map(([field, label]) => {
       const options = capabilities?.[field]?.options ?? null;
       const current = draft[field] ?? '';
       const legacyValue = options && current && !options.includes(current) ? current : null;

@@ -1,5 +1,5 @@
 -- GENERATED FILE. Do not edit by hand.
--- Release: labor-union-validation-schema-2026-09-14-v35
+-- Release: labor-union-validation-schema-2026-09-14-v36
 -- Replace __LU_TEST_DATABASE__ with an explicitly confirmed lu_test_* database.
 -- Rebuild with: python scripts/build_validation_schema_release.py
 
@@ -21687,3 +21687,9 @@ ALTER TABLE orders
         AND MOD(service_hours_per_day * 2, 1) = 0
     );
 -- END SOURCE: db/schema_parts/223_order_service_hours_half_precision.sql
+
+-- BEGIN SOURCE: db/schema_parts/224_historical_manual_beclass_origin.sql
+ALTER TABLE beclass_records
+    ADD COLUMN record_origin ENUM('imported', 'admin_manual') NOT NULL DEFAULT 'imported'
+        AFTER bound_case_no;
+-- END SOURCE: db/schema_parts/224_historical_manual_beclass_origin.sql

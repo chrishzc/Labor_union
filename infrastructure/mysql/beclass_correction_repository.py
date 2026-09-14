@@ -9,7 +9,10 @@ from typing import Any
 from domains.case_import.order_information import project_order_information
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
-from subsystems.case_import.beclass_correction_workflow import BeClassCorrectionSnapshot
+from subsystems.case_import.beclass_correction_workflow import (
+    BeClassCorrectionSnapshot,
+    allows_manual_beclass_source,
+)
 
 
 _SOURCE_FIELDS = (
@@ -26,13 +29,29 @@ class MySqlBeClassCorrectionRepository:
         suffix = " FOR UPDATE" if for_update else ""
         with self._connection.cursor() as cursor:
             cursor.execute(
-                "SELECT id AS beclass_record_id,bound_case_no AS case_no,survey_details," + ",".join(_SOURCE_FIELDS)
+                "SELECT case_no,status FROM orders WHERE case_no=%s" + suffix,
+                (case_no,),
+            )
+            order = cursor.fetchone()
+            if order is None:
+                return None
+            cursor.execute(
+                "SELECT id AS beclass_record_id,bound_case_no AS case_no,record_origin,survey_details," + ",".join(_SOURCE_FIELDS)
                 + " FROM beclass_records WHERE bound_case_no=%s ORDER BY id LIMIT 2" + suffix,
                 (case_no,),
             )
             sources = tuple(cursor.fetchall() or ())
             if not sources:
-                return None
+                if not allows_manual_beclass_source(order.get("status")):
+                    return None
+                return {
+                    "beclass_record_id": None,
+                    "case_no": str(order["case_no"]),
+                    "aggregate_version": 0,
+                    "original": {field: None for field in (*_SOURCE_FIELDS, "multi_birth_count")},
+                    "corrections": {},
+                    "source_kind": "admin_manual",
+                }
             if len(sources) != 1:
                 raise ValueError("beclass_binding_ambiguous")
             source = sources[0]
@@ -57,6 +76,7 @@ class MySqlBeClassCorrectionRepository:
             "aggregate_version": int((state or {}).get("aggregate_version") or 0),
             "original": original,
             "corrections": _decode_json((state or {}).get("effective_values_json"), {}),
+            "source_kind": str(source.get("record_origin") or "imported"),
         }
 
     def claim(self, *, case_no: str, key: IdempotencyKey, command_fingerprint: PreviewFingerprint, correlation_id: CorrelationId) -> None:
@@ -99,9 +119,18 @@ class MySqlBeClassCorrectionRepository:
             "result": _decode_json(row["result_snapshot"], {}),
         }
 
-    def persist(self, *, snapshot: BeClassCorrectionSnapshot, after: Mapping[str, str | None], actor: ActorContext, reason: str, key: IdempotencyKey, correlation_id: CorrelationId) -> int:
+    def persist(self, *, snapshot: BeClassCorrectionSnapshot, after: Mapping[str, str | None], actor: ActorContext, reason: str, key: IdempotencyKey, correlation_id: CorrelationId) -> tuple[int, int]:
         resulting_version = snapshot.version + 1
         with self._connection.cursor() as cursor:
+            beclass_record_id = snapshot.beclass_record_id
+            if beclass_record_id is None:
+                if snapshot.source_kind != "admin_manual":
+                    raise ValueError("beclass_manual_source_invalid")
+                cursor.execute(
+                    "INSERT INTO beclass_records (bound_case_no,record_origin) VALUES (%s,'admin_manual')",
+                    (snapshot.case_no,),
+                )
+                beclass_record_id = int(cursor.lastrowid)
             cursor.execute(
                 "INSERT INTO beclass_record_correction_states "
                 "(beclass_record_id,aggregate_version,effective_values_json,updated_by) "
@@ -109,7 +138,7 @@ class MySqlBeClassCorrectionRepository:
                 "aggregate_version=VALUES(aggregate_version),effective_values_json=VALUES(effective_values_json),"
                 "updated_by=VALUES(updated_by)",
                 (
-                    snapshot.beclass_record_id,
+                    beclass_record_id,
                     resulting_version,
                     _json(after),
                     actor.actor_id,
@@ -121,7 +150,7 @@ class MySqlBeClassCorrectionRepository:
                 "correlation_id,before_values_json,after_values_json) "
                 "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                 (
-                    snapshot.beclass_record_id,
+                    beclass_record_id,
                     snapshot.version,
                     resulting_version,
                     actor.actor_id,
@@ -132,7 +161,7 @@ class MySqlBeClassCorrectionRepository:
                     _json(after),
                 ),
             )
-        return resulting_version
+        return beclass_record_id, resulting_version
 
     def save_receipt(self, *, key: IdempotencyKey, command_fingerprint: PreviewFingerprint, preview_fingerprint: PreviewFingerprint, actor: ActorContext, reason: str, result: Mapping[str, Any]) -> None:
         with self._connection.cursor() as cursor:

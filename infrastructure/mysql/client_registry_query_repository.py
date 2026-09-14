@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from domains.case_import.order_information import project_order_information
+from subsystems.case_import.beclass_correction_workflow import allows_manual_beclass_source
 
 
 _CLIENT_FIELDS = (
@@ -85,7 +86,7 @@ class MySqlClientRegistryQueryRepository:
     def load_detail(self, case_no: str) -> Mapping[str, Any] | None:
         with self._connection.cursor() as cursor:
             cursor.execute(
-                "SELECT c.id AS client_id,o.case_no,c.client_profile_version,"
+                "SELECT c.id AS client_id,o.case_no,o.status AS order_status,c.client_profile_version,"
                 + ",".join(f"c.{field}" for field in _CLIENT_FIELDS)
                 + " FROM orders o JOIN clients c ON c.id=o.client_id WHERE o.case_no=%s LIMIT 1",
                 (case_no,),
@@ -94,7 +95,7 @@ class MySqlClientRegistryQueryRepository:
             if client is None:
                 return None
             cursor.execute(
-                "SELECT id AS beclass_record_id,survey_details," + ",".join(_BECLASS_FIELDS)
+                "SELECT id AS beclass_record_id,record_origin,survey_details," + ",".join(_BECLASS_FIELDS)
                 + " FROM beclass_records WHERE bound_case_no=%s ORDER BY id LIMIT 2",
                 (case_no,),
             )
@@ -107,18 +108,27 @@ class MySqlClientRegistryQueryRepository:
                     (int(beclass_rows[0]["beclass_record_id"]),),
                 )
                 state = cursor.fetchone()
-        if not beclass_rows:
+        effective_values: dict[str, Any] = {}
+        if not beclass_rows and allows_manual_beclass_source(client.get("order_status")):
+            beclass_status = "ready"
+            beclass_record_id = None
+            beclass_source_kind = "admin_manual"
+            beclass_values = {field: None for field in _BECLASS_FIELDS}
+        elif not beclass_rows:
             beclass_status = "unbound"
             beclass_record_id = None
+            beclass_source_kind = None
             beclass_values = None
         elif len(beclass_rows) > 1:
             beclass_status = "duplicate_binding"
             beclass_record_id = None
+            beclass_source_kind = None
             beclass_values = None
         else:
             beclass_status = "ready"
             source = beclass_rows[0]
             beclass_record_id = int(source["beclass_record_id"])
+            beclass_source_kind = str(source.get("record_origin") or "imported")
             effective_values = _decode((state or {}).get("effective_values_json"))
             beclass_values = {field: source.get(field) for field in _BECLASS_FIELDS}
             beclass_values.update({
@@ -127,9 +137,14 @@ class MySqlClientRegistryQueryRepository:
                 if field in effective_values
             })
         if beclass_status == "ready":
-            order_information = project_order_information(beclass_rows[0].get("survey_details"))
+            order_information = project_order_information(
+                beclass_rows[0].get("survey_details") if beclass_rows else None
+            )
             order_information_values = dict(order_information.values)
-            order_information_issues = dict(order_information.issues)
+            order_information_issues = (
+                {} if beclass_source_kind == "admin_manual"
+                else dict(order_information.issues)
+            )
             if "multi_birth_count" in effective_values:
                 order_information_values["multi_birth_count"] = effective_values["multi_birth_count"]
                 order_information_issues.pop("multi_birth_count", None)
@@ -144,6 +159,7 @@ class MySqlClientRegistryQueryRepository:
             "client_values": {field: client.get(field) for field in _CLIENT_FIELDS},
             "beclass_status": beclass_status,
             "beclass_record_id": beclass_record_id,
+            "beclass_source_kind": beclass_source_kind,
             "beclass_version": int((state or {}).get("aggregate_version") or 0),
             "beclass_values": beclass_values,
             "order_information_values": order_information_values,

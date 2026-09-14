@@ -73,6 +73,11 @@
   - `db/schema_parts/1040_order_service_hours_half_precision.sql`
   - `db/migration_releases/labor_union_2026_09_14_order_service_hours_half_precision_v1.json`
   - `db/migration_releases/labor_union_2026_09_14_order_service_hours_half_precision_v1.descriptors.json`
+- current historical manual BeClass origin release:
+  - `db/schema_parts/224_historical_manual_beclass_origin.sql` (fresh bootstrap successor)
+  - `db/schema_parts/1041_historical_manual_beclass_origin.sql`
+  - `db/migration_releases/labor_union_2026_09_14_historical_manual_beclass_origin_v1.json`
+  - `db/migration_releases/labor_union_2026_09_14_historical_manual_beclass_origin_v1.descriptors.json`
 
 ## Contracts
 - Source read-only、candidate identity、release classification、backup／journal／resume及
@@ -86,6 +91,7 @@
 - integration_root: `tests/test_order_lifecycle_pending_status_constraint_schema.py`
 - contract: `tests/domains/global/subsystems/migration/modules/preserved-database-upgrade/contract/test_registry_owner_mutations_schema.py`
 - contract: `tests/domains/global/subsystems/migration/modules/preserved-database-upgrade/contract/test_order_service_hours_half_precision_schema.py`
+- contract: `tests/domains/global/subsystems/migration/modules/preserved-database-upgrade/contract/test_historical_manual_beclass_origin_schema.py`
 
 ## Provenance
 - Preserve-data upgrade is a Global Migration capability distinct from fresh reset —

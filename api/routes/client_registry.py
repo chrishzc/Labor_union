@@ -143,6 +143,7 @@ def get_client_registry(
             "beclass": {
                 "status": detail.beclass.status,
                 "record_id": detail.beclass.record_id,
+                "source_kind": detail.beclass.source_kind,
                 "version": detail.beclass.version,
                 "values": detail.beclass.values,
                 "field_capabilities": _field_capabilities(

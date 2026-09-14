@@ -1,0 +1,23 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-historical-manual-beclass-origin-2026-09-14-v1",
+  "descriptors": {
+    "1041_historical_manual_beclass_origin.sql": {
+      "tables": {},
+      "parent_columns": {
+        "beclass_records": {
+          "record_origin": {
+            "column_type": "enum('imported','admin_manual')",
+            "is_nullable": "NO",
+            "column_default": "imported",
+            "extra": ""
+          }
+        }
+      },
+      "indexes": {},
+      "foreign_keys": {},
+      "checks": {},
+      "triggers": []
+    }
+  }
+}

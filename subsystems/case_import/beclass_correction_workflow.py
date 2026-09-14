@@ -7,11 +7,25 @@ from dataclasses import dataclass
 from typing import Any, Callable, Protocol
 
 from domains.case_import.beclass_correction import normalize_beclass_changes
+from domains.orders.lifecycle import OrderLifecycleStatus
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 
 
 _COMMAND_FAMILY = "client_beclass_correction/v1"
+_HISTORICAL_MANUAL_STATUSES = frozenset({
+    OrderLifecycleStatus.HISTORICAL_UNSERVED,
+    OrderLifecycleStatus.HISTORICAL_IN_SERVICE,
+    OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED,
+    OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED,
+})
+
+
+def allows_manual_beclass_source(order_status: object) -> bool:
+    try:
+        return OrderLifecycleStatus(str(order_status)) in _HISTORICAL_MANUAL_STATUSES
+    except ValueError:
+        return False
 
 
 class BeClassCorrectionNotFound(LookupError):
@@ -24,11 +38,12 @@ class BeClassCorrectionConflict(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class BeClassCorrectionSnapshot:
-    beclass_record_id: int
+    beclass_record_id: int | None
     case_no: str
     version: int
     original: Mapping[str, str | None]
     effective: Mapping[str, str | None]
+    source_kind: str = "imported"
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,7 +72,7 @@ class BeClassCorrectionRepository(Protocol):
     def load(self, case_no: str, *, for_update: bool) -> Mapping[str, Any] | None: ...
     def claim(self, *, case_no: str, key: IdempotencyKey, command_fingerprint: PreviewFingerprint, correlation_id: CorrelationId) -> None: ...
     def load_receipt(self, key: IdempotencyKey, *, for_update: bool) -> Mapping[str, Any] | None: ...
-    def persist(self, *, snapshot: BeClassCorrectionSnapshot, after: Mapping[str, str | None], actor: ActorContext, reason: str, key: IdempotencyKey, correlation_id: CorrelationId) -> int: ...
+    def persist(self, *, snapshot: BeClassCorrectionSnapshot, after: Mapping[str, str | None], actor: ActorContext, reason: str, key: IdempotencyKey, correlation_id: CorrelationId) -> tuple[int, int]: ...
     def save_receipt(self, *, key: IdempotencyKey, command_fingerprint: PreviewFingerprint, preview_fingerprint: PreviewFingerprint, actor: ActorContext, reason: str, result: Mapping[str, Any]) -> None: ...
 
 
@@ -137,7 +152,7 @@ class BeClassCorrectionWorkflow:
             if preview.preview_fingerprint != preview_fingerprint:
                 raise BeClassCorrectionConflict("beclass_correction_stale_preview")
             effective_after = {**snapshot.effective, **normalized}
-            resulting_version = self._repository.persist(
+            beclass_record_id, resulting_version = self._repository.persist(
                 snapshot=snapshot,
                 after=effective_after,
                 actor=actor,
@@ -146,7 +161,7 @@ class BeClassCorrectionWorkflow:
                 correlation_id=correlation_id,
             )
             result = {
-                "beclass_record_id": snapshot.beclass_record_id,
+                "beclass_record_id": beclass_record_id,
                 "case_no": identity,
                 "resulting_version": resulting_version,
                 "changed_fields": sorted(normalized),
@@ -193,12 +208,19 @@ class BeClassCorrectionWorkflow:
 def _snapshot(row: Mapping[str, Any]) -> BeClassCorrectionSnapshot:
     original = dict(row["original"])
     effective = {**original, **dict(row.get("corrections") or {})}
+    source_kind = str(row.get("source_kind") or "imported")
+    record_id = int(row["beclass_record_id"]) if row.get("beclass_record_id") is not None else None
+    if source_kind not in {"imported", "admin_manual"}:
+        raise ValueError("beclass_source_kind_invalid")
+    if record_id is None and source_kind != "admin_manual":
+        raise ValueError("beclass_manual_source_invalid")
     return BeClassCorrectionSnapshot(
-        int(row["beclass_record_id"]),
+        record_id,
         str(row["case_no"]),
         int(row.get("aggregate_version") or 0),
         original,
         effective,
+        source_kind,
     )
 
 
@@ -229,4 +251,5 @@ __all__ = [
     "BeClassCorrectionReceipt",
     "BeClassCorrectionSnapshot",
     "BeClassCorrectionWorkflow",
+    "allows_manual_beclass_source",
 ]

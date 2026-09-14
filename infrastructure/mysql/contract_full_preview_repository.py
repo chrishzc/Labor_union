@@ -5,11 +5,20 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from datetime import date, datetime
+from decimal import Decimal
 import re
 from typing import Any
 
 from domains.case_import.order_information import project_order_information
 from domains.client_finance.subsidy_coverage import derive_subsidy_coverage
+from domains.payroll.calculation import (
+    AssignmentRateSnapshot,
+    OfficialAssignmentServiceFacts,
+    PayrollPolicyKind,
+    PayrollTerms,
+    build_case_payroll_candidate,
+)
+from domains.payroll.payment_due_date import calculate_staff_payment_due_date
 from infrastructure.mysql.contract_context_repository import MySqlContractContextRepository
 from infrastructure.mysql.order_terms_read_model import (
     load_contract_client_finance_facts,
@@ -17,6 +26,7 @@ from infrastructure.mysql.order_terms_read_model import (
     select_order,
 )
 from domains.client_finance.obligation_planning import build_client_finance_terms_candidate, ClientChargeDay
+from shared_kernel.money import MoneyNTD
 from subsystems.contract_signing.staff_contract_application import _allocate_commitment_service_days
 from subsystems.contract_signing.full_contract_preview import (
     ContractPreviewScope,
@@ -201,6 +211,15 @@ class MySqlFullContractProjectionRepository:
                       "client": projection_fingerprint(_owner_values(facts, "client")),
                       "staff": projection_fingerprint(_owner_values(facts, "staff")),
                       "scheduling": projection_fingerprint({"plan": plan["id"], "segment": matching_segment_id, "dates": dates})}
+            _extend_precontract_facts(self._connection, case_no, facts, owners, plan)
+            _extend_precontract_staff_payroll(
+                self._connection,
+                case_no,
+                facts,
+                owners,
+                plan,
+                matching_segment_id,
+            )
             return FullContractOwnerProjection(case_no, ContractPreviewScope.STAFF, None, facts, owners)
         return self.load_staff_projection(case_no, int(rows[0]["assignment_id"]))
 
@@ -277,6 +296,7 @@ def _extend_precontract_facts(connection, case_no, facts, owners, plan):
         finance = replace(finance, charge_days=tuple(ClientChargeDay(day, False) for day in dates))
         destination = _load_client_payment_destination(cursor)
     candidate = build_client_finance_terms_candidate(finance, f"contract-preview:{case_no}")
+    facts["total_hours"] = len(dates) * finance.service_hours_per_day
     facts["total_employer_self_pay_payable"] = sum(stage.amount.amount for stage in candidate.stage_plans)
     facts["client_finance_self_pay_days"] = sum(len(stage.service_dates) for stage in candidate.stage_plans if stage.payment_stage.value != "deposit")
     for stage in candidate.stage_plans:
@@ -286,6 +306,89 @@ def _extend_precontract_facts(connection, case_no, facts, owners, plan):
     if destination is not None:
         facts["client_payment_destination_account"] = destination["account_display"]
     owners["client_finance"] = candidate.fingerprint.value
+    _project_subsidy_coverage(facts, owners)
+
+
+def _extend_precontract_staff_payroll(
+    connection,
+    case_no,
+    facts,
+    owners,
+    plan,
+    matching_segment_id,
+):
+    """Project, but never persist, the accepted-plan whole staff payable."""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT policy_version,policy_kind,hourly_rate_ntd "
+            "FROM case_payroll_rate_policy_snapshots WHERE case_no=%s",
+            (case_no,),
+        )
+        policy = cursor.fetchone()
+    if policy is None:
+        return
+    service_dates = {
+        int(segment["id"]): tuple(
+            day
+            for owner, day in plan["allocations"]
+            if int(owner["id"]) == int(segment["id"])
+        )
+        for segment in plan["segments"]
+    }
+    try:
+        service_facts = tuple(
+            OfficialAssignmentServiceFacts(
+                f"matching-segment:{segment_id}",
+                int(next(
+                    segment["staff_id"]
+                    for segment in plan["segments"]
+                    if int(segment["id"]) == segment_id
+                )),
+                dates,
+            )
+            for segment_id, dates in sorted(service_dates.items())
+        )
+        policy_kind = PayrollPolicyKind(str(policy["policy_kind"]))
+        rates = tuple(
+            AssignmentRateSnapshot(
+                item.assignment_identity,
+                str(policy["policy_version"]),
+                policy_kind,
+                MoneyNTD(int(policy["hourly_rate_ntd"])),
+            )
+            for item in service_facts
+        )
+        payroll = build_case_payroll_candidate(
+            service_facts,
+            rates,
+            PayrollTerms(
+                int(facts["service_days"]),
+                float(facts["service_hours_per_day"]),
+                MoneyNTD(int(facts.get("floor_fee") or 0)),
+            ),
+        )
+        selected = next(
+            item
+            for item in payroll.assignments
+            if item.assignment_identity == f"matching-segment:{matching_segment_id}"
+        )
+        coverage = derive_subsidy_coverage(
+            str(facts["identity_status"]),
+            Decimal(str(facts["total_hours"])),
+            Decimal(str(facts.get("floor_fee") or 0)),
+        )
+        due_date = calculate_staff_payment_due_date(
+            max(day for dates in service_dates.values() for day in dates),
+            int(facts["total_employer_self_pay_payable"]),
+            coverage.is_full_subsidy_order,
+        )
+    except (KeyError, StopIteration, TypeError, ValueError, ArithmeticError):
+        return
+    facts["service_unit_price"] = selected.hourly_rate.amount
+    facts["staff_payable_total"] = selected.total_payable.amount
+    facts["staff_payable_due_date"] = due_date
+    facts["payroll_payment_date"] = due_date
+    owners["payroll"] = payroll.fingerprint.value
 
 
 def _common_facts(case: dict[str, object]) -> dict[str, object]:
@@ -702,6 +805,9 @@ def _project_subsidy_coverage(
     if coverage.subsidy_hours <= 0:
         return
     facts["subsidy_hours"] = coverage.subsidy_hours
+    facts["projected_subsidy_amount"] = (
+        coverage.subsidy_hours * coverage.subsidy_claim_hourly_rate
+    )
     owners["client_finance"] = projection_fingerprint(
         {
             "client_finance": owners.get("client_finance"),

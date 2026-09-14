@@ -51,6 +51,7 @@ export const ClientRegistryDetailSchema = z.strictObject({
   client: z.strictObject({ client_id: z.number().int().positive(), version: z.number().int().nonnegative(), values: profileValues, field_capabilities: fieldCapabilities }),
   beclass: z.strictObject({
     status: z.enum(['ready', 'unbound', 'duplicate_binding']), record_id: z.number().int().positive().nullable(),
+    source_kind: z.enum(['imported', 'admin_manual']).nullable(),
     version: z.number().int().nonnegative().nullable(), values: beclassValues.nullable(), field_capabilities: fieldCapabilities,
   }),
   order_information: z.strictObject({

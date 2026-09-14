@@ -346,6 +346,7 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_09_12_twins_payroll_policy_backfill_hash_v2.json",
     "labor_union_2026_09_12_matching_plan_create_receipts_v1.json",
     "labor_union_2026_09_14_order_service_hours_half_precision_v1.json",
+    "labor_union_2026_09_14_historical_manual_beclass_origin_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -5274,6 +5275,12 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
             "service_hours_per_day >= 0 AND service_hours_per_day <= 24 "
             "AND ((service_hours_per_day * 2) % 1) = 0"
         )
+    if part_name == "1041_historical_manual_beclass_origin.sql":
+        descriptor["parent_columns"]["beclass_records"] = {
+            "record_origin": _column_contract(
+                "enum('imported','admin_manual')", "NO", "imported"
+            )
+        }
     if part_name == "1028_historical_service_accounting.sql":
         historical_statuses = (
             "enum('待補件','洽談中','訂單成立','服務中','訂單完成','訂單取消',"
@@ -5833,6 +5840,7 @@ def _release_descriptor_metadata_state(
         "1033_matching_holiday_work_agreements.sql",
         "1037_twins_payroll_policy.sql",
         "1040_order_service_hours_half_precision.sql",
+        "1041_historical_manual_beclass_origin.sql",
     }:
         if released.get("parent_columns") != canonical.get("parent_columns"):
             raise UpgradeBlocked(

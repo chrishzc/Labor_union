@@ -26,6 +26,7 @@ from infrastructure.mysql.contract_full_preview_repository import (
     _due_date_from_due_month,
     _load_approved_subsidy_claim,
     _load_precontract_plan,
+    _extend_precontract_staff_payroll,
     _project_subsidy_coverage,
     _special_holidays_text,
 )
@@ -424,7 +425,66 @@ def test_client_finance_coverage_projection_uses_exact_planned_hours():
     owners = {"client_finance": "a" * 64}
     _project_subsidy_coverage(facts, owners)
     assert facts["subsidy_hours"] == 80
+    assert facts["projected_subsidy_amount"] == 28000
     assert owners["client_finance"] != "a" * 64
+
+
+class _PayrollPolicyCursor:
+    def execute(self, statement, _parameters=None):
+        assert "FROM case_payroll_rate_policy_snapshots" in statement
+
+    def fetchone(self):
+        return {
+            "policy_version": "approved-rates-v1",
+            "policy_kind": "citizen",
+            "hourly_rate_ntd": 300,
+        }
+
+
+class _PayrollPolicyConnection:
+    class _Context:
+        def __enter__(self):
+            return _PayrollPolicyCursor()
+
+        def __exit__(self, *_args):
+            return False
+
+    def cursor(self):
+        return self._Context()
+
+
+def test_precontract_staff_preview_projects_whole_payable_and_due_date():
+    segment = {"id": 71, "staff_id": 8892}
+    service_dates = tuple(date(2026, 9, day) for day in range(1, 6))
+    plan = {
+        "id": 51,
+        "segments": (segment,),
+        "allocations": tuple((segment, day) for day in service_dates),
+    }
+    facts = {
+        "service_days": 5,
+        "service_hours_per_day": Decimal("8.0"),
+        "floor_fee": 0,
+        "identity_status": "一般市民",
+        "total_hours": 40,
+        "total_employer_self_pay_payable": 12000,
+    }
+    owners = {}
+
+    _extend_precontract_staff_payroll(
+        _PayrollPolicyConnection(),
+        "CASE-1",
+        facts,
+        owners,
+        plan,
+        71,
+    )
+
+    assert facts["service_unit_price"] == 300
+    assert facts["staff_payable_total"] == 12000
+    assert facts["staff_payable_due_date"] == date(2026, 10, 15)
+    assert facts["payroll_payment_date"] == date(2026, 10, 15)
+    assert "payroll" in owners
 
 
 def test_client_finance_coverage_does_not_invent_subsidy_for_noneligible_identity():

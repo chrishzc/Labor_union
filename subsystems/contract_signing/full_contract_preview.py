@@ -172,6 +172,7 @@ class FullContractPreviewApplication:
             if external_formula_cells(content):
                 blockers = ("contract_pdf_external_reference_unresolved",)
         field_values = _mapped_field_values(mapping_path, facts)
+        field_values.update(_projected_field_values(facts))
         fingerprint = fingerprint_payload(
             {
                 "case_no": projection.case_no,
@@ -226,6 +227,27 @@ def _mapped_field_values(
         elif isinstance(key, str) and key:
             values[cell] = facts.get(key)
     return values
+
+
+def _projected_field_values(
+    facts: Mapping[str, object],
+) -> dict[str, object | None]:
+    """Expose clearly labelled Preview-only projections outside XLSX cells."""
+    keys = (
+        "deposit_due_date",
+        "first_payment_due_date",
+        "second_payment_due_date",
+        "subsidy_hours",
+        "projected_subsidy_amount",
+        "service_unit_price",
+        "staff_payable_total",
+        "staff_payable_due_date",
+    )
+    return {
+        f"projected.{key}": facts[key]
+        for key in keys
+        if facts.get(key) is not None
+    }
 
 
 def _fingerprint_field_values(

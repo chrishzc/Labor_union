@@ -25,7 +25,8 @@ class _Repository:
                 "city": "新竹市", "address": None, "residence_type": None,
                 "delivery_type": None, "baby_info": None, "notes": None,
             },
-            "beclass_status": "ready", "beclass_record_id": 12, "beclass_version": 3,
+            "beclass_status": "ready", "beclass_record_id": 12,
+            "beclass_source_kind": "imported", "beclass_version": 3,
             "beclass_values": {"name": "王小明", "phone": "0922222222", "multi_birth_count": "雙胞胎"},
             "order_information_values": {
                 "multi_birth_count": "雙胞胎", "dietary_habits": "不吃牛肉",
@@ -44,6 +45,7 @@ def test_registry_list_and_detail_keep_case_identity_and_owner_versions():
     detail = application.query("CASE-001")
     assert detail.client.version == 2
     assert detail.beclass.version == 3
+    assert detail.beclass.source_kind == "imported"
     assert detail.beclass.values["phone"] == "0922222222"
     assert detail.order_information.values["multi_birth_count"] == "雙胞胎"
 
@@ -191,12 +193,12 @@ class _SqlConnection:
 def test_mysql_registry_uses_order_client_owner_and_bound_beclass_case_identity():
     connection = _SqlConnection([
         {
-            "client_id": 7, "case_no": "CASE-001", "client_profile_version": 2,
+            "client_id": 7, "case_no": "CASE-001", "order_status": "歷史訂單－服務完成", "client_profile_version": 2,
             "name": "王小明", "gender": None, "phone": "0912345678", "city": "新竹市",
             "address": None, "residence_type": None, "delivery_type": None,
             "baby_info": None, "notes": None,
         },
-        ({"beclass_record_id": 12, "survey_details": '{"特殊計費:胎數":"雙胞胎","餐點喜忌備註":"不吃牛肉"}', "name": "原始姓名", "email": None, "phone": "0911111111", "tel": None, "ext": None, "city": None, "zip_code": None, "address": None, "admin_notes": None},),
+        ({"beclass_record_id": 12, "record_origin": "imported", "survey_details": '{"特殊計費:胎數":"雙胞胎","餐點喜忌備註":"不吃牛肉"}', "name": "原始姓名", "email": None, "phone": "0911111111", "tel": None, "ext": None, "city": None, "zip_code": None, "address": None, "admin_notes": None},),
         {"aggregate_version": 3, "effective_values_json": '{"phone":"0922222222","multi_birth_count":"單胞胎"}'},
     ])
 
@@ -211,6 +213,28 @@ def test_mysql_registry_uses_order_client_owner_and_bound_beclass_case_identity(
     assert detail["beclass_values"]["multi_birth_count"] == "單胞胎"
     assert detail["order_information_values"]["multi_birth_count"] == "單胞胎"
     assert detail["order_information_values"]["meal_preferences"] == "不吃牛肉"
+
+
+def test_mysql_registry_exposes_blank_editable_values_for_historical_case_without_beclass():
+    connection = _SqlConnection([
+        {
+            "client_id": 7, "case_no": "CASE-HISTORY",
+            "order_status": "歷史訂單－帳務完成", "client_profile_version": 0,
+            "name": "歷史客戶", "gender": None, "phone": "0912345678",
+            "city": None, "address": None, "residence_type": None,
+            "delivery_type": None, "baby_info": None, "notes": None,
+        },
+        (),
+    ])
+
+    detail = MySqlClientRegistryQueryRepository(connection).load_detail("CASE-HISTORY")
+
+    assert detail["beclass_status"] == "ready"
+    assert detail["beclass_record_id"] is None
+    assert detail["beclass_source_kind"] == "admin_manual"
+    assert detail["beclass_version"] == 0
+    assert detail["beclass_values"]["name"] is None
+    assert detail["order_information_issues"] == {}
 
 
 def test_mysql_registry_list_applies_bound_filters_and_allowlisted_sorting_in_one_query():

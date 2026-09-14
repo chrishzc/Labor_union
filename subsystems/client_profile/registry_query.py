@@ -50,6 +50,7 @@ class ClientRegistryClientProfile:
 class ClientRegistryBeClass:
     status: str
     record_id: int | None
+    source_kind: str | None
     version: int | None
     values: Mapping[str, str | None] | None
 
@@ -140,6 +141,12 @@ class ClientRegistryQueryApplication:
         beclass_status = str(row.get("beclass_status") or "")
         if beclass_status not in {"ready", "unbound", "duplicate_binding"}:
             raise ClientRegistryContractError("client_registry_beclass_status_invalid")
+        beclass_source_kind = row.get("beclass_source_kind")
+        if (
+            beclass_status == "ready"
+            and beclass_source_kind not in {"imported", "admin_manual"}
+        ):
+            raise ClientRegistryContractError("client_registry_beclass_source_kind_invalid")
         beclass_values = row.get("beclass_values")
         if beclass_status == "ready" and not isinstance(beclass_values, Mapping):
             raise ClientRegistryContractError("client_registry_beclass_invalid")
@@ -159,6 +166,7 @@ class ClientRegistryQueryApplication:
             ClientRegistryBeClass(
                 beclass_status,
                 int(row["beclass_record_id"]) if row.get("beclass_record_id") is not None else None,
+                str(beclass_source_kind) if beclass_source_kind is not None else None,
                 int(row.get("beclass_version") or 0) if beclass_status == "ready" else None,
                 ({str(key): _nullable_text(value) for key, value in beclass_values.items()}
                  if isinstance(beclass_values, Mapping) else None),

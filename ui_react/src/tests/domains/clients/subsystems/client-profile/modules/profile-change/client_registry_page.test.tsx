@@ -24,7 +24,7 @@ const detail = {
     },
   },
   beclass: {
-    status: 'ready' as const, record_id: 12, version: 3,
+    status: 'ready' as const, record_id: 12, source_kind: 'imported' as const, version: 3,
     values: { name: '王小明', email: null, phone: '0922222222', tel: null, ext: null, city: '新竹市', zip_code: null, address: null, admin_notes: null, multi_birth_count: '雙胞胎' },
     field_capabilities: {
       name: { owner: 'client_beclass', editable: true, reason: null, options: null },
@@ -110,5 +110,31 @@ describe('Client registry owner editing', () => {
     expect(within(information).getByText('飲食習慣與中藥接受度')).toBeInTheDocument();
     expect(within(information).getByText('不吃牛肉')).toBeInTheDocument();
     expect(information).not.toHaveTextContent('survey_details');
+  });
+
+  it('shows editable blank fields for a historical case without imported BeClass data', async () => {
+    mocks.query.mockResolvedValue({
+      ...detail,
+      beclass: {
+        ...detail.beclass,
+        record_id: null,
+        source_kind: 'admin_manual',
+        version: 0,
+        values: Object.fromEntries(Object.keys(detail.beclass.values).map((field) => [field, null])),
+      },
+      order_information: {
+        ...detail.order_information,
+        values: Object.fromEntries(Object.keys(detail.order_information.values).map((field) => [field, null])),
+      },
+    });
+    render(<ClientRegistryPage />);
+    fireEvent.click(screen.getByRole('tab', { name: '名冊資料' }));
+    fireEvent.click(await screen.findByRole('button', { name: /CASE-001/ }));
+
+    const beclass = (await screen.findByRole('heading', { name: 'BeClass 有效資料' })).closest('section') as HTMLElement;
+    expect(within(beclass).getByText('資料來源：後台人工補登（無 BeClass 匯入紀錄）')).toBeInTheDocument();
+    expect(within(beclass).getByRole('textbox', { name: '報名姓名' })).toHaveValue('');
+    expect(within(beclass).getByRole('combobox', { name: '胎數（單胞胎／雙胞胎）' })).toHaveValue('');
+    expect(screen.queryByText(/尚未綁定 BeClass/)).not.toBeInTheDocument();
   });
 });
