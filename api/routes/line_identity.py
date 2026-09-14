@@ -211,7 +211,8 @@ def _safe_line_public_base_url() -> str | None:
 def open_identity_flow(payload: LineIdentityFlowOpenRequest):
     line_user_id = _verified_line_user_id(payload)
     purpose = LineIdentityFlowPurpose(payload.purpose)
-    result = get_line_identity_application().open_flow(
+    result = _translate_identity_errors(
+        get_line_identity_application().open_flow,
         purpose,
         line_user_id,
         IdempotencyKey(payload.idempotency_key),

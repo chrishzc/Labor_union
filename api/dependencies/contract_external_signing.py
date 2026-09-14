@@ -335,7 +335,7 @@ class ContractExternalSigningApplication:
         with self.connection.cursor() as cursor:
             cursor.execute(
                 "SELECT line_user_id,binding_status,subject_type,subject_reference "
-                "FROM line_identity_bindings WHERE subject_type='staff' "
+                "FROM line_identity_role_bindings WHERE subject_type='staff' "
                 "AND subject_reference=%s" + suffix,
                 (subject_reference,),
             )

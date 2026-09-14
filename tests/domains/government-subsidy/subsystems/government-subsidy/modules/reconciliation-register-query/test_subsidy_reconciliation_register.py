@@ -80,6 +80,7 @@ def test_quarterly_register_includes_established_orders_without_claim_batch():
     assert "INSERT" not in connection.cursor_instance.executed[0][0].upper()
     assert "c.identity_status" in connection.cursor_instance.executed[0][0]
     assert "clients.identity_status" not in connection.cursor_instance.executed[0][0]
+    assert "JOIN clients c ON c.id = o.client_id AND c.case_no = o.case_no" in connection.cursor_instance.executed[0][0]
     assert "subsidy_claim_batches" not in connection.cursor_instance.executed[0][0]
     assert "LEFT JOIN case_payroll_rate_policy_snapshots" in connection.cursor_instance.executed[0][0]
     assert "o.status IN (%s, %s, %s, %s, %s, %s, %s)" in connection.cursor_instance.executed[0][0]
@@ -152,6 +153,7 @@ def test_operations_report_annual_rows_select_current_and_prior_year_carry_in_wi
         _order_row(
             case_no="113000005",
             actual_end_date=date(2026, 5, 10),
+            payroll_hourly_rate_ntd=None,
         ),
         _order_row(
             case_no="115100006",
@@ -249,6 +251,13 @@ def test_register_rejects_missing_payroll_snapshot_instead_of_using_identity_pri
         assert str(exc) == "government_subsidy_payroll_rate_snapshot_missing"
     else:
         raise AssertionError("missing Payroll snapshot must fail closed")
+
+
+def test_incomplete_order_without_payroll_snapshot_is_not_a_report_candidate():
+    assert register._to_register_row(_order_row(
+        actual_start_date=None,
+        payroll_hourly_rate_ntd=None,
+    )) is None
 
 
 def test_combined_subsidy_register_has_both_quarterly_and_annual_sheets():

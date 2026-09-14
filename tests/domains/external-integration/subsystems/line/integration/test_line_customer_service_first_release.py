@@ -265,7 +265,8 @@ def test_customer_context_uses_canonical_identity_binding_ssot():
     repository = (
         PROJECT_ROOT / "infrastructure/mysql/customer_service_repository.py"
     ).read_text(encoding="utf-8")
-    assert "FROM line_identity_bindings b" in repository
+    assert "FROM line_identity_role_bindings b" in repository
+    assert "FROM line_identity_bindings b" not in repository
     assert "WHERE c.line_user_id=%s" not in repository
 
 

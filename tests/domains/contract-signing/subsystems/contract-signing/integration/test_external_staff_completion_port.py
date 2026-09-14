@@ -130,7 +130,7 @@ class FakeCursor:
             self._row = self.connection.plan
         elif "SELECT client_id FROM orders" in statement:
             self._row = self.connection.order
-        elif "FROM line_identity_bindings" in statement:
+        elif "FROM line_identity_role_bindings" in statement:
             self._row = self.connection.binding
         else:
             self._row = None

@@ -27,7 +27,14 @@ class MySqlMatchingRecommendationRepository:
 
     def load_candidates(self, service_dates):
         with self._connection.cursor() as cursor:
-            cursor.execute("SELECT s.id,s.name,s.phone,s.line_user_id,s.care_babies FROM staff s LEFT JOIN staff_lifecycle_states lifecycle ON lifecycle.staff_id=s.id WHERE s.status='active' AND COALESCE(lifecycle.lifecycle_state,'active')='active'")
+            cursor.execute(
+                "SELECT s.id,s.name,s.phone,binding.line_user_id,s.care_babies FROM staff s "
+                "LEFT JOIN staff_lifecycle_states lifecycle ON lifecycle.staff_id=s.id "
+                "LEFT JOIN line_identity_role_bindings binding ON binding.subject_type='staff' "
+                "AND binding.subject_reference=CAST(s.id AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci "
+                "AND binding.binding_status='bound' AND binding.line_user_id=s.line_user_id "
+                "WHERE s.status='active' AND COALESCE(lifecycle.lifecycle_state,'active')='active'"
+            )
             staff = tuple(cursor.fetchall())
             cursor.execute("SELECT staff_id,region_name FROM staff_regions")
             regions = _group(cursor.fetchall(), "region_name")

@@ -1,6 +1,6 @@
 # LINE 四大模組詳細測試手冊與 Agent 前置條件規範
 
-> **文件版本**：v2.3（2026-09-13，M2/M3/M4 全情境對齊與使用者八點業務裁決更新）
+> **文件版本**：v2.4（2026-09-14，M3-02B 真 LINE 寄送驗收更新）
 > **原始對齊程式版本**：`main @ 0988f6c430472343662aa1f8989ab2af9732bde3`；包含 PR #299 及後續對齊修訂。開始測試前須確認實際執行版本已包含修正，PR 存在不等於 main 已合併或環境已部署。
 > **適用範圍**：LINE 官方帳號、LIFF、FastAPI、MySQL、React 管理後台、M1～M4 repository-local 與手機 E2E 驗收。
 > **權威依據**：`document/架構重整/01_規格基線/26_LINE四大模組Eraser流程圖轉錄與驗收基線.md`；同目錄規格 17、20 的 owner 邊界，以及 2026-09-13 使用者八點業務裁決（未解決客服工單回覆、月嫂履歷推薦卡兩大按鈕、Match_Success 群組通知、Zero-Pool 拒絕降維群組通知、確認實際服務時間、月嫂檔期試算通知專員）。現有實作與本手冊不得自行取消規格 26 的 required flow acceptance。
@@ -53,14 +53,14 @@
 | **M1-05** | 管理角色綁定 | `MOBILE_PASS` | 2026-09-10 | ✅ 測試者確認手機實測通過。 |
 | **M1-06** | 管理後台正式解除 (Rich Menu 回復) | `MOBILE_PASS / PROVIDER_PASS` | 2026-09-10 | ✅ 首次回復因舊 provider menu ID 回覆 `404 richmenu not found` 而失敗；重新發布訪客選單（publication `#20`）後走正式 retry，binding=`revoked`、revocation=`completed`，LINE user Rich Menu readback 與新訪客選單一致。另重新發布客戶（`#21`）、月嫂（`#22`）、工會幹部（`#23`）選單，四套 provider existence readback 均為 HTTP 200，LINE 全域預設亦指向新訪客選單；測試者確認手機實測通過。 |
 | **M2-01** | 確定性 Tier 1 | `MOBILE_PASS` | 2026-09-10 | ✅ 測試者確認手機實測通過。 |
-| **M2-02** | 正式 QA + Gemini 語意選擇 | `MOBILE_PASS` | 2026-09-10 | ✅ 測試者確認手機實測通過。 |
+| **M2-02** | 正式 QA + Gemini 語意選擇 | `RETIRED / CANCELLED` | 2026-09-14 | ⚠️ **業務更新**：依指示取消 LINE 聊天室 AI 助理問答（關閉 `knowledge_question_scheduler`），避免額外產生 Push 推播費用；改由客服中心 LIFF 頁面提供知識查詢，提問由真人客服回覆。 |
 | **M2-03** | 非 ready QA 不得自動回答 | `MOBILE_PASS` | 2026-09-10 | ✅ 測試者確認手機實測通過。 |
 | **M2-04** | 模糊問題與 unsupported | `MOBILE_PASS` | 2026-09-10 | ✅ 測試者確認手機實測通過。 |
 | **M2-05** | 明確轉真人 | `MOBILE_PASS` | 2026-09-10 | ✅ 測試者確認手機實測通過。 |
 | **M2-06** | Feedback 閉環 | `MOBILE_PASS` | 2026-09-13 | ✅ **實測更新**：點擊「未解決」回覆已更新為「已收到您的回饋{ticket}。AI 問答系統已暫時關閉，您可以直接在此對話中留下訊息等待真人客服回應。」；點擊「有幫助」記錄正面評分功能依指示暫不排入實作。 |
 | **M3-01** | Criteria snapshot / term diff | `REPO_LOCAL_PASS / USER_VERIFIED` | 2026-09-11 | ✅ 使用者已驗證；initial criteria、criteria diff、受影響 recipient 精確重送及 stale fail-closed 聚焦測試亦通過。 |
 | **M3-02** | Caregiver willingness (月嫂意願) | `REPO_LOCAL_PASS / USER_VERIFIED` | 2026-09-11 | ✅ 使用者已驗證：月嫂已在 LINE 回覆願意；willingness event、receipt、lineage/readback 聚焦測試亦通過。 |
-| **M3-02B** | 月嫂履歷推薦卡與客戶決策分支 | `REPO_LOCAL_PASS / PREPARED` | 2026-09-13 | ✅ **實測準備完成**：工會送出月嫂推薦，客戶手機收到月嫂履歷卡（輪播卡附履歷下載），末卡具備兩顆按鈕：`[接受此配對]` (postback: `accepted`) 與 `[專人協助／進一步了解]` (postback: `contact_requested`)。點擊「專人協助」轉專員人工溝通挽回，不直接退回待媒合池；若客戶堅持不同意再由專員從後台手動更換月嫂。 |
+| **M3-02B** | 月嫂履歷推薦卡與客戶決策分支 | `REPO_LOCAL_PASS / MOBILE_PASS / PROVIDER_PASS` | 2026-09-14 | ✅ **真 LINE 寄送實測通過**：工會端實際寄送客戶確認資訊後，客戶 LINE 成功收到。本次驗收證明 provider 送達成功；不包含客戶點擊 `[接受此配對]`、`[專人協助／進一步了解]`，亦不將履歷 PDF 下載視為已驗收。 |
 | **M3-03** | Zero Pool 協商與拒絕降維 | `REPO_LOCAL_PASS / MOBILE_PASS` | 2026-09-13 | ✅ **實測更新**：Zero Pool 自動詢問客戶替代條件；若客戶拒絕降維（回覆無法調整條件），系統自動向工會管理群組發送 `【媒合需要人工處理】` 告警卡，專員人工介入協調。 |
 | **M3-04** | Match_Success 群組簽約通知 | `REPO_LOCAL_PASS / PREPARED` | 2026-09-13 | ✅ **實測更新**：取消對客戶與月嫂雙向 Push（節省 Push 費用）；改為在客戶接受配對後，向工會管理群組推播 `【案件媒合成功通知】`，由工會專員接手線上簽約。 |
 | **M4-01** | 異常通知群組設定與 CAS 鎖定 | `REPO_LOCAL_PASS / PREPARED` | 2026-09-13 | ✅ 支援管理員指令綁定單一異常群組、CAS 防併發及後台重設。 |
@@ -744,6 +744,7 @@ POST /api/v1/matching/coordination/caregiver-willingness/apply
 
 ### 驗收
 
+- 2026-09-14 真人／Provider 驗收：工會端實際寄送客戶確認資訊後，客戶 LINE 成功收到；本次只驗證訊息送達，客戶決策 postback 與履歷 PDF 下載仍須分別操作驗收。
 - 輪播卡不可超過 LINE Carousel 12 張上限，履歷下載連結必須為有效安全的受控下載 URL。
 - 客戶決策卡**嚴格只有 2 顆按鈕**（取消原圖分支 C，分支 B 改為轉專人），不得出現多餘的「拒絕」直接落入死胡同。
 - Postback 處理 `contact_requested` 時，資料庫記錄狀態 `contact_requested`，UI 面板正確渲染「客戶希望進一步聯絡」。

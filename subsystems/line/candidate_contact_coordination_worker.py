@@ -377,8 +377,11 @@ def _manual_followup_operation_issues(
 
 def _read_pool_observation(cursor, pool_id: int, now: datetime):
     cursor.execute(
-        "SELECT entry.id,staff.line_user_id FROM caregiver_candidate_contact_entries entry "
+        "SELECT entry.id,staff_binding.line_user_id FROM caregiver_candidate_contact_entries entry "
         "JOIN staff ON staff.id=entry.staff_id "
+        "LEFT JOIN line_identity_role_bindings staff_binding ON staff_binding.subject_type='staff' "
+        "AND staff_binding.subject_reference=CAST(staff.id AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci "
+        "AND staff_binding.binding_status='bound' AND staff_binding.line_user_id=staff.line_user_id "
         "WHERE entry.pool_id=%s AND entry.active_marker=1 AND entry.status='active' "
         "ORDER BY entry.id",
         (pool_id,),
@@ -432,8 +435,11 @@ def _read_pool_observation(cursor, pool_id: int, now: datetime):
 def _process_pool(connection, cursor, pool: Mapping[str, object], now: datetime) -> int:
     pool_id = int(pool["id"])
     cursor.execute(
-        "SELECT entry.id,staff.line_user_id FROM caregiver_candidate_contact_entries entry "
+        "SELECT entry.id,staff_binding.line_user_id FROM caregiver_candidate_contact_entries entry "
         "JOIN staff ON staff.id=entry.staff_id "
+        "LEFT JOIN line_identity_role_bindings staff_binding ON staff_binding.subject_type='staff' "
+        "AND staff_binding.subject_reference=CAST(staff.id AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci "
+        "AND staff_binding.binding_status='bound' AND staff_binding.line_user_id=staff.line_user_id "
         "WHERE entry.pool_id=%s AND entry.active_marker=1 AND entry.status='active' ORDER BY entry.id",
         (pool_id,),
     )

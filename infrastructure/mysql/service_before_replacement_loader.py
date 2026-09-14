@@ -872,7 +872,13 @@ class MySqlServiceBeforeReplacementLoader:
                 expected_reference = str(row.get("staff_id"))
             else:
                 raise ServiceBeforeReplacementSourceUnavailable("replacement_recipient_binding_unavailable")
-            binding = self._one("SELECT line_user_id,binding_status,subject_type,subject_reference,aggregate_version FROM line_identity_bindings WHERE line_user_id=%s", (line_user_id,), for_update)
+            binding = self._one(
+                "SELECT line_user_id,binding_status,subject_type,subject_reference,aggregate_version "
+                "FROM line_identity_role_bindings WHERE line_user_id=%s "
+                "AND subject_type=%s AND subject_reference=%s",
+                (line_user_id, expected_type, expected_reference),
+                for_update,
+            )
             payload = _json_object(row.get("payload_snapshot"))
             if (
                 payload.get("line_user_id") != line_user_id

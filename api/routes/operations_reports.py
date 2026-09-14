@@ -49,11 +49,20 @@ def query_weekly_operations_report(
         report = query.query(start_date, end_date)
         view = _weekly_report_view(report)
     except ValueError as exc:
-        raise typed_http_error(
-            400,
-            "validation",
-            "weekly_operations_report_invalid",
-            "起日不得晚於迄日。",
+        if str(exc) in {
+            "operations_report_date_range_invalid",
+            "weekly_operations_report_retired_parameter",
+        }:
+            raise typed_http_error(
+                400,
+                "validation",
+                "weekly_operations_report_invalid",
+                "起日不得晚於迄日。",
+                "weekly-operations-report",
+            ) from exc
+        raise internal_query_error(
+            "weekly_operations_report_source_invalid",
+            "營運報表來源資料不完整。",
             "weekly-operations-report",
         ) from exc
     except Exception as exc:
@@ -79,11 +88,20 @@ def export_weekly_operations_report_xlsx(
         report = query.query(start_date, end_date)
         workbook_bytes = export_weekly_operations_report(report)
     except ValueError as exc:
-        raise typed_http_error(
-            400,
-            "validation",
-            "weekly_operations_report_export_invalid",
-            "起日不得晚於迄日。",
+        if str(exc) in {
+            "operations_report_date_range_invalid",
+            "weekly_operations_report_retired_parameter",
+        }:
+            raise typed_http_error(
+                400,
+                "validation",
+                "weekly_operations_report_export_invalid",
+                "起日不得晚於迄日。",
+                "weekly-operations-report-export",
+            ) from exc
+        raise internal_query_error(
+            "weekly_operations_report_export_source_invalid",
+            "營運報表來源資料不完整。",
             "weekly-operations-report-export",
         ) from exc
     except Exception as exc:

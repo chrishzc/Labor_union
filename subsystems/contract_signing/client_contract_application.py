@@ -468,7 +468,7 @@ def _line_binding(connection, subject_type: str, subject_reference: str) -> Cont
     with connection.cursor() as cursor:
         cursor.execute(
             "SELECT line_user_id,binding_status,subject_type,subject_reference "
-            "FROM line_identity_bindings WHERE subject_type=%s AND subject_reference=%s",
+            "FROM line_identity_role_bindings WHERE subject_type=%s AND subject_reference=%s",
             (subject_type, subject_reference),
         )
         row = cursor.fetchone()

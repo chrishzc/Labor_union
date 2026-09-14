@@ -61,7 +61,7 @@ from subsystems.controlled_files.workflow import (
 def test_binding_validation_uses_fresh_lock_without_owning_transaction() -> None:
     connection = FakeConnection(
         {
-            "line_identity_bindings": {
+            "line_identity_role_bindings": {
                 "binding_status": "bound",
                 "subject_type": "staff",
                 "subject_reference": "501",

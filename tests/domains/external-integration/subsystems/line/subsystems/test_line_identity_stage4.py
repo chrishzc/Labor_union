@@ -38,7 +38,10 @@ from domains.line.review import (
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from subsystems.line.capabilities import LineCapability, LineCapabilityDeniedError
-from subsystems.line.identity_application import LineIdentityApplication
+from subsystems.line.identity_application import (
+    LineIdentityApplication,
+    LineIdentityAuthenticationError,
+)
 from subsystems.line.identity_contracts import (
     LineIdentityCandidate,
     LineIdentityCommandOutcome,
@@ -171,6 +174,49 @@ def test_open_flow_never_mutates_selected_role_state() -> None:
 
     assert flows.calls == 2
     assert uow.committed is True
+
+
+@pytest.mark.parametrize(
+    "binding",
+    [
+        None,
+        LineIdentityBindingSnapshot(
+            LineUserId("U-not-staff"),
+            LineIdentityBindingStatus.REVOKED,
+            ExpectedVersion(2),
+            LineBindingSubjectType.STAFF,
+            "51",
+        ),
+    ],
+)
+def test_staff_self_service_flow_requires_current_staff_binding(binding) -> None:
+    class Identities:
+        def get(self, line_user_id, subject_type=None):
+            assert line_user_id == LineUserId("U-not-staff")
+            assert subject_type is LineBindingSubjectType.STAFF
+            return binding
+
+    uow = FakeUow(
+        platform_users=SimpleNamespace(ensure_verified_user=lambda _: None),
+        identity_flows=SimpleNamespace(
+            open=lambda _command: pytest.fail("unauthorized staff flow must not open")
+        ),
+        identities=Identities(),
+    )
+    application = LineIdentityApplication(lambda: uow, lambda: NOW)
+
+    with pytest.raises(
+        LineIdentityAuthenticationError,
+        match="staff_self_service_binding_required",
+    ):
+        application.open_flow(
+            LineIdentityFlowPurpose.STAFF_SELF_SERVICE,
+            LineUserId("U-not-staff"),
+            IdempotencyKey("staff-self-service:unauthorized"),
+            CorrelationId("staff-self-service:unauthorized"),
+        )
+
+    assert uow.committed is False
 
 
 def test_staff_command_only_opens_flow_and_queues_liff_link() -> None:

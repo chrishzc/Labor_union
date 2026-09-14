@@ -279,6 +279,15 @@ def preview_quarterly_reconciliation(
             application_year, quarter, get_connection,
         )
     except ValueError as exc:
+        if str(exc) not in {
+            "application_year must be a Gregorian year",
+            "quarter must be 1, 2, 3, or 4",
+        }:
+            raise internal_query_error(
+                "quarterly_subsidy_report_source_invalid",
+                "季度補助核銷來源資料不完整。",
+                "quarterly-subsidy-report",
+            ) from exc
         raise typed_http_error(
             400,
             "validation",
@@ -311,6 +320,15 @@ def export_quarterly_reconciliation(
             application_year, quarter, get_connection,
         )
     except ValueError as exc:
+        if str(exc) not in {
+            "application_year must be a Gregorian year",
+            "quarter must be 1, 2, 3, or 4",
+        }:
+            raise internal_query_error(
+                "quarterly_subsidy_export_source_invalid",
+                "季度補助核銷來源資料不完整。",
+                "quarterly-subsidy-export",
+            ) from exc
         raise typed_http_error(
             400,
             "validation",
@@ -342,6 +360,12 @@ def preview_annual_reconciliation(
             application_year, get_connection
         )
     except ValueError as exc:
+        if str(exc) != "application_year must be a Gregorian year":
+            raise internal_query_error(
+                "annual_subsidy_report_source_invalid",
+                "年度補助核銷來源資料不完整。",
+                "annual-subsidy-report",
+            ) from exc
         raise typed_http_error(
             400,
             "validation",
@@ -373,6 +397,12 @@ def export_annual_reconciliation(
             application_year, get_connection
         )
     except ValueError as exc:
+        if str(exc) != "application_year must be a Gregorian year":
+            raise internal_query_error(
+                "annual_subsidy_export_source_invalid",
+                "年度補助核銷來源資料不完整。",
+                "annual-subsidy-export",
+            ) from exc
         raise typed_http_error(
             400,
             "validation",

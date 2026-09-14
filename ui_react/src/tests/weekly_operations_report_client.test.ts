@@ -52,6 +52,7 @@ describe('weekly operations report clients', () => {
   });
 
   it('接受跨月與跨年日期範圍', () => {
+    expect(() => validateOperationsReportDateRange('2026-09-14', '2026-10-22')).not.toThrow();
     expect(() => validateOperationsReportDateRange('2026-12-31', '2027-01-02')).not.toThrow();
   });
 

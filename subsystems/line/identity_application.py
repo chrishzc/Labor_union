@@ -102,6 +102,18 @@ class LineIdentityApplication:
         )
         with self._unit_of_work_factory() as unit_of_work:
             unit_of_work.platform_users.ensure_verified_user(line_user_id)
+            if purpose is LineIdentityFlowPurpose.STAFF_SELF_SERVICE:
+                binding = unit_of_work.identities.get(
+                    line_user_id,
+                    LineBindingSubjectType.STAFF,
+                )
+                if (
+                    binding is None
+                    or binding.status is not LineIdentityBindingStatus.BOUND
+                ):
+                    raise LineIdentityAuthenticationError(
+                        "staff_self_service_binding_required"
+                    )
             result = unit_of_work.identity_flows.open(command)
             unit_of_work.commit()
         return result

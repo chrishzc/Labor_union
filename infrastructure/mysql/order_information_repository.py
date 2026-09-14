@@ -92,11 +92,14 @@ class MySqlOrderInformationRepository:
         with self._connection.cursor() as cursor:
             cursor.execute(_CASE_SQL + (" FOR UPDATE" if for_update else ""), (case_no,))
             case = cursor.fetchone()
-            cursor.execute("""SELECT s.name AS staff_name, s.line_user_id,
+            cursor.execute("""SELECT s.name AS staff_name, binding.line_user_id,
                 e.service_start_date AS assigned_start_date, e.service_end_date AS assigned_end_date
                 FROM caregiver_candidate_contact_entries e
                 JOIN caregiver_candidate_contact_pools p ON p.id=e.pool_id
                 JOIN staff s ON s.id=e.staff_id
+                LEFT JOIN line_identity_role_bindings binding ON binding.subject_type='staff'
+                AND binding.subject_reference=CAST(s.id AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci
+                AND binding.binding_status='bound' AND binding.line_user_id=s.line_user_id
                 WHERE p.case_no=%s AND e.id=%s AND e.active_marker=1""", (case_no, candidate_id))
             candidate = cursor.fetchone()
         if not isinstance(case, Mapping) or not isinstance(candidate, Mapping):

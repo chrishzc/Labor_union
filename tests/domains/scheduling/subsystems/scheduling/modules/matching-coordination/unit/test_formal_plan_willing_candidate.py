@@ -167,6 +167,49 @@ def test_willing_candidate_plan_uses_schedule_only_availability(monkeypatch):
     assert captured["include_candidate_options"] is False
 
 
+def test_formal_plan_notification_distinguishes_date_drift_from_schedule_conflict(monkeypatch):
+    state = SimpleNamespace(
+        plan=SimpleNamespace(case_no="CASE-DATE-DRIFT"),
+        segments=(
+            SimpleNamespace(
+                staff_id=1,
+                assigned_start_date=date(2026, 12, 1),
+                assigned_end_date=date(2026, 12, 20),
+            ),
+        ),
+    )
+
+    monkeypatch.setattr(
+        matching_notification_application,
+        "search_segmented_caregiver_availability",
+        lambda **_kwargs: {"feasibility": "partial", "conflicts": []},
+    )
+    with pytest.raises(
+        matching_notification_application.MatchingPlanDateMismatchError
+    ):
+        matching_notification_application._validate_availability(state, object())
+
+    monkeypatch.setattr(
+        matching_notification_application,
+        "search_segmented_caregiver_availability",
+        lambda **_kwargs: {
+            "feasibility": "partial",
+            "conflicts": [{"date": "2026-12-05"}],
+        },
+    )
+    with pytest.raises(
+        matching_notification_application.MatchingDecisionNotReadyError
+    ):
+        matching_notification_application._validate_availability(state, object())
+
+    assert matching_notification_application._availability_blocker(
+        matching_notification_application.MatchingPlanDateMismatchError()
+    ) == "正式方案日期與目前案件服務日期不一致，請重新建立方案。"
+    assert matching_notification_application._availability_blocker(
+        matching_notification_application.MatchingDecisionNotReadyError()
+    ) == "正式方案中的月嫂目前檔期已有衝突，請重新確認。"
+
+
 def test_multi_caregiver_plan_fresh_check_does_not_reapply_discovery_preferences(monkeypatch):
     captured = {}
     segments = [
@@ -232,6 +275,7 @@ class _FormalPlanFacts:
                 "status": "洽談中",
                 "start_date": "2026-12-01",
                 "end_date": "2026-12-20",
+                "service_days": 20,
                 "scheduling_version": 1,
             },
             # Stage 5 creates the formal plan before later service-date

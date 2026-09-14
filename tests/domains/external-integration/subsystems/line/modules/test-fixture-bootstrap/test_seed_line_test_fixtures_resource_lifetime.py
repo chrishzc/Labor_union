@@ -247,6 +247,19 @@ class _FailingWorkflow:
 
 
 class SeedFixtureResourceLifetimeTests(unittest.TestCase):
+    def test_fixture_refresh_preserves_identity_and_provider_publication_roots(self) -> None:
+        source = Path(seed_module.__file__).read_text(encoding="utf-8")
+
+        self.assertNotIn("DELETE FROM line_identity_role_bindings", source)
+        self.assertNotIn("DELETE FROM line_identity_role_binding_events", source)
+        self.assertNotIn("DELETE FROM line_identity_revocation_requests", source)
+        self.assertNotIn("seed-default-menu-publication", source)
+        self.assertNotIn("seed-staff-menu-publication", source)
+        self.assertNotIn("UPDATE clients SET line_user_id=NULL", source)
+        self.assertNotIn("UPDATE staff SET line_user_id=NULL", source)
+        self.assertNotIn("active_line_user_id=NULL", source)
+        self.assertNotIn("line_user_id=NULL", source)
+
     def setUp(self) -> None:
         self.environment = patch.dict(os.environ, {"APP_ENV": "test"}, clear=False)
         self.environment.start()

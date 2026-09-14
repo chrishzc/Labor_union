@@ -73,6 +73,10 @@ from subsystems.scheduling.segmented_availability_query import (
 from subsystems.scheduling.ports import SegmentedAvailabilityFactsPort
 
 
+class MatchingPlanDateMismatchError(ValueError):
+    """The saved formal plan no longer covers the current Orders dates."""
+
+
 class MatchingNotificationApplication:
     def __init__(
         self,
@@ -132,8 +136,8 @@ class MatchingNotificationApplication:
                 blockers.append("客戶尚未完成 LINE 綁定。")
             try:
                 self._availability_validator(state)
-            except ValueError:
-                blockers.append("目前正式方案的月嫂檔期已變更，請重新確認。")
+            except ValueError as error:
+                blockers.append(_availability_blocker(error))
 
             raw = unit_of_work.matching_notifications.customer_confirmation_preview(
                 plan.case_no, plan.plan_id
@@ -1022,8 +1026,20 @@ def _validate_availability(
             "daily_service_hours": False,
         },
     )
-    if result.get("feasibility") != "complete" or result.get("conflicts"):
+    if result.get("conflicts"):
         raise MatchingDecisionNotReadyError("matching plan is no longer fully available")
+    if result.get("feasibility") != "complete":
+        raise MatchingPlanDateMismatchError(
+            "matching plan does not cover the current Orders service dates"
+        )
+
+
+def _availability_blocker(error: ValueError) -> str:
+    if isinstance(error, MatchingPlanDateMismatchError):
+        return "正式方案日期與目前案件服務日期不一致，請重新建立方案。"
+    if isinstance(error, MatchingDecisionNotReadyError):
+        return "正式方案中的月嫂目前檔期已有衝突，請重新確認。"
+    return "案件服務日期或正式方案資料無法驗證，請重新確認服務日期。"
 
 
 __all__ = ["MatchingNotificationApplication"]

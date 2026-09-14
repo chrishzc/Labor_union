@@ -174,8 +174,9 @@ def _search_availability(
         effective_dates = (planned_start, planned_end, *official_dates)
         planned_start = min(effective_dates)
         planned_end = max(effective_dates)
-    if (planned_end - planned_start).days + 1 > 60:
-        raise ValueError("service period cannot exceed 60 days")
+    maximum_period_days = 60 if inquiry else int(order_row["service_days"]) + 45
+    if (planned_end - planned_start).days + 1 > maximum_period_days:
+        raise ValueError("service period exceeds the Orders selectable range")
 
     candidate_rows = loaded_facts["staff_rows"]
     filter_results = {

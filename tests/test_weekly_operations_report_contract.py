@@ -202,6 +202,23 @@ def test_operations_report_rejects_inverted_date_range():
     assert response.json()["detail"]["error"]["code"] == "weekly_operations_report_invalid"
 
 
+def test_valid_date_range_does_not_misreport_invalid_source_as_date_error():
+    class InvalidSourceQuery:
+        def query(self, _start_date, _end_date):
+            raise ValueError("government_subsidy_payroll_rate_snapshot_missing")
+
+    app = _app()
+    app.dependency_overrides[get_weekly_operations_report_query] = lambda: InvalidSourceQuery()
+    response = TestClient(app).get(
+        "/api/v1/operations-reports/weekly",
+        params={"start_date": "2026-09-14", "end_date": "2026-10-22"},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"]["error"]["code"] == "weekly_operations_report_source_invalid"
+    assert response.json()["detail"]["error"]["message"] == "營運報表來源資料不完整。"
+
+
 def test_operations_report_rejects_legacy_week_start_parameter():
     response = TestClient(_app()).get(
         "/api/v1/operations-reports/weekly",

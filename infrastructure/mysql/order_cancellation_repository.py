@@ -340,7 +340,10 @@ def _append_lifecycle_outbox(cursor, request, preview, event_id):
 
 def _line_user_id(cursor, case_no):
     cursor.execute(
-        "SELECT c.line_user_id FROM orders o JOIN clients c ON c.id=o.client_id "
+        "SELECT binding.line_user_id FROM orders o JOIN clients c ON c.id=o.client_id "
+        "LEFT JOIN line_identity_role_bindings binding ON binding.subject_type='customer' "
+        "AND binding.subject_reference=CAST(c.id AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci "
+        "AND binding.binding_status='bound' AND binding.line_user_id=c.line_user_id "
         "WHERE o.case_no=%s",
         (case_no,),
     )

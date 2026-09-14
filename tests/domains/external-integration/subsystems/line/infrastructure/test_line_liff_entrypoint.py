@@ -180,14 +180,14 @@ def test_liff_targets_route_to_existing_pages() -> None:
         "function requestedStandalonePage()", 1
     )[0]
 
-    assert "staff_leave_apply: '/line-staff-schedule'" in gateway
+    assert "staff_leave_apply: '/line-identity?target=staff_leave_apply'" in gateway
     assert "profile_update: '/line-profile-guard'" in gateway
     assert 'staff_leave_apply: "/line-staff-schedule"' in staff_route
     assert 'profile_update: "/line-profile-guard"' in standalone_route
     assert 'staff_baby_log: "/line-staff-baby-log"' in staff_route
     assert 'staff_payout: "/line-staff-payout"' in staff_route
-    assert "staff_baby_log: '/line-staff-baby-log'" in gateway
-    assert "staff_payout: '/line-staff-payout'" in gateway
+    assert "staff_baby_log: '/line-identity?target=staff_baby_log'" in gateway
+    assert "staff_payout: '/line-identity?target=staff_payout'" in gateway
     for target in ("order_tracking", "anomalies_center", "dashboard"):
         assert f"{target}:" in mobile_admin_route
         assert f"/line-mobile-admin?target={target}" in gateway

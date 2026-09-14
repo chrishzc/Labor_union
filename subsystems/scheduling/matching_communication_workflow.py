@@ -77,10 +77,15 @@ def _event_payload(value: Any) -> dict[str, Any]:
 def _load_contact_state(cursor: Any, case_no: str, plan_id: int) -> dict[str, Any]:
     cursor.execute(
         """SELECT p.id, p.case_no, p.version, p.status, p.is_active,
-                  o.status AS order_status, c.line_user_id AS client_line_user_id
+                  o.status AS order_status, customer_binding.line_user_id AS client_line_user_id
              FROM caregiver_matching_plans p
              JOIN orders o ON o.case_no = p.case_no
              JOIN clients c ON c.id = o.client_id
+             LEFT JOIN line_identity_role_bindings customer_binding
+               ON customer_binding.subject_type = 'customer'
+              AND customer_binding.subject_reference = CAST(c.id AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci
+              AND customer_binding.binding_status = 'bound'
+              AND customer_binding.line_user_id = c.line_user_id
             WHERE p.id = %s AND p.case_no = %s""",
         (plan_id, case_no),
     )
@@ -90,9 +95,14 @@ def _load_contact_state(cursor: Any, case_no: str, plan_id: int) -> dict[str, An
     cursor.execute(
         """SELECT s.id AS segment_id, s.segment_order, s.staff_id,
                   s.assigned_start_date, s.assigned_end_date,
-                  st.name AS staff_name, st.line_user_id AS staff_line_user_id
+                  st.name AS staff_name, staff_binding.line_user_id AS staff_line_user_id
              FROM caregiver_matching_plan_segments s
              JOIN staff st ON st.id = s.staff_id
+             LEFT JOIN line_identity_role_bindings staff_binding
+               ON staff_binding.subject_type = 'staff'
+              AND staff_binding.subject_reference = CAST(st.id AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci
+              AND staff_binding.binding_status = 'bound'
+              AND staff_binding.line_user_id = st.line_user_id
             WHERE s.plan_id = %s
             ORDER BY s.segment_order ASC""",
         (plan_id,),

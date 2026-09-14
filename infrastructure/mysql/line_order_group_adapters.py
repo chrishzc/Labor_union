@@ -41,11 +41,18 @@ class MySqlOrdersLineAudienceAdapter:
         )
 
 _ORDER_AUDIENCE_SQL = (
-    "SELECT o.case_no,o.status AS order_status,c.line_user_id AS customer_line_user_id "
-    "FROM orders o JOIN clients c ON c.id=o.client_id WHERE o.case_no=%s FOR UPDATE"
+    "SELECT o.case_no,o.status AS order_status,binding.line_user_id AS customer_line_user_id "
+    "FROM orders o JOIN clients c ON c.id=o.client_id "
+    "LEFT JOIN line_identity_role_bindings binding ON binding.subject_type='customer' "
+    "AND binding.subject_reference=CAST(c.id AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci "
+    "AND binding.binding_status='bound' AND binding.line_user_id=c.line_user_id "
+    "WHERE o.case_no=%s FOR UPDATE"
 )
 _ASSIGNED_STAFF_SQL = (
-    "SELECT DISTINCT s.line_user_id FROM staff s JOIN ("
+    "SELECT DISTINCT binding.line_user_id FROM staff s "
+    "JOIN line_identity_role_bindings binding ON binding.subject_type='staff' "
+    "AND binding.subject_reference=CAST(s.id AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci "
+    "AND binding.binding_status='bound' AND binding.line_user_id=s.line_user_id JOIN ("
     "SELECT a.staff_id FROM case_staff_assignments a WHERE a.case_no=%s "
     "AND a.status IN ('planned','active') UNION SELECT o.staff_id FROM orders o "
     "WHERE o.case_no=%s AND o.staff_id IS NOT NULL) assigned ON assigned.staff_id=s.id"

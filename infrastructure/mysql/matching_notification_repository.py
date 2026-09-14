@@ -713,13 +713,24 @@ def _date(value):
 
 
 _PLAN_SQL = """SELECT p.id,p.case_no,p.communication_version,p.status,p.is_active,
-o.status AS order_status,c.line_user_id AS client_line_user_id
+o.status AS order_status,customer_binding.line_user_id AS client_line_user_id
 FROM caregiver_matching_plans p JOIN orders o ON o.case_no=p.case_no
-JOIN clients c ON c.id=o.client_id WHERE p.id=%s AND p.case_no=%s"""
+JOIN clients c ON c.id=o.client_id
+LEFT JOIN line_identity_role_bindings customer_binding
+ON customer_binding.subject_type='customer'
+AND customer_binding.subject_reference=CAST(c.id AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci
+AND customer_binding.binding_status='bound'
+AND customer_binding.line_user_id=c.line_user_id
+WHERE p.id=%s AND p.case_no=%s"""
 _SEGMENTS_SQL = """SELECT s.id AS segment_id,s.segment_order,s.staff_id,
 s.assigned_start_date,s.assigned_end_date,st.name AS staff_name,
-st.line_user_id AS staff_line_user_id FROM caregiver_matching_plan_segments s
+staff_binding.line_user_id AS staff_line_user_id FROM caregiver_matching_plan_segments s
 JOIN staff st ON st.id=s.staff_id LEFT JOIN staff_lifecycle_states lifecycle ON lifecycle.staff_id=st.id
+LEFT JOIN line_identity_role_bindings staff_binding
+ON staff_binding.subject_type='staff'
+AND staff_binding.subject_reference=CAST(st.id AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci
+AND staff_binding.binding_status='bound'
+AND staff_binding.line_user_id=st.line_user_id
 WHERE s.plan_id=%s AND st.status='active' AND COALESCE(lifecycle.lifecycle_state,'active')='active' ORDER BY s.segment_order"""
 _RESPONSES_SQL = """SELECT segment_id,response_type,response_value FROM
 matching_response_events WHERE plan_id=%s ORDER BY occurred_at_utc DESC,id DESC"""

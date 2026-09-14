@@ -809,10 +809,16 @@ def _send_information_in_transaction(
     try:
         cursor.execute("SELECT p.id AS pool_id, e.staff_id, e.service_start_date, e.service_end_date, "
                        "e.coverage_fingerprint,"
-                       "s.line_user_id,o.status AS order_status,o.start_date AS order_start_date,"
+                       "staff_binding.line_user_id,o.status AS order_status,o.start_date AS order_start_date,"
                        "o.end_date AS order_end_date FROM caregiver_candidate_contact_pools p "
                        "JOIN caregiver_candidate_contact_entries e ON e.pool_id=p.id "
-                       "JOIN staff s ON s.id=e.staff_id JOIN orders o ON o.case_no=p.case_no "
+                       "JOIN staff s ON s.id=e.staff_id "
+                       "LEFT JOIN line_identity_role_bindings staff_binding "
+                       "ON staff_binding.subject_type='staff' "
+                       "AND staff_binding.subject_reference=CAST(s.id AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci "
+                       "AND staff_binding.binding_status='bound' "
+                       "AND staff_binding.line_user_id=s.line_user_id "
+                       "JOIN orders o ON o.case_no=p.case_no "
                        "WHERE p.case_no=%s AND e.id=%s AND e.active_marker=1 "
                        "AND e.status='active' FOR UPDATE", (case_no, candidate_id))
         entry = cursor.fetchone()

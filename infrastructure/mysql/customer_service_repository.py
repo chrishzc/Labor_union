@@ -328,7 +328,7 @@ _UPDATE_TICKET_SQL = "UPDATE customer_service_tickets SET status=%s,internal_not
 _SUMMARY_SQL = "SELECT SUM(status='waiting') waiting,SUM(status='handling') handling,SUM(status='resolved' AND DATE(resolved_at_utc)=UTC_DATE()) resolved_today FROM customer_service_tickets"
 _LATEST_CLIENT_CASE_SQL = (
     "SELECT c.id client_id,c.name client_name,o.case_no,o.status,o.start_date,o.end_date "
-    "FROM line_identity_bindings b "
+    "FROM line_identity_role_bindings b "
     "JOIN clients c ON c.id=CAST(b.subject_reference AS UNSIGNED) "
     "LEFT JOIN orders o ON o.client_id=c.id "
     "WHERE b.line_user_id=%s AND b.subject_type='customer' "

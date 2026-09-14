@@ -1,5 +1,7 @@
 """Regression coverage for inquiry versus official service-date windows."""
 
+from datetime import date, timedelta
+
 from infrastructure.mysql.segmented_availability_repository import (
     MySqlSegmentedAvailabilityFactsRepository,
 )
@@ -40,6 +42,7 @@ def _repository_facts(monkeypatch):
         "status": "洽談中",
         "start_date": "2026-09-01",
         "end_date": "2026-09-03",
+        "service_days": 3,
         "scheduling_version": 4,
         "requires_cooking": None,
     }
@@ -110,3 +113,53 @@ def test_official_search_still_projects_confirmed_dates_outside_order_window(mon
 
     assert captured["planned_start_date"] == "2026-08-01"
     assert captured["planned_end_date"] == "2026-09-03"
+
+
+def test_official_search_accepts_the_full_orders_selectable_range(monkeypatch):
+    facts, _loaded_windows = _repository_facts(monkeypatch)
+    facts["order"].update({
+        "start_date": "2026-12-01",
+        "end_date": "2026-12-20",
+        "service_days": 20,
+    })
+    service_dates = tuple(
+        date(2026, 12, 1) + timedelta(days=offset) for offset in range(19)
+    ) + (date(2027, 2, 3),)
+    facts["confirmed_service_dates"] = [
+        {"service_date": value.isoformat()} for value in service_dates
+    ]
+    captured = {}
+
+    def derive(**kwargs):
+        captured.update(kwargs)
+        return {
+            "validated_input": {
+                "planned_start_date": kwargs["planned_start_date"],
+                "planned_end_date": kwargs["planned_end_date"],
+            },
+            "complete_combinations": [],
+            "segment_candidates": [],
+            "conflicts": [],
+        }
+
+    monkeypatch.setattr(query, "derive_segment_availability", derive)
+    query.search_segmented_caregiver_availability(
+        "CASE-RECONTACT",
+        1,
+        [],
+        "2026-11-30",
+        facts_port=type(
+            "Facts",
+            (),
+            {"load_case_facts": lambda _self, _case_no: facts},
+        )(),
+        filter_policy={
+            "region": False,
+            "preferred_service_days": False,
+            "cooking": False,
+            "daily_service_hours": False,
+        },
+    )
+
+    assert captured["planned_start_date"] == "2026-12-01"
+    assert captured["planned_end_date"] == "2027-02-03"

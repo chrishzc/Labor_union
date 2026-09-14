@@ -347,10 +347,25 @@ class MySqlMatchingScheduleConfirmationRepository:
     def _payloads(cursor, case_no, plan_id, version_id):
         cursor.execute("SELECT service_date FROM confirmed_service_date_days WHERE confirmed_version_id=%s ORDER BY ordinal", (version_id,))
         dates = [r["service_date"].isoformat() for r in cursor.fetchall()]
-        cursor.execute("SELECT c.line_user_id FROM orders o JOIN clients c ON c.id=o.client_id WHERE o.case_no=%s", (case_no,))
+        cursor.execute(
+            "SELECT binding.line_user_id FROM orders o JOIN clients c ON c.id=o.client_id "
+            "LEFT JOIN line_identity_role_bindings binding ON binding.subject_type='customer' "
+            "AND binding.subject_reference=CAST(c.id AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci "
+            "AND binding.binding_status='bound' AND binding.line_user_id=c.line_user_id "
+            "WHERE o.case_no=%s",
+            (case_no,),
+        )
         client = cursor.fetchone()
         result = [_schedule_payload("customer", "customer", None, client["line_user_id"], dates)]
-        cursor.execute("SELECT s.id,s.assigned_start_date,s.assigned_end_date,st.line_user_id FROM caregiver_matching_plan_segments s JOIN staff st ON st.id=s.staff_id WHERE s.plan_id=%s ORDER BY s.segment_order", (plan_id,))
+        cursor.execute(
+            "SELECT s.id,s.assigned_start_date,s.assigned_end_date,binding.line_user_id "
+            "FROM caregiver_matching_plan_segments s JOIN staff st ON st.id=s.staff_id "
+            "LEFT JOIN line_identity_role_bindings binding ON binding.subject_type='staff' "
+            "AND binding.subject_reference=CAST(st.id AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci "
+            "AND binding.binding_status='bound' AND binding.line_user_id=st.line_user_id "
+            "WHERE s.plan_id=%s ORDER BY s.segment_order",
+            (plan_id,),
+        )
         for row in cursor.fetchall():
             own = [d for d in dates if row["assigned_start_date"].isoformat() <= d <= row["assigned_end_date"].isoformat()]
             result.append(_schedule_payload("caregiver", f"caregiver:{row['id']}", row["id"], row["line_user_id"], own))

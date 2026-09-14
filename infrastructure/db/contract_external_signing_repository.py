@@ -324,7 +324,11 @@ class MySqlContractExternalSigningRepository:
     ) -> bool:
         row = self._one(
             _BINDING_SELECT_SQL + _lock_suffix(for_update),
-            (snapshot.line_user_id,),
+            (
+                snapshot.line_user_id,
+                snapshot.subject_type.value,
+                snapshot.subject_reference,
+            ),
         )
         return row is not None and (
             str(row["binding_status"]) == "bound"
@@ -1166,7 +1170,8 @@ _LEGACY_MANUAL_EVIDENCE_SQL = (
 )
 _BINDING_SELECT_SQL = (
     "SELECT binding_status,subject_type,subject_reference,aggregate_version "
-    "FROM line_identity_bindings WHERE line_user_id=%s"
+    "FROM line_identity_role_bindings WHERE line_user_id=%s "
+    "AND subject_type=%s AND subject_reference=%s"
 )
 _INBOX_SELECT_SQL = (
     "SELECT id,payload_fingerprint,source_user_id FROM line_inbox_events "

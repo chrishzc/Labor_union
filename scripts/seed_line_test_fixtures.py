@@ -114,7 +114,7 @@ def _seed_scenario_client(cursor, scenario: dict[str, object]) -> int:
         cursor.execute(
             "UPDATE clients SET name=%s,gender='female',phone=%s,city='新竹市',address='東區測試路100號',identity_status=%s,"
             "service_time='9小時日間',service_days=%s,due_month=%s,service_start_date=%s,notes=%s,residence_type='大樓',"
-            "delivery_type='自然產',service_type=%s,baby_info='單胞胎',case_no=%s,line_user_id=NULL,"
+            "delivery_type='自然產',service_type=%s,baby_info='單胞胎',case_no=%s,"
             "admin_notes='ORDER_SCENARIO_FIXTURE',created_at=DATE_SUB(%s,INTERVAL 60 DAY) WHERE id=%s",
             (*values, created_date_val, client_id),
         )
@@ -1800,7 +1800,7 @@ def seed_fixtures(verbose: bool = True) -> dict[str, object]:
                 "UPDATE clients SET case_no='115000999', city='新竹市', address='東區科學園路1號', "
                 "identity_status='一般市民', service_days=NULL, due_month='2026-12', service_start_date=NULL, "
                 "notes=NULL, baby_info=NULL, residence_type=NULL, delivery_type=NULL, service_type=NULL, "
-                "admin_notes='STATE_B_UNFILLED_SURVEY', created_at=NOW(), line_user_id=NULL WHERE id = %s", (c3_id,)
+                "admin_notes='STATE_B_UNFILLED_SURVEY', created_at=NOW() WHERE id = %s", (c3_id,)
             )
         else:
             cursor.execute(
@@ -1823,7 +1823,7 @@ def seed_fixtures(verbose: bool = True) -> dict[str, object]:
                 "UPDATE staff SET phone='0923456789', birthday='1980-05-15', city='新竹市', "
                 "address='東區建中一路50號', status='active', has_massage_cert=1, "
                 "weekly_rest_days=%s, care_babies=1, service_regions=%s, special_skills=%s, "
-                "registered_at=NOW(), line_user_id=NULL WHERE id = %s",
+                "registered_at=NOW() WHERE id = %s",
                 (json.dumps(["週日"]), json.dumps(["新竹市", "新竹縣"]), json.dumps(["產婦催乳按摩", "月子膳食調理"]), s1_id)
             )
         else:
@@ -1846,7 +1846,7 @@ def seed_fixtures(verbose: bool = True) -> dict[str, object]:
                 "UPDATE staff SET phone='0934567890', birthday='1982-08-20', city='新竹市', "
                 "address='北區北大路88號', status='active', has_massage_cert=1, "
                 "weekly_rest_days=%s, care_babies=1, service_regions=%s, special_skills=%s, "
-                "registered_at=NOW(), line_user_id=NULL WHERE id = %s",
+                "registered_at=NOW() WHERE id = %s",
                 (json.dumps(["週六", "週日"]), json.dumps(["新竹市", "新竹縣"]), json.dumps(["新生兒照護", "嬰幼兒按摩"]), s2_id)
             )
         else:
@@ -1878,7 +1878,7 @@ def seed_fixtures(verbose: bool = True) -> dict[str, object]:
                 cursor.execute(
                     "UPDATE staff SET phone=%s,birthday=%s,city='新竹市',address='東區測試路200號',"
                     "status='active',has_massage_cert=1,weekly_rest_days=%s,care_babies=1,service_regions=%s,"
-                    "special_skills=%s,registered_at=NOW(),line_user_id=NULL WHERE id=%s",
+                    "special_skills=%s,registered_at=NOW() WHERE id=%s",
                     (phone, birthday, json.dumps([]), json.dumps(["新竹市", "新竹縣"]), json.dumps(["新生兒照護"]), staff_id),
                 )
             else:
@@ -1902,37 +1902,8 @@ def seed_fixtures(verbose: bool = True) -> dict[str, object]:
                 staff_ids,
             )
 
-        # 4. 清除可能殘留的測試用 LINE 綁定與解除申請 (保留乾淨狀態，遵循 FK 關聯順序)
-        cursor.execute("DELETE FROM line_identity_revocation_requests")
-        cursor.execute("DELETE FROM line_identity_role_binding_events")
-        cursor.execute("DELETE FROM line_identity_role_bindings")
-        cursor.execute("DELETE FROM line_identity_bindings")
-
-        # 4.1 確保已發布的 LINE Rich Menu 任務存在 (供解除綁定 M1-06 回復 fallback menu 使用)
-        rich_menu_fixtures = [
-            ("default_menu", "richmenu-afe3c90c191abd8613ca7f9a06049a7b", "一般用戶選單", "seed-default-menu-publication", "seed-corr-default-menu"),
-            ("staff_menu", "richmenu-b1c86786d69f902c79690842dd133afb", "月嫂專屬選單", "seed-staff-menu-publication", "seed-corr-staff-menu"),
-            ("union_staff_menu", "richmenu-e5f8b155c10220e5d3296d50c0a8e027", "工會人員專屬選單", "seed-union-staff-menu-publication", "seed-corr-union-staff-menu"),
-        ]
-        for m_def_id, p_menu_id, m_name, idem_key, corr_id in rich_menu_fixtures:
-            cursor.execute(
-                "INSERT INTO line_rich_menu_publication_tasks ("
-                "  menu_definition_id, configuration_revision, operation, publication_status,"
-                "  definition_snapshot, provider_menu_id, idempotency_key, correlation_id, requested_by_actor_id"
-                ") VALUES (%s, 1, 'publish', 'published', %s, %s, %s, %s, 'system:seed') "
-                "ON DUPLICATE KEY UPDATE publication_status='published', provider_menu_id=%s",
-                (m_def_id, json.dumps({"id": m_def_id, "name": m_name}), p_menu_id, idem_key, corr_id, p_menu_id),
-            )
-            task_id = cursor.lastrowid
-            if not task_id:
-                cursor.execute("SELECT id FROM line_rich_menu_publication_tasks WHERE idempotency_key=%s", (idem_key,))
-                task_id = cursor.fetchone()["id"]
-            cursor.execute(
-                "INSERT IGNORE INTO line_rich_menu_publication_step_acknowledgements ("
-                "  publication_id, step_name, request_fingerprint, idempotency_key, provider_menu_id, acknowledged_at_utc"
-                ") VALUES (%s, 'cleanup', '0000000000000000000000000000000000000000000000000000000000000000', %s, %s, UTC_TIMESTAMP(6))",
-                (task_id, f"seed-cleanup-ack-{task_id}", p_menu_id),
-            )
+        # 4. LINE 身分與 provider publication 都是可持續 owner facts。
+        # Fixture refresh 不得刪除真人綁定，也不得偽造 provider 已發布狀態。
 
         # 清理測試中可能產生的重複客戶資料
         cursor.execute(
@@ -1950,10 +1921,6 @@ def seed_fixtures(verbose: bool = True) -> dict[str, object]:
             cursor.execute(f"DELETE FROM provisional_client_registrations WHERE client_id IN ({format_strings})", tuple(extra_client_ids))
             cursor.execute(f"DELETE FROM client_profile_change_requests WHERE client_id IN ({format_strings})", tuple(extra_client_ids))
             cursor.execute(f"DELETE FROM clients WHERE id IN ({format_strings})", tuple(extra_client_ids))
-
-        cursor.execute("UPDATE clients SET line_user_id=NULL WHERE case_no <> 'M3-CUST-20260910-01' AND name <> '江家綺'")
-        cursor.execute("UPDATE staff SET line_user_id=NULL")
-        cursor.execute("UPDATE provisional_client_registrations SET active_line_user_id=NULL WHERE client_id NOT IN (SELECT id FROM clients WHERE name='江家綺')")
 
         conn.commit()
     finally:

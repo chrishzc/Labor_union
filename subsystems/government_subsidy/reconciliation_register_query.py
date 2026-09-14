@@ -163,7 +163,7 @@ def _fetch_established_cases(
                        br.survey_details,
                        payroll_policy.hourly_rate_ntd AS payroll_hourly_rate_ntd
                 FROM orders o
-                JOIN clients c ON c.id = o.client_id
+                JOIN clients c ON c.id = o.client_id AND c.case_no = o.case_no
                 LEFT JOIN staff s ON s.id = o.staff_id
                 LEFT JOIN beclass_records br
                     ON (br.query_no = o.case_no OR br.bound_case_no = o.case_no)
@@ -320,16 +320,15 @@ def _to_register_row(source: dict) -> dict | None:
     actual_end = _as_date(source.get("actual_end_date"))
     daily_hours = Decimal(str(source.get("service_hours_per_day") or 0))
     service_days = Decimal(str(source.get("service_days") or 0))
+    if not actual_start or not actual_end or daily_hours <= 0 or service_days <= 0:
+        return None
     subsidy_hours, unit_price = _subsidy_terms(
         source.get("identity_status"),
         service_days * daily_hours,
         source.get("payroll_hourly_rate_ntd"),
     )
     if (
-        not actual_start
-        or not actual_end
-        or subsidy_hours <= 0
-        or daily_hours <= 0
+        subsidy_hours <= 0
         or unit_price <= 0
     ):
         return None
@@ -607,10 +606,18 @@ def _operations_report_order_rows(
         connection_factory,
         OPERATIONS_REPORT_ORDER_STATUSES,
     ):
+        source_case_no = str(source.get("case_no") or "")
+        application_roc_year = _case_application_roc_year(source_case_no)
+        source_end = _as_date(source.get("actual_end_date"))
+        if application_roc_year != report_roc_year and not (
+            application_roc_year == report_roc_year - 1
+            and source_end is not None
+            and source_end.year == report_year
+        ):
+            continue
         row = _to_register_row(source)
         if row is None:
             continue
-        application_roc_year = _case_application_roc_year(row["市府訂單號碼"])
         reconciliation_year, reconciliation_period = _operations_reconciliation_period(
             row["服務結束"]
         )

@@ -160,7 +160,8 @@ def _event_consumer(worker_identity: str, now) -> LineWebhookEventConsumer:
                 ),
             )
         ),
-        knowledge_question_scheduler=enqueue_line_knowledge_question,
+        # 依指示取消 LINE 聊天室 AI 助理問答，轉由專屬客服與專員於 LINE 官方 App/後台 1 對 1 免費回覆
+        knowledge_question_scheduler=None,
         service_help_application=LineServiceHelpApplication(
             now,
             _identity_flow_url,

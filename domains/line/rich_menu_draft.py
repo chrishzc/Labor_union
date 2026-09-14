@@ -40,6 +40,44 @@ _LIFF_TARGETS = frozenset(
         "?target=staff_verification",
     }
 )
+_LIFF_TARGETS_BY_AUDIENCE = {
+    "visitor": frozenset(
+        {
+            "?entry=gateway",
+            "?entry=registration",
+            "?target=gateway",
+            "?target=staff_verification",
+        }
+    ),
+    "customer": frozenset({"?target=order_update", "?target=profile_update"}),
+    "staff": frozenset(
+        {
+            "?target=staff_baby_log",
+            "?target=staff_leave_apply",
+            "?target=staff_order_search",
+            "?target=staff_payout",
+            "?target=staff_schedule",
+        }
+    ),
+    "union_staff": frozenset(
+        {
+            "?target=anomalies_center",
+            "?target=customer_service",
+            "?target=dashboard",
+            "?target=order_tracking",
+            "?target=staff_review",
+        }
+    ),
+    "union_staff_page": frozenset(
+        {
+            "?target=anomalies_center",
+            "?target=customer_service",
+            "?target=dashboard",
+            "?target=order_tracking",
+            "?target=staff_review",
+        }
+    ),
+}
 _ALIAS_PATTERN = re.compile(r"^[a-z0-9_-]{1,32}$")
 _IDENTIFIER_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 
@@ -70,7 +108,32 @@ def normalize_rich_menu_draft(definition: Mapping[str, object]) -> dict[str, obj
                 raise RichMenuDraftValidationError("only one enabled menu is allowed per audience role")
             enabled_roles.add(role)
         menus.append(menu)
+    _validate_menu_switch_audiences(menus)
     return {"version": version, "menus": menus}
+
+
+def _validate_menu_switch_audiences(menus: Sequence[Mapping[str, object]]) -> None:
+    alias_audiences = {
+        str(menu["rich_menu_alias_id"]): str(menu["audience_role"])
+        for menu in menus
+        if menu.get("rich_menu_alias_id") is not None
+    }
+    for menu in menus:
+        source_audience = str(menu["audience_role"])
+        for button in _sequence(menu["buttons"], "Rich Menu buttons"):
+            action = _mapping(_mapping(button, "Rich Menu button")["action"], "Rich Menu action")
+            if action.get("type") != "richmenuswitch":
+                continue
+            target_alias = str(action["rich_menu_alias_id"])
+            target_audience = alias_audiences.get(target_alias)
+            if target_audience is None:
+                raise RichMenuDraftValidationError("Rich Menu switch target alias is unknown")
+            source_family = "union_staff" if source_audience == "union_staff_page" else source_audience
+            target_family = "union_staff" if target_audience == "union_staff_page" else target_audience
+            if source_family != target_family:
+                raise RichMenuDraftValidationError(
+                    "Rich Menu switch target belongs to a different audience"
+                )
 
 
 def normalize_rich_menu_action(action: Mapping[str, object]) -> dict[str, object]:
@@ -153,7 +216,7 @@ def _normalize_menu(raw_menu: object, index: int) -> dict[str, object]:
     buttons_raw = _sequence(menu.get("buttons"), f"{path} buttons")
     if not 1 <= len(buttons_raw) <= 20:
         raise RichMenuDraftValidationError(f"{path} must contain 1 to 20 buttons")
-    buttons = [_normalize_button(item, path, size) for item in buttons_raw]
+    buttons = [_normalize_button(item, path, size, audience) for item in buttons_raw]
     ids = [str(item["id"]) for item in buttons]
     if len(ids) != len(set(ids)):
         raise RichMenuDraftValidationError(f"{path} button IDs must be unique")
@@ -243,7 +306,12 @@ def _normalize_appearance(raw: object, path: str) -> dict[str, object]:
     return normalized
 
 
-def _normalize_button(raw: object, path: str, size: Mapping[str, int]) -> dict[str, object]:
+def _normalize_button(
+    raw: object,
+    path: str,
+    size: Mapping[str, int],
+    audience: str,
+) -> dict[str, object]:
     button = _mapping(raw, f"{path} button")
     _only_keys(
         button,
@@ -262,6 +330,14 @@ def _normalize_button(raw: object, path: str, size: Mapping[str, int]) -> dict[s
         raise RichMenuDraftValidationError("Rich Menu button exceeds menu width")
     if normalized_bounds["y"] + normalized_bounds["height"] > size["height"]:
         raise RichMenuDraftValidationError("Rich Menu button exceeds menu height")
+    action = normalize_rich_menu_action(
+        _mapping(button.get("action"), "Rich Menu button action")
+    )
+    if action["type"] == "uri" and action.get("uri_source") == "liff":
+        if action["uri"] not in _LIFF_TARGETS_BY_AUDIENCE[audience]:
+            raise RichMenuDraftValidationError(
+                f"Rich Menu button LIFF target is not allowed for {audience} audience"
+            )
     return {
         "id": _identifier(button.get("id"), "Rich Menu button ID"),
         "label": require_canonical_text(button.get("label"), "Rich Menu button label", 20),
@@ -273,7 +349,7 @@ def _normalize_button(raw: object, path: str, size: Mapping[str, int]) -> dict[s
         ),
         "border_radius": _bounded_integer(button.get("border_radius", 0), 0, 160, "Rich Menu border radius"),
         "bounds": normalized_bounds,
-        "action": normalize_rich_menu_action(_mapping(button.get("action"), "Rich Menu button action")),
+        "action": action,
     }
 
 

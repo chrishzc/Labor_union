@@ -210,6 +210,46 @@ def test_current_rich_menu_configuration_uses_only_canonical_liff_targets() -> N
     assert normalize_rich_menu_draft(definition)["menus"]
 
 
+def test_customer_menu_rejects_staff_liff_target() -> None:
+    definition = _definition(
+        {"type": "uri", "uri_source": "liff", "uri": "?target=staff_schedule"}
+    )
+
+    with pytest.raises(
+        RichMenuDraftValidationError,
+        match="not allowed for customer audience",
+    ):
+        normalize_rich_menu_draft(definition)
+
+
+def test_customer_menu_rejects_switch_to_staff_menu() -> None:
+    definition = _definition(
+        {
+            "type": "richmenuswitch",
+            "rich_menu_alias_id": "staff-menu",
+            "data": "switch:staff",
+        }
+    )
+    definition["menus"][0]["rich_menu_alias_id"] = "customer-menu"
+    staff_menu = json.loads(json.dumps(definition["menus"][0]))
+    staff_menu.update(
+        {
+            "id": "staff_menu",
+            "name": "月嫂選單",
+            "audience_role": "staff",
+            "rich_menu_alias_id": "staff-menu",
+            "set_as_default": False,
+        }
+    )
+    definition["menus"].append(staff_menu)
+
+    with pytest.raises(
+        RichMenuDraftValidationError,
+        match="different audience",
+    ):
+        normalize_rich_menu_draft(definition)
+
+
 @pytest.mark.parametrize(
     "action",
     [

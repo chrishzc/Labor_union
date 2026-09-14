@@ -34,13 +34,16 @@ class MySqlMatchingCoordinationCustomerServiceSource:
         with self._connection.cursor() as cursor:
             cursor.execute(
                 "SELECT o.reference_id,o.case_no,o.intent_payload,o.correlation_id,"
-                "o.idempotency_key,c.line_user_id "
+                "o.idempotency_key,binding.line_user_id "
                 "FROM matching_coordination_outbox o "
                 "JOIN orders ord ON ord.case_no=o.case_no "
                 "JOIN clients c ON c.id=ord.client_id "
+                "JOIN line_identity_role_bindings binding ON binding.subject_type='customer' "
+                "AND binding.subject_reference=CAST(c.id AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci "
+                "AND binding.binding_status='bound' AND binding.line_user_id=c.line_user_id "
                 "WHERE o.target_owner='customer_service' "
                 "AND o.intent_type='customer_service_ticket' "
-                "AND c.line_user_id IS NOT NULL "
+                "AND binding.line_user_id IS NOT NULL "
                 "AND NOT EXISTS (SELECT 1 FROM customer_service_ticket_events e "
                 "WHERE e.event_key=o.reference_id) "
                 "ORDER BY o.id ASC LIMIT %s",

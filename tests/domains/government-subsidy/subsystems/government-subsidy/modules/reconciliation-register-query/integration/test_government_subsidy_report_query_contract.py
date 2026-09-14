@@ -81,3 +81,22 @@ def test_subsidy_report_exports_require_admin_before_builder(monkeypatch):
     )
 
     assert quarterly.status_code == annual.status_code == 401
+
+
+def test_annual_source_gap_is_not_misreported_as_invalid_query(monkeypatch):
+    monkeypatch.setattr(
+        finance_reports.reconciliation_register_query,
+        "build_annual_subsidy_summary",
+        lambda *_: (_ for _ in ()).throw(
+            ValueError("government_subsidy_payroll_rate_snapshot_missing")
+        ),
+    )
+
+    response = TestClient(_app()).get(
+        "/api/v1/finance-reports/subsidy-reconciliation/annual",
+        params={"application_year": 2026},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"]["error"]["code"] == "annual_subsidy_report_source_invalid"
+    assert response.json()["detail"]["error"]["message"] == "年度補助核銷來源資料不完整。"
