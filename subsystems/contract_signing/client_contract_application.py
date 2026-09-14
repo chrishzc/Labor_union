@@ -19,6 +19,7 @@ from subsystems.contract_signing.line_delivery import (
     require_contract_line_recipient,
 )
 from subsystems.contract_signing.template_catalog import (
+    CONTRACT_PDF_PRESENTATION_VERSION,
     TEMPLATE_DIRECTORY,
     approved_template_mapping_path,
     load_approved_template,
@@ -330,13 +331,20 @@ class ClientContractSigningApplication:
                 if len(plans) != 1:
                     raise ValueError("contract_external_signing_accepted_plan_required")
                 facts = dict(plans[0])
-                template_facts = self._template_facts(connection, command.case_no, facts)
+                template_facts = dict(
+                    self._template_facts(connection, command.case_no, facts)
+                )
+                template_facts["__pdf_presentation_version__"] = (
+                    CONTRACT_PDF_PRESENTATION_VERSION
+                )
                 snapshot = _sha256(_canonical_json(template_facts).encode())
                 with connection.cursor() as cursor:
                     cursor.execute("SELECT d.id,d.facts_snapshot_sha256 FROM contract_document_versions d "
+                                   "JOIN media_assets asset ON asset.id=d.media_asset_id "
                                    "WHERE d.case_no=%s AND d.document_scope='client_contract' "
                                    "AND d.document_role='template_generated' AND d.matching_plan_id=%s "
                                    "AND d.template_sha256=%s AND d.mapping_sha256=%s "
+                                   "AND asset.mime_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' "
                                    "ORDER BY d.version_number DESC LIMIT 1 FOR UPDATE",
                                    (command.case_no, facts["matching_plan_id"], template.template_sha256, template.mapping_sha256))
                     existing = cursor.fetchone()

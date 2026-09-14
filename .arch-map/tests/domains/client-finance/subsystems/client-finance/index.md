@@ -5,6 +5,10 @@ test_root: tests/domains/client-finance/subsystems/client-finance/
 integration_root: tests/domains/client-finance/subsystems/client-finance/integration/
 fixtures_root: tests/fixtures/
 modules:
+  deposit-skip:
+    layout_status: custom_current
+    test_root: tests/domains/client-finance/subsystems/client-finance/integration/test_deposit_skip.py
+    presentation_test_root: ui_react/src/tests/domains/client-finance/subsystems/client-finance/modules/deposit-skip/
   receipt-reconciliation:
     layout_status: custom_current
     test_root: tests/domains/client-finance/subsystems/client-finance/integration/test_client_receipt_overage.py

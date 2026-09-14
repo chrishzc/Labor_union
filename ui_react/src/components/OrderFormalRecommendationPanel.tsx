@@ -219,7 +219,7 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
     confirmationVersion,
   ]);
 
-  const perform = async (operation: () => Promise<void>) => {
+  const perform = async (operation: () => Promise<void>, invalidateActiveOnError = true) => {
     if (busyRef.current || activeCase.current !== caseNo) return;
     busyRef.current = true;
     setBusy(true);
@@ -232,8 +232,10 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
       if (sequence.current === request) {
         setLockPreview(null);
         setError(errorMessage(caught));
-        // No blind retry after a write or a failed readback. Reload the owner first.
-        setActive({ status: 'error', message: '請重新讀取目前正式方案後再操作。' });
+        if (invalidateActiveOnError) {
+          // No blind retry after a write or a failed readback. Reload the owner first.
+          setActive({ status: 'error', message: '請重新讀取目前正式方案後再操作。' });
+        }
       }
     } finally {
       busyRef.current = false;
@@ -573,7 +575,7 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
     const preview = await waitingDepositLockClient.preview(caseNo, fresh.plan.planId);
     if (preview.case_no !== caseNo || preview.plan_id !== fresh.plan.planId) throw new Error('等待訂金鎖 Preview identity 不一致，已停止套用。');
     if (activeCase.current === caseNo && sequence.current === request) setLockPreview(preview);
-  });
+  }, false);
 
   const applyLock = () => perform(async () => {
     if (!lockPreview?.apply_allowed) return;

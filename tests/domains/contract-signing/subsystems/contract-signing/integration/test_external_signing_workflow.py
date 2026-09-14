@@ -17,6 +17,9 @@ from domains.contract_signing.external_signing import (
     derive_external_signing_session_id,
 )
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
+from infrastructure.db.external_signing_handoff_notification_port import (
+    MySqlExternalSigningHandoffNotificationPort,
+)
 from subsystems.contract_signing.external_signing_contracts import (
     ExternalReporterSubjectType,
     ExternalSigningTypedError,
@@ -155,7 +158,8 @@ def test_handoff_activates_the_virtual_session_once_at_version_one() -> None:
     virtual = _virtual_facts()
     repository = FakeRepository(None, virtual=virtual)
     uows = FakeUowFactory()
-    workflow = ExternalSigningWorkflow(repository, FakeCompletionPort(), uows)
+    notifications = FakeHandoffNotificationPort()
+    workflow = ExternalSigningWorkflow(repository, FakeCompletionPort(), uows, notifications)
     command = RecordExternalSigningHandoff(
         case_no=virtual.case_no,
         expected_status_version=ExpectedVersion(0),
@@ -173,7 +177,67 @@ def test_handoff_activates_the_virtual_session_once_at_version_one() -> None:
     assert replay.resulting_status_version == 1
     assert replay.replayed is True
     assert repository.writes == ["activate", "handoff_receipt"]
+    assert notifications.calls == [(command, virtual)]
     assert [uow.commits for uow in uows.instances] == [1, 1]
+
+
+def test_handoff_notification_failure_prevents_session_activation_and_commit() -> None:
+    virtual = _virtual_facts()
+    repository = FakeRepository(None, virtual=virtual)
+    uows = FakeUowFactory()
+    notifications = FakeHandoffNotificationPort(error=RuntimeError("line binding missing"))
+    workflow = ExternalSigningWorkflow(repository, FakeCompletionPort(), uows, notifications)
+    command = RecordExternalSigningHandoff(
+        case_no=virtual.case_no,
+        expected_status_version=ExpectedVersion(0),
+        actor=ActorContext("admin:17"),
+        idempotency_key=IdempotencyKey("external-handoff:case-001"),
+        correlation_id=CorrelationId("corr-handoff-001"),
+    )
+
+    with pytest.raises(RuntimeError, match="line binding missing"):
+        workflow.record_handoff(command)
+
+    assert repository.writes == []
+    assert notifications.calls == [(command, virtual)]
+    assert uows.instances[0].commits == 0
+
+
+def test_handoff_notification_port_enqueues_client_and_every_staff_target() -> None:
+    facts = _virtual_facts()
+    connection = FakeBindingConnection(
+        {
+            ("customer", "301"): "U-client",
+            ("staff", "501"): "U-staff-501",
+            ("staff", "502"): "U-staff-502",
+        }
+    )
+    deliveries = FakeDeliveryTasks()
+    port = MySqlExternalSigningHandoffNotificationPort(
+        connection,
+        FakeUnsignedRepository({101, 102, 201}),
+    )
+    port._delivery_tasks = deliveries
+    command = RecordExternalSigningHandoff(
+        case_no=facts.case_no,
+        expected_status_version=ExpectedVersion(0),
+        actor=ActorContext("admin:17"),
+        idempotency_key=IdempotencyKey("external-handoff:case-001"),
+        correlation_id=CorrelationId("corr-handoff-001"),
+    )
+
+    port.enqueue_notifications(command, facts)
+
+    assert [request.recipient.identity.value for request in deliveries.requests] == [
+        "U-client",
+        "U-staff-501",
+        "U-staff-502",
+    ]
+    assert [request.source_aggregate_identity for request in deliveries.requests] == [
+        f"{facts.session_id}:client:201",
+        f"{facts.session_id}:staff:11:101",
+        f"{facts.session_id}:staff:12:102",
+    ]
 
 
 def test_first_staff_report_lazy_activates_in_outer_uow() -> None:
@@ -318,6 +382,63 @@ class FakeCompletionPort:
     def establish_prerequisites(self, command, facts, resulting_status_version):
         self.calls.append((facts.session_id, resulting_status_version))
         return StaffCompletionPrerequisites(44)
+
+
+class FakeHandoffNotificationPort:
+    def __init__(self, error=None) -> None:
+        self.calls = []
+        self.error = error
+
+    def enqueue_notifications(self, command, facts) -> None:
+        self.calls.append((command, facts))
+        if self.error is not None:
+            raise self.error
+
+
+class FakeUnsignedRepository:
+    def __init__(self, document_ids) -> None:
+        self.document_ids = document_ids
+
+    def load_current_pdf(self, case_no, document_id):
+        return object() if document_id in self.document_ids else None
+
+
+class FakeDeliveryTasks:
+    def __init__(self) -> None:
+        self.requests = []
+
+    def enqueue(self, request):
+        self.requests.append(request)
+
+
+class FakeBindingConnection:
+    def __init__(self, bindings) -> None:
+        self.bindings = bindings
+        self.parameters = None
+
+    def cursor(self):
+        return self
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def execute(self, statement, parameters):
+        self.parameters = parameters
+
+    def fetchone(self):
+        subject_type, subject_reference = self.parameters
+        line_user_id = self.bindings.get((subject_type, subject_reference))
+        if line_user_id is None:
+            return None
+        return {
+            "line_user_id": line_user_id,
+            "binding_status": "bound",
+            "subject_type": subject_type,
+            "subject_reference": subject_reference,
+        }
 
 
 class FakeUow:

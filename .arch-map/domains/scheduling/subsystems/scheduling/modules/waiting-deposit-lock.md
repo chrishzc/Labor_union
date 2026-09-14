@@ -19,7 +19,7 @@
 ## Dependencies
 - outbound: `orders/orders` — 訂單取消由 Orders outer Unit of Work 傳入已鎖定 lifecycle command envelope。
 - outbound: `orders/historical-precision-restart` — precision restart 後，沒有 generation ownership 的舊歷史 assignment 不再構成 waiting-lock occupancy。
-- inbound: `scheduling/matching-coordination` — matching plan 與 commitment 提供檔期鎖候選事實。
+- inbound: `scheduling/matching-coordination` — 工會確認的 matching plan 與 current confirmed service dates 提供檔期鎖候選事實；月嫂意願是推薦輸入，不以簽約或 precontract commitment 作為鎖定前置條件。
 
 ## Contracts
 - Waiting-deposit lock ownership and cancellation — `document/架構重整/01_規格基線/02_Assignments_Scheduling_Domain.md`.

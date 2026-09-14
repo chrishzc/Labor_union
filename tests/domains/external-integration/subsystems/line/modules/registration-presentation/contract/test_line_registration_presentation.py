@@ -16,7 +16,12 @@ def test_default_service_registration_menu_uses_the_canonical_identity_entry() -
     source = (ROOT / "config" / "line_menu.json").read_text(encoding="utf-8")
     identity = (ROOT / "line" / "static" / "identity.html").read_text(encoding="utf-8")
 
-    assert '"id": "service_registration"' in source or '"id":"service_registration"' in source
+    assert (
+        '"id": "service_registration"' in source
+        or '"id":"service_registration"' in source
+        or '"id": "client_service"' in source
+        or '"id":"client_service"' in source
+    )
     assert '"uri": "?entry=registration"' in source or '"uri":"?entry=registration"' in source
     assert '"uri": "?target=registration"' not in source and '"uri":"?target=registration"' not in source
     assert '"uri_source": "liff"' in source or '"uri_source":"liff"' in source

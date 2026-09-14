@@ -137,4 +137,25 @@ describe('Client registry owner editing', () => {
     expect(within(beclass).getByRole('combobox', { name: '胎數（單胞胎／雙胞胎）' })).toHaveValue('');
     expect(screen.queryByText(/尚未綁定 BeClass/)).not.toBeInTheDocument();
   });
+
+  it('loads every registry selector page so search results are not capped at 100 cases', async () => {
+    mocks.list.mockImplementation(async (request = {}) => {
+      if (request.after === 'CASE-100') {
+        return {
+          items: [{ client_id: 108, case_no: 'CASE-108', name: '目標客戶', phone: '0988000000', city: '新竹市', planned_start_date: null, order_status: '洽談中' }],
+          next_cursor: null,
+        };
+      }
+      return {
+        items: [{ client_id: 100, case_no: 'CASE-100', name: '第一頁客戶', phone: '0911000000', city: '新竹市', planned_start_date: null, order_status: '洽談中' }],
+        next_cursor: 'CASE-100',
+      };
+    });
+
+    render(<ClientRegistryPage />);
+    fireEvent.click(screen.getByRole('tab', { name: '名冊資料' }));
+
+    expect(await screen.findByRole('button', { name: /CASE-108/ })).toBeInTheDocument();
+    expect(mocks.list).toHaveBeenCalledWith(expect.objectContaining({ limit: 100, after: 'CASE-100' }));
+  });
 });

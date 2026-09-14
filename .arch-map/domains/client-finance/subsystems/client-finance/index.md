@@ -15,6 +15,7 @@
 - `document/架構重整/01_規格基線/00_Global_共同契約.md` — outer UoW
 
 ## Modules
+- `deposit-skip` — 一般市民由管理員允許訂金未付仍推進，不變更應收與核銷狀態；path: `modules/deposit-skip.md`
 - `receipt-reconciliation` — 客戶銀行收款的精確核銷、明示超收處理與 owner Preview／Apply；path: `modules/receipt-reconciliation.md`
 - `obligation-planning` — plans canonical Client Finance stage obligations, including date-only replacement without customer cash impact; path: `modules/obligation-planning.md`
 - `historical-payment-settlement` — adopted pre-system historical Client payment evidence and exact obligation settlement overlay; path: `modules/historical-payment-settlement.md`

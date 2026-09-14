@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from decimal import Decimal
 from enum import StrEnum
 
 from domains.orders.floor_fee import (
@@ -76,10 +77,12 @@ class AssignmentRateSnapshot:
 @dataclass(frozen=True, slots=True)
 class PayrollTerms:
     contracted_service_days: int
-    service_hours_per_day: float | int
+    service_hours_per_day: Decimal | int
     floor_fee: MoneyNTD
 
     def __post_init__(self) -> None:
+        if isinstance(self.service_hours_per_day, float):
+            raise TypeError("service hours per day must use Decimal or int")
         require_positive_integer(
             self.contracted_service_days,
             "contracted service days",
@@ -107,8 +110,8 @@ class AssignmentPayrollCandidate:
     assignment_identity: str
     staff_id: int
     official_service_day_count: int
-    actual_hours: float | int
-    double_pay_hours: float | int
+    actual_hours: Decimal | int
+    double_pay_hours: Decimal | int
     hourly_rate: MoneyNTD
     service_salary: MoneyNTD
     floor_fee_allocated: MoneyNTD
@@ -240,8 +243,8 @@ def _build_assignment_candidate(facts, rate, terms, floor_fee, adjustments):
     )
 
 
-def _whole_ntd(value: float | int) -> int:
-    if isinstance(value, float) and not value.is_integer():
+def _whole_ntd(value: Decimal | int) -> int:
+    if isinstance(value, Decimal) and value != value.to_integral_value():
         raise ValueError("half-hour payroll amount must resolve to whole NTD")
     return int(value)
 

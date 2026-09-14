@@ -13,9 +13,9 @@ from subsystems.client_profile.registry_query import (
 
 
 class _Repository:
-    def list_page(self, *, query, has_baby_info, service_days, requires_cooking, sort_by, sort_order, limit, after):
-        assert (query, has_baby_info, service_days, requires_cooking, sort_by, sort_order, limit, after) == ("王小明", None, None, None, None, None, 25, None)
-        return (({"client_id": 7, "case_no": "CASE-001", "name": "王小明", "phone": "0912345678", "city": "新竹市", "baby_info": "雙胞胎", "service_days": 26, "requires_cooking": True, "planned_start_date": None, "order_status": "matching"},), "CASE-001")
+    def list_page(self, *, query, multi_birth_count, order_status, requires_cooking, sort_by, sort_order, limit, after):
+        assert (query, multi_birth_count, order_status, requires_cooking, sort_by, sort_order, limit, after) == ("王小明", None, None, None, None, None, 25, None)
+        return (({"client_id": 7, "case_no": "CASE-001", "name": "王小明", "phone": "0912345678", "city": "新竹市", "multi_birth_count": "雙胞胎", "service_days": 26, "requires_cooking": True, "planned_start_date": None, "order_status": "洽談中"},), "CASE-001")
 
     def load_detail(self, case_no):
         return {
@@ -39,7 +39,7 @@ def test_registry_list_and_detail_keep_case_identity_and_owner_versions():
     application = ClientRegistryQueryApplication(_Repository())
     page = application.list(query=" 王小明 ", limit=25, after=None)
     assert page.next_cursor == "CASE-001"
-    assert page.items[0].baby_info == "雙胞胎"
+    assert page.items[0].multi_birth_count == "雙胞胎"
     assert page.items[0].service_days == 26
     assert page.items[0].requires_cooking is True
     detail = application.query("CASE-001")
@@ -58,26 +58,26 @@ def test_registry_list_route_preserves_optional_false_and_returns_roster_fields(
             self.captured = kwargs
             return (({
                 "client_id": 7, "case_no": "CASE-001", "name": "王小明", "phone": "0912345678", "city": "新竹市",
-                "baby_info": None, "service_days": 26, "requires_cooking": False,
-                "planned_start_date": None, "order_status": "matching",
+                "multi_birth_count": None, "service_days": 26, "requires_cooking": False,
+                "planned_start_date": None, "order_status": "洽談中",
             },), None)
 
     repository = _RouteRepository()
     response = list_client_registry(
-        query=None, has_baby_info=False, service_days=26, requires_cooking=False,
+        query=None, multi_birth_count="雙胞胎", order_status="洽談中", requires_cooking=False,
         sort_by="case_no", sort_order="asc", limit=25, after=None,
         principal=AdminPrincipal(9, "registry-reader", "Registry Reader", "system_admin"),
         application=ClientRegistryQueryApplication(repository),
     )
 
     assert repository.captured == {
-        "query": None, "has_baby_info": False, "service_days": 26, "requires_cooking": False,
+        "query": None, "multi_birth_count": "雙胞胎", "order_status": "洽談中", "requires_cooking": False,
         "sort_by": "case_no", "sort_order": "asc", "limit": 25, "after": None,
     }
     assert response.data.items[0].model_dump() == {
         "client_id": 7, "case_no": "CASE-001", "name": "王小明", "phone": "0912345678", "city": "新竹市",
-        "baby_info": None, "service_days": 26, "requires_cooking": False,
-        "planned_start_date": None, "order_status": "matching",
+        "multi_birth_count": None, "service_days": 26, "requires_cooking": False,
+        "planned_start_date": None, "order_status": "洽談中",
     }
 
 
@@ -98,18 +98,18 @@ def test_registry_passes_combined_filters_and_discards_unsafe_custom_sort_cursor
             self.captured = kwargs
             return (({
                 "client_id": 7, "case_no": "CASE-001", "name": "王小明", "phone": "0912345678", "city": "新竹市",
-                "baby_info": "雙胞胎", "service_days": 26, "requires_cooking": True,
-                "planned_start_date": None, "order_status": "matching",
+                "multi_birth_count": "雙胞胎", "service_days": 26, "requires_cooking": True,
+                "planned_start_date": None, "order_status": "洽談中",
             },), "CASE-001")
 
     repository = _CaptureRepository()
     page = ClientRegistryQueryApplication(repository).list(
-        query=" 王 ", has_baby_info=True, service_days=26, requires_cooking=True,
+        query=" 王 ", multi_birth_count="雙胞胎", order_status="洽談中", requires_cooking=True,
         sort_by="service_days", sort_order="desc", limit=25, after=None,
     )
 
     assert repository.captured == {
-        "query": "王", "has_baby_info": True, "service_days": 26, "requires_cooking": True,
+        "query": "王", "multi_birth_count": "雙胞胎", "order_status": "洽談中", "requires_cooking": True,
         "sort_by": "service_days", "sort_order": "desc", "limit": 25, "after": None,
     }
     assert page.next_cursor is None
@@ -239,34 +239,33 @@ def test_mysql_registry_exposes_blank_editable_values_for_historical_case_withou
 
 def test_mysql_registry_list_applies_bound_filters_and_allowlisted_sorting_in_one_query():
     connection = _SqlConnection([(
-        {"client_id": 7, "case_no": "CASE-001", "name": "王小明", "phone": "0912345678", "city": "新竹市", "baby_info": "雙胞胎", "service_days": 26, "requires_cooking": True, "planned_start_date": None, "order_status": "matching"},
+        {"client_id": 7, "case_no": "CASE-001", "name": "王小明", "phone": "0912345678", "city": "新竹市", "multi_birth_count": "雙胞胎", "service_days": 26, "requires_cooking": True, "planned_start_date": None, "order_status": "洽談中"},
     )])
 
     rows, next_cursor = MySqlClientRegistryQueryRepository(connection).list_page(
-        query="王", has_baby_info=True, service_days=26, requires_cooking=True,
+        query="王", multi_birth_count="雙胞胎", order_status="洽談中", requires_cooking=True,
         sort_by="service_days", sort_order="desc", limit=25, after=None,
     )
 
     statement, parameters = connection.cursor_instance.statements[0]
     assert len(connection.cursor_instance.statements) == 1
-    assert "c.baby_info" in statement and "o.service_days,o.requires_cooking" in statement
-    assert "COALESCE(TRIM(c.baby_info), '') <> ''" in statement
-    assert "o.service_days = %s" in statement and "o.requires_cooking = %s" in statement
+    assert "AS multi_birth_count" in statement and "o.service_days,o.requires_cooking" in statement
+    assert "$.multi_birth_count" in statement and "特殊計費:胎數" in statement
+    assert "o.status = %s" in statement and "o.requires_cooking = %s" in statement
     assert "ORDER BY o.service_days DESC, o.case_no ASC" in statement
-    assert parameters == ("%王%", 26, True, 26)
+    assert parameters == ("%王%", "雙胞胎", "洽談中", True, 26)
     assert rows[0]["case_no"] == "CASE-001"
     assert next_cursor is None
 
 
-def test_mysql_registry_list_keeps_false_distinct_from_null_for_baby_and_cooking_filters():
+def test_mysql_registry_list_keeps_null_distinct_from_explicit_cooking_filter():
     connection = _SqlConnection([()])
 
     MySqlClientRegistryQueryRepository(connection).list_page(
-        query=None, has_baby_info=False, service_days=None, requires_cooking=False,
+        query=None, multi_birth_count=None, order_status=None, requires_cooking=False,
         sort_by="case_no", sort_order="asc", limit=25, after=None,
     )
 
     statement, parameters = connection.cursor_instance.statements[0]
-    assert "COALESCE(TRIM(c.baby_info), '') = ''" in statement
     assert "o.requires_cooking = %s" in statement
     assert parameters == (False, 26)

@@ -37,7 +37,9 @@
 - 全案有效正式服務量必須等於 Orders 契約服務量。
 - 全案條款變更重建全部有效 assignments；局部請假／代班只重建受影響 family，但仍重驗全案。
 - assignment 的整段連續區間都占用月嫂，休假不能被誤判為可接其他案件。
-- 一般洽談不占檔期；客戶確認後才形成 waiting-deposit lock。
+- 一般洽談不占檔期；月嫂只表示承接意願，客戶接受推薦後仍由工會人員決定是否正式配對並以
+  current confirmed service dates 建立 waiting-deposit lock。鎖定不要求月嫂先簽約或先形成
+  precontract service commitment。
 - 訂金逾期只形成異常，不自動釋放。
 - 每個尚未開始服務的 assignment 預計結束日後七天為獨立 buffer；全案第一個正式服務開始時同交易解除全部 buffer。Current Query 亦須以全案第一個正式服務時刻排除已開始／已完成案件的 stale active buffer root，不得讓 persistence marker 覆蓋 `planned／active／completed` lifecycle。
 - 國定假日不自動雙倍薪；只接受明確 special-pay event。
@@ -86,7 +88,7 @@ confirmation、waiting lock、commitment 與排班的 immutable 歷史保留，�
 
 第一個正式 assignment 的 bootstrap 必須轉換同案仍有效的 waiting-deposit lock；
 若沒有 waiting lock，回 `assignment_plan_bootstrap.waiting_lock_required`，不得直接建立
-正式 assignment。轉換前仍必須驗證契約流程完成、服務時間完整及訂金正式核銷；
+正式 assignment。轉換前仍必須驗證契約流程完成、服務時間完整，以及 Client Finance 提供的訂金已正式核銷或有效的一般市民訂金未付人工放行；放行不得把訂金投影成已核銷或零元；
 legacy 缺漏只能進異常與人工修正，不得由 Assignment Plan 猜測或補造。
 
 依第 `21` 份正式規格，存在簽約前 commitment 時，第一次 bootstrap 還必須鎖定並驗證

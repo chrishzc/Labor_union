@@ -39,6 +39,7 @@ from api.routes import (
     client_registry,
     case_architecture_bootstrap,
     client_deposit_reversal,
+    client_deposit_skip,
     client_receipt_reconciliation,
     client_refund_reversal,
     contract_signing,
@@ -331,6 +332,7 @@ app.include_router(line_system_config.public_router)
 app.include_router(client_payments.router)
 app.include_router(client_payment_destination.router)
 app.include_router(client_deposit_reversal.router)
+app.include_router(client_deposit_skip.router)
 app.include_router(client_receipt_reconciliation.router)
 app.include_router(client_refund_reversal.router)
 app.include_router(financial_adjustment.router)

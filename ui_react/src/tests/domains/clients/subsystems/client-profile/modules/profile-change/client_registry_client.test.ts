@@ -15,14 +15,14 @@ describe('clientRegistryClient list query', () => {
     const get = vi.spyOn(transport, 'get').mockResolvedValue(response);
 
     await clientRegistryClient.list({
-      query: ' 王 ', hasBabyInfo: false, serviceDays: 26, requiresCooking: false,
+      query: ' 王 ', multiBirthCount: '雙胞胎', orderStatus: '洽談中', requiresCooking: false,
       sortBy: 'service_days', sortOrder: 'desc', after: 'CASE-001',
     });
 
     expect(get).toHaveBeenCalledWith('/api/v1/admin/registries/clients', {
       token: 'test-token',
       params: {
-        query: '王', has_baby_info: false, service_days: 26, requires_cooking: false,
+        query: '王', multi_birth_count: '雙胞胎', order_status: '洽談中', requires_cooking: false,
         sort_by: 'service_days', sort_order: 'desc', limit: 100, after: 'CASE-001',
       },
     });
@@ -36,7 +36,7 @@ describe('clientRegistryClient list query', () => {
     expect(get).toHaveBeenCalledWith('/api/v1/admin/registries/clients', {
       token: 'test-token',
       params: {
-        query: undefined, has_baby_info: undefined, service_days: undefined, requires_cooking: undefined,
+        query: undefined, multi_birth_count: undefined, order_status: undefined, requires_cooking: undefined,
         sort_by: undefined, sort_order: undefined, limit: 100, after: undefined,
       },
     });
@@ -62,7 +62,7 @@ describe('clientRegistryClient list query', () => {
     });
 
     await expect(clientRegistryClient.list()).resolves.toMatchObject({
-      items: [{ baby_info: null, service_days: null, requires_cooking: null }],
+      items: [{ multi_birth_count: null, service_days: null, requires_cooking: null }],
     });
   });
 });

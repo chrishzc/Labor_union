@@ -44,7 +44,7 @@ export const CORE_STAGE_SUBSTATUS_CODES = [
   'recommendation_pending', 'recommendation_in_progress', 'recommendation_blocked', 'recommendation_completed', 'recommendation_unavailable',
   'external_dispatch_pending', 'external_dispatch_preparing', 'external_dispatch_blocked', 'external_dispatch_completed', 'external_dispatch_unavailable',
   'external_signing_pending', 'external_signing_in_progress', 'external_signing_blocked', 'external_signing_completed', 'external_signing_unavailable',
-  'deposit_pending', 'deposit_in_progress', 'deposit_blocked', 'deposit_settled', 'deposit_unavailable',
+  'deposit_pending', 'deposit_in_progress', 'deposit_blocked', 'deposit_settled', 'deposit_unpaid_override', 'deposit_unavailable',
   'date_confirmation_pending', 'date_confirmation_in_progress', 'date_confirmation_blocked', 'date_confirmed', 'date_confirmation_unavailable',
   'waiting_to_start', 'service_in_progress', 'service_blocked', 'service_period_completed', 'service_schedule_unavailable',
   'completion_pending', 'completion_in_progress', 'completion_blocked', 'completion_confirmed', 'completion_record_missing',
@@ -100,9 +100,26 @@ export const SUBSTATUS_BY_STAGE_STATUS = {
   },
 } as const satisfies Readonly<Record<CoreStageCode, Readonly<Record<CoreStageStatus, CoreStageSubstatusCode>>>>;
 
+const ALTERNATE_SUBSTATUS_BY_STAGE_STATUS: Readonly<
+  Partial<Record<CoreStageCode, Partial<Record<CoreStageStatus, readonly CoreStageSubstatusCode[]>>>>
+> = {
+  deposit_settlement: {
+    completed: ['deposit_unpaid_override'],
+  },
+};
+
+function substatusCodesForStageStatus(
+  stage: CoreStageCode,
+  status: CoreStageStatus,
+): readonly CoreStageSubstatusCode[] {
+  return [
+    SUBSTATUS_BY_STAGE_STATUS[stage][status],
+    ...(ALTERNATE_SUBSTATUS_BY_STAGE_STATUS[stage]?.[status] ?? []),
+  ];
+}
+
 export function substatusCodesForStage(stage: CoreStageCode): readonly CoreStageSubstatusCode[] {
-  const mapping = SUBSTATUS_BY_STAGE_STATUS[stage];
-  return CORE_STAGE_STATUSES.map((status) => mapping[status]);
+  return CORE_STAGE_STATUSES.flatMap((status) => substatusCodesForStageStatus(stage, status));
 }
 
 export function substatusBelongsToStage(
@@ -164,8 +181,7 @@ export const CoreStageProjectionSchema = z.strictObject({
   available_read_actions: z.array(AvailableReadActionSchema),
   availability_reason: z.string().min(1).nullable(),
 }).superRefine((stage, context) => {
-  const expectedSubstatus = SUBSTATUS_BY_STAGE_STATUS[stage.code][stage.status];
-  if (stage.substatus_code !== expectedSubstatus) {
+  if (!substatusCodesForStageStatus(stage.code, stage.status).includes(stage.substatus_code)) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['substatus_code'],
@@ -308,7 +324,7 @@ const CoreStageSubstatusCountsSchema = z.record(
   if (!matchesOneStage) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
-      message: '子狀態 counts 必須為空，或完整包含單一核心階段的五個正式子狀態',
+      message: '子狀態 counts 必須為空，或完整包含單一核心階段的正式子狀態',
     });
   }
 });

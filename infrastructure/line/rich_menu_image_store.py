@@ -86,6 +86,8 @@ def _get_icon_for_label(label: str) -> str:
         return "👶"
     if "登記" in label or "申請" in label:
         return "📝"
+    if "AI" in label or "智慧" in label:
+        return "🤖"
     if "問答" in label or "FAQ" in label:
         return "💡"
     if "說明" in label:

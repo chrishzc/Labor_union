@@ -19,7 +19,7 @@ const REGISTRY_PAGE: ClientRegistryPage = {
     name: '測試客戶',
     phone: null,
     city: null,
-    baby_info: null,
+    multi_birth_count: null,
     service_days: 26,
     requires_cooking: false,
     planned_start_date: null,

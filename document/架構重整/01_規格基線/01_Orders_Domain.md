@@ -61,7 +61,9 @@ Orders 不擁有：
   immutable owner fact；不得用同一 Contract Completion event 代替月嫂與客戶兩種簽回。
 - Step 2「媒合月嫂候選人加入意願池」只依 Assignments／Scheduling 的候選池／聯繫根事實完成；
   不得等待客戶接受正式方案。七階段的 Stage 2 仍依其完整媒合狀態投影，兩者不可互相覆寫。
-- 正式服務履約只依 effective assignment-owned official service dates、完整 service-time tuple 與
+- 第 9 步正式日期已確認只完成日期確認，不得自行把目前步驟推進到第 10 步；只有 persisted
+  Orders lifecycle 已為 `服務中` 時，第 10 步「正式排班與服務履約」才能成為 current step。
+  進入後的履約狀態只依 effective assignment-owned official service dates、完整 service-time tuple 與
   `BusinessClock` 投影 `not_started／in_progress／completed`；不得依可過期的 assignment status count。
 - 正式服務完成後，current stage 必須前進至完工結案與請款，即使其中某個 settlement owner
   projection 仍為 `unavailable`；不得繼續把案件留在「正式服務履約／進行中」。
@@ -106,7 +108,7 @@ Orders 不擁有：
 
 - **WB-STATE-01**：主要分類為「進行中訂單／完成訂單／取消訂單」。Query 依已持久化的 canonical lifecycle 分組，不得在 React 依中文 status、日期或是否由歷史匯入重新判斷。進行中包含 `待補件`、`洽談中`、`訂單成立`、`服務中`、`歷史訂單－未服務`、`歷史訂單－服務中`；完成包含 `訂單完成`、`歷史訂單－服務完成`、`歷史訂單－帳務完成`；取消包含 `訂單取消`。三集合互斥且涵蓋現行 lifecycle enum。
 - **WB-STATE-02**：進行中提供全部案件與十三階段篩選。歷史案件有正式 `historical_current_owner_stage_code` 時依該 current owner stage 納入階段篩選／counts；無 current owner stage 時仍保留在全部案件中，不得把 immutable historical baseline 當成真實完成事件。
-- **WB-STATE-03**：完成及取消清單與案件抽屜不呈現十三步驟導覽／進度。完成代表服務完成，不能冒充客戶、月嫂或補助已結清；仍顯示既有正式結算狀態、提醒與查閱入口。取消保留既有紀錄與具資格驗證的受控重開入口。來源與歷史 evidence 留在案件詳情，不能再形成主要工作分類。
+- **WB-STATE-03**：正常案件的服務完工只完成第 11 步；客戶或月嫂結算仍未完成時，案件留在進行中並以第 12／13 步為目前待辦。兩端都完成後才進入完成清單，且完成及取消清單與案件抽屜不呈現十三步驟導覽／進度。完成不能冒充補助已結清；仍顯示既有正式結算狀態、提醒與查閱入口。取消保留既有紀錄與具資格驗證的受控重開入口。來源與歷史 evidence 留在案件詳情，不能再形成主要工作分類。
 - **WB-STATE-04**：切換分類不帶入另一分類的 stage／substatus 篩選。沿用本節的完整 continuation、stale request 取消與 partial failure 規則；不得把前 200 筆當作完整結果。所有分類、counts 與 pagination 共用 server predicate。
 - **WB-STATE-05**：既有 `/api/orders/core-stage-timelines` 增加可選 `workbench_scope=in_progress|completed|cancelled`。未指定時維持既有 branch／historical Query 契約，供歷史詳情與既有 consumers 使用。新的工作分類不與 legacy branch／historical facet 合併使用；完成及取消分類不得帶 stage／substatus。此 additive Query 不增加寫入、migration、provider effect 或改變生命週期事實。
 
@@ -284,7 +286,7 @@ Orders contract event 與 Client Finance 補足義務必須使用同一 outer Un
 1. 全部約定服務尚未完成且有有效取消事件：訂單取消。
 2. 全部約定服務已完成：訂單完成；拒絕後續取消。
 3. 契約完成、訂金有效、execution schedule 有效、actual start 已到且無 reconfirm blocker：服務中。
-4. 訂金有效：訂單成立；此狀態不代表客戶已簽回，也不授權 execution conversion。
+4. 訂金有效，或 Client Finance 已由 system admin 建立有效的一般市民訂金未付人工放行：訂單成立；人工放行不代表訂金已核銷或歸零。此狀態不代表客戶已簽回，也不單獨授權 execution conversion。
 5. 其他：洽談中。
 
 Lifecycle Application 是 status、history 與服務資料鎖投影的唯一 writer。任何 caller 都不得傳入 target status。

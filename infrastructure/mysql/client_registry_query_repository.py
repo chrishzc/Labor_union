@@ -33,8 +33,8 @@ class MySqlClientRegistryQueryRepository:
         self,
         *,
         query: str | None,
-        has_baby_info: bool | None,
-        service_days: int | None,
+        multi_birth_count: str | None,
+        order_status: str | None,
         requires_cooking: bool | None,
         sort_by: str | None,
         sort_order: str | None,
@@ -49,13 +49,19 @@ class MySqlClientRegistryQueryRepository:
         if query is not None:
             where.append("CONCAT_WS(' ',o.case_no,COALESCE(c.name,''),COALESCE(c.phone,'')) LIKE %s")
             parameters.append(f"%{query}%")
-        if has_baby_info is True:
-            where.append("COALESCE(TRIM(c.baby_info), '') <> ''")
-        elif has_baby_info is False:
-            where.append("COALESCE(TRIM(c.baby_info), '') = ''")
-        if service_days is not None:
-            where.append("o.service_days = %s")
-            parameters.append(service_days)
+        birth_count_sql = (
+            "COALESCE("
+            "CASE WHEN JSON_VALID(bcs.effective_values_json) THEN "
+            "JSON_UNQUOTE(JSON_EXTRACT(bcs.effective_values_json, '$.multi_birth_count')) END,"
+            "CASE WHEN JSON_VALID(br.survey_details) THEN "
+            "JSON_UNQUOTE(JSON_EXTRACT(br.survey_details, '$.\"特殊計費:胎數\"')) END)"
+        )
+        if multi_birth_count is not None:
+            where.append(f"{birth_count_sql} = %s")
+            parameters.append(multi_birth_count)
+        if order_status is not None:
+            where.append("o.status = %s")
+            parameters.append(order_status)
         if requires_cooking is not None:
             where.append("o.requires_cooking = %s")
             parameters.append(requires_cooking)
@@ -70,10 +76,15 @@ class MySqlClientRegistryQueryRepository:
         parameters.append(limit + 1)
         with self._connection.cursor() as cursor:
             cursor.execute(
-                "SELECT c.id AS client_id,o.case_no,c.name,c.phone,c.city,c.baby_info,"
+                "SELECT c.id AS client_id,o.case_no,c.name,c.phone,c.city,"
+                + birth_count_sql + " AS multi_birth_count,"
                 "o.service_days,o.requires_cooking,"
                 "o.start_date AS planned_start_date,o.status AS order_status "
-                "FROM orders o JOIN clients c ON c.id=o.client_id WHERE "
+                "FROM orders o JOIN clients c ON c.id=o.client_id "
+                "LEFT JOIN (SELECT bound_case_no,MAX(id) AS id,MAX(survey_details) AS survey_details "
+                "FROM beclass_records WHERE bound_case_no IS NOT NULL GROUP BY bound_case_no HAVING COUNT(*)=1) br "
+                "ON br.bound_case_no=o.case_no "
+                "LEFT JOIN beclass_record_correction_states bcs ON bcs.beclass_record_id=br.id WHERE "
                 + " AND ".join(where)
                 + " ORDER BY " + order_by + " LIMIT %s",
                 tuple(parameters),

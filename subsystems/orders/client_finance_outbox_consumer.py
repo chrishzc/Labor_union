@@ -53,7 +53,55 @@ def _consume_event(connection, event) -> None:
     if event["intent_type"] == "orders_deposit_reconciled":
         _project_deposit_established(connection, event, payload)
         _activate_reconfirmation_if_current(connection, event, payload)
+    elif event["intent_type"] == "projection_refresh" and payload.get("unpaid_progression_allowed") is True:
+        _project_deposit_override(connection, event, payload)
     _mark_delivered(connection, int(event["id"]))
+
+
+def _project_deposit_override(connection, event, payload) -> None:
+    if payload.get("unpaid_progression_allowed") is not True:
+        raise ValueError("deposit override payload is invalid")
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "UPDATE orders SET status='訂單成立',lifecycle_version=lifecycle_version+1 "
+            "WHERE case_no=%s AND status='洽談中'",
+            (event["case_no"],),
+        )
+        if cursor.rowcount != 1:
+            return
+        cursor.execute(
+            "INSERT INTO order_lifecycle_state_events "
+            "(case_no,trigger_event,before_status,after_status,actor,business_date,"
+            "expected_version,idempotency_key,facts_snapshot) "
+            "SELECT case_no,'deposit_gate_overridden','洽談中','訂單成立',"
+            "%s,CURRENT_DATE,lifecycle_version-1,%s,"
+            "JSON_OBJECT('deposit_settled',FALSE,'unpaid_progression_allowed',TRUE,'reason',%s) "
+            "FROM orders WHERE case_no=%s",
+            (str(payload.get("actor") or "client-finance-override"), event["intent_key"], str(payload.get("reason") or ""), event["case_no"]),
+        )
+
+
+def consume_client_finance_orders_case_override(connection, case_no: str) -> bool:
+    """Synchronously deliver the case override so the applying UI sees the new state."""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT id,case_no,intent_type,intent_key,payload_snapshot FROM client_finance_outbox "
+            "WHERE case_no=%s AND intent_type='projection_refresh' "
+            "AND JSON_EXTRACT(payload_snapshot,'$.unpaid_progression_allowed') = TRUE "
+            "AND status IN ('pending','failed') ORDER BY id DESC LIMIT 1 FOR UPDATE",
+            (case_no,),
+        )
+        event = cursor.fetchone()
+    if event is None:
+        connection.rollback()
+        return False
+    try:
+        _consume_event(connection, event)
+        connection.commit()
+        return True
+    except Exception:
+        connection.rollback()
+        raise
 
 
 def _project_deposit_established(connection, event, payload) -> None:

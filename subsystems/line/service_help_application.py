@@ -567,16 +567,8 @@ def _handoff_active_payload(prefix: str):
     return {
         "type": "text",
         "text": (
-            f"{prefix}\n\nAI 自動回答目前暫停；接下來的訊息會加入同一張客服案件。"
-            "若要結束真人服務，請點選「恢復 AI 助理」。"
+            f"{prefix}\n\nAI 自動回答目前暫停。請直接在此對話中留言您的問題與需求，工會真人專員將親自為您詳細解說與回覆！"
         ),
-        "quickReply": {
-            "items": [
-                _postback_quick_reply(
-                    "恢復 AI 助理", _HANDOFF_RESUME_POSTBACK, "恢復 AI 助理"
-                )
-            ]
-        },
     }
 
 
@@ -621,6 +613,13 @@ def _registration_reply(registration_url):
     return f"請開啟以下服務登記頁面：\n\n{registration_url}"
 
 
+def _ai_assistant_liff_url():
+    liff_id = os.getenv("LINE_LIFF_ID", "").strip()
+    if not liff_id or liff_id == "your_liff_id_here":
+        liff_id = "ai-assistant"
+    return f"https://liff.line.me/{liff_id}?target=ai_assistant"
+
+
 def _service_menu_payload():
     actions = (
         ("如何申請服務？", "服務流程", "secondary"),
@@ -628,15 +627,15 @@ def _service_menu_payload():
         ("如何查詢目前進度？", "查詢服務進度", "secondary"),
         ("登記資料填錯怎麼辦？", "修改登記資料", "secondary"),
         ("找不到答案，聯絡工會", "聯絡工會人員", "primary"),
-        ("詢問其他問題", "其他問題", "secondary"),
+        ("詢問其他問題", "ai_assistant", "secondary"),
     )
     return _navigation_card_payload(
         alt_text="服務與問答：請選擇需要的協助",
         eyebrow="新竹市月子工會",
         title="服務與問答",
-        description="常見問題與服務入口集中在這裡；涉及個人案件時，系統會先確認您的 LINE 身分。",
+        description="常見問題與服務入口集中在這裡。如果沒看到想問的問題，可以試試看 AI 智慧問答！",
         actions=actions,
-        hint="找不到合適項目時，可選擇「詢問其他問題」。",
+        hint="如果沒看到想問的問題，可點選「詢問其他問題」開啟 AI 智慧問答，或選擇「找不到答案，聯絡工會」直接在聊天室留言。",
     )
 
 
@@ -711,6 +710,25 @@ def _navigation_button(label, action_text, style):
                 "data": _HANDOFF_CONFIRM_POSTBACK,
                 "displayText": "轉接真人客服",
             },
+        }
+    if action_text in ("ai_assistant", "其他問題"):
+        ai_url = _ai_assistant_liff_url()
+        if ai_url:
+            return {
+                "type": "button",
+                "style": style,
+                "height": "sm",
+                "action": {
+                    "type": "uri",
+                    "label": label,
+                    "uri": ai_url,
+                },
+            }
+        return {
+            "type": "button",
+            "style": style,
+            "height": "sm",
+            "action": {"type": "message", "label": label, "text": "詢問其他問題"},
         }
     button = {
         "type": "button",

@@ -1,3 +1,7 @@
+from decimal import Decimal
+
+import pytest
+
 from domains.payroll.calculation import PayrollPolicyKind, PayrollTerms, rate_snapshot
 from domains.payroll.historical_calculation import (
     HistoricalAssignmentServiceFacts,
@@ -33,10 +37,15 @@ def test_historical_payroll_accepts_half_hour_daily_terms_with_whole_ntd_salary(
         rate_snapshots=(
             rate_snapshot("assignment-a", "policy-v1", PayrollPolicyKind.CITIZEN),
         ),
-        terms=PayrollTerms(30, 8.5, MoneyNTD(3000)),
+        terms=PayrollTerms(30, Decimal("8.5"), MoneyNTD(3000)),
     )
 
     assignment = candidate.assignments[0]
-    assert assignment.actual_hours == 25.5
+    assert assignment.actual_hours == Decimal("25.5")
     assert assignment.service_salary == MoneyNTD(7650)
     assert candidate.total_payable == MoneyNTD(7950)
+
+
+def test_payroll_terms_reject_binary_floating_point_hours():
+    with pytest.raises(TypeError, match="must use Decimal or int"):
+        PayrollTerms(30, 8.5, MoneyNTD(3000))

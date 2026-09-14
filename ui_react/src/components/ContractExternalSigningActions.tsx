@@ -17,7 +17,6 @@ import {
   type LegacyRecoveryQuery,
   type LegacyRecoveryTarget,
   type PreparedUnsignedDocument,
-  type StaffReminderReadiness,
 } from '../api/orders/contract_external_signing_client';
 import { ApiHttpError, ApiNetworkError, ApiTimeoutError } from '../api/shared/typed_errors';
 import { contractSigningClient } from '../api/orders/contract_signing_client';
@@ -35,7 +34,7 @@ export interface ContractExternalSigningActionsProps {
   onCommitted?: () => Promise<void> | void;
 }
 
-type WorkingOperation = 'query' | 'prepare_client' | 'prepare_staff' | 'download' | 'handoff' | 'reminder_check' | 'reminder_enqueue' | 'staff_report' | 'client_report' | 'final_preview' | 'final_apply' | 'receipt' | 'readback';
+type WorkingOperation = 'query' | 'prepare_client' | 'prepare_staff' | 'download' | 'handoff' | 'staff_report' | 'client_report' | 'final_preview' | 'final_apply' | 'receipt' | 'readback';
 
 interface RecoveryPreviewState {
   target: LegacyRecoveryTarget;
@@ -229,7 +228,6 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
   const identities = useRef(new Map<string, ExternalSigningCommandIdentity>());
   const requestGeneration = useRef(0);
   const unsignedDownloadController = useRef<AbortController | null>(null);
-  const reminderReadinessController = useRef<AbortController | null>(null);
   const activeHandoffOperation = useRef<{ caseNo: string; operationToken: number } | null>(null);
   const activeUnsignedPreparationOperation = useRef<{ caseNo: string; operationToken: number } | null>(null);
   const [query, setQuery] = useState<ContractExternalSigningQuery | null>(null);
@@ -240,7 +238,6 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
   const [recoveryReasons, setRecoveryReasons] = useState<Record<string, string>>({});
   const [confirmationMethod] = useState<ExternalSigningConfirmationMethod>('verified_other');
   const [finalFile, setFinalFile] = useState<File | null>(null);
-  const [reminderReadiness, setReminderReadiness] = useState<Record<number, StaffReminderReadiness>>({});
   const handoffFlow = useSyncExternalStore(
     subscribeExternalSigningHandoff,
     () => orderMutationFlowStore.getExternalSigningHandoff(caseNo),
@@ -271,14 +268,12 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
 
   useEffect(() => {
     unsignedDownloadController.current?.abort();
-    reminderReadinessController.current?.abort();
     const controller = new AbortController();
     setQuery(null);
     setPreparationSegments([]);
     setRecoveryQuery(null);
     setNotice(null);
     setFinalFile(null);
-    setReminderReadiness({});
     identities.current.clear();
     void loadQuery(controller.signal).then(async (value) => {
       if (controller.signal.aborted || value.state !== 'completed') return;
@@ -352,7 +347,6 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
       requestGeneration.current += 1;
       controller.abort();
       unsignedDownloadController.current?.abort();
-      reminderReadinessController.current?.abort();
     };
   }, [caseNo, loadQuery]);
 
@@ -560,7 +554,9 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
     if (request !== requestGeneration.current) return;
     setQuery(fresh);
     setUiState({ type: 'ready' });
-    setNotice(receipt.replayed ? '已重新確認外部平台交接。' : '已記錄送交外部簽署平台。');
+    setNotice(receipt.replayed
+      ? '已重新確認外部平台交接及 LINE 通知工作。'
+      : '已記錄送交外部簽署平台，並建立客戶與月嫂的 LINE 通知工作。');
   };
 
   const submitHandoff = async (command: ExternalSigningHandoffCommand, recovery: boolean) => {
@@ -674,48 +670,6 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
       if (request === requestGeneration.current) setUiState({ type: 'error', message });
     }
     releaseHandoffOperation(operationToken);
-  };
-
-  const checkReminderReadiness = async (segmentId: number) => {
-    reminderReadinessController.current?.abort();
-    const controller = new AbortController();
-    reminderReadinessController.current = controller;
-    const generation = requestGeneration.current;
-    setUiState({ type: 'working', operation: 'reminder_check' });
-    setNotice(null);
-    try {
-      const readiness = await contractExternalSigningClient.getStaffReminderReadiness(caseNo, segmentId, controller.signal);
-      if (controller.signal.aborted || generation !== requestGeneration.current) return;
-      setReminderReadiness((current) => ({ ...current, [segmentId]: readiness }));
-      setUiState({ type: 'ready' });
-    } catch (error) {
-      if (controller.signal.aborted || generation !== requestGeneration.current) return;
-      setUiState({ type: 'error', message: safeErrorMessage(error) });
-    }
-  };
-
-  const enqueueReminder = async (
-    segmentId: number,
-    staffSubjectReference: string,
-    documentVersionId: number,
-  ) => {
-    const readiness = reminderReadiness[segmentId];
-    if (!readiness?.ready || readiness.document_version_id !== documentVersionId) return;
-    const identity = currentIdentity(identities.current, `reminder-${segmentId}`);
-    setUiState({ type: 'working', operation: 'reminder_enqueue' });
-    setNotice(null);
-    try {
-      const task = await contractExternalSigningClient.enqueueStaffReminder(
-        caseNo, segmentId, documentVersionId, identity,
-      );
-      identities.current.delete(`reminder-${segmentId}`);
-      setNotice(task.replayed
-        ? `月嫂 ${staffSubjectReference} 的 LINE 契約通知工作已存在（工作 #${task.task_id}）。`
-        : `已建立月嫂 ${staffSubjectReference} 的 LINE 契約通知工作 #${task.task_id}；尚未傳送。`);
-      setUiState({ type: 'ready' });
-    } catch (error) {
-      setUiState({ type: 'error', message: safeErrorMessage(error) });
-    }
   };
 
   const downloadUnsigned = async (documentVersionId: number, targetLabel: string) => {
@@ -1087,36 +1041,6 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
           <strong>未簽契約 PDF</strong>
           <div style={{ fontSize: '0.82rem', margin: '5px 0' }}>
             {query.unsigned_document.filename}｜{query.unsigned_document.size_bytes.toLocaleString()} bytes
-          </div>
-          <div style={{ display: 'grid', gap: '6px' }}>
-            {query.staff_targets.map((target) => (
-              <div key={target.matching_segment_id} style={{ display: 'grid', gap: '4px' }}>
-                <button type="button" disabled={busy} onClick={() => void checkReminderReadiness(target.matching_segment_id)}>
-                  檢查月嫂 {target.staff_subject_reference} LINE 通知準備度
-                </button>
-                {reminderReadiness[target.matching_segment_id] && (
-                  <div role="status" style={{ fontSize: '0.82rem' }}>
-                    <div>{reminderReadiness[target.matching_segment_id].message}</div>
-                    <div>{reminderReadiness[target.matching_segment_id].ready
-                      ? '通知內容與收件綁定均已就緒；尚未建立或送出通知。'
-                      : `尚不可建立通知：${reminderReadiness[target.matching_segment_id].blockers.join('、')}`}</div>
-                  </div>
-                )}
-                {reminderReadiness[target.matching_segment_id]?.ready && (
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => void enqueueReminder(
-                      target.matching_segment_id,
-                      target.staff_subject_reference,
-                      target.document_version_id,
-                    )}
-                  >
-                    建立月嫂 {target.staff_subject_reference} LINE 契約通知工作（不立即傳送）
-                  </button>
-                )}
-              </div>
-            ))}
           </div>
           {!query.handoff_recorded && !handoffFlow && (
             <button type="button" disabled={busy} onClick={() => void recordHandoff()}>

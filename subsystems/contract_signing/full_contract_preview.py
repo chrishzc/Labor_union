@@ -14,6 +14,7 @@ from decimal import Decimal
 from enum import StrEnum
 import hashlib
 import json
+import math
 from pathlib import Path
 from typing import Protocol
 
@@ -265,6 +266,8 @@ def _fingerprint_field_value(value: object | None) -> object | None:
         return value
     if isinstance(value, int) and not isinstance(value, bool):
         return value
+    if isinstance(value, float) and math.isfinite(value) and (value * 2).is_integer():
+        return int(value) if value.is_integer() else value
     if isinstance(value, Decimal):
         return format(value, "f")
     if isinstance(value, (date, datetime)):

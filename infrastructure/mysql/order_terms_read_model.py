@@ -400,6 +400,9 @@ def _client_finance_source(terms_row, obligation_rows, double_pay_dates):
         open_nonstage_obligation_count=int(
             terms_row["open_nonstage_obligation_count"]
         ),
+        deposit_gate_override_active=bool(
+            terms_row.get("deposit_gate_override_active", False)
+        ),
     )
 
 
@@ -771,9 +774,12 @@ _CLIENT_PAYMENT_TERMS_SQL = (
     "(SELECT COUNT(*) FROM client_obligations o "
     "WHERE o.case_no=a.case_no AND o.status='open' "
     "AND o.obligation_type NOT IN ('deposit','first','second')) "
-    "AS open_nonstage_obligation_count "
+    "AS open_nonstage_obligation_count,"
+    "(e.source_event_identity LIKE 'deposit-gate-override:%%') "
+    "AS deposit_gate_override_active "
     "FROM client_finance_accounts a "
     "JOIN client_payment_terms t ON t.case_no=a.case_no "
+    "JOIN client_payment_terms_events e ON e.id=t.current_event_id "
     "WHERE a.case_no=%s"
 )
 

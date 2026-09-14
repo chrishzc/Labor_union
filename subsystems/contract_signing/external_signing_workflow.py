@@ -156,6 +156,16 @@ class ExternalStaffCompletionPort(Protocol):
     ) -> StaffCompletionPrerequisites: ...
 
 
+class ExternalSigningHandoffNotificationPort(Protocol):
+    """Creates durable notification tasks inside the caller-owned transaction."""
+
+    def enqueue_notifications(
+        self,
+        command: RecordExternalSigningHandoff,
+        facts: ExternalSigningSessionFacts,
+    ) -> None: ...
+
+
 class ExternalSigningWorkflowRepository(Protocol):
     def lock_case(self, case_no: str) -> bool: ...
 
@@ -244,10 +254,12 @@ class ExternalSigningWorkflow:
         repository: ExternalSigningWorkflowRepository,
         staff_completion_port: ExternalStaffCompletionPort,
         unit_of_work_factory: Callable[[], UnitOfWork],
+        handoff_notification_port: ExternalSigningHandoffNotificationPort | None = None,
     ) -> None:
         self._repository = repository
         self._staff_completion_port = staff_completion_port
         self._unit_of_work_factory = unit_of_work_factory
+        self._handoff_notification_port = handoff_notification_port
 
     def query(self, session_id: str) -> ExternalSigningSessionQuery:
         facts = self._require_session(session_id, for_update=False)
@@ -347,6 +359,9 @@ class ExternalSigningWorkflow:
                     "簽約狀態版本已變更。",
                 )
             resulting_version = facts.status_version + 1
+            if self._handoff_notification_port is None:
+                raise RuntimeError("external_signing_handoff_notification_port_missing")
+            self._handoff_notification_port.enqueue_notifications(command, facts)
             self._repository.activate_session(
                 facts,
                 actor_id=command.actor.actor_id,

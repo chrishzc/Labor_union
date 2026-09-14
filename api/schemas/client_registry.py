@@ -20,7 +20,7 @@ class ClientRegistrySummaryView(_StrictModel):
     name: str | None = None
     phone: str | None = None
     city: str | None = None
-    baby_info: str | None = None
+    multi_birth_count: str | None = None
     service_days: int | None = Field(default=None, gt=0)
     requires_cooking: bool | None = None
     planned_start_date: date | None = None

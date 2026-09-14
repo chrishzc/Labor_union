@@ -38,24 +38,6 @@ const PreparedUnsignedDocumentSchema = UnsignedDocumentSchema.extend({
   replayed: z.boolean(),
 });
 
-const StaffReminderReadinessSchema = z.strictObject({
-  matching_segment_id: z.number().int().positive(),
-  document_version_id: z.number().int().positive(),
-  message: z.string().min(1).max(1000),
-  blockers: z.array(z.string()),
-  ready: z.boolean(),
-}).superRefine((value, context) => {
-  if (value.ready !== (value.blockers.length === 0)) {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ['ready'], message: 'reminder readiness does not match blockers' });
-  }
-});
-
-const StaffReminderTaskSchema = z.strictObject({
-  task_id: z.number().int().positive(),
-  status: z.enum(['pending', 'processing', 'sent', 'retryable_failed', 'failed', 'cancelled']),
-  replayed: z.boolean(),
-});
-
 const StaffTargetSchema = z.strictObject({
   matching_segment_id: z.number().int().positive(),
   staff_subject_reference: z.string().min(1).max(191),
@@ -258,8 +240,6 @@ function envelope<T extends z.ZodTypeAny>(data: T) {
 
 export type ContractExternalSigningQuery = z.infer<typeof ContractExternalSigningQuerySchema>;
 export type PreparedUnsignedDocument = z.infer<typeof PreparedUnsignedDocumentSchema>;
-export type StaffReminderReadiness = z.infer<typeof StaffReminderReadinessSchema>;
-export type StaffReminderTask = z.infer<typeof StaffReminderTaskSchema>;
 export type ExternalSigningReceipt = z.infer<typeof ReceiptSchema>;
 export type FinalDocumentPreview = z.infer<typeof PreviewSchema>;
 export type FinalDocumentReadback = z.infer<typeof FinalReadbackSchema>;
@@ -549,49 +529,6 @@ export const contractExternalSigningClient = {
         `${basePath(caseNo)}/staff-segments/${segmentId}/unsigned-pdf`,
         {},
         stagingCommandOptions(identity, signal),
-      ),
-    ).data;
-  },
-
-  async getStaffReminderReadiness(
-    caseNo: string,
-    segmentId: number,
-    signal?: AbortSignal,
-  ): Promise<StaffReminderReadiness> {
-    if (!Number.isInteger(segmentId) || segmentId <= 0) throw new Error('月嫂分段識別無效。');
-    const value = decodePayload(
-      envelope(StaffReminderReadinessSchema),
-      await transport.get(
-        `${basePath(caseNo)}/staff-segments/${segmentId}/reminder-readiness`,
-        { token: authToken(), signal },
-      ),
-    ).data;
-    if (value.matching_segment_id !== segmentId) {
-      throw new ApiHttpError(409, 'CONTRACT_REMINDER_SEGMENT_MISMATCH', '月嫂契約通知準備度分段識別不一致。');
-    }
-    return value;
-  },
-
-  async enqueueStaffReminder(
-    caseNo: string,
-    segmentId: number,
-    expectedDocumentVersionId: number,
-    identity: ExternalSigningCommandIdentity,
-    signal?: AbortSignal,
-  ): Promise<StaffReminderTask> {
-    if (!Number.isInteger(segmentId) || segmentId <= 0) throw new Error('月嫂分段識別無效。');
-    if (!Number.isInteger(expectedDocumentVersionId) || expectedDocumentVersionId <= 0) throw new Error('月嫂契約文件版本無效。');
-    const options = stagingCommandOptions(identity, signal);
-    options.headers = {
-      ...options.headers,
-      'X-Expected-Document-Version': String(expectedDocumentVersionId),
-    };
-    return decodePayload(
-      envelope(StaffReminderTaskSchema),
-      await transport.post(
-        `${basePath(caseNo)}/staff-segments/${segmentId}/reminders`,
-        {},
-        options,
       ),
     ).data;
   },

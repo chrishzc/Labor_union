@@ -323,6 +323,6 @@ def test_handoff_confirmation_postback_reaches_ticket_hold_and_resume_notice():
     assert len(state.customer_service.messages) == 1
     assert len(state.escalations.commands) == 1
     payload = json.loads(state.delivery_tasks.requests[0].payload_json)
-    assert payload["quickReply"]["items"][0]["action"]["data"] == (
-        "customer-service:handoff:resume-ai"
-    )
+    assert "AI 自動回答目前暫停" in payload["text"]
+    assert "請直接在此對話中留言" in payload["text"]
+    assert "quickReply" not in payload

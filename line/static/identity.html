@@ -444,6 +444,8 @@ function requestedStandalonePage() {
     return `/line-candidate-contact-customer?ref=${encodeURIComponent(reference)}`;
   }
   return {
+    faq: "/line-service-help?tab=faq",
+    ai_assistant: "/line-service-help?tab=ai",
     profile_update: "/line-profile-guard",
     order_update: "/line-order-update"
   }[target] || "";
@@ -481,15 +483,15 @@ async function validateIdentityFlow(purpose) {
 }
 
 async function initialize() {
+  const standalonePage = requestedStandalonePage();
+  if (standalonePage) { location.replace(standalonePage); return; }
   const liffId = await loadLiffId();
   await liff.init({liffId});
   const mobileAdminPage = requestedMobileAdminPage();
   const staffPage = requestedStaffPage();
-  const standalonePage = requestedStandalonePage();
   if (!liff.isLoggedIn()) { liff.login(); return; }
   if (mobileAdminPage) { location.replace(mobileAdminPage); return; }
   if (staffPage) { await openStaffPage(staffPage); return; }
-  if (standalonePage) { location.replace(standalonePage); return; }
   const {parameters, stateParameters} = combinedEntryParameters();
   const target = parameters.get("target") || stateParameters.get("target");
   const purposeParam = parameters.get("purpose") || stateParameters.get("purpose");

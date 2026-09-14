@@ -27,9 +27,14 @@ from infrastructure.db.controlled_file_repository import (
 from infrastructure.db.external_staff_completion_port import (
     MySqlExternalStaffCompletionPort,
 )
+from infrastructure.db.external_signing_handoff_notification_port import (
+    MySqlExternalSigningHandoffNotificationPort,
+)
 from infrastructure.file.contract_unsigned_pdf_storage import ContractUnsignedPdfStorage
 from infrastructure.file.controlled_file_storage import FileSystemControlledFileStorage
-from infrastructure.file.libreoffice_contract_renderer import LibreOfficeContractRenderer
+from infrastructure.file.browser_contract_renderer import (
+    BrowserContractRenderer,
+)
 from infrastructure.archive.contract_documents import (
     archive_contract_document,
     discard_uncommitted_contract_document,
@@ -48,6 +53,7 @@ from subsystems.contract_signing.external_signing_contracts import ExternalSigni
 from subsystems.contract_signing.external_signing_workflow import ExternalSigningWorkflow
 from subsystems.contract_signing.full_contract_preview import FullContractPreviewApplication
 from subsystems.contract_signing.full_contract_preview import FullContractPreviewError
+from subsystems.contract_signing.full_contract_preview import projection_fingerprint
 from subsystems.contract_signing.final_document_preview_token import (
     HmacFinalDocumentPreviewTokenCodec,
 )
@@ -64,6 +70,7 @@ from subsystems.contract_signing.staff_contract_application import (
     PrepareExternalStaffContractCommand,
     StaffContractSigningApplication,
 )
+from subsystems.contract_signing.template_catalog import CONTRACT_PDF_PRESENTATION_VERSION
 from subsystems.contract_signing.line_delivery import (
     ContractLineBinding,
     build_external_platform_reminder_request,
@@ -207,6 +214,15 @@ class ContractExternalSigningApplication:
                 raise ExternalSigningTypedError(category="conflict", code="external_signing_accepted_plan_required",
                     message="請先完成客戶推薦方案確認，再準備客戶契約。") from error
             raise
+        existing = self.unsigned_repository.load_current_pdf_for_source(case_no, source_id)
+        if existing is not None:
+            return {
+                "document_version_id": existing.document_version_id,
+                "filename": existing.filename,
+                "mime_type": existing.mime_type,
+                "size_bytes": existing.size_bytes,
+                "replayed": True,
+            }
         persisted = self.unsigned_persistence.prepare_and_persist(PrepareAndPersistUnsignedContractPdf(
             case_no=case_no, source_document_version_id=source_id, actor=actor,
             idempotency_key=idempotency_key, correlation_id=correlation_id))
@@ -400,15 +416,10 @@ def get_contract_external_signing_application() -> Iterator[ContractExternalSign
         controlled = ControlledFileWorkflow(
             MySqlControlledFileWorkflowRepository(connection),
             FileSystemControlledFileStorage(
-                os.getenv("CONTROLLED_FILE_STORAGE_ROOT", "").strip() or None
+                _controlled_file_storage_root()
             ),
             unit_of_work_factory,
             clock,
-        )
-        reports = ExternalSigningWorkflow(
-            repository,
-            MySqlExternalStaffCompletionPort(connection),
-            unit_of_work_factory,
         )
         orders_completion = ContractCompletionWorkflow(
             MySqlOrderContractCompletionRepository(connection),
@@ -419,10 +430,16 @@ def get_contract_external_signing_application() -> Iterator[ContractExternalSign
             connection,
             archive_root=_contract_archive_root(),
         )
+        reports = ExternalSigningWorkflow(
+            repository,
+            MySqlExternalStaffCompletionPort(connection),
+            unit_of_work_factory,
+            MySqlExternalSigningHandoffNotificationPort(connection, unsigned_repository),
+        )
         unsigned_documents = UnsignedContractPdfApplication(
             unsigned_repository,
             ContractUnsignedPdfStorage(controlled),
-            LibreOfficeContractRenderer(),
+            BrowserContractRenderer(),
         )
         yield ContractExternalSigningApplication(
             connection=connection,
@@ -492,6 +509,18 @@ def _contract_archive_root():
     )
 
 
+def _controlled_file_storage_root() -> Path | None:
+    configured = os.getenv("CONTROLLED_FILE_STORAGE_ROOT", "").strip()
+    if configured:
+        return Path(configured)
+    environment = os.getenv("APP_ENV", "development").strip().lower()
+    if environment in {"production", "prod"}:
+        return None
+    root = Path(__file__).resolve().parents[2] / "runtime_data" / "controlled-files"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
 def _load_external_staff_template_facts(
     connection, case_no: str, matching_segment_id: int, now: datetime
 ) -> tuple[dict[str, object], str]:
@@ -516,7 +545,13 @@ def _load_external_staff_template_facts(
     facts = dict(projection.facts)
     facts["contract_signed_date"] = now.date()
     facts["__today__"] = now.date()
-    return facts, preview.preview_fingerprint.value
+    fingerprint = projection_fingerprint(
+        {
+            "preview_fingerprint": preview.preview_fingerprint.value,
+            "pdf_presentation_version": CONTRACT_PDF_PRESENTATION_VERSION,
+        }
+    )
+    return facts, fingerprint
 
 
 _RECEIPT_VIEW_SQL = (

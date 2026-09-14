@@ -336,21 +336,25 @@ def _waiting_lock_value_error(error, correlation):
             correlation,
             blockers=("invalid_scheduling_intent",),
         )
-    if message == "active staff service commitment is required":
+    if message == "current confirmed service dates are required":
         return _typed_waiting_lock_error(
             ErrorCategory.DOMAIN_BLOCKED,
-            "staff_service_commitment_required",
-            "月嫂尚未完成簽約前服務承諾，不能建立等待訂金檔期鎖。",
+            "confirmed_service_dates_required",
+            "尚未確認正式服務日期，不能建立等待訂金檔期鎖。",
             correlation,
-            blockers=("staff_service_commitment_required",),
+            blockers=("confirmed_service_dates_required",),
         )
-    if message == "active staff service commitment days mismatch":
+    if message in {
+        "current confirmed service dates mismatch",
+        "invalid current confirmed service dates",
+        "current confirmed service dates do not match plan segments",
+    }:
         return _typed_waiting_lock_error(
             ErrorCategory.DOMAIN_BLOCKED,
-            "staff_service_commitment_days_mismatch",
-            "月嫂簽約前服務日與訂單約定天數不一致，請重新建立正確媒合方案。",
+            "confirmed_service_dates_mismatch",
+            "正式服務日期與訂單或配對方案不一致，請重新確認服務日期。",
             correlation,
-            blockers=("staff_service_commitment_days_mismatch",),
+            blockers=("confirmed_service_dates_mismatch",),
         )
     if message == "customer has not accepted the matching plan":
         return _typed_waiting_lock_error(

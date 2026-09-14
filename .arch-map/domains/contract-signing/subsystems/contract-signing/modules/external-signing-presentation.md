@@ -20,7 +20,8 @@
 - `infrastructure/db/contract_external_signing_repository.py`
 - `infrastructure/db/contract_unsigned_pdf_repository.py`
 - `infrastructure/db/external_staff_completion_port.py`
-- `infrastructure/file/libreoffice_contract_renderer.py`
+- `infrastructure/db/external_signing_handoff_notification_port.py`
+- `infrastructure/file/browser_contract_renderer.py`
 - `infrastructure/mysql/contract_context_repository.py`
 - `infrastructure/mysql/contract_full_preview_repository.py`
 - `subsystems/contract_signing/full_contract_preview.py`
@@ -46,6 +47,7 @@
 - `ui_react/src/tests/domains/contract-signing/subsystems/contract-signing/modules/external-signing-presentation/contract_external_signing_actions.test.tsx`
 - `ui_react/src/tests/domains/contract-signing/subsystems/contract-signing/modules/external-signing-presentation/contract_external_signing_client.test.ts`
 - `tests/domains/contract-signing/subsystems/contract-signing/integration/test_full_contract_preview.py`
+- `tests/domains/contract-signing/subsystems/contract-signing/integration/test_browser_contract_renderer.py`
 - `tests/domains/contract-signing/subsystems/contract-signing/integration/test_contract_external_signing_api.py`
 - integration_root: `tests/domains/contract-signing/subsystems/contract-signing/integration/test_contract_completion_workflow.py`
 - routing: `.arch-map/tests/domains/contract-signing/subsystems/contract-signing/modules/external-signing-presentation.md`

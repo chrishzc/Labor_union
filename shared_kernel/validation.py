@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any
 import math
 
@@ -28,9 +29,15 @@ def require_positive_integer(value: Any, field_name: str) -> int:
     return value
 
 
-def require_positive_half_hour(value: Any, field_name: str) -> float | int:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+def require_positive_half_hour(
+    value: Any, field_name: str
+) -> Decimal | float | int:
+    if isinstance(value, bool) or not isinstance(value, (Decimal, int, float)):
         raise ValueError(f"{field_name} must use half-hour precision")
+    if isinstance(value, Decimal):
+        if not value.is_finite() or value <= 0 or value * 2 != (value * 2).to_integral_value():
+            raise ValueError(f"{field_name} must use half-hour precision")
+        return value
     numeric = float(value)
     if not math.isfinite(numeric) or numeric <= 0 or not (numeric * 2).is_integer():
         raise ValueError(f"{field_name} must use half-hour precision")

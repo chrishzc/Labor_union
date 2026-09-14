@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any, Mapping, Sequence
 
 from shared_kernel.validation import require_sha256_hex
@@ -40,6 +41,9 @@ def _normalize_payload(value: Any, path: str) -> Any:
         return value
     if isinstance(value, int) and not isinstance(value, bool):
         return value
+    if isinstance(value, Decimal) and value.is_finite():
+        normalized = value.normalize()
+        return format(normalized, "f")
     if isinstance(value, float) and math.isfinite(value) and (value * 2).is_integer():
         return int(value) if value.is_integer() else value
     if isinstance(value, Mapping):

@@ -129,6 +129,7 @@ class ClientFinanceTermsSourceFacts:
     double_pay_dates: tuple[date, ...]
     existing_obligations: tuple[ExistingClientStageObligation, ...]
     open_nonstage_obligation_count: int = 0
+    deposit_gate_override_active: bool = False
 
     def __post_init__(self) -> None:
         _validate_identity(self.case_no, "case number")
@@ -139,6 +140,8 @@ class ClientFinanceTermsSourceFacts:
             self.open_nonstage_obligation_count,
             "open nonstage obligation count",
         )
+        if not isinstance(self.deposit_gate_override_active, bool):
+            raise TypeError("deposit_gate_override_active must be boolean")
 
 
 @dataclass(frozen=True, slots=True)

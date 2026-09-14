@@ -185,6 +185,7 @@ def test_client_preview_fingerprint_canonicalizes_native_owner_dates_and_amounts
                 "param_mappings": {
                     "A1": {"db_key": "service_date", "requiredness": "required"},
                     "A2": {"db_key": "amount", "requiredness": "required"},
+                    "A3": {"db_key": "total_hours", "requiredness": "required"},
                 },
             }
         ),
@@ -207,7 +208,11 @@ def test_client_preview_fingerprint_canonicalizes_native_owner_dates_and_amounts
         case_no="CASE-1",
         scope=ContractPreviewScope.CLIENT,
         assignment_id=None,
-        facts={"service_date": date(2026, 3, 2), "amount": Decimal("12000.00")},
+        facts={
+            "service_date": date(2026, 3, 2),
+            "amount": Decimal("12000.00"),
+            "total_hours": 25.5,
+        },
         owner_fingerprints={"orders": "a" * 64},
     )
 
@@ -215,7 +220,11 @@ def test_client_preview_fingerprint_canonicalizes_native_owner_dates_and_amounts
 
     assert result.ready_to_print is True
     assert len(result.preview_fingerprint.value) == 64
-    assert result.field_values == {"A1": date(2026, 3, 2), "A2": Decimal("12000.00")}
+    assert result.field_values == {
+        "A1": date(2026, 3, 2),
+        "A2": Decimal("12000.00"),
+        "A3": 25.5,
+    }
 
 
 @pytest.mark.parametrize("value", ["休周六", "休周日", "週休2日", "連續服務"])
@@ -256,15 +265,22 @@ def test_orders_custom_rest_dates_are_projected_as_typed_text(value, expected):
     ("value", "expected"),
     [
         ("2026/09/15", "2026-09-15"),
+        ("2026-09-15", "2026-09-15"),
+        (date(2026, 9, 15), "2026-09-15"),
         ("2026/02/30", None),
         ("2026/09", None),
-        ("2026-09-15", None),
         (None, None),
     ],
 )
 def test_legacy_due_month_only_projects_explicit_full_dates(value, expected):
     result = _due_date_from_due_month(value)
     assert (result.isoformat() if result else None) == expected
+
+
+def test_contract_case_context_selects_due_month_for_template_projection():
+    from infrastructure.mysql.contract_context_repository import _CASE_FACTS_SQL
+
+    assert "c.due_month" in _CASE_FACTS_SQL
 
 
 def test_conditional_unresolved_mapping_is_skipped_when_owner_says_not_applicable(tmp_path):

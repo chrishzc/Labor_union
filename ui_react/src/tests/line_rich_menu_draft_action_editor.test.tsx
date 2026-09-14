@@ -80,6 +80,8 @@ describe('LineRichMenuDraftActionEditor', () => {
     expect(screen.queryByRole('option', { name: /切換 Rich Menu/ })).not.toBeInTheDocument();
     fireEvent.change(actionType, { target: { value: 'uri' } });
     expect(screen.getByRole('option', { name: '?target=order_tracking（狀態追蹤）' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '?target=staff_verification（月嫂身分綁定）' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '?target=order_update（修改訂單資訊）' })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: /anomalies_center|異常中心/ })).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('LIFF target／網址'), { target: { value: '?target=profile_update' } });
     fireEvent.click(screen.getByRole('button', { name: '預覽草稿變更' }));
@@ -152,5 +154,32 @@ describe('LineRichMenuDraftActionEditor', () => {
         buttons: [expect.objectContaining({ action: { type: 'message', text: '開啟工會客服' } })],
       })] }),
     })));
+  });
+
+  it('未收錄的自訂 LIFF 參數會動態加入 option，不退回預設 gateway', () => {
+    const draftClient = client();
+    render(<LineRichMenuDraftActionEditor
+      draft={{
+        ...DRAFT,
+        definition: {
+          ...DRAFT.definition,
+          menus: [{
+            ...DRAFT.definition.menus[0],
+            buttons: [{
+              id: 'custom_btn',
+              label: '自訂按鈕',
+              bounds: { x: 0, y: 0, width: 2500, height: 843 },
+              action: { type: 'uri', uri: '?target=custom_preview_flow', uri_source: 'liff' },
+            }],
+          }],
+        },
+      }}
+      menuId="customer_menu"
+      client={draftClient}
+      onApplied={vi.fn()}
+    />);
+
+    expect(screen.getByRole('option', { name: '?target=custom_preview_flow（自訂／未收錄入口）' })).toBeInTheDocument();
+    expect(screen.getByLabelText('LIFF target／網址')).toHaveValue('?target=custom_preview_flow');
   });
 });

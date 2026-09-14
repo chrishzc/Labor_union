@@ -188,6 +188,8 @@ def test_liff_targets_route_to_existing_pages() -> None:
     assert 'staff_payout: "/line-staff-payout"' in staff_route
     assert "staff_baby_log: '/line-identity?target=staff_baby_log'" in gateway
     assert "staff_payout: '/line-identity?target=staff_payout'" in gateway
+    assert 'faq: "/line-service-help?tab=faq"' in standalone_route
+    assert 'ai_assistant: "/line-service-help?tab=ai"' in standalone_route
     for target in ("order_tracking", "anomalies_center", "dashboard"):
         assert f"{target}:" in mobile_admin_route
         assert f"/line-mobile-admin?target={target}" in gateway

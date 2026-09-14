@@ -58,8 +58,15 @@ const ClientRegistryEditor: React.FC = () => {
   const loadList = async (search = query) => {
     setMessage('正在載入客戶名冊…');
     try {
-      const result = await clientRegistryClient.list({ query: search });
-      setPage(result); setMessage(result.items.length ? '' : '查無符合條件的案件。');
+      const items: ClientRegistryPageData['items'] = [];
+      let after: string | undefined;
+      do {
+        const result = await clientRegistryClient.list({ query: search, sortBy: 'case_no', sortOrder: 'asc', limit: 100, after });
+        items.push(...result.items);
+        if (result.next_cursor === after) throw new Error('客戶名冊分頁資料異常，請稍後重試。');
+        after = result.next_cursor ?? undefined;
+      } while (after);
+      setPage({ items, next_cursor: null }); setMessage(items.length ? '' : '查無符合條件的案件。');
     } catch (error) { setMessage(error instanceof Error ? error.message : '客戶名冊載入失敗。'); }
   };
   useEffect(() => { void loadList(''); }, []);

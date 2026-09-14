@@ -51,7 +51,7 @@ const SUBSTATUS_LABELS: Readonly<Record<CoreStageSubstatusCode, string>> = {
   recommendation_pending: '待推薦', recommendation_in_progress: '推薦處理中', recommendation_blocked: '推薦阻塞', recommendation_completed: '已完成推薦', recommendation_unavailable: '推薦資料不可用',
   external_dispatch_pending: '待建立並送交契約', external_dispatch_preparing: '契約準備中', external_dispatch_blocked: '外部交接阻塞', external_dispatch_completed: '已送交外部平台', external_dispatch_unavailable: '外部交接不可用',
   external_signing_pending: '待送交外部平台', external_signing_in_progress: '等待雙方完成簽署', external_signing_blocked: '外部簽署阻塞', external_signing_completed: '最終簽署 PDF 已驗收', external_signing_unavailable: '外部簽署不可用',
-  deposit_pending: '待定金', deposit_in_progress: '定金核銷中', deposit_blocked: '定金阻塞', deposit_settled: '定金已核銷', deposit_unavailable: '定金資料不可用',
+  deposit_pending: '待定金', deposit_in_progress: '定金核銷中', deposit_blocked: '定金阻塞', deposit_settled: '定金已核銷', deposit_unpaid_override: '定金未付，已人工放行', deposit_unavailable: '定金資料不可用',
   date_confirmation_pending: '待日期確認', date_confirmation_in_progress: '日期確認中', date_confirmation_blocked: '日期確認阻塞', date_confirmed: '日期已確認', date_confirmation_unavailable: '日期資料不可用',
   waiting_to_start: '待開工', service_in_progress: '服務進行中', service_blocked: '服務阻塞', service_period_completed: '服務期間已完成', service_schedule_unavailable: '排班資料不可用',
   completion_pending: '待完工確認', completion_in_progress: '完工確認中', completion_blocked: '完工確認阻塞', completion_confirmed: '已確認完工', completion_record_missing: '完工紀錄缺漏',
@@ -207,12 +207,20 @@ function validateQueryResult(
   if (query.workbench_scope !== undefined) {
     // Validate the server contract; never move or filter mismatched rows locally.
     const allowedStatuses = {
-      in_progress: ['待補件', '洽談中', '訂單成立', '服務中', '歷史訂單－未服務', '歷史訂單－服務中'],
+      in_progress: ['待補件', '洽談中', '訂單成立', '服務中', '訂單完成', '歷史訂單－未服務', '歷史訂單－服務中'],
       completed: ['訂單完成', '歷史訂單－服務完成', '歷史訂單－帳務完成'],
       cancelled: ['訂單取消'],
     }[query.workbench_scope];
     if (page.items.some((item) => !allowedStatuses.includes(item.lifecycle_status))) {
       throw new OrderCoreStageProjectionAdapterError('伺服器回傳的訂單不符合所選分類，請確認服務版本後重新讀取。');
+    }
+    const normalCompletedMismatch = page.items.some((item) => item.lifecycle_status === '訂單完成' && (
+      query.workbench_scope === 'in_progress'
+        ? !['client_settlement', 'staff_payout'].includes(item.current_core_stage_code ?? '')
+        : query.workbench_scope === 'completed' && item.current_core_stage_code !== null
+    ));
+    if (normalCompletedMismatch) {
+      throw new OrderCoreStageProjectionAdapterError('已完工案件必須依客戶與月嫂結算是否完成分類。');
     }
   }
   if (query.branch_type !== undefined) {

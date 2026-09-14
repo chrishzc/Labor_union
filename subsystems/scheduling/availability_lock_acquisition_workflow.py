@@ -1,6 +1,6 @@
 """
 File: availability_lock_acquisition_workflow.py
-Description: 原子建立等待訂金檔期鎖；只接受精確且有效的簽約前服務承諾。
+Description: 原子建立等待訂金檔期鎖；只接受工會確認方案的 current 正式服務日期。
 """
 
 from __future__ import annotations
@@ -123,78 +123,76 @@ def _require_customer_matching_acceptance(cursor: Any, plan_id: int) -> None:
         raise ValueError("customer has not accepted the matching plan")
 
 
-def _require_active_precontract_commitment(cursor: Any, plan_id: int) -> list[dict[str, Any]]:
-    """A lock may reserve a signed commitment, never an unsigned proposal."""
-    cursor.execute(
-        "SELECT commitment.id,commitment.case_no FROM precontract_service_commitments commitment "
-        "LEFT JOIN precontract_service_commitment_events terminal "
-        "ON terminal.commitment_id=commitment.id "
-        "WHERE commitment.matching_plan_id=%s AND terminal.id IS NULL FOR UPDATE",
-        (plan_id,),
-    )
-    commitment = cursor.fetchone()
-    if not isinstance(commitment, dict):
-        raise ValueError("active staff service commitment is required")
-    cursor.execute(
-        "SELECT order_row.service_days,COUNT(day_row.id) AS commitment_days,"
-        "COUNT(DISTINCT day_row.service_date) AS distinct_service_dates "
-        "FROM orders order_row LEFT JOIN precontract_service_commitment_days day_row "
-        "ON day_row.commitment_id=%s WHERE order_row.case_no=%s FOR UPDATE",
-        (commitment["id"], commitment["case_no"]),
-    )
-    days = cursor.fetchone()
-    if not isinstance(days, dict) or any(
-        not isinstance(days.get(key), int)
-        for key in ("service_days", "commitment_days", "distinct_service_dates")
-    ) or days["service_days"] <= 0 or (
-        days["commitment_days"] != days["service_days"]
-        or days["distinct_service_dates"] != days["service_days"]
-    ):
-        raise ValueError("active staff service commitment days mismatch")
-    cursor.execute(
-        "SELECT matching_segment_id,staff_id,service_date "
-        "FROM precontract_service_commitment_days WHERE commitment_id=%s "
-        "ORDER BY matching_segment_id,staff_id,service_date FOR UPDATE",
-        (commitment["id"],),
-    )
-    commitment_days = _rows(cursor, "invalid active staff service commitment days")
-    expected = {"matching_segment_id", "staff_id", "service_date"}
-    if any(
-        set(row) != expected
-        or isinstance(row["matching_segment_id"], bool)
-        or not isinstance(row["matching_segment_id"], int)
-        or row["matching_segment_id"] <= 0
-        or isinstance(row["staff_id"], bool)
-        or not isinstance(row["staff_id"], int)
-        or row["staff_id"] <= 0
-        or row["service_date"].__class__ is not date
-        for row in commitment_days
-    ):
-        raise ValueError("invalid active staff service commitment days")
-    return commitment_days
-
-
-def _with_exact_commitment_lock_rows(
-    snapshot: dict[str, Any], commitment_days: list[dict[str, Any]]
+def _with_current_confirmed_service_dates(
+    cursor: Any,
+    case_no: str,
+    snapshot: dict[str, Any],
+    *,
+    for_update: bool,
 ) -> dict[str, Any]:
-    """Replace calendar-range lock rows with immutable signed service days."""
-    segment_staff = {
-        (row["segment_id"], row["staff_id"])
-        for row in snapshot["segments"]
-    }
-    lock_rows = [
-        {
-            "segment_id": row["matching_segment_id"],
-            "staff_id": row["staff_id"],
-            "lock_date": row["service_date"].isoformat(),
-        }
-        for row in commitment_days
-    ]
+    """Bind a union-confirmed plan to Scheduling-owned current service dates."""
+    lock = " FOR UPDATE" if for_update else ""
+    cursor.execute(
+        "SELECT version.id,version.service_day_count,orders.service_days "
+        "FROM confirmed_service_date_versions version "
+        "JOIN orders ON orders.case_no=version.case_no "
+        "WHERE version.case_no=%s AND version.is_current=1" + lock,
+        (case_no,),
+    )
+    version = cursor.fetchone()
+    if not isinstance(version, dict):
+        raise ValueError("current confirmed service dates are required")
+    expected = {"id", "service_day_count", "service_days"}
     if (
-        len(lock_rows) != len({(row["staff_id"], row["lock_date"]) for row in lock_rows})
-        or any((row["segment_id"], row["staff_id"]) not in segment_staff for row in lock_rows)
+        set(version) != expected
+        or any(
+            isinstance(version[key], bool) or not isinstance(version[key], int)
+            for key in expected
+        )
+        or version["id"] <= 0
+        or version["service_day_count"] <= 0
+        or version["service_day_count"] != version["service_days"]
     ):
-        raise ValueError("active staff service commitment does not match plan segments")
+        raise ValueError("current confirmed service dates mismatch")
+    cursor.execute(
+        "SELECT day.service_date FROM confirmed_service_date_days day "
+        "WHERE day.confirmed_version_id=%s ORDER BY day.ordinal" + lock,
+        (version["id"],),
+    )
+    days = _rows(cursor, "invalid current confirmed service dates")
+    if len(days) != version["service_day_count"] or len(
+        {row.get("service_date") for row in days}
+    ) != len(days):
+        raise ValueError("current confirmed service dates mismatch")
+    lock_rows: list[dict[str, Any]] = []
+    used_segments: set[tuple[int, int]] = set()
+    for row in days:
+        service_date = row.get("service_date")
+        if set(row) != {"service_date"} or service_date.__class__ is not date:
+            raise ValueError("invalid current confirmed service dates")
+        owners = [
+            segment
+            for segment in snapshot["segments"]
+            if segment["assigned_start_date"]
+            <= service_date.isoformat()
+            <= segment["assigned_end_date"]
+        ]
+        if len(owners) != 1:
+            raise ValueError("current confirmed service dates do not match plan segments")
+        owner = owners[0]
+        used_segments.add((owner["segment_id"], owner["staff_id"]))
+        lock_rows.append(
+            {
+                "segment_id": owner["segment_id"],
+                "staff_id": owner["staff_id"],
+                "lock_date": service_date.isoformat(),
+            }
+        )
+    if used_segments != {
+        (segment["segment_id"], segment["staff_id"])
+        for segment in snapshot["segments"]
+    }:
+        raise ValueError("current confirmed service dates do not match plan segments")
     return {
         **snapshot,
         "lock_rows": sorted(
@@ -615,9 +613,11 @@ def _acquire_caregiver_availability_lock_in_transaction(
         locked_snapshot = _canonical_snapshot(request["case_no"], request["plan_id"], order_row, locked_plan, locked_segments)
         if locked_snapshot != preliminary_snapshot:
             raise ValueError("matching plan changed while acquiring lock")
-        commitment_days = _require_active_precontract_commitment(cursor, request["plan_id"])
-        locked_snapshot = _with_exact_commitment_lock_rows(
-            locked_snapshot, commitment_days
+        locked_snapshot = _with_current_confirmed_service_dates(
+            cursor,
+            request["case_no"],
+            locked_snapshot,
+            for_update=True,
         )
         _require_customer_pre_execution_commitment(
             cursor, request["case_no"], request["plan_id"],
@@ -722,8 +722,12 @@ def preview_caregiver_availability_lock(
         )
         if plan["status"] != "proposed" or plan["is_active"] != 1:
             raise ValueError("matching plan is not an active proposed plan")
-        commitment_days = _require_active_precontract_commitment(cursor, request["plan_id"])
-        snapshot = _with_exact_commitment_lock_rows(snapshot, commitment_days)
+        snapshot = _with_current_confirmed_service_dates(
+            cursor,
+            request["case_no"],
+            snapshot,
+            for_update=False,
+        )
         _require_customer_pre_execution_commitment(
             cursor, request["case_no"], request["plan_id"],
         )

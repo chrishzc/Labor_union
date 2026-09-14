@@ -24,7 +24,7 @@
 - `ui_react/src/pages/ClientRosterPage.tsx`
 
 ## Entrypoints
-- `GET /api/v1/admin/registries/clients` — bounded selector with optional query, baby-info, service-days, cooking and allowlisted sort filters.
+- `GET /api/v1/admin/registries/clients` — bounded selector with optional query, BeClass effective multi-birth-count, order-status, cooking and allowlisted sort filters; the registry editor exhausts its case-number cursor so selection and search are not capped by one page.
 - `GET /api/v1/admin/registries/clients/{case_no}`
 - `POST /api/v1/admin/registries/clients/{case_no}/profile/{preview|apply}`
 - Client registry case mapping enters through canonical `orders.case_no -> clients.id`; Client Profile remains the only writer.

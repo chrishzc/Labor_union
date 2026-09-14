@@ -71,6 +71,18 @@ describe('待辦看板 Beta 既有方案等待訂金鎖', () => {
     expect(mocks.apply).not.toHaveBeenCalled();
   });
 
+  it('Preview 業務阻擋保留目前正式方案，不誤報推薦進度讀取失敗', async () => {
+    mocks.preview.mockRejectedValue(new Error('正式服務日期與配對方案不一致，請重新確認服務日期。'));
+    await open();
+
+    fireEvent.click(screen.getByRole('button', { name: '預覽方案 51 等待訂金鎖' }));
+
+    await screen.findByText('正式服務日期與配對方案不一致，請重新確認服務日期。');
+    expect(screen.getByText('目前正式媒合方案：#51')).toBeInTheDocument();
+    expect(screen.queryByText('目前無法讀取推薦進度')).not.toBeInTheDocument();
+    expect(mocks.apply).not.toHaveBeenCalled();
+  });
+
   it('pending 方案仍可 Query，但不提供鎖 Preview 或 Apply', async () => {
     accepted = false;
     await open();

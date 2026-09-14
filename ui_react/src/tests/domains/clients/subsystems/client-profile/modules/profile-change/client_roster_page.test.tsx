@@ -7,8 +7,8 @@ vi.mock('../../../../../../../api/client_registry/client_registry_client', () =>
 
 const item = {
   client_id: 7, case_no: 'CASE-001', name: '王小明', phone: '0912345678', city: '新竹市',
-  baby_info: '雙胞胎', service_days: 26, requires_cooking: true,
-  planned_start_date: '2026-10-01', order_status: 'matching',
+  multi_birth_count: '雙胞胎', service_days: 26, requires_cooking: true,
+  planned_start_date: '2026-10-01', order_status: '洽談中',
 };
 
 describe('ClientRosterPage', () => {
@@ -20,19 +20,19 @@ describe('ClientRosterPage', () => {
   it('requests server filters, displays roster fields, and exposes no mutation controls', async () => {
     render(<ClientRosterPage />);
     await waitFor(() => expect(mocks.list).toHaveBeenCalledWith(expect.objectContaining({ sortBy: 'case_no', sortOrder: 'asc', limit: 100 })));
-    expect(screen.getByText('雙胞胎')).toBeInTheDocument();
+    expect(screen.getAllByText('雙胞胎').length).toBeGreaterThan(1);
     expect(screen.getByText('26')).toBeInTheDocument();
     expect(screen.getAllByText('需要').length).toBeGreaterThan(1);
     expect(screen.queryByRole('button', { name: /儲存|更新|刪除|編輯/ })).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText('搜尋客戶名冊清單'), { target: { value: '王' } });
-    fireEvent.change(screen.getByLabelText('寶寶資訊篩選'), { target: { value: 'true' } });
-    fireEvent.change(screen.getByLabelText('服務天數篩選'), { target: { value: '26' } });
+    fireEvent.change(screen.getByLabelText('BeClass 胎數篩選'), { target: { value: '雙胞胎' } });
+    fireEvent.change(screen.getByLabelText('案件／訂單狀態篩選'), { target: { value: '洽談中' } });
     fireEvent.change(screen.getByLabelText('下廚需求篩選'), { target: { value: 'false' } });
     fireEvent.click(screen.getByRole('button', { name: '套用篩選' }));
 
     await waitFor(() => expect(mocks.list).toHaveBeenLastCalledWith({
-      query: '王', hasBabyInfo: true, serviceDays: 26, requiresCooking: false,
+      query: '王', multiBirthCount: '雙胞胎', orderStatus: '洽談中', requiresCooking: false,
       sortBy: 'case_no', sortOrder: 'asc', limit: 100,
     }));
   });

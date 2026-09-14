@@ -77,6 +77,8 @@ SELECT o.case_no,
        COALESCE(deposit_fact.deposit_obligation_count, 0) AS deposit_obligation_count,
        COALESCE(deposit_fact.deposit_open_count, 0) AS deposit_open_count,
        deposit_fact.deposit_updated_at,
+       (payment_terms_event.source_event_identity LIKE 'deposit-gate-override:%%') AS deposit_gate_override_active,
+       payment_terms_event.created_at AS deposit_gate_override_at,
        confirmed.id AS confirmed_version_id,
        confirmed.version AS confirmed_version,
        confirmed.confirmed_at_utc AS confirmed_at,
@@ -304,6 +306,9 @@ SELECT o.case_no,
          FROM order_contract_flow_events GROUP BY case_no
   ) contract_fact ON contract_fact.case_no = o.case_no
   LEFT JOIN client_finance_accounts finance ON finance.case_no = o.case_no
+  LEFT JOIN client_payment_terms payment_terms ON payment_terms.case_no = o.case_no
+  LEFT JOIN client_payment_terms_events payment_terms_event
+    ON payment_terms_event.id = payment_terms.current_event_id
   LEFT JOIN (
        SELECT case_no,
               SUM(status IN ('open','settled')) AS deposit_obligation_count,

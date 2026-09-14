@@ -238,6 +238,19 @@ describe('待辦看板 Beta 唯讀工作 Drawer', () => {
     clientMocks.loadSummaries.mockResolvedValue(summaryPage());
   });
 
+  it('在收款與結算的訂金區直接顯示一般市民未付人工放行入口', async () => {
+    const caseNo = 'CASE-DEPOSIT-OVERRIDE';
+    clientMocks.getCoreStageTimelines.mockResolvedValue(page([
+      timeline(caseNo, 'deposit_settlement', { lifecycle: '洽談中' }),
+    ]));
+    setOwnerFacts(caseNo);
+
+    render(<OrderWorkbenchV2Drawer caseNo={caseNo} branchType="normal" onClose={vi.fn()} />);
+
+    expect(await screen.findByRole('region', { name: '一般市民訂金未付人工放行' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '檢查是否可放行' })).toBeInTheDocument();
+  });
+
   it('資料未補齊使 detail 不可用時仍依正式 intake projection 開啟補件入口', async () => {
     clientMocks.getCoreStageTimelines.mockResolvedValue(page([
       timeline('CASE-INCOMPLETE', 'intake_validation', { lifecycle: '待補件' }),

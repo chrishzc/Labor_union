@@ -220,6 +220,24 @@ def test_formal_service_planned_and_active_filters_share_consistent_facet_counts
     assert planned_page.substatus_counts["service_in_progress"] == 1
 
 
+def test_deposit_filter_counts_include_the_unpaid_override_substatus():
+    source = _Source({None: _page(_timeline("CASE-001"))})
+
+    page = query_core_stage_page(
+        source,
+        CoreStageProjectionFilterQuery(50, stage="deposit_settlement"),
+    )
+
+    assert set(page.substatus_counts) == {
+        "deposit_pending",
+        "deposit_in_progress",
+        "deposit_blocked",
+        "deposit_settled",
+        "deposit_unpaid_override",
+        "deposit_unavailable",
+    }
+
+
 def test_blocker_warning_case_search_and_branch_filters_are_server_side():
     blocker = ProjectionNotice("service_blocked", "服務根事實有 blocker。")
     warning = ProjectionNotice("service_warning", "服務根事實有 warning。")
@@ -354,6 +372,44 @@ def test_workbench_categories_cover_current_lifecycle_with_stable_pagination(sco
     if scope != "in_progress":
         assert not any(first.stage_counts.values())
         assert first.substatus_counts == {}
+
+
+def test_completed_service_with_open_client_settlement_remains_in_progress_step_twelve():
+    completed = _timeline(
+        "CASE-SETTLEMENT-PENDING",
+        lifecycle=OrderLifecycleStatus.COMPLETED,
+        current_step=11,
+    )
+    settlement_stage = completed.stages[-1]
+    open_client_settlement = replace(
+        completed,
+        stages=completed.stages[:-1] + (
+            replace(
+                settlement_stage,
+                settlement=tuple(
+                    replace(part, status="blocked")
+                    if part.code == "client_settlement"
+                    else part
+                    for part in settlement_stage.settlement
+                ),
+            ),
+        ),
+    )
+    source = _Source({None: _page(open_client_settlement)})
+
+    in_progress = query_core_stage_page(
+        source,
+        CoreStageProjectionFilterQuery(50, workbench_scope="in_progress"),
+    )
+    completed_page = query_core_stage_page(
+        source,
+        CoreStageProjectionFilterQuery(50, workbench_scope="completed"),
+    )
+
+    assert [item.case_no for item in in_progress.items] == ["CASE-SETTLEMENT-PENDING"]
+    assert in_progress.items[0].current_core_stage_code == "client_settlement"
+    assert in_progress.stage_counts["client_settlement"] == 1
+    assert completed_page.items == ()
 
 
 def test_unrelated_cancelled_projection_drift_does_not_disable_active_workbench():

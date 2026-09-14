@@ -1,6 +1,6 @@
 """
-File: test_availability_lock_contract_signing_gate.py
-Description: 驗證等待訂金檔期鎖只接受有效且精確的簽約前服務承諾。
+File: test_availability_lock_matching_decision_gate.py
+Description: 驗證工會確認正式配對時，以 current 正式服務日期建立等待訂金檔期鎖。
 """
 
 from datetime import date
@@ -56,37 +56,42 @@ def _segment() -> dict[str, object]:
     }
 
 
-def test_deposit_established_case_is_eligible_after_contract_signing():
+def test_union_confirmed_plan_uses_current_service_dates_without_staff_contract():
     snapshot = workflow._canonical_snapshot(
         "CASE-1", 8, _order("訂單成立"), _plan(), [_segment()],
     )
     cursor = _Cursor([
-        {"id": 14, "case_no": "CASE-1"},
-        {"service_days": 5, "commitment_days": 5, "distinct_service_dates": 5},
+        {"id": 14, "service_day_count": 5, "service_days": 5},
         [
-            {"matching_segment_id": 18, "staff_id": 99, "service_date": date(2026, 8, day)}
+            {"service_date": date(2026, 8, day)}
             for day in (10, 11, 12, 13, 14)
         ],
         {"id": 15},
     ])
 
-    workflow._require_active_precontract_commitment(cursor, 8)
+    exact_snapshot = workflow._with_current_confirmed_service_dates(
+        cursor, "CASE-1", snapshot, for_update=True,
+    )
     workflow._require_customer_pre_execution_commitment(cursor, "CASE-1", 8)
 
-    assert snapshot["case_no"] == "CASE-1"
-    assert "precontract_service_commitments" in cursor.executed[0][0]
-    assert "precontract_service_commitment_days" in cursor.executed[1][0]
-    assert "contract_signing_events" in cursor.executed[3][0]
+    assert len(exact_snapshot["lock_rows"]) == 5
+    assert "confirmed_service_date_versions" in cursor.executed[0][0]
+    assert "confirmed_service_date_days" in cursor.executed[1][0]
+    assert all("precontract_service_commitment" not in sql for sql, _ in cursor.executed)
+    assert "contract_signing_events" in cursor.executed[2][0]
 
 
-def test_waiting_lock_uses_signed_exact_service_days_not_calendar_range():
+def test_waiting_lock_uses_confirmed_service_days_not_calendar_range():
     snapshot = workflow._canonical_snapshot(
         "CASE-1", 8, _order("訂單成立"), _plan(), [_segment()],
     )
-    exact_snapshot = workflow._with_exact_commitment_lock_rows(snapshot, [
-        {"matching_segment_id": 18, "staff_id": 99, "service_date": date(2026, 8, day)}
-        for day in (10, 11, 14)
+    cursor = _Cursor([
+        {"id": 14, "service_day_count": 3, "service_days": 3},
+        [{"service_date": date(2026, 8, day)} for day in (10, 11, 14)],
     ])
+    exact_snapshot = workflow._with_current_confirmed_service_dates(
+        cursor, "CASE-1", snapshot, for_update=False,
+    )
     occupancy = workflow._proposed_occupancy_rows(exact_snapshot)
 
     service_days = [row for row in occupancy if row["lock_kind"] == "service"]
@@ -96,14 +101,19 @@ def test_waiting_lock_uses_signed_exact_service_days_not_calendar_range():
     ]
 
 
-def test_invalid_commitment_day_count_cannot_reserve_a_waiting_deposit_lock():
+def test_incomplete_current_service_dates_cannot_reserve_a_waiting_deposit_lock():
     cursor = _Cursor([
-        {"id": 14, "case_no": "CASE-1"},
-        {"service_days": 5, "commitment_days": 7, "distinct_service_dates": 7},
+        {"id": 14, "service_day_count": 5, "service_days": 5},
+        [{"service_date": date(2026, 8, day)} for day in (10, 11, 12)],
     ])
+    snapshot = workflow._canonical_snapshot(
+        "CASE-1", 8, _order("訂單成立"), _plan(), [_segment()],
+    )
 
-    with pytest.raises(ValueError, match="active staff service commitment days mismatch"):
-        workflow._require_active_precontract_commitment(cursor, 8)
+    with pytest.raises(ValueError, match="current confirmed service dates mismatch"):
+        workflow._with_current_confirmed_service_dates(
+            cursor, "CASE-1", snapshot, for_update=False,
+        )
 
 
 def test_legacy_matching_acceptance_remains_a_valid_customer_gate():

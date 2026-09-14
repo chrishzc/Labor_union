@@ -4,27 +4,25 @@ import type { ClientRegistryPage as ClientRegistryPageData, ClientRegistrySortBy
 import './ClientRosterPage.css';
 
 type SelectBoolean = '' | 'true' | 'false';
+type MultiBirthCount = '' | '單胞胎' | '雙胞胎';
 type RosterFilters = {
   query: string;
-  hasBabyInfo: SelectBoolean;
-  serviceDays: string;
+  multiBirthCount: MultiBirthCount;
+  orderStatus: string;
   requiresCooking: SelectBoolean;
   sortBy: ClientRegistrySortBy;
   sortOrder: ClientRegistrySortOrder;
 };
 
 const defaultFilters: RosterFilters = {
-  query: '', hasBabyInfo: '', serviceDays: '', requiresCooking: '', sortBy: 'case_no', sortOrder: 'asc',
+  query: '', multiBirthCount: '', orderStatus: '', requiresCooking: '', sortBy: 'case_no', sortOrder: 'asc',
 };
 
-function toRequest(filters: RosterFilters): ClientRegistryListQuery | null {
-  const serviceDaysText = filters.serviceDays.trim();
-  const serviceDays = serviceDaysText ? Number(serviceDaysText) : undefined;
-  if (serviceDays !== undefined && (!Number.isInteger(serviceDays) || serviceDays <= 0)) return null;
+function toRequest(filters: RosterFilters): ClientRegistryListQuery {
   return {
     query: filters.query,
-    hasBabyInfo: filters.hasBabyInfo === '' ? undefined : filters.hasBabyInfo === 'true',
-    serviceDays,
+    multiBirthCount: filters.multiBirthCount || undefined,
+    orderStatus: filters.orderStatus || undefined,
     requiresCooking: filters.requiresCooking === '' ? undefined : filters.requiresCooking === 'true',
     sortBy: filters.sortBy,
     sortOrder: filters.sortOrder,
@@ -33,8 +31,10 @@ function toRequest(filters: RosterFilters): ClientRegistryListQuery | null {
 }
 
 function hasActiveFilter(filters: RosterFilters): boolean {
-  return Boolean(filters.query.trim() || filters.hasBabyInfo || filters.serviceDays.trim() || filters.requiresCooking || filters.sortBy !== 'case_no' || filters.sortOrder !== 'asc');
+  return Boolean(filters.query.trim() || filters.multiBirthCount || filters.orderStatus || filters.requiresCooking || filters.sortBy !== 'case_no' || filters.sortOrder !== 'asc');
 }
+
+const orderStatuses = ['待補件', '洽談中', '訂單成立', '服務中', '訂單完成', '訂單取消', '歷史訂單－未服務', '歷史訂單－服務中', '歷史訂單－服務完成', '歷史訂單－帳務完成'];
 
 const displayCooking = (value: boolean | null) => value === true ? '需要' : value === false ? '不需要' : '未登錄';
 
@@ -51,10 +51,6 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
 
   const load = async (nextFilters: RosterFilters) => {
     const request = toRequest(nextFilters);
-    if (!request) {
-      setError('服務天數請輸入正整數。');
-      return;
-    }
     setLoading(true);
     setError(null);
     try {
@@ -90,8 +86,8 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
     {!embedded && <header><div><h1>客戶名冊清單</h1><p>以案件為單位快速瀏覽與比較；此頁只會查詢，不會修改客戶或訂單資料。</p></div></header>}
     <form className="client-roster-filters" onSubmit={applyFilters}>
       <label>搜尋<input aria-label="搜尋客戶名冊清單" value={filters.query} placeholder="案件編號、姓名或電話" onChange={(event) => setFilters((value) => ({ ...value, query: event.target.value }))} /></label>
-      <label>寶寶資訊<select aria-label="寶寶資訊篩選" value={filters.hasBabyInfo} onChange={(event) => setFilters((value) => ({ ...value, hasBabyInfo: event.target.value as SelectBoolean }))}><option value="">全部</option><option value="true">有寶寶資訊</option><option value="false">無寶寶資訊</option></select></label>
-      <label>服務天數<input aria-label="服務天數篩選" type="number" min="1" step="1" inputMode="numeric" value={filters.serviceDays} onChange={(event) => setFilters((value) => ({ ...value, serviceDays: event.target.value }))} /></label>
+      <label>BeClass 胎數<select aria-label="BeClass 胎數篩選" value={filters.multiBirthCount} onChange={(event) => setFilters((value) => ({ ...value, multiBirthCount: event.target.value as MultiBirthCount }))}><option value="">全部</option><option value="單胞胎">單胞胎</option><option value="雙胞胎">雙胞胎</option></select></label>
+      <label>案件／訂單狀態<select aria-label="案件／訂單狀態篩選" value={filters.orderStatus} onChange={(event) => setFilters((value) => ({ ...value, orderStatus: event.target.value }))}><option value="">全部</option>{orderStatuses.map((status) => <option key={status} value={status}>{status}</option>)}</select></label>
       <label>下廚需求<select aria-label="下廚需求篩選" value={filters.requiresCooking} onChange={(event) => setFilters((value) => ({ ...value, requiresCooking: event.target.value as SelectBoolean }))}><option value="">全部</option><option value="true">需要</option><option value="false">不需要</option></select></label>
       <div className="client-roster-filter-actions"><button type="submit">套用篩選</button><button type="button" onClick={clearFilters}>清除篩選</button></div>
     </form>
@@ -103,7 +99,7 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
       <thead><tr>
         <th scope="col"><button type="button" onClick={() => changeSort('case_no')}>案件編號{sortLabel('case_no')}</button></th>
         <th scope="col"><button type="button" onClick={() => changeSort('customer_name')}>客戶姓名{sortLabel('customer_name')}</button></th>
-        <th scope="col">電話</th><th scope="col">地區</th><th scope="col">寶寶資訊</th>
+        <th scope="col">電話</th><th scope="col">地區</th><th scope="col">BeClass 胎數</th>
         <th scope="col"><button type="button" onClick={() => changeSort('service_days')}>服務天數{sortLabel('service_days')}</button></th>
         <th scope="col">下廚需求</th>
         <th scope="col"><button type="button" onClick={() => changeSort('expected_start_date')}>預計服務日期{sortLabel('expected_start_date')}</button></th>
@@ -111,7 +107,7 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
       </tr></thead>
       <tbody>{page.items.map((item) => <tr key={item.case_no}>
         <td>{item.case_no}</td><td>{item.name ?? '—'}</td><td>{item.phone ?? '—'}</td><td>{item.city ?? '—'}</td>
-        <td>{item.baby_info ?? '—'}</td><td>{item.service_days ?? '—'}</td><td>{displayCooking(item.requires_cooking)}</td>
+        <td>{item.multi_birth_count ?? '—'}</td><td>{item.service_days ?? '—'}</td><td>{displayCooking(item.requires_cooking)}</td>
         <td>{item.planned_start_date ?? '—'}</td><td>{item.order_status ?? '—'}</td>
       </tr>)}</tbody>
     </table></div>}

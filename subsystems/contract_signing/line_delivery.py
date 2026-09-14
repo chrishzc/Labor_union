@@ -99,6 +99,31 @@ def build_external_platform_reminder_request(
     )
 
 
+def build_external_platform_client_reminder_request(
+    recipient: LineRecipient,
+    *,
+    case_no: str,
+    session_id: str,
+    document_version_id: int,
+    scheduled_at: datetime,
+    idempotency_key: IdempotencyKey,
+    correlation_id: CorrelationId,
+) -> LineDeliveryRequest:
+    payload = canonical_line_payload_json(
+        {"text": external_platform_staff_reminder_text(case_no)}
+    )
+    return LineDeliveryRequest(
+        recipient,
+        LineMessageKind.TEXT,
+        payload,
+        scheduled_at,
+        idempotency_key,
+        correlation_id,
+        "contract_external_signing_session",
+        f"{session_id}:client:{document_version_id}",
+    )
+
+
 def external_platform_staff_reminder_text(case_no: str) -> str:
     return (
         f"案件 {case_no} 的契約已放到工會既定的外部簽約平台；"

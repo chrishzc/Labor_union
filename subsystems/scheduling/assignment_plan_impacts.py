@@ -138,7 +138,14 @@ def _assignment_plan_readiness_blockers(
         blockers.append("waiting_lock_conversion.contract_required")
     if not facts.order_terms.service_time.complete:
         blockers.append("waiting_lock_conversion.service_time_required")
-    if not settlement.deposit_settled:
+    if (
+        not settlement.deposit_settled
+        and not getattr(
+            facts.client_finance,
+            "deposit_gate_override_active",
+            False,
+        )
+    ):
         blockers.append("waiting_lock_conversion.deposit_required")
     return tuple(blockers)
 

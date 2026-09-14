@@ -7,17 +7,25 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 
 from domains.orders.lifecycle import OrderLifecycleScope, OrderLifecycleStatus
 from infrastructure.mysql.orders_stage_projection_repository import MySqlOrdersStageProjectionRepository, _PAGE_SQL
 from shared_kernel.clock import FixedBusinessClock, TAIPEI_TIME_ZONE
-from subsystems.orders.stage_projection_query import OrderStageProjectionContractError, OrderStageProjectionQueryService, StageProjectionQuery
+from subsystems.orders.stage_projection_query import OrderStageProjectionContractError, OrderStageProjectionQueryService, StageProjectionQuery, _current_step
 
 
 NOW = datetime(2026, 8, 21, 8, 0, 0)
 BUSINESS_CLOCK = FixedBusinessClock(datetime(2026, 8, 21, 18, 0, tzinfo=TAIPEI_TIME_ZONE))
+
+
+def test_established_order_stays_on_step_nine_after_dates_are_confirmed() -> None:
+    completed_steps = tuple(SimpleNamespace(ordinal=index, status="completed") for index in range(1, 12))
+
+    assert _current_step(OrderLifecycleStatus.ESTABLISHED, completed_steps, None) == 9
+    assert _current_step(OrderLifecycleStatus.IN_SERVICE, completed_steps, None) == 11
 
 
 def test_service_completion_projection_reads_the_canonical_orders_receipt() -> None:
@@ -94,6 +102,8 @@ def _row(case_no: str = "CASE-001") -> dict[str, object]:
         "deposit_obligation_count": 1,
         "deposit_open_count": 0,
         "deposit_updated_at": NOW,
+        "deposit_gate_override_active": False,
+        "deposit_gate_override_at": None,
         "confirmed_version_id": 6,
         "confirmed_version": 2,
         "confirmed_at": NOW,
@@ -368,7 +378,7 @@ def test_in_service_lifecycle_cannot_be_dragged_back_by_intake_gap() -> None:
     assert item.current_step_ordinal == 10
 
 
-def test_active_service_owner_fact_advances_a_stale_established_lifecycle() -> None:
+def test_active_service_owner_fact_does_not_advance_an_established_lifecycle() -> None:
     row = _row("ACTIVE-SERVICE-STALE-LIFECYCLE")
     row.update({
         "lifecycle_status": OrderLifecycleStatus.ESTABLISHED.value,
@@ -382,8 +392,8 @@ def test_active_service_owner_fact_advances_a_stale_established_lifecycle() -> N
     ).items[0]
 
     assert item.stages[5].status == "in_progress"
-    assert item.current_stage_code == "active_service"
-    assert item.current_step_ordinal == 10
+    assert item.current_stage_code == "date_confirmation"
+    assert item.current_step_ordinal == 9
 
 
 def test_established_order_ignores_old_matching_gap_without_replacement_lineage() -> None:

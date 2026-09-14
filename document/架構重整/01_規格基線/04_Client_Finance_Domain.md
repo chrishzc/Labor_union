@@ -27,6 +27,8 @@
 
 依 Orders Terms、服務日根事實及費率政策建立訂金、第一期、第二期及調整義務。樓層費只計入一次。條款變更只重算未核銷義務；已核銷差額建立 adjustment 或 refund obligation。
 
+一般市民遇工會突發狀況時，system admin 可經專用 Preview／Apply 人工允許案件在訂金尚未付清時繼續後續流程。此入口不得自動執行，且不適用低收入戶、中低收入戶或非市民；Apply 必須保存 actor、明確原因、idempotency receipt 與 immutable payment-terms event。放行不修改訂金服務天數、金額、義務或 `deposit_settled`，而是以獨立 typed override 經 durable outbox 交由 Orders 正式 writer 將仍在 `洽談中` 的案件推進為 `訂單成立`；Scheduling 只讀此 override，不得自行改寫 Orders。Operational Stage 必須將訂金關卡標為完成並顯示「定金未付，已人工放行」，不得誤標為已核銷。後續付款仍走既有核銷流程，payment terms 的下一次正式變更會使既有放行失效並要求重新確認。
+
 第 `27` 份正式規格的歷史 lifecycle branch 可用每位月嫂已確認 `actual_service_days` 的總和取代逐日
 服務日期作為歷史服務量來源；Client Finance 仍自行擁有費率、補助、自費、樓層費、obligation direction
 與核銷。歷史服務量可少於或大於原合約天數，既有已核銷金額差異只能追加 adjustment／refund，不得

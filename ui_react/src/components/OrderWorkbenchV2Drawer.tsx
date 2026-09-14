@@ -34,6 +34,7 @@ import { OrderControlledReopenPanel } from './OrderControlledReopenPanel';
 import { OrderActualStartPanel } from './OrderActualStartPanel';
 import { OrderInformationSheets } from './OrderInformationSheets';
 import { OrderContractPreview } from './OrderContractPreview';
+import { ClientDepositSkipActions } from './ClientDepositSkipActions';
 
 interface OrderWorkbenchV2DrawerProps {
   caseNo: string;
@@ -366,7 +367,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
                 </div><div hidden={serviceView !== 'completion'}>{detail.status === 'ready' && (
                 <OrderServiceCompletionActions caseNo={caseNo} orderStatus={detail.data.order_status} onCompleted={refreshFacts} />
               )}</div></div>}
-              {activeGroup === 'finance' && <div className="order-case-document-grid"><article><h3>訂金與客戶收款</h3><p>核對訂金、各期款與退款。正常收款依銀行流水核銷。</p><a href={`#finance?tab=client-receipts&case_no=${encodeURIComponent(caseNo)}`}>查看本案客戶收款 →</a></article><article><h3>月嫂付款與結案</h3><p>前往帳務頁選擇月嫂，再核對應付與付款紀錄。</p><a href="#finance?tab=staff-payables">前往月嫂付款 →</a></article><p className="order-case-review-note">銀行流水如需人工核對，請在帳務頁預覽更正內容後確認核銷。</p></div>}
+              {activeGroup === 'finance' && <div className="order-case-document-grid"><article><h3>訂金與客戶收款</h3><p>核對訂金、各期款與退款。正常收款依銀行流水核銷。</p><a href={`#finance?tab=client-receipts&case_no=${encodeURIComponent(caseNo)}`}>查看本案客戶收款 →</a><ClientDepositSkipActions caseNo={caseNo} onCommitted={refreshFacts} /></article><article><h3>月嫂付款與結案</h3><p>前往帳務頁選擇月嫂，再核對應付與付款紀錄。</p><a href="#finance?tab=staff-payables">前往月嫂付款 →</a></article><p className="order-case-review-note">銀行流水如需人工核對，請在帳務頁預覽更正內容後確認核銷。</p></div>}
             </fieldset>
           </section>
         )}

@@ -288,7 +288,7 @@ def _core_from_step(
         label=label,
         owner=step.owner,
         status=step.status,
-        substatus_code=_substatus(code, step.status),
+        substatus_code=("deposit_unpaid_override" if code == "deposit_settlement" and any(item.code == "deposit_unpaid_override_active" for item in step.warnings) else _substatus(code, step.status)),
         source=source_stage.source,
         occurred_at=step.occurred_at,
         blockers=step.blockers,

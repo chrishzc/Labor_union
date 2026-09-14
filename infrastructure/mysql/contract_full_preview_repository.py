@@ -296,7 +296,9 @@ def _extend_precontract_facts(connection, case_no, facts, owners, plan):
         finance = replace(finance, charge_days=tuple(ClientChargeDay(day, False) for day in dates))
         destination = _load_client_payment_destination(cursor)
     candidate = build_client_finance_terms_candidate(finance, f"contract-preview:{case_no}")
-    facts["total_hours"] = len(dates) * finance.service_hours_per_day
+    facts["total_hours"] = Decimal(len(dates)) * Decimal(
+        str(finance.service_hours_per_day)
+    )
     facts["total_employer_self_pay_payable"] = sum(stage.amount.amount for stage in candidate.stage_plans)
     facts["client_finance_self_pay_days"] = sum(len(stage.service_dates) for stage in candidate.stage_plans if stage.payment_stage.value != "deposit")
     for stage in candidate.stage_plans:
@@ -363,7 +365,7 @@ def _extend_precontract_staff_payroll(
             rates,
             PayrollTerms(
                 int(facts["service_days"]),
-                float(facts["service_hours_per_day"]),
+                Decimal(str(facts["service_hours_per_day"])),
                 MoneyNTD(int(facts.get("floor_fee") or 0)),
             ),
         )
@@ -416,7 +418,8 @@ def _common_facts(case: dict[str, object]) -> dict[str, object]:
         "identity_status": case.get("client_identity_status"),
         # ``due_month`` is legacy-named and may contain only a month.  It is
         # accepted as the contract due-date fact only when the stored value is
-        # an explicit YYYY/MM/DD date; month-only values remain absent.
+        # an explicit YYYY/MM/DD or normalized YYYY-MM-DD date; month-only
+        # values remain absent.
         "due_date": _due_date_from_due_month(case.get("due_month")),
         "multi_birth_count": case_import.values.get("multi_birth_count"),
         # Orders owns the typed custom rest-date projection.  It is already
@@ -821,18 +824,22 @@ def _project_subsidy_coverage(
     )
 
 
-_FULL_DUE_DATE = re.compile(r"^\d{4}/\d{2}/\d{2}$")
+_FULL_DUE_DATE = re.compile(r"^\d{4}([/-])\d{2}\1\d{2}$")
 
 
 def _due_date_from_due_month(value: object) -> date | None:
     """Accept only a fully specified legacy date, never infer a day."""
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
     if not isinstance(value, str):
         return None
     text = value.strip()
     if not _FULL_DUE_DATE.fullmatch(text):
         return None
     try:
-        return datetime.strptime(text, "%Y/%m/%d").date()
+        return date.fromisoformat(text.replace("/", "-"))
     except ValueError:
         return None
 

@@ -12,8 +12,8 @@ import {
 type Owner = 'profile' | 'beclass';
 export interface ClientRegistryListQuery {
   query?: string;
-  hasBabyInfo?: boolean;
-  serviceDays?: number;
+  multiBirthCount?: '單胞胎' | '雙胞胎';
+  orderStatus?: string;
   requiresCooking?: boolean;
   sortBy?: ClientRegistrySortBy;
   sortOrder?: ClientRegistrySortOrder;
@@ -39,8 +39,8 @@ export const clientRegistryClient = {
       token: token(),
       params: {
         query: request.query?.trim() || undefined,
-        has_baby_info: request.hasBabyInfo,
-        service_days: request.serviceDays,
+        multi_birth_count: request.multiBirthCount,
+        order_status: request.orderStatus?.trim() || undefined,
         requires_cooking: request.requiresCooking,
         sort_by: request.sortBy,
         sort_order: request.sortOrder,

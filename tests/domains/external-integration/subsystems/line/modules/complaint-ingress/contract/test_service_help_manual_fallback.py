@@ -5,6 +5,7 @@ Description: 驗證客服 referral 的 typed escalation、同一 UoW、去敏 co
 
 from datetime import datetime, timezone
 import json
+import os
 import re
 from types import SimpleNamespace
 
@@ -154,8 +155,11 @@ def test_service_help_menu_keeps_all_six_approved_categories() -> None:
     payload = json.loads(unit_of_work.delivery_tasks.requests[0].payload_json)
     assert payload["contents"]["header"]["contents"][1]["text"] == "服務與問答"
     buttons = payload["contents"]["body"]["contents"]
+    liff_id = os.getenv("LINE_LIFF_ID") or "ai-assistant"
     assert [
-        button["action"].get("text") or button["action"].get("data")
+        button["action"].get("text")
+        or button["action"].get("data")
+        or button["action"].get("uri")
         for button in buttons
     ] == [
         "服務流程",
@@ -163,7 +167,7 @@ def test_service_help_menu_keeps_all_six_approved_categories() -> None:
         "查詢服務進度",
         "修改登記資料",
         "customer-service:handoff:confirm",
-        "其他問題",
+        f"https://liff.line.me/{liff_id}?target=ai_assistant",
     ]
     assert "月嫂身分認證" not in unit_of_work.delivery_tasks.requests[0].payload_json
 
@@ -335,9 +339,8 @@ def test_confirm_postback_creates_hold_and_exposes_resume_action() -> None:
     assert len(gateway.create_calls) == 1
     payload = json.loads(unit_of_work.delivery_tasks.requests[0].payload_json)
     assert "AI 自動回答目前暫停" in payload["text"]
-    assert payload["quickReply"]["items"][0]["action"]["data"] == (
-        "customer-service:handoff:resume-ai"
-    )
+    assert "請直接在此對話中留言" in payload["text"]
+    assert "quickReply" not in payload
 
 
 def test_resume_postback_releases_hold_in_caller_uow_and_acknowledges() -> None:

@@ -39,6 +39,7 @@ _ROW_FIELDS = frozenset({
     "external_signing_session_id", "external_signing_status_version", "external_signing_handoff_at",
     "final_contract_document_id", "final_contract_completed_at",
     "finance_version", "deposit_obligation_count", "deposit_open_count", "deposit_updated_at",
+    "deposit_gate_override_active", "deposit_gate_override_at",
     "confirmed_version_id", "confirmed_version", "confirmed_at", "scheduling_version",
     "assignment_count", "assignment_active_count", "assignment_completed_count", "assignment_updated_at",
     "assignment_first_service_date", "assignment_last_service_date", "service_start_seconds",
@@ -330,6 +331,7 @@ def _contract_stage(row: Mapping[str, object], case_no: str) -> StageProjection:
     contract = row["contract_event_id"] is not None
     deposits = _nonnegative_int(row, "deposit_obligation_count")
     open_deposits = _nonnegative_int(row, "deposit_open_count")
+    override_active = bool(row["deposit_gate_override_active"])
     source = _source("Contract Signing / Client Finance", "contract-and-deposit", _maximum_version(row, "order_version", "finance_version"))
     terms_changed_after_contract = (
         contract
@@ -346,7 +348,7 @@ def _contract_stage(row: Mapping[str, object], case_no: str) -> StageProjection:
                 "目前服務條件晚於既有契約，需重新產生或確認契約版本。",
             ),
         )
-    elif contract and deposits and not open_deposits:
+    elif contract and deposits and (not open_deposits or override_active):
         status: StageStatus = "completed"
         blockers = ()
     elif contract or deposits:
@@ -354,7 +356,8 @@ def _contract_stage(row: Mapping[str, object], case_no: str) -> StageProjection:
         blockers = (_notice("deposit_not_settled", "客戶定金 obligation 尚未結清。"),) if open_deposits else ()
     else:
         return _unavailable_stage(4, "contract_deposit", "雙邊簽約與定金", "Contract Signing / Client Finance", "contract_and_deposit_lineage_missing")
-    return _stage(4, "contract_deposit", "雙邊簽約與定金", "Contract Signing / Client Finance", status, source, _latest(row, "terms_created_at", "contract_created_at", "deposit_updated_at"), blockers=blockers, actions=(_get("orders.contract_completion.query", f"/api/v1/orders/{case_no}/contract-completion"),))
+    warnings = (_notice("deposit_unpaid_override_active", "定金仍未付款，已由管理員人工放行。"),) if override_active and open_deposits else ()
+    return _stage(4, "contract_deposit", "雙邊簽約與定金", "Contract Signing / Client Finance", status, source, _latest(row, "terms_created_at", "contract_created_at", "deposit_updated_at", "deposit_gate_override_at"), blockers=blockers, warnings=warnings, actions=(_get("orders.contract_completion.query", f"/api/v1/orders/{case_no}/contract-completion"),))
 
 
 def _date_stage(row: Mapping[str, object], case_no: str) -> StageProjection:
@@ -523,7 +526,10 @@ def _steps(row: Mapping[str, object], case_no: str, stages: tuple[StageProjectio
     dispatch_status: StageStatus = "completed" if handoff_recorded else "in_progress" if staff_document_count or staff_sent_count or staff_signed_count else "not_started" if plan_id is not None else "unavailable"
     signing_status: StageStatus = "completed" if final_document_recorded else "in_progress" if handoff_recorded else "not_started" if plan_id is not None else "unavailable"
     deposit_count = _nonnegative_int(row, "deposit_obligation_count")
-    deposit_status: StageStatus = "completed" if final_document_recorded and deposit_count and not _nonnegative_int(row, "deposit_open_count") else "blocked" if final_document_recorded else "not_started" if handoff_recorded else "unavailable"
+    deposit_open = _nonnegative_int(row, "deposit_open_count")
+    deposit_override = bool(row["deposit_gate_override_active"])
+    deposit_status: StageStatus = "completed" if final_document_recorded and deposit_count and (not deposit_open or deposit_override) else "blocked" if final_document_recorded else "not_started" if handoff_recorded else "unavailable"
+    deposit_warnings = (_notice("deposit_unpaid_override_active", "定金仍未付款，已由管理員人工放行。"),) if deposit_override and deposit_open else ()
     return (
         _step_from_stage(1, "intake_validation", "進件報名與資料完整性驗證", stage["intake_terms"]),
         _standalone_step(2, "matching_pool", "媒合月嫂候選人加入意願池", "Assignments / Scheduling", pool_status, _optional_datetime(row, "matching_created_at"), "matching_plan_lineage_missing" if pool_status == "unavailable" else None),
@@ -532,7 +538,7 @@ def _steps(row: Mapping[str, object], case_no: str, stages: tuple[StageProjectio
         _step_from_stage(5, "formal_recommendation", "寄送月嫂履歷給客戶確認", stage["client_review"]),
         _standalone_step(6, "external_signing_dispatch", "建立契約並送交外部簽署平台", "Contract Signing", dispatch_status, _optional_datetime(row, "external_signing_handoff_at"), "external_signing_handoff_missing" if dispatch_status == "unavailable" else None),
         _standalone_step(7, "external_signing_completion", "雙方完成外部簽署並回收最終 PDF", "Contract Signing / Orders", signing_status, _optional_datetime(row, "final_contract_completed_at"), "external_signing_final_document_missing" if signing_status == "unavailable" else None),
-        _standalone_step(8, "deposit_settlement", "客戶定金核銷（訂單成立）", "Client Finance", deposit_status, _optional_datetime(row, "deposit_updated_at"), "deposit_obligation_missing" if deposit_status == "unavailable" else None, blockers=(_notice("deposit_not_settled", "定金 obligation 尚未結清。"),) if deposit_status == "blocked" else ()),
+        _standalone_step(8, "deposit_settlement", "客戶定金核銷（訂單成立）", "Client Finance", deposit_status, _latest(row, "deposit_updated_at", "deposit_gate_override_at"), "deposit_obligation_missing" if deposit_status == "unavailable" else None, blockers=(_notice("deposit_not_settled", "定金 obligation 尚未結清。"),) if deposit_status == "blocked" else (), warnings=deposit_warnings),
         _step_from_stage(9, "confirmed_service_dates", "確認事前服務日期（精算）", stage["date_confirmation"]),
         _step_from_stage(10, "formal_service", "轉換正式排班與服務履約", stage["active_service"]),
         _step_from_stage(11, "settlement_close", "完工驗收、時數核對與尾款／薪資結清", stage["settlement_payout"]),
@@ -543,8 +549,8 @@ def _step_from_stage(ordinal: int, code: str, label: str, stage: StageProjection
     return SopStepProjection(ordinal, code, label, stage.owner, stage.status, stage.occurred_at, stage.blockers, stage.warnings, stage.available_actions, stage.availability_reason)
 
 
-def _standalone_step(ordinal: int, code: str, label: str, owner: str, status: StageStatus, occurred_at: datetime | None, reason: str | None, *, blockers: tuple[ProjectionNotice, ...] = ()) -> SopStepProjection:
-    return SopStepProjection(ordinal, code, label, owner, status, occurred_at, blockers, (), (), reason)
+def _standalone_step(ordinal: int, code: str, label: str, owner: str, status: StageStatus, occurred_at: datetime | None, reason: str | None, *, blockers: tuple[ProjectionNotice, ...] = (), warnings: tuple[ProjectionNotice, ...] = ()) -> SopStepProjection:
+    return SopStepProjection(ordinal, code, label, owner, status, occurred_at, blockers, warnings, (), reason)
 
 
 def _stage(ordinal: int, code: str, label: str, owner: str, status: StageStatus, source: SourceLineage, occurred_at: datetime | None, *, blockers: tuple[ProjectionNotice, ...] = (), warnings: tuple[ProjectionNotice, ...] = (), actions: tuple[AvailableAction, ...] = (), availability_reason: str | None = None, settlement: tuple[SettlementProjection, ...] = ()) -> StageProjection:
@@ -727,25 +733,19 @@ def _current_step(
     }.get(lifecycle_status)
     if fixed_ordinal is not None:
         return fixed_ordinal
-    service_step = steps[9]
-    if service_step.status == "completed":
-        return 11
-    if (
-        service_step.status == "in_progress"
-        or lifecycle_status
-        in {
-            OrderLifecycleStatus.IN_SERVICE,
-            OrderLifecycleStatus.HISTORICAL_IN_SERVICE,
-        }
-    ):
-        return 10
+    if lifecycle_status in {
+        OrderLifecycleStatus.IN_SERVICE,
+        OrderLifecycleStatus.HISTORICAL_IN_SERVICE,
+    }:
+        return 11 if steps[9].status == "completed" else 10
+    if lifecycle_status is OrderLifecycleStatus.ESTABLISHED:
+        floor = replacement_resume_step or 6
+        current = next((step for step in steps[floor - 1 : 9] if step.status != "completed"), None)
+        # Date confirmation may already be complete, but step 10 belongs only
+        # to the persisted IN_SERVICE lifecycle.
+        return current.ordinal if current is not None else 9
     floor = (
-        replacement_resume_step
-        if lifecycle_status is OrderLifecycleStatus.ESTABLISHED
-        and replacement_resume_step is not None
-        else 6
-        if lifecycle_status is OrderLifecycleStatus.ESTABLISHED
-        else 1
+        1
     )
     bounded = steps[floor - 1 :]
     if floor == 1 and all(step.status == "unavailable" for step in bounded):

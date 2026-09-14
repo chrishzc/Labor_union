@@ -18,7 +18,8 @@ execution schedule 才能完成客戶契約，以本規格較新的人工裁決�
 ## 2. Business scenario 與 Global invariants
 
 ```text
-配對完成
+月嫂表示願意承接候選方案 → 客戶接受推薦方案
+→ 工會人員決定正式配對，以 current confirmed service dates 建立 waiting-deposit 檔期鎖
 → 每個月嫂 segment 產生、寄送並回收月嫂契約
 → 全段簽回且精確服務日守恆，建立簽約前服務承諾
 ├─→ 建立唯一簽約前訂金義務 → 訂金可先核銷 → 訂單成立
@@ -36,6 +37,8 @@ execution schedule 才能完成客戶契約，以本規格較新的人工裁決�
 5. 外部 LINE 傳送只由 committed durable delivery task 執行；delivery 成功不等於簽署完成。
 6. UI、script、fixture 與 migration 不得直接寫契約完成、Orders status、execution schedule、
    finance settled projection、alert 或 receipt。
+7. 月嫂只提供承接意願，不負責決定正式配對；waiting-deposit 檔期鎖由工會人員對 current matching
+   plan 執行，且不得要求月嫂先簽約或先建立 precontract service commitment。
 
 ## 3. Ownership、SSOT 與 non-goals
 
@@ -311,9 +314,8 @@ Preview／確認／Apply／receipt/readback，列為 `completed`；外部 LINE �
 ```text
 系統產生未簽 PDF → 工會人員經已認證後台直接下載 PDF bytes
 → 工會人員將 PDF 移到外部簽約平台
-→ 系統以 LINE 提醒月嫂前往外部平台簽約
-→ 月嫂用 LINE 回報完成
-→ 系統以 LINE 提醒客戶簽約
+→ 工會人員確認交接時，系統同時建立客戶與所有月嫂的 LINE 簽約提醒工作
+→ 客戶與月嫂前往外部平台簽約並各自用 LINE 回報完成
 → 客戶用 LINE 回報完成
 → 系統提醒工會人員到外部平台下載最終簽署 PDF
 → 工會人員把最終 PDF 放回指定 NAS 投放區或由管理端受控上傳 → Preview／確認／Apply
@@ -326,7 +328,7 @@ Preview／確認／Apply／receipt/readback，列為 `completed`；外部 LINE �
 2. 外部平台狀態不是本系統根事實。月嫂與客戶的 LINE 回覆必須經 verified binding、目前 document／
    segment／commitment version 與防重放驗證，分別形成 provider-neutral completion report；LINE delivery
    success 不能代替人的回覆。LINE 不可用時保留同等證據要求的人工補登入口。
-3. 只有全部月嫂已回報完成，才可建立客戶提醒 intent；客戶回報完成後只建立「最終 PDF 待回收」任務，
+3. 外部平台交接、客戶提醒 intent 與所有月嫂提醒 intent 必須在同一 outer UoW 全有或全無；客戶回報完成後只建立「最終 PDF 待回收」任務，
    不得在最終檔案上傳、digest 驗證與 DB 保存前形成 Contract Completion。
 4. 最終 PDF 納管採 NAS 指定投放區或管理端 staging → zero-write Preview → 明確確認 → Apply →
    receipt/readback。Apply 必須在單一 outer UoW 鎖定 current case、document version、雙方 completion reports

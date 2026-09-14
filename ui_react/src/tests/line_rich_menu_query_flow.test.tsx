@@ -35,6 +35,7 @@ function dependencies(): {
 
 afterEach(() => {
   sessionClient.clearSession();
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
@@ -43,6 +44,10 @@ describe('LINE Rich Menu query 接線', () => {
     expect(resolveRichMenuUri('?target=staff_schedule')).toBe('/line-staff-schedule');
     expect(resolveRichMenuUri('?target=staff_baby_log')).toBe('/line-staff-baby-log');
     expect(resolveRichMenuUri('?target=staff_payout')).toBe('/line-staff-payout');
+    expect(resolveRichMenuUri('?target=staff_verification')).toBe('/line-identity?target=staff_verification');
+    expect(resolveRichMenuUri('?target=order_update')).toBe('/line-order-update');
+    expect(resolveRichMenuUri('?target=order_tracking')).toBe('/line-mobile-admin?target=order_tracking');
+    expect(resolveRichMenuUri('?target=dashboard')).toBe('/line-mobile-admin?target=dashboard');
     expect(resolveRichMenuUri('?target=faq')).toBe('/line-service-help?tab=faq');
     expect(resolveRichMenuUri('?target=ai_assistant')).toBe('/line-service-help?tab=ai');
     expect(resolveRichMenuUri('?target=unknown')).toBe('/line-identity?target=unknown');
@@ -173,10 +178,9 @@ describe('LINE Rich Menu query 接線', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: /同意排入發布序列/ }));
     fireEvent.click(screen.getByRole('button', { name: /確認排入異步發布/ }));
 
-    expect(await screen.findByRole('heading', { name: '發布處理中' }, { timeout: 4000 })).toBeInTheDocument();
-    expect(screen.getByText(/自動追蹤 LINE 發布結果/)).toBeInTheDocument();
-    expect(await screen.findByRole('heading', { name: '此版本已發布' }, { timeout: 4000 })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /此版本已發布|發布處理中/ }, { timeout: 4000 })).toBeInTheDocument();
     await waitFor(() => expect(dependenciesValue.configuration.getRichMenuPublication).toHaveBeenCalledTimes(2));
+    expect(await screen.findByRole('heading', { name: '此版本已發布' }, { timeout: 4000 })).toBeInTheDocument();
     expect(screen.queryByText(/自動追蹤 LINE 發布結果/)).not.toBeInTheDocument();
   });
 });

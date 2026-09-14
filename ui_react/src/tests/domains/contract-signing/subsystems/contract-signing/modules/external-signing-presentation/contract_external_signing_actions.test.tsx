@@ -19,8 +19,6 @@ vi.mock('../../../../../../../api/orders/contract_external_signing_client', asyn
       query: vi.fn(),
       prepareStaffUnsignedPdf: vi.fn(),
       prepareClientUnsignedPdf: vi.fn(),
-      getStaffReminderReadiness: vi.fn(),
-      enqueueStaffReminder: vi.fn(),
       recordHandoff: vi.fn(),
       queryLegacyRecovery: vi.fn(),
       previewLegacyRecovery: vi.fn(),
@@ -286,18 +284,6 @@ describe('ContractExternalSigningActions', () => {
       size_bytes: 20,
       replayed: false,
     });
-    vi.mocked(contractExternalSigningClient.getStaffReminderReadiness).mockResolvedValue({
-      matching_segment_id: 41,
-      document_version_id: 31,
-      message: '案件 CASE-001 的契約已放到工會既定的外部簽約平台；請前往該平台完成簽署。',
-      blockers: [],
-      ready: true,
-    });
-    vi.mocked(contractExternalSigningClient.enqueueStaffReminder).mockResolvedValue({
-      task_id: 91,
-      status: 'pending',
-      replayed: false,
-    });
     vi.mocked(contractExternalSigningClient.stageFinalDocument).mockResolvedValue(staged);
     vi.mocked(contractExternalSigningClient.previewFinalDocument).mockResolvedValue(preview);
     vi.mocked(contractExternalSigningClient.applyFinalDocument).mockImplementation(async (_caseNo, _input, identity) => ({
@@ -469,33 +455,6 @@ describe('ContractExternalSigningActions', () => {
     render(<ContractExternalSigningActions caseNo="CASE-001" />);
     expect(await screen.findByRole('alert')).toHaveTextContent('請先完成客戶對推薦方案的確認，再準備契約。');
     expect(screen.getByRole('button', { name: '下載客戶契約 PDF' })).toBeDisabled();
-  });
-
-  it('shows the URL-less LINE reminder text and readiness without sending it', async () => {
-    render(<ContractExternalSigningActions caseNo="CASE-001" />);
-
-    fireEvent.click(await screen.findByRole('button', { name: '檢查月嫂 STAFF-009 LINE 通知準備度' }));
-
-    expect(await screen.findByText(/案件 CASE-001 的契約已放到工會既定的外部簽約平台/)).toBeInTheDocument();
-    expect(screen.getByText('通知內容與收件綁定均已就緒；尚未建立或送出通知。')).toBeInTheDocument();
-    expect(contractExternalSigningClient.getStaffReminderReadiness).toHaveBeenCalledWith('CASE-001', 41, expect.any(AbortSignal));
-  });
-
-  it('creates a pending LINE reminder task only after readiness is explicitly checked', async () => {
-    render(<ContractExternalSigningActions caseNo="CASE-001" />);
-
-    expect(screen.queryByRole('button', { name: /建立月嫂 STAFF-009 LINE 契約通知工作/ })).not.toBeInTheDocument();
-    fireEvent.click(await screen.findByRole('button', { name: '檢查月嫂 STAFF-009 LINE 通知準備度' }));
-    const enqueue = await screen.findByRole('button', { name: '建立月嫂 STAFF-009 LINE 契約通知工作（不立即傳送）' });
-    fireEvent.click(enqueue);
-
-    await waitFor(() => expect(contractExternalSigningClient.enqueueStaffReminder).toHaveBeenCalledWith(
-      'CASE-001',
-      41,
-      31,
-      expect.objectContaining({ idempotencyKey: expect.any(String) }),
-    ));
-    expect(await screen.findByText('已建立月嫂 STAFF-009 的 LINE 契約通知工作 #91；尚未傳送。')).toBeInTheDocument();
   });
 
   it('requires final PDF staging and Preview plus explicit confirmation before Apply/readback', async () => {
@@ -690,6 +649,7 @@ describe('ContractExternalSigningActions', () => {
       0,
       expect.objectContaining({ idempotencyKey: expect.any(String), receiptId: expect.any(String) }),
     );
+    expect(screen.getByText('已記錄送交外部簽署平台，並建立客戶與月嫂的 LINE 通知工作。')).toBeInTheDocument();
     expect(screen.queryByText(/選用稽核資料/)).not.toBeInTheDocument();
   });
 

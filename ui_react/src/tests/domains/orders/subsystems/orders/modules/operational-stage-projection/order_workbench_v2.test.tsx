@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   CORE_STAGE_CODES,
+  CoreStageProjectionSchema,
   SUBSTATUS_BY_STAGE_STATUS,
   substatusCodesForStage,
   type CoreStageBranchType,
@@ -184,6 +185,25 @@ function formalServicePage(substatus?: CoreStageSubstatusCode) {
 }
 
 describe('待辦看板 Beta 正式十三階段 contract', () => {
+  it('接受已完成但訂金未付的人工放行正式子狀態', () => {
+    const stage = coreStage('deposit_settlement', 'completed', 'CASE-OVERRIDE');
+
+    expect(CoreStageProjectionSchema.parse({
+      ...stage,
+      substatus_code: 'deposit_unpaid_override',
+      warnings: [{ code: 'deposit_unpaid_override_active', message: '定金仍未付款，已由管理員人工放行。' }],
+    }).substatus_code).toBe('deposit_unpaid_override');
+    expect(substatusCodesForStage('deposit_settlement')).toContain('deposit_unpaid_override');
+    expect(substatusCodesForStage('deposit_settlement')).toHaveLength(6);
+    expect(substatusCodesForStage('confirmed_service_dates')).toEqual([
+      'date_confirmation_pending',
+      'date_confirmation_in_progress',
+      'date_confirmation_blocked',
+      'date_confirmed',
+      'date_confirmation_unavailable',
+    ]);
+  });
+
   beforeEach(() => {
     clientMocks.getCoreStageTimelines.mockReset();
     clientMocks.loadSummaries.mockReset();

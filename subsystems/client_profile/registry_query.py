@@ -6,6 +6,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
+from domains.case_import.beclass_correction import VALID_MULTI_BIRTH_COUNTS
+
 
 ClientRegistrySortBy = Literal["case_no", "customer_name", "service_days", "expected_start_date"]
 ClientRegistrySortOrder = Literal["asc", "desc"]
@@ -26,7 +28,7 @@ class ClientRegistrySummary:
     name: str | None
     phone: str | None
     city: str | None
-    baby_info: str | None
+    multi_birth_count: str | None
     service_days: int | None
     requires_cooking: bool | None
     planned_start_date: object | None
@@ -75,8 +77,8 @@ class ClientRegistryRepository(Protocol):
         self,
         *,
         query: str | None,
-        has_baby_info: bool | None,
-        service_days: int | None,
+        multi_birth_count: str | None,
+        order_status: str | None,
         requires_cooking: bool | None,
         sort_by: ClientRegistrySortBy | None,
         sort_order: ClientRegistrySortOrder | None,
@@ -94,8 +96,8 @@ class ClientRegistryQueryApplication:
         self,
         *,
         query: str | None,
-        has_baby_info: bool | None = None,
-        service_days: int | None = None,
+        multi_birth_count: str | None = None,
+        order_status: str | None = None,
         requires_cooking: bool | None = None,
         sort_by: ClientRegistrySortBy | None = None,
         sort_order: ClientRegistrySortOrder | None = None,
@@ -106,8 +108,10 @@ class ClientRegistryQueryApplication:
             raise ValueError("client_registry_limit_invalid")
         normalized_query = _optional_text(query, 100)
         normalized_after = _optional_text(after, 50)
-        normalized_has_baby_info = _optional_bool(has_baby_info, "client_registry_has_baby_info_invalid")
-        normalized_service_days = _optional_positive_int(service_days, "client_registry_service_days_invalid")
+        normalized_multi_birth_count = _optional_text(multi_birth_count, 20)
+        if normalized_multi_birth_count is not None and normalized_multi_birth_count not in VALID_MULTI_BIRTH_COUNTS:
+            raise ValueError("client_registry_multi_birth_count_invalid")
+        normalized_order_status = _optional_text(order_status, 50)
         normalized_requires_cooking = _optional_bool(requires_cooking, "client_registry_requires_cooking_invalid")
         normalized_sort_by, normalized_sort_order = _normalize_sort(sort_by, sort_order)
         cursor_supported = (normalized_sort_by is None or normalized_sort_by == "case_no") and normalized_sort_order in {None, "asc"}
@@ -115,8 +119,8 @@ class ClientRegistryQueryApplication:
             raise ValueError("client_registry_cursor_sort_unsupported")
         rows, next_cursor = self._repository.list_page(
             query=normalized_query,
-            has_baby_info=normalized_has_baby_info,
-            service_days=normalized_service_days,
+            multi_birth_count=normalized_multi_birth_count,
+            order_status=normalized_order_status,
             requires_cooking=normalized_requires_cooking,
             sort_by=normalized_sort_by,
             sort_order=normalized_sort_order,
@@ -190,7 +194,7 @@ def _summary(row: Mapping[str, Any]) -> ClientRegistrySummary:
         _nullable_text(row.get("name")),
         _nullable_text(row.get("phone")),
         _nullable_text(row.get("city")),
-        _nullable_text(row.get("baby_info")),
+        _nullable_text(row.get("multi_birth_count")),
         _nullable_positive_int(row.get("service_days"), "client_registry_summary_service_days_invalid"),
         _nullable_bool(row.get("requires_cooking"), "client_registry_summary_requires_cooking_invalid"),
         row.get("planned_start_date"),

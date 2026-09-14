@@ -1,0 +1,37 @@
+# Cloud Build source context for the Cloud Run API service.
+# Default-deny: only runtime source and dependency metadata are uploaded.
+*
+
+!requirements.txt
+!pyproject.toml
+!.python-version
+!Dockerfile
+
+!api/
+!api/**
+!config/
+!config/**
+!db/
+!db/**
+!domains/
+!domains/**
+!infrastructure/
+!infrastructure/**
+!line/
+!line/**
+!scripts/
+!scripts/**
+!shared_kernel/
+!shared_kernel/**
+!subsystems/
+!subsystems/**
+!validation/
+!validation/**
+
+# Runtime directories can contain local caches, evidence, or credentials.
+**/__pycache__/
+**/*.py[cod]
+**/*.log
+line/test_result.txt
+scripts/**/scratch/
+validation/generated_contract_documents/

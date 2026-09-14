@@ -85,8 +85,8 @@ assert set(_FIELD_OPTIONS["client_beclass"]["multi_birth_count"]) == VALID_MULTI
 @router.get("", response_model=BaseResponse[ClientRegistryPageView])
 def list_client_registry(
     query: str | None = Query(default=None, max_length=100),
-    has_baby_info: bool | None = Query(default=None),
-    service_days: int | None = Query(default=None, gt=0),
+    multi_birth_count: Literal["單胞胎", "雙胞胎"] | None = Query(default=None),
+    order_status: str | None = Query(default=None, min_length=1, max_length=50),
     requires_cooking: bool | None = Query(default=None),
     sort_by: Literal["case_no", "customer_name", "service_days", "expected_start_date"] | None = Query(default=None),
     sort_order: Literal["asc", "desc"] | None = Query(default=None),
@@ -99,8 +99,8 @@ def list_client_registry(
     try:
         result = application.list(
             query=query,
-            has_baby_info=has_baby_info,
-            service_days=service_days,
+            multi_birth_count=multi_birth_count,
+            order_status=order_status,
             requires_cooking=requires_cooking,
             sort_by=sort_by,
             sort_order=sort_order,

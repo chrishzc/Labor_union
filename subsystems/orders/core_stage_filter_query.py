@@ -36,7 +36,7 @@ CoreStageSubstatusCode = Literal[
     "recommendation_pending", "recommendation_in_progress", "recommendation_blocked", "recommendation_completed", "recommendation_unavailable",
     "external_dispatch_pending", "external_dispatch_preparing", "external_dispatch_blocked", "external_dispatch_completed", "external_dispatch_unavailable",
     "external_signing_pending", "external_signing_in_progress", "external_signing_blocked", "external_signing_completed", "external_signing_unavailable",
-    "deposit_pending", "deposit_in_progress", "deposit_blocked", "deposit_settled", "deposit_unavailable",
+    "deposit_pending", "deposit_in_progress", "deposit_blocked", "deposit_settled", "deposit_unpaid_override", "deposit_unavailable",
     "date_confirmation_pending", "date_confirmation_in_progress", "date_confirmation_blocked", "date_confirmed", "date_confirmation_unavailable",
     "waiting_to_start", "service_in_progress", "service_blocked", "service_period_completed", "service_schedule_unavailable",
     "completion_pending", "completion_in_progress", "completion_blocked", "completion_confirmed", "completion_record_missing",
@@ -45,7 +45,7 @@ CoreStageSubstatusCode = Literal[
 ]
 WorkbenchScope = Literal["in_progress", "completed", "cancelled"]
 _WORKBENCH_STATUSES: Mapping[WorkbenchScope, frozenset[OrderLifecycleStatus]] = {
-    "in_progress": frozenset({OrderLifecycleStatus.PENDING_COMPLETION, OrderLifecycleStatus.DISCUSSION, OrderLifecycleStatus.ESTABLISHED, OrderLifecycleStatus.IN_SERVICE, OrderLifecycleStatus.HISTORICAL_UNSERVED, OrderLifecycleStatus.HISTORICAL_IN_SERVICE}),
+    "in_progress": frozenset({OrderLifecycleStatus.PENDING_COMPLETION, OrderLifecycleStatus.DISCUSSION, OrderLifecycleStatus.ESTABLISHED, OrderLifecycleStatus.IN_SERVICE, OrderLifecycleStatus.COMPLETED, OrderLifecycleStatus.HISTORICAL_UNSERVED, OrderLifecycleStatus.HISTORICAL_IN_SERVICE}),
     "completed": frozenset({OrderLifecycleStatus.COMPLETED, OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED, OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED}),
     "cancelled": frozenset({OrderLifecycleStatus.CANCELLED}),
 }
@@ -83,7 +83,7 @@ _HISTORICAL_LIFECYCLE_FACET_BY_STATUS = {
 }
 _VALID_SUBSTATUSES = frozenset(
     value for mapping in _SUBSTATUS_BY_CODE.values() for value in mapping.values()
-)
+) | {"deposit_unpaid_override"}
 
 
 class OperationalTimelineQueryPort(Protocol):
@@ -164,9 +164,12 @@ def query_core_stage_page(
         facet: 0 for facet in _HISTORICAL_LIFECYCLE_STATUS_BY_FACET
     }
     if request.stage is not None:
+        stage_substatuses = list(_SUBSTATUS_BY_CODE[request.stage].values())
+        if request.stage == "deposit_settlement":
+            stage_substatuses.append("deposit_unpaid_override")
         substatus_counts = {
             cast(CoreStageSubstatusCode, code): 0
-            for code in _SUBSTATUS_BY_CODE[request.stage].values()
+            for code in stage_substatuses
         }
 
     selected: list[OrderCoreStageTimeline] = []
@@ -284,7 +287,7 @@ def _matches_common_filters(
     item: OrderCoreStageTimeline,
     request: CoreStageProjectionFilterQuery,
 ) -> bool:
-    if request.workbench_scope is not None and item.lifecycle_status not in _WORKBENCH_STATUSES[request.workbench_scope]:
+    if request.workbench_scope is not None and not _matches_workbench_scope(item, request.workbench_scope):
         return False
     if request.branch_type is not None and item.branch_type != request.branch_type:
         return False
@@ -298,6 +301,13 @@ def _matches_common_filters(
     if request.warning_only and not any(stage.warnings for stage in item.core_stages):
         return False
     return True
+
+
+def _matches_workbench_scope(item: OrderCoreStageTimeline, scope: WorkbenchScope) -> bool:
+    if item.lifecycle_status is OrderLifecycleStatus.COMPLETED:
+        settlement_pending = item.current_core_stage_code in {"client_settlement", "staff_payout"}
+        return settlement_pending if scope == "in_progress" else not settlement_pending if scope == "completed" else False
+    return item.lifecycle_status in _WORKBENCH_STATUSES[scope]
 
 
 def _historical_lifecycle_facet(

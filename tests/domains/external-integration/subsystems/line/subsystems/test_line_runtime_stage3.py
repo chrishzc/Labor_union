@@ -707,7 +707,9 @@ def test_reply_rate_limit_retains_existing_push_behavior() -> None:
     )
     provider = ReplyCapableProvider(
         actions, LineProviderOutcome(
-            LineProviderOutcomeType.RATE_LIMITED, error_code="line_http_429",
+            LineProviderOutcomeType.RATE_LIMITED,
+            error_code="line_http_429",
+            error_message="rate limited",
         ),
     )
     worker = LineDeliveryWorker(

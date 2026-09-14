@@ -177,6 +177,8 @@ def _matching_pool_cascade_timeline(plan_id=1) -> OrderOperationalTimeline:
         "final_contract_completed_at": _AT,
         "deposit_obligation_count": 1,
         "deposit_open_count": 0,
+        "deposit_gate_override_active": False,
+        "deposit_gate_override_at": None,
         "matching_created_at": None,
         "staff_contract_signed_at": _AT,
         "staff_contract_sent_at": _AT,
