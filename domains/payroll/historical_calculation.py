@@ -36,8 +36,8 @@ class HistoricalAssignmentPayrollCandidate:
     assignment_identity: str
     staff_id: int
     actual_service_days: int
-    actual_hours: int
-    double_pay_hours: int
+    actual_hours: float | int
+    double_pay_hours: float | int
     hourly_rate: MoneyNTD
     service_salary: MoneyNTD
     floor_fee_allocated: MoneyNTD
@@ -126,7 +126,9 @@ def build_historical_case_payroll_candidate(
 
 def _assignment_candidate(facts, rate, terms, floor_fee, adjustments):
     actual_hours = facts.actual_service_days * terms.service_hours_per_day
-    service_salary = MoneyNTD(actual_hours * rate.hourly_rate.amount)
+    service_salary = MoneyNTD(
+        _whole_ntd(actual_hours * rate.hourly_rate.amount)
+    )
     return HistoricalAssignmentPayrollCandidate(
         assignment_identity=facts.assignment_identity,
         staff_id=facts.staff_id,
@@ -139,6 +141,12 @@ def _assignment_candidate(facts, rate, terms, floor_fee, adjustments):
         effective_adjustments=adjustments,
         total_payable=service_salary + floor_fee + adjustments,
     )
+
+
+def _whole_ntd(value: float | int) -> int:
+    if isinstance(value, float) and not value.is_integer():
+        raise ValueError("half-hour payroll amount must resolve to whole NTD")
+    return int(value)
 
 
 __all__ = [

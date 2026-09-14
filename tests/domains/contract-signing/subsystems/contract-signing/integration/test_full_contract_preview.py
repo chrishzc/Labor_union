@@ -358,7 +358,7 @@ def test_staff_legacy_funding_split_cells_stay_blank_and_whole_obligation_popula
 
 def test_real_staff_template_clears_legacy_funding_placeholders():
     root = Path(__file__).resolve().parents[6]
-    template = root / "db/templates/contracts/服務人員契約.xlsx"
+    template = root / "db/templates/contracts/staff_service_contract.xlsx"
     mapping = root / "db/templates/contracts/contract_staff_service.json"
     descriptors = json.loads(mapping.read_text(encoding="utf-8"))["param_mappings"]
     facts = {
@@ -404,7 +404,7 @@ def test_client_contract_payment_destination_and_floor_fee_due_date_use_client_f
 
 @pytest.mark.parametrize(
     ("filename", "print_area"),
-    [("服務人員契約.xlsx", "'工作表1'!$A$1:$H$97"), ("contract_client_copy.xlsx", "'客戶契約'!$A$1:$G$185")],
+    [("staff_service_contract.xlsx", "'工作表1'!$A$1:$H$97"), ("contract_client_copy.xlsx", "'客戶契約'!$A$1:$G$185")],
 )
 def test_contract_templates_print_one_page_wide_without_horizontal_fragment_pages(filename, print_area):
     root = Path(__file__).resolve().parents[6]

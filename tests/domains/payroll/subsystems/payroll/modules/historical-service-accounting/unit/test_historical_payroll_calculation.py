@@ -25,3 +25,18 @@ def test_historical_payroll_uses_single_pay_and_actual_days_beyond_contract():
     assert candidate.assignments[1].service_salary == MoneyNTD(84480)
     assert tuple(item.floor_fee_allocated.amount for item in candidate.assignments) == (600, 440)
     assert candidate.total_payable == MoneyNTD(193520)
+
+
+def test_historical_payroll_accepts_half_hour_daily_terms_with_whole_ntd_salary():
+    candidate = build_historical_case_payroll_candidate(
+        service_facts=(HistoricalAssignmentServiceFacts("assignment-a", 3, 3),),
+        rate_snapshots=(
+            rate_snapshot("assignment-a", "policy-v1", PayrollPolicyKind.CITIZEN),
+        ),
+        terms=PayrollTerms(30, 8.5, MoneyNTD(3000)),
+    )
+
+    assignment = candidate.assignments[0]
+    assert assignment.actual_hours == 25.5
+    assert assignment.service_salary == MoneyNTD(7650)
+    assert candidate.total_payable == MoneyNTD(7950)

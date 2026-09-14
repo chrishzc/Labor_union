@@ -2,7 +2,7 @@
   "id": "contract_staff_service",
   "name": "服務人員契約（真實 Excel 鏡像模板）",
   "desc": "以複製後的服務人員契約 Excel 作為唯讀鏡像模板。",
-  "template_filename": "服務人員契約.xlsx",
+  "template_filename": "staff_service_contract.xlsx",
   "static_cells": {
     "A12": "服務費用",
     "A13": "整筆應付金額",
