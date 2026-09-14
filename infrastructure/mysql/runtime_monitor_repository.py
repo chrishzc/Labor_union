@@ -296,7 +296,12 @@ class MySqlRuntimeMonitorRepository:
 
     def pending_alert_targets(self, event_id: int):
         with self._connection.cursor() as cursor:
-            cursor.execute(_PENDING_TARGETS, (event_id,))
+            try:
+                cursor.execute(_PENDING_TARGETS, (event_id,))
+            except Exception as error:
+                if not _missing_optional_preferences_table(error):
+                    raise
+                cursor.execute(_PENDING_TARGETS_WITH_DEFAULT_PREFERENCES, (event_id,))
             return tuple(cursor.fetchall() or ())
 
     def append_alert_intent(self, event_id, target_id, task_id, status, target_type, target_id_value, error_code=None):
@@ -406,7 +411,20 @@ LEFT JOIN admin_users a ON a.id=t.admin_user_id
 LEFT JOIN line_alert_target_preferences p ON p.target_id=t.id
 LEFT JOIN line_alert_delivery_intents i ON i.health_event_id=e.id AND i.target_id=t.id
 WHERE e.id=%s AND i.id IS NULL"""
+_PENDING_TARGETS_WITH_DEFAULT_PREFERENCES = """SELECT t.id,t.target_type,t.group_id,t.minimum_status,a.linked_line_user_id,e.resulting_status,e.check_name,e.message,e.occurred_at_utc,NULL AS preferences_json
+FROM runtime_health_events e JOIN line_alert_notification_targets t ON t.enabled=TRUE
+LEFT JOIN admin_users a ON a.id=t.admin_user_id
+LEFT JOIN line_alert_delivery_intents i ON i.health_event_id=e.id AND i.target_id=t.id
+WHERE e.id=%s AND i.id IS NULL"""
 _INSERT_ALERT_INTENT = "INSERT INTO line_alert_delivery_intents (health_event_id,target_id,delivery_task_id,projection_status,resolved_line_target_type,resolved_line_target_id,error_code) VALUES (%s,%s,%s,%s,%s,%s,%s)"
+
+
+def _missing_optional_preferences_table(error: Exception) -> bool:
+    return (
+        bool(error.args)
+        and error.args[0] == 1146
+        and "line_alert_target_preferences" in str(error)
+    )
 
 
 def _json_object(value):

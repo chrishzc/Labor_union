@@ -18,7 +18,7 @@
 
 ## Dependencies
 - inbound: `global/reporting/weekly-operations-report` — `end_date` 所屬年度的營運專用補助統計 readback。
-- outbound: 季／年度與營運年度統計均使用 Orders lifecycle、Client 補助身分、訂單服務 facts 與案件 Payroll 凍結費率，並納入同等已付訂金語意的歷史 Orders 狀態；未形成 claim item 時只以 Payroll 快照為單價，缺少快照即 fail closed，不得退回身分別單價；不依賴 claim batch 或 Scheduling generation。
+- outbound: 季／年度與營運年度統計均使用 Orders lifecycle、Client 補助身分、訂單服務 facts、歷史實際服務時數 projection 與案件 Payroll 凍結費率，並納入同等已付訂金語意的歷史 Orders 狀態；歷史實際時數已確認時優先使用，未確認時依身分採 40／120 小時預設。未形成 claim item 時以 Payroll 快照為一般單價；Case Import 正式雙胞胎事實固定投影 450，缺少非雙胞胎快照即 fail closed；不依賴 claim batch 或 Scheduling generation。
 
 ## Contracts
 - Government Subsidy reconciliation formula — `document/架構重整/01_規格基線/14_Government_Subsidy_Domain.md`

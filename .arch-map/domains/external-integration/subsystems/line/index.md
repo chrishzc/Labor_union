@@ -22,6 +22,7 @@
 - `complaint-ingress` — M4 canonical complaint normalization、Customer Service hold／HIGH escalation、masked empathy、告警與客戶結案通知的分離投遞；path: `modules/complaint-ingress.md`
 - `customer-order-change-intake` — verified LIFF 客戶訂單異動 Query／Preview／Apply，Apply 只建立 Customer Service 人工確認需求；path: `modules/customer-order-change-intake.md`
 - `matching-coordination-delivery` — M3 committed owner-intent至既有 LINE delivery task 的 typed projection與LINE-006 readback；path: `modules/matching-coordination-delivery.md`
+- `order-group-coordination` — 已驗證管理員的 LINE 訂單群組綁定、參與者同步與邀請投遞；path: `modules/order-group-coordination.md`
 - `mobile-assignment-review` — persisted-human、target-isolated mobile transport，轉接既有 Scheduling Assignment Plan Q/P/A/readback；path: `modules/mobile-assignment-review.md`
 - `safe-review-link` — 短效一次性review-link transport、runtime owner 版本重驗、masked readback、receipt與committed local intent；不執行provider send；path: `modules/safe-review-link.md`
 - `staff-order-view` — 已驗證月嫂查看自己有效指派的訂單摘要與可選篩選；path: `modules/staff-order-view.md`

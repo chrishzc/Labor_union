@@ -11,6 +11,7 @@
 - primary:
   - `subsystems/line/worker_runtime.py`
   - `subsystems/line/runtime_monitoring_application.py`
+- persistence adapter: `infrastructure/mysql/runtime_monitor_repository.py`
 
 ## Contracts
 - `subsystems/line/runtime_contracts.py::LineWorkerHeartbeat` — success／failure heartbeat typed fact。

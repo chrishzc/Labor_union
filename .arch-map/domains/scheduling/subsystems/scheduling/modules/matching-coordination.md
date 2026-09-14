@@ -16,6 +16,7 @@
   - `subsystems/scheduling/matching_coordination_contracts.py`
   - `subsystems/scheduling/matching_notification_contracts.py` — formal matching contact、customer confirmation preview 與 durable notification typed contracts。
   - `subsystems/scheduling/matching_plan_workflow.py`
+  - `subsystems/scheduling/matching_communication_workflow.py` — 正式媒合方案的 LINE 意願、暫停、恢復與取消溝通事件。
   - `subsystems/scheduling/segmented_availability_query.py`
   - `subsystems/scheduling/candidate_contact_pool_workflow.py` — 初步候選加入及聯絡重新檢查預計期間 availability；客戶同意日期調整後的重新聯絡會以 current Orders 日期重驗完整 coverage，在同一交易更新 contact period／fingerprint、留存前後日期事件並排入新卡，但不建立正式服務日期。
   - `subsystems/scheduling/matching_line_cards.py` — 候選資訊與正式媒合的 pure Flex renderer。
@@ -37,6 +38,7 @@
   - `infrastructure/mysql/candidate_contact_pool_line_reply_repository.py` — 以已送出資訊事件和 staff LINE identity 重新驗證回覆後，追加意願事件；原 24 小時內本人可用新事件更正自己的意願，current projection 採每位候選最新回覆，其他候選已願意時仍拒絕。
   - `infrastructure/mysql/matching_holiday_work_agreement_repository.py` — immutable current-plan agreement evidence 與 accepted-date readback。
   - `infrastructure/mysql/matching_notification_repository.py` — current Stage 5 confirmation package 的 plan/履歷/order-information/proposed-weekly preflight projection。
+  - `infrastructure/mysql/matching_recommendation_repository.py` — 候選月嫂與占用日期的 read adapter；LINE 收件人只採 canonical bound staff identity。
 - entrypoints:
   - `api/routes/caregiver_segment_availability.py` — 候選詢問 `/candidate-contact-pool/availability/search` 與正式分段查詢分離；詢問只接受單人查詢。
   - `api/routes/line_candidate_contact.py`、`api/schemas/line_candidate_contact.py` — recipient-bound candidate/customer query/submit contract 與 LIFF page。

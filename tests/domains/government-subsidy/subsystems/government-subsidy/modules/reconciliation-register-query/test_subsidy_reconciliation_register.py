@@ -83,6 +83,7 @@ def test_quarterly_register_includes_established_orders_without_claim_batch():
     assert "JOIN clients c ON c.id = o.client_id AND c.case_no = o.case_no" in connection.cursor_instance.executed[0][0]
     assert "subsidy_claim_batches" not in connection.cursor_instance.executed[0][0]
     assert "LEFT JOIN case_payroll_rate_policy_snapshots" in connection.cursor_instance.executed[0][0]
+    assert "LEFT JOIN historical_service_day_projections" in connection.cursor_instance.executed[0][0]
     assert "o.status IN (%s, %s, %s, %s, %s, %s, %s)" in connection.cursor_instance.executed[0][0]
     assert "COALESCE(o.actual_end_date, o.end_date)" in connection.cursor_instance.executed[0][0]
     assert connection.cursor_instance.executed[0][1] == (
@@ -236,6 +237,48 @@ def test_register_uses_case_payroll_snapshot_as_subsidy_unit_price():
     })
 
     assert row["補助時數"] == Decimal("40")
+    assert row["單價"] == Decimal("450")
+    assert row["補助款金額"] == Decimal("18000")
+
+
+def test_historical_register_uses_confirmed_actual_service_volume():
+    row = register._to_register_row(_order_row(
+        order_status="歷史訂單－服務完成",
+        service_days=30,
+        service_hours_per_day=Decimal("4"),
+        historical_actual_service_days=4,
+        historical_actual_service_hours=16,
+    ))
+
+    assert row["補助時數"] == Decimal("16")
+    assert row["補助天數"] == Decimal("4.00")
+    assert row["服務天數"] == 4
+    assert row["補助款金額"] == Decimal("4800")
+
+
+def test_historical_register_defaults_unconfirmed_volume_to_identity_cap():
+    general = register._to_register_row(_order_row(
+        order_status="歷史訂單－服務完成",
+        service_days=4,
+        service_hours_per_day=Decimal("4"),
+    ))
+    subsidized = register._to_register_row(_order_row(
+        order_status="歷史訂單－服務完成",
+        identity_status="補助市民",
+        service_days=4,
+        service_hours_per_day=Decimal("4"),
+    ))
+
+    assert general["補助時數"] == Decimal("40")
+    assert subsidized["補助時數"] == Decimal("120")
+
+
+def test_twin_register_uses_450_even_when_legacy_case_snapshot_is_300():
+    row = register._to_register_row(_order_row(
+        survey_details={"特殊計費:胎數": "雙胞胎"},
+        payroll_hourly_rate_ntd=Decimal("300"),
+    ))
+
     assert row["單價"] == Decimal("450")
     assert row["補助款金額"] == Decimal("18000")
 

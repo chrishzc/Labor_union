@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from infrastructure.mysql.runtime_monitor_repository import MySqlRuntimeMonitorRepository
 from subsystems.line.runtime_contracts import LineRuntimeMode, LineWorkerHeartbeat
 from subsystems.line.runtime_monitoring_application import _line_runtime_observations
 from subsystems.line.worker_runtime import CanonicalLineWorkerRuntime
@@ -85,3 +86,36 @@ def test_runtime_monitor_uses_shared_stale_window_and_reports_cycle_failure(
     assert failure.status.value == "critical"
     assert failure.message == "LINE Worker 存活，但最近工作週期失敗"
     assert failure.details == {"age_seconds": 1.0, "last_error_code": "RuntimeError"}
+
+
+def test_runtime_alert_projection_uses_default_preferences_when_optional_table_is_absent() -> None:
+    class Cursor:
+        def __init__(self) -> None:
+            self.executed = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, sql, params) -> None:
+            self.executed.append((sql, params))
+            if len(self.executed) == 1:
+                raise RuntimeError(
+                    1146,
+                    "Table 'union_db.line_alert_target_preferences' doesn't exist",
+                )
+
+        def fetchall(self):
+            return ({"id": 7, "preferences_json": None},)
+
+    cursor = Cursor()
+    connection = SimpleNamespace(cursor=lambda: cursor)
+
+    targets = MySqlRuntimeMonitorRepository(connection).pending_alert_targets(41)
+
+    assert targets == ({"id": 7, "preferences_json": None},)
+    assert len(cursor.executed) == 2
+    assert "line_alert_target_preferences" in cursor.executed[0][0]
+    assert "NULL AS preferences_json" in cursor.executed[1][0]

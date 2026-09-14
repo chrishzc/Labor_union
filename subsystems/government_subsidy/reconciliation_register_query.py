@@ -14,6 +14,8 @@ from typing import Any, Callable
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 
+from domains.case_import.order_information import project_order_information
+
 QUARTERLY_HEADERS = (
     "\u5e8f\u865f", "\u5e02\u5e9c\u8a02\u55ae\u865f\u78bc", "\u88dc\u52a9\u8cc7\u683c", "\u670d\u52d9\u958b\u59cb", "\u670d\u52d9\u7d50\u675f",
     "\u88dc\u52a9\u6642\u6578", "\u88dc\u52a9\u5929\u6578", "\u670d\u52d9\u5929\u6578", "\u88dc\u52a9\u6b3e\u91d1\u984d", "\u55ae\u50f9",
@@ -42,6 +44,9 @@ COMPLETED_ORDER_STATUSES = (
     "訂單完成",
     "歷史訂單－服務完成",
     "歷史訂單－帳務完成",
+)
+HISTORICAL_ORDER_STATUSES = frozenset(
+    status for status in ESTABLISHED_ORDER_STATUSES if status.startswith("歷史訂單－")
 )
 RECONCILIATION_QUARTER_LABELS = ("第一季", "第二季", "第三季", "第四季")
 
@@ -99,17 +104,21 @@ def _fetch_completed_cases(connection_factory: Callable[[], Any]) -> list[dict]:
         with conn.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT o.case_no, c.identity_status, o.actual_start_date,
+                SELECT o.case_no, o.status AS order_status, c.identity_status, o.actual_start_date,
                        o.actual_end_date, o.service_days, o.service_hours_per_day,
                        c.name AS employer_name, c.address AS employer_address,
                        s.name AS staff_name, br.survey_details,
-                       payroll_policy.hourly_rate_ntd AS payroll_hourly_rate_ntd
+                       payroll_policy.hourly_rate_ntd AS payroll_hourly_rate_ntd,
+                       historical_service.total_actual_service_days AS historical_actual_service_days,
+                       historical_service.total_actual_service_hours AS historical_actual_service_hours
                 FROM orders o
                 JOIN clients c ON c.id = o.client_id
                 LEFT JOIN staff s ON s.id = o.staff_id
                 LEFT JOIN beclass_records br ON (br.query_no = o.case_no OR br.bound_case_no = o.case_no)
                 LEFT JOIN case_payroll_rate_policy_snapshots payroll_policy
                     ON payroll_policy.case_no = o.case_no
+                LEFT JOIN historical_service_day_projections historical_service
+                    ON historical_service.case_no = o.case_no
                 WHERE o.actual_end_date IS NOT NULL
                   AND c.identity_status IN (%s, %s)
                 ORDER BY o.case_no
@@ -161,7 +170,9 @@ def _fetch_established_cases(
                            ''
                        ) AS staff_name,
                        br.survey_details,
-                       payroll_policy.hourly_rate_ntd AS payroll_hourly_rate_ntd
+                       payroll_policy.hourly_rate_ntd AS payroll_hourly_rate_ntd,
+                       historical_service.total_actual_service_days AS historical_actual_service_days,
+                       historical_service.total_actual_service_hours AS historical_actual_service_hours
                 FROM orders o
                 JOIN clients c ON c.id = o.client_id AND c.case_no = o.case_no
                 LEFT JOIN staff s ON s.id = o.staff_id
@@ -169,6 +180,8 @@ def _fetch_established_cases(
                     ON (br.query_no = o.case_no OR br.bound_case_no = o.case_no)
                 LEFT JOIN case_payroll_rate_policy_snapshots payroll_policy
                     ON payroll_policy.case_no = o.case_no
+                LEFT JOIN historical_service_day_projections historical_service
+                    ON historical_service.case_no = o.case_no
                 WHERE o.status IN ({status_placeholders})
                   AND c.identity_status IN (%s, %s)
                 {period_clause}
@@ -304,15 +317,47 @@ def _subsidy_terms(
     total_service_hours: Decimal,
     payroll_hourly_rate_ntd: object | None = None,
 ) -> tuple[Decimal, Decimal]:
-    if eligibility == GENERAL_CITIZEN:
-        subsidy_hours = min(Decimal("40"), total_service_hours)
-    elif eligibility == SUBSIDIZED_CITIZEN:
-        subsidy_hours = min(Decimal("120"), total_service_hours)
-    else:
+    hour_limit = _subsidy_hour_limit(eligibility)
+    if hour_limit <= 0:
         return Decimal("0"), Decimal("0")
+    subsidy_hours = min(hour_limit, total_service_hours)
     if payroll_hourly_rate_ntd is None:
         raise ValueError("government_subsidy_payroll_rate_snapshot_missing")
     return subsidy_hours, Decimal(str(payroll_hourly_rate_ntd))
+
+
+def _subsidy_hour_limit(eligibility: object) -> Decimal:
+    if eligibility == GENERAL_CITIZEN:
+        return Decimal("40")
+    if eligibility == SUBSIDIZED_CITIZEN:
+        return Decimal("120")
+    return Decimal("0")
+
+
+def _service_volume(
+    source: dict,
+    daily_hours: Decimal,
+    contracted_service_days: Decimal,
+) -> tuple[Decimal, object]:
+    if source.get("order_status") not in HISTORICAL_ORDER_STATUSES:
+        return contracted_service_days * daily_hours, source.get("service_days") or 0
+    actual_hours = source.get("historical_actual_service_hours")
+    if actual_hours is None:
+        return _subsidy_hour_limit(source.get("identity_status")), source.get("service_days") or 0
+    return (
+        Decimal(str(actual_hours)),
+        source.get("historical_actual_service_days") or 0,
+    )
+
+
+def _effective_payroll_rate(source: dict) -> object | None:
+    order_information = project_order_information(source.get("survey_details"))
+    if (
+        order_information.issues.get("multi_birth_count") is None
+        and order_information.values.get("multi_birth_count") == "雙胞胎"
+    ):
+        return Decimal("450")
+    return source.get("payroll_hourly_rate_ntd")
 
 
 def _to_register_row(source: dict) -> dict | None:
@@ -322,10 +367,15 @@ def _to_register_row(source: dict) -> dict | None:
     service_days = Decimal(str(source.get("service_days") or 0))
     if not actual_start or not actual_end or daily_hours <= 0 or service_days <= 0:
         return None
+    total_service_hours, displayed_service_days = _service_volume(
+        source,
+        daily_hours,
+        service_days,
+    )
     subsidy_hours, unit_price = _subsidy_terms(
         source.get("identity_status"),
-        service_days * daily_hours,
-        source.get("payroll_hourly_rate_ntd"),
+        total_service_hours,
+        _effective_payroll_rate(source),
     )
     if (
         subsidy_hours <= 0
@@ -342,7 +392,7 @@ def _to_register_row(source: dict) -> dict | None:
         "補助天數": (subsidy_hours / daily_hours).quantize(
             Decimal("0.01"), rounding=ROUND_HALF_UP
         ),
-        "服務天數": source.get("service_days") or 0,
+        "服務天數": displayed_service_days,
         "補助款金額": subsidy_hours * unit_price,
         "單價": unit_price,
         "雇主": source.get("employer_name") or "",
