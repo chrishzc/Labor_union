@@ -22,6 +22,7 @@ from domains.bootstrap.case_architecture import (
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.validation import (
     require_canonical_text,
+    require_positive_half_hour,
     require_positive_integer,
 )
 
@@ -104,7 +105,7 @@ class ClientImportAttribute:
 class ImportedOrderRootFacts:
     case_no: str
     service_days: int
-    service_hours_per_day: int
+    service_hours_per_day: float | int
     planned_start_date: date
     planned_end_date: date
     service_start_time: time
@@ -115,7 +116,7 @@ class ImportedOrderRootFacts:
     def __post_init__(self) -> None:
         _validate_case_no(self.case_no)
         require_positive_integer(self.service_days, "service days")
-        require_positive_integer(
+        require_positive_half_hour(
             self.service_hours_per_day,
             "service hours per day",
         )

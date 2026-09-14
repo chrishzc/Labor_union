@@ -135,7 +135,7 @@ def test_published_draft_query_returns_the_canonical_readonly_reason(monkeypatch
         "menu_definition_id": "customer_menu",
         "configuration_revision": 8,
         "state": "published",
-        "readonly_reason": "此版本已正式發布，為保留發布快照，目前只能查看；請建立新的草稿版本再調整。",
+        "readonly_reason": "此版本已正式發布；可由目前內容建立下一個草稿版本，既有發布快照不會被覆寫。",
     }]
 
 

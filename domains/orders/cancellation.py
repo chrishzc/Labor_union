@@ -14,6 +14,7 @@ from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.validation import (
     require_canonical_text,
     require_nonnegative_integer,
+    require_positive_half_hour,
     require_positive_integer,
 )
 
@@ -51,7 +52,7 @@ class CancellationOrderFacts:
     case_no: str
     order_version: int
     contracted_service_days: int
-    service_hours_per_day: int
+    service_hours_per_day: float | int
     actual_start_date: date | None
     service_started: bool
     service_data_locked: bool
@@ -64,7 +65,7 @@ class CancellationOrderFacts:
         require_positive_integer(
             self.contracted_service_days, "contracted service days"
         )
-        require_positive_integer(
+        require_positive_half_hour(
             self.service_hours_per_day, "service hours per day"
         )
         _require_optional_date(self.actual_start_date, "actual start date")
@@ -141,7 +142,7 @@ class CancellationCandidate:
     actual_end_date: date | None
     confirmed_service_days: tuple[ConfirmedServiceDay, ...]
     official_service_day_count: int
-    official_service_hours: int
+    official_service_hours: float | int
     fingerprint: PreviewFingerprint
 
 

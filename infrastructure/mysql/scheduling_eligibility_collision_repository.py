@@ -82,7 +82,7 @@ class MySqlSchedulingEligibilityCollisionRepository:
             start_date=_as_date(row.get("start_date")),
             end_date=_as_date(row.get("end_date")),
             service_days=_as_optional_int(row.get("service_days")),
-            service_hours_per_day=_as_optional_int(row.get("service_hours_per_day")),
+            service_hours_per_day=_as_optional_half_hour(row.get("service_hours_per_day")),
             requires_cooking=_as_optional_bool(row.get("requires_cooking")),
             location_text=_as_optional_text(row.get("location_text")),
             scheduling_version=_as_optional_int(row.get("scheduling_version")),
@@ -364,6 +364,16 @@ def _as_optional_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _as_optional_half_hour(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    return result if result > 0 and (result * 2).is_integer() else None
 
 
 def _as_optional_bool(value: Any) -> bool | None:

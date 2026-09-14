@@ -195,7 +195,7 @@ const assignmentPlanSegmentFields = {
   assigned_start_date: LeaveSubstitutionIsoDateSchema,
   assigned_end_date: LeaveSubstitutionIsoDateSchema,
   official_service_dates: z.array(LeaveSubstitutionIsoDateSchema),
-  actual_hours: z.number().int().nonnegative().nullable().optional(),
+  actual_hours: z.number().nonnegative().multipleOf(0.5).nullable().optional(),
   lineage_source_assignment_ids: z.array(z.number().int().positive()),
 };
 

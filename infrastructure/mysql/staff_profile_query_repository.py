@@ -29,7 +29,7 @@ class MySqlStaffProfileQueryRepository:
     def fetch_bank_accounts(self, staff_id: int) -> tuple[Mapping[str, object], ...]:
         with self._connection.cursor() as cursor:
             cursor.execute(
-                "SELECT id,bank_code,branch_code,RIGHT(account_no,4) AS account_last4,is_primary,is_active "
+                "SELECT id,bank_code,branch_code,account_no,RIGHT(account_no,4) AS account_last4,is_primary,is_active "
                 "FROM staff_bank_accounts WHERE staff_id=%s "
                 "ORDER BY is_active DESC,is_primary DESC,id ASC LIMIT 21",
                 (staff_id,),

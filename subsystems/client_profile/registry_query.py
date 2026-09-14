@@ -55,10 +55,18 @@ class ClientRegistryBeClass:
 
 
 @dataclass(frozen=True, slots=True)
+class ClientRegistryOrderInformation:
+    status: str
+    values: Mapping[str, object] | None
+    field_issues: Mapping[str, str]
+
+
+@dataclass(frozen=True, slots=True)
 class ClientRegistryDetail:
     case_no: str
     client: ClientRegistryClientProfile
     beclass: ClientRegistryBeClass
+    order_information: ClientRegistryOrderInformation
 
 
 class ClientRegistryRepository(Protocol):
@@ -135,6 +143,12 @@ class ClientRegistryQueryApplication:
         beclass_values = row.get("beclass_values")
         if beclass_status == "ready" and not isinstance(beclass_values, Mapping):
             raise ClientRegistryContractError("client_registry_beclass_invalid")
+        order_information_values = row.get("order_information_values")
+        order_information_issues = row.get("order_information_issues")
+        if beclass_status == "ready" and not isinstance(order_information_values, Mapping):
+            raise ClientRegistryContractError("client_registry_order_information_invalid")
+        if not isinstance(order_information_issues, Mapping):
+            raise ClientRegistryContractError("client_registry_order_information_issues_invalid")
         return ClientRegistryDetail(
             identity,
             ClientRegistryClientProfile(
@@ -148,6 +162,12 @@ class ClientRegistryQueryApplication:
                 int(row.get("beclass_version") or 0) if beclass_status == "ready" else None,
                 ({str(key): _nullable_text(value) for key, value in beclass_values.items()}
                  if isinstance(beclass_values, Mapping) else None),
+            ),
+            ClientRegistryOrderInformation(
+                beclass_status,
+                ({str(key): value for key, value in order_information_values.items()}
+                 if isinstance(order_information_values, Mapping) else None),
+                {str(key): str(value) for key, value in order_information_issues.items()},
             ),
         )
 

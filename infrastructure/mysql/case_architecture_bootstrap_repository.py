@@ -313,7 +313,7 @@ def _order_facts(row):
         order_version=int(row["lifecycle_version"]),
         planned_start_date=row["start_date"],
         service_days=int(row["service_days"]),
-        service_hours_per_day=int(row["service_hours_per_day"]),
+        service_hours_per_day=float(row["service_hours_per_day"]),
         source_identity_status=str(row["identity_status"]),
         multi_birth_count=_multi_birth_count(row.get("survey_details")),
     )

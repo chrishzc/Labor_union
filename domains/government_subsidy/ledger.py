@@ -11,6 +11,7 @@ from shared_kernel.money import MoneyNTD
 from shared_kernel.validation import (
     require_canonical_text,
     require_nonnegative_integer,
+    require_positive_half_hour,
     require_positive_integer,
 )
 
@@ -96,7 +97,7 @@ class OfficialAssignmentServiceFacts:
     case_no: str
     staff_id: int
     official_service_day_count: int
-    service_hours_per_day: int
+    service_hours_per_day: float | int
     effective: bool
 
     def __post_init__(self) -> None:
@@ -111,7 +112,7 @@ class OfficialAssignmentServiceFacts:
             self.official_service_day_count,
             "official service day count",
         )
-        require_positive_integer(
+        require_positive_half_hour(
             self.service_hours_per_day,
             "service hours per day",
         )
@@ -119,7 +120,7 @@ class OfficialAssignmentServiceFacts:
             raise TypeError("assignment effective marker must be bool")
 
     @property
-    def official_service_hours(self) -> int:
+    def official_service_hours(self) -> float | int:
         return self.official_service_day_count * self.service_hours_per_day
 
 
@@ -130,7 +131,7 @@ class ClaimItemSnapshot:
     assignment_id: int
     case_no: str
     staff_id: int
-    claimed_hours: int
+    claimed_hours: float | int
     unit_price_ntd: MoneyNTD
     requested_amount_ntd: MoneyNTD
     approved_amount_ntd: MoneyNTD
@@ -369,7 +370,9 @@ def build_claim_item_snapshot(
     net_allocated_ntd: MoneyNTD | None = None,
 ) -> ClaimItemSnapshot:
     _require_effective_assignment(service_facts)
-    requested = unit_price_ntd * service_facts.official_service_hours
+    requested = MoneyNTD(_whole_ntd(
+        unit_price_ntd.amount * service_facts.official_service_hours
+    ))
     return ClaimItemSnapshot(
         item_id,
         batch_id,
@@ -754,7 +757,7 @@ def _validate_claim_item_identities(item):
         _CASE_NUMBER_MAXIMUM_LENGTH,
     )
     require_positive_integer(item.staff_id, "staff id")
-    require_positive_integer(item.claimed_hours, "claimed hours")
+    require_positive_half_hour(item.claimed_hours, "claimed hours")
 
 
 def _validate_claim_item_money(item):
@@ -766,13 +769,19 @@ def _validate_claim_item_money(item):
     )
     if any(not isinstance(value, MoneyNTD) for value in money_values):
         raise TypeError("claim item money must be MoneyNTD")
-    expected = item.unit_price_ntd.amount * item.claimed_hours
+    expected = _whole_ntd(item.unit_price_ntd.amount * item.claimed_hours)
     if item.requested_amount_ntd.amount != expected:
         _raise(GovernmentSubsidyErrorCode.CLAIM_FACTS_INVALID)
     if not 0 <= item.approved_amount_ntd.amount <= expected:
         _raise(GovernmentSubsidyErrorCode.CLAIM_FACTS_INVALID)
     if not 0 <= item.net_allocated_ntd.amount <= item.approved_amount_ntd.amount:
         _raise(GovernmentSubsidyErrorCode.CLAIM_FACTS_INVALID)
+
+
+def _whole_ntd(value: float | int) -> int:
+    if isinstance(value, float) and not value.is_integer():
+        raise ValueError("half-hour subsidy amount must resolve to whole NTD")
+    return int(value)
 
 
 def _validate_batch_items(batch):

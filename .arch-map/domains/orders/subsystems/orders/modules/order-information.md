@@ -16,6 +16,8 @@
 - `api/routes/orders.py`
 - `api/dependencies/order_information.py`
 - `api/schemas/order_information.py`
+- `api/schemas/order_detail.py`
+- `subsystems/orders/detail_query.py`
 - `ui_react/src/api/orders/order_information_client.ts`
 - `ui_react/src/components/OrderInformationSheets.tsx`
 - `ui_react/src/pages/OrderWorkbenchV2Page.tsx`

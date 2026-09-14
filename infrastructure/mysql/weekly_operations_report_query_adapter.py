@@ -41,7 +41,7 @@ class MySqlWeeklyOperationsReportQueryAdapter:
                 district=_hsinchu_district_or_address(row.get("city"), row.get("address")),
                 order_status=_optional_text(row.get("order_status")),
                 service_days=_optional_int(row.get("service_days")),
-                service_hours_per_day=_optional_int(row.get("service_hours_per_day")),
+                service_hours_per_day=_optional_half_hour(row.get("service_hours_per_day")),
                 planned_start_date=_optional_date(row.get("planned_start_date")),
                 planned_end_date=_optional_date(row.get("planned_end_date")),
                 seq_num=_optional_int(row.get("seq_num")),
@@ -61,7 +61,7 @@ class MySqlWeeklyOperationsReportQueryAdapter:
                 staff_name=_optional_text(row.get("staff_name")),
                 service_start_date=_optional_date(row.get("service_start_date")),
                 service_end_date=_optional_date(row.get("service_end_date")),
-                service_hours_per_day=_optional_int(row.get("service_hours_per_day")),
+                service_hours_per_day=_optional_half_hour(row.get("service_hours_per_day")),
                 weekly_work_days=int(row["weekly_work_days"]),
                 week_start_date=_date(row["week_start_date"]),
                 week_end_date=_date(row["week_end_date"]),
@@ -138,6 +138,15 @@ def _optional_text(value: object) -> str | None:
 
 def _optional_int(value: object) -> int | None:
     return None if value is None else int(value)
+
+
+def _optional_half_hour(value: object) -> float | None:
+    if value is None:
+        return None
+    result = float(value)
+    if result < 0 or not (result * 2).is_integer():
+        raise ValueError("service hours per day must use half-hour precision")
+    return result
 
 
 def _date(value: object) -> date:

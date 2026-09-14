@@ -33,7 +33,7 @@ class HistoricalPrecisionRestartFacts:
     planned_start_date: date
     actual_start_date: date | None
     contracted_service_days: int
-    service_hours_per_day: int
+    service_hours_per_day: float | int
     service_data_locked: bool
     assignments: tuple[HistoricalPrecisionRestartAssignmentFacts, ...]
     current_assignment_ids: tuple[int, ...] = ()

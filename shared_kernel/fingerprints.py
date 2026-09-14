@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
@@ -39,6 +40,8 @@ def _normalize_payload(value: Any, path: str) -> Any:
         return value
     if isinstance(value, int) and not isinstance(value, bool):
         return value
+    if isinstance(value, float) and math.isfinite(value) and (value * 2).is_integer():
+        return int(value) if value.is_integer() else value
     if isinstance(value, Mapping):
         return _normalize_mapping(value, path)
     if isinstance(value, (list, tuple)):

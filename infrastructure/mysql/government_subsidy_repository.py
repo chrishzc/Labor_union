@@ -939,7 +939,7 @@ def _planning_source(row):
             str(row["case_no"]),
             int(row["staff_id"]),
             int(row["official_service_day_count"]),
-            int(row["service_hours_per_day"]),
+            float(row["service_hours_per_day"]),
             bool(row["assignment_effective"]),
         ),
         MoneyNTD(unit_price),

@@ -24,9 +24,11 @@ _LIFF_TARGETS = frozenset(
     {
         "?entry=gateway",
         "?entry=registration",
+        "?target=ai_assistant",
         "?target=anomalies_center",
         "?target=customer_service",
         "?target=dashboard",
+        "?target=faq",
         "?target=gateway",
         "?target=order_update",
         "?target=order_tracking",
@@ -45,11 +47,20 @@ _LIFF_TARGETS_BY_AUDIENCE = {
         {
             "?entry=gateway",
             "?entry=registration",
+            "?target=ai_assistant",
+            "?target=faq",
             "?target=gateway",
             "?target=staff_verification",
         }
     ),
-    "customer": frozenset({"?target=order_update", "?target=profile_update"}),
+    "customer": frozenset(
+        {
+            "?target=ai_assistant",
+            "?target=faq",
+            "?target=order_update",
+            "?target=profile_update",
+        }
+    ),
     "staff": frozenset(
         {
             "?target=staff_baby_log",

@@ -57,7 +57,7 @@ class ServiceTimeTermsInput(BaseModel):
 class OrderTermsInput(BaseModel):
     planned_start_date: date
     service_days: int = Field(gt=0)
-    service_hours_per_day: int = Field(gt=0)
+    service_hours_per_day: float = Field(gt=0, le=24, multiple_of=0.5)
     requires_cooking: bool
     floor_fee_ntd: int = Field(ge=0)
     service_time: ServiceTimeTermsInput

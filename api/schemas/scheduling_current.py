@@ -27,7 +27,7 @@ class SchedulingCurrentAssignmentView(BaseModel):
     first_service_at: datetime
     completion_at: datetime
     official_service_day_count: int = Field(gt=0)
-    actual_hours: int = Field(gt=0)
+    actual_hours: float = Field(gt=0, multiple_of=0.5)
 
 
 class SchedulingCurrentDayEntryView(BaseModel):

@@ -50,7 +50,7 @@ class OrderDetail:
     start_date: date | None
     end_date: date | None
     service_days: int
-    service_hours_per_day: int
+    service_hours_per_day: float | int
     deposit_service_days: int | None
     floor_fee: int
     custom_rest_dates: str | None
@@ -80,7 +80,7 @@ def _detail(row: object) -> OrderDetail:
         actual_start_date=_optional_date(row, "actual_start_date"), actual_end_date=_optional_date(row, "actual_end_date"),
         deposit_date=_optional_date(row, "deposit_date"), start_date=_optional_date(row, "start_date"),
         end_date=_optional_date(row, "end_date"), service_days=_nonnegative_integer(row, "service_days"),
-        service_hours_per_day=_nonnegative_integer(row, "service_hours_per_day"),
+        service_hours_per_day=_nonnegative_half_hour(row, "service_hours_per_day"),
         deposit_service_days=_optional_nonnegative_integer(row, "deposit_service_days"),
         floor_fee=_nonnegative_integer(row, "floor_fee"), custom_rest_dates=_optional_text(row, "custom_rest_dates", 10000),
     )
@@ -135,6 +135,18 @@ def _nonnegative_integer(row: Mapping[str, object], field: str) -> int:
     if value < 0 or isinstance(value, Decimal) and value != value.to_integral_value():
         raise OrderDetailContractError(f"{field} must be a nonnegative integer")
     return int(value)
+
+
+def _nonnegative_half_hour(row: Mapping[str, object], field: str) -> float | int:
+    value = row[field]
+    if isinstance(value, bool) or not isinstance(value, (int, float, Decimal)):
+        raise OrderDetailContractError(f"{field} must use 0.5-hour precision")
+    decimal_value = Decimal(str(value))
+    if not decimal_value.is_finite() or decimal_value < 0 or decimal_value > 24 or decimal_value * 2 != (decimal_value * 2).to_integral_value():
+        raise OrderDetailContractError(f"{field} must use 0.5-hour precision")
+    if decimal_value == decimal_value.to_integral_value():
+        return int(decimal_value)
+    return float(decimal_value)
 
 
 __all__ = [

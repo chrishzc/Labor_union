@@ -654,7 +654,7 @@ def _proposed_weekly_rows(segments):
             segment_id=int(item["segment_id"]), staff_id=int(item["staff_id"]),
             start_date=_date(item["assigned_start_date"]), end_date=_date(item["assigned_end_date"]),
             weekly_rest_days=frozenset(_json_ints(item.get("weekly_rest_days"))),
-            service_hours_per_day=int(item["service_hours_per_day"]),
+            service_hours_per_day=float(item["service_hours_per_day"]),
             special_rest_dates=special_dates,
         ) for item in segments
     )
@@ -667,7 +667,7 @@ def _proposed_weekly_rows(segments):
         "staff_name": str(source[row.segment_id]["staff_name"]),
         "week_start_date": row.week_start_date.isoformat(),
         "week_end_date": row.week_end_date.isoformat(),
-        "service_hours_per_day": int(source[row.segment_id]["service_hours_per_day"]),
+        "service_hours_per_day": float(source[row.segment_id]["service_hours_per_day"]),
         "weekly_work_days": row.weekly_work_days,
         "weekly_hours": row.weekly_hours,
     } for index, row in enumerate(projection, start=1))

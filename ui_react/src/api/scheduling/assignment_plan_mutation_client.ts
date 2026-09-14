@@ -19,7 +19,7 @@ const PreviewAssignmentSchema = SegmentInputSchema.extend({
   assignment_id: z.number().int().positive().nullable(),
   candidate_key: z.string().nullable(),
   sequence: z.number().int().positive(),
-  actual_hours: z.number().int().nonnegative().nullable(),
+  actual_hours: z.number().nonnegative().multipleOf(0.5).nullable(),
   lineage_source_assignment_ids: z.array(z.number().int().positive()),
 });
 const PreviewSchema = z.object({

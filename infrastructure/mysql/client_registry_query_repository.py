@@ -6,6 +6,8 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
+from domains.case_import.order_information import project_order_information
+
 
 _CLIENT_FIELDS = (
     "name", "gender", "phone", "city", "address", "residence_type",
@@ -92,7 +94,7 @@ class MySqlClientRegistryQueryRepository:
             if client is None:
                 return None
             cursor.execute(
-                "SELECT id AS beclass_record_id," + ",".join(_BECLASS_FIELDS)
+                "SELECT id AS beclass_record_id,survey_details," + ",".join(_BECLASS_FIELDS)
                 + " FROM beclass_records WHERE bound_case_no=%s ORDER BY id LIMIT 2",
                 (case_no,),
             )
@@ -117,8 +119,24 @@ class MySqlClientRegistryQueryRepository:
             beclass_status = "ready"
             source = beclass_rows[0]
             beclass_record_id = int(source["beclass_record_id"])
+            effective_values = _decode((state or {}).get("effective_values_json"))
             beclass_values = {field: source.get(field) for field in _BECLASS_FIELDS}
-            beclass_values.update(_decode((state or {}).get("effective_values_json")))
+            beclass_values.update({
+                field: effective_values[field]
+                for field in _BECLASS_FIELDS
+                if field in effective_values
+            })
+        if beclass_status == "ready":
+            order_information = project_order_information(beclass_rows[0].get("survey_details"))
+            order_information_values = dict(order_information.values)
+            order_information_issues = dict(order_information.issues)
+            if "multi_birth_count" in effective_values:
+                order_information_values["multi_birth_count"] = effective_values["multi_birth_count"]
+                order_information_issues.pop("multi_birth_count", None)
+            beclass_values["multi_birth_count"] = order_information_values.get("multi_birth_count")
+        else:
+            order_information_values = None
+            order_information_issues = {}
         return {
             "case_no": str(client["case_no"]),
             "client_id": int(client["client_id"]),
@@ -128,6 +146,8 @@ class MySqlClientRegistryQueryRepository:
             "beclass_record_id": beclass_record_id,
             "beclass_version": int((state or {}).get("aggregate_version") or 0),
             "beclass_values": beclass_values,
+            "order_information_values": order_information_values,
+            "order_information_issues": order_information_issues,
         }
 
 

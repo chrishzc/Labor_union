@@ -104,7 +104,7 @@ class AssignmentCandidate:
     assigned_start_date: date
     assigned_end_date: date
     service_dates: tuple[date, ...]
-    actual_hours: int
+    actual_hours: float | int
     lineage_source_assignment_ids: tuple[int, ...] = ()
     double_pay_dates: tuple[date, ...] = ()
 

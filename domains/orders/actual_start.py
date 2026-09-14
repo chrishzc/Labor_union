@@ -16,6 +16,7 @@ from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.validation import (
     require_canonical_text,
     require_nonnegative_integer,
+    require_positive_half_hour,
     require_positive_integer,
 )
 
@@ -185,7 +186,7 @@ class ActualStartAssignmentCandidate:
     assigned_start_date: date
     assigned_end_date: date
     service_dates: tuple[date, ...]
-    actual_hours: int
+    actual_hours: float | int
 
 
 @dataclass(frozen=True, slots=True)
@@ -230,11 +231,11 @@ def build_actual_start_candidate(
     order: ActualStartOrderFacts,
     scheduling: ActualStartSchedulingFacts,
     new_actual_start_date: date,
-    service_hours_per_day: int,
+    service_hours_per_day: float | int,
     recalculated_service_dates: tuple[date, ...] | None = None,
 ) -> ActualStartCandidate:
     _validate_candidate_roots(order, scheduling, new_actual_start_date)
-    require_positive_integer(service_hours_per_day, "service hours per day")
+    require_positive_half_hour(service_hours_per_day, "service hours per day")
     shift_days = (new_actual_start_date - scheduling.root_date).days
     assignments = (
         _recalculate_assignments(
@@ -325,7 +326,7 @@ def to_scheduling_generation_candidate(
 def _shift_assignments(
     scheduling: ActualStartSchedulingFacts,
     shift_days: int,
-    service_hours_per_day: int,
+    service_hours_per_day: float | int,
 ) -> tuple[ActualStartAssignmentCandidate, ...]:
     return tuple(
         _shift_assignment(assignment, shift_days, service_hours_per_day)
@@ -424,7 +425,7 @@ def _validate_assignment_identities(
 def _shift_assignment(
     assignment: ActualStartAssignmentFacts,
     shift_days: int,
-    service_hours_per_day: int,
+    service_hours_per_day: float | int,
 ) -> ActualStartAssignmentCandidate:
     shift = timedelta(days=shift_days)
     service_dates = tuple(
@@ -476,7 +477,7 @@ def calculate_service_dates(
 def _recalculate_assignments(
     scheduling: ActualStartSchedulingFacts,
     service_dates: tuple[date, ...],
-    service_hours_per_day: int,
+    service_hours_per_day: float | int,
 ) -> tuple[ActualStartAssignmentCandidate, ...]:
     assignments = _ordered_assignments(scheduling)
     if service_dates != tuple(sorted(set(service_dates))) or not service_dates:

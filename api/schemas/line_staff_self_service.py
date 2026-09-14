@@ -32,7 +32,7 @@ class StaffOrderView(BaseModel):
     start_date: date | None = None
     end_date: date | None = None
     service_days: int | None = None
-    service_hours_per_day: int | None = None
+    service_hours_per_day: float | None = Field(default=None, gt=0, le=24, multiple_of=0.5)
     due_month: str | None = None
     service_start_date: str | None = None
     service_time: str | None = None

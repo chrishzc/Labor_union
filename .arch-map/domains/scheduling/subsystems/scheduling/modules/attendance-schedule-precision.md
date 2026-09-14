@@ -11,6 +11,8 @@
 - primary:
   - `subsystems/scheduling/attendance_schedule_query.py`
   - `infrastructure/mysql/mysql_adapter.py`
+  - `subsystems/scheduling/eligibility_collision_query.py`
+  - `infrastructure/mysql/scheduling_eligibility_collision_repository.py`
 - entrypoints:
   - `api/schemas/orders.py`
   - `ui_react/src/api/scheduling/schedule_precision_client.ts`

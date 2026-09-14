@@ -647,9 +647,9 @@ def get_order_details() -> list[dict]:
 
                 r['custom_leave_dates'] = r.get('custom_leave_dates') or ""
                 r['service_mode'] = r.get('service_mode') or "休周日"
-                r['service_hours_per_day'] = safe_int(r.get('service_hours_per_day', 9))
+                r['service_hours_per_day'] = safe_float(r.get('service_hours_per_day', 8))
                 days = safe_int(r.get('service_days', 20))
-                hrs = safe_int(r.get('service_hours_per_day', 9))
+                hrs = safe_float(r.get('service_hours_per_day', 8))
                 r['total_hours'] = r.get('total_hours') or (days * hrs)
                 r['subsidy_hours'] = r.get('subsidy_hours') or (40 if r.get('identity_status') != '一般身分' else 0)
                 r['self_pay_hours'] = max(0, r['total_hours'] - r['subsidy_hours'])

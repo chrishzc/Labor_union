@@ -74,7 +74,7 @@ def load_contract_client_finance_facts(
     return ClientFinanceTermsFacts(
         case_no=case_no,
         account_version=source.account_version,
-        service_hours_per_day=int(order_row["service_hours_per_day"]),
+        service_hours_per_day=float(order_row["service_hours_per_day"]),
         floor_fee=MoneyNTD(_integer_ntd(order_row["floor_fee"])),
         charge_days=charge_days,
         payment_terms=source.payment_terms,
@@ -698,7 +698,7 @@ def _order_facts(row: Mapping[str, Any]) -> OrderAggregateFacts:
     terms = OrderTerms(
         planned_start_date=row["start_date"],
         service_days=int(row["service_days"]),
-        service_hours_per_day=int(row["service_hours_per_day"]),
+        service_hours_per_day=float(row["service_hours_per_day"]),
         floor_fee=MoneyNTD(_integer_ntd(row["floor_fee"])),
         service_time=ServiceTimeTerms(
             _mysql_time(row.get("service_start_time")),

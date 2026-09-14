@@ -8,7 +8,8 @@ export const StaffBankAccountSchema = z.strictObject({
   account_id: z.number().int().positive(),
   bank_code: z.string().max(10).nullable(),
   branch_code: z.string().max(10).nullable(),
-  account_last4: z.string().regex(/^\d{4}$/).nullable(),
+  account_no: z.string().max(50).nullable().optional(),
+  account_last4: z.string().regex(/^\d{4}$/).nullable().optional(),
   is_primary: z.boolean(),
   is_active: z.boolean(),
 });

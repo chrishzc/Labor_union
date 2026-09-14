@@ -68,11 +68,13 @@ from api.routes import (
     line_admin,
     line_configurations,
     line_notification_rules,
+    line_onboarding,
     line_ai_events,
     line_feedback,
     staff_service_day_media,
     staff_service_day_logs,
     line_identity,
+    line_service_help,
     line_staff_self_service,
     line_mobile_admin,
     line_media_assets,
@@ -247,6 +249,7 @@ app.include_router(capability_grants.router)
 app.include_router(line_admin.router)
 app.include_router(line_configurations.router)
 app.include_router(line_notification_rules.router)
+app.include_router(line_onboarding.router)
 app.include_router(line_ai_events.router)
 app.include_router(line_feedback.router)
 app.include_router(staff_service_day_media.router)
@@ -272,6 +275,8 @@ app.include_router(line_order_change.router)
 app.include_router(line_order_change.page_router)
 app.include_router(line_candidate_contact.router)
 app.include_router(line_candidate_contact.page_router)
+app.include_router(line_service_help.public_router)
+app.include_router(line_service_help.page_router)
 
 # Existing administration API routers.
 app.include_router(orders.router)

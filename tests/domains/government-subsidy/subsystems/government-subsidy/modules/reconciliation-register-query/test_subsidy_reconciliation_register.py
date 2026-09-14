@@ -238,6 +238,21 @@ def test_register_uses_case_payroll_snapshot_as_subsidy_unit_price():
 
     assert row["補助時數"] == Decimal("40")
     assert row["單價"] == Decimal("450")
+
+
+def test_register_uses_effective_twin_correction_for_historical_unit_price():
+    row = register._to_register_row({
+        "case_no": "HISTORICAL-TWIN", "identity_status": "一般市民",
+        "actual_start_date": date(2026, 9, 8), "actual_end_date": date(2026, 9, 11),
+        "service_days": 5, "service_hours_per_day": Decimal("8"),
+        "payroll_hourly_rate_ntd": Decimal("300"),
+        "employer_name": "歷史客戶", "employer_address": "", "staff_name": "測試服務員",
+        "survey_details": {},
+        "beclass_effective_values": '{"multi_birth_count":"雙胞胎"}',
+    })
+
+    assert row["補助時數"] == Decimal("40")
+    assert row["單價"] == Decimal("450")
     assert row["補助款金額"] == Decimal("18000")
 
 

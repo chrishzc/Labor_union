@@ -13,6 +13,7 @@
   - `domains/orders/terms.py`
   - `subsystems/orders/actual_start_workflow.py`
   - `infrastructure/mysql/order_actual_start_repository.py`
+  - `api/schemas/order_actual_start.py`
   - `ui_react/src/api/orders/order_actual_start_client.ts`
   - `ui_react/src/components/OrderActualStartPanel.tsx`
   - `ui_react/src/adapters/orders/order_mutation_flow_store.ts` — per-case original command／receipt recovery。

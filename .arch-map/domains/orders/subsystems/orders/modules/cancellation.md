@@ -13,6 +13,7 @@
   - `subsystems/orders/cancellation_workflow.py`
   - `infrastructure/mysql/order_cancellation_read_model.py`
   - `infrastructure/mysql/order_cancellation_repository.py`
+  - `api/schemas/order_cancellation.py`
 - entrypoints:
   - `api/routes/order_cancellation.py`
   - `ui_react/src/api/orders/order_cancellation_client.ts`

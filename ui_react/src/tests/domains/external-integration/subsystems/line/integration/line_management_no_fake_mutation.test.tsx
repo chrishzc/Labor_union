@@ -10,6 +10,7 @@ import { CustomerServiceClientError } from '../../../../../../api/customer_servi
 import type { LineIdentityClient } from '../../../../../../api/line_identity/line_identity_client';
 import type { LineConfigurationQueryClient } from '../../../../../../api/line_configuration/line_configuration_query_client';
 import type { LineRichMenuDraftClient } from '../../../../../../api/line_rich_menu_draft/line_rich_menu_draft_client';
+import type { LineOnboardingClient } from '../../../../../../api/line_onboarding/line_onboarding_client';
 import { LineManagementPage } from '../../../../../../pages/LineManagementPage';
 import { CUSTOMER_SERVICE_DETAIL_FIXTURE, CUSTOMER_SERVICE_PAGE_FIXTURE, CUSTOMER_SERVICE_SUMMARY_FIXTURE } from '../../../../../fixtures/customer_service/customer_service_contract_fixtures';
 import { BINDING_PAGE_FIXTURE, BOUND_IDENTITY_FIXTURE } from '../../../../../fixtures/line_identity/line_identity_contract_fixtures';
@@ -83,12 +84,34 @@ describe('LINE 管理頁禁止假 mutation', () => {
       apply: vi.fn().mockRejectedValue(new Error('not used')),
     };
 
+    const onboardingClient: LineOnboardingClient = {
+      get: vi.fn().mockResolvedValue({
+        template_id: 'customer_onboarding_welcome',
+        content: '歡迎加入工會！請至 {url} 登記。',
+        revision: 1,
+        sample_preview: '歡迎加入工會！請至 https://liff.line.me/123/gateway 登記。',
+        variables: ['url'],
+      }),
+      preview: vi.fn().mockResolvedValue({
+        sample_preview: '預覽',
+        variables: ['url'],
+      }),
+      update: vi.fn().mockResolvedValue({
+        template_id: 'customer_onboarding_welcome',
+        content: '更新',
+        revision: 2,
+        sample_preview: '更新',
+        variables: ['url'],
+      }),
+    };
+
     render(
       <LineManagementPage
         customerService={customer}
         lineIdentity={identity}
         lineConfiguration={configuration}
         richMenuDraft={richMenuDraft}
+        onboardingClient={onboardingClient}
       />
     );
     await waitFor(() => expect(screen.getByText('#31')).toBeInTheDocument());
@@ -115,8 +138,9 @@ describe('LINE 管理頁禁止假 mutation', () => {
     const ruleWorkspace = (await screen.findByRole('heading', { name: 'LINE 通知與發送' })).closest('section');
     expect(ruleWorkspace).not.toBeNull();
     fireEvent.click(within(ruleWorkspace as HTMLElement).getByRole('button', { name: 'Onboarding 訊息' }));
-    expect(within(ruleWorkspace as HTMLElement).getByText('Webhook 歡迎訊息設定預覽')).toBeInTheDocument();
-    expect(within(ruleWorkspace as HTMLElement).getByText('執行與送達狀態請查通知紀錄')).toBeInTheDocument();
+    await within(ruleWorkspace as HTMLElement).findByRole('heading', { name: /新好友加入即時歡迎詞與功能導覽/ });
+    expect(within(ruleWorkspace as HTMLElement).queryByText('執行與送達狀態請查通知紀錄')).not.toBeInTheDocument();
+    expect(within(ruleWorkspace as HTMLElement).queryByText(/多日排程關懷設定/)).not.toBeInTheDocument();
     expect(within(ruleWorkspace as HTMLElement).queryByText(/Webhook 自動推播中|Webhook自動推播中/)).not.toBeInTheDocument();
     fireEvent.click(within(ruleWorkspace as HTMLElement).getByRole('button', { name: '規則目錄與編輯' }));
     const ruleCard = await within(ruleWorkspace as HTMLElement).findByRole('button', { name: /deposit_notice/ });

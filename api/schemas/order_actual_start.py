@@ -55,7 +55,7 @@ class ActualStartReceiptView(BaseModel):
     cancelled_assignment_ids: list[int]
     created_assignment_keys: list[str]
     official_service_day_count: int = Field(ge=0)
-    official_service_hours: int = Field(ge=0)
+    official_service_hours: float = Field(ge=0, multiple_of=0.5)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 

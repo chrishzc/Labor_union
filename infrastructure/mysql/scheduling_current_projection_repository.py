@@ -251,7 +251,7 @@ def _assignment_fact(row, case_first_service_date, official_dates, buffer_dates)
         case_first_service_date,
         official_dates,
         buffer_dates,
-        int(row["service_hours_per_day"]),
+        float(row["service_hours_per_day"]),
         service_time,
     )
 

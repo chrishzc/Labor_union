@@ -1,0 +1,61 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-order-service-hours-half-precision-2026-09-14-v1",
+  "release_metadata": {
+    "release_name": "Labor Union order service hours half-hour precision",
+    "application_version": "order-service-hours-half-precision-v1",
+    "published_at": "2026-09-14",
+    "description": "Preserve existing whole-hour order terms while allowing positive service hours in 0.5-hour increments"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": ["absent", "exact"],
+    "forbidden_owned_object_states": ["partial", "drift"],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-matching-plan-create-receipts-2026-09-12-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1040_order_service_hours_half_precision.sql",
+      "relative_path": "db/schema_parts/1040_order_service_hours_half_precision.sql",
+      "sha256": "2db08f61119ef2391ec4a284bd33a884af763e1b803e0c22b4474f3133f9eba2",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "forward-only-preserve-existing-order-hours",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "orders-service-hours-half-hour-column-and-check-exact",
+      "phase": "post-schema",
+      "policy": "orders.service_hours_per_day is decimal(4,1) and constrained to 0.5-hour precision",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": ["order-service-hours-half-precision-v1"],
+    "required_restart_targets": ["api"],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": ["orders-service-hours-half-hour-column-and-check-exact"]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_09_14_order_service_hours_half_precision_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_09_14_order_service_hours_half_precision_v1.descriptors.json",
+    "sha256": "d8599520c933e411838ed083d371c5fea5e71b3b93e8fea3a80d978a5ac33c71",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": ["--single-transaction", "--routines", "--events", "--triggers", "--hex-blob"],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

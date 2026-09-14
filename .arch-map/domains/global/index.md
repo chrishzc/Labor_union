@@ -14,6 +14,7 @@ outbox 與 runtime governance；不擁有各 business Domain 的根事實或公�
   file readback boundary；path: `subsystems/controlled-files/index.md`
 - `runtime-governance` — runtime observability、technical／operational retention、capacity
   policy 與 bounded maintenance ownership；path: `subsystems/runtime-governance/index.md`
+- `shared-kernel` — 跨 Domain 的純驗證與 deterministic fingerprint primitives；path: `subsystems/shared-kernel/index.md`
 
 ## External relationships
 - depended_by: `all domains` — schema／release 與跨域 mutation governance。

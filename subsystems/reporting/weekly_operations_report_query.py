@@ -36,7 +36,7 @@ class WeeklyCaseFact:
     district: str | None
     order_status: str | None
     service_days: int | None
-    service_hours_per_day: int | None
+    service_hours_per_day: float | int | None
     planned_start_date: date | None
     planned_end_date: date | None
     seq_num: int | None = None
@@ -50,7 +50,7 @@ class WeeklyServiceFact:
     staff_name: str | None
     service_start_date: date | None
     service_end_date: date | None
-    service_hours_per_day: int | None
+    service_hours_per_day: float | int | None
     weekly_work_days: int
     week_start_date: date
     week_end_date: date
@@ -114,7 +114,7 @@ class WeeklyCaseRow:
     review_result: str
     order_status: str | None
     service_days: int | None
-    service_hours_per_day: int | None
+    service_hours_per_day: float | int | None
     planned_start_date: date | None
     planned_end_date: date | None
     district: str | None
@@ -176,9 +176,9 @@ class WeeklyServiceRow:
     service_end_date: date
     period_start_date: date
     period_end_date: date
-    service_hours_per_day: int
+    service_hours_per_day: float | int
     weekly_work_days: int
-    weekly_hours: int
+    weekly_hours: float | int
     order_status: str
     completed: bool
     data_quality_codes: tuple[str, ...]

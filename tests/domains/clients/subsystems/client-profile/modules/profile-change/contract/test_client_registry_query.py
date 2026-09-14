@@ -20,9 +20,17 @@ class _Repository:
     def load_detail(self, case_no):
         return {
             "case_no": case_no, "client_id": 7, "client_profile_version": 2,
-            "client_values": {"name": "王小明", "phone": "0912345678"},
+            "client_values": {
+                "name": "王小明", "gender": None, "phone": "0912345678",
+                "city": "新竹市", "address": None, "residence_type": None,
+                "delivery_type": None, "baby_info": None, "notes": None,
+            },
             "beclass_status": "ready", "beclass_record_id": 12, "beclass_version": 3,
-            "beclass_values": {"name": "王小明", "phone": "0922222222"},
+            "beclass_values": {"name": "王小明", "phone": "0922222222", "multi_birth_count": "雙胞胎"},
+            "order_information_values": {
+                "multi_birth_count": "雙胞胎", "dietary_habits": "不吃牛肉",
+            },
+            "order_information_issues": {},
         }
 
 
@@ -37,6 +45,7 @@ def test_registry_list_and_detail_keep_case_identity_and_owner_versions():
     assert detail.client.version == 2
     assert detail.beclass.version == 3
     assert detail.beclass.values["phone"] == "0922222222"
+    assert detail.order_information.values["multi_birth_count"] == "雙胞胎"
 
 
 def test_registry_list_route_preserves_optional_false_and_returns_roster_fields():
@@ -139,9 +148,12 @@ def test_registry_http_composition_identifies_each_field_owner_and_editability()
     )
     payload = response.data.model_dump()
     assert payload["client"]["field_capabilities"]["phone"] == {
-        "owner": "client_profile", "editable": True, "reason": None,
+        "owner": "client_profile", "editable": True, "reason": None, "options": None,
     }
+    assert payload["client"]["field_capabilities"]["gender"]["options"] == ("女", "男")
     assert payload["beclass"]["field_capabilities"]["phone"]["owner"] == "client_beclass"
+    assert payload["beclass"]["field_capabilities"]["multi_birth_count"]["options"] == ("單胞胎", "雙胞胎")
+    assert payload["order_information"]["values"]["multi_birth_count"] == "雙胞胎"
     assert payload["order_terms"]["field_capabilities"]["planned_start_date"]["owner"] == "order_terms"
 
 
@@ -184,8 +196,8 @@ def test_mysql_registry_uses_order_client_owner_and_bound_beclass_case_identity(
             "address": None, "residence_type": None, "delivery_type": None,
             "baby_info": None, "notes": None,
         },
-        ({"beclass_record_id": 12, "name": "原始姓名", "email": None, "phone": "0911111111", "tel": None, "ext": None, "city": None, "zip_code": None, "address": None, "admin_notes": None},),
-        {"aggregate_version": 3, "effective_values_json": '{"phone":"0922222222"}'},
+        ({"beclass_record_id": 12, "survey_details": '{"特殊計費:胎數":"雙胞胎","餐點喜忌備註":"不吃牛肉"}', "name": "原始姓名", "email": None, "phone": "0911111111", "tel": None, "ext": None, "city": None, "zip_code": None, "address": None, "admin_notes": None},),
+        {"aggregate_version": 3, "effective_values_json": '{"phone":"0922222222","multi_birth_count":"單胞胎"}'},
     ])
 
     detail = MySqlClientRegistryQueryRepository(connection).load_detail("CASE-001")
@@ -196,6 +208,9 @@ def test_mysql_registry_uses_order_client_owner_and_bound_beclass_case_identity(
     assert "WHERE bound_case_no=%s" in statements[1]
     assert "query_no" not in " ".join(statements)
     assert detail["beclass_values"]["phone"] == "0922222222"
+    assert detail["beclass_values"]["multi_birth_count"] == "單胞胎"
+    assert detail["order_information_values"]["multi_birth_count"] == "單胞胎"
+    assert detail["order_information_values"]["meal_preferences"] == "不吃牛肉"
 
 
 def test_mysql_registry_list_applies_bound_filters_and_allowlisted_sorting_in_one_query():

@@ -29,7 +29,7 @@ const NullableServiceTimeSchema = z.strictObject({
 export const OrderTermsInputSchema = z.strictObject({
   planned_start_date: DateSchema,
   service_days: z.number().int().positive(),
-  service_hours_per_day: z.number().int().positive(),
+  service_hours_per_day: z.number().positive().max(24).multipleOf(0.5),
   requires_cooking: z.boolean(),
   floor_fee_ntd: z.number().int().nonnegative(),
   service_time: z.strictObject({
@@ -42,7 +42,7 @@ export const OrderTermsInputSchema = z.strictObject({
 export const OrderTermsViewSchema = z.strictObject({
   planned_start_date: DateSchema,
   service_days: z.number().int().positive(),
-  service_hours_per_day: z.number().int().positive(),
+  service_hours_per_day: z.number().positive().max(24).multipleOf(0.5),
   requires_cooking: z.boolean().nullable(),
   floor_fee_ntd: z.number().int().nonnegative(),
   service_time: NullableServiceTimeSchema,
@@ -86,7 +86,7 @@ export const OrderTermsReceiptSchema = z.strictObject({
   cancelled_assignment_ids: z.array(z.number().int().positive()),
   created_assignment_keys: z.array(z.string().min(1)),
   official_service_day_count: z.number().int().nonnegative(),
-  official_service_hours: z.number().int().nonnegative(),
+  official_service_hours: z.number().nonnegative().multipleOf(0.5),
   preview_fingerprint: FingerprintSchema,
 });
 

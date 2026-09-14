@@ -11,12 +11,44 @@ const detail = {
   client: {
     client_id: 7, version: 2,
     values: { name: '王小明', gender: null, phone: '0911111111', city: '新竹市', address: null, residence_type: null, delivery_type: null, baby_info: null, notes: null },
-    field_capabilities: {},
+    field_capabilities: {
+      name: { owner: 'client_profile', editable: true, reason: null, options: null },
+      gender: { owner: 'client_profile', editable: true, reason: null, options: ['女', '男'] },
+      phone: { owner: 'client_profile', editable: true, reason: null, options: null },
+      city: { owner: 'client_profile', editable: true, reason: null, options: ['台北市', '新竹市'] },
+      address: { owner: 'client_profile', editable: true, reason: null, options: null },
+      residence_type: { owner: 'client_profile', editable: true, reason: null, options: ['電梯大樓', '公寓', '透天', '其他'] },
+      delivery_type: { owner: 'client_profile', editable: true, reason: null, options: ['自然產', '剖腹產', '未定'] },
+      baby_info: { owner: 'client_profile', editable: true, reason: null, options: null },
+      notes: { owner: 'client_profile', editable: true, reason: null, options: null },
+    },
   },
   beclass: {
     status: 'ready' as const, record_id: 12, version: 3,
-    values: { name: '王小明', email: null, phone: '0922222222', tel: null, ext: null, city: '新竹市', zip_code: null, address: null, admin_notes: null },
-    field_capabilities: {},
+    values: { name: '王小明', email: null, phone: '0922222222', tel: null, ext: null, city: '新竹市', zip_code: null, address: null, admin_notes: null, multi_birth_count: '雙胞胎' },
+    field_capabilities: {
+      name: { owner: 'client_beclass', editable: true, reason: null, options: null },
+      email: { owner: 'client_beclass', editable: true, reason: null, options: null },
+      phone: { owner: 'client_beclass', editable: true, reason: null, options: null },
+      tel: { owner: 'client_beclass', editable: true, reason: null, options: null },
+      ext: { owner: 'client_beclass', editable: true, reason: null, options: null },
+      city: { owner: 'client_beclass', editable: true, reason: null, options: null },
+      zip_code: { owner: 'client_beclass', editable: true, reason: null, options: null },
+      address: { owner: 'client_beclass', editable: true, reason: null, options: null },
+      admin_notes: { owner: 'client_beclass', editable: true, reason: null, options: null },
+      multi_birth_count: { owner: 'client_beclass', editable: true, reason: null, options: ['單胞胎', '雙胞胎'] },
+    },
+  },
+  order_information: {
+    status: 'ready' as const,
+    values: {
+      dietary_habits: '不吃牛肉', vegetarian_preference: null, alcohol_ratio: null,
+      cooking_oil_type: null, maternal_allergy: null, special_care_notes: null,
+      meal_preferences: null, cooking_tools: null, bath_water_prep: null,
+      breastfeeding_method: null, holiday_pricing_terms: null, multi_birth_count: '雙胞胎',
+      stair_floor_fee_mode: null, parking_space_provided: null, other_babies_present: null,
+    },
+    field_issues: {},
   },
   order_terms: { status: 'not_ready' as const, code: 'order_terms_incomplete', data: null, field_capabilities: {} },
 };
@@ -55,5 +87,28 @@ describe('Client registry owner editing', () => {
     expect(mocks.apply.mock.calls[0][5]).toBe('後台客戶名冊主檔更新');
     expect(mocks.apply.mock.calls[0][6]).toMatch(/^client-profile-/);
     await screen.findByText('客戶主檔已儲存。');
+  });
+
+  it('uses selects for enum fields and keeps free-text fields as inputs', async () => {
+    render(<ClientRegistryPage />);
+    fireEvent.click(screen.getByRole('tab', { name: '名冊資料' }));
+    fireEvent.click(await screen.findByRole('button', { name: /CASE-001/ }));
+
+    const profile = (await screen.findByRole('heading', { name: '客戶主檔' })).closest('section') as HTMLElement;
+    expect(within(profile).getByRole('combobox', { name: '性別' })).toHaveValue('');
+    expect(within(profile).getByRole('combobox', { name: '縣市' })).toHaveValue('新竹市');
+    expect(within(profile).getByRole('combobox', { name: '住宅型態' })).toBeInTheDocument();
+    expect(within(profile).getByRole('combobox', { name: '生產方式' })).toBeInTheDocument();
+    expect(within(profile).getByRole('textbox', { name: '手機' })).toBeInTheDocument();
+    const beclass = (await screen.findByRole('heading', { name: 'BeClass 有效資料' })).closest('section') as HTMLElement;
+    const birthCount = within(beclass).getByRole('combobox', { name: '胎數（單胞胎／雙胞胎）' });
+    expect(birthCount).toHaveValue('雙胞胎');
+    fireEvent.change(birthCount, { target: { value: '單胞胎' } });
+    fireEvent.click(within(beclass).getByRole('button', { name: '預覽變更' }));
+    await waitFor(() => expect(mocks.preview).toHaveBeenCalledWith('CASE-001', 'beclass', { multi_birth_count: '單胞胎' }, 3));
+    const information = (await screen.findByRole('heading', { name: '照護與特殊計費資料' })).closest('section') as HTMLElement;
+    expect(within(information).getByText('飲食習慣與中藥接受度')).toBeInTheDocument();
+    expect(within(information).getByText('不吃牛肉')).toBeInTheDocument();
+    expect(information).not.toHaveTextContent('survey_details');
   });
 });

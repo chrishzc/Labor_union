@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+import math
 
 _SHA256_HEX_LENGTH = 64
 
@@ -24,6 +25,15 @@ def require_nonnegative_integer(value: Any, field_name: str) -> int:
 def require_positive_integer(value: Any, field_name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         raise ValueError(f"{field_name} must be a positive integer")
+    return value
+
+
+def require_positive_half_hour(value: Any, field_name: str) -> float | int:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{field_name} must use half-hour precision")
+    numeric = float(value)
+    if not math.isfinite(numeric) or numeric <= 0 or not (numeric * 2).is_integer():
+        raise ValueError(f"{field_name} must use half-hour precision")
     return value
 
 

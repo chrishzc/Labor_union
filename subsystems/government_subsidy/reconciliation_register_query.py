@@ -108,6 +108,7 @@ def _fetch_completed_cases(connection_factory: Callable[[], Any]) -> list[dict]:
                        o.actual_end_date, o.service_days, o.service_hours_per_day,
                        c.name AS employer_name, c.address AS employer_address,
                        s.name AS staff_name, br.survey_details,
+                       correction.effective_values_json AS beclass_effective_values,
                        payroll_policy.hourly_rate_ntd AS payroll_hourly_rate_ntd,
                        historical_service.total_actual_service_days AS historical_actual_service_days,
                        historical_service.total_actual_service_hours AS historical_actual_service_hours
@@ -115,6 +116,8 @@ def _fetch_completed_cases(connection_factory: Callable[[], Any]) -> list[dict]:
                 JOIN clients c ON c.id = o.client_id
                 LEFT JOIN staff s ON s.id = o.staff_id
                 LEFT JOIN beclass_records br ON (br.query_no = o.case_no OR br.bound_case_no = o.case_no)
+                LEFT JOIN beclass_record_correction_states correction
+                    ON correction.beclass_record_id = br.id
                 LEFT JOIN case_payroll_rate_policy_snapshots payroll_policy
                     ON payroll_policy.case_no = o.case_no
                 LEFT JOIN historical_service_day_projections historical_service
@@ -170,6 +173,7 @@ def _fetch_established_cases(
                            ''
                        ) AS staff_name,
                        br.survey_details,
+                       correction.effective_values_json AS beclass_effective_values,
                        payroll_policy.hourly_rate_ntd AS payroll_hourly_rate_ntd,
                        historical_service.total_actual_service_days AS historical_actual_service_days,
                        historical_service.total_actual_service_hours AS historical_actual_service_hours
@@ -178,6 +182,8 @@ def _fetch_established_cases(
                 LEFT JOIN staff s ON s.id = o.staff_id
                 LEFT JOIN beclass_records br
                     ON (br.query_no = o.case_no OR br.bound_case_no = o.case_no)
+                LEFT JOIN beclass_record_correction_states correction
+                    ON correction.beclass_record_id = br.id
                 LEFT JOIN case_payroll_rate_policy_snapshots payroll_policy
                     ON payroll_policy.case_no = o.case_no
                 LEFT JOIN historical_service_day_projections historical_service
@@ -352,9 +358,25 @@ def _service_volume(
 
 def _effective_payroll_rate(source: dict) -> object | None:
     order_information = project_order_information(source.get("survey_details"))
+    effective_values = source.get("beclass_effective_values")
+    if isinstance(effective_values, str):
+        try:
+            effective_values = json.loads(effective_values)
+        except (TypeError, ValueError):
+            effective_values = {}
+    has_corrected_birth_count = (
+        isinstance(effective_values, dict) and "multi_birth_count" in effective_values
+    )
+    corrected_birth_count = (
+        effective_values.get("multi_birth_count") if has_corrected_birth_count else None
+    )
     if (
-        order_information.issues.get("multi_birth_count") is None
-        and order_information.values.get("multi_birth_count") == "雙胞胎"
+        corrected_birth_count == "雙胞胎"
+        or (
+            not has_corrected_birth_count
+            and order_information.issues.get("multi_birth_count") is None
+            and order_information.values.get("multi_birth_count") == "雙胞胎"
+        )
     ):
         return Decimal("450")
     return source.get("payroll_hourly_rate_ntd")

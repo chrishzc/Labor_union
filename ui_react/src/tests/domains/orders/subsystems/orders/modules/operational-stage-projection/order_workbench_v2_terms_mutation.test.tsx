@@ -380,26 +380,17 @@ describe('待辦看板 Beta 第 1 階訂單條款操作', () => {
     const endSelect = within(panel).getByLabelText('Beta 每日結束時間');
     const offsetSelect = within(panel).getByLabelText('Beta 結束日偏移');
 
-    // Click 12h 白班
-    fireEvent.click(within(panel).getByRole('button', { name: '12h 白班 (08:00~20:00)' }));
-    expect(startSelect).toHaveValue('08:00');
-    expect(endSelect).toHaveValue('20:00');
-    expect(offsetSelect).toHaveValue('0');
-    expect(hoursInput).toHaveValue(12);
-
-    // Click 12h 夜班
-    fireEvent.click(within(panel).getByRole('button', { name: '12h 夜班 (20:00~08:00 隔日)' }));
-    expect(startSelect).toHaveValue('20:00');
-    expect(endSelect).toHaveValue('08:00');
-    expect(offsetSelect).toHaveValue('1');
-    expect(hoursInput).toHaveValue(12);
-
-    // Click 24h 全日
-    fireEvent.click(within(panel).getByRole('button', { name: '24h 全日 (09:00~09:00 隔日)' }));
+    fireEvent.click(within(panel).getByRole('button', { name: '4h 上午 (09:00~13:00)' }));
     expect(startSelect).toHaveValue('09:00');
-    expect(endSelect).toHaveValue('09:00');
-    expect(offsetSelect).toHaveValue('1');
-    expect(hoursInput).toHaveValue(24);
+    expect(endSelect).toHaveValue('13:00');
+    expect(offsetSelect).toHaveValue('0');
+    expect(hoursInput).toHaveValue(4);
+
+    fireEvent.click(within(panel).getByRole('button', { name: '8h (09:00~17:00)' }));
+    expect(startSelect).toHaveValue('09:00');
+    expect(endSelect).toHaveValue('17:00');
+    expect(offsetSelect).toHaveValue('0');
+    expect(hoursInput).toHaveValue(8);
   });
 });
 
@@ -422,8 +413,8 @@ describe('calculateDailyServiceHours 純函式計算', () => {
     expect(calculateDailyServiceHours('09:00', '09:00', '0')).toBeNull();
   });
 
-  it('非整數小時回傳 null', () => {
-    expect(calculateDailyServiceHours('09:00', '17:30', '0')).toBeNull();
+  it('允許半小時刻度，其他分鐘數回傳 null', () => {
+    expect(calculateDailyServiceHours('09:00', '17:30', '0')).toBe(8.5);
     expect(calculateDailyServiceHours('08:00', '12:15', '0')).toBeNull();
   });
 
@@ -454,9 +445,10 @@ describe('validateServiceTimeWindow 驗證與提示', () => {
     expect(validateServiceTimeWindow('08:00', '17:00', '1')).toBe('單日服務時數不可超過 24 小時。');
   });
 
-  it('非整數小時提示計算時數', () => {
-    expect(validateServiceTimeWindow('09:00', '17:30', '0')).toBe(
-      '每日服務時數須為整數小時（目前計算為 8.5 小時）。',
+  it('半小時合法，其他分鐘數提示 0.5 小時刻度', () => {
+    expect(validateServiceTimeWindow('09:00', '17:30', '0')).toBeNull();
+    expect(validateServiceTimeWindow('09:00', '17:15', '0')).toBe(
+      '每日服務時數須以 0.5 小時為單位（目前計算為 8.25 小時）。',
     );
   });
 });

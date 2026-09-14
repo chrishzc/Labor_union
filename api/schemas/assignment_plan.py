@@ -18,7 +18,7 @@ class AssignmentPlanSegmentView(BaseModel):
     assigned_start_date: date
     assigned_end_date: date
     official_service_dates: list[date]
-    actual_hours: int | None = Field(default=None, ge=0)
+    actual_hours: float | None = Field(default=None, ge=0, multiple_of=0.5)
     lineage_source_assignment_ids: list[int] = Field(default_factory=list)
 
 
@@ -32,7 +32,7 @@ class AssignmentPlanQueryView(BaseModel):
     client_finance_version: int = Field(ge=0)
     payroll_version: int = Field(ge=0)
     contracted_service_days: int = Field(gt=0)
-    service_hours_per_day: int = Field(gt=0)
+    service_hours_per_day: float = Field(gt=0, le=24, multiple_of=0.5)
     service_started: bool
     assignments: list[AssignmentPlanSegmentView]
 

@@ -541,7 +541,7 @@ def _seed_external_signing(cursor, case_no: str, plan_id: int, *, completed: boo
             "(recipient_type,recipient_identity,message_kind,payload_snapshot,payload_fingerprint,scheduled_at_utc,"
             "source_aggregate_type,source_aggregate_identity,idempotency_key,correlation_id,processing_status,"
             "completed_attempts,provider_message_id,sent_at_utc) "
-            "VALUES ('user',%s,'text',%s,%s,UTC_TIMESTAMP(6),'contract_external_signing',%s,%s,%s,'sent',"
+            "VALUES ('user',%s,'text',%s,%s,UTC_TIMESTAMP(6),'contract_external_signing_session',%s,%s,%s,'sent',"
             "1,%s,UTC_TIMESTAMP(6))",
             (
                 f"fixture-client:{case_no}",

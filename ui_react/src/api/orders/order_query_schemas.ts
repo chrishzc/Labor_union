@@ -53,7 +53,7 @@ export const OrderDetailSchema = z.strictObject({
   start_date: DateOnlySchema.nullable(),
   end_date: DateOnlySchema.nullable(),
   service_days: z.number().int().nonnegative(),
-  service_hours_per_day: z.number().int().nonnegative(),
+  service_hours_per_day: z.number().nonnegative().multipleOf(0.5),
   deposit_service_days: z.number().int().nonnegative().nullable(),
   floor_fee: z.number().int().nonnegative(),
   custom_rest_dates: z.string().nullable(),
@@ -76,7 +76,7 @@ export type ServiceTimeTerms = z.infer<typeof ServiceTimeTermsSchema>;
 export const OrderTermsDetailSchema = z.strictObject({
   planned_start_date: DateOnlySchema,
   service_days: z.number().int().positive(),
-  service_hours_per_day: z.number().int().positive(),
+  service_hours_per_day: z.number().positive().max(24).multipleOf(0.5),
   requires_cooking: z.boolean().nullable(),
   floor_fee_ntd: z.number().int().nonnegative(),
   service_time: ServiceTimeTermsSchema,
@@ -141,7 +141,7 @@ export const AssignmentSegmentSchema = z.strictObject({
   assigned_start_date: DateOnlySchema,
   assigned_end_date: DateOnlySchema,
   official_service_dates: z.array(DateOnlySchema),
-  actual_hours: z.number().int().nonnegative().nullable(),
+  actual_hours: z.number().nonnegative().multipleOf(0.5).nullable(),
   lineage_source_assignment_ids: z.array(z.number().int()),
 });
 export type AssignmentSegment = z.infer<typeof AssignmentSegmentSchema>;
@@ -154,7 +154,7 @@ export const AssignmentPlanSchema = z.strictObject({
   client_finance_version: z.number().int().nonnegative(),
   payroll_version: z.number().int().nonnegative(),
   contracted_service_days: z.number().int().positive(),
-  service_hours_per_day: z.number().int().positive(),
+  service_hours_per_day: z.number().positive().max(24).multipleOf(0.5),
   service_started: z.boolean(),
   assignments: z.array(AssignmentSegmentSchema),
 });

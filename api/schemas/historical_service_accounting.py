@@ -51,7 +51,7 @@ class HistoricalServiceAccountingQueryView(BaseModel):
     client_finance_version: int
     payroll_version: int
     contracted_service_days: int
-    service_hours_per_day: int
+    service_hours_per_day: float = Field(gt=0, le=24, multiple_of=0.5)
     contractual_floor_fee_ntd: int
     client_identity_status: str
     assignments: list[HistoricalServiceAccountingAssignmentView]
@@ -73,7 +73,7 @@ class HistoricalPayrollAssignmentView(BaseModel):
     assignment_identity: str
     staff_id: int
     actual_service_days: int
-    actual_hours: int
+    actual_hours: float = Field(gt=0, multiple_of=0.5)
     double_pay_hours: int
     hourly_rate_ntd: int
     service_salary_ntd: int

@@ -77,7 +77,7 @@ class MySqlHistoricalServiceAccountingRepository:
             int(root["client_finance_version"]),
             int(root["payroll_version"]),
             int(root["service_days"]),
-            int(root["service_hours_per_day"]),
+            float(root["service_hours_per_day"]),
             MoneyNTD(int(root["floor_fee"])),
             str(root["identity_status"]),
             assignments,

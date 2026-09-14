@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import date, time, timedelta
+from decimal import Decimal
 import json
 from typing import Any
 
@@ -208,7 +209,7 @@ def _matching_plan_payroll_estimates(
 ) -> dict[int, dict[str, str]]:
     """Project explicitly labelled estimates without creating Payroll facts."""
     hourly_rate = _positive_integer(case.get("payroll_hourly_rate_ntd"))
-    hours_per_day = _positive_integer(case.get("service_hours_per_day"))
+    hours_per_day = _positive_half_hour(case.get("service_hours_per_day"))
     contracted_days = _positive_integer(case.get("service_days"))
     if hourly_rate is None or hours_per_day is None or contracted_days is None:
         raise ValueError("matching_plan_payroll_estimate_source_missing")
@@ -230,7 +231,11 @@ def _matching_plan_payroll_estimates(
     )
     if client_hourly_rate is None:
         raise ValueError("matching_plan_client_payment_estimate_source_missing")
-    client_payable = contracted_days * hours_per_day * client_hourly_rate + int(case.get("floor_fee") or 0)
+    client_payable = _whole_ntd(
+        Decimal(contracted_days) * Decimal(str(hours_per_day)) * Decimal(client_hourly_rate)
+        + Decimal(int(case.get("floor_fee") or 0)),
+        "matching_plan_client_payment_estimate_not_whole_ntd",
+    )
     full_subsidy = (
         str(case.get("client_identity_status") or "").strip() == "補助市民"
         and contracted_days * hours_per_day <= 120
@@ -242,7 +247,7 @@ def _matching_plan_payroll_estimates(
     return {
         int(item["assignment_id"]): {
             "estimated_total_salary": (
-                f"預估 {service_days[str(int(item['assignment_id']))] * hours_per_day * hourly_rate + floor_allocations[str(int(item['assignment_id']))].amount} 元"
+                f"預估 {_whole_ntd(Decimal(service_days[str(int(item['assignment_id']))]) * Decimal(str(hours_per_day)) * Decimal(hourly_rate) + Decimal(floor_allocations[str(int(item['assignment_id']))].amount), 'matching_plan_payroll_estimate_not_whole_ntd')} 元"
             ),
             "estimated_salary_payment_date": f"預估 {due_date.isoformat()}",
         }
@@ -258,6 +263,24 @@ def _positive_integer(value: object, *, allow_zero: bool = False) -> int | None:
     except (TypeError, ValueError):
         return None
     return parsed if parsed >= (0 if allow_zero else 1) else None
+
+
+def _positive_half_hour(value: object) -> float | int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = Decimal(str(value))
+    except Exception:
+        return None
+    if not parsed.is_finite() or parsed <= 0 or parsed > 24 or parsed * 2 != (parsed * 2).to_integral_value():
+        return None
+    return int(parsed) if parsed == parsed.to_integral_value() else float(parsed)
+
+
+def _whole_ntd(value: Decimal, error_code: str) -> int:
+    if value != value.to_integral_value():
+        raise ValueError(error_code)
+    return int(value)
 
 
 def _required_date(value: object) -> date:

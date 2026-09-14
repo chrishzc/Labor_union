@@ -2,6 +2,24 @@
   "version": 1,
   "templates": [
     {
+      "id": "customer_onboarding_welcome",
+      "name": "新好友加入即時歡迎詞",
+      "category": "webhook_reply",
+      "message_type": "text",
+      "enabled": true,
+      "content": "您好！歡迎加入【新竹市月子工會】官方服務平台 🤱✨\n\n我們提供專業、安心、有保障的到府坐月子媒合與母嬰照護服務。\n\n📱【新手快速導覽・三步驟開始使用】\n\n1️⃣ 準爸媽／產婦專區：\n👉 請開啟以下專屬登記頁面，進行服務需求填寫或核對市府登記案件：\n{url}\n（此安全登記連結將於 15 分鐘後失效）\n\n2️⃣ 專業月嫂服務人員：\n👉 請點擊下方選單【月嫂專區】或直接在對話框輸入「我要綁定月嫂」進行身分認證。\n\n3️⃣ 服務說明與專人諮詢：\n👉 請點擊下方選單【服務說明】查看服務流程與常見問答。\n\n---\n💡 如需真人專員協助，隨時在對話框輸入「轉真人客服」，我們將由專人為您服務。\n\n👇 請點擊下方圖文選單，開啟您的專屬服務！",
+      "variables": [
+        {
+          "name": "url",
+          "required": true,
+          "description": "安全登記專屬連結"
+        }
+      ],
+      "usage": [
+        "webhook"
+      ]
+    },
+    {
       "id": "staff_switch_success",
       "name": "月嫂身分驗證成功",
       "category": "webhook_reply",

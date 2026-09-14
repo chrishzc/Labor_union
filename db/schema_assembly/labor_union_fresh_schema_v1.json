@@ -5,7 +5,7 @@
     "path": "db/schema.sql",
     "sha256": "b9cd84ae5a09a46949b5d4c131659f7f114480306f94e0af1246833d021b1bfb"
   },
-  "active_artifacts_sha256": "a84fb5f4ac01e496352c627da3bb92bdd655791e9bb8422704175985eae5a725",
+  "active_artifacts_sha256": "51a2ef9450a963d402c9ae18a808a34db483f96d47563208a3da70de6523161f",
   "active_bootstrap": [
     "db/schema_parts/202_scheduling_staff_leave_intake.sql",
     "db/schema_parts/20_staff_monthly_settlements.sql",
@@ -169,7 +169,8 @@
     "db/schema_parts/1034_contract_external_signing_final_pdf_completion.sql",
     "db/schema_parts/220_twins_payroll_policy.sql",
     "db/schema_parts/221_twins_payroll_order_details_view.sql",
-    "db/schema_parts/222_matching_plan_create_receipts.sql"
+    "db/schema_parts/222_matching_plan_create_receipts.sql",
+    "db/schema_parts/223_order_service_hours_half_precision.sql"
   ],
   "classifications": {
     "db/schema_parts/1022_task96_retired_anomaly_owner_contracts.sql": "retired",
@@ -187,7 +188,8 @@
     "db/schema_parts/1036_registry_owner_mutations.sql": "migration-only",
     "db/schema_parts/1037_twins_payroll_policy.sql": "migration-only",
     "db/schema_parts/1038_twins_payroll_order_details_view.sql": "migration-only",
-    "db/schema_parts/1039_matching_plan_create_receipts.sql": "migration-only"
+    "db/schema_parts/1039_matching_plan_create_receipts.sql": "migration-only",
+    "db/schema_parts/1040_order_service_hours_half_precision.sql": "migration-only"
   },
   "retirement_contracts": {
     "db/schema_parts/1022_task96_retired_anomaly_owner_contracts.sql": {
@@ -333,6 +335,15 @@
       "replay": "preserve release applies 1039 only when its complete owned receipt metadata is absent or exact",
       "rollback": "retain source backup and discard candidate before same-name replacement",
       "unresolved_policy": "partial or drift receipt metadata blocks candidate apply pending explicit remediation"
+    },
+    "db/schema_parts/1040_order_service_hours_half_precision.sql": {
+      "source_object": "orders.service_hours_per_day integer precision in deployed schemas",
+      "successor": "db/schema_parts/223_order_service_hours_half_precision.sql",
+      "terminal_schema_evidence": "fresh assembly applies canonical part 223; preserve chain applies part 1040 to deployed schemas",
+      "data_effect": "schema_only; existing whole-hour values are preserved exactly and no business row is backfilled",
+      "replay": "preserve release applies 1040 only to the exact integer predecessor or accepts the exact decimal successor",
+      "rollback": "retain source backup and discard the candidate before any entry switch",
+      "unresolved_policy": "out-of-range values, non-half-hour values, partial constraint state or metadata drift block candidate apply"
     }
   }
 }

@@ -184,7 +184,7 @@ class MatchingNotificationApplication:
                     staff_name=str(item["staff_name"]),
                     week_start_date=str(item["week_start_date"]),
                     week_end_date=str(item["week_end_date"]),
-                    service_hours_per_day=int(item["service_hours_per_day"]),
+                    service_hours_per_day=float(item["service_hours_per_day"]),
                     weekly_work_days=int(item["weekly_work_days"]),
                     weekly_hours=int(item["weekly_hours"]),
                 )

@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 from shared_kernel.money import MoneyNTD
 from shared_kernel.validation import (
     require_canonical_text,
+    require_positive_half_hour,
     require_positive_integer,
 )
 
@@ -69,7 +70,7 @@ class ServiceTimeTerms:
 class OrderTerms:
     planned_start_date: date
     service_days: int
-    service_hours_per_day: int
+    service_hours_per_day: float | int
     floor_fee: MoneyNTD
     service_time: ServiceTimeTerms
     requires_cooking: bool | None = None
@@ -78,7 +79,7 @@ class OrderTerms:
         if not isinstance(self.planned_start_date, date):
             raise TypeError("planned start date must be a date")
         require_positive_integer(self.service_days, "service days")
-        require_positive_integer(
+        require_positive_half_hour(
             self.service_hours_per_day,
             "service hours per day",
         )

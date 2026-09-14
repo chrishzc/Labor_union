@@ -25,6 +25,7 @@
 .registry-editor h3 { margin: 0 0 12px; color: #7c2d12; }
 .registry-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
 .registry-fields label { display: grid; gap: 5px; font-size: .88rem; color: #65483b; }
+.registry-fields input, .registry-fields select { box-sizing: border-box; width: 100%; }
 .registry-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 .registry-actions button { min-width: 88px; }
 .registry-actions button:last-child { background: #9a3412; color: white; }
@@ -32,6 +33,11 @@
 .registry-editor dl { display: flex; gap: 28px; }
 .registry-editor dl div { display: grid; gap: 4px; }
 .registry-editor dd { margin: 0; font-weight: 700; }
+.registry-editor .registry-information-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin: 14px 0 0; }
+.registry-information-fields div { min-width: 0; padding: 10px 12px; border-radius: 8px; background: #fffaf7; }
+.registry-information-fields dt { color: #74593f; font-size: .82rem; }
+.registry-information-fields dd { margin-top: 5px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.registry-information-fields dd.source-issue { color: #b42318; }
 .registry-editor .order-v2-drawer-section label { min-width: 0; }
 .registry-editor .order-v2-drawer-section input,
 .registry-editor .order-v2-drawer-section select,

@@ -24,9 +24,10 @@ class StaffBankAccount:
     account_id: int
     bank_code: str | None
     branch_code: str | None
-    account_last4: str | None
-    is_primary: bool
-    is_active: bool
+    account_no: str | None = None
+    account_last4: str | None = None
+    is_primary: bool = False
+    is_active: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,8 +132,9 @@ def _profile(
 
 
 def _bank_account(row: Mapping[str, object]) -> StaffBankAccount:
-    fields = {"id", "bank_code", "branch_code", "account_last4", "is_primary", "is_active"}
-    if set(row) != fields:
+    base_fields = {"id", "bank_code", "branch_code", "account_last4", "is_primary", "is_active"}
+    row_fields = set(row)
+    if not (row_fields == base_fields or row_fields == base_fields | {"account_no"}):
         raise StaffProfileContractError("staff profile bank account fields are invalid")
     account_id = row["id"]
     if isinstance(account_id, bool) or not isinstance(account_id, int) or account_id <= 0:
@@ -148,6 +150,7 @@ def _bank_account(row: Mapping[str, object]) -> StaffBankAccount:
         account_id=account_id,
         bank_code=_optional_text(row["bank_code"], "bank_code", 10),
         branch_code=_optional_text(row["branch_code"], "branch_code", 10),
+        account_no=_optional_text(row.get("account_no"), "account_no", 50),
         account_last4=_optional_last4(row["account_last4"]),
         is_primary=is_primary,
         is_active=_boolean(row["is_active"], "is_active"),

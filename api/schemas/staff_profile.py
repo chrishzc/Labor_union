@@ -11,6 +11,7 @@ class StaffBankAccountView(BaseModel):
     account_id: int = Field(gt=0)
     bank_code: str | None = Field(default=None, max_length=10)
     branch_code: str | None = Field(default=None, max_length=10)
+    account_no: str | None = Field(default=None, max_length=50)
     account_last4: str | None = Field(default=None, min_length=4, max_length=4, pattern=r"^[0-9]{4}$")
     is_primary: bool
     is_active: bool

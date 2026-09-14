@@ -95,7 +95,7 @@ class OrderCancellationQueryView(BaseModel):
     lifecycle_status: str
     actual_start_date: date | None
     contracted_service_days: int = Field(gt=0)
-    service_hours_per_day: int = Field(gt=0)
+    service_hours_per_day: float = Field(gt=0, le=24, multiple_of=0.5)
     service_started: bool
     historical_mid_service_confirmation_available: bool
     service_data_locked: bool
@@ -116,7 +116,7 @@ class OrderCancellationPreviewView(BaseModel):
     actual_end_date: date | None
     confirmed_service_days: list[CancellationServiceDayView]
     official_service_day_count: int = Field(ge=0)
-    official_service_hours: int = Field(ge=0)
+    official_service_hours: float = Field(ge=0, multiple_of=0.5)
     order_version: int = Field(ge=0)
     scheduling_version: int = Field(ge=0)
     scheduling_generation: int = Field(ge=0)
@@ -141,7 +141,7 @@ class OrderCancellationReceiptView(BaseModel):
     lifecycle_status: str
     actual_end_date: date | None
     official_service_day_count: int = Field(ge=0)
-    official_service_hours: int = Field(ge=0)
+    official_service_hours: float = Field(ge=0, multiple_of=0.5)
     cancelled_assignment_ids: list[int]
     created_assignment_keys: list[str]
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")

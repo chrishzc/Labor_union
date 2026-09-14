@@ -6,12 +6,13 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
+from domains.case_import.order_information import project_order_information
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from subsystems.case_import.beclass_correction_workflow import BeClassCorrectionSnapshot
 
 
-_FIELDS = (
+_SOURCE_FIELDS = (
     "name", "email", "phone", "tel", "ext", "city", "zip_code", "address", "admin_notes",
 )
 _FAMILY = "client_beclass_correction/v1"
@@ -25,7 +26,7 @@ class MySqlBeClassCorrectionRepository:
         suffix = " FOR UPDATE" if for_update else ""
         with self._connection.cursor() as cursor:
             cursor.execute(
-                "SELECT id AS beclass_record_id,bound_case_no AS case_no," + ",".join(_FIELDS)
+                "SELECT id AS beclass_record_id,bound_case_no AS case_no,survey_details," + ",".join(_SOURCE_FIELDS)
                 + " FROM beclass_records WHERE bound_case_no=%s ORDER BY id LIMIT 2" + suffix,
                 (case_no,),
             )
@@ -41,11 +42,20 @@ class MySqlBeClassCorrectionRepository:
                 (int(source["beclass_record_id"]),),
             )
             state = cursor.fetchone()
+        order_information = project_order_information(source.get("survey_details"))
+        original = {field: source.get(field) for field in _SOURCE_FIELDS}
+        birth_count = order_information.values.get("multi_birth_count")
+        original["multi_birth_count"] = (
+            birth_count
+            if order_information.issues.get("multi_birth_count") is None
+            and isinstance(birth_count, str)
+            else None
+        )
         return {
             "beclass_record_id": int(source["beclass_record_id"]),
             "case_no": str(source["case_no"]),
             "aggregate_version": int((state or {}).get("aggregate_version") or 0),
-            "original": {field: source.get(field) for field in _FIELDS},
+            "original": original,
             "corrections": _decode_json((state or {}).get("effective_values_json"), {}),
         }
 

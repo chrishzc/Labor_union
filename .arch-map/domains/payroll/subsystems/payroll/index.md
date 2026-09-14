@@ -18,6 +18,7 @@
 - `late-obligation-disposition` — retired PAYOUT-002 owner validation／historical settlement evidence；path: `modules/late-obligation-disposition.md`
 - `historical-service-accounting` — 歷史逐 assignment 單薪應付與差額義務；path: `modules/historical-service-accounting.md`
 - `assignment-terms-impact` — assignment replacement 所需的 immutable rate snapshot 與 Payroll terms impact writer；path: `modules/assignment-terms-impact.md`
+- `payroll-rebuild` — 依正式 Scheduling facts 重建 Payroll projection；path: `modules/payroll-rebuild.md`
 
 ## Verification routing
 - default_boundary: Subsystem

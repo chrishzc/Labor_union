@@ -1,0 +1,26 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-order-service-hours-half-precision-2026-09-14-v1",
+  "descriptors": {
+    "1040_order_service_hours_half_precision.sql": {
+      "tables": {},
+      "parent_columns": {
+        "orders": {
+          "service_hours_per_day": {
+            "column_type": "decimal(4,1)",
+            "is_nullable": "YES",
+            "column_default": "0.0",
+            "extra": ""
+          }
+        }
+      },
+      "indexes": {},
+      "foreign_keys": {},
+      "checks": {
+        "orders.chk_orders_service_hours_half_hour": "and(atom(service_hours_per_day>=0),atom(service_hours_per_day<=24),atom(((service_hours_per_day*2)%1)=0))"
+      },
+      "triggers": [],
+      "views": {}
+    }
+  }
+}

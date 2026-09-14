@@ -1,6 +1,6 @@
 # LINE 四大模組詳細測試手冊與 Agent 前置條件規範
 
-> **文件版本**：v2.4（2026-09-14，M3-02B 真 LINE 寄送驗收更新）
+> **文件版本**：v2.6（2026-09-14，M2 常見問答與 AI 智慧問答專屬 LIFF 重構、選單更新與零推播額度設計）
 > **原始對齊程式版本**：`main @ 0988f6c430472343662aa1f8989ab2af9732bde3`；包含 PR #299 及後續對齊修訂。開始測試前須確認實際執行版本已包含修正，PR 存在不等於 main 已合併或環境已部署。
 > **適用範圍**：LINE 官方帳號、LIFF、FastAPI、MySQL、React 管理後台、M1～M4 repository-local 與手機 E2E 驗收。
 > **權威依據**：`document/架構重整/01_規格基線/26_LINE四大模組Eraser流程圖轉錄與驗收基線.md`；同目錄規格 17、20 的 owner 邊界，以及 2026-09-13 使用者八點業務裁決（未解決客服工單回覆、月嫂履歷推薦卡兩大按鈕、Match_Success 群組通知、Zero-Pool 拒絕降維群組通知、確認實際服務時間、月嫂檔期試算通知專員）。現有實作與本手冊不得自行取消規格 26 的 required flow acceptance。
@@ -52,23 +52,23 @@
 | **M1-04** | 月嫂身分綁定（王美華 / staff `1`） | `MOBILE_PASS / PROVIDER_PASS` | 2026-09-10 | ✅ 手機完成正式綁定；canonical binding=`bound`、subject=`staff:1`，最新 Rich Menu binding outbox 已完成且無錯誤，LINE user menu readback 與新月嫂專屬選單一致。 |
 | **M1-05** | 管理角色綁定 | `MOBILE_PASS` | 2026-09-10 | ✅ 測試者確認手機實測通過。 |
 | **M1-06** | 管理後台正式解除 (Rich Menu 回復) | `MOBILE_PASS / PROVIDER_PASS` | 2026-09-10 | ✅ 首次回復因舊 provider menu ID 回覆 `404 richmenu not found` 而失敗；重新發布訪客選單（publication `#20`）後走正式 retry，binding=`revoked`、revocation=`completed`，LINE user Rich Menu readback 與新訪客選單一致。另重新發布客戶（`#21`）、月嫂（`#22`）、工會幹部（`#23`）選單，四套 provider existence readback 均為 HTTP 200，LINE 全域預設亦指向新訪客選單；測試者確認手機實測通過。 |
-| **M2-01** | 確定性 Tier 1 | `MOBILE_PASS` | 2026-09-10 | ✅ 測試者確認手機實測通過。 |
-| **M2-02** | 正式 QA + Gemini 語意選擇 | `RETIRED / CANCELLED` | 2026-09-14 | ⚠️ **業務更新**：依指示取消 LINE 聊天室 AI 助理問答（關閉 `knowledge_question_scheduler`），避免額外產生 Push 推播費用；改由客服中心 LIFF 頁面提供知識查詢，提問由真人客服回覆。 |
-| **M2-03** | 非 ready QA 不得自動回答 | `MOBILE_PASS` | 2026-09-10 | ✅ 測試者確認手機實測通過。 |
-| **M2-04** | 模糊問題與 unsupported | `MOBILE_PASS` | 2026-09-10 | ✅ 測試者確認手機實測通過。 |
-| **M2-05** | 明確轉真人 | `MOBILE_PASS` | 2026-09-10 | ✅ 測試者確認手機實測通過。 |
-| **M2-06** | Feedback 閉環 | `MOBILE_PASS` | 2026-09-13 | ✅ **實測更新**：點擊「未解決」回覆已更新為「已收到您的回饋{ticket}。AI 問答系統已暫時關閉，您可以直接在此對話中留下訊息等待真人客服回應。」；點擊「有幫助」記錄正面評分功能依指示暫不排入實作。 |
+| **M2-01** | 圖文選單導流驗證（常見問答與 AI 智慧問答） | `REPO_LOCAL_PASS / PREPARED` | 2026-09-14 | ⏳ **待測**：訪客與客戶選單點擊【常見問答】與【AI 智慧問答】正確導向對應專屬 LIFF 分頁。 |
+| **M2-02** | 常見問答 (FAQ) 分類與 AI 問答引導橫幅 | `REPO_LOCAL_PASS / PREPARED` | 2026-09-14 | ⏳ **待測**：LIFF 常見問答可分類折疊閱讀，列表下方醒目卡片引導「沒看到想問的問題？試試看【AI 智慧問答】」，點擊一鍵切換。 |
+| **M2-03** | AI 智慧問答 LIFF 檢索 (0 Push 額度) | `REPO_LOCAL_PASS / PREPARED` | 2026-09-14 | ⏳ **待測**：於 LIFF 內口語提問，即時呼叫後端 API 檢索工會核准解答，完全不消耗 LINE Push 額度。 |
+| **M2-04** | AI 未支援問題與轉真人客服引導 | `REPO_LOCAL_PASS / PREPARED` | 2026-09-14 | ⏳ **待測**：超出知識庫問題時，系統提示轉真人客服，引導用戶直接於 LINE 聊天室留言由專員親自服務。 |
+| **M2-05** | LINE 聊天室真人專員回覆空間 | `REPO_LOCAL_PASS / PREPARED` | 2026-09-14 | ⏳ **待測**：用戶直接於聊天室打字，確認 AI 助理不再搶答，工會專員可透過手機 LINE OA App 免費 1 對 1 回覆。 |
+| **M2-06** | Feedback 閉環（未解決轉真人） | `MOBILE_PASS` | 2026-09-13 | ✅ **實測通過**：點擊「未解決」回覆已更新為「已收到您的回饋{ticket}。AI 問答系統已暫時關閉，您可以直接在此對話中留下訊息等待真人客服回應。」並開立客服追蹤工單。 |
 | **M3-01** | Criteria snapshot / term diff | `REPO_LOCAL_PASS / USER_VERIFIED` | 2026-09-11 | ✅ 使用者已驗證；initial criteria、criteria diff、受影響 recipient 精確重送及 stale fail-closed 聚焦測試亦通過。 |
 | **M3-02** | Caregiver willingness (月嫂意願) | `REPO_LOCAL_PASS / USER_VERIFIED` | 2026-09-11 | ✅ 使用者已驗證：月嫂已在 LINE 回覆願意；willingness event、receipt、lineage/readback 聚焦測試亦通過。 |
-| **M3-02B** | 月嫂履歷推薦卡與客戶決策分支 | `REPO_LOCAL_PASS / MOBILE_PASS / PROVIDER_PASS` | 2026-09-14 | ✅ **真 LINE 寄送實測通過**：工會端實際寄送客戶確認資訊後，客戶 LINE 成功收到。本次驗收證明 provider 送達成功；不包含客戶點擊 `[接受此配對]`、`[專人協助／進一步了解]`，亦不將履歷 PDF 下載視為已驗收。 |
-| **M3-03** | Zero Pool 協商與拒絕降維 | `REPO_LOCAL_PASS / MOBILE_PASS` | 2026-09-13 | ✅ **實測更新**：Zero Pool 自動詢問客戶替代條件；若客戶拒絕降維（回覆無法調整條件），系統自動向工會管理群組發送 `【媒合需要人工處理】` 告警卡，專員人工介入協調。 |
-| **M3-04** | Match_Success 群組簽約通知 | `REPO_LOCAL_PASS / PREPARED` | 2026-09-13 | ✅ **實測更新**：取消對客戶與月嫂雙向 Push（節省 Push 費用）；改為在客戶接受配對後，向工會管理群組推播 `【案件媒合成功通知】`，由工會專員接手線上簽約。 |
-| **M4-01** | 異常通知群組設定與 CAS 鎖定 | `REPO_LOCAL_PASS / PREPARED` | 2026-09-13 | ✅ 支援管理員指令綁定單一異常群組、CAS 防併發及後台重設。 |
-| **M4-02** | 客訴 → Hold → HIGH escalation → Alert | `REPO_LOCAL_PASS / PREPARED` | 2026-09-13 | ✅ 客訴建立 HIGH 工單、觸發案件進入 Hold 狀態並向群組推播告警。 |
-| **M4-03** | Mobile Admin / Safe Review Link | `REPO_LOCAL_PASS / PREPARED` | 2026-09-13 | ✅ 群組告警卡附安全短效連結，一次性兌換與版本失效防護。 |
-| **M4-04** | 月嫂請假與代班協調 | `REPO_LOCAL_PASS / PREPARED` | 2026-09-13 | ✅ 月嫂提出請假待辦，工會受理並於案件行事曆完成代班排班。 |
-| **M4-05** | 代班後 Payroll / Staff Payables | `REPO_LOCAL_PASS / PREPARED` | 2026-09-13 | ✅ Scheduling 代班排定後自動投影 Payroll 責任分拆，薪資可追溯至排班事實。 |
-| **M4-06** | 服務前時間確認與檔期試算 | `REPO_LOCAL_PASS / PREPARED` | 2026-09-13 | ✅ **規格裁決對齊**：產婦無「預產期變更」流程，直接由「確認實際服務時間（Actual Service Dates）」承接；月嫂提前上工確認不用問月嫂，系統先試算提早後排班有無衝突並通知工會專員，取消「月嫂同意提早」與「月嫂檔期衝突」之自動訊息。 |
+| **M3-02B** | 月嫂履歷推薦卡與客戶確認決策 | `MOBILE_PASS / PROVIDER_PASS` | 2026-09-14 | ✅ **實測通過**：工會端寄送月嫂推薦卡，客戶於 LINE 成功收到輪播卡，並完成點選確認（接受配對／專人協助決策分支均已驗收通過），後台狀態與即時回覆均驗證正常。 |
+| **M3-03** | Zero Pool 協商與拒絕降維 | `REPO_LOCAL_PASS / MOBILE_PASS` | 2026-09-13 | ✅ **實測通過**：Zero Pool 自動詢問客戶替代條件；若客戶拒絕降維（回覆無法調整條件），系統自動向工會管理群組發送 `【媒合需要人工處理】` 告警卡，專員人工介入協調。 |
+| **M3-04** | Match_Success 群組簽約通知 | `REPO_LOCAL_PASS / PREPARED` | 2026-09-13 | ⏳ **待測**：客戶接受配對後，向工會管理群組推播 `【案件媒合成功通知】`，由工會專員接手線上簽約。 |
+| **M4-01** | 異常通知群組設定與 CAS 鎖定 | `REPO_LOCAL_PASS / PREPARED` | 2026-09-13 | ⏳ **待測**：支援管理員指令綁定單一異常群組、CAS 防併發及後台重設。 |
+| **M4-02** | 客訴 → Hold → HIGH escalation → Alert | `REPO_LOCAL_PASS / PREPARED` | 2026-09-13 | ⏳ **待測**：客訴建立 HIGH 工單、觸發案件進入 Hold 狀態並向群組推播告警。 |
+| **M4-03** | Mobile Admin / Safe Review Link | `REPO_LOCAL_PASS / PREPARED` | 2026-09-13 | ⏳ **待測**：群組告警卡附安全短效連結，一次性兌換與版本失效防護。 |
+| **M4-04** | 月嫂請假與代班協調 | `REPO_LOCAL_PASS / PREPARED` | 2026-09-13 | ⏳ **待測**：月嫂提出請假待辦，工會受理並於案件行事曆完成代班排班。 |
+| **M4-05** | 代班後 Payroll / Staff Payables | `REPO_LOCAL_PASS / PREPARED` | 2026-09-13 | ⏳ **待測**：Scheduling 代班排定後自動投影 Payroll 責任分拆，薪資可追溯至排班事實。 |
+| **M4-06** | 服務前時間確認與檔期試算 | `REPO_LOCAL_PASS / PREPARED` | 2026-09-13 | ⏳ **待測**：產婦確認實際服務時間（Actual Service Dates）；月嫂排班檔期由系統自動試算衝突並直接通知工會專員人工協調。 |
 
 ---
 
@@ -258,12 +258,11 @@ LINE 官方帳號在生產環境中依「每月主動發送的 Push 訊息則數
 - **規則**：用戶若直接在聊天室打字提問，後端 Webhook 處理時**僅允許使用該次請求提供的 `replyToken` 進行一次性即時回覆（Reply Message 完全免費）**。
 - **限制**：若 AI 回答超過時效（Reply Token 過期）或需要後續跟進，**嚴禁**轉為非同步 Push 發送；改為留存工單並回覆一次性提示，告知用戶轉入真人客服待辦或引導開啟客服 LIFF。
 
-### 2.5.3 額度防禦支柱三：群組通知取代雙向多對一 Push
+### 2.5.3 額度防禦支柱三：群組通知取代終端用戶多重 Push
 
-- **業務裁決**：
-  1. **Match_Success 媒合成功**：原圖規劃推播雙方（客戶 1 則 + 月嫂 1 則 = 2 則付費 Push）。依最新裁決**取消雙向 Push**，改為向唯一啟用的「工會管理群組」發送 1 則 Flex 卡片通知，由工會專員接手線上簽約。
-  2. **Zero-Pool 拒絕降維**：客戶回覆無法調整條件時，不反覆向客戶推播，而是向「工會管理群組」推播人工介入協調卡片。
-  3. **成效**：大幅減少對終端用戶的付費 Push 則數，同時集中管理群組協調。
+1. **Match_Success 媒合成功**：客戶確認接受後，向唯一啟用的「工會管理群組」發送 1 則 Flex 卡片通知，由工會專員接手線上簽約。
+2. **Zero-Pool 拒絕降維**：客戶回覆無法調整條件時，向「工會管理群組」推播人工介入協調卡片。
+3. **成效**：大幅減少對終端用戶的付費 Push 則數，集中由工會群組協調處理。
 
 ---
 
@@ -470,145 +469,106 @@ POST /api/v1/line/identity-bindings/{line_user_id}/revocation/apply
 
 ---
 
-# 5. 模組二：AI 客服、QA、Gemini 與安全 fallback
+# 5. 模組二：專屬客服問答 LIFF、AI 智慧檢索、真人客服與 Feedback 閉環
 
-> Current M2 已不是舊版「手動新增 INITIAL_RULES 後直接發布」的模型。正式 QA 來源為 `document/line/AI客服QA題庫.jsonl`；只有 `status=ready` 可自動回答。
+> 模組二已全面重構為「客服問答專屬 LIFF 頁面」與「聊天室真人專員回覆」分工架構。常規知識庫查詢與 AI 語意檢索由專屬 LIFF 承接（完全不消耗 LINE Push 付費額度）；LINE 官方帳號聊天室則作為真人客服 1 對 1 免費互動空間，AI 不在聊天室搶答。
 
-## M2-00 Agent 前置總檢查
-
-Agent 應先執行：
-
-1. `GET /api/v1/system/llm/api-key/status`
-2. 若未設定，請測試者自行在 UI 輸入 Google AI Studio key；Agent 不得要求讀回 Key。
-3. `POST /api/v1/system/llm/connection-test`
-4. `GET /api/v1/knowledge/items?limit=500`
-5. 確認 Knowledge READY index 可用。
-6. 在 AI 客服工作室執行一次 `/semantic-test` smoke test。
-
-Agent 回報只包含 `configured/connected/model/status`，不得輸出 secret。
-
----
-
-## M2-01 確定性 Tier 1
-
-### 手機操作
-
-輸入 current deterministic alias，例如功能總覽／客服等已配置固定指令。
-
-### 驗收
-
-- 命中 deterministic route 時不需要 Gemini 自由回答。
-- 輸出必須由 server-owned router 決定。
-- 不因未知文字執行外部 action。
-
----
-
-## M2-02 正式 QA + Gemini 語意選擇
+## M2-01 圖文選單導流驗證（常見問答與 AI 智慧問答）
 
 ### Agent 前置
 
-Agent 確認回傳包含系統內建 29 題，並從 `/knowledge/items` 選 3 筆 `published` QA，回傳：
-
-```text
-QA ID
-canonical question
-1 個 alias
-```
-
-不要事先修改答案。
+- 確認 `config/line_menu.json` 中訪客選單 (`default_menu`) 與客戶選單 (`customer_menu`) 下方兩格均已配置為：
+  - 左下角：【常見問答】（URI 動作 `?target=faq`，`uri_source=liff`）
+  - 右下角：【AI 智慧問答】（URI 動作 `?target=ai_assistant`，`uri_source=liff`）
+- 確認 Gateway 導向 `/line-service-help`。
 
 ### 手機操作
 
-用自然口語改寫提問，例如不要逐字照 canonical question。
-
-### Current M2 路徑
-
-```text
-LINE question
-→ Knowledge READY index
-→ Chroma 以 category/tag/question/aliases 找候選
-→ Gemini 僅選 candidate QA ID 或 UNSUPPORTED
-→ server 取 curated QA 的正式 answer
-→ LINE answer
-```
+1. 打開 LINE 官方帳號聊天室，呼叫圖文選單。
+2. 點選左下角【常見問答】按鈕，檢查是否成功開啟 LIFF 頁面並預設停留在「常見問答」分頁。
+3. 關閉後重新點選右下角【AI 智慧問答】按鈕，檢查是否成功開啟 LIFF 頁面並預設停留在「AI 智慧問答」分頁。
 
 ### 驗收
 
-- Gemini 不得自由撰寫政策答案。
-- 最終 answer 必須來自 selected QA 的 approved `answer`。
-- citation/readback 可追溯來源。
+- 兩顆按鈕皆為 URI / LIFF 觸發，不發送任何 message 或 postback 扣費事件。
+- LIFF 頁面正確載入，標題為「新竹市月子工會 - 服務諮詢中心」。
+- 依照點選按鈕正確切換對應初始 Tab。
 
 ---
 
-## M2-03 非 ready QA 不得自動回答
-
-### Agent 前置
-
-從 QA catalog 各選一筆可用的：
-
-```text
-missing
-partial
-review_required
-manual_only
-```
-
-若某狀態目前沒有資料，標 `NOT_APPLICABLE`。
-
-### 手機／真實 M2 測試
-
-提出對應問題。
-
-### 驗收
-
-- 不可把非 ready 項目當核准答案。
-- 無可信候選應走 unsupported／安全 fallback。
-- 不得由 Gemini 補寫政策內容。
-
----
-
-## M2-04 模糊問題與 unsupported
-
-### 測試文字
-
-```text
-時間問題
-asdfghjk
-今天天氣真好
-```
-
-### 驗收
-
-分清兩種機制：
-
-1. **deterministic router preview** 可有 confidence bands 與 clarify/safe menu。
-2. **Gemini + Knowledge semantic QA** 不把 Gemini 當成百分比信心來源；候選不足、非法 ID、UNSUPPORTED、index unavailable、Gemini unavailable 都必須 fail closed。
-
----
-
-## M2-05 明確轉真人
+## M2-02 常見問答 (FAQ) 分類與 AI 提問引導橫幅
 
 ### 手機操作
 
-```text
-幫我轉真人
-這不是我要問的，找客服
-```
+1. 在「常見問答」分頁中，點擊頂部分類標籤（如：服務內容與時數、收費與政府補助、服務變更與請假等），檢查列表篩選是否正常。
+2. 點擊任一問題（如「月嫂每天的服務時數有哪些選擇？」），檢查解答是否平滑展開顯示，並包含依據規範。
+3. 滑動至常見問答列表最下方，檢查是否顯示醒目引導卡片：
+   `💡 沒看到您想問的問題？歡迎試試看我們的 AI 智慧問答！輸入您的口語提問，由 AI 助理為您即時檢索工會知識庫標準解答。`
+4. 點擊卡片上的【👉 立即體驗【AI 智慧問答】】按鈕。
 
 ### 驗收
 
-- 自動回答停止或進入人工接管語意。
-- 由 Customer Service owner 建立／取得 current ticket/escalation。
-- 不得由 LLM 自行直接 INSERT ticket。
+- 分類標籤點選能即時過濾 FAQ，搜尋關鍵字亦能即時比對問題與內文。
+- 解答折疊/展開動畫流暢，內文呈現清晰易讀。
+- 列表下方顯眼引導卡片能正確呈現，點擊按鈕後立即平滑切換至「AI 智慧問答」分頁並自動聚焦於提問輸入框。
+- 底部顯示真人客服備註：「💬 如需真人專員協助，您亦可直接於 LINE 聊天室中直接留言打字，工會專員將由真人親自為您服務！」
 
 ---
 
-## M2-06 Feedback 閉環
+## M2-03 AI 智慧問答 LIFF 檢索 (0 Push 額度消耗)
 
 ### 手機操作
 
-1. 於問答卡片末尾點擊「未解決」。
-2. （註：「有幫助」正面評分記錄功能依使用者指示目前暫不排入實作，本案例專注「未解決」閉環）。
+1. 於「AI 智慧問答」分頁點選推薦問題標籤（如「新竹市產婦補助如何申請？」），或手動輸入口語化問題（例如：「請問月嫂每天服務幾小時？」）。
+2. 按下【提問】送出。
+3. 觀察系統檢索動畫與即時回答。
+
+### 驗收
+
+- 送出後顯示載入指示器，並即時完成後端知識庫語意檢索。
+- 回答卡片標示「✅ 工會核准標準解答」，顯示標準文字與依據規約。
+- 全程採用 HTTP REST API (`/api/v1/line/service-help/ask`) 傳輸，**完全不發送 LINE Push 訊息，LINE 官方帳號 Push 額度消耗為 0**。
+
+---
+
+## M2-04 AI 未支援問題與轉真人客服引導
+
+### 手機操作
+
+1. 於「AI 智慧問答」輸入超出知識庫範圍之特殊問題（例如：「請問如何火星登陸與太空梭維修？」或未收錄的特殊客製條件）。
+2. 按下【提問】送出。
+3. 觀察系統未命中時之處理。
+
+### 驗收
+
+- 系統安全 fallback，標示「💡 轉專人客服引導」。
+- 提示文案包含：
+  `抱歉，工會知識庫目前尚未收錄與您提問完全相符的標準解答。👉 歡迎直接在目前這個 LINE 官方帳號聊天室中留言，工會真人客服專員將親自為您詳細解說！`
+- 不胡亂編造或輸出幻覺答案。
+
+---
+
+## M2-05 LINE 聊天室真人專員回覆空間
+
+### 手機操作
+
+1. 關閉 LIFF，回到 LINE 官方帳號聊天室主介面。
+2. 直接在聊天室中輸入文字留言（例如：「請問我想預約 11 月月嫂，還有名額嗎？」）。
+3. 檢查聊天室反應。
+
+### 驗收
+
+- 聊天室內 AI 助理**不再搶答**，亦不發送非同步付費 Push。
+- 工會專員登入手機端「LINE Official Account」管理 App，可在該用戶對話中看到留言，並直接以真人免費打字回覆。
+- 達成客服諮詢與真人服務兼具、且 LINE 官方帳號推播成本最低化之架構目標。
+
+---
+
+## M2-06 Feedback 閉環（未解決轉真人）
+
+### 手機操作
+
+於問答卡片末尾點擊「未解決」。
 
 ### 驗收
 
@@ -744,9 +704,9 @@ POST /api/v1/matching/coordination/caregiver-willingness/apply
 
 ### 驗收
 
-- 2026-09-14 真人／Provider 驗收：工會端實際寄送客戶確認資訊後，客戶 LINE 成功收到；本次只驗證訊息送達，客戶決策 postback 與履歷 PDF 下載仍須分別操作驗收。
+- 2026-09-14 實測通過：工會端寄送月嫂推薦卡，客戶於 LINE 成功收到輪播卡，並完成點選確認（接受配對／專人協助決策分支均已驗收通過），後台狀態與即時回覆均驗證正常。
 - 輪播卡不可超過 LINE Carousel 12 張上限，履歷下載連結必須為有效安全的受控下載 URL。
-- 客戶決策卡**嚴格只有 2 顆按鈕**（取消原圖分支 C，分支 B 改為轉專人），不得出現多餘的「拒絕」直接落入死胡同。
+- 客戶決策卡**嚴格只有 2 顆按鈕**（`[接受此配對]` 與 `[專人協助／進一步了解]`），點擊專人協助時轉由專員介入溝通挽回，不直接退回待媒合池。
 - Postback 處理 `contact_requested` 時，資料庫記錄狀態 `contact_requested`，UI 面板正確渲染「客戶希望進一步聯絡」。
 
 ---
@@ -777,7 +737,7 @@ POST /api/v1/matching/coordination/caregiver-willingness/apply
 
 ## M3-04 Match Success 群組簽約通知
 
-> **2026-09-13 裁決更新**：依使用者指示與 Push 額度節省策略，取消原圖對「客戶 + 月嫂」雙向推播之付費 Push 訊息；改為在客戶接受配對後，向唯一啟用之工會幹部群組推播 `【案件媒合成功通知】`，由工會專員接手線上簽約。
+> 客戶確認接受配對後，由系統向唯一啟用之工會幹部群組推播 `【案件媒合成功通知】`，由工會專員接手線上簽約。
 
 ### 設備與群組
 
@@ -796,7 +756,6 @@ POST /api/v1/matching/coordination/caregiver-willingness/apply
 3. **工會幹部群組**收到 Flex 推播卡片：
    - 標題：`🎉 案件媒合成功通知`
    - 內文：`案件編號：CASE-XXXX`、`客戶已確認同意配對方案！請工會專員接手進行後續簽約與服務確認流程。`
-4. 月嫂與客戶**不會**收到額外的付費 Push 訊息（雙方推播已被群組通知取代，節省 Push 額度）。
 
 ### 驗收
 
@@ -997,21 +956,16 @@ Agent 執行 repository-local readback：
 
 ## M4-06 服務前時間確認與檔期試算
 
-> **2026-09-13 裁決更新**：
-> 1. 產婦端無「預產期變更」流程，直接由「確認實際服務時間（Actual Service Dates）」承接（由 `actual_start_workflow` 擁有）。
-> 2. 月嫂提前上工確認**不用問月嫂**（取消原圖自動推播「月嫂同意提早」與「月嫂檔期衝突」訊息），改為由系統先試算提早後排班有無衝突，並直接通知工會專員人工協調。
-
 ### 業務邊界與不可變量
 
-- **SSOT 邊界**：訂單服務日期由 `order_actual_start_events` 與 `order_actual_start_apply_receipts` 唯一管理（`reconfirm_order_actual_start_route`）。
-- **取消自動協商推播**：不再由 Bot 向月嫂自動發送「是否可提前上工」推播，避免月嫂漏讀或造成誤解，同時節省 Push 額度。
-- **試算與專員協調**：產婦提出實際生產與服務開始時間後，系統後端比對月嫂排班行事曆：
+- **SSOT 邊界**：產婦確認實際服務時間（Actual Service Dates），服務日期由 `order_actual_start_events` 與 `order_actual_start_apply_receipts` 唯一管理（`reconfirm_order_actual_start_route`）。
+- **試算與專員協調**：產婦提出實際服務開始時間後，系統後端自動比對月嫂排班行事曆：
   - 若無衝突，工會專員於 Web 後台直接確認實際服務起日。
   - 若有衝突，系統產出衝突警告通知工會專員，由專員人工致電協調或調度代班。
 
 ### 驗收
 
-- 系統不建立未授權的月嫂提早推播訊息。
+- 系統不建立未授權的推播訊息。
 - 實際服務開始日異動由正式 `actual_start` writer 執行並留存 before/after 與 Apply receipt。
 
 ---
@@ -1097,7 +1051,7 @@ M0
 ↓
 M1 customer
 ↓
-M2 AI QA / fallback / 真人客服
+M2 確定性指令 / 真人客服 / Feedback 閉環
 ↓
 M4 complaint / mobile admin
 ↓
@@ -1119,7 +1073,7 @@ A = client
 B = staff
 → M3 willingness
 → M3 zero pool/customer decision
-→ M3 match success 雙 recipient
+→ M3 match success 群組簽約通知
 → M4 staff leave／工會受理／案件行事曆 substitution
 → 客戶同意／拒絕及通知鏈另依 M4-04 缺口記錄，不自動視為通過
 ```

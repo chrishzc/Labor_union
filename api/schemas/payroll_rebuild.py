@@ -16,7 +16,7 @@ class PayrollAssignmentCalculationView(_StrictModel):
     assignment_identity: str
     staff_id: int = Field(gt=0)
     official_service_day_count: int = Field(gt=0)
-    actual_hours: int = Field(gt=0)
+    actual_hours: float = Field(gt=0, multiple_of=0.5)
     double_pay_hours: int = Field(ge=0)
     hourly_rate_ntd: int = Field(gt=0)
     service_salary_ntd: int = Field(gt=0)

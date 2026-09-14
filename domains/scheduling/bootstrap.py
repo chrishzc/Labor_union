@@ -25,7 +25,7 @@ class SchedulingBootstrapIssue(StrEnum):
 class LegacyOrderSchedulingFacts:
     case_no: str
     service_days: int
-    service_hours_per_day: int
+    service_hours_per_day: float | int
     service_started: bool
 
 

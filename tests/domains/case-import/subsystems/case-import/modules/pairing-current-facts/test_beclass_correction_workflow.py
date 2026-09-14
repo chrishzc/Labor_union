@@ -63,6 +63,27 @@ def test_beclass_correction_preserves_original_and_replays_exactly_once():
         workflow.preview("CASE-001", {"phone": "0933333333"}, ExpectedVersion(0))
 
 
+def test_beclass_correction_accepts_only_canonical_multi_birth_count():
+    repository = _Repository()
+    repository.original["multi_birth_count"] = None
+    workflow = BeClassCorrectionWorkflow(repository, _Uow)
+
+    preview = workflow.preview(
+        "CASE-001", {"multi_birth_count": "雙胞胎"}, ExpectedVersion(0)
+    )
+
+    assert preview.before == {"multi_birth_count": None}
+    assert preview.after == {"multi_birth_count": "雙胞胎"}
+    with pytest.raises(ValueError, match="beclass_multi_birth_count_invalid"):
+        workflow.preview(
+            "CASE-001", {"multi_birth_count": "第二胎"}, ExpectedVersion(0)
+        )
+    with pytest.raises(ValueError, match="beclass_value_cannot_be_empty"):
+        workflow.preview(
+            "CASE-001", {"multi_birth_count": None}, ExpectedVersion(0)
+        )
+
+
 class _SqlCursor:
     def __init__(self):
         self.responses = iter([

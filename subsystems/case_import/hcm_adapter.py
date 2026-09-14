@@ -25,7 +25,7 @@ CLIENT_PAYMENT_POLICY_VERSION = "client-approved-v1"
 PAYROLL_POLICY_VERSION = "approved-rates-v1"
 _CLIENT_RATE_BY_IDENTITY = {"一般市民": 300, "低收入戶": 350, "中低收入戶": 350, "非市民": 320, "補助市民": 350}
 _SUBSIDIZED_IDENTITIES = frozenset({"中低收入戶", "低收入戶", "補助市民"})
-_EXPLICIT_HOURS_PATTERN = re.compile(r"(?P<hours>\d{1,2})\s*小時")
+_EXPLICIT_HOURS_PATTERN = re.compile(r"(?P<hours>\d{1,2}(?:\.5)?)\s*小時")
 _CLOCK_PATTERN = re.compile(r"(?P<hour>[01]?\d|2[0-3]):(?P<minute>[0-5]\d)")
 
 
@@ -106,7 +106,7 @@ def build_approved_case_architecture_bootstrap_intent(
     return CaseArchitectureBootstrapIntent(case_no, terms, PAYROLL_POLICY_VERSION)
 
 
-def parse_hcm_service_time(value: str) -> tuple[int, time, time, int]:
+def parse_hcm_service_time(value: str) -> tuple[float | int, time, time, int]:
     """Parse HCM source service terms for both new-case and historical-update lanes."""
     return _service_time_facts(value)
 
@@ -156,7 +156,8 @@ def _service_time_facts(value):
     clocks = tuple(_clock(match) for match in _CLOCK_PATTERN.finditer(value))
     if hours_match is None or len(clocks) != 2:
         raise ValueError("case_import_service_time_incomplete")
-    service_hours = int(hours_match.group("hours"))
+    parsed_hours = float(hours_match.group("hours"))
+    service_hours: float | int = int(parsed_hours) if parsed_hours.is_integer() else parsed_hours
     end_offset = 1 if re.search(r"(次日|翌日|\+1)", value) else 0
     if clocks[1] <= clocks[0] and end_offset == 0:
         raise ValueError("case_import_service_time_incomplete")

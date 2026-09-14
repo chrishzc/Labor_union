@@ -21,7 +21,7 @@ class ProposedServiceSegment:
     start_date: date
     end_date: date
     weekly_rest_days: frozenset[int]
-    service_hours_per_day: int
+    service_hours_per_day: float | int
     special_rest_dates: frozenset[date] = frozenset()
 
     def __post_init__(self) -> None:
@@ -40,7 +40,7 @@ class ProposedWeeklyServiceRow:
     week_start_date: date
     week_end_date: date
     weekly_work_days: int
-    weekly_hours: int
+    weekly_hours: float | int
 
 
 def project_proposed_weekly_service(

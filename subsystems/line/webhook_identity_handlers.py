@@ -18,6 +18,11 @@ from domains.line.delivery import (
 from domains.line.identity_flow import LineIdentityFlowPurpose
 from domains.line.platform_user import LineFriendEvent, LineFriendEventType
 from shared_kernel.identities import CorrelationId, IdempotencyKey
+from domains.line.configuration import LineConfigurationKind
+from subsystems.line.message_configuration import (
+    configuration_definition,
+    render_message_template,
+)
 from subsystems.line.feedback_contracts import FeedbackOutcome, RecordLineFeedback
 from subsystems.line.identity_contracts import OpenLineIdentityFlowCommand
 from subsystems.line.identity_management_contracts import LineIdentityCurrentFactQuery
@@ -339,6 +344,7 @@ class LineWebhookIdentityHandlers:
                 event_identity,
                 correlation_id,
                 self._now(),
+                unit_of_work=unit_of_work,
             )
         )
 
@@ -350,8 +356,9 @@ def _identity_link_delivery(
     event_identity,
     correlation_id,
     scheduled_at,
+    unit_of_work=None,
 ):
-    message = _identity_link_message(purpose, url)
+    message = _identity_link_message(purpose, url, unit_of_work=unit_of_work)
     return LineDeliveryRequest(
         LineRecipient(LineRecipientType.USER, line_user_id),
         LineMessageKind.TEXT,
@@ -474,24 +481,37 @@ def _liff_url(query):
     return f"https://liff.line.me/{liff_id}/{query}"
 
 
-def _identity_link_message(purpose, url):
+DEFAULT_ONBOARDING_WELCOME_MESSAGE = (
+    "您好！歡迎加入【新竹市月子工會】官方服務平台 🤱✨\n\n"
+    "我們提供專業、安心、有保障的到府坐月子媒合與母嬰照護服務。\n\n"
+    "📱【新手快速導覽・三步驟開始使用】\n\n"
+    "1️⃣ 準爸媽／產婦專區：\n"
+    "👉 請開啟以下專屬登記頁面，進行服務需求填寫或核對市府登記案件：\n"
+    "{url}\n"
+    "（此安全登記連結將於 15 分鐘後失效）\n\n"
+    "2️⃣ 專業月嫂服務人員：\n"
+    "👉 請點擊下方選單【月嫂專區】或直接在對話框輸入「我要綁定月嫂」進行身分認證。\n\n"
+    "3️⃣ 服務說明與專人諮詢：\n"
+    "👉 請點擊下方選單【服務說明】查看服務流程與常見問答。\n\n"
+    "---\n"
+    "💡 如需真人專員協助，隨時在對話框輸入「轉真人客服」，我們將由專人為您服務。\n\n"
+    "👇 請點擊下方圖文選單，開啟您的專屬服務！"
+)
+
+
+def _identity_link_message(purpose, url, unit_of_work=None):
     if purpose == LineIdentityFlowPurpose.CUSTOMER_BINDING:
-        return (
-            "您好！歡迎加入【新竹市月子工會】官方服務平台 🤱✨\n\n"
-            "我們提供專業、安心、有保障的到府坐月子媒合與母嬰照護服務。\n\n"
-            "📱【新手快速導覽・三步驟開始使用】\n\n"
-            "1️⃣ 準爸媽／產婦專區：\n"
-            "👉 請開啟以下專屬登記頁面，進行服務需求填寫或核對市府登記案件：\n"
-            f"{url}\n"
-            "（此安全登記連結將於 15 分鐘後失效）\n\n"
-            "2️⃣ 專業月嫂服務人員：\n"
-            "👉 請點擊下方選單【月嫂專區】或直接在對話框輸入「我要綁定月嫂」進行身分認證。\n\n"
-            "3️⃣ 即時智慧客服諮詢：\n"
-            "👉 直接在對話框輸入您的問題（例如：「補助時數」、「收費原則」、「服務內容」），AI 小幫手 24 小時為您即時解答！\n\n"
-            "---\n"
-            "💡 如需真人專員協助，隨時在對話框輸入「轉真人客服」，我們將由專人為您服務。\n\n"
-            "👇 請點擊下方圖文選單，開啟您的專屬服務！"
-        )
+        if unit_of_work is not None:
+            try:
+                snapshot = unit_of_work.configurations.get(LineConfigurationKind.MESSAGE_TEMPLATES)
+                templates = configuration_definition(snapshot)
+                rendered = render_message_template(templates, "customer_onboarding_welcome", {"url": url})
+                payload = json.loads(rendered.payload_json)
+                if isinstance(payload, dict) and isinstance(payload.get("text"), str):
+                    return payload["text"]
+            except Exception:
+                pass
+        return DEFAULT_ONBOARDING_WELCOME_MESSAGE.format(url=url)
     introductions = {
         LineIdentityFlowPurpose.STAFF_VERIFICATION: "請開啟以下頁面填寫月嫂身分資料：",
         LineIdentityFlowPurpose.ADMIN_BINDING: "請開啟以下頁面登入並綁定工會後台帳號：",

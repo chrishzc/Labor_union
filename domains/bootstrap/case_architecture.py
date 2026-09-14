@@ -153,7 +153,7 @@ class CaseRootFacts:
     order_version: int
     planned_start_date: date | None
     service_days: int
-    service_hours_per_day: int
+    service_hours_per_day: float | int
     source_identity_status: str
     multi_birth_count: str | None = None
 

@@ -105,7 +105,7 @@ class OrderTermsReceipt:
     cancelled_assignment_ids: tuple[int, ...]
     created_assignment_keys: tuple[str, ...]
     official_service_day_count: int
-    official_service_hours: int
+    official_service_hours: float | int
     preview_fingerprint: Any
 
 

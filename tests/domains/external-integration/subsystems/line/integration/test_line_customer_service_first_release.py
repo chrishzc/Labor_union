@@ -300,20 +300,16 @@ def test_merge_menu_copy_uses_canonical_entry_and_verified_staff_liff_targets():
     ]
     assert "?entry=registration" in action_uris
     assert "?target=registration" not in action_uris
-    assert "服務與問答" in message_texts
     assert "?target=order_update" in action_uris
+    assert "?target=faq" in action_uris
+    assert "?target=ai_assistant" in action_uris
     assert "服務說明" not in message_texts
     assert "常見問答" not in message_texts
     assert customer_quadrants == [
         ("修改登記資料", "uri", None, "?target=profile_update"),
         ("修改訂單資訊", "uri", None, "?target=order_update"),
-        ("服務與問答", "message", "服務與問答", None),
-        (
-            "專人客服諮詢",
-            "postback",
-            None,
-            "customer-service:handoff:confirm",
-        ),
+        ("常見問答", "uri", None, "?target=faq"),
+        ("AI 智慧問答", "uri", None, "?target=ai_assistant"),
     ]
     assert "?target=staff_order_search" in action_uris
     assert "?target=staff_schedule" in action_uris

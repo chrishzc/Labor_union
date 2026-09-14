@@ -18,6 +18,7 @@ from shared_kernel.money import MoneyNTD
 from shared_kernel.validation import (
     require_canonical_text,
     require_nonnegative_integer,
+    require_positive_half_hour,
     require_positive_integer,
 )
 
@@ -97,7 +98,7 @@ class ExistingClientStageObligation:
 class ClientFinanceTermsFacts:
     case_no: str
     account_version: int
-    service_hours_per_day: int
+    service_hours_per_day: float | int
     floor_fee: MoneyNTD
     charge_days: tuple[ClientChargeDay, ...]
     payment_terms: ClientPaymentTerms
@@ -107,7 +108,7 @@ class ClientFinanceTermsFacts:
     def __post_init__(self) -> None:
         _validate_identity(self.case_no, "case number")
         require_nonnegative_integer(self.account_version, "account version")
-        require_positive_integer(
+        require_positive_half_hour(
             self.service_hours_per_day,
             "service hours per day",
         )
@@ -489,10 +490,18 @@ def _stage_plan(facts, payment_stage, charge_days, floor_fee):
 def _daily_charge(facts, charge_day):
     multiplier = 2 if charge_day.is_double_pay else 1
     return (
-        facts.payment_terms.client_hourly_rate
-        * facts.service_hours_per_day
-        * multiplier
+        MoneyNTD(_whole_ntd(
+            facts.payment_terms.client_hourly_rate.amount
+            * facts.service_hours_per_day
+            * multiplier
+        ))
     )
+
+
+def _whole_ntd(value: float | int) -> int:
+    if isinstance(value, float) and not value.is_integer():
+        raise ValueError("half-hour charge must resolve to whole NTD")
+    return int(value)
 
 
 def _stage_due_date(payment_terms, payment_stage):

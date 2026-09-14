@@ -35,7 +35,7 @@ export const SchedulingCurrentAssignmentSchema = z
     first_service_at: SchedulingIsoDateTimeSchema,
     completion_at: SchedulingIsoDateTimeSchema,
     official_service_day_count: z.number().int().positive(),
-    actual_hours: z.number().int().positive(),
+    actual_hours: z.number().positive().multipleOf(0.5),
   })
   .strict();
 

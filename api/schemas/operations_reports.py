@@ -62,7 +62,7 @@ class WeeklyReportCaseRowView(_StrictModel):
     ]
     order_status: str | None
     service_days: int | None = Field(default=None, gt=0)
-    service_hours_per_day: int | None = Field(default=None, gt=0)
+    service_hours_per_day: float | None = Field(default=None, gt=0, le=24, multiple_of=0.5)
     planned_start_date: date | None
     planned_end_date: date | None
     district: str | None
@@ -81,9 +81,9 @@ class WeeklyReportServiceRowView(_StrictModel):
     service_end_date: date
     period_start_date: date
     period_end_date: date
-    service_hours_per_day: int = Field(gt=0)
+    service_hours_per_day: float = Field(gt=0, le=24, multiple_of=0.5)
     weekly_work_days: int = Field(gt=0)
-    weekly_hours: int = Field(gt=0)
+    weekly_hours: float = Field(gt=0, multiple_of=0.5)
     order_status: str
     completed: bool
     data_quality_codes: list[str]

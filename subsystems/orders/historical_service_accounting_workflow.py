@@ -61,7 +61,7 @@ class HistoricalServiceAccountingFacts:
     client_finance_version: int
     payroll_version: int
     contracted_service_days: int
-    service_hours_per_day: int
+    service_hours_per_day: float | int
     contractual_floor_fee: MoneyNTD
     client_identity_status: str
     assignments: tuple[HistoricalServiceAccountingAssignmentFacts, ...]

@@ -15,6 +15,7 @@ from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.validation import (
     require_canonical_text,
     require_nonnegative_integer,
+    require_positive_half_hour,
     require_positive_integer,
 )
 
@@ -109,7 +110,7 @@ class AssignmentPlanFacts:
     client_finance_version: int
     payroll_version: int
     contracted_service_days: int
-    service_hours_per_day: int
+    service_hours_per_day: float | int
     service_started: bool
     effective_assignments: tuple[EffectiveAssignmentFact, ...] = ()
     external_occupancy: tuple[StaffOccupancyFact, ...] = ()
@@ -126,7 +127,7 @@ class AssignmentPlanFacts:
             self.contracted_service_days,
             "contracted service days",
         )
-        require_positive_integer(
+        require_positive_half_hour(
             self.service_hours_per_day,
             "service hours per day",
         )

@@ -97,7 +97,7 @@ class SchedulingCaseFacts:
     start_date: date | None
     end_date: date | None
     service_days: int | None
-    service_hours_per_day: int | None
+    service_hours_per_day: float | int | None
     requires_cooking: bool | None
     location_text: str | None
     scheduling_version: int | None

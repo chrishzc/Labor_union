@@ -34,7 +34,14 @@ from api.schemas.client_registry import (
 )
 from api.schemas.order_terms import OrderTermsQueryView
 from domains.case_import.beclass_correction import BeClassCorrectionError
-from domains.clients.profile import ClientProfileValidationError
+from domains.case_import.beclass_correction import VALID_MULTI_BIRTH_COUNTS
+from domains.case_import.client_import_validation import VALID_CITIES
+from domains.clients.profile import (
+    ClientProfileValidationError,
+    VALID_DELIVERY_TYPES,
+    VALID_GENDERS,
+    VALID_RESIDENCE_TYPES,
+)
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import CorrelationId, ExpectedVersion, IdempotencyKey
 from subsystems.access.authentication_session import AdminPrincipal
@@ -57,6 +64,22 @@ from subsystems.client_profile.registry_query import (
 
 
 router = APIRouter(prefix="/api/v1/admin/registries/clients", tags=["Client Registry"])
+
+_FIELD_OPTIONS = {
+    "client_profile": {
+        "gender": ("女", "男"),
+        "city": tuple(VALID_CITIES),
+        "residence_type": ("電梯大樓", "公寓", "透天", "其他"),
+        "delivery_type": ("自然產", "剖腹產", "未定"),
+    },
+    "client_beclass": {
+        "multi_birth_count": ("單胞胎", "雙胞胎"),
+    },
+}
+assert set(_FIELD_OPTIONS["client_profile"]["gender"]) == VALID_GENDERS
+assert set(_FIELD_OPTIONS["client_profile"]["residence_type"]) == VALID_RESIDENCE_TYPES
+assert set(_FIELD_OPTIONS["client_profile"]["delivery_type"]) == VALID_DELIVERY_TYPES
+assert set(_FIELD_OPTIONS["client_beclass"]["multi_birth_count"]) == VALID_MULTI_BIRTH_COUNTS
 
 
 @router.get("", response_model=BaseResponse[ClientRegistryPageView])
@@ -128,6 +151,11 @@ def get_client_registry(
                     detail.beclass.status == "ready",
                     None if detail.beclass.status == "ready" else f"beclass_{detail.beclass.status}",
                 ),
+            },
+            "order_information": {
+                "status": detail.order_information.status,
+                "values": detail.order_information.values,
+                "field_issues": detail.order_information.field_issues,
             },
             "order_terms": _order_terms_section(order_terms, case_no),
         }
@@ -303,7 +331,12 @@ def _field_capabilities(
     reason: str | None = None,
 ) -> dict[str, dict[str, Any]]:
     return {
-        str(field): {"owner": owner, "editable": editable, "reason": reason}
+        str(field): {
+            "owner": owner,
+            "editable": editable,
+            "reason": reason,
+            "options": _FIELD_OPTIONS.get(owner, {}).get(str(field)),
+        }
         for field in values
     }
 

@@ -15,6 +15,7 @@ from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.validation import (
     require_canonical_text,
     require_nonnegative_integer,
+    require_positive_half_hour,
     require_positive_integer,
 )
 
@@ -67,7 +68,7 @@ class EffectiveAssignmentCurrentFact:
     case_first_service_date: date
     official_service_dates: tuple[date, ...]
     active_buffer_dates: tuple[date, ...]
-    service_hours_per_day: int
+    service_hours_per_day: float | int
     service_time_terms: ServiceTimeTerms
 
     def __post_init__(self) -> None:
@@ -161,7 +162,7 @@ class AssignmentCurrentProjection:
     first_service_at: datetime
     completion_at: datetime
     official_service_day_count: int
-    actual_hours: int
+    actual_hours: float | int
 
 
 @dataclass(frozen=True, slots=True)
@@ -737,7 +738,7 @@ def _validate_assignment_dates(assignment):
 
 
 def _validate_assignment_service_facts(assignment):
-    require_positive_integer(
+    require_positive_half_hour(
         assignment.service_hours_per_day,
         "service hours per day",
     )

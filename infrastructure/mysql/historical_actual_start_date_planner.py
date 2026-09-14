@@ -293,9 +293,9 @@ def _source_assignment_and_order_facts(cursor, case_no, *, for_update: bool):
     return source_assignments, _order_context(cursor, case_no, for_update=for_update)
 
 
-def _service_hours_per_day(order) -> int:
+def _service_hours_per_day(order) -> float:
     try:
-        return int(order["service_hours_per_day"])
+        return float(order["service_hours_per_day"])
     except (KeyError, TypeError, ValueError) as error:
         raise HistoricalActualStartPreparationError(
             "historical_actual_start_source_invalid"

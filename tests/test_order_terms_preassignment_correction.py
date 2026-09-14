@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
-from api.routes.order_terms import OrderTermsApplyBody
+from api.routes.order_terms import OrderTermsApplyBody, OrderTermsInput
 from domains.client_finance.obligation_planning import (
     ClientFinanceTermsSourceFacts,
     ClientPaymentTerms,
@@ -59,6 +59,28 @@ def _incomplete_terms(*, requires_cooking):
         ServiceTimeTerms(None, None, None),
         requires_cooking,
     )
+
+
+def test_order_terms_accept_half_hour_precision_and_reject_quarter_hours():
+    accepted = OrderTermsInput(
+        planned_start_date=date(2026, 9, 10),
+        service_days=5,
+        service_hours_per_day=4.5,
+        requires_cooking=False,
+        floor_fee_ntd=0,
+        service_time={"start_time": time(9), "end_time": time(13, 30), "end_day_offset": 0},
+    )
+    assert accepted.to_domain().service_hours_per_day == 4.5
+
+    with pytest.raises(ValidationError):
+        OrderTermsInput(
+            planned_start_date=date(2026, 9, 10),
+            service_days=5,
+            service_hours_per_day=4.25,
+            requires_cooking=False,
+            floor_fee_ntd=0,
+            service_time={"start_time": time(9), "end_time": time(13, 15), "end_day_offset": 0},
+        )
 
 
 def _facts():
@@ -621,3 +643,23 @@ def test_assigned_start_date_shift_rebuilds_owned_impacts_and_replays_receipt():
     ]
     assert replayed == receipt
     assert len(repository.writes) == write_count
+
+
+def test_assigned_half_hour_terms_keep_fractional_hours_in_finance_and_payroll():
+    facts = _assigned_facts()
+    workflow = terms_workflow.OrderTermsWorkflow(_Repository(facts), object(), _Clock())
+    proposed = OrderTerms(
+        date(2026, 9, 10),
+        5,
+        4.5,
+        MoneyNTD(0),
+        ServiceTimeTerms(time(9), time(13, 30), 0),
+        None,
+    )
+
+    preview = workflow.preview("116990823", proposed)
+
+    assert preview.scheduling.assignments[0].actual_hours == 22.5
+    assert preview.client_finance_impact.actions
+    assert preview.payroll_impact.actions
+    assert preview.payroll_impact.actions[0].amount.amount == 6750

@@ -97,4 +97,17 @@ describe('Staff registry owner editing', () => {
     expect(mocks.uploadResume).toHaveBeenCalledTimes(2);
     expect(mocks.uploadResume.mock.calls[1][2]).toBe(mocks.uploadResume.mock.calls[0][2]);
   });
+
+  it('displays full bank account number in account selection when available', () => {
+    const profileWithAccountNo = {
+      ...STAFF_PROFILE,
+      bank_accounts: [
+        { account_id: 3, bank_code: '812', branch_code: '0012', account_no: '81230011223344', account_last4: '3344', is_primary: true, is_active: true },
+      ],
+    };
+    render(<StaffRegistryEditor profile={profileWithAccountNo} onUpdated={vi.fn()} />);
+    const bankSection = screen.getByRole('heading', { name: /管理銀行帳戶/ }).closest('section') as HTMLElement;
+    fireEvent.change(within(bankSection).getByLabelText('動作'), { target: { value: 'replace' } });
+    expect(within(bankSection).getByRole('combobox', { name: '帳戶' })).toHaveTextContent('帳號 81230011223344');
+  });
 });

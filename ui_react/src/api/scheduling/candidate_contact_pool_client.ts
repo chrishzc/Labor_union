@@ -139,8 +139,8 @@ const WeeklyServicePreviewSchema = z.strictObject({
   rows: z.array(z.strictObject({
     serial_number: z.number().int().positive(), staff_name: z.string().min(1).max(100),
     week_start_date: IsoDateSchema, week_end_date: IsoDateSchema,
-    service_hours_per_day: z.number().int().positive(), weekly_work_days: z.number().int().min(0).max(7),
-    weekly_hours: z.number().int().nonnegative(),
+    service_hours_per_day: z.number().positive().max(24).multipleOf(0.5), weekly_work_days: z.number().int().min(0).max(7),
+    weekly_hours: z.number().nonnegative().multipleOf(0.5),
   })),
 });
 export type CandidateWeeklyServicePreview = z.infer<typeof WeeklyServicePreviewSchema>;

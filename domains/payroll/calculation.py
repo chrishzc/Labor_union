@@ -15,6 +15,7 @@ from shared_kernel.money import MoneyNTD
 from shared_kernel.validation import (
     require_canonical_text,
     require_nonnegative_integer,
+    require_positive_half_hour,
     require_positive_integer,
 )
 
@@ -75,7 +76,7 @@ class AssignmentRateSnapshot:
 @dataclass(frozen=True, slots=True)
 class PayrollTerms:
     contracted_service_days: int
-    service_hours_per_day: int
+    service_hours_per_day: float | int
     floor_fee: MoneyNTD
 
     def __post_init__(self) -> None:
@@ -83,7 +84,7 @@ class PayrollTerms:
             self.contracted_service_days,
             "contracted service days",
         )
-        require_positive_integer(
+        require_positive_half_hour(
             self.service_hours_per_day,
             "service hours per day",
         )
@@ -106,8 +107,8 @@ class AssignmentPayrollCandidate:
     assignment_identity: str
     staff_id: int
     official_service_day_count: int
-    actual_hours: int
-    double_pay_hours: int
+    actual_hours: float | int
+    double_pay_hours: float | int
     hourly_rate: MoneyNTD
     service_salary: MoneyNTD
     floor_fee_allocated: MoneyNTD
@@ -221,9 +222,9 @@ def _build_assignment_candidate(facts, rate, terms, floor_fee, adjustments):
     service_day_count = len(facts.service_dates)
     actual_hours = service_day_count * terms.service_hours_per_day
     double_pay_hours = len(facts.double_pay_dates) * terms.service_hours_per_day
-    service_salary = MoneyNTD(
+    service_salary = MoneyNTD(_whole_ntd(
         (actual_hours + double_pay_hours) * rate.hourly_rate.amount
-    )
+    ))
     total_payable = service_salary + floor_fee + adjustments
     return AssignmentPayrollCandidate(
         assignment_identity=facts.assignment_identity,
@@ -237,6 +238,12 @@ def _build_assignment_candidate(facts, rate, terms, floor_fee, adjustments):
         effective_adjustments=adjustments,
         total_payable=total_payable,
     )
+
+
+def _whole_ntd(value: float | int) -> int:
+    if isinstance(value, float) and not value.is_integer():
+        raise ValueError("half-hour payroll amount must resolve to whole NTD")
+    return int(value)
 
 
 def _build_assignment_candidates(facts, rates, terms, floor_fees, adjustments):

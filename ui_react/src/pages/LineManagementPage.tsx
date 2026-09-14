@@ -148,6 +148,8 @@ import {
   type LineUnboundPairingClient,
 } from '../components/LineUnboundPairingWorkbench';
 import { LineNotificationRulesMutationPanel } from '../components/LineNotificationRulesMutationPanel';
+import { LineOnboardingEditor } from '../components/LineOnboardingEditor';
+import type { LineOnboardingClient } from '../api/line_onboarding/line_onboarding_client';
 import { LineRichMenuPublicationActions } from '../components/LineRichMenuPublicationActions';
 import {
   lineRichMenuPublicationClient,
@@ -208,6 +210,7 @@ interface LineManagementPageProps {
   escalation?: typeof customerServiceEscalationClient;
   delivery?: typeof lineDeliveryQueryClient;
   safeReviewLink?: SafeReviewLinkClient;
+  onboardingClient?: LineOnboardingClient;
   /** Render only the safety and human-escalation workspace inside the canonical Group & Security page. */
   runtimeOnly?: boolean;
 }
@@ -365,6 +368,8 @@ const CANONICAL_RICH_MENU_ROUTES: Readonly<Record<string, string>> = {
   'target:customer_service': '/line-mobile-admin?target=customer_service',
   'target:scheduling_review': '/line-mobile-admin?target=scheduling_review',
   'target:staff_review': '/line-mobile-admin?target=staff_review',
+  'target:faq': '/line-service-help?tab=faq',
+  'target:ai_assistant': '/line-service-help?tab=ai',
 };
 
 export function resolveRichMenuUri(uri: string | null): string | null {
@@ -435,6 +440,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
   escalation = customerServiceEscalationClient,
   delivery = lineDeliveryQueryClient,
   safeReviewLink = safeReviewLinkClient,
+  onboardingClient,
   runtimeOnly = false,
 }) => {
   const initialHashParams = useRef(currentHashParams()).current;
@@ -1927,7 +1933,8 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                       let Icon = MapPin;
                       if (label.includes('登記')) Icon = FileText;
                       else if (label.includes('修改') || label.includes('異動')) Icon = FilePenLine;
-                      else if (label.includes('說明') || label.includes('FAQ')) Icon = Info;
+                      else if (label.includes('說明') || label.includes('FAQ') || label.includes('常見問答') || label.includes('問答')) Icon = Info;
+                      else if (label.includes('AI') || label.includes('智慧問答') || label.includes('助理')) Icon = Sparkles;
                       else if (label.includes('客服') || label.includes('諮詢')) Icon = Headphones;
                       else if (label.includes('訂單')) Icon = PackageSearch;
                       else if (label.includes('排班') || label.includes('日曆') || label.includes('請假')) Icon = CalendarDays;
@@ -2551,65 +2558,10 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
               <button type="button" className={notificationWorkspaceTab === 'delivery' ? 'active' : ''} aria-current={notificationWorkspaceTab === 'delivery' ? 'page' : undefined} onClick={() => setNotificationWorkspaceTab('delivery')}>發送佇列與歷程</button>
             </nav>
 
-            {/* 0. 新好友加入即時歡迎詞與迎新引導 (Follow Webhook) */}
-            {notificationWorkspaceTab === 'onboarding' && <div className="richmenu-card notification-onboarding-card">
-              <div className="richmenu-card-header">
-                <div>
-                  <div className="notification-heading-row">
-                    <h3 className="line-card-title richmenu-heading-with-icon">
-                      <Sparkles aria-hidden="true" />新好友加入即時歡迎詞與功能導覽
-                    </h3>
-                    <span className="line-status line-status-bound notification-preview-status">
-                      Webhook 歡迎訊息設定預覽
-                    </span>
-                  </div>
-                  <p className="line-card-description">
-                    下方為新好友事件的歡迎訊息設定內容；實際是否觸發與送達，需以事件及送達紀錄確認。
-                  </p>
-                </div>
-              </div>
-
-              <div className="notification-preview-panel">
-                <div className="notification-preview-header">
-                  <strong className="richmenu-heading-with-icon">
-                    <Smartphone aria-hidden="true" />即時歡迎訊息內容預覽
-                  </strong>
-                  <span className="notification-trigger-badge">
-                    觸發條件：LINE Follow Webhook (加好友 / 解除封鎖)
-                  </span>
-                </div>
-                <div className="notification-message-preview">
-{`您好！歡迎加入【新竹市月子工會】官方服務平台 🤱✨
-我們提供專業、安心、有保障的到府坐月子媒合與母嬰照護服務。
-
-📱【新手快速導覽・三步驟開始使用】
-
-1️⃣ 準爸媽／產婦專區：
-👉 請開啟以下專屬登記頁面，進行服務需求填寫或核對市府登記案件：
-https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效）
-
-2️⃣ 專業月嫂服務人員：
-👉 請點擊下方選單【月嫂專區】或直接在對話框輸入「我要綁定月嫂」進行身分認證。
-
-3️⃣ 即時智慧客服諮詢：
-👉 直接在對話框輸入您的問題（例如：「補助時數」、「收費原則」、「服務內容」），AI 小幫手 24 小時為您即時解答！
-
----
-💡 如需真人專員協助，隨時在對話框輸入「轉真人客服」，我們將由專人為您服務。
-
-👇 請點擊下方圖文選單，開啟您的專屬服務！`}
-                </div>
-
-                <div className="notification-preview-footer">
-                  <span>
-                    <strong>多日排程關懷設定：</strong>D+1（登記須知）、D+2（履約保證）、D+3（準備清單）
-                  </span>
-                  <span className="notification-delivery-link">
-                    執行與送達狀態請查通知紀錄
-                  </span>
-                </div>
-              </div>
-            </div>}
+            {/* 0. 新好友加入即時歡迎詞與迎新引導 (手動編輯工作台) */}
+            {notificationWorkspaceTab === 'onboarding' && (
+              <LineOnboardingEditor client={onboardingClient} />
+            )}
 
             {/* 1. 通知規則目錄卡片清單 */}
             {notificationWorkspaceTab === 'rules' && <div className="richmenu-card notification-rules-card">

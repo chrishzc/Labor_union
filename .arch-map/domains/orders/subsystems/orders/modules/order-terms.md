@@ -14,6 +14,7 @@
   - `infrastructure/mysql/order_terms_read_model.py`
   - `infrastructure/mysql/order_terms_repository.py`
   - `infrastructure/mysql/order_intake_terms_bootstrap_repository.py`
+  - `api/schemas/order_terms.py`
 - entrypoints:
   - `api/routes/order_terms.py` — Orders Terms Query／Preview／Apply HTTP transport 與輸入驗證。
 

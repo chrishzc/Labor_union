@@ -163,9 +163,9 @@ class CustomerConfirmationWeeklyServicePreviewView(_ClosedModel):
     staff_name: str = Field(min_length=1, max_length=100)
     week_start_date: date
     week_end_date: date
-    service_hours_per_day: PositiveInt
+    service_hours_per_day: float = Field(gt=0, le=24, multiple_of=0.5)
     weekly_work_days: int = Field(ge=0, le=7)
-    weekly_hours: int = Field(ge=0)
+    weekly_hours: float = Field(ge=0, multiple_of=0.5)
 
 
 class CustomerConfirmationPreviewView(_ClosedModel):

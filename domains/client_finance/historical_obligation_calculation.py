@@ -14,7 +14,7 @@ from domains.client_finance.subsidy_coverage import (
 )
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.money import MoneyNTD
-from shared_kernel.validation import require_positive_integer
+from shared_kernel.validation import require_positive_half_hour, require_positive_integer
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,13 +38,13 @@ def build_historical_client_obligation_candidate(
     client_policy_version: str,
     client_hourly_rate: MoneyNTD,
     actual_service_days: int,
-    service_hours_per_day: int,
+    service_hours_per_day: float | int,
     historical_floor_fee: MoneyNTD,
 ) -> HistoricalClientObligationCandidate:
     """Calculate the historical client obligation without payment-stage dates."""
 
     require_positive_integer(actual_service_days, "actual service days")
-    require_positive_integer(service_hours_per_day, "service hours per day")
+    require_positive_half_hour(service_hours_per_day, "service hours per day")
     if not str(client_policy_version).strip():
         raise ValueError("client payment policy version is required")
     if not isinstance(client_hourly_rate, MoneyNTD):
@@ -62,11 +62,15 @@ def build_historical_client_obligation_candidate(
     )
     if policy_identity == "補助市民":
         service_receivable = MoneyNTD(
-            int(coverage.self_pay_service_hours)
-            * int(SUBSIDIZED_EXCESS_CLIENT_HOURLY_RATE)
+            _whole_ntd(
+                coverage.self_pay_service_hours
+                * int(SUBSIDIZED_EXCESS_CLIENT_HOURLY_RATE)
+            )
         )
     else:
-        service_receivable = MoneyNTD(total_hours * client_hourly_rate.amount)
+        service_receivable = MoneyNTD(
+            _whole_ntd(Decimal(str(total_hours)) * client_hourly_rate.amount)
+        )
     total_receivable = service_receivable + historical_floor_fee
     payload = {
         "basis": "historical_actual_service_day_count",
@@ -95,6 +99,13 @@ def build_historical_client_obligation_candidate(
         self_pay_service_hours=int(coverage.self_pay_service_hours),
         fingerprint=fingerprint_payload(payload),
     )
+
+
+def _whole_ntd(value: Decimal) -> int:
+    integral = value.to_integral_value()
+    if value != integral:
+        raise ValueError("half-hour charge must resolve to whole NTD")
+    return int(integral)
 
 
 __all__ = [

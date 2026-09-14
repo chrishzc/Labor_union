@@ -322,7 +322,7 @@ def _rate_snapshots(rows):
 def _payroll_terms(root):
     return PayrollTerms(
         int(root["service_days"]),
-        int(root["service_hours_per_day"]),
+        float(root["service_hours_per_day"]),
         MoneyNTD(_integer_ntd(root["floor_fee"])),
     )
 

@@ -10,6 +10,8 @@
 ## Implementation
 - primary:
   - `domains/scheduling/current_projection.py`
+  - `infrastructure/mysql/scheduling_current_projection_repository.py`
+  - `api/schemas/scheduling_current.py`
 
 ## Dependencies
 - inbound: `orders/operational-stage-projection` — 讀取 service-period status 顯示於 Orders 七階段。

@@ -50,6 +50,8 @@ const CANONICAL_LIFF_TARGETS = [
   { value: '?target=staff_review', label: '?target=staff_review（待辦工作台）' },
   { value: '?target=staff_payout', label: '?target=staff_payout（薪資請款）' },
   { value: '?target=order_tracking', label: '?target=order_tracking（狀態追蹤）' },
+  { value: '?target=faq', label: '?target=faq（常見問答）' },
+  { value: '?target=ai_assistant', label: '?target=ai_assistant（AI 智慧問答）' },
   { value: '?target=dashboard', label: '?target=dashboard（營運摘要）' },
 ];
 

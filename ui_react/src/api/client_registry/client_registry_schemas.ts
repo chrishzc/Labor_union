@@ -13,9 +13,30 @@ const profileValues = z.strictObject({
 const beclassValues = z.strictObject({
   name: nullableText, email: nullableText, phone: nullableText, tel: nullableText,
   ext: nullableText, city: nullableText, zip_code: nullableText, address: nullableText,
-  admin_notes: nullableText,
+  admin_notes: nullableText, multi_birth_count: nullableText,
 });
-const fieldCapabilities = z.record(z.string(), z.strictObject({ owner: z.enum(['client_profile', 'client_beclass', 'order_terms']), editable: z.boolean(), reason: nullableText }));
+const orderInformationValue = z.union([z.string(), z.boolean(), z.number()]).nullable();
+const orderInformationValues = z.strictObject({
+  dietary_habits: orderInformationValue,
+  vegetarian_preference: orderInformationValue,
+  alcohol_ratio: orderInformationValue,
+  cooking_oil_type: orderInformationValue,
+  maternal_allergy: orderInformationValue,
+  special_care_notes: orderInformationValue,
+  meal_preferences: orderInformationValue,
+  cooking_tools: orderInformationValue,
+  bath_water_prep: orderInformationValue,
+  breastfeeding_method: orderInformationValue,
+  holiday_pricing_terms: orderInformationValue,
+  multi_birth_count: orderInformationValue,
+  stair_floor_fee_mode: orderInformationValue,
+  parking_space_provided: orderInformationValue,
+  other_babies_present: orderInformationValue,
+});
+const fieldCapabilities = z.record(z.string(), z.strictObject({
+  owner: z.enum(['client_profile', 'client_beclass', 'order_terms']),
+  editable: z.boolean(), reason: nullableText, options: z.array(z.string()).nullable(),
+}));
 
 export const ClientRegistrySummarySchema = z.strictObject({
   client_id: z.number().int().positive(), case_no: z.string().min(1), name: nullableText,
@@ -31,6 +52,11 @@ export const ClientRegistryDetailSchema = z.strictObject({
   beclass: z.strictObject({
     status: z.enum(['ready', 'unbound', 'duplicate_binding']), record_id: z.number().int().positive().nullable(),
     version: z.number().int().nonnegative().nullable(), values: beclassValues.nullable(), field_capabilities: fieldCapabilities,
+  }),
+  order_information: z.strictObject({
+    status: z.enum(['ready', 'unbound', 'duplicate_binding']),
+    values: orderInformationValues.nullable(),
+    field_issues: z.record(z.string(), z.string()),
   }),
   order_terms: z.strictObject({ status: z.enum(['ready', 'not_found', 'not_ready']), code: nullableText, data: OrderTermsSchema.nullable(), field_capabilities: fieldCapabilities }),
 });

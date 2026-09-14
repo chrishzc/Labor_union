@@ -118,7 +118,7 @@ class OrderCancellationReceipt:
     lifecycle_status: OrderLifecycleStatus
     actual_end_date: date | None
     official_service_day_count: int
-    official_service_hours: int
+    official_service_hours: float | int
     cancelled_assignment_ids: tuple[int, ...]
     created_assignment_keys: tuple[str, ...]
     preview_fingerprint: PreviewFingerprint

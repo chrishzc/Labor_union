@@ -48,6 +48,7 @@ class RegistryFieldCapabilityView(_StrictModel):
     owner: Literal["client_profile", "client_beclass", "order_terms"]
     editable: bool
     reason: str | None = None
+    options: tuple[str, ...] | None = None
 
 
 class ClientRegistryProfileView(_StrictModel):
@@ -67,6 +68,7 @@ class ClientBeClassValuesView(_StrictModel):
     zip_code: str | None = None
     address: str | None = None
     admin_notes: str | None = None
+    multi_birth_count: str | None = None
 
 
 class ClientRegistryBeClassView(_StrictModel):
@@ -75,6 +77,30 @@ class ClientRegistryBeClassView(_StrictModel):
     version: int | None = Field(default=None, ge=0)
     values: ClientBeClassValuesView | None = None
     field_capabilities: dict[str, RegistryFieldCapabilityView]
+
+
+class ClientOrderInformationValuesView(_StrictModel):
+    dietary_habits: str | bool | int | float | None = None
+    vegetarian_preference: str | bool | int | float | None = None
+    alcohol_ratio: str | bool | int | float | None = None
+    cooking_oil_type: str | bool | int | float | None = None
+    maternal_allergy: str | bool | int | float | None = None
+    special_care_notes: str | bool | int | float | None = None
+    meal_preferences: str | bool | int | float | None = None
+    cooking_tools: str | bool | int | float | None = None
+    bath_water_prep: str | bool | int | float | None = None
+    breastfeeding_method: str | bool | int | float | None = None
+    holiday_pricing_terms: str | bool | int | float | None = None
+    multi_birth_count: str | bool | int | float | None = None
+    stair_floor_fee_mode: str | bool | int | float | None = None
+    parking_space_provided: str | bool | int | float | None = None
+    other_babies_present: str | bool | int | float | None = None
+
+
+class ClientRegistryOrderInformationView(_StrictModel):
+    status: Literal["ready", "unbound", "duplicate_binding"]
+    values: ClientOrderInformationValuesView | None = None
+    field_issues: dict[str, str]
 
 
 class RegistryOrderTermsSectionView(_StrictModel):
@@ -88,6 +114,7 @@ class ClientRegistryDetailView(_StrictModel):
     case_no: str = Field(min_length=1, max_length=50)
     client: ClientRegistryProfileView
     beclass: ClientRegistryBeClassView
+    order_information: ClientRegistryOrderInformationView
     order_terms: RegistryOrderTermsSectionView
 
 
@@ -113,6 +140,7 @@ class BeClassChangeSet(_StrictModel):
     zip_code: str | None = None
     address: str | None = None
     admin_notes: str | None = None
+    multi_birth_count: str | None = None
 
 
 class ClientProfileAdminPreviewRequest(_StrictModel):

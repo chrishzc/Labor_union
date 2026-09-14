@@ -53,6 +53,7 @@ class _Repository:
                 "id": 3,
                 "bank_code": "812",
                 "branch_code": "0012",
+                "account_no": "123456789012",
                 "account_last4": "9012",
                 "is_primary": 1,
                 "is_active": 1,
@@ -61,6 +62,7 @@ class _Repository:
                 "id": 4,
                 "bank_code": "004",
                 "branch_code": "0001",
+                "account_no": "987654321098",
                 "account_last4": "1098",
                 "is_primary": 0,
                 "is_active": 0,
@@ -105,6 +107,7 @@ def test_staff_profile_returns_complete_internal_admin_fields():
             "account_id": 3,
             "bank_code": "812",
             "branch_code": "0012",
+            "account_no": "123456789012",
             "account_last4": "9012",
             "is_primary": True,
             "is_active": True,
@@ -113,6 +116,7 @@ def test_staff_profile_returns_complete_internal_admin_fields():
             "account_id": 4,
             "bank_code": "004",
             "branch_code": "0001",
+            "account_no": "987654321098",
             "account_last4": "1098",
             "is_primary": False,
             "is_active": False,
@@ -123,8 +127,8 @@ def test_staff_profile_returns_complete_internal_admin_fields():
     assert RAW_EMERGENCY_PHONE in serialized
     assert "ip_address" not in payload
     assert "line_user_id" not in payload
-    assert "123456789012" not in serialized
-    assert "987654321098" not in serialized
+    assert "123456789012" in serialized
+    assert "987654321098" in serialized
 
 
 class _Cursor:
@@ -155,7 +159,7 @@ class _Connection:
     def __init__(self):
         self.cursors = [
             _Cursor(one=_row()),
-            _Cursor(many=({"id": 3, "bank_code": "812", "branch_code": "0012", "account_last4": "9012", "is_primary": 1, "is_active": 1},)),
+            _Cursor(many=({"id": 3, "bank_code": "812", "branch_code": "0012", "account_no": "123456789012", "account_last4": "9012", "is_primary": 1, "is_active": 1},)),
         ]
         self.created_cursors = []
 
@@ -172,6 +176,7 @@ def test_staff_profile_repository_reads_only_the_bounded_detail_columns():
     accounts = repository.fetch_bank_accounts(7)
 
     assert row is not None
+    assert accounts[0]["account_no"] == "123456789012"
     assert accounts[0]["account_last4"] == "9012"
     assert connection.cursors == []
     profile_cursor, bank_cursor = connection.created_cursors
@@ -184,6 +189,7 @@ def test_staff_profile_repository_reads_only_the_bounded_detail_columns():
     assert "account_no" not in profile_cursor.sql
     assert bank_cursor.params == (7,)
     assert "FROM staff_bank_accounts WHERE staff_id=%s" in bank_cursor.sql
+    assert "account_no" in bank_cursor.sql
     assert "RIGHT(account_no,4) AS account_last4" in bank_cursor.sql
     assert "ORDER BY is_active DESC,is_primary DESC,id ASC LIMIT 21" in bank_cursor.sql
 

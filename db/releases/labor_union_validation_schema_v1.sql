@@ -1,5 +1,5 @@
 -- GENERATED FILE. Do not edit by hand.
--- Release: labor-union-validation-schema-2026-09-12-v34
+-- Release: labor-union-validation-schema-2026-09-14-v35
 -- Replace __LU_TEST_DATABASE__ with an explicitly confirmed lu_test_* database.
 -- Rebuild with: python scripts/build_validation_schema_release.py
 
@@ -21677,3 +21677,13 @@ BEFORE DELETE ON matching_plan_create_receipts
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'matching plan create receipts cannot be deleted';
 -- END SOURCE: db/schema_parts/222_matching_plan_create_receipts.sql
+
+-- BEGIN SOURCE: db/schema_parts/223_order_service_hours_half_precision.sql
+ALTER TABLE orders
+    MODIFY COLUMN service_hours_per_day DECIMAL(4, 1) DEFAULT 0.0
+        COMMENT '每日服務時數 (J)，以 0.5 小時為單位',
+    ADD CONSTRAINT chk_orders_service_hours_half_hour CHECK (
+        service_hours_per_day >= 0 AND service_hours_per_day <= 24
+        AND MOD(service_hours_per_day * 2, 1) = 0
+    );
+-- END SOURCE: db/schema_parts/223_order_service_hours_half_precision.sql

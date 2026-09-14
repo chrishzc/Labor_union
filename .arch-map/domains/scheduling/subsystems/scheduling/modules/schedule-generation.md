@@ -10,6 +10,9 @@
 ## Implementation
 - primary:
   - `domains/scheduling/generation.py`
+  - `domains/scheduling/assignment_plan.py`
+  - `domains/scheduling/bootstrap.py`
+  - `api/schemas/assignment_plan.py`
 
 ## Dependencies
 - inbound: `orders/order-terms` — Orders Terms workflow 只透過 typed generation candidate 交付排班影響。

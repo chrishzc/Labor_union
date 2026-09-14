@@ -28,7 +28,7 @@ from shared_kernel.identities import (
     ExpectedVersion,
     IdempotencyKey,
 )
-from shared_kernel.validation import require_canonical_text, require_positive_integer
+from shared_kernel.validation import require_canonical_text, require_positive_half_hour, require_positive_integer
 from subsystems.scheduling.matching_assignment_conversion import (
     AssignmentConversionResultState,
     CanonicalAssignmentConversionReceipt,
@@ -139,16 +139,16 @@ class CustomerConfirmationWeeklyServicePreview:
     staff_name: str
     week_start_date: str
     week_end_date: str
-    service_hours_per_day: int
+    service_hours_per_day: float | int
     weekly_work_days: int
-    weekly_hours: int
+    weekly_hours: float | int
 
     def __post_init__(self) -> None:
         require_positive_integer(self.serial_number, "weekly service serial number")
         require_canonical_text(self.staff_name, "weekly service staff name", 100)
         require_canonical_text(self.week_start_date, "weekly service start date", 10)
         require_canonical_text(self.week_end_date, "weekly service end date", 10)
-        require_positive_integer(self.service_hours_per_day, "weekly service hours per day")
+        require_positive_half_hour(self.service_hours_per_day, "weekly service hours per day")
         if self.weekly_work_days < 0 or self.weekly_hours < 0:
             raise ValueError("matching confirmation weekly service values are invalid")
 

@@ -6,7 +6,23 @@ import { ClientRosterPage } from './ClientRosterPage';
 import './ClientRegistryPage.css';
 
 const profileLabels: Record<string, string> = { name: '姓名', gender: '性別', phone: '手機', city: '縣市', address: '地址', residence_type: '住宅型態', delivery_type: '生產方式', baby_info: '寶寶資訊', notes: '行政註記' };
-const beclassLabels: Record<string, string> = { name: '報名姓名', email: 'Email', phone: '手機', tel: '市話', ext: '分機', city: '縣市', zip_code: '郵遞區號', address: '報名地址', admin_notes: '報名註記' };
+const beclassLabels: Record<string, string> = { name: '報名姓名', email: 'Email', phone: '手機', tel: '市話', ext: '分機', city: '縣市', zip_code: '郵遞區號', address: '報名地址', admin_notes: '報名註記', multi_birth_count: '胎數（單胞胎／雙胞胎）' };
+const orderInformationLabels = {
+  dietary_habits: '飲食習慣與中藥接受度',
+  vegetarian_preference: '可否接受蛋奶素餐食',
+  alcohol_ratio: '餐飲含酒比例',
+  cooking_oil_type: '料理用油',
+  maternal_allergy: '過敏體質',
+  special_care_notes: '特殊照護注意事項',
+  meal_preferences: '餐點喜忌',
+  cooking_tools: '現有烹煮工具',
+  bath_water_prep: '洗澡水準備',
+  breastfeeding_method: '哺乳方式',
+  holiday_pricing_terms: '三節計費約定',
+  stair_floor_fee_mode: '服務樓層方式',
+  parking_space_provided: '停車位',
+  other_babies_present: '服務時間內的其他寶寶',
+} as const;
 
 type Owner = 'profile' | 'beclass';
 type Draft = Record<string, string>;
@@ -15,6 +31,19 @@ const initialAction: Action = { preview: null, message: null, loading: false, id
 const toDraft = (values: Record<string, string | null> | null): Draft => Object.fromEntries(Object.entries(values ?? {}).map(([field, value]) => [field, value ?? '']));
 const mutationKey = (owner: Owner) => `client-${owner}-${globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
 const auditReason = (owner: Owner) => owner === 'profile' ? '後台客戶名冊主檔更新' : '後台客戶名冊 BeClass 有效資料更新';
+const displayOrderInformationValue = (value: string | boolean | number | null) => {
+  if (value === null || value === '') return '未登錄';
+  if (typeof value === 'boolean') return value ? '是' : '否';
+  return String(value);
+};
+
+const OrderInformationSection: React.FC<{ detail: ClientRegistryDetail }> = ({ detail }) => {
+  const section = detail.order_information;
+  if (section.status !== 'ready' || !section.values) {
+    return <section className="registry-editor"><h3>照護與特殊計費資料</h3><p>{section.status === 'duplicate_binding' ? '同一案件綁定多筆 BeClass，無法判定訂單資訊來源。' : '此案件尚未綁定 BeClass 紀錄，沒有可顯示的訂單資訊。'}</p></section>;
+  }
+  return <section className="registry-editor"><h3>照護與特殊計費資料</h3><small>資料來源：BeClass 原始訂單資訊（唯讀）</small><dl className="registry-information-fields">{Object.entries(orderInformationLabels).map(([field, label]) => <div key={field}><dt>{label}</dt><dd className={section.field_issues[field] ? 'source-issue' : undefined}>{section.field_issues[field] ? '來源內容無法判定' : displayOrderInformationValue(section.values?.[field as keyof typeof section.values] ?? null)}</dd></div>)}</dl></section>;
+};
 
 const ClientRegistryEditor: React.FC = () => {
   const [query, setQuery] = useState('');
@@ -73,9 +102,19 @@ const ClientRegistryEditor: React.FC = () => {
   const editor = (owner: Owner, labels: Record<string, string>, draft: Draft, setDraft: React.Dispatch<React.SetStateAction<Draft>>) => {
     const action = actions[owner];
     const source = owner === 'profile' ? detail?.client.values : detail?.beclass.values;
-    return <section className="registry-editor"><h3>{owner === 'profile' ? '客戶主檔' : 'BeClass 有效資料'}</h3><small>資料來源：{owner === 'profile' ? 'Client Profile owner' : 'Case Import / BeClass correction owner'}</small><div className="registry-fields">{Object.entries(labels).map(([field, label]) => <label key={field}>{label}<input value={draft[field] ?? ''} disabled={action.loading} onChange={(event) => { setDraft((value) => ({ ...value, [field]: event.target.value })); setActions((value) => ({ ...value, [owner]: initialAction })); }} /></label>)}</div><div className="registry-actions"><button type="button" disabled={action.loading} onClick={() => { setDraft(toDraft(source ?? null)); setActions((value) => ({ ...value, [owner]: initialAction })); }}>取消變更</button><button type="button" disabled={action.loading} onClick={() => void preview(owner)}>預覽變更</button><button type="button" disabled={action.loading || !action.preview} onClick={() => void apply(owner)}>確認儲存</button></div>{action.preview && <div className="registry-preview"><strong>即將變更：</strong>{Object.keys(action.preview.after).map((field) => labels[field] ?? field).join('、')}</div>}{action.message && <p role="status">{action.message}</p>}</section>;
+    const capabilities = owner === 'profile' ? detail?.client.field_capabilities : detail?.beclass.field_capabilities;
+    const update = (field: string, value: string) => {
+      setDraft((current) => ({ ...current, [field]: value }));
+      setActions((current) => ({ ...current, [owner]: initialAction }));
+    };
+    return <section className="registry-editor"><h3>{owner === 'profile' ? '客戶主檔' : 'BeClass 有效資料'}</h3><small>資料來源：{owner === 'profile' ? 'Client Profile owner' : 'Case Import / BeClass correction owner'}</small><div className="registry-fields">{Object.entries(labels).map(([field, label]) => {
+      const options = capabilities?.[field]?.options ?? null;
+      const current = draft[field] ?? '';
+      const legacyValue = options && current && !options.includes(current) ? current : null;
+      return <label key={field}>{label}{options ? <select value={current} disabled={action.loading} onChange={(event) => update(field, event.target.value)}><option value="" disabled>請選擇</option>{legacyValue && <option value={legacyValue} disabled>{legacyValue}（既有值，待修正）</option>}{options.map((option) => <option key={option} value={option}>{option}</option>)}</select> : <input value={current} disabled={action.loading} onChange={(event) => update(field, event.target.value)} />}</label>;
+    })}</div><div className="registry-actions"><button type="button" disabled={action.loading} onClick={() => { setDraft(toDraft(source ?? null)); setActions((value) => ({ ...value, [owner]: initialAction })); }}>取消變更</button><button type="button" disabled={action.loading} onClick={() => void preview(owner)}>預覽變更</button><button type="button" disabled={action.loading || !action.preview} onClick={() => void apply(owner)}>確認儲存</button></div>{action.preview && <div className="registry-preview"><strong>即將變更：</strong>{Object.keys(action.preview.after).map((field) => labels[field] ?? field).join('、')}</div>}{action.message && <p role="status">{action.message}</p>}</section>;
   };
-  return <div className="client-registry-page"><header><div><h2>名冊資料</h2><p>以案件編號整合客戶主檔、BeClass 有效資料與訂單條件；各區塊分別儲存。</p></div><form onSubmit={(event) => { event.preventDefault(); void loadList(); }}><input aria-label="搜尋客戶名冊" value={query} placeholder="案件編號、姓名或電話" onChange={(event) => setQuery(event.target.value)} /><button>搜尋</button></form></header><div className="client-registry-layout"><aside aria-label="案件清單">{page?.items.map((item) => <button type="button" className={selected === item.case_no ? 'selected' : ''} key={item.case_no} onClick={() => void loadDetail(item.case_no)}><strong>{item.case_no}</strong><span>{item.name ?? '未登錄姓名'} · {item.phone ?? '未登錄電話'}</span><small>{item.city ?? '未登錄地區'}｜{item.order_status ?? '未有訂單狀態'}</small></button>)}</aside><main>{message && <p role="status" className="registry-message">{message}</p>}{detail && <><div className="registry-case-heading"><h2>{detail.case_no}</h2><span>客戶主檔 v{detail.client.version}</span></div>{editor('profile', profileLabels, profileDraft, setProfileDraft)}{detail.beclass.status === 'ready' ? editor('beclass', beclassLabels, beclassDraft, setBeclassDraft) : <section className="registry-editor"><h3>BeClass 有效資料</h3><p>{detail.beclass.status === 'duplicate_binding' ? '同一案件綁定多筆 BeClass，已停止編輯，請先處理綁定異常。' : '此案件尚未綁定 BeClass 紀錄。'}</p></section>}<section className="registry-editor"><h3>目前訂單條件</h3>{detail.order_terms.status === 'ready' && detail.order_terms.data ? <OrderTermsMutationPanel caseNo={detail.case_no} query={detail.order_terms.data} onObserved={() => void loadDetail(detail.case_no)} /> : <p>訂單條件目前不可用（{detail.order_terms.code ?? detail.order_terms.status}）。</p>}</section></>}</main></div></div>;
+  return <div className="client-registry-page"><header><div><h2>名冊資料</h2><p>以案件編號整合客戶主檔、BeClass、照護與特殊計費資料及訂單條件；可編輯區塊分別儲存。</p></div><form onSubmit={(event) => { event.preventDefault(); void loadList(); }}><input aria-label="搜尋客戶名冊" value={query} placeholder="案件編號、姓名或電話" onChange={(event) => setQuery(event.target.value)} /><button>搜尋</button></form></header><div className="client-registry-layout"><aside aria-label="案件清單">{page?.items.map((item) => <button type="button" className={selected === item.case_no ? 'selected' : ''} key={item.case_no} onClick={() => void loadDetail(item.case_no)}><strong>{item.case_no}</strong><span>{item.name ?? '未登錄姓名'} · {item.phone ?? '未登錄電話'}</span><small>{item.city ?? '未登錄地區'}｜{item.order_status ?? '未有訂單狀態'}</small></button>)}</aside><main>{message && <p role="status" className="registry-message">{message}</p>}{detail && <><div className="registry-case-heading"><h2>{detail.case_no}</h2><span>客戶主檔 v{detail.client.version}</span></div>{editor('profile', profileLabels, profileDraft, setProfileDraft)}{detail.beclass.status === 'ready' ? editor('beclass', beclassLabels, beclassDraft, setBeclassDraft) : <section className="registry-editor"><h3>BeClass 有效資料</h3><p>{detail.beclass.status === 'duplicate_binding' ? '同一案件綁定多筆 BeClass，已停止編輯，請先處理綁定異常。' : '此案件尚未綁定 BeClass 紀錄。'}</p></section>}<OrderInformationSection detail={detail} /><section className="registry-editor"><h3>目前訂單條件</h3>{detail.order_terms.status === 'ready' && detail.order_terms.data ? <OrderTermsMutationPanel caseNo={detail.case_no} query={detail.order_terms.data} onObserved={() => void loadDetail(detail.case_no)} /> : <p>訂單條件目前不可用（{detail.order_terms.code ?? detail.order_terms.status}）。</p>}</section></>}</main></div></div>;
 };
 
 type RegistryTab = 'roster' | 'records';

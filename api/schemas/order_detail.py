@@ -24,7 +24,7 @@ class OrderDetailView(BaseModel):
     start_date: date | None
     end_date: date | None
     service_days: int = Field(ge=0)
-    service_hours_per_day: int = Field(ge=0)
+    service_hours_per_day: float = Field(ge=0, le=24, multiple_of=0.5)
     deposit_service_days: int | None = Field(default=None, ge=0)
     floor_fee: int = Field(ge=0)
     custom_rest_dates: str | None

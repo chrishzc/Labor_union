@@ -7,6 +7,7 @@ from collections.abc import Mapping
 
 BECLASS_CORRECTION_FIELDS = (
     "name", "email", "phone", "tel", "ext", "city", "zip_code", "address", "admin_notes",
+    "multi_birth_count",
 )
 _MAXIMUMS = {
     "name": 100,
@@ -18,7 +19,9 @@ _MAXIMUMS = {
     "zip_code": 10,
     "address": 255,
     "admin_notes": 2000,
+    "multi_birth_count": 4,
 }
+VALID_MULTI_BIRTH_COUNTS = frozenset({"單胞胎", "雙胞胎"})
 
 
 class BeClassCorrectionError(ValueError):
@@ -36,7 +39,7 @@ def normalize_beclass_changes(changes: Mapping[str, object]) -> dict[str, str | 
         if field not in BECLASS_CORRECTION_FIELDS:
             raise BeClassCorrectionError("beclass_field_not_allowed", str(field))
         if raw_value is None:
-            if field == "name":
+            if field in {"name", "multi_birth_count"}:
                 raise BeClassCorrectionError("beclass_value_cannot_be_empty", field)
             normalized[field] = None
             continue
@@ -44,7 +47,7 @@ def normalize_beclass_changes(changes: Mapping[str, object]) -> dict[str, str | 
             raise BeClassCorrectionError("beclass_value_must_be_text", field)
         value = raw_value.strip()
         if not value:
-            if field == "name":
+            if field in {"name", "multi_birth_count"}:
                 raise BeClassCorrectionError("beclass_value_cannot_be_empty", field)
             normalized[field] = None
             continue
@@ -52,8 +55,13 @@ def normalize_beclass_changes(changes: Mapping[str, object]) -> dict[str, str | 
             raise BeClassCorrectionError("beclass_value_too_long", field)
         if field == "email" and ("@" not in value or value.startswith("@") or value.endswith("@")):
             raise BeClassCorrectionError("beclass_email_invalid", field)
+        if field == "multi_birth_count" and value not in VALID_MULTI_BIRTH_COUNTS:
+            raise BeClassCorrectionError("beclass_multi_birth_count_invalid", field)
         normalized[field] = value
     return {key: normalized[key] for key in sorted(normalized)}
 
 
-__all__ = ["BECLASS_CORRECTION_FIELDS", "BeClassCorrectionError", "normalize_beclass_changes"]
+__all__ = [
+    "BECLASS_CORRECTION_FIELDS", "BeClassCorrectionError",
+    "VALID_MULTI_BIRTH_COUNTS", "normalize_beclass_changes",
+]

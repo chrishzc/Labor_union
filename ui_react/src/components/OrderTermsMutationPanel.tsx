@@ -29,12 +29,10 @@ interface OrderTermsDraft {
 }
 
 export const COMMON_SHIFT_PRESETS = [
-  { label: '9h (09:00~18:00)', startTime: '09:00', endTime: '18:00', endDayOffset: '0' as const },
-  { label: '9h 早班 (08:30~17:30)', startTime: '08:30', endTime: '17:30', endDayOffset: '0' as const },
+  { label: '4h 上午 (09:00~13:00)', startTime: '09:00', endTime: '13:00', endDayOffset: '0' as const },
+  { label: '4h 下午 (14:00~18:00)', startTime: '14:00', endTime: '18:00', endDayOffset: '0' as const },
+  { label: '8h 早班 (08:00~16:00)', startTime: '08:00', endTime: '16:00', endDayOffset: '0' as const },
   { label: '8h (09:00~17:00)', startTime: '09:00', endTime: '17:00', endDayOffset: '0' as const },
-  { label: '12h 白班 (08:00~20:00)', startTime: '08:00', endTime: '20:00', endDayOffset: '0' as const },
-  { label: '12h 夜班 (20:00~08:00 隔日)', startTime: '20:00', endTime: '08:00', endDayOffset: '1' as const },
-  { label: '24h 全日 (09:00~09:00 隔日)', startTime: '09:00', endTime: '09:00', endDayOffset: '1' as const },
 ] as const;
 
 export const STANDARD_TIME_OPTIONS: readonly string[] = Array.from({ length: 48 }, (_, i) => {
@@ -79,7 +77,7 @@ export function calculateDailyServiceHours(
     return null;
   }
   const hours = diffMinutes / 60;
-  return Number.isInteger(hours) && hours > 0 && hours <= 24 ? hours : null;
+  return Number.isInteger(hours * 2) && hours > 0 && hours <= 24 ? hours : null;
 }
 
 export function validateServiceTimeWindow(
@@ -111,8 +109,8 @@ export function validateServiceTimeWindow(
   if (diffMinutes > 24 * 60) {
     return '單日服務時數不可超過 24 小時。';
   }
-  if (diffMinutes % 60 !== 0) {
-    return `每日服務時數須為整數小時（目前計算為 ${(diffMinutes / 60).toFixed(1)} 小時）。`;
+  if (diffMinutes % 30 !== 0) {
+    return `每日服務時數須以 0.5 小時為單位（目前計算為 ${(diffMinutes / 60).toFixed(2)} 小時）。`;
   }
   return null;
 }
@@ -280,7 +278,7 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
   const draftReady = /^\d{4}-\d{2}-\d{2}$/.test(draft.plannedStartDate)
     && Number.isInteger(Number(draft.serviceDays))
     && Number(draft.serviceDays) > 0
-    && Number.isInteger(Number(draft.serviceHoursPerDay))
+    && Number.isInteger(Number(draft.serviceHoursPerDay) * 2)
     && Number(draft.serviceHoursPerDay) > 0
     && draft.requiresCooking !== ''
     && Number.isInteger(Number(draft.floorFeeNtd))
@@ -395,6 +393,7 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
             type="number"
             min="1"
             max="24"
+            step="0.5"
             value={draft.serviceHoursPerDay}
             readOnly
             disabled={locked}
