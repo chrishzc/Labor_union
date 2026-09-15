@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from api.dependencies.line_identity import get_liff_token_verifier
 from api.dependencies.llm_configuration import (
     LlmConfigurationApplication,
     get_llm_configuration_application,
@@ -20,6 +21,10 @@ from api.dependencies.llm_configuration import (
 from api.error_contracts import typed_http_error
 from api.schemas.base import BaseResponse
 from domains.knowledge_retrieval.qa_catalog import decode_governed_qa
+from infrastructure.line.liff_token_verifier import (
+    InvalidLiffTokenError,
+    LiffVerificationUnavailableError,
+)
 from infrastructure.mysql.knowledge_retrieval_unit_of_work import (
     open_knowledge_retrieval_unit_of_work,
 )
@@ -49,6 +54,8 @@ class FaqListResponse(BaseModel):
 class ServiceHelpAskRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     question: str = Field(min_length=1, max_length=1000)
+    interaction_id: str = Field(default="", max_length=191)
+    line_id_token: str = Field(default="", max_length=4096)
 
 
 class ServiceHelpAskResponse(BaseModel):
@@ -61,6 +68,7 @@ class ServiceHelpAskResponse(BaseModel):
     index_version: int | None = None
     source_ref: str | None = None
     suggestion: str | None = None
+    interaction_id: str | None = None
 
 
 @page_router.get("/line-service-help", include_in_schema=False)
@@ -120,8 +128,10 @@ def get_published_faqs() -> BaseResponse[FaqListResponse]:
 def ask_service_question(
     body: ServiceHelpAskRequest,
     application: LlmConfigurationApplication = Depends(get_llm_configuration_application),
+    liff_verifier=Depends(get_liff_token_verifier),
 ) -> BaseResponse[ServiceHelpAskResponse]:
     clean_question = body.question.strip()
+    interaction_id = _verified_liff_interaction(body, liff_verifier)
 
     try:
         semantic_result = application.test_semantics(clean_question)
@@ -138,6 +148,7 @@ def ask_service_question(
                 source_version=semantic_result.source_version,
                 index_version=semantic_result.index_version,
                 source_ref=semantic_result.source_identity,
+                interaction_id=interaction_id,
             ),
             message="AI 助理已由知識庫為您找到解答",
         )
@@ -149,6 +160,7 @@ def ask_service_question(
                 answer_text=None,
                 index_version=semantic_result.index_version,
                 suggestion="抱歉，工會知識庫目前尚未收錄與您提問完全相符的標準解答。您可以直接在此 LINE 官方帳號聊天室中留言，工會真人客服專員將親自為您詳細解說！",
+                interaction_id=interaction_id,
             ),
             message="未找到相符解答，已引導真人客服",
         )
@@ -159,6 +171,41 @@ def ask_service_question(
         )
 
     raise _knowledge_query_unavailable("knowledge_query_unavailable")
+
+
+def _verified_liff_interaction(body: ServiceHelpAskRequest, verifier) -> str | None:
+    token = body.line_id_token.strip()
+    interaction_id = body.interaction_id.strip()
+    if not token and not interaction_id:
+        return None
+    if not token or not interaction_id:
+        raise typed_http_error(
+            422,
+            "validation",
+            "liff_interaction_identity_incomplete",
+            "LINE 問答身分資訊不完整，請重新從 LINE 開啟此頁。",
+            "line-service-help:interaction",
+        )
+    try:
+        verifier.verify(token)
+    except InvalidLiffTokenError as error:
+        raise typed_http_error(
+            401,
+            "forbidden",
+            "liff_token_invalid",
+            "LINE 登入狀態已失效，請重新從 LINE 開啟此頁。",
+            "line-service-help:liff-token-invalid",
+        ) from error
+    except LiffVerificationUnavailableError as error:
+        raise typed_http_error(
+            503,
+            "unavailable",
+            "liff_verification_unavailable",
+            "LINE 身分驗證服務暫時無法使用，請稍後再試。",
+            "line-service-help:liff-verification-unavailable",
+            retryable=True,
+        ) from error
+    return interaction_id
 
 
 def _knowledge_query_unavailable(code: str) -> HTTPException:
