@@ -16,10 +16,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from api.dependencies.line_identity import get_liff_token_verifier
 from api.dependencies.llm_configuration import (
     LlmConfigurationApplication,
+    LlmSemanticTestResult,
     get_llm_configuration_application,
 )
 from api.error_contracts import typed_http_error
 from api.schemas.base import BaseResponse
+from domains.knowledge_retrieval.knowledge import KnowledgeAnswer, KnowledgeCitation
 from domains.knowledge_retrieval.qa_catalog import decode_governed_qa
 from infrastructure.line.liff_token_verifier import (
     InvalidLiffTokenError,
@@ -28,6 +30,8 @@ from infrastructure.line.liff_token_verifier import (
 from infrastructure.mysql.knowledge_retrieval_unit_of_work import (
     open_knowledge_retrieval_unit_of_work,
 )
+from shared_kernel.identities import CorrelationId, IdempotencyKey
+from subsystems.knowledge_retrieval.contracts import AskKnowledgeQuestionCommand
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _SERVICE_HELP_PAGE = PROJECT_ROOT / "line" / "static" / "service_help.html"
@@ -54,7 +58,7 @@ class FaqListResponse(BaseModel):
 class ServiceHelpAskRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     question: str = Field(min_length=1, max_length=1000)
-    interaction_id: str = Field(default="", max_length=191)
+    interaction_id: str = Field(default="", max_length=160)
     line_id_token: str = Field(default="", max_length=4096)
 
 
@@ -69,6 +73,7 @@ class ServiceHelpAskResponse(BaseModel):
     source_ref: str | None = None
     suggestion: str | None = None
     interaction_id: str | None = None
+    answer_receipt_id: int | None = None
 
 
 @page_router.get("/line-service-help", include_in_schema=False)
@@ -131,7 +136,7 @@ def ask_service_question(
     liff_verifier=Depends(get_liff_token_verifier),
 ) -> BaseResponse[ServiceHelpAskResponse]:
     clean_question = body.question.strip()
-    interaction_id = _verified_liff_interaction(body, liff_verifier)
+    interaction_id, actor_id = _verified_liff_interaction(body, liff_verifier)
 
     try:
         semantic_result = application.test_semantics(clean_question)
@@ -139,6 +144,14 @@ def ask_service_question(
         raise _knowledge_query_unavailable("knowledge_query_unavailable") from error
 
     if semantic_result.outcome == "answered" and semantic_result.answer_text:
+        answer_receipt_id = None
+        if interaction_id is not None and actor_id is not None:
+            answer_receipt_id = _persist_liff_answer(
+                clean_question,
+                interaction_id,
+                actor_id,
+                semantic_result,
+            )
         return BaseResponse(
             data=ServiceHelpAskResponse(
                 outcome="answered",
@@ -149,6 +162,7 @@ def ask_service_question(
                 index_version=semantic_result.index_version,
                 source_ref=semantic_result.source_identity,
                 interaction_id=interaction_id,
+                answer_receipt_id=answer_receipt_id,
             ),
             message="AI 助理已由知識庫為您找到解答",
         )
@@ -173,11 +187,14 @@ def ask_service_question(
     raise _knowledge_query_unavailable("knowledge_query_unavailable")
 
 
-def _verified_liff_interaction(body: ServiceHelpAskRequest, verifier) -> str | None:
+def _verified_liff_interaction(
+    body: ServiceHelpAskRequest,
+    verifier,
+) -> tuple[str | None, str | None]:
     token = body.line_id_token.strip()
     interaction_id = body.interaction_id.strip()
     if not token and not interaction_id:
-        return None
+        return None, None
     if not token or not interaction_id:
         raise typed_http_error(
             422,
@@ -187,7 +204,7 @@ def _verified_liff_interaction(body: ServiceHelpAskRequest, verifier) -> str | N
             "line-service-help:interaction",
         )
     try:
-        verifier.verify(token)
+        identity = verifier.verify(token)
     except InvalidLiffTokenError as error:
         raise typed_http_error(
             401,
@@ -205,7 +222,49 @@ def _verified_liff_interaction(body: ServiceHelpAskRequest, verifier) -> str | N
             "line-service-help:liff-verification-unavailable",
             retryable=True,
         ) from error
-    return interaction_id
+    return interaction_id, identity.line_user_id.value
+
+
+def _persist_liff_answer(
+    question: str,
+    interaction_id: str,
+    actor_id: str,
+    semantic_result: LlmSemanticTestResult,
+) -> int:
+    if (
+        semantic_result.source_identity is None
+        or semantic_result.source_version is None
+        or semantic_result.source_excerpt is None
+        or semantic_result.index_version is None
+        or semantic_result.answer_text is None
+    ):
+        raise _knowledge_query_unavailable("knowledge_answer_provenance_incomplete")
+    answer = KnowledgeAnswer(
+        answer=semantic_result.answer_text,
+        citations=(
+            KnowledgeCitation(
+                semantic_result.source_identity,
+                semantic_result.source_version,
+                semantic_result.source_excerpt,
+            ),
+        ),
+        index_version=semantic_result.index_version,
+    )
+    command = AskKnowledgeQuestionCommand(
+        question,
+        actor_id,
+        IdempotencyKey(f"liff-knowledge-answer:{interaction_id}"),
+        CorrelationId(f"liff-knowledge:{interaction_id}"),
+    )
+    try:
+        with open_knowledge_retrieval_unit_of_work() as unit_of_work:
+            receipt_id = unit_of_work.knowledge.record_inline_answer(command, answer)
+            unit_of_work.commit()
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise _knowledge_query_unavailable("knowledge_answer_receipt_unavailable") from error
+    return receipt_id
 
 
 def _knowledge_query_unavailable(code: str) -> HTTPException:
