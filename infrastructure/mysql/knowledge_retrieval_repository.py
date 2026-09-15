@@ -285,6 +285,40 @@ class MySqlKnowledgeRetrievalRepository:
                 raise
             return self._existing_answer_request(command.idempotency_key.value), False
 
+    # LIFF renders the answer in-page, so the existing request/receipt roots are
+    # committed without creating a LINE delivery task or an answer worker job.
+    def record_inline_answer(self, command, answer: KnowledgeAnswer) -> int:
+        if not command.requester_line_user_id:
+            raise ValueError("knowledge_inline_answer_actor_required")
+        try:
+            with self._connection.cursor() as cursor:
+                cursor.execute(
+                    "INSERT INTO knowledge_answer_requests "
+                    "(question,requester_line_user_id,idempotency_key,correlation_id,"
+                    "request_status,completed_at_utc) "
+                    "VALUES (%s,%s,%s,%s,'answered',CURRENT_TIMESTAMP(6))",
+                    (
+                        command.question,
+                        command.requester_line_user_id,
+                        command.idempotency_key.value,
+                        command.correlation_id.value,
+                    ),
+                )
+                request_id = int(cursor.lastrowid)
+                cursor.execute(
+                    "INSERT INTO knowledge_answer_receipts "
+                    "(answer_request_id,answer_text,index_version,authoritative) "
+                    "VALUES (%s,%s,%s,FALSE)",
+                    (request_id, answer.answer, answer.index_version),
+                )
+                receipt_id = int(cursor.lastrowid)
+                self._insert_citations(cursor, receipt_id, answer)
+            return receipt_id
+        except IntegrityError as error:
+            if mysql_error_code(error) != 1062:
+                raise
+            return self._existing_inline_answer_receipt(command, answer)
+
     # The job lease and related request/index projection must move together.
     def claim_next_job(self, worker_id: str):
         now = datetime.now(timezone.utc)
@@ -358,9 +392,10 @@ class MySqlKnowledgeRetrievalRepository:
                 "SELECT receipt.id FROM knowledge_answer_receipts receipt "
                 "JOIN knowledge_answer_requests request "
                 "ON request.id=receipt.answer_request_id "
-                "JOIN line_delivery_tasks task ON task.id=receipt.line_delivery_task_id "
+                "LEFT JOIN line_delivery_tasks task ON task.id=receipt.line_delivery_task_id "
                 "WHERE receipt.id=%s AND request.requester_line_user_id=%s "
-                "AND request.request_status='answered' AND task.processing_status='sent'",
+                "AND request.request_status='answered' "
+                "AND (receipt.line_delivery_task_id IS NULL OR task.processing_status='sent')",
                 (answer_receipt_id, actor_id),
             )
             row = cursor.fetchone()
@@ -675,6 +710,71 @@ class MySqlKnowledgeRetrievalRepository:
             raise RuntimeError("knowledge_answer_idempotency_conflict")
         return int(row["id"])
 
+    def _existing_inline_answer_receipt(self, command, answer: KnowledgeAnswer) -> int:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT request.id AS request_id,request.question,"
+                "request.requester_line_user_id,request.correlation_id,"
+                "request.request_status,receipt.id AS receipt_id,receipt.answer_text,"
+                "receipt.index_version,receipt.line_delivery_task_id "
+                "FROM knowledge_answer_requests request "
+                "LEFT JOIN knowledge_answer_receipts receipt "
+                "ON receipt.answer_request_id=request.id "
+                "WHERE request.idempotency_key=%s",
+                (command.idempotency_key.value,),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                raise RuntimeError("knowledge_answer_idempotency_conflict")
+            expected = (
+                command.question,
+                command.requester_line_user_id,
+                command.correlation_id.value,
+                "answered",
+                answer.answer,
+                answer.index_version,
+                None,
+            )
+            actual = (
+                str(row["question"]),
+                str(row["requester_line_user_id"]),
+                str(row["correlation_id"]),
+                str(row["request_status"]),
+                None if row["answer_text"] is None else str(row["answer_text"]),
+                None if row["index_version"] is None else int(row["index_version"]),
+                row["line_delivery_task_id"],
+            )
+            if actual != expected or row["receipt_id"] is None:
+                raise RuntimeError("knowledge_answer_idempotency_conflict")
+            cursor.execute(
+                "SELECT source_identity,source_version,safe_excerpt,citation_order "
+                "FROM knowledge_answer_sources WHERE answer_receipt_id=%s "
+                "ORDER BY citation_order",
+                (row["receipt_id"],),
+            )
+            citation_rows = tuple(cursor.fetchall() or ())
+        actual_citations = tuple(
+            (
+                str(item["source_identity"]),
+                int(item["source_version"]),
+                str(item["safe_excerpt"]),
+                int(item["citation_order"]),
+            )
+            for item in citation_rows
+        )
+        expected_citations = tuple(
+            (
+                citation.source_identity,
+                citation.source_version,
+                citation.safe_excerpt,
+                order,
+            )
+            for order, citation in enumerate(answer.citations, start=1)
+        )
+        if actual_citations != expected_citations:
+            raise RuntimeError("knowledge_answer_idempotency_conflict")
+        return int(row["receipt_id"])
+
     def _rows(self, sql, parameters=()):
         with self._connection.cursor() as cursor:
             cursor.execute(sql, parameters)
@@ -843,7 +943,7 @@ q.created_at_utc,q.completed_at_utc,r.answer_text,r.index_version,
  FROM line_notification_source_events e
  WHERE e.source_domain='line_feedback'
  AND e.source_aggregate_type='line_feedback'
- AND JSON_UNQUOTE(JSON_EXTRACT(e.facts_snapshot,'$.source_response_id'))=CAST(r.id AS CHAR)
+ AND JSON_UNQUOTE(JSON_EXTRACT(e.facts_snapshot,'$.source_response_id'))=CONCAT('knowledge-answer-receipt:',CAST(r.id AS CHAR))
  ORDER BY e.occurred_at_utc DESC,e.id DESC LIMIT 1) AS feedback_outcome,
 (SELECT j.last_error_code FROM knowledge_jobs j
  WHERE j.answer_request_id=q.id ORDER BY j.id DESC LIMIT 1) AS failure_code
