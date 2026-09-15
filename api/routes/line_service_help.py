@@ -57,6 +57,8 @@ class ServiceHelpAskResponse(BaseModel):
     answer_text: str | None = None
     qa_id: str | None = None
     source_identity: str | None = None
+    source_version: int | None = None
+    index_version: int | None = None
     source_ref: str | None = None
     suggestion: str | None = None
 
@@ -133,6 +135,8 @@ def ask_service_question(
                 answer_text=semantic_result.answer_text,
                 qa_id=semantic_result.qa_id,
                 source_identity=semantic_result.source_identity,
+                source_version=semantic_result.source_version,
+                index_version=semantic_result.index_version,
                 source_ref=semantic_result.source_identity,
             ),
             message="AI 助理已由知識庫為您找到解答",
@@ -143,6 +147,7 @@ def ask_service_question(
             data=ServiceHelpAskResponse(
                 outcome="unsupported",
                 answer_text=None,
+                index_version=semantic_result.index_version,
                 suggestion="抱歉，工會知識庫目前尚未收錄與您提問完全相符的標準解答。您可以直接在此 LINE 官方帳號聊天室中留言，工會真人客服專員將親自為您詳細解說！",
             ),
             message="未找到相符解答，已引導真人客服",
