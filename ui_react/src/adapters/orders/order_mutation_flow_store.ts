@@ -847,9 +847,18 @@ export class OrderMutationFlowStore {
     if (!receipt || receipt.case_no !== caseNo || queryView.case_no !== caseNo
       || queryView.current_version === null || queryView.current_version < receipt.confirmed_version
       || queryView.order_version < receipt.order_version
-      || queryView.scheduling_version < receipt.scheduling_version
-      || !areDateArraysEqual(queryView.current_dates, receipt.service_dates)) {
+      || queryView.scheduling_version < receipt.scheduling_version) {
       throw new Error('服務日期已收到收據，但正式回讀未對上案件、版本與本次日期；只能重新讀取結果。');
+    }
+    if (!areDateArraysEqual(queryView.current_dates, receipt.service_dates)) {
+      if (queryView.current_version > receipt.confirmed_version) {
+        // Keep both facts: the original receipt and the later owner version.
+        // The user must explicitly load the current dates before starting a new draft.
+        draft.queryView = queryView;
+        draft.previewView = null;
+        throw new Error('正式服務日期已被較新版本更新；請載入目前正式日期後核對，不要重送原操作。');
+      }
+      throw new Error('服務日期已收到收據，但正式回讀日期與本次收據不一致；只能重新讀取結果。');
     }
     draft.queryView = queryView;
     draft.selectedDates = [...queryView.current_dates];
