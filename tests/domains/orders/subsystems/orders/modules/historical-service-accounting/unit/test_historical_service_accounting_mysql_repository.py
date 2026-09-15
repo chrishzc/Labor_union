@@ -1,6 +1,7 @@
 """Write-once persistence for historical service-day accounting."""
 
 from dataclasses import replace
+from datetime import date
 
 from domains.orders.historical_service_accounting import HistoricalActualServiceDaysInput
 from domains.orders.lifecycle import OrderLifecycleStatus
@@ -9,6 +10,7 @@ from infrastructure.mysql.historical_service_accounting_repository import (
     MySqlHistoricalServiceAccountingRepository,
     _ensure_assignment_rate_snapshots,
     _write_client_obligation,
+    _write_order_staff_payment_due_date,
     _write_payroll_outbox,
     _write_staff_obligations,
 )
@@ -19,14 +21,17 @@ from subsystems.orders.historical_service_accounting_workflow import (
     ConfirmHistoricalServiceDaysIntent,
     HistoricalServiceAccountingAssignmentFacts,
     HistoricalServiceAccountingFacts,
+    HistoricalServiceAccountingReceipt,
+    HistoricalServiceAccountingWorkflow,
     _candidate,
 )
 
 
 class _Cursor:
-    def __init__(self, *, client_amount=None, staff_amount=None):
+    def __init__(self, *, client_amount=None, staff_amount=None, payout_history_exists=None):
         self.client_amount = client_amount
         self.staff_amount = staff_amount
+        self.payout_history_exists = payout_history_exists
         self.statements = []
         self.lastrowid = 41
         self.rowcount = 1
@@ -53,6 +58,15 @@ class _Cursor:
                         },
                     )
                 )
+        elif statement.startswith("SELECT obligation_identity,payout_history_exists"):
+            self._one = (
+                None
+                if self.payout_history_exists is None
+                else {
+                    "obligation_identity": parameters[0],
+                    "payout_history_exists": self.payout_history_exists,
+                }
+            )
         elif statement.startswith("SELECT obligation_identity"):
             self._one = None
 
@@ -93,6 +107,8 @@ class _LoadCursor:
                 "historical_day_revision": 1,
                 "client_policy_version": "client-policy:case-19",
                 "client_hourly_rate_ntd": 275,
+                "completed_on": date(2026, 4, 20),
+                "staff_payment_due_date": None,
             }
         elif "FROM historical_order_pairing_evidence evidence" in statement:
             self._all = ({
@@ -153,6 +169,8 @@ def _candidate_and_request():
         ),
         client_policy_version="client-policy:case-19",
         client_hourly_rate=MoneyNTD(300),
+        completed_on=date(2026, 4, 20),
+        staff_payment_due_date=None,
     )
     intent = ConfirmHistoricalServiceDaysIntent(
         "CASE-19",
@@ -226,7 +244,8 @@ def test_initial_client_obligation_is_established_once():
 
     parameters = _insert_parameters(cursor, "client_obligation_events")
     assert parameters[2] == "receivable_from_client"
-    assert parameters[3] == 8_400
+    assert parameters[3] == "established"
+    assert parameters[4] == 8_400
     assert all(not statement.startswith("UPDATE client_obligations") for statement, _ in cursor.statements)
 
 
@@ -249,19 +268,24 @@ def test_zero_client_obligation_is_immediately_settled_without_payment() -> None
         for item in cursor.statements
         if item[0].startswith("INSERT INTO client_obligations ")
     )
-    assert parameters[3] == 0
-    assert parameters[4] == "settled"
+    assert parameters[4] == 0
+    assert parameters[5] == "settled"
 
 
-def test_existing_client_day_projection_is_rejected_without_difference_obligation():
+def test_client_day_revision_creates_a_source_bound_difference_obligation():
     candidate, request = _candidate_and_request()
-    cursor = _Cursor(client_amount=8_400)
+    candidate = replace(candidate, facts=replace(candidate.facts, historical_day_revision=1))
+    cursor = _Cursor(client_amount=10_000)
 
-    import pytest
+    _write_client_obligation(cursor, request, candidate, "source:event", 3)
 
-    with pytest.raises(ValueError, match="historical_actual_service_days_already_confirmed"):
-        _write_client_obligation(cursor, request, candidate, "source:event", 3)
-    assert all(not statement.startswith("INSERT INTO") for statement, _ in cursor.statements)
+    event_parameters = _insert_parameters(cursor, "client_obligation_events")
+    assert event_parameters[2] == "payable_to_client"
+    assert event_parameters[3] == "reversed"
+    assert event_parameters[4] == 1_600
+    assert event_parameters[6] == (
+        "historical-service:CASE-19:revision:1:client:receivable_from_client"
+    )
 
 
 def test_initial_staff_obligation_is_payable_and_established_once():
@@ -276,17 +300,137 @@ def test_initial_staff_obligation_is_payable_and_established_once():
     assert parameters[6] is None
     assert parameters[7] == "established"
     assert parameters[8] == 8_400
+    assert parameters[9] == date(2026, 5, 15)
+
+    obligation_parameters = _insert_parameters(cursor, "staff_obligations")
+    assert obligation_parameters[8] == date(2026, 5, 15)
 
 
-def test_existing_staff_day_projection_is_rejected_without_recovery_obligation():
+def test_historical_full_subsidy_staff_due_date_is_second_month_after_completion():
     candidate, request = _candidate_and_request()
-    cursor = _Cursor(staff_amount=8_400)
+    candidate = _candidate(
+        replace(
+            candidate.facts,
+            client_identity_status="補助市民",
+            contractual_floor_fee=MoneyNTD(0),
+        ),
+        request.intent,
+    )
 
-    import pytest
+    assert candidate.client_finance.total_receivable == MoneyNTD(0)
+    assert candidate.staff_payment_due_date == date(2026, 6, 15)
 
-    with pytest.raises(ValueError, match="historical_actual_service_days_already_confirmed"):
-        _write_staff_obligations(cursor, request, candidate, "source:event", 5)
-    assert all(not statement.startswith("INSERT INTO") for statement, _ in cursor.statements)
+
+def test_historical_accounting_sets_the_orders_payment_due_date_root_fact():
+    candidate, _ = _candidate_and_request()
+    cursor = _Cursor()
+
+    _write_order_staff_payment_due_date(cursor, candidate)
+
+    statement, parameters = cursor.statements[-1]
+    assert statement.startswith("UPDATE orders SET staff_payment_due_date=%s")
+    assert parameters == (date(2026, 5, 15), "CASE-19")
+
+
+def test_historical_accounting_preserves_an_existing_orders_payment_due_date():
+    candidate, request = _candidate_and_request()
+    candidate = _candidate(
+        replace(candidate.facts, staff_payment_due_date=date(2026, 5, 15)),
+        request.intent,
+    )
+    cursor = _Cursor()
+
+    _write_order_staff_payment_due_date(cursor, candidate)
+
+    assert cursor.statements == []
+
+
+def test_default_accounting_uses_the_orders_recorded_service_days_without_manual_input():
+    candidate, _ = _candidate_and_request()
+
+    class Repository:
+        def __init__(self):
+            self.persisted = None
+
+        def load(self, case_no, *, for_update):
+            assert case_no == "CASE-19"
+            assert for_update is True
+            return candidate.facts
+
+        def find_receipt(self, key):
+            return None
+
+        def persist(self, request, persisted_candidate):
+            self.persisted = persisted_candidate
+            return HistoricalServiceAccountingReceipt(
+                "CASE-19", 1, 3, 5,
+                persisted_candidate.service_days.total_actual_service_days,
+                persisted_candidate.client_finance.total_receivable.amount,
+                persisted_candidate.payroll.total_payable.amount,
+                persisted_candidate.fingerprint,
+            )
+
+    repository = Repository()
+    workflow = HistoricalServiceAccountingWorkflow(repository, lambda: None)
+
+    workflow.establish_default_in_current_unit_of_work(
+        case_no="CASE-19",
+        source_identity="historical-source:19",
+        actor="operator",
+        correlation_id="historical-default:19",
+    )
+
+    assert repository.persisted.service_days.total_actual_service_days == 40
+    assert repository.persisted.payroll.assignments[0].actual_service_days == 40
+    assert repository.persisted.staff_payment_due_date == date(2026, 5, 15)
+
+
+def test_unpaid_staff_obligation_is_rebuilt_when_actual_days_are_revised():
+    candidate, request = _candidate_and_request()
+    candidate = replace(candidate, facts=replace(candidate.facts, historical_day_revision=1))
+    cursor = _Cursor(staff_amount=9_000, payout_history_exists=False)
+
+    _write_staff_obligations(cursor, request, candidate, "source:event", 5)
+
+    event_parameters = _insert_parameters(cursor, "staff_obligation_events")
+    assert event_parameters[4:6] == (9_000, 8_400)
+    update = next(
+        item for item in cursor.statements if item[0].startswith("UPDATE staff_obligations SET")
+    )
+    assert update[1][0] == 8_400
+
+
+def test_paid_staff_obligation_gets_a_source_bound_reversal_for_the_difference():
+    candidate, request = _candidate_and_request()
+    candidate = replace(candidate, facts=replace(candidate.facts, historical_day_revision=1))
+    cursor = _Cursor(staff_amount=9_000, payout_history_exists=True)
+
+    _write_staff_obligations(cursor, request, candidate, "source:event", 5)
+
+    event_parameters = _insert_parameters(cursor, "staff_obligation_events")
+    assert event_parameters[4] == "reversal"
+    assert event_parameters[5] == "receivable_from_staff"
+    assert event_parameters[6] == (
+        "historical-service:CASE-19:revision:1:assignment:19:payable_to_staff"
+    )
+    assert event_parameters[8] == 600
+    assert all(
+        not statement.startswith("UPDATE staff_obligations SET")
+        for statement, _ in cursor.statements
+    )
+
+
+def test_paid_staff_obligation_gets_an_adjustment_when_revised_pay_is_higher():
+    candidate, request = _candidate_and_request()
+    candidate = replace(candidate, facts=replace(candidate.facts, historical_day_revision=1))
+    cursor = _Cursor(staff_amount=7_000, payout_history_exists=True)
+
+    _write_staff_obligations(cursor, request, candidate, "source:event", 5)
+
+    event_parameters = _insert_parameters(cursor, "staff_obligation_events")
+    assert event_parameters[4] == "adjustment"
+    assert event_parameters[5] == "payable_to_staff"
+    assert event_parameters[8] == 1_400
 
 
 def test_payroll_change_uses_existing_payroll_outbox_contract():

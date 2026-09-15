@@ -14,9 +14,15 @@ from infrastructure.mysql.historical_order_review_remediation_repository import 
     HistoricalOrderReviewRemediationMySqlUnitOfWork,
     MySqlHistoricalOrderReviewRemediationRepository,
 )
+from infrastructure.mysql.historical_service_accounting_repository import (
+    MySqlHistoricalServiceAccountingRepository,
+)
 from infrastructure.mysql.mysql_adapter import get_connection
 from subsystems.orders.historical_adoption_workflow import HistoricalOrderAdoptionWorkflow
 from subsystems.orders.historical_review_remediation_workflow import HistoricalReviewRemediationWorkflow
+from subsystems.orders.historical_service_accounting_workflow import (
+    HistoricalServiceAccountingWorkflow,
+)
 
 
 class HistoricalOrderReviewRemediationApplication:
@@ -61,6 +67,10 @@ def get_historical_order_review_remediation_application():
         MySqlHistoricalAssignmentWriter(connection),
         matching_pending_deposit=MySqlHistoricalPendingDepositMatchingRepository(
             connection
+        ),
+        default_accounting=HistoricalServiceAccountingWorkflow(
+            MySqlHistoricalServiceAccountingRepository(connection),
+            lambda: HistoricalOrderReviewRemediationMySqlUnitOfWork(connection),
         ),
     )
     repository = MySqlHistoricalOrderReviewRemediationRepository(connection, adoption_workflow)

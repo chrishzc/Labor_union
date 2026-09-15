@@ -281,6 +281,63 @@ def test_matching_pending_deposit_apply_writes_formal_matching_root_before_recei
     assert matching.command.source_identity == row.source_identity
 
 
+def test_completed_historical_order_establishes_default_accounting_from_order_days(tmp_path):
+    path = _workbook(
+        tmp_path,
+        ["客戶姓名", "案件編號", "開始日期", "結束日期", "狀態", "月嫂姓名"],
+        ["客戶甲", "CASE-1", date(2025, 1, 3), date(2025, 1, 31), 1, "月嫂甲"],
+    )
+    row = load_historical_order_workbook(path).rows[0]
+
+    class PersistingRepository(_Repository):
+        def persist(self, request, preview, assignment_ids):
+            del request, assignment_ids
+            return SimpleNamespace(
+                outcome=preview.outcome,
+                case_no=preview.case_no,
+                resulting_version=preview.resulting_version,
+                assignment_count=1,
+                review_identity=None,
+                replayed=False,
+                preview_fingerprint=preview.fingerprint,
+            )
+
+    class DefaultAccounting:
+        def __init__(self):
+            self.calls = []
+
+        def establish_default_in_current_unit_of_work(self, **values):
+            self.calls.append(values)
+
+    accounting = DefaultAccounting()
+    workflow = HistoricalOrderAdoptionWorkflow(
+        PersistingRepository(row),
+        _UnitOfWork,
+        _SchedulingHistoricalAssignment(),
+        clock=SimpleNamespace(today=lambda: _BUSINESS_DATE),
+        default_accounting=accounting,
+    )
+    preview = workflow.preview(row)
+
+    workflow.apply(
+        HistoricalOrderAdoptionRequest(
+            row,
+            preview.fingerprint,
+            "historical-order:default-accounting",
+            "test-operator",
+            "adopt completed historical order",
+            "historical-order:default-accounting:correlation",
+        )
+    )
+
+    assert accounting.calls == [{
+        "case_no": "CASE-1",
+        "source_identity": row.source_identity,
+        "actor": "test-operator",
+        "correlation_id": "historical-order:default-accounting:correlation",
+    }]
+
+
 def test_historical_start_matching_plan_is_an_actual_start_and_completes_service():
     current = _current(OrderLifecycleStatus.DISCUSSION, planned_start=date(2025, 1, 3))
     source = HistoricalOrderSourceFacts(

@@ -24,6 +24,9 @@ from infrastructure.mysql.historical_assignment_writer import MySqlHistoricalAss
 from infrastructure.mysql.historical_pending_deposit_matching_repository import (
     MySqlHistoricalPendingDepositMatchingRepository,
 )
+from infrastructure.mysql.historical_service_accounting_repository import (
+    MySqlHistoricalServiceAccountingRepository,
+)
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from shared_kernel.fingerprints import PreviewFingerprint
 from subsystems.orders.historical_adoption_workflow import (
@@ -31,6 +34,9 @@ from subsystems.orders.historical_adoption_workflow import (
     HistoricalOrderAdoptionWorkflow,
 )
 from subsystems.orders.historical_order_workbook import load_historical_order_workbook
+from subsystems.orders.historical_service_accounting_workflow import (
+    HistoricalServiceAccountingWorkflow,
+)
 
 
 def run_historical_order_adoption(
@@ -62,6 +68,10 @@ def _process_workbook(connection, workbook, apply, actor, reason):
         MySqlHistoricalAssignmentWriter(connection),
         matching_pending_deposit=MySqlHistoricalPendingDepositMatchingRepository(
             connection
+        ),
+        default_accounting=HistoricalServiceAccountingWorkflow(
+            MySqlHistoricalServiceAccountingRepository(connection),
+            lambda: MySqlUnitOfWork(connection),
         ),
     )
     outcomes: Counter[str] = Counter()

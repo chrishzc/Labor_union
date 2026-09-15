@@ -42,7 +42,7 @@ export const HistoricalServiceAccountingWorkbench: React.FC = () => {
 
   return <section className="import-workbench-card" aria-label="歷史訂單實際服務天數與帳務">
     <h2>🧮 歷史訂單實際服務天數與帳務</h2>
-    <p>只填每位月嫂的實際服務天數；系統會以單薪計算應收應付，不建立逐日排班。</p>
+    <p>只填每位月嫂的實際服務天數；系統會自動重算月嫂應付，已有付款紀錄時則建立差額，不改動歷史訂單完成狀態。</p>
     <div className="import-result-title-row">
       <label>案件編號 <select aria-label="案件編號" value={caseNo} disabled={caseOptionsUnavailable} onChange={(event) => { setCaseNo(event.target.value); setFacts(null); setPreview(null); }}>
         <option value="">{casePlaceholder}</option>
@@ -59,7 +59,7 @@ export const HistoricalServiceAccountingWorkbench: React.FC = () => {
       <p>總實際服務 {preview.total_actual_service_days} 天；樓層費 {preview.historical_floor_fee_ntd.toLocaleString()} 元；雙薪 0 小時。</p>
       <p>客戶應付 {preview.client_obligation_amount_ntd.toLocaleString()} 元；月嫂應付合計 {preview.staff_obligation_amount_ntd.toLocaleString()} 元。</p>
       {preview.payroll_assignments.map((item) => <p key={item.assignment_identity}>月嫂 ID {item.staff_id}：{item.actual_service_days} 天，應付 {item.total_payable_ntd.toLocaleString()} 元。</p>)}
-      <button type="button" disabled={busy} onClick={() => void run(async () => { const receipt = await historicalServiceAccountingClient.apply(preview, inputs(), '核對舊系統實際服務天數'); setMessage(receipt.replayed ? '此筆已套用，已讀取原收據。' : '實際服務天數與應收應付已建立。'); setPreview(null); })}>確認建立帳務</button>
+      <button type="button" disabled={busy} onClick={() => void run(async () => { const receipt = await historicalServiceAccountingClient.apply(preview, inputs(), '核對舊系統實際服務天數'); setMessage(receipt.replayed ? '此筆已套用，已讀取原收據。' : '實際服務天數與應收應付已更新。'); setPreview(null); })}>確認更新帳務</button>
     </div>}
     {message && <p role="alert">{message}</p>}
   </section>;

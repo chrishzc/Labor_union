@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
+from hashlib import sha256
 from typing import Callable, Protocol
 
 from domains.client_finance.historical_obligation_calculation import (
@@ -25,6 +27,10 @@ from domains.payroll.historical_calculation import (
     HistoricalAssignmentServiceFacts,
     HistoricalCasePayrollCandidate,
     build_historical_case_payroll_candidate,
+)
+from domains.payroll.payment_due_date import (
+    calculate_staff_payment_due_date,
+    is_full_subsidy_eligible,
 )
 from shared_kernel.errors import ErrorCategory, TypedError
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
@@ -67,6 +73,8 @@ class HistoricalServiceAccountingFacts:
     assignments: tuple[HistoricalServiceAccountingAssignmentFacts, ...]
     client_policy_version: str
     client_hourly_rate: MoneyNTD
+    completed_on: date
+    staff_payment_due_date: date | None
 
     def __post_init__(self) -> None:
         require_canonical_text(self.case_no, "case number", 50)
@@ -80,6 +88,12 @@ class HistoricalServiceAccountingFacts:
             raise TypeError("client hourly rate must be MoneyNTD")
         if self.client_hourly_rate.amount <= 0:
             raise ValueError("client hourly rate must be positive")
+        if not isinstance(self.completed_on, date):
+            raise TypeError("completed_on must be a date")
+        if self.staff_payment_due_date is not None and not isinstance(
+            self.staff_payment_due_date, date
+        ):
+            raise TypeError("staff_payment_due_date must be a date")
         for value, field in (
             (self.lifecycle_version, "lifecycle version"),
             (self.historical_day_revision, "historical day revision"),
@@ -109,6 +123,7 @@ class HistoricalServiceAccountingCandidate:
     service_days: HistoricalActualServiceDaysCandidate
     payroll: HistoricalCasePayrollCandidate
     client_finance: HistoricalClientObligationCandidate
+    staff_payment_due_date: date
     fingerprint: PreviewFingerprint
 
 
@@ -191,37 +206,81 @@ class HistoricalServiceAccountingWorkflow:
     def apply(
         self, request: ApplyHistoricalServiceAccounting
     ) -> HistoricalServiceAccountingReceipt:
-        command_fingerprint = _command_fingerprint(request)
         with self._unit_of_work_factory() as unit:
-            stored = self._repository.find_receipt(request.idempotency_key)
-            if stored is not None:
-                if stored.command_fingerprint != command_fingerprint:
-                    raise _error(
-                        request,
-                        ErrorCategory.IDEMPOTENCY_MISMATCH,
-                        "idempotency_conflict",
-                    )
-                return _replayed(stored.receipt)
-            facts = self._repository.load(request.intent.case_no, for_update=True)
-            candidate = _candidate(facts, request.intent)
-            if (
-                facts.lifecycle_version != request.expected_lifecycle_version
-                or facts.historical_day_revision
-                != request.expected_historical_day_revision
-                or facts.client_finance_version
-                != request.expected_client_finance_version
-                or facts.payroll_version != request.expected_payroll_version
-                or candidate.fingerprint != request.preview_fingerprint
-            ):
-                raise _error(
-                    request,
-                    ErrorCategory.CONFLICT,
-                    "historical_actual_service_days_candidate_stale",
-                    facts.lifecycle_version,
-                )
-            receipt = self._repository.persist(request, candidate)
+            receipt = self.apply_in_current_unit_of_work(request)
             unit.commit()
             return receipt
+
+    def apply_in_current_unit_of_work(
+        self, request: ApplyHistoricalServiceAccounting
+    ) -> HistoricalServiceAccountingReceipt:
+        command_fingerprint = _command_fingerprint(request)
+        stored = self._repository.find_receipt(request.idempotency_key)
+        if stored is not None:
+            if stored.command_fingerprint != command_fingerprint:
+                raise _error(
+                    request,
+                    ErrorCategory.IDEMPOTENCY_MISMATCH,
+                    "idempotency_conflict",
+                )
+            return _replayed(stored.receipt)
+        facts = self._repository.load(request.intent.case_no, for_update=True)
+        candidate = _candidate(facts, request.intent)
+        if (
+            facts.lifecycle_version != request.expected_lifecycle_version
+            or facts.historical_day_revision
+            != request.expected_historical_day_revision
+            or facts.client_finance_version
+            != request.expected_client_finance_version
+            or facts.payroll_version != request.expected_payroll_version
+            or candidate.fingerprint != request.preview_fingerprint
+        ):
+            raise _error(
+                request,
+                ErrorCategory.CONFLICT,
+                "historical_actual_service_days_candidate_stale",
+                facts.lifecycle_version,
+            )
+        return self._repository.persist(request, candidate)
+
+    def establish_default_in_current_unit_of_work(
+        self,
+        *,
+        case_no: str,
+        source_identity: str,
+        actor: str,
+        correlation_id: str,
+    ) -> HistoricalServiceAccountingReceipt:
+        facts = self._repository.load(case_no, for_update=True)
+        if len(facts.assignments) != 1:
+            raise ValueError("historical_default_accounting_requires_one_staff")
+        assignment = facts.assignments[0]
+        intent = ConfirmHistoricalServiceDaysIntent(
+            case_no,
+            (
+                HistoricalActualServiceDaysInput(
+                    assignment.assignment_identity,
+                    assignment.staff_id,
+                    facts.contracted_service_days,
+                ),
+            ),
+        )
+        candidate = _candidate(facts, intent)
+        digest = sha256(source_identity.encode("utf-8")).hexdigest()
+        return self.apply_in_current_unit_of_work(
+            ApplyHistoricalServiceAccounting(
+                intent,
+                facts.lifecycle_version,
+                facts.historical_day_revision,
+                facts.client_finance_version,
+                facts.payroll_version,
+                candidate.fingerprint,
+                IdempotencyKey(f"historical-default-accounting:{digest}"),
+                ActorContext(actor),
+                "依歷史訂單原服務天數建立預設帳務",
+                CorrelationId(correlation_id),
+            )
+        )
 
 
 def _candidate(
@@ -232,8 +291,6 @@ def _candidate(
         raise ValueError("historical_actual_service_days_assignment_mismatch")
     if facts.lifecycle_status is not OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED:
         raise ValueError("historical_order_lifecycle_transition_invalid")
-    if facts.historical_day_revision != 0:
-        raise ValueError("historical_actual_service_days_already_confirmed")
     service_days = build_historical_actual_service_days_candidate(
         case_no=facts.case_no,
         assignments=tuple(
@@ -278,6 +335,13 @@ def _candidate(
         service_hours_per_day=facts.service_hours_per_day,
         historical_floor_fee=MoneyNTD(service_days.historical_floor_fee_ntd),
     )
+    calculated_due_date = calculate_staff_payment_due_date(
+        facts.completed_on,
+        client_finance.total_receivable.amount,
+        is_full_subsidy_eligible(facts.client_identity_status)
+        and client_finance.total_receivable.is_zero,
+    )
+    staff_payment_due_date = facts.staff_payment_due_date or calculated_due_date
     payload = {
         "case_no": facts.case_no,
         "lifecycle_status": facts.lifecycle_status.value,
@@ -290,12 +354,14 @@ def _candidate(
         "service_days_fingerprint": service_days.fingerprint.value,
         "payroll_fingerprint": payroll.fingerprint.value,
         "client_finance_fingerprint": client_finance.fingerprint.value,
+        "staff_payment_due_date": staff_payment_due_date.isoformat(),
     }
     return HistoricalServiceAccountingCandidate(
         facts,
         service_days,
         payroll,
         client_finance,
+        staff_payment_due_date,
         fingerprint_payload(payload),
     )
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from datetime import date
 import json
 
 from domains.orders.lifecycle import OrderLifecycleStatus
@@ -83,6 +84,8 @@ class MySqlHistoricalServiceAccountingRepository:
             assignments,
             str(root["client_policy_version"]),
             MoneyNTD(int(root["client_hourly_rate_ntd"])),
+            _date_value(root["completed_on"]),
+            _optional_date_value(root["staff_payment_due_date"]),
         )
 
     def find_receipt(self, key):
@@ -111,8 +114,6 @@ class MySqlHistoricalServiceAccountingRepository:
         )
 
     def persist(self, request, candidate):
-        if candidate.facts.historical_day_revision != 0:
-            raise ValueError("historical_actual_service_days_already_confirmed")
         resulting_day_revision = candidate.facts.historical_day_revision + 1
         resulting_client_version = candidate.facts.client_finance_version + 1
         resulting_payroll_version = candidate.facts.payroll_version + 1
@@ -162,6 +163,7 @@ class MySqlHistoricalServiceAccountingRepository:
             event_id = int(cursor.lastrowid)
             _insert_items(cursor, event_id, candidate)
             _write_client_obligation(cursor, request, candidate, event_identity, resulting_client_version)
+            _write_order_staff_payment_due_date(cursor, candidate)
             _write_staff_obligations(cursor, request, candidate, event_identity, resulting_payroll_version)
             _advance_versions(cursor, candidate, resulting_client_version, resulting_payroll_version)
             _write_payroll_outbox(cursor, request, candidate, resulting_payroll_version)
@@ -281,15 +283,25 @@ def _ensure_assignment_rate_snapshots(cursor, candidate):
 def _write_client_obligation(cursor, request, candidate, source_identity, resulting_version):
     before = _previous_client_amount(cursor, candidate.facts.case_no)
     after = candidate.client_finance.total_receivable.amount
-    if before != 0:
-        raise ValueError("historical_actual_service_days_already_confirmed")
-    direction = "receivable_from_client"
-    projection_status = "settled" if after == 0 else "open"
+    revision = candidate.facts.historical_day_revision + 1
+    delta = after - before
+    if candidate.facts.historical_day_revision > 0 and delta == 0:
+        return
+    direction = "receivable_from_client" if delta >= 0 else "payable_to_client"
+    projection_status = "settled" if candidate.facts.historical_day_revision == 0 and after == 0 else "open"
     identity = (
         f"historical-service:{candidate.facts.case_no}:"
-        f"revision:{candidate.facts.historical_day_revision + 1}:client:{direction}"
+        f"revision:{revision}:client:{direction}"
     )
-    amount = after
+    amount = after if candidate.facts.historical_day_revision == 0 else abs(delta)
+    source_obligation_identity = None
+    event_type = "established"
+    if candidate.facts.historical_day_revision > 0:
+        source_obligation_identity = (
+            f"historical-service:{candidate.facts.case_no}:"
+            "revision:1:client:receivable_from_client"
+        )
+        event_type = "adjusted" if delta > 0 else "reversed"
     cursor.execute(
         "SELECT obligation_identity FROM client_obligations WHERE obligation_identity=%s FOR UPDATE",
         (identity,),
@@ -300,13 +312,15 @@ def _write_client_obligation(cursor, request, candidate, source_identity, result
         "INSERT INTO client_obligation_events "
         "(obligation_identity,case_no,obligation_type,direction,event_type,before_amount_ntd,after_amount_ntd,"
         "before_due_date,after_due_date,source_event_identity,source_obligation_identity,expected_account_version,"
-        "idempotency_key,actor,reason) VALUES (%s,%s,'adjustment',%s,'established',0,%s,NULL,NULL,%s,NULL,%s,%s,%s,%s)",
+        "idempotency_key,actor,reason) VALUES (%s,%s,'adjustment',%s,%s,0,%s,NULL,NULL,%s,%s,%s,%s,%s,%s)",
         (
             identity,
             candidate.facts.case_no,
             direction,
+            event_type,
             amount,
             source_identity,
+            source_obligation_identity,
             candidate.facts.client_finance_version,
             f"{request.idempotency_key.value}:client",
             request.actor.actor_id,
@@ -317,11 +331,12 @@ def _write_client_obligation(cursor, request, candidate, source_identity, result
     cursor.execute(
         "INSERT INTO client_obligations "
         "(obligation_identity,case_no,obligation_type,direction,source_obligation_identity,amount_due_ntd,due_date,status,current_event_id,projection_version) "
-        "VALUES (%s,%s,'adjustment',%s,NULL,%s,NULL,%s,%s,%s)",
+        "VALUES (%s,%s,'adjustment',%s,%s,%s,NULL,%s,%s,%s)",
         (
             identity,
             candidate.facts.case_no,
             direction,
+            source_obligation_identity,
             amount,
             projection_status,
             event_id,
@@ -335,9 +350,21 @@ def _write_staff_obligations(cursor, request, candidate, source_identity, result
     for ordinal, item in enumerate(candidate.payroll.assignments, start=1):
         assignment_id = _assignment_id(item.assignment_identity)
         before = previous.get(assignment_id, 0)
-        if before != 0:
-            raise ValueError("historical_actual_service_days_already_confirmed")
         amount = item.total_payable.amount
+        if candidate.facts.historical_day_revision > 0:
+            _revise_staff_obligation(
+                cursor,
+                request,
+                candidate,
+                source_identity,
+                resulting_version,
+                ordinal,
+                item,
+                assignment_id,
+                before,
+                amount,
+            )
+            continue
         direction = "payable_to_staff"
         obligation_kind = "service_pay"
         event_type = "established"
@@ -358,7 +385,7 @@ def _write_staff_obligations(cursor, request, candidate, source_identity, result
             "(obligation_identity,assignment_id,case_no,staff_id,obligation_kind,direction,source_obligation_identity,"
             "event_type,before_amount_ntd,after_amount_ntd,due_date,payroll_fingerprint,expected_payroll_version,"
             "resulting_payroll_version,idempotency_key,actor,reason) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,0,%s,NULL,%s,%s,%s,%s,%s,%s)",
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,0,%s,%s,%s,%s,%s,%s,%s,%s)",
             (
                 identity,
                 assignment_id,
@@ -369,6 +396,7 @@ def _write_staff_obligations(cursor, request, candidate, source_identity, result
                 source_obligation_identity,
                 event_type,
                 amount,
+                candidate.staff_payment_due_date,
                 candidate.payroll.fingerprint.value,
                 candidate.facts.payroll_version,
                 resulting_version,
@@ -382,7 +410,7 @@ def _write_staff_obligations(cursor, request, candidate, source_identity, result
             "INSERT INTO staff_obligations "
             "(obligation_identity,assignment_id,case_no,staff_id,obligation_kind,direction,source_obligation_identity,"
             "amount_due_ntd,due_date,status,current_event_id,payroll_version,payout_history_exists) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,NULL,'open',%s,%s,0)",
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'open',%s,%s,0)",
             (
                 identity,
                 assignment_id,
@@ -392,10 +420,152 @@ def _write_staff_obligations(cursor, request, candidate, source_identity, result
                 direction,
                 source_obligation_identity,
                 amount,
+                candidate.staff_payment_due_date,
                 event_id,
                 resulting_version,
             ),
         )
+
+
+def _revise_staff_obligation(
+    cursor,
+    request,
+    candidate,
+    source_identity,
+    resulting_version,
+    ordinal,
+    item,
+    assignment_id,
+    before,
+    after,
+):
+    delta = after - before
+    if delta == 0:
+        return
+    base_identity = (
+        f"historical-service:{candidate.facts.case_no}:revision:1:"
+        f"assignment:{assignment_id}:payable_to_staff"
+    )
+    cursor.execute(
+        "SELECT obligation_identity,payout_history_exists FROM staff_obligations "
+        "WHERE obligation_identity=%s AND case_no=%s FOR UPDATE",
+        (base_identity, candidate.facts.case_no),
+    )
+    base = cursor.fetchone()
+    if base is None:
+        raise ValueError("historical_accounting_obligation_binding_invalid")
+    if not bool(base["payout_history_exists"]):
+        cursor.execute(
+            "INSERT INTO staff_obligation_events "
+            "(obligation_identity,assignment_id,case_no,staff_id,obligation_kind,direction,source_obligation_identity,"
+            "event_type,before_amount_ntd,after_amount_ntd,due_date,payroll_fingerprint,expected_payroll_version,"
+            "resulting_payroll_version,idempotency_key,actor,reason) "
+            "VALUES (%s,%s,%s,%s,'service_pay','payable_to_staff',NULL,'rebuilt',%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            (
+                base_identity,
+                assignment_id,
+                candidate.facts.case_no,
+                item.staff_id,
+                before,
+                after,
+                candidate.staff_payment_due_date,
+                candidate.payroll.fingerprint.value,
+                candidate.facts.payroll_version,
+                resulting_version,
+                f"{request.idempotency_key.value}:staff:{ordinal}",
+                request.actor.actor_id,
+                request.reason,
+            ),
+        )
+        event_id = int(cursor.lastrowid)
+        status = "open" if after > 0 else "cancelled"
+        cursor.execute(
+            "UPDATE staff_obligations SET amount_due_ntd=%s,due_date=%s,status=%s,"
+            "current_event_id=%s,payroll_version=%s "
+            "WHERE obligation_identity=%s AND case_no=%s AND payout_history_exists=0",
+            (
+                after,
+                candidate.staff_payment_due_date,
+                status,
+                event_id,
+                resulting_version,
+                base_identity,
+                candidate.facts.case_no,
+            ),
+        )
+        if int(cursor.rowcount) != 1:
+            raise ValueError("staff_obligation_frozen")
+        return
+
+    positive = delta > 0
+    direction = "payable_to_staff" if positive else "receivable_from_staff"
+    obligation_kind = "adjustment" if positive else "reversal"
+    delta_identity = (
+        f"historical-service:{candidate.facts.case_no}:"
+        f"revision:{candidate.facts.historical_day_revision + 1}:"
+        f"assignment:{assignment_id}:{direction}"
+    )
+    amount_due = abs(delta)
+    cursor.execute(
+        "INSERT INTO staff_obligation_events "
+        "(obligation_identity,assignment_id,case_no,staff_id,obligation_kind,direction,source_obligation_identity,"
+        "event_type,before_amount_ntd,after_amount_ntd,due_date,payroll_fingerprint,expected_payroll_version,"
+        "resulting_payroll_version,idempotency_key,actor,reason) "
+        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,0,%s,%s,%s,%s,%s,%s,%s,%s)",
+        (
+            delta_identity,
+            assignment_id,
+            candidate.facts.case_no,
+            item.staff_id,
+            obligation_kind,
+            direction,
+            base_identity,
+            obligation_kind,
+            amount_due,
+            candidate.staff_payment_due_date,
+            candidate.payroll.fingerprint.value,
+            candidate.facts.payroll_version,
+            resulting_version,
+            f"{request.idempotency_key.value}:staff:{ordinal}",
+            request.actor.actor_id,
+            request.reason,
+        ),
+    )
+    event_id = int(cursor.lastrowid)
+    cursor.execute(
+        "INSERT INTO staff_obligations "
+        "(obligation_identity,assignment_id,case_no,staff_id,obligation_kind,direction,source_obligation_identity,"
+        "amount_due_ntd,due_date,status,current_event_id,payroll_version,payout_history_exists) "
+        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'open',%s,%s,0)",
+        (
+            delta_identity,
+            assignment_id,
+            candidate.facts.case_no,
+            item.staff_id,
+            obligation_kind,
+            direction,
+            base_identity,
+            amount_due,
+            candidate.staff_payment_due_date,
+            event_id,
+            resulting_version,
+        ),
+    )
+
+
+def _write_order_staff_payment_due_date(cursor, candidate):
+    due_date = candidate.staff_payment_due_date
+    if candidate.facts.staff_payment_due_date is not None:
+        if candidate.facts.staff_payment_due_date != due_date:
+            raise ValueError("historical_accounting_obligation_binding_invalid")
+        return
+    cursor.execute(
+        "UPDATE orders SET staff_payment_due_date=%s "
+        "WHERE case_no=%s AND staff_payment_due_date IS NULL",
+        (due_date, candidate.facts.case_no),
+    )
+    if cursor.rowcount != 1:
+        raise ValueError("historical_accounting_obligation_binding_invalid")
 
 
 def _previous_client_amount(cursor, case_no):
@@ -499,8 +669,21 @@ def _cursor(connection):
         cursor.close()
 
 
+def _date_value(value) -> date:
+    if not isinstance(value, date):
+        raise ValueError("historical_order_completion_date_missing")
+    return value
+
+
+def _optional_date_value(value) -> date | None:
+    if value is None:
+        return None
+    return _date_value(value)
+
+
 _ROOT_SQL = (
     "SELECT o.case_no,o.status,o.lifecycle_version,o.service_days,o.service_hours_per_day,o.floor_fee,"
+    "COALESCE(o.actual_end_date,o.end_date) AS completed_on,o.staff_payment_due_date,"
     "c.identity_status,COALESCE(client_account.aggregate_version,0) AS client_finance_version,"
     "COALESCE(payroll_account.aggregate_version,0) AS payroll_version,receipt.id AS adoption_receipt_id,"
     "receipt.source_event_identity,COALESCE(day_projection.day_revision,0) AS historical_day_revision,"

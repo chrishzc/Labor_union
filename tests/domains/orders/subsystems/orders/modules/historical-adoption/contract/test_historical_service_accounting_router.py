@@ -1,5 +1,7 @@
 """HTTP contract for one-screen historical service accounting."""
 
+from datetime import date
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -44,6 +46,8 @@ class _Repository:
             ),
             "client-policy:case-19",
             MoneyNTD(300),
+            date(2026, 4, 20),
+            None,
         )
 
     def load(self, case_no, *, for_update):

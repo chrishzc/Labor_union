@@ -219,7 +219,7 @@ LEFT JOIN staff_payable_projections projection
 LEFT JOIN staff_bank_accounts bank_accounts
   ON bank_accounts.staff_id = obligations.staff_id
  AND bank_accounts.is_primary = 1
-WHERE obligations.due_date = %s
+WHERE obligations.due_date <= %s
   AND obligations.direction = 'payable_to_staff'
   AND obligations.status <> 'cancelled'
   AND obligations.amount_due_ntd > 0
@@ -267,9 +267,9 @@ LEFT JOIN client_ledger_obligation_allocations allocations
   ON allocations.obligation_identity = obligations.obligation_identity
 LEFT JOIN client_ledger_entries ledger
   ON ledger.id = allocations.ledger_entry_id
-WHERE obligations.due_date = %s
+WHERE obligations.due_date <= %s
   AND obligations.direction = 'payable_to_client'
-  AND obligations.status <> 'cancelled'
+  AND obligations.status = 'open'
   AND obligations.amount_due_ntd > 0
 GROUP BY obligations.obligation_identity,
          obligations.case_no,
@@ -287,7 +287,7 @@ _GOVERNMENT_RETURNS_SQL = """
 SELECT payable_identity,overpayment_identity,agency_name,bank_code,account_display,
        remaining_amount_ntd,due_date
 FROM government_overpayment_return_payables
-WHERE due_date = %s
+WHERE due_date <= %s
   AND status = 'payable'
   AND remaining_amount_ntd > 0
 ORDER BY due_date,payable_identity

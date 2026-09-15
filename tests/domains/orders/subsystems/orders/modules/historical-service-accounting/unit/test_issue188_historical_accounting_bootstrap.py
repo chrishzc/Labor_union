@@ -1,6 +1,7 @@
 """Focused regression coverage for issue #188 historical accounting bootstrap."""
 
 import inspect
+from datetime import date
 
 import pytest
 from fastapi import HTTPException
@@ -42,6 +43,8 @@ class _LoadCursor:
                 "historical_day_revision": 0,
                 "client_policy_version": "client-policy:188" if self.terms else None,
                 "client_hourly_rate_ntd": 280 if self.terms else None,
+                "completed_on": date(2026, 4, 20),
+                "staff_payment_due_date": None,
             }
         elif "FROM historical_order_pairing_evidence evidence" in statement:
             self._all = (

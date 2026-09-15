@@ -127,6 +127,17 @@ class SchedulingHistoricalAssignmentPort(Protocol):
     ) -> tuple[int, ...]: ...
 
 
+class HistoricalDefaultAccountingPort(Protocol):
+    def establish_default_in_current_unit_of_work(
+        self,
+        *,
+        case_no: str,
+        source_identity: str,
+        actor: str,
+        correlation_id: str,
+    ) -> object: ...
+
+
 class HistoricalOrderAdoptionWorkflow:
     def __init__(
         self,
@@ -136,6 +147,7 @@ class HistoricalOrderAdoptionWorkflow:
         actual_start_rebuilder: HistoricalActualStartRebuilder | None = None,
         clock: BusinessClock | None = None,
         matching_pending_deposit: HistoricalPendingDepositMatchingPort | None = None,
+        default_accounting: HistoricalDefaultAccountingPort | None = None,
     ) -> None:
         self._repository = repository
         self._unit_of_work_factory = unit_of_work_factory
@@ -148,6 +160,7 @@ class HistoricalOrderAdoptionWorkflow:
         self._scheduling_historical_assignment = scheduling_historical_assignment
         self._clock = clock or SystemBusinessClock()
         self._matching_pending_deposit = matching_pending_deposit
+        self._default_accounting = default_accounting
 
     def preview(self, row: HistoricalOrderWorkbookRow) -> HistoricalOrderAdoptionPreview:
         return self._build_preview(row, for_update=False)
@@ -180,7 +193,24 @@ class HistoricalOrderAdoptionWorkflow:
         assignment_ids = self._append_assignment_candidates(preview)
         self._ensure_matching_pending_deposit(request, preview)
         receipt = self._repository.persist(request, preview, assignment_ids)
+        self._establish_default_accounting(request, preview)
         return receipt
+
+    def _establish_default_accounting(
+        self,
+        request: HistoricalOrderAdoptionRequest,
+        preview: HistoricalOrderAdoptionPreview,
+    ) -> None:
+        if preview.result is not HistoricalOrderResult.HISTORICAL_SERVICE_COMPLETED:
+            return
+        if self._default_accounting is None:
+            return
+        self._default_accounting.establish_default_in_current_unit_of_work(
+            case_no=str(preview.case_no),
+            source_identity=request.row.source_identity,
+            actor=request.actor,
+            correlation_id=request.correlation_id,
+        )
 
     def _ensure_matching_pending_deposit(
         self,

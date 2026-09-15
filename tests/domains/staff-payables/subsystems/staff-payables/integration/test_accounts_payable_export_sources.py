@@ -51,6 +51,18 @@ def test_sql_nets_every_canonical_client_refund_reversal_type():
     assert "obligations.obligation_type" in _CLIENT_REFUNDS_SQL
 
 
+def test_export_sources_include_all_open_payables_due_on_or_before_the_target_date():
+    for query in (
+        _STAFF_PAYABLES_SQL,
+        _CLIENT_REFUNDS_SQL,
+        _GOVERNMENT_RETURNS_SQL,
+    ):
+        assert "due_date <= %s" in query
+        assert "due_date = %s" not in query
+
+    assert "obligations.status = 'open'" in _CLIENT_REFUNDS_SQL
+
+
 def test_legacy_partially_paid_staff_row_is_an_anomaly_not_a_current_export():
     fact = _staff_fact(
         {

@@ -201,7 +201,10 @@ def test_deposit_paid_with_distinct_actual_start_builds_service_assignment_candi
     )
 
     preview = HistoricalOrderAdoptionWorkflow(
-        _Repository(), _UnitOfWork, _Writer()
+        _Repository(),
+        _UnitOfWork,
+        _Writer(),
+        clock=SimpleNamespace(today=lambda: date(2026, 9, 1)),
     ).preview(row)
 
     assert preview.after_status == OrderLifecycleStatus.HISTORICAL_IN_SERVICE.value
@@ -676,6 +679,7 @@ def test_deposit_paid_historical_period_skips_precision_and_enters_historical_br
         _UnitOfWork,
         _Writer(),
         ForbiddenPrecision(),
+        clock=SimpleNamespace(today=lambda: date(2026, 9, 1)),
     )
 
     preview = workflow.preview(row)

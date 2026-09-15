@@ -1,6 +1,7 @@
 """Historical day-count accounting is one stale-safe outer transaction."""
 
 from dataclasses import replace
+from datetime import date
 
 import pytest
 
@@ -46,6 +47,8 @@ def _facts():
         ),
         client_policy_version="client-policy:case-19",
         client_hourly_rate=MoneyNTD(275),
+        completed_on=date(2026, 4, 20),
+        staff_payment_due_date=None,
     )
 
 
@@ -82,9 +85,9 @@ class _Repository:
         self.persist_calls += 1
         receipt = HistoricalServiceAccountingReceipt(
             "CASE-19",
-            1,
-            3,
-            5,
+            candidate.facts.historical_day_revision + 1,
+            candidate.facts.client_finance_version + 1,
+            candidate.facts.payroll_version + 1,
             candidate.service_days.total_actual_service_days,
             candidate.client_finance.total_receivable.amount,
             candidate.payroll.total_payable.amount,
@@ -102,10 +105,10 @@ def _intent(days=3):
 def _request(candidate):
     return ApplyHistoricalServiceAccounting(
         _intent(),
-        3,
-        0,
-        2,
-        4,
+        candidate.facts.lifecycle_version,
+        candidate.facts.historical_day_revision,
+        candidate.facts.client_finance_version,
+        candidate.facts.payroll_version,
         candidate.fingerprint,
         IdempotencyKey("historical-days:19"),
         ActorContext("operator"),
@@ -186,12 +189,16 @@ def test_only_historical_service_completed_is_eligible() -> None:
         workflow.preview(_intent())
 
 
-def test_confirmed_historical_service_days_are_immutable() -> None:
+def test_confirmed_historical_service_days_can_be_revised_with_a_new_preview() -> None:
     repository = _Repository()
     repository.facts = replace(repository.facts, historical_day_revision=1)
     workflow = HistoricalServiceAccountingWorkflow(repository, lambda: _Unit([]))
 
-    with pytest.raises(
-        ValueError, match="historical_actual_service_days_already_confirmed"
-    ):
-        workflow.preview(_intent())
+    preview = workflow.preview(_intent())
+
+    assert preview.facts.historical_day_revision == 1
+    assert preview.service_days.total_actual_service_days == 3
+
+    receipt = workflow.apply(_request(preview))
+
+    assert receipt.resulting_historical_day_revision == 2

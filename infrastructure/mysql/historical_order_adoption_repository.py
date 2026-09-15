@@ -183,11 +183,15 @@ class MySqlHistoricalOrderAdoptionRepository:
             "issue_codes": preview.issue_codes,
             "service_calendar_status": "not_reconstructed_for_historical_order",
             "historical_service_days_status": (
-                "pending_operator_confirmation"
+                "defaulted_from_order_service_days"
                 if preview.result.value == "historical_service_completed"
                 else "not_yet_eligible"
             ),
-            "payroll_rebuild_status": "not_started",
+            "payroll_rebuild_status": (
+                "established_in_adoption_transaction"
+                if preview.result.value == "historical_service_completed"
+                else "not_started"
+            ),
             **_operational_baseline_snapshot(request, preview),
         }
         with _cursor(self._connection) as cursor:
