@@ -46,10 +46,26 @@ const fieldCapabilities = z.record(z.string(), z.strictObject({
   editable: z.boolean(), reason: nullableText, options: z.array(z.string()).nullable(),
 }));
 
+const accountingDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable();
+const clientObligationDate = z.strictObject({
+  obligation_identity: z.string().min(1),
+  obligation_type: z.enum(['deposit', 'first', 'second', 'subsidy_return']),
+  due_date: accountingDate,
+});
+const staffObligationDate = z.strictObject({
+  obligation_identity: z.string().min(1), obligation_kind: z.string().min(1),
+  due_date: accountingDate, staff_id: z.number().int().positive(), staff_name: nullableText,
+});
+
 export const ClientRegistrySummarySchema = z.strictObject({
   client_id: z.number().int().positive(), case_no: z.string().min(1), virtual_account: z.string().nullable().optional(), name: nullableText,
   phone: nullableText, city: nullableText, district: z.string().nullable().optional(), multi_birth_count: optionalNullableText, service_days: optionalNullablePositiveInt,
   requires_cooking: optionalNullableBoolean, planned_start_date: nullableText, order_status: nullableText,
+  staff_payment_due_date: accountingDate.optional(),
+  client_obligation_dates: z.array(clientObligationDate).optional(),
+  staff_obligation_dates: z.array(staffObligationDate).optional(),
+  claim_application_year: z.number().int().min(1).max(9999).nullable().optional(),
+  claim_application_month: z.number().int().min(1).max(12).nullable().optional(),
 });
 export const ClientRegistryPageSchema = z.strictObject({
   items: z.array(ClientRegistrySummarySchema), next_cursor: z.string().nullable(),
