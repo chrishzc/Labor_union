@@ -231,6 +231,11 @@ Export：
 1. 在一致 read snapshot 讀取 `payable` obligations，以及 review=`normal` 的
    `pending`／`partially_refunded` 客戶退款義務，以及 Government Subsidy 提供的
    `government_overpayment_return` typed payable view；
+   對已採納且服務完成、但舊資料尚無 `service_pay` obligation 的歷史訂單，Query 必須在
+   同一 snapshot 以最新歷史實際天數 revision 投影；沒有 revision 時使用 Orders 原
+   `service_days`。投影沿用 assignment／case rate snapshot、Payroll 公式、調整額與付款到期日
+   規則，且使用預定的 revision-1 obligation identity；正式 obligation 一旦存在即排除 fallback，
+   每次載入重算但不得寫 DB、不得據此宣稱已付款或已結清；
 2. 月嫂列依 `staff_id + target_payment_date + bank_identity` 聚合；
 3. anomaly／completed／refunded／review-required 不進應付款清單；
 4. client refund row 只輸出 remaining amount，並明確標示

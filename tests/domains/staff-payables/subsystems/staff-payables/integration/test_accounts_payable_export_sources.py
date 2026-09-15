@@ -3,7 +3,9 @@ from datetime import date
 from infrastructure.mysql.accounts_payable_export_sources import (
     _CLIENT_REFUNDS_SQL,
     _GOVERNMENT_RETURNS_SQL,
+    _HISTORICAL_STAFF_PAYABLE_PROJECTION_SQL,
     _STAFF_PAYABLES_SQL,
+    MySqlStaffPayableExportSource,
     _government_return_fact,
     _refund_fact,
     _staff_fact,
@@ -61,6 +63,107 @@ def test_export_sources_include_all_open_payables_due_on_or_before_the_target_da
         assert "due_date = %s" not in query
 
     assert "obligations.status = 'open'" in _CLIENT_REFUNDS_SQL
+
+
+class _ProjectionCursor:
+    def __init__(self, historical_rows):
+        self.historical_rows = historical_rows
+        self.rows = ()
+        self.statements = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+    def execute(self, statement, parameters):
+        self.statements.append((statement, parameters))
+        self.rows = self.historical_rows if statement == _HISTORICAL_STAFF_PAYABLE_PROJECTION_SQL else ()
+
+    def fetchall(self):
+        return self.rows
+
+
+class _ProjectionConnection:
+    def __init__(self, historical_rows):
+        self.cursor_instance = _ProjectionCursor(historical_rows)
+
+    def cursor(self):
+        return self.cursor_instance
+
+
+def test_existing_historical_order_without_obligation_is_projected_on_each_load():
+    row = {
+        "case_no": "H-19",
+        "assignment_id": 19,
+        "staff_id": 3,
+        "recipient_name": "月嫂甲",
+        "identity_card": "A123456789",
+        "contracted_service_days": 40,
+        "service_hours_per_day": 9,
+        "floor_fee_ntd": 4_000,
+        "actual_service_days": 26,
+        "payroll_policy_version": "payroll-rate:citizen:v1",
+        "payroll_policy_kind": "citizen",
+        "payroll_hourly_rate_ntd": 300,
+        "adjustment_amount_ntd": 0,
+        "identity_status": "一般市民",
+        "client_policy_version": "client-rate:citizen:v1",
+        "client_hourly_rate_ntd": 300,
+        "completed_on": date(2026, 4, 20),
+        "staff_payment_due_date": None,
+        "primary_account_count": 1,
+        "bank_code": "012",
+        "account_no": "1234567890",
+    }
+    connection = _ProjectionConnection((row,))
+
+    facts = MySqlStaffPayableExportSource(connection).load(date(2026, 5, 15))
+
+    assert len(facts) == 1
+    assert facts[0].obligation_identity == (
+        "historical-service:H-19:revision:1:assignment:19:payable_to_staff"
+    )
+    assert facts[0].amount.amount == 72_800
+    assert facts[0].payment_date == date(2026, 5, 15)
+    assert "NOT EXISTS" in _HISTORICAL_STAFF_PAYABLE_PROJECTION_SQL
+
+    row["actual_service_days"] = 20
+    refreshed = MySqlStaffPayableExportSource(connection).load(date(2026, 5, 15))
+
+    assert refreshed[0].amount.amount == 56_000
+
+
+def test_historical_projection_does_not_include_a_future_due_date():
+    row = {
+        "case_no": "H-20",
+        "assignment_id": 20,
+        "staff_id": 4,
+        "recipient_name": "月嫂乙",
+        "identity_card": "B123456789",
+        "contracted_service_days": 40,
+        "service_hours_per_day": 9,
+        "floor_fee_ntd": 0,
+        "actual_service_days": 10,
+        "payroll_policy_version": "payroll-rate:subsidized-citizen:v1",
+        "payroll_policy_kind": "subsidized_citizen",
+        "payroll_hourly_rate_ntd": 350,
+        "adjustment_amount_ntd": 0,
+        "identity_status": "補助市民",
+        "client_policy_version": "client-rate:subsidized-citizen:v1",
+        "client_hourly_rate_ntd": 350,
+        "completed_on": date(2026, 4, 20),
+        "staff_payment_due_date": None,
+        "primary_account_count": 1,
+        "bank_code": "012",
+        "account_no": "1234567890",
+    }
+    connection = _ProjectionConnection((row,))
+
+    facts = MySqlStaffPayableExportSource(connection).load(date(2026, 5, 15))
+
+    assert facts == ()
 
 
 def test_legacy_partially_paid_staff_row_is_an_anomaly_not_a_current_export():
