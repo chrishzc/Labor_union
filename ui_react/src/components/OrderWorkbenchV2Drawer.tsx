@@ -351,7 +351,14 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
                 {matchingView === 'information' && <OrderInformationSheets caseNo={caseNo} initialKind={informationKind} assignments={assignmentPlan.status === 'ready' ? assignmentPlan.data.assignments : []} onOpenCandidates={() => setMatchingView('list')} />}
               </div>}
               {(activeGroup === 'recommendation' || visitedGroups.includes('recommendation')) && <div hidden={activeGroup !== 'recommendation'}>
-                <OrderFormalRecommendationPanel caseNo={caseNo} onObserved={refreshFacts} />
+                <OrderFormalRecommendationPanel
+                  caseNo={caseNo}
+                  onObserved={refreshFacts}
+                  onOpenServiceDates={() => {
+                    setServiceView('dates');
+                    openGroup('service');
+                  }}
+                />
               </div>}
               {(activeGroup === 'contracts' || visitedGroups.includes('contracts')) && <div hidden={activeGroup !== 'contracts'}>
                 <nav className="order-case-subnav" aria-label="契約工作"><button type="button" aria-pressed={contractView === 'overview'} onClick={() => setContractView('overview')}>契約欄位預覽</button><button type="button" aria-pressed={contractView === 'signing'} onClick={() => { setSigningOpened(true); setContractView('signing'); }}>下載與簽回</button></nav>

@@ -17,6 +17,7 @@ import { HolidayWorkAgreementActions } from './HolidayWorkAgreementActions';
 interface OrderFormalRecommendationPanelProps {
   caseNo: string;
   onObserved?: () => void;
+  onOpenServiceDates?: () => void;
 }
 
 type ReadState<T> =
@@ -93,7 +94,7 @@ async function readCurrentPlan(caseNo: string, expectedPlanId?: number): Promise
   return { plan, contact };
 }
 
-export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelProps> = ({ caseNo, onObserved }) => {
+export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelProps> = ({ caseNo, onObserved, onOpenServiceDates }) => {
   const [candidates, setCandidates] = useState<ReadState<CandidateContactPool>>({ status: 'idle' });
   const [active, setActive] = useState<ReadState<CurrentPlan | null>>({ status: 'loading' });
   const [busy, setBusy] = useState(false);
@@ -108,6 +109,7 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
   const [confirmationPreviewGeneration, setConfirmationPreviewGeneration] = useState(0);
   const confirmationActionIdentity = useRef<{ signature: string; key: string } | null>(null);
   const [lockPreview, setLockPreview] = useState<WaitingDepositPreview | null>(null);
+  const [requiresServiceDates, setRequiresServiceDates] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const formalManualResponse = useSyncExternalStore(
@@ -139,6 +141,7 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
     setConfirmationPreviewGeneration(0);
     confirmationActionIdentity.current = null;
     setLockPreview(null);
+    setRequiresServiceDates(false);
     setError(null);
     setNotice(null);
     void readCurrentPlan(caseNo)
@@ -572,9 +575,20 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
       throw new Error('僅已接受且尚未鎖定的正式方案可建立等待訂金鎖。');
     }
     const request = sequence.current;
-    const preview = await waitingDepositLockClient.preview(caseNo, fresh.plan.planId);
+    let preview: WaitingDepositPreview;
+    try {
+      preview = await waitingDepositLockClient.preview(caseNo, fresh.plan.planId);
+    } catch (caught) {
+      if (caught instanceof ApiHttpError && caught.code === 'confirmed_service_dates_required') {
+        setRequiresServiceDates(true);
+      }
+      throw caught;
+    }
     if (preview.case_no !== caseNo || preview.plan_id !== fresh.plan.planId) throw new Error('等待訂金鎖 Preview identity 不一致，已停止套用。');
-    if (activeCase.current === caseNo && sequence.current === request) setLockPreview(preview);
+    if (activeCase.current === caseNo && sequence.current === request) {
+      setRequiresServiceDates(false);
+      setLockPreview(preview);
+    }
   }, false);
 
   const applyLock = () => perform(async () => {
@@ -761,6 +775,12 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
                 <>
                   <p>客戶已接受推薦，可先檢查服務日與防撞期，再保留檔期。</p>
                   <button className="formal-recommendation-primary" type="button" aria-label={`預覽方案 ${current.plan.planId} 等待訂金鎖`} onClick={() => void previewLock()}>檢查並保留檔期</button>
+                  {requiresServiceDates && (
+                    <div className="formal-recommendation-readiness-error" role="alert">
+                      <p>請先完成正式服務日期確認，再回來檢查並保留檔期。</p>
+                      {onOpenServiceDates && <button type="button" onClick={onOpenServiceDates}>前往確認正式服務日期</button>}
+                    </div>
+                  )}
                   {lockPreview !== null && (
                     <>
                       <p>Preview：服務日 {lockPreview.service_day_count} · 防撞期 {lockPreview.buffer_day_count}</p>

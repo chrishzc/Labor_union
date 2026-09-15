@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiHttpError } from '../../../../../../../api/shared/typed_errors';
 import { OrderFormalRecommendationPanel } from '../../../../../../../components/OrderFormalRecommendationPanel';
 
 const mocks = vi.hoisted(() => ({ queryPlan: vi.fn(), queryContactState: vi.fn(), preview: vi.fn(), apply: vi.fn() }));
@@ -80,6 +81,30 @@ describe('待辦看板 Beta 既有方案等待訂金鎖', () => {
     await screen.findByText('正式服務日期與配對方案不一致，請重新確認服務日期。');
     expect(screen.getByText('目前正式媒合方案：#51')).toBeInTheDocument();
     expect(screen.queryByText('目前無法讀取推薦進度')).not.toBeInTheDocument();
+    expect(mocks.apply).not.toHaveBeenCalled();
+  });
+
+  it('缺少正式服務日期時提供可執行的日期確認導引', async () => {
+    const onOpenServiceDates = vi.fn();
+    mocks.preview.mockRejectedValue(new ApiHttpError(
+      422,
+      'confirmed_service_dates_required',
+      '尚未確認正式服務日期，不能建立等待訂金檔期鎖。',
+    ));
+    render(
+      <OrderFormalRecommendationPanel
+        caseNo={CASE}
+        onOpenServiceDates={onOpenServiceDates}
+      />,
+    );
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('客戶已接受'));
+
+    fireEvent.click(screen.getByRole('button', { name: '預覽方案 51 等待訂金鎖' }));
+
+    const navigation = await screen.findByRole('button', { name: '前往確認正式服務日期' });
+    expect(screen.getByText('請先完成正式服務日期確認，再回來檢查並保留檔期。')).toBeInTheDocument();
+    fireEvent.click(navigation);
+    expect(onOpenServiceDates).toHaveBeenCalledTimes(1);
     expect(mocks.apply).not.toHaveBeenCalled();
   });
 
