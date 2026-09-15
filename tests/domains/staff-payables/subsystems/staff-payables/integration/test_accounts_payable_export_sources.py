@@ -53,14 +53,12 @@ def test_sql_nets_every_canonical_client_refund_reversal_type():
     assert "obligations.obligation_type" in _CLIENT_REFUNDS_SQL
 
 
-def test_export_sources_include_all_open_payables_due_on_or_before_the_target_date():
-    for query in (
-        _STAFF_PAYABLES_SQL,
-        _CLIENT_REFUNDS_SQL,
-        _GOVERNMENT_RETURNS_SQL,
-    ):
+def test_staff_payables_only_include_the_selected_payment_date():
+    assert "obligations.due_date = %s" in _STAFF_PAYABLES_SQL
+    assert "obligations.due_date <= %s" not in _STAFF_PAYABLES_SQL
+
+    for query in (_CLIENT_REFUNDS_SQL, _GOVERNMENT_RETURNS_SQL):
         assert "due_date <= %s" in query
-        assert "due_date = %s" not in query
 
     assert "obligations.status = 'open'" in _CLIENT_REFUNDS_SQL
 
@@ -133,6 +131,10 @@ def test_existing_historical_order_without_obligation_is_projected_on_each_load(
     refreshed = MySqlStaffPayableExportSource(connection).load(date(2026, 5, 15))
 
     assert refreshed[0].amount.amount == 56_000
+
+    later_month = MySqlStaffPayableExportSource(connection).load(date(2026, 9, 15))
+
+    assert later_month == ()
 
 
 def test_historical_projection_does_not_include_a_future_due_date():

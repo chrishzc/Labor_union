@@ -169,7 +169,7 @@ def _historical_staff_fact(row, target_payment_date: date) -> StaffPayableExport
         and client.total_receivable.is_zero,
     )
     due_date = _date_value(due_date)
-    if due_date > target_payment_date:
+    if due_date != target_payment_date:
         return None
     amount = payroll.total_payable
     if amount.amount <= 0:
@@ -324,7 +324,7 @@ LEFT JOIN staff_payable_projections projection
 LEFT JOIN staff_bank_accounts bank_accounts
   ON bank_accounts.staff_id = obligations.staff_id
  AND bank_accounts.is_primary = 1
-WHERE obligations.due_date <= %s
+WHERE obligations.due_date = %s
   AND obligations.direction = 'payable_to_staff'
   AND obligations.status <> 'cancelled'
   AND obligations.amount_due_ntd > 0

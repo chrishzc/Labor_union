@@ -235,7 +235,8 @@ Export：
    同一 snapshot 以最新歷史實際天數 revision 投影；沒有 revision 時使用 Orders 原
    `service_days`。投影沿用 assignment／case rate snapshot、Payroll 公式、調整額與付款到期日
    規則，且使用預定的 revision-1 obligation identity；正式 obligation 一旦存在即排除 fallback，
-   每次載入重算但不得寫 DB、不得據此宣稱已付款或已結清；
+   每次載入重算但不得寫 DB、不得據此宣稱已付款或已結清。月嫂列只接受
+   `due_date = target_payment_date`；較早月份未付款項不得混入所選月份清單；
 2. 月嫂列依 `staff_id + target_payment_date + bank_identity` 聚合；
 3. anomaly／completed／refunded／review-required 不進應付款清單；
 4. client refund row 只輸出 remaining amount，並明確標示
