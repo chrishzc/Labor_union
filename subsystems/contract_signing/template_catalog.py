@@ -11,7 +11,7 @@ from collections.abc import Mapping
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE_DIRECTORY = PROJECT_ROOT / "db" / "templates" / "contracts"
-CONTRACT_PDF_PRESENTATION_VERSION = "chromium-template-v2"
+CONTRACT_PDF_PRESENTATION_VERSION = "chromium-template-v3"
 _APPROVED_TEMPLATE_KEYS = frozenset({"contract_staff_service", "contract_client_copy"})
 _MAPPING_REQUIREDNESS = frozenset({"required", "conditional", "optional"})
 

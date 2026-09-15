@@ -5,10 +5,11 @@
 - subsystem: `client-finance`
 
 ## Responsibility
-計畫客戶各付款階段的 obligation、日期替換與唯一的客戶現金方向；未結清義務只改到期日不得建立應收或退款。
+計畫客戶各付款階段的 obligation、日期替換與唯一的客戶現金方向；中途取消依已確認實際服務量重算，並在客戶款已涵蓋實際應付時建立獨立 subsidy-return payable。未結清義務只改到期日不得建立應收或退款。
 
 ## Implementation
 - primary: `domains/client_finance/obligation_planning.py`
+- adapter: `infrastructure/mysql/client_finance_terms_writer.py`
 
 ## Contracts
 - `document/架構重整/01_規格基線/04_Client_Finance_Domain.md` — Client Finance direction 與未結清 obligation 規則。

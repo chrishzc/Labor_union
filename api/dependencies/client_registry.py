@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from infrastructure.mysql.beclass_correction_repository import MySqlBeClassCorrectionRepository
+from infrastructure.mysql.beclass_financial_sync import MySqlBeClassFinancialSync
 from infrastructure.mysql.client_registry_query_repository import MySqlClientRegistryQueryRepository
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
@@ -24,6 +25,7 @@ def get_beclass_correction_workflow():
         yield BeClassCorrectionWorkflow(
             MySqlBeClassCorrectionRepository(connection),
             lambda: MySqlUnitOfWork(connection),
+            MySqlBeClassFinancialSync(connection),
         )
     finally:
         connection.close()

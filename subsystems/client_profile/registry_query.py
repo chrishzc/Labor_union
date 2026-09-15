@@ -57,6 +57,7 @@ class ClientRegistryBeClass:
     source_kind: str | None
     version: int | None
     values: Mapping[str, str | None] | None
+    financial_fields_locked: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,11 +68,19 @@ class ClientRegistryOrderInformation:
 
 
 @dataclass(frozen=True, slots=True)
+class ClientRegistryFinance:
+    status: str
+    code: str | None
+    values: Mapping[str, object] | None
+
+
+@dataclass(frozen=True, slots=True)
 class ClientRegistryDetail:
     case_no: str
     client: ClientRegistryClientProfile
     beclass: ClientRegistryBeClass
     order_information: ClientRegistryOrderInformation
+    finance: ClientRegistryFinance
 
 
 class ClientRegistryRepository(Protocol):
@@ -162,6 +171,12 @@ class ClientRegistryQueryApplication:
             raise ClientRegistryContractError("client_registry_order_information_invalid")
         if not isinstance(order_information_issues, Mapping):
             raise ClientRegistryContractError("client_registry_order_information_issues_invalid")
+        finance_status = str(row.get("finance_status") or "not_ready")
+        if finance_status not in {"ready", "not_ready"}:
+            raise ClientRegistryContractError("client_registry_finance_status_invalid")
+        finance_values = row.get("finance_values")
+        if finance_status == "ready" and not isinstance(finance_values, Mapping):
+            raise ClientRegistryContractError("client_registry_finance_invalid")
         return ClientRegistryDetail(
             identity,
             ClientRegistryClientProfile(
@@ -176,12 +191,22 @@ class ClientRegistryQueryApplication:
                 int(row.get("beclass_version") or 0) if beclass_status == "ready" else None,
                 ({str(key): _nullable_text(value) for key, value in beclass_values.items()}
                  if isinstance(beclass_values, Mapping) else None),
+                bool(row.get("beclass_financial_fields_locked", False)),
             ),
             ClientRegistryOrderInformation(
                 beclass_status,
                 ({str(key): value for key, value in order_information_values.items()}
                  if isinstance(order_information_values, Mapping) else None),
                 {str(key): str(value) for key, value in order_information_issues.items()},
+            ),
+            ClientRegistryFinance(
+                finance_status,
+                _nullable_text(row.get("finance_code")),
+                (
+                    {str(key): value for key, value in finance_values.items()}
+                    if isinstance(finance_values, Mapping)
+                    else None
+                ),
             ),
         )
 

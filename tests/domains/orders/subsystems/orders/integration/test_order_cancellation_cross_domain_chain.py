@@ -4,7 +4,13 @@ from datetime import date, datetime, time
 from dataclasses import replace
 
 import pytest
-from domains.client_finance.obligation_planning import ClientFinanceTermsSourceFacts, ClientPaymentTerms
+from domains.client_finance.obligation_planning import (
+    ClientFinanceDirection,
+    ClientFinanceTermsSourceFacts,
+    ClientPaymentTerms,
+    ExistingClientStageObligation,
+)
+from domains.client_finance.reconciliation import PaymentStage
 from domains.orders.cancellation import CancellationAssignmentFacts, CancellationOrderFacts, CancellationSchedulingFacts, ConfirmedServiceDay
 from domains.orders.lifecycle import OrderLifecycleRootFacts, OrderLifecycleStatus
 from domains.orders.terms import OrderTerms, ServiceTimeTerms
@@ -94,3 +100,96 @@ def test_cancellation_apply_replays_matching_receipt_without_new_writes():
     write_count = len(repository.persisted)
     assert workflow.apply(request) == first
     assert len(repository.persisted) == write_count
+
+
+def test_four_day_twins_cancellation_credits_posted_deposit_and_first_payment():
+    service_dates = (
+        date(2026, 7, 30),
+        date(2026, 7, 31),
+        date(2026, 8, 1),
+        date(2026, 8, 2),
+    )
+    order = CancellationOrderFacts("CASE-1", 4, 20, 8, service_dates[0], True, False)
+    scheduling = CancellationSchedulingFacts(
+        "CASE-1",
+        2,
+        1,
+        (CancellationAssignmentFacts(1, 7, 1, service_dates),),
+    )
+    terms = OrderTerms(
+        service_dates[0],
+        20,
+        8,
+        MoneyNTD(0),
+        ServiceTimeTerms(time(8), time(17), 0),
+    )
+    payment_terms = ClientPaymentTerms(
+        5,
+        MoneyNTD(450),
+        date(2026, 7, 1),
+        date(2026, 8, 1),
+        None,
+    )
+    finance = ClientFinanceTermsSourceFacts(
+        "CASE-1",
+        5,
+        payment_terms,
+        (),
+        (
+            ExistingClientStageObligation(
+                "client-obligation:CASE-1:deposit",
+                PaymentStage.DEPOSIT,
+                MoneyNTD(18_000),
+                MoneyNTD(18_000),
+                payment_terms.deposit_due_date,
+                True,
+            ),
+            ExistingClientStageObligation(
+                "client-obligation:CASE-1:first",
+                PaymentStage.FIRST,
+                MoneyNTD(54_000),
+                MoneyNTD(54_000),
+                payment_terms.first_payment_due_date,
+                True,
+            ),
+        ),
+        identity_status="一般市民",
+    )
+    payroll = PayrollTermsSourceFacts(
+        "CASE-1",
+        3,
+        (SourceAssignmentPayrollTerms(1, 7, "twins-v1", PayrollPolicyKind.TWINS),),
+        (),
+        date(2026, 8, 31),
+    )
+    lifecycle = OrderLifecycleRootFacts(
+        "CASE-1",
+        OrderLifecycleStatus.IN_SERVICE,
+        True,
+        service_dates[0],
+        True,
+        False,
+        False,
+    )
+    repository = _Repository(
+        CancellationWorkflowFacts(order, terms, scheduling, finance, payroll, lifecycle)
+    )
+
+    preview = _workflow(repository).preview(
+        "CASE-1",
+        tuple(ConfirmedServiceDay(value, 7) for value in service_dates),
+    )
+
+    assert sum(
+        item.amount.amount for item in preview.client_finance_impact.stage_plans
+    ) == 4 * 8 * 450
+    refunds = tuple(
+        item
+        for item in preview.client_finance_impact.actions
+        if item.direction is ClientFinanceDirection.REFUND_DUE
+    )
+    assert sum(item.direction_amount_ntd for item in refunds) == 57_600
+    assert preview.payroll_impact.payroll.total_payable.amount == 4 * 8 * 450
+    assert preview.client_finance_impact.subsidy_return_plan is not None
+    assert preview.client_finance_impact.subsidy_return_plan.amount == MoneyNTD(14_400)
+    assert preview.client_finance_impact.subsidy_return_plan.due_date == date(2026, 10, 15)

@@ -24,7 +24,7 @@ owner。
 它不擁有：
 
 - Excel、銀行 canonical row、occurrence 或 classification；
-- 客戶應收、客戶退款、client subsidy return；
+- 客戶應付、客戶退款、client subsidy return；
 - 月嫂薪資或 payout；補助資格、claim、政府撥款與 allocation 均不得拆分或直接清償月嫂 obligation；
 - Orders、Scheduling 或 Alert workflow；
 - 政府公文檔案的外部保存機制。
@@ -34,7 +34,7 @@ owner。
 補助市民訂單有兩條互斥路徑：
 
 - **全補助案件**：補助市民的有效正式服務時數不超過 120 小時，且 Client Finance 衍生客戶應付為 0；客戶不出資，月嫂只有一筆整筆 obligation，付款日為結案後第二曆月 15 日。實務申請通常排滿 120 小時。政府 allocation 恰足時為 `government_funded`；付款日到而政府尚未入帳時為 `union_advance_due`，只建立可追溯的 Staff Payables funding／recovery 工作項，不得拆成兩次月嫂 payout。
-- **非全補助的補助市民訂單**：客戶依一般付款條款先代墊完整服務薪資，月嫂仍只有一筆整筆 obligation；服務正式完成後，Client Finance 才可建立對客戶的 `subsidy_return` 義務。
+- **非全補助的補助市民訂單**：客戶依一般付款條款先代墊完整服務薪資，月嫂仍只有一筆整筆 obligation；服務正式完成，或中途取消且實際服務時數已確認後，Client Finance 才可依實際時數建立對客戶的 `subsidy_return` 義務。
 
 Government Subsidy 只提供 claim item、核准與政府 receipt allocation 的不可變 fact，供 Client Finance 將已退還客戶的補助款連結至後續政府資金回收；不得新增第二筆客戶 payout。政府核准額、allocation、客戶退還額或對應不唯一時為 `review_required`，不得自動抵銷、改寫月嫂義務或把政府入款當成客戶收款。超過 120 小時或仍有任何客戶應付，都不得判定為全補助案件。
 
@@ -44,12 +44,16 @@ Government Subsidy 只提供 claim item、核准與政府 receipt allocation 的
 `服務中 | 訂單完成` 也持續納入；具有同等已付訂金語意的
 `歷史訂單－未服務 | 歷史訂單－服務中 | 歷史訂單－服務完成 | 歷史訂單－帳務完成`
 一律同樣納入，不得要求先建立、送出或核准政府補助 claim batch。
-已取消與尚在洽談中的訂單不納入。季度以實際服務結束日、尚未有實際日期時以預定服務結束日
+尚在洽談中的訂單不納入。已取消但沒有正式服務時數者也不納入；服務中途取消且已有正式服務時數者
+必須依實際服務時數納入，不得使用原預計服務總量。季度以實際服務結束日、尚未有實際日期時以預定服務結束日
 決定所屬年與季；年度報表以同一有效結束日彙整該年。正常訂單的補助時數依訂單服務天數、
 每日時數與身分別補助上限計算；歷史訂單若已有正式確認的歷史實際服務總時數，必須優先使用該總時數，
 尚未確認時則一般市民預設 40 小時、補助市民預設 120 小時。尚未形成 claim item 時，單價直接使用
 該案件已凍結的 Payroll 費率快照；已由 Case Import 正式胎數事實確認為雙胞胎者固定使用 450，並優先
 修正既有錯誤的一般市民 300 報表投影，不得由 Government Subsidy 以一般身分費率覆蓋。
+服務前合法形成的 BeClass effective 胎數 correction 也屬上述正式事實，claim planning 與後續
+rebuild 必須採用 450；正式服務開始後不得再變更胎數。服務中取消則只以已確認實際服務時數申請
+及計算應退客戶的補助，不得使用原預計服務總時數。
 非雙胞胎案件的 Payroll 快照缺失時必須 fail closed，不得退回身分別 300／350 單價；
 正式 claim item 已形成後則固定使用 item 自身的送件單價快照。季度 React 明細欄位與既有季度 XLSX 15 欄一致，年度明細與年度
 XLSX 10 欄一致。雇主身分證若存在，沿用報名資料 `survey_details` 的既有值；目前不得臆造

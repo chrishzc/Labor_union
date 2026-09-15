@@ -34,11 +34,12 @@ class _Repository:
         self.manual = manual
         self.claims = {}
         self.receipts = {}
+        self.financial_fields_locked = False
 
     def load(self, case_no, *, for_update):
         if case_no != "CASE-001":
             return None
-        return {"beclass_record_id": None if self.manual and self.version == 0 else 12, "case_no": case_no, "aggregate_version": self.version, "original": dict(self.original), "corrections": dict(self.corrections), "source_kind": "admin_manual" if self.manual else "imported"}
+        return {"beclass_record_id": None if self.manual and self.version == 0 else 12, "case_no": case_no, "aggregate_version": self.version, "original": dict(self.original), "corrections": dict(self.corrections), "source_kind": "admin_manual" if self.manual else "imported", "financial_fields_locked": self.financial_fields_locked}
 
     def claim(self, *, key, command_fingerprint, **_):
         previous = self.claims.setdefault(key.value, command_fingerprint.value)
@@ -51,10 +52,18 @@ class _Repository:
     def persist(self, *, snapshot, after, **_):
         self.corrections = dict(after)
         self.version = snapshot.version + 1
-        return 12, self.version
+        return 12, self.version, 91
 
     def save_receipt(self, *, key, command_fingerprint, result, **_):
         self.receipts[key.value] = {"request_fingerprint": command_fingerprint.value, "result": dict(result)}
+
+
+class _FinancialSync:
+    def __init__(self):
+        self.calls = []
+
+    def apply(self, **kwargs):
+        self.calls.append(kwargs)
 
 
 def test_beclass_correction_preserves_original_and_replays_exactly_once():
@@ -94,7 +103,8 @@ def test_beclass_correction_accepts_only_canonical_multi_birth_count():
 def test_manual_beclass_can_be_created_without_an_imported_record():
     repository = _Repository(manual=True)
     repository.original = {"name": None, "phone": None, "multi_birth_count": None}
-    workflow = BeClassCorrectionWorkflow(repository, _Uow)
+    financial_sync = _FinancialSync()
+    workflow = BeClassCorrectionWorkflow(repository, _Uow, financial_sync)
     preview = workflow.preview(
         "CASE-001",
         {"name": "歷史客戶", "multi_birth_count": "雙胞胎"},
@@ -115,6 +125,22 @@ def test_manual_beclass_can_be_created_without_an_imported_record():
     assert receipt.beclass_record_id == 12
     assert receipt.readback.source_kind == "admin_manual"
     assert receipt.readback.effective["multi_birth_count"] == "雙胞胎"
+    assert financial_sync.calls[0]["correction_event_id"] == 91
+
+
+def test_multi_birth_count_is_locked_after_service_starts_but_other_fields_remain_editable():
+    repository = _Repository()
+    repository.original["multi_birth_count"] = "單胞胎"
+    repository.financial_fields_locked = True
+    workflow = BeClassCorrectionWorkflow(repository, _Uow, _FinancialSync())
+
+    with pytest.raises(ValueError, match="beclass_multi_birth_count_locked_after_service_start"):
+        workflow.preview(
+            "CASE-001", {"multi_birth_count": "雙胞胎"}, ExpectedVersion(0)
+        )
+
+    preview = workflow.preview("CASE-001", {"phone": "0922222222"}, ExpectedVersion(0))
+    assert preview.after == {"phone": "0922222222"}
 
 
 def test_every_canonical_order_status_allows_manual_beclass_source() -> None:
@@ -128,7 +154,7 @@ def test_every_canonical_order_status_allows_manual_beclass_source() -> None:
 class _SqlCursor:
     def __init__(self, responses=None):
         self.responses = iter(responses or [
-            {"case_no": "CASE-001", "status": "歷史訂單－服務完成"},
+            {"case_no": "CASE-001", "status": "歷史訂單－服務完成", "actual_start_date": None, "service_data_locked": True},
             ({"beclass_record_id": 12, "case_no": "CASE-001", "record_origin": "imported", "name": "原始姓名", "email": None, "phone": "0911111111", "tel": None, "ext": None, "city": None, "zip_code": None, "address": None, "admin_notes": None},),
             {"aggregate_version": 3, "effective_values_json": '{"phone":"0922222222"}'},
         ])
@@ -194,6 +220,7 @@ def test_beclass_mysql_correction_exposes_empty_manual_source_for_historical_ord
         },
         "corrections": {},
         "source_kind": "admin_manual",
+        "financial_fields_locked": True,
     }
 
 
@@ -216,6 +243,7 @@ def test_beclass_mysql_correction_exposes_empty_manual_source_for_current_order(
         },
         "corrections": {},
         "source_kind": "admin_manual",
+        "financial_fields_locked": False,
     }
 
 
@@ -261,7 +289,7 @@ def test_beclass_mysql_correction_creates_a_marked_manual_container_on_first_app
         correlation_id=CorrelationId("manual-beclass-corr-1"),
     )
 
-    assert result == (44, 1)
+    assert result == (44, 1, 44)
     first_statement, first_parameters = connection.cursor_instance.statements[0]
     assert "INSERT INTO beclass_records (bound_case_no,record_origin)" in first_statement
     assert "'admin_manual'" in first_statement

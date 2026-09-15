@@ -235,7 +235,6 @@ def _candidate(
     service_lock = (
         root_facts.service_data_locked
         or completion_reached
-        and client_settlement.all_formal_obligations_settled
     )
     payload = {
         "before_status": root_facts.current_status.value,

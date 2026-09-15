@@ -29,7 +29,9 @@ class MySqlBeClassCorrectionRepository:
         suffix = " FOR UPDATE" if for_update else ""
         with self._connection.cursor() as cursor:
             cursor.execute(
-                "SELECT case_no,status FROM orders WHERE case_no=%s" + suffix,
+                "SELECT case_no,status,"
+                "EXISTS(SELECT 1 FROM order_service_data_locks l WHERE l.case_no=orders.case_no) "
+                "AS service_data_locked FROM orders WHERE case_no=%s" + suffix,
                 (case_no,),
             )
             order = cursor.fetchone()
@@ -51,6 +53,7 @@ class MySqlBeClassCorrectionRepository:
                     "original": {field: None for field in (*_SOURCE_FIELDS, "multi_birth_count")},
                     "corrections": {},
                     "source_kind": "admin_manual",
+                    "financial_fields_locked": _financial_fields_locked(order),
                 }
             if len(sources) != 1:
                 raise ValueError("beclass_binding_ambiguous")
@@ -77,6 +80,7 @@ class MySqlBeClassCorrectionRepository:
             "original": original,
             "corrections": _decode_json((state or {}).get("effective_values_json"), {}),
             "source_kind": str(source.get("record_origin") or "imported"),
+            "financial_fields_locked": _financial_fields_locked(order),
         }
 
     def claim(self, *, case_no: str, key: IdempotencyKey, command_fingerprint: PreviewFingerprint, correlation_id: CorrelationId) -> None:
@@ -119,7 +123,7 @@ class MySqlBeClassCorrectionRepository:
             "result": _decode_json(row["result_snapshot"], {}),
         }
 
-    def persist(self, *, snapshot: BeClassCorrectionSnapshot, after: Mapping[str, str | None], actor: ActorContext, reason: str, key: IdempotencyKey, correlation_id: CorrelationId) -> tuple[int, int]:
+    def persist(self, *, snapshot: BeClassCorrectionSnapshot, after: Mapping[str, str | None], actor: ActorContext, reason: str, key: IdempotencyKey, correlation_id: CorrelationId) -> tuple[int, int, int]:
         resulting_version = snapshot.version + 1
         with self._connection.cursor() as cursor:
             beclass_record_id = snapshot.beclass_record_id
@@ -161,7 +165,8 @@ class MySqlBeClassCorrectionRepository:
                     _json(after),
                 ),
             )
-        return beclass_record_id, resulting_version
+            correction_event_id = int(cursor.lastrowid)
+        return beclass_record_id, resulting_version, correction_event_id
 
     def save_receipt(self, *, key: IdempotencyKey, command_fingerprint: PreviewFingerprint, preview_fingerprint: PreviewFingerprint, actor: ActorContext, reason: str, result: Mapping[str, Any]) -> None:
         with self._connection.cursor() as cursor:
@@ -195,6 +200,17 @@ def _decode_json(value: Any, default: Any) -> Any:
     except (TypeError, ValueError):
         return default
     return decoded if isinstance(decoded, dict) else default
+
+
+def _financial_fields_locked(order: Mapping[str, Any]) -> bool:
+    return bool(
+        order.get("service_data_locked")
+        or str(order.get("status") or "")
+        in {
+            "服務中", "訂單完成", "訂單取消",
+            "歷史訂單－服務中", "歷史訂單－服務完成", "歷史訂單－帳務完成",
+        }
+    )
 
 
 __all__ = ["MySqlBeClassCorrectionRepository"]

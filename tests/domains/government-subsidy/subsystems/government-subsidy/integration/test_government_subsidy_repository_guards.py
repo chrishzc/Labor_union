@@ -12,6 +12,7 @@ from infrastructure.mysql.government_subsidy_repository import (
     MySqlGovernmentSubsidyRepository,
     _overpayment_outbox_lineage,
     _planning_source,
+    _link_client_subsidy_return,
 )
 from shared_kernel.money import MoneyNTD
 from shared_kernel.clock import FixedBusinessClock
@@ -258,9 +259,70 @@ def test_claim_planning_source_uses_assignment_frozen_rate_not_identity_price():
     )
 
     assert source.assignment.official_service_hours == 40
+
+
+def test_claim_planning_source_prefers_explicit_effective_birth_count_rate():
+    source = _planning_source(
+        {
+            "assignment_id": 91,
+            "case_no": "CASE-450",
+            "staff_id": 7,
+            "official_service_day_count": 4,
+            "service_hours_per_day": 8,
+            "identity_status": "一般市民",
+            "subsidy_unit_price_ntd": 300,
+            "assignment_effective": 1,
+        },
+        effective_unit_price_ntd=450,
+    )
+
+    assert source.assignment.official_service_hours == 32
     assert source.unit_price_ntd == MoneyNTD(450)
     assert "LEFT JOIN assignment_payroll_rate_snapshots rate" in _CLAIM_PLANNING_SOURCE_SELECT_SQL
     assert "rate.hourly_rate_ntd AS subsidy_unit_price_ntd" in _CLAIM_PLANNING_SOURCE_SELECT_SQL
+
+
+class _EntitlementCursor:
+    def __init__(self):
+        self.statements = []
+        self.current = None
+
+    def execute(self, statement, parameters):
+        self.statements.append((" ".join(statement.split()), parameters))
+        if "FROM client_obligations" in statement:
+            self.current = (
+                {
+                    "obligation_identity": "client-subsidy-return:CASE-450:terminal",
+                    "amount_due_ntd": 14_400,
+                },
+            )
+        else:
+            self.current = ()
+
+    def fetchall(self):
+        return self.current
+
+
+def test_claim_items_link_to_one_exact_client_subsidy_return_entitlement():
+    cursor = _EntitlementCursor()
+    first = type("Item", (), {"requested_amount_ntd": MoneyNTD(9_000)})()
+    second = type("Item", (), {"requested_amount_ntd": MoneyNTD(5_400)})()
+
+    _link_client_subsidy_return(
+        cursor,
+        "CASE-450",
+        ((101, first), (102, second)),
+    )
+
+    links = [
+        values
+        for statement, values in cursor.statements
+        if "INSERT INTO client_subsidy_return_claim_item_links" in statement
+    ]
+    assert links == [
+        ("client-subsidy-return:CASE-450:terminal", 101, 9_000),
+        ("client-subsidy-return:CASE-450:terminal", 102, 5_400),
+    ]
 
 
 def test_claim_planning_source_rejects_missing_assignment_frozen_rate():

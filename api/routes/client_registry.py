@@ -46,6 +46,7 @@ from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import CorrelationId, ExpectedVersion, IdempotencyKey
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.case_import.beclass_correction_workflow import (
+    BeClassCorrectionBlocked,
     BeClassCorrectionConflict,
     BeClassCorrectionNotFound,
     BeClassCorrectionWorkflow,
@@ -146,17 +147,17 @@ def get_client_registry(
                 "source_kind": detail.beclass.source_kind,
                 "version": detail.beclass.version,
                 "values": detail.beclass.values,
-                "field_capabilities": _field_capabilities(
-                    detail.beclass.values or {},
-                    "client_beclass",
-                    detail.beclass.status == "ready",
-                    None if detail.beclass.status == "ready" else f"beclass_{detail.beclass.status}",
-                ),
+                "field_capabilities": _beclass_field_capabilities(detail),
             },
             "order_information": {
                 "status": detail.order_information.status,
                 "values": detail.order_information.values,
                 "field_issues": detail.order_information.field_issues,
+            },
+            "finance": {
+                "status": detail.finance.status,
+                "code": detail.finance.code,
+                "values": detail.finance.values,
             },
             "order_terms": _order_terms_section(order_terms, case_no),
         }
@@ -342,6 +343,23 @@ def _field_capabilities(
     }
 
 
+def _beclass_field_capabilities(detail) -> dict[str, dict[str, Any]]:
+    ready = detail.beclass.status == "ready"
+    capabilities = _field_capabilities(
+        detail.beclass.values or {},
+        "client_beclass",
+        ready,
+        None if ready else f"beclass_{detail.beclass.status}",
+    )
+    if detail.beclass.financial_fields_locked and "multi_birth_count" in capabilities:
+        capabilities["multi_birth_count"] = {
+            **capabilities["multi_birth_count"],
+            "editable": False,
+            "reason": "multi_birth_count_locked_after_service_start",
+        }
+    return capabilities
+
+
 def _registry_error(error: Exception, correlation: str) -> HTTPException:
     return typed_http_error(422, "validation", str(error) or "client_registry_invalid", "客戶名冊資料未通過驗證。", correlation)
 
@@ -350,7 +368,7 @@ def _raise_owner_error(error: Exception, correlation: str, message: str) -> None
     code = str(error) or "registry_mutation_failed"
     if isinstance(error, (ClientProfileNotFoundError, BeClassCorrectionNotFound)):
         status, category = 404, "not_found"
-    elif isinstance(error, (ClientProfileStaleError, ClientProfileRequestConflictError, BeClassCorrectionConflict)) or "stale" in code or "idempotency" in code or "collision" in code:
+    elif isinstance(error, (ClientProfileStaleError, ClientProfileRequestConflictError, BeClassCorrectionConflict, BeClassCorrectionBlocked)) or "stale" in code or "idempotency" in code or "collision" in code:
         status = 409
         category = "idempotency_mismatch" if "idempotency" in code else "conflict"
     elif isinstance(error, (ClientProfileValidationError, BeClassCorrectionError, ValueError)):

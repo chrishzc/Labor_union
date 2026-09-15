@@ -57,7 +57,7 @@ export const HistoricalServiceAccountingWorkbench: React.FC = () => {
     </div>}
     {preview && <div className="import-result-state" role="status">
       <p>總實際服務 {preview.total_actual_service_days} 天；樓層費 {preview.historical_floor_fee_ntd.toLocaleString()} 元；雙薪 0 小時。</p>
-      <p>客戶應收 {preview.client_obligation_amount_ntd.toLocaleString()} 元；月嫂應付合計 {preview.staff_obligation_amount_ntd.toLocaleString()} 元。</p>
+      <p>客戶應付 {preview.client_obligation_amount_ntd.toLocaleString()} 元；月嫂應付合計 {preview.staff_obligation_amount_ntd.toLocaleString()} 元。</p>
       {preview.payroll_assignments.map((item) => <p key={item.assignment_identity}>月嫂 ID {item.staff_id}：{item.actual_service_days} 天，應付 {item.total_payable_ntd.toLocaleString()} 元。</p>)}
       <button type="button" disabled={busy} onClick={() => void run(async () => { const receipt = await historicalServiceAccountingClient.apply(preview, inputs(), '核對舊系統實際服務天數'); setMessage(receipt.replayed ? '此筆已套用，已讀取原收據。' : '實際服務天數與應收應付已建立。'); setPreview(null); })}>確認建立帳務</button>
     </div>}

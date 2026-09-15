@@ -15,6 +15,7 @@
 ## Dependencies
 - inbound: `scheduling/scheduling` — 正式 assignment 與服務時數。
 - inbound: `orders/orders` — current order terms。
+- inbound: `case-import/case-import/pairing-current-facts` — 服務前正式 BeClass 胎數 correction 的 effective rate override。
 
 ## Verification
 - integration_root: `tests/domains/payroll/subsystems/payroll/integration/test_payroll_rebuild_workflow.py`

@@ -24,11 +24,14 @@
 - `domains/case_import/beclass_correction.py`
 - `subsystems/case_import/beclass_correction_workflow.py`
 - `infrastructure/mysql/beclass_correction_repository.py`
+- `infrastructure/mysql/effective_case_service_rate.py`
+- `infrastructure/mysql/beclass_financial_sync.py`
 - `POST /api/v1/admin/registries/clients/{case_no}/beclass/{preview|apply}`
 
 ## Correction boundary
 - Effective corrections resolve the unique `bound_case_no`; `query_no` remains immutable source provenance and original imported BeClass fields remain unchanged.
 - Any order without a bound BeClass row may create one `record_origin='admin_manual'` container during Apply; Preview remains zero-write, and all entered values continue through the same versioned correction state／event owner.
+- A pre-service effective birth-count correction resolves the versioned rate policy and coordinates Client Finance／Payroll impact in the same outer UoW. Once service has started, birth count is financially locked while non-financial BeClass fields remain independently correctable.
 
 ## Consumers
 - Case Import／Client owner follow-up only；不再有 Anomalies runtime consumer。

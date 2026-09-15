@@ -106,6 +106,27 @@ class ClientRegistryOrderInformationView(_StrictModel):
     field_issues: dict[str, str]
 
 
+class ClientRegistryFinanceValuesView(_StrictModel):
+    virtual_account: str
+    service_unit_price_ntd: int = Field(gt=0)
+    service_hours: float = Field(ge=0)
+    customer_payable_total_ntd: int = Field(ge=0)
+    deposit_amount_ntd: int = Field(ge=0)
+    first_payment_amount_ntd: int = Field(ge=0)
+    second_payment_amount_ntd: int = Field(ge=0)
+    received_total_ntd: int = Field(ge=0)
+    customer_balance_ntd: int
+    subsidy_return_amount_ntd: int | None = Field(default=None, ge=0)
+    subsidy_return_due_date: date | None = None
+    subsidy_return_status: str | None = None
+
+
+class ClientRegistryFinanceView(_StrictModel):
+    status: Literal["ready", "not_ready"]
+    code: str | None = None
+    values: ClientRegistryFinanceValuesView | None = None
+
+
 class RegistryOrderTermsSectionView(_StrictModel):
     status: Literal["ready", "not_found", "not_ready"]
     code: str | None = None
@@ -118,6 +139,7 @@ class ClientRegistryDetailView(_StrictModel):
     client: ClientRegistryProfileView
     beclass: ClientRegistryBeClassView
     order_information: ClientRegistryOrderInformationView
+    finance: ClientRegistryFinanceView
     order_terms: RegistryOrderTermsSectionView
 
 

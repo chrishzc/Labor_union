@@ -34,6 +34,11 @@ actual hours、費率、薪資或樓層費結果，也不得把該天數偽造�
 既有雙胞胎案件的不可變 Case／assignment 費率快照不得原地改寫。保留資料 migration
 只可由已確認為 `twins / 450` 的 Case 快照補上缺少的 assignment 快照；既有快照費率
 不是 450、Case 快照缺失或胎數來源歧義時，一律阻擋並交人工裁決。
+
+服務尚未開始時，管理員以正式 BeClass correction 將單胞胎更正為雙胞胎，屬於目前案件有效
+費率事實的更正：同一 outer Unit of Work 必須以 450 重算 open Payroll obligation，後續 Query、
+rebuild 與新 assignment 也必須優先採用此 effective correction；原 assignment 快照及已付款事件
+維持不可變，差額以既有 adjustment／replacement 規則表達。正式服務開始後不得變更胎數。
 - 低收入戶／中低收入戶先映射為補助市民政策
 
 ## 3. Subsystems

@@ -12,6 +12,9 @@ from domains.case_import.order_information import project_order_information
 from domains.payroll.payment_due_date import calculate_staff_payment_due_date
 from domains.orders.floor_fee import allocate_largest_remainder
 from infrastructure.mysql.order_terms_read_model import load_preview_facts
+from infrastructure.mysql.effective_case_service_rate import (
+    load_explicit_case_service_rate,
+)
 from shared_kernel.money import MoneyNTD
 from subsystems.orders.order_information import (
     OrderInformationOwnerSnapshot,
@@ -40,6 +43,7 @@ class MySqlOrderInformationRepository:
             case = cursor.fetchone()
             if not isinstance(case, Mapping):
                 return None
+            case = _apply_explicit_rate_correction(cursor, case, case_no)
             cursor.execute(_ASSIGNMENTS_SQL, (case_no,))
             assignments = tuple(cursor.fetchall() or ())
         selected = _select_assignment(assignments, assignment_id)
@@ -93,6 +97,8 @@ class MySqlOrderInformationRepository:
         with self._connection.cursor() as cursor:
             cursor.execute(_CASE_SQL + (" FOR UPDATE" if for_update else ""), (case_no,))
             case = cursor.fetchone()
+            if isinstance(case, Mapping):
+                case = _apply_explicit_rate_correction(cursor, case, case_no)
             cursor.execute("""SELECT s.name AS staff_name, binding.line_user_id,
                 e.service_start_date AS assigned_start_date, e.service_end_date AS assigned_end_date
                 FROM caregiver_candidate_contact_entries e
@@ -127,6 +133,8 @@ class MySqlOrderInformationRepository:
         with self._connection.cursor() as cursor:
             cursor.execute(_CASE_SQL + (" FOR UPDATE" if for_update else ""), (case_no,))
             case = cursor.fetchone()
+            if isinstance(case, Mapping):
+                case = _apply_explicit_rate_correction(cursor, case, case_no)
             cursor.execute(_FORMAL_PLAN_SEGMENTS_SQL, (plan_id, case_no))
             segments = tuple(cursor.fetchall() or ())
         if not isinstance(case, Mapping) or not segments:
@@ -199,8 +207,28 @@ def _facts(
         "service_type": case.get("service_type"),
         "baby_info": case.get("baby_info"),
         **projection.values,
+        **(
+            {"multi_birth_count": case["_effective_multi_birth_count"]}
+            if case.get("_effective_multi_birth_count") is not None
+            else {}
+        ),
     }
-    return facts, projection.issues
+    issues = dict(projection.issues)
+    if case.get("_effective_multi_birth_count") is not None:
+        issues.pop("multi_birth_count", None)
+    return facts, issues
+
+
+def _apply_explicit_rate_correction(cursor, case, case_no):
+    rate = load_explicit_case_service_rate(cursor, case_no)
+    if rate is None:
+        return case
+    return {
+        **dict(case),
+        "client_hourly_rate_ntd": rate.hourly_rate_ntd,
+        "payroll_hourly_rate_ntd": rate.hourly_rate_ntd,
+        "_effective_multi_birth_count": rate.multi_birth_count,
+    }
 
 
 def _matching_plan_payroll_estimates(

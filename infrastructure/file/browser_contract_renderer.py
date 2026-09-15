@@ -126,8 +126,11 @@ def _workbook_html(content: bytes) -> str:
             for column in range(start[1], start[1] + colspan)
             if (row, column) != start
         }
+        total_width = sum(Decimal(_column_width(worksheet, column)) for column in range(min_col, max_col + 1))
+        # Scale fonts and row heights together with columns into A4's 194 mm content width.
+        scale = min(1.0, (194 * 72 / 25.4) / float(total_width))
         columns = "".join(
-            f'<col style="width:{_column_width(worksheet, column)}pt">'
+            f'<col style="width:{Decimal(_column_width(worksheet, column)) / total_width * 100:.4f}%">'
             for column in range(min_col, max_col + 1)
         )
         rows: list[str] = []
@@ -139,27 +142,42 @@ def _workbook_html(content: bytes) -> str:
                     continue
                 cell = worksheet.cell(row, column)
                 rowspan, colspan = merged.get((row, column), (1, 1))
+                background = _aligned_fill(
+                    worksheet, row, column, colspan, min_col, max_col
+                )
+                # Excel lets labels flow into empty neighbours. Give that text
+                # real layout space so later cell backgrounds cannot paint over it.
+                if cell.value is not None and rowspan == 1:
+                    while column + colspan <= max_col:
+                        neighbour = worksheet.cell(row, column + colspan)
+                        if (
+                            neighbour.value is not None
+                            or (row, column + colspan) in merged
+                            or (row, column + colspan) in covered
+                            or _aligned_fill(worksheet, row, column + colspan, 1, min_col, max_col) != background
+                            or any(
+                                getattr(getattr(candidate.border, side), "style", None)
+                                for candidate in (cell, neighbour)
+                                for side in ("top", "right", "bottom", "left")
+                            )
+                        ):
+                            break
+                        covered.add((row, column + colspan))
+                        colspan += 1
                 span = (f' rowspan="{rowspan}"' if rowspan > 1 else "") + (
                     f' colspan="{colspan}"' if colspan > 1 else ""
                 )
-                background = _aligned_fill(
-                    worksheet,
-                    row,
-                    column,
-                    colspan,
-                    min_col,
-                    max_col,
-                )
                 cells.append(
-                    f'<td{span} style="{_cell_style(cell, colspan, background)}">{_cell_text(cell.value)}</td>'
+                    f'<td{span} style="{_cell_style(cell, colspan, background, scale)}">{_cell_text(cell.value)}</td>'
                 )
-            row_style = f' style="height:{height}pt"' if height else ""
+            row_style = f' style="height:{height * scale:.2f}pt"' if height else ""
             rows.append(f"<tr{row_style}>{''.join(cells)}</tr>")
         return (
             '<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><style>'
             "@page{size:A4 portrait;margin:8mm}html,body{margin:0;padding:0}"
             "table{width:100%;border-collapse:collapse;table-layout:fixed}"
-            "td{box-sizing:border-box;white-space:nowrap;overflow:visible;position:relative}"
+            "tr{break-inside:avoid}"
+            "td{box-sizing:border-box;white-space:pre-wrap;overflow-wrap:anywhere;vertical-align:middle}"
             "</style></head><body><table><colgroup>"
             + columns
             + "</colgroup>"
@@ -229,7 +247,9 @@ def _rgb(color) -> str | None:
 def _source_fill(cell) -> str | None:
     if cell.fill.fill_type != "solid":
         return None
-    return _rgb(cell.fill.fgColor)
+    color = _rgb(cell.fill.fgColor)
+    # The legacy orange registration block belongs to the pale-yellow payment panel.
+    return "#FFFFCC" if color == "#FFC000" else color
 
 
 def _aligned_fill(worksheet, row: int, column: int, colspan: int, min_col: int, max_col: int) -> str | None:
@@ -258,12 +278,12 @@ def _nearest_non_highlight_fill(worksheet, row: int, start: int, step: int, min_
     return None
 
 
-def _cell_style(cell, colspan: int, background: str | None) -> str:
+def _cell_style(cell, colspan: int, background: str | None, scale: float = 1.0) -> str:
     styles = ["padding:1px 2px"]
     if cell.font.name:
         styles.append(f"font-family:{escape(cell.font.name)}")
     if cell.font.sz:
-        styles.append(f"font-size:{cell.font.sz}pt")
+        styles.append(f"font-size:{cell.font.sz * scale:.2f}pt")
     if (
         colspan > 1
         and isinstance(cell.value, str)
@@ -288,7 +308,7 @@ def _cell_style(cell, colspan: int, background: str | None) -> str:
         styles.append(f"background:{background}")
     for side_name in ("top", "right", "bottom", "left"):
         side = getattr(cell.border, side_name)
-        if side.style:
+        if side is not None and side.style:
             width = "2px" if side.style in {"medium", "thick", "double"} else "1px"
             styles.append(
                 f"border-{side_name}:{width} solid {_rgb(side.color) or '#000'}"

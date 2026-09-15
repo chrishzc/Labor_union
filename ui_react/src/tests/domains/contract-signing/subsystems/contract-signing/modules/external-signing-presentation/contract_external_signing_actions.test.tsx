@@ -393,7 +393,7 @@ describe('ContractExternalSigningActions', () => {
     } as Awaited<ReturnType<typeof contractSigningClient.query>>);
 
     render(<ContractExternalSigningActions caseNo="CASE-001" />);
-    expect(await screen.findByRole('button', { name: '準備並下載客戶契約 PDF' })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: '下載客戶契約 PDF' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '準備服務人員契約 PDF（服務區段 41）' }));
 
     await waitFor(() => expect(contractExternalSigningClient.prepareStaffUnsignedPdf).toHaveBeenCalledWith(
@@ -426,7 +426,7 @@ describe('ContractExternalSigningActions', () => {
     expect(screen.getByRole('button', { name: '準備服務人員契約 PDF（服務區段 42）' })).toBeEnabled();
   });
 
-  it('prepares and downloads the exact client PDF when there was no old document', async () => {
+  it('uses the single client download action to prepare and download when there was no old document', async () => {
     vi.mocked(contractExternalSigningClient.query)
       .mockResolvedValueOnce({
         ...query, unsigned_document: null,
@@ -443,7 +443,9 @@ describe('ContractExternalSigningActions', () => {
     const download = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
     vi.stubGlobal('URL', { createObjectURL: vi.fn().mockReturnValue('blob:client'), revokeObjectURL: vi.fn() });
     render(<ContractExternalSigningActions caseNo="CASE-001" />);
-    fireEvent.click(await screen.findByRole('button', { name: '準備並下載客戶契約 PDF' }));
+    const clientDownload = await screen.findAllByRole('button', { name: '下載客戶契約 PDF' });
+    expect(clientDownload).toHaveLength(1);
+    fireEvent.click(clientDownload[0]);
     await waitFor(() => expect(contractExternalSigningClient.downloadUnsignedPdf).toHaveBeenCalledWith(
       'CASE-001', 92, expect.any(AbortSignal),
     ));

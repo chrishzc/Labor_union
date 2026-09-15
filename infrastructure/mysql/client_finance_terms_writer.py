@@ -21,6 +21,8 @@ def persist_client_finance_terms_impact(cursor, command) -> None:
             continue
         event_id = _append_obligation_event(cursor, command, action, ordinal)
         _persist_projection(cursor, command, action, event_id)
+    if getattr(command.candidate, "subsidy_return_plan", None) is not None:
+        _persist_subsidy_return(cursor, command)
     _advance_account_version(cursor, command)
     _append_outbox(cursor, command)
 
@@ -28,6 +30,47 @@ def persist_client_finance_terms_impact(cursor, command) -> None:
 def _append_obligation_event(cursor, command, action, ordinal):
     cursor.execute(_EVENT_INSERT_SQL, _event_values(command, action, ordinal))
     return int(cursor.lastrowid)
+
+
+def _persist_subsidy_return(cursor, command):
+    plan = command.candidate.subsidy_return_plan
+    ordinal = len(command.candidate.actions) + 1
+    cursor.execute(
+        _EVENT_INSERT_SQL,
+        (
+            plan.obligation_identity,
+            command.candidate.case_no,
+            "subsidy_return",
+            "payable_to_client",
+            "established",
+            0,
+            plan.amount.amount,
+            None,
+            plan.due_date,
+            _source_event_identity(command, ordinal),
+            None,
+            command.candidate.expected_account_version,
+            _child_identity(command, "event", ordinal),
+            command.actor.actor_id,
+            command.reason,
+        ),
+    )
+    event_id = int(cursor.lastrowid)
+    cursor.execute(
+        _PROJECTION_INSERT_SQL,
+        (
+            plan.obligation_identity,
+            command.candidate.case_no,
+            "subsidy_return",
+            "payable_to_client",
+            None,
+            plan.amount.amount,
+            plan.due_date,
+            "open",
+            event_id,
+            command.candidate.resulting_account_version,
+        ),
+    )
 
 
 def _event_values(command, action, ordinal):

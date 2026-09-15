@@ -7,6 +7,9 @@ import json
 from shared_kernel.fingerprints import fingerprint_payload
 from subsystems.orders.terms_workflow import PayrollImpactPersistenceCommand
 from subsystems.payroll.terms_impact import PayrollTermsActionKind
+from infrastructure.mysql.effective_case_service_rate import (
+    load_explicit_case_service_rate,
+)
 
 
 def persist_payroll_terms_impact(cursor, command) -> None:
@@ -30,6 +33,16 @@ def persist_scheduling_assignment_rate_snapshots(cursor, scheduling_command, res
         (scheduling_command.candidate.case_no,),
     )
     case_policy = cursor.fetchone()
+    rate_override = load_explicit_case_service_rate(
+        cursor, scheduling_command.candidate.case_no
+    )
+    if rate_override is not None:
+        case_policy = {
+            "policy_version": rate_override.policy_version,
+            "policy_kind": rate_override.policy_kind,
+            "hourly_rate_ntd": rate_override.hourly_rate_ntd,
+            "source_identity_status": "beclass-effective-correction",
+        }
     rows = []
     for assignment in scheduling_command.candidate.assignments:
         source_policy = None
@@ -40,7 +53,7 @@ def persist_scheduling_assignment_rate_snapshots(cursor, scheduling_command, res
                 (assignment.source_assignment_id,),
             )
             source_policy = cursor.fetchone()
-        policy = source_policy or case_policy
+        policy = case_policy if rate_override is not None else source_policy or case_policy
         if policy is None:
             raise ValueError("payroll_case_policy_bootstrap_required")
         source_identity = (

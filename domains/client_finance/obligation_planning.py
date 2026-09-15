@@ -7,11 +7,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import date
+from decimal import Decimal
 from enum import StrEnum
 
 from domains.client_finance.reconciliation import PaymentStage
 from domains.orders.terms import OrderTerms
 from domains.orders.floor_fee import prorate_floor_fee
+from domains.client_finance.subsidy_advance import subsidy_advance_due_date
+from domains.client_finance.subsidy_coverage import normalize_subsidy_policy_identity
 from domains.scheduling.generation import SchedulingGenerationCandidate
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.money import MoneyNTD
@@ -130,6 +133,8 @@ class ClientFinanceTermsSourceFacts:
     existing_obligations: tuple[ExistingClientStageObligation, ...]
     open_nonstage_obligation_count: int = 0
     deposit_gate_override_active: bool = False
+    identity_status: str | None = None
+    existing_subsidy_return_count: int = 0
 
     def __post_init__(self) -> None:
         _validate_identity(self.case_no, "case number")
@@ -142,6 +147,10 @@ class ClientFinanceTermsSourceFacts:
         )
         if not isinstance(self.deposit_gate_override_active, bool):
             raise TypeError("deposit_gate_override_active must be boolean")
+        require_nonnegative_integer(
+            self.existing_subsidy_return_count,
+            "existing subsidy return count",
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,6 +206,19 @@ class ClientFinanceTermsCandidate:
     settlement: ClientSettlementProjection
     blockers: tuple[str, ...]
     fingerprint: PreviewFingerprint
+    subsidy_return_plan: ClientSubsidyReturnPlan | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ClientSubsidyReturnPlan:
+    obligation_identity: str
+    amount: MoneyNTD
+    due_date: date
+
+    def __post_init__(self) -> None:
+        _validate_identity(self.obligation_identity, "subsidy return identity")
+        _require_positive_money(self.amount, "subsidy return amount")
+        _require_date(self.due_date, "subsidy return due date")
 
 
 @dataclass(frozen=True, slots=True)
@@ -362,11 +384,72 @@ def build_client_finance_cancellation_impact(
     cancellation_source = _cancellation_source_facts(
         source_facts, service_dates
     )
-    return build_client_finance_terms_impact(
+    candidate = build_client_finance_terms_impact(
         cancellation_source,
         cancellation_terms,
         scheduling,
         change_identity,
+    )
+    plan = _cancellation_subsidy_return_plan(
+        cancellation_source,
+        cancellation_terms,
+        service_dates,
+        candidate,
+    )
+    if plan is None:
+        return candidate
+    return replace(
+        candidate,
+        subsidy_return_plan=plan,
+        fingerprint=fingerprint_payload(
+            {
+                "terms_impact": candidate.fingerprint.value,
+                "subsidy_return": {
+                    "identity": plan.obligation_identity,
+                    "amount_ntd": plan.amount.amount,
+                    "due_date": plan.due_date.isoformat(),
+                },
+            }
+        ),
+    )
+
+
+def _cancellation_subsidy_return_plan(
+    source_facts,
+    order_terms,
+    service_dates,
+    candidate,
+):
+    if not service_dates or source_facts.existing_subsidy_return_count:
+        return None
+    identity_status = normalize_subsidy_policy_identity(
+        str(source_facts.identity_status or "")
+    )
+    hour_cap = {
+        "一般市民": Decimal("40"),
+        "補助市民": Decimal("120"),
+    }.get(identity_status)
+    if hour_cap is None:
+        return None
+    customer_payable = sum(item.amount.amount for item in candidate.stage_plans)
+    received = sum(
+        item.net_settled_amount.amount
+        for item in source_facts.existing_obligations
+    )
+    if received < customer_payable:
+        return None
+    actual_hours = Decimal(len(service_dates)) * Decimal(
+        str(order_terms.service_hours_per_day)
+    )
+    amount = min(hour_cap, actual_hours) * Decimal(
+        source_facts.payment_terms.client_hourly_rate.amount
+    )
+    if amount <= 0 or amount != amount.to_integral_value():
+        raise ValueError("subsidy return amount must be positive whole NTD")
+    return ClientSubsidyReturnPlan(
+        f"client-subsidy-return:{source_facts.case_no}:terminal",
+        MoneyNTD(int(amount)),
+        subsidy_advance_due_date(max(service_dates)),
     )
 
 

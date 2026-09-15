@@ -33,6 +33,9 @@ from domains.scheduling.generation import (
     SchedulingGenerationFacts,
 )
 from shared_kernel.money import MoneyNTD
+from infrastructure.mysql.effective_case_service_rate import (
+    load_explicit_case_service_rate,
+)
 from subsystems.orders.terms_workflow import TermsWorkflowFacts
 from subsystems.payroll.terms_impact import (
     CasePayrollPolicyTerms,
@@ -360,7 +363,12 @@ def _load_client_finance(cursor, order_row, schedule_rows, lock):
         for row in schedule_rows
         if bool(row["is_work_day"]) and bool(row["is_double_pay"])
     )
-    return _client_finance_source(terms_row, obligation_rows, double_pay_dates)
+    rate_override = load_explicit_case_service_rate(
+        cursor, str(order_row["case_no"]), lock=lock
+    )
+    return _client_finance_source(
+        terms_row, obligation_rows, double_pay_dates, rate_override
+    )
 
 
 def _select_client_payment_terms(cursor, case_no, lock):
@@ -382,13 +390,19 @@ def _select_client_obligations(cursor, case_no, lock):
     return tuple(cursor.fetchall())
 
 
-def _client_finance_source(terms_row, obligation_rows, double_pay_dates):
+def _client_finance_source(
+    terms_row, obligation_rows, double_pay_dates, rate_override=None
+):
     return ClientFinanceTermsSourceFacts(
         case_no=str(terms_row["case_no"]),
         account_version=int(terms_row["aggregate_version"]),
         payment_terms=ClientPaymentTerms(
             int(terms_row["deposit_service_days"]),
-            MoneyNTD(_integer_ntd(terms_row["client_hourly_rate_ntd"])),
+            MoneyNTD(
+                rate_override.hourly_rate_ntd
+                if rate_override is not None
+                else _integer_ntd(terms_row["client_hourly_rate_ntd"])
+            ),
             terms_row["deposit_due_date"],
             terms_row["first_payment_due_date"],
             terms_row["second_payment_due_date"],
@@ -402,6 +416,14 @@ def _client_finance_source(terms_row, obligation_rows, double_pay_dates):
         ),
         deposit_gate_override_active=bool(
             terms_row.get("deposit_gate_override_active", False)
+        ),
+        identity_status=(
+            str(terms_row["identity_status"])
+            if terms_row.get("identity_status") is not None
+            else None
+        ),
+        existing_subsidy_return_count=int(
+            terms_row.get("existing_subsidy_return_count") or 0
         ),
     )
 
@@ -434,6 +456,7 @@ def _load_payroll(cursor, order_row, assignment_rows, lock):
     special_dates = _select_special_pay_dates(cursor, assignment_ids, lock)
     adjustments = _select_payroll_adjustments(cursor, assignment_ids, lock)
     obligations = _select_staff_obligations(cursor, case_no, lock)
+    rate_override = load_explicit_case_service_rate(cursor, case_no, lock=lock)
     return _payroll_source(
         order_row,
         account_row,
@@ -443,6 +466,7 @@ def _load_payroll(cursor, order_row, assignment_rows, lock):
         adjustments,
         obligations,
         case_policy,
+        rate_override,
     )
 
 
@@ -543,24 +567,37 @@ def _payroll_source(
     adjustments,
     obligations,
     case_policy,
+    rate_override=None,
 ):
+    effective_case_policy = (
+        CasePayrollPolicyTerms(
+            rate_override.policy_version,
+            PayrollPolicyKind(rate_override.policy_kind),
+        )
+        if rate_override is not None
+        else case_policy
+    )
     rates = {int(row["assignment_id"]): row for row in rate_rows}
     return PayrollTermsSourceFacts(
         case_no=str(order_row["case_no"]),
         payroll_version=int(account_row["aggregate_version"]),
         source_terms=tuple(
-            _source_assignment_terms(row, rates, special_dates, adjustments)
+            _source_assignment_terms(
+                row, rates, special_dates, adjustments, effective_case_policy
+            )
             for row in assignment_rows
         ),
         existing_obligations=tuple(
             _staff_obligation(row) for row in obligations
         ),
         staff_payment_due_date=order_row["staff_payment_due_date"],
-        case_policy=case_policy,
+        case_policy=effective_case_policy,
     )
 
 
-def _source_assignment_terms(row, rates, special_dates, adjustments):
+def _source_assignment_terms(
+    row, rates, special_dates, adjustments, rate_override=None
+):
     assignment_id = int(row["id"])
     rate = rates.get(assignment_id)
     if not isinstance(rate, Mapping):
@@ -568,8 +605,16 @@ def _source_assignment_terms(row, rates, special_dates, adjustments):
     return SourceAssignmentPayrollTerms(
         assignment_id,
         int(row["staff_id"]),
-        str(rate["policy_version"]),
-        PayrollPolicyKind(str(rate["policy_kind"])),
+        (
+            rate_override.policy_version
+            if rate_override is not None
+            else str(rate["policy_version"])
+        ),
+        (
+            PayrollPolicyKind(rate_override.policy_kind)
+            if rate_override is not None
+            else PayrollPolicyKind(str(rate["policy_kind"]))
+        ),
         special_dates.get(assignment_id, ()),
         adjustments.get(assignment_id, MoneyNTD(0)),
     )
@@ -768,17 +813,22 @@ _PREFLIGHT_STAFF_SQL = (
 )
 
 _CLIENT_PAYMENT_TERMS_SQL = (
-    "SELECT a.case_no,a.aggregate_version,t.policy_version,"
+    "SELECT a.case_no,a.aggregate_version,t.policy_version,clients.identity_status,"
     "t.client_hourly_rate_ntd,t.deposit_service_days,t.deposit_due_date,"
     "t.first_payment_due_date,t.second_payment_due_date,"
     "(SELECT COUNT(*) FROM client_obligations o "
     "WHERE o.case_no=a.case_no AND o.status='open' "
     "AND o.obligation_type NOT IN ('deposit','first','second')) "
     "AS open_nonstage_obligation_count,"
+    "(SELECT COUNT(*) FROM client_obligations subsidy_return "
+    "WHERE subsidy_return.case_no=a.case_no "
+    "AND subsidy_return.obligation_type='subsidy_return' "
+    "AND subsidy_return.status<>'cancelled') AS existing_subsidy_return_count,"
     "(e.source_event_identity LIKE 'deposit-gate-override:%%') "
     "AS deposit_gate_override_active "
     "FROM client_finance_accounts a "
     "JOIN client_payment_terms t ON t.case_no=a.case_no "
+    "JOIN clients ON clients.case_no=a.case_no "
     "JOIN client_payment_terms_events e ON e.id=t.current_event_id "
     "WHERE a.case_no=%s"
 )

@@ -460,7 +460,7 @@ def _client_receivable_overdue_definition() -> AnomalyDefinition:
         available_actions=(
             RecoveryActionDescriptor(
                 action_key="reconcile_client_receivable",
-                label="核銷逾期客戶應收",
+                label="核銷逾期客戶應付",
                 owning_domain="client_finance",
                 preview_operation="PreviewClientReceiptReconciliation",
                 apply_operation="ApplyClientReceiptReconciliation",

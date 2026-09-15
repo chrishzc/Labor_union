@@ -59,6 +59,12 @@ const orderTermLabels = {
   requires_cooking: '下廚需求', floor_fee_ntd: '樓層加給', start_time: '每日開始時間', end_time: '每日結束時間',
   end_day_offset: '結束日偏移',
 } as const;
+const financeLabels = {
+  virtual_account: '本案專屬虛擬帳號', service_unit_price_ntd: '服務單價', service_hours: '服務總時數',
+  customer_payable_total_ntd: '客戶應付總額', deposit_amount_ntd: '訂金金額', first_payment_amount_ntd: '第一期金額',
+  second_payment_amount_ntd: '第二期金額', received_total_ntd: '已入帳金額', customer_balance_ntd: '客戶待繳／應退差額',
+  subsidy_return_amount_ntd: '補助退款金額', subsidy_return_due_date: '補助退款日期', subsidy_return_status: '補助退款狀態',
+} as const;
 
 const ReadOnlyFields: React.FC<{ labels: Record<string, string>; values: Record<string, unknown>; issues?: Record<string, string> }> = ({ labels, values, issues = {} }) => (
   <dl className="client-roster-detail-fields">
@@ -85,6 +91,9 @@ const ReadOnlyDetail: React.FC<{ detail: ClientRegistryDetail }> = ({ detail }) 
     <section><h3>訂單條件</h3>{terms
       ? <ReadOnlyFields labels={orderTermLabels} values={orderTermValues} />
       : <p>訂單條件目前不可用（{detail.order_terms.code ?? detail.order_terms.status}）。</p>}</section>
+    <section><h3>客戶帳務（唯讀）</h3>{detail.finance.status === 'ready' && detail.finance.values
+      ? <ReadOnlyFields labels={financeLabels} values={detail.finance.values} />
+      : <p>客戶帳務目前不可用（{detail.finance.code ?? detail.finance.status}）。</p>}</section>
   </div>;
 };
 

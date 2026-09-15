@@ -4,15 +4,23 @@ Description: 驗證取消帳務方向與金額的 server-owned typed contract。
 """
 
 from datetime import date
+from types import SimpleNamespace
 
 import pytest
 
 from api.schemas.order_cancellation import ClientFinanceActionView
 from domains.client_finance.obligation_planning import (
     ClientFinanceDirection,
+    ClientSubsidyReturnPlan,
     ClientObligationAction,
     ClientObligationActionKind,
 )
+from infrastructure.mysql.client_finance_terms_writer import (
+    persist_client_finance_terms_impact,
+)
+from shared_kernel.fingerprints import PreviewFingerprint
+from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
+from subsystems.orders.terms_workflow import ClientFinanceImpactPersistenceCommand
 from domains.client_finance.reconciliation import PaymentStage
 from shared_kernel.money import MoneyNTD
 
@@ -157,3 +165,63 @@ def test_api_view_requires_direction_and_nonnegative_direction_amount() -> None:
                 "direction_amount_ntd": 1,
             }
         )
+
+
+class _Cursor:
+    def __init__(self):
+        self.statements = []
+        self.lastrowid = 20
+        self.rowcount = 1
+
+    def execute(self, statement, parameters):
+        self.statements.append((" ".join(statement.split()), parameters))
+        if "INSERT INTO client_obligation_events" in statement:
+            self.lastrowid += 1
+
+
+def test_cancellation_writer_persists_subsidy_return_as_separate_client_payable():
+    cursor = _Cursor()
+    plan = ClientSubsidyReturnPlan(
+        "client-subsidy-return:CASE-1:terminal",
+        MoneyNTD(14_400),
+        date(2026, 10, 15),
+    )
+    candidate = SimpleNamespace(
+        case_no="CASE-1",
+        expected_account_version=5,
+        resulting_account_version=6,
+        actions=(),
+        subsidy_return_plan=plan,
+        fingerprint=PreviewFingerprint("a" * 64),
+    )
+    command = ClientFinanceImpactPersistenceCommand(
+        candidate,
+        IdempotencyKey("cancel-client-finance-1"),
+        ActorContext("admin"),
+        "mid-service cancellation",
+        CorrelationId("cancel-client-finance-test"),
+        "order-cancellation",
+        9,
+    )
+
+    persist_client_finance_terms_impact(cursor, command)
+
+    event = next(
+        values
+        for statement, values in cursor.statements
+        if "INSERT INTO client_obligation_events" in statement
+    )
+    projection = next(
+        values
+        for statement, values in cursor.statements
+        if "INSERT INTO client_obligations" in statement
+    )
+    assert event[2:5] == ("subsidy_return", "payable_to_client", "established")
+    assert event[6] == 14_400
+    assert projection[2:7] == (
+        "subsidy_return",
+        "payable_to_client",
+        None,
+        14_400,
+        date(2026, 10, 15),
+    )

@@ -176,7 +176,7 @@ def query_settlement_remediation(
             "subsidy_return_bank_facts": payable["subsidy_return_bank_facts"],
         }
 
-    return _call(query, "成功取得客戶應收與應付人工處理根事實", correlation)
+    return _call(query, "成功取得客戶應付與退款人工處理根事實", correlation)
 
 
 @router.post(

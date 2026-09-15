@@ -28,6 +28,7 @@ class _Repository:
             "beclass_status": "ready", "beclass_record_id": 12,
             "beclass_source_kind": "imported", "beclass_version": 3,
             "beclass_values": {"name": "王小明", "phone": "0922222222", "multi_birth_count": "雙胞胎"},
+            "beclass_financial_fields_locked": True,
             "order_information_values": {
                 "multi_birth_count": "雙胞胎", "dietary_habits": "不吃牛肉",
             },
@@ -155,6 +156,8 @@ def test_registry_http_composition_identifies_each_field_owner_and_editability()
     assert payload["client"]["field_capabilities"]["gender"]["options"] == ("女", "男")
     assert payload["beclass"]["field_capabilities"]["phone"]["owner"] == "client_beclass"
     assert payload["beclass"]["field_capabilities"]["multi_birth_count"]["options"] == ("單胞胎", "雙胞胎")
+    assert payload["beclass"]["field_capabilities"]["multi_birth_count"]["editable"] is False
+    assert payload["beclass"]["field_capabilities"]["multi_birth_count"]["reason"] == "multi_birth_count_locked_after_service_start"
     assert payload["order_information"]["values"]["multi_birth_count"] == "雙胞胎"
     assert payload["order_terms"]["field_capabilities"]["planned_start_date"]["owner"] == "order_terms"
 

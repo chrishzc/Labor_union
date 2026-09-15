@@ -23,7 +23,7 @@ interface Props {
 type Preview = { kind: 'receivable'; value: ClientReceiptPreview } | { kind: 'payable'; value: ClientPayablePreview };
 
 function title(kind: ClientSettlementTarget['kind']): string {
-  return kind === 'receivable' ? '逾期客戶應收' : kind === 'refund' ? '逾期客戶退款／調整應付' : '逾期客戶補助退還';
+  return kind === 'receivable' ? '逾期客戶應付' : kind === 'refund' ? '逾期客戶退款／調整應付' : '逾期客戶補助退還';
 }
 function commandId(prefix: string): string { return `${prefix}-${crypto.randomUUID()}`; }
 function previewAmount(preview: Preview): number {

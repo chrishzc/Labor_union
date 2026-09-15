@@ -15,6 +15,10 @@ from typing import Any
 
 from pymysql.err import IntegrityError, OperationalError
 
+from infrastructure.mysql.effective_case_service_rate import (
+    load_explicit_case_service_rate,
+)
+
 from domains.government_subsidy.claims import (
     ClaimApprovalCandidate,
     ClaimBatchCursorPage,
@@ -898,7 +902,24 @@ def _load_claim_planning_sources(cursor, intent, lock):
     rows = cursor.fetchall()
     if not rows:
         raise ValueError("government_subsidy_claim_facts_invalid")
-    return tuple(_planning_source(row) for row in rows)
+    overrides = {}
+    projected = []
+    for row in rows:
+        case_no = str(row["case_no"])
+        if case_no not in overrides:
+            overrides[case_no] = load_explicit_case_service_rate(
+                cursor,
+                case_no,
+                lock=lock,
+            )
+        override = overrides[case_no]
+        projected.append(
+            _planning_source(
+                row,
+                None if override is None else override.hourly_rate_ntd,
+            )
+        )
+    return tuple(projected)
 
 
 def _lock_claim_planning_rows(cursor, start_date, end_date):
@@ -923,8 +944,12 @@ def _quarter_date_range(intent):
     return start_date, date(identity.application_year + 1, 1, 1)
 
 
-def _planning_source(row):
-    unit_price = row["subsidy_unit_price_ntd"]
+def _planning_source(row, effective_unit_price_ntd=None):
+    unit_price = (
+        row["subsidy_unit_price_ntd"]
+        if effective_unit_price_ntd is None
+        else effective_unit_price_ntd
+    )
     if unit_price is None:
         raise ValueError("government_subsidy_claim_facts_invalid")
     try:
@@ -975,8 +1000,11 @@ def _insert_claim_batch(cursor, candidate):
 
 
 def _insert_claim_items(cursor, batch_id, candidate):
-    rows = tuple(
-        (
+    inserted = []
+    for item in candidate.items:
+        cursor.execute(
+            _CLAIM_ITEM_INSERT_SQL,
+            (
             batch_id,
             item.case_no,
             item.assignment_id,
@@ -984,10 +1012,41 @@ def _insert_claim_items(cursor, batch_id, candidate):
             item.claimed_hours,
             item.unit_price_ntd.amount,
             item.requested_amount_ntd.amount,
+            ),
         )
-        for item in candidate.items
+        inserted.append((int(cursor.lastrowid), item))
+    for case_no in sorted({item.case_no for _, item in inserted}):
+        _link_client_subsidy_return(
+            cursor,
+            case_no,
+            tuple((claim_item_id, item) for claim_item_id, item in inserted if item.case_no == case_no),
+        )
+
+
+def _link_client_subsidy_return(cursor, case_no, claim_items):
+    cursor.execute(
+        "SELECT obligation_identity,amount_due_ntd FROM client_obligations "
+        "WHERE case_no=%s AND obligation_type='subsidy_return' "
+        "AND direction='payable_to_client' AND status<>'cancelled' "
+        "ORDER BY obligation_identity FOR UPDATE",
+        (case_no,),
     )
-    cursor.executemany(_CLAIM_ITEM_INSERT_SQL, rows)
+    obligations = tuple(cursor.fetchall() or ())
+    if not obligations:
+        return
+    entitled_total = sum(item.requested_amount_ntd.amount for _, item in claim_items)
+    if len(obligations) != 1 or int(obligations[0]["amount_due_ntd"]) != entitled_total:
+        raise ValueError("client_subsidy_return_entitlement_ambiguous")
+    for claim_item_id, item in claim_items:
+        cursor.execute(
+            "INSERT INTO client_subsidy_return_claim_item_links "
+            "(obligation_identity,claim_item_id,entitled_amount_ntd) VALUES (%s,%s,%s)",
+            (
+                str(obligations[0]["obligation_identity"]),
+                claim_item_id,
+                item.requested_amount_ntd.amount,
+            ),
+        )
 
 
 def _insert_claim_account(cursor, batch_id, candidate):

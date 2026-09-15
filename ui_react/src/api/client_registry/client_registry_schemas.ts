@@ -33,6 +33,14 @@ const orderInformationValues = z.strictObject({
   parking_space_provided: orderInformationValue,
   other_babies_present: orderInformationValue,
 });
+const financeValues = z.strictObject({
+  virtual_account: z.string().min(1), service_unit_price_ntd: z.number().int().positive(),
+  service_hours: z.number().nonnegative(), customer_payable_total_ntd: z.number().int().nonnegative(),
+  deposit_amount_ntd: z.number().int().nonnegative(), first_payment_amount_ntd: z.number().int().nonnegative(),
+  second_payment_amount_ntd: z.number().int().nonnegative(), received_total_ntd: z.number().int().nonnegative(),
+  customer_balance_ntd: z.number().int(), subsidy_return_amount_ntd: z.number().int().nonnegative().nullable(),
+  subsidy_return_due_date: nullableText, subsidy_return_status: nullableText,
+});
 const fieldCapabilities = z.record(z.string(), z.strictObject({
   owner: z.enum(['client_profile', 'client_beclass', 'order_terms']),
   editable: z.boolean(), reason: nullableText, options: z.array(z.string()).nullable(),
@@ -59,6 +67,7 @@ export const ClientRegistryDetailSchema = z.strictObject({
     values: orderInformationValues.nullable(),
     field_issues: z.record(z.string(), z.string()),
   }),
+  finance: z.strictObject({ status: z.enum(['ready', 'not_ready']), code: nullableText, values: financeValues.nullable() }),
   order_terms: z.strictObject({ status: z.enum(['ready', 'not_found', 'not_ready']), code: nullableText, data: OrderTermsSchema.nullable(), field_capabilities: fieldCapabilities }),
 });
 export const RegistryMutationPreviewSchema = z.strictObject({

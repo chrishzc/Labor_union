@@ -28,6 +28,11 @@
 
 依 Orders Terms、服務日根事實及費率政策建立訂金、第一期、第二期及調整義務。樓層費只計入一次。條款變更只重算未核銷義務；已核銷差額建立 adjustment 或 refund obligation。
 
+使用者介面一律稱為「客戶應付」，意思是客戶應付給工會的金額；內部既有 accounting
+`receivable` 型別可保留。服務本金公式固定為 `有效正式服務時數 × 有效服務單價`，雙胞胎為
+每小時 450。服務前的合法胎數更正必須在同一交易同步付款條款與所有 open 義務；已核銷金額
+不得覆寫，差額形成 adjustment 或 refund。正式服務開始後不得再變更胎數，完工確認當下即凍結本金。
+
 一般市民遇工會突發狀況時，system admin 可經專用 Preview／Apply 人工允許案件在訂金尚未付清時繼續後續流程。此入口不得自動執行，且不適用低收入戶、中低收入戶或非市民；Apply 必須保存 actor、明確原因、idempotency receipt 與 immutable payment-terms event。放行不修改訂金服務天數、金額、義務或 `deposit_settled`，而是以獨立 typed override 經 durable outbox 交由 Orders 正式 writer 將仍在 `洽談中` 的案件推進為 `訂單成立`；Scheduling 只讀此 override，不得自行改寫 Orders。Operational Stage 必須將訂金關卡標為完成並顯示「定金未付，已人工放行」，不得誤標為已核銷。後續付款仍走既有核銷流程，payment terms 的下一次正式變更會使既有放行失效並要求重新確認。
 
 第 `27` 份正式規格的歷史 lifecycle branch 可用每位月嫂已確認 `actual_service_days` 的總和取代逐日
@@ -81,6 +86,10 @@ caller 不得重算：
 obligation；真正已有正式收款而新義務下降時，固定使用 `create_refund` 與 `refund_due`。
 同一 cancellation response 可含多筆 action，各筆均依本表產生自己的 direction 與
 direction amount。
+
+取消不加收取消費。服務中取消以已確認實際服務時數重算服務本金；訂金、第一期及其他已正式
+核銷款項均依 allocation reducer 計入 `current_settled_amount_ntd`，不得只扣其中一期或重複收取。
+已收總額大於實際應付時建立退款，小於時才形成補收。
 
 缺少 direction、direction_amount 與 direction 不一致、或 current owner readback 不能唯一確認
 方向時，Query／Preview／Apply 回 typed schema／domain error 或 `outcome_unknown`，不建立或
@@ -150,14 +159,14 @@ obligation依strictly-newer owner event更新current projection，未被舊event
 功能已啟用，且與客戶服務費 ledger 分離。它是「工會對客戶的應付」，不是
 政府對工會的應收，也不得以 `client_payments.subsidy_refund_*` 作為事實來源。
 
-本節只適用於已由客戶代墊的非全補助案件；全補助案件因客戶未支付服務薪資，不建立 `subsidy_return`。客戶先支付的完整服務薪資是一般 Client Finance receivable／receipt；在正式服務完成前不得建立、預付或核銷 `subsidy_return`。服務完成且客戶服務費已收齊、補助資格可唯一確認後，才建立一筆對客戶的補助退還義務。這筆退款不改寫原客戶收款、不抵銷月嫂應付，也不代表政府已撥款。
+本節只適用於已由客戶代墊的非全補助案件；全補助案件因客戶未支付服務薪資，不建立 `subsidy_return`。客戶先支付的完整服務薪資是一般 Client Finance receivable／receipt；在服務尚未終結前不得建立、預付或核銷 `subsidy_return`。正式完工，或中途取消且實際服務時數已確認後，待該次重算的客戶服務費已收齊、補助資格可唯一確認，才建立一筆對客戶的補助退還義務。這筆退款不改寫原客戶收款、不抵銷月嫂應付，也不代表政府已撥款。
 
 ```text
 退還義務
 = min(補助時數上限, 有效正式服務時數) × 凍結補助單價
 ```
 
-雙倍日不增加退還額。只有服務完成、客戶服務費收齊且資格符合時建立；帳戶不唯一、
+雙倍日不增加退還額。只有服務已完工，或中途取消的實際時數已確認，且客戶服務費收齊、資格符合時建立；帳戶不唯一、
 少退、超退、退匯／沖正都進異常，不改義務。
 
 #### 季度撥款與客戶補助退還

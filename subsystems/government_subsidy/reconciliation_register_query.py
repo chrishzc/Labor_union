@@ -34,6 +34,7 @@ ESTABLISHED_ORDER_STATUSES = (
     "訂單成立",
     "服務中",
     "訂單完成",
+    "訂單取消",
     "歷史訂單－未服務",
     "歷史訂單－服務中",
     "歷史訂單－服務完成",
@@ -111,7 +112,15 @@ def _fetch_completed_cases(connection_factory: Callable[[], Any]) -> list[dict]:
                        correction.effective_values_json AS beclass_effective_values,
                        payroll_policy.hourly_rate_ntd AS payroll_hourly_rate_ntd,
                        historical_service.total_actual_service_days AS historical_actual_service_days,
-                       historical_service.total_actual_service_hours AS historical_actual_service_hours
+                       historical_service.total_actual_service_hours AS historical_actual_service_hours,
+                       (SELECT COUNT(DISTINCT schedule.work_date)
+                        FROM case_staff_assignments assignment
+                        JOIN scheduling_generations generation ON generation.id=assignment.generation_id
+                        JOIN staff_schedule schedule ON schedule.assignment_id=assignment.id
+                            AND schedule.generation_id=assignment.generation_id
+                        WHERE assignment.case_no=o.case_no AND generation.effective_marker=1
+                            AND schedule.effective_marker=1 AND schedule.is_work_day=1)
+                       AS official_service_days
                 FROM orders o
                 JOIN clients c ON c.id = o.client_id
                 LEFT JOIN staff s ON s.id = o.staff_id
@@ -176,7 +185,15 @@ def _fetch_established_cases(
                        correction.effective_values_json AS beclass_effective_values,
                        payroll_policy.hourly_rate_ntd AS payroll_hourly_rate_ntd,
                        historical_service.total_actual_service_days AS historical_actual_service_days,
-                       historical_service.total_actual_service_hours AS historical_actual_service_hours
+                       historical_service.total_actual_service_hours AS historical_actual_service_hours,
+                       (SELECT COUNT(DISTINCT schedule.work_date)
+                        FROM case_staff_assignments assignment
+                        JOIN scheduling_generations generation ON generation.id=assignment.generation_id
+                        JOIN staff_schedule schedule ON schedule.assignment_id=assignment.id
+                            AND schedule.generation_id=assignment.generation_id
+                        WHERE assignment.case_no=o.case_no AND generation.effective_marker=1
+                            AND schedule.effective_marker=1 AND schedule.is_work_day=1)
+                       AS official_service_days
                 FROM orders o
                 JOIN clients c ON c.id = o.client_id AND c.case_no = o.case_no
                 LEFT JOIN staff s ON s.id = o.staff_id
@@ -345,6 +362,9 @@ def _service_volume(
     daily_hours: Decimal,
     contracted_service_days: Decimal,
 ) -> tuple[Decimal, object]:
+    if source.get("order_status") == "訂單取消":
+        actual_days = Decimal(str(source.get("official_service_days") or 0))
+        return actual_days * daily_hours, int(actual_days)
     if source.get("order_status") not in HISTORICAL_ORDER_STATUSES:
         return contracted_service_days * daily_hours, source.get("service_days") or 0
     actual_hours = source.get("historical_actual_service_hours")

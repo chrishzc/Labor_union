@@ -249,7 +249,7 @@ review 或 alert status。首版只接受一份僅含該 review 對應列的更�
 
 ### 3.2.1 Contract Completion Preview／Apply
 
-正式契約完成是 Orders 根事實，但客戶應收義務由 Client Finance 擁有。依第 `21` 份正式
+正式契約完成是 Orders 根事實，但客戶應付義務由 Client Finance 擁有。依第 `21` 份正式
 規格，最後一位月嫂簽回並形成有效 commitment 時可先建立唯一 deposit obligation；客戶
 簽回時的 Contract Completion 必須保留該 deposit，只補足尚未建立的剩餘期款。客戶簽回、
 Orders contract event 與 Client Finance 補足義務必須使用同一 outer Unit of Work：
@@ -306,8 +306,10 @@ completion_instant
 ```
 
 只有 `evaluation_at >= completion_instant`、正式服務日完整一致、沒有 `auto_complete` blocker，
-且訂單未取消／未完成時，才可由 `服務中` 轉為 `訂單完成`。Apply 必須追加 immutable lifecycle
-event、以 expected lifecycle version 更新 projection、保存 idempotency receipt 及 post-commit Orders
+且訂單未取消／未完成時，才可由 `服務中` 轉為 `訂單完成`。完工確認當下必須在同一交易建立
+不可逆服務資料鎖，立即凍結服務日期、時數、服務單價、樓層費及其所形成的財務本金；不得等待客戶
+或月嫂款項結清後才鎖定。姓名、電話、地址、備註等非財務個資仍可由其 owner 獨立更正。
+Apply 必須追加 immutable lifecycle event、以 expected lifecycle version 更新 projection、保存 idempotency receipt 及 post-commit Orders
 source outbox，最後單次 commit；不得重建或結清 Client Finance、Payroll、退款或補助義務。
 
 相同 idempotency key 與 command fingerprint replay 回原 receipt；payload mismatch、expected version
@@ -394,6 +396,10 @@ consumer 不得修改 Orders 或任何其他 Domain root；binding／menu versio
 - 只適用於全部約定服務完成前。
 - 已開始服務時，Preview 由使用者確認逐日「實際服務日期＋實際月嫂」；現有事實預填，新增或改派必須指定月嫂與原因。
 - Apply 取消舊 assignments、未來 schedule 與 buffer，依確認後服務日建立新 assignments，重算 hours、整數樓層費、Client Finance 與 Staff Finance。
+- 沒有取消費或解約違約金。服務中取消的服務本金固定為已確認實際服務時數乘有效服務單價；已正式
+  核銷的訂金與第一期款都納入既有實收，與新本金比較後只形成應退款、應補收或無帳務變動。
+- 月嫂應付同步改為該月嫂已確認實際服務時數乘有效服務單價，再加依法有效的樓層費與其他調整；
+  未服務的原排定日期不得形成薪資或補助時數。
 - 取消結果若包含 Client Finance impact，Orders 只轉送 owning Domain 的 typed 結果；每筆必須帶
   `direction`（`refund_due`／`additional_charge_due`／`no_finance_change`）與
   `direction_amount_ntd`。Orders、API 與 UI 不得由 action kind、obligation amount 或金額正負自行推定。

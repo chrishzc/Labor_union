@@ -31,6 +31,10 @@ class BeClassCorrectionConflict(ValueError):
     pass
 
 
+class BeClassCorrectionBlocked(ValueError):
+    pass
+
+
 @dataclass(frozen=True, slots=True)
 class BeClassCorrectionSnapshot:
     beclass_record_id: int | None
@@ -39,6 +43,7 @@ class BeClassCorrectionSnapshot:
     original: Mapping[str, str | None]
     effective: Mapping[str, str | None]
     source_kind: str = "imported"
+    financial_fields_locked: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,14 +72,28 @@ class BeClassCorrectionRepository(Protocol):
     def load(self, case_no: str, *, for_update: bool) -> Mapping[str, Any] | None: ...
     def claim(self, *, case_no: str, key: IdempotencyKey, command_fingerprint: PreviewFingerprint, correlation_id: CorrelationId) -> None: ...
     def load_receipt(self, key: IdempotencyKey, *, for_update: bool) -> Mapping[str, Any] | None: ...
-    def persist(self, *, snapshot: BeClassCorrectionSnapshot, after: Mapping[str, str | None], actor: ActorContext, reason: str, key: IdempotencyKey, correlation_id: CorrelationId) -> tuple[int, int]: ...
+    def persist(self, *, snapshot: BeClassCorrectionSnapshot, after: Mapping[str, str | None], actor: ActorContext, reason: str, key: IdempotencyKey, correlation_id: CorrelationId) -> tuple[int, int, int]: ...
     def save_receipt(self, *, key: IdempotencyKey, command_fingerprint: PreviewFingerprint, preview_fingerprint: PreviewFingerprint, actor: ActorContext, reason: str, result: Mapping[str, Any]) -> None: ...
 
 
+class BeClassFinancialSyncPort(Protocol):
+    def apply(
+        self,
+        *,
+        case_no: str,
+        correction_event_id: int,
+        actor: ActorContext,
+        reason: str,
+        idempotency_key: IdempotencyKey,
+        correlation_id: CorrelationId,
+    ) -> None: ...
+
+
 class BeClassCorrectionWorkflow:
-    def __init__(self, repository: BeClassCorrectionRepository, unit_of_work_factory: Callable[[], Any]) -> None:
+    def __init__(self, repository: BeClassCorrectionRepository, unit_of_work_factory: Callable[[], Any], financial_sync: BeClassFinancialSyncPort | None = None) -> None:
         self._repository = repository
         self._unit_of_work_factory = unit_of_work_factory
+        self._financial_sync = financial_sync
 
     def query(self, case_no: str) -> BeClassCorrectionSnapshot:
         return _snapshot(self._require_row(self._repository.load(_case_no(case_no), for_update=False)))
@@ -84,6 +103,7 @@ class BeClassCorrectionWorkflow:
         if snapshot.version != expected_version.value:
             raise BeClassCorrectionConflict("beclass_correction_stale_version")
         normalized = normalize_beclass_changes(changes)
+        _validate_financial_field_change(snapshot, normalized)
         before = {field: snapshot.effective.get(field) for field in normalized}
         after = {**snapshot.effective, **normalized}
         fingerprint = fingerprint_payload({
@@ -147,7 +167,7 @@ class BeClassCorrectionWorkflow:
             if preview.preview_fingerprint != preview_fingerprint:
                 raise BeClassCorrectionConflict("beclass_correction_stale_preview")
             effective_after = {**snapshot.effective, **normalized}
-            beclass_record_id, resulting_version = self._repository.persist(
+            beclass_record_id, resulting_version, correction_event_id = self._repository.persist(
                 snapshot=snapshot,
                 after=effective_after,
                 actor=actor,
@@ -155,6 +175,17 @@ class BeClassCorrectionWorkflow:
                 key=idempotency_key,
                 correlation_id=correlation_id,
             )
+            if _birth_count_changed(snapshot, normalized):
+                if self._financial_sync is None:
+                    raise RuntimeError("beclass_financial_sync_required")
+                self._financial_sync.apply(
+                    case_no=identity,
+                    correction_event_id=correction_event_id,
+                    actor=actor,
+                    reason=clean_reason,
+                    idempotency_key=idempotency_key,
+                    correlation_id=correlation_id,
+                )
             result = {
                 "beclass_record_id": beclass_record_id,
                 "case_no": identity,
@@ -176,6 +207,7 @@ class BeClassCorrectionWorkflow:
     def preview_from_snapshot(self, snapshot: BeClassCorrectionSnapshot, normalized: Mapping[str, str | None], expected_version: ExpectedVersion) -> BeClassCorrectionPreview:
         if snapshot.version != expected_version.value:
             raise BeClassCorrectionConflict("beclass_correction_stale_version")
+        _validate_financial_field_change(snapshot, normalized)
         before = {field: snapshot.effective.get(field) for field in normalized}
         after = {field: normalized[field] for field in normalized}
         return BeClassCorrectionPreview(
@@ -216,7 +248,27 @@ def _snapshot(row: Mapping[str, Any]) -> BeClassCorrectionSnapshot:
         original,
         effective,
         source_kind,
+        bool(row.get("financial_fields_locked", False)),
     )
+
+
+def _birth_count_changed(
+    snapshot: BeClassCorrectionSnapshot,
+    normalized: Mapping[str, str | None],
+) -> bool:
+    return (
+        "multi_birth_count" in normalized
+        and normalized["multi_birth_count"]
+        != snapshot.effective.get("multi_birth_count")
+    )
+
+
+def _validate_financial_field_change(
+    snapshot: BeClassCorrectionSnapshot,
+    normalized: Mapping[str, str | None],
+) -> None:
+    if _birth_count_changed(snapshot, normalized) and snapshot.financial_fields_locked:
+        raise BeClassCorrectionBlocked("beclass_multi_birth_count_locked_after_service_start")
 
 
 def _receipt(result: Mapping[str, Any], preview: PreviewFingerprint, key: IdempotencyKey, replayed: bool, readback: BeClassCorrectionSnapshot) -> BeClassCorrectionReceipt:
@@ -241,6 +293,7 @@ def _case_no(value: str) -> str:
 
 __all__ = [
     "BeClassCorrectionConflict",
+    "BeClassCorrectionBlocked",
     "BeClassCorrectionNotFound",
     "BeClassCorrectionPreview",
     "BeClassCorrectionReceipt",

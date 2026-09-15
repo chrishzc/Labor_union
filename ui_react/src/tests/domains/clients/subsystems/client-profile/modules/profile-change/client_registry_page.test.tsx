@@ -50,6 +50,7 @@ const detail = {
     },
     field_issues: {},
   },
+  finance: { status: 'not_ready' as const, code: 'client_finance_bootstrap_required', values: null },
   order_terms: { status: 'not_ready' as const, code: 'order_terms_incomplete', data: null, field_capabilities: {} },
 };
 

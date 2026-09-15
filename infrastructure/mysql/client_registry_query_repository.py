@@ -9,6 +9,11 @@ from typing import Any
 from domains.case_import.order_information import project_order_information
 from subsystems.case_import.beclass_correction_workflow import allows_manual_beclass_source
 from subsystems.client_finance.virtual_account_resolution import build_client_virtual_account
+from domains.client_finance.obligation_planning import build_client_finance_terms_candidate
+from infrastructure.mysql.order_terms_read_model import (
+    load_contract_client_finance_facts,
+    select_order,
+)
 
 
 _CLIENT_FIELDS = (
@@ -108,6 +113,8 @@ class MySqlClientRegistryQueryRepository:
         with self._connection.cursor() as cursor:
             cursor.execute(
                 "SELECT c.id AS client_id,o.case_no,o.status AS order_status,c.client_profile_version,"
+                "EXISTS(SELECT 1 FROM order_service_data_locks service_lock "
+                "WHERE service_lock.case_no=o.case_no) AS service_data_locked,"
                 + ",".join(f"c.{field}" for field in _CLIENT_FIELDS)
                 + " FROM orders o JOIN clients c ON c.id=o.client_id WHERE o.case_no=%s LIMIT 1",
                 (case_no,),
@@ -173,6 +180,9 @@ class MySqlClientRegistryQueryRepository:
         else:
             order_information_values = None
             order_information_issues = {}
+        finance_status, finance_code, finance_values = _finance_values(
+            self._connection, case_no
+        )
         return {
             "case_no": str(client["case_no"]),
             "client_id": int(client["client_id"]),
@@ -183,8 +193,19 @@ class MySqlClientRegistryQueryRepository:
             "beclass_source_kind": beclass_source_kind,
             "beclass_version": int((state or {}).get("aggregate_version") or 0),
             "beclass_values": beclass_values,
+            "beclass_financial_fields_locked": bool(
+                client.get("service_data_locked")
+                or str(client.get("order_status") or "")
+                in {
+                    "服務中", "訂單完成", "訂單取消",
+                    "歷史訂單－服務中", "歷史訂單－服務完成", "歷史訂單－帳務完成",
+                }
+            ),
             "order_information_values": order_information_values,
             "order_information_issues": order_information_issues,
+            "finance_status": finance_status,
+            "finance_code": finance_code,
+            "finance_values": finance_values,
         }
 
 
@@ -203,6 +224,55 @@ def _decode(value: Any) -> dict[str, Any]:
 def _client_district(city: object, address: object) -> str | None:
     location = f"{city or ''}{address or ''}"
     return next((district for district in _SUPPORTED_DISTRICTS if district in location), None)
+
+
+def _finance_values(connection, case_no):
+    try:
+        with connection.cursor() as cursor:
+            order_row = select_order(cursor, case_no, lock=False)
+            facts = load_contract_client_finance_facts(
+                cursor, order_row, lock=False
+            )
+            cursor.execute(
+                "SELECT amount_due_ntd,due_date,status FROM client_obligations "
+                "WHERE case_no=%s AND obligation_type='subsidy_return' "
+                "AND direction='payable_to_client' ORDER BY obligation_identity",
+                (case_no,),
+            )
+            subsidy_rows = tuple(cursor.fetchall() or ())
+        if len(subsidy_rows) > 1:
+            return "not_ready", "client_subsidy_return_ambiguous", None
+        candidate = build_client_finance_terms_candidate(
+            facts, f"client-registry:{case_no}"
+        )
+        stages = {item.payment_stage.value: item for item in candidate.stage_plans}
+        customer_payable = sum(item.amount.amount for item in candidate.stage_plans)
+        received_total = sum(
+            item.net_settled_amount.amount for item in facts.existing_obligations
+        )
+        subsidy = subsidy_rows[0] if subsidy_rows else None
+        return "ready", None, {
+            "virtual_account": build_client_virtual_account(case_no),
+            "service_unit_price_ntd": facts.payment_terms.client_hourly_rate.amount,
+            "service_hours": len(facts.charge_days) * facts.service_hours_per_day,
+            "customer_payable_total_ntd": customer_payable,
+            "deposit_amount_ntd": stages["deposit"].amount.amount,
+            "first_payment_amount_ntd": stages["first"].amount.amount,
+            "second_payment_amount_ntd": stages["second"].amount.amount,
+            "received_total_ntd": received_total,
+            "customer_balance_ntd": customer_payable - received_total,
+            "subsidy_return_amount_ntd": (
+                int(subsidy["amount_due_ntd"]) if subsidy is not None else None
+            ),
+            "subsidy_return_due_date": (
+                subsidy["due_date"] if subsidy is not None else None
+            ),
+            "subsidy_return_status": (
+                str(subsidy["status"]) if subsidy is not None else None
+            ),
+        }
+    except (ValueError, StopIteration) as error:
+        return "not_ready", str(error), None
 
 
 __all__ = ["MySqlClientRegistryQueryRepository"]

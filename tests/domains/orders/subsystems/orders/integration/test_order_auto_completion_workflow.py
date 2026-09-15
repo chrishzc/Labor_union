@@ -7,6 +7,10 @@ from datetime import datetime
 
 import pytest
 
+from domains.orders.auto_completion import build_auto_completion_candidate
+from infrastructure.mysql.order_auto_completion_repository import (
+    MySqlOrderAutoCompletionRepository,
+)
 from shared_kernel.errors import ErrorCategory
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
@@ -96,6 +100,63 @@ def test_auto_completion_applies_only_orders_lifecycle_and_outbox_once():
     receipt = service.apply(_request())
     assert receipt.order_version == 4
     assert repository.writes == ["event", "order", "outbox", "receipt"]
+
+
+class _SqlCursor:
+    def __init__(self):
+        self.statements = []
+        self.current = None
+        self.lastrowid = 0
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+    def execute(self, statement, parameters):
+        self.statements.append((" ".join(statement.split()), parameters))
+        if "FROM orders o JOIN clients c" in statement:
+            self.current = {"line_user_id": None}
+        elif "INSERT INTO order_lifecycle_state_events" in statement:
+            self.lastrowid = 77
+            self.current = None
+        else:
+            self.current = None
+
+    def fetchone(self):
+        return self.current
+
+
+class _SqlConnection:
+    def __init__(self):
+        self.cursor_value = _SqlCursor()
+
+    def cursor(self):
+        return self.cursor_value
+
+
+def test_auto_completion_event_immediately_forms_financial_principal_lock():
+    connection = _SqlConnection()
+    request = _request()
+    candidate = build_auto_completion_candidate(
+        case_no=request.case_no,
+        expected_order_version=request.expected_order_version.value,
+        completion_instant=request.evaluation_at,
+        evaluation_at=request.evaluation_at,
+    )
+
+    event_id = MySqlOrderAutoCompletionRepository(connection).append_lifecycle_event(
+        request,
+        candidate,
+        _facts(),
+    )
+
+    assert event_id == 77
+    lock_statement, lock_values = connection.cursor_value.statements[-1]
+    assert "INSERT INTO order_service_data_locks" in lock_statement
+    assert lock_values[0:2] == ("G05-CASE", 77)
+    assert len(lock_values[2]) == 64
 
 
 def test_manual_preview_binds_same_facts_to_apply() -> None:

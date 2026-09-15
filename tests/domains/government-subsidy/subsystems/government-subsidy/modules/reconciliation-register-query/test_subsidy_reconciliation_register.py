@@ -84,10 +84,10 @@ def test_quarterly_register_includes_established_orders_without_claim_batch():
     assert "subsidy_claim_batches" not in connection.cursor_instance.executed[0][0]
     assert "LEFT JOIN case_payroll_rate_policy_snapshots" in connection.cursor_instance.executed[0][0]
     assert "LEFT JOIN historical_service_day_projections" in connection.cursor_instance.executed[0][0]
-    assert "o.status IN (%s, %s, %s, %s, %s, %s, %s)" in connection.cursor_instance.executed[0][0]
+    assert "o.status IN (%s, %s, %s, %s, %s, %s, %s, %s)" in connection.cursor_instance.executed[0][0]
     assert "COALESCE(o.actual_end_date, o.end_date)" in connection.cursor_instance.executed[0][0]
     assert connection.cursor_instance.executed[0][1] == (
-        "訂單成立", "服務中", "訂單完成",
+        "訂單成立", "服務中", "訂單完成", "訂單取消",
         "歷史訂單－未服務", "歷史訂單－服務中",
         "歷史訂單－服務完成", "歷史訂單－帳務完成",
         "一般市民", "補助市民",
@@ -118,7 +118,7 @@ def test_annual_summary_uses_established_orders_and_repairs_legacy_key():
     row = result["general_citizen_rows"][0]
     assert row["\u8eab\u5206\u8b49\u5b57\u865f"] == "C123456789"
     assert result["subsidized_citizen_rows"] == []
-    assert connection.cursor_instance.executed[0][1][:7] == register.ESTABLISHED_ORDER_STATUSES
+    assert connection.cursor_instance.executed[0][1][:8] == register.ESTABLISHED_ORDER_STATUSES
     assert connection.cursor_instance.executed[0][1][-2:] == (
         date(2026, 1, 1), date(2027, 1, 1),
     )
@@ -177,11 +177,12 @@ def test_operations_report_annual_rows_select_current_and_prior_year_carry_in_wi
     sql, params = connection.cursor_instance.executed[0]
     assert "subsidy_claim_batches" not in sql
     assert "current_revision" not in sql
-    assert "o.status IN (%s, %s, %s, %s, %s, %s, %s)" in sql
+    assert "o.status IN (%s, %s, %s, %s, %s, %s, %s, %s)" in sql
     assert params == (
         "訂單成立",
         "服務中",
         "訂單完成",
+        "訂單取消",
         "歷史訂單－未服務",
         "歷史訂單－服務中",
         "歷史訂單－服務完成",
@@ -224,6 +225,24 @@ def test_register_caps_subsidy_hours_at_case_total_service_hours():
 
     assert row["補助時數"] == Decimal("27")
     assert row["補助款金額"] == Decimal("8100")
+
+
+def test_cancelled_order_uses_only_confirmed_official_service_hours():
+    row = register._to_register_row({
+        "case_no": "115000012", "identity_status": "一般市民",
+        "order_status": "訂單取消",
+        "actual_start_date": date(2026, 1, 1), "actual_end_date": date(2026, 1, 4),
+        "service_days": 20, "service_hours_per_day": Decimal("8"),
+        "official_service_days": 4,
+        "payroll_hourly_rate_ntd": Decimal("450"),
+        "beclass_effective_values": '{"multi_birth_count":"雙胞胎"}',
+        "employer_name": "王小明", "employer_address": "新竹市東區", "staff_name": "月嫂甲",
+        "survey_details": {},
+    })
+
+    assert row["服務天數"] == 4
+    assert row["補助時數"] == Decimal("32")
+    assert row["補助款金額"] == Decimal("14400")
 
 
 def test_register_uses_case_payroll_snapshot_as_subsidy_unit_price():

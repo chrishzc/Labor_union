@@ -20,6 +20,9 @@ from domains.payroll.calculation import (
 )
 from domains.payroll.payment_due_date import calculate_staff_payment_due_date
 from infrastructure.mysql.contract_context_repository import MySqlContractContextRepository
+from infrastructure.mysql.effective_case_service_rate import (
+    load_explicit_case_service_rate,
+)
 from infrastructure.mysql.order_terms_read_model import (
     load_contract_client_finance_facts,
     load_preview_facts,
@@ -505,7 +508,15 @@ def _extend_owner_facts(
             )
             commitment = _load_commitment(cursor, case_no)
             rate = _load_assignment_payroll_rate(cursor, assignment_id)
+            rate_override = load_explicit_case_service_rate(cursor, case_no)
             refund_destination = _load_client_refund_destination(cursor, case_no)
+        if rate_override is not None:
+            facts["multi_birth_count"] = rate_override.multi_birth_count
+            rate = {
+                "hourly_rate_ntd": rate_override.hourly_rate_ntd,
+                "policy_version": rate_override.policy_version,
+                "policy_kind": rate_override.policy_kind,
+            }
         payment = finance.payment_terms
         facts.update(
             {

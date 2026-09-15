@@ -926,12 +926,16 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
 
       <div className="order-case-document-grid" aria-label="下載兩種契約">
         <article><h3>客戶契約 PDF</h3><p>下載未簽署版本，供客戶確認與簽署。</p>
-          <button type="button" disabled={busy || !query?.unsigned_document || query.client_target.document_version_id === null} onClick={() => {
-            if (query?.unsigned_document && query.client_target.document_version_id !== null) void downloadUnsigned(query.client_target.document_version_id, `客戶 ${query.client_target.client_subject_reference} `);
+          <button type="button" disabled={busy || !!unsignedPreparationFlow || !query || (query.state === 'completed' && (!query.unsigned_document || query.client_target.document_version_id === null))} onClick={() => {
+            if (!query) return;
+            if (query.unsigned_document && query.client_target.document_version_id !== null) {
+              void downloadUnsigned(query.client_target.document_version_id, `客戶 ${query.client_target.client_subject_reference} `);
+              return;
+            }
+            void prepareUnsigned('client', null);
           }}>下載客戶契約 PDF</button>
-          {query?.state !== 'completed' && <button type="button" disabled={busy || !!unsignedPreparationFlow || !query} onClick={() => void prepareUnsigned('client', null)}>準備並下載客戶契約 PDF</button>}
           {!query && preparationSegments.length > 0 && <p>請先準備服務人員契約，再準備客戶契約。</p>}
-          {(!query?.unsigned_document || query.client_target.document_version_id === null) && <p>尚無可下載文件時，請先準備契約；需已確認推薦方案，不會發送訊息。</p>}
+          {query && (!query.unsigned_document || query.client_target.document_version_id === null) && <p>尚無文件時，點擊下載會自動產生契約；需已確認推薦方案，不會發送訊息。</p>}
         </article>
         <article><h3>服務人員契約 PDF</h3><p>每位月嫂的契約分別下載。</p>
           {query?.unsigned_document && query.staff_targets.length > 0 ? query.staff_targets.map((target) => <button key={target.matching_segment_id} type="button" disabled={busy} onClick={() => void downloadUnsigned(target.document_version_id, `月嫂 ${target.staff_subject_reference} `)}>下載服務人員契約 PDF（{target.staff_subject_reference}）</button>) : <><button type="button" disabled>下載服務人員契約 PDF</button><p>{!query ? '尚未取得可下載文件的確認結果。' : '尚無可下載文件。'}若下方有「準備服務人員契約」，請先完成文件準備。</p></>}

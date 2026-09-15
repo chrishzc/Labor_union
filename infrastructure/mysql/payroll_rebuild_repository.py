@@ -23,6 +23,9 @@ from domains.payroll.monthly_aggregation import (
     MonthlyPayrollObligationFact,
     build_staff_monthly_payroll_summary,
 )
+from infrastructure.mysql.effective_case_service_rate import (
+    load_explicit_case_service_rate,
+)
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.money import MoneyNTD
@@ -68,6 +71,12 @@ class MySqlPayrollRebuildRepository:
             assignments = _load_assignments(cursor, root, for_update)
             schedules = _load_schedules(cursor, root, for_update)
             rates = _load_rates(cursor, assignments, for_update)
+            rates = _apply_explicit_case_rate(
+                cursor,
+                case_no,
+                rates,
+                for_update,
+            )
             special_dates = _load_special_dates(cursor, assignments, for_update)
             adjustments = _load_adjustments(cursor, assignments, for_update)
             obligations = _load_obligations(cursor, case_no, for_update)
@@ -178,6 +187,21 @@ def _load_rates(cursor, assignments, lock):
         _RATE_SELECT_SQL,
         assignments,
         lock,
+    )
+
+
+def _apply_explicit_case_rate(cursor, case_no, rates, lock):
+    override = load_explicit_case_service_rate(cursor, case_no, lock=lock)
+    if override is None:
+        return rates
+    return tuple(
+        {
+            **dict(row),
+            "policy_version": override.policy_version,
+            "policy_kind": override.policy_kind,
+            "hourly_rate_ntd": override.hourly_rate_ntd,
+        }
+        for row in rates
     )
 
 

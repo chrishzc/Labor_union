@@ -91,7 +91,25 @@ class MySqlOrderAutoCompletionRepository:
         with self._connection.cursor() as cursor:
             snapshot.update(_terminal_closure_fields(request, candidate, cursor, None))
             cursor.execute(_LIFECYCLE_EVENT_INSERT_SQL, (request.case_no, "evaluation_time_reached", "服務中", "訂單完成", request.actor.actor_id, candidate.evaluation_at.date(), candidate.expected_order_version, request.idempotency_key.value, _json(snapshot)))
-            return int(cursor.lastrowid)
+            lifecycle_event_id = int(cursor.lastrowid)
+            cursor.execute(
+                "INSERT INTO order_service_data_locks "
+                "(case_no,lifecycle_event_id,client_settlement_fingerprint,created_by) "
+                "VALUES (%s,%s,%s,%s)",
+                (
+                    request.case_no,
+                    lifecycle_event_id,
+                    fingerprint_payload(
+                        {
+                            "case_no": request.case_no,
+                            "completion_instant": candidate.completion_instant.isoformat(),
+                            "resulting_order_version": candidate.resulting_order_version,
+                        }
+                    ).value,
+                    request.actor.actor_id,
+                ),
+            )
+            return lifecycle_event_id
 
     def update_order(self, candidate: AutoCompletionCandidate) -> None:
         with self._connection.cursor() as cursor:
