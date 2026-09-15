@@ -43,6 +43,24 @@ describe('OrderContractPreview', () => {
     expect(screen.getByText('12000')).toBeInTheDocument();
   });
 
+  it('marks the second payment due date and notes as optional when blank', async () => {
+    vi.mocked(previewContractFields).mockResolvedValue({
+      ...basePreview,
+      scope: 'client',
+      template_key: 'contract_client_copy',
+      field_values: {
+        F1: 'CASE-001',
+        'projected.second_payment_due_date': null,
+        F41: '',
+      },
+    });
+
+    render(<OrderContractPreview caseNo="CASE-001" />);
+
+    expect(await screen.findAllByText('未填（可留白）')).toHaveLength(2);
+    expect(screen.queryByText('契約尚有未完成條件，請核對資料後再準備文件。')).not.toBeInTheDocument();
+  });
+
   it('shows the staff projection as one whole payable with a projected payday', async () => {
     vi.mocked(contractExternalSigningClient.query).mockResolvedValue({
       staff_targets: [{ matching_segment_id: 97 }],

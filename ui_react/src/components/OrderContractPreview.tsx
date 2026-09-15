@@ -7,6 +7,11 @@ const FIELDS = {
   staff: [['F1', '案件編號'], ['C4', '服務人員姓名'], ['B5', '客戶姓名'], ['B7', '服務開始日'], ['D7', '服務結束日'], ['G7', '服務天數'], ['B8', '服務時段'], ['B9', '休假方式'], ['projected.service_unit_price', '預估服務單價'], ['projected.staff_payable_total', '預估整筆應付報酬'], ['projected.staff_payable_due_date', '預估發薪日'], ['B24', '服務地址'], ['A97', '契約日期']],
 } as const;
 
+const OPTIONAL_EMPTY_FIELDS = new Set<string>([
+  'projected.second_payment_due_date',
+  'F41',
+]);
+
 export function OrderContractPreview({ caseNo }: { caseNo: string }) {
   const [scope, setScope] = useState<'client' | 'staff'>('client');
   const [targets, setTargets] = useState<ContractExternalSigningQuery['staff_targets']>([]);
@@ -43,7 +48,9 @@ export function OrderContractPreview({ caseNo }: { caseNo: string }) {
     {result?.blockers.includes('contract_pdf_external_reference_unresolved') && <p role="alert">契約模板缺少舊版引用內容，暫不能產生可簽署 PDF。</p>}
     <article className="order-information-paper"><header><small>案件 {caseNo} · 套值欄位預覽</small><h3>{scope === 'client' ? '坐月子到府服務契約' : '到宅坐月子服務人員委任契約'}</h3></header><dl>{FIELDS[scope].map(([cell, label]) => {
       const value = result?.field_values[cell];
-      return <div key={cell}><dt>{label}</dt><dd className={value == null ? 'is-missing' : ''}>{value == null ? result ? '尚未提供／待核對' : '尚未讀取本案資料' : Array.isArray(value) ? value.join('、') : String(value)}</dd></div>;
+      const isEmpty = value == null || value === '';
+      const isOptionalEmpty = !!result && isEmpty && OPTIONAL_EMPTY_FIELDS.has(cell);
+      return <div key={cell}><dt>{label}</dt><dd className={result && isEmpty && !isOptionalEmpty ? 'is-missing' : ''}>{isEmpty ? result ? isOptionalEmpty ? '未填（可留白）' : '尚未提供／待核對' : '尚未讀取本案資料' : Array.isArray(value) ? value.join('、') : String(value)}</dd></div>;
     })}</dl></article>
   </section>;
 }

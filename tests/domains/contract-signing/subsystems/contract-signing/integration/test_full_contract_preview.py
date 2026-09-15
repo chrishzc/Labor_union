@@ -307,6 +307,34 @@ def test_conditional_unresolved_mapping_is_skipped_when_owner_says_not_applicabl
     )
 
 
+def test_blank_notes_and_absent_second_payment_due_date_do_not_block_client_contract(tmp_path):
+    mapping = tmp_path / "mapping.json"
+    mapping.write_text(
+        json.dumps(
+            {
+                "id": "contract_client_copy",
+                "param_mappings": {
+                    "F1": {
+                        "db_key": "case_no",
+                        "requiredness": "required",
+                    },
+                    "F41": {
+                        "db_key": "notes",
+                        "requiredness": "conditional",
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert _mapping_blockers(
+        "contract_client_copy",
+        mapping,
+        {"case_no": "CASE-1", "notes": None, "second_payment_due_date": None},
+    ) == ()
+
+
 def test_subsidy_unresolved_mapping_blocks_only_for_typed_eligible_identity(tmp_path):
     mapping = tmp_path / "mapping.json"
     mapping.write_text(
