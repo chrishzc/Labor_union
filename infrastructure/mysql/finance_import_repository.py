@@ -477,7 +477,7 @@ def _load_correction_facts(cursor, selection, for_update):
         int(header["canonical_fact_version"]),
         int(header["classification_version"]),
         MoneyNTD(_integer_bank_amount(header["credit"], header["debit"])),
-        str(header["disposition"]) == "manual_review",
+        str(header["disposition"]) in {"manual_review", "business_pending"},
         obligations,
         tuple(
             code

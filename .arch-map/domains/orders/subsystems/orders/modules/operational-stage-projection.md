@@ -13,8 +13,10 @@
   - `subsystems/orders/stage_projection_query.py`
   - `subsystems/orders/core_stage_projection_query.py`
   - `subsystems/orders/core_stage_filter_query.py`
+  - `subsystems/orders/government_subsidy_projection_query.py`
   - `ui_react/src/api/orders/load_all_core_stage_timelines.ts`
   - `ui_react/src/api/orders/order_core_stage_projection_client.ts`
+  - `ui_react/src/api/orders/order_government_subsidy_projection_client.ts`
   - `ui_react/src/adapters/orders/order_core_stage_projection_adapter.ts`
   - `ui_react/src/pages/OrderWorkbenchV2Page.tsx`
   - `ui_react/src/components/OrderWorkbenchV2Drawer.tsx`
@@ -23,10 +25,12 @@
   - `ui_react/src/components/OrderCandidateQueryPanel.tsx`
   - `ui_react/src/components/OrderMultiCaregiverPlanPanel.tsx`
   - `infrastructure/mysql/orders_stage_projection_repository.py`
+  - `infrastructure/mysql/order_government_subsidy_projection_repository.py`
 - entrypoints:
   - `api/routes/orders_stage_projection.py`
   - `api/routes/orders_core_stage_projection.py`
   - `api/dependencies/orders_stage_projection.py`
+  - `api/schemas/order_government_subsidy_projection.py`
 
 ## Dependencies
 - outbound: `scheduling/scheduling` — 讀取有效等待訂金鎖、正式服務期間與 service-time terms；有效鎖是推薦確認已跨入契約準備的直接投影證據。

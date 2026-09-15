@@ -487,6 +487,68 @@
       "content": "Task96 baseline notification: payable anomaly review.",
       "variables": [],
       "usage": ["task96_baseline"]
+    },
+    {
+      "id": "LU96-ORDER-PRE-START-REMINDER-CARD-V1",
+      "name": "服務開始前3天提醒（確認寶寶狀況與第一期款）",
+      "category": "order_lifecycle",
+      "message_type": "text",
+      "enabled": true,
+      "content": "【新竹市月子工會・服務即將開始貼心提醒】🤱✨\n\n親愛的產婦媽媽/家屬您好：\n您的月子照護服務即將於 3 天後（{planned_start_date}）正式開始！\n\n📋 案件編號：{case_no}\n\n1️⃣ 寶寶與產婦狀況確認：\n・請確認寶寶目前健康狀況（出生體重、是否已返家等）。\n・若時間或生產日期有變動，請儘速在官方 LINE 留言聯繫專員。\n\n2️⃣ 服務動線與餐食溝通：\n・服務人員將於前 1~2 天與您再次確認動線、食材及用具準備。\n\n3️⃣ 第一期款繳費說明：\n・應繳金額：{first_payment_amount}\n・繳款期限：服務開始日（{planned_start_date}）\n・繳費狀態：{first_payment_status}\n\n如有任何問題，歡迎隨時於此對話框留言詢問，工會將竭誠為您服務！❤️",
+      "variables": [
+        {
+          "name": "case_no",
+          "required": true,
+          "description": "案件編號"
+        },
+        {
+          "name": "planned_start_date",
+          "required": true,
+          "description": "預計服務開始日"
+        },
+        {
+          "name": "first_payment_amount",
+          "required": true,
+          "description": "第一期款應繳金額"
+        },
+        {
+          "name": "first_payment_status",
+          "required": true,
+          "description": "第一期款繳費狀態"
+        }
+      ],
+      "usage": ["order_lifecycle", "notification"]
+    },
+    {
+      "id": "LU96-ORDER-SECOND-PAYMENT-REMINDER-CARD-V1",
+      "name": "第二期款（尾款）繳款提醒",
+      "category": "order_lifecycle",
+      "message_type": "text",
+      "enabled": true,
+      "content": "【新竹市月子工會・第二期款（尾款）繳款提醒】🤱✨\n\n親愛的產婦媽媽/家屬您好：\n感謝您對新竹市月子工會服務人員的信任與支持！\n您的到府坐月子服務即將圓滿完成，在此貼心提醒您第二期款（尾款）結清事宜：\n\n📋 案件編號：{case_no}\n📅 繳納期限：{second_payment_due_date}\n💰 應繳金額：{second_payment_amount}\n📌 繳費狀態：{second_payment_status}\n\n💡 繳費說明：\n・若款項已完成匯款或已由專員核銷，系統將自動更新，無需重複繳款。\n・如有任何帳務或服務相關疑問，歡迎隨時於此官方 LINE 留言聯繫專員。祝您與寶寶健康平安！❤️",
+      "variables": [
+        {
+          "name": "case_no",
+          "required": true,
+          "description": "案件編號"
+        },
+        {
+          "name": "second_payment_due_date",
+          "required": true,
+          "description": "第二期款繳納期限"
+        },
+        {
+          "name": "second_payment_amount",
+          "required": true,
+          "description": "第二期款應繳金額"
+        },
+        {
+          "name": "second_payment_status",
+          "required": true,
+          "description": "第二期款繳費狀態"
+        }
+      ],
+      "usage": ["order_lifecycle", "notification"]
     }
   ]
 }

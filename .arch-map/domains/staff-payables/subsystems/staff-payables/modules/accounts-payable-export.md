@@ -10,6 +10,7 @@
 ## Implementation
 - primary: `subsystems/staff_payables/accounts_payable_export.py`
 - composition: `api/dependencies/accounts_payable_export.py`
+- api-schema: `api/schemas/accounts_payable_export.py`
 - source: `infrastructure/mysql/accounts_payable_export_sources.py`
 - archive: `infrastructure/archive/accounts_payable.py`
 

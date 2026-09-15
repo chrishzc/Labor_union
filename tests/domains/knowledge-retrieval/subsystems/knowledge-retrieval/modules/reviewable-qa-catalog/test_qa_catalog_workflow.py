@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 import api.dependencies.knowledge_retrieval as knowledge_dependencies
+import api.routes.knowledge_retrieval as knowledge_routes
 from api.dependencies.line_ai_qa_catalog import load_line_ai_qa_catalog
 from api.dependencies.llm_configuration import _qa_id_from_source
 from domains.knowledge_retrieval.qa_catalog import decode_governed_qa
@@ -200,3 +203,54 @@ def test_non_development_startup_does_not_seed_catalog(monkeypatch) -> None:
     )
 
     knowledge_dependencies.ensure_builtin_knowledge_catalog()
+
+
+def test_builtin_catalog_route_uses_authenticated_actor_and_request_identity(
+    monkeypatch,
+) -> None:
+    captured = {}
+
+    def import_catalog(actor, import_key, correlation_id):
+        captured.update(
+            actor=actor,
+            import_key=import_key,
+            correlation_id=correlation_id,
+        )
+        return {
+            "catalog_count": 54,
+            "imported_count": 54,
+            "skipped_existing_count": 0,
+            "published_count": 40,
+            "index_job_id": 88,
+        }
+
+    monkeypatch.setattr(knowledge_routes, "import_builtin_knowledge_catalog", import_catalog)
+    request = SimpleNamespace(state=SimpleNamespace())
+    principal = SimpleNamespace(id=7)
+
+    result = knowledge_routes.import_builtin_line_common_qa(
+        request,
+        "ui-import-key",
+        "ui-correlation-id",
+        principal,
+        principal,
+        principal,
+    )
+
+    assert result["imported_count"] == 54
+    assert captured == {
+        "actor": ActorContext("7"),
+        "import_key": "ui-import-key",
+        "correlation_id": "ui-correlation-id",
+    }
+    assert request.state.audit_action == "knowledge.import_builtin_catalog"
+    assert request.state.audit_resource_id == "builtin-line-common-qa"
+
+
+def test_builtin_catalog_import_rejects_empty_request_identity() -> None:
+    with pytest.raises(ValueError, match="idempotency key"):
+        knowledge_dependencies.import_builtin_knowledge_catalog(
+            ActorContext("7"),
+            "",
+            "ui-correlation-id",
+        )

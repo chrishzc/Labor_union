@@ -27,7 +27,7 @@ class MySqlServiceDateConfirmationRepository:
         lock_clause = " FOR UPDATE" if lock else ""
         with self._connection.cursor() as cursor:
             cursor.execute(
-                "SELECT o.case_no,o.lifecycle_version,o.start_date,o.service_days,"
+                "SELECT o.case_no,o.lifecycle_version,o.start_date,o.actual_start_date,o.service_days,"
                 "COALESCE(g.aggregate_version,0) AS scheduling_version "
                 "FROM orders o LEFT JOIN scheduling_aggregates g ON g.case_no=o.case_no "
                 "WHERE o.case_no=%s" + lock_clause,
@@ -165,8 +165,9 @@ class MySqlServiceDateConfirmationRepository:
 
     @staticmethod
     def _selectable_dates(order):
+        start_date = order["actual_start_date"] or order["start_date"]
         return tuple(
-            order["start_date"] + timedelta(days=offset)
+            start_date + timedelta(days=offset)
             for offset in range(int(order["service_days"]) + 45)
         )
 

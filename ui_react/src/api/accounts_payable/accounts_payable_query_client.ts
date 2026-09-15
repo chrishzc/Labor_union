@@ -5,10 +5,13 @@
 import { sessionClient } from '../auth/session_client';
 import { transport } from '../shared/transport';
 import { ApiDecodeError } from '../shared/typed_errors';
-import { AccountsPayableResponseSchema, type AccountsPayablePreview } from './accounts_payable_query_schemas';
+import { AccountsPayableResponseSchema, CaseStaffPayableAuditResponseSchema, type AccountsPayablePreview, type CaseStaffPayableAudit } from './accounts_payable_query_schemas';
 import { AccountsPayableQueryError, mapAccountsPayableQueryError } from './accounts_payable_query_errors';
 export interface AccountsPayableQueryOptions { signal?: AbortSignal; timeoutMs?: number; baseUrl?: string; }
-export interface AccountsPayableQueryClient { query(targetMonth: string, options?: AccountsPayableQueryOptions): Promise<AccountsPayablePreview>; }
+export interface AccountsPayableQueryClient {
+  query(targetMonth: string, options?: AccountsPayableQueryOptions): Promise<AccountsPayablePreview>;
+  queryCase(caseNo: string, targetMonth: string, options?: AccountsPayableQueryOptions): Promise<CaseStaffPayableAudit>;
+}
 
 let correlationSequence = 0;
 
@@ -38,6 +41,28 @@ class DefaultAccountsPayableQueryClient implements AccountsPayableQueryClient {
       if (result.row_count !== result.rows.length) throw new AccountsPayableQueryError('ACCOUNTS_PAYABLE_COUNT_MISMATCH', 'row_count與rows不一致。');
       if (result.rows.reduce((sum, row) => sum + row.amount_ntd, 0) !== result.total_amount_ntd) throw new AccountsPayableQueryError('ACCOUNTS_PAYABLE_TOTAL_MISMATCH', 'total_amount_ntd與rows不一致。');
       return result;
+    } catch (error) { throw mapAccountsPayableQueryError(error); }
+  }
+
+  async queryCase(caseNo: string, targetMonth: string, options?: AccountsPayableQueryOptions): Promise<CaseStaffPayableAudit> {
+    if (!caseNo.trim()) throw new AccountsPayableQueryError('ACCOUNTS_PAYABLE_VALIDATION', 'caseNo不得為空白。');
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(targetMonth)) throw new AccountsPayableQueryError('ACCOUNTS_PAYABLE_VALIDATION', 'targetMonth必須是YYYY-MM。');
+    const token = sessionClient.getToken();
+    if (!token) throw new AccountsPayableQueryError('ACCOUNTS_PAYABLE_UNAUTHENTICATED', '請先登入。', false, 401);
+    try {
+      const raw = await transport.get<unknown>(`/api/v1/finance-reports/accounts-payable/cases/${encodeURIComponent(caseNo)}`, {
+        signal: options?.signal,
+        timeoutMs: options?.timeoutMs,
+        baseUrl: options?.baseUrl,
+        token,
+        headers: { 'X-Correlation-ID': nextCorrelationId() },
+        params: { target_month: targetMonth },
+      });
+      const decoded = CaseStaffPayableAuditResponseSchema.safeParse(raw);
+      if (!decoded.success) throw new ApiDecodeError('本案月嫂應付款查核回應結構異常。', decoded.error.issues.map((issue) => ({ path: issue.path.join('.'), message: issue.message, code: issue.code })), raw);
+      if (!decoded.data.success) throw new AccountsPayableQueryError('ACCOUNTS_PAYABLE_FAILURE', decoded.data.error ?? decoded.data.message);
+      if (decoded.data.data.case_no !== caseNo) throw new AccountsPayableQueryError('ACCOUNTS_PAYABLE_IDENTITY_MISMATCH', '案件編號與查詢不一致。');
+      return decoded.data.data;
     } catch (error) { throw mapAccountsPayableQueryError(error); }
   }
 }

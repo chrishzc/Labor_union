@@ -17,6 +17,8 @@ const mocks = vi.hoisted(() => ({
   restartQuery: vi.fn(),
   restartPreview: vi.fn(),
   restartApply: vi.fn(),
+  serviceDatesRender: vi.fn(),
+  actualStartRender: vi.fn(),
 }));
 
 vi.mock('../../../../../../../api/orders/order_core_stage_projection_client', () => ({
@@ -41,6 +43,18 @@ vi.mock('../../../../../../../api/orders/historical_service_accounting_client', 
     queryPrecisionRestart: mocks.restartQuery,
     previewPrecisionRestart: mocks.restartPreview,
     applyPrecisionRestart: mocks.restartApply,
+  },
+}));
+vi.mock('../../../../../../../components/OrderServiceDatesPanel', () => ({
+  OrderServiceDatesPanel: (props: { calculationRevision?: number; onOpenActualStart?: () => void }) => {
+    mocks.serviceDatesRender(props);
+    return <div aria-label="服務日期精算工作區">服務日期精算已開啟<button type="button" onClick={props.onOpenActualStart}>確認／更正實際開始日</button></div>;
+  },
+}));
+vi.mock('../../../../../../../components/OrderActualStartPanel', () => ({
+  OrderActualStartPanel: (props: { onObserved?: () => void }) => {
+    mocks.actualStartRender(props);
+    return <button type="button" onClick={props.onObserved}>模擬實際開始日正式回讀成功</button>;
   },
 }));
 vi.mock('../../../../../../../api/orders/order_intake_completion_client', async () => {
@@ -269,7 +283,7 @@ describe('historical Drawer immutable evidence boundary', () => {
     expect(screen.getByRole('region', { name: '案件 CASE-FUTURE' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '案件處理' }));
     fireEvent.click(restart);
-    await screen.findByText(/已重啟正常流程並回讀確認為「訂單成立」/);
+    await screen.findByText(/已重啟正常流程並正式回讀；已接續到服務日期精算/);
     expect(mocks.restartQuery).toHaveBeenCalledWith('CASE-FUTURE');
     expect(mocks.restartPreview).toHaveBeenCalledWith('CASE-FUTURE');
     expect(mocks.restartApply).toHaveBeenCalledTimes(1);
@@ -281,6 +295,16 @@ describe('historical Drawer immutable evidence boundary', () => {
     expect(mocks.restartPreview.mock.invocationCallOrder[0]).toBeLessThan(mocks.restartApply.mock.invocationCallOrder[0]!);
     expect(mocks.detail.mock.invocationCallOrder.at(-1)).toBeGreaterThan(mocks.restartApply.mock.invocationCallOrder[0]!);
     await waitFor(() => expect(screen.queryByRole('button', { name: '前往重啟正常流程' })).not.toBeInTheDocument());
+    expect(await screen.findByLabelText('服務日期精算工作區')).toBeInTheDocument();
+    expect(mocks.serviceDatesRender).toHaveBeenLastCalledWith(
+      expect.objectContaining({ calculationRevision: 1 }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: '確認／更正實際開始日' }));
+    fireEvent.click(await screen.findByRole('button', { name: '模擬實際開始日正式回讀成功' }));
+    expect(await screen.findByLabelText('服務日期精算工作區')).toBeInTheDocument();
+    expect(mocks.serviceDatesRender).toHaveBeenLastCalledWith(
+      expect.objectContaining({ calculationRevision: 2 }),
+    );
     expect(mocks.intakeApply).not.toHaveBeenCalled();
   });
 

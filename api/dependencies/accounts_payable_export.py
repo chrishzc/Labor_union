@@ -46,6 +46,9 @@ class AccountsPayableExportApplication:
     def query(self, target_payment_date: date):
         return self.workflow.query(target_payment_date)
 
+    def query_case(self, case_no: str, target_payment_date: date):
+        return self.workflow.query_case(case_no, target_payment_date)
+
     def export(self, target_payment_date: date):
         return self.workflow.export(target_payment_date)
 

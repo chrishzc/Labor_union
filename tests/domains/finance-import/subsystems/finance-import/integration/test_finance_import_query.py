@@ -89,6 +89,33 @@ def test_review_row_query_uses_a_non_reserved_table_alias() -> None:
     assert " row.id" not in statement
 
 
+def test_review_rows_only_project_client_receipts_whose_virtual_account_matches_an_order() -> None:
+    cursor = _Cursor([])
+
+    FinanceImportQueryService(_Connection(cursor))._fetch_review_rows(
+        ("batch-1", None, None, "manual_review", "business_pending", "blocked", 10)
+    )
+
+    statement = cursor.calls[0][0]
+    assert "event.classification_type='client_receipt'" in statement
+    assert "FROM client_legacy_virtual_accounts legacy_account" in statement
+    assert "JOIN orders legacy_order" in statement
+    assert "FROM orders current_order" in statement
+    assert "finance_import_source_reviews" not in statement
+
+
+def test_manifest_review_count_uses_the_same_matched_order_scope() -> None:
+    cursor = _Cursor([])
+
+    FinanceImportQueryService(_Connection(cursor))._fetch_manifest("batch-1")
+
+    statement = cursor.calls[0][0]
+    assert "event.classification_type='client_receipt'" in statement
+    assert "FROM client_legacy_virtual_accounts legacy_account" in statement
+    assert "FROM orders current_order" in statement
+    assert "finance_import_source_review_occurrences" not in statement
+
+
 def test_query_rejects_missing_formal_batch() -> None:
     with pytest.raises(FinanceImportQueryNotFound):
         FinanceImportQueryService(_Connection(_Cursor([]))).list_reprocess_runs(

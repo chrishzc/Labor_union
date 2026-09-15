@@ -82,12 +82,12 @@ def test_descriptor_matches_every_canonical_owned_object() -> None:
     assert canonical["parent_columns"] == {}
 
 
-def test_fresh_assembly_orders_1011_before_1012() -> None:
+def test_fresh_assembly_orders_1011_before_service_replacement_successor() -> None:
     assembly = load_schema_assembly()
 
     names = [path.name for path in assembly.active_artifact_paths]
     assert names.index("1011_historical_baseline_projector.sql") < names.index(
-        "1012_service_before_replacement.sql"
+        "226_service_before_replacement.sql"
     )
     assert "1023_task96_line_safe_review_link_matching_outbox_v1.sql" in names
 

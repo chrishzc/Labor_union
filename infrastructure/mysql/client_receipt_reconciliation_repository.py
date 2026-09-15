@@ -29,6 +29,7 @@ from subsystems.client_finance.reconciliation_workflow import (
     ClientReconciliationReceipt,
     StoredClientReconciliationReceipt,
 )
+from subsystems.client_finance.virtual_account_resolution import resolve_client_virtual_account
 
 _RETRYABLE_MYSQL_CODES = frozenset({1205, 1213})
 _VIRTUAL_ACCOUNT_PATTERN = re.compile(r"^99781699([0-9]{3})([0-9]{3})$")
@@ -427,7 +428,13 @@ def _load_selected_bank_rows(cursor, selection, *, lock):
         f"WHERE fir.id IN ({placeholders}) ORDER BY fir.id{suffix}",
         (selection.case_no, *row_ids),
     )
-    return tuple(cursor.fetchall())
+    rows = tuple(cursor.fetchall())
+    for row in rows:
+        resolution = resolve_client_virtual_account(cursor, _cancellation_code(row))
+        row["resolved_virtual_account_case_no"] = (
+            resolution["case_no"] if resolution["result"] == "resolved" else None
+        )
+    return rows
 
 
 def _load_selected_obligations(cursor, selection, *, lock):
@@ -495,6 +502,9 @@ def _bank_row_is_eligible(row, selection) -> bool:
 
 
 def _resolved_case_no(row) -> str | None:
+    if "resolved_virtual_account_case_no" in row:
+        value = row.get("resolved_virtual_account_case_no")
+        return str(value) if value is not None else None
     code = _cancellation_code(row)
     match = _VIRTUAL_ACCOUNT_PATTERN.fullmatch(code or "")
     if match is None:

@@ -332,10 +332,7 @@ def list_finance_import_review_rows(
                 limit=limit,
                 after_row_id=after_row_id,
             ),
-            query_service.list_source_reviews(
-                batch_identity, limit=limit,
-                after_source_review_id=after_source_review_id,
-            ),
+            (),
             batch_identity.strip(),
             limit,
         ),

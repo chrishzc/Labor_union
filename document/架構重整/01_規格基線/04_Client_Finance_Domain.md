@@ -11,7 +11,7 @@
 | 資料 | 唯一權威 |
 |---|---|
 | 付款條款與到期日 | `PaymentTerms` root facts |
-| 本案專屬虛擬帳號 | 由 canonical 9 碼案件編號依 Finance Import 規則確定性產生的 Client Finance typed projection |
+| 本案專屬虛擬帳號 | 現行案件由 canonical 9 碼案件編號依 Finance Import 規則確定性產生；舊流程案件可保存實際虛擬帳號對照 |
 | 應收／退款／補助退還義務 | append-only obligation events |
 | 收款／退款／adjustment／reversal | immutable client ledger |
 | transaction allocation | append-only M:N allocations |
@@ -345,4 +345,8 @@ Stable errors：
   三碼序號；僅能表示後六碼數值不大於 999 的 canonical 9 碼案件編號。無法表示時必須 fail closed。
 - Contract Signing 只消費 `client_virtual_account` typed projection；銀行核銷以相同規則解析帳號，
   並且只有在案件唯一且同案同金額的未清償應收義務唯一時才可自動配對，否則保留 pending。
+- 舊流程虛擬帳號由管理員以含「虛擬帳號」與「市府訂單號碼」欄位的 XLSX 經 Preview／Apply 匯入；
+  空白案件編號、格式不符與查無既有訂單的列直接略過，不建立 anomaly 或預覽錯誤。相同案件可保存多個
+  舊帳號，相同帳號也可重新配給不同案件；核銷時合併舊對照與現行公式候選，無法得到唯一案件即保留
+  pending，交由人員人工比對與銷帳。
 - 既有版本化工會／代收付帳戶 Query／Preview／Apply 仍保留供其既有用途，但不再是客戶契約來源。

@@ -319,17 +319,23 @@ def test_default_catalog_runs_only_the_current_declared_backfill() -> None:
     assert tuple(item.backfill_id for item in runner.RELEASE_MANIFEST.backfills) == (
         "twins-payroll-rate-snapshots-v1",
     )
-    assert runner.RELEASE_MANIFEST.manifests[-4].release_id == (
+    assert runner.RELEASE_MANIFEST.manifests[-6].release_id == (
         "labor-union-twins-payroll-policy-2026-09-12-v2"
     )
-    assert runner.RELEASE_MANIFEST.manifests[-3].release_id == (
+    assert runner.RELEASE_MANIFEST.manifests[-5].release_id == (
         "labor-union-matching-plan-create-receipts-2026-09-12-v1"
     )
-    assert runner.RELEASE_MANIFEST.manifests[-2].release_id == (
+    assert runner.RELEASE_MANIFEST.manifests[-4].release_id == (
         "labor-union-order-service-hours-half-precision-2026-09-14-v1"
     )
-    assert runner.RELEASE_MANIFEST.manifests[-1].release_id == (
+    assert runner.RELEASE_MANIFEST.manifests[-3].release_id == (
         "labor-union-historical-manual-beclass-origin-2026-09-14-v1"
+    )
+    assert runner.RELEASE_MANIFEST.manifests[-2].release_id == (
+        "labor-union-client-legacy-virtual-accounts-2026-09-15-v1"
+    )
+    assert runner.RELEASE_MANIFEST.manifests[-1].release_id == (
+        "labor-union-order-details-owner-dates-2026-09-15-v1"
     )
     assert runner.RELEASE_MANIFEST.backfills[0].artifact.sha256 == (
         "5281b8a96620f081494c3339327013c00ff94cbdabea9d0a878851570b2882dd"
@@ -453,6 +459,56 @@ def test_legacy_view_owner_accepts_only_the_selected_1038_successor(
     assert runner._owned_classification(
         {"columns": [], "triggers": [], "views": views}
     )["999_v_order_details_view.sql"] == "drift"
+
+
+def test_order_details_owner_date_successor_accepts_known_predecessors_and_rejects_drift(
+    monkeypatch,
+) -> None:
+    legacy = runner.RELEASE_MANIFEST.descriptors["999_v_order_details_view.sql"]
+    twins = runner.RELEASE_MANIFEST.descriptors[
+        "1038_twins_payroll_order_details_view.sql"
+    ]
+    owner_dates = runner.RELEASE_MANIFEST.descriptors[
+        "1043_twins_payroll_order_details_view.sql"
+    ]
+    views = [{"table_name": "v_order_details", "view_definition": "SELECT 1"}]
+    monkeypatch.setattr(
+        runner,
+        "OWNED_OBJECTS",
+        {
+            "999_v_order_details_view.sql": legacy,
+            "1038_twins_payroll_order_details_view.sql": twins,
+            "1043_twins_payroll_order_details_view.sql": owner_dates,
+        },
+    )
+
+    monkeypatch.setattr(
+        runner,
+        "_view_definition_digest",
+        lambda _definition: twins["views"]["v_order_details"]["definition_sha256"],
+    )
+    predecessor_states = runner._owned_classification(
+        {"columns": [], "triggers": [], "views": views}
+    )
+    assert predecessor_states["1038_twins_payroll_order_details_view.sql"] == "exact"
+    assert predecessor_states["1043_twins_payroll_order_details_view.sql"] == "absent"
+
+    monkeypatch.setattr(
+        runner,
+        "_view_definition_digest",
+        lambda _definition: owner_dates["views"]["v_order_details"]["definition_sha256"],
+    )
+    successor_states = runner._owned_classification(
+        {"columns": [], "triggers": [], "views": views}
+    )
+    assert successor_states["999_v_order_details_view.sql"] == "exact"
+    assert successor_states["1038_twins_payroll_order_details_view.sql"] == "exact"
+    assert successor_states["1043_twins_payroll_order_details_view.sql"] == "exact"
+
+    monkeypatch.setattr(runner, "_view_definition_digest", lambda _definition: "0" * 64)
+    assert runner._owned_classification(
+        {"columns": [], "triggers": [], "views": views}
+    )["1043_twins_payroll_order_details_view.sql"] == "drift"
 
 
 @pytest.mark.parametrize(

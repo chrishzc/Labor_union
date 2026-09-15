@@ -10,7 +10,10 @@ from api.dependencies.admin_auth import (
     require_knowledge_reader,
     require_knowledge_reindexer,
 )
-from api.dependencies.knowledge_retrieval import get_knowledge_application
+from api.dependencies.knowledge_retrieval import (
+    get_knowledge_application,
+    import_builtin_knowledge_catalog,
+)
 from api.schemas.knowledge_retrieval import (
     KnowledgeIngestBody,
     KnowledgeQuestionBody,
@@ -25,6 +28,29 @@ from subsystems.knowledge_retrieval.contracts import (
 )
 
 router = APIRouter(prefix="/api/v1/knowledge", tags=["Knowledge Retrieval"])
+
+
+@router.post("/catalogs/builtin-line-common-qa/import")
+def import_builtin_line_common_qa(
+    request: Request,
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    correlation_id: str = Header(..., alias="X-Correlation-ID"),
+    principal=Depends(require_knowledge_manager),
+    _publisher=Depends(require_knowledge_publisher),
+    _reindexer=Depends(require_knowledge_reindexer),
+):
+    result = _call_knowledge(
+        lambda: import_builtin_knowledge_catalog(
+            _actor(principal), idempotency_key, correlation_id
+        )
+    )
+    _set_knowledge_audit(
+        request,
+        "import_builtin_catalog",
+        "knowledge_catalog",
+        "builtin-line-common-qa",
+    )
+    return result
 
 
 @router.get("/items")
@@ -223,7 +249,7 @@ def _set_knowledge_audit(
     request: Request,
     action: str,
     resource_type: str,
-    resource_id: int,
+    resource_id: int | str,
     reason: str | None = None,
 ) -> None:
     request.state.audit_action = f"knowledge.{action}"

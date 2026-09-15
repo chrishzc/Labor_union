@@ -56,6 +56,11 @@ function subsidyItem(caseNo: string, substatus: 'claim_lineage_missing' | 'submi
       version: missing ? null : 2,
     },
     occurred_at: null,
+    service_end_date: '2026-09-30',
+    claim_quarter: 3,
+    claim_application_year: 2026,
+    claim_application_month: 10,
+    claim_submitted_at: missing ? null : '2026-10-05T09:00:00+08:00',
     blockers: missing
       ? [{
         code: 'government_subsidy_claim_lineage_missing',
@@ -128,6 +133,10 @@ describe('財務中心 Government Subsidy cross-order query', () => {
     expect(screen.getByText('CASE-SUBMITTED')).toBeInTheDocument();
     expect(screen.getByText('77 小時')).toBeInTheDocument();
     expect(screen.getByText(/23,100/)).toBeInTheDocument();
+    expect(screen.getAllByText('服務歸屬：2026 年第 3 季')).toHaveLength(2);
+    expect(screen.getAllByText('預計申請年月：2026-10')).toHaveLength(2);
+    expect(screen.getByText('實際送件日：2026-10-05')).toBeInTheDocument();
+    expect(screen.getByText('實際送件日：尚未送件')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /已送件 1/ }));
 

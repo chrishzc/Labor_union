@@ -34,6 +34,17 @@ type FinanceImportReviewSnapshot = {
   items: Awaited<ReturnType<typeof financeImportQueryClient.listReviewRows>>['items'];
   sourceReviews: Awaited<ReturnType<typeof financeImportQueryClient.listReviewRows>>['source_reviews'];
 };
+type CaseStaffPayable = Awaited<ReturnType<typeof accountsPayableQueryClient.queryCase>>['items'][number];
+const FINANCE_CORRECTION_ACTIONS = new Set([
+  'preview_manual_correction',
+  'resolve_owning_domain_target',
+  'review_suspected_duplicate_business_match',
+]);
+
+function canCorrectFinanceImportRow(row: FinanceImportReviewSnapshot['items'][number]): boolean {
+  return ['client_receipt', 'staff_payout'].includes(row.classification_type)
+    && row.available_actions.some((action) => FINANCE_CORRECTION_ACTIONS.has(action));
+}
 const FINANCE_OUTCOME_POLL_LIMIT = 10;
 const FINANCE_OUTCOME_POLL_DELAY_MS = 500;
 
@@ -84,6 +95,7 @@ export const FinancePage: React.FC = () => {
   const [selectedCase, setSelectedCase] = useState(entry.caseNo);
   const [caseQuery, setCaseQuery] = useState(entry.caseNo);
   const [receipt, setReceipt] = useState<LoadState<ReturnType<typeof adaptClientReceiptQuery>>>({ kind: 'idle' });
+  const [caseStaffPayables, setCaseStaffPayables] = useState<LoadState<CaseStaffPayable[]>>({ kind: 'idle' });
   const [staff, setStaff] = useState<{ id: number; label: string }[]>([]);
   const [selectedStaff, setSelectedStaff] = useState<number | null>(null);
   const [payables, setPayables] = useState<LoadState<ReturnType<typeof adaptStaffPayablesQuery>>>({ kind: 'idle' });
@@ -95,6 +107,7 @@ export const FinancePage: React.FC = () => {
   const [ingestion, setIngestion] = useState<LoadState<FinanceWorkbookIngestionReceipt>>({ kind: 'idle' });
   const [batchPreview, setBatchPreview] = useState<LoadState<FinanceImportBatchPreview>>({ kind: 'idle' });
   const [sourceReview, setSourceReview] = useState<LoadState<FinanceImportReviewSnapshot>>({ kind: 'idle' });
+  const [correctionRow, setCorrectionRow] = useState<FinanceImportReviewSnapshot['items'][number] | null>(null);
   const [applyReason, setApplyReason] = useState('已核對銀行流水預覽，確認匯入');
   const [applyConfirmed, setApplyConfirmed] = useState(false);
   const [applyJob, setApplyJob] = useState<LoadState<FinanceImportJobAccepted>>({ kind: 'idle' });
@@ -196,6 +209,25 @@ export const FinancePage: React.FC = () => {
   }, [activeTab, selectedCase, reload]);
 
   useEffect(() => {
+    if (activeTab !== 'client-receipts' || !selectedCase) return;
+    return schedule('case-staff-payables', (request) => {
+      setCaseStaffPayables({ kind: 'loading' });
+      void accountsPayableQueryClient.queryCase(selectedCase, targetMonth, { signal: request.controller.signal })
+        .then((audit) => {
+          if (!current('case-staff-payables', request.sequence, request.controller)) return;
+          setCaseStaffPayables(audit.items.length > 0
+            ? { kind: 'ready', data: audit.items }
+            : { kind: 'empty' });
+        })
+        .catch((error: unknown) => {
+          if (current('case-staff-payables', request.sequence, request.controller)) {
+            setCaseStaffPayables({ kind: 'error', message: financeErrorMessage(error, '本案月嫂應付款查核失敗，請重新整理。') });
+          }
+        });
+    });
+  }, [activeTab, selectedCase, targetMonth, reload]);
+
+  useEffect(() => {
     if (activeTab !== 'staff-payables' && activeTab !== 'finance-import') return;
     return schedule('staff', (request) => {
       setPayables({ kind: 'loading' });
@@ -252,26 +284,23 @@ export const FinancePage: React.FC = () => {
       if (!current('source-review', request.sequence, request.controller)) return;
       let page = firstPage;
       const items = [...page.items];
-      const sourceReviews = [...page.source_reviews];
-      while (page.next_after_row_id !== null || page.next_after_source_review_id !== null) {
+      while (page.next_after_row_id !== null) {
         page = await financeImportQueryClient.listReviewRows(batchIdentity, {
           signal: request.controller.signal,
           afterRowId: items.at(-1)?.row_id,
-          afterSourceReviewId: sourceReviews.at(-1)?.review_id,
         });
         if (!current('source-review', request.sequence, request.controller)) return;
         items.push(...page.items);
-        sourceReviews.push(...page.source_reviews);
       }
-      if (items.length + sourceReviews.length !== manifest.review_count) {
+      if (items.length !== manifest.review_count) {
         setSourceReview({ kind: 'error', message: '人工確認清單與批次統計不一致，請重新查詢。' });
         return;
       }
-      const manualItems = items.filter((row) => row.disposition === 'manual_review');
       setSourceReview({
         kind: 'ready',
-        data: { batchIdentity: manifest.batch_identity, reviewCount: manualItems.length + sourceReviews.length, items: manualItems, sourceReviews },
+        data: { batchIdentity: manifest.batch_identity, reviewCount: items.length, items, sourceReviews: [] },
       });
+      setCorrectionRow((currentRow) => currentRow && items.some((row) => row.row_identity === currentRow.row_identity) ? currentRow : null);
     } catch (error) {
       if (current('source-review', request.sequence, request.controller)) {
         setSourceReview({ kind: 'error', message: financeErrorMessage(error, '人工確認清單載入失敗，請重新查詢。') });
@@ -486,6 +515,30 @@ export const FinancePage: React.FC = () => {
                 </tbody>
               </table>
 
+              <div className="finance-detail-block" role="region" aria-label="本案月嫂應付查核">
+                <h3>本案月嫂應付</h3>
+                <p>逐案核對正式義務或合法歷史唯讀計算；未知金額與日期保持未知，不以零元或預定日期補造。</p>
+                <StateMessage state={caseStaffPayables} empty="找不到本案可核對的月嫂應付來源。" />
+                {caseStaffPayables.kind === 'ready' && (
+                  <div className="finance-table-container">
+                    <table className="finance-table">
+                      <thead><tr><th>月嫂</th><th>應付</th><th>待付</th><th>案件既定應付日</th><th>現行義務／計算日</th><th>來源</th><th>月份查核</th></tr></thead>
+                      <tbody>{caseStaffPayables.data.map((item, index) => {
+                        const source = item.source === 'formal_obligation' ? '現行正式義務' : item.source === 'historical_projection' ? '合法歷史唯讀計算' : 'Orders 案件事實';
+                        return <tr key={item.obligation_identity ?? `${item.case_no}:${item.staff_id ?? 'unknown'}:${index}`}>
+                          <td>{item.recipient_name ?? (item.staff_id === null ? '月嫂尚未確認' : `Staff #${item.staff_id}`)}</td>
+                          <td>{item.amount_due_ntd === null ? '未知' : `NT$ ${item.amount_due_ntd.toLocaleString()}`}</td>
+                          <td>{item.balance_ntd === null ? '未知' : `NT$ ${item.balance_ntd.toLocaleString()}`}</td>
+                          <td>{item.order_due_date ?? '尚未形成'}</td>
+                          <td>{item.effective_due_date ?? '尚未形成'}</td><td>{source}</td>
+                          <td>{item.reason}</td>
+                        </tr>;
+                      })}</tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
               <div className="finance-detail-block">
                 <h3>已載入銀行交易</h3>
                 <div className="finance-table-container">
@@ -591,6 +644,7 @@ export const FinancePage: React.FC = () => {
                     <th>應付</th>
                     <th>已付</th>
                     <th>餘額</th>
+                    <th>應付日</th>
                     <th>付款狀態</th>
                   </tr>
                 </thead>
@@ -602,6 +656,7 @@ export const FinancePage: React.FC = () => {
                       <td>{item.amountDue}</td>
                       <td style={{ color: '#16a34a' }}>{item.netPaid}</td>
                       <td style={{ color: '#ea580c', fontWeight: 700 }}>{item.balance}</td>
+                      <td>{item.dueDate}</td>
                       <td><span className={`finance-badge ${item.payoutCompleted ? 'finance-badge-paid' : 'finance-badge-unpaid'}`}>{item.payoutStatus}</span></td>
                     </tr>
                   ))}
@@ -790,6 +845,7 @@ export const FinancePage: React.FC = () => {
                   setIngestion({ kind: 'idle' });
                   setBatchPreview({ kind: 'idle' });
                   setSourceReview({ kind: 'idle' });
+                  setCorrectionRow(null);
                   setApplyJob({ kind: 'idle' });
                   setBatchOutcome({ kind: 'idle' });
                 }}
@@ -851,7 +907,7 @@ export const FinancePage: React.FC = () => {
                 </div>
 
                 <div className="finance-scope-note">
-                  可自動入帳 {batchPreview.data.counts.ready_dispatch}｜已存在 {batchPreview.data.counts.existing}｜待人工確認 {sourceReview.kind === 'ready' ? sourceReview.data.reviewCount : '讀取中'}｜待業務配對 {batchPreview.data.counts.business_pending}｜阻擋 {batchPreview.data.counts.blocked}。
+                  可自動入帳 {batchPreview.data.counts.ready_dispatch}｜已存在 {batchPreview.data.counts.existing}｜需人工處理 {sourceReview.kind === 'ready' ? sourceReview.data.reviewCount : '讀取中'}｜待業務配對 {batchPreview.data.counts.business_pending}｜阻擋 {batchPreview.data.counts.blocked}。
                   {batchPreview.data.apply_allowed && batchPreview.data.counts.ready_dispatch > 0
                     ? '可進入匯入確認。'
                     : batchPreview.data.apply_allowed
@@ -863,7 +919,7 @@ export const FinancePage: React.FC = () => {
                 {sourceReview.kind === 'ready' && (
                   <div id="finance-import-review" className="finance-detail-block" data-surface-id="finance.finance-import.manual-review" style={{ marginTop: '12px' }}>
                     <div className="finance-meta">
-                      <span>批次 <code>{sourceReview.data.batchIdentity}</code>｜待人工確認 {sourceReview.data.reviewCount} 筆</span>
+                      <span>批次 <code>{sourceReview.data.batchIdentity}</code>｜待處理 {sourceReview.data.items.length + sourceReview.data.sourceReviews.length} 筆</span>
                       <button
                         className="finance-btn-secondary"
                         data-control-id="finance.finance-import.review-reload"
@@ -872,7 +928,7 @@ export const FinancePage: React.FC = () => {
                         重新查詢人工確認
                       </button>
                     </div>
-                    {sourceReview.data.reviewCount === 0 ? (
+                    {sourceReview.data.items.length + sourceReview.data.sourceReviews.length === 0 ? (
                       <div className="finance-state">目前沒有待人工確認資料。</div>
                     ) : (
                       <div className="finance-table-container">
@@ -903,13 +959,20 @@ export const FinancePage: React.FC = () => {
                                 <td>{row.direction}</td>
                                 <td><strong>{row.amount_ntd}</strong></td>
                                 <td>{row.classification_type}</td>
-                                <td>{row.disposition}{row.available_actions.includes('preview_manual_correction') && <details><summary>更正收款／付款對象</summary><FinanceImportCorrectionForm key={row.row_identity} rowIdentity={row.row_identity} sourceLabel={`${row.source_sheet} 第 ${row.source_row} 列`} staff={staff} /></details>}</td>
+                                <td>{row.disposition}{canCorrectFinanceImportRow(row) && <button type="button" className="finance-btn-secondary" onClick={() => setCorrectionRow(row)}>指定正確訂單</button>}</td>
                               </tr>
                             ))}
                           </tbody>
                         </table>
                       </div>
                     )}
+                    {correctionRow && <section className="finance-detail-block" aria-label="指定銀行入款的正確訂單" style={{ marginTop: '12px' }}>
+                      <div className="finance-meta">
+                        <strong>{correctionRow.source_sheet}#{correctionRow.source_row}｜指定正確訂單</strong>
+                        <button type="button" className="finance-btn-secondary" onClick={() => setCorrectionRow(null)}>關閉</button>
+                      </div>
+                      <FinanceImportCorrectionForm key={correctionRow.row_identity} rowIdentity={correctionRow.row_identity} sourceLabel={`${correctionRow.source_sheet} 第 ${correctionRow.source_row} 列`} staff={staff} />
+                    </section>}
                   </div>
                 )}
 

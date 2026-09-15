@@ -56,6 +56,8 @@ const EVENT_OPTIONS: ReadonlyArray<{ value: LineNotificationEventCode; label: st
   { value: 'service_time_checkpoint', label: '服務時間節點' },
   { value: 'beclass_completion_changed', label: 'BeClass 完成狀態變更' },
   { value: 'deposit_confirmed', label: '訂金確認' },
+  { value: 'order.pre_start_reminder', label: '服務開始前 3 天提醒（第一期款）' },
+  { value: 'order.second_payment_reminder', label: '第二期款（尾款）繳款提醒' },
 ];
 const RECIPIENT_OPTIONS: ReadonlyArray<{
   value: LineNotificationRecipientSelector;

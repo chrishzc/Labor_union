@@ -1,5 +1,7 @@
 """Focused API contract tests for the Order Workbench Government Subsidy side lane."""
 
+from datetime import date
+
 from fastapi import Response
 
 import api.routes.orders_stage_projection as route_module
@@ -49,6 +51,11 @@ def test_government_subsidy_route_returns_strict_owner_projection_and_etag(monke
                     identity_status="一般市民",
                     source=SourceLineage("Government Subsidy", "claim-batch:8", 2),
                     occurred_at=None,
+                    service_end_date=date(2026, 9, 30),
+                    claim_quarter=3,
+                    claim_application_year=2026,
+                    claim_application_month=10,
+                    claim_submitted_at=None,
                     blockers=(),
                     warnings=(
                         ProjectionNotice("owner_warning", "owner warning"),

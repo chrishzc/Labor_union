@@ -1,0 +1,19 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-order-details-owner-dates-2026-09-15-v1",
+  "descriptors": {
+    "1043_twins_payroll_order_details_view.sql": {
+      "tables": {},
+      "parent_columns": {},
+      "indexes": {},
+      "foreign_keys": {},
+      "checks": {},
+      "triggers": [],
+      "views": {
+        "v_order_details": {
+          "definition_sha256": "4f5e02d1806b2c9923b56daa8cf20530b148f5477bde5086200968265626491b"
+        }
+      }
+    }
+  }
+}

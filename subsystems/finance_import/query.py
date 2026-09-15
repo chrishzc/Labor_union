@@ -14,6 +14,38 @@ from typing import Any
 
 _MAXIMUM_PAGE_SIZE = 100
 _REVIEW_DISPOSITIONS = ("manual_review", "business_pending", "blocked")
+_MATCHED_CLIENT_RECEIPT_PREDICATE = """
+event.classification_type='client_receipt'
+AND (
+    EXISTS (
+        SELECT 1
+        FROM client_legacy_virtual_accounts legacy_account
+        JOIN orders legacy_order ON legacy_order.case_no=legacy_account.case_no
+        WHERE legacy_account.virtual_account=COALESCE(
+            finance_row.cancellation_code,
+            JSON_UNQUOTE(JSON_EXTRACT(finance_row.bank_references, '$."銷帳編號"'))
+        )
+    )
+    OR EXISTS (
+        SELECT 1
+        FROM orders current_order
+        WHERE COALESCE(
+              finance_row.cancellation_code,
+              JSON_UNQUOTE(JSON_EXTRACT(finance_row.bank_references, '$."銷帳編號"'))
+          ) REGEXP '^99781699[0-9]{6}$'
+          AND current_order.case_no=CONCAT(
+              SUBSTRING(COALESCE(
+                  finance_row.cancellation_code,
+                  JSON_UNQUOTE(JSON_EXTRACT(finance_row.bank_references, '$."銷帳編號"'))
+              ), 9, 3),
+              LPAD(CAST(CAST(SUBSTRING(COALESCE(
+                  finance_row.cancellation_code,
+                  JSON_UNQUOTE(JSON_EXTRACT(finance_row.bank_references, '$."銷帳編號"'))
+              ), 12, 3) AS UNSIGNED) AS CHAR), 6, '0')
+          )
+    )
+)
+"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -266,7 +298,7 @@ class FinanceImportQueryService:
     def _fetch_manifest(self, batch_identity: str):
         with self._connection.cursor() as cursor:
             cursor.execute(
-                """
+                f"""
                 SELECT batch.id AS batch_id, contract.batch_identity,
                        batch.format_id, batch.source_file, batch.sheet_name,
                        batch.header_row, batch.row_count AS source_row_count,
@@ -285,20 +317,20 @@ class FinanceImportQueryService:
                            AS occurrence_count,
                        (SELECT COUNT(*)
                           FROM finance_import_classification_events event
+                          JOIN finance_import_rows finance_row
+                            ON finance_row.id=event.finance_import_row_id
                          WHERE event.batch_id=batch.id
                            AND event.disposition IN (
                                'manual_review','business_pending','blocked'
                            )
+                           AND {_MATCHED_CLIENT_RECEIPT_PREDICATE}
                            AND event.classification_version=(
                                SELECT MAX(latest.classification_version)
                                  FROM finance_import_classification_events latest
                                 WHERE latest.batch_id=batch.id
                                   AND latest.finance_import_row_id=
                                       event.finance_import_row_id
-                           )) +
-                       (SELECT COUNT(*)
-                          FROM finance_import_source_review_occurrences occurrence
-                         WHERE occurrence.batch_id=batch.id) AS review_count,
+                           )) AS review_count,
                        (SELECT COUNT(*)
                           FROM finance_import_dispatch_events dispatch
                          WHERE dispatch.batch_id=batch.id)
@@ -322,7 +354,7 @@ class FinanceImportQueryService:
     def _fetch_review_rows(self, params: tuple[Any, ...]):
         with self._connection.cursor() as cursor:
             cursor.execute(
-                """
+                f"""
                 SELECT finance_row.id AS row_id, finance_row.transaction_date, finance_row.direction,
                        finance_row.debit, finance_row.credit, finance_row.reconciliation_status,
                        finance_row.created_at, event.classification_type,
@@ -362,6 +394,7 @@ class FinanceImportQueryService:
                 WHERE contract.batch_identity=%s
                   AND (%s IS NULL OR finance_row.id>%s)
                   AND event.disposition IN (%s,%s,%s)
+                  AND {_MATCHED_CLIENT_RECEIPT_PREDICATE}
                 ORDER BY finance_row.id ASC
                 LIMIT %s
                 """,

@@ -13,6 +13,11 @@ modules:
     layout_status: custom_current
     test_root: tests/domains/client-finance/subsystems/client-finance/integration/test_client_receipt_overage.py
     architecture: ../../../../../domains/client-finance/subsystems/client-finance/modules/receipt-reconciliation.md
+  legacy-virtual-account-import:
+    layout_status: custom_current
+    test_root: tests/domains/client-finance/subsystems/client-finance/modules/legacy-virtual-account-import/
+    presentation_test_root: ui_react/src/tests/domains/client-finance/subsystems/client-finance/integration/legacy_virtual_account_import.test.tsx
+    architecture: ../../../../../domains/client-finance/subsystems/client-finance/modules/legacy-virtual-account-import.md
   historical-service-accounting:
     test_root: tests/domains/client-finance/subsystems/client-finance/modules/historical-service-accounting/
   obligation-planning:

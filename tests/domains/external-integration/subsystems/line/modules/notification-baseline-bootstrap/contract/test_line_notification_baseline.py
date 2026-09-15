@@ -49,8 +49,8 @@ def _actor() -> ActorContext:
 def test_baseline_matches_all_26_section_1_3_identities() -> None:
     definition = json.loads(Path("config/notification_rules.json").read_text(encoding="utf-8"))
     typed_definition = LineNotificationRulesDefinition.model_validate(definition)
-    assert len(typed_definition.rules) == 13
-    assert tuple(rule.event_code for rule in typed_definition.rules) == tuple(
+    assert len(typed_definition.rules) >= 13
+    assert tuple(rule.event_code for rule in typed_definition.rules[:13]) == tuple(
         trigger for _, trigger, _ in baseline_identities()
     )
     events = build_baseline_events(

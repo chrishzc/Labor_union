@@ -14,7 +14,12 @@ from domains.client_finance.obligation_planning import (
     ClientSubsidyReturnPlan,
     ClientObligationAction,
     ClientObligationActionKind,
+    ClientFinanceTermsSourceFacts,
+    ClientPaymentTerms,
+    build_client_finance_terms_impact,
 )
+from domains.orders.terms import OrderTerms, ServiceTimeTerms
+from domains.scheduling.generation import AssignmentCandidate, SchedulingGenerationCandidate
 from infrastructure.mysql.client_finance_terms_writer import (
     persist_client_finance_terms_impact,
 )
@@ -23,6 +28,60 @@ from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from subsystems.orders.terms_workflow import ClientFinanceImpactPersistenceCommand
 from domains.client_finance.reconciliation import PaymentStage
 from shared_kernel.money import MoneyNTD
+
+
+def test_full_subsidy_terms_do_not_create_client_service_principal() -> None:
+    dates = tuple(date(2026, 8, day) for day in range(1, 16))
+    scheduling = SchedulingGenerationCandidate(
+        "CASE-FULL-SUBSIDY",
+        2,
+        1,
+        2,
+        (1,),
+        (
+            AssignmentCandidate(
+                "CASE-FULL-SUBSIDY:g2:a1",
+                1,
+                7,
+                1,
+                dates[0],
+                dates[-1],
+                dates,
+                120,
+            ),
+        ),
+        (),
+    )
+    source = ClientFinanceTermsSourceFacts(
+        "CASE-FULL-SUBSIDY",
+        3,
+        ClientPaymentTerms(
+            0,
+            MoneyNTD(350),
+            date(2026, 7, 1),
+            date(2026, 8, 1),
+            date(2026, 8, 15),
+        ),
+        (),
+        (),
+        identity_status="補助市民",
+    )
+    terms = OrderTerms(
+        dates[0],
+        15,
+        8,
+        MoneyNTD(0),
+        ServiceTimeTerms(None, None, None),
+    )
+
+    candidate = build_client_finance_terms_impact(
+        source,
+        terms,
+        scheduling,
+        "actual-start:full-subsidy",
+    )
+
+    assert sum(plan.amount.amount for plan in candidate.stage_plans) == 0
 
 
 def _action(

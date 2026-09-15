@@ -11,6 +11,48 @@ from shared_kernel.migration_release import load_migration_release_manifest
 ROOT = Path(__file__).resolve().parents[8]
 ARCHIVED_MANIFEST = ROOT / "db/migration_releases/labor_union_2026_09_11_twins_payroll_policy_v1.json"
 MANIFEST = ROOT / "db/migration_releases/labor_union_2026_09_12_twins_payroll_policy_backfill_hash_v2.json"
+OWNER_DATES_MANIFEST = ROOT / "db/migration_releases/labor_union_2026_09_15_order_details_owner_dates_v1.json"
+
+
+@pytest.mark.parametrize(
+    "schema_part",
+    (
+        "db/schema_parts/221_twins_payroll_order_details_view.sql",
+        "db/schema_parts/1043_twins_payroll_order_details_view.sql",
+    ),
+)
+def test_order_details_view_reads_owner_dates_without_end_date_fallbacks(schema_part):
+    view_sql = (ROOT / schema_part).read_text(encoding="utf-8")
+
+    assert "o.staff_payment_due_date AS salary_payment_date_1" in view_sql
+    assert "MAX(DATE(claim_batch.submitted_at))" in view_sql
+    assert "DATE_ADD(LAST_DAY(o.end_date), INTERVAL 15 DAY)" not in view_sql
+    assert "DATE_ADD(LAST_DAY(o.end_date), INTERVAL 5 DAY)" not in view_sql
+
+
+def test_fresh_and_preserve_order_details_owner_date_views_stay_synchronized():
+    fresh = (ROOT / "db/schema_parts/221_twins_payroll_order_details_view.sql").read_text(
+        encoding="utf-8"
+    )
+    preserve = (ROOT / "db/schema_parts/1043_twins_payroll_order_details_view.sql").read_text(
+        encoding="utf-8"
+    )
+
+    assert fresh.split("CREATE OR REPLACE VIEW", 1)[1].strip() == preserve.split(
+        "CREATE OR REPLACE VIEW", 1
+    )[1].strip()
+
+
+def test_owner_date_view_successor_is_registered_with_the_mysql_verified_digest():
+    manifest = load_migration_release_manifest(OWNER_DATES_MANIFEST, ROOT)
+    descriptor = manifest.owned_object_descriptors(ROOT)[
+        "1043_twins_payroll_order_details_view.sql"
+    ]
+
+    assert OWNER_DATES_MANIFEST.name in migration.DEFAULT_RELEASE_MANIFESTS
+    assert descriptor["views"]["v_order_details"]["definition_sha256"] == (
+        "4f5e02d1806b2c9923b56daa8cf20530b148f5477bde5086200968265626491b"
+    )
 
 
 def test_twins_payroll_release_is_registered_and_exact():

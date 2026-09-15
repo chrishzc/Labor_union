@@ -6,7 +6,10 @@ from infrastructure.mysql.accounts_payable_export_sources import (
     _HISTORICAL_STAFF_PAYABLE_PROJECTION_SQL,
     _STAFF_PAYABLES_SQL,
     MySqlStaffPayableExportSource,
+    _formal_case_audit_item,
     _government_return_fact,
+    _historical_case_audit_item,
+    _missing_case_audit_item,
     _refund_fact,
     _staff_fact,
 )
@@ -61,6 +64,52 @@ def test_staff_payables_only_include_the_selected_payment_date():
         assert "due_date <= %s" in query
 
     assert "obligations.status = 'open'" in _CLIENT_REFUNDS_SQL
+
+
+def test_historical_confirmation_excludes_only_the_exact_obligation_amount_and_version():
+    assert "historical_confirmation.amount_snapshot_ntd = obligations.amount_due_ntd" in _STAFF_PAYABLES_SQL
+    assert "historical_confirmation.obligation_payroll_version = obligations.payroll_version" in _STAFF_PAYABLES_SQL
+    assert "historical_confirmation.obligation_identity IS NULL" in _STAFF_PAYABLES_SQL
+
+
+def test_case_audit_keeps_exact_historical_settlement_visible_without_relisting_it():
+    item = _formal_case_audit_item(
+        {
+            "obligation_identity": "service:C-1:assignment:7",
+            "case_no": "C-1",
+            "staff_id": 7,
+            "recipient_name": "月嫂甲",
+            "amount_due_ntd": 42_000,
+            "export_amount_ntd": 42_000,
+            "due_date": date(2026, 10, 15),
+            "order_due_date": date(2026, 10, 15),
+            "payout_status": "payable",
+            "historical_confirmation_kind": "settled",
+            "primary_account_count": 0,
+            "bank_code": None,
+            "account_no": None,
+        },
+        date(2026, 10, 15),
+    )
+
+    assert item.disposition == "paid_or_settled"
+    assert item.balance.amount == 0
+    assert item.effective_due_date == date(2026, 10, 15)
+
+
+def test_case_audit_reports_unknown_amount_and_unformed_date_instead_of_zero():
+    item = _missing_case_audit_item(
+        {
+            "case_no": "C-MISSING",
+            "staff_payment_due_date": None,
+            "staff_id": None,
+            "recipient_name": None,
+        }
+    )
+
+    assert item.amount_due is None
+    assert item.balance is None
+    assert item.disposition == "date_not_formed"
 
 
 class _ProjectionCursor:
@@ -135,6 +184,13 @@ def test_existing_historical_order_without_obligation_is_projected_on_each_load(
     later_month = MySqlStaffPayableExportSource(connection).load(date(2026, 9, 15))
 
     assert later_month == ()
+
+    row["adjustment_amount_ntd"] = -100_000
+    blocked = _historical_case_audit_item(row, date(2026, 5, 15))
+
+    assert blocked.disposition == "blocked"
+    assert blocked.amount_due is None
+    assert blocked.balance is None
 
 
 def test_historical_projection_does_not_include_a_future_due_date():

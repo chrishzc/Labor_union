@@ -83,6 +83,7 @@ class ActualStartPreview:
     reconfirmation: ActualStartReconfirmationCandidate
     client_identity_status: str
     is_full_subsidy_order: bool
+    staff_payment_due_date: date
     fingerprint: PreviewFingerprint
 
 
@@ -377,9 +378,20 @@ class ActualStartWorkflow:
             new_date,
             recalculated_service_dates,
         )
-        client_finance, payroll = _downstream_impacts(facts, actual_start, scheduling)
+        client_finance, payroll, staff_payment_due_date = _downstream_impacts(
+            facts, actual_start, scheduling
+        )
         lifecycle = _actual_start_lifecycle(facts, new_date, scheduling, client_finance, self._clock)
-        return _preview_result(facts, actual_start, scheduling, client_finance, payroll, lifecycle, reconfirmation)
+        return _preview_result(
+            facts,
+            actual_start,
+            scheduling,
+            client_finance,
+            payroll,
+            lifecycle,
+            reconfirmation,
+            staff_payment_due_date,
+        )
 
     def _persist(self, request, preview, command_fingerprint, receipt):
         event_id = self._repository.append_actual_start_event(request, preview)
@@ -531,11 +543,7 @@ def _persist_order_projection(repository, request, preview, receipt):
 
 
 def _staff_payment_due_date(preview):
-    return _calculated_staff_payment_due_date(
-        preview.actual_start.actual_end_date,
-        preview.client_finance_impact,
-        preview.is_full_subsidy_order,
-    )
+    return preview.staff_payment_due_date
 
 
 def _calculated_staff_payment_due_date(
@@ -588,17 +596,24 @@ def _downstream_impacts(facts, actual_start, scheduling):
         change_identity,
     )
     coverage = _subsidy_coverage(facts)
-    staff_payment_due_date = _calculated_staff_payment_due_date(
-        actual_start.actual_end_date,
-        client,
-        coverage.is_full_subsidy_order,
+    staff_payment_due_date = _effective_staff_payment_due_date(
+        facts.payroll.staff_payment_due_date,
+        _calculated_staff_payment_due_date(
+            actual_start.actual_end_date,
+            client,
+            coverage.is_full_subsidy_order,
+        ),
     )
     return client, _payroll_impact(
         facts,
         scheduling,
         change_identity,
         staff_payment_due_date,
-    )
+    ), staff_payment_due_date
+
+
+def _effective_staff_payment_due_date(existing_due_date, calculated_due_date):
+    return existing_due_date or calculated_due_date
 
 
 def _client_finance_impact(facts, actual_start, scheduling, change_identity):
@@ -632,10 +647,19 @@ def _subsidy_coverage(facts):
     )
 
 
-def _preview_result(facts, actual_start, scheduling, client, payroll, lifecycle, reconfirmation):
+def _preview_result(
+    facts,
+    actual_start,
+    scheduling,
+    client,
+    payroll,
+    lifecycle,
+    reconfirmation,
+    staff_payment_due_date,
+):
     payload = _preview_fingerprint_payload(facts, actual_start, client, payroll, lifecycle, reconfirmation)
     coverage = _subsidy_coverage(facts)
-    return ActualStartPreview(facts.lifecycle.actual_start_date, actual_start.new_actual_start_date, actual_start, scheduling, facts.order.version, facts.scheduling.aggregate_version, facts.scheduling.generation_number, facts.client_finance.account_version, facts.payroll.payroll_version, client, payroll, lifecycle, reconfirmation, facts.order.client_identity_status, coverage.is_full_subsidy_order, fingerprint_payload(payload))
+    return ActualStartPreview(facts.lifecycle.actual_start_date, actual_start.new_actual_start_date, actual_start, scheduling, facts.order.version, facts.scheduling.aggregate_version, facts.scheduling.generation_number, facts.client_finance.account_version, facts.payroll.payroll_version, client, payroll, lifecycle, reconfirmation, facts.order.client_identity_status, coverage.is_full_subsidy_order, staff_payment_due_date, fingerprint_payload(payload))
 
 
 def _preview_fingerprint_payload(facts, actual_start, client, payroll, lifecycle, reconfirmation):

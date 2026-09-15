@@ -1,6 +1,6 @@
 """Focused tests for the Orders terminal aggregate."""
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import pytest
 
@@ -207,6 +207,11 @@ def _subsidy(substatus_code: str, *, case_no: str = "CASE-TERMINAL-001") -> Orde
         identity_status="一般市民",
         source=SourceLineage("Government Subsidy", "claim-batch:1", 1),
         occurred_at=_AT,
+        service_end_date=date(2026, 9, 30),
+        claim_quarter=3,
+        claim_application_year=2026,
+        claim_application_month=10,
+        claim_submitted_at=_AT,
         blockers=(),
         warnings=(),
         available_read_actions=(),

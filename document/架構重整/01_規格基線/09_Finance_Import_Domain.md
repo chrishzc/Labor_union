@@ -412,6 +412,11 @@ Finance owner review 顯示：
 立即回傳 correction impact Preview；按下「確認修正並入帳」後執行
 `CorrectAndPostFinanceImportRow`：
 
+已判定為客戶收款但因虛擬帳號重複、正式義務多候選或疑似重匯而停在
+`business_pending` 的銀行列，也必須留在同一待處理清單並提供逐列的「指定正確訂單」入口；
+待處理清單只投影虛擬帳號可對應到既有案件、但無法自動核銷的客戶入款；查無案件、缺少有效虛擬帳號或僅有來源格式警示的其他銀行流水仍保留匯入稽核，但不載入此預覽清單。
+不得只顯示待配對筆數而沒有可完成的人工操作。
+
 ```text
 lock canonical bank fact、review version、target obligations
 → fresh rebuild correction candidate

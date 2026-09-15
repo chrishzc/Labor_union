@@ -22,6 +22,8 @@ import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_s
 interface OrderServiceDatesPanelProps {
   caseNo: string;
   onObserved?: () => void;
+  onOpenActualStart?: () => void;
+  calculationRevision?: number;
 }
 
 type WorkingAction = 'load' | 'preview' | 'apply' | null;
@@ -60,7 +62,7 @@ function recoveryFromServiceDatesDraft(caseNo: string): ServiceDatesRecovery | n
   return null;
 }
 
-export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo, onObserved }) => {
+export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo, onObserved, onOpenActualStart, calculationRevision = 0 }) => {
   const [working, setWorking] = useState<WorkingAction>(null);
   const [queryView, setQueryView] = useState<ServiceDateConfirmationQueryView | null>(null);
   const [precision, setPrecision] = useState<SchedulePrecisionResult | null>(null);
@@ -69,8 +71,12 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
   const [preview, setPreview] = useState<ServiceDateConfirmationPreviewView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [basisNotice, setBasisNotice] = useState<string | null>(null);
+  const [calculationBasis, setCalculationBasis] = useState<{ date: string; confirmed: boolean } | null>(null);
+  const [hasManualChanges, setHasManualChanges] = useState(false);
   const [, setRecoveryRevision] = useState(0);
   const actionInFlight = useRef(new Set<string>());
+  const calculationSequence = useRef(0);
   const renderedCaseNo = useRef(caseNo);
   renderedCaseNo.current = caseNo;
   const recovery = recoveryFromServiceDatesDraft(caseNo);
@@ -85,6 +91,9 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
     setPreview(null);
     setError(null);
     setSuccess(null);
+    setBasisNotice(null);
+    setCalculationBasis(null);
+    setHasManualChanges(false);
     setRecoveryRevision((revision) => revision + 1);
 
     return orderMutationFlowStore.subscribe(() => {
@@ -98,20 +107,30 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
     setRecoveryRevision((revision) => revision + 1);
   };
 
-  const loadAndCalculate = async () => {
-    if (actionInFlight.current.has(caseNo) || isRecoveryActive) return;
-    actionInFlight.current.add(caseNo);
+  const loadAndCalculate = async (basisChanged = false) => {
+    if ((!basisChanged && actionInFlight.current.has(caseNo)) || isRecoveryActive) return;
+    const request = calculationSequence.current + 1;
+    calculationSequence.current = request;
     setWorking('load');
     setError(null);
     setSuccess(null);
     setPreview(null);
+    if (basisChanged) {
+      setBasisNotice(hasManualChanges
+        ? '實際開始日基準已變更，先前人工調整已清除，請重新核對新的服務日期。'
+        : '實際開始日基準已變更，正在更新服務日期與日曆。');
+      setQueryView(null);
+      setPrecision(null);
+      setServiceMode(null);
+      setSelectedDates([]);
+    }
     try {
       const [actualStart, serviceDates, calendarDetail] = await Promise.all([
         ordersQueryClient.getActualStart(caseNo),
         fetchServiceDatesQuery(caseNo),
         ordersQueryClient.getOrderCalendarDetail(caseNo),
       ]);
-      if (renderedCaseNo.current !== caseNo) return;
+      if (renderedCaseNo.current !== caseNo || calculationSequence.current !== request) return;
       const startDate = actualStart.current_actual_start_date ?? actualStart.planned_start_date;
       if (
         actualStart.case_no !== caseNo
@@ -120,13 +139,17 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
       ) {
         throw new Error('服務日期精算回讀案件編號不一致。');
       }
+      setCalculationBasis({
+        date: startDate,
+        confirmed: actualStart.current_actual_start_date !== null,
+      });
 
       const calculated = await schedulePrecisionClient.calculate({
         actual_start_date: startDate,
         target_service_days: serviceDates.contracted_service_days,
         service_mode: calendarDetail.service_mode,
       });
-      if (renderedCaseNo.current !== caseNo) return;
+      if (renderedCaseNo.current !== caseNo || calculationSequence.current !== request) return;
       const selectable = new Set(serviceDates.selectable_dates);
       const calculatedDates = calculated.day_by_day
         .filter((day) => day.is_work_day && selectable.has(day.date))
@@ -138,18 +161,25 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
       setPrecision(calculated);
       setServiceMode(calendarDetail.service_mode);
       setSelectedDates(calculatedDates);
+      setHasManualChanges(false);
+      if (basisChanged) setBasisNotice('已依正式實際開始日更新服務日期，請核對後再確認。');
     } catch (caught) {
-      if (renderedCaseNo.current !== caseNo) return;
+      if (renderedCaseNo.current !== caseNo || calculationSequence.current !== request) return;
       setError(errorMessage(caught));
       setQueryView(null);
       setPrecision(null);
       setServiceMode(null);
       setSelectedDates([]);
     } finally {
-      actionInFlight.current.delete(caseNo);
-      if (renderedCaseNo.current === caseNo) setWorking(null);
+      if (renderedCaseNo.current === caseNo && calculationSequence.current === request) setWorking(null);
     }
   };
+
+  useEffect(() => {
+    if (calculationRevision > 0) void loadAndCalculate(true);
+    // calculationRevision is a parent-owned signal emitted only after an authoritative readback.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [calculationRevision]);
 
   const changeDate = (date: string, checked: boolean) => {
     if (queryView === null || isRecoveryActive) return;
@@ -161,40 +191,43 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
     setSelectedDates(nextDates);
     setPreview(null);
     setSuccess(null);
+    setHasManualChanges(true);
   };
 
   const runPreview = async () => {
     if (actionInFlight.current.has(caseNo) || isRecoveryActive) return;
     actionInFlight.current.add(caseNo);
+    const basisSequence = calculationSequence.current;
     setWorking('preview');
     setError(null);
     setSuccess(null);
     try {
       const nextPreview = await previewServiceDatesFlow(caseNo);
-      if (renderedCaseNo.current !== caseNo) return;
+      if (renderedCaseNo.current !== caseNo || calculationSequence.current !== basisSequence) return;
       if (nextPreview.case_no !== caseNo) {
         throw new Error('服務日期確認預覽案件識別不一致。');
       }
       setPreview(nextPreview);
       setSuccess('服務日期確認內容已準備。');
     } catch (caught) {
-      if (renderedCaseNo.current !== caseNo) return;
+      if (renderedCaseNo.current !== caseNo || calculationSequence.current !== basisSequence) return;
       setError(errorMessage(caught));
     } finally {
       actionInFlight.current.delete(caseNo);
-      if (renderedCaseNo.current === caseNo) setWorking(null);
+      if (renderedCaseNo.current === caseNo && calculationSequence.current === basisSequence) setWorking(null);
     }
   };
 
   const runApply = async () => {
     if (actionInFlight.current.has(caseNo) || isRecoveryActive) return;
     actionInFlight.current.add(caseNo);
+    const basisSequence = calculationSequence.current;
     setWorking('apply');
     setError(null);
     setSuccess(null);
     try {
       const receipt = await applyServiceDatesFlow(caseNo);
-      if (renderedCaseNo.current !== caseNo) return;
+      if (renderedCaseNo.current !== caseNo || calculationSequence.current !== basisSequence) return;
       const observed = orderMutationFlowStore.getServiceDatesDraft(caseNo);
       if (observed?.status !== 'observed' || observed.queryView === null) {
         throw new Error('服務日期已套用，但未取得正式回讀狀態。');
@@ -205,12 +238,12 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
       setSuccess(`服務日期已確認並回讀版本 #${receipt.confirmed_version}。`);
       onObserved?.();
     } catch (caught) {
-      if (renderedCaseNo.current !== caseNo) return;
+      if (renderedCaseNo.current !== caseNo || calculationSequence.current !== basisSequence) return;
       captureRecovery();
       setError(errorMessage(caught));
     } finally {
       actionInFlight.current.delete(caseNo);
-      if (renderedCaseNo.current === caseNo) setWorking(null);
+      if (renderedCaseNo.current === caseNo && calculationSequence.current === basisSequence) setWorking(null);
     }
   };
 
@@ -287,6 +320,18 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
       </button>
 
       {error !== null && <p role="alert">{error}</p>}
+      {basisNotice !== null && <p role="status">{basisNotice}</p>}
+      {calculationBasis !== null && (
+        <div className="order-case-review-note" aria-label="服務日期計算基準">
+          <strong>{calculationBasis.confirmed ? '正式實際開始日' : '目前以原訂日試算'}</strong>
+          <span>：{calculationBasis.date}</span>
+          {onOpenActualStart !== undefined && (
+            <button type="button" className="order-v2-open-drawer" onClick={onOpenActualStart}>
+              確認／更正實際開始日
+            </button>
+          )}
+        </div>
+      )}
       {success !== null && <p role="status">{success}</p>}
       {recovery?.caseNo === caseNo && recovery.kind === 'outcome_unknown' && (
         <button

@@ -319,6 +319,11 @@ def test_knowledge_routes_use_only_registered_knowledge_guards() -> None:
     assert inventory
     assert all(dependencies & KNOWLEDGE_GUARDS for dependencies in inventory.values())
     assert all("require_root" not in dependencies for dependencies in inventory.values())
+    assert inventory["import_builtin_line_common_qa"] == {
+        "require_knowledge_manager",
+        "require_knowledge_publisher",
+        "require_knowledge_reindexer",
+    }
 
 
 def test_contract_route_uses_registered_contract_reader() -> None:

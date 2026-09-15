@@ -38,6 +38,16 @@
 .registry-information-fields dt { color: #74593f; font-size: .82rem; }
 .registry-information-fields dd { margin-top: 5px; overflow-wrap: anywhere; white-space: pre-wrap; }
 .registry-information-fields dd.source-issue { color: #b42318; }
+.legacy-va-import { max-width: 760px; }
+.legacy-va-import > p { color: #74593f; }
+.legacy-va-file { display: grid; gap: 7px; color: #65483b; font-size: .9rem; }
+.legacy-va-file input { width: 100%; box-sizing: border-box; background: #fffaf7; }
+.legacy-va-metrics dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(105px, 1fr)); gap: 10px; margin: 12px 0; }
+.legacy-va-metrics dl div { padding: 9px 11px; border-radius: 8px; background: white; }
+.legacy-va-metrics dt { color: #74593f; font-size: .82rem; }
+.legacy-va-metrics dd { margin-top: 4px; }
+.legacy-va-confirm { display: flex; align-items: center; gap: 7px; color: #65483b; }
+.legacy-va-confirm input { width: auto; }
 .registry-editor .order-v2-drawer-section label { min-width: 0; }
 .registry-editor .order-v2-drawer-section input,
 .registry-editor .order-v2-drawer-section select,

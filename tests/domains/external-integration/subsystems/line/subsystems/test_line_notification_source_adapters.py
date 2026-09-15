@@ -41,3 +41,42 @@ def test_rejects_unsettled_or_raw_client_finance_payload() -> None:
             payload={"settlement_identity": "not-a-settlement", "resulting_account_version": 2},
             occurred_at=datetime(2026, 8, 16, tzinfo=timezone.utc),
         )
+
+
+def test_adapts_order_pre_start_checkpoint_unsettled() -> None:
+    from subsystems.line.notification_source_adapters import from_order_pre_start_checkpoint
+
+    event = from_order_pre_start_checkpoint(
+        case_no="CASE-2026-001",
+        planned_start_date="2026-08-20",
+        first_payment_amount=24000,
+        already_settled=False,
+        occurred_at=datetime(2026, 8, 17, 9, 0, tzinfo=timezone.utc),
+        client_line_user_id="U1234567890",
+    )
+
+    assert event.identity == "order-pre-start-reminder:CASE-2026-001:2026-08-20"
+    assert event.event_code == "order.pre_start_reminder"
+    assert event.facts["case_no"] == "CASE-2026-001"
+    assert event.facts["planned_start_date"] == "2026-08-20"
+    assert event.facts["first_payment_amount"] == "NT$ 24,000"
+    assert "待繳納" in event.facts["first_payment_status"]
+    assert event.facts["already_settled"] is False
+    assert event.facts["line_user_id"] == "U1234567890"
+    assert event.facts["recipient_projection"]["identity"] == "U1234567890"
+
+
+def test_adapts_order_pre_start_checkpoint_already_settled() -> None:
+    from subsystems.line.notification_source_adapters import from_order_pre_start_checkpoint
+
+    event = from_order_pre_start_checkpoint(
+        case_no="CASE-2026-002",
+        planned_start_date="2026-08-20",
+        first_payment_amount=0,
+        already_settled=True,
+        occurred_at=datetime(2026, 8, 17, 9, 0, tzinfo=timezone.utc),
+    )
+
+    assert event.facts["already_settled"] is True
+    assert "已結清" in event.facts["first_payment_amount"]
+    assert "已核銷完成" in event.facts["first_payment_status"]

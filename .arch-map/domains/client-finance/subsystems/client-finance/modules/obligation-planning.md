@@ -9,6 +9,7 @@
 
 ## Implementation
 - primary: `domains/client_finance/obligation_planning.py`
+- calculation: `domains/client_finance/order_amount_calculation.py`
 - adapter: `infrastructure/mysql/client_finance_terms_writer.py`
 
 ## Contracts

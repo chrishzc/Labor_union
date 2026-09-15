@@ -86,13 +86,14 @@ def _pending_receipt(amount=12000):
 def test_virtual_account_resolves_one_exact_open_client_obligation() -> None:
     connection = _VirtualAccountConnection(
         (
-            {
-                "format_id": "sinopac",
-                "cancellation_code": None,
-                "bank_references": '{"銷帳編號":"99781699115150"}',
-            },
-            ({"case_no": "115000150"},),
-            ({"obligation_identity": "client-obligation:115000150:deposit"},),
+                {
+                    "format_id": "sinopac",
+                    "cancellation_code": None,
+                    "bank_references": '{"銷帳編號":"99781699115150"}',
+                },
+                (),
+                ({"case_no": "115000150"},),
+                ({"obligation_identity": "client-obligation:115000150:deposit"},),
         )
     )
 
@@ -109,13 +110,14 @@ def test_virtual_account_keeps_underpayment_pending() -> None:
     candidate = _pending_receipt(2400)
     connection = _VirtualAccountConnection(
         (
-            {
-                "format_id": "sinopac",
-                "cancellation_code": None,
-                "bank_references": '{"銷帳編號":"99781699115150"}',
-            },
-            ({"case_no": "115000150"},),
-            (),
+                {
+                    "format_id": "sinopac",
+                    "cancellation_code": None,
+                    "bank_references": '{"銷帳編號":"99781699115150"}',
+                },
+                (),
+                ({"case_no": "115000150"},),
+                (),
         )
     )
 

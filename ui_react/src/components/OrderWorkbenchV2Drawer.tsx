@@ -113,6 +113,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
 }) => {
   const requestSequence = useRef(0);
   const [refreshRevision, setRefreshRevision] = useState(0);
+  const [serviceDatesCalculationRevision, setServiceDatesCalculationRevision] = useState(0);
   const [factsRefreshing, setFactsRefreshing] = useState(true);
   const [timeline, setTimeline] = useState<ReadState<OrderCoreStageTimeline>>(loading);
   const [detail, setDetail] = useState<ReadState<OrderDetail>>(loading);
@@ -239,9 +240,13 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
       setHistoricalRestart({
         status: 'completed',
         message: receipt.replayed
-          ? '此案件先前已重啟正常流程；正式回讀已確認為「訂單成立」。請返回待辦看板後繼續。'
-          : '已重啟正常流程並回讀確認為「訂單成立」。請返回待辦看板後繼續日期／媒合／排班。',
+          ? '此案件先前已重啟正常流程；已接續到服務日期精算。'
+          : '已重啟正常流程並正式回讀；已接續到服務日期精算。',
       });
+      setDrawerTab('work');
+      setServiceView('dates');
+      openGroup('service');
+      setServiceDatesCalculationRevision((revision) => revision + 1);
       refreshFacts();
     } catch (error) {
       setHistoricalRestart({ status: 'error', message: errorMessage(error) });
@@ -368,7 +373,15 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
               {(activeGroup === 'service' || visitedGroups.includes('service')) && <div hidden={activeGroup !== 'service'}>
                 <nav className="order-case-subnav" aria-label="服務工作"><button type="button" aria-pressed={serviceView === 'dates'} onClick={() => setServiceView('dates')}>確認日期</button><button type="button" aria-pressed={serviceView === 'assignment'} onClick={() => setServiceView('assignment')}>正式排班</button><button type="button" aria-pressed={serviceView === 'completion'} onClick={() => setServiceView('completion')}>完工確認</button></nav>
                 <div hidden={serviceView !== 'dates'}>
-                <OrderServiceDatesPanel caseNo={caseNo} onObserved={refreshFacts} />
+                <OrderServiceDatesPanel
+                  caseNo={caseNo}
+                  calculationRevision={serviceDatesCalculationRevision}
+                  onObserved={refreshFacts}
+                  onOpenActualStart={() => {
+                    setDrawerTab('changes');
+                    setOperation('actual-start');
+                  }}
+                />
                 </div><div hidden={serviceView !== 'assignment'}>
                 <OrderAssignmentPlanPanel caseNo={caseNo} onObserved={refreshFacts} onOpenReplacement={() => { setDrawerTab('changes'); setReplacementExpanded(true); }} />
                 </div><div hidden={serviceView !== 'completion'}>{detail.status === 'ready' && (
@@ -460,7 +473,13 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
             {operationBusy && <p role="status">操作結果或正式回讀尚未確認，暫時不能關閉或切換操作。</p>}
             {operation === 'cancellation' && <OrderCancellationPanel key={caseNo} caseNo={caseNo} onObserved={refreshFacts} onBusyChange={onOperationBusyChange} />}
             {operation === 'reopen' && <OrderControlledReopenPanel key={caseNo} caseNo={caseNo} onObserved={refreshFacts} onBusyChange={onOperationBusyChange} />}
-            {operation === 'actual-start' && <OrderActualStartPanel key={caseNo} caseNo={caseNo} onObserved={refreshFacts} onBusyChange={onOperationBusyChange} />}
+            {operation === 'actual-start' && <OrderActualStartPanel key={caseNo} caseNo={caseNo} onObserved={() => {
+              setDrawerTab('work');
+              setServiceView('dates');
+              openGroup('service');
+              setServiceDatesCalculationRevision((revision) => revision + 1);
+              refreshFacts();
+            }} onBusyChange={onOperationBusyChange} />}
             {currentBranch === 'normal' && !terminalStatus && detail.status === 'ready' && (
               <div className="order-v2-more-action-workflow" data-surface-id="orders.service-before-replacement.entry">
                 {!replacementExpanded ? (

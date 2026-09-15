@@ -56,6 +56,11 @@ describe('Finance query request lifecycle', () => {
     vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue({ items: [{ id: 11, name: '去敏人員', phone: null, education: null }], next_cursor: null });
     vi.spyOn(staffPayablesQueryClient, 'query').mockResolvedValue(STAFF_PAYABLES_RESPONSE.data);
     vi.spyOn(accountsPayableQueryClient, 'query').mockResolvedValue(ACCOUNTS_PAYABLE_RESPONSE.data);
+    vi.spyOn(accountsPayableQueryClient, 'queryCase').mockResolvedValue({
+      case_no: 'CASE-FIN-001',
+      target_payment_date: '2026-09-15',
+      items: [],
+    });
     vi.spyOn(financeImportQueryClient, 'listBatches').mockResolvedValue(FINANCE_BATCH_RESPONSE.data);
     vi.spyOn(financeImportQueryClient, 'getManifest').mockResolvedValue(FINANCE_MANIFEST_RESPONSE.data);
     vi.spyOn(financeImportQueryClient, 'listReviewRows').mockResolvedValue({ batch_identity: 'BATCH-FIN-021', source_reviews: [], next_after_source_review_id: null, items: [], next_after_row_id: null });

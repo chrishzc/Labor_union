@@ -1,5 +1,5 @@
 -- GENERATED FILE. Do not edit by hand.
--- Release: labor-union-validation-schema-2026-09-14-v36
+-- Release: labor-union-validation-schema-2026-09-15-v37
 -- Replace __LU_TEST_DATABASE__ with an explicitly confirmed lu_test_* database.
 -- Rebuild with: python scripts/build_validation_schema_release.py
 
@@ -18136,9 +18136,9 @@ FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'historical_baseline_projector_receipts records cannot be deleted';
 -- END SOURCE: db/schema_parts/1011_historical_baseline_projector.sql
 
--- BEGIN SOURCE: db/schema_parts/1012_service_before_replacement.sql
--- File: 1012_service_before_replacement.sql
--- Description: 保存服務前換人的不可變事件、逐 root disposition、successor binding、receipt 與內部 outbox。
+-- BEGIN SOURCE: db/schema_parts/226_service_before_replacement.sql
+-- File: 226_service_before_replacement.sql
+-- Description: fresh bootstrap 的服務前換人 canonical schema；補齊 MySQL 8.4 複合外鍵所需唯一 owner binding。
 
 CREATE TABLE IF NOT EXISTS scheduling_service_before_replacement_events (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -18192,6 +18192,10 @@ CREATE TABLE IF NOT EXISTS scheduling_service_before_replacement_events (
     ),
     UNIQUE KEY uq_service_before_replacement_event_generation (
         replacement_generation_id
+    ),
+    UNIQUE KEY uq_service_before_replacement_event_owner_binding (
+        id,
+        case_no
     ),
     UNIQUE KEY uq_service_before_replacement_event_successor_binding (
         id,
@@ -18830,7 +18834,7 @@ CREATE TRIGGER trg_service_before_replacement_outbox_before_delete
 BEFORE DELETE ON scheduling_service_before_replacement_outbox
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'scheduling_service_before_replacement_outbox records cannot be deleted';
--- END SOURCE: db/schema_parts/1012_service_before_replacement.sql
+-- END SOURCE: db/schema_parts/226_service_before_replacement.sql
 
 -- BEGIN SOURCE: db/schema_parts/1013_order_lifecycle_pending_status_constraint.sql
 -- File: 1013_order_lifecycle_pending_status_constraint.sql
@@ -21600,14 +21604,7 @@ SELECT
             payroll_rate.hourly_rate_ntd
         ELSE NULL
     END AS service_salary,
-    CASE
-        WHEN o.status NOT IN ('洽談中', '訂單取消') AND
-             o.end_date IS NOT NULL AND c.identity_status = '補助市民' THEN
-            DATE_ADD(LAST_DAY(DATE_ADD(o.end_date, INTERVAL 1 MONTH)), INTERVAL 15 DAY)
-        WHEN o.status NOT IN ('洽談中', '訂單取消') AND o.end_date IS NOT NULL THEN
-            DATE_ADD(LAST_DAY(o.end_date), INTERVAL 15 DAY)
-        ELSE NULL
-    END AS salary_payment_date_1,
+    o.staff_payment_due_date AS salary_payment_date_1,
     CASE
         WHEN o.status NOT IN ('洽談中', '訂單取消') THEN
             CASE
@@ -21617,12 +21614,14 @@ SELECT
             END * payroll_rate.hourly_rate_ntd
         ELSE NULL
     END AS subsidy_salary,
-    CASE
-        WHEN o.status NOT IN ('洽談中', '訂單取消') AND
-             c.identity_status != '非市民' AND o.end_date IS NOT NULL THEN
-            DATE_ADD(LAST_DAY(o.end_date), INTERVAL 5 DAY)
-        ELSE NULL
-    END AS govt_claim_date
+    (
+        SELECT MAX(DATE(claim_batch.submitted_at))
+        FROM subsidy_claim_batch_items claim_item
+        JOIN subsidy_claim_batches claim_batch
+          ON claim_batch.id = claim_item.batch_id
+        WHERE claim_item.case_no = o.case_no
+          AND claim_batch.submitted_at IS NOT NULL
+    ) AS govt_claim_date
 FROM orders o
 JOIN clients c ON o.client_id = c.id
 LEFT JOIN staff s ON o.staff_id = s.id
@@ -21693,3 +21692,26 @@ ALTER TABLE beclass_records
     ADD COLUMN record_origin ENUM('imported', 'admin_manual') NOT NULL DEFAULT 'imported'
         AFTER bound_case_no;
 -- END SOURCE: db/schema_parts/224_historical_manual_beclass_origin.sql
+
+-- BEGIN SOURCE: db/schema_parts/225_client_legacy_virtual_accounts.sql
+CREATE TABLE IF NOT EXISTS client_legacy_virtual_accounts (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    case_no VARCHAR(50) NOT NULL,
+    virtual_account VARCHAR(14) NOT NULL,
+    source_content_digest CHAR(64) NOT NULL,
+    source_row INT UNSIGNED NOT NULL,
+    created_by VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_client_legacy_virtual_account_pair (case_no, virtual_account),
+    KEY idx_client_legacy_virtual_account_lookup (virtual_account, case_no),
+    CONSTRAINT fk_client_legacy_virtual_account_order FOREIGN KEY (case_no)
+        REFERENCES orders(case_no) ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_client_legacy_virtual_account_format CHECK (
+        virtual_account REGEXP '^99781699[0-9]{6}$'
+    ),
+    CONSTRAINT chk_client_legacy_virtual_account_source CHECK (
+        source_content_digest REGEXP '^[0-9a-f]{64}$' AND source_row >= 2
+        AND CHAR_LENGTH(TRIM(created_by)) > 0
+    )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- END SOURCE: db/schema_parts/225_client_legacy_virtual_accounts.sql

@@ -1,0 +1,61 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-client-legacy-virtual-accounts-2026-09-15-v1",
+  "release_metadata": {
+    "release_name": "Labor Union client legacy virtual accounts",
+    "application_version": "client-legacy-virtual-accounts-v1",
+    "published_at": "2026-09-15",
+    "description": "Add an auditable per-case mapping for legacy virtual accounts without changing the current allocation formula"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": ["absent", "exact"],
+    "forbidden_owned_object_states": ["partial", "drift"],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-historical-manual-beclass-origin-2026-09-14-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1042_client_legacy_virtual_accounts.sql",
+      "relative_path": "db/schema_parts/1042_client_legacy_virtual_accounts.sql",
+      "sha256": "0f86bad12a7c628544e61e1ea4f5de6dbfe11d8dc51216df0f3fb8e06c4ef879",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "forward-only-preserve-imported-virtual-account-mappings",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "client-legacy-virtual-account-table-exact",
+      "phase": "post-schema",
+      "policy": "legacy virtual accounts are stored as exact case/account pairs while account reuse remains allowed",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": ["client-legacy-virtual-accounts-v1"],
+    "required_restart_targets": ["api"],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": ["client-legacy-virtual-account-table-exact"]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_09_15_client_legacy_virtual_accounts_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_09_15_client_legacy_virtual_accounts_v1.descriptors.json",
+    "sha256": "7174221bec2bb5139241cefc8cf9d33313f5fd54f7dc9e6e4d88b4e165906486",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": ["--single-transaction", "--routines", "--events", "--triggers", "--hex-blob"],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}
