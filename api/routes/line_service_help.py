@@ -17,6 +17,7 @@ from api.dependencies.llm_configuration import (
     LlmConfigurationApplication,
     get_llm_configuration_application,
 )
+from api.error_contracts import typed_http_error
 from api.schemas.base import BaseResponse
 from domains.knowledge_retrieval.qa_catalog import decode_governed_qa
 from infrastructure.mysql.knowledge_retrieval_unit_of_work import (
@@ -75,22 +76,39 @@ def get_published_faqs() -> BaseResponse[FaqListResponse]:
     try:
         with open_knowledge_retrieval_unit_of_work() as unit_of_work:
             raw_items = unit_of_work.knowledge.list_items(100, "published")
-            for raw in raw_items:
-                decoded = decode_governed_qa(raw.get("content", ""))
-                if decoded and decoded.qa_id not in seen_ids:
-                    items.append(
-                        FaqItem(
-                            qa_id=decoded.qa_id,
-                            category=decoded.category,
-                            tag=decoded.tag,
-                            question=decoded.question,
-                            answer=decoded.answer,
-                            source_ref=decoded.source_ref,
-                        )
-                    )
-                    seen_ids.add(decoded.qa_id)
-    except Exception:
-        pass
+    except Exception as error:
+        raise typed_http_error(
+            503,
+            "unavailable",
+            "knowledge_catalog_unavailable",
+            "常見問答暫時無法讀取，請稍後再試。",
+            "line-service-help:faq",
+            retryable=True,
+        ) from error
+
+    for raw in raw_items:
+        try:
+            decoded = decode_governed_qa(raw.get("content", ""))
+        except Exception as error:
+            raise typed_http_error(
+                503,
+                "internal",
+                "knowledge_catalog_invalid",
+                "常見問答資料目前無法使用，請稍後再試。",
+                "line-service-help:faq",
+            ) from error
+        if decoded and decoded.qa_id not in seen_ids:
+            items.append(
+                FaqItem(
+                    qa_id=decoded.qa_id,
+                    category=decoded.category,
+                    tag=decoded.tag,
+                    question=decoded.question,
+                    answer=decoded.answer,
+                    source_ref=decoded.source_ref,
+                )
+            )
+            seen_ids.add(decoded.qa_id)
 
     categories = list(dict.fromkeys(item.category for item in items))
     return BaseResponse(data=FaqListResponse(items=items, categories=categories))
@@ -105,27 +123,47 @@ def ask_service_question(
 
     try:
         semantic_result = application.test_semantics(clean_question)
-        if semantic_result.outcome == "answered" and semantic_result.answer_text:
-            return BaseResponse(
-                data=ServiceHelpAskResponse(
-                    outcome="answered",
-                    answer_text=semantic_result.answer_text,
-                    qa_id=semantic_result.qa_id,
-                    source_identity=semantic_result.source_identity,
-                    source_ref=semantic_result.source_identity,
-                ),
-                message="AI 助理已由知識庫為您找到解答",
-            )
-    except Exception:
-        pass
+    except Exception as error:
+        raise _knowledge_query_unavailable("knowledge_query_unavailable") from error
 
-    return BaseResponse(
-        data=ServiceHelpAskResponse(
-            outcome="unsupported",
-            answer_text=None,
-            suggestion="抱歉，工會知識庫目前尚未收錄與您提問完全相符的標準解答。您可以直接在此 LINE 官方帳號聊天室中留言，工會真人客服專員將親自為您詳細解說！",
-        ),
-        message="未找到相符解答，已引導真人客服",
+    if semantic_result.outcome == "answered" and semantic_result.answer_text:
+        return BaseResponse(
+            data=ServiceHelpAskResponse(
+                outcome="answered",
+                answer_text=semantic_result.answer_text,
+                qa_id=semantic_result.qa_id,
+                source_identity=semantic_result.source_identity,
+                source_ref=semantic_result.source_identity,
+            ),
+            message="AI 助理已由知識庫為您找到解答",
+        )
+
+    if semantic_result.outcome == "unsupported":
+        return BaseResponse(
+            data=ServiceHelpAskResponse(
+                outcome="unsupported",
+                answer_text=None,
+                suggestion="抱歉，工會知識庫目前尚未收錄與您提問完全相符的標準解答。您可以直接在此 LINE 官方帳號聊天室中留言，工會真人客服專員將親自為您詳細解說！",
+            ),
+            message="未找到相符解答，已引導真人客服",
+        )
+
+    if semantic_result.outcome in {"index_unavailable", "provider_error"}:
+        raise _knowledge_query_unavailable(
+            semantic_result.code or "knowledge_query_unavailable"
+        )
+
+    raise _knowledge_query_unavailable("knowledge_query_unavailable")
+
+
+def _knowledge_query_unavailable(code: str) -> HTTPException:
+    return typed_http_error(
+        503,
+        "unavailable",
+        code,
+        "AI 智慧問答服務暫時無法使用，請稍後再試。",
+        "line-service-help:ask",
+        retryable=True,
     )
 
 
