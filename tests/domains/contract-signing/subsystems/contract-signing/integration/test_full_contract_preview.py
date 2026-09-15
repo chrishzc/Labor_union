@@ -637,7 +637,9 @@ class _PrecontractConnection:
 
 def test_precontract_preview_uses_confirmed_dates_without_recalculating_rest_days():
     result = _load_precontract_plan(
-        _PrecontractConnection(tuple(date(2026, 9, day) for day in range(1, 6))),
+        _PrecontractConnection(
+            tuple(date(2026, 9, day) for day in (5, 1, 4, 2, 3))
+        ),
         "CASE-1",
         {"start_date": date(2026, 9, 1), "service_days": 5, "service_type": "週休2日"},
     )

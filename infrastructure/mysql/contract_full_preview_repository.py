@@ -250,7 +250,9 @@ def _load_precontract_plan(connection, case_no, case):
             "WHERE version.case_no=%s AND version.is_current=1 ORDER BY day.ordinal",
             (case_no,),
         )
-        confirmed_service_dates = tuple(row["service_date"] for row in cursor.fetchall())
+        confirmed_service_dates = tuple(
+            sorted(row["service_date"] for row in cursor.fetchall())
+        )
     try:
         expected_day_count = int(case.get("service_days") or 0)
     except (TypeError, ValueError):
