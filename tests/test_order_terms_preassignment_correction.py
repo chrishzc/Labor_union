@@ -72,6 +72,9 @@ def test_order_terms_accept_half_hour_precision_and_reject_quarter_hours():
     )
     assert accepted.to_domain().service_hours_per_day == 4.5
 
+    unknown_cooking = accepted.model_copy(update={"requires_cooking": None})
+    assert unknown_cooking.to_domain().requires_cooking is None
+
     with pytest.raises(ValidationError):
         OrderTermsInput(
             planned_start_date=date(2026, 9, 10),
@@ -338,6 +341,22 @@ def test_preassignment_cooking_correction_builds_empty_scheduling_candidate(
     assert preview.payroll_impact.resulting_payroll_version == 7
     assert preview.client_finance_impact.actions == ()
     assert preview.payroll_impact.actions == ()
+
+
+def test_preassignment_non_date_change_preserves_missing_planned_end_date():
+    facts = replace(_facts(), planned_end_date=None)
+    workflow = terms_workflow.OrderTermsWorkflow(
+        _Repository(facts), object(), _Clock()
+    )
+
+    proposed = replace(
+        _terms(requires_cooking=True), service_hours_per_day=8.0
+    )
+    preview = workflow.preview("116990823", proposed)
+
+    assert preview.after.requires_cooking is True
+    assert preview.planned_end_date is None
+    assert len(preview.fingerprint.value) == 64
 
 
 def test_incomplete_time_terms_allow_only_unique_cooking_correction():

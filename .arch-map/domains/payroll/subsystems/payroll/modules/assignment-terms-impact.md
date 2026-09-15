@@ -9,10 +9,12 @@
 
 ## Implementation
 - primary:
+  - `subsystems/payroll/terms_impact.py`
   - `infrastructure/mysql/payroll_terms_writer.py`
 
 ## Dependencies
 - inbound: `orders/orders/module:service-date-confirmation` — Precision Restart 後建立 canonical assignment 時，同一 outer transaction 凍結 rate。
+- inbound: `orders/orders/module:order-terms` — 將 Orders 的工時與費用轉為 Payroll typed impact candidate；浮點 HTTP 值在此邊界正規化為精確 Decimal。
 - outbound: `scheduling` — 只消費 canonical assignment identity resolution。
 
 ## Verification
@@ -20,6 +22,7 @@
 
 ## Provenance
 - Assignment-owned rate snapshots 由 Payroll writer 保存 — `source_observed` — `infrastructure/mysql/payroll_terms_writer.py`。
+- Payroll Terms impact candidate 與 Orders-to-Payroll typed conversion 由 Payroll workflow 保存 — `source_observed` — `subsystems/payroll/terms_impact.py`。
 - Restart-specific current assignment 必須可被 ordinary Actual Start read model 消費 — `requirement_declared` — current task acceptance 與 `document/架構重整/01_規格基線/01_Orders_Domain.md` §3.4.1。
 
 ## Change triggers

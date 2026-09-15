@@ -510,7 +510,11 @@ def _preview_fingerprint_payload(
         "client_finance": client_finance.fingerprint.value,
         "payroll": payroll.fingerprint.value,
         "lifecycle": lifecycle.fingerprint.value,
-        "planned_end_date": planned_end_date.isoformat(),
+        "planned_end_date": (
+            planned_end_date.isoformat()
+            if planned_end_date is not None
+            else None
+        ),
         "confirmed_service_dates": (
             None
             if confirmed_service_date_candidate is None
@@ -559,9 +563,14 @@ def _planned_end_date(
     )
     if service_dates:
         return max(service_dates)
-    return current_planned_end_date + (
+    day_shift = (
         proposed_terms.planned_start_date - current_terms.planned_start_date
     )
+    if current_planned_end_date is None:
+        if day_shift.days == 0:
+            return None
+        raise ValueError("planned_end_date_required")
+    return current_planned_end_date + day_shift
 
 
 def _confirmed_service_date_candidate(facts, proposed_terms, scheduling):

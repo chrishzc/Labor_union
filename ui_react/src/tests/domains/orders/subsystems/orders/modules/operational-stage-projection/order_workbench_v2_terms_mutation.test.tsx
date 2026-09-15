@@ -357,6 +357,40 @@ describe('待辦看板 Beta 第 1 階訂單條款操作', () => {
     expect(within(panel).getByRole('button', { name: '檢查訂單條款變更' })).not.toBeDisabled();
   });
 
+  it('下廚需求尚未確認時仍可單獨修改服務時段並保留 unknown', async () => {
+    mocks.getOrderTerms.mockResolvedValueOnce({
+      ...orderTerms(),
+      terms: { ...orderTerms().terms, requires_cooking: null },
+    });
+    const panel = await openTermsPanel();
+
+    expect(within(panel).getByLabelText('Beta 下廚料理需求')).toHaveValue('');
+    fireEvent.change(within(panel).getByLabelText('Beta 每日開始時間'), {
+      target: { value: '09:00' },
+    });
+    const previewButton = within(panel).getByRole('button', {
+      name: '檢查訂單條款變更',
+    });
+    expect(previewButton).not.toBeDisabled();
+    fireEvent.click(previewButton);
+
+    await waitFor(() => expect(mocks.previewTerms).toHaveBeenCalledWith(
+      'CASE-TERMS',
+      expect.objectContaining({
+        proposed_terms: expect.objectContaining({
+          requires_cooking: null,
+          service_hours_per_day: 8,
+          service_time: {
+            start_time: '09:00:00',
+            end_time: '17:00:00',
+            end_day_offset: 0,
+          },
+        }),
+      }),
+      expect.objectContaining({ signal: expect.anything() }),
+    ));
+  });
+
   it('當原始資料 service_hours_per_day 與時段不一致時，依開始結束時間自動修正顯示', async () => {
     // Simulate raw query having service_hours_per_day: 8 while service_time is 09:00~18:00 (9 hours)
     mocks.getOrderTerms.mockResolvedValueOnce({

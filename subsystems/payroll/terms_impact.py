@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from decimal import Decimal
 from enum import StrEnum
 
 from domains.orders.terms import OrderTerms
@@ -203,11 +204,7 @@ def build_preassignment_payroll_noop(
         raise ValueError("preassignment_source_assignment_conflict")
     if source_facts.existing_obligations:
         raise ValueError("preassignment_payroll_obligation_conflict")
-    terms = PayrollTerms(
-        order_terms.service_days,
-        order_terms.service_hours_per_day,
-        order_terms.floor_fee,
-    )
+    terms = _payroll_terms(order_terms)
     payroll = build_case_payroll_candidate((), (), terms)
     return PayrollTermsImpactCandidate(
         source_facts.case_no,
@@ -237,7 +234,18 @@ def build_payroll_cancellation_impact(source_facts: PayrollTermsSourceFacts, sch
 
 
 def _impact_facts(source, scheduling, order_terms):
-    return PayrollTermsImpactFacts(source.case_no, source.payroll_version, scheduling, PayrollTerms(order_terms.service_days, order_terms.service_hours_per_day, order_terms.floor_fee), source.source_terms, source.existing_obligations, source.staff_payment_due_date)
+    return PayrollTermsImpactFacts(source.case_no, source.payroll_version, scheduling, _payroll_terms(order_terms), source.source_terms, source.existing_obligations, source.staff_payment_due_date)
+
+
+def _payroll_terms(order_terms: OrderTerms) -> PayrollTerms:
+    service_hours = order_terms.service_hours_per_day
+    if isinstance(service_hours, float):
+        service_hours = Decimal(str(service_hours))
+    return PayrollTerms(
+        order_terms.service_days,
+        service_hours,
+        order_terms.floor_fee,
+    )
 
 
 def _calculate_payroll(facts):

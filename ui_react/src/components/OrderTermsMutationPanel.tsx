@@ -263,7 +263,9 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
       planned_start_date: draft.plannedStartDate,
       service_days: Number(draft.serviceDays),
       service_hours_per_day: Number(draft.serviceHoursPerDay),
-      requires_cooking: draft.requiresCooking === 'yes',
+      requires_cooking: draft.requiresCooking === ''
+        ? null
+        : draft.requiresCooking === 'yes',
       floor_fee_ntd: Number(draft.floorFeeNtd),
       service_time: {
         start_time: timeWithSeconds(draft.startTime),
@@ -280,7 +282,6 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
     && Number(draft.serviceDays) > 0
     && Number.isInteger(Number(draft.serviceHoursPerDay) * 2)
     && Number(draft.serviceHoursPerDay) > 0
-    && draft.requiresCooking !== ''
     && Number.isInteger(Number(draft.floorFeeNtd))
     && Number(draft.floorFeeNtd) >= 0
     && /^\d{2}:\d{2}$/.test(draft.startTime)
@@ -402,7 +403,7 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
         </label>
         <label>下廚料理需求
           <select aria-label="Beta 下廚料理需求" value={draft.requiresCooking} disabled={locked} onChange={(event) => updateDraft('requiresCooking', event.target.value as OrderTermsDraft['requiresCooking'])}>
-            <option value="">請明確選擇</option>
+            <option value="">尚未確認（可先保留）</option>
             <option value="yes">需要下廚</option>
             <option value="no">不需下廚</option>
           </select>
