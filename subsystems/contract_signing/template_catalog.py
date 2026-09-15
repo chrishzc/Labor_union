@@ -59,6 +59,17 @@ def mapping_is_applicable(
             return False
     if kind == "subsidy_eligible":
         return facts.get("identity_status") in {"一般市民", "補助市民"}
+    payment_amount_key = {
+        "deposit_payment_positive": "deposit_amount",
+        "first_payment_positive": "first_payment_amount",
+        "second_payment_positive": "second_payment_amount",
+    }.get(kind)
+    if payment_amount_key is not None:
+        value = facts.get(payment_amount_key)
+        try:
+            return value is not None and value > 0
+        except TypeError:
+            return False
     keys = {
         "staff_payable_obligation_present": ("staff_payable_total",),
         "official_assignment_rate_present": ("service_unit_price",),

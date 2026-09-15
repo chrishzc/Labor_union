@@ -57,7 +57,7 @@ def test_registry_list_route_preserves_optional_false_and_returns_roster_fields(
         def list_page(self, **kwargs):
             self.captured = kwargs
             return (({
-                "client_id": 7, "case_no": "CASE-001", "name": "王小明", "phone": "0912345678", "city": "新竹市",
+                "client_id": 7, "case_no": "115000001", "virtual_account": "99781699115001", "name": "王小明", "phone": "0912345678", "city": "新竹市", "district": "東區",
                 "multi_birth_count": None, "service_days": 26, "requires_cooking": False,
                 "planned_start_date": None, "order_status": "洽談中",
             },), None)
@@ -75,7 +75,7 @@ def test_registry_list_route_preserves_optional_false_and_returns_roster_fields(
         "sort_by": "case_no", "sort_order": "asc", "limit": 25, "after": None,
     }
     assert response.data.items[0].model_dump() == {
-        "client_id": 7, "case_no": "CASE-001", "name": "王小明", "phone": "0912345678", "city": "新竹市",
+        "client_id": 7, "case_no": "115000001", "virtual_account": "99781699115001", "name": "王小明", "phone": "0912345678", "city": "新竹市", "district": "東區",
         "multi_birth_count": None, "service_days": 26, "requires_cooking": False,
         "planned_start_date": None, "order_status": "洽談中",
     }
@@ -239,7 +239,8 @@ def test_mysql_registry_exposes_blank_editable_values_for_historical_case_withou
 
 def test_mysql_registry_list_applies_bound_filters_and_allowlisted_sorting_in_one_query():
     connection = _SqlConnection([(
-        {"client_id": 7, "case_no": "CASE-001", "name": "王小明", "phone": "0912345678", "city": "新竹市", "multi_birth_count": "雙胞胎", "service_days": 26, "requires_cooking": True, "planned_start_date": None, "order_status": "洽談中"},
+        {"client_id": 7, "case_no": "115000001", "name": "王小明", "phone": "0912345678", "city": "新竹市", "address": "東區中央路1號", "multi_birth_count": "雙胞胎", "service_days": 26, "requires_cooking": True, "planned_start_date": None, "order_status": "洽談中"},
+        {"client_id": 8, "case_no": "115000002", "name": "林小華", "phone": "0922345678", "city": "新竹市", "address": None, "multi_birth_count": None, "service_days": 20, "requires_cooking": False, "planned_start_date": None, "order_status": "洽談中"},
     )])
 
     rows, next_cursor = MySqlClientRegistryQueryRepository(connection).list_page(
@@ -250,11 +251,15 @@ def test_mysql_registry_list_applies_bound_filters_and_allowlisted_sorting_in_on
     statement, parameters = connection.cursor_instance.statements[0]
     assert len(connection.cursor_instance.statements) == 1
     assert "AS multi_birth_count" in statement and "o.service_days,o.requires_cooking" in statement
+    assert "c.city,c.address" in statement
     assert "$.multi_birth_count" in statement and "特殊計費:胎數" in statement
     assert "o.status = %s" in statement and "o.requires_cooking = %s" in statement
     assert "ORDER BY o.service_days DESC, o.case_no ASC" in statement
     assert parameters == ("%王%", "雙胞胎", "洽談中", True, 26)
-    assert rows[0]["case_no"] == "CASE-001"
+    assert rows[0]["case_no"] == "115000001"
+    assert rows[0]["virtual_account"] == "99781699115001"
+    assert rows[0]["district"] == "東區"
+    assert rows[1]["district"] is None
     assert next_cursor is None
 
 

@@ -1,36 +1,18 @@
-from datetime import date
-from infrastructure.mysql.contract_full_preview_repository import _extend_actual_receipt_dates
+import json
+from pathlib import Path
 
 
-class Cursor:
-    def __init__(self, rows): self.rows = rows
-    def __enter__(self): return self
-    def __exit__(self, *args): pass
-    def execute(self, sql, args):
-        assert args == ("CASE-1", "CASE-1")
-        assert "reversal_of_entry_id" in sql and "allocation.amount_ntd>0" in sql
-    def fetchall(self): return self.rows
+def test_client_contract_dates_are_planned_due_dates_not_receipt_dates():
+    root = Path(__file__).resolve().parents[6]
+    mapping = json.loads(
+        (root / "db/templates/contracts/contract_client_copy.json").read_text(encoding="utf-8")
+    )["param_mappings"]
 
+    payment_date_keys = {mapping[cell]["db_key"] for cell in ("C34", "C35", "C36", "C37")}
 
-class Connection:
-    def __init__(self, rows): self.rows = rows
-    def cursor(self): return Cursor(self.rows)
-
-
-def test_unpaid_contract_never_uses_due_dates():
-    facts = {"floor_fee": 100, "deposit_due_date": date(2026, 10, 1)}
-    _extend_actual_receipt_dates(Connection([]), "CASE-1", facts, {})
-    assert facts["deposit_receipt_date"] is None
-    assert facts["floor_fee_receipt_date"] is None
-    assert facts["first_receipt_date"] is None
-
-
-def test_multiple_actual_receipt_dates_are_preserved_without_inventing_a_deadline():
-    facts, owners = {"floor_fee": 100, "deposit_due_date": date(2026, 10, 1)}, {}
-    _extend_actual_receipt_dates(Connection([
-        {"obligation_type": "deposit", "occurred_on": date(2026, 9, 2)},
-        {"obligation_type": "deposit", "occurred_on": date(2026, 9, 1)},
-    ]), "CASE-1", facts, owners)
-    assert facts["deposit_receipt_date"] == "2026-09-01、2026-09-02"
-    assert facts["floor_fee_receipt_date"] == facts["deposit_receipt_date"]
-    assert "client_receipt_dates" in owners
+    assert payment_date_keys == {
+        "deposit_due_date",
+        "first_payment_due_date",
+        "second_payment_due_date",
+    }
+    assert all("receipt" not in key for key in payment_date_keys)

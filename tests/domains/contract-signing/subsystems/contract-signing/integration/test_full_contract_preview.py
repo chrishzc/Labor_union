@@ -307,7 +307,7 @@ def test_conditional_unresolved_mapping_is_skipped_when_owner_says_not_applicabl
     )
 
 
-def test_blank_notes_and_absent_second_payment_due_date_do_not_block_client_contract(tmp_path):
+def test_absent_zero_amount_payment_stages_and_blank_notes_do_not_block_client_contract(tmp_path):
     mapping = tmp_path / "mapping.json"
     mapping.write_text(
         json.dumps(
@@ -322,6 +322,21 @@ def test_blank_notes_and_absent_second_payment_due_date_do_not_block_client_cont
                         "db_key": "notes",
                         "requiredness": "conditional",
                     },
+                    "C34": {
+                        "db_key": "deposit_due_date",
+                        "requiredness": "conditional",
+                        "applicability": "deposit_payment_positive",
+                    },
+                    "C35": {
+                        "db_key": "first_payment_due_date",
+                        "requiredness": "conditional",
+                        "applicability": "first_payment_positive",
+                    },
+                    "C36": {
+                        "db_key": "second_payment_due_date",
+                        "requiredness": "conditional",
+                        "applicability": "second_payment_positive",
+                    },
                 },
             }
         ),
@@ -331,8 +346,27 @@ def test_blank_notes_and_absent_second_payment_due_date_do_not_block_client_cont
     assert _mapping_blockers(
         "contract_client_copy",
         mapping,
-        {"case_no": "CASE-1", "notes": None, "second_payment_due_date": None},
+        {
+            "case_no": "CASE-1",
+            "notes": None,
+            "deposit_amount": 0,
+            "first_payment_amount": 0,
+            "second_payment_amount": 0,
+        },
     ) == ()
+
+    for amount_key in ("deposit_amount", "first_payment_amount", "second_payment_amount"):
+        facts = {
+            "case_no": "CASE-1",
+            "notes": None,
+            "deposit_amount": 0,
+            "first_payment_amount": 0,
+            "second_payment_amount": 0,
+            amount_key: 1,
+        }
+        assert _mapping_blockers("contract_client_copy", mapping, facts) == (
+            "contract_pdf_required_mapping_missing",
+        )
 
 
 def test_subsidy_unresolved_mapping_blocks_only_for_typed_eligible_identity(tmp_path):
@@ -431,19 +465,25 @@ def test_real_staff_template_clears_legacy_funding_placeholders():
     assert [worksheet[cell].value for cell in ("B13", "C13", "B15", "C15")] == [24000, None, None, None]
 
 
-def test_client_contract_payment_destination_and_floor_fee_due_date_use_client_finance_owner():
+def test_client_contract_uses_planned_due_dates_and_per_case_virtual_account():
     root = Path(__file__).resolve().parents[6]
     mapping = json.loads((root / "db/templates/contracts/contract_client_copy.json").read_text(encoding="utf-8"))
     assert mapping["param_mappings"]["D36"] == {
-        "label": "工會／代收付帳戶 (D36)",
-        "db_table": "client_payment_destination_configuration_current (Client Finance typed current configuration)",
-        "db_key": "client_payment_destination_account",
+        "label": "本案專屬虛擬帳號 (D36)",
+        "db_table": "Client Finance per-case virtual account projection",
+        "db_key": "client_virtual_account",
         "requiredness": "required",
         "status": "approved",
     }
-    floor_fee_date = mapping["param_mappings"]["C37"]
-    assert floor_fee_date["db_key"] == "floor_fee_receipt_date"
-    assert floor_fee_date["status"] == "approved"
+    assert {
+        cell: mapping["param_mappings"][cell]["db_key"]
+        for cell in ("C34", "C35", "C36", "C37")
+    } == {
+        "C34": "deposit_due_date",
+        "C35": "first_payment_due_date",
+        "C36": "second_payment_due_date",
+        "C37": "deposit_due_date",
+    }
 
 
 @pytest.mark.parametrize(
@@ -656,6 +696,14 @@ def test_case_import_named_projection_is_the_only_multi_birth_source():
     )
     assert facts["multi_birth_count"] == "雙胞胎"
     assert "survey_details" not in facts
+
+
+def test_common_facts_projects_the_same_per_case_virtual_account_used_by_reconciliation():
+    from infrastructure.mysql.contract_full_preview_repository import _common_facts
+
+    facts = _common_facts({"case_no": "115000157", "survey_details": None})
+
+    assert facts["client_virtual_account"] == "99781699115157"
 
 
 def test_staff_preview_requires_exact_assignment_and_uses_no_client_fallback():

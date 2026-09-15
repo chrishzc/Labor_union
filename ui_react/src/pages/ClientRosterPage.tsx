@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { clientRegistryClient, type ClientRegistryListQuery } from '../api/client_registry/client_registry_client';
-import type { ClientRegistryPage as ClientRegistryPageData, ClientRegistrySortBy, ClientRegistrySortOrder } from '../api/client_registry/client_registry_schemas';
+import type { ClientRegistryDetail, ClientRegistryPage as ClientRegistryPageData, ClientRegistrySortBy, ClientRegistrySortOrder } from '../api/client_registry/client_registry_schemas';
 import './ClientRosterPage.css';
 
 type SelectBoolean = '' | 'true' | 'false';
@@ -37,6 +37,56 @@ function hasActiveFilter(filters: RosterFilters): boolean {
 const orderStatuses = ['待補件', '洽談中', '訂單成立', '服務中', '訂單完成', '訂單取消', '歷史訂單－未服務', '歷史訂單－服務中', '歷史訂單－服務完成', '歷史訂單－帳務完成'];
 
 const displayCooking = (value: boolean | null) => value === true ? '需要' : value === false ? '不需要' : '未登錄';
+const displayValue = (value: unknown) => value === null || value === undefined || value === '' ? '未登錄' : typeof value === 'boolean' ? (value ? '是' : '否') : String(value);
+
+const profileLabels = {
+  name: '姓名', gender: '性別', phone: '手機', city: '縣市', address: '地址', residence_type: '住宅型態',
+  delivery_type: '生產方式', baby_info: '寶寶資訊', notes: '行政註記',
+} as const;
+const beclassLabels = {
+  name: '報名姓名', email: 'Email', phone: '手機', tel: '市話', ext: '分機', city: '縣市',
+  zip_code: '郵遞區號', address: '報名地址', admin_notes: '報名註記', multi_birth_count: '胎數',
+} as const;
+const orderInformationLabels = {
+  dietary_habits: '飲食習慣與中藥接受度', vegetarian_preference: '可否接受蛋奶素餐食', alcohol_ratio: '餐飲含酒比例',
+  cooking_oil_type: '料理用油', maternal_allergy: '過敏體質', special_care_notes: '特殊照護注意事項',
+  meal_preferences: '餐點喜忌', cooking_tools: '現有烹煮工具', bath_water_prep: '洗澡水準備',
+  breastfeeding_method: '哺乳方式', holiday_pricing_terms: '三節計費約定', multi_birth_count: '胎數',
+  stair_floor_fee_mode: '服務樓層方式', parking_space_provided: '停車位', other_babies_present: '服務時間內的其他寶寶',
+} as const;
+const orderTermLabels = {
+  planned_start_date: '計畫服務開始日', service_days: '服務天數', service_hours_per_day: '每日服務時數',
+  requires_cooking: '下廚需求', floor_fee_ntd: '樓層加給', start_time: '每日開始時間', end_time: '每日結束時間',
+  end_day_offset: '結束日偏移',
+} as const;
+
+const ReadOnlyFields: React.FC<{ labels: Record<string, string>; values: Record<string, unknown>; issues?: Record<string, string> }> = ({ labels, values, issues = {} }) => (
+  <dl className="client-roster-detail-fields">
+    {Object.entries(labels).map(([field, label]) => <div key={field}><dt>{label}</dt><dd className={issues[field] ? 'source-issue' : undefined}>{issues[field] ? '來源內容無法判定' : displayValue(values[field])}</dd></div>)}
+  </dl>
+);
+
+const ReadOnlyDetail: React.FC<{ detail: ClientRegistryDetail }> = ({ detail }) => {
+  const terms = detail.order_terms.data?.terms;
+  const orderTermValues = terms ? {
+    planned_start_date: terms.planned_start_date, service_days: terms.service_days,
+    service_hours_per_day: terms.service_hours_per_day, requires_cooking: terms.requires_cooking,
+    floor_fee_ntd: terms.floor_fee_ntd, start_time: terms.service_time.start_time,
+    end_time: terms.service_time.end_time, end_day_offset: terms.service_time.end_day_offset === 1 ? '隔日' : '同日',
+  } : {};
+  return <div className="client-roster-detail" aria-label={`${detail.case_no} 全部唯讀欄位`}>
+    <section><h3>客戶主檔</h3><ReadOnlyFields labels={profileLabels} values={detail.client.values} /></section>
+    <section><h3>BeClass 有效資料</h3>{detail.beclass.status === 'ready' && detail.beclass.values
+      ? <ReadOnlyFields labels={beclassLabels} values={detail.beclass.values} />
+      : <p>{detail.beclass.status === 'duplicate_binding' ? '同一案件綁定多筆 BeClass，無法判定資料。' : '尚未綁定 BeClass 紀錄。'}</p>}</section>
+    <section><h3>BeClass 照護與特殊計費</h3>{detail.order_information.status === 'ready' && detail.order_information.values
+      ? <ReadOnlyFields labels={orderInformationLabels} values={detail.order_information.values} issues={detail.order_information.field_issues} />
+      : <p>{detail.order_information.status === 'duplicate_binding' ? '同一案件綁定多筆 BeClass，無法判定資料。' : '尚無 BeClass 照護資料。'}</p>}</section>
+    <section><h3>訂單條件</h3>{terms
+      ? <ReadOnlyFields labels={orderTermLabels} values={orderTermValues} />
+      : <p>訂單條件目前不可用（{detail.order_terms.code ?? detail.order_terms.status}）。</p>}</section>
+  </div>;
+};
 
 export interface ClientRosterPageProps {
   embedded?: boolean;
@@ -48,6 +98,11 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
   const [page, setPage] = useState<ClientRegistryPageData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [expandedCaseNo, setExpandedCaseNo] = useState<string | null>(null);
+  const [detail, setDetail] = useState<ClientRegistryDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const detailRequest = useRef(0);
 
   const load = async (nextFilters: RosterFilters) => {
     const request = toRequest(nextFilters);
@@ -81,6 +136,23 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
     void load(nextFilters);
   };
   const sortLabel = (sortBy: ClientRegistrySortBy) => filters.sortBy === sortBy ? (filters.sortOrder === 'asc' ? ' ↑' : ' ↓') : '';
+  const toggleDetail = async (caseNo: string) => {
+    if (expandedCaseNo === caseNo) {
+      detailRequest.current += 1;
+      setExpandedCaseNo(null); setDetail(null); setDetailError(null);
+      return;
+    }
+    const request = ++detailRequest.current;
+    setExpandedCaseNo(caseNo); setDetail(null); setDetailError(null); setDetailLoading(true);
+    try {
+      const result = await clientRegistryClient.query(caseNo);
+      if (detailRequest.current === request) setDetail(result);
+    } catch (caught) {
+      if (detailRequest.current === request) setDetailError(caught instanceof Error ? caught.message : '完整客戶資料載入失敗。');
+    } finally {
+      if (detailRequest.current === request) setDetailLoading(false);
+    }
+  };
 
   return <div className={`client-roster-page${embedded ? ' client-roster-page--embedded' : ''}`}>
     {!embedded && <header><div><h1>客戶名冊清單</h1><p>以案件為單位快速瀏覽與比較；此頁只會查詢，不會修改客戶或訂單資料。</p></div></header>}
@@ -98,18 +170,24 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
       <caption>客戶名冊清單（最多顯示 100 筆符合條件的案件）</caption>
       <thead><tr>
         <th scope="col"><button type="button" onClick={() => changeSort('case_no')}>案件編號{sortLabel('case_no')}</button></th>
+        <th scope="col">虛擬帳號</th>
         <th scope="col"><button type="button" onClick={() => changeSort('customer_name')}>客戶姓名{sortLabel('customer_name')}</button></th>
-        <th scope="col">電話</th><th scope="col">地區</th><th scope="col">BeClass 胎數</th>
+        <th scope="col">電話</th><th scope="col">行政區</th><th scope="col">BeClass 胎數</th>
         <th scope="col"><button type="button" onClick={() => changeSort('service_days')}>服務天數{sortLabel('service_days')}</button></th>
         <th scope="col">下廚需求</th>
         <th scope="col"><button type="button" onClick={() => changeSort('expected_start_date')}>預計服務日期{sortLabel('expected_start_date')}</button></th>
-        <th scope="col">案件／訂單狀態</th>
+        <th scope="col">案件／訂單狀態</th><th scope="col">完整資料</th>
       </tr></thead>
-      <tbody>{page.items.map((item) => <tr key={item.case_no}>
-        <td>{item.case_no}</td><td>{item.name ?? '—'}</td><td>{item.phone ?? '—'}</td><td>{item.city ?? '—'}</td>
+      <tbody>{page.items.map((item) => <React.Fragment key={item.case_no}><tr>
+        <td>{item.case_no}</td><td>{item.virtual_account ?? '—'}</td><td>{item.name ?? '—'}</td><td>{item.phone ?? '—'}</td><td>{item.district ?? '未登錄'}</td>
         <td>{item.multi_birth_count ?? '—'}</td><td>{item.service_days ?? '—'}</td><td>{displayCooking(item.requires_cooking)}</td>
         <td>{item.planned_start_date ?? '—'}</td><td>{item.order_status ?? '—'}</td>
-      </tr>)}</tbody>
+        <td><button type="button" aria-expanded={expandedCaseNo === item.case_no} onClick={() => void toggleDetail(item.case_no)}>{expandedCaseNo === item.case_no ? '收合全部欄位' : '顯示全部欄位'}</button></td>
+      </tr>{expandedCaseNo === item.case_no && <tr className="client-roster-detail-row"><td colSpan={11}>
+        {detailLoading && <p role="status">正在載入完整客戶資料…</p>}
+        {detailError && <p role="alert">{detailError}</p>}
+        {detail?.case_no === item.case_no && <ReadOnlyDetail detail={detail} />}
+      </td></tr>}</React.Fragment>)}</tbody>
     </table></div>}
   </div>;
 };

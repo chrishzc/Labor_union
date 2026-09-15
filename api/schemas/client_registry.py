@@ -17,9 +17,11 @@ class _StrictModel(BaseModel):
 class ClientRegistrySummaryView(_StrictModel):
     client_id: int = Field(gt=0)
     case_no: str = Field(min_length=1, max_length=50)
+    virtual_account: str | None = None
     name: str | None = None
     phone: str | None = None
     city: str | None = None
+    district: str | None = None
     multi_birth_count: str | None = None
     service_days: int | None = Field(default=None, gt=0)
     requires_cooking: bool | None = None

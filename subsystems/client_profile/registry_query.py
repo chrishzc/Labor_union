@@ -25,9 +25,11 @@ class ClientRegistryContractError(ValueError):
 class ClientRegistrySummary:
     client_id: int
     case_no: str
+    virtual_account: str | None
     name: str | None
     phone: str | None
     city: str | None
+    district: str | None
     multi_birth_count: str | None
     service_days: int | None
     requires_cooking: bool | None
@@ -191,9 +193,11 @@ def _summary(row: Mapping[str, Any]) -> ClientRegistrySummary:
     return ClientRegistrySummary(
         client_id,
         _required_text(row.get("case_no"), 50, "client_registry_case_no_invalid"),
+        _nullable_text(row.get("virtual_account")),
         _nullable_text(row.get("name")),
         _nullable_text(row.get("phone")),
         _nullable_text(row.get("city")),
+        _nullable_text(row.get("district")),
         _nullable_text(row.get("multi_birth_count")),
         _nullable_positive_int(row.get("service_days"), "client_registry_summary_service_days_invalid"),
         _nullable_bool(row.get("requires_cooking"), "client_registry_summary_requires_cooking_invalid"),

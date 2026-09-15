@@ -353,7 +353,7 @@ Preview／確認／Apply／receipt/readback，列為 `completed`；外部 LINE �
 
 ### 2026-09-09 外部平台自動轉送與最終 PDF 完成裁決
 
-2026-09-10 管理端功能修復人工確認：契約收付日採實際收付紀錄，未收付留白，不以應繳／應付期限替代。2026-09-14 再確認：初步接案詢問與正式推薦寄送前預覽可用目前訂單條款、Payroll 費率及預計服務期間投影「預估總薪資／預估發薪日」；必須明確標示預估，不據此建立 commitment、assignment 或正式應付。accepted plan 的契約準備不要求先存在 commitment，沿用下列 final PDF 完成順序；準備／預覽本身不建立 commitment。
+2026-09-15 管理端功能修復人工確認：客戶契約的訂金、第一期、第二期及樓層費日期一律顯示 Client Finance 付款條款的預計繳款日；實際入帳日期只保留在 ledger／核銷紀錄，不投影至契約。此裁決取代 2026-09-10「契約收付日採實際收付紀錄」的舊決定。2026-09-14 再確認：初步接案詢問與正式推薦寄送前預覽可用目前訂單條款、Payroll 費率及預計服務期間投影「預估總薪資／預估發薪日」；必須明確標示預估，不據此建立 commitment、assignment 或正式應付。accepted plan 的契約準備不要求先存在 commitment，沿用下列 final PDF 完成順序；準備／預覽本身不建立 commitment。
 
 同日追加人工裁決，並於 2026-09-11 再確認：非全補助的補助市民訂單由客戶依一般付款條款先代墊完整服務薪資，服務完成後才退符合資格的補助款；全補助案件限補助市民、有效正式服務不超過 120 小時且客戶應付為 0，客戶不出資，實務申請通常排滿 120 小時。無論哪一類，同一 assignment 的月嫂都只有一筆整筆應付報酬；舊契約的補助／雇主自費報酬及其兩筆付款欄不再適用。服務人員契約及詢問資訊沿用 Staff Payables 整筆應付，不推算資金來源分拆，也不把市府補助金額當作月嫂薪資。一般／非全補助案件於結案後次月 15 日付款，全補助案件於結案後第二個月 15 日付款。
 
@@ -415,9 +415,11 @@ fingerprint、blockers、preview fingerprint與PDF result。正式document persi
 也不重新計算business facts。preview與正式download bytes/digest依既有version contract保持一致可追溯。
 本裁決解除public-entry及owner-projection blocker，但依Task 96 priority尚未開始此後順位implementation。
 
-### 2026-09-01 客戶契約付款欄位人工裁決
+### 2026-09-15 客戶契約付款欄位人工裁決
 
-- 客戶契約 D36「服務款項匯款帳號」固定使用 Client Finance 的工會／代收付帳戶 current
-  configuration；禁止綁定月嫂或其他 Staff Payables 帳戶。沒有 current configuration 時不得列印。
-- 樓層費與訂金一起支付，因此 C37「樓層費入帳日」使用同一筆 Client Finance
-  `deposit_due_date`，不得另取實際收款日或建立第二套日期算法。
+- C34、C35、C36 分別使用 Client Finance 的 `deposit_due_date`、`first_payment_due_date`、
+  `second_payment_due_date`；C37 樓層費與訂金一起支付，使用同一筆 `deposit_due_date`。
+  實際入帳日不得套入契約，也不得由 Contract Signing 建立第二套日期算法。
+- D36 固定顯示本案專屬虛擬帳號。帳號以 Client Finance／Finance Import 共用的案件編號規則產生，
+  後續銀行核銷以同一帳號解析回唯一案件；不得改用全域工會／代收付帳戶、月嫂帳戶、環境變數或
+  Excel placeholder。案件編號無法產生合法虛擬帳號時不得列印。

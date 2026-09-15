@@ -10,6 +10,9 @@ import pymysql
 import math
 from datetime import datetime, date, timedelta
 from dotenv import load_dotenv
+from subsystems.client_finance.virtual_account_resolution import (
+    build_client_virtual_account,
+)
 
 # 從專案根目錄的 .env 讀取資料庫連線設定 (若 .env 不存在或缺少某欄位，則回退為原本的預設值)
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
@@ -91,14 +94,8 @@ def safe_date(val):
     return val
 
 def generate_virtual_account(case_no) -> str:
-    """Build a 14-digit account only from one canonical nine-digit case number."""
-    case_no_text = str(case_no) if case_no is not None else ""
-    if len(case_no_text) != 9 or not case_no_text.isascii() or not case_no_text.isdigit():
-        return ""
-
-    roc_year = case_no_text[:3]
-    sequence = int(case_no_text[3:])
-    return f"99781699{roc_year}{sequence:03d}"
+    """Compatibility wrapper around the Client Finance-owned rule."""
+    return build_client_virtual_account(case_no) or ""
 
 def get_connection():
     """建立並回傳資料庫連線"""

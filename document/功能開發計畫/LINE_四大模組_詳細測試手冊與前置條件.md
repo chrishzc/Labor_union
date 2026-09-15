@@ -1,6 +1,6 @@
 # LINE 四大模組詳細測試手冊與 Agent 前置條件規範
 
-> **文件版本**：v2.6（2026-09-14，M2 常見問答與 AI 智慧問答專屬 LIFF 重構、選單更新與零推播額度設計）
+> **文件版本**：v2.7（2026-09-15，補齊 M4-07 三方服務群組之群組綁定、邀請連結轉發私訊推播、成員進出事件與後台監控測試規範）
 > **原始對齊程式版本**：`main @ 0988f6c430472343662aa1f8989ab2af9732bde3`；包含 PR #299 及後續對齊修訂。開始測試前須確認實際執行版本已包含修正，PR 存在不等於 main 已合併或環境已部署。
 > **適用範圍**：LINE 官方帳號、LIFF、FastAPI、MySQL、React 管理後台、M1～M4 repository-local 與手機 E2E 驗收。
 > **權威依據**：`document/架構重整/01_規格基線/26_LINE四大模組Eraser流程圖轉錄與驗收基線.md`；同目錄規格 17、20 的 owner 邊界，以及 2026-09-13 使用者八點業務裁決（未解決客服工單回覆、月嫂履歷推薦卡兩大按鈕、Match_Success 群組通知、Zero-Pool 拒絕降維群組通知、確認實際服務時間、月嫂檔期試算通知專員）。現有實作與本手冊不得自行取消規格 26 的 required flow acceptance。
@@ -69,6 +69,7 @@
 | **M4-04** | 月嫂請假與代班協調 | `REPO_LOCAL_PASS / PREPARED` | 2026-09-13 | ⏳ **待測**：月嫂提出請假待辦，工會受理並於案件行事曆完成代班排班。 |
 | **M4-05** | 代班後 Payroll / Staff Payables | `REPO_LOCAL_PASS / PREPARED` | 2026-09-13 | ⏳ **待測**：Scheduling 代班排定後自動投影 Payroll 責任分拆，薪資可追溯至排班事實。 |
 | **M4-06** | 服務前時間確認與檔期試算 | `REPO_LOCAL_PASS / PREPARED` | 2026-09-13 | ⏳ **待測**：產婦確認實際服務時間（Actual Service Dates）；月嫂排班檔期由系統自動試算衝突並直接通知工會專員人工協調。 |
+| **M4-07** | 三方服務群組綁定與邀請發送 | `REPO_LOCAL_PASS / PREPARED` | 2026-09-15 | ⏳ **待測**：工會人員於服務群組輸入「綁定訂單 <案號>」完成綁定；輸入「發送邀請連結 <網址>」自動向媽媽與月嫂私訊推播 Flex 邀請卡；成員加入自動更新為 active；後台可即時回讀。 |
 
 ---
 
@@ -970,6 +971,159 @@ Agent 執行 repository-local readback：
 
 ---
 
+## M4-07 三方服務群組綁定與邀請發送（Order Group）
+
+### 業務場景與架構定位
+
+- **三方服務群組定位**：案件媒合成功並完成簽約後，工會專員為該案件建立「專屬三方服務群組」（工會專員 + 產婦客戶 + 服務月嫂）。官方帳號（Bot）受邀入群作為訊息轉發與服務協調中樞。
+- **與 M4-01 全域異常通知群組之區隔**：
+  - **M4-01 異常通知群組**：全系統唯一的工會幹部內部告警群組（Singleton），由指令「`設定異常通知群組`」綁定，用於接收系統重大異常與客訴 HIGH 工單告警。
+  - **M4-07 三方服務群組**：一案一群組（1 Order : 1 Group），透過專屬指令「`綁定訂單 <案號>`」與「`發送邀請連結 <網址>`」執行案件關聯與各別私訊邀請。
+- **身分權限嚴格防呆（fail-closed）**：
+  - 群組指令僅限已在系統中完成 LINE 身分綁定且具備 `order_group.bind` 能力（如 `line_agent`, `line_manager`, `system_admin`）之工會人員執行。
+  - 非工會人員或未綁定帳號在群組發言，系統一律安全拒絕，防止未授權操作。
+- **個人化 1 對 1 Flex 邀請卡推播（零個資廣播）**：
+  - 專員於群組發送邀請指令時，系統不會在群組中公開 @ 任何人或廣播敏感資訊，而是由訂單受眾事實（`OrderLineAudience`）自動取得案件媽媽與月嫂的個人 `line_user_id`。
+  - 系統分別向媽媽與月嫂的「個人 1 對 1 官方帳號聊天室」推播專屬稱謂之 Flex 邀請卡（媽媽收到「媽媽您好…」、月嫂收到「月嫂您好…」），內嵌綠色【加入服務群組】按鈕。
+- **群組成員監聽與狀態自適應晉升**：
+  - 系統監聽 LINE Webhook `memberJoined` 與 `memberLeft`。
+  - 成員加入群組時，更新參與者狀態為 `joined`；當案件之媽媽與月嫂皆加入群組時，群組狀態自動由 `inviting` 晉升為 `active`（活躍中）。
+  - 若任一關鍵成員離群，群組狀態自動轉為 `attention`（需注意），提示專員介入關心。
+
+### 設備與帳號角色準備
+
+- **測試帳號組合**：
+  - **帳號 A（工會專員）**：已綁定工會幹部身分，於 LINE 建立測試群組並將官方帳號拉入群組。
+  - **帳號 B（產婦/媽媽）**：已綁定測試案件之客戶身分（`customer_line_user_id`）。
+  - **帳號 C（月嫂/服務人員）**：已綁定測試案件指派之月嫂身分（`staff_line_user_ids`）。
+  - *註：若測試者手邊僅有 1～2 支手機，可由 Agent 前置將同一測試帳號或模擬帳號註冊於案件受眾名冊中，同樣能完整驗證指令分發、Flex 私訊發送與後台回讀。*
+- **LINE 測試群組**：
+  - 建立一個新的 LINE 群組（群組名稱建議標記案號，例如：`心愛月嫂服務群-CASE-2026-M301`）。
+  - 將 LINE 官方帳號加入該群組。
+
+### Agent 一鍵前置任務
+
+Agent 在 development/test DB 執行前置檢查與準備：
+
+1. **檢查案件與受眾事實**：
+   - 確認測試案號（如 `CASE-2026-M301`）存在且狀態非 `訂單取消`。
+   - 確認 `clients.line_user_id` 與 `line_identity_role_bindings`（`subject_type='customer'`、`binding_status='bound'`）存在。
+   - 確認該案件有指派月嫂（`case_staff_assignments` 或 `orders.staff_id`），且該月嫂之 `staff.line_user_id` 與 `line_identity_role_bindings`（`subject_type='staff'`、`binding_status='bound'`）存在。
+2. **檢查操作者權限**：
+   - 確認測試帳號 A 的 `line_user_id` 已綁定工會角色（`subject_type='admin'`），且具備 `order_group.bind` 權限。
+3. **檢查群組綁定初態**：
+   - 查詢 `line_order_group_bindings`，確認該案號目前處於可綁定狀態（若有舊測試資料，確認 `aggregate_version` 或由 Agent 進行安全重置）。
+4. **回傳手機測試包**：案號、操作者 LINE ID、客戶 LINE ID、月嫂 LINE ID、合法邀請連結範例。
+
+### 手機操作與群組指令（真人驗收 4 步驟）
+
+#### 步驟 1：工會人員於 LINE 群組輸入「綁定訂單」指令
+
+工會人員（帳號 A）在剛建立且已拉入官方帳號的 LINE 測試群組中打字輸入：
+
+```text
+綁定訂單 CASE-2026-M301
+```
+
+> **預期系統即時回覆（群組內）**：
+> ```text
+> 已將本群組綁定訂單 CASE-2026-M301。請再輸入「發送邀請連結 LINE群組網址」。
+> ```
+
+- **底層驗證點**：
+  - 系統在單一交易中寫入 `line_order_group_bindings`（`binding_status = 'bound'`，`group_id` 記錄為該群組 ID）。
+  - 同步案件受眾名冊至 `line_order_group_participants`（媽媽與月嫂的 `invitation_status` 設為 `pending`）。
+  - 寫入事件至 `line_order_group_binding_events`（`action = 'bound'`）。
+
+#### 步驟 2：工會人員於 LINE 群組輸入「發送邀請連結」指令
+
+1. 工會人員於 LINE 群組右上角選單 → 點擊「邀請」→ 點擊「邀請網址」→ 複製群組專屬邀請網址（格式例如：`https://line.me/R/ti/g/abcdef12345`）。
+2. 在該群組中打字輸入：
+
+```text
+發送邀請連結 https://line.me/R/ti/g/abcdef12345
+```
+
+> **預期系統即時回覆（群組內）**：
+> ```text
+> 訂單 CASE-2026-M301 的邀請已排入發送，共 2 位。
+> ```
+
+- **底層驗證點**：
+  - 系統驗證邀請網址符合官方安全性規則（必須為 `https://line.me/R/ti/g/...` 或 `https://line.me/ti/g/...`，禁止無關 query parameters 或外部域名）。
+  - 系統更新 `line_order_group_bindings` 狀態為 `inviting`，更新 `last_invitation_at_utc`。
+  - 寫入執行期事件至 `line_order_group_runtime_events`（`event_type = 'invitation_relayed'`），記錄 64 碼 `invitation_fingerprint`。
+  - 系統將兩筆個人發送任務排入 `line_delivery_tasks`。
+
+#### 步驟 3：產婦（媽媽）與月嫂查收個人 LINE 私訊 Flex 邀請卡
+
+分別開啟媽媽手機（帳號 B）與月嫂手機（帳號 C）的 LINE 官方帳號 1 對 1 聊天室：
+
+- **產婦（媽媽）手機畫面**：
+  - 收到 Flex 卡片，標題為【**服務群組邀請**】。
+  - 內容顯示：
+    - `案件編號：CASE-2026-M301`
+    - `媽媽您好，請點下方按鈕加入本案服務群組。`
+  - 底部綠色按鈕：【**加入服務群組**】。
+- **月嫂手機畫面**：
+  - 收到 Flex 卡片，標題為【**服務群組邀請**】。
+  - 內容顯示：
+    - `案件編號：CASE-2026-M301`
+    - `月嫂您好，請點下方按鈕加入本案服務群組。`
+  - 底部綠色按鈕：【**加入服務群組**】。
+
+#### 步驟 4：成員加入群組與狀態自適應晉升（`active`）
+
+1. 媽媽（帳號 B）點擊【加入服務群組】按鈕，手機開啟 LINE 群組並點選「加入」。
+2. 月嫂（帳號 C）點擊【加入服務群組】按鈕，手機開啟 LINE 群組並點選「加入」。
+3. **驗證結果**：
+   - 官方伺服器接收 LINE Webhook `memberJoined` 事件。
+   - `line_order_group_participants` 更新各成員的 `invitation_status = 'joined'` 與 `joined_at_utc`。
+   - 當名冊內的所有參與者（媽媽與月嫂）皆已完成加入（`invitation_status <> 'joined'` 計數為 0）時，系統自動將 `line_order_group_bindings.binding_status` 晉升為 `active`，並記錄 `activated_at_utc`！
+
+### 異常防呆與錯誤提示驗收（7 大防呆分支）
+
+| 情境 | 操作與輸入 | 預期系統安全回覆 / 結果 | 防呆驗證要點 |
+|---|---|---|---|
+| **分支 A：非工會人員發言** | 一般客戶或未綁定身分之帳號在群組輸入 `綁定訂單 <案號>` | `此操作只允許已綁定 LINE 的工會人員使用。` | 嚴格防禦未授權發送者任意綁定案件。 |
+| **分支 B：查無案件** | 輸入不存在之案號，如 `綁定訂單 NON-EXIST-999` | `找不到指定訂單。` | 查無 Orders 根事實即刻 fail-closed。 |
+| **分支 C：訂單已取消** | 輸入狀態為 `訂單取消` 之案號 | `已取消的訂單不能綁定服務群組。` | 已終止/取消案件禁止再建服務群組。 |
+| **分支 D：未綁定即發邀請** | 在尚未執行綁定之新群組直接輸入 `發送邀請連結 <網址>` | `本群組尚未綁定訂單，請先輸入「綁定訂單 案件編號」。` | 必須先有 case binding 才能派送邀請。 |
+| **分支 E：受眾尚未綁定 LINE** | 案件之媽媽或指派月嫂尚未綁定 LINE（查無 `line_user_id`） | `訂單的媽媽或月嫂尚未完成 LINE 綁定。` | 避免邀請發送進入黑洞，促使專員先引導綁定。 |
+| **分支 F：非法邀請網址格式** | 輸入外部網址（如 `https://google.com`）或帶 query 之網址 | 系統安全攔截驗證錯誤，不發出無效推播。 | 嚴格比對 `https://line.me/(R/)?ti/g/[^/?#]+`。 |
+| **分支 G：群組重複綁定衝突** | 在已綁定訂單 A 的群組再次輸入 `綁定訂單 <案號B>` | `此群組已綁定其他訂單。` | 一個 LINE 群組僅限綁定單一有效訂單。 |
+
+### React 管理後台回讀核對
+
+1. **清單與狀態核對**：
+   - 登入工會管理後台 → 進入【**LINE 管理**】→ 切換至【**三方服務群組**】Tab（`line.tab.order-groups`）。
+   - 表格中應正確列出 `#{case_no}`，且群組狀態標籤應依步驟顯示 `已綁定 (bound)` → `邀請中 (inviting)` → `活躍中 (active)`。
+   - 支援分頁（numbered query：`page`、`pageSize`、`total`、`totalPages`），前端不進行假切片。
+2. **Drawer 明細與歷程核對**：
+   - 點擊該列「**查看明細**」開啟側邊抽屜（Drawer）。
+   - 核對內容：
+     - **基本資訊**：案件編號、LINE 群組 ID、當前狀態標籤。
+     - **事件歷程**：時間由新至舊依序列出 `member_joined`、`invitation_relayed`、`bound` 等事件類型與發生時間。
+     - **邀請指紋**：歷程中記錄安全的 64 碼 SHA-256 `invitation_fingerprint`，群組邀請之敏感 token 絕不洩漏至日誌或前端。
+
+### Current API / Owner / Schema 對照
+
+- **群組 Webhook 處理**：
+  - Ingress：`LineWebhookEventConsumer` → `LineWebhookIdentityHandlers.handle_message` & `handle_group_membership`
+  - Owner：`subsystems.line.order_group_application.LineOrderGroupApplication`
+  - 網址安全性校驗：`domains.line.order_group._validate_invitation_url`
+- **管理端 Query API**：
+  - `GET /api/v1/line/order-groups/numbered?status={status}&page={page}&page_size={page_size}`
+  - `GET /api/v1/line/order-groups/{case_no}`
+  - `GET /api/v1/line/order-groups/{case_no}/events/numbered?page={page}&page_size={page_size}`
+- **資料庫 SSOT 表**：
+  - `line_order_group_bindings`：記錄案件與 LINE 群組 ID 之一對一綁定關係、狀態（`unbound` / `bound` / `inviting` / `active` / `attention` / `replaced` / `released`）及樂觀鎖版本（`aggregate_version`）。
+  - `line_order_group_participants`：記錄案件參與者（`customer` 媽媽、`staff` 月嫂）之 `line_user_id`、邀請狀態（`pending` / `joined` / `left`）與加入時間。
+  - `line_order_group_binding_events`：記錄群組綁定與換群事件（`bound` / `replaced`）。
+  - `line_order_group_runtime_events`：記錄執行期邀請轉發與成員進出事件（`invitation_relayed` / `member_joined` / `member_left`）。
+
+---
+
 # 8. Agent 快速前置 Prompt 範本
 
 ## 8.1 任一案例
@@ -1016,6 +1170,17 @@ Agent 執行 repository-local readback：
 建立一筆 development 測試案件與已完成意願調查的月嫂候選人，包含姓名、技能、證書與履歷。
 透過正式端點 POST /api/v1/matches/plans/{case_no}/{plan_id}/customer-confirmation 送出履歷推薦卡。
 停在客戶手機即將收到輪播卡與兩顆按鈕的狀態，回傳手機測試包。
+```
+
+## 8.6 M4-07 三方服務群組前置
+
+```text
+請替我準備 M4-07 三方服務群組綁定與發送邀請手機實測。
+限制：使用 development/test 環境，不變更 production。
+確認已有一筆有效 development 測試案件（如 CASE-2026-M301），且該案件之客戶（媽媽）與指派月嫂（staff）均已在 line_identity_role_bindings 處於 bound 狀態（若單機測試可使用同一組已綁定測試 LINE ID 或前置提供兩組測試 user_id）。
+確認執行測試的工會人員帳號已綁定工會幹部身分，並具備 order_group.bind 權限。
+檢查 line_order_group_bindings，確認案號尚未被其他群組鎖定或重設為可綁定狀態。
+完成後回傳「手機測試包」：case_no、可發送的合法邀請連結範例、工會人員群組下指令步驟、媽媽與月嫂預期收到的私訊內容、以及後台三方服務群組查驗點。
 ```
 
 ---
@@ -1106,6 +1271,9 @@ B = staff
 | Leave intake root | `scheduling_staff_leave_request_aggregates` + events／receipts |
 | Formal leave/substitution | `/api/v1/orders/{case_no}/leave-substitution/preview`、`/apply` |
 | Payroll SSOT | `staff_obligations` / `staff_obligation_events` 等 current Payroll owner |
+| Order group commands | LINE 群組文字指令：`綁定訂單 <case_no>`、`發送邀請連結 <url>` |
+| Order group query API | `GET /api/v1/line/order-groups/numbered`、`GET /api/v1/line/order-groups/{case_no}/events/numbered` |
+| Order group SSOT | `line_order_group_bindings`、`line_order_group_participants`、`line_order_group_binding_events`、`line_order_group_runtime_events` |
 
 ---
 

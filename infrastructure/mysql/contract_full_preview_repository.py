@@ -27,6 +27,7 @@ from infrastructure.mysql.order_terms_read_model import (
 )
 from domains.client_finance.obligation_planning import build_client_finance_terms_candidate, ClientChargeDay
 from shared_kernel.money import MoneyNTD
+from subsystems.client_finance.virtual_account_resolution import build_client_virtual_account
 from subsystems.contract_signing.staff_contract_application import _allocate_commitment_service_days
 from subsystems.contract_signing.full_contract_preview import (
     ContractPreviewScope,
@@ -98,7 +99,6 @@ class MySqlFullContractProjectionRepository:
             plan = _load_precontract_plan(self._connection, case_no, case)
             if plan is not None:
                 _extend_precontract_facts(self._connection, case_no, facts, owners, plan)
-        _extend_actual_receipt_dates(self._connection, case_no, facts, owners)
         return FullContractOwnerProjection(
             case_no=case_no,
             scope=ContractPreviewScope.CLIENT,
@@ -264,27 +264,6 @@ def _load_precontract_plan(connection, case_no, case):
     return {"id": plans[0]["id"], "segments": segments, "allocations": allocations}
 
 
-def _extend_actual_receipt_dates(connection, case_no, facts, owners):
-    """Project actual surviving receipt dates; deadlines never fill receipt cells."""
-    with connection.cursor() as cursor:
-        cursor.execute("SELECT DISTINCT obligation.obligation_type,ledger.occurred_on "
-                       "FROM client_ledger_entries ledger "
-                       "JOIN client_ledger_obligation_allocations allocation ON allocation.ledger_entry_id=ledger.id "
-                       "JOIN client_obligations obligation ON obligation.obligation_identity=allocation.obligation_identity "
-                       "WHERE ledger.case_no=%s AND obligation.case_no=%s AND ledger.entry_type='receipt' "
-                       "AND allocation.amount_ntd>0 AND ledger.amount_ntd>COALESCE((SELECT SUM(reversal.amount_ntd) "
-                       "FROM client_ledger_entries reversal WHERE reversal.reversal_of_entry_id=ledger.id "
-                       "AND reversal.entry_type='reversal'),0) ORDER BY obligation.obligation_type,ledger.occurred_on", (case_no, case_no))
-        rows = tuple(cursor.fetchall() or ())
-    dates = {stage: tuple(sorted({str(row["occurred_on"]) for row in rows
-                                  if row["obligation_type"] == stage and row.get("occurred_on") is not None}))
-             for stage in ("deposit", "first", "second")}
-    for stage, values in dates.items():
-        facts[f"{stage}_receipt_date"] = "、".join(values) or None
-    facts["floor_fee_receipt_date"] = facts["deposit_receipt_date"] if facts.get("floor_fee") else None
-    owners["client_receipt_dates"] = projection_fingerprint(dates)
-
-
 def _extend_precontract_facts(connection, case_no, facts, owners, plan):
     dates = tuple(day for _, day in plan["allocations"])
     facts.update({"committed_service_start_date": dates[0], "committed_service_end_date": dates[-1],
@@ -294,7 +273,6 @@ def _extend_precontract_facts(connection, case_no, facts, owners, plan):
         order = select_order(cursor, case_no, lock=False)
         finance = load_contract_client_finance_facts(cursor, order, lock=False)
         finance = replace(finance, charge_days=tuple(ClientChargeDay(day, False) for day in dates))
-        destination = _load_client_payment_destination(cursor)
     candidate = build_client_finance_terms_candidate(finance, f"contract-preview:{case_no}")
     facts["total_hours"] = Decimal(len(dates)) * Decimal(
         str(finance.service_hours_per_day)
@@ -303,11 +281,15 @@ def _extend_precontract_facts(connection, case_no, facts, owners, plan):
     facts["client_finance_self_pay_days"] = sum(len(stage.service_dates) for stage in candidate.stage_plans if stage.payment_stage.value != "deposit")
     for stage in candidate.stage_plans:
         facts[_stage_fact_key(stage.payment_stage.value, "amount")] = stage.amount.amount
+        facts[_stage_fact_key(stage.payment_stage.value, "due_date")] = stage.due_date
     facts["first_payment_amount"] = facts.get("first_amount")
     facts["second_payment_amount"] = facts.get("second_amount")
-    if destination is not None:
-        facts["client_payment_destination_account"] = destination["account_display"]
-    owners["client_finance"] = candidate.fingerprint.value
+    owners["client_finance"] = projection_fingerprint(
+        {
+            "candidate": candidate.fingerprint.value,
+            "client_virtual_account": facts.get("client_virtual_account"),
+        }
+    )
     _project_subsidy_coverage(facts, owners)
 
 
@@ -400,6 +382,7 @@ def _common_facts(case: dict[str, object]) -> dict[str, object]:
     case_import = project_order_information(case.get("survey_details"))
     return {
         "case_no": case.get("case_no"),
+        "client_virtual_account": build_client_virtual_account(case.get("case_no")),
         "client_name": case.get("client_name"),
         "phone": case.get("client_phone"),
         "address": case.get("client_address"),
@@ -496,7 +479,6 @@ def _extend_owner_facts(
             )
             commitment = _load_commitment(cursor, case_no)
             rate = _load_assignment_payroll_rate(cursor, assignment_id)
-            payment_destination = _load_client_payment_destination(cursor)
             refund_destination = _load_client_refund_destination(cursor, case_no)
         payment = finance.payment_terms
         facts.update(
@@ -514,7 +496,7 @@ def _extend_owner_facts(
         )
         for stage in finance_candidate.stage_plans:
             facts[_stage_fact_key(stage.payment_stage.value, "amount")] = stage.amount.amount
-            facts[_stage_fact_key(stage.payment_stage.value, "date")] = stage.due_date
+            facts[_stage_fact_key(stage.payment_stage.value, "due_date")] = stage.due_date
         # Client Finance already owns the typed stage plan.  Expose its
         # aggregate as a named projection so the XLSX renderer does not
         # recalculate or combine money fields.
@@ -539,6 +521,7 @@ def _extend_owner_facts(
                     "second_payment_due_date": payment.second_payment_due_date,
                 },
                 "candidate": finance_candidate.fingerprint.value,
+                "client_virtual_account": facts.get("client_virtual_account"),
             }
         )
         owners["payroll"] = projection_fingerprint(
@@ -612,15 +595,6 @@ def _extend_owner_facts(
                         "policy_kind": rate["policy_kind"],
                     }
                 )
-        if payment_destination is not None:
-            facts["client_payment_destination_account"] = payment_destination["account_display"]
-            owners["client_finance"] = projection_fingerprint(
-                {
-                    "client_finance": owners["client_finance"],
-                    "payment_destination_revision": payment_destination["revision"],
-                    "account_display": payment_destination["account_display"],
-                }
-            )
         if refund_destination is not None:
             facts["bank_code"] = refund_destination["bank_code"]
             facts["bank_account"] = refund_destination["bank_account"]
@@ -679,15 +653,6 @@ def _load_assignment_payroll_rate(cursor: Any, assignment_id: int | None) -> dic
         "SELECT hourly_rate_ntd,policy_version,policy_kind "
         "FROM assignment_payroll_rate_snapshots WHERE assignment_id=%s",
         (assignment_id,),
-    )
-    return cursor.fetchone()
-
-
-def _load_client_payment_destination(cursor: Any) -> dict[str, object] | None:
-    """Read the single Client Finance-owned union collection destination."""
-    cursor.execute(
-        "SELECT account_display,revision "
-        "FROM client_payment_destination_configuration_current WHERE singleton_id=1"
     )
     return cursor.fetchone()
 

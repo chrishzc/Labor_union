@@ -8,6 +8,7 @@ from typing import Any
 
 from domains.case_import.order_information import project_order_information
 from subsystems.case_import.beclass_correction_workflow import allows_manual_beclass_source
+from subsystems.client_finance.virtual_account_resolution import build_client_virtual_account
 
 
 _CLIENT_FIELDS = (
@@ -23,6 +24,11 @@ _SORT_COLUMNS = {
     "service_days": "o.service_days",
     "expected_start_date": "o.start_date",
 }
+_SUPPORTED_DISTRICTS = (
+    "香山區", "東區", "北區", "竹北市", "竹東鎮", "新埔鎮", "關西鎮",
+    "湖口鄉", "新豐鄉", "芎林鄉", "橫山鄉", "北埔鄉", "寶山鄉", "峨眉鄉",
+    "尖石鄉", "五峰鄉", "頭份市", "竹南鎮",
+)
 
 
 class MySqlClientRegistryQueryRepository:
@@ -76,7 +82,7 @@ class MySqlClientRegistryQueryRepository:
         parameters.append(limit + 1)
         with self._connection.cursor() as cursor:
             cursor.execute(
-                "SELECT c.id AS client_id,o.case_no,c.name,c.phone,c.city,"
+                "SELECT c.id AS client_id,o.case_no,c.name,c.phone,c.city,c.address,"
                 + birth_count_sql + " AS multi_birth_count,"
                 "o.service_days,o.requires_cooking,"
                 "o.start_date AS planned_start_date,o.status AS order_status "
@@ -90,7 +96,11 @@ class MySqlClientRegistryQueryRepository:
                 tuple(parameters),
             )
             rows = tuple(cursor.fetchall() or ())
-        visible = rows[:limit]
+        visible = tuple({
+            **row,
+            "virtual_account": build_client_virtual_account(row.get("case_no")),
+            "district": _client_district(row.get("city"), row.get("address")),
+        } for row in rows[:limit])
         next_cursor = str(visible[-1]["case_no"]) if len(rows) > limit and visible else None
         return visible, next_cursor
 
@@ -188,6 +198,11 @@ def _decode(value: Any) -> dict[str, Any]:
     except (TypeError, ValueError):
         return {}
     return result if isinstance(result, dict) else {}
+
+
+def _client_district(city: object, address: object) -> str | None:
+    location = f"{city or ''}{address or ''}"
+    return next((district for district in _SUPPORTED_DISTRICTS if district in location), None)
 
 
 __all__ = ["MySqlClientRegistryQueryRepository"]

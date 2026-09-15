@@ -1,6 +1,7 @@
 import pytest
 
 from subsystems.client_finance.virtual_account_resolution import (
+    build_client_virtual_account,
     resolve_client_virtual_account,
 )
 
@@ -15,6 +16,15 @@ class _Cursor:
 
     def fetchall(self):
         return self.matches
+
+
+def test_builds_contract_virtual_account_from_canonical_case_number():
+    assert build_client_virtual_account("115000157") == "99781699115157"
+
+
+@pytest.mark.parametrize("case_no", [None, "CASE-1", "115001234", "１１５０００１５７"])
+def test_virtual_account_builder_rejects_unrepresentable_case_number(case_no):
+    assert build_client_virtual_account(case_no) is None
 
 
 @pytest.mark.parametrize("value", [None, 99781699114001, "9978169911400X", "99781699114001 "])

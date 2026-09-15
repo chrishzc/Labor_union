@@ -5,12 +5,13 @@
 - subsystem: `client-finance`
 
 ## Responsibility
-由 Client Finance 驗證客戶收款與應收義務，編排 fresh Preview／Apply、核銷分配與收據。需人工核對的金額差異必須在正式帳務寫入前拒絕；明示超收處理沿既有退款義務流程。
+由 Client Finance 擁有案件專屬虛擬帳號的確定性產生／解析規則，驗證客戶收款與應收義務，並編排 fresh Preview／Apply、核銷分配與收據。需人工核對的金額差異必須在正式帳務寫入前拒絕；明示超收處理沿既有退款義務流程。
 
 ## Implementation
 - primary:
   - `domains/client_finance/reconciliation.py`
   - `subsystems/client_finance/reconciliation_workflow.py`
+  - `subsystems/client_finance/virtual_account_resolution.py`
   - `infrastructure/mysql/client_receipt_reconciliation_repository.py`
 - entrypoints:
   - `api/routes/client_receipt_reconciliation.py`
@@ -26,6 +27,7 @@
 ## Verification
 - layout_status: `custom_current`
 - test_root: `tests/domains/client-finance/subsystems/client-finance/integration/test_client_receipt_overage.py`
+- test_root: `tests/domains/client-finance/subsystems/client-finance/integration/test_client_virtual_account_resolution.py`
 - routing: `.arch-map/tests/domains/client-finance/subsystems/client-finance/index.md`
 
 ## Provenance

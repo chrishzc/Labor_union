@@ -9,6 +9,17 @@ import re
 _VIRTUAL_ACCOUNT_PATTERN = re.compile(r"^99781699([0-9]{3})([0-9]{3})$")
 
 
+def build_client_virtual_account(case_no: object) -> str | None:
+    """Build the per-case Client Finance collection account."""
+    normalized = str(case_no) if case_no is not None else ""
+    if len(normalized) != 9 or not normalized.isascii() or not normalized.isdigit():
+        return None
+    sequence = int(normalized[3:])
+    if sequence > 999:
+        return None
+    return f"99781699{normalized[:3]}{sequence:03d}"
+
+
 def _pending(reason: str) -> dict[str, str | None]:
     return {"result": "pending", "case_no": None, "reason": reason}
 
@@ -39,4 +50,4 @@ def resolve_client_virtual_account(cursor: Any, cancellation_code: Any) -> dict[
     return {"result": "resolved", "case_no": case_no, "reason": None}
 
 
-__all__ = ["resolve_client_virtual_account"]
+__all__ = ["build_client_virtual_account", "resolve_client_virtual_account"]

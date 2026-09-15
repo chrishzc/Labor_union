@@ -5,7 +5,7 @@
 - subsystem: `client-finance`
 
 ## Responsibility
-擁有客戶付款給工會／代收付的 current account configuration、revision、event 與 receipt；提供財務管理 UI 的 Query／Preview／Apply，並向 Contract Signing 提供唯一 typed payment-destination projection。不得讀取或覆寫服務人員個人帳戶。
+擁有既有工會／代收付 current account configuration、revision、event 與 receipt，並提供財務管理 UI 的 Query／Preview／Apply。2026-09-15 起 Contract Signing 不再使用此設定；客戶契約改讀 Client Finance 與 Finance Import 共用規則產生的本案專屬虛擬帳號。不得讀取或覆寫服務人員個人帳戶。
 
 ## Implementation
 - `domains/client_finance/payment_destination.py`

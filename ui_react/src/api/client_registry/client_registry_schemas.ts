@@ -39,8 +39,8 @@ const fieldCapabilities = z.record(z.string(), z.strictObject({
 }));
 
 export const ClientRegistrySummarySchema = z.strictObject({
-  client_id: z.number().int().positive(), case_no: z.string().min(1), name: nullableText,
-  phone: nullableText, city: nullableText, multi_birth_count: optionalNullableText, service_days: optionalNullablePositiveInt,
+  client_id: z.number().int().positive(), case_no: z.string().min(1), virtual_account: z.string().nullable().optional(), name: nullableText,
+  phone: nullableText, city: nullableText, district: z.string().nullable().optional(), multi_birth_count: optionalNullableText, service_days: optionalNullablePositiveInt,
   requires_cooking: optionalNullableBoolean, planned_start_date: nullableText, order_status: nullableText,
 });
 export const ClientRegistryPageSchema = z.strictObject({

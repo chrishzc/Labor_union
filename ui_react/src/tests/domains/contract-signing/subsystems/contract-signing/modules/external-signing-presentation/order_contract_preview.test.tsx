@@ -31,7 +31,7 @@ describe('OrderContractPreview', () => {
       ...basePreview,
       scope: 'client',
       template_key: 'contract_client_copy',
-      field_values: { F1: 'CASE-001', 'projected.projected_subsidy_amount': 12000 },
+      field_values: { F1: 'CASE-001', D36: '99781699115157', 'projected.projected_subsidy_amount': 12000 },
     });
 
     render(<OrderContractPreview caseNo="CASE-001" />);
@@ -41,9 +41,12 @@ describe('OrderContractPreview', () => {
     ));
     expect(await screen.findByText('預估市府補助金額')).toBeInTheDocument();
     expect(screen.getByText('12000')).toBeInTheDocument();
+    expect(screen.getByText('本案專屬虛擬帳號')).toBeInTheDocument();
+    expect(screen.getByText('99781699115157')).toBeInTheDocument();
+    expect(screen.getByText(/契約顯示預計繳款日/)).toBeInTheDocument();
   });
 
-  it('marks the second payment due date and notes as optional when blank', async () => {
+  it('marks absent planned payment stages and notes as optional only when printable', async () => {
     vi.mocked(previewContractFields).mockResolvedValue({
       ...basePreview,
       scope: 'client',
@@ -57,8 +60,24 @@ describe('OrderContractPreview', () => {
 
     render(<OrderContractPreview caseNo="CASE-001" />);
 
-    expect(await screen.findAllByText('未填（可留白）')).toHaveLength(2);
+    expect(await screen.findAllByText('未填（可留白）')).toHaveLength(4);
     expect(screen.queryByText('契約尚有未完成條件，請核對資料後再準備文件。')).not.toBeInTheDocument();
+  });
+
+  it('does not hide a missing planned due date when the backend blocks printing', async () => {
+    vi.mocked(previewContractFields).mockResolvedValue({
+      ...basePreview,
+      ready_to_print: false,
+      blockers: ['C34:deposit_due_date'],
+      scope: 'client',
+      template_key: 'contract_client_copy',
+      field_values: { F1: 'CASE-001', 'projected.deposit_due_date': null },
+    });
+
+    render(<OrderContractPreview caseNo="CASE-001" />);
+
+    expect(await screen.findByText('契約尚有未完成條件，請核對資料後再準備文件。')).toBeInTheDocument();
+    expect(screen.getAllByText('尚未提供／待核對').length).toBeGreaterThan(0);
   });
 
   it('shows the staff projection as one whole payable with a projected payday', async () => {

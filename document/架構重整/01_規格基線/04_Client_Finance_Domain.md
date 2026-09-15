@@ -11,6 +11,7 @@
 | 資料 | 唯一權威 |
 |---|---|
 | 付款條款與到期日 | `PaymentTerms` root facts |
+| 本案專屬虛擬帳號 | 由 canonical 9 碼案件編號依 Finance Import 規則確定性產生的 Client Finance typed projection |
 | 應收／退款／補助退還義務 | append-only obligation events |
 | 收款／退款／adjustment／reversal | immutable client ledger |
 | transaction allocation | append-only M:N allocations |
@@ -327,11 +328,12 @@ Stable errors：
 - final writer scan 必須證明 obligation event、client ledger、allocation、refund、
   adjustment、reversal 與 settled projection 都只有 Client Finance adapters 可寫。
 
-## 8. 工會／代收付帳戶設定（2026-09-01 人工裁決）
+## 8. 客戶收款帳號（2026-09-15 人工裁決）
 
-- 客戶契約的「服務款項匯款帳號」是 Client Finance 擁有的付款目的地，不得讀取
-  `staff_bank_accounts` 或任何服務人員個人收款帳戶。
-- 管理端在財務工作台提供版本化 Query／Preview／Apply 設定入口；設定保存 account display、
-  revision、actor、reason、idempotency 與 receipt。未設定時契約 Preview fail closed。
-- Contract Signing 只消費 `client_payment_destination_account` typed current projection，不能保存
-  第二份設定或以環境變數、Excel placeholder、UI state 作 fallback。
+- 每個案件的服務款項使用 Client Finance 擁有的專屬虛擬帳號，不得讀取 `staff_bank_accounts`，
+  也不得以全域工會／代收付帳戶填入客戶契約。
+- 虛擬帳號與 Finance Import 共用同一規則：固定前綴 `99781699` 加案件編號前三碼及後六碼轉為
+  三碼序號；僅能表示後六碼數值不大於 999 的 canonical 9 碼案件編號。無法表示時必須 fail closed。
+- Contract Signing 只消費 `client_virtual_account` typed projection；銀行核銷以相同規則解析帳號，
+  並且只有在案件唯一且同案同金額的未清償應收義務唯一時才可自動配對，否則保留 pending。
+- 既有版本化工會／代收付帳戶 Query／Preview／Apply 仍保留供其既有用途，但不再是客戶契約來源。
