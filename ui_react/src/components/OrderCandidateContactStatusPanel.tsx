@@ -234,6 +234,9 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
         && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429;
       if (rejected && !recoveringUnknown) {
         orderMutationFlowStore.clearCandidateInformation(command.caseNo, command.candidateId, command.infoType);
+        if (mounted.current && activeCaseNo.current === command.caseNo) {
+          setState({ status: 'error', message: errorMessage(error) });
+        }
       } else {
         orderMutationFlowStore.setCandidateInformation(command.caseNo, {
           status: 'outcome_unknown', command, receipt: null,
@@ -334,19 +337,25 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
       || saved?.status === 'observing'
       || saved?.status === 'observation_failed'
     ) return;
-    const command = saved?.status === 'outcome_unknown'
-      ? saved.command
-      : (() => {
-        const created = createCandidateWillingnessCommand(caseNo, candidateId, willingness, reason);
-        return {
-          caseNo: created.caseNo,
-          candidateId: created.candidateId,
-          willingness: created.willingness,
-          reason: created.reason,
-          expectedActor: created.actor,
-          eventKey: created.eventKey,
-        };
-      })();
+    let command: NonNullable<typeof saved>['command'];
+    try {
+      command = saved?.status === 'outcome_unknown'
+        ? saved.command
+        : (() => {
+          const created = createCandidateWillingnessCommand(caseNo, candidateId, willingness, reason);
+          return {
+            caseNo: created.caseNo,
+            candidateId: created.candidateId,
+            willingness: created.willingness,
+            reason: created.reason,
+            expectedActor: created.actor,
+            eventKey: created.eventKey,
+          };
+        })();
+    } catch (error) {
+      setState({ status: 'error', message: errorMessage(error) });
+      return;
+    }
     const recoveringUnknown = saved?.status === 'outcome_unknown';
     orderMutationFlowStore.setCandidateWillingness(command.caseNo, {
       status: 'applying', command, receipt: null, error: null,
@@ -369,6 +378,9 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
         && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429;
       if (rejected && !recoveringUnknown) {
         orderMutationFlowStore.clearCandidateWillingness(command.caseNo, command.candidateId);
+        if (mounted.current && activeCaseNo.current === command.caseNo) {
+          setState({ status: 'error', message: errorMessage(error) });
+        }
       } else {
         orderMutationFlowStore.setCandidateWillingness(command.caseNo, {
           status: 'outcome_unknown', command, receipt: null,

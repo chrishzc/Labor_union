@@ -843,6 +843,14 @@ export class OrderMutationFlowStore {
     queryView: ServiceDateConfirmationQueryView
   ): ServiceDatesDraftState {
     const draft = this.getOrCreateServiceDatesDraft(caseNo);
+    const receipt = draft.receiptView;
+    if (!receipt || receipt.case_no !== caseNo || queryView.case_no !== caseNo
+      || queryView.current_version === null || queryView.current_version < receipt.confirmed_version
+      || queryView.order_version < receipt.order_version
+      || queryView.scheduling_version < receipt.scheduling_version
+      || !areDateArraysEqual(queryView.current_dates, receipt.service_dates)) {
+      throw new Error('服務日期已收到收據，但正式回讀未對上案件、版本與本次日期；只能重新讀取結果。');
+    }
     draft.queryView = queryView;
     draft.selectedDates = [...queryView.current_dates];
     draft.previewView = null;
