@@ -10,6 +10,8 @@ from domains.case_import.order_information import project_order_information
 from subsystems.case_import.beclass_correction_workflow import allows_manual_beclass_source
 from subsystems.client_finance.virtual_account_resolution import build_client_virtual_account
 from domains.client_finance.obligation_planning import build_client_finance_terms_candidate
+from domains.client_finance.order_amount_calculation import _claim_schedule
+from domains.client_finance.subsidy_coverage import normalize_subsidy_policy_identity
 from infrastructure.mysql.order_terms_read_model import (
     load_contract_client_finance_facts,
     select_order,
@@ -90,7 +92,8 @@ class MySqlClientRegistryQueryRepository:
                 "SELECT c.id AS client_id,o.case_no,c.name,c.phone,c.city,c.address,"
                 + birth_count_sql + " AS multi_birth_count,"
                 "o.service_days,o.requires_cooking,"
-                "o.start_date AS planned_start_date,o.status AS order_status "
+                "o.start_date AS planned_start_date,o.status AS order_status,"
+                "o.staff_payment_due_date,o.actual_end_date,c.identity_status "
                 "FROM orders o JOIN clients c ON c.id=o.client_id "
                 "LEFT JOIN (SELECT bound_case_no,MAX(id) AS id,MAX(survey_details) AS survey_details "
                 "FROM beclass_records WHERE bound_case_no IS NOT NULL GROUP BY bound_case_no HAVING COUNT(*)=1) br "
@@ -101,10 +104,15 @@ class MySqlClientRegistryQueryRepository:
                 tuple(parameters),
             )
             rows = tuple(cursor.fetchall() or ())
+            obligation_dates = _load_obligation_dates(
+                cursor, tuple(str(row["case_no"]) for row in rows[:limit])
+            )
         visible = tuple({
             **row,
             "virtual_account": build_client_virtual_account(row.get("case_no")),
             "district": _client_district(row.get("city"), row.get("address")),
+            **obligation_dates[str(row["case_no"])],
+            **_claim_application_month(row),
         } for row in rows[:limit])
         next_cursor = str(visible[-1]["case_no"]) if len(rows) > limit and visible else None
         return visible, next_cursor
@@ -224,6 +232,64 @@ def _decode(value: Any) -> dict[str, Any]:
 def _client_district(city: object, address: object) -> str | None:
     location = f"{city or ''}{address or ''}"
     return next((district for district in _SUPPORTED_DISTRICTS if district in location), None)
+
+
+def _load_obligation_dates(cursor, case_nos: tuple[str, ...]) -> dict[str, dict[str, list[dict[str, Any]]]]:
+    """Read stored dates for this page; do not calculate amounts or filter by month."""
+    result = {
+        case_no: {"client_obligation_dates": [], "staff_obligation_dates": []}
+        for case_no in case_nos
+    }
+    if not case_nos:
+        return result
+    placeholders = ",".join("%s" for _ in case_nos)
+    cursor.execute(
+        "SELECT case_no,obligation_identity,obligation_type,due_date "
+        "FROM client_obligations WHERE case_no IN (" + placeholders + ") "
+        "AND status<>'cancelled' AND ("
+        "(direction='receivable_from_client' AND obligation_type IN ('deposit','first','second')) "
+        "OR (direction='payable_to_client' AND obligation_type='subsidy_return')) "
+        "ORDER BY case_no,obligation_type,obligation_identity",
+        case_nos,
+    )
+    for row in cursor.fetchall():
+        result[str(row["case_no"])]["client_obligation_dates"].append({
+            "obligation_identity": row["obligation_identity"],
+            "obligation_type": row["obligation_type"],
+            "due_date": row["due_date"],
+        })
+    cursor.execute(
+        "SELECT obligations.case_no,obligations.obligation_identity,"
+        "obligations.obligation_kind,obligations.due_date,obligations.staff_id,"
+        "staff.name AS staff_name FROM staff_obligations obligations "
+        "LEFT JOIN staff ON staff.id=obligations.staff_id "
+        "WHERE obligations.case_no IN (" + placeholders + ") "
+        "AND obligations.direction='payable_to_staff' AND obligations.status<>'cancelled' "
+        "ORDER BY obligations.case_no,obligations.staff_id,obligations.obligation_identity",
+        case_nos,
+    )
+    for row in cursor.fetchall():
+        result[str(row["case_no"])]["staff_obligation_dates"].append({
+            "obligation_identity": row["obligation_identity"],
+            "obligation_kind": row["obligation_kind"],
+            "due_date": row["due_date"],
+            "staff_id": row["staff_id"],
+            "staff_name": row["staff_name"],
+        })
+    return result
+
+
+def _claim_application_month(row) -> dict[str, int | None]:
+    # Reuse the existing owner projection. Never manufacture a day or use a
+    # planned date to fill a missing actual end date in this diagnostic list.
+    eligible = normalize_subsidy_policy_identity(
+        str(row.get("identity_status") or "")
+    ) in {"一般市民", "補助市民"}
+    schedule = _claim_schedule(row.get("actual_end_date") if eligible else None)
+    return {
+        "claim_application_year": schedule["claim_application_year"],
+        "claim_application_month": schedule["claim_application_month"],
+    }
 
 
 def _finance_values(connection, case_no):

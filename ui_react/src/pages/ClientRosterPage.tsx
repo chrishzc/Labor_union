@@ -39,6 +39,19 @@ const orderStatuses = ['待補件', '洽談中', '訂單成立', '服務中', '�
 const displayCooking = (value: boolean | null) => value === true ? '需要' : value === false ? '不需要' : '未登錄';
 const displayValue = (value: unknown) => value === null || value === undefined || value === '' ? '未登錄' : typeof value === 'boolean' ? (value ? '是' : '否') : String(value);
 
+type RosterItem = ClientRegistryPageData['items'][number];
+const staffObligationLabels: Record<string, string> = {
+  service_pay: '薪資', adjustment: '調整', reversal: '沖正',
+};
+
+function clientDueDates(item: RosterItem, stage: NonNullable<RosterItem['client_obligation_dates']>[number]['obligation_type']) {
+  if (item.client_obligation_dates === undefined) return '未載入';
+  const dates = item.client_obligation_dates.filter((entry) => entry.obligation_type === stage);
+  return dates.length ? dates.map((entry) => (
+    <div key={entry.obligation_identity} title={entry.obligation_identity}>{entry.due_date ?? '無值'}</div>
+  )) : '無值';
+}
+
 const profileLabels = {
   name: '姓名', gender: '性別', phone: '手機', city: '縣市', address: '地址', residence_type: '住宅型態',
   delivery_type: '生產方式', baby_info: '寶寶資訊', notes: '行政註記',
@@ -185,14 +198,36 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
         <th scope="col"><button type="button" onClick={() => changeSort('service_days')}>服務天數{sortLabel('service_days')}</button></th>
         <th scope="col">下廚需求</th>
         <th scope="col"><button type="button" onClick={() => changeSort('expected_start_date')}>預計服務日期{sortLabel('expected_start_date')}</button></th>
-        <th scope="col">案件／訂單狀態</th><th scope="col">完整資料</th>
+        <th scope="col">案件／訂單狀態</th>
+        <th scope="col" title="client_obligations.due_date（deposit）">訂金應繳日</th>
+        <th scope="col" title="client_obligations.due_date（first）">第一期應繳日</th>
+        <th scope="col" title="client_obligations.due_date（second）">第二期應繳日</th>
+        <th scope="col" title="orders.staff_payment_due_date">訂單月嫂應付日</th>
+        <th scope="col" title="staff_obligations.due_date">月嫂義務應付日</th>
+        <th scope="col" title="client_obligations.due_date（subsidy_return）">客戶補助退還日</th>
+        <th scope="col" title="既有 _claim_schedule(actual_end_date) 投影；非實際送件日">補助預計申請年月</th>
+        <th scope="col">完整資料</th>
       </tr></thead>
       <tbody>{page.items.map((item) => <React.Fragment key={item.case_no}><tr>
         <td>{item.case_no}</td><td>{item.virtual_account ?? '—'}</td><td>{item.name ?? '—'}</td><td>{item.phone ?? '—'}</td><td>{item.district ?? '未登錄'}</td>
         <td>{item.multi_birth_count ?? '—'}</td><td>{item.service_days ?? '—'}</td><td>{displayCooking(item.requires_cooking)}</td>
         <td>{item.planned_start_date ?? '—'}</td><td>{item.order_status ?? '—'}</td>
+        <td>{clientDueDates(item, 'deposit')}</td>
+        <td>{clientDueDates(item, 'first')}</td>
+        <td>{clientDueDates(item, 'second')}</td>
+        <td>{item.staff_payment_due_date === undefined ? '未載入' : item.staff_payment_due_date ?? '無值'}</td>
+        <td>{item.staff_obligation_dates === undefined ? '未載入' : item.staff_obligation_dates.length ? item.staff_obligation_dates.map((entry) => (
+          <div key={entry.obligation_identity} title={entry.obligation_identity}>
+            {entry.staff_name ?? `月嫂 #${entry.staff_id}`}／{staffObligationLabels[entry.obligation_kind] ?? entry.obligation_kind}：{entry.due_date ?? '無值'}
+          </div>
+        )) : '無值'}</td>
+        <td>{clientDueDates(item, 'subsidy_return')}</td>
+        <td>{item.claim_application_year === undefined || item.claim_application_month === undefined ? '未載入'
+          : item.claim_application_year !== null && item.claim_application_month !== null
+          ? `${item.claim_application_year}-${String(item.claim_application_month).padStart(2, '0')}`
+          : '無值'}</td>
         <td><button type="button" aria-expanded={expandedCaseNo === item.case_no} onClick={() => void toggleDetail(item.case_no)}>{expandedCaseNo === item.case_no ? '收合全部欄位' : '顯示全部欄位'}</button></td>
-      </tr>{expandedCaseNo === item.case_no && <tr className="client-roster-detail-row"><td colSpan={11}>
+      </tr>{expandedCaseNo === item.case_no && <tr className="client-roster-detail-row"><td colSpan={18}>
         {detailLoading && <p role="status">正在載入完整客戶資料…</p>}
         {detailError && <p role="alert">{detailError}</p>}
         {detail?.case_no === item.case_no && <ReadOnlyDetail detail={detail} />}

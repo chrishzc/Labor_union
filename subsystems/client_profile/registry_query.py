@@ -35,6 +35,11 @@ class ClientRegistrySummary:
     requires_cooking: bool | None
     planned_start_date: object | None
     order_status: str | None
+    staff_payment_due_date: object | None = None
+    client_obligation_dates: tuple[Mapping[str, Any], ...] = ()
+    staff_obligation_dates: tuple[Mapping[str, Any], ...] = ()
+    claim_application_year: int | None = None
+    claim_application_month: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,6 +233,11 @@ def _summary(row: Mapping[str, Any]) -> ClientRegistrySummary:
         _nullable_bool(row.get("requires_cooking"), "client_registry_summary_requires_cooking_invalid"),
         row.get("planned_start_date"),
         _nullable_text(row.get("order_status")),
+        row.get("staff_payment_due_date"),
+        tuple(row.get("client_obligation_dates", ())),
+        tuple(row.get("staff_obligation_dates", ())),
+        row.get("claim_application_year"),
+        row.get("claim_application_month"),
     )
 
 
