@@ -547,14 +547,28 @@
   font-weight: 650;
 }
 
-.gantt-matrix-scroll-wrapper {
-  overflow-x: auto;
-  overscroll-behavior-inline: contain;
-  scrollbar-gutter: stable;
+.gantt-matrix-frame {
   border: 1.5px solid #e7d5cf;
   border-radius: 16px;
   background: #ffffff;
   box-shadow: 0 4px 18px rgba(74, 69, 67, 0.05);
+}
+
+.gantt-matrix-sticky-header {
+  position: sticky;
+  top: 136px;
+  z-index: 40;
+  overflow-x: hidden;
+  border-radius: 14px 14px 0 0;
+  background: #fff8f6;
+  box-shadow: 0 3px 10px rgba(74, 69, 67, 0.08);
+}
+
+.gantt-matrix-scroll-wrapper {
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-gutter: stable;
+  border-radius: 0 0 14px 14px;
 }
 
 .gantt-matrix-scroll-wrapper:focus-visible {
@@ -571,11 +585,9 @@
 /* Header Row: Days 1 ~ 31 */
 .gantt-matrix-header-row {
   display: flex;
+  min-width: 1200px;
   background: #fff8f6;
   border-bottom: 2px solid #fed9b8;
-  position: sticky;
-  top: 0;
-  z-index: 20;
 }
 
 .gantt-staff-header-cell {

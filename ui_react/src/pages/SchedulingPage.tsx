@@ -1913,6 +1913,7 @@ export const SchedulingPage: React.FC = () => {
   const directoryControllerRef = useRef<AbortController | null>(null);
   const directoryPendingCursorRef = useRef<number | null>(null);
   const directorySentinelRef = useRef<HTMLDivElement | null>(null);
+  const calendarHeaderScrollRef = useRef<HTMLDivElement | null>(null);
   const calendarControllerRef = useRef<AbortController | null>(null);
   const caseOptionsControllerRef = useRef<AbortController | null>(null);
   const assignmentOptionsByStaffRef = useRef(new Map<number, readonly StaffAssignmentOption[]>());
@@ -2693,16 +2694,14 @@ export const SchedulingPage: React.FC = () => {
           {filteredStaff.length > 0 && (
             <>
             <p className="gantt-scroll-guidance" id="gantt-scroll-guidance">
-              左右滑動查看整月檔期；月嫂名冊會固定在左側。
+              左右滑動查看整月檔期；往下瀏覽時日期列會固定顯示，月嫂名冊會固定在左側。
             </p>
-            <div
-              className="gantt-matrix-scroll-wrapper"
-              data-surface-id="scheduling.calendar.grid"
-              tabIndex={0}
-              aria-describedby="gantt-scroll-guidance"
-            >
-              <div className="gantt-matrix-table">
-                {/* Header Row: Days 1 ~ 31 */}
+            <div className="gantt-matrix-frame" data-surface-id="scheduling.calendar.grid">
+              <div
+                ref={calendarHeaderScrollRef}
+                className="gantt-matrix-sticky-header"
+                data-surface-id="scheduling.calendar.date-header"
+              >
                 <div className="gantt-matrix-header-row">
                   <div className="gantt-staff-header-cell">
                     <strong>月嫂名冊 ｜ 檔期診斷</strong>
@@ -2720,7 +2719,19 @@ export const SchedulingPage: React.FC = () => {
                     ))}
                   </div>
                 </div>
+              </div>
 
+              <div
+                className="gantt-matrix-scroll-wrapper"
+                tabIndex={0}
+                aria-describedby="gantt-scroll-guidance"
+                onScroll={(event) => {
+                  if (calendarHeaderScrollRef.current) {
+                    calendarHeaderScrollRef.current.scrollLeft = event.currentTarget.scrollLeft;
+                  }
+                }}
+              >
+                <div className="gantt-matrix-table">
                 {/* Staff Rows */}
                 {filteredStaff.map((staff) => {
                   const row = calendarRows[staff.id];
@@ -2832,6 +2843,7 @@ export const SchedulingPage: React.FC = () => {
                     </div>
                   );
                 })}
+                </div>
               </div>
             </div>
             </>

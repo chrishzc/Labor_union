@@ -608,8 +608,6 @@ class _PrecontractCursor:
                 "staff_name": "月嫂甲",
                 "staff_phone": "0900000000",
             },)
-        elif "SELECT holiday_date FROM holidays" in statement:
-            self.rows = ()
         elif "FROM confirmed_service_date_versions version" in statement:
             self.rows = tuple({"service_date": value} for value in self.confirmed_dates)
         else:
@@ -637,11 +635,11 @@ class _PrecontractConnection:
         return self._Context(self.cursor_instance)
 
 
-def test_precontract_preview_accepts_active_proposed_plan_with_latest_customer_acceptance():
+def test_precontract_preview_uses_confirmed_dates_without_recalculating_rest_days():
     result = _load_precontract_plan(
-        _PrecontractConnection(),
+        _PrecontractConnection(tuple(date(2026, 9, day) for day in range(1, 6))),
         "CASE-1",
-        {"start_date": date(2026, 9, 1), "service_days": 5, "service_type": "連續服務"},
+        {"start_date": date(2026, 9, 1), "service_days": 5, "service_type": "週休2日"},
     )
 
     assert result["id"] == 51
@@ -650,7 +648,7 @@ def test_precontract_preview_accepts_active_proposed_plan_with_latest_customer_a
     )
 
 
-def test_precontract_preview_rejects_service_dates_changed_after_plan_acceptance():
+def test_precontract_preview_rejects_confirmed_dates_outside_accepted_segments():
     with pytest.raises(FullContractPreviewError) as captured:
         _load_precontract_plan(
             _PrecontractConnection(
@@ -661,6 +659,17 @@ def test_precontract_preview_rejects_service_dates_changed_after_plan_acceptance
         )
 
     assert captured.value.code == "contract_preview_service_dates_stale"
+
+
+def test_precontract_preview_requires_current_confirmed_service_dates():
+    with pytest.raises(FullContractPreviewError) as captured:
+        _load_precontract_plan(
+            _PrecontractConnection(),
+            "CASE-1",
+            {"start_date": date(2026, 9, 1), "service_days": 5, "service_type": "連續服務"},
+        )
+
+    assert captured.value.code == "official_service_dates_incomplete"
 
 
 def test_government_claim_item_projection_requires_one_exact_approved_item():

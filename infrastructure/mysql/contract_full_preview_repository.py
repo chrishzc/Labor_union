@@ -28,7 +28,6 @@ from infrastructure.mysql.order_terms_read_model import (
 from domains.client_finance.obligation_planning import build_client_finance_terms_candidate, ClientChargeDay
 from shared_kernel.money import MoneyNTD
 from subsystems.client_finance.virtual_account_resolution import build_client_virtual_account
-from subsystems.contract_signing.staff_contract_application import _allocate_commitment_service_days
 from subsystems.contract_signing.full_contract_preview import (
     ContractPreviewScope,
     FullContractOwnerProjection,
@@ -245,8 +244,6 @@ def _load_precontract_plan(connection, case_no, case):
         segments = tuple(cursor.fetchall() or ())
         if not segments:
             return None
-        cursor.execute("SELECT holiday_date FROM holidays")
-        holidays = {row["holiday_date"] for row in cursor.fetchall()}
         cursor.execute(
             "SELECT day.service_date FROM confirmed_service_date_versions version "
             "JOIN confirmed_service_date_days day ON day.confirmed_version_id=version.id "
@@ -254,14 +251,41 @@ def _load_precontract_plan(connection, case_no, case):
             (case_no,),
         )
         confirmed_service_dates = tuple(row["service_date"] for row in cursor.fetchall())
-    allocations = _allocate_commitment_service_days(case, segments, holidays)
-    allocated_service_dates = tuple(day for _, day in allocations)
-    if confirmed_service_dates and allocated_service_dates != confirmed_service_dates:
+    try:
+        expected_day_count = int(case.get("service_days") or 0)
+    except (TypeError, ValueError):
+        expected_day_count = 0
+    if (
+        not confirmed_service_dates
+        or expected_day_count <= 0
+        or len(confirmed_service_dates) != expected_day_count
+        or len(set(confirmed_service_dates)) != len(confirmed_service_dates)
+    ):
+        raise FullContractPreviewError(
+            "official_service_dates_incomplete",
+            "正式服務日期尚未完整確認，不能產生契約。",
+        )
+    allocations = []
+    used_segment_ids = set()
+    for service_date in confirmed_service_dates:
+        owners = tuple(
+            segment
+            for segment in segments
+            if segment["assigned_start_date"] <= service_date <= segment["assigned_end_date"]
+        )
+        if len(owners) != 1:
+            raise FullContractPreviewError(
+                "contract_preview_service_dates_stale",
+                "正式服務日期與已接受的月嫂區段不一致，不能產生契約。",
+            )
+        used_segment_ids.add(int(owners[0]["id"]))
+        allocations.append((owners[0], service_date))
+    if used_segment_ids != {int(segment["id"]) for segment in segments}:
         raise FullContractPreviewError(
             "contract_preview_service_dates_stale",
-            "正式服務日期已變更；原月嫂意願與客戶接受方案不可繼續產生契約。",
+            "正式服務日期未完整涵蓋已接受的月嫂區段，不能產生契約。",
         )
-    return {"id": plans[0]["id"], "segments": segments, "allocations": allocations}
+    return {"id": plans[0]["id"], "segments": segments, "allocations": tuple(allocations)}
 
 
 def _extend_precontract_facts(connection, case_no, facts, owners, plan):

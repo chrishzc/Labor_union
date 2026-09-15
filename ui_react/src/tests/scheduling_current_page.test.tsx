@@ -170,6 +170,21 @@ describe('SchedulingPage query-only presentation', () => {
     );
   });
 
+  it('keeps the fixed date header aligned with the horizontally scrolled calendar cells', async () => {
+    render(<SchedulingPage />);
+
+    await waitFor(() => expect(document.querySelector('[data-surface-id="scheduling.calendar.row"]')).toBeInTheDocument());
+    const grid = document.querySelector('[data-surface-id="scheduling.calendar.grid"] .gantt-matrix-scroll-wrapper');
+    const dateHeader = document.querySelector('[data-surface-id="scheduling.calendar.date-header"]');
+    expect(grid).toBeInstanceOf(HTMLElement);
+    expect(dateHeader).toBeInstanceOf(HTMLElement);
+
+    (grid as HTMLElement).scrollLeft = 320;
+    fireEvent.scroll(grid as HTMLElement);
+
+    expect((dateHeader as HTMLElement).scrollLeft).toBe(320);
+  });
+
   it('排查案件只保留第 8 訂金階段之前的訂單', async () => {
     const summary = (caseNo: string, clientName: string) => ({
       case_no: caseNo,
