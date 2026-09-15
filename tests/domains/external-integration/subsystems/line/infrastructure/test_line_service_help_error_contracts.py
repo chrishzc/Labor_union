@@ -1,5 +1,6 @@
 """Focused regressions for LINE service-help failure classification."""
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -102,3 +103,14 @@ def test_faq_repository_failure_is_not_a_successful_empty_catalog(monkeypatch) -
     assert error.status_code == 503
     assert error.detail["error"]["code"] == "knowledge_catalog_unavailable"
     assert error.detail["error"]["retryable"] is True
+
+
+def test_liff_distinguishes_unsupported_from_runtime_and_malformed_failures() -> None:
+    source = Path("line/static/service_help.html").read_text(encoding="utf-8")
+
+    assert "if (!response.ok || !result?.data" in source
+    assert "!Array.isArray(result.data.items)" in source
+    assert "result.data.outcome === 'unsupported'" in source
+    assert "系統目前無法完成知識庫查詢" in source
+    assert "問答服務暫時無法使用" in source
+    assert "result.data?.suggestion ||" not in source
