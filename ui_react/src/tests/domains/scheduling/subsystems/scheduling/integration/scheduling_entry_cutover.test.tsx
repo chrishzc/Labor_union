@@ -463,7 +463,8 @@ describe('Scheduling #scheduling query entry cutover candidate', () => {
     const request = eligibilityRequests.at(-1);
     expect(request?.query.get('case_no')).toBe('CASE-SCH-011');
     expect(request?.query.get('staff_id')).toBe('12');
-    await waitFor(() => expect(screen.getByText(/資料待補正：請至訂單管理/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/資料待補正：請依上方「需補齊」/)).toBeInTheDocument());
+    expect(document.body.textContent).not.toContain('請至訂單管理補齊服務日期與每日時段');
     expect(document.body.textContent).not.toMatch(/測試資料不足|測試資料不完整|test_data_incomplete|unavailable/i);
   });
 

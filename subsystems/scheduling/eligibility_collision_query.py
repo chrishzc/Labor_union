@@ -482,8 +482,6 @@ def _case_period(
         issues.add("case_service_period_exceeds_projection_window")
     if case.service_days is None or case.service_days <= 0:
         issues.add("case_service_days_missing")
-    elif case.service_days != day_count:
-        issues.add("case_service_days_mismatch")
     return (case.start_date, case.end_date), tuple(sorted(issues))
 
 

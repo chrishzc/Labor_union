@@ -3133,7 +3133,7 @@ export const SchedulingPage: React.FC = () => {
                   )}
                   {eligibilityResult.needsCorrection && (
                     <p role="status" style={{ fontSize: '0.82rem', color: '#b45309', marginTop: '6px' }}>
-                      ⚠️ 資料待補正：請至訂單管理補齊服務日期與每日時段，並至服務人員名冊確認資格主檔後重試。
+                      ⚠️ 資料待補正：請依上方「需補齊」與資格檢查的實際項目處理後重試。
                     </p>
                   )}
                 </div>
