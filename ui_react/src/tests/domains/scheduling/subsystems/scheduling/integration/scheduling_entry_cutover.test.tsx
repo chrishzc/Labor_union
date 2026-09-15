@@ -5,19 +5,21 @@
 import { StrictMode } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { App } from '../App';
-import { SYSTEM_STATUS_ENDPOINT } from '../api/system/system_status_client';
-import { sessionClient } from '../api/auth/session_client';
+import { App } from '../../../../../../App';
+import { SYSTEM_STATUS_ENDPOINT } from '../../../../../../api/system/system_status_client';
+import { sessionClient } from '../../../../../../api/auth/session_client';
+import { CORE_STAGE_CODES, SUBSTATUS_BY_STAGE_STATUS } from '../../../../../../api/orders/order_core_stage_projection_schemas';
 import {
   STAFF_EMPTY_RESPONSE,
   STAFF_RESPONSE_ONE,
-} from './fixtures/staff/staff_directory_contract_fixtures';
+} from '../../../../../fixtures/staff/staff_directory_contract_fixtures';
 
 const STAFF_SUMMARY_ENDPOINT = '/api/v1/staff/summaries';
 const ORDER_SUMMARY_ENDPOINT = '/api/v1/orders/summaries';
 const STAFF_ASSIGNMENT_OPTIONS_ENDPOINT_PREFIX = '/api/v1/staff/';
 const CALENDAR_ENDPOINT_PREFIX = '/api/v1/scheduling/staff/';
 const ELIGIBILITY_ENDPOINT = '/api/v1/scheduling/eligibility-collisions';
+const CORE_STAGE_ENDPOINT = '/api/orders/core-stage-timelines';
 type FetchRecord = {
   path: string;
   method: string;
@@ -249,6 +251,49 @@ function schedulingOrderSummaryResponse(): Response {
   });
 }
 
+function schedulingCoreStageResponse(): Response {
+  const current = 'formal_recommendation' as const;
+  return jsonResponse({
+    success: true,
+    message: '成功取得核心階段',
+    data: {
+      items: [{
+        case_no: 'CASE-SCH-011',
+        base_revision: 1,
+        lifecycle_status: '洽談中',
+        branch_type: 'normal',
+        current_core_stage_code: current,
+        current_core_stage_ordinal: CORE_STAGE_CODES.indexOf(current) + 1,
+        historical_current_owner_stage_code: null,
+        historical_current_owner_stage_ordinal: null,
+        core_stages: CORE_STAGE_CODES.map((code, index) => ({
+          ordinal: index + 1,
+          code,
+          label: code,
+          owner: 'fixture-owner',
+          status: code === current ? 'in_progress' : 'completed',
+          substatus_code: code === current
+            ? SUBSTATUS_BY_STAGE_STATUS[code].in_progress
+            : SUBSTATUS_BY_STAGE_STATUS[code].completed,
+          source: { owner: 'fixture-owner', identity: `fixture:${code}`, version: 1 },
+          occurred_at: null,
+          blockers: [],
+          warnings: [],
+          available_read_actions: [],
+          availability_reason: null,
+        })),
+        source_projection_digest: 'a'.repeat(64),
+      }],
+      stage_counts: Object.fromEntries(CORE_STAGE_CODES.map((code) => [code, code === current ? 1 : 0])),
+      substatus_counts: {},
+      historical_lifecycle_counts: { unserved: 0, in_service: 0, service_completed: 0, accounting_completed: 0 },
+      next_cursor: null,
+      etag: 'b'.repeat(64),
+    },
+    error: null,
+  });
+}
+
 function schedulingAssignmentOptionsResponse(staffId: number): Response {
   return jsonResponse({
     success: true,
@@ -287,6 +332,9 @@ function installFetchStub(mode: FetchMode): FetchRecord[] {
     }
     if (url.pathname === ORDER_SUMMARY_ENDPOINT) {
       return schedulingOrderSummaryResponse();
+    }
+    if (url.pathname === CORE_STAGE_ENDPOINT) {
+      return schedulingCoreStageResponse();
     }
     if (url.pathname.startsWith(STAFF_ASSIGNMENT_OPTIONS_ENDPOINT_PREFIX)
       && url.pathname.endsWith('/assignment-schedules')) {

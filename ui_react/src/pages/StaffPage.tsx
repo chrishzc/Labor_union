@@ -1164,6 +1164,23 @@ export const StaffPage: React.FC = () => {
                     </div>
                   </div>
 
+                  <div className="staff-card-pref-summary" data-surface-id={`staff.card.case-preference.${staff.id}`}>
+                    {selectedStaffId !== staff.id && <span>🎯 選取後載入接案偏好摘要</span>}
+                    {selectedStaffId === staff.id && casePreferenceSummary.status === 'idle' && <span>🎯 接案偏好摘要待查詢</span>}
+                    {selectedStaffId === staff.id && casePreferenceSummary.status === 'loading' && <span role="status">🎯 正在載入接案偏好摘要…</span>}
+                    {selectedStaffId === staff.id && casePreferenceSummary.status === 'error' && <span>🎯 接案偏好目前無法讀取</span>}
+                    {selectedStaffId === staff.id && casePreferenceSummary.status === 'ready' && (
+                      <div>
+                        {casePreferenceSummary.data.topics.map((topic) => (
+                          <div key={topic.key} role="group" aria-label={topic.label}>
+                            <strong>{topic.label}</strong>：{topic.valuesText}
+                            {topic.otherDetailStatus === 'ready' && topic.detailText && <small> · {topic.detailText}</small>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
 
                   <div className="staff-card-footer">
                     <button
@@ -1230,6 +1247,7 @@ export const StaffPage: React.FC = () => {
                 type="button"
                 role="tab"
                 aria-selected={drawerTab === 'management'}
+                disabled={interactionLocked}
                 className={`staff-drawer-tab-btn ${drawerTab === 'management' ? 'active' : ''}`}
                 onClick={() => setDrawerTab('management')}
               >
@@ -1239,6 +1257,7 @@ export const StaffPage: React.FC = () => {
                 type="button"
                 role="tab"
                 aria-selected={drawerTab === 'qualification'}
+                disabled={interactionLocked}
                 className={`staff-drawer-tab-btn ${drawerTab === 'qualification' ? 'active' : ''}`}
                 onClick={() => setDrawerTab('qualification')}
               >
@@ -1248,6 +1267,7 @@ export const StaffPage: React.FC = () => {
                 type="button"
                 role="tab"
                 aria-selected={drawerTab === 'preferences'}
+                disabled={interactionLocked}
                 className={`staff-drawer-tab-btn ${drawerTab === 'preferences' ? 'active' : ''}`}
                 onClick={() => setDrawerTab('preferences')}
               >
@@ -1257,6 +1277,7 @@ export const StaffPage: React.FC = () => {
                 type="button"
                 role="tab"
                 aria-selected={drawerTab === 'unavailability'}
+                disabled={interactionLocked}
                 className={`staff-drawer-tab-btn ${drawerTab === 'unavailability' ? 'active' : ''}`}
                 onClick={() => setDrawerTab('unavailability')}
               >

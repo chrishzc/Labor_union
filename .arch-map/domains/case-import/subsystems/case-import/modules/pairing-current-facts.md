@@ -28,7 +28,7 @@
 
 ## Correction boundary
 - Effective corrections resolve the unique `bound_case_no`; `query_no` remains immutable source provenance and original imported BeClass fields remain unchanged.
-- A historical order without a bound BeClass row may create one `record_origin='admin_manual'` container during Apply; Preview remains zero-write, and all entered values continue through the same versioned correction state／event owner.
+- Any order without a bound BeClass row may create one `record_origin='admin_manual'` container during Apply; Preview remains zero-write, and all entered values continue through the same versioned correction state／event owner.
 
 ## Consumers
 - Case Import／Client owner follow-up only；不再有 Anomalies runtime consumer。

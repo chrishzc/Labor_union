@@ -174,29 +174,28 @@ describe('Staff #staff entry cutover candidate', () => {
 
     render(<StrictMode><App /></StrictMode>);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: /配對偏好/ }));
-    fireEvent.change(screen.getByLabelText('查詢服務人員'), { target: { value: '11' } });
+    fireEvent.click(screen.getByRole('button', { name: /查看 去敏人員甲 的詳情/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /接案偏好設定/ }));
 
     await screen.findByRole('button', { name: '編輯六項偏好' });
     expect(countPath(requests, PREFERENCE_MANUAL_ENDPOINT)).toBe(2);
-    expect(countPath(requests, STAFF_LIFECYCLE_ENDPOINT)).toBe(0);
+    expect(countPath(requests, STAFF_LIFECYCLE_ENDPOINT)).toBe(1);
     expect(countPath(requests, AVAILABILITY_ENDPOINT)).toBe(0);
     expectOnlyGet(requests);
   });
 
-  it('Availability 未輸入日期範圍時維持零 GET', async () => {
+  it('Availability 使用預設日期範圍自動執行一個 GET', async () => {
     authenticate();
     const requests = installFetchStub();
 
     render(<StrictMode><App /></StrictMode>);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: /長假與暫停/ }));
-    fireEvent.change(screen.getByLabelText('查詢服務人員'), { target: { value: '11' } });
+    fireEvent.click(screen.getByRole('button', { name: /查看 去敏人員甲 的詳情/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
     await waitFor(() => expect(screen.getByLabelText('查詢服務人員')).toHaveValue('11'));
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(countPath(requests, AVAILABILITY_ENDPOINT)).toBe(0);
-    expect(requests.filter((request) => ![SYSTEM_STATUS_ENDPOINT, STAFF_SUMMARY_ENDPOINT].includes(request.path))).toHaveLength(0);
+    expect(countPath(requests, AVAILABILITY_ENDPOINT)).toBe(1);
     expectOnlyGet(requests);
   });
 
@@ -206,18 +205,12 @@ describe('Staff #staff entry cutover candidate', () => {
 
     render(<StrictMode><App /></StrictMode>);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
-    const initialRequestCount = requests.length;
-
-    fireEvent.click(screen.getByRole('button', { name: /配對偏好/ }));
+    fireEvent.click(screen.getByRole('button', { name: /查看 去敏人員甲 的詳情/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /接案偏好設定/ }));
     expect(document.querySelector('[data-control-id="staff.preferences.cooking-skills"]')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /長假與暫停/ }));
-    expect(document.querySelector('[data-control-id="staff.availability.end-pause"]')).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: /服務月嫂名冊/ }));
-    expect(document.querySelector('[data-control-id="staff.master.create"]')).not.toBeInTheDocument();
-    expect(requests).toHaveLength(initialRequestCount);
-
-    fireEvent.click(screen.getAllByRole('button', { name: /檢視服務人員摘要/ })[0]);
     fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
+    expect(document.querySelector('[data-control-id="staff.availability.end-pause"]')).toBeDisabled();
+    expect(document.querySelector('[data-control-id="staff.master.create"]')).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByText(/人事任職狀態與異動辦理/)).toBeInTheDocument());
     expect(countPath(requests, STAFF_LIFECYCLE_ENDPOINT)).toBe(1);
     expect(countPath(requests, STAFF_QUALIFICATION_ENDPOINT)).toBe(1);

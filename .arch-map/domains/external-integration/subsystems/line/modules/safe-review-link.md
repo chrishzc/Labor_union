@@ -60,5 +60,4 @@ review's Preview/Apply/readback must be verified separately.
 - layout_status: `custom_current`
 - test_root: `tests/domains/external-integration/subsystems/line/modules/safe-review-link/`
 - test_root: `ui_react/src/tests/safe_review_link_workbench.test.tsx`
-- shared regression: `tests/domains/external-integration/subsystems/line/subsystems/test_line_m4_continuation_regressions.py` — actual owner version drift, disabled/reactivated group, missing issuance evidence, and unchanged-target redemption.
 - evidence: PR #299 code baseline `4eb58e07e94660308ba8afd05d39931f0301fdf1`; shared regression run `34733277249` / job `103659935152`. The 29 M4 regressions are part of the recorded 53-test run, not 53 tests of this module. Owner/UoW substitutes and SQLite adapter checks do not establish MySQL locking, mobile, provider, or full one-time-link flow acceptance; those remain `NOT_RUN` for this correction.

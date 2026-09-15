@@ -282,7 +282,7 @@ describe('LINE runtime alert target successor', () => {
       system_health: false,
       contract_signing: true,
     };
-    const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+    const fetchMock = vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
       if (init?.method === 'PATCH') {
         const body = JSON.parse(init.body as string);
         return Promise.resolve(response({

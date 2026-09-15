@@ -10,9 +10,6 @@ import {
   CheckCircle2,
   Copy,
   Eye,
-  FileText,
-  Info,
-  MessageSquare,
   RefreshCw,
   RotateCcw,
   SearchCheck,
@@ -249,14 +246,15 @@ export const AlertGroupSecurity: React.FC<AlertGroupSecurityProps> = ({
   });
 
   const groupTarget = targets.find((target) => target.target_kind === 'group') ?? null;
+  const groupTargetId = groupTarget?.target_id ?? null;
   const activeMeta = MESSAGE_CATEGORIES.find((c) => c.key === activePreviewKey) ?? MESSAGE_CATEGORIES[0];
 
   useEffect(() => {
-    if (!groupTarget) return;
+    if (groupTargetId === null) return;
     const fetcher = targetClient.getPreferences ?? lineRuntimeTargetClient.getPreferences;
     let active = true;
     setPrefLoading(true);
-    fetcher(groupTarget.target_id, { correlationId: `pref-query-${groupTarget.target_id}` })
+    fetcher(groupTargetId, { correlationId: `pref-query-${groupTargetId}` })
       .then((prefs) => {
         if (active) {
           setCategoryPreferences(prefs);
@@ -274,7 +272,7 @@ export const AlertGroupSecurity: React.FC<AlertGroupSecurityProps> = ({
     return () => {
       active = false;
     };
-  }, [groupTarget?.target_id, targetClient]);
+  }, [groupTargetId, targetClient]);
 
   const handleToggleCategory = async (key: MessageCategoryKey) => {
     const nextState = !categoryPreferences[key];
@@ -624,12 +622,13 @@ export const AlertGroupSecurity: React.FC<AlertGroupSecurityProps> = ({
             </h2>
             <p>設定此幹部群組要出現哪些訊息；點選不同分類可在右側直接預覽手機 LINE 接收到的排版樣式。</p>
           </div>
-          {prefSaving && (
+          {(prefLoading || prefSaving) && (
             <div className="alert-save-tip" role="status">
-              <RefreshCw aria-hidden="true" className="spin" style={{ width: 14, height: 14, marginRight: 4 }} /> 同步儲存至資料庫中…
+              <RefreshCw aria-hidden="true" className="spin" style={{ width: 14, height: 14, marginRight: 4 }} />
+              {prefLoading ? '正在載入群組推播設定…' : '同步儲存至資料庫中…'}
             </div>
           )}
-          {!prefSaving && savedSuccessTip && (
+          {!prefLoading && !prefSaving && savedSuccessTip && (
             <div className="alert-save-tip" role="status">
               <Check aria-hidden="true" /> {savedSuccessTip}
             </div>
@@ -659,7 +658,7 @@ export const AlertGroupSecurity: React.FC<AlertGroupSecurityProps> = ({
                       <input
                         type="checkbox"
                         checked={isEnabled}
-                        disabled={prefSaving}
+                        disabled={prefLoading || prefSaving}
                         onChange={() => void handleToggleCategory(category.key)}
                         aria-label={`切換${category.label}`}
                       />

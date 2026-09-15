@@ -30,7 +30,8 @@ describe('StaffPage directory presentation', () => {
 
     expect(screen.getByText(/正在載入服務人員摘要名冊/)).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
-    expect(screen.getByText('📞 09******** ｜ 學歷：大學')).toBeInTheDocument();
+    expect(screen.getByText('電話：09********')).toBeInTheDocument();
+    expect(screen.getByText('學歷：大學')).toBeInTheDocument();
     expect(screen.getByText('服務人員摘要 #12')).toBeInTheDocument();
     expect(screen.getByText('目前已載入 2 位服務人員')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '🟢 在職中' })).not.toBeInTheDocument();
@@ -45,12 +46,12 @@ describe('StaffPage directory presentation', () => {
   it('opens summary drawer without another query', async () => {
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
-    fireEvent.click(screen.getAllByRole('button', { name: /檢視服務人員摘要/ })[0]);
+    fireEvent.click(screen.getAllByRole('button', { name: /查看 .* 的詳情/ })[0]);
 
-    const drawer = screen.getByText(/服務人員摘要 - 去敏人員甲/).closest('.drawer-container');
+    const drawer = screen.getByText(/月嫂詳情 — 去敏人員甲/).closest('.drawer-container');
     expect(drawer).not.toBeNull();
     expect(within(drawer as HTMLElement).getByText(/#11/)).toBeInTheDocument();
-    expect(within(drawer as HTMLElement).getByText('聯絡電話：09******** ｜ 學歷：大學')).toBeInTheDocument();
+    expect(drawer).toHaveTextContent('聯絡電話：09********');
     await waitFor(() => expect(within(drawer as HTMLElement).getAllByText('在職').length).toBeGreaterThan(0));
     await waitFor(() => expect(screen.getByText(/整體狀態/)).toBeInTheDocument());
     const selector = screen.getByLabelText('查詢服務人員');

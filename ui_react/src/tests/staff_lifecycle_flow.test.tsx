@@ -44,12 +44,10 @@ describe('Staff lifecycle flow', () => {
   async function openDrawer(): Promise<void> {
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
-    fireEvent.change(screen.getByLabelText('查詢服務人員'), { target: { value: '11' } });
-    await waitFor(() => expect(screen.getAllByText(/在職|已退役/).length).toBeGreaterThan(0));
-    fireEvent.click(screen.getAllByRole('button', { name: /檢視服務人員摘要/ })[0]);
+    fireEvent.click(screen.getAllByRole('button', { name: /查看 .* 的詳情/ })[0]);
     fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
     await waitFor(() => expect(screen.getByText(/人事任職狀態與異動辦理/)).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: /辦理(退役|復職)登記/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /辦理(退役|復職)登記/ }));
   }
 
   it('退役完成 preview、apply、receipt 與重新查詢並更新 server state', async () => {
@@ -124,8 +122,8 @@ describe('Staff lifecycle flow', () => {
     await waitFor(() => expect(staffLifecycleClient.apply).toHaveBeenCalledTimes(1));
 
     const expectLocked = () => {
-      for (const name of [/服務月嫂名冊/, /配對偏好/, /長假與暫停/]) {
-        expect(screen.getByRole('button', { name })).toBeDisabled();
+      for (const name of [/個資與履歷管理/, /完整資格主檔/, /接案偏好設定/, /接案狀態管理/]) {
+        expect(screen.getByRole('tab', { name })).toBeDisabled();
       }
       expect(screen.getByLabelText('查詢服務人員')).toBeDisabled();
       expect(screen.getByRole('button', { name: '關閉' })).toBeDisabled();

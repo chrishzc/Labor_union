@@ -20,15 +20,14 @@ describe('StaffPage zero fake mutation', () => {
     expect(document.querySelector('[data-control-id="staff.master.create"]')).not.toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: '辦理退役／復職' })[0]).toBeEnabled();
 
-    fireEvent.click(screen.getByRole('button', { name: /配對偏好/ }));
-    expect(screen.getByText('請先選擇服務人員。')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /查看 去敏人員甲 的詳情/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /接案偏好設定/ }));
     expect(screen.queryByRole('button', { name: '預覽變更' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '確認儲存' })).not.toBeInTheDocument();
     expect(document.querySelector('[data-control-id="staff.preferences.cooking-skills"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-control-id="staff.preferences.special-notes"]')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /長假與暫停/ }));
-    fireEvent.change(screen.getByLabelText('查詢服務人員'), { target: { value: '11' } });
+    fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
     for (const id of [
       'staff.availability.create.preview',
       'staff.availability.create.apply',
@@ -38,10 +37,6 @@ describe('StaffPage zero fake mutation', () => {
     ]) {
       expect(document.querySelector(`[data-control-id="${id}"]`)).toBeDisabled();
     }
-    fireEvent.click(screen.getByRole('button', { name: /服務月嫂名冊/ }));
-    fireEvent.click(screen.getAllByRole('button', { name: /檢視服務人員摘要/ })[0]);
-    fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
-
     const unsupportedIds = [
       'staff.master.save',
       'staff.master.edit',

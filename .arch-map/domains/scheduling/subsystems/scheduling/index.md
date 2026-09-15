@@ -32,6 +32,9 @@
 
 ## Verification routing
 - default_boundary: Subsystem
+- layout_status: `custom_current`
+- layout_basis: SchedulingPage composes multiple Scheduling modules, so entry-cutover coverage uses the mirrored frontend subsystem integration root.
 - test_root: `tests/domains/scheduling/subsystems/scheduling/`
+- integration_root: `ui_react/src/tests/domains/scheduling/subsystems/scheduling/integration/`
 - routing: `.arch-map/tests/domains/scheduling/subsystems/scheduling/index.md`.
 - bounded runtime verification: `scripts/run_task96_scheduling_lane_c.py` (typed TestClient disposable lane-C data and Scheduling readback)

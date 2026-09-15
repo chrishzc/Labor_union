@@ -67,7 +67,7 @@ describe('Staff case preference summary flow', () => {
     expect(cardView.getByRole('group', { name: '交通方式' })).not.toHaveTextContent('其它來源尚未就緒');
     expect(cardView.getAllByRole('group')).toHaveLength(6);
 
-    fireEvent.click(cardView.getByRole('button', { name: /檢視服務人員摘要/ }));
+    fireEvent.click(cardView.getByRole('button', { name: /查看 .* 的詳情/ }));
     fireEvent.click(screen.getByRole('tab', { name: /接案偏好設定/ }));
     const drawer = document.querySelector('[data-surface-id="staff.drawer.preferences"]');
     expect(drawer).not.toBeNull();
@@ -79,7 +79,7 @@ describe('Staff case preference summary flow', () => {
     expect(drawerView.getByRole('group', { name: '可承接區域' })).toHaveTextContent('偏遠地區需先確認交通');
     expect(drawerView.getByRole('group', { name: '下廚能力' })).toHaveTextContent('家常菜');
     expect(drawerView.queryByRole('group', { name: '交通方式' })).not.toBeInTheDocument();
-    expect(drawerView.getAllByRole('group')).toHaveLength(6);
+    expect(drawerView.getAllByRole('group')).toHaveLength(7);
     expect(drawerView.queryByRole('button', { name: '預覽變更' })).not.toBeInTheDocument();
     expect(drawerView.queryByRole('button', { name: '確認儲存' })).not.toBeInTheDocument();
     expect(staffCasePreferenceSummaryClient.query).toHaveBeenCalledWith(

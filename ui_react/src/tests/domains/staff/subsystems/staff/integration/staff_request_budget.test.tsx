@@ -54,8 +54,8 @@ describe('Staff request budget', () => {
     });
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: /配對偏好/ }));
-    fireEvent.change(screen.getByLabelText('查詢服務人員'), { target: { value: '11' } });
+    fireEvent.click(screen.getByRole('button', { name: /查看 去敏人員甲 的詳情/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /接案偏好設定/ }));
     fireEvent.click(await screen.findByRole('button', { name: '編輯六項偏好' }));
     fireEvent.change(screen.getByLabelText('六大接案能力變更原因'), { target: { value: 'request budget' } });
     fireEvent.click(screen.getByRole('button', { name: '預覽變更' }));
@@ -66,19 +66,14 @@ describe('Staff request budget', () => {
   });
 
   it('availability create uses one range GET plus preview/apply/requery', async () => {
-    vi.spyOn(staffAvailabilityClient, 'getBlocks')
-      .mockResolvedValueOnce([STAFF_AVAILABILITY_BLOCK])
-      .mockResolvedValueOnce([STAFF_AVAILABILITY_BLOCK]);
+    vi.spyOn(staffAvailabilityClient, 'getBlocks').mockResolvedValue([STAFF_AVAILABILITY_BLOCK]);
     vi.spyOn(staffAvailabilityClient, 'previewChange').mockResolvedValue(STAFF_AVAILABILITY_PREVIEW_RESPONSE.data!);
     vi.spyOn(staffAvailabilityClient, 'applyChange').mockResolvedValue(STAFF_AVAILABILITY_RECEIPT_RESPONSE.data!);
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: /長假與暫停/ }));
-    fireEvent.change(screen.getByLabelText('查詢服務人員'), { target: { value: '11' } });
-    fireEvent.change(screen.getByLabelText('開始日期'), { target: { value: '2026-09-01' } });
-    fireEvent.change(screen.getByLabelText('結束日期'), { target: { value: '2026-10-31' } });
+    fireEvent.click(screen.getByRole('button', { name: /查看 去敏人員甲 的詳情/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
     fireEvent.change(screen.getByLabelText('新增原因'), { target: { value: '排定休假' } });
-    fireEvent.click(screen.getByRole('button', { name: '查詢不可服務期間' }));
     await waitFor(() => expect(screen.getByText('2026-09-01 ～ 2026-09-30')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: '預覽新增' }));
     await waitFor(() => expect(screen.getByRole('button', { name: '套用新增' })).not.toBeDisabled());
@@ -96,9 +91,7 @@ describe('Staff request budget', () => {
     vi.spyOn(staffLifecycleClient, 'apply').mockResolvedValue(STAFF_LIFECYCLE_RECEIPT);
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
-    fireEvent.change(screen.getByLabelText('查詢服務人員'), { target: { value: '11' } });
-    await waitFor(() => expect(screen.getAllByText('在職').length).toBeGreaterThan(0));
-    fireEvent.click(screen.getAllByRole('button', { name: /檢視服務人員摘要/ })[0]);
+    fireEvent.click(screen.getByRole('button', { name: /查看 去敏人員甲 的詳情/ }));
     fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
     await waitFor(() => expect(screen.getByText(/人事任職狀態與異動辦理/)).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: /辦理退役登記/ }));

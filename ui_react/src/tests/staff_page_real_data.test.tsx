@@ -30,9 +30,11 @@ describe('StaffPage real data boundary', () => {
   it('renders server summary and lifecycle values through bounded clients', async () => {
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
-    fireEvent.change(screen.getByLabelText('查詢服務人員'), { target: { value: '11' } });
-    await waitFor(() => expect(screen.getAllByText('在職').length).toBeGreaterThan(0));
-    expect(screen.getByText('📞 09******** ｜ 學歷：大學')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /查看 去敏人員甲 的詳情/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
+    await waitFor(() => expect(screen.getAllByText(/正常在職中/).length).toBeGreaterThan(0));
+    expect(screen.getByText('電話：09********')).toBeInTheDocument();
+    expect(screen.getByText('學歷：大學')).toBeInTheDocument();
     expect(screen.queryByText(/未開放|後端.*提供|unavailable|資料待補/)).not.toBeInTheDocument();
   });
 
@@ -75,7 +77,7 @@ describe('StaffPage real data boundary', () => {
   it('shows BeClass-adopted service capability facts in the selected staff drawer', async () => {
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
-    fireEvent.click(screen.getAllByRole('button', { name: /檢視服務人員摘要/ })[0]);
+    fireEvent.click(screen.getAllByRole('button', { name: /查看 .* 的詳情/ })[0]);
 
     expect(await screen.findByRole('group', { name: '最多照顧寶寶數' })).toHaveTextContent('2 位');
     expect(screen.getByRole('group', { name: '可承接區域' })).toHaveTextContent('北區、其他（新竹市）');
@@ -122,7 +124,7 @@ describe('StaffPage real data boundary', () => {
     });
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
-    fireEvent.click(screen.getAllByRole('button', { name: /檢視服務人員摘要/ })[0]);
+    fireEvent.click(screen.getAllByRole('button', { name: /查看 .* 的詳情/ })[0]);
 
     expect(await screen.findByRole('group', { name: '料理能力' })).toHaveTextContent('料理類型：素食');
     expect(screen.getByRole('group', { name: '證照' })).toHaveTextContent('寶寶按摩證照：是');
@@ -149,11 +151,11 @@ describe('StaffPage real data boundary', () => {
       .mockResolvedValueOnce(STAFF_LIFECYCLE_VIEW);
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
-    fireEvent.click(screen.getAllByRole('button', { name: /檢視服務人員摘要/ })[0]);
+    fireEvent.click(screen.getAllByRole('button', { name: /查看 .* 的詳情/ })[0]);
     fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
 
     fireEvent.click(await screen.findByRole('button', { name: '重試任職狀態' }));
-    await waitFor(() => expect(screen.getAllByText('在職').length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getAllByText(/正常在職中/).length).toBeGreaterThan(0));
     expect(staffLifecycleClient.query).toHaveBeenCalledTimes(2);
   });
 });

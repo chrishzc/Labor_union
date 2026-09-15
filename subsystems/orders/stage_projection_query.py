@@ -30,6 +30,7 @@ _ROW_FIELDS = frozenset({
     "candidate_pool_candidate_count", "candidate_pool_contacted_count", "candidate_pool_contacted_at",
     "candidate_pool_replied_count", "candidate_pool_willing_count", "candidate_pool_replied_at", "matching_plan_id", "matching_plan_version",
     "matching_plan_status", "matching_created_at", "matching_customer_decision", "matching_customer_decision_at",
+    "waiting_deposit_lock_id", "waiting_deposit_lock_created_at",
     "willingness_contact_attempt_count", "willingness_count", "willingness_replied_count",
     "willingness_accepted_count", "willingness_contacted_at", "willingness_replied_at",
     "resume_attempt_count", "resume_sent_count", "resume_sent_at", "matching_segment_count", "staff_contract_document_count", "staff_contract_sent_count",
@@ -275,6 +276,7 @@ def _matching_stage(row: Mapping[str, object], case_no: str) -> StageProjection:
     plan_id = row["matching_plan_id"]
     status = row["matching_plan_status"]
     customer_decision = row["matching_customer_decision"]
+    waiting_deposit_lock_id = _optional_int(row, "waiting_deposit_lock_id")
     candidate_pool_id = _optional_int(row, "candidate_pool_id")
     candidate_count = _nonnegative_int(row, "candidate_pool_candidate_count")
     if plan_id is not None and (isinstance(plan_id, bool) or not isinstance(plan_id, int) or plan_id <= 0):
@@ -303,7 +305,7 @@ def _matching_stage(row: Mapping[str, object], case_no: str) -> StageProjection:
         )
     if plan_id is None:
         return _unavailable_stage(2, "matching_willingness", "媒合與徵詢意願", "Assignments / Scheduling", "matching_plan_lineage_missing")
-    if customer_decision == "accepted" or status == "accepted":
+    if waiting_deposit_lock_id is not None or customer_decision == "accepted" or status == "accepted":
         projected: StageStatus = "completed"
         blockers: tuple[ProjectionNotice, ...] = ()
     elif customer_decision == "rejected" or status in {"rejected", "cancelled"}:
@@ -321,10 +323,19 @@ def _client_review_stage(row: Mapping[str, object], case_no: str) -> StageProjec
     resume_sent_count = _nonnegative_int(row, "resume_sent_count")
     if plan_id is None:
         return _unavailable_stage(3, "client_review", "推薦客戶與確認", "Assignments / Customer Decision", "formal_recommendation_projection_missing")
-    accepted = row["matching_customer_decision"] == "accepted" or row["matching_plan_status"] == "accepted"
-    status: StageStatus = "completed" if accepted and resume_sent_count else "in_progress" if accepted or resume_sent_count else "not_started"
-    source = _source("Assignments / Customer Decision", f"caregiver-matching-plan:{plan_id}", _optional_int(row, "matching_plan_version"))
-    return _stage(3, "client_review", "推薦客戶與確認", "Assignments / Customer Decision", status, source, _latest(row, "resume_sent_at", "matching_customer_decision_at"), actions=(_get("orders.assignment_plan.query", f"/api/v1/orders/{case_no}/assignment-plan"),))
+    waiting_deposit_lock_id = _optional_int(row, "waiting_deposit_lock_id")
+    accepted = (
+        waiting_deposit_lock_id is not None
+        or row["matching_customer_decision"] == "accepted"
+        or row["matching_plan_status"] == "accepted"
+    )
+    status: StageStatus = "completed" if accepted else "in_progress" if resume_sent_count else "not_started"
+    source = (
+        _source("Scheduling", f"caregiver-availability-lock:{waiting_deposit_lock_id}", None)
+        if waiting_deposit_lock_id is not None
+        else _source("Assignments / Customer Decision", f"caregiver-matching-plan:{plan_id}", _optional_int(row, "matching_plan_version"))
+    )
+    return _stage(3, "client_review", "推薦客戶與確認", "Assignments / Customer Decision", status, source, _latest(row, "resume_sent_at", "matching_customer_decision_at", "waiting_deposit_lock_created_at"), actions=(_get("orders.assignment_plan.query", f"/api/v1/orders/{case_no}/assignment-plan"),))
 
 
 def _contract_stage(row: Mapping[str, object], case_no: str) -> StageProjection:

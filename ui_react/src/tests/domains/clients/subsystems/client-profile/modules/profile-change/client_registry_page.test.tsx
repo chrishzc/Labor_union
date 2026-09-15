@@ -112,7 +112,7 @@ describe('Client registry owner editing', () => {
     expect(information).not.toHaveTextContent('survey_details');
   });
 
-  it('shows editable blank fields for a historical case without imported BeClass data', async () => {
+  it('shows editable blank fields for any case without imported BeClass data', async () => {
     mocks.query.mockResolvedValue({
       ...detail,
       beclass: {

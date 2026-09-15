@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HistoricalClientPaymentWorkbench } from '../components/HistoricalClientPaymentWorkbench';
 import { historicalClientPaymentClient } from '../api/client_finance/historical_client_payment_client';
+import { sessionClient } from '../api/auth/session_client';
 
 const obligation = {
   obligation_identity: 'client-obligation:1', case_no: 'CASE-1', obligation_type: 'deposit',
@@ -12,6 +13,9 @@ describe('HistoricalClientPaymentWorkbench', () => {
   afterEach(() => vi.restoreAllMocks());
 
   it('runs owner Query, Preview, confirmed Apply and fresh readback without an Anomalies mutation', async () => {
+    sessionClient.setSession('historical-client-payment-test', {
+      id: 1, username: 'operator', display_name: 'Operator', role: 'admin',
+    });
     vi.spyOn(historicalClientPaymentClient, 'query').mockResolvedValue({
       case_no: 'CASE-1', account_version: 4, adoption_receipt_id: 9, adopted: true,
       normal_bank_candidate_identities: [], obligations: [obligation],
@@ -33,10 +37,11 @@ describe('HistoricalClientPaymentWorkbench', () => {
     fireEvent.click(await screen.findByLabelText(/client-obligation:1/));
     fireEvent.click(screen.getByRole('button', { name: '預覽歷史付款影響' }));
     expect(await screen.findByText(/金額快照：NT\$ 12,000/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('原因'), { target: { value: '核對歷史付款' } });
     fireEvent.click(screen.getByLabelText(/我已核對方向/));
     fireEvent.click(screen.getByRole('button', { name: '確認並提交' }));
 
     await waitFor(() => expect(apply).toHaveBeenCalledTimes(1));
-    expect(await screen.findByText(/Fresh readback：Client Finance 已結清/)).toBeInTheDocument();
+    expect(await screen.findByText(/已重新讀取付款結果：客戶款項已結清/)).toBeInTheDocument();
   });
 });

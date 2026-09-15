@@ -46,9 +46,12 @@
 - `db/schema_parts/1019_line_identity_role_scope.sql` — additive shared root/event successor, selected-role column and streak root.
 
 ## Verification
+- layout_status: `custom_current`
+- layout_basis: LINE identity frontend adapter tests mirror this module under the React test domain tree; backend behavior remains in the existing Python module root.
 - static:
   - `python -m py_compile domains/line/identity_binding.py subsystems/line/identity_application.py subsystems/line/identity_management_application.py infrastructure/mysql/line_identity_review_repository.py infrastructure/mysql/line_identity_management_repository.py`
 - test_root: `tests/domains/external-integration/subsystems/line/modules/line-identity-management/`
+- test_root: `ui_react/src/tests/domains/external-integration/subsystems/line/modules/line-identity-management/` — identity presentation adapter masking and strict typed-state coverage.
 
 ## Provenance
 - `line_identity_role_bindings` and `line_identity_role_binding_events` are the single shared role-scoped successor; legacy roots/events are migration/compatibility input only — `architecture_declared` — `document/架構重整/01_規格基線/23_LINE身分管理與解除正式規格.md` §9.

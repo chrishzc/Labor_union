@@ -63,13 +63,9 @@ describe('StaffPage request budget', () => {
   it('tab switches and Drawer interaction add zero directory requests', async () => {
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: /配對偏好/ }));
-    fireEvent.click(screen.getByRole('button', { name: /長假與暫停/ }));
-    fireEvent.click(screen.getByRole('button', { name: /服務月嫂名冊/ }));
-    fireEvent.click(screen.getAllByRole('button', { name: /檢視服務人員摘要/ })[0]);
-    await waitFor(() => expect(screen.getAllByText('在職').length).toBeGreaterThan(0));
-    await waitFor(() => expect(screen.getByText(/整體狀態/)).toBeInTheDocument());
-
+    fireEvent.click(screen.getAllByRole('button', { name: /查看 .* 的詳情/ })[0]);
+    fireEvent.click(screen.getByRole('tab', { name: /接案偏好設定/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
     expect(staffDirectoryClient.queryPage).toHaveBeenCalledTimes(1);
   });
 

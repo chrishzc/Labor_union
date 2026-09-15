@@ -112,9 +112,11 @@ Orders 不擁有：
 - **WB-STATE-04**：切換分類不帶入另一分類的 stage／substatus 篩選。沿用本節的完整 continuation、stale request 取消與 partial failure 規則；不得把前 200 筆當作完整結果。所有分類、counts 與 pagination 共用 server predicate。
 - **WB-STATE-05**：既有 `/api/orders/core-stage-timelines` 增加可選 `workbench_scope=in_progress|completed|cancelled`。未指定時維持既有 branch／historical Query 契約，供歷史詳情與既有 consumers 使用。新的工作分類不與 legacy branch／historical facet 合併使用；完成及取消分類不得帶 stage／substatus。此 additive Query 不增加寫入、migration、provider effect 或改變生命週期事實。
 
-#### 3.1.2.2 第 6–8 核心階段外部簽署順序（2026-09-09 人工裁決）
+#### 3.1.2.2 第 6–8 核心階段外部簽署順序（2026-09-09 人工裁決；2026-09-15 推薦完成條件補充）
 
 十三核心階段總數維持不變；第 6–8 階段依實際外部平台流程固定為：
+
+客戶決策已接受、matching plan 已成為 `accepted`，或該方案已有 Scheduling-owned 的有效等待訂金鎖時，第 5 階段「推薦客戶與確認」即完成並進入「契約與文件」；履歷是否由系統記錄成功寄送只保留為 delivery evidence，不得使已接受或已鎖檔案件停留在第 5 階段。
 
 6. `external_signing_dispatch`：系統建立目前 accepted plan 的契約文件，由工會人員明確確認已送交外部簽署平台。
 7. `external_signing_completion`：客戶與所有月嫂在外部平台完成簽署，以本系統驗收並保存的最終簽署 PDF 為完成根事實。

@@ -47,6 +47,8 @@ SELECT o.case_no,
        plan.created_at AS matching_created_at,
        customer_response.response_value AS matching_customer_decision,
        customer_response.occurred_at_utc AS matching_customer_decision_at,
+       waiting_deposit_lock.id AS waiting_deposit_lock_id,
+       waiting_deposit_lock.created_at AS waiting_deposit_lock_created_at,
        GREATEST(COALESCE(willingness.willingness_count, 0), COALESCE(communication.contact_attempt_count, 0), COALESCE(response_fact.replied_count, 0)) AS willingness_contact_attempt_count,
        GREATEST(COALESCE(willingness.willingness_count, 0), COALESCE(communication.contact_sent_count, 0), COALESCE(response_fact.replied_count, 0)) AS willingness_count,
        GREATEST(COALESCE(willingness.willingness_replied_count, 0), COALESCE(response_fact.replied_count, 0)) AS willingness_replied_count,
@@ -186,6 +188,10 @@ SELECT o.case_no,
   ) candidate_pool ON candidate_pool.case_no = o.case_no
   LEFT JOIN caregiver_matching_plans plan
     ON plan.case_no = o.case_no AND plan.is_active = 1
+  LEFT JOIN caregiver_availability_locks waiting_deposit_lock
+    ON waiting_deposit_lock.plan_id = plan.id
+   AND waiting_deposit_lock.status = 'active'
+   AND waiting_deposit_lock.is_active = 1
   LEFT JOIN (
        SELECT case_no, COUNT(*) AS willingness_count,
               SUM(replied_at IS NOT NULL) AS willingness_replied_count,

@@ -52,29 +52,26 @@ async function renderReadyStaff(): Promise<void> {
 
 async function openPreferences(): Promise<void> {
   await renderReadyStaff();
-  fireEvent.click(screen.getByRole('button', { name: /配對偏好/ }));
-  fireEvent.change(screen.getByLabelText('查詢服務人員'), { target: { value: '11' } });
+  fireEvent.click(screen.getByRole('button', { name: /查看 去敏人員甲 的詳情/ }));
+  fireEvent.click(screen.getByRole('tab', { name: /接案偏好設定/ }));
   await screen.findByRole('button', { name: '編輯六項偏好' });
 }
 
 async function openAvailability(): Promise<void> {
   await renderReadyStaff();
-  fireEvent.click(screen.getByRole('button', { name: /長假與暫停/ }));
-  fireEvent.change(screen.getByLabelText('查詢服務人員'), { target: { value: '11' } });
+  fireEvent.click(screen.getByRole('button', { name: /查看 去敏人員甲 的詳情/ }));
+  fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
   fireEvent.change(screen.getByLabelText('開始日期'), { target: { value: '2026-09-01' } });
   fireEvent.change(screen.getByLabelText('結束日期'), { target: { value: '2026-10-31' } });
-  fireEvent.click(screen.getByRole('button', { name: '查詢不可服務期間' }));
   await waitFor(() => expect(screen.getByText('2026-09-01 ～ 2026-09-30')).toBeInTheDocument());
 }
 
 async function openLifecycle(): Promise<void> {
   await renderReadyStaff();
-  fireEvent.change(screen.getByLabelText('查詢服務人員'), { target: { value: '11' } });
-  await waitFor(() => expect(screen.getByText('在職')).toBeInTheDocument());
   fireEvent.click(document.querySelector('[data-control-id="staff.drawer.open.11"]') as HTMLElement);
   fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
   await waitFor(() => expect(screen.getByText(/人事任職狀態與異動辦理/)).toBeInTheDocument());
-  fireEvent.click(screen.getByRole('button', { name: /辦理退役登記/ }));
+  fireEvent.click(await screen.findByRole('button', { name: /辦理退役登記/ }));
 }
 
 describe('Staff action async race guards', () => {
@@ -127,9 +124,9 @@ describe('Staff action async race guards', () => {
     fireEvent.change(screen.getByLabelText('新增原因'), { target: { value: '去敏預覽競態' } });
     fireEvent.click(screen.getByRole('button', { name: '預覽新增' }));
     await waitFor(() => expect(staffAvailabilityClient.previewChange).toHaveBeenCalledTimes(1));
-    fireEvent.click(screen.getByRole('button', { name: /服務月嫂名冊/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /完整資格主檔/ }));
     pending.resolve(STAFF_AVAILABILITY_PREVIEW_RESPONSE.data!);
-    fireEvent.click(screen.getByRole('button', { name: /長假與暫停/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
 
     await waitFor(() => expect(screen.getByRole('button', { name: '套用新增' })).toBeDisabled());
     expect(screen.queryByText(/Preview 指紋/)).not.toBeInTheDocument();
@@ -226,11 +223,13 @@ describe('Staff action async race guards', () => {
       .mockReturnValueOnce(stale.promise)
       .mockResolvedValueOnce(manualSnapshot(12, '南區'));
     await renderReadyStaff();
-    fireEvent.click(screen.getByRole('button', { name: /配對偏好/ }));
-    fireEvent.change(screen.getByLabelText('查詢服務人員'), { target: { value: '11' } });
+    fireEvent.click(screen.getByRole('button', { name: /查看 去敏人員甲 的詳情/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /接案偏好設定/ }));
     await waitFor(() => expect(staffCasePreferenceManualClient.query).toHaveBeenCalledTimes(1));
     const staleSignal = vi.mocked(staffCasePreferenceManualClient.query).mock.calls[0]?.[1]?.signal;
-    fireEvent.change(screen.getByLabelText('查詢服務人員'), { target: { value: '12' } });
+    fireEvent.click(screen.getByRole('button', { name: '關閉' }));
+    fireEvent.click(screen.getByRole('button', { name: /查看 服務人員摘要 #12 的詳情/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /接案偏好設定/ }));
     expect(await screen.findByText('南區')).toBeInTheDocument();
     expect(staleSignal?.aborted).toBe(true);
     stale.resolve(manualSnapshot(11, '北區'));
@@ -245,12 +244,10 @@ describe('Staff action async race guards', () => {
       .mockReturnValueOnce(requery.promise);
     const view = render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
-    fireEvent.change(screen.getByLabelText('查詢服務人員'), { target: { value: '11' } });
-    await waitFor(() => expect(screen.getByText('在職')).toBeInTheDocument());
     fireEvent.click(document.querySelector('[data-control-id="staff.drawer.open.11"]') as HTMLElement);
     fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
     await waitFor(() => expect(screen.getByText(/人事任職狀態與異動辦理/)).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: /辦理退役登記/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /辦理退役登記/ }));
     fireEvent.change(screen.getAllByLabelText('生效時間').at(-1)!, { target: { value: STAFF_LIFECYCLE_PREVIEW_PAYLOAD.effective_at } });
     fireEvent.change(screen.getAllByLabelText('異動原因').at(-1)!, { target: { value: STAFF_LIFECYCLE_PREVIEW_PAYLOAD.reason_code } });
     fireEvent.click(screen.getByRole('button', { name: /預覽退役/ }));

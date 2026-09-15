@@ -2,7 +2,7 @@
  * File: data_import_no_fake_mutation.test.tsx
  * Description: 驗證退役／跨域匯入不再佔用操作頁，active Apply只會在成功Preview後出現。
  */
-import { fireEvent, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { anomalyQueryClient } from '../api/anomalies/anomaly_query_client';
 import { DataImportPage } from '../pages/DataImportPage';
@@ -31,7 +31,6 @@ describe('DataImportPage zero fake mutation gate', () => {
   it('exposes active Preview but no Apply control before a successful Preview', async () => {
     render(<DataImportPage />);
     expect(anomalyQueryClient.queryImportWarningTasks).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: /工作簿資料匯入/i }));
     expect(document.querySelector('[data-control-id="imports.hcm-current.open-preview"]')).toBeInTheDocument();
     expect(document.querySelector('[data-control-id="imports.hcm-current.preview"]')).toBeDisabled();
     expect(document.querySelector('[data-control-id="imports.hcm-current.apply"]')).toBeNull();

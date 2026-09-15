@@ -17,7 +17,7 @@ describe('FinancePage query safety', () => {
     expect(source).toContain('上傳檔案');
     expect(source).toContain('預覽匯入結果');
     expect(source).toContain('確認匯入');
-    expect(source).toContain('observeApplyOutcome(accepted.job_id)');
+    expect(source).toContain('observeApplyOutcome(accepted.job_id,');
     expect(source).not.toContain('finance.finance-import.correction');
     expect(source).not.toContain('帳務更正義務識別');
   });

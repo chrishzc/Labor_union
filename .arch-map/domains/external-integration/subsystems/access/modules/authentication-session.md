@@ -32,6 +32,7 @@ Owns admin authentication/session persistence orchestration, including the absol
 
 - test_root: `ui_react/src/tests/session_client_two_step_auth.test.ts` — existing session client contract.
 - test_root: `ui_react/src/tests/login_enrollment.test.tsx` — enrollment presentation and successful binding without a login session.
+- test_root: `ui_react/src/tests/LoginPage.test.tsx` — two-step login, TOTP failure presentation and secret-safe handling.
 - test_root: `ui_react/src/tests/fixtures/auth/two_step_auth_contract_fixtures.ts` — existing authentication contract fixtures.
 
 - layout_status: `custom_current`

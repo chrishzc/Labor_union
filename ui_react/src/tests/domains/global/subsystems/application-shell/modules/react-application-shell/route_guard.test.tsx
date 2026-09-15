@@ -57,6 +57,7 @@ describe('Route Guard & Shell Hash Navigation', () => {
             data: {
               challenge_id: 'ch-guard-test-12345',
               challenge_token: 'tok-guard-test-32chars-minimum-abcdef123456',
+              challenge_type: 'factor_verification',
               expires_at: '2099-12-31T23:59:59Z',
             },
             error: null,

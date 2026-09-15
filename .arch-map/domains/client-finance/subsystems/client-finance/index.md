@@ -27,5 +27,8 @@
 
 ## Verification routing
 - default_boundary: Subsystem
+- layout_status: `custom_current`
+- layout_basis: FinancePage spans multiple Client Finance modules, so its frontend composition tests use the mirrored subsystem integration root.
+- integration_root: `ui_react/src/tests/domains/client-finance/subsystems/client-finance/integration/`
 - current owner-local integration coverage remains catalogued in `.arch-map/tests/domains/client-finance/subsystems/client-finance/index.md`.
 - material module tests use the exact canonical root declared by their module leaf.

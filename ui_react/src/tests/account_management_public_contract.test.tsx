@@ -13,10 +13,16 @@ describe('Account Management public mutation contract', () => {
   afterEach(() => vi.restoreAllMocks());
 
   it('sends expected version/reason and renders only safe receipt projection', async () => {
-    vi.spyOn(accountDirectoryClient, 'query').mockResolvedValue(ACCOUNT_DIRECTORY_FIXTURE);
+    vi.spyOn(accountDirectoryClient, 'query').mockResolvedValue([
+      ...ACCOUNT_DIRECTORY_FIXTURE,
+      {
+        id: 2, username: 'operator-user', display_name: '操作員', enabled: true,
+        is_root: false, access_control_version: 2,
+      },
+    ]);
     const command = vi.spyOn(accountCenterClient, 'revokeSessions').mockResolvedValue({
       operation: 'account-sessions-revoke',
-      target_account_id: 1,
+      target_account_id: 2,
       resulting_access_control_version: 3,
       receipt_identity: 'a'.repeat(64),
       replayed: false,
@@ -24,10 +30,11 @@ describe('Account Management public mutation contract', () => {
     });
     render(<AccountManagementPage />);
     await screen.findByText('root-user');
-    fireEvent.change(screen.getByLabelText('操作原因'), { target: { value: 'security review' } });
     fireEvent.click(screen.getByRole('button', { name: /強制登出/ }));
+    fireEvent.change(screen.getByLabelText('操作原因'), { target: { value: 'security review' } });
+    fireEvent.click(screen.getByRole('button', { name: '確認執行' }));
     await waitFor(() => expect(screen.getByText('帳號操作已完成，清冊已重新整理。')).toBeInTheDocument());
-    expect(command).toHaveBeenCalledWith(1, expect.objectContaining({
+    expect(command).toHaveBeenCalledWith(2, expect.objectContaining({
       reason: 'security review', expected_version: 2, idempotency_key: expect.stringMatching(/^account-/),
     }));
     expect(screen.queryByText('a'.repeat(64))).not.toBeInTheDocument();

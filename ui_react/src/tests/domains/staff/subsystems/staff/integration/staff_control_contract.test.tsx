@@ -39,46 +39,37 @@ describe('Staff control contract', () => {
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
     expect(document.querySelector('[data-control-id="staff.master.create"]')).not.toBeInTheDocument();
-    expect(document.querySelector('[data-control-id="staff.tab.roster"]')).toBeInTheDocument();
-    expect(document.querySelector('[data-control-id="staff.tab.preferences"]')).toBeInTheDocument();
-    expect(document.querySelector('[data-control-id="staff.tab.unavailability"]')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /配對偏好/ }));
-    fireEvent.change(screen.getByLabelText('查詢服務人員'), { target: { value: '11' } });
+    fireEvent.click(screen.getByRole('button', { name: /查看 去敏人員甲 的詳情/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /接案偏好設定/ }));
     expect(await screen.findByRole('button', { name: '編輯六項偏好' })).toBeEnabled();
     expect(screen.queryByRole('button', { name: '預覽變更' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '確認儲存' })).not.toBeInTheDocument();
     expect(document.querySelector('[data-control-id="staff.preferences.cooking-skills"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-control-id="staff.preferences.special-notes"]')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /長假與暫停/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
     for (const id of ['staff.availability.create.preview', 'staff.availability.create.apply', 'staff.availability.cancel.apply', 'staff.availability.end-pause']) {
       expect(document.querySelector(`[data-control-id="${id}"]`)).toBeInTheDocument();
     }
     fireEvent.change(screen.getByLabelText('開始日期'), { target: { value: '2026-09-01' } });
     fireEvent.change(screen.getByLabelText('結束日期'), { target: { value: '2026-10-31' } });
-    fireEvent.click(screen.getByRole('button', { name: '查詢不可服務期間' }));
     await waitFor(() => expect(document.querySelector('[data-control-id="staff.availability.cancel.preview"]')).toBeInTheDocument());
     expect(document.querySelector('[data-control-id="staff.availability.end-pause"]')).toBeDisabled();
 
-    fireEvent.click(screen.getByRole('button', { name: /服務月嫂名冊/ }));
-    fireEvent.click(screen.getAllByRole('button', { name: /檢視服務人員摘要/ })[0]);
-    fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
     await waitFor(() => expect(screen.getByText(/人事任職狀態與異動辦理/)).toBeInTheDocument());
     expect(screen.getByRole('tab', { name: /接案狀態管理/ })).toHaveAttribute('aria-selected', 'true');
     expect(document.querySelector('[data-control-id="staff.master.save"]')).not.toBeInTheDocument();
   });
 
   it('shows an explicit empty row and omits a meaningless cancel-preview button', async () => {
-    vi.mocked(staffAvailabilityClient.getBlocks).mockResolvedValueOnce([]);
+    vi.mocked(staffAvailabilityClient.getBlocks).mockResolvedValue([]);
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: /長假與暫停/ }));
-    fireEvent.change(screen.getByLabelText('查詢服務人員'), { target: { value: '11' } });
+    fireEvent.click(screen.getByRole('button', { name: /查看 去敏人員甲 的詳情/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
     fireEvent.change(screen.getByLabelText('開始日期'), { target: { value: '2026-09-01' } });
     fireEvent.change(screen.getByLabelText('結束日期'), { target: { value: '2026-10-31' } });
-    fireEvent.click(screen.getByRole('button', { name: '查詢不可服務期間' }));
-    await waitFor(() => expect(screen.getByText('此範圍沒有不可服務紀錄。')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/此範圍沒有不可服務紀錄/)).toBeInTheDocument());
 
     expect(screen.queryByRole('button', { name: '預覽取消' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '套用取消' })).toBeDisabled();

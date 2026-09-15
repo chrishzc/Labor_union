@@ -22,6 +22,8 @@
 - layout_status: `custom_current`
 - test_root: `ui_react/src/tests/account_query_page.test.tsx`
 - test_root: `ui_react/src/tests/account_management_no_fake_mutation.test.tsx`
+- test_root: `ui_react/src/tests/account_management_entry_cutover.test.tsx`
+- test_root: `ui_react/src/tests/account_management_public_contract.test.tsx`
 
 ## Provenance
 Access歸屬由既有parent宣告；上述UI／client／既有測試路徑為source_observed。沿用現有React harness，不移動測試。

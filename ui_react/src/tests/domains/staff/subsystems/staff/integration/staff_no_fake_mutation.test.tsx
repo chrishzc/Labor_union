@@ -46,13 +46,13 @@ describe('StaffPage no fake mutation', () => {
     expect(staffAvailabilityClient.previewChange).not.toHaveBeenCalled();
     expect(staffAvailabilityClient.applyChange).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: /配對偏好/ }));
-    fireEvent.change(screen.getByLabelText('查詢服務人員'), { target: { value: '11' } });
+    fireEvent.click(screen.getByRole('button', { name: /查看 去敏人員甲 的詳情/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /接案偏好設定/ }));
     expect(await screen.findByRole('button', { name: '編輯六項偏好' })).toBeEnabled();
     expect(document.querySelector('[data-control-id="staff.preferences.cooking-skills"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-control-id="staff.preferences.special-notes"]')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /長假與暫停/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
     expect(screen.getByRole('button', { name: '預覽結束暫停' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '套用取消' })).toBeDisabled();
   });

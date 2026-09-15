@@ -17,3 +17,7 @@
 - layout_basis: frontend Staff cross-module integration tests use the mirrored subsystem root under `ui_react/src/tests/domains/staff/subsystems/staff/integration/`.
 - test_root: `tests/domains/staff/subsystems/staff/`
 - integration_root: `ui_react/src/tests/domains/staff/subsystems/staff/integration/`
+- integration_root: `ui_react/src/tests/staff_directory_page.test.tsx`
+- integration_root: `ui_react/src/tests/staff_directory_request_budget.test.tsx`
+- integration_root: `ui_react/src/tests/staff_lifecycle_flow.test.tsx`
+- integration_root: `ui_react/src/tests/staff_page_real_data.test.tsx`

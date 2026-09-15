@@ -29,7 +29,7 @@
   - `api/dependencies/orders_stage_projection.py`
 
 ## Dependencies
-- outbound: `scheduling/scheduling` — 讀取正式服務期間與 service-time terms。
+- outbound: `scheduling/scheduling` — 讀取有效等待訂金鎖、正式服務期間與 service-time terms；有效鎖是推薦確認已跨入契約準備的直接投影證據。
 - outbound: `client-finance/client-finance` — 讀取定金與客戶 obligation projection。
 - outbound: `payroll/payroll` — 讀取月嫂薪資 obligation projection。
 - outbound: `case-import | case-architecture-bootstrap` — 任一正式建立事件皆可提供進件 lineage；不得要求 bootstrap 案件補造 Case Import 收據。

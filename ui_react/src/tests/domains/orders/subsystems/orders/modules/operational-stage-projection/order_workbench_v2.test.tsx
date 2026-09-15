@@ -257,7 +257,7 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
     expect(clientMocks.getCoreStageTimelines.mock.calls.at(-1)![0]).not.toHaveProperty('substatus_code');
   });
 
-  it('搜尋與 進行中／完成／取消 都傳入正式 query，且不顯示無用途篩選', async () => {
+  it('在完整集合搜尋案件編號或姓名，且進行中／完成／取消都傳入正式 query', async () => {
     clientMocks.getCoreStageTimelines.mockImplementation(async (params: OrderCoreStageProjectionQueryParams) => {
       if (params.workbench_scope === 'completed') {
         return corePage([
@@ -293,13 +293,16 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
       expect.any(Object),
     ));
 
-    fireEvent.change(screen.getByRole('textbox', { name: '搜尋案件編號' }), {
+    const searchInput = screen.getByRole('textbox', { name: '搜尋案件編號或姓名' });
+    const callsBeforeSearch = clientMocks.getCoreStageTimelines.mock.calls.length;
+    fireEvent.change(searchInput, {
       target: { value: 'CASE-SEARCH' },
     });
-    await waitFor(() => expect(clientMocks.getCoreStageTimelines).toHaveBeenLastCalledWith(
-      expect.objectContaining({ case_no_search: 'CASE-SEARCH' }),
-      expect.any(Object),
-    ));
+    await waitFor(() => expect(screen.getByText('目前沒有符合條件的案件。')).toBeInTheDocument());
+    expect(clientMocks.getCoreStageTimelines).toHaveBeenCalledTimes(callsBeforeSearch);
+
+    fireEvent.change(searchInput, { target: { value: '' } });
+    await waitFor(() => expect(screen.getByText('CASE-NORMAL')).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole('button', { name: '完成訂單' }));
     await waitFor(() => expect(clientMocks.getCoreStageTimelines).toHaveBeenLastCalledWith(

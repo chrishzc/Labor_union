@@ -55,7 +55,6 @@ Service owner 原子結案並 release hold。LINE 不擁有客服、Payroll 或 
 ## Verification
 
 - test_root: `tests/domains/external-integration/subsystems/line/modules/complaint-ingress/`
-- shared regression: `tests/domains/external-integration/subsystems/line/subsystems/test_line_m4_continuation_regressions.py` — reopened ticket SQL/CAS、group/admin selection、告警導航、客戶結案通知與群組告警 outcome 分離。
 - source baseline: PR #299 `4eb58e07e94660308ba8afd05d39931f0301fdf1`。
 - recorded evidence: run `34733277249` / job `103659935152` 的 29 項 M4 回歸，與保留的 24 項 LINE 回歸合計 53 項通過；部分實際 adapter SQL 在 SQLite 執行，其餘使用 owner/UoW/provider 替身。此證據不涵蓋完整 pytest、MySQL 鎖／整合、手機、真實 provider 或部署；不改寫既有手機驗收紀錄。
 

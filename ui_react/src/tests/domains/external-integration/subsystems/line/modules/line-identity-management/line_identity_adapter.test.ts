@@ -15,7 +15,7 @@ import {
   adaptLineIdentityRevocationAccepted,
   adaptLineIdentityRevocationPreview,
   maskLineUserId,
-} from '../adapters/line_identity/line_identity_adapter';
+} from '../../../../../../../adapters/line_identity/line_identity_adapter';
 import {
   BINDING_PAGE_FIXTURE,
   BLOCKED_REVOCATION_PREVIEW_FIXTURE,
@@ -23,7 +23,7 @@ import {
   FIXTURE_LINE_USER_ID,
   REVOCATION_PREVIEW_FIXTURE,
   REVOCATION_REQUEST_FIXTURE,
-} from './fixtures/line_identity/line_identity_contract_fixtures';
+} from '../../../../../../fixtures/line_identity/line_identity_contract_fixtures';
 
 describe('LINE Identity Adapter（Phase 3A Lane D）', () => {
   const review = {
@@ -181,7 +181,7 @@ describe('LINE Identity Adapter（Phase 3A Lane D）', () => {
     expect(retry.notice).toContain('重新排入');
     expect(retry.notice).toContain('重新查詢');
     expect(manual.statusLabel).toBe('人工解除完成');
-    expect(manual.notice).toContain('重新查詢');
+    expect(manual.notice).toContain('重新發布訪客／預設選單');
     expect(JSON.stringify([retry, manual])).not.toContain(FIXTURE_LINE_USER_ID);
   });
 

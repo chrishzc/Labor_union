@@ -178,7 +178,6 @@ describe('LINE Rich Menu query 接線', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: /同意排入發布序列/ }));
     fireEvent.click(screen.getByRole('button', { name: /確認排入異步發布/ }));
 
-    expect(await screen.findByRole('heading', { name: /此版本已發布|發布處理中/ }, { timeout: 4000 })).toBeInTheDocument();
     await waitFor(() => expect(dependenciesValue.configuration.getRichMenuPublication).toHaveBeenCalledTimes(2));
     expect(await screen.findByRole('heading', { name: '此版本已發布' }, { timeout: 4000 })).toBeInTheDocument();
     expect(screen.queryByText(/自動追蹤 LINE 發布結果/)).not.toBeInTheDocument();

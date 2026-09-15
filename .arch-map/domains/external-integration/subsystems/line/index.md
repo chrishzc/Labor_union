@@ -87,6 +87,7 @@ layout_status: `custom_current`
 - regression: `tests/domains/external-integration/subsystems/line/subsystems/test_line_delivery_friend_regressions.py`
 - regression: `tests/domains/external-integration/subsystems/line/subsystems/test_line_friend_feedback_regressions.py`
 - regression: `tests/domains/external-integration/subsystems/line/subsystems/test_line_m4_continuation_regressions.py`
+- integration_root: `ui_react/src/tests/line_successor_clients.test.ts`
 
 上述修正的source基準為PR #299 `4eb58e07e94660308ba8afd05d39931f0301fdf1`；記錄中的
 53項回歸只涵蓋指定情境，非全M1～M4通過。main合併、部署、實際DB與手機／provider狀態

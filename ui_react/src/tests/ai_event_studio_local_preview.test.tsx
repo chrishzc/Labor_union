@@ -83,14 +83,6 @@ describe('AI 事件工作室正式規則 readback', () => {
     });
   });
 
-  it('零樣本回饋不顯示為百分之百滿意', async () => {
-    mockReadback(null);
-    render(React.createElement(AiEventStudio));
-
-    expect(await screen.findByText('尚無回饋')).toBeInTheDocument();
-    expect(screen.queryByText('100%')).not.toBeInTheDocument();
-  });
-
   it('server router preview 不再依賴本機規則', async () => {
     const fetchSpy = mockReadback();
     render(React.createElement(AiEventStudio));

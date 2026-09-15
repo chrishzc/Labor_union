@@ -624,6 +624,7 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
         data: {
           challenge_id: 'ch-expired-id',
           challenge_token: 'tok-32chars-minimum-expired-token-12345678',
+          challenge_type: 'factor_verification',
           expires_at: new Date(Date.now() - 10000).toISOString(), // 10 seconds ago
         },
         error: null,

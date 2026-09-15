@@ -44,7 +44,7 @@ describe('historical service accounting entry ownership', () => {
     vi.spyOn(ordersQueryClient, 'getOrderSummaries').mockResolvedValue(summaryPage);
 
     const dataCenter = render(<DataImportPage />);
-    await waitFor(() => expect(anomalyQueryClient.queryImportWarningTasks).toHaveBeenCalledTimes(1));
+    expect(anomalyQueryClient.queryImportWarningTasks).not.toHaveBeenCalled();
     expect(screen.queryByRole('region', { name: '歷史訂單實際服務天數與帳務' })).not.toBeInTheDocument();
     dataCenter.unmount();
 

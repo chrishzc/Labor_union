@@ -72,6 +72,8 @@ def _row(case_no: str = "CASE-001") -> dict[str, object]:
         "matching_created_at": NOW,
         "matching_customer_decision": "accepted",
         "matching_customer_decision_at": NOW,
+        "waiting_deposit_lock_id": None,
+        "waiting_deposit_lock_created_at": None,
         "willingness_contact_attempt_count": 2,
         "willingness_count": 2,
         "willingness_replied_count": 2,
@@ -247,6 +249,8 @@ def test_customer_decision_event_completes_matching_and_review_without_mutating_
     row = _row("MATCHING-CUSTOMER-DECISION")
     row["matching_plan_status"] = "proposed"
     row["matching_customer_decision"] = "accepted"
+    row["resume_sent_count"] = 0
+    row["resume_sent_at"] = None
 
     item = OrderStageProjectionQueryService(_Repository((row,)), BUSINESS_CLOCK).query(
         StageProjectionQuery(50)
@@ -256,6 +260,67 @@ def test_customer_decision_event_completes_matching_and_review_without_mutating_
     assert item.stages[2].status == "completed"
     assert item.sop_steps[4].status == "completed"
     assert item.sop_steps[2].label == "發送訂單資訊詢問月嫂意願（LINE 或人工確認）"
+
+
+def test_accepted_plan_completes_client_review_without_resume_delivery() -> None:
+    row = _row("MATCHING-ACCEPTED-PLAN")
+    row.update({
+        "matching_plan_status": "accepted",
+        "matching_customer_decision": None,
+        "resume_sent_count": 0,
+        "resume_sent_at": None,
+        "staff_contract_document_count": 0,
+        "staff_contract_sent_count": 0,
+        "staff_contract_signed_count": 0,
+        "external_signing_session_id": None,
+        "external_signing_status_version": None,
+        "external_signing_handoff_at": None,
+        "final_contract_document_id": None,
+        "final_contract_completed_at": None,
+    })
+
+    item = OrderStageProjectionQueryService(_Repository((row,)), BUSINESS_CLOCK).query(
+        StageProjectionQuery(50)
+    ).items[0]
+
+    assert item.stages[2].status == "completed"
+    assert item.sop_steps[4].status == "completed"
+    assert item.sop_steps[5].status == "not_started"
+    assert item.current_step_ordinal == 6
+
+
+def test_active_waiting_deposit_lock_directly_advances_to_contract_documents() -> None:
+    row = _row("ACTIVE-WAITING-DEPOSIT-LOCK")
+    row.update({
+        "waiting_deposit_lock_id": 7,
+        "waiting_deposit_lock_created_at": NOW,
+        "matching_plan_status": "proposed",
+        "matching_customer_decision": "pending",
+        "matching_customer_decision_at": None,
+        "resume_sent_count": 0,
+        "resume_sent_at": None,
+        "staff_contract_document_count": 0,
+        "staff_contract_sent_count": 0,
+        "staff_contract_signed_count": 0,
+        "client_contract_sent_count": 0,
+        "client_contract_signed_count": 0,
+        "external_signing_session_id": None,
+        "external_signing_status_version": None,
+        "external_signing_handoff_at": None,
+        "final_contract_document_id": None,
+        "final_contract_completed_at": None,
+    })
+
+    item = OrderStageProjectionQueryService(_Repository((row,)), BUSINESS_CLOCK).query(
+        StageProjectionQuery(50)
+    ).items[0]
+
+    assert item.stages[1].status == "completed"
+    assert item.stages[2].status == "completed"
+    assert item.stages[2].source.identity == "caregiver-availability-lock:7"
+    assert item.sop_steps[4].status == "completed"
+    assert item.current_stage_code == "contract_deposit"
+    assert item.current_step_ordinal == 6
 
 
 def test_candidate_pool_steps_do_not_require_a_formal_matching_plan() -> None:
@@ -483,6 +548,7 @@ def test_rootless_historical_order_is_isolated_without_guessing_a_business_stage
         "candidate_pool_contacted_at", "candidate_pool_replied_at", "matching_plan_id", "matching_plan_version",
         "matching_plan_status", "matching_created_at", "matching_customer_decision",
         "matching_customer_decision_at", "willingness_contacted_at",
+        "waiting_deposit_lock_id", "waiting_deposit_lock_created_at",
         "willingness_replied_at", "resume_sent_at", "staff_contract_sent_at",
         "staff_contract_signed_at", "client_contract_sent_at", "client_contract_signed_at",
         "external_signing_session_id", "external_signing_status_version", "external_signing_handoff_at",
@@ -695,7 +761,7 @@ def test_external_signing_steps_use_handoff_and_final_document_owner_facts() -> 
 
     assert steps[2].status == "completed"
     assert steps[3].status == "in_progress"
-    assert steps[4].status == "in_progress"
+    assert steps[4].status == "completed"
     assert steps[5].status == "not_started"
     assert steps[6].status == "not_started"
     assert steps[7].status == "unavailable"

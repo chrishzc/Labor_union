@@ -93,7 +93,7 @@ describe('Adversarial Challenge: URL Hash Navigation & Routing', () => {
     await waitFor(() => {
       const activeNav = screen.getByTitle('待辦看板');
       expect(activeNav).toHaveClass('active');
-      expect(screen.getByText('待辦看板')).toBeInTheDocument();
+      expect(screen.getAllByText('待辦看板').length).toBeGreaterThan(0);
     });
   });
 

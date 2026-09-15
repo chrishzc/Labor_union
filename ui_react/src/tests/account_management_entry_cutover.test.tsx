@@ -95,14 +95,10 @@ describe('Account Management Phase5 entry candidate', () => {
     expect(count(requests, AUDIT_ENDPOINT)).toBe(0);
     expect(requests.some((request) => request.path.startsWith('/api/v1/jobs/'))).toBe(false);
 
-    for (const name of [
-      /建立工作人員帳號/,
-      /重設 MFA/,
-      /強制登出/,
-      /停權/,
-    ]) {
-      expect(screen.getAllByRole('button', { name })[0]).toBeDisabled();
-    }
+    // Account actions now open a bounded Drawer; only the final confirmation
+    // is input-gated after the operator selects an action.
+    expect(screen.getByRole('button', { name: /建立工作人員帳號/ })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: /強制登出/ })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('tab', { name: /安全操作與登入稽核/ }));
     await waitFor(() => expect(screen.getByText('登入驗證')).toBeInTheDocument());

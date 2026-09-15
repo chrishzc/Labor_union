@@ -4,12 +4,14 @@ from contextlib import AbstractContextManager
 
 import pytest
 
+from domains.orders.lifecycle import OrderLifecycleStatus
 from infrastructure.mysql.beclass_correction_repository import MySqlBeClassCorrectionRepository
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from subsystems.case_import.beclass_correction_workflow import (
     BeClassCorrectionConflict,
     BeClassCorrectionSnapshot,
     BeClassCorrectionWorkflow,
+    allows_manual_beclass_source,
 )
 
 
@@ -89,7 +91,7 @@ def test_beclass_correction_accepts_only_canonical_multi_birth_count():
         )
 
 
-def test_historical_manual_beclass_can_be_created_without_an_imported_record():
+def test_manual_beclass_can_be_created_without_an_imported_record():
     repository = _Repository(manual=True)
     repository.original = {"name": None, "phone": None, "multi_birth_count": None}
     workflow = BeClassCorrectionWorkflow(repository, _Uow)
@@ -113,6 +115,14 @@ def test_historical_manual_beclass_can_be_created_without_an_imported_record():
     assert receipt.beclass_record_id == 12
     assert receipt.readback.source_kind == "admin_manual"
     assert receipt.readback.effective["multi_birth_count"] == "雙胞胎"
+
+
+def test_every_canonical_order_status_allows_manual_beclass_source() -> None:
+    assert all(
+        allows_manual_beclass_source(status.value)
+        for status in OrderLifecycleStatus
+    )
+    assert allows_manual_beclass_source("unknown-status") is False
 
 
 class _SqlCursor:
@@ -187,7 +197,7 @@ def test_beclass_mysql_correction_exposes_empty_manual_source_for_historical_ord
     }
 
 
-def test_beclass_mysql_correction_does_not_create_manual_source_for_current_order():
+def test_beclass_mysql_correction_exposes_empty_manual_source_for_current_order():
     connection = _SqlConnection([
         {"case_no": "CASE-CURRENT", "status": "洽談中"},
         (),
@@ -195,7 +205,18 @@ def test_beclass_mysql_correction_does_not_create_manual_source_for_current_orde
 
     assert MySqlBeClassCorrectionRepository(connection).load(
         "CASE-CURRENT", for_update=False
-    ) is None
+    ) == {
+        "beclass_record_id": None,
+        "case_no": "CASE-CURRENT",
+        "aggregate_version": 0,
+        "original": {
+            "name": None, "email": None, "phone": None, "tel": None,
+            "ext": None, "city": None, "zip_code": None, "address": None,
+            "admin_notes": None, "multi_birth_count": None,
+        },
+        "corrections": {},
+        "source_kind": "admin_manual",
+    }
 
 
 def test_beclass_mysql_correction_creates_a_marked_manual_container_on_first_apply():

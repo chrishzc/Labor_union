@@ -5,15 +5,15 @@
 import { StrictMode } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { App } from '../App';
-import { sessionClient } from '../api/auth/session_client';
+import { App } from '../../../../../../App';
+import { sessionClient } from '../../../../../../api/auth/session_client';
 import {
   ACCOUNTS_PAYABLE_RESPONSE,
   FINANCE_BATCH_RESPONSE,
   FINANCE_MANIFEST_RESPONSE,
   RECEIPT_RESPONSE,
   STAFF_PAYABLES_RESPONSE,
-} from './fixtures/finance/finance_query_contract_fixtures';
+} from '../../../../../fixtures/finance/finance_query_contract_fixtures';
 
 const ORDERS_SUMMARY_ENDPOINT = '/api/v1/orders/summaries';
 const CLIENT_RECEIPT_ENDPOINT = '/api/v1/orders/CASE-FIN-001/client-finance/receipt-reconciliation';
@@ -259,7 +259,7 @@ describe('Finance #finance entry static subgate', () => {
     await waitFor(() => expect(screen.getByText(/\*{8}9012/)).toBeInTheDocument());
     expect(countPath(requests, ACCOUNTS_PAYABLE_ENDPOINT)).toBe(1);
     expect(screen.queryByText('123456789012')).not.toBeInTheDocument();
-    expect(document.querySelector('[data-control-id="finance.accounts-payable.export-xlsx"]')).toBeNull();
+    expect(document.querySelector('[data-control-id="finance.accounts-payable.export-xlsx"]')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '銀行流水匯入' }));
     expect(screen.getByText('上傳檔案 → 預覽 → 匯入完成')).toBeInTheDocument();

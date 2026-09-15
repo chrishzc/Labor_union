@@ -13,19 +13,14 @@ from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersio
 
 
 _COMMAND_FAMILY = "client_beclass_correction/v1"
-_HISTORICAL_MANUAL_STATUSES = frozenset({
-    OrderLifecycleStatus.HISTORICAL_UNSERVED,
-    OrderLifecycleStatus.HISTORICAL_IN_SERVICE,
-    OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED,
-    OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED,
-})
 
 
 def allows_manual_beclass_source(order_status: object) -> bool:
     try:
-        return OrderLifecycleStatus(str(order_status)) in _HISTORICAL_MANUAL_STATUSES
+        OrderLifecycleStatus(str(order_status))
     except ValueError:
         return False
+    return True
 
 
 class BeClassCorrectionNotFound(LookupError):
