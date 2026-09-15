@@ -175,6 +175,9 @@ export const OrderGovernmentSubsidyLane: FC<{ expanded?: boolean; onExpandedChan
                   </dl>
 
                   <div className="order-v2-case-meta">
+                    <span>服務歸屬：{item.service_end_date === null || item.claim_quarter === null ? '尚未形成' : `${item.service_end_date.slice(0, 4)} 年第 ${item.claim_quarter} 季`}</span>
+                    <span>預計申請年月：{item.claim_application_year === null || item.claim_application_month === null ? '尚未形成' : `${item.claim_application_year}-${String(item.claim_application_month).padStart(2, '0')}`}</span>
+                    <span>實際送件日：{item.claim_submitted_at === null ? '尚未送件' : item.claim_submitted_at.slice(0, 10)}</span>
                     <span>申請：{formatNtd(item.requested_amount_ntd)}</span>
                     <span>核准：{formatNtd(item.approved_amount_ntd)}</span>
                     <span>已入款／折抵：{formatNtd(item.net_allocated_ntd)}</span>

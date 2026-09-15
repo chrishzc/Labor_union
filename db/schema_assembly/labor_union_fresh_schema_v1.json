@@ -5,7 +5,7 @@
     "path": "db/schema.sql",
     "sha256": "b9cd84ae5a09a46949b5d4c131659f7f114480306f94e0af1246833d021b1bfb"
   },
-  "active_artifacts_sha256": "b68b678a3acc7d954a27b5f83eac501ca61aa0149dd6411e64193a4025a24981",
+  "active_artifacts_sha256": "8cc6e8ca725d03462ef6ac3cdb22ac050b02e15a9677deb6efef5381158c63fd",
   "active_bootstrap": [
     "db/schema_parts/202_scheduling_staff_leave_intake.sql",
     "db/schema_parts/20_staff_monthly_settlements.sql",
@@ -145,7 +145,7 @@
     "db/schema_parts/1009_anomaly_reclassification_disposition.sql",
     "db/schema_parts/1010_historical_operational_baseline.sql",
     "db/schema_parts/1011_historical_baseline_projector.sql",
-    "db/schema_parts/1012_service_before_replacement.sql",
+    "db/schema_parts/226_service_before_replacement.sql",
     "db/schema_parts/1013_order_lifecycle_pending_status_constraint.sql",
     "db/schema_parts/1014_historical_baseline_projector_v2.sql",
     "db/schema_parts/1015_controlled_file_reference_finalize_leases.sql",
@@ -171,9 +171,11 @@
     "db/schema_parts/221_twins_payroll_order_details_view.sql",
     "db/schema_parts/222_matching_plan_create_receipts.sql",
     "db/schema_parts/223_order_service_hours_half_precision.sql",
-    "db/schema_parts/224_historical_manual_beclass_origin.sql"
+    "db/schema_parts/224_historical_manual_beclass_origin.sql",
+    "db/schema_parts/225_client_legacy_virtual_accounts.sql"
   ],
   "classifications": {
+    "db/schema_parts/1012_service_before_replacement.sql": "migration-only",
     "db/schema_parts/1022_task96_retired_anomaly_owner_contracts.sql": "retired",
     "db/schema_parts/153_retire_empty_legacy_field_inventory.sql": "migration-only",
     "db/schema_parts/189_client_refund_recipient_snapshot_local_upgrade.sql": "migration-only",
@@ -191,9 +193,20 @@
     "db/schema_parts/1038_twins_payroll_order_details_view.sql": "migration-only",
     "db/schema_parts/1039_matching_plan_create_receipts.sql": "migration-only",
     "db/schema_parts/1040_order_service_hours_half_precision.sql": "migration-only",
-    "db/schema_parts/1041_historical_manual_beclass_origin.sql": "migration-only"
+    "db/schema_parts/1041_historical_manual_beclass_origin.sql": "migration-only",
+    "db/schema_parts/1042_client_legacy_virtual_accounts.sql": "migration-only",
+    "db/schema_parts/1043_twins_payroll_order_details_view.sql": "migration-only"
   },
   "retirement_contracts": {
+    "db/schema_parts/1012_service_before_replacement.sql": {
+      "source_object": "released service-before replacement schema whose (id, case_no) references relied on MySQL non-standard parent-key handling",
+      "successor": "db/schema_parts/226_service_before_replacement.sql",
+      "terminal_schema_evidence": "fresh bootstrap uses part 226 with an exact unique owner binding; the released 1012 bytes remain immutable for preserve-chain reconstruction",
+      "data_effect": "none in fresh bootstrap; existing preserve-chain databases retain their released immutable event rows",
+      "replay": "preserve releases may replay immutable 1012 on their supported predecessor; fresh MySQL 8.4 bootstrap executes only canonical part 226",
+      "rollback": "retain the released 1012 artifact and source backup; discard a fresh disposable candidate if canonical verification fails",
+      "unresolved_policy": "partial or drift metadata remains blocked; do not rewrite immutable replacement evidence"
+    },
     "db/schema_parts/1022_task96_retired_anomaly_owner_contracts.sql": {
       "source_object": "historical mixed Task 96 anomaly/recovery owner contracts listed in the retired provenance artifact",
       "successor": "Client Profile-only 1021 plus each owning Domain's normal canonical contract; no anomaly-recovery framework successor",
@@ -355,6 +368,24 @@
       "replay": "preserve release accepts the absent predecessor or exact origin column successor",
       "rollback": "retain source backup and discard the candidate before any entry switch",
       "unresolved_policy": "partial or drift origin metadata blocks candidate apply pending explicit remediation"
+    },
+    "db/schema_parts/1042_client_legacy_virtual_accounts.sql": {
+      "source_object": "deployed databases without Client Finance legacy virtual-account mappings",
+      "successor": "db/schema_parts/225_client_legacy_virtual_accounts.sql",
+      "terminal_schema_evidence": "fresh assembly creates the canonical mapping table in part 225; preserve chain applies part 1042 to deployed schemas",
+      "data_effect": "schema_only; no virtual-account mapping is inferred or backfilled",
+      "replay": "CREATE TABLE IF NOT EXISTS accepts an absent predecessor or the exact successor table",
+      "rollback": "retain source backup and discard the candidate before any entry switch",
+      "unresolved_policy": "partial or drift mapping metadata blocks candidate apply pending explicit remediation"
+    },
+    "db/schema_parts/1043_twins_payroll_order_details_view.sql": {
+      "source_object": "deployed v_order_details with legacy derived staff due and expected subsidy claim dates",
+      "successor": "db/schema_parts/221_twins_payroll_order_details_view.sql",
+      "terminal_schema_evidence": "fresh assembly applies canonical part 221; preserve chain applies part 1043 after the Payroll view predecessor",
+      "data_effect": "schema_only; no Orders due date or subsidy claim history is inferred or backfilled",
+      "replay": "CREATE OR REPLACE VIEW accepts either known predecessor and converges to the MySQL-verified owner-date definition",
+      "rollback": "retain source backup and discard the candidate before any entry switch",
+      "unresolved_policy": "any unknown view definition blocks candidate apply pending explicit remediation"
     }
   }
 }

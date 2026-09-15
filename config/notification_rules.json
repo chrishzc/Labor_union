@@ -129,6 +129,26 @@
       "schedule": {"kind": "immediate"},
       "frequency": {"kind": "once"},
       "predicates": []
+    },
+    {
+      "id": "LU96-ORDER-PRE-START-REMINDER-V1",
+      "event_code": "order.pre_start_reminder",
+      "recipient_selector": "client.bound_case",
+      "template_id": "LU96-ORDER-PRE-START-REMINDER-CARD-V1",
+      "enabled": true,
+      "schedule": {"kind": "immediate"},
+      "frequency": {"kind": "once"},
+      "predicates": []
+    },
+    {
+      "id": "LU96-ORDER-SECOND-PAYMENT-REMINDER-V1",
+      "event_code": "order.second_payment_reminder",
+      "recipient_selector": "client.bound_case",
+      "template_id": "LU96-ORDER-SECOND-PAYMENT-REMINDER-CARD-V1",
+      "enabled": true,
+      "schedule": {"kind": "immediate"},
+      "frequency": {"kind": "once"},
+      "predicates": []
     }
   ]
 }

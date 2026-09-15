@@ -34,6 +34,8 @@ _EVENT_CODES = frozenset(
         "runtime.alert.review_required",
         "complaint.ingress.hold_high_ticket",
         "payroll.substitute.obligation_projected",
+        "order.pre_start_reminder",
+        "order.second_payment_reminder",
     }
 )
 _RECIPIENT_SELECTORS = frozenset(

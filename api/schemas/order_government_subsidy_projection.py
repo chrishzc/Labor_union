@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 from api.schemas.orders_stage_projection import (
@@ -23,6 +23,11 @@ class OrderGovernmentSubsidyProjectionView(BaseModel):
     identity_status: str | None
     source: SourceLineageView
     occurred_at: datetime | None
+    service_end_date: date | None
+    claim_quarter: int | None = Field(default=None, ge=1, le=4)
+    claim_application_year: int | None = Field(default=None, ge=1912)
+    claim_application_month: int | None = Field(default=None, ge=1, le=12)
+    claim_submitted_at: datetime | None
     blockers: list[ProjectionNoticeView]
     warnings: list[ProjectionNoticeView]
     available_read_actions: list[AvailableActionView]

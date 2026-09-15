@@ -68,6 +68,8 @@ Client canonical `city`、`address`、`residence_type` 仍由 Client owner 保�
 
 本機／development runtime 在啟動時必須幂等補齊隨系統交付的 54 題，並在全新或仍為未編修 v1 草稿時還原 Git 追蹤 JSONL 內的 `enabled` 狀態及建立索引；不以管理員先手動匯入作為可用前提，也不得覆寫系統內已編修的 revision。JSONL 是可隨 repository 攜帶的 bundled migration／bootstrap evidence，runtime 查詢仍不得直接以它產生候選答案。具備 Knowledge 發布權限的管理員可將完整草稿直接發布啟用；每次 actor 仍必須寫入 audit event 與 publisher 欄位。
 
+Production／production-like runtime 不得在服務啟動時自動 seed。具備 `knowledge.manage`、`knowledge.publish` 與 `knowledge.reindex` 的已驗證管理員，可由 AI 客服工作室明確執行「匯入／補齊內建 54 題」；server 只接受固定 bundled source，使用 request idempotency／correlation identity 寫入 audit，且不得接受 browser 上傳或自訂 source path。UI command 與受控 CLI 都只補缺少的 stable source identity，不覆寫或退回既有 revision；只將 bundled input 中 `enabled=true` 且內容完全相同的 v1 draft 發布，並在同一 Knowledge Unit of Work 建立 index job。需要 release／cutover receipt 的 CLI 路徑仍須先讀取 target identity、schema、enabled actor、source digest 與 current catalog state 產生零寫入 plan；Apply 綁定同一 plan、資料庫備份、exact target confirmation 與 terminal receipt，target state 或 source digest 在 plan 後漂移時 fail closed。完成任何一種 import 都不代表 deployment、worker 已執行或 index 已 READY。
+
 - stable item identity 與 revision；
 - category、audience／role 與適用條件；
 - source／provenance；

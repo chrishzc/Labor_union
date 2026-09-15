@@ -91,6 +91,34 @@ def test_correction_facts_use_latest_owner_review_without_anomaly_projection():
     )
 
 
+def test_business_pending_receipt_can_enter_the_same_manual_correction_flow():
+    connection = _Connection(
+        (
+            {
+                "batch_id": 1,
+                "batch_identity": "finance-import-batch:1",
+                "batch_version": 3,
+                "canonical_fact_version": 2,
+                "classification_version": 7,
+                "disposition": "business_pending",
+                "credit": 12000,
+                "debit": 0,
+            },
+            ({"obligation_identity": "client-obligation:1", "remaining_amount_ntd": 12000},),
+            (),
+            (),
+        )
+    )
+
+    facts = _load_correction_facts(
+        connection.cursor_instance,
+        _selection(),
+        for_update=False,
+    )
+
+    assert facts.active_manual_review is True
+
+
 def test_legacy_alert_resolution_is_a_noop_when_no_projection_exists():
     connection = _Connection((None,))
     candidate = SimpleNamespace(

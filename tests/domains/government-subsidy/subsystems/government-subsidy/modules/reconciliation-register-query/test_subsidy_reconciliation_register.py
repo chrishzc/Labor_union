@@ -4,7 +4,15 @@ from io import BytesIO
 
 from openpyxl import load_workbook
 
+from domains.government_subsidy.claim_schedule import project_claim_schedule
 from subsystems.government_subsidy import reconciliation_register_query as register
+
+
+def test_claim_schedule_uses_service_quarter_and_crosses_year_without_fabricating_a_day():
+    assert project_claim_schedule(date(2026, 7, 1)) == (3, 2026, 10)
+    assert project_claim_schedule(date(2026, 9, 30)) == (3, 2026, 10)
+    assert project_claim_schedule(date(2026, 12, 31)) == (4, 2027, 1)
+    assert project_claim_schedule(None) is None
 
 
 class FakeCursor:

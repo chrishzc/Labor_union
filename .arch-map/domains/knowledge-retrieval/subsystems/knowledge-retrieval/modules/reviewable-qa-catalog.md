@@ -10,6 +10,7 @@
 - `subsystems/knowledge_retrieval/qa_catalog_import.py`
 - `subsystems/knowledge_retrieval/application.py`
 - `api/dependencies/knowledge_retrieval.py`
+- `scripts/import_builtin_knowledge_catalog.py`
 - `api/main.py`
 - `domains/knowledge_retrieval/publication.py`
 - `infrastructure/mysql/knowledge_retrieval_repository.py`
@@ -23,6 +24,8 @@
 ## Dependencies
 
 - migration input: `document/line/AI客服QA題庫.jsonl` — input/evidence only；不得由 retrieval runtime 直接查詢。
+- runtime packaging: `.dockerignore` 只放行 bundled QA JSONL，不納入其餘 `document/` tree。
+- operator runbook: `document/line/LINE_AI客服題庫Production匯入操作手冊.md`
 - consumer: LINE AI customer-service studio and knowledge answer worker.
 
 ## Verification

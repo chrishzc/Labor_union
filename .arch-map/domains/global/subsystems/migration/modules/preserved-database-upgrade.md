@@ -25,6 +25,7 @@
   - `db/releases/labor_union_validation_schema_v1.sql`
   - `db/schema_parts/212_government_subsidy_return_excess_recovery.sql` (fresh bootstrap owner)
   - `db/schema_parts/214_historical_order_pairing_resolution_reused.sql` (fresh bootstrap successor)
+  - `db/schema_parts/226_service_before_replacement.sql` (MySQL 8.4-compatible fresh bootstrap successor; immutable preserve release remains 1012)
 - current Task 96 release successor:
   - `db/schema_parts/1024_task96_line_identity_revocation_role_binding_fk.sql`
   - `db/migration_releases/labor_union_2026_09_01_task96_line_identity_revocation_role_binding_fk_v1.json`
@@ -68,6 +69,10 @@
   - `db/migration_releases/labor_union_2026_09_11_twins_payroll_policy_v1.descriptors.json`
   - `db/migration_releases/labor_union_2026_09_12_twins_payroll_policy_backfill_hash_v2.json` — current preserve-chain successor; repeats the immutable 1037／1038 schema contracts and binds the audited current backfill bytes. The 2026-09-11 v1 manifest／descriptor remains archived and is intentionally excluded from default selection because its protected backfill digest no longer matches the current artifact.
   - `db/migration_releases/labor_union_2026_09_12_twins_payroll_policy_backfill_hash_v2.descriptors.json`
+- current order-details owner-date successor:
+  - `db/schema_parts/1043_twins_payroll_order_details_view.sql`
+  - `db/migration_releases/labor_union_2026_09_15_order_details_owner_dates_v1.json`
+  - `db/migration_releases/labor_union_2026_09_15_order_details_owner_dates_v1.descriptors.json`
 - current order service-hours half-hour precision release:
   - `db/schema_parts/223_order_service_hours_half_precision.sql` (fresh bootstrap successor)
   - `db/schema_parts/1040_order_service_hours_half_precision.sql`

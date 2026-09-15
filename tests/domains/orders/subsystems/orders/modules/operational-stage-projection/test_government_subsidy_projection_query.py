@@ -1,6 +1,6 @@
 """Focused tests for the Order Workbench Government Subsidy side-lane projection."""
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from domains.government_subsidy.ledger import GovernmentSubsidyBatchStatus
 from domains.government_subsidy.overpayment import GovernmentSubsidyOverpaymentStatus
@@ -204,12 +204,14 @@ def _facts(
     case_no: str,
     *,
     identity_status: str | None = "一般市民",
+    actual_end_date: date | None = date(2026, 9, 30),
     claims=(),
     overpayments=(),
 ) -> GovernmentSubsidyOrderProjectionFacts:
     return GovernmentSubsidyOrderProjectionFacts(
         case_no=case_no,
         identity_status=identity_status,
+        actual_end_date=actual_end_date,
         claim_items=tuple(claims),
         overpayments=tuple(overpayments),
     )
@@ -250,6 +252,9 @@ def test_every_normal_order_has_owner_projection_or_traceable_claim_gap() -> Non
     assert [notice.code for notice in gap.blockers] == [
         "government_subsidy_claim_lineage_missing"
     ]
+    assert gap.claim_quarter == 3
+    assert (gap.claim_application_year, gap.claim_application_month) == (2026, 10)
+    assert gap.claim_submitted_at is None
 
 
 def test_substatus_filter_and_counts_are_server_side_and_counts_ignore_filter() -> None:

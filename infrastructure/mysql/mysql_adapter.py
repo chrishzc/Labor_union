@@ -657,21 +657,9 @@ def get_order_details() -> list[dict]:
                 r['second_payment_days'] = r.get('second_payment_days') or (days - r['first_payment_days'])
                 r['caregiver_rate'] = r.get('caregiver_rate') or 2000
                 
-                end_dt = safe_date(r['actual_end_date'])
-                if end_dt:
-                    m1 = end_dt.month % 12 + 1
-                    y1 = end_dt.year + (1 if end_dt.month == 12 else 0)
-                    default_pay1 = f"{y1:04d}-{m1:02d}-15"
-                    
-                    m2 = m1 % 12 + 1
-                    y2 = y1 + (1 if m1 == 12 else 0)
-                    default_pay2 = f"{y2:04d}-{m2:02d}-15"
-                else:
-                    default_pay1 = "2026-10-15"
-                    default_pay2 = "2026-11-15"
-
-                r['salary_payment_date_1'] = to_str_date(r.get('salary_payment_date_1') or default_pay1)
-                r['salary_payment_date_2'] = to_str_date(r.get('salary_payment_date_2') or default_pay2)
+                # 月嫂應付日只能來自 Staff Payables 正式 owner；未知時保持空白。
+                r['salary_payment_date_1'] = to_str_date(r.get('salary_payment_date_1'))
+                r['salary_payment_date_2'] = to_str_date(r.get('salary_payment_date_2'))
                 r['phone'] = r.get('phone') or r.get('client_phone') or "0912-345-678"
                 r['address'] = r.get('address') or r.get('client_address') or "新竹市東區中央路 100 號"
                 r['total_caregiver_salary'] = safe_int(r.get('service_salary', 0)) + safe_int(r.get('subsidy_salary', 0))

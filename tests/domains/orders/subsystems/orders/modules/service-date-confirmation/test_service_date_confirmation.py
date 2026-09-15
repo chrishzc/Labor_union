@@ -136,6 +136,45 @@ def test_service_date_must_be_in_the_server_selectable_range():
         _candidate(facts, (date(2026, 8, 1), date(2026, 8, 3)))
 
 
+@pytest.mark.parametrize(
+    ("actual_start_date", "expected_start"),
+    (
+        (date(2026, 9, 15), date(2026, 9, 15)),
+        (date(2026, 9, 20), date(2026, 9, 20)),
+        (date(2026, 9, 25), date(2026, 9, 25)),
+        (None, date(2026, 9, 20)),
+    ),
+)
+def test_selectable_dates_use_confirmed_actual_start_as_the_only_available_basis(
+    actual_start_date, expected_start
+):
+    selectable = MySqlServiceDateConfirmationRepository._selectable_dates(
+        {
+            "start_date": date(2026, 9, 20),
+            "actual_start_date": actual_start_date,
+            "service_days": 10,
+        }
+    )
+
+    assert selectable[0] == expected_start
+    assert len(selectable) == 55
+
+
+def test_selectable_range_exposes_the_first_ten_consecutive_dates_from_actual_start():
+    selectable = MySqlServiceDateConfirmationRepository._selectable_dates(
+        {
+            "start_date": date(2026, 9, 20),
+            "actual_start_date": date(2026, 9, 28),
+            "service_days": 10,
+        }
+    )
+
+    assert selectable[:10] == tuple(
+        date(2026, 9, day) if day <= 30 else date(2026, 10, day - 30)
+        for day in range(28, 38)
+    )
+
+
 def test_restarted_historical_dates_build_one_canonical_scheduling_generation():
     facts = ServiceDateConfirmationFacts(
         "HIST-68", 3, 7, 2, (),

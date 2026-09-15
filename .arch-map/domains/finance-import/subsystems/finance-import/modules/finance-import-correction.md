@@ -25,6 +25,7 @@
 ## Verification
 - layout_status: `custom_current`
 - test_root: `ui_react/src/tests/finance_import_correction_client.test.ts`
+- test_root: `ui_react/src/tests/finance_source_review_list.test.tsx`
 - test_root: `ui_react/src/tests/domains/finance-import/subsystems/finance-import/modules/finance-import-correction/`
 
 ## Provenance

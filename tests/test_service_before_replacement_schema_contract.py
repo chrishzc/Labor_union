@@ -82,13 +82,17 @@ def test_descriptor_matches_every_canonical_owned_object() -> None:
     assert canonical["parent_columns"] == {}
 
 
-def test_fresh_assembly_orders_1012_before_projector_v2_successor() -> None:
+def test_fresh_assembly_uses_mysql84_compatible_successor_before_projector() -> None:
     assembly = load_schema_assembly()
 
     names = [path.name for path in assembly.active_artifact_paths]
-    assert names.index("1012_service_before_replacement.sql") < names.index(
+    assert names.index("226_service_before_replacement.sql") < names.index(
         "1014_historical_baseline_projector_v2.sql"
     )
+    canonical_sql = (
+        ROOT / "db/schema_parts/226_service_before_replacement.sql"
+    ).read_text(encoding="utf-8")
+    assert "UNIQUE KEY uq_service_before_replacement_event_owner_binding" in canonical_sql
     assert "1023_task96_line_safe_review_link_matching_outbox_v1.sql" in names
 
 

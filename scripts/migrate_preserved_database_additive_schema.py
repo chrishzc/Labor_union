@@ -347,6 +347,8 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_09_12_matching_plan_create_receipts_v1.json",
     "labor_union_2026_09_14_order_service_hours_half_precision_v1.json",
     "labor_union_2026_09_14_historical_manual_beclass_origin_v1.json",
+    "labor_union_2026_09_15_client_legacy_virtual_accounts_v1.json",
+    "labor_union_2026_09_15_order_details_owner_dates_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -1810,20 +1812,45 @@ def _owned_classification(
             successor = OWNED_OBJECTS.get(
                 "1038_twins_payroll_order_details_view.sql"
             )
+            owner_date_successor = OWNED_OBJECTS.get(
+                "1043_twins_payroll_order_details_view.sql"
+            )
             if (
                 state == "drift"
-                and successor is not None
-                and _twins_payroll_order_details_view_state(
-                    snapshot.get("views", ()), successor
-                ) == "exact"
+                and (
+                    successor is not None
+                    and _twins_payroll_order_details_view_state(
+                        snapshot.get("views", ()), successor
+                    ) == "exact"
+                    or owner_date_successor is not None
+                    and _order_details_owner_dates_view_state(
+                        snapshot.get("views", ()), owner_date_successor
+                    ) == "exact"
+                )
             ):
-                # The selected 1038 release intentionally replaces this view.
-                # Its exact descriptor is the only accepted later definition.
+                # A selected immutable successor intentionally replaces this view.
                 state = "exact"
             result[part] = state
             continue
         if part == "1038_twins_payroll_order_details_view.sql":
-            result[part] = _twins_payroll_order_details_view_state(
+            state = _twins_payroll_order_details_view_state(
+                snapshot.get("views", ()), expected
+            )
+            owner_date_successor = OWNED_OBJECTS.get(
+                "1043_twins_payroll_order_details_view.sql"
+            )
+            if (
+                state == "drift"
+                and owner_date_successor is not None
+                and _order_details_owner_dates_view_state(
+                    snapshot.get("views", ()), owner_date_successor
+                ) == "exact"
+            ):
+                state = "exact"
+            result[part] = state
+            continue
+        if part == "1043_twins_payroll_order_details_view.sql":
+            result[part] = _order_details_owner_dates_view_state(
                 snapshot.get("views", ()), expected
             )
             continue
@@ -1945,6 +1972,28 @@ def _twins_payroll_order_details_view_state(
         return "exact"
     predecessor = "4d8fc34c1d50b85d0cd426a0ce3f5fc9d1eee8eede8d6c46943e4cae94577aba"
     if actual == predecessor:
+        return "absent"
+    return "drift"
+
+
+def _order_details_owner_dates_view_state(
+    present_views: Iterable[Mapping[str, Any]],
+    descriptor: Mapping[str, Any],
+) -> str:
+    actual = {
+        str(view["table_name"]): _view_definition_digest(view["view_definition"])
+        for view in present_views
+    }.get("v_order_details")
+    if actual is None:
+        return "absent"
+    target = descriptor["views"]["v_order_details"]["definition_sha256"]
+    if actual == target:
+        return "exact"
+    predecessors = {
+        "4d8fc34c1d50b85d0cd426a0ce3f5fc9d1eee8eede8d6c46943e4cae94577aba",
+        "ab3ef0e5c827433b3b9b3f7d66e5ad5c84ad0f57d4b0f61d898fbdb290d3a0dd",
+    }
+    if actual in predecessors:
         return "absent"
     return "drift"
 

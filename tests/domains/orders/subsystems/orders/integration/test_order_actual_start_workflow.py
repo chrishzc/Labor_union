@@ -37,7 +37,7 @@ from domains.client_finance.obligation_planning import ClientFinanceTermsSourceF
 from domains.payroll.calculation import PayrollPolicyKind
 from domains.scheduling.generation import AssignmentIdentityResolution, EffectiveAssignmentSegment, SchedulingGenerationFacts
 from subsystems.payroll.terms_impact import CasePayrollPolicyTerms, PayrollTermsSourceFacts, SourceAssignmentPayrollTerms
-from subsystems.orders.actual_start_workflow import ActualStartApplyRequest, ActualStartWorkflow, ActualStartWorkflowContext, ActualStartWorkflowError
+from subsystems.orders.actual_start_workflow import ActualStartApplyRequest, ActualStartWorkflow, ActualStartWorkflowContext, ActualStartWorkflowError, _build_receipt, _effective_staff_payment_due_date, _persist_order_projection
 from subsystems.orders.terms_workflow import CommandClaimState, OrderTermsReceipt, SchedulingReplacementResult, TermsWorkflowFacts
 from infrastructure.mysql.order_actual_start_repository import (
     _is_effective_staff_date_conflict, _receipt_payload, _stored_receipt,
@@ -70,6 +70,155 @@ def test_actual_start_request_uses_direct_canonical_source_contract() -> None:
 def test_actual_start_request_rejects_blank_change_reason() -> None:
     with pytest.raises(ValueError, match="change reason"):
         _request(reason=" ")
+
+
+def test_actual_start_preserves_an_existing_staff_payment_due_date_across_months() -> None:
+    assert _effective_staff_payment_due_date(
+        date(2026, 8, 15),
+        date(2026, 9, 15),
+    ) == date(2026, 8, 15)
+
+
+def test_actual_start_uses_the_calculated_due_date_only_when_none_exists() -> None:
+    assert _effective_staff_payment_due_date(
+        None,
+        date(2026, 10, 15),
+    ) == date(2026, 10, 15)
+
+
+def test_full_subsidy_actual_start_uses_one_zero_client_and_42000_staff_plan() -> None:
+    service_dates = tuple(date(2026, 8, day) for day in range(6, 21))
+    segment = EffectiveAssignmentSegment(
+        assignment_id=101,
+        staff_id=11,
+        sequence=1,
+        service_day_count=15,
+        assigned_start_date=service_dates[0],
+        assigned_end_date=service_dates[-1],
+        official_service_dates=service_dates,
+    )
+    facts = TermsWorkflowFacts(
+        order=OrderAggregateFacts(
+            "CASE-FULL-SUBSIDY",
+            1,
+            OrderTerms(
+                service_dates[0],
+                15,
+                8,
+                MoneyNTD(0),
+                ServiceTimeTerms(None, None, None),
+            ),
+            False,
+            "補助市民",
+        ),
+        scheduling=SchedulingGenerationFacts(
+            "CASE-FULL-SUBSIDY", 2, 1, (segment,), False
+        ),
+        planned_service_dates=service_dates,
+        planned_end_date=service_dates[-1],
+        client_finance=ClientFinanceTermsSourceFacts(
+            "CASE-FULL-SUBSIDY",
+            3,
+            ClientPaymentTerms(
+                0,
+                MoneyNTD(350),
+                date(2026, 8, 1),
+                date(2026, 8, 15),
+                None,
+            ),
+            (),
+            (),
+            identity_status="補助市民",
+        ),
+        payroll=PayrollTermsSourceFacts(
+            "CASE-FULL-SUBSIDY",
+            4,
+            (
+                SourceAssignmentPayrollTerms(
+                    101,
+                    11,
+                    "payroll-rate:subsidized-citizen:v1",
+                    PayrollPolicyKind.SUBSIDIZED_CITIZEN,
+                ),
+            ),
+            (),
+            None,
+            CasePayrollPolicyTerms(
+                "payroll-rate:subsidized-citizen:v1",
+                PayrollPolicyKind.SUBSIDIZED_CITIZEN,
+            ),
+        ),
+        lifecycle=OrderLifecycleRootFacts(
+            "CASE-FULL-SUBSIDY",
+            OrderLifecycleStatus.ESTABLISHED,
+            True,
+            None,
+            False,
+            False,
+            False,
+        ),
+    )
+
+    class _PreviewRepository:
+        def __init__(self, shared_facts):
+            self.shared_facts = shared_facts
+
+        def load_for_preview(self, case_no):
+            assert case_no == "CASE-FULL-SUBSIDY"
+            return ActualStartWorkflowContext(
+                self.shared_facts,
+                ActualStartReconfirmationFacts(
+                    ActualStartReconfirmationState.NOT_REQUIRED,
+                    None,
+                    None,
+                    False,
+                ),
+            )
+
+    preview = ActualStartWorkflow(
+        _PreviewRepository(facts),
+        lambda: None,
+        FixedBusinessClock(datetime(2026, 8, 6, 9, tzinfo=TAIPEI_TIME_ZONE)),
+    ).preview(
+        "CASE-FULL-SUBSIDY",
+        service_dates[0],
+        recalculated_service_dates=service_dates,
+    )
+
+    assert sum(plan.amount.amount for plan in preview.client_finance_impact.stage_plans) == 0
+    assert sum(action.amount.amount for action in preview.payroll_impact.actions) == 42_000
+    assert {action.due_date for action in preview.payroll_impact.actions} == {date(2026, 10, 15)}
+    assert preview.staff_payment_due_date == date(2026, 10, 15)
+
+    preserved_facts = replace(
+        facts,
+        payroll=replace(facts.payroll, staff_payment_due_date=date(2026, 8, 15)),
+    )
+    preserved_preview = ActualStartWorkflow(
+        _PreviewRepository(preserved_facts),
+        lambda: None,
+        FixedBusinessClock(datetime(2026, 8, 6, 9, tzinfo=TAIPEI_TIME_ZONE)),
+    ).preview(
+        "CASE-FULL-SUBSIDY",
+        service_dates[0],
+        recalculated_service_dates=service_dates,
+    )
+    assert {action.due_date for action in preserved_preview.payroll_impact.actions} == {date(2026, 8, 15)}
+
+    class _PersistenceCapture:
+        command = None
+
+        def update_actual_start(self, command):
+            self.command = command
+
+    capture = _PersistenceCapture()
+    _persist_order_projection(
+        capture,
+        SimpleNamespace(case_no="CASE-FULL-SUBSIDY", new_actual_start_date=service_dates[0]),
+        preserved_preview,
+        _build_receipt(preserved_preview),
+    )
+    assert capture.command.staff_payment_due_date == date(2026, 8, 15)
 
 
 def test_actual_start_lifecycle_impact_cannot_bypass_auto_completion_owner() -> None:

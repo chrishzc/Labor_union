@@ -14,6 +14,20 @@ class _StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class ClientRegistryClientObligationDateView(_StrictModel):
+    obligation_identity: str = Field(min_length=1)
+    obligation_type: Literal["deposit", "first", "second", "subsidy_return"]
+    due_date: date | None
+
+
+class ClientRegistryStaffObligationDateView(_StrictModel):
+    obligation_identity: str = Field(min_length=1)
+    obligation_kind: str = Field(min_length=1)
+    due_date: date | None
+    staff_id: int = Field(gt=0)
+    staff_name: str | None
+
+
 class ClientRegistrySummaryView(_StrictModel):
     client_id: int = Field(gt=0)
     case_no: str = Field(min_length=1, max_length=50)
@@ -27,6 +41,11 @@ class ClientRegistrySummaryView(_StrictModel):
     requires_cooking: bool | None = None
     planned_start_date: date | None = None
     order_status: str | None = None
+    staff_payment_due_date: date | None = None
+    client_obligation_dates: tuple[ClientRegistryClientObligationDateView, ...] = ()
+    staff_obligation_dates: tuple[ClientRegistryStaffObligationDateView, ...] = ()
+    claim_application_year: int | None = Field(default=None, ge=1, le=9999)
+    claim_application_month: int | None = Field(default=None, ge=1, le=12)
 
 
 class ClientRegistryPageView(_StrictModel):

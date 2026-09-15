@@ -41,7 +41,7 @@ def test_release_hashes_and_catalog_order_are_exact() -> None:
         DESCRIPTOR_PATH.read_bytes()
     ).hexdigest()
     assert manifest["backfills"] == []
-    assert names.index("1012_service_before_replacement.sql") < names.index(SQL_PATH.name)
+    assert names.index("226_service_before_replacement.sql") < names.index(SQL_PATH.name)
     assert names.index(SQL_PATH.name) < names.index(
         "1018_hcm_resubmission_canonical_review_version.sql"
     )

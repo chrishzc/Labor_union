@@ -159,4 +159,13 @@ describe('Client registry owner editing', () => {
     expect(await screen.findByRole('button', { name: /CASE-108/ })).toBeInTheDocument();
     expect(mocks.list).toHaveBeenCalledWith(expect.objectContaining({ limit: 100, after: 'CASE-100' }));
   });
+
+  it('provides the legacy virtual-account import as a third registry tab', () => {
+    render(<ClientRegistryPage />);
+
+    fireEvent.click(screen.getByRole('tab', { name: '虛擬帳號匯入' }));
+
+    expect(screen.getByRole('tabpanel', { name: '虛擬帳號匯入' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '匯入舊流程虛擬帳號' })).toBeInTheDocument();
+  });
 });

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 import hashlib
 from io import BytesIO
-from typing import Callable, Protocol
+from typing import Callable, Literal, Protocol
 
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
@@ -48,6 +48,32 @@ class StaffPayableExportFact:
         _validate_export_identity(self)
         require_positive_integer(self.staff_id, "staff id")
         _require_positive_money(self.amount)
+
+
+CaseStaffPayableSource = Literal["formal_obligation", "historical_projection", "order_facts"]
+CaseStaffPayableDisposition = Literal[
+    "selected_month",
+    "other_month",
+    "date_not_formed",
+    "missing_calculation_basis",
+    "paid_or_settled",
+    "blocked",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class CaseStaffPayableAuditItem:
+    case_no: str
+    staff_id: int | None
+    recipient_name: str | None
+    obligation_identity: str | None
+    amount_due: MoneyNTD | None
+    balance: MoneyNTD | None
+    order_due_date: date | None
+    effective_due_date: date | None
+    source: CaseStaffPayableSource
+    disposition: CaseStaffPayableDisposition
+    reason: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,6 +165,9 @@ class AccountsPayableExportReceipt:
 
 class StaffPayableExportSource(Protocol):
     def load(self, target_payment_date: date) -> tuple[StaffPayableExportFact, ...]: ...
+    def load_case(
+        self, case_no: str, target_payment_date: date
+    ) -> tuple[CaseStaffPayableAuditItem, ...]: ...
 
 
 class ClientRefundExportSource(Protocol):
@@ -182,6 +211,13 @@ class AccountsPayableExportWorkflow:
 
     def query(self, target_payment_date: date) -> tuple[AccountsPayableRow, ...]:
         return self._load_rows(target_payment_date)
+
+    def query_case(
+        self, case_no: str, target_payment_date: date
+    ) -> tuple[CaseStaffPayableAuditItem, ...]:
+        require_canonical_text(case_no, "case number", 50)
+        with self._read_snapshot_factory():
+            return self._staff_source.load_case(case_no, target_payment_date)
 
     def query_archive(self, year: int) -> tuple[ArchivedWorkbookRecord, ...]:
         return self._archive.list(year)

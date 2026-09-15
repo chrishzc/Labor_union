@@ -17,6 +17,7 @@
 - `notification-rules-presentation` — LINE通知規則維護的business-facing presentation；path: `modules/notification-rules-presentation.md`
 - `notification-failure-current-fact` — LINE-006 typed zero-write group readback、manual replay lineage與bounded recheck；path: `modules/notification-failure-current-fact.md`
 - `notification-baseline-bootstrap` — Task96 M1–M4 versioned notification catalog與development-only source fixture producer；path: `modules/notification-baseline-bootstrap.md`
+- `order-pre-start-notification-source` — 服務開始前三日首期款提醒與第二期款到期提醒的唯讀候選掃描、immutable source-event投影及worker UoW；path: `modules/order-pre-start-notification-source.md`
 - `test-fixture-bootstrap` — development-only LINE 身分、訂單情境與 Rich Menu 測試前置資料；path: `modules/test-fixture-bootstrap.md`
 - `feedback` — M2 immutable LINE feedback root／receipt／aggregate與Customer Service ticket linkage；path: `modules/feedback.md`
 - `complaint-ingress` — M4 canonical complaint normalization、Customer Service hold／HIGH escalation、masked empathy、告警與客戶結案通知的分離投遞；path: `modules/complaint-ingress.md`

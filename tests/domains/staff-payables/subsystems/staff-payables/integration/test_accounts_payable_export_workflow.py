@@ -9,6 +9,7 @@ from shared_kernel.money import MoneyNTD
 from subsystems.staff_payables.accounts_payable_export import (
     AccountsPayableExportWorkflow,
     ArchivedWorkbook,
+    CaseStaffPayableAuditItem,
     ClientRefundExportFact,
     GovernmentOverpaymentReturnExportFact,
     StaffPayableExportFact,
@@ -32,6 +33,29 @@ class _Source:
     def load(self, target_date):
         assert target_date == date(2026, 8, 31)
         return self.facts
+
+
+class _CaseSource(_Source):
+    def __init__(self, facts):
+        super().__init__(facts)
+        self.case_calls = []
+
+    def load_case(self, case_no, target_date):
+        self.case_calls.append((case_no, target_date))
+        return self.facts
+
+
+class _ObservedSnapshot(_Snapshot):
+    entered = 0
+    exited = 0
+
+    def __enter__(self):
+        type(self).entered += 1
+        return self
+
+    def __exit__(self, *_):
+        type(self).exited += 1
+        return False
 
 
 class _Archive:
@@ -103,6 +127,39 @@ def test_export_rejects_archive_hash_mismatch():
 
     with pytest.raises(RuntimeError, match="accounts_payable_archive_failed"):
         workflow.export(date(2026, 8, 31))
+
+
+def test_case_audit_uses_one_read_only_snapshot_and_does_not_load_other_payable_sources():
+    _ObservedSnapshot.entered = 0
+    _ObservedSnapshot.exited = 0
+    item = CaseStaffPayableAuditItem(
+        case_no="CASE-1",
+        staff_id=None,
+        recipient_name=None,
+        obligation_identity=None,
+        amount_due=None,
+        balance=None,
+        order_due_date=None,
+        effective_due_date=None,
+        source="order_facts",
+        disposition="date_not_formed",
+        reason="尚未形成月嫂應付款日期。",
+    )
+    staff_source = _CaseSource((item,))
+    workflow = AccountsPayableExportWorkflow(
+        staff_source,
+        _Source(()),
+        _Source(()),
+        _Archive(),
+        _ObservedSnapshot,
+        lambda: datetime(2026, 8, 31, 9, tzinfo=timezone.utc),
+    )
+
+    result = workflow.query_case("CASE-1", date(2026, 8, 31))
+
+    assert result == (item,)
+    assert staff_source.case_calls == [("CASE-1", date(2026, 8, 31))]
+    assert (_ObservedSnapshot.entered, _ObservedSnapshot.exited) == (1, 1)
 
 
 def test_export_keeps_the_main_fixed_transfer_columns_for_client_subsidy_return():

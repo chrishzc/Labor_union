@@ -58,6 +58,27 @@ def test_second_different_bank_row_for_the_same_obligation_stays_pending():
     assert second.available_actions == ("review_suspected_duplicate_business_match",)
 
 
+def test_duplicate_detection_retains_every_row_and_continues_to_later_targets():
+    rows = mark_suspected_duplicate_client_receipts(
+        (
+            _resolved_row("finance-import-row:11", "deposit:C-1"),
+            _resolved_row("finance-import-row:12", "deposit:C-1"),
+            _resolved_row("finance-import-row:13", "deposit:C-2"),
+        )
+    )
+
+    assert tuple(row.row_identity for row in rows) == (
+        "finance-import-row:11",
+        "finance-import-row:12",
+        "finance-import-row:13",
+    )
+    assert tuple(row.disposition for row in rows) == (
+        FinanceImportDisposition.CREATE,
+        FinanceImportDisposition.BUSINESS_PENDING,
+        FinanceImportDisposition.CREATE,
+    )
+
+
 def test_unique_heuristic_candidate_can_enter_the_canonical_receipt_workflow():
     row = {
         "format_id": "legacy",
@@ -130,7 +151,7 @@ def _incoming_row():
     }
 
 
-def _resolved_row(row_identity):
+def _resolved_row(row_identity, target="deposit:C-1"):
     return CanonicalFinanceImportRow(
         row_identity,
         1,
@@ -138,7 +159,7 @@ def _resolved_row(row_identity):
         FinanceClassificationType.CLIENT_RECEIPT,
         FinanceImportDisposition.CREATE,
         PreviewFingerprint("a" * 64),
-        ("deposit:C-1",),
+        (target,),
         ("client_receipt_heuristic:name+amount",),
         ("preview_apply",),
     )

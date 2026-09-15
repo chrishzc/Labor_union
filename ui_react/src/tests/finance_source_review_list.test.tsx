@@ -150,6 +150,26 @@ describe('Finance source-review owner readback', () => {
     expect(screen.getByText('Sheet1#3')).toBeInTheDocument();
   });
 
+  it('offers exact-order correction for a business-pending client receipt', async () => {
+    vi.mocked(financeImportQueryClient.listReviewRows).mockResolvedValue({
+      ...REVIEW_PAGE,
+      items: [{
+        ...REVIEW_PAGE.items[0],
+        classification_type: 'client_receipt',
+        disposition: 'business_pending',
+        available_actions: ['resolve_owning_domain_target'],
+      }],
+    });
+
+    await showPreview();
+
+    const entry = await screen.findByRole('button', { name: '指定正確訂單' });
+    fireEvent.click(entry);
+    expect(screen.getByRole('region', { name: '指定銀行入款的正確訂單' })).toBeInTheDocument();
+    expect(screen.getByLabelText('案件編號')).toBeInTheDocument();
+    expect(screen.getByText('查詢待核銷款項')).toBeInTheDocument();
+  });
+
   it('paginates a full review page instead of treating its cursor as an inconsistency', async () => {
     const rows = Array.from({ length: 51 }, (_, i) => ({ ...REVIEW_PAGE.items[0], row_id: i + 1, row_identity: `row-${i + 1}`, source_row: i + 1 }));
     vi.mocked(financeImportQueryClient.getManifest).mockResolvedValue({ ...MANIFEST, review_count: 51 });
@@ -162,8 +182,8 @@ describe('Finance source-review owner readback', () => {
     expect(financeImportQueryClient.listReviewRows).toHaveBeenLastCalledWith(BATCH, expect.objectContaining({ afterRowId: 50 }));
   });
 
-  it('shows source-only review identity and reason without inventing bank fields or counting business pending as manual', async () => {
-    vi.mocked(financeImportQueryClient.getManifest).mockResolvedValue({ ...MANIFEST, review_count: 2 });
+  it('keeps matched business-pending rows and discards unrelated source warnings', async () => {
+    vi.mocked(financeImportQueryClient.getManifest).mockResolvedValue({ ...MANIFEST, review_count: 1 });
     vi.mocked(financeImportQueryClient.listReviewRows).mockResolvedValue({
       ...REVIEW_PAGE,
       items: [{ ...REVIEW_PAGE.items[0], disposition: 'business_pending' }],
@@ -171,9 +191,9 @@ describe('Finance source-review owner readback', () => {
     });
     await showPreview();
     await waitFor(() => expect(reviewCount()).toBe('1'));
-    expect(screen.getByText('交易明細#4')).toBeInTheDocument();
-    expect(screen.getByText('invalid:transaction_amount')).toBeInTheDocument();
-    expect(screen.queryByText('Sheet1#3')).not.toBeInTheDocument();
+    expect(screen.queryByText('交易明細#4')).not.toBeInTheDocument();
+    expect(screen.queryByText('invalid:transaction_amount')).not.toBeInTheDocument();
+    expect(screen.getByText('Sheet1#3')).toBeInTheDocument();
     expect(financeImportMutationClient.apply).not.toHaveBeenCalled();
   });
 

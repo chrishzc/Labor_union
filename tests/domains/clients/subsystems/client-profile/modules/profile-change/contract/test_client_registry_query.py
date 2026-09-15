@@ -79,6 +79,11 @@ def test_registry_list_route_preserves_optional_false_and_returns_roster_fields(
         "client_id": 7, "case_no": "115000001", "virtual_account": "99781699115001", "name": "王小明", "phone": "0912345678", "city": "新竹市", "district": "東區",
         "multi_birth_count": None, "service_days": 26, "requires_cooking": False,
         "planned_start_date": None, "order_status": "洽談中",
+        "staff_payment_due_date": None,
+        "client_obligation_dates": (),
+        "staff_obligation_dates": (),
+        "claim_application_year": None,
+        "claim_application_month": None,
     }
 
 
@@ -240,30 +245,54 @@ def test_mysql_registry_exposes_blank_editable_values_for_historical_case_withou
     assert detail["order_information_issues"] == {}
 
 
-def test_mysql_registry_list_applies_bound_filters_and_allowlisted_sorting_in_one_query():
+def test_mysql_registry_list_preserves_filters_and_batches_visible_page_dates():
     connection = _SqlConnection([(
         {"client_id": 7, "case_no": "115000001", "name": "王小明", "phone": "0912345678", "city": "新竹市", "address": "東區中央路1號", "multi_birth_count": "雙胞胎", "service_days": 26, "requires_cooking": True, "planned_start_date": None, "order_status": "洽談中"},
         {"client_id": 8, "case_no": "115000002", "name": "林小華", "phone": "0922345678", "city": "新竹市", "address": None, "multi_birth_count": None, "service_days": 20, "requires_cooking": False, "planned_start_date": None, "order_status": "洽談中"},
+        {"client_id": 9, "case_no": "115000003", "service_days": 10},
+    ), (
+        {"case_no": "115000001", "obligation_identity": "client-deposit", "obligation_type": "deposit", "due_date": None},
+    ), (
+        {"case_no": "115000002", "obligation_identity": "staff-service", "obligation_kind": "service_pay", "due_date": None, "staff_id": 8, "staff_name": None},
     )])
 
     rows, next_cursor = MySqlClientRegistryQueryRepository(connection).list_page(
         query="王", multi_birth_count="雙胞胎", order_status="洽談中", requires_cooking=True,
-        sort_by="service_days", sort_order="desc", limit=25, after=None,
+        sort_by="service_days", sort_order="desc", limit=2, after=None,
     )
 
     statement, parameters = connection.cursor_instance.statements[0]
-    assert len(connection.cursor_instance.statements) == 1
+    assert len(connection.cursor_instance.statements) == 3
     assert "AS multi_birth_count" in statement and "o.service_days,o.requires_cooking" in statement
     assert "c.city,c.address" in statement
     assert "$.multi_birth_count" in statement and "特殊計費:胎數" in statement
     assert "o.status = %s" in statement and "o.requires_cooking = %s" in statement
     assert "ORDER BY o.service_days DESC, o.case_no ASC" in statement
-    assert parameters == ("%王%", "雙胞胎", "洽談中", True, 26)
+    assert parameters == ("%王%", "雙胞胎", "洽談中", True, 3)
     assert rows[0]["case_no"] == "115000001"
     assert rows[0]["virtual_account"] == "99781699115001"
     assert rows[0]["district"] == "東區"
     assert rows[1]["district"] is None
-    assert next_cursor is None
+    assert next_cursor == "115000002"
+    assert [row["case_no"] for row in rows] == ["115000001", "115000002"]
+
+    client_statement, client_parameters = connection.cursor_instance.statements[1]
+    staff_statement, staff_parameters = connection.cursor_instance.statements[2]
+    assert "FROM client_obligations" in client_statement
+    assert "case_no IN (%s,%s)" in client_statement
+    assert "FROM staff_obligations obligations" in staff_statement
+    assert "obligations.case_no IN (%s,%s)" in staff_statement
+    # The look-ahead row is not visible and must not trigger accounting reads.
+    assert client_parameters == staff_parameters == ("115000001", "115000002")
+    assert all(statement.startswith("SELECT ") for statement, _ in connection.cursor_instance.statements)
+    assert rows[0]["client_obligation_dates"] == [
+        {"obligation_identity": "client-deposit", "obligation_type": "deposit", "due_date": None},
+    ]
+    assert rows[0]["staff_obligation_dates"] == []
+    assert rows[1]["client_obligation_dates"] == []
+    assert rows[1]["staff_obligation_dates"] == [
+        {"obligation_identity": "staff-service", "obligation_kind": "service_pay", "due_date": None, "staff_id": 8, "staff_name": None},
+    ]
 
 
 def test_mysql_registry_list_keeps_null_distinct_from_explicit_cooking_filter():

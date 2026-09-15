@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { clientRegistryClient } from '../api/client_registry/client_registry_client';
 import type { BeClassChanges, ClientProfileChanges, ClientRegistryDetail, ClientRegistryPage as ClientRegistryPageData, RegistryMutationPreview } from '../api/client_registry/client_registry_schemas';
 import { OrderTermsMutationPanel } from '../components/OrderTermsMutationPanel';
+import { LegacyVirtualAccountImport } from '../components/LegacyVirtualAccountImport';
 import { ClientRosterPage } from './ClientRosterPage';
 import './ClientRegistryPage.css';
 
@@ -129,7 +130,7 @@ const ClientRegistryEditor: React.FC = () => {
   return <div className="client-registry-page"><header><div><h2>名冊資料</h2><p>以案件編號整合客戶主檔、BeClass、照護與特殊計費資料及訂單條件；可編輯區塊分別儲存。</p></div><form onSubmit={(event) => { event.preventDefault(); void loadList(); }}><input aria-label="搜尋客戶名冊" value={query} placeholder="案件編號、姓名或電話" onChange={(event) => setQuery(event.target.value)} /><button>搜尋</button></form></header><div className="client-registry-layout"><aside aria-label="案件清單">{page?.items.map((item) => <button type="button" className={selected === item.case_no ? 'selected' : ''} key={item.case_no} onClick={() => void loadDetail(item.case_no)}><strong>{item.case_no}</strong><span>{item.name ?? '未登錄姓名'} · {item.phone ?? '未登錄電話'}</span><small>{item.city ?? '未登錄地區'}｜{item.order_status ?? '未有訂單狀態'}</small></button>)}</aside><main>{message && <p role="status" className="registry-message">{message}</p>}{detail && <><div className="registry-case-heading"><h2>{detail.case_no}</h2><span>客戶主檔 v{detail.client.version}</span></div>{editor('profile', profileLabels, profileDraft, setProfileDraft)}{detail.beclass.status === 'ready' ? editor('beclass', beclassLabels, beclassDraft, setBeclassDraft) : <section className="registry-editor"><h3>BeClass 有效資料</h3><p>{detail.beclass.status === 'duplicate_binding' ? '同一案件綁定多筆 BeClass，已停止編輯，請先處理綁定異常。' : '此案件尚未綁定 BeClass 紀錄。'}</p></section>}<OrderInformationSection detail={detail} /><section className="registry-editor"><h3>目前訂單條件</h3>{detail.order_terms.status === 'ready' && detail.order_terms.data ? <OrderTermsMutationPanel caseNo={detail.case_no} query={detail.order_terms.data} onObserved={() => void loadDetail(detail.case_no)} /> : <p>訂單條件目前不可用（{detail.order_terms.code ?? detail.order_terms.status}）。</p>}</section></>}</main></div></div>;
 };
 
-type RegistryTab = 'roster' | 'records';
+type RegistryTab = 'roster' | 'records' | 'virtual-accounts';
 
 export const ClientRegistryPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<RegistryTab>('roster');
@@ -141,9 +142,10 @@ export const ClientRegistryPage: React.FC = () => {
     <div className="client-registry-tabs" role="tablist" aria-label="客戶名冊檢視">
       <button type="button" role="tab" aria-selected={activeTab === 'roster'} onClick={() => setActiveTab('roster')}>客戶清單</button>
       <button type="button" role="tab" aria-selected={activeTab === 'records'} onClick={() => setActiveTab('records')}>名冊資料</button>
+      <button type="button" role="tab" aria-selected={activeTab === 'virtual-accounts'} onClick={() => setActiveTab('virtual-accounts')}>虛擬帳號匯入</button>
     </div>
-    <section role="tabpanel" aria-label={activeTab === 'roster' ? '客戶清單' : '名冊資料'}>
-      {activeTab === 'roster' ? <ClientRosterPage embedded /> : <ClientRegistryEditor />}
+    <section role="tabpanel" aria-label={activeTab === 'roster' ? '客戶清單' : activeTab === 'records' ? '名冊資料' : '虛擬帳號匯入'}>
+      {activeTab === 'roster' ? <ClientRosterPage embedded /> : activeTab === 'records' ? <ClientRegistryEditor /> : <LegacyVirtualAccountImport />}
     </section>
   </div>;
 };

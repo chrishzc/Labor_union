@@ -24,6 +24,7 @@
 - `over-refund-recovery-presentation` — 客戶退款超額追償的既有安全 workflow 與 business-first React projection; path: `modules/over-refund-recovery-presentation.md`
 - `settlement-remediation-presentation` — 客戶應收、退款與補助退還三碼Q/P/A的business-first React projection; path: `modules/settlement-remediation-presentation.md`
 - `payment-destination-configuration` — 工會／代收付帳戶的版本化 Q/P/A 與客戶契約 typed projection; path: `modules/payment-destination-configuration.md`
+- `legacy-virtual-account-import` — 舊流程案件／虛擬帳號對照的 XLSX Preview／Apply 與多案命中人工核銷邊界; path: `modules/legacy-virtual-account-import.md`
 
 ## Verification routing
 - default_boundary: Subsystem

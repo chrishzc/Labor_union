@@ -381,7 +381,7 @@ class MySqlLineNotificationRepository:
             render_message_template(
                 template_snapshot[1],
                 str(rule["template_id"]),
-                _template_variables(original.facts),
+                _template_variables(original.facts, str(rule.get("template_id")), template_snapshot[1]),
             )
         except (KeyError, ValueError):
             return "template_or_schedule_invalid"
@@ -561,7 +561,7 @@ class MySqlLineNotificationRepository:
                 )
             try:
                 render_message_template(
-                    templates, str(rule["template_id"]), _template_variables(source.facts)
+                    templates, str(rule["template_id"]), _template_variables(source.facts, str(rule.get("template_id")), templates)
                 )
                 occurrences = schedule_notification_occurrences(
                     occurred_at=occurred_at,
@@ -712,7 +712,7 @@ class MySqlLineNotificationRepository:
             return
         try:
             rendered = render_message_template(
-                templates, str(rule["template_id"]), _template_variables(event.facts)
+                templates, str(rule["template_id"]), _template_variables(event.facts, str(rule.get("template_id")), templates)
             )
             occurrences = schedule_notification_occurrences(
                 occurred_at=event.occurred_at,
@@ -749,17 +749,41 @@ class MySqlLineNotificationRepository:
         # allowlisted ``lu_test_*`` identity.
         if source_domain in {"line_task96_fixture", "manual_replay"}:
             return _fixture_recipient(selector, facts)
-        if selector != "case_group" or not isinstance(facts, dict):
-            return None
-        case_no = facts.get("case_no")
-        if not isinstance(case_no, str) or not case_no:
-            return None
-        with self._connection.cursor() as cursor:
-            cursor.execute(_ACTIVE_CASE_GROUP_SQL, (case_no,))
-            row = cursor.fetchone()
-        if not isinstance(row, dict) or not isinstance(row.get("group_id"), str):
-            return None
-        return LineRecipient(LineRecipientType.GROUP, LineGroupId(row["group_id"]))
+        if selector == "case_group" and isinstance(facts, dict):
+            case_no = facts.get("case_no")
+            if not isinstance(case_no, str) or not case_no:
+                return None
+            with self._connection.cursor() as cursor:
+                cursor.execute(_ACTIVE_CASE_GROUP_SQL, (case_no,))
+                row = cursor.fetchone()
+            if not isinstance(row, dict) or not isinstance(row.get("group_id"), str):
+                return None
+            return LineRecipient(LineRecipientType.GROUP, LineGroupId(row["group_id"]))
+        if selector in {"client.bound_case", "client"} and isinstance(facts, dict):
+            direct = facts.get("line_user_id") or facts.get("client_line_user_id")
+            if isinstance(direct, str) and direct:
+                return LineRecipient(LineRecipientType.USER, LineUserId(direct))
+            case_no = facts.get("case_no")
+            if isinstance(case_no, str) and case_no:
+                with self._connection.cursor() as cursor:
+                    cursor.execute(
+                        "SELECT line_user_id FROM line_order_group_participants "
+                        "WHERE case_no=%s AND participant_type='customer' "
+                        "AND invitation_status='joined' AND line_user_id IS NOT NULL AND line_user_id != '' "
+                        "ORDER BY id DESC LIMIT 1",
+                        (case_no,),
+                    )
+                    row = cursor.fetchone()
+                    if isinstance(row, dict) and isinstance(row.get("line_user_id"), str) and row["line_user_id"]:
+                        return LineRecipient(LineRecipientType.USER, LineUserId(row["line_user_id"]))
+                    cursor.execute(
+                        "SELECT line_user_id FROM clients WHERE case_no=%s AND line_user_id IS NOT NULL AND line_user_id != '' LIMIT 1",
+                        (case_no,),
+                    )
+                    row = cursor.fetchone()
+                    if isinstance(row, dict) and isinstance(row.get("line_user_id"), str) and row["line_user_id"]:
+                        return LineRecipient(LineRecipientType.USER, LineUserId(row["line_user_id"]))
+        return None
 
     def _record_decision(self, source_event_id, revision_id, rule_id, selector, recipient, status, reason, event) -> int:
         recipient_type = None if recipient is None else recipient.recipient_type.value
@@ -1199,9 +1223,28 @@ def _predicates_match(predicates: object, facts: object) -> bool:
     return all(checks.get(item, False) for item in predicates)
 
 
-def _template_variables(facts: object) -> dict[str, object]:
+def _template_variables(
+    facts: object,
+    template_id: str | None = None,
+    templates: dict[str, object] | None = None,
+) -> dict[str, object]:
     if not isinstance(facts, dict):
         return {}
+    if template_id is not None and isinstance(templates, dict):
+        template_list = templates.get("templates")
+        if isinstance(template_list, list):
+            for item in template_list:
+                if isinstance(item, dict) and item.get("id") == template_id:
+                    declared = {
+                        str(var["name"])
+                        for var in item.get("variables", [])
+                        if isinstance(var, dict) and "name" in var
+                    }
+                    return {
+                        k: str(facts[k]) if isinstance(facts[k], (str, int, float, bool)) else ""
+                        for k in declared
+                        if k in facts
+                    }
     service_date = facts.get("service_date")
     return {"service_date": service_date} if isinstance(service_date, str) else {}
 

@@ -22,10 +22,32 @@ describe('FinancePage query and guarded import presentation', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.spyOn(ordersQueryClient, 'getOrderSummaries').mockResolvedValue({ items: [{ case_no: 'CASE-FIN-001', client_name: '去敏客戶', order_status: '服務中', staff_name: null, identity_status: null, start_date: null, end_date: null, actual_start_date: null, actual_end_date: null, service_days: null, total_employer_self_pay_payable: null }], next_cursor: null, etag: 'c'.repeat(64) });
+    vi.spyOn(ordersQueryClient, 'getAssignmentPlan').mockResolvedValue({
+      case_no: 'CASE-FIN-001', order_version: 1, scheduling_version: 1,
+      scheduling_generation: 1, client_finance_version: 1, payroll_version: 1,
+      contracted_service_days: 1, service_hours_per_day: 8, service_started: true,
+      assignments: [{
+        sequence: 1, staff_id: 11, assignment_id: 101, actual_hours: 8,
+        assigned_start_date: '2026-09-01', assigned_end_date: '2026-09-01',
+        official_service_dates: ['2026-09-01'], candidate_key: null,
+        lineage_source_assignment_ids: [],
+      }],
+    });
     vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue({ items: [{ id: 11, name: '去敏人員', phone: null, education: null }], next_cursor: null });
     vi.spyOn(clientReceiptQueryClient, 'query').mockResolvedValue(RECEIPT_RESPONSE.data);
     vi.spyOn(staffPayablesQueryClient, 'query').mockResolvedValue(STAFF_PAYABLES_RESPONSE.data);
     vi.spyOn(accountsPayableQueryClient, 'query').mockResolvedValue(ACCOUNTS_PAYABLE_RESPONSE.data);
+    vi.spyOn(accountsPayableQueryClient, 'queryCase').mockResolvedValue({
+      case_no: 'CASE-FIN-001',
+      target_payment_date: '2026-09-15',
+      items: [{
+        case_no: 'CASE-FIN-001', staff_id: 11, recipient_name: '去敏人員',
+        obligation_identity: 'OBL-S-1', amount_due_ntd: 42000, balance_ntd: 42000,
+        order_due_date: '2026-10-15', effective_due_date: '2026-10-15',
+        source: 'formal_obligation', disposition: 'other_month',
+        reason: '案件屬於其他付款月份。',
+      }],
+    });
   });
 
   it('maps import blockers to closed operator messages', () => {
@@ -78,6 +100,9 @@ describe('FinancePage query and guarded import presentation', () => {
     await waitFor(() => expect(screen.getByText('OBL-C-1')).toBeInTheDocument());
     expect(ordersQueryClient.getOrderSummaries).toHaveBeenCalledTimes(1);
     expect(clientReceiptQueryClient.query).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole('region', { name: '本案月嫂應付查核' })).toHaveTextContent('現行正式義務');
+    expect(screen.getByRole('region', { name: '本案月嫂應付查核' })).toHaveTextContent('NT$ 42,000');
+    expect(screen.getByRole('region', { name: '本案月嫂應付查核' })).toHaveTextContent('案件屬於其他付款月份。');
     expect(screen.getByText('此為正常案件；歷史人工收款確認只會在歷史案件顯示。')).toBeInTheDocument();
     expect(screen.queryByText(/Account Version|Account version/)).not.toBeInTheDocument();
     expect(staffDirectoryClient.queryPage).not.toHaveBeenCalled();
@@ -85,6 +110,7 @@ describe('FinancePage query and guarded import presentation', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '月嫂應付款' }));
     await waitFor(() => expect(screen.getByText('OBL-S-1')).toBeInTheDocument());
+    expect(screen.getByRole('columnheader', { name: '應付日' })).toBeInTheDocument();
     expect(staffDirectoryClient.queryPage).toHaveBeenCalledTimes(1);
     expect(staffPayablesQueryClient.query).toHaveBeenCalledTimes(1);
     expect(screen.queryByText(/^Version$|｜Version/)).not.toBeInTheDocument();

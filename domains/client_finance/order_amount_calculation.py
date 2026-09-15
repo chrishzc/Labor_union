@@ -11,6 +11,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from domains.payroll.payment_due_date import calculate_staff_payment_due_date
+from domains.government_subsidy.claim_schedule import project_claim_schedule
 from domains.client_finance.subsidy_coverage import (
     derive_subsidy_coverage,
     normalize_subsidy_policy_identity,
@@ -59,14 +60,10 @@ def _parse_date(value: Any, field: str) -> date | None:
 
 
 def _claim_schedule(completed_on: date | None) -> dict[str, int | None]:
-    if completed_on is None:
+    projected = project_claim_schedule(completed_on)
+    if projected is None:
         return {"claim_quarter": None, "claim_application_year": None, "claim_application_month": None}
-    quarter = (completed_on.month - 1) // 3 + 1
-    application_month = quarter * 3 + 1
-    application_year = completed_on.year
-    if application_month == 13:
-        application_month = 1
-        application_year += 1
+    quarter, application_year, application_month = projected
     return {
         "claim_quarter": quarter,
         "claim_application_year": application_year,

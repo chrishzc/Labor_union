@@ -1,0 +1,48 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-client-legacy-virtual-accounts-2026-09-15-v1",
+  "descriptors": {
+    "1042_client_legacy_virtual_accounts.sql": {
+      "tables": {
+        "client_legacy_virtual_accounts": [
+          "id",
+          "case_no",
+          "virtual_account",
+          "source_content_digest",
+          "source_row",
+          "created_by",
+          "created_at"
+        ]
+      },
+      "parent_columns": {},
+      "indexes": {
+        "client_legacy_virtual_accounts.PRIMARY": {
+          "non_unique": 0,
+          "columns": ["id"]
+        },
+        "client_legacy_virtual_accounts.uq_client_legacy_virtual_account_pair": {
+          "non_unique": 0,
+          "columns": ["case_no", "virtual_account"]
+        },
+        "client_legacy_virtual_accounts.idx_client_legacy_virtual_account_lookup": {
+          "non_unique": 1,
+          "columns": ["virtual_account", "case_no"]
+        }
+      },
+      "foreign_keys": {
+        "client_legacy_virtual_accounts.fk_client_legacy_virtual_account_order": {
+          "columns": ["case_no"],
+          "referenced_table": "orders",
+          "referenced_columns": ["case_no"],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        }
+      },
+      "checks": {
+        "client_legacy_virtual_accounts.chk_client_legacy_virtual_account_format": "atom(regexp_like(virtual_account,'^99781699[0-9]{6}$'))",
+        "client_legacy_virtual_accounts.chk_client_legacy_virtual_account_source": "and(atom(regexp_like(source_content_digest,'^[0-9a-f]{64}$')),atom(source_row>=2),atom(char_length(trim(created_by))>0))"
+      },
+      "triggers": []
+    }
+  }
+}

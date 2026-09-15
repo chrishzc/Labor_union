@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -54,11 +54,12 @@ class MySqlOrderGovernmentSubsidyProjectionRepository:
             case_no = _required_text(row, "case_no")
             key = case_no.casefold()
             identity_status = _optional_text(row.get("identity_status"))
+            actual_end_date = _optional_date(row.get("actual_end_date"))
             builder = builders.get(key)
             if builder is None:
-                builder = _CaseFactsBuilder(case_no, identity_status)
+                builder = _CaseFactsBuilder(case_no, identity_status, actual_end_date)
                 builders[key] = builder
-            elif builder.case_no != case_no or builder.identity_status != identity_status:
+            elif builder.case_no != case_no or builder.identity_status != identity_status or builder.actual_end_date != actual_end_date:
                 raise GovernmentSubsidyProjectionContractError(
                     "order identity facts are inconsistent"
                 )
@@ -112,9 +113,10 @@ class MySqlOrderGovernmentSubsidyProjectionRepository:
 
 
 class _CaseFactsBuilder:
-    def __init__(self, case_no: str, identity_status: str | None) -> None:
+    def __init__(self, case_no: str, identity_status: str | None, actual_end_date: date | None) -> None:
         self.case_no = case_no
         self.identity_status = identity_status
+        self.actual_end_date = actual_end_date
         self.claims: dict[int, GovernmentSubsidyClaimItemProjectionFact] = {}
         self.overpayments: dict[str, GovernmentSubsidyOverpaymentProjectionFact] = {}
 
@@ -142,6 +144,7 @@ class _CaseFactsBuilder:
         return GovernmentSubsidyOrderProjectionFacts(
             case_no=self.case_no,
             identity_status=self.identity_status,
+            actual_end_date=self.actual_end_date,
             claim_items=tuple(
                 sorted(
                     self.claims.values(),
@@ -218,10 +221,21 @@ def _optional_datetime(value: object) -> datetime | None:
     return value
 
 
+def _optional_date(value: object) -> date | None:
+    if value is None:
+        return None
+    if not isinstance(value, date) or isinstance(value, datetime):
+        raise GovernmentSubsidyProjectionContractError(
+            "Government Subsidy service end must be date"
+        )
+    return value
+
+
 _ORDER_SUBSIDY_FACTS_SELECT_SQL = """
 SELECT
     o.case_no AS case_no,
     c.identity_status AS identity_status,
+    o.actual_end_date AS actual_end_date,
     i.id AS claim_item_id,
     i.batch_id AS batch_id,
     account.aggregate_version AS batch_version,

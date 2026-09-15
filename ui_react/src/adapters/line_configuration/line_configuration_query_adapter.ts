@@ -99,6 +99,8 @@ const RULE_NAMES: Record<string, string> = {
   'LU96-M4-SAFE-ALERT-RULE-V1': 'M4：幹部異常通報與安全審核',
   'LU96-M4-COMPLAINT-HIGH-RULE-V1': 'M4：重大客訴 HIGH 急件告警',
   'LU96-M4-SALARY-PAYABLE-RULE-V1': 'M4：代班薪資自動拆帳通報',
+  'LU96-ORDER-PRE-START-REMINDER-V1': '服務前 3 天：寶寶狀況與第一期款提醒',
+  'LU96-ORDER-SECOND-PAYMENT-REMINDER-V1': '第二期款（尾款）繳款提醒',
 };
 
 const EVENT_LABELS: Record<string, string> = {
@@ -119,6 +121,8 @@ const EVENT_LABELS: Record<string, string> = {
   'service_time_checkpoint': '服務時間節點',
   'beclass_completion_changed': 'BeClass 完成狀態變更',
   'deposit_confirmed': '訂金確認',
+  'order.pre_start_reminder': '服務開始前 3 天提醒（第一期款）',
+  'order.second_payment_reminder': '第二期款（尾款）繳款提醒',
 };
 
 const RECIPIENT_LABELS: Record<string, string> = {

@@ -8,6 +8,7 @@
 依已因訂金核銷成立、服務中或已完成，或具有同等已付訂金語意的歷史 Orders facts、案件 Payroll 凍結費率與有效服務結束日產生獨立季度／年度報表；另為營運報表依 `end_date` 年度，選取同民國案件年度的正常／歷史訂單，以及上一民國案件年度但同西元核銷年度的 carry-in rows，並維持專用欄位格式。正式 claim batch `submitted_at` 的 bounded 送件期間 query 保留為 Government Subsidy owner 能力，但不再供營運報表使用。
 
 ## Implementation
+- schedule-rule: `domains/government_subsidy/claim_schedule.py`
 - primary:
   - `subsystems/government_subsidy/reconciliation_register_query.py`
   - `api/routes/finance_reports.py`

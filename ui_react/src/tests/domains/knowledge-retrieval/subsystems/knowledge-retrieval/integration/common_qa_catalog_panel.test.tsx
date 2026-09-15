@@ -19,6 +19,7 @@ const items = [
 function mockKnowledgeApi() {
   return vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
     const path = String(url);
+    if (path.includes('/catalogs/builtin-line-common-qa/import')) return new Response(JSON.stringify({ catalog_count: 54, imported_count: 51, skipped_existing_count: 3, published_count: 39, index_job_id: 88 }), { status: 200 });
     if (path.includes('/knowledge/items?')) return new Response(JSON.stringify(items), { status: 200 });
     if (path.includes('/knowledge/indexes?')) return new Response(JSON.stringify([{ index_version: 4, index_status: 'stale', built_at_utc: null }]), { status: 200 });
     return new Response(JSON.stringify({}), { status: 200 });
@@ -47,7 +48,11 @@ describe('正式 Knowledge QA 管理 panel', () => {
     await waitFor(() => expect(screen.getByText(/共 3 筆/)).toBeInTheDocument());
 
     expect(screen.getByText(/系統已載入基礎題庫/)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /匯入/ })).not.toBeInTheDocument();
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    fireEvent.click(screen.getByRole('button', { name: '匯入／補齊內建 54 題' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/v1/knowledge/catalogs/builtin-line-common-qa/import', expect.objectContaining({ method: 'POST' })));
+    expect(confirm).toHaveBeenCalledWith('將補齊系統內建的 54 題，不會覆寫既有編修。確定繼續？');
+    expect(await screen.findByText(/本次補入 51 題、發布 39 題/)).toBeInTheDocument();
 
     expect(screen.queryByRole('button', { name: '送審完成' })).not.toBeInTheDocument();
     fireEvent.click(screen.getAllByRole('button', { name: '發布啟用' })[0]);

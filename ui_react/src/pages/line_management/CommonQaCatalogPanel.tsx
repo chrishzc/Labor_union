@@ -1,6 +1,6 @@
 /** Governed Knowledge workflow for LINE common questions and approved answers. */
 import React, { useEffect, useMemo, useState } from 'react';
-import { BookOpenCheck, Pencil, Plus, SearchCheck, ShieldCheck } from 'lucide-react';
+import { BookOpenCheck, Download, Pencil, Plus, SearchCheck, ShieldCheck } from 'lucide-react';
 import { sessionClient } from '../../api/auth/session_client';
 import { Drawer } from '../../components/Drawer';
 
@@ -38,6 +38,14 @@ interface KnowledgeIndex {
   index_version: number;
   index_status: 'requested' | 'building' | 'ready' | 'stale' | 'failed';
   built_at_utc: string | null;
+}
+
+interface BuiltinCatalogImportResult {
+  catalog_count: number;
+  imported_count: number;
+  skipped_existing_count: number;
+  published_count: number;
+  index_job_id: number | null;
 }
 
 const lifecycleLabels: Record<LifecycleStatus, string> = {
@@ -153,6 +161,30 @@ export const CommonQaCatalogPanel: React.FC = () => {
     method: 'POST', headers: { ...requestHeaders(), 'Idempotency-Key': operationIdentity('qa-index') }, credentials: 'include',
   }), '已送出索引建立工作；狀態變成 READY 後才會供 AI 客服使用。');
 
+  const importBuiltinCatalog = async () => {
+    if (!window.confirm('將補齊系統內建的 54 題，不會覆寫既有編修。確定繼續？')) return;
+    setBusy(true); setNotice(null);
+    const identity = operationIdentity('qa-builtin-import');
+    try {
+      const response = await fetch('/api/v1/knowledge/catalogs/builtin-line-common-qa/import', {
+        method: 'POST',
+        headers: { ...requestHeaders(), 'Idempotency-Key': identity, 'X-Correlation-ID': identity },
+        credentials: 'include',
+      });
+      if (!response.ok) throw new Error(await apiError(response));
+      const result = await response.json() as BuiltinCatalogImportResult;
+      await loadState();
+      const indexMessage = result.index_job_id === null ? '目前不需重建索引。' : '索引工作已建立，READY 後即啟用。';
+      setNotice(`內建題庫共 ${result.catalog_count} 題；本次補入 ${result.imported_count} 題、發布 ${result.published_count} 題。${indexMessage}`);
+      setNoticeKind('success');
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : '內建題庫匯入失敗。');
+      setNoticeKind('error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const transition = (item: ManagedQa, action: 'publish' | 'retire') => {
     const identity = operationIdentity(`qa-${action}`);
     const success = action === 'publish' ? '已發布，正在更新 AI 索引；READY 後即啟用。' : '已停用，正在更新 AI 索引以移除舊答案。';
@@ -222,6 +254,7 @@ export const CommonQaCatalogPanel: React.FC = () => {
           <span className="category-badge">共 {items.length} 筆 · {publishedCount} 筆已發布</span>
         </div>
         <div className="qa-catalog-actions">
+          <button type="button" className="line-secondary-btn" disabled={busy} onClick={() => void importBuiltinCatalog()}><Download aria-hidden="true" />匯入／補齊內建 54 題</button>
           <button type="button" className="line-secondary-btn" disabled={busy || publishedCount === 0} onClick={() => void requestIndex()}><SearchCheck aria-hidden="true" />手動重建索引</button>
           <button type="button" className="line-primary-btn" disabled={busy} onClick={openCreate}><Plus aria-hidden="true" />新增 QA</button>
         </div>
@@ -255,7 +288,7 @@ export const CommonQaCatalogPanel: React.FC = () => {
             <div className="qa-catalog-detail"><div><strong>常見問法：</strong>{item.qa.aliases.join('、') || '—'}</div><div><strong>標準回答：</strong>{item.qa.answer || '尚無答案'}</div>{item.qa.notes && <div><strong>備註：</strong>{item.qa.notes}</div>}<details className="qa-catalog-technical"><summary>技術資訊</summary><small>Knowledge #{item.id} · {item.source_identity} · 來源 {item.qa.source_ref}</small></details></div>
           </details>
         ))}
-        {filteredItems.length === 0 && <div className="line-warning" role="status">{items.length === 0 ? '內建題庫尚未完成初始化，請重新啟動服務；若仍為空白，請聯絡系統管理者。' : '目前沒有符合條件的正式 Knowledge QA。'}</div>}
+        {filteredItems.length === 0 && <div className="line-warning" role="status">{items.length === 0 ? '目前沒有題目，可使用上方「匯入／補齊內建 54 題」。' : '目前沒有符合條件的正式 Knowledge QA。'}</div>}
       </div>
 
       <Drawer isOpen={isCreating || editingItem !== null} onClose={closeEditor} title={isCreating ? '新增 QA 草稿' : `編輯 QA（${editingItem?.qa.id}）`} size="wide" closeDisabled={busy} closeLabel="關閉 QA 編輯器" footer={<div className="line-drawer-footer"><button type="button" disabled={busy} className="line-secondary-btn" onClick={closeEditor}>取消</button><button type="button" disabled={busy} className="line-primary-btn" onClick={save}>{busy ? '儲存中…' : '儲存為草稿'}</button></div>}>

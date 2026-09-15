@@ -22,6 +22,7 @@ from api.schemas.base import BaseResponse
 from api.schemas.accounts_payable_export import (
     AccountsPayableArchiveView,
     AccountsPayablePreviewView,
+    CaseStaffPayableAuditView,
 )
 from api.schemas.government_subsidy_report import (
     GovernmentSubsidyReportPartitionView,
@@ -84,6 +85,61 @@ def preview_accounts_payable(
             "accounts_payable_query_internal_error",
             "應付帳款查詢失敗。",
             "accounts-payable-query",
+        ) from exc
+
+
+@router.get(
+    "/accounts-payable/cases/{case_no}",
+    response_model=BaseResponse[CaseStaffPayableAuditView],
+)
+def query_case_staff_payables(
+    case_no: str,
+    target_month: str = Query(..., pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
+    principal: AdminPrincipal = Depends(require_admin),
+    application: AccountsPayableExportApplication = Depends(
+        get_accounts_payable_export_application
+    ),
+):
+    del principal
+    try:
+        target_payment_date = _target_payment_date(target_month)
+        items = application.query_case(case_no, target_payment_date)
+        return BaseResponse(
+            data=CaseStaffPayableAuditView(
+                case_no=case_no,
+                target_payment_date=target_payment_date,
+                items=[
+                    {
+                        "case_no": item.case_no,
+                        "staff_id": item.staff_id,
+                        "recipient_name": item.recipient_name,
+                        "obligation_identity": item.obligation_identity,
+                        "amount_due_ntd": None if item.amount_due is None else item.amount_due.amount,
+                        "balance_ntd": None if item.balance is None else item.balance.amount,
+                        "order_due_date": item.order_due_date,
+                        "effective_due_date": item.effective_due_date,
+                        "source": item.source,
+                        "disposition": item.disposition,
+                        "reason": item.reason,
+                    }
+                    for item in items
+                ],
+            ),
+            message="Case staff payables audit",
+        )
+    except (TypeError, ValueError) as exc:
+        raise typed_http_error(
+            400,
+            "validation",
+            "case_staff_payables_query_invalid",
+            "本案月嫂應付款查核條件無效。",
+            "case-staff-payables-query",
+        ) from exc
+    except Exception as exc:
+        raise internal_query_error(
+            "case_staff_payables_query_internal_error",
+            "本案月嫂應付款查核失敗。",
+            "case-staff-payables-query",
         ) from exc
 
 

@@ -14,7 +14,10 @@ from domains.client_finance.reconciliation import PaymentStage
 from domains.orders.terms import OrderTerms
 from domains.orders.floor_fee import prorate_floor_fee
 from domains.client_finance.subsidy_advance import subsidy_advance_due_date
-from domains.client_finance.subsidy_coverage import normalize_subsidy_policy_identity
+from domains.client_finance.subsidy_coverage import (
+    derive_subsidy_coverage,
+    normalize_subsidy_policy_identity,
+)
 from domains.scheduling.generation import SchedulingGenerationCandidate
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.money import MoneyNTD
@@ -107,6 +110,7 @@ class ClientFinanceTermsFacts:
     payment_terms: ClientPaymentTerms
     existing_obligations: tuple[ExistingClientStageObligation, ...]
     open_nonstage_obligation_count: int = 0
+    client_service_charge_waived: bool = False
 
     def __post_init__(self) -> None:
         _validate_identity(self.case_no, "case number")
@@ -122,6 +126,8 @@ class ClientFinanceTermsFacts:
             self.open_nonstage_obligation_count,
             "open nonstage obligation count",
         )
+        if not isinstance(self.client_service_charge_waived, bool):
+            raise TypeError("client service charge waived must be boolean")
 
 
 @dataclass(frozen=True, slots=True)
@@ -488,6 +494,15 @@ def _materialize_terms_facts(source_facts, order_terms, scheduling):
         raise ValueError("Client Finance and Scheduling case numbers must match")
     service_dates = _scheduling_service_dates(scheduling)
     charge_days = _charge_days(service_dates, source_facts.double_pay_dates)
+    client_service_charge_waived = False
+    if source_facts.identity_status is not None:
+        coverage = derive_subsidy_coverage(
+            source_facts.identity_status,
+            Decimal(str(order_terms.service_days))
+            * Decimal(str(order_terms.service_hours_per_day)),
+            Decimal(order_terms.floor_fee.amount),
+        )
+        client_service_charge_waived = coverage.is_full_subsidy_order
     return ClientFinanceTermsFacts(
         source_facts.case_no,
         source_facts.account_version,
@@ -497,6 +512,7 @@ def _materialize_terms_facts(source_facts, order_terms, scheduling):
         source_facts.payment_terms,
         source_facts.existing_obligations,
         source_facts.open_nonstage_obligation_count,
+        client_service_charge_waived,
     )
 
 
@@ -574,6 +590,8 @@ def _stage_plan(facts, payment_stage, charge_days, floor_fee):
 
 
 def _daily_charge(facts, charge_day):
+    if facts.client_service_charge_waived:
+        return MoneyNTD(0)
     multiplier = 2 if charge_day.is_double_pay else 1
     return (
         MoneyNTD(_whole_ntd(

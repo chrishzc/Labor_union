@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 import hashlib
 import json
 from typing import Literal, Mapping, Protocol, cast
 
 from domains.government_subsidy.ledger import GovernmentSubsidyBatchStatus
+from domains.government_subsidy.claim_schedule import project_claim_schedule
 from domains.government_subsidy.overpayment import GovernmentSubsidyOverpaymentStatus
 from domains.orders.lifecycle import OrderLifecycleScope, OrderLifecycleStatus
 from shared_kernel.validation import require_canonical_text, require_positive_integer
@@ -114,6 +115,7 @@ class GovernmentSubsidyOverpaymentProjectionFact:
 class GovernmentSubsidyOrderProjectionFacts:
     case_no: str
     identity_status: str | None
+    actual_end_date: date | None
     claim_items: tuple[GovernmentSubsidyClaimItemProjectionFact, ...]
     overpayments: tuple[GovernmentSubsidyOverpaymentProjectionFact, ...]
 
@@ -155,6 +157,11 @@ class OrderGovernmentSubsidyProjection:
     identity_status: str | None
     source: SourceLineage
     occurred_at: datetime | None
+    service_end_date: date | None
+    claim_quarter: int | None
+    claim_application_year: int | None
+    claim_application_month: int | None
+    claim_submitted_at: datetime | None
     blockers: tuple[ProjectionNotice, ...]
     warnings: tuple[ProjectionNotice, ...]
     available_read_actions: tuple[AvailableAction, ...]
@@ -301,6 +308,7 @@ def _project(
     facts: GovernmentSubsidyOrderProjectionFacts,
 ) -> OrderGovernmentSubsidyProjection:
     identity_blockers = _identity_blockers(facts)
+    schedule = project_claim_schedule(facts.actual_end_date)
     if not facts.claim_items:
         return OrderGovernmentSubsidyProjection(
             case_no=facts.case_no,
@@ -308,6 +316,11 @@ def _project(
             identity_status=facts.identity_status,
             source=SourceLineage("Government Subsidy", None, None),
             occurred_at=None,
+            service_end_date=facts.actual_end_date,
+            claim_quarter=None if schedule is None else schedule[0],
+            claim_application_year=None if schedule is None else schedule[1],
+            claim_application_month=None if schedule is None else schedule[2],
+            claim_submitted_at=None,
             blockers=(
                 ProjectionNotice(
                     "government_subsidy_claim_lineage_missing",
@@ -548,12 +561,18 @@ def _projection_from_items(
 ) -> OrderGovernmentSubsidyProjection:
     batch_id = items[0].batch_id
     unit_prices = {item.unit_price_ntd for item in items}
+    schedule = project_claim_schedule(facts.actual_end_date)
     return OrderGovernmentSubsidyProjection(
         case_no=facts.case_no,
         substatus_code=substatus_code,
         identity_status=facts.identity_status,
         source=source,
         occurred_at=occurred_at,
+        service_end_date=facts.actual_end_date,
+        claim_quarter=None if schedule is None else schedule[0],
+        claim_application_year=None if schedule is None else schedule[1],
+        claim_application_month=None if schedule is None else schedule[2],
+        claim_submitted_at=items[0].submitted_at,
         blockers=blockers,
         warnings=warnings,
         available_read_actions=read_actions,
@@ -587,6 +606,11 @@ def _response_etag(
                     item.source.version,
                 ),
                 "claim_batch_id": item.claim_batch_id,
+                "service_end_date": None if item.service_end_date is None else item.service_end_date.isoformat(),
+                "claim_quarter": item.claim_quarter,
+                "claim_application_year": item.claim_application_year,
+                "claim_application_month": item.claim_application_month,
+                "claim_submitted_at": None if item.claim_submitted_at is None else item.claim_submitted_at.isoformat(),
                 "claim_item_count": item.claim_item_count,
                 "claimed_hours": item.claimed_hours,
                 "unit_price_ntd": item.unit_price_ntd,

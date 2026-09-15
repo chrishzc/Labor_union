@@ -26,6 +26,7 @@ from domains.payroll.payment_due_date import (
 from domains.staff_payables.reconciliation import StaffPayableStatus
 from shared_kernel.money import MoneyNTD
 from subsystems.staff_payables.accounts_payable_export import (
+    CaseStaffPayableAuditItem,
     ClientRefundExportFact,
     GovernmentOverpaymentReturnExportFact,
     StaffPayableExportFact,
@@ -72,6 +73,25 @@ class MySqlStaffPayableExportSource:
         )
         facts = tuple(_staff_fact(row) for row in rows) + projected
         return tuple(sorted(facts, key=lambda item: (item.staff_id, item.obligation_identity)))
+
+    def load_case(
+        self, case_no: str, target_payment_date: date
+    ) -> tuple[CaseStaffPayableAuditItem, ...]:
+        with self._connection.cursor() as cursor:
+            cursor.execute(_STAFF_PAYABLE_CASE_AUDIT_SQL, (case_no,))
+            formal_rows = tuple(cursor.fetchall())
+            if formal_rows:
+                return tuple(_formal_case_audit_item(row, target_payment_date) for row in formal_rows)
+            cursor.execute(_HISTORICAL_STAFF_PAYABLE_CASE_PROJECTION_SQL, (case_no,))
+            historical_rows = tuple(cursor.fetchall())
+            if historical_rows:
+                return tuple(
+                    _historical_case_audit_item(row, target_payment_date)
+                    for row in historical_rows
+                )
+            cursor.execute(_STAFF_PAYABLE_CASE_ORDER_FACTS_SQL, (case_no,))
+            order_rows = tuple(cursor.fetchall())
+        return tuple(_missing_case_audit_item(row) for row in order_rows)
 
 
 class MySqlClientRefundExportSource:
@@ -120,6 +140,11 @@ def _staff_fact(row) -> StaffPayableExportFact:
 
 
 def _historical_staff_fact(row, target_payment_date: date) -> StaffPayableExportFact | None:
+    fact = _historical_staff_export_fact(row)
+    return fact if fact is not None and fact.payment_date == target_payment_date else None
+
+
+def _historical_staff_export_fact(row) -> StaffPayableExportFact | None:
     assignment_id = _integer(row["assignment_id"], "assignment id")
     staff_id = _integer(row["staff_id"], "staff id")
     actual_days = _integer(row["actual_service_days"], "actual service days")
@@ -169,8 +194,6 @@ def _historical_staff_fact(row, target_payment_date: date) -> StaffPayableExport
         and client.total_receivable.is_zero,
     )
     due_date = _date_value(due_date)
-    if due_date != target_payment_date:
-        return None
     amount = payroll.total_payable
     if amount.amount <= 0:
         return None
@@ -195,6 +218,96 @@ def _historical_staff_fact(row, target_payment_date: date) -> StaffPayableExport
         payment_date=due_date,
         status=status,
         recipient_identity_card=_clean_text(row.get("identity_card")),
+    )
+
+
+def _formal_case_audit_item(row, target_payment_date: date) -> CaseStaffPayableAuditItem:
+    due_date = row.get("due_date")
+    payout_status = str(row.get("payout_status") or "payable")
+    historical_confirmation = row.get("historical_confirmation_kind")
+    status = _staff_status(row)
+    if historical_confirmation is not None or payout_status == "completed":
+        disposition, reason = "paid_or_settled", "已有有效付款／結清證據，不列入待付清冊。"
+    elif status is StaffPayableStatus.ANOMALY or payout_status != "payable":
+        disposition, reason = "blocked", "現行付款狀態或受款資料尚有 blocker。"
+    elif due_date is None:
+        disposition, reason = "date_not_formed", "月嫂應付日尚未形成。"
+    elif _date_value(due_date) == target_payment_date:
+        disposition, reason = "selected_month", "列入所選付款月份。"
+    else:
+        disposition, reason = "other_month", "案件屬於其他付款月份。"
+    return CaseStaffPayableAuditItem(
+        case_no=str(row["case_no"]),
+        staff_id=_integer(row["staff_id"], "staff id"),
+        recipient_name=_clean_text(row.get("recipient_name")) or None,
+        obligation_identity=str(row["obligation_identity"]),
+        amount_due=MoneyNTD(_integer(row["amount_due_ntd"], "staff payable")),
+        balance=MoneyNTD(0 if historical_confirmation is not None else _integer(row["export_amount_ntd"], "staff payable balance")),
+        order_due_date=row.get("order_due_date"),
+        effective_due_date=due_date,
+        source="formal_obligation",
+        disposition=disposition,
+        reason=reason,
+    )
+
+
+def _historical_case_audit_item(row, target_payment_date: date) -> CaseStaffPayableAuditItem:
+    fact = _historical_staff_export_fact(row)
+    if fact is None:
+        return CaseStaffPayableAuditItem(
+            case_no=str(row["case_no"]),
+            staff_id=_integer(row["staff_id"], "staff id"),
+            recipient_name=_clean_text(row.get("recipient_name")) or None,
+            obligation_identity=None,
+            amount_due=None,
+            balance=None,
+            order_due_date=row.get("staff_payment_due_date"),
+            effective_due_date=None,
+            source="historical_projection",
+            disposition="blocked",
+            reason="合法歷史計算未形成正數月嫂應付款。",
+        )
+    status = fact.status
+    if status is StaffPayableStatus.ANOMALY:
+        disposition, reason = "blocked", "合法歷史計算已形成，但受款資料尚有 blocker。"
+    elif fact.payment_date == target_payment_date:
+        disposition, reason = "selected_month", "合法歷史唯讀計算列入所選付款月份。"
+    else:
+        disposition, reason = "other_month", "合法歷史唯讀計算屬於其他付款月份。"
+    return CaseStaffPayableAuditItem(
+        case_no=fact.case_no,
+        staff_id=fact.staff_id,
+        recipient_name=fact.recipient_name,
+        obligation_identity=fact.obligation_identity,
+        amount_due=fact.amount,
+        balance=fact.amount,
+        order_due_date=row.get("staff_payment_due_date"),
+        effective_due_date=fact.payment_date,
+        source="historical_projection",
+        disposition=disposition,
+        reason=reason,
+    )
+
+
+def _missing_case_audit_item(row) -> CaseStaffPayableAuditItem:
+    due_date = row.get("staff_payment_due_date")
+    if due_date is None:
+        disposition, reason = "date_not_formed", "案件月嫂應付日尚未形成。"
+    else:
+        disposition, reason = "missing_calculation_basis", "案件已有應付日，但缺少形成月嫂義務所需的正式計算依據。"
+    staff_id = row.get("staff_id")
+    return CaseStaffPayableAuditItem(
+        case_no=str(row["case_no"]),
+        staff_id=None if staff_id is None else _integer(staff_id, "staff id"),
+        recipient_name=_clean_text(row.get("recipient_name")) or None,
+        obligation_identity=None,
+        amount_due=None,
+        balance=None,
+        order_due_date=due_date,
+        effective_due_date=None,
+        source="order_facts",
+        disposition=disposition,
+        reason=reason,
     )
 
 
@@ -321,6 +434,10 @@ FROM staff_obligations obligations
 JOIN staff ON staff.id = obligations.staff_id
 LEFT JOIN staff_payable_projections projection
   ON projection.obligation_identity = obligations.obligation_identity
+LEFT JOIN historical_staff_payout_projections historical_confirmation
+  ON historical_confirmation.obligation_identity = obligations.obligation_identity
+ AND historical_confirmation.amount_snapshot_ntd = obligations.amount_due_ntd
+ AND historical_confirmation.obligation_payroll_version = obligations.payroll_version
 LEFT JOIN staff_bank_accounts bank_accounts
   ON bank_accounts.staff_id = obligations.staff_id
  AND bank_accounts.is_primary = 1
@@ -329,6 +446,7 @@ WHERE obligations.due_date = %s
   AND obligations.status <> 'cancelled'
   AND obligations.amount_due_ntd > 0
   AND COALESCE(projection.status, 'payable') = 'payable'
+  AND historical_confirmation.obligation_identity IS NULL
 GROUP BY obligations.obligation_identity,
          obligations.case_no,
          obligations.staff_id,
@@ -336,6 +454,52 @@ GROUP BY obligations.obligation_identity,
          obligations.amount_due_ntd,
          obligations.due_date,
          projection.status
+ORDER BY obligations.staff_id, obligations.obligation_identity
+"""
+
+
+_STAFF_PAYABLE_CASE_AUDIT_SQL = """
+SELECT obligations.obligation_identity,
+       obligations.case_no,
+       obligations.staff_id,
+       staff.name AS recipient_name,
+       staff.identity_card,
+       obligations.amount_due_ntd,
+       COALESCE(projection.balance_ntd, obligations.amount_due_ntd) AS export_amount_ntd,
+       obligations.due_date,
+       orders.staff_payment_due_date AS order_due_date,
+       COALESCE(projection.status, 'payable') AS payout_status,
+       historical_confirmation.confirmation_kind AS historical_confirmation_kind,
+       COUNT(bank_accounts.id) AS primary_account_count,
+       MAX(bank_accounts.bank_code) AS bank_code,
+       MAX(bank_accounts.account_no) AS account_no
+FROM staff_obligations obligations
+JOIN orders ON orders.case_no = obligations.case_no
+JOIN staff ON staff.id = obligations.staff_id
+LEFT JOIN staff_payable_projections projection
+  ON projection.obligation_identity = obligations.obligation_identity
+LEFT JOIN historical_staff_payout_projections historical_confirmation
+  ON historical_confirmation.obligation_identity = obligations.obligation_identity
+ AND historical_confirmation.amount_snapshot_ntd = obligations.amount_due_ntd
+ AND historical_confirmation.obligation_payroll_version = obligations.payroll_version
+LEFT JOIN staff_bank_accounts bank_accounts
+  ON bank_accounts.staff_id = obligations.staff_id
+ AND bank_accounts.is_primary = 1
+WHERE obligations.case_no = %s
+  AND obligations.direction = 'payable_to_staff'
+  AND obligations.status <> 'cancelled'
+  AND obligations.amount_due_ntd > 0
+GROUP BY obligations.obligation_identity,
+         obligations.case_no,
+         obligations.staff_id,
+         staff.name,
+         staff.identity_card,
+         obligations.amount_due_ntd,
+         obligations.due_date,
+         orders.staff_payment_due_date,
+         projection.balance_ntd,
+         projection.status,
+         historical_confirmation.confirmation_kind
 ORDER BY obligations.staff_id, obligations.obligation_identity
 """
 
@@ -398,6 +562,29 @@ WHERE orders.status='歷史訂單－服務完成'
         AND obligation.obligation_kind='service_pay'
   )
 ORDER BY evidence.staff_id, orders.case_no, assignment.id
+"""
+
+_HISTORICAL_STAFF_PAYABLE_CASE_PROJECTION_SQL = (
+    _HISTORICAL_STAFF_PAYABLE_PROJECTION_SQL.replace(
+        "\nORDER BY evidence.staff_id, orders.case_no, assignment.id",
+        "\n  AND orders.case_no=%s\nORDER BY evidence.staff_id, orders.case_no, assignment.id",
+    )
+)
+
+_STAFF_PAYABLE_CASE_ORDER_FACTS_SQL = """
+SELECT orders.case_no,
+       orders.staff_payment_due_date,
+       COALESCE(assignment.staff_id, orders.staff_id) AS staff_id,
+       staff.name AS recipient_name
+FROM orders
+LEFT JOIN case_staff_assignments assignment ON assignment.id = (
+    SELECT MAX(candidate.id)
+    FROM case_staff_assignments candidate
+    WHERE candidate.case_no = orders.case_no
+      AND candidate.status IN ('planned', 'active', 'completed')
+)
+LEFT JOIN staff ON staff.id = COALESCE(assignment.staff_id, orders.staff_id)
+WHERE orders.case_no = %s
 """
 
 

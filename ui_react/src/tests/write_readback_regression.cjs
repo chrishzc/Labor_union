@@ -134,14 +134,15 @@ function datesHarness(queryChange = {}, failure = null, receiptChange = {}) {
 }
 function latestHarness(h, next = h.query, failure = null) {
   const out = { queryView: h.draft.queryView, selectedDates: [...h.draft.selectedDates], precision: { actual_start_date: 'OLD', actual_end_date: 'OLD' },
-    serviceMode: '連續服務', preview: { service_dates: ['OLD'] }, working: null, error: null, success: null };
+    serviceMode: '連續服務', preview: { service_dates: ['OLD'] }, working: null, error: null, success: null,
+    calculationBasis: { date: 'OLD', confirmed: true }, basisNotice: 'OLD', hasManualChanges: true };
   const renderedCaseNo = { current: 'TEST-CASE' }, actionInFlight = { current: new Set() };
   const api = { getServiceDates: async () => { h.calls.query++; if (failure) throw failure; return copy(next); } };
   const env = { caseNo: 'TEST-CASE', orderMutationFlowStore: h.store, ordersMutationClient: api,
     recoveryFromServiceDatesDraft: h.functions.recoveryFromServiceDatesDraft, renderedCaseNo, actionInFlight,
     selectServiceDates: (c, d) => h.store.updateServiceDatesSelection(c, d), updateServiceDatesReason: (c, r) => h.store.updateServiceDatesReason(c, r),
     AUTOMATIC_CONFIRMATION_REASON: '確認正式服務日期', errorMessage: message, onObserved: () => {},
-    ...setters(out, ['Working', 'Error', 'Success', 'Preview', 'QueryView', 'SelectedDates', 'Precision', 'ServiceMode']),
+    ...setters(out, ['Working', 'Error', 'Success', 'Preview', 'QueryView', 'SelectedDates', 'Precision', 'ServiceMode', 'CalculationBasis', 'BasisNotice', 'HasManualChanges']),
   };
   const load = () => compile(source('dates', 'loadLatestDates'), ['loadLatestDates'], env).functions.loadLatestDates();
   const view = () => {
@@ -151,7 +152,7 @@ function latestHarness(h, next = h.query, failure = null) {
     }).functions;
     return render('dates', 'OrderServiceDatesPanel', { ...out, ...derived, caseNo: 'TEST-CASE', recovery, isRecoveryActive: recovery?.caseNo === 'TEST-CASE',
       loadAndCalculate: () => {}, retryApply: () => {}, retryObservation: () => {}, loadLatestDates: load,
-      changeDate: () => {}, runPreview: () => {}, runApply: () => {},
+      changeDate: () => {}, runPreview: () => {}, runApply: () => {}, onOpenActualStart: undefined,
     });
   };
   return { out, load, view, renderedCaseNo, api };
@@ -281,6 +282,7 @@ async function main() {
     assert.equal(h.calls.apply, oldWrites); assert.notEqual(h.draft.idempotencyKey, key);
     assert.deepEqual(copy(h.draft.selectedDates), next.current_dates); assert.equal(h.draft.receiptView, null);
     assert.equal(h.functions.recoveryFromServiceDatesDraft('TEST-CASE'), null); assert.equal(l.out.preview, null); assert.equal(l.out.precision, null);
+    assert.equal(l.out.calculationBasis, null); assert.equal(l.out.basisNotice, null); assert.equal(l.out.hasManualChanges, false);
     const v = l.view(); assert.equal(nodes(v, n => n.props['aria-pressed'] === true).length, 2);
     assert.equal(nodes(v, n => n.type === 'button' && text(n) === '確認服務日期')[0].props.disabled, false);
   });
