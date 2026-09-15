@@ -78,6 +78,10 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
 
   const check = async () => {
     if (!query || query.service_data_locked || busy) return;
+    // A completed command must not block a newly previewed correction.
+    if (orderMutationFlowStore.getActualStart(caseNo)?.status === 'observed') {
+      orderMutationFlowStore.clearActualStart(caseNo);
+    }
     const request = ++sequence.current;
     setPhase('previewing'); setPreview(null); setError(null);
     try {

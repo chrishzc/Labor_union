@@ -3,6 +3,7 @@ import type {
   ServiceDateConfirmationPreviewView,
   ServiceDateConfirmationQueryView,
 } from '../api/orders/order_mutation_schemas';
+import { ordersMutationClient } from '../api/orders/order_mutation_client';
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import {
   schedulePrecisionClient,
@@ -31,6 +32,7 @@ type ServiceMode = '休周六' | '休周日' | '週休2日' | '連續服務';
 type ServiceDatesRecovery =
   | { caseNo: string; kind: 'outcome_unknown' }
   | { caseNo: string; kind: 'observation_failed'; confirmedVersion: number }
+  | { caseNo: string; kind: 'superseded'; confirmedVersion: number; currentVersion: number }
   | { caseNo: string; kind: 'observation_in_progress' };
 const AUTOMATIC_CONFIRMATION_REASON = '確認正式服務日期';
 
@@ -46,6 +48,15 @@ function recoveryFromServiceDatesDraft(caseNo: string): ServiceDatesRecovery | n
     return { caseNo, kind: 'outcome_unknown' };
   }
   if (draft?.status === 'observation_failed' && draft.receiptView !== null) {
+    const receipt = draft.receiptView;
+    const current = draft.queryView;
+    if (current !== null && current.case_no === caseNo && receipt.case_no === caseNo
+      && current.current_version !== null && current.current_version > receipt.confirmed_version
+      && current.order_version >= receipt.order_version && current.scheduling_version >= receipt.scheduling_version
+      && (current.current_dates.length !== receipt.service_dates.length
+        || current.current_dates.some((date) => !receipt.service_dates.includes(date)))) {
+      return { caseNo, kind: 'superseded', confirmedVersion: receipt.confirmed_version, currentVersion: current.current_version };
+    }
     return {
       caseNo,
       kind: 'observation_failed',
@@ -180,6 +191,45 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
     // calculationRevision is a parent-owned signal emitted only after an authoritative readback.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [calculationRevision]);
+
+  const loadLatestDates = async () => {
+    const pending = recoveryFromServiceDatesDraft(caseNo);
+    if (actionInFlight.current.has(caseNo) || pending?.kind !== 'superseded') return;
+    const original = orderMutationFlowStore.getServiceDatesDraft(caseNo);
+    const receipt = original?.receiptView;
+    const previous = original?.queryView;
+    if (!receipt || !previous) return;
+    actionInFlight.current.add(caseNo);
+    setWorking('load');
+    setError(null); setSuccess(null); setPreview(null);
+    try {
+      const current = await ordersMutationClient.getServiceDates(caseNo);
+      if (renderedCaseNo.current !== caseNo) return;
+      if (current.case_no !== caseNo || current.current_version === null
+        || current.current_version < pending.currentVersion
+        || current.order_version < previous.order_version
+        || current.scheduling_version < previous.scheduling_version) {
+        throw new Error('尚未讀到目前正式日期版本；原收據仍保留，請重新讀取。');
+      }
+      if (orderMutationFlowStore.getServiceDatesDraft(caseNo)?.receiptView !== receipt) return;
+      // Explicitly resume from a fresh owner query, never by replaying the old write.
+      orderMutationFlowStore.setServiceDatesQueryLoading(caseNo);
+      orderMutationFlowStore.setServiceDatesQueryReady(caseNo, current);
+      selectServiceDates(caseNo, current.current_dates);
+      updateServiceDatesReason(caseNo, AUTOMATIC_CONFIRMATION_REASON);
+      setQueryView(current);
+      setSelectedDates(current.current_dates);
+      setPrecision(null); setServiceMode(null);
+      setCalculationBasis(null); setBasisNotice(null); setHasManualChanges(false);
+      setSuccess(`已載入目前正式日期版本 #${current.current_version}，請核對後再確認；未重送原操作。`);
+      onObserved?.();
+    } catch (caught) {
+      if (renderedCaseNo.current === caseNo) setError(errorMessage(caught));
+    } finally {
+      actionInFlight.current.delete(caseNo);
+      if (renderedCaseNo.current === caseNo) setWorking(null);
+    }
+  };
 
   const changeDate = (date: string, checked: boolean) => {
     if (queryView === null || isRecoveryActive) return;
@@ -353,18 +403,25 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
           {working === 'apply' ? '重新讀取服務日期結果中…' : '只重新讀取服務日期結果'}
         </button>
       )}
+      {recovery?.caseNo === caseNo && recovery.kind === 'superseded' && (
+        <div role="status">
+          <p>本次收據為版本 #{recovery.confirmedVersion}；目前正式日期已更新為版本 #{recovery.currentVersion}。請載入目前日期核對，不要重送原操作。</p>
+          <button type="button" className="order-v2-open-drawer" disabled={working !== null}
+            onClick={() => void loadLatestDates()}>載入目前正式服務日期</button>
+        </div>
+      )}
       {recovery?.caseNo === caseNo && recovery.kind === 'observation_in_progress' && (
         <p role="status">服務日期確認正在處理或回讀中，暫不可建立新操作。</p>
       )}
 
-      {queryView !== null && precision !== null && serviceMode !== null && (
+      {queryView !== null && (
         <>
-          <dl className="order-v2-business-summary" aria-label="建議服務日期摘要">
+          {precision !== null && serviceMode !== null && <dl className="order-v2-business-summary" aria-label="建議服務日期摘要">
             <div><dt>排休類型</dt><dd>{serviceMode}</dd></div>
             <div><dt>建議開始</dt><dd>{precision.actual_start_date}</dd></div>
             <div><dt>建議完工</dt><dd>{precision.actual_end_date}</dd></div>
             <div><dt>合約服務日</dt><dd>{requiredDateCount} 天</dd></div>
-          </dl>
+          </dl>}
 
           <div className="service-calendar-workbench-layout">
             <div className="calendar-matrix-card">
@@ -398,7 +455,7 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
                       onClick={() => changeDate(date, !selected)}
                     >
                       <span>{date}</span>
-                      {selected && <span className="calendar-date-cell-badge">8hr / 服務</span>}
+                      {selected && <span className="calendar-date-cell-badge">服務日</span>}
                     </button>
                   );
                 })}
