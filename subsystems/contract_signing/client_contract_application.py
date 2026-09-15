@@ -355,7 +355,10 @@ class ClientContractSigningApplication:
                     mapping_path=approved_template_mapping_path(template.template_key),
                     facts=template_facts,
                 )
-                archive = self._archive(content, f"{command.case_no}/client/{command.idempotency_key.value}-{_sha256(content)}-unsigned.xlsx")
+                archive = self._archive(
+                    content,
+                    _external_client_template_storage_key(command, content),
+                )
                 return _insert_generated_document(connection, command, facts, template, archive, snapshot=snapshot), False
             return self._run_in_application_unit_of_work(persist)
         except Exception:
@@ -419,6 +422,12 @@ class ClientContractSigningApplication:
 
 def _client_template_storage_key(command: SendClientContractCommand) -> str:
     return f"{command.case_no}/client/{command.idempotency_key.value}.xlsx"
+
+
+def _external_client_template_storage_key(
+    command: PrepareExternalClientContractCommand, content: bytes
+) -> str:
+    return f"{command.case_no}/client/external-{_sha256(content)[:24]}.xlsx"
 
 
 def _append_command_outcome(connection, command, command_kind, document_id, event_id, result):

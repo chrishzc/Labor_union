@@ -52,6 +52,11 @@ def test_preparation_uses_stable_facts_and_never_requires_prior_commitment(monke
     assert "JOIN media_assets asset ON asset.id=d.media_asset_id" in cursor.sql[1]
     assert "asset.mime_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'" in cursor.sql[1]
     assert len(archived) == (0 if replayed else 1)
+    if not replayed:
+        assert archived == [
+            f"CASE-1/client/external-{module._sha256(b'xlsx')[:24]}.xlsx"
+        ]
+        assert ":" not in archived[0]
 
 
 def test_client_pdf_preparation_reuses_pdf_for_current_xlsx_source():
