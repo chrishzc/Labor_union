@@ -48,7 +48,7 @@ def test_registry_list_and_detail_keep_case_identity_and_owner_versions():
     assert detail.beclass.version == 3
     assert detail.beclass.source_kind == "imported"
     assert detail.beclass.values["phone"] == "0922222222"
-    assert detail.order_information.values["multi_birth_count"] == "單胞胎" if False else detail.order_information.values["multi_birth_count"] == "雙胞胎"
+    assert detail.order_information.values["multi_birth_count"] == "雙胞胎"
 
 
 def test_registry_list_route_preserves_optional_false_and_returns_roster_fields():
