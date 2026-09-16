@@ -75,6 +75,9 @@ from subsystems.line.runtime_alert_application import register_group_alert_targe
 from subsystems.line.runtime_contracts import LineRuntimeMode, LineWorkerHeartbeat
 from subsystems.line.runtime_cutover import validate_line_worker_runtime
 from subsystems.line.service_help_application import LineServiceHelpApplication
+from subsystems.line.staff_leave_customer_coordination import (
+    StaffLeaveCustomerCoordinationApplication,
+)
 from subsystems.line.webhook_event_consumer import LineWebhookEventConsumer
 from subsystems.line.webhook_identity_handlers import LineWebhookIdentityHandlers
 from subsystems.line.worker_runtime import CanonicalLineWorkerRuntime
@@ -144,6 +147,11 @@ def _canonical_runtime(
 
 
 def _event_consumer(worker_identity: str, now) -> LineWebhookEventConsumer:
+    leave_coordination = StaffLeaveCustomerCoordinationApplication(
+        get_connection,
+        open_line_unit_of_work,
+        now,
+    )
     identity_handlers = LineWebhookIdentityHandlers(
         now,
         _identity_flow_url,
@@ -170,9 +178,18 @@ def _event_consumer(worker_identity: str, now) -> LineWebhookEventConsumer:
         menu_command_application=LineMenuCommandApplication(),
         feedback_application=LineFeedbackApplication(open_line_unit_of_work, now),
     )
+    handlers = identity_handlers.registry()
+    default_postback = handlers["postback"]
+
+    def handle_postback(inbox, unit_of_work):
+        if leave_coordination.handle_postback(inbox, unit_of_work):
+            return
+        return default_postback(inbox, unit_of_work)
+
+    handlers["postback"] = handle_postback
     return LineWebhookEventConsumer(
         open_line_unit_of_work,
-        LineEventDispatcher(identity_handlers.registry()),
+        LineEventDispatcher(handlers),
         worker_identity,
         now,
     )
@@ -293,8 +310,6 @@ def _heartbeat_from_caller(
         heartbeat.last_error_code,
         heartbeat.last_error_message,
     )
-
-
 
 
 def _required_access_token() -> str:
