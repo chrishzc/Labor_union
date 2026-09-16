@@ -18,6 +18,7 @@ from subsystems.line.notification_source_adapters import (
     from_order_pre_start_checkpoint,
     from_order_second_payment_checkpoint,
 )
+from subsystems.line.runtime_contracts import LineRuntimeMode
 from subsystems.line.worker_runtime import CanonicalLineWorkerRuntime
 
 
@@ -45,6 +46,44 @@ def test_order_reminder_source_worker_is_registered_in_canonical_additional_work
     assert isinstance(worker, MySqlOrderPreStartNotificationSourceWorker)
     assert worker._connection_factory is line_worker_operation.get_connection
     assert worker._now is now
+
+
+def test_run_line_cycle_executes_canonical_runtime_that_carries_reminder_worker(
+    monkeypatch,
+) -> None:
+    runtime_identity = SimpleNamespace()
+    runs: list[str] = []
+    heartbeats: list[tuple[object, int]] = []
+    runtime = SimpleNamespace(
+        run_once=lambda: runs.append("canonical")
+        or {
+            "inbox_events": 0,
+            "delivery_tasks": 0,
+            "order_pre_start_notification_sources": 2,
+        }
+    )
+    monkeypatch.setattr(
+        line_worker_operation,
+        "validate_line_worker_runtime",
+        lambda _environment: SimpleNamespace(worker_mode=LineRuntimeMode.CANONICAL),
+    )
+    monkeypatch.setattr(
+        line_worker_operation,
+        "_canonical_runtime",
+        lambda _worker_identity, _runtime_identity: runtime,
+    )
+    monkeypatch.setattr(
+        line_worker_operation,
+        "record_runtime_heartbeat",
+        lambda identity, processed: heartbeats.append((identity, processed)),
+    )
+    monkeypatch.delenv("KNOWLEDGE_RETRIEVAL_RUNTIME_ENABLED", raising=False)
+
+    processed = line_worker_operation.run_line_cycle("worker:test", runtime_identity)
+
+    assert runs == ["canonical"]
+    assert processed == 2
+    assert heartbeats == [(runtime_identity, 2)]
 
 
 def test_order_reminder_source_worker_failure_is_not_reported_as_healthy_cycle() -> None:
