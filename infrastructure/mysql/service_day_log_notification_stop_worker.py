@@ -19,6 +19,10 @@ from subsystems.line.service_day_log_notification_stop import (
 
 
 class MySqlServiceDayLogNotificationStopWorker:
+    # A committed service-day log makes same-day reminders obsolete. The
+    # canonical runtime must project that stop before any due LINE task is sent.
+    run_before_delivery = True
+
     def __init__(self, connection_factory: Callable[[], object], now: Callable[[], datetime]) -> None:
         self._connection_factory = connection_factory
         self._now = now
