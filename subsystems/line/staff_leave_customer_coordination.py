@@ -74,17 +74,38 @@ class StaffLeaveCustomerCoordinationApplication:
     def _enqueue_inquiries(self, context, unit_of_work) -> None:
         request_id = context["request_id"]
         version = context["request_version"]
-        for target in context["targets"]:
-            case_no = str(target["case_no"])
+        leave_start_date = _date_text(context["leave_start_date"])
+        leave_end_date = _date_text(context["leave_end_date"])
+        targets = tuple(context["targets"])
+
+        # A genuinely affected case without a current customer binding is a
+        # coordination blocker. Do not commit acceptance while silently omitting
+        # that case; fixing the binding and retrying the same review can then
+        # atomically create all required inquiries.
+        for target in targets:
             recipient_value = target.get("client_line_user_id")
             if not isinstance(recipient_value, str) or not recipient_value.strip():
-                continue
+                raise StaffLeaveIntakeWorkflowError(
+                    "leave_customer_recipient_unavailable"
+                )
+
+        for target in targets:
+            case_no = str(target["case_no"])
+            recipient_value = str(target["client_line_user_id"]).strip()
             identity = _interaction_identity(request_id, version, case_no)
             unit_of_work.delivery_tasks.enqueue(
                 LineDeliveryRequest(
-                    LineRecipient(LineRecipientType.USER, LineUserId(recipient_value.strip())),
+                    LineRecipient(LineRecipientType.USER, LineUserId(recipient_value)),
                     LineMessageKind.FLEX,
-                    canonical_line_payload_json(_inquiry_payload(request_id, version, case_no)),
+                    canonical_line_payload_json(
+                        _inquiry_payload(
+                            request_id,
+                            version,
+                            case_no,
+                            leave_start_date,
+                            leave_end_date,
+                        )
+                    ),
                     self._now(),
                     IdempotencyKey(f"leave-customer-inquiry:{identity}"),
                     CorrelationId(f"leave-request:{request_id}:v{version}"),
@@ -124,10 +145,19 @@ class StaffLeaveCustomerCoordinationApplication:
                     idempotency_key=f"leave-customer-decision:{identity}",
                 )
             )
-        except StaffLeaveIntakeWorkflowError:
-            # Stale, wrong-recipient and conflicting clicks are terminal input
-            # outcomes. The canonical webhook inbox remains their event trace;
-            # do not retry them as transient provider failures.
+        except StaffLeaveIntakeWorkflowError as error:
+            # Business-stale or conflicting postbacks are terminal inputs, not
+            # transient provider failures. Still give the clicking user a safe,
+            # non-case-specific result so "handled" is never silent.
+            event_identity = inbox.event.event_id.value
+            unit_of_work.delivery_tasks.enqueue(
+                _decision_rejection_acknowledgement(
+                    str(error),
+                    line_user_id,
+                    event_identity,
+                    _event_time_or_now(inbox, self._now),
+                )
+            )
             return True
         ticket_id = None
         if receipt.decision == "reject_substitution":
@@ -206,10 +236,26 @@ def _postback_value(request_id: int, version: int, case_no: str, decision: str) 
     )
 
 
-def _inquiry_payload(request_id: int, version: int, case_no: str) -> dict[str, object]:
+def _date_text(value) -> str:
+    isoformat = getattr(value, "isoformat", None)
+    return str(isoformat() if callable(isoformat) else value)
+
+
+def _inquiry_payload(
+    request_id: int,
+    version: int,
+    case_no: str,
+    leave_start_date: str,
+    leave_end_date: str,
+) -> dict[str, object]:
+    period = (
+        leave_start_date
+        if leave_start_date == leave_end_date
+        else f"{leave_start_date}～{leave_end_date}"
+    )
     return {
         "type": "flex",
-        "altText": f"請確認月嫂請假後續安排（案件 {case_no}）",
+        "altText": f"請確認月嫂請假後續安排（案件 {case_no}，{period}）",
         "contents": {
             "type": "bubble",
             "body": {
@@ -226,6 +272,12 @@ def _inquiry_payload(request_id: int, version: int, case_no: str) -> dict[str, o
                     {
                         "type": "text",
                         "text": f"案件：{case_no}",
+                        "size": "sm",
+                        "wrap": True,
+                    },
+                    {
+                        "type": "text",
+                        "text": f"請假期間：{period}",
                         "size": "sm",
                         "wrap": True,
                     },
@@ -295,6 +347,41 @@ def _decision_acknowledgement(
         "staff_leave_customer_decision",
         receipt.fingerprint,
     )
+
+
+def _decision_rejection_acknowledgement(
+    error_code: str,
+    recipient: LineUserId,
+    event_identity: str,
+    scheduled_at: datetime,
+) -> LineDeliveryRequest:
+    if error_code in {
+        "leave_request_stale",
+        "leave_request_not_accepted",
+        "leave_request_dates_missing",
+    }:
+        text = "這個確認已失效，請以最新通知為準；如有疑問請聯絡工會。"
+    elif error_code == "leave_customer_decision_idempotency_conflict":
+        text = "這個確認目前無法更改；如需調整已選擇的安排，請聯絡工會。"
+    else:
+        text = "這個確認目前無法使用，請聯絡工會。"
+    return LineDeliveryRequest(
+        LineRecipient(LineRecipientType.USER, recipient),
+        LineMessageKind.TEXT,
+        canonical_line_payload_json({"type": "text", "text": text}),
+        scheduled_at,
+        IdempotencyKey(f"leave-customer-decision-rejected:{event_identity}"),
+        CorrelationId(f"line-event:{event_identity}"),
+        "staff_leave_customer_decision_rejected",
+        event_identity,
+    )
+
+
+def _event_time_or_now(inbox, now: Callable[[], datetime]) -> datetime:
+    occurred_at = getattr(inbox.event, "occurred_at", None)
+    if isinstance(occurred_at, datetime) and occurred_at.tzinfo is not None:
+        return occurred_at
+    return now()
 
 
 def _postback_data(inbox) -> str:
