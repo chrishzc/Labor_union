@@ -10,6 +10,7 @@ from api.dependencies.admin_auth import require_admin
 from api.dependencies.staff_leave_intake import get_staff_leave_intake_application
 from api.schemas.base import BaseResponse
 from api.schemas.staff_leave_management import (
+    StaffLeaveCoordinationContextView,
     StaffLeaveInboxItemView,
     StaffLeaveReviewReceiptView,
 )
@@ -39,6 +40,28 @@ def list_staff_leave_requests(
     connection = get_connection()
     try:
         return BaseResponse(data=MySqlStaffLeaveIntakeRepository(connection).list_requests(status, limit))
+    finally:
+        connection.close()
+
+
+@router.get("/{request_id}/coordination-context", response_model=BaseResponse[StaffLeaveCoordinationContextView])
+def get_staff_leave_coordination_context(
+    request_id: int,
+    expected_version: int = Query(ge=1),
+    principal: AdminPrincipal = Depends(require_admin),
+):
+    del principal
+    connection = get_connection()
+    try:
+        repository = MySqlStaffLeaveIntakeRepository(connection)
+        try:
+            result = repository.coordination_context(request_id, expected_version)
+        except ValueError as error:
+            code = str(error)
+            if code == "leave_request_not_found":
+                raise HTTPException(status_code=404, detail={"code": code}) from error
+            raise HTTPException(status_code=409, detail={"code": code}) from error
+        return BaseResponse(data=result)
     finally:
         connection.close()
 
