@@ -11,7 +11,6 @@ import {
 } from '../api/scheduling/schedule_precision_client';
 import {
   applyServiceDatesFlow,
-  fetchServiceDatesQuery,
   previewServiceDatesFlow,
   retryServiceDatesApplyFlow,
   retryServiceDatesObservationFlow,
@@ -28,6 +27,7 @@ interface OrderServiceDatesPanelProps {
 }
 
 type WorkingAction = 'load' | 'preview' | 'apply' | null;
+type DateLoadMode = 'read' | 'calculate' | 'resume';
 type ServiceMode = '休周六' | '休周日' | '週休2日' | '連續服務';
 type ServiceDatesRecovery =
   | { caseNo: string; kind: 'outcome_unknown' }
@@ -86,14 +86,18 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
   const [calculationBasis, setCalculationBasis] = useState<{ date: string; confirmed: boolean } | null>(null);
   const [hasManualChanges, setHasManualChanges] = useState(false);
   const [, setRecoveryRevision] = useState(0);
+  const [attemptedCalculationRevision, setAttemptedCalculationRevision] = useState(0);
   const actionInFlight = useRef(new Set<string>());
   const calculationSequence = useRef(0);
+  const readController = useRef<AbortController | null>(null);
   const renderedCaseNo = useRef(caseNo);
   renderedCaseNo.current = caseNo;
   const recovery = recoveryFromServiceDatesDraft(caseNo);
   const isRecoveryActive = recovery?.caseNo === caseNo;
+  const needsBasisUpdate = calculationRevision > attemptedCalculationRevision;
 
   useEffect(() => {
+    setAttemptedCalculationRevision(0);
     setWorking(null);
     setQueryView(null);
     setPrecision(null);
@@ -107,132 +111,152 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
     setHasManualChanges(false);
     setRecoveryRevision((revision) => revision + 1);
 
-    return orderMutationFlowStore.subscribe(() => {
+    const unsubscribe = orderMutationFlowStore.subscribe(() => {
       if (renderedCaseNo.current === caseNo) {
         setRecoveryRevision((revision) => revision + 1);
       }
     });
+    // Opening an existing case reads saved dates; it does not regenerate them.
+    if (calculationRevision === 0) void loadServiceDates('read');
+    return () => {
+      unsubscribe();
+      readController.current?.abort();
+      readController.current = null;
+      calculationSequence.current += 1;
+    };
+    // A new case has its own read lifecycle; revisions are handled below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [caseNo]);
 
   const captureRecovery = () => {
     setRecoveryRevision((revision) => revision + 1);
   };
 
-  const loadAndCalculate = async (basisChanged = false) => {
-    if ((!basisChanged && actionInFlight.current.has(caseNo)) || isRecoveryActive) return;
-    const request = calculationSequence.current + 1;
-    calculationSequence.current = request;
+  const loadServiceDates = async (mode: DateLoadMode) => {
+    const pending = recoveryFromServiceDatesDraft(caseNo);
+    if (actionInFlight.current.has(caseNo)
+      || (pending !== null && !(mode === 'resume' && pending.kind === 'superseded'))
+      || (mode === 'resume' && pending?.kind !== 'superseded')) return;
+    const original = orderMutationFlowStore.getServiceDatesDraft(caseNo);
+    const receipt = original?.receiptView;
+    const previous = original?.queryView;
+    const originalKey = original?.idempotencyKey;
+    readController.current?.abort();
+    const controller = new AbortController();
+    readController.current = controller;
+    const request = ++calculationSequence.current;
+    const current = () => !controller.signal.aborted
+      && readController.current === controller
+      && renderedCaseNo.current === caseNo
+      && calculationSequence.current === request;
+    if (mode === 'calculate') setAttemptedCalculationRevision(calculationRevision);
     setWorking('load');
-    setError(null);
-    setSuccess(null);
-    setPreview(null);
-    if (basisChanged) {
+    setError(null); setSuccess(null); setPreview(null);
+    if (mode === 'calculate') {
       setBasisNotice(hasManualChanges
-        ? '實際開始日基準已變更，先前人工調整已清除，請重新核對新的服務日期。'
-        : '實際開始日基準已變更，正在更新服務日期與日曆。');
-      setQueryView(null);
-      setPrecision(null);
-      setServiceMode(null);
-      setSelectedDates([]);
+        ? '正在重新精算；先前人工調整將由新建議取代，請重新核對。'
+        : '正在依目前日期基準更新服務日期與日曆。');
+      setPrecision(null); setServiceMode(null); setCalculationBasis(null);
     }
     try {
-      const [actualStart, serviceDates, calendarDetail] = await Promise.all([
-        ordersQueryClient.getActualStart(caseNo),
-        fetchServiceDatesQuery(caseNo),
-        ordersQueryClient.getOrderCalendarDetail(caseNo),
-      ]);
-      if (renderedCaseNo.current !== caseNo || calculationSequence.current !== request) return;
-      const startDate = actualStart.current_actual_start_date ?? actualStart.planned_start_date;
-      if (
-        actualStart.case_no !== caseNo
-        || serviceDates.case_no !== caseNo
-        || calendarDetail.case_no !== caseNo
-      ) {
-        throw new Error('服務日期精算回讀案件編號不一致。');
+      // Pure reads: stale responses must be discarded BEFORE any shared draft writes.
+      const serviceDates = await ordersMutationClient.getServiceDates(caseNo, { signal: controller.signal });
+      if (!current()) return;
+      if (serviceDates.case_no !== caseNo) throw new Error('服務日期回讀案件編號不一致。');
+      if (previous && (serviceDates.order_version < previous.order_version
+        || serviceDates.scheduling_version < previous.scheduling_version)) {
+        throw new Error('服務日期回讀版本落後，尚未更新；請重新讀取。');
       }
-      setCalculationBasis({
-        date: startDate,
-        confirmed: actualStart.current_actual_start_date !== null,
-      });
-
-      const calculated = await schedulePrecisionClient.calculate({
-        actual_start_date: startDate,
-        target_service_days: serviceDates.contracted_service_days,
-        service_mode: calendarDetail.service_mode,
-      });
-      if (renderedCaseNo.current !== caseNo || calculationSequence.current !== request) return;
-      const selectable = new Set(serviceDates.selectable_dates);
-      const calculatedDates = calculated.day_by_day
-        .filter((day) => day.is_work_day && selectable.has(day.date))
-        .map((day) => day.date);
-
-      selectServiceDates(caseNo, calculatedDates);
+      if (pending?.kind === 'superseded' && (serviceDates.current_version === null
+        || serviceDates.current_version < pending.currentVersion)) {
+        throw new Error('尚未讀到目前正式日期版本；原收據仍保留，請重新讀取。');
+      }
+      let dates = serviceDates.current_dates;
+      let calculated: SchedulePrecisionResult | null = null;
+      let modeValue: ServiceMode | null = null;
+      let basis: { date: string; confirmed: boolean } | null = null;
+      if (mode === 'calculate') {
+        const [actualStart, calendarDetail] = await Promise.all([
+          ordersQueryClient.getActualStart(caseNo, { signal: controller.signal }),
+          ordersQueryClient.getOrderCalendarDetail(caseNo, { signal: controller.signal }),
+        ]);
+        if (!current()) return;
+        if (actualStart.case_no !== caseNo || calendarDetail.case_no !== caseNo) {
+          throw new Error('服務日期精算回讀案件編號不一致。');
+        }
+        if (actualStart.order_version !== serviceDates.order_version
+          || actualStart.scheduling_version !== serviceDates.scheduling_version) {
+          throw new Error('實際開始日與服務日期版本不同，尚未更新；請重新精算。');
+        }
+        basis = { date: actualStart.current_actual_start_date ?? actualStart.planned_start_date,
+          confirmed: actualStart.current_actual_start_date !== null };
+        modeValue = calendarDetail.service_mode;
+        calculated = await schedulePrecisionClient.calculate({
+          actual_start_date: basis.date,
+          target_service_days: serviceDates.contracted_service_days,
+          service_mode: modeValue,
+        });
+        if (!current()) return;
+        const selectable = new Set(serviceDates.selectable_dates);
+        dates = calculated.day_by_day.filter((day) => day.is_work_day && selectable.has(day.date)).map((day) => day.date);
+      }
+      const liveRecovery = recoveryFromServiceDatesDraft(caseNo);
+      if (!current() || actionInFlight.current.has(caseNo)
+        || (mode === 'resume'
+          ? liveRecovery?.kind !== 'superseded' || orderMutationFlowStore.getServiceDatesDraft(caseNo)?.receiptView !== receipt
+          : liveRecovery !== null)) return;
+      const draft = orderMutationFlowStore.getServiceDatesDraft(caseNo);
+      if (draft?.queryView !== previous || draft?.receiptView !== receipt
+        || draft?.idempotencyKey !== originalKey) return;
+      // A same-basis unsaved draft survives a read; a saved arrangement is never recalculated by a read.
+      const keepDraft = mode === 'read' && draft?.receiptView === null
+        && draft.queryView?.order_version === serviceDates.order_version
+        && draft.queryView?.scheduling_version === serviceDates.scheduling_version
+        && draft.queryView?.current_version === serviceDates.current_version
+        && draft.selectedDates.length > 0;
+      if (keepDraft) dates = [...draft.selectedDates];
+      // This validated read starts a fresh preview lifecycle, never an unresolved command.
+      orderMutationFlowStore.resetServiceDatesDraft(caseNo);
+      orderMutationFlowStore.setServiceDatesQueryReady(caseNo, serviceDates);
+      selectServiceDates(caseNo, dates);
       updateServiceDatesReason(caseNo, AUTOMATIC_CONFIRMATION_REASON);
-      setQueryView(serviceDates);
-      setPrecision(calculated);
-      setServiceMode(calendarDetail.service_mode);
-      setSelectedDates(calculatedDates);
-      setHasManualChanges(false);
-      if (basisChanged) setBasisNotice('已依正式實際開始日更新服務日期，請核對後再確認。');
+      setQueryView(serviceDates); setSelectedDates(dates);
+      setPrecision(calculated); setServiceMode(modeValue); setCalculationBasis(basis);
+      setHasManualChanges(keepDraft);
+      setBasisNotice(basis === null ? null
+        : `${basis.confirmed ? '已依正式實際開始日更新' : '尚未確認實際開始日，已依原訂日期試算'}服務日期，請核對後再確認。${hasManualChanges ? '先前人工調整已由新建議取代。' : ''}`);
+      if (mode === 'resume') {
+        // Explicitly adopting the current formal arrangement resolves the pending view update, without recalculating it.
+        setAttemptedCalculationRevision(calculationRevision);
+        setSuccess(`已載入目前正式日期版本 #${serviceDates.current_version}，請核對後再確認；未重送原操作。`);
+        onObserved?.();
+      }
     } catch (caught) {
-      if (renderedCaseNo.current !== caseNo || calculationSequence.current !== request) return;
+      if (!current()) return;
       setError(errorMessage(caught));
-      setQueryView(null);
-      setPrecision(null);
-      setServiceMode(null);
-      setSelectedDates([]);
+      if (mode !== 'resume') setQueryView(null);
+      setBasisNotice(mode === 'calculate' ? '服務日期尚未更新，請重新精算；目前正式日期未被此試算修改。' : null);
+      setPrecision(null); setServiceMode(null); setCalculationBasis(null);
     } finally {
-      if (renderedCaseNo.current === caseNo && calculationSequence.current === request) setWorking(null);
+      if (current()) { readController.current = null; setWorking(null); }
     }
   };
 
   useEffect(() => {
-    if (calculationRevision > 0) void loadAndCalculate(true);
-    // calculationRevision is a parent-owned signal emitted only after an authoritative readback.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [calculationRevision]);
-
-  const loadLatestDates = async () => {
-    const pending = recoveryFromServiceDatesDraft(caseNo);
-    if (actionInFlight.current.has(caseNo) || pending?.kind !== 'superseded') return;
-    const original = orderMutationFlowStore.getServiceDatesDraft(caseNo);
-    const receipt = original?.receiptView;
-    const previous = original?.queryView;
-    if (!receipt || !previous) return;
-    actionInFlight.current.add(caseNo);
-    setWorking('load');
-    setError(null); setSuccess(null); setPreview(null);
-    try {
-      const current = await ordersMutationClient.getServiceDates(caseNo);
-      if (renderedCaseNo.current !== caseNo) return;
-      if (current.case_no !== caseNo || current.current_version === null
-        || current.current_version < pending.currentVersion
-        || current.order_version < previous.order_version
-        || current.scheduling_version < previous.scheduling_version) {
-        throw new Error('尚未讀到目前正式日期版本；原收據仍保留，請重新讀取。');
-      }
-      if (orderMutationFlowStore.getServiceDatesDraft(caseNo)?.receiptView !== receipt) return;
-      // Explicitly resume from a fresh owner query, never by replaying the old write.
-      orderMutationFlowStore.setServiceDatesQueryLoading(caseNo);
-      orderMutationFlowStore.setServiceDatesQueryReady(caseNo, current);
-      selectServiceDates(caseNo, current.current_dates);
-      updateServiceDatesReason(caseNo, AUTOMATIC_CONFIRMATION_REASON);
-      setQueryView(current);
-      setSelectedDates(current.current_dates);
-      setPrecision(null); setServiceMode(null);
-      setCalculationBasis(null); setBasisNotice(null); setHasManualChanges(false);
-      setSuccess(`已載入目前正式日期版本 #${current.current_version}，請核對後再確認；未重送原操作。`);
-      onObserved?.();
-    } catch (caught) {
-      if (renderedCaseNo.current === caseNo) setError(errorMessage(caught));
-    } finally {
-      actionInFlight.current.delete(caseNo);
-      if (renderedCaseNo.current === caseNo) setWorking(null);
+    if (!needsBasisUpdate) return;
+    setPreview(null);
+    if (isRecoveryActive || actionInFlight.current.has(caseNo)) {
+      setBasisNotice('日期基準已變更；待目前操作結果確認後，會接續更新。');
+      return;
     }
-  };
+    void loadServiceDates('calculate');
+    // A blocked revision is not consumed. Resume when its write/readback settles,
+    // but do not retry failed reads forever or recalculate on unrelated refreshes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [caseNo, calculationRevision, needsBasisUpdate, isRecoveryActive, working]);
 
   const changeDate = (date: string, checked: boolean) => {
-    if (queryView === null || isRecoveryActive) return;
+    if (queryView === null || isRecoveryActive || needsBasisUpdate || readController.current !== null) return;
     const nextSet = new Set(selectedDates);
     if (checked) nextSet.add(date);
     else nextSet.delete(date);
@@ -245,7 +269,7 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
   };
 
   const runPreview = async () => {
-    if (actionInFlight.current.has(caseNo) || isRecoveryActive) return;
+    if (actionInFlight.current.has(caseNo) || isRecoveryActive || needsBasisUpdate || readController.current !== null) return;
     actionInFlight.current.add(caseNo);
     const basisSequence = calculationSequence.current;
     setWorking('preview');
@@ -269,7 +293,7 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
   };
 
   const runApply = async () => {
-    if (actionInFlight.current.has(caseNo) || isRecoveryActive) return;
+    if (actionInFlight.current.has(caseNo) || isRecoveryActive || needsBasisUpdate || readController.current !== null) return;
     actionInFlight.current.add(caseNo);
     const basisSequence = calculationSequence.current;
     setWorking('apply');
@@ -355,8 +379,9 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
     && selectedDates.length === requiredDateCount
     && selectedDates.length > 0
     && working === null
-    && !isRecoveryActive;
-  const canApply = preview !== null && working === null && !isRecoveryActive;
+    && !isRecoveryActive
+    && !needsBasisUpdate;
+  const canApply = preview !== null && working === null && !isRecoveryActive && !needsBasisUpdate;
 
   return (
     <section aria-label={`案件 ${caseNo} 服務日期設定`}>
@@ -364,12 +389,15 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
         type="button"
         className="order-v2-open-drawer"
         disabled={working !== null || isRecoveryActive}
-        onClick={() => void loadAndCalculate()}
+        onClick={() => void loadServiceDates('calculate')}
       >
-        {working === 'load' ? '正在精算服務日期…' : '精算天數並設定服務日期'}
+        {working === 'load' ? '正在更新服務日期…' : '精算天數並設定服務日期'}
       </button>
 
       {error !== null && <p role="alert">{error}</p>}
+      {error !== null && queryView === null && !isRecoveryActive && (
+        <button type="button" disabled={working !== null} onClick={() => void loadServiceDates('read')}>重新讀取正式服務日期</button>
+      )}
       {basisNotice !== null && <p role="status">{basisNotice}</p>}
       {calculationBasis !== null && (
         <div className="order-case-review-note" aria-label="服務日期計算基準">
@@ -407,7 +435,7 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
         <div role="status">
           <p>本次收據為版本 #{recovery.confirmedVersion}；目前正式日期已更新為版本 #{recovery.currentVersion}。請載入目前日期核對，不要重送原操作。</p>
           <button type="button" className="order-v2-open-drawer" disabled={working !== null}
-            onClick={() => void loadLatestDates()}>載入目前正式服務日期</button>
+            onClick={() => void loadServiceDates('resume')}>載入目前正式服務日期</button>
         </div>
       )}
       {recovery?.caseNo === caseNo && recovery.kind === 'observation_in_progress' && (
@@ -451,7 +479,7 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
                       aria-label={`服務日期 ${date}`}
                       aria-pressed={selected}
                       className={`calendar-date-cell${selected ? ' selected' : ''}`}
-                      disabled={working !== null || isRecoveryActive}
+                      disabled={working !== null || isRecoveryActive || needsBasisUpdate}
                       onClick={() => changeDate(date, !selected)}
                     >
                       <span>{date}</span>
@@ -474,7 +502,7 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
         </>
       )}
 
-      {preview !== null && (
+      {preview !== null && !needsBasisUpdate && (
         <>
           <dl className="order-v2-business-summary" aria-label="服務日期確認內容">
             <div><dt>目前版本</dt><dd>{preview.current_version === null ? '首次確認' : `#${preview.current_version}`}</dd></div>
