@@ -77,6 +77,7 @@ function deliveryStatus(
 
 export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPanelProps> = ({ caseNo, onObserved, revision = 0 }) => {
   const [state, setState] = useState<ContactStatusState>({ status: 'idle' });
+  const [mutationError, setMutationError] = useState<string | null>(null);
   const [sendPreview, setSendPreview] = useState<{ candidateId: number; kind: 1 | 2 } | null>(null);
   const [reasonDrafts, setReasonDrafts] = useState<Record<number, string>>({});
   const [willingnessNotices, setWillingnessNotices] = useState<Record<number, string>>({});
@@ -119,6 +120,7 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
     activeCaseNo.current = caseNo;
     cancelWillingnessReadbacks();
     setWillingnessNotices({});
+    setMutationError(null);
   }, [caseNo]);
   useEffect(() => orderMutationFlowStore.subscribe(() => {
     if (mounted.current) setFlowRevision((value) => value + 1);
@@ -220,6 +222,7 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
     if (informationInFlight.current.has(key) || current?.status === 'applying' || current?.status === 'observing') return;
     const recoveringUnknown = current?.status === 'outcome_unknown';
     informationInFlight.current.add(key);
+    if (mounted.current && activeCaseNo.current === command.caseNo) setMutationError(null);
     orderMutationFlowStore.setCandidateInformation(command.caseNo, {
       status: 'applying', command, receipt: null, error: null,
     });
@@ -234,6 +237,9 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
         && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429;
       if (rejected && !recoveringUnknown) {
         orderMutationFlowStore.clearCandidateInformation(command.caseNo, command.candidateId, command.infoType);
+        if (mounted.current && activeCaseNo.current === command.caseNo) {
+          setMutationError(errorMessage(error));
+        }
       } else {
         orderMutationFlowStore.setCandidateInformation(command.caseNo, {
           status: 'outcome_unknown', command, receipt: null,
@@ -334,19 +340,26 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
       || saved?.status === 'observing'
       || saved?.status === 'observation_failed'
     ) return;
-    const command = saved?.status === 'outcome_unknown'
-      ? saved.command
-      : (() => {
-        const created = createCandidateWillingnessCommand(caseNo, candidateId, willingness, reason);
-        return {
-          caseNo: created.caseNo,
-          candidateId: created.candidateId,
-          willingness: created.willingness,
-          reason: created.reason,
-          expectedActor: created.actor,
-          eventKey: created.eventKey,
-        };
-      })();
+    setMutationError(null);
+    let command: NonNullable<typeof saved>['command'];
+    try {
+      command = saved?.status === 'outcome_unknown'
+        ? saved.command
+        : (() => {
+          const created = createCandidateWillingnessCommand(caseNo, candidateId, willingness, reason);
+          return {
+            caseNo: created.caseNo,
+            candidateId: created.candidateId,
+            willingness: created.willingness,
+            reason: created.reason,
+            expectedActor: created.actor,
+            eventKey: created.eventKey,
+          };
+        })();
+    } catch (error) {
+      setMutationError(errorMessage(error));
+      return;
+    }
     const recoveringUnknown = saved?.status === 'outcome_unknown';
     orderMutationFlowStore.setCandidateWillingness(command.caseNo, {
       status: 'applying', command, receipt: null, error: null,
@@ -369,6 +382,9 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
         && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429;
       if (rejected && !recoveringUnknown) {
         orderMutationFlowStore.clearCandidateWillingness(command.caseNo, command.candidateId);
+        if (mounted.current && activeCaseNo.current === command.caseNo) {
+          setMutationError(errorMessage(error));
+        }
       } else {
         orderMutationFlowStore.setCandidateWillingness(command.caseNo, {
           status: 'outcome_unknown', command, receipt: null,
@@ -405,6 +421,8 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
       </button>
       </header>
       {state.status === 'idle' && <div className="order-case-empty"><h4>查看已加入的人選</h4><p>讀取候選清單以查看意願與聯絡紀錄；要加入人選，請切換「新增候選月嫂」。</p></div>}
+
+      {mutationError !== null && <p className="order-v2-drawer-error" role="alert">{mutationError}</p>}
 
       {state.status === 'error' && (
         <div className="order-v2-notice blocked" role="alert">
