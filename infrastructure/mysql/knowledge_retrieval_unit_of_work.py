@@ -10,6 +10,17 @@ class KnowledgeRetrievalMySqlUnitOfWork(MySqlUnitOfWork):
         super().__init__(connection)
         self.knowledge = MySqlKnowledgeRetrievalRepository(connection)
 
+    def answer_receipt_catalog_revision(self, answer_receipt_id: int) -> int | None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT index_version FROM knowledge_answer_receipts WHERE id=%s",
+                (answer_receipt_id,),
+            )
+            row = cursor.fetchone()
+        if row is None or row["index_version"] is None:
+            return None
+        return int(row["index_version"])
+
 
 class ManagedKnowledgeRetrievalMySqlUnitOfWork(KnowledgeRetrievalMySqlUnitOfWork):
     def __exit__(self, exception_type, exception, traceback) -> bool:
