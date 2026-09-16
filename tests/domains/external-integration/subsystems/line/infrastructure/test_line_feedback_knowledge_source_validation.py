@@ -9,8 +9,12 @@ from subsystems.line.feedback_contracts import KnowledgeAnswerFeedbackContext
 
 
 class _KnowledgeUnitOfWork:
-    def __init__(self, context):
+    def __init__(self, context, catalog_revision=9):
         self.knowledge = SimpleNamespace(feedback_context=lambda receipt_id, actor_id: context(receipt_id, actor_id))
+        self._catalog_revision = catalog_revision
+
+    def answer_receipt_catalog_revision(self, _receipt_id):
+        return self._catalog_revision
 
     def __enter__(self):
         return self
@@ -57,6 +61,7 @@ def test_knowledge_feedback_uses_actor_scoped_answer_context(monkeypatch):
     assert command.actor_id == "U-owner"
     assert command.source_response_id == "knowledge-answer-receipt:42"
     assert command.response_revision == 1
+    assert command.catalog_revision == 9
     assert command.binding_version == 7
 
 
@@ -95,6 +100,54 @@ def test_knowledge_feedback_rejects_source_revision_drift(monkeypatch):
 
     assert captured.value.status_code == 409
     assert captured.value.detail == "line_feedback_source_version_conflict"
+
+
+def test_knowledge_feedback_rejects_client_catalog_revision_drift(monkeypatch):
+    context = KnowledgeAnswerFeedbackContext(
+        source_response_id="knowledge-answer-receipt:42",
+        response_revision=1,
+        rule_revision=None,
+    )
+    monkeypatch.setattr(
+        line_feedback,
+        "open_knowledge_retrieval_unit_of_work",
+        lambda: _KnowledgeUnitOfWork(
+            lambda _receipt_id, _actor_id: context,
+            catalog_revision=9,
+        ),
+    )
+
+    with pytest.raises(HTTPException) as captured:
+        line_feedback._feedback_command(
+            _payload(catalog_revision=10),
+            "U-owner",
+            7,
+        )
+
+    assert captured.value.status_code == 409
+    assert captured.value.detail == "line_feedback_source_version_conflict"
+
+
+def test_knowledge_feedback_requires_persisted_catalog_revision(monkeypatch):
+    context = KnowledgeAnswerFeedbackContext(
+        source_response_id="knowledge-answer-receipt:42",
+        response_revision=1,
+        rule_revision=None,
+    )
+    monkeypatch.setattr(
+        line_feedback,
+        "open_knowledge_retrieval_unit_of_work",
+        lambda: _KnowledgeUnitOfWork(
+            lambda _receipt_id, _actor_id: context,
+            catalog_revision=None,
+        ),
+    )
+
+    with pytest.raises(HTTPException) as captured:
+        line_feedback._feedback_command(_payload(), "U-owner", 7)
+
+    assert captured.value.status_code == 404
+    assert captured.value.detail == "line_feedback_source_unavailable"
 
 
 def test_non_knowledge_feedback_keeps_existing_owner_path(monkeypatch):
