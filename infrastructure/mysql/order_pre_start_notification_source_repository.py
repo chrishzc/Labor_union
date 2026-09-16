@@ -17,7 +17,7 @@ from subsystems.line.order_pre_start_notification_source import (
 _SCAN_DUE_ORDERS_SQL = (
     "SELECT "
     "  o.case_no, "
-    "  o.service_start_date, "
+    "  COALESCE(o.actual_start_date, o.start_date) AS service_start_date, "
     "  p.first_payment_due_date, "
     "  ( "
     "    SELECT e.after_amount_ntd FROM client_obligations ob "
@@ -46,7 +46,17 @@ _SCAN_DUE_ORDERS_SQL = (
     "FROM orders o "
     "LEFT JOIN client_payment_terms p ON p.case_no=o.case_no "
     "WHERE o.status NOT IN ('訂單取消', '已取消', '終止', '已結案', '取消') "
-    "  AND o.service_start_date = %s "
+    "  AND COALESCE(o.actual_start_date, o.start_date) = %s "
+    # This is a once-per-order/date checkpoint, not a mutable finance event.
+    # Reconciliation owns registered sources that still lack a decision.
+    "  AND NOT EXISTS ( "
+    "    SELECT 1 FROM line_notification_source_events source "
+    "    WHERE source.source_domain='orders' "
+    "      AND source.event_code='order.pre_start_reminder' "
+    "      AND source.source_event_identity=CONCAT( "
+    "        'order-pre-start-reminder:', o.case_no, ':', "
+    "        COALESCE(o.actual_start_date, o.start_date)) "
+    "  ) "
     "ORDER BY o.case_no ASC"
 )
 
@@ -159,7 +169,7 @@ def _project_payment(required_value: object, received_value: object) -> tuple[in
 _SCAN_DUE_SECOND_PAYMENTS_SQL = (
     "SELECT "
     "  o.case_no, "
-    "  o.service_start_date, "
+    "  COALESCE(o.actual_start_date, o.start_date) AS service_start_date, "
     "  p.second_payment_due_date, "
     "  ( "
     "    SELECT e.after_amount_ntd FROM client_obligations ob "
@@ -190,6 +200,13 @@ _SCAN_DUE_SECOND_PAYMENTS_SQL = (
     "WHERE o.status NOT IN ('訂單取消', '已取消', '終止', '已結案', '取消') "
     "  AND p.second_payment_due_date IS NOT NULL "
     "  AND p.second_payment_due_date = %s "
+    "  AND NOT EXISTS ( "
+    "    SELECT 1 FROM line_notification_source_events source "
+    "    WHERE source.source_domain='orders' "
+    "      AND source.event_code='order.second_payment_reminder' "
+    "      AND source.source_event_identity=CONCAT( "
+    "        'order-second-payment-reminder:', o.case_no, ':', p.second_payment_due_date) "
+    "  ) "
     "ORDER BY o.case_no ASC"
 )
 
