@@ -1,21 +1,19 @@
 """File: staff_leave_management.py
 Description: 提供工會人員處理 Scheduling 請假待辦的管理 API。"""
 
-from datetime import datetime, timezone
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from api.dependencies.admin_auth import require_admin
-from api.dependencies.staff_leave_intake import get_staff_leave_intake_application
+from api.dependencies.staff_leave_intake import get_staff_leave_customer_coordination_application
 from api.schemas.base import BaseResponse
 from api.schemas.staff_leave_management import (
     StaffLeaveCoordinationContextView,
     StaffLeaveInboxItemView,
     StaffLeaveReviewReceiptView,
 )
-from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.staff_leave_intake_repository import MySqlStaffLeaveIntakeRepository
 from subsystems.access.authentication_session import AdminPrincipal
@@ -24,7 +22,6 @@ from subsystems.line.staff_leave_customer_coordination import (
 )
 from subsystems.scheduling.staff_leave_intake_workflow import (
     ReviewStaffLeaveRequest,
-    StaffLeaveIntakeApplication,
     StaffLeaveIntakeWorkflowError,
 )
 
@@ -81,7 +78,7 @@ def review_staff_leave_request(
     body: ReviewBody,
     idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=191)],
     principal: AdminPrincipal = Depends(require_admin),
-    application: StaffLeaveIntakeApplication = Depends(get_staff_leave_intake_application),
+    application: StaffLeaveCustomerCoordinationApplication = Depends(get_staff_leave_customer_coordination_application),
 ):
     try:
         result = application.review(
@@ -89,12 +86,5 @@ def review_staff_leave_request(
         )
     except StaffLeaveIntakeWorkflowError as error:
         raise HTTPException(status_code=409, detail={"code": str(error)}) from error
-
-    if result.status.value == "accepted_for_processing":
-        StaffLeaveCustomerCoordinationApplication(
-            get_connection,
-            open_line_unit_of_work,
-            lambda: datetime.now(timezone.utc),
-        ).schedule_inquiries(result.request_id, result.version)
 
     return BaseResponse(data={"request_id": result.request_id, "status": result.status.value, "version": result.version, "actor": str(principal.username)})
