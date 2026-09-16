@@ -17,6 +17,7 @@ from api.dependencies.line_identity import get_liff_token_verifier
 from api.dependencies.llm_configuration import (
     LlmConfigurationApplication,
     LlmSemanticTestResult,
+    _qa_id_from_source,
     get_llm_configuration_application,
 )
 from api.error_contracts import typed_http_error
@@ -137,6 +138,10 @@ def ask_service_question(
 ) -> BaseResponse[ServiceHelpAskResponse]:
     clean_question = body.question.strip()
     interaction_id, actor_id = _verified_liff_interaction(body, liff_verifier)
+    if interaction_id is not None and actor_id is not None:
+        replay = _replay_liff_response(clean_question, interaction_id, actor_id)
+        if replay is not None:
+            return replay
 
     try:
         semantic_result = application.test_semantics(clean_question)
@@ -245,6 +250,69 @@ def _verified_liff_interaction(
             retryable=True,
         ) from error
     return interaction_id, identity.line_user_id.value
+
+
+def _replay_liff_response(
+    question: str,
+    interaction_id: str,
+    actor_id: str,
+) -> BaseResponse[ServiceHelpAskResponse] | None:
+    command = AskKnowledgeQuestionCommand(
+        question,
+        actor_id,
+        IdempotencyKey(f"liff-knowledge-answer:{interaction_id}"),
+        CorrelationId(f"liff-knowledge:{interaction_id}"),
+    )
+    try:
+        with open_knowledge_retrieval_unit_of_work() as unit_of_work:
+            previous = unit_of_work.read_inline_request(command)
+    except Exception as error:
+        if isinstance(error, RuntimeError) and str(error) == "knowledge_answer_idempotency_conflict":
+            raise typed_http_error(
+                409,
+                "conflict",
+                "knowledge_answer_idempotency_conflict",
+                "此問答互動識別已被使用，請重新提出問題。",
+                "line-service-help:interaction",
+            ) from error
+        raise _knowledge_query_unavailable("knowledge_answer_observation_unavailable") from error
+    if previous is None:
+        return None
+    # A replay reads the recorded outcome, not a fresh answer from today's index.
+    if previous["request_status"] == "unsupported":
+        return BaseResponse(
+            data=ServiceHelpAskResponse(
+                outcome="unsupported",
+                suggestion="抱歉，工會知識庫目前尚未收錄與您提問完全相符的標準解答。您可以直接在此 LINE 官方帳號聊天室中留言，工會真人客服專員將親自為您詳細解說！",
+                interaction_id=interaction_id,
+            ),
+            message="未找到相符解答，已引導真人客服",
+        )
+    if previous["request_status"] != "answered":
+        # The existing failed request does not store the original provider code.
+        raise _knowledge_query_unavailable("knowledge_query_unavailable")
+    if (
+        previous["answer_receipt_id"] is None
+        or not previous["answer_text"]
+        or previous["index_version"] is None
+        or not previous["citations"]
+    ):
+        raise _knowledge_query_unavailable("knowledge_answer_provenance_incomplete")
+    citation = previous["citations"][0]
+    return BaseResponse(
+        data=ServiceHelpAskResponse(
+            outcome="answered",
+            answer_text=previous["answer_text"],
+            qa_id=_qa_id_from_source(citation["source_identity"]),
+            source_identity=citation["source_identity"],
+            source_version=citation["source_version"],
+            index_version=previous["index_version"],
+            source_ref=citation["source_identity"],
+            interaction_id=interaction_id,
+            answer_receipt_id=previous["answer_receipt_id"],
+        ),
+        message="AI 助理已由知識庫為您找到解答",
+    )
 
 
 def _persist_liff_answer(
