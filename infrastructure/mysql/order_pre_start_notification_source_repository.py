@@ -17,12 +17,13 @@ from subsystems.line.order_pre_start_notification_source import (
 _SCAN_DUE_ORDERS_SQL = (
     "SELECT "
     "  o.case_no, "
-    "  COALESCE(p.first_payment_due_date, o.service_start_date) AS effective_start_date, "
-    "  COALESCE(( "
+    "  o.service_start_date, "
+    "  p.first_payment_due_date, "
+    "  ( "
     "    SELECT e.after_amount_ntd FROM client_obligations ob "
     "    JOIN client_obligation_events e ON e.id=ob.current_event_id "
     "    WHERE ob.case_no=o.case_no AND ob.obligation_type='first' LIMIT 1 "
-    "  ), 0) AS first_payment_required, "
+    "  ) AS first_payment_required, "
     "  COALESCE(( "
     "    SELECT SUM(CASE l.entry_type "
     "                 WHEN 'receipt' THEN x.amount_ntd "
@@ -45,7 +46,7 @@ _SCAN_DUE_ORDERS_SQL = (
     "FROM orders o "
     "LEFT JOIN client_payment_terms p ON p.case_no=o.case_no "
     "WHERE o.status NOT IN ('訂單取消', '已取消', '終止', '已結案', '取消') "
-    "  AND (p.first_payment_due_date = %s OR (p.first_payment_due_date IS NULL AND o.service_start_date = %s)) "
+    "  AND o.service_start_date = %s "
     "ORDER BY o.case_no ASC"
 )
 
@@ -57,7 +58,7 @@ class MySqlOrderPreStartNotificationSourceRepository:
     def find_due_candidates(self, target_date: date) -> tuple[OrderPreStartCandidate, ...]:
         date_str = target_date.isoformat()
         with self._connection.cursor() as cursor:
-            cursor.execute(_SCAN_DUE_ORDERS_SQL, (date_str, date_str))
+            cursor.execute(_SCAN_DUE_ORDERS_SQL, (date_str,))
             rows = cursor.fetchall() or ()
 
         candidates: list[OrderPreStartCandidate] = []
@@ -67,15 +68,14 @@ class MySqlOrderPreStartNotificationSourceRepository:
             case_no = str(row.get("case_no") or "")
             if not case_no:
                 continue
-            start_date_val = row.get("effective_start_date")
+            start_date_val = row.get("service_start_date")
             start_date_str = str(start_date_val) if start_date_val is not None else date_str
-            required = int(row.get("first_payment_required") or 0)
-            received = int(row.get("first_payment_received") or 0)
-
-            already_settled = (required > 0 and received >= required)
-            amount = max(0, required - received) if not already_settled else 0
-            if required == 0 and not already_settled:
-                amount = 0
+            due_date_val = row.get("first_payment_due_date")
+            due_date_str = str(due_date_val) if due_date_val is not None else None
+            amount, already_settled, payment_state = _project_payment(
+                row.get("first_payment_required"),
+                row.get("first_payment_received"),
+            )
 
             client_line_user_id = row.get("client_line_user_id")
             if isinstance(client_line_user_id, str):
@@ -90,6 +90,8 @@ class MySqlOrderPreStartNotificationSourceRepository:
                     first_payment_amount=amount,
                     already_settled=already_settled,
                     client_line_user_id=client_line_user_id,
+                    first_payment_due_date=due_date_str,
+                    payment_state=payment_state,
                 )
             )
         return tuple(candidates)
@@ -107,13 +109,10 @@ class MySqlOrderPreStartNotificationSourceRepository:
             case_no = str(row.get("case_no") or "")
             if not case_no:
                 continue
-            required = int(row.get("second_payment_required") or 0)
-            if required <= 0:
-                # If there is no second payment obligation amount, this order does not need second payment
-                continue
-            received = int(row.get("second_payment_received") or 0)
-            already_settled = (received >= required)
-            amount = max(0, required - received) if not already_settled else 0
+            amount, already_settled, payment_state = _project_payment(
+                row.get("second_payment_required"),
+                row.get("second_payment_received"),
+            )
 
             client_line_user_id = row.get("client_line_user_id")
             if isinstance(client_line_user_id, str):
@@ -123,6 +122,8 @@ class MySqlOrderPreStartNotificationSourceRepository:
 
             due_date_val = row.get("second_payment_due_date")
             due_date_str = str(due_date_val) if due_date_val is not None else date_str
+            service_date_val = row.get("service_start_date")
+            service_date_str = str(service_date_val) if service_date_val is not None else None
 
             candidates.append(
                 OrderSecondPaymentCandidate(
@@ -131,20 +132,40 @@ class MySqlOrderPreStartNotificationSourceRepository:
                     second_payment_amount=amount,
                     already_settled=already_settled,
                     client_line_user_id=client_line_user_id,
+                    service_start_date=service_date_str,
+                    payment_state=payment_state,
                 )
             )
         return tuple(candidates)
 
 
+def _project_payment(required_value: object, received_value: object) -> tuple[int, bool, str]:
+    if required_value is None:
+        return 0, False, "missing"
+
+    required = int(required_value)
+    received = int(received_value or 0)
+    if required <= 0:
+        return 0, True, "not_required"
+    if received >= required:
+        return 0, True, "settled"
+
+    outstanding = max(0, required - received)
+    if received > 0:
+        return outstanding, False, "partial"
+    return outstanding, False, "outstanding"
+
+
 _SCAN_DUE_SECOND_PAYMENTS_SQL = (
     "SELECT "
     "  o.case_no, "
+    "  o.service_start_date, "
     "  p.second_payment_due_date, "
-    "  COALESCE(( "
+    "  ( "
     "    SELECT e.after_amount_ntd FROM client_obligations ob "
     "    JOIN client_obligation_events e ON e.id=ob.current_event_id "
     "    WHERE ob.case_no=o.case_no AND ob.obligation_type='second' LIMIT 1 "
-    "  ), 0) AS second_payment_required, "
+    "  ) AS second_payment_required, "
     "  COALESCE(( "
     "    SELECT SUM(CASE l.entry_type "
     "                 WHEN 'receipt' THEN x.amount_ntd "
