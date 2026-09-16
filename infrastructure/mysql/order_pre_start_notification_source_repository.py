@@ -46,14 +46,6 @@ _SCAN_DUE_ORDERS_SQL = (
     "LEFT JOIN client_payment_terms p ON p.case_no=o.case_no "
     "WHERE o.status NOT IN ('訂單取消', '已取消', '終止', '已結案', '取消') "
     "  AND (p.first_payment_due_date = %s OR (p.first_payment_due_date IS NULL AND o.service_start_date = %s)) "
-    "  AND NOT EXISTS ( "
-    "    SELECT 1 FROM line_notification_source_events source "
-    "    WHERE source.source_domain='orders' "
-    "      AND source.event_code='order.pre_start_reminder' "
-    "      AND source.source_event_identity=CONCAT( "
-    "        'order-pre-start-reminder:', o.case_no, ':', "
-    "        COALESCE(p.first_payment_due_date, o.service_start_date)) "
-    "  ) "
     "ORDER BY o.case_no ASC"
 )
 
@@ -177,13 +169,6 @@ _SCAN_DUE_SECOND_PAYMENTS_SQL = (
     "WHERE o.status NOT IN ('訂單取消', '已取消', '終止', '已結案', '取消') "
     "  AND p.second_payment_due_date IS NOT NULL "
     "  AND p.second_payment_due_date = %s "
-    "  AND NOT EXISTS ( "
-    "    SELECT 1 FROM line_notification_source_events source "
-    "    WHERE source.source_domain='orders' "
-    "      AND source.event_code='order.second_payment_reminder' "
-    "      AND source.source_event_identity=CONCAT( "
-    "        'order-second-payment-reminder:', o.case_no, ':', p.second_payment_due_date) "
-    "  ) "
     "ORDER BY o.case_no ASC"
 )
 
