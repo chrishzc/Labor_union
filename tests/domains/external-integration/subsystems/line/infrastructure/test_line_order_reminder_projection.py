@@ -1,4 +1,7 @@
 import json
+import sqlite3
+
+import pytest
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -59,7 +62,7 @@ def test_pre_start_scan_is_keyed_by_service_date_and_preserves_payment_deadline(
     candidates = repository.find_due_candidates(date(2026, 9, 20))
 
     sql, params = connection.cursor_instance.executed
-    assert "o.service_start_date = %s" in sql
+    assert "COALESCE(o.actual_start_date, o.start_date) = %s" in sql
     assert "p.first_payment_due_date = %s" not in sql
     assert params == ("2026-09-20",)
     assert len(candidates) == 1
@@ -184,3 +187,161 @@ def test_projector_uses_taipei_business_date_for_three_day_window():
 
     assert processed == 0
     assert scanner.targets == [date(2026, 9, 19), date(2026, 9, 19)]
+
+
+class _SqliteCursor:
+    """Execute production SELECTs; only DB-API placeholders are translated."""
+    def __init__(self, connection):
+        self.cursor = connection.cursor()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.cursor.close()
+
+    def execute(self, sql, params):
+        self.cursor.execute(sql.replace("%s", "?"), params)
+
+    def fetchall(self):
+        return [dict(row) for row in self.cursor.fetchall()]
+
+
+class _SqliteConnection:
+    def __init__(self, connection):
+        self.connection = connection
+
+    def cursor(self):
+        return _SqliteCursor(self.connection)
+
+
+@pytest.fixture
+def reminder_db():
+    # Minimal columns used by the SELECT, matching the Orders/Finance schema.
+    # No synthetic orders.service_start_date column; SQLite is NOT MySQL proof.
+    connection = sqlite3.connect(":memory:")
+    connection.row_factory = sqlite3.Row
+    connection.create_function("CONCAT", -1, lambda *values: (
+        None if any(value is None for value in values) else "".join(map(str, values))
+    ))
+    connection.executescript("""
+        CREATE TABLE orders (case_no TEXT PRIMARY KEY, status TEXT,
+            start_date TEXT, actual_start_date TEXT);
+        CREATE TABLE client_payment_terms (case_no TEXT PRIMARY KEY,
+            first_payment_due_date TEXT, second_payment_due_date TEXT);
+        CREATE TABLE client_obligations (obligation_identity TEXT PRIMARY KEY,
+            case_no TEXT, obligation_type TEXT, current_event_id INTEGER);
+        CREATE TABLE client_obligation_events (id INTEGER PRIMARY KEY, after_amount_ntd INTEGER);
+        CREATE TABLE client_ledger_entries (id INTEGER PRIMARY KEY, entry_type TEXT);
+        CREATE TABLE client_ledger_obligation_allocations (ledger_entry_id INTEGER,
+            obligation_identity TEXT, amount_ntd INTEGER);
+        CREATE TABLE line_order_group_participants (id INTEGER PRIMARY KEY,
+            case_no TEXT, participant_type TEXT, invitation_status TEXT, line_user_id TEXT);
+        CREATE TABLE clients (case_no TEXT PRIMARY KEY, line_user_id TEXT);
+        CREATE TABLE line_notification_source_events (source_domain TEXT,
+            event_code TEXT, source_event_identity TEXT, facts_snapshot TEXT,
+            UNIQUE(source_domain,event_code,source_event_identity));
+        INSERT INTO orders VALUES ('CASE-A','訂單成立','2026-09-19',NULL);
+        INSERT INTO client_payment_terms VALUES ('CASE-A','2026-09-18','2026-09-19');
+        INSERT INTO clients VALUES ('CASE-A','test-client-a');
+        INSERT INTO client_obligation_events VALUES (1,10000),(2,20000);
+        INSERT INTO client_obligations VALUES
+            ('first-a','CASE-A','first',1),('second-a','CASE-A','second',2);
+    """)
+    try:
+        yield connection
+    finally:
+        connection.close()
+
+
+class _CheckpointRegistry:
+    def __init__(self, connection):
+        self.connection = connection
+
+    def register_and_project(self, event):
+        # Duplicate registration fails: the production scanner must omit an
+        # already materialized occurrence, not rewrite its immutable facts.
+        cursor = self.connection.execute(
+            "INSERT INTO line_notification_source_events VALUES (?,?,?,?)",
+            (event.source_domain, event.event_code, event.identity,
+             json.dumps(dict(event.facts), sort_keys=True)),
+        )
+        return cursor.lastrowid
+
+
+@pytest.mark.parametrize("change", [
+    "none", "first-paid", "first-deadline", "second-partial", "second-service", "recipient",
+])
+def test_rescan_does_not_recreate_checkpoint_after_facts_change(reminder_db, change):
+    repository = MySqlOrderPreStartNotificationSourceRepository(_SqliteConnection(reminder_db))
+    projector = OrderPreStartNotificationSourceProjector(repository, _CheckpointRegistry(reminder_db))
+    now = datetime(2026, 9, 16, tzinfo=timezone.utc)
+    assert projector.run_once(now) == 2
+    original = [tuple(row) for row in reminder_db.execute(
+        "SELECT * FROM line_notification_source_events ORDER BY event_code"
+    )]
+    if change in {"first-paid", "second-partial"}:
+        reminder_db.execute("INSERT INTO client_ledger_entries VALUES (1,'receipt')")
+        reminder_db.execute("INSERT INTO client_ledger_obligation_allocations VALUES (1,?,?)",
+            ("first-a" if change == "first-paid" else "second-a", 10000 if change == "first-paid" else 4000))
+    elif change == "first-deadline":
+        reminder_db.execute("UPDATE client_payment_terms SET first_payment_due_date='2026-09-20'")
+    elif change == "second-service":
+        reminder_db.execute("UPDATE orders SET actual_start_date='2026-09-20'")
+    elif change == "recipient":
+        reminder_db.execute("UPDATE clients SET line_user_id='test-client-new'")
+    reminder_db.execute("INSERT INTO orders VALUES ('CASE-B','訂單成立','2026-09-19',NULL)")
+    assert projector.run_once(now) == 1  # The other case still progresses.
+    assert projector.run_once(now) == 0
+    retained = [tuple(row) for row in reminder_db.execute(
+        "SELECT * FROM line_notification_source_events WHERE source_event_identity LIKE '%CASE-A:%' ORDER BY event_code"
+    )]
+    assert retained == original
+    assert reminder_db.execute("SELECT COUNT(*) FROM line_notification_source_events").fetchone()[0] == 3
+
+
+@pytest.mark.parametrize("actual_start,target,count", [
+    (None, "2026-09-19", 1), ("2026-09-18", "2026-09-18", 1),
+    ("2026-09-20", "2026-09-20", 1), ("2026-09-20", "2026-09-19", 0),
+])
+def test_sql_uses_confirmed_actual_start_before_planned_start(reminder_db, actual_start, target, count):
+    reminder_db.execute("UPDATE orders SET actual_start_date=?", (actual_start,))
+    repository = MySqlOrderPreStartNotificationSourceRepository(_SqliteConnection(reminder_db))
+    candidates = repository.find_due_candidates(date.fromisoformat(target))
+    assert len(candidates) == count
+    if count:
+        assert candidates[0].planned_start_date == target
+        assert candidates[0].first_payment_due_date == "2026-09-18"
+    second = repository.find_second_payment_due_candidates(date(2026, 9, 19))
+    assert second[0].service_start_date == (actual_start or "2026-09-19")
+
+
+@pytest.mark.parametrize("domain,event", [
+    ("manual_replay", "order.pre_start_reminder"), ("orders", "other.event"),
+])
+def test_checkpoint_exclusion_uses_the_complete_source_key(reminder_db, domain, event):
+    reminder_db.execute("INSERT INTO line_notification_source_events VALUES (?,?,?,?)",
+        (domain, event, "order-pre-start-reminder:CASE-A:2026-09-19", "{}"))
+    repository = MySqlOrderPreStartNotificationSourceRepository(_SqliteConnection(reminder_db))
+    assert len(repository.find_due_candidates(date(2026, 9, 19))) == 1
+
+
+def test_unregistered_occurrence_reads_current_facts(reminder_db):
+    reminder_db.execute("UPDATE client_payment_terms SET first_payment_due_date='2026-09-17'")
+    reminder_db.execute("INSERT INTO client_ledger_entries VALUES (1,'receipt')")
+    reminder_db.execute("INSERT INTO client_ledger_obligation_allocations VALUES (1,'first-a',4000)")
+    repository = MySqlOrderPreStartNotificationSourceRepository(_SqliteConnection(reminder_db))
+    candidate = repository.find_due_candidates(date(2026, 9, 19))[0]
+    assert candidate.first_payment_due_date == "2026-09-17"
+    assert candidate.first_payment_amount == 6000
+    assert candidate.payment_state == "partial"
+
+
+def test_genuinely_new_due_occurrence_is_not_suppressed(reminder_db):
+    repository = MySqlOrderPreStartNotificationSourceRepository(_SqliteConnection(reminder_db))
+    projector = OrderPreStartNotificationSourceProjector(repository, _CheckpointRegistry(reminder_db))
+    now = datetime(2026, 9, 16, tzinfo=timezone.utc)
+    assert projector.run_once(now) == 2
+    reminder_db.execute("UPDATE client_payment_terms SET second_payment_due_date='2026-09-20'")
+    assert projector.run_once(now, target_date=date(2026, 9, 20)) == 1
+    assert projector.run_once(now, target_date=date(2026, 9, 20)) == 0
