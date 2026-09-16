@@ -78,20 +78,15 @@ class StaffLeaveCustomerCoordinationApplication:
         leave_end_date = _date_text(context["leave_end_date"])
         targets = tuple(context["targets"])
 
-        # A genuinely affected case without a current customer binding is a
-        # coordination blocker. Do not commit acceptance while silently omitting
-        # that case; fixing the binding and retrying the same review can then
-        # atomically create all required inquiries.
-        for target in targets:
-            recipient_value = target.get("client_line_user_id")
-            if not isinstance(recipient_value, str) or not recipient_value.strip():
-                raise StaffLeaveIntakeWorkflowError(
-                    "leave_customer_recipient_unavailable"
-                )
-
         for target in targets:
             case_no = str(target["case_no"])
-            recipient_value = str(target["client_line_user_id"]).strip()
+            recipient_value = target.get("client_line_user_id")
+            # Keep an affected case visible in coordination_context even when
+            # there is no current customer binding; never invent or fall back
+            # to a legacy/group recipient.
+            if not isinstance(recipient_value, str) or not recipient_value.strip():
+                continue
+            recipient_value = recipient_value.strip()
             identity = _interaction_identity(request_id, version, case_no)
             unit_of_work.delivery_tasks.enqueue(
                 LineDeliveryRequest(
