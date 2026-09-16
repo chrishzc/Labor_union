@@ -141,6 +141,13 @@ def ask_service_question(
     try:
         semantic_result = application.test_semantics(clean_question)
     except Exception as error:
+        if interaction_id is not None and actor_id is not None:
+            _persist_liff_outcome(
+                clean_question,
+                interaction_id,
+                actor_id,
+                "failed",
+            )
         raise _knowledge_query_unavailable("knowledge_query_unavailable") from error
 
     if semantic_result.outcome == "answered" and semantic_result.answer_text:
@@ -168,6 +175,13 @@ def ask_service_question(
         )
 
     if semantic_result.outcome == "unsupported":
+        if interaction_id is not None and actor_id is not None:
+            _persist_liff_outcome(
+                clean_question,
+                interaction_id,
+                actor_id,
+                "unsupported",
+            )
         return BaseResponse(
             data=ServiceHelpAskResponse(
                 outcome="unsupported",
@@ -177,6 +191,14 @@ def ask_service_question(
                 interaction_id=interaction_id,
             ),
             message="未找到相符解答，已引導真人客服",
+        )
+
+    if interaction_id is not None and actor_id is not None:
+        _persist_liff_outcome(
+            clean_question,
+            interaction_id,
+            actor_id,
+            "failed",
         )
 
     if semantic_result.outcome in {"index_unavailable", "provider_error"}:
@@ -265,6 +287,29 @@ def _persist_liff_answer(
     except Exception as error:
         raise _knowledge_query_unavailable("knowledge_answer_receipt_unavailable") from error
     return receipt_id
+
+
+def _persist_liff_outcome(
+    question: str,
+    interaction_id: str,
+    actor_id: str,
+    request_status: str,
+) -> int:
+    command = AskKnowledgeQuestionCommand(
+        question,
+        actor_id,
+        IdempotencyKey(f"liff-knowledge-answer:{interaction_id}"),
+        CorrelationId(f"liff-knowledge:{interaction_id}"),
+    )
+    try:
+        with open_knowledge_retrieval_unit_of_work() as unit_of_work:
+            request_id = unit_of_work.record_inline_outcome(command, request_status)
+            unit_of_work.commit()
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise _knowledge_query_unavailable("knowledge_answer_observation_unavailable") from error
+    return request_id
 
 
 def _knowledge_query_unavailable(code: str) -> HTTPException:
