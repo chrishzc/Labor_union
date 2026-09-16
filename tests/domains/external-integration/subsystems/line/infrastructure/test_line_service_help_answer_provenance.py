@@ -52,6 +52,11 @@ class _Verifier:
 
 class LineServiceHelpAnswerProvenanceTests(unittest.TestCase):
     def setUp(self) -> None:
+        # These existing cases test first-time provenance/persistence calls.
+        # Actual stored replay is exercised in test_line_inline_knowledge_replay.
+        lookup = patch("api.routes.line_service_help._replay_liff_response", return_value=None)
+        lookup.start()
+        self.addCleanup(lookup.stop)
         self.application = LlmConfigurationApplication(
             store=_Store(),
             selector=_Selector(),
