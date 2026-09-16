@@ -5,8 +5,10 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from fastapi import HTTPException
+from pydantic import ValidationError
 
-from api.dependencies.llm_configuration import LlmConfigurationApplication
+from api.dependencies.llm_configuration import LlmConfigurationApplication, LlmSemanticTestResult
+from api.routes import llm_configuration as admin_llm
 from api.routes.line_service_help import ServiceHelpAskRequest, ask_service_question
 from domains.knowledge_retrieval.knowledge import KnowledgeAnswer, KnowledgeCitation
 
@@ -233,6 +235,46 @@ class LineServiceHelpAnswerProvenanceTests(unittest.TestCase):
             "U-line-307",
             "failed",
         )
+
+
+class AdminSemanticResponseRegressionTests(unittest.TestCase):
+    def test_all_semantic_outcomes_preserve_the_admin_response_contract(self) -> None:
+        for outcome in ("answered", "unsupported", "index_unavailable", "provider_error"):
+            with self.subTest(outcome=outcome):
+                answered = outcome == "answered"
+                result = LlmSemanticTestResult(
+                    outcome=outcome, provider="test-provider", model="test-model",
+                    index_version=7 if answered else None,
+                    qa_id="service-flow" if answered else None,
+                    source_identity="line-common-qa:service-flow" if answered else None,
+                    source_version=4 if answered else None,
+                    source_excerpt="核准來源摘要" if answered else None,
+                    answer_text="核准回答" if answered else None,
+                    code=None if answered else "test-code",
+                )
+                request = SimpleNamespace(state=SimpleNamespace())
+                response = admin_llm.test_llm_semantics(
+                    admin_llm.LlmSemanticTestRequest(question="服務流程"),
+                    request, _=None,
+                    application=SimpleNamespace(test_semantics=lambda _: result),
+                )
+                self.assertEqual(response.data.outcome, outcome)
+                self.assertEqual(response.data.model_dump(), {
+                    name: getattr(result, name) for name in (
+                        "outcome", "provider", "model", "index_version", "qa_id",
+                        "source_identity", "answer_text", "code",
+                    )
+                })
+                self.assertEqual(request.state.audit_details["outcome"], outcome)
+                self.assertNotIn("source_excerpt", request.state.audit_details)
+
+    def test_admin_model_still_rejects_undeclared_fields(self) -> None:
+        with self.assertRaises(ValidationError):
+            admin_llm.LlmSemanticTestView(
+                outcome="unsupported", provider="test-provider", model="test-model",
+                index_version=None, qa_id=None, source_identity=None,
+                answer_text=None, code="test-code", source_excerpt="not-public",
+            )
 
 
 if __name__ == "__main__":
