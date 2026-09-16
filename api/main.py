@@ -79,6 +79,7 @@ from api.routes import (
     line_service_help,
     line_staff_self_service,
     line_mobile_admin,
+    line_mobile_staff_leave_coordination,
     line_media_assets,
     line_identity_management,
     line_order_change,
@@ -269,6 +270,7 @@ app.include_router(line_staff_self_service.router)
 app.include_router(staff_leave_intake.router)
 app.include_router(staff_leave_management.router)
 app.include_router(line_mobile_admin.router)
+app.include_router(line_mobile_staff_leave_coordination.router)
 app.include_router(line_mobile_admin.page_router)
 app.include_router(customer_service.router)
 app.include_router(customer_service.escalation_router)
