@@ -624,7 +624,7 @@ class MySqlLineNotificationRepository:
             if cursor.rowcount == 1:
                 return int(cursor.lastrowid)
             cursor.execute(
-                _SOURCE_EVENT_EXISTING_SQL,
+                _SOURCE_EVENT_EXISTING_SQL + " FOR UPDATE",
                 (event.source_domain, event.event_code, event.identity),
             )
             row = cursor.fetchone()
@@ -822,7 +822,7 @@ _LOCK_RULE_INTENTS_SQL = (
 _CANCEL_INTENTS_BY_ID_SQL = (
     "UPDATE line_notification_intents SET intent_status='cancelled',"
     "cancellation_reason=%s,cancelled_at_utc=UTC_TIMESTAMP(6) "
-    "WHERE id IN ({placeholders}) AND intent_status='scheduled'"
+    "WHERE id IN ({placeholders}) AND intent.intent_status='scheduled'"
 )
 _MARK_PROVIDER_ACCEPTED_SQL = (
     "UPDATE line_notification_intents SET intent_status='provider_accepted' "
@@ -952,7 +952,8 @@ _RECENT_ROUTER_REPLIES_SQL = (
 _NOTIFICATION_ANOMALY_SOURCES_SQL = (
     "SELECT decision.id AS decision_id,source.source_event_identity,"
     "JSON_UNQUOTE(JSON_EXTRACT(source.facts_snapshot,'$.case_no')) AS case_no,"
-    "decision.reason_code,source.source_version "
+    "decision.rule_id,decision.decision_status,decision.reason_code,decision.recipient_type,decision.recipient_identity,"
+    "source.source_version "
     "FROM line_notification_decisions decision JOIN line_notification_source_events source "
     "ON source.id=decision.source_event_id "
     "WHERE decision.reason_code IN ('recipient_unavailable','template_or_schedule_invalid') "
