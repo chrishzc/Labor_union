@@ -127,6 +127,36 @@ def test_repository_find_second_payment_due_candidates() -> None:
     assert c2.already_settled is True
 
 
+def test_pre_start_scan_excludes_registered_source_identity() -> None:
+    conn = MockConnection()
+
+    MySqlOrderPreStartNotificationSourceRepository(conn).find_due_candidates(
+        date(2026, 8, 20)
+    )
+
+    query = conn._cursor.last_query
+    assert "NOT EXISTS" in query
+    assert "source.event_code='order.pre_start_reminder'" in query
+    assert "'order-pre-start-reminder:', o.case_no, ':'" in query
+    assert "COALESCE(p.first_payment_due_date, o.service_start_date)" in query
+    assert conn._cursor.last_params == ("2026-08-20", "2026-08-20")
+
+
+def test_second_payment_scan_excludes_registered_source_identity() -> None:
+    conn = MockConnection()
+
+    MySqlOrderPreStartNotificationSourceRepository(
+        conn
+    ).find_second_payment_due_candidates(date(2026, 9, 10))
+
+    query = conn._cursor.last_query
+    assert "NOT EXISTS" in query
+    assert "source.event_code='order.second_payment_reminder'" in query
+    assert "'order-second-payment-reminder:', o.case_no, ':'" in query
+    assert "p.second_payment_due_date" in query
+    assert conn._cursor.last_params == ("2026-09-10",)
+
+
 def test_worker_commits_on_processed_events(monkeypatch) -> None:
     class DummyProjector:
         def __init__(self, scanner, registry):
