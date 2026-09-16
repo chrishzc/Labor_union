@@ -7,7 +7,11 @@ import json
 from typing import Any
 
 from domains.scheduling.staff_leave_intake import StaffLeaveRequestStatus
-from subsystems.scheduling.staff_leave_intake_workflow import StaffLeaveRequestSnapshot
+from subsystems.scheduling.staff_leave_intake_workflow import (
+    RecordStaffLeaveCustomerDecision,
+    StaffLeaveCustomerDecisionReceipt,
+    StaffLeaveRequestSnapshot,
+)
 
 
 class MySqlStaffLeaveIntakeRepository:
@@ -101,6 +105,73 @@ class MySqlStaffLeaveIntakeRepository:
             "targets": targets,
         }
 
+    def record_customer_decision(
+        self,
+        command: RecordStaffLeaveCustomerDecision,
+        fingerprint: str,
+    ) -> StaffLeaveCustomerDecisionReceipt:
+        """Persist one immutable customer choice without changing the leave aggregate state."""
+        with self._connection.cursor() as cursor:
+            cursor.execute(_CUSTOMER_DECISION_RECEIPT_SQL, (command.idempotency_key,))
+            existing = cursor.fetchone()
+            if existing is not None:
+                if str(existing["request_fingerprint"]) != fingerprint:
+                    raise ValueError("leave_customer_decision_idempotency_conflict")
+                return _customer_decision_receipt(
+                    existing["result_snapshot"], fingerprint, command.idempotency_key, replayed=True
+                )
+
+            cursor.execute(_ROOT_SQL + " FOR UPDATE", (command.request_id,))
+            row = cursor.fetchone()
+            if row is None:
+                raise ValueError("leave_request_not_found")
+            snapshot = _snapshot(row)
+            if snapshot.version != command.expected_version:
+                raise ValueError("leave_request_stale")
+            if snapshot.status is not StaffLeaveRequestStatus.ACCEPTED_FOR_PROCESSING:
+                raise ValueError("leave_request_not_accepted")
+            if snapshot.leave_start_date is None or snapshot.leave_end_date is None:
+                raise ValueError("leave_request_dates_missing")
+
+            cursor.execute(
+                _COORDINATION_TARGETS_SQL,
+                (snapshot.staff_id, snapshot.leave_end_date, snapshot.leave_start_date),
+            )
+            rows = tuple(cursor.fetchall() or ())
+            target = next(
+                (
+                    item for item in rows
+                    if str(item.get("case_no") or "").strip() == command.case_no.strip()
+                ),
+                None,
+            )
+            if target is None:
+                raise ValueError("leave_customer_case_not_affected")
+            current_recipient = target.get("client_line_user_id")
+            if not isinstance(current_recipient, str) or not current_recipient.strip():
+                raise ValueError("leave_customer_recipient_unavailable")
+            if current_recipient.strip() != command.line_user_id.strip():
+                raise ValueError("leave_customer_recipient_mismatch")
+
+            payload = {
+                "family": "scheduling-staff-leave-customer-decision/v1",
+                "request_id": snapshot.request_id,
+                "request_version": snapshot.version,
+                "case_no": command.case_no.strip(),
+                "line_user_id": current_recipient.strip(),
+                "decision": command.decision,
+            }
+            serialized = json.dumps(
+                payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            )
+            cursor.execute(
+                _RECEIPT_INSERT_SQL,
+                (command.idempotency_key, snapshot.request_id, fingerprint, serialized),
+            )
+            return _customer_decision_receipt(
+                serialized, fingerprint, command.idempotency_key, replayed=False
+            )
+
     def replay_mutation(self, key: str, fingerprint: str) -> StaffLeaveRequestSnapshot | None:
         return self.replay(key, fingerprint)
 
@@ -170,6 +241,10 @@ _RECEIPT_SQL = (
     "JOIN scheduling_staff_leave_request_aggregates a ON a.id=r.request_id "
     "WHERE r.idempotency_key=%s"
 )
+_CUSTOMER_DECISION_RECEIPT_SQL = (
+    "SELECT request_fingerprint,result_snapshot "
+    "FROM scheduling_staff_leave_request_receipts WHERE idempotency_key=%s FOR UPDATE"
+)
 _ROOT_INSERT_SQL = "INSERT INTO scheduling_staff_leave_request_aggregates (staff_id,line_user_id,leave_start_date,leave_end_date,request_reason,request_status,request_fingerprint) VALUES (%s,%s,%s,%s,%s,'pending',%s)"
 _EVENT_INSERT_SQL = "INSERT INTO scheduling_staff_leave_request_events (request_id,aggregate_version,event_type,actor_id,reason) VALUES (%s,%s,%s,%s,%s)"
 _RECEIPT_INSERT_SQL = "INSERT INTO scheduling_staff_leave_request_receipts (idempotency_key,request_id,request_fingerprint,result_snapshot) VALUES (%s,%s,%s,%s)"
@@ -203,6 +278,34 @@ def _result_snapshot(request_id: int, status: str, version: int, receipt_key: st
     if receipt_key is not None:
         payload["leave_substitution_receipt_key"] = receipt_key
     return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _customer_decision_receipt(
+    raw_snapshot: object,
+    fingerprint: str,
+    idempotency_key: str,
+    *,
+    replayed: bool,
+) -> StaffLeaveCustomerDecisionReceipt:
+    try:
+        payload = json.loads(str(raw_snapshot))
+    except (TypeError, ValueError) as error:
+        raise ValueError("leave_customer_decision_replay_readback_missing") from error
+    if not isinstance(payload, dict) or payload.get("family") != "scheduling-staff-leave-customer-decision/v1":
+        raise ValueError("leave_customer_decision_replay_readback_missing")
+    try:
+        return StaffLeaveCustomerDecisionReceipt(
+            request_id=int(payload["request_id"]),
+            request_version=int(payload["request_version"]),
+            case_no=str(payload["case_no"]),
+            line_user_id=str(payload["line_user_id"]),
+            decision=str(payload["decision"]),
+            idempotency_key=idempotency_key,
+            fingerprint=fingerprint,
+            replayed=replayed,
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("leave_customer_decision_replay_readback_missing") from error
 
 
 def _duplicate_key(error: Exception) -> bool:
