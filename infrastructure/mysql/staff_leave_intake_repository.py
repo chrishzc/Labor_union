@@ -180,18 +180,20 @@ _CANONICAL_RECEIPT_SQL = (
     "JOIN scheduling_leave_substitution_outcomes o ON o.batch_key=b.batch_key "
     "WHERE b.batch_key=%s AND o.original_staff_id=%s LIMIT 1 FOR UPDATE"
 )
+# The leave window intersects actual owner-backed work days, not the bounding
+# assignment period (which also contains rest days). Group membership and the
+# legacy clients.line_user_id projection are not current binding authority.
 _COORDINATION_TARGETS_SQL = (
-    "SELECT DISTINCT g.case_no,"
-    "COALESCE((SELECT p.line_user_id FROM line_order_group_participants p "
-    "WHERE p.case_no=g.case_no AND p.participant_type='customer' "
-    "AND p.invitation_status='joined' AND p.line_user_id IS NOT NULL AND p.line_user_id!='' "
-    "ORDER BY p.id DESC LIMIT 1),"
-    "(SELECT c.line_user_id FROM clients c WHERE c.case_no=g.case_no "
-    "AND c.line_user_id IS NOT NULL AND c.line_user_id!='' LIMIT 1)) AS client_line_user_id "
+    "SELECT DISTINCT g.case_no,binding.line_user_id AS client_line_user_id "
     "FROM scheduling_aggregates g JOIN case_staff_assignments a "
-    "ON a.generation_id=g.effective_generation_id "
+    "ON a.generation_id=g.effective_generation_id AND a.case_no=g.case_no "
+    "JOIN staff_schedule ss ON ss.assignment_id=a.id AND ss.staff_id=a.staff_id "
+    "JOIN orders o ON o.case_no=g.case_no "
+    "LEFT JOIN line_identity_role_bindings binding "
+    "ON binding.subject_type='customer' AND binding.binding_status='bound' "
+    "AND binding.subject_reference=CAST(o.client_id AS CHAR) "
     "WHERE a.staff_id=%s AND a.status NOT IN ('cancelled','replaced') "
-    "AND a.assigned_start_date<=%s AND a.assigned_end_date>=%s "
+    "AND ss.is_work_day=1 AND ss.work_date<=%s AND ss.work_date>=%s "
     "ORDER BY g.case_no"
 )
 
