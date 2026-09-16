@@ -94,6 +94,10 @@ def _coordination_context(
     )
 
 
+def _coordination_data(response) -> StaffLeaveCoordinationContextView:
+    return StaffLeaveCoordinationContextView.model_validate(response.data)
+
+
 def _require_case_target(context: StaffLeaveCoordinationContextView, case_no: str) -> None:
     if not any(target.case_no == case_no for target in context.targets):
         raise typed_http_error(
@@ -129,7 +133,7 @@ def mobile_customer_defer_assignments(
 ):
     principal = _customer_defer_principal(payload.line_id_token)
     context_response = _coordination_context(request_id, payload.expected_version, principal)
-    _require_case_target(context_response.data, case_no)
+    _require_case_target(_coordination_data(context_response), case_no)
     return leave_substitution_routes.list_leave_assignments(case_no, principal, application)
 
 
@@ -150,7 +154,7 @@ def mobile_customer_defer_preview(
         payload.expected_leave_request_version,
         principal,
     )
-    _require_case_target(context_response.data, case_no)
+    _require_case_target(_coordination_data(context_response), case_no)
     body = CustomerLeaveDeferPreviewBody.model_validate(
         payload.model_dump(exclude={"line_id_token"})
     )
