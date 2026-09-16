@@ -22,11 +22,14 @@ from domains.line.delivery import (
     LineRecipientType,
 )
 from domains.line.identities import LineUserId
+from domains.scheduling.staff_leave_intake import StaffLeaveRequestStatus
 from infrastructure.mysql.staff_leave_intake_repository import MySqlStaffLeaveIntakeRepository
 from shared_kernel.identities import CorrelationId, IdempotencyKey
 from subsystems.customer_service.contracts import CreateCustomerServiceMessage
 from subsystems.scheduling.staff_leave_intake_workflow import (
     RecordStaffLeaveCustomerDecision,
+    ReviewStaffLeaveRequest,
+    StaffLeaveRequestSnapshot,
     StaffLeaveCustomerDecisionReceipt,
     StaffLeaveIntakeWorkflow,
     StaffLeaveIntakeWorkflowError,
@@ -48,44 +51,47 @@ class StaffLeaveCustomerCoordinationApplication:
         self._line_unit_of_work_factory = line_unit_of_work_factory
         self._now = now
 
-    def schedule_inquiries(self, request_id: int, expected_version: int) -> int:
-        """Enqueue one deterministic customer inquiry per currently affected case."""
-        connection = self._connection_factory()
-        try:
-            context = MySqlStaffLeaveIntakeRepository(connection).coordination_context(
-                request_id, expected_version
-            )
-        finally:
-            connection.close()
-
-        scheduled = 0
+    def review(self, command: ReviewStaffLeaveRequest) -> StaffLeaveRequestSnapshot:
+        """Commit a new acceptance and its customer inquiries in one transaction."""
         with self._line_unit_of_work_factory() as unit_of_work:
-            for target in context["targets"]:
-                case_no = str(target["case_no"])
-                recipient_value = target.get("client_line_user_id")
-                if not isinstance(recipient_value, str) or not recipient_value.strip():
-                    continue
-                identity = _interaction_identity(request_id, expected_version, case_no)
-                unit_of_work.delivery_tasks.enqueue(
-                    LineDeliveryRequest(
-                        LineRecipient(
-                            LineRecipientType.USER,
-                            LineUserId(recipient_value.strip()),
-                        ),
-                        LineMessageKind.FLEX,
-                        canonical_line_payload_json(
-                            _inquiry_payload(request_id, expected_version, case_no)
-                        ),
-                        self._now(),
-                        IdempotencyKey(f"leave-customer-inquiry:{identity}"),
-                        CorrelationId(f"leave-request:{request_id}:v{expected_version}"),
-                        "staff_leave_customer_coordination",
-                        identity,
-                    )
-                )
-                scheduled += 1
+            repository = MySqlStaffLeaveIntakeRepository(unit_of_work._connection)
+            # Serialize acceptance with review/replay. The existing workflow
+            # still owns validation, transition, event and receipt persistence.
+            before = repository.load_for_update(command.request_id)
+            result = StaffLeaveIntakeWorkflow(repository).review(command)
+            if (
+                before is not None
+                and before.status is StaffLeaveRequestStatus.PENDING
+                and result.status is StaffLeaveRequestStatus.ACCEPTED_FOR_PROCESSING
+            ):
+                context = repository.coordination_context(result.request_id, result.version)
+                self._enqueue_inquiries(context, unit_of_work)
+            # Replayed reviews never recreate a request with a new scheduled_at
+            # under an already-used delivery key, even if recipients changed.
             unit_of_work.commit()
-        return scheduled
+            return result
+
+    def _enqueue_inquiries(self, context, unit_of_work) -> None:
+        request_id = context["request_id"]
+        version = context["request_version"]
+        for target in context["targets"]:
+            case_no = str(target["case_no"])
+            recipient_value = target.get("client_line_user_id")
+            if not isinstance(recipient_value, str) or not recipient_value.strip():
+                continue
+            identity = _interaction_identity(request_id, version, case_no)
+            unit_of_work.delivery_tasks.enqueue(
+                LineDeliveryRequest(
+                    LineRecipient(LineRecipientType.USER, LineUserId(recipient_value.strip())),
+                    LineMessageKind.FLEX,
+                    canonical_line_payload_json(_inquiry_payload(request_id, version, case_no)),
+                    self._now(),
+                    IdempotencyKey(f"leave-customer-inquiry:{identity}"),
+                    CorrelationId(f"leave-request:{request_id}:v{version}"),
+                    "staff_leave_customer_coordination",
+                    identity,
+                )
+            )
 
     def handle_postback(self, inbox, unit_of_work) -> bool:
         parsed = parse_staff_leave_customer_postback(_postback_data(inbox))
