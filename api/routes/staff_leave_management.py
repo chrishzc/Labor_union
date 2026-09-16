@@ -1,6 +1,7 @@
 """File: staff_leave_management.py
 Description: 提供工會人員處理 Scheduling 請假待辦的管理 API。"""
 
+from datetime import datetime, timezone
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
@@ -14,10 +15,18 @@ from api.schemas.staff_leave_management import (
     StaffLeaveInboxItemView,
     StaffLeaveReviewReceiptView,
 )
+from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.staff_leave_intake_repository import MySqlStaffLeaveIntakeRepository
 from subsystems.access.authentication_session import AdminPrincipal
-from subsystems.scheduling.staff_leave_intake_workflow import ReviewStaffLeaveRequest, StaffLeaveIntakeApplication, StaffLeaveIntakeWorkflowError
+from subsystems.line.staff_leave_customer_coordination import (
+    StaffLeaveCustomerCoordinationApplication,
+)
+from subsystems.scheduling.staff_leave_intake_workflow import (
+    ReviewStaffLeaveRequest,
+    StaffLeaveIntakeApplication,
+    StaffLeaveIntakeWorkflowError,
+)
 
 
 router = APIRouter(prefix="/api/v1/scheduling/staff-leave-requests", tags=["Scheduling Staff Leave Intake"])
@@ -80,4 +89,12 @@ def review_staff_leave_request(
         )
     except StaffLeaveIntakeWorkflowError as error:
         raise HTTPException(status_code=409, detail={"code": str(error)}) from error
+
+    if result.status.value == "accepted_for_processing":
+        StaffLeaveCustomerCoordinationApplication(
+            get_connection,
+            open_line_unit_of_work,
+            lambda: datetime.now(timezone.utc),
+        ).schedule_inquiries(result.request_id, result.version)
+
     return BaseResponse(data={"request_id": result.request_id, "status": result.status.value, "version": result.version, "actor": str(principal.username)})
