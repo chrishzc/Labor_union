@@ -132,6 +132,108 @@ class LineServiceHelpAnswerProvenanceTests(unittest.TestCase):
         )
         self.assertEqual(verifier.tokens, [])
 
+    def test_verified_unsupported_interaction_is_persisted_for_admin_observation(self) -> None:
+        verifier = _Verifier()
+        application = SimpleNamespace(
+            test_semantics=lambda _question: SimpleNamespace(
+                outcome="unsupported",
+                answer_text=None,
+                index_version=7,
+                code="knowledge_answer_unsupported",
+            )
+        )
+
+        with patch(
+            "api.routes.line_service_help._persist_liff_outcome",
+            return_value=51,
+        ) as persist:
+            response = ask_service_question(
+                ServiceHelpAskRequest(
+                    question="題庫沒有這一題",
+                    interaction_id="interaction-307-unsupported",
+                    line_id_token="verified-token-placeholder",
+                ),
+                application=application,
+                liff_verifier=verifier,
+            )
+
+        self.assertEqual(response.data.outcome, "unsupported")
+        persist.assert_called_once_with(
+            "題庫沒有這一題",
+            "interaction-307-unsupported",
+            "U-line-307",
+            "unsupported",
+        )
+
+    def test_verified_runtime_failure_is_persisted_before_typed_503(self) -> None:
+        verifier = _Verifier()
+        application = SimpleNamespace(
+            test_semantics=lambda _question: SimpleNamespace(
+                outcome="provider_error",
+                answer_text=None,
+                code="timeout",
+            )
+        )
+
+        with patch(
+            "api.routes.line_service_help._persist_liff_outcome",
+            return_value=52,
+        ) as persist:
+            with self.assertRaises(HTTPException) as caught:
+                ask_service_question(
+                    ServiceHelpAskRequest(
+                        question="服務問題",
+                        interaction_id="interaction-307-failed",
+                        line_id_token="verified-token-placeholder",
+                    ),
+                    application=application,
+                    liff_verifier=verifier,
+                )
+
+        self.assertEqual(caught.exception.status_code, 503)
+        self.assertEqual(caught.exception.detail["error"]["code"], "timeout")
+        persist.assert_called_once_with(
+            "服務問題",
+            "interaction-307-failed",
+            "U-line-307",
+            "failed",
+        )
+
+    def test_verified_unexpected_failure_is_persisted_before_generic_503(self) -> None:
+        verifier = _Verifier()
+
+        def fail(_question: str):
+            raise RuntimeError("provider detail")
+
+        application = SimpleNamespace(test_semantics=fail)
+
+        with patch(
+            "api.routes.line_service_help._persist_liff_outcome",
+            return_value=53,
+        ) as persist:
+            with self.assertRaises(HTTPException) as caught:
+                ask_service_question(
+                    ServiceHelpAskRequest(
+                        question="服務問題",
+                        interaction_id="interaction-307-exception",
+                        line_id_token="verified-token-placeholder",
+                    ),
+                    application=application,
+                    liff_verifier=verifier,
+                )
+
+        self.assertEqual(caught.exception.status_code, 503)
+        self.assertEqual(
+            caught.exception.detail["error"]["code"],
+            "knowledge_query_unavailable",
+        )
+        persist.assert_called_once_with(
+            "服務問題",
+            "interaction-307-exception",
+            "U-line-307",
+            "failed",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
