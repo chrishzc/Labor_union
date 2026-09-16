@@ -27,7 +27,9 @@ from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from infrastructure.mysql.mysql_adapter import get_connection
 from shared_kernel.clock import SystemBusinessClock
 from subsystems.scheduling.leave_substitution_workflow import (
+    LeaveSubstitutionPreviewRequest,
     LeaveSubstitutionWorkflow,
+    LinkedLeaveRequestIntent,
 )
 from subsystems.scheduling.leave_substitution_linked_request_resolution import (
     LeaveSubstitutionLinkedRequestResolution,
@@ -50,6 +52,34 @@ class LeaveSubstitutionApplication:
     def apply(self, request):
         return self.workflow.apply(request)
 
+    def preview_customer_defer(
+        self, case_no, request_id, expected_version, assignment_id, correlation_id,
+    ):
+        intent = MySqlStaffLeaveIntakeRepository(self.connection).customer_defer_intent(
+            request_id, expected_version, case_no, assignment_id,
+        )
+        workflow = _build_leave_workflow(
+            self.connection, self.repository,
+            customer_defer_case_no=case_no, customer_defer_intent=intent,
+        )
+        preview = workflow.preview(LeaveSubstitutionPreviewRequest(
+            case_no, intent, correlation_id,
+            LinkedLeaveRequestIntent(request_id, expected_version),
+        ))
+        return intent, preview
+
+    def apply_customer_defer(self, request):
+        if request.linked_request is None:
+            raise ValueError("leave_request_identity_pair_required")
+        # Do not rebuild the submitted intent or pre-read live consent here:
+        # the canonical workflow must first replay an already committed batch.
+        # Fresh commands revalidate consent/days in its linked-request lock hook.
+        return _build_leave_workflow(
+            self.connection, self.repository,
+            customer_defer_case_no=request.case_no,
+            customer_defer_intent=request.intent,
+        ).apply(request)
+
     def list_effective_assignments(self, case_no):
         return self.repository.list_effective_assignments(case_no)
 
@@ -57,10 +87,10 @@ class LeaveSubstitutionApplication:
         return self.payables_lineage.query(case_no, batch_key)
 
 
-def get_leave_substitution_application():
-    connection = get_connection()
-    repository = MySqlLeaveSubstitutionRepository(connection)
-    workflow = LeaveSubstitutionWorkflow(
+def _build_leave_workflow(
+    connection, repository, *, customer_defer_case_no=None, customer_defer_intent=None,
+):
+    return LeaveSubstitutionWorkflow(
         repository,
         MySqlClientFinanceLeaveImpactPort(connection),
         MySqlPayrollLeaveImpactPort(connection),
@@ -71,8 +101,16 @@ def get_leave_substitution_application():
             MySqlStaffLeaveIntakeRepository(connection),
             MySqlLineDeliveryTaskRepository(connection),
             SystemBusinessClock(),
+            customer_defer_case_no=customer_defer_case_no,
+            customer_defer_intent=customer_defer_intent,
         ),
     )
+
+
+def get_leave_substitution_application():
+    connection = get_connection()
+    repository = MySqlLeaveSubstitutionRepository(connection)
+    workflow = _build_leave_workflow(connection, repository)
     try:
         yield LeaveSubstitutionApplication(
             connection,
