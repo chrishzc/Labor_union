@@ -341,6 +341,25 @@ async function refreshCases(){
   pending.resolve({actual_start_date:'2026-09-15',actual_end_date:'2026-09-16',day_by_day:[{date:'2026-09-15',is_work_day:true},{date:'2026-09-16',is_work_day:true}]});await h.flush();
   assert.equal(h.store.getServiceDatesDraft(h.model.caseNo).queryView,newer);h.unmount();
  });
+ for (const historical of [false, true]) for (const outcome of ['success', 'failure']) {
+  await test(`${historical ? 'historical' : 'normal'}: unmounted preview ${outcome} cannot change newer shared state`, async () => {
+   const h = refreshHarness({ historical }); await h.flush();
+   const pending = deferred(); let signal;
+   h.api.previewServiceDates = (_caseNo, _payload, options) => { signal = options?.signal; return pending.promise; };
+   h.click('確認服務日期'); await h.flush(); h.unmount();
+   // A new view owns this draft while the old read-only preview is still unresolved.
+   h.store.resetServiceDatesDraft(h.model.caseNo);
+   h.store.setServiceDatesQueryReady(h.model.caseNo, { ...copy(h.model.query), current_version: 7 });
+   const current = h.store.getServiceDatesDraft(h.model.caseNo), before = copy(current);
+   if (outcome === 'success') pending.resolve({ case_no: h.model.caseNo, current_version: 1,
+    order_version: 1, scheduling_version: 1, service_dates: ['2026-09-15', '2026-09-17'], preview_fingerprint: 'a'.repeat(64) });
+   else pending.reject(new Error('OLD PREVIEW FAILED'));
+   await h.flush();
+   assert.equal(h.store.getServiceDatesDraft(h.model.caseNo), current);
+   assert.deepEqual(copy(current), before); assert.equal(signal?.aborted, true);
+   assert.equal(h.calls.apply.length, 0);
+  });
+ }
  await test('manual draft on the same official basis survives reopening a read-only view',async()=>{
   const h=refreshHarness({seed:store=>{const d=store.getOrCreateServiceDatesDraft('TEST-NORMAL');Object.assign(d,{status:'draft_changed',
    queryView:{case_no:'TEST-NORMAL',order_version:1,scheduling_version:1,current_version:1},selectedDates:['2026-09-16','2026-09-18']});}});

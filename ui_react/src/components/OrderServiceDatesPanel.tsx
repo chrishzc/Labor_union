@@ -271,12 +271,14 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
   const runPreview = async () => {
     if (actionInFlight.current.has(caseNo) || isRecoveryActive || needsBasisUpdate || readController.current !== null) return;
     actionInFlight.current.add(caseNo);
+    const controller = new AbortController();
+    readController.current = controller;
     const basisSequence = calculationSequence.current;
     setWorking('preview');
     setError(null);
     setSuccess(null);
     try {
-      const nextPreview = await previewServiceDatesFlow(caseNo);
+      const nextPreview = await previewServiceDatesFlow(caseNo, { signal: controller.signal });
       if (renderedCaseNo.current !== caseNo || calculationSequence.current !== basisSequence) return;
       if (nextPreview.case_no !== caseNo) {
         throw new Error('服務日期確認預覽案件識別不一致。');
@@ -287,6 +289,7 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
       if (renderedCaseNo.current !== caseNo || calculationSequence.current !== basisSequence) return;
       setError(errorMessage(caught));
     } finally {
+      if (readController.current === controller) readController.current = null;
       actionInFlight.current.delete(caseNo);
       if (renderedCaseNo.current === caseNo && calculationSequence.current === basisSequence) setWorking(null);
     }
