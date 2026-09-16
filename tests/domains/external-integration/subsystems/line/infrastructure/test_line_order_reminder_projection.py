@@ -1,8 +1,11 @@
+import json
 from datetime import date, datetime, timezone
+from pathlib import Path
 
 from infrastructure.mysql.order_pre_start_notification_source_repository import (
     MySqlOrderPreStartNotificationSourceRepository,
 )
+from subsystems.line.message_configuration import render_message_template
 from subsystems.line.notification_source_adapters import (
     from_order_pre_start_checkpoint,
     from_order_second_payment_checkpoint,
@@ -133,6 +136,28 @@ def test_notification_facts_do_not_alias_payment_deadlines_to_service_date():
     assert second.facts["second_payment_due_date"] == "2026-10-01"
     assert second.facts["second_payment_amount"] == "帳務資料尚未確認"
     assert second.facts["second_payment_status"] == "帳務資料尚未確認"
+
+
+def test_pre_start_template_renders_service_date_and_payment_deadline_separately():
+    repository_root = Path(__file__).resolve().parents[6]
+    definition = json.loads((repository_root / "config" / "message_templates.json").read_text())
+
+    rendered = render_message_template(
+        definition,
+        "LU96-ORDER-PRE-START-REMINDER-CARD-V1",
+        {
+            "case_no": "CASE-310-RENDER",
+            "planned_start_date": "2026-09-20",
+            "first_payment_due_date": "2026-09-18",
+            "first_payment_amount": "NT$ 6,000",
+            "first_payment_status": "部分已收，尚有餘額",
+        },
+    )
+    text = json.loads(rendered.payload_json)["text"]
+
+    assert "3 天後（2026-09-20）正式開始" in text
+    assert "繳款期限：2026-09-18" in text
+    assert "繳款期限：服務開始日（2026-09-20）" not in text
 
 
 def test_projector_uses_taipei_business_date_for_three_day_window():
