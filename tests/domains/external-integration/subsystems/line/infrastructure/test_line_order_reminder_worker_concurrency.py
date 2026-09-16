@@ -143,8 +143,8 @@ def test_losing_scanner_reads_winner_after_unique_key_wait(monkeypatch):
     assert connection.rollbacks == 0
     assert connection.closed is True
     assert connection.statements[0][0] == "SET TRANSACTION ISOLATION LEVEL READ COMMITTED"
-    assert connection.statements[2][0].startswith("INSERT IGNORE INTO line_notification_source_events")
-    assert "source_event_identity=%s" in connection.statements[3][0]
+    assert connection.statements[1][0].startswith("INSERT IGNORE INTO line_notification_source_events")
+    assert "source_event_identity=%s" in connection.statements[2][0]
 
 
 def test_same_identity_with_different_immutable_facts_still_conflicts(monkeypatch):
