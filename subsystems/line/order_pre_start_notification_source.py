@@ -6,7 +6,7 @@ Description: 掃描服務開始前 3 天之有效案件，將其投影為 LINE i
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Protocol
 
 from subsystems.line.notification_policy import NotificationSourceEvent
@@ -16,6 +16,9 @@ from subsystems.line.notification_source_adapters import (
 )
 
 
+_TAIPEI_TIMEZONE = timezone(timedelta(hours=8), "Asia/Taipei")
+
+
 @dataclass(frozen=True, slots=True)
 class OrderPreStartCandidate:
     case_no: str
@@ -23,6 +26,8 @@ class OrderPreStartCandidate:
     first_payment_amount: int
     already_settled: bool
     client_line_user_id: str | None = None
+    first_payment_due_date: str | None = None
+    payment_state: str = "outstanding"
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +37,8 @@ class OrderSecondPaymentCandidate:
     second_payment_amount: int
     already_settled: bool
     client_line_user_id: str | None = None
+    service_start_date: str | None = None
+    payment_state: str = "outstanding"
 
 
 class OrderPreStartScannerPort(Protocol):
@@ -60,7 +67,8 @@ class OrderPreStartNotificationSourceProjector:
         self._registry = registry
 
     def run_once(self, now: datetime, *, target_date: date | None = None) -> int:
-        effective_target = target_date or (now.date() + timedelta(days=3))
+        business_date = now.astimezone(_TAIPEI_TIMEZONE).date()
+        effective_target = target_date or (business_date + timedelta(days=3))
         processed = 0
 
         # 1. First payment pre-start candidates
@@ -73,6 +81,8 @@ class OrderPreStartNotificationSourceProjector:
                 already_settled=candidate.already_settled,
                 occurred_at=now,
                 client_line_user_id=candidate.client_line_user_id,
+                first_payment_due_date=candidate.first_payment_due_date,
+                payment_state=candidate.payment_state,
             )
             self._registry.register_and_project(event)
             processed += 1
@@ -89,6 +99,8 @@ class OrderPreStartNotificationSourceProjector:
                     already_settled=sc.already_settled,
                     occurred_at=now,
                     client_line_user_id=sc.client_line_user_id,
+                    service_start_date=sc.service_start_date,
+                    payment_state=sc.payment_state,
                 )
                 self._registry.register_and_project(event)
                 processed += 1
