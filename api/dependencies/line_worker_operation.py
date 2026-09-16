@@ -23,6 +23,9 @@ from infrastructure.line.redis_wakeup import SleepingLineWakeupSubscriber
 from infrastructure.line.rich_menu_api_adapter import LineRichMenuApiAdapter
 from infrastructure.line.rich_menu_image_store import FileSystemRichMenuImageStore
 from infrastructure.mysql.line_notification_anomaly_worker import MySqlLineNotificationAnomalyWorker
+from infrastructure.mysql.order_pre_start_notification_source_worker import (
+    MySqlOrderPreStartNotificationSourceWorker,
+)
 from infrastructure.mysql.service_day_checkpoint_worker import MySqlServiceDayCheckpointWorker
 from infrastructure.mysql.scheduling_checkpoint_notification_source_worker import (
     MySqlSchedulingCheckpointNotificationSourceWorker,
@@ -182,6 +185,7 @@ def _additional_workers(worker_identity: str, now, images, provider) -> dict[str
     return {
         "service_day_checkpoints": MySqlServiceDayCheckpointWorker(get_connection, now),
         "service_day_checkpoint_notification_sources": MySqlSchedulingCheckpointNotificationSourceWorker(get_connection, now),
+        "order_pre_start_notification_sources": MySqlOrderPreStartNotificationSourceWorker(get_connection, now),
         "service_day_log_notification_stops": MySqlServiceDayLogNotificationStopWorker(get_connection, now),
         "scheduling_rebuild_notification_invalidations": MySqlSchedulingRebuildNotificationInvalidationWorker(get_connection, now),
         "notification_anomalies": MySqlLineNotificationAnomalyWorker(get_connection),
