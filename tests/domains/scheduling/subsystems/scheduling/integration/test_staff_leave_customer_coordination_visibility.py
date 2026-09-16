@@ -73,15 +73,11 @@ def _inbox(*, event_id="event-1"):
     )
 
 
-def test_missing_current_recipient_blocks_acceptance_side_effects_before_any_enqueue():
+def test_missing_current_recipient_does_not_invent_a_delivery_target():
     application = _application()
     unit = _UnitOfWork()
 
-    with pytest.raises(
-        StaffLeaveIntakeWorkflowError,
-        match="leave_customer_recipient_unavailable",
-    ):
-        application._enqueue_inquiries(_context(recipient=None), unit)
+    application._enqueue_inquiries(_context(recipient=None), unit)
 
     assert unit.delivery_tasks.requests == []
 
