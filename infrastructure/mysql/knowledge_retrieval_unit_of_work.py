@@ -24,6 +24,39 @@ class KnowledgeRetrievalMySqlUnitOfWork(MySqlUnitOfWork):
             return None
         return int(row["index_version"])
 
+    def read_inline_request(self, command) -> dict | None:
+        """Read a prior interaction only after checking its original requester."""
+        if not command.requester_line_user_id:
+            raise ValueError("knowledge_inline_answer_actor_required")
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT request.id,request.question,request.requester_line_user_id,"
+                "request.correlation_id,receipt.id AS answer_receipt_id "
+                "FROM knowledge_answer_requests request "
+                "LEFT JOIN knowledge_answer_receipts receipt "
+                "ON receipt.answer_request_id=request.id "
+                "WHERE request.idempotency_key=%s",
+                (command.idempotency_key.value,),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        if (
+            str(row["question"]),
+            str(row["requester_line_user_id"]),
+            str(row["correlation_id"]),
+        ) != (
+            command.question,
+            command.requester_line_user_id,
+            command.correlation_id.value,
+        ):
+            raise RuntimeError("knowledge_answer_idempotency_conflict")
+        result = self.knowledge.get_answer_request(int(row["id"]))
+        if result is None or result["line_delivery_task_id"] is not None:
+            raise RuntimeError("knowledge_inline_result_unavailable")
+        result["answer_receipt_id"] = row["answer_receipt_id"]
+        return result
+
     def record_inline_outcome(self, command, request_status: str) -> int:
         if request_status not in {"unsupported", "failed"}:
             raise ValueError("knowledge_inline_outcome_invalid")
