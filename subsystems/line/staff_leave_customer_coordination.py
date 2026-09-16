@@ -13,6 +13,7 @@ import json
 from typing import Callable
 from urllib.parse import parse_qs, urlencode
 
+from domains.customer_service.ticket import CustomerServiceCategory
 from domains.line.canonical_payload import canonical_line_payload_json
 from domains.line.delivery import (
     LineDeliveryRequest,
@@ -22,12 +23,12 @@ from domains.line.delivery import (
 )
 from domains.line.identities import LineUserId
 from infrastructure.mysql.staff_leave_intake_repository import MySqlStaffLeaveIntakeRepository
-from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from shared_kernel.identities import CorrelationId, IdempotencyKey
+from subsystems.customer_service.contracts import CreateCustomerServiceMessage
 from subsystems.scheduling.staff_leave_intake_workflow import (
     RecordStaffLeaveCustomerDecision,
     StaffLeaveCustomerDecisionReceipt,
-    StaffLeaveIntakeApplication,
+    StaffLeaveIntakeWorkflow,
     StaffLeaveIntakeWorkflowError,
 )
 
@@ -98,13 +99,13 @@ class StaffLeaveCustomerCoordinationApplication:
             return True
 
         identity = _interaction_identity(request_id, expected_version, case_no)
-        connection = self._connection_factory()
+        # The webhook consumer owns the outer transaction. Decision, customer
+        # service need and acknowledgement must commit or roll back together.
         try:
-            application = StaffLeaveIntakeApplication(
-                MySqlStaffLeaveIntakeRepository(connection),
-                lambda: MySqlUnitOfWork(connection),
+            workflow = StaffLeaveIntakeWorkflow(
+                MySqlStaffLeaveIntakeRepository(unit_of_work._connection),
             )
-            receipt = application.record_customer_decision(
+            receipt = workflow.record_customer_decision(
                 RecordStaffLeaveCustomerDecision(
                     request_id=request_id,
                     expected_version=expected_version,
@@ -122,12 +123,35 @@ class StaffLeaveCustomerCoordinationApplication:
             # outcomes. The canonical webhook inbox remains their event trace;
             # do not retry them as transient provider failures.
             return True
-        finally:
-            connection.close()
+        ticket_id = None
+        if receipt.decision == "reject_substitution":
+            # Customer Service owns one active conversation per user/category.
+            # The immutable event identifies this exact leave request and case;
+            # do not create another ticket root or overwrite an existing case.
+            ticket = unit_of_work.customer_service.create_or_append(
+                CreateCustomerServiceMessage(
+                    line_user_id=receipt.line_user_id,
+                    category=CustomerServiceCategory.SERVICE_PROGRESS,
+                    message=(
+                        f"代班需求（leave_substitute_required）：案件 {receipt.case_no}，"
+                        f"請假申請 #{receipt.request_id}／版本 {receipt.request_version}。"
+                        "客戶不同意順延，請工會安排代班；正式班表尚未變更。"
+                    ),
+                    event_key=f"leave-substitute-required:{identity}",
+                    case_no=receipt.case_no,
+                )
+            )
+            ticket_id = ticket.ticket_id
 
-        unit_of_work.delivery_tasks.enqueue(
-            _decision_acknowledgement(receipt, line_user_id, inbox.event.event_id.value, self._now())
-        )
+        # A repeated click reuses the saved decision/need, not a new delivery
+        # with a different scheduled_at under the same idempotency identity.
+        if not receipt.replayed:
+            unit_of_work.delivery_tasks.enqueue(
+                _decision_acknowledgement(
+                    receipt, line_user_id, inbox.event.event_id.value,
+                    self._now(), ticket_id=ticket_id,
+                )
+            )
         return True
 
 
@@ -246,11 +270,15 @@ def _decision_acknowledgement(
     recipient: LineUserId,
     event_identity: str,
     scheduled_at: datetime,
+    *,
+    ticket_id: int | None = None,
 ) -> LineDeliveryRequest:
     if receipt.decision == "agree_defer":
         text = "已記錄您同意順延的選擇，工會將依正式排班流程處理。"
     else:
-        text = "已記錄您不同意順延的選擇，工會將接手安排代班。"
+        if ticket_id is None:
+            raise ValueError("leave_substitution_ticket_required")
+        text = f"已登記案件 {receipt.case_no} 的代班需求（客服單 #{ticket_id}），待工會安排；正式班表尚未變更。"
     return LineDeliveryRequest(
         LineRecipient(LineRecipientType.USER, recipient),
         LineMessageKind.TEXT,
