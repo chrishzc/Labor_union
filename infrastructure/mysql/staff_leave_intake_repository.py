@@ -7,6 +7,11 @@ import json
 from typing import Any
 
 from domains.scheduling.staff_leave_intake import StaffLeaveRequestStatus
+from domains.scheduling.leave_substitution import (
+    LeaveResolutionType,
+    LeaveSubstitutionBatchIntent,
+    LeaveSubstitutionItem,
+)
 from subsystems.scheduling.staff_leave_intake_workflow import (
     RecordStaffLeaveCustomerDecision,
     StaffLeaveCustomerDecisionReceipt,
@@ -172,6 +177,85 @@ class MySqlStaffLeaveIntakeRepository:
                 serialized, fingerprint, command.idempotency_key, replayed=False
             )
 
+    def customer_defer_intent(
+        self,
+        request_id: int,
+        expected_version: int,
+        case_no: str,
+        original_assignment_id: int,
+        *,
+        lock: bool = False,
+    ) -> LeaveSubstitutionBatchIntent:
+        """Read saved consent and derive only current affected official service days.
+
+        Apply calls this from the canonical workflow's linked-request lock hook;
+        it owns neither a transaction nor a schedule write.
+        """
+        snapshot = self.load_for_update(request_id) if lock else self.load(request_id)
+        if snapshot is None:
+            raise ValueError("leave_request_not_found")
+        if snapshot.version != expected_version:
+            raise ValueError("leave_request_stale")
+        if snapshot.status is not StaffLeaveRequestStatus.ACCEPTED_FOR_PROCESSING:
+            raise ValueError("leave_request_not_accepted")
+        if snapshot.leave_start_date is None or snapshot.leave_end_date is None:
+            raise ValueError("leave_request_dates_missing")
+
+        suffix = " FOR UPDATE" if lock else ""
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                _CUSTOMER_DECISIONS_FOR_CASE_SQL + suffix,
+                (request_id, expected_version, case_no),
+            )
+            decisions = tuple(cursor.fetchall() or ())
+            if len(decisions) != 1:
+                raise ValueError("leave_customer_agreement_missing_or_ambiguous")
+            row = decisions[0]
+            decision = _customer_decision_receipt(
+                row["result_snapshot"], str(row["request_fingerprint"]),
+                str(row["idempotency_key"]), replayed=True,
+            )
+            if decision.decision != "agree_defer":
+                raise ValueError("leave_customer_defer_not_agreed")
+
+            cursor.execute(
+                _CUSTOMER_DEFER_DAYS_SQL + suffix,
+                (case_no, original_assignment_id, snapshot.staff_id,
+                 snapshot.leave_start_date, snapshot.leave_end_date),
+            )
+            days = tuple(cursor.fetchall() or ())
+        if not days:
+            raise ValueError("leave_customer_service_days_missing")
+        recipients = {row["client_line_user_id"] for row in days}
+        if recipients != {decision.line_user_id}:
+            raise ValueError("leave_customer_binding_conflict")
+        return LeaveSubstitutionBatchIntent(
+            original_assignment_id,
+            tuple(
+                LeaveSubstitutionItem(
+                    int(row["schedule_id"]), row["work_date"],
+                    LeaveResolutionType.DEFER_FOLLOWING_ASSIGNMENTS,
+                )
+                for row in days
+            ),
+        )
+
+    def has_pending_service_days(self, request_id: int, expected_version: int) -> bool:
+        """Read remaining affected days after the canonical generation replacement."""
+        snapshot = self.load_for_update(request_id)
+        if snapshot is None or snapshot.version != expected_version:
+            raise ValueError("leave_request_stale")
+        if snapshot.status is not StaffLeaveRequestStatus.ACCEPTED_FOR_PROCESSING:
+            raise ValueError("leave_request_not_accepted")
+        if snapshot.leave_start_date is None or snapshot.leave_end_date is None:
+            raise ValueError("leave_request_dates_missing")
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                _PENDING_LEAVE_SERVICE_DAYS_SQL,
+                (snapshot.staff_id, snapshot.leave_start_date, snapshot.leave_end_date),
+            )
+            return cursor.fetchone() is not None
+
     def replay_mutation(self, key: str, fingerprint: str) -> StaffLeaveRequestSnapshot | None:
         return self.replay(key, fingerprint)
 
@@ -270,6 +354,41 @@ _COORDINATION_TARGETS_SQL = (
     "WHERE a.staff_id=%s AND a.status NOT IN ('cancelled','replaced') "
     "AND ss.is_work_day=1 AND ss.work_date<=%s AND ss.work_date>=%s "
     "ORDER BY g.case_no"
+)
+
+
+# Reuse the immutable customer-decision receipt; no second consent store.
+_CUSTOMER_DECISIONS_FOR_CASE_SQL = (
+    "SELECT idempotency_key,request_fingerprint,result_snapshot "
+    "FROM scheduling_staff_leave_request_receipts WHERE request_id=%s "
+    "AND JSON_UNQUOTE(JSON_EXTRACT(result_snapshot,'$.family'))="
+    "'scheduling-staff-leave-customer-decision/v1' "
+    "AND JSON_EXTRACT(result_snapshot,'$.request_version')=%s "
+    "AND JSON_UNQUOTE(JSON_EXTRACT(result_snapshot,'$.case_no'))=%s"
+)
+_CUSTOMER_DEFER_DAYS_SQL = (
+    "SELECT ss.id AS schedule_id,ss.work_date,binding.line_user_id AS client_line_user_id "
+    "FROM scheduling_aggregates g JOIN case_staff_assignments a "
+    "ON a.generation_id=g.effective_generation_id AND a.case_no=g.case_no "
+    "JOIN staff_schedule ss ON ss.generation_id=g.effective_generation_id "
+    "AND ss.assignment_id=a.id AND ss.staff_id=a.staff_id "
+    "JOIN orders o ON o.case_no=g.case_no "
+    "LEFT JOIN line_identity_role_bindings binding "
+    "ON binding.subject_type='customer' AND binding.binding_status='bound' "
+    "AND binding.subject_reference=CAST(o.client_id AS CHAR) "
+    "WHERE g.case_no=%s AND a.id=%s AND a.staff_id=%s "
+    "AND a.status NOT IN ('cancelled','replaced') "
+    "AND ss.effective_marker=1 AND ss.is_work_day=1 "
+    "AND ss.work_date>=%s AND ss.work_date<=%s ORDER BY ss.work_date,ss.id"
+)
+_PENDING_LEAVE_SERVICE_DAYS_SQL = (
+    "SELECT ss.id FROM scheduling_aggregates g JOIN case_staff_assignments a "
+    "ON a.generation_id=g.effective_generation_id AND a.case_no=g.case_no "
+    "JOIN staff_schedule ss ON ss.generation_id=g.effective_generation_id "
+    "AND ss.assignment_id=a.id AND ss.staff_id=a.staff_id "
+    "WHERE a.staff_id=%s AND a.status NOT IN ('cancelled','replaced') "
+    "AND ss.effective_marker=1 AND ss.is_work_day=1 "
+    "AND ss.work_date>=%s AND ss.work_date<=%s LIMIT 1 FOR UPDATE"
 )
 
 
