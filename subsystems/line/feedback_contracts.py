@@ -21,15 +21,12 @@ class FeedbackOutcome(StrEnum):
 class KnowledgeAnswerFeedbackContext:
     source_response_id: str
     response_revision: int
-    catalog_revision: int
     rule_revision: int | None
 
     def __post_init__(self) -> None:
         require_canonical_text(self.source_response_id, "feedback source response", 191)
         if self.response_revision < 1:
             raise ValueError("feedback response revision must be positive")
-        if self.catalog_revision < 1:
-            raise ValueError("feedback catalog revision must be positive")
         if self.rule_revision is not None and self.rule_revision < 1:
             raise ValueError("feedback rule revision must be positive")
 
