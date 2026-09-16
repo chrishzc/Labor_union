@@ -63,6 +63,44 @@ class MySqlStaffLeaveIntakeRepository:
             row = cursor.fetchone()
         return _snapshot(row) if row is not None else None
 
+    def coordination_context(self, request_id: int, expected_version: int) -> dict[str, Any]:
+        """Project current impacted cases and customer recipients for an accepted leave request."""
+        snapshot = self.load(request_id)
+        if snapshot is None:
+            raise ValueError("leave_request_not_found")
+        if snapshot.version != expected_version:
+            raise ValueError("leave_request_stale")
+        if snapshot.status is not StaffLeaveRequestStatus.ACCEPTED_FOR_PROCESSING:
+            raise ValueError("leave_request_not_accepted")
+        if snapshot.leave_start_date is None or snapshot.leave_end_date is None:
+            raise ValueError("leave_request_dates_missing")
+
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                _COORDINATION_TARGETS_SQL,
+                (snapshot.staff_id, snapshot.leave_end_date, snapshot.leave_start_date),
+            )
+            rows = tuple(cursor.fetchall() or ())
+
+        targets: list[dict[str, Any]] = []
+        for row in rows:
+            case_no = str(row.get("case_no") or "").strip()
+            if not case_no:
+                continue
+            line_user_id = row.get("client_line_user_id")
+            if isinstance(line_user_id, str):
+                line_user_id = line_user_id.strip() or None
+            else:
+                line_user_id = None
+            targets.append({"case_no": case_no, "client_line_user_id": line_user_id})
+        return {
+            "request_id": snapshot.request_id,
+            "request_version": snapshot.version,
+            "leave_start_date": snapshot.leave_start_date,
+            "leave_end_date": snapshot.leave_end_date,
+            "targets": targets,
+        }
+
     def replay_mutation(self, key: str, fingerprint: str) -> StaffLeaveRequestSnapshot | None:
         return self.replay(key, fingerprint)
 
@@ -141,6 +179,20 @@ _CANONICAL_RECEIPT_SQL = (
     "SELECT b.batch_key FROM scheduling_leave_substitution_batches b "
     "JOIN scheduling_leave_substitution_outcomes o ON o.batch_key=b.batch_key "
     "WHERE b.batch_key=%s AND o.original_staff_id=%s LIMIT 1 FOR UPDATE"
+)
+_COORDINATION_TARGETS_SQL = (
+    "SELECT DISTINCT g.case_no,"
+    "COALESCE((SELECT p.line_user_id FROM line_order_group_participants p "
+    "WHERE p.case_no=g.case_no AND p.participant_type='customer' "
+    "AND p.invitation_status='joined' AND p.line_user_id IS NOT NULL AND p.line_user_id!='' "
+    "ORDER BY p.id DESC LIMIT 1),"
+    "(SELECT c.line_user_id FROM clients c WHERE c.case_no=g.case_no "
+    "AND c.line_user_id IS NOT NULL AND c.line_user_id!='' LIMIT 1)) AS client_line_user_id "
+    "FROM scheduling_aggregates g JOIN case_staff_assignments a "
+    "ON a.generation_id=g.effective_generation_id "
+    "WHERE a.staff_id=%s AND a.status NOT IN ('cancelled','replaced') "
+    "AND a.assigned_start_date<=%s AND a.assigned_end_date>=%s "
+    "ORDER BY g.case_no"
 )
 
 
