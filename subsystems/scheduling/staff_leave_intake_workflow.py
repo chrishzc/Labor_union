@@ -70,6 +70,30 @@ class ResolveStaffLeaveRequest:
     idempotency_key: str
 
 
+@dataclass(frozen=True, slots=True)
+class RecordStaffLeaveCustomerDecision:
+    """One customer choice bound to an accepted leave version and affected case."""
+
+    request_id: int
+    expected_version: int
+    case_no: str
+    line_user_id: str
+    decision: str
+    idempotency_key: str
+
+
+@dataclass(frozen=True, slots=True)
+class StaffLeaveCustomerDecisionReceipt:
+    request_id: int
+    request_version: int
+    case_no: str
+    line_user_id: str
+    decision: str
+    idempotency_key: str
+    fingerprint: str
+    replayed: bool
+
+
 class StaffLeaveIntakeRepository(Protocol):
     def replay(self, key: str, fingerprint: str) -> StaffLeaveRequestSnapshot | None: ...
     def create(self, command: SubmitStaffLeaveRequest, fingerprint: str) -> StaffLeaveRequestSnapshot: ...
@@ -79,6 +103,11 @@ class StaffLeaveIntakeRepository(Protocol):
     def replay_mutation(self, key: str, fingerprint: str) -> StaffLeaveRequestSnapshot | None: ...
     def transition(self, snapshot: StaffLeaveRequestSnapshot, target: StaffLeaveRequestStatus, reason: str, actor_id: str, key: str, fingerprint: str) -> StaffLeaveRequestSnapshot: ...
     def resolve(self, snapshot: StaffLeaveRequestSnapshot, receipt_key: str, key: str, fingerprint: str) -> StaffLeaveRequestSnapshot: ...
+    def record_customer_decision(
+        self,
+        command: RecordStaffLeaveCustomerDecision,
+        fingerprint: str,
+    ) -> StaffLeaveCustomerDecisionReceipt: ...
 
 
 class StaffLeaveIntakeWorkflowError(ValueError):
@@ -172,6 +201,21 @@ class StaffLeaveIntakeWorkflow:
                 raise StaffLeaveIntakeWorkflowError(code) from error
             raise
 
+    def record_customer_decision(
+        self,
+        command: RecordStaffLeaveCustomerDecision,
+    ) -> StaffLeaveCustomerDecisionReceipt:
+        if command.decision not in {"agree_defer", "reject_substitution"}:
+            raise StaffLeaveIntakeWorkflowError("leave_customer_decision_invalid")
+        fingerprint = _customer_decision_fingerprint(command)
+        try:
+            return self._repository.record_customer_decision(command, fingerprint)
+        except ValueError as error:
+            code = str(error)
+            if code.startswith("leave_"):
+                raise StaffLeaveIntakeWorkflowError(code) from error
+            raise
+
 
 class StaffLeaveIntakeApplication:
     """Own the single transaction for each Staff Leave mutation."""
@@ -196,6 +240,12 @@ class StaffLeaveIntakeApplication:
 
     def review(self, command: ReviewStaffLeaveRequest) -> StaffLeaveRequestSnapshot:
         return self._mutate(lambda: self._workflow.review(command))
+
+    def record_customer_decision(
+        self,
+        command: RecordStaffLeaveCustomerDecision,
+    ) -> StaffLeaveCustomerDecisionReceipt:
+        return self._mutate(lambda: self._workflow.record_customer_decision(command))
 
     def _mutate(self, operation):
         with self._unit_of_work_factory() as unit_of_work:
@@ -236,4 +286,15 @@ def _resolve_fingerprint(command: ResolveStaffLeaveRequest) -> str:
         "request_id": command.request_id,
         "expected_version": command.expected_version,
         "leave_substitution_receipt_key": command.leave_substitution_receipt_key,
+    }).value
+
+
+def _customer_decision_fingerprint(command: RecordStaffLeaveCustomerDecision) -> str:
+    return fingerprint_payload({
+        "family": "scheduling-staff-leave-customer-decision/v1",
+        "request_id": command.request_id,
+        "expected_version": command.expected_version,
+        "case_no": command.case_no.strip(),
+        "line_user_id": command.line_user_id.strip(),
+        "decision": command.decision,
     }).value
