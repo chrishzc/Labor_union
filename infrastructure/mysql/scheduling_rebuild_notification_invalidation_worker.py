@@ -14,11 +14,16 @@ from infrastructure.mysql.scheduling_rebuild_notification_invalidation_repositor
 )
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from subsystems.line.scheduling_rebuild_notification_invalidation import (
+    SchedulingRebuildNotificationInvalidationError,
     SchedulingRebuildNotificationInvalidationProjector,
 )
 
 
 class MySqlSchedulingRebuildNotificationInvalidationWorker:
+    # A committed rebuild invalidates old assignment-derived reminders before
+    # any due LINE task may cross the provider boundary in the same cycle.
+    run_before_delivery = True
+
     def __init__(
         self, connection_factory: Callable[[], object], now: Callable[[], datetime]
     ) -> None:
@@ -29,10 +34,16 @@ class MySqlSchedulingRebuildNotificationInvalidationWorker:
         connection = self._connection_factory()
         try:
             with MySqlUnitOfWork(connection) as unit_of_work:
-                result = SchedulingRebuildNotificationInvalidationProjector(
-                    MySqlSchedulingRebuildNotificationInvalidationRepository(connection),
-                    MySqlLineNotificationRepository(connection),
-                ).run_once(self._now())
+                try:
+                    result = SchedulingRebuildNotificationInvalidationProjector(
+                        MySqlSchedulingRebuildNotificationInvalidationRepository(connection),
+                        MySqlLineNotificationRepository(connection),
+                    ).run_once(self._now())
+                except SchedulingRebuildNotificationInvalidationError:
+                    # Persist the bounded retry/failed state recorded by the
+                    # projector, then propagate so provider delivery is blocked.
+                    unit_of_work.commit()
+                    raise
                 if result:
                     unit_of_work.commit()
                 return result
