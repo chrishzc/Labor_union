@@ -59,6 +59,7 @@ def _predicates_match(predicates: object, facts: Mapping[str, object]) -> bool:
         "requires_cooking_true": facts.get("requires_cooking") is True,
         "baby_log_missing": facts.get("baby_log_completed") is False,
         "beclass_missing": facts.get("beclass_completed") is False,
+        "service_completion_reached": facts.get("service_completion_reached") is True,
     }
     return all(checks.get(str(predicate), False) for predicate in predicates)
 
