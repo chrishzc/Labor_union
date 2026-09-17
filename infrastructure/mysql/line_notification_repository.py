@@ -9,6 +9,7 @@ import json
 from datetime import datetime
 from typing import Any
 
+from infrastructure.mysql.line_identity_review_repository import MySqlLineIdentityRepository
 from infrastructure.mysql.line_repository_support import aware_utc
 from domains.line.delivery import (
     LineDeliveryRequest,
@@ -17,6 +18,10 @@ from domains.line.delivery import (
 )
 from domains.line.identities import LineGroupId, LineRoomId, LineUserId
 from domains.line.identities import LineDeliveryTaskId
+from domains.line.identity_binding import (
+    LineBindingSubjectType,
+    LineIdentityBindingStatus,
+)
 from shared_kernel.identities import CorrelationId, IdempotencyKey
 from shared_kernel.validation import require_canonical_text
 from subsystems.line.message_configuration import render_message_template
@@ -749,6 +754,23 @@ class MySqlLineNotificationRepository:
         # allowlisted ``lu_test_*`` identity.
         if source_domain in {"line_task96_fixture", "manual_replay"}:
             return _fixture_recipient(selector, facts)
+        if selector == "assigned_caregiver" and isinstance(facts, dict):
+            staff_id = facts.get("staff_id")
+            if (
+                not isinstance(staff_id, int)
+                or isinstance(staff_id, bool)
+                or staff_id <= 0
+            ):
+                return None
+            binding = MySqlLineIdentityRepository(self._connection).get_by_subject(
+                LineBindingSubjectType.STAFF, str(staff_id)
+            )
+            if (
+                binding is None
+                or binding.status is not LineIdentityBindingStatus.BOUND
+            ):
+                return None
+            return LineRecipient(LineRecipientType.USER, binding.line_user_id)
         if selector == "case_group" and isinstance(facts, dict):
             case_no = facts.get("case_no")
             if not isinstance(case_no, str) or not case_no:
@@ -1300,7 +1322,6 @@ def _canonical_recipient(value: object) -> str | None:
     if not isinstance(value, str) or not value:
         return None
     return value
-
 def _cancellation_row(row: object) -> tuple[int, int | None]:
     if not isinstance(row, dict) or frozenset(row) != {"intent_id", "delivery_task_id"}:
         raise RuntimeError("line_notification_intent_cancellation_lineage_invalid")
