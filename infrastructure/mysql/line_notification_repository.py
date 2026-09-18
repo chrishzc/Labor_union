@@ -9,6 +9,7 @@ import json
 from datetime import datetime
 from typing import Any
 
+from infrastructure.mysql.line_identity_review_repository import MySqlLineIdentityRepository
 from infrastructure.mysql.line_repository_support import aware_utc
 from domains.line.delivery import (
     LineDeliveryRequest,
@@ -17,6 +18,10 @@ from domains.line.delivery import (
 )
 from domains.line.identities import LineGroupId, LineRoomId, LineUserId
 from domains.line.identities import LineDeliveryTaskId
+from domains.line.identity_binding import (
+    LineBindingSubjectType,
+    LineIdentityBindingStatus,
+)
 from shared_kernel.identities import CorrelationId, IdempotencyKey
 from shared_kernel.validation import require_canonical_text
 from subsystems.line.message_configuration import render_message_template
@@ -139,7 +144,21 @@ class MySqlLineNotificationRepository:
         with self._connection.cursor() as cursor:
             cursor.execute(_CASE_TIMELINE_SQL, (case_no,))
             rows = tuple(cursor.fetchall() or ())
-        return tuple(_timeline_row(row) for row in rows if isinstance(row, dict))
+        rule_snapshot = self._current_configuration("notification_rules")
+        template_snapshot = self._current_configuration("message_templates")
+        configured_event_codes = _configured_event_codes(rule_snapshot)
+        configuration_available = (
+            configured_event_codes is not None and template_snapshot is not None
+        )
+        return tuple(
+            _timeline_row(
+                row,
+                configured_event_codes=configured_event_codes,
+                configuration_available=configuration_available,
+            )
+            for row in rows
+            if isinstance(row, dict)
+        )
 
     def list_router_replies(
         self, recipient_identity: str, *, limit: int = 5
@@ -545,6 +564,7 @@ class MySqlLineNotificationRepository:
             and rule.get("event_code") == source.event_code
             and rule.get("enabled") is True
             and _predicates_match(rule.get("predicates"), source.facts)
+            and self._rule_source_currently_applicable(source, rule)
         ) if isinstance(rules, list) else ()
         if not matching:
             raise LineNotificationManualReplayValidationError(
@@ -576,6 +596,46 @@ class MySqlLineNotificationRepository:
                 raise LineNotificationManualReplayValidationError(
                     "template_or_schedule_invalid"
                 )
+
+    def _rule_source_currently_applicable(
+        self,
+        source: NotificationSourceEvent,
+        rule: dict[str, object],
+    ) -> bool:
+        if source.event_code != "service_time_checkpoint":
+            return True
+        if (
+            source.source_aggregate_type != "case_staff_assignment"
+            or not isinstance(source.facts, dict)
+        ):
+            return False
+        assignment_id = source.facts.get("assignment_id")
+        service_date = source.facts.get("service_date")
+        if (
+            not isinstance(assignment_id, int)
+            or isinstance(assignment_id, bool)
+            or assignment_id <= 0
+            or not isinstance(service_date, str)
+            or not service_date
+            or source.source_aggregate_identity != str(assignment_id)
+        ):
+            return False
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                _SERVICE_TIME_SOURCE_CURRENT_SQL,
+                (service_date, assignment_id),
+            )
+            row = cursor.fetchone()
+        if not isinstance(row, dict):
+            return False
+        predicates = rule.get("predicates")
+        if (
+            isinstance(predicates, list)
+            and "baby_log_missing" in predicates
+            and row.get("service_day_log_id") is not None
+        ):
+            return False
+        return True
 
     def _source_has_newer_version(self, source: NotificationSourceEvent) -> bool:
         with self._connection.cursor() as cursor:
@@ -695,6 +755,18 @@ class MySqlLineNotificationRepository:
         selector = rule.get("recipient_selector")
         if not isinstance(rule_id, str) or not isinstance(selector, str):
             return
+        if not self._rule_source_currently_applicable(event, rule):
+            self._record_decision(
+                source_event_id,
+                rule_revision_id,
+                rule_id,
+                selector,
+                None,
+                "cancelled_stale",
+                "notification_source_not_currently_applicable",
+                event,
+            )
+            return
         if event.historical_silent:
             self._record_decision(source_event_id, rule_revision_id, rule_id, selector, None, "suppressed", "historical_source_silent", event)
             return
@@ -749,6 +821,23 @@ class MySqlLineNotificationRepository:
         # allowlisted ``lu_test_*`` identity.
         if source_domain in {"line_task96_fixture", "manual_replay"}:
             return _fixture_recipient(selector, facts)
+        if selector == "assigned_caregiver" and isinstance(facts, dict):
+            staff_id = facts.get("staff_id")
+            if (
+                not isinstance(staff_id, int)
+                or isinstance(staff_id, bool)
+                or staff_id <= 0
+            ):
+                return None
+            binding = MySqlLineIdentityRepository(self._connection).get_by_subject(
+                LineBindingSubjectType.STAFF, str(staff_id)
+            )
+            if (
+                binding is None
+                or binding.status is not LineIdentityBindingStatus.BOUND
+            ):
+                return None
+            return LineRecipient(LineRecipientType.USER, binding.line_user_id)
         if selector == "case_group" and isinstance(facts, dict):
             case_no = facts.get("case_no")
             if not isinstance(case_no, str) or not case_no:
@@ -901,6 +990,14 @@ _CURRENT_CONFIGURATION_SQL = (
     "SELECT config_current.revision_id,revision.definition_snapshot "
     "FROM line_configuration_current config_current JOIN line_configuration_revisions revision "
     "ON revision.id=config_current.revision_id WHERE config_current.configuration_kind=%s"
+)
+_SERVICE_TIME_SOURCE_CURRENT_SQL = (
+    "SELECT csa.id,log.id AS service_day_log_id "
+    "FROM case_staff_assignments csa "
+    "LEFT JOIN scheduling_service_day_logs log "
+    "ON log.assignment_id=csa.id AND log.service_date=%s "
+    "WHERE csa.id=%s AND (csa.status IS NULL OR csa.status NOT IN ('cancelled','replaced')) "
+    "LIMIT 1 FOR SHARE"
 )
 _ACTIVE_CASE_GROUP_SQL = (
     "SELECT binding.group_id FROM line_order_group_bindings binding "
@@ -1276,8 +1373,37 @@ def _fixture_recipient(selector: str, facts: object) -> LineRecipient | None:
     return None
 
 
-def _timeline_row(row: dict[str, object]) -> dict[str, object]:
+def _configured_event_codes(
+    snapshot: tuple[int, dict[str, object]] | None,
+) -> frozenset[str] | None:
+    if snapshot is None:
+        return None
+    rules = snapshot[1].get("rules")
+    if not isinstance(rules, list):
+        return None
+    return frozenset(
+        str(rule["event_code"])
+        for rule in rules
+        if isinstance(rule, dict) and isinstance(rule.get("event_code"), str)
+    )
+
+
+def _timeline_row(
+    row: dict[str, object],
+    *,
+    configured_event_codes: frozenset[str] | None,
+    configuration_available: bool,
+) -> dict[str, object]:
     recipient = row.get("recipient_identity")
+    reason_code = row.get("reason_code")
+    if row.get("decision_status") is None and reason_code is None:
+        if not configuration_available:
+            reason_code = "notification_configuration_unavailable"
+        elif (
+            configured_event_codes is not None
+            and str(row["event_code"]) not in configured_event_codes
+        ):
+            reason_code = "rule_not_configured"
     return {
         "source_event_id": int(row["source_event_id"]),
         "event_code": str(row["event_code"]),
@@ -1285,7 +1411,7 @@ def _timeline_row(row: dict[str, object]) -> dict[str, object]:
         "historical_silent": bool(row["historical_silent"]),
         "rule_id": row.get("rule_id"),
         "decision_status": row.get("decision_status"),
-        "reason_code": row.get("reason_code"),
+        "reason_code": reason_code,
         "recipient_type": row.get("recipient_type"),
         "recipient_identity": _canonical_recipient(recipient),
         "occurrence_number": row.get("occurrence_number"),
@@ -1300,7 +1426,6 @@ def _canonical_recipient(value: object) -> str | None:
     if not isinstance(value, str) or not value:
         return None
     return value
-
 def _cancellation_row(row: object) -> tuple[int, int | None]:
     if not isinstance(row, dict) or frozenset(row) != {"intent_id", "delivery_task_id"}:
         raise RuntimeError("line_notification_intent_cancellation_lineage_invalid")

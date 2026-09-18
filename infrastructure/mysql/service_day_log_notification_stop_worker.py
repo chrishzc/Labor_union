@@ -14,11 +14,16 @@ from infrastructure.mysql.service_day_log_notification_stop_repository import (
 )
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from subsystems.line.service_day_log_notification_stop import (
+    ServiceDayLogNotificationStopError,
     ServiceDayLogNotificationStopProjector,
 )
 
 
 class MySqlServiceDayLogNotificationStopWorker:
+    # A committed service-day log makes same-day reminders obsolete. The
+    # canonical runtime must project that stop before any due LINE task is sent.
+    run_before_delivery = True
+
     def __init__(self, connection_factory: Callable[[], object], now: Callable[[], datetime]) -> None:
         self._connection_factory = connection_factory
         self._now = now
@@ -27,10 +32,17 @@ class MySqlServiceDayLogNotificationStopWorker:
         connection = self._connection_factory()
         try:
             with MySqlUnitOfWork(connection) as unit_of_work:
-                result = ServiceDayLogNotificationStopProjector(
-                    MySqlServiceDayLogNotificationStopRepository(connection),
-                    MySqlLineNotificationRepository(connection),
-                ).run_once(self._now())
+                try:
+                    result = ServiceDayLogNotificationStopProjector(
+                        MySqlServiceDayLogNotificationStopRepository(connection),
+                        MySqlLineNotificationRepository(connection),
+                    ).run_once(self._now())
+                except ServiceDayLogNotificationStopError:
+                    # Persist the bounded retry/failed state recorded by the
+                    # projector, then propagate so the pre-delivery gate blocks
+                    # provider sends for this cycle.
+                    unit_of_work.commit()
+                    raise
                 if result:
                     unit_of_work.commit()
                 return result

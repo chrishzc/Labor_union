@@ -40,15 +40,29 @@ class CanonicalLineWorkerRuntime:
         try:
             counts = {
                 "inbox_events": self._event_consumer.run_once(),
-                "delivery_tasks": self._delivery_worker.run_once(),
             }
-            for name, worker in self._additional_workers.items():
-                counts[name] = worker.run_once()
+            # Cancellation/invalidation projections that are explicitly marked
+            # as pre-delivery gates must observe committed owner facts before a
+            # due task can cross the provider boundary in this cycle.
+            self._run_additional_workers(counts, before_delivery=True)
+            counts["delivery_tasks"] = self._delivery_worker.run_once()
+            self._run_additional_workers(counts, before_delivery=False)
             self._record_heartbeat(counts)
             return counts
         except Exception as error:
             self._record_failure_safely(error)
             raise
+
+    def _run_additional_workers(
+        self,
+        counts: dict[str, int],
+        *,
+        before_delivery: bool,
+    ) -> None:
+        for name, worker in self._additional_workers.items():
+            is_pre_delivery = bool(getattr(worker, "run_before_delivery", False))
+            if is_pre_delivery is before_delivery:
+                counts[name] = worker.run_once()
 
     def run_forever(self, stop_event: threading.Event | None = None) -> None:
         stop_event = stop_event or threading.Event()
