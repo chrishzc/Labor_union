@@ -122,6 +122,8 @@ def from_order_pre_start_checkpoint(
     already_settled: bool,
     occurred_at: datetime,
     client_line_user_id: str | None = None,
+    first_payment_due_date: str | None = None,
+    payment_state: str = "outstanding",
 ) -> NotificationSourceEvent:
     """Adapt a pre-start order checkpoint (3 days before service start) without ad-hoc push side-effects."""
     _text(case_no, "case number")
@@ -131,14 +133,16 @@ def from_order_pre_start_checkpoint(
     if not isinstance(already_settled, bool):
         raise ValueError("already settled flag is invalid")
 
-    payment_amount_str = f"NT$ {first_payment_amount:,}" if not already_settled else "NT$ 0（已結清）"
-    payment_status_str = "已核銷完成" if already_settled else "待繳納（請於服務開始日繳納）"
+    payment_amount_str, payment_status_str = _payment_display(first_payment_amount, payment_state)
+    payment_due_date = first_payment_due_date.strip() if isinstance(first_payment_due_date, str) else ""
 
     facts: dict[str, object] = {
         "case_no": case_no,
         "planned_start_date": planned_start_date,
+        "first_payment_due_date": payment_due_date or "尚未確認",
         "first_payment_amount": payment_amount_str,
         "first_payment_status": payment_status_str,
+        "payment_state": payment_state,
         "already_settled": already_settled,
         "service_date": planned_start_date,
     }
@@ -171,6 +175,8 @@ def from_order_second_payment_checkpoint(
     already_settled: bool,
     occurred_at: datetime,
     client_line_user_id: str | None = None,
+    service_start_date: str | None = None,
+    payment_state: str = "outstanding",
 ) -> NotificationSourceEvent:
     """Adapt a second payment reminder checkpoint (3 days before second payment due date)."""
     _text(case_no, "case number")
@@ -180,17 +186,18 @@ def from_order_second_payment_checkpoint(
     if not isinstance(already_settled, bool):
         raise ValueError("already settled flag is invalid")
 
-    payment_amount_str = f"NT$ {second_payment_amount:,}" if not already_settled else "NT$ 0（已結清）"
-    payment_status_str = "已核銷完成" if already_settled else "待繳納（請於繳納期限前完成匯款）"
+    payment_amount_str, payment_status_str = _payment_display(second_payment_amount, payment_state)
 
     facts: dict[str, object] = {
         "case_no": case_no,
         "second_payment_due_date": second_payment_due_date,
         "second_payment_amount": payment_amount_str,
         "second_payment_status": payment_status_str,
+        "payment_state": payment_state,
         "already_settled": already_settled,
-        "service_date": second_payment_due_date,
     }
+    if isinstance(service_start_date, str) and service_start_date.strip():
+        facts["service_date"] = service_start_date.strip()
     if client_line_user_id:
         facts["line_user_id"] = client_line_user_id
         facts["recipient_projection"] = {
@@ -210,6 +217,20 @@ def from_order_second_payment_checkpoint(
         source_version=1,
         occurred_at=occurred_at,
     )
+
+
+def _payment_display(amount: int, payment_state: str) -> tuple[str, str]:
+    if payment_state == "missing":
+        return "帳務資料尚未確認", "帳務資料尚未確認"
+    if payment_state == "not_required":
+        return "NT$ 0（本期無需繳納）", "本期無需繳納"
+    if payment_state == "settled":
+        return "NT$ 0（已結清）", "已核銷完成"
+    if payment_state == "partial":
+        return f"NT$ {amount:,}", "部分已收，尚有餘額"
+    if payment_state == "outstanding":
+        return f"NT$ {amount:,}", "待繳納"
+    raise ValueError("payment state is invalid")
 
 
 def _positive(value: object, name: str) -> int:

@@ -26,6 +26,12 @@ class MySqlOrderPreStartNotificationSourceWorker:
     def run_once(self, *, target_date: date | None = None) -> int:
         connection = self._connection_factory()
         try:
+            # Two worker processes may select the same still-unregistered source
+            # before either reaches INSERT IGNORE.  READ COMMITTED keeps the
+            # duplicate readback in this same transaction able to observe the
+            # source row committed by the winner after the unique-key wait.
+            with connection.cursor() as cursor:
+                cursor.execute("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
             with MySqlUnitOfWork(connection) as unit_of_work:
                 result = OrderPreStartNotificationSourceProjector(
                     MySqlOrderPreStartNotificationSourceRepository(connection),

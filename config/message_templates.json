@@ -494,7 +494,7 @@
       "category": "order_lifecycle",
       "message_type": "text",
       "enabled": true,
-      "content": "【新竹市月子工會・服務即將開始貼心提醒】🤱✨\n\n親愛的產婦媽媽/家屬您好：\n您的月子照護服務即將於 3 天後（{planned_start_date}）正式開始！\n\n📋 案件編號：{case_no}\n\n1️⃣ 寶寶與產婦狀況確認：\n・請確認寶寶目前健康狀況（出生體重、是否已返家等）。\n・若時間或生產日期有變動，請儘速在官方 LINE 留言聯繫專員。\n\n2️⃣ 服務動線與餐食溝通：\n・服務人員將於前 1~2 天與您再次確認動線、食材及用具準備。\n\n3️⃣ 第一期款繳費說明：\n・應繳金額：{first_payment_amount}\n・繳款期限：服務開始日（{planned_start_date}）\n・繳費狀態：{first_payment_status}\n\n如有任何問題，歡迎隨時於此對話框留言詢問，工會將竭誠為您服務！❤️",
+      "content": "【新竹市月子工會・服務即將開始貼心提醒】🤱✨\n\n親愛的產婦媽媽/家屬您好：\n您的月子照護服務即將於 3 天後（{planned_start_date}）正式開始！\n\n📋 案件編號：{case_no}\n\n1️⃣ 寶寶與產婦狀況確認：\n・請確認寶寶目前健康狀況（出生體重、是否已返家等）。\n・若時間或生產日期有變動，請儘速在官方 LINE 留言聯繫專員。\n\n2️⃣ 服務動線與餐食溝通：\n・服務人員將於前 1~2 天與您再次確認動線、食材及用具準備。\n\n3️⃣ 第一期款繳費說明：\n・應繳金額：{first_payment_amount}\n・繳款期限：{first_payment_due_date}\n・繳費狀態：{first_payment_status}\n\n如有任何問題，歡迎隨時於此對話框留言詢問，工會將竭誠為您服務！❤️",
       "variables": [
         {
           "name": "case_no",
@@ -505,6 +505,11 @@
           "name": "planned_start_date",
           "required": true,
           "description": "預計服務開始日"
+        },
+        {
+          "name": "first_payment_due_date",
+          "required": true,
+          "description": "第一期款繳款期限"
         },
         {
           "name": "first_payment_amount",
