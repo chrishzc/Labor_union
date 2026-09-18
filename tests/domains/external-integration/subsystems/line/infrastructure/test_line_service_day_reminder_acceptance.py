@@ -55,11 +55,19 @@ def _event(*, baby_log_completed=False, requires_cooking=True, outbox_id=31):
 
 
 class _ProjectionRepository(MySqlLineNotificationRepository):
-    def __init__(self, *, rules=None, templates=None, existing_decision=False):
+    def __init__(
+        self,
+        *,
+        rules=None,
+        templates=None,
+        existing_decision=False,
+        fresh_applicable=True,
+    ):
         super().__init__(object())
         self.rules = {"rules": [_RULE]} if rules is None else rules
         self.templates = _TEMPLATE if templates is None else templates
         self.existing_decision = existing_decision
+        self.fresh_applicable = fresh_applicable
         self.sources = []
         self.decisions = []
         self.intents = []
@@ -78,6 +86,9 @@ class _ProjectionRepository(MySqlLineNotificationRepository):
     def _source_has_decision(self, source_event_id):
         assert source_event_id == 51
         return self.existing_decision
+
+    def _rule_source_currently_applicable(self, _source, _rule):
+        return self.fresh_applicable
 
     def _resolve_recipient(self, selector, facts, *, source_domain="unknown"):
         assert selector == "assigned_caregiver"
@@ -167,6 +178,17 @@ def test_completed_service_day_is_legally_not_applicable_to_missing_log_rule():
 
     assert [(item["status"], item["reason"]) for item in repository.decisions] == [
         ("suppressed", "prerequisite_not_satisfied")
+    ]
+    assert repository.intents == []
+
+
+def test_fresh_completed_or_replaced_source_is_cancelled_stale_before_new_intent():
+    repository = _ProjectionRepository(fresh_applicable=False)
+
+    repository.register_and_project(_event())
+
+    assert [(item["status"], item["reason"]) for item in repository.decisions] == [
+        ("cancelled_stale", "notification_source_not_currently_applicable")
     ]
     assert repository.intents == []
 
@@ -326,3 +348,73 @@ def test_completion_cancellation_sql_is_exact_assignment_and_service_date_scope(
     assert "task.processing_status IN ('pending','retryable_failed','processing')" in (
         connection.calls[1][0]
     )
+
+
+class _CurrentApplicabilityCursor:
+    def __init__(self, row, calls):
+        self._row = row
+        self._calls = calls
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def execute(self, sql, params):
+        self._calls.append((sql, params))
+
+    def fetchone(self):
+        return self._row
+
+
+class _CurrentApplicabilityConnection:
+    def __init__(self, row):
+        self.row = row
+        self.calls = []
+
+    def cursor(self):
+        return _CurrentApplicabilityCursor(self.row, self.calls)
+
+
+def test_fresh_applicability_reads_exact_assignment_and_service_date():
+    connection = _CurrentApplicabilityConnection(
+        {"id": 8, "service_day_log_id": None}
+    )
+    repository = MySqlLineNotificationRepository(connection)
+
+    applicable = repository._rule_source_currently_applicable(_event(), _RULE)
+
+    assert applicable is True
+    assert len(connection.calls) == 1
+    sql, params = connection.calls[0]
+    assert params == ("2026-09-18", 8)
+    assert "csa.id=%s" in sql
+    assert "csa.status NOT IN ('cancelled','replaced')" in sql
+    assert "log.service_date=%s" in sql
+    assert sql.endswith("LIMIT 1 FOR SHARE")
+
+
+def test_fresh_applicability_blocks_replaced_or_cancelled_assignment():
+    repository = MySqlLineNotificationRepository(
+        _CurrentApplicabilityConnection(None)
+    )
+
+    assert repository._rule_source_currently_applicable(_event(), _RULE) is False
+
+
+def test_fresh_applicability_blocks_missing_log_rule_after_log_completed():
+    repository = MySqlLineNotificationRepository(
+        _CurrentApplicabilityConnection({"id": 8, "service_day_log_id": 501})
+    )
+
+    assert repository._rule_source_currently_applicable(_event(), _RULE) is False
+
+
+def test_fresh_log_completion_does_not_block_unrelated_service_time_rule():
+    rule = {**_RULE, "predicates": []}
+    repository = MySqlLineNotificationRepository(
+        _CurrentApplicabilityConnection({"id": 8, "service_day_log_id": 501})
+    )
+
+    assert repository._rule_source_currently_applicable(_event(), rule) is True
