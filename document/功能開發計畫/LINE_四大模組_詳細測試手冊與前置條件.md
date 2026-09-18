@@ -1,6 +1,6 @@
 # LINE 四大模組詳細測試手冊與 Agent 前置條件規範
 
-> **文件版本**：v2.8（2026-09-18，分離人工／實機驗收與程式驗收；#313、#314 僅追蹤程式測試，真人／手機／provider 可見效果集中於本手冊）
+> **文件版本**：v2.9（2026-09-18，新增 #325 寶寶日誌／餐食照片提醒的真人 LIFF 與 provider 驗收；#313、#314、#325 的程式驗收留在 Issue）
 > **原始對齊程式版本**：`main @ 0988f6c430472343662aa1f8989ab2af9732bde3`；包含 PR #299 及後續對齊修訂。開始測試前須確認實際執行版本已包含修正，PR 存在不等於 main 已合併或環境已部署。
 > **適用範圍**：LINE 官方帳號、LIFF、Rich Menu、LINE OA 與 React 管理介面的人工／手機／provider 驗收；FastAPI、MySQL、owner/readback 只作人測前置或證據背景，#313／#314 的程式 acceptance 留在 Issue。
 > **權威依據**：`document/架構重整/01_規格基線/26_LINE四大模組Eraser流程圖轉錄與驗收基線.md`、同目錄現行正式規格及其後續修訂；最新明確使用者決定優先。M3-04 幹部群簽約通知、Zero Pool 幹部群告警、M4-01 告警群與 M4-03 告警 Safe Review Link 已取消，不得因舊手冊或舊實作恢復。
@@ -1043,6 +1043,72 @@ Agent 在 development/test DB 執行前置檢查與準備：
   - `line_order_group_participants`：記錄案件參與者（`customer` 媽媽、`staff` 月嫂）之 `line_user_id`、邀請狀態（`pending` / `joined` / `left`）與加入時間。
   - `line_order_group_binding_events`：記錄群組綁定與換群事件（`bound` / `replaced`）。
   - `line_order_group_runtime_events`：記錄執行期邀請轉發與成員進出事件（`invitation_relayed` / `member_joined` / `member_left`）。
+
+---
+
+## H325 寶寶日誌與餐食照片提醒（真人／LIFF／provider 驗收）
+
+本節承接 #325 的**人工可見效果**。#325 自 2026-09-18 起只追蹤程式、configuration、Native MySQL、owner receipt/readback、replay/concurrency；本節不重複判斷 DB lineage 或 task 唯一性。
+
+### H325-00 Agent 前置
+
+開始手機測試前，Agent 只準備測試包並停在 provider boundary 前：
+
+- 確認待測版本包含 #323 的 current 實作；#323 目前仍是 Draft，未部署時本項記 `BLOCKED`，不能拿舊環境判修正失敗。
+- 由 #325 程式驗收先讀回 current versioned notification rule/template。只有 current `service_time_checkpoint` 規則實際啟用且 schedule/recipient 合法時才做人測；沒有 rule／disabled 時不為人測自行啟用。
+- 準備一個有效 assignment/service_date 與已綁定的 assigned caregiver 測試帳號，分別準備 `requires_cooking=false` 與 `requires_cooking=true` 案例。
+- 回傳給測試者：測試帳號、服務日、是否需餐食照片、目前提醒時段／可觀察窗口，以及手機 LIFF 入口。不要回傳 token、cookie 或 credential。
+
+### H325-01 真 LINE 提醒送達
+
+1. 在提醒條件仍未完成的有效服務日，等待 current rule 的實際提醒窗口。
+2. 以指派月嫂帳號確認 LINE OA 是否收到目前的寶寶日誌／餐食紀錄提醒。
+3. 核對訊息對象、服務日與人類可讀內容正確，沒有顯示其他 assignment 或其他服務日的資料。
+4. 若 current rule 沒有啟用、尚未部署或 provider 不可用，記 `BLOCKED/NOT_RUN`；不要為了驗收修改 production rule 或提高頻率。
+
+本步只證明真人實際收到 provider 訊息；task lineage、recipient binding 與去重由 #325 程式驗收負責。
+
+### H325-02 `requires_cooking=false`：寶寶日誌完成
+
+1. 從實際 LINE／LIFF 入口開啟該服務日的日誌流程。
+2. 使用已驗證身分完成目前要求的日誌內容；此案例不應要求餐食照片才能提交。
+3. 依 UI 執行 Query／Preview／Apply 對應的人工作業，確認最後顯示完成成功，重新進入同服務日仍呈現已完成狀態。
+4. 不以手機畫面判斷 DB checkpoint 或取消了幾筆 reminder；那些由 #325 程式 readback 驗證。
+
+### H325-03 `requires_cooking=true`：有效餐食照片完成
+
+1. 從實際 LINE／LIFF 入口開啟需要下廚的服務日。
+2. 選擇一張允許的測試餐食照片，走 current controlled-file staging／上傳 UI。
+3. 確認沒有餐食照片時不能完成；只有寶寶日誌照片而非有效餐食照片時，也不得顯示成已完成。
+4. 加入有效餐食照片後完成 Preview／Apply，確認成功畫面及重新進入後的已完成狀態。
+5. 測試素材不得包含真實客戶敏感資訊。
+
+### H325-04 完成後停止真人可見提醒
+
+在 H325-02 或 H325-03 完成後，依 current bounded schedule 觀察下一個原本可能送出的提醒窗口：
+
+- 同一 `assignment_id + service_date` 不應再收到後續未送提醒。
+- 另一個尚未完成的服務日或另一個合法 assignment 不應因本次完成而一起停止。
+- 這項只看 provider 可見結果；精確取消 predicate、task state 與 replay 仍由 #325 程式驗收。
+
+若 current schedule 沒有第二個可觀察提醒窗口，不為了人測調高頻率；記錄為 `NOT_RUN`，程式驗收仍可獨立完成。
+
+### H325-05 排班重建後不再收到舊 assignment 提醒
+
+僅在測試環境已有合法排班重建流程且本次明確允許操作時執行：
+
+1. 讓舊 assignment 透過正式排班重建失效。
+2. 在舊 assignment 原提醒窗口確認該月嫂不再收到屬於舊 assignment 的提醒。
+3. 若新 assignment 有 current 有效提醒規則，僅確認新 assignment 的可見訊息符合新服務事實。
+4. 不直接改 DB、取消 task 或重播 provider 來製造結果。
+
+### 人工結果紀錄
+
+| 案例 | 狀態 | 測試帳號／服務日 | 待測版本 | 真人可見結果 |
+|---|---|---|---|---|
+| H325-01～05 | `passed / failed / blocked / not_run` | 待填 | 待填 | 待填 |
+
+本節不要求公開貼 LINE user id、token、照片原檔、cookie 或 provider credential。若失敗，只保留必要的時間、測試代號、畫面結果與已遮罩截圖。
 
 ---
 
