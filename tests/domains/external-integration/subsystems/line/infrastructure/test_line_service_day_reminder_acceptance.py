@@ -3,11 +3,16 @@
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
+import pytest
+
 from domains.line.delivery import LineMessageKind, LineRecipient, LineRecipientType
 from domains.line.identities import LineDeliveryTaskId, LineUserId
 from infrastructure.mysql import line_delivery_task_repository as delivery_repository_module
 from infrastructure.mysql import line_notification_repository as notification_repository_module
-from infrastructure.mysql.line_notification_repository import MySqlLineNotificationRepository
+from infrastructure.mysql.line_notification_repository import (
+    LineNotificationManualReplayValidationError,
+    MySqlLineNotificationRepository,
+)
 from subsystems.line.message_configuration import RenderedLineMessage
 from subsystems.line.notification_source_adapters import (
     from_scheduling_service_day_checkpoint_outbox,
@@ -89,6 +94,9 @@ class _ProjectionRepository(MySqlLineNotificationRepository):
 
     def _rule_source_currently_applicable(self, _source, _rule):
         return self.fresh_applicable
+
+    def _source_has_newer_version(self, _source):
+        return False
 
     def _resolve_recipient(self, selector, facts, *, source_domain="unknown"):
         assert selector == "assigned_caregiver"
@@ -191,6 +199,16 @@ def test_fresh_completed_or_replaced_source_is_cancelled_stale_before_new_intent
         ("cancelled_stale", "notification_source_not_currently_applicable")
     ]
     assert repository.intents == []
+
+
+def test_manual_replay_rejects_source_after_completion_or_rebuild_invalidation():
+    repository = _ProjectionRepository(fresh_applicable=False)
+
+    with pytest.raises(
+        LineNotificationManualReplayValidationError,
+        match="notification_source_not_currently_applicable",
+    ):
+        repository._validate_manual_replay(51, _event(), _OCCURRED_AT)
 
 
 def test_disabled_service_day_rule_is_readable_shadow_suppression():
