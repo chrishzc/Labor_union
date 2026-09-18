@@ -385,6 +385,37 @@ def test_default_accounting_uses_the_orders_recorded_service_days_without_manual
     assert repository.persisted.staff_payment_due_date == date(2026, 5, 15)
 
 
+def test_default_accounting_is_skipped_when_historical_day_revision_already_positive():
+    candidate, _ = _candidate_and_request()
+    facts = replace(candidate.facts, historical_day_revision=1)
+
+    class Repository:
+        persisted = None
+
+        def load(self, case_no, *, for_update):
+            return facts
+
+        def find_receipt(self, key):
+            return None
+
+        def persist(self, request, persisted_candidate):
+            self.persisted = persisted_candidate
+            return None
+
+    repository = Repository()
+    workflow = HistoricalServiceAccountingWorkflow(repository, lambda: None)
+
+    receipt = workflow.establish_default_in_current_unit_of_work(
+        case_no="CASE-19",
+        source_identity="historical-source:19",
+        actor="operator",
+        correlation_id="historical-default:19",
+    )
+
+    assert receipt is None
+    assert repository.persisted is None
+
+
 def test_unpaid_staff_obligation_is_rebuilt_when_actual_days_are_revised():
     candidate, request = _candidate_and_request()
     candidate = replace(candidate, facts=replace(candidate.facts, historical_day_revision=1))

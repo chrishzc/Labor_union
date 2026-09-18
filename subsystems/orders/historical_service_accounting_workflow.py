@@ -256,8 +256,10 @@ class HistoricalServiceAccountingWorkflow:
         source_identity: str,
         actor: str,
         correlation_id: str,
-    ) -> HistoricalServiceAccountingReceipt:
+    ) -> HistoricalServiceAccountingReceipt | None:
         facts = self._repository.load(case_no, for_update=True)
+        if facts.historical_day_revision > 0:
+            return None
         if len(facts.assignments) != 1:
             raise ValueError("historical_default_accounting_requires_one_staff")
         assignment = facts.assignments[0]
