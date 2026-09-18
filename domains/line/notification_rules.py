@@ -59,7 +59,7 @@ _SCHEDULE_KINDS = frozenset(
 )
 _FREQUENCY_KINDS = frozenset({"once", "recurring_bounded"})
 _PREDICATE_CODES = frozenset(
-    {"requires_cooking_true", "baby_log_missing", "beclass_missing"}
+    {"requires_cooking_true", "baby_log_missing", "beclass_missing", "service_completion_reached"}
 )
 _ROOT_FIELDS = frozenset({"rules"})
 _RULE_FIELDS = frozenset({
