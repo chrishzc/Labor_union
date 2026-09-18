@@ -131,6 +131,7 @@ async def _with_workbook(
     except OperationalError as error:
         code = int(error.args[0]) if error.args else 0
         message = str(error.args[1]) if len(error.args) > 1 else ""
+        logger.exception("歷史訂單匯入 OperationalError code=%s message=%s", code, message)
         if (
             code == 3819
             and "chk_order_lifecycle_state_event_before_status" in message
