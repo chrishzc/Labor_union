@@ -627,7 +627,7 @@
 
 <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <script>
-  let allFaqs = [];
+  let allFaqs = null; // null means the catalog has not loaded successfully.
   let currentCategory = 'all';
 
   // 解析 URL 參數及 LIFF state
@@ -660,19 +660,38 @@
     }
   }
 
+  async function readJson(response) {
+    try {
+      return await response.json();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function showFaqUnavailable() {
+    allFaqs = null;
+    document.getElementById('faqSearchInput').disabled = true;
+    document.getElementById('faqList').innerHTML = '<div style="text-align: center; color: #DC2626; padding: 20px;">問答服務暫時無法使用，請稍後重新整理頁面。</div>';
+  }
+
   // 載入 FAQ 資料
   async function loadFaqs() {
+    allFaqs = null;
+    document.getElementById('faqSearchInput').disabled = true;
     try {
       const response = await fetch('/api/v1/line/service-help/faq');
-      const result = await response.json();
-      if (result.data) {
-        allFaqs = result.data.items || [];
-        renderCategories(result.data.categories || []);
-        renderFaqList(allFaqs);
+      const result = await readJson(response);
+      if (!response.ok || !result?.data || !Array.isArray(result.data.items) || !Array.isArray(result.data.categories)) {
+        showFaqUnavailable();
+        return;
       }
+      allFaqs = result.data.items;
+      renderCategories(result.data.categories);
+      renderFaqList(allFaqs);
+      document.getElementById('faqSearchInput').disabled = false;
     } catch (err) {
       console.error('FAQ 載入失敗', err);
-      document.getElementById('faqList').innerHTML = '<div style="text-align: center; color: #DC2626; padding: 20px;">無法讀取問答資料，請重新整理頁面。</div>';
+      showFaqUnavailable();
     }
   }
 
@@ -696,6 +715,7 @@
   }
 
   function selectCategory(cat, element) {
+    if (allFaqs === null) return;
     currentCategory = cat;
     document.querySelectorAll('.category-chip').forEach(c => c.classList.remove('active'));
     element.classList.add('active');
@@ -703,6 +723,7 @@
   }
 
   function filterFaqs() {
+    if (allFaqs === null) return;
     const keyword = document.getElementById('faqSearchInput').value.trim().toLowerCase();
     const filtered = allFaqs.filter(item => {
       const matchCat = (currentCategory === 'all' || item.category === currentCategory);
@@ -782,6 +803,14 @@
     submitQuestion(question);
   }
 
+  function appendQueryUnavailable(flow) {
+    const errCard = document.createElement('div');
+    errCard.className = 'message-card message-ai';
+    errCard.textContent = '系統目前無法完成知識庫查詢，請稍後再試或直接在聊天室留言。';
+    flow.appendChild(errCard);
+    errCard.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }
+
   async function submitQuestion(question) {
     const flow = document.getElementById('qaFlow');
     const btn = document.getElementById('askBtn');
@@ -807,37 +836,46 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question })
       });
-      const result = await response.json();
-      flow.removeChild(loadingCard);
+      const result = await readJson(response);
+      if (loadingCard.parentNode === flow) flow.removeChild(loadingCard);
+
+      if (!response.ok || !result?.data) {
+        appendQueryUnavailable(flow);
+        return;
+      }
 
       const aiMsg = document.createElement('div');
       aiMsg.className = 'message-card message-ai';
 
-      if (result.data && result.data.outcome === 'answered') {
+      if (
+        result.data.outcome === 'answered'
+        && typeof result.data.answer_text === 'string'
+        && result.data.answer_text.trim()
+      ) {
         aiMsg.innerHTML = `
           <div class="ai-badge">✅ 工會核准標準解答</div>
           <div>${escapeHtml(result.data.answer_text)}</div>
           ${result.data.source_ref ? `<div class="ai-source-ref">依據標準：${escapeHtml(result.data.source_ref)}</div>` : ''}
           <div style="font-size: 12px; color: var(--text-muted); margin-top: 6px;">💡 若有特殊或客製化需求，您可隨時於 LINE 聊天室留言由真人為您服務。</div>
         `;
-      } else {
+      } else if (result.data.outcome === 'unsupported') {
         aiMsg.innerHTML = `
           <div class="ai-badge unsupported">💡 轉專人客服引導</div>
-          <div>${escapeHtml(result.data?.suggestion || '抱歉，工會知識庫目前尚未收錄與您提問完全相符的標準解答。')}</div>
+          <div>${escapeHtml(result.data.suggestion || '抱歉，工會知識庫目前尚未收錄與您提問完全相符的標準解答。')}</div>
           <div style="margin-top: 8px; font-size: 13px; color: var(--primary); font-weight: 600;">
             👉 歡迎直接在目前這個 LINE 官方帳號聊天室中留言，工會真人專員將會親自為您詳細解說！
           </div>
         `;
+      } else {
+        appendQueryUnavailable(flow);
+        return;
       }
       flow.appendChild(aiMsg);
       aiMsg.scrollIntoView({ behavior: 'smooth', block: 'end' });
     } catch (err) {
       console.error('提問失敗', err);
-      flow.removeChild(loadingCard);
-      const errCard = document.createElement('div');
-      errCard.className = 'message-card message-ai';
-      errCard.textContent = '系統連線暫時不穩定，請稍後再試或直接在聊天室留言。';
-      flow.appendChild(errCard);
+      if (loadingCard.parentNode === flow) flow.removeChild(loadingCard);
+      appendQueryUnavailable(flow);
     } finally {
       btn.disabled = false;
     }
