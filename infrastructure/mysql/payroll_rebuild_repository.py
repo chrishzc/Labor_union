@@ -1,4 +1,7 @@
-"""MySQL persistence for standalone Payroll rebuild and monthly query."""
+"""
+File: payroll_rebuild_repository.py
+Description: 提供獨立 Payroll 重建與月度匯總查詢的 MySQL 配接器。
+"""
 
 from __future__ import annotations
 
@@ -346,7 +349,7 @@ def _rate_snapshots(rows):
 def _payroll_terms(root):
     return PayrollTerms(
         int(root["service_days"]),
-        float(root["service_hours_per_day"]),
+        Decimal(str(root["service_hours_per_day"])),
         MoneyNTD(_integer_ntd(root["floor_fee"])),
     )
 

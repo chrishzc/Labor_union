@@ -1,9 +1,13 @@
-"""MySQL owner adapter for count-based historical service accounting."""
+"""
+File: historical_service_accounting_repository.py
+Description: 支援計次歷史服務帳務的 MySQL 持久化儲存與查詢配接器。
+"""
 
 from __future__ import annotations
 
 from contextlib import contextmanager
 from datetime import date
+from decimal import Decimal
 import json
 
 from domains.orders.lifecycle import OrderLifecycleStatus
@@ -78,7 +82,7 @@ class MySqlHistoricalServiceAccountingRepository:
             int(root["client_finance_version"]),
             int(root["payroll_version"]),
             int(root["service_days"]),
-            float(root["service_hours_per_day"]),
+            Decimal(str(root["service_hours_per_day"])),
             MoneyNTD(int(root["floor_fee"])),
             str(root["identity_status"]),
             assignments,

@@ -2,18 +2,26 @@
 
 import inspect
 from datetime import date
+from decimal import Decimal
 
 import pytest
 from fastapi import HTTPException
 
 from api.routes.historical_service_accounting import _call
 from domains.orders.lifecycle import OrderLifecycleStatus
-from domains.payroll.calculation import PayrollPolicyKind
+from domains.payroll.calculation import PayrollPolicyKind, rate_snapshot
 from infrastructure.mysql.historical_service_accounting_repository import (
     MySqlHistoricalServiceAccountingRepository,
     _ensure_accounting_accounts,
 )
 from shared_kernel.identities import CorrelationId
+from shared_kernel.money import MoneyNTD
+from subsystems.orders.historical_service_accounting_workflow import (
+    HistoricalServiceAccountingAssignmentFacts,
+    HistoricalServiceAccountingFacts,
+    HistoricalServiceAccountingReceipt,
+    HistoricalServiceAccountingWorkflow,
+)
 
 
 class _LoadCursor:
@@ -170,3 +178,62 @@ def test_missing_canonical_policy_is_exposed_as_domain_blocker(code):
     assert error["category"] == "domain_blocked"
     assert error["code"] == code
     assert error["domain_blockers"] == [code]
+
+
+def test_historical_service_accounting_facts_rejects_float_service_hours():
+    with pytest.raises(TypeError, match="service hours per day must use Decimal or int"):
+        HistoricalServiceAccountingFacts(
+            case_no="CASE-188",
+            lifecycle_status=OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED,
+            lifecycle_version=1,
+            adoption_receipt_id=1,
+            adoption_source_identity="source:1",
+            historical_day_revision=0,
+            client_finance_version=0,
+            payroll_version=0,
+            contracted_service_days=10,
+            service_hours_per_day=8.5,
+            contractual_floor_fee=MoneyNTD(0),
+            client_identity_status="一般市民",
+            assignments=(
+                HistoricalServiceAccountingAssignmentFacts(
+                    "assignment:1",
+                    1,
+                    "月嫂甲",
+                    rate_snapshot("assignment:1", "policy:1", PayrollPolicyKind.CITIZEN),
+                    MoneyNTD(0),
+                ),
+            ),
+            client_policy_version="policy:1",
+            client_hourly_rate=MoneyNTD(280),
+            completed_on=date(2026, 4, 20),
+            staff_payment_due_date=None,
+        )
+
+
+def test_service_hours_per_day_loads_as_decimal_and_supports_default_accounting():
+    connection = _LoadConnection()
+    repository = MySqlHistoricalServiceAccountingRepository(connection)
+
+    facts = repository.load("CASE-188", for_update=False)
+
+    assert isinstance(facts.service_hours_per_day, Decimal)
+    assert facts.service_hours_per_day == Decimal("8")
+
+    persisted_box = []
+    repository.persist = lambda request, candidate: persisted_box.append(candidate) or HistoricalServiceAccountingReceipt(
+        "CASE-188", 1, 1, 1,
+        candidate.service_days.total_actual_service_days,
+        candidate.client_finance.total_receivable.amount,
+        candidate.payroll.total_payable.amount,
+        candidate.fingerprint,
+    )
+    workflow = HistoricalServiceAccountingWorkflow(repository, lambda: None)
+    workflow.establish_default_in_current_unit_of_work(
+        case_no="CASE-188",
+        source_identity="historical-source:188",
+        actor="admin",
+        correlation_id="corr-188",
+    )
+    assert len(persisted_box) == 1
+    assert persisted_box[0].service_days.total_actual_service_days == 30

@@ -1,9 +1,13 @@
-"""Cross-domain Q/P/A for historical per-caregiver service-day accounting."""
+"""
+File: historical_service_accounting_workflow.py
+Description: 協調歷史訂單每位服務人員服務天數與薪資帳務的跨領域建立與套用流程。
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from decimal import Decimal
 from hashlib import sha256
 from typing import Callable, Protocol
 
@@ -67,7 +71,7 @@ class HistoricalServiceAccountingFacts:
     client_finance_version: int
     payroll_version: int
     contracted_service_days: int
-    service_hours_per_day: float | int
+    service_hours_per_day: Decimal | int
     contractual_floor_fee: MoneyNTD
     client_identity_status: str
     assignments: tuple[HistoricalServiceAccountingAssignmentFacts, ...]
@@ -77,6 +81,8 @@ class HistoricalServiceAccountingFacts:
     staff_payment_due_date: date | None
 
     def __post_init__(self) -> None:
+        if isinstance(self.service_hours_per_day, float):
+            raise TypeError("service hours per day must use Decimal or int")
         require_canonical_text(self.case_no, "case number", 50)
         require_canonical_text(
             self.adoption_source_identity, "historical adoption source identity", 191
@@ -318,7 +324,7 @@ def _candidate(
         tuple(item.rate_snapshot for item in facts.assignments),
         PayrollTerms(
             facts.contracted_service_days,
-            facts.service_hours_per_day,
+            _decimal_hours(facts.service_hours_per_day),
             facts.contractual_floor_fee,
         ),
         tuple(
@@ -332,7 +338,7 @@ def _candidate(
         client_policy_version=facts.client_policy_version,
         client_hourly_rate=facts.client_hourly_rate,
         actual_service_days=service_days.total_actual_service_days,
-        service_hours_per_day=facts.service_hours_per_day,
+        service_hours_per_day=_decimal_hours(facts.service_hours_per_day),
         historical_floor_fee=MoneyNTD(service_days.historical_floor_fee_ntd),
     )
     calculated_due_date = calculate_staff_payment_due_date(
@@ -366,10 +372,8 @@ def _candidate(
     )
 
 
-def _decimal_hours(value: int):
-    from decimal import Decimal
-
-    return Decimal(value)
+def _decimal_hours(value: Decimal | int) -> Decimal:
+    return value if isinstance(value, Decimal) else Decimal(str(value))
 
 
 def _command_fingerprint(
