@@ -148,6 +148,14 @@ def _query_payload(facts) -> dict[str, Any]:
         "selectable_dates": facts.selectable_dates,
         "current_version": facts.current_version,
         "current_dates": facts.current_dates,
+        "bound_staff": [
+            {
+                "staff_id": assignment.staff_id,
+                "staff_name": assignment.staff_name,
+            }
+            for assignment in facts.restart_assignments
+            if assignment.staff_name is not None
+        ],
     }
 
 

@@ -148,7 +148,10 @@ function conflictMessage(error: unknown): string | null {
   const code = (error as { code?: unknown }).code;
   if (typeof code !== 'string') return null;
   if (code === 'scheduling_segments_required') {
-    return '本案尚無正式排班區段，目前無法在此變更開始日或服務天數。其他條款可分開檢查；本次未儲存任何變更。';
+    return '目前排班資料不完整，無法安全調整既有排班；本次未儲存任何變更。';
+  }
+  if (code === 'confirmed_service_dates_reconfirmation_required') {
+    return '本案已有正式服務日期；變更服務天數前，請到「服務安排」提供完整替代日期。其他條款可分開檢查；本次未儲存任何變更。';
   }
   if (code === 'stale_preview') {
     return '預覽已過期：正式資料已變更，請重新檢查條款變更後再套用。';
@@ -376,7 +379,7 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
   return (
     <section className="order-v2-drawer-section" aria-labelledby="order-v2-terms-mutation-heading">
       <h3 id="order-v2-terms-mutation-heading">進件條款預覽與套用</h3>
-      <p className="order-v2-drawer-note">先檢查服務條件與變更影響，再填寫原因並確認儲存。檢查時不會修改訂單。</p>
+      <p className="order-v2-drawer-note">尚未建立正式服務日期時，可先修正進件條款；已有日期或排班時，系統會要求到服務安排完成重排。檢查時不會修改訂單。</p>
       {currentQuery.service_data_locked && (
         <p className="order-v2-drawer-error" role="status">此案件的服務條件已鎖定，依既有規則不可再變更條款。</p>
       )}

@@ -549,11 +549,18 @@ def test_preassignment_payroll_obligation_fails_closed():
         workflow.preview("116990823", _terms(requires_cooking=False))
 
 
-def test_preassignment_service_day_count_change_still_requires_segments():
-    with pytest.raises(ValueError, match="scheduling_segments_required"):
-        terms_workflow._scheduling_candidate(
-            _facts(), _terms(requires_cooking=False, service_days=4)
-        )
+def test_preassignment_service_day_count_change_keeps_empty_generation():
+    workflow = terms_workflow.OrderTermsWorkflow(_Repository(_facts()), object(), _Clock())
+
+    preview = workflow.preview(
+        "116990823", _terms(requires_cooking=False, service_days=4)
+    )
+
+    assert preview.scheduling.assignments == ()
+    assert preview.scheduling.cancelled_assignment_ids == ()
+    assert preview.scheduling.generation_number == 1
+    assert preview.after.service_days == 4
+    assert preview.planned_end_date == date(2026, 9, 15)
 
 
 def test_preassignment_start_date_shift_keeps_empty_generation_and_shifts_end_date():

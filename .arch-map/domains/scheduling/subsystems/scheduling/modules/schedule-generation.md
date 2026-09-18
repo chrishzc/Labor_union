@@ -5,7 +5,7 @@
 - subsystem: `scheduling`
 
 ## Responsibility
-從 current Scheduling generation facts 產生版本化 assignment／buffer candidate，並在未指派時將 Orders Terms 影響表示為不虛構 segment 的空 generation。服務天數改變仍 fail closed，需由正式排班重新分配。
+從 current Scheduling generation facts 產生版本化 assignment／buffer candidate，並在尚無 assignment／buffer、正式服務日期或既有服務日時，將 Orders Terms 的開始日／服務天數影響表示為不虛構 segment 的空 generation。已有服務日期或排班事實時仍 fail closed，分別要求替換日期或正式重新分配。
 
 ## Implementation
 - primary:

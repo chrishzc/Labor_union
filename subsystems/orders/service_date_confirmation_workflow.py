@@ -22,10 +22,11 @@ from subsystems.orders.terms_workflow import SchedulingReplacementCommand
 
 @dataclass(frozen=True, slots=True)
 class RestartSchedulingAssignmentFacts:
-    source_assignment_id: int
+    source_assignment_id: int | None
     staff_id: int
     sequence: int
     service_day_count: int
+    staff_name: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

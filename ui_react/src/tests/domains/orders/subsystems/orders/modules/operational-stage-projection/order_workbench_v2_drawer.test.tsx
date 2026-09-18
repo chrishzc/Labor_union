@@ -293,7 +293,7 @@ describe('待辦看板 Beta 唯讀工作 Drawer', () => {
     expect(within(dialog).getByText('2026-10-01 ～ 2026-10-20')).toBeInTheDocument();
     expect(within(dialog).queryByText(/lineage_source_assignment_ids/)).not.toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole('button', { name: '案件處理' }));
-    fireEvent.click(within(dialog).getByText('查看十三階段進度'));
+    fireEvent.click(within(dialog).getByText('查看十三階段紀錄'));
     expect(dialog.querySelectorAll('.order-case-progress li')).toHaveLength(13);
     expect(within(dialog).queryByText(/source_projection_digest/)).not.toBeInTheDocument();
 

@@ -32,6 +32,7 @@ export const realisticServiceDateQueryView: ServiceDateConfirmationQueryView = {
   ],
   current_version: null,
   current_dates: [],
+  bound_staff: [],
 };
 
 export const realisticServiceDateQueryViewConfirmed: ServiceDateConfirmationQueryView = {
@@ -49,6 +50,7 @@ export const realisticServiceDateQueryViewConfirmed: ServiceDateConfirmationQuer
   ],
   current_version: 1,
   current_dates: ['2026-09-01', '2026-09-02', '2026-09-03'],
+  bound_staff: [],
 };
 
 export const realisticServiceDatePreviewPayload: ServiceDatePreviewPayload = {

@@ -282,18 +282,19 @@ describe('待辦看板 Beta 第 1 階訂單條款操作', () => {
     await waitFor(() => expect(mocks.queryTerms).toHaveBeenCalledWith('CASE-TERMS'));
     expect(await within(panel).findByText(/條款已套用並完成正式回讀；Order version 13，合約服務 21 日。/)).toBeInTheDocument();
     expect(within(panel).getByLabelText('Beta 服務天數')).toHaveValue(21);
-    await screen.findByText('目前進度：推薦月嫂給客戶確認');
+    await screen.findByText('各項工作依自己的正式資料判斷，不要求照編號依序辦理。');
     expect(panel).toBeVisible();
-    expect(screen.getByRole('button', { name: '1 進件資料' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('button', { name: /1 進件資料 可辦理/ })).toHaveAttribute('aria-current', 'page');
   });
 
-  it('未排班案件的日期或天數變更受阻時解釋原因且不套用', async () => {
+  it('已有正式日期的天數變更受阻時導向服務安排且不套用', async () => {
     mocks.previewTerms.mockRejectedValue(Object.assign(new Error('Orders Terms request was rejected.'), {
-      code: 'scheduling_segments_required',
+      code: 'confirmed_service_dates_reconfirmation_required',
     }));
     const panel = await openTermsPanel();
     fireEvent.click(within(panel).getByRole('button', { name: '檢查訂單條款變更' }));
-    expect(await within(panel).findByRole('alert')).toHaveTextContent('本案尚無正式排班區段');
+    expect(await within(panel).findByRole('alert')).toHaveTextContent('本案已有正式服務日期');
+    expect(within(panel).getByRole('alert')).toHaveTextContent('服務安排');
     expect(within(panel).getByRole('alert')).toHaveTextContent('本次未儲存任何變更');
     expect(mocks.applyTerms).not.toHaveBeenCalled();
   });

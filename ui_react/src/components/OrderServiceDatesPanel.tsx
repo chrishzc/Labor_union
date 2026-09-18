@@ -447,6 +447,13 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
 
       {queryView !== null && (
         <>
+          {queryView.bound_staff.length > 0 && (
+            <div role="status" className="order-v2-inline-notice">
+              <strong>既定服務人員：</strong>
+              {queryView.bound_staff.map((staff) => staff.staff_name).join('、')}
+              <span>。此歷史綁定已保留，不需重新挑選候選或再次推薦。</span>
+            </div>
+          )}
           {precision !== null && serviceMode !== null && <dl className="order-v2-business-summary" aria-label="建議服務日期摘要">
             <div><dt>排休類型</dt><dd>{serviceMode}</dd></div>
             <div><dt>建議開始</dt><dd>{precision.actual_start_date}</dd></div>

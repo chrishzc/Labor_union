@@ -65,6 +65,7 @@ const initialQuery = {
   selectable_dates: ['2026-10-01', '2026-10-02', '2026-10-03', '2026-10-04'],
   current_version: null,
   current_dates: [],
+  bound_staff: [],
 };
 
 const observedQuery = {
@@ -249,6 +250,19 @@ describe('待辦看板 Beta 第 9 階服務日期', () => {
 
     expect(screen.queryByLabelText('服務日期確認內容')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '完成服務日期確認' })).not.toBeInTheDocument();
+  });
+
+  it('歷史重啟後顯示既定服務人員且不要求重新挑選候選', async () => {
+    mocks.getServiceDates.mockResolvedValue({
+      ...initialQuery,
+      bound_staff: [{ staff_id: 12, staff_name: '王月嫂' }],
+    });
+
+    render(<OrderServiceDatesPanel caseNo="CASE-SERVICE-DATES" />);
+
+    expect(await screen.findByText(/既定服務人員：/)).toBeInTheDocument();
+    expect(screen.getByText(/王月嫂/)).toBeInTheDocument();
+    expect(screen.getByText(/不需重新挑選候選或再次推薦/)).toBeInTheDocument();
   });
 
   it('正式實際開始日變更後自動重算，並使舊預覽與人工選日失效', async () => {

@@ -18,10 +18,13 @@
 .client-roster-table-wrap th, .client-roster-table-wrap td { padding: 11px 13px; border-top: 1px solid #f1ddd5; vertical-align: top; }
 .client-roster-table-wrap th { position: sticky; top: 0; background: #fff7ed; color: #7c2d12; white-space: nowrap; }
 .client-roster-table-wrap th button { padding: 0; border: 0; background: transparent; font: inherit; font-weight: 700; }
-.client-roster-table-wrap tbody tr:hover { background: #fffaf7; }
-.client-roster-detail-row:hover { background: white !important; }
-.client-roster-detail-row > td { padding: 0; }
+.client-roster-table-wrap tbody tr { cursor: pointer; transition: background-color .15s ease, box-shadow .15s ease; }
+.client-roster-table-wrap tbody tr:hover { background: #fff7ed; }
+.client-roster-table-wrap tbody tr:focus-visible { outline: 3px solid rgba(154, 52, 18, .28); outline-offset: -3px; }
+.client-roster-table-wrap tbody tr.is-selected { background: #ffedd5; box-shadow: inset 4px 0 #9a3412; }
 .client-roster-detail { display: grid; gap: 14px; padding: 18px; background: #fffdfa; }
+.client-roster-detail-drawer .drawer-body { background: #fffaf7; }
+.client-roster-detail-drawer .client-roster-detail { padding: 0; background: transparent; }
 .client-roster-detail section { padding: 14px; border: 1px solid #ead3c8; border-radius: 10px; background: white; }
 .client-roster-detail h3 { margin: 0 0 12px; color: #7c2d12; }
 .client-roster-detail-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px 18px; margin: 0; }

@@ -17,7 +17,7 @@ import type {
 } from '../api/orders/order_core_stage_projection_schemas';
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import type { AssignmentPlan, OrderDetail, OrderTerms } from '../api/orders/order_query_schemas';
-import { coreStageDefinition, coreStageSubstatusLabel } from '../adapters/orders/order_core_stage_projection_adapter';
+import { coreStageSubstatusLabel } from '../adapters/orders/order_core_stage_projection_adapter';
 import { ContractExternalSigningActions } from './ContractExternalSigningActions';
 import { OrderAssignmentPlanPanel } from './OrderAssignmentPlanPanel';
 import { OrderCandidateContactStatusPanel } from './OrderCandidateContactStatusPanel';
@@ -68,6 +68,16 @@ const WORK_GROUPS = [
   { id: 'finance', title: '收款與結算', description: '查看訂金、客戶收款及月嫂付款；核銷統一由帳務中心處理。', stages: ['deposit_settlement', 'client_settlement', 'staff_payout'] },
 ] as const;
 type WorkGroup = typeof WORK_GROUPS[number]['id'];
+
+function workGroupStatus(
+  stages: readonly { status: string }[],
+): '已完成' | '可辦理' | '需要處理' | '等待資料' {
+  if (stages.length > 0 && stages.every((stage) => stage.status === 'completed')) return '已完成';
+  if (stages.some((stage) => stage.status === 'blocked')) return '需要處理';
+  if (stages.some((stage) => stage.status === 'not_started' || stage.status === 'in_progress')) return '可辦理';
+  if (stages.some((stage) => stage.status === 'completed')) return '可辦理';
+  return '等待資料';
+}
 
 
 const loading = <T,>(): ReadState<T> => ({ status: 'loading' });
@@ -280,12 +290,11 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
   const currentStageCode: CoreStageCode | null = timeline.status === 'ready'
     ? timeline.data.current_core_stage_code
     : null;
-  const currentStage = currentStageCode === null ? null : coreStageDefinition(currentStageCode);
-  const currentGroup = terminalStatus ? 'finance' : WORK_GROUPS.find((group) => (group.stages as readonly string[]).includes(currentStageCode ?? ''))?.id ?? 'intake';
-  const activeGroup = selectedGroup ?? currentGroup;
+  const suggestedGroup = terminalStatus ? 'finance' : WORK_GROUPS.find((group) => (group.stages as readonly string[]).includes(currentStageCode ?? ''))?.id ?? 'intake';
+  const activeGroup = selectedGroup ?? suggestedGroup;
   useEffect(() => {
-    if (timeline.status === 'ready') setSelectedGroup((previous) => previous ?? currentGroup);
-  }, [timeline.status, currentGroup]);
+    if (timeline.status === 'ready') setSelectedGroup((previous) => previous ?? suggestedGroup);
+  }, [timeline.status, suggestedGroup]);
   const groupDefinition = WORK_GROUPS.find((group) => group.id === activeGroup)!;
   const openGroup = (group: WorkGroup) => {
     setVisitedGroups((previous) => Array.from(new Set([...previous, activeGroup, group])));
@@ -302,7 +311,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
           <div><p className="order-case-eyebrow">案件 {caseNo}</p><h1 ref={pageHeadingRef} tabIndex={-1}>{selectedTitle}</h1></div>
           <span className="order-case-lifecycle">{intakeOrderStatus ?? '讀取案件中'}</span>
         </div>
-        <p className="order-case-purpose">{drawerTab === 'data' ? '查閱客戶、約定條款與服務安排，不在此頁執行案件流程。' : drawerTab === 'changes' ? '選擇需要辦理的異動，核對影響後再確認。' : '選擇要辦理的工作；目前進度提供指引，不限制可獨立處理的事項。'}</p>
+        <p className="order-case-purpose">{drawerTab === 'data' ? '查閱客戶、約定條款與服務安排，不在此頁執行案件流程。' : drawerTab === 'changes' ? '選擇需要辦理的異動，核對影響後再確認。' : '選擇要辦理的工作；各事項依自己的正式資料判斷，不要求依序辦理。'}</p>
         <div className="order-case-context">
           <span><small>客戶</small>{detail.status === 'ready' ? detail.data.client_name || '未登錄' : '讀取中'}</span>
           <span><small>約定服務</small>{terms.status === 'ready' ? terms.data.terms.planned_start_date : '讀取中'}</span>
@@ -317,22 +326,22 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
       {factsRefreshing && <p role="status" className="order-case-read-status">正在更新案件資料…</p>}
       {timeline.status === 'error' && <div role="alert" className="order-v2-drawer-error">案件進度暫時無法取得，請稍後重新整理。</div>}
       <div hidden={drawerTab !== 'work'} className="order-case-workspace">
-        <aside className="order-case-stepper" aria-label="案件分步流程">
-          <h2>辦理事項</h2><p>依工作切換，不會變更案件進度。</p>
+        <aside className="order-case-stepper" aria-label="案件辦理事項">
+          <h2>辦理事項</h2><p>各項工作依自己的正式資料判斷，不要求照編號依序辦理。</p>
           <ol>
             {WORK_GROUPS.map((group, index) => (
               <li key={group.id}>
                 <button type="button" disabled={navigationLocked} className={group.id === activeGroup ? 'selected' : ''} aria-current={group.id === activeGroup ? 'page' : undefined} onClick={() => openGroup(group.id)}>
                   <span className="order-case-step-number">{index + 1}</span>
-                  <span><strong>{group.title}</strong>{timeline.status === 'ready' && group.id === currentGroup && <small>目前待辦</small>}</span>
+                  <span><strong>{group.title}</strong>{timeline.status === 'ready' && <small>{workGroupStatus(timeline.data.core_stages.filter((stage) => (group.stages as readonly string[]).includes(stage.code)))}</small>}</span>
                 </button>
               </li>
             ))}
           </ol>
-          {timeline.status === 'ready' && !terminalStatus && workbenchScope === 'in_progress' && <details className="order-case-progress"><summary>查看十三階段進度</summary><ol>{timeline.data.core_stages.map((stage) => <li key={stage.code}><span>{stage.ordinal}. {stage.label}</span><small>{stage.status === 'completed' ? '已完成' : stage.code === currentStageCode ? '目前待辦' : stage.status === 'unavailable' ? '暫無資料' : '尚未完成'}</small></li>)}</ol></details>}
+          {timeline.status === 'ready' && !terminalStatus && workbenchScope === 'in_progress' && <details className="order-case-progress"><summary>查看十三階段紀錄</summary><ol>{timeline.data.core_stages.map((stage) => <li key={stage.code}><span>{stage.ordinal}. {stage.label}</span><small>{stage.status === 'completed' ? '已完成' : stage.status === 'blocked' ? '需要處理' : stage.status === 'unavailable' ? '暫無資料' : '可繼續辦理'}</small></li>)}</ol></details>}
         </aside>
         <div className="order-case-task-body">
-          <div className="order-case-work-heading"><div><p className="order-case-eyebrow">{currentStage ? `目前進度：${currentStage.label}` : '案件工作區'}</p><h2>{groupDefinition.title}</h2><p>{groupDefinition.description}</p></div></div>
+          <div className="order-case-work-heading"><div><p className="order-case-eyebrow">案件工作區</p><h2>{groupDefinition.title}</h2><p>{groupDefinition.description}</p></div></div>
         {currentBranch === 'normal' && workbenchScope === 'in_progress' && !terminalStatus && (
           <section className="order-v2-drawer-current-task" aria-label="案件工作內容">
             {[...blockers, ...warnings].filter((notice) => (groupDefinition.stages as readonly string[]).includes(notice.stageCode)).map((notice) => <p className="order-case-review-note" key={notice.key} role="status"><strong>{notice.stage}</strong>：{notice.message}</p>)}

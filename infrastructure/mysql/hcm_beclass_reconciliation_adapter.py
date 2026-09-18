@@ -95,8 +95,19 @@ class MySqlHcmBeClassReconciliationAdapter:
             _nested_uow_forbidden,
             SystemBusinessClock(),
         )
+        try:
+            preview_facts = repository.load_for_preview(case_no)
+        except ValueError as error:
+            if str(error) == "client_finance_bootstrap_required":
+                with self._connection.cursor() as cursor:
+                    cursor.execute(
+                        "UPDATE orders SET requires_cooking=%s WHERE case_no=%s",
+                        (requires_cooking, case_no),
+                    )
+                return
+            raise
         proposed_terms = replace(
-            repository.load_for_preview(case_no).order.terms,
+            preview_facts.order.terms,
             requires_cooking=requires_cooking,
         )
         preview = workflow.preview(case_no, proposed_terms)

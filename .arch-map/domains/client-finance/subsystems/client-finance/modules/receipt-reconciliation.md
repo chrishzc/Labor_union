@@ -5,7 +5,7 @@
 - subsystem: `client-finance`
 
 ## Responsibility
-由 Client Finance 擁有案件專屬虛擬帳號的確定性產生／解析規則，驗證客戶收款與應收義務，並編排 fresh Preview／Apply、核銷分配與收據。需人工核對的金額差異必須在正式帳務寫入前拒絕；明示超收處理沿既有退款義務流程。
+由 Client Finance 擁有案件專屬虛擬帳號的確定性產生／解析規則；匯入實際對照優先於公式候選，只有完全沒有匯入對照時才使用公式。驗證客戶收款與應收義務，並編排 fresh Preview／Apply、核銷分配與收據。需人工核對的帳號或金額差異必須在正式帳務寫入前拒絕；明示超收處理沿既有退款義務流程。
 
 ## Implementation
 - primary:

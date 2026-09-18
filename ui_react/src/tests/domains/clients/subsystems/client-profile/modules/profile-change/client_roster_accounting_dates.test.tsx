@@ -43,7 +43,7 @@ describe('client roster accounting date columns', () => {
     for (const name of ['訂金應繳日', '第一期應繳日', '第二期應繳日', '訂單月嫂應付日', '月嫂義務應付日', '客戶補助退還日', '補助預計申請年月']) {
       expect(screen.getByRole('columnheader', { name })).toBeInTheDocument();
     }
-    expect(row).toHaveLength(19);
+    expect(row).toHaveLength(18);
     expect(row[11]).toHaveTextContent('2026-06-20');
     expect(row[12]).toHaveTextContent('2026-07-03');
     expect(row[13]).toHaveTextContent('無值');
@@ -69,11 +69,11 @@ describe('client roster accounting date columns', () => {
   it('does not lose list dates when the existing amount/detail query fails', async () => {
     mocks.query.mockRejectedValue(new Error('帳務詳情無法計算'));
     render(<ClientRosterPage />);
-    await cells();
-    fireEvent.click(screen.getByRole('button', { name: '顯示全部欄位' }));
+    const row = (await screen.findByText('115000101')).closest('tr')!;
+    fireEvent.click(row);
     expect(await screen.findByRole('alert')).toHaveTextContent('帳務詳情無法計算');
     expect((await cells())[14]).toHaveTextContent('2026-09-15');
-    expect(screen.getByRole('alert').closest('td')).toHaveAttribute('colspan', '19');
+    expect(screen.getByRole('alert').closest('[role="dialog"]')).toHaveAccessibleName('案件 115000101 詳細資料');
   });
 
   it('distinguishes an older response without the new fields from stored nulls', async () => {

@@ -38,6 +38,13 @@ def test_service_completion_projection_reads_the_canonical_orders_receipt() -> N
     assert "service_lock.client_settlement_fingerprint AS service_completion_identity" not in _PAGE_SQL
 
 
+def test_historical_binding_projection_is_scoped_to_the_current_effective_generation() -> None:
+    assert "receipt.resulting_generation_id = aggregate.effective_generation_id" in _PAGE_SQL
+    assert "'orders_historical_precision_restart'" in _PAGE_SQL
+    assert "'historical_restart_service_dates'" in _PAGE_SQL
+    assert "WHERE trigger_event = 'orders_historical_precision_restart'" not in _PAGE_SQL
+
+
 def test_staff_settlement_reads_staff_payables_projection_not_obligation_status() -> None:
     assert "LEFT JOIN staff_payable_projections projection" in _PAGE_SQL
     assert "COALESCE(projection.status, 'payable') <> 'completed'" in _PAGE_SQL
@@ -55,6 +62,9 @@ def _row(case_no: str = "CASE-001") -> dict[str, object]:
         "bootstrap_event_id": None,
         "bootstrap_created_at": None,
         "imported_terms_complete": 1,
+        "historical_binding_receipt_id": None,
+        "historical_binding_at": None,
+        "historical_bound_staff_count": 0,
         "terms_event_id": 2,
         "terms_version": 2,
         "terms_created_at": NOW,
@@ -260,6 +270,88 @@ def test_customer_decision_event_completes_matching_and_review_without_mutating_
     assert item.stages[2].status == "completed"
     assert item.sop_steps[4].status == "completed"
     assert item.sop_steps[2].label == "發送訂單資訊詢問月嫂意願（LINE 或人工確認）"
+
+
+def test_historical_restart_binding_satisfies_candidate_and_recommendation_steps() -> None:
+    row = _row("HISTORICAL-RESTART-BOUND")
+    row.update({
+        "historical_binding_receipt_id": 41,
+        "historical_binding_at": NOW,
+        "historical_bound_staff_count": 1,
+        "candidate_pool_id": None,
+        "candidate_pool_created_at": None,
+        "candidate_pool_candidate_count": 0,
+        "candidate_pool_contacted_count": 0,
+        "candidate_pool_contacted_at": None,
+        "candidate_pool_replied_count": 0,
+        "candidate_pool_willing_count": 0,
+        "candidate_pool_replied_at": None,
+        "matching_plan_id": None,
+        "matching_plan_version": None,
+        "matching_plan_status": None,
+        "matching_created_at": None,
+        "matching_customer_decision": None,
+        "matching_customer_decision_at": None,
+        "willingness_contact_attempt_count": 0,
+        "willingness_count": 0,
+        "willingness_replied_count": 0,
+        "willingness_accepted_count": 0,
+        "willingness_contacted_at": None,
+        "willingness_replied_at": None,
+        "resume_attempt_count": 0,
+        "resume_sent_count": 0,
+        "resume_sent_at": None,
+    })
+
+    item = OrderStageProjectionQueryService(_Repository((row,)), BUSINESS_CLOCK).query(
+        StageProjectionQuery(50)
+    ).items[0]
+
+    assert item.stages[1].status == "completed"
+    assert item.stages[2].status == "completed"
+    assert [step.status for step in item.sop_steps[1:5]] == ["completed"] * 4
+    assert item.sop_steps[1].occurred_at == NOW
+
+
+def test_stale_historical_binding_does_not_skip_fresh_matching_after_reopen() -> None:
+    row = _row("HISTORICAL-REOPEN-FRESH-MATCHING")
+    row.update({
+        "lifecycle_status": OrderLifecycleStatus.ESTABLISHED.value,
+        "replacement_resume_step": "step_2",
+        "historical_binding_receipt_id": None,
+        "historical_binding_at": None,
+        "historical_bound_staff_count": 1,
+        "candidate_pool_id": None,
+        "candidate_pool_created_at": None,
+        "candidate_pool_candidate_count": 0,
+        "candidate_pool_contacted_count": 0,
+        "candidate_pool_contacted_at": None,
+        "candidate_pool_replied_count": 0,
+        "candidate_pool_willing_count": 0,
+        "candidate_pool_replied_at": None,
+        "matching_plan_id": None,
+        "matching_plan_version": None,
+        "matching_plan_status": None,
+        "matching_created_at": None,
+        "matching_customer_decision": None,
+        "matching_customer_decision_at": None,
+        "willingness_contact_attempt_count": 0,
+        "willingness_count": 0,
+        "willingness_replied_count": 0,
+        "willingness_accepted_count": 0,
+        "willingness_contacted_at": None,
+        "willingness_replied_at": None,
+        "resume_attempt_count": 0,
+        "resume_sent_count": 0,
+        "resume_sent_at": None,
+    })
+
+    item = OrderStageProjectionQueryService(_Repository((row,)), BUSINESS_CLOCK).query(
+        StageProjectionQuery(50)
+    ).items[0]
+
+    assert item.current_step_ordinal == 2
+    assert [step.status for step in item.sop_steps[1:5]] != ["completed"] * 4
 
 
 def test_accepted_plan_completes_client_review_without_resume_delivery() -> None:

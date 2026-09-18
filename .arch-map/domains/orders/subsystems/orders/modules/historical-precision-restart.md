@@ -21,7 +21,7 @@
   - `ui_react/src/api/orders/historical_service_accounting_client.ts`
 
 ## Dependencies
-- outbound: `scheduling` — 撤銷原有效 generation，建立等待正常流程重建的空 tombstone。
+- outbound: `scheduling` — 撤銷原有效 generation，建立等待服務日期確認重建的空 tombstone；歷史 pairing evidence 仍是既定人員來源，不回到候選媒合。
 - observed-only: `client-finance`／`payroll` — 重啟只查詢並保存既有版本、基準義務與付款 lineage；後續正常流程才形成差額。
 - inbound: authenticated historical-order administration only.
 
@@ -34,5 +34,5 @@
 
 ## Change triggers
 Reconcile when restart eligibility, historical accounting bridge, current-root revocation、API/UI entrypoint or provenance receipt semantics change.
-eligible 的歷史未服務／服務中狀態都只回到正常 `訂單成立`；重啟不得接受服務日期、直接建立帳務或視為 actual-start reconfirmation。後續全部使用既有正常訂單 UI／API。
+eligible 的歷史未服務／服務中狀態都只回到正常 `訂單成立`；重啟不得接受服務日期、直接建立帳務或視為 actual-start reconfirmation。後續沿用既有服務日期與排班 UI／API，但唯一歷史綁定人員不重跑候選、詢問、意願與推薦。
 六欄歷史來源缺少可信排休 root 時，Order Workbench V2 只允許人工確認真實服務日期，不得預設任何 service mode。restart writer 本身仍只建立空 tombstone；其後由既有服務日期 Apply 在同一交易保存 confirmed dates，且僅對待重建的 restart tombstone 呼叫 Scheduling generation replacement writer，讓可追溯的歷史 assignment 與人工日期成為 current canonical `staff_schedule`。

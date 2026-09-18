@@ -563,14 +563,15 @@ def _planned_end_date(
     )
     if service_dates:
         return max(service_dates)
-    day_shift = (
-        proposed_terms.planned_start_date - current_terms.planned_start_date
-    )
+    day_shift = proposed_terms.planned_start_date - current_terms.planned_start_date
+    service_day_delta = proposed_terms.service_days - current_terms.service_days
     if current_planned_end_date is None:
-        if day_shift.days == 0:
+        if day_shift.days == 0 and service_day_delta == 0:
             return None
-        raise ValueError("planned_end_date_required")
-    return current_planned_end_date + day_shift
+        return proposed_terms.planned_start_date + timedelta(
+            days=proposed_terms.service_days - 1
+        )
+    return current_planned_end_date + day_shift + timedelta(days=service_day_delta)
 
 
 def _confirmed_service_date_candidate(facts, proposed_terms, scheduling):

@@ -26,6 +26,7 @@ _ROW_FIELDS = frozenset({
     "case_no", "lifecycle_status", "replacement_resume_step", "order_version", "order_updated_at",
     "import_receipt_id", "import_created_at", "bootstrap_event_id", "bootstrap_created_at",
     "imported_terms_complete",
+    "historical_binding_receipt_id", "historical_binding_at", "historical_bound_staff_count",
     "terms_event_id", "terms_version", "terms_created_at", "candidate_pool_id", "candidate_pool_created_at",
     "candidate_pool_candidate_count", "candidate_pool_contacted_count", "candidate_pool_contacted_at",
     "candidate_pool_replied_count", "candidate_pool_willing_count", "candidate_pool_replied_at", "matching_plan_id", "matching_plan_version",
@@ -273,6 +274,18 @@ def _intake_stage(row: Mapping[str, object], case_no: str) -> StageProjection:
 
 
 def _matching_stage(row: Mapping[str, object], case_no: str) -> StageProjection:
+    historical_binding_receipt_id = _optional_int(row, "historical_binding_receipt_id")
+    historical_bound_staff_count = _nonnegative_int(row, "historical_bound_staff_count")
+    if historical_binding_receipt_id is not None and historical_bound_staff_count == 1:
+        return _stage(
+            2,
+            "matching_willingness",
+            "媒合與徵詢意願",
+            "Historical Orders / Scheduling",
+            "completed",
+            _source("Historical Orders / Scheduling", f"historical-binding-receipt:{historical_binding_receipt_id}", None),
+            _optional_datetime(row, "historical_binding_at"),
+        )
     plan_id = row["matching_plan_id"]
     status = row["matching_plan_status"]
     customer_decision = row["matching_customer_decision"]
@@ -319,6 +332,18 @@ def _matching_stage(row: Mapping[str, object], case_no: str) -> StageProjection:
 
 
 def _client_review_stage(row: Mapping[str, object], case_no: str) -> StageProjection:
+    historical_binding_receipt_id = _optional_int(row, "historical_binding_receipt_id")
+    historical_bound_staff_count = _nonnegative_int(row, "historical_bound_staff_count")
+    if historical_binding_receipt_id is not None and historical_bound_staff_count == 1:
+        return _stage(
+            3,
+            "client_review",
+            "推薦客戶與確認",
+            "Historical Orders / Scheduling",
+            "completed",
+            _source("Historical Orders / Scheduling", f"historical-binding-receipt:{historical_binding_receipt_id}", None),
+            _optional_datetime(row, "historical_binding_at"),
+        )
     plan_id = row["matching_plan_id"]
     resume_sent_count = _nonnegative_int(row, "resume_sent_count")
     if plan_id is None:
@@ -530,8 +555,20 @@ def _steps(row: Mapping[str, object], case_no: str, stages: tuple[StageProjectio
         pool_willing_count,
         pool_contacted_at,
     )
-    pool_status: StageStatus = "completed" if candidate_count else "in_progress" if candidate_pool_id is not None else "not_started" if plan_id is None else "unavailable"
-    recommendation_status: StageStatus = "completed" if resume_sent_count else "in_progress" if resume_attempt_count or accepted_count else "not_started" if plan_id is not None else "unavailable"
+    historical_binding = (
+        _optional_int(row, "historical_binding_receipt_id") is not None
+        and _nonnegative_int(row, "historical_bound_staff_count") == 1
+    )
+    historical_binding_at = _optional_datetime(row, "historical_binding_at")
+    if historical_binding:
+        pool_status = "completed"
+        contact_status = "completed"
+        reply_status = "completed"
+        reply_blockers = ()
+        recommendation_status = "completed"
+    else:
+        pool_status = "completed" if candidate_count else "in_progress" if candidate_pool_id is not None else "not_started" if plan_id is None else "unavailable"
+        recommendation_status = "completed" if resume_sent_count else "in_progress" if resume_attempt_count or accepted_count else "not_started" if plan_id is not None else "unavailable"
     handoff_recorded = row["external_signing_session_id"] is not None
     final_document_recorded = row["final_contract_document_id"] is not None
     dispatch_status: StageStatus = "completed" if handoff_recorded else "in_progress" if staff_document_count or staff_sent_count or staff_signed_count else "not_started" if plan_id is not None else "unavailable"
@@ -543,9 +580,9 @@ def _steps(row: Mapping[str, object], case_no: str, stages: tuple[StageProjectio
     deposit_warnings = (_notice("deposit_unpaid_override_active", "定金仍未付款，已由管理員人工放行。"),) if deposit_override and deposit_open else ()
     return (
         _step_from_stage(1, "intake_validation", "進件報名與資料完整性驗證", stage["intake_terms"]),
-        _standalone_step(2, "matching_pool", "媒合月嫂候選人加入意願池", "Assignments / Scheduling", pool_status, _optional_datetime(row, "matching_created_at"), "matching_plan_lineage_missing" if pool_status == "unavailable" else None),
-        _standalone_step(3, "caregiver_line_delivery", "發送訂單資訊詢問月嫂意願（LINE 或人工確認）", "Assignments / LINE Delivery", contact_status, pool_contacted_at, "candidate_contact_pool_missing" if contact_status == "unavailable" else None),
-        _standalone_step(4, "caregiver_willingness_reply", "月嫂回傳接案意願", "Assignments / LINE", reply_status, pool_replied_at, "candidate_contact_pool_missing" if reply_status == "unavailable" else None, blockers=reply_blockers),
+        _standalone_step(2, "matching_pool", "媒合月嫂候選人加入意願池", "Assignments / Scheduling", pool_status, historical_binding_at if historical_binding else _optional_datetime(row, "matching_created_at"), "matching_plan_lineage_missing" if pool_status == "unavailable" else None),
+        _standalone_step(3, "caregiver_line_delivery", "發送訂單資訊詢問月嫂意願（LINE 或人工確認）", "Assignments / LINE Delivery", contact_status, historical_binding_at if historical_binding else pool_contacted_at, "candidate_contact_pool_missing" if contact_status == "unavailable" else None),
+        _standalone_step(4, "caregiver_willingness_reply", "月嫂回傳接案意願", "Assignments / LINE", reply_status, historical_binding_at if historical_binding else pool_replied_at, "candidate_contact_pool_missing" if reply_status == "unavailable" else None, blockers=reply_blockers),
         _step_from_stage(5, "formal_recommendation", "寄送月嫂履歷給客戶確認", stage["client_review"]),
         _standalone_step(6, "external_signing_dispatch", "建立契約並送交外部簽署平台", "Contract Signing", dispatch_status, _optional_datetime(row, "external_signing_handoff_at"), "external_signing_handoff_missing" if dispatch_status == "unavailable" else None),
         _standalone_step(7, "external_signing_completion", "雙方完成外部簽署並回收最終 PDF", "Contract Signing / Orders", signing_status, _optional_datetime(row, "final_contract_completed_at"), "external_signing_final_document_missing" if signing_status == "unavailable" else None),

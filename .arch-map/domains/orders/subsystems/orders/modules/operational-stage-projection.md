@@ -5,10 +5,10 @@
 - subsystem: `orders`
 
 ## Responsibility
-將 Case Import 或 Case Architecture Bootstrap 的正式進件 lineage，連同 Orders、Scheduling、Client Finance 與 Payroll 的唯讀根事實整合為營運階段投影；單一 owner fact 不可用時只局部標示 unavailable，不使整頁訂單清單失效。指定 workbench scope 時先依 canonical lifecycle 排除 scope 外案件，再投影十三核心階段；scope 內資料仍採 fail-closed。既有七階段／十一 SOP 契約保持相容，待辦看板 Beta 另由同一正式根事實轉成十三核心階段唯讀契約。
+將 Case Import 或 Case Architecture Bootstrap 的正式進件 lineage，連同 Orders、Scheduling、Client Finance 與 Payroll 的唯讀根事實整合為營運階段投影；單一 owner fact 不可用時只局部標示 unavailable，不使整頁訂單清單失效。目前有效 Scheduling generation 由歷史精算重啟或其服務日期接手 command 建立，且歷史綁定人員唯一時，候選、詢問、意願與推薦由該 current provenance 判定完成；舊重啟事件不得在取消、重開或後續 replacement generation 繼續冒充現況。指定 workbench scope 時先依 canonical lifecycle 排除 scope 外案件，再投影十三核心階段；scope 內資料仍採 fail-closed。既有七階段／十一 SOP 契約保持相容，待辦看板 Beta 另由同一正式根事實轉成十三核心階段唯讀契約。
 
 ## Implementation
-- presentation: 待辦看板以卡片進入獨立案件工作畫面；六個工作群組承接既有業務元件，十三階段進度另供展開查閱。群組切換不推進後端階段，已開啟表單保留掛載。案件資料與案件異動分開呈現，不在工會操作頁顯示技術來源。元件沿用原 `OrderWorkbenchV2Drawer` symbol，但不再使用 Drawer overlay；導覽為現有 route 內的本機狀態。
+- presentation: 待辦看板以卡片進入獨立案件工作畫面；六個工作群組各自依正式資料顯示狀態，十三階段只作紀錄與導覽，不構成線性操作前置。群組切換不推進後端階段，已開啟表單保留掛載。案件資料與案件異動分開呈現，不在工會操作頁顯示技術來源。元件沿用原 `OrderWorkbenchV2Drawer` symbol，但不再使用 Drawer overlay；導覽為現有 route 內的本機狀態。
 - primary:
   - `subsystems/orders/stage_projection_query.py`
   - `subsystems/orders/core_stage_projection_query.py`

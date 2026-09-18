@@ -30,6 +30,9 @@ SELECT o.case_no,
                   AND o.service_end_time IS NOT NULL
                   AND o.service_end_day_offset IN (0, 1)
             THEN 1 ELSE 0 END AS imported_terms_complete,
+       historical_binding_generation.receipt_id AS historical_binding_receipt_id,
+       historical_binding_generation.created_at AS historical_binding_at,
+       COALESCE(historical_binding.bound_staff_count, 0) AS historical_bound_staff_count,
        terms_fact.terms_event_id,
        terms_fact.terms_version,
        terms_fact.terms_created_at,
@@ -113,6 +116,31 @@ SELECT o.case_no,
               MAX(created_at) AS bootstrap_created_at
          FROM case_architecture_bootstrap_events GROUP BY case_no
   ) bootstrap_fact ON bootstrap_fact.case_no = o.case_no
+  LEFT JOIN (
+       SELECT aggregate.case_no, receipt.id AS receipt_id, receipt.created_at
+         FROM scheduling_aggregates aggregate
+         JOIN scheduling_command_receipts receipt
+           ON receipt.case_no = aggregate.case_no
+          AND receipt.resulting_generation_id = aggregate.effective_generation_id
+          AND receipt.command_family IN (
+              'orders_historical_precision_restart',
+              'historical_restart_service_dates'
+          )
+  ) historical_binding_generation
+    ON historical_binding_generation.case_no = o.case_no
+  LEFT JOIN (
+       SELECT receipt.case_no, COUNT(DISTINCT evidence.staff_id) AS bound_staff_count
+         FROM historical_order_adoption_receipts receipt
+         JOIN historical_order_pairing_evidence evidence ON evidence.receipt_id = receipt.id
+         JOIN (
+              SELECT case_no, MAX(id) AS receipt_id
+                FROM historical_order_adoption_receipts
+               WHERE outcome = 'adopted'
+               GROUP BY case_no
+         ) latest_adoption ON latest_adoption.receipt_id = receipt.id
+        WHERE evidence.staff_id IS NOT NULL
+        GROUP BY receipt.case_no
+  ) historical_binding ON historical_binding.case_no = o.case_no
   LEFT JOIN (
        SELECT case_no, MAX(id) AS terms_event_id, MAX(resulting_order_version) AS terms_version,
               MAX(created_at) AS terms_created_at

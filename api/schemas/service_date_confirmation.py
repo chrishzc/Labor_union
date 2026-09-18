@@ -13,6 +13,12 @@ class ServiceWeekView(BaseModel):
     service_day_count: int = Field(gt=0)
 
 
+class BoundServiceStaffView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    staff_id: int = Field(gt=0)
+    staff_name: str = Field(min_length=1)
+
+
 class ServiceDateConfirmationQueryView(BaseModel):
     model_config = ConfigDict(extra="forbid")
     case_no: str
@@ -23,6 +29,7 @@ class ServiceDateConfirmationQueryView(BaseModel):
     selectable_dates: list[date]
     current_version: int | None = None
     current_dates: list[date]
+    bound_staff: list[BoundServiceStaffView]
 
 
 class ServiceDateConfirmationPreviewView(BaseModel):

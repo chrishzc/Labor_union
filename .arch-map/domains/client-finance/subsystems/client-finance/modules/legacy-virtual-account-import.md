@@ -5,7 +5,7 @@
 - subsystem: `client-finance`
 
 ## Responsibility
-由 Client Finance 匯入舊流程的案件／虛擬帳號實際對照。現行案件編號產生規則保持不變；空白、格式不符或查無訂單的來源列直接略過。相同帳號命中多個案件時不得自動核銷。
+由 Client Finance 匯入舊流程的案件／虛擬帳號實際對照。只要案件存在匯入對照，收款解析與契約顯示皆以匯入帳號為優先且不得回退公式；唯一對照可直接使用，多筆不同對照須人工處理。只有完全沒有匯入對照時才使用現行案件編號公式；空白、格式不符或查無訂單的來源列直接略過。相同帳號命中多個案件時不得自動核銷。
 
 ## Implementation
 - `subsystems/client_finance/legacy_virtual_account_workbook.py`
@@ -19,7 +19,7 @@
 
 ## Dependencies
 - outbound: `orders` — 只接受已存在的 canonical `case_no`，不存在即略過。
-- inbound: `receipt-reconciliation` — 虛擬帳號解析合併舊流程對照與現行公式候選。
+- inbound: `receipt-reconciliation`／`contract-signing` — 虛擬帳號解析先判斷匯入對照；不存在時才建立現行公式候選。
 
 ## Contracts
 - `document/架構重整/01_規格基線/04_Client_Finance_Domain.md`

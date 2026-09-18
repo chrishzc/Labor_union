@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { clientRegistryClient, type ClientRegistryListQuery } from '../api/client_registry/client_registry_client';
 import type { ClientRegistryDetail, ClientRegistryPage as ClientRegistryPageData, ClientRegistrySortBy, ClientRegistrySortOrder } from '../api/client_registry/client_registry_schemas';
+import { Drawer } from '../components/Drawer';
 import './ClientRosterPage.css';
 
 type SelectBoolean = '' | 'true' | 'false';
@@ -126,7 +127,7 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
   const [pageOffset, setPageOffset] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [expandedCaseNo, setExpandedCaseNo] = useState<string | null>(null);
+  const [selectedCaseNo, setSelectedCaseNo] = useState<string | null>(null);
   const [detail, setDetail] = useState<ClientRegistryDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
@@ -144,7 +145,7 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
       setPage(result);
       setAppliedFilters(nextFilters);
       setPageOffset(nextOffset);
-      setExpandedCaseNo(null);
+      setSelectedCaseNo(null);
       setDetail(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : '客戶名冊清單載入失敗。');
@@ -176,14 +177,9 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
     }
   };
   const sortLabel = (sortBy: ClientRegistrySortBy) => filters.sortBy === sortBy ? (filters.sortOrder === 'asc' ? ' ↑' : ' ↓') : '';
-  const toggleDetail = async (caseNo: string) => {
-    if (expandedCaseNo === caseNo) {
-      detailRequest.current += 1;
-      setExpandedCaseNo(null); setDetail(null); setDetailError(null);
-      return;
-    }
+  const openDetail = async (caseNo: string) => {
     const request = ++detailRequest.current;
-    setExpandedCaseNo(caseNo); setDetail(null); setDetailError(null); setDetailLoading(true);
+    setSelectedCaseNo(caseNo); setDetail(null); setDetailError(null); setDetailLoading(true);
     try {
       const result = await clientRegistryClient.query(caseNo);
       if (detailRequest.current === request) setDetail(result);
@@ -192,6 +188,10 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
     } finally {
       if (detailRequest.current === request) setDetailLoading(false);
     }
+  };
+  const closeDetail = () => {
+    detailRequest.current += 1;
+    setSelectedCaseNo(null); setDetail(null); setDetailError(null); setDetailLoading(false);
   };
   const exportOrderAccounting = async () => {
     setExporting(true); setExportMessage(null); setExportError(null);
@@ -247,9 +247,22 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
         <th scope="col" title="staff_obligations.due_date">月嫂義務應付日</th>
         <th scope="col" title="client_obligations.due_date（subsidy_return）">客戶補助退還日</th>
         <th scope="col" title="既有 _claim_schedule(actual_end_date) 投影；非實際送件日">補助預計申請年月</th>
-        <th scope="col">完整資料</th>
       </tr></thead>
-      <tbody>{page.items.map((item) => <React.Fragment key={item.case_no}><tr>
+      <tbody>{page.items.map((item) => <tr
+        key={item.case_no}
+        className={selectedCaseNo === item.case_no ? 'is-selected' : undefined}
+        tabIndex={0}
+        aria-haspopup="dialog"
+        aria-expanded={selectedCaseNo === item.case_no}
+        aria-label={`開啟案件 ${item.case_no} 詳細資料`}
+        onClick={(event) => { event.currentTarget.focus(); void openDetail(item.case_no); }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            void openDetail(item.case_no);
+          }
+        }}
+      >
         <td>{item.case_no}</td><td>{displayImportedVirtualAccounts(item.imported_virtual_accounts)}</td><td>{item.built_in_virtual_account ?? '—'}</td><td>{item.name ?? '—'}</td><td>{item.phone ?? '—'}</td><td>{item.district ?? '未登錄'}</td>
         <td>{item.multi_birth_count ?? '—'}</td><td>{item.service_days ?? '—'}</td><td>{displayCooking(item.requires_cooking)}</td>
         <td>{item.planned_start_date ?? '—'}</td><td>{item.order_status ?? '—'}</td>
@@ -267,13 +280,20 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
           : item.claim_application_year !== null && item.claim_application_month !== null
           ? `${item.claim_application_year}-${String(item.claim_application_month).padStart(2, '0')}`
           : '無值'}</td>
-        <td><button type="button" aria-expanded={expandedCaseNo === item.case_no} onClick={() => void toggleDetail(item.case_no)}>{expandedCaseNo === item.case_no ? '收合全部欄位' : '顯示全部欄位'}</button></td>
-      </tr>{expandedCaseNo === item.case_no && <tr className="client-roster-detail-row"><td colSpan={19}>
-        {detailLoading && <p role="status">正在載入完整客戶資料…</p>}
-        {detailError && <p role="alert">{detailError}</p>}
-        {detail?.case_no === item.case_no && <ReadOnlyDetail detail={detail} />}
-      </td></tr>}</React.Fragment>)}</tbody>
+      </tr>)}</tbody>
     </table></div>}
+    <Drawer
+      isOpen={selectedCaseNo !== null}
+      onClose={closeDetail}
+      title={selectedCaseNo ? `案件 ${selectedCaseNo} 詳細資料` : '案件詳細資料'}
+      size="wide"
+      closeLabel="關閉案件詳細資料"
+      className="client-roster-detail-drawer"
+    >
+      {detailLoading && <p role="status" className="client-roster-message">正在載入完整客戶資料…</p>}
+      {detailError && <p role="alert" className="client-roster-message">{detailError}</p>}
+      {detail?.case_no === selectedCaseNo && <ReadOnlyDetail detail={detail} />}
+    </Drawer>
   </div>;
 };
 

@@ -152,6 +152,9 @@ def _matching_pool_cascade_timeline(plan_id=1) -> OrderOperationalTimeline:
     root_facts = {
         "matching_plan_id": plan_id,
         "candidate_pool_id": None,
+        "historical_binding_receipt_id": None,
+        "historical_binding_at": None,
+        "historical_bound_staff_count": 0,
         "candidate_pool_candidate_count": 0,
         "candidate_pool_contacted_count": 0,
         "candidate_pool_replied_count": 0,

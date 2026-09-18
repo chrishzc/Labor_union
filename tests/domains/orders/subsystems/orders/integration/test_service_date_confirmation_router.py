@@ -22,6 +22,7 @@ from domains.orders.service_date_confirmation import ConfirmedServiceDateCandida
 from shared_kernel.fingerprints import PreviewFingerprint
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.orders.service_date_confirmation_workflow import (
+    RestartSchedulingAssignmentFacts,
     ServiceDateConfirmationFacts,
     ServiceDateConfirmationReceipt,
     ServiceDateConfirmationWorkflow,
@@ -179,6 +180,33 @@ def test_query_service_dates_success():
     assert len(data["selectable_dates"]) == 19
     assert data["current_version"] == 1
     assert data["current_dates"] == ["2026-08-01", "2026-08-02", "2026-08-03"]
+    assert data["bound_staff"] == []
+
+
+def test_query_service_dates_preserves_historical_bound_staff():
+    facts = ServiceDateConfirmationFacts(
+        case_no="HIST-SD-001",
+        order_version=2,
+        scheduling_version=3,
+        contracted_service_days=3,
+        suggested_dates=(),
+        selectable_dates=(date(2026, 8, 1), date(2026, 8, 2), date(2026, 8, 3)),
+        current_version=None,
+        current_dates=(),
+        restart_generation_number=4,
+        restart_assignments=(RestartSchedulingAssignmentFacts(91, 12, 1, 3, "王月嫂"),),
+    )
+    client = TestClient(_create_app(
+        InMemoryServiceDateConfirmationRepository(facts),
+        InMemorySchedulingSnapshotInvalidationPort(),
+    ))
+
+    response = client.get("/api/v1/orders/HIST-SD-001/service-dates")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["bound_staff"] == [
+        {"staff_id": 12, "staff_name": "王月嫂"}
+    ]
 
 
 def test_query_service_dates_case_not_found():

@@ -65,6 +65,13 @@ export const ServiceWeekSchema = z
 
 export type ServiceWeek = z.infer<typeof ServiceWeekSchema>;
 
+export const BoundServiceStaffSchema = z
+  .object({
+    staff_id: z.number().int().gt(0),
+    staff_name: z.string().min(1),
+  })
+  .strict();
+
 export const ServiceDateConfirmationQueryViewSchema = z
   .object({
     case_no: z.string().min(1),
@@ -75,6 +82,7 @@ export const ServiceDateConfirmationQueryViewSchema = z
     selectable_dates: z.array(IsoDateSchema),
     current_version: z.number().int().min(1).nullable(),
     current_dates: z.array(IsoDateSchema),
+    bound_staff: z.array(BoundServiceStaffSchema),
   })
   .strict();
 

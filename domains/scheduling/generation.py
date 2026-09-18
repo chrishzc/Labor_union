@@ -214,8 +214,6 @@ def build_preassignment_terms_candidate(
         raise ValueError("preassignment scheduling facts must not contain segments")
     if facts.service_started:
         raise ValueError("preassignment_service_started_conflict")
-    if proposed_terms.service_days != current_terms.service_days:
-        raise ValueError("scheduling_segments_required")
     return SchedulingGenerationCandidate(
         case_no=facts.case_no,
         generation_number=facts.generation_number + 1,

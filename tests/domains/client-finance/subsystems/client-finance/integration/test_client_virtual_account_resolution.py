@@ -2,6 +2,7 @@ import pytest
 
 from subsystems.client_finance.virtual_account_resolution import (
     build_client_virtual_account,
+    resolve_case_virtual_account,
     resolve_client_virtual_account,
 )
 
@@ -67,15 +68,15 @@ def test_virtual_account_requires_one_matching_canonical_case(generated_matches,
 
 def test_resolves_an_imported_legacy_account_to_its_order():
     assert resolve_client_virtual_account(
-        _Cursor([{"case_no": "114000018"}], []), "99781699114033"
+        _Cursor([{"case_no": "114000018"}]), "99781699114033"
     ) == {"result": "resolved", "case_no": "114000018", "reason": None}
 
 
-def test_reused_account_stays_pending_when_legacy_and_current_cases_differ():
+def test_imported_account_wins_when_formula_points_to_a_different_case():
     assert resolve_client_virtual_account(
         _Cursor([{"case_no": "114000018"}], [{"case_no": "114000033"}]),
         "99781699114033",
-    ) == {"result": "pending", "case_no": None, "reason": "case_not_unique"}
+    ) == {"result": "resolved", "case_no": "114000018", "reason": None}
 
 
 def test_same_case_from_both_rules_is_not_ambiguous():
@@ -83,3 +84,48 @@ def test_same_case_from_both_rules_is_not_ambiguous():
         _Cursor([{"case_no": "114000033"}], [{"case_no": "114000033"}]),
         "99781699114033",
     ) == {"result": "resolved", "case_no": "114000033", "reason": None}
+
+
+def test_multiple_imported_cases_stay_pending_without_formula_fallback():
+    cursor = _Cursor(
+        [{"case_no": "114000018"}, {"case_no": "114000019"}],
+        [{"case_no": "114000033"}],
+    )
+
+    assert resolve_client_virtual_account(cursor, "99781699114033") == {
+        "result": "pending",
+        "case_no": None,
+        "reason": "case_not_unique",
+    }
+    assert len(cursor.executions) == 1
+
+
+def test_case_projection_prefers_its_unique_imported_account():
+    cursor = _Cursor([{"virtual_account": "99781699114991"}])
+
+    assert resolve_case_virtual_account(cursor, "114000033") == {
+        "result": "resolved",
+        "virtual_account": "99781699114991",
+        "reason": None,
+    }
+
+
+def test_case_projection_rejects_multiple_imported_accounts_without_formula_fallback():
+    cursor = _Cursor([
+        {"virtual_account": "99781699114991"},
+        {"virtual_account": "99781699114992"},
+    ])
+
+    assert resolve_case_virtual_account(cursor, "114000033") == {
+        "result": "pending",
+        "virtual_account": None,
+        "reason": "imported_account_not_unique",
+    }
+
+
+def test_case_projection_uses_formula_only_without_an_imported_account():
+    assert resolve_case_virtual_account(_Cursor([]), "114000033") == {
+        "result": "resolved",
+        "virtual_account": "99781699114033",
+        "reason": None,
+    }

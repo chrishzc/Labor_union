@@ -93,6 +93,26 @@ class _EmptyRestartCursor:
         return None
 
 
+class _EvidenceOnlyRestartCursor:
+    def __init__(self):
+        self.statements = []
+
+    def execute(self, statement, parameters):
+        self.statements.append((statement, parameters))
+
+    def fetchone(self):
+        return {"generation_number": 4}
+
+    def fetchall(self):
+        return ({
+            "assignment_id": None,
+            "staff_id": 12,
+            "caregiver_ordinal": 1,
+            "staff_name": "王月嫂",
+            "service_day_count": 0,
+        },)
+
+
 def test_service_dates_must_match_the_contracted_day_count():
     with pytest.raises(ValueError, match="service date count"):
         ConfirmedServiceDateCandidate(
@@ -202,6 +222,33 @@ def test_restarted_historical_dates_build_one_canonical_scheduling_generation():
     assert assignment.service_dates == (date(2026, 9, 3), date(2026, 9, 4))
     assert assignment.assigned_start_date == date(2026, 9, 3)
     assert assignment.assigned_end_date == date(2026, 9, 4)
+
+
+def test_evidence_only_historical_binding_builds_a_new_assignment_without_source_id():
+    cursor = _EvidenceOnlyRestartCursor()
+    generation, assignments = MySqlServiceDateConfirmationRepository._restart_scheduling_source(
+        cursor, "HIST-EVIDENCE-ONLY", 2
+    )
+    facts = ServiceDateConfirmationFacts(
+        "HIST-EVIDENCE-ONLY", 3, 7, 2, (),
+        (date(2026, 9, 3), date(2026, 9, 4)), None, (), generation,
+        assignments,
+    )
+
+    command = _restart_scheduling_command(
+        facts,
+        (date(2026, 9, 3), date(2026, 9, 4)),
+        actor="admin",
+        reason="沿用歷史既定月嫂",
+        idempotency_key="restart-evidence-only",
+        command_fingerprint="a" * 64,
+        preview_fingerprint="b" * 64,
+    )
+
+    assert "evidence.assignment_id IS NOT NULL" not in cursor.statements[1][0]
+    assert assignments[0].staff_name == "王月嫂"
+    assert command.candidate.assignments[0].source_assignment_id is None
+    assert command.candidate.assignments[0].staff_id == 12
 
 
 def test_restarted_multi_caregiver_dates_fail_closed_without_existing_allocation():

@@ -358,3 +358,40 @@ def test_reconciliation_does_not_create_retired_anomaly_rechecks(monkeypatch):
     reconciliation.reconcile("115990823")
 
     assert requests == []
+
+
+def test_apply_cooking_terms_falls_back_to_direct_update_when_client_finance_bootstrap_required(monkeypatch):
+    executed = []
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def execute(self, statement, params):
+            executed.append((statement, params))
+
+    class Connection(_Connection):
+        def cursor(self):
+            return Cursor()
+
+    class Repository:
+        def __init__(self, _connection):
+            pass
+
+        def load_for_preview(self, _case_no):
+            raise ValueError("client_finance_bootstrap_required")
+
+    monkeypatch.setattr(adapter, "MySqlOrderTermsRepository", Repository)
+
+    connection = Connection()
+    adapter.MySqlHcmBeClassReconciliationAdapter(connection).apply_cooking_terms(
+        "115990823", 9, True
+    )
+
+    assert executed == [
+        ("UPDATE orders SET requires_cooking=%s WHERE case_no=%s", (True, "115990823"))
+    ]
+    assert connection.begins == connection.commits == connection.rollbacks == 0

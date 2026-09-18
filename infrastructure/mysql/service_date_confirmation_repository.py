@@ -192,25 +192,28 @@ class MySqlServiceDateConfirmationRepository:
             return None, ()
         cursor.execute(
             "SELECT evidence.assignment_id,evidence.staff_id,evidence.caregiver_ordinal,"
+            "staff.name AS staff_name,"
             "COUNT(schedule.id) AS service_day_count "
             "FROM historical_order_adoption_receipts receipt "
             "JOIN historical_order_pairing_evidence evidence ON evidence.receipt_id=receipt.id "
+            "JOIN staff ON staff.id=evidence.staff_id "
             "LEFT JOIN staff_schedule schedule ON schedule.assignment_id=evidence.assignment_id "
             "AND schedule.is_work_day=1 "
             "WHERE receipt.id=(SELECT MAX(candidate.id) FROM historical_order_adoption_receipts candidate "
             "WHERE candidate.case_no=%s AND candidate.outcome='adopted') "
-            "AND evidence.assignment_id IS NOT NULL AND evidence.staff_id IS NOT NULL "
-            "GROUP BY evidence.assignment_id,evidence.staff_id,evidence.caregiver_ordinal "
+            "AND evidence.staff_id IS NOT NULL "
+            "GROUP BY evidence.assignment_id,evidence.staff_id,evidence.caregiver_ordinal,staff.name "
             "ORDER BY evidence.caregiver_ordinal" + lock_clause,
             (case_no,),
         )
         rows = tuple(cursor.fetchall())
         assignments = tuple(
             RestartSchedulingAssignmentFacts(
-                int(row["assignment_id"]),
+                None if row["assignment_id"] is None else int(row["assignment_id"]),
                 int(row["staff_id"]),
                 index,
                 contracted_days if len(rows) == 1 else int(row["service_day_count"]),
+                str(row["staff_name"]),
             )
             for index, row in enumerate(rows, start=1)
         )

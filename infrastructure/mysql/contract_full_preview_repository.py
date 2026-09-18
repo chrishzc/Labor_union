@@ -30,7 +30,10 @@ from infrastructure.mysql.order_terms_read_model import (
 )
 from domains.client_finance.obligation_planning import build_client_finance_terms_candidate, ClientChargeDay
 from shared_kernel.money import MoneyNTD
-from subsystems.client_finance.virtual_account_resolution import build_client_virtual_account
+from subsystems.client_finance.virtual_account_resolution import (
+    build_client_virtual_account,
+    resolve_case_virtual_account,
+)
 from subsystems.contract_signing.full_contract_preview import (
     ContractPreviewScope,
     FullContractOwnerProjection,
@@ -45,6 +48,7 @@ _LEGACY_SERVICE_MODE_ALIASES = {
     "週休二日": "週休2日",
     "周休二日": "週休2日",
 }
+_UNSET_VIRTUAL_ACCOUNT = object()
 
 
 class MySqlFullContractProjectionRepository:
@@ -59,7 +63,7 @@ class MySqlFullContractProjectionRepository:
         if case is None:
             return None
         assignments = self._context.load_assignments(case_no)
-        facts = _common_facts(case)
+        facts = _common_facts(case, _client_virtual_account(self._connection, case_no))
         facts["service_type"] = _canonical_service_mode(facts.get("service_type"))
         # A client contract may project the staff selected by Scheduling when
         # there is one unambiguous current assignment (planned or active).
@@ -125,7 +129,7 @@ class MySqlFullContractProjectionRepository:
         )
         if assignment is None:
             return None
-        facts = _common_facts(case)
+        facts = _common_facts(case, _client_virtual_account(self._connection, case_no))
         facts.update(
             {
                 "staff_name": assignment.get("staff_name"),
@@ -205,7 +209,7 @@ class MySqlFullContractProjectionRepository:
             dates = tuple(day for owner, day in plan["allocations"] if int(owner["id"]) == matching_segment_id)
             if not dates:
                 raise ValueError("precontract_service_days_mismatch")
-            facts = _common_facts(case)
+            facts = _common_facts(case, _client_virtual_account(self._connection, case_no))
             facts.update({"matching_segment_id": matching_segment_id, "staff_name": segment["staff_name"],
                           "staff_phone": segment["staff_phone"], "service_type": _canonical_service_mode(case.get("service_type")),
                           "assignment_start_date": dates[0], "assignment_end_date": dates[-1], "assignment_service_days": len(dates)})
@@ -404,14 +408,34 @@ def _extend_precontract_staff_payroll(
     owners["payroll"] = payroll.fingerprint.value
 
 
-def _common_facts(case: dict[str, object]) -> dict[str, object]:
+def _client_virtual_account(connection: Any, case_no: str) -> str | None:
+    cursor = connection.cursor()
+    try:
+        resolution = resolve_case_virtual_account(cursor, case_no)
+    finally:
+        cursor.close()
+    return (
+        str(resolution["virtual_account"])
+        if resolution["result"] == "resolved"
+        else None
+    )
+
+
+def _common_facts(
+    case: dict[str, object],
+    client_virtual_account: str | None | object = _UNSET_VIRTUAL_ACCOUNT,
+) -> dict[str, object]:
     """Map typed scalar context fields; raw survey is normalized and excluded."""
     # Case Import owns normalization of the legacy payload.  Contract Signing
     # receives only this named projection, never the raw survey mapping.
     case_import = project_order_information(case.get("survey_details"))
     return {
         "case_no": case.get("case_no"),
-        "client_virtual_account": build_client_virtual_account(case.get("case_no")),
+        "client_virtual_account": (
+            build_client_virtual_account(case.get("case_no"))
+            if client_virtual_account is _UNSET_VIRTUAL_ACCOUNT
+            else client_virtual_account
+        ),
         "client_name": case.get("client_name"),
         "phone": case.get("client_phone"),
         "address": case.get("client_address"),

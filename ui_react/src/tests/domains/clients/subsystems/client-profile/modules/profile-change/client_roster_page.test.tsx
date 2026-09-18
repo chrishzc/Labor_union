@@ -55,10 +55,13 @@ describe('ClientRosterPage', () => {
     }));
   });
 
-  it('expands every registry section as read-only fields for the selected order', async () => {
+  it('opens every registry section in the system drawer when the order row is selected', async () => {
     render(<ClientRosterPage />);
-    fireEvent.click(await screen.findByRole('button', { name: '顯示全部欄位' }));
+    const orderRow = await screen.findByRole('row', { name: '開啟案件 CASE-001 詳細資料' });
+    expect(screen.queryByRole('button', { name: /顯示全部欄位|收合全部欄位/ })).not.toBeInTheDocument();
+    fireEvent.click(orderRow);
     await waitFor(() => expect(mocks.query).toHaveBeenCalledWith('CASE-001'));
+    expect(screen.getByRole('dialog', { name: '案件 CASE-001 詳細資料' })).toBeInTheDocument();
     const detail = await screen.findByLabelText('CASE-001 全部唯讀欄位');
     expect(detail).toHaveTextContent('客戶主檔');
     expect(detail).toHaveTextContent('主檔註記');
@@ -72,6 +75,10 @@ describe('ClientRosterPage', () => {
     expect(detail).toHaveTextContent('客戶應付總額');
     expect(detail).toHaveTextContent('450');
     expect(within(detail).queryByRole('button', { name: /儲存|更新|刪除|編輯|套用/ })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '關閉案件詳細資料' }));
+    expect(screen.queryByRole('dialog', { name: '案件 CASE-001 詳細資料' })).not.toBeInTheDocument();
+    expect(orderRow).toHaveFocus();
   });
 
   it('clears filters through another unfiltered server request and sorts through the server', async () => {
