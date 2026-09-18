@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from datetime import date
 from decimal import Decimal
 import json
+import logging
 
 from domains.orders.lifecycle import OrderLifecycleStatus
 from domains.payroll.calculation import AssignmentRateSnapshot, PayrollPolicyKind
@@ -21,6 +22,8 @@ from subsystems.orders.historical_service_accounting_workflow import (
     StoredHistoricalServiceAccountingReceipt,
     _command_fingerprint,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class MySqlHistoricalServiceAccountingRepository:
@@ -264,6 +267,17 @@ def _ensure_assignment_rate_snapshots(cursor, candidate):
                 or str(row["policy_kind"]) != snapshot.policy_kind.value
                 or int(row["hourly_rate_ntd"]) != snapshot.hourly_rate.amount
             ):
+                logger.warning(
+                    "historical_service_accounting: assignment rate snapshot mismatch: "
+                    "assignment_id=%s db=(%s, %s, %s) expected=(%s, %s, %s)",
+                    assignment_id,
+                    row["policy_version"],
+                    row["policy_kind"],
+                    row["hourly_rate_ntd"],
+                    snapshot.policy_version,
+                    snapshot.policy_kind.value,
+                    snapshot.hourly_rate.amount,
+                )
                 raise ValueError("historical_accounting_obligation_binding_invalid")
             continue
         rows.append(
@@ -311,6 +325,12 @@ def _write_client_obligation(cursor, request, candidate, source_identity, result
         (identity,),
     )
     if cursor.fetchone() is not None:
+        logger.warning(
+            "historical_service_accounting: client obligation already exists: "
+            "case_no=%s identity=%s",
+            candidate.facts.case_no,
+            identity,
+        )
         raise ValueError("historical_accounting_obligation_binding_invalid")
     cursor.execute(
         "INSERT INTO client_obligation_events "
@@ -383,6 +403,12 @@ def _write_staff_obligations(cursor, request, candidate, source_identity, result
             (identity,),
         )
         if cursor.fetchone() is not None:
+            logger.warning(
+                "historical_service_accounting: staff obligation already exists: "
+                "case_no=%s identity=%s",
+                candidate.facts.case_no,
+                identity,
+            )
             raise ValueError("historical_accounting_obligation_binding_invalid")
         cursor.execute(
             "INSERT INTO staff_obligation_events "
@@ -457,6 +483,12 @@ def _revise_staff_obligation(
     )
     base = cursor.fetchone()
     if base is None:
+        logger.warning(
+            "historical_service_accounting: base staff obligation missing for revision: "
+            "case_no=%s base_identity=%s",
+            candidate.facts.case_no,
+            base_identity,
+        )
         raise ValueError("historical_accounting_obligation_binding_invalid")
     if not bool(base["payout_history_exists"]):
         cursor.execute(
@@ -561,6 +593,13 @@ def _write_order_staff_payment_due_date(cursor, candidate):
     due_date = candidate.staff_payment_due_date
     if candidate.facts.staff_payment_due_date is not None:
         if candidate.facts.staff_payment_due_date != due_date:
+            logger.warning(
+                "historical_service_accounting: staff_payment_due_date conflict: "
+                "case_no=%s facts_due_date=%s candidate_due_date=%s",
+                candidate.facts.case_no,
+                candidate.facts.staff_payment_due_date,
+                due_date,
+            )
             raise ValueError("historical_accounting_obligation_binding_invalid")
         return
     cursor.execute(
@@ -569,6 +608,13 @@ def _write_order_staff_payment_due_date(cursor, candidate):
         (due_date, candidate.facts.case_no),
     )
     if cursor.rowcount != 1:
+        logger.warning(
+            "historical_service_accounting: orders.staff_payment_due_date update affected != 1: "
+            "case_no=%s due_date=%s rowcount=%s",
+            candidate.facts.case_no,
+            due_date,
+            cursor.rowcount,
+        )
         raise ValueError("historical_accounting_obligation_binding_invalid")
 
 

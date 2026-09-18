@@ -3,6 +3,7 @@ File: historical_order_adoption.py
 Description: 提供 authenticated Orders historical workbook Preview／Apply 與暫存檔清理邊界。
 """
 
+import logging
 from pathlib import Path
 import tempfile
 from typing import Annotated
@@ -23,6 +24,7 @@ from subsystems.orders.historical_order_workbook_import import HistoricalOrderWo
 
 
 router = APIRouter(prefix="/api/v1/orders/historical-adoption/workbooks", tags=["Orders Historical Adoption"])
+logger = logging.getLogger(__name__)
 _MAXIMUM_WORKBOOK_BYTES = 20 * 1024 * 1024
 _IdempotencyHeader = Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=191)]
 _CorrelationHeader = Annotated[str, Header(alias="X-Correlation-ID", min_length=1, max_length=191)]
@@ -75,6 +77,7 @@ async def _with_workbook(
         result = await run_in_threadpool(operation, upload_path)
         return BaseResponse(data=result.as_dict(), message=message)
     except ValueError as error:
+        logger.exception("歷史訂單工作簿處理驗證失敗: %s", error)
         raise _http_error(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             TypedError(
