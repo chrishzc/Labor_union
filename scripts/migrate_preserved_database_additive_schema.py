@@ -6867,6 +6867,16 @@ def _allowed_later_artifact_indexes(
                 "columns": ("source_identity",),
             }
         }
+    if part_name == "1012_service_before_replacement.sql":
+        return {
+            (
+                "scheduling_service_before_replacement_events",
+                "uq_service_before_replacement_event_owner_binding",
+            ): {
+                "non_unique": 0,
+                "columns": ("id", "case_no"),
+            }
+        }
     return {}
 
 

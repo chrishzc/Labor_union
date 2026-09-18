@@ -330,3 +330,98 @@ def test_event_roots_successor_receipt_are_immutable_and_outbox_only_updates_del
         assert f"OLD.{business_column} <=> NEW.{business_column}" in sql
     for delivery_column in ("published_at", "attempts", "last_error"):
         assert f"OLD.{delivery_column} <=> NEW.{delivery_column}" not in sql
+
+
+def test_artifact_metadata_state_accepts_successor_owner_binding_index() -> None:
+    canonical = migration._canonical_artifact_descriptor(SQL_PATH.name)
+    indexes = dict(canonical["indexes"])
+    indexes[(
+        "scheduling_service_before_replacement_events",
+        "uq_service_before_replacement_event_owner_binding",
+    )] = {
+        "non_unique": 0,
+        "columns": ("id", "case_no"),
+    }
+
+    columns = [
+        {
+            "table_name": table,
+            "column_name": col_name,
+            "column_type": col_def["column_type"],
+            "is_nullable": col_def["is_nullable"],
+            "column_default": col_def["column_default"],
+            "extra": col_def["extra"],
+        }
+        for table, col_map in canonical["tables"].items()
+        for col_name, col_def in col_map.items()
+    ]
+    key_columns = [
+        {
+            "table_name": table,
+            "constraint_name": fk_name,
+            "column_name": col,
+            "referenced_table_name": fk_info["referenced_table"],
+            "referenced_column_name": ref_col,
+        }
+        for (table, fk_name), fk_info in canonical["foreign_keys"].items()
+        for col, ref_col in zip(
+            fk_info["columns"], fk_info["referenced_columns"]
+        )
+    ]
+    snapshot = {
+        "columns": columns,
+        "indexes": [
+            {
+                "table_name": t,
+                "index_name": idx_name,
+                "non_unique": idx["non_unique"],
+                "columns": ",".join(idx["columns"]),
+            }
+            for (t, idx_name), idx in indexes.items()
+        ],
+        "constraints": [
+            {
+                "table_name": t,
+                "constraint_name": fk_name,
+                "constraint_type": "FOREIGN KEY",
+            }
+            for (t, fk_name) in canonical["foreign_keys"]
+        ] + [
+            {
+                "table_name": t,
+                "constraint_name": chk_name,
+                "constraint_type": "CHECK",
+                "enforced": "YES",
+                "check_clause": clause,
+            }
+            for (t, chk_name), clause in canonical["checks"].items()
+        ],
+        "key_columns": key_columns,
+        "foreign_keys": [
+            {
+                "table_name": t,
+                "constraint_name": fk_name,
+                "update_rule": "RESTRICT",
+                "delete_rule": "RESTRICT",
+            }
+            for (t, fk_name) in canonical["foreign_keys"]
+        ],
+        "triggers": [
+            {
+                "trigger_name": trg_name,
+                "event_object_table": trg["event_object_table"],
+                "action_timing": trg["action_timing"],
+                "event_manipulation": trg["event_manipulation"],
+                "action_statement": trg["action_statement"],
+            }
+            for trg_name, trg in canonical["triggers"].items()
+        ],
+        "show_create_tables": {},
+    }
+
+    state = migration._artifact_metadata_state(
+        snapshot,
+        canonical,
+        SQL_PATH.name,
+    )
+    assert state == "exact"
