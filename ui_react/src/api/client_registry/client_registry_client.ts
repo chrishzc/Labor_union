@@ -19,7 +19,9 @@ export interface ClientRegistryListQuery {
   sortOrder?: ClientRegistrySortOrder;
   limit?: number;
   after?: string;
+  offset?: number;
 }
+export interface ClientRegistryExportArtifact { blob: Blob; filename: string }
 const token = () => {
   const value = sessionClient.getToken();
   if (!value) throw new Error('請先登入管理後台。');
@@ -32,6 +34,21 @@ const decode = <T>(schema: { safeParse(value: unknown): { success: true; data: {
   return parsed.data.data;
 };
 const key = (scope: string) => `${scope}-${globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
+const exportParams = (request: ClientRegistryListQuery) => {
+  const params = new URLSearchParams();
+  if (request.query?.trim()) params.set('query', request.query.trim());
+  if (request.multiBirthCount) params.set('multi_birth_count', request.multiBirthCount);
+  if (request.orderStatus?.trim()) params.set('order_status', request.orderStatus.trim());
+  if (request.requiresCooking !== undefined) params.set('requires_cooking', String(request.requiresCooking));
+  if (request.sortBy) params.set('sort_by', request.sortBy);
+  if (request.sortOrder) params.set('sort_order', request.sortOrder);
+  return params;
+};
+const exportFilename = (value: string | null) => {
+  const match = value?.match(/filename="?([^";]+)"?/i);
+  const candidate = match?.[1]?.trim();
+  return candidate?.toLowerCase().endsWith('.xlsx') ? candidate : 'client-order-accounting.xlsx';
+};
 
 export const clientRegistryClient = {
   async list(request: ClientRegistryListQuery = {}): Promise<ClientRegistryPage> {
@@ -46,6 +63,7 @@ export const clientRegistryClient = {
         sort_order: request.sortOrder,
         limit: request.limit ?? 100,
         after: request.after?.trim() || undefined,
+        offset: request.offset,
       },
     });
     return decode(ClientRegistryPageResponseSchema, raw, '客戶名冊回應結構異常');
@@ -53,6 +71,21 @@ export const clientRegistryClient = {
   async query(caseNo: string): Promise<ClientRegistryDetail> {
     const raw = await transport.get(`/api/v1/admin/registries/clients/${encodeURIComponent(caseNo)}`, { token: token() });
     return decode(ClientRegistryDetailResponseSchema, raw, '客戶名冊詳情回應結構異常');
+  },
+  async downloadOrderAccounting(request: ClientRegistryListQuery = {}): Promise<ClientRegistryExportArtifact> {
+    const params = exportParams(request);
+    const suffix = params.size ? `?${params.toString()}` : '';
+    const response = await fetch(`/api/v1/admin/registries/clients/export/order-accounting${suffix}`, {
+      method: 'GET', headers: { Authorization: `Bearer ${token()}` },
+    });
+    if (!response.ok) throw new Error(`訂單帳務匯出失敗（HTTP ${response.status}）。`);
+    const contentType = response.headers.get('content-type')?.toLowerCase() ?? '';
+    if (!contentType.includes('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')) {
+      throw new Error('訂單帳務匯出回應不是 Excel 檔案。');
+    }
+    const blob = await response.blob();
+    if (blob.size === 0) throw new Error('訂單帳務匯出檔案為空。');
+    return { blob, filename: exportFilename(response.headers.get('content-disposition')) };
   },
   async preview(caseNo: string, owner: Owner, changes: ClientProfileChanges | BeClassChanges, expectedVersion: number): Promise<RegistryMutationPreview> {
     const raw = await transport.post(`/api/v1/admin/registries/clients/${encodeURIComponent(caseNo)}/${owner}/preview`, { changes, expected_version: expectedVersion }, { token: token() });

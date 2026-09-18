@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ClientRosterPage } from '../../../../../../../pages/ClientRosterPage';
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), query: vi.fn() }));
+const mocks = vi.hoisted(() => ({ list: vi.fn(), query: vi.fn(), downloadOrderAccounting: vi.fn() }));
 vi.mock('../../../../../../../api/client_registry/client_registry_client', () => ({ clientRegistryClient: mocks }));
 
 const item = {
@@ -15,7 +15,8 @@ describe('ClientRosterPage', () => {
   beforeEach(() => {
     mocks.list.mockReset();
     mocks.query.mockReset();
-    mocks.list.mockResolvedValue({ items: [item], next_cursor: null });
+    mocks.downloadOrderAccounting.mockReset();
+    mocks.list.mockResolvedValue({ items: [item], next_cursor: null, next_offset: null });
     mocks.query.mockResolvedValue({
       case_no: 'CASE-001',
       client: { client_id: 7, version: 2, values: { name: '王小明', gender: '女', phone: '0912345678', city: '新竹市', address: '測試路1號', residence_type: '電梯大樓', delivery_type: '自然產', baby_info: '單胞胎', notes: '主檔註記' }, field_capabilities: {} },
@@ -24,6 +25,7 @@ describe('ClientRosterPage', () => {
       finance: { status: 'ready', code: null, values: { virtual_account: '99781699115001', service_unit_price_ntd: 450, service_hours: 208, customer_payable_total_ntd: 93600, deposit_amount_ntd: 18000, first_payment_amount_ntd: 75600, second_payment_amount_ntd: 0, received_total_ntd: 18000, customer_balance_ntd: 75600, subsidy_return_amount_ntd: null, subsidy_return_due_date: null, subsidy_return_status: null } },
       order_terms: { status: 'ready', code: null, data: { case_no: 'CASE-001', order_version: 1, scheduling_version: 1, scheduling_generation: 1, client_finance_version: 1, payroll_version: 1, service_data_locked: false, terms: { planned_start_date: '2026-10-01', service_days: 26, service_hours_per_day: 8, requires_cooking: true, floor_fee_ntd: 0, service_time: { start_time: '09:00:00', end_time: '17:00:00', end_day_offset: 0 } } }, field_capabilities: {} },
     });
+    mocks.downloadOrderAccounting.mockResolvedValue({ blob: new Blob(['xlsx']), filename: 'client-order-accounting.xlsx' });
   });
 
   it('requests server filters, displays roster fields, and exposes no mutation controls', async () => {
@@ -75,5 +77,47 @@ describe('ClientRosterPage', () => {
     await waitFor(() => expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ sortBy: 'service_days', sortOrder: 'asc', limit: 100 })));
     fireEvent.click(screen.getByRole('button', { name: '清除篩選' }));
     await waitFor(() => expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ sortBy: 'case_no', sortOrder: 'asc', limit: 100 })));
+  });
+
+  it('moves between pages for any sort and exposes the current page above the table', async () => {
+    mocks.list
+      .mockResolvedValueOnce({ items: [item], next_cursor: 'CASE-001', next_offset: 100 })
+      .mockResolvedValueOnce({ items: [{ ...item, case_no: 'CASE-101' }], next_cursor: null, next_offset: null })
+      .mockResolvedValueOnce({ items: [item], next_cursor: 'CASE-001', next_offset: 100 });
+    render(<ClientRosterPage />);
+
+    const pagination = await screen.findByRole('navigation', { name: '客戶名冊分頁' });
+    expect(within(pagination).getByText('第 1 頁', { exact: false })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '下一頁' }));
+    await waitFor(() => expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 100, limit: 100 })));
+    expect(await screen.findByText('CASE-101')).toBeInTheDocument();
+    expect(within(pagination).getByText('第 2 頁', { exact: false })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '上一頁' }));
+    await waitFor(() => expect(mocks.list).toHaveBeenLastCalledWith(expect.not.objectContaining({ offset: expect.anything() })));
+    expect(await screen.findByText('CASE-001')).toBeInTheDocument();
+  });
+
+  it('downloads order accounting with the currently applied roster filters', async () => {
+    const createObjectURL = vi.fn().mockReturnValue('blob:order-accounting');
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal('URL', { createObjectURL, revokeObjectURL });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    render(<ClientRosterPage />);
+    await screen.findByText('CASE-001');
+
+    fireEvent.change(screen.getByLabelText('案件／訂單狀態篩選'), { target: { value: '訂單成立' } });
+    fireEvent.click(screen.getByRole('button', { name: '套用篩選' }));
+    await waitFor(() => expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ orderStatus: '訂單成立' })));
+    fireEvent.click(screen.getByRole('button', { name: '匯出訂單帳務' }));
+
+    await waitFor(() => expect(mocks.downloadOrderAccounting).toHaveBeenCalledWith({
+      query: '', multiBirthCount: undefined, orderStatus: '訂單成立', requiresCooking: undefined,
+      sortBy: 'case_no', sortOrder: 'asc', limit: 100,
+    }));
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:order-accounting');
+    expect(await screen.findByRole('status')).toHaveTextContent('訂單帳務 Excel 已下載。');
   });
 });

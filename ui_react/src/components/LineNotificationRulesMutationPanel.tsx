@@ -25,11 +25,14 @@ import {
 } from '../api/line_notification_rules/line_notification_rules_mutation_client';
 import { LineNotificationRulesMutationError } from '../api/line_notification_rules/line_notification_rules_mutation_errors';
 import type { LineNotificationRulesMutationDefinition } from '../api/line_notification_rules/line_notification_rules_mutation_schemas';
+import type { LineNotificationTemplateClient } from '../api/line_notification_rules/line_notification_template_client';
+import { LineNotificationTemplateEditor } from './LineNotificationTemplateEditor';
 
 export interface LineNotificationRulesMutationPanelProps {
   catalog: LineNotificationRulesCatalog;
   selectedRuleId?: string | null;
   client?: LineNotificationRulesMutationClient;
+  templateClient?: LineNotificationTemplateClient;
   onCommitted?: (receipt: LineNotificationRulesMutationReceiptModel) => void;
 }
 
@@ -113,6 +116,10 @@ function nextRuleId(definition: LineNotificationRulesMutationDefinition): string
   return `new_rule_${sequence}`;
 }
 
+function eventLabel(eventCode: LineNotificationEventCode): string {
+  return EVENT_OPTIONS.find((option) => option.value === eventCode)?.label ?? eventCode;
+}
+
 function newRule(id: string): LineNotificationRule {
   return {
     id,
@@ -132,6 +139,7 @@ export const LineNotificationRulesMutationPanel: React.FC<
   catalog,
   selectedRuleId = null,
   client = lineNotificationRulesMutationClient,
+  templateClient,
   onCommitted,
 }) => {
   const initial = useMemo(() => adaptLineNotificationRulesDraft(catalog), [catalog]);
@@ -168,6 +176,7 @@ export const LineNotificationRulesMutationPanel: React.FC<
   useEffect(() => () => controllerRef.current?.abort(), []);
 
   const activeRule = draft.rules.find((rule) => rule.id === activeRuleId) ?? null;
+  const committedActiveRule = baseline.rules.find((rule) => rule.id === activeRuleId) ?? null;
   const baselineHasActiveRule = baseline.rules.some((rule) => rule.id === activeRuleId);
   const draftChanged = JSON.stringify(draft) !== JSON.stringify(baseline);
   const busy = state === 'loading';
@@ -187,18 +196,6 @@ export const LineNotificationRulesMutationPanel: React.FC<
     setDraft((current) => ({
       rules: current.rules.map((rule) => (rule.id === activeRuleId ? update(rule) : rule)),
     }));
-  };
-
-  const updateRuleId = (nextId: string): void => {
-    if (!activeRuleId) return;
-    const previousId = activeRuleId;
-    invalidatePreview();
-    setDraft((current) => ({
-      rules: current.rules.map((rule) => (
-        rule.id === previousId ? { ...rule, id: nextId } : rule
-      )),
-    }));
-    setActiveRuleId(nextId);
   };
 
   const addRule = (): void => {
@@ -338,7 +335,9 @@ export const LineNotificationRulesMutationPanel: React.FC<
               setActiveRuleId(event.target.value);
             }}
           >
-            {draft.rules.map((rule) => <option key={rule.id} value={rule.id}>{rule.id}</option>)}
+            {draft.rules.map((rule) => (
+              <option key={rule.id} value={rule.id}>{eventLabel(rule.event_code)}</option>
+            ))}
           </select>
         </div>
       ) : <p className="line-scope-note line-block-spacing-12">目前沒有通知規則；可新增第一筆規則後預覽儲存。</p>}
@@ -351,17 +350,6 @@ export const LineNotificationRulesMutationPanel: React.FC<
             </legend>
 
             <div className="richmenu-drawer-grid">
-              <div className="richmenu-drawer-field">
-                <label htmlFor="line-notification-rule-id">規則 ID</label>
-                <input
-                  id="line-notification-rule-id"
-                  className="richmenu-drawer-input"
-                  value={activeRule.id}
-                  maxLength={64}
-                  onChange={(event) => updateRuleId(event.target.value)}
-                />
-              </div>
-
               <div className="richmenu-drawer-field">
                 <label htmlFor="line-notification-event-code">事件</label>
                 <select
@@ -394,20 +382,6 @@ export const LineNotificationRulesMutationPanel: React.FC<
                     <option key={option.value} value={option.value}>{option.label}</option>
                   ))}
                 </select>
-              </div>
-
-              <div className="richmenu-drawer-field">
-                <label htmlFor="line-notification-template-id">訊息模板 ID</label>
-                <input
-                  id="line-notification-template-id"
-                  className="richmenu-drawer-input"
-                  value={activeRule.template_id}
-                  maxLength={64}
-                  onChange={(event) => updateActiveRule((rule) => ({
-                    ...rule,
-                    template_id: event.target.value,
-                  }))}
-                />
               </div>
 
               <div className="richmenu-drawer-field">
@@ -565,6 +539,14 @@ export const LineNotificationRulesMutationPanel: React.FC<
           </fieldset>
         </div>
       )}
+
+      {activeRule && committedActiveRule && activeRule.template_id === committedActiveRule.template_id ? (
+        <LineNotificationTemplateEditor ruleId={committedActiveRule.id} client={templateClient} />
+      ) : activeRule ? (
+        <p className="line-scope-note notification-rule-dirty-note">
+          <TriangleAlert aria-hidden="true" />先儲存新增規則，再編輯實際發送的訊息內容。
+        </p>
+      ) : null}
 
       <div className="line-action-row notification-rule-action-row">
         <button

@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from typing import Annotated, Any, Literal
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Response
 from pymysql.err import OperationalError, ProgrammingError
 
 from api.dependencies.admin_auth import (
@@ -17,6 +17,7 @@ from api.dependencies.admin_auth import (
 from api.dependencies.client_profile import get_client_profile_application
 from api.dependencies.client_registry import (
     get_beclass_correction_workflow,
+    get_client_registry_order_accounting_export_application,
     get_client_registry_query_application,
 )
 from api.dependencies.order_terms import get_order_terms_application
@@ -62,6 +63,11 @@ from subsystems.client_profile.registry_query import (
     ClientRegistryNotFound,
     ClientRegistryQueryApplication,
 )
+from subsystems.client_profile.order_accounting_export import (
+    ClientRegistryOrderAccountingExportApplication,
+    OrderAccountingExportQuery,
+    XLSX_MEDIA_TYPE,
+)
 
 
 router = APIRouter(prefix="/api/v1/admin/registries/clients", tags=["Client Registry"])
@@ -93,6 +99,7 @@ def list_client_registry(
     sort_order: Literal["asc", "desc"] | None = Query(default=None),
     limit: int = Query(default=25, ge=1, le=100),
     after: str | None = Query(default=None, min_length=1, max_length=50),
+    offset: int = Query(default=0, ge=0),
     principal: AdminPrincipal = Depends(require_registry_reader),
     application: ClientRegistryQueryApplication = Depends(get_client_registry_query_application),
 ):
@@ -107,6 +114,7 @@ def list_client_registry(
             sort_order=sort_order,
             limit=limit,
             after=after,
+            offset=offset,
         )
         return BaseResponse(
             data=ClientRegistryPageView.model_validate(result, from_attributes=True),
@@ -119,6 +127,55 @@ def list_client_registry(
             "client_registry_query_internal_error",
             "客戶名冊查詢失敗。",
             uuid4().hex,
+        ) from error
+
+
+@router.get(
+    "/export/order-accounting",
+    response_class=Response,
+    responses={200: {"content": {XLSX_MEDIA_TYPE: {}}}},
+)
+def export_client_registry_order_accounting(
+    query: str | None = Query(default=None, max_length=100),
+    multi_birth_count: Literal["單胞胎", "雙胞胎"] | None = Query(default=None),
+    order_status: str | None = Query(default=None, min_length=1, max_length=50),
+    requires_cooking: bool | None = Query(default=None),
+    sort_by: Literal["case_no", "customer_name", "service_days", "expected_start_date"] | None = Query(default=None),
+    sort_order: Literal["asc", "desc"] | None = Query(default=None),
+    principal: AdminPrincipal = Depends(require_registry_reader),
+    application: ClientRegistryOrderAccountingExportApplication = Depends(
+        get_client_registry_order_accounting_export_application
+    ),
+):
+    del principal
+    correlation = uuid4().hex
+    try:
+        content = application.export(OrderAccountingExportQuery(
+            query=query,
+            multi_birth_count=multi_birth_count,
+            order_status=order_status,
+            requires_cooking=requires_cooking,
+            sort_by=sort_by,
+            sort_order=sort_order,
+        ))
+        return Response(
+            content=content,
+            media_type=XLSX_MEDIA_TYPE,
+            headers={"Content-Disposition": 'attachment; filename="client-order-accounting.xlsx"'},
+        )
+    except ValueError as error:
+        raise _registry_error(error, correlation) from error
+    except (OperationalError, ProgrammingError) as error:
+        raise internal_query_error(
+            "client_registry_order_accounting_export_internal_error",
+            "訂單帳務匯出失敗。",
+            correlation,
+        ) from error
+    except Exception as error:
+        raise internal_query_error(
+            "client_registry_order_accounting_export_internal_error",
+            "訂單帳務匯出失敗。",
+            correlation,
         ) from error
 
 

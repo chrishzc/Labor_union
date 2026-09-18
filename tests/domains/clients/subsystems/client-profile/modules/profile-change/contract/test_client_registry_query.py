@@ -13,9 +13,9 @@ from subsystems.client_profile.registry_query import (
 
 
 class _Repository:
-    def list_page(self, *, query, multi_birth_count, order_status, requires_cooking, sort_by, sort_order, limit, after):
-        assert (query, multi_birth_count, order_status, requires_cooking, sort_by, sort_order, limit, after) == ("王小明", None, None, None, None, None, 25, None)
-        return (({"client_id": 7, "case_no": "CASE-001", "name": "王小明", "phone": "0912345678", "city": "新竹市", "multi_birth_count": "雙胞胎", "service_days": 26, "requires_cooking": True, "planned_start_date": None, "order_status": "洽談中"},), "CASE-001")
+    def list_page(self, *, query, multi_birth_count, order_status, requires_cooking, sort_by, sort_order, limit, after, offset):
+        assert (query, multi_birth_count, order_status, requires_cooking, sort_by, sort_order, limit, after, offset) == ("王小明", None, None, None, None, None, 25, None, 0)
+        return (({"client_id": 7, "case_no": "CASE-001", "name": "王小明", "phone": "0912345678", "city": "新竹市", "multi_birth_count": "雙胞胎", "service_days": 26, "requires_cooking": True, "planned_start_date": None, "order_status": "洽談中"},), "CASE-001", 25)
 
     def load_detail(self, case_no):
         return {
@@ -61,19 +61,19 @@ def test_registry_list_route_preserves_optional_false_and_returns_roster_fields(
                 "client_id": 7, "case_no": "115000001", "virtual_account": "99781699115001", "name": "王小明", "phone": "0912345678", "city": "新竹市", "district": "東區",
                 "multi_birth_count": None, "service_days": 26, "requires_cooking": False,
                 "planned_start_date": None, "order_status": "洽談中",
-            },), None)
+            },), None, None)
 
     repository = _RouteRepository()
     response = list_client_registry(
         query=None, multi_birth_count="雙胞胎", order_status="洽談中", requires_cooking=False,
-        sort_by="case_no", sort_order="asc", limit=25, after=None,
+        sort_by="case_no", sort_order="asc", limit=25, after=None, offset=0,
         principal=AdminPrincipal(9, "registry-reader", "Registry Reader", "system_admin"),
         application=ClientRegistryQueryApplication(repository),
     )
 
     assert repository.captured == {
         "query": None, "multi_birth_count": "雙胞胎", "order_status": "洽談中", "requires_cooking": False,
-        "sort_by": "case_no", "sort_order": "asc", "limit": 25, "after": None,
+        "sort_by": "case_no", "sort_order": "asc", "limit": 25, "after": None, "offset": 0,
     }
     assert response.data.items[0].model_dump() == {
         "client_id": 7, "case_no": "115000001", "virtual_account": "99781699115001", "name": "王小明", "phone": "0912345678", "city": "新竹市", "district": "東區",
@@ -85,12 +85,13 @@ def test_registry_list_route_preserves_optional_false_and_returns_roster_fields(
         "claim_application_year": None,
         "claim_application_month": None,
     }
+    assert response.data.next_offset is None
 
 
 def test_registry_rejects_cursor_not_matching_last_visible_case():
     class _BadRepository(_Repository):
         def list_page(self, **_):
-            return (({"client_id": 7, "case_no": "CASE-001"},), "CASE-999")
+            return (({"client_id": 7, "case_no": "CASE-001"},), "CASE-999", None)
 
     with pytest.raises(ClientRegistryContractError, match="cursor_invalid"):
         ClientRegistryQueryApplication(_BadRepository()).list(query=None, limit=25, after=None)
@@ -106,7 +107,7 @@ def test_registry_passes_combined_filters_and_discards_unsafe_custom_sort_cursor
                 "client_id": 7, "case_no": "CASE-001", "name": "王小明", "phone": "0912345678", "city": "新竹市",
                 "multi_birth_count": "雙胞胎", "service_days": 26, "requires_cooking": True,
                 "planned_start_date": None, "order_status": "洽談中",
-            },), "CASE-001")
+            },), "CASE-001", 25)
 
     repository = _CaptureRepository()
     page = ClientRegistryQueryApplication(repository).list(
@@ -116,9 +117,10 @@ def test_registry_passes_combined_filters_and_discards_unsafe_custom_sort_cursor
 
     assert repository.captured == {
         "query": "王", "multi_birth_count": "雙胞胎", "order_status": "洽談中", "requires_cooking": True,
-        "sort_by": "service_days", "sort_order": "desc", "limit": 25, "after": None,
+        "sort_by": "service_days", "sort_order": "desc", "limit": 25, "after": None, "offset": 0,
     }
     assert page.next_cursor is None
+    assert page.next_offset == 25
 
 
 def test_registry_rejects_invalid_sort_before_it_reaches_repository_and_custom_sort_cursor():
@@ -131,6 +133,8 @@ def test_registry_rejects_invalid_sort_before_it_reaches_repository_and_custom_s
         application.list(query=None, sort_by="not_sql", limit=25, after=None)  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="cursor_sort_unsupported"):
         application.list(query=None, sort_by="service_days", sort_order="desc", limit=25, after="CASE-001")
+    with pytest.raises(ValueError, match="pagination_ambiguous"):
+        application.list(query=None, limit=25, after="CASE-001", offset=25)
 
 
 def test_registry_http_composition_identifies_each_field_owner_and_editability():
@@ -256,9 +260,9 @@ def test_mysql_registry_list_preserves_filters_and_batches_visible_page_dates():
         {"case_no": "115000002", "obligation_identity": "staff-service", "obligation_kind": "service_pay", "due_date": None, "staff_id": 8, "staff_name": None},
     )])
 
-    rows, next_cursor = MySqlClientRegistryQueryRepository(connection).list_page(
+    rows, next_cursor, next_offset = MySqlClientRegistryQueryRepository(connection).list_page(
         query="王", multi_birth_count="雙胞胎", order_status="洽談中", requires_cooking=True,
-        sort_by="service_days", sort_order="desc", limit=2, after=None,
+        sort_by="service_days", sort_order="desc", limit=2, after=None, offset=100,
     )
 
     statement, parameters = connection.cursor_instance.statements[0]
@@ -268,12 +272,13 @@ def test_mysql_registry_list_preserves_filters_and_batches_visible_page_dates():
     assert "$.multi_birth_count" in statement and "特殊計費:胎數" in statement
     assert "o.status = %s" in statement and "o.requires_cooking = %s" in statement
     assert "ORDER BY o.service_days DESC, o.case_no ASC" in statement
-    assert parameters == ("%王%", "雙胞胎", "洽談中", True, 3)
+    assert parameters == ("%王%", "雙胞胎", "洽談中", True, 3, 100)
     assert rows[0]["case_no"] == "115000001"
     assert rows[0]["virtual_account"] == "99781699115001"
     assert rows[0]["district"] == "東區"
     assert rows[1]["district"] is None
     assert next_cursor == "115000002"
+    assert next_offset == 102
     assert [row["case_no"] for row in rows] == ["115000001", "115000002"]
 
     client_statement, client_parameters = connection.cursor_instance.statements[1]
@@ -300,9 +305,9 @@ def test_mysql_registry_list_keeps_null_distinct_from_explicit_cooking_filter():
 
     MySqlClientRegistryQueryRepository(connection).list_page(
         query=None, multi_birth_count=None, order_status=None, requires_cooking=False,
-        sort_by="case_no", sort_order="asc", limit=25, after=None,
+        sort_by="case_no", sort_order="asc", limit=25, after=None, offset=0,
     )
 
     statement, parameters = connection.cursor_instance.statements[0]
     assert "o.requires_cooking = %s" in statement
-    assert parameters == (False, 26)
+    assert parameters == (False, 26, 0)

@@ -17,8 +17,9 @@ type RosterFilters = {
 const defaultFilters: RosterFilters = {
   query: '', multiBirthCount: '', orderStatus: '', requiresCooking: '', sortBy: 'case_no', sortOrder: 'asc',
 };
+const pageSize = 100;
 
-function toRequest(filters: RosterFilters): ClientRegistryListQuery {
+function toRequest(filters: RosterFilters, offset?: number): ClientRegistryListQuery {
   return {
     query: filters.query,
     multiBirthCount: filters.multiBirthCount || undefined,
@@ -26,7 +27,8 @@ function toRequest(filters: RosterFilters): ClientRegistryListQuery {
     requiresCooking: filters.requiresCooking === '' ? undefined : filters.requiresCooking === 'true',
     sortBy: filters.sortBy,
     sortOrder: filters.sortOrder,
-    limit: 100,
+    limit: pageSize,
+    ...(offset === undefined ? {} : { offset }),
   };
 }
 
@@ -118,22 +120,29 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
   const [filters, setFilters] = useState<RosterFilters>(defaultFilters);
   const [appliedFilters, setAppliedFilters] = useState<RosterFilters>(defaultFilters);
   const [page, setPage] = useState<ClientRegistryPageData | null>(null);
+  const [pageOffset, setPageOffset] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedCaseNo, setExpandedCaseNo] = useState<string | null>(null);
   const [detail, setDetail] = useState<ClientRegistryDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportMessage, setExportMessage] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
   const detailRequest = useRef(0);
 
-  const load = async (nextFilters: RosterFilters) => {
-    const request = toRequest(nextFilters);
+  const load = async (nextFilters: RosterFilters, nextOffset = 0) => {
+    const request = toRequest(nextFilters, nextOffset || undefined);
     setLoading(true);
     setError(null);
     try {
       const result = await clientRegistryClient.list(request);
       setPage(result);
       setAppliedFilters(nextFilters);
+      setPageOffset(nextOffset);
+      setExpandedCaseNo(null);
+      setDetail(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : '客戶名冊清單載入失敗。');
     } finally {
@@ -157,6 +166,12 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
     setFilters(nextFilters);
     void load(nextFilters);
   };
+  const previousPage = () => void load(appliedFilters, Math.max(0, pageOffset - pageSize));
+  const nextPage = () => {
+    if (page?.next_offset !== null && page?.next_offset !== undefined) {
+      void load(appliedFilters, page.next_offset);
+    }
+  };
   const sortLabel = (sortBy: ClientRegistrySortBy) => filters.sortBy === sortBy ? (filters.sortOrder === 'asc' ? ' ↑' : ' ↓') : '';
   const toggleDetail = async (caseNo: string) => {
     if (expandedCaseNo === caseNo) {
@@ -175,6 +190,21 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
       if (detailRequest.current === request) setDetailLoading(false);
     }
   };
+  const exportOrderAccounting = async () => {
+    setExporting(true); setExportMessage(null); setExportError(null);
+    try {
+      const artifact = await clientRegistryClient.downloadOrderAccounting(toRequest(appliedFilters));
+      const objectUrl = URL.createObjectURL(artifact.blob);
+      const anchor = document.createElement('a');
+      anchor.href = objectUrl; anchor.download = artifact.filename; anchor.click();
+      URL.revokeObjectURL(objectUrl);
+      setExportMessage('訂單帳務 Excel 已下載。');
+    } catch (caught) {
+      setExportError(caught instanceof Error ? caught.message : '訂單帳務匯出失敗。');
+    } finally {
+      setExporting(false);
+    }
+  };
 
   return <div className={`client-roster-page${embedded ? ' client-roster-page--embedded' : ''}`}>
     {!embedded && <header><div><h1>客戶名冊清單</h1><p>以案件為單位快速瀏覽與比較；此頁只會查詢，不會修改客戶或訂單資料。</p></div></header>}
@@ -183,13 +213,20 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
       <label>BeClass 胎數<select aria-label="BeClass 胎數篩選" value={filters.multiBirthCount} onChange={(event) => setFilters((value) => ({ ...value, multiBirthCount: event.target.value as MultiBirthCount }))}><option value="">全部</option><option value="單胞胎">單胞胎</option><option value="雙胞胎">雙胞胎</option></select></label>
       <label>案件／訂單狀態<select aria-label="案件／訂單狀態篩選" value={filters.orderStatus} onChange={(event) => setFilters((value) => ({ ...value, orderStatus: event.target.value }))}><option value="">全部</option>{orderStatuses.map((status) => <option key={status} value={status}>{status}</option>)}</select></label>
       <label>下廚需求<select aria-label="下廚需求篩選" value={filters.requiresCooking} onChange={(event) => setFilters((value) => ({ ...value, requiresCooking: event.target.value as SelectBoolean }))}><option value="">全部</option><option value="true">需要</option><option value="false">不需要</option></select></label>
-      <div className="client-roster-filter-actions"><button type="submit">套用篩選</button><button type="button" onClick={clearFilters}>清除篩選</button></div>
+      <div className="client-roster-filter-actions"><button type="submit">套用篩選</button><button type="button" onClick={clearFilters}>清除篩選</button><button type="button" disabled={exporting} onClick={() => void exportOrderAccounting()}>{exporting ? '匯出中…' : '匯出訂單帳務'}</button></div>
     </form>
+    {exportMessage && <p role="status" className="client-roster-message">{exportMessage}</p>}
+    {exportError && <p role="alert" className="client-roster-message">{exportError}</p>}
     {error && <p role="alert" className="client-roster-message">{error}</p>}
     {loading && <p role="status" className="client-roster-message">正在載入客戶名冊清單…</p>}
     {!loading && !error && page?.items.length === 0 && <p role="status" className="client-roster-message">{hasActiveFilter(appliedFilters) ? '沒有符合篩選條件的案件。' : '目前沒有可顯示的案件。'}</p>}
+    {!error && page && <nav className="client-roster-pagination" aria-label="客戶名冊分頁">
+      <button type="button" disabled={loading || pageOffset === 0} onClick={previousPage}>上一頁</button>
+      <span aria-live="polite">第 {Math.floor(pageOffset / pageSize) + 1} 頁<span className="client-roster-page-count">（本頁 {page.items.length} 筆）</span></span>
+      <button type="button" disabled={loading || page.next_offset == null} onClick={nextPage}>下一頁</button>
+    </nav>}
     {!loading && !error && page && page.items.length > 0 && <div className="client-roster-table-wrap"><table>
-      <caption>客戶名冊清單（最多顯示 100 筆符合條件的案件）</caption>
+      <caption>客戶名冊清單（第 {Math.floor(pageOffset / pageSize) + 1} 頁）</caption>
       <thead><tr>
         <th scope="col"><button type="button" onClick={() => changeSort('case_no')}>案件編號{sortLabel('case_no')}</button></th>
         <th scope="col">虛擬帳號</th>

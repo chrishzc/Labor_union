@@ -345,6 +345,26 @@ def test_incomplete_order_without_payroll_snapshot_is_not_a_report_candidate():
     )) is None
 
 
+def test_order_accounting_projection_reuses_operations_report_amount_by_case(monkeypatch):
+    monkeypatch.setattr(
+        register,
+        "_select_established_cases",
+        lambda connection, period_start, period_end, statuses: [
+            _order_row(case_no="115000001"),
+            _order_row(case_no="115000002"),
+        ],
+    )
+
+    result = register.build_operations_report_subsidy_rows_by_case(
+        ("115000002",),
+        object(),
+    )
+
+    assert tuple(result) == ("115000002",)
+    assert result["115000002"]["補助款金額"] == Decimal("12000")
+    assert result["115000002"]["服務結束"] == date(2026, 3, 20)
+
+
 def test_combined_subsidy_register_has_both_quarterly_and_annual_sheets():
     connection = FakeConnection([
         _order_row(case_no="115000001", employer_name="陳小姐", staff_name="王月嫂"),

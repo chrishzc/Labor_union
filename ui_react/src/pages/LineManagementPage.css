@@ -4004,6 +4004,31 @@
 .notification-rule-preview-title { display: block; margin: 0 0 10px; color: #9a3412; font-size: 1rem; font-weight: 800; }
 .notification-rule-reason-input { min-height: 70px; }
 .notification-rule-confirm-row { margin: 8px 0 14px; }
+.notification-template-editor { margin-top: 16px; padding: 18px; border: 2px solid var(--line-color-primary); border-radius: 12px; background: linear-gradient(180deg, #fffaf6 0%, #fff 100%); }
+.notification-template-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+.notification-template-heading h5 { margin: 0; color: var(--line-color-text); font-size: 1rem; }
+.notification-template-heading p { margin: 5px 0 0; color: var(--line-color-text-muted); font-size: 0.86rem; }
+.notification-template-workbench { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.notification-template-compose { display: flex; min-width: 0; flex-direction: column; gap: 10px; }
+.notification-template-label-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.notification-template-label-row label { color: var(--line-color-text); font-size: 0.9rem; font-weight: 800; }
+.notification-template-label-row svg { width: 15px; height: 15px; }
+.notification-template-compose textarea { width: 100%; min-height: 280px; padding: 12px; resize: vertical; border: 1px solid var(--line-color-border-subtle); border-radius: 8px; background: #fff; color: var(--line-color-text); font: inherit; font-size: 0.88rem; line-height: 1.6; box-sizing: border-box; }
+.notification-template-meta { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; color: var(--line-color-text-muted); font-size: 0.8rem; }
+.notification-template-variables { display: inline-flex; align-items: flex-start; gap: 5px; text-align: right; }
+.notification-template-variables svg { width: 15px; height: 15px; flex: 0 0 auto; }
+.notification-template-save { align-self: flex-end; }
+.notification-template-preview { min-width: 0; margin: 0; }
+.notification-template-preview .notification-message-preview { min-height: 280px; }
+
+@media (max-width: 900px) {
+  .notification-template-heading,
+  .notification-template-label-row,
+  .notification-template-meta { align-items: stretch; flex-direction: column; }
+  .notification-template-workbench { grid-template-columns: minmax(0, 1fr); }
+  .notification-template-save { align-self: stretch; }
+  .notification-template-variables { text-align: left; }
+}
 
 .real-llm-panel { margin-bottom: 16px; border-color: var(--line-color-border); border-radius: var(--radius-md); background: #fff; box-shadow: var(--shadow-sm); }
 .real-llm-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--line-color-border-subtle); }

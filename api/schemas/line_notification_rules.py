@@ -185,6 +185,33 @@ class DeleteLineNotificationRuleView(SaveLineNotificationRulesView):
     rule_id: Identifier
 
 
+class LineNotificationMessageTemplateView(_ClosedModel):
+    rule_id: Identifier
+    template_id: Identifier
+    name: StrictStr
+    content: StrictStr
+    revision: StrictInt = Field(ge=0)
+    variables: list[StrictStr]
+    sample_preview: StrictStr
+
+
+class UpdateLineNotificationMessageTemplateRequest(_ClosedModel):
+    content: StrictStr = Field(min_length=1, max_length=5_000)
+    expected_revision: StrictInt = Field(ge=0)
+    reason: StrictStr = Field(
+        default="更新通知規則訊息內容",
+        min_length=1,
+        max_length=200,
+    )
+
+    @field_validator("content", "reason")
+    @classmethod
+    def reject_blank_template_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("notification template text must not be blank")
+        return value
+
+
 class ApplyLineNotificationManualReplayRequest(BaseModel):
     reason: str = Field(min_length=1, max_length=1_000)
     idempotency_key: str = Field(min_length=1, max_length=191)
@@ -206,6 +233,7 @@ __all__ = [
     "LineNotificationRuleInput",
     "LineNotificationRulesDefinition",
     "LineNotificationRulesCatalogView",
+    "LineNotificationMessageTemplateView",
     "LineNotificationTimelineRecordView",
     "LineNotificationTimelineView",
     "PreviewLineNotificationManualReplayView",
@@ -213,4 +241,5 @@ __all__ = [
     "PreviewLineNotificationRulesView",
     "SaveLineNotificationRulesRequest",
     "SaveLineNotificationRulesView",
+    "UpdateLineNotificationMessageTemplateRequest",
 ]

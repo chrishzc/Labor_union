@@ -69,6 +69,7 @@ export const ClientRegistrySummarySchema = z.strictObject({
 });
 export const ClientRegistryPageSchema = z.strictObject({
   items: z.array(ClientRegistrySummarySchema), next_cursor: z.string().nullable(),
+  next_offset: z.number().int().positive().nullable().optional(),
 });
 export const ClientRegistryDetailSchema = z.strictObject({
   case_no: z.string().min(1),

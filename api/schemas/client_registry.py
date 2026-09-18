@@ -51,6 +51,7 @@ class ClientRegistrySummaryView(_StrictModel):
 class ClientRegistryPageView(_StrictModel):
     items: tuple[ClientRegistrySummaryView, ...]
     next_cursor: str | None = None
+    next_offset: int | None = Field(default=None, ge=1)
 
 
 class ClientProfileValuesView(_StrictModel):

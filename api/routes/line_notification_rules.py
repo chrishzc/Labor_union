@@ -4,6 +4,9 @@ Description: 提供 LINE 通知規則矩陣、預覽、儲存啟用與安全刪�
 """
 
 import json
+from pathlib import Path
+import re
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pymysql.err import InterfaceError, OperationalError
@@ -28,12 +31,14 @@ from api.schemas.line_notification_rules import (
     DeleteLineNotificationRuleView,
     LineNotificationRulesDefinition,
     LineNotificationRulesCatalogView,
+    LineNotificationMessageTemplateView,
     LineNotificationTimelineView,
     PreviewLineNotificationRulesRequest,
     PreviewLineNotificationManualReplayView,
     PreviewLineNotificationRulesView,
     SaveLineNotificationRulesRequest,
     SaveLineNotificationRulesView,
+    UpdateLineNotificationMessageTemplateRequest,
 )
 from domains.line.configuration import (
     LineConfigurationKind,
@@ -47,9 +52,14 @@ from subsystems.line.configuration_contracts import LineConfigurationQueryUnavai
 from subsystems.line.notification_rule_administration import (
     LineNotificationRuleMutationError,
 )
+from subsystems.line.message_configuration import (
+    LineMessageConfigurationError,
+    validate_message_templates,
+)
 
 
 router = APIRouter(prefix="/api/v1/line/notification-rules", tags=["LINE Notification Rules"])
+_TEMPLATE_VARIABLE = re.compile(r"\{([a-zA-Z][a-zA-Z0-9_]*)\}")
 
 
 @router.get("", response_model=BaseResponse[LineNotificationRulesCatalogView])
@@ -66,6 +76,87 @@ def get_notification_rules(
             revision=snapshot.revision.value,
             definition=definition,
         )
+    )
+
+
+@router.get(
+    "/{rule_id}/message-template",
+    response_model=BaseResponse[LineNotificationMessageTemplateView],
+)
+def get_notification_rule_message_template(
+    rule_id: str,
+    principal: AdminPrincipal = Depends(require_line_configuration_reader),
+):
+    application = get_line_configuration_application()
+    actor = admin_actor_context(principal)
+    rule_snapshot = application.get(LineConfigurationKind.NOTIFICATION_RULES, actor)
+    template_snapshot = application.get(LineConfigurationKind.MESSAGE_TEMPLATES, actor)
+    return BaseResponse(data=_message_template_view(
+        rule_id,
+        _definition_from_snapshot(rule_snapshot.definition_json),
+        _message_template_definition(template_snapshot),
+        template_snapshot.revision.value,
+    ))
+
+
+@router.put(
+    "/{rule_id}/message-template",
+    response_model=BaseResponse[LineNotificationMessageTemplateView],
+)
+def update_notification_rule_message_template(
+    rule_id: str,
+    payload: UpdateLineNotificationMessageTemplateRequest,
+    request: Request,
+    principal: AdminPrincipal = Depends(require_line_configuration_manager),
+):
+    application = get_line_configuration_application()
+    actor = admin_actor_context(principal)
+    rule_snapshot = application.get(LineConfigurationKind.NOTIFICATION_RULES, actor)
+    template_snapshot = application.get(LineConfigurationKind.MESSAGE_TEMPLATES, actor)
+    rules = _definition_from_snapshot(rule_snapshot.definition_json)
+    definition = _message_template_definition(template_snapshot)
+    view = _message_template_view(
+        rule_id, rules, definition, template_snapshot.revision.value
+    )
+    template = next(
+        item for item in definition["templates"]
+        if item.get("id") == view.template_id
+    )
+    template["content"] = payload.content
+    try:
+        validate_message_templates(definition)
+        result = application.apply(
+            kind=LineConfigurationKind.MESSAGE_TEMPLATES,
+            expected_revision=LineConfigurationRevision(payload.expected_revision),
+            definition=definition,
+            actor=actor,
+            reason=payload.reason.strip(),
+            idempotency_key=IdempotencyKey(
+                f"line-notification-template:{rule_id}:{uuid4().hex[:12]}"
+            ),
+            correlation_id=CorrelationId(
+                f"line-notification-template:{uuid4().hex[:12]}"
+            ),
+        )
+    except LineConfigurationRevisionConflict as error:
+        raise HTTPException(
+            status_code=409,
+            detail="通知訊息內容已遭修改，請重新載入後再試。",
+        ) from error
+    except LineMessageConfigurationError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    request.state.audit_action = "line.notification_rule.message_template.update"
+    request.state.audit_resource_type = "line_message_template"
+    request.state.audit_resource_id = view.template_id
+    return BaseResponse(
+        data=_message_template_view(
+            rule_id,
+            rules,
+            definition,
+            result.snapshot.revision.value,
+        ),
+        message="通知訊息內容已成功儲存",
     )
 
 
@@ -273,6 +364,62 @@ def _definition_from_snapshot(definition_json: str) -> LineNotificationRulesDefi
     if value == {}:
         value = {"rules": []}
     return LineNotificationRulesDefinition.model_validate(value)
+
+
+def _message_template_definition(snapshot) -> dict[str, object]:
+    if snapshot.revision.value == 0 or snapshot.definition_json == "{}":
+        path = Path(__file__).resolve().parent.parent.parent / "config" / "message_templates.json"
+        if path.exists():
+            value = json.loads(path.read_text(encoding="utf-8"))
+        else:
+            value = {"version": 1, "templates": []}
+    else:
+        value = json.loads(snapshot.definition_json)
+    if not isinstance(value, dict) or not isinstance(value.get("templates"), list):
+        raise HTTPException(status_code=409, detail="通知訊息設定目前無法讀取。")
+    return value
+
+
+def _message_template_view(
+    rule_id: str,
+    rules: LineNotificationRulesDefinition,
+    templates_definition: dict[str, object],
+    revision: int,
+) -> LineNotificationMessageTemplateView:
+    rule = next((item for item in rules.rules if item.id == rule_id), None)
+    if rule is None:
+        raise HTTPException(status_code=404, detail="找不到這筆通知規則。")
+    templates = templates_definition.get("templates", [])
+    template = next(
+        (
+            item for item in templates
+            if isinstance(item, dict) and item.get("id") == rule.template_id
+        ),
+        None,
+    )
+    if template is None:
+        raise HTTPException(status_code=404, detail="找不到此規則使用的訊息模板。")
+    if template.get("message_type") != "text" or not isinstance(template.get("content"), str):
+        raise HTTPException(status_code=409, detail="此規則使用的訊息格式目前不支援文字編輯。")
+    variables = [
+        str(item.get("name"))
+        for item in template.get("variables", [])
+        if isinstance(item, dict) and isinstance(item.get("name"), str)
+    ]
+    content = str(template["content"])
+    sample_preview = _TEMPLATE_VARIABLE.sub(
+        lambda match: f"〔{match.group(1)}〕",
+        content,
+    )
+    return LineNotificationMessageTemplateView(
+        rule_id=rule.id,
+        template_id=rule.template_id,
+        name=str(template.get("name") or rule.template_id),
+        content=content,
+        revision=revision,
+        variables=variables,
+        sample_preview=sample_preview,
+    )
 
 
 def _rule_http_error(request: Request, error: Exception) -> HTTPException:

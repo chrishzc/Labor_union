@@ -148,6 +148,24 @@ def _fetch_established_cases(
     connection_factory: Callable[[], Any],
     order_statuses: tuple[str, ...] = ESTABLISHED_ORDER_STATUSES,
 ) -> list[dict]:
+    conn = connection_factory()
+    try:
+        return _select_established_cases(
+            conn,
+            period_start,
+            period_end,
+            order_statuses,
+        )
+    finally:
+        conn.close()
+
+
+def _select_established_cases(
+    conn: Any,
+    period_start: date | None,
+    period_end: date | None,
+    order_statuses: tuple[str, ...] = ESTABLISHED_ORDER_STATUSES,
+) -> list[dict]:
     if (period_start is None) != (period_end is None):
         raise ValueError("period_start and period_end must both be provided or omitted")
     status_placeholders = ", ".join("%s" for _ in order_statuses)
@@ -158,10 +176,8 @@ def _fetch_established_cases(
                   AND COALESCE(o.actual_end_date, o.end_date) >= %s
                   AND COALESCE(o.actual_end_date, o.end_date) < %s"""
         period_params = (period_start, period_end)
-    conn = connection_factory()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute(
+    with conn.cursor() as cursor:
+        cursor.execute(
                 f"""
                 SELECT o.case_no, o.status AS order_status, c.identity_status,
                        COALESCE(o.actual_start_date, o.start_date) AS actual_start_date,
@@ -216,10 +232,32 @@ def _fetch_established_cases(
                     SUBSIDIZED_CITIZEN,
                     *period_params,
                 ),
-            )
-            return cursor.fetchall()
-    finally:
-        conn.close()
+        )
+        return cursor.fetchall()
+
+
+def build_operations_report_subsidy_rows_by_case(
+    case_nos: tuple[str, ...],
+    connection: Any,
+) -> dict[str, dict]:
+    """Return the operations-report subsidy projection for selected established cases."""
+    selected_case_nos = frozenset(str(case_no) for case_no in case_nos)
+    if not selected_case_nos:
+        return {}
+    result: dict[str, dict] = {}
+    for source in _select_established_cases(
+        connection,
+        None,
+        None,
+        OPERATIONS_REPORT_ORDER_STATUSES,
+    ):
+        case_no = str(source.get("case_no") or "")
+        if case_no not in selected_case_nos:
+            continue
+        row = _to_register_row(source)
+        if row is not None:
+            result[case_no] = row
+    return result
 
 
 def _fetch_claim_submission_period_cases(

@@ -16,6 +16,10 @@ from domains.line.configuration import LineConfigurationKind, LineConfigurationS
 from domains.line.identities import LineConfigurationRevision
 from shared_kernel.fingerprints import PreviewFingerprint
 from subsystems.access.authentication_session import AdminPrincipal
+from subsystems.line.configuration_contracts import (
+    ApplyLineConfigurationResult,
+    LineConfigurationCommandOutcome,
+)
 
 
 def _principal() -> AdminPrincipal:
@@ -177,6 +181,102 @@ def test_dedicated_notification_rule_api_supports_get_preview_and_save(monkeypat
     assert saved.json()["data"]["revision"] == 4
     assert calls[0][0] == "preview"
     assert calls[1][0] == "save"
+
+
+def test_notification_rule_message_template_can_be_queried_and_updated(monkeypatch) -> None:
+    from domains.line.canonical_payload import canonical_line_payload_json
+
+    rules = {
+        "rules": [{
+            "id": "deposit_notice",
+            "event_code": "deposit_confirmed",
+            "recipient_selector": "client",
+            "template_id": "deposit_template",
+            "enabled": True,
+            "schedule": {"kind": "immediate"},
+            "frequency": {"kind": "once"},
+            "predicates": [],
+        }]
+    }
+    templates = {
+        "version": 1,
+        "templates": [{
+            "id": "deposit_template",
+            "name": "訂金確認通知",
+            "category": "push",
+            "message_type": "text",
+            "enabled": True,
+            "content": "案件 {case_no} 已確認訂金。",
+            "variables": [{"name": "case_no", "required": True}],
+            "usage": ["push"],
+        }],
+    }
+    applied = []
+
+    class Application:
+        template_revision = 7
+
+        def get(self, kind, _actor):
+            definition = rules if kind is LineConfigurationKind.NOTIFICATION_RULES else templates
+            revision = 3 if kind is LineConfigurationKind.NOTIFICATION_RULES else self.template_revision
+            return LineConfigurationSnapshot(
+                kind,
+                LineConfigurationRevision(revision),
+                canonical_line_payload_json(definition),
+            )
+
+        def apply(self, **command):
+            assert command["kind"] is LineConfigurationKind.MESSAGE_TEMPLATES
+            assert command["expected_revision"] == LineConfigurationRevision(7)
+            applied.append(command["definition"])
+            self.template_revision = 8
+            return ApplyLineConfigurationResult(
+                outcome=LineConfigurationCommandOutcome.CREATED,
+                snapshot=LineConfigurationSnapshot(
+                    LineConfigurationKind.MESSAGE_TEMPLATES,
+                    LineConfigurationRevision(8),
+                    canonical_line_payload_json(command["definition"]),
+                ),
+            )
+
+    application = Application()
+    monkeypatch.setattr(
+        line_notification_rules,
+        "get_line_configuration_application",
+        lambda: application,
+    )
+    app = FastAPI()
+    app.include_router(line_notification_rules.router)
+    app.dependency_overrides[require_line_configuration_reader] = _principal
+    app.dependency_overrides[require_line_configuration_manager] = _principal
+    client = TestClient(app)
+
+    queried = client.get(
+        "/api/v1/line/notification-rules/deposit_notice/message-template"
+    )
+    assert queried.status_code == 200
+    assert queried.json()["data"] == {
+        "rule_id": "deposit_notice",
+        "template_id": "deposit_template",
+        "name": "訂金確認通知",
+        "content": "案件 {case_no} 已確認訂金。",
+        "revision": 7,
+        "variables": ["case_no"],
+        "sample_preview": "案件 〔case_no〕 已確認訂金。",
+    }
+
+    updated = client.put(
+        "/api/v1/line/notification-rules/deposit_notice/message-template",
+        json={
+            "content": "案件 {case_no} 的訂金已完成確認。",
+            "expected_revision": 7,
+            "reason": "調整通知文案",
+        },
+    )
+    assert updated.status_code == 200
+    assert updated.json()["data"]["content"] == "案件 {case_no} 的訂金已完成確認。"
+    assert updated.json()["data"]["revision"] == 8
+    assert applied[0]["templates"][0]["content"] == "案件 {case_no} 的訂金已完成確認。"
 
 
 def test_notification_timeline_api_returns_deidentified_evidence(monkeypatch) -> None:

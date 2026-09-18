@@ -5,7 +5,7 @@
 - subsystem: `government-subsidy`
 
 ## Responsibility
-依已因訂金核銷成立、服務中或已完成，或具有同等已付訂金語意的歷史 Orders facts、案件 Payroll 凍結費率與有效服務結束日產生獨立季度／年度報表；另為營運報表依 `end_date` 年度，選取同民國案件年度的正常／歷史訂單，以及上一民國案件年度但同西元核銷年度的 carry-in rows，並維持專用欄位格式。正式 claim batch `submitted_at` 的 bounded 送件期間 query 保留為 Government Subsidy owner 能力，但不再供營運報表使用。
+依已因訂金核銷成立、服務中或已完成，或具有同等已付訂金語意的歷史 Orders facts、案件 Payroll 凍結費率與有效服務結束日產生獨立季度／年度報表；另為營運報表依 `end_date` 年度，選取同民國案件年度的正常／歷史訂單，以及上一民國案件年度但同西元核銷年度的 carry-in rows，並維持專用欄位格式。相同補助金額與服務結束日投影亦可依案件提供給客戶名冊訂單帳務匯出，不以 Client Finance 補助返還義務是否存在為前提。正式 claim batch `submitted_at` 的 bounded 送件期間 query 保留為 Government Subsidy owner 能力，但不再供營運報表使用。
 
 ## Implementation
 - schedule-rule: `domains/government_subsidy/claim_schedule.py`
@@ -19,6 +19,7 @@
 
 ## Dependencies
 - inbound: `global/reporting/weekly-operations-report` — `end_date` 所屬年度的營運專用補助統計 readback。
+- inbound: `domains/clients/subsystems/client-profile/modules/profile-change` — 客戶名冊訂單帳務匯出依案件讀取相同補助金額與服務結束日投影。
 - outbound: 季／年度與營運年度統計均使用 Orders lifecycle、Client 補助身分、訂單服務 facts、歷史實際服務時數 projection 與案件 Payroll 凍結費率，並納入同等已付訂金語意的歷史 Orders 狀態；歷史實際時數已確認時優先使用，未確認時依身分採 40／120 小時預設。未形成 claim item 時以 Payroll 快照為一般單價；Case Import 正式雙胞胎事實固定投影 450，缺少非雙胞胎快照即 fail closed；不依賴 claim batch 或 Scheduling generation。
 
 ## Contracts

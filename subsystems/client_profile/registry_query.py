@@ -46,6 +46,7 @@ class ClientRegistrySummary:
 class ClientRegistryPage:
     items: tuple[ClientRegistrySummary, ...]
     next_cursor: str | None
+    next_offset: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,7 +101,8 @@ class ClientRegistryRepository(Protocol):
         sort_order: ClientRegistrySortOrder | None,
         limit: int,
         after: str | None,
-    ) -> tuple[tuple[Mapping[str, Any], ...], str | None]: ...
+        offset: int,
+    ) -> tuple[tuple[Mapping[str, Any], ...], str | None, int | None]: ...
     def load_detail(self, case_no: str) -> Mapping[str, Any] | None: ...
 
 
@@ -119,9 +121,12 @@ class ClientRegistryQueryApplication:
         sort_order: ClientRegistrySortOrder | None = None,
         limit: int,
         after: str | None,
+        offset: int = 0,
     ) -> ClientRegistryPage:
         if limit < 1 or limit > 100:
             raise ValueError("client_registry_limit_invalid")
+        if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
+            raise ValueError("client_registry_offset_invalid")
         normalized_query = _optional_text(query, 100)
         normalized_after = _optional_text(after, 50)
         normalized_multi_birth_count = _optional_text(multi_birth_count, 20)
@@ -133,7 +138,9 @@ class ClientRegistryQueryApplication:
         cursor_supported = (normalized_sort_by is None or normalized_sort_by == "case_no") and normalized_sort_order in {None, "asc"}
         if normalized_after is not None and not cursor_supported:
             raise ValueError("client_registry_cursor_sort_unsupported")
-        rows, next_cursor = self._repository.list_page(
+        if normalized_after is not None and offset:
+            raise ValueError("client_registry_pagination_ambiguous")
+        rows, next_cursor, next_offset = self._repository.list_page(
             query=normalized_query,
             multi_birth_count=normalized_multi_birth_count,
             order_status=normalized_order_status,
@@ -142,11 +149,20 @@ class ClientRegistryQueryApplication:
             sort_order=normalized_sort_order,
             limit=limit,
             after=normalized_after,
+            offset=offset,
         )
         items = tuple(_summary(row) for row in rows)
         if cursor_supported and next_cursor is not None and (not items or next_cursor != items[-1].case_no):
             raise ClientRegistryContractError("client_registry_cursor_invalid")
-        return ClientRegistryPage(items, next_cursor if cursor_supported else None)
+        if next_offset is not None and next_offset != offset + limit:
+            raise ClientRegistryContractError("client_registry_offset_invalid")
+        if normalized_after is not None and next_offset is not None:
+            raise ClientRegistryContractError("client_registry_pagination_ambiguous")
+        return ClientRegistryPage(
+            items,
+            next_cursor if cursor_supported else None,
+            next_offset if normalized_after is None else None,
+        )
 
     def query(self, case_no: str) -> ClientRegistryDetail:
         identity = _required_text(case_no, 50, "client_registry_case_no_invalid")

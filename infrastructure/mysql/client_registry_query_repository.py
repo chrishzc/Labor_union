@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from datetime import date
+from decimal import Decimal
 from typing import Any
 
 from domains.case_import.order_information import project_order_information
@@ -12,9 +14,18 @@ from subsystems.client_finance.virtual_account_resolution import build_client_vi
 from domains.client_finance.obligation_planning import build_client_finance_terms_candidate
 from domains.client_finance.order_amount_calculation import _claim_schedule
 from domains.client_finance.subsidy_coverage import normalize_subsidy_policy_identity
+from domains.client_finance.subsidy_advance import subsidy_advance_due_date
+from domains.payroll.payment_due_date import calculate_staff_payment_due_date
 from infrastructure.mysql.order_terms_read_model import (
     load_contract_client_finance_facts,
     select_order,
+)
+from subsystems.client_profile.order_accounting_export import (
+    OrderAccountingExportQuery,
+    OrderAccountingExportRow,
+)
+from subsystems.government_subsidy.reconciliation_register_query import (
+    build_operations_report_subsidy_rows_by_case,
 )
 
 
@@ -31,6 +42,13 @@ _SORT_COLUMNS = {
     "service_days": "o.service_days",
     "expected_start_date": "o.start_date",
 }
+_BIRTH_COUNT_SQL = (
+    "COALESCE("
+    "CASE WHEN JSON_VALID(bcs.effective_values_json) THEN "
+    "JSON_UNQUOTE(JSON_EXTRACT(bcs.effective_values_json, '$.multi_birth_count')) END,"
+    "CASE WHEN JSON_VALID(br.survey_details) THEN "
+    "JSON_UNQUOTE(JSON_EXTRACT(br.survey_details, '$.\"特殊計費:胎數\"')) END)"
+)
 _SUPPORTED_DISTRICTS = (
     "香山區", "東區", "北區", "竹北市", "竹東鎮", "新埔鎮", "關西鎮",
     "湖口鄉", "新豐鄉", "芎林鄉", "橫山鄉", "北埔鄉", "寶山鄉", "峨眉鄉",
@@ -39,8 +57,11 @@ _SUPPORTED_DISTRICTS = (
 
 
 class MySqlClientRegistryQueryRepository:
-    def __init__(self, connection: Any) -> None:
+    def __init__(self, connection: Any, subsidy_projection_loader=None) -> None:
         self._connection = connection
+        self._subsidy_projection_loader = (
+            subsidy_projection_loader or build_operations_report_subsidy_rows_by_case
+        )
 
     def list_page(
         self,
@@ -53,31 +74,15 @@ class MySqlClientRegistryQueryRepository:
         sort_order: str | None,
         limit: int,
         after: str | None,
+        offset: int,
     ):
-        where = ["o.case_no IS NOT NULL"]
-        parameters: list[object] = []
-        if after is not None:
-            where.append("o.case_no > %s")
-            parameters.append(after)
-        if query is not None:
-            where.append("CONCAT_WS(' ',o.case_no,COALESCE(c.name,''),COALESCE(c.phone,'')) LIKE %s")
-            parameters.append(f"%{query}%")
-        birth_count_sql = (
-            "COALESCE("
-            "CASE WHEN JSON_VALID(bcs.effective_values_json) THEN "
-            "JSON_UNQUOTE(JSON_EXTRACT(bcs.effective_values_json, '$.multi_birth_count')) END,"
-            "CASE WHEN JSON_VALID(br.survey_details) THEN "
-            "JSON_UNQUOTE(JSON_EXTRACT(br.survey_details, '$.\"特殊計費:胎數\"')) END)"
+        where, parameters = _registry_filters(
+            query=query,
+            multi_birth_count=multi_birth_count,
+            order_status=order_status,
+            requires_cooking=requires_cooking,
+            after=after,
         )
-        if multi_birth_count is not None:
-            where.append(f"{birth_count_sql} = %s")
-            parameters.append(multi_birth_count)
-        if order_status is not None:
-            where.append("o.status = %s")
-            parameters.append(order_status)
-        if requires_cooking is not None:
-            where.append("o.requires_cooking = %s")
-            parameters.append(requires_cooking)
         if sort_by is None:
             order_by = "o.case_no ASC"
         else:
@@ -86,11 +91,11 @@ class MySqlClientRegistryQueryRepository:
             order_by = f"{column} {direction}"
             if column != "o.case_no":
                 order_by += ", o.case_no ASC"
-        parameters.append(limit + 1)
+        parameters.extend((limit + 1, offset))
         with self._connection.cursor() as cursor:
             cursor.execute(
                 "SELECT c.id AS client_id,o.case_no,c.name,c.phone,c.city,c.address,"
-                + birth_count_sql + " AS multi_birth_count,"
+                + _BIRTH_COUNT_SQL + " AS multi_birth_count,"
                 "o.service_days,o.requires_cooking,"
                 "o.start_date AS planned_start_date,o.status AS order_status,"
                 "o.staff_payment_due_date,o.actual_end_date,c.identity_status "
@@ -100,7 +105,7 @@ class MySqlClientRegistryQueryRepository:
                 "ON br.bound_case_no=o.case_no "
                 "LEFT JOIN beclass_record_correction_states bcs ON bcs.beclass_record_id=br.id WHERE "
                 + " AND ".join(where)
-                + " ORDER BY " + order_by + " LIMIT %s",
+                + " ORDER BY " + order_by + " LIMIT %s OFFSET %s",
                 tuple(parameters),
             )
             rows = tuple(cursor.fetchall() or ())
@@ -115,7 +120,135 @@ class MySqlClientRegistryQueryRepository:
             **_claim_application_month(row),
         } for row in rows[:limit])
         next_cursor = str(visible[-1]["case_no"]) if len(rows) > limit and visible else None
-        return visible, next_cursor
+        next_offset = offset + limit if len(rows) > limit and after is None else None
+        return visible, next_cursor, next_offset
+
+    def query_order_accounting_rows(
+        self, selection: OrderAccountingExportQuery
+    ) -> tuple[OrderAccountingExportRow, ...]:
+        where, parameters = _registry_filters(
+            query=selection.query,
+            multi_birth_count=selection.multi_birth_count,
+            order_status=selection.order_status,
+            requires_cooking=selection.requires_cooking,
+            after=None,
+        )
+        if selection.sort_by is None:
+            order_by = "o.case_no ASC"
+        else:
+            column = _SORT_COLUMNS[selection.sort_by]
+            direction = "DESC" if selection.sort_order == "desc" else "ASC"
+            order_by = f"{column} {direction}"
+            if column != "o.case_no":
+                order_by += ", o.case_no ASC"
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT c.seq_num,o.case_no,c.name,c.identity_status,c.service_time,"
+                "c.due_month,c.service_start_date,c.baby_info,o.status AS order_status,"
+                "o.service_days,o.service_hours_per_day,o.requires_cooking,o.floor_fee,"
+                "o.start_date AS planned_start_date,o.end_date AS planned_end_date,"
+                "o.actual_start_date,o.actual_end_date,o.staff_payment_due_date,"
+                "terms.deposit_due_date,terms.first_payment_due_date,terms.second_payment_due_date,"
+                "deposit_ledger.occurred_on AS deposit_settled_on "
+                "FROM orders o JOIN clients c ON c.id=o.client_id "
+                "LEFT JOIN client_payment_terms terms ON terms.case_no=o.case_no "
+                "LEFT JOIN client_deposit_settlement_projection deposit_projection "
+                "ON deposit_projection.case_no=o.case_no "
+                "LEFT JOIN client_ledger_entries deposit_ledger "
+                "ON deposit_ledger.id=deposit_projection.latest_ledger_entry_id "
+                "LEFT JOIN (SELECT bound_case_no,MAX(id) AS id,MAX(survey_details) AS survey_details "
+                "FROM beclass_records WHERE bound_case_no IS NOT NULL GROUP BY bound_case_no HAVING COUNT(*)=1) br "
+                "ON br.bound_case_no=o.case_no "
+                "LEFT JOIN beclass_record_correction_states bcs ON bcs.beclass_record_id=br.id WHERE "
+                + " AND ".join(where)
+                + " ORDER BY " + order_by,
+                tuple(parameters),
+            )
+            base_rows = tuple(cursor.fetchall() or ())
+        subsidy_rows = self._subsidy_projection_loader(
+            tuple(str(row["case_no"]) for row in base_rows),
+            self._connection,
+        )
+        return tuple(
+            self._order_accounting_row(row, subsidy_rows.get(str(row["case_no"])))
+            for row in base_rows
+        )
+
+    def _order_accounting_row(
+        self,
+        row: Mapping[str, Any],
+        subsidy_row: Mapping[str, Any] | None,
+    ) -> OrderAccountingExportRow:
+        case_no = str(row["case_no"])
+        finance_status, _, finance = _finance_values(self._connection, case_no)
+        values = finance if finance_status == "ready" and finance is not None else {}
+        subsidy_amount = (
+            int(Decimal(str(subsidy_row["補助款金額"])))
+            if subsidy_row is not None
+            else None
+        )
+        subsidy_service_end = (
+            subsidy_row.get("服務結束") if subsidy_row is not None else None
+        )
+        subsidy_due_date = (
+            subsidy_advance_due_date(subsidy_service_end)
+            if isinstance(subsidy_service_end, date)
+            else None
+        )
+        staff_payment_due_date = row.get("staff_payment_due_date")
+        customer_payable = values.get("customer_payable_total_ntd")
+        if (
+            staff_payment_due_date is None
+            and isinstance(subsidy_service_end, date)
+            and customer_payable is not None
+        ):
+            staff_payment_due_date = calculate_staff_payment_due_date(
+                subsidy_service_end,
+                customer_payable,
+                normalize_subsidy_policy_identity(
+                    str(row.get("identity_status") or "")
+                ) == "補助市民" and Decimal(str(customer_payable)) == 0,
+            )
+        claim = _claim_application_month(row)
+        baby_info = str(row.get("baby_info") or "")
+        return OrderAccountingExportRow(
+            seq_num=row.get("seq_num"),
+            case_no=case_no,
+            name=row.get("name"),
+            identity_status=row.get("identity_status"),
+            service_time=row.get("service_time"),
+            due_month=row.get("due_month"),
+            hcm_service_start_date=row.get("service_start_date"),
+            is_twins="雙胞胎" in baby_info or "2" in baby_info,
+            order_status=row.get("order_status"),
+            virtual_account=build_client_virtual_account(case_no),
+            service_days=row.get("service_days"),
+            service_hours_per_day=row.get("service_hours_per_day"),
+            service_hours=values.get("service_hours"),
+            requires_cooking=row.get("requires_cooking"),
+            floor_fee_ntd=row.get("floor_fee"),
+            service_unit_price_ntd=values.get("service_unit_price_ntd"),
+            customer_payable_total_ntd=values.get("customer_payable_total_ntd"),
+            deposit_amount_ntd=values.get("deposit_amount_ntd"),
+            first_payment_amount_ntd=values.get("first_payment_amount_ntd"),
+            second_payment_amount_ntd=values.get("second_payment_amount_ntd"),
+            received_total_ntd=values.get("received_total_ntd"),
+            customer_balance_ntd=values.get("customer_balance_ntd"),
+            subsidy_return_amount_ntd=subsidy_amount,
+            planned_start_date=row.get("planned_start_date"),
+            planned_end_date=row.get("planned_end_date"),
+            actual_start_date=row.get("actual_start_date"),
+            actual_end_date=row.get("actual_end_date"),
+            deposit_due_date=row.get("deposit_due_date"),
+            first_payment_due_date=row.get("first_payment_due_date"),
+            second_payment_due_date=row.get("second_payment_due_date"),
+            deposit_settled_on=row.get("deposit_settled_on"),
+            subsidy_return_due_date=subsidy_due_date,
+            subsidy_return_status=None,
+            staff_payment_due_date=staff_payment_due_date,
+            claim_application_year=claim["claim_application_year"],
+            claim_application_month=claim["claim_application_month"],
+        )
 
     def load_detail(self, case_no: str) -> Mapping[str, Any] | None:
         with self._connection.cursor() as cursor:
@@ -227,6 +360,34 @@ def _decode(value: Any) -> dict[str, Any]:
     except (TypeError, ValueError):
         return {}
     return result if isinstance(result, dict) else {}
+
+
+def _registry_filters(
+    *,
+    query: str | None,
+    multi_birth_count: str | None,
+    order_status: str | None,
+    requires_cooking: bool | None,
+    after: str | None,
+) -> tuple[list[str], list[object]]:
+    where = ["o.case_no IS NOT NULL"]
+    parameters: list[object] = []
+    if after is not None:
+        where.append("o.case_no > %s")
+        parameters.append(after)
+    if query is not None:
+        where.append("CONCAT_WS(' ',o.case_no,COALESCE(c.name,''),COALESCE(c.phone,'')) LIKE %s")
+        parameters.append(f"%{query}%")
+    if multi_birth_count is not None:
+        where.append(f"{_BIRTH_COUNT_SQL} = %s")
+        parameters.append(multi_birth_count)
+    if order_status is not None:
+        where.append("o.status = %s")
+        parameters.append(order_status)
+    if requires_cooking is not None:
+        where.append("o.requires_cooking = %s")
+        parameters.append(requires_cooking)
+    return where, parameters
 
 
 def _client_district(city: object, address: object) -> str | None:
