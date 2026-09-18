@@ -55,6 +55,13 @@ class FeedbackConflictError(RuntimeError): pass
 class CustomerServiceTicketNotFoundError(LookupError): pass
 
 
+class MySqlLineDeliveryTaskRepository:
+    """Unused collaborator required by the production repository constructor."""
+
+    def __init__(self, connection):
+        self.connection = connection
+
+
 def fp(payload):
     raw=json.dumps(payload,ensure_ascii=False,sort_keys=True,separators=(",",":")).encode()
     return PreviewFingerprint(hashlib.sha256(raw).hexdigest())

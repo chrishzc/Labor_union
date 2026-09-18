@@ -2,4 +2,10 @@ module: reviewable-qa-catalog
 architecture: ../../../../../../../domains/knowledge-retrieval/subsystems/knowledge-retrieval/modules/reviewable-qa-catalog.md
 test_root: tests/domains/knowledge-retrieval/subsystems/knowledge-retrieval/modules/reviewable-qa-catalog/
 test_root: tests/test_line_ai_qa_catalog.py
+integration_root: tests/test_line_service_help.py
+integration_root: tests/domains/external-integration/subsystems/line/infrastructure/test_line_service_help_governed_catalog.py
+integration_root: tests/domains/external-integration/subsystems/line/infrastructure/test_line_service_help_error_contracts.py
+integration_root: tests/domains/external-integration/subsystems/line/infrastructure/test_line_service_help_answer_provenance.py
+integration_root: tests/domains/external-integration/subsystems/line/infrastructure/test_line_inline_knowledge_outcomes.py
+integration_root: tests/domains/external-integration/subsystems/line/infrastructure/test_line_inline_knowledge_replay.py
 ui_integration_root: ui_react/src/tests/domains/knowledge-retrieval/subsystems/knowledge-retrieval/integration/

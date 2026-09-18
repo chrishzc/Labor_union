@@ -34,6 +34,10 @@ The adapter reuses immutable `line_notification_source_events` and `line_command
 - layout_status: `custom_current`
 - integration_root: `ui_react/src/tests/ai_event_studio_local_preview.test.tsx`
 - `tests/domains/external-integration/subsystems/line/modules/feedback/test_feedback_application.py`
+- `tests/domains/external-integration/subsystems/line/infrastructure/test_line_feedback_knowledge_owner_flow.py`
+- `tests/domains/external-integration/subsystems/line/infrastructure/test_line_feedback_knowledge_source_validation.py`
+- `tests/domains/external-integration/subsystems/line/infrastructure/test_line_feedback_transaction_failures.py`
+- `tests/domains/external-integration/subsystems/line/infrastructure/test_line_service_help_feedback_page.py`
 - `ui_react/src/tests/ai_event_studio_local_preview.test.tsx`
 
 Required negative cases are wrong terminal outcome, idempotency replay, unresolved ticket linkage and fixed catalog/window aggregate.

@@ -14,8 +14,11 @@
 - `api/main.py`
 - `domains/knowledge_retrieval/publication.py`
 - `infrastructure/mysql/knowledge_retrieval_repository.py`
+- `infrastructure/mysql/knowledge_retrieval_unit_of_work.py`
 - `infrastructure/knowledge/chroma_gateway.py`
 - `api/routes/knowledge_retrieval.py`
+- `api/routes/line_service_help.py`
+- `api/routes/llm_configuration.py`
 - `api/dependencies/llm_configuration.py`
 - `ui_react/src/pages/line_management/CommonQaCatalogPanel.tsx`
 - `ui_react/src/pages/line_management/RealLlmSemanticTestPanel.tsx`
@@ -33,5 +36,11 @@
 - layout_status: `custom_current`
 - test_root: `tests/domains/knowledge-retrieval/subsystems/knowledge-retrieval/modules/reviewable-qa-catalog/`
 - test_root: `tests/test_line_ai_qa_catalog.py`
+- integration_root: `tests/test_line_service_help.py`
+- integration_root: `tests/domains/external-integration/subsystems/line/infrastructure/test_line_service_help_governed_catalog.py`
+- integration_root: `tests/domains/external-integration/subsystems/line/infrastructure/test_line_service_help_error_contracts.py`
+- integration_root: `tests/domains/external-integration/subsystems/line/infrastructure/test_line_service_help_answer_provenance.py`
+- integration_root: `tests/domains/external-integration/subsystems/line/infrastructure/test_line_inline_knowledge_outcomes.py`
+- integration_root: `tests/domains/external-integration/subsystems/line/infrastructure/test_line_inline_knowledge_replay.py`
 - integration_root: `ui_react/src/tests/domains/knowledge-retrieval/subsystems/knowledge-retrieval/integration/`
 - required claims: 54-row non-overwriting portable import, initial enabled-state restoration, direct draft publishability gate, publish/retire plus atomic index-job request, bounded lexical re-ranking that cannot lose a known short Chinese alias outside the first vector results, published-only metadata projection, unsupported-to-common-FAQ navigation, feedback-derived answer outcome, UI lifecycle/index workflow.

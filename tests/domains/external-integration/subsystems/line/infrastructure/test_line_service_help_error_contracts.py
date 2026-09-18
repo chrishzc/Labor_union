@@ -28,6 +28,8 @@ def _semantic_result(outcome: str, code: str | None = None):
         answer_text=None,
         qa_id=None,
         source_identity=None,
+        source_version=None,
+        index_version=None,
         code=code,
     )
 

@@ -39,19 +39,21 @@ def test_service_help_faq_endpoint(client):
     assert len(data["items"]) >= 5
 
     qa_ids = {item["qa_id"] for item in data["items"]}
-    assert "service_hours_intro" in qa_ids
-    assert "subsidy_intro" in qa_ids
+    assert "QA-001" in qa_ids
+    assert "QA-005" in qa_ids
 
 
 def test_service_help_ask_matched_question(client):
     response = client.post(
         "/api/v1/line/service-help/ask",
-        json={"question": "請問月嫂每天服務時數有幾種？"},
+        json={"question": "如果和月嫂合作不適合，可以更換月嫂嗎？"},
     )
     assert response.status_code == 200
     body = response.json()
     assert body["data"]["outcome"] == "answered"
-    assert "時數" in body["data"]["answer_text"]
+    assert body["data"]["answer_text"]
+    assert body["data"]["qa_id"] == "QA-001"
+    assert body["data"]["source_identity"] == "line-common-qa:QA-001"
 
 
 def test_service_help_ask_unsupported_question(client):

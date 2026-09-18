@@ -483,8 +483,14 @@ def test_failure_rolls_back_decision_need_and_ack_and_explicit_retry_can_finish(
 def test_rejected_actor_or_stale_context_cannot_create_need(transaction_context, options):
     connection, application, _ = transaction_context
     _run_postback(connection, application, _inbox(**options))
-    for table in ("scheduling_staff_leave_request_receipts", "customer_service_tickets", "test_deliveries"):
+    for table in ("scheduling_staff_leave_request_receipts", "customer_service_tickets"):
         assert _rows(connection, table) == []
+    deliveries = _rows(connection, "test_deliveries")
+    if options.get("source_type") == "group":
+        assert deliveries == []
+    else:
+        assert len(deliveries) == 1
+        assert deliveries[0]["identity"].startswith("leave-customer-decision-rejected:")
 
 
 def test_agreement_does_not_create_substitution_need_or_claim_schedule_completed(transaction_context):
@@ -503,7 +509,9 @@ def test_conflicting_second_choice_has_no_new_effect(transaction_context):
     _run_postback(connection, application, _inbox("agree_defer", event_id="conflicting-click"))
     assert _rows(connection, "scheduling_staff_leave_request_receipts") == before
     assert len(_rows(connection, "customer_service_tickets")) == 1
-    assert len(_rows(connection, "test_deliveries")) == 1
+    deliveries = _rows(connection, "test_deliveries")
+    assert len(deliveries) == 2
+    assert deliveries[1]["identity"] == "leave-customer-decision-rejected:conflicting-click"
 
 
 def test_fixture_preserves_the_production_active_conversation_uniqueness(transaction_context):

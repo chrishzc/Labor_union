@@ -66,6 +66,8 @@ def test_ask_does_not_restore_hardcoded_answer_after_governed_lookup_misses() ->
             answer_text=None,
             qa_id=None,
             source_identity=None,
+            source_version=None,
+            index_version=None,
         )
     )
 
@@ -90,6 +92,8 @@ def test_ask_preserves_governed_answer_source_identity() -> None:
             answer_text="目前已發布的核准回答。",
             qa_id="published-only",
             source_identity="line-common-qa:published-only",
+            source_version=1,
+            index_version=1,
         )
     )
 
