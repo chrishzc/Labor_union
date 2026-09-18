@@ -31,7 +31,8 @@ class ClientRegistryStaffObligationDateView(_StrictModel):
 class ClientRegistrySummaryView(_StrictModel):
     client_id: int = Field(gt=0)
     case_no: str = Field(min_length=1, max_length=50)
-    virtual_account: str | None = None
+    imported_virtual_accounts: tuple[str, ...] = ()
+    built_in_virtual_account: str | None = None
     name: str | None = None
     phone: str | None = None
     city: str | None = None

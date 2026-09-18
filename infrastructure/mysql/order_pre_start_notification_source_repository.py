@@ -17,7 +17,7 @@ from subsystems.line.order_pre_start_notification_source import (
 _SCAN_DUE_ORDERS_SQL = (
     "SELECT "
     "  o.case_no, "
-    "  COALESCE(p.first_payment_due_date, o.service_start_date) AS effective_start_date, "
+    "  COALESCE(p.first_payment_due_date, o.start_date) AS effective_start_date, "
     "  COALESCE(( "
     "    SELECT e.after_amount_ntd FROM client_obligations ob "
     "    JOIN client_obligation_events e ON e.id=ob.current_event_id "
@@ -45,7 +45,7 @@ _SCAN_DUE_ORDERS_SQL = (
     "FROM orders o "
     "LEFT JOIN client_payment_terms p ON p.case_no=o.case_no "
     "WHERE o.status NOT IN ('訂單取消', '已取消', '終止', '已結案', '取消') "
-    "  AND (p.first_payment_due_date = %s OR (p.first_payment_due_date IS NULL AND o.service_start_date = %s)) "
+    "  AND (p.first_payment_due_date = %s OR (p.first_payment_due_date IS NULL AND o.start_date = %s)) "
     "ORDER BY o.case_no ASC"
 )
 

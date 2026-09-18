@@ -13,7 +13,7 @@ const FlexDesignSourceSchema = z.discriminatedUnion('id', [
   z.object({
     id: z.literal('flex_leave_confirm'),
     design_revision: z.literal(1),
-    owner_fact_status: z.literal('missing'),
+    owner_fact_status: z.literal('connected'),
   }).strict(),
   z.object({
     id: z.literal('flex_alert_critical'),
@@ -31,7 +31,7 @@ export type LineFlexDesignSource = z.infer<typeof FlexDesignSourceSchema>;
 
 export const LINE_FLEX_DESIGN_SOURCES = {
   flex_dispatch: { id: 'flex_dispatch', design_revision: 1, owner_fact_status: 'missing' },
-  flex_leave_confirm: { id: 'flex_leave_confirm', design_revision: 1, owner_fact_status: 'missing' },
+  flex_leave_confirm: { id: 'flex_leave_confirm', design_revision: 1, owner_fact_status: 'connected' },
   flex_alert_critical: { id: 'flex_alert_critical', design_revision: 1, owner_fact_status: 'missing' },
   flex_negotiation: { id: 'flex_negotiation', design_revision: 2, owner_fact_status: 'connected' },
 } as const satisfies Record<string, LineFlexDesignSource>;
@@ -74,9 +74,9 @@ const PREVIEW_BY_ID: Record<LineFlexDesignSource['id'], LineFlexDesignPreviewMod
       { label: '🔴 不同意順延', tone: 'secondary' },
     ],
     alertStyle: false,
-    ownerFactStatus: 'missing',
-    ownerFactNote: '正式服務日期、確認憑證與目前案件版本尚未接上排班資料。',
-    lifecycleNote: '視覺排版範本已完成去敏核可；動態推播仍待正式業務來源。',
+    ownerFactStatus: 'connected',
+    ownerFactNote: '正式請假日期、案件版本與收件者綁定操作由月嫂請假協調流程帶入。',
+    lifecycleNote: '卡片已由正式業務流程產生；同意／不同意只提交綁定該案件版本的決定。',
   },
   flex_alert_critical: {
     id: 'flex_alert_critical',

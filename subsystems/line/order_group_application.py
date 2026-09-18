@@ -338,6 +338,7 @@ def _safe_error_message(error: Exception) -> str:
         "group_not_bound": "本群組尚未綁定訂單，請先輸入「綁定訂單 案件編號」。",
         "order_line_audience_not_ready": "訂單的媽媽或月嫂尚未完成 LINE 綁定。",
         "cancelled_order_cannot_bind_line_group": "已取消的訂單不能綁定服務群組。",
+        "settled_deposit_required_for_line_group": "客戶訂金尚未確認入帳，不能建立或邀請第三方服務群組。",
         "line_group_already_bound_to_another_order": "此群組已綁定其他訂單。",
     }
     return messages.get(str(error), "操作無法完成，請至 LINE 管理中心查看。")

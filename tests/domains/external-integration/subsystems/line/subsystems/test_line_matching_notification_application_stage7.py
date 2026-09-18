@@ -1,6 +1,6 @@
 """
 File: test_line_matching_notification_application_stage7.py
-Description: 驗證 Stage 7 matching 通知與 assignment conversion 雙向 LINE durable intent。
+Description: 驗證 Stage 7 matching LINE 通知與互動 durable intent。
 """
 
 import json
@@ -23,12 +23,6 @@ from domains.scheduling.matching_communication import (
     MatchingNotificationKind,
     MatchingPlanReference,
 )
-from domains.scheduling.matching_coordination import (
-    SOURCE_KINDS,
-    MatchingCrossDomainRequest,
-    MatchingRequestKind,
-    MatchingSourceVersion,
-)
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import (
     ActorContext,
@@ -37,10 +31,6 @@ from shared_kernel.identities import (
     IdempotencyKey,
 )
 from subsystems.line.delivery_contracts import LineDeliveryCommandOutcome
-from subsystems.scheduling.matching_assignment_conversion import (
-    AssignmentConversionResultState,
-    CanonicalAssignmentConversionReceipt,
-)
 from subsystems.scheduling.matching_notification_application import (
     MatchingNotificationApplication,
 )
@@ -48,11 +38,9 @@ from subsystems.scheduling.matching_notification_contracts import (
     ApplyManualCustomerProfilesCommand,
     ManualCustomerProfilesEvidence,
     ManualMatchingConfirmationMethod,
-    MatchingNotificationAudience,
     MatchingContactState,
     MatchingResponseResult,
     MatchingSegmentContact,
-    NotifyAssignmentConversionCommand,
     PreviewManualCustomerProfilesCommand,
     RecordManualMatchingResponseCommand,
     RequestCaregiverInformationCommand,
@@ -203,72 +191,6 @@ def _state():
     )
 
 
-def _assignment_conversion_notification() -> NotifyAssignmentConversionCommand:
-    source_versions = tuple(
-        MatchingSourceVersion(kind, f"{kind}:1", 1, "a" * 64)
-        for kind in SOURCE_KINDS
-    )
-    request = MatchingCrossDomainRequest(
-        request_id="assignment-conversion-request-1",
-        request_kind=MatchingRequestKind.ASSIGNMENT_CONVERSION_REQUESTED,
-        case_no="CASE-1",
-        package_id="matching-package-10",
-        package_version=2,
-        criteria_snapshot_id="matching-criteria-10",
-        candidate_id="candidate-30",
-        source_versions=source_versions,
-        lineage_event_id="matching-decision-10",
-        reason="customer accepted willing candidate",
-    )
-    receipt = CanonicalAssignmentConversionReceipt(
-        request_id=request.request_id,
-        result_state=AssignmentConversionResultState.CONVERTED,
-        package_id=request.package_id,
-        package_version=request.package_version,
-        criteria_snapshot_id=request.criteria_snapshot_id,
-        candidate_id=request.candidate_id,
-        source_versions=request.source_versions,
-        assignment_reference="assignment:canonical-10",
-        receipt_fingerprint=PreviewFingerprint("c" * 64),
-    )
-    return NotifyAssignmentConversionCommand(
-        request=request,
-        receipt=receipt,
-        customer=MatchingNotificationAudience(
-            LineUserId("U-customer"),
-            "王小姐",
-            request.case_no,
-        ),
-        caregiver=MatchingNotificationAudience(
-            LineUserId("U-caregiver"),
-            "林月嫂",
-            request.candidate_id,
-        ),
-        actor=ActorContext("admin:1", ("line.matching.send",)),
-        scheduled_at=NOW,
-        idempotency_key=IdempotencyKey("matching-assignment-notification:1"),
-        correlation_id=CorrelationId("matching-assignment-correlation:1"),
-    )
-
-
-def test_assignment_conversion_command_rejects_mismatched_receipt_and_customer_subject() -> None:
-    command = _assignment_conversion_notification()
-
-    with pytest.raises(ValueError, match="receipt does not match request"):
-        replace(
-            command,
-            receipt=replace(
-                command.receipt,
-                package_version=command.receipt.package_version + 1,
-            ),
-        )
-    with pytest.raises(ValueError, match="customer subject reference"):
-        replace(
-            command,
-            customer=replace(command.customer, subject_reference="CASE-WRONG"),
-        )
-
-
 def test_manual_customer_decision_allows_documented_non_line_confirmation() -> None:
     unit_of_work = _UnitOfWork(_state())
     application = MatchingNotificationApplication(
@@ -368,119 +290,6 @@ def test_caregiver_card_intent_action_and_delivery_share_one_commit() -> None:
     assert request.message_kind.value == "flex"
     assert "matching:safe-token-12345678901234567890:willing" in request.payload_json
     assert unit_of_work.matching_notifications.projection_arguments[0] == 31
-
-
-def test_assignment_conversion_enqueues_bilateral_created_user_texts_in_one_commit() -> None:
-    unit_of_work = _UnitOfWork(_state())
-    application = MatchingNotificationApplication(
-        lambda: unit_of_work,
-        lambda: NOW,
-        availability_validator=lambda state: None,
-    )
-    command = _assignment_conversion_notification()
-
-    result = application.notify_assignment_conversion(command)
-
-    assert result.request_id == command.request.request_id
-    assert result.customer_task_id == LineDeliveryTaskId(41)
-    assert result.caregiver_task_id == LineDeliveryTaskId(42)
-    assert result.replayed is False
-    assert unit_of_work.committed
-    customer, caregiver = unit_of_work.delivery_tasks.requests
-    assert [customer.recipient.recipient_type, caregiver.recipient.recipient_type] == [
-        LineRecipientType.USER,
-        LineRecipientType.USER,
-    ]
-    assert [customer.recipient.identity, caregiver.recipient.identity] == [
-        command.customer.line_user_id,
-        command.caregiver.line_user_id,
-    ]
-    assert [customer.message_kind, caregiver.message_kind] == [
-        LineMessageKind.TEXT,
-        LineMessageKind.TEXT,
-    ]
-    assert [customer.source_aggregate_type, caregiver.source_aggregate_type] == [
-        "assignment_conversion_receipt",
-        "assignment_conversion_receipt",
-    ]
-    assert [customer.source_aggregate_identity, caregiver.source_aggregate_identity] == [
-        command.receipt.request_id,
-        command.receipt.request_id,
-    ]
-    assert customer.idempotency_key.value.startswith(
-        "matching-assignment-notification:customer:"
-    )
-    assert caregiver.idempotency_key.value.startswith(
-        "matching-assignment-notification:caregiver:"
-    )
-    assert customer.idempotency_key != caregiver.idempotency_key
-    assert json.loads(customer.payload_json) == {
-        "type": "text",
-        "text": "媒合已完成，工會人員將提供後續服務資訊。",
-    }
-    assert json.loads(caregiver.payload_json) == {
-        "type": "text",
-        "text": "派案已完成，工會人員將提供後續服務資訊。",
-    }
-    internal_identities = (
-        command.request.request_id,
-        command.request.package_id,
-        command.request.criteria_snapshot_id,
-        command.request.candidate_id,
-        command.receipt.assignment_reference,
-    )
-    assert all(
-        identity not in delivery.payload_json
-        for identity in internal_identities
-        for delivery in (customer, caregiver)
-    )
-
-
-def test_assignment_conversion_bilateral_existing_is_a_committed_replay() -> None:
-    unit_of_work = _UnitOfWork(
-        _state(),
-        (
-            LineDeliveryCommandOutcome.EXISTING,
-            LineDeliveryCommandOutcome.EXISTING,
-        ),
-    )
-    application = MatchingNotificationApplication(
-        lambda: unit_of_work,
-        lambda: NOW,
-        availability_validator=lambda state: None,
-    )
-
-    result = application.notify_assignment_conversion(
-        _assignment_conversion_notification()
-    )
-
-    assert result.replayed is True
-    assert result.customer_task_id == LineDeliveryTaskId(41)
-    assert result.caregiver_task_id == LineDeliveryTaskId(42)
-    assert unit_of_work.committed
-
-
-def test_assignment_conversion_mixed_delivery_outcomes_fail_without_commit() -> None:
-    unit_of_work = _UnitOfWork(
-        _state(),
-        (
-            LineDeliveryCommandOutcome.CREATED,
-            LineDeliveryCommandOutcome.EXISTING,
-        ),
-    )
-    application = MatchingNotificationApplication(
-        lambda: unit_of_work,
-        lambda: NOW,
-        availability_validator=lambda state: None,
-    )
-
-    with pytest.raises(MatchingCommunicationConflictError):
-        application.notify_assignment_conversion(
-            _assignment_conversion_notification()
-        )
-
-    assert len(unit_of_work.delivery_tasks.requests) == 2
-    assert unit_of_work.committed is False
 
 
 def test_record_line_response_accepted_enqueues_match_success_group_notification() -> None:

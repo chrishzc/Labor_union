@@ -16,6 +16,8 @@ const REGISTRY_PAGE: ClientRegistryPage = {
   items: [{
     client_id: 1,
     case_no: 'CASE-001',
+    imported_virtual_accounts: [],
+    built_in_virtual_account: null,
     name: '測試客戶',
     phone: null,
     city: null,

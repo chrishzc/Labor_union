@@ -20,6 +20,8 @@ class MySqlOrdersLineAudienceAdapter:
                 return None
             if str(order["order_status"]) == "訂單取消":
                 raise RuntimeError("cancelled_order_cannot_bind_line_group")
+            if str(order.get("deposit_settlement_state") or "") != "settled":
+                raise RuntimeError("settled_deposit_required_for_line_group")
             customer_id = str(order.get("customer_line_user_id") or "").strip()
             cursor.execute(_ASSIGNED_STAFF_SQL, (case_no, case_no))
             staff_rows = tuple(cursor.fetchall() or ())
@@ -41,8 +43,10 @@ class MySqlOrdersLineAudienceAdapter:
         )
 
 _ORDER_AUDIENCE_SQL = (
-    "SELECT o.case_no,o.status AS order_status,binding.line_user_id AS customer_line_user_id "
+    "SELECT o.case_no,o.status AS order_status,binding.line_user_id AS customer_line_user_id,"
+    "deposit.settlement_state AS deposit_settlement_state "
     "FROM orders o JOIN clients c ON c.id=o.client_id "
+    "LEFT JOIN client_deposit_settlement_projection deposit ON deposit.case_no=o.case_no "
     "LEFT JOIN line_identity_role_bindings binding ON binding.subject_type='customer' "
     "AND binding.subject_reference=CAST(c.id AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci "
     "AND binding.binding_status='bound' AND binding.line_user_id=c.line_user_id "

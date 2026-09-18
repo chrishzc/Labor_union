@@ -109,12 +109,17 @@ class MySqlClientRegistryQueryRepository:
                 tuple(parameters),
             )
             rows = tuple(cursor.fetchall() or ())
+            visible_case_nos = tuple(str(row["case_no"]) for row in rows[:limit])
+            imported_virtual_accounts = _load_imported_virtual_accounts(
+                cursor, visible_case_nos
+            )
             obligation_dates = _load_obligation_dates(
-                cursor, tuple(str(row["case_no"]) for row in rows[:limit])
+                cursor, visible_case_nos
             )
         visible = tuple({
             **row,
-            "virtual_account": build_client_virtual_account(row.get("case_no")),
+            "imported_virtual_accounts": imported_virtual_accounts[str(row["case_no"])],
+            "built_in_virtual_account": build_client_virtual_account(row.get("case_no")),
             "district": _client_district(row.get("city"), row.get("address")),
             **obligation_dates[str(row["case_no"])],
             **_claim_application_month(row),
@@ -122,6 +127,7 @@ class MySqlClientRegistryQueryRepository:
         next_cursor = str(visible[-1]["case_no"]) if len(rows) > limit and visible else None
         next_offset = offset + limit if len(rows) > limit and after is None else None
         return visible, next_cursor, next_offset
+
 
     def query_order_accounting_rows(
         self, selection: OrderAccountingExportQuery
@@ -165,12 +171,19 @@ class MySqlClientRegistryQueryRepository:
                 tuple(parameters),
             )
             base_rows = tuple(cursor.fetchall() or ())
+            imported_virtual_accounts = _load_imported_virtual_accounts(
+                cursor, tuple(str(row["case_no"]) for row in base_rows)
+            )
         subsidy_rows = self._subsidy_projection_loader(
             tuple(str(row["case_no"]) for row in base_rows),
             self._connection,
         )
         return tuple(
-            self._order_accounting_row(row, subsidy_rows.get(str(row["case_no"])))
+            self._order_accounting_row(
+                row,
+                subsidy_rows.get(str(row["case_no"])),
+                imported_virtual_accounts[str(row["case_no"])],
+            )
             for row in base_rows
         )
 
@@ -178,6 +191,7 @@ class MySqlClientRegistryQueryRepository:
         self,
         row: Mapping[str, Any],
         subsidy_row: Mapping[str, Any] | None,
+        imported_virtual_accounts: tuple[str, ...],
     ) -> OrderAccountingExportRow:
         case_no = str(row["case_no"])
         finance_status, _, finance = _finance_values(self._connection, case_no)
@@ -221,7 +235,8 @@ class MySqlClientRegistryQueryRepository:
             hcm_service_start_date=row.get("service_start_date"),
             is_twins="雙胞胎" in baby_info or "2" in baby_info,
             order_status=row.get("order_status"),
-            virtual_account=build_client_virtual_account(case_no),
+            imported_virtual_accounts=imported_virtual_accounts,
+            built_in_virtual_account=build_client_virtual_account(case_no),
             service_days=row.get("service_days"),
             service_hours_per_day=row.get("service_hours_per_day"),
             service_hours=values.get("service_hours"),
@@ -348,6 +363,21 @@ class MySqlClientRegistryQueryRepository:
             "finance_code": finance_code,
             "finance_values": finance_values,
         }
+
+
+def _load_imported_virtual_accounts(cursor, case_nos: tuple[str, ...]) -> dict[str, tuple[str, ...]]:
+    result: dict[str, list[str]] = {case_no: [] for case_no in case_nos}
+    if not case_nos:
+        return {}
+    placeholders = ",".join(("%s",) * len(case_nos))
+    cursor.execute(
+        "SELECT case_no,virtual_account FROM client_legacy_virtual_accounts "
+        "WHERE case_no IN (" + placeholders + ") ORDER BY case_no,virtual_account",
+        case_nos,
+    )
+    for row in cursor.fetchall():
+        result[str(row["case_no"])].append(str(row["virtual_account"]))
+    return {case_no: tuple(accounts) for case_no, accounts in result.items()}
 
 
 def _decode(value: Any) -> dict[str, Any]:

@@ -40,6 +40,9 @@ const orderStatuses = ['待補件', '洽談中', '訂單成立', '服務中', '�
 
 const displayCooking = (value: boolean | null) => value === true ? '需要' : value === false ? '不需要' : '未登錄';
 const displayValue = (value: unknown) => value === null || value === undefined || value === '' ? '未登錄' : typeof value === 'boolean' ? (value ? '是' : '否') : String(value);
+const displayImportedVirtualAccounts = (values: string[]) => values.length
+  ? values.map((value) => <div key={value}>{value}</div>)
+  : '—';
 
 type RosterItem = ClientRegistryPageData['items'][number];
 const staffObligationLabels: Record<string, string> = {
@@ -229,7 +232,8 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
       <caption>客戶名冊清單（第 {Math.floor(pageOffset / pageSize) + 1} 頁）</caption>
       <thead><tr>
         <th scope="col"><button type="button" onClick={() => changeSort('case_no')}>案件編號{sortLabel('case_no')}</button></th>
-        <th scope="col">虛擬帳號</th>
+        <th scope="col">匯入虛擬帳號</th>
+        <th scope="col">內建虛擬帳號</th>
         <th scope="col"><button type="button" onClick={() => changeSort('customer_name')}>客戶姓名{sortLabel('customer_name')}</button></th>
         <th scope="col">電話</th><th scope="col">行政區</th><th scope="col">BeClass 胎數</th>
         <th scope="col"><button type="button" onClick={() => changeSort('service_days')}>服務天數{sortLabel('service_days')}</button></th>
@@ -246,7 +250,7 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
         <th scope="col">完整資料</th>
       </tr></thead>
       <tbody>{page.items.map((item) => <React.Fragment key={item.case_no}><tr>
-        <td>{item.case_no}</td><td>{item.virtual_account ?? '—'}</td><td>{item.name ?? '—'}</td><td>{item.phone ?? '—'}</td><td>{item.district ?? '未登錄'}</td>
+        <td>{item.case_no}</td><td>{displayImportedVirtualAccounts(item.imported_virtual_accounts)}</td><td>{item.built_in_virtual_account ?? '—'}</td><td>{item.name ?? '—'}</td><td>{item.phone ?? '—'}</td><td>{item.district ?? '未登錄'}</td>
         <td>{item.multi_birth_count ?? '—'}</td><td>{item.service_days ?? '—'}</td><td>{displayCooking(item.requires_cooking)}</td>
         <td>{item.planned_start_date ?? '—'}</td><td>{item.order_status ?? '—'}</td>
         <td>{clientDueDates(item, 'deposit')}</td>
@@ -264,7 +268,7 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
           ? `${item.claim_application_year}-${String(item.claim_application_month).padStart(2, '0')}`
           : '無值'}</td>
         <td><button type="button" aria-expanded={expandedCaseNo === item.case_no} onClick={() => void toggleDetail(item.case_no)}>{expandedCaseNo === item.case_no ? '收合全部欄位' : '顯示全部欄位'}</button></td>
-      </tr>{expandedCaseNo === item.case_no && <tr className="client-roster-detail-row"><td colSpan={18}>
+      </tr>{expandedCaseNo === item.case_no && <tr className="client-roster-detail-row"><td colSpan={19}>
         {detailLoading && <p role="status">正在載入完整客戶資料…</p>}
         {detailError && <p role="alert">{detailError}</p>}
         {detail?.case_no === item.case_no && <ReadOnlyDetail detail={detail} />}

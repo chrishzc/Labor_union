@@ -32,6 +32,9 @@ from subsystems.line.notification_manual_replay_application import (
     LineNotificationManualReplayApplication,
 )
 from infrastructure.mysql import line_notification_anomaly_worker
+from infrastructure.mysql.line_notification_repository import (
+    MySqlLineNotificationRepository,
+)
 
 
 TARGET = LineNotificationFailureRecheckTarget(
@@ -254,3 +257,29 @@ def test_existing_notification_anomaly_worker_entry_enqueues_current_recheck(
         "commit",
         "close",
     ]
+
+
+def test_rule_change_ignores_non_case_failure_when_building_line006_rechecks() -> None:
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, _sql, _parameters):
+            return None
+
+        def fetchall(self):
+            return (
+                {"case_no": None, "reason_code": "recipient_unavailable"},
+                {"case_no": "CASE-006", "reason_code": "recipient_unavailable"},
+            )
+
+    connection = SimpleNamespace(cursor=lambda: Cursor())
+
+    targets = MySqlLineNotificationRepository(
+        connection
+    ).line006_recheck_targets_for_event_codes(("router.deterministic.reply_committed",))
+
+    assert targets == (TARGET,)

@@ -27,6 +27,22 @@ const CATALOG: LineNotificationRulesCatalog = {
   },
 };
 
+const CARD_CATALOG: LineNotificationRulesCatalog = {
+  revision: 3,
+  definition: {
+    rules: [{
+      id: 'leave_confirmation',
+      event_code: 'scheduling.leave.extension_requested',
+      recipient_selector: 'client.bound_case',
+      template_id: 'leave_confirmation_card',
+      enabled: false,
+      schedule: { kind: 'immediate' },
+      frequency: { kind: 'once' },
+      predicates: [],
+    }],
+  },
+};
+
 function templateClient(overrides: Partial<LineNotificationTemplateClient> = {}): LineNotificationTemplateClient {
   return {
     get: vi.fn().mockResolvedValue({
@@ -76,13 +92,15 @@ describe('LINE notification rules mutation panel', () => {
     );
 
     await screen.findByRole('textbox', { name: '訊息內容編輯' });
-    const ruleSelector = screen.getByRole('combobox', { name: /要編輯的通知規則/ });
+    const ruleSelector = screen.getByRole('combobox', { name: '通知規則：' });
     expect(within(ruleSelector).getByRole('option', { name: '訂金確認' })).toBeInTheDocument();
     expect(screen.queryByRole('textbox', { name: '規則 ID' })).not.toBeInTheDocument();
     expect(screen.queryByRole('textbox', { name: '訊息模板 ID' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: '事件' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '新增規則' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '預覽儲存變更' })).toBeDisabled();
-    fireEvent.change(screen.getByRole('combobox', { name: '事件' }), {
-      target: { value: 'order_lifecycle_transition' },
+    fireEvent.change(screen.getByRole('combobox', { name: '收件者' }), {
+      target: { value: 'assigned_caregiver' },
     });
     fireEvent.click(screen.getByRole('button', { name: '預覽儲存變更' }));
 
@@ -107,8 +125,9 @@ describe('LINE notification rules mutation panel', () => {
       preview_fingerprint: FINGERPRINT,
       reason: '核准訂金通知事件更新',
       definition: { rules: [expect.objectContaining({
-        event_code: 'order_lifecycle_transition',
+        event_code: 'deposit_confirmed',
         id: 'deposit_notice',
+        recipient_selector: 'assigned_caregiver',
         template_id: 'deposit_template',
       })] },
       idempotency_key: expect.stringMatching(/^line-notification-save-idem-/),
@@ -197,8 +216,8 @@ describe('LINE notification rules mutation panel', () => {
     render(<LineNotificationRulesMutationPanel catalog={CATALOG} client={client} templateClient={templateClient()} />);
     await screen.findByRole('textbox', { name: '訊息內容編輯' });
 
-    fireEvent.change(screen.getByRole('combobox', { name: '事件' }), {
-      target: { value: 'order_lifecycle_transition' },
+    fireEvent.change(screen.getByRole('combobox', { name: '收件者' }), {
+      target: { value: 'assigned_caregiver' },
     });
     fireEvent.click(screen.getByRole('button', { name: '預覽儲存變更' }));
 
@@ -250,5 +269,33 @@ describe('LINE notification rules mutation panel', () => {
       },
     );
     expect(screen.getByText('版本 Rev.8')).toBeInTheDocument();
+  });
+
+  it('互動卡片顯示真實卡片預覽與觸發狀態，不誤載文字模板編輯器', () => {
+    const messageClient = templateClient();
+    const ruleClient: LineNotificationRulesMutationClient = {
+      preview: vi.fn(),
+      save: vi.fn(),
+      deleteRule: vi.fn(),
+    };
+
+    render(
+      <LineNotificationRulesMutationPanel
+        catalog={CARD_CATALOG}
+        client={ruleClient}
+        templateClient={messageClient}
+      />
+    );
+
+    expect(screen.getByRole('region', { name: '通知內容與觸發狀態' })).toHaveTextContent(
+      '互動卡片｜已由月嫂請假流程觸發',
+    );
+    expect(screen.getByText('🌸 服務調休與順延確認通知')).toBeInTheDocument();
+    expect(screen.getByText('🟢 我同意順延一日')).toBeInTheDocument();
+    expect(screen.getByText('🔴 不同意順延')).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: '訊息內容編輯' })).not.toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: '收件者' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: '預覽刪除規則' })).not.toBeInTheDocument();
+    expect(messageClient.get).not.toHaveBeenCalled();
   });
 });

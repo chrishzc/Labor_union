@@ -25,7 +25,8 @@ class ClientRegistryContractError(ValueError):
 class ClientRegistrySummary:
     client_id: int
     case_no: str
-    virtual_account: str | None
+    imported_virtual_accounts: tuple[str, ...]
+    built_in_virtual_account: str | None
     name: str | None
     phone: str | None
     city: str | None
@@ -239,7 +240,12 @@ def _summary(row: Mapping[str, Any]) -> ClientRegistrySummary:
     return ClientRegistrySummary(
         client_id,
         _required_text(row.get("case_no"), 50, "client_registry_case_no_invalid"),
-        _nullable_text(row.get("virtual_account")),
+        tuple(
+            account
+            for value in row.get("imported_virtual_accounts", ())
+            if (account := _nullable_text(value)) is not None
+        ),
+        _nullable_text(row.get("built_in_virtual_account")),
         _nullable_text(row.get("name")),
         _nullable_text(row.get("phone")),
         _nullable_text(row.get("city")),

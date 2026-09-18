@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({ list: vi.fn(), query: vi.fn(), downloadOrderAc
 vi.mock('../../../../../../../api/client_registry/client_registry_client', () => ({ clientRegistryClient: mocks }));
 
 const item = {
-  client_id: 7, case_no: 'CASE-001', virtual_account: '99781699115001', name: '王小明', phone: '0912345678', city: '新竹市', district: '東區',
+  client_id: 7, case_no: 'CASE-001', imported_virtual_accounts: ['009978160011500001', '009978160011500009'], built_in_virtual_account: '99781699115001', name: '王小明', phone: '0912345678', city: '新竹市', district: '東區',
   multi_birth_count: '雙胞胎', service_days: 26, requires_cooking: true,
   planned_start_date: '2026-10-01', order_status: '洽談中',
 };
@@ -33,6 +33,10 @@ describe('ClientRosterPage', () => {
     await waitFor(() => expect(mocks.list).toHaveBeenCalledWith(expect.objectContaining({ sortBy: 'case_no', sortOrder: 'asc', limit: 100 })));
     expect(screen.getAllByText('雙胞胎').length).toBeGreaterThan(1);
     expect(screen.getByText('26')).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: '匯入虛擬帳號' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: '內建虛擬帳號' })).toBeInTheDocument();
+    expect(screen.getByText('009978160011500001')).toBeInTheDocument();
+    expect(screen.getByText('009978160011500009')).toBeInTheDocument();
     expect(screen.getByText('99781699115001')).toBeInTheDocument();
     expect(screen.getByText('東區')).toBeInTheDocument();
     expect(screen.queryByText('新竹市')).not.toBeInTheDocument();

@@ -28,7 +28,8 @@ def _row() -> OrderAccountingExportRow:
         hcm_service_start_date="2026/10/01",
         is_twins=True,
         order_status="訂單成立",
-        virtual_account="009978160011500001",
+        imported_virtual_accounts=("009978160011500001", "009978160011500009"),
+        built_in_virtual_account="99781699115001",
         service_days=26,
         service_hours_per_day=8,
         service_hours=208,
@@ -67,10 +68,13 @@ class _Repository:
 
 
 class _Cursor:
-    def __init__(self, rows):
+    def __init__(self, rows, imported_rows=()):
         self.rows = rows
+        self.imported_rows = imported_rows
+        self.current = None
         self.statement = None
         self.parameters = None
+        self.statements = []
 
     def __enter__(self):
         return self
@@ -81,14 +85,16 @@ class _Cursor:
     def execute(self, statement, parameters):
         self.statement = " ".join(statement.split())
         self.parameters = parameters
+        self.statements.append((self.statement, parameters))
+        self.current = self.imported_rows if "client_legacy_virtual_accounts" in statement else self.rows
 
     def fetchall(self):
-        return self.rows
+        return self.current
 
 
 class _Connection:
-    def __init__(self, rows):
-        self.cursor_instance = _Cursor(rows)
+    def __init__(self, rows, imported_rows=()):
+        self.cursor_instance = _Cursor(rows, imported_rows)
 
     def cursor(self):
         return self.cursor_instance
@@ -124,14 +130,18 @@ def test_export_keeps_fixed_hcm_columns_and_native_excel_value_types():
     assert worksheet["B2"].value == "00115000001"
     assert worksheet["B2"].number_format == "@"
     assert worksheet["H2"].value == "是"
-    assert worksheet["N2"].value == "否"
-    assert worksheet["Q2"].value == 93600
-    assert worksheet["Q2"].data_type == "n"
-    assert worksheet["W2"].value == 36000
-    assert worksheet["X2"].value.date() == date(2026, 10, 1)
-    assert worksheet["AF2"].value.date() == date(2026, 12, 15)
-    assert worksheet["AH2"].value.date() == date(2026, 11, 10)
-    assert worksheet.auto_filter.ref == "A1:AJ2"
+    assert worksheet["J2"].value == "009978160011500001\n009978160011500009"
+    assert worksheet["J2"].number_format == "@"
+    assert worksheet["K2"].value == "99781699115001"
+    assert worksheet["K2"].number_format == "@"
+    assert worksheet["O2"].value == "否"
+    assert worksheet["R2"].value == 93600
+    assert worksheet["R2"].data_type == "n"
+    assert worksheet["X2"].value == 36000
+    assert worksheet["Y2"].value.date() == date(2026, 10, 1)
+    assert worksheet["AG2"].value.date() == date(2026, 12, 15)
+    assert worksheet["AI2"].value.date() == date(2026, 11, 10)
+    assert worksheet.auto_filter.ref == "A1:AK2"
     assert worksheet.freeze_panes == "A2"
 
 
@@ -155,7 +165,7 @@ def test_export_route_returns_authenticated_xlsx_download():
 def test_mysql_export_uses_one_unbounded_base_join_and_current_finance_projection(monkeypatch):
     connection = _Connection(({
         "seq_num": 7,
-        "case_no": "00115000001",
+        "case_no": "115000001",
         "name": "王小明",
         "identity_status": "一般市民",
         "service_time": "09:00-17:00 8小時",
@@ -176,7 +186,10 @@ def test_mysql_export_uses_one_unbounded_base_join_and_current_finance_projectio
         "first_payment_due_date": date(2026, 10, 1),
         "second_payment_due_date": date(2026, 10, 31),
         "deposit_settled_on": date(2026, 9, 18),
-    },))
+    },), (
+        {"case_no": "115000001", "virtual_account": "009978160011500001"},
+        {"case_no": "115000001", "virtual_account": "009978160011500009"},
+    ))
     finance = {
         "service_hours": 208,
         "service_unit_price_ntd": 450,
@@ -192,14 +205,14 @@ def test_mysql_export_uses_one_unbounded_base_join_and_current_finance_projectio
     }
     monkeypatch.setattr(
         "infrastructure.mysql.client_registry_query_repository._finance_values",
-        lambda _connection, case_no: ("ready", None, finance) if case_no == "00115000001" else None,
+        lambda _connection, case_no: ("ready", None, finance) if case_no == "115000001" else None,
     )
 
     rows = MySqlClientRegistryQueryRepository(
         connection,
         subsidy_projection_loader=lambda case_nos, _connection: {
-            "00115000001": {
-                "市府訂單號碼": "00115000001",
+                "115000001": {
+                    "市府訂單號碼": "115000001",
                 "補助款金額": 36000,
                 "服務結束": date(2026, 10, 31),
             }
@@ -215,7 +228,7 @@ def test_mysql_export_uses_one_unbounded_base_join_and_current_finance_projectio
         )
     )
 
-    statement = connection.cursor_instance.statement
+    statement, parameters = connection.cursor_instance.statements[0]
     assert "FROM orders o JOIN clients c ON c.id=o.client_id" in statement
     assert "LEFT JOIN client_payment_terms terms" in statement
     assert "LEFT JOIN client_deposit_settlement_projection deposit_projection" in statement
@@ -224,8 +237,15 @@ def test_mysql_export_uses_one_unbounded_base_join_and_current_finance_projectio
     assert "o.staff_payment_due_date" in statement
     assert " LIMIT " not in statement
     assert "ORDER BY o.service_days DESC, o.case_no ASC" in statement
-    assert connection.cursor_instance.parameters == ("%王%", "雙胞胎", "訂單成立", False)
+    assert parameters == ("%王%", "雙胞胎", "訂單成立", False)
+    imported_statement, imported_parameters = connection.cursor_instance.statements[1]
+    assert "FROM client_legacy_virtual_accounts" in imported_statement
+    assert imported_parameters == ("115000001",)
     assert len(rows) == 1
+    assert rows[0].imported_virtual_accounts == (
+        "009978160011500001", "009978160011500009",
+    )
+    assert rows[0].built_in_virtual_account == "99781699115001"
     assert rows[0].is_twins is True
     assert rows[0].customer_payable_total_ntd == 93600
     assert rows[0].subsidy_return_amount_ntd == 36000

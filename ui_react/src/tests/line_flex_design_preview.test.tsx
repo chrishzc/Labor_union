@@ -32,7 +32,9 @@ describe('LINE Flex design preview', () => {
       fireEvent.click(screen.getByRole('button', { name: new RegExp(title) }));
       expect(screen.getByText(safeText)).toBeInTheDocument();
       expect(screen.getByRole('status', { name: '正式資料狀態' })).toHaveTextContent(
-        title === '媒合條件協調卡' ? '正式資料已接通' : '正式資料尚未載入',
+        title === '媒合條件協調卡' || title === '服務日順延確認卡設計稿'
+          ? '正式資料已接通'
+          : '正式資料尚未載入',
       );
     }
 

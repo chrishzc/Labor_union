@@ -58,7 +58,7 @@ def test_registry_list_route_preserves_optional_false_and_returns_roster_fields(
         def list_page(self, **kwargs):
             self.captured = kwargs
             return (({
-                "client_id": 7, "case_no": "115000001", "virtual_account": "99781699115001", "name": "王小明", "phone": "0912345678", "city": "新竹市", "district": "東區",
+                "client_id": 7, "case_no": "115000001", "imported_virtual_accounts": ("009978160011500001",), "built_in_virtual_account": "99781699115001", "name": "王小明", "phone": "0912345678", "city": "新竹市", "district": "東區",
                 "multi_birth_count": None, "service_days": 26, "requires_cooking": False,
                 "planned_start_date": None, "order_status": "洽談中",
             },), None, None)
@@ -76,7 +76,7 @@ def test_registry_list_route_preserves_optional_false_and_returns_roster_fields(
         "sort_by": "case_no", "sort_order": "asc", "limit": 25, "after": None, "offset": 0,
     }
     assert response.data.items[0].model_dump() == {
-        "client_id": 7, "case_no": "115000001", "virtual_account": "99781699115001", "name": "王小明", "phone": "0912345678", "city": "新竹市", "district": "東區",
+        "client_id": 7, "case_no": "115000001", "imported_virtual_accounts": ("009978160011500001",), "built_in_virtual_account": "99781699115001", "name": "王小明", "phone": "0912345678", "city": "新竹市", "district": "東區",
         "multi_birth_count": None, "service_days": 26, "requires_cooking": False,
         "planned_start_date": None, "order_status": "洽談中",
         "staff_payment_due_date": None,
@@ -255,6 +255,9 @@ def test_mysql_registry_list_preserves_filters_and_batches_visible_page_dates():
         {"client_id": 8, "case_no": "115000002", "name": "林小華", "phone": "0922345678", "city": "新竹市", "address": None, "multi_birth_count": None, "service_days": 20, "requires_cooking": False, "planned_start_date": None, "order_status": "洽談中"},
         {"client_id": 9, "case_no": "115000003", "service_days": 10},
     ), (
+        {"case_no": "115000001", "virtual_account": "009978160011500001"},
+        {"case_no": "115000001", "virtual_account": "009978160011500009"},
+    ), (
         {"case_no": "115000001", "obligation_identity": "client-deposit", "obligation_type": "deposit", "due_date": None},
     ), (
         {"case_no": "115000002", "obligation_identity": "staff-service", "obligation_kind": "service_pay", "due_date": None, "staff_id": 8, "staff_name": None},
@@ -266,7 +269,7 @@ def test_mysql_registry_list_preserves_filters_and_batches_visible_page_dates():
     )
 
     statement, parameters = connection.cursor_instance.statements[0]
-    assert len(connection.cursor_instance.statements) == 3
+    assert len(connection.cursor_instance.statements) == 4
     assert "AS multi_birth_count" in statement and "o.service_days,o.requires_cooking" in statement
     assert "c.city,c.address" in statement
     assert "$.multi_birth_count" in statement and "特殊計費:胎數" in statement
@@ -274,21 +277,28 @@ def test_mysql_registry_list_preserves_filters_and_batches_visible_page_dates():
     assert "ORDER BY o.service_days DESC, o.case_no ASC" in statement
     assert parameters == ("%王%", "雙胞胎", "洽談中", True, 3, 100)
     assert rows[0]["case_no"] == "115000001"
-    assert rows[0]["virtual_account"] == "99781699115001"
+    assert rows[0]["imported_virtual_accounts"] == (
+        "009978160011500001", "009978160011500009",
+    )
+    assert rows[0]["built_in_virtual_account"] == "99781699115001"
+    assert rows[1]["imported_virtual_accounts"] == ()
     assert rows[0]["district"] == "東區"
     assert rows[1]["district"] is None
     assert next_cursor == "115000002"
     assert next_offset == 102
     assert [row["case_no"] for row in rows] == ["115000001", "115000002"]
 
-    client_statement, client_parameters = connection.cursor_instance.statements[1]
-    staff_statement, staff_parameters = connection.cursor_instance.statements[2]
+    imported_statement, imported_parameters = connection.cursor_instance.statements[1]
+    client_statement, client_parameters = connection.cursor_instance.statements[2]
+    staff_statement, staff_parameters = connection.cursor_instance.statements[3]
+    assert "FROM client_legacy_virtual_accounts" in imported_statement
+    assert "case_no IN (%s,%s)" in imported_statement
     assert "FROM client_obligations" in client_statement
     assert "case_no IN (%s,%s)" in client_statement
     assert "FROM staff_obligations obligations" in staff_statement
     assert "obligations.case_no IN (%s,%s)" in staff_statement
     # The look-ahead row is not visible and must not trigger accounting reads.
-    assert client_parameters == staff_parameters == ("115000001", "115000002")
+    assert imported_parameters == client_parameters == staff_parameters == ("115000001", "115000002")
     assert all(statement.startswith("SELECT ") for statement, _ in connection.cursor_instance.statements)
     assert rows[0]["client_obligation_dates"] == [
         {"obligation_identity": "client-deposit", "obligation_type": "deposit", "due_date": None},

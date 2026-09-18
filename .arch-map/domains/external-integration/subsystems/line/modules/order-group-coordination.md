@@ -16,6 +16,7 @@
 
 ## Dependencies
 - outbound: `orders` — 提供訂單狀態與指派對象。
+- outbound: `client-finance` — 只讀正式訂金核銷 projection；未核銷或僅有未付款人工放行時禁止綁定群組與發送邀請。
 - outbound: `line-identity-management` — 只接受 canonical bound role 與 owner projection 一致的收件人。
 - outbound: `delivery-provider-transport` — 邀請訊息只經 committed delivery intent 投遞。
 

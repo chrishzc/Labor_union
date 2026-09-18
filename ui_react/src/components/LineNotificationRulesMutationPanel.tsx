@@ -3,7 +3,11 @@
  * Description: 提供通知規則欄位編輯、零寫入 Preview、人工確認 Save 與安全 Delete 操作。
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Eye, FilePenLine, Plus, Save, Settings, Trash2, TriangleAlert, X } from 'lucide-react';
+import { Eye, FilePenLine, Info, Save, Settings, Trash2, TriangleAlert } from 'lucide-react';
+import {
+  LINE_FLEX_DESIGN_SOURCES,
+  type LineFlexDesignSource,
+} from '../adapters/line_flex_design/line_flex_design_adapter';
 import {
   adaptLineNotificationRuleDeleteReceipt,
   adaptLineNotificationRulesDraft,
@@ -24,8 +28,8 @@ import {
   type LineNotificationRulesMutationClient,
 } from '../api/line_notification_rules/line_notification_rules_mutation_client';
 import { LineNotificationRulesMutationError } from '../api/line_notification_rules/line_notification_rules_mutation_errors';
-import type { LineNotificationRulesMutationDefinition } from '../api/line_notification_rules/line_notification_rules_mutation_schemas';
 import type { LineNotificationTemplateClient } from '../api/line_notification_rules/line_notification_template_client';
+import { LineFlexDesignPreview } from './LineFlexDesignPreview';
 import { LineNotificationTemplateEditor } from './LineNotificationTemplateEditor';
 
 export interface LineNotificationRulesMutationPanelProps {
@@ -41,27 +45,26 @@ type PreviewIntent =
   | { kind: 'save'; preview: LineNotificationRulesPreviewModel }
   | { kind: 'delete'; ruleId: string; preview: LineNotificationRulesPreviewModel };
 
-const EVENT_OPTIONS: ReadonlyArray<{ value: LineNotificationEventCode; label: string }> = [
-  { value: 'gateway.identity_mismatch.second_attempt', label: '身分核對連續兩次失敗' },
-  { value: 'scheduling.leave.extension_requested', label: '月嫂申請請假調休' },
-  { value: 'staff.retirement.committed', label: '月嫂辦理退休生效' },
-  { value: 'router.deterministic.reply_committed', label: 'AI 確定性指令回覆' },
-  { value: 'feedback.unresolved.recorded', label: '客服回答評為未解決' },
-  { value: 'matching.zero_pool.preview_applied', label: '媒合意願池人數為零' },
-  { value: 'matching.decision.committed.client', label: '媒合派案成交（產婦）' },
-  { value: 'matching.decision.committed.staff', label: '媒合派案成交（月嫂）' },
-  { value: 'client.leave.extension_agreed', label: '產婦同意服務順延' },
-  { value: 'client.leave.extension_rejected', label: '產婦不同意順延需代班' },
-  { value: 'runtime.alert.review_required', label: '系統重大告警待審核' },
-  { value: 'complaint.ingress.hold_high_ticket', label: '重大客訴觸發急件工單' },
-  { value: 'payroll.substitute.obligation_projected', label: '代班出勤薪資拆帳結算' },
-  { value: 'order_lifecycle_transition', label: '訂單生命週期變更' },
-  { value: 'service_time_checkpoint', label: '服務時間節點' },
-  { value: 'beclass_completion_changed', label: 'BeClass 完成狀態變更' },
-  { value: 'deposit_confirmed', label: '訂金確認' },
-  { value: 'order.pre_start_reminder', label: '服務開始前 3 天提醒（第一期款）' },
-  { value: 'order.second_payment_reminder', label: '第二期款（尾款）繳款提醒' },
-];
+const NOTIFICATION_RULE_LABELS: Record<LineNotificationEventCode, string> = {
+  'gateway.identity_mismatch.second_attempt': '身分核對連續兩次失敗',
+  'scheduling.leave.extension_requested': '月嫂請假－請客戶確認',
+  'staff.retirement.committed': '月嫂辦理退休生效',
+  'router.deterministic.reply_committed': 'AI 確定性指令回覆',
+  'feedback.resolved.recorded': '客服回答評為已解決',
+  'feedback.unresolved.recorded': '客服回答評為未解決',
+  'matching.zero_pool.preview_applied': '候選池協調建議',
+  'client.leave.extension_agreed': '產婦同意服務順延',
+  'client.leave.extension_rejected': '產婦不同意順延需代班',
+  'runtime.alert.review_required': '系統重大異常',
+  'complaint.ingress.hold_high_ticket': '重大客訴告警',
+  'payroll.substitute.obligation_projected': '代班出勤薪資拆帳結算',
+  'order_lifecycle_transition': '訂單生命週期變更',
+  'service_time_checkpoint': '提醒上傳寶寶日誌',
+  'beclass_completion_changed': 'BeClass 完成狀態變更',
+  'deposit_confirmed': '訂金確認',
+  'order.pre_start_reminder': '服務開始前 3 天提醒',
+  'order.second_payment_reminder': '第二期款（尾款）繳款提醒',
+};
 const RECIPIENT_OPTIONS: ReadonlyArray<{
   value: LineNotificationRecipientSelector;
   label: string;
@@ -90,6 +93,67 @@ const PREDICATE_OPTIONS: ReadonlyArray<{
   { value: 'beclass_missing', label: 'BeClass 資料缺失' },
 ];
 
+interface OwnerManagedNotification {
+  format: 'card' | 'text';
+  state: 'connected' | 'gap';
+  summary: string;
+  detail: string;
+  flexSource?: LineFlexDesignSource;
+}
+
+const OWNER_MANAGED_NOTIFICATIONS: Partial<
+  Record<LineNotificationEventCode, OwnerManagedNotification>
+> = {
+  'scheduling.leave.extension_requested': {
+    format: 'card',
+    state: 'connected',
+    summary: '互動卡片｜已由月嫂請假流程觸發',
+    detail: '卡片的同意／不同意操作會綁定案件、請假申請版本與收件者，不能改成一般文字通知。',
+    flexSource: LINE_FLEX_DESIGN_SOURCES.flex_leave_confirm,
+  },
+  'matching.zero_pool.preview_applied': {
+    format: 'card',
+    state: 'connected',
+    summary: '互動卡片｜已由媒合協調流程觸發',
+    detail: '卡片會帶入當次候選池與限時互動憑證；客戶回覆不等同完成派案。',
+    flexSource: LINE_FLEX_DESIGN_SOURCES.flex_negotiation,
+  },
+  'runtime.alert.review_required': {
+    format: 'card',
+    state: 'gap',
+    summary: '應為告警卡片｜目前實際路徑仍送文字',
+    detail: '安全審核連結與卡片發送尚未接通，因此不能在此宣稱卡片已啟用。',
+    flexSource: LINE_FLEX_DESIGN_SOURCES.flex_alert_critical,
+  },
+  'complaint.ingress.hold_high_ticket': {
+    format: 'card',
+    state: 'gap',
+    summary: '應為告警卡片｜尚無真實客訴來源',
+    detail: '目前只有需求與設計稿，尚未形成 HIGH 工單、去敏告警與正式發送閉環。',
+    flexSource: LINE_FLEX_DESIGN_SOURCES.flex_alert_critical,
+  },
+};
+
+const OwnerManagedNotificationPanel: React.FC<{
+  notification: OwnerManagedNotification;
+}> = ({ notification }) => (
+  <section className="notification-template-editor" aria-label="通知內容與觸發狀態">
+    <div className="notification-template-heading">
+      <div>
+        <h5>{notification.format === 'card' ? '通知卡片內容' : '通知訊息內容'}</h5>
+        <p>{notification.detail}</p>
+      </div>
+      <span className={notification.state === 'connected' ? 'line-status line-status-bound' : 'line-status line-status-revoked'}>
+        {notification.state === 'connected' ? '真實流程已接通' : '尚未接通'}
+      </span>
+    </div>
+    <div className={notification.state === 'connected' ? 'line-scope-note' : 'line-warning'} role="status">
+      <Info aria-hidden="true" />{notification.summary}
+    </div>
+    {notification.flexSource && <LineFlexDesignPreview source={notification.flexSource} />}
+  </section>
+);
+
 function operationIdentity(prefix: string): string {
   const suffix = globalThis.crypto?.randomUUID?.()
     ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -109,28 +173,8 @@ function displayError(error: unknown): string {
   return 'LINE 通知規則操作未完成，請重新載入最新規則後再試。';
 }
 
-function nextRuleId(definition: LineNotificationRulesMutationDefinition): string {
-  const used = new Set(definition.rules.map((rule) => rule.id));
-  let sequence = 1;
-  while (used.has(`new_rule_${sequence}`)) sequence += 1;
-  return `new_rule_${sequence}`;
-}
-
 function eventLabel(eventCode: LineNotificationEventCode): string {
-  return EVENT_OPTIONS.find((option) => option.value === eventCode)?.label ?? eventCode;
-}
-
-function newRule(id: string): LineNotificationRule {
-  return {
-    id,
-    event_code: 'order_lifecycle_transition',
-    recipient_selector: 'client',
-    template_id: 'message_template',
-    enabled: false,
-    schedule: { kind: 'immediate' },
-    frequency: { kind: 'once' },
-    predicates: [],
-  };
+  return NOTIFICATION_RULE_LABELS[eventCode] ?? eventCode;
 }
 
 export const LineNotificationRulesMutationPanel: React.FC<
@@ -177,6 +221,9 @@ export const LineNotificationRulesMutationPanel: React.FC<
 
   const activeRule = draft.rules.find((rule) => rule.id === activeRuleId) ?? null;
   const committedActiveRule = baseline.rules.find((rule) => rule.id === activeRuleId) ?? null;
+  const ownerManagedNotification = activeRule
+    ? OWNER_MANAGED_NOTIFICATIONS[activeRule.event_code]
+    : undefined;
   const baselineHasActiveRule = baseline.rules.some((rule) => rule.id === activeRuleId);
   const draftChanged = JSON.stringify(draft) !== JSON.stringify(baseline);
   const busy = state === 'loading';
@@ -196,21 +243,6 @@ export const LineNotificationRulesMutationPanel: React.FC<
     setDraft((current) => ({
       rules: current.rules.map((rule) => (rule.id === activeRuleId ? update(rule) : rule)),
     }));
-  };
-
-  const addRule = (): void => {
-    const id = nextRuleId(draft);
-    invalidatePreview();
-    setDraft((current) => ({ rules: [...current.rules, newRule(id)] }));
-    setActiveRuleId(id);
-  };
-
-  const cancelNewRule = (): void => {
-    if (!activeRuleId || baselineHasActiveRule) return;
-    const remaining = draft.rules.filter((rule) => rule.id !== activeRuleId);
-    invalidatePreview();
-    setDraft({ rules: remaining });
-    setActiveRuleId(remaining[0]?.id ?? null);
   };
 
   const runPreview = async (kind: 'save' | 'delete'): Promise<void> => {
@@ -310,20 +342,12 @@ export const LineNotificationRulesMutationPanel: React.FC<
             已載入最新通知規則｜每次儲存或刪除前都必須重新檢查影響。
           </p>
         </div>
-        <button
-          type="button"
-          className="line-primary-btn line-compact-button"
-          disabled={busy}
-          onClick={addRule}
-        >
-          <Plus aria-hidden="true" />新增規則
-        </button>
       </div>
 
       {draft.rules.length > 0 ? (
         <div className="line-search-filter-toolbar notification-rule-selector-row">
           <label htmlFor="line-notification-rule-selector" className="notification-rule-selector-label">
-            要編輯的通知規則：
+            通知規則：
           </label>
           <select
             id="line-notification-rule-selector"
@@ -340,33 +364,16 @@ export const LineNotificationRulesMutationPanel: React.FC<
             ))}
           </select>
         </div>
-      ) : <p className="line-scope-note line-block-spacing-12">目前沒有通知規則；可新增第一筆規則後預覽儲存。</p>}
+      ) : <p className="line-scope-note line-block-spacing-12">目前沒有可維護的通知規則。</p>}
 
       {activeRule && (
         <div className="richmenu-drawer-panel notification-rule-editor-panel">
-          <fieldset disabled={busy} className="line-fieldset-reset">
+          <fieldset disabled={busy || Boolean(ownerManagedNotification)} className="line-fieldset-reset">
             <legend className="notification-rule-editor-legend">
               <FilePenLine aria-hidden="true" />規則欄位
             </legend>
 
             <div className="richmenu-drawer-grid">
-              <div className="richmenu-drawer-field">
-                <label htmlFor="line-notification-event-code">事件</label>
-                <select
-                  id="line-notification-event-code"
-                  className="richmenu-drawer-select"
-                  value={activeRule.event_code}
-                  onChange={(event) => updateActiveRule((rule) => ({
-                    ...rule,
-                    event_code: event.target.value as LineNotificationEventCode,
-                  }))}
-                >
-                  {EVENT_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </select>
-              </div>
-
               <div className="richmenu-drawer-field">
                 <label htmlFor="line-notification-recipient">收件者</label>
                 <select
@@ -540,44 +547,44 @@ export const LineNotificationRulesMutationPanel: React.FC<
         </div>
       )}
 
-      {activeRule && committedActiveRule && activeRule.template_id === committedActiveRule.template_id ? (
+      {ownerManagedNotification ? (
+        <OwnerManagedNotificationPanel notification={ownerManagedNotification} />
+      ) : activeRule && committedActiveRule && activeRule.template_id === committedActiveRule.template_id ? (
         <LineNotificationTemplateEditor ruleId={committedActiveRule.id} client={templateClient} />
       ) : activeRule ? (
         <p className="line-scope-note notification-rule-dirty-note">
-          <TriangleAlert aria-hidden="true" />先儲存新增規則，再編輯實際發送的訊息內容。
+          <TriangleAlert aria-hidden="true" />請先儲存通知規則變更，再編輯實際發送的訊息內容。
         </p>
       ) : null}
 
-      <div className="line-action-row notification-rule-action-row">
-        <button
-          type="button"
-          className="line-secondary-btn"
-          disabled={busy || !draftChanged}
-          onClick={() => void runPreview('save')}
-        >
-          <Eye aria-hidden="true" />預覽儲存變更
-        </button>
-        {activeRule && baselineHasActiveRule && (
-          <button
-            type="button"
-            className="line-danger-btn"
-            disabled={busy || draftChanged}
-            onClick={() => void runPreview('delete')}
-          >
-            <Trash2 aria-hidden="true" />預覽刪除規則
-          </button>
-        )}
-        {activeRule && !baselineHasActiveRule && (
+      {ownerManagedNotification && (
+        <p className="line-scope-note notification-rule-dirty-note">
+          <Info aria-hidden="true" />此通知由業務流程管理，避免重複發送，收件者、排程、頻率與啟用狀態不在通知規則頁修改。
+        </p>
+      )}
+
+      {!ownerManagedNotification && (
+        <div className="line-action-row notification-rule-action-row">
           <button
             type="button"
             className="line-secondary-btn"
-            disabled={busy}
-            onClick={cancelNewRule}
+            disabled={busy || !draftChanged}
+            onClick={() => void runPreview('save')}
           >
-            <X aria-hidden="true" />取消新增規則
+            <Eye aria-hidden="true" />預覽儲存變更
           </button>
-        )}
-      </div>
+          {activeRule && baselineHasActiveRule && (
+            <button
+              type="button"
+              className="line-danger-btn"
+              disabled={busy || draftChanged}
+              onClick={() => void runPreview('delete')}
+            >
+              <Trash2 aria-hidden="true" />預覽刪除規則
+            </button>
+          )}
+        </div>
+      )}
 
       {draftChanged && baselineHasActiveRule && (
         <p className="line-scope-note notification-rule-dirty-note">

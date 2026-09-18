@@ -46,13 +46,28 @@ def _actor() -> ActorContext:
     return ActorContext("system:line-task96-baseline", ("line.config.manage",))
 
 
-def test_baseline_matches_all_26_section_1_3_identities() -> None:
+def test_current_catalog_keeps_only_required_notifications_and_real_reminders() -> None:
     definition = json.loads(Path("config/notification_rules.json").read_text(encoding="utf-8"))
     typed_definition = LineNotificationRulesDefinition.model_validate(definition)
-    assert len(typed_definition.rules) >= 13
-    assert tuple(rule.event_code for rule in typed_definition.rules[:13]) == tuple(
-        trigger for _, trigger, _ in baseline_identities()
+    assert tuple(rule.event_code for rule in typed_definition.rules) == (
+        "scheduling.leave.extension_requested",
+        "matching.zero_pool.preview_applied",
+        "runtime.alert.review_required",
+        "complaint.ingress.hold_high_ticket",
+        "service_time_checkpoint",
+        "order.pre_start_reminder",
+        "order.second_payment_reminder",
     )
+    baby_log_rule = next(
+        rule for rule in typed_definition.rules
+        if rule.event_code == "service_time_checkpoint"
+    )
+    assert baby_log_rule.recipient_selector == "assigned_caregiver"
+    assert baby_log_rule.schedule.kind == "service_end"
+    assert baby_log_rule.predicates == ("baby_log_missing",)
+
+
+def test_historical_task96_fixture_keeps_its_provenance_contract() -> None:
     events = build_baseline_events(
         target_database="lu_test_line96",
         occurred_at=datetime(2026, 9, 1, tzinfo=timezone.utc),

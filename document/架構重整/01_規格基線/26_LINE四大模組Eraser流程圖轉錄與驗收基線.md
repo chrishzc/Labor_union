@@ -79,6 +79,26 @@ provenance，不覆寫。
 | M4 complaint escalation | `LU96-M4-COMPLAINT-HIGH-SOURCE-V1` | `LU96-M4-COMPLAINT-HIGH-RULE-V1` | `LU96-M4-COMPLAINT-HIGH-CARD-V1` | `complaint.ingress.hold_high_ticket` | `customer_service.claim_owner` |
 | M4 salary/payable anomaly | `LU96-M4-SALARY-PAYABLE-SOURCE-V1` | `LU96-M4-SALARY-PAYABLE-RULE-V1` | `LU96-M4-SALARY-PAYABLE-CARD-V1` | `payroll.substitute.obligation_projected` | `staff_payables.anomaly_owner` |
 
+2026-09-18 人工裁決：上表 13 筆繼續保存為 Task96 development fixture 與歷史驗收 provenance，
+但不再等同 current 可維護通知目錄。current 目錄只保留具獨立收件人價值的請假客戶確認、
+候選池協調建議、系統重大異常與重大客訴告警；Gateway 失敗、
+staff retirement、deterministic router reply、unresolved feedback、請假同意／拒絕均由各自
+owner 的工單、回覆、receipt 或互動流程承接，不另建可配置通知規則。代班出勤薪資／應付
+仍由 Payroll／Staff Payables 正常計算與讀回，但完全不建立 LINE 通知規則。
+
+媒合成功只提交媒合結果與內部稽核，不另外通知客戶或月嫂。後續由工會依序發送契約簽署
+提醒與訂金付款提醒；客戶付款完成後，才可建立第三方服務群組並發送群組邀請。
+
+current 目錄另納入已有正式 source worker 的三項營運提醒：服務日結束且寶寶日誌尚未完成時
+提醒已指派月嫂上傳、服務開始前三日提醒客戶，以及第二期款到期提醒客戶。通知規則 UI
+只以業務名稱選擇既有規則；event code 是 owner contract，不提供一般管理員改寫，也不提供
+脫離 owner producer 的任意新增規則。前述六項業務通知不得一律降級為文字模板：請假客戶確認與
+候選池協調建議由正式流程產生 recipient-bound Flex 互動卡片；媒合成功客戶／月嫂通知由 committed
+媒合結果流程送出非互動文字；runtime 重大異常的 current 實作仍送文字，尚未完成規格要求的安全
+審核卡片；重大客訴尚未具備 canonical ingress → hold → HIGH ticket → masked alert 的正式來源閉環。
+通知規則 UI 必須如實顯示上述載體與接通狀態，並鎖定由 owner 流程管理的收件者、排程、頻率與
+啟用狀態；只有真正由 notification rule／template engine 產生的營運提醒提供文字內容編輯。
+
 development-only reset/bootstrap 可由既有 Notification owner 的 typed fixture writer 建立上述最小 synthetic
 owner-root recipient fixture／projection 與 source trigger event；fixture 只含 `lu_test_*` synthetic principal／binding、canonical
 identity、source subject 與 revision，不建立假的 matching／leave decision、assignment、payroll obligation 或

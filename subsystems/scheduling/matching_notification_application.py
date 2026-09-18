@@ -38,7 +38,6 @@ from subsystems.line.capabilities import (
     LineCapability,
     require_line_capability,
 )
-from subsystems.line.delivery_contracts import LineDeliveryCommandOutcome
 from subsystems.scheduling.matching_line_cards import (
     caregiver_information_card,
     customer_confirmation_card,
@@ -60,8 +59,6 @@ from subsystems.scheduling.matching_notification_contracts import (
     MatchingNotificationProjectionStatus,
     MatchingNotificationResult,
     MatchingResponseResult,
-    AssignmentConversionNotificationResult,
-    NotifyAssignmentConversionCommand,
     PreviewManualCustomerProfilesCommand,
     RecordManualMatchingResponseCommand,
     RequestCaregiverInformationCommand,
@@ -292,30 +289,6 @@ class MatchingNotificationApplication:
             )
             unit_of_work.commit()
         return ManualCustomerProfilesReceipt(state.plan, evidence, replayed=False)
-
-    def notify_assignment_conversion(
-        self,
-        command: NotifyAssignmentConversionCommand,
-    ) -> AssignmentConversionNotificationResult:
-        require_line_capability(command.actor, LineCapability.MATCHING_SEND)
-        with self._unit_of_work_factory() as unit_of_work:
-            customer = unit_of_work.delivery_tasks.enqueue(
-                _assignment_conversion_delivery(command, "customer")
-            )
-            caregiver = unit_of_work.delivery_tasks.enqueue(
-                _assignment_conversion_delivery(command, "caregiver")
-            )
-            _require_assignment_conversion_outcomes(customer, caregiver)
-            unit_of_work.commit()
-        return AssignmentConversionNotificationResult(
-            command.receipt.request_id,
-            customer.task_id,
-            caregiver.task_id,
-            replayed=(
-                customer.outcome is LineDeliveryCommandOutcome.EXISTING
-                and caregiver.outcome is LineDeliveryCommandOutcome.EXISTING
-            ),
-        )
 
     def record_line_response(
         self,
@@ -816,63 +789,6 @@ def _matching_delivery(command, recipient, payload_json, intent_id, scheduled_at
         "matching_notification_intent",
         str(intent_id),
     )
-
-
-def _assignment_conversion_delivery(
-    command: NotifyAssignmentConversionCommand,
-    role: str,
-) -> LineDeliveryRequest:
-    if role == "customer":
-        recipient = command.customer.line_user_id
-        text = "媒合已完成，工會人員將提供後續服務資訊。"
-    elif role == "caregiver":
-        recipient = command.caregiver.line_user_id
-        text = "派案已完成，工會人員將提供後續服務資訊。"
-    else:
-        raise ValueError("assignment conversion notification role is invalid")
-    return LineDeliveryRequest(
-        LineRecipient(LineRecipientType.USER, recipient),
-        LineMessageKind.TEXT,
-        canonical_line_payload_json({"type": "text", "text": text}),
-        command.scheduled_at,
-        _assignment_conversion_idempotency_key(command, role),
-        command.correlation_id,
-        "assignment_conversion_receipt",
-        command.receipt.request_id,
-    )
-
-
-def _assignment_conversion_idempotency_key(
-    command: NotifyAssignmentConversionCommand,
-    role: str,
-) -> IdempotencyKey:
-    digest = fingerprint_payload(
-        {
-            "parent_key": command.idempotency_key.value,
-            "command_fingerprint": command.fingerprint.value,
-            "audience": role,
-        }
-    ).value
-    return IdempotencyKey(f"matching-assignment-notification:{role}:{digest}")
-
-
-def _require_assignment_conversion_outcomes(customer, caregiver) -> None:
-    outcome_values = (customer.outcome, caregiver.outcome)
-    if not all(
-        isinstance(outcome, LineDeliveryCommandOutcome)
-        for outcome in outcome_values
-    ):
-        raise MatchingCommunicationConflictError(
-            "assignment conversion notification returned an unknown delivery outcome"
-        )
-    outcomes = set(outcome_values)
-    if outcomes not in (
-        {LineDeliveryCommandOutcome.CREATED},
-        {LineDeliveryCommandOutcome.EXISTING},
-    ):
-        raise MatchingCommunicationConflictError(
-            "assignment conversion notification delivery outcomes conflict"
-        )
 
 
 def _response_confirmation(result, recipient, correlation_id, scheduled_at):

@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({ list: vi.fn(), query: vi.fn() }));
 vi.mock('../../../../../../../api/client_registry/client_registry_client', () => ({ clientRegistryClient: mocks }));
 
 const item = {
-  client_id: 1, case_no: '115000101', name: '客戶甲', phone: null, city: null,
+  client_id: 1, case_no: '115000101', imported_virtual_accounts: [], built_in_virtual_account: '99781699115101', name: '客戶甲', phone: null, city: null,
   multi_birth_count: null, service_days: 20, requires_cooking: false,
   planned_start_date: '2026-07-01', order_status: '訂單完成',
   staff_payment_due_date: '2026-09-15',
@@ -43,17 +43,17 @@ describe('client roster accounting date columns', () => {
     for (const name of ['訂金應繳日', '第一期應繳日', '第二期應繳日', '訂單月嫂應付日', '月嫂義務應付日', '客戶補助退還日', '補助預計申請年月']) {
       expect(screen.getByRole('columnheader', { name })).toBeInTheDocument();
     }
-    expect(row).toHaveLength(18);
-    expect(row[10]).toHaveTextContent('2026-06-20');
-    expect(row[11]).toHaveTextContent('2026-07-03');
-    expect(row[12]).toHaveTextContent('無值');
-    expect(row[13]).toHaveTextContent('2026-09-15');
-    expect(row[14]).toHaveTextContent('月嫂甲／薪資：2026-10-15');
-    expect(row[14]).toHaveTextContent('月嫂乙／調整：2026-08-15');
-    expect(row[14]).toHaveTextContent('月嫂 #9／薪資：無值');
-    expect(row[15]).toHaveTextContent('2026-10-15');
-    expect(row[15]).toHaveTextContent('2026-11-15');
-    expect(row[16].textContent).toBe('2026-10');
+    expect(row).toHaveLength(19);
+    expect(row[11]).toHaveTextContent('2026-06-20');
+    expect(row[12]).toHaveTextContent('2026-07-03');
+    expect(row[13]).toHaveTextContent('無值');
+    expect(row[14]).toHaveTextContent('2026-09-15');
+    expect(row[15]).toHaveTextContent('月嫂甲／薪資：2026-10-15');
+    expect(row[15]).toHaveTextContent('月嫂乙／調整：2026-08-15');
+    expect(row[15]).toHaveTextContent('月嫂 #9／薪資：無值');
+    expect(row[16]).toHaveTextContent('2026-10-15');
+    expect(row[16]).toHaveTextContent('2026-11-15');
+    expect(row[17].textContent).toBe('2026-10');
     expect(mocks.query).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: /儲存|更新|套用日期|重算/ })).not.toBeInTheDocument();
   });
@@ -63,7 +63,7 @@ describe('client roster accounting date columns', () => {
       client_obligation_dates: [], staff_obligation_dates: [], claim_application_year: null, claim_application_month: null,
     }], next_cursor: null });
     render(<ClientRosterPage />);
-    expect((await cells()).slice(10, 17).map((cell) => cell.textContent)).toEqual(Array(7).fill('無值'));
+    expect((await cells()).slice(11, 18).map((cell) => cell.textContent)).toEqual(Array(7).fill('無值'));
   });
 
   it('does not lose list dates when the existing amount/detail query fails', async () => {
@@ -72,16 +72,16 @@ describe('client roster accounting date columns', () => {
     await cells();
     fireEvent.click(screen.getByRole('button', { name: '顯示全部欄位' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('帳務詳情無法計算');
-    expect((await cells())[13]).toHaveTextContent('2026-09-15');
-    expect(screen.getByRole('alert').closest('td')).toHaveAttribute('colspan', '18');
+    expect((await cells())[14]).toHaveTextContent('2026-09-15');
+    expect(screen.getByRole('alert').closest('td')).toHaveAttribute('colspan', '19');
   });
 
   it('distinguishes an older response without the new fields from stored nulls', async () => {
-    const legacy = { client_id: 1, case_no: '115000101', name: null, phone: null, city: null, planned_start_date: null, order_status: null };
+    const legacy = { client_id: 1, case_no: '115000101', imported_virtual_accounts: [], built_in_virtual_account: '99781699115101', name: null, phone: null, city: null, planned_start_date: null, order_status: null };
     const decoded = ClientRegistrySummarySchema.parse(legacy);
     mocks.list.mockResolvedValue({ items: [decoded], next_cursor: null });
     render(<ClientRosterPage />);
-    expect((await cells()).slice(10, 17).map((cell) => cell.textContent)).toEqual(Array(7).fill('未載入'));
+    expect((await cells()).slice(11, 18).map((cell) => cell.textContent)).toEqual(Array(7).fill('未載入'));
   });
 
   it('decodes each obligation date without replacing nulls or hiding malformed fields', () => {

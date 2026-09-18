@@ -81,6 +81,8 @@ def test_repository_find_due_candidates_maps_rows() -> None:
     assert c2.first_payment_amount == 0
     assert c2.already_settled is True
     assert c2.client_line_user_id == "U_USER_002"
+    assert "o.start_date" in conn._cursor.last_query
+    assert "o.service_start_date" not in conn._cursor.last_query
 
 
 def test_repository_find_second_payment_due_candidates() -> None:

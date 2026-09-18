@@ -370,13 +370,13 @@
     },
     {
       "id": "LU96-M1-LEAVE-EXTENSION-CARD-V1",
-      "name": "Task96 M1 leave extension baseline",
-      "category": "task96_baseline",
+      "name": "月嫂請假－請客戶確認",
+      "category": "leave_coordination",
       "message_type": "text",
       "enabled": true,
-      "content": "Task96 baseline notification: leave extension.",
+      "content": "月嫂已提出請假／調休申請，服務日期可能需要順延。請在 LINE 通知中確認是否同意；若不同意，工會將協助安排代班月嫂。",
       "variables": [],
-      "usage": ["task96_baseline"]
+      "usage": ["leave_coordination", "notification"]
     },
     {
       "id": "LU96-M1-STAFF-RETIRE-CARD-V1",
@@ -410,33 +410,33 @@
     },
     {
       "id": "LU96-M3-ZERO-POOL-CARD-V1",
-      "name": "Task96 M3 zero pool baseline",
-      "category": "task96_baseline",
+      "name": "候選池協調建議",
+      "category": "matching_coordination",
       "message_type": "text",
       "enabled": true,
-      "content": "Task96 baseline notification: zero-pool proposal.",
+      "content": "目前已聯繫的候選月嫂皆已完成回覆，但尚無人願意承接。工會已彙整可協調的服務條件，請確認是否可以調整；您的回覆不代表已完成派案。",
       "variables": [],
-      "usage": ["task96_baseline"]
+      "usage": ["matching_coordination", "notification"]
     },
     {
       "id": "LU96-M3-MATCH-SUCCESS-CLIENT-CARD-V1",
-      "name": "Task96 M3 client match baseline",
-      "category": "task96_baseline",
+      "name": "媒合成功－客戶",
+      "category": "matching_result",
       "message_type": "text",
       "enabled": true,
-      "content": "Task96 baseline notification: client match success.",
+      "content": "媒合已完成，工會已確認本案的服務月嫂。請查看最新服務安排；如需協助，請直接於官方 LINE 留言。",
       "variables": [],
-      "usage": ["task96_baseline"]
+      "usage": ["matching_result", "notification"]
     },
     {
       "id": "LU96-M3-MATCH-SUCCESS-STAFF-CARD-V1",
-      "name": "Task96 M3 staff match baseline",
-      "category": "task96_baseline",
+      "name": "媒合成功－月嫂",
+      "category": "matching_result",
       "message_type": "text",
       "enabled": true,
-      "content": "Task96 baseline notification: staff match success.",
+      "content": "您已完成本案媒合指派，請查看最新服務日期與案件安排；如資料有誤，請儘速聯繫工會專員。",
       "variables": [],
-      "usage": ["task96_baseline"]
+      "usage": ["matching_result", "notification"]
     },
     {
       "id": "LU96-M3-LEAVE-AGREE-CARD-V1",
@@ -460,23 +460,23 @@
     },
     {
       "id": "LU96-M4-SAFE-ALERT-CARD-V1",
-      "name": "Task96 M4 safe alert baseline",
-      "category": "task96_baseline",
+      "name": "系統重大異常",
+      "category": "runtime_alert",
       "message_type": "text",
       "enabled": true,
-      "content": "Task96 baseline notification: safety alert review.",
+      "content": "系統偵測到需要人工處理的重大異常。請由安全審核入口查看去敏資訊並進行處理；請勿在群組轉貼個案資料。",
       "variables": [],
-      "usage": ["task96_baseline"]
+      "usage": ["runtime_alert", "notification"]
     },
     {
       "id": "LU96-M4-COMPLAINT-HIGH-CARD-V1",
-      "name": "Task96 M4 complaint baseline",
-      "category": "task96_baseline",
+      "name": "重大客訴告警",
+      "category": "customer_service",
       "message_type": "text",
       "enabled": true,
-      "content": "Task96 baseline notification: high complaint review.",
+      "content": "收到重大客訴急件，系統已建立 HIGH 優先工單並暫停自動回覆。請由客服中心查看去敏摘要並接手處理。",
       "variables": [],
-      "usage": ["task96_baseline"]
+      "usage": ["customer_service", "notification"]
     },
     {
       "id": "LU96-M4-SALARY-PAYABLE-CARD-V1",
@@ -487,6 +487,22 @@
       "content": "Task96 baseline notification: payable anomaly review.",
       "variables": [],
       "usage": ["task96_baseline"]
+    },
+    {
+      "id": "LINE-SERVICE-DAY-LOG-REMINDER-TEXT-V1",
+      "name": "提醒上傳寶寶日誌",
+      "category": "service_day",
+      "message_type": "text",
+      "enabled": true,
+      "content": "提醒您完成 {service_date} 的服務紀錄，請至 LINE 選單的「寶寶日誌」上傳當日紀錄；如本案包含下廚服務，也請一併上傳餐食照片。",
+      "variables": [
+        {
+          "name": "service_date",
+          "required": true,
+          "description": "服務日期"
+        }
+      ],
+      "usage": ["service_day", "notification"]
     },
     {
       "id": "LU96-ORDER-PRE-START-REMINDER-CARD-V1",

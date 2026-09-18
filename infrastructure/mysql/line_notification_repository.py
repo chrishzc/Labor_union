@@ -1305,13 +1305,21 @@ def _line006_recheck_targets(
 ) -> tuple[LineNotificationFailureRecheckTarget, ...]:
     targets: set[LineNotificationFailureRecheckTarget] = set()
     for row in rows:
-        if not isinstance(row, dict) or not isinstance(row.get("case_no"), str):
+        if not isinstance(row, dict):
+            raise RuntimeError("line006_recheck_target_readback_invalid")
+        case_no = row.get("case_no")
+        if case_no is None:
+            # LINE-006 is a case-scoped current fact.  Conversation, identity,
+            # and other non-case notifications may still have delivery failures,
+            # but they cannot form a case recheck target.
+            continue
+        if not isinstance(case_no, str) or not case_no.strip():
             raise RuntimeError("line006_recheck_target_readback_invalid")
         try:
             reason = LineNotificationFailureReason(str(row.get("reason_code")))
         except ValueError as error:
             raise RuntimeError("line006_recheck_target_readback_invalid") from error
-        targets.add(LineNotificationFailureRecheckTarget(row["case_no"], reason))
+        targets.add(LineNotificationFailureRecheckTarget(case_no, reason))
     return tuple(
         sorted(targets, key=lambda item: (item.case_no, item.notification_reason.value))
     )
