@@ -48,7 +48,8 @@ def _item(row) -> SchedulingCheckpointOutboxItem:
 
 
 _CLAIM_SQL = (
-    "SELECT outbox.id,outbox.event_id,outbox.payload_snapshot,event.created_at_utc "
+    "SELECT outbox.id,outbox.event_id,outbox.payload_snapshot,"
+    "event.created_at_utc AS occurred_at_utc "
     "FROM scheduling_service_day_checkpoint_outbox outbox "
     "JOIN scheduling_service_day_checkpoint_events event ON event.id=outbox.event_id "
     "WHERE outbox.delivery_status='pending' AND (outbox.next_attempt_at_utc IS NULL OR outbox.next_attempt_at_utc<=%s) "

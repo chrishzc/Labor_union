@@ -6,7 +6,7 @@ Description: 以正式排班和訂單服務時段形成每日服務結束 checkp
 from __future__ import annotations
 
 import json
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from pymysql.err import IntegrityError
@@ -113,7 +113,17 @@ def _date(value) -> date | None:
 
 
 def _time(value) -> time | None:
-    return value if isinstance(value, time) else None
+    if isinstance(value, time):
+        return value
+    if isinstance(value, timedelta):
+        seconds = int(value.total_seconds())
+        if 0 <= seconds < 86_400:
+            return time(
+                seconds // 3_600,
+                seconds % 3_600 // 60,
+                seconds % 60,
+            )
+    return None
 
 
 def _baby_log_completed(cursor, assignment_id: int, service_date: str) -> bool:

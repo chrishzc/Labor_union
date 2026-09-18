@@ -5,7 +5,10 @@ Description: 驗證日誌完成只停止同一指派與服務日尚未送出的�
 
 from datetime import UTC, datetime
 
+import pytest
+
 from subsystems.line.service_day_log_notification_stop import (
+    ServiceDayLogNotificationStopError,
     ServiceDayLogNotificationStopProjector,
     ServiceDayLogOutboxItem,
 )
@@ -37,7 +40,7 @@ def test_completed_log_cancels_exact_service_day_reminders_then_publishes_outbox
     assert recorded == [("cancel", 8, "2026-08-16"), ("published", 17)]
 
 
-def test_cancellation_failure_keeps_outbox_for_bounded_retry() -> None:
+def test_cancellation_failure_keeps_retry_state_and_signals_pre_delivery_gate() -> None:
     recorded: list[str] = []
 
     class Outbox:
@@ -54,8 +57,14 @@ def test_cancellation_failure_keeps_outbox_for_bounded_retry() -> None:
         def cancel_service_day_log_reminders(self, _assignment_id, _service_date):
             raise RuntimeError("temporary database failure")
 
-    ServiceDayLogNotificationStopProjector(Outbox(), Notifications()).run_once(
-        datetime(2026, 8, 16, 11, tzinfo=UTC)
-    )
+    with pytest.raises(
+        ServiceDayLogNotificationStopError,
+        match="service_day_log_notification_stop_failed:RuntimeError",
+    ) as failure:
+        ServiceDayLogNotificationStopProjector(Outbox(), Notifications()).run_once(
+            datetime(2026, 8, 16, 11, tzinfo=UTC)
+        )
 
+    assert failure.value.processed == 1
+    assert failure.value.error_type == "RuntimeError"
     assert recorded == ["RuntimeError"]
