@@ -144,7 +144,21 @@ class MySqlLineNotificationRepository:
         with self._connection.cursor() as cursor:
             cursor.execute(_CASE_TIMELINE_SQL, (case_no,))
             rows = tuple(cursor.fetchall() or ())
-        return tuple(_timeline_row(row) for row in rows if isinstance(row, dict))
+        rule_snapshot = self._current_configuration("notification_rules")
+        template_snapshot = self._current_configuration("message_templates")
+        configured_event_codes = _configured_event_codes(rule_snapshot)
+        configuration_available = (
+            configured_event_codes is not None and template_snapshot is not None
+        )
+        return tuple(
+            _timeline_row(
+                row,
+                configured_event_codes=configured_event_codes,
+                configuration_available=configuration_available,
+            )
+            for row in rows
+            if isinstance(row, dict)
+        )
 
     def list_router_replies(
         self, recipient_identity: str, *, limit: int = 5
@@ -1298,8 +1312,37 @@ def _fixture_recipient(selector: str, facts: object) -> LineRecipient | None:
     return None
 
 
-def _timeline_row(row: dict[str, object]) -> dict[str, object]:
+def _configured_event_codes(
+    snapshot: tuple[int, dict[str, object]] | None,
+) -> frozenset[str] | None:
+    if snapshot is None:
+        return None
+    rules = snapshot[1].get("rules")
+    if not isinstance(rules, list):
+        return None
+    return frozenset(
+        str(rule["event_code"])
+        for rule in rules
+        if isinstance(rule, dict) and isinstance(rule.get("event_code"), str)
+    )
+
+
+def _timeline_row(
+    row: dict[str, object],
+    *,
+    configured_event_codes: frozenset[str] | None,
+    configuration_available: bool,
+) -> dict[str, object]:
     recipient = row.get("recipient_identity")
+    reason_code = row.get("reason_code")
+    if row.get("decision_status") is None and reason_code is None:
+        if not configuration_available:
+            reason_code = "notification_configuration_unavailable"
+        elif (
+            configured_event_codes is not None
+            and str(row["event_code"]) not in configured_event_codes
+        ):
+            reason_code = "rule_not_configured"
     return {
         "source_event_id": int(row["source_event_id"]),
         "event_code": str(row["event_code"]),
@@ -1307,7 +1350,7 @@ def _timeline_row(row: dict[str, object]) -> dict[str, object]:
         "historical_silent": bool(row["historical_silent"]),
         "rule_id": row.get("rule_id"),
         "decision_status": row.get("decision_status"),
-        "reason_code": row.get("reason_code"),
+        "reason_code": reason_code,
         "recipient_type": row.get("recipient_type"),
         "recipient_identity": _canonical_recipient(recipient),
         "occurrence_number": row.get("occurrence_number"),
