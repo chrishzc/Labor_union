@@ -564,6 +564,7 @@ class MySqlLineNotificationRepository:
             and rule.get("event_code") == source.event_code
             and rule.get("enabled") is True
             and _predicates_match(rule.get("predicates"), source.facts)
+            and self._rule_source_currently_applicable(source, rule)
         ) if isinstance(rules, list) else ()
         if not matching:
             raise LineNotificationManualReplayValidationError(
@@ -595,6 +596,46 @@ class MySqlLineNotificationRepository:
                 raise LineNotificationManualReplayValidationError(
                     "template_or_schedule_invalid"
                 )
+
+    def _rule_source_currently_applicable(
+        self,
+        source: NotificationSourceEvent,
+        rule: dict[str, object],
+    ) -> bool:
+        if source.event_code != "service_time_checkpoint":
+            return True
+        if (
+            source.source_aggregate_type != "case_staff_assignment"
+            or not isinstance(source.facts, dict)
+        ):
+            return False
+        assignment_id = source.facts.get("assignment_id")
+        service_date = source.facts.get("service_date")
+        if (
+            not isinstance(assignment_id, int)
+            or isinstance(assignment_id, bool)
+            or assignment_id <= 0
+            or not isinstance(service_date, str)
+            or not service_date
+            or source.source_aggregate_identity != str(assignment_id)
+        ):
+            return False
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                _SERVICE_TIME_SOURCE_CURRENT_SQL,
+                (service_date, assignment_id),
+            )
+            row = cursor.fetchone()
+        if not isinstance(row, dict):
+            return False
+        predicates = rule.get("predicates")
+        if (
+            isinstance(predicates, list)
+            and "baby_log_missing" in predicates
+            and row.get("service_day_log_id") is not None
+        ):
+            return False
+        return True
 
     def _source_has_newer_version(self, source: NotificationSourceEvent) -> bool:
         with self._connection.cursor() as cursor:
@@ -713,6 +754,18 @@ class MySqlLineNotificationRepository:
         rule_id = rule.get("id")
         selector = rule.get("recipient_selector")
         if not isinstance(rule_id, str) or not isinstance(selector, str):
+            return
+        if not self._rule_source_currently_applicable(event, rule):
+            self._record_decision(
+                source_event_id,
+                rule_revision_id,
+                rule_id,
+                selector,
+                None,
+                "cancelled_stale",
+                "notification_source_not_currently_applicable",
+                event,
+            )
             return
         if event.historical_silent:
             self._record_decision(source_event_id, rule_revision_id, rule_id, selector, None, "suppressed", "historical_source_silent", event)
@@ -937,6 +990,14 @@ _CURRENT_CONFIGURATION_SQL = (
     "SELECT config_current.revision_id,revision.definition_snapshot "
     "FROM line_configuration_current config_current JOIN line_configuration_revisions revision "
     "ON revision.id=config_current.revision_id WHERE config_current.configuration_kind=%s"
+)
+_SERVICE_TIME_SOURCE_CURRENT_SQL = (
+    "SELECT csa.id,log.id AS service_day_log_id "
+    "FROM case_staff_assignments csa "
+    "LEFT JOIN scheduling_service_day_logs log "
+    "ON log.assignment_id=csa.id AND log.service_date=%s "
+    "WHERE csa.id=%s AND (csa.status IS NULL OR csa.status NOT IN ('cancelled','replaced')) "
+    "LIMIT 1 FOR SHARE"
 )
 _ACTIVE_CASE_GROUP_SQL = (
     "SELECT binding.group_id FROM line_order_group_bindings binding "
