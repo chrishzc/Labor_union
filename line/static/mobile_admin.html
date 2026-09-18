@@ -168,7 +168,7 @@ Description: 提供 LINE 工會人員獨立的待辦、客服、訂單狀態與�
         <div id="profileReviews" class="surface-list"></div>
       </div>
       <button class="workstream-trigger" type="button" aria-expanded="false" aria-controls="leaveWorkstream">
-        <span class="workstream-copy"><strong>請假、代班與改期</strong><small id="leaveReviewMeta">待受理 — 件</small></span>
+        <span class="workstream-copy"><strong>請假、代班與改期</strong><small id="leaveReviewMeta">待處理 — 件</small></span>
         <span class="workstream-count" id="leaveReviewCount">—</span>
         <span class="workstream-action">查看</span>
       </button>
@@ -264,6 +264,7 @@ let idToken = "";
 let target = "customer_service";
 const reviewPreviews = new Map();
 const profileReviewPreviews = new Map();
+const leaveDeferPreviews = new Map();
 const replyPreviews = new Map();
 let schedulingQuery = null;
 let schedulingPreview = null;
@@ -521,12 +522,12 @@ function renderStudioPreview(next) {
   } else if (target === "staff_review") {
     setWorkstreamCount("identityReviewCount", "identityReviewMeta", 1, "待審核");
     setWorkstreamCount("profileReviewCount", "profileReviewMeta", 3, "待審核");
-    setWorkstreamCount("leaveReviewCount", "leaveReviewMeta", 2, "待受理");
+    setWorkstreamCount("leaveReviewCount", "leaveReviewMeta", 2, "待處理");
     setWorkstreamCount("matchingFollowupCount", "matchingFollowupMeta", 1, "需人工跟進");
     const previewGroups = [
       ["profileReviews", "安全預覽不載入正式客戶資料異動申請。"],
       ["reviews", "安全預覽不載入正式身分重綁與異常申請。"],
-      ["leaveReviews", "安全預覽不載入正式請假與代班申請。"],
+      ["leaveReviews", "安全預覽不載入正式請假、客戶決策與順延操作。"],
       ["matchingFollowups", "安全預覽不載入正式媒合人工跟進案件。"],
     ];
     previewGroups.forEach(([id, message]) => {
@@ -1176,7 +1177,7 @@ async function loadReviewWorkbench() {
     const countTargets = [
       ["profileReviewCount", "profileReviewMeta", "待審核"],
       ["identityReviewCount", "identityReviewMeta", "待審核"],
-      ["leaveReviewCount", "leaveReviewMeta", "待受理"],
+      ["leaveReviewCount", "leaveReviewMeta", "待處理"],
       ["matchingFollowupCount", "matchingFollowupMeta", "需人工跟進"],
     ];
     const [countId, metaId, label] = countTargets[index];
@@ -1801,28 +1802,61 @@ async function loadLeaveReviews() {
   const querySequence = ++leaveReviewQuerySequence;
   const root = document.getElementById("leaveReviews");
   root.replaceChildren();
-  const data = await postJson("/api/v1/line/mobile-admin/staff-leave-requests", {
-    status: "pending", limit: 50,
-  });
+  const [pending, accepted] = await Promise.all([
+    postJson("/api/v1/line/mobile-admin/staff-leave-requests", {
+      status: "pending", limit: 50,
+    }),
+    postJson("/api/v1/line/mobile-admin/staff-leave-requests", {
+      status: "accepted_for_processing", limit: 50,
+    }),
+  ]);
   if (querySequence !== leaveReviewQuerySequence) return 0;
-  if (!Array.isArray(data)) throw new Error("請假待辦格式不完整。");
-  if (!data.length) {
-    setWorkstreamCount("leaveReviewCount", "leaveReviewMeta", 0, "待受理");
-    showEmpty(root, "目前沒有待受理的月嫂請假申請。");
+  if (!Array.isArray(pending) || !Array.isArray(accepted)) {
+    throw new Error("請假待辦格式不完整。");
+  }
+  const items = [...pending, ...accepted].sort((left, right) => left.id - right.id);
+  if (!items.length) {
+    setWorkstreamCount("leaveReviewCount", "leaveReviewMeta", 0, "待處理");
+    showEmpty(root, "目前沒有待處理的月嫂請假或客戶順延案件。");
     return 0;
   }
-  data.forEach(request => root.appendChild(leaveReviewCard(request)));
-  setWorkstreamCount("leaveReviewCount", "leaveReviewMeta", data.length, "待受理");
-  return data.length;
+  items.forEach(request => root.appendChild(leaveReviewCard(request)));
+  setWorkstreamCount("leaveReviewCount", "leaveReviewMeta", items.length, "待處理");
+  return items.length;
 }
 
 function leaveReviewCard(request) {
   const card = document.createElement("div");
   card.className = "card";
+  card.dataset.leaveRequestId = String(request.id);
+  const row = document.createElement("div");
+  row.className = "row";
   const title = document.createElement("strong");
   title.textContent = `請假 #${request.id}｜${request.staff_name}`;
+  const status = document.createElement("span");
+  status.className = "pill";
+  status.textContent = request.request_status === "accepted_for_processing" ? "已受理，待安排" : "待受理";
+  row.append(title, status);
   const period = document.createElement("p");
   period.textContent = `${request.leave_start_date} 至 ${request.leave_end_date}｜${request.request_reason || "未填寫原因"}`;
+  card.append(row, period);
+
+  if (request.request_status === "accepted_for_processing") {
+    const guidance = document.createElement("p");
+    guidance.className = "muted";
+    guidance.textContent = "先讀取這筆請假的目前受影響案件。客戶同意事實、目前綁定、正式服務日與版本都由既有 owner 驗證；工作台不自行推定。";
+    const load = document.createElement("button");
+    load.type = "button";
+    load.textContent = "載入客戶安排與順延選項";
+    const coordination = document.createElement("div");
+    coordination.dataset.leaveCoordination = "true";
+    load.addEventListener("click", () => {
+      loadLeaveCoordination(request, coordination).catch(error => showStatus(error.message, true));
+    });
+    card.append(guidance, load, coordination);
+    return card;
+  }
+
   const reason = document.createElement("textarea");
   reason.id = `leave-reason-${request.id}`;
   reason.placeholder = "受理備註或退回原因";
@@ -1838,8 +1872,291 @@ function leaveReviewCard(request) {
   reject.textContent = "退回申請";
   reject.addEventListener("click", () => reviewLeaveRequest(request, "reject"));
   actions.append(accept, reject);
-  card.append(title, period, reason, actions);
+  card.append(reason, actions);
   return card;
+}
+
+function requireLeaveCoordinationContext(data, request) {
+  const validTarget = item => item
+    && typeof item.case_no === "string" && item.case_no.length > 0
+    && (item.client_line_user_id === null || typeof item.client_line_user_id === "string");
+  if (!data || data.request_id !== request.id
+      || data.request_version !== request.aggregate_version
+      || data.leave_start_date !== request.leave_start_date
+      || data.leave_end_date !== request.leave_end_date
+      || !Array.isArray(data.targets) || data.targets.some(item => !validTarget(item))) {
+    throw new Error("請假協調資料格式不完整，未顯示不完整資料。");
+  }
+  return data;
+}
+
+async function loadLeaveCoordination(request, root) {
+  root.replaceChildren();
+  const data = requireLeaveCoordinationContext(
+    await postJson(
+      `/api/v1/line/mobile-admin/staff-leave-requests/${request.id}/coordination-context`,
+      {expected_version: request.aggregate_version},
+    ),
+    request,
+  );
+  if (!root.isConnected || !root.closest(`[data-leave-request-id="${request.id}"]`)) return;
+  if (!data.targets.length) {
+    showEmpty(root, "目前沒有仍受這筆請假影響的正式服務案件。");
+    return;
+  }
+  data.targets.forEach(target => root.appendChild(leaveCoordinationCaseCard(request, target)));
+  showStatus(`請假 #${request.id} 已讀回 ${data.targets.length} 個目前受影響案件。`);
+}
+
+function leaveCoordinationCaseCard(request, target) {
+  const card = document.createElement("div");
+  card.className = "card";
+  const row = document.createElement("div");
+  row.className = "row";
+  const title = document.createElement("strong");
+  title.textContent = `案件 ${target.case_no}`;
+  const binding = document.createElement("span");
+  binding.className = "pill";
+  binding.textContent = target.client_line_user_id ? "客戶綁定已確認" : "客戶綁定待確認";
+  row.append(title, binding);
+  const guidance = document.createElement("p");
+  guidance.className = "muted";
+  guidance.textContent = "只有既有 owner 已保存「同意順延」且目前綁定仍一致時，才能建立正式排班預覽。";
+  const load = document.createElement("button");
+  load.type = "button";
+  load.textContent = "載入正式指派";
+  const operation = document.createElement("div");
+  operation.dataset.leaveDeferOperation = "true";
+  load.addEventListener("click", () => {
+    loadLeaveDeferAssignments(request, target.case_no, operation)
+      .catch(error => showStatus(error.message, true));
+  });
+  card.append(row, guidance, load, operation);
+  return card;
+}
+
+function requireLeaveAssignments(data) {
+  const validDate = value => typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
+  if (!Array.isArray(data) || data.some(assignment => !assignment
+      || !Number.isInteger(assignment.assignment_id) || assignment.assignment_id < 1
+      || !Number.isInteger(assignment.staff_id) || assignment.staff_id < 1
+      || !validDate(assignment.assigned_start_date) || !validDate(assignment.assigned_end_date)
+      || !Array.isArray(assignment.official_schedules)
+      || assignment.official_schedules.some(schedule => !schedule
+        || !Number.isInteger(schedule.schedule_id) || schedule.schedule_id < 1
+        || !validDate(schedule.work_date)))) {
+    throw new Error("請假正式指派格式不完整，未顯示不完整資料。");
+  }
+  return data;
+}
+
+function affectedLeaveAssignments(data, request) {
+  return data.filter(assignment => assignment.staff_id === request.staff_id
+    && assignment.official_schedules.some(schedule =>
+      schedule.work_date >= request.leave_start_date
+      && schedule.work_date <= request.leave_end_date));
+}
+
+function invalidateLeaveDeferPreview(request, caseNo, root) {
+  leaveDeferPreviews.delete(`${request.id}:${request.aggregate_version}:${caseNo}`);
+  const preview = root.querySelector("[data-leave-defer-preview]");
+  if (preview) {
+    preview.replaceChildren();
+    preview.classList.add("hidden");
+  }
+}
+
+async function loadLeaveDeferAssignments(request, caseNo, root) {
+  invalidateLeaveDeferPreview(request, caseNo, root);
+  root.replaceChildren();
+  const data = requireLeaveAssignments(await postJson(
+    `/api/v1/line/mobile-admin/staff-leave-requests/${request.id}/customer-defer/${encodeURIComponent(caseNo)}/assignments`,
+    {expected_version: request.aggregate_version},
+  ));
+  if (!root.isConnected) return;
+  const assignments = affectedLeaveAssignments(data, request);
+  if (!assignments.length) {
+    showEmpty(root, "目前沒有屬於這位月嫂且與請假日期重疊的有效正式指派。");
+    return;
+  }
+
+  const select = document.createElement("select");
+  select.setAttribute("aria-label", `案件 ${caseNo} 請假順延原指派`);
+  select.add(new Option(assignments.length === 1 ? "已確認受影響指派" : "請選擇受影響指派", ""));
+  assignments.forEach(assignment => {
+    const affectedDates = assignment.official_schedules
+      .filter(schedule => schedule.work_date >= request.leave_start_date
+        && schedule.work_date <= request.leave_end_date)
+      .map(schedule => schedule.work_date);
+    select.add(new Option(
+      `指派 #${assignment.assignment_id}｜${affectedDates.join("、")}`,
+      String(assignment.assignment_id),
+    ));
+  });
+  if (assignments.length === 1) select.value = String(assignments[0].assignment_id);
+
+  const reason = document.createElement("textarea");
+  reason.placeholder = "正式順延原因（預覽後套用時固定使用）";
+  reason.value = "客戶已同意順延，由工會依正式請假排班流程套用。";
+
+  const previewButton = document.createElement("button");
+  previewButton.type = "button";
+  previewButton.textContent = "預覽客戶同意順延";
+  const previewRoot = document.createElement("div");
+  previewRoot.className = "preview hidden";
+  previewRoot.dataset.leaveDeferPreview = "true";
+  const invalidate = () => invalidateLeaveDeferPreview(request, caseNo, root);
+  select.addEventListener("change", invalidate);
+  reason.addEventListener("input", invalidate);
+  previewButton.addEventListener("click", () => {
+    previewLeaveCustomerDefer(request, caseNo, root, select, reason, previewRoot)
+      .catch(error => showStatus(error.message, true));
+  });
+  root.append(select, reason, previewButton, previewRoot);
+}
+
+function requireLeaveDeferPreview(data, request, caseNo, assignmentId) {
+  const validFingerprint = typeof data?.preview_fingerprint === "string"
+    && /^[0-9a-f]{64}$/.test(data.preview_fingerprint);
+  const validItems = Array.isArray(data?.items) && data.items.length > 0
+    && data.items.every(item => item
+      && Number.isInteger(item.original_schedule_id) && item.original_schedule_id > 0
+      && typeof item.work_date === "string"
+      && item.resolution_type === "defer_following_assignments"
+      && item.substitute_staff_id === null
+      && item.is_double_pay === false);
+  const validLinked = data?.linked_request
+    && data.linked_request.request_id === request.id
+    && data.linked_request.expected_version === request.aggregate_version
+    && data.linked_request.status === "accepted_for_processing";
+  if (!data || data.case_no !== caseNo
+      || data.leave_request_id !== request.id
+      || data.expected_leave_request_version !== request.aggregate_version
+      || data.original_assignment_id !== assignmentId
+      || !Number.isInteger(data.order_version) || data.order_version < 0
+      || !Number.isInteger(data.scheduling_version) || data.scheduling_version < 0
+      || !Number.isInteger(data.client_finance_version) || data.client_finance_version < 0
+      || !Number.isInteger(data.payroll_version) || data.payroll_version < 0
+      || !validFingerprint || !validItems || !validLinked
+      || !data.apply_readiness || !Array.isArray(data.apply_readiness.blockers)
+      || !["ready", "blocked"].includes(data.apply_readiness.status)
+      || !data.calendar_candidate) {
+    throw new Error("客戶順延預覽格式不完整，未執行套用。");
+  }
+  return data;
+}
+
+function renderLeaveDeferPreview(request, caseNo, root, state) {
+  const previewRoot = state.previewRoot;
+  previewRoot.replaceChildren();
+  previewRoot.classList.remove("hidden");
+  const preview = state.preview;
+  const summary = document.createElement("div");
+  summary.textContent = [
+    `案件：${caseNo}｜請假 #${request.id}`,
+    `受影響正式服務日：${preview.items.map(item => item.work_date).join("、")}`,
+    `服務區間：${preview.calendar_candidate.before_service_start_date || "—"}～${preview.calendar_candidate.before_service_end_date || "—"} → ${preview.calendar_candidate.after_service_start_date || "—"}～${preview.calendar_candidate.after_service_end_date || "—"}`,
+    `順延服務日數：${preview.calendar_candidate.deferred_day_count}`,
+    `Orders 版本：${preview.orders_impact.expected_version} → ${preview.orders_impact.resulting_version}`,
+    `Client Finance 版本：${preview.client_finance_impact.expected_version} → ${preview.client_finance_impact.resulting_version}`,
+    `Payroll 版本：${preview.payroll_impact.expected_version} → ${preview.payroll_impact.resulting_version}`,
+  ].join("\n");
+  previewRoot.appendChild(summary);
+
+  if (preview.apply_readiness.status !== "ready" || preview.apply_readiness.blockers.length) {
+    const blocked = document.createElement("div");
+    blocked.className = "error";
+    blocked.textContent = `目前不可套用：${preview.apply_readiness.blockers.join("、") || "正式影響尚未就緒"}`;
+    previewRoot.appendChild(blocked);
+    return;
+  }
+
+  const confirm = document.createElement("button");
+  confirm.type = "button";
+  confirm.textContent = "確認套用此順延預覽";
+  confirm.addEventListener("click", () => {
+    applyLeaveCustomerDefer(request, caseNo, root)
+      .catch(error => showStatus(error.message, true));
+  });
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "secondary";
+  cancel.textContent = "取消預覽";
+  cancel.addEventListener("click", () => invalidateLeaveDeferPreview(request, caseNo, root));
+  previewRoot.append(confirm, cancel);
+}
+
+async function previewLeaveCustomerDefer(request, caseNo, root, select, reason, previewRoot) {
+  const assignmentId = Number(select.value);
+  if (!Number.isInteger(assignmentId) || assignmentId < 1) {
+    throw new Error("請先選擇受請假影響的正式指派。");
+  }
+  const reasonText = reason.value.trim();
+  if (!reasonText) throw new Error("請先輸入正式順延原因。");
+  invalidateLeaveDeferPreview(request, caseNo, root);
+  const preview = requireLeaveDeferPreview(
+    await postJson(
+      `/api/v1/line/mobile-admin/staff-leave-requests/${request.id}/customer-defer/${encodeURIComponent(caseNo)}/preview`,
+      {
+        leave_request_id: request.id,
+        expected_leave_request_version: request.aggregate_version,
+        original_assignment_id: assignmentId,
+      },
+    ),
+    request,
+    caseNo,
+    assignmentId,
+  );
+  const identity = globalThis.crypto?.randomUUID
+    ? globalThis.crypto.randomUUID()
+    : Date.now().toString(36);
+  const state = {
+    preview,
+    previewRoot,
+    reason: reasonText,
+    idempotencyKey: `mobile-leave-defer:${request.id}:${caseNo}:${identity}`,
+  };
+  leaveDeferPreviews.set(`${request.id}:${request.aggregate_version}:${caseNo}`, state);
+  renderLeaveDeferPreview(request, caseNo, root, state);
+  showStatus("客戶同意順延預覽已建立；確認前尚未修改正式排班或帳務。");
+}
+
+async function applyLeaveCustomerDefer(request, caseNo, root) {
+  const key = `${request.id}:${request.aggregate_version}:${caseNo}`;
+  const state = leaveDeferPreviews.get(key);
+  if (!state) throw new Error("客戶順延預覽已失效，請重新預覽。");
+  const preview = state.preview;
+  const data = await postJson(
+    `/api/v1/line/mobile-admin/staff-leave-requests/${request.id}/customer-defer/${encodeURIComponent(caseNo)}/apply`,
+    {
+      leave_request_id: preview.leave_request_id,
+      expected_leave_request_version: preview.expected_leave_request_version,
+      original_assignment_id: preview.original_assignment_id,
+      items: preview.items,
+      expected_order_version: preview.order_version,
+      expected_scheduling_version: preview.scheduling_version,
+      expected_client_finance_version: preview.client_finance_version,
+      expected_payroll_version: preview.payroll_version,
+      preview_fingerprint: preview.preview_fingerprint,
+      idempotency_key: state.idempotencyKey,
+      reason: state.reason,
+    },
+  );
+  if (!data || data.case_no !== caseNo
+      || data.preview_fingerprint !== preview.preview_fingerprint
+      || typeof data.batch_key !== "string" || !data.batch_key
+      || !data.linked_request
+      || data.linked_request.request_id !== request.id
+      || data.linked_request.expected_version !== request.aggregate_version
+      || !["accepted_for_processing", "resolved"].includes(data.linked_request.status)) {
+    throw new Error("順延套用結果驗證資料不完整；同一冪等操作識別已保留，請勿改用新的操作重送，並由工會查核收據。");
+  }
+  leaveDeferPreviews.delete(key);
+  root.replaceChildren();
+  showStatus(data.linked_request.status === "resolved"
+    ? `案件 ${caseNo} 順延已保存並讀回收據；這筆請假已完成。`
+    : `案件 ${caseNo} 順延已保存並讀回收據；這筆請假仍有其他受影響案件待處理。`);
+  await loadLeaveReviews();
 }
 
 async function reviewLeaveRequest(request, action) {
@@ -1860,7 +2177,7 @@ async function reviewLeaveRequest(request, action) {
       throw new Error("請假處理結果讀回不完整，請勿重複送出。");
     }
     showStatus(action === "accept"
-      ? "請假已受理；正式代班或改期仍須在對應處理流程另行預覽並確認，目前尚未修改排班。"
+      ? "請假已受理並排入客戶詢問；正式排班仍未修改。請在同一工作台讀回客戶決策後再預覽後續。"
       : "請假申請已退回。正式排班未修改。");
     await loadLeaveReviews();
   } catch (error) { showStatus(error.message, true); }

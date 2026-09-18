@@ -69,6 +69,19 @@ class LeaveSubstitutionApplyBody(LeaveSubstitutionPreviewBody):
     reason: str = Field(min_length=1, max_length=500)
 
 
+class CustomerLeaveDeferPreviewBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    leave_request_id: int = Field(gt=0)
+    expected_leave_request_version: int = Field(ge=1)
+    original_assignment_id: int = Field(gt=0)
+
+
+class CustomerLeaveDeferApplyBody(LeaveSubstitutionApplyBody):
+    leave_request_id: int = Field(gt=0)
+    expected_leave_request_version: int = Field(ge=1)
+
+
 class LeaveSubstitutionOutcomeView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -176,6 +189,14 @@ class LeaveSubstitutionPreviewView(BaseModel):
     apply_readiness: LeaveApplyReadinessView
     linked_request: LinkedLeaveRequestView | None
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class CustomerLeaveDeferPreviewView(LeaveSubstitutionPreviewView):
+    # Echo these owner-derived inputs unchanged when confirming Apply.
+    leave_request_id: int = Field(gt=0)
+    expected_leave_request_version: int = Field(ge=1)
+    original_assignment_id: int = Field(gt=0)
+    items: list[LeaveSubstitutionItemInput]
 
 
 class LeaveSubstitutionReceiptView(BaseModel):

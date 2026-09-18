@@ -28,6 +28,23 @@ class StaffLeaveInboxItemView(BaseModel):
     aggregate_version: int = Field(gt=0)
 
 
+class StaffLeaveCoordinationTargetView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    case_no: str = Field(min_length=1)
+    client_line_user_id: str | None = None
+
+
+class StaffLeaveCoordinationContextView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    request_id: int = Field(gt=0)
+    request_version: int = Field(gt=0)
+    leave_start_date: date
+    leave_end_date: date
+    targets: list[StaffLeaveCoordinationTargetView]
+
+
 class StaffLeaveReviewReceiptView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

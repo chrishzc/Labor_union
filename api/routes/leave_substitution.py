@@ -20,6 +20,9 @@ from api.dependencies.leave_substitution import (
 )
 from api.schemas.base import BaseResponse
 from api.schemas.leave_substitution import (
+    CustomerLeaveDeferApplyBody,
+    CustomerLeaveDeferPreviewBody,
+    CustomerLeaveDeferPreviewView,
     LeaveAssignmentSummaryView,
     LeaveSubstitutionApplyBody,
     LeaveSubstitutionPreviewBody,
@@ -164,6 +167,66 @@ def apply_leave_substitution(
         "成功套用請假與代班處理",
         identity,
     )
+
+
+@router.post(
+    "/{case_no}/leave-substitution/customer-defer/preview",
+    response_model=BaseResponse[CustomerLeaveDeferPreviewView],
+)
+def preview_customer_leave_defer(
+    body: CustomerLeaveDeferPreviewBody,
+    case_no: str = Path(..., min_length=1, max_length=50),
+    correlation_id: Annotated[
+        str, Header(alias="X-Correlation-ID", min_length=1, max_length=191),
+    ] = "leave-customer-defer-preview",
+    principal: AdminPrincipal = Depends(require_system_admin),
+    application: LeaveSubstitutionApplication = Depends(get_leave_substitution_application),
+):
+    del principal
+    identity = CorrelationId(correlation_id)
+    return _call_endpoint(
+        lambda: _customer_defer_preview_command(application, case_no, body, identity),
+        "成功產生客戶同意順延的正式排班預覽", identity,
+    )
+
+
+@router.post(
+    "/{case_no}/leave-substitution/customer-defer/apply",
+    response_model=BaseResponse[LeaveSubstitutionReceiptView],
+)
+def apply_customer_leave_defer(
+    body: CustomerLeaveDeferApplyBody,
+    case_no: str = Path(..., min_length=1, max_length=50),
+    idempotency_key: Annotated[
+        str, Header(alias="Idempotency-Key", min_length=1, max_length=191),
+    ] = ...,
+    correlation_id: Annotated[
+        str, Header(alias="X-Correlation-ID", min_length=1, max_length=191),
+    ] = ...,
+    principal: AdminPrincipal = Depends(require_system_admin),
+    application: LeaveSubstitutionApplication = Depends(get_leave_substitution_application),
+):
+    identity = CorrelationId(correlation_id)
+    return _call_endpoint(
+        lambda: _receipt_payload(application.apply_customer_defer(_apply_request(
+            case_no, body, idempotency_key, identity, principal,
+        ))),
+        "成功套用本案客戶同意的順延排班；請以收據核對整張請假狀態", identity,
+    )
+
+
+def _customer_defer_preview_command(application, case_no, body, correlation_id):
+    intent, preview = application.preview_customer_defer(
+        case_no, body.leave_request_id, body.expected_leave_request_version,
+        body.original_assignment_id, correlation_id,
+    )
+    return {
+        **_preview_payload(preview),
+        "leave_request_id": body.leave_request_id,
+        "expected_leave_request_version": body.expected_leave_request_version,
+        "original_assignment_id": intent.original_assignment_id,
+        "items": _materialize(intent.items),
+    }
 
 
 def _preview_command(application, case_no, body, correlation_id):

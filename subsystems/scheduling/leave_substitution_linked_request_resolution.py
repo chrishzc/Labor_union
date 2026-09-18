@@ -30,11 +30,16 @@ from subsystems.scheduling.staff_leave_intake_workflow import (
 
 
 class LeaveSubstitutionLinkedRequestResolution:
-    def __init__(self, repository, line_delivery_repository, clock: BusinessClock) -> None:
+    def __init__(
+        self, repository, line_delivery_repository, clock: BusinessClock,
+        *, customer_defer_case_no: str | None = None, customer_defer_intent=None,
+    ) -> None:
         self._repository = repository
         self._workflow = StaffLeaveIntakeWorkflow(repository)
         self._line_delivery_repository = line_delivery_repository
         self._clock = clock
+        self._customer_defer_case_no = customer_defer_case_no
+        self._customer_defer_intent = customer_defer_intent
 
     def preview(
         self,
@@ -43,7 +48,9 @@ class LeaveSubstitutionLinkedRequestResolution:
         if intent is None:
             return None
         snapshot = self._repository.load(intent.request_id)
-        return self._validated_snapshot(intent, snapshot)
+        linked = self._validated_snapshot(intent, snapshot)
+        self._validate_customer_defer(intent, lock=False)
+        return linked
 
     def lock_for_apply(
         self,
@@ -52,7 +59,23 @@ class LeaveSubstitutionLinkedRequestResolution:
         if intent is None:
             return None
         snapshot = self._repository.load_for_update(intent.request_id)
-        return self._validated_snapshot(intent, snapshot)
+        linked = self._validated_snapshot(intent, snapshot)
+        self._validate_customer_defer(intent, lock=True)
+        return linked
+
+    def _validate_customer_defer(self, linked, *, lock):
+        if self._customer_defer_case_no is None:
+            return
+        try:
+            current = self._repository.customer_defer_intent(
+                linked.request_id, linked.expected_version,
+                self._customer_defer_case_no,
+                self._customer_defer_intent.original_assignment_id, lock=lock,
+            )
+        except ValueError as error:
+            raise LinkedLeaveRequestResolutionError(str(error)) from error
+        if current != self._customer_defer_intent:
+            raise LinkedLeaveRequestResolutionError("leave_customer_defer_intent_conflict")
 
     def resolve_and_enqueue(
         self,
@@ -64,6 +87,21 @@ class LeaveSubstitutionLinkedRequestResolution:
     ) -> LinkedLeaveRequestResult | None:
         if locked is None:
             return None
+        if self._customer_defer_case_no is not None:
+            try:
+                remaining = self._repository.has_pending_service_days(
+                    locked.request_id, locked.expected_version
+                )
+            except ValueError as error:
+                raise LinkedLeaveRequestResolutionError(str(error)) from error
+            if remaining:
+                # The canonical batch receipt records this case's result. Other
+                # cases/assignments still require their own processing; do not
+                # resolve the entire leave or send a completion notification.
+                return LinkedLeaveRequestResult(
+                    locked.request_id, locked.expected_version, None,
+                    locked.status, receipt_key, "not_requested", locked.staff_id,
+                )
         resolution_key = _resolution_key(
             idempotency_key,
             locked.request_id,

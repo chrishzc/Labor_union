@@ -7,16 +7,23 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from api.dependencies.admin_auth import require_admin
-from api.dependencies.staff_leave_intake import get_staff_leave_intake_application
+from api.dependencies.staff_leave_intake import get_staff_leave_customer_coordination_application
 from api.schemas.base import BaseResponse
 from api.schemas.staff_leave_management import (
+    StaffLeaveCoordinationContextView,
     StaffLeaveInboxItemView,
     StaffLeaveReviewReceiptView,
 )
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.staff_leave_intake_repository import MySqlStaffLeaveIntakeRepository
 from subsystems.access.authentication_session import AdminPrincipal
-from subsystems.scheduling.staff_leave_intake_workflow import ReviewStaffLeaveRequest, StaffLeaveIntakeApplication, StaffLeaveIntakeWorkflowError
+from subsystems.line.staff_leave_customer_coordination import (
+    StaffLeaveCustomerCoordinationApplication,
+)
+from subsystems.scheduling.staff_leave_intake_workflow import (
+    ReviewStaffLeaveRequest,
+    StaffLeaveIntakeWorkflowError,
+)
 
 
 router = APIRouter(prefix="/api/v1/scheduling/staff-leave-requests", tags=["Scheduling Staff Leave Intake"])
@@ -43,13 +50,35 @@ def list_staff_leave_requests(
         connection.close()
 
 
+@router.get("/{request_id}/coordination-context", response_model=BaseResponse[StaffLeaveCoordinationContextView])
+def get_staff_leave_coordination_context(
+    request_id: int,
+    expected_version: int = Query(ge=1),
+    principal: AdminPrincipal = Depends(require_admin),
+):
+    del principal
+    connection = get_connection()
+    try:
+        repository = MySqlStaffLeaveIntakeRepository(connection)
+        try:
+            result = repository.coordination_context(request_id, expected_version)
+        except ValueError as error:
+            code = str(error)
+            if code == "leave_request_not_found":
+                raise HTTPException(status_code=404, detail={"code": code}) from error
+            raise HTTPException(status_code=409, detail={"code": code}) from error
+        return BaseResponse(data=result)
+    finally:
+        connection.close()
+
+
 @router.post("/{request_id}/review", response_model=BaseResponse[StaffLeaveReviewReceiptView])
 def review_staff_leave_request(
     request_id: int,
     body: ReviewBody,
     idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=191)],
     principal: AdminPrincipal = Depends(require_admin),
-    application: StaffLeaveIntakeApplication = Depends(get_staff_leave_intake_application),
+    application: StaffLeaveCustomerCoordinationApplication = Depends(get_staff_leave_customer_coordination_application),
 ):
     try:
         result = application.review(
@@ -57,4 +86,5 @@ def review_staff_leave_request(
         )
     except StaffLeaveIntakeWorkflowError as error:
         raise HTTPException(status_code=409, detail={"code": str(error)}) from error
+
     return BaseResponse(data={"request_id": result.request_id, "status": result.status.value, "version": result.version, "actor": str(principal.username)})
