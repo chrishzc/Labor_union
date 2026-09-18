@@ -62,6 +62,8 @@ class LlmSemanticTestResult:
     index_version: int | None
     qa_id: str | None
     source_identity: str | None
+    source_version: int | None
+    source_excerpt: str | None
     answer_text: str | None
     code: str | None
 
@@ -167,6 +169,8 @@ class LlmConfigurationApplication:
             index_version=answer.index_version,
             qa_id=_qa_id_from_source(citation.source_identity),
             source_identity=citation.source_identity,
+            source_version=citation.source_version,
+            source_excerpt=citation.safe_excerpt,
             answer_text=answer.answer,
             code=None,
         )
@@ -185,6 +189,8 @@ class LlmConfigurationApplication:
             index_version=index_version,
             qa_id=None,
             source_identity=None,
+            source_version=None,
+            source_excerpt=None,
             answer_text=None,
             code=code,
         )

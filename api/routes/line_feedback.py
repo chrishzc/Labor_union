@@ -16,6 +16,7 @@ from api.schemas.line_feedback import (
     RecordLineFeedbackRequest,
 )
 from infrastructure.line.liff_token_verifier import InvalidLiffTokenError, LiffVerificationUnavailableError
+from infrastructure.mysql.knowledge_retrieval_unit_of_work import open_knowledge_retrieval_unit_of_work
 from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
 from domains.line.identities import LineUserId
 from shared_kernel.identities import CorrelationId, IdempotencyKey
@@ -25,6 +26,7 @@ from subsystems.line.identity_management_contracts import LineIdentityCurrentFac
 
 
 router = APIRouter(prefix="/api/v1/line/feedback", tags=["LINE Feedback"])
+_KNOWLEDGE_RESPONSE_PREFIX = "knowledge-answer-receipt:"
 
 
 @router.post("/preview", response_model=BaseResponse[LineFeedbackPreviewView])
@@ -78,17 +80,53 @@ def query_feedback(payload: LineFeedbackQueryRequest):
 
 
 def _feedback_command(payload: RecordLineFeedbackRequest, actor_id: str, binding_version: int):
+    source = _knowledge_feedback_source(payload.source_response_id, actor_id)
+    catalog_revision = payload.catalog_revision
+    if source is not None:
+        context, catalog_revision = source
+        if (
+            payload.response_revision != context.response_revision
+            or payload.catalog_revision != catalog_revision
+            or payload.rule_revision != context.rule_revision
+        ):
+            raise HTTPException(status_code=409, detail="line_feedback_source_version_conflict")
     return RecordLineFeedback(
         actor_id=actor_id,
         source_response_id=payload.source_response_id,
         outcome=FeedbackOutcome(payload.outcome),
         binding_version=binding_version,
         response_revision=payload.response_revision,
-        catalog_revision=payload.catalog_revision,
+        catalog_revision=catalog_revision,
         rule_revision=payload.rule_revision,
         idempotency_key=IdempotencyKey(payload.idempotency_key),
         correlation_id=CorrelationId(payload.correlation_id),
     )
+
+
+def _knowledge_feedback_source(source_response_id: str, actor_id: str):
+    if not source_response_id.startswith(_KNOWLEDGE_RESPONSE_PREFIX):
+        return None
+    raw_id = source_response_id[len(_KNOWLEDGE_RESPONSE_PREFIX):]
+    try:
+        receipt_id = int(raw_id)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail="line_feedback_source_invalid") from error
+    if receipt_id < 1 or str(receipt_id) != raw_id:
+        raise HTTPException(status_code=422, detail="line_feedback_source_invalid")
+    with open_knowledge_retrieval_unit_of_work() as unit_of_work:
+        context = unit_of_work.knowledge.feedback_context(receipt_id, actor_id)
+        catalog_revision = (
+            None
+            if context is None
+            else unit_of_work.answer_receipt_catalog_revision(receipt_id)
+        )
+    if (
+        context is None
+        or context.source_response_id != source_response_id
+        or catalog_revision is None
+    ):
+        raise HTTPException(status_code=404, detail="line_feedback_source_unavailable")
+    return context, catalog_revision
 
 
 def _verified_bound_actor(payload: RecordLineFeedbackRequest | LineFeedbackQueryRequest):

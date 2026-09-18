@@ -475,6 +475,38 @@
       padding-top: 6px;
     }
 
+    .feedback-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid var(--border);
+    }
+
+    .feedback-btn {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #FFF;
+      color: var(--text);
+      padding: 7px 11px;
+      font: inherit;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .feedback-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .feedback-status {
+      margin-top: 10px;
+      padding-top: 8px;
+      border-top: 1px solid var(--border);
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
     /* 提問輸入框 */
     .ask-box {
       display: flex;
@@ -629,6 +661,8 @@
 <script>
   let allFaqs = null; // null means the catalog has not loaded successfully.
   let currentCategory = 'all';
+  let lineIdToken = '';
+  let liffIdentityPromise = null;
 
   // 解析 URL 參數及 LIFF state
   function getQueryParam(name) {
@@ -811,6 +845,109 @@
     errCard.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }
 
+  function createInteractionId() {
+    return `service-help-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+  }
+
+  async function waitForLineIdentity() {
+    if (liffIdentityPromise) await liffIdentityPromise;
+    return lineIdToken;
+  }
+
+  function appendFeedbackControls(card, answerData, token) {
+    if (
+      !token
+      || !Number.isInteger(answerData.answer_receipt_id)
+      || answerData.answer_receipt_id < 1
+      || !Number.isInteger(answerData.index_version)
+      || answerData.index_version < 1
+    ) {
+      return;
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'feedback-actions';
+
+    const resolvedButton = document.createElement('button');
+    resolvedButton.type = 'button';
+    resolvedButton.className = 'feedback-btn';
+    resolvedButton.textContent = '👍 有幫助';
+
+    const unresolvedButton = document.createElement('button');
+    unresolvedButton.type = 'button';
+    unresolvedButton.className = 'feedback-btn';
+    unresolvedButton.textContent = '需要專人協助';
+
+    resolvedButton.onclick = () => submitFeedback(card, actions, answerData, token, 'resolved');
+    unresolvedButton.onclick = () => submitFeedback(card, actions, answerData, token, 'unresolved');
+    actions.append(resolvedButton, unresolvedButton);
+    card.appendChild(actions);
+  }
+
+  function feedbackPayload(answerData, token, outcome) {
+    const sourceResponseId = `knowledge-answer-receipt:${answerData.answer_receipt_id}`;
+    return {
+      line_id_token: token,
+      source_response_id: sourceResponseId,
+      outcome,
+      response_revision: 1,
+      catalog_revision: answerData.index_version,
+      rule_revision: null,
+      idempotency_key: `liff-feedback:${answerData.answer_receipt_id}`,
+      correlation_id: `liff-feedback:${answerData.answer_receipt_id}`
+    };
+  }
+
+  async function submitFeedback(card, actions, answerData, token, outcome) {
+    card.querySelector('.feedback-status')?.remove();
+    const buttons = actions.querySelectorAll('button');
+    buttons.forEach(button => { button.disabled = true; });
+    const payload = feedbackPayload(answerData, token, outcome);
+
+    try {
+      const previewResponse = await fetch('/api/v1/line/feedback/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const preview = await readJson(previewResponse);
+      if (!previewResponse.ok || !preview?.data?.apply_ready) {
+        throw new Error('feedback_preview_failed');
+      }
+
+      const applyResponse = await fetch('/api/v1/line/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const result = await readJson(applyResponse);
+      if (!applyResponse.ok || !result?.data || result.data.source_response_id !== payload.source_response_id) {
+        throw new Error('feedback_apply_failed');
+      }
+
+      const status = document.createElement('div');
+      status.className = 'feedback-status';
+      if (outcome === 'resolved') {
+        status.textContent = '感謝您的回饋。';
+      } else if (Number.isInteger(result.data.ticket_id) && result.data.ticket_id > 0) {
+        status.textContent = '已記錄未解決，客服需求已建立。';
+      } else {
+        status.textContent = '已記錄未解決；客服需求狀態請稍後確認。';
+      }
+      actions.replaceWith(status);
+    } catch (error) {
+      console.error('回饋提交失敗', error);
+      buttons.forEach(button => { button.disabled = false; });
+      let status = card.querySelector('.feedback-status');
+      if (!status) {
+        status = document.createElement('div');
+        status.className = 'feedback-status';
+        card.appendChild(status);
+      }
+      status.textContent = '回饋目前無法送出，請稍後再試。';
+    }
+  }
+
   async function submitQuestion(question) {
     const flow = document.getElementById('qaFlow');
     const btn = document.getElementById('askBtn');
@@ -831,10 +968,16 @@
     btn.disabled = true;
 
     try {
+      const token = await waitForLineIdentity();
+      const interactionId = token ? createInteractionId() : '';
       const response = await fetch('/api/v1/line/service-help/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question })
+        body: JSON.stringify({
+          question,
+          interaction_id: interactionId,
+          line_id_token: token
+        })
       });
       const result = await readJson(response);
       if (loadingCard.parentNode === flow) flow.removeChild(loadingCard);
@@ -858,6 +1001,9 @@
           ${result.data.source_ref ? `<div class="ai-source-ref">依據標準：${escapeHtml(result.data.source_ref)}</div>` : ''}
           <div style="font-size: 12px; color: var(--text-muted); margin-top: 6px;">💡 若有特殊或客製化需求，您可隨時於 LINE 聊天室留言由真人為您服務。</div>
         `;
+        if (!interactionId || result.data.interaction_id === interactionId) {
+          appendFeedbackControls(aiMsg, result.data, token);
+        }
       } else if (result.data.outcome === 'unsupported') {
         aiMsg.innerHTML = `
           <div class="ai-badge unsupported">💡 轉專人客服引導</div>
@@ -885,6 +1031,20 @@
     return String(str || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
   }
 
+  async function initializeLiffIdentity() {
+    try {
+      const cfgRes = await fetch('/api/v1/line/identity/runtime-config');
+      const cfg = await readJson(cfgRes);
+      if (!cfgRes.ok || !cfg?.data?.liff_id || !window.liff) return;
+      await liff.init({ liffId: cfg.data.liff_id });
+      if (liff.isLoggedIn()) {
+        lineIdToken = liff.getIDToken() || '';
+      }
+    } catch (_) {
+      lineIdToken = '';
+    }
+  }
+
   // 初始化
   window.onload = async () => {
     // 依 URL 參數決定初始分頁
@@ -895,18 +1055,9 @@
       switchTab('faq');
     }
 
+    liffIdentityPromise = initializeLiffIdentity();
     loadFaqs();
-
-    // 嘗試 LIFF 初始化（非同步進行，不阻塞頁面渲染）
-    try {
-      const cfgRes = await fetch('/api/v1/line/identity/runtime-config');
-      const cfg = await cfgRes.json();
-      if (cfg.data?.liff_id && window.liff) {
-        await liff.init({ liffId: cfg.data.liff_id });
-      }
-    } catch (e) {
-      // 離線或一般瀏覽器模式正常運作
-    }
+    await liffIdentityPromise;
   };
 </script>
 </body>
