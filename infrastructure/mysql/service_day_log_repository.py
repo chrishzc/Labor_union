@@ -74,7 +74,9 @@ class MySqlServiceDayLogRepository:
                 (log_id, command.assignment_id, command.staff_id, command.intent.service_date, command.idempotency_key),
             )
             event_id = int(cursor.lastrowid)
-            controlled_attachments = self._attach_controlled_files(command, log_id)
+            controlled_attachments = self._attach_controlled_files(
+                command, log_id, case_no=str(assignment["case_no"])
+            )
             payload = json.dumps(
                 {
                     "case_no": assignment["case_no"],
@@ -102,7 +104,7 @@ class MySqlServiceDayLogRepository:
         )
 
     def _attach_controlled_files(
-        self, command: ApplyServiceDayLog, log_id: int
+        self, command: ApplyServiceDayLog, log_id: int, *, case_no: str
     ) -> tuple[tuple[int, str], ...]:
         """Write 1015 attachment/reference/intent facts in this UoW only."""
 
@@ -112,7 +114,7 @@ class MySqlServiceDayLogRepository:
         result: list[tuple[int, str]] = []
         for attachment in command.controlled_file_attachments:
             expected_object_key = canonical_scheduling_object_key(
-                assignment_id=command.assignment_id,
+                case_no=case_no,
                 service_date=command.intent.service_date,
                 attachment_kind=attachment.attachment_kind,
                 sequence=attachment.sequence,

@@ -208,6 +208,50 @@ def test_staging_is_idempotent_digest_verified_and_cleanup_is_registration_scope
     )
 
 
+def test_finalize_moves_registered_staging_to_durable_case_locator(tmp_path: Path) -> None:
+    content = b"case-photo"
+    digest = hashlib.sha256(content).hexdigest()
+    storage = FileSystemControlledFileStorage(tmp_path)
+    staged = storage.put_staged(
+        idempotency_key="controlled-file:case-photo-001",
+        filename="photo.png",
+        mime_type="image/png",
+        content=content,
+    )
+    object_reference = (
+        f"scheduling/cases/v1/CASE-1/2026-09-18/baby_log_photo/1/{digest}.png"
+    )
+
+    finalized = storage.finalize_staged(
+        staged.staging_id,
+        expected_sha256=digest,
+        object_reference=object_reference,
+    )
+
+    assert finalized.content == content
+    assert (tmp_path / object_reference).read_bytes() == content
+    staging_payload = (
+        tmp_path
+        / ".controlled-file-staging"
+        / "objects"
+        / "cf"
+        / staged.staging_id
+        / "payload.bin"
+    )
+    assert not staging_payload.exists()
+    assert storage.read_registered_staged(
+        staged.staging_id, expected_sha256=digest
+    ).content == content
+    replayed = storage.put_staged(
+        idempotency_key="controlled-file:case-photo-001",
+        filename="photo.png",
+        mime_type="image/png",
+        content=content,
+    )
+    assert replayed.staging_id == staged.staging_id
+    assert replayed.replayed is True
+
+
 def test_registered_staging_read_remains_available_after_staging_ttl(tmp_path: Path) -> None:
     current = [200.0]
     content = b"registered-content"

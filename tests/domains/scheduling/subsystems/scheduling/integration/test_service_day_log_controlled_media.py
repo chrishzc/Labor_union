@@ -180,7 +180,9 @@ def test_baby_log_photo_resolves_to_baby_controlled_file_purpose():
     ServiceDayLogWorkflow(NoCookingRepository(), controlled).preview(command)
 
     assert recorded["intent"].purpose.value == "baby_log_photo"
+    assert recorded["intent"].object_key.startswith("scheduling/cases/v1/CASE-1/")
     assert recorded["intent"].object_key.endswith("/baby_log_photo/1/" + "a" * 64)
+    assert recorded["intent"].logical_folder.startswith("scheduling/cases/CASE-1/")
 
 
 def test_baby_log_photo_does_not_satisfy_cooking_meal_requirement():

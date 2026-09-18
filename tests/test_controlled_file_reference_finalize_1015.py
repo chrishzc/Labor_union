@@ -17,6 +17,7 @@ from domains.controlled_files.reference_finalize import (
     ReferenceAwareStagingCandidate,
     SchedulingControlledFileReference,
     canonical_scheduling_object_key,
+    canonical_scheduling_storage_locator,
     gc_disposition,
 )
 from subsystems.controlled_files.contracts import ControlledFileStagingContent, ControlledFileStorageError
@@ -35,21 +36,27 @@ STAGING = "cfs_1234567890abcdef1234567890abcdef"
 FILE = "cf_abcdefabcdefabcdefabcdefabcdefab"
 DIGEST = "a" * 64
 FINALIZE = "cff_1234567890abcdef1234567890abcdef"
+LOCATOR = f"scheduling/cases/v1/CASE-42/2026-08-30/meal_photo/2/{DIGEST}.jpg"
 
 
 def _intent(state=ControlledFileFinalizeState.PENDING):
-    return ControlledFileFinalizeIntent(FINALIZE, STAGING, FILE, DIGEST, state, NOW)
+    return ControlledFileFinalizeIntent(
+        FINALIZE, STAGING, FILE, DIGEST, state, NOW, storage_locator=LOCATOR
+    )
 
 
 def test_identity_prefixes_and_canonical_key_are_closed_and_non_pii():
     key = canonical_scheduling_object_key(
-        assignment_id=42,
+        case_no="CASE-42",
         service_date=date(2026, 8, 30),
         attachment_kind="meal_photo",
         sequence=2,
         sha256_digest=DIGEST,
     )
-    assert key == f"scheduling/service-day/v1/42/2026-08-30/meal_photo/2/{DIGEST}"
+    assert key == f"scheduling/cases/v1/CASE-42/2026-08-30/meal_photo/2/{DIGEST}"
+    assert canonical_scheduling_storage_locator(
+        object_key=key, mime_type="image/jpeg"
+    ) == LOCATOR
     assert "{" not in key
     assert "Alice" not in key
 
@@ -57,7 +64,7 @@ def test_identity_prefixes_and_canonical_key_are_closed_and_non_pii():
 def test_canonical_key_rejects_locator_or_pii_like_components():
     with pytest.raises(ControlledFileReferenceError):
         canonical_scheduling_object_key(
-            assignment_id=42,
+            case_no="CASE-42",
             service_date=date(2026, 8, 30),
             attachment_kind="../name",
             sequence=1,
@@ -83,8 +90,8 @@ class _Storage:
         self.failure = failure
         self.calls = []
 
-    def finalize_staged(self, staging_id, *, expected_sha256):
-        self.calls.append((staging_id, expected_sha256))
+    def finalize_staged(self, staging_id, *, expected_sha256, object_reference=None):
+        self.calls.append((staging_id, expected_sha256, object_reference))
         if self.failure:
             raise self.failure
         return ControlledFileStagingContent(staging_id, b"payload", DIGEST, NOW + timedelta(hours=1))
@@ -126,7 +133,7 @@ def test_worker_calls_storage_between_claim_and_available_cas():
         FINALIZE, worker_id="worker-1", observed_at=NOW
     )
     assert receipt.outcome is FinalizeOutcome.AVAILABLE
-    assert storage.calls == [(STAGING, DIGEST)]
+    assert storage.calls == [(STAGING, DIGEST, LOCATOR)]
     assert [item[0] for item in repo.transitions] == ["claim", "lease", "available", "release"]
 
 

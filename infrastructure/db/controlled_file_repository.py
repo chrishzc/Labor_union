@@ -12,6 +12,7 @@ import json
 from typing import Any
 import uuid
 
+from domains.controlled_files.reference_finalize import canonical_scheduling_storage_locator
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from subsystems.controlled_files.contracts import (
@@ -215,6 +216,7 @@ class MySqlControlledFileWorkflowRepository:
             version = 1 if predecessor is None else int(predecessor["version_number"]) + 1
             file_id = f"cf_{uuid.uuid4().hex}"
             applied_at_utc = _mysql_utc(applied_at)
+            storage_locator = _storage_locator_for(candidate, staging)
             cursor.execute(
                 _OBJECT_INSERT_SQL,
                 (
@@ -226,7 +228,7 @@ class MySqlControlledFileWorkflowRepository:
                     candidate.purpose.value,
                     candidate.logical_folder,
                     candidate.filename,
-                    str(staging["storage_locator"]),
+                    storage_locator,
                     candidate.mime_type,
                     candidate.size_bytes,
                     candidate.sha256_digest,
@@ -654,6 +656,19 @@ def _preview_fingerprint_from_context(row: Mapping[str, object]) -> PreviewFinge
             "subject_reference": str(row["subject_reference"]),
         }
     )
+
+
+def _storage_locator_for(candidate, staging) -> str:
+    if (
+        candidate.owner is ControlledFileOwner.SCHEDULING
+        and candidate.purpose
+        in {ControlledFilePurpose.BABY_LOG_PHOTO, ControlledFilePurpose.MEAL_PHOTO}
+    ):
+        return canonical_scheduling_storage_locator(
+            object_key=candidate.object_key,
+            mime_type=candidate.mime_type,
+        )
+    return str(staging["storage_locator"])
 
 
 def _require_candidate_matches_staging(candidate, row) -> None:

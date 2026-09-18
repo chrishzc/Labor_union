@@ -142,6 +142,7 @@ class ControlledFileStoragePort(Protocol):
         staging_id: str,
         *,
         expected_sha256: str,
+        object_reference: str | None = None,
     ) -> ControlledFileStagingContent: ...
 
     def cleanup_staged(

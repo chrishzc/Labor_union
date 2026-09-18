@@ -81,7 +81,7 @@ class MySqlControlledFileReferenceFinalizeRepository:
             if cursor.rowcount != 1:
                 cursor.execute(
                     "SELECT intent.finalize_id,staging.staging_id,object.opaque_object_id "
-                    "AS controlled_file_object_id,intent.expected_sha256,intent.finalize_state,"
+                    "AS controlled_file_object_id,object.storage_locator,intent.expected_sha256,intent.finalize_state,"
                     "intent.claim_token,intent.observed_sha256,intent.observed_size_bytes,"
                     "intent.created_at_utc FROM controlled_file_finalize_intents intent "
                     "JOIN controlled_file_staging_objects staging ON staging.id=intent.staging_object_id "
@@ -93,7 +93,7 @@ class MySqlControlledFileReferenceFinalizeRepository:
                 return None if row is None else _intent(row)
             cursor.execute(
                 "SELECT intent.finalize_id,staging.staging_id,object.opaque_object_id "
-                "AS controlled_file_object_id,intent.expected_sha256,intent.finalize_state,"
+                "AS controlled_file_object_id,object.storage_locator,intent.expected_sha256,intent.finalize_state,"
                 "intent.claim_token,intent.observed_sha256,intent.observed_size_bytes,"
                 "intent.created_at_utc FROM controlled_file_finalize_intents intent "
                 "JOIN controlled_file_staging_objects staging ON staging.id=intent.staging_object_id "
@@ -344,6 +344,9 @@ def _intent(row: Mapping[str, Any]) -> ControlledFileFinalizeIntent:
         ),
         observed_size_bytes=(
             None if row.get("observed_size_bytes") is None else int(row["observed_size_bytes"])
+        ),
+        storage_locator=(
+            None if row.get("storage_locator") is None else str(row["storage_locator"])
         ),
     )
 
