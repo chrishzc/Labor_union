@@ -159,4 +159,19 @@ def test_llm_semantics(
         "code": result.code,
     }
     message = "Gemini M2 語意測試完成" if result.outcome == "answered" else "Gemini M2 語意測試未產生核准答案"
-    return BaseResponse(data=LlmSemanticTestView(**asdict(result)), message=message)
+    # The shared semantic result also carries LIFF-only provenance. Keep this
+    # admin endpoint's existing response contract explicit rather than leaking
+    # new internal fields through asdict().
+    return BaseResponse(
+        data=LlmSemanticTestView(
+            outcome=result.outcome,
+            provider=result.provider,
+            model=result.model,
+            index_version=result.index_version,
+            qa_id=result.qa_id,
+            source_identity=result.source_identity,
+            answer_text=result.answer_text,
+            code=result.code,
+        ),
+        message=message,
+    )
