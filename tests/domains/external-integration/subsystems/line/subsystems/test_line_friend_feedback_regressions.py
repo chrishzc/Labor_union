@@ -236,3 +236,161 @@ def _consumer(inbox, state):
     return LineWebhookEventConsumer(
         UnitOfWork, LineEventDispatcher(_handler().registry()), "worker:test", lambda: NOW,
     )
+
+
+def _canonical_follow_handler(now=NOW):
+    """Exercise the production composition; isolate unrelated worker components."""
+    from contextlib import ExitStack
+    from unittest.mock import patch
+    from api.dependencies import line_worker_operation as runtime
+
+    captured = []
+
+    def capture_handler(*args, **kwargs):
+        captured.append(LineWebhookIdentityHandlers(*args, **kwargs))
+        # Follow handling is exercised below, not the unrelated dispatch registry.
+        return SimpleNamespace(registry=lambda: {})
+
+    with ExitStack() as stack:
+        stack.enter_context(patch.object(runtime, "LineWebhookIdentityHandlers", side_effect=capture_handler))
+        stack.enter_context(patch.object(runtime, "_identity_flow_url", lambda *_: "https://example.test/identity"))
+        for name in (
+            "LineOrderGroupApplication", "LineCandidateContactPostbackApplication",
+            "LineMatchingPostbackApplication", "MatchingNotificationApplication",
+            "MySqlSegmentedAvailabilityFactsRepository", "LineServiceHelpApplication",
+            "HumanEscalationApplication", "LineMenuCommandApplication",
+            "LineFeedbackApplication", "LineWebhookEventConsumer", "LineEventDispatcher",
+        ):
+            stack.enter_context(patch.object(runtime, name))
+        runtime._event_consumer("worker:refollow-regression", lambda: now)
+    return captured[0]
+
+
+def _welcome_configuration(legacy="missing"):
+    from domains.line.configuration import LineConfigurationKind
+
+    templates = [{
+        "id": "customer_onboarding_welcome", "message_type": "text",
+        "enabled": True, "content": "目前的歡迎訊息：{url}",
+        "variables": [{"name": "url", "required": True}],
+    }]
+    templates.extend({
+        "id": f"new_user_d{day}", "message_type": "text", "enabled": True,
+        "content": f"retired-day-{day}", "variables": [],
+    } for day in (1, 2, 3))
+
+    def get(kind):
+        if kind is LineConfigurationKind.MESSAGE_TEMPLATES:
+            return SimpleNamespace(definition_json=json.dumps({"templates": templates}))
+        if kind is LineConfigurationKind.MESSAGE_SCHEDULES:
+            if legacy == "missing":
+                return None
+            if legacy == "broken":
+                raise RuntimeError("retired schedule unavailable")
+            return SimpleNamespace(definition_json=json.dumps({
+                "timezone": "Asia/Taipei", "schedules": [{
+                    "id": "new_user_onboarding", "enabled": True, "trigger": "follow",
+                    "restart_on_refollow": False,
+                    "steps": [{"day": day, "send_time": "10:00", "template_id": f"new_user_d{day}"}
+                              for day in (1, 2, 3)],
+                }],
+            }))
+        raise AssertionError("unexpected configuration read")
+
+    return SimpleNamespace(get=Mock(side_effect=get))
+
+
+class CanonicalWelcomeRegressionTests(unittest.TestCase):
+    def assert_welcome(self, unit, event_id):
+        from domains.line.configuration import LineConfigurationKind
+
+        unit.identity_flows.open.assert_called_once()
+        unit.delivery_tasks.enqueue.assert_called_once()
+        delivery = unit.delivery_tasks.enqueue.call_args.args[0]
+        self.assertEqual(json.loads(delivery.payload_json)["text"],
+                         "目前的歡迎訊息：https://example.test/identity")
+        self.assertEqual(delivery.recipient.identity, USER)
+        self.assertEqual(delivery.idempotency_key.value, f"identity-link:customer_binding:{event_id}")
+        self.assertEqual(delivery.source_aggregate_type, "line_webhook_event")
+        unit.configurations.get.assert_called_once_with(LineConfigurationKind.MESSAGE_TEMPLATES)
+
+    def test_canonical_welcome_does_not_install_retired_scheduler(self):
+        self.assertIsNone(_canonical_follow_handler()._follow_scheduler)
+
+    def test_first_follow_creates_only_current_welcome_despite_old_enabled_schedule(self):
+        unit, state = _friend_unit(LineFriendStatus.UNKNOWN)
+        unit.configurations = _welcome_configuration("enabled")
+        _canonical_follow_handler().handle_follow(_inbox("follow"), unit)
+        self.assertIs(state[0].friend_status, LineFriendStatus.ACTIVE)
+        self.assert_welcome(unit, "friend-feedback-event")
+
+    def test_cross_day_refollow_ignores_missing_broken_or_old_enabled_schedule(self):
+        for legacy in ("missing", "broken", "enabled"):
+            with self.subTest(legacy=legacy):
+                unit, state = _friend_unit(LineFriendStatus.BLOCKED)
+                unit.configurations = _welcome_configuration(legacy)
+                later = NOW + timedelta(days=2)
+                inbox = _inbox("follow", occurred_at=later)
+                inbox.event.event_id = LineWebhookEventId("refollow-event")
+                _canonical_follow_handler(later).handle_follow(inbox, unit)
+                self.assertIs(state[0].friend_status, LineFriendStatus.ACTIVE)
+                self.assertIsNone(state[0].blocked_at)
+                self.assert_welcome(unit, "refollow-event")
+                self.assertEqual(unit.delivery_tasks.enqueue.call_args.args[0].scheduled_at, later)
+
+    def test_unfollow_then_refollow_uses_a_new_welcome_event_identity(self):
+        unit, state = _friend_unit(LineFriendStatus.UNKNOWN)
+        unit.configurations = _welcome_configuration()
+        _canonical_follow_handler().handle_follow(_inbox("follow"), unit)
+        first_key = unit.delivery_tasks.enqueue.call_args.args[0].idempotency_key
+        later = NOW + timedelta(days=1)
+        _canonical_follow_handler(later).handle_unfollow(_inbox("unfollow", occurred_at=later), unit)
+        unit.delivery_tasks.cancel_pending_for_recipient.assert_called_once_with(USER)
+        self.assertIs(state[0].friend_status, LineFriendStatus.BLOCKED)
+        unit.identity_flows.open.reset_mock()
+        unit.delivery_tasks.enqueue.reset_mock()
+        unit.configurations.get.reset_mock()
+        later += timedelta(days=1)
+        inbox = _inbox("follow", occurred_at=later)
+        inbox.event.event_id = LineWebhookEventId("refollow-event")
+        _canonical_follow_handler(later).handle_follow(inbox, unit)
+        self.assert_welcome(unit, "refollow-event")
+        self.assertNotEqual(unit.delivery_tasks.enqueue.call_args.args[0].idempotency_key, first_key)
+
+    def test_same_follow_event_preserves_existing_welcome_idempotency_key(self):
+        unit, _ = _friend_unit(LineFriendStatus.UNKNOWN)
+        unit.configurations = _welcome_configuration()
+        handler = _canonical_follow_handler()
+        inbox = _inbox("follow")
+        handler.handle_follow(inbox, unit)
+        handler.handle_follow(inbox, unit)
+        first, second = (call.args[0] for call in unit.delivery_tasks.enqueue.call_args_list)
+        self.assertEqual(first.idempotency_key, second.idempotency_key)
+        self.assertEqual(first.fingerprint, second.fingerprint)
+        # Actual duplicate persistence remains owned by the unchanged delivery repository.
+
+    def test_old_follow_does_not_reactivate_or_welcome_after_newer_unfollow(self):
+        unit, state = _friend_unit(LineFriendStatus.BLOCKED)
+        unit.configurations = _welcome_configuration("broken")
+        _canonical_follow_handler().handle_follow(
+            _inbox("follow", occurred_at=NOW - timedelta(days=1)), unit,
+        )
+        self.assertIs(state[0].friend_status, LineFriendStatus.BLOCKED)
+        unit.identity_flows.open.assert_not_called()
+        unit.delivery_tasks.enqueue.assert_not_called()
+        unit.configurations.get.assert_not_called()
+
+    def test_real_welcome_enqueue_failure_is_not_swallowed(self):
+        unit, _ = _friend_unit(LineFriendStatus.BLOCKED)
+        unit.configurations = _welcome_configuration()
+        unit.delivery_tasks.enqueue.side_effect = RuntimeError("welcome persistence unavailable")
+        with self.assertRaisesRegex(RuntimeError, "welcome persistence unavailable"):
+            _canonical_follow_handler().handle_follow(_inbox("follow"), unit)
+
+    def test_identity_flow_failure_cannot_claim_a_welcome_was_created(self):
+        unit, _ = _friend_unit(LineFriendStatus.BLOCKED)
+        unit.configurations = _welcome_configuration()
+        unit.identity_flows.open.side_effect = RuntimeError("identity flow unavailable")
+        with self.assertRaisesRegex(RuntimeError, "identity flow unavailable"):
+            _canonical_follow_handler().handle_follow(_inbox("follow"), unit)
+        unit.delivery_tasks.enqueue.assert_not_called()

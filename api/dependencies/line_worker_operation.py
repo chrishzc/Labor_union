@@ -54,7 +54,6 @@ from subsystems.line.human_escalation_delivery import (
     HumanEscalationDeliveryWorker,
 )
 from subsystems.line.event_dispatcher import LineEventDispatcher
-from subsystems.line.follow_schedule_application import enqueue_follow_schedule
 from subsystems.line.feedback_application import LineFeedbackApplication
 from subsystems.line.identity_management_application import IDENTITY_MENU_RESET_INTENT
 from subsystems.line.identity_revocation_worker import LineIdentityRevocationWorker
@@ -150,7 +149,8 @@ def _event_consumer(worker_identity: str, now) -> LineWebhookEventConsumer:
     identity_handlers = LineWebhookIdentityHandlers(
         now,
         _identity_flow_url,
-        follow_scheduler=enqueue_follow_schedule,
+        # D+N onboarding was retired; immediate welcomes must not depend on it.
+        follow_scheduler=None,
         media_scheduler=schedule_line_media_archive,
         group_application=LineOrderGroupApplication(now, alert_group_registrar=register_group_alert_target),
         candidate_contact_postback_application=LineCandidateContactPostbackApplication(),

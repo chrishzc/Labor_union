@@ -47,6 +47,11 @@
 - `document/架構重整/01_規格基線/20_LINE客服與月嫂自助服務正式規格.md` — self-service contract
 - `document/架構重整/01_規格基線/23_LINE身分管理與解除正式規格.md` — identity contract
 - `document/架構重整/01_規格基線/26_LINE四大模組Eraser流程圖轉錄與驗收基線.md` — required direct-flow acceptance；source存在或局部測試通過不取代流程驗收。
+- `document/架構重整/01_規格基線/29_LINE服務說明、客服互動與選單角色正式規格.md` §4.1、§10.14 — 加好友只保留即時歡迎的 current contract 與驗收；三日引導不再是需求或 implementation gap。
+
+### 加好友歡迎（2026-09-16 使用者裁決）
+
+首次與封鎖後重新加好友，只接續既有即時歡迎訊息及身分入口，語意以 `29` §4.1 為準。canonical 組裝不掛入退役的 follow scheduler；舊 D+N 設定／模組不構成恢復功能或三日推送驗收的依據。現有好友事件時間判定、歡迎去重、保存／投遞失敗回讀仍沿用原 owner；source 修正不代表已部署或手機送達通過。付款、服務日與日誌通知不受此裁決影響。
 
 ### 同群告警重新綁定（2026-09-13 使用者明確指示）
 

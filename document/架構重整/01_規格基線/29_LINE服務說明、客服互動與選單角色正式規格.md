@@ -4,11 +4,12 @@
 
 - 狀態：`consolidated-current-baseline`
 - 收斂日期：2026-09-09
+- 2026-09-16 使用者修訂：加好友引導只保留即時歡迎訊息；三日引導從現行需求與驗收移除，詳見 §4.1、§10.14。
 - 上位契約：`17_External_Integration_LINE_Access正式規格.md`
 - 關聯契約：`20_LINE客服與月嫂自助服務正式規格.md`、`23_LINE身分管理與解除正式規格.md`、`26_LINE四大模組Eraser流程圖轉錄與驗收基線.md`
 - 來源：既有 Service Help 正式條款、已完成 migration 的歷史 QA／Rich Menu 規格，以及仍保留的 QA implementation-gap tracker 與 LINE 四大模組操作測試手冊；歷史來源只保留於 Git history，不另建 Authority。
 
-本文件只補足「使用者如何進入服務說明、回答如何發布啟用、何時轉人工、不同身分看到哪一類選單，以及本機 preview 的零外送邊界」。LINE identity、ticket root、delivery task、provider publication 與 M1～M4 transaction 仍由上位正式規格擁有。
+本文件只補足「加好友的即時歡迎、使用者如何進入服務說明、回答如何發布啟用、何時轉人工、不同身分看到哪一類選單，以及本機 preview 的零外送邊界」。LINE identity、ticket root、delivery task、provider publication 與 M1～M4 transaction 仍由上位正式規格擁有。
 
 ## 2. Owner 與非目標
 
@@ -18,7 +19,7 @@
 | Service Help dispatch、Customer Service ticket／conversation／status | `20` |
 | role-scoped binding、目前選定角色、replacement、revocation 與 default-menu reset | `23` |
 | M1～M4 流程節點與跨模組 acceptance | `26` |
-| 服務說明分類、核准回答 catalog、人工轉接與 menu audience | 本文件 |
+| 加好友歡迎、服務說明分類、核准回答 catalog、人工轉接與 menu audience | 本文件 |
 | 具體業務金額、資格、進度、排班或帳務事實 | 對應 owning Domain |
 
 不得由 FAQ、LLM、Rich Menu action、瀏覽器 local state 或客服文字直接寫 Orders、Scheduling、Finance、Staff、Access 或 LINE binding root。
@@ -61,6 +62,16 @@ Client canonical `city`、`address`、`residence_type` 仍由 Client owner 保�
 - Gateway／registration 頁不得因 query string、browser local state 或單次點擊即宣稱 binding、案件或申請成功。
 - Registration Preview 零正式寫入；Apply 可依 current owner contract 建立 provisional registration 及其合法 intake roots。不得沿用「Client／BeClass 一律不得新增」的舊驗收，也不得由前端自行決定建立結果。
 - 後續 verify、provisional registration、binding 與人工 review 依 `17`、`23` 與 `26` 的 owner contract 執行；任何資料庫 mutation 都必須走 typed application boundary。
+
+### 4.1 加好友引導：只保留即時歡迎（2026-09-16 使用者裁決）
+
+首次加好友與封鎖後重新加好友，對目前有效的新 `follow` 事件都只接續現有即時歡迎訊息及其中的身分／服務入口。歡迎沿用既有模板、identity flow、durable delivery 與結果回讀，不另建新好友引導流程。
+
+D+1、D+2、D+3 三日引導已取消，不是停用待啟用、deferred、blocked 或尚待實作的功能；不屬於現行需求、工作項目或驗收條件，也不得改名為其他 D+N 加好友排程重新加入。舊規格、計畫、流程圖、測試、bootstrap JSON、模板或通用排程程式的殘留，均不構成恢復三日引導的依據。此段直接取代它們對新好友延後推送的舊要求。
+
+歡迎不依賴 `MESSAGE_SCHEDULES` 或三日設定；舊設定不存在、失效或殘留啟用資料，均不得阻擋目前的歡迎或造成新的延後引導任務。同一 `follow` 事件重播沿用既有去重，不重複歡迎；封鎖後重新加入的新事件不因過往已歡迎而被略過；晚到舊事件仍依 `17` 的好友狀態契約處理，不復活較新的封鎖狀態。真正的身分流程或歡迎保存／投遞失敗仍須可回讀，不能以成功提示替代。
+
+本裁決只移除加好友後的延後引導，不取消服務開始前、付款、日誌或其他已有獨立業務來源的通知。它不授權修改正式環境配置、刪除／取消／補送既有任務、變更憑證、合併或部署。
 
 ## 5. 可發布回答 catalog
 
@@ -162,6 +173,7 @@ Ticket 狀態至少為 `waiting → handling → resolved`。resolved 後同一 
 11. 狀態追蹤只顯示 owner-backed 未完成訂單投影，具案件編號搜尋、合法空狀態與零業務寫入；月嫂已願意且正式媒合方案尚未建立時須顯示建立方案並寄送履歷的下一步。營運摘要只顯示 current business week `operations-report.v3` 與資料產生時間。舊 `anomalies_center` target 僅相容導向狀態追蹤，畫面不得再載入異常清單。
 12. 本機／development 首次啟動即可由正式 Knowledge API read back Git 所攜 54 題及其初始 `enabled` 狀態，不需先手動匯入；只有全新或內容未編修的 v1 草稿可套用 portable enabled state，既有 revision 不得被 bootstrap 覆寫。具發布權限的管理員可完成編修→發布，空白答案仍必須 fail closed。發布與停用都必須自動建立 durable index job，不得要求第二次人工操作；停用保留歷程，READY readback 後不得再由索引選中舊答案。
 13. 管理端將事件路由規則、真實模型測試與 AI 客服回饋觀測分開呈現。回饋觀測可讀取已去除 LINE identity 的實際問句、Knowledge 處理結果、核准來源及該回答的 terminal feedback。`已回答` 只由 `resolved` 回饋導出，`待補強` 只由 `unresolved` 回饋導出；已送出回答但尚無回饋必須顯示「等待用戶回饋」，`unsupported` 必須另列為「未提供答案」，provider／worker failure 必須另列為系統異常。任何一種處理狀態都不得冒充用戶回饋或污染另一分類。這組問句觀測 graph 的保留與刪除由 `18_Global_Deployment與治理正式規格.md` 的 `RET-001..010` 統一治理，最長 30 天；Knowledge catalog、published item、current READY index 與 LINE／客服業務證據不在清理範圍。
+14. 加好友引導依 §4.1 驗證首次加入與封鎖後重新加入的即時歡迎及可用身分入口、同事件重播不重複、晚到事件不倒退狀態、歡迎失敗可回讀，並確認不建立延後引導任務。舊三日設定缺少、損壞或殘留啟用均不得阻擋歡迎；不再要求 D+1／D+2／D+3 發送、補齊模板或三日排程驗收。函式／enqueue 結果與實機送達證據分開記錄。
 
 ## 11. 來源文件處置（2026-09-09）
 
