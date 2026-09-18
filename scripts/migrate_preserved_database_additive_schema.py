@@ -2405,7 +2405,31 @@ def _metadata_state_for_artifact(
     defer_missing_triggers: bool,
 ) -> str:
     if artifact == "1038_twins_payroll_order_details_view.sql":
-        return _twins_payroll_order_details_view_state(
+        state = _twins_payroll_order_details_view_state(
+            snapshot.get("views", ()),
+            descriptor,
+        )
+        owner_date_successor = OWNED_OBJECTS.get(
+            "1043_twins_payroll_order_details_view.sql"
+        )
+        if owner_date_successor is None:
+            try:
+                owner_date_successor = _canonical_artifact_descriptor(
+                    "1043_twins_payroll_order_details_view.sql"
+                )
+            except Exception:
+                owner_date_successor = None
+        if (
+            state == "drift"
+            and owner_date_successor is not None
+            and _order_details_owner_dates_view_state(
+                snapshot.get("views", ()), owner_date_successor
+            ) == "exact"
+        ):
+            state = "exact"
+        return state
+    if artifact == "1043_twins_payroll_order_details_view.sql":
+        return _order_details_owner_dates_view_state(
             snapshot.get("views", ()),
             descriptor,
         )
@@ -5896,7 +5920,31 @@ def _release_descriptor_metadata_state(
                 f"release descriptor differs from canonical SQL: {part_name}:parent_columns"
             )
     if part_name == "1038_twins_payroll_order_details_view.sql":
-        return _twins_payroll_order_details_view_state(
+        state = _twins_payroll_order_details_view_state(
+            snapshot.get("views", ()),
+            canonical,
+        )
+        owner_date_successor = OWNED_OBJECTS.get(
+            "1043_twins_payroll_order_details_view.sql"
+        )
+        if owner_date_successor is None:
+            try:
+                owner_date_successor = _canonical_artifact_descriptor(
+                    "1043_twins_payroll_order_details_view.sql"
+                )
+            except Exception:
+                owner_date_successor = None
+        if (
+            state == "drift"
+            and owner_date_successor is not None
+            and _order_details_owner_dates_view_state(
+                snapshot.get("views", ()), owner_date_successor
+            ) == "exact"
+        ):
+            state = "exact"
+        return state
+    if part_name == "1043_twins_payroll_order_details_view.sql":
+        return _order_details_owner_dates_view_state(
             snapshot.get("views", ()),
             canonical,
         )

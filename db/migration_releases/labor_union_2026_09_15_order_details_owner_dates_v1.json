@@ -20,7 +20,7 @@
     {
       "name": "1043_twins_payroll_order_details_view.sql",
       "relative_path": "db/schema_parts/1043_twins_payroll_order_details_view.sql",
-      "sha256": "d2e4806dd8d123ba657fbdc0d1cc154726d5ae96eba5a879acecec5ecb581ab5",
+      "sha256": "1310bf0787e869600e4a12a7900b4800b4f0046b0a40481cffbb77f7e876099d",
       "dependencies": [],
       "data_effect": "schema_only",
       "rollback_policy": "discard-candidate-before-entry-switch",
