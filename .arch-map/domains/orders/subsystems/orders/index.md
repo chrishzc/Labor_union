@@ -42,4 +42,5 @@
 - test_root: `tests/domains/orders/subsystems/orders/`
 - integration_root: `tests/domains/orders/subsystems/orders/integration/`
 - integration_root: `ui_react/src/tests/domains/orders/subsystems/orders/modules/service-date-confirmation/order_workbench_v2_service_dates.test.tsx`
+- integration_root: `ui_react/src/tests/write_readback_regression.cjs`
 - fixtures_root: `tests/fixtures/`

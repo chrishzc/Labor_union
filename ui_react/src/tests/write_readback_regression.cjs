@@ -33,8 +33,10 @@ function declaration(file, symbol) {
     ts.forEachChild(node, visit);
   }
   visit(ast);
-  assert.equal(found.length, 1, `${file}: expected one ${symbol}`);
-  return { ast, node: found[0] };
+  const declarations = found.filter(node => ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node));
+  const selected = declarations.length === 1 ? declarations : found;
+  assert.equal(selected.length, 1, `${file}: expected one ${symbol}`);
+  return { ast, node: selected[0] };
 }
 function source(file, ...names) {
   return names.map(name => {
@@ -45,7 +47,12 @@ function source(file, ...names) {
 function compile(text, names, env = {}) {
   const result = ts.transpileModule(text.replace(/\bexport\s+(?=(?:async\s+)?function|abstract\s+class|class)/g, ''), {
     fileName: 'test-boundary.tsx', reportDiagnostics: true,
-    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None, jsx: ts.JsxEmit.React },
+    compilerOptions: {
+      target: ts.ScriptTarget.ES2022,
+      module: ts.ModuleKind.None,
+      jsx: ts.JsxEmit.React,
+      ignoreDeprecations: '6.0',
+    },
   });
   assert.equal((result.diagnostics || []).filter(d => d.category === ts.DiagnosticCategory.Error).length, 0);
   const context = vm.createContext({ Error, Map, Set, Promise, AbortController, console, crypto: { randomUUID }, ...env });
@@ -229,7 +236,7 @@ function refreshHarness({revision=0, historical=false, unconfirmed=false, savedD
   useEffect:(setup,deps)=>{const i=index++;if(!effects[i]||deps.some((d,j)=>!Object.is(d,effects[i].deps[j]))){
     const old=effects[i];effects[i]={deps:[...deps],setup,cleanup:old?.cleanup,pending:true};}},
  };
- const code=fs.readFileSync(path.join(root,file),'utf8').replace(/^import[\s\S]*?from ['"][^'"]+['"];\n/gm,'')
+ const code=fs.readFileSync(path.join(root,file),'utf8').replace(/^import[\s\S]*?from ['"][^'"]+['"];\r?\n/gm,'')
    .replace(/^export default[^\n]*$/gm,'').replace(/^export /gm,'');
  const component=compile(code,['OrderServiceDatesPanel'],{...hooks,...flow,orderMutationFlowStore:store,ordersMutationClient:api,
   ordersQueryClient:queries,schedulePrecisionClient:precision,
