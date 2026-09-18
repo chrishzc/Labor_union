@@ -363,6 +363,85 @@ def test_review_approval_requires_capability_and_binds_in_one_uow() -> None:
         application.decide(denied)
 
 
+def test_review_rejection_exact_replay_keeps_one_receipt_and_delivery_task() -> None:
+    snapshot = _pending_staff_review()
+
+    class RejectIdentities(ApprovalIdentityRepository):
+        def __init__(self, review) -> None:
+            super().__init__(review)
+            self.revocations = []
+
+        def revoke(self, line_user_id, version, actor_id, key, correlation_id, subject_type):
+            self.revocations.append(
+                (line_user_id, version, actor_id, key, correlation_id, subject_type)
+            )
+
+    class ReplayReceipts(RecordingRepository):
+        def get(self, key):
+            return next((item for item in self.items if item.key == key), None)
+
+    identities = RejectIdentities(snapshot)
+    receipts = ReplayReceipts()
+    deliveries = RecordingRepository()
+    uow = FakeUow(
+        reviews=ReviewDecisionRepository(snapshot),
+        identities=identities,
+        staff=StaffOwnerRepository(),
+        customers=SimpleNamespace(),
+        admins=SimpleNamespace(),
+        receipts=receipts,
+        audit=RecordingRepository(),
+        delivery_tasks=deliveries,
+        outbox=RecordingRepository(),
+    )
+    application = LineIdentityReviewApplication(lambda: uow, lambda: NOW)
+    command = _reject_command()
+
+    created = application.decide(command)
+    replay = application.decide(command)
+
+    assert created.outcome is LineReviewCommandOutcome.CREATED
+    assert created.snapshot.status is LineReviewStatus.REJECTED
+    assert replay.outcome is LineReviewCommandOutcome.EXISTING
+    assert len(identities.revocations) == 1
+    assert len(receipts.items) == 1
+    assert len(deliveries.items) == 1
+    delivery = deliveries.items[0]
+    assert delivery.source_aggregate_type == "line_review_request"
+    assert delivery.source_aggregate_identity == "41"
+    assert "未通過" in json.loads(delivery.payload_json)["text"]
+
+
+def test_review_rejection_delivery_enqueue_failure_is_not_reported_as_success() -> None:
+    snapshot = _pending_staff_review()
+
+    class RejectIdentities(ApprovalIdentityRepository):
+        def revoke(self, *_):
+            return None
+
+    class FailingDeliveries:
+        def enqueue(self, _request):
+            raise RuntimeError("review delivery persistence unavailable")
+
+    uow = FakeUow(
+        reviews=ReviewDecisionRepository(snapshot),
+        identities=RejectIdentities(snapshot),
+        staff=StaffOwnerRepository(),
+        customers=SimpleNamespace(),
+        admins=SimpleNamespace(),
+        receipts=ReceiptRepository(),
+        audit=RecordingRepository(),
+        delivery_tasks=FailingDeliveries(),
+        outbox=RecordingRepository(),
+    )
+    application = LineIdentityReviewApplication(lambda: uow, lambda: NOW)
+
+    with pytest.raises(RuntimeError, match="review delivery persistence unavailable"):
+        application.decide(_reject_command())
+
+    assert uow.committed is False
+
+
 def test_review_decision_preview_is_zero_write_and_apply_rejects_stale_preview() -> None:
     snapshot = _pending_staff_review()
     uow = FakeUow(
@@ -651,4 +730,26 @@ def _approve_command(*capabilities):
         ),
         IdempotencyKey("review-decision:41"),
         CorrelationId("review:41"),
+    )
+
+
+def _reject_command():
+    return DecideLineReviewCommand(
+        LineReviewRequestId(41),
+        LineReviewDecision.REJECT,
+        ExpectedVersion(0),
+        ActorContext("admin:7", (LineCapability.IDENTITY_REVIEW.value,)),
+        "資料無法核對",
+        fingerprint_payload(
+            {
+                "request_id": 41,
+                "review_type": "staff_verification",
+                "decision": "reject",
+                "expected_version": 0,
+                "actor_id": "admin:7",
+                "reason": "資料無法核對",
+            }
+        ),
+        IdempotencyKey("review-rejection:41"),
+        CorrelationId("review-rejection:41"),
     )

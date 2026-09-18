@@ -433,7 +433,7 @@ def request_staff_retirement_revocation(
     staff_id: int,
     lifecycle_version: int,
     correlation_id: CorrelationId,
-) -> bool:
+) -> LineIdentityRevocationRequest | None:
     """Request exact Staff-role revocation inside the Staff outer transaction."""
 
     current = unit_of_work.identities.get_by_subject(
@@ -441,7 +441,7 @@ def request_staff_retirement_revocation(
         str(staff_id),
     )
     if current is None or current.status is LineIdentityBindingStatus.REVOKED:
-        return False
+        return None
     if current.status is not LineIdentityBindingStatus.BOUND:
         raise RuntimeError("line_identity_staff_retirement_revocation_blocked")
     command = RequestLineIdentityRevocationCommand(
@@ -454,12 +454,11 @@ def request_staff_retirement_revocation(
         ),
         correlation_id,
     )
-    _request_revocation_in_uow(
+    return _request_revocation_in_uow(
         unit_of_work,
         command,
         subject_type=LineBindingSubjectType.STAFF,
     )
-    return True
 
 
 def _request_revocation_in_uow(unit_of_work, command, *, subject_type=None):

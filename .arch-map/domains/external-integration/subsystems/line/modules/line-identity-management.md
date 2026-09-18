@@ -44,6 +44,7 @@
 - `document/架構重整/01_規格基線/23_LINE身分管理與解除正式規格.md` §9.5 — Orders terminal closure is the source; LINE fresh-reads role bindings and active client cases before a single staff default-menu intent.
 - `domains/line/identity_binding.py` — role-scoped claim/snapshot plus bounded streak transition.
 - `db/schema_parts/1019_line_identity_role_scope.sql` — additive shared root/event successor, selected-role column and streak root.
+- Staff retirement committed receipt 在同一 outer UoW 建立 staff-role revocation／default-menu intent；只有 current `staff.retirement.committed` rule 有效且退役前 binding 可核對時，才由 notification registry 建立 source／decision／intent／delivery task，不由 effect 自建 rule 或 template。
 
 ## Verification
 - layout_status: `custom_current`
@@ -51,6 +52,7 @@
 - static:
   - `python -m py_compile domains/line/identity_binding.py subsystems/line/identity_application.py subsystems/line/identity_management_application.py infrastructure/mysql/line_identity_review_repository.py infrastructure/mysql/line_identity_management_repository.py`
 - test_root: `tests/domains/external-integration/subsystems/line/modules/line-identity-management/`
+- regression: `tests/domains/external-integration/subsystems/line/subsystems/test_line_friend_feedback_regressions.py` — canonical webhook friend-state／welcome composition 與同 handler 內 feedback continuation 的既有 cohesive regression。
 - test_root: `ui_react/src/tests/domains/external-integration/subsystems/line/modules/line-identity-management/` — identity presentation adapter masking and strict typed-state coverage.
 
 ## Provenance

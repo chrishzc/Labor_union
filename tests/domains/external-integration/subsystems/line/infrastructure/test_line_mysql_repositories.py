@@ -204,14 +204,18 @@ def test_webhook_transition_binds_every_sql_parameter() -> None:
     assert update_parameters[:2] == ("processing", "processing")
 
 
-def test_delivery_claim_binds_all_three_clock_predicates() -> None:
+def test_delivery_claim_cancels_retired_follow_schedule_before_claiming() -> None:
     cursor = ScriptedCursor(all_rows=((),))
     repository = MySqlLineDeliveryTaskRepository(FakeConnection(cursor))
 
     claimed = repository.claim(ClaimLineDeliveryTasksQuery("worker-1", NOW, 10))
 
     assert claimed == ()
-    parameters = cursor.executed[0][1]
+    retirement_sql, retirement_parameters = cursor.executed[0]
+    assert "source_aggregate_type='line_follow_schedule'" in retirement_sql
+    assert "processing_status='cancelled'" in retirement_sql
+    assert retirement_parameters == ()
+    parameters = cursor.executed[1][1]
     assert parameters[0] == parameters[1] == parameters[2]
     assert parameters[3] == 10
 

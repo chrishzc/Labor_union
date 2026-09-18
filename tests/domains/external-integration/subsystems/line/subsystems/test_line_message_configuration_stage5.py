@@ -92,14 +92,13 @@ def _snapshot(kind, name):
     )
 
 
-def test_current_templates_and_schedules_expand_in_taipei_time() -> None:
+def test_retired_follow_schedule_does_not_expand_delivery_steps() -> None:
     templates = _definition("message_templates")
     schedules = _definition("message_schedules")
 
     steps = follow_schedule_steps(schedules, templates, FOLLOWED_AT)
 
-    assert [step.day for step in steps] == [1, 2, 3]
-    assert steps[0].scheduled_at == datetime(2026, 8, 9, 2, tzinfo=timezone.utc)
+    assert steps == ()
 
 
 def test_template_render_requires_declared_required_variables() -> None:
@@ -116,7 +115,7 @@ def test_template_render_requires_declared_required_variables() -> None:
     assert "CASE-1" in rendered.payload_json
 
 
-def test_follow_schedule_uses_stable_non_refollow_idempotency_keys() -> None:
+def test_retired_follow_schedule_enqueues_no_delivery_tasks() -> None:
     configurations = ConfigurationRepository(
         {
             LineConfigurationKind.MESSAGE_TEMPLATES: _snapshot(
@@ -140,10 +139,8 @@ def test_follow_schedule_uses_stable_non_refollow_idempotency_keys() -> None:
 
     count = enqueue_follow_schedule(inbox, uow, LineUserId("U-stage5"))
 
-    assert count == 3
-    assert deliveries.items[0].idempotency_key.value == (
-        "follow-schedule:U-stage5:new_user_onboarding:d1"
-    )
+    assert count == 0
+    assert deliveries.items == []
 
 
 def test_configuration_apply_requires_capability_and_commits_revision() -> None:

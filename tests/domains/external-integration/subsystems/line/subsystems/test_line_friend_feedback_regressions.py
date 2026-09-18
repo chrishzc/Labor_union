@@ -249,7 +249,7 @@ def _canonical_follow_handler(now=NOW):
     def capture_handler(*args, **kwargs):
         captured.append(LineWebhookIdentityHandlers(*args, **kwargs))
         # Follow handling is exercised below, not the unrelated dispatch registry.
-        return SimpleNamespace(registry=lambda: {})
+        return SimpleNamespace(registry=lambda: {"postback": Mock()})
 
     with ExitStack() as stack:
         stack.enter_context(patch.object(runtime, "LineWebhookIdentityHandlers", side_effect=capture_handler))

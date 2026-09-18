@@ -838,6 +838,30 @@ class MySqlLineNotificationRepository:
             ):
                 return None
             return LineRecipient(LineRecipientType.USER, binding.line_user_id)
+        if selector == "staff.binding_owner" and isinstance(facts, dict):
+            staff_id = facts.get("staff_id")
+            line_user_id = facts.get("line_user_id")
+            if (
+                not isinstance(staff_id, int)
+                or isinstance(staff_id, bool)
+                or staff_id <= 0
+                or not isinstance(line_user_id, str)
+                or not line_user_id
+            ):
+                return None
+            binding = MySqlLineIdentityRepository(self._connection).get(
+                LineUserId(line_user_id), LineBindingSubjectType.STAFF
+            )
+            if (
+                binding is None
+                or binding.subject_reference != str(staff_id)
+                or binding.status not in {
+                    LineIdentityBindingStatus.BOUND,
+                    LineIdentityBindingStatus.REVOCATION_PENDING,
+                }
+            ):
+                return None
+            return LineRecipient(LineRecipientType.USER, binding.line_user_id)
         if selector == "case_group" and isinstance(facts, dict):
             case_no = facts.get("case_no")
             if not isinstance(case_no, str) or not case_no:

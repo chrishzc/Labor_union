@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
@@ -18,6 +19,7 @@ from domains.staff.retirement import StaffLifecycleFact, StaffLifecycleState, St
 from shared_kernel.clock import FixedBusinessClock
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from subsystems.line.identity_management_application import request_staff_retirement_revocation
+from subsystems.line.staff_retirement_effect import LineStaffRetirementEffect
 from subsystems.line.identity_management_contracts import (
     LineIdentityRevocationRequest,
     LineIdentityRevocationStatus,
@@ -105,6 +107,16 @@ class _LineUnitOfWork:
         self.identity_management = _IdentityManagement()
         self.outbox = _AppendOnly()
         self.audit = _AppendOnly()
+        self.notification_rules = _NotificationRules()
+
+
+class _NotificationRules:
+    def __init__(self):
+        self.events = []
+
+    def register_and_project(self, event):
+        self.events.append(event)
+        return len(self.events)
 
 
 def test_retirement_requests_exact_staff_role_revocation_in_given_uow() -> None:
@@ -117,13 +129,43 @@ def test_retirement_requests_exact_staff_role_revocation_in_given_uow() -> None:
         correlation_id=CorrelationId("staff-retirement-7-v4"),
     )
 
-    assert requested is True
+    assert requested is not None
+    assert requested.line_user_id == LineUserId("U-retired-staff")
     assert unit_of_work.identities.requested_subject_type is LineBindingSubjectType.STAFF
     assert unit_of_work.identity_management.command.idempotency_key == IdempotencyKey(
         "staff-retirement-line-revoke:7:4"
     )
     assert len(unit_of_work.outbox.items) == 1
     assert len(unit_of_work.audit.items) == 1
+
+
+def test_retirement_effect_projects_owner_receipt_through_current_notification_rules() -> None:
+    unit_of_work = _LineUnitOfWork()
+    request = SimpleNamespace(
+        transition=StaffLifecycleTransition.RETIRE,
+        effective_at=NOW,
+        correlation_id=CorrelationId("staff-retirement-7-v4"),
+    )
+    receipt = SimpleNamespace(
+        staff_id=7,
+        version=4,
+        state=StaffLifecycleState.RETIRED,
+    )
+
+    LineStaffRetirementEffect().on_transition(unit_of_work, request, None, receipt)
+
+    assert len(unit_of_work.notification_rules.events) == 1
+    event = unit_of_work.notification_rules.events[0]
+    assert event.identity == "staff-retirement:7:4"
+    assert event.event_code == "staff.retirement.committed"
+    assert event.source_aggregate_identity == "7"
+    assert event.source_version == 4
+    assert event.occurred_at == NOW
+    assert event.facts["recipient_projection"] == {
+        "selector": "staff.binding_owner",
+        "type": "user",
+        "identity": "U-retired-staff",
+    }
 
 
 class _LifecycleRepository:

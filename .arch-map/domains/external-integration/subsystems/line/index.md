@@ -84,7 +84,9 @@ layout_status: `custom_current`
 - test_root: `tests/domains/external-integration/subsystems/line/`
 - integration_root: `tests/domains/external-integration/subsystems/line/integration/`.
 - integration_root: `tests/domains/external-integration/subsystems/line/infrastructure/test_line_mysql_repositories.py`
+- integration_root: `tests/domains/external-integration/subsystems/line/infrastructure/test_line_runtime_schema_stage3.py`
 - integration_root: `tests/domains/external-integration/subsystems/line/subsystems/test_line_application_contracts.py`
+- integration_root: `tests/domains/external-integration/subsystems/line/subsystems/test_line_message_configuration_stage5.py`
 - integration_root: `tests/domains/external-integration/subsystems/line/subsystems/test_line_runtime_stage3.py`
 - integration_root: `tests/domains/external-integration/subsystems/line/infrastructure/test_line_liff_entrypoint.py`
 - integration_root: `tests/domains/external-integration/subsystems/line/subsystems/test_line_identity_stage4.py`
@@ -92,7 +94,6 @@ layout_status: `custom_current`
 - integration_root: `ui_react/src/tests/domains/external-integration/subsystems/line/integration/`
 - higher_boundary: LINE Identity first-release living baseline由Global schema/release routing分類；Anomalies consumer保留在其canonical integration root。
 - regression: `tests/domains/external-integration/subsystems/line/subsystems/test_line_delivery_friend_regressions.py`
-- regression: `tests/domains/external-integration/subsystems/line/subsystems/test_line_friend_feedback_regressions.py`
 - regression: `tests/domains/external-integration/subsystems/line/subsystems/test_line_m4_continuation_regressions.py`
 - integration_root: `ui_react/src/tests/line_successor_clients.test.ts`
 

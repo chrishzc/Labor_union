@@ -35,12 +35,13 @@ def test_canonical_webhook_boundary_does_not_import_provider_adapter() -> None:
     assert "requests" not in source
 
 
-def test_canonical_delivery_excludes_legacy_backfill_projection() -> None:
+def test_canonical_delivery_excludes_retired_legacy_and_follow_schedule_tasks() -> None:
     source = (
         PROJECT_ROOT / "infrastructure/mysql/line_delivery_task_repository.py"
     ).read_text(encoding="utf-8")
 
-    assert "source_aggregate_type<>'legacy_line_task'" in source
+    assert "source_aggregate_type NOT IN ('legacy_line_task','line_follow_schedule')" in source
+    assert "error_code='retired_follow_schedule'" in source
 
 
 def test_redis_is_only_a_wakeup_dependency() -> None:

@@ -28,7 +28,7 @@ function dependencies(rules: LineNotificationRulesCatalog = LINE_NOTIFICATION_RU
 afterEach(() => vi.restoreAllMocks());
 
 describe('LINE 通知規則 query 與 mutation 接線', () => {
-  it('只在頁籤啟用時查一次並以真實規則開啟查詢 Drawer', async () => {
+  it('只在頁籤啟用時查一次，並可從目錄新增或由明細編輯真實規則', async () => {
     const fetchSpy = vi.fn().mockRejectedValue(new Error('unexpected network'));
     vi.stubGlobal('fetch', fetchSpy);
     const { customer, identity, configuration } = dependencies();
@@ -39,8 +39,18 @@ describe('LINE 通知規則 query 與 mutation 接線', () => {
     await waitFor(() => expect(screen.getAllByText('deposit_notice').length).toBeGreaterThan(0));
     expect(configuration.getNotificationRules).toHaveBeenCalledTimes(1);
     expect(screen.queryByText('FLOW-04')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '新增／編輯通知規則' }));
+    expect(screen.getByRole('region', { name: '通知規則編輯區' })).toBeInTheDocument();
+    expect(screen.getByLabelText('要編輯的通知規則：')).toHaveValue('deposit_notice');
+    fireEvent.click(screen.getByRole('button', { name: '關閉編輯區' }));
+
     fireEvent.click(screen.getByRole('button', { name: /deposit_notice/ }));
     expect(screen.getAllByText('訂金確認').length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole('button', { name: '編輯此規則' }));
+    expect(screen.queryByText('系統唯一規則識別碼：deposit_notice')).not.toBeInTheDocument();
+    expect(screen.getByRole('region', { name: '通知規則編輯區' })).toBeInTheDocument();
+    expect(screen.getByLabelText('要編輯的通知規則：')).toHaveValue('deposit_notice');
     expect(screen.queryByRole('button', { name: /儲存並發布|手動重播/ })).not.toBeInTheDocument();
     expect(fetchSpy).not.toHaveBeenCalled();
   });

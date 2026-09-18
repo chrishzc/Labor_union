@@ -504,6 +504,9 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
   const [rawRules, setRawRules] = useState<LineNotificationRulesCatalog | null>(null);
   const [rulesReload, setRulesReload] = useState(0);
   const [selectedRule, setSelectedRule] = useState<LineNotificationRuleModel | null>(null);
+  const [notificationRuleEditorOpen, setNotificationRuleEditorOpen] = useState(false);
+  const [notificationRuleEditorId, setNotificationRuleEditorId] = useState<string | null>(null);
+  const notificationRuleEditorRef = useRef<HTMLElement | null>(null);
   const [deliverySummary, setDeliverySummary] = useState<QueryState<LineDeliverySummaryView>>(idleState);
   const [deliveryDetail, setDeliveryDetail] = useState<QueryState<LineDeliveryDetailView>>(idleState);
   const deliveryDetailController = useRef<AbortController | null>(null);
@@ -2577,14 +2580,35 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                     共有 {ruleList.length} 項排程與即時通知規則
                   </p>
                 </div>
+                <button
+                  type="button"
+                  className="line-primary-btn line-compact-button"
+                  disabled={!rawRules}
+                  aria-expanded={notificationRuleEditorOpen}
+                  onClick={() => {
+                    setNotificationRuleEditorId(null);
+                    setNotificationRuleEditorOpen(true);
+                    window.requestAnimationFrame(() => notificationRuleEditorRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }));
+                  }}
+                >
+                  <FilePenLine aria-hidden="true" />新增／編輯通知規則
+                </button>
               </div>
 
               <LoadingOrError state={rules} loadingText="正在載入通知規則目錄…" />
 
-              {rawRules && <details className="line-rules-editor-disclosure">
-                <summary>新增或編輯通知規則</summary>
-                <LineNotificationRulesMutationPanel catalog={rawRules} selectedRuleId={selectedRule?.id ?? null} onCommitted={() => setRulesReload((value) => value + 1)} />
-              </details>}
+              {rawRules && notificationRuleEditorOpen && (
+                <section ref={notificationRuleEditorRef} className="line-rules-editor-workspace" aria-label="通知規則編輯區">
+                  <div className="line-rules-editor-workspace-header">
+                    <div>
+                      <h4>通知規則編輯區</h4>
+                      <p>可新增、修改或停用規則；儲存前會先顯示影響並要求確認。</p>
+                    </div>
+                    <button type="button" className="line-secondary-btn" onClick={() => setNotificationRuleEditorOpen(false)}>關閉編輯區</button>
+                  </div>
+                  <LineNotificationRulesMutationPanel catalog={rawRules} selectedRuleId={notificationRuleEditorId} onCommitted={() => setRulesReload((value) => value + 1)} />
+                </section>
+              )}
 
               {rules.status === 'loaded' && !isRulesEmpty && <div className="line-search-filter-toolbar notification-rule-toolbar">
                 <label className="line-search-field">
@@ -2659,7 +2683,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                           {rule.enabled ? '● 已啟用' : '○ 停用中'}
                         </span>
                         <span className="notification-rule-detail-link">
-                          查看規則明細
+                          查看與編輯
                         </span>
                       </div>
                     </button>
@@ -3416,7 +3440,19 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
         isOpen={selectedRule !== null}
         onClose={() => setSelectedRule(null)}
         title={selectedRule ? ruleName(selectedRule.id) : '通知規則明細'}
-        footer={<div className="line-drawer-footer"><button type="button" onClick={() => setSelectedRule(null)}>關閉</button></div>}
+        footer={<div className="line-drawer-footer">
+          {selectedRule && <button
+            type="button"
+            className="line-primary-btn"
+            onClick={() => {
+              setNotificationRuleEditorId(selectedRule.id);
+              setNotificationRuleEditorOpen(true);
+              setSelectedRule(null);
+              window.requestAnimationFrame(() => notificationRuleEditorRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }));
+            }}
+          ><FilePenLine aria-hidden="true" />編輯此規則</button>}
+          <button type="button" onClick={() => setSelectedRule(null)}>關閉</button>
+        </div>}
       >
         {selectedRule && (
           <div className="line-drawer-content" data-control-id="line.notification-rule.detail">

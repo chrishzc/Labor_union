@@ -116,6 +116,7 @@ class MySqlLineDeliveryTaskRepository:
     ) -> tuple[LineDeliveryTaskSnapshot, ...]:
         lease_expires_at = query.now + self._lease_duration
         with self._connection.cursor() as cursor:
+            cursor.execute(_CANCEL_RETIRED_FOLLOW_SCHEDULES_SQL)
             cursor.execute(
                 _CLAIM_CANDIDATES_SQL,
                 (
@@ -722,12 +723,20 @@ _REPLY_OPPORTUNITY_SQL = (
 )
 _CLAIM_CANDIDATES_SQL = (
     f"SELECT {_SELECT_COLUMNS} FROM line_delivery_tasks WHERE "
-    "source_aggregate_type<>'legacy_line_task' AND "
+    "source_aggregate_type NOT IN ('legacy_line_task','line_follow_schedule') AND "
     "((processing_status='pending' AND scheduled_at_utc<=%s) OR "
     "(processing_status='retryable_failed' AND next_attempt_at_utc<=%s) OR "
     "(processing_status='processing' AND lease_expires_at_utc<=%s)) "
     "ORDER BY COALESCE(next_attempt_at_utc,scheduled_at_utc),id LIMIT %s "
     "FOR UPDATE SKIP LOCKED"
+)
+_CANCEL_RETIRED_FOLLOW_SCHEDULES_SQL = (
+    "UPDATE line_delivery_tasks SET processing_status='cancelled',"
+    "error_code='retired_follow_schedule',"
+    "error_message='Legacy follow schedule retired',"
+    "lease_owner=NULL,lease_acquired_at_utc=NULL,lease_expires_at_utc=NULL "
+    "WHERE source_aggregate_type='line_follow_schedule' "
+    "AND processing_status IN ('pending','retryable_failed','processing')"
 )
 _EXPIRE_INVITATIONS_SQL = (
     "UPDATE line_delivery_tasks SET processing_status='cancelled',"
@@ -744,7 +753,8 @@ _NEXT_DUE_SQL = (
     "WHEN processing_status='pending' THEN scheduled_at_utc "
     "WHEN processing_status='retryable_failed' THEN next_attempt_at_utc "
     "WHEN processing_status='processing' THEN lease_expires_at_utc END) AS next_due_at_utc "
-    "FROM line_delivery_tasks WHERE source_aggregate_type<>'legacy_line_task' "
+    "FROM line_delivery_tasks WHERE "
+    "source_aggregate_type NOT IN ('legacy_line_task','line_follow_schedule') "
     "AND processing_status IN ('pending','retryable_failed','processing')"
 )
 _CLAIM_UPDATE_SQL = (
