@@ -58,6 +58,11 @@ class _Repository:
             observed_sha256=None,
             observed_size_bytes=None,
             created_at=observed_at,
+            storage_locator=(
+                "scheduling/cases/v1/CASE-1/2026-09-01/meal_photo/1/"
+                + "a" * 64
+                + ".jpg"
+            ),
         )
 
     def acquire_finalize_lease(self, intent, *, worker_id, acquired_at):
@@ -78,14 +83,14 @@ class _Repository:
 
 
 class _Storage:
-    def finalize_staged(self, staging_id, *, expected_sha256):
+    def finalize_staged(self, staging_id, *, expected_sha256, object_reference=None):
         return ControlledFileStagingContent(
             staging_id, b"verified", expected_sha256, NOW,
         )
 
 
 class _FailingStorage(_Storage):
-    def finalize_staged(self, _staging_id, *, expected_sha256):
+    def finalize_staged(self, _staging_id, *, expected_sha256, object_reference=None):
         raise ControlledFileStorageError(
             "controlled_file_staging_not_found", "missing", retryable=False
         )

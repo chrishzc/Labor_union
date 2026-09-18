@@ -111,7 +111,7 @@ class _TransactionConnection:
         self.next_id = 100
         self.cursors = []
         self.object_key = canonical_scheduling_object_key(
-            assignment_id=12,
+            case_no="CASE-1",
             service_date=date(2026, 8, 16),
             attachment_kind="meal_photo",
             sequence=1,
@@ -236,7 +236,7 @@ def test_controlled_file_bridge_failure_rolls_back_log_attachment_and_reference_
 
 def test_controlled_file_bridge_rejects_noncanonical_object_key_before_attachment():
     connection = _TransactionConnection()
-    connection.object_key = "scheduling/service-day/v1/12/2026-08-16/meal_photo/1/wrong"
+    connection.object_key = "scheduling/cases/v1/CASE-1/2026-08-16/meal_photo/1/wrong"
     port = _ReferenceFinalizePort(connection)
     repository = MySqlServiceDayLogRepository(
         connection, reference_finalize_repository=port

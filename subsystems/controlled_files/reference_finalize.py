@@ -148,7 +148,9 @@ class ControlledFileFinalizeWorker:
         try:
             # This call is intentionally outside the repository/CAS operation.
             verified = self._storage.finalize_staged(
-                intent.staging_id, expected_sha256=intent.expected_sha256
+                intent.staging_id,
+                expected_sha256=intent.expected_sha256,
+                object_reference=intent.storage_locator,
             )
             if (
                 verified.staging_id != intent.staging_id

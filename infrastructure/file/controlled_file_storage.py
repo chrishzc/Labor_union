@@ -349,17 +349,150 @@ class FileSystemControlledFileStorage:
         staging_id: str,
         *,
         expected_sha256: str,
+        object_reference: str | None = None,
     ) -> ControlledFileStagingContent:
-        """Verify an applied object after DB commit.
+        """Verify an applied object and move it to its durable locator when supplied."""
 
-        The filesystem adapter deliberately does not rename or delete bytes here:
-        the 1004 schema stores the staging locator as the immutable object source.
-        Finalization is therefore an idempotent integrity check; a future durable
-        intent/reconciler may call it again without changing object identity.
-        """
-        return self.read_registered_staged(
+        _validate_staging_id(staging_id)
+        if not _is_sha256(expected_sha256):
+            raise ControlledFileStorageError(
+                "controlled_file_digest_invalid",
+                "檔案完整性識別格式無效",
+                retryable=False,
+            )
+        if object_reference is None or object_reference == staging_id:
+            return self.read_registered_staged(
+                staging_id,
+                expected_sha256=expected_sha256,
+            )
+
+        reference = _validate_object_reference(object_reference)
+        if reference.parts[0] == _STAGING_DIRECTORY:
+            raise ControlledFileStorageError(
+                "controlled_file_reference_invalid",
+                "正式檔案位置不可位於 staging 目錄",
+                retryable=False,
+            )
+        root = self._require_ready_root()
+        object_directory = self._staging_object_directory(root, staging_id)
+        metadata_path = object_directory / "metadata.json"
+        payload_path = object_directory / "payload.bin"
+        try:
+            metadata = _read_json(metadata_path)
+            staged_result = _staging_result_from_metadata(metadata, replayed=False)
+        except FileNotFoundError as error:
+            raise ControlledFileStorageError(
+                "controlled_file_staging_not_found",
+                "指定 staging 檔案不存在",
+                retryable=False,
+            ) from error
+        if staged_result.staging_id != staging_id or staged_result.sha256_digest != expected_sha256:
+            raise ControlledFileStorageError(
+                "controlled_file_staging_digest_mismatch",
+                "staging 檔案完整性驗證失敗",
+                retryable=False,
+            )
+
+        normalized_reference = reference.as_posix()
+        existing_reference = metadata.get("finalized_object_reference")
+        if existing_reference is not None and existing_reference != normalized_reference:
+            raise ControlledFileStorageError(
+                "controlled_file_finalize_locator_conflict",
+                "staging 檔案已對應不同正式位置",
+                retryable=False,
+            )
+
+        target = root.joinpath(*reference.parts)
+        if any(path.is_symlink() for path in _path_chain(root, target)):
+            raise ControlledFileStorageError(
+                "controlled_file_reference_invalid",
+                "檔案識別超出受控儲存範圍",
+                retryable=False,
+            )
+
+        if target.exists():
+            if not target.is_file():
+                raise ControlledFileStorageError(
+                    "controlled_file_finalize_locator_conflict",
+                    "正式檔案位置不是一般檔案",
+                    retryable=False,
+                )
+            try:
+                content = target.read_bytes()
+            except OSError as error:
+                raise ControlledFileStorageError(
+                    "controlled_file_storage_mount_unavailable",
+                    "正式檔案目前無法讀取",
+                    retryable=True,
+                ) from error
+            digest = hashlib.sha256(content).hexdigest()
+            if digest != expected_sha256 or len(content) != staged_result.size_bytes:
+                raise ControlledFileStorageError(
+                    "controlled_file_staging_digest_mismatch",
+                    "正式檔案完整性驗證失敗",
+                    retryable=False,
+                    observed_sha256=digest,
+                    observed_size_bytes=len(content),
+                )
+            if existing_reference is None:
+                updated = dict(metadata)
+                updated["finalized_object_reference"] = normalized_reference
+                _write_json_replace(metadata_path, updated)
+            if payload_path.exists():
+                staged = self.read_registered_staged(
+                    staging_id, expected_sha256=expected_sha256
+                )
+                if staged.content != content:
+                    raise ControlledFileStorageError(
+                        "controlled_file_staging_digest_mismatch",
+                        "staging 與正式檔案內容不一致",
+                        retryable=False,
+                    )
+                try:
+                    payload_path.unlink()
+                except OSError as error:
+                    raise ControlledFileStorageError(
+                        "controlled_file_staging_cleanup_failed",
+                        "staging 檔案移轉後無法清理",
+                        retryable=True,
+                    ) from error
+            return ControlledFileStagingContent(
+                staging_id=staging_id,
+                content=content,
+                sha256_digest=digest,
+                expires_at=staged_result.expires_at,
+            )
+
+        staged = self.read_registered_staged(
             staging_id,
             expected_sha256=expected_sha256,
+        )
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if any(path.is_symlink() for path in _path_chain(root, target)):
+                raise ControlledFileStorageError(
+                    "controlled_file_reference_invalid",
+                    "檔案識別超出受控儲存範圍",
+                    retryable=False,
+                )
+            updated = dict(metadata)
+            updated["finalized_object_reference"] = normalized_reference
+            _write_json_replace(metadata_path, updated)
+            os.replace(payload_path, target)
+        except ControlledFileStorageError:
+            raise
+        except OSError as error:
+            raise ControlledFileStorageError(
+                "controlled_file_finalize_write_failed",
+                "正式檔案目前無法寫入",
+                retryable=True,
+            ) from error
+
+        return ControlledFileStagingContent(
+            staging_id=staging_id,
+            content=staged.content,
+            sha256_digest=staged.sha256_digest,
+            expires_at=staged.expires_at,
         )
 
     def cleanup_staged(
@@ -506,9 +639,6 @@ class FileSystemControlledFileStorage:
                     "staging 檔案超過讀取上限",
                     retryable=False,
                 )
-            before = payload_path.stat()
-            content = payload_path.read_bytes()
-            after = payload_path.stat()
         except FileNotFoundError as error:
             if missing_ok:
                 return {}, b""
@@ -525,6 +655,43 @@ class FileSystemControlledFileStorage:
                 "staging 檔案狀態無法確認，需要對帳",
                 retryable=False,
             ) from error
+
+        content_path = payload_path
+        try:
+            before = content_path.stat()
+            content = content_path.read_bytes()
+            after = content_path.stat()
+        except FileNotFoundError as error:
+            finalized_reference = metadata.get("finalized_object_reference")
+            if finalized_reference is None:
+                if missing_ok:
+                    return {}, b""
+                raise ControlledFileStorageError(
+                    "controlled_file_staging_not_found",
+                    "指定 staging 檔案不存在",
+                    retryable=False,
+                ) from error
+            try:
+                reference = _validate_object_reference(str(finalized_reference))
+                content_path = self._resolve_target(root, reference)
+                before = content_path.stat()
+                content = content_path.read_bytes()
+                after = content_path.stat()
+            except ControlledFileStorageError:
+                raise
+            except (FileNotFoundError, OSError, ValueError) as final_error:
+                raise ControlledFileStorageError(
+                    "controlled_file_staging_reconciliation_required",
+                    "正式檔案狀態無法確認，需要對帳",
+                    retryable=False,
+                ) from final_error
+        except OSError as error:
+            raise ControlledFileStorageError(
+                "controlled_file_staging_reconciliation_required",
+                "staging 檔案狀態無法確認，需要對帳",
+                retryable=False,
+            ) from error
+
         if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
             raise ControlledFileStorageError(
                 "controlled_file_staging_changed_during_read",
@@ -816,6 +983,16 @@ def _write_json_exclusive(path: Path, payload: dict[str, object]) -> None:
         handle.write("\n")
         handle.flush()
         os.fsync(handle.fileno())
+
+
+def _write_json_replace(path: Path, payload: dict[str, object]) -> None:
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        _write_json_exclusive(temporary, payload)
+        os.replace(temporary, path)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
 
 
 def _read_json(path: Path) -> dict[str, object]:

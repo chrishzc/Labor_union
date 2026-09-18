@@ -349,7 +349,7 @@ def _controlled_file_intent(command, assignment, attachment):
     )
 
     object_key = canonical_scheduling_object_key(
-        assignment_id=command.assignment_id,
+        case_no=str(assignment["case_no"]),
         service_date=command.intent.service_date,
         attachment_kind=attachment.attachment_kind,
         sequence=attachment.sequence,
@@ -365,7 +365,7 @@ def _controlled_file_intent(command, assignment, attachment):
         ),
         subject_reference=str(assignment["case_no"]),
         object_key=object_key,
-        logical_folder=f"scheduling/service-day/{command.assignment_id}/{command.intent.service_date.isoformat()}",
+        logical_folder=f"scheduling/cases/{assignment['case_no']}/{command.intent.service_date.isoformat()}",
     )
 
 

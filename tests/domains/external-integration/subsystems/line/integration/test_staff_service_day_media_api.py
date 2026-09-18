@@ -66,6 +66,10 @@ def test_upload_meal_photo_stages_controlled_file_for_bound_assignment(monkeypat
     assert recorded["stage"].owner.value == "scheduling"
     assert recorded["stage"].purpose.value == "meal_photo"
     assert recorded["stage"].subject_reference == "CASE-44"
+    assert recorded["stage"].object_key.startswith(
+        "scheduling/cases/v1/CASE-44/2026-08-16/meal_photo/1/"
+    )
+    assert recorded["stage"].logical_folder == "scheduling/cases/CASE-44/2026-08-16"
     assert recorded["preview"].assignment_id == 71
 
 
@@ -151,7 +155,7 @@ def test_upload_meal_photo_maps_staging_idempotency_conflict_to_409(monkeypatch)
     assert captured.value.detail["code"] == "controlled_file_staging_idempotency_conflict"
 
 
-def test_same_key_different_assignment_canonical_payload_is_closed_409(monkeypatch) -> None:
+def test_same_key_different_case_canonical_payload_is_closed_409(monkeypatch) -> None:
     recorded = {"commands": []}
 
     class SameKeyControlledFiles:
@@ -171,7 +175,10 @@ def test_same_key_different_assignment_canonical_payload_is_closed_409(monkeypat
             raise RuntimeError("controlled_file_staging_idempotency_conflict")
 
     logs = SimpleNamespace(
-        preview=lambda _command: SimpleNamespace(case_no="CASE-44", requires_cooking=True)
+        preview=lambda command: SimpleNamespace(
+            case_no="CASE-44" if command.assignment_id == 71 else "CASE-45",
+            requires_cooking=True,
+        )
     )
     monkeypatch.setattr(
         staff_service_day_media,

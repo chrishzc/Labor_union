@@ -89,7 +89,7 @@ async def upload_service_day_meal_photo(
             raise ValueError("service_day_log_meal_photo_forbidden")
         digest = hashlib.sha256(content).hexdigest()
         object_key = canonical_scheduling_object_key(
-            assignment_id=assignment_id,
+            case_no=assignment_preview.case_no,
             service_date=service_date,
             attachment_kind=attachment_kind,
             sequence=1,
@@ -105,7 +105,7 @@ async def upload_service_day_meal_photo(
                 ),
                 subject_reference=assignment_preview.case_no,
                 object_key=object_key,
-                logical_folder=f"scheduling/service-day/{assignment_id}/{service_date.isoformat()}",
+                logical_folder=f"scheduling/cases/{assignment_preview.case_no}/{service_date.isoformat()}",
                 filename=Path(getattr(photo, "filename", None) or "meal-photo").name,
                 mime_type=metadata.content_type,
                 content=content,

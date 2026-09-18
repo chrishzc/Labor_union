@@ -21,6 +21,11 @@ _LEASE_ID = re.compile(r"^cfl_[0-9a-f]{32}$")
 _STAGING_ID = re.compile(r"^cfs_[0-9a-f]{32}$")
 _FILE_ID = re.compile(r"^cf_[0-9a-f]{32}$")
 _SAFE_KEY_COMPONENT = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+_SAFE_CASE_COMPONENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_SCHEDULING_MEDIA_EXTENSIONS = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+}
 
 
 class ControlledFileFinalizeState(StrEnum):
@@ -55,6 +60,7 @@ class ControlledFileFinalizeIntent:
     claim_token: str | None = None
     observed_sha256: str | None = None
     observed_size_bytes: int | None = None
+    storage_locator: str | None = None
 
     def __post_init__(self) -> None:
         if _FINALIZE_ID.fullmatch(self.finalize_id) is None:
@@ -82,6 +88,13 @@ class ControlledFileFinalizeIntent:
         if self.observed_size_bytes is not None:
             try:
                 require_positive_integer(self.observed_size_bytes, "controlled file finalize observed size")
+            except ValueError as exc:
+                raise ControlledFileReferenceError(str(exc)) from exc
+        if self.storage_locator is not None:
+            try:
+                require_canonical_text(
+                    self.storage_locator, "controlled file storage locator", 500
+                )
             except ValueError as exc:
                 raise ControlledFileReferenceError(str(exc)) from exc
         if self.state is ControlledFileFinalizeState.AVAILABLE and (
@@ -176,16 +189,16 @@ class ReferenceAwareStagingCandidate:
 
 def canonical_scheduling_object_key(
     *,
-    assignment_id: int,
+    case_no: str,
     service_date: date,
     attachment_kind: str,
     sequence: int,
     sha256_digest: str,
 ) -> str:
-    """Build the Scheduling-owned, non-PII object key fixed by NAS §9.6."""
+    """Build the Scheduling-owned object key around the business case number."""
 
     try:
-        require_positive_integer(assignment_id, "assignment identity")
+        require_canonical_text(case_no, "case number", 64)
         require_positive_integer(sequence, "attachment sequence")
         require_sha256_hex(sha256_digest, "controlled file object digest")
         require_canonical_text(attachment_kind, "attachment kind", 64)
@@ -193,14 +206,38 @@ def canonical_scheduling_object_key(
         raise ControlledFileReferenceError(str(exc)) from exc
     if not isinstance(service_date, date) or isinstance(service_date, datetime):
         raise ControlledFileReferenceError("service date must be a date")
+    if _SAFE_CASE_COMPONENT.fullmatch(case_no) is None:
+        raise ControlledFileReferenceError("case number is not canonical")
     if _SAFE_KEY_COMPONENT.fullmatch(attachment_kind) is None:
         raise ControlledFileReferenceError("attachment kind is not canonical")
-    return (
-        f"scheduling/service-day/v1/{assignment_id}/{service_date.isoformat()}"
+    key = (
+        f"scheduling/cases/v1/{case_no}/{service_date.isoformat()}"
         f"/{attachment_kind}/{sequence}/{sha256_digest}"
     )
+    try:
+        require_canonical_text(key, "controlled file object key", 191)
+    except ValueError as exc:
+        raise ControlledFileReferenceError(str(exc)) from exc
+    return key
 
 
+def canonical_scheduling_storage_locator(*, object_key: str, mime_type: str) -> str:
+    """Map a canonical Scheduling media key to its durable filesystem locator."""
+
+    try:
+        require_canonical_text(object_key, "controlled file object key", 191)
+        require_canonical_text(mime_type, "controlled file mime type", 100)
+    except ValueError as exc:
+        raise ControlledFileReferenceError(str(exc)) from exc
+    if not object_key.startswith("scheduling/cases/v1/"):
+        raise ControlledFileReferenceError("scheduling object key is not canonical")
+    extension = _SCHEDULING_MEDIA_EXTENSIONS.get(mime_type.lower())
+    if extension is None:
+        raise ControlledFileReferenceError("scheduling media type is not supported")
+    return f"{object_key}{extension}"
+
+
+def lease_is_active
 def lease_is_active(lease: ControlledFileLease, now: datetime) -> bool:
     _aware(now, "controlled file lease observation time")
     return lease.state is ControlledFileLeaseState.ACTIVE and now < lease.expires_at
@@ -240,6 +277,7 @@ __all__ = [
     "ReferenceAwareStagingCandidate",
     "SchedulingControlledFileReference",
     "canonical_scheduling_object_key",
+    "canonical_scheduling_storage_locator",
     "gc_disposition",
     "lease_is_active",
 ]
