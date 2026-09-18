@@ -3,6 +3,7 @@ File: client_beclass_import.py
 Description: 提供 authenticated Client BeClass temporary workbook Preview／Apply 與暫存清理。
 """
 
+import logging
 from pathlib import Path
 import tempfile
 from typing import Annotated
@@ -17,6 +18,7 @@ from api.schemas.client_beclass_import import ClientBeClassWorkbookPreviewView, 
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.case_import.client_beclass_workbook_import import ClientBeClassWorkbookConflict, ClientBeClassWorkbookUnavailable
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/case-import/client-beclass/workbooks", tags=["Case Import"])
 _MAXIMUM_WORKBOOK_BYTES = 20 * 1024 * 1024
 _IdempotencyHeader = Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=191)]
@@ -41,10 +43,13 @@ async def _with_workbook(workbook: UploadFile, operation, message: str):
         result = await run_in_threadpool(operation, path)
         return BaseResponse(data=result.as_dict(), message=message)
     except ValueError as error:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail={"code": str(error)}) from error
+        logger.exception("Client BeClass 工作簿處理失敗: %s", error)
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail={"code": str(error)}) from error
     except ClientBeClassWorkbookConflict as error:
+        logger.warning("Client BeClass 工作簿衝突: %s", error)
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": str(error)}) from error
     except ClientBeClassWorkbookUnavailable as error:
+        logger.warning("Client BeClass 工作簿服務不可用: %s", error)
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail={"code": str(error)}) from error
     finally:
         if path is not None:
