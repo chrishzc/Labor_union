@@ -2,8 +2,8 @@
 
 > **文件版本**：v2.8（2026-09-18，分離人工／實機驗收與程式驗收；#313、#314 僅追蹤程式測試，真人／手機／provider 可見效果集中於本手冊）
 > **原始對齊程式版本**：`main @ 0988f6c430472343662aa1f8989ab2af9732bde3`；包含 PR #299 及後續對齊修訂。開始測試前須確認實際執行版本已包含修正，PR 存在不等於 main 已合併或環境已部署。
-> **適用範圍**：LINE 官方帳號、LIFF、FastAPI、MySQL、React 管理後台、M1～M4 repository-local 與手機 E2E 驗收。
-> **權威依據**：`document/架構重整/01_規格基線/26_LINE四大模組Eraser流程圖轉錄與驗收基線.md`；同目錄規格 17、20 的 owner 邊界，以及 2026-09-13 使用者八點業務裁決（未解決客服工單回覆、月嫂履歷推薦卡兩大按鈕、Match_Success 群組通知、Zero-Pool 拒絕降維群組通知、確認實際服務時間、月嫂檔期試算通知專員）。現有實作與本手冊不得自行取消規格 26 的 required flow acceptance。
+> **適用範圍**：LINE 官方帳號、LIFF、Rich Menu、LINE OA 與 React 管理介面的人工／手機／provider 驗收；FastAPI、MySQL、owner/readback 只作人測前置或證據背景，#313／#314 的程式 acceptance 留在 Issue。
+> **權威依據**：`document/架構重整/01_規格基線/26_LINE四大模組Eraser流程圖轉錄與驗收基線.md`、同目錄現行正式規格及其後續修訂；最新明確使用者決定優先。M3-04 幹部群簽約通知、Zero Pool 幹部群告警、M4-01 告警群與 M4-03 告警 Safe Review Link 已取消，不得因舊手冊或舊實作恢復。
 > **目的**：本手冊集中記錄真人／手機／provider 可見效果的驗收步驟。Agent 段落只負責準備人測前置資料與測試包，不承擔 #313／#314 的程式驗收；程式、DB、owner receipt/readback 的 acceptance 留在對應 Issue。
 
 ---
@@ -44,7 +44,7 @@
 自本版起，#313、#314 與本手冊採明確分工：
 
 - **本手冊**：只把需要真人操作 LINE／LIFF／Rich Menu／LINE OA，或需要真人確認 provider 實際送達與畫面效果的項目視為 acceptance。
-- **Issue #313、#314**：只追蹤可由程式、owner contract、DB、receipt、task、intent、state transition 與 deterministic readback 驗證的項目；\`MOBILE_PASS\`／\`PROVIDER_PASS\` 不再是這兩個 Issue 的結案條件。
+- **Issue #313、#314**：只追蹤可由程式、owner contract、DB、receipt、task、intent、state transition 與 deterministic readback 驗證的項目；`MOBILE_PASS`／`PROVIDER_PASS` 不再是這兩個 Issue 的結案條件。
 - 本手冊既有 **Agent 前置** 只代表準備測試資料、版本、帳號、案件與 readback；前置成功不等於程式流程通過，也不把程式 acceptance 重複搬回本手冊。
 - 人工驗收只判斷人能直接觀察的結果；去重、晚到事件、absence of task、DB lineage、transaction、replay、owner state 等不可見條件，由 Issue 的程式測試負責。
 
@@ -52,20 +52,20 @@
 
 | 人測代碼 | 真人操作 | 人工可見通過條件 |
 |---|---|---|
-| \`H313-01\` | 在測試版本以新帳號首次加好友；再封鎖後重新加好友 | 兩次有效 follow 都能立即看到現行歡迎訊息與可用身分／服務入口。不要等待或驗收已取消的 D+1／D+2／D+3。 |
-| \`H313-02\` | 在程式測試已證明訂金確認通知 task 可達後，以測試案件完成一次正式訂金確認 | 目標 LINE 帳號實際收到目前有效的訂金確認通知，內容與對象正確；是否去重與 task lineage 不由肉眼判定。 |
-| \`H313-03\` | 僅在 current rule/config 明確啟用訂單生命週期或服務完成通知時執行 | 真人只確認實際送達與顯示內容。若 current disposition 為停用／無 rule，**不為驗收自行啟用**。 |
-| \`H313-04\` | 將測試客戶最後一個 active case 走到 terminal，再重新開啟 LINE OA | 使用者看到恢復後應有的身分／Rich Menu 狀態；此流程不要求額外文字訊息。 |
-| \`H313-05\` | 在測試環境完成月嫂退役流程後，以該月嫂帳號重新開啟 LINE | 原有 staff 權限／選單不可再使用；若 current spec 有既有個人通知，再確認實際送達。 |
-| \`H313-06\` | 以需要人工審核的身分重綁案例執行拒絕／結果通知 | 使用者能看到 current rejection/result 訊息與正確下一步。replay、失敗分類與 receipt 由 #313 程式測試負責。 |
+| `H313-01` | 在測試版本以新帳號首次加好友；再封鎖後重新加好友 | 兩次有效 follow 都能立即看到現行歡迎訊息與可用身分／服務入口。不要等待或驗收已取消的 D+1／D+2／D+3。 |
+| `H313-02` | 在程式測試已證明訂金確認通知 task 可達後，以測試案件完成一次正式訂金確認 | 目標 LINE 帳號實際收到目前有效的訂金確認通知，內容與對象正確；是否去重與 task lineage 不由肉眼判定。 |
+| `H313-03` | 僅在 current rule/config 明確啟用訂單生命週期或服務完成通知時執行 | 真人只確認實際送達與顯示內容。若 current disposition 為停用／無 rule，**不為驗收自行啟用**。 |
+| `H313-04` | 將測試客戶最後一個 active case 走到 terminal，再重新開啟 LINE OA | 使用者看到恢復後應有的身分／Rich Menu 狀態；此流程不要求額外文字訊息。 |
+| `H313-05` | 在測試環境完成月嫂退役流程後，以該月嫂帳號重新開啟 LINE | 原有 staff 權限／選單不可再使用；若 current spec 有既有個人通知，再確認實際送達。 |
+| `H313-06` | 以需要人工審核的身分重綁案例執行拒絕／結果通知 | 使用者能看到 current rejection/result 訊息與正確下一步。replay、失敗分類與 receipt 由 #313 程式測試負責。 |
 
 #### #314 的人工驗收歸屬
 
-- \`M2-01～M2-05\`：沿用本手冊下方手機步驟，驗 Rich Menu → LIFF 導流、FAQ/AI 畫面、unsupported／故障可見差異與 LINE OA 真人回覆空間。
-- \`M4-02\`：只驗客訴／明確轉真人、客服接手／結案與客戶恢復後的可見效果；**群組告警已取消，不是人工驗收條件**。
-- \`M4-04／M4-05\`：真人只操作請假、工會受理與需要人工確認的 UI；Scheduling／Payroll／Staff Payables readback 留在程式 Issue。
-- \`M4-06\`：真人確認實際服務日期入口及工會人工協調入口；衝突試算與 owner receipt 留在程式 Issue。
-- \`M4-07\`：真人建立普通三方服務群組、輸入群組指令、查收邀請卡、加入／退出群組並確認可見狀態；後端 binding／participant／event readback 留在程式 Issue。
+- `M2-01～M2-05`：沿用本手冊下方手機步驟，驗 Rich Menu → LIFF 導流、FAQ/AI 畫面、unsupported／故障可見差異與 LINE OA 真人回覆空間。
+- `M4-02`：只驗客訴／明確轉真人、客服接手／結案與客戶恢復後的可見效果；**群組告警已取消，不是人工驗收條件**。
+- `M4-04／M4-05`：真人只操作請假、工會受理與需要人工確認的 UI；Scheduling／Payroll／Staff Payables readback 留在程式 Issue。
+- `M4-06`：真人確認實際服務日期入口及工會人工協調入口；衝突試算與 owner receipt 留在程式 Issue。
+- `M4-07`：真人建立普通三方服務群組、輸入群組指令、查收邀請卡、加入／退出群組並確認可見狀態；後端 binding／participant／event readback 留在程式 Issue。
 - 已取消的 **M3-04 幹部群簽約通知、M4-01 告警群設定、M4-03 告警 Safe Review Link** 不再做人測，也不得為驗收重新啟用。
 
 ### 0.4 目前實測執行進度總表（持續更新）
@@ -91,10 +91,10 @@
 | **M3-02** | Caregiver willingness (月嫂意願) | `REPO_LOCAL_PASS / USER_VERIFIED` | 2026-09-11 | ✅ 使用者已驗證：月嫂已在 LINE 回覆願意；willingness event、receipt、lineage/readback 聚焦測試亦通過。 |
 | **M3-02B** | 月嫂履歷推薦卡與客戶確認決策 | `MOBILE_PASS / PROVIDER_PASS` | 2026-09-14 | ✅ **實測通過**：工會端寄送月嫂推薦卡，客戶於 LINE 成功收到輪播卡，並完成點選確認（接受配對／專人協助決策分支均已驗收通過），後台狀態與即時回覆均驗證正常。 |
 | **M3-03** | Zero Pool 協商與拒絕降維 | `REPO_LOCAL_PASS / MOBILE_PASS` | 2026-09-13 | ✅ 歷史手機流程已驗證；其中幹部群告警已由後續使用者決定取消，不需再做人測。 |
-| **M3-04** | Match_Success 幹部群簽約通知 | `SUPERSEDED` | 2026-09-18 | 已取消群組通知，不再列為人工驗收，也不得為測試恢復。 |
-| **M4-01** | 異常通知群組設定 | `SUPERSEDED` | 2026-09-18 | 已取消群組告警，不再列為人工驗收。 |
+| **M3-04** | Match_Success 幹部群簽約通知 | 不適用（已取消） | 2026-09-18 | 已取消群組通知，不再列為人工驗收，也不得為測試恢復。 |
+| **M4-01** | 異常通知群組設定 | 不適用（已取消） | 2026-09-18 | 已取消群組告警，不再列為人工驗收。 |
 | **M4-02** | 客訴／轉真人 → Hold → Customer Service → 恢復 | `REPO_LOCAL_PASS / PREPARED` | 2026-09-18 | ⏳ 待人測：明確客訴／轉真人、客服接手與結案、後續訊息及客戶恢復後的可見效果；群組告警排除。 |
-| **M4-03** | 告警 Safe Review Link | `SUPERSEDED` | 2026-09-18 | 已隨群組告警取消，不再做人測。 |
+| **M4-03** | 告警 Safe Review Link | 不適用（已取消） | 2026-09-18 | 已隨群組告警取消，不再做人測。 |
 | **M4-04** | 月嫂請假與代班協調 | `REPO_LOCAL_PASS / PREPARED` | 2026-09-13 | ⏳ **待測**：月嫂提出請假待辦，工會受理並於案件行事曆完成代班排班。 |
 | **M4-05** | 代班後 Payroll / Staff Payables | `REPO_LOCAL_PASS / PREPARED` | 2026-09-13 | ⏳ **待測**：Scheduling 代班排定後自動投影 Payroll 責任分拆，薪資可追溯至排班事實。 |
 | **M4-06** | 服務前時間確認與檔期試算 | `REPO_LOCAL_PASS / PREPARED` | 2026-09-13 | ⏳ **待測**：產婦確認實際服務時間（Actual Service Dates）；月嫂排班檔期由系統自動試算衝突並直接通知工會專員人工協調。 |
@@ -774,12 +774,6 @@ POST /api/v1/matching/coordination/caregiver-willingness/apply
 # 7. 模組四：管理端、客訴、代班財務與三方服務群組
 
 本節的人工作業只保留目前仍有效且需要真人觀察的流程。群組告警及其 Safe Review Link 已取消；程式／DB／owner readback 驗收由 #313、#314 或其引用 Issue 追蹤，不以本手冊的人測取代。
-
-# 7. 模組四：管理端、群組告警、客訴與代班財務
-
-本節補正測試方法與已確認的 M4 程式問題；不變更 §0.3 已記錄的手機驗收結果，也不把新增自動化回歸測試當作手機或真 provider 通過。PR #299 記錄的 53 項回歸為 29 項 M4 加上 24 項投遞／好友／客服回歸，執行於 run `34733277249` / job `103659935152`；資料庫／交易／provider 使用替身，部分 adapter SQL 在 SQLite 執行，不證明 MySQL 鎖或完整 M4 閉環。
-
-規格 26 §9 的「請假同意／拒絕與 due-shift rematch」及「M4 alert 群組安全直達審核連結」仍是 required acceptance。以下列出現行可操作路徑與缺少的直接證據；缺口保留 `NOT_RUN`，實際無入口／consumer 時記 `BLOCKED` 並說明原因，不得僅因程式尚未接通而標為 superseded 或 passed。
 
 ## M4-01 異常通知群組設定（已取消）
 
