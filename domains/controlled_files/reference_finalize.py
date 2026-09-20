@@ -237,7 +237,6 @@ def canonical_scheduling_storage_locator(*, object_key: str, mime_type: str) -> 
     return f"{object_key}{extension}"
 
 
-def lease_is_active
 def lease_is_active(lease: ControlledFileLease, now: datetime) -> bool:
     _aware(now, "controlled file lease observation time")
     return lease.state is ControlledFileLeaseState.ACTIVE and now < lease.expires_at

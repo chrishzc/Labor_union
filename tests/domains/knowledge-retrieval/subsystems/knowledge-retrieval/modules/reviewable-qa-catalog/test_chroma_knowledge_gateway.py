@@ -10,22 +10,26 @@ from infrastructure.knowledge.chroma_gateway import ChromaKnowledgeGateway
 
 
 class _Collection:
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str, metadata: dict) -> None:
         self.name = name
+        self.metadata = metadata
         self.ids: list[str] = []
         self.documents: list[str] = []
         self.metadatas: list[dict] = []
+        self.embeddings: list[list[float]] = []
+        self.query_embeddings: list[list[float]] = []
 
-    def add(self, *, ids, documents, metadatas) -> None:
+    def add(self, *, ids, documents, metadatas, embeddings) -> None:
         self.ids = list(ids)
         self.documents = list(documents)
         self.metadatas = list(metadatas)
+        self.embeddings = list(embeddings)
 
     def count(self) -> int:
         return len(self.ids)
 
-    def query(self, *, query_texts, n_results):
-        del query_texts
+    def query(self, *, query_embeddings, n_results):
+        self.query_embeddings = list(query_embeddings)
         return {
             "documents": [self.documents[:n_results]],
             "metadatas": [self.metadatas[:n_results]],
@@ -42,8 +46,8 @@ class _Client:
     def delete_collection(self, name: str) -> None:
         self.collections.pop(name, None)
 
-    def create_collection(self, name: str) -> _Collection:
-        collection = _Collection(name)
+    def create_collection(self, name: str, metadata: dict) -> _Collection:
+        collection = _Collection(name, metadata)
         self.collections[name] = collection
         return collection
 
@@ -124,11 +128,31 @@ def _published_food_qa(
     }
 
 
+class _Embedder:
+    model = "test-multilingual-embedding-v1"
+    dimension = 3
+    space_id = "test:test-multilingual-embedding-v1:3:qa-v1"
+
+    def __init__(self) -> None:
+        self.documents: list[str] = []
+        self.queries: list[str] = []
+
+    def embed_documents(self, documents):
+        self.documents.extend(documents)
+        return [[1.0, 0.0, 0.0] for _ in documents]
+
+    def embed_queries(self, queries):
+        self.queries.extend(queries)
+        return [[1.0, 0.0, 0.0] for _ in queries]
+
+
 def _gateway(tmp_path, *, llm=None, min_confidence: float = 0.60):
     client = _Client()
+    embedder = _Embedder()
     gateway = ChromaKnowledgeGateway(
         str(tmp_path / "chroma"),
         llm=llm,
+        embedder=embedder,
         min_confidence=min_confidence,
     )
     gateway._client = lambda: client
@@ -146,6 +170,10 @@ def test_rebuild_indexes_only_supplied_published_knowledge_with_labels_and_alias
     assert "月嫂媒合" in document
     assert "更換月嫂" in document
     assert "可以換月嫂嗎？" in document
+    collection = client.get_collection("union_knowledge_v1")
+    assert collection.embeddings == [[1.0, 0.0, 0.0]]
+    assert collection.metadata["embedding_model"] == "test-multilingual-embedding-v1"
+    assert collection.metadata["embedding_dimension"] == 3
 
 
 def test_llm_can_only_select_candidate_and_answer_stays_verbatim(tmp_path) -> None:
@@ -166,6 +194,37 @@ def test_llm_can_only_select_candidate_and_answer_stays_verbatim(tmp_path) -> No
     assert answer.citations[0].safe_excerpt == expected
     assert expected not in prompts[0]
     assert "只能回傳下列候選 ID" in prompts[0]
+
+
+def test_query_uses_same_explicit_embedding_space_as_index(tmp_path) -> None:
+    gateway, client = _gateway(tmp_path, llm=lambda _: "QA-001")
+    gateway.rebuild(11, (_published_qa(),))
+
+    gateway.answer("我跟月嫂不合，能換人嗎？", 11)
+
+    collection = client.get_collection("union_knowledge_v11")
+    assert collection.query_embeddings == [[1.0, 0.0, 0.0]]
+
+
+def test_query_rejects_index_from_an_incompatible_embedding_space(tmp_path) -> None:
+    gateway, client = _gateway(tmp_path)
+    gateway.rebuild(12, (_published_qa(),))
+    client.get_collection("union_knowledge_v12").metadata["embedding_model"] = "old-model"
+
+    with pytest.raises(RuntimeError, match="knowledge_embedding_space_mismatch"):
+        gateway.answer("可以換月嫂嗎？", 12)
+
+
+def test_real_chroma_index_can_rebuild_and_query_with_explicit_embeddings(tmp_path) -> None:
+    gateway = ChromaKnowledgeGateway(
+        str(tmp_path / "real-chroma"),
+        embedder=_Embedder(),
+    )
+    gateway.rebuild(13, (_published_qa(),))
+
+    answer = gateway.answer("可以換月嫂嗎？", 13)
+
+    assert answer.answer == "經協調仍無法解決時，會依相關規定辦理服務人員更換。"
 
 
 def test_no_model_or_low_confidence_fails_closed(tmp_path) -> None:

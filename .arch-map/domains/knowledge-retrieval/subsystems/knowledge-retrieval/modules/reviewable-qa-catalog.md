@@ -16,6 +16,7 @@
 - `infrastructure/mysql/knowledge_retrieval_repository.py`
 - `infrastructure/mysql/knowledge_retrieval_unit_of_work.py`
 - `infrastructure/knowledge/chroma_gateway.py`
+- `infrastructure/knowledge/gemini_embedding.py`
 - `api/routes/knowledge_retrieval.py`
 - `api/routes/line_service_help.py`
 - `api/routes/llm_configuration.py`
