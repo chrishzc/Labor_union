@@ -78,8 +78,23 @@ class OrderTermsInput(BaseModel):
         )
 
 
+class TermsAllocationInput(BaseModel):
+    assignment_id: int = Field(gt=0)
+    service_days: int = Field(gt=0)
+
+
 class OrderTermsPreviewRequest(BaseModel):
     proposed_terms: OrderTermsInput
+    replacement_service_dates: list[date] | None = None
+    replacement_allocations: list[TermsAllocationInput] = Field(default_factory=list)
+
+    def replacement_arguments(self):
+        return {
+            "replacement_service_dates": (tuple(self.replacement_service_dates)
+                                          if self.replacement_service_dates is not None else None),
+            "replacement_allocations": tuple((a.assignment_id, a.service_days)
+                                             for a in self.replacement_allocations),
+        }
 
 
 class OrderTermsApplyBody(OrderTermsPreviewRequest):
@@ -135,7 +150,7 @@ def preview_order_terms(
     identity = CorrelationId(correlation_id)
     return _call_endpoint(
         lambda: _preview_payload(
-            application.preview(case_no, body.proposed_terms.to_domain())
+            application.preview(case_no, body.proposed_terms.to_domain(), **body.replacement_arguments())
         ),
         "成功產生訂單條款變更預覽",
         identity,
@@ -189,6 +204,7 @@ def _apply_request(case_no, body, key, correlation, principal):
         ActorContext(actor_id),
         body.reason,
         CorrelationId(correlation),
+        **body.replacement_arguments(),
     )
 
 
@@ -202,6 +218,11 @@ def _query_payload(facts) -> dict[str, Any]:
         "payroll_version": facts.payroll.payroll_version,
         "service_data_locked": facts.order.service_data_locked,
         "terms": facts.order.terms.canonical_payload(),
+        "confirmed_service_dates": list(facts.confirmed_service_dates),
+        "confirmed_service_date_version": facts.confirmed_service_date_version,
+        "assignments": [{"assignment_id": s.assignment_id, "staff_id": s.staff_id,
+                         "service_days": s.service_day_count}
+                        for s in sorted(facts.scheduling.segments, key=lambda s: s.sequence)],
     }
 
 

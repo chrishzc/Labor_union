@@ -7,6 +7,8 @@
 ## Responsibility
 編排 Orders Terms 的 Query／zero-write Preview／fresh-lock Apply，以單一 outer Unit of Work 套用 Orders、Scheduling、Client Finance 與 Payroll 影響並產生可追溯 receipt。尚未建立 assignment 時，起始日平移不虛構排班 segment，並以相同天數平移預計結束日；已有 current confirmed service dates 時保留日期間隔、建立新的 immutable current version 取代舊版。
 
+Issue #326：同一 Terms command 可承接完整替代日期與明確既有指派分配；原有跨 owner transaction 與 immutable versions 保持不變。
+
 ## Implementation
 - primary:
   - `subsystems/orders/terms_workflow.py`
@@ -15,6 +17,7 @@
   - `infrastructure/mysql/order_terms_repository.py`
   - `infrastructure/mysql/order_intake_terms_bootstrap_repository.py`
   - `api/schemas/order_terms.py`
+  - `api/dependencies/order_terms.py`
 - entrypoints:
   - `api/routes/order_terms.py` — Orders Terms Query／Preview／Apply HTTP transport 與輸入驗證。
 

@@ -14,8 +14,10 @@
   - `scripts/imports/import_client_hcm.py`
   - `domains/case_import/client_import_validation.py`
   - `domains/case_import/hcm_import_review.py`
+  - `subsystems/case_import/hcm_resubmission_workflow.py`
+  - `infrastructure/mysql/hcm_resubmission_repository.py`
 - entrypoints:
-  - `api/routes/hcm_import.py`
+  - `api/routes/hcm_import.py` — 包含 current field review page／single-review readback。
   - `api/dependencies/hcm_import.py`
   - `api/schemas/hcm_import.py`
   - `ui_react/src/api/case_import/hcm_workbook_schemas.ts`

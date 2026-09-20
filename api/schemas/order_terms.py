@@ -27,6 +27,12 @@ class OrderTermsView(BaseModel):
     service_time: ServiceTimeTermsView
 
 
+class TermsAssignmentView(BaseModel):
+    assignment_id: int
+    staff_id: int
+    service_days: int
+
+
 class OrderTermsQueryView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -38,6 +44,9 @@ class OrderTermsQueryView(BaseModel):
     payroll_version: int = Field(ge=0)
     service_data_locked: bool
     terms: OrderTermsView
+    confirmed_service_dates: list[date] = Field(default_factory=list)
+    confirmed_service_date_version: int | None = None
+    assignments: list[TermsAssignmentView] = Field(default_factory=list)
 
 
 class OrderTermsPreviewView(BaseModel):

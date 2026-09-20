@@ -63,6 +63,10 @@ class HcmResubmissionReceipt:
 
 
 class HcmResubmissionRepository(Protocol):
+    def query_review(self, review_identity: str) -> Mapping[str, object]: ...
+
+    def query_current_reviews(self, *, limit: int, before_id: int | None) -> Mapping[str, object]: ...
+
     def load_facts(self, review_identity: str, *, for_update: bool) -> HcmResubmissionFacts: ...
 
     def readback(self, case_no: str) -> Mapping[str, object]: ...
@@ -98,6 +102,12 @@ class HcmResubmissionWorkflow:
     def __init__(self, repository: HcmResubmissionRepository, unit_of_work_factory: Callable[[], UnitOfWork]) -> None:
         self._repository = repository
         self._unit_of_work_factory = unit_of_work_factory
+
+    def query_review(self, review_identity: str):
+        return self._repository.query_review(review_identity)
+
+    def query_current_reviews(self, *, limit: int, before_id: int | None):
+        return self._repository.query_current_reviews(limit=limit, before_id=before_id)
 
     def preview(self, review_identity: str, source: HcmResubmissionSource) -> HcmResubmissionPreview:
         facts = self._repository.load_facts(review_identity, for_update=False)

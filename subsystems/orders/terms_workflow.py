@@ -6,7 +6,7 @@ Description: 協調 Orders Terms 的 Query／Preview／Apply、跨域影響與�
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import timedelta
+from datetime import date, timedelta
 from enum import StrEnum
 from typing import Any
 
@@ -67,6 +67,8 @@ class OrderTermsApplyRequest:
     actor: Any
     reason: str
     correlation_id: Any
+    replacement_service_dates: tuple[date, ...] | None = None
+    replacement_allocations: tuple[tuple[int, int], ...] = ()
 
     def __post_init__(self) -> None:
         require_canonical_text(self.case_no, "case number", 50)
@@ -217,9 +219,11 @@ class OrderTermsWorkflow:
         self._unit_of_work_factory = unit_of_work_factory
         self._clock = clock
 
-    def preview(self, case_no: str, proposed_terms: Any) -> Any:
+    def preview(self, case_no: str, proposed_terms: Any, *,
+                replacement_service_dates=None, replacement_allocations=()) -> Any:
         return self._build_preview(
-            self._repository.load_for_preview(case_no), proposed_terms
+            self._repository.load_for_preview(case_no), proposed_terms,
+            replacement_service_dates, replacement_allocations,
         )
 
     def apply(self, request: OrderTermsApplyRequest) -> Any:
@@ -281,7 +285,9 @@ class OrderTermsWorkflow:
             )
         _validate_locked_staff_set(request, facts, staff_ids)
         _validate_versions(request, facts)
-        preview = self._build_preview(facts, request.proposed_terms)
+        preview = self._build_preview(facts, request.proposed_terms,
+                                      request.replacement_service_dates,
+                                      request.replacement_allocations)
         if preview.fingerprint != request.preview_fingerprint:
             raise _workflow_error(
                 request,
@@ -292,9 +298,13 @@ class OrderTermsWorkflow:
         _raise_if_impacts_blocked(request, preview)
         return preview
 
-    def _build_preview(self, facts, proposed_terms):
+    def _build_preview(self, facts, proposed_terms, replacement_service_dates=None,
+                       replacement_allocations=()):
         validate_terms_change(facts.order, proposed_terms)
-        scheduling = _scheduling_candidate(facts, proposed_terms)
+        candidate_facts = _replacement_facts(
+            facts, proposed_terms, replacement_service_dates, replacement_allocations
+        )
+        scheduling = _scheduling_candidate(candidate_facts, proposed_terms)
         change_identity = f"terms:{scheduling.case_no}:{scheduling.generation_number}"
         if not facts.scheduling.segments:
             client_finance = build_preassignment_client_finance_noop(
@@ -317,7 +327,8 @@ class OrderTermsWorkflow:
             client_finance.settlement,
             self._clock.now(),
         )
-        return _preview_result(facts, proposed_terms, scheduling, client_finance, payroll, lifecycle)
+        return _preview_result(facts, proposed_terms, scheduling, client_finance, payroll, lifecycle,
+                               replacement_service_dates)
 
     def _persist(self, request, preview, command_fingerprint, receipt):
         event_id = self._repository.append_terms_event(request, preview)
@@ -400,6 +411,49 @@ class OrderTermsWorkflow:
         )
 
 
+def _replacement_facts(facts, terms, dates, allocations):
+    if dates is None:
+        if allocations:
+            raise ValueError("confirmed_service_dates_reconfirmation_required")
+        return facts
+    if facts.scheduling.service_started:
+        raise ValueError("service_started_replacement_blocked")
+    if facts.confirmed_service_date_version is None and not facts.scheduling.segments:
+        raise ValueError("preassignment_replacement_not_required")
+    # The same target count is used for dates and Scheduling, before any writer runs.
+    ConfirmedServiceDateCandidate(facts.order.case_no, facts.order.version,
+                                 facts.scheduling.aggregate_version, dates, terms.service_days)
+    if any(d < terms.planned_start_date or
+           d >= terms.planned_start_date + timedelta(days=terms.service_days + 45)
+           for d in dates):
+        raise ValueError("replacement_service_date_outside_selectable_range")
+    segments = facts.scheduling.segments
+    if segments:
+        counts = dict(allocations)
+        if (len(counts) != len(allocations)
+                or set(counts) != {s.assignment_id for s in segments}
+                or any(type(n) is not int or n <= 0 for n in counts.values())
+                or sum(counts.values()) != terms.service_days):
+            raise ValueError("scheduling_reallocation_required")
+        rebuilt = []
+        offset = 0
+        for segment in sorted(segments, key=lambda s: s.sequence):
+            count = counts[segment.assignment_id]
+            segment_dates = dates[offset:offset + count]
+            offset += count
+            rebuilt.append(replace(segment, service_day_count=count,
+                                   assigned_start_date=segment_dates[0],
+                                   assigned_end_date=segment_dates[-1],
+                                   official_service_dates=segment_dates))
+        segments = tuple(rebuilt)
+    elif allocations:
+        raise ValueError("scheduling_reallocation_required")
+    # Dates already belong to the proposed start; avoid shifting them a second time.
+    return replace(facts, order=replace(facts.order, terms=replace(
+        facts.order.terms, planned_start_date=terms.planned_start_date)),
+        scheduling=replace(facts.scheduling, segments=segments), planned_service_dates=dates)
+
+
 def _scheduling_candidate(facts, proposed_terms):
     if not facts.scheduling.segments:
         if is_unique_cooking_requirement_correction(
@@ -447,6 +501,7 @@ def _preview_result(
     client_finance,
     payroll,
     lifecycle,
+    replacement_service_dates=None,
 ):
     planned_end_date = _planned_end_date(
         scheduling,
@@ -458,7 +513,10 @@ def _preview_result(
         facts,
         proposed_terms,
         scheduling,
+        replacement_service_dates,
     )
+    if replacement_service_dates is not None:
+        planned_end_date = replacement_service_dates[-1]
     return OrderTermsPreview(
         before=facts.order.terms,
         after=proposed_terms,
@@ -574,7 +632,16 @@ def _planned_end_date(
     return current_planned_end_date + day_shift + timedelta(days=service_day_delta)
 
 
-def _confirmed_service_date_candidate(facts, proposed_terms, scheduling):
+def _confirmed_service_date_candidate(facts, proposed_terms, scheduling, replacement_dates=None):
+    if replacement_dates is not None:
+        return ConfirmedServiceDateCandidate(
+            case_no=facts.order.case_no,
+            order_version=facts.order.version + 1,
+            scheduling_version=scheduling.resulting_aggregate_version,
+            service_dates=replacement_dates,
+            contracted_service_days=proposed_terms.service_days,
+            current_confirmed_version=facts.confirmed_service_date_version,
+        )
     if facts.confirmed_service_date_version is None:
         return None
     if facts.order.terms.service_days != proposed_terms.service_days:
@@ -644,6 +711,10 @@ def _command_fingerprint(request):
         "preview_fingerprint": request.preview_fingerprint.value,
         "actor": request.actor.actor_id,
         "reason": request.reason,
+        **({"replacement_service_dates": ([d.isoformat() for d in request.replacement_service_dates]
+                                             if request.replacement_service_dates is not None else None),
+            "replacement_allocations": request.replacement_allocations}
+           if request.replacement_service_dates is not None or request.replacement_allocations else {}),
     })
 
 

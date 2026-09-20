@@ -747,6 +747,13 @@ LINE 對話原文、完整聯絡資料或把回覆文字直接當成正式 Clien
 resubmission Preview／Apply，才屬修正命令。該命令仍須提交完整修正來源，並只採納通過驗證且屬 HCM
 欄位權威的差異；不提供警示中心或 Streamlit 單欄編輯，也不得修改 immutable source。
 
+Issue #326 的欄位修正 Query 由 Case Import 提供 `/api/v1/case-import/hcm/reviews` 與
+`/reviews/{review_identity}`：主清單只讀每案最新、已綁定案件的欄位 review，沿用更正 owner 的
+current review version 與 root fingerprint exact predicate 判定解除，不使用已停用的 warning tracking。
+更正事件的 after fingerprint 必須綁定 resulting review version；不可用前端刪列或 immutable workbook
+receipt 判定問題已解除。伺服器先套目前問題 predicate 再分頁；一般 workbook preview 的「來源欄位檢查通過」
+不承諾新增或更新，Apply 的 skipped_existing 仍為零覆寫。來源／身份／bootstrap 問題保留各自 owner 的入口。
+
 HCM 匯入中心只顯示每個案件最新且尚未解決的一筆 active 異常；成功、exact replay、`skipped_existing`
 與歷史批次不得出現在主清單。畫面使用白話原因，不顯示 internal issue code，並依 owner 分流：HCM 欄位
 錯誤導向 owning resubmission；身份疑義導向身份確認；bootstrap／費率或案件初始設定問題導向系統設定

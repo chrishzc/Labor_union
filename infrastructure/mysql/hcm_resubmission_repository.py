@@ -17,7 +17,7 @@ class MySqlHcmResubmissionRepository:
         self._client_port = client_port
         self._orders_port = orders_port
 
-    def load_facts(self, review_identity: str, *, for_update: bool) -> HcmResubmissionFacts:
+    def load_facts(self, review_identity: str, *, for_update: bool, resulting_review_version: int | None = None) -> HcmResubmissionFacts:
         suffix = " FOR UPDATE" if for_update else ""
         with self._connection.cursor() as cursor:
             cursor.execute(_FACTS_SQL + suffix, (review_identity,))
@@ -35,6 +35,8 @@ class MySqlHcmResubmissionRepository:
             )
             version_row = cursor.fetchone() or {}
         review_version = int(version_row.get("review_version") or 0)
+        if resulting_review_version is not None:
+            review_version = resulting_review_version
         client_version = int(row.get("client_hcm_correction_version") or 0)
         order_version = int(row.get("order_version") or 0)
         root_fingerprint = fingerprint_payload({
@@ -50,6 +52,68 @@ class MySqlHcmResubmissionRepository:
             review_version=review_version, root_fingerprint=root_fingerprint,
             client_version=client_version, order_version=order_version,
         )
+
+    def query_review(self, review_identity: str):
+        facts = self.load_facts(review_identity, for_update=False)
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT resulting_review_version,root_after_fingerprint FROM case_import_hcm_correction_events "
+                "WHERE canonical_review_identity=%s ORDER BY resulting_review_version DESC LIMIT 1",
+                (review_identity,),
+            )
+            event = cursor.fetchone()
+        resolved = bool(event and int(event["resulting_review_version"]) == facts.review_version
+                        and str(event["root_after_fingerprint"]) == facts.root_fingerprint)
+        return {"review_identity": facts.review_identity, "case_no": facts.case_no,
+                "source_field": facts.field_path, "review_version": facts.review_version,
+                "resolved": resolved}
+
+    def query_current_reviews(self, *, limit: int, before_id: int | None):
+        # Paginate the current owner predicate, never a downloaded first page.
+        items = []
+        cursor_id = before_id
+        while len(items) <= limit:
+            with self._connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT r.id,r.review_identity,b.case_no,r.issue_codes,EXISTS(SELECT 1 FROM order_service_data_locks l "
+                    "WHERE l.case_no=b.case_no) AS service_data_locked FROM case_import_hcm_review_rows r "
+                    "JOIN case_import_hcm_review_case_bindings b ON b.review_row_id=r.id "
+                    "WHERE (%s IS NULL OR r.id<%s) AND NOT EXISTS (SELECT 1 "
+                    "FROM case_import_hcm_review_rows newer JOIN case_import_hcm_review_case_bindings nb "
+                    "ON nb.review_row_id=newer.id WHERE nb.case_no=b.case_no AND newer.id>r.id) "
+                    "ORDER BY r.id DESC LIMIT 100", (cursor_id, cursor_id))
+                rows = cursor.fetchall()
+            if not rows:
+                break
+            for row in rows:
+                cursor_id = int(row["id"])
+                codes = json.loads(row["issue_codes"]) if isinstance(row["issue_codes"], str) else row["issue_codes"]
+                fields = sorted({code.split(":", 1)[1] for code in codes
+                                 if code.startswith(("hcm_field_missing:", "hcm_field_invalid:"))})
+                if not fields:
+                    continue
+                can_correct = False
+                unavailable_reason = None
+                if len(fields) == 1:
+                    try:
+                        state = self.query_review(str(row["review_identity"]))
+                        if state["resolved"]:
+                            continue
+                        targets = hcm_field_targets(fields[0])
+                        locked = bool(row.get("service_data_locked")) and any(target.startswith("orders.") for target in targets)
+                        can_correct = not locked
+                        unavailable_reason = "service_data_locked" if locked else None
+                    except ValueError as error:
+                        if str(error) not in {"hcm_resubmission_review_scope_ambiguous", "hcm_resubmission_field_not_owned", "hcm_resubmission_not_available"}:
+                            raise
+                items.append({"source_id": cursor_id, "review_identity": str(row["review_identity"]),
+                              "case_no": str(row["case_no"]), "fields": fields,
+                              "can_correct": can_correct, "unavailable_reason": unavailable_reason})
+                if len(items) > limit:
+                    break
+            if len(rows) < 100:
+                break
+        return {"items": items[:limit], "next_cursor": items[limit-1]["source_id"] if len(items) > limit else None}
 
     def load_holiday_dates(self) -> set[date]:
         with self._connection.cursor() as cursor:
@@ -98,8 +162,9 @@ class MySqlHcmResubmissionRepository:
                 candidate.case_no, order_values, source_event_identity=source.source_event_identity,
                 actor=actor, reason=reason, correlation_id=correlation_id,
                 idempotency_key=source.source_event_identity)
-        after = self.load_facts(candidate.review_identity, for_update=True)
         resulting_review_version = facts.review_version + 1
+        after = self.load_facts(candidate.review_identity, for_update=True,
+                                resulting_review_version=resulting_review_version)
         event_identity = _identity(
             "hcm-correction-event",
             f"{candidate.review_identity}:{source.source_event_identity}:{source.source_fingerprint}")
