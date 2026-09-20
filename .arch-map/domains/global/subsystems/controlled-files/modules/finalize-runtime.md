@@ -10,6 +10,7 @@ commits short CAS checkpoints around the local storage integrity read, and never
 reports availability without digest-verified storage bytes.
 
 ## Implementation
+- domain contracts: `domains/controlled_files/reference_finalize.py`
 - workflow: `subsystems/controlled_files/reference_finalize.py`
 - MySQL runner: `infrastructure/mysql/controlled_file_finalize_worker.py`
 
