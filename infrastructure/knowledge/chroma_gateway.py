@@ -16,6 +16,7 @@ from domains.knowledge_retrieval.knowledge import (
     KnowledgeCitation,
 )
 from domains.knowledge_retrieval.qa_catalog import decode_governed_qa
+from infrastructure.knowledge.gemini_embedding import GeminiKnowledgeEmbedder
 
 
 _MAX_RETRIEVAL_CANDIDATES = 50
@@ -28,11 +29,13 @@ class ChromaKnowledgeGateway:
         collection_prefix: str = "union_knowledge",
         *,
         llm: Callable[[str], str] | None = None,
+        embedder: GeminiKnowledgeEmbedder | None = None,
         min_confidence: float = 0.60,
     ) -> None:
         self._persistence_path = persistence_path
         self._collection_prefix = collection_prefix
         self._llm = llm
+        self._embedder = embedder or GeminiKnowledgeEmbedder()
         self._min_confidence = min_confidence
 
     def rebuild(
@@ -47,13 +50,24 @@ class ChromaKnowledgeGateway:
         }
         if name in existing_names:
             client.delete_collection(name)
-        collection = client.create_collection(name)
+        collection = client.create_collection(
+            name,
+            metadata={
+                "hnsw:space": "cosine",
+                "embedding_provider": "gemini",
+                "embedding_model": self._embedder.model,
+                "embedding_dimension": self._embedder.dimension,
+                "embedding_space": self._embedder.space_id,
+            },
+        )
         if not indexed_items:
             return ()
+        documents = [self._retrieval_document(item) for item in indexed_items]
         collection.add(
             ids=[self._candidate_id(item) for item in indexed_items],
-            documents=[self._retrieval_document(item) for item in indexed_items],
+            documents=documents,
             metadatas=[self._metadata(item) for item in indexed_items],
+            embeddings=self._embedder.embed_documents(documents),
         )
         return indexed_items
 
@@ -64,6 +78,7 @@ class ChromaKnowledgeGateway:
         history: tuple[dict[str, str], ...] = (),
     ) -> KnowledgeAnswer:
         collection = self._client().get_collection(self._collection_name(index_version))
+        self._require_compatible_embedding_space(collection)
         count = int(collection.count())
         if count < 1:
             raise KnowledgeAnswerUnsupported("knowledge_answer_unsupported")
@@ -71,7 +86,7 @@ class ChromaKnowledgeGateway:
         if history:
             query_texts.append(f"{history[-1]['question']} {question}")
         result = collection.query(
-            query_texts=query_texts,
+            query_embeddings=self._embedder.embed_queries(query_texts),
             n_results=min(_MAX_RETRIEVAL_CANDIDATES, count),
         )
         raw_docs = result.get("documents") or []
@@ -334,6 +349,15 @@ class ChromaKnowledgeGateway:
         import chromadb
 
         return chromadb.PersistentClient(path=self._persistence_path)
+
+    def _require_compatible_embedding_space(self, collection) -> None:
+        metadata = getattr(collection, "metadata", None) or {}
+        if (
+            metadata.get("embedding_space") != self._embedder.space_id
+            or metadata.get("embedding_model") != self._embedder.model
+            or int(metadata.get("embedding_dimension", 0)) != self._embedder.dimension
+        ):
+            raise RuntimeError("knowledge_embedding_space_mismatch")
 
     def _collection_name(self, index_version: int) -> str:
         return f"{self._collection_prefix}_v{index_version}"
