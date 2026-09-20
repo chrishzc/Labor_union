@@ -689,3 +689,87 @@ def test_assigned_half_hour_terms_keep_fractional_hours_in_finance_and_payroll()
     assert preview.client_finance_impact.actions
     assert preview.payroll_impact.actions
     assert preview.payroll_impact.actions[0].amount.amount == 6750
+
+
+def test_terms_day_replacement_uses_one_target_before_assignment():
+    facts = replace(_facts(), confirmed_service_date_version=3,
+                    confirmed_service_dates=tuple(date(2026, 9, 10 + n) for n in range(5)))
+    proposed = _terms(requires_cooking=False, service_days=3)
+    dates = (date(2026, 9, 10), date(2026, 9, 14), date(2026, 9, 16))
+    workflow = terms_workflow.OrderTermsWorkflow(_PreviewReadRepository(facts), object(), _Clock())
+    preview = workflow.preview(facts.order.case_no, proposed, replacement_service_dates=dates)
+    assert preview.after.service_days == 3
+    assert preview.confirmed_service_date_candidate.service_dates == dates
+    assert preview.confirmed_service_date_candidate.order_version == facts.order.version + 1
+    assert preview.scheduling.assignments == ()
+    assert preview.planned_end_date == dates[-1]
+    assert facts.order.terms.service_days == 5
+    assert facts.confirmed_service_date_version == 3
+
+
+def test_terms_day_replacement_requires_explicit_existing_assignment_allocation():
+    facts = _assigned_facts()
+    proposed = _terms(requires_cooking=False, service_days=3)
+    dates = (date(2026, 9, 10), date(2026, 9, 12), date(2026, 9, 14))
+    workflow = terms_workflow.OrderTermsWorkflow(_Repository(facts), object(), _Clock())
+    with pytest.raises(ValueError, match="scheduling_reallocation_required"):
+        workflow.preview(facts.order.case_no, proposed, replacement_service_dates=dates)
+    preview = workflow.preview(facts.order.case_no, proposed,
+                              replacement_service_dates=dates,
+                              replacement_allocations=((9, 3),))
+    assert preview.scheduling.cancelled_assignment_ids == (9,)
+    assert preview.scheduling.assignments[0].service_dates == dates
+    assert preview.scheduling.assignments[0].source_assignment_id == 9
+    assert preview.confirmed_service_date_candidate.service_dates == dates
+    assert preview.client_finance_impact.actions
+    assert preview.payroll_impact.actions
+    assert preview.payroll_impact.actions[0].amount.amount == 3 * 8 * 300
+
+
+def test_terms_receipt_replay_accepts_half_hour_json_numbers():
+    from infrastructure.mysql.order_terms_repository import _required_service_hours
+    assert _required_service_hours({"official_service_hours": 240.0}) == 240.0
+    assert _required_service_hours({"official_service_hours": 22.5}) == 22.5
+    for value in (True, -1, 0.25, '240', float('nan')):
+        with pytest.raises(ValueError, match='order_terms_receipt_integrity_violation'):
+            _required_service_hours({"official_service_hours": value})
+
+
+@pytest.mark.parametrize('dates,allocation,error', [
+    ((date(2026, 9, 10),), ((9, 3),), 'service date count'),
+    ((date(2026, 9, 10),) * 3, ((9, 3),), 'unique and sorted'),
+    ((date(2026, 9, 1), date(2026, 9, 2), date(2026, 9, 3)), ((9, 3),), 'outside_selectable_range'),
+    ((date(2026, 9, 10), date(2026, 9, 12), date(2026, 9, 14)), ((999, 3),), 'scheduling_reallocation_required'),
+])
+def test_invalid_replacement_is_rejected_without_writes(dates, allocation, error):
+    repository = _AssignedPersistenceRepository(_assigned_facts())
+    workflow = terms_workflow.OrderTermsWorkflow(repository, object(), _Clock())
+    with pytest.raises(ValueError, match=error):
+        workflow.preview('116990823', _terms(requires_cooking=False, service_days=3),
+                         replacement_service_dates=dates, replacement_allocations=allocation)
+    assert repository.writes == []
+
+
+def test_replacement_rejects_stale_confirmed_date_version_and_started_service():
+    facts = _assigned_facts()
+    repository = _AssignedPersistenceRepository(facts)
+    workflow = terms_workflow.OrderTermsWorkflow(repository, object(), _Clock())
+    proposed = _terms(requires_cooking=False, service_days=3)
+    dates = (date(2026, 9, 10), date(2026, 9, 12), date(2026, 9, 14))
+    preview = workflow.preview(facts.order.case_no, proposed,
+                               replacement_service_dates=dates, replacement_allocations=((9, 3),))
+    request = terms_workflow.OrderTermsApplyRequest(facts.order.case_no, proposed,
+        ExpectedVersion(preview.order_version), ExpectedVersion(preview.scheduling_version),
+        ExpectedVersion(preview.client_finance_version), ExpectedVersion(preview.payroll_version),
+        preview.fingerprint, IdempotencyKey('issue326-stale'), ActorContext('synthetic'),
+        'synthetic replacement', CorrelationId('issue326'), dates, ((9, 3),))
+    repository.facts = replace(facts, confirmed_service_date_version=4)
+    with pytest.raises(terms_workflow.TermsWorkflowError) as caught:
+        workflow.apply_in_current_uow(request)
+    assert caught.value.error.code == 'stale_preview'
+    assert repository.writes == []
+    repository.facts = replace(facts, scheduling=replace(facts.scheduling, service_started=True))
+    with pytest.raises(ValueError, match='service_started_replacement_blocked'):
+        workflow.preview(facts.order.case_no, proposed,
+                         replacement_service_dates=dates, replacement_allocations=((9, 3),))
+    assert repository.writes == []

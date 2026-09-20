@@ -143,7 +143,13 @@ React adapter 不再自行解讀中文狀態縮減集合；focused tests 與 pro
 
 ### 3.2 Terms Preview／Apply
 
-Preview 輸入只接受 Terms 根事實意圖；輸出：
+Preview 輸入接受 Terms 根事實意圖。依 Issue #326 的本機修復授權，尚未開始服務且已有正式日期／指派的
+合約天數修改，可在同一 Terms Preview／Apply 附上由既有 server 精算得到的完整
+`replacement_service_dates`；已有指派時另由操作者明示每個既有 `assignment_id` 的
+`replacement_allocations.service_days`。只重用既有人員與順序，不猜測分配或新增服務量來源。
+日期須按同一新合約天數驗證唯一、排序及可選期間，分配總量必須完全守恆；缺漏即拒絕。
+已開始服務的完整日期／天數重排依 2026-09-19 人工裁決維持拒絕，待另定保留已履行歷史的規則；
+其他原有合法條款異動不受此限制。輸出：
 
 - before／after；
 - assignment 與 schedule 重建候選；
@@ -525,8 +531,11 @@ must be previewed, sent, and confirmed again before formal assignment can procee
 
 若已有 current confirmed service dates，planned start 平移且 `service_days` 不變時，Apply 保留原日期
 間隔並以相同日差建立新的 immutable current version；同一 transaction 同步保存版本 receipt 並使既有
-matching schedule snapshot 失效。若 `service_days` 改變，必須在服務日期流程提供完整 replacement dates；
-已有 segments 時另須由 Scheduling 完成正式重新分配，否則 fail closed。若要重新聯繫既有候選人，
+matching schedule snapshot 失效。若 `service_days` 改變，必須提供完整 replacement dates；
+Terms 面板使用既有 server 日期精算後，與新條款在同一 Preview／Apply 提交，不先單獨保存日期或天數。
+已有 segments 時另須明示完整分配，由 Scheduling canonical replacement writer 在原有 outer transaction
+重建，並同步 Client Finance／Payroll、confirmed-date immutable version 及 receipt，否則 fail closed。
+Apply 成功但 Query 失敗時保留已提交狀態，重新讀取不得重送異動；結果未知時只允許人工重播同一命令。若要重新聯繫既有候選人，
 Scheduling 仍須以修改後 current Orders 起訖日及 current confirmed dates 重驗其完整檔期。
 
 ### Confirmed Service Dates (2026-08-12)

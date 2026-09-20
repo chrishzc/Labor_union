@@ -57,6 +57,9 @@ export const OrderTermsQuerySchema = z.strictObject({
   payroll_version: VersionSchema,
   service_data_locked: z.boolean(),
   terms: OrderTermsViewSchema,
+  confirmed_service_dates: z.array(DateSchema).optional(),
+  confirmed_service_date_version: VersionSchema.nullable().optional(),
+  assignments: z.array(z.strictObject({ assignment_id: z.number().int().positive(), staff_id: z.number().int().positive(), service_days: z.number().int().positive() })).optional(),
 });
 
 export const OrderTermsPreviewSchema = z.strictObject({
@@ -92,6 +95,8 @@ export const OrderTermsReceiptSchema = z.strictObject({
 
 export const OrderTermsPreviewPayloadSchema = z.strictObject({
   proposed_terms: OrderTermsInputSchema,
+  replacement_service_dates: z.array(DateSchema).optional(),
+  replacement_allocations: z.array(z.strictObject({ assignment_id: z.number().int().positive(), service_days: z.number().int().positive() })).optional(),
 });
 
 export const OrderTermsApplyPayloadSchema = OrderTermsPreviewPayloadSchema.extend({

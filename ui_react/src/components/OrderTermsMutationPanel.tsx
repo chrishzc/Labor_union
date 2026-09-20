@@ -8,7 +8,10 @@ import {
   orderTermsMutationClient,
   type OrderTermsPreview,
   type OrderTermsReceipt,
+  type OrderTermsApplyPayload,
 } from '../api/orders/order_terms_mutation_client';
+import { schedulePrecisionClient, type SchedulePrecisionRequest } from '../api/scheduling/schedule_precision_client';
+import { ApiHttpError } from '../api/shared/typed_errors';
 import type { OrderTerms } from '../api/orders/order_query_schemas';
 
 interface OrderTermsMutationPanelProps {
@@ -151,8 +154,12 @@ function conflictMessage(error: unknown): string | null {
     return '目前排班資料不完整，無法安全調整既有排班；本次未儲存任何變更。';
   }
   if (code === 'confirmed_service_dates_reconfirmation_required') {
-    return '本案已有正式服務日期；變更服務天數前，請到「服務安排」提供完整替代日期。其他條款可分開檢查；本次未儲存任何變更。';
+    return '本案已有正式服務日期；變更服務天數前，請在本面板精算完整替代日期並填寫人員分配；本次未儲存任何變更。';
   }
+  if (code === 'scheduling_reallocation_required') return '請填寫每個既有指派的新服務天數，合計須等於新合約天數，再重新檢查。';
+  if (code === 'service_data_locked') return '服務條件已鎖定，本次未儲存；請保留已完成服務與帳務歷史。';
+  if (code === 'service_started_replacement_blocked') return '本案已開始服務，不能由此替換完整日期；請由承辦人確認保留已履行服務的調整方案。本次未儲存。';
+  if (code === 'replacement_service_date_outside_selectable_range') return '替代日期超出可選期間，請重新精算日期並核對計畫開始日。';
   if (code === 'stale_preview') {
     return '預覽已過期：正式資料已變更，請重新檢查條款變更後再套用。';
   }
@@ -172,9 +179,17 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
   const [receipt, setReceipt] = useState<OrderTermsReceipt | null>(null);
   const [readback, setReadback] = useState<OrderTerms | null>(null);
   const [reason, setReason] = useState('');
-  const [status, setStatus] = useState<'idle' | 'previewing' | 'applying'>('idle');
+  const [replacementDates, setReplacementDates] = useState<string[] | null>(null);
+  const [serviceMode, setServiceMode] = useState<SchedulePrecisionRequest['service_mode'] | ''>('');
+  const [allocations, setAllocations] = useState<Record<number, string>>({});
+  const [status, setStatus] = useState<'idle' | 'previewing' | 'applying' | 'calculating' | 'reading'>('idle');
   const [error, setError] = useState<string | null>(null);
+  const submittedTarget = useRef<OrderTermsApplyPayload | null>(null);
+  const pendingCommand = useRef<{ payload: OrderTermsApplyPayload; key: string } | null>(null);
+  const [outcomeUnknown, setOutcomeUnknown] = useState(false);
   const mounted = useRef(false);
+  const activeCase = useRef(caseNo);
+  activeCase.current = caseNo;
   const previewGeneration = useRef(0);
   const previewAbort = useRef<AbortController | null>(null);
   useEffect(() => {
@@ -207,11 +222,19 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
 
   useEffect(() => {
     if (previousQueryRevision.current === queryRevision) return;
+    const sameCase = previousQueryRevision.current.split(':')[0] === caseNo;
+    if (sameCase && (pendingCommand.current || (receipt && !readback))) return;
     previousQueryRevision.current = queryRevision;
     previewGeneration.current += 1;
     previewAbort.current?.abort();
     previewAbort.current = null;
     if (queryRevision === observedRevision) return;
+    pendingCommand.current = null;
+    submittedTarget.current = null;
+    setOutcomeUnknown(false);
+    setServiceMode('');
+    setReplacementDates(null);
+    setAllocations({});
     setDraft(draftFromQuery(query));
     setPreview(null);
     setReceipt(null);
@@ -219,9 +242,13 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
     setReason('');
     setError(null);
     setStatus('idle');
-  }, [query, queryRevision, observedRevision]);
+  }, [caseNo, query, queryRevision, observedRevision, receipt, readback]);
+
+  const needsReplacement = Number(draft.serviceDays) !== currentQuery.terms.service_days
+    && ((currentQuery.confirmed_service_dates?.length ?? 0) > 0 || (currentQuery.assignments?.length ?? 0) > 0);
 
   const updateDraft = <K extends keyof OrderTermsDraft>(key: K, value: OrderTermsDraft[K]) => {
+    setReplacementDates(null);
     setDraft((current) => {
       const next = { ...current, [key]: value };
       if (key === 'startTime' || key === 'endTime' || key === 'endDayOffset') {
@@ -262,6 +289,13 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
   };
 
   const proposedTermsPayload = () => ({
+    ...(needsReplacement && replacementDates ? {
+      replacement_service_dates: replacementDates,
+      replacement_allocations: (currentQuery.assignments ?? []).map((assignment) => ({
+        assignment_id: assignment.assignment_id,
+        service_days: Number(allocations[assignment.assignment_id] ?? ''),
+      })),
+    } : {}),
     proposed_terms: {
       planned_start_date: draft.plannedStartDate,
       service_days: Number(draft.serviceDays),
@@ -290,10 +324,52 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
     && /^\d{2}:\d{2}$/.test(draft.startTime)
     && /^\d{2}:\d{2}$/.test(draft.endTime)
     && timeValidationError === null;
-  const locked = currentQuery.service_data_locked || status !== 'idle';
+  const replacementReady = !needsReplacement || (replacementDates?.length === Number(draft.serviceDays)
+    && (currentQuery.assignments?.length ? currentQuery.assignments.every((a) => Number.isInteger(Number(allocations[a.assignment_id])) && Number(allocations[a.assignment_id]) > 0)
+      && currentQuery.assignments.reduce((sum, a) => sum + Number(allocations[a.assignment_id]), 0) === Number(draft.serviceDays) : true));
+  const locked = currentQuery.service_data_locked || status !== 'idle' || (receipt !== null && readback === null) || outcomeUnknown;
+
+  const calculateReplacement = async () => {
+    if (!serviceMode || !draftReady || locked) return;
+    const generation = ++previewGeneration.current;
+    const isCurrent = () => mounted.current && generation === previewGeneration.current;
+    setStatus('calculating'); setError(null); setPreview(null); setReplacementDates(null);
+    try {
+      const result = await schedulePrecisionClient.calculate({ case_no: caseNo,
+        actual_start_date: draft.plannedStartDate, target_service_days: Number(draft.serviceDays), service_mode: serviceMode });
+      if (!isCurrent()) return;
+      setReplacementDates(result.day_by_day.filter((day) => day.is_work_day).map((day) => day.date));
+    } catch (caught) { if (isCurrent()) setError(errorMessage(caught, '替代日期精算失敗。')); }
+    finally { if (isCurrent()) setStatus('idle'); }
+  };
+
+  const observeReceipt = async (nextReceipt: OrderTermsReceipt) => {
+    setStatus('reading'); setError(null);
+    try {
+      const refreshed = await orderTermsMutationClient.query(caseNo);
+      if (!mounted.current || activeCase.current !== caseNo) return;
+      if (refreshed.case_no !== caseNo || refreshed.order_version < nextReceipt.order_version
+        || refreshed.scheduling_version < nextReceipt.scheduling_version
+        || refreshed.client_finance_version < nextReceipt.client_finance_version
+        || refreshed.payroll_version < nextReceipt.payroll_version) throw new Error('條款回讀案件識別或版本與收據不一致。');
+      const target = submittedTarget.current;
+      if (target && refreshed.order_version === nextReceipt.order_version) {
+        const expected = target.proposed_terms;
+        const termsDiffer = Object.entries(expected).some(([key, value]) => key === 'service_time'
+          ? Object.entries(value as Record<string, unknown>).some(([part, item]) => refreshed.terms.service_time[part as keyof typeof refreshed.terms.service_time] !== item)
+          : refreshed.terms[key as keyof typeof expected] !== value);
+        const datesDiffer = target.replacement_service_dates
+          && JSON.stringify(refreshed.confirmed_service_dates) !== JSON.stringify(target.replacement_service_dates);
+        if (termsDiffer || datesDiffer) throw new Error('正式讀回內容與已提交條款／日期不一致。');
+      }
+      setReadback(refreshed); setDraft(draftFromQuery(refreshed)); setReplacementDates(null);
+      if (mounted.current) onObserved?.();
+    } catch (caught) { if (mounted.current && activeCase.current === caseNo) setError(`條款已套用，但正式回讀失敗：${errorMessage(caught, '無法重新取得訂單條款。')}`); }
+    finally { if (mounted.current && activeCase.current === caseNo) setStatus('idle'); }
+  };
 
   const previewTerms = async () => {
-    if (!draftReady || currentQuery.service_data_locked) return;
+    if (!draftReady || !replacementReady || locked) return;
     const generation = ++previewGeneration.current;
     previewAbort.current?.abort();
     const controller = new AbortController();
@@ -332,9 +408,8 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
     setError(null);
     setReadback(null);
     try {
-      const nextReceipt = await orderTermsMutationClient.apply(
-        caseNo,
-        {
+      if (pendingCommand.current === null) pendingCommand.current = {
+        payload: {
           ...proposedTermsPayload(),
           expected_order_version: preview.order_version,
           expected_scheduling_version: preview.scheduling_version,
@@ -343,43 +418,39 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
           preview_fingerprint: preview.preview_fingerprint,
           reason: reason.trim(),
         },
-        { idempotencyKey: `orders-terms-ui-${caseNo}-${crypto.randomUUID()}` },
-      );
+        key: `orders-terms-ui-${caseNo}-${crypto.randomUUID()}`,
+      };
+      const command = pendingCommand.current;
+      submittedTarget.current = command.payload;
+      const nextReceipt = await orderTermsMutationClient.apply(caseNo, command.payload, { idempotencyKey: command.key });
+      if (!mounted.current || activeCase.current !== caseNo) return;
+      pendingCommand.current = null; setOutcomeUnknown(false);
       setReceipt(nextReceipt);
       setPreview(null);
       setReason('');
-      try {
-        const refreshed = await orderTermsMutationClient.query(caseNo);
-        if (refreshed.case_no !== caseNo || refreshed.order_version < nextReceipt.order_version
-          || refreshed.scheduling_version < nextReceipt.scheduling_version
-          || refreshed.client_finance_version < nextReceipt.client_finance_version
-          || refreshed.payroll_version < nextReceipt.payroll_version) {
-          throw new Error('條款回讀案件識別或版本與收據不一致。');
-        }
-        setReadback(refreshed);
-        setDraft(draftFromQuery(refreshed));
-        if (mounted.current) onObserved?.();
-      } catch (caught) {
-        setError(`條款已套用，但正式回讀失敗：${errorMessage(caught, '無法重新取得訂單條款。')}`);
-      }
+      await observeReceipt(nextReceipt);
     } catch (caught) {
-      const conflict = conflictMessage(caught);
+      if (!mounted.current || activeCase.current !== caseNo) return;
+      const conflict = conflictMessage(caught) ?? (caught instanceof ApiHttpError && [400, 401, 403, 404, 409, 422].includes(caught.status)
+        ? '本次條款未通過檢查，請核對目前資料、帳務限制及登入權限後重新檢查。' : null);
       if (conflict) {
+        pendingCommand.current = null; setOutcomeUnknown(false);
         setPreview(null);
         setReason('');
         setError(conflict);
       } else {
-        setError(errorMessage(caught, '無法確認套用訂單條款。'));
+        setOutcomeUnknown(true);
+        setError(`送出結果尚未確認，請重播同一筆提交以取得結果：${errorMessage(caught, '無法確認套用訂單條款。')}`);
       }
     } finally {
-      setStatus('idle');
+      if (mounted.current && activeCase.current === caseNo) setStatus('idle');
     }
   };
 
   return (
     <section className="order-v2-drawer-section" aria-labelledby="order-v2-terms-mutation-heading">
       <h3 id="order-v2-terms-mutation-heading">進件條款預覽與套用</h3>
-      <p className="order-v2-drawer-note">尚未建立正式服務日期時，可先修正進件條款；已有日期或排班時，系統會要求到服務安排完成重排。檢查時不會修改訂單。</p>
+      <p className="order-v2-drawer-note">尚未建立正式服務日期時，可先修正進件條款；已有日期或排班且需改天數時，請在下方精算替代日期並填寫人員分配，一次確認保存。檢查時不會修改訂單。</p>
       {currentQuery.service_data_locked && (
         <p className="order-v2-drawer-error" role="status">此案件的服務條件已鎖定，依既有規則不可再變更條款。</p>
       )}
@@ -477,12 +548,26 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
         </label>
       </div>
 
+      {needsReplacement && <fieldset disabled={locked}>
+        <legend>新天數的替代服務安排</legend>
+        <label>替代日期排休方式<select aria-label="替代日期排休方式" value={serviceMode} onChange={(event) => { setServiceMode(event.target.value as typeof serviceMode); setReplacementDates(null); setPreview(null); }}>
+          <option value="">請選擇排休方式</option>
+          {(['休周六', '休周日', '週休2日', '連續服務'] as const).map((mode) => <option key={mode}>{mode}</option>)}
+        </select></label>
+        <button type="button" disabled={!serviceMode || !draftReady} onClick={() => void calculateReplacement()}>精算替代日期</button>
+        {replacementDates && <p>替代服務日期（{replacementDates.length} 天）：{replacementDates.join('、')}</p>}
+        {(currentQuery.assignments ?? []).map((assignment) => <label key={assignment.assignment_id}>人員 {assignment.staff_id}（原 {assignment.service_days} 天）的新服務天數
+          <input aria-label={`指派 ${assignment.assignment_id} 新服務天數`} type="number" min="1" value={allocations[assignment.assignment_id] ?? ''} onChange={(event) => { setAllocations((current) => ({ ...current, [assignment.assignment_id]: event.target.value })); setPreview(null); }} />
+        </label>)}
+        <p>依原指派順序分配上述日期，合計須等於新合約天數；不會自動分配。日期與條款將同時保存。</p>
+      </fieldset>}
+
       {timeValidationError && (
         <p className="order-v2-drawer-error" role="status" style={{ marginTop: '6px' }}>{timeValidationError}</p>
       )}
 
       <div className="order-v2-drawer-actions" style={{ marginTop: '12px' }}>
-        <button type="button" disabled={locked || !draftReady} onClick={() => void previewTerms()}>
+        <button type="button" disabled={locked || !draftReady || !replacementReady} onClick={() => void previewTerms()}>
           {status === 'previewing' ? '正在檢查條款變更…' : '檢查訂單條款變更'}
         </button>
       </div>
@@ -507,11 +592,13 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
         </div>
       )}
 
+      {outcomeUnknown && <button type="button" disabled={status !== 'idle'} onClick={() => void applyTerms()}>重播同一筆條款提交</button>}
       {receipt && readback && (
         <p role="status">條款已套用並完成正式回讀；Order version {readback.order_version}，合約服務 {readback.terms.service_days} 日。</p>
       )}
       {receipt && !readback && (
-        <p role="status">條款已套用；Order version {receipt.order_version}，正式服務日 {receipt.official_service_day_count} 天。</p>
+        <div><p role="status">條款已提交、尚未確認正式讀回；Order version {receipt.order_version}。</p>
+          <button type="button" disabled={status !== 'idle'} onClick={() => void observeReceipt(receipt)}>重新讀取已提交條款</button></div>
       )}
       {error && <p className="order-v2-drawer-error" role="alert">{error}</p>}
     </section>

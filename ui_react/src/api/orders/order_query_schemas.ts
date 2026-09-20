@@ -92,6 +92,9 @@ export const OrderTermsSchema = z.strictObject({
   payroll_version: z.number().int().nonnegative(),
   service_data_locked: z.boolean(),
   terms: OrderTermsDetailSchema,
+  confirmed_service_dates: z.array(DateOnlySchema).optional(),
+  confirmed_service_date_version: z.number().int().nonnegative().nullable().optional(),
+  assignments: z.array(z.strictObject({ assignment_id: z.number().int().positive(), staff_id: z.number().int().positive(), service_days: z.number().int().positive() })).optional(),
 });
 export type OrderTerms = z.infer<typeof OrderTermsSchema>;
 

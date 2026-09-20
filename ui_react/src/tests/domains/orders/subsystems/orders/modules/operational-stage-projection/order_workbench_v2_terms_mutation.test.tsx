@@ -7,9 +7,12 @@ import {
 } from '../../../../../../../api/orders/order_core_stage_projection_schemas';
 import { OrderWorkbenchV2Page } from '../../../../../../../pages/OrderWorkbenchV2Page';
 import {
+  OrderTermsMutationPanel,
   calculateDailyServiceHours,
   validateServiceTimeWindow,
 } from '../../../../../../../components/OrderTermsMutationPanel';
+
+import { schedulePrecisionClient } from '../../../../../../../api/scheduling/schedule_precision_client';
 
 const mocks = vi.hoisted(() => ({
   getCoreStageTimelines: vi.fn(),
@@ -294,7 +297,7 @@ describe('待辦看板 Beta 第 1 階訂單條款操作', () => {
     const panel = await openTermsPanel();
     fireEvent.click(within(panel).getByRole('button', { name: '檢查訂單條款變更' }));
     expect(await within(panel).findByRole('alert')).toHaveTextContent('本案已有正式服務日期');
-    expect(within(panel).getByRole('alert')).toHaveTextContent('服務安排');
+    expect(within(panel).getByRole('alert')).toHaveTextContent('本面板精算完整替代日期');
     expect(within(panel).getByRole('alert')).toHaveTextContent('本次未儲存任何變更');
     expect(mocks.applyTerms).not.toHaveBeenCalled();
   });
@@ -485,5 +488,60 @@ describe('validateServiceTimeWindow 驗證與提示', () => {
     expect(validateServiceTimeWindow('09:00', '17:15', '0')).toBe(
       '每日服務時數須以 0.5 小時為單位（目前計算為 8.25 小時）。',
     );
+  });
+});
+
+
+describe('Issue326 replacement dates and allocation from the Terms UI', () => {
+  beforeEach(() => { vi.restoreAllMocks(); Object.values(mocks).forEach((mock) => mock.mockReset()); });
+  it.each([[false, 'none'], [true, 'none'], [true, 'readback'], [true, 'unknown']] as const)('40→30 submits one target and reads back dates (assigned=%s, failure=%s)', async (assigned, failure) => {
+    const dates = Array.from({ length: 30 }, (_, i) => `2026-10-${String(i + 1).padStart(2, '0')}`);
+    const query = { ...orderTerms(), terms: { ...orderTerms().terms, service_days: 40 }, confirmed_service_dates: [...dates, ...Array.from({ length: 10 }, (_, i) => `2026-11-${String(i+1).padStart(2,'0')}`)], confirmed_service_date_version: 1,
+      assignments: assigned ? [{ assignment_id: 9, staff_id: 3, service_days: 20 }, { assignment_id: 10, staff_id: 4, service_days: 20 }] : [] };
+    const calculate = vi.spyOn(schedulePrecisionClient, 'calculate').mockResolvedValue({
+      actual_start_date: '2026-10-01', actual_end_date: '2026-10-30', target_service_days: 30, total_calendar_days: 30, actual_work_days_count: 30, rest_days_count: 0, national_holidays_found: [], total_estimated_salary: null, weekly_stats: [],
+      day_by_day: dates.map((date, i) => ({ date, day_num: i+1, is_work_day: true, is_rest_day: false, holiday_name: null })),
+    });
+    mocks.previewTerms.mockImplementation(async (_case, payload) => ({ before: query.terms, after: payload.proposed_terms, order_version: 12, scheduling_version: 13, scheduling_generation: 2, client_finance_version: 5, payroll_version: 6, scheduling: {}, client_finance_impact: {}, payroll_impact: {}, lifecycle_impact: {}, preview_fingerprint: 'a'.repeat(64) }));
+    mocks.applyTerms.mockResolvedValue({ case_no: 'CASE-TERMS', order_version: 13, scheduling_version: 14, scheduling_generation: 3, client_finance_version: 5, payroll_version: 6, lifecycle_status: '洽談中', service_data_lock_formed: false, cancelled_assignment_ids: assigned ? [9, 10] : [], created_assignment_keys: [], official_service_day_count: assigned ? 30 : 0, official_service_hours: assigned ? 270 : 0, preview_fingerprint: 'a'.repeat(64) });
+    mocks.queryTerms.mockImplementation(async () => ({ ...query, order_version: 13, scheduling_version: 14, terms: mocks.applyTerms.mock.calls[0][1].proposed_terms, confirmed_service_dates: dates }));
+    if (failure === 'readback') mocks.queryTerms.mockRejectedValueOnce(new Error('readback unavailable'));
+    if (failure === 'unknown') mocks.applyTerms.mockRejectedValueOnce(new Error('connection interrupted'));
+    render(<OrderTermsMutationPanel caseNo="CASE-TERMS" query={query} />);
+    fireEvent.change(screen.getByLabelText('Beta 服務天數'), { target: { value: '30' } });
+    expect(screen.getByRole('button', { name: '檢查訂單條款變更' })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('替代日期排休方式'), { target: { value: '連續服務' } });
+    fireEvent.click(screen.getByRole('button', { name: '精算替代日期' }));
+    await screen.findByText(/替代服務日期（30 天）/);
+    expect(calculate).toHaveBeenCalledWith({ case_no: 'CASE-TERMS', actual_start_date: '2026-10-01', target_service_days: 30, service_mode: '連續服務' });
+    if (assigned) {
+      expect(screen.getByRole('button', { name: '檢查訂單條款變更' })).toBeDisabled();
+      fireEvent.change(screen.getByLabelText('指派 9 新服務天數'), { target: { value: '12' } });
+      fireEvent.change(screen.getByLabelText('指派 10 新服務天數'), { target: { value: '18' } });
+    }
+    fireEvent.click(screen.getByRole('button', { name: '檢查訂單條款變更' }));
+    await screen.findByLabelText('Beta 條款變更原因');
+    fireEvent.change(screen.getByLabelText('Beta 條款變更原因'), { target: { value: '合成縮減服務驗收' } });
+    fireEvent.click(screen.getByRole('button', { name: '確認套用訂單條款' }));
+    if (failure === 'readback') {
+      await screen.findByText(/條款已套用，但正式回讀失敗/);
+      expect(screen.queryByText(/條款已套用並完成正式回讀/)).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: '重新讀取已提交條款' }));
+    }
+    if (failure === 'unknown') {
+      await screen.findByText(/送出結果尚未確認/);
+      expect(screen.getByLabelText('Beta 服務天數')).toBeDisabled();
+      fireEvent.click(screen.getByRole('button', { name: '重播同一筆條款提交' }));
+    }
+    await screen.findByText(/條款已套用並完成正式回讀/);
+    expect(mocks.applyTerms).toHaveBeenCalledTimes(failure === 'unknown' ? 2 : 1);
+    if (failure === 'unknown') expect(mocks.applyTerms.mock.calls[1]).toEqual(mocks.applyTerms.mock.calls[0]);
+    const payload = mocks.applyTerms.mock.calls[0][1];
+    expect(payload.proposed_terms.service_days).toBe(30);
+    expect(payload.proposed_terms).not.toHaveProperty('actual_start_date');
+    expect(payload.replacement_service_dates).toEqual(dates);
+    expect(payload.replacement_allocations).toEqual(assigned ? [{ assignment_id: 9, service_days: 12 }, { assignment_id: 10, service_days: 18 }] : []);
+    expect(screen.getByLabelText('Beta 服務天數')).toHaveValue(30);
+    expect(mocks.queryTerms).toHaveBeenCalledWith('CASE-TERMS');
   });
 });

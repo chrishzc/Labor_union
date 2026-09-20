@@ -320,10 +320,7 @@ def _stored_receipt(row: Mapping[str, Any]) -> StoredTermsReceipt:
             payload,
             "official_service_day_count",
         ),
-        official_service_hours=_required_integer(
-            payload,
-            "official_service_hours",
-        ),
+        official_service_hours=_required_service_hours(payload),
         preview_fingerprint=PreviewFingerprint(
             _required_text(payload, "preview_fingerprint")
         ),
@@ -497,3 +494,10 @@ _RECEIPT_PAYLOAD_KEYS = {
     "scheduling_version",
     "service_data_lock_formed",
 }
+
+
+def _required_service_hours(payload):
+    value = payload.get("official_service_hours")
+    if type(value) not in (int, float) or value < 0 or (isinstance(value, float) and not (value * 2).is_integer()):
+        raise ValueError("order_terms_receipt_integrity_violation")
+    return value

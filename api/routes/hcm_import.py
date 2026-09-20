@@ -12,9 +12,10 @@ from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query
 from starlette.concurrency import run_in_threadpool
 
 from api.dependencies.admin_auth import require_admin
-from api.dependencies.hcm_import import get_hcm_resubmission_workbook_service, get_hcm_workbook_import_service
+from api.dependencies.hcm_import import get_hcm_resubmission_workflow, get_hcm_resubmission_workbook_service, get_hcm_workbook_import_service
 from api.schemas.base import BaseResponse
 from api.schemas.hcm_import import (
+    HcmReviewStateView, HcmCurrentReviewPageView,
     HcmResubmissionPreviewView,
     HcmResubmissionReceiptView,
     HcmWorkbookPreviewView,
@@ -31,6 +32,27 @@ _MAXIMUM_WORKBOOK_BYTES = 20 * 1024 * 1024
 _IdempotencyHeader = Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=191)]
 _CorrelationHeader = Annotated[str, Header(alias="X-Correlation-ID", min_length=1, max_length=191)]
 _PreviewFingerprintHeader = Annotated[str, Header(alias="X-Preview-Fingerprint", pattern=r"^[0-9a-f]{64}$")]
+
+
+@router.get("/reviews", response_model=BaseResponse[HcmCurrentReviewPageView])
+def query_current_hcm_reviews(limit: int = Query(20, ge=1, le=100),
+                              before_id: int | None = Query(None, gt=0),
+                              principal: AdminPrincipal = Depends(require_admin),
+                              workflow=Depends(get_hcm_resubmission_workflow)):
+    del principal
+    return BaseResponse(data=workflow.query_current_reviews(limit=limit, before_id=before_id),
+                        message="目前 HCM 欄位待修正資料")
+
+
+@router.get("/reviews/{review_identity}", response_model=BaseResponse[HcmReviewStateView])
+def query_hcm_review(review_identity: str,
+                     principal: AdminPrincipal = Depends(require_admin),
+                     workflow=Depends(get_hcm_resubmission_workflow)):
+    del principal
+    try:
+        return BaseResponse(data=workflow.query_review(review_identity), message="HCM 修正正式讀回")
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail={"code": str(error)}) from error
 
 
 @router.post("/workbooks/preview", response_model=BaseResponse[HcmWorkbookPreviewView])

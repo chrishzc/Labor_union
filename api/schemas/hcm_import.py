@@ -92,3 +92,31 @@ class HcmResubmissionReceiptView(BaseModel):
     target_fields: tuple[str, ...] = Field(min_length=1)
     resulting_review_version: int = Field(ge=1)
     replayed: bool
+
+
+class HcmReviewStateView(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    review_identity: str
+    case_no: str
+    source_field: str
+    review_version: int
+    resolved: bool
+
+
+class HcmCurrentReviewView(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    source_id: int
+    review_identity: str
+    case_no: str
+    fields: list[str]
+    can_correct: bool
+    unavailable_reason: str | None = None
+
+
+class HcmCurrentReviewPageView(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    items: list[HcmCurrentReviewView]
+    next_cursor: int | None
