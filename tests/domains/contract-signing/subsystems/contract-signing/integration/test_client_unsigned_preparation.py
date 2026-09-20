@@ -1,4 +1,4 @@
-"""Client preparation reuses current accepted plans without creating commitments."""
+"""Client preparation reuses the current plan without creating commitments."""
 from datetime import datetime, timezone
 from types import SimpleNamespace
 import pytest
@@ -47,8 +47,8 @@ def test_preparation_uses_stable_facts_and_never_requires_prior_commitment(monke
     assert app.prepare_external_document(command) == ((8,True) if replayed else (9,False))
     assert connection.commits == 1 and connection.rollbacks == 0
     assert not any('commitment' in sql for sql in cursor.sql)
-    assert "plan.status='proposed'" in cursor.sql[0]
-    assert "response.response_type='customer_decision'" in cursor.sql[0]
+    assert "plan.status IN ('proposed','accepted')" in cursor.sql[0]
+    assert "matching_response_events" not in cursor.sql[0]
     assert "JOIN media_assets asset ON asset.id=d.media_asset_id" in cursor.sql[1]
     assert "asset.mime_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'" in cursor.sql[1]
     assert len(archived) == (0 if replayed else 1)

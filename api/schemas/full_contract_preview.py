@@ -17,6 +17,8 @@ class FullContractPreviewView(BaseModel):
     template_version: str = Field(pattern=r"^[0-9a-f]{64}$")
     owner_fingerprints: dict[str, str]
     field_values: dict[str, Any | None]
+    field_states: dict[str, str]
+    warnings: list[str]
     blockers: list[str]
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     ready_to_print: bool

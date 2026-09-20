@@ -28,6 +28,7 @@ class OrderInformationView(BaseModel):
     fields: list[OrderInformationFieldView]
     owner_fingerprints: dict[str, str]
     blockers: list[str]
+    warnings: list[str]
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     can_render: bool
 

@@ -15,10 +15,10 @@
 .order-case-view-nav button { border: 0; border-bottom: 3px solid transparent; background: none; padding: 14px 2px; font: inherit; font-weight: 650; color: #806c5d; cursor: pointer; }
 .order-case-view-nav button[aria-current=page] { color: #b64d21; border-bottom-color: #b64d21; }
 .order-case-workspace { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 24px; align-items: start; }
-.order-case-stepper { background: #fffdfa; border: 1px solid #eadfd6; border-radius: 14px; padding: 18px 10px; }
+.order-case-stepper { min-width: 0; background: #fffdfa; border: 1px solid #eadfd6; border-radius: 14px; padding: 18px 10px; }
 .order-case-stepper h2 { font-size: .94rem; padding: 0 10px; margin: 0 0 6px; }
 .order-case-stepper > p { font-size: .73rem; color: #8b796b; margin: 0 10px 16px; }
-.order-case-stepper ol { list-style: none; padding: 0; margin: 0; display: grid; gap: 3px; }
+.order-case-stepper > ol { list-style: none; padding: 0; margin: 0; display: grid; gap: 3px; }
 .order-case-stepper button { display: flex; gap: 10px; align-items: flex-start; width: 100%; text-align: left; border: 0; border-radius: 8px; padding: 10px; background: none; color: #67594f; font: inherit; cursor: pointer; }
 .order-case-stepper button.selected { background: #fcebdd; color: #9f421a; }
 .order-case-stepper button > span:last-child { display: grid; gap: 3px; min-width: 0; }
@@ -121,8 +121,8 @@
 }
 @media (max-width: 900px) {
   .order-case-workspace { grid-template-columns: 1fr; }
-  .order-case-stepper ol { display: flex; overflow-x: auto; }
-  .order-case-stepper li { flex: 0 0 180px; }
+  .order-case-stepper > ol { display: flex; overflow-x: auto; }
+  .order-case-stepper > ol > li { flex: 0 0 180px; }
   .order-case-data-grid { grid-template-columns: 1fr; }
 }
 .order-v2-open-drawer {

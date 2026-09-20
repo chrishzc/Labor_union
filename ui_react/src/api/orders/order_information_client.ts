@@ -12,7 +12,7 @@ const schema = z.strictObject({
     requiredness: z.string(), status: z.string(), value: z.union([z.string(), z.number(), z.null()]),
   })),
   owner_fingerprints: z.record(z.string(), z.string()),
-  blockers: z.array(z.string()), preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+  blockers: z.array(z.string()), warnings: z.array(z.string()), preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
   can_render: z.boolean(),
 });
 export type OrderInformation = z.infer<typeof schema>;

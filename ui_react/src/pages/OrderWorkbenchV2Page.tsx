@@ -201,7 +201,7 @@ export const OrderWorkbenchV2Page: FC = () => {
   if (selectedDrawer !== null) return (
     <>
       {error !== null && <div role="alert"><p>案件清單更新失敗，請重新整理後繼續。</p><button type="button" onClick={refreshProjection}>重新整理</button></div>}
-      <fieldset disabled={refreshing || error !== null} style={{ border: 0, padding: 0, margin: 0 }}>
+      <fieldset disabled={refreshing || error !== null} style={{ border: 0, padding: 0, margin: 0, minWidth: 0, width: '100%' }}>
         <OrderWorkbenchV2Drawer
           key={selectedDrawer.caseNo}
           caseNo={selectedDrawer.caseNo}

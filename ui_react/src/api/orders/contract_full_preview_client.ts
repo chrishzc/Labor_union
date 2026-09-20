@@ -9,6 +9,8 @@ const schema = z.strictObject({
   template_key: z.string(), template_version: z.string().regex(/^[0-9a-f]{64}$/),
   owner_fingerprints: z.record(z.string(), z.string()),
   field_values: z.record(z.string(), z.union([scalar, z.array(scalar)])),
+  field_states: z.record(z.string(), z.enum(['present', 'missing', 'optional_empty', 'not_applicable', 'unresolved'])),
+  warnings: z.array(z.string()),
   blockers: z.array(z.string()), preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/), ready_to_print: z.boolean(),
 });
 export type ContractFullPreview = z.infer<typeof schema>;

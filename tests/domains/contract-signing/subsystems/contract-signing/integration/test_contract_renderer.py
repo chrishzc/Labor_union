@@ -160,7 +160,7 @@ def test_renderer_fails_closed_for_unresolved_mapping_descriptor(tmp_path):
     assert captured.value.code == "contract_pdf_required_mapping_unresolved"
 
 
-def test_renderer_fails_closed_for_missing_fact_in_approved_mapping(tmp_path):
+def test_renderer_leaves_missing_owner_fact_blank_for_current_projection(tmp_path):
     template = tmp_path / "template.xlsx"
     Workbook().save(template)
     mapping = tmp_path / "mapping.json"
@@ -179,14 +179,13 @@ def test_renderer_fails_closed_for_missing_fact_in_approved_mapping(tmp_path):
         encoding="utf-8",
     )
 
-    with pytest.raises(ContractRendererError) as captured:
-        render_contract_template(
-            template_path=template,
-            mapping_path=mapping,
-            facts={"case_no": "CASE-1"},
-        )
+    content = render_contract_template(
+        template_path=template,
+        mapping_path=mapping,
+        facts={"case_no": "CASE-1"},
+    )
 
-    assert captured.value.code == "contract_pdf_required_mapping_missing"
+    assert load_workbook(BytesIO(content)).active["A1"].value is None
 
 
 def test_renderer_fails_closed_when_approved_mapping_lacks_requiredness(tmp_path):

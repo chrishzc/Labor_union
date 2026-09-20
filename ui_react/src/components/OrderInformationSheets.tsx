@@ -90,7 +90,7 @@ export function OrderInformationSheets({ caseNo, assignments, initialKind = 1, o
     <div className="order-information-choice" aria-label="選擇訂單資訊">
       <button type="button" aria-pressed={kind === 1} onClick={() => setKind(1)}><strong>訂單資訊－1</strong><span>服務條件與薪資 · 初步詢問</span></button>
       <button type="button" aria-pressed={kind === 2} onClick={() => setKind(2)}><strong>訂單資訊－2</strong><span>照護與飲食需求 · 分開確認</span></button>
-      <button type="button" aria-pressed={kind === 'weekly'} onClick={() => setKind('weekly')}><strong>每周服務中說明</strong><span>預計工作日與每周時數</span></button>
+      <button type="button" aria-pressed={kind === 'weekly'} onClick={() => setKind('weekly')}><strong>每週服務時間說明</strong><span>預計工作日與每週時數</span></button>
     </div>
     {targets.length > 1 && <label>預覽哪一段服務
       <select value={selectedId ?? ''} onChange={(event) => setAssignmentId(event.target.value ? Number(event.target.value) : null)}>
@@ -103,7 +103,8 @@ export function OrderInformationSheets({ caseNo, assignments, initialKind = 1, o
     {selectedId === null && !candidatePreview && !weeklyPreview && !loading && <p role="status">{targets.length > 1 ? '請選擇服務區段以查閱本案資料。' : candidates.length ? '請選擇月嫂，查閱本次詢問內容。' : '請先在候選月嫂清單加入要詢問的人選，即可預覽完整資訊。'}</p>}
     {loading && <p role="status">正在讀取本案資訊…</p>}
     {error && <p role="alert">本案資訊暫時無法讀取；下方僅顯示欄位，不代表資料已完整。</p>}
-    {result && !result.can_render && <p role="status">部分資料尚未齊全，請核對標示為「待補」的欄位。</p>}
+    {result && result.warnings.length > 0 && <p role="status">部分資料尚未提供，已在欄位中標示；不影響目前資料的預覽。</p>}
+    {result && !result.can_render && <p role="alert">模板或資料投影發生技術錯誤，目前無法完成預覽。</p>}
     {candidatePreview && kind !== 'weekly' && <article className="order-information-paper"><h3>給 {candidatePreview.staff_name} 的訂單資訊－{kind}</h3><pre style={{ whiteSpace: 'pre-wrap', font: 'inherit' }}>{candidatePreview.text}</pre></article>}
     {targets.length > 0 && kind !== 'weekly' && <article className="order-information-paper">
       <header><small>案件 {caseNo}</small><h3>給服務人員的訂單資訊－{kind}</h3><p>{kind === 1 ? '先確認服務條件與接案意願' : '確認個別照護需求與服務準備'}</p></header>
@@ -114,8 +115,8 @@ export function OrderInformationSheets({ caseNo, assignments, initialKind = 1, o
       })}</dl>
       {kind === 2 && <section className="order-information-ingredients"><h4>食材準備參考</h4><p>依原表保留供核對，不代表本案已同意或需要全部採買。</p><div><span>中藥／食材：四物、四君、四神、枸杞、紅棗、黃耆、杜仲、大豐草、黑豆、紅豆、白木耳、紫米、桂圓肉、米酒、麻油</span><span>肉品：雞腿、雞胸、排骨、豬／牛肉絲、絞肉、雞蛋、魚排</span><span>蔬菜：青菜、紅蘿蔔、薑、香菇、其他菇類、豆製品</span></div></section>}
     </article>}
-    {kind === 'weekly' && targets.length > 0 && <p role="status">正式方案建立後，可在「推薦月嫂」步驟預覽方案的每周服務內容。</p>}
-    {weeklyPreview && <article className="order-information-paper"><header><h3>每周服務中說明</h3><p>依目前候選服務期間推算，尚未建立正式排班。</p></header>
+    {kind === 'weekly' && targets.length > 0 && <p role="status">目前方案的每週服務內容可在「推薦月嫂」步驟直接預覽。</p>}
+    {weeklyPreview && <article className="order-information-paper"><header><h3>每週服務時間說明</h3><p>依目前候選服務期間推算，尚未建立正式排班。</p></header>
       <div className="formal-recommendation-weekly-preview"><table><thead><tr><th>週次</th><th>服務人員</th><th>期間</th><th>工作日</th><th>時數</th></tr></thead><tbody>
         {weeklyPreview.rows.map((item) => <tr key={item.serial_number}><td>第 {item.serial_number} 週</td><td>{item.staff_name}</td><td>{item.week_start_date}～{item.week_end_date}</td><td>{item.weekly_work_days} 日</td><td>{item.weekly_hours} 小時</td></tr>)}
       </tbody></table></div>

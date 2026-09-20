@@ -906,6 +906,8 @@ def _public_full_preview(value) -> dict[str, Any]:
         "template_version": value.template_version,
         "owner_fingerprints": dict(value.owner_fingerprints),
         "field_values": dict(value.field_values),
+        "field_states": dict(value.field_states),
+        "warnings": list(value.warnings),
         "blockers": list(value.blockers),
         "preview_fingerprint": value.preview_fingerprint.value,
         "ready_to_print": value.ready_to_print,

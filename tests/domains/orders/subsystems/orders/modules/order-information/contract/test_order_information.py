@@ -99,6 +99,7 @@ def test_info_01_uses_exact_typed_owner_values_and_no_legacy_execution_dates():
 
     assert result.can_render is True
     assert result.blockers == ()
+    assert result.warnings == ()
     values = {field.field_id: field.value for field in result.fields}
     assert values["f_104_c4"] == date(2026, 9, 1)
     assert values["f_105_c5"] == date(2026, 9, 20)
@@ -115,6 +116,7 @@ def test_info_02_uses_case_import_typed_projection_without_raw_passthrough():
 
     assert result.can_render is True
     assert result.blockers == ()
+    assert result.warnings == ()
     assert all("survey_details" not in blocker for blocker in result.blockers)
     field = next(item for item in result.fields if item.field_id == "f_206_e6")
     assert field.owner == "case_import"
@@ -122,7 +124,7 @@ def test_info_02_uses_case_import_typed_projection_without_raw_passthrough():
     assert field.value == "葷食"
 
 
-def test_info_02_blocks_only_missing_case_import_field():
+def test_info_02_warns_only_for_missing_case_import_field_without_blocking_render():
     snapshot = _snapshot()
     facts = dict(snapshot.facts)
     facts["cooking_tools"] = None
@@ -135,8 +137,10 @@ def test_info_02_blocks_only_missing_case_import_field():
     result = OrderInformationQueryService(_Repository(missing)).query(
         "tpl_info_02", "CASE-1", 7
     )
-    assert "order_information_required_field_missing:f_213_ed" in result.blockers
-    assert all("f_206_e6" not in blocker for blocker in result.blockers)
+    assert result.can_render is True
+    assert result.blockers == ()
+    assert "order_information_required_field_missing:f_213_ed" in result.warnings
+    assert all("f_206_e6" not in warning for warning in result.warnings)
 
 
 def test_staff_projection_requires_exact_assignment_target():

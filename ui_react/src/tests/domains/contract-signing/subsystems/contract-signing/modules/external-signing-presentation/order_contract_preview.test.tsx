@@ -18,6 +18,8 @@ const basePreview = {
   assignment_id: null,
   template_version: 'a'.repeat(64),
   owner_fingerprints: {},
+  field_states: {},
+  warnings: [],
   blockers: [],
   preview_fingerprint: 'b'.repeat(64),
   ready_to_print: true,
@@ -46,11 +48,17 @@ describe('OrderContractPreview', () => {
     expect(screen.getByText(/契約顯示預計繳款日/)).toBeInTheDocument();
   });
 
-  it('marks absent planned payment stages and notes as optional only when printable', async () => {
+  it('marks absent planned payment stages and notes as optional', async () => {
     vi.mocked(previewContractFields).mockResolvedValue({
       ...basePreview,
       scope: 'client',
       template_key: 'contract_client_copy',
+      field_states: {
+        'projected.deposit_due_date': 'optional_empty',
+        'projected.first_payment_due_date': 'optional_empty',
+        'projected.second_payment_due_date': 'optional_empty',
+        F41: 'optional_empty',
+      },
       field_values: {
         F1: 'CASE-001',
         'projected.second_payment_due_date': null,
@@ -64,20 +72,30 @@ describe('OrderContractPreview', () => {
     expect(screen.queryByText('契約尚有未完成條件，請核對資料後再準備文件。')).not.toBeInTheDocument();
   });
 
-  it('does not hide a missing planned due date when the backend blocks printing', async () => {
+  it('keeps one optional field optional when another field is missing', async () => {
     vi.mocked(previewContractFields).mockResolvedValue({
       ...basePreview,
       ready_to_print: false,
-      blockers: ['C34:deposit_due_date'],
+      warnings: ['contract_pdf_field_missing:B43'],
+      blockers: ['contract_pdf_external_reference_unresolved'],
       scope: 'client',
       template_key: 'contract_client_copy',
-      field_values: { F1: 'CASE-001', 'projected.deposit_due_date': null },
+      field_states: {
+        B43: 'missing',
+        F41: 'optional_empty',
+        'projected.deposit_due_date': 'optional_empty',
+        'projected.first_payment_due_date': 'optional_empty',
+        'projected.second_payment_due_date': 'optional_empty',
+      },
+      field_values: { F1: 'CASE-001', B43: null, F41: '', 'projected.deposit_due_date': null },
     });
 
     render(<OrderContractPreview caseNo="CASE-001" />);
 
-    expect(await screen.findByText('契約尚有未完成條件，請核對資料後再準備文件。')).toBeInTheDocument();
-    expect(screen.getAllByText('尚未提供／待核對').length).toBeGreaterThan(0);
+    expect(await screen.findByText(/目前資料仍有缺漏/)).toBeInTheDocument();
+    expect(screen.getByText(/契約模板或文件產生發生技術問題/)).toBeInTheDocument();
+    expect(screen.getAllByText('未填（可留白）')).toHaveLength(4);
+    expect(screen.getByText('服務地址').nextElementSibling).toHaveTextContent('尚未提供／待核對');
   });
 
   it('shows the staff projection as one whole payable with a projected payday', async () => {

@@ -89,6 +89,8 @@ class FullContractPreviewResult:
     mapping_sha256: str
     owner_fingerprints: Mapping[str, str]
     field_values: Mapping[str, object | None]
+    field_states: Mapping[str, str]
+    warnings: tuple[str, ...]
     blockers: tuple[str, ...]
     preview_fingerprint: PreviewFingerprint
 
@@ -163,7 +165,9 @@ class FullContractPreviewApplication:
         facts["contract_signed_date"] = snapshot_date
         facts["__today__"] = snapshot_date
         mapping_path = approved_template_mapping_path(template_key)
-        blockers = _mapping_blockers(template_key, mapping_path, facts)
+        blockers, warnings, field_states = _mapping_validation(
+            template_key, mapping_path, facts
+        )
         if not blockers:
             from subsystems.contract_signing.contract_renderer import external_formula_cells, render_contract_template
             content = render_contract_template(
@@ -174,6 +178,9 @@ class FullContractPreviewApplication:
                 blockers = ("contract_pdf_external_reference_unresolved",)
         field_values = _mapped_field_values(mapping_path, facts)
         field_values.update(_projected_field_values(facts))
+        field_states.update(
+            _projected_field_states(mapping_path, facts, field_states)
+        )
         fingerprint = fingerprint_payload(
             {
                 "case_no": projection.case_no,
@@ -185,6 +192,8 @@ class FullContractPreviewApplication:
                 "owner_fingerprints": dict(sorted(projection.owner_fingerprints.items())),
                 "command_snapshot_date": snapshot_date.isoformat(),
                 "blockers": list(blockers),
+                "warnings": list(warnings),
+                "field_states": dict(sorted(field_states.items())),
                 "field_values": _fingerprint_field_values(field_values),
             }
         )
@@ -198,6 +207,8 @@ class FullContractPreviewApplication:
             mapping_sha256=template.mapping_sha256,
             owner_fingerprints=dict(sorted(projection.owner_fingerprints.items())),
             field_values=field_values,
+            field_states=dict(sorted(field_states.items())),
+            warnings=tuple(warnings),
             blockers=tuple(blockers),
             preview_fingerprint=fingerprint,
         )
@@ -251,6 +262,44 @@ def _projected_field_values(
     }
 
 
+def _projected_field_states(
+    mapping_path: Path,
+    facts: Mapping[str, object],
+    mapped_states: Mapping[str, str],
+) -> dict[str, str]:
+    """Describe Preview-only display fields without a second UI policy list."""
+    keys = (
+        "deposit_due_date",
+        "first_payment_due_date",
+        "second_payment_due_date",
+        "subsidy_hours",
+        "projected_subsidy_amount",
+        "service_unit_price",
+        "staff_payable_total",
+        "staff_payable_due_date",
+    )
+    fields = _mapping_fields(mapping_path) or {}
+    result: dict[str, str] = {}
+    for key in keys:
+        states = tuple(
+            mapped_states.get(cell)
+            for cell, descriptor in fields.items()
+            if isinstance(cell, str)
+            and isinstance(descriptor, dict)
+            and descriptor.get("db_key") == key
+        )
+        states = tuple(state for state in states if state is not None)
+        if not _is_missing(facts.get(key)):
+            result[f"projected.{key}"] = "present"
+        elif states and all(state == "not_applicable" for state in states):
+            result[f"projected.{key}"] = "not_applicable"
+        elif states and all(state in {"not_applicable", "optional_empty"} for state in states):
+            result[f"projected.{key}"] = "optional_empty"
+        else:
+            result[f"projected.{key}"] = "missing"
+    return result
+
+
 def _fingerprint_field_values(
     values: Mapping[str, object | None],
 ) -> dict[str, object | None]:
@@ -278,12 +327,21 @@ def _fingerprint_field_value(value: object | None) -> object | None:
 def _mapping_blockers(
     template_key: str, mapping_path: Path, facts: Mapping[str, object]
 ) -> tuple[str, ...]:
+    blockers, _, _ = _mapping_validation(template_key, mapping_path, facts)
+    return blockers
+
+
+def _mapping_validation(
+    template_key: str, mapping_path: Path, facts: Mapping[str, object]
+) -> tuple[tuple[str, ...], tuple[str, ...], dict[str, str]]:
     fields = _mapping_fields(mapping_path)
     if fields is None:
-        return ("contract_pdf_mapping_invalid",)
+        return ("contract_pdf_mapping_invalid",), (), {}
     blockers: set[str] = set()
-    for descriptor in fields.values():
-        if not isinstance(descriptor, dict):
+    warnings: set[str] = set()
+    field_states: dict[str, str] = {}
+    for cell, descriptor in fields.items():
+        if not isinstance(cell, str) or not isinstance(descriptor, dict):
             blockers.add("contract_pdf_mapping_invalid")
             continue
         key = descriptor.get("db_key")
@@ -293,8 +351,10 @@ def _mapping_blockers(
             # Legacy funding-split cells are intentionally blank in the
             # current owner model. They never require a manual value.
             if requiredness in {"optional", "conditional"}:
+                field_states[cell] = "not_applicable"
                 continue
             blockers.add("contract_pdf_required_mapping_unresolved")
+            field_states[cell] = "unresolved"
             continue
         if status in {"pending", "unresolved"}:
             # Conditional legacy cells only participate when the current
@@ -304,21 +364,41 @@ def _mapping_blockers(
                 requiredness == "conditional"
                 and not mapping_is_applicable(descriptor, facts)
             ):
+                field_states[cell] = (
+                    "optional_empty"
+                    if requiredness == "optional"
+                    else "not_applicable"
+                )
                 continue
             blockers.add("contract_pdf_required_mapping_unresolved")
+            field_states[cell] = "unresolved"
             continue
         if not isinstance(key, str) or not key:
             blockers.add("contract_pdf_required_mapping_unresolved")
+            field_states[cell] = "unresolved"
             continue
         if requiredness not in {"required", "conditional", "optional"}:
             blockers.add("contract_pdf_required_mapping_unresolved")
+            field_states[cell] = "unresolved"
             continue
         applicable = requiredness == "required" or (
             requiredness == "conditional" and mapping_is_applicable(descriptor, facts)
         )
-        if applicable and (key not in facts or facts.get(key) is None):
-            blockers.add("contract_pdf_required_mapping_missing")
-    return tuple(sorted(blockers))
+        missing = key not in facts or _is_missing(facts.get(key))
+        if not applicable:
+            field_states[cell] = (
+                "optional_empty" if requiredness == "optional" else "not_applicable"
+            ) if missing else "present"
+        elif missing:
+            field_states[cell] = "missing"
+            warnings.add(f"contract_pdf_field_missing:{cell}")
+        else:
+            field_states[cell] = "present"
+    return tuple(sorted(blockers)), tuple(sorted(warnings)), field_states
+
+
+def _is_missing(value: object) -> bool:
+    return value is None or (isinstance(value, str) and not value.strip())
 
 
 def projection_fingerprint(values: Mapping[str, object]) -> str:
