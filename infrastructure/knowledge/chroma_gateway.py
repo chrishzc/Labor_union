@@ -19,7 +19,7 @@ from domains.knowledge_retrieval.qa_catalog import decode_governed_qa
 from infrastructure.knowledge.gemini_embedding import GeminiKnowledgeEmbedder
 
 
-_MAX_RETRIEVAL_CANDIDATES = 50
+_MAX_RETRIEVAL_CANDIDATES = 10
 
 
 class ChromaKnowledgeGateway:
@@ -245,7 +245,8 @@ class ChromaKnowledgeGateway:
             str(item.get("title", "")),
             str(item.get("content", "")),
         )
-        return "\n".join(part for part in parts if part.strip())
+        return "
+".join(part for part in parts if part.strip())
 
     def _candidate_confidence(self, question: str, document: str, metadata: dict) -> float:
         aliases = self._aliases(metadata)
@@ -308,19 +309,29 @@ class ChromaKnowledgeGateway:
                     )
                 )
             )
-        candidate_text = "\n".join(rows)
+        candidate_text = "
+".join(rows)
         history_text = ""
         if history:
             h_lines = []
             for item in history:
                 h_lines.append(f"用戶：{item['question']}")
                 h_lines.append(f"客服：{item['answer']}")
-            history_text = "最近對話紀錄（供理解語意與指代關係）：\n" + "\n".join(h_lines) + "\n\n"
+            history_text = "最近對話紀錄（供理解語意與指代關係）：
+" + "
+".join(h_lines) + "
+
+"
         return (
-            "你是客服題庫候選選擇器。請參考對話紀錄並根據當前使用者問題，挑選最符合的候選 ID。\n"
-            "只能回傳下列候選 ID 其中之一，若沒有足夠符合的候選只能回傳 UNSUPPORTED。不要回答問題、不要輸出其他文字。\n\n"
-            f"{history_text}當前使用者問題：{question}\n"
-            f"候選：\n{candidate_text}"
+            "你是客服題庫候選選擇器。請參考對話紀錄並根據當前使用者問題，挑選最符合的候選 ID。
+"
+            "只能回傳下列候選 ID 其中之一，若沒有足夠符合的候選只能回傳 UNSUPPORTED。不要回答問題、不要輸出其他文字。
+
+"
+            f"{history_text}當前使用者問題：{question}
+"
+            f"候選：
+{candidate_text}"
         )
 
     @staticmethod
@@ -369,8 +380,8 @@ def _normalize(value: str) -> str:
 
 def _cjk_bigram_coverage(question: str, candidate_term: str) -> float:
     """Match compact Chinese intent labels even when natural speech inserts words."""
-    query_cjk = "".join(character for character in question if "\u4e00" <= character <= "\u9fff")
-    term_cjk = "".join(character for character in candidate_term if "\u4e00" <= character <= "\u9fff")
+    query_cjk = "".join(character for character in question if "一" <= character <= "鿿")
+    term_cjk = "".join(character for character in candidate_term if "一" <= character <= "鿿")
     if len(query_cjk) < 4 or len(term_cjk) < 4:
         return 0.0
     query_bigrams = {query_cjk[index : index + 2] for index in range(len(query_cjk) - 1)}
@@ -398,45 +409,3 @@ _SUBSIDY_DECISION_MARKERS = (
     "可以申請",
     "能申請",
 )
-
-
-def _subsidy_scope_compatible(question: str, metadata: dict) -> bool:
-    query_scope = _query_subsidy_scope(question)
-    if query_scope is None:
-        return True
-    if query_scope == "ambiguous":
-        return False
-    candidate_text = " ".join(
-        (
-            str(metadata.get("question", "")),
-            str(metadata.get("category", "")),
-            str(metadata.get("tag", "")),
-            *ChromaKnowledgeGateway._aliases(metadata),
-            str(metadata.get("answer", "")),
-        )
-    )
-    return _explicit_subsidy_scope(candidate_text) == query_scope
-
-
-def _query_subsidy_scope(value: str) -> str | None:
-    normalized = _normalize(value)
-    if "補助" not in normalized:
-        return None
-    explicit = _explicit_subsidy_scope(normalized)
-    if explicit is not None:
-        return explicit
-    if any(marker in normalized for marker in _SUBSIDY_DECISION_MARKERS):
-        return "ambiguous"
-    return None
-
-
-def _explicit_subsidy_scope(value: str) -> str | None:
-    normalized = _normalize(value)
-    if any(marker in normalized for marker in _SOCIAL_WELFARE_MARKERS):
-        return "social_welfare"
-    if any(marker in normalized for marker in _GENERAL_CITIZEN_MARKERS):
-        return "general_citizen"
-    return None
-
-
-__all__ = ["ChromaKnowledgeGateway"]
