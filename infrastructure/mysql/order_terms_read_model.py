@@ -18,6 +18,7 @@ from domains.client_finance.obligation_planning import (
     ExistingClientStageObligation,
 )
 from domains.client_finance.reconciliation import PaymentStage
+from domains.client_finance.subsidy_coverage import derive_subsidy_coverage
 from domains.orders.terms import (
     OrderAggregateFacts,
     OrderTerms,
@@ -74,15 +75,37 @@ def load_contract_client_finance_facts(
     schedule_rows = _select_schedules(cursor, generation_row, lock)
     charge_days = _contract_charge_days(cursor, case_no, schedule_rows, lock)
     source = _load_client_finance(cursor, order_row, schedule_rows, lock)
+    return _materialize_contract_client_finance_facts(order_row, charge_days, source)
+
+
+def _materialize_contract_client_finance_facts(
+    order_row: Mapping[str, Any],
+    charge_days: tuple[ClientChargeDay, ...],
+    source: ClientFinanceTermsSourceFacts,
+) -> ClientFinanceTermsFacts:
+    case_no = str(order_row["case_no"])
+    if source.case_no != case_no:
+        raise ValueError("Client Finance and Orders case numbers must match")
+    service_hours_per_day = float(order_row["service_hours_per_day"])
+    floor_fee = MoneyNTD(_integer_ntd(order_row["floor_fee"]))
+    client_service_charge_waived = False
+    if source.identity_status is not None:
+        coverage = derive_subsidy_coverage(
+            source.identity_status,
+            Decimal(len(charge_days)) * Decimal(str(service_hours_per_day)),
+            Decimal(floor_fee.amount),
+        )
+        client_service_charge_waived = coverage.is_full_subsidy_order
     return ClientFinanceTermsFacts(
         case_no=case_no,
         account_version=source.account_version,
-        service_hours_per_day=float(order_row["service_hours_per_day"]),
-        floor_fee=MoneyNTD(_integer_ntd(order_row["floor_fee"])),
+        service_hours_per_day=service_hours_per_day,
+        floor_fee=floor_fee,
         charge_days=charge_days,
         payment_terms=source.payment_terms,
         existing_obligations=source.existing_obligations,
         open_nonstage_obligation_count=source.open_nonstage_obligation_count,
+        client_service_charge_waived=client_service_charge_waived,
     )
 
 

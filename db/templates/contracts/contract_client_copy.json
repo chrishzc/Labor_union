@@ -26,7 +26,7 @@
     "B83": "費用申請", "C83": "所有採購費用收據實報實銷"
   },
   "param_mappings": {
-    "B39": {"label": "自費服務天數", "db_table": "Client Finance typed stage plan projection", "db_key": "client_finance_self_pay_days", "requiredness": "conditional"},
+    "B39": {"label": "自費服務天數", "db_table": "Client Finance subsidy coverage projection", "db_key": "client_finance_self_pay_days", "requiredness": "conditional"},
     "F1": {
       "label": "訂單單號 (F1)",
       "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
@@ -112,7 +112,7 @@
     },
     "B30": {
       "label": "自費天數 (B30)",
-      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
+      "db_table": "Client Finance subsidy coverage projection",
       "db_key": "client_finance_self_pay_days",
       "requiredness": "conditional"
     },

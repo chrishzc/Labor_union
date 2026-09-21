@@ -587,13 +587,48 @@ def test_client_finance_coverage_projection_uses_exact_planned_hours():
     facts = {
         "identity_status": "補助市民",
         "total_hours": 80,
+        "service_hours_per_day": 8,
         "floor_fee": 0,
     }
     owners = {"client_finance": "a" * 64}
     _project_subsidy_coverage(facts, owners)
     assert facts["subsidy_hours"] == 80
+    assert facts["client_finance_self_pay_days"] == 0
     assert facts["projected_subsidy_amount"] == 28000
     assert owners["client_finance"] != "a" * 64
+
+
+@pytest.mark.parametrize(
+    ("identity_status", "expected_self_pay_days"),
+    [("一般市民", Decimal("15")), ("非市民", Decimal("20"))],
+)
+def test_client_contract_self_pay_days_follow_uncovered_service_hours(
+    identity_status, expected_self_pay_days
+):
+    facts = {
+        "identity_status": identity_status,
+        "total_hours": 160,
+        "service_hours_per_day": 8,
+        "floor_fee": 0,
+        "deposit_service_days": 5,
+    }
+
+    _project_subsidy_coverage(facts, {"client_finance": "a" * 64})
+
+    assert facts["client_finance_self_pay_days"] == expected_self_pay_days
+
+
+def test_client_contract_self_pay_day_cells_share_the_coverage_projection():
+    root = Path(__file__).resolve().parents[6]
+    mappings = json.loads(
+        (root / "db/templates/contracts/contract_client_copy.json").read_text(
+            encoding="utf-8"
+        )
+    )["param_mappings"]
+
+    for cell in ("B30", "B39"):
+        assert mappings[cell]["db_key"] == "client_finance_self_pay_days"
+        assert mappings[cell]["db_table"] == "Client Finance subsidy coverage projection"
 
 
 class _PayrollPolicyCursor:

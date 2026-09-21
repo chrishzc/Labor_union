@@ -296,13 +296,20 @@ def _extend_precontract_facts(connection, case_no, facts, owners, plan):
     with connection.cursor() as cursor:
         order = select_order(cursor, case_no, lock=False)
         finance = load_contract_client_finance_facts(cursor, order, lock=False)
-        finance = replace(finance, charge_days=tuple(ClientChargeDay(day, False) for day in dates))
+        total_hours = Decimal(len(dates)) * Decimal(
+            str(finance.service_hours_per_day)
+        )
+        coverage = _derive_contract_subsidy_coverage(facts, total_hours)
+        finance = replace(
+            finance,
+            charge_days=tuple(ClientChargeDay(day, False) for day in dates),
+            client_service_charge_waived=(
+                coverage.is_full_subsidy_order if coverage is not None else False
+            ),
+        )
     candidate = build_client_finance_terms_candidate(finance, f"contract-preview:{case_no}")
-    facts["total_hours"] = Decimal(len(dates)) * Decimal(
-        str(finance.service_hours_per_day)
-    )
+    facts["total_hours"] = total_hours
     facts["total_employer_self_pay_payable"] = sum(stage.amount.amount for stage in candidate.stage_plans)
-    facts["client_finance_self_pay_days"] = sum(len(stage.service_dates) for stage in candidate.stage_plans if stage.payment_stage.value != "deposit")
     for stage in candidate.stage_plans:
         facts[_stage_fact_key(stage.payment_stage.value, "amount")] = stage.amount.amount
         facts[_stage_fact_key(stage.payment_stage.value, "due_date")] = stage.due_date
@@ -623,11 +630,6 @@ def _extend_owner_facts(
         )
         facts["first_payment_amount"] = facts.get("first_amount")
         facts["second_payment_amount"] = facts.get("second_amount")
-        facts["client_finance_self_pay_days"] = sum(
-            len(stage.service_dates)
-            for stage in finance_candidate.stage_plans
-            if stage.payment_stage.value != "deposit"
-        )
         owners["client_finance"] = projection_fingerprint(
             {
                 "account_version": finance.account_version,
@@ -916,13 +918,18 @@ def _project_subsidy_coverage(
     total_hours = facts.get("total_hours")
     if not isinstance(identity, str) or total_hours is None:
         return
+    coverage = _derive_contract_subsidy_coverage(
+        facts, Decimal(str(total_hours))
+    )
+    if coverage is None:
+        return
+    service_hours_per_day = facts.get("service_hours_per_day")
     try:
-        from decimal import Decimal
-
-        coverage = derive_subsidy_coverage(
-            identity,
-            Decimal(str(total_hours)),
-            Decimal(str(facts.get("floor_fee") or 0)),
+        hours_per_day = Decimal(str(service_hours_per_day))
+        if hours_per_day <= 0:
+            return
+        facts["client_finance_self_pay_days"] = (
+            coverage.self_pay_service_hours / hours_per_day
         )
     except (TypeError, ValueError, ArithmeticError):
         return
@@ -943,6 +950,22 @@ def _project_subsidy_coverage(
             },
         }
     )
+
+
+def _derive_contract_subsidy_coverage(
+    facts: dict[str, object], total_hours: Decimal
+):
+    identity = facts.get("identity_status")
+    if not isinstance(identity, str):
+        return None
+    try:
+        return derive_subsidy_coverage(
+            identity,
+            total_hours,
+            Decimal(str(facts.get("floor_fee") or 0)),
+        )
+    except (TypeError, ValueError, ArithmeticError):
+        return None
 
 
 _FULL_DUE_DATE = re.compile(r"^\d{4}([/-])\d{2}\1\d{2}$")
