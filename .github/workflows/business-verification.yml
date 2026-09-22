@@ -1,0 +1,247 @@
+name: Business verification 7e12a3e
+
+on:
+  push:
+    branches: [verify/business-regression-7e12a3e-20260922]
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python ${{ matrix.mode }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [unit, mysql]
+    env:
+      APP_ENV: development
+      DB_HOST: 127.0.0.1
+      DB_PORT: '33306'
+      DB_USER: root
+      DB_PASSWORD: verification-only
+      DB_DATABASE: ''
+      LINE_CHANNEL_ACCESS_TOKEN: ''
+      LINE_CHANNEL_SECRET: ''
+      ANONYMIZED_TELEMETRY: 'False'
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+      PROOF_DIR: ${{ runner.temp }}/business-proof
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: 7e12a3e5b605261311f6339ffe01fb8f13b06b09
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - name: Record exact verification source
+        run: |
+          mkdir -p "$PROOF_DIR"
+          git rev-parse HEAD > "$PROOF_DIR/source-commit.txt"
+          git rev-parse HEAD^{tree} > "$PROOF_DIR/source-tree.txt"
+          if [ '${{ matrix.mode }}' = unit ]; then
+            git archive --format=tar HEAD > "$PROOF_DIR/source.tar"
+          fi
+      - name: Install existing locked runtime and test dependencies without build hooks
+        id: dependencies
+        run: |
+          python - <<'PY'
+          import tomllib
+          from pathlib import Path
+          from pip._vendor.packaging.markers import Marker
+          from pip._vendor.packaging.requirements import Requirement
+          lock = tomllib.loads(Path('uv.lock').read_text())
+          project = tomllib.loads(Path('pyproject.toml').read_text())
+          selected, seen = {}, set()
+          pending = [{'name': Requirement(s).name, 'extra': list(Requirement(s).extras)} for s in project['project']['dependencies']]
+          pending += [{'name': 'pytest'}, {'name': 'httpx'}]
+          while pending:
+              dep = pending.pop()
+              if dep.get('marker') and not Marker(dep['marker']).evaluate():
+                  continue
+              candidates = [p for p in lock['package'] if p['name'] == dep['name'] and (not dep.get('version') or p['version'] == dep['version'])]
+              candidates = [p for p in candidates if not p.get('resolution-markers') or any(Marker(m).evaluate() for m in p['resolution-markers'])]
+              assert len(candidates) == 1, (dep['name'], len(candidates))
+              package = candidates[0]
+              assert package['source'] == {'registry': 'https://pypi.org/simple'}, package['name']
+              key = (package['name'], package['version'], tuple(sorted(dep.get('extra', []))))
+              if key in seen:
+                  continue
+              seen.add(key)
+              selected[package['name']] = package
+              pending.extend(package.get('dependencies', []))
+              for extra in dep.get('extra', []):
+                  pending.extend(package.get('optional-dependencies', {}).get(extra, []))
+          lines = []
+          for name, package in sorted(selected.items()):
+              hashes = sorted({wheel['hash'] for wheel in package['wheels']})
+              assert hashes and all(h.startswith('sha256:') for h in hashes), name
+              lines.append(f"{name}=={package['version']} " + ' '.join('--hash=' + h for h in hashes))
+          assert 'graphifyy' not in selected and 'httpx2' not in selected
+          Path('/tmp/business-test-requirements.txt').write_text('\n'.join(lines) + '\n')
+          print('Locked runtime/test packages:', len(lines))
+          PY
+          python -m pip install --disable-pip-version-check --no-input --only-binary=:all: --require-hashes -r /tmp/business-test-requirements.txt > "$PROOF_DIR/dependencies.log" 2>&1 || { tail -60 "$PROOF_DIR/dependencies.log"; exit 1; }
+          python -m pip list --format=json > "$PROOF_DIR/installed-packages.json"
+      - name: Execute full existing Python suite without external database configuration
+        if: matrix.mode == 'unit'
+        run: |
+          set +e
+          timeout 900 python -m pytest -q --continue-on-collection-errors --tb=short --durations=20 --junitxml="$PROOF_DIR/python.xml" > "$PROOF_DIR/python.log" 2>&1
+          code=$?
+          echo "$code" > "$PROOF_DIR/python-exit-code.txt"
+          tail -70 "$PROOF_DIR/python.log"
+          exit "$code"
+      - name: Start disposable MySQL matching the existing compose image family
+        if: matrix.mode == 'mysql'
+        env:
+          MYSQL_ROOT_PASSWORD: verification-only
+        run: |
+          docker pull mysql:8.0
+          docker image inspect mysql:8.0 --format '{{json .RepoDigests}}' > "$PROOF_DIR/mysql-image.json"
+          docker run -d --name business-verification-mysql -p 127.0.0.1:33306:3306 -e MYSQL_ROOT_PASSWORD -e MYSQL_ROOT_HOST=% mysql:8.0
+          for attempt in $(seq 1 40); do
+            if docker exec -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" business-verification-mysql mysqladmin ping --silent; then exit 0; fi
+            sleep 2
+          done
+          exit 1
+      - name: Verify canonical fresh schema before business integration tests
+        if: matrix.mode == 'mysql'
+        run: |
+          python - <<'PY' > "$PROOF_DIR/mysql-schema.log" 2>&1
+          from argparse import Namespace
+          import json
+          from scripts.bootstrap_disposable_mysql_schema import bootstrap
+          result = bootstrap(Namespace(host='127.0.0.1', port=33306, user='root', password='verification-only', database='lu_test_verification_schema', confirm_database='lu_test_verification_schema'))
+          print(json.dumps(result, ensure_ascii=False))
+          PY
+      - name: Execute existing MySQL cases on distinct synthetic targets
+        if: matrix.mode == 'mysql'
+        run: |
+          cat > /tmp/business_mysql_cases.py <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+          from argparse import Namespace
+          from scripts.bootstrap_disposable_mysql_schema import bootstrap
+          out = Path(os.environ['PROOF_DIR'])
+          base_env = dict(os.environ)
+          for suffix, value in {'HOST': '127.0.0.1', 'PORT': '33306', 'USER': 'root', 'PASSWORD': 'verification-only', 'DATABASE': 'lu_test_verification_collection'}.items():
+              base_env['LABOR_UNION_TEST_MYSQL_' + suffix] = value
+              base_env['DB_' + suffix] = value
+          paths = []
+          for path in sorted(Path('tests').rglob('test_*.py')):
+              source = path.read_text()
+              if 'LABOR_UNION_TEST_MYSQL_DATABASE' in source and ('mysql' in str(path).lower() or path.name == 'test_line_delivery_public_query_route.py'):
+                  paths.append(str(path))
+          collect = subprocess.run([sys.executable, '-m', 'pytest', '--collect-only', '-q', '--continue-on-collection-errors', *paths], env=base_env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+          (out / 'mysql-collection.log').write_text(collect.stdout)
+          nodes = [line.strip() for line in collect.stdout.splitlines() if line.startswith('tests/') and '::' in line]
+          (out / 'mysql-collected.json').write_text(json.dumps(nodes, ensure_ascii=False, indent=2))
+          results = []
+          for index, node in enumerate(nodes):
+              digest = hashlib.sha256(node.encode()).hexdigest()[:18]
+              database = 'lu_test_verification_' + digest
+              env = {**base_env, 'LABOR_UNION_TEST_MYSQL_DATABASE': database, 'DB_DATABASE': database}
+              source = Path(node.split('::')[0]).read_text()
+              own_bootstrap = 'scripts.bootstrap_disposable_mysql_schema' in source
+              prefix = out / ('mysql-' + digest)
+              if not own_bootstrap:
+                  args = Namespace(host='127.0.0.1', port=33306, user='root', password='verification-only', database=database, confirm_database=database)
+                  try:
+                      bootstrap(args)
+                  except Exception as exc:
+                      results.append({'nodeid': node, 'status': 'blocked_schema_setup', 'error_type': type(exc).__name__, 'message': str(exc)})
+                      (out / 'mysql-results.json').write_text(json.dumps(results, ensure_ascii=False, indent=2))
+                      break
+              try:
+                  with prefix.with_suffix('.log').open('w') as log:
+                      run = subprocess.run([sys.executable, '-m', 'pytest', '-q', '--tb=short', '--junitxml=' + str(prefix.with_suffix('.xml')), node], env=env, stdout=log, stderr=subprocess.STDOUT, timeout=180)
+                  results.append({'nodeid': node, 'status': 'executed', 'exit_code': run.returncode})
+              except subprocess.TimeoutExpired:
+                  results.append({'nodeid': node, 'status': 'timeout'})
+              (out / 'mysql-results.json').write_text(json.dumps(results, ensure_ascii=False, indent=2))
+              print(json.dumps({'case': index + 1, 'total': len(nodes), **results[-1]}, ensure_ascii=False), flush=True)
+          print('MySQL case execution finished:', len(results))
+          sys.exit(int(not nodes or collect.returncode != 0 or len(results) != len(nodes) or any(r.get('exit_code', 1) != 0 for r in results)))
+          PY
+          PYTHONPATH="$PWD" timeout 1200 python /tmp/business_mysql_cases.py
+      - name: Record source changes caused by tests
+        if: always()
+        run: git status --short > "$PROOF_DIR/working-tree-after-tests.txt"
+      - name: Remove disposable MySQL container
+        if: always() && matrix.mode == 'mysql'
+        run: docker rm -f business-verification-mysql || true
+      - name: Upload exact test evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: business-python-${{ matrix.mode }}-7e12a3e
+          path: ${{ runner.temp }}/business-proof
+          retention-days: 1
+          if-no-files-found: error
+
+  frontend:
+    name: React tests build lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PROOF_DIR: ${{ runner.temp }}/business-proof
+      CI: 'true'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: 7e12a3e5b605261311f6339ffe01fb8f13b06b09
+          persist-credentials: false
+      - name: Install locked frontend dependencies without install hooks
+        id: dependencies
+        working-directory: ui_react
+        run: |
+          mkdir -p "$PROOF_DIR"
+          git rev-parse HEAD > "$PROOF_DIR/source-commit.txt"
+          node --version > "$PROOF_DIR/node-version.txt"
+          npm --version > "$PROOF_DIR/npm-version.txt"
+          npm ci --ignore-scripts --no-audit --fund=false > "$PROOF_DIR/npm-install.log" 2>&1 || { tail -60 "$PROOF_DIR/npm-install.log"; exit 1; }
+      - name: Run all existing React tests
+        if: always() && steps.dependencies.outcome == 'success'
+        working-directory: ui_react
+        run: |
+          set +e
+          timeout 900 npm test -- --reporter=json --outputFile="$PROOF_DIR/frontend.json" --maxWorkers=2 --minWorkers=1 > "$PROOF_DIR/frontend-test.log" 2>&1
+          code=$?
+          echo "$code" > "$PROOF_DIR/frontend-test-exit-code.txt"
+          tail -40 "$PROOF_DIR/frontend-test.log"
+          exit "$code"
+      - name: Typecheck and production build
+        if: always() && steps.dependencies.outcome == 'success'
+        working-directory: ui_react
+        run: |
+          set +e
+          npm run build > "$PROOF_DIR/frontend-build.log" 2>&1
+          code=$?
+          echo "$code" > "$PROOF_DIR/frontend-build-exit-code.txt"
+          tail -50 "$PROOF_DIR/frontend-build.log"
+          exit "$code"
+      - name: Run existing frontend lint
+        if: always() && steps.dependencies.outcome == 'success'
+        working-directory: ui_react
+        run: |
+          set +e
+          npm run lint > "$PROOF_DIR/frontend-lint.log" 2>&1
+          code=$?
+          echo "$code" > "$PROOF_DIR/frontend-lint-exit-code.txt"
+          tail -40 "$PROOF_DIR/frontend-lint.log"
+          exit "$code"
+      - name: Upload exact frontend evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: business-frontend-7e12a3e
+          path: ${{ runner.temp }}/business-proof
+          retention-days: 1
+          if-no-files-found: error
