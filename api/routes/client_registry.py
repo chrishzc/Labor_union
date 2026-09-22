@@ -26,6 +26,7 @@ from api.schemas.base import BaseResponse
 from api.schemas.client_registry import (
     BeClassCorrectionApplyRequest,
     BeClassCorrectionPreviewRequest,
+    ClientRegistryChangeHistoryItemView,
     ClientProfileAdminApplyRequest,
     ClientProfileAdminPreviewRequest,
     ClientRegistryDetailView,
@@ -175,6 +176,36 @@ def export_client_registry_order_accounting(
         raise internal_query_error(
             "client_registry_order_accounting_export_internal_error",
             "訂單帳務匯出失敗。",
+            correlation,
+        ) from error
+
+
+@router.get(
+    "/{case_no}/change-history",
+    response_model=BaseResponse[tuple[ClientRegistryChangeHistoryItemView, ...]],
+)
+def get_client_registry_change_history(
+    case_no: str = Path(..., min_length=1, max_length=50),
+    principal: AdminPrincipal = Depends(require_registry_reader),
+    application: ClientRegistryQueryApplication = Depends(get_client_registry_query_application),
+):
+    del principal
+    correlation = uuid4().hex
+    try:
+        history = application.history(case_no)
+        return BaseResponse(
+            data=tuple(
+                ClientRegistryChangeHistoryItemView.model_validate(item, from_attributes=True)
+                for item in history
+            ),
+            message="成功取得案件變更歷程",
+        )
+    except (ValueError, ClientRegistryContractError) as error:
+        raise _registry_error(error, correlation) from error
+    except (OperationalError, ProgrammingError) as error:
+        raise internal_query_error(
+            "client_registry_history_internal_error",
+            "案件變更歷程查詢失敗。",
             correlation,
         ) from error
 

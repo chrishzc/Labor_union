@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Literal, Protocol
 
 from domains.case_import.beclass_correction import VALID_MULTI_BIRTH_COUNTS
@@ -90,6 +91,16 @@ class ClientRegistryDetail:
     finance: ClientRegistryFinance
 
 
+@dataclass(frozen=True, slots=True)
+class ClientRegistryChangeHistoryItem:
+    sequence: int
+    event_type: str
+    label: str
+    reason: str
+    actor: str
+    occurred_at: datetime
+
+
 class ClientRegistryRepository(Protocol):
     def list_page(
         self,
@@ -105,6 +116,7 @@ class ClientRegistryRepository(Protocol):
         offset: int,
     ) -> tuple[tuple[Mapping[str, Any], ...], str | None, int | None]: ...
     def load_detail(self, case_no: str) -> Mapping[str, Any] | None: ...
+    def load_change_history(self, case_no: str) -> tuple[Mapping[str, Any], ...]: ...
 
 
 class ClientRegistryQueryApplication:
@@ -232,6 +244,26 @@ class ClientRegistryQueryApplication:
             ),
         )
 
+    def history(self, case_no: str) -> tuple[ClientRegistryChangeHistoryItem, ...]:
+        identity = _required_text(case_no, 50, "client_registry_case_no_invalid")
+        rows = self._repository.load_change_history(identity)
+        result: list[ClientRegistryChangeHistoryItem] = []
+        for sequence, row in enumerate(rows, start=1):
+            occurred_at = row.get("occurred_at")
+            if not isinstance(occurred_at, datetime):
+                raise ClientRegistryContractError("client_registry_history_occurred_at_invalid")
+            if occurred_at.tzinfo is None:
+                occurred_at = occurred_at.replace(tzinfo=timezone.utc)
+            result.append(ClientRegistryChangeHistoryItem(
+                sequence=sequence,
+                event_type=_required_text(row.get("event_type"), 100, "client_registry_history_event_type_invalid"),
+                label=_required_text(row.get("label"), 100, "client_registry_history_label_invalid"),
+                reason=_required_text(row.get("reason"), 500, "client_registry_history_reason_invalid"),
+                actor=_required_text(row.get("actor"), 191, "client_registry_history_actor_invalid"),
+                occurred_at=occurred_at,
+            ))
+        return tuple(result)
+
 
 def _summary(row: Mapping[str, Any]) -> ClientRegistrySummary:
     client_id = row.get("client_id")
@@ -340,6 +372,7 @@ def _normalize_sort(
 
 
 __all__ = [
+    "ClientRegistryChangeHistoryItem",
     "ClientRegistryContractError",
     "ClientRegistryDetail",
     "ClientRegistryNotFound",

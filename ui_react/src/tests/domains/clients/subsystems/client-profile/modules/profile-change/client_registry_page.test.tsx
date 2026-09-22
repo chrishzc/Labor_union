@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ClientRegistryPage } from '../../../../../../../pages/ClientRegistryPage';
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), query: vi.fn(), preview: vi.fn(), apply: vi.fn() }));
+const mocks = vi.hoisted(() => ({ list: vi.fn(), query: vi.fn(), history: vi.fn(), preview: vi.fn(), apply: vi.fn() }));
 vi.mock('../../../../../../../api/client_registry/client_registry_client', () => ({ clientRegistryClient: mocks }));
 vi.mock('../../../../../../../components/OrderTermsMutationPanel', () => ({ OrderTermsMutationPanel: () => <div>訂單條款 owner</div> }));
 
@@ -192,5 +192,24 @@ describe('Client registry owner editing', () => {
 
     expect(screen.getByRole('tabpanel', { name: '虛擬帳號匯入' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '匯入舊流程虛擬帳號' })).toBeInTheDocument();
+  });
+
+  it('shows saved change reasons in chronological step order', async () => {
+    mocks.history.mockResolvedValue([
+      { sequence: 1, event_type: 'order_terms', label: '訂單條件變更', reason: '調整服務地址', actor: 'admin-1', occurred_at: '2026-09-20T08:00:00Z' },
+      { sequence: 2, event_type: 'actual_start', label: '實際開始日確認', reason: '確認實際開始日：2026-09-22', actor: 'admin-2', occurred_at: '2026-09-22T09:30:00Z' },
+    ]);
+    render(<ClientRegistryPage />);
+
+    fireEvent.click(screen.getByRole('tab', { name: '變更歷程' }));
+    fireEvent.change(screen.getByLabelText('變更歷程案件編號'), { target: { value: ' CASE-001 ' } });
+    fireEvent.click(screen.getByRole('button', { name: '查詢' }));
+
+    await waitFor(() => expect(mocks.history).toHaveBeenCalledWith('CASE-001'));
+    const steps = await screen.findAllByRole('listitem');
+    expect(steps[0]).toHaveTextContent('1. 訂單條件變更');
+    expect(steps[0]).toHaveTextContent('調整服務地址');
+    expect(steps[1]).toHaveTextContent('2. 實際開始日確認');
+    expect(steps[1]).toHaveTextContent('確認實際開始日：2026-09-22');
   });
 });

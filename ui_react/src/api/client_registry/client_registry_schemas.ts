@@ -72,6 +72,15 @@ export const ClientRegistryPageSchema = z.strictObject({
   items: z.array(ClientRegistrySummarySchema), next_cursor: z.string().nullable(),
   next_offset: z.number().int().positive().nullable().optional(),
 });
+export const ClientRegistryChangeHistoryItemSchema = z.strictObject({
+  sequence: z.number().int().positive(),
+  event_type: z.string().min(1),
+  label: z.string().min(1),
+  reason: z.string().min(1),
+  actor: z.string().min(1),
+  occurred_at: z.string().datetime({ offset: true }),
+});
+export const ClientRegistryChangeHistorySchema = z.array(ClientRegistryChangeHistoryItemSchema);
 export const ClientRegistryDetailSchema = z.strictObject({
   case_no: z.string().min(1),
   client: z.strictObject({ client_id: z.number().int().positive(), version: z.number().int().nonnegative(), values: profileValues, field_capabilities: fieldCapabilities }),
@@ -102,6 +111,7 @@ export const RegistryMutationReceiptSchema = z.strictObject({
 const response = <T extends z.ZodTypeAny>(data: T) => z.strictObject({ success: z.boolean(), message: z.string(), data: data.nullable(), error: z.string().nullable() });
 export const ClientRegistryPageResponseSchema = response(ClientRegistryPageSchema);
 export const ClientRegistryDetailResponseSchema = response(ClientRegistryDetailSchema);
+export const ClientRegistryChangeHistoryResponseSchema = response(ClientRegistryChangeHistorySchema);
 export const RegistryMutationPreviewResponseSchema = response(RegistryMutationPreviewSchema);
 export const RegistryMutationReceiptResponseSchema = response(RegistryMutationReceiptSchema);
 
@@ -109,6 +119,7 @@ export type ClientRegistryPage = z.infer<typeof ClientRegistryPageSchema>;
 export type ClientRegistrySortBy = 'case_no' | 'customer_name' | 'service_days' | 'expected_start_date';
 export type ClientRegistrySortOrder = 'asc' | 'desc';
 export type ClientRegistryDetail = z.infer<typeof ClientRegistryDetailSchema>;
+export type ClientRegistryChangeHistoryItem = z.infer<typeof ClientRegistryChangeHistoryItemSchema>;
 export type RegistryMutationPreview = z.infer<typeof RegistryMutationPreviewSchema>;
 export type RegistryMutationReceipt = z.infer<typeof RegistryMutationReceiptSchema>;
 export type ClientProfileChanges = Partial<z.infer<typeof profileValues>>;

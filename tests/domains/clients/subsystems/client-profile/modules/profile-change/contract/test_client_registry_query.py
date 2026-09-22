@@ -1,11 +1,15 @@
 """Case-centered Client registry read-composition contract."""
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
 
-from api.routes.client_registry import get_client_registry, list_client_registry
+from api.routes.client_registry import (
+    get_client_registry,
+    get_client_registry_change_history,
+    list_client_registry,
+)
 from domains.client_finance.obligation_planning import (
     ClientChargeDay,
     ClientFinanceTermsFacts,
@@ -47,6 +51,13 @@ class _Repository:
             "order_information_issues": {},
         }
 
+    def load_change_history(self, case_no):
+        assert case_no == "CASE-001"
+        return (
+            {"event_type": "order_terms", "label": "訂單條件變更", "reason": "調整服務地址", "actor": "admin-1", "occurred_at": datetime(2026, 9, 20, 8)},
+            {"event_type": "actual_start", "label": "實際開始日確認", "reason": "確認實際開始日：2026-09-22", "actor": "admin-2", "occurred_at": datetime(2026, 9, 22, 9, 30)},
+        )
+
 
 def test_registry_list_and_detail_keep_case_identity_and_owner_versions():
     application = ClientRegistryQueryApplication(_Repository())
@@ -61,6 +72,44 @@ def test_registry_list_and_detail_keep_case_identity_and_owner_versions():
     assert detail.beclass.source_kind == "imported"
     assert detail.beclass.values["phone"] == "0922222222"
     assert detail.order_information.values["multi_birth_count"] == "雙胞胎"
+
+
+def test_registry_change_history_keeps_repository_order_and_assigns_visible_steps():
+    history = ClientRegistryQueryApplication(_Repository()).history(" CASE-001 ")
+
+    assert [(item.sequence, item.label, item.reason) for item in history] == [
+        (1, "訂單條件變更", "調整服務地址"),
+        (2, "實際開始日確認", "確認實際開始日：2026-09-22"),
+    ]
+
+
+def test_registry_change_history_route_exposes_saved_reasons_with_utc_timestamps():
+    response = get_client_registry_change_history(
+        case_no="CASE-001",
+        principal=AdminPrincipal(9, "registry-reader", "Registry Reader", "system_admin"),
+        application=ClientRegistryQueryApplication(_Repository()),
+    )
+
+    assert response.data[0].sequence == 1
+    assert response.data[0].reason == "調整服務地址"
+    assert response.data[0].occurred_at.isoformat() == "2026-09-20T08:00:00+00:00"
+
+
+def test_mysql_registry_change_history_reads_primary_events_without_derived_duplicates():
+    connection = _SqlConnection([({
+        "event_type": "actual_start", "label": "實際開始日確認", "reason": "確認日期",
+        "actor": "admin", "occurred_at": datetime(2026, 9, 22, 9, 30),
+    },)])
+
+    rows = MySqlClientRegistryQueryRepository(connection).load_change_history("CASE-001")
+
+    statement, parameters = connection.cursor_instance.statements[0]
+    assert rows[0]["reason"] == "確認日期"
+    assert "FROM order_actual_start_events" in statement
+    assert "FROM order_terms_change_events" in statement
+    assert "FROM confirmed_service_date_versions" in statement
+    assert "client_finance" not in statement and "payroll" not in statement
+    assert parameters == ("CASE-001",) * 7
 
 
 def test_registry_list_route_preserves_optional_false_and_returns_roster_fields():

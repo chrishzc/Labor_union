@@ -31,6 +31,7 @@
 ## Entrypoints
 - `GET /api/v1/admin/registries/clients` — bounded selector with optional query, BeClass effective multi-birth-count, order-status, cooking and allowlisted sort filters; the registry editor exhausts its case-number cursor, while the read-only roster uses offset pagination across all supported sorts.
 - `GET /api/v1/admin/registries/clients/{case_no}`
+- `GET /api/v1/admin/registries/clients/{case_no}/change-history` — 依時間／流程順序讀取主要人工變更事件保存的原因，不重複列出同次操作的衍生 projection events。
 - `GET /api/v1/admin/registries/clients/export/order-accounting` — 依客戶名冊 current filters 匯出每案件一列的 HCM／Orders／Client Finance XLSX。
 - `POST /api/v1/admin/registries/clients/{case_no}/profile/{preview|apply}`
 - Client registry case mapping enters through canonical `orders.case_no -> clients.id`; Client Profile remains the only writer.

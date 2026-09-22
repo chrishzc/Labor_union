@@ -18,7 +18,6 @@ const subscribeActualStart = (listener: () => void) => orderMutationFlowStore.su
 export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyChange, onOpenServiceDates }) => {
   const [query, setQuery] = useState<ActualStart | null>(null);
   const [date, setDate] = useState('');
-  const [reason, setReason] = useState('');
   const [preview, setPreview] = useState<ActualStartPreview | null>(null);
   const [phase, setPhase] = useState<Phase>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -48,7 +47,7 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
     }
     activeCaseNo.current = caseNo;
     sequence.current += 1;
-    setQuery(null); setDate(''); setReason(''); setPreview(null); setPhase('idle'); setError(null); setMissingAssignments(false);
+    setQuery(null); setDate(''); setPreview(null); setPhase('idle'); setError(null); setMissingAssignments(false);
   }, [caseNo]);
   useEffect(() => {
     mounted.current = true;
@@ -82,9 +81,8 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
     }
   };
 
-  const check = async () => {
+  const confirm = async () => {
     if (!query || query.service_data_locked || busy) return;
-    // A completed command must not block a newly previewed correction.
     if (orderMutationFlowStore.getActualStart(caseNo)?.status === 'observed') {
       orderMutationFlowStore.clearActualStart(caseNo);
     }
@@ -93,7 +91,28 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
     try {
       const data = await orderActualStartClient.preview(caseNo, { new_actual_start_date: date });
       if (data.actual_start.case_no !== caseNo || data.after_actual_start_date !== date) throw new Error('實際開始日預覽 identity 不一致。');
-      if (isActive(request, caseNo)) { setPreview(data); setPhase('idle'); }
+      if (!isActive(request, caseNo)) return;
+      if (data.client_finance_impact.blockers.length > 0 || data.payroll_impact.blockers.length > 0) {
+        setPreview(data);
+        setPhase('idle');
+        setError('實際開始日目前有阻擋事項，尚未套用。');
+        return;
+      }
+      const reason = data.before_actual_start_date === null
+        ? `確認實際開始日：${data.after_actual_start_date}`
+        : `更正實際開始日：${data.before_actual_start_date} → ${data.after_actual_start_date}`;
+      await execute({
+        payload: {
+          new_actual_start_date: data.after_actual_start_date,
+          expected_order_version: data.order_version,
+          expected_scheduling_version: data.scheduling_version,
+          expected_client_finance_version: data.client_finance_version,
+          expected_payroll_version: data.payroll_version,
+          preview_fingerprint: data.preview_fingerprint,
+          reason,
+        },
+        idempotencyKey: `beta-actual-start-${crypto.randomUUID()}`,
+      }, request, false);
     } catch (caught) {
       if (isActive(request, caseNo)) {
         const missingAssignments = (caught instanceof OrderMutationError || caught instanceof ApiHttpError)
@@ -101,7 +120,7 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
         setMissingAssignments(missingAssignments);
         setError(missingAssignments
           ? '尚未建立正式月嫂指派，本次未變更日期。請先以「計畫開始日」精算並確認正式服務日期；之後確認實際開始日時，系統會一併重排服務日期與排班。'
-          : caught instanceof Error ? caught.message : '實際開始日預覽失敗。');
+          : caught instanceof Error ? caught.message : '實際開始日確認失敗。');
         setPhase('idle');
       }
     }
@@ -130,33 +149,13 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
     orderMutationFlowStore.setActualStart(caseNo, { ...saved, status: 'observed', error: null });
     if (!isActive(request, caseNo)) return;
     setQuery(data); setDate(data.current_actual_start_date ?? data.planned_start_date);
-    setPreview(null); setReason(''); setPhase('observed');
+    setPreview(null); setPhase('observed');
     onBusyChange?.(false); onObserved?.();
   };
 
-  const apply = async (retry = false) => {
+  const execute = async (command: ActualStartCommand, request: number, recoveringUnknown: boolean) => {
     if (inFlight.current.has(caseNo)) return;
-    if (!retry && (!preview || !query || query.service_data_locked || !reason.trim() || busy
-      || preview.client_finance_impact.blockers.length > 0 || preview.payroll_impact.blockers.length > 0)) return;
-    const existing = orderMutationFlowStore.getActualStart(caseNo);
-    if (retry && existing?.status !== 'outcome_unknown') return;
-    if (existing?.status === 'applying' || existing?.receipt) return;
-    const recoveringUnknown = existing?.status === 'outcome_unknown' && existing.command !== null;
-    const command = existing?.command ?? (preview ? {
-      payload: {
-        new_actual_start_date: preview.after_actual_start_date,
-        expected_order_version: preview.order_version,
-        expected_scheduling_version: preview.scheduling_version,
-        expected_client_finance_version: preview.client_finance_version,
-        expected_payroll_version: preview.payroll_version,
-        preview_fingerprint: preview.preview_fingerprint,
-        reason: reason.trim(),
-      },
-      idempotencyKey: `beta-actual-start-${crypto.randomUUID()}`,
-    } : null);
-    if (!command) return;
     inFlight.current.add(caseNo);
-    const request = sequence.current;
     setPhase('applying'); setError(null); onBusyChange?.(true);
     orderMutationFlowStore.setActualStart(caseNo, { status: 'applying', command, receipt: null, error: null });
     try {
@@ -175,12 +174,12 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
         orderMutationFlowStore.setActualStart(caseNo, { status: 'outcome_unknown', command, receipt: null,
           error: recoveringUnknown
             ? '實際開始日結果仍未確認；請恢復權限後以原操作重新確認。'
-            : '實際開始日套用結果未明；保留原操作，只能使用相同內容與原冪等鍵重新確認。' });
+            : `實際開始日套用結果未明；保留原操作，只能使用相同內容與原冪等鍵重新確認：${caught instanceof Error ? caught.message : '未知錯誤'}` });
         if (isActive(request, caseNo)) {
           setPhase('outcome_unknown');
           setError(recoveringUnknown
             ? '實際開始日結果仍未確認；請恢復權限後以原操作重新確認。'
-            : '實際開始日套用結果未明；保留原操作，只能使用相同內容與原冪等鍵重新確認。');
+            : `實際開始日套用結果未明；保留原操作，只能使用相同內容與原冪等鍵重新確認：${caught instanceof Error ? caught.message : '未知錯誤'}`);
         }
       }
       inFlight.current.delete(caseNo);
@@ -195,6 +194,12 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
       }
       if (isActive(request, caseNo)) { setPhase('observation_failed'); setError(caught instanceof Error ? caught.message : '實際開始日回讀失敗。'); }
     } finally { inFlight.current.delete(caseNo); }
+  };
+
+  const retryApply = async () => {
+    const existing = orderMutationFlowStore.getActualStart(caseNo);
+    if (existing?.status !== 'outcome_unknown' || existing.command === null || existing.receipt) return;
+    await execute(existing.command, sequence.current, true);
   };
 
   const retryObservation = async () => {
@@ -217,7 +222,7 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
   return (
     <section aria-label={`案件 ${caseNo} 實際開始日`}>
       <h4>確認／更正實際開始日</h4>
-      <p>與正式服務日期確認分開；日期位移、排班、帳務及薪資影響以後端預覽為準。</p>
+      <p>輸入日期後一次完成正式服務日期與排班；歷史重啟不會因此新增客戶應收或月嫂應付金額。</p>
       <button type="button" disabled={busy} onClick={() => void load()}>讀取實際開始日</button>
       {phase === 'loading' && <p role="status">讀取實際開始日中…</p>}
       {query && (
@@ -228,7 +233,7 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
             <input aria-label="Beta 實際開始日期" type="date" value={date} disabled={busy || query.service_data_locked}
               onChange={(event) => { setDate(event.target.value); setPreview(null); setError(null); setMissingAssignments(false); setPhase('idle'); }} />
           </label>
-          <button type="button" disabled={busy || query.service_data_locked || !date} onClick={() => void check()}>檢查實際開始日影響</button>
+          <button type="button" disabled={busy || query.service_data_locked || !date} onClick={() => void confirm()}>確認實際開始日</button>
         </>
       )}
       {preview && (
@@ -236,21 +241,14 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
           <p>實際開始：{preview.before_actual_start_date ?? '未確認'} → {preview.after_actual_start_date}</p>
           <p>正式服務日：{preview.actual_start.official_service_dates.join('、')}</p>
           <p>正式結束：{preview.actual_end_date}；狀態：{preview.lifecycle_impact.before_status} → {preview.lifecycle_impact.after_status}</p>
-          <section aria-label="實際開始日帳務與薪資影響">
-            {preview.client_finance_impact.actions.map((action, index) => <p key={`client-${index}`}>客戶 {action.payment_stage}：{action.direction} NT$ {action.direction_amount_ntd}</p>)}
-            {preview.payroll_impact.actions.map((action, index) => <p key={`staff-${index}`}>月嫂 #{action.staff_id}：{action.direction} NT$ {action.amount.amount}</p>)}
+          <section aria-label="實際開始日阻擋事項">
             {[...preview.client_finance_impact.blockers, ...preview.payroll_impact.blockers].map((blocker, index) => <p role="alert" key={index}>{blocker}</p>)}
           </section>
-          <label>實際開始日變更原因
-            <textarea aria-label="Beta 實際開始日變更原因" value={reason} maxLength={500} disabled={busy} onChange={(event) => setReason(event.target.value)} />
-          </label>
-          <button type="button" disabled={busy || !reason.trim() || preview.client_finance_impact.blockers.length > 0 || preview.payroll_impact.blockers.length > 0}
-            onClick={() => void apply()}>確認實際開始日</button>
         </>
       )}
-      {phase === 'previewing' && <p role="status">檢查實際開始日影響中…</p>}
+      {phase === 'previewing' && <p role="status">正在確認實際開始日…</p>}
       {(flowPhase === 'applying' || flowPhase === 'observing' || phase === 'applying') && <p role="status">實際開始日套用／回讀中…</p>}
-      {(flowPhase === 'outcome_unknown' || phase === 'outcome_unknown') && <button type="button" onClick={() => void apply(true)}>以原操作重新確認實際開始日</button>}
+      {(flowPhase === 'outcome_unknown' || phase === 'outcome_unknown') && <button type="button" onClick={() => void retryApply()}>以原操作重新確認實際開始日</button>}
       {(flowPhase === 'observation_failed' || phase === 'observation_failed') && <button type="button" onClick={() => void retryObservation()}>只重新讀取實際開始日結果</button>}
       {(flowPhase === 'observed' || phase === 'observed') && <p role="status">實際開始日已完成正式回讀{query?.current_actual_start_date ? `：${query.current_actual_start_date}` : '。'}</p>}
       {(flow?.error ?? error) && <p role="alert">{flow?.error ?? error}</p>}

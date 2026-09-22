@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -53,6 +53,15 @@ class ClientRegistryPageView(_StrictModel):
     items: tuple[ClientRegistrySummaryView, ...]
     next_cursor: str | None = None
     next_offset: int | None = Field(default=None, ge=1)
+
+
+class ClientRegistryChangeHistoryItemView(_StrictModel):
+    sequence: int = Field(ge=1)
+    event_type: str = Field(min_length=1, max_length=100)
+    label: str = Field(min_length=1, max_length=100)
+    reason: str = Field(min_length=1, max_length=500)
+    actor: str = Field(min_length=1, max_length=191)
+    occurred_at: datetime
 
 
 class ClientProfileValuesView(_StrictModel):

@@ -403,11 +403,22 @@ def test_historical_actual_start_preview_projects_the_asserted_schedule_root():
         asserted_start,
         recalculated_service_dates=(asserted_start,),
         source_staff_ids=(11,),
+        source_assignment_ids=(91,),
     )
 
     assert preview.actual_start.new_actual_start_date == asserted_start
     assert preview.scheduling.assignments[0].assigned_start_date == asserted_start
-    assert preview.unpersisted_source_assignment_ids == (1,)
+    assert preview.unpersisted_source_assignment_ids == (91,)
+    assert preview.client_finance_impact.actions == ()
+    assert (
+        preview.client_finance_impact.resulting_account_version
+        == preview.client_finance_impact.expected_account_version
+    )
+    assert preview.payroll_impact.actions == ()
+    assert (
+        preview.payroll_impact.resulting_payroll_version
+        == preview.payroll_impact.expected_payroll_version
+    )
     persisted = _scheduling_persistence_candidate(preview)
     assert persisted.cancelled_assignment_ids == ()
     assert persisted.assignments[0].source_assignment_id is None

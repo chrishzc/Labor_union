@@ -2,9 +2,9 @@ import { sessionClient } from '../auth/session_client';
 import { transport } from '../shared/transport';
 import { ApiDecodeError } from '../shared/typed_errors';
 import {
-  ClientRegistryDetailResponseSchema, ClientRegistryPageResponseSchema,
+  ClientRegistryChangeHistoryResponseSchema, ClientRegistryDetailResponseSchema, ClientRegistryPageResponseSchema,
   RegistryMutationPreviewResponseSchema, RegistryMutationReceiptResponseSchema,
-  type BeClassChanges, type ClientProfileChanges, type ClientRegistryDetail,
+  type BeClassChanges, type ClientProfileChanges, type ClientRegistryChangeHistoryItem, type ClientRegistryDetail,
   type ClientRegistryPage, type ClientRegistrySortBy, type ClientRegistrySortOrder,
   type RegistryMutationPreview, type RegistryMutationReceipt,
 } from './client_registry_schemas';
@@ -71,6 +71,10 @@ export const clientRegistryClient = {
   async query(caseNo: string): Promise<ClientRegistryDetail> {
     const raw = await transport.get(`/api/v1/admin/registries/clients/${encodeURIComponent(caseNo)}`, { token: token() });
     return decode(ClientRegistryDetailResponseSchema, raw, '客戶名冊詳情回應結構異常');
+  },
+  async history(caseNo: string): Promise<ClientRegistryChangeHistoryItem[]> {
+    const raw = await transport.get(`/api/v1/admin/registries/clients/${encodeURIComponent(caseNo)}/change-history`, { token: token() });
+    return decode(ClientRegistryChangeHistoryResponseSchema, raw, '案件變更歷程回應結構異常');
   },
   async downloadOrderAccounting(request: ClientRegistryListQuery = {}): Promise<ClientRegistryExportArtifact> {
     const params = exportParams(request);

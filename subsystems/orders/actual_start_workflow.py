@@ -93,6 +93,7 @@ class ActualStartWorkflowContext:
     shared_facts: TermsWorkflowFacts
     reconfirmation: ActualStartReconfirmationFacts | None
     unpersisted_source_assignment_ids: tuple[int, ...] = ()
+    preserve_downstream_amounts: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -418,6 +419,11 @@ class ActualStartWorkflow:
         client_finance, payroll, staff_payment_due_date = _downstream_impacts(
             facts, actual_start, scheduling
         )
+        if context.preserve_downstream_amounts:
+            client_finance, payroll = _preserved_downstream_impacts(
+                client_finance,
+                payroll,
+            )
         lifecycle = _actual_start_lifecycle(facts, new_date, scheduling, client_finance, self._clock)
         return _preview_result(
             facts,
@@ -530,11 +536,16 @@ def _historical_source_context(
         # same asserted root instead of retaining the HCM planned date.
         lifecycle=replace(facts.lifecycle, actual_start_date=service_dates[0]),
     )
-    unpersisted = () if persisted_source_assignment_id is not None or facts.scheduling.segments else (source_assignment_id,)
+    # Historical evidence may retain an assignment identity from a retired
+    # generation. Only assignments present in current Scheduling facts may be
+    # cancelled or used as replacement lineage. A tombstone has no current
+    # assignments even when its evidence still names an old id.
+    unpersisted = () if facts.scheduling.segments else (source_assignment_id,)
     return ActualStartWorkflowContext(
         synthetic_facts,
         context.reconfirmation,
         unpersisted_source_assignment_ids=unpersisted,
+        preserve_downstream_amounts=not facts.scheduling.segments,
     )
 
 
@@ -693,6 +704,46 @@ def _downstream_impacts(facts, actual_start, scheduling):
     ), staff_payment_due_date
 
 
+def _preserved_downstream_impacts(client, payroll):
+    """Keep historical money facts unchanged while Actual Start forms dates.
+
+    A restarted historical tombstone has already crossed the historical
+    adoption/accounting boundary. Confirming its Actual Start may establish a
+    Scheduling generation and due dates, but it must not bootstrap missing
+    receivables or payables as if they were new charges.
+    """
+    preserved_client = replace(
+        client,
+        resulting_account_version=client.expected_account_version,
+        actions=(),
+        subsidy_return_plan=None,
+        fingerprint=fingerprint_payload(
+            {
+                "mode": "historical_actual_start_amounts_preserved",
+                "case_no": client.case_no,
+                "account_version": client.expected_account_version,
+                "settlement": client.settlement.fingerprint.value,
+            }
+        ),
+    )
+    preserved_payroll = replace(
+        payroll,
+        resulting_payroll_version=payroll.expected_payroll_version,
+        carried_rate_snapshots=(),
+        actions=(),
+        special_pay_events=(),
+        fingerprint=fingerprint_payload(
+            {
+                "mode": "historical_actual_start_amounts_preserved",
+                "case_no": payroll.case_no,
+                "payroll_version": payroll.expected_payroll_version,
+                "payroll": payroll.payroll.fingerprint.value,
+            }
+        ),
+    )
+    return preserved_client, preserved_payroll
+
+
 def _effective_staff_payment_due_date(existing_due_date, calculated_due_date):
     return existing_due_date or calculated_due_date
 
@@ -763,8 +814,16 @@ def _confirmation_command(request, candidate, settlement_identity, actual_start_
 
 
 def _persist_finance_and_payroll(repository, request, preview, event_id, assignment_resolution):
-    _persist_client_finance(repository, request, preview, event_id)
-    _persist_payroll(repository, request, preview, event_id, assignment_resolution)
+    if (
+        preview.client_finance_impact.resulting_account_version
+        != preview.client_finance_impact.expected_account_version
+    ):
+        _persist_client_finance(repository, request, preview, event_id)
+    if (
+        preview.payroll_impact.resulting_payroll_version
+        != preview.payroll_impact.expected_payroll_version
+    ):
+        _persist_payroll(repository, request, preview, event_id, assignment_resolution)
 
 
 def _persist_client_finance(repository, request, preview, event_id):

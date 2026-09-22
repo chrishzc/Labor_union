@@ -364,6 +364,31 @@ class MySqlClientRegistryQueryRepository:
             "finance_values": finance_values,
         }
 
+    def load_change_history(self, case_no: str) -> tuple[Mapping[str, Any], ...]:
+        """Read primary user-confirmed reasons without duplicating derived projections."""
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT event_type,label,reason,actor,occurred_at FROM ("
+                "SELECT 'client_profile' AS event_type,'客戶主檔變更' AS label,e.reason,e.actor_id AS actor,"
+                "e.created_at_utc AS occurred_at,1 AS source_order,e.id AS event_id "
+                "FROM client_profile_admin_change_events e JOIN orders o ON o.client_id=e.client_id WHERE o.case_no=%s "
+                "UNION ALL SELECT 'beclass_correction','BeClass 資料修正',e.reason,e.actor_id,e.created_at_utc,2,e.id "
+                "FROM beclass_record_correction_events e JOIN beclass_records r ON r.id=e.beclass_record_id WHERE r.bound_case_no=%s "
+                "UNION ALL SELECT 'order_terms','訂單條件變更',e.reason,e.actor,e.created_at,3,e.id "
+                "FROM order_terms_change_events e WHERE e.case_no=%s "
+                "UNION ALL SELECT 'service_dates','正式服務日期確認',v.reason,v.confirmed_by_actor_id,v.confirmed_at_utc,4,v.id "
+                "FROM confirmed_service_date_versions v WHERE v.case_no=%s AND NULLIF(TRIM(v.reason),'') IS NOT NULL "
+                "UNION ALL SELECT 'actual_start','實際開始日確認',e.reason,e.actor,e.created_at,5,e.id "
+                "FROM order_actual_start_events e WHERE e.case_no=%s "
+                "UNION ALL SELECT 'cancellation','訂單取消',e.reason,e.actor,e.created_at,6,e.id "
+                "FROM order_cancellation_events e WHERE e.case_no=%s "
+                "UNION ALL SELECT 'reopen','訂單重啟',e.reason,e.actor,e.created_at,7,e.id "
+                "FROM order_reopen_events e WHERE e.case_no=%s"
+                ") history ORDER BY occurred_at,source_order,event_id",
+                (case_no,) * 7,
+            )
+            return tuple(cursor.fetchall() or ())
+
 
 def _load_imported_virtual_accounts(cursor, case_nos: tuple[str, ...]) -> dict[str, tuple[str, ...]]:
     result: dict[str, list[str]] = {case_no: [] for case_no in case_nos}
