@@ -28,6 +28,7 @@ export interface OrderCoreStageProjectionQueryOptions {
   timeoutMs?: number;
   ifNoneMatch?: string;
   baseUrl?: string;
+  cache?: RequestCache;
 }
 
 export type OrderWorkbenchScope = 'in_progress' | 'completed' | 'cancelled';
@@ -107,6 +108,7 @@ function requestOptions(options?: OrderCoreStageProjectionQueryOptions): Request
     token: options?.token !== undefined ? options.token : sessionClient.getToken(),
     timeoutMs: options?.timeoutMs,
     baseUrl: options?.baseUrl,
+    cache: options?.cache ?? 'no-store',
     headers,
   };
 }

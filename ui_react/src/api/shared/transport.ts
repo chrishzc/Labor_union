@@ -19,6 +19,7 @@ export interface RequestOptions {
   timeoutMs?: number;
   signal?: AbortSignal;
   baseUrl?: string;
+  cache?: RequestCache;
 }
 
 const DEFAULT_TIMEOUT_MS = 10000;
@@ -76,6 +77,7 @@ export async function request<T = unknown>(
     timeoutMs = DEFAULT_TIMEOUT_MS,
     signal: externalSignal,
     baseUrl = '',
+    cache,
   } = options;
 
   // Build query string
@@ -143,6 +145,7 @@ export async function request<T = unknown>(
       headers: reqHeaders,
       body: serializedBody,
       signal: controller.signal,
+      cache,
     });
 
     clearTimeout(timer);
