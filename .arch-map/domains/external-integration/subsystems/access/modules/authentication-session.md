@@ -18,7 +18,6 @@ Owns admin authentication/session persistence orchestration, including the absol
 - `subsystems/access/authentication_session.py` — shared password hashing and account/session orchestration.
 - `api/dependencies/admin_auth.py` — authenticated principal and bounded registry read/write capability guards.
 - `api/schemas/account_center.py` — account creation/reset transport constraints.
-- `scripts/create_admin.py` — interactive bootstrap adapter using the shared password hasher.
 
 ## Current contract
 

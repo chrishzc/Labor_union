@@ -138,20 +138,3 @@ def _value(observed: dict[str, object], key: str, field: str):
 
 def _check(check_id: str, expected: object, observed: object) -> dict[str, object]:
     return {"check_id": check_id, "expected": expected, "observed": observed, "passed": expected == observed}
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--host", required=True)
-    parser.add_argument("--port", required=True, type=int)
-    parser.add_argument("--user", required=True)
-    parser.add_argument("--password", required=True)
-    parser.add_argument("--database", required=True)
-    parser.add_argument("--case-no", default=_NORMAL_CASE_NO)
-    result = verify(parser.parse_args())
-    print(json.dumps(result, ensure_ascii=False, sort_keys=True, default=str))
-    return 0 if result["valid"] else 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

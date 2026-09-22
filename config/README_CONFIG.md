@@ -5,20 +5,13 @@
 ## Data flow
 
 ```text
-config/*.json
-  → scripts/bootstrap_line_configuration.py --apply
-  → MySQL versioned configuration
+經認證的 React 管理端
   → typed FastAPI Query／Preview／Apply
+  → MySQL versioned configuration
   → React 管理端或 LINE worker
 ```
 
-只驗證 bootstrap JSON，不寫入資料庫：
-
-```powershell
-.\.venv\Scripts\python.exe scripts\bootstrap_line_configuration.py
-```
-
-只有目標資料庫缺少初始 revision 時才使用 `--apply`。既有正式 revision 不得被 repository JSON 靜默覆蓋。
+隔離測試用的 configuration bootstrap 命令已移除。本目錄 JSON 是 repository-owned defaults，不會自動寫入資料庫；不能以檔案存在推定初始 revision 已建立。設定操作使用下列現行 API，仍需符合其初始狀態、revision 與權限契約，既有正式 revision 不得被 JSON 靜默覆蓋。
 
 ## Bootstrap files
 

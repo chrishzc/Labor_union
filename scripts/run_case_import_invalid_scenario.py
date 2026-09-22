@@ -119,18 +119,3 @@ def _connect(arguments):
 def _require_dataset_database(database: str) -> None:
     if not _DATABASE_PATTERN.fullmatch(database):
         raise ValueError("database must match lu_test_dataset_[a-z0-9_]+")
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--host", required=True)
-    parser.add_argument("--port", type=int, required=True)
-    parser.add_argument("--user", required=True)
-    parser.add_argument("--password", required=True)
-    parser.add_argument("--database", required=True)
-    print(json.dumps(run(parser.parse_args()), ensure_ascii=False, sort_keys=True))
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

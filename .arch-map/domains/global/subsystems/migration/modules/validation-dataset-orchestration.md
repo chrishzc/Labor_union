@@ -12,12 +12,11 @@
 ## Implementation
 
 - primary:
-  - `scripts/seed_ui_validation_dataset.py`
-  - `scripts/seed_validation_dataset.py`
-  - `scripts/seed_validation_beclass_review.py`
-  - `scripts/seed_validation_finance_manual_review.py`
-  - `scripts/verify_finance_manual_review_scenario.py`
-  - `scripts/prepare_issue218_persisted_browser_fixture.py` — disposable Issue 218 browser fixture；只在指定的 `lu_test_*` schema 建立 line-agent 與合成訂單，並將一次性登入資料寫入 operator-supplied mode-600 file。
+  - `scripts/seed_ui_validation_dataset.py` — library-only；沒有獨立命令入口。
+  - `scripts/seed_validation_dataset.py` — library-only；沒有獨立命令入口。
+  - `scripts/seed_validation_beclass_review.py` — library-only；沒有獨立命令入口。
+  - `scripts/seed_validation_finance_manual_review.py` — library-only；沒有獨立命令入口。
+  - `scripts/verify_finance_manual_review_scenario.py` — library-only；沒有獨立命令入口。
   - `subsystems/validation_dataset/inspection.py`
 - config:
   - `validation/datasets/dataset_v1_foundation.json`
@@ -38,7 +37,6 @@
 ## Provenance
 
 - Validation dataset orchestration never bypasses owner commands — `source_observed` — current seed scripts and `infrastructure/mysql/beclass_import_review_writer.py`.
-- Issue 218 fixture uses the guarded disposable bootstrap then only creates synthetic browser-acceptance roots — `source_observed` — `scripts/prepare_issue218_persisted_browser_fixture.py`.
 - Finance Import manual review is an owning-domain work item, not a current anomaly projection — `source_observed` — `tests/domains/anomalies/subsystems/anomalies/modules/anomaly-registry/test_finance_anomaly_registry_contract.py`.
 
 ## Change triggers

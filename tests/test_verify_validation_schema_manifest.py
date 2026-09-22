@@ -18,7 +18,6 @@ from scripts.verify_validation_schema_manifest import (
     verify_database_objects,
     verify_manifest,
 )
-from scripts.verify_validation_database import _require_disposable_database
 
 
 def test_checked_in_validation_schema_manifest_matches_current_artifacts():
@@ -101,14 +100,3 @@ def test_full_release_is_reproducible_and_uses_a_database_token(tmp_path):
     assert DATABASE_TOKEN in release_text
     assert "CREATE OR REPLACE VIEW v_order_details" in release_text
     assert release_text == build_release_text(manifest)
-
-
-def test_database_postcheck_accepts_only_disposable_database_names():
-    assert _require_disposable_database("lu_test_validation_v1") == "lu_test_validation_v1"
-
-    try:
-        _require_disposable_database("union_db_candidate_20260803_v5")
-    except ValueError as error:
-        assert str(error) == "database must start with lu_test_"
-    else:
-        raise AssertionError("candidate database must not be accepted")

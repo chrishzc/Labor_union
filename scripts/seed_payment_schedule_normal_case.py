@@ -71,20 +71,3 @@ def _matches_manifest(existing: dict[str, object], dataset: dict[str, object]) -
         and existing["name"] == client["name"]
         and existing["phone"] == client["phone"]
     )
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--host", required=True)
-    parser.add_argument("--port", type=int, required=True)
-    parser.add_argument("--user", required=True)
-    parser.add_argument("--password", required=True)
-    parser.add_argument("--database", required=True)
-    parser.add_argument("--confirm-database", required=True)
-    parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
-    print(json.dumps(seed(parser.parse_args()), ensure_ascii=False, sort_keys=True))
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

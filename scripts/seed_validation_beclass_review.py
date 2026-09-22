@@ -226,14 +226,3 @@ def _text_items(source: dict[str, object], field: str) -> tuple[str, ...]:
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
         raise ValueError(f"{field} must be a list of text")
     return tuple(sorted(value))
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.parse_args()
-    print(seed())
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

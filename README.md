@@ -105,6 +105,8 @@ document/架構重整/   正式規格、仍有效決策與必要證據
 
 ## 驗證
 
+CI 執行 Python 語法、退役命令／文件契約、schema manifest 及 SQL release 一致性檢查；不連線資料庫。確切命令與未涵蓋的驗證範圍見 [scripts 入口與驗證](scripts/scripts_map.md)。
+
 先執行直接相關的 focused tests：
 
 ```powershell

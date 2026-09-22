@@ -13,7 +13,7 @@ fixture。
 ## Implementation
 - primary:
   - `scripts/reset_fake_database.py`
-  - `scripts/bootstrap_disposable_mysql_schema.py`
+  - `scripts/bootstrap_disposable_mysql_schema.py` — library-only；沒有獨立命令入口。
   - `scripts/verify_verification_scenarios.py`
 - entrypoints:
   - `scripts/launchers/reset_DB.bat`

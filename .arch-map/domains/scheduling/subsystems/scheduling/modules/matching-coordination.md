@@ -54,8 +54,6 @@
   - `db/schema_parts/1032_matching_holiday_work_agreements.sql` — additive immutable agreement and participant records.
   - `db/schema_parts/222_matching_plan_create_receipts.sql` — fresh-bootstrap immutable receipt root for formal matching-plan create commands; preserve upgrade uses byte-equivalent migration-only part `1039`.
   - `db/schema_parts/1039_matching_plan_create_receipts.sql` — preserve-only byte-equivalent bridge for the same receipt root; it is not a second writer or a fresh-bootstrap table.
-  - `scripts/run_contract_signing_normal_chain.py` — disposable normal-chain scenario calls the typed matching-plan create command with an explicit immutable event key.
-  - `scripts/run_holiday_work_agreement_scenario.py` — disposable `lu_test_*` scenario runner；透過 typed public API 驗證任意假日排班拒絕、雙方同意後納入服務日，以及後續拒絕立即撤銷。
 
 ## Dependencies
 - outbound: `orders/order-information` — 候選資訊使用命名投影；預覽與寄送共用相同內容，不建立虛構 assignment。
@@ -94,7 +92,6 @@
 - Historical pending-deposit typed port、borrowed-connection adapter 與 owner-local tests — `source_observed` — current source and canonical module test root.
 - Segmented availability query/repository 的 lifecycle gate 與 assignment occupancy filtering — `source_observed` — current Scheduling query and MySQL facts adapter.
 - Scheduling React entry contract — `source_observed` — same architecture-aligned module test root.
-- Holiday-work scenario runner — `source_observed` — public API scenario uses the matching coordination agreement route and service-date readback.
 - Candidate direct-coordination LIFF、24-hour worker、工會人工跟進 LIFF／群組通知、recipient-bound reply adapter 與 canonical module tests — `source_observed` — current source and architecture-aligned test root.
 - Repository test exception — `source_observed` — current flat path with relocation-sensitive schema lookup.
 

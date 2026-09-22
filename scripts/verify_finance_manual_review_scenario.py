@@ -49,20 +49,3 @@ def _checks(observed: dict[str, object]) -> list[dict[str, object]]:
 
 def _check(check_id: str, observed: object, expected: object) -> dict[str, object]:
     return {"check_id": check_id, "expected": expected, "observed": observed, "passed": observed == expected}
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--host", required=True)
-    parser.add_argument("--port", type=int, required=True)
-    parser.add_argument("--user", required=True)
-    parser.add_argument("--password", required=True)
-    parser.add_argument("--database", required=True)
-    parser.add_argument("--batch-identity", required=True)
-    result = verify(parser.parse_args())
-    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
-    return 0 if result["valid"] else 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
