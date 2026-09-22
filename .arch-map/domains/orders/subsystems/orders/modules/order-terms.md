@@ -9,6 +9,8 @@
 
 Issue #326：同一 Terms command 可承接完整替代日期與明確既有指派分配；原有跨 owner transaction 與 immutable versions 保持不變。
 
+既有歷史案件缺少約定服務開始日／服務天數，且尚未建立 Client Finance、Payroll 或服務資料鎖定時，沿用同一 owner-local Query／Preview／Apply 補齊契約條件；保留歷史 lifecycle、實際開工日與既有歷史排班證據。
+
 ## Implementation
 - primary:
   - `subsystems/orders/terms_workflow.py`
@@ -20,7 +22,7 @@ Issue #326：同一 Terms command 可承接完整替代日期與明確既有指�
   - `api/dependencies/order_terms.py`
 - entrypoints:
   - `api/routes/order_terms.py` — Orders Terms Query／Preview／Apply HTTP transport 與輸入驗證。
-  - `api/routes/order_intake_terms_bootstrap.py` — 早期進件服務條件修正與進件完成的 Preview／Apply HTTP transport。
+  - `api/routes/order_intake_terms_bootstrap.py` — 早期進件及受限歷史案件的服務條件修正，以及進件完成的 Preview／Apply HTTP transport。
 
 ## Dependencies
 - outbound: `scheduling/schedule-generation` — 由 Scheduling typed candidate 判定排班 generation 影響；Orders 不自行寫入 assignment。

@@ -4,8 +4,14 @@ import { ClientRosterPage } from '../../../../../../../pages/ClientRosterPage';
 
 const mocks = vi.hoisted(() => ({ list: vi.fn(), query: vi.fn(), downloadOrderAccounting: vi.fn() }));
 const bootstrapMocks = vi.hoisted(() => ({ status: vi.fn(), preview: vi.fn(), apply: vi.fn() }));
+const intakeMocks = vi.hoisted(() => ({ previewCompletion: vi.fn(), previewTerms: vi.fn(), applyTerms: vi.fn() }));
 vi.mock('../../../../../../../api/client_registry/client_registry_client', () => ({ clientRegistryClient: mocks }));
 vi.mock('../../../../../../../api/case_import/case_architecture_bootstrap_client', () => ({ caseArchitectureBootstrapClient: bootstrapMocks }));
+vi.mock('../../../../../../../api/orders/order_intake_completion_client', () => ({
+  orderIntakeCompletionClient: intakeMocks,
+  intakeBlockerMessage: (code: string) => code,
+  intakeRepairErrorMessage: (error: unknown) => error instanceof Error ? error.message : '補件失敗',
+}));
 
 const item = {
   client_id: 7, case_no: 'CASE-001', imported_virtual_accounts: ['009978160011500001', '009978160011500009'], built_in_virtual_account: '99781699115001', name: '王小明', phone: '0912345678', city: '新竹市', district: '東區',
@@ -19,6 +25,7 @@ describe('ClientRosterPage', () => {
     mocks.query.mockReset();
     mocks.downloadOrderAccounting.mockReset();
     Object.values(bootstrapMocks).forEach((mock) => mock.mockReset());
+    Object.values(intakeMocks).forEach((mock) => mock.mockReset());
     mocks.list.mockResolvedValue({ items: [item], next_cursor: null, next_offset: null });
     mocks.query.mockResolvedValue({
       case_no: 'CASE-001',
@@ -50,6 +57,23 @@ describe('ClientRosterPage', () => {
       case_no: 'CASE-001', order_version: 7, client_finance_version: 0, payroll_version: 0,
       scheduling_version: 0, scheduling_generation: 0, bootstrap_created: true,
       bootstrap_event_id: 81, preview_fingerprint: 'a'.repeat(64),
+    });
+    intakeMocks.previewCompletion.mockResolvedValue({
+      case_no: 'CASE-001', lifecycle_version: 7, current_status: '歷史訂單－服務中',
+      target_status: '歷史訂單－服務中', current_start_date: null, current_service_days: 26,
+      missing_fields: ['start_date'], blockers: [], apply_allowed: false,
+      preview_fingerprint: 'b'.repeat(64),
+    });
+    intakeMocks.previewTerms.mockResolvedValue({
+      case_no: 'CASE-001', lifecycle_version: 7, before_start_date: null,
+      before_service_days: 26, after_start_date: '2026-09-01', after_service_days: 26,
+      changed_fields: ['start_date'], blockers: [], apply_allowed: true,
+      preview_fingerprint: 'c'.repeat(64),
+    });
+    intakeMocks.applyTerms.mockResolvedValue({
+      receipt_key: 'historical-terms-repair', case_no: 'CASE-001', lifecycle_version: 8,
+      start_date: '2026-09-01', service_days: 26, changed_fields: ['start_date'],
+      preview_fingerprint: 'c'.repeat(64), replayed: false,
     });
   });
 
@@ -135,6 +159,43 @@ describe('ClientRosterPage', () => {
     await waitFor(() => expect(bootstrapMocks.apply).toHaveBeenCalledTimes(1));
     expect(bootstrapMocks.apply.mock.calls[0][4]).toMatch(/^case-bootstrap-repair-/);
     await waitFor(() => expect(mocks.query).toHaveBeenCalledTimes(2));
+  });
+
+  it('lets an operator fill the missing contractual start date before bootstrap repair', async () => {
+    const unavailable = {
+      ...(await mocks.query()),
+      finance: { status: 'not_ready', code: 'client_finance_bootstrap_required', values: null },
+      order_terms: { status: 'not_ready', code: 'client_finance_bootstrap_required', data: null, field_capabilities: {} },
+    };
+    mocks.query.mockReset();
+    mocks.query.mockResolvedValue(unavailable);
+    const missingDate = {
+      case_no: 'CASE-001', ready: false, scheduling_version: 1,
+      scheduling_generation: 1, service_time_complete: true,
+      domain_blockers: ['missing_start_date'], recommendation: null,
+    };
+    const repairReady = {
+      ...missingDate, domain_blockers: [],
+      recommendation: {
+        client_payment_policy_version: 'client-approved-v1', client_hourly_rate_ntd: 350,
+        deposit_service_days: 0, deposit_due_date: '2026-09-01',
+        first_payment_due_date: '2026-09-01', payroll_policy_version: 'approved-rates-v1',
+      },
+    };
+    bootstrapMocks.status.mockReset();
+    bootstrapMocks.status.mockResolvedValueOnce(missingDate).mockResolvedValue(repairReady);
+
+    render(<ClientRosterPage />);
+    fireEvent.click(await screen.findByRole('row', { name: '開啟案件 CASE-001 詳細資料' }));
+    const repair = await screen.findByLabelText('案件初始資料修復');
+    await waitFor(() => expect(intakeMocks.previewCompletion).toHaveBeenCalledWith('CASE-001'));
+    fireEvent.change(within(repair).getByLabelText('約定服務開始日'), { target: { value: '2026-09-01' } });
+    fireEvent.click(within(repair).getByRole('button', { name: '檢查約定服務資料' }));
+    await waitFor(() => expect(intakeMocks.previewTerms).toHaveBeenCalledWith('CASE-001', '2026-09-01', 26));
+    fireEvent.click(within(repair).getByRole('button', { name: '確認套用約定服務資料' }));
+    await waitFor(() => expect(intakeMocks.applyTerms).toHaveBeenCalledTimes(1));
+    expect(intakeMocks.applyTerms.mock.calls[0][3]).toMatch(/^historical-terms-repair-case-bootstrap-repair-/);
+    expect(await within(repair).findByRole('button', { name: '檢查初始資料補建內容' })).toBeInTheDocument();
   });
 
   it('moves between pages for any sort and exposes the current page above the table', async () => {

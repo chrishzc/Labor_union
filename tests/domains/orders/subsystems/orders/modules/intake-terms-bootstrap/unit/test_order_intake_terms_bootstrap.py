@@ -144,6 +144,49 @@ def test_discussion_case_can_be_corrected_when_downstream_roots_are_still_absent
     assert repository.case.status is OrderLifecycleStatus.DISCUSSION
 
 
+def test_historical_in_service_case_can_repair_missing_contract_terms_before_financial_roots_exist():
+    repository = _Repository(start_date=None, service_days=None)
+    repository.case = replace(
+        repository.case,
+        status=OrderLifecycleStatus.HISTORICAL_IN_SERVICE,
+        actual_start_date=date(2026, 9, 1),
+        scheduling_present=True,
+        scheduling_pristine=False,
+    )
+    application = OrderIntakeTermsBootstrapApplication(repository, _UnitOfWorkFactory())
+
+    preview = application.preview(_CASE, _START, _DAYS)
+
+    assert preview.apply_allowed is True
+    assert preview.changed_fields == ("start_date", "service_days")
+    receipt = application.apply(
+        _CASE, _START, _DAYS, preview.lifecycle_version,
+        preview.preview_fingerprint, "historical-terms-repair:CASE-166",
+        "orders-operator", "repair imported historical contract terms",
+    )
+    assert receipt.lifecycle_version == 8
+    assert repository.case.status is OrderLifecycleStatus.HISTORICAL_IN_SERVICE
+    assert repository.case.start_date == _START
+    assert repository.case.service_days == _DAYS
+
+
+def test_historical_terms_repair_stays_blocked_after_financial_root_exists():
+    repository = _Repository(start_date=None, service_days=None)
+    repository.case = replace(
+        repository.case,
+        status=OrderLifecycleStatus.HISTORICAL_IN_SERVICE,
+        actual_start_date=date(2026, 9, 1),
+        client_finance_present=True,
+    )
+
+    preview = OrderIntakeTermsBootstrapApplication(
+        repository, _UnitOfWorkFactory()
+    ).preview(_CASE, _START, _DAYS)
+
+    assert preview.apply_allowed is False
+    assert "order_intake_terms_bootstrap_client_finance_exists" in preview.blockers
+
+
 @pytest.mark.parametrize(
     ("overrides", "expected_blocker"),
     [

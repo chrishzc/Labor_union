@@ -17,6 +17,12 @@ _EARLY_TERMS_STATUSES = frozenset({
     OrderLifecycleStatus.PENDING_COMPLETION,
     OrderLifecycleStatus.DISCUSSION,
 })
+_HISTORICAL_TERMS_REPAIR_STATUSES = frozenset({
+    OrderLifecycleStatus.HISTORICAL_UNSERVED,
+    OrderLifecycleStatus.HISTORICAL_IN_SERVICE,
+    OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED,
+})
+_TERMS_REPAIR_STATUSES = _EARLY_TERMS_STATUSES | _HISTORICAL_TERMS_REPAIR_STATUSES
 
 
 @dataclass(frozen=True, slots=True)
@@ -353,7 +359,7 @@ def apply_case(
         or readback.lifecycle_version != new_version
         or readback.start_date != current.after_start_date
         or readback.service_days != current.after_service_days
-        or readback.status not in _EARLY_TERMS_STATUSES
+        or readback.status not in _TERMS_REPAIR_STATUSES
     ):
         raise OrderIntakeTermsBootstrapError(
             "order_intake_terms_bootstrap_readback_failed"
@@ -520,9 +526,10 @@ def _blockers(
     service_days_changed: bool,
 ) -> tuple[str, ...]:
     blockers: list[str] = []
-    if facts.status not in _EARLY_TERMS_STATUSES:
+    historical_repair = facts.status in _HISTORICAL_TERMS_REPAIR_STATUSES
+    if facts.status not in _TERMS_REPAIR_STATUSES:
         blockers.append("order_intake_terms_bootstrap_status_not_eligible")
-    if facts.actual_start_date is not None:
+    if facts.actual_start_date is not None and not historical_repair:
         blockers.append("order_intake_terms_bootstrap_actual_start_exists")
     if facts.service_data_locked:
         blockers.append("order_intake_terms_bootstrap_service_data_locked")
@@ -530,7 +537,7 @@ def _blockers(
         blockers.append("order_intake_terms_bootstrap_client_finance_exists")
     if facts.payroll_present:
         blockers.append("order_intake_terms_bootstrap_payroll_exists")
-    if facts.scheduling_present and not facts.scheduling_pristine:
+    if facts.scheduling_present and not facts.scheduling_pristine and not historical_repair:
         blockers.append("order_intake_terms_bootstrap_scheduling_not_pristine")
     if facts.service_days is not None and facts.service_days < 0:
         blockers.append("order_intake_terms_bootstrap_current_service_days_invalid")
