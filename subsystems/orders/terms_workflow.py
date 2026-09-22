@@ -477,7 +477,7 @@ def _replacement_facts(facts, terms, dates, allocations):
     ConfirmedServiceDateCandidate(facts.order.case_no, facts.order.version,
                                  facts.scheduling.aggregate_version, dates, terms.service_days)
     if any(d < terms.planned_start_date or
-           d >= terms.planned_start_date + timedelta(days=terms.service_days + 45)
+           d >= terms.planned_start_date + timedelta(days=terms.service_days + 30)
            for d in dates):
         raise ValueError("replacement_service_date_outside_selectable_range")
     segments = facts.scheduling.segments

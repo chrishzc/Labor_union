@@ -22,7 +22,7 @@ let confirmedDates: string[];
 let serviceMode: string;
 const days = (start: string, count: number) => Array.from({ length: count }, (_, i) => new Date(Date.parse(`${start}T00:00:00Z`) + i * 86400000).toISOString().slice(0, 10));
 const datesQuery = () => ({ case_no: CASE, order_version: orderVersion, scheduling_version: 0,
-  contracted_service_days: 3, suggested_dates: [], selectable_dates: days(actual ?? '2026-10-01', 48), current_version: confirmedVersion,
+  contracted_service_days: 3, suggested_dates: [], selectable_dates: days(actual ?? '2026-10-01', 33), current_version: confirmedVersion,
   current_dates: confirmedDates, bound_staff: [] });
 const startQuery = () => ({ case_no: CASE, current_actual_start_date: actual, planned_start_date: '2026-10-01', service_data_locked: false,
   order_version: orderVersion, scheduling_version: null, scheduling_generation: null, client_finance_version: null, payroll_version: null, has_formal_assignments: false });

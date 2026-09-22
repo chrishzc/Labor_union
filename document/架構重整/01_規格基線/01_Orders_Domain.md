@@ -419,6 +419,10 @@ Scheduling 規格 2026-09-22 退休獨立 agreement 的最新裁決，不恢復�
   `custom_holiday_rest_dates` 集合來反轉。
 - UI 不得自行加減、重排或提交服務日；每次覆寫都必須重新取得目標合約天數完全守恆、且全數位於
   server `selectable_dates` 的結果，才可進入既有服務日期 Preview／Apply。
+- `selectable_dates` 自本次服務開始日起，連續提供「合約服務天數＋30 個日曆日」的可選期間。
+  額外 30 天是為客戶請假、臨時中斷等情況預留的排程緩衝，不增加合約服務天數。一般確認以已確認的
+  `actual_start_date` 為基準，尚未確認時以 planned start 為基準；Terms 完整日期替換以本次擬議的
+  `planned_start_date` 為基準。開始日之前或超出該期間的日期固定拒絕。
 - 一般案件本節只確認 Orders 的事前服務日期，不得直接切換 `staff_schedule.is_work_day`、建立 assignment
   或替代正式請假／代班流程；正式排班後的請假與代班仍由 Scheduling 擁有。完成 Precision Restart、
   current effective generation 仍是空 tombstone 且歷史 caregiver assignment 可唯一追溯時，「儲存排班結果」

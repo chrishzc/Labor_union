@@ -5,7 +5,7 @@ Description: 驗證服務日期確認 Candidate、restart Scheduling handoff 與
 
 from dataclasses import replace
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date
+from datetime import date, timedelta
 from threading import Barrier, Lock
 
 import pytest
@@ -177,7 +177,8 @@ def test_selectable_dates_use_confirmed_actual_start_as_the_only_available_basis
     )
 
     assert selectable[0] == expected_start
-    assert len(selectable) == 55
+    assert len(selectable) == 40
+    assert selectable[-1] == expected_start + timedelta(days=39)
 
 
 def test_selectable_range_exposes_the_first_ten_consecutive_dates_from_actual_start():

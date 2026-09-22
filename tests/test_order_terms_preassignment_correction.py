@@ -833,6 +833,7 @@ def test_apply_http_contract_accepts_absent_downstream_versions():
     ((date(2026, 9, 10),), ((9, 3),), 'service date count'),
     ((date(2026, 9, 10),) * 3, ((9, 3),), 'unique and sorted'),
     ((date(2026, 9, 1), date(2026, 9, 2), date(2026, 9, 3)), ((9, 3),), 'outside_selectable_range'),
+    ((date(2026, 10, 13), date(2026, 10, 14), date(2026, 10, 15)), ((9, 3),), 'outside_selectable_range'),
     ((date(2026, 9, 10), date(2026, 9, 12), date(2026, 9, 14)), ((999, 3),), 'scheduling_reallocation_required'),
 ])
 def test_invalid_replacement_is_rejected_without_writes(dates, allocation, error):
