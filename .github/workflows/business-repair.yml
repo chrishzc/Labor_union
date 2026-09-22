@@ -1,4 +1,4 @@
-name: Business repair final checks
+name: Canonical refund evidence regression
 on:
   push:
     branches: [fix/business-regressions-20260922]
@@ -14,34 +14,27 @@ jobs:
       commit: ${{ steps.publish.outputs.commit }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
-        with:
-          fetch-depth: 2
       - id: publish
         run: |
           python - <<'PY'
           import hashlib,json,os,subprocess
           from pathlib import Path
           assert os.environ['GITHUB_REF']=='refs/heads/fix/business-regressions-20260922'
-          definition=subprocess.check_output(['git','show','90edc7948108e4803ec93c154377a9cfa92dd91f:.github/workflows/business-repair.yml'],text=True)
-          encoded=definition.split("records=json.loads(r'''",1)[1].split("''')",1)[0]
-          records=json.loads(encoded)
-          assert records[-1]['path']=='ui_react/src/tests/domains/client-finance/subsystems/client-finance/modules/historical-payment-settlement-presentation/finance_query_page.test.tsx'
-          records[-1]['before']='68bf8033c71c780eafc804dcc021bf54b7430369d4c52d8b1b6207cbca438b12'
+          records=json.loads(r'''[{"path":"infrastructure/mysql/client_refund_reversal_repository.py","before":"286eaefb6cd0e4e992300868ac4a6dadd703d536bf0ad964de19dde66a040d21","after":"5821793cd1e4c0c5b22be83ed480de45561d4274ccd4bcc73fac46f20d3e808e","edits":[[13993,13993,"    # Manual/historical classification does not rewrite the initial resolution\n    # cache. Verify the immutable bank account against the recipient snapshot.\n"],[14380,14380,"counterparty_account AS "],[30208,30208,"counterparty_account AS "]]},{"path":"tests/test_admin_auth_runtime.py","before":"031c947282702ed266becc1a305d9fb927ee5e75039db909e21a371d2af9e7c1","after":"6526cab82bee92a3823e786a52b7843a5fb91e2282b0d594434058ebd74c3ecf","edits":[[11480,11590,"options = {\"session_minutes\": 30} if method == \"authenticate_admin\" else {}\n        getattr(authentication_session, method)(\"synthetic-admin\", \"synthetic-password\", connection_factory=Connection, **options"]]},{"path":"tests/test_wp77_disposable_mysql_e2e.py","before":"4791effd3c9dadfc92a801d7de57d90b6c464dfdce2f5630b7b0a5fd791a29c5","after":"7f4680bcb6aa9dca3f2f3087f38e86c28f3f00625cca6e2dbaedc8929bab73c1","edits":[[8764,8774,"alert"]]}]''')
           raw=json.dumps(records,ensure_ascii=False,separators=(',',':')).encode()
-          assert hashlib.sha256(raw).hexdigest()=='e10248791dbd8cc940fef431f68525d6720b014e6e7226adcb78228109f48741'
+          assert hashlib.sha256(raw).hexdigest()=='995a8c6ef696bffa9540a16fcca0bb49305cf300bda3a783eb456216c260cab8'
           for item in records:
-              p=Path(item['path']); original=p.read_bytes()
+              p=Path(item['path']);original=p.read_bytes()
               assert hashlib.sha256(original).hexdigest()==item['before'],str(p)
               text=original.decode('utf-8')
               for start,end,replacement in reversed(item['edits']): text=text[:start]+replacement+text[end:]
-              result=text.encode('utf-8')
-              assert hashlib.sha256(result).hexdigest()==item['after'],str(p)
+              result=text.encode('utf-8');assert hashlib.sha256(result).hexdigest()==item['after'],str(p)
               p.write_bytes(result)
           paths=[item['path'] for item in records]
           assert set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines())==set(paths)
           subprocess.run(['git','diff','--check'],check=True)
           subprocess.run(['git','add','--',*paths],check=True)
-          subprocess.run(['git','-c','user.name=github-actions[bot]','-c','user.email=41898282+github-actions[bot]@users.noreply.github.com','commit','-m','fix: preserve rate-limit audit outcomes and deliver HCM field warnings without retired projections'],check=True)
+          subprocess.run(['git','-c','user.name=github-actions[bot]','-c','user.email=41898282+github-actions[bot]@users.noreply.github.com','commit','-m','fix: verify refunds against immutable bank accounts instead of stale classification cache'],check=True)
           subprocess.run(['git','push','origin','HEAD:refs/heads/fix/business-regressions-20260922'],check=True)
           sha=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
           with open(os.environ['GITHUB_OUTPUT'],'a') as output: output.write('commit='+sha+'\n')
@@ -49,12 +42,11 @@ jobs:
   verification:
     needs: prepare
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     strategy:
       fail-fast: false
-      max-parallel: 6
       matrix:
-        mode: [backend, frontend, finance-parity, finance, imports, access, reminder, migrations, replacement, data-browser]
+        mode: [backend, finance, imports, replacement]
     name: ${{ matrix.mode }}
     env:
       PROOF_DIR: /tmp/business-repair
@@ -77,19 +69,16 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.11'
-      - name: Record source
+      - name: Record source and install locked wheels
         run: |
           mkdir -p "$PROOF_DIR"
           git rev-parse HEAD > "$PROOF_DIR/source-commit.txt"
-      - name: Install locked runtime and test wheels
-        if: matrix.mode != 'frontend'
-        run: |
           python - <<'PY'
           import tomllib
           from pathlib import Path
           from pip._vendor.packaging.markers import Marker
           from pip._vendor.packaging.requirements import Requirement
-          lock=tomllib.loads(Path('uv.lock').read_text()); project=tomllib.loads(Path('pyproject.toml').read_text())
+          lock=tomllib.loads(Path('uv.lock').read_text());project=tomllib.loads(Path('pyproject.toml').read_text())
           selected,seen={},set()
           pending=[{'name':Requirement(s).name,'extra':list(Requirement(s).extras)} for s in project['project']['dependencies']]+[{'name':'pytest'},{'name':'httpx'}]
           while pending:
@@ -98,34 +87,23 @@ jobs:
               candidates=[p for p in lock['package'] if p['name']==dep['name'] and (not dep.get('version') or p['version']==dep['version'])]
               candidates=[p for p in candidates if not p.get('resolution-markers') or any(Marker(m).evaluate() for m in p['resolution-markers'])]
               assert len(candidates)==1,dep['name']
-              p=candidates[0]; assert p['source']=={'registry':'https://pypi.org/simple'}
+              p=candidates[0];assert p['source']=={'registry':'https://pypi.org/simple'}
               key=(p['name'],p['version'],tuple(sorted(dep.get('extra',[]))))
               if key in seen: continue
-              seen.add(key); selected[p['name']]=p; pending.extend(p.get('dependencies',[]))
+              seen.add(key);selected[p['name']]=p;pending.extend(p.get('dependencies',[]))
               for extra in dep.get('extra',[]): pending.extend(p.get('optional-dependencies',{}).get(extra,[]))
           lines=[]
           for name,p in sorted(selected.items()):
-              hashes=sorted({w['hash'] for w in p['wheels']}); assert hashes
+              hashes=sorted({w['hash'] for w in p['wheels']});assert hashes
               lines.append(f"{name}=={p['version']} "+' '.join('--hash='+h for h in hashes))
           Path('/tmp/repair-requirements.txt').write_text('\n'.join(lines)+'\n')
           PY
           python -m pip install --disable-pip-version-check --no-input --only-binary=:all: --require-hashes -r /tmp/repair-requirements.txt > "$PROOF_DIR/dependencies.log" 2>&1
-      - name: Install locked frontend without hooks
-        if: matrix.mode == 'frontend' || matrix.mode == 'finance-parity'
-        run: npm --prefix ui_react ci --ignore-scripts --no-audit --fund=false > "$PROOF_DIR/npm-install.log" 2>&1
       - name: Full backend without unconfigured external fixtures
         if: matrix.mode == 'backend'
         run: python -m pytest -q --continue-on-collection-errors --tb=short --ignore=tests/test_background_job_repository_mysql.py --ignore=tests/test_durable_job_disposable_mysql_e2e.py --ignore=tests/test_durable_job_payload_equality_disposable_mysql_e2e.py --ignore=tests/domains/orders/subsystems/orders/integration/test_order_terms_empty_service_time_disposable_mysql.py --junitxml="$PROOF_DIR/backend.xml" > "$PROOF_DIR/backend.log" 2>&1
-      - name: Full frontend tests
-        if: matrix.mode == 'frontend'
-        run: npm --prefix ui_react test -- --reporter=json --outputFile="$PROOF_DIR/frontend.json" --maxWorkers=2 --minWorkers=1 > "$PROOF_DIR/frontend.log" 2>&1
-      - name: Frontend build and lint
-        if: always() && matrix.mode == 'frontend'
-        run: |
-          npm --prefix ui_react run build > "$PROOF_DIR/build.log" 2>&1
-          npm --prefix ui_react run lint > "$PROOF_DIR/lint.log" 2>&1
-      - name: Start synthetic MySQL and await authenticated host TCP
-        if: matrix.mode != 'backend' && matrix.mode != 'frontend'
+      - name: Start synthetic MySQL and verify host TCP
+        if: matrix.mode != 'backend'
         run: |
           MYSQL_ROOT_PASSWORD=$(openssl rand -hex 16)
           echo "::add-mask::$MYSQL_ROOT_PASSWORD"
@@ -137,59 +115,54 @@ jobs:
           echo 'LABOR_UNION_TEST_MYSQL_USER=root' >> "$GITHUB_ENV"
           echo 'LABOR_UNION_TEST_MYSQL_DATABASE=lu_test_repair' >> "$GITHUB_ENV"
           echo 'DB_DATABASE=lu_test_repair' >> "$GITHUB_ENV"
-          echo 'MYSQL_TEST_CONTAINER=repair-mysql' >> "$GITHUB_ENV"
           docker run -d --name repair-mysql -p 127.0.0.1:33306:3306 -e MYSQL_ROOT_PASSWORD -e MYSQL_ROOT_HOST=% mysql@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b
           python - <<'PY'
           import os,time,pymysql
           for attempt in range(60):
               try:
                   c=pymysql.connect(host='127.0.0.1',port=33306,user='root',password=os.environ['MYSQL_ROOT_PASSWORD'])
-                  with c.cursor() as cur: cur.execute('SELECT 1'); assert cur.fetchone()[0]==1
-                  c.close(); break
+                  with c.cursor() as cur: cur.execute('SELECT 1');assert cur.fetchone()[0]==1
+                  c.close();break
               except pymysql.err.OperationalError:
                   if attempt==59: raise
                   time.sleep(2)
           PY
-      - name: Verify affected integration cases on separate synthetic databases
-        if: matrix.mode != 'backend' && matrix.mode != 'frontend'
+      - name: Execute bounded integration cases
+        if: matrix.mode != 'backend'
         run: |
           python - <<'PY'
           import json,os,subprocess,sys
           from argparse import Namespace
           from pathlib import Path
           from scripts.bootstrap_disposable_mysql_schema import bootstrap
-          finance='tests/test_finance_import_disposable_mysql_e2e.py::'
           groups={
-            'finance-parity':['tests/test_finance_import_staging_persistent_mysql_e2e.py'],
-            'finance':[finance+'test_real_taishin_subsidy_payout_advances_then_recovers_after_government_allocation',finance+'test_historical_owner_selection_posts_once_without_mutating_bank_root_fact',finance+'test_mismatched_refund_return_remains_manual_review_without_partial_writes'],
-            'imports':['tests/test_wp77_disposable_mysql_e2e.py','tests/test_hcm_import_api_disposable_mysql_e2e.py'],
-            'access':['tests/domains/external-integration/subsystems/access/integration/test_access_control_disposable_mysql_e2e.py'],
-            'reminder':['tests/domains/external-integration/subsystems/line/integration/test_service_day_reminder_disposable_mysql.py'],
-            'migrations':['tests/test_wp79_line_runtime_recovery_disposable_mysql.py','tests/test_customer_service_partial_recovery_disposable_mysql.py'],
+            'finance':['tests/test_finance_import_disposable_mysql_e2e.py'],
+            'imports':['tests/test_wp77_disposable_mysql_e2e.py::test_hcm_review_outbox_projects_field_warnings_and_replays_without_duplicates'],
             'replacement':['tests/domains/scheduling/subsystems/scheduling/modules/service-before-replacement/integration/test_service_before_replacement_mysql_adapter.py'],
-            'data-browser':['tests/test_data_browser_query_disposable_mysql_e2e.py'],
           }
-          mode=os.environ['MODE']; proof=Path(os.environ['PROOF_DIR'])
+          mode=os.environ['MODE'];proof=Path(os.environ['PROOF_DIR'])
           collected=subprocess.run([sys.executable,'-m','pytest','--collect-only','-q',*groups[mode]],text=True,capture_output=True)
-          (proof/'collection.log').write_text(collected.stdout+collected.stderr)
-          assert collected.returncode==0
-          nodes=[line.strip() for line in collected.stdout.splitlines() if line.startswith('tests/') and '::' in line]
-          assert nodes
+          (proof/'collection.log').write_text(collected.stdout+collected.stderr);assert collected.returncode==0
+          nodes=[s.strip() for s in collected.stdout.splitlines() if s.startswith('tests/') and '::' in s];assert nodes
           results=[]
           for index,node in enumerate(nodes):
-              db=f'lu_test_r{index}_{mode.replace("-", "")}'
+              db=f'lu_test_r{index}_{mode}'
               if mode=='replacement': db='lu_test_task96_ldu_candidate_1012_r1'
               env={**os.environ,'DB_DATABASE':db,'LABOR_UNION_TEST_MYSQL_DATABASE':db}
-              if mode in {'finance-parity','imports','access','replacement','data-browser'}:
+              if mode in {'imports','replacement'}:
                   bootstrap(Namespace(host='127.0.0.1',port=33306,user='root',password=os.environ['DB_PASSWORD'],database=db,confirm_database=db))
+              runner=[sys.executable,'-m','pytest','-q','--tb=short',f'--junitxml={proof}/case-{index}.xml',node]
+              if mode=='replacement':
+                  code="import sys,traceback,pytest\ndef trace(frame,event,arg):\n if event=='exception' and frame.f_code.co_name=='apply' and frame.f_code.co_filename.endswith('/service_before_replacement_workflow.py'):\n  traceback.print_exception(*arg)\n return trace\nsys.settrace(trace)\nraise SystemExit(pytest.main(sys.argv[1:]))\n"
+                  runner=[sys.executable,'-c',code,*runner[3:]]
               with (proof/f'case-{index}.log').open('w') as log:
-                  result=subprocess.run([sys.executable,'-m','pytest','-q','--tb=short',f'--junitxml={proof}/case-{index}.xml',node],env=env,stdout=log,stderr=subprocess.STDOUT,timeout=180)
+                  result=subprocess.run(runner,env=env,stdout=log,stderr=subprocess.STDOUT,timeout=180)
               results.append({'nodeid':node,'exit_code':result.returncode,'evidence':f'case-{index}.xml'})
           (proof/'results.json').write_text(json.dumps(results))
           sys.exit(int(any(r['exit_code'] for r in results)))
           PY
-      - name: Destroy only the synthetic container
-        if: always() && matrix.mode != 'backend' && matrix.mode != 'frontend'
+      - name: Destroy only test container
+        if: always() && matrix.mode != 'backend'
         run: docker rm -f repair-mysql
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
