@@ -1,4 +1,4 @@
-name: Final exact-money and replacement verification
+name: LINE query fixture and read-only integration
 on:
   push:
     branches: [fix/business-regressions-20260922]
@@ -20,44 +20,41 @@ jobs:
           import hashlib,json,os,subprocess
           from pathlib import Path
           assert os.environ['GITHUB_REF']=='refs/heads/fix/business-regressions-20260922'
-          records=json.loads(r'''[{"path":"domains/government_subsidy/claims.py","before":"12e3d00586f20d7bbb7a2db7ea604a46f42828b11dbab8c427667cab4a77b99d","after":"4307e53b304e1f7112f99dee8acdaaa5aa39505800dd13c1354da57fc50451e1","edits":[[469,485,""],[7282,7393,"hours_numerator, hours_denominator = assignment.official_service_hours.as_integer_ratio()\n    requested_ntd, remainder = divmod(\n        source.unit_price_ntd.amount * hours_numerator, hours_denominator\n    )\n    if remainder:\n        raise ValueError(\"half-hour subsidy amount must resolve to whole NTD\")\n    requested = MoneyNTD(requested_ntd"]]},{"path":"tests/domains/government-subsidy/subsystems/government-subsidy/integration/test_government_subsidy_claim_workflow.py","before":"a71e9c7e8ab1051e5787ede1bc77986a7ef9454d65839e734ac70c39b8bc3cae","after":"8712d84da7244d4ccec7a4e6a6744e1fd783c15ae94ef8826a6826d0111bcd40","edits":[[4360,4360,"    (1.0, 1, 2**53 + 1, 2**53 + 1),\n    (0.5, 1, 2**54 + 2, 2**53 + 1),\n"]]},{"path":"tests/domains/scheduling/subsystems/scheduling/modules/service-before-replacement/integration/test_service_before_replacement_mysql_adapter.py","before":"991da35bd92500719ca070e1782f2bb6cb3e70ec18bc711e67f70232228dea11","after":"93ff1f5e0140af4a4c7f6261b1170dc625201e63457542d19eb9cbed3c47028f","edits":[[1880,1954,", prior_event_identity = _seed_prerequisites(connection, case_no)\n        facts = _facts(case_no, prior_event_identity"],[2600,2600,", prior_event_identity"],[5419,5435,"tuple[dict[str, object], str"],[7527,7527,"        cursor.execute(\n            \"INSERT INTO scheduling_rebuild_events \"\n            \"(case_no,new_generation_id,expected_order_version,expected_scheduling_version,\"\n            \"resulting_scheduling_version,preview_fingerprint,idempotency_key,actor,reason,correlation_id) \"\n            \"VALUES (%s,%s,0,7,8,%s,%s,'task96-rpre','fixture',%s)\",\n            (case_no, prior_generation_id, fingerprint_payload({\"case_no\": case_no}).value,\n             f\"fixture-rebuild:{case_no.lower()}\", f\"correlation:{case_no}:rebuild\"),\n        )\n        prior_event_identity = f\"scheduling-rebuild-event:{case_no}:{int(cursor.lastrowid)}\"\n"],[10334,10334,", prior_event_identity"],[10360,10360,", prior_event_identity: str"],[10959,10980,"prior_event_identity"],[11355,11355,", prior_event_identity: str"],[11611,11632,"prior_event_identity"]]}]''')
-          assert hashlib.sha256(json.dumps(records,ensure_ascii=False,separators=(',',':')).encode()).hexdigest()=='0ee9e12c1f0c9fd04ab2f793bd589084e905ceee83ea0bef98547cc8136879f5'
+          records=json.loads(r'''[{"path":"tests/test_line_delivery_public_query_route.py","before":"99da38546d43ed1e43101770911cecda16fcc57e09f54b315bf7d84c2c216b73","after":"a6e90293aab54d5f26a9a1af5185b6542ce730baabd4dedac2dfceca84a9b904","edits":[[12929,13177,"from scripts.bootstrap_disposable_mysql_schema import bootstrap\n\n        _assert_disposable_schema_name(name)\n        bootstrap(Namespace(\n            host=self._values[\"LABOR_UNION_TEST_MYSQL_HOST\"],\n            port=int(self._values[\"LABOR_UNION_TEST_MYSQL_PORT\"]),\n            user=self._values[\"LABOR_UNION_TEST_MYSQL_USER\"],\n            password=self._values[\"LABOR_UNION_TEST_MYSQL_PASSWORD\"],\n            database=name,\n            confirm_database=name,\n        )"],[15027,15503,""]]}]''')
+          assert hashlib.sha256(json.dumps(records,ensure_ascii=False,separators=(',',':')).encode()).hexdigest()=='af8cda3d10db8fabeed6a836d9d5fdf4f3821b81c54a08f57a618426742b2c38'
           for item in records:
-              p=Path(item['path']);original=p.read_bytes();assert hashlib.sha256(original).hexdigest()==item['before'],str(p)
+              p=Path(item['path']);original=p.read_bytes();assert hashlib.sha256(original).hexdigest()==item['before']
               text=original.decode('utf-8')
               for start,end,replacement in reversed(item['edits']): text=text[:start]+replacement+text[end:]
-              result=text.encode('utf-8');assert hashlib.sha256(result).hexdigest()==item['after'],str(p)
-              p.write_bytes(result)
+              result=text.encode('utf-8');assert hashlib.sha256(result).hexdigest()==item['after'];p.write_bytes(result)
           paths=[item['path'] for item in records]
           assert set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines())==set(paths)
           subprocess.run(['git','diff','--check'],check=True);subprocess.run(['git','add','--',*paths],check=True)
-          subprocess.run(['git','-c','user.name=github-actions[bot]','-c','user.email=41898282+github-actions[bot]@users.noreply.github.com','commit','-m','fix: preserve exact NTD arithmetic and provide real replacement predecessor evidence'],check=True)
+          subprocess.run(['git','-c','user.name=github-actions[bot]','-c','user.email=41898282+github-actions[bot]@users.noreply.github.com','commit','-m','fix(tests): give the LINE query fixture one canonical schema creation owner'],check=True)
           subprocess.run(['git','push','origin','HEAD:refs/heads/fix/business-regressions-20260922'],check=True)
           sha=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
-          with open(os.environ['GITHUB_OUTPUT'],'a') as output: output.write('commit='+sha+'\n')
+          with open(os.environ['GITHUB_OUTPUT'],'a') as output:output.write('commit='+sha+'\n')
           PY
   verification:
     needs: prepare
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        mode: [backend, subsidy, replacement]
-    name: ${{ matrix.mode }}
+    timeout-minutes: 10
     env:
       PROOF_DIR: /tmp/business-repair
       APP_ENV: development
       DB_HOST: 127.0.0.1
       DB_PORT: '33306'
-      DB_USER: root
-      DB_DATABASE: ''
+      DB_USER: repair_reader
+      DB_DATABASE: lu_test_line_delivery_public_query_20260820_a1
+      LABOR_UNION_TEST_MYSQL_HOST: 127.0.0.1
+      LABOR_UNION_TEST_MYSQL_PORT: '33306'
+      LABOR_UNION_TEST_MYSQL_USER: repair_reader
+      LABOR_UNION_TEST_MYSQL_DATABASE: lu_test_line_delivery_public_query_20260820_a1
       LINE_CHANNEL_ACCESS_TOKEN: ''
       LINE_CHANNEL_SECRET: ''
       ANONYMIZED_TELEMETRY: 'False'
       PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
       CI: 'true'
-      MODE: ${{ matrix.mode }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
@@ -79,14 +76,14 @@ jobs:
           selected,seen={},set();pending=[{'name':Requirement(s).name,'extra':list(Requirement(s).extras)} for s in project['project']['dependencies']]+[{'name':'pytest'},{'name':'httpx'}]
           while pending:
               dep=pending.pop()
-              if dep.get('marker') and not Marker(dep['marker']).evaluate(): continue
+              if dep.get('marker') and not Marker(dep['marker']).evaluate():continue
               candidates=[p for p in lock['package'] if p['name']==dep['name'] and (not dep.get('version') or p['version']==dep['version'])]
               candidates=[p for p in candidates if not p.get('resolution-markers') or any(Marker(m).evaluate() for m in p['resolution-markers'])]
               assert len(candidates)==1,dep['name'];p=candidates[0];assert p['source']=={'registry':'https://pypi.org/simple'}
               key=(p['name'],p['version'],tuple(sorted(dep.get('extra',[]))))
-              if key in seen: continue
+              if key in seen:continue
               seen.add(key);selected[p['name']]=p;pending.extend(p.get('dependencies',[]))
-              for extra in dep.get('extra',[]): pending.extend(p.get('optional-dependencies',{}).get(extra,[]))
+              for extra in dep.get('extra',[]):pending.extend(p.get('optional-dependencies',{}).get(extra,[]))
           lines=[]
           for name,p in sorted(selected.items()):
               hashes=sorted({w['hash'] for w in p['wheels']});assert hashes
@@ -94,65 +91,40 @@ jobs:
           Path('/tmp/repair-requirements.txt').write_text('\n'.join(lines)+'\n')
           PY
           python -m pip install --disable-pip-version-check --no-input --only-binary=:all: --require-hashes -r /tmp/repair-requirements.txt > "$PROOF_DIR/dependencies.log" 2>&1
-      - name: Full backend without unconfigured external fixtures
-        if: matrix.mode == 'backend'
-        run: python -m pytest -q --continue-on-collection-errors --tb=short --ignore=tests/test_background_job_repository_mysql.py --ignore=tests/test_durable_job_disposable_mysql_e2e.py --ignore=tests/test_durable_job_payload_equality_disposable_mysql_e2e.py --ignore=tests/domains/orders/subsystems/orders/integration/test_order_terms_empty_service_time_disposable_mysql.py --junitxml="$PROOF_DIR/backend.xml" > "$PROOF_DIR/backend.log" 2>&1
-      - name: Start synthetic MySQL and verify host TCP
-        if: matrix.mode != 'backend'
+      - name: Prepare one-schema non-root account on a disposable server
         run: |
           MYSQL_ROOT_PASSWORD=$(openssl rand -hex 16)
+          DB_PASSWORD=$(openssl rand -hex 16)
           echo "::add-mask::$MYSQL_ROOT_PASSWORD"
-          export MYSQL_ROOT_PASSWORD
-          echo "DB_PASSWORD=$MYSQL_ROOT_PASSWORD" >> "$GITHUB_ENV"
-          echo "LABOR_UNION_TEST_MYSQL_PASSWORD=$MYSQL_ROOT_PASSWORD" >> "$GITHUB_ENV"
-          echo 'LABOR_UNION_TEST_MYSQL_HOST=127.0.0.1' >> "$GITHUB_ENV"
-          echo 'LABOR_UNION_TEST_MYSQL_PORT=33306' >> "$GITHUB_ENV"
-          echo 'LABOR_UNION_TEST_MYSQL_USER=root' >> "$GITHUB_ENV"
-          echo 'LABOR_UNION_TEST_MYSQL_DATABASE=lu_test_repair' >> "$GITHUB_ENV"
-          echo 'DB_DATABASE=lu_test_repair' >> "$GITHUB_ENV"
-          docker run -d --name repair-mysql -p 127.0.0.1:33306:3306 -e MYSQL_ROOT_PASSWORD -e MYSQL_ROOT_HOST=% mysql@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b
+          echo "::add-mask::$DB_PASSWORD"
+          export MYSQL_ROOT_PASSWORD DB_PASSWORD
+          echo "DB_PASSWORD=$DB_PASSWORD" >> "$GITHUB_ENV"
+          echo "LABOR_UNION_TEST_MYSQL_PASSWORD=$DB_PASSWORD" >> "$GITHUB_ENV"
+          docker run -d --name repair-mysql -p 127.0.0.1:33306:3306 -e MYSQL_ROOT_PASSWORD -e MYSQL_ROOT_HOST=% mysql@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b --log-bin-trust-function-creators=1
           python - <<'PY'
           import os,time,pymysql
           for attempt in range(60):
               try:
                   c=pymysql.connect(host='127.0.0.1',port=33306,user='root',password=os.environ['MYSQL_ROOT_PASSWORD'])
-                  with c.cursor() as cur: cur.execute('SELECT 1');assert cur.fetchone()[0]==1
-                  c.close();break
+                  with c.cursor() as cur:cur.execute('SELECT 1');assert cur.fetchone()[0]==1
+                  break
               except pymysql.err.OperationalError:
-                  if attempt==59: raise
+                  if attempt==59:raise
                   time.sleep(2)
+          with c.cursor() as cur:
+              cur.execute("CREATE USER 'repair_reader'@'%' IDENTIFIED BY %s",(os.environ['DB_PASSWORD'],))
+              cur.execute("GRANT ALL PRIVILEGES ON `lu_test_line_delivery_public_query_20260820_a1`.* TO 'repair_reader'@'%'")
+          c.commit();c.close()
           PY
-      - name: Execute exact subsidy and replacement contracts
-        if: matrix.mode != 'backend'
-        run: |
-          python - <<'PY'
-          import json,os,subprocess,sys
-          from argparse import Namespace
-          from pathlib import Path
-          from scripts.bootstrap_disposable_mysql_schema import bootstrap
-          mode=os.environ['MODE'];proof=Path(os.environ['PROOF_DIR'])
-          if mode=='subsidy':
-              nodes=['tests/test_government_subsidy_durable_mysql_e2e.py::test_government_subsidy_'+name+'_durable_crash_recovery_and_duplicate_apply' for name in ['submission','claim_plan','approval']]
-          else:
-              nodes=['tests/domains/scheduling/subsystems/scheduling/modules/service-before-replacement/integration/test_service_before_replacement_mysql_adapter.py::test_r02_apply_replay_and_exact_mysql_readback']
-          results=[]
-          for index,node in enumerate(nodes):
-              db=f'lu_test_subsidy_{index}' if mode=='subsidy' else 'lu_test_task96_ldu_candidate_1012_r1'
-              env={**os.environ,'DB_DATABASE':db,'LABOR_UNION_TEST_MYSQL_DATABASE':db}
-              if mode=='replacement':bootstrap(Namespace(host='127.0.0.1',port=33306,user='root',password=os.environ['DB_PASSWORD'],database=db,confirm_database=db))
-              code="import sys,traceback,pytest\ndef trace(frame,event,arg):\n if event=='exception' and frame.f_code.co_name=='apply' and frame.f_code.co_filename.endswith('/service_before_replacement_workflow.py'):\n  traceback.print_exception(*arg)\n return trace\nif 'replacement' in sys.argv[-1]:sys.settrace(trace)\nraise SystemExit(pytest.main(sys.argv[1:]))\n"
-              with (proof/f'case-{index}.log').open('w') as log:
-                  result=subprocess.run([sys.executable,'-c',code,'-q','--tb=short',f'--junitxml={proof}/case-{index}.xml',node],env=env,stdout=log,stderr=subprocess.STDOUT,timeout=180)
-              results.append({'nodeid':node,'exit_code':result.returncode,'evidence':f'case-{index}.xml'})
-          (proof/'results.json').write_text(json.dumps(results));sys.exit(int(any(r['exit_code'] for r in results)))
-          PY
-      - name: Destroy only test container
-        if: always() && matrix.mode != 'backend'
+      - name: Verify real LINE query and schema lease contracts
+        run: python -m pytest -q --tb=short --junitxml="$PROOF_DIR/line-query.xml" tests/test_line_delivery_public_query_route.py > "$PROOF_DIR/line-query.log" 2>&1
+      - name: Destroy only the disposable server
+        if: always()
         run: docker rm -f repair-mysql
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: repair-${{ matrix.mode }}-${{ github.run_number }}
+          name: repair-line-query-${{ github.run_number }}
           path: /tmp/business-repair
           retention-days: 1
           if-no-files-found: error
