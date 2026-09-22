@@ -29,7 +29,15 @@ afterEach(() => vi.restoreAllMocks());
 
 describe('LINE 通知規則 query 與 mutation 接線', () => {
   it('只在頁籤啟用時查一次，並可從目錄新增或由明細編輯真實規則', async () => {
-    const fetchSpy = vi.fn().mockRejectedValue(new Error('unexpected network'));
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL, options?: RequestInit) => {
+      expect(String(input)).toBe('/api/v1/line/notification-rules/deposit_notice/message-template');
+      expect(options?.method).toBe('GET');
+      expect(options?.body).toBeUndefined();
+      return new Response(JSON.stringify({ success: true, data: {
+        rule_id: 'deposit_notice', template_id: 'deposit_notice', name: '訂金確認',
+        content: '訂金確認通知', revision: 1, variables: [], sample_preview: '訂金確認通知',
+      } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    });
     vi.stubGlobal('fetch', fetchSpy);
     const { customer, identity, configuration } = dependencies();
     render(<LineManagementPage customerService={customer} lineIdentity={identity} lineConfiguration={configuration} />);
@@ -39,6 +47,7 @@ describe('LINE 通知規則 query 與 mutation 接線', () => {
     await waitFor(() => expect(screen.getAllByText('deposit_notice').length).toBeGreaterThan(0));
     expect(configuration.getNotificationRules).toHaveBeenCalledTimes(1);
     expect(screen.queryByText('FLOW-04')).not.toBeInTheDocument();
+    expect(fetchSpy).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: '新增／編輯通知規則' }));
     expect(screen.getByRole('region', { name: '通知規則編輯區' })).toBeInTheDocument();
@@ -52,7 +61,8 @@ describe('LINE 通知規則 query 與 mutation 接線', () => {
     expect(screen.getByRole('region', { name: '通知規則編輯區' })).toBeInTheDocument();
     expect(screen.getByLabelText('通知規則：')).toHaveValue('deposit_notice');
     expect(screen.queryByRole('button', { name: /儲存並發布|手動重播/ })).not.toBeInTheDocument();
-    expect(fetchSpy).not.toHaveBeenCalled();
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    expect(fetchSpy.mock.calls.every(([, options]) => options?.method === 'GET')).toBe(true);
   });
 
   it('revision 0 的空 definition 顯示真實空狀態而不是 mock 規則', async () => {

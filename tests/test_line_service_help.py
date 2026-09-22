@@ -121,4 +121,5 @@ def test_service_help_catalog_unavailable_is_not_replaced_by_builtin_faqs(client
     monkeypatch.setattr(line_service_help, "open_knowledge_retrieval_unit_of_work", unavailable)
     response = client.get("/api/v1/line/service-help/faq")
     assert response.status_code == 503
-    assert response.json()["error"]["code"] == "knowledge_catalog_unavailable"
+    assert response.json()["detail"]["error"]["code"] == "knowledge_catalog_unavailable"
+    assert "data" not in response.json()

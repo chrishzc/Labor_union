@@ -305,8 +305,8 @@ def _write_client_obligation(cursor, request, candidate, source_identity, result
     delta = after - before
     if candidate.facts.historical_day_revision > 0 and delta == 0:
         return
-    if candidate.facts.historical_day_revision == 0 and after == 0:
-        return  # 應收為零（免費或已結清），無需建立帳務事件
+    # A zero initial obligation still establishes the settled lineage required
+    # by completion readback and by later source-bound day revisions.
     direction = "receivable_from_client" if delta >= 0 else "payable_to_client"
     projection_status = "settled" if candidate.facts.historical_day_revision == 0 and after == 0 else "open"
     identity = (

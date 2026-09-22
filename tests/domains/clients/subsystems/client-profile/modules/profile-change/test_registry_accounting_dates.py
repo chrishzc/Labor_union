@@ -123,7 +123,8 @@ def test_stored_values_survive_query_and_http_serialization(connection):
     assert historical["staff_obligation_dates"] == []
     assert historical["claim_application_year"] is None
     assert historical["claim_application_month"] is None
-    assert len(connection.statements) == 3
+    assert len(connection.statements) == 4
+    assert sum("FROM client_legacy_virtual_accounts" in sql for sql, _ in connection.statements) == 1
     assert not any("v_order_details" in sql or "staff_schedule" in sql for sql, _ in connection.statements)
 
 

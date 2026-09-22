@@ -693,6 +693,10 @@ def _review(record: dict[str, object]) -> tuple[str, str, str, str]:
     exact = _exact_source_review(path, str(record["symbol"]), EXACT_SOURCE_REVIEWS)
     if exact is not None:
         return exact
+    if path in EXACT_SOURCE_RESTRICTED_REVIEWS or path in EXACT_SOURCE_REVIEWS:
+        # An expired or symbol-mismatched source review cannot inherit a broader
+        # module-level decision. Independent exact decisions were checked above.
+        return _needs_decision_review(path)
     reviewed = _current_runtime_review(path)
     if reviewed is not None:
         return reviewed
@@ -730,7 +734,8 @@ def _exact_source_review(
     expected_sha256, symbols, disposition = reviewed
     if symbol not in symbols:
         return None
-    if sha256((ROOT / path).read_bytes()).hexdigest() != expected_sha256:
+    source = ROOT / path
+    if not source.is_file() or sha256(source.read_bytes()).hexdigest() != expected_sha256:
         return None
     return disposition
 
