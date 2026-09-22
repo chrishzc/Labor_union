@@ -198,6 +198,42 @@ describe('ClientRosterPage', () => {
     expect(await within(repair).findByRole('button', { name: '檢查初始資料補建內容' })).toBeInTheDocument();
   });
 
+  it('asks for service days instead of sending an invalid bootstrap preview', async () => {
+    const unavailable = {
+      ...(await mocks.query()),
+      finance: { status: 'not_ready', code: 'client_finance_bootstrap_required', values: null },
+      order_terms: { status: 'not_ready', code: 'client_finance_bootstrap_required', data: null, field_capabilities: {} },
+    };
+    mocks.query.mockReset();
+    mocks.query.mockResolvedValue(unavailable);
+    bootstrapMocks.status.mockReset();
+    bootstrapMocks.status.mockResolvedValue({
+      case_no: 'CASE-001', ready: false, scheduling_version: 1,
+      scheduling_generation: 1, service_time_complete: true,
+      domain_blockers: ['missing_service_days'],
+      recommendation: {
+        client_payment_policy_version: 'client-approved-v1', client_hourly_rate_ntd: 350,
+        deposit_service_days: 0, deposit_due_date: '2026-09-01',
+        first_payment_due_date: '2026-09-15', payroll_policy_version: 'approved-rates-v1',
+      },
+    });
+    intakeMocks.previewCompletion.mockResolvedValue({
+      case_no: 'CASE-001', lifecycle_version: 7, current_status: '歷史訂單－服務中',
+      target_status: '歷史訂單－服務中', current_start_date: '2026-09-15', current_service_days: 0,
+      missing_fields: ['service_days'], blockers: [], apply_allowed: false,
+      preview_fingerprint: 'b'.repeat(64),
+    });
+
+    render(<ClientRosterPage />);
+    fireEvent.click(await screen.findByRole('row', { name: '開啟案件 CASE-001 詳細資料' }));
+    const repair = await screen.findByLabelText('案件初始資料修復');
+    expect(await within(repair).findByText('請先補齊約定服務天數，再建立案件初始資料。')).toBeInTheDocument();
+    expect(within(repair).getByLabelText('約定服務開始日')).toHaveValue('2026-09-15');
+    expect(within(repair).getByLabelText('服務天數')).toHaveValue(null);
+    expect(within(repair).queryByRole('button', { name: '檢查初始資料補建內容' })).not.toBeInTheDocument();
+    expect(bootstrapMocks.preview).not.toHaveBeenCalled();
+  });
+
   it('moves between pages for any sort and exposes the current page above the table', async () => {
     mocks.list
       .mockResolvedValueOnce({ items: [item], next_cursor: 'CASE-001', next_offset: 100 })

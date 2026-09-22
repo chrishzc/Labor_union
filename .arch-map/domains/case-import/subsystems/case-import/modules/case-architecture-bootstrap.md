@@ -4,13 +4,15 @@
 - subsystem: `case-import`
 
 ## Responsibility
-以 Case Import named scalar facts 建立 first-use Client Finance、Payroll 與 Scheduling roots。Payroll rate classification 可由 case 的 authoritative `multi_birth_count` 覆寫 identity classification；Client Finance identity semantics 不變。
+以 Case Import named scalar facts 建立 first-use Client Finance、Payroll 與 Scheduling roots。Status 在提供 bootstrap Preview 前先揭露缺少正式開始日或正整數服務天數；由 Orders-owned terms repair 補齊後才可繼續。Payroll rate classification 可由 case 的 authoritative `multi_birth_count` 覆寫 identity classification；Client Finance identity semantics 不變。
 
 ## Implementation
 - `domains/bootstrap/case_architecture.py`
 - `domains/case_import/case_import.py`
 - `infrastructure/mysql/case_architecture_bootstrap_repository.py`
 - `infrastructure/mysql/case_import_repository.py`
+- `subsystems/bootstrap/case_architecture_status.py`
+- `api/routes/case_architecture_bootstrap.py`
 - `ui_react/src/api/case_import/case_architecture_bootstrap_client.ts`
 - `ui_react/src/components/CaseArchitectureBootstrapRepairPanel.tsx`
 

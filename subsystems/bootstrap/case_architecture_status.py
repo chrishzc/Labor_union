@@ -41,7 +41,7 @@ class CaseArchitectureBootstrapStatusService:
     def _load_case_state(self, case_no: str) -> Mapping[str, object] | None:
         with self._connection.cursor() as cursor:
             cursor.execute(
-                "SELECT o.case_no,o.start_date,o.service_start_time,o.service_end_time,"
+                "SELECT o.case_no,o.start_date,o.service_days,o.service_start_time,o.service_end_time,"
                 "o.service_end_day_offset,c.identity_status,c.created_at AS client_created_at,"
                 "cfa.case_no AS client_finance_case,cpt.case_no AS client_terms_case,"
                 "pca.case_no AS payroll_account_case,cps.case_no AS payroll_policy_case,"
@@ -70,10 +70,19 @@ def _partial_status(case_no, row):
 
 def _bootstrap_status(case_no, row):
     rec = _recommendation(row)
-    blockers = ()
-    if rec is None and row.get("start_date") is None:
-        blockers = ("missing_start_date",)
-    return _status(case_no, row, ready=False, recommendation=rec, blockers=blockers)
+    blockers: list[str] = []
+    if row.get("start_date") is None:
+        blockers.append("missing_start_date")
+    service_days = row.get("service_days")
+    if isinstance(service_days, bool) or not isinstance(service_days, int) or service_days <= 0:
+        blockers.append("missing_service_days")
+    return _status(
+        case_no,
+        row,
+        ready=False,
+        recommendation=rec,
+        blockers=tuple(blockers),
+    )
 
 
 def _status(case_no, row, ready, recommendation=None, blockers=()):

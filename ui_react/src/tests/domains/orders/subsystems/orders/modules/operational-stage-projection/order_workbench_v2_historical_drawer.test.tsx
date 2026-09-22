@@ -243,12 +243,26 @@ describe('historical Drawer immutable evidence boundary', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: '訂單與服務資料' }));
     const evidenceRegion = within(dialog).getByRole('heading', { name: '歷史服務資料' }).closest('section')!;
     expect(within(dialog).getByText('尚未正式安排月嫂。')).toBeInTheDocument();
-    expect(within(dialog).getByText('尚未確認')).toBeInTheDocument();
+    expect(within(dialog).getAllByText('尚未確認').length).toBeGreaterThan(0);
 
     expect(within(evidenceRegion).getByText(/2026-09-03 → 2026-09-22/)).toBeInTheDocument();
     expect(within(evidenceRegion).getByText(/陳月嫂/)).toBeInTheDocument();
     expect(within(evidenceRegion).queryByText(/陳\*嫂/)).not.toBeInTheDocument();
     expect(within(evidenceRegion).getByText(/不代表目前已確認的服務安排/)).toBeInTheDocument();
+  });
+
+  it('shows failed formal reads as unavailable while retaining the historical source period', async () => {
+    mocks.detail.mockRejectedValue(new Error('order_detail_projection_invalid'));
+    mocks.terms.mockRejectedValue(new Error('client_finance_bootstrap_required'));
+
+    const view = render(<OrderWorkbenchV2Drawer caseNo="CASE-FUTURE" branchType="historical" onClose={vi.fn()} />);
+    await screen.findByText('歷史匯入期間');
+    const context = view.container.querySelector('.order-case-context');
+    if (!(context instanceof HTMLElement)) throw new Error('找不到案件摘要區');
+
+    expect(context).toHaveTextContent('2026-09-03 → 2026-09-22');
+    expect(context).toHaveTextContent('暫時無法取得');
+    expect(context).not.toHaveTextContent('讀取中');
   });
 
   it('strict adoption evidence contract 接受 canonical staff_name 並拒絕舊 masked 欄位', () => {

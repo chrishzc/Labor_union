@@ -299,6 +299,14 @@ def _http_error(status_code, error):
             "code": error.code,
             "message": error.message,
             "correlation_id": error.correlation_id.value,
+            "field_errors": [
+                {
+                    "field": item.field,
+                    "code": item.code,
+                    "message": item.message,
+                }
+                for item in error.field_errors
+            ],
             "domain_blockers": list(error.domain_blockers),
             "retryable": error.retryable,
             "current_version": (

@@ -18,8 +18,11 @@ const key = () => `case-bootstrap-repair-${globalThis.crypto?.randomUUID?.() ?? 
 
 const blockerMessage = (code: string) => ({
   missing_start_date: '請先補齊約定服務開始日，再建立案件初始資料。',
+  missing_service_days: '請先補齊約定服務天數，再建立案件初始資料。',
   case_architecture_bootstrap_partial: '案件已有部分初始資料，為避免覆寫既有資料，請由系統管理員檢查。',
 }[code] ?? `目前無法補建（${code}）。`);
+
+const isTermsRepairBlocker = (code: string) => code === 'missing_start_date' || code === 'missing_service_days';
 
 export const CaseArchitectureBootstrapRepairPanel: React.FC<{
   caseNo: string;
@@ -48,7 +51,7 @@ export const CaseArchitectureBootstrapRepairPanel: React.FC<{
       .then(async (value) => {
         if (!active) return;
         setStatus(value);
-        if (value.domain_blockers.includes('missing_start_date')) {
+        if (value.domain_blockers.some(isTermsRepairBlocker)) {
           const completion = await orderIntakeCompletionClient.previewCompletion(caseNo);
           if (!active) return;
           setStartDate(completion.current_start_date ?? '');
@@ -74,6 +77,10 @@ export const CaseArchitectureBootstrapRepairPanel: React.FC<{
       setBusy(null);
     }
   };
+
+  const termsRepairBlockers = status?.domain_blockers.filter(
+    isTermsRepairBlocker,
+  ) ?? [];
 
   const applyTerms = async () => {
     if (!termsPreview) return;
@@ -129,9 +136,9 @@ export const CaseArchitectureBootstrapRepairPanel: React.FC<{
     <p style={{ margin: 0 }}>這不是排班格式問題；既有案件尚未建立 Client Finance、Payroll 與 Scheduling 初始根資料。</p>
     {busy === 'status' && <p role="status">正在檢查可補建資料…</p>}
     {status?.ready && <p role="status">初始資料已存在，請重新讀取案件。</p>}
-    {status && status.domain_blockers.filter((blocker) => blocker !== 'missing_start_date').length > 0 && <ul>{status.domain_blockers.filter((blocker) => blocker !== 'missing_start_date').map((blocker) => <li key={blocker}>{blockerMessage(blocker)}</li>)}</ul>}
-    {status?.domain_blockers.includes('missing_start_date') && <div style={{ display: 'grid', gap: '8px' }}>
-      <p style={{ margin: 0 }}>{blockerMessage('missing_start_date')}</p>
+    {status && status.domain_blockers.filter((blocker) => !isTermsRepairBlocker(blocker)).length > 0 && <ul>{status.domain_blockers.filter((blocker) => !isTermsRepairBlocker(blocker)).map((blocker) => <li key={blocker}>{blockerMessage(blocker)}</li>)}</ul>}
+    {termsRepairBlockers.length > 0 && <div style={{ display: 'grid', gap: '8px' }}>
+      <ul>{termsRepairBlockers.map((blocker) => <li key={blocker}>{blockerMessage(blocker)}</li>)}</ul>
       <label>約定服務開始日<input type="date" value={startDate} onChange={(event) => { setStartDate(event.target.value); setTermsPreview(null); }} /></label>
       <label>服務天數<input type="number" min="1" step="1" value={serviceDays} onChange={(event) => { setServiceDays(event.target.value); setTermsPreview(null); }} /></label>
       <button type="button" disabled={busy !== null || !startDate || Number(serviceDays) <= 0} onClick={() => void runTermsPreview()}>
@@ -145,7 +152,7 @@ export const CaseArchitectureBootstrapRepairPanel: React.FC<{
         </button>
       </div>}
     </div>}
-    {status?.recommendation && !preview && <button type="button" disabled={busy !== null} onClick={() => void runPreview()}>
+    {status?.recommendation && status.domain_blockers.length === 0 && !preview && <button type="button" disabled={busy !== null} onClick={() => void runPreview()}>
       {busy === 'preview' ? '正在產生補建預覽…' : '檢查初始資料補建內容'}
     </button>}
     {preview && <div style={{ display: 'grid', gap: '6px' }}>
