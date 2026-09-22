@@ -1,25 +1,155 @@
-name: Business repair source
+name: Business repair verification
 on:
   push:
     branches: [fix/business-regressions-20260922]
 permissions:
   contents: read
 jobs:
-  source:
+  verification:
+    name: ${{ matrix.mode }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [backend, frontend, finance-query, finance-parity]
+    env:
+      PROOF_DIR: /tmp/business-repair
+      APP_ENV: development
+      DB_HOST: 127.0.0.1
+      DB_PORT: '33306'
+      DB_USER: root
+      DB_DATABASE: ''
+      LINE_CHANNEL_ACCESS_TOKEN: ''
+      LINE_CHANNEL_SECRET: ''
+      ANONYMIZED_TELEMETRY: 'False'
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+      CI: 'true'
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
-      - name: Export tracked source only
-        run: |
-          mkdir -p /tmp/business-repair
-          git archive HEAD > /tmp/business-repair/source.tar
-          git rev-parse HEAD > /tmp/business-repair/source-commit.txt
-          git rev-parse HEAD^{tree} > /tmp/business-repair/source-tree.txt
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
-          name: business-repair-source
+          python-version: '3.11'
+      - name: Record source
+        run: |
+          mkdir -p "$PROOF_DIR"
+          git rev-parse HEAD > "$PROOF_DIR/source-commit.txt"
+      - name: Install existing locked Python runtime and test dependencies
+        if: matrix.mode != 'frontend'
+        run: |
+          python - <<'PY'
+          import tomllib
+          from pathlib import Path
+          from pip._vendor.packaging.markers import Marker
+          from pip._vendor.packaging.requirements import Requirement
+          lock = tomllib.loads(Path('uv.lock').read_text())
+          project = tomllib.loads(Path('pyproject.toml').read_text())
+          selected, seen = {}, set()
+          pending = [{'name': Requirement(s).name, 'extra': list(Requirement(s).extras)} for s in project['project']['dependencies']]
+          pending += [{'name': 'pytest'}, {'name': 'httpx'}]
+          while pending:
+              dep = pending.pop()
+              if dep.get('marker') and not Marker(dep['marker']).evaluate():
+                  continue
+              candidates = [p for p in lock['package'] if p['name'] == dep['name'] and (not dep.get('version') or p['version'] == dep['version'])]
+              candidates = [p for p in candidates if not p.get('resolution-markers') or any(Marker(m).evaluate() for m in p['resolution-markers'])]
+              assert len(candidates) == 1, dep['name']
+              package = candidates[0]
+              assert package['source'] == {'registry': 'https://pypi.org/simple'}, package['name']
+              key = (package['name'], package['version'], tuple(sorted(dep.get('extra', []))))
+              if key in seen:
+                  continue
+              seen.add(key)
+              selected[package['name']] = package
+              pending.extend(package.get('dependencies', []))
+              for extra in dep.get('extra', []):
+                  pending.extend(package.get('optional-dependencies', {}).get(extra, []))
+          lines = []
+          for name, package in sorted(selected.items()):
+              hashes = sorted({wheel['hash'] for wheel in package['wheels']})
+              assert hashes and all(h.startswith('sha256:') for h in hashes), name
+              lines.append(f"{name}=={package['version']} " + ' '.join('--hash=' + h for h in hashes))
+          Path('/tmp/repair-requirements.txt').write_text('\n'.join(lines) + '\n')
+          PY
+          python -m pip install --disable-pip-version-check --no-input --only-binary=:all: --require-hashes -r /tmp/repair-requirements.txt > "$PROOF_DIR/dependencies.log" 2>&1
+      - name: Install locked frontend dependencies without install hooks
+        if: matrix.mode != 'backend'
+        run: npm --prefix ui_react ci --ignore-scripts --no-audit --fund=false > "$PROOF_DIR/npm-install.log" 2>&1
+      - name: Run backend suite
+        if: matrix.mode == 'backend'
+        run: python -m pytest -q --continue-on-collection-errors --tb=short --ignore=tests/test_background_job_repository_mysql.py --ignore=tests/test_durable_job_disposable_mysql_e2e.py --ignore=tests/test_durable_job_payload_equality_disposable_mysql_e2e.py --junitxml="$PROOF_DIR/backend.xml" > "$PROOF_DIR/backend.log" 2>&1
+      - name: Run all frontend tests
+        if: matrix.mode == 'frontend'
+        run: npm --prefix ui_react test -- --reporter=json --outputFile="$PROOF_DIR/frontend.json" --maxWorkers=2 --minWorkers=1 > "$PROOF_DIR/frontend.log" 2>&1
+      - name: Verify frontend build and lint
+        if: always() && matrix.mode == 'frontend'
+        run: |
+          npm --prefix ui_react run build > "$PROOF_DIR/build.log" 2>&1
+          npm --prefix ui_react run lint > "$PROOF_DIR/lint.log" 2>&1
+      - name: Start disposable database and verify authenticated TCP readiness
+        if: startsWith(matrix.mode, 'finance-')
+        run: |
+          MYSQL_ROOT_PASSWORD=$(openssl rand -hex 16)
+          echo "::add-mask::$MYSQL_ROOT_PASSWORD"
+          export MYSQL_ROOT_PASSWORD
+          echo "DB_PASSWORD=$MYSQL_ROOT_PASSWORD" >> "$GITHUB_ENV"
+          echo "LABOR_UNION_TEST_MYSQL_PASSWORD=$MYSQL_ROOT_PASSWORD" >> "$GITHUB_ENV"
+          echo 'LABOR_UNION_TEST_MYSQL_HOST=127.0.0.1' >> "$GITHUB_ENV"
+          echo 'LABOR_UNION_TEST_MYSQL_PORT=33306' >> "$GITHUB_ENV"
+          echo 'LABOR_UNION_TEST_MYSQL_USER=root' >> "$GITHUB_ENV"
+          echo 'LABOR_UNION_TEST_MYSQL_DATABASE=lu_test_business_repair' >> "$GITHUB_ENV"
+          echo 'DB_DATABASE=lu_test_business_repair' >> "$GITHUB_ENV"
+          docker run -d --name repair-mysql -p 127.0.0.1:33306:3306 -e MYSQL_ROOT_PASSWORD -e MYSQL_ROOT_HOST=% mysql@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b
+          python - <<'PY'
+          import os,time,pymysql
+          for attempt in range(60):
+              try:
+                  c=pymysql.connect(host='127.0.0.1',port=33306,user='root',password=os.environ['MYSQL_ROOT_PASSWORD'])
+                  with c.cursor() as cur: cur.execute('SELECT 1'); assert cur.fetchone()[0] == 1
+                  c.close(); break
+              except pymysql.err.OperationalError:
+                  if attempt == 59: raise
+                  time.sleep(2)
+          PY
+      - name: Execute actual finance paths and retain internal failure cause
+        if: startsWith(matrix.mode, 'finance-')
+        env:
+          MODE: ${{ matrix.mode }}
+        run: |
+          python - <<'PY' > "$PROOF_DIR/finance.log" 2>&1
+          import os,sys,traceback
+          from argparse import Namespace
+          from pathlib import Path
+          import pytest
+          if os.environ['MODE'] == 'finance-parity':
+              from scripts.bootstrap_disposable_mysql_schema import bootstrap
+              bootstrap(Namespace(host='127.0.0.1',port=33306,user='root',password=os.environ['DB_PASSWORD'],database=os.environ['DB_DATABASE'],confirm_database=os.environ['DB_DATABASE']))
+          from api.routes import finance_import as route
+          original = route._call_query
+          def trace_query(query,message,correlation):
+              def checked_query():
+                  try: return query()
+                  except Exception:
+                      traceback.print_exc()
+                      raise
+              return original(checked_query,message,correlation)
+          route._call_query = trace_query
+          case = 'tests/test_finance_source_review_mysql_e2e.py' if os.environ['MODE']=='finance-query' else 'tests/test_finance_import_staging_persistent_mysql_e2e.py'
+          code=pytest.main(['-q','--tb=long','--junitxml=/tmp/business-repair/finance.xml','--basetemp=/tmp/repair-pytest',case])
+          import shutil
+          for index,p in enumerate(Path('/tmp/repair-pytest').rglob('*.json')):
+              if 'result' in p.name or 'report' in p.name: shutil.copyfile(p,Path('/tmp/business-repair')/f'inner-{index}.json')
+          sys.exit(code)
+          PY
+      - name: Clean up test container
+        if: always() && startsWith(matrix.mode, 'finance-')
+        run: docker rm -f repair-mysql
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: repair-${{ matrix.mode }}-${{ github.run_number }}
           path: /tmp/business-repair
           retention-days: 1
           if-no-files-found: error
