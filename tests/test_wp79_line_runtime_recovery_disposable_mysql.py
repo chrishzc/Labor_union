@@ -56,6 +56,7 @@ def _configure_release(monkeypatch: pytest.MonkeyPatch) -> None:
             data_effect="schema_only_additive",
         ),),
         backfills=(),
+        verification_contracts=release.verification_contracts,
     ),)
     monkeypatch.setattr(migration, "RELEASE_MANIFEST", release)
     monkeypatch.setattr(migration, "SCHEMA_PARTS", (PART_186,))

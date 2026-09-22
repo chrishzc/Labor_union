@@ -315,3 +315,29 @@ def _login_request() -> Request:
             "scheme": "http",
         }
     )
+
+
+@pytest.mark.parametrize("method", ["authenticate_admin", "issue_password_login_challenge"])
+@pytest.mark.parametrize("commit_failure", [False, True])
+def test_rate_limit_audit_is_committed_without_rollback_of_finalized_transaction(monkeypatch, method, commit_failure):
+    events = []
+    class Cursor:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def execute(self, *_): pass
+        def fetchone(self): return None
+    class Connection:
+        def begin(self): events.append("begin")
+        def cursor(self, *_): return Cursor()
+        def commit(self):
+            if commit_failure: raise RuntimeError("audit commit failed")
+            events.append("commit")
+        def rollback(self): events.append("rollback")
+        def close(self): events.append("close")
+    monkeypatch.setattr(authentication_session, "_require_admin_session_schema", lambda _: None)
+    monkeypatch.setattr(authentication_session, "_is_rate_limited", lambda *_: True)
+    monkeypatch.setattr(authentication_session, "_record_login_attempt", lambda *_: events.append("rate_limited"))
+    error = RuntimeError if commit_failure else authentication_session.AdminLoginRateLimitedError
+    with pytest.raises(error):
+        getattr(authentication_session, method)("synthetic-admin", "synthetic-password", connection_factory=Connection)
+    assert events == ["begin", "rate_limited", "rollback" if commit_failure else "commit", "close"]

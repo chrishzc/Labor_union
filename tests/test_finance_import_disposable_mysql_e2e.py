@@ -192,8 +192,8 @@ def test_mixed_finance_workbook_keeps_valid_row_and_acknowledges_owner_review(tm
 
 def test_historical_owner_selection_posts_once_without_mutating_bank_root_fact(tmp_path):
     bootstrap(_arguments())
-    _seed_open_refund_obligation()
     intake_receipt = _ingest_unresolved_taishin_outflow(tmp_path)
+    _seed_open_refund_obligation()
 
     from api.dependencies.finance_import import HistoricalReprocessApplication
     from infrastructure.mysql.finance_import_owning_domain_composite import (
@@ -505,7 +505,7 @@ def test_mismatched_refund_return_remains_manual_review_without_partial_writes(t
             cursor.execute("SELECT reconciliation_status FROM finance_import_rows WHERE id=2")
             assert cursor.fetchone() == {"reconciliation_status": "pending"}
             cursor.execute("SELECT predicate_active,workflow_status FROM anomaly_current_alerts WHERE definition_code='finance_import_manual_review'")
-            assert cursor.fetchall() == []
+            assert not cursor.fetchall()
     finally:
         connection.close()
 
@@ -772,6 +772,12 @@ def _seed_open_subsidy_return_with_claim_link() -> None:
             cursor.execute("INSERT INTO subsidy_claim_batch_items(batch_id,case_no,assignment_id,staff_id,requested_amount,approved_amount) VALUES (%s,'C-ADV',%s,%s,6000,6000)", (batch_id, assignment_id, staff_id))
             claim_item_id = int(cursor.lastrowid)
             cursor.execute("INSERT INTO client_subsidy_return_claim_item_links(obligation_identity,claim_item_id,entitled_amount_ntd) VALUES ('subsidy:C-ADV',%s,6000)", (claim_item_id,))
+            cursor.execute(
+                "INSERT INTO client_refund_recipient_snapshots "
+                "(refund_obligation_identity,case_no,bank_code,bank_account,source_kind) "
+                "VALUES ('subsidy:C-ADV','C-ADV','synthetic-bank',%s,'test-fixture')",
+                ("9" * 16,),
+            )
         connection.commit()
     finally:
         connection.close()

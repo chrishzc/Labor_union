@@ -456,6 +456,7 @@ describe('Finance import preview and replay boundary', () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input);
       requests.push(path);
+      if (path === '/api/v1/staff/summaries?page_size=200') return importResponse({ items: [], next_cursor: null });
       if (path.endsWith('/workbooks/ingest')) return importResponse(exchange.ingestion_response.data);
       if (path.endsWith('/batches/preview')) return importResponse(exchange.preview_response.data);
       if (path.includes('/manifest')) return importResponse(exchange.manifest_response.data);
@@ -477,9 +478,11 @@ describe('Finance import preview and replay boundary', () => {
     if (!exchange.preview_response.data.apply_allowed) {
       expect(screen.getByText(new RegExp(financeImportBlockerMessage(exchange.expected.blocking_codes)))).toBeInTheDocument();
     }
-    expect(requests.slice(0, 2)).toEqual(['/api/v1/finance-import/workbooks/ingest', '/api/v1/finance-import/batches/preview']);
+    const importRequests = requests.filter((path) => path.startsWith('/api/v1/finance-import/'));
+    expect(requests.filter((path) => !path.startsWith('/api/v1/finance-import/'))).toEqual(['/api/v1/staff/summaries?page_size=200']);
+    expect(importRequests.slice(0, 2)).toEqual(['/api/v1/finance-import/workbooks/ingest', '/api/v1/finance-import/batches/preview']);
     const batchPath = `/api/v1/finance-import/batches/${encodeURIComponent(exchange.preview_response.data.batch_identity)}`;
-    expect(requests.slice(2)).toEqual([`${batchPath}/manifest`, `${batchPath}/review-rows?limit=50`]);
+    expect(importRequests.slice(2)).toEqual([`${batchPath}/manifest`, `${batchPath}/review-rows?limit=50`]);
     expect(screen.queryByText(/匯入完成：核銷/)).not.toBeInTheDocument();
   });
 });

@@ -309,7 +309,7 @@ def _command(case_no: str, preview_fingerprint) -> ApplyServiceBeforeReplacement
         f"event:{case_no}:13",
         f"aggregate:{case_no}:8",
         preview_fingerprint,
-        IdempotencyKey(f"replacement:{case_no}:14"),
+        IdempotencyKey(f"replacement:{case_no.lower()}:14"),
         ActorContext("task96-rpre", ("scheduling.replace",)),
         "caregiver_requested_replacement",
         (f"evidence:{case_no}",),
