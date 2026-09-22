@@ -27,3 +27,50 @@ jobs:
       - name: Check tracked Python files for syntax errors
         shell: bash
         run: git ls-files -z -- '*.py' | xargs -0 -r python -m py_compile
+      - name: Verify retired standalone migration entrypoints
+        run: python -m unittest discover -s tests -p test_migrate_admin_capability_grants_schema.py
+      - name: Inspect script command references
+        # Temporary read-only inventory for the current command retirement.
+        shell: bash
+        run: |
+          python - <<'PY'
+          import ast
+          import json
+          from pathlib import Path
+          import subprocess
+
+          paths = [Path(p) for p in subprocess.check_output(["git", "ls-files", "-z"], text=True).split("\0") if p]
+          texts = {}
+          for path in paths:
+              if path.suffix.lower() in {".py", ".md", ".json", ".jsonl", ".yaml", ".yml", ".toml", ".ps1", ".sh", ".bat", ".ts", ".tsx"}:
+                  try:
+                      texts[path] = path.read_text(encoding="utf-8")
+                  except UnicodeDecodeError:
+                      pass
+          for path, source in texts.items():
+              if path.suffix != ".py" or path.parts[0] != "scripts" or "migration_artifacts" in path.parts:
+                  continue
+              tree = ast.parse(source)
+              main = [node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "main"]
+              if not main:
+                  continue
+              imports = []
+              for node in ast.walk(tree):
+                  if isinstance(node, ast.ImportFrom) and (node.module or "").startswith(("scripts", "tests")):
+                      imports.extend(f"{node.module}.{alias.name}" for alias in node.names)
+                  elif isinstance(node, ast.Import):
+                      imports.extend(alias.name for alias in node.names if alias.name.startswith(("scripts", "tests")))
+              guards = []
+              for node in ast.walk(tree):
+                  if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and "lu_test" in ast.get_source_segment(source, node):
+                      guards.append([node.name, node.lineno, node.end_lineno])
+              print("COMMAND " + json.dumps({"path": str(path), "mentions_lu_test": "lu_test" in source, "main": [[node.lineno, node.end_lineno] for node in main], "guard_spans": guards, "imports": imports}, ensure_ascii=True))
+              if "lu_test" not in source and not imports:
+                  continue
+              for other, text in texts.items():
+                  if other == path:
+                      continue
+                  lines = [number for number, line in enumerate(text.splitlines(), 1) if path.stem in line]
+                  if lines:
+                      print("REFERENCE " + json.dumps({"command": str(path), "path": str(other), "lines": lines}, ensure_ascii=True))
+          PY
