@@ -29,8 +29,8 @@ jobs:
         run: git ls-files -z -- '*.py' | xargs -0 -r python -m py_compile
       - name: Verify retired standalone migration entrypoints
         run: python -m unittest discover -s tests -p test_migrate_admin_capability_grants_schema.py
-      - name: Inspect remaining command references
-        # Temporary read-only inventory; no application imports or database calls.
+      - name: Inspect isolated command dependencies
+        # Temporary scoped read-only inspection; removed after the cleanup.
         shell: bash
         run: |
           python - <<'PY'
@@ -44,31 +44,42 @@ jobs:
           for path in paths:
               if path.suffix.lower() in {".py", ".md", ".json", ".jsonl", ".yaml", ".yml", ".toml", ".ps1", ".sh", ".bat", ".ts", ".tsx"}:
                   try:
-                      texts[path] = path.read_text(encoding="utf-8")
+                      texts[path.as_posix()] = path.read_text(encoding="utf-8")
                   except UnicodeDecodeError:
                       pass
+          scripts = {}
           for path, source in texts.items():
-              if path.parts[0] not in {"scripts", "tools"} or "migration_artifacts" in path.parts:
+              if not path.startswith(("scripts/", "tools/")) or "/migration_artifacts/" in path:
                   continue
-              if path.suffix != ".py":
+              if not path.endswith(".py"):
                   if "lu_test" in source:
-                      print("SHELL " + str(path))
+                      print("SHELL " + path)
                   continue
               tree = ast.parse(source)
-              main = [node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "main"]
-              guards = [node for node in tree.body if isinstance(node, ast.If) and "__name__" in ast.unparse(node.test) and "__main__" in ast.unparse(node.test)]
-              if main or not guards:
-                  continue
-              print("EXECUTABLE " + json.dumps({"path": str(path), "mentions_lu_test": "lu_test" in source, "guard_spans": [[node.lineno, node.end_lineno] for node in guards]}, ensure_ascii=True))
-              for other, text in texts.items():
-                  if other == path:
+              imports = [ast.unparse(n) for n in ast.walk(tree) if isinstance(n, (ast.Import, ast.ImportFrom))]
+              definitions = [[n.name, n.lineno, n.end_lineno] for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))]
+              guards = [[n.lineno, n.end_lineno] for n in tree.body if isinstance(n, ast.If) and "__name__" in ast.unparse(n.test) and "__main__" in ast.unparse(n.test)]
+              markers = [i for i, line in enumerate(source.splitlines(), 1) if "lu_test" in line or "require_test" in line or "ensure_test" in line]
+              scripts[path] = {"path": path, "markers": markers, "imports": imports, "definitions": definitions, "guards": guards}
+          selected = {p for p, item in scripts.items() if item["markers"]}
+          while True:
+              added = {p for p, item in scripts.items() if any(Path(s).stem in "\n".join(item["imports"]) for s in selected)} - selected
+              if not added:
+                  break
+              selected.update(added)
+          for path, item in sorted(scripts.items()):
+              if path in selected:
+                  print("CANDIDATE " + json.dumps(item, ensure_ascii=True))
+              elif item["guards"] or any(d[0] == "main" for d in item["definitions"]):
+                  print("OTHER_COMMAND " + json.dumps({"path": path, "imports": item["imports"]}, ensure_ascii=True))
+          for command in sorted(selected):
+              refs = []
+              stem = Path(command).stem
+              for path, source in texts.items():
+                  if path == command:
                       continue
-                  lines = [number for number, line in enumerate(text.splitlines(), 1) if path.stem in line]
+                  lines = [i for i, line in enumerate(source.splitlines(), 1) if stem in line]
                   if lines:
-                      print("REFERENCE " + json.dumps({"command": str(path), "path": str(other), "lines": lines}, ensure_ascii=True))
-          for name in ("migrate_admin_capability_grants_schema", "migrate_case_architecture_bootstrap_receipt_version_contract", "migrate_leave_substitution_holiday_only_batch_contract"):
-              for path, text in texts.items():
-                  lines = [number for number, line in enumerate(text.splitlines(), 1) if name in line]
-                  if lines:
-                      print("RETIRED_REFERENCE " + json.dumps({"name": name, "path": str(path), "lines": lines}, ensure_ascii=True))
+                      refs.append({"path": path, "lines": lines})
+              print("REFERENCES " + json.dumps({"command": command, "references": refs}, ensure_ascii=True))
           PY
