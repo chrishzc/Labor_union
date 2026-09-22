@@ -1,4 +1,4 @@
-name: Verify reviewed business repairs
+name: Verify transfer bytes
 on:
   push:
     branches: [fix/business-regressions-20260922]
@@ -6,197 +6,20 @@ on:
 permissions:
   contents: read
 jobs:
-  prepare:
+  readback:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    outputs:
-      commit: ${{ steps.publish.outputs.commit }}
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
-      - name: Apply exact locally reviewed source changes
-        id: publish
-        env:
-          EDITS: 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
-        run: |
-          python - <<'PY'
-          import base64,gzip,hashlib,json,os,subprocess
-          from pathlib import Path
-          assert os.environ['GITHUB_REF']=='refs/heads/fix/business-regressions-20260922'
-          raw=gzip.decompress(base64.b64decode(os.environ['EDITS']))
-          assert hashlib.sha256(raw).hexdigest()=='d38b08c670b99e214bc6ce9f77d26c6c04782995e8013bae62dccbb787f85693'
-          records=json.loads(raw)
-          for item in records:
-              path=Path(item['path']); original=path.read_bytes()
-              assert hashlib.sha256(original).hexdigest()==item['before'], str(path)
-              text=original.decode('utf-8')
-              for start,end,replacement in reversed(item['edits']): text=text[:start]+replacement+text[end:]
-              result=text.encode('utf-8')
-              assert hashlib.sha256(result).hexdigest()==item['after'], str(path)
-              path.write_bytes(result)
-          paths=[item['path'] for item in records]
-          changed=subprocess.check_output(['git','diff','--name-only'],text=True).splitlines()
-          assert set(changed)==set(paths)
-          subprocess.run(['git','diff','--check'],check=True)
-          subprocess.run(['git','add','--',*paths],check=True)
-          subprocess.run(['git','-c','user.name=github-actions[bot]','-c','user.email=41898282+github-actions[bot]@users.noreply.github.com','commit','-m','fix: repair subsidy money arithmetic, finance query collation and stale regression contracts'],check=True)
-          subprocess.run(['git','push','origin','HEAD:refs/heads/fix/business-regressions-20260922'],check=True)
-          sha=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
-          with open(os.environ['GITHUB_OUTPUT'],'a') as output: output.write('commit='+sha+'\n')
-          PY
-  verification:
-    needs: prepare
-    name: ${{ matrix.mode }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        mode: [backend, frontend, finance-query, finance-parity, subsidy, order-terms]
-    env:
-      PROOF_DIR: /tmp/business-repair
-      APP_ENV: development
-      DB_HOST: 127.0.0.1
-      DB_PORT: '33306'
-      DB_USER: root
-      DB_DATABASE: ''
-      LINE_CHANNEL_ACCESS_TOKEN: ''
-      LINE_CHANNEL_SECRET: ''
-      ANONYMIZED_TELEMETRY: 'False'
-      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
-      CI: 'true'
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: ${{ needs.prepare.outputs.commit }}
+          fetch-depth: 2
           persist-credentials: false
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
-        with:
-          python-version: '3.11'
-      - name: Record source
+      - name: Export only prior transfer definition
         run: |
-          mkdir -p "$PROOF_DIR"
-          git rev-parse HEAD > "$PROOF_DIR/source-commit.txt"
-      - name: Install locked Python runtime and test wheels
-        if: matrix.mode != 'frontend'
-        run: |
-          python - <<'PY'
-          import tomllib
-          from pathlib import Path
-          from pip._vendor.packaging.markers import Marker
-          from pip._vendor.packaging.requirements import Requirement
-          lock=tomllib.loads(Path('uv.lock').read_text()); project=tomllib.loads(Path('pyproject.toml').read_text())
-          selected,seen={},set()
-          pending=[{'name':Requirement(s).name,'extra':list(Requirement(s).extras)} for s in project['project']['dependencies']]+[{'name':'pytest'},{'name':'httpx'}]
-          while pending:
-              dep=pending.pop()
-              if dep.get('marker') and not Marker(dep['marker']).evaluate(): continue
-              candidates=[p for p in lock['package'] if p['name']==dep['name'] and (not dep.get('version') or p['version']==dep['version'])]
-              candidates=[p for p in candidates if not p.get('resolution-markers') or any(Marker(m).evaluate() for m in p['resolution-markers'])]
-              assert len(candidates)==1,dep['name']
-              p=candidates[0]; assert p['source']=={'registry':'https://pypi.org/simple'}
-              key=(p['name'],p['version'],tuple(sorted(dep.get('extra',[]))))
-              if key in seen: continue
-              seen.add(key); selected[p['name']]=p; pending.extend(p.get('dependencies',[]))
-              for extra in dep.get('extra',[]): pending.extend(p.get('optional-dependencies',{}).get(extra,[]))
-          lines=[]
-          for name,p in sorted(selected.items()):
-              hashes=sorted({w['hash'] for w in p['wheels']}); assert hashes
-              lines.append(f"{name}=={p['version']} "+' '.join('--hash='+h for h in hashes))
-          Path('/tmp/repair-requirements.txt').write_text('\n'.join(lines)+'\n')
-          PY
-          python -m pip install --disable-pip-version-check --no-input --only-binary=:all: --require-hashes -r /tmp/repair-requirements.txt > "$PROOF_DIR/dependencies.log" 2>&1
-      - name: Install locked frontend dependencies without hooks
-        if: matrix.mode == 'frontend' || startsWith(matrix.mode, 'finance-')
-        run: npm --prefix ui_react ci --ignore-scripts --no-audit --fund=false > "$PROOF_DIR/npm-install.log" 2>&1
-      - name: Backend regression suite without external services
-        if: matrix.mode == 'backend'
-        run: python -m pytest -q --continue-on-collection-errors --tb=short --ignore=tests/test_background_job_repository_mysql.py --ignore=tests/test_durable_job_disposable_mysql_e2e.py --ignore=tests/test_durable_job_payload_equality_disposable_mysql_e2e.py --ignore=tests/domains/orders/subsystems/orders/integration/test_order_terms_empty_service_time_disposable_mysql.py --junitxml="$PROOF_DIR/backend.xml" > "$PROOF_DIR/backend.log" 2>&1
-      - name: Full frontend tests
-        if: matrix.mode == 'frontend'
-        run: npm --prefix ui_react test -- --reporter=json --outputFile="$PROOF_DIR/frontend.json" --maxWorkers=2 --minWorkers=1 > "$PROOF_DIR/frontend.log" 2>&1
-      - name: Frontend build and lint
-        if: always() && matrix.mode == 'frontend'
-        run: |
-          npm --prefix ui_react run build > "$PROOF_DIR/build.log" 2>&1
-          npm --prefix ui_react run lint > "$PROOF_DIR/lint.log" 2>&1
-      - name: Start synthetic MySQL and await authenticated host TCP
-        if: matrix.mode != 'backend' && matrix.mode != 'frontend'
-        run: |
-          MYSQL_ROOT_PASSWORD=$(openssl rand -hex 16)
-          echo "::add-mask::$MYSQL_ROOT_PASSWORD"
-          export MYSQL_ROOT_PASSWORD
-          echo "DB_PASSWORD=$MYSQL_ROOT_PASSWORD" >> "$GITHUB_ENV"
-          echo "LABOR_UNION_TEST_MYSQL_PASSWORD=$MYSQL_ROOT_PASSWORD" >> "$GITHUB_ENV"
-          echo 'LABOR_UNION_TEST_MYSQL_HOST=127.0.0.1' >> "$GITHUB_ENV"
-          echo 'LABOR_UNION_TEST_MYSQL_PORT=33306' >> "$GITHUB_ENV"
-          echo 'LABOR_UNION_TEST_MYSQL_USER=root' >> "$GITHUB_ENV"
-          echo 'LABOR_UNION_TEST_MYSQL_DATABASE=lu_test_business_repair' >> "$GITHUB_ENV"
-          echo 'DB_DATABASE=lu_test_business_repair' >> "$GITHUB_ENV"
-          docker run -d --name repair-mysql -p 127.0.0.1:33306:3306 -e MYSQL_ROOT_PASSWORD -e MYSQL_ROOT_HOST=% mysql@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b
-          python - <<'PY'
-          import os,time,pymysql
-          for attempt in range(60):
-              try:
-                  c=pymysql.connect(host='127.0.0.1',port=33306,user='root',password=os.environ['MYSQL_ROOT_PASSWORD'])
-                  with c.cursor() as cur: cur.execute('SELECT 1'); assert cur.fetchone()[0]==1
-                  c.close(); break
-              except pymysql.err.OperationalError:
-                  if attempt==59: raise
-                  time.sleep(2)
-          PY
-      - name: Finance integration with real query and typed frontend
-        if: startsWith(matrix.mode, 'finance-')
-        env:
-          MODE: ${{ matrix.mode }}
-        run: |
-          python - <<'PY' > "$PROOF_DIR/finance.log" 2>&1
-          import os,sys,traceback
-          from argparse import Namespace
-          import pytest
-          if os.environ['MODE']=='finance-parity':
-              from scripts.bootstrap_disposable_mysql_schema import bootstrap
-              bootstrap(Namespace(host='127.0.0.1',port=33306,user='root',password=os.environ['DB_PASSWORD'],database=os.environ['DB_DATABASE'],confirm_database=os.environ['DB_DATABASE']))
-          from api.routes import finance_import as route
-          original=route._call_query
-          def trace_query(query,message,correlation):
-              def checked():
-                  try: return query()
-                  except Exception:
-                      traceback.print_exc(); raise
-              return original(checked,message,correlation)
-          route._call_query=trace_query
-          case='tests/test_finance_source_review_mysql_e2e.py' if os.environ['MODE']=='finance-query' else 'tests/test_finance_import_staging_persistent_mysql_e2e.py'
-          sys.exit(pytest.main(['-q','--tb=long','--junitxml=/tmp/business-repair/finance.xml',case]))
-          PY
-      - name: Subsidy durable business flows on separate synthetic targets
-        if: matrix.mode == 'subsidy'
-        run: |
-          python - <<'PY'
-          import os,subprocess,sys,json
-          from pathlib import Path
-          names=['submission','claim_plan','approval']
-          results=[]
-          for index,name in enumerate(names):
-              db=f'lu_test_repair_subsidy_{index}'
-              env={**os.environ,'DB_DATABASE':db,'LABOR_UNION_TEST_MYSQL_DATABASE':db}
-              node='tests/test_government_subsidy_durable_mysql_e2e.py::test_government_subsidy_'+name+'_durable_crash_recovery_and_duplicate_apply'
-              with open(f'/tmp/business-repair/subsidy-{index}.log','w') as log:
-                  result=subprocess.run([sys.executable,'-m','pytest','-q','--tb=short',f'--junitxml=/tmp/business-repair/subsidy-{index}.xml',node],env=env,stdout=log,stderr=subprocess.STDOUT)
-              results.append({'nodeid':node,'exit_code':result.returncode})
-          Path('/tmp/business-repair/subsidy-results.json').write_text(json.dumps(results))
-          sys.exit(int(any(r['exit_code'] for r in results)))
-          PY
-      - name: Empty service time preservation on real MySQL
-        if: matrix.mode == 'order-terms'
-        run: python -m pytest -q --tb=short --junitxml="$PROOF_DIR/orders.xml" tests/domains/orders/subsystems/orders/integration/test_order_terms_empty_service_time_disposable_mysql.py > "$PROOF_DIR/orders.log" 2>&1
-      - name: Destroy only synthetic test container
-        if: always() && matrix.mode != 'backend' && matrix.mode != 'frontend'
-        run: docker rm -f repair-mysql
+          mkdir -p /tmp/repair-readback
+          git show HEAD^:.github/workflows/business-repair.yml > /tmp/repair-readback/transfer.yml
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
         with:
-          name: repair-${{ matrix.mode }}-${{ github.run_number }}
-          path: /tmp/business-repair
+          name: repair-transfer-readback
+          path: /tmp/repair-readback
           retention-days: 1
           if-no-files-found: error
