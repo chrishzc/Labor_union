@@ -160,15 +160,16 @@ function historicalCurrentOwnerStageForTimeline(timeline: OrderCoreStageTimeline
   return stage;
 }
 
-function noticesForTimeline(
-  timeline: OrderCoreStageTimeline,
+function noticesForStage(
+  stage: CoreStageProjection | null,
   kind: 'blockers' | 'warnings',
 ): readonly CoreStageNoticeViewModel[] {
-  return timeline.core_stages.flatMap((stage) => stage[kind].map((notice) => ({
+  if (stage === null) return [];
+  return stage[kind].map((notice) => ({
     id: `${stage.code}:${notice.code}`,
     stageLabel: stage.label,
     message: notice.message,
-  })));
+  }));
 }
 
 function adaptTimeline(timeline: OrderCoreStageTimeline, query: OrderCoreStageProjectionQueryParams): CoreStageCaseViewModel {
@@ -187,8 +188,8 @@ function adaptTimeline(timeline: OrderCoreStageTimeline, query: OrderCoreStagePr
       : timeline.lifecycle_status,
     clientSettlementLabel: coreStageSubstatusLabel(stageByCode(timeline, 'client_settlement')!.substatus_code),
     staffSettlementLabel: coreStageSubstatusLabel(stageByCode(timeline, 'staff_payout')!.substatus_code),
-    blockers: noticesForTimeline(timeline, 'blockers'),
-    warnings: noticesForTimeline(timeline, 'warnings'),
+    blockers: noticesForStage(currentStage, 'blockers'),
+    warnings: noticesForStage(currentStage, 'warnings'),
     sourceProjectionDigest: timeline.source_projection_digest,
   };
 }

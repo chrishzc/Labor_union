@@ -210,6 +210,37 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
     clientMocks.loadSummaries.mockResolvedValue(summaryPage([]));
   });
 
+  it('案件卡只顯示目前階段通知，不提前顯示未來客戶結算阻塞', async () => {
+    const current = timeline('CASE-CURRENT-NOTICE', 'confirmed_service_dates');
+    const withFutureSettlementBlocker = {
+      ...current,
+      core_stages: current.core_stages.map((stage) => stage.code === 'client_settlement'
+        ? {
+            ...stage,
+            status: 'blocked' as const,
+            substatus_code: SUBSTATUS_BY_STAGE_STATUS.client_settlement.blocked,
+            blockers: [{
+              code: 'client_settlement_not_complete',
+              message: 'Client Finance 子投影尚未完成。',
+            }],
+          }
+        : stage),
+    };
+    clientMocks.getCoreStageTimelines.mockResolvedValue(corePage([
+      withFutureSettlementBlocker,
+    ], {
+      stageCounts: { confirmed_service_dates: 1 },
+    }));
+
+    render(<OrderWorkbenchV2Page />);
+
+    await screen.findByText('CASE-CURRENT-NOTICE');
+    const card = cardFor('CASE-CURRENT-NOTICE');
+    expect(within(card).getByText('正式服務日期確認')).toBeInTheDocument();
+    expect(within(card).queryByText('Client Finance 子投影尚未完成。')).not.toBeInTheDocument();
+    expect(within(card).queryByText(/阻塞 · 客戶端結算/)).not.toBeInTheDocument();
+  });
+
   it('保留正式階段總數與案件摘要，不再提供已移除的小狀態篩選', async () => {
     clientMocks.loadSummaries.mockResolvedValue(summaryPage([
       orderSummary('CASE-PLAN-1', '林小芳', null, '2026-10-01', '2026-10-20'),
