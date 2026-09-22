@@ -53,6 +53,16 @@ describe('Beta Drawer 受控操作整合與跨支線回讀', () => {
     expect(screen.getByRole('region', { name: `操作面板 ${label}` })).toBeInTheDocument();
   });
 
+  it('實際開始日面板展開後移除無作用的重複入口', async () => {
+    render(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="normal" onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '案件異動' }));
+    const entry = screen.getByRole('button', { name: '確認／更正實際開始日' });
+    await waitFor(() => expect(entry).toBeEnabled());
+    fireEvent.click(entry);
+    expect(screen.getByRole('region', { name: '操作面板 actual-start' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '確認／更正實際開始日' })).not.toBeInTheDocument();
+  });
+
   it('受控重開入口只在取消支線顯示', async () => {
     const normal = render(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="normal" onClose={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: '案件異動' }));

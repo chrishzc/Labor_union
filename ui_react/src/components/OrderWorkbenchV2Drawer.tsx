@@ -475,7 +475,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
               {currentBranch === 'cancelled' && (
                 <button type="button" disabled={operationBusy || factsRefreshing} onClick={() => setOperation('reopen')}>受控重開取消案件</button>
               )}
-              {currentBranch !== 'cancelled' && (
+              {currentBranch !== 'cancelled' && operation !== 'actual-start' && (
                 <button type="button" disabled={operationBusy || factsRefreshing} onClick={() => setOperation('actual-start')}>確認／更正實際開始日</button>
               )}
             </div>
