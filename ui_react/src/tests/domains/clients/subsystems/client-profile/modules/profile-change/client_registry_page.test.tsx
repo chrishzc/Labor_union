@@ -113,6 +113,31 @@ describe('Client registry owner editing', () => {
     expect(information).not.toHaveTextContent('survey_details');
   });
 
+  it('disables a financially locked BeClass field before it can produce a 409 preview', async () => {
+    mocks.query.mockResolvedValue({
+      ...detail,
+      beclass: {
+        ...detail.beclass,
+        field_capabilities: {
+          ...detail.beclass.field_capabilities,
+          multi_birth_count: {
+            owner: 'client_beclass', editable: false,
+            reason: 'multi_birth_count_locked_after_service_start',
+            options: ['單胞胎', '雙胞胎'],
+          },
+        },
+      },
+    });
+    render(<ClientRegistryPage />);
+    fireEvent.click(screen.getByRole('tab', { name: '名冊資料' }));
+    fireEvent.click(await screen.findByRole('button', { name: /CASE-001/ }));
+
+    const beclass = (await screen.findByRole('heading', { name: 'BeClass 有效資料' })).closest('section') as HTMLElement;
+    expect(within(beclass).getByRole('combobox', { name: /胎數（單胞胎／雙胞胎）/ })).toBeDisabled();
+    expect(within(beclass).getByText('服務已開始，胎數會影響費率，不能在此直接修改。')).toBeInTheDocument();
+    expect(mocks.preview).not.toHaveBeenCalled();
+  });
+
   it('shows editable blank fields for any case without imported BeClass data', async () => {
     mocks.query.mockResolvedValue({
       ...detail,

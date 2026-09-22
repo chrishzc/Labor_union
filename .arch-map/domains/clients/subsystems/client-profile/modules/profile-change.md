@@ -22,6 +22,10 @@
 - `ui_react/src/api/client_registry/`
 - `ui_react/src/pages/ClientRegistryPage.tsx`
 - `ui_react/src/pages/ClientRosterPage.tsx`
+- `ui_react/src/components/CaseArchitectureBootstrapRepairPanel.tsx` — 僅組合 Case Import-owned bootstrap Q/P/A，完成後重讀名冊 owner facts。
+
+## Dependencies
+- outbound: `case-import/case-architecture-bootstrap` — `client_finance_bootstrap_required` 時提供明示 Preview／Apply 修復入口；Client Profile／名冊 Query 不自行建立 financial roots。
 
 ## Entrypoints
 - `GET /api/v1/admin/registries/clients` — bounded selector with optional query, BeClass effective multi-birth-count, order-status, cooking and allowlisted sort filters; the registry editor exhausts its case-number cursor, while the read-only roster uses offset pagination across all supported sorts.

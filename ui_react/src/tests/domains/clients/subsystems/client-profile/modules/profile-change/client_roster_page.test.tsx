@@ -3,7 +3,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ClientRosterPage } from '../../../../../../../pages/ClientRosterPage';
 
 const mocks = vi.hoisted(() => ({ list: vi.fn(), query: vi.fn(), downloadOrderAccounting: vi.fn() }));
+const bootstrapMocks = vi.hoisted(() => ({ status: vi.fn(), preview: vi.fn(), apply: vi.fn() }));
 vi.mock('../../../../../../../api/client_registry/client_registry_client', () => ({ clientRegistryClient: mocks }));
+vi.mock('../../../../../../../api/case_import/case_architecture_bootstrap_client', () => ({ caseArchitectureBootstrapClient: bootstrapMocks }));
 
 const item = {
   client_id: 7, case_no: 'CASE-001', imported_virtual_accounts: ['009978160011500001', '009978160011500009'], built_in_virtual_account: '99781699115001', name: '王小明', phone: '0912345678', city: '新竹市', district: '東區',
@@ -16,6 +18,7 @@ describe('ClientRosterPage', () => {
     mocks.list.mockReset();
     mocks.query.mockReset();
     mocks.downloadOrderAccounting.mockReset();
+    Object.values(bootstrapMocks).forEach((mock) => mock.mockReset());
     mocks.list.mockResolvedValue({ items: [item], next_cursor: null, next_offset: null });
     mocks.query.mockResolvedValue({
       case_no: 'CASE-001',
@@ -26,6 +29,28 @@ describe('ClientRosterPage', () => {
       order_terms: { status: 'ready', code: null, data: { case_no: 'CASE-001', order_version: 1, scheduling_version: 1, scheduling_generation: 1, client_finance_version: 1, payroll_version: 1, service_data_locked: false, terms: { planned_start_date: '2026-10-01', service_days: 26, service_hours_per_day: 8, requires_cooking: true, floor_fee_ntd: 0, service_time: { start_time: '09:00:00', end_time: '17:00:00', end_day_offset: 0 } } }, field_capabilities: {} },
     });
     mocks.downloadOrderAccounting.mockResolvedValue({ blob: new Blob(['xlsx']), filename: 'client-order-accounting.xlsx' });
+    bootstrapMocks.status.mockResolvedValue({
+      case_no: 'CASE-001', ready: false, scheduling_version: 0,
+      scheduling_generation: 0, service_time_complete: true, domain_blockers: [],
+      recommendation: {
+        client_payment_policy_version: 'client-approved-v1', client_hourly_rate_ntd: 350,
+        deposit_service_days: 0, deposit_due_date: '2026-09-01',
+        first_payment_due_date: '2026-10-01', payroll_policy_version: 'approved-rates-v1',
+      },
+    });
+    bootstrapMocks.preview.mockResolvedValue({
+      case_no: 'CASE-001', order_version: 7, source_identity_status: '補助市民',
+      client_payment_policy_version: 'client-approved-v1', client_hourly_rate_ntd: 350,
+      deposit_service_days: 0, deposit_due_date: '2026-09-01', first_payment_due_date: '2026-10-01',
+      payroll_policy_version: 'approved-rates-v1', payroll_policy_kind: 'subsidized_citizen',
+      payroll_hourly_rate_ntd: 350, scheduling_version: 0, scheduling_generation: 0,
+      mutation: 'create', preview_fingerprint: 'a'.repeat(64),
+    });
+    bootstrapMocks.apply.mockResolvedValue({
+      case_no: 'CASE-001', order_version: 7, client_finance_version: 0, payroll_version: 0,
+      scheduling_version: 0, scheduling_generation: 0, bootstrap_created: true,
+      bootstrap_event_id: 81, preview_fingerprint: 'a'.repeat(64),
+    });
   });
 
   it('requests server filters, displays roster fields, and exposes no mutation controls', async () => {
@@ -88,6 +113,28 @@ describe('ClientRosterPage', () => {
     await waitFor(() => expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ sortBy: 'service_days', sortOrder: 'asc', limit: 100 })));
     fireEvent.click(screen.getByRole('button', { name: '清除篩選' }));
     await waitFor(() => expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ sortBy: 'case_no', sortOrder: 'asc', limit: 100 })));
+  });
+
+  it('offers the existing Preview and Apply repair when Client Finance bootstrap is missing', async () => {
+    const unavailable = {
+      ...(await mocks.query()),
+      finance: { status: 'not_ready', code: 'client_finance_bootstrap_required', values: null },
+      order_terms: { status: 'not_ready', code: 'client_finance_bootstrap_required', data: null, field_capabilities: {} },
+    };
+    mocks.query.mockReset();
+    mocks.query.mockResolvedValueOnce(unavailable).mockResolvedValue(unavailable);
+    render(<ClientRosterPage />);
+    fireEvent.click(await screen.findByRole('row', { name: '開啟案件 CASE-001 詳細資料' }));
+
+    const repair = await screen.findByLabelText('案件初始資料修復');
+    expect(repair).toHaveTextContent('這不是排班格式問題');
+    fireEvent.click(await within(repair).findByRole('button', { name: '檢查初始資料補建內容' }));
+    await waitFor(() => expect(bootstrapMocks.preview).toHaveBeenCalledTimes(1));
+    expect(repair).toHaveTextContent('客戶時薪：350 元');
+    fireEvent.click(within(repair).getByRole('button', { name: '確認建立案件初始資料' }));
+    await waitFor(() => expect(bootstrapMocks.apply).toHaveBeenCalledTimes(1));
+    expect(bootstrapMocks.apply.mock.calls[0][4]).toMatch(/^case-bootstrap-repair-/);
+    await waitFor(() => expect(mocks.query).toHaveBeenCalledTimes(2));
   });
 
   it('moves between pages for any sort and exposes the current page above the table', async () => {

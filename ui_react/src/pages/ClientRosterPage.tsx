@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { clientRegistryClient, type ClientRegistryListQuery } from '../api/client_registry/client_registry_client';
 import type { ClientRegistryDetail, ClientRegistryPage as ClientRegistryPageData, ClientRegistrySortBy, ClientRegistrySortOrder } from '../api/client_registry/client_registry_schemas';
+import { CaseArchitectureBootstrapRepairPanel } from '../components/CaseArchitectureBootstrapRepairPanel';
 import { Drawer } from '../components/Drawer';
 import './ClientRosterPage.css';
 
@@ -91,8 +92,10 @@ const ReadOnlyFields: React.FC<{ labels: Record<string, string>; values: Record<
   </dl>
 );
 
-const ReadOnlyDetail: React.FC<{ detail: ClientRegistryDetail }> = ({ detail }) => {
+const ReadOnlyDetail: React.FC<{ detail: ClientRegistryDetail; onRepaired: () => void | Promise<void> }> = ({ detail, onRepaired }) => {
   const terms = detail.order_terms.data?.terms;
+  const bootstrapRequired = detail.order_terms.code === 'client_finance_bootstrap_required'
+    || detail.finance.code === 'client_finance_bootstrap_required';
   const orderTermValues = terms ? {
     planned_start_date: terms.planned_start_date, service_days: terms.service_days,
     service_hours_per_day: terms.service_hours_per_day, requires_cooking: terms.requires_cooking,
@@ -112,7 +115,9 @@ const ReadOnlyDetail: React.FC<{ detail: ClientRegistryDetail }> = ({ detail }) 
       : <p>訂單條件目前不可用（{detail.order_terms.code ?? detail.order_terms.status}）。</p>}</section>
     <section><h3>客戶帳務（唯讀）</h3>{detail.finance.status === 'ready' && detail.finance.values
       ? <ReadOnlyFields labels={financeLabels} values={detail.finance.values} />
-      : <p>客戶帳務目前不可用（{detail.finance.code ?? detail.finance.status}）。</p>}</section>
+      : <p>客戶帳務目前不可用（{detail.finance.code ?? detail.finance.status}）。</p>}
+      {bootstrapRequired && <CaseArchitectureBootstrapRepairPanel caseNo={detail.case_no} onCompleted={onRepaired} />}
+    </section>
   </div>;
 };
 
@@ -292,7 +297,7 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
     >
       {detailLoading && <p role="status" className="client-roster-message">正在載入完整客戶資料…</p>}
       {detailError && <p role="alert" className="client-roster-message">{detailError}</p>}
-      {detail?.case_no === selectedCaseNo && <ReadOnlyDetail detail={detail} />}
+      {detail?.case_no === selectedCaseNo && <ReadOnlyDetail detail={detail} onRepaired={() => openDetail(detail.case_no)} />}
     </Drawer>
   </div>;
 };
