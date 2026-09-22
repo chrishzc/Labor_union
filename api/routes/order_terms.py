@@ -126,7 +126,7 @@ def query_order_terms(
 ):
     del principal
     return _call_endpoint(
-        lambda: _query_payload(application.query(case_no)),
+        lambda: application.query(case_no),
         "成功取得訂單條款",
         CorrelationId(f"query:{case_no}"),
     )
@@ -206,24 +206,6 @@ def _apply_request(case_no, body, key, correlation, principal):
         CorrelationId(correlation),
         **body.replacement_arguments(),
     )
-
-
-def _query_payload(facts) -> dict[str, Any]:
-    return {
-        "case_no": facts.order.case_no,
-        "order_version": facts.order.version,
-        "scheduling_version": facts.scheduling.aggregate_version,
-        "scheduling_generation": facts.scheduling.generation_number,
-        "client_finance_version": facts.client_finance.account_version,
-        "payroll_version": facts.payroll.payroll_version,
-        "service_data_locked": facts.order.service_data_locked,
-        "terms": facts.order.terms.canonical_payload(),
-        "confirmed_service_dates": list(facts.confirmed_service_dates),
-        "confirmed_service_date_version": facts.confirmed_service_date_version,
-        "assignments": [{"assignment_id": s.assignment_id, "staff_id": s.staff_id,
-                         "service_days": s.service_day_count}
-                        for s in sorted(facts.scheduling.segments, key=lambda s: s.sequence)],
-    }
 
 
 def _preview_payload(preview) -> dict[str, Any]:

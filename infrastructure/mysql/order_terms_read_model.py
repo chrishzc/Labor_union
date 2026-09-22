@@ -54,6 +54,56 @@ def load_preview_facts(cursor: Any, case_no: str) -> TermsWorkflowFacts:
     return _assemble_facts(cursor, order_row, aggregate_row, lock=False)
 
 
+def load_query_facts(cursor: Any, case_no: str) -> dict[str, Any]:
+    """Read the Terms form without constructing Finance or Payroll impacts.
+
+    A missing account has no version (None), not version zero. Account versions
+    are display/readback metadata; they do not assert that policy data is ready.
+    Mutation and borrowed-owner readers retain their existing strict contract.
+    """
+    order = _order_facts(select_order(cursor, case_no, lock=False))
+    aggregate = select_scheduling_aggregate(cursor, case_no, lock=False)
+    generation = _select_generation(cursor, aggregate, False)
+    assignment_rows = _select_assignments(cursor, generation, False)
+    schedule_rows = _select_schedules(cursor, generation, False)
+    segments = _segments(
+        assignment_rows, _service_dates_by_assignment(schedule_rows)
+    )
+    confirmed_version, confirmed_dates = _select_confirmed_service_dates(
+        cursor, case_no, False
+    )
+    cursor.execute(
+        "SELECT (SELECT aggregate_version FROM client_finance_accounts "
+        "WHERE case_no=%s) AS client_finance_version,"
+        "(SELECT aggregate_version FROM payroll_case_accounts "
+        "WHERE case_no=%s) AS payroll_version",
+        (case_no, case_no),
+    )
+    versions = cursor.fetchone()
+    return {
+        "case_no": order.case_no,
+        "order_version": order.version,
+        "scheduling_version": int(aggregate["aggregate_version"]),
+        "scheduling_generation": (
+            int(generation["generation_number"]) if generation is not None else 0
+        ),
+        "client_finance_version": versions["client_finance_version"],
+        "payroll_version": versions["payroll_version"],
+        "service_data_locked": order.service_data_locked,
+        "terms": order.terms.canonical_payload(),
+        "confirmed_service_dates": list(confirmed_dates),
+        "confirmed_service_date_version": confirmed_version,
+        "assignments": [
+            {
+                "assignment_id": segment.assignment_id,
+                "staff_id": segment.staff_id,
+                "service_days": segment.service_day_count,
+            }
+            for segment in segments
+        ],
+    }
+
+
 def load_order_facts(
     cursor: Any, case_no: str, *, for_update: bool = False
 ) -> OrderAggregateFacts:

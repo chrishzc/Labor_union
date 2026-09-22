@@ -18,7 +18,7 @@ class OrderTermsApplication:
     workflow: OrderTermsWorkflow
 
     def query(self, case_no: str):
-        return self.repository.load_for_preview(case_no)
+        return self.repository.load_for_query(case_no)
 
     def preview(self, case_no, proposed_terms, **replacement):
         return self.workflow.preview(case_no, proposed_terms, **replacement)

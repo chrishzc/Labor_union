@@ -202,21 +202,18 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
     };
   }, []);
   const currentQuery = readback ?? query;
+  // Finance metadata alone does not change the editable Terms draft.
   const queryRevision = [
     caseNo,
     query.order_version,
     query.scheduling_version,
     query.scheduling_generation,
-    query.client_finance_version,
-    query.payroll_version,
   ].join(':');
   const observedRevision = readback === null ? null : [
     readback.case_no,
     readback.order_version,
     readback.scheduling_version,
     readback.scheduling_generation,
-    readback.client_finance_version,
-    readback.payroll_version,
   ].join(':');
   const previousQueryRevision = useRef(queryRevision);
 
@@ -350,6 +347,8 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
       if (!mounted.current || activeCase.current !== caseNo) return;
       if (refreshed.case_no !== caseNo || refreshed.order_version < nextReceipt.order_version
         || refreshed.scheduling_version < nextReceipt.scheduling_version
+        || refreshed.client_finance_version === null
+        || refreshed.payroll_version === null
         || refreshed.client_finance_version < nextReceipt.client_finance_version
         || refreshed.payroll_version < nextReceipt.payroll_version) throw new Error('條款回讀案件識別或版本與收據不一致。');
       const target = submittedTarget.current;

@@ -34,6 +34,7 @@ from .order_terms_read_model import (
     load_order_facts,
     load_locked_facts,
     load_preview_facts,
+    load_query_facts,
     preflight_staff_ids,
 )
 from .order_lifecycle_impact_writer import persist_order_lifecycle_impact
@@ -44,6 +45,10 @@ from .payroll_terms_writer import persist_payroll_terms_impact
 class MySqlOrderTermsRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
+
+    def load_for_query(self, case_no: str) -> dict[str, Any]:
+        with self._connection.cursor() as cursor:
+            return load_query_facts(cursor, case_no)
 
     def load_for_preview(self, case_no: str) -> TermsWorkflowFacts:
         with self._connection.cursor() as cursor:

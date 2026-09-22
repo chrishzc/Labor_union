@@ -40,8 +40,8 @@ class OrderTermsQueryView(BaseModel):
     order_version: int = Field(ge=0)
     scheduling_version: int = Field(ge=0)
     scheduling_generation: int = Field(ge=0)
-    client_finance_version: int = Field(ge=0)
-    payroll_version: int = Field(ge=0)
+    client_finance_version: int | None = Field(ge=0)
+    payroll_version: int | None = Field(ge=0)
     service_data_locked: bool
     terms: OrderTermsView
     confirmed_service_dates: list[date] = Field(default_factory=list)
