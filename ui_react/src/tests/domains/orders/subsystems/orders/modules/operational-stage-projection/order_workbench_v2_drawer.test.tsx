@@ -285,10 +285,13 @@ describe('待辦看板 Beta 唯讀工作 Drawer', () => {
     const dialog = await screen.findByRole('region', { name: '案件 CASE-DRAWER' });
 
     await waitFor(() => expect(within(dialog).getAllByText('林小芳').length).toBeGreaterThan(0));
+    const caseContext = dialog.querySelector('.order-case-context');
+    expect(caseContext).toHaveTextContent('預期開始2026-10-01');
+    expect(caseContext).toHaveTextContent('實際開始2026-10-03');
     fireEvent.click(within(dialog).getByRole('button', { name: '訂單與服務資料' }));
     expect(within(dialog).getAllByText('2026-10-01').length).toBeGreaterThan(0);
     expect(within(dialog).getByText('20 日')).toBeInTheDocument();
-    expect(within(dialog).getByText('2026-10-03')).toBeInTheDocument();
+    expect(within(dialog).getAllByText('2026-10-03').length).toBeGreaterThan(0);
     expect(within(dialog).getByText('第 1 段 · 月嫂編號 42')).toBeInTheDocument();
     expect(within(dialog).getByText('2026-10-01 ～ 2026-10-20')).toBeInTheDocument();
     expect(within(dialog).queryByText(/lineage_source_assignment_ids/)).not.toBeInTheDocument();

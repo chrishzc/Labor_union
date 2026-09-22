@@ -314,7 +314,8 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
         <p className="order-case-purpose">{drawerTab === 'data' ? '查閱客戶、約定條款與服務安排，不在此頁執行案件流程。' : drawerTab === 'changes' ? '選擇需要辦理的異動，核對影響後再確認。' : '選擇要辦理的工作；各事項依自己的正式資料判斷，不要求依序辦理。'}</p>
         <div className="order-case-context">
           <span><small>客戶</small>{detail.status === 'ready' ? detail.data.client_name || '未登錄' : '讀取中'}</span>
-          <span><small>約定服務</small>{terms.status === 'ready' ? terms.data.terms.planned_start_date : '讀取中'}</span>
+          <span><small>預期開始</small>{terms.status === 'ready' ? terms.data.terms.planned_start_date : '讀取中'}</span>
+          <span><small>實際開始</small>{detail.status === 'ready' ? detail.data.actual_start_date ?? '尚未確認' : '讀取中'}</span>
           <span><small>服務量</small>{terms.status === 'ready' ? `${terms.data.terms.service_days} 日 · 每日 ${terms.data.terms.service_hours_per_day} 小時` : '讀取中'}</span>
         </div>
         <nav className="order-case-view-nav" aria-label="案件頁面">
