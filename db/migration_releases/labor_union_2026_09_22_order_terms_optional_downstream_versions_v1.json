@@ -1,0 +1,61 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-order-terms-optional-downstream-versions-2026-09-22-v1",
+  "release_metadata": {
+    "release_name": "Labor Union Orders Terms optional downstream versions",
+    "application_version": "order-terms-optional-downstream-versions-v1",
+    "published_at": "2026-09-22",
+    "description": "Allow Terms receipts to state that Client Finance and Payroll roots were not read for a preassignment edit"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": ["absent", "exact"],
+    "forbidden_owned_object_states": ["partial", "drift"],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-order-details-owner-dates-2026-09-15-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1044_order_terms_optional_downstream_versions.sql",
+      "relative_path": "db/schema_parts/1044_order_terms_optional_downstream_versions.sql",
+      "sha256": "3f3775b69b9c15c69a32b38694653f4a499481c74ee3c60514138f6b49decc63",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "forward-only-after-null-receipt; discard-candidate-before-entry-switch",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "order-terms-receipt-downstream-version-nullability-exact",
+      "phase": "post-schema",
+      "policy": "Orders Terms receipt downstream versions are nullable while their unsigned bigint types remain unchanged",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": ["order-terms-optional-downstream-versions-v1"],
+    "required_restart_targets": ["api"],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": ["order-terms-receipt-downstream-version-nullability-exact"]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_09_22_order_terms_optional_downstream_versions_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_09_22_order_terms_optional_downstream_versions_v1.descriptors.json",
+    "sha256": "84c23d40f82241356847e4cc0ff8776cdfbc070fe7bf2bd1c1749acfa864cdbb",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": ["--single-transaction", "--routines", "--events", "--triggers", "--hex-blob"],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

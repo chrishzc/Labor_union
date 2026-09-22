@@ -100,8 +100,8 @@ class OrderTermsPreviewRequest(BaseModel):
 class OrderTermsApplyBody(OrderTermsPreviewRequest):
     expected_order_version: int = Field(ge=0)
     expected_scheduling_version: int = Field(ge=0)
-    expected_client_finance_version: int = Field(ge=0)
-    expected_payroll_version: int = Field(ge=0)
+    expected_client_finance_version: int | None = Field(ge=0)
+    expected_payroll_version: int | None = Field(ge=0)
     preview_fingerprint: str = Field(
         min_length=64,
         max_length=64,
@@ -206,8 +206,16 @@ def _apply_request(case_no, body, key, correlation, principal):
         body.proposed_terms.to_domain(),
         ExpectedVersion(body.expected_order_version),
         ExpectedVersion(body.expected_scheduling_version),
-        ExpectedVersion(body.expected_client_finance_version),
-        ExpectedVersion(body.expected_payroll_version),
+        (
+            ExpectedVersion(body.expected_client_finance_version)
+            if body.expected_client_finance_version is not None
+            else None
+        ),
+        (
+            ExpectedVersion(body.expected_payroll_version)
+            if body.expected_payroll_version is not None
+            else None
+        ),
         PreviewFingerprint(body.preview_fingerprint),
         IdempotencyKey(key) if key is not None else None,
         ActorContext(actor_id),
@@ -224,8 +232,14 @@ def _query_payload(facts) -> dict[str, Any]:
         "order_version": facts.order.version,
         "scheduling_version": facts.scheduling.aggregate_version,
         "scheduling_generation": facts.scheduling.generation_number,
-        "client_finance_version": facts.client_finance.account_version,
-        "payroll_version": facts.payroll.payroll_version,
+        "client_finance_version": (
+            facts.client_finance.account_version
+            if facts.client_finance is not None
+            else None
+        ),
+        "payroll_version": (
+            facts.payroll.payroll_version if facts.payroll is not None else None
+        ),
         "service_data_locked": facts.order.service_data_locked,
         "terms": facts.order.terms.canonical_payload(),
         "confirmed_service_dates": list(facts.confirmed_service_dates),

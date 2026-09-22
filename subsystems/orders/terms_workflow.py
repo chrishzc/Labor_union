@@ -14,7 +14,10 @@ from domains.client_finance.obligation_planning import (
     build_preassignment_client_finance_noop,
     build_client_finance_terms_impact,
 )
-from domains.orders.lifecycle import build_terms_lifecycle_impact
+from domains.orders.lifecycle import (
+    build_preassignment_terms_lifecycle_impact,
+    build_terms_lifecycle_impact,
+)
 from domains.orders.service_date_confirmation import ConfirmedServiceDateCandidate
 from domains.orders.terms import (
     is_unique_cooking_requirement_correction,
@@ -47,8 +50,8 @@ class TermsWorkflowFacts:
     scheduling: Any
     planned_service_dates: tuple[Any, ...]
     planned_end_date: Any
-    client_finance: Any
-    payroll: Any
+    client_finance: Any | None
+    payroll: Any | None
     lifecycle: Any
     confirmed_service_date_version: int | None = None
     confirmed_service_dates: tuple[Any, ...] = ()
@@ -60,8 +63,8 @@ class OrderTermsApplyRequest:
     proposed_terms: Any
     expected_order_version: Any
     expected_scheduling_version: Any
-    expected_client_finance_version: Any
-    expected_payroll_version: Any
+    expected_client_finance_version: Any | None
+    expected_payroll_version: Any | None
     preview_fingerprint: Any
     idempotency_key: Any | None
     actor: Any
@@ -87,10 +90,10 @@ class OrderTermsPreview:
     order_version: int
     scheduling_version: int
     scheduling_generation: int
-    client_finance_version: int
-    payroll_version: int
-    client_finance_impact: Any
-    payroll_impact: Any
+    client_finance_version: int | None
+    payroll_version: int | None
+    client_finance_impact: Any | None
+    payroll_impact: Any | None
     lifecycle_impact: Any
     planned_end_date: Any
     confirmed_service_date_candidate: ConfirmedServiceDateCandidate | None
@@ -105,8 +108,8 @@ class OrderTermsReceipt:
     order_version: int
     scheduling_version: int
     scheduling_generation: int
-    client_finance_version: int
-    payroll_version: int
+    client_finance_version: int | None
+    payroll_version: int | None
     lifecycle_status: Any
     service_data_lock_formed: bool
     cancelled_assignment_ids: tuple[int, ...]
@@ -323,26 +326,44 @@ class OrderTermsWorkflow:
         scheduling = _scheduling_candidate(candidate_facts, proposed_terms)
         change_identity = f"terms:{scheduling.case_no}:{scheduling.generation_number}"
         if not facts.scheduling.segments:
-            client_finance = build_preassignment_client_finance_noop(
-                facts.client_finance, proposed_terms, scheduling, change_identity
-            )
-            payroll = build_preassignment_payroll_noop(
-                facts.payroll, scheduling, proposed_terms, change_identity
-            )
+            if facts.client_finance is None and facts.payroll is None:
+                client_finance = None
+                payroll = None
+                lifecycle = build_preassignment_terms_lifecycle_impact(
+                    facts.lifecycle,
+                    scheduling,
+                    self._clock.now(),
+                )
+            else:
+                client_finance = build_preassignment_client_finance_noop(
+                    facts.client_finance, proposed_terms, scheduling, change_identity
+                )
+                payroll = build_preassignment_payroll_noop(
+                    facts.payroll, scheduling, proposed_terms, change_identity
+                )
+                lifecycle = build_terms_lifecycle_impact(
+                    facts.lifecycle,
+                    proposed_terms,
+                    scheduling,
+                    client_finance.settlement,
+                    self._clock.now(),
+                )
         else:
+            if facts.client_finance is None or facts.payroll is None:
+                raise ValueError("assigned_terms_downstream_facts_required")
             client_finance = build_client_finance_terms_impact(
                 facts.client_finance, proposed_terms, scheduling, change_identity
             )
             payroll = build_payroll_terms_impact(
                 facts.payroll, scheduling, proposed_terms, change_identity
             )
-        lifecycle = build_terms_lifecycle_impact(
-            facts.lifecycle,
-            proposed_terms,
-            scheduling,
-            client_finance.settlement,
-            self._clock.now(),
-        )
+            lifecycle = build_terms_lifecycle_impact(
+                facts.lifecycle,
+                proposed_terms,
+                scheduling,
+                client_finance.settlement,
+                self._clock.now(),
+            )
         return _preview_result(facts, proposed_terms, scheduling, client_finance, payroll, lifecycle,
                                replacement_service_dates)
 
@@ -374,7 +395,7 @@ class OrderTermsWorkflow:
                 correlation_id=request.correlation_id,
             )
         )
-        if _client_finance_impact_mutates(preview.client_finance_impact):
+        if preview.client_finance_impact is not None and _client_finance_impact_mutates(preview.client_finance_impact):
             self._repository.persist_client_finance_impact(
                 ClientFinanceImpactPersistenceCommand(
                     candidate=preview.client_finance_impact,
@@ -386,7 +407,7 @@ class OrderTermsWorkflow:
                     source_event_id=event_id,
                 )
             )
-        if _payroll_impact_mutates(preview.payroll_impact):
+        if preview.payroll_impact is not None and _payroll_impact_mutates(preview.payroll_impact):
             self._repository.persist_payroll_impact(
                 PayrollImpactPersistenceCommand(
                     candidate=preview.payroll_impact,
@@ -403,7 +424,11 @@ class OrderTermsWorkflow:
                 candidate=preview.lifecycle_impact,
                 expected_order_version=preview.order_version,
                 resulting_order_version=receipt.order_version,
-                client_settlement_fingerprint=preview.client_finance_impact.settlement.fingerprint,
+                client_settlement_fingerprint=(
+                    preview.client_finance_impact.settlement.fingerprint
+                    if preview.client_finance_impact is not None
+                    else None
+                ),
                 idempotency_key=request.idempotency_key,
                 actor=request.actor,
                 reason=request.reason,
@@ -559,8 +584,14 @@ def _preview_result(
         order_version=facts.order.version,
         scheduling_version=facts.scheduling.aggregate_version,
         scheduling_generation=facts.scheduling.generation_number,
-        client_finance_version=facts.client_finance.account_version,
-        payroll_version=facts.payroll.payroll_version,
+        client_finance_version=(
+            facts.client_finance.account_version
+            if facts.client_finance is not None
+            else None
+        ),
+        payroll_version=(
+            facts.payroll.payroll_version if facts.payroll is not None else None
+        ),
         client_finance_impact=client_finance,
         payroll_impact=payroll,
         lifecycle_impact=lifecycle,
@@ -598,11 +629,19 @@ def _preview_fingerprint_payload(
         "terms": proposed_terms.canonical_payload(),
         "order_version": facts.order.version,
         "scheduling_version": facts.scheduling.aggregate_version,
-        "client_finance_version": facts.client_finance.account_version,
-        "payroll_version": facts.payroll.payroll_version,
+        "client_finance_version": (
+            facts.client_finance.account_version
+            if facts.client_finance is not None
+            else None
+        ),
+        "payroll_version": (
+            facts.payroll.payroll_version if facts.payroll is not None else None
+        ),
         "scheduling": _scheduling_payload(scheduling),
-        "client_finance": client_finance.fingerprint.value,
-        "payroll": payroll.fingerprint.value,
+        "client_finance": (
+            client_finance.fingerprint.value if client_finance is not None else None
+        ),
+        "payroll": payroll.fingerprint.value if payroll is not None else None,
         "lifecycle": lifecycle.fingerprint.value,
         "requires_formal_apply": _requires_formal_apply(
             facts,
@@ -753,14 +792,26 @@ def _validate_versions(request, facts):
     values = (
         (request.expected_order_version.value, facts.order.version, "order"),
         (request.expected_scheduling_version.value, facts.scheduling.aggregate_version, "scheduling"),
-        (request.expected_client_finance_version.value, facts.client_finance.account_version, "client_finance"),
-        (request.expected_payroll_version.value, facts.payroll.payroll_version, "payroll"),
+        (
+            _optional_version_value(request.expected_client_finance_version),
+            facts.client_finance.account_version if facts.client_finance is not None else None,
+            "client_finance",
+        ),
+        (
+            _optional_version_value(request.expected_payroll_version),
+            facts.payroll.payroll_version if facts.payroll is not None else None,
+            "payroll",
+        ),
     )
     for expected, current, domain in values:
         if expected == current:
             continue
         code = "client_finance_candidate_stale" if domain == "client_finance" else f"{domain}_version_conflict"
         raise _workflow_error(request, ErrorCategory.CONFLICT, code, f"The {domain} version changed before Apply.")
+
+
+def _optional_version_value(value):
+    return value.value if value is not None else None
 
 
 def _validate_locked_staff_set(request, facts, staff_ids):
@@ -771,7 +822,10 @@ def _validate_locked_staff_set(request, facts, staff_ids):
 
 
 def _raise_if_impacts_blocked(request, preview):
-    blockers = tuple(sorted(set(preview.client_finance_impact.blockers) | set(preview.payroll_impact.blockers)))
+    blockers = tuple(sorted(
+        set(preview.client_finance_impact.blockers if preview.client_finance_impact is not None else ())
+        | set(preview.payroll_impact.blockers if preview.payroll_impact is not None else ())
+    ))
     if not blockers:
         return
     raise _workflow_error(request, ErrorCategory.DOMAIN_BLOCKED, "terms_impact_blocked", "A downstream Domain blocked the Terms change.")
@@ -783,8 +837,8 @@ def _command_fingerprint(request):
         "terms": request.proposed_terms.canonical_payload(),
         "order_version": request.expected_order_version.value,
         "scheduling_version": request.expected_scheduling_version.value,
-        "client_finance_version": request.expected_client_finance_version.value,
-        "payroll_version": request.expected_payroll_version.value,
+        "client_finance_version": _optional_version_value(request.expected_client_finance_version),
+        "payroll_version": _optional_version_value(request.expected_payroll_version),
         "preview_fingerprint": request.preview_fingerprint.value,
         "actor": request.actor.actor_id,
         "reason": request.reason,

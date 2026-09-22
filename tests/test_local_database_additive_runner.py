@@ -107,6 +107,23 @@ def test_statement_classifier_allows_only_canonical_1028_lifecycle_widens() -> N
         )
 
 
+def test_statement_classifier_allows_only_canonical_1044_nullability_widen() -> None:
+    sql = (
+        migration.ROOT / "db" / "schema_parts" /
+        "1044_order_terms_optional_downstream_versions.sql"
+    ).read_text(encoding="utf-8")
+    statements = migration.split_sql(sql)
+
+    assert len(statements) == 1
+    assert migration._local_classify_statement(statements[0]) == (
+        "order_terms_downstream_version_nullability_widen"
+    )
+    with pytest.raises(migration.LocalAdditiveBlocked):
+        migration._local_classify_statement(
+            statements[0].replace("BIGINT UNSIGNED NULL", "BIGINT UNSIGNED NOT NULL")
+        )
+
+
 def test_column_contract_detects_stored_generated_column() -> None:
     name, contract = migration._parse_column_definition(
         "active_hold_scope_key VARCHAR(191)\n"

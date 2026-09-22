@@ -7,6 +7,8 @@
 ## Responsibility
 編排 Orders Terms 的 Query／zero-write Preview／fresh-lock Apply。Preview 衍生 `requires_formal_apply`：不形成 Scheduling、confirmed dates、Finance、Payroll 或 lifecycle 正式影響的普通保存只更新 Orders aggregate，不建立 command claim、事件或永久 receipt；有正式影響時才以單一 outer Unit of Work 套用跨 owner 影響並產生可追溯 receipt。尚未建立 assignment 時，起始日平移不虛構排班 segment，並以相同天數平移預計結束日；已有 current confirmed service dates 時保留日期間隔、建立新的 immutable current version 取代舊版。
 
+尚未建立 assignment 且沒有既有下游義務時，Terms 只讀 Orders／Scheduling 與下游完整性的最小存在 facts；Finance／Payroll version 與 impact 明確為 nullable，不建立 root、不讀取完整金額／費率／政策，也不以無關版本阻擋 Apply。已有 assignment 時仍使用完整下游 facts 與版本控制。
+
 Issue #326：同一 Terms command 可承接完整替代日期與明確既有指派分配；原有跨 owner transaction 與 immutable versions 保持不變。
 
 既有歷史案件缺少約定服務開始日／服務天數，且尚未建立 Client Finance、Payroll 或服務資料鎖定時，沿用同一 owner-local Query／Preview／Apply 補齊契約條件；保留歷史 lifecycle、實際開工日與既有歷史排班證據。
@@ -48,6 +50,7 @@ Issue #326：同一 Terms command 可承接完整替代日期與明確既有指�
 
 ## Provenance
 - Workflow owner and cross-owner transaction boundary — `architecture_declared` — Orders formal spec and current source.
+- Preassignment impact-aware read set and nullable downstream version／impact contract — `architecture_declared` — Orders formal spec, Terms workflow, HTTP schema and MySQL adapter.
 - Ordinary Terms direct-save／formal-impact split and conditional permanent receipt contract — `architecture_declared` — Orders formal spec, Terms workflow, HTTP／UI adapters and focused regression.
 - Preassignment start-date、confirmed-service-date replacement projection and focused regression — `source_observed` — current workflow, MySQL adapter and test listed above.
 - Nullable service-time HTTP／UI preservation and disposable-MySQL round trip — `source_observed` — canonical module and subsystem integration roots listed above.

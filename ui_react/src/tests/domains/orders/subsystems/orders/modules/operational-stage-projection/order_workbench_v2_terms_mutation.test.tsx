@@ -292,6 +292,58 @@ describe('待辦看板 Beta 第 1 階訂單條款操作', () => {
     expect(screen.getByRole('button', { name: /1 進件資料 可辦理/ })).toHaveAttribute('aria-current', 'page');
   });
 
+  it('普通保存結果不明時只讀回確認，不重播提交', async () => {
+    const query = {
+      ...orderTerms(),
+      client_finance_version: null,
+      payroll_version: null,
+    };
+    mocks.getOrderTerms.mockResolvedValue(query);
+    mocks.previewTerms.mockResolvedValue({
+      before: query.terms,
+      after: { ...query.terms, planned_start_date: '2026-10-02' },
+      order_version: 12,
+      scheduling_version: 13,
+      scheduling_generation: 2,
+      client_finance_version: null,
+      payroll_version: null,
+      scheduling: {},
+      client_finance_impact: null,
+      payroll_impact: null,
+      lifecycle_impact: {},
+      requires_formal_apply: false,
+      preview_fingerprint: 'b'.repeat(64),
+    });
+    mocks.applyTerms.mockRejectedValueOnce(new Error('connection interrupted'));
+    mocks.queryTerms.mockResolvedValue({
+      ...query,
+      order_version: 13,
+      scheduling_version: 13,
+      scheduling_generation: 2,
+      terms: { ...query.terms, planned_start_date: '2026-10-02' },
+    });
+    const panel = await openTermsPanel();
+
+    fireEvent.change(within(panel).getByLabelText('Beta 計畫服務開始日'), { target: { value: '2026-10-02' } });
+    fireEvent.click(within(panel).getByRole('button', { name: '檢查訂單條款變更' }));
+    expect(await within(panel).findByText(/Client Finance 未讀取 · Payroll 未讀取/)).toBeInTheDocument();
+    fireEvent.click(within(panel).getByRole('button', { name: '確認保存訂單條款' }));
+
+    await waitFor(() => expect(mocks.applyTerms).toHaveBeenCalledWith(
+      'CASE-TERMS',
+      expect.objectContaining({
+        expected_client_finance_version: null,
+        expected_payroll_version: null,
+        requires_formal_apply: false,
+      }),
+      {},
+    ));
+    expect(await within(panel).findByText(/條款已保存並完成正式回讀/)).toBeInTheDocument();
+    expect(mocks.applyTerms).toHaveBeenCalledTimes(1);
+    expect(within(panel).queryByRole('button', { name: '重播同一筆條款提交' })).not.toBeInTheDocument();
+    expect(within(panel).getByLabelText('Beta 計畫服務開始日')).toHaveValue('2026-10-02');
+  });
+
   it('已有正式日期的天數變更受阻時導向服務安排且不套用', async () => {
     mocks.previewTerms.mockRejectedValue(Object.assign(new Error('Orders Terms request was rejected.'), {
       code: 'confirmed_service_dates_reconfirmation_required',
@@ -424,8 +476,8 @@ describe('待辦看板 Beta 第 1 階訂單條款操作', () => {
     expect(offsetSelect).toHaveValue('0');
     expect(hoursInput).toHaveValue(4);
 
-    fireEvent.click(within(panel).getByRole('button', { name: '8h (09:00~17:00)' }));
-    expect(startSelect).toHaveValue('09:00');
+    fireEvent.click(within(panel).getByRole('button', { name: '8h (08:30~17:00)' }));
+    expect(startSelect).toHaveValue('08:30');
     expect(endSelect).toHaveValue('17:00');
     expect(offsetSelect).toHaveValue('0');
     expect(hoursInput).toHaveValue(8);
@@ -452,7 +504,8 @@ describe('calculateDailyServiceHours 純函式計算', () => {
   });
 
   it('允許半小時刻度，其他分鐘數回傳 null', () => {
-    expect(calculateDailyServiceHours('09:00', '17:30', '0')).toBe(8.5);
+    expect(calculateDailyServiceHours('08:30', '17:00', '0')).toBe(8);
+    expect(calculateDailyServiceHours('09:00', '17:30', '0')).toBe(8);
     expect(calculateDailyServiceHours('08:00', '12:15', '0')).toBeNull();
   });
 

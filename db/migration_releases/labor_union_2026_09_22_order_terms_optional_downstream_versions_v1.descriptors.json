@@ -1,0 +1,30 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-order-terms-optional-downstream-versions-2026-09-22-v1",
+  "descriptors": {
+    "1044_order_terms_optional_downstream_versions.sql": {
+      "tables": {},
+      "parent_columns": {
+        "order_terms_apply_receipts": {
+          "client_finance_version": {
+            "column_type": "bigint unsigned",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "payroll_version": {
+            "column_type": "bigint unsigned",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          }
+        }
+      },
+      "indexes": {},
+      "foreign_keys": {},
+      "checks": {},
+      "triggers": [],
+      "views": {}
+    }
+  }
+}

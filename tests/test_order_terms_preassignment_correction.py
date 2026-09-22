@@ -171,6 +171,33 @@ class _PersistenceRepository(_Repository):
         self.saved.append(command)
 
 
+class _NoDownstreamPersistenceRepository(_PersistenceRepository):
+    def preflight_impacted_staff_ids(self, _case_no):
+        return ()
+
+    def claim_command(self, _request, _command_fingerprint):
+        pytest.fail("ordinary Terms save must not claim a permanent command")
+
+    def find_receipt(self, _key, *, for_update):
+        pytest.fail("ordinary Terms save must not read a permanent receipt")
+
+    def append_terms_event(self, _request, _preview):
+        pytest.fail("ordinary Terms save must not append a Terms event")
+
+    def replace_scheduling_generation(self, _command):
+        pytest.fail("ordinary Terms save must not replace Scheduling")
+
+    def persist_lifecycle_impact(self, _command):
+        pytest.fail("ordinary Terms save must not persist lifecycle impact")
+
+    def save_receipt(self, _command):
+        pytest.fail("ordinary Terms save must not persist a receipt")
+
+    def load_for_apply(self, _case_no, staff_ids):
+        assert staff_ids == ()
+        return self.facts
+
+
 class _Clock:
     def now(self):
         return datetime(2026, 8, 23, tzinfo=timezone.utc)
@@ -619,6 +646,49 @@ def test_service_data_lock_rejects_unique_cooking_correction():
         workflow.preview("116990823", _terms(requires_cooking=True))
 
 
+def test_preassignment_terms_apply_does_not_require_downstream_roots_or_versions():
+    facts = replace(_facts(), client_finance=None, payroll=None)
+    repository = _NoDownstreamPersistenceRepository(facts)
+    workflow = terms_workflow.OrderTermsWorkflow(repository, object(), _Clock())
+    proposed = _terms(requires_cooking=None, start=date(2026, 9, 12))
+    preview = workflow.preview("116990823", proposed)
+    request = terms_workflow.OrderTermsApplyRequest(
+        case_no="116990823",
+        proposed_terms=proposed,
+        expected_order_version=ExpectedVersion(preview.order_version),
+        expected_scheduling_version=ExpectedVersion(preview.scheduling_version),
+        expected_client_finance_version=None,
+        expected_payroll_version=None,
+        preview_fingerprint=preview.fingerprint,
+        idempotency_key=None,
+        actor=ActorContext("internal-admin"),
+        reason=None,
+        correlation_id=CorrelationId("terms-no-downstream-roots-correlation"),
+        requires_formal_apply=False,
+    )
+
+    receipt = workflow.apply_in_current_uow(request)
+
+    assert preview.client_finance_version is None
+    assert preview.payroll_version is None
+    assert preview.client_finance_impact is None
+    assert preview.payroll_impact is None
+    assert preview.requires_formal_apply is False
+    assert receipt.client_finance_version is None
+    assert receipt.payroll_version is None
+    assert receipt.scheduling_version == preview.scheduling_version
+    assert receipt.scheduling_generation == preview.scheduling_generation
+    assert len(repository.saved) == 1
+    assert isinstance(repository.saved[0], terms_workflow.OrderTermsPersistenceCommand)
+    assert all(
+        not isinstance(item, (
+            terms_workflow.ClientFinanceImpactPersistenceCommand,
+            terms_workflow.PayrollImpactPersistenceCommand,
+        ))
+        for item in repository.saved
+    )
+
+
 def test_assigned_start_date_shift_rebuilds_owned_impacts_and_replays_receipt():
     facts = _assigned_facts()
     repository = _AssignedPersistenceRepository(facts)
@@ -729,12 +799,34 @@ def test_terms_day_replacement_requires_explicit_existing_assignment_allocation(
 
 
 def test_terms_receipt_replay_accepts_half_hour_json_numbers():
-    from infrastructure.mysql.order_terms_repository import _required_service_hours
+    from infrastructure.mysql.order_terms_repository import (
+        _optional_integer,
+        _required_service_hours,
+    )
     assert _required_service_hours({"official_service_hours": 240.0}) == 240.0
     assert _required_service_hours({"official_service_hours": 22.5}) == 22.5
+    assert _optional_integer({"version": None}, "version") is None
+    assert _optional_integer({"version": 7}, "version") == 7
     for value in (True, -1, 0.25, '240', float('nan')):
         with pytest.raises(ValueError, match='order_terms_receipt_integrity_violation'):
             _required_service_hours({"official_service_hours": value})
+
+
+def test_apply_http_contract_accepts_absent_downstream_versions():
+    body = OrderTermsApplyBody.model_validate({
+        "proposed_terms": _terms(requires_cooking=None).canonical_payload(),
+        "expected_order_version": 0,
+        "expected_scheduling_version": 0,
+        "expected_client_finance_version": None,
+        "expected_payroll_version": None,
+        "preview_fingerprint": "a" * 64,
+        "requires_formal_apply": False,
+    })
+
+    assert body.expected_client_finance_version is None
+    assert body.expected_payroll_version is None
+    assert body.reason is None
+    assert body.requires_formal_apply is False
 
 
 @pytest.mark.parametrize('dates,allocation,error', [

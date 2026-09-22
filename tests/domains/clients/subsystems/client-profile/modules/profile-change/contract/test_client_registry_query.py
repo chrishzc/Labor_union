@@ -232,6 +232,35 @@ def test_registry_http_composition_identifies_each_field_owner_and_editability()
     assert payload["order_terms"]["field_capabilities"]["planned_start_date"]["owner"] == "order_terms"
 
 
+def test_registry_http_composition_allows_preassignment_terms_without_downstream_roots():
+    terms = SimpleNamespace(
+        order=SimpleNamespace(
+            case_no="CASE-001", version=4, service_data_locked=False,
+            terms=SimpleNamespace(canonical_payload=lambda: {
+                "planned_start_date": "2026-10-01", "service_days": 20,
+                "service_hours_per_day": 8, "requires_cooking": None,
+                "floor_fee_ntd": 0,
+                "service_time": {"start_time": None, "end_time": None, "end_day_offset": None},
+            }),
+        ),
+        scheduling=SimpleNamespace(aggregate_version=5, generation_number=2),
+        client_finance=None,
+        payroll=None,
+    )
+
+    response = get_client_registry(
+        case_no="CASE-001",
+        principal=AdminPrincipal(9, "registry-reader", "Registry Reader", "system_admin"),
+        application=ClientRegistryQueryApplication(_Repository()),
+        order_terms=SimpleNamespace(query=lambda _case_no: terms),
+    )
+
+    payload = response.data.model_dump()["order_terms"]
+    assert payload["status"] == "ready"
+    assert payload["data"]["client_finance_version"] is None
+    assert payload["data"]["payroll_version"] is None
+
+
 class _SqlCursor:
     def __init__(self, responses):
         self.responses = iter(responses)

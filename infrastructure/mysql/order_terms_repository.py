@@ -32,8 +32,8 @@ from subsystems.orders.terms_workflow import (
 from .client_finance_terms_writer import persist_client_finance_terms_impact
 from .order_terms_read_model import (
     load_order_facts,
-    load_locked_facts,
-    load_preview_facts,
+    load_terms_locked_facts,
+    load_terms_preview_facts,
     preflight_staff_ids,
 )
 from .order_lifecycle_impact_writer import persist_order_lifecycle_impact
@@ -47,7 +47,7 @@ class MySqlOrderTermsRepository:
 
     def load_for_preview(self, case_no: str) -> TermsWorkflowFacts:
         with self._connection.cursor() as cursor:
-            return load_preview_facts(cursor, case_no)
+            return load_terms_preview_facts(cursor, case_no)
 
     def load_order_terms(
         self, case_no: str, *, for_update: bool = False
@@ -67,7 +67,7 @@ class MySqlOrderTermsRepository:
         preflight_staff_ids: tuple[int, ...],
     ) -> TermsWorkflowFacts:
         with self._connection.cursor() as cursor:
-            return load_locked_facts(cursor, case_no, preflight_staff_ids)
+            return load_terms_locked_facts(cursor, case_no, preflight_staff_ids)
 
     def claim_command(
         self,
@@ -298,11 +298,11 @@ def _stored_receipt(row: Mapping[str, Any]) -> StoredTermsReceipt:
             payload,
             "scheduling_generation",
         ),
-        client_finance_version=_required_integer(
+        client_finance_version=_optional_integer(
             payload,
             "client_finance_version",
         ),
-        payroll_version=_required_integer(payload, "payroll_version"),
+        payroll_version=_optional_integer(payload, "payroll_version"),
         lifecycle_status=_lifecycle_status(payload),
         service_data_lock_formed=_required_boolean(
             payload,
@@ -367,8 +367,8 @@ def _validate_receipt_columns(row, receipt) -> None:
         int(row["order_version"]),
         int(row["scheduling_version"]),
         int(row["scheduling_generation"]),
-        int(row["client_finance_version"]),
-        int(row["payroll_version"]),
+        _optional_row_integer(row["client_finance_version"]),
+        _optional_row_integer(row["payroll_version"]),
         str(row["lifecycle_status"]),
         int(row["service_data_lock_formed"]),
         str(row["preview_fingerprint"]),
@@ -387,6 +387,19 @@ def _required_text(payload, key) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError("order_terms_receipt_integrity_violation")
     return value
+
+
+def _optional_integer(payload, key) -> int | None:
+    value = payload[key]
+    if value is None:
+        return None
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ValueError("order_terms_receipt_integrity_violation")
+    return value
+
+
+def _optional_row_integer(value) -> int | None:
+    return None if value is None else int(value)
 
 
 def _required_integer(payload, key) -> int:

@@ -160,7 +160,8 @@ Preview 輸入接受 Terms 根事實意圖。依 Issue #326 的本機修復授�
 Apply：
 
 1. 驗證 actor、expected version，以及 request 回傳的 `requires_formal_apply` 與 fresh Preview 一致；不得由前端自行降級。
-2. 鎖定並讀取 fresh Orders、Scheduling 與 Finance facts。
+2. 鎖定並讀取 fresh Orders、Scheduling，以及本次 candidate 實際需要的 Finance／Payroll facts；
+   未建立正式 assignment 且沒有既有下游義務時，不讀取完整帳務、費率或政策，也不要求或偽造其版本。
 3. 以相同 candidate builder 重建 Preview。
 4. 驗證 fingerprint。
 5. 若變更不形成 Scheduling、confirmed service dates、Finance、Payroll 或 lifecycle 正式影響，走普通保存：只更新 Orders Terms 與 aggregate version，回傳當次 HTTP result；不要求 reason／idempotency key，不建立 command claim、Terms／lifecycle event、audit／outbox、snapshot／history 或永久 receipt，也不呼叫其他 owner writer。
@@ -557,6 +558,12 @@ must be previewed, sent, and confirmed again before formal assignment can procee
 修改 planned start 與 `service_days`；planned end 由 Orders 依修改後條款重新計算，並建立不含 assignment
 的下一代 Scheduling generation。此時「尚無正式排班」是允許修改的前提，不得反向成為 blocker，也
 不得為了修改進件資料先虛構 assignment 或逐日服務日期。
+
+此 preassignment Terms Query／Preview／Apply 只讀 Orders、Scheduling 與判斷下游完整性所需的最小
+存在／義務 facts；Client Finance／Payroll root 可合法不存在，回應與 receipt 的對應 version／impact
+使用 `NULL`，不得以 `0`、空金額或自動 bootstrap 冒充完整資料。若 root 已存在但內部關聯不完整，或已
+存在 Client／Staff obligation，固定 fail closed；若未讀取該 owner，該 owner 的無關版本變動不得使
+Preview／Apply stale。已有有效 segment 時仍讀取完整下游 facts、驗證版本並執行既有 impact writer。
 
 若已有 current confirmed service dates，planned start 平移且 `service_days` 不變時，Apply 保留原日期
 間隔並以相同日差建立新的 immutable current version；同一 transaction 同步保存版本 receipt 並使既有

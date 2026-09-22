@@ -83,6 +83,11 @@
   - `db/schema_parts/1041_historical_manual_beclass_origin.sql`
   - `db/migration_releases/labor_union_2026_09_14_historical_manual_beclass_origin_v1.json`
   - `db/migration_releases/labor_union_2026_09_14_historical_manual_beclass_origin_v1.descriptors.json`
+- current order-terms optional downstream versions release:
+  - `db/schema_parts/227_order_terms_optional_downstream_versions.sql` (fresh bootstrap successor)
+  - `db/schema_parts/1044_order_terms_optional_downstream_versions.sql`
+  - `db/migration_releases/labor_union_2026_09_22_order_terms_optional_downstream_versions_v1.json`
+  - `db/migration_releases/labor_union_2026_09_22_order_terms_optional_downstream_versions_v1.descriptors.json`
 
 ## Contracts
 - Source read-only、candidate identity、release classification、backup／journal／resume及

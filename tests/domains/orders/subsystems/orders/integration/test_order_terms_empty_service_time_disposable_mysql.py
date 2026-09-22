@@ -391,3 +391,54 @@ def test_empty_service_time_survives_date_change_without_downstream_roots():
     finally:
         connection.close()
         _drop_database()
+
+
+def test_general_terms_date_change_round_trips_without_downstream_roots():
+    """Issue #336: the general Terms path must not bootstrap Finance or Payroll."""
+
+    bootstrap(_arguments())
+    connection = _connect()
+    try:
+        _seed_without_downstream_roots(connection)
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO scheduling_aggregates(case_no) VALUES (%s)",
+                (_CASE_NO,),
+            )
+        connection.commit()
+        client = _client(connection)
+        query = _data(client.get(f"/api/v1/orders/{_CASE_NO}/terms"))
+        assert query["client_finance_version"] is None
+        assert query["payroll_version"] is None
+
+        changed = {**query["terms"], "planned_start_date": "2026-10-02"}
+        preview = _preview(client, changed)
+        assert preview["client_finance_version"] is None
+        assert preview["payroll_version"] is None
+        assert preview["client_finance_impact"] is None
+        assert preview["payroll_impact"] is None
+
+        receipt = _data(_apply(
+            client,
+            query,
+            preview,
+            changed,
+            "issue336-general-terms-no-roots",
+        ))
+        readback = _data(client.get(f"/api/v1/orders/{_CASE_NO}/terms"))
+
+        assert receipt["client_finance_version"] is None
+        assert receipt["payroll_version"] is None
+        assert readback["terms"]["planned_start_date"] == "2026-10-02"
+        assert readback["client_finance_version"] is None
+        assert readback["payroll_version"] is None
+        with connection.cursor() as cursor:
+            for table in ("client_finance_accounts", "payroll_case_accounts"):
+                cursor.execute(
+                    f"SELECT COUNT(*) AS total FROM {table} WHERE case_no=%s",
+                    (_CASE_NO,),
+                )
+                assert int(cursor.fetchone()["total"]) == 0
+    finally:
+        connection.close()
+        _drop_database()

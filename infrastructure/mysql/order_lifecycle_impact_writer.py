@@ -64,6 +64,8 @@ def _forms_service_data_lock(command):
 
 
 def _insert_service_data_lock(cursor, command, lifecycle_event_id):
+    if command.client_settlement_fingerprint is None:
+        raise ValueError("client_settlement_fingerprint_required")
     cursor.execute(
         "INSERT INTO order_service_data_locks "
         "(case_no,lifecycle_event_id,client_settlement_fingerprint,created_by) "

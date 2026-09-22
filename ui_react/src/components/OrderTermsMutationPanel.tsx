@@ -34,9 +34,12 @@ interface OrderTermsDraft {
 export const COMMON_SHIFT_PRESETS = [
   { label: '4h 上午 (09:00~13:00)', startTime: '09:00', endTime: '13:00', endDayOffset: '0' as const },
   { label: '4h 下午 (14:00~18:00)', startTime: '14:00', endTime: '18:00', endDayOffset: '0' as const },
-  { label: '8h 早班 (08:00~16:00)', startTime: '08:00', endTime: '16:00', endDayOffset: '0' as const },
-  { label: '8h (09:00~17:00)', startTime: '09:00', endTime: '17:00', endDayOffset: '0' as const },
+  { label: '8h 早班 (08:00~16:30)', startTime: '08:00', endTime: '16:30', endDayOffset: '0' as const },
+  { label: '8h (08:30~17:00)', startTime: '08:30', endTime: '17:00', endDayOffset: '0' as const },
 ] as const;
+
+const EIGHT_HOUR_SHIFT_SPAN_MINUTES = 8.5 * 60;
+const EIGHT_HOUR_SHIFT_BREAK_MINUTES = 30;
 
 export const STANDARD_TIME_OPTIONS: readonly string[] = Array.from({ length: 48 }, (_, i) => {
   const h = String(Math.floor(i / 2)).padStart(2, '0');
@@ -79,7 +82,10 @@ export function calculateDailyServiceHours(
   if (diffMinutes <= 0) {
     return null;
   }
-  const hours = diffMinutes / 60;
+  const serviceMinutes = diffMinutes === EIGHT_HOUR_SHIFT_SPAN_MINUTES
+    ? diffMinutes - EIGHT_HOUR_SHIFT_BREAK_MINUTES
+    : diffMinutes;
+  const hours = serviceMinutes / 60;
   return Number.isInteger(hours * 2) && hours > 0 && hours <= 24 ? hours : null;
 }
 
@@ -352,8 +358,12 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
       if (!mounted.current || activeCase.current !== caseNo) return;
       if (refreshed.case_no !== caseNo || refreshed.order_version < nextReceipt.order_version
         || refreshed.scheduling_version < nextReceipt.scheduling_version
-        || refreshed.client_finance_version < nextReceipt.client_finance_version
-        || refreshed.payroll_version < nextReceipt.payroll_version) throw new Error('條款回讀案件識別或版本與收據不一致。');
+        || (nextReceipt.client_finance_version !== null
+          && (refreshed.client_finance_version === null
+            || refreshed.client_finance_version < nextReceipt.client_finance_version))
+        || (nextReceipt.payroll_version !== null
+          && (refreshed.payroll_version === null
+            || refreshed.payroll_version < nextReceipt.payroll_version))) throw new Error('條款回讀案件識別或版本與收據不一致。');
       const target = submittedTarget.current;
       if (target && refreshed.order_version === nextReceipt.order_version) {
         const expected = target.proposed_terms;
@@ -621,7 +631,7 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
             <p>每日時數：{preview.before.service_hours_per_day} 小時 → {preview.after.service_hours_per_day} 小時</p>
           )}
           <p>時段：{preview.before.service_time.start_time}～{preview.before.service_time.end_time} → {preview.after.service_time.start_time}～{preview.after.service_time.end_time}</p>
-          <p>版本：Order {preview.order_version} · Scheduling {preview.scheduling_version} · Client Finance {preview.client_finance_version} · Payroll {preview.payroll_version}</p>
+          <p>版本：Order {preview.order_version} · Scheduling {preview.scheduling_version} · Client Finance {preview.client_finance_version ?? '未讀取'} · Payroll {preview.payroll_version ?? '未讀取'}</p>
           {preview.requires_formal_apply && <label>變更原因（正式影響必填）
             <textarea aria-label="Beta 條款變更原因" rows={2} maxLength={500} value={reason} disabled={locked} onChange={(event) => setReason(event.target.value)} />
           </label>}

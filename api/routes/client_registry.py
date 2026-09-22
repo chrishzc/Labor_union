@@ -402,8 +402,14 @@ def _order_terms_section(application, case_no: str) -> dict[str, Any]:
             "order_version": facts.order.version,
             "scheduling_version": facts.scheduling.aggregate_version,
             "scheduling_generation": facts.scheduling.generation_number,
-            "client_finance_version": facts.client_finance.account_version,
-            "payroll_version": facts.payroll.payroll_version,
+            "client_finance_version": (
+                facts.client_finance.account_version
+                if facts.client_finance is not None else None
+            ),
+            "payroll_version": (
+                facts.payroll.payroll_version
+                if facts.payroll is not None else None
+            ),
             "service_data_locked": facts.order.service_data_locked,
             "terms": facts.order.terms.canonical_payload(),
         }),

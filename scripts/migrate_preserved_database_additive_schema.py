@@ -349,6 +349,7 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_09_14_historical_manual_beclass_origin_v1.json",
     "labor_union_2026_09_15_client_legacy_virtual_accounts_v1.json",
     "labor_union_2026_09_15_order_details_owner_dates_v1.json",
+    "labor_union_2026_09_22_order_terms_optional_downstream_versions_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -2357,6 +2358,22 @@ def _modified_parent_predecessor_absent_state(
                 },
             },
         },
+        "1044_order_terms_optional_downstream_versions.sql": {
+            "order_terms_apply_receipts": {
+                "client_finance_version": {
+                    "column_type": "bigint unsigned",
+                    "is_nullable": "NO",
+                    "column_default": None,
+                    "extra": "",
+                },
+                "payroll_version": {
+                    "column_type": "bigint unsigned",
+                    "is_nullable": "NO",
+                    "column_default": None,
+                    "extra": "",
+                },
+            },
+        },
     }.get(artifact)
     if predecessor_columns is None:
         return None
@@ -3593,6 +3610,15 @@ def _local_classify_statement(statement: str) -> str:
                 .read_text(encoding="utf-8")
             )[0].strip(),
         ).casefold()
+        canonical_1044 = re.sub(
+            r"\s+",
+            " ",
+            split_sql(
+                (ROOT / "db" / "schema_parts" /
+                 "1044_order_terms_optional_downstream_versions.sql")
+                .read_text(encoding="utf-8")
+            )[0].strip(),
+        ).casefold()
         controlled_parent_replacement = (
             normalized.startswith("alter table controlled_file_staging_objects ")
             and "modify column purpose enum(" in normalized
@@ -3624,6 +3650,8 @@ def _local_classify_statement(statement: str) -> str:
             return "matching_holiday_work_agreement_plan_version_rename"
         if normalized == canonical_1034:
             return "contract_external_signing_state_constraint_replacement"
+        if normalized == canonical_1044:
+            return "order_terms_downstream_version_nullability_widen"
         if re.search(r"\b(drop|modify|change|rename|truncate)\b", normalized):
             raise LocalAdditiveBlocked("destructive ALTER is outside additive allowlist", code="forbidden_sql_effect")
         if not re.search(r"\badd\s+(column|index|unique|constraint|fulltext|spatial)\b", normalized):
@@ -5348,6 +5376,15 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
             "service_hours_per_day >= 0 AND service_hours_per_day <= 24 "
             "AND ((service_hours_per_day * 2) % 1) = 0"
         )
+    if part_name == "1044_order_terms_optional_downstream_versions.sql":
+        descriptor["parent_columns"]["order_terms_apply_receipts"] = {
+            "client_finance_version": _column_contract(
+                "bigint unsigned", "YES", None
+            ),
+            "payroll_version": _column_contract(
+                "bigint unsigned", "YES", None
+            ),
+        }
     if part_name == "1041_historical_manual_beclass_origin.sql":
         descriptor["parent_columns"]["beclass_records"] = {
             "record_origin": _column_contract(
@@ -5914,6 +5951,7 @@ def _release_descriptor_metadata_state(
         "1037_twins_payroll_policy.sql",
         "1040_order_service_hours_half_precision.sql",
         "1041_historical_manual_beclass_origin.sql",
+        "1044_order_terms_optional_downstream_versions.sql",
     }:
         if released.get("parent_columns") != canonical.get("parent_columns"):
             raise UpgradeBlocked(

@@ -156,6 +156,41 @@ def build_terms_lifecycle_impact(
     )
 
 
+def build_preassignment_terms_lifecycle_impact(
+    root_facts: OrderLifecycleRootFacts,
+    scheduling: SchedulingGenerationCandidate,
+    evaluation_at: datetime,
+) -> LifecycleImpactCandidate:
+    """Preserve lifecycle when a Terms edit has no scheduled or financial impact."""
+
+    _validate_inputs(root_facts, scheduling, evaluation_at)
+    if scheduling.assignments:
+        raise ValueError("preassignment_lifecycle_scheduling_conflict")
+    payload = {
+        "before_status": root_facts.current_status.value,
+        "after_status": root_facts.current_status.value,
+        "actual_end_date": None,
+        "completion_instant": None,
+        "service_completion_reached": False,
+        "service_data_lock_should_exist": root_facts.service_data_locked,
+        "client_settlement_fingerprint": None,
+        "alert_codes": (),
+    }
+    return LifecycleImpactCandidate(
+        root_facts.case_no,
+        root_facts.current_status,
+        root_facts.current_status,
+        None,
+        None,
+        evaluation_at.date(),
+        False,
+        root_facts.service_data_locked,
+        root_facts.service_data_locked,
+        (),
+        fingerprint_payload(payload),
+    )
+
+
 def _validate_inputs(root_facts, scheduling, evaluation_at):
     if root_facts.case_no != scheduling.case_no:
         raise ValueError("Orders and Scheduling case numbers must match")

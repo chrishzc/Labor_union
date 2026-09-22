@@ -1,5 +1,5 @@
 -- GENERATED FILE. Do not edit by hand.
--- Release: labor-union-validation-schema-2026-09-15-v37
+-- Release: labor-union-validation-schema-2026-09-22-v38
 -- Replace __LU_TEST_DATABASE__ with an explicitly confirmed lu_test_* database.
 -- Rebuild with: python scripts/build_validation_schema_release.py
 
@@ -21715,3 +21715,9 @@ CREATE TABLE IF NOT EXISTS client_legacy_virtual_accounts (
     )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- END SOURCE: db/schema_parts/225_client_legacy_virtual_accounts.sql
+
+-- BEGIN SOURCE: db/schema_parts/227_order_terms_optional_downstream_versions.sql
+ALTER TABLE order_terms_apply_receipts
+    MODIFY COLUMN client_finance_version BIGINT UNSIGNED NULL,
+    MODIFY COLUMN payroll_version BIGINT UNSIGNED NULL;
+-- END SOURCE: db/schema_parts/227_order_terms_optional_downstream_versions.sql

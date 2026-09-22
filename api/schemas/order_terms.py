@@ -40,8 +40,8 @@ class OrderTermsQueryView(BaseModel):
     order_version: int = Field(ge=0)
     scheduling_version: int = Field(ge=0)
     scheduling_generation: int = Field(ge=0)
-    client_finance_version: int = Field(ge=0)
-    payroll_version: int = Field(ge=0)
+    client_finance_version: int | None = Field(ge=0)
+    payroll_version: int | None = Field(ge=0)
     service_data_locked: bool
     terms: OrderTermsView
     confirmed_service_dates: list[date] = Field(default_factory=list)
@@ -57,11 +57,11 @@ class OrderTermsPreviewView(BaseModel):
     order_version: int = Field(ge=0)
     scheduling_version: int = Field(ge=0)
     scheduling_generation: int = Field(ge=0)
-    client_finance_version: int = Field(ge=0)
-    payroll_version: int = Field(ge=0)
+    client_finance_version: int | None = Field(ge=0)
+    payroll_version: int | None = Field(ge=0)
     scheduling: dict[str, Any]
-    client_finance_impact: dict[str, Any]
-    payroll_impact: dict[str, Any]
+    client_finance_impact: dict[str, Any] | None
+    payroll_impact: dict[str, Any] | None
     lifecycle_impact: dict[str, Any]
     requires_formal_apply: bool
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -74,8 +74,8 @@ class OrderTermsReceiptView(BaseModel):
     order_version: int = Field(ge=0)
     scheduling_version: int = Field(ge=0)
     scheduling_generation: int = Field(ge=0)
-    client_finance_version: int = Field(ge=0)
-    payroll_version: int = Field(ge=0)
+    client_finance_version: int | None = Field(ge=0)
+    payroll_version: int | None = Field(ge=0)
     lifecycle_status: str
     service_data_lock_formed: bool
     cancelled_assignment_ids: list[int]

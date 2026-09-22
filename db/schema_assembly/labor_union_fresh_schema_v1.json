@@ -5,7 +5,7 @@
     "path": "db/schema.sql",
     "sha256": "b9cd84ae5a09a46949b5d4c131659f7f114480306f94e0af1246833d021b1bfb"
   },
-  "active_artifacts_sha256": "8cc6e8ca725d03462ef6ac3cdb22ac050b02e15a9677deb6efef5381158c63fd",
+  "active_artifacts_sha256": "505fd5a26bf5d02b2e0da498d3c1a5c440fdfd933c30e26e157842224bd0aa10",
   "active_bootstrap": [
     "db/schema_parts/202_scheduling_staff_leave_intake.sql",
     "db/schema_parts/20_staff_monthly_settlements.sql",
@@ -172,7 +172,8 @@
     "db/schema_parts/222_matching_plan_create_receipts.sql",
     "db/schema_parts/223_order_service_hours_half_precision.sql",
     "db/schema_parts/224_historical_manual_beclass_origin.sql",
-    "db/schema_parts/225_client_legacy_virtual_accounts.sql"
+    "db/schema_parts/225_client_legacy_virtual_accounts.sql",
+    "db/schema_parts/227_order_terms_optional_downstream_versions.sql"
   ],
   "classifications": {
     "db/schema_parts/1012_service_before_replacement.sql": "migration-only",
@@ -195,7 +196,8 @@
     "db/schema_parts/1040_order_service_hours_half_precision.sql": "migration-only",
     "db/schema_parts/1041_historical_manual_beclass_origin.sql": "migration-only",
     "db/schema_parts/1042_client_legacy_virtual_accounts.sql": "migration-only",
-    "db/schema_parts/1043_twins_payroll_order_details_view.sql": "migration-only"
+    "db/schema_parts/1043_twins_payroll_order_details_view.sql": "migration-only",
+    "db/schema_parts/1044_order_terms_optional_downstream_versions.sql": "migration-only"
   },
   "retirement_contracts": {
     "db/schema_parts/1012_service_before_replacement.sql": {
@@ -359,6 +361,15 @@
       "replay": "preserve release applies 1040 only to the exact integer predecessor or accepts the exact decimal successor",
       "rollback": "retain source backup and discard the candidate before any entry switch",
       "unresolved_policy": "out-of-range values, non-half-hour values, partial constraint state or metadata drift block candidate apply"
+    },
+    "db/schema_parts/1044_order_terms_optional_downstream_versions.sql": {
+      "source_object": "deployed order_terms_apply_receipts rows whose downstream version columns were mandatory even when Terms did not read those roots",
+      "successor": "db/schema_parts/227_order_terms_optional_downstream_versions.sql",
+      "terminal_schema_evidence": "fresh assembly applies canonical part 227; preserve chain applies part 1044 to deployed schemas",
+      "data_effect": "schema_only; existing non-null versions remain unchanged and no business row is backfilled",
+      "replay": "preserve release accepts the exact non-null predecessor or exact nullable successor",
+      "rollback": "retain source backup and discard the candidate before any entry switch; after nullable receipts exist the contract is forward-only",
+      "unresolved_policy": "unexpected type, default, partial nullability change or metadata drift blocks candidate apply"
     },
     "db/schema_parts/1041_historical_manual_beclass_origin.sql": {
       "source_object": "deployed BeClass records without an explicit imported versus admin-manual origin",

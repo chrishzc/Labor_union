@@ -54,6 +54,20 @@ def load_preview_facts(cursor: Any, case_no: str) -> TermsWorkflowFacts:
     return _assemble_facts(cursor, order_row, aggregate_row, lock=False)
 
 
+def load_terms_preview_facts(cursor: Any, case_no: str) -> TermsWorkflowFacts:
+    """Load only downstream facts that an Orders Terms preview can affect."""
+
+    order_row = select_order(cursor, case_no, lock=False)
+    aggregate_row = select_scheduling_aggregate(cursor, case_no, lock=False)
+    return _assemble_facts(
+        cursor,
+        order_row,
+        aggregate_row,
+        lock=False,
+        omit_preassignment_downstream=True,
+    )
+
+
 def load_order_facts(
     cursor: Any, case_no: str, *, for_update: bool = False
 ) -> OrderAggregateFacts:
@@ -151,6 +165,28 @@ def load_locked_facts(
     return _assemble_facts(cursor, order_row, aggregate_row, lock=True)
 
 
+def load_terms_locked_facts(
+    cursor: Any,
+    case_no: str,
+    preflight_staff_ids: tuple[int, ...],
+    after_staff_lock: Callable[[Any], None] | None = None,
+) -> TermsWorkflowFacts:
+    """Lock the current Terms impact set without requiring unrelated roots."""
+
+    order_row = select_order(cursor, case_no, lock=True)
+    aggregate_row = select_scheduling_aggregate(cursor, case_no, lock=True)
+    lock_staff_mutexes(cursor, preflight_staff_ids)
+    if after_staff_lock is not None:
+        after_staff_lock(cursor)
+    return _assemble_facts(
+        cursor,
+        order_row,
+        aggregate_row,
+        lock=True,
+        omit_preassignment_downstream=True,
+    )
+
+
 def select_order(cursor: Any, case_no: str, *, lock: bool) -> Mapping[str, Any]:
     lock_clause = " FOR UPDATE" if lock else ""
     cursor.execute(_ORDER_SQL + lock_clause, (case_no,))
@@ -202,6 +238,7 @@ def _assemble_facts(
     aggregate_row: Mapping[str, Any],
     *,
     lock: bool,
+    omit_preassignment_downstream: bool = False,
 ) -> TermsWorkflowFacts:
     generation_row = _select_generation(cursor, aggregate_row, lock)
     assignment_rows = _select_assignments(cursor, generation_row, lock)
@@ -209,8 +246,17 @@ def _assemble_facts(
     confirmed_service_date_version, confirmed_service_dates = (
         _select_confirmed_service_dates(cursor, str(order_row["case_no"]), lock)
     )
-    client_finance = _load_client_finance(cursor, order_row, schedule_rows, lock)
-    payroll = _load_payroll(cursor, order_row, assignment_rows, lock)
+    if omit_preassignment_downstream and not assignment_rows:
+        _validate_preassignment_downstream_state(
+            cursor,
+            str(order_row["case_no"]),
+            lock,
+        )
+        client_finance = None
+        payroll = None
+    else:
+        client_finance = _load_client_finance(cursor, order_row, schedule_rows, lock)
+        payroll = _load_payroll(cursor, order_row, assignment_rows, lock)
     lifecycle = _load_lifecycle(cursor, order_row, lock)
     if lock and generation_row is not None:
         _lock_dated_occupancy(cursor, generation_row)
@@ -226,6 +272,57 @@ def _assemble_facts(
         confirmed_service_date_version,
         confirmed_service_dates,
     )
+
+
+def _validate_preassignment_downstream_state(cursor, case_no: str, lock: bool) -> None:
+    client_account_present = _row_exists(
+        cursor,
+        "SELECT case_no FROM client_finance_accounts WHERE case_no=%s",
+        case_no,
+        lock,
+    )
+    client_terms_present = _row_exists(
+        cursor,
+        "SELECT case_no FROM client_payment_terms WHERE case_no=%s",
+        case_no,
+        lock,
+    )
+    if client_account_present != client_terms_present:
+        raise ValueError("invalid_client_finance_facts")
+    if _row_exists(
+        cursor,
+        "SELECT obligation_identity FROM client_obligations WHERE case_no=%s",
+        case_no,
+        lock,
+    ):
+        raise ValueError("preassignment_client_finance_obligation_conflict")
+
+    payroll_account_present = _row_exists(
+        cursor,
+        "SELECT case_no FROM payroll_case_accounts WHERE case_no=%s",
+        case_no,
+        lock,
+    )
+    payroll_policy_present = _row_exists(
+        cursor,
+        "SELECT case_no FROM case_payroll_rate_policy_snapshots WHERE case_no=%s",
+        case_no,
+        lock,
+    )
+    if payroll_account_present != payroll_policy_present:
+        raise ValueError("invalid_payroll_facts")
+    if _row_exists(
+        cursor,
+        "SELECT obligation_identity FROM staff_obligations WHERE case_no=%s",
+        case_no,
+        lock,
+    ):
+        raise ValueError("preassignment_payroll_obligation_conflict")
+
+
+def _row_exists(cursor, sql: str, case_no: str, lock: bool) -> bool:
+    cursor.execute(sql + _lock_clause(lock), (case_no,))
+    return cursor.fetchone() is not None
 
 
 def _select_confirmed_service_dates(cursor: Any, case_no: str, lock: bool):
