@@ -100,6 +100,7 @@ const previewFixture = {
     },
     blockers: [],
     fingerprint: fingerprint('c'),
+    subsidy_return_plan: null,
   },
   payroll_impact: {
     case_no: 'CASE/1',
@@ -219,6 +220,45 @@ describe('orderActualStartClient', () => {
         token: 'token',
         headers: expect.objectContaining({ 'X-Correlation-ID': 'corr-preview-1' }),
       }),
+    );
+  });
+
+  it('normalizes exact payroll hour strings and accepts the subsidy return projection', async () => {
+    const payload = {
+      ...previewFixture,
+      client_finance_impact: {
+        ...previewFixture.client_finance_impact,
+        subsidy_return_plan: {
+          obligation_identity: 'client-subsidy-return:CASE/1:terminal',
+          amount: { amount: 1200 },
+          due_date: '2026-09-10',
+        },
+      },
+      payroll_impact: {
+        ...previewFixture.payroll_impact,
+        payroll: {
+          ...previewFixture.payroll_impact.payroll,
+          assignments: [{
+            ...previewFixture.payroll_impact.payroll.assignments[0],
+            actual_hours: '24.0',
+            double_pay_hours: '0',
+          }],
+        },
+      },
+    };
+    vi.spyOn(transport, 'post').mockResolvedValue(envelope(payload));
+
+    const result = await orderActualStartClient.preview(
+      'CASE/1',
+      { new_actual_start_date: '2026-09-01' },
+    );
+
+    expect(result.payroll_impact.payroll.assignments[0]).toEqual(expect.objectContaining({
+      actual_hours: 24,
+      double_pay_hours: 0,
+    }));
+    expect(result.client_finance_impact.subsidy_return_plan).toEqual(
+      payload.client_finance_impact.subsidy_return_plan,
     );
   });
 

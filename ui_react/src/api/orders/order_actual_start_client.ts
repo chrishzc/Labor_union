@@ -33,6 +33,16 @@ const IsoDateTimeSchema = z.string().refine(
 const FingerprintSchema = z.string().regex(SHA256_PATTERN);
 const NonnegativeIntegerSchema = z.number().int().nonnegative();
 const PositiveIntegerSchema = z.number().int().positive();
+const DecimalTransportSchema = z.union([
+  z.number(),
+  z.string().regex(/^(?:0|[1-9]\d*)(?:\.\d+)?$/),
+]).transform(Number);
+const PositiveHalfHourSchema = DecimalTransportSchema.pipe(
+  z.number().positive().multipleOf(0.5),
+);
+const NonnegativeHalfHourSchema = DecimalTransportSchema.pipe(
+  z.number().nonnegative().multipleOf(0.5),
+);
 const MoneySchema = z.strictObject({ amount: z.number().int() });
 const LifecycleStatusSchema = z.enum([
   '待補件',
@@ -107,6 +117,11 @@ const ClientFinanceDirectionSchema = z.enum([
   'additional_charge_due',
   'no_finance_change',
 ]);
+const ClientSubsidyReturnPlanSchema = z.strictObject({
+  obligation_identity: z.string().min(1),
+  amount: MoneySchema,
+  due_date: IsoDateSchema,
+});
 const ClientFinanceImpactSchema = z.strictObject({
   case_no: z.string().min(1),
   expected_account_version: NonnegativeIntegerSchema,
@@ -144,14 +159,15 @@ const ClientFinanceImpactSchema = z.strictObject({
   }),
   blockers: z.array(z.string()),
   fingerprint: FingerprintSchema,
+  subsidy_return_plan: ClientSubsidyReturnPlanSchema.nullable(),
 });
 
 const PayrollAssignmentSchema = z.strictObject({
   assignment_identity: z.string().min(1),
   staff_id: PositiveIntegerSchema,
   official_service_day_count: PositiveIntegerSchema,
-  actual_hours: PositiveIntegerSchema,
-  double_pay_hours: NonnegativeIntegerSchema,
+  actual_hours: PositiveHalfHourSchema,
+  double_pay_hours: NonnegativeHalfHourSchema,
   hourly_rate: MoneySchema,
   service_salary: MoneySchema,
   floor_fee_allocated: MoneySchema,
