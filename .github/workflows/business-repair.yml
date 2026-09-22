@@ -1,4 +1,4 @@
-name: Reviewed business repair verification
+name: Final business regression repairs
 on:
   push:
     branches: [fix/business-regressions-20260922]
@@ -14,36 +14,29 @@ jobs:
       commit: ${{ steps.publish.outputs.commit }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
-        with:
-          fetch-depth: 3
-      - name: Publish exact hash-verified reviewed changes
+      - name: Publish exact final reviewed edits
         id: publish
         run: |
           python - <<'PY'
-          import base64,gzip,hashlib,json,os,subprocess
+          import hashlib,json,os,subprocess
           from pathlib import Path
           assert os.environ['GITHUB_REF']=='refs/heads/fix/business-regressions-20260922'
-          definition=subprocess.check_output(['git','show','6e7d3b5114b76a2acaa3459f988dd0164077a44a:.github/workflows/business-repair.yml'],text=True)
-          encoded=next(line.split('EDITS: ',1)[1] for line in definition.splitlines() if line.startswith('          EDITS: '))
-          corrections=[[3195,3196,''],[5842,5843,'/5d'],[7570,7572,'9'],[7755,7756,''],[8745,8747,'PX'],[9239,9240,'4'],[9537,9540,'9']]
-          for start,end,replacement in reversed(corrections): encoded=encoded[:start]+replacement+encoded[end:]
-          raw=gzip.decompress(base64.b64decode(encoded))
-          assert hashlib.sha256(raw).hexdigest()=='d38b08c670b99e214bc6ce9f77d26c6c04782995e8013bae62dccbb787f85693'
-          records=json.loads(raw)
+          records=json.loads(r'''[{"path":"infrastructure/mysql/historical_service_accounting_repository.py","before":"71330b112265026a72124bd54b391b9c5f2fca8c96eb08b7b887d462d86df656","after":"148eb3a32b84a26c51d931f905a5697aa03a35c200e68d8b087e3577840b76c4","edits":[[14176,14279,"# A zero initial obligation still establishes the settled lineage required\n    # by completion readback and by later source-bound day revisions."]]},{"path":"scripts/reconcile_writer_inventory_v3_dispositions.py","before":"b575bd912b144861d2af37f4e5dadd3951a447dba629649f3c61d48716d8400d","after":"cda4f2208219e3394aab7432bc1f83b724e9cc87dba6c965dd0dd8fa956d0a1c","edits":[[70912,70912,"    if path in EXACT_SOURCE_RESTRICTED_REVIEWS or path in EXACT_SOURCE_REVIEWS:\n        # An expired or symbol-mismatched source review cannot inherit a broader\n        # module-level decision. Independent exact decisions were checked above.\n        return _needs_decision_review(path)\n"],[72363,72386,"source = ROOT / path\n    if not source.is_file() or sha256(source"]]},{"path":"subsystems/anomalies/government_return_outbound_overage_anomaly_source.py","before":"3b38bd76d1c007e8f73ffb6bb08733a6d5d510d7dabf69a8c829e35a79bb54e6","after":null,"edits":[]},{"path":"subsystems/anomalies/government_subsidy_anomaly_source.py","before":"48895e4cc008a034091d0086ae72cadb647dd46fd372be01e31568358b12b762","after":null,"edits":[]},{"path":"subsystems/anomalies/government_subsidy_integrity_anomaly_source.py","before":"2b8ea218aff587407d787176139b20e885a41cbac1e032e67a35eb8ba5e3a04d","after":null,"edits":[]},{"path":"subsystems/anomalies/government_subsidy_reversal_anomaly_source.py","before":"28bad07fb32c96a8a97c4fda51f0e4a177af5719ce3cbd75c1aacc1b02650734","after":null,"edits":[]},{"path":"subsystems/anomalies/process_reminder_anomaly_source.py","before":"7d94339914ac2f6fe05cdbdbd32a4224dcce917997228352a718029bf12c9fb2","after":null,"edits":[]},{"path":"subsystems/anomalies/staff_payables_anomaly_source.py","before":"c61e7c09c02c20d532aa5f678992c5c78d513228b353026e59180fcfadda2587","after":null,"edits":[]},{"path":"subsystems/validation_dataset/inspection.py","before":"19c27cf6b9508105275de839adbef277df479c75fa0cb3222e68344d1a09ddc5","after":null,"edits":[]},{"path":"tests/domains/clients/subsystems/client-profile/modules/profile-change/test_registry_accounting_dates.py","before":"c6fb525a2b315767779bbc8b7b17ca6c43ad2584b7c95549af77e379e21dd690","after":"b32e3607194a03cf55971111e1bf120a346e381c83cc434965938a4ee8d8ee6d","edits":[[6888,6889,"4\n    assert sum(\"FROM client_legacy_virtual_accounts\" in sql for sql, _ in connection.statements) == 1"]]},{"path":"tests/test_finance_import_staging_persistent_mysql_e2e.py","before":"fe91c6980c435ba29850d0f1dcec919621db616cb31bc2d8f04a2012ad8f00aa","after":"68a399c2a71cffd89b26939b44a2168e4e98faa4dfd237e43af113e53e6cf83e","edits":[[7714,7714,"        manifest_response = client.get(\n            f\"/api/v1/finance-import/batches/{intake['batch_identity']}/manifest\",\n        )\n        review_response = client.get(\n            f\"/api/v1/finance-import/batches/{intake['batch_identity']}/review-rows?limit=50\",\n        )\n        assert manifest_response.status_code == review_response.status_code == 200\n"],[9130,9130,"        \"manifest_response\": manifest_response.json(), \"review_response\": review_response.json(),\n"],[9936,9936,"default\", \"--reporter="]]},{"path":"tests/test_line_service_help.py","before":"cc987051d85320f13275f450f5db05df2fc1c0dc492c7cc030dc40f97b13d2aa","after":"9e102a8b9372607f97a5d2ff5fb20a8228fe8776df6315c395d1b662a1ff291c","edits":[[4540,4590,"detail\"][\"error\"][\"code\"] == \"knowledge_catalog_unavailable\"\n    assert \"data\" not in response.json()"]]},{"path":"tests/test_writer_inventory_v3_dispositions.py","before":"3ecea9206a24765f6cc685423c3c341f7ede7b63abea18ad39749d20f49ef149","after":"198ee500a89a51b55995823b3ec03390da8356c2c8cc21b5d405b56fa5bc1048","edits":[[276,276,"    _disposition,\n    _review,\n"],[2802,2802,"    candidates = {record[\"identity\"]: record for record in _records(\"writer_inventory_v3_candidate.findings.jsonl\")}\n    # Historical receipts remain immutable; current eligibility is recomputed\n    # by the review resolver against current source, not accepted from snapshots.\n"],[2923,2923,"historical_"],[3244,3286," = REPOSITORY_ROOT / path\n            source_matches = source.is_file() and sha256(source"],[3405,3405,"                current = _disposition(candidates[identity])\n"],[3596,3602,"current"],[3943,3949,"current"],[4088,4088,"            unknown = {\"relative_path\": path, \"symbol\": \"FutureUnreviewedWriter.mutate\", \"identity\": f\"{path}:FutureUnreviewedWriter.mutate:execute\"}\n            assert _review(unknown)[3].startswith(\"needs_decision:\")\n"]]},{"path":"ui_react/src/tests/domains/external-integration/subsystems/line/integration/line_rules_query_flow.test.tsx","before":"be9e3239852037db9e9d594fb6314e1efb39c07e1a92be2ffa7a0e3c569887fe","after":"e93604a9645a2b31810bc4ae5d6daddc2eca641bd63d5ca18d725878eaadb5df","edits":[[2984,3035,"async (input: RequestInfo | URL, options?: RequestInit) => {\n      expect(String(input)).toBe('/api/v1/line/notification-rules/deposit_notice/message-template');\n      expect(options?.method).toBe('GET');\n      expect(options?.body).toBeUndefined();\n      return new Response(JSON.stringify({ success: true, data: {\n        rule_id: 'deposit_notice', template_id: 'deposit_notice', name: '訂金確認',\n        content: '訂金確認通知', revision: 1, variables: [], sample_preview: '訂金確認通知',\n      } }), { status: 200, headers: { 'Content-Type': 'application/json' } });\n    }"],[3641,3641,"    expect(fetchSpy).not.toHaveBeenCalled();\n"],[4483,4521,"await waitFor(() => expect(fetchSpy).toHaveBeenCalled());\n    expect(fetchSpy.mock.calls.every(([, options]) => options?.method === 'GET')).toBe(true"]]}]''')
           for item in records:
               path=Path(item['path']); original=path.read_bytes()
               assert hashlib.sha256(original).hexdigest()==item['before'], str(path)
+              if item['after'] is None:
+                  path.unlink(); continue
               text=original.decode('utf-8')
               for start,end,replacement in reversed(item['edits']): text=text[:start]+replacement+text[end:]
               result=text.encode('utf-8')
               assert hashlib.sha256(result).hexdigest()==item['after'], str(path)
               path.write_bytes(result)
           paths=[item['path'] for item in records]
-          changed=subprocess.check_output(['git','diff','--name-only'],text=True).splitlines()
-          assert set(changed)==set(paths)
+          assert set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines())==set(paths)
           subprocess.run(['git','diff','--check'],check=True)
           subprocess.run(['git','add','--',*paths],check=True)
-          subprocess.run(['git','-c','user.name=github-actions[bot]','-c','user.email=41898282+github-actions[bot]@users.noreply.github.com','commit','-m','fix: repair subsidy arithmetic, finance query collation and stale regression contracts'],check=True)
+          subprocess.run(['git','-c','user.name=github-actions[bot]','-c','user.email=41898282+github-actions[bot]@users.noreply.github.com','commit','-m','fix: preserve zero-value accounting lineage and enforce current source review contracts'],check=True)
           subprocess.run(['git','push','origin','HEAD:refs/heads/fix/business-regressions-20260922'],check=True)
           sha=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
           with open(os.environ['GITHUB_OUTPUT'],'a') as output: output.write('commit='+sha+'\n')
