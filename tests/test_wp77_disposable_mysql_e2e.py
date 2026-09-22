@@ -198,7 +198,7 @@ def test_hcm_review_outbox_projects_field_warnings_and_replays_without_duplicate
                 ("HCM-FIELD-002", "服務時間"),
             ]
             assert all(row["subject"] == "HCM-TEST-0008" for row in warnings)
-            cursor.execute("SELECT COUNT(*) AS count FROM system_alerts WHERE definition_code='IMPORT-004'")
+            cursor.execute("SELECT COUNT(*) AS count FROM system_alerts WHERE alert_code='IMPORT-004'")
             assert cursor.fetchone()["count"] == 0
             cursor.execute(
                 "SELECT tracking_status,tracking_version FROM import_warning_current_tasks task "

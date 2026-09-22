@@ -339,5 +339,6 @@ def test_rate_limit_audit_is_committed_without_rollback_of_finalized_transaction
     monkeypatch.setattr(authentication_session, "_record_login_attempt", lambda *_: events.append("rate_limited"))
     error = RuntimeError if commit_failure else authentication_session.AdminLoginRateLimitedError
     with pytest.raises(error):
-        getattr(authentication_session, method)("synthetic-admin", "synthetic-password", connection_factory=Connection)
+        options = {"session_minutes": 30} if method == "authenticate_admin" else {}
+        getattr(authentication_session, method)("synthetic-admin", "synthetic-password", connection_factory=Connection, **options)
     assert events == ["begin", "rate_limited", "rollback" if commit_failure else "commit", "close"]
