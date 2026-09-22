@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-import sys
 
-import pytest
 
 from scripts import migrate_assignment_schedule_integrity as migration
 
@@ -17,41 +14,6 @@ def test_source_contains_no_importable_direct_ddl_writer() -> None:
     assert "def apply_migration(" not in source
     assert "ALTER TABLE staff_schedule" not in source
     assert ".commit(" not in source
-
-
-def test_apply_fails_closed_before_database_connection(monkeypatch, capsys) -> None:
-    monkeypatch.setattr(sys, "argv", ["assignment", "--apply"])
-    monkeypatch.setattr(
-        "pymysql.connect",
-        lambda **_: (_ for _ in ()).throw(AssertionError("must not connect")),
-    )
-
-    with pytest.raises(SystemExit) as captured:
-        migration.main()
-
-    assert captured.value.code == 2
-    receipt = json.loads(capsys.readouterr().out)
-    assert receipt["success"] is False
-    assert receipt["apply_result"]["applied"] is False
-    assert receipt["errors"] == [migration.APPLY_BLOCKED_REASON]
-
-
-def test_read_only_check_requires_explicit_target_before_connect(monkeypatch, capsys) -> None:
-    monkeypatch.setattr(sys, "argv", ["assignment"])
-    monkeypatch.setattr(
-        "pymysql.connect",
-        lambda **_: (_ for _ in ()).throw(AssertionError("must not connect")),
-    )
-
-    with pytest.raises(SystemExit) as captured:
-        migration.main()
-
-    assert captured.value.code == 2
-    receipt = json.loads(capsys.readouterr().out)
-    assert receipt["success"] is False
-    assert receipt["errors"] == [
-        "explicit --target-database is required for read-only checks"
-    ]
 
 
 def test_read_only_helpers_remain_deterministic() -> None:

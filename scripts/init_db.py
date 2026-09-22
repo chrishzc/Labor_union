@@ -65,22 +65,3 @@ def _schema_part_sort_key(path: Path) -> tuple[int, str, str]:
     if match:
         return int(match.group(1)), match.group(2).lower(), path.name
     return 10**9, "", path.name
-
-def main(argv: list[str] | None = None) -> int:
-    """Retired executable entrypoint; schema helpers remain importable.
-
-    Fresh schema work is owned by ``scripts.reset_fake_database``.  Keeping a
-    fail-closed shim here prevents old runbooks from silently writing a
-    configured database while preserving the helper functions used by tests
-    and the canonical disposable bootstrapper.
-    """
-    del argv
-    print(
-        "[blocked] scripts.init_db is a library-only schema helper; "
-        "use scripts.reset_fake_database for an explicit lu_test_* target.",
-        file=sys.stderr,
-    )
-    return 2
-
-if __name__ == '__main__':
-    raise SystemExit(main(sys.argv[1:]))

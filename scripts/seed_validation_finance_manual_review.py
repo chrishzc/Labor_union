@@ -139,16 +139,3 @@ def _bank_amount_columns(incoming_amount: int | None) -> tuple[str, str]:
     if incoming_amount <= 0:
         raise ValueError("incoming_amount must be positive")
     return "", str(incoming_amount)
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--scenario-id", required=True)
-    parser.add_argument("--incoming-amount", type=int)
-    arguments = parser.parse_args()
-    print(seed(arguments.scenario_id, incoming_amount=arguments.incoming_amount))
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

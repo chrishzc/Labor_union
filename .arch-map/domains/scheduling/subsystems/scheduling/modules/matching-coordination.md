@@ -50,7 +50,6 @@
   - `db/schema_parts/1032_matching_holiday_work_agreements.sql` — 已退休 agreement 的保留資料 schema；不再有 current writer 或精算 readback consumer。
   - `db/schema_parts/222_matching_plan_create_receipts.sql` — fresh-bootstrap immutable receipt root for formal matching-plan create commands; preserve upgrade uses byte-equivalent migration-only part `1039`.
   - `db/schema_parts/1039_matching_plan_create_receipts.sql` — preserve-only byte-equivalent bridge for the same receipt root; it is not a second writer or a fresh-bootstrap table.
-  - `scripts/run_contract_signing_normal_chain.py` — disposable normal-chain scenario calls the typed matching-plan create command with an explicit immutable event key.
 
 ## Dependencies
 - outbound: `orders/order-information` — 候選資訊使用命名投影；預覽與寄送共用相同內容，不建立虛構 assignment。

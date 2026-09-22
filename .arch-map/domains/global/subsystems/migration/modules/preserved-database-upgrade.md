@@ -14,7 +14,7 @@
   - `scripts/migrate_preserved_database_additive_schema.py`
   - `scripts/local_database_additive_update.py`
   - `scripts/update_local_database.py`
-  - `scripts/collect_local_additive_engine_evidence.py`
+  - `scripts/collect_local_additive_engine_evidence.py` — library-only；沒有獨立命令入口。
   - `shared_kernel/migration_release.py`
 - entrypoints:
   - `scripts/launchers/update_local_database.bat`

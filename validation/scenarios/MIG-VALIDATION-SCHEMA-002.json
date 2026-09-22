@@ -3,11 +3,19 @@
   "scenario_id": "MIG-VALIDATION-SCHEMA-002",
   "track": "B",
   "suite_id": "MIG",
-  "status": "bound",
+  "status": "blocked",
   "requires_database": true,
   "database_execution_mode": "read_only_existing_database",
-  "test_kinds": ["metadata_fixture", "filesystem_artifact", "process_network_harness"],
-  "coverage_ids": ["MIG-01", "MIG-04", "MIG-07"],
+  "test_kinds": [
+    "metadata_fixture",
+    "filesystem_artifact",
+    "process_network_harness"
+  ],
+  "coverage_ids": [
+    "MIG-01",
+    "MIG-04",
+    "MIG-07"
+  ],
   "source_refs": [
     "document/資料庫、資料處理/新版驗證雙軌總計畫_草案.md#6.1"
   ],
@@ -36,14 +44,13 @@
   "execution": {
     "runner": [
       ".\\.venv\\Scripts\\python.exe scripts\\verify_validation_schema_manifest.py",
-      ".\\.venv\\Scripts\\python.exe scripts\\verify_validation_database.py --database lu_test_validation_v1",
       ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_verify_validation_schema_manifest.py tests\\domains\\global\\subsystems\\migration\\modules\\local-database-fresh-reset\\test_bootstrap_disposable_mysql_schema.py"
     ],
     "test_paths": [
       "scripts/verify_validation_schema_manifest.py",
-      "scripts/verify_validation_database.py",
       "tests/test_verify_validation_schema_manifest.py",
       "tests/domains/global/subsystems/migration/modules/local-database-fresh-reset/test_bootstrap_disposable_mysql_schema.py"
     ]
-  }
+  },
+  "blocker": "The standalone isolated-database command has been removed. Historical receipts are retained as evidence of their recorded revision, not as verification of the current tree."
 }

@@ -8,7 +8,6 @@
 月嫂服務日日誌的 typed Query／Preview／Apply、requires_cooking 門禁、服務結束 checkpoint／outbox，以及受控寶寶／餐食照片在同一 Scheduling UoW 的登錄與 fresh readback。餐食照片僅在需要料理時適用，寶寶照片可在不需料理的服務日使用；需要料理時仍必須有餐食照片。
 
 ## Implementation
-- `scripts/run_task96_scheduling_lane_c.py`
 - primary:
   - `domains/scheduling/service_day_log.py`
   - `subsystems/scheduling/service_day_log_workflow.py`

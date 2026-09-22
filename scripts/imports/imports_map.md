@@ -1,98 +1,30 @@
-##### Module: ImportClientHCM
-- Type: script
-- Description: 監控並解析 HCM 月子平台 Excel 案件檔案，以「查詢序號(案件編號)」為唯一識別碼，支援新增與更新複寫寫入 MySQL clients 表。支援自動偵測 Excel 標頭列位置（相容雙列格式），且報名時間與預產期等時間支援民國年格式自動轉換。
-- Source: scripts/imports/import_client_hcm.py
-- Dependencies: [InitDB]
-- Input:
-  - excel_file: str
-  - db_config: dict
-- Output:
-  - inserted_count: int
-  - updated_count: int
-- Invariants:
-  - 'INV-IMPORT-01: 解析前必須以探針列 (nrows=0) 檢查標頭型態，若超過半數欄位為數字或 Unnamed，則自動改用 header=1 重新讀取，以相容 BeClass/HCM 雙列格式匯出。'
-  - 'INV-IMPORT-03: 寫入資料庫前必須動態過濾掉資料庫中實際不存在的欄位，防止 1054 錯誤。'
-  - 'INV-HCM-01: clients INSERT 時自 Excel 欄位「案件狀態」讀取 status 值，但 UPDATE 時排除 status 覆寫。'
-  - 'INV-HCM-02: 支援民國年時間格式轉換。若偵測到年份低於 200 (例如 113/09/25)，應自動將年份加 1911 後再行解析。'
-  - 'INV-CLEAN-01: DATETIME 欄位（created_at）轉換失敗時必須回退為 None 並記錄至 row_errors，嚴禁傳入任意字串至 MySQL DATETIME 欄位。'
-  - 'INV-CLEAN-02: 唯一鍵欄位（case_no）為 None 時整列跳過，並記錄至 import_errors（含列號與原因）。'
-  - 'INV-CLEAN-03: 匯入完成後必須輸出結構化錯誤摘要，列出所有 row_errors 以供人工確認。'
-- Preferred Pattern: none
-- Verification: []
-- Todo:
-  - [x] 撰寫 scripts/imports/import_client_hcm.py 解析 HCM 月子平台分頁
-- Checkpoint:
-  - [x] CP-5.1: 審查 HCM 月子平台資料清洗與去重更新邏輯
+# Workbook 匯入與預覽介面
 
-##### Module: ImportClientBeclass
-- Type: script
-- Description: 監控並解析客戶 beclass 報名名冊 Excel 檔案，以「姓名+出生年月日」為組合唯一鍵，支援資料庫 beclass_records 表 the 異動偵測與資料更新複寫。BeClass 匯出格式第一列為題目編號索引，第二列才是中文欄位名，需自動偵測並跳過。欄位「查詢序號」對應 query_no。
-- Source: scripts/imports/import_client_beclass.py
-- Dependencies: [InitDB]
-- Input:
-  - excel_file: str
-  - db_config: dict
-- Output:
-  - inserted_count: int
-  - updated_count: int
-- Invariants:
-  - 'INV-IMPORT-01: 解析前必須以探針列 (nrows=0) 檢查標頭型態，若超過半數欄位為數字或 Unnamed，則自動改用 header=1 重新讀取，以相容 BeClass/HCM 雙列格式匯出。'
-  - 'INV-IMPORT-03: 寫入資料庫前必須動態過濾掉資料庫中實際不存在的欄位，防止 1054 錯誤。'
-  - 'INV-BECLASS-02: BeClass 客戶 Excel 中「查詢序號」欄位對應 query_no。'
-  - 'INV-CLEAN-01: DATETIME 欄位（created_at）轉換失敗時必須回退為 None 並記錄至 row_errors。'
-  - 'INV-CLEAN-02: 組合唯一鍵（name+birth_date）任一為 None 時整列跳過，並記錄至 import_errors（含列號與原因）。'
-  - 'INV-CLEAN-03: 匯入完成後必須輸出結構化錯誤摘要，列出所有 row_errors 以供人工確認。'
-- Preferred Pattern: none
-- Verification: []
-- Todo:
-  - [x] 撰寫 scripts/imports/import_client_beclass.py 解析 BeClass 客戶分頁
-- Checkpoint:
-  - [x] CP-5.2: 審查 BeClass 客戶資料組合唯一鍵異動更新邏輯
+正式寫入以經認證的現行 Web API／owner workflow 為入口。以下腳本的名稱不代表可直接更新資料庫；CLI 與可匯入函式的效果必須分開看。
 
-##### Module: ImportStaffBeclass
-- Type: script
-- Description: 監控並解析服務人員 beclass 報名名冊 Excel 檔案，以「身分證字號」為唯一識別碼，支援資料庫 staff 表的異動偵測與資料更新複寫。支援自動偵測 Excel 標頭列位置（相容雙列格式）。
-- Source: scripts/imports/import_staff_beclass.py
-- Dependencies: [InitDB]
-- Input:
-  - excel_file: str
-  - db_config: dict
-- Output:
-  - inserted_count: int
-  - updated_count: int
-- Invariants:
-  - 'INV-IMPORT-01: 解析前必須以探針列 (nrows=0) 檢查標頭型態，若超過半數欄位為數字或 Unnamed，則自動改用 header=1 重新讀取，以相容 BeClass/HCM 雙列格式匯出。'
-  - 'INV-IMPORT-03: 寫入資料庫前必須動態過濾掉資料庫中實際不存在的欄位，防止 1054 錯誤。'
-  - 'INV-CLEAN-01: DATETIME 欄位（registered_at）轉換失敗時必須回退為 None 並記錄至 row_errors，嚴禁以 str() 回退傳入 MySQL DATETIME。'
-  - 'INV-CLEAN-02: 唯一鍵欄位（identity_card）為 None 時整列跳過，並記錄至 import_errors（含列號與原因）。'
-  - 'INV-CLEAN-03: 匯入完成後必須輸出結構化錯誤摘要，列出所有 row_errors 以供人工確認。'
-- Preferred Pattern: none
-- Verification: []
-- Todo:
-  - [x] 撰寫 scripts/imports/import_staff_beclass.py 解析 BeClass 服務人員分頁
-- Checkpoint:
-  - [x] CP-5.3: 審查 BeClass 服務人員身分證字號異動更新邏輯
+| 模組 | CLI 現況 | 資料庫效果 |
+| --- | --- | --- |
+| `scripts/imports/import_client_hcm.py` | 函式庫，沒有獨立 CLI。提供 HCM 正規化與現行匯入流程使用的函式。 | 寫入由呼叫端的 Case Import workflow 與 Unit of Work 管理；不是「既有案件直接複寫更新」命令。 |
+| `scripts/imports/import_client_beclass.py` | 預設委派 workbook 預演；`--historical-apply` 即使通過目標檢查仍會拒絕。 | 預覽不寫入資料庫；不得將函式可匯入解讀為 CLI Apply 已開放。 |
+| `scripts/imports/import_staff_beclass.py` | 預設委派 workbook 預演；`--historical-apply` 仍被拒絕。 | 同上；正式採用由現行 Staff 歷史 workbook workflow 處理。 |
+| `scripts/imports/import_finance_excel.py` | 只提供銀行 workbook 格式預覽；`--apply` 已退役。 | 不建立 Finance Import 批次、不核銷、不寫入 payments；`--confirm-database` 不會開放寫入。 |
+| `scripts/imports/rehearse_case_import_workbook.py` | HCM／Client BeClass／Staff BeClass 來源診斷。 | 不連線資料庫，不建立業務根事實。 |
 
-##### Module: ImportFinanceExcel
-- Type: script
-- Description: 監控並解析合作社流水帳對帳單（單一分頁），依據 14 碼虛擬帳號解碼還原案號進行付款核銷與更新寫入 MySQL payments 表。案件對照資訊（客戶姓名、月嫂姓名）從 MySQL 動態查詢，不依賴 Excel 第二分頁。
-- Source: scripts/imports/import_finance_excel.py
-- Dependencies: [InitDB]
-- Input:
-  - finance_excel: str
-  - db_config: dict
-- Output:
-  - inserted_count: int
-  - updated_count: int
-- Invariants:
-  - 'INV-FINANCE-01: payments 表所有後續新增欄位必須設 DEFAULT 值或允許 NULL，禁止加裸 NOT NULL 欄位，以確保固定欄位列表的 INSERT 不因 schema 擴充而崩潰。'
-- Preferred Pattern: none
-- Verification: []
-- Todo:
-  - [x] 撰寫 scripts/import_finance_excel.py 腳本解析帳務.xlsx
-  - [x] 實作帳務數據去重與清洗邏輯並匯入 MySQL 帳務表
-  - [x] 改由 MySQL 動態查詢案件對照，移除對 Excel 第二分頁的依賴
-- Checkpoint:
-  - [x] CP-3.2: 審查帳務資料清洗與匯入邏輯
+## 可用的預覽範例
 
+從 repository root，使用已安裝相應 workbook 依賴的 Python 環境：
 
+```bash
+python -m scripts.imports.import_finance_excel --excel-path bank.xlsx
+python -m scripts.imports.import_finance_excel --excel-path bank.xlsx --report-path preview.json
+python -m scripts.imports.import_client_beclass clients.xlsx
+python -m scripts.imports.import_staff_beclass staff.xlsx
+```
+
+財務預覽輸出包含 `mode: dry_run`、`transaction_outcome: not_written`、格式及正規化列數，不表示已完成業務匯入。`--report-path` 會建立本機 JSON 報告，因此「不寫入」在此指資料庫，不是 filesystem。
+
+`--apply`、`--historical-apply` 等舊選項不是替代正式 API 的操作方式；此文件不提供繞過其拒絕條件的命令。
+
+## 驗證
+
+`tests/test_finance_import_cli_test_adapter.py` 驗證財務預覽與 Apply 拒絕行為；`tests/test_wp73_workbook_rehearsal_cli.py` 覆蓋來源預演。CI 與人工 focused test 的實際執行範圍見 [scripts_map.md](../scripts_map.md)，不因測試檔存在就宣稱 CI 已執行。

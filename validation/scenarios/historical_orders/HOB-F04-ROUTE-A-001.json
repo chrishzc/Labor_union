@@ -3,8 +3,8 @@
   "scenario_id": "HOB-F04-ROUTE-A-001",
   "track": "A",
   "suite_id": "HOB",
-  "status": "bound",
-  "revision": 1,
+  "status": "blocked",
+  "revision": 2,
   "owner": "Historical Orders / Orders / Scheduling / Client Finance / Staff Payables",
   "route": "A",
   "start_stage": "stage-00-clean",
@@ -23,7 +23,10 @@
     "expected_manifest"
   ],
   "coverage_scope": "task96_hob_f04_terminal",
-  "coverage_ids": ["HOB-A5", "HOB-F04"],
+  "coverage_ids": [
+    "HOB-A5",
+    "HOB-F04"
+  ],
   "source_refs": [
     "document/架構重整/02_決策與退役執行記錄/PROV-20260827-historical-order-business-scenario-gap-matrix.md#8.3 可重建階段基線",
     "document/架構重整/02_決策與退役執行記錄/PROV-20260827-historical-order-operational-work-packages.md#6-wp-hob-e完成案件-owner-terminal-closure",
@@ -75,11 +78,5 @@
     "exact replay evidence and retained-data policy"
   ],
   "retained_data_policy": "retain only the versioned synthetic HOB-F04-ROUTE-A-001 rows in the canonical Task96 validation database",
-  "execution": {
-    "runner": [
-      ".venv/bin/python scripts/run_task96_hob_route_a.py",
-      ".\\.venv\\Scripts\\python.exe scripts\\run_task96_hob_route_a.py"
-    ],
-    "runner_path": "scripts/run_task96_hob_route_a.py"
-  }
+  "blocker": "The standalone isolated-database command has been removed. Historical receipts are retained as evidence of their recorded revision, not as verification of the current tree."
 }
