@@ -105,28 +105,43 @@ def test_missing_service_days_only_preserves_existing_start_date():
     assert repository.case.start_date == _START
 
 
-def test_existing_values_cannot_be_rewritten_through_bootstrap():
+def test_existing_values_can_be_corrected_before_downstream_roots_exist():
     repository = _Repository(start_date=_START, service_days=_DAYS)
     application = OrderIntakeTermsBootstrapApplication(repository, _UnitOfWorkFactory())
 
     preview = application.preview(_CASE, date(2026, 9, 11), 31)
 
-    assert preview.apply_allowed is False
-    assert "order_intake_terms_bootstrap_start_date_already_set" in preview.blockers
-    assert "order_intake_terms_bootstrap_service_days_already_set" in preview.blockers
-    assert "order_intake_terms_bootstrap_nothing_missing" in preview.blockers
-    with pytest.raises(OrderIntakeTermsBootstrapError, match="order_intake_terms_bootstrap_blocked"):
-        application.apply(
-            _CASE,
-            date(2026, 9, 11),
-            31,
-            preview.lifecycle_version,
-            preview.preview_fingerprint,
-            "issue-166:rewrite",
-            "orders-operator",
-            "attempt rewrite",
-        )
-    assert repository.update_calls == []
+    assert preview.apply_allowed is True
+    assert preview.changed_fields == ("start_date", "service_days")
+    application.apply(
+        _CASE,
+        date(2026, 9, 11),
+        31,
+        preview.lifecycle_version,
+        preview.preview_fingerprint,
+        "issue-166:rewrite",
+        "orders-operator",
+        "correct imported terms",
+    )
+    assert repository.case.start_date == date(2026, 9, 11)
+    assert repository.case.service_days == 31
+
+
+def test_discussion_case_can_be_corrected_when_downstream_roots_are_still_absent():
+    repository = _Repository(start_date=_START, service_days=_DAYS)
+    repository.case = replace(repository.case, status=OrderLifecycleStatus.DISCUSSION)
+    application = OrderIntakeTermsBootstrapApplication(repository, _UnitOfWorkFactory())
+
+    preview = application.preview(_CASE, date(2026, 9, 12), 29)
+
+    assert preview.apply_allowed is True
+    receipt = application.apply(
+        _CASE, date(2026, 9, 12), 29, preview.lifecycle_version,
+        preview.preview_fingerprint, "issue-166:discussion-correction",
+        "orders-operator", "correct newly imported terms",
+    )
+    assert receipt.lifecycle_version == 8
+    assert repository.case.status is OrderLifecycleStatus.DISCUSSION
 
 
 @pytest.mark.parametrize(
@@ -134,7 +149,7 @@ def test_existing_values_cannot_be_rewritten_through_bootstrap():
     [
         ({"service_data_locked": True}, "order_intake_terms_bootstrap_service_data_locked"),
         ({"actual_start_date": date(2026, 9, 1)}, "order_intake_terms_bootstrap_actual_start_exists"),
-        ({"status": OrderLifecycleStatus.DISCUSSION}, "order_intake_terms_bootstrap_status_not_eligible"),
+        ({"status": OrderLifecycleStatus.ESTABLISHED}, "order_intake_terms_bootstrap_status_not_eligible"),
         ({"client_finance_present": True}, "order_intake_terms_bootstrap_client_finance_exists"),
         ({"payroll_present": True}, "order_intake_terms_bootstrap_payroll_exists"),
         (
@@ -401,15 +416,15 @@ class _Repository:
             self.for_update_calls.append(True)
         return self.case if case_no == self.case.case_no else None
 
-    def update_missing_terms(
+    def update_early_terms(
         self,
         case_no,
         expected_lifecycle_version,
         start_date,
         service_days,
         *,
-        fill_start_date,
-        fill_service_days,
+        update_start_date,
+        update_service_days,
     ):
         self.update_calls.append(
             (
@@ -417,16 +432,16 @@ class _Repository:
                 expected_lifecycle_version,
                 start_date,
                 service_days,
-                fill_start_date,
-                fill_service_days,
+                update_start_date,
+                update_service_days,
             )
         )
         assert self.case.lifecycle_version == expected_lifecycle_version
         self.case = replace(
             self.case,
             lifecycle_version=expected_lifecycle_version + 1,
-            start_date=start_date if fill_start_date else self.case.start_date,
-            service_days=service_days if fill_service_days else self.case.service_days,
+            start_date=start_date if update_start_date else self.case.start_date,
+            service_days=service_days if update_service_days else self.case.service_days,
         )
         return self.case.lifecycle_version
 

@@ -1,4 +1,4 @@
-"""MySQL adapter for Orders intake terms bootstrap and completion."""
+"""MySQL adapter for Orders early intake terms correction and completion."""
 
 from __future__ import annotations
 
@@ -79,22 +79,22 @@ class MySqlOrderIntakeTermsBootstrapRepository:
             client_name=normalized_client_name,
         )
 
-    def update_missing_terms(
+    def update_early_terms(
         self,
         case_no: str,
         expected_lifecycle_version: int,
         start_date: date,
         service_days: int,
         *,
-        fill_start_date: bool,
-        fill_service_days: bool,
+        update_start_date: bool,
+        update_service_days: bool,
     ) -> int:
         assignments: list[str] = []
         parameters: list[object] = []
-        if fill_start_date:
+        if update_start_date:
             assignments.append("start_date=%s")
             parameters.append(start_date)
-        if fill_service_days:
+        if update_service_days:
             assignments.append("service_days=%s")
             parameters.append(service_days)
         if not assignments:

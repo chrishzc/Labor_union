@@ -176,9 +176,9 @@ def test_terms_writer_updates_only_selected_terms_and_version(
 ):
     repository = MySqlOrderIntakeTermsBootstrapRepository(connection)
 
-    resulting_version = repository.update_missing_terms(
+    resulting_version = repository.update_early_terms(
         _CASE, _VERSION, _START, _DAYS,
-        fill_start_date=fill_start, fill_service_days=fill_days,
+        update_start_date=fill_start, update_service_days=fill_days,
     )
 
     # Exact write-set assertion includes absence of end_date, status and other roots.
@@ -192,13 +192,13 @@ def test_terms_writer_updates_only_selected_terms_and_version(
     connection.rollback.assert_not_called()
 
 
-def test_terms_writer_with_no_missing_fields_issues_no_sql(connection):
+def test_terms_writer_with_no_changed_fields_issues_no_sql(connection):
     repository = MySqlOrderIntakeTermsBootstrapRepository(connection)
 
     with pytest.raises(RuntimeError, match="order_intake_terms_bootstrap_nothing_to_write"):
-        repository.update_missing_terms(
+        repository.update_early_terms(
             _CASE, _VERSION, _START, _DAYS,
-            fill_start_date=False, fill_service_days=False,
+            update_start_date=False, update_service_days=False,
         )
 
     connection.cursor.assert_not_called()

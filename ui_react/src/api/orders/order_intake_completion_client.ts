@@ -61,6 +61,8 @@ const CompletionPreviewSchema = z.strictObject({
   lifecycle_version: VersionSchema,
   current_status: z.string().min(1),
   target_status: z.string().min(1),
+  current_start_date: DateSchema.nullable().optional(),
+  current_service_days: z.number().int().nonnegative().nullable().optional(),
   missing_fields: z.array(MissingFieldSchema),
   blockers: z.array(z.string().min(1)),
   apply_allowed: z.boolean(),
@@ -295,6 +297,7 @@ const blockerMessages: Record<string, string> = {
   order_intake_terms_bootstrap_scheduling_not_pristine: '正式排班或指派資料已形成，不能使用進件補件流程。',
   order_intake_completion_scheduling_not_pristine: '正式排班或指派資料已形成，不能完成進件補齊。',
   order_intake_terms_bootstrap_status_not_eligible: '案件已不在待補件狀態，請重新載入。',
+  order_intake_terms_bootstrap_nothing_changed: '服務開始日與天數沒有變更。',
   order_intake_completion_status_not_eligible: '案件已不在待補件狀態，請重新載入。',
 };
 

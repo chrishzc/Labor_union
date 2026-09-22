@@ -20,6 +20,7 @@ Issue #326：同一 Terms command 可承接完整替代日期與明確既有指�
   - `api/dependencies/order_terms.py`
 - entrypoints:
   - `api/routes/order_terms.py` — Orders Terms Query／Preview／Apply HTTP transport 與輸入驗證。
+  - `api/routes/order_intake_terms_bootstrap.py` — 早期進件服務條件修正與進件完成的 Preview／Apply HTTP transport。
 
 ## Dependencies
 - outbound: `scheduling/schedule-generation` — 由 Scheduling typed candidate 判定排班 generation 影響；Orders 不自行寫入 assignment。

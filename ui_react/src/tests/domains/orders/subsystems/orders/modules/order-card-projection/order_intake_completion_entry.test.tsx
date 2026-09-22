@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ordersQueryClient } from '../../../../../../../api/orders/order_query_client';
 import { orderIntakeCompletionClient } from '../../../../../../../api/orders/order_intake_completion_client';
 import { OrdersIntakeRepairCard } from '../../../../../../../components/OrdersIntakeRepairCard';
+import { OrderIntakeRepairPanel } from '../../../../../../../components/OrderIntakeRepairPanel';
 
 const ETAG = 'a'.repeat(64);
 const FP1 = '1'.repeat(64);
@@ -209,6 +210,56 @@ describe('Orders intake repair entry', () => {
       '合成姓名補件驗收', expect.stringContaining('orders-intake-client-name-CASE-153-'),
     ));
     await waitFor(() => expect(onChanged).toHaveBeenCalledOnce());
+  });
+
+  it('allows a newly imported discussion case to correct existing date and days without Finance, Payroll, or assignment roots', async () => {
+    const previewCompletion = vi.spyOn(orderIntakeCompletionClient, 'previewCompletion')
+      .mockResolvedValueOnce({
+        case_no: 'CASE-EARLY-CORRECTION', lifecycle_version: 7,
+        current_status: '洽談中', target_status: '洽談中',
+        current_start_date: '2026-09-10', current_service_days: 30,
+        missing_fields: [], blockers: ['order_intake_completion_status_not_eligible'],
+        apply_allowed: false, preview_fingerprint: FP1,
+      })
+      .mockResolvedValueOnce({
+        case_no: 'CASE-EARLY-CORRECTION', lifecycle_version: 8,
+        current_status: '洽談中', target_status: '洽談中',
+        current_start_date: '2026-09-12', current_service_days: 28,
+        missing_fields: [], blockers: ['order_intake_completion_status_not_eligible'],
+        apply_allowed: false, preview_fingerprint: FP2,
+      });
+    vi.spyOn(orderIntakeCompletionClient, 'previewTerms').mockResolvedValue({
+      case_no: 'CASE-EARLY-CORRECTION', lifecycle_version: 7,
+      before_start_date: '2026-09-10', before_service_days: 30,
+      after_start_date: '2026-09-12', after_service_days: 28,
+      changed_fields: ['start_date', 'service_days'], blockers: [],
+      apply_allowed: true, preview_fingerprint: FP1,
+    });
+    const applyTerms = vi.spyOn(orderIntakeCompletionClient, 'applyTerms').mockResolvedValue({
+      receipt_key: 'early-correction-receipt', case_no: 'CASE-EARLY-CORRECTION',
+      lifecycle_version: 8, start_date: '2026-09-12', service_days: 28,
+      changed_fields: ['start_date', 'service_days'], preview_fingerprint: FP1,
+      replayed: false,
+    });
+    const detail = vi.spyOn(ordersQueryClient, 'getOrderDetail');
+
+    render(<OrderIntakeRepairPanel caseNo="CASE-EARLY-CORRECTION" orderStatus="洽談中" />);
+
+    expect(await screen.findByLabelText('服務開始日')).toHaveValue('2026-09-10');
+    expect(screen.getByLabelText('服務天數')).toHaveValue(30);
+    fireEvent.change(screen.getByLabelText('服務開始日'), { target: { value: '2026-09-12' } });
+    fireEvent.change(screen.getByLabelText('服務天數'), { target: { value: '28' } });
+    fireEvent.change(screen.getByLabelText('異動／補件原因（套用時必填）'), {
+      target: { value: '修正剛匯入的服務條件' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '檢查日期／天數異動影響' }));
+    await screen.findByText('服務開始日 2026-09-12；服務天數 28 天。');
+    fireEvent.click(screen.getByRole('button', { name: '確認套用日期／天數異動' }));
+
+    await waitFor(() => expect(applyTerms).toHaveBeenCalled());
+    await waitFor(() => expect(previewCompletion).toHaveBeenCalledTimes(2));
+    expect(detail).not.toHaveBeenCalled();
+    expect(await screen.findByText('服務開始日／天數已更新並完成回讀。')).toBeInTheDocument();
   });
 
 });

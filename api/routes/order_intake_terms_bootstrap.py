@@ -1,4 +1,4 @@
-"""Typed Preview/Apply boundaries for pending Orders intake repair."""
+"""Typed Preview/Apply boundaries for early Orders intake repair."""
 
 from __future__ import annotations
 
@@ -115,6 +115,8 @@ class OrderIntakeCompletionPreviewView(BaseModel):
     lifecycle_version: int
     current_status: str
     target_status: str
+    current_start_date: date | None
+    current_service_days: int | None
     missing_fields: list[str]
     blockers: list[str]
     apply_allowed: bool
@@ -416,6 +418,8 @@ def _completion_preview_payload(result):
         "lifecycle_version": result.lifecycle_version,
         "current_status": result.current_status.value,
         "target_status": result.target_status.value,
+        "current_start_date": result.current_start_date,
+        "current_service_days": result.current_service_days,
         "missing_fields": list(result.missing_fields),
         "blockers": list(result.blockers),
         "apply_allowed": result.apply_allowed,

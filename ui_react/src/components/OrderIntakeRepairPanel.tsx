@@ -62,7 +62,7 @@ function viewOperation(operation: IntakeRepairOperation): Exclude<IntakeOperatio
 
 function successMessage(operation: IntakeRepairOperation): string {
   if (operation === 'client_name') return '客戶姓名已補齊並完成回讀。';
-  if (operation === 'terms') return '服務開始日／天數已補齊並完成回讀。';
+  if (operation === 'terms') return '服務開始日／天數已更新並完成回讀。';
   return '進件缺件已完成，案件已回讀最新狀態。';
 }
 
@@ -117,6 +117,12 @@ export function OrderIntakeRepairPanel({
       if (signal?.aborted) return;
       if (currentCompletion.case_no !== caseNo) throw new Error('進件補件回讀案件識別不一致。');
       setCompletion(currentCompletion);
+      setStartDate(currentCompletion.current_start_date ?? '');
+      setServiceDays(
+        currentCompletion.current_service_days && currentCompletion.current_service_days > 0
+          ? String(currentCompletion.current_service_days)
+          : '',
+      );
       // Only editable missing fields consume detail to prefill the repair form.
       // Blockers and completed intake are fully described by the owner preview.
       let detail: IntakeReadback['detail'] = null;
@@ -213,8 +219,8 @@ export function OrderIntakeRepairPanel({
     }
     if (command.operation === 'terms') {
       return 'start_date' in receipt
-        && readback.detail?.start_date === receipt.start_date
-        && readback.detail.service_days === receipt.service_days
+        && readback.completion.current_start_date === receipt.start_date
+        && readback.completion.current_service_days === receipt.service_days
         && !readback.completion.missing_fields.includes('start_date')
         && !readback.completion.missing_fields.includes('service_days');
     }
@@ -252,7 +258,7 @@ export function OrderIntakeRepairPanel({
         preserveReadbackOnly(state, '案件已切換；保留收據，只能重新讀取補件結果。');
         return;
       }
-      const readback = await refresh(controller.signal, true);
+      const readback = await refresh(controller.signal, command.operation === 'client_name');
       if (controller.signal.aborted || !isActive(request, caseNo)) {
         preserveReadbackOnly(state, '案件已切換；保留收據，只能重新讀取補件結果。');
         return;
@@ -437,13 +443,19 @@ export function OrderIntakeRepairPanel({
   const historicalRestartAvailable = orderStatus === '歷史訂單－未服務' || orderStatus === '歷史訂單－服務中';
   const historicalCompleted = orderStatus === '歷史訂單－服務完成' || orderStatus === '歷史訂單－帳務完成';
   const repairAllowed = completion !== null && completion.blockers.length === 0;
+  const termsRepairAllowed = completion !== null
+    && (completion.current_status === '待補件' || completion.current_status === '洽談中')
+    && completion.blockers.every((blocker) => blocker === 'order_intake_completion_status_not_eligible');
+  const visibleCompletionBlockers = completion?.blockers.filter(
+    (blocker) => !(termsRepairAllowed && blocker === 'order_intake_completion_status_not_eligible'),
+  ) ?? [];
   const missingName = completion?.missing_fields.includes('client_name') ?? false;
-  const missingTerms = completion?.missing_fields.some((field) => field === 'start_date' || field === 'service_days') ?? false;
   const shouldRender = loading
     || visibleError !== null
     || completion === null
     || completion.missing_fields.length > 0
     || completion.apply_allowed
+    || termsRepairAllowed
     || ((historicalRestartAvailable || historicalCompleted) && completion.blockers.length > 0);
 
   if (!shouldRender) return null;
@@ -455,7 +467,9 @@ export function OrderIntakeRepairPanel({
       style={{ border: '1px solid #fdba74', borderRadius: '12px', padding: '14px 16px', background: '#fffaf5', display: 'grid', gap: '10px' }}
     >
       <header>
-        <strong style={{ color: '#9a3412' }}>缺件</strong>
+        <strong style={{ color: '#9a3412' }}>
+          {completion && completion.missing_fields.length === 0 ? '服務資料' : '缺件'}
+        </strong>
         <div style={{ color: '#74593f', fontSize: '0.82rem', marginTop: '3px' }}>
           系統會依案件目前進度確認可補資料；已進入後續作業的案件，不一定能從進件頁修改。
         </div>
@@ -473,11 +487,11 @@ export function OrderIntakeRepairPanel({
               : '無'}
           </div>
 
-          {completion.blockers.length > 0 && (
+          {visibleCompletionBlockers.length > 0 && (
             <div role="status" style={{ color: '#991b1b', display: 'grid', gap: '4px' }}>
               <strong>目前不可完成補件</strong>
               <ul style={{ margin: 0, paddingLeft: '20px' }}>
-                {completion.blockers.map((blocker) => <li key={blocker}>{intakeBlockerMessage(blocker)}</li>)}
+                {visibleCompletionBlockers.map((blocker) => <li key={blocker}>{intakeBlockerMessage(blocker)}</li>)}
               </ul>
             </div>
           )}
@@ -488,9 +502,9 @@ export function OrderIntakeRepairPanel({
             </div>
           )}
 
-          {repairAllowed && (missingName || missingTerms || completion.apply_allowed) && (
+          {((repairAllowed && (missingName || completion.apply_allowed)) || termsRepairAllowed) && (
             <label style={{ display: 'grid', gap: '4px', fontSize: '0.82rem', color: '#57423b' }}>
-              補件原因（套用時必填）
+              異動／補件原因（套用時必填）
               <input
                 value={reason}
                 maxLength={500}
@@ -532,7 +546,7 @@ export function OrderIntakeRepairPanel({
             </div>
           )}
 
-          {repairAllowed && missingTerms && (
+          {termsRepairAllowed && (
             <div style={{ borderTop: '1px solid #fed7aa', paddingTop: '10px', display: 'grid', gap: '6px' }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                 <label style={{ display: 'grid', gap: '4px', fontSize: '0.82rem' }}>
@@ -545,7 +559,7 @@ export function OrderIntakeRepairPanel({
                 </label>
               </div>
               <button type="button" className="btn-secondary-action" disabled={controlsLocked || !startDate || Number(serviceDays) <= 0} onClick={() => void previewTerms()}>
-                {operation === 'terms-preview' ? '正在檢查日期／天數補件…' : '檢查日期／天數補件影響'}
+                {operation === 'terms-preview' ? '正在檢查日期／天數異動…' : '檢查日期／天數異動影響'}
               </button>
               {termsPreview && (
                 <div style={{ display: 'grid', gap: '6px' }}>
@@ -558,7 +572,7 @@ export function OrderIntakeRepairPanel({
                     disabled={controlsLocked || !termsPreview.apply_allowed || !reason.trim()}
                     onClick={() => void applyTerms()}
                   >
-                    {operation === 'terms-apply' ? '正在套用日期／天數補件…' : '確認套用日期／天數補件'}
+                    {operation === 'terms-apply' ? '正在套用日期／天數異動…' : '確認套用日期／天數異動'}
                   </button>
                 </div>
               )}

@@ -1,4 +1,4 @@
-"""Orders-owned bootstrap and completion boundary for pending intake data."""
+"""Orders-owned early intake terms correction and completion boundary."""
 
 from __future__ import annotations
 
@@ -13,6 +13,10 @@ from shared_kernel.fingerprints import fingerprint_payload
 
 _FAMILY = "orders_intake_terms_bootstrap/v1"
 _COMPLETION_FAMILY = "orders_intake_completion/v1"
+_EARLY_TERMS_STATUSES = frozenset({
+    OrderLifecycleStatus.PENDING_COMPLETION,
+    OrderLifecycleStatus.DISCUSSION,
+})
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +67,8 @@ class OrderIntakeCompletionPreview:
     lifecycle_version: int
     current_status: OrderLifecycleStatus
     target_status: OrderLifecycleStatus
+    current_start_date: date | None
+    current_service_days: int | None
     missing_fields: tuple[str, ...]
     blockers: tuple[str, ...]
     apply_allowed: bool
@@ -91,15 +97,15 @@ class OrderIntakeTermsBootstrapRepository(Protocol):
         self, case_no: str, *, for_update: bool
     ) -> OrderIntakeTermsBootstrapFacts | None: ...
 
-    def update_missing_terms(
+    def update_early_terms(
         self,
         case_no: str,
         expected_lifecycle_version: int,
         start_date: date,
         service_days: int,
         *,
-        fill_start_date: bool,
-        fill_service_days: bool,
+        update_start_date: bool,
+        update_service_days: bool,
     ) -> int: ...
 
     def complete_intake(
@@ -233,26 +239,20 @@ def preview_case(
             "order_intake_terms_bootstrap_case_not_found"
         )
 
-    start_missing = facts.start_date is None
-    service_days_missing = _service_days_missing(facts)
+    start_changed = facts.start_date != proposed_start_date
+    service_days_changed = facts.service_days != proposed_service_days
     blockers = _blockers(
         facts,
         proposed_start_date,
         proposed_service_days,
-        start_missing=start_missing,
-        service_days_missing=service_days_missing,
+        start_changed=start_changed,
+        service_days_changed=service_days_changed,
     )
-    after_start_date = proposed_start_date if start_missing else facts.start_date
-    after_service_days = proposed_service_days if service_days_missing else facts.service_days
-    if after_start_date is None or after_service_days is None or after_service_days <= 0:
-        raise OrderIntakeTermsBootstrapError(
-            "order_intake_terms_bootstrap_current_terms_invalid"
-        )
     changed_fields = tuple(
         field
         for field, changed in (
-            ("start_date", start_missing),
-            ("service_days", service_days_missing),
+            ("start_date", start_changed),
+            ("service_days", service_days_changed),
         )
         if changed
     )
@@ -262,8 +262,8 @@ def preview_case(
         "lifecycle_version": facts.lifecycle_version,
         "before_start_date": _iso(facts.start_date),
         "before_service_days": facts.service_days,
-        "after_start_date": after_start_date.isoformat(),
-        "after_service_days": after_service_days,
+        "after_start_date": proposed_start_date.isoformat(),
+        "after_service_days": proposed_service_days,
         "actual_start_date": _iso(facts.actual_start_date),
         "service_data_locked": facts.service_data_locked,
         "client_finance_present": facts.client_finance_present,
@@ -278,8 +278,8 @@ def preview_case(
         lifecycle_version=facts.lifecycle_version,
         before_start_date=facts.start_date,
         before_service_days=facts.service_days,
-        after_start_date=after_start_date,
-        after_service_days=after_service_days,
+        after_start_date=proposed_start_date,
+        after_service_days=proposed_service_days,
         changed_fields=changed_fields,
         blockers=blockers,
         apply_allowed=not blockers,
@@ -339,13 +339,13 @@ def apply_case(
             blockers=current.blockers,
         )
 
-    new_version = repository.update_missing_terms(
+    new_version = repository.update_early_terms(
         current.case_no,
         current.lifecycle_version,
         current.after_start_date,
         current.after_service_days,
-        fill_start_date="start_date" in current.changed_fields,
-        fill_service_days="service_days" in current.changed_fields,
+        update_start_date="start_date" in current.changed_fields,
+        update_service_days="service_days" in current.changed_fields,
     )
     readback = repository.load_case(current.case_no, for_update=True)
     if (
@@ -353,7 +353,7 @@ def apply_case(
         or readback.lifecycle_version != new_version
         or readback.start_date != current.after_start_date
         or readback.service_days != current.after_service_days
-        or readback.status is not OrderLifecycleStatus.PENDING_COMPLETION
+        or readback.status not in _EARLY_TERMS_STATUSES
     ):
         raise OrderIntakeTermsBootstrapError(
             "order_intake_terms_bootstrap_readback_failed"
@@ -417,6 +417,8 @@ def preview_completion_case(
         lifecycle_version=facts.lifecycle_version,
         current_status=facts.status,
         target_status=OrderLifecycleStatus.DISCUSSION,
+        current_start_date=facts.start_date,
+        current_service_days=facts.service_days,
         missing_fields=missing_fields,
         blockers=blockers,
         apply_allowed=not missing_fields and not blockers,
@@ -514,11 +516,11 @@ def _blockers(
     proposed_start_date: date,
     proposed_service_days: int,
     *,
-    start_missing: bool,
-    service_days_missing: bool,
+    start_changed: bool,
+    service_days_changed: bool,
 ) -> tuple[str, ...]:
     blockers: list[str] = []
-    if facts.status is not OrderLifecycleStatus.PENDING_COMPLETION:
+    if facts.status not in _EARLY_TERMS_STATUSES:
         blockers.append("order_intake_terms_bootstrap_status_not_eligible")
     if facts.actual_start_date is not None:
         blockers.append("order_intake_terms_bootstrap_actual_start_exists")
@@ -532,12 +534,8 @@ def _blockers(
         blockers.append("order_intake_terms_bootstrap_scheduling_not_pristine")
     if facts.service_days is not None and facts.service_days < 0:
         blockers.append("order_intake_terms_bootstrap_current_service_days_invalid")
-    if not start_missing and facts.start_date != proposed_start_date:
-        blockers.append("order_intake_terms_bootstrap_start_date_already_set")
-    if not service_days_missing and facts.service_days != proposed_service_days:
-        blockers.append("order_intake_terms_bootstrap_service_days_already_set")
-    if not start_missing and not service_days_missing:
-        blockers.append("order_intake_terms_bootstrap_nothing_missing")
+    if not start_changed and not service_days_changed:
+        blockers.append("order_intake_terms_bootstrap_nothing_changed")
     return tuple(sorted(set(blockers)))
 
 
