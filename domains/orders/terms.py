@@ -149,9 +149,7 @@ def validate_terms_change(
     if current.service_data_locked:
         raise ValueError("service_data_locked")
     if (
-        not proposed_terms.service_time.complete
-        and not is_unique_cooking_requirement_correction(
-            current.terms, proposed_terms
-        )
+        proposed_terms.service_time != current.terms.service_time
+        and not proposed_terms.service_time.complete
     ):
         raise ValueError("service_time_terms_incomplete")

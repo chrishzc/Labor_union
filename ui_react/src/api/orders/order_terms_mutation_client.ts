@@ -32,11 +32,7 @@ export const OrderTermsInputSchema = z.strictObject({
   service_hours_per_day: z.number().positive().max(24).multipleOf(0.5),
   requires_cooking: z.boolean().nullable(),
   floor_fee_ntd: z.number().int().nonnegative(),
-  service_time: z.strictObject({
-    start_time: TimeSchema,
-    end_time: TimeSchema,
-    end_day_offset: z.number().int().min(0).max(1),
-  }),
+  service_time: NullableServiceTimeSchema,
 });
 
 export const OrderTermsViewSchema = z.strictObject({
