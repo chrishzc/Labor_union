@@ -9,7 +9,7 @@ const schema = z.strictObject({
   assignment_id: z.number().int().positive(),
   fields: z.array(z.strictObject({
     field_id: z.string(), label: z.string(), owner: z.string(), source: z.string().nullable(),
-    requiredness: z.string(), status: z.string(), value: z.union([z.string(), z.number(), z.null()]),
+    requiredness: z.string(), status: z.string(), value: z.union([z.string(), z.number(), z.boolean(), z.null()]),
   })),
   owner_fingerprints: z.record(z.string(), z.string()),
   blockers: z.array(z.string()), warnings: z.array(z.string()), preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/),

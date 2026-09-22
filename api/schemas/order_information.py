@@ -16,7 +16,7 @@ class OrderInformationFieldView(BaseModel):
     source: str | None
     requiredness: str
     status: str
-    value: str | int | float | Decimal | date | datetime | None
+    value: str | int | float | bool | Decimal | date | datetime | None
 
 
 class OrderInformationView(BaseModel):

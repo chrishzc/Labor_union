@@ -110,11 +110,27 @@
 .order-information-paper dt { font-size: .78rem; color: #887461; }
 .order-information-paper dd { margin: 7px 0 0; font-size: .87rem; overflow-wrap: anywhere; }
 .order-information-paper dd.is-missing { color: #a08d7d; font-size: .78rem; }
-.order-information-ingredients { margin-top: 24px; }
-.order-information-ingredients p, .order-information-ingredients span { font-size: .8rem; color: #8a7767; }
-.order-information-ingredients > div { display: grid; gap: 10px; }
+.order-information-contract-shot { margin: 0; border: 1px solid #cfc4b9; background: #fffdf9; box-shadow: 0 8px 24px rgba(77,55,38,.08); }
+.order-information-contract-shot figcaption { padding: 9px 14px; background: #f4eee7; color: #765b45; font-size: .76rem; font-weight: 700; letter-spacing: .08em; }
+.order-information-contract-shot__title { padding: 18px 14px 12px; text-align: center; font-weight: 700; letter-spacing: .06em; border-bottom: 2px solid #4f463f; }
+.order-information-contract-shot > section > h4 { margin: 0; padding: 10px 14px; border-top: 1px solid #d7c4b4; border-bottom: 1px solid #e9ddd3; background: #f8f1eb; color: #6f4327; font-size: .9rem; }
+.order-information-contract-shot dl { grid-template-columns: repeat(2,minmax(0,1fr)); padding: 8px 14px 16px; }
+.order-information-contract-shot dl > div { display: grid; grid-template-columns: minmax(7rem,.8fr) minmax(0,1.4fr); align-items: baseline; gap: 12px; border-bottom-color: #d9d0c7; }
+.order-information-contract-shot dt { color: #4f463f; font-weight: 600; }
+.order-information-contract-shot dd { margin-top: 0; }
+.order-information-two-sections { display: grid; gap: 18px; }
+.order-information-two-sections > section { border: 1px solid #e4d9ce; border-radius: 8px; overflow: hidden; }
+.order-information-two-sections h4 { margin: 0; padding: 11px 14px; background: #f7f1eb; color: #6f523d; font-size: .9rem; }
+.order-information-two-sections dl { padding: 0 12px 8px; }
+.order-information-ingredients { margin-top: 20px; padding: 16px; border-radius: 8px; background: #faf7f2; }
+.order-information-ingredients h4 { margin: 0; color: #6f523d; }
+.order-information-ingredients p, .order-information-ingredients span { font-size: .8rem; color: #6f6258; }
+.order-information-ingredients > div { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; }
+.order-information-ingredients span { display: grid; align-content: start; gap: 6px; padding: 12px; border: 1px solid #e5dbd0; border-radius: 6px; background: #fff; line-height: 1.6; }
+.order-information-ingredients span strong { color: #4f463f; }
 @media (max-width: 640px) {
-  .order-case-document-grid, .order-candidate-delivery, .order-information-choice, .order-information-paper dl { grid-template-columns: 1fr; }
+  .order-case-document-grid, .order-candidate-delivery, .order-information-choice, .order-information-paper dl, .order-information-contract-shot dl, .order-information-ingredients > div { grid-template-columns: 1fr; }
+  .order-information-contract-shot dl > div { grid-template-columns: 1fr; gap: 4px; }
   .order-candidate-list-heading { flex-direction: column; gap: 8px; }
   .order-information-paper { padding: 16px; }
   .order-case-page .order-v2-drawer-current-task { padding: 16px; }

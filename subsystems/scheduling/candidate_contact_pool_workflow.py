@@ -919,7 +919,7 @@ def _send_information_in_transaction(
         message = candidate_contact_information_card(
             case_no,
             info_type,
-            preview.text,
+            tuple((section.title, section.rows) for section in preview.line_sections),
             hashlib.sha256(event_key.encode("utf-8")).hexdigest(),
             _candidate_contact_liff_url(
                 hashlib.sha256(event_key.encode("utf-8")).hexdigest()

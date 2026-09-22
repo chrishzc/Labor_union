@@ -25,32 +25,31 @@ def caregiver_information_card(
 def candidate_contact_information_card(
     case_no: str,
     info_type: int,
-    information_text: str,
+    information_sections: Sequence[tuple[str, Sequence[tuple[str, str]]]],
     interaction_reference: str,
     response_url: str,
 ) -> str:
-    """Render the candidate-pool information projection with bound reply actions."""
+    """Render redacted candidate information as readable table sections."""
     if not isinstance(case_no, str) or not case_no.strip():
         raise ValueError("candidate order number is required")
     if info_type not in {1, 2}:
         raise ValueError("candidate information type is invalid")
-    if not isinstance(information_text, str) or not information_text.strip():
-        raise ValueError("candidate information text is required")
+    if not information_sections:
+        raise ValueError("candidate information sections are required")
     if not isinstance(interaction_reference, str) or not interaction_reference.strip():
         raise ValueError("candidate interaction reference is required")
     if not isinstance(response_url, str) or not response_url.startswith("https://"):
         raise ValueError("candidate response URL must use HTTPS")
     title = f"訂單編號：{case_no.strip()}"
-    body = [
-        _title(title),
-        {
-            "type": "text",
-            "text": information_text.strip(),
-            "size": "sm",
-            "wrap": True,
-        },
-        _notice("請確認檔期與條件後回覆是否願意承接。"),
-    ]
+    body = [_title(title)]
+    body.extend(_information_table_section(section_title, rows) for section_title, rows in information_sections)
+    if info_type == 2:
+        body.append(_information_table_section("食材準備參考", (
+            ("中藥／食材", "四物、四君、四神、枸杞、紅棗、黃耆、杜仲、大豐草、黑豆、紅豆、白木耳、紫米、桂圓肉、米酒、麻油"),
+            ("肉品", "雞腿、雞胸、排骨、豬／牛肉絲、絞肉、雞蛋、魚排"),
+            ("蔬菜", "青菜、紅蘿蔔、薑、香菇、其他菇類、豆製品"),
+        )))
+    body.append(_notice("請確認檔期與條件後回覆是否願意承接。"))
     actions = [
         _candidate_contact_button("願意承接", interaction_reference, "willing", "#06C755"),
         _candidate_contact_liff_button(
@@ -58,6 +57,32 @@ def candidate_contact_information_card(
         ),
     ]
     return canonical_line_payload_json(_bubble_payload(title, body, actions))
+
+
+def _information_table_section(title: str, rows: Sequence[tuple[str, str]]) -> dict[str, object]:
+    if not isinstance(title, str) or not title.strip() or not rows:
+        raise ValueError("candidate information table section is invalid")
+    contents: list[dict[str, object]] = [{
+        "type": "text", "text": title.strip(), "weight": "bold", "size": "md",
+        "color": "#7A4E2D", "wrap": True,
+    }]
+    for index, row in enumerate(rows):
+        if not isinstance(row, tuple) or len(row) != 2:
+            raise ValueError("candidate information table row is invalid")
+        label, value = row
+        if index:
+            contents.append({"type": "separator", "margin": "sm", "color": "#E5E7EB"})
+        contents.append({
+            "type": "box", "layout": "vertical", "spacing": "xs", "margin": "sm",
+            "contents": [
+                {"type": "text", "text": str(label), "size": "xs", "color": "#6B7280", "wrap": True},
+                {"type": "text", "text": str(value), "size": "sm", "color": "#222222", "wrap": True},
+            ],
+        })
+    return {
+        "type": "box", "layout": "vertical", "spacing": "xs", "margin": "lg",
+        "contents": contents,
+    }
 
 
 def customer_profiles_card(

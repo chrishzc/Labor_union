@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from api.schemas.candidate_contact_pool import CandidateInformationPreviewView
 from subsystems.scheduling import candidate_contact_pool_workflow as workflow
 
 
@@ -21,6 +22,29 @@ class Cursor:
             self.writes.append((sql, args))
     def fetchone(self):
         return next(self.reads)
+
+
+def test_preview_schema_exposes_the_same_ordered_sections_used_for_line_delivery():
+    preview = SimpleNamespace(
+        case_no="CASE-1",
+        candidate_id=3,
+        info_type=1,
+        staff_name="測試月嫂",
+        text="訂單資訊－1",
+        line_sections=(SimpleNamespace(
+            title="契約重點",
+            rows=(("預計服務開始日", "2026-10-01"), ("每日服務時數", "8")),
+        ),),
+        preview_fingerprint="a" * 64,
+    )
+
+    view = CandidateInformationPreviewView.model_validate(preview)
+
+    assert view.line_sections[0].title == "契約重點"
+    assert view.line_sections[0].rows == [
+        ("預計服務開始日", "2026-10-01"),
+        ("每日服務時數", "8"),
+    ]
 
 
 def test_manual_willingness_cancellation_compares_numeric_identity_without_collation():
@@ -40,7 +64,11 @@ def test_manual_willingness_cancellation_compares_numeric_identity_without_colla
 
 @pytest.mark.parametrize("kind", [1, 2])
 def test_sender_enqueues_exact_preview_and_no_provider(monkeypatch, kind):
-    preview = SimpleNamespace(text=f"訂單資訊－{kind}\n總薪資：待確認", preview_fingerprint="a" * 64)
+    preview = SimpleNamespace(
+        text=f"訂單資訊－{kind}\n總薪資：待確認",
+        line_sections=(SimpleNamespace(title="契約重點" if kind == 1 else "飲食與照護需求", rows=(("總薪資", "待確認"),)),),
+        preview_fingerprint="a" * 64,
+    )
     queued = []
     monkeypatch.setattr(workflow, "_require_full_coverage", lambda *args: {})
     monkeypatch.setenv("LINE_LIFF_ID", "1234567890-candidate")
@@ -54,7 +82,12 @@ def test_sender_enqueues_exact_preview_and_no_provider(monkeypatch, kind):
     payload = json.loads(queued[0].payload_json)
     assert queued[0].message_kind.value == "flex"
     assert payload["type"] == "flex"
-    assert payload["contents"]["body"]["contents"][1]["text"] == preview.text
+    table = payload["contents"]["body"]["contents"][1]
+    assert table["layout"] == "vertical"
+    assert table["contents"][0]["text"] == ("契約重點" if kind == 1 else "飲食與照護需求")
+    assert table["contents"][1]["contents"][0]["text"] == "總薪資"
+    assert table["contents"][1]["contents"][1]["text"] == "待確認"
+    assert preview.text not in queued[0].payload_json
     assert payload["contents"]["body"]["contents"][0]["text"] == "訂單編號：CASE-1"
     assert payload["altText"] == "訂單編號：CASE-1"
     actions = payload["contents"]["footer"]["contents"]
@@ -121,6 +154,7 @@ def test_recontact_refreshes_candidate_period_from_current_order_before_queue(mo
     preview_periods = []
     preview = SimpleNamespace(
         text="訂單資訊－1\n預計服務開始日期：2026-10-04",
+        line_sections=(SimpleNamespace(title="契約重點", rows=(("預計服務開始日", "2026-10-04"),)),),
         preview_fingerprint="a" * 64,
     )
     monkeypatch.setattr(

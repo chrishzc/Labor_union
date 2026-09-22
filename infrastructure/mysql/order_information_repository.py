@@ -15,6 +15,9 @@ from infrastructure.mysql.order_terms_read_model import load_preview_facts
 from infrastructure.mysql.effective_case_service_rate import (
     load_explicit_case_service_rate,
 )
+from infrastructure.mysql.contract_full_preview_repository import (
+    MySqlFullContractProjectionRepository,
+)
 from shared_kernel.money import MoneyNTD
 from subsystems.orders.order_information import (
     OrderInformationOwnerSnapshot,
@@ -50,6 +53,7 @@ class MySqlOrderInformationRepository:
         if selected is None:
             return None
         facts, field_issues = _facts(case, selected)
+        _merge_contract_payment_facts(self._connection, case_no, facts)
         owners = {
             "orders": projection_fingerprint(
                 {key: facts.get(key) for key in _ORDER_FACT_KEYS}
@@ -119,6 +123,7 @@ class MySqlOrderInformationRepository:
                 "assigned_end_date": end_date,
             }
         facts, issues = _facts(case, candidate)
+        _merge_contract_payment_facts(self._connection, case_no, facts)
         return build_candidate_information(case_no, candidate_id, info_type, facts, issues, candidate.get("line_user_id"))
 
     def preview_matching_plan_information(
@@ -370,6 +375,39 @@ def _load_typed_payroll_facts(
         )
     except Exception:
         # A missing bootstrap is an owner-source blocker, never a raw fallback.
+        return
+
+
+def _merge_contract_payment_facts(
+    connection: Any,
+    case_no: str,
+    facts: dict[str, object],
+) -> None:
+    """Reuse the client-contract projection for the information-1 payment block."""
+    try:
+        projection = MySqlFullContractProjectionRepository(
+            connection
+        ).load_client_projection(case_no)
+        if projection is None:
+            return
+        for key in (
+            "deposit_amount",
+            "deposit_due_date",
+            "first_payment_amount",
+            "first_payment_due_date",
+            "second_payment_amount",
+            "second_payment_due_date",
+            "floor_fee",
+            "total_employer_self_pay_payable",
+        ):
+            facts[key] = projection.facts.get(key)
+        facts["floor_fee_due_date"] = (
+            projection.facts.get("deposit_due_date")
+            if Decimal(str(projection.facts.get("floor_fee") or 0)) > 0
+            else None
+        )
+    except Exception:
+        # Missing contract/bootstrap data remains a field-local preview gap.
         return
 
 

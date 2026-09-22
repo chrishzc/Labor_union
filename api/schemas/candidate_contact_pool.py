@@ -38,6 +38,13 @@ class SendCandidateInformationRequest(_EventIdentity):
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+class CandidateInformationSectionView(BaseModel):
+    model_config = ConfigDict(extra="forbid", from_attributes=True)
+
+    title: str = Field(min_length=1, max_length=50)
+    rows: list[tuple[str, str]] = Field(min_length=1, max_length=30)
+
+
 class CandidateInformationPreviewView(BaseModel):
     model_config = ConfigDict(extra="forbid", from_attributes=True)
     case_no: str
@@ -45,6 +52,7 @@ class CandidateInformationPreviewView(BaseModel):
     info_type: Literal[1, 2]
     staff_name: str
     text: str
+    line_sections: list[CandidateInformationSectionView] = Field(min_length=1, max_length=4)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 

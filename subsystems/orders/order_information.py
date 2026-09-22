@@ -174,12 +174,19 @@ class OrderInformationQueryService:
 
 
 @dataclass(frozen=True, slots=True)
+class CandidateInformationSection:
+    title: str
+    rows: tuple[tuple[str, str], ...]
+
+
+@dataclass(frozen=True, slots=True)
 class CandidateInformationPreview:
     case_no: str
     candidate_id: int
     info_type: int
     staff_name: str
     text: str
+    line_sections: tuple[CandidateInformationSection, ...]
     preview_fingerprint: str
 
 
@@ -195,9 +202,89 @@ def build_candidate_information(case_no, candidate_id, info_type, facts, field_i
     )
     if "order_information_template_invalid" in blockers:
         raise ValueError("order_information_template_invalid")
+    line_sections = _candidate_line_sections(info_type, facts, field_issues)
     fingerprint = projection_fingerprint({"case_no": case_no, "candidate_id": candidate_id,
-                                          "info_type": info_type, "text": text, "recipient": recipient_identity})
-    return CandidateInformationPreview(case_no, candidate_id, info_type, str(facts["staff_name"]), text, fingerprint)
+                                          "info_type": info_type, "text": text,
+                                          "line_sections": [
+                                              {"title": section.title, "rows": section.rows}
+                                              for section in line_sections
+                                          ], "recipient": recipient_identity})
+    return CandidateInformationPreview(
+        case_no, candidate_id, info_type, str(facts["staff_name"]), text,
+        line_sections, fingerprint,
+    )
+
+
+def _candidate_line_sections(
+    info_type: int,
+    facts: Mapping[str, object],
+    field_issues: Mapping[str, str],
+) -> tuple[CandidateInformationSection, ...]:
+    template = OrderInformationTemplate.INFO_01 if info_type == 1 else OrderInformationTemplate.INFO_02
+    fields, blockers, _warnings = _project_fields(template, facts, field_issues)
+    if blockers:
+        raise ValueError(blockers[0])
+    # Candidate LINE cards are deliberately redacted. The admin preview retains
+    # the complete projection, while provider-bound content excludes direct PII.
+    excluded = {
+        "f_101_c1", "f_102_c2", "f_103_c3", "f_108_c8",
+        "f_201_e1", "f_202_e2", "f_203_e3", "f_205_e5",
+    }
+    info_two_diet = {
+        "f_206_e6", "f_207_e7", "f_208_e8", "f_209_e9", "f_210_ea",
+        "f_211_eb", "f_212_ec",
+    }
+    info_one_payments = {
+        "f_112_cc", "f_113_cd", "f_116_cg", "f_117_ch", "f_118_ci",
+        "f_119_cj", "f_120_ck", "f_121_cl", "f_122_cm",
+    }
+    info_one_other = {"f_114_ce", "f_115_cf"}
+    grouped: dict[str, list[tuple[str, str]]] = {}
+    labels = {
+        "f_104_c4": "預計服務開始日", "f_105_c5": "預計服務結束日",
+        "f_106_c6": "每日服務時數", "f_107_c7": "希望服務天數",
+        "f_109_c9": "下廚需求", "f_114_ce": "特殊休假日",
+        "f_115_cf": "注意事項",
+        "f_112_cc": "訂金金額", "f_113_cd": "預計訂金繳款日",
+        "f_116_cg": "第一期金額", "f_117_ch": "預計第一期繳款日",
+        "f_118_ci": "第二期金額", "f_119_cj": "預計第二期繳款日",
+        "f_120_ck": "樓層費", "f_121_cl": "樓層費預計繳款日",
+        "f_122_cm": "客戶應付總額",
+    }
+    for item in fields:
+        if item.field_id in excluded:
+            continue
+        section = (
+            (
+                "客戶付款約定" if item.field_id in info_one_payments
+                else "其他約定" if item.field_id in info_one_other
+                else "服務約定"
+            )
+            if info_type == 1
+            else "飲食與照護需求" if item.field_id in info_two_diet else "服務環境與費用約定"
+        )
+        grouped.setdefault(section, []).append(
+            (labels.get(item.field_id, item.label.rstrip("：")), _candidate_field_value(item))
+        )
+    return tuple(
+        CandidateInformationSection(title, tuple(rows))
+        for title, rows in grouped.items()
+        if rows
+    )
+
+
+def _candidate_field_value(item: OrderInformationFieldView) -> str:
+    if item.status == "absent":
+        return "不適用" if item.requiredness == "conditional" else "待確認"
+    if item.status in {"missing", "unresolved"} or _is_missing(item.value):
+        return "待確認"
+    if item.field_id == "f_109_c9" and isinstance(item.value, bool):
+        return "需要下廚" if item.value else "不需要下廚"
+    if item.field_id in {
+        "f_112_cc", "f_116_cg", "f_118_ci", "f_120_ck", "f_122_cm"
+    } and isinstance(item.value, (int, float, Decimal)) and not isinstance(item.value, bool):
+        return f"NT$ {int(item.value):,}"
+    return str(_fingerprint_value(item.value))
 
 
 def build_order_information_message(
@@ -218,13 +305,7 @@ def build_order_information_message(
     lines = [f"訂單資訊－{info_type}", introduction]
     labels = {"f_104_c4": "預計服務開始日期", "f_105_c5": "預計服務結束日期", "f_106_c6": "每日服務時數"}
     for item in fields:
-        if item.status in {"missing", "unresolved", "absent"} or _is_missing(item.value):
-            value = "待確認"
-        elif item.field_id == "f_109_c9" and isinstance(item.value, bool):
-            value = "需要下廚" if item.value else "不需要下廚"
-        else:
-            value = str(_fingerprint_value(item.value))
-        lines.append(f"{labels.get(item.field_id, item.label)}：{value}")
+        lines.append(f"{labels.get(item.field_id, item.label)}：{_candidate_field_value(item)}")
     if info_type == 2:
         lines.extend(("食材準備參考（請另確認需求，非全部必購）：",
                       "中藥／食材：四物、四君、四神、枸杞、紅棗、黃耆、杜仲、大豐草、黑豆、紅豆、白木耳、紫米、桂圓肉、米酒、麻油",
@@ -327,6 +408,7 @@ def projection_fingerprint(values: Mapping[str, object]) -> str:
 
 
 __all__ = [
+    "CandidateInformationSection",
     "OrderInformationError",
     "OrderInformationFieldView",
     "OrderInformationOwnerSnapshot",

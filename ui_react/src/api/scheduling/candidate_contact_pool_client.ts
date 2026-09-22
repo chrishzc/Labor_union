@@ -131,7 +131,11 @@ const mutationEnvelope = <TSchema extends z.ZodTypeAny>(schema: TSchema) => z.st
 export type CandidateContactPool = z.infer<typeof CandidateContactPoolSchema>;
 const InformationPreviewSchema = z.strictObject({
   case_no: z.string().min(1), candidate_id: z.number().int().positive(), info_type: z.union([z.literal(1), z.literal(2)]),
-  staff_name: z.string().min(1), text: z.string().min(1), preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+  staff_name: z.string().min(1), text: z.string().min(1),
+  line_sections: z.array(z.strictObject({
+    title: z.string().min(1), rows: z.array(z.tuple([z.string().min(1), z.string().min(1)])).min(1),
+  })).min(1),
+  preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
 });
 export type CandidateInformationPreview = z.infer<typeof InformationPreviewSchema>;
 const WeeklyServicePreviewSchema = z.strictObject({

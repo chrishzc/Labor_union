@@ -18,19 +18,46 @@ from subsystems.orders.order_information import (
 def test_candidate_information_works_without_assignment_or_beclass_and_binds_content():
     facts = {"case_no": "INQUIRY-1", "staff_name": "測試月嫂", "assigned_start_date": date(2026, 10, 1),
              "assigned_end_date": date(2026, 10, 5), "service_hours_per_day": 8,
-             "requires_cooking": False, "service_time": "09:00–17:00", "total_salary": None}
+             "requires_cooking": False, "service_time": "09:00–17:00", "total_salary": None,
+             "deposit_amount": 12000, "deposit_due_date": date(2026, 9, 20),
+             "first_payment_amount": 36000, "first_payment_due_date": date(2026, 10, 1),
+             "second_payment_amount": 0, "second_payment_due_date": None,
+             "floor_fee": 0, "floor_fee_due_date": None,
+             "total_employer_self_pay_payable": 48000}
     first = build_candidate_information("INQUIRY-1", 9, 1, facts, {}, "recipient-a")
     second = build_candidate_information("INQUIRY-1", 9, 2, facts, {}, "recipient-a")
     assert "預計服務開始日期：2026-10-01" in first.text
-    assert "總薪資：待確認" in first.text
+    assert "總薪資" not in first.text
+    assert "預計發薪日" not in first.text
     assert "每日服務時數：8" in first.text
     assert "服務是否需要下廚：不需要下廚" in first.text
-    assert "樓層費" not in first.text
+    assert "樓層費：NT$ 0" in first.text
     assert "食材準備參考" in second.text
+    sections = {section.title: dict(section.rows) for section in first.line_sections}
+    first_rows = sections["服務約定"]
+    assert [label for label, _ in first.line_sections[0].rows[:8]] == [
+        "預計服務開始日",
+        "預計服務結束日",
+        "每日服務時段",
+        "每日服務時數",
+        "服務方式",
+        "希望服務天數",
+        "下廚需求",
+        "寶寶資訊",
+    ]
+    assert first_rows["每日服務時數"] == "8"
+    assert first_rows["下廚需求"] == "不需要下廚"
+    assert sections["客戶付款約定"]["訂金金額"] == "NT$ 12,000"
+    assert sections["客戶付款約定"]["預計訂金繳款日"] == "2026-09-20"
+    assert sections["客戶付款約定"]["第一期金額"] == "NT$ 36,000"
+    assert sections["客戶付款約定"]["預計第一期繳款日"] == "2026-10-01"
+    assert sections["客戶付款約定"]["第二期金額"] == "NT$ 0"
+    assert sections["客戶付款約定"]["預計第二期繳款日"] == "不適用"
+    assert all(label not in {"客戶名稱", "聯絡電話", "服務地址"} for section in second.line_sections for label, _ in section.rows)
     assert first.preview_fingerprint != second.preview_fingerprint
     assert first.preview_fingerprint != build_candidate_information("INQUIRY-1", 10, 1, facts, {}, "recipient-a").preview_fingerprint
     assert first.preview_fingerprint != build_candidate_information("INQUIRY-1", 9, 1, facts, {}, "recipient-b").preview_fingerprint
-    assert first.preview_fingerprint != build_candidate_information("INQUIRY-1", 9, 1, {**facts, "total_salary": 48000}, {}, "recipient-a").preview_fingerprint
+    assert first.preview_fingerprint == build_candidate_information("INQUIRY-1", 9, 1, {**facts, "total_salary": 48000}, {}, "recipient-a").preview_fingerprint
 from infrastructure.mysql.order_information_repository import (
     MySqlOrderInformationRepository,
 )
@@ -103,8 +130,8 @@ def test_info_01_uses_exact_typed_owner_values_and_no_legacy_execution_dates():
     values = {field.field_id: field.value for field in result.fields}
     assert values["f_104_c4"] == date(2026, 9, 1)
     assert values["f_105_c5"] == date(2026, 9, 20)
-    assert values["f_110_ca"] == 48000
-    assert values["f_111_cb"] == date(2026, 10, 5)
+    assert "f_110_ca" not in values
+    assert "f_111_cb" not in values
     assert values["f_114_ce"] == "2026-09-07、2026-09-14"
     assert repository.calls == [("CASE-1", 7)]
 
@@ -171,11 +198,14 @@ def test_templates_declare_typed_owner_and_requiredness_metadata(template_id):
     )
     if template_id == "tpl_info_01":
         by_id = {field["id"]: field for field in template["fields"]}
-        assert by_id["f_110_ca"]["label"] == "總薪資"
-        assert by_id["f_110_ca"]["db_key"] == "total_salary"
+        assert "f_110_ca" not in by_id
+        assert "f_111_cb" not in by_id
         assert by_id["f_106_c6"]["source"] == "order.service_hours_per_day"
         assert by_id["f_109_c9"]["source"] == "order.requires_cooking"
-        assert "f_112_cc" not in by_id
+        assert by_id["f_112_cc"]["db_key"] == "deposit_amount"
+        assert by_id["f_113_cd"]["db_key"] == "deposit_due_date"
+        assert by_id["f_116_cg"]["db_key"] == "first_payment_amount"
+        assert by_id["f_117_ch"]["db_key"] == "first_payment_due_date"
         assert by_id["f_114_ce"]["source"] == "order.custom_rest_dates"
         assert by_id["f_115_cf"]["label"] == "注意事項備註"
     else:
@@ -230,6 +260,15 @@ class _Cursor:
                     "staff_name": "月嫂甲",
                 }
             ]
+        elif "FROM caregiver_candidate_contact_entries" in statement:
+            self.rows = [
+                {
+                    "staff_name": "月嫂甲",
+                    "line_user_id": "U" + "a" * 32,
+                    "assigned_start_date": date(2026, 9, 1),
+                    "assigned_end_date": date(2026, 9, 20),
+                }
+            ]
         elif "FROM case_staff_assignments" in statement:
             self.rows = [
                 {
@@ -275,14 +314,24 @@ def test_mysql_adapter_projects_case_import_source_before_returning_owner_snapsh
     assert "case_import" in snapshot.owner_fingerprints
 
 
-def test_formal_plan_information_one_uses_labelled_order_estimates_before_payable_exists():
+def test_formal_plan_information_one_excludes_staff_payroll_terms():
     rows = MySqlOrderInformationRepository(_Connection()).preview_matching_plan_information(
         "CASE-1", 51, 1
     )
 
     assert len(rows) == 1
-    assert "總薪資：預估 60000 元" in rows[0]["text"]
-    assert "預計發薪日：預估 2026-10-15" in rows[0]["text"]
+    assert "總薪資" not in rows[0]["text"]
+    assert "預計發薪日" not in rows[0]["text"]
+
+
+def test_candidate_information_one_excludes_staff_payroll_terms():
+    preview = MySqlOrderInformationRepository(_Connection()).preview_candidate_information(
+        "CASE-1", 91, 1
+    )
+
+    assert all(section.title != "月嫂報酬" for section in preview.line_sections)
+    assert "總薪資" not in preview.text
+    assert "預計發薪日" not in preview.text
 
 
 def test_case_import_projection_keeps_missing_and_ambiguous_answers_field_local():
