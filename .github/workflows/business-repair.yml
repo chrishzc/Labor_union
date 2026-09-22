@@ -1,4 +1,4 @@
-name: Final business regression repairs
+name: Business repair MySQL regression
 on:
   push:
     branches: [fix/business-regressions-20260922]
@@ -14,19 +14,17 @@ jobs:
       commit: ${{ steps.publish.outputs.commit }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
-      - name: Publish exact final reviewed edits
+      - name: Publish exact reviewed edits
         id: publish
         run: |
           python - <<'PY'
           import hashlib,json,os,subprocess
           from pathlib import Path
           assert os.environ['GITHUB_REF']=='refs/heads/fix/business-regressions-20260922'
-          records=json.loads(r'''[{"path":"infrastructure/mysql/historical_service_accounting_repository.py","before":"71330b112265026a72124bd54b391b9c5f2fca8c96eb08b7b887d462d86df656","after":"148eb3a32b84a26c51d931f905a5697aa03a35c200e68d8b087e3577840b76c4","edits":[[14176,14279,"# A zero initial obligation still establishes the settled lineage required\n    # by completion readback and by later source-bound day revisions."]]},{"path":"scripts/reconcile_writer_inventory_v3_dispositions.py","before":"b575bd912b144861d2af37f4e5dadd3951a447dba629649f3c61d48716d8400d","after":"cda4f2208219e3394aab7432bc1f83b724e9cc87dba6c965dd0dd8fa956d0a1c","edits":[[70912,70912,"    if path in EXACT_SOURCE_RESTRICTED_REVIEWS or path in EXACT_SOURCE_REVIEWS:\n        # An expired or symbol-mismatched source review cannot inherit a broader\n        # module-level decision. Independent exact decisions were checked above.\n        return _needs_decision_review(path)\n"],[72363,72386,"source = ROOT / path\n    if not source.is_file() or sha256(source"]]},{"path":"subsystems/anomalies/government_return_outbound_overage_anomaly_source.py","before":"3b38bd76d1c007e8f73ffb6bb08733a6d5d510d7dabf69a8c829e35a79bb54e6","after":null,"edits":[]},{"path":"subsystems/anomalies/government_subsidy_anomaly_source.py","before":"48895e4cc008a034091d0086ae72cadb647dd46fd372be01e31568358b12b762","after":null,"edits":[]},{"path":"subsystems/anomalies/government_subsidy_integrity_anomaly_source.py","before":"2b8ea218aff587407d787176139b20e885a41cbac1e032e67a35eb8ba5e3a04d","after":null,"edits":[]},{"path":"subsystems/anomalies/government_subsidy_reversal_anomaly_source.py","before":"28bad07fb32c96a8a97c4fda51f0e4a177af5719ce3cbd75c1aacc1b02650734","after":null,"edits":[]},{"path":"subsystems/anomalies/process_reminder_anomaly_source.py","before":"7d94339914ac2f6fe05cdbdbd32a4224dcce917997228352a718029bf12c9fb2","after":null,"edits":[]},{"path":"subsystems/anomalies/staff_payables_anomaly_source.py","before":"c61e7c09c02c20d532aa5f678992c5c78d513228b353026e59180fcfadda2587","after":null,"edits":[]},{"path":"subsystems/validation_dataset/inspection.py","before":"19c27cf6b9508105275de839adbef277df479c75fa0cb3222e68344d1a09ddc5","after":null,"edits":[]},{"path":"tests/domains/clients/subsystems/client-profile/modules/profile-change/test_registry_accounting_dates.py","before":"c6fb525a2b315767779bbc8b7b17ca6c43ad2584b7c95549af77e379e21dd690","after":"b32e3607194a03cf55971111e1bf120a346e381c83cc434965938a4ee8d8ee6d","edits":[[6888,6889,"4\n    assert sum(\"FROM client_legacy_virtual_accounts\" in sql for sql, _ in connection.statements) == 1"]]},{"path":"tests/test_finance_import_staging_persistent_mysql_e2e.py","before":"fe91c6980c435ba29850d0f1dcec919621db616cb31bc2d8f04a2012ad8f00aa","after":"68a399c2a71cffd89b26939b44a2168e4e98faa4dfd237e43af113e53e6cf83e","edits":[[7714,7714,"        manifest_response = client.get(\n            f\"/api/v1/finance-import/batches/{intake['batch_identity']}/manifest\",\n        )\n        review_response = client.get(\n            f\"/api/v1/finance-import/batches/{intake['batch_identity']}/review-rows?limit=50\",\n        )\n        assert manifest_response.status_code == review_response.status_code == 200\n"],[9130,9130,"        \"manifest_response\": manifest_response.json(), \"review_response\": review_response.json(),\n"],[9936,9936,"default\", \"--reporter="]]},{"path":"tests/test_line_service_help.py","before":"cc987051d85320f13275f450f5db05df2fc1c0dc492c7cc030dc40f97b13d2aa","after":"9e102a8b9372607f97a5d2ff5fb20a8228fe8776df6315c395d1b662a1ff291c","edits":[[4540,4590,"detail\"][\"error\"][\"code\"] == \"knowledge_catalog_unavailable\"\n    assert \"data\" not in response.json()"]]},{"path":"tests/test_writer_inventory_v3_dispositions.py","before":"3ecea9206a24765f6cc685423c3c341f7ede7b63abea18ad39749d20f49ef149","after":"198ee500a89a51b55995823b3ec03390da8356c2c8cc21b5d405b56fa5bc1048","edits":[[276,276,"    _disposition,\n    _review,\n"],[2802,2802,"    candidates = {record[\"identity\"]: record for record in _records(\"writer_inventory_v3_candidate.findings.jsonl\")}\n    # Historical receipts remain immutable; current eligibility is recomputed\n    # by the review resolver against current source, not accepted from snapshots.\n"],[2923,2923,"historical_"],[3244,3286," = REPOSITORY_ROOT / path\n            source_matches = source.is_file() and sha256(source"],[3405,3405,"                current = _disposition(candidates[identity])\n"],[3596,3602,"current"],[3943,3949,"current"],[4088,4088,"            unknown = {\"relative_path\": path, \"symbol\": \"FutureUnreviewedWriter.mutate\", \"identity\": f\"{path}:FutureUnreviewedWriter.mutate:execute\"}\n            assert _review(unknown)[3].startswith(\"needs_decision:\")\n"]]},{"path":"ui_react/src/tests/domains/external-integration/subsystems/line/integration/line_rules_query_flow.test.tsx","before":"be9e3239852037db9e9d594fb6314e1efb39c07e1a92be2ffa7a0e3c569887fe","after":"e93604a9645a2b31810bc4ae5d6daddc2eca641bd63d5ca18d725878eaadb5df","edits":[[2984,3035,"async (input: RequestInfo | URL, options?: RequestInit) => {\n      expect(String(input)).toBe('/api/v1/line/notification-rules/deposit_notice/message-template');\n      expect(options?.method).toBe('GET');\n      expect(options?.body).toBeUndefined();\n      return new Response(JSON.stringify({ success: true, data: {\n        rule_id: 'deposit_notice', template_id: 'deposit_notice', name: '訂金確認',\n        content: '訂金確認通知', revision: 1, variables: [], sample_preview: '訂金確認通知',\n      } }), { status: 200, headers: { 'Content-Type': 'application/json' } });\n    }"],[3641,3641,"    expect(fetchSpy).not.toHaveBeenCalled();\n"],[4483,4521,"await waitFor(() => expect(fetchSpy).toHaveBeenCalled());\n    expect(fetchSpy.mock.calls.every(([, options]) => options?.method === 'GET')).toBe(true"]]}]''')
+          records=json.loads(r'''[{"path":"infrastructure/mysql/order_cancellation_repository.py","before":"f2818a958d9804c6ea9ecbd2e520e0816cba5263cb59647e955806f947515278","after":"a6ae96cae3ec5990c7711793531186471029481e9676a292f4491e864376fcb0","edits":[[172,172,"from decimal import Decimal\n"],[385,385,"from shared_kernel.validation import require_positive_half_hour\n"],[15669,15676,"service_hours"],[17863,17896,"_required_service_hours(row, \"official_service_hours\""],[18661,18661,"\n\ndef _required_service_hours(payload, key):\n    value = payload[key]\n    if not isinstance(value, bool) and isinstance(value, (int, float, Decimal)) and value == 0:\n        return value\n    try:\n        return require_positive_half_hour(value, key)\n    except ValueError as error:\n        raise ValueError(\"order_cancellation_receipt_integrity_violation\") from error\n"]]},{"path":"tests/domains/client-finance/subsystems/client-finance/modules/legacy-virtual-account-import/test_legacy_virtual_account_disposable_mysql.py","before":"8b2917d8f9545fd14b916f3c07d039e4093e8cf6f20c1ae97d6bd04a6148b08a","after":"910ce534c6bfe3317173db1cf9c9e8d85a77e3f7ed2d543a22b417e743ae525e","edits":[[2424,2424,"            assert resolve_client_virtual_account(cursor, \"99781699114033\") == {\n                \"result\": \"resolved\", \"case_no\": \"114000018\", \"reason\": None,\n            }\n        # A second imported mapping, not a lower-precedence generated account,\n        # makes the owner ambiguous and must stay pending.\n        duplicate = tmp_path / \"duplicate-accounts.xlsx\"\n        pd.DataFrame([[\"99781699114033\", \"114000033\"]], columns=[\"虛擬帳號\", \"市府訂單號碼\"]).to_excel(duplicate, index=False)\n        duplicate_preview = service.preview(str(duplicate))\n        service.apply(str(duplicate), \"legacy-va-e2e-duplicate\", duplicate_preview.preview_fingerprint, \"test\")\n        with connection.cursor() as cursor:\n"]]},{"path":"tests/domains/clients/subsystems/client-profile/modules/profile-change/contract/test_registry_finance_disposable_mysql.py","before":"98f2f25914e539331fb93995061abdd2b2191820983044723b02ba085fb1d9d6","after":"85b0ab59bc56b6ca824e5e556f33c51975f2c6e223474ff6b4007f733ff3e318","edits":[[2190,2192,"訂單"]]},{"path":"tests/domains/external-integration/subsystems/access/integration/test_access_control_disposable_mysql_e2e.py","before":"1e3be24924be710f46c8f9e4dac2cb2f2de4fa7f50bd85edce666bd3558e10ed","after":"a9b582576dc31ba506823538c95e7ff3ffdf1479dea505bc27b649d1e492c010","edits":[[972,1109,""],[1622,1702,", connection_factory=_connection)).data.logged_out\n    assert authentication_session.get_admin_session(root_token, connection_factory=_connectio"],[1833,1833,",\n        connection_factory=_connection,"],[2234,2234," connection_factory=_connection"],[2370,2370,",\n        connection_factory=_connection,"],[2695,2695," connection_factory=_connection"],[2826,2826,",\n        connection_factory=_connection,"],[3372,3372," connection_factory=_connection"],[3716,3716,"        connection_factory=_connection,\n"],[4064,4064,"        connection_factory=_connection,\n"],[4133,4133,", connection_factory=_connection"],[4342,4342,",\n        connection_factory=_connection,"],[5142,5142,"        connection_factory=_connection,\n"],[5421,5421,"        connection_factory=_connection,\n"],[5499,5610,", connection_factory=_connection) is None\n    assert authentication_session.issue_password_login_challenge(child_username, \"Child-password-123\", connection_factory=_connection"],[5848,5848,"        connection_factory=_connection,\n"],[5921,6038,", connection_factory=_connection) is None\n    enrollment = authentication_session.issue_password_login_challenge(child_username, \"Child-password-456\", connection_factory=_connection"],[6379,6379,"            connection_factory=_connection,\n"],[6974,6974,"        connection_factory=_connection,\n"],[7313,7313,",\n            connection_factory=_connection,"],[7559,7559,",\n            connection_factory=_connection,"],[7854,7854,",\n        connection_factory=_connection,"],[8286,8286,", connection_factory=_connection"],[8676,8676,"        connection_factory=_connection,\n"],[9041,9041,", connection_factory=_connection"],[9383,9383,"        connection_factory=_connection,\n"]]},{"path":"tests/domains/orders/subsystems/orders/integration/test_order_cancellation_cross_domain_chain.py","before":"dee7f4d890363ddd400487e952b355af0ae702375bcd5c0535303c03d4009e4b","after":"719b0020170da6a7df9e3a6eaafef8874e84cb7aefc1e87505773a8e33b8161b","edits":[[8271,8271,"\n\n@pytest.mark.parametrize(\"hours\", [0, 0.0, 8, 16.0, 7.5])\ndef test_cancellation_receipt_preserves_exact_numeric_hours(hours):\n    from dataclasses import asdict\n    from decimal import Decimal\n    import json\n    from infrastructure.mysql.order_cancellation_repository import _receipt_payload, _stored_receipt\n\n    repository = _Repository(_facts())\n    workflow = _workflow(repository)\n    preview = workflow.preview(\"CASE-1\", (ConfirmedServiceDay(date(2026, 8, 1), 7),))\n    receipt = replace(workflow.apply(_request(preview)), official_service_hours=hours)\n    row = asdict(receipt)\n    row.update(\n        lifecycle_status=receipt.lifecycle_status.value,\n        preview_fingerprint=receipt.preview_fingerprint.value,\n        command_fingerprint=\"b\" * 64,\n        official_service_hours=Decimal(str(hours)),\n        result_snapshot=json.dumps(_receipt_payload(receipt)),\n    )\n    assert _stored_receipt(row).receipt == receipt\n    row[\"official_service_hours\"] = Decimal(str(hours)) + Decimal(\"0.5\")\n    with pytest.raises(ValueError, match=\"receipt_integrity_violation\"):\n        _stored_receipt(row)\n\n\n@pytest.mark.parametrize(\"hours\", [True, -1, \"8\", 0.25, float(\"nan\"), float(\"inf\")])\ndef test_cancellation_receipt_rejects_invalid_hour_values(hours):\n    from infrastructure.mysql.order_cancellation_repository import _required_service_hours\n\n    with pytest.raises(ValueError, match=\"receipt_integrity_violation\"):\n        _required_service_hours({\"hours\": hours}, \"hours\")\n"]]},{"path":"tests/domains/scheduling/subsystems/scheduling/modules/service-before-replacement/integration/test_service_before_replacement_mysql_adapter.py","before":"582075bfe40aac70800e439789f130fac2c59e4b7957bcd1e0351d2b0ad01178","after":"d76925ce1fd0b95084b095e28fae21c1eea9e6650d5b98f2fd71db5704c5211b","edits":[[2145,2218,"*, for_update: facts,\n            matching_source_loader=lambda _request, *, "]]},{"path":"tests/test_customer_service_partial_recovery_disposable_mysql.py","before":"7bddf635f0eb7d02456562f5c532f86948cc0e928dd3f67baedac00329325a2c","after":"f91c2d9adbc649c307e60b4a4fc96061f0f5f8611f68f97faab19a23fd92503c","edits":[[183,183,"from hashlib import sha256\n"],[697,730,"DatabaseConfig(\n        os.environ[\"DB_HOST\"], int(os.environ[\"DB_PORT\"]),\n        os.environ[\"DB_USER\"], os.environ[\"DB_PASSWORD\"],\n    )"],[798,798,"    monkeypatch.setattr(migration, \"SCHEMA_PARTS\", (PART_185,))\n"],[1279,1279,"    release.manifests = (SimpleNamespace(\n        release_id=release.release_id,\n        fingerprint=release.fingerprint,\n        schema_artifacts=(SimpleNamespace(\n            artifact=SimpleNamespace(\n                name=PART_185.name,\n                relative_path=PART_185.relative_to(ROOT).as_posix(),\n                sha256=sha256(PART_185.read_bytes()).hexdigest(),\n                dependencies=(),\n            ),\n            data_effect=\"schema_only_additive\",\n        ),),\n        backfills=(),\n    ),)\n"]]},{"path":"tests/test_data_browser_query_disposable_mysql_e2e.py","before":"0cc2421f20363bc6bf567c829ebd978bf408e4416a283d8f873b62ba0f49c70b","after":"47823b59b38156be801eec01919c965e6a3cac2f1ac2b3f41a4a514a90a54ce0","edits":[[1939,1939,"    # Arrange synthetic rows before the read-only boundary; a fresh schema has\n    # no cursor and otherwise makes masking assertions vacuous.\n    with connection.cursor() as cursor:\n        for index in range(3):\n            cursor.execute(\"INSERT INTO clients(case_no,name) VALUES (%s,%s)\",\n                           (f\"BROWSER-TEST-{index}\", f\"合成客戶{index}\"))\n            cursor.execute(\"INSERT INTO staff(name) VALUES (%s)\", (f\"合成人員{index}\",))\n    connection.commit()\n"],[3335,3344,"masked"]]},{"path":"tests/test_finance_import_disposable_mysql_e2e.py","before":"461dfbf0b750943ec1da1ab7e7edcfab6417e1343b19bbc3482fc98118cd84ec","after":"36aaaec20c612f9b36e4897b7cb3c11b0db53c49814582c451d4a09be6f1f2cc","edits":[[14309,14361,"stays_out_of_anomaly_center"],[22875,22942,"cursor.fetchall() == []"],[55499,55577,"# Ordinary classification belongs to Finance; it must not create an Anomalies alert.\n        assert cursor.fetchone() is None"],[57715,57767,"stays_out_of_anomaly_center"],[58095,58173,"# Ordinary classification belongs to Finance; it must not create an Anomalies alert.\n            assert cursor.fetchone() is None"]]},{"path":"tests/test_hcm_import_api_disposable_mysql_e2e.py","before":"7fe75dbca9d302c237b19da486ced670f40aafaed9e8c2eb7e3ddbe5605f6f75","after":"4ab99023abb21aeeb5d8a2117146c389a92d5bd07d9ed95c6bd9f21c7efc508c","edits":[[4632,4632,"    from api.dependencies.admin_auth import require_admin\n    from subsystems.access.authentication_session import AdminPrincipal\n    application.dependency_overrides[require_admin] = lambda: AdminPrincipal(\n        1, \"hcm-integration\", \"Test\", \"system_admin\"\n    )\n"]]},{"path":"tests/test_order_auto_completion_disposable_mysql_e2e.py","before":"ba6facd0020d53a9a31928a8a3d6568889401cf2599ef008f67a9c0e693f6460","after":"a29c91227c871b3113e0c7ceceeecca3a93fc7eac456190528e487d93224c647","edits":[[8444,8468,",service_type) VALUES (%s,'G05 Client','連續服務"]]},{"path":"tests/test_wp77_disposable_mysql_e2e.py","before":"7d17a36794fea8b8ae40007ba2db3617299c4f719b8358dcd86090029002bf60","after":"f3ac507dc2ab16a48fa2c7a75c9ec979a8ea729f13ef7002bd6ec332b231f7d0","edits":[[294,294,"from infrastructure.mysql.hcm_import_review_repository import MySqlHcmImportReviewRepository\nfrom infrastructure.mysql.beclass_import_review_repository import MySqlBeClassImportReviewRepository\nfrom infrastructure.mysql.staff_historical_adoption_repository import MySqlStaffHistoricalAdoptionRepository\nfrom infrastructure.mysql.unit_of_work import MySqlUnitOfWork\nfrom api.dependencies.staff_historical_workbook import _record_staff_historical_review\n"],[2126,2126," repository=MySqlStaffHistoricalAdoptionRepository(connection), unit_of_work_factory=lambda: MySqlUnitOfWork(connection), review_recorder=_record_staff_historical_review,"],[2415,2415," repository=MySqlStaffHistoricalAdoptionRepository(connection), unit_of_work_factory=lambda: MySqlUnitOfWork(connection), review_recorder=_record_staff_historical_review,"],[5057,5122,"repository=MySqlHcmImportReviewRepository(connection), unit_of_work_factory=lambda: MySqlUnitOfWork(connection), **arguments)\n        replay = record_hcm_import_review(connection, repository=MySqlHcmImportReviewRepository(connection), unit_of_work_factory=lambda: MySqlUnitOfWork(connection)"],[6125,6125,", runtime=build_anomaly_runtime()"],[6202,6202," repository=MySqlHcmImportReviewRepository(connection), unit_of_work_factory=lambda: MySqlUnitOfWork(connection),"],[6628,6690,", runtime=build_anomaly_runtime())\n        replay = consume_hcm_import_review_events(connection, runtime=build_anomaly_runtime()"],[8367,8367,", runtime=build_anomaly_runtime()"],[8444,8444," repository=MySqlHcmImportReviewRepository(connection), unit_of_work_factory=lambda: MySqlUnitOfWork(connection),"],[8786,8786,", runtime=build_anomaly_runtime()"],[10313,10313,", runtime=build_anomaly_runtime()"],[10390,10390," repository=MySqlHcmImportReviewRepository(connection), unit_of_work_factory=lambda: MySqlUnitOfWork(connection),"],[10744,10744,"runtime=build_anomaly_runtime(), "],[10875,10875,"runtime=build_anomaly_runtime(), "],[11064,11064,"runtime=build_anomaly_runtime(), "],[12561,12561," repository=MySqlBeClassImportReviewRepository(connection),"],[14704,14704," repository=MySqlBeClassImportReviewRepository(connection),"],[16334,16334," repository=MySqlBeClassImportReviewRepository(connection),"],[19295,19295," repository=MySqlStaffHistoricalAdoptionRepository(connection), unit_of_work_factory=lambda: MySqlUnitOfWork(connection), review_recorder=_record_staff_historical_review,"]]},{"path":"tests/test_wp79_line_runtime_recovery_disposable_mysql.py","before":"f551d49346ea66a50839be524c15a46feaef7b6e6655402db1bb64bc1526908d","after":"4c1c65f12b6fef32736d761fc5784b39ca28c4635128008e5546e4a0753d8820","edits":[[175,175,"from hashlib import sha256\n"],[1328,1328,"    release.manifests = (SimpleNamespace(\n        release_id=release.release_id,\n        fingerprint=release.fingerprint,\n        schema_artifacts=(SimpleNamespace(\n            artifact=SimpleNamespace(\n                name=PART_186.name,\n                relative_path=PART_186.relative_to(ROOT).as_posix(),\n                sha256=sha256(PART_186.read_bytes()).hexdigest(),\n                dependencies=(),\n            ),\n            data_effect=\"schema_only_additive\",\n        ),),\n        backfills=(),\n    ),)\n"]]},{"path":"tests/test_wp80_disposable_mysql_e2e.py","before":"1a63d6e9d1ad83834e9f1b67b5ea968722b1efc79684489e1e3dca012865ad72","after":"68fe274f5edea176c171f4feb377540454cdad48c98b7c6a3158d4b30739bd0a","edits":[[3829,3835,"OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED.value"]]},{"path":"ui_react/src/tests/domains/client-finance/subsystems/client-finance/modules/historical-payment-settlement-presentation/finance_query_page.test.tsx","before":"c93fb4722933dca25b04d23ae9fb60080935b5eef30b8ca89d601bc09ace6c54","after":"68bf8033c71c780eafc804dcc021bf54b7430369d4c52d8b1b6207cbca438b12","edits":[[18010,18010,", reviewCount: number"],[18376,18376,"key === 'manual_review' ? reviewCount : "],[19710,19710,", plan.counts.manual_review"],[20439,20439,", plan.counts.manual_review"],[24835,24878,"{ review_count: number } }; review_response: { data: { items: unknown[] }"],[26369,26406,"// The worklist excludes unmatched bank facts; the untouched Preview still\n    // describes every staged row. Read the displayed count from the real query.\n    expect(exchange.review_response.data.items).toHaveLength(exchange.manifest_response.data.review_count);\n    assertPreviewCounts(exchange.expected, exchange.manifest_response.data.review_count"]]}]''')
           for item in records:
               path=Path(item['path']); original=path.read_bytes()
               assert hashlib.sha256(original).hexdigest()==item['before'], str(path)
-              if item['after'] is None:
-                  path.unlink(); continue
               text=original.decode('utf-8')
               for start,end,replacement in reversed(item['edits']): text=text[:start]+replacement+text[end:]
               result=text.encode('utf-8')
@@ -36,7 +34,7 @@ jobs:
           assert set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines())==set(paths)
           subprocess.run(['git','diff','--check'],check=True)
           subprocess.run(['git','add','--',*paths],check=True)
-          subprocess.run(['git','-c','user.name=github-actions[bot]','-c','user.email=41898282+github-actions[bot]@users.noreply.github.com','commit','-m','fix: preserve zero-value accounting lineage and enforce current source review contracts'],check=True)
+          subprocess.run(['git','-c','user.name=github-actions[bot]','-c','user.email=41898282+github-actions[bot]@users.noreply.github.com','commit','-m','fix: preserve cancellation receipt precision and align MySQL regression fixtures'],check=True)
           subprocess.run(['git','push','origin','HEAD:refs/heads/fix/business-regressions-20260922'],check=True)
           sha=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
           with open(os.environ['GITHUB_OUTPUT'],'a') as output: output.write('commit='+sha+'\n')
@@ -48,8 +46,9 @@ jobs:
     timeout-minutes: 20
     strategy:
       fail-fast: false
+      max-parallel: 6
       matrix:
-        mode: [backend, frontend, finance-query, finance-parity, subsidy, order-terms]
+        mode: [backend, frontend, finance-parity, finance, imports, orders, access, legacy, reminder, migrations, replacement, data-browser]
     env:
       PROOF_DIR: /tmp/business-repair
       APP_ENV: development
@@ -62,6 +61,7 @@ jobs:
       ANONYMIZED_TELEMETRY: 'False'
       PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
       CI: 'true'
+      MODE: ${{ matrix.mode }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
@@ -104,9 +104,9 @@ jobs:
           PY
           python -m pip install --disable-pip-version-check --no-input --only-binary=:all: --require-hashes -r /tmp/repair-requirements.txt > "$PROOF_DIR/dependencies.log" 2>&1
       - name: Install locked frontend dependencies without hooks
-        if: matrix.mode == 'frontend' || startsWith(matrix.mode, 'finance-')
+        if: matrix.mode == 'frontend' || matrix.mode == 'finance-parity'
         run: npm --prefix ui_react ci --ignore-scripts --no-audit --fund=false > "$PROOF_DIR/npm-install.log" 2>&1
-      - name: Backend regression suite without external services
+      - name: Full backend without unconfigured external fixtures
         if: matrix.mode == 'backend'
         run: python -m pytest -q --continue-on-collection-errors --tb=short --ignore=tests/test_background_job_repository_mysql.py --ignore=tests/test_durable_job_disposable_mysql_e2e.py --ignore=tests/test_durable_job_payload_equality_disposable_mysql_e2e.py --ignore=tests/domains/orders/subsystems/orders/integration/test_order_terms_empty_service_time_disposable_mysql.py --junitxml="$PROOF_DIR/backend.xml" > "$PROOF_DIR/backend.log" 2>&1
       - name: Full frontend tests
@@ -117,7 +117,7 @@ jobs:
         run: |
           npm --prefix ui_react run build > "$PROOF_DIR/build.log" 2>&1
           npm --prefix ui_react run lint > "$PROOF_DIR/lint.log" 2>&1
-      - name: Start synthetic MySQL and await authenticated host TCP
+      - name: Start synthetic MySQL with verified host TCP readiness
         if: matrix.mode != 'backend' && matrix.mode != 'frontend'
         run: |
           MYSQL_ROOT_PASSWORD=$(openssl rand -hex 16)
@@ -128,8 +128,9 @@ jobs:
           echo 'LABOR_UNION_TEST_MYSQL_HOST=127.0.0.1' >> "$GITHUB_ENV"
           echo 'LABOR_UNION_TEST_MYSQL_PORT=33306' >> "$GITHUB_ENV"
           echo 'LABOR_UNION_TEST_MYSQL_USER=root' >> "$GITHUB_ENV"
-          echo 'LABOR_UNION_TEST_MYSQL_DATABASE=lu_test_business_repair' >> "$GITHUB_ENV"
-          echo 'DB_DATABASE=lu_test_business_repair' >> "$GITHUB_ENV"
+          echo 'LABOR_UNION_TEST_MYSQL_DATABASE=lu_test_repair' >> "$GITHUB_ENV"
+          echo 'DB_DATABASE=lu_test_repair' >> "$GITHUB_ENV"
+          echo 'MYSQL_TEST_CONTAINER=repair-mysql' >> "$GITHUB_ENV"
           docker run -d --name repair-mysql -p 127.0.0.1:33306:3306 -e MYSQL_ROOT_PASSWORD -e MYSQL_ROOT_HOST=% mysql@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b
           python - <<'PY'
           import os,time,pymysql
@@ -142,51 +143,46 @@ jobs:
                   if attempt==59: raise
                   time.sleep(2)
           PY
-      - name: Finance integration with real query and typed frontend
-        if: startsWith(matrix.mode, 'finance-')
-        env:
-          MODE: ${{ matrix.mode }}
-        run: |
-          python - <<'PY' > "$PROOF_DIR/finance.log" 2>&1
-          import os,sys,traceback
-          from argparse import Namespace
-          import pytest
-          if os.environ['MODE']=='finance-parity':
-              from scripts.bootstrap_disposable_mysql_schema import bootstrap
-              bootstrap(Namespace(host='127.0.0.1',port=33306,user='root',password=os.environ['DB_PASSWORD'],database=os.environ['DB_DATABASE'],confirm_database=os.environ['DB_DATABASE']))
-          from api.routes import finance_import as route
-          original=route._call_query
-          def trace_query(query,message,correlation):
-              def checked():
-                  try: return query()
-                  except Exception:
-                      traceback.print_exc(); raise
-              return original(checked,message,correlation)
-          route._call_query=trace_query
-          case='tests/test_finance_source_review_mysql_e2e.py' if os.environ['MODE']=='finance-query' else 'tests/test_finance_import_staging_persistent_mysql_e2e.py'
-          sys.exit(pytest.main(['-q','--tb=long','--junitxml=/tmp/business-repair/finance.xml',case]))
-          PY
-      - name: Subsidy durable business flows on separate synthetic targets
-        if: matrix.mode == 'subsidy'
+      - name: Execute individual cases against separate synthetic databases
+        if: matrix.mode != 'backend' && matrix.mode != 'frontend'
         run: |
           python - <<'PY'
-          import os,subprocess,sys,json
+          import json,os,subprocess,sys
+          from argparse import Namespace
           from pathlib import Path
+          from scripts.bootstrap_disposable_mysql_schema import bootstrap
+          groups={
+            'finance-parity':['tests/test_finance_import_staging_persistent_mysql_e2e.py'],
+            'finance':['tests/test_finance_import_disposable_mysql_e2e.py'],
+            'imports':['tests/test_wp77_disposable_mysql_e2e.py','tests/test_hcm_import_api_disposable_mysql_e2e.py','tests/test_wp80_disposable_mysql_e2e.py'],
+            'orders':['tests/test_historical_mid_service_cancellation_disposable_mysql_e2e.py','tests/test_order_auto_completion_disposable_mysql_e2e.py'],
+            'access':['tests/domains/external-integration/subsystems/access/integration/test_access_control_disposable_mysql_e2e.py'],
+            'legacy':['tests/domains/client-finance/subsystems/client-finance/modules/legacy-virtual-account-import/test_legacy_virtual_account_disposable_mysql.py','tests/domains/clients/subsystems/client-profile/modules/profile-change/contract/test_registry_finance_disposable_mysql.py'],
+            'reminder':['tests/domains/external-integration/subsystems/line/integration/test_service_day_reminder_disposable_mysql.py'],
+            'migrations':['tests/test_wp79_line_runtime_recovery_disposable_mysql.py','tests/test_customer_service_partial_recovery_disposable_mysql.py'],
+            'replacement':['tests/domains/scheduling/subsystems/scheduling/modules/service-before-replacement/integration/test_service_before_replacement_mysql_adapter.py'],
+            'data-browser':['tests/test_data_browser_query_disposable_mysql_e2e.py'],
+          }
+          mode=os.environ['MODE']; proof=Path(os.environ['PROOF_DIR'])
+          collected=subprocess.run([sys.executable,'-m','pytest','--collect-only','-q',*groups[mode]],text=True,capture_output=True)
+          (proof/'collection.log').write_text(collected.stdout+collected.stderr)
+          assert collected.returncode==0, 'test collection failed'
+          nodes=[line.strip() for line in collected.stdout.splitlines() if line.startswith('tests/') and '::' in line]
+          assert nodes, 'no cases collected'
           results=[]
-          for index,name in enumerate(['submission','claim_plan','approval']):
-              db=f'lu_test_repair_subsidy_{index}'
+          for index,node in enumerate(nodes):
+              db=f'lu_test_r{index}_{mode.replace("-", "")}'
+              if mode=='replacement': db='lu_test_task96_ldu_candidate_1012_r1'
               env={**os.environ,'DB_DATABASE':db,'LABOR_UNION_TEST_MYSQL_DATABASE':db}
-              node='tests/test_government_subsidy_durable_mysql_e2e.py::test_government_subsidy_'+name+'_durable_crash_recovery_and_duplicate_apply'
-              with open(f'/tmp/business-repair/subsidy-{index}.log','w') as log:
-                  result=subprocess.run([sys.executable,'-m','pytest','-q','--tb=short',f'--junitxml=/tmp/business-repair/subsidy-{index}.xml',node],env=env,stdout=log,stderr=subprocess.STDOUT)
-              results.append({'nodeid':node,'exit_code':result.returncode})
-          Path('/tmp/business-repair/subsidy-results.json').write_text(json.dumps(results))
+              if mode in {'finance-parity','imports','access','replacement','data-browser'}:
+                  bootstrap(Namespace(host='127.0.0.1',port=33306,user='root',password=os.environ['DB_PASSWORD'],database=db,confirm_database=db))
+              with (proof/f'case-{index}.log').open('w') as log:
+                  result=subprocess.run([sys.executable,'-m','pytest','-q','--tb=short',f'--junitxml={proof}/case-{index}.xml',node],env=env,stdout=log,stderr=subprocess.STDOUT,timeout=180)
+              results.append({'nodeid':node,'exit_code':result.returncode,'evidence':f'case-{index}.xml'})
+          (proof/'results.json').write_text(json.dumps(results))
           sys.exit(int(any(r['exit_code'] for r in results)))
           PY
-      - name: Empty service time preservation on real MySQL
-        if: matrix.mode == 'order-terms'
-        run: python -m pytest -q --tb=short --junitxml="$PROOF_DIR/orders.xml" tests/domains/orders/subsystems/orders/integration/test_order_terms_empty_service_time_disposable_mysql.py > "$PROOF_DIR/orders.log" 2>&1
-      - name: Destroy only synthetic test container
+      - name: Destroy only the synthetic container
         if: always() && matrix.mode != 'backend' && matrix.mode != 'frontend'
         run: docker rm -f repair-mysql
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
