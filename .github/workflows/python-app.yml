@@ -29,46 +29,71 @@ jobs:
         run: git ls-files -z -- '*.py' | xargs -0 -r python -m py_compile
       - name: Verify retired standalone migration entrypoints
         run: python -m unittest discover -s tests -p test_migrate_admin_capability_grants_schema.py
-      - name: Inspect remaining command references
-        # Temporary read-only inventory; no application imports or database calls.
+  transfer-verified-blobs:
+    # Temporary byte transport only. Does not update branches, run app code or access a database.
+    if: github.event_name == 'pull_request' && github.event.pull_request.number == 343 && github.event.pull_request.head.repo.full_name == 'chrishzc/Labor_union' && github.event.pull_request.head.ref == 'chore/remove-isolated-db-commands-20260922'
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: a08ff742ca20b1e1cf170d98e247802c4be276f0
+          persist-credentials: false
+      - name: Publish exact locally verified blob objects
+        env:
+          GH_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
           python - <<'PY'
           import ast
+          import base64
+          import hashlib
           import json
+          import os
           from pathlib import Path
-          import subprocess
+          import urllib.request
 
-          paths = [Path(p) for p in subprocess.check_output(["git", "ls-files", "-z"], text=True).split("\0") if p]
-          texts = {}
-          for path in paths:
-              if path.suffix.lower() in {".py", ".md", ".json", ".jsonl", ".yaml", ".yml", ".toml", ".ps1", ".sh", ".bat", ".ts", ".tsx"}:
-                  try:
-                      texts[path] = path.read_text(encoding="utf-8")
-                  except UnicodeDecodeError:
-                      pass
-          for path, source in texts.items():
-              if path.parts[0] not in {"scripts", "tools"} or "migration_artifacts" in path.parts:
-                  continue
-              if path.suffix != ".py":
-                  if "lu_test" in source:
-                      print("SHELL " + str(path))
-                  continue
-              tree = ast.parse(source)
-              main = [node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "main"]
-              guards = [node for node in tree.body if isinstance(node, ast.If) and "__name__" in ast.unparse(node.test) and "__main__" in ast.unparse(node.test)]
-              if main or not guards:
-                  continue
-              print("EXECUTABLE " + json.dumps({"path": str(path), "mentions_lu_test": "lu_test" in source, "guard_spans": [[node.lineno, node.end_lineno] for node in guards]}, ensure_ascii=True))
-              for other, text in texts.items():
-                  if other == path:
-                      continue
-                  lines = [number for number, line in enumerate(text.splitlines(), 1) if path.stem in line]
-                  if lines:
-                      print("REFERENCE " + json.dumps({"command": str(path), "path": str(other), "lines": lines}, ensure_ascii=True))
-          for name in ("migrate_admin_capability_grants_schema", "migrate_case_architecture_bootstrap_receipt_version_contract", "migrate_leave_substitution_holiday_only_batch_contract"):
-              for path, text in texts.items():
-                  lines = [number for number, line in enumerate(text.splitlines(), 1) if name in line]
-                  if lines:
-                      print("RETIRED_REFERENCE " + json.dumps({"name": name, "path": str(path), "lines": lines}, ensure_ascii=True))
+          changes = [
+              ('scripts/backfill_canonical_accounting_projections.py', 'e97c8453afc389d764951da2b1327f7da190810c', 24163, '0672c1dbe95091f259b0057e125004bf9a7e070c'),
+              ('scripts/bootstrap_disposable_mysql_schema.py', 'a287ed4d84786ddf55233d177f14a970dcd04666', 6706, 'fb41c51b5447510df79e091cb3c9c5ae8a148a0f'),
+              ('scripts/collect_local_additive_engine_evidence.py', 'dc6ac7fcb174a488ba884c8a9c2eff6753e77656', 19958, '7b7c6dc255ba90c9fbe26daa9e0112fbb7d371fd'),
+              ('scripts/migrate_assignment_schedule_integrity.py', 'b3ef4ed79906592c0e715aa0c7ae44b06193161d', 14626, '7f5f79830a041d3b5cbb31d02f33a8c9ce52d514'),
+              ('scripts/migrate_legacy_ui_dataset.py', '8f73b4c02cf5e77e9db9c00a31147f7bdc0a974a', 13224, '6013343b9de61851dfee1c6d2a53dc8ad2c9faa1'),
+              ('scripts/plan_legacy_ui_dataset_integration.py', '42d4694e1911ad9cc89341ce4b3de233883c12b1', 9500, '8273f3ecabe9b5319f4109f56ad4d6d96fcdbb51'),
+              ('scripts/run_case_import_invalid_scenario.py', '218f4efacbad047ec6c6a409b2bdb5fd8acbdf31', 4178, '2359d525e9b48fb73d2423bda3e15af0d66b34e1'),
+              ('scripts/seed_validation_beclass_review.py', '06f6f0cadd54704b084d0bec6a2abfff992fe80b', 9114, '4dac2a48f005f78540b1896929e42dfed4e8b1a0'),
+              ('scripts/seed_validation_dataset.py', 'cad6172289d3588d2d6e59654903855674fedc4f', 8713, '49dd29431e6416a6939568d27df0115fe1817b49'),
+              ('scripts/seed_validation_finance_manual_review.py', '8cfea456f6fed2c6ef6d8ba8fa1cc5370b8fe91c', 5431, 'b53f4c078a931f2cd74a1ad042a6ef025ee9fa8a'),
+              ('scripts/verify_integrated_ui_validation_dataset.py', '115fc4f68eb3138e3a191bf9c61996c3474871a0', 5214, '143d34f7e5f23244ce5a1e21e339d7f0a63b521d'),
+              ('scripts/verify_legacy_ui_preservation.py', 'a55cde09e64aaaf5f4714a21222abb1c6f632665', 4874, 'dfc9944916adf9d9ba50ce1eee48057cc0394924'),
+          ]
+          def blob_sha(data):
+              return hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest()
+          verified = []
+          for path, before_sha, prefix_bytes, after_sha in changes:
+              before = Path(path).read_bytes()
+              assert blob_sha(before) == before_sha, path
+              after = before[:prefix_bytes] + b'\n'
+              assert blob_sha(after) == after_sha, path
+              old = ast.parse(before)
+              new = ast.parse(after)
+              old.body = [n for n in old.body if not (
+                  isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == 'main'
+              ) and not (
+                  isinstance(n, ast.If) and '__name__' in ast.unparse(n.test) and '__main__' in ast.unparse(n.test)
+              )]
+              assert ast.dump(old) == ast.dump(new), path
+              verified.append((path, after, after_sha))
+          for path, content, expected_sha in verified:
+              payload = json.dumps({'encoding': 'base64', 'content': base64.b64encode(content).decode('ascii')}).encode()
+              request = urllib.request.Request(
+                  'https://api.github.com/repos/chrishzc/Labor_union/git/blobs',
+                  data=payload, method='POST',
+                  headers={'Authorization': 'Bearer ' + os.environ['GH_API_TOKEN'], 'Accept': 'application/vnd.github+json', 'Content-Type': 'application/json'},
+              )
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  result = json.load(response)
+              assert result['sha'] == expected_sha, path
+              print(json.dumps({'path': path, 'sha': result['sha']}))
           PY
