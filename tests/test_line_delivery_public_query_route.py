@@ -347,13 +347,17 @@ class _MySqlDisposableSchemaAdmin:
             connection.close()
 
     def create_schema(self, name: str) -> None:
-        connection = self._connection()
-        try:
-            with connection.cursor() as cursor:
-                cursor.execute(f"CREATE DATABASE {self._quoted_name(name)}")
-            connection.commit()
-        finally:
-            connection.close()
+        from scripts.bootstrap_disposable_mysql_schema import bootstrap
+
+        _assert_disposable_schema_name(name)
+        bootstrap(Namespace(
+            host=self._values["LABOR_UNION_TEST_MYSQL_HOST"],
+            port=int(self._values["LABOR_UNION_TEST_MYSQL_PORT"]),
+            user=self._values["LABOR_UNION_TEST_MYSQL_USER"],
+            password=self._values["LABOR_UNION_TEST_MYSQL_PASSWORD"],
+            database=name,
+            confirm_database=name,
+        ))
 
     def drop_schema(self, name: str) -> None:
         connection = self._connection()
@@ -399,18 +403,6 @@ def _managed_g7_database(monkeypatch):
     values = _g7_database_values()
     admin = _MySqlDisposableSchemaAdmin(values)
     with _DisposableSchemaLease(admin, G7_DATABASE):
-        from scripts.bootstrap_disposable_mysql_schema import bootstrap
-
-        bootstrap(
-            Namespace(
-                host=values["LABOR_UNION_TEST_MYSQL_HOST"],
-                port=int(values["LABOR_UNION_TEST_MYSQL_PORT"]),
-                user=values["LABOR_UNION_TEST_MYSQL_USER"],
-                password=values["LABOR_UNION_TEST_MYSQL_PASSWORD"],
-                database=G7_DATABASE,
-                confirm_database=G7_DATABASE,
-            )
-        )
         monkeypatch.setenv("DB_HOST", values["LABOR_UNION_TEST_MYSQL_HOST"])
         monkeypatch.setenv("DB_PORT", values["LABOR_UNION_TEST_MYSQL_PORT"])
         monkeypatch.setenv("DB_USER", values["LABOR_UNION_TEST_MYSQL_USER"])
