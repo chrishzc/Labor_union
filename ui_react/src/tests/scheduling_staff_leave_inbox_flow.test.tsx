@@ -11,6 +11,7 @@ import {
 } from '../api/scheduling/staff_leave_inbox_client';
 import { ApiDecodeError } from '../api/shared/typed_errors';
 import { transport } from '../api/shared/transport';
+import { leaveSubstitutionClient } from '../api/scheduling/leave_substitution_client';
 import { staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
 import { leaveSubstitutionFlowStore } from '../adapters/scheduling/leave_substitution_flow_store';
 import { SchedulingPage } from '../pages/SchedulingPage';
@@ -92,6 +93,38 @@ describe('Scheduling staff leave inbox flow', () => {
     expect(screen.getByText(/目前已連動 LINE 請假待辦/)).not.toHaveTextContent('版本');
     expect(document.body.textContent).not.toContain('請假待辦 #77');
     expect(screen.queryByText(/已通知月嫂/)).not.toBeInTheDocument();
+  });
+
+  it('人工指定補班日期會原樣送入既有 Preview', async () => {
+    seedQueryReady();
+    vi.spyOn(staffLeaveInboxClient, 'list').mockResolvedValue([]);
+    const preview = vi.spyOn(leaveSubstitutionClient, 'preview').mockResolvedValue({
+      ...LEAVE_PREVIEW,
+      outcomes: LEAVE_PREVIEW.outcomes.map((outcome) => ({
+        ...outcome,
+        resulting_service_date: '2026-08-11',
+      })),
+    });
+
+    renderLeaveWorkspace();
+    fireEvent.change(await screen.findByRole('combobox', { name: '請假代班處理方式' }), {
+      target: { value: 'defer_following_assignments' },
+    });
+    fireEvent.change(screen.getByLabelText('指定補班日期'), {
+      target: { value: '2026-08-11' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '🔍 檢查代班影響' }));
+
+    await waitFor(() => expect(preview).toHaveBeenCalledTimes(1));
+    expect(preview.mock.calls[0]?.[1].items[0]).toMatchObject({
+      original_schedule_id: 301,
+      work_date: '2026-08-03',
+      resolution_type: 'defer_following_assignments',
+      replacement_work_date: '2026-08-11',
+      substitute_staff_id: null,
+      is_double_pay: false,
+    });
+    expect(await screen.findByText('2026-08-11')).toBeInTheDocument();
   });
 
   it('提供管理員取消 pending 待辦的原因與 typed receipt', async () => {

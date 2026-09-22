@@ -21,14 +21,36 @@ describe('ReportsPage service-hours display', () => {
     fireEvent.click(screen.getByRole('tab', { name: '每周服務中說明' }));
 
     expect(screen.getByText('王**')).toBeInTheDocument();
+    expect(screen.getByText('陳**')).toBeInTheDocument();
     expect(screen.getByText('40')).toBeInTheDocument();
     expect(screen.getByText('8-3')).toBeInTheDocument();
     expect(screen.getByText('2026/8/17')).toBeInTheDocument();
     expect(screen.getAllByRole('columnheader').map((header) => header.textContent)).toEqual([
-      '週數', '序號', '市府案號', '雇主', '每週起始日',
+      '週數', '序號', '市府案號', '雇主', '服務人員', '每週起始日',
       '每週結束日', '服務時數', '每周工作日數', '每周工時', '結案',
     ]);
-    expect(screen.queryByRole('columnheader', { name: '月嫂' })).not.toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: '服務人員' })).toBeInTheDocument();
+  });
+
+  it('每日時數缺值時保留服務日數並顯示提醒', async () => {
+    const first = WEEKLY_OPERATIONS_REPORT.service_rows[0];
+    vi.spyOn(weeklyOperationsReportQueryClient, 'query').mockResolvedValue({
+      ...WEEKLY_OPERATIONS_REPORT,
+      service_rows: [{
+        ...first,
+        service_hours_per_day: null,
+        weekly_hours: null,
+        data_quality_codes: ['service_hours_per_day_missing'],
+      }],
+    });
+
+    render(<ReportsPage />);
+    await screen.findByText('CASE-WEEK-001');
+    fireEvent.click(screen.getByRole('tab', { name: '每周服務中說明' }));
+
+    expect(screen.getByRole('status')).toHaveTextContent('已保留可得明細');
+    expect(screen.getByText('5')).toBeInTheDocument();
+    expect(screen.getByText('陳**')).toBeInTheDocument();
   });
 
   it('營運報表有其他資料但沒有服務工時時明確顯示無資料', async () => {

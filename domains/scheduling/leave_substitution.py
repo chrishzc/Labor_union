@@ -68,10 +68,13 @@ class LeaveSubstitutionItem:
     resolution_type: LeaveResolutionType
     substitute_staff_id: int | None = None
     is_double_pay: bool = False
+    replacement_work_date: date | None = None
 
     def __post_init__(self) -> None:
         require_positive_integer(self.original_schedule_id, "original schedule id")
         _require_date(self.work_date, "leave work date")
+        if self.replacement_work_date is not None:
+            _require_date(self.replacement_work_date, "replacement work date")
         _validate_resolution(self)
 
 
@@ -93,12 +96,22 @@ class LeaveSubstitutionFacts:
     assignment_plan: AssignmentPlanFacts
     official_schedules: tuple[OfficialScheduleFact, ...]
     service_data_locked: bool
+    fixed_rest_weekdays: tuple[int, ...] = ()
+    approved_holiday_work_dates: tuple[date, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.official_schedules, tuple):
             raise TypeError("official schedules must be a tuple")
         if not isinstance(self.service_data_locked, bool):
             raise TypeError("service-data lock marker must be bool")
+        if self.fixed_rest_weekdays != tuple(sorted(set(self.fixed_rest_weekdays))):
+            raise ValueError("fixed rest weekdays must be canonical")
+        if any(type(value) is not int or not 0 <= value <= 6 for value in self.fixed_rest_weekdays):
+            raise TypeError("fixed rest weekdays must be weekday integers")
+        if self.approved_holiday_work_dates != tuple(sorted(set(self.approved_holiday_work_dates))):
+            raise ValueError("approved holiday work dates must be canonical")
+        if any(type(value) is not date for value in self.approved_holiday_work_dates):
+            raise TypeError("approved holiday work dates must be calendar dates")
         _validate_schedule_facts(self)
 
 
@@ -181,11 +194,15 @@ def _validate_resolution(item: LeaveSubstitutionItem) -> None:
         raise TypeError("double-pay marker must be bool")
     if item.resolution_type is LeaveResolutionType.SUBSTITUTE:
         require_positive_integer(item.substitute_staff_id, "substitute staff id")
+        if item.replacement_work_date is not None:
+            _raise_invalid("substitute leave cannot specify a replacement work date")
         return
     if item.substitute_staff_id is not None:
         _raise_invalid("deferred leave cannot specify substitute staff")
     if item.is_double_pay:
         _raise_invalid("deferred leave cannot create a double-pay event")
+    if item.replacement_work_date == item.work_date:
+        _raise_invalid("replacement work date must differ from the original work date")
 
 
 def _validate_batch_items(items: tuple[LeaveSubstitutionItem, ...]) -> None:
@@ -202,6 +219,12 @@ def _validate_batch_items(items: tuple[LeaveSubstitutionItem, ...]) -> None:
         _raise_invalid("leave batch repeats an original schedule")
     if len(work_dates) != len(set(work_dates)):
         _raise_invalid("leave batch repeats a work date")
+    if any(item.replacement_work_date is not None for item in items) and any(
+        item.resolution_type is LeaveResolutionType.DEFER_FOLLOWING_ASSIGNMENTS
+        and item.replacement_work_date is None
+        for item in items
+    ):
+        _raise_invalid("specified replacement dates cannot be mixed with automatic deferral")
 
 
 def _validate_schedule_facts(facts: LeaveSubstitutionFacts) -> None:
@@ -264,18 +287,36 @@ def _transform_service_ownership(
         for item in intent.items
         if item.resolution_type is LeaveResolutionType.DEFER_FOLLOWING_ASSIGNMENTS
     )
+    specified_replacements = {
+        item.work_date: item.replacement_work_date
+        for item in intent.items
+        if item.replacement_work_date is not None
+    }
+    recalculate_existing_dates = not specified_replacements and bool(
+        deferred_dates or holiday_rest_dates
+    )
     transformed = []
     previous_service_date = None
     for row in facts.official_schedules:
-        base_date = row.work_date + timedelta(
-            days=sum(deferred_date <= row.work_date for deferred_date in deferred_dates)
-        )
-        service_date = _next_service_date(
-            base_date,
-            previous_service_date,
-            holiday_rest_dates,
-        )
         item = intent_by_date.get(row.work_date)
+        if row.work_date in specified_replacements:
+            service_date = specified_replacements[row.work_date]
+            if _is_rest_date(service_date, holiday_rest_dates, facts):
+                _raise_invalid("specified replacement date is a rest date")
+        elif recalculate_existing_dates and (
+            not deferred_dates or row.work_date >= deferred_dates[0]
+        ):
+            base_date = row.work_date + timedelta(
+                days=sum(deferred_date <= row.work_date for deferred_date in deferred_dates)
+            )
+            service_date = _next_service_date(
+                base_date,
+                previous_service_date,
+                holiday_rest_dates,
+                facts,
+            )
+        else:
+            service_date = row.work_date
         transformed.append(
             _ServiceOwner(
                 service_date,
@@ -285,8 +326,11 @@ def _transform_service_ownership(
                 row.is_double_pay if item is None or item.resolution_type is not LeaveResolutionType.SUBSTITUTE else item.is_double_pay,
             )
         )
-        previous_service_date = service_date
-    transformed = tuple(transformed)
+        if recalculate_existing_dates and (
+            not deferred_dates or row.work_date >= deferred_dates[0]
+        ):
+            previous_service_date = service_date
+    transformed = tuple(sorted(transformed, key=lambda value: (value.service_date, value.source_schedule_id)))
     _validate_transformed_service_rows(facts, transformed, selected)
     return transformed
 
@@ -299,13 +343,22 @@ def _canonical_holiday_rest_dates(values: tuple[date, ...]) -> tuple[date, ...]:
     return values
 
 
-def _next_service_date(base_date, previous_service_date, holiday_rest_dates):
+def _next_service_date(base_date, previous_service_date, holiday_rest_dates, facts):
     service_date = base_date
     if previous_service_date is not None:
         service_date = max(service_date, previous_service_date + timedelta(days=1))
-    while service_date in holiday_rest_dates:
+    while _is_rest_date(service_date, holiday_rest_dates, facts):
         service_date += timedelta(days=1)
     return service_date
+
+
+def _is_rest_date(service_date, holiday_rest_dates, facts):
+    if service_date in facts.approved_holiday_work_dates:
+        return False
+    return (
+        service_date in holiday_rest_dates
+        or service_date.weekday() in facts.fixed_rest_weekdays
+    )
 
 
 # One row owns the defer offset and substitution ownership decision together.
@@ -640,6 +693,7 @@ def _deferred_dates(
         item.work_date
         for item in intent.items
         if item.resolution_type is LeaveResolutionType.DEFER_FOLLOWING_ASSIGNMENTS
+        and item.replacement_work_date is None
     )
 
 
@@ -668,6 +722,12 @@ def _candidate_payload(facts, intent, scheduling, outcomes):
             "payroll": facts.assignment_plan.payroll_version,
         },
         "original_assignment_id": intent.original_assignment_id,
+        "calendar_policy": {
+            "fixed_rest_weekdays": facts.fixed_rest_weekdays,
+            "approved_holiday_work_dates": tuple(
+                value.isoformat() for value in facts.approved_holiday_work_dates
+            ),
+        },
         "items": tuple(_item_payload(item) for item in intent.items),
         "generation": _generation_payload(scheduling),
         "outcomes": tuple(_outcome_payload(item) for item in outcomes),
@@ -681,6 +741,11 @@ def _item_payload(item: LeaveSubstitutionItem) -> dict[str, object]:
         "resolution_type": item.resolution_type.value,
         "substitute_staff_id": item.substitute_staff_id,
         "is_double_pay": item.is_double_pay,
+        "replacement_work_date": (
+            None
+            if item.replacement_work_date is None
+            else item.replacement_work_date.isoformat()
+        ),
     }
 
 

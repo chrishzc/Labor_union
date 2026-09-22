@@ -26,6 +26,7 @@ class LeaveSubstitutionItemInput(BaseModel):
     resolution_type: LeaveResolutionType
     substitute_staff_id: int | None = Field(default=None, gt=0)
     is_double_pay: bool = False
+    replacement_work_date: date | None = None
 
     def to_domain(self) -> LeaveSubstitutionItem:
         return LeaveSubstitutionItem(
@@ -34,6 +35,7 @@ class LeaveSubstitutionItemInput(BaseModel):
             self.resolution_type,
             self.substitute_staff_id,
             self.is_double_pay,
+            self.replacement_work_date,
         )
 
 

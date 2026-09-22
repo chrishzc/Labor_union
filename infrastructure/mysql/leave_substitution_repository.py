@@ -4,7 +4,7 @@ Description: 查詢正式assignment schedule，並在單一MySQL交易保存請�
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 import json
 from typing import Any, Mapping
 
@@ -32,6 +32,9 @@ from infrastructure.mysql.order_terms_read_model import (
     select_order,
     select_scheduling_aggregate,
 )
+from infrastructure.mysql.matching_holiday_work_agreement_repository import (
+    MySqlMatchingHolidayWorkAgreementRepository,
+)
 from infrastructure.mysql.scheduling_replacement_writer import (
     persist_scheduling_replacement,
 )
@@ -55,6 +58,15 @@ from subsystems.scheduling.matching_leave_integration import (
 
 
 _COMMAND_FAMILY = "scheduling_leave_substitution"
+
+_CASE_SERVICE_MODE_SQL = (
+    "SELECT c.service_type AS service_mode FROM orders o "
+    "JOIN clients c ON c.id=o.client_id WHERE o.case_no=%s"
+)
+_CURRENT_MATCHING_PLAN_LOCK_SQL = (
+    "SELECT id FROM caregiver_matching_plans "
+    "WHERE case_no=%s AND is_active=1 ORDER BY id FOR UPDATE"
+)
 
 
 class _ExistingLeaveSubstitutionClaim(Exception):
@@ -140,6 +152,14 @@ class MySqlLeaveSubstitutionRepository:
                 lock=False,
             )
             schedules = _official_schedules(cursor, case_no)
+            fixed_rest_weekdays, approved_holiday_work_dates = _calendar_policy(
+                cursor,
+                self._connection,
+                case_no,
+                intent,
+                schedules,
+                lock=False,
+            )
             try:
                 source = load_preview_facts(cursor, case_no)
             except ValueError as error:
@@ -151,10 +171,23 @@ class MySqlLeaveSubstitutionRepository:
                     schedules,
                     (blocker,),
                     _scheduling_only_leave_facts(
-                        cursor, case_no, occupancy, lock_ids, schedules
+                        cursor,
+                        case_no,
+                        occupancy,
+                        lock_ids,
+                        schedules,
+                        fixed_rest_weekdays,
+                        approved_holiday_work_dates,
                     ),
                 )
-        return _workflow_facts(source, occupancy, lock_ids, schedules)
+        return _workflow_facts(
+            source,
+            occupancy,
+            lock_ids,
+            schedules,
+            fixed_rest_weekdays,
+            approved_holiday_work_dates,
+        )
 
     def list_effective_assignments(self, case_no):
         with self._connection.cursor() as cursor:
@@ -243,7 +276,22 @@ class MySqlLeaveSubstitutionRepository:
                 lock=True,
             )
             schedules = _official_schedules(cursor, request.case_no)
-        facts = _workflow_facts(source, occupancy, lock_ids, schedules)
+            fixed_rest_weekdays, approved_holiday_work_dates = _calendar_policy(
+                cursor,
+                self._connection,
+                request.case_no,
+                request.intent,
+                schedules,
+                lock=True,
+            )
+        facts = _workflow_facts(
+            source,
+            occupancy,
+            lock_ids,
+            schedules,
+            fixed_rest_weekdays,
+            approved_holiday_work_dates,
+        )
         return _apply_evidence(facts, claim_state, evidence_rows), linked_request
 
     def replace_scheduling_generation(self, candidate, context):
@@ -295,13 +343,25 @@ class MySqlLeaveSubstitutionRepository:
             cursor.execute(_RECEIPT_INSERT_SQL, values)
 
 
-def _workflow_facts(source, occupancy, lock_ids, schedules):
+def _workflow_facts(
+    source,
+    occupancy,
+    lock_ids,
+    schedules,
+    fixed_rest_weekdays,
+    approved_holiday_work_dates,
+):
     impact_facts = build_assignment_plan_workflow_facts(
         source,
         occupancy,
         lock_ids,
     )
-    return LeaveSubstitutionWorkflowFacts(impact_facts, schedules)
+    return LeaveSubstitutionWorkflowFacts(
+        impact_facts,
+        schedules,
+        fixed_rest_weekdays=fixed_rest_weekdays,
+        approved_holiday_work_dates=approved_holiday_work_dates,
+    )
 
 
 def _preview_dependency_blocker(error):
@@ -312,7 +372,15 @@ def _preview_dependency_blocker(error):
     } else None
 
 
-def _scheduling_only_leave_facts(cursor, case_no, occupancy, lock_ids, schedules):
+def _scheduling_only_leave_facts(
+    cursor,
+    case_no,
+    occupancy,
+    lock_ids,
+    schedules,
+    fixed_rest_weekdays,
+    approved_holiday_work_dates,
+):
     order_row = select_order(cursor, case_no, lock=False)
     order = _order_facts(order_row)
     aggregate = select_scheduling_aggregate(cursor, case_no, lock=False)
@@ -353,7 +421,59 @@ def _scheduling_only_leave_facts(cursor, case_no, occupancy, lock_ids, schedules
         assignment_plan,
         schedules,
         order.service_data_locked,
+        fixed_rest_weekdays,
+        approved_holiday_work_dates,
     )
+
+
+def _calendar_policy(cursor, connection, case_no, intent, schedules, *, lock):
+    cursor.execute(_CASE_SERVICE_MODE_SQL, (case_no,))
+    row = cursor.fetchone()
+    if not isinstance(row, Mapping):
+        raise ValueError("service_calendar_policy_missing")
+    fixed_rest_weekdays = _fixed_rest_weekdays(row.get("service_mode"))
+    if not schedules:
+        return fixed_rest_weekdays, ()
+    if lock:
+        cursor.execute(_CURRENT_MATCHING_PLAN_LOCK_SQL, (case_no,))
+        cursor.fetchall()
+    replacement_dates = tuple(
+        item.replacement_work_date
+        for item in intent.items
+        if item.replacement_work_date is not None
+    )
+    schedule_dates = tuple(item.work_date for item in schedules)
+    policy_dates = schedule_dates + replacement_dates
+    start_date = min(policy_dates)
+    horizon_days = len(schedules) + len(intent.items)
+    replacement_horizon = max(replacement_dates) if replacement_dates else max(schedule_dates)
+    end_date = max(
+        max(schedule_dates) + timedelta(days=horizon_days),
+        replacement_horizon,
+    )
+    approved = MySqlMatchingHolidayWorkAgreementRepository(
+        connection
+    ).current_accepted_holiday_dates(case_no, start_date, end_date)
+    return fixed_rest_weekdays, tuple(sorted(set(approved)))
+
+
+def _fixed_rest_weekdays(value):
+    aliases = {
+        "週休1日": "休周日",
+        "週休一日": "休周日",
+        "週休二日": "週休2日",
+        "周休二日": "週休2日",
+    }
+    canonical = aliases.get(value, value)
+    mapping = {
+        "休周六": (5,),
+        "休周日": (6,),
+        "週休2日": (5, 6),
+        "連續服務": (),
+    }
+    if canonical not in mapping:
+        raise ValueError("service_calendar_policy_invalid")
+    return mapping[canonical]
 
 
 def _preflight_staff_ids(cursor, case_no, intent):
@@ -643,6 +763,11 @@ def _request_snapshot(request):
                 "resolution_type": item.resolution_type.value,
                 "substitute_staff_id": item.substitute_staff_id,
                 "is_double_pay": item.is_double_pay,
+                "replacement_work_date": (
+                    None
+                    if item.replacement_work_date is None
+                    else item.replacement_work_date.isoformat()
+                ),
             }
             for item in request.intent.items
         ],

@@ -679,6 +679,7 @@ function LeaveSubstitutionWorkspace({
   const [resolutionType, setResolutionType] = useState<LeaveResolutionType>('substitute');
   const [substituteStaffId, setSubstituteStaffId] = useState<number | null>(null);
   const [isDoublePay, setIsDoublePay] = useState(false);
+  const [replacementWorkDate, setReplacementWorkDate] = useState('');
   const [reason, setReason] = useState('正式處理請假代班');
   const [confirmed, setConfirmed] = useState(false);
   const [, setStoreRevision] = useState(0);
@@ -926,6 +927,9 @@ function LeaveSubstitutionWorkspace({
         resolution_type: resolutionType,
         substitute_staff_id: resolutionType === 'substitute' ? substituteStaffId : null,
         is_double_pay: resolutionType === 'substitute' ? isDoublePay : false,
+        replacement_work_date: resolutionType === 'defer_following_assignments' && replacementWorkDate
+          ? replacementWorkDate
+          : null,
       }],
       leave_request_id: selectedInboxItem ? selectedInboxItem.id : null,
       expected_leave_request_version: selectedInboxItem ? selectedInboxItem.aggregate_version : null,
@@ -1276,6 +1280,8 @@ function LeaveSubstitutionWorkspace({
                 if (next === 'defer_following_assignments') {
                   setSubstituteStaffId(null);
                   setIsDoublePay(false);
+                } else {
+                  setReplacementWorkDate('');
                 }
                 invalidatePreview();
               }}
@@ -1283,6 +1289,20 @@ function LeaveSubstitutionWorkspace({
               <option value="substitute">安排合格代班月嫂</option>
               <option value="defer_following_assignments">順延後續服務日期</option>
             </select>
+          </label>
+          <label>
+            指定補班日期
+            <input
+              type="date"
+              aria-label="指定補班日期"
+              value={replacementWorkDate}
+              disabled={busy || resolutionType !== 'defer_following_assignments'}
+              onChange={(event) => {
+                setReplacementWorkDate(event.target.value);
+                invalidatePreview();
+              }}
+            />
+            <small>留空時依案件週休與假日條件自動順延；指定後不會無聲改成其他日期。</small>
           </label>
           <label>
             指派代班月嫂

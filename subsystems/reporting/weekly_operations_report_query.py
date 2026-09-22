@@ -23,6 +23,11 @@ SOURCE_REVISION = "operations_report_query_v5"
 TIMEZONE = "Asia/Taipei"
 GENERAL_CITIZEN = "一般市民"
 SUBSIDIZED_CITIZEN = "補助市民"
+_SERVICE_COMPLETED_STATUSES = frozenset({
+    "訂單完成",
+    "歷史訂單－服務完成",
+    "歷史訂單－帳務完成",
+})
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,13 +177,13 @@ class WeeklyServiceRow:
     case_no: str
     client_name: str
     staff_name: str
-    service_start_date: date
-    service_end_date: date
+    service_start_date: date | None
+    service_end_date: date | None
     period_start_date: date
     period_end_date: date
-    service_hours_per_day: float | int
+    service_hours_per_day: float | int | None
     weekly_work_days: int
-    weekly_hours: float | int
+    weekly_hours: float | int | None
     order_status: str
     completed: bool
     data_quality_codes: tuple[str, ...]
@@ -230,7 +235,7 @@ def _roc_date(d: date | None) -> str:
 def _service_status(order_status: str | None) -> str:
     if not order_status:
         return ""
-    if order_status in ("訂單完成", "歷史訂單－服務完成", "歷史訂單－帳務完成"):
+    if order_status in _SERVICE_COMPLETED_STATUSES:
         return "服務中結案"
     if order_status in ("訂單成立", "待補件", "歷史訂單－未服務"):
         return "等待服務"
@@ -270,12 +275,11 @@ class WeeklyOperationsReportQuery:
             case_rows.append(self._case_row(fact, serial_number=idx, month_label=month_str))
         case_rows_tuple = tuple(case_rows)
 
-        service_candidates = tuple(
+        service_rows = tuple(
             self._service_row(fact, idx)
             for idx, fact in enumerate(self._facts.list_service_facts(start_date, end_date), start=1)
         )
-        service_rows = tuple(row for row in service_candidates if row is not None)
-        incomplete_service_count = len(service_candidates) - len(service_rows)
+        incomplete_service_count = sum(bool(row.data_quality_codes) for row in service_rows)
         subsidies = self._facts.list_subsidy_facts(start_date, end_date)
         subsidy_partitions = (
             self._subsidy_partition("general", subsidies.general),
@@ -383,14 +387,17 @@ class WeeklyOperationsReportQuery:
     def _service_row(
         fact: WeeklyServiceFact,
         serial: int = 1,
-    ) -> WeeklyServiceRow | None:
+    ) -> WeeklyServiceRow:
         hours_per_day = _positive_or_none(fact.service_hours_per_day)
-        if hours_per_day is None or fact.service_start_date is None or fact.service_end_date is None:
-            return None
+        quality_codes: list[str] = []
+        if hours_per_day is None:
+            quality_codes.append("service_hours_per_day_missing")
+        if fact.service_start_date is None or fact.service_end_date is None:
+            quality_codes.append("service_period_missing")
         rest_days = fact.weekly_rest_days or [0, 6]
         rest_mode = "周休二日" if len(rest_days) >= 2 else "休周日"
         rest_count = max(0, 7 - fact.weekly_work_days)
-        is_closed = "結案" if (fact.order_status in ("訂單完成", "歷史訂單－服務完成") or fact.assignment_status == "completed" or (fact.service_end_date and fact.service_end_date <= fact.week_end_date)) else ""
+        completed = fact.order_status in _SERVICE_COMPLETED_STATUSES
 
         return WeeklyServiceRow(
             assignment_id=fact.assignment_id,
@@ -403,16 +410,20 @@ class WeeklyOperationsReportQuery:
             period_end_date=fact.week_end_date,
             service_hours_per_day=hours_per_day,
             weekly_work_days=fact.weekly_work_days,
-            weekly_hours=fact.weekly_work_days * hours_per_day,
+            weekly_hours=(
+                None
+                if hours_per_day is None
+                else fact.weekly_work_days * hours_per_day
+            ),
             order_status=fact.order_status,
-            completed=fact.order_status == "訂單完成" or fact.assignment_status == "completed",
-            data_quality_codes=(),
+            completed=completed,
+            data_quality_codes=tuple(quality_codes),
             week_label=week_label(fact.week_start_date),
             week_serial=serial,
             rest_mode=rest_mode,
             rest_days_count=rest_count,
             special_rest="",
-            is_closed=is_closed,
+            is_closed="結案" if completed else "",
         )
 
     @staticmethod
@@ -489,7 +500,7 @@ class WeeklyOperationsReportQuery:
         if subsidy_count and not any(row.claim_period_label for p in partitions for row in p.rows):
             issues.append(DataQualityIssue("subsidy_reconciliation_month_not_recorded", "subsidy_partitions", subsidy_count, "核銷月份 root fact 尚未登錄。"))
         if incomplete_service_count:
-            issues.append(DataQualityIssue("service_row_incomplete", "service_rows", incomplete_service_count, "正式排班缺少起訖或每日服務時數，該列待補正。"))
+            issues.append(DataQualityIssue("service_row_incomplete", "service_rows", incomplete_service_count, "正式排班缺少起訖或每日服務時數；已保留可得明細，無法計算欄位留空。"))
         return tuple(issues)
 
 

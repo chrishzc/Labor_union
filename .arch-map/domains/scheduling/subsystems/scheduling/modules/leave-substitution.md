@@ -14,6 +14,7 @@
 - `api/routes/leave_substitution.py`
 - `api/schemas/leave_substitution.py`
 - `api/dependencies/leave_substitution.py`
+- `infrastructure/mysql/leave_substitution_repository.py`
 - `infrastructure/mysql/substitution_payables_lineage_repository.py`
 - `ui_react/src/api/scheduling/leave_substitution_client.ts`
 - `ui_react/src/api/scheduling/substitution_payables_lineage_client.ts`
@@ -28,5 +29,8 @@
 ## Verification routing
 - default_boundary: Subsystem
 - test_root: `ui_react/src/tests/substitution_payables_readback.test.tsx`
+- test_root: `tests/test_leave_substitution_public_contract.py`
+- integration_root: `tests/test_g13_leave_cancellation_disposable_mysql_e2e.py`
+- integration_root: `ui_react/src/tests/scheduling_staff_leave_inbox_flow.test.tsx`
 - layout_status: `custom_current`
 - routing: `.arch-map/tests/domains/scheduling/subsystems/scheduling/modules/leave-substitution.md`
