@@ -88,6 +88,7 @@ backups/
 # Personal presentation files
 
 # Local test, coverage, type-check and runtime artifacts
+/output/
 .pytest_cache/
 .coverage
 .coverage.*

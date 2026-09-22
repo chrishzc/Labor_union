@@ -73,7 +73,7 @@ function safeErrorMessage(error: unknown): string {
   if (error instanceof ApiHttpError) {
     if (error.status === 401 || error.status === 403) return '目前帳號無權處理這筆外部簽約。';
     if (error.code === 'external_signing_accepted_plan_required') return '目前尚無可投影契約的有效配對方案。';
-    if (error.code === 'external_signing_session_facts_unavailable') return '外部簽約工作尚未建立；仍可依目前資料準備契約文件。';
+    if (error.code === 'external_signing_session_facts_unavailable') return '外部簽約工作尚未建立；請先完成服務人員媒合與服務區段。';
     if (error.code === 'contract_pdf_external_reference_unresolved') return '契約模板缺少舊版引用內容，尚不能產生可簽署 PDF；請先補齊模板。';
     if (error.code === 'contract_pdf_required_mapping_missing') return '契約必要資料尚未齊全，請先在契約欄位預覽核對案件資料與收款設定。';
     if (error.status === 409) return '簽約資料已變更，請重新查詢後再檢查影響。';
@@ -152,10 +152,7 @@ function unsignedPreparationReadbackMatches(
     return fresh.client_target.document_version_id === receipt.document_version_id;
   }
   return command.segmentId !== null
-    && fresh.staff_targets.some((target) => (
-      target.matching_segment_id === command.segmentId
-      && target.document_version_id === receipt.document_version_id
-    ));
+    && fresh.staff_targets.some((target) => target.matching_segment_id === command.segmentId);
 }
 
 function recoveryTargetKey(target: LegacyRecoveryTarget): string {
@@ -467,8 +464,11 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
     orderMutationFlowStore.setExternalSigningUnsignedPreparation(command.caseNo, received);
     try {
       await observeUnsignedPreparation(received, request);
-      if (downloadAfterObserved && command.kind === 'client' && request === requestGeneration.current) {
-        await downloadUnsigned(receipt.document_version_id, '客戶');
+      if (downloadAfterObserved && request === requestGeneration.current) {
+        await downloadUnsigned(
+          receipt.document_version_id,
+          command.kind === 'client' ? '客戶' : `月嫂分段 #${command.segmentId}`,
+        );
       }
     } catch (error) {
       if (!ownsUnsignedPreparationOperation(command.caseNo, operationToken)) return;
@@ -482,7 +482,11 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
     releaseUnsignedPreparationOperation(operationToken);
   };
 
-  const prepareUnsigned = async (kind: 'client' | 'staff', segmentId: number | null) => {
+  const prepareUnsigned = async (
+    kind: 'client' | 'staff',
+    segmentId: number | null,
+    downloadAfterObserved = kind === 'client',
+  ) => {
     if (unsignedPreparationFlow) return;
     const actor = sessionClient.getUser()?.username.trim() ?? '';
     if (!actor) {
@@ -490,12 +494,16 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
       return;
     }
     const command: ExternalSigningUnsignedPreparationCommand = {
-      kind, caseNo, sessionId: query?.session_id ?? null, segmentId, actor,
+      kind,
+      caseNo,
+      sessionId: query?.handoff_recorded ? query.session_id : null,
+      segmentId,
+      actor,
       identity: createExternalSigningCommandIdentity(kind === 'client' ? 'prepare-client' : `prepare-${segmentId}`),
     };
     setUiState({ type: 'working', operation: kind === 'client' ? 'prepare_client' : 'prepare_staff' });
     setNotice(null);
-    await submitUnsignedPreparation(command, false, kind === 'client');
+    await submitUnsignedPreparation(command, false, downloadAfterObserved);
   };
 
   const retryUnsignedPreparationOriginal = async () => {
@@ -929,7 +937,7 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
 
       <div className="order-case-document-grid" aria-label="下載兩種契約">
         <article><h3>客戶契約 PDF</h3><p>下載未簽署版本，供客戶確認與簽署。</p>
-          <button type="button" disabled={busy || !!unsignedPreparationFlow || (query?.state === 'completed' && (!query.unsigned_document || query.client_target.document_version_id === null))} onClick={() => {
+          <button type="button" disabled={busy || !!unsignedPreparationFlow || (!query && preparationSegments.length === 0) || (query?.state === 'completed' && (!query.unsigned_document || query.client_target.document_version_id === null))} onClick={() => {
             if (query?.unsigned_document && query.client_target.document_version_id !== null) {
               void downloadUnsigned(query.client_target.document_version_id, `客戶 ${query.client_target.client_subject_reference} `);
               return;
@@ -940,7 +948,13 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
           {query && (!query.unsigned_document || query.client_target.document_version_id === null) && <p>尚無文件時，點擊下載會依目前資料自動產生契約；不會發送訊息或改變同意、簽約及履約狀態。</p>}
         </article>
         <article><h3>服務人員契約 PDF</h3><p>每位月嫂的契約分別下載。</p>
-          {query?.unsigned_document && query.staff_targets.length > 0 ? query.staff_targets.map((target) => <button key={target.matching_segment_id} type="button" disabled={busy} onClick={() => void downloadUnsigned(target.document_version_id, `月嫂 ${target.staff_subject_reference} `)}>下載服務人員契約 PDF（{target.staff_subject_reference}）</button>) : <><button type="button" disabled>下載服務人員契約 PDF</button><p>{!query ? '尚未取得可下載文件的確認結果。' : '尚無可下載文件。'}若下方有「準備服務人員契約」，請先完成文件準備。</p></>}
+          {query && query.staff_targets.length > 0 ? query.staff_targets.map((target) => <button key={target.matching_segment_id} type="button" disabled={busy || !!unsignedPreparationFlow} onClick={() => {
+            if (query.unsigned_document?.document_version_id === target.document_version_id) {
+              void downloadUnsigned(target.document_version_id, `月嫂 ${target.staff_subject_reference} `);
+              return;
+            }
+            void prepareUnsigned('staff', target.matching_segment_id, true);
+          }}>下載服務人員契約 PDF（{target.staff_subject_reference}）</button>) : <><button type="button" disabled>下載服務人員契約 PDF</button><p>{!query ? '尚未取得可下載文件的確認結果。' : '尚無可下載文件。'}若下方有「準備服務人員契約」，請先完成文件準備。</p></>}
         </article>
       </div>
 

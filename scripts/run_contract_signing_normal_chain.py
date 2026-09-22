@@ -51,6 +51,7 @@ def run(arguments) -> dict[str, object]:
     staff_id = int(receipts["staff_root"]["staff_id"])
     plan = _create_matching_plan(arguments, staff_id)
     receipts["matching_plan"] = plan
+    receipts["matching_acceptance"] = _accept_matching_plan(int(plan["plan_id"]))
     receipts["staff_signing"] = _sign_staff_contracts(int(plan["plan_id"]))
     if getattr(arguments, "stop_before_client_signed", False):
         receipts["client_signing"] = {"sent": _send_client_contract()}
@@ -108,6 +109,17 @@ def _configure_database(arguments) -> None:
     if os.getenv("APP_ENV", "development").strip().lower() in {"prod", "production"}:
         raise ValueError("normal chain requires a development validation profile")
     os.environ.update({"DB_HOST": arguments.host, "DB_PORT": str(arguments.port), "DB_USER": arguments.user, "DB_PASSWORD": arguments.password, "DB_DATABASE": arguments.database})
+    from infrastructure.mysql.mysql_adapter import DB_CONFIG, get_connection
+    from subsystems.scheduling import matching_plan_workflow
+
+    DB_CONFIG.update({
+        "host": arguments.host,
+        "port": arguments.port,
+        "user": arguments.user,
+        "password": arguments.password,
+        "database": arguments.database,
+    })
+    matching_plan_workflow.get_connection = get_connection
 
 
 def _seed_foundation(arguments):
@@ -144,25 +156,184 @@ def _seed_foundation(arguments):
 
 
 def _seed_staff(arguments):
-    from scripts.seed_contract_signing_roots import seed
+    import pymysql
+    from subsystems.validation_dataset.staff_master_source import apply_staff_master_source
 
-    return seed(arguments)
+    fact = _staff_source_fact(arguments.source)
+    connection = pymysql.connect(
+        host=arguments.host,
+        port=arguments.port,
+        user=arguments.user,
+        password=arguments.password,
+        database=arguments.database,
+        charset="utf8mb4",
+        cursorclass=pymysql.cursors.DictCursor,
+        autocommit=False,
+    )
+    try:
+        with connection.cursor() as cursor:
+            staff_id = apply_staff_master_source(cursor, fact)
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+    return {"database": arguments.database, "staff_id": staff_id}
+
+
+def _staff_source_fact(path: Path):
+    from subsystems.validation_dataset.staff_master_source import StaffMasterSourceFact
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if payload.get("contract") != "labor-union-validation-staff-master/v1":
+        raise ValueError("unsupported staff-master source contract")
+    staff = payload.get("staff")
+    if not isinstance(staff, dict):
+        raise ValueError("staff-master source is missing")
+    return StaffMasterSourceFact(
+        str(staff["name"]),
+        str(staff["identity_card"]),
+        str(staff["phone"]),
+        date.fromisoformat(str(staff["birthday"])),
+        str(staff["city"]),
+        int(staff["care_babies"]),
+    )
 
 
 def _seed_line_identities(arguments, client_id: int, staff_id: int):
-    from scripts.seed_contract_signing_line_identities import seed
-
     existing = _existing_line_bindings(arguments, client_id, staff_id)
     if existing == {"customer": "bound", "staff": "bound"}:
         return {"customer": "reused", "staff": "reused"}
-    with TemporaryDirectory(prefix="lu-wp56-case-source-") as directory:
-        source = Path(directory) / "case-source.json"
-        source.write_text(json.dumps(_scenario_dataset(arguments.scenario_id), ensure_ascii=False), encoding="utf-8")
-        line_arguments = copy.copy(arguments)
-        line_arguments.case_source = source
-        line_arguments.line_namespace = arguments.scenario_id
-        line_arguments.reuse_staff_binding = existing.get("staff") == "bound"
-        return seed(line_arguments)
+    staff = json.loads(arguments.staff_source.read_text(encoding="utf-8"))["staff"]
+    customer = _scenario_dataset(arguments.scenario_id)["root_case"]["client_attributes"]
+    namespace = _line_namespace(arguments.scenario_id)
+    _register_line_platform_users(namespace)
+    return _bind_line_subjects(
+        staff,
+        customer,
+        namespace,
+        reuse_staff_binding=existing.get("staff") == "bound",
+    )
+
+
+def _line_namespace(value: object) -> str:
+    text = str(value or "default").strip().lower()
+    if not text or not text.replace("-", "").isalnum():
+        raise ValueError("line namespace must be alphanumeric or hyphen")
+    return text
+
+
+def _register_line_platform_users(namespace: str) -> None:
+    from domains.line.identities import LineUserId, LineWebhookEventId
+    from domains.line.platform_user import LineFriendEvent, LineFriendEventType
+    from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
+
+    users = (
+        ("U-validation-staff-1", f"validation-follow-staff-{namespace}"),
+        (f"U-validation-client-{namespace}", f"validation-follow-client-{namespace}"),
+    )
+    for user, event in users:
+        with open_line_unit_of_work() as unit:
+            unit.platform_users.apply_friend_event(
+                LineFriendEvent(
+                    LineUserId(user),
+                    LineWebhookEventId(event),
+                    LineFriendEventType.FOLLOW,
+                    datetime(2026, 7, 1, tzinfo=timezone.utc),
+                )
+            )
+            unit.commit()
+
+
+def _bind_line_subjects(
+    staff: dict[str, object],
+    customer: dict[str, object],
+    namespace: str,
+    *,
+    reuse_staff_binding: bool,
+) -> dict[str, object]:
+    from api.dependencies.line_identity import get_line_identity_application
+    from domains.line.identities import LineUserId
+    from domains.line.identity_flow import LineIdentityFlowPurpose
+    from subsystems.line.identity_contracts import CustomerIdentityProof, StaffIdentityProof
+
+    get_line_identity_application.cache_clear()
+    application = get_line_identity_application()
+    staff_result = None if reuse_staff_binding else _bind_line_subject(
+        application,
+        LineIdentityFlowPurpose.STAFF_VERIFICATION,
+        LineUserId("U-validation-staff-1"),
+        StaffIdentityProof(
+            str(staff["name"]),
+            str(staff["identity_card"]),
+            datetime.fromisoformat(str(staff["birthday"])).date(),
+        ),
+        f"staff-{namespace}",
+    )
+    client_result = _bind_line_subject(
+        application,
+        LineIdentityFlowPurpose.CUSTOMER_BINDING,
+        LineUserId(f"U-validation-client-{namespace}"),
+        CustomerIdentityProof(str(customer["name"]), str(customer["phone"])),
+        f"client-{namespace}",
+    )
+    staff_status = "reused" if staff_result is None else _approve_staff_review_if_needed(staff_result, namespace)
+    return {"staff": staff_status, "customer": client_result.status.value}
+
+
+def _approve_staff_review_if_needed(result, namespace: str) -> str:
+    if result.status.value != "pending_review":
+        return result.status.value
+    from api.dependencies.line_identity import get_line_identity_review_application
+    from domains.line.review import LineReviewDecision
+    from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
+    from subsystems.line.review_contracts import DecideLineReviewCommand
+
+    application = get_line_identity_review_application()
+    snapshot = application.get(result.review_request_id)
+    approved = application.decide(
+        DecideLineReviewCommand(
+            snapshot.request_id,
+            LineReviewDecision.APPROVE,
+            snapshot.version,
+            ActorContext("validation-dataset-seed", ("line.identity.review",)),
+            "approve synthetic staff identity evidence",
+            IdempotencyKey(f"validation-contract-staff-review-approve-{namespace}"),
+            CorrelationId(f"validation-contract-staff-review-approve-{namespace}"),
+        )
+    )
+    return approved.snapshot.status.value
+
+
+def _bind_line_subject(application, purpose, user, proof, suffix):
+    from shared_kernel.identities import CorrelationId, IdempotencyKey
+
+    flow = application.open_flow(
+        purpose,
+        user,
+        IdempotencyKey(f"validation-contract-flow-{suffix}"),
+        CorrelationId(f"validation-contract-flow-{suffix}"),
+    )
+    if purpose.value == "staff_verification":
+        preview = application.preview_staff(flow.flow_id, user, proof)
+        return application.apply_staff(
+            flow.flow_id,
+            user,
+            proof,
+            preview.expected_version,
+            preview.preview_fingerprint,
+            CorrelationId(f"validation-contract-apply-{suffix}"),
+        )
+    preview = application.preview_customer(flow.flow_id, user, proof)
+    return application.apply_customer(
+        flow.flow_id,
+        user,
+        proof,
+        preview.expected_version,
+        preview.preview_fingerprint,
+        CorrelationId(f"validation-contract-apply-{suffix}"),
+    )
 
 
 def _existing_line_bindings(arguments, client_id: int, staff_id: int) -> dict[str, str]:
@@ -181,7 +352,7 @@ def _existing_line_bindings(arguments, client_id: int, staff_id: int) -> dict[st
     try:
         with connection.cursor() as cursor:
             cursor.execute(
-                "SELECT subject_type,binding_status FROM line_identity_bindings "
+                "SELECT subject_type,binding_status FROM line_identity_role_bindings "
                 "WHERE (subject_type=%s AND subject_reference=%s) "
                 "OR (subject_type=%s AND subject_reference=%s)",
                 (*subjects[0], *subjects[1]),
@@ -224,6 +395,67 @@ def _create_matching_plan(arguments, staff_id: int):
         facts_port=MySqlSegmentedAvailabilityFactsRepository(connect),
         event_key=f"wp56-matching-plan-create:{CASE_NO}",
     )
+
+
+def _accept_matching_plan(plan_id: int) -> dict[str, object]:
+    from domains.scheduling.matching_communication import (
+        CaregiverWillingness,
+        CustomerMatchingDecision,
+        MatchingPlanReference,
+    )
+    from infrastructure.mysql.line_unit_of_work import ManagedLineMySqlUnitOfWork
+    from infrastructure.mysql.mysql_adapter import get_connection
+    from shared_kernel.identities import (
+        ActorContext,
+        CorrelationId,
+        ExpectedVersion,
+        IdempotencyKey,
+    )
+    from subsystems.line.capabilities import LineCapability
+    from subsystems.scheduling.matching_notification_application import (
+        MatchingNotificationApplication,
+    )
+    from subsystems.scheduling.matching_notification_contracts import (
+        RecordManualMatchingResponseCommand,
+    )
+
+    segment_id = _plan_segment_id(plan_id)
+    application = MatchingNotificationApplication(
+        lambda: ManagedLineMySqlUnitOfWork(get_connection()),
+        _fixed_now,
+        availability_validator=lambda _state: None,
+    )
+    actor = ActorContext(
+        "wp56-validation",
+        (LineCapability.MATCHING_OVERRIDE.value,),
+    )
+    willing = application.record_manual_response(
+        RecordManualMatchingResponseCommand(
+            MatchingPlanReference(CASE_NO, plan_id, 0),
+            segment_id,
+            CaregiverWillingness.WILLING,
+            None,
+            "WP56 驗收：服務人員已確認意願",
+            actor,
+            ExpectedVersion(0),
+            IdempotencyKey(_key("staff-willing")),
+            CorrelationId(_key("staff-willing")),
+        )
+    )
+    accepted = application.record_manual_response(
+        RecordManualMatchingResponseCommand(
+            MatchingPlanReference(CASE_NO, plan_id, 1),
+            None,
+            None,
+            CustomerMatchingDecision.ACCEPTED,
+            "WP56 驗收：客戶已接受正式方案",
+            actor,
+            ExpectedVersion(1),
+            IdempotencyKey(_key("customer-accepted")),
+            CorrelationId(_key("customer-accepted")),
+        )
+    )
+    return {"staff": _receipt(willing), "customer": _receipt(accepted)}
 
 
 def _resume_conversion(arguments) -> dict[str, object]:
@@ -284,20 +516,15 @@ def _existing_matching_plan(case_no: str) -> tuple[int, int, date, date]:
 
 
 def _sign_staff_contracts(plan_id: int) -> dict[str, object]:
-    from infrastructure.mysql.mysql_adapter import get_connection
+    from api.dependencies.contract_signing import get_staff_contract_signing_application
     from shared_kernel.identities import CorrelationId, IdempotencyKey
     from subsystems.contract_signing.staff_contract_application import (
         RecordStaffSignedReturnCommand,
         SendStaffContractCommand,
-        StaffContractSigningApplication,
     )
 
     segment_id = _plan_segment_id(plan_id)
-    application = StaffContractSigningApplication(
-        get_connection,
-        archive_root=_archive_root(),
-        now=_fixed_now,
-    )
+    application = get_staff_contract_signing_application()
     sent = application.send(SendStaffContractCommand(CASE_NO, segment_id, "wp56-validation", IdempotencyKey(_key("staff-send")), CorrelationId(_key("staff-send")), "https://validation.invalid/contracts/staff"))
     command = RecordStaffSignedReturnCommand(CASE_NO, segment_id, b"WP56 staff signed return", "staff-signed.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "wp56-validation", IdempotencyKey(_key("staff-return")), CorrelationId(_key("staff-return")), sent.document_version_id)
     signed = application.record_signed_return(command)
@@ -308,20 +535,14 @@ def _sign_staff_contracts(plan_id: int) -> dict[str, object]:
 
 
 def _sign_client_contract() -> dict[str, object]:
-    from infrastructure.mysql.mysql_adapter import get_connection
+    from api.dependencies.contract_signing import get_client_contract_signing_application
     from shared_kernel.identities import CorrelationId, IdempotencyKey
     from subsystems.contract_signing.client_contract_application import (
-        ClientContractSigningApplication,
         RecordClientSignedReturnCommand,
-        SendClientContractCommand,
     )
 
     sent = _send_client_contract()
-    application = ClientContractSigningApplication(
-        get_connection,
-        archive_root=_archive_root(),
-        now=_fixed_now,
-    )
+    application = get_client_contract_signing_application()
     command = RecordClientSignedReturnCommand(CASE_NO, b"WP56 client signed return", "client-signed.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "wp56-validation", IdempotencyKey(_key("client-return")), CorrelationId(_key("client-return")), sent.document_version_id)
     signed = application.record_signed_return(command)
     replay = application.record_signed_return(command)
@@ -331,18 +552,13 @@ def _sign_client_contract() -> dict[str, object]:
 
 
 def _send_client_contract():
-    from infrastructure.mysql.mysql_adapter import get_connection
+    from api.dependencies.contract_signing import get_client_contract_signing_application
     from shared_kernel.identities import CorrelationId, IdempotencyKey
     from subsystems.contract_signing.client_contract_application import (
-        ClientContractSigningApplication,
         SendClientContractCommand,
     )
 
-    application = ClientContractSigningApplication(
-        get_connection,
-        archive_root=_archive_root(),
-        now=_fixed_now,
-    )
+    application = get_client_contract_signing_application()
     return application.send(SendClientContractCommand(CASE_NO, "wp56-validation", IdempotencyKey(_key("client-send")), CorrelationId(_key("client-send")), "https://validation.invalid/contracts/client"))
 
 
@@ -823,6 +1039,9 @@ def _scenario_dataset(scenario_id: str) -> dict[str, object]:
     client["case_no"] = CASE_NO
     client["name"] = f"WP56 驗收客戶 {suffix}"
     client["phone"] = "09" + str(int(suffix, 16)).zfill(8)[-8:]
+    client["city"] = "臺北市"
+    client["address"] = "中正區測試路 56 號"
+    client["service_type"] = "連續服務"
     order = root["order_root_facts"]
     order["service_days"] = SERVICE_DAYS
     order["planned_start_date"] = SERVICE_START.isoformat()

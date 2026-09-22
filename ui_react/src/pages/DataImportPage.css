@@ -41,6 +41,9 @@
 .import-file-name-display { flex: 1; min-width: 120px; font-size: .84rem; color: #8c736a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .import-file-name-display.selected { color: #1e1b19; font-weight: 700; }
 .import-preview-btn,.import-apply-btn { border: 0; color: #fff; padding: 8px 18px; border-radius: 8px; font-weight: 700; font-size: .85rem; cursor: pointer; white-space: nowrap; }
+.import-clear-file-btn { border: 1px solid #c9b4ab; background: #fff; color: #74593f; padding: 8px 12px; border-radius: 8px; font-weight: 700; font-size: .82rem; cursor: pointer; white-space: nowrap; }
+.import-clear-file-btn:hover:not(:disabled) { background: #fff0eb; border-color: #e0683a; color: #a63f1f; }
+.import-clear-file-btn:disabled { opacity: .55; cursor: not-allowed; }
 .import-preview-btn { background: #ff7f50; }
 .import-preview-btn:hover:not(:disabled) { background: #e0683a; }
 .import-preview-btn:disabled,.import-apply-btn:disabled { opacity: .55; cursor: not-allowed; }
