@@ -3,11 +3,15 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import { OrderCandidateContactStatusPanel } from '../../../../../../../components/OrderCandidateContactStatusPanel';
 import { OrderInformationSheets } from '../../../../../../../components/OrderInformationSheets';
 import { candidateContactPoolClient as client } from '../../../../../../../api/scheduling/candidate_contact_pool_client';
+import { queryOrderInformation } from '../../../../../../../api/orders/order_information_client';
 
 const { createInformationCommand } = vi.hoisted(() => ({ createInformationCommand: vi.fn() }));
 vi.mock('../../../../../../../api/scheduling/candidate_contact_pool_client', () => ({
   createCandidateInformationSendCommand: createInformationCommand,
   candidateContactPoolClient: { query: vi.fn(), previewInformation: vi.fn(), previewWeeklyService: vi.fn(), sendInformation: vi.fn() },
+}));
+vi.mock('../../../../../../../api/orders/order_information_client', () => ({
+  queryOrderInformation: vi.fn(),
 }));
 beforeEach(() => {
   vi.resetAllMocks();
@@ -59,8 +63,30 @@ it('previews weekly service in the same earlier information step', async () => {
   render(<OrderInformationSheets caseNo="CASE-1" assignments={[]} />);
   await screen.findByText('資訊1：服務報酬待確認');
 
-  fireEvent.click(screen.getByText('每周服務中說明'));
+  fireEvent.click(screen.getByText('每週服務時間說明'));
 
   expect(await screen.findByRole('table')).toHaveTextContent('16 小時');
   expect(client.previewWeeklyService).toHaveBeenCalledWith('CASE-1', 3, expect.objectContaining({ signal: expect.any(AbortSignal) }));
+});
+
+it('shows missing order-information values as non-blocking warnings', async () => {
+  vi.mocked(queryOrderInformation).mockResolvedValue({
+    template_id: 'tpl_info_01', case_no: 'CASE-1', assignment_id: 7,
+    fields: [{
+      field_id: 'f_108_c8', label: '服務地址', owner: 'orders', source: null,
+      requiredness: 'required', status: 'missing', value: null,
+    }],
+    owner_fingerprints: {}, blockers: [],
+    warnings: ['order_information_required_field_missing:f_108_c8'],
+    preview_fingerprint: 'a'.repeat(64), can_render: true,
+  });
+
+  render(<OrderInformationSheets caseNo="CASE-1" assignments={[{
+    assignment_id: 7, sequence: 1, staff_id: 2,
+    assigned_start_date: '2026-09-01', assigned_end_date: '2026-09-05',
+  }] as never} />);
+
+  expect(await screen.findByText('部分資料尚未提供，已在欄位中標示；不影響目前資料的預覽。')).toBeInTheDocument();
+  expect(screen.getAllByText('待確認').length).toBeGreaterThan(0);
+  expect(screen.queryByText('模板或資料投影發生技術錯誤，目前無法完成預覽。')).not.toBeInTheDocument();
 });

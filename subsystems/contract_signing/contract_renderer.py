@@ -193,11 +193,9 @@ def render_contract_template(
                 "契約 PDF 欄位缺少核准的 requiredness 與 typed owner source。",
             )
         if key not in facts or facts.get(key) is None:
-            if requiredness == "required":
-                raise ContractRendererError(
-                    "contract_pdf_required_mapping_missing",
-                    "契約 PDF 欄位缺少核准的 typed owner source。",
-                )
+            # A missing owner value remains blank in the current-data
+            # projection. Preview reports the exact field as a warning; the
+            # renderer must not invent a value or turn absence into a gate.
             worksheet[cell] = None
             continue
         value = facts[key]

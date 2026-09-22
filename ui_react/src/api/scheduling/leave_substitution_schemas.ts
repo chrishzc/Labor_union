@@ -60,6 +60,7 @@ const leaveSubstitutionItemFields = {
   resolution_type: LeaveResolutionTypeSchema,
   substitute_staff_id: z.number().int().positive().nullable(),
   is_double_pay: z.boolean(),
+  replacement_work_date: LeaveSubstitutionIsoDateSchema.nullable().optional(),
 };
 
 export const LeaveSubstitutionItemSchema = z
@@ -72,6 +73,13 @@ export const LeaveSubstitutionItemSchema = z
         message: 'substitute resolution requires substitute_staff_id。',
       });
     }
+    if (item.resolution_type === 'substitute' && item.replacement_work_date != null) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['replacement_work_date'],
+        message: 'substitute resolution cannot carry replacement_work_date。',
+      });
+    }
     if (
       item.resolution_type === 'defer_following_assignments' &&
       (item.substitute_staff_id !== null || item.is_double_pay)
@@ -80,6 +88,13 @@ export const LeaveSubstitutionItemSchema = z
         code: z.ZodIssueCode.custom,
         path: ['resolution_type'],
         message: 'defer resolution cannot carry substitute or double-pay data。',
+      });
+    }
+    if (item.replacement_work_date === item.work_date) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['replacement_work_date'],
+        message: 'replacement_work_date 必須不同於原服務日。',
       });
     }
   });

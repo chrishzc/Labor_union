@@ -164,6 +164,22 @@ def test_complete_pair_and_unlinked_request_are_both_valid_commands() -> None:
     assert (linked_apply.leave_request_id, linked_apply.expected_leave_request_version) == (77, 4)
 
 
+def test_preview_request_preserves_specified_replacement_date_in_domain_intent() -> None:
+    body = LeaveSubstitutionPreviewBody.model_validate({
+        "original_assignment_id": 1,
+        "items": [{
+            "original_schedule_id": 10,
+            "work_date": "2026-08-03",
+            "resolution_type": "defer_following_assignments",
+            "substitute_staff_id": None,
+            "is_double_pay": False,
+            "replacement_work_date": "2026-08-11",
+        }],
+    })
+
+    assert body.to_intent().items[0].replacement_work_date == date(2026, 8, 11)
+
+
 def test_impact_views_are_exactly_typed_and_reject_internal_extension_fields() -> None:
     assert LeaveSubstitutionPreviewView.model_fields[
         "client_finance_impact"

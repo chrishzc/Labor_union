@@ -80,6 +80,7 @@ class OrderInformationResult:
     fields: tuple[OrderInformationFieldView, ...]
     owner_fingerprints: Mapping[str, str]
     blockers: tuple[str, ...]
+    warnings: tuple[str, ...]
     preview_fingerprint: PreviewFingerprint
 
     @property
@@ -143,7 +144,9 @@ class OrderInformationQueryService:
                 "order_information_target_mismatch",
                 "訂單資訊預覽對象身分不一致。",
             )
-        fields, blockers = _project_fields(template, snapshot.facts, snapshot.field_issues)
+        fields, blockers, warnings = _project_fields(
+            template, snapshot.facts, snapshot.field_issues
+        )
         fingerprint = fingerprint_payload(
             {
                 "template_id": template.value,
@@ -155,6 +158,7 @@ class OrderInformationQueryService:
                     for field in fields
                 ],
                 "blockers": list(blockers),
+                "warnings": list(warnings),
             }
         )
         return OrderInformationResult(
@@ -164,6 +168,7 @@ class OrderInformationQueryService:
             fields,
             dict(sorted(snapshot.owner_fingerprints.items())),
             blockers,
+            warnings,
             fingerprint,
         )
 
@@ -209,7 +214,7 @@ def build_order_information_message(
     if info_type not in (1, 2):
         raise ValueError("info_type_invalid")
     template = OrderInformationTemplate.INFO_01 if info_type == 1 else OrderInformationTemplate.INFO_02
-    fields, blockers = _project_fields(template, facts, field_issues)
+    fields, blockers, _warnings = _project_fields(template, facts, field_issues)
     lines = [f"訂單資訊－{info_type}", introduction]
     labels = {"f_104_c4": "預計服務開始日期", "f_105_c5": "預計服務結束日期", "f_106_c6": "每日服務時數"}
     for item in fields:
@@ -235,7 +240,9 @@ def _project_fields(
     template: OrderInformationTemplate,
     facts: Mapping[str, object],
     field_issues: Mapping[str, str],
-) -> tuple[tuple[OrderInformationFieldView, ...], tuple[str, ...]]:
+) -> tuple[
+    tuple[OrderInformationFieldView, ...], tuple[str, ...], tuple[str, ...]
+]:
     path = TEMPLATE_DIRECTORY / f"{template.value}.json"
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -250,6 +257,7 @@ def _project_fields(
         )
     projected: list[OrderInformationFieldView] = []
     blockers: set[str] = set()
+    warnings: set[str] = set()
     for raw in raw_fields:
         if not isinstance(raw, Mapping):
             blockers.add("order_information_template_invalid")
@@ -276,12 +284,12 @@ def _project_fields(
         field_status = status
         issue = field_issues.get(key)
         if issue:
-            blockers.add(f"order_information_source_{issue}:{field_id}")
+            warnings.add(f"order_information_source_{issue}:{field_id}")
             field_status = "missing"
         elif status == "unresolved":
-            blockers.add(f"order_information_source_unresolved:{field_id}")
+            warnings.add(f"order_information_source_unresolved:{field_id}")
         elif requiredness == "required" and _is_missing(value):
-            blockers.add(f"order_information_required_field_missing:{field_id}")
+            warnings.add(f"order_information_required_field_missing:{field_id}")
             field_status = "missing"
         elif requiredness == "conditional" and _is_missing(value):
             field_status = "absent"
@@ -292,7 +300,7 @@ def _project_fields(
                 field_id, label, owner, source, requiredness, field_status, value
             )
         )
-    return tuple(projected), tuple(sorted(blockers))
+    return tuple(projected), tuple(sorted(blockers)), tuple(sorted(warnings))
 
 
 def _is_missing(value: object) -> bool:

@@ -130,6 +130,8 @@ lineage 中客戶與目標月嫂全數 `confirmed` 或 `manually_confirmed`；�
 
 多日請假為一次 Preview、一個 fingerprint、一次 Apply transaction；每一天保存 immutable outcome。正式結果只允許順延或指定代班。代班建立獨立 assignment；取消或更正以反向／替代事件處理。
 
+2026-09-20 人工裁決：順延處理可選擇指定補班日期。未指定時仍依案件固定週休、國定假日及目前有效的國定假日上班協議自動順延；指定時只將該次服務由原服務日移至明確新日，不得無聲改成其他日期，也不得連帶移動其他既有服務日。原日與新日不得重複計入，全案服務日數守恆；與同案服務日、案件休假條件或人員占用衝突時，Preview／Apply 必須沿既有 typed blocker／conflict fail closed。指定日期須納入 request snapshot、fingerprint、immutable outcome 與正式 generation readback，不建立另一套單日 CRUD 或平行 writer。
+
 2026-08-12 人工裁決：月嫂請假審核的 API、typed client 與管理入口由 Scheduling 擁有，
 不得掛在 LINE identity review route 或 `LineAdminApiClient`。LINE 只提供 verified identity、
 delivery intent 與通知結果。現有依賴已退役 `services.*` 的 review service 是 `live-drift`，

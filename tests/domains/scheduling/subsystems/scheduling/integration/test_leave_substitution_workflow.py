@@ -12,6 +12,7 @@ import pytest
 
 from domains.scheduling.leave_substitution import (
     LeaveSubstitutionFacts,
+    LeaveSubstitutionDomainError,
     LeaveResolutionType,
     LeaveSubstitutionBatchIntent,
     LeaveSubstitutionItem,
@@ -23,8 +24,11 @@ from domains.scheduling.assignment_plan import (
     EffectiveAssignmentFact,
 )
 from infrastructure.mysql.scheduling_holiday_query import MySqlSchedulingHolidayQuery
+from infrastructure.mysql import leave_substitution_repository
+from subsystems.scheduling.holiday_calendar_query import HolidayCalendarFacts
 from subsystems.scheduling.leave_substitution_workflow import (
     _canonical_staff_ids,
+    _query_holiday_facts,
     leave_request_fingerprint,
 )
 
@@ -44,6 +48,33 @@ def test_leave_substitution_workflow_is_readable_source_without_bridge():
 
 def test_leave_request_fingerprint_is_deterministic_for_typed_batch():
     assert leave_request_fingerprint(_intent()) == leave_request_fingerprint(_intent())
+
+
+def test_leave_request_fingerprint_includes_specified_replacement_date():
+    first = LeaveSubstitutionBatchIntent(
+        1,
+        (
+            LeaveSubstitutionItem(
+                10,
+                date(2026, 8, 3),
+                LeaveResolutionType.DEFER_FOLLOWING_ASSIGNMENTS,
+                replacement_work_date=date(2026, 8, 11),
+            ),
+        ),
+    )
+    second = LeaveSubstitutionBatchIntent(
+        1,
+        (
+            LeaveSubstitutionItem(
+                10,
+                date(2026, 8, 3),
+                LeaveResolutionType.DEFER_FOLLOWING_ASSIGNMENTS,
+                replacement_work_date=date(2026, 8, 12),
+            ),
+        ),
+    )
+
+    assert leave_request_fingerprint(first) != leave_request_fingerprint(second)
 
 
 def test_preflight_staff_ids_must_be_already_canonical():
@@ -78,6 +109,219 @@ def test_holiday_rest_day_defers_service_without_changing_contract_day_count():
     )
     assert planned_dates == [date(2026, 8, 1), date(2026, 8, 3), date(2026, 8, 4)]
     assert len(planned_dates) == facts.assignment_plan.contracted_service_days
+
+
+def test_automatic_defer_skips_case_fixed_rest_weekdays():
+    service_dates = (date(2026, 9, 18), date(2026, 9, 21), date(2026, 9, 22))
+    assignment = EffectiveAssignmentFact(1, 1, 1, service_dates[0], service_dates[-1], service_dates)
+    facts = LeaveSubstitutionFacts(
+        AssignmentPlanFacts("case-weekend", 1, 1, 1, 1, 1, 3, 8, True, (assignment,)),
+        tuple(OfficialScheduleFact(index + 1, 1, 1, value) for index, value in enumerate(service_dates)),
+        False,
+        (5, 6),
+    )
+
+    candidate = build_leave_substitution_candidate(
+        facts,
+        LeaveSubstitutionBatchIntent(
+            1,
+            (LeaveSubstitutionItem(1, service_dates[0], LeaveResolutionType.DEFER_FOLLOWING_ASSIGNMENTS),),
+        ),
+    )
+
+    assert candidate.scheduling.assignments[0].service_dates == (
+        date(2026, 9, 21),
+        date(2026, 9, 22),
+        date(2026, 9, 23),
+    )
+
+
+def test_substitution_preserves_existing_approved_holiday_work_date():
+    service_dates = (date(2026, 10, 9), date(2026, 10, 10), date(2026, 10, 12))
+    assignment = EffectiveAssignmentFact(1, 1, 1, service_dates[0], service_dates[-1], service_dates)
+    facts = LeaveSubstitutionFacts(
+        AssignmentPlanFacts("case-holiday-work", 1, 1, 1, 1, 1, 3, 8, True, (assignment,)),
+        tuple(OfficialScheduleFact(index + 1, 1, 1, value) for index, value in enumerate(service_dates)),
+        False,
+        (5, 6),
+        (date(2026, 10, 10),),
+    )
+
+    candidate = build_leave_substitution_candidate(
+        facts,
+        LeaveSubstitutionBatchIntent(
+            1,
+            (LeaveSubstitutionItem(1, service_dates[0], LeaveResolutionType.SUBSTITUTE, 2),),
+        ),
+        (date(2026, 10, 10),),
+    )
+
+    planned_dates = sorted(
+        service_date
+        for segment in candidate.scheduling.assignments
+        for service_date in segment.service_dates
+    )
+    assert planned_dates == list(service_dates)
+
+
+def test_specified_replacement_moves_only_selected_service_and_conserves_days():
+    service_dates = (date(2026, 9, 18), date(2026, 9, 21), date(2026, 9, 23))
+    assignment = EffectiveAssignmentFact(1, 1, 1, service_dates[0], service_dates[-1], service_dates)
+    facts = LeaveSubstitutionFacts(
+        AssignmentPlanFacts("case-specified", 1, 1, 1, 1, 1, 3, 8, True, (assignment,)),
+        tuple(OfficialScheduleFact(index + 1, 1, 1, value) for index, value in enumerate(service_dates)),
+        False,
+        (5, 6),
+    )
+
+    candidate = build_leave_substitution_candidate(
+        facts,
+        LeaveSubstitutionBatchIntent(
+            1,
+            (
+                LeaveSubstitutionItem(
+                    1,
+                    service_dates[0],
+                    LeaveResolutionType.DEFER_FOLLOWING_ASSIGNMENTS,
+                    replacement_work_date=date(2026, 9, 22),
+                ),
+            ),
+        ),
+    )
+
+    assert candidate.scheduling.assignments[0].service_dates == (
+        date(2026, 9, 21),
+        date(2026, 9, 22),
+        date(2026, 9, 23),
+    )
+    assert candidate.outcomes[0].original_work_date == date(2026, 9, 18)
+    assert candidate.outcomes[0].resulting_service_date == date(2026, 9, 22)
+
+
+def test_specified_replacement_rejects_rest_or_existing_service_date():
+    service_dates = (date(2026, 9, 18), date(2026, 9, 21))
+    assignment = EffectiveAssignmentFact(1, 1, 1, service_dates[0], service_dates[-1], service_dates)
+    facts = LeaveSubstitutionFacts(
+        AssignmentPlanFacts("case-specified-conflict", 1, 1, 1, 1, 1, 2, 8, True, (assignment,)),
+        tuple(OfficialScheduleFact(index + 1, 1, 1, value) for index, value in enumerate(service_dates)),
+        False,
+        (5, 6),
+    )
+
+    for replacement_date, message in (
+        (date(2026, 9, 19), "rest date"),
+        (date(2026, 9, 21), "duplicate service ownership"),
+    ):
+        with pytest.raises(LeaveSubstitutionDomainError, match=message):
+            build_leave_substitution_candidate(
+                facts,
+                LeaveSubstitutionBatchIntent(
+                    1,
+                    (
+                        LeaveSubstitutionItem(
+                            1,
+                            service_dates[0],
+                            LeaveResolutionType.DEFER_FOLLOWING_ASSIGNMENTS,
+                            replacement_work_date=replacement_date,
+                        ),
+                    ),
+                ),
+            )
+
+
+def test_specified_replacement_extends_holiday_query_to_exact_target():
+    service_dates = (date(2026, 9, 18), date(2026, 9, 21))
+    assignment = EffectiveAssignmentFact(1, 1, 1, service_dates[0], service_dates[-1], service_dates)
+    facts = LeaveSubstitutionFacts(
+        AssignmentPlanFacts("case-horizon", 1, 1, 1, 1, 1, 2, 8, True, (assignment,)),
+        tuple(OfficialScheduleFact(index + 1, 1, 1, value) for index, value in enumerate(service_dates)),
+        False,
+    )
+    intent = LeaveSubstitutionBatchIntent(
+        1,
+        (
+            LeaveSubstitutionItem(
+                1,
+                service_dates[0],
+                LeaveResolutionType.DEFER_FOLLOWING_ASSIGNMENTS,
+                replacement_work_date=date(2026, 12, 1),
+            ),
+        ),
+    )
+
+    class HolidayQuery:
+        call = None
+
+        def query(self, from_date, to_date, *, lock):
+            self.call = (from_date, to_date, lock)
+            return HolidayCalendarFacts("fake:holidays/v1", "version-1", ())
+
+    holiday_query = HolidayQuery()
+
+    _query_holiday_facts(facts, intent, holiday_query, True)
+
+    assert holiday_query.call == (date(2026, 9, 18), date(2026, 12, 1), True)
+
+
+def test_mysql_calendar_policy_reads_case_rest_mode_and_effective_holiday_agreements(monkeypatch):
+    target_date = date(2026, 12, 1)
+    intent = LeaveSubstitutionBatchIntent(
+        1,
+        (
+            LeaveSubstitutionItem(
+                1,
+                date(2026, 9, 18),
+                LeaveResolutionType.DEFER_FOLLOWING_ASSIGNMENTS,
+                replacement_work_date=target_date,
+            ),
+        ),
+    )
+    schedules = (OfficialScheduleFact(1, 1, 1, date(2026, 9, 18)),)
+
+    class Cursor:
+        def __init__(self):
+            self.executions = []
+
+        def execute(self, statement, params):
+            self.executions.append((statement, params))
+
+        def fetchone(self):
+            return {"service_mode": "週休2日"}
+
+        def fetchall(self):
+            return ()
+
+    class AgreementRepository:
+        def __init__(self, connection):
+            assert connection is database_connection
+
+        def current_accepted_holiday_dates(self, case_no, start_date, end_date):
+            assert (case_no, start_date, end_date) == (
+                "case-policy",
+                date(2026, 9, 18),
+                target_date,
+            )
+            return (date(2026, 10, 10),)
+
+    database_connection = object()
+    cursor = Cursor()
+    monkeypatch.setattr(
+        leave_substitution_repository,
+        "MySqlMatchingHolidayWorkAgreementRepository",
+        AgreementRepository,
+    )
+
+    result = leave_substitution_repository._calendar_policy(
+        cursor,
+        database_connection,
+        "case-policy",
+        intent,
+        schedules,
+        lock=True,
+    )
+
+    assert result == ((5, 6), (date(2026, 10, 10),))
+    assert any("FOR UPDATE" in statement for statement, _ in cursor.executions)
 
 
 def test_in_progress_substitution_needs_no_new_contract_or_customer_signature():

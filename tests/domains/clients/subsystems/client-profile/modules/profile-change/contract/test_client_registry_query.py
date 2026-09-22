@@ -1,10 +1,22 @@
 """Case-centered Client registry read-composition contract."""
 
-import pytest
+from datetime import date, timedelta
 from types import SimpleNamespace
 
+import pytest
+
 from api.routes.client_registry import get_client_registry, list_client_registry
-from infrastructure.mysql.client_registry_query_repository import MySqlClientRegistryQueryRepository
+from domains.client_finance.obligation_planning import (
+    ClientChargeDay,
+    ClientFinanceTermsFacts,
+    ClientPaymentTerms,
+)
+from infrastructure.mysql.client_registry_query_repository import (
+    MySqlClientRegistryQueryRepository,
+    _client_service_received_total,
+    _finance_values,
+)
+from shared_kernel.money import MoneyNTD
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.client_profile.registry_query import (
     ClientRegistryContractError,
@@ -321,3 +333,57 @@ def test_mysql_registry_list_keeps_null_distinct_from_explicit_cooking_filter():
     statement, parameters = connection.cursor_instance.statements[0]
     assert "o.requires_cooking = %s" in statement
     assert parameters == (False, 26, 0)
+
+
+def test_client_receipt_summary_includes_adjustment_allocations_and_net_reversals():
+    cursor = _SqlCursor(({"received_total_ntd": 70000},))
+
+    received_total = _client_service_received_total(cursor, "CASE-001")
+
+    statement, parameters = cursor.statements[0]
+    assert received_total == 70000
+    assert "obligation.direction='receivable_from_client'" in statement
+    assert "obligation.obligation_type IN ('deposit','first','second','adjustment')" in statement
+    assert "WHEN 'refund' THEN -allocation.amount_ntd" in statement
+    assert "WHEN 'reversal' THEN -allocation.amount_ntd" in statement
+    assert parameters == ("CASE-001",)
+
+
+def test_registry_balance_uses_paid_adjustment_allocation(monkeypatch):
+    start = date(2026, 10, 1)
+    facts = ClientFinanceTermsFacts(
+        case_no="CASE-001",
+        account_version=4,
+        service_hours_per_day=10,
+        floor_fee=MoneyNTD(0),
+        charge_days=tuple(
+            ClientChargeDay(start + timedelta(days=offset), False)
+            for offset in range(20)
+        ),
+        payment_terms=ClientPaymentTerms(
+            deposit_service_days=5,
+            client_hourly_rate=MoneyNTD(350),
+            deposit_due_date=date(2026, 9, 20),
+            first_payment_due_date=date(2026, 10, 1),
+            second_payment_due_date=date(2026, 10, 15),
+        ),
+        existing_obligations=(),
+    )
+    connection = _SqlConnection(
+        [
+            {"case_no": "CASE-001"},
+            {"received_total_ntd": 70000},
+            (),
+        ]
+    )
+    monkeypatch.setattr(
+        "infrastructure.mysql.client_registry_query_repository.load_contract_client_finance_facts",
+        lambda _cursor, _order, lock: facts,
+    )
+
+    status, code, values = _finance_values(connection, "CASE-001")
+
+    assert (status, code) == ("ready", None)
+    assert values["customer_payable_total_ntd"] == 70000
+    assert values["received_total_ntd"] == 70000
+    assert values["customer_balance_ntd"] == 0

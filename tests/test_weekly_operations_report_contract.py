@@ -182,6 +182,7 @@ def test_weekly_query_is_redacted_and_uses_official_work_days():
     ]
     assert data["service_rows"][0]["weekly_work_days"] == 5
     assert data["service_rows"][0]["weekly_hours"] == 40
+    assert data["service_rows"][0]["staff_name"] == "陳月嫂"
     assert data["case_rows"][0]["applicant_name"] == "王小美"
     assert data["subsidy_partitions"][0]["rows"][0]["identity_card"] == "A123456789"
     assert data["subsidy_partitions"][0]["rows"][0]["application_roc_year"] == 114
@@ -200,6 +201,72 @@ def test_operations_report_rejects_inverted_date_range():
     )
     assert response.status_code == 400
     assert response.json()["detail"]["error"]["code"] == "weekly_operations_report_invalid"
+
+
+def test_weekly_service_keeps_partial_rows_and_uses_order_completion_only():
+    class PartialFacts(_Facts):
+        def list_service_facts(self, _start_date, _end_date):
+            return [
+                WeeklyServiceFact(
+                    41, "115000041", "缺時數雇主", "甲月嫂", None, None,
+                    None, 3, date(2026, 8, 17), date(2026, 8, 23), "服務中", "completed",
+                ),
+                WeeklyServiceFact(
+                    42, "115000042", "已完成雇主", "乙月嫂", date(2026, 8, 1), date(2026, 8, 31),
+                    8, 2, date(2026, 8, 17), date(2026, 8, 23), "歷史訂單－服務完成", "active",
+                ),
+            ]
+
+    query = WeeklyOperationsReportQuery(
+        PartialFacts(),
+        lambda: datetime(2026, 8, 23, 12, tzinfo=TAIPEI_TIME_ZONE),
+    )
+    report = query.query(date(2026, 8, 20), date(2026, 8, 26))
+
+    assert len(report.service_rows) == 2
+    partial, completed = report.service_rows
+    assert partial.weekly_work_days == 3
+    assert partial.service_hours_per_day is None
+    assert partial.weekly_hours is None
+    assert partial.completed is False
+    assert partial.data_quality_codes == (
+        "service_hours_per_day_missing",
+        "service_period_missing",
+    )
+    assert completed.completed is True
+    assert any(issue.code == "service_row_incomplete" and issue.row_count == 1 for issue in report.data_quality_issues)
+
+
+def test_weekly_service_export_keeps_partial_row_blank_and_adds_reminder():
+    class PartialFacts(_Facts):
+        def list_service_facts(self, _start_date, _end_date):
+            return [
+                WeeklyServiceFact(
+                    51, "115000051", "缺時數雇主", "甲月嫂", None, None,
+                    None, 3, date(2026, 8, 17), date(2026, 8, 23), "服務中", "active",
+                ),
+            ]
+
+    app = _app()
+    app.dependency_overrides[get_weekly_operations_report_query] = lambda: WeeklyOperationsReportQuery(
+        PartialFacts(),
+        lambda: datetime(2026, 8, 23, 12, tzinfo=TAIPEI_TIME_ZONE),
+    )
+    response = TestClient(app).get(
+        "/api/v1/operations-reports/weekly/export",
+        params={"start_date": "2026-08-20", "end_date": "2026-08-26"},
+    )
+
+    assert response.status_code == 200
+    worksheet = load_workbook(BytesIO(response.content))["每周服務中說明"]
+    assert worksheet.cell(row=3, column=5).value == "甲月嫂"
+    assert worksheet.cell(row=3, column=8).value is None
+    assert worksheet.cell(row=3, column=9).value == 3
+    assert worksheet.cell(row=3, column=10).value is None
+    assert worksheet.cell(row=3, column=8).comment is not None
+    assert "無法計算" in worksheet.cell(row=3, column=8).comment.text
+    assert worksheet.cell(row=3, column=3).comment is not None
+    assert "正式服務期間缺值" in worksheet.cell(row=3, column=3).comment.text
 
 
 def test_valid_date_range_does_not_misreport_invalid_source_as_date_error():
@@ -355,22 +422,22 @@ def test_weekly_export_has_fixed_three_sheets_and_summary_without_pii():
     assert subsidy_sheet.cell(row=2, column=7).value == 0
     assert subsidy_sheet.cell(row=2, column=11).value == 0
 
-    # 每周服務中說明：對齊使用者提供的 10 欄範例
+    # 每周服務中說明：在既有範例加入每列對應的服務人員。
     service_values = list(workbook["每周服務中說明"].values)
     assert service_values[0][0] == "服務總表-案件服務中說明(每周)"
     expected_headers = (
-        "週數", "序號", "市府案號", "雇主", "每週起始日",
+        "週數", "序號", "市府案號", "雇主", "服務人員", "每週起始日",
         "每週結束日", "服務時數", "每周工作日數", "每周工時", "結案",
     )
-    assert service_values[1][:10] == expected_headers
+    assert service_values[1][:11] == expected_headers
     assert service_values[2][0] == "8-3"
-    assert service_values[2][1:10] == (1, "115000007", "王小美", "2026/8/17", "2026/8/23", 8, 5, 40, None)
+    assert service_values[2][1:11] == (1, "115000007", "王小美", "陳月嫂", "2026/8/17", "2026/8/23", 8, 5, 40, None)
     assert service_values[3][0] is None
-    assert service_values[3][1:10] == (2, "115000009", "林大華", "2026/8/17", "2026/8/23", 7, 4, 28, None)
-    assert service_values[4][:10] == expected_headers
+    assert service_values[3][1:11] == (2, "115000009", "林大華", "吳月嫂", "2026/8/17", "2026/8/23", 7, 4, 28, None)
+    assert service_values[4][:11] == expected_headers
     assert service_values[5][0:2] == ("8-4", 1)
     styled_service_sheet = load_workbook(BytesIO(response.content), data_only=True)["每周服務中說明"]
-    assert str(styled_service_sheet["J2"].fill.fgColor.rgb).endswith("F4B6C2")
+    assert str(styled_service_sheet["K2"].fill.fgColor.rgb).endswith("F4B6C2")
     assert "A3:A4" in {str(cell_range) for cell_range in styled_service_sheet.merged_cells.ranges}
     assert styled_service_sheet.page_setup.orientation == "landscape"
     assert styled_service_sheet.page_setup.fitToWidth == 1

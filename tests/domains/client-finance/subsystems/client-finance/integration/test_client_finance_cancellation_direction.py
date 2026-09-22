@@ -3,25 +3,30 @@ File: test_client_finance_cancellation_direction.py
 Description: 驗證取消帳務方向與金額的 server-owned typed contract。
 """
 
-from datetime import date
+from datetime import date, timedelta
 from types import SimpleNamespace
 
 import pytest
 
 from api.schemas.order_cancellation import ClientFinanceActionView
 from domains.client_finance.obligation_planning import (
+    ClientChargeDay,
     ClientFinanceDirection,
     ClientSubsidyReturnPlan,
     ClientObligationAction,
     ClientObligationActionKind,
     ClientFinanceTermsSourceFacts,
     ClientPaymentTerms,
+    build_client_finance_terms_candidate,
     build_client_finance_terms_impact,
 )
 from domains.orders.terms import OrderTerms, ServiceTimeTerms
 from domains.scheduling.generation import AssignmentCandidate, SchedulingGenerationCandidate
 from infrastructure.mysql.client_finance_terms_writer import (
     persist_client_finance_terms_impact,
+)
+from infrastructure.mysql.order_terms_read_model import (
+    _materialize_contract_client_finance_facts,
 )
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
@@ -82,6 +87,38 @@ def test_full_subsidy_terms_do_not_create_client_service_principal() -> None:
     )
 
     assert sum(plan.amount.amount for plan in candidate.stage_plans) == 0
+
+
+def test_shared_contract_finance_reader_preserves_full_subsidy_waiver() -> None:
+    start = date(2026, 10, 1)
+    charge_days = tuple(
+        ClientChargeDay(start + timedelta(days=offset), False)
+        for offset in range(15)
+    )
+    source = ClientFinanceTermsSourceFacts(
+        case_no="115000010",
+        account_version=3,
+        payment_terms=ClientPaymentTerms(
+            deposit_service_days=5,
+            client_hourly_rate=MoneyNTD(350),
+            deposit_due_date=date(2026, 9, 20),
+            first_payment_due_date=date(2026, 10, 1),
+            second_payment_due_date=date(2026, 10, 15),
+        ),
+        double_pay_dates=(),
+        existing_obligations=(),
+        identity_status="補助市民",
+    )
+
+    facts = _materialize_contract_client_finance_facts(
+        {"case_no": "115000010", "service_hours_per_day": 8, "floor_fee": 0},
+        charge_days,
+        source,
+    )
+    candidate = build_client_finance_terms_candidate(facts, "test-full-subsidy")
+
+    assert facts.client_service_charge_waived is True
+    assert sum(stage.amount.amount for stage in candidate.stage_plans) == 0
 
 
 def _action(

@@ -490,6 +490,7 @@ def _finance_values(connection, case_no):
             facts = load_contract_client_finance_facts(
                 cursor, order_row, lock=False
             )
+            received_total = _client_service_received_total(cursor, case_no)
             cursor.execute(
                 "SELECT amount_due_ntd,due_date,status FROM client_obligations "
                 "WHERE case_no=%s AND obligation_type='subsidy_return' "
@@ -504,9 +505,6 @@ def _finance_values(connection, case_no):
         )
         stages = {item.payment_stage.value: item for item in candidate.stage_plans}
         customer_payable = sum(item.amount.amount for item in candidate.stage_plans)
-        received_total = sum(
-            item.net_settled_amount.amount for item in facts.existing_obligations
-        )
         subsidy = subsidy_rows[0] if subsidy_rows else None
         return "ready", None, {
             "virtual_account": build_client_virtual_account(case_no),
@@ -530,6 +528,27 @@ def _finance_values(connection, case_no):
         }
     except (ValueError, StopIteration) as error:
         return "not_ready", str(error), None
+
+
+def _client_service_received_total(cursor, case_no: str) -> int:
+    """Return net client cash allocated to all service receivables."""
+    cursor.execute(
+        "SELECT COALESCE(SUM(CASE ledger.entry_type "
+        "WHEN 'receipt' THEN allocation.amount_ntd "
+        "WHEN 'adjustment' THEN allocation.amount_ntd "
+        "WHEN 'refund' THEN -allocation.amount_ntd "
+        "WHEN 'reversal' THEN -allocation.amount_ntd END),0) "
+        "AS received_total_ntd FROM client_obligations obligation "
+        "JOIN client_ledger_obligation_allocations allocation "
+        "ON allocation.obligation_identity=obligation.obligation_identity "
+        "JOIN client_ledger_entries ledger ON ledger.id=allocation.ledger_entry_id "
+        "WHERE obligation.case_no=%s "
+        "AND obligation.direction='receivable_from_client' "
+        "AND obligation.obligation_type IN ('deposit','first','second','adjustment')",
+        (case_no,),
+    )
+    row = cursor.fetchone()
+    return int(row["received_total_ntd"] or 0) if row is not None else 0
 
 
 __all__ = ["MySqlClientRegistryQueryRepository"]

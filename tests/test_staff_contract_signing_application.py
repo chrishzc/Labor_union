@@ -123,14 +123,14 @@ def test_external_unsigned_document_accepts_latest_manual_customer_acceptance():
         "status": "accepted", "is_active": 1,
     })
     staff_signing._require_external_staff_segment_applicable({
-        "status": "proposed", "is_active": 1, "customer_decision": "accepted",
+        "status": "proposed", "is_active": 1, "customer_decision": "pending",
     })
 
     with pytest.raises(
         ValueError, match="contract_external_signing_accepted_plan_required"
     ):
         staff_signing._require_external_staff_segment_applicable({
-            "status": "proposed", "is_active": 1, "customer_decision": "pending",
+            "status": "rejected", "is_active": 1, "customer_decision": "pending",
         })
 
 

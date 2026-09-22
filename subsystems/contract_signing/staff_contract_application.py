@@ -497,11 +497,10 @@ def _staff_segment(connection, case_no: str, segment_id: int) -> dict[str, objec
 
 
 def _require_external_staff_segment_applicable(segment: dict[str, object]) -> None:
-    accepted = str(segment["status"]) == "accepted" or (
-        str(segment["status"]) == "proposed"
-        and str(segment.get("customer_decision", "")) == "accepted"
-    )
-    if not accepted or segment["is_active"] != 1:
+    if (
+        str(segment["status"]) not in {"proposed", "accepted"}
+        or segment["is_active"] != 1
+    ):
         raise ValueError("contract_external_signing_accepted_plan_required")
 
 

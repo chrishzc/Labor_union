@@ -192,6 +192,7 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
           confirmed: actualStart.current_actual_start_date !== null };
         modeValue = calendarDetail.service_mode;
         calculated = await schedulePrecisionClient.calculate({
+          case_no: caseNo,
           actual_start_date: basis.date,
           target_service_days: serviceDates.contracted_service_days,
           service_mode: modeValue,

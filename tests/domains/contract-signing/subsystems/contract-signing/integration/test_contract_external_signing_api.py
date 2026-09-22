@@ -152,6 +152,8 @@ class FakeFullPreview:
             template_version="a" * 64,
             owner_fingerprints={"orders": "b" * 64},
             field_values={"F1": CASE_NO},
+            field_states={"F1": "present"},
+            warnings=(),
             blockers=(),
             preview_fingerprint=route.PreviewFingerprint("c" * 64),
             ready_to_print=True,
@@ -327,6 +329,8 @@ def test_full_contract_preview_has_exact_targets_and_typed_values_without_locato
     assert client_preview.json()["data"]["scope"] == "client"
     assert client_preview.json()["data"]["assignment_id"] is None
     assert client_preview.json()["data"]["field_values"] == {"F1": CASE_NO}
+    assert client_preview.json()["data"]["field_states"] == {"F1": "present"}
+    assert client_preview.json()["data"]["warnings"] == []
     assert client_preview.json()["data"]["ready_to_print"] is True
     assert staff_preview.status_code == 200
     assert staff_preview.json()["data"]["scope"] == "staff"

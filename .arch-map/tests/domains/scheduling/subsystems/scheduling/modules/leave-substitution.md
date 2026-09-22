@@ -3,6 +3,9 @@ parent_subsystem: scheduling
 architecture: ../../../../../../domains/scheduling/subsystems/scheduling/modules/leave-substitution.md
 layout_status: custom_current
 test_root: ui_react/src/tests/substitution_payables_readback.test.tsx
+test_root: tests/test_leave_substitution_public_contract.py
+integration_root: tests/test_g13_leave_cancellation_disposable_mysql_e2e.py
+integration_root: ui_react/src/tests/scheduling_staff_leave_inbox_flow.test.tsx
 
 ## Current oracle
 - observed leave/substitution receipt triggers a case-bound Scheduling→Payroll→Staff Payables lineage readback for affected assignments。

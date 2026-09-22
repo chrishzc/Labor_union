@@ -67,8 +67,12 @@ function assertWeeklyView(view: WeeklyOperationsReport, startDate: string, endDa
       || weekEnd.getTime() - weekStart.getTime() !== 6 * 24 * 60 * 60 * 1000) {
       throw new WeeklyOperationsReportError('WEEKLY_REPORT_PERIOD_MISMATCH', '服務工時列不是星期一至星期日。');
     }
-    if (Math.abs(row.weekly_hours - (row.weekly_work_days * row.service_hours_per_day)) > 0.000001) {
+    if (row.weekly_hours !== null && row.service_hours_per_day !== null
+      && Math.abs(row.weekly_hours - (row.weekly_work_days * row.service_hours_per_day)) > 0.000001) {
       throw new WeeklyOperationsReportError('WEEKLY_REPORT_AGGREGATE_MISMATCH', '服務工時 aggregate 不一致。');
+    }
+    if ((row.weekly_hours === null) !== (row.service_hours_per_day === null)) {
+      throw new WeeklyOperationsReportError('WEEKLY_REPORT_AGGREGATE_MISMATCH', '服務工時缺值狀態不一致。');
     }
   }
   for (const metric of view.weekly_metrics) {

@@ -854,6 +854,7 @@ def _seed_service_schedule(cursor, scenario: dict[str, object]) -> tuple[int, ..
     assignments = cursor.fetchall()
     if not assignments:
         raise RuntimeError(f"fixture assignment missing: {case_no}")
+    _ensure_fixture_assignment_payroll_rate_snapshots(cursor, case_no, assignments)
     assignment_ids: list[int] = []
     official_dates: list[date] = []
     for assignment in assignments:
@@ -955,6 +956,58 @@ def _seed_service_schedule(cursor, scenario: dict[str, object]) -> tuple[int, ..
         (f"line-stage-service-dates:{case_no.lower()}:{next_version}", fingerprint, confirmed_version_id),
     )
     return tuple(assignment_ids)
+
+
+def _ensure_fixture_assignment_payroll_rate_snapshots(
+    cursor, case_no: str, assignments: list[dict[str, object]]
+) -> None:
+    cursor.execute(
+        "SELECT policy_version,policy_kind,hourly_rate_ntd,source_identity_status "
+        "FROM case_payroll_rate_policy_snapshots WHERE case_no=%s",
+        (case_no,),
+    )
+    case_policy = cursor.fetchone()
+    if case_policy is None:
+        raise RuntimeError(f"fixture payroll case policy missing: {case_no}")
+
+    assignment_ids = tuple(int(item["id"]) for item in assignments)
+    placeholders = ",".join("%s" for _ in assignment_ids)
+    cursor.execute(
+        "SELECT assignment_id,policy_version,policy_kind,hourly_rate_ntd,"
+        "source_identity_status FROM assignment_payroll_rate_snapshots "
+        f"WHERE assignment_id IN ({placeholders})",
+        assignment_ids,
+    )
+    existing = {int(row["assignment_id"]): row for row in cursor.fetchall()}
+    expected = (
+        str(case_policy["policy_version"]),
+        str(case_policy["policy_kind"]),
+        int(case_policy["hourly_rate_ntd"]),
+        str(case_policy["source_identity_status"]),
+    )
+    rows = []
+    for assignment_id in assignment_ids:
+        row = existing.get(assignment_id)
+        if row is None:
+            rows.append((assignment_id, *expected))
+            continue
+        actual = (
+            str(row["policy_version"]),
+            str(row["policy_kind"]),
+            int(row["hourly_rate_ntd"]),
+            str(row["source_identity_status"]),
+        )
+        if actual != expected:
+            raise RuntimeError(
+                f"fixture assignment payroll rate mismatch: {case_no}/{assignment_id}"
+            )
+    if rows:
+        cursor.executemany(
+            "INSERT INTO assignment_payroll_rate_snapshots "
+            "(assignment_id,policy_version,policy_kind,hourly_rate_ntd,"
+            "source_identity_status) VALUES (%s,%s,%s,%s,%s)",
+            tuple(rows),
+        )
 
 
 def _seed_completion_receipt(cursor, case_no: str) -> None:
@@ -1669,6 +1722,18 @@ def _verify_fixture_readback() -> dict[str, dict[str, int]]:
             ))
         }
         cursor.execute(
+            "SELECT a.case_no,COUNT(*) AS assignment_count,COUNT(rate.assignment_id) AS rate_count "
+            "FROM case_staff_assignments a "
+            "LEFT JOIN assignment_payroll_rate_snapshots rate ON rate.assignment_id=a.id "
+            "WHERE a.case_no LIKE '115000%' AND a.status NOT IN ('cancelled','replaced') "
+            "GROUP BY a.case_no"
+        )
+        payroll_rate_mismatches = {
+            row["case_no"]: (int(row["assignment_count"]), int(row["rate_count"]))
+            for row in cursor.fetchall()
+            if int(row["assignment_count"]) != int(row["rate_count"])
+        }
+        cursor.execute(
             "SELECT case_no,after_status FROM order_lifecycle_state_events WHERE case_no IN "
             "('115000107','115000108','115000109','115000110','115000201','115000202',"
             "'115000203','115000204','115000205','115000312','115000313')"
@@ -1723,6 +1788,7 @@ def _verify_fixture_readback() -> dict[str, dict[str, int]]:
         if (
             schedule_mismatches
             or occupancy_mismatches
+            or payroll_rate_mismatches
             or not required_events.issubset(lifecycle_events)
             or historical_accounting_root_count != 3
             or not matching_candidate_ready
@@ -1731,6 +1797,7 @@ def _verify_fixture_readback() -> dict[str, dict[str, int]]:
                 "fixture owner-root mismatch: "
                 f"schedule_mismatches={schedule_mismatches}, "
                 f"occupancy_mismatches={occupancy_mismatches}, "
+                f"payroll_rate_mismatches={payroll_rate_mismatches}, "
                 f"missing_lifecycle_events={sorted(required_events - lifecycle_events)}, "
                 f"historical_accounting_root_count={historical_accounting_root_count}, "
                 f"matching_candidate_ready={matching_candidate_ready}, "

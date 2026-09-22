@@ -425,9 +425,9 @@ def test_customer_preview_route_returns_canonical_preview_and_exact_apply_items(
     assert result.data["original_assignment_id"] == 1
     assert result.data["items"] == [
         {"original_schedule_id":11,"work_date":"2026-09-20","resolution_type":"defer_following_assignments",
-         "substitute_staff_id":None,"is_double_pay":False},
+         "substitute_staff_id":None,"is_double_pay":False,"replacement_work_date":None},
         {"original_schedule_id":13,"work_date":"2026-09-22","resolution_type":"defer_following_assignments",
-         "substitute_staff_id":None,"is_double_pay":False},
+         "substitute_staff_id":None,"is_double_pay":False,"replacement_work_date":None},
     ]
     assert "line_user_id" not in result.data and "decision" not in result.data
     app.preview_customer_defer.assert_called_once_with("CASE-001",17,3,1,CorrelationId("request-corr"))

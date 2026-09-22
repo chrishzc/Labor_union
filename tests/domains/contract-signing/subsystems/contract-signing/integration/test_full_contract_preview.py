@@ -19,11 +19,15 @@ from subsystems.contract_signing.full_contract_preview import (
     FullContractPreviewApplication,
     FullContractPreviewError,
     _mapping_blockers,
+    _mapping_validation,
 )
 from shared_kernel.clock import FixedBusinessClock
 from infrastructure.mysql.contract_full_preview_repository import (
     _canonical_service_mode,
+    _assignment_service_day_count,
+    _assignment_staff_summary,
     _due_date_from_due_month,
+    _load_client_email,
     _load_approved_subsidy_claim,
     _load_precontract_plan,
     _extend_precontract_staff_payroll,
@@ -142,7 +146,7 @@ def test_staff_segment_preview_uses_resolved_assignment_identity(monkeypatch, tm
     assert result.ready_to_print is True
 
 
-def test_preview_rejects_null_required_owner_fact(monkeypatch, tmp_path):
+def test_preview_reports_null_required_owner_fact_without_blocking(monkeypatch, tmp_path):
     mapping, template = _approved_mapping(tmp_path)
     mapping.write_text(
         json.dumps(
@@ -170,8 +174,10 @@ def test_preview_rejects_null_required_owner_fact(monkeypatch, tmp_path):
         owner_fingerprints={"orders": "a" * 64},
     )
     result = FullContractPreviewApplication(_Repository(projection)).preview_client("CASE-1")
-    assert result.ready_to_print is False
-    assert result.blockers == ("contract_pdf_required_mapping_missing",)
+    assert result.ready_to_print is True
+    assert result.blockers == ()
+    assert result.warnings == ("contract_pdf_field_missing:A1",)
+    assert result.field_states["A1"] == "missing"
 
 
 def test_client_preview_fingerprint_canonicalizes_native_owner_dates_and_amounts(
@@ -364,9 +370,17 @@ def test_absent_zero_amount_payment_stages_and_blank_notes_do_not_block_client_c
             "second_payment_amount": 0,
             amount_key: 1,
         }
-        assert _mapping_blockers("contract_client_copy", mapping, facts) == (
-            "contract_pdf_required_mapping_missing",
+        blockers, warnings, states = _mapping_validation(
+            "contract_client_copy", mapping, facts
         )
+        assert blockers == ()
+        missing_cell = {
+            "deposit_amount": "C34",
+            "first_payment_amount": "C35",
+            "second_payment_amount": "C36",
+        }[amount_key]
+        assert warnings == (f"contract_pdf_field_missing:{missing_cell}",)
+        assert states[missing_cell] == "missing"
 
 
 def test_subsidy_unresolved_mapping_blocks_only_for_typed_eligible_identity(tmp_path):
@@ -465,6 +479,75 @@ def test_real_staff_template_clears_legacy_funding_placeholders():
     assert [worksheet[cell].value for cell in ("B13", "C13", "B15", "C15")] == [24000, None, None, None]
 
 
+def test_real_templates_render_multi_staff_summary_and_personal_service_days():
+    root = Path(__file__).resolve().parents[6]
+    assignments = (
+        {"staff_name": "月嫂甲", "assigned_start_date": date(2026, 9, 1),
+         "assigned_end_date": date(2026, 9, 12), "planned_hours": 80},
+        {"staff_name": "月嫂乙", "assigned_start_date": date(2026, 9, 13),
+         "assigned_end_date": date(2026, 10, 8), "planned_hours": 160},
+    )
+    summary = _assignment_staff_summary(assignments, 8)
+
+    client_content = render_contract_template(
+        template_path=root / "db/templates/contracts/contract_client_copy.xlsx",
+        mapping_path=root / "db/templates/contracts/contract_client_copy.json",
+        facts={
+            "staff_name": summary,
+            "service_days": 30,
+            "total_hours": 240,
+            "service_time": "08:00-16:00",
+            "total_employer_self_pay_payable": 120000,
+            "email": "corrected@example.test",
+        },
+    )
+    client_sheet = load_workbook(BytesIO(client_content), data_only=False).active
+    assert client_sheet["C10"].value == summary
+    merged_ranges = {str(item) for item in client_sheet.merged_cells.ranges}
+    assert client_sheet["C10"].alignment.wrap_text is True
+    assert "C10:E10" in merged_ranges
+    assert "F10:G10" in merged_ranges
+    assert "E34:G34" in merged_ranges
+    assert "B181:D181" in merged_ranges
+    assert "E181:G181" in merged_ranges
+    assert all(
+        getattr(side, "style", None) is None
+        for side in (
+            client_sheet["E34"].border.left,
+            client_sheet["E34"].border.right,
+            client_sheet["E34"].border.top,
+            client_sheet["E34"].border.bottom,
+        )
+    )
+    assert client_sheet["B181"].alignment.wrap_text is True
+    assert client_sheet["F24"].value == 30
+    assert client_sheet["F25"].value == 240
+    assert client_sheet["E28"].value == "08:00-16:00"
+    assert client_sheet["F30"].value == 120000
+    assert client_sheet["B38"].value == 120000
+    assert client_sheet["E34"].value == "corrected@example.test"
+
+    staff_content = render_contract_template(
+        template_path=root / "db/templates/contracts/staff_service_contract.xlsx",
+        mapping_path=root / "db/templates/contracts/contract_staff_service.json",
+        facts={
+            "staff_name": "月嫂甲",
+            "service_days": 30,
+            "assignment_service_days": 5,
+            "service_time": "08:00-16:00",
+            "service_unit_price": 500,
+            "staff_payable_total": 20000,
+        },
+    )
+    staff_sheet = load_workbook(BytesIO(staff_content), data_only=False).active
+    assert staff_sheet["C4"].value == "月嫂甲"
+    assert staff_sheet["D6"].value == 30
+    assert staff_sheet["G7"].value == 5
+    assert staff_sheet["B8"].value == "08:00-16:00"
+    assert staff_sheet["B10"].value == 500
+    assert [staff_sheet[cell].value for cell in ("F10", "B13", "B19")] == [20000, 20000, 20000]
+
+
 def test_client_contract_uses_planned_due_dates_and_per_case_virtual_account():
     root = Path(__file__).resolve().parents[6]
     mapping = json.loads((root / "db/templates/contracts/contract_client_copy.json").read_text(encoding="utf-8"))
@@ -504,13 +587,48 @@ def test_client_finance_coverage_projection_uses_exact_planned_hours():
     facts = {
         "identity_status": "補助市民",
         "total_hours": 80,
+        "service_hours_per_day": 8,
         "floor_fee": 0,
     }
     owners = {"client_finance": "a" * 64}
     _project_subsidy_coverage(facts, owners)
     assert facts["subsidy_hours"] == 80
+    assert facts["client_finance_self_pay_days"] == 0
     assert facts["projected_subsidy_amount"] == 28000
     assert owners["client_finance"] != "a" * 64
+
+
+@pytest.mark.parametrize(
+    ("identity_status", "expected_self_pay_days"),
+    [("一般市民", Decimal("15")), ("非市民", Decimal("20"))],
+)
+def test_client_contract_self_pay_days_follow_uncovered_service_hours(
+    identity_status, expected_self_pay_days
+):
+    facts = {
+        "identity_status": identity_status,
+        "total_hours": 160,
+        "service_hours_per_day": 8,
+        "floor_fee": 0,
+        "deposit_service_days": 5,
+    }
+
+    _project_subsidy_coverage(facts, {"client_finance": "a" * 64})
+
+    assert facts["client_finance_self_pay_days"] == expected_self_pay_days
+
+
+def test_client_contract_self_pay_day_cells_share_the_coverage_projection():
+    root = Path(__file__).resolve().parents[6]
+    mappings = json.loads(
+        (root / "db/templates/contracts/contract_client_copy.json").read_text(
+            encoding="utf-8"
+        )
+    )["param_mappings"]
+
+    for cell in ("B30", "B39"):
+        assert mappings[cell]["db_key"] == "client_finance_self_pay_days"
+        assert mappings[cell]["db_table"] == "Client Finance subsidy coverage projection"
 
 
 class _PayrollPolicyCursor:
@@ -589,27 +707,67 @@ class _Cursor:
         return self.rows
 
 
+def test_effective_beclass_email_overrides_original_import_value():
+    cursor = _Cursor([{
+        "email": "old@example.test",
+        "effective_values_json": json.dumps({"email": "new@example.test"}),
+    }])
+
+    assert _load_client_email(cursor, "CASE-1") == "new@example.test"
+
+
+def test_effective_beclass_email_can_remain_missing_without_old_value_fallback():
+    cursor = _Cursor([{
+        "email": "old@example.test",
+        "effective_values_json": json.dumps({"email": None}),
+    }])
+
+    assert _load_client_email(cursor, "CASE-1") is None
+
+
+def test_assignment_service_days_use_planned_service_volume_not_calendar_span():
+    assignment = {
+        "assigned_start_date": date(2026, 9, 1),
+        "assigned_end_date": date(2026, 9, 7),
+        "planned_hours": Decimal("40"),
+    }
+
+    assert _assignment_service_day_count(assignment, Decimal("8")) == 5
+
+
+def test_multi_staff_client_summary_keeps_each_segment_and_service_volume():
+    assignments = (
+        {"staff_name": "月嫂甲", "assigned_start_date": date(2026, 9, 1),
+         "assigned_end_date": date(2026, 9, 12), "planned_hours": 80},
+        {"staff_name": "月嫂乙", "assigned_start_date": date(2026, 9, 13),
+         "assigned_end_date": date(2026, 10, 8), "planned_hours": 160},
+    )
+
+    assert _assignment_staff_summary(assignments, 8) == (
+        "月嫂甲（2026-09-01～2026-09-12，10天）\n"
+        "月嫂乙（2026-09-13～2026-10-08，20天）"
+    )
+
+
 class _PrecontractCursor:
-    def __init__(self, confirmed_dates=()):
+    def __init__(self, segment_end=date(2026, 9, 7)):
         self.rows = ()
-        self.confirmed_dates = confirmed_dates
+        self.segment_end = segment_end
 
     def execute(self, statement, _parameters=None):
         if "FROM caregiver_matching_plans plan" in statement:
-            assert "matching_response_events" in statement
-            assert "response.response_value" in statement
+            assert "plan.status IN ('proposed','accepted')" in statement
+            assert "matching_response_events" not in statement
             self.rows = ({"id": 51},)
         elif "FROM caregiver_matching_plan_segments segment" in statement:
             self.rows = ({
                 "id": 71,
                 "staff_id": 8892,
                 "assigned_start_date": date(2026, 9, 1),
-                "assigned_end_date": date(2026, 9, 5),
+                "assigned_end_date": self.segment_end,
                 "staff_name": "月嫂甲",
                 "staff_phone": "0900000000",
             },)
-        elif "FROM confirmed_service_date_versions version" in statement:
-            self.rows = tuple({"service_date": value} for value in self.confirmed_dates)
         else:
             raise AssertionError(statement)
 
@@ -618,8 +776,8 @@ class _PrecontractCursor:
 
 
 class _PrecontractConnection:
-    def __init__(self, confirmed_dates=()):
-        self.cursor_instance = _PrecontractCursor(confirmed_dates)
+    def __init__(self, segment_end=date(2026, 9, 7)):
+        self.cursor_instance = _PrecontractCursor(segment_end)
 
     class _Context:
         def __init__(self, cursor):
@@ -635,27 +793,23 @@ class _PrecontractConnection:
         return self._Context(self.cursor_instance)
 
 
-def test_precontract_preview_uses_confirmed_dates_without_recalculating_rest_days():
+def test_precontract_preview_projects_expected_dates_without_formal_confirmation():
     result = _load_precontract_plan(
-        _PrecontractConnection(
-            tuple(date(2026, 9, day) for day in (5, 1, 4, 2, 3))
-        ),
+        _PrecontractConnection(),
         "CASE-1",
         {"start_date": date(2026, 9, 1), "service_days": 5, "service_type": "週休2日"},
     )
 
     assert result["id"] == 51
     assert tuple(day for _, day in result["allocations"]) == tuple(
-        date(2026, 9, day) for day in range(1, 6)
+        date(2026, 9, day) for day in (1, 2, 3, 4, 7)
     )
 
 
-def test_precontract_preview_rejects_confirmed_dates_outside_accepted_segments():
+def test_precontract_preview_rejects_expected_dates_outside_current_segments():
     with pytest.raises(FullContractPreviewError) as captured:
         _load_precontract_plan(
-            _PrecontractConnection(
-                tuple(date(2026, 9, day) for day in (1, 2, 3, 4, 6))
-            ),
+            _PrecontractConnection(date(2026, 9, 4)),
             "CASE-1",
             {"start_date": date(2026, 9, 1), "service_days": 5, "service_type": "連續服務"},
         )
@@ -663,15 +817,15 @@ def test_precontract_preview_rejects_confirmed_dates_outside_accepted_segments()
     assert captured.value.code == "contract_preview_service_dates_stale"
 
 
-def test_precontract_preview_requires_current_confirmed_service_dates():
-    with pytest.raises(FullContractPreviewError) as captured:
-        _load_precontract_plan(
-            _PrecontractConnection(),
-            "CASE-1",
-            {"start_date": date(2026, 9, 1), "service_days": 5, "service_type": "連續服務"},
-        )
+def test_precontract_preview_keeps_current_plan_when_date_inputs_are_missing():
+    result = _load_precontract_plan(
+        _PrecontractConnection(),
+        "CASE-1",
+        {"start_date": None, "service_days": 5, "service_type": "連續服務"},
+    )
 
-    assert captured.value.code == "official_service_dates_incomplete"
+    assert result["id"] == 51
+    assert result["allocations"] == ()
 
 
 def test_government_claim_item_projection_requires_one_exact_approved_item():

@@ -294,7 +294,7 @@ def _seed_case() -> tuple[int, int]:
     try:
         with connection.cursor() as cursor:
             cursor.execute(
-                "INSERT INTO clients(case_no,name) VALUES (%s,'G13 Client')",
+                "INSERT INTO clients(case_no,name,service_type) VALUES (%s,'G13 Client','連續服務')",
                 (CASE_NO,),
             )
             client_id = int(cursor.lastrowid)

@@ -40,7 +40,9 @@ _STAFF_SEGMENTS_SQL = (
     "AND document.document_scope='staff_segment') AS signed_received "
     "FROM caregiver_matching_plan_segments segment "
     "JOIN caregiver_matching_plans plan ON plan.id=segment.plan_id "
-    "WHERE plan.case_no=%s ORDER BY segment.segment_order,segment.id"
+    "WHERE plan.case_no=%s AND plan.is_active=1 "
+    "AND plan.status IN ('proposed','accepted') "
+    "ORDER BY segment.segment_order,segment.id"
 )
 _COMMITMENT_SQL = "SELECT id FROM precontract_service_commitments WHERE case_no=%s"
 _CLIENT_EVENTS_SQL = (

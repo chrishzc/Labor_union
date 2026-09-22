@@ -155,6 +155,7 @@ describe('待辦看板 Beta 第 9 階服務日期', () => {
     fireEvent.click(await screen.findByRole('button', { name: '精算天數並設定服務日期' }));
 
     await waitFor(() => expect(mocks.calculate).toHaveBeenCalledWith({
+      case_no: 'CASE-SERVICE-DATES',
       actual_start_date: '2026-10-01',
       target_service_days: 3,
       service_mode: '休周六',
@@ -316,6 +317,7 @@ describe('待辦看板 Beta 第 9 階服務日期', () => {
     expect(screen.queryByLabelText('服務日期確認內容')).not.toBeInTheDocument();
     expect(screen.getByLabelText('建議服務日期摘要')).toHaveTextContent('2026-09-28');
     expect(mocks.calculate).toHaveBeenLastCalledWith({
+      case_no: 'CASE-SERVICE-DATES',
       actual_start_date: '2026-09-28',
       target_service_days: 3,
       service_mode: '休周六',

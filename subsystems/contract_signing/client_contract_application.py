@@ -315,7 +315,7 @@ class ClientContractSigningApplication:
             connection.close()
 
     def prepare_external_document(self, command: PrepareExternalClientContractCommand) -> tuple[int, bool]:
-        """Prepare the current accepted-plan source without LINE or completion facts."""
+        """Prepare the current-plan source without LINE or completion facts."""
         template = load_approved_template("contract_client_copy")
         archive = None
         try:
@@ -323,10 +323,9 @@ class ClientContractSigningApplication:
                 nonlocal archive
                 with connection.cursor() as cursor:
                     cursor.execute("SELECT plan.id AS matching_plan_id FROM caregiver_matching_plans plan "
-                                   "WHERE plan.case_no=%s AND plan.is_active=1 AND (plan.status='accepted' OR "
-                                   "(plan.status='proposed' AND (SELECT response.response_value FROM matching_response_events response "
-                                   "WHERE response.plan_id=plan.id AND response.response_type='customer_decision' "
-                                   "ORDER BY response.occurred_at_utc DESC,response.id DESC LIMIT 1)='accepted')) FOR UPDATE", (command.case_no,))
+                                   "WHERE plan.case_no=%s AND plan.is_active=1 "
+                                   "AND plan.status IN ('proposed','accepted') "
+                                   "ORDER BY plan.version DESC LIMIT 2 FOR UPDATE", (command.case_no,))
                     plans = tuple(cursor.fetchall() or ())
                 if len(plans) != 1:
                     raise ValueError("contract_external_signing_accepted_plan_required")

@@ -72,8 +72,8 @@ function safeErrorMessage(error: unknown): string {
   }
   if (error instanceof ApiHttpError) {
     if (error.status === 401 || error.status === 403) return '目前帳號無權處理這筆外部簽約。';
-    if (error.code === 'external_signing_accepted_plan_required') return '請先完成客戶對推薦方案的確認，再準備契約。';
-    if (error.code === 'external_signing_session_facts_unavailable') return '簽約資料尚未備妥，請先確認推薦方案與契約文件。';
+    if (error.code === 'external_signing_accepted_plan_required') return '目前尚無可投影契約的有效配對方案。';
+    if (error.code === 'external_signing_session_facts_unavailable') return '外部簽約工作尚未建立；仍可依目前資料準備契約文件。';
     if (error.code === 'contract_pdf_external_reference_unresolved') return '契約模板缺少舊版引用內容，尚不能產生可簽署 PDF；請先補齊模板。';
     if (error.code === 'contract_pdf_required_mapping_missing') return '契約必要資料尚未齊全，請先在契約欄位預覽核對案件資料與收款設定。';
     if (error.status === 409) return '簽約資料已變更，請重新查詢後再檢查影響。';
@@ -388,26 +388,29 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
     try {
       fresh = await contractExternalSigningClient.query(command.caseNo);
     } catch (error) {
-      if (!(command.kind === 'staff'
-        && error instanceof ApiHttpError
+      if (!(error instanceof ApiHttpError
         && error.code === 'external_signing_session_facts_unavailable')) throw error;
       const legacy = await contractSigningClient.query(command.caseNo);
       if (!ownsUnsignedPreparationOperation(command.caseNo, state.operationToken)) return;
-      const segmentObserved = command.segmentId !== null
-        && legacy.staff_segments.some((segment) => segment.segment_id === command.segmentId);
+      const targetObserved = command.kind === 'staff'
+        ? command.segmentId !== null
+          && legacy.staff_segments.some((segment) => segment.segment_id === command.segmentId)
+        : true;
       const documentObserved = legacy.documents.some((document) => (
         document.document_version_id === receipt.document_version_id
-        && document.scope === 'staff'
+        && document.scope === command.kind
       ));
-      if (!segmentObserved || !documentObserved) {
-        throw new Error('月嫂未簽契約收據尚未出現在正式契約狀態；只能重新讀取。');
+      if (!targetObserved || !documentObserved) {
+        throw new Error('未簽契約收據尚未出現在正式契約狀態；只能重新讀取。');
       }
       orderMutationFlowStore.clearExternalSigningUnsignedPreparation(command.caseNo);
       if (request !== requestGeneration.current) return;
       setQuery(null);
       setPreparationSegments(legacy.staff_segments.map((segment) => segment.segment_id));
       setUiState({ type: 'ready' });
-      setNotice(`${receipt.replayed ? '已重新確認' : '已產生'}月嫂分段 #${command.segmentId} 未簽 PDF。`);
+      setNotice(command.kind === 'client'
+        ? `${receipt.replayed ? '已重新確認' : '已產生'}客戶未簽契約 PDF。`
+        : `${receipt.replayed ? '已重新確認' : '已產生'}月嫂分段 #${command.segmentId} 未簽 PDF。`);
       return;
     }
     if (!ownsUnsignedPreparationOperation(command.caseNo, state.operationToken)) return;
@@ -480,7 +483,7 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
   };
 
   const prepareUnsigned = async (kind: 'client' | 'staff', segmentId: number | null) => {
-    if (unsignedPreparationFlow || (!query && kind === 'client')) return;
+    if (unsignedPreparationFlow) return;
     const actor = sessionClient.getUser()?.username.trim() ?? '';
     if (!actor) {
       setUiState({ type: 'error', message: '請先登入後再準備未簽契約。' });
@@ -926,16 +929,15 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
 
       <div className="order-case-document-grid" aria-label="下載兩種契約">
         <article><h3>客戶契約 PDF</h3><p>下載未簽署版本，供客戶確認與簽署。</p>
-          <button type="button" disabled={busy || !!unsignedPreparationFlow || !query || (query.state === 'completed' && (!query.unsigned_document || query.client_target.document_version_id === null))} onClick={() => {
-            if (!query) return;
-            if (query.unsigned_document && query.client_target.document_version_id !== null) {
+          <button type="button" disabled={busy || !!unsignedPreparationFlow || (query?.state === 'completed' && (!query.unsigned_document || query.client_target.document_version_id === null))} onClick={() => {
+            if (query?.unsigned_document && query.client_target.document_version_id !== null) {
               void downloadUnsigned(query.client_target.document_version_id, `客戶 ${query.client_target.client_subject_reference} `);
               return;
             }
             void prepareUnsigned('client', null);
           }}>下載客戶契約 PDF</button>
-          {!query && preparationSegments.length > 0 && <p>請先準備服務人員契約，再準備客戶契約。</p>}
-          {query && (!query.unsigned_document || query.client_target.document_version_id === null) && <p>尚無文件時，點擊下載會自動產生契約；需已確認推薦方案，不會發送訊息。</p>}
+          {!query && preparationSegments.length > 0 && <p>可依目前資料直接產生客戶契約；服務人員契約仍各自對應服務區段。</p>}
+          {query && (!query.unsigned_document || query.client_target.document_version_id === null) && <p>尚無文件時，點擊下載會依目前資料自動產生契約；不會發送訊息或改變同意、簽約及履約狀態。</p>}
         </article>
         <article><h3>服務人員契約 PDF</h3><p>每位月嫂的契約分別下載。</p>
           {query?.unsigned_document && query.staff_targets.length > 0 ? query.staff_targets.map((target) => <button key={target.matching_segment_id} type="button" disabled={busy} onClick={() => void downloadUnsigned(target.document_version_id, `月嫂 ${target.staff_subject_reference} `)}>下載服務人員契約 PDF（{target.staff_subject_reference}）</button>) : <><button type="button" disabled>下載服務人員契約 PDF</button><p>{!query ? '尚未取得可下載文件的確認結果。' : '尚無可下載文件。'}若下方有「準備服務人員契約」，請先完成文件準備。</p></>}
@@ -947,7 +949,7 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
         <section aria-label="準備月嫂未簽契約 PDF" style={{ border: '1px solid #dec0b6', borderRadius: '10px', padding: '12px', display: 'grid', gap: '8px' }}>
           <strong>準備服務人員契約</strong>
           <div style={{ fontSize: '0.82rem', color: '#74593f' }}>
-            核對案件與服務安排後產生未簽署的契約；此操作不會寄送訊息。
+            依目前案件與服務安排產生未簽署的契約；缺值只會提醒，此操作不會寄送訊息或改變業務狀態。
           </div>
           {(query
             ? query.staff_targets.map((target) => target.matching_segment_id)

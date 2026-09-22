@@ -5,11 +5,12 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from datetime import date, datetime
-from decimal import Decimal
+from decimal import Decimal, ROUND_CEILING
 import re
 from typing import Any
 
 from domains.case_import.order_information import project_order_information
+from domains.orders.actual_start import calculate_service_dates
 from domains.client_finance.subsidy_coverage import derive_subsidy_coverage
 from domains.payroll.calculation import (
     AssignmentRateSnapshot,
@@ -73,13 +74,23 @@ class MySqlFullContractProjectionRepository:
             row for row in assignments
             if row.get("status") not in {"cancelled", "replaced"}
         )
+        if current:
+            facts["staff_name"] = _assignment_staff_summary(
+                current, facts.get("service_hours_per_day")
+            )
+            planned_hours = tuple(
+                _decimal_or_none(row.get("planned_hours")) for row in current
+            )
+            if all(value is not None for value in planned_hours):
+                facts["total_hours"] = sum(
+                    (value for value in planned_hours if value is not None),
+                    Decimal("0"),
+                )
         if len(current) == 1:
-            facts["staff_name"] = current[0].get("staff_name")
             facts["assignment_hourly_rate"] = current[0].get("hourly_rate")
             # Scheduling owns the assignment's planned hours.  This is a
             # read-through of the exact assignment value, never an
             # order-days × hours formula in Contract Signing.
-            facts["total_hours"] = current[0].get("planned_hours")
             active_assignment_id = int(current[0]["assignment_id"])
         else:
             active_assignment_id = None
@@ -138,7 +149,9 @@ class MySqlFullContractProjectionRepository:
                 "end_date": assignment.get("assigned_end_date"),
                 "assignment_start_date": assignment.get("assigned_start_date"),
                 "assignment_end_date": assignment.get("assigned_end_date"),
-                "assignment_service_days": _service_day_count(assignment),
+                "assignment_service_days": _assignment_service_day_count(
+                    assignment, facts.get("service_hours_per_day")
+                ),
                 "service_unit_price": assignment.get("hourly_rate"),
                 "total_hours": assignment.get("planned_hours"),
             }
@@ -207,12 +220,12 @@ class MySqlFullContractProjectionRepository:
             if segment is None:
                 return None
             dates = tuple(day for owner, day in plan["allocations"] if int(owner["id"]) == matching_segment_id)
-            if not dates:
-                raise ValueError("precontract_service_days_mismatch")
             facts = _common_facts(case, _client_virtual_account(self._connection, case_no))
             facts.update({"matching_segment_id": matching_segment_id, "staff_name": segment["staff_name"],
                           "staff_phone": segment["staff_phone"], "service_type": _canonical_service_mode(case.get("service_type")),
-                          "assignment_start_date": dates[0], "assignment_end_date": dates[-1], "assignment_service_days": len(dates)})
+                          "assignment_start_date": dates[0] if dates else segment.get("assigned_start_date"),
+                          "assignment_end_date": dates[-1] if dates else segment.get("assigned_end_date"),
+                          "assignment_service_days": len(dates) if dates else None})
             owners = {"orders": projection_fingerprint(_owner_values(facts, "order")),
                       "client": projection_fingerprint(_owner_values(facts, "client")),
                       "staff": projection_fingerprint(_owner_values(facts, "staff")),
@@ -231,15 +244,12 @@ class MySqlFullContractProjectionRepository:
 
 
 def _load_precontract_plan(connection, case_no, case):
-    """Read the accepted plan and reuse the existing commitment date allocator."""
+    """Read the current plan and project expected dates from current Orders facts."""
     with connection.cursor() as cursor:
         cursor.execute(
             "SELECT plan.id FROM caregiver_matching_plans plan "
-            "WHERE plan.case_no=%s AND plan.is_active=1 AND (plan.status='accepted' OR ("
-            "plan.status='proposed' AND COALESCE((SELECT response.response_value "
-            "FROM matching_response_events response WHERE response.plan_id=plan.id "
-            "AND response.response_type='customer_decision' "
-            "ORDER BY response.occurred_at_utc DESC,response.id DESC LIMIT 1),'')='accepted'))",
+            "WHERE plan.case_no=%s AND plan.is_active=1 "
+            "AND plan.status IN ('proposed','accepted') ORDER BY plan.version DESC LIMIT 2",
             (case_no,),
         )
         plans = tuple(cursor.fetchall() or ())
@@ -251,32 +261,10 @@ def _load_precontract_plan(connection, case_no, case):
         segments = tuple(cursor.fetchall() or ())
         if not segments:
             return None
-        cursor.execute(
-            "SELECT day.service_date FROM confirmed_service_date_versions version "
-            "JOIN confirmed_service_date_days day ON day.confirmed_version_id=version.id "
-            "WHERE version.case_no=%s AND version.is_current=1 ORDER BY day.ordinal",
-            (case_no,),
-        )
-        confirmed_service_dates = tuple(
-            sorted(row["service_date"] for row in cursor.fetchall())
-        )
-    try:
-        expected_day_count = int(case.get("service_days") or 0)
-    except (TypeError, ValueError):
-        expected_day_count = 0
-    if (
-        not confirmed_service_dates
-        or expected_day_count <= 0
-        or len(confirmed_service_dates) != expected_day_count
-        or len(set(confirmed_service_dates)) != len(confirmed_service_dates)
-    ):
-        raise FullContractPreviewError(
-            "official_service_dates_incomplete",
-            "正式服務日期尚未完整確認，不能產生契約。",
-        )
+    expected_service_dates = _expected_service_dates(case)
     allocations = []
     used_segment_ids = set()
-    for service_date in confirmed_service_dates:
+    for service_date in expected_service_dates:
         owners = tuple(
             segment
             for segment in segments
@@ -285,33 +273,43 @@ def _load_precontract_plan(connection, case_no, case):
         if len(owners) != 1:
             raise FullContractPreviewError(
                 "contract_preview_service_dates_stale",
-                "正式服務日期與已接受的月嫂區段不一致，不能產生契約。",
+                "預期服務日期與目前月嫂區段不一致。",
             )
         used_segment_ids.add(int(owners[0]["id"]))
         allocations.append((owners[0], service_date))
-    if used_segment_ids != {int(segment["id"]) for segment in segments}:
+    if expected_service_dates and used_segment_ids != {int(segment["id"]) for segment in segments}:
         raise FullContractPreviewError(
             "contract_preview_service_dates_stale",
-            "正式服務日期未完整涵蓋已接受的月嫂區段，不能產生契約。",
+            "預期服務日期未完整涵蓋目前月嫂區段。",
         )
     return {"id": plans[0]["id"], "segments": segments, "allocations": tuple(allocations)}
 
 
 def _extend_precontract_facts(connection, case_no, facts, owners, plan):
     dates = tuple(day for _, day in plan["allocations"])
-    facts.update({"committed_service_start_date": dates[0], "committed_service_end_date": dates[-1],
-                  "staff_name": "、".join(str(row["staff_name"]) for row in plan["segments"])})
+    if not facts.get("staff_name"):
+        facts["staff_name"] = _segment_staff_summary(plan)
     owners["scheduling"] = projection_fingerprint({"plan_id": plan["id"], "allocations": plan["allocations"]})
+    if not dates:
+        return
+    facts.update({"committed_service_start_date": dates[0], "committed_service_end_date": dates[-1]})
     with connection.cursor() as cursor:
         order = select_order(cursor, case_no, lock=False)
         finance = load_contract_client_finance_facts(cursor, order, lock=False)
-        finance = replace(finance, charge_days=tuple(ClientChargeDay(day, False) for day in dates))
+        total_hours = Decimal(len(dates)) * Decimal(
+            str(finance.service_hours_per_day)
+        )
+        coverage = _derive_contract_subsidy_coverage(facts, total_hours)
+        finance = replace(
+            finance,
+            charge_days=tuple(ClientChargeDay(day, False) for day in dates),
+            client_service_charge_waived=(
+                coverage.is_full_subsidy_order if coverage is not None else False
+            ),
+        )
     candidate = build_client_finance_terms_candidate(finance, f"contract-preview:{case_no}")
-    facts["total_hours"] = Decimal(len(dates)) * Decimal(
-        str(finance.service_hours_per_day)
-    )
+    facts["total_hours"] = total_hours
     facts["total_employer_self_pay_payable"] = sum(stage.amount.amount for stage in candidate.stage_plans)
-    facts["client_finance_self_pay_days"] = sum(len(stage.service_dates) for stage in candidate.stage_plans if stage.payment_stage.value != "deposit")
     for stage in candidate.stage_plans:
         facts[_stage_fact_key(stage.payment_stage.value, "amount")] = stage.amount.amount
         facts[_stage_fact_key(stage.payment_stage.value, "due_date")] = stage.due_date
@@ -464,15 +462,81 @@ def _common_facts(
     }
 
 
-def _service_day_count(row: dict[str, object]) -> int | None:
-    start = row.get("assigned_start_date")
-    end = row.get("assigned_end_date")
-    if start is None or end is None:
+def _assignment_service_day_count(
+    row: dict[str, object], service_hours_per_day: object
+) -> int | None:
+    planned_hours = _decimal_or_none(row.get("planned_hours"))
+    hours_per_day = _decimal_or_none(service_hours_per_day)
+    if planned_hours is None or planned_hours < 0 or hours_per_day is None or hours_per_day <= 0:
         return None
+    return int((planned_hours / hours_per_day).to_integral_value(rounding=ROUND_CEILING))
+
+
+def _decimal_or_none(value: object) -> Decimal | None:
     try:
-        return (end - start).days + 1
-    except (AttributeError, TypeError):
+        parsed = Decimal(str(value))
+    except (ArithmeticError, TypeError, ValueError):
         return None
+    return parsed if parsed.is_finite() else None
+
+
+def _assignment_staff_summary(
+    assignments: tuple[dict[str, object], ...], service_hours_per_day: object
+) -> str | None:
+    if len(assignments) == 1:
+        value = assignments[0].get("staff_name")
+        return str(value).strip() if value is not None else None
+    labels = []
+    for row in assignments:
+        name = str(row.get("staff_name") or "").strip()
+        if not name:
+            continue
+        details = []
+        start, end = row.get("assigned_start_date"), row.get("assigned_end_date")
+        days = _assignment_service_day_count(row, service_hours_per_day)
+        if start is not None and end is not None:
+            details.append(f"{start}～{end}")
+        if days is not None:
+            details.append(f"{days}天")
+        labels.append(f"{name}（{'，'.join(details)}）" if details else name)
+    return "\n".join(labels) or None
+
+
+def _expected_service_dates(case: dict[str, object]) -> tuple[date, ...]:
+    start = case.get("start_date")
+    mode = _canonical_service_mode(case.get("service_type"))
+    try:
+        service_days = int(case.get("service_days") or 0)
+    except (TypeError, ValueError):
+        return ()
+    holidays = _special_holiday_dates(case.get("custom_rest_dates"))
+    if type(start) is not date or mode is None or service_days <= 0 or holidays is None:
+        return ()
+    try:
+        return calculate_service_dates(start, service_days, mode, holidays)
+    except (TypeError, ValueError):
+        return ()
+
+
+def _segment_staff_summary(plan: dict[str, object]) -> str | None:
+    segments = tuple(plan.get("segments") or ())
+    allocations = tuple(plan.get("allocations") or ())
+    if len(segments) == 1:
+        value = segments[0].get("staff_name")
+        return str(value).strip() if value is not None else None
+    labels = []
+    for segment in segments:
+        name = str(segment.get("staff_name") or "").strip()
+        if not name:
+            continue
+        dates = tuple(
+            day for owner, day in allocations if int(owner["id"]) == int(segment["id"])
+        )
+        details = []
+        if dates:
+            details.extend((f"{dates[0]}～{dates[-1]}", f"{len(dates)}天"))
+        labels.append(f"{name}（{'，'.join(details)}）" if details else name)
+    return "\n".join(labels) or None
 
 
 def _owner_values(facts: dict[str, object], owner: str) -> dict[str, object]:
@@ -566,11 +630,6 @@ def _extend_owner_facts(
         )
         facts["first_payment_amount"] = facts.get("first_amount")
         facts["second_payment_amount"] = facts.get("second_amount")
-        facts["client_finance_self_pay_days"] = sum(
-            len(stage.service_dates)
-            for stage in finance_candidate.stage_plans
-            if stage.payment_stage.value != "deposit"
-        )
         owners["client_finance"] = projection_fingerprint(
             {
                 "account_version": finance.account_version,
@@ -606,8 +665,17 @@ def _extend_owner_facts(
             if item.obligation_kind.value == "service_pay"
             and item.direction.value == "payable_to_staff"
         )
-        if len(service_obligations) == 1:
-            obligation = service_obligations[0]
+        exact_obligations = (
+            tuple(
+                item
+                for item in service_obligations
+                if item.source_assignment_id == assignment_id
+            )
+            if assignment_id is not None
+            else service_obligations
+        )
+        if len(exact_obligations) == 1:
+            obligation = exact_obligations[0]
             facts["staff_payable_total"] = obligation.contracted_amount.amount
             facts["staff_payable_due_date"] = obligation.due_date
             owners["staff_payables"] = projection_fingerprint(
@@ -734,16 +802,28 @@ def _load_client_refund_destination(cursor: Any, case_no: str) -> dict[str, obje
 
 
 def _load_client_email(cursor: Any, case_no: str) -> str | None:
-    """Read the normalized Case Import email column, not survey_details."""
+    """Read the current effective Case Import email, including saved corrections."""
     cursor.execute(
-        "SELECT email FROM beclass_records WHERE bound_case_no=%s "
-        "AND email IS NOT NULL AND TRIM(email)<>'' ORDER BY id",
+        "SELECT record.email,state.effective_values_json FROM beclass_records record "
+        "LEFT JOIN beclass_record_correction_states state "
+        "ON state.beclass_record_id=record.id WHERE record.bound_case_no=%s ORDER BY record.id",
         (case_no,),
     )
     rows = tuple(cursor.fetchall() or ())
     if len(rows) != 1:
         return None
-    value = rows[0].get("email") if isinstance(rows[0], dict) else None
+    row = rows[0]
+    if not isinstance(row, dict):
+        return None
+    corrections = row.get("effective_values_json")
+    if isinstance(corrections, str):
+        try:
+            corrections = json.loads(corrections)
+        except (TypeError, ValueError):
+            corrections = {}
+    if not isinstance(corrections, dict):
+        corrections = {}
+    value = corrections["email"] if "email" in corrections else row.get("email")
     value = str(value).strip() if value is not None else ""
     return value or None
 
@@ -813,6 +893,23 @@ def _special_holidays_text(value: object) -> str | None:
     return "、".join(item.strip() for item in value)
 
 
+def _special_holiday_dates(value: object) -> tuple[date, ...] | None:
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(value, list):
+        return None
+    try:
+        dates = tuple(date.fromisoformat(str(item).strip()) for item in value)
+    except (TypeError, ValueError):
+        return None
+    return tuple(sorted(set(dates)))
+
+
 def _project_subsidy_coverage(
     facts: dict[str, object], owners: dict[str, str]
 ) -> None:
@@ -821,13 +918,18 @@ def _project_subsidy_coverage(
     total_hours = facts.get("total_hours")
     if not isinstance(identity, str) or total_hours is None:
         return
+    coverage = _derive_contract_subsidy_coverage(
+        facts, Decimal(str(total_hours))
+    )
+    if coverage is None:
+        return
+    service_hours_per_day = facts.get("service_hours_per_day")
     try:
-        from decimal import Decimal
-
-        coverage = derive_subsidy_coverage(
-            identity,
-            Decimal(str(total_hours)),
-            Decimal(str(facts.get("floor_fee") or 0)),
+        hours_per_day = Decimal(str(service_hours_per_day))
+        if hours_per_day <= 0:
+            return
+        facts["client_finance_self_pay_days"] = (
+            coverage.self_pay_service_hours / hours_per_day
         )
     except (TypeError, ValueError, ArithmeticError):
         return
@@ -848,6 +950,22 @@ def _project_subsidy_coverage(
             },
         }
     )
+
+
+def _derive_contract_subsidy_coverage(
+    facts: dict[str, object], total_hours: Decimal
+):
+    identity = facts.get("identity_status")
+    if not isinstance(identity, str):
+        return None
+    try:
+        return derive_subsidy_coverage(
+            identity,
+            total_hours,
+            Decimal(str(facts.get("floor_fee") or 0)),
+        )
+    except (TypeError, ValueError, ArithmeticError):
+        return None
 
 
 _FULL_DUE_DATE = re.compile(r"^\d{4}([/-])\d{2}\1\d{2}$")

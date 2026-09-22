@@ -173,7 +173,7 @@ class ContractExternalSigningApplication:
                 raise ExternalSigningTypedError(
                     category="conflict",
                     code="external_signing_accepted_plan_required",
-                    message="目前案件尚未具備已接受且有效的配對方案。",
+                    message="目前案件尚未具備可投影的有效配對方案。",
                 ) from error
             raise
         existing = self.unsigned_repository.load_current_pdf_for_source(
@@ -212,7 +212,7 @@ class ContractExternalSigningApplication:
         except ValueError as error:
             if str(error) == "contract_external_signing_accepted_plan_required":
                 raise ExternalSigningTypedError(category="conflict", code="external_signing_accepted_plan_required",
-                    message="請先完成客戶推薦方案確認，再準備客戶契約。") from error
+                    message="目前案件尚未具備可投影的有效配對方案。") from error
             raise
         existing = self.unsigned_repository.load_current_pdf_for_source(case_no, source_id)
         if existing is not None:
@@ -540,7 +540,7 @@ def _load_external_staff_template_facts(
     if preview.blockers:
         raise FullContractPreviewError(
             preview.blockers[0],
-            "契約必要欄位尚未齊全，不能產生未簽 PDF。",
+            "契約模板或文件產生發生技術問題，不能產生未簽 PDF。",
         )
     facts = dict(projection.facts)
     facts["contract_signed_date"] = now.date()

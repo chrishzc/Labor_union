@@ -96,6 +96,11 @@ class _FakeCursor:
             statement, parameters = args[:2]
             assert statement.count("%s") == len(parameters)
 
+    def executemany(self, statement, rows) -> None:
+        for parameters in rows:
+            self.executions.append((statement, parameters))
+            assert statement.count("%s") == len(parameters)
+
     def fetchone(self):
         return None
 
@@ -132,6 +137,62 @@ class _FakeConnection:
 
 
 class SeedFixtureCanonicalMatchingFactsTests(unittest.TestCase):
+    def test_assignment_payroll_rates_are_seeded_from_case_policy(self) -> None:
+        cursor = _FakeCursor()
+        cursor.fetchone = lambda: {
+            "policy_version": "approved-rates-v1",
+            "policy_kind": "citizen",
+            "hourly_rate_ntd": 300,
+            "source_identity_status": "一般市民",
+        }
+        cursor.fetchall = lambda: []
+
+        seed_module._ensure_fixture_assignment_payroll_rate_snapshots(
+            cursor,
+            "115000105",
+            [{"id": 17}, {"id": 18}],
+        )
+
+        inserts = [
+            parameters
+            for statement, parameters in cursor.executions
+            if statement.startswith("INSERT INTO assignment_payroll_rate_snapshots")
+        ]
+        self.assertEqual(
+            inserts,
+            [
+                (17, "approved-rates-v1", "citizen", 300, "一般市民"),
+                (18, "approved-rates-v1", "citizen", 300, "一般市民"),
+            ],
+        )
+
+    def test_assignment_payroll_rate_mismatch_fails_closed(self) -> None:
+        cursor = _FakeCursor()
+        cursor.fetchone = lambda: {
+            "policy_version": "approved-rates-v1",
+            "policy_kind": "citizen",
+            "hourly_rate_ntd": 300,
+            "source_identity_status": "一般市民",
+        }
+        cursor.fetchall = lambda: [
+            {
+                "assignment_id": 17,
+                "policy_version": "old-policy",
+                "policy_kind": "citizen",
+                "hourly_rate_ntd": 250,
+                "source_identity_status": "一般市民",
+            }
+        ]
+
+        with self.assertRaisesRegex(
+            RuntimeError, "fixture assignment payroll rate mismatch: 115000105/17"
+        ):
+            seed_module._ensure_fixture_assignment_payroll_rate_snapshots(
+                cursor,
+                "115000105",
+                [{"id": 17}],
+            )
+
     def test_order_information_survey_fixture_populates_all_owner_projection_fields(self) -> None:
         cursor = _FakeCursor()
 

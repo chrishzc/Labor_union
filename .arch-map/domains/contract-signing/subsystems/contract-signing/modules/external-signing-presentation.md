@@ -16,6 +16,7 @@
 - page: `ui_react/src/pages/OrderWorkbenchV2Page.tsx`
 - `api/routes/contract_external_signing.py`
 - `api/dependencies/contract_external_signing.py`
+- `api/schemas/full_contract_preview.py`
 - `domains/contract_signing/external_signing.py`
 - `infrastructure/db/contract_external_signing_repository.py`
 - `infrastructure/db/contract_unsigned_pdf_repository.py`
@@ -24,6 +25,7 @@
 - `infrastructure/file/browser_contract_renderer.py`
 - `infrastructure/mysql/contract_context_repository.py`
 - `infrastructure/mysql/contract_full_preview_repository.py`
+- `infrastructure/mysql/contract_signing_document_query_repository.py`
 - `subsystems/contract_signing/full_contract_preview.py`
 - `subsystems/contract_signing/external_signing_workflow.py`
 - `subsystems/contract_signing/final_document_workflow.py`

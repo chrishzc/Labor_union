@@ -8,6 +8,7 @@ from __future__ import annotations
 from io import BytesIO
 
 from openpyxl import Workbook
+from openpyxl.comments import Comment
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
@@ -37,7 +38,7 @@ _SERVICE_BORDER = Border(
 )
 
 SERVICE_HEADERS = (
-    "週數", "序號", "市府案號", "雇主", "每週起始日",
+    "週數", "序號", "市府案號", "雇主", "服務人員", "每週起始日",
     "每週結束日", "服務時數", "每周工作日數", "每周工時", "結案",
 )
 
@@ -350,17 +351,17 @@ def _subsidy_quarter_totals(
 def _build_service_sheet(ws, report: WeeklyOperationsReport) -> None:
     # R1: 標題
     ws.append(["服務總表-案件服務中說明(每周)"])
-    ws.merge_cells("A1:J1")
+    ws.merge_cells("A1:K1")
     ws.cell(row=1, column=1).font = Font(bold=True, size=14)
     ws.cell(row=1, column=1).alignment = Alignment(horizontal="left", vertical="center")
     _configure_service_sheet(ws)
 
     if not report.service_rows:
         ws.append(SERVICE_HEADERS)
-        for c in range(1, 11):
+        for c in range(1, 12):
             cell = ws.cell(row=2, column=c)
             cell.font = Font(bold=True)
-            cell.fill = PatternFill(fill_type="solid", fgColor="F4B6C2") if c == 10 else PatternFill()
+            cell.fill = PatternFill(fill_type="solid", fgColor="F4B6C2") if c == 11 else PatternFill()
             cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
             cell.border = _SERVICE_BORDER
         ws.row_dimensions[2].height = 30
@@ -374,13 +375,13 @@ def _build_service_sheet(ws, report: WeeklyOperationsReport) -> None:
         groups.setdefault(label, []).append(r)
 
     for label, rows in groups.items():
-        # 每一週區塊開始前插入與範例一致的 10 欄表頭列。
+        # 每一週區塊開始前插入同一組服務明細表頭。
         header_row_idx = ws.max_row + 1
         ws.append(SERVICE_HEADERS)
-        for c in range(1, 11):
+        for c in range(1, 12):
             cell = ws.cell(row=header_row_idx, column=c)
             cell.font = Font(bold=True)
-            cell.fill = PatternFill(fill_type="solid", fgColor="F4B6C2") if c == 10 else PatternFill()
+            cell.fill = PatternFill(fill_type="solid", fgColor="F4B6C2") if c == 11 else PatternFill()
             cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
             cell.border = _SERVICE_BORDER
         ws.row_dimensions[header_row_idx].height = 30
@@ -394,18 +395,37 @@ def _build_service_sheet(ws, report: WeeklyOperationsReport) -> None:
                 idx,
                 r.case_no,
                 r.client_name,
+                r.staff_name,
                 p_start_str,
                 p_end_str,
-                r.service_hours_per_day,
+                r.service_hours_per_day if r.service_hours_per_day is not None else "",
                 r.weekly_work_days,
-                r.weekly_hours,
-                r.is_closed or ("結案" if r.completed else ""),
+                r.weekly_hours if r.weekly_hours is not None else "",
+                "結案" if r.completed else "",
             ])
             curr_r = ws.max_row
-            for c in range(1, 11):
+            for c in range(1, 12):
                 cell = ws.cell(row=curr_r, column=c)
                 cell.alignment = Alignment(horizontal="center", vertical="center")
                 cell.border = _SERVICE_BORDER
+            if r.service_hours_per_day is None:
+                ws.cell(row=curr_r, column=8).comment = Comment(
+                    "每日服務時數缺值，已保留服務日數；每周工時無法計算。",
+                    "系統",
+                )
+            if r.data_quality_codes:
+                quality_labels = {
+                    "service_hours_per_day_missing": "每日服務時數缺值",
+                    "service_period_missing": "正式服務期間缺值",
+                }
+                warning = "、".join(
+                    quality_labels.get(code, code)
+                    for code in r.data_quality_codes
+                )
+                ws.cell(row=curr_r, column=3).comment = Comment(
+                    f"資料待補：{warning}。此列已保留可得明細。",
+                    "系統",
+                )
 
         data_end_row = ws.max_row
         if data_end_row >= data_start_row:
@@ -417,7 +437,7 @@ def _build_service_sheet(ws, report: WeeklyOperationsReport) -> None:
 
 
 def _configure_service_sheet(ws) -> None:
-    widths = (8, 8, 14, 14, 14, 14, 12, 12, 12, 12)
+    widths = (8, 8, 14, 14, 14, 14, 14, 12, 12, 12, 12)
     for column, width in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(column)].width = width
     ws.sheet_view.showGridLines = False

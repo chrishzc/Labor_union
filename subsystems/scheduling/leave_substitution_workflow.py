@@ -32,6 +32,8 @@ class LeaveSubstitutionWorkflowFacts:
     official_schedules: tuple
     preview_blockers: tuple[str, ...] = ()
     scheduling_facts: LeaveSubstitutionFacts | None = None
+    fixed_rest_weekdays: tuple[int, ...] = ()
+    approved_holiday_work_dates: tuple[date, ...] = ()
 
     @property
     def leave_facts(self) -> LeaveSubstitutionFacts:
@@ -39,7 +41,13 @@ class LeaveSubstitutionWorkflowFacts:
             return self.scheduling_facts
         if self.impact_facts is None:
             raise ValueError("leave_preview_facts_missing")
-        return LeaveSubstitutionFacts(self.impact_facts.assignment_plan, self.official_schedules, self.impact_facts.lifecycle.service_data_locked)
+        return LeaveSubstitutionFacts(
+            self.impact_facts.assignment_plan,
+            self.official_schedules,
+            self.impact_facts.lifecycle.service_data_locked,
+            self.fixed_rest_weekdays,
+            self.approved_holiday_work_dates,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -414,6 +422,13 @@ def _calendar_candidate(facts, candidate, holiday_facts):
         item
         for item in holiday_facts.holidays
         if min(service_dates) <= item.holiday_date <= max(service_dates)
+        and item.holiday_date not in facts.approved_holiday_work_dates
+    )
+    fixed_rest_days = tuple(
+        value
+        for value in _inclusive_calendar_dates(min(service_dates), max(service_dates))
+        if value.weekday() in facts.fixed_rest_weekdays
+        and value not in facts.approved_holiday_work_dates
     )
     outcomes_by_type = tuple(item.resolution_type.value for item in candidate.outcomes)
     return LeaveCalendarCandidate(
@@ -428,7 +443,7 @@ def _calendar_candidate(facts, candidate, holiday_facts):
         outcomes_by_type.count("substitute"),
         len(candidate.outcomes),
         len(holidays),
-        0,
+        len(fixed_rest_days),
         holiday_facts.holiday_version,
         tuple((item.holiday_date.isoformat(), item.holiday_name) for item in holidays),
         "conserved" if len(before) == len(after) else "failed",
@@ -441,15 +456,32 @@ def _query_holiday_facts(facts, intent, holiday_query, lock_holidays):
     if not service_dates:
         raise HolidayCalendarUnavailable("service dates are missing")
     service_horizon = facts.assignment_plan.contracted_service_days + len(intent.items)
+    replacement_dates = tuple(
+        item.replacement_work_date
+        for item in intent.items
+        if item.replacement_work_date is not None
+    )
+    policy_dates = service_dates + replacement_dates
+    replacement_horizon = max(replacement_dates) if replacement_dates else max(service_dates)
     return holiday_query.query(
-        min(service_dates),
-        max(service_dates) + timedelta(days=service_horizon),
+        min(policy_dates),
+        max(
+            max(service_dates) + timedelta(days=service_horizon),
+            replacement_horizon,
+        ),
         lock=lock_holidays,
     )
 
 
 def _calendar_boundary(service_days, reducer):
     return None if not service_days else reducer(service_days).isoformat()
+
+
+def _inclusive_calendar_dates(start_date, end_date):
+    return tuple(
+        start_date + timedelta(days=offset)
+        for offset in range((end_date - start_date).days + 1)
+    )
 
 
 def _preview_impact(build_impact):
@@ -504,9 +536,9 @@ def _raise_if_claim_mismatched(request, claim):
     if claim is CommandClaimState.MISMATCH: raise _workflow_error(request.correlation_id, ErrorCategory.IDEMPOTENCY_MISMATCH, "batch_key_request_identity_conflict", "Batch key was already used with a different command.")
 def _raise_replay_integrity(request, message): raise _workflow_error(request.correlation_id, ErrorCategory.DOMAIN_BLOCKED, "invalid_batch_replay_snapshot", message)
 def _command_fingerprint(request): return fingerprint_payload({"family":"scheduling-leave-substitution","batch_key":request.idempotency_key.value,"case_no":request.case_no,"request_fingerprint":_request_fingerprint(request).value,"expected_versions":{"order":request.expected_order_version.value,"scheduling":request.expected_scheduling_version.value,"client_finance":request.expected_client_finance_version.value,"payroll":request.expected_payroll_version.value},"preview_fingerprint":request.preview_fingerprint.value,"actor":request.actor.actor_id,"reason":request.reason})
-def leave_request_fingerprint(intent): return fingerprint_payload({"original_assignment_id":intent.original_assignment_id,"items":tuple({"original_schedule_id":item.original_schedule_id,"work_date":item.work_date.isoformat(),"resolution_type":item.resolution_type.value,"substitute_staff_id":item.substitute_staff_id,"is_double_pay":item.is_double_pay} for item in intent.items)})
+def leave_request_fingerprint(intent): return fingerprint_payload({"original_assignment_id":intent.original_assignment_id,"items":tuple({"original_schedule_id":item.original_schedule_id,"work_date":item.work_date.isoformat(),"resolution_type":item.resolution_type.value,"substitute_staff_id":item.substitute_staff_id,"is_double_pay":item.is_double_pay,"replacement_work_date":None if item.replacement_work_date is None else item.replacement_work_date.isoformat()} for item in intent.items)})
 def _request_fingerprint(request): return fingerprint_payload(_request_snapshot(request))
-def _request_snapshot(request): return {"case_no":request.case_no,"original_assignment_id":request.intent.original_assignment_id,"items":[{"original_schedule_id":item.original_schedule_id,"work_date":item.work_date.isoformat(),"resolution_type":item.resolution_type.value,"substitute_staff_id":item.substitute_staff_id,"is_double_pay":item.is_double_pay} for item in request.intent.items],"linked_request":None if request.linked_request is None else {"request_id":request.linked_request.request_id,"expected_version":request.linked_request.expected_version}}
+def _request_snapshot(request): return {"case_no":request.case_no,"original_assignment_id":request.intent.original_assignment_id,"items":[{"original_schedule_id":item.original_schedule_id,"work_date":item.work_date.isoformat(),"resolution_type":item.resolution_type.value,"substitute_staff_id":item.substitute_staff_id,"is_double_pay":item.is_double_pay,"replacement_work_date":None if item.replacement_work_date is None else item.replacement_work_date.isoformat()} for item in request.intent.items],"linked_request":None if request.linked_request is None else {"request_id":request.linked_request.request_id,"expected_version":request.linked_request.expected_version}}
 def _receipt_snapshot(receipt): return {"batch_key":receipt.batch_key,"case_no":receipt.case_no,"order_version":receipt.order_version,"scheduling_generation":receipt.scheduling_generation,"scheduling_version":receipt.scheduling_version,"client_finance_version":receipt.client_finance_version,"payroll_version":receipt.payroll_version,"outcome_event_ids":list(receipt.outcome_event_ids),"preview_fingerprint":receipt.preview_fingerprint.value,"linked_request":_linked_result_payload(receipt.linked_request)}
 def _linked_result_payload(result): return None if result is None else {"request_id":result.request_id,"expected_version":result.expected_version,"resolved_version":result.resolved_version,"status":result.status,"receipt_key":result.receipt_key,"notification_intent":result.notification_intent,"staff_id":result.staff_id}
 def _resolve_linked_preview(resolver, request):
