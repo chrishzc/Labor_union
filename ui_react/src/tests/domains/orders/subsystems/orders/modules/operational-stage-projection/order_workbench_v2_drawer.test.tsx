@@ -161,8 +161,8 @@ function detail(caseNo: string, clientName: string, actualStart: string | null =
     actual_start_date: actualStart,
     actual_end_date: null,
     deposit_date: null,
-    start_date: '1999-01-01',
-    end_date: '1999-01-20',
+    start_date: '2026-10-01',
+    end_date: '2026-10-20',
     service_days: 20,
     service_hours_per_day: 9,
     deposit_service_days: null,
@@ -400,7 +400,10 @@ describe('待辦看板 Beta 唯讀工作 Drawer', () => {
         ? page([row])
         : page([row], params.stage)
     ));
-    clientMocks.getOrderDetail.mockResolvedValue(detail('CASE-STRICT', '嚴格解碼客戶'));
+    clientMocks.getOrderDetail.mockResolvedValue({
+      ...detail('CASE-STRICT', '嚴格解碼客戶'),
+      start_date: '1999-01-01',
+    });
     clientMocks.getOrderTerms.mockRejectedValue(new Error('strict decode: invalid OrderTerms payload'));
     let resolveAssignment!: (value: ReturnType<typeof assignment>) => void;
     clientMocks.getAssignmentPlan.mockReturnValue(new Promise((resolve) => {
@@ -412,10 +415,12 @@ describe('待辦看板 Beta 唯讀工作 Drawer', () => {
     fireEvent.click(within(cardFor('CASE-STRICT')).getByRole('button', { name: '開啟案件工作' }));
 
     const dialog = await screen.findByRole('region', { name: '案件 CASE-STRICT' });
+    const caseContext = dialog.querySelector('.order-case-context');
+    expect(caseContext).toHaveTextContent('預期開始1999-01-01');
+    expect(caseContext).toHaveTextContent('服務量20 日 · 每日 9 小時');
     fireEvent.click(within(dialog).getByRole('button', { name: '訂單與服務資料' }));
     await waitFor(() => expect(within(dialog).getByText('約定服務資料暫時無法取得。')).toBeInTheDocument());
     expect(within(dialog).getByRole('button', { name: '訂單與服務資料' })).toHaveAttribute('aria-current', 'page');
-    expect(within(dialog).queryByText('1999-01-01')).not.toBeInTheDocument();
 
     fireEvent.click(within(dialog).getByRole('button', { name: '← 返回待辦看板' }));
     await waitFor(() => expect(screen.queryByRole('region', { name: '案件 CASE-STRICT' })).not.toBeInTheDocument());
