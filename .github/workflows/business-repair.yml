@@ -1,4 +1,4 @@
-name: LINE query fixture and read-only integration
+name: LINE query final verification
 on:
   push:
     branches: [fix/business-regressions-20260922]
@@ -6,37 +6,7 @@ on:
 permissions:
   contents: read
 jobs:
-  prepare:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    outputs:
-      commit: ${{ steps.publish.outputs.commit }}
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
-      - id: publish
-        run: |
-          python - <<'PY'
-          import hashlib,json,os,subprocess
-          from pathlib import Path
-          assert os.environ['GITHUB_REF']=='refs/heads/fix/business-regressions-20260922'
-          records=json.loads(r'''[{"path":"tests/test_line_delivery_public_query_route.py","before":"99da38546d43ed1e43101770911cecda16fcc57e09f54b315bf7d84c2c216b73","after":"a6e90293aab54d5f26a9a1af5185b6542ce730baabd4dedac2dfceca84a9b904","edits":[[12929,13177,"from scripts.bootstrap_disposable_mysql_schema import bootstrap\n\n        _assert_disposable_schema_name(name)\n        bootstrap(Namespace(\n            host=self._values[\"LABOR_UNION_TEST_MYSQL_HOST\"],\n            port=int(self._values[\"LABOR_UNION_TEST_MYSQL_PORT\"]),\n            user=self._values[\"LABOR_UNION_TEST_MYSQL_USER\"],\n            password=self._values[\"LABOR_UNION_TEST_MYSQL_PASSWORD\"],\n            database=name,\n            confirm_database=name,\n        )"],[15027,15503,""]]}]''')
-          assert hashlib.sha256(json.dumps(records,ensure_ascii=False,separators=(',',':')).encode()).hexdigest()=='af8cda3d10db8fabeed6a836d9d5fdf4f3821b81c54a08f57a618426742b2c38'
-          for item in records:
-              p=Path(item['path']);original=p.read_bytes();assert hashlib.sha256(original).hexdigest()==item['before']
-              text=original.decode('utf-8')
-              for start,end,replacement in reversed(item['edits']): text=text[:start]+replacement+text[end:]
-              result=text.encode('utf-8');assert hashlib.sha256(result).hexdigest()==item['after'];p.write_bytes(result)
-          paths=[item['path'] for item in records]
-          assert set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines())==set(paths)
-          subprocess.run(['git','diff','--check'],check=True);subprocess.run(['git','add','--',*paths],check=True)
-          subprocess.run(['git','-c','user.name=github-actions[bot]','-c','user.email=41898282+github-actions[bot]@users.noreply.github.com','commit','-m','fix(tests): give the LINE query fixture one canonical schema creation owner'],check=True)
-          subprocess.run(['git','push','origin','HEAD:refs/heads/fix/business-regressions-20260922'],check=True)
-          sha=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
-          with open(os.environ['GITHUB_OUTPUT'],'a') as output:output.write('commit='+sha+'\n')
-          PY
   verification:
-    needs: prepare
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -58,7 +28,6 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: ${{ needs.prepare.outputs.commit }}
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
@@ -112,7 +81,7 @@ jobs:
                   if attempt==59:raise
                   time.sleep(2)
           with c.cursor() as cur:
-              cur.execute("CREATE USER 'repair_reader'@'%' IDENTIFIED BY %s",(os.environ['DB_PASSWORD'],))
+              cur.execute("CREATE USER %s@%s IDENTIFIED BY %s",('repair_reader','%',os.environ['DB_PASSWORD']))
               cur.execute("GRANT ALL PRIVILEGES ON `lu_test_line_delivery_public_query_20260820_a1`.* TO 'repair_reader'@'%'")
           c.commit();c.close()
           PY
