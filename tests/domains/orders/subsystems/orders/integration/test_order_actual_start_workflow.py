@@ -21,7 +21,12 @@ from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.clock import FixedBusinessClock, TAIPEI_TIME_ZONE
 from shared_kernel.errors import ErrorCategory
 from shared_kernel.money import MoneyNTD
-from domains.orders.lifecycle import OrderLifecycleRootFacts, OrderLifecycleStatus, _lifecycle_status
+from domains.orders.lifecycle import (
+    OrderLifecycleRootFacts,
+    OrderLifecycleStatus,
+    _alert_codes,
+    _lifecycle_status,
+)
 from domains.orders.actual_start import (
     ActualStartBlocker,
     ActualStartCandidateError,
@@ -241,6 +246,56 @@ def test_actual_start_lifecycle_impact_cannot_bypass_auto_completion_owner() -> 
     )
 
     assert status is OrderLifecycleStatus.IN_SERVICE
+
+
+def test_restarted_historical_actual_start_enters_service_without_deposit_or_contract() -> None:
+    roots = OrderLifecycleRootFacts(
+        case_no="CASE-HISTORICAL-RESTART",
+        current_status=OrderLifecycleStatus.ESTABLISHED,
+        contract_completed=False,
+        actual_start_date=date(2026, 8, 20),
+        actual_start_reconfirmed=True,
+        cancellation_effective=False,
+        service_data_locked=False,
+        historical_precision_restarted=True,
+    )
+
+    settlement = SimpleNamespace(deposit_settled=False)
+    evaluation_at = datetime(2026, 8, 20, 9, 0, tzinfo=ZoneInfo("Asia/Taipei"))
+    status = _lifecycle_status(
+        roots,
+        settlement,
+        completion_reached=False,
+        evaluation_at=evaluation_at,
+    )
+
+    assert status is OrderLifecycleStatus.IN_SERVICE
+    assert _alert_codes(roots, settlement, evaluation_at) == ()
+
+
+@pytest.mark.parametrize("actual_start_date", [None, date(2026, 8, 21)])
+def test_restarted_historical_unstarted_or_future_actual_start_stays_established(
+    actual_start_date,
+) -> None:
+    roots = OrderLifecycleRootFacts(
+        case_no="CASE-HISTORICAL-FUTURE",
+        current_status=OrderLifecycleStatus.ESTABLISHED,
+        contract_completed=False,
+        actual_start_date=actual_start_date,
+        actual_start_reconfirmed=actual_start_date is not None,
+        cancellation_effective=False,
+        service_data_locked=False,
+        historical_precision_restarted=True,
+    )
+
+    status = _lifecycle_status(
+        roots,
+        SimpleNamespace(deposit_settled=False),
+        completion_reached=False,
+        evaluation_at=datetime(2026, 8, 20, 9, 0, tzinfo=ZoneInfo("Asia/Taipei")),
+    )
+
+    assert status is OrderLifecycleStatus.ESTABLISHED
 
 
 def test_actual_start_maps_effective_staff_date_duplicate_to_typed_conflict() -> None:

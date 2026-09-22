@@ -91,6 +91,7 @@ class OrderLifecycleRootFacts:
     actual_start_reconfirmed: bool
     cancellation_effective: bool
     service_data_locked: bool
+    historical_precision_restarted: bool = False
 
     def __post_init__(self) -> None:
         require_canonical_text(
@@ -216,6 +217,11 @@ def _lifecycle_status(
         return OrderLifecycleStatus.IN_SERVICE
     if root_facts.current_status is OrderLifecycleStatus.IN_SERVICE:
         return OrderLifecycleStatus.IN_SERVICE
+    if (
+        root_facts.historical_precision_restarted
+        and root_facts.current_status is OrderLifecycleStatus.ESTABLISHED
+    ):
+        return OrderLifecycleStatus.ESTABLISHED
     if client_settlement.deposit_settled:
         return OrderLifecycleStatus.ESTABLISHED
     return OrderLifecycleStatus.DISCUSSION
@@ -225,8 +231,13 @@ def _service_should_be_active(root_facts, client_settlement, evaluation_at):
     return (
         root_facts.actual_start_date is not None
         and root_facts.actual_start_date <= evaluation_at.date()
-        and client_settlement.deposit_settled
-        and root_facts.contract_completed
+        and (
+            root_facts.historical_precision_restarted
+            or (
+                client_settlement.deposit_settled
+                and root_facts.contract_completed
+            )
+        )
         and root_facts.actual_start_reconfirmed
     )
 
@@ -236,7 +247,10 @@ def _alert_codes(root_facts, client_settlement, evaluation_at):
         return ()
     if root_facts.actual_start_date > evaluation_at.date():
         return ()
-    if not client_settlement.deposit_settled:
+    if (
+        not root_facts.historical_precision_restarted
+        and not client_settlement.deposit_settled
+    ):
         return ("enter_service.deposit_required_before_service",)
     if not root_facts.actual_start_reconfirmed:
         return ("enter_service.actual_start_reconfirmation_required",)
@@ -290,6 +304,7 @@ def _validate_boolean_roots(root_facts):
         root_facts.actual_start_reconfirmed,
         root_facts.cancellation_effective,
         root_facts.service_data_locked,
+        root_facts.historical_precision_restarted,
     )
     if any(not isinstance(value, bool) for value in values):
         raise TypeError("lifecycle boolean root is invalid")

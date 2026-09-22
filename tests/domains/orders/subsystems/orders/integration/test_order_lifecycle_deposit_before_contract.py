@@ -26,6 +26,7 @@ def _facts(
         actual_start_date=actual_start_date,
         actual_start_reconfirmed=True,
         contract_completed=contract_completed,
+        historical_precision_restarted=False,
     )
 
 

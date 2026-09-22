@@ -368,6 +368,10 @@ consumer 不得修改 Orders 或任何其他 Domain root；binding／menu versio
 - 首次確認與更正都必須 Preview／Apply。
 - 不得以 planned start、訂金日期、第一個 schedule 或 UI default fallback。
 - 延遲訂金核銷後仍須人工重新確認真正開始日。
+- 已成功完成歷史訂單重啟正常流程、且目前正常 lifecycle 可追溯至該 restart event 的案件，於正式
+  actual start 確認日不晚於 business date 時，進入 `服務中` 不以訂金核銷或契約完成為前置條件；
+  此例外只移除 lifecycle gate，不得偽造或改寫 Client Finance／契約事實。一般訂單仍維持原條件，
+  完整邊界與驗收由 `27_歷史訂單生命週期與服務天數帳務正式規格.md` 擁有。
 - Apply 同交易重建 assignments、正式服務日、actual end、未核銷薪資／帳務日期及 lifecycle。
 - 原過期日期到新確認日期之間不得補造服務日。
 

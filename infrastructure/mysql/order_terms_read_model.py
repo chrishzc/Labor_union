@@ -682,6 +682,11 @@ def _load_lifecycle(cursor, order_row, lock):
         actual_start_reconfirmed=_actual_start_reconfirmed(order_row, controls),
         cancellation_effective=_cancellation_effective(controls),
         service_data_locked=bool(order_row["service_data_locked"]),
+        historical_precision_restarted=_historical_precision_restarted(
+            cursor,
+            str(order_row["case_no"]),
+            lock,
+        ),
     )
 
 
@@ -691,6 +696,17 @@ def _contract_completed(cursor, case_no, lock):
         "WHERE case_no=%s AND event_type='contract_completed'"
         + _lock_clause(lock),
         (case_no,),
+    )
+    return cursor.fetchone() is not None
+
+
+def _historical_precision_restarted(cursor, case_no, lock):
+    cursor.execute(
+        "SELECT id FROM order_lifecycle_state_events "
+        "WHERE case_no=%s AND trigger_event='orders_historical_precision_restart' "
+        "AND after_status=%s ORDER BY id DESC LIMIT 1"
+        + _lock_clause(lock),
+        (case_no, OrderLifecycleStatus.ESTABLISHED.value),
     )
     return cursor.fetchone() is not None
 
