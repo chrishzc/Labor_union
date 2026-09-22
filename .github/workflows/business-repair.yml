@@ -1,4 +1,4 @@
-name: LINE query final verification
+name: LINE query request boundary verification
 on:
   push:
     branches: [fix/business-regressions-20260922]
@@ -86,7 +86,19 @@ jobs:
           c.commit();c.close()
           PY
       - name: Verify real LINE query and schema lease contracts
-        run: python -m pytest -q --tb=short --junitxml="$PROOF_DIR/line-query.xml" tests/test_line_delivery_public_query_route.py > "$PROOF_DIR/line-query.log" 2>&1
+        run: |
+          python -m pytest -q --tb=short --junitxml="$PROOF_DIR/line-query.xml" tests/test_line_delivery_public_query_route.py > "$PROOF_DIR/line-query.log" 2>&1
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from xml.etree import ElementTree
+          root = ElementTree.parse(Path(os.environ['PROOF_DIR']) / 'line-query.xml').getroot()
+          cases = list(root.iter('testcase'))
+          assert len(cases) == 15, len(cases)
+          assert any(c.get('name') == 'test_delivery_query_g7_uses_production_app_and_real_repository' for c in cases)
+          assert all(c.find('failure') is None and c.find('error') is None and c.find('skipped') is None for c in cases)
+          print('All 15 cases passed, including real MySQL G7; no skipped cases.')
+          PY
       - name: Destroy only the disposable server
         if: always()
         run: docker rm -f repair-mysql
