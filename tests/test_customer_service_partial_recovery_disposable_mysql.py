@@ -6,6 +6,7 @@ Description: 以一次性 MySQL 驗證客服 runtime 的既知 partial 可在候
 from __future__ import annotations
 
 import os
+from hashlib import sha256
 from pathlib import Path
 from types import SimpleNamespace
 import uuid
@@ -23,10 +24,14 @@ RECOVERABLE = frozenset({PART_185.name})
 def _config() -> migration.DatabaseConfig:
     if not os.getenv("MYSQL_TEST_CONTAINER"):
         pytest.skip("requires an explicitly configured disposable MySQL container")
-    return migration.config_from_env(ROOT / ".env")[0]
+    return migration.DatabaseConfig(
+        os.environ["DB_HOST"], int(os.environ["DB_PORT"]),
+        os.environ["DB_USER"], os.environ["DB_PASSWORD"],
+    )
 
 
 def _configure_release(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(migration, "SCHEMA_PARTS", (PART_185,))
     descriptor = migration._canonical_artifact_descriptor(PART_185.name)
     release = SimpleNamespace(
         release_id="customer-service-partial-disposable-test",
@@ -38,6 +43,20 @@ def _configure_release(monkeypatch: pytest.MonkeyPatch) -> None:
         descriptors={},
         backfills=(),
     )
+    release.manifests = (SimpleNamespace(
+        release_id=release.release_id,
+        fingerprint=release.fingerprint,
+        schema_artifacts=(SimpleNamespace(
+            artifact=SimpleNamespace(
+                name=PART_185.name,
+                relative_path=PART_185.relative_to(ROOT).as_posix(),
+                sha256=sha256(PART_185.read_bytes()).hexdigest(),
+                dependencies=(),
+            ),
+            data_effect="schema_only_additive",
+        ),),
+        backfills=(),
+    ),)
     monkeypatch.setattr(migration, "RELEASE_MANIFEST", release)
     monkeypatch.setattr(migration, "SCHEMA_PARTS", (PART_185,))
     monkeypatch.setattr(

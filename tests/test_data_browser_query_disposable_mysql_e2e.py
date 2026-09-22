@@ -68,6 +68,14 @@ class _AuditedCursor:
 
 def test_six_source_query_cursor_masking_and_zero_write_on_lu_test_mysql() -> None:
     connection = get_connection()
+    # Arrange synthetic rows before the read-only boundary; a fresh schema has
+    # no cursor and otherwise makes masking assertions vacuous.
+    with connection.cursor() as cursor:
+        for index in range(3):
+            cursor.execute("INSERT INTO clients(case_no,name) VALUES (%s,%s)",
+                           (f"BROWSER-TEST-{index}", f"合成客戶{index}"))
+            cursor.execute("INSERT INTO staff(name) VALUES (%s)", (f"合成人員{index}",))
+    connection.commit()
     audited = _AuditedConnection(connection)
     repository = DataBrowserQueryRepository(audited)
     try:
@@ -110,7 +118,7 @@ def test_six_source_query_cursor_masking_and_zero_write_on_lu_test_mysql() -> No
                 name_cell = next(
                     cell for cell in row.detail_cells if cell.field_id == "name"
                 )
-                assert name_cell.presentation == "canonical"
+                assert name_cell.presentation == "masked"
                 assert name_cell.value == "未提供" or "○" in str(name_cell.value)
         for row in pages["bank_facts"].items:
             amount_cell = next(

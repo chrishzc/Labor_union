@@ -69,8 +69,8 @@ def test_r02_apply_replay_and_exact_mysql_readback() -> None:
         repository = MySqlServiceBeforeReplacementRepository(
             connection,
             MatchingSuccessorPersistenceAdapter(connection),
-            facts_loader=lambda _request, _for_update: facts,
-            matching_source_loader=lambda _request, _for_update: source,
+            facts_loader=lambda _request, *, for_update: facts,
+            matching_source_loader=lambda _request, *, for_update: source,
         )
         workflow = ServiceBeforeReplacementWorkflow(
             repository, lambda: MySqlUnitOfWork(connection)

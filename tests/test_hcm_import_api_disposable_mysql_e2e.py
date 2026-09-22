@@ -120,6 +120,11 @@ def test_historical_hcm_api_overwrites_fields_without_overwriting_order_status(t
 def _client() -> TestClient:
     application = FastAPI()
     application.include_router(router)
+    from api.dependencies.admin_auth import require_admin
+    from subsystems.access.authentication_session import AdminPrincipal
+    application.dependency_overrides[require_admin] = lambda: AdminPrincipal(
+        1, "hcm-integration", "Test", "system_admin"
+    )
     return TestClient(application)
 
 

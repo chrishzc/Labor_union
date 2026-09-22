@@ -340,7 +340,7 @@ def test_manual_refund_correction_posts_ledger_allocation_and_resolves_anomaly(t
 
     _deliver_finance_import_outbox()
     assert receipt.ledger_entry_count == receipt.allocation_count == 1
-    _assert_manual_review_alert_remains_active_without_owner_terminal_contract()
+    _assert_manual_review_stays_out_of_anomaly_center()
 
 
 def test_durable_correction_worker_posts_manual_refund_once(tmp_path):
@@ -505,7 +505,7 @@ def test_mismatched_refund_return_remains_manual_review_without_partial_writes(t
             cursor.execute("SELECT reconciliation_status FROM finance_import_rows WHERE id=2")
             assert cursor.fetchone() == {"reconciliation_status": "pending"}
             cursor.execute("SELECT predicate_active,workflow_status FROM anomaly_current_alerts WHERE definition_code='finance_import_manual_review'")
-            assert {tuple(row.values()) for row in cursor.fetchall()} >= {(1, "open")}
+            assert cursor.fetchall() == []
     finally:
         connection.close()
 
@@ -1022,7 +1022,8 @@ def _assert_g12_rollback_state(connection):
         cursor.execute("SELECT COUNT(*) AS count FROM finance_import_classification_events")
         assert cursor.fetchone() == {"count": 1}
         cursor.execute("SELECT predicate_active,workflow_status FROM anomaly_current_alerts WHERE definition_code='finance_import_manual_review'")
-        assert cursor.fetchone() == {"predicate_active": 1, "workflow_status": "open"}
+        # Ordinary classification belongs to Finance; it must not create an Anomalies alert.
+        assert cursor.fetchone() is None
 
 
 def _assert_g08_no_partial_correction_commit(connection):
@@ -1091,13 +1092,14 @@ def _deliver_finance_import_outbox() -> None:
         connection.close()
 
 
-def _assert_manual_review_alert_remains_active_without_owner_terminal_contract() -> None:
+def _assert_manual_review_stays_out_of_anomaly_center() -> None:
     from infrastructure.mysql.mysql_adapter import get_connection
     connection = get_connection()
     try:
         with connection.cursor() as cursor:
             cursor.execute("SELECT predicate_active,workflow_status FROM anomaly_current_alerts WHERE definition_code='finance_import_manual_review'")
-            assert cursor.fetchone() == {"predicate_active": 1, "workflow_status": "open"}
+            # Ordinary classification belongs to Finance; it must not create an Anomalies alert.
+            assert cursor.fetchone() is None
     finally:
         connection.close()
 

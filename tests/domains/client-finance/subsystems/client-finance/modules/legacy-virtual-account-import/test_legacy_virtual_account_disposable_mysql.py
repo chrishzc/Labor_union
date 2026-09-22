@@ -49,6 +49,16 @@ def test_imported_legacy_account_is_durable_and_reuse_stays_pending(tmp_path):
             cursor.execute("SELECT case_no,virtual_account FROM client_legacy_virtual_accounts")
             assert cursor.fetchall() == [{"case_no": "114000018", "virtual_account": "99781699114033"}]
             assert resolve_client_virtual_account(cursor, "99781699114033") == {
+                "result": "resolved", "case_no": "114000018", "reason": None,
+            }
+        # A second imported mapping, not a lower-precedence generated account,
+        # makes the owner ambiguous and must stay pending.
+        duplicate = tmp_path / "duplicate-accounts.xlsx"
+        pd.DataFrame([["99781699114033", "114000033"]], columns=["虛擬帳號", "市府訂單號碼"]).to_excel(duplicate, index=False)
+        duplicate_preview = service.preview(str(duplicate))
+        service.apply(str(duplicate), "legacy-va-e2e-duplicate", duplicate_preview.preview_fingerprint, "test")
+        with connection.cursor() as cursor:
+            assert resolve_client_virtual_account(cursor, "99781699114033") == {
                 "result": "pending", "case_no": None, "reason": "case_not_unique",
             }
     finally:

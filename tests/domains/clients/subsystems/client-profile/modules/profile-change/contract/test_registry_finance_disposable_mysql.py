@@ -69,7 +69,7 @@ def _seed_paid_stage_and_adjustment(connection, case_no: str) -> None:
         )
         client_id = int(cursor.lastrowid)
         cursor.execute(
-            "INSERT INTO orders(case_no,client_id,status) VALUES (%s,%s,'服務完成')",
+            "INSERT INTO orders(case_no,client_id,status) VALUES (%s,%s,'訂單完成')",
             (case_no, client_id),
         )
         cursor.execute(
