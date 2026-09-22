@@ -1,14 +1,22 @@
-name: Business verification follow-up
+name: Backend baseline and durable MySQL verification
 on:
   push:
     branches: [verify/business-regression-7e12a3e-20260922]
 permissions:
   contents: read
 jobs:
-  mysql:
-    name: MySQL business cases
+  verification:
+    name: ${{ matrix.mode }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - mode: python-baseline
+            source: aa7acaa88d59f40cad2d9b0b1f2cfc44a76634d6
+          - mode: durable-mysql
+            source: 7e12a3e5b605261311f6339ffe01fb8f13b06b09
     env:
       APP_ENV: development
       DB_HOST: 127.0.0.1
@@ -24,15 +32,16 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: 7e12a3e5b605261311f6339ffe01fb8f13b06b09
+          ref: ${{ matrix.source }}
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.11'
-      - name: Record source and install locked wheel dependencies
+      - name: Record source and install the same locked wheel dependencies
         run: |
           mkdir -p "$PROOF_DIR"
           git rev-parse HEAD > "$PROOF_DIR/source-commit.txt"
+          git rev-parse HEAD^{tree} > "$PROOF_DIR/source-tree.txt"
           python - <<'PY'
           import tomllib
           from pathlib import Path
@@ -71,7 +80,17 @@ jobs:
           PY
           python -m pip install --disable-pip-version-check --no-input --only-binary=:all: --require-hashes -r /tmp/business-test-requirements.txt > "$PROOF_DIR/dependencies.log" 2>&1 || { tail -60 "$PROOF_DIR/dependencies.log"; exit 1; }
           python -m pip list --format=json > "$PROOF_DIR/installed-packages.json"
-      - name: Start exact MySQL image and await authenticated host TCP query
+      - name: Run unchanged pre-cleanup suite in the same environment
+        if: matrix.mode == 'python-baseline'
+        run: |
+          set +e
+          timeout 900 python -m pytest -q --continue-on-collection-errors --tb=short --durations=20 --junitxml="$PROOF_DIR/python-baseline.xml" > "$PROOF_DIR/python-baseline.log" 2>&1
+          code=$?
+          echo "$code" > "$PROOF_DIR/python-baseline-exit-code.txt"
+          tail -70 "$PROOF_DIR/python-baseline.log"
+          exit "$code"
+      - name: Prepare authenticated host TCP connection to disposable MySQL
+        if: matrix.mode == 'durable-mysql'
         env:
           MYSQL_ROOT_PASSWORD: verification-only
         run: |
@@ -96,115 +115,33 @@ jobs:
                       raise
                   time.sleep(2)
           PY
-      - name: Verify canonical fresh schema
-        run: |
-          python - <<'PY' > "$PROOF_DIR/mysql-schema.log" 2>&1
-          from argparse import Namespace
-          import json
-          from scripts.bootstrap_disposable_mysql_schema import bootstrap
-          result = bootstrap(Namespace(host='127.0.0.1', port=33306, user='root', password='verification-only', database='lu_test_verification_schema', confirm_database='lu_test_verification_schema'))
-          print(json.dumps(result, ensure_ascii=False))
-          PY
-      - name: Execute unchanged MySQL cases on separate synthetic databases
-        run: |
-          cat > /tmp/business_mysql_cases.py <<'PY'
-          import hashlib
-          import json
-          import os
-          from pathlib import Path
-          import subprocess
-          import sys
-          from argparse import Namespace
-          from scripts.bootstrap_disposable_mysql_schema import bootstrap
-          out = Path(os.environ['PROOF_DIR'])
-          base_env = dict(os.environ)
-          for suffix, value in {'HOST': '127.0.0.1', 'PORT': '33306', 'USER': 'root', 'PASSWORD': 'verification-only', 'DATABASE': 'lu_test_verification_collection'}.items():
-              base_env['LABOR_UNION_TEST_MYSQL_' + suffix] = value
-              base_env['DB_' + suffix] = value
-          paths = []
-          for path in sorted(Path('tests').rglob('test_*.py')):
-              source = path.read_text()
-              if 'LABOR_UNION_TEST_MYSQL_DATABASE' in source and ('mysql' in str(path).lower() or path.name == 'test_line_delivery_public_query_route.py'):
-                  paths.append(str(path))
-          collect = subprocess.run([sys.executable, '-m', 'pytest', '--collect-only', '-q', '--continue-on-collection-errors', *paths], env=base_env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-          (out / 'mysql-collection.log').write_text(collect.stdout)
-          nodes = [line.strip() for line in collect.stdout.splitlines() if line.startswith('tests/') and '::' in line]
-          (out / 'mysql-collected.json').write_text(json.dumps(nodes, ensure_ascii=False, indent=2))
-          results = []
-          for index, node in enumerate(nodes):
-              digest = hashlib.sha256(node.encode()).hexdigest()[:18]
-              database = 'lu_test_verification_' + digest
-              env = {**base_env, 'LABOR_UNION_TEST_MYSQL_DATABASE': database, 'DB_DATABASE': database}
-              source = Path(node.split('::')[0]).read_text()
-              own_bootstrap = 'scripts.bootstrap_disposable_mysql_schema' in source
-              prefix = out / ('mysql-' + digest)
-              if not own_bootstrap:
-                  args = Namespace(host='127.0.0.1', port=33306, user='root', password='verification-only', database=database, confirm_database=database)
-                  try:
-                      bootstrap(args)
-                  except Exception as exc:
-                      results.append({'nodeid': node, 'status': 'blocked_schema_setup', 'error_type': type(exc).__name__, 'message': str(exc)})
-                      (out / 'mysql-results.json').write_text(json.dumps(results, ensure_ascii=False, indent=2))
-                      break
-              try:
-                  with prefix.with_suffix('.log').open('w') as log:
-                      run = subprocess.run([sys.executable, '-m', 'pytest', '-q', '--tb=short', '--junitxml=' + str(prefix.with_suffix('.xml')), node], env=env, stdout=log, stderr=subprocess.STDOUT, timeout=180)
-                  results.append({'nodeid': node, 'status': 'executed', 'exit_code': run.returncode})
-              except subprocess.TimeoutExpired:
-                  results.append({'nodeid': node, 'status': 'timeout'})
-              (out / 'mysql-results.json').write_text(json.dumps(results, ensure_ascii=False, indent=2))
-              print(json.dumps({'case': index + 1, 'total': len(nodes), **results[-1]}, ensure_ascii=False), flush=True)
-          print('MySQL case execution finished:', len(results))
-          sys.exit(int(not nodes or collect.returncode != 0 or len(results) != len(nodes) or any(r.get('exit_code', 1) != 0 for r in results)))
-          PY
-          PYTHONPATH="$PWD" timeout 1200 python /tmp/business_mysql_cases.py
-      - name: Record source state and destroy only the test container
-        if: always()
-        run: |
-          git status --short > "$PROOF_DIR/working-tree-after-tests.txt"
-          docker logs business-verification-mysql > "$PROOF_DIR/mysql-container.log" 2>&1 || true
-          docker rm -f business-verification-mysql || true
-      - name: Upload MySQL evidence
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: business-mysql-tcp-7e12a3e
-          path: /tmp/business-proof
-          retention-days: 1
-          if-no-files-found: error
-  frontend-baseline:
-    name: Frontend failure comparison before cleanup
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    env:
-      PROOF_DIR: /tmp/business-proof
-      CI: 'true'
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
-        with:
-          ref: aa7acaa88d59f40cad2d9b0b1f2cfc44a76634d6
-          persist-credentials: false
-      - name: Install the same locked frontend dependencies
-        working-directory: ui_react
-        run: |
-          mkdir -p "$PROOF_DIR"
-          git rev-parse HEAD > "$PROOF_DIR/source-commit.txt"
-          node --version > "$PROOF_DIR/node-version.txt"
-          npm ci --ignore-scripts --no-audit --fund=false > "$PROOF_DIR/npm-install.log" 2>&1
-      - name: Run only files that failed on current main
-        working-directory: ui_react
+      - name: Execute the twelve cases previously blocked on missing MySQL configuration
+        if: matrix.mode == 'durable-mysql'
+        env:
+          LABOR_UNION_TEST_MYSQL_HOST: 127.0.0.1
+          LABOR_UNION_TEST_MYSQL_PORT: '33306'
+          LABOR_UNION_TEST_MYSQL_USER: root
+          LABOR_UNION_TEST_MYSQL_PASSWORD: verification-only
         run: |
           set +e
-          npm test -- src/tests/orders_mutation_adapter.test.ts src/tests/domains/external-integration/subsystems/line/integration/line_rules_query_flow.test.tsx src/tests/domains/clients/subsystems/client-profile/modules/profile-change/client_registry_client.test.ts --reporter=json --outputFile="$PROOF_DIR/frontend-baseline.json" --maxWorkers=2 --minWorkers=1 > "$PROOF_DIR/frontend-baseline.log" 2>&1
+          timeout 600 python -m pytest -q --tb=short --junitxml="$PROOF_DIR/durable-mysql.xml" tests/test_background_job_repository_mysql.py tests/test_durable_job_disposable_mysql_e2e.py tests/test_durable_job_payload_equality_disposable_mysql_e2e.py > "$PROOF_DIR/durable-mysql.log" 2>&1
           code=$?
-          echo "$code" > "$PROOF_DIR/frontend-baseline-exit-code.txt"
-          tail -30 "$PROOF_DIR/frontend-baseline.log"
+          echo "$code" > "$PROOF_DIR/durable-mysql-exit-code.txt"
+          tail -70 "$PROOF_DIR/durable-mysql.log"
           exit "$code"
-      - name: Upload baseline comparison evidence
+      - name: Record source state
+        if: always()
+        run: git status --short > "$PROOF_DIR/working-tree-after-tests.txt"
+      - name: Remove only the temporary MySQL container
+        if: always() && matrix.mode == 'durable-mysql'
+        run: |
+          docker logs business-verification-mysql > "$PROOF_DIR/mysql-container.log" 2>&1 || true
+          docker rm -f business-verification-mysql || true
+      - name: Upload exact comparison evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: business-frontend-baseline-aa7acaa
+          name: business-${{ matrix.mode }}-comparison
           path: /tmp/business-proof
           retention-days: 1
           if-no-files-found: error
