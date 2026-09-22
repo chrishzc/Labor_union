@@ -9,8 +9,3 @@ def RemoveOtherAdditionMigration(row_count: int, nonzero_other_addition: int) ->
     if nonzero_other_addition != 0:
         raise ValueError("Cannot migrate: nonzero other_addition detected.")
     return {"contract_complete": True, "row_count": row_count}
-
-if __name__ == "__main__":
-    raise SystemExit(
-        "migrate_remove_other_addition 已退役；請使用受治理的 preserve-data migration runner。"
-    )

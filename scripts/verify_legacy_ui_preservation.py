@@ -137,19 +137,3 @@ def _row_digest(rows, columns, keys) -> str:
     ]
     payload = json.dumps(normalized, ensure_ascii=True, sort_keys=True, default=str)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--database", required=True)
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", default=3306, type=int)
-    parser.add_argument("--user", default="root")
-    parser.add_argument("--password", default="1234")
-    result = verify(parser.parse_args())
-    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
-    return 0 if result["valid"] else 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

@@ -568,38 +568,3 @@ def _verify(cursor, client_items, staff_items) -> None:
     actual_staff = {row["obligation_identity"]: int(row["amount_due_ntd"]) for row in cursor.fetchall()}
     if actual_client != expected_client or actual_staff != expected_staff:
         raise RuntimeError("canonical accounting projection verification failed")
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    modes = parser.add_mutually_exclusive_group()
-    modes.add_argument("--dry-run", action="store_true")
-    modes.add_argument("--apply", action="store_true")
-    modes.add_argument("--verify", action="store_true")
-    parser.add_argument("--target-database", required=True)
-    parser.add_argument("--plan-receipt")
-    parser.add_argument("--backup-receipt")
-    parser.add_argument("--receipt-path")
-    parser.add_argument(
-        "--confirm-apply",
-        help="Exact confirmation required for a write: APPLY <target-database>",
-    )
-    args = parser.parse_args()
-    if not re.fullmatch(r"lu_test_[a-z0-9_]+", args.target_database):
-        parser.error("target database must be an explicitly named lu_test_* database")
-    if os.getenv("APP_ENV", "development").strip().lower() in {"prod", "production"}:
-        parser.error("production environment is not permitted for this legacy migration CLI")
-    mode = "apply" if args.apply else "verify" if args.verify else "dry-run"
-    if args.apply:
-        expected_confirmation = f"APPLY {args.target_database}"
-        if args.confirm_apply != expected_confirmation:
-            parser.error(f"--confirm-apply must exactly equal {expected_confirmation!r}")
-        if not args.receipt_path:
-            parser.error("--apply requires --receipt-path for a terminal receipt")
-    receipt = run_migration(mode=mode, target_database=args.target_database, plan_receipt=args.plan_receipt, backup_receipt=args.backup_receipt, receipt_path=args.receipt_path)
-    print(canonical_json({key: receipt.get(key) for key in ("mode", "receipt_status", "dataset_fingerprint", "database")}))
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

@@ -106,12 +106,3 @@ def test_empty_schema_parts_directory_is_valid(tmp_path):
     parts.mkdir()
 
     assert load_schema_parts(RecordingCursor(), parts) == []
-
-
-def test_main_is_retired_and_cannot_open_or_commit(monkeypatch, capsys):
-    monkeypatch.setattr(init_db, "load_schema_paths", lambda *_: pytest.fail("legacy writer ran"))
-
-    assert init_db.main(["--allow-drop"]) == 2
-    captured = capsys.readouterr()
-    assert "library-only" in captured.err
-    assert "reset_fake_database" in captured.err

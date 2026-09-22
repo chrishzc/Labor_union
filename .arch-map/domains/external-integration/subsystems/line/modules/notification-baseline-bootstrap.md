@@ -15,7 +15,6 @@ assignments, profiles, payroll obligations, or provider calls.
 - `infrastructure/mysql/line_notification_repository.py`
 - `subsystems/line/configuration_application.py`
 - `api/schemas/line_notification_rules.py`
-- `scripts/bootstrap_line_configuration.py`
 - `config/notification_rules.json`
 - `config/message_templates.json`
 

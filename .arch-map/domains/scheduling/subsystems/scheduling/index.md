@@ -37,4 +37,3 @@
 - test_root: `tests/domains/scheduling/subsystems/scheduling/`
 - integration_root: `ui_react/src/tests/domains/scheduling/subsystems/scheduling/integration/`
 - routing: `.arch-map/tests/domains/scheduling/subsystems/scheduling/index.md`.
-- bounded runtime verification: `scripts/run_task96_scheduling_lane_c.py` (typed TestClient disposable lane-C data and Scheduling readback)
