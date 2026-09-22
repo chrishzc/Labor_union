@@ -124,6 +124,7 @@ export const realisticActualStart: ActualStart = {
   scheduling_generation: 3,
   client_finance_version: 4,
   payroll_version: 5,
+  has_formal_assignments: true,
 };
 
 export const realisticContractCompletion: ContractCompletion = {
