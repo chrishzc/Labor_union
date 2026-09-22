@@ -19,9 +19,11 @@
   - `api/dependencies/service_date_confirmation.py`
   - `api/schemas/order_calendar_detail.py`
   - `ui_react/src/adapters/orders/order_mutation_adapter.ts`
+  - `ui_react/src/adapters/orders/service_date_start_flow.ts` — 將未保存開始日的建議範圍投影到 UI；人工確認後串接既有 Actual Start 與服務日期 writer，保留第一步結果及第二步恢復狀態。
   - `ui_react/src/components/OrderServiceDatesPanel.tsx`
 
 ## Dependencies
+- outbound: `orders/actual-start` — 輸入改變時零寫入 Preview；最後確認才 Apply／readback，取得新 owner versions 後再 Preview／Apply 服務日期。正式或歷史重排候選須與核對集合一致。
 - outbound: `scheduling/scheduling` — restart tombstone 的正式重建只呼叫 `infrastructure/mysql/scheduling_replacement_writer.py`。
 - outbound: `staff-payables/payroll` — 新 assignment 在同一交易沿 source assignment frozen rate，缺少時使用既有 case payroll policy，建立 immutable assignment rate snapshot，供普通 Actual Start read model 使用。
 - inbound: `orders/historical-precision-restart` — completed restart、空 effective generation 與 immutable historical pairing evidence；source assignment identity 可不存在。

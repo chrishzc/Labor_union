@@ -1,5 +1,7 @@
 import type { OrderWorkbenchScope } from '../api/orders/order_core_stage_projection_client';
-import { useCallback, useEffect, useRef, useState, type FC } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type FC } from 'react';
+import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_store';
+import { serviceDatesNeedCompletion } from '../adapters/orders/service_date_start_flow';
 import './OrderWorkbenchV2Drawer.css';
 import '../pages/OrdersPage.css';
 import { historicalAdoptionEvidenceClient } from '../api/orders/historical_adoption_evidence_client';
@@ -149,6 +151,10 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
   const [replacementExpanded, setReplacementExpanded] = useState(false);
   const [operation, setOperation] = useState<'cancellation' | 'reopen' | 'actual-start' | null>(null);
   const [operationBusy, setOperationBusy] = useState(false);
+  const datesPending = useSyncExternalStore(
+    (listener) => orderMutationFlowStore.subscribe(listener),
+    () => serviceDatesNeedCompletion(caseNo),
+  );
   const operationBusyRef = useRef(false);
   const onOperationBusyChange = useCallback((busy: boolean) => {
     operationBusyRef.current = busy;
@@ -357,7 +363,10 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
                 />
               )}
               {terms.status === 'ready' && (
-                <OrderTermsMutationPanel caseNo={caseNo} query={terms.data} onObserved={refreshFacts} />
+                <OrderTermsMutationPanel caseNo={caseNo} query={terms.data} onObserved={() => {
+                  setServiceDatesCalculationRevision((revision) => revision + 1);
+                  refreshFacts();
+                }} />
               )}
               </div>}
               {(activeGroup === 'matching' || visitedGroups.includes('matching')) && <div hidden={activeGroup !== 'matching'}>
@@ -367,14 +376,18 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
                 {matchingView === 'information' && <OrderInformationSheets caseNo={caseNo} initialKind={informationKind} assignments={assignmentPlan.status === 'ready' ? assignmentPlan.data.assignments : []} onOpenCandidates={() => setMatchingView('list')} />}
               </div>}
               {(activeGroup === 'recommendation' || visitedGroups.includes('recommendation')) && <div hidden={activeGroup !== 'recommendation'}>
+                {datesPending && <p role="status">開始日與服務日期尚未完成接續確認，請先到「服務安排 → 確認日期」完成；目前不能以舊日期繼續推薦確認。</p>}
+                <fieldset disabled={datesPending}>
                 <OrderFormalRecommendationPanel
                   caseNo={caseNo}
+                  revision={refreshRevision}
                   onObserved={refreshFacts}
                   onOpenServiceDates={() => {
                     setServiceView('dates');
                     openGroup('service');
                   }}
                 />
+                </fieldset>
               </div>}
               {(activeGroup === 'contracts' || visitedGroups.includes('contracts')) && <div hidden={activeGroup !== 'contracts'}>
                 <nav className="order-case-subnav" aria-label="契約工作"><button type="button" aria-pressed={contractView === 'overview'} onClick={() => setContractView('overview')}>契約欄位預覽</button><button type="button" aria-pressed={contractView === 'signing'} onClick={() => { setSigningOpened(true); setContractView('signing'); }}>下載與簽回</button></nav>
@@ -387,6 +400,8 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
                 <OrderServiceDatesPanel
                   caseNo={caseNo}
                   calculationRevision={serviceDatesCalculationRevision}
+                  projectionRevision={refreshRevision}
+                  onBusyChange={onOperationBusyChange}
                   onObserved={refreshFacts}
                   onOpenActualStart={() => {
                     setDrawerTab('changes');
@@ -394,7 +409,10 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
                   }}
                 />
                 </div><div hidden={serviceView !== 'assignment'}>
-                <OrderAssignmentPlanPanel caseNo={caseNo} onObserved={refreshFacts} onOpenReplacement={() => { setDrawerTab('changes'); setReplacementExpanded(true); }} />
+                {datesPending && <p role="status">服務日期尚未完成保存或回讀，請先到「確認日期」接續；目前不能以舊日期辦理正式排班。</p>}
+                <fieldset disabled={datesPending}>
+                <OrderAssignmentPlanPanel caseNo={caseNo} revision={refreshRevision} onObserved={refreshFacts} onOpenReplacement={() => { setDrawerTab('changes'); setReplacementExpanded(true); }} />
+                </fieldset>
                 </div><div hidden={serviceView !== 'completion'}>{detail.status === 'ready' && (
                 <OrderServiceCompletionActions caseNo={caseNo} orderStatus={detail.data.order_status} onCompleted={refreshFacts} />
               )}</div></div>}

@@ -17,6 +17,8 @@ const mocks = vi.hoisted(() => ({
   resetServiceDatesDraft: vi.fn(),
   setServiceDatesQueryReady: vi.fn(),
   subscribe: vi.fn(),
+  getActualStartFlow: vi.fn(),
+  setServiceDatesCalculation: vi.fn(),
 }));
 
 vi.mock('../../../../../../../api/orders/order_query_client', () => ({
@@ -53,6 +55,8 @@ vi.mock('../../../../../../../adapters/orders/order_mutation_flow_store', () => 
     resetServiceDatesDraft: mocks.resetServiceDatesDraft,
     setServiceDatesQueryReady: mocks.setServiceDatesQueryReady,
     subscribe: mocks.subscribe,
+    getActualStart: mocks.getActualStartFlow,
+    setServiceDatesCalculation: mocks.setServiceDatesCalculation,
   },
 }));
 
@@ -106,7 +110,7 @@ describe('待辦看板 Beta 第 9 階服務日期', () => {
     Object.values(mocks).forEach((mock) => mock.mockReset());
     mocks.getActualStart.mockResolvedValue({
       case_no: 'CASE-SERVICE-DATES',
-      current_actual_start_date: null,
+      current_actual_start_date: '2026-10-01',
       planned_start_date: '2026-10-01',
       service_data_locked: false,
       order_version: 11,
@@ -169,7 +173,7 @@ describe('待辦看板 Beta 第 9 階服務日期', () => {
       '確認正式服務日期',
     );
     expect(screen.getByLabelText('建議服務日期摘要')).toBeInTheDocument();
-    expect(screen.getByLabelText('服務日期計算基準')).toHaveTextContent('目前以原訂日試算：2026-10-01');
+    expect(screen.getByLabelText('服務日期計算基準')).toHaveTextContent('正式實際開始日：2026-10-01');
     fireEvent.click(screen.getByRole('button', { name: '確認／更正實際開始日' }));
     expect(onOpenActualStart).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('heading', { name: '📅 正式服務日期確認（日曆排盤）' })).toBeInTheDocument();
@@ -209,7 +213,7 @@ describe('待辦看板 Beta 第 9 階服務日期', () => {
   });
 
   it('任一 owner 回讀案件編號不一致時 fail closed，不執行精算或 Preview', async () => {
-    mocks.getActualStart.mockResolvedValueOnce({
+    mocks.getActualStart.mockResolvedValue({
       case_no: 'OTHER-CASE',
       current_actual_start_date: null,
       planned_start_date: '2026-10-01',
@@ -267,7 +271,7 @@ describe('待辦看板 Beta 第 9 階服務日期', () => {
     expect(screen.getByText(/不需重新挑選候選或再次推薦/)).toBeInTheDocument();
   });
 
-  it('正式實際開始日變更後自動重算，並使舊預覽與人工選日失效', async () => {
+  it('正式實際開始日變更後自動重算，舊預覽失效且人工選日須明確採用新建議', async () => {
     const { rerender } = render(
       <OrderServiceDatesPanel caseNo="CASE-SERVICE-DATES" calculationRevision={0} />,
     );
@@ -317,6 +321,8 @@ describe('待辦看板 Beta 第 9 階服務日期', () => {
     expect(await screen.findByText(/已依正式實際開始日更新服務日期，請核對後再確認。/)).toBeInTheDocument();
     expect(screen.queryByLabelText('服務日期確認內容')).not.toBeInTheDocument();
     expect(screen.getByLabelText('建議服務日期摘要')).toHaveTextContent('2026-09-28');
+    expect(screen.getByRole('button', { name: '確認服務日期' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '採用新建議' }));
     expect(mocks.calculate).toHaveBeenLastCalledWith({
       case_no: 'CASE-SERVICE-DATES',
       actual_start_date: '2026-09-28',
@@ -357,6 +363,10 @@ describe('待辦看板 Beta 第 9 階服務日期', () => {
       ...initialQuery,
       order_version: 12,
       scheduling_version: 8,
+    });
+    const previousCalculation = await mocks.calculate.mock.results[0].value;
+    mocks.calculate.mockResolvedValue({ ...previousCalculation, actual_start_date: '2026-09-28', actual_end_date: '2026-09-30',
+      day_by_day: ['2026-09-28', '2026-09-29', '2026-09-30'].map((date, index) => ({ date, day_num: index + 1, is_work_day: true, is_rest_day: false, holiday_name: null })),
     });
     rerender(<OrderServiceDatesPanel caseNo="CASE-SERVICE-DATES" calculationRevision={1} />);
     expect(await screen.findByText('日期基準已變更；待目前操作結果確認後，會接續更新。')).toBeInTheDocument();

@@ -144,3 +144,57 @@ def test_date_only_first_save_and_correction_do_not_bootstrap_downstream_roots()
         }
     finally:
         connection.close()
+
+
+def test_input_start_then_confirm_dates_uses_fresh_versions_without_downstream_roots():
+    """#335: the existing two writers accept an earlier/later/cross-month draft after human confirmation."""
+    from infrastructure.mysql.service_date_confirmation_repository import MySqlServiceDateConfirmationRepository
+    from infrastructure.mysql.matching_schedule_confirmation_repository import MySqlMatchingScheduleConfirmationRepository
+    from subsystems.orders.service_date_confirmation_workflow import ServiceDateConfirmationWorkflow
+    from datetime import timedelta
+
+    database = f"{DATABASE}_service_dates"
+    bootstrap(_arguments(database))
+    connection = _connect(database)
+    try:
+        for ordinal, start_date in enumerate((date(2026, 8, 30), date(2026, 9, 15), date(2026, 9, 30))):
+            case_no = f"INPUT-335-{ordinal}"
+            _seed_order(connection, case_no)
+            actual_repository = MySqlOrderActualStartRepository(connection)
+            actual_workflow = ActualStartWorkflow(actual_repository, lambda: MySqlUnitOfWork(connection),
+                FixedBusinessClock(datetime(2026, 9, 2, tzinfo=TAIPEI_TIME_ZONE)))
+            dates_workflow = ServiceDateConfirmationWorkflow(MySqlServiceDateConfirmationRepository(connection),
+                lambda: MySqlUnitOfWork(connection), MySqlMatchingScheduleConfirmationRepository(connection))
+            selected = (start_date, start_date + timedelta(days=1))
+            initial = actual_repository.load_actual_start_query(case_no, for_update=False)
+            preview = actual_workflow.preview_date_only(initial, start_date)
+            before, before_counts = _snapshot(connection, case_no)
+            assert before["actual_start_date"] is None
+            assert not any(before_counts.values())
+
+            start_result = actual_workflow.apply_date_only(ActualStartDateOnlyApplyRequest(case_no, start_date,
+                ExpectedVersion(initial.order_version), preview.fingerprint, CorrelationId(f"input-335-{ordinal}")))
+            current = dates_workflow.query(case_no)
+            assert current.order_version == start_result.order_version == 2
+            assert current.selectable_dates[0] == start_date
+            # A failure here leaves only the date saved; a later Preview can safely continue.
+            with pytest.raises(ValueError, match="outside_selectable_range"):
+                dates_workflow.preview(case_no, (start_date - timedelta(days=1), start_date))
+            assert dates_workflow.query(case_no).current_version is None
+            candidate = dates_workflow.preview(case_no, selected)
+            receipt = dates_workflow.apply(case_no, selected, expected_order_version=current.order_version,
+                expected_scheduling_version=current.scheduling_version, preview_fingerprint=candidate.candidate.fingerprint.value,
+                actor="issue335-test", reason="確認正式服務日期", idempotency_key=f"input-335-dates-{ordinal}")
+            observed = dates_workflow.query(case_no)
+            after, counts = _snapshot(connection, case_no)
+            assert observed.current_version == receipt.confirmed_version == 1
+            assert observed.current_dates == selected
+            assert after["actual_start_date"] == start_date
+            assert after["lifecycle_version"] == 2
+            assert after["status"] == before["status"]
+            assert not any(counts.values())
+            print({"database": database, "case": case_no, "actual_start": start_date.isoformat(),
+                   "confirmed_dates": [value.isoformat() for value in observed.current_dates],
+                   "confirmed_version": observed.current_version, "downstream_counts": counts})
+    finally:
+        connection.close()

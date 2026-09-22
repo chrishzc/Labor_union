@@ -8,6 +8,7 @@ import { ServiceBeforeReplacementActions } from './ServiceBeforeReplacementActio
 
 interface OrderAssignmentPlanPanelProps {
   caseNo: string;
+  revision?: number;
   onObserved?: () => void;
   onOpenReplacement?: () => void;
 }
@@ -24,13 +25,17 @@ function errorMessage(error: unknown): string {
     : '正式指派與排班資料讀取失敗';
 }
 
-export const OrderAssignmentPlanPanel: FC<OrderAssignmentPlanPanelProps> = ({ caseNo, onObserved, onOpenReplacement }) => {
+export const OrderAssignmentPlanPanel: FC<OrderAssignmentPlanPanelProps> = ({ caseNo, onObserved, onOpenReplacement, revision }) => {
   const [state, setState] = useState<ReadState>({ status: 'idle' });
   const [replacementOpen, setReplacementOpen] = useState(false);
   const mounted = useRef(false);
+  const sequence = useRef(0);
+  const currentCase = useRef(caseNo);
+  currentCase.current = caseNo;
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
   const load = async (notify = false) => {
+    const request = ++sequence.current;
     setState({ status: 'loading' });
     try {
       const [assignment, matchingPlan] = await Promise.all([
@@ -43,12 +48,21 @@ export const OrderAssignmentPlanPanel: FC<OrderAssignmentPlanPanelProps> = ({ ca
       if (assignment.case_no !== caseNo) {
         throw new Error('正式指派回讀案件編號不一致。');
       }
+      if (!mounted.current || currentCase.current !== caseNo || sequence.current !== request) return;
       setState({ status: 'ready', data: { assignment, matchingPlan } });
       if (notify && mounted.current) onObserved?.();
     } catch (error) {
+      if (!mounted.current || currentCase.current !== caseNo || sequence.current !== request) return;
       setState({ status: 'error', message: errorMessage(error) });
     }
   };
+
+  useEffect(() => {
+    if (revision !== undefined) void load();
+    return () => { sequence.current += 1; };
+    // The workbench supplies a revision after committed owner changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [caseNo, revision]);
 
   const plan = state.status === 'ready' ? state.data.assignment : null;
   const matchingPlan = state.status === 'ready' ? state.data.matchingPlan : null;

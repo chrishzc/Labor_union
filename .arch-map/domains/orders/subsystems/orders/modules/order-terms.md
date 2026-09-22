@@ -18,6 +18,7 @@ Issue #326：同一 Terms command 可承接完整替代日期與明確既有指�
   - `subsystems/orders/order_intake_terms_bootstrap.py`
   - `infrastructure/mysql/order_terms_read_model.py`
   - `infrastructure/mysql/order_terms_repository.py`
+  - `infrastructure/mysql/order_lifecycle_impact_writer.py` — 將 typed lifecycle impact 寫入 Orders projection、事件、資料鎖與 outbox；沿用外層 transaction。
   - `infrastructure/mysql/order_intake_terms_bootstrap_repository.py`
   - `api/schemas/order_terms.py`
   - `api/dependencies/order_terms.py`
@@ -42,6 +43,7 @@ Issue #326：同一 Terms command 可承接完整替代日期與明確既有指�
 - test_root: `tests/test_order_terms_preassignment_correction.py`
 - test_root: `tests/domains/orders/subsystems/orders/modules/order-terms/`
 - test_root: `ui_react/src/tests/domains/orders/subsystems/orders/modules/order-terms/`
+- test_root: `ui_react/src/tests/order_terms_mutation_client.test.ts` — 既有 Terms typed-client 契約測試，沿用現行位置。
 - test_root: `tests/domains/orders/subsystems/orders/modules/intake-terms-bootstrap/unit/`
 
 ## Provenance

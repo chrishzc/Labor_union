@@ -131,7 +131,7 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
           && caught.code === 'scheduling_assignments_required';
         setMissingAssignments(missingAssignments);
         setError(missingAssignments
-          ? '尚未建立正式月嫂指派，本次未變更日期。請先以「計畫開始日」精算並確認正式服務日期；之後確認實際開始日時，系統會一併重排服務日期與排班。'
+          ? '目前缺少可接續的正式或歷史服務安排，本次未變更日期。請回服務日期入口輸入此次開始日並核對；歷史案件若仍缺少既定人員或排休資料，須先補齊該項資料。'
           : actualStartErrorMessage(caught, '實際開始日確認失敗。'));
         setPhase('idle');
       }

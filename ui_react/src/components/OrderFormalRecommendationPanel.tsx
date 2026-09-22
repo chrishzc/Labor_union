@@ -15,6 +15,7 @@ import {
 
 interface OrderFormalRecommendationPanelProps {
   caseNo: string;
+  revision?: number;
   onObserved?: () => void;
   onOpenServiceDates?: () => void;
 }
@@ -93,7 +94,7 @@ async function readCurrentPlan(caseNo: string, expectedPlanId?: number): Promise
   return { plan, contact };
 }
 
-export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelProps> = ({ caseNo, onObserved, onOpenServiceDates }) => {
+export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelProps> = ({ caseNo, onObserved, onOpenServiceDates, revision = 0 }) => {
   const [candidates, setCandidates] = useState<ReadState<CandidateContactPool>>({ status: 'idle' });
   const [active, setActive] = useState<ReadState<CurrentPlan | null>>({ status: 'loading' });
   const [busy, setBusy] = useState(false);
@@ -167,6 +168,15 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
       if (sequence.current === request) setActive({ status: 'error', message: errorMessage(caught) });
     }
   };
+
+  const observedRevision = useRef(revision);
+  useEffect(() => {
+    if (observedRevision.current === revision || busy || formalManualProtected || formalPlanCreationProtected) return;
+    observedRevision.current = revision;
+    void reload();
+    // Preserve form input and unresolved commands while refreshing owner projections.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revision, busy, formalManualProtected, formalPlanCreationProtected]);
 
   const loadCandidates = async () => {
     candidateQueryController.current?.abort();

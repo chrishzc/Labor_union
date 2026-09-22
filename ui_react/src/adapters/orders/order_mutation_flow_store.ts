@@ -10,7 +10,7 @@ import type {
   OrderReopenReceiptView,
 } from '../../api/orders/order_mutation_schemas';
 import type { OrderServiceCompletionPreview, OrderServiceCompletionReceipt } from '../../api/orders/order_service_completion_client';
-import type { ActualStartApplyPayload, ActualStartReceipt } from '../../api/orders/order_actual_start_client';
+import type { ActualStartApplyPayload, ActualStartReceipt, ActualStartPreview } from '../../api/orders/order_actual_start_client';
 import type {
   AddCandidatesResult,
   CandidateAddCommand,
@@ -82,6 +82,8 @@ export type ReopenFlowStatus =
   | 'typed_error';
 
 export interface ServiceDatesDraftState {
+  /** Unsaved input and the existing Actual Start command, retained across drawer reopen. */
+  calculation?: { startDate: string; startPreview: ActualStartPreview | null };
   caseNo: string;
   queryView: ServiceDateConfirmationQueryView | null;
   selectedDates: string[];
@@ -678,6 +680,13 @@ export class OrderMutationFlowStore {
 
   public getServiceDatesDraft(caseNo: string): ServiceDatesDraftState | undefined {
     return this.serviceDatesDrafts.get(caseNo);
+  }
+
+  public setServiceDatesCalculation(caseNo: string, calculation: ServiceDatesDraftState['calculation']): void {
+    const draft = this.getOrCreateServiceDatesDraft(caseNo);
+    draft.calculation = calculation;
+    draft.previewView = null;
+    this.notify();
   }
 
   public getOrCreateServiceDatesDraft(caseNo: string): ServiceDatesDraftState {
