@@ -23,12 +23,17 @@ from infrastructure.mysql.order_lifecycle_impact_writer import (
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.identities import IdempotencyKey
 from subsystems.orders.historical_completion_apply import (
+    ApplyHistoricalServiceCompletion,
     ApplyHistoricalCompletion,
     HistoricalCompletionApplyFacts,
     HistoricalCompletionCandidate,
     HistoricalCompletionClaimState,
     HistoricalCompletionReceipt,
+    HistoricalServiceCompletionCandidate,
+    HistoricalServiceCompletionFacts,
+    HistoricalServiceCompletionReceipt,
     StoredHistoricalCompletionReceipt,
+    StoredHistoricalServiceCompletionReceipt,
     lifecycle_impact_candidate,
 )
 from subsystems.orders.historical_completion_oracle import (
@@ -39,6 +44,7 @@ from subsystems.orders.terms_workflow import LifecycleImpactPersistenceCommand
 
 
 _COMMAND_FAMILY = "historical_accounting_completion"
+_SERVICE_COMPLETION_COMMAND_FAMILY = "historical_service_completion"
 
 
 class MySqlHistoricalCompletionWriter:
@@ -197,6 +203,136 @@ class MySqlHistoricalCompletionWriter:
                 cursor.fetchall()
 
 
+class MySqlHistoricalServiceCompletionWriter:
+    """Persist the historical in-service date rollover through the Orders writer."""
+
+    def __init__(self, connection: Any) -> None:
+        self._connection = connection
+
+    def load(self, case_no: str, *, for_update: bool) -> HistoricalServiceCompletionFacts:
+        suffix = " FOR UPDATE" if for_update else ""
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT o.case_no,o.status,o.lifecycle_version,o.actual_end_date,"
+                "(SELECT receipt.source_event_identity "
+                "FROM historical_order_adoption_receipts receipt "
+                "WHERE receipt.case_no=o.case_no AND receipt.outcome='adopted' "
+                "ORDER BY receipt.id DESC LIMIT 1) AS source_identity "
+                "FROM orders o WHERE o.case_no=%s" + suffix,
+                (case_no,),
+            )
+            row = cursor.fetchone()
+        if not isinstance(row, Mapping):
+            raise ValueError("historical_order_not_found")
+        source_identity = row.get("source_identity")
+        if not isinstance(source_identity, str) or not source_identity.strip():
+            raise ValueError("historical_adoption_source_missing")
+        from domains.orders.lifecycle import OrderLifecycleStatus
+
+        return HistoricalServiceCompletionFacts(
+            str(row["case_no"]),
+            OrderLifecycleStatus(str(row["status"])),
+            int(row["lifecycle_version"]),
+            row.get("actual_end_date"),
+            source_identity,
+        )
+
+    def claim(self, request, command_fingerprint):
+        with self._connection.cursor() as cursor:
+            try:
+                cursor.execute(
+                    "INSERT INTO application_command_claims "
+                    "(idempotency_key,command_family,aggregate_identity,command_fingerprint,correlation_id) "
+                    "VALUES (%s,%s,%s,%s,%s)",
+                    (
+                        request.idempotency_key.value,
+                        _SERVICE_COMPLETION_COMMAND_FAMILY,
+                        request.case_no,
+                        command_fingerprint.value,
+                        request.correlation_id.value,
+                    ),
+                )
+                return HistoricalCompletionClaimState.CREATED
+            except IntegrityError as error:
+                if _mysql_error_code(error) != 1062:
+                    raise
+            cursor.execute(
+                "SELECT command_family,aggregate_identity,command_fingerprint "
+                "FROM application_command_claims WHERE idempotency_key=%s FOR UPDATE",
+                (request.idempotency_key.value,),
+            )
+            row = cursor.fetchone()
+        if not isinstance(row, Mapping):
+            raise RuntimeError("idempotency_claim_missing")
+        expected = (
+            _SERVICE_COMPLETION_COMMAND_FAMILY,
+            request.case_no,
+            command_fingerprint.value,
+        )
+        actual = (
+            str(row["command_family"]),
+            str(row["aggregate_identity"]),
+            str(row["command_fingerprint"]),
+        )
+        return (
+            HistoricalCompletionClaimState.MATCHED
+            if actual == expected
+            else HistoricalCompletionClaimState.MISMATCH
+        )
+
+    def find_service_completion_receipt(self, key: IdempotencyKey):
+        event_key = _child_identity(key, "lifecycle-event")
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT c.command_fingerprint,e.id,e.case_no,e.after_status,e.expected_version "
+                "FROM application_command_claims c "
+                "JOIN order_lifecycle_state_events e ON e.case_no=c.aggregate_identity "
+                "AND e.idempotency_key=%s "
+                "WHERE c.idempotency_key=%s AND c.command_family=%s FOR UPDATE",
+                (event_key, key.value, _SERVICE_COMPLETION_COMMAND_FAMILY),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        if not isinstance(row, Mapping):
+            raise ValueError("historical_service_completion_receipt_invalid")
+        return StoredHistoricalServiceCompletionReceipt(
+            PreviewFingerprint(str(row["command_fingerprint"])),
+            HistoricalServiceCompletionReceipt(
+                str(row["case_no"]),
+                int(row["id"]),
+                int(row["expected_version"]) + 1,
+                _service_completed_status(row["after_status"]),
+            ),
+        )
+
+    def persist_service_completion(self, request, candidate):
+        if not isinstance(request, ApplyHistoricalServiceCompletion):
+            raise TypeError("historical service completion request is invalid")
+        if not isinstance(candidate, HistoricalServiceCompletionCandidate):
+            raise TypeError("historical service completion candidate is invalid")
+        command = LifecycleImpactPersistenceCommand(
+            candidate.lifecycle,
+            candidate.expected_order_version,
+            candidate.resulting_order_version,
+            candidate.lifecycle.fingerprint,
+            request.idempotency_key,
+            request.actor,
+            request.reason,
+            request.correlation_id,
+            "historical_service_period_elapsed",
+        )
+        with self._connection.cursor() as cursor:
+            event_id = persist_order_lifecycle_impact(cursor, command)
+            persist_order_lifecycle_projection(cursor, command)
+        return HistoricalServiceCompletionReceipt(
+            request.case_no,
+            event_id,
+            candidate.resulting_order_version,
+            candidate.lifecycle.after_status,
+        )
+
+
 def _child_identity(key: IdempotencyKey, purpose: str) -> str:
     return "child:" + fingerprint_payload(
         {"outer_key": key.value, "domain": "orders", "purpose": purpose}
@@ -212,8 +348,17 @@ def _completed_status(value: object):
     return status
 
 
+def _service_completed_status(value: object):
+    from domains.orders.lifecycle import OrderLifecycleStatus
+
+    status = OrderLifecycleStatus(str(value))
+    if status is not OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED:
+        raise ValueError("historical_service_completion_receipt_invalid")
+    return status
+
+
 def _mysql_error_code(error: Exception) -> int | None:
     return error.args[0] if error.args and isinstance(error.args[0], int) else None
 
 
-__all__ = ["MySqlHistoricalCompletionWriter"]
+__all__ = ["MySqlHistoricalCompletionWriter", "MySqlHistoricalServiceCompletionWriter"]

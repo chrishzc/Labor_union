@@ -62,6 +62,7 @@ def default_job_handlers() -> dict[str, JobHandler]:
         "finance_import_historical_reprocess_apply": historical_reprocess_apply_handler,
         "government_subsidy_apply": government_subsidy_apply_handler,
         "orders_auto_completion_apply": order_auto_completion_handler,
+        "orders_historical_service_completion_apply": historical_service_completion_handler,
         "payroll_rebuild_apply": payroll_rebuild_apply_handler,
         "staff_payout_apply": staff_payout_apply_handler,
     }
@@ -478,6 +479,78 @@ def _auto_completion_request(payload: dict[str, Any]):
         payload["case_no"],
         ExpectedVersion(payload["expected_order_version"]),
         datetime.fromisoformat(payload["evaluation_at"]),
+        IdempotencyKey(payload["idempotency_key"]),
+        ActorContext(payload["actor"]),
+        payload["reason"],
+        CorrelationId(payload["correlation_id"]),
+    )
+
+
+def historical_service_completion_handler(
+    payload: dict[str, Any],
+) -> tuple[dict[str, Any], str]:
+    """Advance a due historical service period without requiring Scheduling facts."""
+    from infrastructure.mysql.historical_completion_writer import (
+        MySqlHistoricalServiceCompletionWriter,
+    )
+    from infrastructure.mysql.historical_service_accounting_repository import (
+        MySqlHistoricalServiceAccountingRepository,
+    )
+    from infrastructure.mysql.mysql_adapter import get_connection
+    from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+    from pymysql.err import OperationalError
+    from shared_kernel.errors import ErrorCategory
+    from subsystems.orders.historical_completion_apply import (
+        HistoricalServiceCompletionApplyError,
+        HistoricalServiceCompletionApplyWorkflow,
+    )
+    from subsystems.orders.historical_service_accounting_workflow import (
+        HistoricalServiceAccountingWorkflow,
+    )
+
+    request = _historical_service_completion_request(payload)
+    connection = get_connection()
+    try:
+        workflow = HistoricalServiceCompletionApplyWorkflow(
+            MySqlHistoricalServiceCompletionWriter(connection),
+            lambda: MySqlUnitOfWork(connection),
+            HistoricalServiceAccountingWorkflow(
+                MySqlHistoricalServiceAccountingRepository(connection),
+                lambda: MySqlUnitOfWork(connection),
+            ),
+        )
+        receipt = _materialize(workflow.apply(request))
+        return receipt, "historical_service_completion:" + receipt["case_no"]
+    except HistoricalServiceCompletionApplyError as error:
+        if error.error.category is ErrorCategory.UNAVAILABLE and error.error.retryable:
+            raise RetryableDurableJobError(error.error.code, error.error.message) from error
+        raise TerminalDurableJobError(error.error) from error
+    except OperationalError as error:
+        if _is_retryable_mysql_error(error):
+            raise RetryableDurableJobError(
+                "historical_service_completion_transaction_temporarily_unavailable",
+                "Historical service completion transaction is temporarily unavailable.",
+            ) from error
+        raise
+    finally:
+        connection.close()
+
+
+def _historical_service_completion_request(payload: dict[str, Any]):
+    from datetime import datetime
+    from shared_kernel.identities import (
+        ActorContext,
+        CorrelationId,
+        IdempotencyKey,
+    )
+    from subsystems.orders.historical_completion_apply import (
+        ApplyHistoricalServiceCompletion,
+    )
+
+    return ApplyHistoricalServiceCompletion(
+        payload["case_no"],
+        int(payload["expected_order_version"]),
+        datetime.fromisoformat(payload["evaluation_at"]).date(),
         IdempotencyKey(payload["idempotency_key"]),
         ActorContext(payload["actor"]),
         payload["reason"],

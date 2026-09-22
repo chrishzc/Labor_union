@@ -9,7 +9,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 import hashlib
-from typing import Protocol
+from typing import Literal, Protocol
 from uuid import uuid4
 
 from shared_kernel.clock import TAIPEI_TIME_ZONE
@@ -18,8 +18,10 @@ from subsystems.jobs.command_application import DurableJobAcceptance
 
 
 _COMMAND_TYPE = "orders_auto_completion_apply"
+_HISTORICAL_COMMAND_TYPE = "orders_historical_service_completion_apply"
 _SYSTEM_ACTOR = "system:orders-auto-completion"
 _REASON = "scheduled service completion instant reached"
+_HISTORICAL_REASON = "historical source service end date passed"
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +29,7 @@ class DueOrderAutoCompletion:
     case_no: str
     lifecycle_version: int
     completion_instant: datetime
+    completion_kind: Literal["normal", "historical"] = "normal"
 
     def __post_init__(self) -> None:
         if not self.case_no or self.case_no != self.case_no.strip():
@@ -35,6 +38,8 @@ class DueOrderAutoCompletion:
             raise ValueError("lifecycle_version must be non-negative")
         if self.completion_instant.tzinfo is None:
             raise ValueError("completion_instant must be timezone-aware")
+        if self.completion_kind not in {"normal", "historical"}:
+            raise ValueError("completion_kind is invalid")
         object.__setattr__(self, "completion_instant", self.completion_instant.astimezone(TAIPEI_TIME_ZONE))
 
 
@@ -113,12 +118,20 @@ def build_auto_completion_job_command(due_order: DueOrderAutoCompletion) -> Dura
         "evaluation_at": due_order.completion_instant.isoformat(),
         "expected_order_version": due_order.lifecycle_version,
         "idempotency_key": identity,
-        "reason": _REASON,
+        "reason": (
+            _HISTORICAL_REASON
+            if due_order.completion_kind == "historical"
+            else _REASON
+        ),
     }
     return DurableJobCommand(
         job_id=str(uuid4()),
         command_identity=identity,
-        command_type=_COMMAND_TYPE,
+        command_type=(
+            _HISTORICAL_COMMAND_TYPE
+            if due_order.completion_kind == "historical"
+            else _COMMAND_TYPE
+        ),
         command_version=1,
         payload=payload,
         submitted_by=_SYSTEM_ACTOR,
@@ -129,8 +142,15 @@ def build_auto_completion_job_command(due_order: DueOrderAutoCompletion) -> Dura
 def _command_identity(due_order: DueOrderAutoCompletion) -> str:
     instant = due_order.completion_instant.strftime("%Y%m%dT%H%M%S%z")
     source = f"{due_order.case_no}\0{due_order.lifecycle_version}\0{instant}"
+    if due_order.completion_kind == "historical":
+        source = "historical\0" + source
     digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
-    return f"orders-auto-completion:{digest}"
+    prefix = (
+        "orders-historical-service-completion"
+        if due_order.completion_kind == "historical"
+        else "orders-auto-completion"
+    )
+    return f"{prefix}:{digest}"
 
 
 def _taipei_instant(value: datetime) -> datetime:

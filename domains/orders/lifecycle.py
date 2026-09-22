@@ -38,6 +38,27 @@ class OrderLifecycleScope(StrEnum):
     UNFINISHED = "unfinished"
 
 
+def project_historical_service_completion_status(
+    current_status: OrderLifecycleStatus,
+    *,
+    actual_end_date: date | None,
+    business_date: date,
+) -> OrderLifecycleStatus:
+    """Advance the historical service branch once its source end date is past."""
+
+    if actual_end_date is not None and type(actual_end_date) is not date:
+        raise TypeError("historical actual end date is invalid")
+    if type(business_date) is not date:
+        raise TypeError("historical completion business date is invalid")
+    if current_status is not OrderLifecycleStatus.HISTORICAL_IN_SERVICE:
+        raise ValueError("historical_order_lifecycle_transition_invalid")
+    if actual_end_date is None:
+        raise ValueError("historical_service_end_date_missing")
+    if actual_end_date >= business_date:
+        raise ValueError("historical_service_completion_not_due")
+    return OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED
+
+
 def project_historical_accounting_completion_status(
     current_status: OrderLifecycleStatus,
     *,

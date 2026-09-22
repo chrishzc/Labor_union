@@ -2,19 +2,20 @@
 
 from datetime import date
 
-from domains.orders.lifecycle import OrderLifecycleStatus
+from domains.orders.lifecycle import LifecycleImpactCandidate, OrderLifecycleStatus
 from infrastructure.mysql.historical_completion_writer import (
     MySqlHistoricalCompletionWriter,
+    MySqlHistoricalServiceCompletionWriter,
     _child_identity,
 )
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from subsystems.orders.historical_completion_apply import (
+    ApplyHistoricalServiceCompletion,
     ApplyHistoricalCompletion,
     HistoricalCompletionCandidate,
+    HistoricalServiceCompletionCandidate,
 )
-
-
 class _Cursor:
     def __init__(self):
         self.calls = []
@@ -121,3 +122,61 @@ def test_apply_locks_historical_staff_payout_roots() -> None:
     assert any("FROM historical_staff_payout_obligation_links" in item for item in statements)
     assert any("FROM historical_staff_payout_events" in item for item in statements)
     assert all(parameters == ("CASE-1",) for _, parameters in connection.cursor_value.calls)
+
+
+def test_service_completion_persist_reuses_canonical_event_outbox_and_projection_writers(
+    monkeypatch,
+) -> None:
+    calls = []
+
+    def persist_event(cursor, command):
+        calls.append(("event", command))
+        return 92
+
+    def persist_projection(cursor, command):
+        calls.append(("projection", command))
+
+    monkeypatch.setattr(
+        "infrastructure.mysql.historical_completion_writer.persist_order_lifecycle_impact",
+        persist_event,
+    )
+    monkeypatch.setattr(
+        "infrastructure.mysql.historical_completion_writer.persist_order_lifecycle_projection",
+        persist_projection,
+    )
+    lifecycle = LifecycleImpactCandidate(
+        "CASE-1",
+        OrderLifecycleStatus.HISTORICAL_IN_SERVICE,
+        OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED,
+        date(2026, 9, 21),
+        None,
+        date(2026, 9, 22),
+        True,
+        False,
+        False,
+        (),
+        PreviewFingerprint("c" * 64),
+    )
+    candidate = HistoricalServiceCompletionCandidate(
+        lifecycle, 7, 8, "historical-source:CASE-1"
+    )
+    request = ApplyHistoricalServiceCompletion(
+        "CASE-1",
+        7,
+        date(2026, 9, 22),
+        IdempotencyKey("historical-service-completion:key-1"),
+        ActorContext("system:historical-service-completion"),
+        "historical source service end date passed",
+        CorrelationId("historical-service-completion:test"),
+    )
+
+    receipt = MySqlHistoricalServiceCompletionWriter(_Connection()).persist_service_completion(
+        request, candidate
+    )
+
+    assert [name for name, _ in calls] == ["event", "projection"]
+    command = calls[0][1]
+    assert command.trigger_event == "historical_service_period_elapsed"
+    assert command.candidate.service_data_lock_should_exist is False
+    assert receipt.lifecycle_event_id == 92
+    assert receipt.after_status is OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED

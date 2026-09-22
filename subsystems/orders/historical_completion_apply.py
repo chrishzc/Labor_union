@@ -11,6 +11,7 @@ from domains.orders.lifecycle import (
     LifecycleImpactCandidate,
     OrderLifecycleStatus,
     project_historical_accounting_completion_status,
+    project_historical_service_completion_status,
 )
 from shared_kernel.errors import ErrorCategory, TypedError
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
@@ -183,6 +184,181 @@ class HistoricalCompletionApplyWorkflow:
             return receipt
 
 
+@dataclass(frozen=True, slots=True)
+class HistoricalServiceCompletionFacts:
+    case_no: str
+    lifecycle_status: OrderLifecycleStatus
+    lifecycle_version: int
+    actual_end_date: date | None
+    source_identity: str
+
+    def __post_init__(self) -> None:
+        require_canonical_text(self.case_no, "case number", 50)
+        require_nonnegative_integer(self.lifecycle_version, "lifecycle version")
+        if not isinstance(self.lifecycle_status, OrderLifecycleStatus):
+            raise TypeError("historical lifecycle status is invalid")
+        if self.actual_end_date is not None and type(self.actual_end_date) is not date:
+            raise TypeError("historical actual end date is invalid")
+        require_canonical_text(self.source_identity, "historical source identity", 191)
+
+
+@dataclass(frozen=True, slots=True)
+class HistoricalServiceCompletionCandidate:
+    lifecycle: LifecycleImpactCandidate
+    expected_order_version: int
+    resulting_order_version: int
+    source_identity: str
+
+
+@dataclass(frozen=True, slots=True)
+class ApplyHistoricalServiceCompletion:
+    case_no: str
+    expected_order_version: int
+    evaluation_date: date
+    idempotency_key: IdempotencyKey
+    actor: ActorContext
+    reason: str
+    correlation_id: CorrelationId
+
+    def __post_init__(self) -> None:
+        require_canonical_text(self.case_no, "case number", 50)
+        require_nonnegative_integer(self.expected_order_version, "expected order version")
+        if type(self.evaluation_date) is not date:
+            raise TypeError("historical completion evaluation date is invalid")
+        require_canonical_text(self.reason, "historical service completion reason", 500)
+
+
+@dataclass(frozen=True, slots=True)
+class HistoricalServiceCompletionReceipt:
+    case_no: str
+    lifecycle_event_id: int
+    resulting_order_version: int
+    after_status: OrderLifecycleStatus
+    replayed: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class StoredHistoricalServiceCompletionReceipt:
+    command_fingerprint: PreviewFingerprint
+    receipt: HistoricalServiceCompletionReceipt
+
+
+class HistoricalServiceCompletionApplyError(Exception):
+    def __init__(self, error: TypedError) -> None:
+        self.error = error
+        super().__init__(error.code)
+
+
+class HistoricalServiceCompletionRepository(Protocol):
+    def load(self, case_no: str, *, for_update: bool) -> HistoricalServiceCompletionFacts: ...
+
+    def claim(
+        self,
+        request: ApplyHistoricalServiceCompletion,
+        command_fingerprint: PreviewFingerprint,
+    ) -> HistoricalCompletionClaimState: ...
+
+    def find_service_completion_receipt(
+        self, key: IdempotencyKey
+    ) -> StoredHistoricalServiceCompletionReceipt | None: ...
+
+    def persist_service_completion(
+        self,
+        request: ApplyHistoricalServiceCompletion,
+        candidate: HistoricalServiceCompletionCandidate,
+    ) -> HistoricalServiceCompletionReceipt: ...
+
+
+class HistoricalDefaultAccountingPort(Protocol):
+    def establish_default_in_current_unit_of_work(
+        self,
+        *,
+        case_no: str,
+        source_identity: str,
+        actor: str,
+        correlation_id: str,
+    ) -> object: ...
+
+
+class HistoricalServiceCompletionApplyWorkflow:
+    """Persist the date-driven historical service transition without Scheduling facts."""
+
+    def __init__(
+        self,
+        repository: HistoricalServiceCompletionRepository,
+        unit_of_work_factory: Callable[[], object],
+        default_accounting: HistoricalDefaultAccountingPort,
+    ) -> None:
+        self._repository = repository
+        self._unit_of_work_factory = unit_of_work_factory
+        self._default_accounting = default_accounting
+
+    def apply(
+        self, request: ApplyHistoricalServiceCompletion
+    ) -> HistoricalServiceCompletionReceipt:
+        command_fingerprint = _service_completion_command_fingerprint(request)
+        with self._unit_of_work_factory() as unit:
+            claim = self._repository.claim(request, command_fingerprint)
+            if claim is HistoricalCompletionClaimState.MISMATCH:
+                raise _service_error(
+                    request, ErrorCategory.IDEMPOTENCY_MISMATCH, "idempotency_conflict"
+                )
+            stored = self._repository.find_service_completion_receipt(
+                request.idempotency_key
+            )
+            if stored is not None:
+                if stored.command_fingerprint != command_fingerprint:
+                    raise _service_error(
+                        request,
+                        ErrorCategory.IDEMPOTENCY_MISMATCH,
+                        "idempotency_conflict",
+                    )
+                return _replayed_service_completion(stored.receipt)
+            if claim is HistoricalCompletionClaimState.MATCHED:
+                raise _service_error(
+                    request, ErrorCategory.INTERNAL, "idempotency_evidence_incomplete"
+                )
+
+            try:
+                facts = self._repository.load(request.case_no, for_update=True)
+                candidate = _historical_service_completion_candidate(
+                    facts, request.evaluation_date
+                )
+            except ValueError as error:
+                code = str(error)
+                category = (
+                    ErrorCategory.CONFLICT
+                    if code
+                    in {
+                        "historical_order_lifecycle_transition_invalid",
+                        "historical_order_not_found",
+                    }
+                    else ErrorCategory.DOMAIN_BLOCKED
+                )
+                raise _service_error(request, category, code) from error
+            if candidate.expected_order_version != request.expected_order_version:
+                raise _service_error(
+                    request,
+                    ErrorCategory.CONFLICT,
+                    "historical_service_completion_candidate_stale",
+                    candidate.expected_order_version,
+                )
+            receipt = self._repository.persist_service_completion(request, candidate)
+            try:
+                self._default_accounting.establish_default_in_current_unit_of_work(
+                    case_no=request.case_no,
+                    source_identity=candidate.source_identity,
+                    actor=request.actor.actor_id,
+                    correlation_id=request.correlation_id.value,
+                )
+            except ValueError as error:
+                raise _service_error(
+                    request, ErrorCategory.DOMAIN_BLOCKED, str(error)
+                ) from error
+            unit.commit()
+            return receipt
+
+
 def _candidate(
     facts: HistoricalCompletionApplyFacts,
     business_date: date,
@@ -327,6 +503,94 @@ def lifecycle_impact_candidate(
         True,
         (),
         candidate.fingerprint,
+    )
+
+
+def _historical_service_completion_candidate(
+    facts: HistoricalServiceCompletionFacts,
+    business_date: date,
+) -> HistoricalServiceCompletionCandidate:
+    after_status = project_historical_service_completion_status(
+        facts.lifecycle_status,
+        actual_end_date=facts.actual_end_date,
+        business_date=business_date,
+    )
+    payload = {
+        "case_no": facts.case_no,
+        "before_status": facts.lifecycle_status.value,
+        "after_status": after_status.value,
+        "expected_order_version": facts.lifecycle_version,
+        "resulting_order_version": facts.lifecycle_version + 1,
+        "actual_end_date": facts.actual_end_date.isoformat() if facts.actual_end_date else None,
+        "business_date": business_date.isoformat(),
+        "source_identity": facts.source_identity,
+    }
+    lifecycle = LifecycleImpactCandidate(
+        facts.case_no,
+        facts.lifecycle_status,
+        after_status,
+        facts.actual_end_date,
+        None,
+        business_date,
+        True,
+        False,
+        False,
+        (),
+        fingerprint_payload(payload),
+    )
+    return HistoricalServiceCompletionCandidate(
+        lifecycle,
+        facts.lifecycle_version,
+        facts.lifecycle_version + 1,
+        facts.source_identity,
+    )
+
+
+def _service_completion_command_fingerprint(
+    request: ApplyHistoricalServiceCompletion,
+) -> PreviewFingerprint:
+    return fingerprint_payload(
+        {
+            "case_no": request.case_no,
+            "expected_order_version": request.expected_order_version,
+            "evaluation_date": request.evaluation_date.isoformat(),
+            "actor": request.actor.actor_id,
+            "reason": request.reason,
+        }
+    )
+
+
+def _replayed_service_completion(
+    receipt: HistoricalServiceCompletionReceipt,
+) -> HistoricalServiceCompletionReceipt:
+    return HistoricalServiceCompletionReceipt(
+        receipt.case_no,
+        receipt.lifecycle_event_id,
+        receipt.resulting_order_version,
+        receipt.after_status,
+        True,
+    )
+
+
+def _service_error(
+    request: ApplyHistoricalServiceCompletion,
+    category: ErrorCategory,
+    code: str,
+    current_version: int | None = None,
+) -> HistoricalServiceCompletionApplyError:
+    from shared_kernel.identities import ExpectedVersion
+
+    return HistoricalServiceCompletionApplyError(
+        TypedError(
+            category,
+            code,
+            "歷史訂單服務完成狀態未通過驗證。",
+            request.correlation_id,
+            current_version=(
+                None if current_version is None else ExpectedVersion(current_version)
+            ),
+            domain_blockers=(code,),
+        )
     )
 
 
