@@ -1,0 +1,25 @@
+name: Business repair source
+on:
+  push:
+    branches: [fix/business-regressions-20260922]
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Export tracked source only
+        run: |
+          mkdir -p /tmp/business-repair
+          git archive HEAD > /tmp/business-repair/source.tar
+          git rev-parse HEAD > /tmp/business-repair/source-commit.txt
+          git rev-parse HEAD^{tree} > /tmp/business-repair/source-tree.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: business-repair-source
+          path: /tmp/business-repair
+          retention-days: 1
+          if-no-files-found: error
