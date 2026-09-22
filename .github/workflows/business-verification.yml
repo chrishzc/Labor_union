@@ -1,29 +1,25 @@
-name: Backend baseline and durable MySQL verification
+name: Durable MySQL complete fixture configuration
 on:
   push:
     branches: [verify/business-regression-7e12a3e-20260922]
 permissions:
   contents: read
 jobs:
-  verification:
-    name: ${{ matrix.mode }}
+  durable-mysql:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - mode: python-baseline
-            source: aa7acaa88d59f40cad2d9b0b1f2cfc44a76634d6
-          - mode: durable-mysql
-            source: 7e12a3e5b605261311f6339ffe01fb8f13b06b09
+    timeout-minutes: 15
     env:
       APP_ENV: development
       DB_HOST: 127.0.0.1
       DB_PORT: '33306'
       DB_USER: root
       DB_PASSWORD: verification-only
-      DB_DATABASE: ''
+      DB_DATABASE: lu_test_verification_queue
+      LABOR_UNION_TEST_MYSQL_HOST: 127.0.0.1
+      LABOR_UNION_TEST_MYSQL_PORT: '33306'
+      LABOR_UNION_TEST_MYSQL_USER: root
+      LABOR_UNION_TEST_MYSQL_PASSWORD: verification-only
+      LABOR_UNION_TEST_MYSQL_DATABASE: lu_test_verification_queue
       LINE_CHANNEL_ACCESS_TOKEN: ''
       LINE_CHANNEL_SECRET: ''
       ANONYMIZED_TELEMETRY: 'False'
@@ -32,7 +28,7 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: ${{ matrix.source }}
+          ref: 7e12a3e5b605261311f6339ffe01fb8f13b06b09
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
@@ -41,7 +37,6 @@ jobs:
         run: |
           mkdir -p "$PROOF_DIR"
           git rev-parse HEAD > "$PROOF_DIR/source-commit.txt"
-          git rev-parse HEAD^{tree} > "$PROOF_DIR/source-tree.txt"
           python - <<'PY'
           import tomllib
           from pathlib import Path
@@ -80,17 +75,7 @@ jobs:
           PY
           python -m pip install --disable-pip-version-check --no-input --only-binary=:all: --require-hashes -r /tmp/business-test-requirements.txt > "$PROOF_DIR/dependencies.log" 2>&1 || { tail -60 "$PROOF_DIR/dependencies.log"; exit 1; }
           python -m pip list --format=json > "$PROOF_DIR/installed-packages.json"
-      - name: Run unchanged pre-cleanup suite in the same environment
-        if: matrix.mode == 'python-baseline'
-        run: |
-          set +e
-          timeout 900 python -m pytest -q --continue-on-collection-errors --tb=short --durations=20 --junitxml="$PROOF_DIR/python-baseline.xml" > "$PROOF_DIR/python-baseline.log" 2>&1
-          code=$?
-          echo "$code" > "$PROOF_DIR/python-baseline-exit-code.txt"
-          tail -70 "$PROOF_DIR/python-baseline.log"
-          exit "$code"
-      - name: Prepare authenticated host TCP connection to disposable MySQL
-        if: matrix.mode == 'durable-mysql'
+      - name: Await authenticated host TCP query on disposable MySQL
         env:
           MYSQL_ROOT_PASSWORD: verification-only
         run: |
@@ -115,13 +100,7 @@ jobs:
                       raise
                   time.sleep(2)
           PY
-      - name: Execute the twelve cases previously blocked on missing MySQL configuration
-        if: matrix.mode == 'durable-mysql'
-        env:
-          LABOR_UNION_TEST_MYSQL_HOST: 127.0.0.1
-          LABOR_UNION_TEST_MYSQL_PORT: '33306'
-          LABOR_UNION_TEST_MYSQL_USER: root
-          LABOR_UNION_TEST_MYSQL_PASSWORD: verification-only
+      - name: Run unchanged durable repository lifecycle and payload tests
         run: |
           set +e
           timeout 600 python -m pytest -q --tb=short --junitxml="$PROOF_DIR/durable-mysql.xml" tests/test_background_job_repository_mysql.py tests/test_durable_job_disposable_mysql_e2e.py tests/test_durable_job_payload_equality_disposable_mysql_e2e.py > "$PROOF_DIR/durable-mysql.log" 2>&1
@@ -129,19 +108,17 @@ jobs:
           echo "$code" > "$PROOF_DIR/durable-mysql-exit-code.txt"
           tail -70 "$PROOF_DIR/durable-mysql.log"
           exit "$code"
-      - name: Record source state
+      - name: Record source state and remove only the test container
         if: always()
-        run: git status --short > "$PROOF_DIR/working-tree-after-tests.txt"
-      - name: Remove only the temporary MySQL container
-        if: always() && matrix.mode == 'durable-mysql'
         run: |
+          git status --short > "$PROOF_DIR/working-tree-after-tests.txt"
           docker logs business-verification-mysql > "$PROOF_DIR/mysql-container.log" 2>&1 || true
           docker rm -f business-verification-mysql || true
-      - name: Upload exact comparison evidence
+      - name: Upload exact test evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: business-${{ matrix.mode }}-comparison
+          name: business-durable-mysql-complete-7e12a3e
           path: /tmp/business-proof
           retention-days: 1
           if-no-files-found: error
