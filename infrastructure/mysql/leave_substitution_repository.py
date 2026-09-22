@@ -32,9 +32,6 @@ from infrastructure.mysql.order_terms_read_model import (
     select_order,
     select_scheduling_aggregate,
 )
-from infrastructure.mysql.matching_holiday_work_agreement_repository import (
-    MySqlMatchingHolidayWorkAgreementRepository,
-)
 from infrastructure.mysql.scheduling_replacement_writer import (
     persist_scheduling_replacement,
 )
@@ -427,6 +424,7 @@ def _scheduling_only_leave_facts(
 
 
 def _calendar_policy(cursor, connection, case_no, intent, schedules, *, lock):
+    del connection
     cursor.execute(_CASE_SERVICE_MODE_SQL, (case_no,))
     row = cursor.fetchone()
     if not isinstance(row, Mapping):
@@ -437,24 +435,11 @@ def _calendar_policy(cursor, connection, case_no, intent, schedules, *, lock):
     if lock:
         cursor.execute(_CURRENT_MATCHING_PLAN_LOCK_SQL, (case_no,))
         cursor.fetchall()
-    replacement_dates = tuple(
-        item.replacement_work_date
-        for item in intent.items
-        if item.replacement_work_date is not None
-    )
     schedule_dates = tuple(item.work_date for item in schedules)
-    policy_dates = schedule_dates + replacement_dates
-    start_date = min(policy_dates)
-    horizon_days = len(schedules) + len(intent.items)
-    replacement_horizon = max(replacement_dates) if replacement_dates else max(schedule_dates)
-    end_date = max(
-        max(schedule_dates) + timedelta(days=horizon_days),
-        replacement_horizon,
-    )
-    approved = MySqlMatchingHolidayWorkAgreementRepository(
-        connection
-    ).current_accepted_holiday_dates(case_no, start_date, end_date)
-    return fixed_rest_weekdays, tuple(sorted(set(approved)))
+    # Current official service dates were explicitly confirmed by an operator.
+    # They are therefore the only existing dates that may override calendar
+    # holidays during leave/substitution projection.
+    return fixed_rest_weekdays, tuple(sorted(set(schedule_dates)))
 
 
 def _fixed_rest_weekdays(value):

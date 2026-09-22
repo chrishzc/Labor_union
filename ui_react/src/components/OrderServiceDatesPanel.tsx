@@ -470,6 +470,7 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
                 </h3>
                 <span>已選 {selectedDates.length} / {requiredDateCount} 天</span>
               </div>
+              <p className="order-case-review-note">請逐日核對服務安排；選取國定假日即代表已確認該日安排服務，不需另行登錄協調結果。</p>
 
               <div
                 className="calendar-days-grid"

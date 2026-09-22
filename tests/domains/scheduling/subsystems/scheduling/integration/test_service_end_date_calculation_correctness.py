@@ -28,7 +28,10 @@ from datetime import date
 
 import pytest
 
+from api.routes.order_schedule_calculation import calculate_schedule
+from api.schemas.orders import ScheduleCalculationRequest
 from scripts.imports.import_client_hcm import _calculate_service_end_date
+from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.scheduling.attendance_schedule_query import (
     calculate_order_attendance_schedule,
 )
@@ -162,6 +165,61 @@ def test_logic_a_and_logic_b_agree_on_default_holiday_handling():
     assert logic_a_result == date(2026, 2, 24)
     assert logic_b_result["actual_end_date"] == date(2026, 2, 24)
     assert logic_a_result == logic_b_result["actual_end_date"]
+
+
+def test_schedule_route_keeps_holidays_in_the_default_rest_policy(monkeypatch):
+    calls = []
+
+    def _calculate(**kwargs):
+        calls.append(kwargs)
+        return {
+            "actual_start_date": date(2026, 3, 1),
+            "actual_end_date": date(2026, 3, 3),
+            "target_service_days": 2,
+            "total_calendar_days": 3,
+            "actual_work_days_count": 2,
+            "rest_days_count": 1,
+            "national_holidays_found": [{
+                "date": date(2026, 3, 2),
+                "name": "測試國定假日",
+                "is_worked": False,
+            }],
+            "total_estimated_salary": None,
+            "weekly_stats": [{
+                "week_num": 1,
+                "start_date": date(2026, 3, 1),
+                "end_date": date(2026, 3, 3),
+                "work_days": 2,
+                "rest_days": 1,
+                "holiday_days": 1,
+            }],
+            "day_by_day": [{
+                "date": date(2026, 3, 1),
+                "day_num": 1,
+                "is_work_day": True,
+                "is_rest_day": False,
+                "holiday_name": None,
+            }],
+        }
+
+    monkeypatch.setattr(
+        "api.routes.order_schedule_calculation.attendance_schedule_query.calculate_order_attendance_schedule",
+        _calculate,
+    )
+
+    calculate_schedule(
+        ScheduleCalculationRequest(
+            case_no="CASE-HOLIDAY-1",
+            actual_start_date=date(2026, 3, 1),
+            target_service_days=2,
+            service_mode="週休2日",
+        ),
+        AdminPrincipal(1, "typed-schedule", "Typed Schedule", "system_admin"),
+    )
+
+    assert len(calls) == 1
+    assert calls[0].get("custom_holiday_rest_dates") is None
+    assert calls[0].get("custom_work_dates") is None
 
 
 def test_logic_b_custom_leave_date_extends_completion_like_a_holiday():

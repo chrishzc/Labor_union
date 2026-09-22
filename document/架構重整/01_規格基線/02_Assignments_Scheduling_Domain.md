@@ -440,15 +440,13 @@ version、idempotency identity 與回讀；不得偽造 LINE delivery 或省略�
 手工傳送履歷，但不得把這個系統外動作偽造成受控檔案 delivery。訂單資訊－1、訂單資訊－2、每周服務中
 說明、方案有效性、全體月嫂意願、客戶 LINE 綁定與檔期 fresh validation 仍是寄送 blocker。
 
-國定假日上班協調是與前段意願／客戶媒合決策分離的 Scheduling-owned current fact。它只能對目前
-正式 matching plan 的明確國定假日日期建立：客戶及每一個涵蓋該日的 segment 都必須個別肯認，並保存
-plan version、segment、日期、actor、非空協調依據及 idempotency identity。任何 plan、
-segment、日期或 plan version 改變都使舊 agreement 僅保留歷史證據、不得滿足目前服務日期精算；一般
-履歷送達、月嫂意願或客戶媒合決策的 communication version 變化不重寫方案形狀，也不得使既有
-holiday agreement 失效。
-缺少、拒絕、過期或 readback 不完整時結果固定為國定假日休假。電話、現場、紙本的人工補登可形成這些
-個別肯認，但不得偽造 LINE delivery，也不得把一般 `caregiver_willingness` 或
-`customer_decision` 重新解讀為 holiday agreement。
+2026-09-22 人工裁決：退休獨立的「國定假日上班雙方協調」入口與 agreement
+Preview／Apply contract。出勤精算的初始建議仍將國定假日視為休假；工會人員在 Orders-owned
+正式服務日期月曆逐日選取並完成 Preview／Apply，即代表已核對該組日期是否包含國定假日，無須另一份
+matching-plan agreement。正式服務日期版本、actor、原因、日期集合、fingerprint 與冪等 receipt
+是此人工確認的唯一 current 稽核事實；後續 Scheduling 投影須保留已確認的正式服務日，不得再讀取
+歷史 `matching_holiday_work_agreements` 改寫日期。既有 agreement 資料只保留歷史證據，不再形成
+current gate、精算 override、LINE delivery 或回覆事實。
 
 ## Historical pairing evidence（2026-08-13）
 

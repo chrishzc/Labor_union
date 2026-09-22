@@ -263,7 +263,7 @@ def test_specified_replacement_extends_holiday_query_to_exact_target():
     assert holiday_query.call == (date(2026, 9, 18), date(2026, 12, 1), True)
 
 
-def test_mysql_calendar_policy_reads_case_rest_mode_and_effective_holiday_agreements(monkeypatch):
+def test_mysql_calendar_policy_treats_confirmed_schedule_dates_as_operator_verified():
     target_date = date(2026, 12, 1)
     intent = LeaveSubstitutionBatchIntent(
         1,
@@ -291,25 +291,8 @@ def test_mysql_calendar_policy_reads_case_rest_mode_and_effective_holiday_agreem
         def fetchall(self):
             return ()
 
-    class AgreementRepository:
-        def __init__(self, connection):
-            assert connection is database_connection
-
-        def current_accepted_holiday_dates(self, case_no, start_date, end_date):
-            assert (case_no, start_date, end_date) == (
-                "case-policy",
-                date(2026, 9, 18),
-                target_date,
-            )
-            return (date(2026, 10, 10),)
-
     database_connection = object()
     cursor = Cursor()
-    monkeypatch.setattr(
-        leave_substitution_repository,
-        "MySqlMatchingHolidayWorkAgreementRepository",
-        AgreementRepository,
-    )
 
     result = leave_substitution_repository._calendar_policy(
         cursor,
@@ -320,7 +303,7 @@ def test_mysql_calendar_policy_reads_case_rest_mode_and_effective_holiday_agreem
         lock=True,
     )
 
-    assert result == ((5, 6), (date(2026, 10, 10),))
+    assert result == ((5, 6), (date(2026, 9, 18),))
     assert any("FOR UPDATE" in statement for statement, _ in cursor.executions)
 
 

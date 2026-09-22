@@ -26,8 +26,6 @@
   - `subsystems/line/candidate_contact_response_application.py` — 驗證 candidate/customer LIFF recipient，追加結構化回應並建立直接協調 delivery task。
   - `subsystems/line/candidate_contact_coordination_worker.py` — 以 provider sent time 處理 24 小時逾期、willing short-circuit、全池完成後的調整彙整，以及「非空已聯繫池全員終結、零調整條件或客戶已回覆可以／無法調整」的工會人工跟進衍生查詢與一次性群組通知；另投影 exact accepted adjustment、受影響候選與 post-answer Orders Terms receipt gate，供工會完成正式修改後再重新詢問月嫂。
   - `subsystems/scheduling/historical_pending_deposit_matching.py` — Historical Adoption 可用的 typed proposed-plan writer port。
-  - `domains/scheduling/holiday_work_agreement.py` — current plan/version/date-bound 的客戶與全體月嫂國定假日上班協調規則。
-  - `subsystems/scheduling/holiday_work_agreement_workflow.py` — 協調結果 Preview／Apply，fresh-read 現行 proposed plan、全分段與官方國定假日後才可寫入。
 - `subsystems/scheduling/matching_coordination_workflow.py`
 - `subsystems/scheduling/matching_notification_application.py` (zero-pool client decision response owner)
   - `subsystems/scheduling/matching_coordination_application.py` — P3 typed leave/date handoffs
@@ -36,7 +34,6 @@
   - `infrastructure/mysql/historical_pending_deposit_matching_repository.py` — 借用 caller transaction 寫入可由 active Matching Query 讀取的正式 plan／segment roots。
   - `infrastructure/mysql/segmented_availability_repository.py`
   - `infrastructure/mysql/candidate_contact_pool_line_reply_repository.py` — 以已送出資訊事件和 staff LINE identity 重新驗證回覆後，追加意願事件；原 24 小時內本人可用新事件更正自己的意願，current projection 採每位候選最新回覆，其他候選已願意時仍拒絕。
-  - `infrastructure/mysql/matching_holiday_work_agreement_repository.py` — immutable current-plan agreement evidence 與 accepted-date readback。
   - `infrastructure/mysql/matching_notification_repository.py` — current Stage 5 confirmation package 的 plan/履歷/order-information/proposed-weekly preflight projection。
   - `infrastructure/mysql/matching_recommendation_repository.py` — 候選月嫂與占用日期的 read adapter；LINE 收件人只採 canonical bound staff identity。
 - entrypoints:
@@ -49,13 +46,11 @@
   - `api/schemas/matching_coordination.py`
   - `ui_react/src/api/matching_coordination/matching_coordination_client.ts` — isolated-tested transport client; no current App route consumer.
   - `ui_react/src/components/MatchingCoordinationWorkbench.tsx` — isolated-tested workbench; no current App route consumer.
-  - `api/routes/matches.py`、`api/schemas/matches.py` — `/holiday-work-agreements/preview`、Stage 5 customer confirmation、matching-plan create immutable receipt Query 與到期履歷 download contract。
-  - `ui_react/src/api/scheduling/matching_plan_communication_client.ts`、`ui_react/src/components/HolidayWorkAgreementActions.tsx`、`ui_react/src/components/OrderFormalRecommendationPanel.tsx` — current Order Workbench V2 的人工協調 UI；不宣稱為 LINE delivery/reply。
-  - `db/schema_parts/1032_matching_holiday_work_agreements.sql` — additive immutable agreement and participant records.
+  - `api/routes/matches.py`、`api/schemas/matches.py` — Stage 5 customer confirmation、matching-plan create immutable receipt Query 與到期履歷 download contract。
+  - `db/schema_parts/1032_matching_holiday_work_agreements.sql` — 已退休 agreement 的保留資料 schema；不再有 current writer 或精算 readback consumer。
   - `db/schema_parts/222_matching_plan_create_receipts.sql` — fresh-bootstrap immutable receipt root for formal matching-plan create commands; preserve upgrade uses byte-equivalent migration-only part `1039`.
   - `db/schema_parts/1039_matching_plan_create_receipts.sql` — preserve-only byte-equivalent bridge for the same receipt root; it is not a second writer or a fresh-bootstrap table.
   - `scripts/run_contract_signing_normal_chain.py` — disposable normal-chain scenario calls the typed matching-plan create command with an explicit immutable event key.
-  - `scripts/run_holiday_work_agreement_scenario.py` — disposable `lu_test_*` scenario runner；透過 typed public API 驗證任意假日排班拒絕、雙方同意後納入服務日，以及後續拒絕立即撤銷。
 
 ## Dependencies
 - outbound: `orders/order-information` — 候選資訊使用命名投影；預覽與寄送共用相同內容，不建立虛構 assignment。
@@ -94,7 +89,6 @@
 - Historical pending-deposit typed port、borrowed-connection adapter 與 owner-local tests — `source_observed` — current source and canonical module test root.
 - Segmented availability query/repository 的 lifecycle gate 與 assignment occupancy filtering — `source_observed` — current Scheduling query and MySQL facts adapter.
 - Scheduling React entry contract — `source_observed` — same architecture-aligned module test root.
-- Holiday-work scenario runner — `source_observed` — public API scenario uses the matching coordination agreement route and service-date readback.
 - Candidate direct-coordination LIFF、24-hour worker、工會人工跟進 LIFF／群組通知、recipient-bound reply adapter 與 canonical module tests — `source_observed` — current source and architecture-aligned test root.
 - Repository test exception — `source_observed` — current flat path with relocation-sensitive schema lookup.
 

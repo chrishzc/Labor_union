@@ -115,12 +115,10 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
     });
   });
 
-  it('在目前 proposed 方案保留國定假日雙方協調入口', async () => {
+  it('不再顯示獨立的國定假日雙方協調入口', async () => {
     await openExisting();
-    const more = screen.getByText('其他處理').closest('details');
-    expect(more).not.toHaveAttribute('open');
-    expect(screen.getByText('國定假日上班雙方協調')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '檢查國定假日上班協議' })).toBeInTheDocument();
+    expect(screen.queryByText('國定假日上班雙方協調')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '檢查國定假日上班協議' })).not.toBeInTheDocument();
   });
 
   it('只让 active 且 willing 候選建立既有正式方案，並以 active-plan 與 contact-state 回讀', async () => {

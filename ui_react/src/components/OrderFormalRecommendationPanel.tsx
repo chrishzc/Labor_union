@@ -12,7 +12,6 @@ import {
   type FormalManualResponseCommand,
   type FormalManualResponseFlowState,
 } from '../adapters/orders/order_mutation_flow_store';
-import { HolidayWorkAgreementActions } from './HolidayWorkAgreementActions';
 
 interface OrderFormalRecommendationPanelProps {
   caseNo: string;
@@ -797,14 +796,6 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
           <details className="formal-recommendation-more">
             <summary>其他處理</summary>
             <div className="formal-recommendation-more-body">
-              {current.contact.plan.status === 'proposed' && currentSegments.length > 0 && (
-                <HolidayWorkAgreementActions
-                  caseNo={caseNo}
-                  planId={current.plan.planId}
-                  segments={currentSegments}
-                  onCommitted={reload}
-                />
-              )}
               <div className="formal-recommendation-technical">
                 <span>確認資訊狀態：{profileStatusLabel(confirmationDeliveryStatus)}</span>
                 <span>{decisionLabel(current.contact.customer_decision)}</span>

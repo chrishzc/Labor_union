@@ -33,10 +33,6 @@ vi.mock('../../../../../../../api/orders/order_query_client', () => ({
 vi.mock('../../../../../../../components/MatchingManualCommunicationActions', () => ({
   CustomerProfilesManualActions: () => null,
 }));
-vi.mock('../../../../../../../components/HolidayWorkAgreementActions', () => ({
-  HolidayWorkAgreementActions: () => null,
-}));
-
 const CASE_NO = 'CASE-277';
 let customerProfilesStatus: string | null;
 let communicationVersion: number;

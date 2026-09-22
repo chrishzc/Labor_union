@@ -14,6 +14,7 @@
   - `subsystems/scheduling/eligibility_collision_query.py`
   - `infrastructure/mysql/scheduling_eligibility_collision_repository.py`
 - entrypoints:
+  - `api/routes/order_schedule_calculation.py`
   - `api/schemas/orders.py`
   - `ui_react/src/api/scheduling/schedule_precision_client.ts`
 

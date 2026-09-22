@@ -173,6 +173,7 @@ describe('待辦看板 Beta 第 9 階服務日期', () => {
     fireEvent.click(screen.getByRole('button', { name: '確認／更正實際開始日' }));
     expect(onOpenActualStart).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('heading', { name: '📅 正式服務日期確認（日曆排盤）' })).toBeInTheDocument();
+    expect(screen.getByText('請逐日核對服務安排；選取國定假日即代表已確認該日安排服務，不需另行登錄協調結果。')).toBeInTheDocument();
     const calendar = screen.getByRole('group', { name: '服務日期月曆' });
     expect(within(calendar).getByRole('button', { name: '服務日期 2026-10-02' })).toHaveAttribute('aria-pressed', 'true');
     expect(within(calendar).getByRole('button', { name: '服務日期 2026-10-03' })).toHaveAttribute('aria-pressed', 'false');
