@@ -137,6 +137,58 @@ class _FakeConnection:
 
 
 class SeedFixtureCanonicalMatchingFactsTests(unittest.TestCase):
+    def test_normal_case_hcm_snapshot_contains_canonical_source_and_terms(self) -> None:
+        scenario = next(
+            item for item in seed_module._ORDER_SCENARIOS
+            if item["case_no"] == "115000104"
+        )
+
+        snapshot = seed_module._hcm_source_snapshot(scenario)
+
+        self.assertEqual(snapshot["source_kind"], "hcm_current_fixture")
+        self.assertEqual(snapshot["case_no"], "115000104")
+        self.assertEqual(snapshot["client_attributes"]["service_type"], "連續服務")
+        self.assertEqual(snapshot["order"]["planned_start_date"], "2026-11-05")
+        self.assertEqual(snapshot["order"]["planned_end_date"], "2026-11-24")
+        self.assertEqual(snapshot["order"]["service_days"], 20)
+
+    def test_fixture_line_identity_creates_canonical_bound_owner_projection(self) -> None:
+        cursor = _FakeCursor()
+        responses = iter(({"line_user_id": None}, None))
+        cursor.fetchone = lambda: next(responses)
+        cursor.rowcount = 1
+
+        line_user_id = seed_module._seed_bound_line_identity(
+            cursor,
+            subject_type="staff",
+            subject_reference=42,
+        )
+
+        self.assertTrue(line_user_id.startswith("U"))
+        statements = [statement for statement, _parameters in cursor.executions]
+        self.assertTrue(any(statement.startswith("INSERT INTO line_platform_users") for statement in statements))
+        self.assertTrue(any(statement.startswith("INSERT INTO line_identity_role_bindings") for statement in statements))
+        self.assertTrue(any(statement.startswith("INSERT IGNORE INTO line_identity_role_binding_events") for statement in statements))
+        self.assertTrue(any(statement.startswith("UPDATE staff SET line_user_id") for statement in statements))
+
+    def test_fixture_line_identity_preserves_existing_bound_identity(self) -> None:
+        cursor = _FakeCursor()
+        responses = iter((
+            {"line_user_id": "U-existing"},
+            {"line_user_id": "U-existing", "binding_status": "bound"},
+        ))
+        cursor.fetchone = lambda: next(responses)
+
+        line_user_id = seed_module._seed_bound_line_identity(
+            cursor,
+            subject_type="customer",
+            subject_reference=77,
+        )
+
+        self.assertEqual(line_user_id, "U-existing")
+        statements = [statement for statement, _parameters in cursor.executions]
+        self.assertFalse(any(statement.startswith("INSERT INTO line_identity_role_bindings") for statement in statements))
+
     def test_assignment_payroll_rates_are_seeded_from_case_policy(self) -> None:
         cursor = _FakeCursor()
         cursor.fetchone = lambda: {
@@ -361,6 +413,7 @@ class SeedFixtureResourceLifetimeTests(unittest.TestCase):
 
     def test_order_scenarios_cover_every_lifecycle_and_approved_variant(self) -> None:
         scenarios = seed_module._ORDER_SCENARIOS
+        seed_module._validate_fixture_scenarios()
         self.assertEqual(len(scenarios), 15)
         self.assertEqual(len({item["case_no"] for item in scenarios}), 15)
         self.assertEqual(len({item["phone"] for item in scenarios}), 15)
@@ -381,6 +434,9 @@ class SeedFixtureResourceLifetimeTests(unittest.TestCase):
         by_case = {item["case_no"]: item for item in scenarios}
         self.assertEqual(by_case["115000101"]["status"], "洽談中")
         self.assertEqual(by_case["115000104"]["identity_status"], "補助市民")
+        self.assertEqual(by_case["115000104"]["staff_keys"], ("staff_4",))
+        self.assertEqual(by_case["115000104"]["assignment_status"], "planned")
+        self.assertEqual(by_case["115000104"]["service_mode"], "連續服務")
         self.assertEqual(len(by_case["115000106"]["staff_keys"]), 2)
         self.assertEqual(by_case["115000107"]["payment"][2], "待結算")
         self.assertEqual(by_case["115000108"]["payment"][2], "已結清")

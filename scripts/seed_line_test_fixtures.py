@@ -40,7 +40,7 @@ _ORDER_SCENARIOS: tuple[dict[str, object], ...] = (
     {"case_no": "115000101", "name": "陳雅婷", "phone": "0912345678", "identity_status": "一般市民", "status": "洽談中", "service_days": 30, "start_date": "2026-10-05", "end_date": "2026-11-03", "staff_keys": (), "scenario": "洽談中（LINE 舊客完整命中／Orders Terms 可測）"},
     {"case_no": "115000102", "name": "林怡君", "phone": "0922333444", "identity_status": "一般市民", "status": "洽談中", "service_days": 20, "start_date": "2026-11-01", "end_date": "2026-11-20", "staff_keys": (), "scenario": "洽談中（資料完整）"},
     {"case_no": "115000103", "name": "測試客戶－一般待收訂金", "phone": "0988000303", "identity_status": "一般市民", "status": "洽談中", "service_days": 20, "start_date": "2026-10-01", "end_date": "2026-10-20", "staff_keys": (), "payment": (54000, 0, "待收訂金"), "scenario": "洽談中－一般案／待收訂金"},
-    {"case_no": "115000104", "name": "測試客戶－補助成立", "phone": "0988000304", "identity_status": "補助市民", "status": "訂單成立", "service_days": 20, "start_date": "2026-11-05", "end_date": "2026-11-24", "staff_keys": (), "payment": (48000, 9600, "訂金已收"), "scenario": "訂單成立－補助案／訂金已收"},
+    {"case_no": "115000104", "name": "測試客戶－補助成立", "phone": "0988000304", "identity_status": "補助市民", "status": "訂單成立", "service_days": 20, "start_date": "2026-11-05", "end_date": "2026-11-24", "staff_keys": ("staff_4",), "assignment_status": "planned", "service_mode": "連續服務", "payment": (48000, 9600, "訂金已收"), "scenario": "訂單成立－補助案／訂金已收／正式排班完成"},
     {"case_no": "115000105", "name": "測試客戶－服務中", "phone": "0988000305", "identity_status": "一般市民", "status": "服務中", "service_days": 30, "start_date": "2026-09-01", "end_date": "2026-09-30", "actual_start_date": "2026-09-01", "staff_keys": ("staff_1",), "assignment_status": "active", "service_mode": "連續服務", "scenario": "服務中－單一月嫂"},
     {"case_no": "115000106", "name": "測試客戶－多人服務", "phone": "0988000306", "identity_status": "一般市民", "status": "服務中", "service_days": 20, "start_date": "2026-09-05", "end_date": "2026-09-24", "actual_start_date": "2026-09-05", "staff_keys": ("staff_2", "staff_3"), "assignment_statuses": ("active", "planned"), "assignment_periods": (("2026-09-05", "2026-09-14", 10), ("2026-09-15", "2026-09-24", 10)), "service_mode": "連續服務", "scenario": "服務中－多月嫂分段"},
     {"case_no": "115000107", "name": "測試客戶－完成待結算", "phone": "0988000307", "identity_status": "一般市民", "status": "訂單完成", "service_days": 20, "start_date": "2026-06-01", "end_date": "2026-06-20", "actual_start_date": "2026-06-01", "actual_end_date": "2026-06-20", "staff_keys": ("staff_1",), "assignment_status": "completed", "service_mode": "連續服務", "payment": (54000, 36000, "待結算"), "scenario": "訂單完成－待結算"},
@@ -64,8 +64,8 @@ _CORE_STAGE_SCENARIOS: tuple[dict[str, object], ...] = (
     {"case_no": "115000306", "name": "階段測試－06送簽", "phone": "0988010006", "identity_status": "一般市民", "status": "洽談中", "service_days": 20, "start_date": "2026-12-01", "end_date": "2026-12-20", "staff_keys": (), "stage_code": "external_signing_dispatch", "scenario": "核心階段06－建立契約並送交外部簽署平台"},
     {"case_no": "115000307", "name": "階段測試－07簽署", "phone": "0988010007", "identity_status": "一般市民", "status": "洽談中", "service_days": 20, "start_date": "2026-12-01", "end_date": "2026-12-20", "staff_keys": (), "stage_code": "external_signing_completion", "scenario": "核心階段07－雙方外部簽署完成"},
     {"case_no": "115000308", "name": "階段測試－08定金", "phone": "0988010008", "identity_status": "一般市民", "status": "洽談中", "service_days": 20, "start_date": "2026-12-01", "end_date": "2026-12-20", "staff_keys": (), "stage_code": "deposit_settlement", "scenario": "核心階段08－客戶定金核銷"},
-    {"case_no": "115000309", "name": "階段測試－09日期", "phone": "0988010009", "identity_status": "一般市民", "status": "訂單成立", "service_days": 20, "start_date": "2026-12-01", "end_date": "2026-12-20", "staff_keys": (), "stage_code": "confirmed_service_dates", "scenario": "核心階段09－正式服務日期確認"},
-    {"case_no": "115000310", "name": "階段測試－10服務", "phone": "0988010010", "identity_status": "一般市民", "status": "服務中", "service_days": 20, "start_date": "2026-09-01", "end_date": "2026-09-20", "actual_start_date": "2026-09-01", "staff_keys": ("staff_4",), "assignment_status": "active", "service_mode": "連續服務", "stage_code": "formal_service", "scenario": "核心階段10－正式排班與服務履約"},
+    {"case_no": "115000309", "name": "階段測試－09日期", "phone": "0988010009", "identity_status": "一般市民", "status": "訂單成立", "service_days": 20, "start_date": "2026-12-01", "end_date": "2026-12-20", "staff_keys": ("staff_3",), "assignment_status": "planned", "service_mode": "連續服務", "stage_code": "confirmed_service_dates", "scenario": "核心階段09－正式服務日期確認"},
+    {"case_no": "115000310", "name": "階段測試－10服務", "phone": "0988010010", "identity_status": "一般市民", "status": "服務中", "service_days": 20, "start_date": "2026-09-15", "end_date": "2026-10-04", "actual_start_date": "2026-09-15", "staff_keys": ("staff_4",), "assignment_status": "active", "service_mode": "連續服務", "stage_code": "formal_service", "scenario": "核心階段10－正式排班與服務履約"},
     {"case_no": "115000311", "name": "階段測試－11完工", "phone": "0988010011", "identity_status": "一般市民", "status": "服務中", "service_days": 20, "start_date": "2024-01-01", "end_date": "2024-01-20", "actual_start_date": "2024-01-01", "actual_end_date": "2024-01-20", "staff_keys": ("staff_1",), "assignment_status": "completed", "service_mode": "連續服務", "stage_code": "service_completion", "scenario": "核心階段11－完工／服務完成確認"},
     {"case_no": "115000312", "name": "階段測試－12客戶結算", "phone": "0988010012", "identity_status": "一般市民", "status": "訂單完成", "service_days": 20, "start_date": "2024-02-01", "end_date": "2024-02-20", "actual_start_date": "2024-02-01", "actual_end_date": "2024-02-20", "staff_keys": ("staff_1",), "assignment_status": "completed", "service_mode": "連續服務", "stage_code": "client_settlement", "scenario": "核心階段12－客戶端結算"},
     {"case_no": "115000313", "name": "階段測試－13月嫂結算", "phone": "0988010013", "identity_status": "一般市民", "status": "訂單完成", "service_days": 20, "start_date": "2024-03-01", "end_date": "2024-03-20", "actual_start_date": "2024-03-01", "actual_end_date": "2024-03-20", "staff_keys": ("staff_2",), "assignment_status": "completed", "service_mode": "連續服務", "stage_code": "staff_payout", "scenario": "核心階段13－月嫂端結算"},
@@ -74,6 +74,17 @@ _CORE_STAGE_SCENARIOS: tuple[dict[str, object], ...] = (
 
 _ALL_ORDER_SCENARIOS = _ORDER_SCENARIOS + _CORE_STAGE_SCENARIOS
 _SUPPORTED_SERVICE_MODES = frozenset({"週休1日", "週休2日", "連續服務"})
+_NORMAL_HCM_CASES = frozenset(
+    str(item["case_no"])
+    for item in _ALL_ORDER_SCENARIOS
+    if not str(item["status"]).startswith("歷史訂單")
+    and item.get("stage_code") != "intake_validation"
+)
+_CUSTOMER_LINE_BINDING_CASES = _NORMAL_HCM_CASES - {"115000101"}
+_FIXTURE_STAFF_IDENTITY_CARDS = (
+    "A234567890", "B234567891", "C234567892",
+    "D234567893", "E234567894", "F234567895",
+)
 _ORDER_INFORMATION_SURVEY_FIXTURE = {
     "月子餐點調理喜好/飲食習慣": "葷食，可接受中藥調理",
     "呈上題，若遇無法媒合到葷食服務人員時，是否可以接受蛋奶素服務人員？": "可以接受蛋奶素",
@@ -93,11 +104,40 @@ _ORDER_INFORMATION_SURVEY_FIXTURE = {
 }
 
 
+def _validate_fixture_scenarios() -> None:
+    """拒絕會讓操作情境名稱、狀態與正式 owner facts 互相矛盾的 fixture。"""
+    operational_statuses_requiring_assignment = {
+        "訂單成立",
+        "服務中",
+        "訂單完成",
+    }
+    for scenario in _ALL_ORDER_SCENARIOS:
+        case_no = str(scenario["case_no"])
+        service_mode = str(scenario.get("service_mode", "連續服務"))
+        if service_mode not in _SUPPORTED_SERVICE_MODES:
+            raise ValueError(f"unsupported fixture service mode: {service_mode}")
+        service_dates = _inclusive_dates(scenario["start_date"], scenario["end_date"])
+        if service_mode == "連續服務" and len(service_dates) != int(scenario["service_days"]):
+            raise ValueError(f"continuous fixture service day count mismatch: {case_no}")
+        if scenario.get("actual_end_date") is not None and scenario.get("actual_start_date") is None:
+            raise ValueError(f"fixture actual end has no actual start: {case_no}")
+
+    for scenario in _ALL_ORDER_SCENARIOS:
+        if (
+            str(scenario["status"]) in operational_statuses_requiring_assignment
+            and not tuple(scenario.get("staff_keys", ()))
+        ):
+            raise ValueError(
+                "operational fixture status requires a formal assignment: "
+                f"{scenario['case_no']}"
+            )
+
+
 def _seed_scenario_client(cursor, scenario: dict[str, object]) -> int:
     case_no = str(scenario["case_no"])
     name = str(scenario["name"])
     phone = str(scenario["phone"])
-    service_mode = str(scenario.get("service_mode", "週休1日"))
+    service_mode = str(scenario.get("service_mode", "連續服務"))
     if service_mode not in _SUPPORTED_SERVICE_MODES:
         raise ValueError(f"unsupported fixture service mode: {service_mode}")
     cursor.execute("SELECT id FROM clients WHERE case_no=%s", (case_no,))
@@ -259,7 +299,32 @@ def _seed_order_information_survey(cursor, case_no: str, client_id: int) -> None
     )
 
 
-def _seed_import_receipt(cursor, case_no: str, client_id: int) -> None:
+def _hcm_source_snapshot(scenario: dict[str, object]) -> dict[str, object]:
+    service_mode = str(scenario.get("service_mode", "連續服務"))
+    return {
+        "source_kind": "hcm_current_fixture",
+        "case_no": str(scenario["case_no"]),
+        "client_attributes": {
+            "identity_status": str(scenario["identity_status"]),
+            "service_days": int(scenario["service_days"]),
+            "service_start_date": str(scenario["start_date"]),
+            "service_type": service_mode,
+        },
+        "order": {
+            "planned_start_date": str(scenario["start_date"]),
+            "planned_end_date": str(scenario["end_date"]),
+            "service_days": int(scenario["service_days"]),
+            "service_hours_per_day": 9,
+            "service_start_time": "09:00:00",
+            "service_end_time": "18:00:00",
+            "service_end_day_offset": 0,
+            "requires_cooking": True,
+        },
+    }
+
+
+def _seed_import_receipt(cursor, scenario: dict[str, object], client_id: int) -> None:
+    case_no = str(scenario["case_no"])
     cursor.execute(
         "SELECT id FROM case_architecture_bootstrap_events WHERE case_no=%s",
         (case_no,),
@@ -267,7 +332,9 @@ def _seed_import_receipt(cursor, case_no: str, client_id: int) -> None:
     bootstrap = cursor.fetchone()
     if not bootstrap:
         raise RuntimeError(f"case architecture bootstrap missing: {case_no}")
-    digest = _sha(f"line-stage-import:{case_no}")
+    source_snapshot = _hcm_source_snapshot(scenario)
+    source_json = json.dumps(source_snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    digest = _sha(source_json)
     cursor.execute(
         "INSERT IGNORE INTO case_import_events "
         "(case_no,client_id,bootstrap_event_id,source_fingerprint,candidate_fingerprint,source_snapshot,"
@@ -278,9 +345,9 @@ def _seed_import_receipt(cursor, case_no: str, client_id: int) -> None:
             bootstrap["id"],
             digest,
             digest,
-            json.dumps({"fixture": "core_stage", "case_no": case_no}),
+            source_json,
             f"line-stage-import:{case_no.lower()}",
-            "建立十三核心階段測試進件根事實",
+            "建立 HCM Current 測試進件根事實",
             f"line-stage-import:{case_no.lower()}",
         ),
     )
@@ -306,9 +373,117 @@ def _seed_import_receipt(cursor, case_no: str, client_id: int) -> None:
             0,
             0,
             0,
-            json.dumps({"fixture": "core_stage", "case_no": case_no}),
+            json.dumps({
+                "fixture": "hcm_current",
+                "case_no": case_no,
+                "source_kind": source_snapshot["source_kind"],
+            }, ensure_ascii=False, sort_keys=True),
         ),
     )
+
+
+def _fixture_line_user_id(subject_type: str, subject_reference: int) -> str:
+    return f"U{_sha(f'line-fixture:{subject_type}:{subject_reference}')[:32]}"
+
+
+def _assert_existing_hcm_fixture_sources(cursor) -> None:
+    cases = tuple(sorted(_NORMAL_HCM_CASES))
+    placeholders = ",".join("%s" for _ in cases)
+    cursor.execute(
+        "SELECT case_no,JSON_UNQUOTE(JSON_EXTRACT(source_snapshot,'$.source_kind')) AS source_kind "
+        f"FROM case_import_events WHERE case_no IN ({placeholders})",
+        cases,
+    )
+    fetchall = getattr(cursor, "fetchall", None)
+    rows = tuple(fetchall() or ()) if callable(fetchall) else ()
+    stale = {
+        row["case_no"]: row["source_kind"]
+        for row in rows
+        if row["source_kind"] != "hcm_current_fixture"
+    }
+    if stale:
+        raise RuntimeError(
+            "existing fixture HCM lineage is immutable and requires a local test-data rebuild: "
+            f"{stale}"
+        )
+
+
+def _seed_bound_line_identity(
+    cursor,
+    *,
+    subject_type: str,
+    subject_reference: int,
+) -> str:
+    owner_table = "clients" if subject_type == "customer" else "staff"
+    cursor.execute(
+        f"SELECT line_user_id FROM {owner_table} WHERE id=%s",
+        (subject_reference,),
+    )
+    owner = cursor.fetchone()
+    if owner is None:
+        raise RuntimeError(f"fixture LINE identity owner missing: {subject_type}/{subject_reference}")
+    cursor.execute(
+        "SELECT line_user_id,binding_status FROM line_identity_role_bindings "
+        "WHERE subject_type=%s AND subject_reference=%s "
+        "AND binding_status IN ('pending_review','bound','revocation_pending')",
+        (subject_type, str(subject_reference)),
+    )
+    binding = cursor.fetchone()
+    if binding is not None:
+        if binding["binding_status"] != "bound":
+            raise RuntimeError(
+                f"fixture LINE identity is not bound: {subject_type}/{subject_reference}"
+            )
+        line_user_id = str(binding["line_user_id"])
+        owner_line_user_id = owner.get("line_user_id")
+        if owner_line_user_id not in (None, line_user_id):
+            raise RuntimeError(
+                f"fixture LINE owner projection conflict: {subject_type}/{subject_reference}"
+            )
+        cursor.execute(
+            f"UPDATE {owner_table} SET line_user_id=%s WHERE id=%s AND line_user_id IS NULL",
+            (line_user_id, subject_reference),
+        )
+        return line_user_id
+
+    line_user_id = str(owner.get("line_user_id") or _fixture_line_user_id(subject_type, subject_reference))
+    cursor.execute(
+        "INSERT INTO line_platform_users "
+        "(line_user_id,friend_status,first_followed_at_utc,last_followed_at_utc,last_event_at_utc,aggregate_version) "
+        "VALUES (%s,'active',UTC_TIMESTAMP(6),UTC_TIMESTAMP(6),UTC_TIMESTAMP(6),1) "
+        "ON DUPLICATE KEY UPDATE line_user_id=VALUES(line_user_id)",
+        (line_user_id,),
+    )
+    cursor.execute(
+        "INSERT INTO line_identity_role_bindings "
+        "(line_user_id,subject_type,binding_status,subject_reference,aggregate_version) "
+        "VALUES (%s,%s,'bound',%s,1)",
+        (line_user_id, subject_type, str(subject_reference)),
+    )
+    fingerprint = _sha(f"line-fixture-binding:{subject_type}:{subject_reference}:{line_user_id}")
+    cursor.execute(
+        "INSERT IGNORE INTO line_identity_role_binding_events "
+        "(line_user_id,subject_type,action,subject_reference,expected_version,resulting_version,"
+        "actor_id,payload_fingerprint,idempotency_key,correlation_id) "
+        "VALUES (%s,%s,'bound',%s,0,1,'system:seed',%s,%s,%s)",
+        (
+            line_user_id,
+            subject_type,
+            str(subject_reference),
+            fingerprint,
+            f"line-fixture-bind:{subject_type}:{subject_reference}",
+            f"line-fixture-bind:{subject_type}:{subject_reference}",
+        ),
+    )
+    cursor.execute(
+        f"UPDATE {owner_table} SET line_user_id=%s WHERE id=%s AND line_user_id IS NULL",
+        (line_user_id, subject_reference),
+    )
+    if cursor.rowcount != 1:
+        raise RuntimeError(
+            f"fixture LINE owner projection was not established: {subject_type}/{subject_reference}"
+        )
+    return line_user_id
 
 
 def _seed_contact_pool(cursor, case_no: str, staff_id: int, progress: str) -> None:
@@ -1482,14 +1657,39 @@ def _seed_post_bootstrap_owner_facts(
     cursor = None
     try:
         cursor = connection.cursor(pymysql.cursors.DictCursor)
-        import_cases = {
-            "115000102", "115000103", "115000104", "115000105",
-            "115000106", "115000107", "115000108", "115000109",
-            "115000110",
-            *(f"1150003{ordinal:02d}" for ordinal in range(2, 14)),
-        }
-        for case_no in sorted(import_cases):
-            _seed_import_receipt(cursor, case_no, scenario_client_ids[case_no])
+        by_case = {str(item["case_no"]): item for item in _ALL_ORDER_SCENARIOS}
+        for case_no in sorted(_NORMAL_HCM_CASES):
+            _seed_import_receipt(
+                cursor,
+                by_case[case_no],
+                scenario_client_ids[case_no],
+            )
+        for case_no in sorted(_CUSTOMER_LINE_BINDING_CASES):
+            _seed_bound_line_identity(
+                cursor,
+                subject_type="customer",
+                subject_reference=scenario_client_ids[case_no],
+            )
+        for staff_id in sorted(staff_ids.values()):
+            _seed_bound_line_identity(
+                cursor,
+                subject_type="staff",
+                subject_reference=staff_id,
+            )
+        for scenario in _ALL_ORDER_SCENARIOS:
+            case_no = str(scenario["case_no"])
+            cursor.execute(
+                "SELECT id,staff_id,assigned_start_date,assigned_end_date,planned_hours,status,generation_id "
+                "FROM case_staff_assignments WHERE case_no=%s ORDER BY assignment_sequence",
+                (case_no,),
+            )
+            assignments = cursor.fetchall()
+            if assignments:
+                _ensure_fixture_assignment_payroll_rate_snapshots(
+                    cursor,
+                    case_no,
+                    assignments,
+                )
         _seed_contact_pool(cursor, "115000302", staff_ids["staff_1"], "empty")
         _seed_contact_pool(cursor, "115000303", staff_ids["staff_1"], "candidate")
         _seed_contact_pool(cursor, "115000304", staff_ids["staff_1"], "contacted")
@@ -1500,7 +1700,6 @@ def _seed_post_bootstrap_owner_facts(
             "115000107", "115000108", "115000110",
             *(f"1150003{ordinal:02d}" for ordinal in range(6, 14)),
         }
-        by_case = {str(item["case_no"]): item for item in _ALL_ORDER_SCENARIOS}
         plans = {}
         for case_no in sorted(fully_matched_cases):
             staff_keys = tuple(by_case[case_no].get("staff_keys", ()))
@@ -1531,7 +1730,7 @@ def _seed_post_bootstrap_owner_facts(
             _seed_contract_completion(cursor, case_no)
 
         scheduled_cases = {
-            "115000105", "115000106", "115000107", "115000108",
+            "115000104", "115000105", "115000106", "115000107", "115000108",
             "115000110", "115000201", "115000202", "115000203",
             "115000204", "115000205", "115000310", "115000311",
             "115000312", "115000313",
@@ -1694,7 +1893,7 @@ def _verify_fixture_readback() -> dict[str, dict[str, int]]:
         schedule_mismatches = {
             case_no: schedule_roots.get(case_no)
             for case_no in {
-                "115000105", "115000106", "115000107", "115000108",
+                "115000104", "115000105", "115000106", "115000107", "115000108",
                 "115000201", "115000202", "115000203", "115000204",
                 "115000205", "115000310", "115000311", "115000312", "115000313",
             }
@@ -1713,7 +1912,7 @@ def _verify_fixture_readback() -> dict[str, dict[str, int]]:
         occupancy_mismatches = {
             case_no: occupancy_roots.get(case_no)
             for case_no in {
-                "115000105", "115000106", "115000107", "115000108",
+                "115000104", "115000105", "115000106", "115000107", "115000108",
                 "115000201", "115000202", "115000203", "115000204",
                 "115000205", "115000310", "115000311", "115000312", "115000313",
             }
@@ -1732,6 +1931,60 @@ def _verify_fixture_readback() -> dict[str, dict[str, int]]:
             row["case_no"]: (int(row["assignment_count"]), int(row["rate_count"]))
             for row in cursor.fetchall()
             if int(row["assignment_count"]) != int(row["rate_count"])
+        }
+        hcm_cases = tuple(sorted(_NORMAL_HCM_CASES))
+        hcm_placeholders = ",".join("%s" for _ in hcm_cases)
+        cursor.execute(
+            "SELECT case_no,JSON_UNQUOTE(JSON_EXTRACT(source_snapshot,'$.source_kind')) AS source_kind "
+            f"FROM case_import_events WHERE case_no IN ({hcm_placeholders})",
+            hcm_cases,
+        )
+        hcm_sources = {row["case_no"]: row["source_kind"] for row in cursor.fetchall()}
+        hcm_source_mismatches = {
+            case_no: hcm_sources.get(case_no)
+            for case_no in hcm_cases
+            if hcm_sources.get(case_no) != "hcm_current_fixture"
+        }
+        customer_cases = tuple(sorted(_CUSTOMER_LINE_BINDING_CASES))
+        customer_placeholders = ",".join("%s" for _ in customer_cases)
+        cursor.execute(
+            "SELECT c.case_no,c.line_user_id AS owner_line_user_id,b.line_user_id AS binding_line_user_id,"
+            "b.binding_status,p.friend_status FROM clients c "
+            "LEFT JOIN line_identity_role_bindings b ON b.subject_type='customer' "
+            "AND BINARY b.subject_reference=BINARY CAST(c.id AS CHAR) AND b.binding_status='bound' "
+            "LEFT JOIN line_platform_users p ON BINARY p.line_user_id=BINARY b.line_user_id "
+            f"WHERE c.case_no IN ({customer_placeholders})",
+            customer_cases,
+        )
+        customer_bindings = {row["case_no"]: row for row in cursor.fetchall()}
+        customer_binding_mismatches = {
+            case_no: customer_bindings.get(case_no)
+            for case_no in customer_cases
+            if customer_bindings.get(case_no) is None
+            or customer_bindings[case_no]["binding_status"] != "bound"
+            or customer_bindings[case_no]["friend_status"] != "active"
+            or customer_bindings[case_no]["owner_line_user_id"]
+            != customer_bindings[case_no]["binding_line_user_id"]
+        }
+        staff_placeholders = ",".join("%s" for _ in _FIXTURE_STAFF_IDENTITY_CARDS)
+        cursor.execute(
+            "SELECT s.identity_card,s.line_user_id AS owner_line_user_id,b.line_user_id AS binding_line_user_id,"
+            "b.binding_status,p.friend_status FROM staff s "
+            "LEFT JOIN line_identity_role_bindings b ON b.subject_type='staff' "
+            "AND BINARY b.subject_reference=BINARY CAST(s.id AS CHAR) AND b.binding_status='bound' "
+            "LEFT JOIN line_platform_users p ON BINARY p.line_user_id=BINARY b.line_user_id "
+            f"WHERE s.identity_card IN ({staff_placeholders})",
+            _FIXTURE_STAFF_IDENTITY_CARDS,
+        )
+        staff_bindings = {row["identity_card"]: row for row in cursor.fetchall()}
+        staff_binding_mismatches = {
+            identity_card: staff_bindings.get(identity_card)
+            for identity_card in _FIXTURE_STAFF_IDENTITY_CARDS
+            if staff_bindings.get(identity_card) is None
+            or staff_bindings[identity_card]["binding_status"] != "bound"
+            or staff_bindings[identity_card]["friend_status"] != "active"
+            or staff_bindings[identity_card]["owner_line_user_id"]
+            != staff_bindings[identity_card]["binding_line_user_id"]
         }
         cursor.execute(
             "SELECT case_no,after_status FROM order_lifecycle_state_events WHERE case_no IN "
@@ -1789,6 +2042,9 @@ def _verify_fixture_readback() -> dict[str, dict[str, int]]:
             schedule_mismatches
             or occupancy_mismatches
             or payroll_rate_mismatches
+            or hcm_source_mismatches
+            or customer_binding_mismatches
+            or staff_binding_mismatches
             or not required_events.issubset(lifecycle_events)
             or historical_accounting_root_count != 3
             or not matching_candidate_ready
@@ -1798,6 +2054,9 @@ def _verify_fixture_readback() -> dict[str, dict[str, int]]:
                 f"schedule_mismatches={schedule_mismatches}, "
                 f"occupancy_mismatches={occupancy_mismatches}, "
                 f"payroll_rate_mismatches={payroll_rate_mismatches}, "
+                f"hcm_source_mismatches={hcm_source_mismatches}, "
+                f"customer_binding_mismatches={customer_binding_mismatches}, "
+                f"staff_binding_mismatches={staff_binding_mismatches}, "
                 f"missing_lifecycle_events={sorted(required_events - lifecycle_events)}, "
                 f"historical_accounting_root_count={historical_accounting_root_count}, "
                 f"matching_candidate_ready={matching_candidate_ready}, "
@@ -1816,6 +2075,9 @@ def _verify_fixture_readback() -> dict[str, dict[str, int]]:
         "owner_root_counts": {
             "historical_accounting": historical_accounting_root_count,
             "matching_candidate_ready": int(matching_candidate_ready),
+            "hcm_current_sources": len(hcm_sources),
+            "customer_line_bindings": len(customer_bindings),
+            "staff_line_bindings": len(staff_bindings),
         },
     }
 
@@ -1824,12 +2086,14 @@ def seed_fixtures(verbose: bool = True) -> dict[str, object]:
     app_env = os.getenv("APP_ENV", "development").strip().lower()
     if app_env in {"prod", "production"}:
         raise RuntimeError("此腳本禁止在 production 正式環境執行！")
+    _validate_fixture_scenarios()
 
     conn = get_connection()
     cursor = None
 
     try:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
+        _assert_existing_hcm_fixture_sources(cursor)
 
         # 1. 客戶資料 (Clients)：生命週期與十三核心階段共用 deterministic 定義。
         scenario_client_ids = {

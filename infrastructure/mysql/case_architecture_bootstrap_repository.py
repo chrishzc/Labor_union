@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from decimal import Decimal
 import json
 from typing import Any
 
@@ -313,7 +314,7 @@ def _order_facts(row):
         order_version=int(row["lifecycle_version"]),
         planned_start_date=row["start_date"],
         service_days=int(row["service_days"]),
-        service_hours_per_day=float(row["service_hours_per_day"]),
+        service_hours_per_day=int(row["service_hours_per_day"]),
         source_identity_status=str(row["identity_status"]),
         multi_birth_count=_multi_birth_count(row.get("survey_details")),
     )
@@ -329,7 +330,8 @@ def _multi_birth_count(survey_details) -> str | None:
 
 def _require_order_numeric_root(row, field_name) -> None:
     value = row[field_name]
-    if isinstance(value, bool) or not isinstance(value, int):
+    is_integer_decimal = isinstance(value, Decimal) and value == value.to_integral_value()
+    if isinstance(value, bool) or not (isinstance(value, int) or is_integer_decimal):
         raise BootstrapDomainError(
             BootstrapIssue.INVALID_ROOT_FACTS,
             f"{field_name} must be an integer root fact.",
