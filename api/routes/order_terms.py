@@ -49,9 +49,9 @@ _RETRYABLE_MYSQL_CODES = frozenset({1205, 1213})
 
 
 class ServiceTimeTermsInput(BaseModel):
-    start_time: time
-    end_time: time
-    end_day_offset: int = Field(ge=0, le=1)
+    start_time: time | None
+    end_time: time | None
+    end_day_offset: int | None = Field(ge=0, le=1)
 
 
 class OrderTermsInput(BaseModel):

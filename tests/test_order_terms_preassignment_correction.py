@@ -376,7 +376,7 @@ def test_incomplete_time_terms_allow_only_unique_cooking_correction():
     assert preview.scheduling.assignments == ()
 
 
-def test_incomplete_time_terms_reject_non_cooking_change():
+def test_empty_time_terms_allow_independent_change():
     facts = _facts()
     incomplete = replace(
         facts,
@@ -387,11 +387,13 @@ def test_incomplete_time_terms_reject_non_cooking_change():
     )
     workflow = terms_workflow.OrderTermsWorkflow(_Repository(incomplete), object(), _Clock())
 
-    with pytest.raises(ValueError, match="service_time_terms_incomplete"):
-        workflow.preview(
-            "116990823",
-            replace(_incomplete_terms(requires_cooking=True), service_days=4),
-        )
+    preview = workflow.preview(
+        "116990823",
+        replace(_incomplete_terms(requires_cooking=True), service_days=4),
+    )
+
+    assert preview.after.service_days == 4
+    assert preview.after.service_time == incomplete.order.terms.service_time
 
 
 def test_preassignment_persist_skips_finance_and_payroll_writers():

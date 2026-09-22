@@ -13,6 +13,7 @@ Issue #326：同一 Terms command 可承接完整替代日期與明確既有指�
 
 ## Implementation
 - primary:
+  - `domains/orders/terms.py`
   - `subsystems/orders/terms_workflow.py`
   - `subsystems/orders/order_intake_terms_bootstrap.py`
   - `infrastructure/mysql/order_terms_read_model.py`
@@ -22,6 +23,8 @@ Issue #326：同一 Terms command 可承接完整替代日期與明確既有指�
   - `api/dependencies/order_terms.py`
 - entrypoints:
   - `api/routes/order_terms.py` — Orders Terms Query／Preview／Apply HTTP transport 與輸入驗證。
+  - `ui_react/src/api/orders/order_terms_mutation_client.ts` — strict typed client 與 nullable service-time tuple decoder。
+  - `ui_react/src/components/OrderTermsMutationPanel.tsx` — Terms Preview／Apply 操作面板；未修改的全空服務時段可原樣保存。
   - `api/routes/order_intake_terms_bootstrap.py` — 早期進件及受限歷史案件的服務條件修正，以及進件完成的 Preview／Apply HTTP transport。
 
 ## Dependencies
@@ -37,11 +40,14 @@ Issue #326：同一 Terms command 可承接完整替代日期與明確既有指�
 ## Verification
 - layout_status: `custom_current`
 - test_root: `tests/test_order_terms_preassignment_correction.py`
+- test_root: `tests/domains/orders/subsystems/orders/modules/order-terms/`
+- test_root: `ui_react/src/tests/domains/orders/subsystems/orders/modules/order-terms/`
 - test_root: `tests/domains/orders/subsystems/orders/modules/intake-terms-bootstrap/unit/`
 
 ## Provenance
 - Workflow owner and cross-owner transaction boundary — `architecture_declared` — Orders formal spec and current source.
 - Preassignment start-date、confirmed-service-date replacement projection and focused regression — `source_observed` — current workflow, MySQL adapter and test listed above.
+- Nullable service-time HTTP／UI preservation and disposable-MySQL round trip — `source_observed` — canonical module and subsystem integration roots listed above.
 - Intake terms bootstrap and intake completion owner-local unit regression — `source_observed` — current bootstrap workflow and canonical unit root.
 
 ## Change triggers

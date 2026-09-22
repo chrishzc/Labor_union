@@ -171,12 +171,14 @@ Apply：
 
 每日服務時間 tuple 契約：
 
-- `service_start_time`、`service_end_time`、`service_end_day_offset` 必須全空或全有；新匯入
-  訂單進入契約完成、waiting-deposit lock 或訂金核銷前必須全有。
+- `service_start_time`、`service_end_time`、`service_end_day_offset` 必須全空或全有；既有全空
+  tuple 未被本次修改時，可隨預定開始日等獨立欄位原樣保存，不得猜填或重算；使用者實際
+  修改服務時段時仍必須一次提供完整 tuple。新匯入訂單進入契約完成、waiting-deposit lock
+  或訂金核銷前必須全有。
 - `service_end_day_offset` 只允許 `0 | 1`，必須由契約明確提供；不得依結束時間小於開始
   時間自行猜測跨日。
-- legacy 三欄全空可唯讀載入，但立即形成資料異常，且阻擋契約完成、收訂金、進入服務與
-  自動完成；不得以預設上下班時間補值。
+- legacy 三欄全空可載入並保留，且不阻擋無關 Terms 欄位修改；仍阻擋契約完成、收訂金、
+  進入服務與自動完成，不得以預設上下班時間補值。
 - legacy 案件可先建立空的 Client Finance／Payroll account、付款政策與 Scheduling
   aggregate，讓正式 Terms Preview／Apply 得以補登時段；此架構初始化本身不建立訂金
   或其他帳務義務，因此不得把它誤判為簽約或收款。
@@ -573,7 +575,7 @@ must be previewed, sent, and confirmed again before formal assignment can procee
 
 | Module | Input | Output | SSOT／限制 |
 |---|---|---|---|
-| TermsValidator | candidate terms | typed validation | 三個服務時段欄位全空或全有；正式流程前必須完整 |
+| TermsValidator | current／candidate terms | typed validation | 未修改的全空 tuple 可保留；時段異動須三欄完整，正式流程前必須完整 |
 | ServiceTimeTermsValidator | start、end、day offset | canonical tuple／typed blocker | offset 僅 0/1；不推測跨日 |
 | PlannedEndCalculator | planned start、terms、規劃服務日 | end date | 不讀 actual facts |
 | ActualEndCalculator | 有效正式服務日 | actual end | 忽略 cancelled、休假與 buffer |

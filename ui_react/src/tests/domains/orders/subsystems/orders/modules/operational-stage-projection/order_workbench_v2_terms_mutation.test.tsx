@@ -395,8 +395,7 @@ describe('待辦看板 Beta 第 1 階訂單條款操作', () => {
     ));
   });
 
-  it('當原始資料 service_hours_per_day 與時段不一致時，依開始結束時間自動修正顯示', async () => {
-    // Simulate raw query having service_hours_per_day: 8 while service_time is 09:00~18:00 (9 hours)
+  it('載入時保留已保存的 service_hours_per_day，不因未修改的時段自動覆寫', async () => {
     mocks.getOrderTerms.mockResolvedValueOnce({
       ...orderTerms(),
       terms: {
@@ -407,8 +406,7 @@ describe('待辦看板 Beta 第 1 階訂單條款操作', () => {
     });
     const panel = await openTermsPanel();
     const hoursInput = within(panel).getByLabelText('Beta 每日服務時數');
-    // Auto-calculated from 09:00 to 18:00 -> 9 hours, not 8
-    expect(hoursInput).toHaveValue(9);
+    expect(hoursInput).toHaveValue(8);
   });
 
   it('點擊常用班次快捷按鈕時可一鍵帶入起訖時段、偏移與計算時數', async () => {

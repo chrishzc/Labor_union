@@ -122,14 +122,10 @@ function draftFromQuery(query: OrderTerms): OrderTermsDraft {
   const startTime = query.terms.service_time.start_time?.slice(0, 5) ?? '';
   const endTime = query.terms.service_time.end_time?.slice(0, 5) ?? '';
   const endDayOffset = query.terms.service_time.end_day_offset === 1 ? '1' : '0';
-  const calculated = calculateDailyServiceHours(startTime, endTime, endDayOffset);
-
   return {
     plannedStartDate: query.terms.planned_start_date,
     serviceDays: String(query.terms.service_days),
-    serviceHoursPerDay: calculated !== null
-      ? String(calculated)
-      : String(query.terms.service_hours_per_day),
+    serviceHoursPerDay: String(query.terms.service_hours_per_day),
     requiresCooking: query.terms.requires_cooking === null
       ? ''
       : query.terms.requires_cooking ? 'yes' : 'no',
@@ -288,6 +284,10 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
     setError(null);
   };
 
+  const serviceTimeUnchanged = draft.startTime === (currentQuery.terms.service_time.start_time?.slice(0, 5) ?? '')
+    && draft.endTime === (currentQuery.terms.service_time.end_time?.slice(0, 5) ?? '')
+    && Number(draft.endDayOffset) === (currentQuery.terms.service_time.end_day_offset ?? 0);
+
   const proposedTermsPayload = () => ({
     ...(needsReplacement && replacementDates ? {
       replacement_service_dates: replacementDates,
@@ -304,10 +304,10 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
         ? null
         : draft.requiresCooking === 'yes',
       floor_fee_ntd: Number(draft.floorFeeNtd),
-      service_time: {
-        start_time: timeWithSeconds(draft.startTime),
-        end_time: timeWithSeconds(draft.endTime),
-        end_day_offset: Number(draft.endDayOffset),
+      service_time: serviceTimeUnchanged ? currentQuery.terms.service_time : {
+        start_time: draft.startTime ? timeWithSeconds(draft.startTime) : null,
+        end_time: draft.endTime ? timeWithSeconds(draft.endTime) : null,
+        end_day_offset: draft.startTime && draft.endTime ? Number(draft.endDayOffset) : null,
       },
     },
   });
@@ -321,8 +321,8 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
     && Number(draft.serviceHoursPerDay) > 0
     && Number.isInteger(Number(draft.floorFeeNtd))
     && Number(draft.floorFeeNtd) >= 0
-    && /^\d{2}:\d{2}$/.test(draft.startTime)
-    && /^\d{2}:\d{2}$/.test(draft.endTime)
+    && ((!draft.startTime && !draft.endTime)
+      || (/^\d{2}:\d{2}$/.test(draft.startTime) && /^\d{2}:\d{2}$/.test(draft.endTime)))
     && timeValidationError === null;
   const replacementReady = !needsReplacement || (replacementDates?.length === Number(draft.serviceDays)
     && (currentQuery.assignments?.length ? currentQuery.assignments.every((a) => Number.isInteger(Number(allocations[a.assignment_id])) && Number(allocations[a.assignment_id]) > 0)

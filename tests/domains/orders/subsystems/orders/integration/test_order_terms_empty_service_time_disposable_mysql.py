@@ -1,0 +1,374 @@
+"""Issue #337 real HTTP/Application/MySQL acceptance for empty service time."""
+
+from argparse import Namespace
+from datetime import date, datetime, time
+import os
+from types import SimpleNamespace
+
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+import pymysql
+
+from api.dependencies.admin_auth import require_system_admin
+from api.dependencies.admin_auth import require_persisted_admin
+from api.dependencies.order_intake_terms_bootstrap import get_order_intake_terms_bootstrap_application
+from api.dependencies.order_terms import OrderTermsApplication, get_order_terms_application
+from api.routes.order_intake_terms_bootstrap import router as intake_terms_router
+from api.routes.order_terms import router
+from domains.bootstrap.case_architecture import CaseArchitectureBootstrapIntent, ClientPaymentTermsRootFacts
+from domains.case_import.case_import import (
+    CaseImportIntent,
+    ClientImportAttribute,
+    ImportedOrderRootFacts,
+)
+from infrastructure.mysql.case_import_repository import CaseImportMySqlUnitOfWork, MySqlCaseImportRepository
+from infrastructure.mysql.mysql_adapter import DB_CONFIG
+from infrastructure.mysql.order_intake_terms_bootstrap_repository import MySqlOrderIntakeTermsBootstrapRepository
+from infrastructure.mysql.order_terms_repository import MySqlOrderTermsRepository
+from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+from scripts.bootstrap_disposable_mysql_schema import bootstrap
+from shared_kernel.clock import FixedBusinessClock, TAIPEI_TIME_ZONE
+from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
+from shared_kernel.money import MoneyNTD
+from subsystems.case_import.case_import_workflow import ApplyCaseImport, CaseImportWorkflow
+from subsystems.orders.terms_workflow import OrderTermsWorkflow
+from subsystems.orders.order_intake_terms_bootstrap import OrderIntakeTermsBootstrapApplication
+
+
+_DATABASE = f"lu_test_issue337_terms_{os.getpid()}"
+_CASE_NO = "ISSUE-337-MYSQL"
+
+
+def _arguments() -> Namespace:
+    assert DB_CONFIG["host"] in {"127.0.0.1", "localhost"}
+    return Namespace(
+        host=DB_CONFIG["host"],
+        port=DB_CONFIG["port"],
+        user=DB_CONFIG["user"],
+        password=DB_CONFIG["password"],
+        database=_DATABASE,
+        confirm_database=_DATABASE,
+    )
+
+
+def _connect():
+    return pymysql.connect(
+        host=DB_CONFIG["host"],
+        port=DB_CONFIG["port"],
+        user=DB_CONFIG["user"],
+        password=DB_CONFIG["password"],
+        database=_DATABASE,
+        charset="utf8mb4",
+        cursorclass=pymysql.cursors.DictCursor,
+        autocommit=False,
+    )
+
+
+def _drop_database() -> None:
+    assert _DATABASE.startswith("lu_test_issue337_terms_")
+    connection = pymysql.connect(
+        host=DB_CONFIG["host"],
+        port=DB_CONFIG["port"],
+        user=DB_CONFIG["user"],
+        password=DB_CONFIG["password"],
+        charset="utf8mb4",
+        autocommit=True,
+    )
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(f"DROP DATABASE IF EXISTS `{_DATABASE}`")
+    finally:
+        connection.close()
+
+
+def _intent() -> CaseImportIntent:
+    start_date = date(2026, 10, 1)
+    payment_terms = ClientPaymentTermsRootFacts(
+        "issue337-client-policy-v1",
+        MoneyNTD(400),
+        5,
+        date(2026, 9, 20),
+        start_date,
+    )
+    attributes = tuple(sorted(
+        (
+            ClientImportAttribute("case_no", _CASE_NO),
+            ClientImportAttribute("created_at", datetime(2026, 9, 1, 9, 0)),
+            ClientImportAttribute("identity_status", "一般市民"),
+            ClientImportAttribute("name", "Issue 337 合成客戶"),
+            ClientImportAttribute("service_time", "09:00-17:00"),
+        ),
+        key=lambda attribute: attribute.name,
+    ))
+    order = ImportedOrderRootFacts(
+        _CASE_NO,
+        5,
+        8,
+        start_date,
+        date(2026, 10, 5),
+        time(9),
+        time(17),
+        0,
+        False,
+    )
+    return CaseImportIntent(
+        _CASE_NO,
+        attributes,
+        order,
+        CaseArchitectureBootstrapIntent(
+            _CASE_NO,
+            payment_terms,
+            "issue337-approved-rates-v1",
+        ),
+    )
+
+
+def _seed(connection) -> None:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO payroll_rate_policies "
+            "(policy_version,policy_kind,hourly_rate_ntd,effective_from) "
+            "VALUES ('issue337-approved-rates-v1','citizen',300,'2026-01-01')"
+        )
+    connection.commit()
+    intent = _intent()
+    workflow = CaseImportWorkflow(
+        MySqlCaseImportRepository(connection),
+        lambda: CaseImportMySqlUnitOfWork(connection),
+    )
+    preview = workflow.preview(intent, CorrelationId("issue337-import-preview"))
+    workflow.apply(ApplyCaseImport(
+        intent,
+        ExpectedVersion(0),
+        preview.fingerprint,
+        IdempotencyKey("issue337-import"),
+        ActorContext("issue337-acceptance"),
+        "create isolated acceptance roots",
+        CorrelationId("issue337-import"),
+    ))
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "UPDATE orders SET service_start_time=NULL,service_end_time=NULL,"
+            "service_end_day_offset=NULL WHERE case_no=%s",
+            (_CASE_NO,),
+        )
+        assert cursor.rowcount == 1
+    connection.commit()
+
+
+def _seed_without_downstream_roots(connection) -> None:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO clients(case_no,name,identity_status) VALUES (%s,%s,%s)",
+            (_CASE_NO, "Issue 337 無下游 roots", "一般市民"),
+        )
+        client_id = int(cursor.lastrowid)
+        cursor.execute(
+            "INSERT INTO orders(case_no,client_id,status,lifecycle_version,start_date,end_date,"
+            "service_days,service_hours_per_day,requires_cooking,floor_fee,service_start_time,"
+            "service_end_time,service_end_day_offset) "
+            "VALUES (%s,%s,'洽談中',3,'2026-10-01','2026-10-05',5,8,0,0,NULL,NULL,NULL)",
+            (_CASE_NO, client_id),
+        )
+    connection.commit()
+
+
+def _snapshot(connection):
+    connection.commit()
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT start_date,end_date,service_days,service_hours_per_day,requires_cooking,"
+            "floor_fee,service_start_time,service_end_time,service_end_day_offset,lifecycle_version "
+            "FROM orders WHERE case_no=%s",
+            (_CASE_NO,),
+        )
+        order = dict(cursor.fetchone())
+        cursor.execute(
+            "SELECT COUNT(*) AS total FROM order_terms_change_events WHERE case_no=%s",
+            (_CASE_NO,),
+        )
+        event_count = int(cursor.fetchone()["total"])
+    return order, event_count
+
+
+def _client(connection) -> TestClient:
+    repository = MySqlOrderTermsRepository(connection)
+    application = OrderTermsApplication(
+        connection,
+        repository,
+        OrderTermsWorkflow(
+            repository,
+            lambda: MySqlUnitOfWork(connection),
+            FixedBusinessClock(datetime(2026, 9, 22, 12, tzinfo=TAIPEI_TIME_ZONE)),
+        ),
+    )
+    app = FastAPI()
+    app.include_router(router)
+    app.include_router(intake_terms_router)
+    app.dependency_overrides[require_system_admin] = lambda: SimpleNamespace(username="issue337-admin")
+    app.dependency_overrides[require_persisted_admin] = lambda: SimpleNamespace(username="issue337-admin")
+    app.dependency_overrides[get_order_terms_application] = lambda: application
+    intake_repository = MySqlOrderIntakeTermsBootstrapRepository(connection)
+    app.dependency_overrides[get_order_intake_terms_bootstrap_application] = lambda: OrderIntakeTermsBootstrapApplication(
+        intake_repository,
+        lambda: MySqlUnitOfWork(connection),
+    )
+    return TestClient(app)
+
+
+def _data(response, expected_status=200):
+    assert response.status_code == expected_status, response.text
+    return response.json()["data"]
+
+
+def _preview(client, terms):
+    return _data(client.post(
+        f"/api/v1/orders/{_CASE_NO}/terms/preview",
+        json={"proposed_terms": terms},
+        headers={"X-Correlation-ID": "issue337-preview"},
+    ))
+
+
+def _apply(client, query, preview, terms, key):
+    return client.post(
+        f"/api/v1/orders/{_CASE_NO}/terms/apply",
+        json={
+            "proposed_terms": terms,
+            "expected_order_version": query["order_version"],
+            "expected_scheduling_version": query["scheduling_version"],
+            "expected_client_finance_version": query["client_finance_version"],
+            "expected_payroll_version": query["payroll_version"],
+            "preview_fingerprint": preview["preview_fingerprint"],
+            "reason": "Issue 337 disposable acceptance",
+        },
+        headers={"Idempotency-Key": key, "X-Correlation-ID": key},
+    )
+
+
+def test_empty_service_time_round_trips_through_http_application_and_mysql():
+    bootstrap(_arguments())
+    connection = _connect()
+    try:
+        _seed(connection)
+        client = _client(connection)
+        query = _data(client.get(f"/api/v1/orders/{_CASE_NO}/terms"))
+        assert query["terms"]["service_time"] == {
+            "start_time": None,
+            "end_time": None,
+            "end_day_offset": None,
+        }
+        before = _snapshot(connection)
+
+        changed = {**query["terms"], "planned_start_date": "2026-10-02"}
+        preview = _preview(client, changed)
+        assert _snapshot(connection) == before
+        receipt = _data(_apply(client, query, preview, changed, "issue337-empty-apply"))
+        readback = _data(client.get(f"/api/v1/orders/{_CASE_NO}/terms"))
+        after, event_count = _snapshot(connection)
+
+        assert receipt["order_version"] == query["order_version"] + 1
+        assert readback["terms"] == changed
+        assert after["service_start_time"] is None
+        assert after["service_end_time"] is None
+        assert after["service_end_day_offset"] is None
+        assert after["service_days"] == before[0]["service_days"]
+        assert after["service_hours_per_day"] == before[0]["service_hours_per_day"]
+        assert after["requires_cooking"] == before[0]["requires_cooking"]
+        assert after["floor_fee"] == before[0]["floor_fee"]
+        assert event_count == before[1] + 1
+
+        complete = {
+            **readback["terms"],
+            "service_hours_per_day": 8,
+            "service_time": {
+                "start_time": "21:00:00",
+                "end_time": "05:00:00",
+                "end_day_offset": 1,
+            },
+        }
+        complete_preview = _preview(client, complete)
+        _data(_apply(client, readback, complete_preview, complete, "issue337-complete-apply"))
+        complete_readback = _data(client.get(f"/api/v1/orders/{_CASE_NO}/terms"))
+        assert complete_readback["terms"]["service_time"] == complete["service_time"]
+
+        failed_before = _snapshot(connection)
+        partial = {
+            **complete_readback["terms"],
+            "service_time": {
+                "start_time": "09:00:00",
+                "end_time": None,
+                "end_day_offset": 0,
+            },
+        }
+        response = client.post(
+            f"/api/v1/orders/{_CASE_NO}/terms/preview",
+            json={"proposed_terms": partial},
+            headers={"X-Correlation-ID": "issue337-partial"},
+        )
+        assert response.status_code == 422, response.text
+        assert _snapshot(connection) == failed_before
+    finally:
+        connection.close()
+        _drop_database()
+
+
+def test_empty_service_time_survives_date_change_without_downstream_roots():
+    bootstrap(_arguments())
+    connection = _connect()
+    try:
+        _seed_without_downstream_roots(connection)
+        client = _client(connection)
+        preview = _data(client.post(
+            f"/api/v1/orders/{_CASE_NO}/intake-terms-bootstrap/preview",
+            json={"proposed_start_date": "2026-10-02", "proposed_service_days": 5},
+        ))
+        assert preview["apply_allowed"] is True
+        assert preview["changed_fields"] == ["start_date"]
+
+        receipt = _data(client.post(
+            f"/api/v1/orders/{_CASE_NO}/intake-terms-bootstrap/apply",
+            json={
+                "proposed_start_date": "2026-10-02",
+                "proposed_service_days": 5,
+                "expected_lifecycle_version": preview["lifecycle_version"],
+                "preview_fingerprint": preview["preview_fingerprint"],
+                "reason": "Issue 337 no-root acceptance",
+            },
+            headers={
+                "Idempotency-Key": "issue337-no-root-apply",
+                "X-Correlation-ID": "issue337-no-root-apply",
+            },
+        ))
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT start_date,service_days,service_hours_per_day,requires_cooking,floor_fee,"
+                "service_start_time,service_end_time,service_end_day_offset,lifecycle_version "
+                "FROM orders WHERE case_no=%s",
+                (_CASE_NO,),
+            )
+            order = dict(cursor.fetchone())
+            counts = {}
+            for name, table in {
+                "scheduling": "scheduling_aggregates",
+                "finance": "client_finance_accounts",
+                "payroll": "payroll_case_accounts",
+            }.items():
+                cursor.execute(f"SELECT COUNT(*) AS total FROM {table} WHERE case_no=%s", (_CASE_NO,))
+                counts[name] = int(cursor.fetchone()["total"])
+
+        assert receipt["lifecycle_version"] == 4
+        assert order == {
+            "start_date": date(2026, 10, 2),
+            "service_days": 5,
+            "service_hours_per_day": 8.0,
+            "requires_cooking": False,
+            "floor_fee": 0,
+            "service_start_time": None,
+            "service_end_time": None,
+            "service_end_day_offset": None,
+            "lifecycle_version": 4,
+        }
+        assert counts == {"scheduling": 0, "finance": 0, "payroll": 0}
+    finally:
+        connection.close()
+        _drop_database()
