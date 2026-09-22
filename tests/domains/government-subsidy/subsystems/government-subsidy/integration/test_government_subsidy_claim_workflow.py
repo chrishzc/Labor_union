@@ -141,6 +141,8 @@ def test_claim_plan_calculates_frozen_450_rate_for_40_official_hours():
     (8.0, 5, 450, 18000),
     (7.5, 3, 350, 7875),
     (0.5, 1, 450, 225),
+    (1.0, 1, 2**53 + 1, 2**53 + 1),
+    (0.5, 1, 2**54 + 2, 2**53 + 1),
 ])
 def test_claim_plan_accepts_integral_and_half_hour_service_facts(hours_per_day, days, rate, expected):
     assignment = OfficialAssignmentServiceFacts(1, "CASE-HALF", 7, days, hours_per_day, True)

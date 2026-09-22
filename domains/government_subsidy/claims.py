@@ -15,7 +15,6 @@ from domains.government_subsidy.ledger import (
     OfficialAssignmentServiceFacts,
     reduce_batch_status,
     validate_approval_amounts,
-    _whole_ntd,
 )
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.money import MoneyNTD
@@ -227,9 +226,13 @@ def _planned_item(source):
     assignment = source.assignment
     if not assignment.effective:
         _raise(GovernmentSubsidyErrorCode.ASSIGNMENT_FACTS_STALE)
-    requested = MoneyNTD(_whole_ntd(
-        source.unit_price_ntd.amount * assignment.official_service_hours
-    ))
+    hours_numerator, hours_denominator = assignment.official_service_hours.as_integer_ratio()
+    requested_ntd, remainder = divmod(
+        source.unit_price_ntd.amount * hours_numerator, hours_denominator
+    )
+    if remainder:
+        raise ValueError("half-hour subsidy amount must resolve to whole NTD")
+    requested = MoneyNTD(requested_ntd)
     return PlannedClaimItem(
         assignment.assignment_id,
         assignment.case_no,
