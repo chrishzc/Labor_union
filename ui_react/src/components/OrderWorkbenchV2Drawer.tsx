@@ -489,7 +489,11 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
               openGroup('service');
               setServiceDatesCalculationRevision((revision) => revision + 1);
               refreshFacts();
-            }} onBusyChange={onOperationBusyChange} />}
+            }} onBusyChange={onOperationBusyChange} onOpenServiceDates={() => {
+              setDrawerTab('work');
+              setServiceView('dates');
+              openGroup('service');
+            }} />}
             {currentBranch === 'normal' && !terminalStatus && detail.status === 'ready' && (
               <div className="order-v2-more-action-workflow" data-surface-id="orders.service-before-replacement.entry">
                 {!replacementExpanded ? (

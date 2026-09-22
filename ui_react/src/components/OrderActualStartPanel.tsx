@@ -6,17 +6,23 @@ import { OrderMutationError } from '../api/orders/order_mutation_errors';
 import { ApiHttpError } from '../api/shared/typed_errors';
 import { orderMutationFlowStore, type ActualStartCommand } from '../adapters/orders/order_mutation_flow_store';
 
-interface Props { caseNo: string; onObserved?: () => void; onBusyChange?: (busy: boolean) => void }
+interface Props {
+  caseNo: string;
+  onObserved?: () => void;
+  onBusyChange?: (busy: boolean) => void;
+  onOpenServiceDates?: () => void;
+}
 type Phase = 'idle' | 'loading' | 'previewing' | 'applying' | 'outcome_unknown' | 'observation_failed' | 'observed';
 const subscribeActualStart = (listener: () => void) => orderMutationFlowStore.subscribe(listener);
 
-export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyChange }) => {
+export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyChange, onOpenServiceDates }) => {
   const [query, setQuery] = useState<ActualStart | null>(null);
   const [date, setDate] = useState('');
   const [reason, setReason] = useState('');
   const [preview, setPreview] = useState<ActualStartPreview | null>(null);
   const [phase, setPhase] = useState<Phase>('idle');
   const [error, setError] = useState<string | null>(null);
+  const [missingAssignments, setMissingAssignments] = useState(false);
   const flow = useSyncExternalStore(subscribeActualStart, () => orderMutationFlowStore.getActualStart(caseNo));
   const inFlight = useRef(new Set<string>());
   const sequence = useRef(0);
@@ -42,7 +48,7 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
     }
     activeCaseNo.current = caseNo;
     sequence.current += 1;
-    setQuery(null); setDate(''); setReason(''); setPreview(null); setPhase('idle'); setError(null);
+    setQuery(null); setDate(''); setReason(''); setPreview(null); setPhase('idle'); setError(null); setMissingAssignments(false);
   }, [caseNo]);
   useEffect(() => {
     mounted.current = true;
@@ -65,7 +71,7 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
     if (unresolved) return;
     if (flow?.status === 'observed') orderMutationFlowStore.clearActualStart(caseNo);
     const request = ++sequence.current;
-    setPhase('loading'); setError(null); setPreview(null);
+    setPhase('loading'); setError(null); setPreview(null); setMissingAssignments(false);
     try {
       const data = await ordersQueryClient.getActualStart(caseNo);
       if (data.case_no !== caseNo) throw new Error('實際開始日查詢案件識別不一致。');
@@ -83,7 +89,7 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
       orderMutationFlowStore.clearActualStart(caseNo);
     }
     const request = ++sequence.current;
-    setPhase('previewing'); setPreview(null); setError(null);
+    setPhase('previewing'); setPreview(null); setError(null); setMissingAssignments(false);
     try {
       const data = await orderActualStartClient.preview(caseNo, { new_actual_start_date: date });
       if (data.actual_start.case_no !== caseNo || data.after_actual_start_date !== date) throw new Error('實際開始日預覽 identity 不一致。');
@@ -92,8 +98,9 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
       if (isActive(request, caseNo)) {
         const missingAssignments = (caught instanceof OrderMutationError || caught instanceof ApiHttpError)
           && caught.code === 'scheduling_assignments_required';
+        setMissingAssignments(missingAssignments);
         setError(missingAssignments
-          ? '尚未建立正式月嫂指派，無法確認實際開始日。請先完成服務安排，再重新查詢；本次未變更日期。'
+          ? '尚未建立正式月嫂指派，本次未變更日期。請先以「計畫開始日」精算並確認正式服務日期；之後確認實際開始日時，系統會一併重排服務日期與排班。'
           : caught instanceof Error ? caught.message : '實際開始日預覽失敗。');
         setPhase('idle');
       }
@@ -219,7 +226,7 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
           {query.service_data_locked && <p role="status">服務資料已鎖定，不可修改實際開始日。</p>}
           <label>實際開始日期
             <input aria-label="Beta 實際開始日期" type="date" value={date} disabled={busy || query.service_data_locked}
-              onChange={(event) => { setDate(event.target.value); setPreview(null); setError(null); setPhase('idle'); }} />
+              onChange={(event) => { setDate(event.target.value); setPreview(null); setError(null); setMissingAssignments(false); setPhase('idle'); }} />
           </label>
           <button type="button" disabled={busy || query.service_data_locked || !date} onClick={() => void check()}>檢查實際開始日影響</button>
         </>
@@ -247,6 +254,9 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
       {(flowPhase === 'observation_failed' || phase === 'observation_failed') && <button type="button" onClick={() => void retryObservation()}>只重新讀取實際開始日結果</button>}
       {(flowPhase === 'observed' || phase === 'observed') && <p role="status">實際開始日已完成正式回讀{query?.current_actual_start_date ? `：${query.current_actual_start_date}` : '。'}</p>}
       {(flow?.error ?? error) && <p role="alert">{flow?.error ?? error}</p>}
+      {missingAssignments && onOpenServiceDates && (
+        <button type="button" onClick={onOpenServiceDates}>前往精算並確認服務日期</button>
+      )}
     </section>
   );
 };

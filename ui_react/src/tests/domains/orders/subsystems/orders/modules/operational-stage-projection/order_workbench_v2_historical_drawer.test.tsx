@@ -52,9 +52,12 @@ vi.mock('../../../../../../../components/OrderServiceDatesPanel', () => ({
   },
 }));
 vi.mock('../../../../../../../components/OrderActualStartPanel', () => ({
-  OrderActualStartPanel: (props: { onObserved?: () => void }) => {
+  OrderActualStartPanel: (props: { onObserved?: () => void; onOpenServiceDates?: () => void }) => {
     mocks.actualStartRender(props);
-    return <button type="button" onClick={props.onObserved}>模擬實際開始日正式回讀成功</button>;
+    return <>
+      <button type="button" onClick={props.onOpenServiceDates}>模擬尚未建立正式排班</button>
+      <button type="button" onClick={props.onObserved}>模擬實際開始日正式回讀成功</button>
+    </>;
   },
 }));
 vi.mock('../../../../../../../api/orders/order_intake_completion_client', async () => {
@@ -299,6 +302,9 @@ describe('historical Drawer immutable evidence boundary', () => {
     expect(mocks.serviceDatesRender).toHaveBeenLastCalledWith(
       expect.objectContaining({ calculationRevision: 1 }),
     );
+    fireEvent.click(screen.getByRole('button', { name: '確認／更正實際開始日' }));
+    fireEvent.click(await screen.findByRole('button', { name: '模擬尚未建立正式排班' }));
+    expect(await screen.findByLabelText('服務日期精算工作區')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '確認／更正實際開始日' }));
     fireEvent.click(await screen.findByRole('button', { name: '模擬實際開始日正式回讀成功' }));
     expect(await screen.findByLabelText('服務日期精算工作區')).toBeInTheDocument();
