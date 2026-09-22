@@ -70,7 +70,7 @@ def test_hcm_multipart_api_writes_once_replays_and_rejects_changed_payload(
     _assert_formal_case(case_no)
 
 
-def test_historical_hcm_api_overwrites_fields_without_overwriting_order_status(tmp_path, monkeypatch) -> None:
+def test_retired_historical_hcm_api_cannot_overwrite_existing_case(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("APP_ENV", "test")
     monkeypatch.setenv("ENABLE_ADMIN_AUTH", "false")
     case_no = f"HCM-HISTORY-API-{uuid4().hex[:10]}"
@@ -97,22 +97,23 @@ def test_historical_hcm_api_overwrites_fields_without_overwriting_order_status(t
         headers={
             "Idempotency-Key": f"hcm-history-api:{case_no}",
             "X-Correlation-ID": f"hcm-history-api:{case_no}",
-            "X-Preview-Fingerprint": preview.json()["data"]["preview_fingerprint"],
+            "X-Preview-Fingerprint": "a" * 64,
         },
     )
 
     assert initial_applied.status_code == 200
-    assert preview.status_code == 200
-    assert applied.status_code == 200
+    assert preview.status_code == applied.status_code == 410
+    for response in (preview, applied):
+        assert response.json()["detail"]["code"] == "hcm_historical_whole_row_overwrite_retired"
     from infrastructure.mysql.mysql_adapter import get_connection
 
     connection = get_connection()
     try:
         with connection.cursor() as cursor:
             cursor.execute("SELECT name FROM clients WHERE case_no=%s", (case_no,))
-            assert cursor.fetchone() == {"name": "歷史 API 新姓名"}
+            assert cursor.fetchone() == {"name": _hcm_row(case_no, "0912345678")["姓名"]}
             cursor.execute("SELECT status,service_days FROM orders WHERE case_no=%s", (case_no,))
-            assert cursor.fetchone() == {"status": "洽談中", "service_days": 12}
+            assert cursor.fetchone() == {"status": "洽談中", "service_days": _hcm_row(case_no, "0912345678")["希望服務天數"]}
     finally:
         connection.close()
 
@@ -120,6 +121,11 @@ def test_historical_hcm_api_overwrites_fields_without_overwriting_order_status(t
 def _client() -> TestClient:
     application = FastAPI()
     application.include_router(router)
+    from api.dependencies.admin_auth import require_admin
+    from subsystems.access.authentication_session import AdminPrincipal
+    application.dependency_overrides[require_admin] = lambda: AdminPrincipal(
+        1, "hcm-integration", "Test", "system_admin"
+    )
     return TestClient(application)
 
 

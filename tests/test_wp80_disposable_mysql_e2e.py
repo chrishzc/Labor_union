@@ -108,7 +108,7 @@ def _assert_persisted(connection, case_no, staff_id, key):
             (case_no,),
         )
         assert cursor.fetchone() == {
-            "status": "訂單完成",
+            "status": OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED.value,
             "lifecycle_version": 1,
             "actual_start_date": date(2025, 1, 2),
             "actual_end_date": date(2025, 1, 31),

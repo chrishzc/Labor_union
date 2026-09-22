@@ -1,6 +1,6 @@
 """
 File: test_data_browser_query_disposable_mysql_e2e.py
-Description: 以受控 lu_test MySQL 驗證六來源 allowlist、cursor、masking 與零寫入查詢。
+Description: 以受控 lu_test MySQL 驗證六來源 allowlist、cursor、canonical 值 與零寫入查詢。
 """
 
 from __future__ import annotations
@@ -66,8 +66,16 @@ class _AuditedCursor:
         return self.cursor_value.fetchall()
 
 
-def test_six_source_query_cursor_masking_and_zero_write_on_lu_test_mysql() -> None:
+def test_six_source_query_cursor_canonical_values_and_zero_write_on_lu_test_mysql() -> None:
     connection = get_connection()
+    # Arrange synthetic rows before the read-only boundary; a fresh schema has
+    # no cursor and otherwise makes canonical-value assertions vacuous.
+    with connection.cursor() as cursor:
+        for index in range(3):
+            cursor.execute("INSERT INTO clients(case_no,name) VALUES (%s,%s)",
+                           (f"BROWSER-TEST-{index}", f"合成客戶{index}"))
+            cursor.execute("INSERT INTO staff(name) VALUES (%s)", (f"合成人員{index}",))
+    connection.commit()
     audited = _AuditedConnection(connection)
     repository = DataBrowserQueryRepository(audited)
     try:
@@ -110,13 +118,17 @@ def test_six_source_query_cursor_masking_and_zero_write_on_lu_test_mysql() -> No
                 name_cell = next(
                     cell for cell in row.detail_cells if cell.field_id == "name"
                 )
-                assert name_cell.presentation == "canonical"
-                assert name_cell.value == "未提供" or "○" in str(name_cell.value)
+                assert name_cell.presentation == "text"
+                prefix = "合成客戶" if source_id == "clients" else "合成人員"
+                assert name_cell.value in {f"{prefix}{index}" for index in range(3)}
+                assert not {"phone", "address", "identity_card", "bank_account"}.intersection(
+                    cell.field_id for cell in row.detail_cells
+                )
         for row in pages["bank_facts"].items:
-            amount_cell = next(
-                cell for cell in row.detail_cells if cell.field_id == "amount"
+            assert {"credit", "debit"}.issubset(cell.field_id for cell in row.detail_cells)
+            assert not {"source_bank_account", "counterparty_name", "raw_payload"}.intersection(
+                cell.field_id for cell in row.detail_cells
             )
-            assert amount_cell.value in {None, "NT$ ****"}
 
         statement_count = len(audited.statements)
         with pytest.raises(DataBrowserSourceNotFound):

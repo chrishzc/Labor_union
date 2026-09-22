@@ -39,6 +39,8 @@ MATCHING_ROUTE_CONTRACT = {
             {"require_line_matching_sender"},
             "none",
         ),
+        "preview_candidate_information": ({"require_line_matching_sender"}, "none"),
+        "preview_candidate_weekly_service": ({"require_line_matching_reader"}, "none"),
         "send_candidate_information": (
             {"require_line_matching_sender"},
             "durable-provider-worker",
@@ -61,6 +63,9 @@ MATCHING_ROUTE_CONTRACT = {
             {"require_line_matching_reader"},
             "none",
         ),
+        "get_matching_plan_create_receipt_route": ({"require_system_admin"}, "none"),
+        "preview_matching_plan_customer_confirmation_route": ({"require_line_matching_reader"}, "none"),
+        "send_matching_plan_customer_confirmation_route": ({"require_line_matching_sender"}, "durable-provider-worker"),
         "get_active_matching_plan_state_route": (
             {"require_line_matching_reader"},
             "none",
@@ -94,6 +99,8 @@ MATCHING_ROUTE_CONTRACT = {
         "recommend_staff": ({"require_system_admin"}, "none"),
     },
     "runtime_health.py": {
+        "get_target_preferences": ({"require_line_monitor_reader"}, "none"),
+        "update_target_preferences": ({"require_line_alert_manager"}, "none"),
         "query_safe_review_link": ({"require_line_monitor_reader"}, "none"),
         "issue_safe_review_link": ({"require_line_alert_manager"}, "none"),
         "redeem_safe_review_link": ({"require_line_alert_manager"}, "none"),
@@ -133,6 +140,7 @@ SIDE_EFFECT_CALLS = {
         "send_information",
         "request_caregiver_information",
         "request_customer_profiles",
+        "request_customer_confirmation",
     },
 }
 
@@ -367,6 +375,13 @@ def test_matching_and_runtime_routes_have_complete_guard_capability_matrix() -> 
     for filename, expected_routes in MATCHING_ROUTE_CONTRACT.items():
         inventory = _route_inventory(filename)
         nodes = _route_endpoint_nodes(filename)
+        if filename == "matches.py":
+            # This is the customer-facing, signed file-reference route, not an admin endpoint.
+            assert inventory.pop("download_matching_confirmation_resume") == {"get_controlled_file_workflow"}
+            download = nodes.pop("download_matching_confirmation_resume")
+            assert "verify_resume_download_token" in ast.unparse(download)
+            assert "ControlledFilePurpose.STAFF_RESUME" in ast.unparse(download)
+            assert "readback.subject_reference != str(staff_id)" in ast.unparse(download)
         assert set(inventory) == set(expected_routes), filename
         assert set(nodes) == set(expected_routes), filename
         for route_name, (expected_dependencies, expected_side_effect) in expected_routes.items():
@@ -380,7 +395,7 @@ def test_matching_and_runtime_routes_have_complete_guard_capability_matrix() -> 
             )
             route_count += 1
 
-    assert route_count == 31
+    assert route_count == 38
 
 
 def test_identity_public_liff_and_page_static_routes_are_explicit_exclusions() -> None:

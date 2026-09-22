@@ -11,9 +11,7 @@ import json
 
 from pymysql.err import OperationalError
 
-from domains.anomalies.registry import DesiredAlertState, default_anomaly_registry
 from domains.case_import.hcm_import_review import build_hcm_warning_occurrences_from_review
-from subsystems.anomalies.alert_workflow import AnomalyApplication, ProjectAlertRequest
 from subsystems.anomalies.ports import AnomalyRuntime, require_runtime
 from subsystems.anomalies.import_warning_projection_retry import (
     MAX_WARNING_PROJECTION_ATTEMPTS,
@@ -27,13 +25,6 @@ from subsystems.anomalies.import_warning_projection_retry import (
 class HcmImportReviewOutboxResult:
     delivered_count: int
     failed_count: int
-
-
-class BorrowedUnitOfWork:
-    def __enter__(self): return self
-    def __exit__(self, exception_type, exception, traceback): return False
-    def commit(self): return None
-    def rollback(self): return None
 
 
 def consume_hcm_import_review_events(connection, *, maximum_events: int = 50, runtime: AnomalyRuntime | None = None):
@@ -58,14 +49,7 @@ def _consume_next(connection, runtime: AnomalyRuntime):
             connection.rollback()
             return None
         snapshot = _json_object(event["bounded_snapshot"])
-        warning_count = _project_warning_occurrences(connection, snapshot)
-        if warning_count:
-            application = AnomalyApplication(
-                default_anomaly_registry(),
-                runtime.anomaly_repository(connection),
-                BorrowedUnitOfWork,
-            )
-            application.project(_project_request(event, snapshot))
+        _project_warning_occurrences(connection, snapshot)
         _mark_delivered(connection, int(event["id"]))
         connection.commit()
         return True
@@ -79,29 +63,6 @@ def _consume_next(connection, runtime: AnomalyRuntime):
         connection.rollback()
         _record_failure(connection, event, error, runtime)
         return False
-
-
-def _project_request(event, snapshot):
-    review_identity = str(snapshot["review_identity"])
-    case_identity = str(snapshot["case_identity"])
-    return ProjectAlertRequest(
-        desired=DesiredAlertState(
-            definition_code="IMPORT-004",
-            source_identity=review_identity,
-            source_version=int(snapshot["source_version"]),
-            active=bool(snapshot["active"]),
-            fingerprint_values={"case_no": case_identity},
-        ),
-        source_event_identity=f"hcm-review-outbox:{event['id']}",
-        consumer_identity="hcm-import-review-anomaly-projector-v1",
-        partition_identity=f"IMPORT-004:{review_identity}",
-        display_snapshot={
-            "review_identity": review_identity,
-            "source_row": int(snapshot["source_row"]),
-            "case_identity": case_identity,
-            "issue_codes": tuple(sorted(set(snapshot["issue_codes"]))),
-        },
-    )
 
 
 def _claim_next(connection):

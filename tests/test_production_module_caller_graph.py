@@ -102,7 +102,7 @@ def _record_imports(path: Path, package: str, known_modules: set[str], callers: 
 
 
 def _import_tokens(path: Path, package: str) -> tuple[str, ...]:
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    tree = ast.parse(path.read_bytes(), filename=str(path))
     tokens: list[str] = []
     for node in ast.walk(tree):
         tokens.extend(_tokens_from_node(node, package))

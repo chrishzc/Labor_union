@@ -30,6 +30,7 @@ class _FactsPort:
                 "start_date": "2026-09-10",
                 "end_date": "2026-09-10",
                 "requires_cooking": self.requires_cooking,
+                "service_days": 1,
             },
             "confirmed_service_dates": self.confirmed_service_dates,
             "staff_rows": self.staff_rows,

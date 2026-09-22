@@ -991,6 +991,9 @@ def authenticate_admin(
     except (AdminSessionSchemaError, AdminMfaConfigurationError):
         unit_of_work.rollback()
         raise
+    except AdminLoginRateLimitedError:
+        # The rejected login attempt was committed before this domain outcome.
+        raise
     except pymysql.MySQLError as error:
         unit_of_work.rollback()
         raise AdminSessionStorageError("管理員登入儲存服務暫時無法使用") from error
@@ -1052,6 +1055,9 @@ def issue_password_login_challenge(
             _record_admin_audit_with_cursor(cursor, principal=_principal_from_row(cursor, row), action="admin.password_challenge_issued", result_status=202)
         unit_of_work.commit()
         return PasswordLoginChallenge(challenge_id, challenge_token, expires_at)
+    except AdminLoginRateLimitedError:
+        # The rejected login attempt was committed before this domain outcome.
+        raise
     except pymysql.MySQLError as error:
         unit_of_work.rollback()
         raise AdminSessionStorageError("管理員登入儲存服務暫時無法使用") from error

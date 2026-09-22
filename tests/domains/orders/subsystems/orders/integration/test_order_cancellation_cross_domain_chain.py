@@ -193,3 +193,36 @@ def test_four_day_twins_cancellation_credits_posted_deposit_and_first_payment():
     assert preview.client_finance_impact.subsidy_return_plan is not None
     assert preview.client_finance_impact.subsidy_return_plan.amount == MoneyNTD(14_400)
     assert preview.client_finance_impact.subsidy_return_plan.due_date == date(2026, 10, 15)
+
+
+@pytest.mark.parametrize("hours", [0, 0.0, 8, 16.0, 7.5])
+def test_cancellation_receipt_preserves_exact_numeric_hours(hours):
+    from dataclasses import asdict
+    from decimal import Decimal
+    import json
+    from infrastructure.mysql.order_cancellation_repository import _receipt_payload, _stored_receipt
+
+    repository = _Repository(_facts())
+    workflow = _workflow(repository)
+    preview = workflow.preview("CASE-1", (ConfirmedServiceDay(date(2026, 8, 1), 7),))
+    receipt = replace(workflow.apply(_request(preview)), official_service_hours=hours)
+    row = asdict(receipt)
+    row.update(
+        lifecycle_status=receipt.lifecycle_status.value,
+        preview_fingerprint=receipt.preview_fingerprint.value,
+        command_fingerprint="b" * 64,
+        official_service_hours=Decimal(str(hours)),
+        result_snapshot=json.dumps(_receipt_payload(receipt)),
+    )
+    assert _stored_receipt(row).receipt == receipt
+    row["official_service_hours"] = Decimal(str(hours)) + Decimal("0.5")
+    with pytest.raises(ValueError, match="receipt_integrity_violation"):
+        _stored_receipt(row)
+
+
+@pytest.mark.parametrize("hours", [True, -1, "8", 0.25, float("nan"), float("inf")])
+def test_cancellation_receipt_rejects_invalid_hour_values(hours):
+    from infrastructure.mysql.order_cancellation_repository import _required_service_hours
+
+    with pytest.raises(ValueError, match="receipt_integrity_violation"):
+        _required_service_hours({"hours": hours}, "hours")

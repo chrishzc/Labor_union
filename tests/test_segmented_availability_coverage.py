@@ -18,6 +18,7 @@ class _Facts:
                 "start_date": "2026-08-02",
                 "end_date": "2026-08-04",
                 "scheduling_version": 9,
+                "service_days": 2,
                 "requires_cooking": False,
             },
             "confirmed_service_dates": [

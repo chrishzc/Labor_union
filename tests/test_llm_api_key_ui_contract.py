@@ -12,14 +12,17 @@ def test_llm_api_key_ui_is_write_only() -> None:
         ROOT / "ui_react" / "src" / "api" / "system" / "llm_configuration_client.ts"
     ).read_text(encoding="utf-8")
 
-    assert 'type="password"' in page
+    # The visibility toggle applies only to the unsaved input, never stored keys.
+    assert "type={showApiKey ? 'text' : 'password'}" in page
+    assert "const [apiKey, setApiKey] = useState('')" in page
+    assert 'value={apiKey}' in page
+    assert 'setApiKey(nextStatus' not in page
     assert "setApiKey('')" in page
     assert "fetchLlmApiKeyStatus" in page
     assert "replaceLlmApiKey" in page
     assert "testLlmConnection" in page
     assert "測試 Gemini 連線" in page
     assert 'type="text"' not in page
-    assert "showApiKey" not in page
     assert "revealApiKey" not in page
 
     assert "'/api/v1/system/llm/api-key/status'" in client
@@ -36,9 +39,9 @@ def test_llm_api_key_ui_is_write_only() -> None:
     assert "api_key" not in semantic_test
 
 
-def test_real_gemini_semantic_panel_is_registered_in_ai_studio() -> None:
+def test_real_gemini_semantic_panel_is_registered_in_customer_service_studio() -> None:
     studio = (
-        ROOT / "ui_react" / "src" / "pages" / "line_management" / "AiEventStudio.tsx"
+        ROOT / "ui_react" / "src" / "pages" / "line_management" / "AiCustomerServiceStudioPage.tsx"
     ).read_text(encoding="utf-8")
     panel = (
         ROOT
@@ -54,7 +57,7 @@ def test_real_gemini_semantic_panel_is_registered_in_ai_studio() -> None:
     assert "testLlmSemantics" in panel
     assert "執行真實 AI 智能解答" in panel
     assert "通報專人客服" in panel
-    assert "matched QA" in panel
+    assert "result.answer_text" in panel
 
 
 def test_llm_settings_page_is_registered_in_line_navigation_and_app() -> None:

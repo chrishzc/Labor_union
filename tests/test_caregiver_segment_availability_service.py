@@ -112,6 +112,10 @@ def _make_connection(**fixture):
             {"service_date": start + timedelta(days=offset)}
             for offset in range((end - start).days + 1)
         ]
+    if isinstance(order, dict):
+        order = dict(order)
+        order.setdefault("service_days", len(fixture.get("confirmed_service_dates", [])) or 1)
+        fixture["order"] = order
     return QueryAwareConnection(fixture)
 
 

@@ -192,8 +192,8 @@ def test_mixed_finance_workbook_keeps_valid_row_and_acknowledges_owner_review(tm
 
 def test_historical_owner_selection_posts_once_without_mutating_bank_root_fact(tmp_path):
     bootstrap(_arguments())
-    _seed_open_refund_obligation()
     intake_receipt = _ingest_unresolved_taishin_outflow(tmp_path)
+    _seed_open_refund_obligation()
 
     from api.dependencies.finance_import import HistoricalReprocessApplication
     from infrastructure.mysql.finance_import_owning_domain_composite import (
@@ -340,7 +340,7 @@ def test_manual_refund_correction_posts_ledger_allocation_and_resolves_anomaly(t
 
     _deliver_finance_import_outbox()
     assert receipt.ledger_entry_count == receipt.allocation_count == 1
-    _assert_manual_review_alert_remains_active_without_owner_terminal_contract()
+    _assert_manual_review_stays_out_of_anomaly_center()
 
 
 def test_durable_correction_worker_posts_manual_refund_once(tmp_path):
@@ -505,7 +505,7 @@ def test_mismatched_refund_return_remains_manual_review_without_partial_writes(t
             cursor.execute("SELECT reconciliation_status FROM finance_import_rows WHERE id=2")
             assert cursor.fetchone() == {"reconciliation_status": "pending"}
             cursor.execute("SELECT predicate_active,workflow_status FROM anomaly_current_alerts WHERE definition_code='finance_import_manual_review'")
-            assert {tuple(row.values()) for row in cursor.fetchall()} >= {(1, "open")}
+            assert not cursor.fetchall()
     finally:
         connection.close()
 
@@ -772,6 +772,12 @@ def _seed_open_subsidy_return_with_claim_link() -> None:
             cursor.execute("INSERT INTO subsidy_claim_batch_items(batch_id,case_no,assignment_id,staff_id,requested_amount,approved_amount) VALUES (%s,'C-ADV',%s,%s,6000,6000)", (batch_id, assignment_id, staff_id))
             claim_item_id = int(cursor.lastrowid)
             cursor.execute("INSERT INTO client_subsidy_return_claim_item_links(obligation_identity,claim_item_id,entitled_amount_ntd) VALUES ('subsidy:C-ADV',%s,6000)", (claim_item_id,))
+            cursor.execute(
+                "INSERT INTO client_refund_recipient_snapshots "
+                "(refund_obligation_identity,case_no,bank_code,bank_account,source_kind) "
+                "VALUES ('subsidy:C-ADV','C-ADV','synthetic-bank',%s,'test-fixture')",
+                ("9" * 16,),
+            )
         connection.commit()
     finally:
         connection.close()
@@ -1022,7 +1028,8 @@ def _assert_g12_rollback_state(connection):
         cursor.execute("SELECT COUNT(*) AS count FROM finance_import_classification_events")
         assert cursor.fetchone() == {"count": 1}
         cursor.execute("SELECT predicate_active,workflow_status FROM anomaly_current_alerts WHERE definition_code='finance_import_manual_review'")
-        assert cursor.fetchone() == {"predicate_active": 1, "workflow_status": "open"}
+        # Ordinary classification belongs to Finance; it must not create an Anomalies alert.
+        assert cursor.fetchone() is None
 
 
 def _assert_g08_no_partial_correction_commit(connection):
@@ -1091,13 +1098,14 @@ def _deliver_finance_import_outbox() -> None:
         connection.close()
 
 
-def _assert_manual_review_alert_remains_active_without_owner_terminal_contract() -> None:
+def _assert_manual_review_stays_out_of_anomaly_center() -> None:
     from infrastructure.mysql.mysql_adapter import get_connection
     connection = get_connection()
     try:
         with connection.cursor() as cursor:
             cursor.execute("SELECT predicate_active,workflow_status FROM anomaly_current_alerts WHERE definition_code='finance_import_manual_review'")
-            assert cursor.fetchone() == {"predicate_active": 1, "workflow_status": "open"}
+            # Ordinary classification belongs to Finance; it must not create an Anomalies alert.
+            assert cursor.fetchone() is None
     finally:
         connection.close()
 

@@ -10,6 +10,7 @@ import pymysql
 import pytest
 
 from scripts.bootstrap_disposable_mysql_schema import bootstrap
+from infrastructure.mysql.line_repository_support import aware_utc
 
 
 DATABASE = os.getenv("LABOR_UNION_TEST_MYSQL_DATABASE")
@@ -160,7 +161,7 @@ def _lineage(connection) -> tuple[dict[str, object], ...]:
             "SELECT JSON_UNQUOTE(JSON_EXTRACT(source.facts_snapshot,'$.case_no')) AS case_no,"
             "source.id AS source_id,source.source_event_identity,decision.decision_status,decision.reason_code,"
             "decision.recipient_type,decision.recipient_identity,intent.id AS intent_id,"
-            "intent.intent_status,intent.delivery_task_id,task.processing_status,task.error_code "
+            "intent.intent_status,intent.delivery_task_id,task.processing_status,task.error_code,task.scheduled_at_utc "
             "FROM line_notification_source_events source "
             "JOIN line_notification_decisions decision ON decision.source_event_id=source.id "
             "LEFT JOIN line_notification_intents intent ON intent.decision_id=decision.id "
@@ -377,11 +378,13 @@ def test_service_day_reminder_native_mysql_lineage_stop_rebuild_and_replay() -> 
             )
             assert int(cursor.fetchone()["total"]) == 1
 
+        # MySQL owns event creation time; claim only when that persisted task is due.
+        delivery_now = max(_NOW, aware_utc(completion_row["scheduled_at_utc"]))
         delivery_repository = MySqlLineDeliveryTaskRepository(connection)
         connection.begin()
         claimed = delivery_repository.claim_specific(
             LineDeliveryTaskId(int(completion_row["delivery_task_id"])),
-            ClaimLineDeliveryTasksQuery("issue-325-delivery", _NOW, 1),
+            ClaimLineDeliveryTasksQuery("issue-325-delivery", delivery_now, 1),
         )
         connection.commit()
         assert claimed is not None
@@ -400,7 +403,7 @@ def test_service_day_reminder_native_mysql_lineage_stop_rebuild_and_replay() -> 
                     lambda: ManagedLineMySqlUnitOfWork(connect()),
                     Provider(),
                     "issue-325-delivery",
-                    lambda: _NOW,
+                    lambda: delivery_now,
                     batch_size=1,
                 )
                 self._claimed_once = False

@@ -21,6 +21,7 @@ class FactsPort:
                 "start_date": "2026-07-01",
                 "end_date": "2026-07-02",
                 "requires_cooking": False,
+                "service_days": 2,
             },
             "staff_rows": [{"id": 1}],
             "confirmed_service_dates": [

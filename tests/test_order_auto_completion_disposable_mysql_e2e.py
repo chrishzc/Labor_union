@@ -259,7 +259,7 @@ def _seed_case():
     connection = get_connection()
     try:
         with connection.cursor() as cursor:
-            cursor.execute("INSERT INTO clients(case_no,name) VALUES (%s,'G05 Client')", (_CASE_NO,))
+            cursor.execute("INSERT INTO clients(case_no,name,service_type) VALUES (%s,'G05 Client','連續服務')", (_CASE_NO,))
             client_id = cursor.lastrowid
             cursor.execute("INSERT INTO staff(name,status) VALUES ('G05 Staff','active')")
             staff_id = cursor.lastrowid

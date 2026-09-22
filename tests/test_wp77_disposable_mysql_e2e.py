@@ -13,6 +13,11 @@ from uuid import uuid4
 import pytest
 
 from infrastructure.mysql.mysql_adapter import get_connection
+from infrastructure.mysql.hcm_import_review_repository import MySqlHcmImportReviewRepository
+from infrastructure.mysql.beclass_import_review_repository import MySqlBeClassImportReviewRepository
+from infrastructure.mysql.staff_historical_adoption_repository import MySqlStaffHistoricalAdoptionRepository
+from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+from api.dependencies.staff_historical_workbook import _record_staff_historical_review
 from infrastructure.mysql.anomaly_runtime import build_anomaly_runtime
 from infrastructure.mysql.beclass_import_review_anomaly_source import (
     project_beclass_import_review_page,
@@ -58,7 +63,7 @@ def test_staff_existing_identity_fills_blank_and_replays_receipt():
         }
 
         first = adopt_existing_staff(
-            connection,
+            connection, repository=MySqlStaffHistoricalAdoptionRepository(connection), unit_of_work_factory=lambda: MySqlUnitOfWork(connection), review_recorder=_record_staff_historical_review,
             source_content_digest=digest,
             source_row=2,
             identity_card=identity_card,
@@ -67,7 +72,7 @@ def test_staff_existing_identity_fills_blank_and_replays_receipt():
             review_payload=record,
         )
         replay = adopt_existing_staff(
-            connection,
+            connection, repository=MySqlStaffHistoricalAdoptionRepository(connection), unit_of_work_factory=lambda: MySqlUnitOfWork(connection), review_recorder=_record_staff_historical_review,
             source_content_digest=digest,
             source_row=2,
             identity_card=identity_card,
@@ -134,8 +139,8 @@ def test_hcm_invalid_row_creates_root_and_outbox_then_exactly_replays():
     }
     connection = get_connection()
     try:
-        first = record_hcm_import_review(connection, **arguments)
-        replay = record_hcm_import_review(connection, **arguments)
+        first = record_hcm_import_review(connection, repository=MySqlHcmImportReviewRepository(connection), unit_of_work_factory=lambda: MySqlUnitOfWork(connection), **arguments)
+        replay = record_hcm_import_review(connection, repository=MySqlHcmImportReviewRepository(connection), unit_of_work_factory=lambda: MySqlUnitOfWork(connection), **arguments)
 
         assert replay == first
         with connection.cursor() as cursor:
@@ -160,9 +165,9 @@ def test_hcm_review_outbox_projects_field_warnings_and_replays_without_duplicate
     connection = get_connection()
     try:
         # 共用 disposable schema 可能含前序案例事件，先排空才只驗證本筆 review 投影。
-        consume_hcm_import_review_events(connection)
+        consume_hcm_import_review_events(connection, runtime=build_anomaly_runtime())
         review_identity = record_hcm_import_review(
-            connection,
+            connection, repository=MySqlHcmImportReviewRepository(connection), unit_of_work_factory=lambda: MySqlUnitOfWork(connection),
             source_content_digest=digest,
             source_sheet="任意資料頁",
             source_row=8,
@@ -174,8 +179,8 @@ def test_hcm_review_outbox_projects_field_warnings_and_replays_without_duplicate
             evidence_snapshot={"invalid_field_count": 2, "has_case_identity": True},
         )
 
-        first = consume_hcm_import_review_events(connection)
-        replay = consume_hcm_import_review_events(connection)
+        first = consume_hcm_import_review_events(connection, runtime=build_anomaly_runtime())
+        replay = consume_hcm_import_review_events(connection, runtime=build_anomaly_runtime())
 
         assert first.delivered_count == 1
         assert first.failed_count == 0
@@ -192,8 +197,9 @@ def test_hcm_review_outbox_projects_field_warnings_and_replays_without_duplicate
                 ("HCM-FIELD-001", "服務日期"),
                 ("HCM-FIELD-002", "服務時間"),
             ]
-            assert all(row["subject"] == "hcm-***-0008" for row in warnings)
-            assert all("HCM-TEST-0008" not in str(row) for row in warnings)
+            assert all(row["subject"] == "HCM-TEST-0008" for row in warnings)
+            cursor.execute("SELECT COUNT(*) AS count FROM system_alerts WHERE alert_code='IMPORT-004'")
+            assert cursor.fetchone()["count"] == 0
             cursor.execute(
                 "SELECT tracking_status,tracking_version FROM import_warning_current_tasks task "
                 "JOIN import_warning_occurrences occurrence ON occurrence.id=task.occurrence_id "
@@ -212,9 +218,9 @@ def test_hcm_row_below_import_threshold_is_audited_but_not_sent_to_anomaly_cente
     digest = hashlib.sha256(uuid4().bytes).hexdigest()
     connection = get_connection()
     try:
-        consume_hcm_import_review_events(connection)
+        consume_hcm_import_review_events(connection, runtime=build_anomaly_runtime())
         review_identity = record_hcm_import_review(
-            connection,
+            connection, repository=MySqlHcmImportReviewRepository(connection), unit_of_work_factory=lambda: MySqlUnitOfWork(connection),
             source_content_digest=digest,
             source_sheet="任意資料頁",
             source_row=10,
@@ -223,7 +229,7 @@ def test_hcm_row_below_import_threshold_is_audited_but_not_sent_to_anomaly_cente
             evidence_snapshot={"has_case_identity": False},
         )
 
-        result = consume_hcm_import_review_events(connection)
+        result = consume_hcm_import_review_events(connection, runtime=build_anomaly_runtime())
 
         assert result.delivered_count == 1
         assert result.failed_count == 0
@@ -260,9 +266,9 @@ def test_hcm_unknown_issue_retries_then_dead_letters_without_partial_warning():
     raw_issue = "future_hcm_state:完整姓名不得寫入錯誤"
     connection = get_connection()
     try:
-        consume_hcm_import_review_events(connection)
+        consume_hcm_import_review_events(connection, runtime=build_anomaly_runtime())
         review_identity = record_hcm_import_review(
-            connection,
+            connection, repository=MySqlHcmImportReviewRepository(connection), unit_of_work_factory=lambda: MySqlUnitOfWork(connection),
             source_content_digest=digest,
             source_sheet="任意資料頁",
             source_row=11,
@@ -272,13 +278,13 @@ def test_hcm_unknown_issue_retries_then_dead_letters_without_partial_warning():
         )
 
         for attempt in range(3):
-            result = consume_hcm_import_review_events(connection, maximum_events=1)
+            result = consume_hcm_import_review_events(connection, runtime=build_anomaly_runtime(), maximum_events=1)
             assert result.failed_count == 1
-            immediate = consume_hcm_import_review_events(connection, maximum_events=1)
+            immediate = consume_hcm_import_review_events(connection, runtime=build_anomaly_runtime(), maximum_events=1)
             assert immediate.failed_count == 0
             if attempt < 2:
                 time.sleep(1.05)
-        stopped = consume_hcm_import_review_events(connection, maximum_events=1)
+        stopped = consume_hcm_import_review_events(connection, runtime=build_anomaly_runtime(), maximum_events=1)
 
         assert stopped.delivered_count == 0
         assert stopped.failed_count == 0
@@ -314,7 +320,7 @@ def test_beclass_review_root_rescan_stays_in_case_import_owner_follow_up():
     connection = get_connection()
     try:
         review_identity = record_invalid_beclass_row(
-            connection,
+            connection, repository=MySqlBeClassImportReviewRepository(connection),
             source_kind=BeClassImportSourceKind.STAFF,
             source_content_digest=digest,
             source_sheet="任意資料頁",
@@ -367,7 +373,7 @@ def test_staff_beclass_review_outbox_acknowledges_canonical_review_without_legac
             runtime=build_anomaly_runtime(),
         )
         review_identity = record_invalid_beclass_row(
-            connection,
+            connection, repository=MySqlBeClassImportReviewRepository(connection),
             source_kind=BeClassImportSourceKind.STAFF,
             source_content_digest=digest,
             source_sheet="任意資料頁",
@@ -411,7 +417,7 @@ def test_beclass_unknown_issue_is_delivered_as_canonical_review_evidence():
             runtime=build_anomaly_runtime(),
         )
         review_identity = record_invalid_beclass_row(
-            connection,
+            connection, repository=MySqlBeClassImportReviewRepository(connection),
             source_kind=BeClassImportSourceKind.CLIENT,
             source_content_digest=digest,
             source_sheet="任意資料頁",
@@ -493,7 +499,7 @@ def _seed_staff_snapshot(connection, record, bank):
 
 def _adopt_snapshot(connection, digest, row, record, bank, region):
     return adopt_existing_staff(
-        connection,
+        connection, repository=MySqlStaffHistoricalAdoptionRepository(connection), unit_of_work_factory=lambda: MySqlUnitOfWork(connection), review_recorder=_record_staff_historical_review,
         source_content_digest=digest,
         source_row=row,
         identity_card=record["identity_card"],

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import date
+from decimal import Decimal
 import json
 from typing import Any
 
@@ -11,6 +12,7 @@ from pymysql.err import IntegrityError
 
 from domains.orders.lifecycle import OrderLifecycleStatus
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
+from shared_kernel.validation import require_positive_half_hour
 from subsystems.scheduling.availability_lock_cancellation_workflow import (
     cancel_caregiver_availability_lock_for_order,
 )
@@ -426,7 +428,7 @@ def _stored_receipt(row):
         _lifecycle_status(payload),
         _optional_date(payload, "actual_end_date"),
         _required_integer(payload, "official_service_day_count"),
-        _required_integer(payload, "official_service_hours"),
+        _required_service_hours(payload, "official_service_hours"),
         _integer_tuple(payload, "cancelled_assignment_ids"),
         _text_tuple(payload, "created_assignment_keys"),
         PreviewFingerprint(_required_text(payload, "preview_fingerprint")),
@@ -481,7 +483,7 @@ def _validate_receipt_columns(row, receipt) -> None:
         str(row["lifecycle_status"]),
         row["actual_end_date"],
         int(row["official_service_day_count"]),
-        int(row["official_service_hours"]),
+        _required_service_hours(row, "official_service_hours"),
         str(row["preview_fingerprint"]),
     )
     if actual != expected:
@@ -505,6 +507,16 @@ def _required_integer(payload, key):
     if not isinstance(value, int) or isinstance(value, bool) or value < 0:
         raise ValueError("order_cancellation_receipt_integrity_violation")
     return value
+
+
+def _required_service_hours(payload, key):
+    value = payload[key]
+    if not isinstance(value, bool) and isinstance(value, (int, float, Decimal)) and value == 0:
+        return value
+    try:
+        return require_positive_half_hour(value, key)
+    except ValueError as error:
+        raise ValueError("order_cancellation_receipt_integrity_violation") from error
 
 
 def _optional_date(payload, key):

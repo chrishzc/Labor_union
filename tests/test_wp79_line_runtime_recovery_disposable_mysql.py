@@ -6,6 +6,7 @@ Description: 以一次性 MySQL 驗證舊版 LINE 身分 schema 可在候選 DB 
 from __future__ import annotations
 
 import os
+from hashlib import sha256
 from pathlib import Path
 from types import SimpleNamespace
 import uuid
@@ -42,6 +43,21 @@ def _configure_release(monkeypatch: pytest.MonkeyPatch) -> None:
         descriptors={},
         backfills=(),
     )
+    release.manifests = (SimpleNamespace(
+        release_id=release.release_id,
+        fingerprint=release.fingerprint,
+        schema_artifacts=(SimpleNamespace(
+            artifact=SimpleNamespace(
+                name=PART_186.name,
+                relative_path=PART_186.relative_to(ROOT).as_posix(),
+                sha256=sha256(PART_186.read_bytes()).hexdigest(),
+                dependencies=(),
+            ),
+            data_effect="schema_only_additive",
+        ),),
+        backfills=(),
+        verification_contracts=release.verification_contracts,
+    ),)
     monkeypatch.setattr(migration, "RELEASE_MANIFEST", release)
     monkeypatch.setattr(migration, "SCHEMA_PARTS", (PART_186,))
     monkeypatch.setattr(migration, "OWNED_OBJECTS", {

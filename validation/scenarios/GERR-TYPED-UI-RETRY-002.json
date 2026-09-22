@@ -38,14 +38,14 @@
   "execution": {
     "runner": [
       ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\domains\\orders\\subsystems\\orders\\integration\\test_order_auto_completion_api.py",
-      "npm --prefix ui_react test -- src/tests/challenger_g2_orders_client_resilience.test.ts src/tests/orders_mutation_flow_store.test.ts src/tests/finance_import_mutation_client.test.ts src/tests/finance_query_page.test.tsx"
+      "npm --prefix ui_react test -- src/tests/challenger_g2_orders_client_resilience.test.ts src/tests/orders_mutation_flow_store.test.ts src/tests/finance_import_mutation_client.test.ts src/tests/domains/client-finance/subsystems/client-finance/modules/historical-payment-settlement-presentation/finance_query_page.test.tsx"
     ],
     "test_paths": [
       "tests/domains/orders/subsystems/orders/integration/test_order_auto_completion_api.py",
       "ui_react/src/tests/challenger_g2_orders_client_resilience.test.ts",
       "ui_react/src/tests/orders_mutation_flow_store.test.ts",
       "ui_react/src/tests/finance_import_mutation_client.test.ts",
-      "ui_react/src/tests/finance_query_page.test.tsx"
+      "ui_react/src/tests/domains/client-finance/subsystems/client-finance/modules/historical-payment-settlement-presentation/finance_query_page.test.tsx"
     ]
   }
 }

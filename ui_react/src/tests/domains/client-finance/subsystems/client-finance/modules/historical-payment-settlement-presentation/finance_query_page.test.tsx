@@ -311,13 +311,13 @@ async function uploadAndPreview(file = IMPORT_FILE): Promise<void> {
   });
 }
 
-function assertPreviewCounts(plan: Pick<FinanceImportBatchPreview, 'counts'>): void {
+function assertPreviewCounts(plan: Pick<FinanceImportBatchPreview, 'counts'>, reviewCount: number): void {
   for (const [label, key] of [
     ['可自動入帳', 'ready_dispatch'], ['已存在', 'existing'], ['待人工確認', 'manual_review'],
     ['待業務配對', 'business_pending'], ['阻擋筆數', 'blocked'],
   ] as const) {
     const item = screen.getByText(label, { selector: '.finance-kpi-label' }).parentElement;
-    expect(item?.querySelector('.finance-kpi-value')?.textContent).toBe(String(plan.counts[key]));
+    expect(item?.querySelector('.finance-kpi-value')?.textContent).toBe(String(key === 'manual_review' ? reviewCount : plan.counts[key]));
   }
 }
 
@@ -350,7 +350,7 @@ describe('Finance import preview and replay boundary', () => {
     await uploadAndPreview();
     expect(previewSpy).toHaveBeenCalledOnce();
     await expect(previewSpy.mock.results[0].value).resolves.toEqual(plan);
-    assertPreviewCounts(plan);
+    assertPreviewCounts(plan, plan.counts.manual_review);
     confirmImport();
     await screen.findByText('匯入完成：核銷 3、既有 2、待處理 5');
     expect(applyRequests[0].body).toEqual({ batch_identity: plan.batch_identity,
@@ -367,7 +367,7 @@ describe('Finance import preview and replay boundary', () => {
     render(<FinancePage />);
     fireEvent.click(screen.getByRole('button', { name: '銀行流水匯入' }));
     await uploadAndPreview();
-    assertPreviewCounts(plan);
+    assertPreviewCounts(plan, plan.counts.manual_review);
     expect(screen.getByText(/目前不可匯入：存在可能重複的銀行交易/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '確認匯入' })).not.toBeInTheDocument();
   });
@@ -445,7 +445,7 @@ describe('Finance import preview and replay boundary', () => {
     const exchange = JSON.parse(readFileSync(process.env.FI_PREVIEW_EXCHANGE!, 'utf8')) as {
       workbook_path: string; ingestion_response: { data: unknown };
       preview_response: { data: FinanceImportBatchPreview };
-      manifest_response: { data: unknown }; review_response: { data: unknown };
+      manifest_response: { data: { review_count: number } }; review_response: { data: { items: unknown[] } };
       expected: Pick<FinanceImportBatchPreview, 'batch_version' | 'preview_fingerprint' | 'counts' | 'blocking_codes'>;
     };
     const bytes = new Uint8Array(readFileSync(exchange.workbook_path));
@@ -456,6 +456,7 @@ describe('Finance import preview and replay boundary', () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input);
       requests.push(path);
+      if (path === '/api/v1/staff/summaries?page_size=200') return importResponse({ items: [], next_cursor: null });
       if (path.endsWith('/workbooks/ingest')) return importResponse(exchange.ingestion_response.data);
       if (path.endsWith('/batches/preview')) return importResponse(exchange.preview_response.data);
       if (path.includes('/manifest')) return importResponse(exchange.manifest_response.data);
@@ -470,13 +471,18 @@ describe('Finance import preview and replay boundary', () => {
     const decoded = await previewSpy.mock.results[0].value;
     expect(decoded).toEqual(exchange.preview_response.data);
     expect(decoded).toMatchObject(exchange.expected);
-    assertPreviewCounts(exchange.expected);
+    // The worklist excludes unmatched bank facts; the untouched Preview still
+    // describes every staged row. Read the displayed count from the real query.
+    expect(exchange.review_response.data.items).toHaveLength(exchange.manifest_response.data.review_count);
+    assertPreviewCounts(exchange.expected, exchange.manifest_response.data.review_count);
     if (!exchange.preview_response.data.apply_allowed) {
       expect(screen.getByText(new RegExp(financeImportBlockerMessage(exchange.expected.blocking_codes)))).toBeInTheDocument();
     }
-    expect(requests.slice(0, 2)).toEqual(['/api/v1/finance-import/workbooks/ingest', '/api/v1/finance-import/batches/preview']);
+    const importRequests = requests.filter((path) => path.startsWith('/api/v1/finance-import/'));
+    expect(requests.filter((path) => !path.startsWith('/api/v1/finance-import/'))).toEqual(['/api/v1/staff/summaries?page_size=200']);
+    expect(importRequests.slice(0, 2)).toEqual(['/api/v1/finance-import/workbooks/ingest', '/api/v1/finance-import/batches/preview']);
     const batchPath = `/api/v1/finance-import/batches/${encodeURIComponent(exchange.preview_response.data.batch_identity)}`;
-    expect(requests.slice(2)).toEqual([`${batchPath}/manifest`, `${batchPath}/review-rows?limit=50`]);
+    expect(importRequests.slice(2)).toEqual([`${batchPath}/manifest`, `${batchPath}/review-rows?limit=50`]);
     expect(screen.queryByText(/匯入完成：核銷/)).not.toBeInTheDocument();
   });
 });

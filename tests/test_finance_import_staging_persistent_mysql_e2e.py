@@ -163,6 +163,13 @@ def test_workbook_api_preview_reaches_react_without_formal_posting(tmp_path) -> 
             json={"batch_identity": intake["batch_identity"]},
         )
         assert response.status_code == 200
+        manifest_response = client.get(
+            f"/api/v1/finance-import/batches/{intake['batch_identity']}/manifest",
+        )
+        review_response = client.get(
+            f"/api/v1/finance-import/batches/{intake['batch_identity']}/review-rows?limit=50",
+        )
+        assert manifest_response.status_code == review_response.status_code == 200
     assert formal_counts() == before
 
     connection = get_connection()
@@ -190,6 +197,7 @@ def test_workbook_api_preview_reaches_react_without_formal_posting(tmp_path) -> 
             (root / "validation/expected/FI-UI-PREVIEW-PARITY-003.json").read_bytes()
         ).hexdigest(),
         "ingestion_response": ingested.json(), "preview_response": response.json(), "expected": expected,
+        "manifest_response": manifest_response.json(), "review_response": review_response.json(),
     }, ensure_ascii=False), encoding="utf-8")
     report_path = tmp_path / "react-parity-result.json"
     # The frontend needs only the synthetic exchange, not the parent's DB credentials.
@@ -201,8 +209,8 @@ def test_workbook_api_preview_reaches_react_without_formal_posting(tmp_path) -> 
     if "SYSTEMROOT" in os.environ:
         ui_environment["SYSTEMROOT"] = os.environ["SYSTEMROOT"]
     result = subprocess.run(
-        [npm, "--prefix", str(root / "ui_react"), "test", "--", "src/tests/finance_query_page.test.tsx",
-         "-t", "same-run MySQL Preview", "--reporter=json", "--outputFile", str(report_path)],
+        [npm, "--prefix", str(root / "ui_react"), "test", "--", "src/tests/domains/client-finance/subsystems/client-finance/modules/historical-payment-settlement-presentation/finance_query_page.test.tsx",
+         "-t", "same-run MySQL Preview", "--reporter=default", "--reporter=json", "--outputFile", str(report_path)],
         cwd=root, env=ui_environment, capture_output=True, text=True, timeout=120, check=False,
     )
     assert result.returncode == 0, result.stdout[-4000:] + result.stderr[-4000:]

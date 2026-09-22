@@ -351,13 +351,15 @@ def _read_account_version(cursor, case_no, *, lock):
 
 
 def _load_refund_bank_rows(cursor, identities, lock):
+    # Manual/historical classification does not rewrite the initial resolution
+    # cache. Verify the immutable bank account against the recipient snapshot.
     row_ids = tuple(_positive_row_id(item) for item in identities)
     suffix = " FOR UPDATE" if lock else ""
     cursor.execute(
         "SELECT fir.id,fir.transaction_date,fir.debit,fir.credit,fir.direction,"
         "fir.currency,COALESCE(classification.classification_type,"
         "fir.classification_type) AS effective_classification_type,"
-        "fir.reconciliation_status,fir.resolved_counterparty_account,"
+        "fir.reconciliation_status,fir.counterparty_account AS resolved_counterparty_account,"
         "fir.bank_references,ledger.id AS ledger_entry_id "
         "FROM finance_import_rows fir LEFT JOIN client_ledger_entries ledger "
         "ON ledger.finance_import_row_id=fir.id "
@@ -749,7 +751,7 @@ def _public_payable_obligations(rows):
 def _query_candidate_outgoing_bank_rows(cursor):
     cursor.execute(
         "SELECT fir.id,fir.transaction_date,fir.debit,fir.credit,fir.direction,"
-        "fir.currency,fir.reconciliation_status,fir.resolved_counterparty_account,"
+        "fir.currency,fir.reconciliation_status,fir.counterparty_account AS resolved_counterparty_account,"
         "COALESCE(classification.classification_type,fir.classification_type) "
         "AS effective_classification_type,ledger.id AS ledger_entry_id "
         "FROM finance_import_rows fir "

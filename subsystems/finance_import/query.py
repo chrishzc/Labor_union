@@ -24,7 +24,7 @@ AND (
         WHERE legacy_account.virtual_account=COALESCE(
             finance_row.cancellation_code,
             JSON_UNQUOTE(JSON_EXTRACT(finance_row.bank_references, '$."銷帳編號"'))
-        )
+        ) COLLATE utf8mb4_unicode_ci
     )
     OR EXISTS (
         SELECT 1
@@ -42,7 +42,7 @@ AND (
                   finance_row.cancellation_code,
                   JSON_UNQUOTE(JSON_EXTRACT(finance_row.bank_references, '$."銷帳編號"'))
               ), 12, 3) AS UNSIGNED) AS CHAR), 6, '0')
-          )
+          ) COLLATE utf8mb4_unicode_ci
     )
 )
 """

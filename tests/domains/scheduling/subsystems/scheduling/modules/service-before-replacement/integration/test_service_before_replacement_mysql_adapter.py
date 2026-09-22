@@ -64,13 +64,13 @@ def test_r02_apply_replay_and_exact_mysql_readback() -> None:
     case_no = f"RPRE-{uuid4().hex[:20]}"
     try:
         _assert_target(connection)
-        source = _seed_prerequisites(connection, case_no)
-        facts = _facts(case_no)
+        source, prior_event_identity = _seed_prerequisites(connection, case_no)
+        facts = _facts(case_no, prior_event_identity)
         repository = MySqlServiceBeforeReplacementRepository(
             connection,
             MatchingSuccessorPersistenceAdapter(connection),
-            facts_loader=lambda _request, _for_update: facts,
-            matching_source_loader=lambda _request, _for_update: source,
+            facts_loader=lambda _request, *, for_update: facts,
+            matching_source_loader=lambda _request, *, for_update: source,
         )
         workflow = ServiceBeforeReplacementWorkflow(
             repository, lambda: MySqlUnitOfWork(connection)
@@ -78,7 +78,7 @@ def test_r02_apply_replay_and_exact_mysql_readback() -> None:
         preview = workflow.preview(ServiceBeforeReplacementQueryRequest(
             case_no, ReplacementScenario.R02, CorrelationId(f"correlation:{case_no}")
         ))
-        command = _command(case_no, preview.fingerprint)
+        command = _command(case_no, preview.fingerprint, prior_event_identity)
 
         applied = workflow.apply(command)
         replayed = workflow.apply(command)
@@ -149,7 +149,7 @@ def _sources(case_no: str) -> tuple[MatchingSourceVersion, ...]:
     )
 
 
-def _seed_prerequisites(connection: pymysql.Connection, case_no: str) -> dict[str, object]:
+def _seed_prerequisites(connection: pymysql.Connection, case_no: str) -> tuple[dict[str, object], str]:
     versions = _sources(case_no)
     service_day = date(2026, 9, 1)
     criteria = {"required_service_dates": [service_day.isoformat()]}
@@ -201,6 +201,15 @@ def _seed_prerequisites(connection: pymysql.Connection, case_no: str) -> dict[st
             "VALUES (%s,8,8,%s)",
             (case_no, prior_generation_id),
         )
+        cursor.execute(
+            "INSERT INTO scheduling_rebuild_events "
+            "(case_no,new_generation_id,expected_order_version,expected_scheduling_version,"
+            "resulting_scheduling_version,preview_fingerprint,idempotency_key,actor,reason,correlation_id) "
+            "VALUES (%s,%s,0,7,8,%s,%s,'task96-rpre','fixture',%s)",
+            (case_no, prior_generation_id, fingerprint_payload({"case_no": case_no}).value,
+             f"fixture-rebuild:{case_no.lower()}", f"correlation:{case_no}:rebuild"),
+        )
+        prior_event_identity = f"scheduling-rebuild-event:{case_no}:{int(cursor.lastrowid)}"
         cursor.execute(
             "INSERT INTO matching_coordination_criteria_snapshots "
             "(snapshot_id,case_no,criteria_version,criteria_snapshot,source_version_tuple,"
@@ -266,10 +275,10 @@ def _seed_prerequisites(connection: pymysql.Connection, case_no: str) -> dict[st
         "parent_package": parent,
         "source_event_identity": source_event_identity,
         "required_service_dates": [service_day.isoformat()],
-    }
+    }, prior_event_identity
 
 
-def _facts(case_no: str) -> ServiceBeforeReplacementFacts:
+def _facts(case_no: str, prior_event_identity: str) -> ServiceBeforeReplacementFacts:
     roots = tuple(
         ReplacementRootIdentity(kind, f"{kind.value}:{case_no}:old", case_no)
         for kind in (
@@ -285,7 +294,7 @@ def _facts(case_no: str) -> ServiceBeforeReplacementFacts:
         ReplacementScenario.R02,
         (),
         f"generation:{case_no}:8",
-        f"event:{case_no}:13",
+        prior_event_identity,
         8,
         13,
         roots,
@@ -298,7 +307,7 @@ def _facts(case_no: str) -> ServiceBeforeReplacementFacts:
     )
 
 
-def _command(case_no: str, preview_fingerprint) -> ApplyServiceBeforeReplacement:
+def _command(case_no: str, preview_fingerprint, prior_event_identity: str) -> ApplyServiceBeforeReplacement:
     return ApplyServiceBeforeReplacement(
         case_no,
         ReplacementScenario.R02,
@@ -306,10 +315,10 @@ def _command(case_no: str, preview_fingerprint) -> ApplyServiceBeforeReplacement
         ExpectedVersion(13),
         ExpectedVersion(8),
         f"generation:{case_no}:8",
-        f"event:{case_no}:13",
+        prior_event_identity,
         f"aggregate:{case_no}:8",
         preview_fingerprint,
-        IdempotencyKey(f"replacement:{case_no}:14"),
+        IdempotencyKey(f"replacement:{case_no.lower()}:14"),
         ActorContext("task96-rpre", ("scheduling.replace",)),
         "caregiver_requested_replacement",
         (f"evidence:{case_no}",),

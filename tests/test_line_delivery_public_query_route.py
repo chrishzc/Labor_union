@@ -347,13 +347,17 @@ class _MySqlDisposableSchemaAdmin:
             connection.close()
 
     def create_schema(self, name: str) -> None:
-        connection = self._connection()
-        try:
-            with connection.cursor() as cursor:
-                cursor.execute(f"CREATE DATABASE {self._quoted_name(name)}")
-            connection.commit()
-        finally:
-            connection.close()
+        from scripts.bootstrap_disposable_mysql_schema import bootstrap
+
+        _assert_disposable_schema_name(name)
+        bootstrap(Namespace(
+            host=self._values["LABOR_UNION_TEST_MYSQL_HOST"],
+            port=int(self._values["LABOR_UNION_TEST_MYSQL_PORT"]),
+            user=self._values["LABOR_UNION_TEST_MYSQL_USER"],
+            password=self._values["LABOR_UNION_TEST_MYSQL_PASSWORD"],
+            database=name,
+            confirm_database=name,
+        ))
 
     def drop_schema(self, name: str) -> None:
         connection = self._connection()
@@ -399,18 +403,6 @@ def _managed_g7_database(monkeypatch):
     values = _g7_database_values()
     admin = _MySqlDisposableSchemaAdmin(values)
     with _DisposableSchemaLease(admin, G7_DATABASE):
-        from scripts.bootstrap_disposable_mysql_schema import bootstrap
-
-        bootstrap(
-            Namespace(
-                host=values["LABOR_UNION_TEST_MYSQL_HOST"],
-                port=int(values["LABOR_UNION_TEST_MYSQL_PORT"]),
-                user=values["LABOR_UNION_TEST_MYSQL_USER"],
-                password=values["LABOR_UNION_TEST_MYSQL_PASSWORD"],
-                database=G7_DATABASE,
-                confirm_database=G7_DATABASE,
-            )
-        )
         monkeypatch.setenv("DB_HOST", values["LABOR_UNION_TEST_MYSQL_HOST"])
         monkeypatch.setenv("DB_PORT", values["LABOR_UNION_TEST_MYSQL_PORT"])
         monkeypatch.setenv("DB_USER", values["LABOR_UNION_TEST_MYSQL_USER"])
@@ -564,9 +556,6 @@ def test_delivery_query_g7_uses_production_app_and_real_repository(monkeypatch, 
     def fail_wakeup():
         raise AssertionError("query invoked wakeup")
 
-    monkeypatch.setattr(line_unit_of_work, "get_connection", tracked_connection)
-    monkeypatch.setattr(line_tasks, "get_connection", tracked_connection)
-    monkeypatch.setattr(line_tasks, "get_line_wakeup_publisher", fail_wakeup)
     line_runtime.get_line_delivery_task_admin_application.cache_clear()
     monkeypatch.setenv("APP_ENV", "test")
     monkeypatch.setenv("LINE_WEBHOOK_RUNTIME_MODE", "canonical")
@@ -574,12 +563,19 @@ def test_delivery_query_g7_uses_production_app_and_real_repository(monkeypatch, 
     production_app.dependency_overrides[require_line_task_reader] = _principal
     try:
         with TestClient(production_app) as client:
-            summary = client.get("/api/v1/line/tasks/summary")
-            listing = client.get(
-                "/api/v1/line/tasks",
-                params={"source_type": "general_push", "page": 1, "page_size": 25},
-            )
-            detail = client.get(f"/api/v1/line/tasks/{task_id}")
+            # Lifespan may commit development defaults. Measure only the queries,
+            # without disabling startup or resetting counts after a request.
+            with monkeypatch.context() as query_patch:
+                query_patch.setattr(line_unit_of_work, "get_connection", tracked_connection)
+                query_patch.setattr(line_tasks, "get_connection", tracked_connection)
+                query_patch.setattr(line_tasks, "get_line_wakeup_publisher", fail_wakeup)
+                summary = client.get("/api/v1/line/tasks/summary")
+                listing = client.get(
+                    "/api/v1/line/tasks",
+                    params={"source_type": "general_push", "page": 1, "page_size": 25},
+                )
+                detail = client.get(f"/api/v1/line/tasks/{task_id}")
+                assert counters["commit"] == 0
     finally:
         production_app.dependency_overrides.pop(require_line_task_reader, None)
         line_runtime.get_line_delivery_task_admin_application.cache_clear()
@@ -591,7 +587,6 @@ def test_delivery_query_g7_uses_production_app_and_real_repository(monkeypatch, 
     assert detail.status_code == 200
     assert any(item["id"] == task_id for item in listing.json()["data"]["items"])
     assert detail.json()["data"]["task"]["id"] == task_id
-    assert counters["commit"] == 0
     for response in (summary, listing, detail):
         body = response.text
         assert "U-g7-safe" not in body

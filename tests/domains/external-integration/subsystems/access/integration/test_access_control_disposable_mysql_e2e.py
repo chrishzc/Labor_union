@@ -28,9 +28,6 @@ def _disposable_access_control_database(monkeypatch):
     assert DATABASE is not None and DATABASE.startswith("lu_test_")
     monkeypatch.setenv("ACCESS_CONTROL_TOTP_KEYRING", f"v1:{Fernet.generate_key().decode('ascii')}")
     monkeypatch.setenv("ACCESS_CONTROL_TOTP_ACTIVE_KEY_VERSION", "v1")
-    from subsystems.access import authentication_session
-
-    monkeypatch.setattr(authentication_session, "get_connection", _connection)
 
 
 def test_account_center_security_transitions_are_atomic_and_root_is_protected(monkeypatch) -> None:
@@ -43,10 +40,11 @@ def test_account_center_security_transitions_are_atomic_and_root_is_protected(mo
     from api.routes import admin_auth
 
     assert admin_auth.me(root).data.username == root_username
-    assert asyncio.run(admin_auth.logout(f"Bearer {root_token}", root)).data.logged_out
-    assert authentication_session.get_admin_session(root_token) is None
+    assert asyncio.run(admin_auth.logout(f"Bearer {root_token}", root, connection_factory=_connection)).data.logged_out
+    assert authentication_session.get_admin_session(root_token, connection_factory=_connection) is None
     replay_challenge = authentication_session.issue_password_login_challenge(
-        root_username, "Root-password-123"
+        root_username, "Root-password-123",
+        connection_factory=_connection,
     )
     assert isinstance(replay_challenge, authentication_session.PasswordLoginChallenge)
     from subsystems.access.totp import _totp_code
@@ -55,18 +53,20 @@ def test_account_center_security_transitions_are_atomic_and_root_is_protected(mo
         challenge_id=replay_challenge.challenge_id,
         challenge_token=replay_challenge.challenge_token,
         factor_code=_totp_code(root_secret, _last_factor_step(root.id)),
-    ) is None
+     connection_factory=_connection) is None
     wrong_factor_challenge = authentication_session.issue_password_login_challenge(
-        root_username, "Root-password-123"
+        root_username, "Root-password-123",
+        connection_factory=_connection,
     )
     assert isinstance(wrong_factor_challenge, authentication_session.PasswordLoginChallenge)
     assert authentication_session.complete_password_login_challenge(
         challenge_id=wrong_factor_challenge.challenge_id,
         challenge_token=wrong_factor_challenge.challenge_token,
         factor_code="000000",
-    ) is None
+     connection_factory=_connection) is None
     expired_challenge = authentication_session.issue_password_login_challenge(
-        root_username, "Root-password-123"
+        root_username, "Root-password-123",
+        connection_factory=_connection,
     )
     assert isinstance(expired_challenge, authentication_session.PasswordLoginChallenge)
     original_now = authentication_session._utc_now_naive
@@ -79,7 +79,7 @@ def test_account_center_security_transitions_are_atomic_and_root_is_protected(mo
         challenge_id=expired_challenge.challenge_id,
         challenge_token=expired_challenge.challenge_token,
         factor_code="000000",
-    ) is None
+     connection_factory=_connection) is None
     monkeypatch.setattr(authentication_session, "_utc_now_naive", original_now)
     child = authentication_session.create_account_center_user(
         actor=root,
@@ -88,6 +88,7 @@ def test_account_center_security_transitions_are_atomic_and_root_is_protected(mo
         display_name="Child",
         reason="E2E create",
         idempotency_key="create-child",
+        connection_factory=_connection,
     )
     child_principal, child_secret, child_token = _enroll_and_login(child_username, "Child-password-123")
     assert child_principal.id == child.id
@@ -95,11 +96,13 @@ def test_account_center_security_transitions_are_atomic_and_root_is_protected(mo
     authentication_session.set_account_center_enabled(
         actor=root, account_id=child.id, enabled=False, reason="E2E disable",
         expected_version=1, idempotency_key="disable-child",
+        connection_factory=_connection,
     )
-    assert authentication_session.get_admin_session(child_token) is None
+    assert authentication_session.get_admin_session(child_token, connection_factory=_connection) is None
     assert _user_state(child.id) == (False, 2)
     assert authentication_session.issue_password_login_challenge(
-        child_username, "Child-password-123", source_identifier="disabled-account-e2e"
+        child_username, "Child-password-123", source_identifier="disabled-account-e2e",
+        connection_factory=_connection,
     ) is None
     from subsystems.access.security_alert_outbox import consume_security_alert_outbox
     from subsystems.anomalies.system_alert_projection import upsert_system_alert
@@ -119,27 +122,31 @@ def test_account_center_security_transitions_are_atomic_and_root_is_protected(mo
     authentication_session.set_account_center_enabled(
         actor=root, account_id=child.id, enabled=True, reason="E2E enable",
         expected_version=2, idempotency_key="enable-child",
+        connection_factory=_connection,
     )
     password_reset_token = _seed_active_session(child.id)
     authentication_session.reset_account_center_password(
         actor=root, account_id=child.id, password="Child-password-456", reason="E2E password",
         expected_version=3, idempotency_key="password-child",
+        connection_factory=_connection,
     )
-    assert authentication_session.get_admin_session(password_reset_token) is None
-    assert authentication_session.issue_password_login_challenge(child_username, "Child-password-123") is None
+    assert authentication_session.get_admin_session(password_reset_token, connection_factory=_connection) is None
+    assert authentication_session.issue_password_login_challenge(child_username, "Child-password-123", connection_factory=_connection) is None
     mfa_reset_token = _seed_active_session(child.id)
 
     authentication_session.reset_account_center_mfa(
         actor=root, account_id=child.id, reason="E2E MFA lost", expected_version=4,
         idempotency_key="mfa-child",
+        connection_factory=_connection,
     )
-    assert authentication_session.get_admin_session(mfa_reset_token) is None
-    enrollment = authentication_session.issue_password_login_challenge(child_username, "Child-password-456")
+    assert authentication_session.get_admin_session(mfa_reset_token, connection_factory=_connection) is None
+    enrollment = authentication_session.issue_password_login_challenge(child_username, "Child-password-456", connection_factory=_connection)
     assert isinstance(enrollment, authentication_session.MfaEnrollmentChallenge)
     with pytest.raises(ValueError, match="root 帳號受保護"):
         authentication_session.set_account_center_enabled(
             actor=root, account_id=root.id, enabled=False, reason="must fail",
             expected_version=1, idempotency_key="root-disable",
+            connection_factory=_connection,
         )
 
     before = _user_state(child.id)
@@ -152,16 +159,19 @@ def test_account_center_security_transitions_are_atomic_and_root_is_protected(mo
         authentication_session.set_account_center_enabled(
             actor=root, account_id=child.id, enabled=False, reason="must rollback",
             expected_version=5, idempotency_key="audit-rollback",
+        connection_factory=_connection,
     )
     assert _user_state(child.id) == before
     monkeypatch.setattr(authentication_session, "_record_admin_audit_with_cursor", original_audit_recorder)
     for _ in range(5):
         assert authentication_session.issue_password_login_challenge(
-            f"unknown-{run_id}", "incorrect-password", source_identifier="e2e-rate-limit"
+            f"unknown-{run_id}", "incorrect-password", source_identifier="e2e-rate-limit",
+            connection_factory=_connection,
         ) is None
     with pytest.raises(authentication_session.AdminLoginRateLimitedError):
         authentication_session.issue_password_login_challenge(
-            f"unknown-{run_id}", "incorrect-password", source_identifier="e2e-rate-limit"
+            f"unknown-{run_id}", "incorrect-password", source_identifier="e2e-rate-limit",
+            connection_factory=_connection,
         )
     assert root_secret
 
@@ -171,7 +181,8 @@ def _bootstrap_and_enroll(username: str):
 
     password = "Root-password-123"
     root_id = authentication_session.bootstrap_root_admin(
-        username=username, password=password, display_name="Root"
+        username=username, password=password, display_name="Root",
+        connection_factory=_connection,
     )
     principal, secret, token = _enroll_and_login(username, password)
     assert principal.id == root_id and principal.is_root
@@ -182,13 +193,14 @@ def _enroll_and_login(username: str, password: str):
     from subsystems.access import authentication_session
     from subsystems.access.totp import _totp_code, totp_step
 
-    enrollment = authentication_session.issue_password_login_challenge(username, password)
+    enrollment = authentication_session.issue_password_login_challenge(username, password, connection_factory=_connection)
     assert isinstance(enrollment, authentication_session.MfaEnrollmentChallenge)
     secret = parse_qs(urlparse(enrollment.provisioning_uri).query)["secret"][0]
     authentication_session.complete_mfa_enrollment(
         challenge_id=enrollment.challenge_id,
         challenge_token=enrollment.challenge_token,
         totp_code=_totp_code(secret, totp_step(datetime.now(timezone.utc))),
+        connection_factory=_connection,
     )
     return _login_with_secret(username, password, secret)
 
@@ -197,12 +209,13 @@ def _login_with_secret(username: str, password: str, secret: str, *, step_offset
     from subsystems.access import authentication_session
     from subsystems.access.totp import _totp_code, totp_step
 
-    challenge = authentication_session.issue_password_login_challenge(username, password)
+    challenge = authentication_session.issue_password_login_challenge(username, password, connection_factory=_connection)
     assert isinstance(challenge, authentication_session.PasswordLoginChallenge)
     result = authentication_session.complete_password_login_challenge(
         challenge_id=challenge.challenge_id,
         challenge_token=challenge.challenge_token,
         factor_code=_totp_code(secret, totp_step(datetime.now(timezone.utc)) + step_offset),
+        connection_factory=_connection,
     )
     assert result is not None
     token, _expires_at, principal = result

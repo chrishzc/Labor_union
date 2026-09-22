@@ -66,7 +66,7 @@ class PlannedClaimItem:
     assignment_id: int
     case_no: str
     staff_id: int
-    claimed_hours: int
+    claimed_hours: float | int
     unit_price_ntd: MoneyNTD
     requested_amount_ntd: MoneyNTD
 
@@ -226,7 +226,13 @@ def _planned_item(source):
     assignment = source.assignment
     if not assignment.effective:
         _raise(GovernmentSubsidyErrorCode.ASSIGNMENT_FACTS_STALE)
-    requested = source.unit_price_ntd * assignment.official_service_hours
+    hours_numerator, hours_denominator = assignment.official_service_hours.as_integer_ratio()
+    requested_ntd, remainder = divmod(
+        source.unit_price_ntd.amount * hours_numerator, hours_denominator
+    )
+    if remainder:
+        raise ValueError("half-hour subsidy amount must resolve to whole NTD")
+    requested = MoneyNTD(requested_ntd)
     return PlannedClaimItem(
         assignment.assignment_id,
         assignment.case_no,

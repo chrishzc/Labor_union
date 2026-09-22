@@ -9,6 +9,8 @@ from scripts.reconcile_writer_inventory_v3_dispositions import (
     EXACT_SOURCE_RESTRICTED_REVIEWS,
     EXACT_SOURCE_REVIEWS,
     _task97_exact_review,
+    _disposition,
+    _review,
 )
 
 
@@ -77,8 +79,11 @@ def test_task97_source_locked_reviews_are_exact_and_fail_closed_for_new_symbols(
 
     for identity in EXACT_IDENTITY_REVIEWS:
         assert by_identity[identity]["final_disposition"] != "needs_decision"
+    candidates = {record["identity"]: record for record in _records("writer_inventory_v3_candidate.findings.jsonl")}
+    # Historical receipts remain immutable; current eligibility is recomputed
+    # by the review resolver against current source, not accepted from snapshots.
     for review_registry in (EXACT_SOURCE_REVIEWS, EXACT_SOURCE_RESTRICTED_REVIEWS):
-        for path, (digest, symbols, _review) in review_registry.items():
+        for path, (digest, symbols, _historical_review) in review_registry.items():
             selected = [
                 record
                 for record in records
@@ -86,18 +91,22 @@ def test_task97_source_locked_reviews_are_exact_and_fail_closed_for_new_symbols(
                 and str(record["identity"]).split(":", 2)[1] in symbols
             ]
             assert selected, path
-            source_matches = sha256((REPOSITORY_ROOT / path).read_bytes()).hexdigest() == digest
+            source = REPOSITORY_ROOT / path
+            source_matches = source.is_file() and sha256(source.read_bytes()).hexdigest() == digest
             for record in selected:
                 identity = record["identity"]
+                current = _disposition(candidates[identity])
                 if (source_matches or identity in EXACT_IDENTITY_REVIEWS
                     or _task97_exact_review(path, identity.split(":", 2)[1]) is not None):
-                    assert record["final_disposition"] != "needs_decision", identity
+                    assert current["final_disposition"] != "needs_decision", identity
                 else:
                     # Expired source reviews must reject the writer, not inherit
                     # an old accepted snapshot. Independent exact decisions above
                     # do not grant approval to other occurrences or symbols.
-                    assert record["final_disposition"] == "needs_decision", identity
+                    assert current["final_disposition"] == "needs_decision", identity
             assert _task97_exact_review(path, "FutureUnreviewedWriter.mutate") is None
+            unknown = {"relative_path": path, "symbol": "FutureUnreviewedWriter.mutate", "identity": f"{path}:FutureUnreviewedWriter.mutate:execute"}
+            assert _review(unknown)[3].startswith("needs_decision:")
 
 
 def test_writer_inventory_v3_receipts_close_legacy_scheduling_and_payroll_boundaries():
