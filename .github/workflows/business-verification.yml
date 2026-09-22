@@ -1,25 +1,32 @@
-name: Durable MySQL complete fixture configuration
+name: Remaining synthetic business integration verification
 on:
   push:
     branches: [verify/business-regression-7e12a3e-20260922]
 permissions:
   contents: read
 jobs:
-  durable-mysql:
+  integration:
+    name: ${{ matrix.mode }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [controlled-files, holiday, preserved-database]
     env:
       APP_ENV: development
       DB_HOST: 127.0.0.1
       DB_PORT: '33306'
       DB_USER: root
       DB_PASSWORD: verification-only
-      DB_DATABASE: lu_test_verification_queue
+      DB_DATABASE: lu_test_phase3bh_verification
       LABOR_UNION_TEST_MYSQL_HOST: 127.0.0.1
       LABOR_UNION_TEST_MYSQL_PORT: '33306'
       LABOR_UNION_TEST_MYSQL_USER: root
       LABOR_UNION_TEST_MYSQL_PASSWORD: verification-only
-      LABOR_UNION_TEST_MYSQL_DATABASE: lu_test_verification_queue
+      LABOR_UNION_TEST_MYSQL_DATABASE: lu_test_phase3bh_verification
+      MYSQL_TEST_CONTAINER: business-verification-mysql
+      PRESERVED_DB_TEST_SOURCE: lu_test_phase3bh_verification
       LINE_CHANNEL_ACCESS_TOKEN: ''
       LINE_CHANNEL_SECRET: ''
       ANONYMIZED_TELEMETRY: 'False'
@@ -75,7 +82,7 @@ jobs:
           PY
           python -m pip install --disable-pip-version-check --no-input --only-binary=:all: --require-hashes -r /tmp/business-test-requirements.txt > "$PROOF_DIR/dependencies.log" 2>&1 || { tail -60 "$PROOF_DIR/dependencies.log"; exit 1; }
           python -m pip list --format=json > "$PROOF_DIR/installed-packages.json"
-      - name: Await authenticated host TCP query on disposable MySQL
+      - name: Start authenticated host TCP MySQL on the temporary runner
         env:
           MYSQL_ROOT_PASSWORD: verification-only
         run: |
@@ -100,25 +107,69 @@ jobs:
                       raise
                   time.sleep(2)
           PY
-      - name: Run unchanged durable repository lifecycle and payload tests
+      - name: Prepare a synthetic source for file and database-copy tests
+        if: matrix.mode != 'holiday'
+        run: |
+          python - <<'PY' > "$PROOF_DIR/synthetic-setup.log" 2>&1
+          import os
+          from pathlib import Path
+          from argparse import Namespace
+          from scripts.bootstrap_disposable_mysql_schema import bootstrap
+          import pymysql
+          database = os.environ['DB_DATABASE']
+          bootstrap(Namespace(host='127.0.0.1', port=33306, user='root', password=os.environ['DB_PASSWORD'], database=database, confirm_database=database))
+          connection = pymysql.connect(host='127.0.0.1', port=33306, user='root', password=os.environ['DB_PASSWORD'], database=database, charset='utf8mb4')
+          with connection.cursor() as cursor:
+              cursor.execute('INSERT INTO clients(case_no,name) VALUES (%s,%s)', ('VERIFY-FILE-001','Synthetic verification client'))
+              client_id = cursor.lastrowid
+              cursor.execute('INSERT INTO orders(case_no,client_id,status,service_days,service_hours_per_day,start_date,end_date,service_start_time,service_end_time,service_end_day_offset) VALUES (%s,%s,%s,2,8,%s,%s,%s,%s,0)', ('VERIFY-FILE-001',client_id,'洽談中','2026-10-01','2026-10-02','09:00:00','17:00:00'))
+          connection.commit()
+          connection.close()
+          target = Path('.env')
+          assert not target.exists(), 'checkout unexpectedly contains environment configuration'
+          target.write_text('\n'.join(name+'='+os.environ[name] for name in ('DB_HOST','DB_PORT','DB_USER','DB_PASSWORD','DB_DATABASE'))+'\n', encoding='utf-8')
+          print('Canonical schema and one synthetic order prepared on the temporary MySQL container.')
+          PY
+      - name: Verify controlled file staging receipt finalization and download
+        if: matrix.mode == 'controlled-files'
+        env:
+          RUN_CONTROLLED_FILE_MYSQL_E2E: '1'
         run: |
           set +e
-          timeout 600 python -m pytest -q --tb=short --junitxml="$PROOF_DIR/durable-mysql.xml" tests/test_background_job_repository_mysql.py tests/test_durable_job_disposable_mysql_e2e.py tests/test_durable_job_payload_equality_disposable_mysql_e2e.py > "$PROOF_DIR/durable-mysql.log" 2>&1
+          timeout 300 python -m pytest -q --tb=short --junitxml="$PROOF_DIR/results.xml" tests/test_controlled_file_disposable_mysql_e2e.py tests/domains/global/subsystems/controlled-files/integration/test_controlled_file_finalize_mysql_e2e.py > "$PROOF_DIR/results.log" 2>&1
           code=$?
-          echo "$code" > "$PROOF_DIR/durable-mysql-exit-code.txt"
-          tail -70 "$PROOF_DIR/durable-mysql.log"
+          echo "$code" > "$PROOF_DIR/exit-code.txt"
+          tail -60 "$PROOF_DIR/results.log"
           exit "$code"
-      - name: Record source state and remove only the test container
+      - name: Verify holiday preview rollback apply and replay on its required namespace
+        if: matrix.mode == 'holiday'
+        run: |
+          set +e
+          timeout 300 python -m pytest -q --tb=short --junitxml="$PROOF_DIR/results.xml" tests/test_holiday_preview_apply_disposable_mysql_e2e.py > "$PROOF_DIR/results.log" 2>&1
+          code=$?
+          echo "$code" > "$PROOF_DIR/exit-code.txt"
+          tail -60 "$PROOF_DIR/results.log"
+          exit "$code"
+      - name: Verify copy-only backups upgrades recovery and preservation
+        if: matrix.mode == 'preserved-database'
+        run: |
+          set +e
+          timeout 900 python -m pytest -q -m integration --tb=short --junitxml="$PROOF_DIR/results.xml" tests/test_preserved_database_additive_upgrade_cutover.py::test_real_mysql_preserved_source_candidate_cutover tests/test_wp74_local_database_upgrade_mysql.py tests/test_wp78_partial_recovery_disposable_mysql.py tests/test_wp79_line_runtime_recovery_disposable_mysql.py tests/test_wp84_legacy_knowledge_empty_recovery.py tests/test_customer_service_partial_recovery_disposable_mysql.py tests/integration/test_human_escalation_mysql_preserve_data.py > "$PROOF_DIR/results.log" 2>&1
+          code=$?
+          echo "$code" > "$PROOF_DIR/exit-code.txt"
+          tail -80 "$PROOF_DIR/results.log"
+          exit "$code"
+      - name: Record source state and destroy only the synthetic container
         if: always()
         run: |
           git status --short > "$PROOF_DIR/working-tree-after-tests.txt"
           docker logs business-verification-mysql > "$PROOF_DIR/mysql-container.log" 2>&1 || true
           docker rm -f business-verification-mysql || true
-      - name: Upload exact test evidence
+      - name: Upload exact evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: business-durable-mysql-complete-7e12a3e
+          name: business-supplement-${{ matrix.mode }}-7e12a3e
           path: /tmp/business-proof
           retention-days: 1
           if-no-files-found: error
