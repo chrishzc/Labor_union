@@ -84,6 +84,7 @@ class ActualStartPreview:
     client_identity_status: str
     is_full_subsidy_order: bool
     staff_payment_due_date: date
+    unpersisted_source_assignment_ids: tuple[int, ...]
     fingerprint: PreviewFingerprint
 
 
@@ -91,6 +92,13 @@ class ActualStartPreview:
 class ActualStartWorkflowContext:
     shared_facts: TermsWorkflowFacts
     reconfirmation: ActualStartReconfirmationFacts | None
+    unpersisted_source_assignment_ids: tuple[int, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class HistoricalActualStartSourceAssignment:
+    source_assignment_id: int | None
+    staff_id: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -222,6 +230,7 @@ class ActualStartWorkflow:
         *,
         recalculated_service_dates: tuple[date, ...],
         source_staff_ids: tuple[int, ...],
+        source_assignment_ids: tuple[int | None, ...] = (),
     ) -> ActualStartPreview:
         """Validate an unpersisted historical caregiver source without writes.
 
@@ -236,6 +245,7 @@ class ActualStartWorkflow:
                 context,
                 recalculated_service_dates,
                 source_staff_ids,
+                source_assignment_ids,
             ),
             new_date,
             recalculated_service_dates,
@@ -298,6 +308,7 @@ class ActualStartWorkflow:
         *,
         recalculated_service_dates: tuple[date, ...],
         source_staff_ids: tuple[int, ...] = (),
+        source_assignment_ids: tuple[int | None, ...] = (),
     ) -> OrderTermsReceipt:
         """Apply a historical source through the canonical writer in one UoW.
 
@@ -329,6 +340,7 @@ class ActualStartWorkflow:
             context,
             recalculated_service_dates,
             source_staff_ids,
+            source_assignment_ids,
         )
         preview = self._fresh_preview(
             request,
@@ -339,6 +351,31 @@ class ActualStartWorkflow:
         receipt = _build_receipt(preview)
         self._persist(request, preview, command_fingerprint, receipt)
         return receipt
+
+    def apply_historical_source(
+        self,
+        request: ActualStartApplyRequest,
+        *,
+        source_loader: Callable[
+            [],
+            tuple[
+                tuple[date, ...],
+                tuple[HistoricalActualStartSourceAssignment, ...],
+            ],
+        ],
+    ) -> OrderTermsReceipt:
+        with self._unit_of_work_factory() as unit_of_work:
+            recalculated_service_dates, assignments = source_loader()
+            receipt = self.apply_historical_source_in_current_unit_of_work(
+                request,
+                recalculated_service_dates=recalculated_service_dates,
+                source_staff_ids=tuple(item.staff_id for item in assignments),
+                source_assignment_ids=tuple(
+                    item.source_assignment_id for item in assignments
+                ),
+            )
+            unit_of_work.commit()
+            return receipt
 
     def _claim_or_replay(self, request, command_fingerprint):
         state = self._repository.claim_actual_start_command(request, command_fingerprint)
@@ -391,6 +428,7 @@ class ActualStartWorkflow:
             lifecycle,
             reconfirmation,
             staff_payment_due_date,
+            context.unpersisted_source_assignment_ids,
         )
 
     def _persist(self, request, preview, command_fingerprint, receipt):
@@ -414,7 +452,12 @@ def _actual_start_candidates(facts, new_date, recalculated_service_dates=None):
     return actual_start, to_scheduling_generation_candidate(actual_start)
 
 
-def _historical_source_context(context, service_dates, source_staff_ids):
+def _historical_source_context(
+    context,
+    service_dates,
+    source_staff_ids,
+    source_assignment_ids=(),
+):
     if not service_dates or service_dates != tuple(sorted(set(service_dates))):
         raise ValueError("historical_service_dates_invalid")
     facts = context.shared_facts
@@ -433,6 +476,8 @@ def _historical_source_context(context, service_dates, source_staff_ids):
         )
     if len(source_staff_ids) != 1 or source_staff_ids[0] <= 0:
         raise ValueError("historical_assignment_required_for_actual_start")
+    if source_assignment_ids and len(source_assignment_ids) != len(source_staff_ids):
+        raise ValueError("historical_assignment_required_for_actual_start")
     policy = facts.payroll.case_policy
     if policy is None:
         raise ValueError("payroll_case_policy_bootstrap_required")
@@ -440,11 +485,16 @@ def _historical_source_context(context, service_dates, source_staff_ids):
     # assignment into an effective generation, retain that formal assignment
     # identity for canonical Scheduling replacement.  Preview-only contexts
     # have no assignment identity yet and use a stable synthetic identity.
+    persisted_source_assignment_id = (
+        source_assignment_ids[0] if source_assignment_ids else None
+    )
     source_assignment_id = (
         facts.scheduling.segments[0].assignment_id
         if len(facts.scheduling.segments) == 1
-        else 1
+        else persisted_source_assignment_id or 1
     )
+    if persisted_source_assignment_id is not None and persisted_source_assignment_id <= 0:
+        raise ValueError("historical_assignment_required_for_actual_start")
     segment = EffectiveAssignmentSegment(
         assignment_id=source_assignment_id,
         staff_id=source_staff_ids[0],
@@ -480,7 +530,12 @@ def _historical_source_context(context, service_dates, source_staff_ids):
         # same asserted root instead of retaining the HCM planned date.
         lifecycle=replace(facts.lifecycle, actual_start_date=service_dates[0]),
     )
-    return ActualStartWorkflowContext(synthetic_facts, context.reconfirmation)
+    unpersisted = () if persisted_source_assignment_id is not None or facts.scheduling.segments else (source_assignment_id,)
+    return ActualStartWorkflowContext(
+        synthetic_facts,
+        context.reconfirmation,
+        unpersisted_source_assignment_ids=unpersisted,
+    )
 
 
 def _raise_missing_receipt(request):
@@ -493,8 +548,9 @@ def _actual_start_lifecycle(facts, new_date, scheduling, client, clock):
 
 
 def _persist_scheduling(repository, request, preview, command_fingerprint):
+    candidate = _scheduling_persistence_candidate(preview)
     command = SchedulingReplacementCommand(
-        candidate=preview.scheduling,
+        candidate=candidate,
         command_family="orders_actual_start_rebuild",
         expected_order_version=preview.order_version,
         command_fingerprint=command_fingerprint,
@@ -505,6 +561,31 @@ def _persist_scheduling(repository, request, preview, command_fingerprint):
         correlation_id=request.correlation_id,
     )
     return repository.replace_scheduling_generation(command)
+
+
+def _scheduling_persistence_candidate(preview):
+    unpersisted = set(preview.unpersisted_source_assignment_ids)
+    if not unpersisted:
+        return preview.scheduling
+    assignments = tuple(
+        replace(
+            assignment,
+            source_assignment_id=None,
+            lineage_source_assignment_ids=(),
+        )
+        if assignment.source_assignment_id in unpersisted
+        else assignment
+        for assignment in preview.scheduling.assignments
+    )
+    return replace(
+        preview.scheduling,
+        cancelled_assignment_ids=tuple(
+            assignment_id
+            for assignment_id in preview.scheduling.cancelled_assignment_ids
+            if assignment_id not in unpersisted
+        ),
+        assignments=assignments,
+    )
 
 
 def _persist_lifecycle(repository, request, preview, receipt):
@@ -656,10 +737,11 @@ def _preview_result(
     lifecycle,
     reconfirmation,
     staff_payment_due_date,
+    unpersisted_source_assignment_ids,
 ):
     payload = _preview_fingerprint_payload(facts, actual_start, client, payroll, lifecycle, reconfirmation)
     coverage = _subsidy_coverage(facts)
-    return ActualStartPreview(facts.lifecycle.actual_start_date, actual_start.new_actual_start_date, actual_start, scheduling, facts.order.version, facts.scheduling.aggregate_version, facts.scheduling.generation_number, facts.client_finance.account_version, facts.payroll.payroll_version, client, payroll, lifecycle, reconfirmation, facts.order.client_identity_status, coverage.is_full_subsidy_order, staff_payment_due_date, fingerprint_payload(payload))
+    return ActualStartPreview(facts.lifecycle.actual_start_date, actual_start.new_actual_start_date, actual_start, scheduling, facts.order.version, facts.scheduling.aggregate_version, facts.scheduling.generation_number, facts.client_finance.account_version, facts.payroll.payroll_version, client, payroll, lifecycle, reconfirmation, facts.order.client_identity_status, coverage.is_full_subsidy_order, staff_payment_due_date, unpersisted_source_assignment_ids, fingerprint_payload(payload))
 
 
 def _preview_fingerprint_payload(facts, actual_start, client, payroll, lifecycle, reconfirmation):
@@ -752,4 +834,5 @@ __all__ = [
     "ActualStartWorkflow",
     "ActualStartWorkflowError",
     "ConfirmActualStartReconfirmationCommand",
+    "HistoricalActualStartSourceAssignment",
 ]

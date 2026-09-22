@@ -30,6 +30,7 @@ from subsystems.orders.actual_start_workflow import (
     ActualStartApplyRequest,
     ActualStartWorkflow,
     ActualStartWorkflowContext,
+    _scheduling_persistence_candidate,
 )
 from shared_kernel.identities import (
     ActorContext,
@@ -406,6 +407,11 @@ def test_historical_actual_start_preview_projects_the_asserted_schedule_root():
 
     assert preview.actual_start.new_actual_start_date == asserted_start
     assert preview.scheduling.assignments[0].assigned_start_date == asserted_start
+    assert preview.unpersisted_source_assignment_ids == (1,)
+    persisted = _scheduling_persistence_candidate(preview)
+    assert persisted.cancelled_assignment_ids == ()
+    assert persisted.assignments[0].source_assignment_id is None
+    assert persisted.assignments[0].lineage_source_assignment_ids == ()
 
 
 def test_historical_preview_corrects_a_stale_order_root_against_formal_schedule():

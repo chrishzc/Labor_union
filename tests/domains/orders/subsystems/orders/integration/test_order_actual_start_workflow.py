@@ -47,6 +47,8 @@ from subsystems.orders.terms_workflow import CommandClaimState, OrderTermsReceip
 from infrastructure.mysql.order_actual_start_repository import (
     _is_effective_staff_date_conflict, _receipt_payload, _stored_receipt,
 )
+from api.dependencies.order_actual_start import ActualStartApplication
+from subsystems.orders.actual_start_workflow import HistoricalActualStartSourceAssignment
 
 
 def _request(*, reason: str = "confirm service start") -> ActualStartApplyRequest:
@@ -75,6 +77,81 @@ def test_actual_start_request_uses_direct_canonical_source_contract() -> None:
 def test_actual_start_request_rejects_blank_change_reason() -> None:
     with pytest.raises(ValueError, match="change reason"):
         _request(reason=" ")
+
+
+def test_restarted_historical_actual_start_routes_directly_through_unique_pairing() -> None:
+    shared_facts = SimpleNamespace(
+        lifecycle=SimpleNamespace(historical_precision_restarted=True),
+        scheduling=SimpleNamespace(segments=()),
+    )
+
+    class Repository:
+        def load_for_preview(self, case_no):
+            assert case_no == "CASE-1"
+            return SimpleNamespace(shared_facts=shared_facts)
+
+    planner_lock_modes = []
+
+    class Planner:
+        def calculate(self, case_no, actual_start_date, *, for_update):
+            assert (case_no, actual_start_date) == ("CASE-1", date(2026, 8, 3))
+            planner_lock_modes.append(("dates", for_update))
+            return (date(2026, 8, 3), date(2026, 8, 4))
+
+        def load_restart_source_assignments(self, case_no, *, for_update):
+            assert case_no == "CASE-1"
+            planner_lock_modes.append(("pairing", for_update))
+            return (HistoricalActualStartSourceAssignment(None, 16),)
+
+    calls = []
+
+    class Workflow:
+        def preview_historical_source(self, case_no, actual_start_date, **values):
+            calls.append(("preview", case_no, actual_start_date, values))
+            return "historical-preview"
+
+        def apply_historical_source(self, request, **values):
+            service_dates, assignments = values["source_loader"]()
+            calls.append((
+                "apply",
+                request.case_no,
+                request.new_actual_start_date,
+                service_dates,
+                assignments,
+            ))
+            return "historical-receipt"
+
+        def preview(self, *_args, **_kwargs):
+            raise AssertionError("generic preview must not handle a restarted historical tombstone")
+
+        def apply(self, *_args, **_kwargs):
+            raise AssertionError("generic apply must not handle a restarted historical tombstone")
+
+    application = ActualStartApplication(Repository(), Workflow(), Planner())
+
+    assert application.preview("CASE-1", date(2026, 8, 3)) == "historical-preview"
+    assert application.apply(_request()) == "historical-receipt"
+    assert planner_lock_modes == [
+        ("dates", False),
+        ("pairing", False),
+        ("dates", True),
+        ("pairing", True),
+    ]
+    assert calls == [
+        (
+            "preview", "CASE-1", date(2026, 8, 3),
+            {
+                "recalculated_service_dates": (date(2026, 8, 3), date(2026, 8, 4)),
+                "source_staff_ids": (16,),
+                "source_assignment_ids": (None,),
+            },
+        ),
+        (
+            "apply", "CASE-1", date(2026, 8, 3),
+            (date(2026, 8, 3), date(2026, 8, 4)),
+            (HistoricalActualStartSourceAssignment(None, 16),),
+        ),
+    ]
 
 
 def test_actual_start_preserves_an_existing_staff_payment_due_date_across_months() -> None:

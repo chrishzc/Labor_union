@@ -5,7 +5,7 @@
 - subsystem: `orders`
 
 ## Responsibility
-以既有正式服務日重建 Actual Start、有效 Scheduling generation 與下游未結清 Client Finance／Payroll projection；歷史來源只能經此 canonical writer 套用 actual-start，不得直接建立付款或通知事實。
+以正式服務日重建 Actual Start、有效 Scheduling generation 與下游未結清 Client Finance／Payroll projection；歷史重啟且 current generation 為空 tombstone 時，直接以輸入的 actual start 與唯一 pairing evidence 計算正式服務日，並在同一 Apply 建立排班與 actual-start。歷史來源只能經此 canonical writer 套用 actual-start，不得直接建立付款或通知事實。
 
 ## Implementation
 - primary:
@@ -13,6 +13,8 @@
   - `domains/orders/terms.py`
   - `subsystems/orders/actual_start_workflow.py`
   - `infrastructure/mysql/order_actual_start_repository.py`
+  - `infrastructure/mysql/historical_actual_start_date_planner.py`
+  - `api/dependencies/order_actual_start.py`
   - `api/schemas/order_actual_start.py`
   - `ui_react/src/api/orders/order_actual_start_client.ts`
   - `ui_react/src/components/OrderActualStartPanel.tsx`
@@ -24,6 +26,7 @@
 - outbound: `client-finance/client-finance` — 重算未結清的客戶帳務日期與 projection。
 - outbound: `payroll/payroll` — 重算 assignment-owned payroll obligation。
 - inbound: `orders/historical-adoption` — 已付訂金且來源開始日異於 HCM 預定開始日的 historical actual-start assertion 經 typed delegation 進入。
+- inbound: `orders/historical-precision-restart` — 重啟後的空 tombstone 與唯一 historical pairing evidence 可由一次 Actual Start Preview／Apply 直接建立 current Scheduling。
 
 ## Contracts
 - `document/架構重整/01_規格基線/01_Orders_Domain.md` — Actual Start、歷史來源與 completion instant 語意。

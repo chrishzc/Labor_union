@@ -23,6 +23,9 @@ from subsystems.orders.terms_workflow import SchedulingReplacementCommand
 from subsystems.orders.historical_actual_start_rebuild import (
     HistoricalActualStartPreparationError,
 )
+from subsystems.orders.actual_start_workflow import (
+    HistoricalActualStartSourceAssignment,
+)
 
 _POST_SERVICE_BUFFER_DAYS = 7
 
@@ -67,6 +70,39 @@ class MySqlHistoricalActualStartDatePlanner:
             raise HistoricalActualStartPreparationError(
                 "historical_actual_start_source_invalid"
             ) from error
+
+    def load_restart_source_assignments(
+        self,
+        case_no: str,
+        *,
+        for_update: bool,
+    ) -> tuple[HistoricalActualStartSourceAssignment, ...]:
+        suffix = " FOR UPDATE" if for_update else ""
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT evidence.assignment_id,evidence.staff_id "
+                "FROM historical_order_adoption_receipts receipt "
+                "JOIN historical_order_pairing_evidence evidence "
+                "ON evidence.receipt_id=receipt.id "
+                "WHERE receipt.id=(SELECT MAX(candidate.id) "
+                "FROM historical_order_adoption_receipts candidate "
+                "WHERE candidate.case_no=%s AND candidate.outcome='adopted') "
+                "ORDER BY evidence.caregiver_ordinal" + suffix,
+                (case_no,),
+            )
+            rows = tuple(cursor.fetchall())
+        if len(rows) != 1 or rows[0]["staff_id"] is None:
+            raise HistoricalActualStartPreparationError(
+                "historical_assignment_required_for_actual_start"
+            )
+        assignment_id = rows[0]["assignment_id"]
+        source_assignment_id = None if assignment_id is None else int(assignment_id)
+        staff_id = int(rows[0]["staff_id"])
+        if staff_id <= 0 or (source_assignment_id is not None and source_assignment_id <= 0):
+            raise HistoricalActualStartPreparationError(
+                "historical_assignment_required_for_actual_start"
+            )
+        return (HistoricalActualStartSourceAssignment(source_assignment_id, staff_id),)
 
     def prepare_source_generation(
         self,

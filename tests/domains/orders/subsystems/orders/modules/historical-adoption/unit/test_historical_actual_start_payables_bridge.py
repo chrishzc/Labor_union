@@ -341,6 +341,34 @@ def test_mysql_historical_planner_preview_checks_assignment_before_any_write():
     assert all(statement.lstrip().upper().startswith("SELECT") for statement in cursor.statements)
 
 
+def test_mysql_historical_planner_reads_one_pairing_without_inventing_assignment_lineage():
+    from infrastructure.mysql.historical_actual_start_date_planner import (
+        MySqlHistoricalActualStartDatePlanner,
+    )
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, statement, parameters):
+            assert "historical_order_pairing_evidence" in statement
+            assert parameters == ("CASE-1",)
+
+        def fetchall(self):
+            return ({"assignment_id": None, "staff_id": 16},)
+
+    assignments = MySqlHistoricalActualStartDatePlanner(
+        SimpleNamespace(cursor=lambda: Cursor())
+    ).load_restart_source_assignments("CASE-1", for_update=False)
+
+    assert len(assignments) == 1
+    assert assignments[0].source_assignment_id is None
+    assert assignments[0].staff_id == 16
+
+
 def test_mysql_historical_planner_preview_does_not_block_existing_staff_schedule():
     from infrastructure.mysql.historical_actual_start_date_planner import (
         MySqlHistoricalActualStartDatePlanner,

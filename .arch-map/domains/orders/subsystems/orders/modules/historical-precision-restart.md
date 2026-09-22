@@ -35,4 +35,4 @@
 ## Change triggers
 Reconcile when restart eligibility, historical accounting bridge, current-root revocation、API/UI entrypoint or provenance receipt semantics change.
 eligible 的歷史未服務／服務中狀態都只回到正常 `訂單成立`；重啟不得接受服務日期、直接建立帳務或視為 actual-start reconfirmation。後續沿用既有服務日期與排班 UI／API，但唯一歷史綁定人員不重跑候選、詢問、意願與推薦。
-六欄歷史來源缺少可信排休 root 時，Order Workbench V2 只允許人工確認真實服務日期，不得預設任何 service mode。restart writer 本身仍只建立空 tombstone；其後由既有服務日期 Apply 在同一交易保存 confirmed dates，且僅對待重建的 restart tombstone 呼叫 Scheduling generation replacement writer，讓可追溯的歷史 assignment 與人工日期成為 current canonical `staff_schedule`。
+六欄歷史來源缺少可信排休 root 時，Order Workbench V2 只允許人工確認真實服務日期，不得預設任何 service mode。restart writer 本身仍只建立空 tombstone；其後可由既有服務日期 Apply 保存人工日期並重建 Scheduling，或由 Actual Start Preview／Apply 依輸入日與唯一歷史 pairing evidence 在單一交易直接建立 current canonical `staff_schedule` 與 actual start／end。
