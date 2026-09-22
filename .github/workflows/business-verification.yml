@@ -1,41 +1,82 @@
-name: Remaining synthetic business integration verification
+name: Scoped fixture corrections and subsidy comparison
 on:
   push:
     branches: [verify/business-regression-7e12a3e-20260922]
 permissions:
   contents: read
 jobs:
-  integration:
+  verification:
     name: ${{ matrix.mode }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 12
     strategy:
       fail-fast: false
       matrix:
-        mode: [controlled-files, holiday, preserved-database]
+        include:
+          - mode: staff-retirement
+            source: 7e12a3e5b605261311f6339ffe01fb8f13b06b09
+            database: lu_test_v_ret
+            user: root
+            prepare: false
+            test: tests/domains/external-integration/subsystems/line/integration/test_staff_retirement_notification_disposable_mysql.py
+          - mode: leave-uow
+            source: 7e12a3e5b605261311f6339ffe01fb8f13b06b09
+            database: lu_test_phase3b2_verify
+            user: root
+            prepare: false
+            test: tests/test_leave_substitution_outer_uow_disposable_mysql_e2e.py
+          - mode: replacement-r02
+            source: 7e12a3e5b605261311f6339ffe01fb8f13b06b09
+            database: lu_test_task96_ldu_candidate_1012_r1
+            user: root
+            prepare: true
+            test: tests/domains/scheduling/subsystems/scheduling/modules/service-before-replacement/integration/test_service_before_replacement_mysql_adapter.py
+          - mode: unsigned-contract-o2
+            source: 7e12a3e5b605261311f6339ffe01fb8f13b06b09
+            database: lu_test_contract_o2_candidate_1005_u3
+            user: root
+            prepare: true
+            test: tests/integration/test_contract_unsigned_pdf_mysql_adapter.py
+          - mode: finance-react-parity
+            source: 7e12a3e5b605261311f6339ffe01fb8f13b06b09
+            database: lu_test_v_finreact
+            user: root
+            prepare: true
+            test: tests/test_finance_import_staging_persistent_mysql_e2e.py::test_workbook_api_preview_reaches_react_without_formal_posting
+          - mode: line-query-g7
+            source: 7e12a3e5b605261311f6339ffe01fb8f13b06b09
+            database: lu_test_v_g7
+            user: verification_app
+            prepare: false
+            test: tests/test_line_delivery_public_query_route.py::test_delivery_query_g7_uses_production_app_and_real_repository
+          - mode: subsidy-before-cleanup
+            source: aa7acaa88d59f40cad2d9b0b1f2cfc44a76634d6
+            database: lu_test_v_subsidy
+            user: root
+            prepare: false
+            test: tests/test_government_subsidy_durable_mysql_e2e.py::test_government_subsidy_claim_plan_durable_crash_recovery_and_duplicate_apply
     env:
       APP_ENV: development
       DB_HOST: 127.0.0.1
       DB_PORT: '33306'
-      DB_USER: root
+      DB_USER: ${{ matrix.user }}
       DB_PASSWORD: verification-only
-      DB_DATABASE: lu_test_phase3bh_verification
+      DB_DATABASE: ${{ matrix.database }}
       LABOR_UNION_TEST_MYSQL_HOST: 127.0.0.1
       LABOR_UNION_TEST_MYSQL_PORT: '33306'
-      LABOR_UNION_TEST_MYSQL_USER: root
+      LABOR_UNION_TEST_MYSQL_USER: ${{ matrix.user }}
       LABOR_UNION_TEST_MYSQL_PASSWORD: verification-only
-      LABOR_UNION_TEST_MYSQL_DATABASE: lu_test_phase3bh_verification
-      MYSQL_TEST_CONTAINER: business-verification-mysql
-      PRESERVED_DB_TEST_SOURCE: lu_test_phase3bh_verification
+      LABOR_UNION_TEST_MYSQL_DATABASE: ${{ matrix.database }}
       LINE_CHANNEL_ACCESS_TOKEN: ''
       LINE_CHANNEL_SECRET: ''
       ANONYMIZED_TELEMETRY: 'False'
       PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
       PROOF_DIR: /tmp/business-proof
+      CI: 'true'
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: 7e12a3e5b605261311f6339ffe01fb8f13b06b09
+          ref: ${{ matrix.source }}
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
@@ -81,8 +122,11 @@ jobs:
           print('Locked runtime/test packages:', len(lines))
           PY
           python -m pip install --disable-pip-version-check --no-input --only-binary=:all: --require-hashes -r /tmp/business-test-requirements.txt > "$PROOF_DIR/dependencies.log" 2>&1 || { tail -60 "$PROOF_DIR/dependencies.log"; exit 1; }
-          python -m pip list --format=json > "$PROOF_DIR/installed-packages.json"
-      - name: Start authenticated host TCP MySQL on the temporary runner
+      - name: Install existing React dependencies required by the parity case
+        if: matrix.mode == 'finance-react-parity'
+        working-directory: ui_react
+        run: npm ci --ignore-scripts --no-audit --fund=false > "$PROOF_DIR/npm-install.log" 2>&1
+      - name: Start the same disposable MySQL image and verify authenticated host TCP
         env:
           MYSQL_ROOT_PASSWORD: verification-only
         run: |
@@ -91,85 +135,57 @@ jobs:
           docker image inspect "$image" --format '{{json .RepoDigests}}' > "$PROOF_DIR/mysql-image.json"
           docker run -d --name business-verification-mysql -p 127.0.0.1:33306:3306 -e MYSQL_ROOT_PASSWORD -e MYSQL_ROOT_HOST=% "$image"
           python - <<'PY'
+          import os
           import time
           import pymysql
           deadline = time.monotonic() + 90
           while True:
               try:
-                  connection = pymysql.connect(host='127.0.0.1', port=33306, user='root', password='verification-only', connect_timeout=2, read_timeout=2)
+                  connection = pymysql.connect(host='127.0.0.1', port=33306, user='root', password=os.environ['DB_PASSWORD'], connect_timeout=2, read_timeout=2)
                   with connection.cursor() as cursor:
                       cursor.execute('SELECT VERSION()')
                       print('Authenticated host TCP ready:', cursor.fetchone()[0])
-                  connection.close()
                   break
               except pymysql.MySQLError:
                   if time.monotonic() >= deadline:
                       raise
                   time.sleep(2)
+          if os.environ['DB_USER'] == 'verification_app':
+              with connection.cursor() as cursor:
+                  cursor.execute("CREATE USER 'verification_app'@'%%' IDENTIFIED BY %s", (os.environ['DB_PASSWORD'],))
+                  cursor.execute("GRANT ALL PRIVILEGES ON `lu_test_line_delivery_public_query_20260820_a1`.* TO 'verification_app'@'%'")
+          connection.close()
           PY
-      - name: Prepare a synthetic source for file and database-copy tests
-        if: matrix.mode != 'holiday'
+      - name: Prepare only the canonical schema explicitly required by this existing test
+        if: matrix.prepare
         run: |
-          python - <<'PY' > "$PROOF_DIR/synthetic-setup.log" 2>&1
+          python - <<'PY' > "$PROOF_DIR/schema-setup.log" 2>&1
           import os
-          from pathlib import Path
           from argparse import Namespace
           from scripts.bootstrap_disposable_mysql_schema import bootstrap
-          import pymysql
           database = os.environ['DB_DATABASE']
           bootstrap(Namespace(host='127.0.0.1', port=33306, user='root', password=os.environ['DB_PASSWORD'], database=database, confirm_database=database))
-          connection = pymysql.connect(host='127.0.0.1', port=33306, user='root', password=os.environ['DB_PASSWORD'], database=database, charset='utf8mb4')
-          with connection.cursor() as cursor:
-              cursor.execute('INSERT INTO clients(case_no,name) VALUES (%s,%s)', ('VERIFY-FILE-001','Synthetic verification client'))
-              client_id = cursor.lastrowid
-              cursor.execute('INSERT INTO orders(case_no,client_id,status,service_days,service_hours_per_day,start_date,end_date,service_start_time,service_end_time,service_end_day_offset) VALUES (%s,%s,%s,2,8,%s,%s,%s,%s,0)', ('VERIFY-FILE-001',client_id,'洽談中','2026-10-01','2026-10-02','09:00:00','17:00:00'))
-          connection.commit()
-          connection.close()
-          target = Path('.env')
-          assert not target.exists(), 'checkout unexpectedly contains environment configuration'
-          target.write_text('\n'.join(name+'='+os.environ[name] for name in ('DB_HOST','DB_PORT','DB_USER','DB_PASSWORD','DB_DATABASE'))+'\n', encoding='utf-8')
-          print('Canonical schema and one synthetic order prepared on the temporary MySQL container.')
+          print('Fresh canonical schema prepared on the temporary runner.')
           PY
-      - name: Verify controlled file staging receipt finalization and download
-        if: matrix.mode == 'controlled-files'
-        env:
-          RUN_CONTROLLED_FILE_MYSQL_E2E: '1'
+      - name: Execute the unchanged selected test with its required fixture configuration
         run: |
           set +e
-          timeout 300 python -m pytest -q --tb=short --junitxml="$PROOF_DIR/results.xml" tests/test_controlled_file_disposable_mysql_e2e.py tests/domains/global/subsystems/controlled-files/integration/test_controlled_file_finalize_mysql_e2e.py > "$PROOF_DIR/results.log" 2>&1
-          code=$?
-          echo "$code" > "$PROOF_DIR/exit-code.txt"
-          tail -60 "$PROOF_DIR/results.log"
-          exit "$code"
-      - name: Verify holiday preview rollback apply and replay on its required namespace
-        if: matrix.mode == 'holiday'
-        run: |
-          set +e
-          timeout 300 python -m pytest -q --tb=short --junitxml="$PROOF_DIR/results.xml" tests/test_holiday_preview_apply_disposable_mysql_e2e.py > "$PROOF_DIR/results.log" 2>&1
-          code=$?
-          echo "$code" > "$PROOF_DIR/exit-code.txt"
-          tail -60 "$PROOF_DIR/results.log"
-          exit "$code"
-      - name: Verify copy-only backups upgrades recovery and preservation
-        if: matrix.mode == 'preserved-database'
-        run: |
-          set +e
-          timeout 900 python -m pytest -q -m integration --tb=short --junitxml="$PROOF_DIR/results.xml" tests/test_preserved_database_additive_upgrade_cutover.py::test_real_mysql_preserved_source_candidate_cutover tests/test_wp74_local_database_upgrade_mysql.py tests/test_wp78_partial_recovery_disposable_mysql.py tests/test_wp79_line_runtime_recovery_disposable_mysql.py tests/test_wp84_legacy_knowledge_empty_recovery.py tests/test_customer_service_partial_recovery_disposable_mysql.py tests/integration/test_human_escalation_mysql_preserve_data.py > "$PROOF_DIR/results.log" 2>&1
+          timeout 420 python -m pytest -q --tb=short --junitxml="$PROOF_DIR/results.xml" '${{ matrix.test }}' > "$PROOF_DIR/results.log" 2>&1
           code=$?
           echo "$code" > "$PROOF_DIR/exit-code.txt"
           tail -80 "$PROOF_DIR/results.log"
           exit "$code"
-      - name: Record source state and destroy only the synthetic container
+      - name: Record source state and destroy only the test container
         if: always()
         run: |
           git status --short > "$PROOF_DIR/working-tree-after-tests.txt"
           docker logs business-verification-mysql > "$PROOF_DIR/mysql-container.log" 2>&1 || true
           docker rm -f business-verification-mysql || true
-      - name: Upload exact evidence
+      - name: Upload exact selected-case evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: business-supplement-${{ matrix.mode }}-7e12a3e
+          name: business-fixture-${{ matrix.mode }}
           path: /tmp/business-proof
           retention-days: 1
           if-no-files-found: error
