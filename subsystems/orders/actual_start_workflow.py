@@ -4,14 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import date
-from decimal import Decimal
 from typing import Callable, Protocol
 
 from domains.client_finance.obligation_planning import (
-    ClientFinanceTermsCandidate,
-    build_client_finance_terms_impact,
+    ClientSettlementProjection,
 )
-from domains.client_finance.subsidy_coverage import derive_subsidy_coverage
+from domains.client_finance.reconciliation import PaymentStage
 from domains.orders.actual_start import (
     ActualStartAssignmentFacts,
     ActualStartCandidate,
@@ -31,7 +29,6 @@ from domains.orders.lifecycle import (
     OrderLifecycleStatus,
     build_terms_lifecycle_impact,
 )
-from domains.payroll.payment_due_date import calculate_staff_payment_due_date
 from domains.scheduling.generation import SchedulingGenerationCandidate
 from shared_kernel.clock import BusinessClock
 from shared_kernel.errors import ErrorCategory, TypedError
@@ -45,25 +42,17 @@ from shared_kernel.identities import (
 from shared_kernel.ports import UnitOfWork
 from shared_kernel.validation import require_canonical_text
 from subsystems.orders.terms_workflow import (
-    ClientFinanceImpactPersistenceCommand,
     CommandClaimState,
     LifecycleImpactPersistenceCommand,
     OrderTermsReceipt,
-    PayrollImpactPersistenceCommand,
     SchedulingReplacementCommand,
     SchedulingReplacementResult,
     StoredTermsReceipt,
     TermsWorkflowFacts,
 )
-from subsystems.payroll.terms_impact import (
-    PayrollTermsImpactCandidate,
-    SourceAssignmentPayrollTerms,
-    build_payroll_terms_impact,
-)
 
 _CASE_NUMBER_MAXIMUM_LENGTH = 50
 _REASON_MAXIMUM_LENGTH = 500
-_ACTUAL_START_SOURCE_EVENT_FAMILY = "order-actual-start"
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,13 +66,9 @@ class ActualStartPreview:
     scheduling_generation: int
     client_finance_version: int
     payroll_version: int
-    client_finance_impact: ClientFinanceTermsCandidate
-    payroll_impact: PayrollTermsImpactCandidate
+    client_settlement: ClientSettlementProjection
     lifecycle_impact: LifecycleImpactCandidate
     reconfirmation: ActualStartReconfirmationCandidate
-    client_identity_status: str
-    is_full_subsidy_order: bool
-    staff_payment_due_date: date
     unpersisted_source_assignment_ids: tuple[int, ...]
     fingerprint: PreviewFingerprint
 
@@ -93,7 +78,70 @@ class ActualStartWorkflowContext:
     shared_facts: TermsWorkflowFacts
     reconfirmation: ActualStartReconfirmationFacts | None
     unpersisted_source_assignment_ids: tuple[int, ...] = ()
-    preserve_downstream_amounts: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class ActualStartQueryFacts:
+    case_no: str
+    current_actual_start_date: date | None
+    planned_start_date: date
+    service_data_locked: bool
+    order_version: int
+    scheduling_version: int | None
+    scheduling_generation: int | None
+    client_finance_version: int | None
+    payroll_version: int | None
+    has_formal_assignments: bool
+    historical_precision_restarted: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ActualStartDateOnlyPreview:
+    case_no: str
+    before_actual_start_date: date | None
+    after_actual_start_date: date
+    order_version: int
+    scheduling_version: int | None
+    scheduling_generation: int | None
+    client_finance_version: int | None
+    payroll_version: int | None
+    fingerprint: PreviewFingerprint
+
+
+@dataclass(frozen=True, slots=True)
+class ActualStartDateOnlyResult:
+    case_no: str
+    actual_start_date: date
+    order_version: int
+    scheduling_version: int | None
+    scheduling_generation: int | None
+    client_finance_version: int | None
+    payroll_version: int | None
+    preview_fingerprint: PreviewFingerprint
+    changed: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ActualStartDateOnlyApplyRequest:
+    case_no: str
+    new_actual_start_date: date
+    expected_order_version: ExpectedVersion
+    preview_fingerprint: PreviewFingerprint
+    correlation_id: CorrelationId
+
+    def __post_init__(self) -> None:
+        require_canonical_text(self.case_no, "case number", _CASE_NUMBER_MAXIMUM_LENGTH)
+        if not isinstance(self.new_actual_start_date, date):
+            raise TypeError("new actual start date must be a date")
+
+
+@dataclass(frozen=True, slots=True)
+class ActualStartDateOnlyPersistenceCommand:
+    case_no: str
+    actual_start_date: date
+    expected_order_version: int
+    resulting_order_version: int
+    correlation_id: CorrelationId
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,8 +156,6 @@ class ActualStartApplyRequest:
     new_actual_start_date: date
     expected_order_version: ExpectedVersion
     expected_scheduling_version: ExpectedVersion
-    expected_client_finance_version: ExpectedVersion
-    expected_payroll_version: ExpectedVersion
     preview_fingerprint: PreviewFingerprint
     idempotency_key: IdempotencyKey
     actor: ActorContext
@@ -128,7 +174,6 @@ class ActualStartPersistenceCommand:
     case_no: str
     actual_start_date: date
     actual_end_date: date
-    staff_payment_due_date: date | None
     lifecycle_status: OrderLifecycleStatus
     expected_order_version: int
     resulting_order_version: int
@@ -164,6 +209,12 @@ class ActualStartReconfirmationControlPort(Protocol):
 
 
 class ActualStartWorkflowRepository(ActualStartReconfirmationControlPort, Protocol):
+    def load_actual_start_query(
+        self, case_no: str, *, for_update: bool
+    ) -> ActualStartQueryFacts: ...
+    def save_actual_start_date_only(
+        self, command: ActualStartDateOnlyPersistenceCommand
+    ) -> None: ...
     def load_for_preview(self, case_no: str) -> ActualStartWorkflowContext: ...
     def preflight_impacted_staff_ids(self, case_no: str) -> tuple[int, ...]: ...
     def load_for_apply(
@@ -181,10 +232,6 @@ class ActualStartWorkflowRepository(ActualStartReconfirmationControlPort, Protoc
     def replace_scheduling_generation(
         self, command: SchedulingReplacementCommand
     ) -> SchedulingReplacementResult: ...
-    def persist_client_finance_impact(
-        self, command: ClientFinanceImpactPersistenceCommand
-    ) -> None: ...
-    def persist_payroll_impact(self, command: PayrollImpactPersistenceCommand) -> None: ...
     def persist_lifecycle_impact(
         self, command: LifecycleImpactPersistenceCommand
     ) -> int: ...
@@ -210,6 +257,67 @@ class ActualStartWorkflow:
         self._repository = repository
         self._unit_of_work_factory = unit_of_work_factory
         self._clock = clock
+
+    def preview_date_only(
+        self,
+        facts: ActualStartQueryFacts,
+        new_date: date,
+    ) -> ActualStartDateOnlyPreview:
+        return _date_only_preview(facts, new_date)
+
+    def apply_date_only(
+        self,
+        request: ActualStartDateOnlyApplyRequest,
+    ) -> ActualStartDateOnlyResult:
+        with self._unit_of_work_factory() as unit_of_work:
+            facts = self._repository.load_actual_start_query(
+                request.case_no,
+                for_update=True,
+            )
+            if facts.order_version != request.expected_order_version.value:
+                raise _workflow_error(
+                    request,
+                    ErrorCategory.CONFLICT,
+                    "order_version_conflict",
+                    "The Orders root changed after Preview.",
+                    current_version=facts.order_version,
+                )
+            preview = _date_only_preview(
+                facts,
+                request.new_actual_start_date,
+                correlation_id=request.correlation_id,
+            )
+            if preview.fingerprint != request.preview_fingerprint:
+                raise _workflow_error(
+                    request,
+                    ErrorCategory.CONFLICT,
+                    "stale_preview",
+                    "The Actual Start date-only facts changed after Preview.",
+                )
+            changed = facts.current_actual_start_date != request.new_actual_start_date
+            resulting_version = facts.order_version + 1 if changed else facts.order_version
+            if changed:
+                self._repository.save_actual_start_date_only(
+                    ActualStartDateOnlyPersistenceCommand(
+                        request.case_no,
+                        request.new_actual_start_date,
+                        facts.order_version,
+                        resulting_version,
+                        request.correlation_id,
+                    )
+                )
+            unit_of_work.commit()
+            return ActualStartDateOnlyResult(
+                request.case_no,
+                request.new_actual_start_date,
+                resulting_version,
+                facts.scheduling_version,
+                facts.scheduling_generation,
+                facts.client_finance_version,
+                facts.payroll_version,
+                preview.fingerprint,
+                changed,
+            )
 
     def preview(
         self,
@@ -405,7 +513,6 @@ class ActualStartWorkflow:
         )
         if preview.fingerprint != request.preview_fingerprint:
             raise _workflow_error(request, ErrorCategory.CONFLICT, "stale_preview", "The business facts changed after Preview.")
-        _raise_if_impacts_blocked(request, preview)
         return preview
 
     def _build_preview(self, context, new_date, recalculated_service_dates=None):
@@ -416,31 +523,27 @@ class ActualStartWorkflow:
             new_date,
             recalculated_service_dates,
         )
-        client_finance, payroll, staff_payment_due_date = _downstream_impacts(
-            facts, actual_start, scheduling
+        client_settlement = _existing_client_settlement(facts)
+        lifecycle = _actual_start_lifecycle(
+            facts,
+            new_date,
+            scheduling,
+            client_settlement,
+            self._clock,
         )
-        if context.preserve_downstream_amounts:
-            client_finance, payroll = _preserved_downstream_impacts(
-                client_finance,
-                payroll,
-            )
-        lifecycle = _actual_start_lifecycle(facts, new_date, scheduling, client_finance, self._clock)
         return _preview_result(
             facts,
             actual_start,
             scheduling,
-            client_finance,
-            payroll,
+            client_settlement,
             lifecycle,
             reconfirmation,
-            staff_payment_due_date,
             context.unpersisted_source_assignment_ids,
         )
 
     def _persist(self, request, preview, command_fingerprint, receipt):
         event_id = self._repository.append_actual_start_event(request, preview)
         scheduling_result = _persist_scheduling(self._repository, request, preview, command_fingerprint)
-        _persist_finance_and_payroll(self._repository, request, preview, event_id, scheduling_result.assignment_resolution)
         control_event_id = _confirm_reconfirmation(self._repository, request, preview, event_id)
         lifecycle_id = _persist_lifecycle(self._repository, request, preview, receipt)
         _persist_order_projection(self._repository, request, preview, receipt)
@@ -456,6 +559,55 @@ def _actual_start_candidates(facts, new_date, recalculated_service_dates=None):
         recalculated_service_dates,
     )
     return actual_start, to_scheduling_generation_candidate(actual_start)
+
+
+def _date_only_preview(facts, new_date, *, correlation_id=None):
+    if not isinstance(facts, ActualStartQueryFacts):
+        raise TypeError("actual start query facts are invalid")
+    if not isinstance(new_date, date):
+        raise TypeError("new actual start date must be a date")
+    if facts.service_data_locked:
+        raise ActualStartCandidateError(ActualStartBlocker.SERVICE_DATA_LOCKED)
+    if facts.has_formal_assignments or facts.historical_precision_restarted:
+        code = (
+            "historical_actual_start_requires_reschedule"
+            if facts.historical_precision_restarted
+            else "actual_start_mode_changed"
+        )
+        if correlation_id is None:
+            raise ValueError(code)
+        raise ActualStartWorkflowError(TypedError(
+            ErrorCategory.CONFLICT,
+            code,
+            "The Actual Start operation mode changed; Preview the required workflow again.",
+            correlation_id,
+        ))
+    fingerprint = fingerprint_payload(
+        {
+            "mode": "date_only",
+            "case_no": facts.case_no,
+            "before_actual_start_date": (
+                facts.current_actual_start_date.isoformat()
+                if facts.current_actual_start_date is not None
+                else None
+            ),
+            "after_actual_start_date": new_date.isoformat(),
+            "order_version": facts.order_version,
+            "service_data_locked": facts.service_data_locked,
+            "has_formal_assignments": facts.has_formal_assignments,
+        }
+    )
+    return ActualStartDateOnlyPreview(
+        facts.case_no,
+        facts.current_actual_start_date,
+        new_date,
+        facts.order_version,
+        facts.scheduling_version,
+        facts.scheduling_generation,
+        facts.client_finance_version,
+        facts.payroll_version,
+        fingerprint,
+    )
 
 
 def _historical_source_context(
@@ -484,9 +636,6 @@ def _historical_source_context(
         raise ValueError("historical_assignment_required_for_actual_start")
     if source_assignment_ids and len(source_assignment_ids) != len(source_staff_ids):
         raise ValueError("historical_assignment_required_for_actual_start")
-    policy = facts.payroll.case_policy
-    if policy is None:
-        raise ValueError("payroll_case_policy_bootstrap_required")
     # When the planner has already bridged the generation-less historical
     # assignment into an effective generation, retain that formal assignment
     # identity for canonical Scheduling replacement.  Preview-only contexts
@@ -510,17 +659,6 @@ def _historical_source_context(
         assigned_end_date=service_dates[-1],
         official_service_dates=service_dates,
     )
-    payroll = replace(
-        facts.payroll,
-        source_terms=(
-            SourceAssignmentPayrollTerms(
-                source_assignment_id,
-                source_staff_ids[0],
-                policy.policy_version,
-                policy.policy_kind,
-            ),
-        ),
-    )
     synthetic_facts = replace(
         facts,
         scheduling=replace(
@@ -529,7 +667,6 @@ def _historical_source_context(
             service_started=False,
         ),
         planned_service_dates=service_dates,
-        payroll=payroll,
         # The synthetic assignment is the asserted historical Actual Start.
         # Actual Start validates the first assignment against the current
         # Scheduling root, so this preview-only snapshot must project that
@@ -545,7 +682,6 @@ def _historical_source_context(
         synthetic_facts,
         context.reconfirmation,
         unpersisted_source_assignment_ids=unpersisted,
-        preserve_downstream_amounts=not facts.scheduling.segments,
     )
 
 
@@ -553,9 +689,15 @@ def _raise_missing_receipt(request):
     raise _workflow_error(request, ErrorCategory.INTERNAL, "idempotency_evidence_incomplete", "The command claim exists without its receipt.")
 
 
-def _actual_start_lifecycle(facts, new_date, scheduling, client, clock):
+def _actual_start_lifecycle(facts, new_date, scheduling, client_settlement, clock):
     roots = replace(facts.lifecycle, actual_start_date=new_date, actual_start_reconfirmed=True)
-    return build_terms_lifecycle_impact(roots, facts.order.terms, scheduling, client.settlement, clock.now())
+    return build_terms_lifecycle_impact(
+        roots,
+        facts.order.terms,
+        scheduling,
+        client_settlement,
+        clock.now(),
+    )
 
 
 def _persist_scheduling(repository, request, preview, command_fingerprint):
@@ -604,7 +746,7 @@ def _persist_lifecycle(repository, request, preview, receipt):
         candidate=preview.lifecycle_impact,
         expected_order_version=preview.order_version,
         resulting_order_version=receipt.order_version,
-        client_settlement_fingerprint=preview.client_finance_impact.settlement.fingerprint,
+        client_settlement_fingerprint=preview.client_settlement.fingerprint,
         idempotency_key=request.idempotency_key,
         actor=request.actor,
         reason=request.reason,
@@ -626,31 +768,10 @@ def _persist_order_projection(repository, request, preview, receipt):
             request.case_no,
             request.new_actual_start_date,
             preview.actual_start.actual_end_date,
-            _staff_payment_due_date(preview),
             preview.lifecycle_impact.after_status,
             preview.order_version,
             receipt.order_version,
         )
-    )
-
-
-def _staff_payment_due_date(preview):
-    return preview.staff_payment_due_date
-
-
-def _calculated_staff_payment_due_date(
-    actual_end_date,
-    client_finance_impact,
-    is_full_subsidy_order,
-):
-    client_payable_amount = sum(
-        (stage_plan.amount.amount for stage_plan in client_finance_impact.stage_plans),
-        0,
-    )
-    return calculate_staff_payment_due_date(
-        actual_end_date,
-        client_payable_amount,
-        is_full_subsidy_order,
     )
 
 
@@ -679,103 +800,44 @@ def _actual_start_assignments(facts):
     return tuple(assignments)
 
 
-def _downstream_impacts(facts, actual_start, scheduling):
-    change_identity = f"actual-start:{actual_start.fingerprint.value}"
-    client = _client_finance_impact(
-        facts,
-        actual_start,
-        scheduling,
-        change_identity,
+def _existing_client_settlement(facts):
+    """Read the existing deposit gate without recalculating any amount."""
+    client_source = facts.client_finance
+    existing = {
+        item.payment_stage: item
+        for item in client_source.existing_obligations
+    }
+    deposit = existing.get(PaymentStage.DEPOSIT)
+    deposit_settled = (
+        client_source.deposit_gate_override_active
+        or (
+            deposit is None
+            and client_source.payment_terms.deposit_service_days == 0
+        )
+        or (
+            deposit is not None
+            and deposit.formal_history_exists
+            and deposit.net_settled_amount.amount >= deposit.contracted_amount.amount
+        )
     )
-    coverage = _subsidy_coverage(facts)
-    staff_payment_due_date = _effective_staff_payment_due_date(
-        facts.payroll.staff_payment_due_date,
-        _calculated_staff_payment_due_date(
-            actual_start.actual_end_date,
-            client,
-            coverage.is_full_subsidy_order,
-        ),
+    all_settled = (
+        client_source.open_nonstage_obligation_count == 0
+        and all(
+            item.formal_history_exists
+            and item.net_settled_amount.amount >= item.contracted_amount.amount
+            for item in existing.values()
+        )
     )
-    return client, _payroll_impact(
-        facts,
-        scheduling,
-        change_identity,
-        staff_payment_due_date,
-    ), staff_payment_due_date
-
-
-def _preserved_downstream_impacts(client, payroll):
-    """Keep historical money facts unchanged while Actual Start forms dates.
-
-    A restarted historical tombstone has already crossed the historical
-    adoption/accounting boundary. Confirming its Actual Start may establish a
-    Scheduling generation and due dates, but it must not bootstrap missing
-    receivables or payables as if they were new charges.
-    """
-    preserved_client = replace(
-        client,
-        resulting_account_version=client.expected_account_version,
-        actions=(),
-        subsidy_return_plan=None,
-        fingerprint=fingerprint_payload(
-            {
-                "mode": "historical_actual_start_amounts_preserved",
-                "case_no": client.case_no,
-                "account_version": client.expected_account_version,
-                "settlement": client.settlement.fingerprint.value,
-            }
-        ),
-    )
-    preserved_payroll = replace(
-        payroll,
-        resulting_payroll_version=payroll.expected_payroll_version,
-        carried_rate_snapshots=(),
-        actions=(),
-        special_pay_events=(),
-        fingerprint=fingerprint_payload(
-            {
-                "mode": "historical_actual_start_amounts_preserved",
-                "case_no": payroll.case_no,
-                "payroll_version": payroll.expected_payroll_version,
-                "payroll": payroll.payroll.fingerprint.value,
-            }
-        ),
-    )
-    return preserved_client, preserved_payroll
-
-
-def _effective_staff_payment_due_date(existing_due_date, calculated_due_date):
-    return existing_due_date or calculated_due_date
-
-
-def _client_finance_impact(facts, actual_start, scheduling, change_identity):
-    payment_terms = replace(facts.client_finance.payment_terms, first_payment_due_date=actual_start.new_actual_start_date, second_payment_due_date=actual_start.actual_end_date)
-    client_source = replace(facts.client_finance, payment_terms=payment_terms, double_pay_dates=())
-    return build_client_finance_terms_impact(client_source, facts.order.terms, scheduling, change_identity)
-
-
-def _payroll_impact(
-    facts,
-    scheduling,
-    change_identity,
-    staff_payment_due_date,
-):
-    payroll_source = replace(
-        facts.payroll,
-        staff_payment_due_date=staff_payment_due_date,
-        source_terms=tuple(
-            replace(item, double_pay_dates=())
-            for item in facts.payroll.source_terms
-        ),
-    )
-    return build_payroll_terms_impact(payroll_source, scheduling, facts.order.terms, change_identity)
-
-
-def _subsidy_coverage(facts):
-    return derive_subsidy_coverage(
-        facts.order.client_identity_status,
-        Decimal(facts.order.terms.service_days * facts.order.terms.service_hours_per_day),
-        Decimal(facts.order.terms.floor_fee.amount),
+    payload = {
+        "mode": "actual_start_existing_settlement",
+        "case_no": client_source.case_no,
+        "deposit_settled": deposit_settled,
+        "all_formal_obligations_settled": all_settled,
+    }
+    return ClientSettlementProjection(
+        deposit_settled,
+        all_settled,
+        fingerprint_payload(payload),
     )
 
 
@@ -783,20 +845,51 @@ def _preview_result(
     facts,
     actual_start,
     scheduling,
-    client,
-    payroll,
+    client_settlement,
     lifecycle,
     reconfirmation,
-    staff_payment_due_date,
     unpersisted_source_assignment_ids,
 ):
-    payload = _preview_fingerprint_payload(facts, actual_start, client, payroll, lifecycle, reconfirmation)
-    coverage = _subsidy_coverage(facts)
-    return ActualStartPreview(facts.lifecycle.actual_start_date, actual_start.new_actual_start_date, actual_start, scheduling, facts.order.version, facts.scheduling.aggregate_version, facts.scheduling.generation_number, facts.client_finance.account_version, facts.payroll.payroll_version, client, payroll, lifecycle, reconfirmation, facts.order.client_identity_status, coverage.is_full_subsidy_order, staff_payment_due_date, unpersisted_source_assignment_ids, fingerprint_payload(payload))
+    payload = _preview_fingerprint_payload(
+        facts,
+        actual_start,
+        client_settlement,
+        lifecycle,
+        reconfirmation,
+    )
+    return ActualStartPreview(
+        facts.lifecycle.actual_start_date,
+        actual_start.new_actual_start_date,
+        actual_start,
+        scheduling,
+        facts.order.version,
+        facts.scheduling.aggregate_version,
+        facts.scheduling.generation_number,
+        facts.client_finance.account_version,
+        facts.payroll.payroll_version,
+        client_settlement,
+        lifecycle,
+        reconfirmation,
+        unpersisted_source_assignment_ids,
+        fingerprint_payload(payload),
+    )
 
 
-def _preview_fingerprint_payload(facts, actual_start, client, payroll, lifecycle, reconfirmation):
-    return {"actual_start": actual_start.fingerprint.value, "client_finance": client.fingerprint.value, "payroll": payroll.fingerprint.value, "lifecycle": lifecycle.fingerprint.value, "reconfirmation": reconfirmation.fingerprint.value, "order_version": facts.order.version, "scheduling_version": facts.scheduling.aggregate_version, "client_finance_version": facts.client_finance.account_version, "payroll_version": facts.payroll.payroll_version}
+def _preview_fingerprint_payload(
+    facts,
+    actual_start,
+    client_settlement,
+    lifecycle,
+    reconfirmation,
+):
+    return {
+        "actual_start": actual_start.fingerprint.value,
+        "client_settlement": client_settlement.fingerprint.value,
+        "lifecycle": lifecycle.fingerprint.value,
+        "reconfirmation": reconfirmation.fingerprint.value,
+        "order_version": facts.order.version,
+        "scheduling_version": facts.scheduling.aggregate_version,
+    }
 
 
 def _confirm_reconfirmation(repository, request, preview, actual_start_event_id):
@@ -813,30 +906,9 @@ def _confirmation_command(request, candidate, settlement_identity, actual_start_
     return ConfirmActualStartReconfirmationCommand(case_no=request.case_no, required_settlement_identity=settlement_identity, reconfirmation_fingerprint=candidate.fingerprint, actual_start_event_id=actual_start_event_id, idempotency_key=request.idempotency_key, actor=request.actor, reason=request.reason, correlation_id=request.correlation_id)
 
 
-def _persist_finance_and_payroll(repository, request, preview, event_id, assignment_resolution):
-    if (
-        preview.client_finance_impact.resulting_account_version
-        != preview.client_finance_impact.expected_account_version
-    ):
-        _persist_client_finance(repository, request, preview, event_id)
-    if (
-        preview.payroll_impact.resulting_payroll_version
-        != preview.payroll_impact.expected_payroll_version
-    ):
-        _persist_payroll(repository, request, preview, event_id, assignment_resolution)
-
-
-def _persist_client_finance(repository, request, preview, event_id):
-    repository.persist_client_finance_impact(ClientFinanceImpactPersistenceCommand(candidate=preview.client_finance_impact, idempotency_key=request.idempotency_key, actor=request.actor, reason=request.reason, correlation_id=request.correlation_id, source_event_family=_ACTUAL_START_SOURCE_EVENT_FAMILY, source_event_id=event_id))
-
-
-def _persist_payroll(repository, request, preview, event_id, assignment_resolution):
-    repository.persist_payroll_impact(PayrollImpactPersistenceCommand(candidate=preview.payroll_impact, assignment_resolution=assignment_resolution, idempotency_key=request.idempotency_key, actor=request.actor, reason=request.reason, correlation_id=request.correlation_id, source_event_id=event_id))
-
-
 def _build_receipt(preview):
     assignments = preview.scheduling.assignments
-    return OrderTermsReceipt(preview.scheduling.case_no, preview.order_version + 1, preview.scheduling.resulting_aggregate_version, preview.scheduling.generation_number, preview.client_finance_impact.resulting_account_version, preview.payroll_impact.resulting_payroll_version, preview.lifecycle_impact.after_status, preview.lifecycle_impact.service_data_lock_should_exist and not preview.lifecycle_impact.service_data_lock_was_present, preview.scheduling.cancelled_assignment_ids, tuple(item.candidate_key for item in assignments), sum(len(item.service_dates) for item in assignments), sum(item.actual_hours for item in assignments), preview.fingerprint)
+    return OrderTermsReceipt(preview.scheduling.case_no, preview.order_version + 1, preview.scheduling.resulting_aggregate_version, preview.scheduling.generation_number, preview.client_finance_version, preview.payroll_version, preview.lifecycle_impact.after_status, preview.lifecycle_impact.service_data_lock_should_exist and not preview.lifecycle_impact.service_data_lock_was_present, preview.scheduling.cancelled_assignment_ids, tuple(item.candidate_key for item in assignments), sum(len(item.service_dates) for item in assignments), sum(item.actual_hours for item in assignments), preview.fingerprint)
 
 
 def _validate_versions(request, facts):
@@ -845,7 +917,7 @@ def _validate_versions(request, facts):
 
 
 def _version_comparisons(request, facts):
-    return ((request.expected_order_version.value, facts.order.version, "order"), (request.expected_scheduling_version.value, facts.scheduling.aggregate_version, "scheduling"), (request.expected_client_finance_version.value, facts.client_finance.account_version, "client_finance"), (request.expected_payroll_version.value, facts.payroll.payroll_version, "payroll"))
+    return ((request.expected_order_version.value, facts.order.version, "order"), (request.expected_scheduling_version.value, facts.scheduling.aggregate_version, "scheduling"))
 
 
 def _validate_version(request, expected, current, domain):
@@ -862,15 +934,8 @@ def _validate_locked_staff_set(request, facts, staff_ids):
     raise _workflow_error(request, ErrorCategory.CONFLICT, "scheduling_lock_set_stale", "The impacted caregiver set expanded after preflight.")
 
 
-def _raise_if_impacts_blocked(request, preview):
-    blockers = tuple(sorted(set(preview.client_finance_impact.blockers) | set(preview.payroll_impact.blockers)))
-    if not blockers:
-        return
-    raise ActualStartWorkflowError(TypedError(ErrorCategory.DOMAIN_BLOCKED, "actual_start_impact_blocked", "A downstream Domain blocked the Actual Start change.", request.correlation_id, domain_blockers=blockers))
-
-
 def _command_fingerprint(request):
-    return fingerprint_payload({"case_no": request.case_no, "new_actual_start_date": request.new_actual_start_date.isoformat(), "order_version": request.expected_order_version.value, "scheduling_version": request.expected_scheduling_version.value, "client_finance_version": request.expected_client_finance_version.value, "payroll_version": request.expected_payroll_version.value, "preview_fingerprint": request.preview_fingerprint.value, "actor": request.actor.actor_id, "reason": request.reason})
+    return fingerprint_payload({"case_no": request.case_no, "new_actual_start_date": request.new_actual_start_date.isoformat(), "order_version": request.expected_order_version.value, "scheduling_version": request.expected_scheduling_version.value, "preview_fingerprint": request.preview_fingerprint.value, "actor": request.actor.actor_id, "reason": request.reason})
 
 
 def _matched_receipt(request, command_fingerprint, stored):
@@ -879,8 +944,20 @@ def _matched_receipt(request, command_fingerprint, stored):
     raise _workflow_error(request, ErrorCategory.IDEMPOTENCY_MISMATCH, "idempotency_mismatch", "Idempotency key was already used with a different command.")
 
 
-def _workflow_error(request, category, code, message):
-    return ActualStartWorkflowError(TypedError(category, code, message, request.correlation_id))
+def _workflow_error(request, category, code, message, *, current_version=None):
+    return ActualStartWorkflowError(
+        TypedError(
+            category,
+            code,
+            message,
+            request.correlation_id,
+            current_version=(
+                ExpectedVersion(current_version)
+                if current_version is not None
+                else None
+            ),
+        )
+    )
 
 
 __all__ = [

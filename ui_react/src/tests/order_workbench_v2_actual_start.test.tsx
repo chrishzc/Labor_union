@@ -13,19 +13,18 @@ const fingerprint = 'a'.repeat(64);
 let facts: ActualStart;
 function query(): ActualStart {
   return { case_no: CASE, current_actual_start_date: null, planned_start_date: '2026-09-01', service_data_locked: false,
-    order_version: 2, scheduling_version: 3, scheduling_generation: 1, client_finance_version: 4, payroll_version: 5 };
+    order_version: 2, scheduling_version: 3, scheduling_generation: 1, client_finance_version: 4, payroll_version: 5,
+    has_formal_assignments: true };
 }
 // Component doubles; existing typed-client tests own HTTP/schema validation.
 function preview() {
-  return { before_actual_start_date: null, after_actual_start_date: '2026-09-02', actual_end_date: '2026-09-03',
-    order_version: 2, scheduling_version: 3, scheduling_generation: 1, client_finance_version: 4, payroll_version: 5,
+  return { operation: 'reschedule' as const, before_actual_start_date: null, after_actual_start_date: '2026-09-02', actual_end_date: '2026-09-03',
+    order_version: 2, scheduling_version: 3, scheduling_generation: 1,
     actual_start: { case_no: CASE, official_service_dates: ['2026-09-02', '2026-09-03'] },
-    client_finance_impact: { actions: [{ payment_stage: 'first', direction: 'no_finance_change', direction_amount_ntd: 0 }], blockers: [] },
-    payroll_impact: { actions: [], blockers: [] },
     lifecycle_impact: { before_status: '訂單成立', after_status: '服務中' }, preview_fingerprint: fingerprint };
 }
 function receipt(): ActualStartReceipt {
-  return { case_no: CASE, order_version: 3, scheduling_version: 4, scheduling_generation: 2, client_finance_version: 5, payroll_version: 6,
+  return { operation: 'reschedule', case_no: CASE, order_version: 3, scheduling_version: 4, scheduling_generation: 2,
     lifecycle_status: '服務中', service_data_lock_formed: false, cancelled_assignment_ids: [], created_assignment_keys: ['new:1'],
     official_service_day_count: 2, official_service_hours: 16, preview_fingerprint: fingerprint };
 }
@@ -50,14 +49,14 @@ describe('Beta 實際開始日正式操作', () => {
     mocks.apply.mockImplementation(async () => { commitFacts(); return receipt(); });
   });
 
-  it('以單一步驟預覽並套用四版本，日期與版本回讀確認後才通知父頁', async () => {
+  it('以單一步驟預覽並套用日期及排班，回讀確認後才通知父頁', async () => {
     const onObserved = vi.fn(); render(<OrderActualStartPanel caseNo={CASE} onObserved={onObserved} />);
     await open(); await confirm();
     expect(mocks.preview).toHaveBeenCalledWith(CASE, { new_actual_start_date: '2026-09-02' });
     await screen.findByText('實際開始日已完成正式回讀：2026-09-02');
     expect(mocks.apply).toHaveBeenCalledWith(CASE, {
-      new_actual_start_date: '2026-09-02', expected_order_version: 2, expected_scheduling_version: 3,
-      expected_client_finance_version: 4, expected_payroll_version: 5, preview_fingerprint: fingerprint, reason: '確認實際開始日：2026-09-02',
+      operation: 'reschedule', new_actual_start_date: '2026-09-02', expected_order_version: 2, expected_scheduling_version: 3,
+      preview_fingerprint: fingerprint, reason: '確認實際開始日：2026-09-02',
     }, { idempotencyKey: expect.any(String) });
     expect(onObserved).toHaveBeenCalledTimes(1);
   });
@@ -70,13 +69,6 @@ describe('Beta 實際開始日正式操作', () => {
     expect(mocks.preview).not.toHaveBeenCalled(); expect(mocks.apply).not.toHaveBeenCalled();
   });
 
-  it('owner blocker 會停止單步套用並顯示原因', async () => {
-    mocks.preview.mockResolvedValue({ ...preview(), payroll_impact: { actions: [], blockers: ['payroll_frozen'] } });
-    render(<OrderActualStartPanel caseNo={CASE} />); await open(); await confirm();
-    expect(await screen.findByText('payroll_frozen')).toBeInTheDocument();
-    expect(mocks.apply).not.toHaveBeenCalled();
-  });
-
   it('預覽案件識別不同即停止', async () => {
     mocks.preview.mockResolvedValue({ ...preview(), actual_start: { case_no: 'OTHER', official_service_dates: [] } });
     render(<OrderActualStartPanel caseNo={CASE} />); await open();
@@ -85,10 +77,24 @@ describe('Beta 實際開始日正式操作', () => {
     await screen.findByText('實際開始日預覽 identity 不一致。'); expect(mocks.apply).not.toHaveBeenCalled();
   });
 
+  it('422 會顯示後端驗證代碼，不再只顯示通用訊息', async () => {
+    mocks.preview.mockRejectedValue(new ApiHttpError(
+      422,
+      'payroll_case_policy_bootstrap_required',
+      '實際開工日請求未通過驗證。',
+    ));
+    render(<OrderActualStartPanel caseNo={CASE} />); await open(); await confirm();
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '實際開工日請求未通過驗證。（payroll_case_policy_bootstrap_required）',
+    );
+    expect(mocks.apply).not.toHaveBeenCalled();
+  });
+
   it('409 清除預覽，不以其他版本重送', async () => {
     mocks.apply.mockRejectedValue(new ApiHttpError(409, 'stale_preview', '版本過期'));
     render(<OrderActualStartPanel caseNo={CASE} />); await open(); await confirm();
-    await screen.findByText('實際開始日未通過檢查，請重新讀取並預覽：版本過期');
+    await screen.findByText('實際開始日未通過檢查，請重新讀取並預覽：版本過期（stale_preview）');
     expect(screen.queryByLabelText('Beta 實際開始日期')).not.toBeInTheDocument();
     expect(mocks.apply).toHaveBeenCalledTimes(1);
   });

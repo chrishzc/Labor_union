@@ -14,6 +14,12 @@ interface Props {
 }
 type Phase = 'idle' | 'loading' | 'previewing' | 'applying' | 'outcome_unknown' | 'observation_failed' | 'observed';
 const subscribeActualStart = (listener: () => void) => orderMutationFlowStore.subscribe(listener);
+const actualStartErrorMessage = (caught: unknown, fallback: string) => {
+  if (caught instanceof OrderMutationError || caught instanceof ApiHttpError) {
+    return `${caught.message}（${caught.code}）`;
+  }
+  return caught instanceof Error ? caught.message : fallback;
+};
 
 export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyChange, onOpenServiceDates }) => {
   const [query, setQuery] = useState<ActualStart | null>(null);
@@ -90,27 +96,28 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
     setPhase('previewing'); setPreview(null); setError(null); setMissingAssignments(false);
     try {
       const data = await orderActualStartClient.preview(caseNo, { new_actual_start_date: date });
-      if (data.actual_start.case_no !== caseNo || data.after_actual_start_date !== date) throw new Error('實際開始日預覽 identity 不一致。');
+      const previewCaseNo = data.operation === 'date_only' ? data.case_no : data.actual_start.case_no;
+      if (previewCaseNo !== caseNo || data.after_actual_start_date !== date) throw new Error('實際開始日預覽 identity 不一致。');
       if (!isActive(request, caseNo)) return;
-      if (data.client_finance_impact.blockers.length > 0 || data.payroll_impact.blockers.length > 0) {
-        setPreview(data);
-        setPhase('idle');
-        setError('實際開始日目前有阻擋事項，尚未套用。');
-        return;
-      }
-      const reason = data.before_actual_start_date === null
-        ? `確認實際開始日：${data.after_actual_start_date}`
-        : `更正實際開始日：${data.before_actual_start_date} → ${data.after_actual_start_date}`;
-      await execute({
-        payload: {
+      const payload = data.operation === 'date_only'
+        ? {
+          operation: 'date_only' as const,
+          new_actual_start_date: data.after_actual_start_date,
+          expected_order_version: data.order_version,
+          preview_fingerprint: data.preview_fingerprint,
+        }
+        : {
+          operation: 'reschedule' as const,
           new_actual_start_date: data.after_actual_start_date,
           expected_order_version: data.order_version,
           expected_scheduling_version: data.scheduling_version,
-          expected_client_finance_version: data.client_finance_version,
-          expected_payroll_version: data.payroll_version,
           preview_fingerprint: data.preview_fingerprint,
-          reason,
-        },
+          reason: data.before_actual_start_date === null
+            ? `確認實際開始日：${data.after_actual_start_date}`
+            : `更正實際開始日：${data.before_actual_start_date} → ${data.after_actual_start_date}`,
+        };
+      await execute({
+        payload,
         idempotencyKey: `beta-actual-start-${crypto.randomUUID()}`,
       }, request, false);
     } catch (caught) {
@@ -120,7 +127,7 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
         setMissingAssignments(missingAssignments);
         setError(missingAssignments
           ? '尚未建立正式月嫂指派，本次未變更日期。請先以「計畫開始日」精算並確認正式服務日期；之後確認實際開始日時，系統會一併重排服務日期與排班。'
-          : caught instanceof Error ? caught.message : '實際開始日確認失敗。');
+          : actualStartErrorMessage(caught, '實際開始日確認失敗。'));
         setPhase('idle');
       }
     }
@@ -142,8 +149,10 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
       throw caught;
     }
     if (observation !== observationSequence.current) return;
+    const schedulingNotObserved = receipt.operation === 'reschedule'
+      && (data.scheduling_version === null || data.scheduling_version < receipt.scheduling_version);
     if (data.case_no !== caseNo || data.current_actual_start_date !== command.payload.new_actual_start_date
-      || data.order_version < receipt.order_version || data.scheduling_version < receipt.scheduling_version) {
+      || data.order_version < receipt.order_version || schedulingNotObserved) {
       throw new Error('實際開始日已回傳收據，但正式回讀尚未觀察到該版本與日期。');
     }
     orderMutationFlowStore.setActualStart(caseNo, { ...saved, status: 'observed', error: null });
@@ -168,7 +177,7 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
         orderMutationFlowStore.clearActualStart(caseNo);
         if (isActive(request, caseNo)) {
           setPreview(null); setQuery(null); setPhase('idle'); onBusyChange?.(false);
-          setError(`實際開始日未通過檢查，請重新讀取並預覽：${caught.message}`);
+          setError(`實際開始日未通過檢查，請重新讀取並預覽：${actualStartErrorMessage(caught, caught.message)}`);
         }
       } else {
         orderMutationFlowStore.setActualStart(caseNo, { status: 'outcome_unknown', command, receipt: null,
@@ -199,6 +208,26 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
   const retryApply = async () => {
     const existing = orderMutationFlowStore.getActualStart(caseNo);
     if (existing?.status !== 'outcome_unknown' || existing.command === null || existing.receipt) return;
+    if (existing.command.payload.operation === 'date_only') {
+      let data: ActualStart;
+      try {
+        data = await ordersQueryClient.getActualStart(caseNo);
+      } catch (caught) {
+        setError(`實際開始日結果仍未確認，請稍後重新讀取：${caught instanceof Error ? caught.message : '未知錯誤'}`);
+        return;
+      }
+      if (data.current_actual_start_date === existing.command.payload.new_actual_start_date
+        && data.order_version > existing.command.payload.expected_order_version) {
+        orderMutationFlowStore.setActualStart(caseNo, { ...existing, status: 'observed', error: null });
+        setQuery(data); setDate(data.current_actual_start_date); setPhase('observed'); setError(null);
+        onBusyChange?.(false); onObserved?.();
+        return;
+      }
+      if (data.order_version !== existing.command.payload.expected_order_version) {
+        setError('實際開始日結果與原操作不同，請重新讀取後確認。');
+        return;
+      }
+    }
     await execute(existing.command, sequence.current, true);
   };
 
@@ -222,7 +251,7 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
   return (
     <section aria-label={`案件 ${caseNo} 實際開始日`}>
       <h4>確認／更正實際開始日</h4>
-      <p>輸入日期後一次完成正式服務日期與排班；歷史重啟不會因此新增客戶應收或月嫂應付金額。</p>
+      <p>尚未正式排班時只保存日期；已有正式安排時才由後端預覽並重排服務日期及必要下游影響。</p>
       <button type="button" disabled={busy} onClick={() => void load()}>讀取實際開始日</button>
       {phase === 'loading' && <p role="status">讀取實際開始日中…</p>}
       {query && (
@@ -239,11 +268,12 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
       {preview && (
         <>
           <p>實際開始：{preview.before_actual_start_date ?? '未確認'} → {preview.after_actual_start_date}</p>
-          <p>正式服務日：{preview.actual_start.official_service_dates.join('、')}</p>
-          <p>正式結束：{preview.actual_end_date}；狀態：{preview.lifecycle_impact.before_status} → {preview.lifecycle_impact.after_status}</p>
-          <section aria-label="實際開始日阻擋事項">
-            {[...preview.client_finance_impact.blockers, ...preview.payroll_impact.blockers].map((blocker, index) => <p role="alert" key={index}>{blocker}</p>)}
-          </section>
+          {preview.operation === 'date_only'
+            ? <p>目前尚無正式排班；本次只保存日期，不建立排班、帳務、薪資或服務完成資料。</p>
+            : <>
+              <p>正式服務日：{preview.actual_start.official_service_dates.join('、')}</p>
+              <p>正式結束：{preview.actual_end_date}；狀態：{preview.lifecycle_impact.before_status} → {preview.lifecycle_impact.after_status}</p>
+            </>}
         </>
       )}
       {phase === 'previewing' && <p role="status">正在確認實際開始日…</p>}

@@ -6,7 +6,8 @@ Orders 擁有：
 
 - `case_no` 訂單識別；
 - Order Terms：`start_date`、`service_days`、`service_hours_per_day`、`requires_cooking`、`floor_fee`、統一服務時段三欄；
-- `actual_start_date` 的首次確認與更正事件；
+- `actual_start_date` 的首次確認與更正；無正式 Scheduling 時以 Orders aggregate
+  current root 保存，已有正式安排或延遲訂金重新確認時才使用對應正式事件；
 - Terms change、cancellation、controlled reopen、lifecycle transition 等不可變事件；
 - aggregate version、命令冪等 receipt；
 - `status`、`end_date`、`actual_end_date` 與服務資料鎖的目前投影。
@@ -26,7 +27,7 @@ Orders 不擁有：
 | Order Terms | root_fact | 最新有效 Terms event 及 Orders aggregate |
 | 下廚需求 | root_fact | Case Import 明確正規化結果或後續 Orders Terms event；不得於 Matching 重新解析問卷 |
 | 每日服務時間 | root_fact | `service_start_time`、`service_end_time`、`service_end_day_offset` 三欄完整 tuple |
-| actual start | root_fact | Confirm／Correct Actual Start event |
+| actual start | root_fact | 無正式 Scheduling 時為 Orders aggregate current root；已有正式安排的更正或延遲訂金重新確認為 Actual Start event |
 | planned end | derived_projection | 凍結的 planned start、目前 Terms 與規劃服務日 |
 | actual end | derived_projection | 有效 assignment-owned 正式服務日最大日期 |
 | lifecycle status | derived_projection | Lifecycle evaluator |
@@ -368,11 +369,26 @@ consumer 不得修改 Orders 或任何其他 Domain root；binding／menu versio
 - 首次確認與更正都必須 Preview／Apply。
 - 不得以 planned start、訂金日期、第一個 schedule 或 UI default fallback。
 - 延遲訂金核銷後仍須人工重新確認真正開始日。
+- 尚無有效正式 assignment 時，Actual Start 是後續日期精算的 Orders 輸入：Query／Preview／Apply
+  只讀寫 Orders root，以 `lifecycle_version` 作 owner concurrency control；Finance／Payroll／Scheduling
+  root 與版本可不存在，回應必須以 `NULL` 表示不存在，不得補造 root、版本、金額或正式安排。
+- 上述日期-only Apply 只更新 `actual_start_date` 與 Orders version，不建立 Actual Start event、
+  Scheduling generation、Finance／Payroll impact、lifecycle event、永久 receipt、快照、歷程或變更原因。
+  HTTP 保存結果與 owner readback 只是本次操作結果，不升格為永久業務紀錄；未知結果以 Orders
+  version 與日期重新查閱判定，不盲目重送。
+- 日期-only 首次保存後，只要仍無有效正式 assignment，再次修正仍走相同日期-only 路徑；
+  單純 `actual_start_date IS NOT NULL` 不代表 `service_started`、實際履約、付款完成、排班完成、
+  AutoComplete eligibility 或服務資料鎖。
+- Preview 後若有效正式 assignment 已形成，日期-only Apply 必須以 typed conflict 關閉並重新
+  Preview，不得在同一 request 偷換為重排流程。
 - 已成功完成歷史訂單重啟正常流程、且目前正常 lifecycle 可追溯至該 restart event 的案件，於正式
   actual start 確認日不晚於 business date 時，進入 `服務中` 不以訂金核銷或契約完成為前置條件；
   此例外只移除 lifecycle gate，不得偽造或改寫 Client Finance／契約事實。一般訂單仍維持原條件，
   完整邊界與驗收由 `27_歷史訂單生命週期與服務天數帳務正式規格.md` 擁有。
-- Apply 同交易重建 assignments、正式服務日、actual end、未核銷薪資／帳務日期及 lifecycle。
+- 已有有效正式 assignment 時，Apply 才同交易重建 assignments、正式服務日、actual end 與
+  lifecycle；服務天數與金額契約不變，因此不重算、不驗證也不寫入 Client Finance／Payroll，
+  Apply 只要求 Orders／Scheduling owner version。一般案件只允許唯讀既有訂金核銷狀態作
+  lifecycle gate；fingerprint、idempotency、reconfirmation、receipt 與衝突契約維持不變。
 - 原過期日期到新確認日期之間不得補造服務日。
 
 #### 3.4.1 事前服務日期精算與排休覆寫
@@ -571,6 +587,8 @@ must be previewed, sent, and confirmed again before formal assignment can procee
 | LargestRemainderAllocator | 整數總額、各 assignment 日數 | 整數 allocations | 固定 assignment 順序；總和守恆 |
 | ReopenEligibility | cancellation 及財務事件 | allow／blocker | 不恢復舊資料 |
 | DepositSettlementIdentity | obligation、receipt、reversal、allocation | deterministic identity | reconfirmation 必須綁定目前 identity |
+
+Terms 編輯畫面以起訖時段推算每日服務時數時，4 小時班不扣休息；8 小時班的排定時段為 8.5 小時，其中 30 分鐘為休息，因此例如 `08:30～17:00` 的 `service_hours_per_day` 為 8。
 
 Module 必須為純函式，不得讀 DB、取得現在時間或 import API／UI。
 

@@ -14,14 +14,13 @@ import { ApiDecodeError } from '../../../../../../../api/shared/typed_errors';
 const fingerprint = (character: string) => character.repeat(64);
 
 const previewFixture = {
+  operation: 'reschedule',
   before_actual_start_date: null,
   after_actual_start_date: '2026-09-01',
   actual_end_date: '2026-09-03',
   order_version: 3,
   scheduling_version: 4,
   scheduling_generation: 2,
-  client_finance_version: 5,
-  payroll_version: 6,
   actual_start: {
     case_no: 'CASE/1',
     kind: 'first_confirmation',
@@ -70,85 +69,6 @@ const previewFixture = {
       active: false,
     }],
   },
-  client_finance_impact: {
-    case_no: 'CASE/1',
-    expected_account_version: 5,
-    resulting_account_version: 6,
-    stage_plans: [{
-      payment_stage: 'deposit',
-      service_dates: ['2026-09-01'],
-      amount: { amount: 1000 },
-      due_date: '2026-09-01',
-    }],
-    actions: [{
-      action: 'create_stage',
-      payment_stage: 'deposit',
-      obligation_identity: 'client-obligation-1',
-      before_amount: { amount: 0 },
-      after_amount: { amount: 1000 },
-      obligation_amount: { amount: 1000 },
-      before_due_date: null,
-      after_due_date: '2026-09-01',
-      source_obligation_identity: null,
-      direction: 'additional_charge_due',
-      direction_amount_ntd: 1000,
-    }],
-    settlement: {
-      deposit_settled: false,
-      all_formal_obligations_settled: false,
-      fingerprint: fingerprint('b'),
-    },
-    blockers: [],
-    fingerprint: fingerprint('c'),
-    subsidy_return_plan: null,
-  },
-  payroll_impact: {
-    case_no: 'CASE/1',
-    expected_payroll_version: 6,
-    resulting_payroll_version: 7,
-    payroll: {
-      assignments: [{
-        assignment_identity: 'CASE/1:g3:a1',
-        staff_id: 22,
-        official_service_day_count: 3,
-        actual_hours: 24,
-        double_pay_hours: 0,
-        hourly_rate: { amount: 300 },
-        service_salary: { amount: 7200 },
-        floor_fee_allocated: { amount: 0 },
-        effective_adjustments: { amount: 0 },
-        total_payable: { amount: 7200 },
-      }],
-      earned_floor_fee: { amount: 0 },
-      total_payable: { amount: 7200 },
-      fingerprint: fingerprint('d'),
-    },
-    carried_rate_snapshots: [{
-      assignment_identity: 'CASE/1:g3:a1',
-      policy_version: '2026-v1',
-      policy_kind: 'citizen',
-      hourly_rate: { amount: 300 },
-    }],
-    actions: [{
-      action: 'establish',
-      obligation_identity: 'staff-obligation-1',
-      source_obligation_identity: null,
-      source_assignment_id: 11,
-      candidate_assignment_key: 'CASE/1:g3:a1',
-      staff_id: 22,
-      obligation_kind: 'service_pay',
-      direction: 'payable_to_staff',
-      amount: { amount: 7200 },
-      due_date: '2026-09-10',
-    }],
-    special_pay_events: [{
-      assignment_identity: 'CASE/1:g3:a1',
-      assignment_sequence: 1,
-      service_dates: ['2026-09-01', '2026-09-02', '2026-09-03'],
-    }],
-    blockers: [],
-    fingerprint: fingerprint('e'),
-  },
   lifecycle_impact: {
     case_no: 'CASE/1',
     before_status: '訂單成立',
@@ -166,22 +86,20 @@ const previewFixture = {
 } as const;
 
 const applyPayload: ActualStartApplyPayload = {
+  operation: 'reschedule',
   new_actual_start_date: '2026-09-01',
   expected_order_version: 3,
   expected_scheduling_version: 4,
-  expected_client_finance_version: 5,
-  expected_payroll_version: 6,
   preview_fingerprint: fingerprint('1'),
   reason: '客戶確認實際開工日',
 };
 
 const receiptFixture = {
+  operation: 'reschedule',
   case_no: 'CASE/1',
   order_version: 4,
   scheduling_version: 5,
   scheduling_generation: 3,
-  client_finance_version: 6,
-  payroll_version: 7,
   lifecycle_status: '服務中',
   service_data_lock_formed: false,
   cancelled_assignment_ids: [11],
@@ -223,43 +141,61 @@ describe('orderActualStartClient', () => {
     );
   });
 
-  it('normalizes exact payroll hour strings and accepts the subsidy return projection', async () => {
+  it('accepts a date-only preview and result without downstream versions', async () => {
+    const dateOnlyPreview = {
+      operation: 'date_only',
+      case_no: 'CASE/1',
+      before_actual_start_date: null,
+      after_actual_start_date: '2026-09-01',
+      order_version: 3,
+      scheduling_version: null,
+      scheduling_generation: null,
+      client_finance_version: null,
+      payroll_version: null,
+      preview_fingerprint: fingerprint('2'),
+    } as const;
+    const dateOnlyResult = {
+      operation: 'date_only',
+      case_no: 'CASE/1',
+      actual_start_date: '2026-09-01',
+      order_version: 4,
+      scheduling_version: null,
+      scheduling_generation: null,
+      client_finance_version: null,
+      payroll_version: null,
+      preview_fingerprint: fingerprint('2'),
+      changed: true,
+    } as const;
+    vi.spyOn(transport, 'post')
+      .mockResolvedValueOnce(envelope(dateOnlyPreview))
+      .mockResolvedValueOnce(envelope(dateOnlyResult));
+
+    await expect(orderActualStartClient.preview(
+      'CASE/1',
+      { new_actual_start_date: '2026-09-01' },
+    )).resolves.toEqual(dateOnlyPreview);
+    await expect(orderActualStartClient.apply('CASE/1', {
+      operation: 'date_only',
+      new_actual_start_date: '2026-09-01',
+      expected_order_version: 3,
+      preview_fingerprint: fingerprint('2'),
+    }, { idempotencyKey: 'date-only-1' })).resolves.toEqual(dateOnlyResult);
+  });
+
+  it('rejects retired downstream impact fields in a reschedule preview', async () => {
     const payload = {
       ...previewFixture,
       client_finance_impact: {
-        ...previewFixture.client_finance_impact,
-        subsidy_return_plan: {
-          obligation_identity: 'client-subsidy-return:CASE/1:terminal',
-          amount: { amount: 1200 },
-          due_date: '2026-09-10',
-        },
-      },
-      payroll_impact: {
-        ...previewFixture.payroll_impact,
-        payroll: {
-          ...previewFixture.payroll_impact.payroll,
-          assignments: [{
-            ...previewFixture.payroll_impact.payroll.assignments[0],
-            actual_hours: '24.0',
-            double_pay_hours: '0',
-          }],
-        },
+        actions: [],
+        blockers: [],
       },
     };
     vi.spyOn(transport, 'post').mockResolvedValue(envelope(payload));
 
-    const result = await orderActualStartClient.preview(
+    await expect(orderActualStartClient.preview(
       'CASE/1',
       { new_actual_start_date: '2026-09-01' },
-    );
-
-    expect(result.payroll_impact.payroll.assignments[0]).toEqual(expect.objectContaining({
-      actual_hours: 24,
-      double_pay_hours: 0,
-    }));
-    expect(result.client_finance_impact.subsidy_return_plan).toEqual(
-      payload.client_finance_impact.subsidy_return_plan,
-    );
+    )).rejects.toBeInstanceOf(ApiDecodeError);
   });
 
   it('applies all fresh versions with idempotency and correlation headers', async () => {

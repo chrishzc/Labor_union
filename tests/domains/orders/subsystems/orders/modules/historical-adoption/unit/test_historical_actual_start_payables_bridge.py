@@ -12,7 +12,6 @@ from subsystems.orders.historical_actual_start_rebuild import (
     HistoricalActualStartRebuilder,
 )
 from subsystems.orders.actual_start_workflow import ActualStartWorkflowError
-from subsystems.payroll.terms_impact import PayrollTermsSourceFacts
 
 
 def test_historical_rebuilder_prepares_source_generation_before_preview():
@@ -619,44 +618,3 @@ def test_historical_bootstrap_single_assignment_uses_recalculated_service_dates(
     assert assignment.assigned_end_date == date(2026, 8, 12)
     assert assignment.actual_hours == 24
     assert candidate.resulting_aggregate_version == 1
-
-
-def test_actual_start_payroll_impact_receives_recalculated_due_date(monkeypatch):
-    import subsystems.orders.actual_start_workflow as workflow
-
-    captured = {}
-
-    def capture(source, scheduling, order_terms, change_identity):
-        captured["source"] = source
-        captured["scheduling"] = scheduling
-        captured["order_terms"] = order_terms
-        captured["change_identity"] = change_identity
-        return "payroll-candidate"
-
-    monkeypatch.setattr(workflow, "build_payroll_terms_impact", capture)
-    source = PayrollTermsSourceFacts(
-        case_no="CASE-1",
-        payroll_version=0,
-        source_terms=(),
-        existing_obligations=(),
-        staff_payment_due_date=None,
-    )
-    order_terms = object()
-    facts = SimpleNamespace(
-        payroll=source,
-        order=SimpleNamespace(terms=order_terms),
-    )
-    due_date = date(2026, 10, 15)
-    scheduling = object()
-
-    result = workflow._payroll_impact(
-        facts,
-        scheduling,
-        "actual-start:test",
-        due_date,
-    )
-
-    assert result == "payroll-candidate"
-    assert captured["source"].staff_payment_due_date == due_date
-    assert captured["scheduling"] is scheduling
-    assert captured["order_terms"] is order_terms

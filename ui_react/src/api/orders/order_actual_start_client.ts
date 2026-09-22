@@ -33,17 +33,6 @@ const IsoDateTimeSchema = z.string().refine(
 const FingerprintSchema = z.string().regex(SHA256_PATTERN);
 const NonnegativeIntegerSchema = z.number().int().nonnegative();
 const PositiveIntegerSchema = z.number().int().positive();
-const DecimalTransportSchema = z.union([
-  z.number(),
-  z.string().regex(/^(?:0|[1-9]\d*)(?:\.\d+)?$/),
-]).transform(Number);
-const PositiveHalfHourSchema = DecimalTransportSchema.pipe(
-  z.number().positive().multipleOf(0.5),
-);
-const NonnegativeHalfHourSchema = DecimalTransportSchema.pipe(
-  z.number().nonnegative().multipleOf(0.5),
-);
-const MoneySchema = z.strictObject({ amount: z.number().int() });
 const LifecycleStatusSchema = z.enum([
   '待補件',
   '洽談中',
@@ -111,112 +100,6 @@ const SchedulingGenerationSchema = z.strictObject({
   })),
 });
 
-const PaymentStageSchema = z.enum(['deposit', 'first', 'second']);
-const ClientFinanceDirectionSchema = z.enum([
-  'refund_due',
-  'additional_charge_due',
-  'no_finance_change',
-]);
-const ClientSubsidyReturnPlanSchema = z.strictObject({
-  obligation_identity: z.string().min(1),
-  amount: MoneySchema,
-  due_date: IsoDateSchema,
-});
-const ClientFinanceImpactSchema = z.strictObject({
-  case_no: z.string().min(1),
-  expected_account_version: NonnegativeIntegerSchema,
-  resulting_account_version: NonnegativeIntegerSchema,
-  stage_plans: z.array(z.strictObject({
-    payment_stage: PaymentStageSchema,
-    service_dates: z.array(IsoDateSchema),
-    amount: MoneySchema,
-    due_date: IsoDateSchema.nullable(),
-  })),
-  actions: z.array(z.strictObject({
-    action: z.enum([
-      'create_stage',
-      'replace_open',
-      'cancel_open',
-      'create_adjustment',
-      'create_refund',
-      'unchanged',
-    ]),
-    payment_stage: PaymentStageSchema,
-    obligation_identity: z.string().min(1),
-    before_amount: MoneySchema,
-    after_amount: MoneySchema,
-    obligation_amount: MoneySchema,
-    before_due_date: IsoDateSchema.nullable(),
-    after_due_date: IsoDateSchema.nullable(),
-    source_obligation_identity: z.string().min(1).nullable(),
-    direction: ClientFinanceDirectionSchema,
-    direction_amount_ntd: NonnegativeIntegerSchema,
-  })),
-  settlement: z.strictObject({
-    deposit_settled: z.boolean(),
-    all_formal_obligations_settled: z.boolean(),
-    fingerprint: FingerprintSchema,
-  }),
-  blockers: z.array(z.string()),
-  fingerprint: FingerprintSchema,
-  subsidy_return_plan: ClientSubsidyReturnPlanSchema.nullable(),
-});
-
-const PayrollAssignmentSchema = z.strictObject({
-  assignment_identity: z.string().min(1),
-  staff_id: PositiveIntegerSchema,
-  official_service_day_count: PositiveIntegerSchema,
-  actual_hours: PositiveHalfHourSchema,
-  double_pay_hours: NonnegativeHalfHourSchema,
-  hourly_rate: MoneySchema,
-  service_salary: MoneySchema,
-  floor_fee_allocated: MoneySchema,
-  effective_adjustments: MoneySchema,
-  total_payable: MoneySchema,
-});
-
-const PayrollImpactSchema = z.strictObject({
-  case_no: z.string().min(1),
-  expected_payroll_version: NonnegativeIntegerSchema,
-  resulting_payroll_version: NonnegativeIntegerSchema,
-  payroll: z.strictObject({
-    assignments: z.array(PayrollAssignmentSchema),
-    earned_floor_fee: MoneySchema,
-    total_payable: MoneySchema,
-    fingerprint: FingerprintSchema,
-  }),
-  carried_rate_snapshots: z.array(z.strictObject({
-    assignment_identity: z.string().min(1),
-    policy_version: z.string().min(1),
-    policy_kind: z.enum(['citizen', 'subsidized_citizen', 'non_citizen']),
-    hourly_rate: MoneySchema,
-  })),
-  actions: z.array(z.strictObject({
-    action: z.enum([
-      'establish',
-      'close_unpaid',
-      'append_frozen_difference',
-      'keep_frozen',
-    ]),
-    obligation_identity: z.string().min(1),
-    source_obligation_identity: z.string().min(1).nullable(),
-    source_assignment_id: PositiveIntegerSchema.nullable(),
-    candidate_assignment_key: z.string().min(1).nullable(),
-    staff_id: PositiveIntegerSchema,
-    obligation_kind: z.enum(['service_pay', 'adjustment', 'reversal']),
-    direction: z.enum(['payable_to_staff', 'receivable_from_staff']),
-    amount: MoneySchema,
-    due_date: IsoDateSchema.nullable(),
-  })),
-  special_pay_events: z.array(z.strictObject({
-    assignment_identity: z.string().min(1),
-    assignment_sequence: PositiveIntegerSchema,
-    service_dates: z.array(IsoDateSchema),
-  })),
-  blockers: z.array(z.string()),
-  fingerprint: FingerprintSchema,
-});
-
 const LifecycleImpactSchema = z.strictObject({
   case_no: z.string().min(1),
   before_status: LifecycleStatusSchema,
@@ -235,12 +118,18 @@ export const ActualStartPreviewPayloadSchema = z.strictObject({
   new_actual_start_date: IsoDateSchema,
 });
 
-export const ActualStartApplyPayloadSchema = z.strictObject({
+const ActualStartDateOnlyApplyPayloadSchema = z.strictObject({
+  operation: z.literal('date_only'),
+  new_actual_start_date: IsoDateSchema,
+  expected_order_version: NonnegativeIntegerSchema,
+  preview_fingerprint: FingerprintSchema,
+});
+
+const ActualStartRescheduleApplyPayloadSchema = z.strictObject({
+  operation: z.literal('reschedule'),
   new_actual_start_date: IsoDateSchema,
   expected_order_version: NonnegativeIntegerSchema,
   expected_scheduling_version: NonnegativeIntegerSchema,
-  expected_client_finance_version: NonnegativeIntegerSchema,
-  expected_payroll_version: NonnegativeIntegerSchema,
   preview_fingerprint: FingerprintSchema,
   reason: z.string().refine(
     (value) => value.trim().length >= 1 && value.length <= 500,
@@ -248,30 +137,62 @@ export const ActualStartApplyPayloadSchema = z.strictObject({
   ),
 });
 
-export const ActualStartPreviewSchema = z.strictObject({
+export const ActualStartApplyPayloadSchema = z.discriminatedUnion('operation', [
+  ActualStartDateOnlyApplyPayloadSchema,
+  ActualStartRescheduleApplyPayloadSchema,
+]);
+
+const ActualStartDateOnlyPreviewSchema = z.strictObject({
+  operation: z.literal('date_only'),
+  case_no: z.string().min(1),
+  before_actual_start_date: IsoDateSchema.nullable(),
+  after_actual_start_date: IsoDateSchema,
+  order_version: NonnegativeIntegerSchema,
+  scheduling_version: NonnegativeIntegerSchema.nullable(),
+  scheduling_generation: NonnegativeIntegerSchema.nullable(),
+  client_finance_version: NonnegativeIntegerSchema.nullable(),
+  payroll_version: NonnegativeIntegerSchema.nullable(),
+  preview_fingerprint: FingerprintSchema,
+});
+
+const ActualStartReschedulePreviewSchema = z.strictObject({
+  operation: z.literal('reschedule'),
   before_actual_start_date: IsoDateSchema.nullable(),
   after_actual_start_date: IsoDateSchema,
   actual_end_date: IsoDateSchema,
   order_version: NonnegativeIntegerSchema,
   scheduling_version: NonnegativeIntegerSchema,
   scheduling_generation: NonnegativeIntegerSchema,
-  client_finance_version: NonnegativeIntegerSchema,
-  payroll_version: NonnegativeIntegerSchema,
   actual_start: ActualStartCandidateSchema,
   scheduling: SchedulingGenerationSchema,
-  client_finance_impact: ClientFinanceImpactSchema,
-  payroll_impact: PayrollImpactSchema,
   lifecycle_impact: LifecycleImpactSchema,
   preview_fingerprint: FingerprintSchema,
 });
 
-export const ActualStartReceiptSchema = z.strictObject({
+export const ActualStartPreviewSchema = z.discriminatedUnion('operation', [
+  ActualStartDateOnlyPreviewSchema,
+  ActualStartReschedulePreviewSchema,
+]);
+
+const ActualStartDateOnlyResultSchema = z.strictObject({
+  operation: z.literal('date_only'),
+  case_no: z.string().min(1),
+  actual_start_date: IsoDateSchema,
+  order_version: NonnegativeIntegerSchema,
+  scheduling_version: NonnegativeIntegerSchema.nullable(),
+  scheduling_generation: NonnegativeIntegerSchema.nullable(),
+  client_finance_version: NonnegativeIntegerSchema.nullable(),
+  payroll_version: NonnegativeIntegerSchema.nullable(),
+  preview_fingerprint: FingerprintSchema,
+  changed: z.boolean(),
+});
+
+const ActualStartRescheduleReceiptSchema = z.strictObject({
+  operation: z.literal('reschedule'),
   case_no: z.string().min(1),
   order_version: NonnegativeIntegerSchema,
   scheduling_version: NonnegativeIntegerSchema,
   scheduling_generation: NonnegativeIntegerSchema,
-  client_finance_version: NonnegativeIntegerSchema,
-  payroll_version: NonnegativeIntegerSchema,
   lifecycle_status: LifecycleStatusSchema,
   service_data_lock_formed: z.boolean(),
   cancelled_assignment_ids: z.array(PositiveIntegerSchema),
@@ -280,6 +201,11 @@ export const ActualStartReceiptSchema = z.strictObject({
   official_service_hours: NonnegativeIntegerSchema,
   preview_fingerprint: FingerprintSchema,
 });
+
+export const ActualStartReceiptSchema = z.discriminatedUnion('operation', [
+  ActualStartDateOnlyResultSchema,
+  ActualStartRescheduleReceiptSchema,
+]);
 
 const envelope = <T extends z.ZodTypeAny>(schema: T) => z.strictObject({
   success: z.boolean(),

@@ -179,10 +179,6 @@ class HistoricalActualStartRebuilder:
                 expected_scheduling_version=ExpectedVersion(
                     preview.scheduling_version
                 ),
-                expected_client_finance_version=ExpectedVersion(
-                    preview.client_finance_version
-                ),
-                expected_payroll_version=ExpectedVersion(preview.payroll_version),
                 preview_fingerprint=preview.fingerprint,
                 idempotency_key=idempotency_key,
                 actor=ActorContext(actor),
@@ -205,10 +201,6 @@ class HistoricalActualStartRebuilder:
             new_actual_start_date=actual_start_date,
             expected_order_version=ExpectedVersion(preview.order_version),
             expected_scheduling_version=ExpectedVersion(preview.scheduling_version),
-            expected_client_finance_version=ExpectedVersion(
-                preview.client_finance_version
-            ),
-            expected_payroll_version=ExpectedVersion(preview.payroll_version),
             preview_fingerprint=preview.fingerprint,
             idempotency_key=idempotency_key,
             actor=ActorContext(actor),

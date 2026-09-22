@@ -338,7 +338,10 @@ def _facts_from_rows(
                 else 0
             ),
             segments=segments,
-            service_started=order_row["actual_start_date"] is not None,
+            service_started=_service_started(
+                order_row["actual_start_date"],
+                segments,
+            ),
         ),
         planned_service_dates=official_dates,
         planned_end_date=order_row["end_date"],
@@ -357,6 +360,10 @@ def _empty_scheduling_aggregate(case_no: str) -> dict[str, object]:
         "generation_counter": 0,
         "effective_generation_id": None,
     }
+
+
+def _service_started(actual_start_date, segments) -> bool:
+    return actual_start_date is not None and bool(segments)
 
 
 def _validate_scheduling_aggregate_state(aggregate_row) -> None:

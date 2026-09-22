@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -16,40 +16,73 @@ class ActualStartQueryView(BaseModel):
     planned_start_date: date
     service_data_locked: bool
     order_version: int = Field(ge=0)
-    scheduling_version: int = Field(ge=0)
-    scheduling_generation: int = Field(ge=0)
-    client_finance_version: int = Field(ge=0)
-    payroll_version: int = Field(ge=0)
+    scheduling_version: int | None = Field(default=None, ge=0)
+    scheduling_generation: int | None = Field(default=None, ge=0)
+    client_finance_version: int | None = Field(default=None, ge=0)
+    payroll_version: int | None = Field(default=None, ge=0)
+    has_formal_assignments: bool
 
 
-class ActualStartPreviewView(BaseModel):
+class ActualStartDateOnlyPreviewView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    operation: Literal["date_only"]
+    case_no: str
+    before_actual_start_date: date | None
+    after_actual_start_date: date
+    order_version: int = Field(ge=0)
+    scheduling_version: int | None = Field(default=None, ge=0)
+    scheduling_generation: int | None = Field(default=None, ge=0)
+    client_finance_version: int | None = Field(default=None, ge=0)
+    payroll_version: int | None = Field(default=None, ge=0)
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class ActualStartReschedulePreviewView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    operation: Literal["reschedule"]
     before_actual_start_date: date | None
     after_actual_start_date: date
     actual_end_date: date
     order_version: int = Field(ge=0)
     scheduling_version: int = Field(ge=0)
     scheduling_generation: int = Field(ge=0)
-    client_finance_version: int = Field(ge=0)
-    payroll_version: int = Field(ge=0)
     actual_start: dict[str, Any]
     scheduling: dict[str, Any]
-    client_finance_impact: dict[str, Any]
-    payroll_impact: dict[str, Any]
     lifecycle_impact: dict[str, Any]
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
-class ActualStartReceiptView(BaseModel):
+ActualStartPreviewView = Annotated[
+    ActualStartDateOnlyPreviewView | ActualStartReschedulePreviewView,
+    Field(discriminator="operation"),
+]
+
+
+class ActualStartDateOnlyResultView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    operation: Literal["date_only"]
+    case_no: str
+    actual_start_date: date
+    order_version: int = Field(ge=0)
+    scheduling_version: int | None = Field(default=None, ge=0)
+    scheduling_generation: int | None = Field(default=None, ge=0)
+    client_finance_version: int | None = Field(default=None, ge=0)
+    payroll_version: int | None = Field(default=None, ge=0)
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    changed: bool
+
+
+class ActualStartRescheduleReceiptView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    operation: Literal["reschedule"]
     case_no: str
     order_version: int = Field(ge=0)
     scheduling_version: int = Field(ge=0)
     scheduling_generation: int = Field(ge=0)
-    client_finance_version: int = Field(ge=0)
-    payroll_version: int = Field(ge=0)
     lifecycle_status: str
     service_data_lock_formed: bool
     cancelled_assignment_ids: list[int]
@@ -57,6 +90,12 @@ class ActualStartReceiptView(BaseModel):
     official_service_day_count: int = Field(ge=0)
     official_service_hours: float = Field(ge=0, multiple_of=0.5)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+ActualStartReceiptView = Annotated[
+    ActualStartDateOnlyResultView | ActualStartRescheduleReceiptView,
+    Field(discriminator="operation"),
+]
 
 
 class ActualStartTypedErrorView(BaseModel):

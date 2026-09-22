@@ -477,8 +477,6 @@ def _confirm_actual_start(connection, case_no: str):
         date(2026, 9, 3),
         ExpectedVersion(preview.order_version),
         ExpectedVersion(preview.scheduling_version),
-        ExpectedVersion(preview.client_finance_version),
-        ExpectedVersion(preview.payroll_version),
         preview.fingerprint,
         IdempotencyKey(f"{case_no}-actual-start"),
         ActorContext("test"),

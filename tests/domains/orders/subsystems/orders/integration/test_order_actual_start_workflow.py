@@ -20,7 +20,6 @@ from shared_kernel.identities import (
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.clock import FixedBusinessClock, TAIPEI_TIME_ZONE
 from shared_kernel.errors import ErrorCategory
-from shared_kernel.money import MoneyNTD
 from domains.orders.lifecycle import (
     OrderLifecycleRootFacts,
     OrderLifecycleStatus,
@@ -37,16 +36,24 @@ from domains.orders.actual_start import (
     ActualStartSchedulingFacts,
     build_actual_start_candidate,
 )
-from domains.orders.terms import OrderAggregateFacts, OrderTerms, ServiceTimeTerms
-from domains.client_finance.obligation_planning import ClientFinanceTermsSourceFacts, ClientPaymentTerms
-from domains.payroll.calculation import PayrollPolicyKind
-from domains.scheduling.generation import AssignmentIdentityResolution, EffectiveAssignmentSegment, SchedulingGenerationFacts
-from subsystems.payroll.terms_impact import CasePayrollPolicyTerms, PayrollTermsSourceFacts, SourceAssignmentPayrollTerms
-from subsystems.orders.actual_start_workflow import ActualStartApplyRequest, ActualStartWorkflow, ActualStartWorkflowContext, ActualStartWorkflowError, _build_receipt, _effective_staff_payment_due_date, _persist_order_projection
+from domains.orders.terms import OrderTerms, ServiceTimeTerms
+from domains.scheduling.generation import AssignmentIdentityResolution
+from subsystems.orders.actual_start_workflow import (
+    ActualStartApplyRequest,
+    ActualStartDateOnlyApplyRequest,
+    ActualStartQueryFacts,
+    ActualStartWorkflow,
+    ActualStartWorkflowContext,
+    ActualStartWorkflowError,
+)
 from subsystems.orders.terms_workflow import CommandClaimState, OrderTermsReceipt, SchedulingReplacementResult, TermsWorkflowFacts
 from infrastructure.mysql.order_actual_start_repository import (
-    _is_effective_staff_date_conflict, _receipt_payload, _stored_receipt,
+    MySqlOrderActualStartRepository,
+    _is_effective_staff_date_conflict,
+    _receipt_payload,
+    _stored_receipt,
 )
+from infrastructure.mysql.order_terms_read_model import _service_started
 from api.dependencies.order_actual_start import ActualStartApplication
 from subsystems.orders.actual_start_workflow import HistoricalActualStartSourceAssignment
 
@@ -57,8 +64,6 @@ def _request(*, reason: str = "confirm service start") -> ActualStartApplyReques
         date(2026, 8, 3),
         ExpectedVersion(1),
         ExpectedVersion(2),
-        ExpectedVersion(3),
-        ExpectedVersion(4),
         PreviewFingerprint("a" * 64),
         IdempotencyKey("actual-start-1"),
         ActorContext("admin"),
@@ -80,15 +85,16 @@ def test_actual_start_request_rejects_blank_change_reason() -> None:
 
 
 def test_restarted_historical_actual_start_routes_directly_through_unique_pairing() -> None:
-    shared_facts = SimpleNamespace(
-        lifecycle=SimpleNamespace(historical_precision_restarted=True),
-        scheduling=SimpleNamespace(segments=()),
+    query = ActualStartQueryFacts(
+        "CASE-1", None, date(2026, 8, 1), False, 1,
+        2, None, 3, 4, False, True,
     )
 
     class Repository:
-        def load_for_preview(self, case_no):
+        def load_actual_start_query(self, case_no, *, for_update):
             assert case_no == "CASE-1"
-            return SimpleNamespace(shared_facts=shared_facts)
+            assert for_update is False
+            return query
 
     planner_lock_modes = []
 
@@ -154,153 +160,191 @@ def test_restarted_historical_actual_start_routes_directly_through_unique_pairin
     ]
 
 
-def test_actual_start_preserves_an_existing_staff_payment_due_date_across_months() -> None:
-    assert _effective_staff_payment_due_date(
-        date(2026, 8, 15),
-        date(2026, 9, 15),
-    ) == date(2026, 8, 15)
-
-
-def test_actual_start_uses_the_calculated_due_date_only_when_none_exists() -> None:
-    assert _effective_staff_payment_due_date(
-        None,
-        date(2026, 10, 15),
-    ) == date(2026, 10, 15)
-
-
-def test_full_subsidy_actual_start_uses_one_zero_client_and_42000_staff_plan() -> None:
-    service_dates = tuple(date(2026, 8, day) for day in range(6, 21))
-    segment = EffectiveAssignmentSegment(
-        assignment_id=101,
-        staff_id=11,
-        sequence=1,
-        service_day_count=15,
-        assigned_start_date=service_dates[0],
-        assigned_end_date=service_dates[-1],
-        official_service_dates=service_dates,
-    )
-    facts = TermsWorkflowFacts(
-        order=OrderAggregateFacts(
-            "CASE-FULL-SUBSIDY",
-            1,
-            OrderTerms(
-                service_dates[0],
-                15,
-                8,
-                MoneyNTD(0),
-                ServiceTimeTerms(None, None, None),
-            ),
-            False,
-            "補助市民",
-        ),
-        scheduling=SchedulingGenerationFacts(
-            "CASE-FULL-SUBSIDY", 2, 1, (segment,), False
-        ),
-        planned_service_dates=service_dates,
-        planned_end_date=service_dates[-1],
-        client_finance=ClientFinanceTermsSourceFacts(
-            "CASE-FULL-SUBSIDY",
-            3,
-            ClientPaymentTerms(
-                0,
-                MoneyNTD(350),
-                date(2026, 8, 1),
-                date(2026, 8, 15),
-                None,
-            ),
-            (),
-            (),
-            identity_status="補助市民",
-        ),
-        payroll=PayrollTermsSourceFacts(
-            "CASE-FULL-SUBSIDY",
-            4,
-            (
-                SourceAssignmentPayrollTerms(
-                    101,
-                    11,
-                    "payroll-rate:subsidized-citizen:v1",
-                    PayrollPolicyKind.SUBSIDIZED_CITIZEN,
-                ),
-            ),
-            (),
-            None,
-            CasePayrollPolicyTerms(
-                "payroll-rate:subsidized-citizen:v1",
-                PayrollPolicyKind.SUBSIDIZED_CITIZEN,
-            ),
-        ),
-        lifecycle=OrderLifecycleRootFacts(
-            "CASE-FULL-SUBSIDY",
-            OrderLifecycleStatus.ESTABLISHED,
-            True,
-            None,
-            False,
-            False,
-            False,
-        ),
+def test_application_routes_unassigned_order_to_date_only_without_downstream_facts() -> None:
+    query = ActualStartQueryFacts(
+        "CASE-DATE", None, date(2026, 9, 1), False, 7,
+        None, None, None, None, False, False,
     )
 
-    class _PreviewRepository:
-        def __init__(self, shared_facts):
-            self.shared_facts = shared_facts
+    class Repository:
+        def load_actual_start_query(self, case_no, *, for_update):
+            assert (case_no, for_update) == ("CASE-DATE", False)
+            return query
 
-        def load_for_preview(self, case_no):
-            assert case_no == "CASE-FULL-SUBSIDY"
-            return ActualStartWorkflowContext(
-                self.shared_facts,
-                ActualStartReconfirmationFacts(
-                    ActualStartReconfirmationState.NOT_REQUIRED,
-                    None,
-                    None,
-                    False,
-                ),
-            )
+        def load_for_preview(self, _case_no):
+            raise AssertionError("date-only preview must not load downstream facts")
 
-    preview = ActualStartWorkflow(
-        _PreviewRepository(facts),
-        lambda: None,
-        FixedBusinessClock(datetime(2026, 8, 6, 9, tzinfo=TAIPEI_TIME_ZONE)),
-    ).preview(
-        "CASE-FULL-SUBSIDY",
-        service_dates[0],
-        recalculated_service_dates=service_dates,
+    class Workflow:
+        def preview_date_only(self, facts, new_date):
+            assert facts is query
+            assert new_date == date(2026, 9, 2)
+            return "date-only-preview"
+
+        def preview(self, *_args):
+            raise AssertionError("date-only preview must not enter rescheduling")
+
+    application = ActualStartApplication(Repository(), Workflow())
+
+    assert application.query("CASE-DATE") is query
+    assert application.preview("CASE-DATE", date(2026, 9, 2)) == "date-only-preview"
+
+
+def test_date_only_apply_updates_only_orders_root_and_returns_fresh_version() -> None:
+    query = ActualStartQueryFacts(
+        "CASE-DATE", None, date(2026, 9, 1), False, 7,
+        None, None, None, None, False, False,
+    )
+    class UnitOfWork:
+        committed = False
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def commit(self):
+            self.committed = True
+
+    class Repository:
+        saved = []
+
+        def load_actual_start_query(self, case_no, *, for_update):
+            assert (case_no, for_update) == ("CASE-DATE", True)
+            return query
+
+        def save_actual_start_date_only(self, command):
+            self.saved.append(command)
+
+    repository = Repository()
+    unit_of_work = UnitOfWork()
+    workflow = ActualStartWorkflow(
+        repository,
+        lambda: unit_of_work,
+        FixedBusinessClock(datetime(2026, 9, 1, tzinfo=TAIPEI_TIME_ZONE)),
+    )
+    preview = workflow.preview_date_only(query, date(2026, 9, 2))
+    request = ActualStartDateOnlyApplyRequest(
+        "CASE-DATE",
+        date(2026, 9, 2),
+        ExpectedVersion(7),
+        preview.fingerprint,
+        CorrelationId("date-only-apply"),
     )
 
-    assert sum(plan.amount.amount for plan in preview.client_finance_impact.stage_plans) == 0
-    assert sum(action.amount.amount for action in preview.payroll_impact.actions) == 42_000
-    assert {action.due_date for action in preview.payroll_impact.actions} == {date(2026, 10, 15)}
-    assert preview.staff_payment_due_date == date(2026, 10, 15)
+    result = workflow.apply_date_only(request)
 
-    preserved_facts = replace(
-        facts,
-        payroll=replace(facts.payroll, staff_payment_due_date=date(2026, 8, 15)),
+    assert result.actual_start_date == date(2026, 9, 2)
+    assert result.order_version == 8
+    assert result.changed is True
+    assert result.preview_fingerprint == preview.fingerprint
+    assert repository.saved[0].expected_order_version == 7
+    assert repository.saved[0].resulting_order_version == 8
+    assert unit_of_work.committed is True
+
+
+def test_date_only_apply_reports_typed_conflict_when_formal_assignment_appears() -> None:
+    preview_facts = ActualStartQueryFacts(
+        "CASE-DATE", None, date(2026, 9, 1), False, 7,
+        None, None, None, None, False, False,
     )
-    preserved_preview = ActualStartWorkflow(
-        _PreviewRepository(preserved_facts),
-        lambda: None,
-        FixedBusinessClock(datetime(2026, 8, 6, 9, tzinfo=TAIPEI_TIME_ZONE)),
-    ).preview(
-        "CASE-FULL-SUBSIDY",
-        service_dates[0],
-        recalculated_service_dates=service_dates,
+
+    class UnitOfWork:
+        committed = False
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def commit(self):
+            self.committed = True
+
+    class Repository:
+        saved = []
+
+        def load_actual_start_query(self, case_no, *, for_update):
+            assert (case_no, for_update) == ("CASE-DATE", True)
+            return replace(preview_facts, has_formal_assignments=True)
+
+        def save_actual_start_date_only(self, command):
+            self.saved.append(command)
+
+    repository = Repository()
+    unit_of_work = UnitOfWork()
+    workflow = ActualStartWorkflow(
+        repository,
+        lambda: unit_of_work,
+        FixedBusinessClock(datetime(2026, 9, 1, tzinfo=TAIPEI_TIME_ZONE)),
     )
-    assert {action.due_date for action in preserved_preview.payroll_impact.actions} == {date(2026, 8, 15)}
+    preview = workflow.preview_date_only(preview_facts, date(2026, 9, 2))
 
-    class _PersistenceCapture:
-        command = None
+    with pytest.raises(ActualStartWorkflowError) as exc_info:
+        workflow.apply_date_only(ActualStartDateOnlyApplyRequest(
+            "CASE-DATE",
+            date(2026, 9, 2),
+            ExpectedVersion(7),
+            preview.fingerprint,
+            CorrelationId("date-only-mode-conflict"),
+        ))
 
-        def update_actual_start(self, command):
-            self.command = command
+    assert exc_info.value.error.category is ErrorCategory.CONFLICT
+    assert exc_info.value.error.code == "actual_start_mode_changed"
+    assert repository.saved == []
+    assert unit_of_work.committed is False
 
-    capture = _PersistenceCapture()
-    _persist_order_projection(
-        capture,
-        SimpleNamespace(case_no="CASE-FULL-SUBSIDY", new_actual_start_date=service_dates[0]),
-        preserved_preview,
-        _build_receipt(preserved_preview),
-    )
-    assert capture.command.staff_payment_due_date == date(2026, 8, 15)
+
+def test_mysql_query_allows_missing_scheduling_finance_and_payroll_roots() -> None:
+    class Cursor:
+        row = None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, statement, _params):
+            normalized = " ".join(statement.lower().split())
+            if "from orders o where o.case_no" in normalized:
+                self.row = {
+                    "case_no": "CASE-DATE",
+                    "actual_start_date": None,
+                    "start_date": date(2026, 9, 1),
+                    "lifecycle_version": 7,
+                    "service_data_locked": 0,
+                }
+            else:
+                self.row = None
+
+        def fetchone(self):
+            return self.row
+
+        def fetchall(self):
+            return ()
+
+    class Connection:
+        cursor_instance = Cursor()
+
+        def cursor(self):
+            return self.cursor_instance
+
+    result = MySqlOrderActualStartRepository(
+        Connection()
+    ).load_actual_start_query("CASE-DATE", for_update=False)
+
+    assert result.case_no == "CASE-DATE"
+    assert result.scheduling_version is None
+    assert result.scheduling_generation is None
+    assert result.client_finance_version is None
+    assert result.payroll_version is None
+    assert result.has_formal_assignments is False
+
+
+def test_date_without_formal_assignment_is_not_projected_as_service_started() -> None:
+    assert _service_started(date(2026, 9, 2), ()) is False
+    assert _service_started(date(2026, 9, 2), (object(),)) is True
 
 
 def test_actual_start_lifecycle_impact_cannot_bypass_auto_completion_owner() -> None:

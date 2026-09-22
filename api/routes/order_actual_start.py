@@ -7,10 +7,10 @@ from datetime import date, datetime, time
 from decimal import Decimal
 from enum import Enum
 import logging
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pymysql.err import OperationalError
 
 from api.dependencies.admin_auth import require_system_admin
@@ -36,6 +36,9 @@ from shared_kernel.identities import (
 )
 from subsystems.orders.actual_start_workflow import (
     ActualStartApplyRequest,
+    ActualStartDateOnlyApplyRequest,
+    ActualStartDateOnlyPreview,
+    ActualStartDateOnlyResult,
     ActualStartWorkflowError,
 )
 
@@ -51,12 +54,22 @@ class ActualStartPreviewBody(BaseModel):
 
 
 class ActualStartApplyBody(ActualStartPreviewBody):
+    operation: Literal["date_only", "reschedule"] = "reschedule"
     expected_order_version: int = Field(ge=0)
-    expected_scheduling_version: int = Field(ge=0)
-    expected_client_finance_version: int = Field(ge=0)
-    expected_payroll_version: int = Field(ge=0)
+    expected_scheduling_version: int | None = Field(default=None, ge=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str | None = Field(default=None, min_length=1, max_length=500)
+
+    @model_validator(mode="after")
+    def validate_operation_shape(self):
+        downstream = (self.expected_scheduling_version,)
+        if self.operation == "date_only":
+            if any(value is not None for value in downstream) or self.reason is not None:
+                raise ValueError("date_only_actual_start_has_downstream_fields")
+            return self
+        if any(value is None for value in downstream) or self.reason is None:
+            raise ValueError("reschedule_actual_start_fields_required")
+        return self
 
 
 @router.get(
@@ -128,21 +141,27 @@ def apply_actual_start(
         principal,
     )
     return _call_endpoint(
-        lambda: _materialize(application.apply(request)),
+        lambda: _apply_payload(application.apply(request)),
         "成功套用實際開工日",
         request.correlation_id,
     )
 
 
 def _apply_request(case_no, body, key, correlation, principal):
+    if body.operation == "date_only":
+        return ActualStartDateOnlyApplyRequest(
+            case_no,
+            body.new_actual_start_date,
+            ExpectedVersion(body.expected_order_version),
+            PreviewFingerprint(body.preview_fingerprint),
+            CorrelationId(correlation),
+        )
     actor_id = str(principal.username or "").strip()
     return ActualStartApplyRequest(
         case_no,
         body.new_actual_start_date,
         ExpectedVersion(body.expected_order_version),
         ExpectedVersion(body.expected_scheduling_version),
-        ExpectedVersion(body.expected_client_finance_version),
-        ExpectedVersion(body.expected_payroll_version),
         PreviewFingerprint(body.preview_fingerprint),
         IdempotencyKey(key),
         ActorContext(actor_id),
@@ -153,34 +172,75 @@ def _apply_request(case_no, body, key, correlation, principal):
 
 def _query_payload(facts) -> dict[str, Any]:
     return {
-        "case_no": facts.order.case_no,
-        "current_actual_start_date": facts.lifecycle.actual_start_date,
-        "planned_start_date": facts.order.terms.planned_start_date,
-        "service_data_locked": facts.order.service_data_locked,
-        "order_version": facts.order.version,
-        "scheduling_version": facts.scheduling.aggregate_version,
-        "scheduling_generation": facts.scheduling.generation_number,
-        "client_finance_version": facts.client_finance.account_version,
-        "payroll_version": facts.payroll.payroll_version,
+        "case_no": facts.case_no,
+        "current_actual_start_date": facts.current_actual_start_date,
+        "planned_start_date": facts.planned_start_date,
+        "service_data_locked": facts.service_data_locked,
+        "order_version": facts.order_version,
+        "scheduling_version": facts.scheduling_version,
+        "scheduling_generation": facts.scheduling_generation,
+        "client_finance_version": facts.client_finance_version,
+        "payroll_version": facts.payroll_version,
+        "has_formal_assignments": facts.has_formal_assignments,
     }
 
 
 def _preview_payload(preview) -> dict[str, Any]:
+    if isinstance(preview, ActualStartDateOnlyPreview):
+        return {
+            "operation": "date_only",
+            "case_no": preview.case_no,
+            "before_actual_start_date": preview.before_actual_start_date,
+            "after_actual_start_date": preview.after_actual_start_date,
+            "order_version": preview.order_version,
+            "scheduling_version": preview.scheduling_version,
+            "scheduling_generation": preview.scheduling_generation,
+            "client_finance_version": preview.client_finance_version,
+            "payroll_version": preview.payroll_version,
+            "preview_fingerprint": preview.fingerprint.value,
+        }
     return {
+        "operation": "reschedule",
         "before_actual_start_date": preview.before_actual_start_date,
         "after_actual_start_date": preview.after_actual_start_date,
         "actual_end_date": preview.actual_start.actual_end_date,
         "order_version": preview.order_version,
         "scheduling_version": preview.scheduling_version,
         "scheduling_generation": preview.scheduling_generation,
-        "client_finance_version": preview.client_finance_version,
-        "payroll_version": preview.payroll_version,
         "actual_start": _materialize(preview.actual_start),
         "scheduling": _materialize(preview.scheduling),
-        "client_finance_impact": _materialize(preview.client_finance_impact),
-        "payroll_impact": _materialize(preview.payroll_impact),
         "lifecycle_impact": _materialize(preview.lifecycle_impact),
         "preview_fingerprint": preview.fingerprint.value,
+    }
+
+
+def _apply_payload(result) -> dict[str, Any]:
+    if isinstance(result, ActualStartDateOnlyResult):
+        return {
+            "operation": "date_only",
+            "case_no": result.case_no,
+            "actual_start_date": result.actual_start_date,
+            "order_version": result.order_version,
+            "scheduling_version": result.scheduling_version,
+            "scheduling_generation": result.scheduling_generation,
+            "client_finance_version": result.client_finance_version,
+            "payroll_version": result.payroll_version,
+            "preview_fingerprint": result.preview_fingerprint.value,
+            "changed": result.changed,
+        }
+    return {
+        "operation": "reschedule",
+        "case_no": result.case_no,
+        "order_version": result.order_version,
+        "scheduling_version": result.scheduling_version,
+        "scheduling_generation": result.scheduling_generation,
+        "lifecycle_status": result.lifecycle_status,
+        "service_data_lock_formed": result.service_data_lock_formed,
+        "cancelled_assignment_ids": result.cancelled_assignment_ids,
+        "created_assignment_keys": result.created_assignment_keys,
+        "official_service_day_count": result.official_service_day_count,
+        "official_service_hours": result.official_service_hours,
+        "preview_fingerprint": result.preview_fingerprint.value,
     }
 
 

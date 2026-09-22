@@ -353,7 +353,7 @@ def test_historical_actual_start_preview_projects_the_asserted_schedule_root():
             "CASE-1",
             0,
             ClientPaymentTerms(
-                0,
+                99,
                 MoneyNTD(300),
                 date(2026, 8, 1),
                 date(2026, 8, 6),
@@ -368,7 +368,7 @@ def test_historical_actual_start_preview_projects_the_asserted_schedule_root():
             (),
             (),
             None,
-            CasePayrollPolicyTerms("policy-1", PayrollPolicyKind.CITIZEN),
+            None,
         ),
         lifecycle=OrderLifecycleRootFacts(
             "CASE-1",
@@ -409,16 +409,11 @@ def test_historical_actual_start_preview_projects_the_asserted_schedule_root():
     assert preview.actual_start.new_actual_start_date == asserted_start
     assert preview.scheduling.assignments[0].assigned_start_date == asserted_start
     assert preview.unpersisted_source_assignment_ids == (91,)
-    assert preview.client_finance_impact.actions == ()
-    assert (
-        preview.client_finance_impact.resulting_account_version
-        == preview.client_finance_impact.expected_account_version
-    )
-    assert preview.payroll_impact.actions == ()
-    assert (
-        preview.payroll_impact.resulting_payroll_version
-        == preview.payroll_impact.expected_payroll_version
-    )
+    # The historical no-money path must not run current-order amount
+    # validation; this fixture's 99 deposit days intentionally exceed the
+    # one official service day.
+    assert not hasattr(preview, "client_finance_impact")
+    assert not hasattr(preview, "payroll_impact")
     persisted = _scheduling_persistence_candidate(preview)
     assert persisted.cancelled_assignment_ids == ()
     assert persisted.assignments[0].source_assignment_id is None
@@ -481,8 +476,6 @@ def test_legacy_actual_start_apply_rejects_stale_root_even_with_historical_dates
         asserted_start,
         ExpectedVersion(7),
         ExpectedVersion(3),
-        ExpectedVersion(3),
-        ExpectedVersion(3),
         fingerprint_payload({"preview": "historical"}),
         IdempotencyKey("historical-negative-control"),
         ActorContext("operator"),
@@ -541,8 +534,6 @@ def test_historical_apply_rebuilds_fresh_candidate_from_formal_schedule_context(
         asserted_start,
         ExpectedVersion(historical_preview.order_version),
         ExpectedVersion(historical_preview.scheduling_version),
-        ExpectedVersion(historical_preview.client_finance_version),
-        ExpectedVersion(historical_preview.payroll_version),
         historical_preview.fingerprint,
         IdempotencyKey("historical-source-context-apply"),
         ActorContext("operator"),

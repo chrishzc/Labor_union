@@ -5,7 +5,7 @@
 - subsystem: `orders`
 
 ## Responsibility
-以正式服務日重建 Actual Start、有效 Scheduling generation 與下游未結清 Client Finance／Payroll projection；歷史重啟且 current generation 為空 tombstone 時，直接以輸入的 actual start 與唯一 pairing evidence 計算正式服務日，並在同一 Apply 建立排班與 actual-start，但保持既有 Client Finance／Payroll 金額與版本不變。歷史來源只能經此 canonical writer 套用 actual-start，不得直接建立付款或通知事實。
+擁有 Actual Start Query／Preview／Apply。尚無有效正式 assignment 時，只以 Orders owner version 保存或修正日期，不建立 Scheduling、Finance、Payroll、lifecycle event 或永久 receipt；已有正式 assignment 時，才以正式服務日重建有效 Scheduling generation、actual end 與 lifecycle。Actual Start 不重算、不驗證也不寫入 Client Finance／Payroll，只唯讀既有訂金核銷狀態作 lifecycle gate。歷史重啟且 current generation 為空 tombstone 時，直接以輸入的 actual start 與唯一 pairing evidence 計算正式服務日，並在同一 Apply 建立排班與 actual-start。歷史來源只能經此 canonical writer 套用 actual-start，不得直接建立付款或通知事實。
 
 ## Implementation
 - primary:
@@ -15,6 +15,7 @@
   - `infrastructure/mysql/order_actual_start_repository.py`
   - `infrastructure/mysql/historical_actual_start_date_planner.py`
   - `api/dependencies/order_actual_start.py`
+  - `api/routes/order_actual_start.py`
   - `api/schemas/order_actual_start.py`
   - `ui_react/src/api/orders/order_actual_start_client.ts`
   - `ui_react/src/components/OrderActualStartPanel.tsx`
@@ -23,12 +24,12 @@
 
 ## Dependencies
 - outbound: `scheduling/scheduling` — replacement generation 擁有正式服務日期與 assignment lineage。
-- outbound: `client-finance/client-finance` — 重算未結清的客戶帳務日期與 projection。
-- outbound: `payroll/payroll` — 重算 assignment-owned payroll obligation。
+- outbound: `client-finance/client-finance` — 唯讀既有訂金核銷狀態作一般案件 lifecycle gate；不重算 projection。
 - inbound: `orders/historical-adoption` — 已付訂金且來源開始日異於 HCM 預定開始日的 historical actual-start assertion 經 typed delegation 進入。
 - inbound: `orders/historical-precision-restart` — 重啟後的空 tombstone 與唯一 historical pairing evidence 可由一次 Actual Start Preview／Apply 直接建立 current Scheduling。
 
-管理 UI 以單次確認操作串接 Preview／Apply；後端 fingerprint、owner versions 與 idempotency 契約維持不變。
+管理 UI 以單次確認操作串接 Preview／Apply；已有正式 assignment 的重排分支只綁 Orders／Scheduling owner versions，且維持 fingerprint 與 idempotency 契約。
+日期-only 分支只綁 Orders version 與該次 Preview fingerprint；若 Apply fresh-read 發現正式 assignment 已形成，回 typed conflict 並要求重新 Preview。一般 Terms reader 不得只因日期存在便投影 `service_started`。
 
 ## Contracts
 - `document/架構重整/01_規格基線/01_Orders_Domain.md` — Actual Start、歷史來源與 completion instant 語意。

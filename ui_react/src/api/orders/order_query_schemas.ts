@@ -115,10 +115,11 @@ export const ActualStartSchema = z.strictObject({
   planned_start_date: DateOnlySchema,
   service_data_locked: z.boolean(),
   order_version: z.number().int().nonnegative(),
-  scheduling_version: z.number().int().nonnegative(),
-  scheduling_generation: z.number().int().nonnegative(),
-  client_finance_version: z.number().int().nonnegative(),
-  payroll_version: z.number().int().nonnegative(),
+  scheduling_version: z.number().int().nonnegative().nullable(),
+  scheduling_generation: z.number().int().nonnegative().nullable(),
+  client_finance_version: z.number().int().nonnegative().nullable(),
+  payroll_version: z.number().int().nonnegative().nullable(),
+  has_formal_assignments: z.boolean(),
 });
 export type ActualStart = z.infer<typeof ActualStartSchema>;
 

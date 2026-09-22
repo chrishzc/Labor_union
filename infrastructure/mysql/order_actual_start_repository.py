@@ -27,32 +27,30 @@ from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import IdempotencyKey
 from subsystems.orders.actual_start_workflow import (
     ActualStartApplyRequest,
+    ActualStartDateOnlyPersistenceCommand,
     ActualStartPersistenceCommand,
     ActualStartPreview,
+    ActualStartQueryFacts,
     ActualStartReceiptPersistenceCommand,
     ActualStartWorkflowError,
     ActualStartWorkflowContext,
     ConfirmActualStartReconfirmationCommand,
 )
 from subsystems.orders.terms_workflow import (
-    ClientFinanceImpactPersistenceCommand,
     CommandClaimState,
     LifecycleImpactPersistenceCommand,
     OrderTermsReceipt,
-    PayrollImpactPersistenceCommand,
     SchedulingReplacementCommand,
     SchedulingReplacementResult,
     StoredTermsReceipt,
 )
 
-from .client_finance_terms_writer import persist_client_finance_terms_impact
 from .order_lifecycle_impact_writer import persist_order_lifecycle_impact
 from .order_terms_read_model import (
     load_locked_facts,
     load_preview_facts,
     preflight_staff_ids,
 )
-from .payroll_terms_writer import persist_payroll_terms_impact
 from .scheduling_replacement_writer import persist_scheduling_replacement
 
 _COMMAND_FAMILY = "orders_actual_start"
@@ -61,6 +59,78 @@ _COMMAND_FAMILY = "orders_actual_start"
 class MySqlOrderActualStartRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
+
+    def load_actual_start_query(
+        self,
+        case_no: str,
+        *,
+        for_update: bool,
+    ) -> ActualStartQueryFacts:
+        with self._connection.cursor() as cursor:
+            order = _select_actual_start_order(cursor, case_no, for_update)
+            # The Orders row is the date-only mutex. Formal-assignment writers
+            # also lock it before reading their fresh facts, so taking a
+            # Scheduling lock here would invert their canonical lock order.
+            scheduling = _select_actual_start_scheduling(cursor, case_no, False)
+            generation, has_assignments = _actual_start_generation_facts(
+                cursor,
+                case_no,
+                scheduling,
+                False,
+            )
+            client_finance_version = _optional_owner_version(
+                cursor,
+                "client_finance_accounts",
+                case_no,
+            )
+            payroll_version = _optional_owner_version(
+                cursor,
+                "payroll_case_accounts",
+                case_no,
+            )
+            historical_restarted = _historical_precision_restarted(
+                cursor,
+                case_no,
+            )
+        return ActualStartQueryFacts(
+            case_no=str(order["case_no"]),
+            current_actual_start_date=order["actual_start_date"],
+            planned_start_date=order["start_date"],
+            service_data_locked=bool(order["service_data_locked"]),
+            order_version=int(order["lifecycle_version"]),
+            scheduling_version=(
+                int(scheduling["aggregate_version"])
+                if scheduling is not None
+                else None
+            ),
+            scheduling_generation=generation,
+            client_finance_version=client_finance_version,
+            payroll_version=payroll_version,
+            has_formal_assignments=has_assignments,
+            historical_precision_restarted=historical_restarted,
+        )
+
+    def save_actual_start_date_only(
+        self,
+        command: ActualStartDateOnlyPersistenceCommand,
+    ) -> None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                _DATE_ONLY_ORDER_UPDATE_SQL,
+                (
+                    command.actual_start_date,
+                    command.resulting_order_version,
+                    command.case_no,
+                    command.expected_order_version,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise ActualStartWorkflowError(TypedError(
+                    ErrorCategory.CONFLICT,
+                    "order_version_conflict",
+                    "The Orders root changed while saving Actual Start.",
+                    command.correlation_id,
+                ))
 
     def load_for_preview(self, case_no: str) -> ActualStartWorkflowContext:
         with self._connection.cursor() as cursor:
@@ -148,20 +218,6 @@ class MySqlOrderActualStartRepository:
                     ) from error
                 raise
 
-    def persist_client_finance_impact(
-        self,
-        command: ClientFinanceImpactPersistenceCommand,
-    ) -> None:
-        with self._connection.cursor() as cursor:
-            persist_client_finance_terms_impact(cursor, command)
-
-    def persist_payroll_impact(
-        self,
-        command: PayrollImpactPersistenceCommand,
-    ) -> None:
-        with self._connection.cursor() as cursor:
-            persist_payroll_terms_impact(cursor, command)
-
     def confirm_actual_start_reconfirmation(
         self,
         command: ConfirmActualStartReconfirmationCommand,
@@ -206,6 +262,67 @@ class MySqlOrderActualStartRepository:
             cursor.execute(_RECEIPT_INSERT_SQL, _receipt_values(command))
             if cursor.rowcount != 1:
                 raise RuntimeError("actual_start_event_not_found")
+
+
+def _select_actual_start_order(cursor, case_no, for_update):
+    lock_clause = " FOR UPDATE" if for_update else ""
+    cursor.execute(_DATE_ONLY_ORDER_SELECT_SQL + lock_clause, (case_no,))
+    row = cursor.fetchone()
+    if not isinstance(row, Mapping):
+        raise ValueError("order_not_found")
+    if row.get("start_date") is None:
+        raise ValueError("actual_start_planned_start_missing")
+    return row
+
+
+def _select_actual_start_scheduling(cursor, case_no, for_update):
+    lock_clause = " FOR UPDATE" if for_update else ""
+    cursor.execute(_DATE_ONLY_SCHEDULING_SELECT_SQL + lock_clause, (case_no,))
+    row = cursor.fetchone()
+    return row if isinstance(row, Mapping) else None
+
+
+def _actual_start_generation_facts(
+    cursor,
+    case_no,
+    scheduling,
+    for_update,
+):
+    if scheduling is None or scheduling.get("effective_generation_id") is None:
+        return None, False
+    lock_clause = " FOR UPDATE" if for_update else ""
+    cursor.execute(
+        _DATE_ONLY_GENERATION_SELECT_SQL + lock_clause,
+        (scheduling["effective_generation_id"], case_no),
+    )
+    generation = cursor.fetchone()
+    if not isinstance(generation, Mapping):
+        raise ValueError("scheduling_effective_generation_invalid")
+    cursor.execute(
+        _DATE_ONLY_ASSIGNMENT_SELECT_SQL + lock_clause,
+        (generation["id"],),
+    )
+    assignments = tuple(cursor.fetchall())
+    return int(generation["generation_number"]), bool(assignments)
+
+
+def _optional_owner_version(cursor, table, case_no):
+    if table not in {"client_finance_accounts", "payroll_case_accounts"}:
+        raise ValueError("unsupported actual start owner version")
+    cursor.execute(
+        f"SELECT aggregate_version FROM {table} WHERE case_no=%s",
+        (case_no,),
+    )
+    row = cursor.fetchone()
+    return int(row["aggregate_version"]) if isinstance(row, Mapping) else None
+
+
+def _historical_precision_restarted(cursor, case_no):
+    cursor.execute(
+        _HISTORICAL_RESTART_SELECT_SQL,
+        (case_no, OrderLifecycleStatus.ESTABLISHED.value),
+    )
+    return cursor.fetchone() is not None
 
 
 def _insert_claim(cursor, request, command_fingerprint) -> bool:
@@ -460,7 +577,6 @@ def _order_update_values(command):
     return (
         command.actual_start_date,
         command.actual_end_date,
-        command.staff_payment_due_date,
         status.value,
         command.resulting_order_version,
         command.case_no,
@@ -681,9 +797,44 @@ _EVENT_INSERT_SQL = (
     "reason,correlation_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
 )
 
+_DATE_ONLY_ORDER_SELECT_SQL = (
+    "SELECT o.case_no,o.actual_start_date,o.start_date,o.lifecycle_version,"
+    "EXISTS(SELECT 1 FROM order_service_data_locks service_lock "
+    "WHERE service_lock.case_no=o.case_no) AS service_data_locked "
+    "FROM orders o WHERE o.case_no=%s"
+)
+
+_DATE_ONLY_SCHEDULING_SELECT_SQL = (
+    "SELECT aggregate_version,effective_generation_id "
+    "FROM scheduling_aggregates WHERE case_no=%s"
+)
+
+_DATE_ONLY_GENERATION_SELECT_SQL = (
+    "SELECT id,generation_number FROM scheduling_generations "
+    "WHERE id=%s AND case_no=%s AND status='effective'"
+)
+
+_DATE_ONLY_ASSIGNMENT_SELECT_SQL = (
+    "SELECT id FROM case_staff_assignments WHERE generation_id=%s "
+    "AND status NOT IN ('cancelled','replaced') ORDER BY id"
+)
+
+_HISTORICAL_RESTART_SELECT_SQL = (
+    "SELECT id FROM order_lifecycle_state_events "
+    "WHERE case_no=%s AND trigger_event='orders_historical_precision_restart' "
+    "AND after_status=%s ORDER BY id DESC LIMIT 1"
+)
+
+_DATE_ONLY_ORDER_UPDATE_SQL = (
+    "UPDATE orders SET actual_start_date=%s,lifecycle_version=%s "
+    "WHERE case_no=%s AND lifecycle_version=%s "
+    "AND NOT EXISTS(SELECT 1 FROM order_service_data_locks service_lock "
+    "WHERE service_lock.case_no=orders.case_no)"
+)
+
 _ORDER_UPDATE_SQL = (
     "UPDATE orders SET actual_start_date=%s,actual_end_date=%s,"
-    "staff_payment_due_date=COALESCE(staff_payment_due_date,%s),status=%s,"
+    "status=%s,"
     "lifecycle_version=%s WHERE case_no=%s AND lifecycle_version=%s"
 )
 
