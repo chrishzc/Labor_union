@@ -9,7 +9,7 @@ from enum import Enum
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pymysql.err import OperationalError
 
 from api.dependencies.admin_auth import require_system_admin
@@ -107,12 +107,19 @@ class OrderTermsApplyBody(OrderTermsPreviewRequest):
         max_length=64,
         pattern=r"^[0-9a-f]{64}$",
     )
-    reason: str = Field(min_length=1, max_length=500)
+    requires_formal_apply: bool
+    reason: str | None = Field(default=None, min_length=1, max_length=500)
 
     @field_validator("reason")
     @classmethod
-    def validate_reason(cls, value: str) -> str:
-        return require_canonical_text(value, "terms change reason", 500)
+    def validate_reason(cls, value: str | None) -> str | None:
+        return None if value is None else require_canonical_text(value, "terms change reason", 500)
+
+    @model_validator(mode="after")
+    def validate_formal_reason(self):
+        if self.requires_formal_apply and self.reason is None:
+            raise ValueError("formal terms Apply requires a reason")
+        return self
 
 
 @router.get(
@@ -166,9 +173,9 @@ def apply_order_terms(
     body: OrderTermsApplyBody,
     case_no: str = Path(..., min_length=1, max_length=50),
     idempotency_key: Annotated[
-        str,
+        str | None,
         Header(alias="Idempotency-Key", min_length=1, max_length=191),
-    ] = ...,
+    ] = None,
     correlation_id: Annotated[
         str,
         Header(alias="X-Correlation-ID", min_length=1, max_length=191),
@@ -176,6 +183,8 @@ def apply_order_terms(
     principal: AdminPrincipal = Depends(require_system_admin),
     application: OrderTermsApplication = Depends(get_order_terms_application),
 ):
+    if body.requires_formal_apply and idempotency_key is None:
+        raise HTTPException(status_code=422, detail="Formal Terms Apply requires Idempotency-Key.")
     request = _apply_request(
         case_no,
         body,
@@ -200,10 +209,11 @@ def _apply_request(case_no, body, key, correlation, principal):
         ExpectedVersion(body.expected_client_finance_version),
         ExpectedVersion(body.expected_payroll_version),
         PreviewFingerprint(body.preview_fingerprint),
-        IdempotencyKey(key),
+        IdempotencyKey(key) if key is not None else None,
         ActorContext(actor_id),
         body.reason,
         CorrelationId(correlation),
+        requires_formal_apply=body.requires_formal_apply,
         **body.replacement_arguments(),
     )
 
@@ -239,6 +249,7 @@ def _preview_payload(preview) -> dict[str, Any]:
         "client_finance_impact": _materialize(preview.client_finance_impact),
         "payroll_impact": _materialize(preview.payroll_impact),
         "lifecycle_impact": _materialize(preview.lifecycle_impact),
+        "requires_formal_apply": preview.requires_formal_apply,
         "preview_fingerprint": preview.fingerprint.value,
     }
 

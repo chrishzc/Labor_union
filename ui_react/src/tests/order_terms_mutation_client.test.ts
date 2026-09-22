@@ -43,6 +43,7 @@ const preview = {
   client_finance_impact: {},
   payroll_impact: {},
   lifecycle_impact: {},
+  requires_formal_apply: true,
   preview_fingerprint: 'a'.repeat(64),
 };
 
@@ -70,6 +71,7 @@ const applyPayload = {
   expected_client_finance_version: 4,
   expected_payroll_version: 5,
   preview_fingerprint: 'a'.repeat(64),
+  requires_formal_apply: true,
   reason: '補登明確料理需求',
 };
 
@@ -149,5 +151,31 @@ describe('orderTermsMutationClient', () => {
     await expect(orderTermsMutationClient.apply('CASE-1', applyPayload, {
       idempotencyKey: 'terms-command-2',
     })).rejects.toThrow('收據案件識別不一致');
+  });
+
+  it('saves an ordinary change without a permanent command header', async () => {
+    const post = vi.spyOn(transport, 'post').mockResolvedValueOnce({
+      success: true,
+      message: 'ok',
+      data: { ...receipt, scheduling_version: 3, scheduling_generation: 1 },
+      error: null,
+    });
+    const ordinaryPayload = {
+      ...applyPayload,
+      requires_formal_apply: false,
+      reason: undefined,
+    };
+
+    await orderTermsMutationClient.apply('CASE-1', ordinaryPayload, {
+      correlationId: 'terms-ordinary-1',
+    });
+
+    expect(post).toHaveBeenCalledWith(
+      '/api/v1/orders/CASE-1/terms/apply',
+      expect.not.objectContaining({ reason: expect.anything() }),
+      expect.objectContaining({
+        headers: { 'X-Correlation-ID': 'terms-ordinary-1' },
+      }),
+    );
   });
 });

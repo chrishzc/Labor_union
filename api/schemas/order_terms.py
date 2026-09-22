@@ -63,6 +63,7 @@ class OrderTermsPreviewView(BaseModel):
     client_finance_impact: dict[str, Any]
     payroll_impact: dict[str, Any]
     lifecycle_impact: dict[str, Any]
+    requires_formal_apply: bool
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 

@@ -70,6 +70,7 @@ export const OrderTermsPreviewSchema = z.strictObject({
   client_finance_impact: z.record(z.string(), z.unknown()),
   payroll_impact: z.record(z.string(), z.unknown()),
   lifecycle_impact: z.record(z.string(), z.unknown()),
+  requires_formal_apply: z.boolean(),
   preview_fingerprint: FingerprintSchema,
 });
 
@@ -101,8 +102,17 @@ export const OrderTermsApplyPayloadSchema = OrderTermsPreviewPayloadSchema.exten
   expected_client_finance_version: VersionSchema,
   expected_payroll_version: VersionSchema,
   preview_fingerprint: FingerprintSchema,
-  reason: z.string().trim().min(1).max(500),
-}).strict();
+  requires_formal_apply: z.boolean(),
+  reason: z.string().trim().min(1).max(500).optional(),
+}).strict().superRefine((value, context) => {
+  if (value.requires_formal_apply && value.reason === undefined) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['reason'],
+      message: '正式條款異動必須提供原因。',
+    });
+  }
+});
 
 export type OrderTermsQuery = z.infer<typeof OrderTermsQuerySchema>;
 export type OrderTermsPreview = z.infer<typeof OrderTermsPreviewSchema>;
@@ -118,7 +128,7 @@ export interface OrderTermsRequestOptions {
 }
 
 export interface OrderTermsApplyOptions extends OrderTermsRequestOptions {
-  idempotencyKey: string;
+  idempotencyKey?: string;
 }
 
 const envelope = <T extends z.ZodTypeAny>(schema: T) => z.strictObject({
@@ -213,7 +223,9 @@ export const orderTermsMutationClient = {
   ): Promise<OrderTermsReceipt> {
     const canonical = caseIdentity(caseNo);
     const parsed = OrderTermsApplyPayloadSchema.parse(payload);
-    const key = commandKey(source?.idempotencyKey);
+    const key = source?.idempotencyKey === undefined
+      ? undefined
+      : commandKey(source.idempotencyKey);
     const endpoint = `/api/v1/orders/${encodeURIComponent(canonical)}/terms/apply`;
     const correlation = source?.correlationId
       ?? `orders-terms-apply-${canonical}-${Date.now()}`;
@@ -223,7 +235,7 @@ export const orderTermsMutationClient = {
         parsed,
         options(source, {
           'X-Correlation-ID': correlation,
-          'Idempotency-Key': key,
+          ...(key ? { 'Idempotency-Key': key } : {}),
         }),
       ));
       if (result.case_no !== canonical) throw new Error('訂單條款收據案件識別不一致。');

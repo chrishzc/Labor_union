@@ -61,6 +61,7 @@ beforeEach(() => {
       client_finance_impact: {},
       payroll_impact: {},
       lifecycle_impact: {},
+      requires_formal_apply: false,
       preview_fingerprint: 'a'.repeat(64),
     });
   });
@@ -168,13 +169,13 @@ describe('Issue #337 empty service time', () => {
 
     fireEvent.change(screen.getByLabelText('Beta 計畫服務開始日'), { target: { value: '2026-10-02' } });
     fireEvent.click(previewButton());
-    fireEvent.change(await screen.findByLabelText('Beta 條款變更原因'), {
-      target: { value: 'test date correction' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: '確認套用訂單條款' }));
+    fireEvent.click(await screen.findByRole('button', { name: '確認保存訂單條款' }));
 
     await waitFor(() => expect(onObserved).toHaveBeenCalledTimes(1));
     expect(vi.mocked(orderTermsMutationClient.apply).mock.calls[0][1].proposed_terms.service_time).toEqual(emptyTime);
+    expect(vi.mocked(orderTermsMutationClient.apply).mock.calls[0][1].reason).toBeUndefined();
+    expect(vi.mocked(orderTermsMutationClient.apply).mock.calls[0][1].requires_formal_apply).toBe(false);
+    expect(vi.mocked(orderTermsMutationClient.apply).mock.calls[0][2].idempotencyKey).toBeUndefined();
     expect(screen.getByLabelText('Beta 每日開始時間')).toHaveProperty('value', '');
     fireEvent.change(screen.getByLabelText('Beta 計畫服務開始日'), { target: { value: '2026-10-03' } });
     expect(previewButton()).toHaveProperty('disabled', false);

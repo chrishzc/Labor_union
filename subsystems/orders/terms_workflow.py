@@ -63,16 +63,20 @@ class OrderTermsApplyRequest:
     expected_client_finance_version: Any
     expected_payroll_version: Any
     preview_fingerprint: Any
-    idempotency_key: Any
+    idempotency_key: Any | None
     actor: Any
-    reason: str
+    reason: str | None
     correlation_id: Any
     replacement_service_dates: tuple[date, ...] | None = None
     replacement_allocations: tuple[tuple[int, int], ...] = ()
+    requires_formal_apply: bool = True
 
     def __post_init__(self) -> None:
         require_canonical_text(self.case_no, "case number", 50)
-        require_canonical_text(self.reason, "terms change reason", 500)
+        if self.reason is not None:
+            require_canonical_text(self.reason, "terms change reason", 500)
+        if self.requires_formal_apply and (self.idempotency_key is None or self.reason is None):
+            raise ValueError("formal terms Apply requires idempotency key and reason")
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +96,7 @@ class OrderTermsPreview:
     confirmed_service_date_candidate: ConfirmedServiceDateCandidate | None
     confirmed_service_date_current_version: int | None
     fingerprint: Any
+    requires_formal_apply: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -227,7 +232,7 @@ class OrderTermsWorkflow:
         )
 
     def apply(self, request: OrderTermsApplyRequest) -> Any:
-        command_fingerprint = _command_fingerprint(request)
+        command_fingerprint = _command_fingerprint(request) if request.requires_formal_apply else None
         staff_ids = self._repository.preflight_impacted_staff_ids(request.case_no)
         with self._unit_of_work_factory() as unit_of_work:
             receipt = self._apply_in_current_uow(
@@ -237,18 +242,22 @@ class OrderTermsWorkflow:
             return receipt
 
     def apply_in_current_uow(self, request: OrderTermsApplyRequest) -> Any:
-        command_fingerprint = _command_fingerprint(request)
+        command_fingerprint = _command_fingerprint(request) if request.requires_formal_apply else None
         staff_ids = self._repository.preflight_impacted_staff_ids(request.case_no)
         return self._apply_in_current_uow(request, command_fingerprint, staff_ids)
 
     def _apply_in_current_uow(self, request, command_fingerprint, staff_ids):
-        replay = self._claim_or_replay(request, command_fingerprint)
-        if replay is not None:
-            return replay
+        if request.requires_formal_apply:
+            replay = self._claim_or_replay(request, command_fingerprint)
+            if replay is not None:
+                return replay
         facts = self._repository.load_for_apply(request.case_no, staff_ids)
         preview = self._fresh_preview(request, facts, staff_ids)
         receipt = _build_receipt(preview)
-        self._persist(request, preview, command_fingerprint, receipt)
+        if preview.requires_formal_apply:
+            self._persist(request, preview, command_fingerprint, receipt)
+        else:
+            self._persist_ordinary(request, preview, receipt)
         return receipt
 
     def _claim_or_replay(self, request, command_fingerprint):
@@ -288,6 +297,13 @@ class OrderTermsWorkflow:
         preview = self._build_preview(facts, request.proposed_terms,
                                       request.replacement_service_dates,
                                       request.replacement_allocations)
+        if preview.requires_formal_apply != request.requires_formal_apply:
+            raise _workflow_error(
+                request,
+                ErrorCategory.CONFLICT,
+                "terms_apply_mode_changed",
+                "The Terms Apply mode changed after Preview.",
+            )
         if preview.fingerprint != request.preview_fingerprint:
             raise _workflow_error(
                 request,
@@ -329,6 +345,19 @@ class OrderTermsWorkflow:
         )
         return _preview_result(facts, proposed_terms, scheduling, client_finance, payroll, lifecycle,
                                replacement_service_dates)
+
+    def _persist_ordinary(self, request, preview, receipt):
+        self._repository.update_order_terms(
+            OrderTermsPersistenceCommand(
+                case_no=request.case_no,
+                terms=request.proposed_terms,
+                expected_order_version=preview.order_version,
+                resulting_order_version=receipt.order_version,
+                planned_end_date=preview.planned_end_date,
+                actual_end_date=preview.lifecycle_impact.actual_end_date,
+                lifecycle_status=preview.lifecycle_impact.after_status,
+            )
+        )
 
     def _persist(self, request, preview, command_fingerprint, receipt):
         event_id = self._repository.append_terms_event(request, preview)
@@ -409,7 +438,6 @@ class OrderTermsWorkflow:
                 correlation_id=request.correlation_id,
             )
         )
-
 
 def _replacement_facts(facts, terms, dates, allocations):
     if dates is None:
@@ -517,6 +545,13 @@ def _preview_result(
     )
     if replacement_service_dates is not None:
         planned_end_date = replacement_service_dates[-1]
+    requires_formal_apply = _requires_formal_apply(
+        facts,
+        client_finance,
+        payroll,
+        lifecycle,
+        confirmed_service_date_candidate,
+    )
     return OrderTermsPreview(
         before=facts.order.terms,
         after=proposed_terms,
@@ -532,6 +567,7 @@ def _preview_result(
         planned_end_date=planned_end_date,
         confirmed_service_date_candidate=confirmed_service_date_candidate,
         confirmed_service_date_current_version=facts.confirmed_service_date_version,
+        requires_formal_apply=requires_formal_apply,
         fingerprint=fingerprint_payload(
             _preview_fingerprint_payload(
                 facts,
@@ -568,6 +604,13 @@ def _preview_fingerprint_payload(
         "client_finance": client_finance.fingerprint.value,
         "payroll": payroll.fingerprint.value,
         "lifecycle": lifecycle.fingerprint.value,
+        "requires_formal_apply": _requires_formal_apply(
+            facts,
+            client_finance,
+            payroll,
+            lifecycle,
+            confirmed_service_date_candidate,
+        ),
         "planned_end_date": (
             planned_end_date.isoformat()
             if planned_end_date is not None
@@ -593,20 +636,54 @@ def _scheduling_payload(scheduling):
 
 def _build_receipt(preview):
     assignments = preview.scheduling.assignments
+    scheduling_version = (
+        preview.scheduling.resulting_aggregate_version
+        if preview.requires_formal_apply
+        else preview.scheduling_version
+    )
+    scheduling_generation = (
+        preview.scheduling.generation_number
+        if preview.requires_formal_apply
+        else preview.scheduling_generation
+    )
     return OrderTermsReceipt(
         preview.scheduling.case_no,
         preview.order_version + 1,
-        preview.scheduling.resulting_aggregate_version,
-        preview.scheduling.generation_number,
-        preview.client_finance_impact.resulting_account_version,
-        preview.payroll_impact.resulting_payroll_version,
+        scheduling_version,
+        scheduling_generation,
+        (
+            preview.client_finance_impact.resulting_account_version
+            if preview.requires_formal_apply and preview.client_finance_impact is not None
+            else preview.client_finance_version
+        ),
+        (
+            preview.payroll_impact.resulting_payroll_version
+            if preview.requires_formal_apply and preview.payroll_impact is not None
+            else preview.payroll_version
+        ),
         preview.lifecycle_impact.after_status,
-        preview.lifecycle_impact.service_data_lock_should_exist and not preview.lifecycle_impact.service_data_lock_was_present,
-        preview.scheduling.cancelled_assignment_ids,
-        tuple(item.candidate_key for item in assignments),
-        sum(len(item.service_dates) for item in assignments),
-        sum(item.actual_hours for item in assignments),
+        (
+            preview.requires_formal_apply
+            and preview.lifecycle_impact.service_data_lock_should_exist
+            and not preview.lifecycle_impact.service_data_lock_was_present
+        ),
+        preview.scheduling.cancelled_assignment_ids if preview.requires_formal_apply else (),
+        tuple(item.candidate_key for item in assignments) if preview.requires_formal_apply else (),
+        sum(len(item.service_dates) for item in assignments) if preview.requires_formal_apply else 0,
+        sum(item.actual_hours for item in assignments) if preview.requires_formal_apply else 0,
         preview.fingerprint,
+    )
+
+
+def _requires_formal_apply(facts, client_finance, payroll, lifecycle, confirmed_dates):
+    return bool(
+        facts.scheduling.segments
+        or confirmed_dates is not None
+        or (client_finance is not None and _client_finance_impact_mutates(client_finance))
+        or (payroll is not None and _payroll_impact_mutates(payroll))
+        or lifecycle.after_status != lifecycle.before_status
+        or lifecycle.service_data_lock_should_exist != lifecycle.service_data_lock_was_present
+        or lifecycle.alert_codes
     )
 
 

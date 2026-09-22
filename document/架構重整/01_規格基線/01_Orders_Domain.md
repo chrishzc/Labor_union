@@ -8,7 +8,7 @@ Orders 擁有：
 - Order Terms：`start_date`、`service_days`、`service_hours_per_day`、`requires_cooking`、`floor_fee`、統一服務時段三欄；
 - `actual_start_date` 的首次確認與更正；無正式 Scheduling 時以 Orders aggregate
   current root 保存，已有正式安排或延遲訂金重新確認時才使用對應正式事件；
-- Terms change、cancellation、controlled reopen、lifecycle transition 等不可變事件；
+- 會形成 Scheduling／Finance／Payroll／lifecycle 正式影響的 Terms change，以及 cancellation、controlled reopen、lifecycle transition 等不可變事件；
 - aggregate version、命令冪等 receipt；
 - `status`、`end_date`、`actual_end_date` 與服務資料鎖的目前投影。
 
@@ -24,7 +24,7 @@ Orders 不擁有：
 
 | 資料 | 類型 | 唯一權威 |
 |---|---|---|
-| Order Terms | root_fact | 最新有效 Terms event 及 Orders aggregate |
+| Order Terms | root_fact | Orders aggregate；有正式跨 owner／lifecycle 影響的變更另有最新有效 Terms event |
 | 下廚需求 | root_fact | Case Import 明確正規化結果或後續 Orders Terms event；不得於 Matching 重新解析問卷 |
 | 每日服務時間 | root_fact | `service_start_time`、`service_end_time`、`service_end_day_offset` 三欄完整 tuple |
 | actual start | root_fact | 無正式 Scheduling 時為 Orders aggregate current root；已有正式安排的更正或延遲訂金重新確認為 Actual Start event |
@@ -154,20 +154,18 @@ Preview 輸入接受 Terms 根事實意圖。依 Issue #326 的本機修復授�
 
 - before／after；
 - assignment 與 schedule 重建候選；
-- planned／actual end、hours、樓層費及兩端未核銷投影差異；
-- blockers、aggregate version、fingerprint。
+- planned／actual end、hours、樓層費，以及本次實際受影響的兩端未核銷投影差異；
+- blockers、aggregate version、fingerprint，以及 server 衍生的 `requires_formal_apply`。
 
 Apply：
 
-1. 驗證 actor、reason、idempotency key、expected version。
+1. 驗證 actor、expected version，以及 request 回傳的 `requires_formal_apply` 與 fresh Preview 一致；不得由前端自行降級。
 2. 鎖定並讀取 fresh Orders、Scheduling 與 Finance facts。
 3. 以相同 candidate builder 重建 Preview。
 4. 驗證 fingerprint。
-5. 追加 Terms event。
-6. 委派 Scheduling 取消全部舊有效 assignments 並建立新資料。
-7. 委派兩端 Finance 重算未核銷投影。
-8. 重評 lifecycle，寫 audit、outbox 與 receipt。
-9. 單一 commit。
+5. 若變更不形成 Scheduling、confirmed service dates、Finance、Payroll 或 lifecycle 正式影響，走普通保存：只更新 Orders Terms 與 aggregate version，回傳當次 HTTP result；不要求 reason／idempotency key，不建立 command claim、Terms／lifecycle event、audit／outbox、snapshot／history 或永久 receipt，也不呼叫其他 owner writer。
+6. 若 `requires_formal_apply=true`，才要求 reason 與 idempotency key、追加 Terms event、委派 Scheduling replacement、按實際影響委派 Finance／Payroll、重評 lifecycle，並保存 audit／outbox／永久 receipt。
+7. 兩種分支皆由同一 outer Unit of Work 單一 commit；普通保存若 transport 結果不明，client 必須重新 Query 比對 current Orders version／Terms，不得以同一或新 key 盲目重播。
 
 每日服務時間 tuple 契約：
 

@@ -183,12 +183,19 @@ def _snapshot(connection):
             (_CASE_NO,),
         )
         order = dict(cursor.fetchone())
-        cursor.execute(
-            "SELECT COUNT(*) AS total FROM order_terms_change_events WHERE case_no=%s",
-            (_CASE_NO,),
-        )
-        event_count = int(cursor.fetchone()["total"])
-    return order, event_count
+        counts = {}
+        for name, statement in {
+            "terms_events": "SELECT COUNT(*) AS total FROM order_terms_change_events WHERE case_no=%s",
+            "terms_receipts": "SELECT COUNT(*) AS total FROM order_terms_apply_receipts WHERE case_no=%s",
+            "lifecycle_events": "SELECT COUNT(*) AS total FROM order_lifecycle_state_events WHERE case_no=%s",
+            "command_claims": (
+                "SELECT COUNT(*) AS total FROM application_command_claims "
+                "WHERE command_family='orders_terms' AND aggregate_identity=%s"
+            ),
+        }.items():
+            cursor.execute(statement, (_CASE_NO,))
+            counts[name] = int(cursor.fetchone()["total"])
+    return order, counts
 
 
 def _client(connection) -> TestClient:
@@ -230,6 +237,7 @@ def _preview(client, terms):
 
 
 def _apply(client, query, preview, terms, key):
+    requires_formal_apply = preview["requires_formal_apply"]
     return client.post(
         f"/api/v1/orders/{_CASE_NO}/terms/apply",
         json={
@@ -239,9 +247,17 @@ def _apply(client, query, preview, terms, key):
             "expected_client_finance_version": query["client_finance_version"],
             "expected_payroll_version": query["payroll_version"],
             "preview_fingerprint": preview["preview_fingerprint"],
-            "reason": "Issue 337 disposable acceptance",
+            "requires_formal_apply": requires_formal_apply,
+            **(
+                {"reason": "Issue 337 disposable acceptance"}
+                if requires_formal_apply
+                else {}
+            ),
         },
-        headers={"Idempotency-Key": key, "X-Correlation-ID": key},
+        headers={
+            "X-Correlation-ID": key,
+            **({"Idempotency-Key": key} if requires_formal_apply else {}),
+        },
     )
 
 
@@ -261,12 +277,15 @@ def test_empty_service_time_round_trips_through_http_application_and_mysql():
 
         changed = {**query["terms"], "planned_start_date": "2026-10-02"}
         preview = _preview(client, changed)
+        assert preview["requires_formal_apply"] is False
         assert _snapshot(connection) == before
         receipt = _data(_apply(client, query, preview, changed, "issue337-empty-apply"))
         readback = _data(client.get(f"/api/v1/orders/{_CASE_NO}/terms"))
-        after, event_count = _snapshot(connection)
+        after, permanent_counts = _snapshot(connection)
 
         assert receipt["order_version"] == query["order_version"] + 1
+        assert receipt["scheduling_version"] == query["scheduling_version"]
+        assert receipt["scheduling_generation"] == query["scheduling_generation"]
         assert readback["terms"] == changed
         assert after["service_start_time"] is None
         assert after["service_end_time"] is None
@@ -275,7 +294,7 @@ def test_empty_service_time_round_trips_through_http_application_and_mysql():
         assert after["service_hours_per_day"] == before[0]["service_hours_per_day"]
         assert after["requires_cooking"] == before[0]["requires_cooking"]
         assert after["floor_fee"] == before[0]["floor_fee"]
-        assert event_count == before[1] + 1
+        assert permanent_counts == before[1]
 
         complete = {
             **readback["terms"],

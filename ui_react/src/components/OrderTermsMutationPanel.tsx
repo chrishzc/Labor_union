@@ -175,13 +175,14 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
   const [receipt, setReceipt] = useState<OrderTermsReceipt | null>(null);
   const [readback, setReadback] = useState<OrderTerms | null>(null);
   const [reason, setReason] = useState('');
+  const [ordinaryApplied, setOrdinaryApplied] = useState(false);
   const [replacementDates, setReplacementDates] = useState<string[] | null>(null);
   const [serviceMode, setServiceMode] = useState<SchedulePrecisionRequest['service_mode'] | ''>('');
   const [allocations, setAllocations] = useState<Record<number, string>>({});
   const [status, setStatus] = useState<'idle' | 'previewing' | 'applying' | 'calculating' | 'reading'>('idle');
   const [error, setError] = useState<string | null>(null);
   const submittedTarget = useRef<OrderTermsApplyPayload | null>(null);
-  const pendingCommand = useRef<{ payload: OrderTermsApplyPayload; key: string } | null>(null);
+  const pendingCommand = useRef<{ payload: OrderTermsApplyPayload; key?: string } | null>(null);
   const [outcomeUnknown, setOutcomeUnknown] = useState(false);
   const mounted = useRef(false);
   const activeCase = useRef(caseNo);
@@ -236,6 +237,7 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
     setReceipt(null);
     setReadback(null);
     setReason('');
+    setOrdinaryApplied(false);
     setError(null);
     setStatus('idle');
   }, [caseNo, query, queryRevision, observedRevision, receipt, readback]);
@@ -382,6 +384,7 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
     setStatus('previewing');
     setError(null);
     setReceipt(null);
+    setOrdinaryApplied(false);
     try {
       const nextPreview = await orderTermsMutationClient.preview(
         caseNo,
@@ -403,29 +406,40 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
   };
 
   const applyTerms = async () => {
-    if (!preview || !reason.trim() || currentQuery.service_data_locked) return;
+    if (!preview || (preview.requires_formal_apply && !reason.trim()) || currentQuery.service_data_locked) return;
     setStatus('applying');
     setError(null);
     setReadback(null);
     try {
-      if (pendingCommand.current === null) pendingCommand.current = {
-        payload: {
+      if (pendingCommand.current === null) {
+        const payload: OrderTermsApplyPayload = {
           ...proposedTermsPayload(),
           expected_order_version: preview.order_version,
           expected_scheduling_version: preview.scheduling_version,
           expected_client_finance_version: preview.client_finance_version,
           expected_payroll_version: preview.payroll_version,
           preview_fingerprint: preview.preview_fingerprint,
-          reason: reason.trim(),
-        },
-        key: `orders-terms-ui-${caseNo}-${crypto.randomUUID()}`,
-      };
+          requires_formal_apply: preview.requires_formal_apply,
+          ...(preview.requires_formal_apply ? { reason: reason.trim() } : {}),
+        };
+        pendingCommand.current = {
+          payload,
+          ...(preview.requires_formal_apply
+            ? { key: `orders-terms-ui-${caseNo}-${crypto.randomUUID()}` }
+            : {}),
+        };
+      }
       const command = pendingCommand.current;
       submittedTarget.current = command.payload;
-      const nextReceipt = await orderTermsMutationClient.apply(caseNo, command.payload, { idempotencyKey: command.key });
+      const nextReceipt = await orderTermsMutationClient.apply(
+        caseNo,
+        command.payload,
+        command.key ? { idempotencyKey: command.key } : {},
+      );
       if (!mounted.current || activeCase.current !== caseNo) return;
       pendingCommand.current = null; setOutcomeUnknown(false);
       setReceipt(nextReceipt);
+      setOrdinaryApplied(!command.payload.requires_formal_apply);
       setPreview(null);
       setReason('');
       await observeReceipt(nextReceipt);
@@ -438,6 +452,33 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
         setPreview(null);
         setReason('');
         setError(conflict);
+      } else if (pendingCommand.current?.payload.requires_formal_apply === false) {
+        const target = pendingCommand.current.payload;
+        pendingCommand.current = null;
+        setOutcomeUnknown(false);
+        setPreview(null);
+        setReason('');
+        try {
+          const refreshed = await orderTermsMutationClient.query(caseNo);
+          if (!mounted.current || activeCase.current !== caseNo) return;
+          const expected = target.proposed_terms;
+          const termsDiffer = Object.entries(expected).some(([key, value]) => key === 'service_time'
+            ? Object.entries(value as Record<string, unknown>).some(([part, item]) => refreshed.terms.service_time[part as keyof typeof refreshed.terms.service_time] !== item)
+            : refreshed.terms[key as keyof typeof expected] !== value);
+          if (refreshed.case_no !== caseNo || refreshed.order_version <= target.expected_order_version || termsDiffer) {
+            throw new Error('目前正式資料尚未反映本次變更。');
+          }
+          setReadback(refreshed);
+          setDraft(draftFromQuery(refreshed));
+          setReplacementDates(null);
+          setOrdinaryApplied(true);
+          onObserved?.();
+        } catch (readError) {
+          if (mounted.current && activeCase.current === caseNo) {
+            setOrdinaryApplied(false);
+            setError(`送出結果尚未確認；已停止自動重送，請先重新整理正式資料：${errorMessage(readError, '無法重新取得訂單條款。')}`);
+          }
+        }
       } else {
         setOutcomeUnknown(true);
         setError(`送出結果尚未確認，請重播同一筆提交以取得結果：${errorMessage(caught, '無法確認套用訂單條款。')}`);
@@ -581,20 +622,23 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
           )}
           <p>時段：{preview.before.service_time.start_time}～{preview.before.service_time.end_time} → {preview.after.service_time.start_time}～{preview.after.service_time.end_time}</p>
           <p>版本：Order {preview.order_version} · Scheduling {preview.scheduling_version} · Client Finance {preview.client_finance_version} · Payroll {preview.payroll_version}</p>
-          <label>變更原因（稽核必填）
+          {preview.requires_formal_apply && <label>變更原因（正式影響必填）
             <textarea aria-label="Beta 條款變更原因" rows={2} maxLength={500} value={reason} disabled={locked} onChange={(event) => setReason(event.target.value)} />
-          </label>
+          </label>}
           <div className="order-v2-drawer-actions" style={{ marginTop: '8px' }}>
-            <button type="button" disabled={locked || reason.trim().length === 0} onClick={() => void applyTerms()}>
-              {status === 'applying' ? '條款套用中…' : '確認套用訂單條款'}
+            <button type="button" disabled={locked || (preview.requires_formal_apply && reason.trim().length === 0)} onClick={() => void applyTerms()}>
+              {status === 'applying' ? '條款保存中…' : '確認保存訂單條款'}
             </button>
           </div>
         </div>
       )}
 
       {outcomeUnknown && <button type="button" disabled={status !== 'idle'} onClick={() => void applyTerms()}>重播同一筆條款提交</button>}
-      {receipt && readback && (
+      {receipt && readback && !ordinaryApplied && (
         <p role="status">條款已套用並完成正式回讀；Order version {readback.order_version}，合約服務 {readback.terms.service_days} 日。</p>
+      )}
+      {ordinaryApplied && readback && (
+        <p role="status">條款已保存並完成正式回讀；Order version {readback.order_version}，合約服務 {readback.terms.service_days} 日。</p>
       )}
       {receipt && !readback && (
         <div><p role="status">條款已提交、尚未確認正式讀回；Order version {receipt.order_version}。</p>

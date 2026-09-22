@@ -169,7 +169,7 @@ async function previewAndApply(panel: HTMLElement) {
   fireEvent.click(within(panel).getByRole('button', { name: '檢查訂單條款變更' }));
   await waitFor(() => expect(mocks.previewTerms).toHaveBeenCalled());
   fireEvent.change(within(panel).getByLabelText('Beta 條款變更原因'), { target: { value: '客戶確認延長一天' } });
-  fireEvent.click(within(panel).getByRole('button', { name: '確認套用訂單條款' }));
+  fireEvent.click(within(panel).getByRole('button', { name: '確認保存訂單條款' }));
 }
 
 describe('待辦看板 Beta 第 1 階訂單條款操作', () => {
@@ -225,6 +225,7 @@ describe('待辦看板 Beta 第 1 階訂單條款操作', () => {
       client_finance_impact: {},
       payroll_impact: {},
       lifecycle_impact: {},
+      requires_formal_apply: true,
       preview_fingerprint: 'a'.repeat(64),
     });
     mocks.applyTerms.mockResolvedValue({
@@ -267,7 +268,7 @@ describe('待辦看板 Beta 第 1 階訂單條款操作', () => {
     expect(within(panel).getByText(/版本：Order 12 · Scheduling 13 · Client Finance 5 · Payroll 6/)).toBeInTheDocument();
 
     fireEvent.change(within(panel).getByLabelText('Beta 條款變更原因'), { target: { value: '客戶確認延長一天' } });
-    fireEvent.click(within(panel).getByRole('button', { name: '確認套用訂單條款' }));
+    fireEvent.click(within(panel).getByRole('button', { name: '確認保存訂單條款' }));
 
     await waitFor(() => expect(mocks.applyTerms).toHaveBeenCalledWith(
       'CASE-TERMS',
@@ -277,6 +278,7 @@ describe('待辦看板 Beta 第 1 階訂單條款操作', () => {
         expected_client_finance_version: 5,
         expected_payroll_version: 6,
         preview_fingerprint: 'a'.repeat(64),
+        requires_formal_apply: true,
         reason: '客戶確認延長一天',
         proposed_terms: expect.objectContaining({ service_days: 21 }),
       }),
@@ -314,7 +316,7 @@ describe('待辦看板 Beta 第 1 階訂單條款操作', () => {
     expect(await within(panel).findByRole('alert')).toHaveTextContent(
       '預覽已過期：正式資料已變更，請重新檢查條款變更後再套用。',
     );
-    expect(within(panel).queryByRole('button', { name: '確認套用訂單條款' })).not.toBeInTheDocument();
+    expect(within(panel).queryByRole('button', { name: '確認保存訂單條款' })).not.toBeInTheDocument();
     expect(mocks.queryTerms).not.toHaveBeenCalled();
   });
 
@@ -330,7 +332,7 @@ describe('待辦看板 Beta 第 1 階訂單條款操作', () => {
     expect(await within(panel).findByRole('alert')).toHaveTextContent(
       '版本已變更：正式資料已更新，請重新檢查條款變更後再套用。',
     );
-    expect(within(panel).queryByRole('button', { name: '確認套用訂單條款' })).not.toBeInTheDocument();
+    expect(within(panel).queryByRole('button', { name: '確認保存訂單條款' })).not.toBeInTheDocument();
     expect(mocks.queryTerms).not.toHaveBeenCalled();
   });
 
@@ -500,7 +502,7 @@ describe('Issue326 replacement dates and allocation from the Terms UI', () => {
       actual_start_date: '2026-10-01', actual_end_date: '2026-10-30', target_service_days: 30, total_calendar_days: 30, actual_work_days_count: 30, rest_days_count: 0, national_holidays_found: [], total_estimated_salary: null, weekly_stats: [],
       day_by_day: dates.map((date, i) => ({ date, day_num: i+1, is_work_day: true, is_rest_day: false, holiday_name: null })),
     });
-    mocks.previewTerms.mockImplementation(async (_case, payload) => ({ before: query.terms, after: payload.proposed_terms, order_version: 12, scheduling_version: 13, scheduling_generation: 2, client_finance_version: 5, payroll_version: 6, scheduling: {}, client_finance_impact: {}, payroll_impact: {}, lifecycle_impact: {}, preview_fingerprint: 'a'.repeat(64) }));
+    mocks.previewTerms.mockImplementation(async (_case, payload) => ({ before: query.terms, after: payload.proposed_terms, order_version: 12, scheduling_version: 13, scheduling_generation: 2, client_finance_version: 5, payroll_version: 6, scheduling: {}, client_finance_impact: {}, payroll_impact: {}, lifecycle_impact: {}, requires_formal_apply: true, preview_fingerprint: 'a'.repeat(64) }));
     mocks.applyTerms.mockResolvedValue({ case_no: 'CASE-TERMS', order_version: 13, scheduling_version: 14, scheduling_generation: 3, client_finance_version: 5, payroll_version: 6, lifecycle_status: '洽談中', service_data_lock_formed: false, cancelled_assignment_ids: assigned ? [9, 10] : [], created_assignment_keys: [], official_service_day_count: assigned ? 30 : 0, official_service_hours: assigned ? 270 : 0, preview_fingerprint: 'a'.repeat(64) });
     mocks.queryTerms.mockImplementation(async () => ({ ...query, order_version: 13, scheduling_version: 14, terms: mocks.applyTerms.mock.calls[0][1].proposed_terms, confirmed_service_dates: dates }));
     if (failure === 'readback') mocks.queryTerms.mockRejectedValueOnce(new Error('readback unavailable'));
@@ -520,7 +522,7 @@ describe('Issue326 replacement dates and allocation from the Terms UI', () => {
     fireEvent.click(screen.getByRole('button', { name: '檢查訂單條款變更' }));
     await screen.findByLabelText('Beta 條款變更原因');
     fireEvent.change(screen.getByLabelText('Beta 條款變更原因'), { target: { value: '合成縮減服務驗收' } });
-    fireEvent.click(screen.getByRole('button', { name: '確認套用訂單條款' }));
+    fireEvent.click(screen.getByRole('button', { name: '確認保存訂單條款' }));
     if (failure === 'readback') {
       await screen.findByText(/條款已套用，但正式回讀失敗/);
       expect(screen.queryByText(/條款已套用並完成正式回讀/)).not.toBeInTheDocument();
