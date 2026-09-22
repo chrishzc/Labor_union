@@ -1,21 +1,14 @@
-name: Business verification 7e12a3e
-
+name: Business verification follow-up
 on:
   push:
     branches: [verify/business-regression-7e12a3e-20260922]
-
 permissions:
   contents: read
-
 jobs:
-  python:
-    name: Python ${{ matrix.mode }}
+  mysql:
+    name: MySQL business cases
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        mode: [unit, mysql]
     env:
       APP_ENV: development
       DB_HOST: 127.0.0.1
@@ -36,17 +29,10 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.11'
-      - name: Record exact verification source
+      - name: Record source and install locked wheel dependencies
         run: |
           mkdir -p "$PROOF_DIR"
           git rev-parse HEAD > "$PROOF_DIR/source-commit.txt"
-          git rev-parse HEAD^{tree} > "$PROOF_DIR/source-tree.txt"
-          if [ '${{ matrix.mode }}' = unit ]; then
-            git archive --format=tar HEAD > "$PROOF_DIR/source.tar"
-          fi
-      - name: Install existing locked runtime and test dependencies without build hooks
-        id: dependencies
-        run: |
           python - <<'PY'
           import tomllib
           from pathlib import Path
@@ -85,30 +71,32 @@ jobs:
           PY
           python -m pip install --disable-pip-version-check --no-input --only-binary=:all: --require-hashes -r /tmp/business-test-requirements.txt > "$PROOF_DIR/dependencies.log" 2>&1 || { tail -60 "$PROOF_DIR/dependencies.log"; exit 1; }
           python -m pip list --format=json > "$PROOF_DIR/installed-packages.json"
-      - name: Execute full existing Python suite without external database configuration
-        if: matrix.mode == 'unit'
-        run: |
-          set +e
-          timeout 900 python -m pytest -q --continue-on-collection-errors --tb=short --durations=20 --junitxml="$PROOF_DIR/python.xml" > "$PROOF_DIR/python.log" 2>&1
-          code=$?
-          echo "$code" > "$PROOF_DIR/python-exit-code.txt"
-          tail -70 "$PROOF_DIR/python.log"
-          exit "$code"
-      - name: Start disposable MySQL matching the existing compose image family
-        if: matrix.mode == 'mysql'
+      - name: Start exact MySQL image and await authenticated host TCP query
         env:
           MYSQL_ROOT_PASSWORD: verification-only
         run: |
-          docker pull mysql:8.0
-          docker image inspect mysql:8.0 --format '{{json .RepoDigests}}' > "$PROOF_DIR/mysql-image.json"
-          docker run -d --name business-verification-mysql -p 127.0.0.1:33306:3306 -e MYSQL_ROOT_PASSWORD -e MYSQL_ROOT_HOST=% mysql:8.0
-          for attempt in $(seq 1 40); do
-            if docker exec -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" business-verification-mysql mysqladmin ping --silent; then exit 0; fi
-            sleep 2
-          done
-          exit 1
-      - name: Verify canonical fresh schema before business integration tests
-        if: matrix.mode == 'mysql'
+          image=mysql@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b
+          docker pull "$image"
+          docker image inspect "$image" --format '{{json .RepoDigests}}' > "$PROOF_DIR/mysql-image.json"
+          docker run -d --name business-verification-mysql -p 127.0.0.1:33306:3306 -e MYSQL_ROOT_PASSWORD -e MYSQL_ROOT_HOST=% "$image"
+          python - <<'PY'
+          import time
+          import pymysql
+          deadline = time.monotonic() + 90
+          while True:
+              try:
+                  connection = pymysql.connect(host='127.0.0.1', port=33306, user='root', password='verification-only', connect_timeout=2, read_timeout=2)
+                  with connection.cursor() as cursor:
+                      cursor.execute('SELECT VERSION()')
+                      print('Authenticated host TCP ready:', cursor.fetchone()[0])
+                  connection.close()
+                  break
+              except pymysql.MySQLError:
+                  if time.monotonic() >= deadline:
+                      raise
+                  time.sleep(2)
+          PY
+      - name: Verify canonical fresh schema
         run: |
           python - <<'PY' > "$PROOF_DIR/mysql-schema.log" 2>&1
           from argparse import Namespace
@@ -117,8 +105,7 @@ jobs:
           result = bootstrap(Namespace(host='127.0.0.1', port=33306, user='root', password='verification-only', database='lu_test_verification_schema', confirm_database='lu_test_verification_schema'))
           print(json.dumps(result, ensure_ascii=False))
           PY
-      - name: Execute existing MySQL cases on distinct synthetic targets
-        if: matrix.mode == 'mysql'
+      - name: Execute unchanged MySQL cases on separate synthetic databases
         run: |
           cat > /tmp/business_mysql_cases.py <<'PY'
           import hashlib
@@ -171,77 +158,53 @@ jobs:
           sys.exit(int(not nodes or collect.returncode != 0 or len(results) != len(nodes) or any(r.get('exit_code', 1) != 0 for r in results)))
           PY
           PYTHONPATH="$PWD" timeout 1200 python /tmp/business_mysql_cases.py
-      - name: Record source changes caused by tests
+      - name: Record source state and destroy only the test container
         if: always()
-        run: git status --short > "$PROOF_DIR/working-tree-after-tests.txt"
-      - name: Remove disposable MySQL container
-        if: always() && matrix.mode == 'mysql'
-        run: docker rm -f business-verification-mysql || true
-      - name: Upload exact test evidence
+        run: |
+          git status --short > "$PROOF_DIR/working-tree-after-tests.txt"
+          docker logs business-verification-mysql > "$PROOF_DIR/mysql-container.log" 2>&1 || true
+          docker rm -f business-verification-mysql || true
+      - name: Upload MySQL evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: business-python-${{ matrix.mode }}-7e12a3e
+          name: business-mysql-tcp-7e12a3e
           path: /tmp/business-proof
           retention-days: 1
           if-no-files-found: error
-
-  frontend:
-    name: React tests build lint
+  frontend-baseline:
+    name: Frontend failure comparison before cleanup
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     env:
       PROOF_DIR: /tmp/business-proof
       CI: 'true'
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: 7e12a3e5b605261311f6339ffe01fb8f13b06b09
+          ref: aa7acaa88d59f40cad2d9b0b1f2cfc44a76634d6
           persist-credentials: false
-      - name: Install locked frontend dependencies without install hooks
-        id: dependencies
+      - name: Install the same locked frontend dependencies
         working-directory: ui_react
         run: |
           mkdir -p "$PROOF_DIR"
           git rev-parse HEAD > "$PROOF_DIR/source-commit.txt"
           node --version > "$PROOF_DIR/node-version.txt"
-          npm --version > "$PROOF_DIR/npm-version.txt"
-          npm ci --ignore-scripts --no-audit --fund=false > "$PROOF_DIR/npm-install.log" 2>&1 || { tail -60 "$PROOF_DIR/npm-install.log"; exit 1; }
-      - name: Run all existing React tests
-        if: always() && steps.dependencies.outcome == 'success'
+          npm ci --ignore-scripts --no-audit --fund=false > "$PROOF_DIR/npm-install.log" 2>&1
+      - name: Run only files that failed on current main
         working-directory: ui_react
         run: |
           set +e
-          timeout 900 npm test -- --reporter=json --outputFile="$PROOF_DIR/frontend.json" --maxWorkers=2 --minWorkers=1 > "$PROOF_DIR/frontend-test.log" 2>&1
+          npm test -- src/tests/orders_mutation_adapter.test.ts src/tests/domains/external-integration/subsystems/line/integration/line_rules_query_flow.test.tsx src/tests/domains/clients/subsystems/client-profile/modules/profile-change/client_registry_client.test.ts --reporter=json --outputFile="$PROOF_DIR/frontend-baseline.json" --maxWorkers=2 --minWorkers=1 > "$PROOF_DIR/frontend-baseline.log" 2>&1
           code=$?
-          echo "$code" > "$PROOF_DIR/frontend-test-exit-code.txt"
-          tail -40 "$PROOF_DIR/frontend-test.log"
+          echo "$code" > "$PROOF_DIR/frontend-baseline-exit-code.txt"
+          tail -30 "$PROOF_DIR/frontend-baseline.log"
           exit "$code"
-      - name: Typecheck and production build
-        if: always() && steps.dependencies.outcome == 'success'
-        working-directory: ui_react
-        run: |
-          set +e
-          npm run build > "$PROOF_DIR/frontend-build.log" 2>&1
-          code=$?
-          echo "$code" > "$PROOF_DIR/frontend-build-exit-code.txt"
-          tail -50 "$PROOF_DIR/frontend-build.log"
-          exit "$code"
-      - name: Run existing frontend lint
-        if: always() && steps.dependencies.outcome == 'success'
-        working-directory: ui_react
-        run: |
-          set +e
-          npm run lint > "$PROOF_DIR/frontend-lint.log" 2>&1
-          code=$?
-          echo "$code" > "$PROOF_DIR/frontend-lint-exit-code.txt"
-          tail -40 "$PROOF_DIR/frontend-lint.log"
-          exit "$code"
-      - name: Upload exact frontend evidence
+      - name: Upload baseline comparison evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: business-frontend-7e12a3e
+          name: business-frontend-baseline-aa7acaa
           path: /tmp/business-proof
           retention-days: 1
           if-no-files-found: error
