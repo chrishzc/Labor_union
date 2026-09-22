@@ -154,7 +154,7 @@ def test_date_only_http_request_rejects_downstream_versions():
     assert response.status_code == 422
 
 
-def test_reschedule_apply_contract_has_only_orders_and_scheduling_versions():
+def test_reschedule_apply_ignores_legacy_finance_and_payroll_versions():
     payload = {
         "operation": "reschedule",
         "new_actual_start_date": "2026-09-02",
@@ -164,10 +164,16 @@ def test_reschedule_apply_contract_has_only_orders_and_scheduling_versions():
         "reason": "確認實際開始日",
     }
 
-    assert ActualStartApplyBody.model_validate(payload).model_dump(
+    legacy_payload = {
+        **payload,
+        "expected_client_finance_version": 2,
+        "expected_payroll_version": 3,
+    }
+
+    assert ActualStartApplyBody.model_validate(legacy_payload).model_dump(
         mode="json", exclude_none=True
     ) == payload
     with pytest.raises(ValidationError):
         ActualStartApplyBody.model_validate(
-            {**payload, "expected_payroll_version": 3}
+            {**payload, "unknown_actual_start_field": 3}
         )

@@ -57,6 +57,18 @@ class ActualStartApplyBody(ActualStartPreviewBody):
     operation: Literal["date_only", "reschedule"] = "reschedule"
     expected_order_version: int = Field(ge=0)
     expected_scheduling_version: int | None = Field(default=None, ge=0)
+    # Rolling-upgrade compatibility only. Actual Start no longer validates or
+    # writes these owners, and the fields are excluded from the command.
+    expected_client_finance_version: int | None = Field(
+        default=None,
+        ge=0,
+        exclude=True,
+    )
+    expected_payroll_version: int | None = Field(
+        default=None,
+        ge=0,
+        exclude=True,
+    )
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     reason: str | None = Field(default=None, min_length=1, max_length=500)
 
@@ -64,7 +76,14 @@ class ActualStartApplyBody(ActualStartPreviewBody):
     def validate_operation_shape(self):
         downstream = (self.expected_scheduling_version,)
         if self.operation == "date_only":
-            if any(value is not None for value in downstream) or self.reason is not None:
+            legacy_downstream = (
+                self.expected_client_finance_version,
+                self.expected_payroll_version,
+            )
+            if (
+                any(value is not None for value in downstream + legacy_downstream)
+                or self.reason is not None
+            ):
                 raise ValueError("date_only_actual_start_has_downstream_fields")
             return self
         if any(value is None for value in downstream) or self.reason is None:

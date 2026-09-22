@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { OrderActualStartPanel } from '../components/OrderActualStartPanel';
 import { ApiHttpError } from '../api/shared/typed_errors';
+import { OrderMutationValidationError } from '../api/orders/order_mutation_errors';
 import type { ActualStart } from '../api/orders/order_query_schemas';
 import type { ActualStartReceipt } from '../api/orders/order_actual_start_client';
 const mocks = vi.hoisted(() => ({ query: vi.fn(), preview: vi.fn(), apply: vi.fn() }));
@@ -78,15 +79,19 @@ describe('Beta 實際開始日正式操作', () => {
   });
 
   it('422 會顯示後端驗證代碼，不再只顯示通用訊息', async () => {
-    mocks.preview.mockRejectedValue(new ApiHttpError(
-      422,
-      'payroll_case_policy_bootstrap_required',
-      '實際開工日請求未通過驗證。',
-    ));
+    mocks.preview.mockRejectedValue(new OrderMutationValidationError({
+      code: 'request_validation_error',
+      message: '請求欄位不符合契約',
+      fieldErrors: [{
+        field: 'body.expected_scheduling_version',
+        code: 'missing',
+        message: '欄位格式不符合契約',
+      }],
+    }));
     render(<OrderActualStartPanel caseNo={CASE} />); await open(); await confirm();
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      '實際開工日請求未通過驗證。（payroll_case_policy_bootstrap_required）',
+      '請求欄位不符合契約（request_validation_error：body.expected_scheduling_version）',
     );
     expect(mocks.apply).not.toHaveBeenCalled();
   });

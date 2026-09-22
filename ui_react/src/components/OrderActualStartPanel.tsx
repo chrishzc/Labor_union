@@ -15,7 +15,12 @@ interface Props {
 type Phase = 'idle' | 'loading' | 'previewing' | 'applying' | 'outcome_unknown' | 'observation_failed' | 'observed';
 const subscribeActualStart = (listener: () => void) => orderMutationFlowStore.subscribe(listener);
 const actualStartErrorMessage = (caught: unknown, fallback: string) => {
-  if (caught instanceof OrderMutationError || caught instanceof ApiHttpError) {
+  if (caught instanceof OrderMutationError) {
+    const fields = caught.fieldErrors.map((item) => item.field).join('、');
+    const suffix = fields ? `${caught.code}：${fields}` : caught.code;
+    return `${caught.message}（${suffix}）`;
+  }
+  if (caught instanceof ApiHttpError) {
     return `${caught.message}（${caught.code}）`;
   }
   return caught instanceof Error ? caught.message : fallback;
