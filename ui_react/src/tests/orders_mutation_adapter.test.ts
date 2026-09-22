@@ -50,26 +50,26 @@ describe('OrderMutationAdapter State Machine & Flow Suite', () => {
     it('服務日期各階段 status 映射至型別完備的 ServiceDatesMachineState', () => {
       expect(resolveServiceDatesMachineState(undefined)).toEqual({ type: 'idle' });
 
-      orderMutationFlowStore.setServiceDatesQueryLoading('CASE-1');
+      orderMutationFlowStore.setServiceDatesQueryLoading('ORD-2026-0801');
       expect(
         resolveServiceDatesMachineState(
-          orderMutationFlowStore.getServiceDatesDraft('CASE-1')
+          orderMutationFlowStore.getServiceDatesDraft('ORD-2026-0801')
         )
-      ).toEqual({ type: 'query_loading', caseNo: 'CASE-1' });
+      ).toEqual({ type: 'query_loading', caseNo: 'ORD-2026-0801' });
 
       orderMutationFlowStore.setServiceDatesQueryReady(
-        'CASE-1',
+        'ORD-2026-0801',
         realisticServiceDateQueryView
       );
       const queryReadyState = resolveServiceDatesMachineState(
-        orderMutationFlowStore.getServiceDatesDraft('CASE-1')
+        orderMutationFlowStore.getServiceDatesDraft('ORD-2026-0801')
       );
       expect(queryReadyState.type).toBe('query_ready');
 
       // 選擇不足天數 -> canPreview: false
-      selectServiceDates('CASE-1', ['2026-09-01']);
+      selectServiceDates('ORD-2026-0801', ['2026-09-01']);
       const draftChangedState1 = resolveServiceDatesMachineState(
-        orderMutationFlowStore.getServiceDatesDraft('CASE-1')
+        orderMutationFlowStore.getServiceDatesDraft('ORD-2026-0801')
       );
       expect(draftChangedState1.type).toBe('draft_changed');
       if (draftChangedState1.type === 'draft_changed') {
@@ -77,48 +77,52 @@ describe('OrderMutationAdapter State Machine & Flow Suite', () => {
       }
 
       // 選滿 3 天 -> canPreview: true
-      selectServiceDates('CASE-1', ['2026-09-01', '2026-09-02', '2026-09-03']);
+      selectServiceDates('ORD-2026-0801', ['2026-09-01', '2026-09-02', '2026-09-03']);
       const draftChangedState2 = resolveServiceDatesMachineState(
-        orderMutationFlowStore.getServiceDatesDraft('CASE-1')
+        orderMutationFlowStore.getServiceDatesDraft('ORD-2026-0801')
       );
       if (draftChangedState2.type === 'draft_changed') {
         expect(draftChangedState2.canPreview).toBe(true);
       }
 
       orderMutationFlowStore.setServiceDatesPreviewReady(
-        'CASE-1',
+        'ORD-2026-0801',
         realisticServiceDatePreviewView
       );
       expect(
         resolveServiceDatesMachineState(
-          orderMutationFlowStore.getServiceDatesDraft('CASE-1')
+          orderMutationFlowStore.getServiceDatesDraft('ORD-2026-0801')
         ).type
       ).toBe('preview_ready');
 
-      orderMutationFlowStore.setServiceDatesApplyPending('CASE-1');
+      orderMutationFlowStore.setServiceDatesApplyPending('ORD-2026-0801');
       expect(
         resolveServiceDatesMachineState(
-          orderMutationFlowStore.getServiceDatesDraft('CASE-1')
+          orderMutationFlowStore.getServiceDatesDraft('ORD-2026-0801')
         ).type
       ).toBe('apply_pending');
 
       orderMutationFlowStore.setServiceDatesReceiptReceived(
-        'CASE-1',
+        'ORD-2026-0801',
         realisticServiceDateReceiptView
       );
       expect(
         resolveServiceDatesMachineState(
-          orderMutationFlowStore.getServiceDatesDraft('CASE-1')
+          orderMutationFlowStore.getServiceDatesDraft('ORD-2026-0801')
         ).type
       ).toBe('receipt_received');
 
       orderMutationFlowStore.setServiceDatesObserved(
-        'CASE-1',
-        realisticServiceDateQueryView
+        'ORD-2026-0801',
+        {
+          ...realisticServiceDateQueryView,
+          current_version: realisticServiceDateReceiptView.confirmed_version,
+          current_dates: realisticServiceDateReceiptView.service_dates,
+        }
       );
       expect(
         resolveServiceDatesMachineState(
-          orderMutationFlowStore.getServiceDatesDraft('CASE-1')
+          orderMutationFlowStore.getServiceDatesDraft('ORD-2026-0801')
         ).type
       ).toBe('observed');
     });
@@ -289,6 +293,7 @@ describe('OrderMutationAdapter State Machine & Flow Suite', () => {
       vi.spyOn(ordersMutationClient, 'getServiceDates').mockResolvedValue({
         ...realisticServiceDateQueryView,
         current_version: 1,
+        current_dates: realisticServiceDateReceiptView.service_dates,
       });
 
       await expect(applyServiceDatesFlow('ORD-2026-0801')).rejects.toThrow(timeoutErr);
@@ -325,6 +330,7 @@ describe('OrderMutationAdapter State Machine & Flow Suite', () => {
         .mockResolvedValueOnce({
           ...realisticServiceDateQueryView,
           current_version: 1,
+          current_dates: realisticServiceDateReceiptView.service_dates,
         });
 
       await expect(applyServiceDatesFlow('ORD-2026-0801')).rejects.toThrow('查詢失敗');

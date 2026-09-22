@@ -62,6 +62,7 @@ def connection(monkeypatch):
         CREATE TABLE staff_obligations (case_no TEXT, obligation_identity TEXT,
             obligation_kind TEXT, due_date DATE, staff_id INTEGER, direction TEXT, status TEXT);
         CREATE TABLE staff (id INTEGER, name TEXT);
+        CREATE TABLE client_legacy_virtual_accounts (case_no TEXT, virtual_account TEXT);
         INSERT INTO clients VALUES (1,'客戶甲',NULL,'新竹市','東區','一般市民');
         INSERT INTO clients VALUES (2,'客戶乙',NULL,NULL,NULL,'補助市民');
         INSERT INTO orders VALUES ('115000101',1,20,1,'2026-07-01','訂單完成','2026-09-15','2026-08-20');

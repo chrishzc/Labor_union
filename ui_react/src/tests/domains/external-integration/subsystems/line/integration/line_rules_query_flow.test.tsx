@@ -42,7 +42,7 @@ describe('LINE 通知規則 query 與 mutation 接線', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '新增／編輯通知規則' }));
     expect(screen.getByRole('region', { name: '通知規則編輯區' })).toBeInTheDocument();
-    expect(screen.getByLabelText('要編輯的通知規則：')).toHaveValue('deposit_notice');
+    expect(screen.getByLabelText('通知規則：')).toHaveValue('deposit_notice');
     fireEvent.click(screen.getByRole('button', { name: '關閉編輯區' }));
 
     fireEvent.click(screen.getByRole('button', { name: /deposit_notice/ }));
@@ -50,7 +50,7 @@ describe('LINE 通知規則 query 與 mutation 接線', () => {
     fireEvent.click(screen.getByRole('button', { name: '編輯此規則' }));
     expect(screen.queryByText('系統唯一規則識別碼：deposit_notice')).not.toBeInTheDocument();
     expect(screen.getByRole('region', { name: '通知規則編輯區' })).toBeInTheDocument();
-    expect(screen.getByLabelText('要編輯的通知規則：')).toHaveValue('deposit_notice');
+    expect(screen.getByLabelText('通知規則：')).toHaveValue('deposit_notice');
     expect(screen.queryByRole('button', { name: /儲存並發布|手動重播/ })).not.toBeInTheDocument();
     expect(fetchSpy).not.toHaveBeenCalled();
   });

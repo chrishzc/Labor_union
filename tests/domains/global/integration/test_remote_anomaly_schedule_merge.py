@@ -108,7 +108,7 @@ def test_staff_summary_supports_exact_typed_lookup():
     assert connection.closed is True
 
 
-def test_existing_hcm_case_with_invalid_source_persists_owned_review(monkeypatch):
+def test_existing_hcm_case_with_changed_source_is_skipped_without_new_review(monkeypatch):
     recorded = []
     monkeypatch.setattr(
         import_client_hcm,
@@ -141,9 +141,8 @@ def test_existing_hcm_case_with_invalid_source_persists_owned_review(monkeypatch
         source_sheet="來源",
     )
 
-    assert result == "review_required"
-    assert recorded[0]["case_identity"] == "CASE-7"
-    assert recorded[0]["source_row"] == 3
+    assert result == "skipped_existing"
+    assert recorded == []
 
 
 def test_hcm_review_persistence_failure_is_not_reported_as_reviewable(monkeypatch):

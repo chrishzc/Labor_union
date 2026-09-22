@@ -10,7 +10,7 @@ class Facts:
     def __init__(self, *, occupied=False):
         self.data = {
             "order": {"case_no": "INQUIRY-1", "status": "洽談中", "requires_cooking": None,
-                      "start_date": "2026-10-05", "end_date": "2026-10-05", "scheduling_version": 1},
+                      "start_date": "2026-10-05", "end_date": "2026-10-05", "scheduling_version": 1, "service_days": 1},
             "staff_rows": [{"id": 3, "name": "測試月嫂"}],
             "confirmed_service_dates": [{"service_date": "2026-10-05"}],
             "assignments": [], "schedule_rows": [], "legacy_schedule_rows": [],

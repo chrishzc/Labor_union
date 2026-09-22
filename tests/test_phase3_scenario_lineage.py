@@ -352,7 +352,7 @@ def test_track_b_harness_fixture_declares_canonical_shape_without_becoming_a_fix
 def test_canonical_gate_report_separates_phase3_family_without_crashing() -> None:
     report = build_gate_report()
     assert report["errors"]["scenarios"] == []
-    assert report["contract_valid"] is False
+    assert report["contract_valid"] is True
     assert report["errors"]["fixtures"] == []
     external_phase4_errors = {
         error

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from domains.government_subsidy.claims import (
     ClaimPlanningFacts,
     ClaimPlanningIntent,
@@ -132,3 +134,29 @@ def test_claim_plan_calculates_frozen_450_rate_for_40_official_hours():
     assert candidate.items[0].unit_price_ntd == MoneyNTD(450)
     assert candidate.items[0].requested_amount_ntd == MoneyNTD(18000)
     assert candidate.requested_total_ntd == MoneyNTD(18000)
+
+
+@pytest.mark.parametrize(("hours_per_day", "days", "rate", "expected"), [
+    (8, 5, 450, 18000),
+    (8.0, 5, 450, 18000),
+    (7.5, 3, 350, 7875),
+    (0.5, 1, 450, 225),
+])
+def test_claim_plan_accepts_integral_and_half_hour_service_facts(hours_per_day, days, rate, expected):
+    assignment = OfficialAssignmentServiceFacts(1, "CASE-HALF", 7, days, hours_per_day, True)
+    candidate = build_claim_planning_candidate(ClaimPlanningFacts(
+        ClaimPlanningIntent(ClaimBatchIdentity(2026, 3, 1)),
+        (ClaimPlanningSourceItem(assignment, MoneyNTD(rate)),),
+    ))
+    assert candidate.items[0].claimed_hours == days * hours_per_day
+    assert candidate.items[0].requested_amount_ntd == MoneyNTD(expected)
+    assert candidate.requested_total_ntd == MoneyNTD(expected)
+
+
+def test_claim_plan_rejects_fractional_ntd_without_rounding():
+    assignment = OfficialAssignmentServiceFacts(1, "CASE-FRACTION", 7, 1, 0.5, True)
+    with pytest.raises(ValueError, match="whole NTD"):
+        build_claim_planning_candidate(ClaimPlanningFacts(
+            ClaimPlanningIntent(ClaimBatchIdentity(2026, 3, 1)),
+            (ClaimPlanningSourceItem(assignment, MoneyNTD(351)),),
+        ))

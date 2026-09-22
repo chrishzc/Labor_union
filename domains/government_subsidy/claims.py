@@ -15,6 +15,7 @@ from domains.government_subsidy.ledger import (
     OfficialAssignmentServiceFacts,
     reduce_batch_status,
     validate_approval_amounts,
+    _whole_ntd,
 )
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.money import MoneyNTD
@@ -66,7 +67,7 @@ class PlannedClaimItem:
     assignment_id: int
     case_no: str
     staff_id: int
-    claimed_hours: int
+    claimed_hours: float | int
     unit_price_ntd: MoneyNTD
     requested_amount_ntd: MoneyNTD
 
@@ -226,7 +227,9 @@ def _planned_item(source):
     assignment = source.assignment
     if not assignment.effective:
         _raise(GovernmentSubsidyErrorCode.ASSIGNMENT_FACTS_STALE)
-    requested = source.unit_price_ntd * assignment.official_service_hours
+    requested = MoneyNTD(_whole_ntd(
+        source.unit_price_ntd.amount * assignment.official_service_hours
+    ))
     return PlannedClaimItem(
         assignment.assignment_id,
         assignment.case_no,

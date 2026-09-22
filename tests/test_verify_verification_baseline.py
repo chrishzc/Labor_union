@@ -16,12 +16,13 @@ from scripts.verify_verification_scenarios import (
 )
 from scripts.verify_verification_receipts import (
     _persistent_database_source_errors,
+    _database_target_errors,
     load_receipts,
     receipt_coverage_report,
     _source_aware_scenario_digest,
     verify_receipts,
 )
-from scripts.verification_gate_report import build_gate_report
+from scripts.verification_gate_report import build_gate_report, _suite_execution_report, _evidence_boundary_report
 from scripts.verification_gate_report import write_gate_report
 from scripts.verify_verification_fixtures import (
     fixture_coverage_report,
@@ -266,18 +267,12 @@ def test_receipt_validator_rejects_unbound_passing_evidence():
 
 
 def test_receipt_validator_rejects_database_evidence_outside_lu_test_namespace():
-    receipts = copy.deepcopy(load_receipts())
-    receipt = next(
-        item for item in receipts
-        if item["scenario_id"] == "FI-CANONICAL-STAGING-003"
-    )
-    receipt["environment"]["database"] = "union_db_candidate_20260803_v5"
-
-    errors = verify_receipts(receipts, load_scenarios())
-
-    # 現行基線刻意保留過期 receipt 作為 fail-closed 訊號；此案例只驗證
-    # 目標資料庫名稱違反隔離規則時，仍會被額外精準指出。
-    assert "receipt FI-CANONICAL-STAGING-003 must use a lu_test_* database" in errors
+    # Exercise the target guard independently of historical receipt availability.
+    scenario = {"status": "bound", "requires_database": True}
+    assert _database_target_errors("fixture", scenario, {"database": "union_db"}) == [
+        "receipt fixture must use a lu_test_* database"
+    ]
+    assert _database_target_errors("fixture", scenario, {"database": "lu_test_receipt"}) == []
 
 
 def test_persistent_database_source_guard_rejects_unsafe_runner(tmp_path):
@@ -321,9 +316,8 @@ def test_scenario_digest_changes_when_its_authoritative_source_changes(tmp_path)
 def test_gate_report_separates_complete_contracts_from_unverified_execution():
     report = _current_gate_report()
 
-    # 來源或 schema 已變動但尚未取得全套重跑 receipt 時，gate 必須保留
-    # fail-closed 狀態，不能以舊 digest 宣稱驗收已完成。
-    assert report["contract_valid"] is False
+    # Valid source bindings do not establish execution evidence or completion.
+    assert report["contract_valid"] is True
     assert report["baseline_established"] is False
     assert any(not item["satisfied"] for item in report["baseline_deliverables"])
     assert report["errors"]["field_authority"] == []
@@ -334,37 +328,23 @@ def test_gate_report_separates_complete_contracts_from_unverified_execution():
     assert report["fixtures"]["all_a_scenarios_have_fixture"] is True
     assert all(not track["suites_missing_contract"] for track in report["tracks"])
     assert report["receipts"]["all_scenarios_verified"] is False
-    assert report["database_execution"]["execution_evidence_recorded"] is True
-    assert report["database_execution"]["passed_disposable_database_scenarios"] == [
-        "AC-CAPABILITY-SESSION-002",
-        "CF-EXPLICIT-REFUND-RECOVERY-002",
-        "CI-CANONICAL-ROOTS-002",
-        "FI-CANONICAL-STAGING-003",
-        "FI-UI-PREVIEW-PARITY-003",
-        "JOB-QUEUE-LIFECYCLE-002",
-        "KN-KNOWLEDGE-LIFECYCLE-001",
-        "MIG-VALIDATION-SCHEMA-002",
-        "ORD-AUTO-COMPLETION-002",
-    ]
-    assert report["database_execution"]["passed_by_execution_mode"] == {
-        "persistent_append_only": [
-            "AC-CAPABILITY-SESSION-002",
-            "CF-EXPLICIT-REFUND-RECOVERY-002",
-            "CI-CANONICAL-ROOTS-002",
-            "FI-CANONICAL-STAGING-003",
-            "FI-UI-PREVIEW-PARITY-003",
-            "JOB-QUEUE-LIFECYCLE-002",
-            "KN-KNOWLEDGE-LIFECYCLE-001",
-            "ORD-AUTO-COMPLETION-002",
-        ],
-        "read_only_existing_database": ["MIG-VALIDATION-SCHEMA-002"],
-    }
+    assert report["database_execution"]["execution_evidence_recorded"] is False
+    assert report["database_execution"]["passed_disposable_database_scenarios"] == []
+    assert report["database_execution"]["passed_by_execution_mode"] == {}
     assert report["overall_complete"] is False
 
 
 def test_gate_report_keeps_supplemental_receipts_separate_from_master_scenarios():
-    report = _current_gate_report()
-    suites = {row["suite_id"]: row for row in report["suite_execution"]}
+    # Synthetic inputs test report classification, not checked-in acceptance evidence.
+    passed_ids = (
+        "PAY-ASSIGNMENT-RECONCILIATION-002", "BKR-ARTIFACT-RESTORE-GUARDS-002",
+        "REL-PREFLIGHT-FAIL-CLOSED-002", "SCH-WAITING-LOCK-RELEASE-002",
+        "ORD-AUTO-COMPLETION-002", "ORD-CANCELLATION-WORKFLOW-003", "ORD-DETAIL-TYPED-QUERY-004",
+    )
+    rows = _suite_execution_report(load_baseline(), load_scenarios(), [
+        {"scenario_id": scenario_id, "result": "passed"} for scenario_id in passed_ids
+    ])
+    suites = {row["suite_id"]: row for row in rows}
 
     assert suites["PAY"]["unverified_matrix_scenario_ids"] == [
         "PAY-AND-SP-OBLIGATION-001"
@@ -390,13 +370,19 @@ def test_gate_report_keeps_supplemental_receipts_separate_from_master_scenarios(
 
 
 def test_gate_report_separates_data_fixtures_from_runtime_evidence():
-    report = _current_gate_report()
-    boundaries = {row["track"]: row["test_kinds"] for row in report["evidence_boundaries"]}
+    scenarios = load_scenarios()
+    # Only the selected execution kinds receive synthetic passing results.
+    receipts = [
+        {"scenario_id": scenario["scenario_id"], "result": "passed"}
+        for scenario in scenarios if scenario.get("status") == "bound"
+        and set(scenario.get("test_kinds", [])) & {"subsystem_state_machine", "process_network_harness"}
+    ]
+    boundaries = {row["track"]: row["test_kinds"] for row in _evidence_boundary_report(scenarios, receipts)}
 
     assert boundaries["A"]["domain_root_data"]["declared_scenarios"] >= 1
     assert boundaries["A"]["external_input_fixture"]["declared_scenarios"] >= 1
     assert boundaries["A"]["subsystem_state_machine"] == {
-        "declared_scenarios": 3,
+        "declared_scenarios": 6,
         "bound_scenarios": 2,
         "passing_receipts": 2,
     }

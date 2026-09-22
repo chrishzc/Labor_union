@@ -5,6 +5,7 @@ Requires an explicitly bootstrapped disposable lu_test_* database. No provider c
 from __future__ import annotations
 
 from argparse import Namespace
+from dataclasses import asdict
 import json
 import os
 from pathlib import Path
@@ -100,6 +101,7 @@ def test_t11_source_review_query_apply_and_replay(tmp_path):
     from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
     from subsystems.access.authentication_session import AdminPrincipal
     from subsystems.finance_import.import_workflow import FinanceImportApplyRequest
+    from subsystems.finance_import.query import FinanceImportQueryService
 
     token = uuid4().hex
     # Unique canonical virtual-account case in this disposable schema, not production data.
@@ -141,9 +143,15 @@ def test_t11_source_review_query_apply_and_replay(tmp_path):
         assert page['batch_identity'] == batch
         assert manifest.json()['data']['review_count'] == len(page['items']) + len(page['source_reviews'])
         assert len(page['items']) == 1 and page['items'][0]['disposition'] == 'business_pending'
-        assert sum(item['disposition'] == 'manual_review' for item in page['items']) + len(page['source_reviews']) == 1
-        assert len(page['source_reviews']) == 1
-        source = page['source_reviews'][0]
+        # Source-format warnings are audit evidence, not matched pending receipts.
+        assert page['source_reviews'] == []
+        audit_connection = get_connection()
+        try:
+            source_reviews = FinanceImportQueryService(audit_connection).list_source_reviews(batch, limit=100)
+        finally:
+            audit_connection.close()
+        assert len(source_reviews) == 1
+        source = asdict(source_reviews[0])
         assert source['source_sheet'] == '來源' and source['source_row'] == 3
         assert 'finance_source_field_invalid:transaction_amount' in source['issue_codes']
         assert set(source) == {'review_id', 'review_identity', 'source_sheet', 'source_row', 'issue_codes', 'created_at'}
@@ -170,7 +178,11 @@ def test_t11_source_review_query_apply_and_replay(tmp_path):
         assert applied['staff_payout_events'] == staged['staff_payout_events']  # This batch contains no staff payout.
         after_apply_reviews = client.get(url+'/review-rows').json()['data']
         assert after_apply_reviews['source_reviews'] == page['source_reviews']
-        assert sum(item['disposition'] == 'manual_review' for item in after_apply_reviews['items']) + len(after_apply_reviews['source_reviews']) == 1
+        audit_connection = get_connection()
+        try:
+            assert FinanceImportQueryService(audit_connection).list_source_reviews(batch, limit=100) == source_reviews
+        finally:
+            audit_connection.close()
         replay = ingest(headers_http['Idempotency-Key'])
         reselect = ingest(headers_http['Idempotency-Key'])
         assert replay.status_code == reselect.status_code == 200
@@ -179,7 +191,7 @@ def test_t11_source_review_query_apply_and_replay(tmp_path):
         assert client.get(url+'/manifest').json()['data']['review_count'] == manifest.json()['data']['review_count']
         # Exact API response crosses the real typed client and page, without DB credentials in the UI process.
         exchange = tmp_path/'review-exchange.json'
-        exchange.write_text(json.dumps({'ingestion': intake.json(), 'preview': preview.json(), 'manifest': manifest.json(), 'reviews': reviews.json()}), encoding='utf-8')
+        exchange.write_text(json.dumps({'ingestion': intake.json(), 'preview': preview.json(), 'manifest': manifest.json(), 'reviews': reviews.json(), 'source_audit': source}, default=str), encoding='utf-8')
         root = Path(__file__).resolve().parents[1]
         ui_report = tmp_path/'typed-ui-report.json'
         result = subprocess.run(['npm', '--prefix', str(root/'ui_react'), 'test', '--', 'src/tests/finance_source_review_list.test.tsx', '-t', 'same-run source-review', '--reporter=json', '--outputFile', str(ui_report)], cwd=root, env={'PATH': os.environ['PATH'], 'HOME': str(tmp_path), 'CI': 'true', 'FI_REVIEW_EXCHANGE': str(exchange)}, capture_output=True, text=True, timeout=60)

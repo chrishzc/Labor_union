@@ -144,7 +144,8 @@ def test_invalid_hcm_row_with_case_number_creates_partial_formal_case(monkeypatc
     )
 
 
-def test_partial_hcm_intent_keeps_parseable_values_and_nulls_invalid_fields():
+def test_partial_hcm_intent_keeps_parseable_values_and_nulls_invalid_fields(monkeypatch):
+    monkeypatch.setattr(import_client_hcm, "_find_matching_provisional_registration", lambda *_: None)
     record = {
         "case_no": "HCM-002",
         "name": "王小明",

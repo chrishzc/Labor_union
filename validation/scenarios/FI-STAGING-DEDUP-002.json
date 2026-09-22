@@ -5,9 +5,18 @@
   "suite_id": "FI",
   "status": "bound",
   "requires_database": false,
-  "test_kinds": ["external_input_fixture", "expected_manifest"],
+  "test_kinds": [
+    "external_input_fixture",
+    "expected_manifest"
+  ],
   "coverage_scope": "supplemental",
-  "coverage_ids": ["FI-01", "FI-02", "FSM-01", "FSM-02", "FSM-03"],
+  "coverage_ids": [
+    "FI-01",
+    "FI-02",
+    "FSM-01",
+    "FSM-02",
+    "FSM-03"
+  ],
   "source_refs": [
     "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#FI-01",
     "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#FI-02",
@@ -40,12 +49,12 @@
   ],
   "execution": {
     "runner": [
-      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\domains\\finance-import\\subsystems\\finance-import\\integration\\test_finance_import_staging.py tests\\domains\\finance-import\\subsystems\\finance-import\\integration\\test_finance_import_orchestrator.py tests\\test_finance_transaction_classifier.py"
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\domains\\finance-import\\subsystems\\finance-import\\integration\\test_finance_import_staging.py tests\\domains\\finance-import\\subsystems\\finance-import\\integration\\test_finance_import_orchestrator.py tests\\domains\\finance-import\\subsystems\\finance-import\\test_finance_transaction_classifier.py"
     ],
     "test_paths": [
       "tests/domains/finance-import/subsystems/finance-import/integration/test_finance_import_staging.py",
       "tests/domains/finance-import/subsystems/finance-import/integration/test_finance_import_orchestrator.py",
-      "tests/test_finance_transaction_classifier.py"
+      "tests/domains/finance-import/subsystems/finance-import/test_finance_transaction_classifier.py"
     ]
   }
 }

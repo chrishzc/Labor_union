@@ -201,7 +201,7 @@ def test_workbook_api_preview_reaches_react_without_formal_posting(tmp_path) -> 
     if "SYSTEMROOT" in os.environ:
         ui_environment["SYSTEMROOT"] = os.environ["SYSTEMROOT"]
     result = subprocess.run(
-        [npm, "--prefix", str(root / "ui_react"), "test", "--", "src/tests/finance_query_page.test.tsx",
+        [npm, "--prefix", str(root / "ui_react"), "test", "--", "src/tests/domains/client-finance/subsystems/client-finance/modules/historical-payment-settlement-presentation/finance_query_page.test.tsx",
          "-t", "same-run MySQL Preview", "--reporter=json", "--outputFile", str(report_path)],
         cwd=root, env=ui_environment, capture_output=True, text=True, timeout=120, check=False,
     )

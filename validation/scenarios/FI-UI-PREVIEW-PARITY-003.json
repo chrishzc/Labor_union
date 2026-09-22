@@ -39,7 +39,7 @@
     ],
     "test_paths": [
       "tests/test_finance_import_staging_persistent_mysql_e2e.py",
-      "ui_react/src/tests/finance_query_page.test.tsx"
+      "ui_react/src/tests/domains/client-finance/subsystems/client-finance/modules/historical-payment-settlement-presentation/finance_query_page.test.tsx"
     ]
   }
 }

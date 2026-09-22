@@ -52,7 +52,7 @@ describe('clientRegistryClient list query', () => {
     }));
   });
 
-  it('accepts the previous list shape while the additive roster fields are not yet present', async () => {
+  it('accepts absent optional roster fields while requiring current virtual-account fields', async () => {
     vi.spyOn(transport, 'get').mockResolvedValue({
       success: true,
       message: 'ok',
@@ -60,6 +60,8 @@ describe('clientRegistryClient list query', () => {
         items: [{
           client_id: 7,
           case_no: 'CASE-001',
+          imported_virtual_accounts: [],
+          built_in_virtual_account: null,
           name: '王小明',
           phone: '0912345678',
           city: '新竹市',

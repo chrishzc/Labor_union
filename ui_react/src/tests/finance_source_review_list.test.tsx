@@ -240,7 +240,9 @@ describe('Finance source-review owner readback', () => {
   (exchangePath ? it : it.skip)('decodes same-run source-review owner envelopes through the real typed query client', async () => {
     const raw = JSON.parse(readFileSync(exchangePath!, 'utf-8')) as Record<string, any>;
     const batch = raw.ingestion.data.batch_identity as string;
-    const sourceReview = raw.reviews.data.source_reviews[0] as { source_sheet: string; source_row: number; issue_codes: string[] };
+    const matchedRow = raw.reviews.data.items[0] as { source_sheet: string; source_row: number };
+    const sourceReview = raw.source_audit as { source_sheet: string; source_row: number; issue_codes: string[] };
+    expect(raw.reviews.data.source_reviews).toEqual([]);
     vi.restoreAllMocks();
     vi.spyOn(ordersQueryClient, 'getOrderSummaries').mockResolvedValue({ items: [], next_cursor: null, etag: 'c'.repeat(64) });
     vi.spyOn(financeImportMutationClient, 'ingest').mockResolvedValue(raw.ingestion.data);
@@ -254,8 +256,9 @@ describe('Finance source-review owner readback', () => {
     await showPreview();
     await waitFor(() => expect(reviewCount()).toBe('1'));
     expect(screen.getByText(batch)).toBeInTheDocument();
-    expect(screen.getByText(`${sourceReview.source_sheet}#${sourceReview.source_row}`)).toBeInTheDocument();
-    expect(screen.getByText(sourceReview.issue_codes[0])).toBeInTheDocument();
+    expect(screen.getByText(`${matchedRow.source_sheet}#${matchedRow.source_row}`)).toBeInTheDocument();
+    expect(screen.queryByText(`${sourceReview.source_sheet}#${sourceReview.source_row}`)).not.toBeInTheDocument();
+    expect(screen.queryByText(sourceReview.issue_codes[0])).not.toBeInTheDocument();
     expect(get.mock.calls.some(([path]) => String(path).endsWith('/manifest'))).toBe(true);
     expect(get.mock.calls.some(([path]) => String(path).endsWith('/review-rows'))).toBe(true);
   });

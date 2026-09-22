@@ -427,16 +427,16 @@ def test_g_mfa_enrollment_is_password_authenticated_success_data(monkeypatch):
     assert "access_token" not in payload["data"]
 
 
-def test_g_unknown_data_browser_dict_is_status_redacted():
+def test_g_removed_data_browser_mutation_is_not_found_and_status_redacted():
     app = _admin_app()
     app.include_router(data_browser_admin.router)
     response = TestClient(app).patch(
         "/api/v1/admin/data-browser/private_table/secret-row",
     )
 
-    assert response.status_code == 410
+    assert response.status_code == 404
     error = _error(response)
-    assert error["code"] == "resource_retired"
+    assert error["code"] == "resource_not_found"
     _assert_no_sensitive_values(
         response.json(),
         ("private_table", "secret-row", "replacement", "owning Domain"),
@@ -542,7 +542,7 @@ def test_k_cors_exposes_only_approved_error_headers_without_wildcards():
     preflight = client.options(
         "/api/v1/orders/CASE-RO-001/reopen/preview",
         headers={
-            "Origin": "http://localhost:8501",
+            "Origin": "http://localhost:5173",
             "Access-Control-Request-Method": "POST",
             "Access-Control-Request-Headers": (
                 "authorization,x-correlation-id,x-preview-fingerprint,if-match,if-none-match"
@@ -552,18 +552,18 @@ def test_k_cors_exposes_only_approved_error_headers_without_wildcards():
     response = client.get(
         "/api/v1/route-does-not-exist",
         headers={
-            "Origin": "http://localhost:8501",
+            "Origin": "http://localhost:5173",
             "X-Correlation-ID": "cors-correlation",
         },
     )
 
     assert preflight.status_code == 200
-    assert preflight.headers["access-control-allow-origin"] == "http://localhost:8501"
+    assert preflight.headers["access-control-allow-origin"] == "http://localhost:5173"
     allowed_headers = preflight.headers["access-control-allow-headers"].lower()
     assert "*" not in allowed_headers
     for header in ("authorization", "x-correlation-id", "x-preview-fingerprint", "if-match", "if-none-match"):
         assert header in allowed_headers
     assert response.status_code == 404
-    assert response.headers["access-control-allow-origin"] == "http://localhost:8501"
+    assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
     assert "*" not in response.headers.get("access-control-allow-methods", "")
     assert response.headers["access-control-expose-headers"] == "X-Correlation-ID, Retry-After, WWW-Authenticate"

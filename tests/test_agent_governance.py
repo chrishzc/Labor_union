@@ -44,13 +44,13 @@ def test_missing_task_class_marker_fails_closed(tmp_path):
     assert any(error.startswith(f"missing_marker:{relative_path}:| T2 |") for error in errors)
 
 
-def test_retired_per_slice_blanket_gate_fails_closed(tmp_path):
+def test_current_forbidden_blanket_gate_fails_closed(tmp_path):
     _copy_governance_fixture(tmp_path)
-    relative_path = "document/架構重整/02_決策與退役執行記錄/96_Current_剩餘代辦任務總表.md"
+    relative_path = "AGENTS.md"
     target = tmp_path / relative_path
     target.write_text(
         target.read_text(encoding="utf-8")
-        + "\n每個新的 bounded execution slice 都必須先經 legacy gate\n",
+        + "\n1. **Scope gate**\n",
         encoding="utf-8",
     )
 

@@ -5,8 +5,17 @@
   "suite_id": "PERF",
   "status": "bound",
   "requires_database": false,
-  "test_kinds": ["process_network_harness"],
-  "coverage_ids": ["PERF-02", "PERF-03", "PERF-04", "PERF-05", "PERF-07", "PERF-08"],
+  "test_kinds": [
+    "process_network_harness"
+  ],
+  "coverage_ids": [
+    "PERF-02",
+    "PERF-03",
+    "PERF-04",
+    "PERF-05",
+    "PERF-07",
+    "PERF-08"
+  ],
   "source_refs": [
     "document/資料庫、資料處理/新版驗證雙軌總計畫_草案.md#6.1"
   ],
@@ -36,7 +45,7 @@
   "execution": {
     "runner": [
       ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_api_performance_middleware.py tests\\test_performance_snapshot.py tests\\test_system_status_router.py tests\\test_performance_policies.py",
-      "npm --prefix ui_react test -- src/tests/runtime_decoder.test.ts src/tests/system_status_entry_cutover.test.tsx src/tests/system_status_entry_identity.test.tsx"
+      "npm --prefix ui_react test -- src/tests/runtime_decoder.test.ts src/tests/domains/global/subsystems/application-shell/modules/react-application-shell/system_status_entry_cutover.test.tsx"
     ],
     "test_paths": [
       "tests/test_api_performance_middleware.py",
@@ -44,8 +53,7 @@
       "tests/test_system_status_router.py",
       "tests/test_performance_policies.py",
       "ui_react/src/tests/runtime_decoder.test.ts",
-      "ui_react/src/tests/system_status_entry_cutover.test.tsx",
-      "ui_react/src/tests/system_status_entry_identity.test.tsx"
+      "ui_react/src/tests/domains/global/subsystems/application-shell/modules/react-application-shell/system_status_entry_cutover.test.tsx"
     ]
   }
 }

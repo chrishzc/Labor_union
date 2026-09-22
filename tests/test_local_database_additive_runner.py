@@ -6,6 +6,7 @@ Description: 驗證本機 ordered additive runner 的逐版資格、SQL allowlis
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -16,7 +17,7 @@ from scripts import migrate_preserved_database_additive_schema as migration
 from scripts import update_local_database as update
 
 
-def _option_b_receipt() -> Path:
+def _historical_option_b_receipt() -> Path:
     return (
         migration.ROOT
         / "validation"
@@ -24,6 +25,23 @@ def _option_b_receipt() -> Path:
         / "phase4"
         / "PROV-20260821-local-additive-qualification-rich-menu-option-b.json"
     )
+
+
+def _option_b_receipt(tmp_path: Path) -> Path:
+    """Synthetic parser fixture only; never publish it as execution evidence."""
+    receipt = json.loads(_historical_option_b_receipt().read_text(encoding="utf-8"))
+    for item in receipt["local_prerequisites"]:
+        item["projection"] = migration._local_prerequisite_descriptor(item["name"])
+        item["projection_sha256"] = migration._local_prerequisite_projection_sha256(item["projection"])
+    receipt["payload_digest"] = additive._payload_digest(receipt)
+    path = tmp_path / "synthetic-qualification.json"
+    path.write_text(json.dumps(receipt, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def test_historical_receipt_with_stale_prerequisite_projection_is_rejected():
+    with pytest.raises(migration.LocalAdditiveBlocked, match="prerequisite projection differs"):
+        migration._local_validate_qualification(_historical_option_b_receipt())
 
 
 def test_qualification_is_canonical_and_option_b_counts() -> None:
@@ -112,8 +130,8 @@ def test_column_contract_detects_virtual_and_ignores_ordinary_text() -> None:
     assert ordinary["extra"] == ""
 
 
-def test_qualification_receipt_is_portable_and_digest_verified() -> None:
-    receipt = migration._local_validate_qualification(_option_b_receipt())
+def test_qualification_receipt_is_portable_and_digest_verified(tmp_path: Path) -> None:
+    receipt = migration._local_validate_qualification(_option_b_receipt(tmp_path))
     assert receipt["metadata_backup"]["status"] == "verified"
     assert receipt["artifact"]["dependency_contracts"] == {}
     assert receipt["artifact"]["dependencies"] == []
@@ -131,8 +149,8 @@ def test_qualification_receipt_is_portable_and_digest_verified() -> None:
     assert receipt["payload_digest"] == additive._payload_digest(receipt)
 
 
-def test_declared_rich_menu_prerequisites_still_validate() -> None:
-    receipt = migration._local_validate_qualification(_option_b_receipt())
+def test_declared_rich_menu_prerequisites_still_validate(tmp_path: Path) -> None:
+    receipt = migration._local_validate_qualification(_option_b_receipt(tmp_path))
 
     prerequisites = migration._local_validate_prerequisite_policy(receipt)
 
@@ -226,8 +244,8 @@ def test_declared_prerequisite_with_missing_fields_fails_closed() -> None:
         )
 
 
-def test_hash_verification_uses_real_release_selection_descriptor_shape() -> None:
-    qualification = migration._local_validate_qualification(_option_b_receipt())
+def test_hash_verification_uses_real_release_selection_descriptor_shape(tmp_path: Path) -> None:
+    qualification = migration._local_validate_qualification(_option_b_receipt(tmp_path))
     assert isinstance(migration.RELEASE_MANIFEST, migration.ReleaseSelection)
     assert not hasattr(migration.RELEASE_MANIFEST, "descriptor_artifact")
     migration._local_verify_hashes(qualification)
