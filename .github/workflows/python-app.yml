@@ -40,7 +40,7 @@ jobs:
     timeout-minutes: 20
     services:
       mysql:
-        image: mysql:8.0
+        image: mysql:8.0@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b
         env:
           MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
           MYSQL_ROOT_HOST: "%"
@@ -58,13 +58,11 @@ jobs:
       DB_HOST: 127.0.0.1
       DB_PORT: "3307"
       DB_USER: root
-      DB_PASSWORD: ""
       DB_SSL_MODE: disabled
       DB_DATABASE: lu_test_weekly_${{ github.run_id }}_${{ github.run_attempt }}
       LABOR_UNION_TEST_MYSQL_HOST: 127.0.0.1
       LABOR_UNION_TEST_MYSQL_PORT: "3307"
       LABOR_UNION_TEST_MYSQL_USER: root
-      LABOR_UNION_TEST_MYSQL_PASSWORD: ""
       LABOR_UNION_TEST_MYSQL_DATABASE: lu_test_weekly_${{ github.run_id }}_${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@v6
@@ -76,6 +74,26 @@ jobs:
       - name: Install declared runtime and test dependencies
         id: dependencies
         run: python -m pip install -r requirements.txt 'pytest>=8.0' 'httpx2==2.10.0'
+      - name: Initialize random credentials for this disposable MySQL service
+        id: database
+        run: |
+          python - <<'PY'
+          import os
+          import secrets
+          import pymysql
+          password = secrets.token_urlsafe(32)
+          print(f"::add-mask::{password}")
+          connection = pymysql.connect(host='127.0.0.1', port=3307, user='root', password='', autocommit=True)
+          try:
+              with connection.cursor() as cursor:
+                  for host in ('%', 'localhost'):
+                      cursor.execute("ALTER USER 'root'@%s IDENTIFIED BY %s", (host, password))
+          finally:
+              connection.close()
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as environment:
+              environment.write(f'DB_PASSWORD={password}\n')
+              environment.write(f'LABOR_UNION_TEST_MYSQL_PASSWORD={password}\n')
+          PY
       - name: Run weekly report contracts with real imports
         run: >-
           python -m pytest -q
@@ -83,10 +101,10 @@ jobs:
           tests/test_weekly_operations_report_totals.py
           tests/test_weekly_operations_report_api_versions.py
       - name: Run session-authenticated API and export against MySQL
-        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.database.outcome == 'success' }}
         run: python -m pytest -q tests/test_weekly_operations_report_mysql.py
       - name: Run canonical scheduling to weekly report MySQL regression
-        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.database.outcome == 'success' }}
         run: >-
           python -m pytest -q
           tests/global/integration/test_historical_restart_to_weekly_report_mysql.py
@@ -150,7 +168,7 @@ jobs:
           from scripts.build_validation_schema_release import main
           path = Path('db/releases/labor_union_validation_schema_v1.sql')
           before = path.read_text(encoding='utf-8')
-          assert main([]) == 0
+          assert main() == 0
           after = path.read_text(encoding='utf-8')
           expected = before.replace(
               '-- Release: labor-union-validation-schema-2026-09-22-v38\n',
