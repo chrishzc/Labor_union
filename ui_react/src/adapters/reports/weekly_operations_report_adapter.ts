@@ -52,6 +52,8 @@ export function adaptWeeklyOperationsReport(source: WeeklyOperationsReport) {
     },
     serviceRows: source.service_rows,
     weeklyMetrics: source.weekly_metrics,
+    annualTotals: source.annual_totals,
+    monthlySubtotals: source.monthly_subtotals,
     dataQualityIssues: source.data_quality_issues,
   };
 }

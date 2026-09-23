@@ -94,37 +94,95 @@ const SubsidyPartitionsView: React.FC<{
   </section>)}
 </>;
 
-const WeeklyCasesView: React.FC<{ report: WeeklyView }> = ({ report }) => <>
-  <section className="reports-weekly-metrics" aria-label="每週推廣與詢問數值">
-    {report.weeklyMetrics.map((metric) => <article key={metric.week_start_date}>
-      <h3>{metric.week_start_date}～{metric.week_end_date}</h3>
-      <dl>
-        <div><dt>推廣次數</dt><dd>{displayWeeklyMetric(metric.promotion_count)}</dd></div>
-        <div><dt>詢問人次</dt><dd>{displayWeeklyMetric(metric.inquiry_count)}</dd></div>
-      </dl>
-    </article>)}
-  </section>
-  <section className="reports-kpi-grid reports-weekly-kpis" data-surface-id="reports.weekly.case-kpis">
-    <article><span>案件申請</span><strong>{displayWeeklyMetric(report.summary.application_count)}</strong></article>
-    <article><span>一般符合</span><strong>{displayWeeklyMetric(report.summary.general_eligible_count)}</strong></article>
-    <article><span>補助符合</span><strong>{displayWeeklyMetric(report.summary.subsidized_eligible_count)}</strong></article>
-    <article><span>不符合（待分流）</span><strong>{displayWeeklyMetric(report.summary.rejection_unpartitioned_count)}</strong></article>
-    <article><span>已成立訂單</span><strong>{displayWeeklyMetric(report.summary.order_established_count)}</strong></article>
-    <article><span>資料不完整</span><strong>{displayWeeklyMetric(report.summary.incomplete_count)}</strong></article>
-  </section>
-  {report.caseRows.length === 0 ? <div className="reports-state">此期間沒有案件受理資料。</div> : <div className="reports-table-container" tabIndex={0} role="region" aria-label="案件受理資料，可左右捲動">
-    <table className="reports-table">
-      <thead><tr><th>案件</th><th>申請人</th><th>申請日</th><th>身分</th><th>審核</th><th>訂單狀態</th><th>天數／每日時數</th><th>預計服務期間</th><th>區域</th></tr></thead>
-      <tbody>{report.caseRows.map((row) => <tr key={row.case_no}>
-        <td>{row.case_no}</td><td>{row.applicant_name}</td><td>{displayWeeklyValue(row.application_date)}</td>
-        <td>{displayWeeklyValue(row.identity_status)}</td><td>{row.reviewLabel}</td><td>{displayWeeklyValue(row.order_status)}</td>
-        <td>{displayWeeklyValue(row.service_days)}／{displayWeeklyValue(row.service_hours_per_day)}</td>
-        <td>{displayWeeklyValue(row.planned_start_date)}～{displayWeeklyValue(row.planned_end_date)}</td>
-        <td>{displayWeeklyValue(row.district)}</td>
-      </tr>)}</tbody>
-    </table>
-  </div>}
-</>;
+const WeeklyCaseTotalsRow: React.FC<{
+  total: WeeklyView['annualTotals'][number];
+}> = ({ total }) => {
+  const label = total.month === null
+    ? `${total.year - 1911}年度累計`
+    : `${total.year - 1911}年${total.month}月小計`;
+  const counts: [string, number | null][] = [
+    ['平台案件申請數', total.application_count],
+    ['一般市民符合', total.general_eligible_count],
+    ['一般市民不符合', total.general_ineligible_count],
+    ['補助市民符合', total.subsidized_eligible_count],
+    ['補助市民不符合', total.subsidized_ineligible_count],
+    ['審核不符合（獨立）', total.review_rejected_count],
+  ];
+  return <tr aria-label={label}>
+    <th scope="row">{label}<br /><small>{total.start_date}～{total.end_date}</small></th>
+    <td colSpan={8}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 16px' }}>
+        <span>推廣次數：{total.promotion_count === null ? '未完整登錄' : displayWeeklyMetric(total.promotion_count)}</span>
+        <span>詢問人次：{total.inquiry_count === null ? '未完整登錄' : displayWeeklyMetric(total.inquiry_count)}</span>
+        {counts.map(([name, value]) => <span key={name}>{name}：{displayWeeklyMetric(value)}</span>)}
+        {Object.entries(total.order_status_counts).map(([status, value]) =>
+          <span key={`status-${status}`}>{status}：{displayWeeklyMetric(value)}</span>)}
+      </div>
+    </td>
+  </tr>;
+};
+
+const WeeklyCasesView: React.FC<{ report: WeeklyView }> = ({ report }) => {
+  const metrics = new Map(report.weeklyMetrics.map((metric) => [metric.week_start_date, metric]));
+  const rowsByWeek = new Map<string | null, typeof report.caseRows>();
+  report.caseRows.forEach((row) => {
+    rowsByWeek.set(row.week_start_date, [...(rowsByWeek.get(row.week_start_date) ?? []), row]);
+  });
+  const weeks = [...new Set([
+    ...metrics.keys(),
+    ...report.caseRows.flatMap((row) => row.week_start_date === null ? [] : [row.week_start_date]),
+  ])].sort();
+  const caseRows = (rows: typeof report.caseRows) => rows.map((row) => <tr key={row.case_no}>
+    <td>{row.case_no}</td><td>{row.applicant_name}</td><td>{displayWeeklyValue(row.application_date)}</td>
+    <td>{displayWeeklyValue(row.identity_status)}</td><td>{row.reviewLabel}</td><td>{displayWeeklyValue(row.order_status)}</td>
+    <td>{displayWeeklyValue(row.service_days)}／{displayWeeklyValue(row.service_hours_per_day)}</td>
+    <td>{displayWeeklyValue(row.planned_start_date)}～{displayWeeklyValue(row.planned_end_date)}</td>
+    <td>{displayWeeklyValue(row.district)}</td>
+  </tr>);
+
+  return <>
+    <section className="reports-kpi-grid reports-weekly-kpis" data-surface-id="reports.weekly.case-kpis">
+      <article><span>案件申請</span><strong>{displayWeeklyMetric(report.summary.application_count)}</strong></article>
+      <article><span>一般符合</span><strong>{displayWeeklyMetric(report.summary.general_eligible_count)}</strong></article>
+      <article><span>補助符合</span><strong>{displayWeeklyMetric(report.summary.subsidized_eligible_count)}</strong></article>
+      <article><span>不符合（待分流）</span><strong>{displayWeeklyMetric(report.summary.rejection_unpartitioned_count)}</strong></article>
+      <article><span>已成立訂單</span><strong>{displayWeeklyMetric(report.summary.order_established_count)}</strong></article>
+      <article><span>資料不完整</span><strong>{displayWeeklyMetric(report.summary.incomplete_count)}</strong></article>
+    </section>
+    {report.caseRows.length === 0 && <div className="reports-state">此期間沒有案件受理資料。</div>}
+    <div className="reports-table-container" tabIndex={0} role="region" aria-label="案件受理資料，可左右捲動">
+      <table className="reports-table" aria-label="週報案件受理總表">
+        <caption>整週按星期一歸月／年；月小計為查詢期間內的週資料，年度累計另由該年第一個星期一計至迄日。審核不符合獨立統計，不加進訂單狀態合計。</caption>
+        <thead><tr><th>案件</th><th>申請人</th><th>申請日</th><th>身分</th><th>審核</th><th>訂單狀態</th><th>天數／每日時數</th><th>預計服務期間</th><th>區域</th></tr></thead>
+        <tbody>
+          {report.annualTotals.map((total) => <WeeklyCaseTotalsRow key={`year-${total.year}`} total={total} />)}
+          {report.monthlySubtotals.map((total) => {
+            const monthKey = `${total.year}-${String(total.month).padStart(2, '0')}`;
+            return <React.Fragment key={monthKey}>
+              {weeks.filter((week) => week.slice(0, 7) === monthKey).map((week) => {
+                const metric = metrics.get(week);
+                const rows = rowsByWeek.get(week) ?? [];
+                return <React.Fragment key={week}>
+                  <tr aria-label={`週次 ${week}`}><th colSpan={9} scope="row">
+                    {week}～{metric?.week_end_date ?? rows[0]?.week_end_date ?? ''}
+                    {'　'}推廣次數：{displayWeeklyMetric(metric?.promotion_count ?? null)}
+                    {'　'}詢問人次：{displayWeeklyMetric(metric?.inquiry_count ?? null)}
+                  </th></tr>
+                  {caseRows(rows)}
+                </React.Fragment>;
+              })}
+              <WeeklyCaseTotalsRow total={total} />
+            </React.Fragment>;
+          })}
+          {rowsByWeek.has(null) && <>
+            <tr><th colSpan={9}>日期未登錄</th></tr>
+            {caseRows(rowsByWeek.get(null) ?? [])}
+          </>}
+        </tbody>
+      </table>
+    </div>
+  </>;
+};
 
 const WeeklySubsidyView: React.FC<{ report: WeeklyView }> = ({ report }) => <>
   <section className="reports-kpi-grid" data-surface-id="reports.weekly.subsidy-kpis">
