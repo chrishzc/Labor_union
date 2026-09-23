@@ -85,6 +85,61 @@ def persist_scheduling_assignment_rate_snapshots(cursor, scheduling_command, res
         )
 
 
+def load_actual_start_source_rate_snapshots(cursor, assignments, *, lock):
+    """Require one immutable Payroll snapshot for each source assignment."""
+
+    snapshots = {}
+    for assignment in assignments:
+        source_id = assignment.source_assignment_id
+        if (
+            source_id is None
+            or assignment.lineage_source_assignment_ids != (source_id,)
+            or source_id in snapshots
+        ):
+            raise ValueError("actual_start_rate_snapshot_lineage_invalid")
+        cursor.execute(
+            "SELECT policy_version,policy_kind,hourly_rate_ntd "
+            "FROM assignment_payroll_rate_snapshots WHERE assignment_id=%s"
+            + (" FOR UPDATE" if lock else ""),
+            (source_id,),
+        )
+        rows = tuple(cursor.fetchall())
+        if len(rows) != 1:
+            raise ValueError("actual_start_rate_snapshot_missing_or_ambiguous")
+        snapshots[source_id] = rows[0]
+    return snapshots
+
+
+def persist_actual_start_rate_snapshot_carry(cursor, scheduling_command, result) -> None:
+    """Copy exact source rates to replacement identities without Payroll root impact."""
+
+    assignments = scheduling_command.candidate.assignments
+    snapshots = load_actual_start_source_rate_snapshots(
+        cursor, assignments, lock=True,
+    )
+    rows = []
+    resolved = result.assignment_resolution.assignment_id_by_candidate_key
+    for assignment in assignments:
+        assignment_id = resolved.get(assignment.candidate_key)
+        if assignment_id is None:
+            raise ValueError("actual_start_assignment_identity_missing")
+        source_id = assignment.source_assignment_id
+        policy = snapshots[source_id]
+        rows.append((
+            assignment_id,
+            policy["policy_version"],
+            policy["policy_kind"],
+            policy["hourly_rate_ntd"],
+            f"carried-from:{source_id}",
+        ))
+    cursor.executemany(
+        "INSERT INTO assignment_payroll_rate_snapshots "
+        "(assignment_id,policy_version,policy_kind,hourly_rate_ntd,source_identity_status) "
+        "VALUES (%s,%s,%s,%s,%s)",
+        tuple(rows),
+    )
+
+
 def _insert_special_pay_events(cursor, command):
     for event in command.special_pay_events:
         assignment_id = _resolved_assignment_id(command, event.assignment_identity)

@@ -110,6 +110,7 @@ from api.routes import (
     order_reopen,
     order_schedule_calculation,
     service_date_confirmation,
+    official_service_date_correction,
     service_before_replacement,
     matching_schedule_confirmation,
     matching_coordination,
@@ -301,6 +302,7 @@ app.include_router(assignment_plan.router)
 app.include_router(leave_substitution.router)
 app.include_router(order_schedule_calculation.router)
 app.include_router(service_date_confirmation.router)
+app.include_router(official_service_date_correction.router)
 app.include_router(service_before_replacement.router)
 app.include_router(matching_schedule_confirmation.router)
 app.include_router(matching_coordination.router)

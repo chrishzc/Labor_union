@@ -138,13 +138,18 @@ def _insert_assignments(
     generation_id: int,
 ) -> dict[str, int]:
     assignment_ids: dict[str, int] = {}
+    assignment_status = (
+        "completed"
+        if command.command_family == "orders_official_service_date_correction"
+        else "planned"
+    )
     for assignment in command.candidate.assignments:
         cursor.execute(
             "INSERT INTO case_staff_assignments "
             "(case_no,generation_id,candidate_key,staff_id,"
             "assignment_sequence,assigned_start_date,assigned_end_date,"
             "floor_fee_allocated,status) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s,0,'planned')",
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,0,%s)",
             (
                 command.candidate.case_no,
                 generation_id,
@@ -153,6 +158,7 @@ def _insert_assignments(
                 assignment.sequence,
                 assignment.assigned_start_date,
                 assignment.assigned_end_date,
+                assignment_status,
             ),
         )
         assignment_ids[assignment.candidate_key] = int(cursor.lastrowid)

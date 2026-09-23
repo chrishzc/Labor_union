@@ -28,6 +28,7 @@ import { OrderFormalRecommendationPanel } from './OrderFormalRecommendationPanel
 import { OrderIntakeRepairPanel } from './OrderIntakeRepairPanel';
 import { OrderServiceCompletionActions } from './OrderServiceCompletionActions';
 import { OrderServiceDatesPanel } from './OrderServiceDatesPanel';
+import { OrderOfficialDateCorrectionPanel } from './OrderOfficialDateCorrectionPanel';
 import { OrderTermsMutationPanel } from './OrderTermsMutationPanel';
 import { OrderWorkbenchV2OwnerContext } from './OrderWorkbenchV2OwnerContext';
 import { ServiceBeforeReplacementActions } from './ServiceBeforeReplacementActions';
@@ -143,7 +144,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
   const [visitedGroups, setVisitedGroups] = useState<WorkGroup[]>([]);
   const [matchingView, setMatchingView] = useState<'list' | 'search' | 'information'>('list');
   const [informationKind, setInformationKind] = useState<1 | 2>(1);
-  const [serviceView, setServiceView] = useState<'dates' | 'assignment' | 'completion'>('dates');
+  const [serviceView, setServiceView] = useState<'dates' | 'assignment' | 'completion' | 'correction'>('dates');
   const [contractView, setContractView] = useState<'overview' | 'signing'>('signing');
   const [signingOpened, setSigningOpened] = useState(true);
   const pageHeadingRef = useRef<HTMLHeadingElement>(null);
@@ -395,7 +396,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
                 {signingOpened && <div hidden={contractView !== 'signing'}><ContractExternalSigningActions caseNo={caseNo} onCommitted={refreshFacts} /></div>}
               </div>}
               {(activeGroup === 'service' || visitedGroups.includes('service')) && <div hidden={activeGroup !== 'service'}>
-                <nav className="order-case-subnav" aria-label="服務工作"><button type="button" aria-pressed={serviceView === 'dates'} onClick={() => setServiceView('dates')}>確認日期</button><button type="button" aria-pressed={serviceView === 'assignment'} onClick={() => setServiceView('assignment')}>正式排班</button><button type="button" aria-pressed={serviceView === 'completion'} onClick={() => setServiceView('completion')}>完工確認</button></nav>
+                <nav className="order-case-subnav" aria-label="服務工作"><button type="button" aria-pressed={serviceView === 'dates'} onClick={() => setServiceView('dates')}>確認日期</button><button type="button" aria-pressed={serviceView === 'assignment'} onClick={() => setServiceView('assignment')}>正式排班</button><button type="button" aria-pressed={serviceView === 'completion'} onClick={() => setServiceView('completion')}>完工確認</button><button type="button" aria-pressed={serviceView === 'correction'} onClick={() => setServiceView('correction')}>更正正式日期</button></nav>
                 <div hidden={serviceView !== 'dates'}>
                 <OrderServiceDatesPanel
                   caseNo={caseNo}
@@ -413,7 +414,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
                 <fieldset disabled={datesPending}>
                 <OrderAssignmentPlanPanel caseNo={caseNo} revision={refreshRevision} onObserved={refreshFacts} onOpenReplacement={() => { setDrawerTab('changes'); setReplacementExpanded(true); }} />
                 </fieldset>
-                </div><div hidden={serviceView !== 'completion'}>{detail.status === 'ready' && (
+                </div><div hidden={serviceView !== 'correction'}>{serviceView === 'correction' && <OrderOfficialDateCorrectionPanel caseNo={caseNo} revision={refreshRevision} onObserved={refreshFacts} />}</div><div hidden={serviceView !== 'completion'}>{detail.status === 'ready' && (
                 <OrderServiceCompletionActions caseNo={caseNo} orderStatus={detail.data.order_status} onCompleted={refreshFacts} />
               )}</div></div>}
               {activeGroup === 'finance' && <div className="order-case-document-grid"><article><h3>訂金與客戶收款</h3><p>核對訂金、各期款與退款。正常收款依銀行流水核銷。</p><a href={`#finance?tab=client-receipts&case_no=${encodeURIComponent(caseNo)}`}>查看本案客戶收款 →</a><ClientDepositSkipActions caseNo={caseNo} onCommitted={refreshFacts} /></article><article><h3>月嫂付款與結案</h3><p>前往帳務頁選擇月嫂，再核對應付與付款紀錄。</p><a href="#finance?tab=staff-payables">前往月嫂付款 →</a></article><p className="order-case-review-note">銀行流水如需人工核對，請在帳務頁預覽更正內容後確認核銷。</p></div>}

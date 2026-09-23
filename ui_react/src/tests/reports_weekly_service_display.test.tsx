@@ -97,6 +97,43 @@ describe('ReportsPage service-hours display', () => {
     expect(within(within(tables[1]).getAllByRole('row')[1]).getByRole('cell', { name: '1' })).toBeInTheDocument();
   });
 
+  it('請假代班後重新載入，依月嫂與週別顯示各自有效工作日', async () => {
+    const first = WEEKLY_OPERATIONS_REPORT.service_rows[0];
+    const originalReport = {
+      ...WEEKLY_OPERATIONS_REPORT,
+      service_rows: [
+        { ...first, assignment_id: 701, staff_name: '原月嫂', weekly_work_days: 1, weekly_hours: 8 },
+        { ...first, assignment_id: 702, staff_name: '代班月嫂', weekly_work_days: 1, weekly_hours: 8 },
+      ],
+    };
+    const correctedReport = {
+      ...originalReport,
+      service_rows: [
+        originalReport.service_rows[0],
+        { ...originalReport.service_rows[1], period_start_date: '2026-08-24',
+          period_end_date: '2026-08-30' },
+      ],
+    };
+    const query = vi.spyOn(weeklyOperationsReportQueryClient, 'query')
+      .mockResolvedValueOnce(originalReport).mockResolvedValueOnce(correctedReport);
+    render(<ReportsPage />);
+    await screen.findByText('CASE-WEEK-001');
+    fireEvent.click(screen.getByRole('tab', { name: '每周服務中說明' }));
+    expect(screen.getAllByText('CASE-WEEK-001')).toHaveLength(2);
+    expect(screen.getByText('8-3')).toHaveAttribute('rowspan', '2');
+    fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
+    await screen.findByText('8-4');
+    const tables = screen.getByRole('region', { name: '服務工時資料，可左右捲動' }).querySelectorAll('table');
+    expect(tables).toHaveLength(2);
+    expect(within(tables[0]).getByText('原月嫂')).toBeInTheDocument();
+    expect(within(tables[1]).getByText('代班月嫂')).toBeInTheDocument();
+    expect(within(tables[0]).getAllByRole('cell').at(-3)).toHaveTextContent('1');
+    expect(within(tables[0]).getAllByRole('cell').at(-2)).toHaveTextContent('8');
+    expect(within(tables[1]).getAllByRole('cell').at(-3)).toHaveTextContent('1');
+    expect(within(tables[1]).getAllByRole('cell').at(-2)).toHaveTextContent('8');
+    expect(query).toHaveBeenCalledTimes(2);
+  });
+
   it('整個期間沒有案件資料時仍顯示每週補登值並說明案件無資料', async () => {
     vi.spyOn(weeklyOperationsReportQueryClient, 'query').mockResolvedValue({
       ...WEEKLY_OPERATIONS_REPORT,

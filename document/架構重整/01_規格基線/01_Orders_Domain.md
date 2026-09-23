@@ -331,6 +331,16 @@ AutoComplete 與 Scheduling leave-substitution Apply 必須序列化於同一 Or
 任一方先提交都會使另一方持有的 Orders expected version 失效；舊 command 不得以舊服務日完成，
 也不得在完成後補寫請假。人工後續更正必須使用獨立、可稽核的 correction command。
 
+正式排班日期登錄錯誤時，`official-service-dates` Query／Preview／Apply 是上述更正命令。
+它只接受已完成案件現行 effective generation 中，每個 assignment 完整且日數守恆的正式服務日期；
+Preview 綁定 Orders／Scheduling 版本、原日期、新日期及必要 Finance／Payroll 版本。
+Apply 在同一交易委派 Scheduling generation replacement，追加維持 `訂單完成` 的不可變更正事件，
+推進 Orders version 並以 successor 的最後正式服務日更新 current `actual_end_date`。
+原 completion event 與 `order_service_data_locks` 不得改寫或移除。日期更正若涉及特殊薪資、
+雙倍薪、既有調整或補助退還等無法證明金額 no-op 的事實，Preview 必須阻擋；
+純日期更正不得新建 Client Finance／Payroll 義務。此命令不取代事前 confirmed dates、
+Actual Start、Terms 或請假代班流程。詳細可驗收情境以 Issue #346 為本次 bounded package。
+
 訂金 receipt／reversal 與 actual-start reconfirm 綁定：
 
 - 訂金有效性只由 Client Finance 的正式 deposit obligation、succeeded receipt、合法 reversal

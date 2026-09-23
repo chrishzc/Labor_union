@@ -300,6 +300,10 @@ fingerprint。任一不同均零 mutation 回 conflict；不得信任 Preview sn
 - lock day 必須區分 `service` 與 `buffer`；buffer 有獨立 lifecycle。
 - `staff_schedule.assignment_id` 必須進入 base schema，正式歷史不得 `ON DELETE CASCADE`。
 - Scheduling aggregate 需要獨立 version 與 idempotency receipt。
+- 完工後正式日期更正仍須經 canonical generation replacement：舊 effective schedule 退役、
+  successor assignment／`staff_schedule`／occupancy 同交易生效，舊 generation 與 rebuild lineage 保留；
+  Orders correction command 不得原地修改舊 `work_date`。新有效 assignment 的完成狀態
+  必須與已完成 Orders lifecycle 一致，週報只讀 successor effective 工作日。
 - batch header 必須唯一 `batch_key`；child event 必須唯一
   `(batch_key, batch_item_index)` 與穩定 event identity，且 ordinals 從 0 連續。
 
