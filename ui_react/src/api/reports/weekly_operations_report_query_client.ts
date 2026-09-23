@@ -8,7 +8,8 @@ import { ApiDecodeError } from '../shared/typed_errors';
 import { WeeklyOperationsReportError, mapWeeklyOperationsReportError } from './weekly_operations_report_errors';
 import {
   WeeklyOperationsReportResponseSchema,
-  type WeeklyOperationsReport,
+  WEEKLY_REPORT_SCHEMA_VERSION,
+  type WeeklyOperationsReportData,
 } from './weekly_operations_report_schemas';
 
 export interface WeeklyOperationsReportQueryOptions {
@@ -32,7 +33,7 @@ export function validateOperationsReportDateRange(startDate: string, endDate: st
 }
 
 
-function assertWeeklyView(view: WeeklyOperationsReport, startDate: string, endDate: string): WeeklyOperationsReport {
+function assertWeeklyView(view: WeeklyOperationsReportData, startDate: string, endDate: string): WeeklyOperationsReportData {
   if (view.period.start_date !== startDate || view.period.end_date !== endDate) {
     throw new WeeklyOperationsReportError('WEEKLY_REPORT_PERIOD_MISMATCH', '週報 period 與 request 不一致。');
   }
@@ -87,7 +88,7 @@ function assertWeeklyView(view: WeeklyOperationsReport, startDate: string, endDa
 }
 
 export const weeklyOperationsReportQueryClient = {
-  async query(startDate: string, endDate: string, options?: WeeklyOperationsReportQueryOptions): Promise<WeeklyOperationsReport> {
+  async query(startDate: string, endDate: string, options?: WeeklyOperationsReportQueryOptions): Promise<WeeklyOperationsReportData> {
     validateOperationsReportDateRange(startDate, endDate);
     const token = sessionClient.getToken();
     if (!token) throw new WeeklyOperationsReportError('WEEKLY_REPORT_UNAUTHENTICATED', '請先登入。', false, 401);
@@ -97,7 +98,7 @@ export const weeklyOperationsReportQueryClient = {
         timeoutMs: options?.timeoutMs,
         baseUrl: options?.baseUrl,
         token,
-        params: { start_date: startDate, end_date: endDate },
+        params: { start_date: startDate, end_date: endDate, schema_version: WEEKLY_REPORT_SCHEMA_VERSION },
       });
       const decoded = WeeklyOperationsReportResponseSchema.safeParse(raw);
       if (!decoded.success) {

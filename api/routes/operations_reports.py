@@ -20,6 +20,8 @@ from api.schemas.base import BaseResponse
 from api.schemas.operations_reports import (
     SaveWeeklyReportMetricRequest,
     WeeklyOperationsReportView,
+    WeeklyOperationsReportTotalsView,
+    WeeklyOperationsReportSchemaVersion,
     WeeklyReportMetricView,
 )
 from subsystems.access.authentication_session import AdminPrincipal
@@ -34,12 +36,13 @@ XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.s
 
 @router.get(
     "/weekly",
-    response_model=BaseResponse[WeeklyOperationsReportView],
+    response_model=BaseResponse[WeeklyOperationsReportView | WeeklyOperationsReportTotalsView],
 )
 def query_weekly_operations_report(
     request: Request,
     start_date: date = Query(...),
     end_date: date = Query(...),
+    schema_version: WeeklyOperationsReportSchemaVersion = Query("operations-report.v3"),
     principal: AdminPrincipal = Depends(require_admin),
     query: WeeklyOperationsReportQuery = Depends(get_weekly_operations_report_query),
 ):
@@ -47,7 +50,7 @@ def query_weekly_operations_report(
     try:
         _reject_retired_weekly_parameters(request)
         report = query.query(start_date, end_date)
-        view = _weekly_report_view(report)
+        view = _weekly_report_view(report, schema_version)
     except ValueError as exc:
         if str(exc) in {
             "operations_report_date_range_invalid",
@@ -114,7 +117,10 @@ def export_weekly_operations_report_xlsx(
     return StreamingResponse(
         iter([workbook_bytes]),
         media_type=XLSX_MEDIA_TYPE,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Operations-Report-Version": "operations-report.v4",
+        },
     )
 
 
@@ -180,34 +186,41 @@ def _service_row_view_dict(row) -> dict[str, object]:
     }
 
 
-def _weekly_report_view(report) -> WeeklyOperationsReportView:
-    return WeeklyOperationsReportView.model_validate(
-        {
-            "schema_version": report.schema_version,
-            "period": {
-                "start_date": report.start_date,
-                "end_date": report.end_date,
-                "timezone": report.timezone,
-                "period_label": report.period_label,
-            },
-            "generated_at": report.generated_at,
-            "source_revision": report.source_revision,
-            "summary": _slots_dict(report.summary),
-            "case_rows": [_case_row_view_dict(row) for row in report.case_rows],
-            "subsidy_partitions": [
-                {
-                    "citizen_kind": partition.citizen_kind,
-                    "row_count": len(partition.rows),
-                    "total_amount_ntd": sum(row.subsidy_amount_ntd for row in partition.rows),
-                    "rows": [_subsidy_row_view_dict(row) for row in partition.rows],
-                }
-                for partition in report.subsidy_partitions
-            ],
-            "service_rows": [_service_row_view_dict(row) for row in report.service_rows],
-            "weekly_metrics": [_slots_dict(metric) for metric in report.weekly_metrics],
-            "data_quality_issues": [_slots_dict(issue) for issue in report.data_quality_issues],
+def _weekly_report_view(
+    report,
+    schema_version: WeeklyOperationsReportSchemaVersion = "operations-report.v4",
+) -> WeeklyOperationsReportView | WeeklyOperationsReportTotalsView:
+    # 舊版 strict client 不接受新增欄位；只有明確要求 v4 才輸出新版統計。
+    data = {
+        "schema_version": schema_version,
+        "period": {
+            "start_date": report.start_date,
+            "end_date": report.end_date,
+            "timezone": report.timezone,
+            "period_label": report.period_label,
         },
-    )
+        "generated_at": report.generated_at,
+        "source_revision": report.source_revision,
+        "summary": _slots_dict(report.summary),
+        "case_rows": [_case_row_view_dict(row) for row in report.case_rows],
+        "subsidy_partitions": [
+            {
+                "citizen_kind": partition.citizen_kind,
+                "row_count": len(partition.rows),
+                "total_amount_ntd": sum(row.subsidy_amount_ntd for row in partition.rows),
+                "rows": [_subsidy_row_view_dict(row) for row in partition.rows],
+            }
+            for partition in report.subsidy_partitions
+        ],
+        "service_rows": [_service_row_view_dict(row) for row in report.service_rows],
+        "weekly_metrics": [_slots_dict(metric) for metric in report.weekly_metrics],
+        "data_quality_issues": [_slots_dict(issue) for issue in report.data_quality_issues],
+    }
+    if schema_version == "operations-report.v3":
+        return WeeklyOperationsReportView.model_validate(data)
+    data["annual_totals"] = [_slots_dict(total) for total in report.annual_totals]
+    data["monthly_subtotals"] = [_slots_dict(total) for total in report.monthly_subtotals]
+    return WeeklyOperationsReportTotalsView.model_validate(data)
 
 
 def _reject_retired_weekly_parameters(request: Request) -> None:
