@@ -32,31 +32,40 @@ jobs:
       - name: Verify validation schema manifest
         run: python -m scripts.verify_validation_schema_manifest
       - name: Verify SQL release reproducibility without rebuilding
-        id: release
         run: python -m scripts.build_validation_schema_release --check
-      - name: Show generated release drift
-        if: failure() && steps.release.outcome == 'failure'
-        run: |
-          python -m scripts.build_validation_schema_release --output "$RUNNER_TEMP/expected-validation.sql"
-          python - <<'PY'
-          import difflib
-          import os
-          from pathlib import Path
-          actual = Path('db/releases/labor_union_validation_schema_v1.sql').read_text(encoding='utf-8')
-          expected = (Path(os.environ['RUNNER_TEMP']) / 'expected-validation.sql').read_text(encoding='utf-8')
-          difference = list(difflib.unified_diff(actual.splitlines(), expected.splitlines(), fromfile='committed', tofile='generated'))
-          print('\n'.join(difference[:300]))
-          print(f'Diff lines: {len(difference)}')
-          PY
 
   weekly-report-api:
     name: Weekly report API contracts
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+          MYSQL_ROOT_HOST: "%"
+        ports:
+          - "127.0.0.1:3307:3306"
+        options: >-
+          --health-cmd="mysqladmin ping --silent"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
     env:
       APP_ENV: test
       ACCESS_CONTROL_PROFILE: local_auth
       ENABLE_ADMIN_AUTH: "true"
+      DB_HOST: 127.0.0.1
+      DB_PORT: "3307"
+      DB_USER: root
+      DB_PASSWORD: ""
+      DB_SSL_MODE: disabled
+      DB_DATABASE: lu_test_weekly_${{ github.run_id }}_${{ github.run_attempt }}
+      LABOR_UNION_TEST_MYSQL_HOST: 127.0.0.1
+      LABOR_UNION_TEST_MYSQL_PORT: "3307"
+      LABOR_UNION_TEST_MYSQL_USER: root
+      LABOR_UNION_TEST_MYSQL_PASSWORD: ""
+      LABOR_UNION_TEST_MYSQL_DATABASE: lu_test_weekly_${{ github.run_id }}_${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -65,6 +74,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install declared runtime and test dependencies
+        id: dependencies
         run: python -m pip install -r requirements.txt 'pytest>=8.0' 'httpx2==2.10.0'
       - name: Run weekly report contracts with real imports
         run: >-
@@ -72,6 +82,15 @@ jobs:
           tests/test_weekly_operations_report_contract.py
           tests/test_weekly_operations_report_totals.py
           tests/test_weekly_operations_report_api_versions.py
+      - name: Run session-authenticated API and export against MySQL
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: python -m pytest -q tests/test_weekly_operations_report_mysql.py
+      - name: Run canonical scheduling to weekly report MySQL regression
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: >-
+          python -m pytest -q
+          tests/global/integration/test_historical_restart_to_weekly_report_mysql.py
+          -k test_historical_restart_reenters_canonical_scheduling_and_weekly_report
 
   weekly-report-frontend:
     name: Weekly report frontend
@@ -103,3 +122,47 @@ jobs:
       - name: Typecheck and build complete frontend
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: npm run build
+
+  # One-time repair for this authorized PR only; removed after the generated commit.
+  regenerate-pr349-release:
+    if: >-
+      github.event_name == 'pull_request' && github.event.pull_request.number == 349 &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'feat/weekly-report-totals-all-statuses-20260923'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Regenerate and publish only the confirmed release-header drift
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          python - <<'PY'
+          from pathlib import Path
+          from scripts.build_validation_schema_release import main
+          path = Path('db/releases/labor_union_validation_schema_v1.sql')
+          before = path.read_text(encoding='utf-8')
+          assert main([]) == 0
+          after = path.read_text(encoding='utf-8')
+          expected = before.replace(
+              '-- Release: labor-union-validation-schema-2026-09-22-v38\n',
+              '-- Release: labor-union-validation-schema-2026-09-22-v39\n',
+              1,
+          )
+          assert after == expected, 'release drift exceeds the confirmed header-only change'
+          PY
+          python -m scripts.build_validation_schema_release --check
+          git diff --check
+          if git diff --quiet; then exit 0; fi
+          test "$(git diff --name-only)" = 'db/releases/labor_union_validation_schema_v1.sql'
+          git add -- db/releases/labor_union_validation_schema_v1.sql
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'fix(db): regenerate validation SQL release with current manifest version'
+          git push origin HEAD:refs/heads/feat/weekly-report-totals-all-statuses-20260923
