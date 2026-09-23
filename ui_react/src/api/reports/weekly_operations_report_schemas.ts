@@ -26,6 +26,19 @@ export const WeeklyOperationsReportSummarySchema = z.strictObject({
   negotiating_count: z.number().int().nonnegative(),
   cancelled_count: z.number().int().nonnegative(),
   incomplete_count: z.number().int().nonnegative(),
+  order_status_counts: z.record(z.string().min(1), z.number().int().nonnegative()),
+  order_status_missing_count: z.number().int().nonnegative(),
+});
+
+export const WeeklyReportCaseTotalsSchema = z.strictObject({
+  ...WeeklyOperationsReportSummarySchema.shape,
+  year: z.number().int().positive(),
+  month: z.number().int().min(1).max(12).nullable(),
+  start_date: DateSchema,
+  end_date: DateSchema,
+  promotion_count: NonNegativeNullableIntegerSchema,
+  inquiry_count: NonNegativeNullableIntegerSchema,
+  review_rejected_count: z.number().int().nonnegative(),
 });
 
 export const WeeklyOperationsCaseRowSchema = z.strictObject({
@@ -103,6 +116,8 @@ export const WeeklyOperationsReportSchema = z.strictObject({
   subsidy_partitions: z.array(WeeklyOperationsSubsidyPartitionSchema).length(2),
   service_rows: z.array(WeeklyOperationsServiceRowSchema),
   weekly_metrics: z.array(WeeklyReportMetricSchema),
+  annual_totals: z.array(WeeklyReportCaseTotalsSchema),
+  monthly_subtotals: z.array(WeeklyReportCaseTotalsSchema),
   data_quality_issues: z.array(WeeklyOperationsDataQualityIssueSchema),
 });
 

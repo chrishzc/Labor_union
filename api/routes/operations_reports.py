@@ -205,6 +205,8 @@ def _weekly_report_view(report) -> WeeklyOperationsReportView:
             ],
             "service_rows": [_service_row_view_dict(row) for row in report.service_rows],
             "weekly_metrics": [_slots_dict(metric) for metric in report.weekly_metrics],
+            "annual_totals": [_slots_dict(total) for total in report.annual_totals],
+            "monthly_subtotals": [_slots_dict(total) for total in report.monthly_subtotals],
             "data_quality_issues": [_slots_dict(issue) for issue in report.data_quality_issues],
         },
     )

@@ -43,7 +43,10 @@ from infrastructure.mysql.weekly_operations_report_query_adapter import (
 
 class _Facts:
     def list_case_facts(self, start_date, end_date):
-        assert (start_date, end_date) == (date(2026, 8, 20), date(2026, 8, 26))
+        assert (start_date, end_date) in {
+            (date(2026, 8, 20), date(2026, 8, 26)),
+            (date(2026, 1, 5), date(2026, 8, 26)),
+        }
         return [
             WeeklyCaseFact(
                 7, "115000007", datetime(2026, 8, 20, 9), "王小美", "一般市民", None,
@@ -87,7 +90,10 @@ class _Facts:
         )
 
     def list_weekly_metrics(self, start_date, end_date):
-        assert (start_date, end_date) == (date(2026, 8, 20), date(2026, 8, 26))
+        assert (start_date, end_date) in {
+            (date(2026, 8, 20), date(2026, 8, 26)),
+            (date(2026, 1, 5), date(2026, 8, 26)),
+        }
         return [
             WeeklyReportMetric(date(2026, 8, 17), date(2026, 8, 23), 12, 34),
             WeeklyReportMetric(date(2026, 8, 24), date(2026, 8, 30), 5, 6),
@@ -173,7 +179,18 @@ def test_weekly_query_is_redacted_and_uses_official_work_days():
         "timezone": "Asia/Taipei",
         "period_label": "2026-08-20 ~ 2026-08-26",
     }
+    assert data["annual_totals"][0]["year"] == 2026
+    assert data["annual_totals"][0]["start_date"] == "2026-01-05"
+    assert data["annual_totals"][0]["application_count"] == 2
+    assert data["annual_totals"][0]["promotion_count"] is None
+    assert data["monthly_subtotals"][0]["month"] == 8
+    assert data["monthly_subtotals"][0]["promotion_count"] == 17
+    assert data["monthly_subtotals"][0]["inquiry_count"] == 40
     assert data["summary"]["application_count"] == 2
+    assert data["summary"]["order_status_counts"]["服務中"] == 1
+    assert data["summary"]["order_status_counts"]["訂單成立"] == 0
+    assert data["summary"]["order_status_missing_count"] == 1
+    assert data["monthly_subtotals"][0]["order_status_counts"] == data["summary"]["order_status_counts"]
     assert data["summary"]["general_eligible_count"] == 1
     assert data["summary"]["rejection_unpartitioned_count"] == 1
     assert [(item["week_start_date"], item["promotion_count"]) for item in data["weekly_metrics"]] == [
@@ -397,13 +414,19 @@ def test_weekly_export_has_fixed_three_sheets_and_summary_without_pii():
     assert workbook.sheetnames == ["週報案件受理總表", "補助案件統計表", "每周服務中說明"]
     case_values = list(workbook["週報案件受理總表"].values)
     assert case_values[0][:2] == ("報表期間", "2026-08-20 ~ 2026-08-26")
-    # 欄位與雙層表頭不變；明細直接按實際週次開始，沒有查詢期間合計列。
+    # 表頭不變；年度累計置頂，月小計位於最後一週下方，原週資料保留。
     assert "平台序號" in case_values[1]
     assert "一般市民符合" in case_values[2]
-    assert case_values[3][3] == "2026-08-17 ~ 2026-08-23"
-    assert case_values[3][5:7] == (12, 34)
-    assert case_values[3][7:16] == (1, 1, None, None, None, 1, None, None, None)
-    assert any(row[3] == "2026-08-24 ~ 2026-08-30" for row in case_values[3:])
+    assert case_values[3][0] == "115年度累計"
+    assert case_values[4][3] == "2026-08-17 ~ 2026-08-23"
+    assert case_values[4][5:7] == (12, 34)
+    assert case_values[4][7:12] == (1, 1, None, None, None)
+    assert case_values[4][12:22] == (None, None, None, 1, None, None, None, None, None, None)
+    assert case_values[5][22:24] == (1, 1)
+    assert len(case_values[2]) == 31
+    assert case_values[5][3] == "2026-08-24 ~ 2026-08-30"
+    assert case_values[6][0] == "115年8月小計"
+    assert case_values[6][5:8] == (17, 40, 2)
     workbook_text = " ".join(str(value) for sheet in workbook for row in sheet.values for value in row if value is not None)
     assert "王小美" in workbook_text
     # 補助案件統計表對齊模板：經費統計格式，不包含身分證字號與地址個資

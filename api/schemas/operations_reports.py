@@ -4,7 +4,7 @@ Description: 定義實際週界營運報表 operations-report.v3 的 strict view
 """
 
 from datetime import date, datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -33,6 +33,18 @@ class WeeklyReportSummaryView(_StrictModel):
     negotiating_count: int = Field(ge=0)
     cancelled_count: int = Field(ge=0)
     incomplete_count: int = Field(ge=0)
+    order_status_counts: dict[str, Annotated[int, Field(ge=0)]]
+    order_status_missing_count: int = Field(ge=0)
+
+
+class WeeklyReportCaseTotalsView(WeeklyReportSummaryView):
+    year: int = Field(ge=1)
+    month: int | None = Field(ge=1, le=12)
+    start_date: date
+    end_date: date
+    promotion_count: int | None = Field(ge=0)
+    inquiry_count: int | None = Field(ge=0)
+    review_rejected_count: int = Field(ge=0)
 
 
 class WeeklyOperationsSubsidyRowView(GovernmentSubsidyReportRowView):
@@ -114,6 +126,8 @@ class WeeklyOperationsReportView(_StrictModel):
     subsidy_partitions: list[WeeklyOperationsSubsidyPartitionView]
     service_rows: list[WeeklyReportServiceRowView]
     weekly_metrics: list[WeeklyReportMetricView]
+    annual_totals: list[WeeklyReportCaseTotalsView]
+    monthly_subtotals: list[WeeklyReportCaseTotalsView]
     data_quality_issues: list[WeeklyReportDataQualityIssueView]
 
 

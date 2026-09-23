@@ -5,7 +5,7 @@ Description: 協調營運週報三分頁根事實、遮罩、彙總與資料品�
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Protocol
@@ -15,12 +15,18 @@ from subsystems.reporting.weekly_report_metrics_service import (
     monday_of,
     sunday_of,
     week_label,
+    week_starts_between,
 )
 
 
 SCHEMA_VERSION = "operations-report.v3"
-SOURCE_REVISION = "operations_report_query_v5"
+SOURCE_REVISION = "operations_report_query_v7"
 TIMEZONE = "Asia/Taipei"
+# 報表欄序對齊 Orders 的全部生命週期狀態；無案件的狀態也保留零值欄。
+ORDER_STATUS_LABELS = (
+    "待補件", "洽談中", "訂單成立", "服務中", "訂單完成", "訂單取消",
+    "歷史訂單－未服務", "歷史訂單－服務中", "歷史訂單－服務完成", "歷史訂單－帳務完成",
+)
 GENERAL_CITIZEN = "一般市民"
 SUBSIDIZED_CITIZEN = "補助市民"
 _SERVICE_COMPLETED_STATUSES = frozenset({
@@ -207,6 +213,19 @@ class WeeklySummary:
     negotiating_count: int
     cancelled_count: int
     incomplete_count: int
+    order_status_counts: dict[str, int]
+    order_status_missing_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class WeeklyCaseTotals(WeeklySummary):
+    year: int
+    month: int | None
+    start_date: date
+    end_date: date
+    promotion_count: int | None
+    inquiry_count: int | None
+    review_rejected_count: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -224,6 +243,8 @@ class WeeklyOperationsReport:
     service_rows: tuple[WeeklyServiceRow, ...]
     data_quality_issues: tuple[DataQualityIssue, ...]
     weekly_metrics: tuple[WeeklyReportMetric, ...]
+    annual_totals: tuple[WeeklyCaseTotals, ...]
+    monthly_subtotals: tuple[WeeklyCaseTotals, ...]
 
 
 def _roc_date(d: date | None) -> str:
@@ -269,9 +290,11 @@ class WeeklyOperationsReportQuery:
         last_month = None
         for idx, fact in enumerate(facts_cases_sorted, start=1):
             app_dt = fact.created_at.date() if fact.created_at is not None else None
-            month_str = f"{app_dt.month}月" if app_dt and app_dt.month != last_month else ""
-            if app_dt:
-                last_month = app_dt.month
+            week_start = monday_of(app_dt) if app_dt else None
+            month_key = (week_start.year, week_start.month) if week_start else None
+            month_str = f"{week_start.month}月" if week_start and month_key != last_month else ""
+            if week_start:
+                last_month = month_key
             case_rows.append(self._case_row(fact, serial_number=idx, month_label=month_str))
         case_rows_tuple = tuple(case_rows)
 
@@ -286,6 +309,34 @@ class WeeklyOperationsReportQuery:
             self._subsidy_partition("subsidized", subsidies.subsidized),
         )
         weekly_metrics = tuple(self._facts.list_weekly_metrics(start_date, end_date))
+
+        # 月小計只加總目前顯示的週資料；跨月／跨年皆按星期一歸屬。
+        weeks = week_starts_between(start_date, end_date)
+        monthly_subtotals = []
+        for year, month in dict.fromkeys((week.year, week.month) for week in weeks):
+            month_weeks = tuple(week for week in weeks if (week.year, week.month) == (year, month))
+            rows = tuple(row for row in case_rows_tuple if row.week_start_date in month_weeks)
+            monthly_subtotals.append(self._case_totals(
+                year, month, max(start_date, month_weeks[0]),
+                min(end_date, sunday_of(month_weeks[-1])), rows, weekly_metrics,
+            ))
+
+        # 年度累計另讀年初至迄日，不把自選期間的小計誤當成年度累計。
+        # 年初是該年第一個星期一；跨年週整週歸入星期一所屬年度。
+        annual_totals = []
+        for year in dict.fromkeys(week.year for week in weeks):
+            annual_start = monday_of(date(year, 1, 7))
+            annual_end = min(end_date, sunday_of(date(year, 12, 31)))
+            annual_rows = tuple(
+                self._case_row(fact)
+                for fact in self._facts.list_case_facts(annual_start, annual_end)
+                if fact.created_at is not None
+                and annual_start <= fact.created_at.date() <= annual_end
+            )
+            annual_metrics = tuple(self._facts.list_weekly_metrics(annual_start, annual_end))
+            annual_totals.append(self._case_totals(
+                year, None, annual_start, annual_end, annual_rows, annual_metrics,
+            ))
 
         issues = self._issues(case_rows_tuple, subsidy_partitions, incomplete_service_count)
         return WeeklyOperationsReport(
@@ -302,6 +353,40 @@ class WeeklyOperationsReportQuery:
             service_rows=service_rows,
             data_quality_issues=issues,
             weekly_metrics=weekly_metrics,
+            annual_totals=tuple(annual_totals),
+            monthly_subtotals=tuple(monthly_subtotals),
+        )
+
+    def _case_totals(
+        self,
+        year: int,
+        month: int | None,
+        start_date: date,
+        end_date: date,
+        rows: tuple[WeeklyCaseRow, ...],
+        metrics: tuple[WeeklyReportMetric, ...],
+    ) -> WeeklyCaseTotals:
+        by_week = {metric.week_start_date: metric for metric in metrics}
+
+        def metric_total(field: str) -> int | None:
+            total = 0
+            for week in week_starts_between(start_date, end_date):
+                metric = by_week.get(week)
+                value = getattr(metric, field) if metric is not None else None
+                if value is None:
+                    return None  # 未登錄不是零，也不能將部分合計標成完整合計。
+                total += value
+            return total
+
+        return WeeklyCaseTotals(
+            **asdict(self._summary(rows)),
+            year=year,
+            month=month,
+            start_date=start_date,
+            end_date=end_date,
+            promotion_count=metric_total("promotion_count"),
+            inquiry_count=metric_total("inquiry_count"),
+            review_rejected_count=sum(row.review_rejected for row in rows),
         )
 
     @staticmethod
@@ -459,6 +544,12 @@ class WeeklyOperationsReportQuery:
     def _summary(
         rows: tuple[WeeklyCaseRow, ...],
     ) -> WeeklySummary:
+        # 直接計算當前狀態，不把服務中／完成／歷史狀態併入「訂單成立」。
+        # 如來源另有具名狀態，保留其原名計數，不靜默丟棄或猜成其他狀態。
+        status_counts = dict.fromkeys(ORDER_STATUS_LABELS, 0)
+        for row in rows:
+            if row.order_status:
+                status_counts[row.order_status] = status_counts.get(row.order_status, 0) + 1
         return WeeklySummary(
             application_count=len(rows),
             general_eligible_count=sum(row.general_eligible for row in rows),
@@ -470,6 +561,8 @@ class WeeklyOperationsReportQuery:
             negotiating_count=sum(row.negotiating for row in rows),
             cancelled_count=sum(row.cancelled for row in rows),
             incomplete_count=sum(row.order_status is None or bool(row.data_quality_codes) for row in rows),
+            order_status_counts=status_counts,
+            order_status_missing_count=sum(not row.order_status for row in rows),
         )
 
     @staticmethod
