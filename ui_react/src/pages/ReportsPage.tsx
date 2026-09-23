@@ -16,6 +16,7 @@ import {
   displayWeeklyMetric,
   displayWeeklyValue,
 } from '../adapters/reports/weekly_operations_report_adapter';
+import { WeeklyOperationsReportError } from '../api/reports/weekly_operations_report_errors';
 import { WeeklyMetricsEditor } from '../components/reports/WeeklyMetricsEditor';
 
 type ReportKind = 'weekly' | 'quarterly' | 'annual';
@@ -95,7 +96,7 @@ const SubsidyPartitionsView: React.FC<{
 </>;
 
 const WeeklyCaseTotalsRow: React.FC<{
-  total: WeeklyView['annualTotals'][number];
+  total: NonNullable<WeeklyView['annualTotals']>[number];
 }> = ({ total }) => {
   const label = total.month === null
     ? `${total.year - 1911}年度累計`
@@ -152,26 +153,25 @@ const WeeklyCasesView: React.FC<{ report: WeeklyView }> = ({ report }) => {
     {report.caseRows.length === 0 && <div className="reports-state">此期間沒有案件受理資料。</div>}
     <div className="reports-table-container" tabIndex={0} role="region" aria-label="案件受理資料，可左右捲動">
       <table className="reports-table" aria-label="週報案件受理總表">
-        <caption>整週按星期一歸月／年；月小計為查詢期間內的週資料，年度累計另由該年第一個星期一計至迄日。審核不符合獨立統計，不加進訂單狀態合計。</caption>
+        <caption>{report.totalsAvailable ? '整週按星期一歸月／年；月小計為查詢期間內的週資料，年度累計另由該年第一個星期一計至迄日。審核不符合獨立統計，不加進訂單狀態合計。' : '目前顯示舊版週報資料，年度累計與月小計尚未提供。'}</caption>
         <thead><tr><th>案件</th><th>申請人</th><th>申請日</th><th>身分</th><th>審核</th><th>訂單狀態</th><th>天數／每日時數</th><th>預計服務期間</th><th>區域</th></tr></thead>
         <tbody>
-          {report.annualTotals.map((total) => <WeeklyCaseTotalsRow key={`year-${total.year}`} total={total} />)}
-          {report.monthlySubtotals.map((total) => {
-            const monthKey = `${total.year}-${String(total.month).padStart(2, '0')}`;
-            return <React.Fragment key={monthKey}>
-              {weeks.filter((week) => week.slice(0, 7) === monthKey).map((week) => {
-                const metric = metrics.get(week);
-                const rows = rowsByWeek.get(week) ?? [];
-                return <React.Fragment key={week}>
-                  <tr aria-label={`週次 ${week}`}><th colSpan={9} scope="row">
-                    {week}～{metric?.week_end_date ?? rows[0]?.week_end_date ?? ''}
-                    {'　'}推廣次數：{displayWeeklyMetric(metric?.promotion_count ?? null)}
-                    {'　'}詢問人次：{displayWeeklyMetric(metric?.inquiry_count ?? null)}
-                  </th></tr>
-                  {caseRows(rows)}
-                </React.Fragment>;
-              })}
-              <WeeklyCaseTotalsRow total={total} />
+          {report.annualTotals?.map((total) => <WeeklyCaseTotalsRow key={`year-${total.year}`} total={total} />)}
+          {weeks.map((week, index) => {
+            const metric = metrics.get(week);
+            const rows = rowsByWeek.get(week) ?? [];
+            const monthKey = week.slice(0, 7);
+            const lastWeekOfMonth = weeks[index + 1]?.slice(0, 7) !== monthKey;
+            const subtotal = lastWeekOfMonth ? report.monthlySubtotals?.find((total) =>
+              `${total.year}-${String(total.month).padStart(2, '0')}` === monthKey) : undefined;
+            return <React.Fragment key={week}>
+              <tr aria-label={`週次 ${week}`}><th colSpan={9} scope="row">
+                {week}～{metric?.week_end_date ?? rows[0]?.week_end_date ?? ''}
+                {'　'}推廣次數：{displayWeeklyMetric(metric?.promotion_count ?? null)}
+                {'　'}詢問人次：{displayWeeklyMetric(metric?.inquiry_count ?? null)}
+              </th></tr>
+              {caseRows(rows)}
+              {subtotal && <WeeklyCaseTotalsRow total={subtotal} />}
             </React.Fragment>;
           })}
           {rowsByWeek.has(null) && <>
@@ -242,7 +242,7 @@ export const ReportsPage: React.FC = () => {
   const [quarter, setQuarter] = useState(period.quarter);
   const [state, setState] = useState<ReportState>({ kind: 'idle' });
   const [reload, setReload] = useState(0);
-  const [exportState, setExportState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [exportState, setExportState] = useState<'idle' | 'loading' | 'success' | { error: string }>('idle');
   const controllerRef = useRef<AbortController | null>(null);
   const exportControllerRef = useRef<AbortController | null>(null);
   const sequenceRef = useRef(0);
@@ -349,8 +349,12 @@ export const ReportsPage: React.FC = () => {
       anchor.click();
       URL.revokeObjectURL(url);
       setExportState('success');
-    } catch {
-      if (!controller.signal.aborted && sequence === exportSequenceRef.current) setExportState('error');
+    } catch (error) {
+      if (!controller.signal.aborted && sequence === exportSequenceRef.current) {
+        setExportState({ error: error instanceof WeeklyOperationsReportError
+          && error.code === 'WEEKLY_REPORT_EXPORT_VERSION_MISMATCH'
+          ? error.message : '報表匯出失敗，請重試。' });
+      }
     }
   };
 
@@ -391,7 +395,7 @@ export const ReportsPage: React.FC = () => {
           </select>
         </label>}
         <button type="button" onClick={reloadReport}>重新載入</button>
-        <button type="button" data-control-id={exportControlId} disabled={exportState === 'loading'} onClick={() => void downloadXlsx()}>
+        <button type="button" data-control-id={exportControlId} disabled={exportState === 'loading' || (reportKind === 'weekly' && (state.kind !== 'weekly-ready' || !state.data.totalsAvailable))} onClick={() => void downloadXlsx()}>
           {exportState === 'loading' ? '正在產生 XLSX…' : reportKind === 'weekly' ? '下載營運報表 XLSX' : '匯出 XLSX'}
         </button>
       </div>
@@ -417,7 +421,7 @@ export const ReportsPage: React.FC = () => {
       />}
 
       {exportState === 'success' && <div className="reports-state" role="status">XLSX 已產生並開始下載。</div>}
-      {exportState === 'error' && <div className="reports-state error" role="alert">報表匯出失敗，請重試。</div>}
+      {typeof exportState === 'object' && <div className="reports-state error" role="alert">{exportState.error}</div>}
       {state.kind === 'loading' && <div className="reports-state" role="status">正在載入報表…</div>}
       {state.kind === 'empty' && <div className="reports-state">此期間沒有可列入報表的資料。</div>}
       {state.kind === 'error' && <div className="reports-state error" role="alert">
@@ -425,6 +429,9 @@ export const ReportsPage: React.FC = () => {
       </div>}
 
       {state.kind === 'weekly-ready' && <>
+        {!state.data.totalsAvailable && <div className="reports-state" role="status">
+          週報 API 尚未更新至新版統計；目前保留原有週資料，年度累計、月小計及新版 XLSX 暫不提供。後端更新後請重新載入。
+        </div>}
         {weeklyTab === 'cases' && <WeeklyCasesView report={state.data} />}
         {weeklyTab === 'subsidy' && <WeeklySubsidyView report={state.data} />}
         {weeklyTab === 'service' && <WeeklyServiceView report={state.data} />}

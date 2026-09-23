@@ -168,11 +168,11 @@ def _app():
 def test_weekly_query_is_redacted_and_uses_official_work_days():
     response = TestClient(_app()).get(
         "/api/v1/operations-reports/weekly",
-        params={"start_date": "2026-08-20", "end_date": "2026-08-26"},
+        params={"start_date": "2026-08-20", "end_date": "2026-08-26", "schema_version": "operations-report.v4"},
     )
     assert response.status_code == 200
     data = response.json()["data"]
-    assert data["schema_version"] == "operations-report.v3"
+    assert data["schema_version"] == "operations-report.v4"
     assert data["period"] == {
         "start_date": "2026-08-20",
         "end_date": "2026-08-26",

@@ -33,7 +33,7 @@ const SUMMARY = {
 };
 
 export const WEEKLY_OPERATIONS_REPORT: WeeklyOperationsReport = {
-  schema_version: 'operations-report.v3',
+  schema_version: 'operations-report.v4',
   period: {
     start_date: '2026-08-20',
     end_date: '2026-08-26',

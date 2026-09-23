@@ -5,6 +5,8 @@
 import { z } from 'zod';
 import { SubsidyReportRowSchema } from './subsidy_report_query_schemas';
 
+export const WEEKLY_REPORT_SCHEMA_VERSION = 'operations-report.v4' as const;
+
 const DateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const NonNegativeNullableIntegerSchema = z.number().int().nonnegative().nullable();
 
@@ -106,7 +108,7 @@ export const WeeklyReportMetricSchema = z.strictObject({
 });
 
 export const WeeklyOperationsReportSchema = z.strictObject({
-  schema_version: z.literal('operations-report.v3'),
+  schema_version: z.literal(WEEKLY_REPORT_SCHEMA_VERSION),
   period: WeeklyOperationsReportPeriodSchema,
   generated_at: z.string().datetime({ offset: true }),
   source_revision: z.string().min(1),
@@ -120,11 +122,22 @@ export const WeeklyOperationsReportSchema = z.strictObject({
   data_quality_issues: z.array(WeeklyOperationsDataQualityIssueSchema),
 });
 
+// 舊後端會忽略新的 schema_version query 並回 v3；兩版各自嚴格驗證，
+// 不把缺少 v4 統計欄位的異常回應當成合法舊版。
+export const WeeklyOperationsReportV3Schema = WeeklyOperationsReportSchema.omit({
+  annual_totals: true,
+  monthly_subtotals: true,
+}).extend({ schema_version: z.literal('operations-report.v3') });
+
 export const WeeklyOperationsReportResponseSchema = z.strictObject({
   success: z.boolean(),
   message: z.string(),
-  data: WeeklyOperationsReportSchema,
+  data: z.discriminatedUnion('schema_version', [
+    WeeklyOperationsReportV3Schema,
+    WeeklyOperationsReportSchema,
+  ]),
   error: z.string().nullable().optional(),
 });
 
 export type WeeklyOperationsReport = z.infer<typeof WeeklyOperationsReportSchema>;
+export type WeeklyOperationsReportData = z.infer<typeof WeeklyOperationsReportResponseSchema>['data'];
