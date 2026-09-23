@@ -140,6 +140,90 @@ def persist_actual_start_rate_snapshot_carry(cursor, scheduling_command, result)
     )
 
 
+def load_historical_restart_arrangement_rates(cursor, case_no, assignments, *, lock):
+    """Resolve source snapshots, or the existing case policy for first assignments."""
+
+    suffix = " FOR UPDATE" if lock else ""
+    policies = []
+    case_override = None
+    case_override_loaded = False
+    for assignment in assignments:
+        source_id = assignment.source_assignment_id
+        source_rows = ()
+        if source_id is not None:
+            cursor.execute(
+                "SELECT case_no,staff_id FROM case_staff_assignments "
+                "WHERE id=%s" + suffix,
+                (source_id,),
+            )
+            source_assignment = cursor.fetchone()
+            if (
+                source_assignment is None
+                or str(source_assignment["case_no"]) != case_no
+                or int(source_assignment["staff_id"]) != assignment.staff_id
+            ):
+                raise ValueError("historical_arrangement_source_lineage_invalid_blocked")
+            cursor.execute(
+                "SELECT policy_version,policy_kind,hourly_rate_ntd "
+                "FROM assignment_payroll_rate_snapshots WHERE assignment_id=%s" + suffix,
+                (source_id,),
+            )
+            source_rows = tuple(cursor.fetchall())
+        if len(source_rows) > 1:
+            raise ValueError("historical_arrangement_rate_snapshot_ambiguous_blocked")
+        if source_rows:
+            policy = source_rows[0]
+            source_identity = f"carried-from:{source_id}"
+        else:
+            if not case_override_loaded:
+                case_override = load_explicit_case_service_rate(
+                    cursor, case_no, lock=lock,
+                )
+                case_override_loaded = True
+            if case_override is not None:
+                policy = {
+                    "policy_version": case_override.policy_version,
+                    "policy_kind": case_override.policy_kind,
+                    "hourly_rate_ntd": case_override.hourly_rate_ntd,
+                }
+                source_identity = "beclass-effective-correction"
+            else:
+                cursor.execute(
+                    "SELECT policy_version,policy_kind,hourly_rate_ntd "
+                    "FROM case_payroll_rate_policy_snapshots WHERE case_no=%s" + suffix,
+                    (case_no,),
+                )
+                rows = tuple(cursor.fetchall())
+                if len(rows) != 1:
+                    raise ValueError("historical_arrangement_case_policy_missing_blocked")
+                policy = rows[0]
+                source_identity = "case-policy"
+        policies.append((
+            assignment.candidate_key,
+            policy["policy_version"],
+            policy["policy_kind"],
+            policy["hourly_rate_ntd"],
+            source_identity,
+        ))
+    return tuple(policies)
+
+
+def persist_historical_restart_arrangement_rates(cursor, policies, result):
+    resolved = result.assignment_resolution.assignment_id_by_candidate_key
+    rows = []
+    for key, version, kind, hourly_rate, source_identity in policies:
+        assignment_id = resolved.get(key)
+        if assignment_id is None:
+            raise ValueError("historical_arrangement_assignment_identity_missing")
+        rows.append((assignment_id, version, kind, hourly_rate, source_identity))
+    cursor.executemany(
+        "INSERT INTO assignment_payroll_rate_snapshots "
+        "(assignment_id,policy_version,policy_kind,hourly_rate_ntd,source_identity_status) "
+        "VALUES (%s,%s,%s,%s,%s)",
+        tuple(rows),
+    )
+
+
 def _insert_special_pay_events(cursor, command):
     for event in command.special_pay_events:
         assignment_id = _resolved_assignment_id(command, event.assignment_identity)

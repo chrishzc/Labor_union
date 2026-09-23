@@ -330,6 +330,31 @@ def _raise_mysql_error(error, correlation_id):
 
 def _raise_value_error(error, correlation_id):
     code = str(error)
+    if code in {
+        "actual_start_rate_snapshot_lineage_invalid",
+        "actual_start_rate_snapshot_missing_or_ambiguous",
+        "actual_start_calendar_horizon_exceeded",
+        "actual_start_attendance_rules_missing",
+        "actual_start_staff_schedule_conflict",
+        "actual_start_staff_ineligible_blocked",
+        "actual_start_leave_outcome_conflict",
+        "actual_start_manual_work_confirmation_required",
+        "actual_start_confirmed_dates_invalid",
+    }:
+        typed = TypedError(
+            ErrorCategory.DOMAIN_BLOCKED,
+            code,
+            (
+                "既有請假或代班無法在新排班中完整保留，請先處理請假／代班後重新預覽。"
+                if code == "actual_start_leave_outcome_conflict"
+                else "新日期涉及尚未確認的假日上班，請先核對正式服務日期後重新預覽。"
+                if code == "actual_start_manual_work_confirmation_required"
+                else "實際開工日重排需要先處理正式排班或費率來源。"
+            ),
+            correlation_id,
+            domain_blockers=(code,),
+        )
+        raise _http_error(409, typed) from error
     category = ErrorCategory.NOT_FOUND if code == "order_not_found" else ErrorCategory.VALIDATION
     status_code = 404 if category is ErrorCategory.NOT_FOUND else 422
     

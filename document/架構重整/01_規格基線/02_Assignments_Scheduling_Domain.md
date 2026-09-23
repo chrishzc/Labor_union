@@ -70,6 +70,49 @@ lock day 只對應該分段的正式服務日；固定週休不是 lock day。�
 
 提供 Query、Preview、Apply；支援 bootstrap、分段增減、換人、日期調整及 Orders Terms 全案重建。Apply 取消舊紀錄並新增新集合，通用 rebuild event 保存一對多／多對一 lineage。
 
+#### Actual Start 逐段重新精算（2026-09-23）
+
+已有 effective assignments 的 Actual Start 更正不得整批平移舊日期，也不得以全案新服務日按陣列位置
+切片後把各段區間縮成第一／最後服務日。Scheduling 必須以 current effective assignments 的順序、staff
+與每段既有 official-service-day count 為不可變輸入，依下列規則建立完整 replacement candidate：
+
+1. 第一段 `assigned_start_date` 固定為使用者確認的新 `actual_start_date`；該日可以是休息日，不要求等於
+   第一個 official service date。
+2. 以 current 服務方式、固定週休、版本化 Holiday facts，以及對新日期仍有效的請假／人工覆寫逐日精算，
+   直到該段取得與 source segment 相同的 official-service-day count；最後一個 official service date 為該段
+   `assigned_end_date`。
+3. 後續每段的 `assigned_start_date` 固定為前一段 `assigned_end_date + 1 day`，再依相同規則取得該段原有
+   service-day count。落在段首至第一服務日之間的休息日屬該段完整占用，不得形成未歸屬 gap。
+4. replacement 必須保留 segment 順序、staff identity、逐段服務量及一對一 source assignment lineage；
+   不得換人、重新媒合、跨段挪用服務量或沿用只綁舊日期的假日上班同意。
+5. 全部 segments 的連續區間、每日唯一 ownership、總服務量、actual hours、人員占用、七日 buffer 與
+   generation version 必須重新驗證；`actual_end_date` 取最後一段 `assigned_end_date`。任何衝突皆在
+   Preview 顯示並使 Apply 零寫入。
+
+Holiday／人工調整 facts 與其版本必須納入 Preview fingerprint；Apply 在同一 outer Unit of Work fresh-lock
+相同 owner facts 後重算，不得由 UI 提供日曆結果，也不得以另一條 DB connection 讀取未綁定版本的假日集合。
+
+對已有 effective assignments 的開工日更正，逐段候選須在正式寫入前供內部操作者查看與
+重新確認。此 Actual Start 畫面只接受新開始日，不接受自選服務日、請假或假日上班輸入；
+這些調整須先走既有受控 owner 流程，不由 UI 提交權威日曆結果或直接切換
+`staff_schedule.is_work_day`。Scheduling 依目前有效的週休、Holiday、請假及人工調整 facts
+重新精算／驗證，回傳可核對的完整候選。開始日或相關 owner facts 變更使既有 Preview
+失效；最終確認仍由 Actual Start 單一 Apply fresh-lock 重算並同交易寫入。
+取消、拒絕或 stale conflict 全部零寫入。
+
+已核准請假／代班若在 source effective generation 仍有有效占用與對應 outcome，本次 Actual Start
+重排必須一併保留並重新驗證：原月嫂的請假日期不得被排成正式服務日；既有代班／順延 outcome
+的已核准人員與結果日期不得因重排被偷偷移動、重複計入或遺失；有效請假占用須隨 successor
+generation 繼續有效，immutable outcome 與原有 Payroll 事實保持不變。Preview fingerprint 必須綁定
+這些 current facts，Apply 在同一 Unit of Work fresh-lock；若新逐段候選無法唯一對應並保留既有
+outcome，或與請假、人員占用衝突，回 typed conflict 且 Orders／Scheduling／請假占用全部零寫入，
+由操作者走既有請假／代班流程調整後重新 Preview。本次畫面不另建請假／代班批准入口。
+
+Actual Start replacement 建立 successor assignment identity 時，Scheduling candidate 必須保存每段唯一
+`source_assignment_id`，供 Payroll persistence adapter 原值搬移 immutable rate snapshot。這項搬移不重算
+Payroll、不改 Payroll root version／obligation／amount；source snapshot 缺失或 lineage 不唯一時 fail closed，
+不得以 current case policy 取代 source snapshot。
+
 2026-08-27 人工裁決：服務前現任月嫂因車禍或其他正式不可服務事實必須
 整案換人時，不是將 Orders／Scheduling version 改小，也不是原地改舊 assignment。
 必須新增 version 更大的 caregiver-replacement event，supersede 舊 active matching／assignment

@@ -7,6 +7,9 @@ from infrastructure.mysql.matching_schedule_confirmation_repository import (
 from infrastructure.mysql.service_date_confirmation_repository import MySqlServiceDateConfirmationRepository
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from subsystems.orders.service_date_confirmation_workflow import ServiceDateConfirmationWorkflow
+from subsystems.orders.historical_restart_arrangement import (
+    HistoricalRestartArrangementWorkflow,
+)
 
 
 def get_service_date_confirmation_workflow():
@@ -16,6 +19,17 @@ def get_service_date_confirmation_workflow():
             MySqlServiceDateConfirmationRepository(connection),
             lambda: MySqlUnitOfWork(connection),
             MySqlMatchingScheduleConfirmationRepository(connection),
+        )
+    finally:
+        connection.close()
+
+
+def get_historical_restart_arrangement_workflow():
+    connection = get_connection()
+    try:
+        yield HistoricalRestartArrangementWorkflow(
+            MySqlServiceDateConfirmationRepository(connection),
+            lambda: MySqlUnitOfWork(connection),
         )
     finally:
         connection.close()

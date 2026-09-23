@@ -5,7 +5,8 @@
 - subsystem: `orders`
 
 ## Responsibility
-擁有 Actual Start Query／Preview／Apply。尚無有效正式 assignment 時，只以 Orders owner version 保存或修正日期，不建立 Scheduling、Finance、Payroll、lifecycle event 或永久 receipt；已有正式 assignment 時，才以正式服務日重建有效 Scheduling generation、actual end 與 lifecycle。Actual Start 不重算、不驗證也不寫入 Client Finance／Payroll，只唯讀既有訂金核銷狀態作 lifecycle gate。歷史重啟且 current generation 為空 tombstone 時，直接以輸入的 actual start 與唯一 pairing evidence 計算正式服務日，並在同一 Apply 建立排班與 actual-start。歷史來源只能經此 canonical writer 套用 actual-start，不得直接建立付款或通知事實。
+擁有 Actual Start Query／Preview／Apply。尚無有效正式 assignment（含歷史重啟空 tombstone）時，只以 Orders owner version 保存或修正日期，不建立 Scheduling、Finance、Payroll、lifecycle event 或永久 receipt；歷史案件後續由明確正式安排操作建立 assignment。已有正式 assignment 時，依每個 segment 原有服務日數、當前排休及假日逐段精算，保留人員／順序／lineage，重建有效 Scheduling generation、actual end 與 lifecycle。Actual Start 不重算或寫入 Client Finance／Payroll 金額與 root；僅唯讀既有訂金核銷狀態作一般案件 lifecycle gate，並由 Payroll adapter 同交易搬移各 source assignment immutable 費率快照至新 identity。
+已有正式排班的更正亦須按月嫂逐段套用仍有效的已核准請假／代班，無法保留核准 outcome 時零寫入；合法 replacement 在同一交易續接 effective leave occupancy，不改 immutable outcome。
 
 ## Implementation
 - primary:
@@ -23,12 +24,13 @@
   - `ui_react/src/components/OrderWorkbenchV2Drawer.tsx`
 
 ## Dependencies
-- outbound: `scheduling/scheduling` — replacement generation 擁有正式服務日期與 assignment lineage。
+- outbound: `scheduling/scheduling` — replacement generation 擁有正式服務日期、assignment lineage 及已核准請假／代班的 active occupancy；Actual Start 只協調同交易重排。
 - outbound: `client-finance/client-finance` — 唯讀既有訂金核銷狀態作一般案件 lifecycle gate；不重算 projection。
 - inbound: `orders/historical-adoption` — 已付訂金且來源開始日異於 HCM 預定開始日的 historical actual-start assertion 經 typed delegation 進入。
-- inbound: `orders/historical-precision-restart` — 重啟後的空 tombstone 與唯一 historical pairing evidence 可由一次 Actual Start Preview／Apply 直接建立 current Scheduling。
+- inbound: `orders/historical-precision-restart` — 重啟後空 tombstone 的 HTTP Actual Start 為日期-only；歷史採納內部仍可使用 immutable source delegation，不代表一般入口自動建立 Scheduling。
+- outbound: `staff-payables/payroll` — source rate snapshot 唯讀驗證與 successor identity 原值搬移，不寫 Payroll root／obligation。
 
-管理 UI 以單次確認操作串接 Preview／Apply；已有正式 assignment 的重排分支只綁 Orders／Scheduling owner versions，且維持 fingerprint 與 idempotency 契約。
+管理 UI 對已有正式 assignment 的重排先顯示逐段 Preview，內部操作者最後確認才呼叫單一原子 Apply；此畫面不編輯請假、假日或正式服務日。重排只綁 Orders／Scheduling owner versions，且維持 fingerprint 與 idempotency 契約。
 日期-only 分支只綁 Orders version 與該次 Preview fingerprint；若 Apply fresh-read 發現正式 assignment 已形成，回 typed conflict 並要求重新 Preview。一般 Terms reader 不得只因日期存在便投影 `service_started`。
 
 ## Contracts
@@ -44,7 +46,7 @@
 ## Provenance
 - Actual Start writer and cross-owner persistence — `source_observed` — `subsystems/orders/actual_start_workflow.py`.
 - Order Workbench V2 drawer eligibility gate — `source_observed` — `ui_react/src/components/OrderWorkbenchV2Drawer.tsx`。
-- Historical delegation rule — `architecture_declared` — `document/架構重整/01_規格基線/01_Orders_Domain.md`.
+- Historical tombstone date-only 與逐段精算／快照搬移 — `architecture_declared` — `document/架構重整/01_規格基線/01_Orders_Domain.md` §3.4。
 
 ## Change triggers
 Reconcile when Actual Start official-date calculation, cross-owner projection, lifecycle completion instant, or historical delegation changes.

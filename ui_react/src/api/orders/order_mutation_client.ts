@@ -14,6 +14,10 @@ import {
   ServiceDateConfirmationReceiptViewSchema,
   ServiceDatePreviewPayloadSchema,
   ServiceDateApplyPayloadSchema,
+  HistoricalArrangementPreviewPayloadSchema,
+  HistoricalArrangementApplyPayloadSchema,
+  HistoricalArrangementPreviewViewSchema,
+  HistoricalArrangementReceiptViewSchema,
   OrderReopenPreviewViewSchema,
   OrderReopenReceiptViewSchema,
   OrderReopenApplyPayloadSchema,
@@ -23,6 +27,9 @@ import {
   type ServiceDateConfirmationReceiptView,
   type ServiceDatePreviewPayload,
   type ServiceDateApplyPayload,
+  type HistoricalArrangementSegmentPayload,
+  type HistoricalArrangementPreviewView,
+  type HistoricalArrangementReceiptView,
   type OrderReopenPreviewView,
   type OrderReopenReceiptView,
   type OrderReopenApplyPayload,
@@ -56,6 +63,18 @@ export interface OrdersMutationClient {
     payload: ServiceDateApplyPayload,
     options: OrderMutationApplyOptions
   ): Promise<ServiceDateConfirmationReceiptView>;
+
+  previewHistoricalArrangement(
+    caseNo: string,
+    segments: HistoricalArrangementSegmentPayload[],
+    options?: OrderMutationRequestOptions
+  ): Promise<HistoricalArrangementPreviewView>;
+
+  applyHistoricalArrangement(
+    caseNo: string,
+    payload: z.input<typeof HistoricalArrangementApplyPayloadSchema>,
+    options: OrderMutationApplyOptions
+  ): Promise<HistoricalArrangementReceiptView>;
 
   previewReopen(
     caseNo: string,
@@ -219,6 +238,43 @@ export async function applyServiceDates(
   }
 }
 
+export async function previewHistoricalArrangement(
+  caseNo: string,
+  segments: HistoricalArrangementSegmentPayload[],
+  options?: OrderMutationRequestOptions
+): Promise<HistoricalArrangementPreviewView> {
+  const endpoint = `/api/v1/orders/${encodeURIComponent(caseNo)}/service-dates/arrangement/preview`;
+  const payload = HistoricalArrangementPreviewPayloadSchema.parse({ segments });
+  try {
+    const raw = await transport.post(endpoint, payload, resolveTransportOptions(options));
+    return decodeOrderMutationEnvelope(HistoricalArrangementPreviewViewSchema, raw);
+  } catch (error) {
+    throw decodeMutationError(error, { caseNo, endpoint });
+  }
+}
+
+export async function applyHistoricalArrangement(
+  caseNo: string,
+  payload: z.input<typeof HistoricalArrangementApplyPayloadSchema>,
+  options: OrderMutationApplyOptions
+): Promise<HistoricalArrangementReceiptView> {
+  const endpoint = `/api/v1/orders/${encodeURIComponent(caseNo)}/service-dates/arrangement/apply`;
+  const validated = HistoricalArrangementApplyPayloadSchema.parse(payload);
+  const key = requireValidIdempotencyKey(options.idempotencyKey);
+  const headers = {
+    'X-Correlation-ID': options.correlationId ?? `historical-arrangement-${caseNo}-${Date.now()}`,
+    'Idempotency-Key': key,
+  };
+  try {
+    const raw = await transport.post(
+      endpoint, validated, resolveTransportOptions(options, headers),
+    );
+    return decodeOrderMutationEnvelope(HistoricalArrangementReceiptViewSchema, raw);
+  } catch (error) {
+    throw decodeMutationError(error, { caseNo, endpoint });
+  }
+}
+
 // ============================================================================
 // 4. previewReopen (Preview)
 // ============================================================================
@@ -336,6 +392,22 @@ export class DefaultOrdersMutationClient implements OrdersMutationClient {
     options: OrderMutationApplyOptions
   ): Promise<ServiceDateConfirmationReceiptView> {
     return applyServiceDates(caseNo, payload, this.mergeApplyOptions(options));
+  }
+
+  public previewHistoricalArrangement(
+    caseNo: string,
+    segments: HistoricalArrangementSegmentPayload[],
+    options?: OrderMutationRequestOptions
+  ): Promise<HistoricalArrangementPreviewView> {
+    return previewHistoricalArrangement(caseNo, segments, this.mergeOptions(options));
+  }
+
+  public applyHistoricalArrangement(
+    caseNo: string,
+    payload: z.input<typeof HistoricalArrangementApplyPayloadSchema>,
+    options: OrderMutationApplyOptions
+  ): Promise<HistoricalArrangementReceiptView> {
+    return applyHistoricalArrangement(caseNo, payload, this.mergeApplyOptions(options));
   }
 
   public previewReopen(

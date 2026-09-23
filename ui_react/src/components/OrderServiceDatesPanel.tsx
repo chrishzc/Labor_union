@@ -5,6 +5,7 @@ import type {
 } from '../api/orders/order_mutation_schemas';
 import { ordersMutationClient } from '../api/orders/order_mutation_client';
 import { ordersQueryClient } from '../api/orders/order_query_client';
+import type { AssignmentPlan } from '../api/orders/order_query_schemas';
 import {
   schedulePrecisionClient,
   type SchedulePrecisionResult,
@@ -21,6 +22,7 @@ import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_s
 import { orderActualStartClient, type ActualStartPreview } from '../api/orders/order_actual_start_client';
 import type { ActualStart } from '../api/orders/order_query_schemas';
 import { assertStartDates, isServiceDateConflict, refreshServiceDatesAfterStart, sameServiceDates, saveServiceDatesStart, serviceDateRange } from '../adapters/orders/service_date_start_flow';
+import { HistoricalRestartArrangementPanel } from './HistoricalRestartArrangementPanel';
 
 interface OrderServiceDatesPanelProps {
   caseNo: string;
@@ -29,6 +31,7 @@ interface OrderServiceDatesPanelProps {
   calculationRevision?: number;
   projectionRevision?: number;
   onBusyChange?: (busy: boolean) => void;
+  currentAssignmentPlan?: AssignmentPlan | null;
 }
 
 type WorkingAction = 'load' | 'preview' | 'apply' | null;
@@ -78,7 +81,7 @@ function recoveryFromServiceDatesDraft(caseNo: string): ServiceDatesRecovery | n
   return null;
 }
 
-export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo, onObserved, onOpenActualStart, calculationRevision = 0, projectionRevision = 0, onBusyChange }) => {
+export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo, onObserved, onOpenActualStart, calculationRevision = 0, projectionRevision = 0, onBusyChange, currentAssignmentPlan }) => {
   const [working, setWorking] = useState<WorkingAction>(null);
   const [queryView, setQueryView] = useState<ServiceDateConfirmationQueryView | null>(null);
   const [precision, setPrecision] = useState<SchedulePrecisionResult | null>(null);
@@ -111,6 +114,16 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
   const startFlow = orderMutationFlowStore.getActualStart(caseNo);
   const startUnresolved = startFlow !== undefined && startFlow.status !== 'observed';
   const saving = working === 'apply';
+  const effectiveServiceDates = queryView !== null
+    && currentAssignmentPlan?.case_no === caseNo
+    && currentAssignmentPlan.scheduling_version === queryView.scheduling_version
+    && currentAssignmentPlan.assignments.length > 0
+    ? [...new Set(currentAssignmentPlan.assignments.flatMap((segment) => segment.official_service_dates))].sort()
+    : null;
+  const confirmationSupersededBySchedule = effectiveServiceDates !== null
+    && queryView !== null
+    && queryView.current_dates.length > 0
+    && !sameServiceDates(queryView.current_dates, effectiveServiceDates);
 
   useEffect(() => { onBusyChange?.(saving); return () => onBusyChange?.(false); }, [saving, onBusyChange]);
   useEffect(() => {
@@ -635,6 +648,25 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
               <span>。此歷史綁定已保留，不需重新挑選候選或再次推薦。</span>
             </div>
           )}
+          {queryView.arrangement_pending && !isRecoveryActive && !startUnresolved
+            && sameServiceDates(selectedDates, queryView.current_dates) && (
+              queryView.bound_staff.length === 0
+              ? <p role="alert">歷史案件缺少可核對的既定月嫂，請先處理配對證據，不能建立正式安排。</p>
+              : <HistoricalRestartArrangementPanel
+                caseNo={caseNo}
+                dates={queryView}
+                onObserved={(observed) => {
+                  setQueryView(observed);
+                  setSuccess('歷史案件正式安排已建立並回讀。');
+                  onObserved?.();
+                }}
+              />
+            )}
+          {confirmationSupersededBySchedule && (
+            <p role="status" className="order-case-review-note">
+              先前確認的日期與目前正式排班不同；下方日曆保留事前確認紀錄，不代表目前服務安排。
+            </p>
+          )}
           {precision !== null && serviceMode !== null && <dl className="order-v2-business-summary" aria-label="建議服務日期摘要">
             <div><dt>排休類型</dt><dd>{serviceMode}</dd></div>
             <div><dt>建議開始</dt><dd>{precision.actual_start_date}</dd></div>
@@ -652,11 +684,13 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
             <div className="calendar-matrix-card">
               <div className="calendar-month-header">
                 <h3 style={{ fontSize: '1.05rem', fontWeight: 750, color: '#0f766e', margin: 0 }}>
-                  📅 正式服務日期確認（日曆排盤）
+                  📅 {confirmationSupersededBySchedule ? '先前確認日期（日曆紀錄）' : '正式服務日期確認（日曆排盤）'}
                 </h3>
                 <span>已選 {selectedDates.length} / {requiredDateCount} 天</span>
               </div>
-              <p className="order-case-review-note">請逐日核對服務安排；選取國定假日即代表已確認該日安排服務，不需另行登錄協調結果。</p>
+              <p className="order-case-review-note">{confirmationSupersededBySchedule
+                ? '此日曆為先前確認日期紀錄；目前服務日期請以正式排班為準。'
+                : '請逐日核對服務安排；選取國定假日即代表已確認該日安排服務，不需另行登錄協調結果。'}</p>
 
               <div
                 className="calendar-days-grid"
@@ -725,9 +759,10 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
       )}
 
       {queryView !== null && queryView.current_dates.length > 0 && (
-        <dl className="order-v2-business-summary" aria-label="正式服務日期回讀" tabIndex={-1} ref={readbackElement}>
-          <div><dt>正式版本</dt><dd>{queryView.current_version === null ? '未建立' : `#${queryView.current_version}`}</dd></div>
-          <div><dt>正式服務日期</dt><dd>{queryView.current_dates.join('、')}</dd></div>
+        <dl className="order-v2-business-summary" aria-label={confirmationSupersededBySchedule ? '先前確認日期與目前正式排班回讀' : '正式服務日期回讀'} tabIndex={-1} ref={readbackElement}>
+          <div><dt>{confirmationSupersededBySchedule ? '先前確認版本' : '正式版本'}</dt><dd>{queryView.current_version === null ? '未建立' : `#${queryView.current_version}`}</dd></div>
+          <div><dt>{confirmationSupersededBySchedule ? '先前確認日期' : '正式服務日期'}</dt><dd>{queryView.current_dates.join('、')}</dd></div>
+          {effectiveServiceDates !== null && <div><dt>目前正式排班服務日</dt><dd>{effectiveServiceDates.join('、')}</dd></div>}
         </dl>
       )}
     </section>

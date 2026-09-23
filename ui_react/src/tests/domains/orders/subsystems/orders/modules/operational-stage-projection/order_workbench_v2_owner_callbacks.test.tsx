@@ -46,14 +46,15 @@ async function applyTerms() {
   fireEvent.click(screen.getByRole('button', { name: '檢查訂單條款變更' }));
   const reason = await screen.findByLabelText('Beta 條款變更原因');
   fireEvent.change(reason, { target: { value: '客戶確認延長一天。' } });
-  fireEvent.click(screen.getByRole('button', { name: '確認套用訂單條款' }));
+  fireEvent.click(screen.getByRole('button', { name: '確認保存訂單條款' }));
 }
 
 describe('Beta 實際 owner 元件只在正式回讀成立後通知外層', () => {
   beforeEach(() => {
     Object.values(mocks).forEach((mock) => mock.mockReset());
     mocks.termsPreview.mockResolvedValue({ before: terms().terms, after: terms(true).terms,
-      order_version: 2, scheduling_version: 3, client_finance_version: 4, payroll_version: 5, preview_fingerprint: 'a'.repeat(64) });
+      order_version: 2, scheduling_version: 3, client_finance_version: 4, payroll_version: 5,
+      requires_formal_apply: true, preview_fingerprint: 'a'.repeat(64) });
     mocks.termsApply.mockResolvedValue({ case_no: CASE, order_version: 3, scheduling_version: 4,
       client_finance_version: 5, payroll_version: 6, official_service_day_count: 3 });
     mocks.termsQuery.mockResolvedValue(terms(true));

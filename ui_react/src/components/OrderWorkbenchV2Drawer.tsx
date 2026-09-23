@@ -402,6 +402,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
                   caseNo={caseNo}
                   calculationRevision={serviceDatesCalculationRevision}
                   projectionRevision={refreshRevision}
+                  currentAssignmentPlan={assignmentPlan.status === 'ready' ? assignmentPlan.data : null}
                   onBusyChange={onOperationBusyChange}
                   onObserved={refreshFacts}
                   onOpenActualStart={() => {
@@ -503,11 +504,13 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
             {operationBusy && <p role="status">操作結果或正式回讀尚未確認，暫時不能關閉或切換操作。</p>}
             {operation === 'cancellation' && <OrderCancellationPanel key={caseNo} caseNo={caseNo} onObserved={refreshFacts} onBusyChange={onOperationBusyChange} />}
             {operation === 'reopen' && <OrderControlledReopenPanel key={caseNo} caseNo={caseNo} onObserved={refreshFacts} onBusyChange={onOperationBusyChange} />}
-            {operation === 'actual-start' && <OrderActualStartPanel key={caseNo} caseNo={caseNo} onObserved={() => {
+            {operation === 'actual-start' && <OrderActualStartPanel key={caseNo} caseNo={caseNo} onObserved={(actualStartOperation) => {
               setDrawerTab('work');
               setServiceView('dates');
               openGroup('service');
-              setServiceDatesCalculationRevision((revision) => revision + 1);
+              if (actualStartOperation === 'date_only') {
+                setServiceDatesCalculationRevision((revision) => revision + 1);
+              }
               refreshFacts();
             }} onBusyChange={onOperationBusyChange} onOpenServiceDates={() => {
               setDrawerTab('work');

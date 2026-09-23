@@ -30,6 +30,34 @@ class ServiceDateConfirmationQueryView(BaseModel):
     current_version: int | None = None
     current_dates: list[date]
     bound_staff: list[BoundServiceStaffView]
+    arrangement_pending: bool
+
+
+class HistoricalArrangementSegmentView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    staff_id: int = Field(gt=0)
+    assigned_start_date: date
+    assigned_end_date: date
+    service_dates: list[date] = Field(min_length=1)
+
+
+class HistoricalArrangementPreviewView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    case_no: str
+    order_version: int = Field(ge=0)
+    scheduling_version: int = Field(ge=0)
+    confirmed_version: int = Field(gt=0)
+    segments: list[HistoricalArrangementSegmentView]
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class HistoricalArrangementReceiptView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    case_no: str
+    scheduling_version: int = Field(ge=0)
+    generation_number: int = Field(gt=0)
+    assignment_ids: list[int]
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class ServiceDateConfirmationPreviewView(BaseModel):

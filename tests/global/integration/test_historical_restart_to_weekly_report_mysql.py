@@ -410,6 +410,44 @@ def _confirm_dates(connection, case_no: str):
     return receipt
 
 
+def _arrange_restarted_dates(connection, case_no: str, staff_id: int):
+    from infrastructure.mysql.service_date_confirmation_repository import MySqlServiceDateConfirmationRepository
+    from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+    from subsystems.orders.historical_restart_arrangement import (
+        ArrangementSegmentIntent, HistoricalRestartArrangementWorkflow,
+    )
+
+    workflow = HistoricalRestartArrangementWorkflow(
+        MySqlServiceDateConfirmationRepository(connection),
+        lambda: MySqlUnitOfWork(connection),
+    )
+    segments = (ArrangementSegmentIntent(
+        staff_id, (date(2026, 9, 3), date(2026, 9, 4)),
+    ),)
+    preview = workflow.preview(case_no, segments)
+    receipt = workflow.apply(
+        case_no, segments,
+        expected_order_version=preview.order_version,
+        expected_scheduling_version=preview.candidate.expected_aggregate_version,
+        expected_confirmed_version=preview.confirmed_version,
+        preview_fingerprint=preview.fingerprint.value,
+        idempotency_key=f"{case_no}-arrangement",
+        actor="test", reason="confirmed historical arrangement",
+        correlation_id=f"{case_no}-arrangement",
+    )
+    assert workflow.apply(
+        case_no, segments,
+        expected_order_version=preview.order_version,
+        expected_scheduling_version=preview.candidate.expected_aggregate_version,
+        expected_confirmed_version=preview.confirmed_version,
+        preview_fingerprint=preview.fingerprint.value,
+        idempotency_key=f"{case_no}-arrangement",
+        actor="test", reason="confirmed historical arrangement",
+        correlation_id=f"{case_no}-arrangement",
+    ) == receipt
+    return receipt
+
+
 def _confirm_matching(connection, case_no: str, plan_id: int) -> None:
     from infrastructure.mysql.matching_schedule_confirmation_repository import MySqlMatchingScheduleConfirmationRepository
     from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
@@ -542,7 +580,9 @@ def test_existing_database_restart_writes_and_reads_canonical_schedule(
         assert report.list_service_facts(date(2026, 9, 3), date(2026, 9, 4)) == []
         restart = _restart(connection, case_no)
         dates = _confirm_dates(connection, case_no)
-        assert dates.scheduling_version == restart.scheduling_version + 1
+        assert dates.scheduling_version == restart.scheduling_version
+        arrangement = _arrange_restarted_dates(connection, case_no, staff_id)
+        assert arrangement.scheduling_version == restart.scheduling_version + 1
 
         with connection.cursor() as cursor:
             cursor.execute(
@@ -654,7 +694,12 @@ def test_historical_restart_reenters_canonical_scheduling_and_weekly_report(
 
         dates = _confirm_dates(connection, case_no)
         assert dates.service_dates == (date(2026, 9, 3), date(2026, 9, 4))
-        assert dates.scheduling_version == restart.scheduling_version + 1
+        assert dates.scheduling_version == restart.scheduling_version
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) AS count FROM staff_schedule WHERE case_no=%s AND effective_marker=1", (case_no,))
+            assert cursor.fetchone()["count"] == 0
+        arrangement = _arrange_restarted_dates(connection, case_no, staff_id)
+        assert arrangement.scheduling_version == restart.scheduling_version + 1
         with connection.cursor() as cursor:
             cursor.execute(
                 "SELECT assignment.id,assignment.generation_id FROM scheduling_aggregates aggregate "
@@ -722,4 +767,503 @@ def test_historical_restart_reenters_canonical_scheduling_and_weekly_report(
             )
             assert cursor.fetchone()["actual_start_date"] == date(2026, 9, 3)
     finally:
+        connection.close()
+
+
+def test_three_segment_actual_start_carries_rates_and_rolls_back_on_failure(
+    monkeypatch,
+) -> None:
+    """A real replacement keeps three owners and has one atomic failure boundary."""
+    from api.dependencies.order_actual_start import ActualStartApplication
+    from infrastructure.mysql import order_actual_start_repository as repository_module
+    from infrastructure.mysql.order_actual_start_repository import MySqlOrderActualStartRepository
+    from infrastructure.mysql.scheduling_current_projection_repository import (
+        MySqlSchedulingCurrentProjectionRepository,
+    )
+    from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+    from shared_kernel.clock import FixedBusinessClock, TAIPEI_TIME_ZONE
+    from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
+    from subsystems.orders.actual_start_workflow import ActualStartApplyRequest, ActualStartWorkflow
+    from subsystems.scheduling.current_projection_workflow import (
+        SchedulingCurrentProjectionWorkflow, SchedulingCurrentQuery,
+    )
+
+    database = f"{DATABASE}_three_segment"
+    bootstrap(_arguments(database))
+    case_no = "HIST-THREE-SEGMENTS"
+    connection = _connection_factory(database)()
+    try:
+        with connection.cursor() as cursor:
+            first_staff_id, _ = _seed_owner_roots(cursor, case_no, "歷史訂單－服務中")
+            _seed_settled_deposit(cursor, case_no)
+            cursor.execute(
+                "UPDATE clients SET service_type='週休2日' WHERE id=(SELECT client_id FROM orders WHERE case_no=%s)",
+                (case_no,),
+            )
+            cursor.execute(
+                "UPDATE orders SET status='服務中',service_days=3,end_date='2026-09-05',"
+                "actual_end_date='2026-09-05' "
+                "WHERE case_no=%s", (case_no,),
+            )
+            cursor.execute(
+                "UPDATE confirmed_service_date_versions SET service_day_count=3 WHERE case_no=%s",
+                (case_no,),
+            )
+            cursor.execute(
+                "SELECT id FROM confirmed_service_date_versions WHERE case_no=%s", (case_no,),
+            )
+            confirmed_id = int(cursor.fetchone()["id"])
+            cursor.execute(
+                "INSERT INTO confirmed_service_date_days(confirmed_version_id,ordinal,service_date) "
+                "VALUES (%s,3,'2026-09-05')", (confirmed_id,),
+            )
+            staff_ids = [first_staff_id]
+            for ordinal in (2, 3):
+                cursor.execute(
+                    "INSERT INTO staff(name,phone,status) VALUES (%s,'0900000000','active')",
+                    (f"{case_no} staff {ordinal}",),
+                )
+                staff_ids.append(int(cursor.lastrowid))
+            cursor.execute(
+                "INSERT INTO scheduling_generations(case_no,generation_number,resulting_aggregate_version,"
+                "status,effective_marker,created_by,change_reason) "
+                "VALUES (%s,1,1,'effective',1,'test','three-segment fixture')",
+                (case_no,),
+            )
+            generation_id = int(cursor.lastrowid)
+            cursor.execute(
+                "UPDATE scheduling_aggregates SET aggregate_version=1,generation_counter=1,"
+                "effective_generation_id=%s WHERE case_no=%s", (generation_id, case_no),
+            )
+            source_assignment_ids = []
+            for ordinal, (staff_id, rate) in enumerate(zip(staff_ids, (300, 350, 400)), 1):
+                work_date = date(2026, 9, ordinal + 2)
+                cursor.execute(
+                    "INSERT INTO case_staff_assignments(case_no,generation_id,candidate_key,staff_id,"
+                    "assignment_sequence,assigned_start_date,assigned_end_date,status) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,'planned')",
+                    (case_no, generation_id, f"{case_no}:g1:a{ordinal}", staff_id,
+                     ordinal, work_date, work_date),
+                )
+                assignment_id = int(cursor.lastrowid)
+                source_assignment_ids.append(assignment_id)
+                cursor.execute(
+                    "INSERT INTO staff_schedule(case_no,staff_id,assignment_id,generation_id,work_date,"
+                    "is_work_day,is_double_pay,effective_marker) VALUES (%s,%s,%s,%s,%s,1,0,1)",
+                    (case_no, staff_id, assignment_id, generation_id, work_date),
+                )
+                cursor.execute(
+                    "INSERT INTO scheduling_effective_occupancy(staff_id,occupancy_date,generation_id,"
+                    "assignment_id,occupancy_type) VALUES (%s,%s,%s,%s,'assignment_interval')",
+                    (staff_id, work_date, generation_id, assignment_id),
+                )
+                cursor.execute(
+                    "INSERT INTO assignment_payroll_rate_snapshots(assignment_id,policy_version,"
+                    "policy_kind,hourly_rate_ntd,source_identity_status) "
+                    "VALUES (%s,'approved-rates-v1','citizen',%s,'case-policy')",
+                    (assignment_id, rate),
+                )
+        connection.commit()
+
+        def persisted_state():
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT lifecycle_version,actual_start_date,actual_end_date,status "
+                    "FROM orders WHERE case_no=%s", (case_no,),
+                )
+                order = cursor.fetchone()
+                cursor.execute(
+                    "SELECT aggregate_version,generation_counter,effective_generation_id "
+                    "FROM scheduling_aggregates WHERE case_no=%s", (case_no,),
+                )
+                scheduling = cursor.fetchone()
+                counts = []
+                for table in (
+                    "scheduling_generations", "case_staff_assignments", "staff_schedule",
+                    "order_actual_start_events", "order_actual_start_apply_receipts",
+                ):
+                    cursor.execute(f"SELECT COUNT(*) AS count FROM {table} WHERE case_no=%s", (case_no,))
+                    counts.append(int(cursor.fetchone()["count"]))
+                cursor.execute(
+                    "SELECT aggregate_version FROM payroll_case_accounts WHERE case_no=%s",
+                    (case_no,),
+                )
+                payroll_version = int(cursor.fetchone()["aggregate_version"])
+                return order, scheduling, tuple(counts), payroll_version
+
+        repository = MySqlOrderActualStartRepository(connection)
+        workflow = ActualStartWorkflow(
+            repository,
+            lambda: MySqlUnitOfWork(connection),
+            FixedBusinessClock(datetime(2026, 9, 10, 12, tzinfo=TAIPEI_TIME_ZONE)),
+        )
+        application = ActualStartApplication(repository, workflow)
+        new_start = date(2026, 9, 6)  # Sunday: occupancy begins before the first workday.
+        before = persisted_state()
+        preview = application.preview(case_no, new_start)
+        assert persisted_state() == before  # Preview has no persisted effect.
+        assert [
+            (item.staff_id, item.assigned_start_date, item.assigned_end_date,
+             item.service_dates)
+            for item in preview.scheduling.assignments
+        ] == [
+            (staff_ids[0], date(2026, 9, 6), date(2026, 9, 7), (date(2026, 9, 7),)),
+            (staff_ids[1], date(2026, 9, 8), date(2026, 9, 8), (date(2026, 9, 8),)),
+            (staff_ids[2], date(2026, 9, 9), date(2026, 9, 9), (date(2026, 9, 9),)),
+        ]
+
+        def apply_request(key: str, current_preview):
+            return ActualStartApplyRequest(
+                case_no, new_start,
+                ExpectedVersion(current_preview.order_version),
+                ExpectedVersion(current_preview.scheduling_version),
+                current_preview.fingerprint, IdempotencyKey(f"{case_no}-{key}"),
+                ActorContext("test"), "three-segment correction", CorrelationId(f"{case_no}-{key}"),
+            )
+
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "DELETE FROM assignment_payroll_rate_snapshots WHERE assignment_id=%s",
+                (source_assignment_ids[1],),
+            )
+        connection.commit()
+        missing_source_state = persisted_state()
+        with pytest.raises(ValueError, match="actual_start_rate_snapshot_missing_or_ambiguous"):
+            application.preview(case_no, new_start)
+        with pytest.raises(ValueError, match="actual_start_rate_snapshot_missing_or_ambiguous"):
+            application.apply(apply_request("missing-source", preview))
+        assert persisted_state() == missing_source_state
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO assignment_payroll_rate_snapshots(assignment_id,policy_version,"
+                "policy_kind,hourly_rate_ntd,source_identity_status) "
+                "VALUES (%s,'approved-rates-v1','citizen',350,'case-policy')",
+                (source_assignment_ids[1],),
+            )
+        connection.commit()
+        assert persisted_state() == before
+
+        def fail_after_scheduling_writer(*_args):
+            raise RuntimeError("injected_rate_snapshot_persistence_failure")
+
+        with monkeypatch.context() as patcher:
+            patcher.setattr(
+                repository_module, "persist_actual_start_rate_snapshot_carry",
+                fail_after_scheduling_writer,
+            )
+            with pytest.raises(RuntimeError, match="injected_rate_snapshot_persistence_failure"):
+                application.apply(apply_request("injected-failure", preview))
+        assert persisted_state() == before  # The generation writer was rolled back too.
+
+        current_preview = application.preview(case_no, new_start)
+        application.apply(apply_request("success", current_preview))
+        after = persisted_state()
+        assert after[0]["actual_start_date"] == new_start
+        assert after[0]["actual_end_date"] == date(2026, 9, 9)
+        assert after[1]["aggregate_version"] == before[1]["aggregate_version"] + 1
+        assert after[3] == before[3]  # No Payroll root mutation.
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT assignment.id,assignment.staff_id,assignment.assignment_sequence,"
+                "assignment.assigned_start_date,assignment.assigned_end_date,"
+                "snapshot.policy_version,snapshot.policy_kind,snapshot.hourly_rate_ntd,"
+                "snapshot.source_identity_status "
+                "FROM case_staff_assignments assignment "
+                "JOIN assignment_payroll_rate_snapshots snapshot ON snapshot.assignment_id=assignment.id "
+                "WHERE assignment.generation_id=%s ORDER BY assignment.assignment_sequence",
+                (after[1]["effective_generation_id"],),
+            )
+            successor_rows = cursor.fetchall()
+        assert [
+            (row["staff_id"], row["assigned_start_date"], row["assigned_end_date"],
+             row["policy_version"], row["policy_kind"], row["hourly_rate_ntd"],
+             row["source_identity_status"])
+            for row in successor_rows
+        ] == [
+            (staff_ids[0], date(2026, 9, 6), date(2026, 9, 7),
+             "approved-rates-v1", "citizen", 300, f"carried-from:{source_assignment_ids[0]}"),
+            (staff_ids[1], date(2026, 9, 8), date(2026, 9, 8),
+             "approved-rates-v1", "citizen", 350, f"carried-from:{source_assignment_ids[1]}"),
+            (staff_ids[2], date(2026, 9, 9), date(2026, 9, 9),
+             "approved-rates-v1", "citizen", 400, f"carried-from:{source_assignment_ids[2]}"),
+        ]
+        calendar = SchedulingCurrentProjectionWorkflow(
+            MySqlSchedulingCurrentProjectionRepository(connection),
+            FixedBusinessClock(datetime(2026, 9, 10, 12, tzinfo=TAIPEI_TIME_ZONE)),
+        )
+        for staff_id, row, expected_date in zip(
+            staff_ids, successor_rows, (date(2026, 9, 7), date(2026, 9, 8), date(2026, 9, 9)),
+        ):
+            current = calendar.query(SchedulingCurrentQuery(
+                staff_id, date(2026, 9, 6), date(2026, 9, 10),
+            ))
+            assert [item.assignment_id for item in current.assignments] == [row["id"]]
+            assert [
+                (day.calendar_date, entry.assignment_id)
+                for day in current.days for entry in day.entries
+                if entry.occupancy_kind.value == "official_workday"
+            ] == [(expected_date, row["id"])]
+
+        # The saved replacement is itself a valid source for another correction.
+        later_start = date(2026, 9, 8)
+        later_preview = application.preview(case_no, later_start)
+        application.apply(ActualStartApplyRequest(
+            case_no, later_start,
+            ExpectedVersion(later_preview.order_version),
+            ExpectedVersion(later_preview.scheduling_version),
+            later_preview.fingerprint, IdempotencyKey(f"{case_no}-second-correction"),
+            ActorContext("test"), "second three-segment correction",
+            CorrelationId(f"{case_no}-second-correction"),
+        ))
+        second = persisted_state()
+        assert second[0]["actual_start_date"] == later_start
+        assert second[0]["actual_end_date"] == date(2026, 9, 10)
+        assert second[1]["aggregate_version"] == after[1]["aggregate_version"] + 1
+        assert second[3] == before[3]
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT assignment.staff_id,assignment.assigned_start_date,"
+                "assignment.assigned_end_date,snapshot.hourly_rate_ntd,"
+                "snapshot.source_identity_status "
+                "FROM case_staff_assignments assignment "
+                "JOIN assignment_payroll_rate_snapshots snapshot ON snapshot.assignment_id=assignment.id "
+                "WHERE assignment.generation_id=%s ORDER BY assignment.assignment_sequence",
+                (second[1]["effective_generation_id"],),
+            )
+            second_rows = cursor.fetchall()
+        assert [
+            (row["staff_id"], row["assigned_start_date"], row["assigned_end_date"],
+             row["hourly_rate_ntd"], row["source_identity_status"])
+            for row in second_rows
+        ] == [
+            (staff_id, service_date, service_date, rate,
+             f"carried-from:{source['id']}")
+            for staff_id, service_date, rate, source in zip(
+                staff_ids,
+                (date(2026, 9, 8), date(2026, 9, 9), date(2026, 9, 10)),
+                (300, 350, 400), successor_rows,
+            )
+        ]
+    finally:
+        connection.rollback()
+        connection.close()
+
+
+def test_actual_start_preserves_approved_substitution_and_leave_occupancy_mysql(
+    monkeypatch,
+) -> None:
+    from api.dependencies.order_actual_start import ActualStartApplication
+    from infrastructure.mysql import order_actual_start_repository as repository_module
+    from infrastructure.mysql.order_actual_start_repository import MySqlOrderActualStartRepository
+    from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+    from shared_kernel.clock import FixedBusinessClock, TAIPEI_TIME_ZONE
+    from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
+    from subsystems.orders.actual_start_workflow import ActualStartApplyRequest, ActualStartWorkflow
+
+    database = f"{DATABASE}_leave_replan"
+    bootstrap(_arguments(database))
+    case_no = "ACTUAL-START-LEAVE-SUBSTITUTE"
+    connection = _connection_factory(database)()
+    try:
+        with connection.cursor() as cursor:
+            caregiver, _ = _seed_owner_roots(cursor, case_no, "歷史訂單－服務中")
+            _seed_settled_deposit(cursor, case_no)
+            cursor.execute(
+                "INSERT INTO staff(name,phone,status) VALUES (%s,'0900000001','active')",
+                (f"{case_no} substitute",),
+            )
+            substitute = int(cursor.lastrowid)
+            cursor.execute(
+                "UPDATE orders SET status='服務中',actual_start_date='2026-09-08',"
+                "actual_end_date='2026-09-10',lifecycle_version=2 WHERE case_no=%s",
+                (case_no,),
+            )
+            cursor.execute(
+                "INSERT INTO holidays(holiday_date,holiday_name,is_double_pay_default) "
+                "VALUES ('2026-09-07','fixture holiday',0)"
+            )
+            cursor.execute(
+                "INSERT INTO scheduling_generations(case_no,generation_number,"
+                "resulting_aggregate_version,status,effective_marker,created_by,"
+                "change_reason,cancelled_at) "
+                "VALUES (%s,1,1,'cancelled',NULL,'test','source before leave',CURRENT_TIMESTAMP)",
+                (case_no,),
+            )
+            old_generation = int(cursor.lastrowid)
+            cursor.execute(
+                "INSERT INTO case_staff_assignments(case_no,generation_id,candidate_key,staff_id,"
+                "assignment_sequence,assigned_start_date,assigned_end_date,status) "
+                "VALUES (%s,%s,%s,%s,1,'2026-09-08','2026-09-09','replaced')",
+                (case_no, old_generation, f"{case_no}:g1:a1", caregiver),
+            )
+            old_assignment = int(cursor.lastrowid)
+            cursor.execute(
+                "INSERT INTO staff_schedule(case_no,staff_id,assignment_id,generation_id,"
+                "work_date,is_work_day,is_double_pay,effective_marker) "
+                "VALUES (%s,%s,%s,%s,'2026-09-08',1,0,NULL)",
+                (case_no, caregiver, old_assignment, old_generation),
+            )
+            old_schedule = int(cursor.lastrowid)
+            cursor.execute(
+                "INSERT INTO scheduling_generations(case_no,generation_number,"
+                "resulting_aggregate_version,status,effective_marker,created_by,change_reason) "
+                "VALUES (%s,2,2,'effective',1,'test','approved substitution')",
+                (case_no,),
+            )
+            current_generation = int(cursor.lastrowid)
+            cursor.execute(
+                "UPDATE scheduling_aggregates SET aggregate_version=2,generation_counter=2,"
+                "effective_generation_id=%s WHERE case_no=%s",
+                (current_generation, case_no),
+            )
+            current_assignments = []
+            for ordinal, (staff_id, start_day, end_day, work_day) in enumerate((
+                (caregiver, date(2026, 9, 8), date(2026, 9, 9), date(2026, 9, 9)),
+                (substitute, date(2026, 9, 10), date(2026, 9, 10), date(2026, 9, 10)),
+            ), 1):
+                cursor.execute(
+                    "INSERT INTO case_staff_assignments(case_no,generation_id,candidate_key,"
+                    "staff_id,assignment_sequence,assigned_start_date,assigned_end_date,status) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,'planned')",
+                    (case_no, current_generation, f"{case_no}:g2:a{ordinal}",
+                     staff_id, ordinal, start_day, end_day),
+                )
+                assignment_id = int(cursor.lastrowid)
+                current_assignments.append(assignment_id)
+                cursor.execute(
+                    "INSERT INTO staff_schedule(case_no,staff_id,assignment_id,generation_id,"
+                    "work_date,is_work_day,is_double_pay,effective_marker) "
+                    "VALUES (%s,%s,%s,%s,%s,1,0,1)",
+                    (case_no, staff_id, assignment_id, current_generation, work_day),
+                )
+                cursor.execute(
+                    "INSERT INTO assignment_payroll_rate_snapshots(assignment_id,policy_version,"
+                    "policy_kind,hourly_rate_ntd,source_identity_status) "
+                    "VALUES (%s,'approved-rates-v1','citizen',300,'case-policy')",
+                    (assignment_id,),
+                )
+                for offset in range((end_day - start_day).days + 1):
+                    cursor.execute(
+                        "INSERT INTO scheduling_effective_occupancy(staff_id,occupancy_date,"
+                        "generation_id,assignment_id,occupancy_type) "
+                        "VALUES (%s,%s,%s,%s,'assignment_interval')",
+                        (staff_id, start_day.fromordinal(start_day.toordinal() + offset),
+                         current_generation, assignment_id),
+                    )
+            batch_key = f"{case_no}-approved-leave"
+            cursor.execute(
+                "INSERT INTO scheduling_leave_substitution_batches(batch_key,case_no,"
+                "original_assignment_id,command_fingerprint,preview_fingerprint,"
+                "request_fingerprint,item_count,actor,reason,request_snapshot,correlation_id) "
+                "VALUES (%s,%s,%s,%s,%s,%s,1,'test','approved fixture','{}',%s)",
+                (batch_key, case_no, old_assignment, 'a' * 64, 'b' * 64,
+                 'c' * 64, f"{case_no}-leave-correlation"),
+            )
+            cursor.execute(
+                "INSERT INTO scheduling_leave_substitution_outcomes(batch_key,item_index,"
+                "event_key,original_assignment_id,original_schedule_id,original_staff_id,"
+                "original_work_date,resolution_type,leave_occupancy_date,"
+                "resulting_assignment_id,resulting_staff_id,resulting_service_date,"
+                "result_fingerprint,outcome_snapshot) "
+                "VALUES (%s,1,%s,%s,%s,%s,'2026-09-08','substitute','2026-09-08',"
+                "%s,%s,'2026-09-10',%s,'{}')",
+                (batch_key, f"{batch_key}-outcome", old_assignment, old_schedule,
+                 caregiver, current_assignments[1], substitute, 'd' * 64),
+            )
+            outcome_id = int(cursor.lastrowid)
+            cursor.execute(
+                "INSERT INTO scheduling_leave_occupancy_days(batch_key,item_index,"
+                "outcome_id,generation_id,staff_id,occupancy_date,status,active_marker) "
+                "VALUES (%s,1,%s,%s,%s,'2026-09-08','active',1)",
+                (batch_key, outcome_id, current_generation, caregiver),
+            )
+            occupancy_id = int(cursor.lastrowid)
+        connection.commit()
+
+        repository = MySqlOrderActualStartRepository(connection)
+        application = ActualStartApplication(repository, ActualStartWorkflow(
+            repository, lambda: MySqlUnitOfWork(connection),
+            FixedBusinessClock(datetime(2026, 9, 10, 12, tzinfo=TAIPEI_TIME_ZONE)),
+        ))
+
+        def state():
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT actual_start_date,actual_end_date,lifecycle_version FROM orders "
+                    "WHERE case_no=%s", (case_no,),
+                )
+                order = cursor.fetchone()
+                cursor.execute(
+                    "SELECT aggregate_version,effective_generation_id FROM scheduling_aggregates "
+                    "WHERE case_no=%s", (case_no,),
+                )
+                scheduling = cursor.fetchone()
+                cursor.execute(
+                    "SELECT generation_id,status,active_marker,outcome_id FROM "
+                    "scheduling_leave_occupancy_days WHERE id=%s", (occupancy_id,),
+                )
+                leave = cursor.fetchone()
+                cursor.execute(
+                    "SELECT original_staff_id,original_work_date,resulting_staff_id,"
+                    "resulting_service_date FROM scheduling_leave_substitution_outcomes "
+                    "WHERE id=%s", (outcome_id,),
+                )
+                outcome = cursor.fetchone()
+                cursor.execute(
+                    "SELECT aggregate_version FROM payroll_case_accounts WHERE case_no=%s",
+                    (case_no,),
+                )
+                payroll_version = cursor.fetchone()["aggregate_version"]
+                return order, scheduling, leave, outcome, payroll_version
+
+        def request(preview, start_date, key):
+            return ActualStartApplyRequest(
+                case_no, start_date,
+                ExpectedVersion(preview.order_version),
+                ExpectedVersion(preview.scheduling_version),
+                preview.fingerprint, IdempotencyKey(f"{case_no}-{key}"),
+                ActorContext("test"), "leave-preserving correction",
+                CorrelationId(f"{case_no}-{key}"),
+            )
+
+        before = state()
+        with pytest.raises(ValueError, match="actual_start_leave_outcome_conflict"):
+            application.preview(case_no, date(2026, 9, 6))
+        assert state() == before
+        first_preview = application.preview(case_no, date(2026, 9, 7))
+        assert [item.service_dates for item in first_preview.scheduling.assignments] == [
+            (date(2026, 9, 9),), (date(2026, 9, 10),),
+        ]
+        assert state() == before
+
+        def fail_after_scheduling_writer(*_args):
+            raise RuntimeError("injected_leave_preservation_rollback")
+
+        with monkeypatch.context() as patcher:
+            patcher.setattr(
+                repository_module, "persist_actual_start_rate_snapshot_carry",
+                fail_after_scheduling_writer,
+            )
+            with pytest.raises(RuntimeError, match="injected_leave_preservation_rollback"):
+                application.apply(request(first_preview, date(2026, 9, 7), "failed"))
+        assert state() == before
+
+        application.apply(request(application.preview(case_no, date(2026, 9, 7)),
+                                  date(2026, 9, 7), "first"))
+        after = state()
+        assert after[0]["actual_start_date"] == date(2026, 9, 7)
+        assert after[1]["effective_generation_id"] != current_generation
+        assert after[2]["generation_id"] == after[1]["effective_generation_id"]
+        assert after[2]["status"] == "active" and after[2]["active_marker"] == 1
+        assert after[3:] == before[3:]
+
+        second_preview = application.preview(case_no, date(2026, 9, 8))
+        application.apply(request(second_preview, date(2026, 9, 8), "second"))
+        second = state()
+        assert second[0]["actual_start_date"] == date(2026, 9, 8)
+        assert second[2]["generation_id"] == second[1]["effective_generation_id"]
+        assert second[2]["status"] == "active" and second[2]["active_marker"] == 1
+        assert second[3:] == before[3:]
+    finally:
+        connection.rollback()
         connection.close()

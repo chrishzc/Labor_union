@@ -38,6 +38,7 @@ from infrastructure.mysql.effective_case_service_rate import (
     load_explicit_case_service_rate,
 )
 from subsystems.orders.terms_workflow import TermsWorkflowFacts
+from subsystems.orders.actual_start_workflow import ActualStartPayrollVersionFacts
 from subsystems.payroll.terms_impact import (
     CasePayrollPolicyTerms,
     ExistingStaffObligationTermsFact,
@@ -52,6 +53,15 @@ def load_preview_facts(cursor: Any, case_no: str) -> TermsWorkflowFacts:
     order_row = select_order(cursor, case_no, lock=False)
     aggregate_row = select_scheduling_aggregate(cursor, case_no, lock=False)
     return _assemble_facts(cursor, order_row, aggregate_row, lock=False)
+
+
+def load_actual_start_preview_facts(cursor: Any, case_no: str) -> TermsWorkflowFacts:
+    order_row = select_order(cursor, case_no, lock=False)
+    aggregate_row = select_scheduling_aggregate(cursor, case_no, lock=False)
+    return _assemble_facts(
+        cursor, order_row, aggregate_row, lock=False,
+        omit_payroll_details=True,
+    )
 
 
 def load_terms_preview_facts(cursor: Any, case_no: str) -> TermsWorkflowFacts:
@@ -165,6 +175,18 @@ def load_locked_facts(
     return _assemble_facts(cursor, order_row, aggregate_row, lock=True)
 
 
+def load_actual_start_locked_facts(
+    cursor: Any, case_no: str, preflight_staff_ids: tuple[int, ...],
+) -> TermsWorkflowFacts:
+    order_row = select_order(cursor, case_no, lock=True)
+    aggregate_row = select_scheduling_aggregate(cursor, case_no, lock=True)
+    lock_staff_mutexes(cursor, preflight_staff_ids)
+    return _assemble_facts(
+        cursor, order_row, aggregate_row, lock=True,
+        omit_payroll_details=True,
+    )
+
+
 def load_terms_locked_facts(
     cursor: Any,
     case_no: str,
@@ -239,6 +261,7 @@ def _assemble_facts(
     *,
     lock: bool,
     omit_preassignment_downstream: bool = False,
+    omit_payroll_details: bool = False,
 ) -> TermsWorkflowFacts:
     generation_row = _select_generation(cursor, aggregate_row, lock)
     assignment_rows = _select_assignments(cursor, generation_row, lock)
@@ -256,7 +279,11 @@ def _assemble_facts(
         payroll = None
     else:
         client_finance = _load_client_finance(cursor, order_row, schedule_rows, lock)
-        payroll = _load_payroll(cursor, order_row, assignment_rows, lock)
+        payroll = (
+            _load_actual_start_payroll_version(cursor, str(order_row["case_no"]))
+            if omit_payroll_details
+            else _load_payroll(cursor, order_row, assignment_rows, lock)
+        )
     lifecycle = _load_lifecycle(cursor, order_row, lock)
     if lock and generation_row is not None:
         _lock_dated_occupancy(cursor, generation_row)
@@ -272,6 +299,17 @@ def _assemble_facts(
         confirmed_service_date_version,
         confirmed_service_dates,
     )
+
+
+def _load_actual_start_payroll_version(cursor, case_no):
+    cursor.execute(
+        "SELECT aggregate_version FROM payroll_case_accounts WHERE case_no=%s",
+        (case_no,),
+    )
+    row = cursor.fetchone()
+    if not isinstance(row, Mapping):
+        raise ValueError("payroll_bootstrap_required")
+    return ActualStartPayrollVersionFacts(int(row["aggregate_version"]))
 
 
 def _validate_preassignment_downstream_state(cursor, case_no: str, lock: bool) -> None:

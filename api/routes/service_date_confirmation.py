@@ -17,6 +17,7 @@ from pymysql.err import OperationalError
 
 from api.dependencies.admin_auth import require_system_admin
 from api.dependencies.service_date_confirmation import (
+    get_historical_restart_arrangement_workflow,
     get_service_date_confirmation_workflow,
 )
 from api.schemas.base import BaseResponse
@@ -24,7 +25,10 @@ from api.schemas.service_date_confirmation import (
     ServiceDateConfirmationPreviewView,
     ServiceDateConfirmationQueryView,
     ServiceDateConfirmationReceiptView,
+    HistoricalArrangementPreviewView,
+    HistoricalArrangementReceiptView,
 )
+from subsystems.orders.historical_restart_arrangement import ArrangementSegmentIntent
 from shared_kernel.errors import ErrorCategory, TypedError
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import (
@@ -59,6 +63,33 @@ class ServiceDateApplyBody(ServiceDatePreviewBody):
         return trimmed
 
 
+class HistoricalArrangementSegmentBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    staff_id: int = Field(gt=0)
+    service_dates: list[date] = Field(min_length=1)
+
+
+class HistoricalArrangementPreviewBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    segments: list[HistoricalArrangementSegmentBody] = Field(min_length=1, max_length=4)
+
+
+class HistoricalArrangementApplyBody(HistoricalArrangementPreviewBody):
+    expected_order_version: int = Field(ge=0)
+    expected_scheduling_version: int = Field(ge=0)
+    expected_confirmed_version: int = Field(gt=0)
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    reason: str = Field(min_length=1, max_length=500)
+
+    @field_validator("reason")
+    @classmethod
+    def validate_arrangement_reason(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("arrangement reason must not be blank")
+        return trimmed
+
+
 @router.get(
     "/{case_no}/service-dates",
     response_model=BaseResponse[ServiceDateConfirmationQueryView],
@@ -73,6 +104,55 @@ def query_service_dates(
         lambda: _query_payload(workflow.query(case_no)),
         "成功取得服務日期確認狀態",
         CorrelationId(f"service-dates-query:{case_no}"),
+    )
+
+
+@router.post(
+    "/{case_no}/service-dates/arrangement/preview",
+    response_model=BaseResponse[HistoricalArrangementPreviewView],
+)
+def preview_historical_arrangement(
+    body: HistoricalArrangementPreviewBody,
+    case_no: str = Path(..., min_length=1, max_length=50),
+    principal: AdminPrincipal = Depends(require_system_admin),
+    workflow=Depends(get_historical_restart_arrangement_workflow),
+):
+    del principal
+    return _call_endpoint(
+        lambda: _arrangement_preview_payload(workflow.preview(case_no, _arrangement_segments(body))),
+        "成功產生歷史正式安排預覽",
+        CorrelationId(f"historical-arrangement-preview:{case_no}"),
+    )
+
+
+@router.post(
+    "/{case_no}/service-dates/arrangement/apply",
+    response_model=BaseResponse[HistoricalArrangementReceiptView],
+)
+def apply_historical_arrangement(
+    body: HistoricalArrangementApplyBody,
+    case_no: str = Path(..., min_length=1, max_length=50),
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=191)] = ...,
+    correlation_id: Annotated[str, Header(alias="X-Correlation-ID", min_length=1, max_length=191)] = ...,
+    principal: AdminPrincipal = Depends(require_system_admin),
+    workflow=Depends(get_historical_restart_arrangement_workflow),
+):
+    identity = CorrelationId(correlation_id)
+    return _call_endpoint(
+        lambda: _arrangement_receipt_payload(workflow.apply(
+            case_no,
+            _arrangement_segments(body),
+            expected_order_version=body.expected_order_version,
+            expected_scheduling_version=body.expected_scheduling_version,
+            expected_confirmed_version=body.expected_confirmed_version,
+            preview_fingerprint=body.preview_fingerprint,
+            idempotency_key=idempotency_key,
+            actor=str(principal.username or "").strip(),
+            reason=body.reason.strip(),
+            correlation_id=correlation_id,
+        )),
+        "歷史正式安排已建立",
+        identity,
     )
 
 
@@ -156,6 +236,46 @@ def _query_payload(facts) -> dict[str, Any]:
             for assignment in facts.restart_assignments
             if assignment.staff_name is not None
         ],
+        "arrangement_pending": (
+            facts.restart_generation_number is not None
+            and facts.current_version is not None
+        ),
+    }
+
+
+def _arrangement_segments(body):
+    return tuple(
+        ArrangementSegmentIntent(item.staff_id, tuple(item.service_dates))
+        for item in body.segments
+    )
+
+
+def _arrangement_preview_payload(preview):
+    return {
+        "case_no": preview.candidate.case_no,
+        "order_version": preview.order_version,
+        "scheduling_version": preview.candidate.expected_aggregate_version,
+        "confirmed_version": preview.confirmed_version,
+        "segments": [
+            {
+                "staff_id": item.staff_id,
+                "assigned_start_date": item.assigned_start_date,
+                "assigned_end_date": item.assigned_end_date,
+                "service_dates": item.service_dates,
+            }
+            for item in preview.candidate.assignments
+        ],
+        "preview_fingerprint": preview.fingerprint.value,
+    }
+
+
+def _arrangement_receipt_payload(receipt):
+    return {
+        "case_no": receipt.case_no,
+        "scheduling_version": receipt.scheduling_version,
+        "generation_number": receipt.generation_number,
+        "assignment_ids": receipt.assignment_ids,
+        "preview_fingerprint": receipt.preview_fingerprint.value,
     }
 
 
@@ -251,6 +371,10 @@ def _raise_value_error(
         category = ErrorCategory.CONFLICT
         status_code = 409
         message = "版本或預覽已過期，請重新查詢後重試。"
+    elif code == "historical_arrangement_case_policy_missing_blocked":
+        category = ErrorCategory.DOMAIN_BLOCKED
+        status_code = 409
+        message = "本案缺少已核定的月嫂費率政策，無法建立正式安排；已確認的服務日期不受影響。"
     elif "blocked" in code:
         category = ErrorCategory.DOMAIN_BLOCKED
         status_code = 409

@@ -8,7 +8,7 @@ import { orderMutationFlowStore, type ActualStartCommand } from '../adapters/ord
 
 interface Props {
   caseNo: string;
-  onObserved?: () => void;
+  onObserved?: (operation: 'date_only' | 'reschedule') => void;
   onBusyChange?: (busy: boolean) => void;
   onOpenServiceDates?: () => void;
 }
@@ -104,25 +104,18 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
       const previewCaseNo = data.operation === 'date_only' ? data.case_no : data.actual_start.case_no;
       if (previewCaseNo !== caseNo || data.after_actual_start_date !== date) throw new Error('實際開始日預覽 identity 不一致。');
       if (!isActive(request, caseNo)) return;
-      const payload = data.operation === 'date_only'
-        ? {
-          operation: 'date_only' as const,
-          new_actual_start_date: data.after_actual_start_date,
-          expected_order_version: data.order_version,
-          preview_fingerprint: data.preview_fingerprint,
-        }
-        : {
-          operation: 'reschedule' as const,
-          new_actual_start_date: data.after_actual_start_date,
-          expected_order_version: data.order_version,
-          expected_scheduling_version: data.scheduling_version,
-          preview_fingerprint: data.preview_fingerprint,
-          reason: data.before_actual_start_date === null
-            ? `確認實際開始日：${data.after_actual_start_date}`
-            : `更正實際開始日：${data.before_actual_start_date} → ${data.after_actual_start_date}`,
-        };
+      if (data.operation === 'reschedule') {
+        setPreview(data);
+        setPhase('idle');
+        return;
+      }
       await execute({
-        payload,
+        payload: {
+          operation: 'date_only',
+          new_actual_start_date: data.after_actual_start_date,
+          expected_order_version: data.order_version,
+          preview_fingerprint: data.preview_fingerprint,
+        },
         idempotencyKey: `beta-actual-start-${crypto.randomUUID()}`,
       }, request, false);
     } catch (caught) {
@@ -164,7 +157,7 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
     if (!isActive(request, caseNo)) return;
     setQuery(data); setDate(data.current_actual_start_date ?? data.planned_start_date);
     setPreview(null); setPhase('observed');
-    onBusyChange?.(false); onObserved?.();
+    onBusyChange?.(false); onObserved?.(receipt.operation);
   };
 
   const execute = async (command: ActualStartCommand, request: number, recoveringUnknown: boolean) => {
@@ -210,6 +203,25 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
     } finally { inFlight.current.delete(caseNo); }
   };
 
+  const applyPreview = async () => {
+    if (!preview || preview.operation !== 'reschedule' || preview.after_actual_start_date !== date || busy) return;
+    const request = ++sequence.current;
+    setPreview(null);
+    await execute({
+      payload: {
+        operation: 'reschedule',
+        new_actual_start_date: preview.after_actual_start_date,
+        expected_order_version: preview.order_version,
+        expected_scheduling_version: preview.scheduling_version,
+        preview_fingerprint: preview.preview_fingerprint,
+        reason: preview.before_actual_start_date === null
+          ? `確認實際開始日：${preview.after_actual_start_date}`
+          : `更正實際開始日：${preview.before_actual_start_date} → ${preview.after_actual_start_date}`,
+      },
+      idempotencyKey: `beta-actual-start-${crypto.randomUUID()}`,
+    }, request, false);
+  };
+
   const retryApply = async () => {
     const existing = orderMutationFlowStore.getActualStart(caseNo);
     if (existing?.status !== 'outcome_unknown' || existing.command === null || existing.receipt) return;
@@ -225,7 +237,7 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
         && data.order_version > existing.command.payload.expected_order_version) {
         orderMutationFlowStore.setActualStart(caseNo, { ...existing, status: 'observed', error: null });
         setQuery(data); setDate(data.current_actual_start_date); setPhase('observed'); setError(null);
-        onBusyChange?.(false); onObserved?.();
+        onBusyChange?.(false); onObserved?.('date_only');
         return;
       }
       if (data.order_version !== existing.command.payload.expected_order_version) {
@@ -265,9 +277,11 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
           {query.service_data_locked && <p role="status">服務資料已鎖定，不可修改實際開始日。</p>}
           <label>實際開始日期
             <input aria-label="Beta 實際開始日期" type="date" value={date} disabled={busy || query.service_data_locked}
-              onChange={(event) => { setDate(event.target.value); setPreview(null); setError(null); setMissingAssignments(false); setPhase('idle'); }} />
+              onChange={(event) => { sequence.current += 1; setDate(event.target.value); setPreview(null); setError(null); setMissingAssignments(false); setPhase('idle'); }} />
           </label>
-          <button type="button" disabled={busy || query.service_data_locked || !date} onClick={() => void confirm()}>確認實際開始日</button>
+          <button type="button" disabled={busy || query.service_data_locked || !date} onClick={() => void confirm()}>
+            {query.has_formal_assignments ? '預覽新排班' : '確認實際開始日'}
+          </button>
         </>
       )}
       {preview && (
@@ -276,8 +290,18 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
           {preview.operation === 'date_only'
             ? <p>目前尚無正式排班；本次只保存日期，不建立排班、帳務、薪資或服務完成資料。</p>
             : <>
-              <p>正式服務日：{preview.actual_start.official_service_dates.join('、')}</p>
+              <p>以下為尚未儲存的新排班，請逐段核對後再確認。</p>
+              <ol>
+                {preview.scheduling.assignments.map((assignment) => (
+                  <li key={assignment.candidate_key}>
+                    月嫂 {assignment.staff_id}：占用 {assignment.assigned_start_date} 至 {assignment.assigned_end_date}；
+                    服務日 {assignment.service_dates.join('、')}
+                  </li>
+                ))}
+              </ol>
               <p>正式結束：{preview.actual_end_date}；狀態：{preview.lifecycle_impact.before_status} → {preview.lifecycle_impact.after_status}</p>
+              <button type="button" disabled={busy} onClick={() => void applyPreview()}>確認並儲存新排班</button>
+              <button type="button" disabled={busy} onClick={() => setPreview(null)}>取消本次預覽</button>
             </>}
         </>
       )}

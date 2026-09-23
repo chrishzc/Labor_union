@@ -81,6 +81,11 @@ class ActualStartWorkflowContext:
 
 
 @dataclass(frozen=True, slots=True)
+class ActualStartPayrollVersionFacts:
+    payroll_version: int
+
+
+@dataclass(frozen=True, slots=True)
 class ActualStartQueryFacts:
     case_no: str
     current_actual_start_date: date | None
@@ -220,6 +225,16 @@ class ActualStartWorkflowRepository(ActualStartReconfirmationControlPort, Protoc
     def load_for_apply(
         self, case_no: str, preflight_staff_ids: tuple[int, ...]
     ) -> ActualStartWorkflowContext: ...
+    def calculate_progressive_service_dates(
+        self, case_no: str, new_date: date,
+        assignments: tuple[ActualStartAssignmentFacts, ...], *, lock: bool,
+    ) -> tuple[tuple[date, ...], str]: ...
+    def validate_replacement_rate_snapshots(
+        self, assignments: tuple, *, lock: bool,
+    ) -> None: ...
+    def validate_replacement_availability(
+        self, candidate: SchedulingGenerationCandidate, *, lock: bool,
+    ) -> None: ...
     def claim_actual_start_command(
         self, request: ActualStartApplyRequest, command_fingerprint: PreviewFingerprint
     ) -> CommandClaimState: ...
@@ -504,25 +519,54 @@ class ActualStartWorkflow:
         staff_ids,
         recalculated_service_dates=None,
     ):
+        if not context.shared_facts.scheduling.segments:
+            raise _workflow_error(
+                request, ErrorCategory.CONFLICT, "actual_start_mode_changed",
+                "The Actual Start operation mode changed after Preview.",
+            )
         _validate_locked_staff_set(request, context.shared_facts, staff_ids)
         _validate_versions(request, context.shared_facts)
         preview = self._build_preview(
             context,
             request.new_actual_start_date,
             recalculated_service_dates,
+            lock_calendar=True,
         )
         if preview.fingerprint != request.preview_fingerprint:
             raise _workflow_error(request, ErrorCategory.CONFLICT, "stale_preview", "The business facts changed after Preview.")
         return preview
 
-    def _build_preview(self, context, new_date, recalculated_service_dates=None):
+    def _build_preview(
+        self, context, new_date, recalculated_service_dates=None,
+        *, lock_calendar=False,
+    ):
         facts = context.shared_facts
+        calendar_version = None
+        normal_replacement = recalculated_service_dates is None
+        if normal_replacement:
+            recalculated_service_dates, calendar_version = (
+                self._repository.calculate_progressive_service_dates(
+                    facts.order.case_no,
+                    new_date,
+                    _actual_start_assignments(facts),
+                    lock=lock_calendar,
+                )
+            )
         reconfirmation = build_actual_start_reconfirmation_candidate(context.reconfirmation)
         actual_start, scheduling = _actual_start_candidates(
             facts,
             new_date,
             recalculated_service_dates,
         )
+        if normal_replacement:
+            self._repository.validate_replacement_rate_snapshots(
+                scheduling.assignments,
+                lock=lock_calendar,
+            )
+            self._repository.validate_replacement_availability(
+                scheduling,
+                lock=lock_calendar,
+            )
         client_settlement = _existing_client_settlement(facts)
         lifecycle = _actual_start_lifecycle(
             facts,
@@ -539,6 +583,7 @@ class ActualStartWorkflow:
             lifecycle,
             reconfirmation,
             context.unpersisted_source_assignment_ids,
+            calendar_version,
         )
 
     def _persist(self, request, preview, command_fingerprint, receipt):
@@ -568,12 +613,8 @@ def _date_only_preview(facts, new_date, *, correlation_id=None):
         raise TypeError("new actual start date must be a date")
     if facts.service_data_locked:
         raise ActualStartCandidateError(ActualStartBlocker.SERVICE_DATA_LOCKED)
-    if facts.has_formal_assignments or facts.historical_precision_restarted:
-        code = (
-            "historical_actual_start_requires_reschedule"
-            if facts.historical_precision_restarted
-            else "actual_start_mode_changed"
-        )
+    if facts.has_formal_assignments:
+        code = "actual_start_mode_changed"
         if correlation_id is None:
             raise ValueError(code)
         raise ActualStartWorkflowError(TypedError(
@@ -704,7 +745,11 @@ def _persist_scheduling(repository, request, preview, command_fingerprint):
     candidate = _scheduling_persistence_candidate(preview)
     command = SchedulingReplacementCommand(
         candidate=candidate,
-        command_family="orders_actual_start_rebuild",
+        command_family=(
+            "orders_historical_actual_start_bootstrap"
+            if preview.unpersisted_source_assignment_ids
+            else "orders_actual_start_rebuild"
+        ),
         expected_order_version=preview.order_version,
         command_fingerprint=command_fingerprint,
         preview_fingerprint=preview.fingerprint,
@@ -790,14 +835,17 @@ def _actual_start_scheduling_facts(facts):
 
 
 def _actual_start_assignments(facts):
-    service_dates = facts.planned_service_dates
-    assignments = []
-    offset = 0
-    for segment in sorted(facts.scheduling.segments, key=lambda item: item.sequence):
-        end = offset + segment.service_day_count
-        assignments.append(ActualStartAssignmentFacts(segment.assignment_id, segment.staff_id, segment.sequence, segment.assigned_start_date, segment.assigned_end_date, service_dates[offset:end]))
-        offset = end
-    return tuple(assignments)
+    return tuple(
+        ActualStartAssignmentFacts(
+            segment.assignment_id,
+            segment.staff_id,
+            segment.sequence,
+            segment.assigned_start_date,
+            segment.assigned_end_date,
+            segment.official_service_dates,
+        )
+        for segment in sorted(facts.scheduling.segments, key=lambda item: item.sequence)
+    )
 
 
 def _existing_client_settlement(facts):
@@ -849,6 +897,7 @@ def _preview_result(
     lifecycle,
     reconfirmation,
     unpersisted_source_assignment_ids,
+    calendar_version=None,
 ):
     payload = _preview_fingerprint_payload(
         facts,
@@ -856,6 +905,7 @@ def _preview_result(
         client_settlement,
         lifecycle,
         reconfirmation,
+        calendar_version,
     )
     return ActualStartPreview(
         facts.lifecycle.actual_start_date,
@@ -881,6 +931,7 @@ def _preview_fingerprint_payload(
     client_settlement,
     lifecycle,
     reconfirmation,
+    calendar_version=None,
 ):
     return {
         "actual_start": actual_start.fingerprint.value,
@@ -889,6 +940,7 @@ def _preview_fingerprint_payload(
         "reconfirmation": reconfirmation.fingerprint.value,
         "order_version": facts.order.version,
         "scheduling_version": facts.scheduling.aggregate_version,
+        "calendar_version": calendar_version,
     }
 
 

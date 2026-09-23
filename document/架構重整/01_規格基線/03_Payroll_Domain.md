@@ -41,6 +41,25 @@ rebuild 與新 assignment 也必須優先採用此 effective correction；原 as
 維持不可變，差額以既有 adjustment／replacement 規則表達。正式服務開始後不得變更胎數。
 - 低收入戶／中低收入戶先映射為補助市民政策
 
+### Assignment replacement rate snapshot carry-forward（2026-09-23）
+
+Actual Start 只改日期並由 Scheduling cancel-old／create-new 時，successor assignment 的費率不是重新
+選擇政策或重算薪資，而是 source assignment immutable rate snapshot 的 identity carry-forward：
+
+- 每個 successor 必須有且只有一個 source assignment；Payroll persistence adapter 依 Scheduling writer
+  回傳的新 assignment identity，將 source 的 `policy_version`、`policy_kind`、`hourly_rate_ntd` 原值寫入
+  successor snapshot，並保存可追溯的 source identity。
+- 本操作不修改 case payroll policy，不增加 Payroll aggregate version，不新增、重建或調整
+  `staff_obligations`／obligation events，也不改任何已付款或應付金額。
+- source snapshot 缺失、重複、無法唯一對應或與 candidate lineage 不一致時，Preview／Apply 固定回 typed
+  integrity blocker 並零寫入；一般 Actual Start replacement 不得 fallback 到目前 case policy。
+- 搬移必須與 Scheduling replacement 位於同一 outer Unit of Work；Scheduling 仍只擁有 assignment／lineage，
+  rate snapshot 仍只能由 Payroll persistence adapter 寫入。
+
+上述規則只處理已有 source assignment 的日期 replacement。歷史 Precision Restart 後首次建立正式安排，
+若 pairing 原本沒有 source assignment／snapshot，仍依 Orders §3.4.1 在真正建立安排時使用案件已存在的
+case payroll policy；不得在 confirmed-date 保存階段建立 snapshot，也不得自行產生政策。
+
 ## 3. Subsystems
 
 ### Official Service Facts

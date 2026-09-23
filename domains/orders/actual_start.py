@@ -239,7 +239,8 @@ def build_actual_start_candidate(
     shift_days = (new_actual_start_date - scheduling.root_date).days
     assignments = (
         _recalculate_assignments(
-            scheduling, recalculated_service_dates, service_hours_per_day
+            scheduling, new_actual_start_date, recalculated_service_dates,
+            service_hours_per_day,
         )
         if recalculated_service_dates is not None
         else _shift_assignments(scheduling, shift_days, service_hours_per_day)
@@ -403,7 +404,6 @@ def _first_assignment_starts_at_root(
     first_assignment = assignments[0]
     return (
         first_assignment.assigned_start_date == root_date
-        and first_assignment.service_dates[0] == root_date
     )
 
 
@@ -447,6 +447,9 @@ def calculate_service_dates(
     service_days: int,
     service_mode: str,
     holiday_dates: tuple[date, ...],
+    unavailable_dates: tuple[date, ...] = (),
+    manual_work_dates: tuple[date, ...] = (),
+    manual_rest_dates: tuple[date, ...] = (),
 ) -> tuple[date, ...]:
     """Calculate official work days from one order's rest mode and holidays."""
 
@@ -458,6 +461,17 @@ def calculate_service_dates(
         raise ValueError("holiday dates must be canonically ordered")
     if any(type(value) is not date for value in holiday_dates):
         raise TypeError("holiday dates must contain dates")
+    if unavailable_dates != tuple(sorted(set(unavailable_dates))):
+        raise ValueError("unavailable dates must be canonically ordered")
+    if any(type(value) is not date for value in unavailable_dates):
+        raise TypeError("unavailable dates must contain dates")
+    for label, values in (("manual work", manual_work_dates), ("manual rest", manual_rest_dates)):
+        if values != tuple(sorted(set(values))):
+            raise ValueError(f"{label} dates must be canonically ordered")
+        if any(type(value) is not date for value in values):
+            raise TypeError(f"{label} dates must contain dates")
+    if set(manual_work_dates) & set(manual_rest_dates):
+        raise ValueError("manual work and rest dates overlap")
     rest_weekdays = {
         "休周六": {5},
         "休周日": {6},
@@ -465,17 +479,108 @@ def calculate_service_dates(
         "連續服務": set(),
     }[service_mode]
     holidays = set(holiday_dates)
+    unavailable = set(unavailable_dates)
+    manual_work = set(manual_work_dates)
+    manual_rest = set(manual_rest_dates)
     service_dates: list[date] = []
     current = actual_start_date
     while len(service_dates) < service_days:
-        if current.weekday() not in rest_weekdays and current not in holidays:
+        if current not in unavailable and current not in manual_rest and (
+            current in manual_work
+            or (current.weekday() not in rest_weekdays and current not in holidays)
+        ):
             service_dates.append(current)
         current += timedelta(days=1)
     return tuple(service_dates)
 
 
+def calculate_progressive_segment_service_dates(
+    new_actual_start_date: date,
+    assignments: tuple[ActualStartAssignmentFacts, ...],
+    service_mode: str,
+    holiday_dates: tuple[date, ...],
+    unavailable_staff_dates: tuple[tuple[int, date], ...] = (),
+    manual_work_staff_dates: tuple[tuple[int, date], ...] = (),
+    manual_rest_staff_dates: tuple[tuple[int, date], ...] = (),
+) -> tuple[date, ...]:
+    """Recalculate each existing segment from its own consecutive interval."""
+
+    if not assignments:
+        raise ActualStartCandidateError(
+            ActualStartBlocker.SCHEDULING_ASSIGNMENTS_REQUIRED
+        )
+    for label, values in (
+        ("unavailable", unavailable_staff_dates),
+        ("manual work", manual_work_staff_dates),
+        ("manual rest", manual_rest_staff_dates),
+    ):
+        if values != tuple(sorted(set(values))):
+            raise ValueError(f"{label} staff dates must be canonically ordered")
+        if any(type(staff_id) is not int or staff_id <= 0 or type(day) is not date for staff_id, day in values):
+            raise TypeError(f"{label} staff dates are invalid")
+    if set(manual_work_staff_dates) & set(manual_rest_staff_dates):
+        raise ValueError("manual work and rest staff dates overlap")
+    cursor = new_actual_start_date
+    result: list[date] = []
+    for assignment in assignments:
+        segment_dates = calculate_service_dates(
+            cursor,
+            len(assignment.service_dates),
+            service_mode,
+            holiday_dates,
+            tuple(day for staff_id, day in unavailable_staff_dates if staff_id == assignment.staff_id),
+            tuple(day for staff_id, day in manual_work_staff_dates if staff_id == assignment.staff_id),
+            tuple(day for staff_id, day in manual_rest_staff_dates if staff_id == assignment.staff_id),
+        )
+        result.extend(segment_dates)
+        cursor = segment_dates[-1] + timedelta(days=1)
+    return tuple(result)
+
+
+def date_bound_manual_overrides(
+    assignments: tuple[ActualStartAssignmentFacts, ...],
+    service_mode: str,
+    holiday_dates: tuple[date, ...],
+    confirmed_service_dates: tuple[date, ...],
+    from_date: date,
+    to_date: date,
+) -> tuple[tuple[tuple[int, date], ...], tuple[tuple[int, date], ...]]:
+    """Retain confirmed official-day choices only for the same date and staff."""
+
+    if from_date > to_date:
+        raise ValueError("manual override date range is invalid")
+    rest_weekdays = {
+        "休周六": {5},
+        "休周日": {6},
+        "週休2日": {5, 6},
+        "連續服務": set(),
+    }[service_mode]
+    holidays = set(holiday_dates)
+    if confirmed_service_dates != tuple(sorted(set(confirmed_service_dates))):
+        raise ValueError("confirmed service dates must be canonically ordered")
+    confirmed = set(confirmed_service_dates)
+    manual_work: set[tuple[int, date]] = set()
+    manual_rest: set[tuple[int, date]] = set()
+    for assignment in assignments:
+        official = set(assignment.service_dates)
+        current = max(assignment.assigned_start_date, from_date)
+        end = min(assignment.assigned_end_date, to_date)
+        while current <= end:
+            identity = (assignment.staff_id, current)
+            default_rest = current.weekday() in rest_weekdays or current in holidays
+            if current in official and default_rest:
+                if current not in confirmed:
+                    raise ValueError("actual_start_manual_work_confirmation_required")
+                manual_work.add(identity)
+            elif current not in official and current not in confirmed and not default_rest and confirmed:
+                manual_rest.add(identity)
+            current += timedelta(days=1)
+    return tuple(sorted(manual_work)), tuple(sorted(manual_rest))
+
+
 def _recalculate_assignments(
     scheduling: ActualStartSchedulingFacts,
+    new_actual_start_date: date,
     service_dates: tuple[date, ...],
     service_hours_per_day: float | int,
 ) -> tuple[ActualStartAssignmentCandidate, ...]:
@@ -490,22 +595,28 @@ def _recalculate_assignments(
             ActualStartBlocker.SCHEDULING_SERVICE_DATES_INVALID
         )
     offset = 0
+    segment_start = new_actual_start_date
     result: list[ActualStartAssignmentCandidate] = []
     for assignment in assignments:
         count = len(assignment.service_dates)
         assigned_dates = service_dates[offset:offset + count]
         offset += count
+        if assigned_dates[0] < segment_start:
+            raise ActualStartCandidateError(
+                ActualStartBlocker.SCHEDULING_SERVICE_DATES_INVALID
+            )
         result.append(
             ActualStartAssignmentCandidate(
                 source_assignment_id=assignment.assignment_id,
                 staff_id=assignment.staff_id,
                 sequence=assignment.sequence,
-                assigned_start_date=assigned_dates[0],
+                assigned_start_date=segment_start,
                 assigned_end_date=assigned_dates[-1],
                 service_dates=assigned_dates,
                 actual_hours=len(assigned_dates) * service_hours_per_day,
             )
         )
+        segment_start = assigned_dates[-1] + timedelta(days=1)
     return tuple(result)
 
 

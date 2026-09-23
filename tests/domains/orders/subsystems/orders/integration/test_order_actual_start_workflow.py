@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pytest
+from fastapi import HTTPException
 from pymysql.err import IntegrityError
 
 from shared_kernel.identities import (
@@ -35,6 +36,8 @@ from domains.orders.actual_start import (
     ActualStartReconfirmationState,
     ActualStartSchedulingFacts,
     build_actual_start_candidate,
+    calculate_progressive_segment_service_dates,
+    date_bound_manual_overrides,
 )
 from domains.orders.terms import OrderTerms, ServiceTimeTerms
 from domains.scheduling.generation import AssignmentIdentityResolution
@@ -54,8 +57,15 @@ from infrastructure.mysql.order_actual_start_repository import (
     _stored_receipt,
 )
 from infrastructure.mysql.order_terms_read_model import _service_started
+from infrastructure.mysql.payroll_terms_writer import (
+    load_actual_start_source_rate_snapshots,
+    persist_actual_start_rate_snapshot_carry,
+)
+from infrastructure.mysql.scheduling_replacement_writer import (
+    _preserve_previous_leave_occupancy,
+)
 from api.dependencies.order_actual_start import ActualStartApplication
-from subsystems.orders.actual_start_workflow import HistoricalActualStartSourceAssignment
+from api.routes.order_actual_start import _raise_value_error
 
 
 def _request(*, reason: str = "confirm service start") -> ActualStartApplyRequest:
@@ -84,7 +94,7 @@ def test_actual_start_request_rejects_blank_change_reason() -> None:
         _request(reason=" ")
 
 
-def test_restarted_historical_actual_start_routes_directly_through_unique_pairing() -> None:
+def test_restarted_historical_tombstone_uses_date_only_route() -> None:
     query = ActualStartQueryFacts(
         "CASE-1", None, date(2026, 8, 1), False, 1,
         2, None, 3, 4, False, True,
@@ -96,68 +106,54 @@ def test_restarted_historical_actual_start_routes_directly_through_unique_pairin
             assert for_update is False
             return query
 
-    planner_lock_modes = []
-
-    class Planner:
-        def calculate(self, case_no, actual_start_date, *, for_update):
-            assert (case_no, actual_start_date) == ("CASE-1", date(2026, 8, 3))
-            planner_lock_modes.append(("dates", for_update))
-            return (date(2026, 8, 3), date(2026, 8, 4))
-
-        def load_restart_source_assignments(self, case_no, *, for_update):
-            assert case_no == "CASE-1"
-            planner_lock_modes.append(("pairing", for_update))
-            return (HistoricalActualStartSourceAssignment(None, 16),)
-
     calls = []
 
     class Workflow:
-        def preview_historical_source(self, case_no, actual_start_date, **values):
-            calls.append(("preview", case_no, actual_start_date, values))
-            return "historical-preview"
+        def preview_date_only(self, facts, actual_start_date):
+            calls.append(("preview_date_only", facts, actual_start_date))
+            return "date-only-preview"
 
-        def apply_historical_source(self, request, **values):
-            service_dates, assignments = values["source_loader"]()
-            calls.append((
-                "apply",
-                request.case_no,
-                request.new_actual_start_date,
-                service_dates,
-                assignments,
-            ))
-            return "historical-receipt"
+        def apply_date_only(self, request):
+            calls.append(("apply_date_only", request))
+            return "date-only-receipt"
 
         def preview(self, *_args, **_kwargs):
-            raise AssertionError("generic preview must not handle a restarted historical tombstone")
+            raise AssertionError("unassigned historical order must not reschedule")
 
         def apply(self, *_args, **_kwargs):
-            raise AssertionError("generic apply must not handle a restarted historical tombstone")
+            raise AssertionError("unassigned historical order must not reschedule")
 
-    application = ActualStartApplication(Repository(), Workflow(), Planner())
+    application = ActualStartApplication(Repository(), Workflow())
 
-    assert application.preview("CASE-1", date(2026, 8, 3)) == "historical-preview"
-    assert application.apply(_request()) == "historical-receipt"
-    assert planner_lock_modes == [
-        ("dates", False),
-        ("pairing", False),
-        ("dates", True),
-        ("pairing", True),
-    ]
+    assert application.preview("CASE-1", date(2026, 8, 3)) == "date-only-preview"
+    request = ActualStartDateOnlyApplyRequest(
+        "CASE-1", date(2026, 8, 3), ExpectedVersion(1),
+        PreviewFingerprint("a" * 64), CorrelationId("date-only"),
+    )
+    assert application.apply(request) == "date-only-receipt"
     assert calls == [
-        (
-            "preview", "CASE-1", date(2026, 8, 3),
-            {
-                "recalculated_service_dates": (date(2026, 8, 3), date(2026, 8, 4)),
-                "source_staff_ids": (16,),
-                "source_assignment_ids": (None,),
-            },
-        ),
-        (
-            "apply", "CASE-1", date(2026, 8, 3),
-            (date(2026, 8, 3), date(2026, 8, 4)),
-            (HistoricalActualStartSourceAssignment(None, 16),),
-        ),
+        ("preview_date_only", query, date(2026, 8, 3)),
+        ("apply_date_only", request),
     ]
+
+
+def test_restarted_tombstone_rejects_stale_reschedule_apply_mode() -> None:
+    query = ActualStartQueryFacts(
+        "CASE-1", None, date(2026, 8, 1), False, 1,
+        2, None, 3, 4, False, True,
+    )
+
+    class Repository:
+        def load_actual_start_query(self, *_args, **_kwargs):
+            return query
+
+    class Workflow:
+        def apply(self, *_args):
+            raise AssertionError("unassigned case must not enter reschedule")
+
+    with pytest.raises(ActualStartWorkflowError) as error:
+        ActualStartApplication(Repository(), Workflow()).apply(_request())
+    assert error.value.error.code == "actual_start_mode_changed"
 
 
 def test_application_routes_unassigned_order_to_date_only_without_downstream_facts() -> None:
@@ -476,6 +472,350 @@ def test_actual_start_can_replace_legacy_dates_with_recalculated_official_dates(
         date(2026, 8, 12),
     )
     assert candidate.actual_end_date == date(2026, 8, 12)
+
+
+def test_actual_start_recalculates_each_segment_from_previous_end() -> None:
+    assignments = (
+        ActualStartAssignmentFacts(
+            11, 21, 1, date(2026, 8, 3), date(2026, 8, 4),
+            (date(2026, 8, 3), date(2026, 8, 4)),
+        ),
+        ActualStartAssignmentFacts(
+            12, 22, 2, date(2026, 8, 5), date(2026, 8, 6),
+            (date(2026, 8, 5), date(2026, 8, 6)),
+        ),
+    )
+    recalculated = calculate_progressive_segment_service_dates(
+        date(2026, 9, 6), assignments, "週休2日", (date(2026, 9, 7),),
+    )
+    candidate = build_actual_start_candidate(
+        ActualStartOrderFacts(
+            "CASE-SEGMENTS", 3, None, False, ServiceTimeTerms(None, None, None),
+        ),
+        ActualStartSchedulingFacts(
+            "CASE-SEGMENTS", 5, 1, date(2026, 8, 3), assignments,
+        ),
+        date(2026, 9, 6), 8, recalculated,
+    )
+
+    assert recalculated == (
+        date(2026, 9, 8), date(2026, 9, 9),
+        date(2026, 9, 10), date(2026, 9, 11),
+    )
+    assert [
+        (item.source_assignment_id, item.staff_id, item.sequence,
+         item.assigned_start_date, item.assigned_end_date, item.service_dates)
+        for item in candidate.assignments
+    ] == [
+        (11, 21, 1, date(2026, 9, 6), date(2026, 9, 9), recalculated[:2]),
+        (12, 22, 2, date(2026, 9, 10), date(2026, 9, 11), recalculated[2:]),
+    ]
+
+
+def test_actual_start_recalculates_around_effective_leave_per_caregiver() -> None:
+    assignments = (
+        ActualStartAssignmentFacts(
+            11, 21, 1, date(2026, 8, 3), date(2026, 8, 4),
+            (date(2026, 8, 3), date(2026, 8, 4)),
+        ),
+        ActualStartAssignmentFacts(
+            12, 22, 2, date(2026, 8, 5), date(2026, 8, 6),
+            (date(2026, 8, 5), date(2026, 8, 6)),
+        ),
+    )
+    assert calculate_progressive_segment_service_dates(
+        date(2026, 9, 8), assignments, "連續服務", (),
+        ((21, date(2026, 9, 8)), (22, date(2026, 9, 11))),
+    ) == (
+        date(2026, 9, 9), date(2026, 9, 10),
+        date(2026, 9, 12), date(2026, 9, 13),
+    )
+
+
+def test_actual_start_preserves_leave_occupancy_only_for_valid_successor() -> None:
+    class Cursor:
+        def __init__(self):
+            self.statements = []
+            self.rowcount = 0
+
+        def execute(self, sql, parameters):
+            self.statements.append((sql, parameters))
+            self.rowcount = 1 if sql.startswith("UPDATE") else 0
+
+        def fetchall(self):
+            return ({
+                "staff_id": 21,
+                "occupancy_date": date(2026, 9, 8),
+                "resulting_staff_id": 22,
+                "resulting_service_date": date(2026, 9, 10),
+            },)
+
+    valid = SimpleNamespace(candidate=SimpleNamespace(assignments=(
+        SimpleNamespace(staff_id=21, service_dates=(date(2026, 9, 9),)),
+        SimpleNamespace(staff_id=22, service_dates=(date(2026, 9, 10),)),
+    )))
+    cursor = Cursor()
+    _preserve_previous_leave_occupancy(cursor, valid, 7, 8)
+    assert cursor.statements[-1] == (
+        "UPDATE scheduling_leave_occupancy_days SET generation_id=%s "
+        "WHERE generation_id=%s AND active_marker=1",
+        (8, 7),
+    )
+    invalid = SimpleNamespace(candidate=SimpleNamespace(assignments=(
+        SimpleNamespace(staff_id=21, service_dates=(date(2026, 9, 8),)),
+        SimpleNamespace(staff_id=22, service_dates=(date(2026, 9, 10),)),
+    )))
+    with pytest.raises(ValueError, match="actual_start_leave_outcome_conflict"):
+        _preserve_previous_leave_occupancy(Cursor(), invalid, 7, 8)
+
+
+def test_actual_start_leave_outcome_conflict_is_typed_409() -> None:
+    with pytest.raises(HTTPException) as caught:
+        _raise_value_error(
+            ValueError("actual_start_leave_outcome_conflict"),
+            CorrelationId("actual-start-leave-test"),
+        )
+    assert caught.value.status_code == 409
+    assert caught.value.detail["error"]["code"] == "actual_start_leave_outcome_conflict"
+
+
+def test_actual_start_rate_snapshots_are_copied_exactly_without_payroll_root_write() -> None:
+    class Cursor:
+        statements = []
+
+        def execute(self, sql, args):
+            self.statements.append((sql, args))
+
+        def fetchall(self):
+            source_id = self.statements[-1][1][0]
+            return ({
+                "policy_version": 7,
+                "policy_kind": "municipal",
+                "hourly_rate_ntd": 380 if source_id == 11 else 420,
+            },)
+
+        def executemany(self, sql, rows):
+            self.statements.append((sql, rows))
+
+    assignments = (
+        SimpleNamespace(
+            source_assignment_id=11,
+            lineage_source_assignment_ids=(11,),
+            candidate_key="a1",
+        ),
+        SimpleNamespace(
+            source_assignment_id=12,
+            lineage_source_assignment_ids=(12,),
+            candidate_key="a2",
+        ),
+    )
+    cursor = Cursor()
+    command = SimpleNamespace(candidate=SimpleNamespace(assignments=assignments))
+    result = SimpleNamespace(assignment_resolution=SimpleNamespace(
+        assignment_id_by_candidate_key={"a1": 101, "a2": 102},
+    ))
+    persist_actual_start_rate_snapshot_carry(cursor, command, result)
+
+    assert cursor.statements[-1][1] == (
+        (101, 7, "municipal", 380, "carried-from:11"),
+        (102, 7, "municipal", 420, "carried-from:12"),
+    )
+    assert all(
+        "payroll_case_accounts" not in sql and "staff_obligations" not in sql
+        for sql, _ in cursor.statements
+    )
+    with pytest.raises(ValueError, match="lineage_invalid"):
+        load_actual_start_source_rate_snapshots(
+            cursor,
+            (SimpleNamespace(source_assignment_id=None,
+                             lineage_source_assignment_ids=()),),
+            lock=False,
+        )
+
+
+def test_actual_start_mysql_calculator_uses_one_locked_holiday_snapshot_for_segments() -> None:
+    statements = []
+    mode = ["週休二日"]
+    leave_rows = []
+    confirmation = [None]
+    confirmed_days = [date(2026, 8, 3), date(2026, 8, 4)]
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, sql, parameters):
+            statements.append((sql, parameters))
+
+        def fetchone(self):
+            if "FROM confirmed_service_date_versions" in statements[-1][0]:
+                return confirmation[0]
+            return {"service_type": mode[0]}
+
+        def fetchall(self):
+            if "FROM confirmed_service_date_days" in statements[-1][0]:
+                return tuple({"service_date": day} for day in confirmed_days)
+            if "FROM holidays" not in statements[-1][0]:
+                return tuple(leave_rows)
+            return ({
+                "holiday_date": date(2026, 9, 7),
+                "holiday_name": "休假",
+                "is_double_pay_default": 0,
+            },)
+
+    class Connection:
+        def cursor(self):
+            return Cursor()
+
+    assignment = ActualStartAssignmentFacts(
+        11, 21, 1, date(2026, 8, 3), date(2026, 8, 4),
+        (date(2026, 8, 3), date(2026, 8, 4)),
+    )
+    dates, version = MySqlOrderActualStartRepository(Connection()).calculate_progressive_service_dates(
+        "CASE-CALENDAR", date(2026, 9, 6), (assignment,), lock=True,
+    )
+    assert dates == (date(2026, 9, 8), date(2026, 9, 9))
+    assert len(version) == 64
+    assert all("FOR UPDATE" in sql for sql, _ in statements)
+    mode[0] = "休周日"
+    same_dates, changed_version = MySqlOrderActualStartRepository(Connection()).calculate_progressive_service_dates(
+        "CASE-CALENDAR", date(2026, 9, 8), (assignment,), lock=True,
+    )
+    mode[0] = "週休二日"
+    _, original_rule_version = MySqlOrderActualStartRepository(Connection()).calculate_progressive_service_dates(
+        "CASE-CALENDAR", date(2026, 9, 8), (assignment,), lock=True,
+    )
+    assert same_dates == (date(2026, 9, 8), date(2026, 9, 9))
+    assert changed_version != original_rule_version
+
+    confirmation[0] = {
+        "id": 42, "version": 1, "service_day_count": 2,
+        "service_date_fingerprint": "a" * 64,
+    }
+    _, confirmed_version = MySqlOrderActualStartRepository(Connection()).calculate_progressive_service_dates(
+        "CASE-CALENDAR", date(2026, 9, 8), (assignment,), lock=True,
+    )
+    confirmation[0] = {**confirmation[0], "version": 2}
+    _, changed_confirmation_version = MySqlOrderActualStartRepository(Connection()).calculate_progressive_service_dates(
+        "CASE-CALENDAR", date(2026, 9, 8), (assignment,), lock=True,
+    )
+    assert confirmed_version != changed_confirmation_version
+    assert any("confirmed_service_date_days" in sql and "FOR UPDATE" in sql for sql, _ in statements)
+    confirmed_days[1] = date(2026, 8, 5)
+    _, changed_confirmation_dates = MySqlOrderActualStartRepository(Connection()).calculate_progressive_service_dates(
+        "CASE-CALENDAR", date(2026, 9, 8), (assignment,), lock=True,
+    )
+    assert changed_confirmation_dates != changed_confirmation_version
+
+    confirmed_days[:] = [date(2026, 9, 7), date(2026, 9, 8)]
+    holiday_work_assignment = ActualStartAssignmentFacts(
+        12, 21, 1, date(2026, 9, 7), date(2026, 9, 8),
+        (date(2026, 9, 7), date(2026, 9, 8)),
+    )
+    confirmed_work_dates, _ = MySqlOrderActualStartRepository(Connection()).calculate_progressive_service_dates(
+        "CASE-CALENDAR", date(2026, 9, 7), (holiday_work_assignment,), lock=True,
+    )
+    assert confirmed_work_dates == (date(2026, 9, 7), date(2026, 9, 8))
+    confirmation[0] = None
+    with pytest.raises(ValueError, match="actual_start_manual_work_confirmation_required"):
+        MySqlOrderActualStartRepository(Connection()).calculate_progressive_service_dates(
+            "CASE-CALENDAR", date(2026, 9, 7), (holiday_work_assignment,), lock=True,
+        )
+
+    mode[0] = "連續服務"
+    leave_rows.append({
+        "id": 101,
+        "outcome_id": 201,
+        "staff_id": 21,
+        "occupancy_date": date(2026, 9, 8),
+        "resolution_type": "defer_following_assignments",
+        "resulting_staff_id": 21,
+        "resulting_service_date": date(2026, 9, 10),
+    })
+    leave_dates, leave_version = MySqlOrderActualStartRepository(Connection()).calculate_progressive_service_dates(
+        "CASE-CALENDAR", date(2026, 9, 8), (assignment,), lock=True,
+    )
+    assert leave_dates == (date(2026, 9, 9), date(2026, 9, 10))
+    assert leave_version != original_rule_version
+    leave_rows[0] = {**leave_rows[0], "resulting_service_date": date(2026, 9, 11)}
+    with pytest.raises(ValueError, match="actual_start_leave_outcome_conflict"):
+        MySqlOrderActualStartRepository(Connection()).calculate_progressive_service_dates(
+            "CASE-CALENDAR", date(2026, 9, 8), (assignment,), lock=True,
+        )
+
+
+def test_actual_start_preserves_only_same_date_same_staff_manual_choices() -> None:
+    source = (
+        ActualStartAssignmentFacts(
+            11, 21, 1, date(2026, 9, 6), date(2026, 9, 8),
+            (date(2026, 9, 6), date(2026, 9, 8)),
+        ),
+        ActualStartAssignmentFacts(
+            12, 22, 2, date(2026, 9, 9), date(2026, 9, 11),
+            (date(2026, 9, 9), date(2026, 9, 11)),
+        ),
+    )
+    holidays = (date(2026, 9, 7),)
+    work, rest = date_bound_manual_overrides(
+        source, "休周日", holidays,
+        (date(2026, 9, 6), date(2026, 9, 8), date(2026, 9, 9), date(2026, 9, 11)),
+        date(2026, 9, 6), date(2026, 10, 1),
+    )
+    assert work == ((21, date(2026, 9, 6)),)
+    assert rest == ((22, date(2026, 9, 10)),)
+    assert calculate_progressive_segment_service_dates(
+        date(2026, 9, 6), source, "休周日", holidays, (), work, rest,
+    ) == (
+        date(2026, 9, 6), date(2026, 9, 8),
+        date(2026, 9, 9), date(2026, 9, 11),
+    )
+    assert calculate_progressive_segment_service_dates(
+        date(2026, 9, 7), source, "休周日", holidays, (), work, rest,
+    ) == (
+        date(2026, 9, 8), date(2026, 9, 9),
+        date(2026, 9, 11), date(2026, 9, 12),
+    )
+    assert calculate_progressive_segment_service_dates(
+        date(2026, 9, 6), source, "休周日", holidays,
+        ((21, date(2026, 9, 6)),), work, rest,
+    ) == (
+        date(2026, 9, 8), date(2026, 9, 9),
+        date(2026, 9, 11), date(2026, 9, 12),
+    )
+
+
+def test_actual_start_holiday_work_is_not_shifted_to_new_date() -> None:
+    source = (ActualStartAssignmentFacts(
+        11, 21, 1, date(2026, 9, 7), date(2026, 9, 8),
+        (date(2026, 9, 7), date(2026, 9, 8)),
+    ),)
+    holidays = (date(2026, 9, 7), date(2026, 9, 10))
+    work, rest = date_bound_manual_overrides(
+        source, "連續服務", holidays,
+        (date(2026, 9, 7), date(2026, 9, 8)),
+        date(2026, 9, 7), date(2026, 9, 30),
+    )
+    assert work == ((21, date(2026, 9, 7)),)
+    assert rest == ()
+    assert calculate_progressive_segment_service_dates(
+        date(2026, 9, 10), source, "連續服務", holidays, (), work, rest,
+    ) == (date(2026, 9, 11), date(2026, 9, 12))
+
+    with pytest.raises(ValueError, match="actual_start_manual_work_confirmation_required"):
+        date_bound_manual_overrides(
+            source, "連續服務", holidays, (),
+            date(2026, 9, 7), date(2026, 9, 30),
+        )
+    with pytest.raises(HTTPException) as caught:
+        _raise_value_error(
+            ValueError("actual_start_manual_work_confirmation_required"),
+            CorrelationId("unconfirmed-holiday-work"),
+        )
+    assert caught.value.status_code == 409
+    assert caught.value.detail["error"]["code"] == "actual_start_manual_work_confirmation_required"
 
 
 def test_actual_start_keeps_current_service_data_lock_blocker() -> None:

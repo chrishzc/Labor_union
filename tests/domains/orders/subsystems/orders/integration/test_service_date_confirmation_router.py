@@ -15,11 +15,17 @@ from pymysql.err import OperationalError
 
 from api.dependencies.admin_auth import require_system_admin
 from api.dependencies.service_date_confirmation import (
+    get_historical_restart_arrangement_workflow,
     get_service_date_confirmation_workflow,
 )
 from api.routes.service_date_confirmation import router
 from domains.orders.service_date_confirmation import ConfirmedServiceDateCandidate
 from shared_kernel.fingerprints import PreviewFingerprint
+from subsystems.orders.historical_restart_arrangement import (
+    HistoricalRestartArrangementPreview,
+    HistoricalRestartArrangementReceipt,
+    _arrangement_candidate,
+)
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.orders.service_date_confirmation_workflow import (
     RestartSchedulingAssignmentFacts,
@@ -181,6 +187,7 @@ def test_query_service_dates_success():
     assert data["current_version"] == 1
     assert data["current_dates"] == ["2026-08-01", "2026-08-02", "2026-08-03"]
     assert data["bound_staff"] == []
+    assert data["arrangement_pending"] is False
 
 
 def test_query_service_dates_preserves_historical_bound_staff():
@@ -207,6 +214,65 @@ def test_query_service_dates_preserves_historical_bound_staff():
     assert response.json()["data"]["bound_staff"] == [
         {"staff_id": 12, "staff_name": "王月嫂"}
     ]
+    assert response.json()["data"]["arrangement_pending"] is False
+
+
+def test_historical_arrangement_http_is_separate_from_date_confirmation():
+    facts = ServiceDateConfirmationFacts(
+        case_no="HIST-SD-ARRANGE", order_version=2, scheduling_version=3,
+        contracted_service_days=2,
+        suggested_dates=(),
+        selectable_dates=(date(2026, 8, 1), date(2026, 8, 2), date(2026, 8, 3)),
+        current_version=1,
+        current_dates=(date(2026, 8, 2), date(2026, 8, 3)),
+        restart_generation_number=4,
+        restart_assignments=(RestartSchedulingAssignmentFacts(None, 12, 1, 0, "王月嫂"),),
+        service_hours_per_day=8,
+    )
+    app = _create_app(
+        InMemoryServiceDateConfirmationRepository(facts),
+        InMemorySchedulingSnapshotInvalidationPort(),
+    )
+    calls = []
+
+    class Arrangement:
+        def preview(self, case_no, segments):
+            calls.append(("preview", case_no, segments))
+            return HistoricalRestartArrangementPreview(
+                _arrangement_candidate(facts, segments), 2, 1,
+                PreviewFingerprint("a" * 64),
+            )
+
+        def apply(self, case_no, segments, **kwargs):
+            calls.append(("apply", case_no, segments, kwargs))
+            return HistoricalRestartArrangementReceipt(
+                case_no, 4, 5, (101,), PreviewFingerprint("a" * 64),
+            )
+
+    app.dependency_overrides[get_historical_restart_arrangement_workflow] = Arrangement
+    client = TestClient(app)
+    query = client.get("/api/v1/orders/HIST-SD-ARRANGE/service-dates")
+    assert query.json()["data"]["arrangement_pending"] is True
+    body = {"segments": [{
+        "staff_id": 12,
+        "service_dates": ["2026-08-02", "2026-08-03"],
+    }]}
+    preview = client.post(
+        "/api/v1/orders/HIST-SD-ARRANGE/service-dates/arrangement/preview",
+        json=body,
+    )
+    assert preview.status_code == 200
+    assert preview.json()["data"]["segments"][0]["assigned_start_date"] == "2026-08-01"
+    applied = client.post(
+        "/api/v1/orders/HIST-SD-ARRANGE/service-dates/arrangement/apply",
+        headers={"Idempotency-Key": "arrange-1", "X-Correlation-ID": "arrange-correlation"},
+        json={**body, "expected_order_version": 2, "expected_scheduling_version": 3,
+              "expected_confirmed_version": 1, "preview_fingerprint": "a" * 64,
+              "reason": "核對既定月嫂"},
+    )
+    assert applied.status_code == 200
+    assert applied.json()["data"]["assignment_ids"] == [101]
+    assert calls[1][3]["expected_confirmed_version"] == 1
 
 
 def test_query_service_dates_case_not_found():
@@ -469,6 +535,32 @@ def test_service_dates_mysql_retryable_error():
     error = res.json()["detail"]["error"]
     assert error["category"] == "unavailable"
     assert error["retryable"] is True
+
+
+def test_historical_arrangement_missing_policy_reports_the_arrangement_blocker():
+    class MissingPolicyWorkflow:
+        def preview(self, _case_no, _segments):
+            raise ValueError("historical_arrangement_case_policy_missing_blocked")
+
+    app = _create_app(
+        InMemoryServiceDateConfirmationRepository(),
+        InMemorySchedulingSnapshotInvalidationPort(),
+    )
+    app.dependency_overrides[get_historical_restart_arrangement_workflow] = (
+        lambda: MissingPolicyWorkflow()
+    )
+    response = TestClient(app).post(
+        "/api/v1/orders/HIST-001/service-dates/arrangement/preview",
+        json={"segments": [{"staff_id": 1, "service_dates": ["2026-09-03"]}]},
+    )
+
+    assert response.status_code == 409
+    error = response.json()["detail"]["error"]
+    assert error["category"] == "domain_blocked"
+    assert error["code"] == "historical_arrangement_case_policy_missing_blocked"
+    assert error["message"] == (
+        "本案缺少已核定的月嫂費率政策，無法建立正式安排；已確認的服務日期不受影響。"
+    )
 
 
 def test_service_dates_requires_auth():

@@ -18,7 +18,7 @@ describe('ReportsPage service-hours display', () => {
 
     render(<ReportsPage />);
     await screen.findByText('CASE-WEEK-001');
-    fireEvent.click(screen.getByRole('tab', { name: '每周服務中說明' }));
+    fireEvent.click(screen.getByRole('tab', { name: '每週服務中與工時' }));
 
     expect(screen.getByText('王**')).toBeInTheDocument();
     expect(screen.getByText('陳**')).toBeInTheDocument();
@@ -27,7 +27,7 @@ describe('ReportsPage service-hours display', () => {
     expect(screen.getByText('2026/8/17')).toBeInTheDocument();
     expect(screen.getAllByRole('columnheader').map((header) => header.textContent)).toEqual([
       '週數', '序號', '市府案號', '雇主', '服務人員', '每週起始日',
-      '每週結束日', '服務時數', '每周工作日數', '每周工時', '結案',
+      '每週結束日', '服務時數', '每週工作日數', '每週工時', '結案',
     ]);
     expect(screen.getByRole('columnheader', { name: '服務人員' })).toBeInTheDocument();
   });
@@ -46,7 +46,7 @@ describe('ReportsPage service-hours display', () => {
 
     render(<ReportsPage />);
     await screen.findByText('CASE-WEEK-001');
-    fireEvent.click(screen.getByRole('tab', { name: '每周服務中說明' }));
+    fireEvent.click(screen.getByRole('tab', { name: '每週服務中與工時' }));
 
     expect(screen.getByRole('status')).toHaveTextContent('已保留可得明細');
     expect(screen.getByText('5')).toBeInTheDocument();
@@ -62,12 +62,12 @@ describe('ReportsPage service-hours display', () => {
 
     render(<ReportsPage />);
     await screen.findByText('CASE-WEEK-001');
-    fireEvent.click(screen.getByRole('tab', { name: '每周服務中說明' }));
+    fireEvent.click(screen.getByRole('tab', { name: '每週服務中與工時' }));
 
     expect(screen.getByText('此期間服務工時無資料。')).toBeInTheDocument();
   });
 
-  it('同週合併週數，下一週重複表頭並重置序號', async () => {
+  it('跨月份仍以實際週界分組，並顯示月份週次標籤', async () => {
     const first = WEEKLY_OPERATIONS_REPORT.service_rows[0];
     vi.spyOn(weeklyOperationsReportQueryClient, 'query').mockResolvedValue({
       ...WEEKLY_OPERATIONS_REPORT,
@@ -78,22 +78,24 @@ describe('ReportsPage service-hours display', () => {
           ...first,
           assignment_id: 703,
           case_no: 'CASE-WEEK-003',
-          period_start_date: '2026-08-24',
-          period_end_date: '2026-08-30',
+          period_start_date: '2026-09-07',
+          period_end_date: '2026-09-13',
         },
       ],
     });
 
     render(<ReportsPage />);
     await screen.findByText('CASE-WEEK-001');
-    fireEvent.click(screen.getByRole('tab', { name: '每周服務中說明' }));
+    fireEvent.click(screen.getByRole('tab', { name: '每週服務中與工時' }));
 
     expect(screen.getByText('8-3')).toHaveAttribute('rowspan', '2');
-    expect(screen.getByText('8-4')).toHaveAttribute('rowspan', '1');
+    expect(screen.getByText('9-1')).toHaveAttribute('rowspan', '1');
     const tables = screen.getByRole('region', { name: '服務工時資料，可左右捲動' }).querySelectorAll('table');
     expect(tables).toHaveLength(2);
     expect(within(tables[0]).getAllByRole('row')).toHaveLength(3);
     expect(within(tables[1]).getAllByRole('row')).toHaveLength(2);
+    expect(within(tables[0]).getAllByRole('cell', { name: '2026/8/17' })).toHaveLength(2);
+    expect(within(tables[1]).getByRole('cell', { name: '2026/9/7' })).toBeInTheDocument();
     expect(within(within(tables[1]).getAllByRole('row')[1]).getByRole('cell', { name: '1' })).toBeInTheDocument();
   });
 
@@ -118,11 +120,13 @@ describe('ReportsPage service-hours display', () => {
       .mockResolvedValueOnce(originalReport).mockResolvedValueOnce(correctedReport);
     render(<ReportsPage />);
     await screen.findByText('CASE-WEEK-001');
-    fireEvent.click(screen.getByRole('tab', { name: '每周服務中說明' }));
+    fireEvent.click(screen.getByRole('tab', { name: '每週服務中與工時' }));
     expect(screen.getAllByText('CASE-WEEK-001')).toHaveLength(2);
+    expect(screen.getAllByText('2026/8/17')).toHaveLength(2);
     expect(screen.getByText('8-3')).toHaveAttribute('rowspan', '2');
     fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
-    await screen.findByText('8-4');
+    await screen.findByText('2026/8/24');
+    expect(screen.getByText('8-4')).toHaveAttribute('rowspan', '1');
     const tables = screen.getByRole('region', { name: '服務工時資料，可左右捲動' }).querySelectorAll('table');
     expect(tables).toHaveLength(2);
     expect(within(tables[0]).getByText('原月嫂')).toBeInTheDocument();

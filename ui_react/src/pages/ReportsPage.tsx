@@ -161,7 +161,7 @@ const WeeklyServiceView: React.FC<{ report: WeeklyView }> = ({ report }) => {
   return <div className="reports-table-container reports-service-tables" tabIndex={0} role="region" aria-label="服務工時資料，可左右捲動">
     {hasIncompleteRows && <p role="status">部分服務安排缺少每日時數或服務期間；已保留可得明細，無法計算欄位留空。</p>}
     {[...groups.entries()].map(([key, rows]) => <table className="reports-table reports-service-table" key={key}>
-      <thead><tr><th>週數</th><th>序號</th><th>市府案號</th><th>雇主</th><th>服務人員</th><th>每週起始日</th><th>每週結束日</th><th>服務時數</th><th>每周工作日數</th><th>每周工時</th><th>結案</th></tr></thead>
+      <thead><tr><th>週數</th><th>序號</th><th>市府案號</th><th>雇主</th><th>服務人員</th><th>每週起始日</th><th>每週結束日</th><th>服務時數</th><th>每週工作日數</th><th>每週工時</th><th>結案</th></tr></thead>
       <tbody>{rows.map((row, idx) => <tr key={`${row.assignment_id}-${row.period_start_date}`}>
         {idx === 0 && <td rowSpan={rows.length} className="reports-service-week">{serviceWeekNumber(row.period_start_date)}</td>}
         <td>{idx + 1}</td><td>{row.case_no}</td><td>{row.client_name}</td><td>{row.staff_name}</td>
@@ -342,7 +342,7 @@ export const ReportsPage: React.FC = () => {
         {([
           ['cases', '週報案件受理總表'],
           ['subsidy', '補助案件統計表'],
-          ['service', '每周服務中說明'],
+          ['service', '每週服務中與工時'],
         ] as const).map(([tab, label]) => <button
           key={tab}
           type="button"

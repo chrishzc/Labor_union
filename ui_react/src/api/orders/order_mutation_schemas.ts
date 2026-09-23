@@ -83,12 +83,56 @@ export const ServiceDateConfirmationQueryViewSchema = z
     current_version: z.number().int().min(1).nullable(),
     current_dates: z.array(IsoDateSchema),
     bound_staff: z.array(BoundServiceStaffSchema),
+    arrangement_pending: z.boolean(),
   })
   .strict();
 
 export type ServiceDateConfirmationQueryView = z.infer<
   typeof ServiceDateConfirmationQueryViewSchema
 >;
+
+export const HistoricalArrangementSegmentPayloadSchema = z.object({
+  staff_id: z.number().int().gt(0),
+  service_dates: z.array(IsoDateSchema).min(1),
+}).strict();
+
+export const HistoricalArrangementPreviewPayloadSchema = z.object({
+  segments: z.array(HistoricalArrangementSegmentPayloadSchema).min(1).max(4),
+}).strict();
+
+export const HistoricalArrangementApplyPayloadSchema = HistoricalArrangementPreviewPayloadSchema.extend({
+  expected_order_version: z.number().int().min(0),
+  expected_scheduling_version: z.number().int().min(0),
+  expected_confirmed_version: z.number().int().gt(0),
+  preview_fingerprint: FingerprintSchema,
+  reason: ReasonSchema,
+}).strict();
+
+export const HistoricalArrangementPreviewViewSchema = z.object({
+  case_no: z.string().min(1),
+  order_version: z.number().int().min(0),
+  scheduling_version: z.number().int().min(0),
+  confirmed_version: z.number().int().gt(0),
+  segments: z.array(z.object({
+    staff_id: z.number().int().gt(0),
+    assigned_start_date: IsoDateSchema,
+    assigned_end_date: IsoDateSchema,
+    service_dates: z.array(IsoDateSchema).min(1),
+  }).strict()).min(1),
+  preview_fingerprint: FingerprintSchema,
+}).strict();
+
+export const HistoricalArrangementReceiptViewSchema = z.object({
+  case_no: z.string().min(1),
+  scheduling_version: z.number().int().min(0),
+  generation_number: z.number().int().gt(0),
+  assignment_ids: z.array(z.number().int().gt(0)).min(1),
+  preview_fingerprint: FingerprintSchema,
+}).strict();
+
+export type HistoricalArrangementSegmentPayload = z.infer<typeof HistoricalArrangementSegmentPayloadSchema>;
+export type HistoricalArrangementPreviewView = z.infer<typeof HistoricalArrangementPreviewViewSchema>;
+export type HistoricalArrangementReceiptView = z.infer<typeof HistoricalArrangementReceiptViewSchema>;
 
 export const ServiceDateConfirmationPreviewViewSchema = z
   .object({

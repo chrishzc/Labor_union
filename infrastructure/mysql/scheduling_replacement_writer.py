@@ -33,7 +33,7 @@ def persist_scheduling_replacement(
     # same transaction before inserting a shifted replacement (for example an
     # Actual Start correction); rollback still restores the old generation if
     # any later write fails.
-    _cancel_previous_state(cursor, command, previous_generation_id)
+    _cancel_previous_state(cursor, command, previous_generation_id, generation_id)
     _insert_schedules(cursor, command, generation_id, assignment_ids)
     _insert_buffers(cursor, command, generation_id, assignment_ids)
     _activate_new_generation(cursor, generation_id)
@@ -106,11 +106,16 @@ def _previous_generation_id(aggregate_row) -> int | None:
     return int(value) if value is not None else None
 
 
-def _cancel_previous_state(cursor, command, previous_generation_id) -> None:
+def _cancel_previous_state(cursor, command, previous_generation_id, generation_id) -> None:
     if previous_generation_id is None:
         return
     _cancel_previous_buffers(cursor, command, previous_generation_id)
-    _cancel_previous_leave_occupancy(cursor, command, previous_generation_id)
+    if command.command_family == "orders_actual_start_rebuild":
+        _preserve_previous_leave_occupancy(
+            cursor, command, previous_generation_id, generation_id,
+        )
+    else:
+        _cancel_previous_leave_occupancy(cursor, command, previous_generation_id)
     _cancel_previous(cursor, command, previous_generation_id)
 
 
@@ -336,6 +341,43 @@ def _cancel_previous_leave_occupancy(
         "WHERE generation_id=%s AND active_marker=1",
         (command.actor.actor_id, previous_generation_id),
     )
+
+
+def _preserve_previous_leave_occupancy(
+    cursor,
+    command,
+    previous_generation_id,
+    generation_id,
+) -> None:
+    cursor.execute(
+        "SELECT d.staff_id,d.occupancy_date,o.resulting_staff_id,"
+        "o.resulting_service_date FROM scheduling_leave_occupancy_days d "
+        "JOIN scheduling_leave_substitution_outcomes o ON o.id=d.outcome_id "
+        "WHERE d.generation_id=%s AND d.active_marker=1 "
+        "ORDER BY d.id FOR UPDATE",
+        (previous_generation_id,),
+    )
+    rows = tuple(cursor.fetchall())
+    official_dates = {
+        (assignment.staff_id, day)
+        for assignment in command.candidate.assignments
+        for day in assignment.service_dates
+    }
+    if any(
+        (int(row["staff_id"]), row["occupancy_date"]) in official_dates
+        or (int(row["resulting_staff_id"]), row["resulting_service_date"])
+        not in official_dates
+        for row in rows
+    ):
+        raise ValueError("actual_start_leave_outcome_conflict")
+    if rows:
+        cursor.execute(
+            "UPDATE scheduling_leave_occupancy_days SET generation_id=%s "
+            "WHERE generation_id=%s AND active_marker=1",
+            (generation_id, previous_generation_id),
+        )
+        if cursor.rowcount != len(rows):
+            raise ValueError("actual_start_leave_outcome_conflict")
 
 
 def _cancel_previous_assignments(cursor, command, previous_generation_id) -> None:

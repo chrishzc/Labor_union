@@ -70,6 +70,7 @@ const initialQuery = {
   current_version: null,
   current_dates: [],
   bound_staff: [],
+  arrangement_pending: false,
 };
 
 const observedQuery = {
@@ -212,6 +213,58 @@ describe('待辦看板 Beta 第 9 階服務日期', () => {
     expect(within(readback).getByText('2026-10-01、2026-10-03、2026-10-04')).toBeInTheDocument();
   });
 
+  it('實際開始日重排後區分先前確認日期與目前有效排班', async () => {
+    mocks.getActualStart.mockResolvedValue({
+      case_no: 'CASE-SERVICE-DATES',
+      current_actual_start_date: '2026-10-05',
+      planned_start_date: '2026-10-01',
+      service_data_locked: false,
+      order_version: 13,
+      scheduling_version: 9,
+    });
+    mocks.getServiceDates.mockResolvedValue({
+      ...observedQuery,
+      order_version: 13,
+      scheduling_version: 9,
+      current_version: 2,
+      current_dates: ['2026-10-01', '2026-10-02', '2026-10-04'],
+    });
+    render(<OrderServiceDatesPanel caseNo="CASE-SERVICE-DATES" currentAssignmentPlan={{
+      case_no: 'CASE-SERVICE-DATES',
+      order_version: 13,
+      scheduling_version: 9,
+      scheduling_generation: 3,
+      client_finance_version: 3,
+      payroll_version: 2,
+      contracted_service_days: 3,
+      service_hours_per_day: 8,
+      service_started: true,
+      assignments: [
+        {
+          assignment_id: 101, candidate_key: null, staff_id: 1, sequence: 1,
+          assigned_start_date: '2026-10-05', assigned_end_date: '2026-10-06',
+          official_service_dates: ['2026-10-05', '2026-10-06'], actual_hours: 16,
+          lineage_source_assignment_ids: [91],
+        },
+        {
+          assignment_id: 102, candidate_key: null, staff_id: 2, sequence: 2,
+          assigned_start_date: '2026-10-07', assigned_end_date: '2026-10-07',
+          official_service_dates: ['2026-10-07'], actual_hours: 8,
+          lineage_source_assignment_ids: [92],
+        },
+      ],
+    }} />);
+
+    expect(await screen.findByText('先前確認的日期與目前正式排班不同；下方日曆保留事前確認紀錄，不代表目前服務安排。')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '📅 先前確認日期（日曆紀錄）' })).toBeInTheDocument();
+    expect(screen.getByText('此日曆為先前確認日期紀錄；目前服務日期請以正式排班為準。')).toBeInTheDocument();
+    const readback = screen.getByLabelText('先前確認日期與目前正式排班回讀');
+    expect(within(readback).getByText('先前確認日期')).toBeInTheDocument();
+    expect(within(readback).getByText('2026-10-01、2026-10-02、2026-10-04')).toBeInTheDocument();
+    expect(within(readback).getByText('目前正式排班服務日')).toBeInTheDocument();
+    expect(within(readback).getByText('2026-10-05、2026-10-06、2026-10-07')).toBeInTheDocument();
+  });
+
   it('任一 owner 回讀案件編號不一致時 fail closed，不執行精算或 Preview', async () => {
     mocks.getActualStart.mockResolvedValue({
       case_no: 'OTHER-CASE',
@@ -269,6 +322,21 @@ describe('待辦看板 Beta 第 9 階服務日期', () => {
     expect(await screen.findByText(/既定服務人員：/)).toBeInTheDocument();
     expect(screen.getByText(/王月嫂/)).toBeInTheDocument();
     expect(screen.getByText(/不需重新挑選候選或再次推薦/)).toBeInTheDocument();
+  });
+
+  it('歷史日期已確認但未排班時顯示獨立建立正式安排入口', async () => {
+    mocks.getServiceDates.mockResolvedValue({
+      ...initialQuery,
+      current_version: 2,
+      current_dates: ['2026-10-01', '2026-10-02', '2026-10-04'],
+      bound_staff: [{ staff_id: 12, staff_name: '王月嫂' }],
+      arrangement_pending: true,
+    });
+
+    render(<OrderServiceDatesPanel caseNo="CASE-SERVICE-DATES" />);
+
+    expect(await screen.findByRole('region', { name: '歷史訂單建立正式安排' })).toBeInTheDocument();
+    expect(screen.getByText(/排班與費率快照尚未建立/)).toBeInTheDocument();
   });
 
   it('正式實際開始日變更後自動重算，舊預覽失效且人工選日須明確採用新建議', async () => {

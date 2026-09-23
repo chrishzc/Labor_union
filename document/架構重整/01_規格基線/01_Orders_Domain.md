@@ -399,18 +399,32 @@ consumer 不得修改 Orders 或任何其他 Domain root；binding／menu versio
   此例外只移除 lifecycle gate，不得偽造或改寫 Client Finance／契約事實。一般訂單仍維持原條件，
   完整邊界與驗收由 `27_歷史訂單生命週期與服務天數帳務正式規格.md` 擁有。
 - 已有有效正式 assignment 時，Apply 才同交易重建 assignments、正式服務日、actual end 與
-  lifecycle；服務天數與金額契約不變，因此不重算、不驗證也不寫入 Client Finance／Payroll，
-  Apply 只要求 Orders／Scheduling owner version。一般案件只允許唯讀既有訂金核銷狀態作
-  lifecycle gate；fingerprint、idempotency、reconfirmation、receipt 與衝突契約維持不變。
+  lifecycle；服務天數與金額契約不變，因此不重算 Client Finance／Payroll 金額、不新增或調整
+  obligation，也不推進 Client Finance／Payroll root version。Scheduling cancel-old／create-new 產生
+  successor assignment identity 時，Payroll persistence adapter 只可把該 segment 唯一 source assignment
+  的 immutable rate snapshot 原值搬移至 successor；不得重套目前 case policy、改費率或把搬移解讀為
+  Payroll impact。source snapshot 缺失、重複或 lineage 不唯一時以 typed integrity blocker 零寫入，
+  不得用 case policy fallback。一般案件只允許唯讀既有訂金核銷狀態作 lifecycle gate；Orders／
+  Scheduling versions、fingerprint、idempotency、reconfirmation、receipt 與衝突契約維持不變。
 - 原過期日期到新確認日期之間不得補造服務日。
+- 已有有效正式 assignment 的更正操作須先以新 `actual_start_date` 產生可見的逐段排班 Preview，
+  讓內部操作者逐段核對；此畫面不新增請假、假日上班或其他排班日期編輯入口，
+  相關調整仍須走既有受控流程。Preview 期間 Orders／Scheduling 均零寫入。
+  每次開始日改變，都要由 Scheduling 重新精算、驗證並顯示新候選；舊 Preview
+  不得直接確認。操作者最後一次明確確認，才以綁定該候選的 fingerprint／owner versions
+  執行原有 Actual Start Apply，同一交易保存開始日、完整正式排班及結束日。取消、離開、
+  驗證失敗或 stale conflict 時兩個 owner 的正式結果都不變；不得先保存日期再等待排班確認。
+  成功後只回讀 effective Scheduling，不另開第二個排班 Apply 或未保存草稿。
 
 #### 3.4.1 事前服務日期精算與排休覆寫
 
 2026-09-22 #335 UI 接線：服務日期畫面允許輸入此次開始日，輸入改變後自動呼叫既有 server 精算；
 試算與核對期間零寫入，日期範圍須對齊此次輸入，不得以舊範圍裁掉合法建議。人工選日的天數及起訖
 即時投影；條件改變時保留人工選日並要求重新核對或明確採用新建議。開啟已保存案件只讀正式日期。
-最終確認才串接既有 Actual Start 與 Service Dates writer；第一步正式回讀後使用新 owner versions
-重新 Preview／Apply 第二步。正式或歷史重排候選須等於人員核對集合，不得靜默保存另一組日期。
+尚無有效正式 assignment 時，最終確認才串接既有 Actual Start 與 Service Dates writer；
+第一步正式回讀後使用新 owner versions 重新 Preview／Apply 第二步。已有有效正式 assignment
+時改依 §3.4 的逐段可見 Preview 與單一原子 Apply，不串接事前 Service Dates writer；正式
+重排候選須等於人員核對結果，不得靜默保存另一組日期。
 部分完成保留原操作及已保存結果，回讀失敗不得重送已成功寫入；工作台提示接續日期確認，完成前不能
 將舊日期視為本次已確認安排。保存後自動更新工作台及相關正式安排投影。國定假日人工確認方式依
 Scheduling 規格 2026-09-22 退休獨立 agreement 的最新裁決，不恢復已退役入口。
@@ -435,13 +449,22 @@ Scheduling 規格 2026-09-22 退休獨立 agreement 的最新裁決，不恢復�
   額外 30 天是為客戶請假、臨時中斷等情況預留的排程緩衝，不增加合約服務天數。一般確認以已確認的
   `actual_start_date` 為基準，尚未確認時以 planned start 為基準；Terms 完整日期替換以本次擬議的
   `planned_start_date` 為基準。開始日之前或超出該期間的日期固定拒絕。
-- 一般案件本節只確認 Orders 的事前服務日期，不得直接切換 `staff_schedule.is_work_day`、建立 assignment
-  或替代正式請假／代班流程；正式排班後的請假與代班仍由 Scheduling 擁有。完成 Precision Restart、
-  current effective generation 仍是空 tombstone 且歷史 caregiver assignment 可唯一追溯時，「儲存排班結果」
-  必須在同一交易以 Scheduling canonical generation replacement writer 建立 current `staff_schedule`，並以 server
-  read-back 為成功依據；新 assignment 同交易凍結既有 source assignment rate，若來源尚無 snapshot 則使用案件
-  已存在的 case payroll policy，不得自造費率。不得建立 historical overlay。多月嫂日期配置無法由既有正式
-  allocation 唯一決定時 fail closed。
+- 一般案件與完成 Precision Restart、current effective generation 仍是空 tombstone 的歷史案件，本節都只
+  確認 Orders 的事前服務日期；Service Dates Apply 不得切換 `staff_schedule.is_work_day`、建立 assignment／
+  buffer、寫 rate snapshot 或增加 Scheduling version。歷史案件 Query 仍回傳 immutable pairing evidence 的
+  `bound_staff`，但日期保存成功只表示 confirmed dates 已成立，不表示正式排班、薪資或履約已建立。
+- 歷史重啟案件後續由明確的「建立正式安排」Preview／Apply 接續：只接受 current restart tombstone、current
+  confirmed-date version 與既定 `bound_staff`，不要求重做候選、意願或推薦。單月嫂可形成一個 segment；
+  多月嫂只有在既有正式 allocation 可唯一重用時才可預填，否則必須由操作者明確提供每個連續 segment
+  及其服務日 ownership。不得平均分配、按人員順序猜測或虛構 source assignment lineage。
+- Service Dates Query 的 `arrangement_pending` 僅由 current restart tombstone 與 current confirmed-date
+  version 投影，不是新增持久狀態；一般訂單即使尚未正式指派也不得顯示歷史待安排操作。正式安排
+  Apply 必須綁定 Orders／Scheduling／confirmed-date 版本與預覽 fingerprint，並以原冪等鍵回傳同一結果。
+- 真正建立安排時才由 Scheduling canonical generation replacement writer 驗證占用並建立 current assignment／
+  `staff_schedule`／buffer；Payroll adapter 同交易凍結費率。存在 source assignment snapshot 時只能原值搬移；
+  歷史 pairing 原本沒有 source assignment 或 snapshot 時，才可使用案件已存在的 case payroll policy 建立首次
+  assignment snapshot，缺少政策即 typed blocker，不得自造費率。不得建立 historical overlay；正式排班後的
+  Actual Start 更正、請假與代班回到各自既有 owner 流程。
 
 ### 3.5 Cancellation
 

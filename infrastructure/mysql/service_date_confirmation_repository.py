@@ -5,17 +5,26 @@ Description: 實作 confirmed service dates persistence 與 typed borrowed owner
 
 from __future__ import annotations
 
+import json
 from datetime import timedelta
 
-from shared_kernel.fingerprints import PreviewFingerprint
+from pymysql.err import IntegrityError
+
+from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
+from subsystems.orders.historical_restart_arrangement import (
+    HistoricalRestartArrangementReceipt,
+)
+from infrastructure.mysql.payroll_terms_writer import (
+    load_historical_restart_arrangement_rates,
+    persist_historical_restart_arrangement_rates,
+)
+from infrastructure.mysql.scheduling_replacement_writer import (
+    persist_scheduling_replacement,
+)
 from subsystems.orders.service_date_confirmation_workflow import (
     RestartSchedulingAssignmentFacts,
     ServiceDateConfirmationFacts,
     ServiceDateConfirmationReceipt,
-)
-from infrastructure.mysql.scheduling_replacement_writer import persist_scheduling_replacement
-from infrastructure.mysql.payroll_terms_writer import (
-    persist_scheduling_assignment_rate_snapshots,
 )
 
 
@@ -28,6 +37,7 @@ class MySqlServiceDateConfirmationRepository:
         with self._connection.cursor() as cursor:
             cursor.execute(
                 "SELECT o.case_no,o.lifecycle_version,o.start_date,o.actual_start_date,o.service_days,"
+                "o.service_hours_per_day,"
                 "COALESCE(g.aggregate_version,0) AS scheduling_version "
                 "FROM orders o LEFT JOIN scheduling_aggregates g ON g.case_no=o.case_no "
                 "WHERE o.case_no=%s" + lock_clause,
@@ -37,7 +47,7 @@ class MySqlServiceDateConfirmationRepository:
             if not order:
                 raise ValueError("service_date_confirmation_case_not_found")
             cursor.execute(
-                "SELECT id,version FROM confirmed_service_date_versions "
+                "SELECT id,version,order_version FROM confirmed_service_date_versions "
                 "WHERE case_no=%s AND is_current=1" + lock_clause,
                 (case_no,),
             )
@@ -58,20 +68,9 @@ class MySqlServiceDateConfirmationRepository:
             current_dates,
             restart_generation,
             restart_assignments,
+            float(order["service_hours_per_day"]),
+            int(current["order_version"]) if current else None,
         )
-
-    def persist_restarted_scheduling(self, command):
-        with self._connection.cursor() as cursor:
-            result = persist_scheduling_replacement(cursor, command)
-            persist_scheduling_assignment_rate_snapshots(cursor, command, result)
-            cursor.execute(
-                "UPDATE confirmed_service_date_versions SET scheduling_version=%s "
-                "WHERE case_no=%s AND is_current=1",
-                (result.scheduling_version, command.candidate.case_no),
-            )
-            if cursor.rowcount != 1:
-                raise RuntimeError("confirmed_service_date_version_conflict")
-        return result.scheduling_version
 
     def load_service_dates(
         self, case_no: str, *, for_update: bool = False
@@ -79,6 +78,169 @@ class MySqlServiceDateConfirmationRepository:
         """Expose the owner root through the shared typed M3 read port."""
 
         return self.load(case_no, lock=for_update)
+
+    def lock_arrangement_staff(self, staff_ids):
+        if staff_ids != tuple(sorted(set(staff_ids))) or not staff_ids:
+            raise ValueError("historical_arrangement_staff_set_invalid_blocked")
+        placeholders = ",".join("%s" for _ in staff_ids)
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT s.id,s.status,COALESCE(l.lifecycle_state,'active') AS lifecycle_state "
+                "FROM staff s LEFT JOIN staff_lifecycle_states l ON l.staff_id=s.id "
+                f"WHERE s.id IN ({placeholders}) ORDER BY s.id FOR UPDATE",
+                staff_ids,
+            )
+            rows = tuple(cursor.fetchall())
+        if tuple(int(row["id"]) for row in rows) != staff_ids or any(
+            row["status"] != "active" or row["lifecycle_state"] == "retired"
+            for row in rows
+        ):
+            raise ValueError("historical_arrangement_staff_ineligible_blocked")
+
+    def validate_arrangement_availability(self, candidate, *, lock):
+        occupied = {
+            (assignment.staff_id, assignment.assigned_start_date + timedelta(days=offset))
+            for assignment in candidate.assignments
+            for offset in range(
+                (assignment.assigned_end_date - assignment.assigned_start_date).days + 1
+            )
+        }
+        occupied.update(
+            (buffer.staff_id, day)
+            for buffer in candidate.buffers if buffer.active
+            for day in buffer.dates
+        )
+        staff_ids = tuple(sorted({item.staff_id for item in candidate.assignments}))
+        first = min(day for _, day in occupied)
+        last = max(day for _, day in occupied)
+        placeholders = ",".join("%s" for _ in staff_ids)
+        suffix = " FOR UPDATE" if lock else ""
+        queries = (
+            (
+                "SELECT o.staff_id,o.occupancy_date,g.case_no "
+                "FROM scheduling_effective_occupancy o "
+                "JOIN scheduling_generations g ON g.id=o.generation_id "
+                f"WHERE o.staff_id IN ({placeholders}) "
+                "AND o.occupancy_date BETWEEN %s AND %s" + suffix,
+            ),
+            (
+                "SELECT d.staff_id,d.lock_date AS occupancy_date,p.case_no "
+                "FROM caregiver_availability_lock_days d "
+                "JOIN caregiver_availability_locks l ON l.id=d.lock_id "
+                "JOIN caregiver_matching_plan_segments s ON s.id=d.segment_id "
+                "JOIN caregiver_matching_plans p ON p.id=s.plan_id "
+                f"WHERE d.staff_id IN ({placeholders}) "
+                "AND d.lock_date BETWEEN %s AND %s "
+                "AND d.active_marker=1 AND l.is_active=1" + suffix,
+            ),
+            (
+                "SELECT d.staff_id,d.occupancy_date,b.case_no "
+                "FROM scheduling_leave_occupancy_days d "
+                "JOIN scheduling_leave_substitution_batches b ON b.batch_key=d.batch_key "
+                f"WHERE d.staff_id IN ({placeholders}) "
+                "AND d.occupancy_date BETWEEN %s AND %s AND d.active_marker=1" + suffix,
+            ),
+        )
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT s.id,s.status,COALESCE(l.lifecycle_state,'active') AS lifecycle_state "
+                "FROM staff s LEFT JOIN staff_lifecycle_states l ON l.staff_id=s.id "
+                f"WHERE s.id IN ({placeholders}) ORDER BY s.id" + suffix,
+                staff_ids,
+            )
+            staff_rows = tuple(cursor.fetchall())
+            if tuple(int(row["id"]) for row in staff_rows) != staff_ids or any(
+                row["status"] != "active" or row["lifecycle_state"] == "retired"
+                for row in staff_rows
+            ):
+                raise ValueError("historical_arrangement_staff_ineligible_blocked")
+            for (sql,) in queries:
+                cursor.execute(sql, (*staff_ids, first, last))
+                for row in cursor.fetchall():
+                    if (
+                        int(row["staff_id"]), row["occupancy_date"]
+                    ) in occupied and str(row["case_no"]) != candidate.case_no:
+                        raise ValueError("historical_arrangement_occupancy_conflict")
+
+    def arrangement_rate_fingerprint(self, candidate, *, lock):
+        with self._connection.cursor() as cursor:
+            policies = load_historical_restart_arrangement_rates(
+                cursor, candidate.case_no, candidate.assignments, lock=lock,
+            )
+        return fingerprint_payload({"rates": policies})
+
+    def replay_arrangement(self, key, command_fingerprint, *, lock):
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT command_family,command_fingerprint,preview_fingerprint,"
+                "result_snapshot FROM scheduling_command_receipts "
+                "WHERE idempotency_key=%s" + (" FOR UPDATE" if lock else ""),
+                (key,),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        if (
+            row["command_family"] != "orders_historical_restart_arrangement"
+            or row["command_fingerprint"] != command_fingerprint
+        ):
+            raise ValueError("historical_arrangement_idempotency_conflict")
+        stored = row["result_snapshot"]
+        payload = json.loads(stored) if isinstance(stored, str) else stored
+        if (
+            not isinstance(payload, dict)
+            or not isinstance(payload.get("assignment_ids"), dict)
+            or not isinstance(payload.get("case_no"), str)
+            or not payload["case_no"]
+            or not isinstance(payload.get("scheduling_version"), int)
+            or not isinstance(payload.get("generation_number"), int)
+            or not payload["assignment_ids"]
+            or any(
+                not isinstance(value, int) or value <= 0
+                for value in payload["assignment_ids"].values()
+            )
+        ):
+            raise ValueError("historical_arrangement_receipt_integrity_blocked")
+        assignment_ids = payload["assignment_ids"]
+        return HistoricalRestartArrangementReceipt(
+            str(payload["case_no"]),
+            int(payload["scheduling_version"]),
+            int(payload["generation_number"]),
+            tuple(int(value) for _, value in sorted(assignment_ids.items())),
+            PreviewFingerprint(str(row["preview_fingerprint"])),
+        )
+
+    def persist_arrangement(self, command):
+        with self._connection.cursor() as cursor:
+            policies = load_historical_restart_arrangement_rates(
+                cursor, command.candidate.case_no,
+                command.candidate.assignments, lock=True,
+            )
+            try:
+                result = persist_scheduling_replacement(cursor, command)
+            except IntegrityError as error:
+                if error.args and error.args[0] == 1062:
+                    detail = str(error)
+                    if (
+                        "uq_staff_schedule_effective_date" in detail
+                        or "scheduling_effective_occupancy.PRIMARY" in detail
+                    ):
+                        raise ValueError("historical_arrangement_occupancy_conflict") from error
+                    if (
+                        "uq_scheduling_command_receipt_key" in detail
+                        or "uq_scheduling_rebuild_idempotency" in detail
+                    ):
+                        raise ValueError("historical_arrangement_idempotency_conflict") from error
+                raise
+            persist_historical_restart_arrangement_rates(cursor, policies, result)
+        resolved = result.assignment_resolution.assignment_id_by_candidate_key
+        return HistoricalRestartArrangementReceipt(
+            command.candidate.case_no,
+            result.scheduling_version,
+            command.candidate.generation_number,
+            tuple(resolved[item.candidate_key] for item in command.candidate.assignments),
+            command.preview_fingerprint,
+        )
 
     def replay(self, idempotency_key, command_fingerprint, *, actor, reason, for_update=False):
         with self._connection.cursor() as cursor:

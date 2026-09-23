@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import date, timedelta
 import json
 from typing import Any
 
 from pymysql.err import IntegrityError
 
 from domains.orders.actual_start import (
+    ActualStartAssignmentFacts,
     ActualStartCandidateKind,
     ActualStartReconfirmationAction,
     ActualStartReconfirmationFacts,
     ActualStartReconfirmationState,
+    calculate_progressive_segment_service_dates,
+    date_bound_manual_overrides,
 )
 from domains.orders.lifecycle import OrderLifecycleStatus
 from shared_kernel.errors import ErrorCategory, TypedError
@@ -23,7 +27,7 @@ from subsystems.orders.order_lifecycle_control_commands import (
     ActualStartReconfirmationConfirmedCommand,
     apply_order_lifecycle_control_command,
 )
-from shared_kernel.fingerprints import PreviewFingerprint
+from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.identities import IdempotencyKey
 from subsystems.orders.actual_start_workflow import (
     ActualStartApplyRequest,
@@ -47,11 +51,23 @@ from subsystems.orders.terms_workflow import (
 
 from .order_lifecycle_impact_writer import persist_order_lifecycle_impact
 from .order_terms_read_model import (
-    load_locked_facts,
-    load_preview_facts,
+    load_actual_start_locked_facts,
+    load_actual_start_preview_facts,
     preflight_staff_ids,
 )
 from .scheduling_replacement_writer import persist_scheduling_replacement
+from .scheduling_holiday_query import MySqlSchedulingHolidayQuery
+from .historical_actual_start_date_planner import _canonical_service_mode
+from .assignment_plan_repository import (
+    _effective_occupancy_rows,
+    _waiting_lock_rows,
+    _leave_occupancy_rows,
+)
+from .payroll_terms_writer import (
+    load_actual_start_source_rate_snapshots,
+    persist_actual_start_rate_snapshot_carry,
+    persist_scheduling_assignment_rate_snapshots,
+)
 
 _COMMAND_FAMILY = "orders_actual_start"
 
@@ -134,7 +150,7 @@ class MySqlOrderActualStartRepository:
 
     def load_for_preview(self, case_no: str) -> ActualStartWorkflowContext:
         with self._connection.cursor() as cursor:
-            shared_facts = load_preview_facts(cursor, case_no)
+            shared_facts = load_actual_start_preview_facts(cursor, case_no)
             reconfirmation = _load_reconfirmation_facts(
                 cursor,
                 case_no,
@@ -152,7 +168,7 @@ class MySqlOrderActualStartRepository:
         preflight_staff_ids: tuple[int, ...],
     ) -> ActualStartWorkflowContext:
         with self._connection.cursor() as cursor:
-            shared_facts = load_locked_facts(
+            shared_facts = load_actual_start_locked_facts(
                 cursor,
                 case_no,
                 preflight_staff_ids,
@@ -163,6 +179,186 @@ class MySqlOrderActualStartRepository:
                 lock=True,
             )
         return ActualStartWorkflowContext(shared_facts, reconfirmation)
+
+    def calculate_progressive_service_dates(
+        self,
+        case_no: str,
+        new_date: date,
+        assignments: tuple[ActualStartAssignmentFacts, ...],
+        *,
+        lock: bool,
+    ) -> tuple[tuple[date, ...], str]:
+        total_days = sum(len(item.service_dates) for item in assignments)
+        if total_days <= 0:
+            raise ValueError("scheduling_assignments_required")
+        horizon_end = new_date + timedelta(days=total_days * 4 + 30)
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT c.service_type FROM orders o JOIN clients c ON c.id=o.client_id "
+                "WHERE o.case_no=%s" + (" FOR UPDATE" if lock else ""),
+                (case_no,),
+            )
+            row = cursor.fetchone()
+            if (
+                not isinstance(row, Mapping)
+                or not isinstance(row.get("service_type"), str)
+            ):
+                raise ValueError("actual_start_attendance_rules_missing")
+            service_mode = _canonical_service_mode(row["service_type"])
+            if service_mode not in {"休周六", "休周日", "週休2日", "連續服務"}:
+                raise ValueError("actual_start_attendance_rules_missing")
+        holidays = MySqlSchedulingHolidayQuery(self._connection).query(
+            new_date, horizon_end, lock=lock,
+        )
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT id,version,service_day_count,service_date_fingerprint "
+                "FROM confirmed_service_date_versions "
+                "WHERE case_no=%s AND is_current=1" + (" FOR UPDATE" if lock else ""),
+                (case_no,),
+            )
+            confirmed = cursor.fetchone()
+            if confirmed is not None:
+                cursor.execute(
+                    "SELECT service_date FROM confirmed_service_date_days "
+                    "WHERE confirmed_version_id=%s ORDER BY ordinal"
+                    + (" FOR UPDATE" if lock else ""),
+                    (confirmed["id"],),
+                )
+                confirmed_dates = tuple(row["service_date"] for row in cursor.fetchall())
+                if (
+                    len(confirmed_dates) != int(confirmed["service_day_count"])
+                    or confirmed_dates != tuple(sorted(set(confirmed_dates)))
+                ):
+                    raise ValueError("actual_start_confirmed_dates_invalid")
+            else:
+                confirmed_dates = ()
+            cursor.execute(
+                "SELECT d.id,d.outcome_id,d.staff_id,d.occupancy_date,"
+                "o.resolution_type,o.resulting_staff_id,o.resulting_service_date "
+                "FROM scheduling_aggregates g "
+                "JOIN scheduling_leave_occupancy_days d "
+                "ON d.generation_id=g.effective_generation_id "
+                "JOIN scheduling_leave_substitution_outcomes o ON o.id=d.outcome_id "
+                "JOIN scheduling_leave_substitution_batches b ON b.batch_key=d.batch_key "
+                "WHERE g.case_no=%s AND b.case_no=g.case_no AND d.active_marker=1 "
+                "ORDER BY d.id" + (" FOR UPDATE" if lock else ""),
+                (case_no,),
+            )
+            active_leave_rows = tuple(cursor.fetchall())
+        unavailable_staff_dates = tuple(sorted({
+            (int(row["staff_id"]), row["occupancy_date"])
+            for row in active_leave_rows
+        }))
+        manual_work_staff_dates, manual_rest_staff_dates = date_bound_manual_overrides(
+            assignments,
+            service_mode,
+            tuple(item.holiday_date for item in holidays.holidays),
+            confirmed_dates,
+            new_date,
+            horizon_end,
+        )
+        dates = calculate_progressive_segment_service_dates(
+            new_date,
+            assignments,
+            service_mode,
+            tuple(item.holiday_date for item in holidays.holidays),
+            unavailable_staff_dates,
+            manual_work_staff_dates,
+            manual_rest_staff_dates,
+        )
+        result_staff_dates = set()
+        offset = 0
+        for assignment in assignments:
+            count = len(assignment.service_dates)
+            result_staff_dates.update(
+                (assignment.staff_id, day) for day in dates[offset:offset + count]
+            )
+            offset += count
+        if any(
+            (int(row["resulting_staff_id"]), row["resulting_service_date"])
+            not in result_staff_dates
+            for row in active_leave_rows
+        ):
+            raise ValueError("actual_start_leave_outcome_conflict")
+        if dates[-1] > horizon_end:
+            raise ValueError("actual_start_calendar_horizon_exceeded")
+        calculation_version = fingerprint_payload({
+            "service_mode": service_mode,
+            "holiday_version": holidays.holiday_version,
+            "confirmed_service_date_version": (
+                None if confirmed is None else int(confirmed["version"])
+            ),
+            "confirmed_service_date_fingerprint": (
+                None if confirmed is None else str(confirmed["service_date_fingerprint"])
+            ),
+            "confirmed_service_dates": [day.isoformat() for day in confirmed_dates],
+            "manual_work_staff_dates": [
+                (staff_id, day.isoformat()) for staff_id, day in manual_work_staff_dates
+            ],
+            "manual_rest_staff_dates": [
+                (staff_id, day.isoformat()) for staff_id, day in manual_rest_staff_dates
+            ],
+            "active_leave_outcomes": [
+                {
+                    "occupancy_id": int(row["id"]),
+                    "outcome_id": int(row["outcome_id"]),
+                    "staff_id": int(row["staff_id"]),
+                    "occupancy_date": row["occupancy_date"].isoformat(),
+                    "resolution_type": row["resolution_type"],
+                    "resulting_staff_id": int(row["resulting_staff_id"]),
+                    "resulting_service_date": row["resulting_service_date"].isoformat(),
+                }
+                for row in active_leave_rows
+            ],
+            "horizon_start": new_date.isoformat(),
+            "horizon_end": horizon_end.isoformat(),
+        }).value
+        return dates, calculation_version
+
+    def validate_replacement_rate_snapshots(
+        self, assignments: tuple, *, lock: bool,
+    ) -> None:
+        with self._connection.cursor() as cursor:
+            load_actual_start_source_rate_snapshots(
+                cursor, assignments, lock=lock,
+            )
+
+    def validate_replacement_availability(self, candidate, *, lock):
+        occupied = {
+            (assignment.staff_id, assignment.assigned_start_date + timedelta(days=offset))
+            for assignment in candidate.assignments
+            for offset in range(
+                (assignment.assigned_end_date - assignment.assigned_start_date).days + 1
+            )
+        }
+        staff_ids = tuple(sorted({item.staff_id for item in candidate.assignments}))
+        with self._connection.cursor() as cursor:
+            placeholders = ",".join("%s" for _ in staff_ids)
+            cursor.execute(
+                "SELECT s.id,s.status,COALESCE(l.lifecycle_state,'active') AS lifecycle_state "
+                "FROM staff s LEFT JOIN staff_lifecycle_states l ON l.staff_id=s.id "
+                f"WHERE s.id IN ({placeholders}) ORDER BY s.id"
+                + (" FOR UPDATE" if lock else ""),
+                staff_ids,
+            )
+            staff_rows = tuple(cursor.fetchall())
+            if tuple(int(row["id"]) for row in staff_rows) != staff_ids or any(
+                row["status"] != "active" or row["lifecycle_state"] == "retired"
+                for row in staff_rows
+            ):
+                raise ValueError("actual_start_staff_ineligible_blocked")
+            rows = (
+                *_effective_occupancy_rows(cursor, staff_ids, lock),
+                *_waiting_lock_rows(cursor, staff_ids, lock),
+                *_leave_occupancy_rows(cursor, staff_ids, lock),
+            )
+        if any(
+            (int(row["staff_id"]), row["occupancy_date"]) in occupied
+            and str(row["case_no"]) != candidate.case_no
+            for row in rows
+        ):
+            raise ValueError("actual_start_staff_schedule_conflict")
 
     def claim_actual_start_command(
         self,
@@ -200,9 +396,19 @@ class MySqlOrderActualStartRepository:
         self,
         command: SchedulingReplacementCommand,
     ) -> SchedulingReplacementResult:
+        if command.command_family not in {
+            "orders_actual_start_rebuild",
+            "orders_historical_actual_start_bootstrap",
+        }:
+            raise ValueError("actual_start_scheduling_command_family_invalid")
         with self._connection.cursor() as cursor:
             try:
-                return persist_scheduling_replacement(cursor, command)
+                result = persist_scheduling_replacement(cursor, command)
+                if command.command_family == "orders_actual_start_rebuild":
+                    persist_actual_start_rate_snapshot_carry(cursor, command, result)
+                elif command.command_family == "orders_historical_actual_start_bootstrap":
+                    persist_scheduling_assignment_rate_snapshots(cursor, command, result)
+                return result
             except IntegrityError as error:
                 if _is_effective_staff_date_conflict(error):
                     raise ActualStartWorkflowError(

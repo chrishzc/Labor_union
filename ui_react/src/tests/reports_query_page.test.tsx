@@ -56,7 +56,7 @@ describe('ReportsPage query-only presentation', () => {
     expect(screen.getAllByText('NT$ 12,000').length).toBeGreaterThan(0);
     expect(screen.getByText('2026-01-01～2026-12-31')).toBeInTheDocument();
     expect(screen.queryByText(/年初至本週/)).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('tab', { name: '每周服務中說明' }));
+    fireEvent.click(screen.getByRole('tab', { name: '每週服務中與工時' }));
     expect(screen.getByText('王**')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '下載營運報表 XLSX' }));
