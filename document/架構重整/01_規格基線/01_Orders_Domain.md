@@ -155,7 +155,8 @@ Preview 輸入接受 Terms 根事實意圖。依 Issue #326 的本機修復授�
 - before／after；
 - assignment 與 schedule 重建候選；
 - planned／actual end、hours、樓層費，以及本次實際受影響的兩端未核銷投影差異；
-- blockers、aggregate version、fingerprint，以及 server 衍生的 `requires_formal_apply`。
+- blockers、aggregate version、fingerprint，以及 server 衍生的 `requires_formal_apply`；
+- 排班 candidate 與 current effective assignments 的日期／人員形狀是否真的不同。
 
 Apply：
 
@@ -165,7 +166,8 @@ Apply：
 3. 以相同 candidate builder 重建 Preview。
 4. 驗證 fingerprint。
 5. 若變更不形成 Scheduling、confirmed service dates、Finance、Payroll 或 lifecycle 正式影響，走普通保存：只更新 Orders Terms 與 aggregate version，回傳當次 HTTP result；不要求 reason／idempotency key，不建立 command claim、Terms／lifecycle event、audit／outbox、snapshot／history 或永久 receipt，也不呼叫其他 owner writer。
-6. 若 `requires_formal_apply=true`，才要求 reason 與 idempotency key、追加 Terms event、委派 Scheduling replacement、按實際影響委派 Finance／Payroll、重評 lifecycle，並保存 audit／outbox／永久 receipt。
+6. 若 `requires_formal_apply=true`，才要求 reason 與 idempotency key、追加 Terms event、按實際影響委派 Finance／Payroll、重評 lifecycle，並保存 audit／outbox／永久 receipt。只有 assignment identity／人員／日期／區間真的改變時才委派 Scheduling replacement；單純費用、每日時數、下廚需求等不改變排班形狀的正式異動沿用 current generation 與真實 assignment identity，不增加 Scheduling version、generation、rebuild event、通知失效 outbox 或 Scheduling receipt。
+   此時 Terms receipt 的 `scheduling_command_receipt_id` 為 `NULL`，但仍保存 current scheduling version／generation；不得建立空 generation 或虛構 Scheduling receipt 補舊格式。
 7. 兩種分支皆由同一 outer Unit of Work 單一 commit；普通保存若 transport 結果不明，client 必須重新 Query 比對 current Orders version／Terms，不得以同一或新 key 盲目重播。
 
 每日服務時間 tuple 契約：

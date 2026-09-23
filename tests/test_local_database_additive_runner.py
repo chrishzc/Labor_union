@@ -27,6 +27,29 @@ def _historical_option_b_receipt() -> Path:
     )
 
 
+def test_altered_table_checksum_drift_requires_identical_full_rows(monkeypatch) -> None:
+    original = "a" * 64
+    changed = "b" * 64
+    baseline = {
+        "data_row_counts": {"terms": 2},
+        "data_fingerprints": {"terms": original},
+        "data_fingerprint_sha256": migration._local_data_fingerprint({"terms": original}),
+        "data_row_projections": {"terms": {"columns": ["id", "note"], "row_count": 2, "rows_sha256": "c" * 64}},
+    }
+    monkeypatch.setattr(migration, "_local_capture_backup_rows", lambda *_args: {
+        "data_row_counts": {"terms": 2},
+        "data_fingerprints": {"terms": changed},
+        "data_fingerprint_sha256": migration._local_data_fingerprint({"terms": changed}),
+    })
+    monkeypatch.setattr(migration, "_local_row_projection", lambda *_args: baseline["data_row_projections"]["terms"])
+    migration._local_verify_backup_rows(None, "source", baseline, altered_tables={"terms"})
+    with pytest.raises(migration.LocalAdditiveBlocked, match="fingerprint changed"):
+        migration._local_verify_backup_rows(None, "source", baseline)
+    monkeypatch.setattr(migration, "_local_row_projection", lambda *_args: {"columns": ["id", "note"], "row_count": 2, "rows_sha256": "d" * 64})
+    with pytest.raises(migration.LocalAdditiveBlocked, match="fingerprint changed"):
+        migration._local_verify_backup_rows(None, "source", baseline, altered_tables={"terms"})
+
+
 def _option_b_receipt(tmp_path: Path) -> Path:
     """Synthetic parser fixture only; never publish it as execution evidence."""
     receipt = json.loads(_historical_option_b_receipt().read_text(encoding="utf-8"))
@@ -121,6 +144,23 @@ def test_statement_classifier_allows_only_canonical_1044_nullability_widen() -> 
     with pytest.raises(migration.LocalAdditiveBlocked):
         migration._local_classify_statement(
             statements[0].replace("BIGINT UNSIGNED NULL", "BIGINT UNSIGNED NOT NULL")
+        )
+
+
+def test_statement_classifier_allows_only_canonical_1045_nullability_widen() -> None:
+    sql = (
+        migration.ROOT / "db" / "schema_parts" /
+        "1045_order_terms_optional_scheduling_receipt.sql"
+    ).read_text(encoding="utf-8")
+    statements = migration.split_sql(sql)
+
+    assert len(statements) == 1
+    assert migration._local_classify_statement(statements[0]) == (
+        "order_terms_scheduling_receipt_nullability_widen"
+    )
+    with pytest.raises(migration.LocalAdditiveBlocked):
+        migration._local_classify_statement(
+            statements[0].replace("BIGINT NULL", "BIGINT NOT NULL")
         )
 
 
@@ -940,7 +980,7 @@ def test_apply_keeps_fresh_snapshot_after_maintenance_lock(monkeypatch, tmp_path
     monkeypatch.setattr(
         migration, "_local_validate_backup", lambda *_args, **_kwargs: local_backup
     )
-    monkeypatch.setattr(migration, "_local_verify_backup_rows", lambda *_args: None)
+    monkeypatch.setattr(migration, "_local_verify_backup_rows", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(migration, "_local_append_event", lambda *_args, **_kwargs: {"sequence": 1})
     monkeypatch.setattr(migration, "_local_maintenance_lock", lambda *_args: Lock())
     monkeypatch.setattr(migration, "_schema_snapshot", schema_snapshot)

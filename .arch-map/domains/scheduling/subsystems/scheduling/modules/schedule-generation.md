@@ -5,7 +5,7 @@
 - subsystem: `scheduling`
 
 ## Responsibility
-從 current Scheduling generation facts 產生版本化 assignment／buffer candidate，並在尚無 assignment／buffer、正式服務日期或既有服務日時，將 Orders Terms 的開始日／服務天數影響表示為不虛構 segment 的空 generation。已有服務日期或排班事實時仍 fail closed，分別要求替換日期或正式重新分配。
+從 current Scheduling generation facts 產生版本化 assignment／buffer candidate。Orders Terms caller 必須先比對 candidate 與 current effective assignment 的 identity／人員／日期／區間形狀；形狀未變時 candidate 只供 Finance／Payroll 計算與真實 assignment identity mapping，不得持久化新 generation。尚無 assignment／buffer 時，開始日／服務天數 candidate 不虛構 segment；已有服務日期或排班事實時仍 fail closed，分別要求替換日期或正式重新分配。
 
 ## Implementation
 - primary:

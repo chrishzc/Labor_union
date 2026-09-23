@@ -35,7 +35,7 @@
 - cancelled assignment 保留歷史但完全排除目前投影。
 - 同案同日只有一個正式服務 owner；不支援半日或分時交接。
 - 全案有效正式服務量必須等於 Orders 契約服務量。
-- 全案條款變更重建全部有效 assignments；局部請假／代班只重建受影響 family，但仍重驗全案。
+- 全案條款變更只有在 current effective assignment 的 identity／人員／日期／區間形狀改變時才重建全部有效 assignments；費用、每日時數、下廚需求等不改變排班形狀的異動保留 current generation、assignment、schedule、buffer 與 occupancy。局部請假／代班只重建受影響 family，但仍重驗全案。
 - assignment 的整段連續區間都占用月嫂，休假不能被誤判為可接其他案件。
 - 一般洽談不占檔期；月嫂只表示承接意願，客戶接受推薦後仍由工會人員決定是否正式配對並以
   current confirmed service dates 建立 waiting-deposit lock。鎖定不要求月嫂先簽約或先形成

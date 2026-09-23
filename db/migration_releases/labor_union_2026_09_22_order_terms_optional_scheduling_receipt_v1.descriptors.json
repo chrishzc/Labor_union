@@ -1,0 +1,24 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-order-terms-optional-scheduling-receipt-2026-09-22-v1",
+  "descriptors": {
+    "1045_order_terms_optional_scheduling_receipt.sql": {
+      "tables": {},
+      "parent_columns": {
+        "order_terms_apply_receipts": {
+          "scheduling_command_receipt_id": {
+            "column_type": "bigint",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          }
+        }
+      },
+      "indexes": {},
+      "foreign_keys": {},
+      "checks": {},
+      "triggers": [],
+      "views": {}
+    }
+  }
+}

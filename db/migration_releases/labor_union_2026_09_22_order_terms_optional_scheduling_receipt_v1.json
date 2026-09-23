@@ -1,0 +1,61 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-order-terms-optional-scheduling-receipt-2026-09-22-v1",
+  "release_metadata": {
+    "release_name": "Labor Union Orders Terms optional Scheduling receipt",
+    "application_version": "order-terms-optional-scheduling-receipt-v1",
+    "published_at": "2026-09-22",
+    "description": "Allow a formal Terms receipt to retain the current Scheduling generation when no Scheduling replacement occurred"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": ["absent", "exact"],
+    "forbidden_owned_object_states": ["partial", "drift"],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-order-terms-optional-downstream-versions-2026-09-22-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1045_order_terms_optional_scheduling_receipt.sql",
+      "relative_path": "db/schema_parts/1045_order_terms_optional_scheduling_receipt.sql",
+      "sha256": "c9d537b1a7f0b62a29f3e76c48898051c9d086a7380c789e9308894f0a3d0a76",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "forward-only-after-no-replacement-receipt; discard-candidate-before-entry-switch",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "order-terms-scheduling-receipt-nullability-exact",
+      "phase": "post-schema",
+      "policy": "A Terms Apply receipt may omit its Scheduling command receipt only when Scheduling was not replaced",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": ["order-terms-optional-scheduling-receipt-v1"],
+    "required_restart_targets": ["api"],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": ["order-terms-scheduling-receipt-nullability-exact"]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_09_22_order_terms_optional_scheduling_receipt_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_09_22_order_terms_optional_scheduling_receipt_v1.descriptors.json",
+    "sha256": "72a9da00186d4d48e2130d0a0be9606d7d48816a867cd31a8033b1cd6bdea2e0",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": ["--single-transaction", "--routines", "--events", "--triggers", "--hex-blob"],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

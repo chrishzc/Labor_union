@@ -21721,3 +21721,8 @@ ALTER TABLE order_terms_apply_receipts
     MODIFY COLUMN client_finance_version BIGINT UNSIGNED NULL,
     MODIFY COLUMN payroll_version BIGINT UNSIGNED NULL;
 -- END SOURCE: db/schema_parts/227_order_terms_optional_downstream_versions.sql
+
+-- BEGIN SOURCE: db/schema_parts/228_order_terms_optional_scheduling_receipt.sql
+ALTER TABLE order_terms_apply_receipts
+    MODIFY COLUMN scheduling_command_receipt_id BIGINT NULL;
+-- END SOURCE: db/schema_parts/228_order_terms_optional_scheduling_receipt.sql

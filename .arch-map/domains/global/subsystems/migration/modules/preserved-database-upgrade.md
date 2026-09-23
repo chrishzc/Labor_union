@@ -88,6 +88,11 @@
   - `db/schema_parts/1044_order_terms_optional_downstream_versions.sql`
   - `db/migration_releases/labor_union_2026_09_22_order_terms_optional_downstream_versions_v1.json`
   - `db/migration_releases/labor_union_2026_09_22_order_terms_optional_downstream_versions_v1.descriptors.json`
+- current order-terms optional Scheduling receipt release:
+  - `db/schema_parts/228_order_terms_optional_scheduling_receipt.sql` (fresh bootstrap successor)
+  - `db/schema_parts/1045_order_terms_optional_scheduling_receipt.sql`
+  - `db/migration_releases/labor_union_2026_09_22_order_terms_optional_scheduling_receipt_v1.json`
+  - `db/migration_releases/labor_union_2026_09_22_order_terms_optional_scheduling_receipt_v1.descriptors.json`
 
 ## Contracts
 - Source read-only、candidate identity、release classification、backup／journal／resume及

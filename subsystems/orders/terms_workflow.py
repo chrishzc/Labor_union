@@ -24,6 +24,8 @@ from domains.orders.terms import (
     validate_terms_change,
 )
 from domains.scheduling.generation import (
+    AssignmentIdentityResolution,
+    EmptyAssignmentIdentityResolution,
     build_generation_candidate,
     build_preassignment_cooking_correction_candidate,
     build_preassignment_terms_candidate,
@@ -98,6 +100,7 @@ class OrderTermsPreview:
     planned_end_date: Any
     confirmed_service_date_candidate: ConfirmedServiceDateCandidate | None
     confirmed_service_date_current_version: int | None
+    scheduling_replacement_required: bool
     fingerprint: Any
     requires_formal_apply: bool = True
 
@@ -179,6 +182,7 @@ class PayrollImpactPersistenceCommand:
     correlation_id: Any
     source_event_id: int
     special_pay_events: tuple[PayrollSpecialPayEventCandidate, ...] = ()
+    reuse_existing_assignments: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,7 +203,7 @@ class OrderTermsReceiptPersistenceCommand:
     key: Any
     stored_receipt: StoredTermsReceipt
     terms_event_id: int
-    scheduling_receipt_id: int
+    scheduling_receipt_id: int | None
     lifecycle_event_id: int
     correlation_id: Any
 
@@ -382,19 +386,25 @@ class OrderTermsWorkflow:
 
     def _persist(self, request, preview, command_fingerprint, receipt):
         event_id = self._repository.append_terms_event(request, preview)
-        scheduling_result = self._repository.replace_scheduling_generation(
-            SchedulingReplacementCommand(
-                candidate=preview.scheduling,
-                command_family="orders_terms_rebuild",
-                expected_order_version=preview.order_version,
-                command_fingerprint=command_fingerprint,
-                preview_fingerprint=preview.fingerprint,
-                idempotency_key=request.idempotency_key,
-                actor=request.actor,
-                reason=request.reason,
-                correlation_id=request.correlation_id,
+        scheduling_receipt_id = None
+        if preview.scheduling_replacement_required:
+            scheduling_result = self._repository.replace_scheduling_generation(
+                SchedulingReplacementCommand(
+                    candidate=preview.scheduling,
+                    command_family="orders_terms_rebuild",
+                    expected_order_version=preview.order_version,
+                    command_fingerprint=command_fingerprint,
+                    preview_fingerprint=preview.fingerprint,
+                    idempotency_key=request.idempotency_key,
+                    actor=request.actor,
+                    reason=request.reason,
+                    correlation_id=request.correlation_id,
+                )
             )
-        )
+            scheduling_receipt_id = scheduling_result.scheduling_receipt_id
+            assignment_resolution = scheduling_result.assignment_resolution
+        else:
+            assignment_resolution = _existing_assignment_resolution(preview.scheduling)
         if preview.client_finance_impact is not None and _client_finance_impact_mutates(preview.client_finance_impact):
             self._repository.persist_client_finance_impact(
                 ClientFinanceImpactPersistenceCommand(
@@ -411,12 +421,15 @@ class OrderTermsWorkflow:
             self._repository.persist_payroll_impact(
                 PayrollImpactPersistenceCommand(
                     candidate=preview.payroll_impact,
-                    assignment_resolution=scheduling_result.assignment_resolution,
+                    assignment_resolution=assignment_resolution,
                     idempotency_key=request.idempotency_key,
                     actor=request.actor,
                     reason=request.reason,
                     correlation_id=request.correlation_id,
                     source_event_id=event_id,
+                    reuse_existing_assignments=(
+                        not preview.scheduling_replacement_required
+                    ),
                 )
             )
         lifecycle_event_id = self._repository.persist_lifecycle_impact(
@@ -458,7 +471,7 @@ class OrderTermsWorkflow:
                 key=request.idempotency_key,
                 stored_receipt=StoredTermsReceipt(command_fingerprint, receipt),
                 terms_event_id=event_id,
-                scheduling_receipt_id=scheduling_result.scheduling_receipt_id,
+                scheduling_receipt_id=scheduling_receipt_id,
                 lifecycle_event_id=lifecycle_event_id,
                 correlation_id=request.correlation_id,
             )
@@ -562,16 +575,22 @@ def _preview_result(
         facts.order.terms,
         proposed_terms,
     )
+    scheduling_replacement_required = _scheduling_replacement_required(
+        facts.scheduling,
+        scheduling,
+        facts.planned_service_dates,
+    )
     confirmed_service_date_candidate = _confirmed_service_date_candidate(
         facts,
         proposed_terms,
         scheduling,
+        scheduling_replacement_required,
         replacement_service_dates,
     )
     if replacement_service_dates is not None:
         planned_end_date = replacement_service_dates[-1]
     requires_formal_apply = _requires_formal_apply(
-        facts,
+        scheduling_replacement_required,
         client_finance,
         payroll,
         lifecycle,
@@ -598,6 +617,7 @@ def _preview_result(
         planned_end_date=planned_end_date,
         confirmed_service_date_candidate=confirmed_service_date_candidate,
         confirmed_service_date_current_version=facts.confirmed_service_date_version,
+        scheduling_replacement_required=scheduling_replacement_required,
         requires_formal_apply=requires_formal_apply,
         fingerprint=fingerprint_payload(
             _preview_fingerprint_payload(
@@ -609,6 +629,7 @@ def _preview_result(
                 lifecycle,
                 planned_end_date,
                 confirmed_service_date_candidate,
+                scheduling_replacement_required,
             )
         ),
     )
@@ -623,6 +644,7 @@ def _preview_fingerprint_payload(
     lifecycle,
     planned_end_date,
     confirmed_service_date_candidate,
+    scheduling_replacement_required,
 ):
     return {
         "case_no": facts.order.case_no,
@@ -638,13 +660,14 @@ def _preview_fingerprint_payload(
             facts.payroll.payroll_version if facts.payroll is not None else None
         ),
         "scheduling": _scheduling_payload(scheduling),
+        "scheduling_replacement_required": scheduling_replacement_required,
         "client_finance": (
             client_finance.fingerprint.value if client_finance is not None else None
         ),
         "payroll": payroll.fingerprint.value if payroll is not None else None,
         "lifecycle": lifecycle.fingerprint.value,
         "requires_formal_apply": _requires_formal_apply(
-            facts,
+            scheduling_replacement_required,
             client_finance,
             payroll,
             lifecycle,
@@ -677,12 +700,12 @@ def _build_receipt(preview):
     assignments = preview.scheduling.assignments
     scheduling_version = (
         preview.scheduling.resulting_aggregate_version
-        if preview.requires_formal_apply
+        if preview.scheduling_replacement_required
         else preview.scheduling_version
     )
     scheduling_generation = (
         preview.scheduling.generation_number
-        if preview.requires_formal_apply
+        if preview.scheduling_replacement_required
         else preview.scheduling_generation
     )
     return OrderTermsReceipt(
@@ -706,17 +729,23 @@ def _build_receipt(preview):
             and preview.lifecycle_impact.service_data_lock_should_exist
             and not preview.lifecycle_impact.service_data_lock_was_present
         ),
-        preview.scheduling.cancelled_assignment_ids if preview.requires_formal_apply else (),
-        tuple(item.candidate_key for item in assignments) if preview.requires_formal_apply else (),
-        sum(len(item.service_dates) for item in assignments) if preview.requires_formal_apply else 0,
-        sum(item.actual_hours for item in assignments) if preview.requires_formal_apply else 0,
+        preview.scheduling.cancelled_assignment_ids if preview.scheduling_replacement_required else (),
+        tuple(item.candidate_key for item in assignments) if preview.scheduling_replacement_required else (),
+        sum(len(item.service_dates) for item in assignments) if preview.scheduling_replacement_required else 0,
+        sum(item.actual_hours for item in assignments) if preview.scheduling_replacement_required else 0,
         preview.fingerprint,
     )
 
 
-def _requires_formal_apply(facts, client_finance, payroll, lifecycle, confirmed_dates):
+def _requires_formal_apply(
+    scheduling_replacement_required,
+    client_finance,
+    payroll,
+    lifecycle,
+    confirmed_dates,
+):
     return bool(
-        facts.scheduling.segments
+        scheduling_replacement_required
         or confirmed_dates is not None
         or (client_finance is not None and _client_finance_impact_mutates(client_finance))
         or (payroll is not None and _payroll_impact_mutates(payroll))
@@ -724,6 +753,44 @@ def _requires_formal_apply(facts, client_finance, payroll, lifecycle, confirmed_
         or lifecycle.service_data_lock_should_exist != lifecycle.service_data_lock_was_present
         or lifecycle.alert_codes
     )
+
+
+def _scheduling_replacement_required(facts, candidate, planned_service_dates):
+    segments = tuple(sorted(facts.segments, key=lambda item: item.sequence))
+    assignments = tuple(sorted(candidate.assignments, key=lambda item: item.sequence))
+    if len(segments) != len(assignments):
+        return True
+    offset = 0
+    for segment, assignment in zip(segments, assignments, strict=True):
+        current_dates = segment.official_service_dates
+        if not current_dates:
+            current_dates = planned_service_dates[
+                offset : offset + segment.service_day_count
+            ]
+        offset += segment.service_day_count
+        if (
+            assignment.source_assignment_id != segment.assignment_id
+            or assignment.staff_id != segment.staff_id
+            or assignment.sequence != segment.sequence
+            or assignment.assigned_start_date != segment.assigned_start_date
+            or assignment.assigned_end_date != segment.assigned_end_date
+            or assignment.service_dates != current_dates
+        ):
+            return True
+    return False
+
+
+def _existing_assignment_resolution(candidate):
+    identities = {
+        assignment.candidate_key: assignment.source_assignment_id
+        for assignment in candidate.assignments
+        if assignment.source_assignment_id is not None
+    }
+    if not identities:
+        return EmptyAssignmentIdentityResolution()
+    if len(identities) != len(candidate.assignments):
+        raise ValueError("existing assignment identity resolution is incomplete")
+    return AssignmentIdentityResolution(identities)
 
 
 def _planned_end_date(
@@ -748,12 +815,23 @@ def _planned_end_date(
     return current_planned_end_date + day_shift + timedelta(days=service_day_delta)
 
 
-def _confirmed_service_date_candidate(facts, proposed_terms, scheduling, replacement_dates=None):
+def _confirmed_service_date_candidate(
+    facts,
+    proposed_terms,
+    scheduling,
+    scheduling_replacement_required,
+    replacement_dates=None,
+):
+    scheduling_version = (
+        scheduling.resulting_aggregate_version
+        if scheduling_replacement_required
+        else facts.scheduling.aggregate_version
+    )
     if replacement_dates is not None:
         return ConfirmedServiceDateCandidate(
             case_no=facts.order.case_no,
             order_version=facts.order.version + 1,
-            scheduling_version=scheduling.resulting_aggregate_version,
+            scheduling_version=scheduling_version,
             service_dates=replacement_dates,
             contracted_service_days=proposed_terms.service_days,
             current_confirmed_version=facts.confirmed_service_date_version,
@@ -774,7 +852,7 @@ def _confirmed_service_date_candidate(facts, proposed_terms, scheduling, replace
     return ConfirmedServiceDateCandidate(
         case_no=facts.order.case_no,
         order_version=facts.order.version + 1,
-        scheduling_version=scheduling.resulting_aggregate_version,
+        scheduling_version=scheduling_version,
         service_dates=shifted_dates,
         contracted_service_days=proposed_terms.service_days,
     )

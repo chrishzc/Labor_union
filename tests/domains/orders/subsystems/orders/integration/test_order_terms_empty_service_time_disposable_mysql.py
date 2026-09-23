@@ -156,6 +156,123 @@ def _seed(connection) -> None:
     connection.commit()
 
 
+def _seed_effective_assignment(connection) -> int:
+    service_dates = tuple(date(2026, 10, day) for day in range(1, 6))
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO staff(name,status) VALUES (%s,'active')",
+            ("Issue 338 合成月嫂",),
+        )
+        staff_id = int(cursor.lastrowid)
+        cursor.execute(
+            "INSERT INTO scheduling_generations "
+            "(case_no,generation_number,resulting_aggregate_version,status,effective_marker,"
+            "created_by,change_reason) VALUES (%s,1,1,'effective',1,%s,%s)",
+            (_CASE_NO, "issue338-acceptance", "initial effective assignment"),
+        )
+        generation_id = int(cursor.lastrowid)
+        cursor.execute(
+            "UPDATE scheduling_aggregates SET aggregate_version=1,generation_counter=1,"
+            "effective_generation_id=%s WHERE case_no=%s",
+            (generation_id, _CASE_NO),
+        )
+        assert cursor.rowcount == 1
+        cursor.execute(
+            "INSERT INTO case_staff_assignments "
+            "(case_no,generation_id,candidate_key,staff_id,assignment_sequence,"
+            "assigned_start_date,assigned_end_date,floor_fee_allocated,status) "
+            "VALUES (%s,%s,%s,%s,1,%s,%s,0,'planned')",
+            (
+                _CASE_NO,
+                generation_id,
+                f"{_CASE_NO}:g1:a1",
+                staff_id,
+                service_dates[0],
+                service_dates[-1],
+            ),
+        )
+        assignment_id = int(cursor.lastrowid)
+        for service_date in service_dates:
+            cursor.execute(
+                "INSERT INTO staff_schedule "
+                "(case_no,staff_id,assignment_id,generation_id,work_date,is_work_day,"
+                "is_double_pay,effective_marker) VALUES (%s,%s,%s,%s,%s,1,0,1)",
+                (_CASE_NO, staff_id, assignment_id, generation_id, service_date),
+            )
+            cursor.execute(
+                "INSERT INTO scheduling_effective_occupancy "
+                "(staff_id,occupancy_date,generation_id,assignment_id,occupancy_type) "
+                "VALUES (%s,%s,%s,%s,'assignment_interval')",
+                (staff_id, service_date, generation_id, assignment_id),
+            )
+        for day in range(6, 13):
+            buffer_date = date(2026, 10, day)
+            cursor.execute(
+                "INSERT INTO scheduling_buffer_days "
+                "(generation_id,assignment_id,staff_id,buffer_date,status,active_marker) "
+                "VALUES (%s,%s,%s,%s,'active',1)",
+                (generation_id, assignment_id, staff_id, buffer_date),
+            )
+            cursor.execute(
+                "INSERT INTO scheduling_effective_occupancy "
+                "(staff_id,occupancy_date,generation_id,assignment_id,occupancy_type) "
+                "VALUES (%s,%s,%s,%s,'buffer')",
+                (staff_id, buffer_date, generation_id, assignment_id),
+            )
+        cursor.execute(
+            "INSERT INTO assignment_payroll_rate_snapshots "
+            "(assignment_id,policy_version,policy_kind,hourly_rate_ntd,source_identity_status) "
+            "VALUES (%s,'issue337-approved-rates-v1','citizen',300,'fixture')",
+            (assignment_id,),
+        )
+    connection.commit()
+    return assignment_id
+
+
+def _scheduling_snapshot(connection):
+    connection.commit()
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT aggregate_version,generation_counter,effective_generation_id "
+            "FROM scheduling_aggregates WHERE case_no=%s",
+            (_CASE_NO,),
+        )
+        aggregate = dict(cursor.fetchone())
+        counts = {}
+        for name, statement in {
+            "generations": "SELECT COUNT(*) AS total FROM scheduling_generations WHERE case_no=%s",
+            "assignments": "SELECT COUNT(*) AS total FROM case_staff_assignments WHERE case_no=%s",
+            "schedules": "SELECT COUNT(*) AS total FROM staff_schedule WHERE case_no=%s AND effective_marker=1",
+            "buffers": (
+                "SELECT COUNT(*) AS total FROM scheduling_buffer_days buffer "
+                "JOIN case_staff_assignments assignment ON assignment.id=buffer.assignment_id "
+                "WHERE assignment.case_no=%s AND buffer.active_marker=1"
+            ),
+            "occupancy": (
+                "SELECT COUNT(*) AS total FROM scheduling_effective_occupancy occupancy "
+                "JOIN scheduling_generations generation ON generation.id=occupancy.generation_id "
+                "WHERE generation.case_no=%s"
+            ),
+            "rebuild_events": "SELECT COUNT(*) AS total FROM scheduling_rebuild_events WHERE case_no=%s",
+            "scheduling_receipts": "SELECT COUNT(*) AS total FROM scheduling_command_receipts WHERE case_no=%s",
+            "notification_invalidations": (
+                "SELECT COUNT(*) AS total FROM scheduling_rebuild_notification_outbox outbox "
+                "JOIN scheduling_rebuild_events event ON event.id=outbox.rebuild_event_id "
+                "WHERE event.case_no=%s"
+            ),
+        }.items():
+            cursor.execute(statement, (_CASE_NO,))
+            counts[name] = int(cursor.fetchone()["total"])
+        cursor.execute(
+            "SELECT id,generation_id,candidate_key,staff_id,assignment_sequence,"
+            "assigned_start_date,assigned_end_date,status FROM case_staff_assignments "
+            "WHERE case_no=%s ORDER BY id",
+            (_CASE_NO,),
+        )
+        assignments = tuple(dict(row) for row in cursor.fetchall())
+    return aggregate, counts, assignments
+
+
 def _seed_without_downstream_roots(connection) -> None:
     with connection.cursor() as cursor:
         cursor.execute(
@@ -439,6 +556,55 @@ def test_general_terms_date_change_round_trips_without_downstream_roots():
                     (_CASE_NO,),
                 )
                 assert int(cursor.fetchone()["total"]) == 0
+    finally:
+        connection.close()
+        _drop_database()
+
+
+def test_assigned_hours_change_keeps_effective_scheduling_and_real_assignment_identity():
+    """Issue #338: a Finance/Payroll impact does not imply Scheduling replacement."""
+
+    bootstrap(_arguments())
+    connection = _connect()
+    try:
+        _seed(connection)
+        assignment_id = _seed_effective_assignment(connection)
+        client = _client(connection)
+        query = _data(client.get(f"/api/v1/orders/{_CASE_NO}/terms"))
+        before = _scheduling_snapshot(connection)
+
+        changed = {**query["terms"], "service_hours_per_day": 4.5}
+        preview = _preview(client, changed)
+        assert preview["requires_formal_apply"] is True
+        receipt = _data(_apply(
+            client,
+            query,
+            preview,
+            changed,
+            "issue338-hours-no-scheduling-replacement",
+        ))
+        readback = _data(client.get(f"/api/v1/orders/{_CASE_NO}/terms"))
+        after = _scheduling_snapshot(connection)
+
+        assert after == before
+        assert receipt["scheduling_version"] == query["scheduling_version"]
+        assert receipt["scheduling_generation"] == query["scheduling_generation"]
+        assert receipt["cancelled_assignment_ids"] == []
+        assert receipt["created_assignment_keys"] == []
+        assert readback["terms"]["service_hours_per_day"] == 4.5
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT scheduling_command_receipt_id FROM order_terms_apply_receipts "
+                "WHERE idempotency_key=%s",
+                ("issue338-hours-no-scheduling-replacement",),
+            )
+            assert cursor.fetchone()["scheduling_command_receipt_id"] is None
+            cursor.execute(
+                "SELECT assignment_id FROM staff_obligations "
+                "WHERE case_no=%s ORDER BY obligation_identity DESC LIMIT 1",
+                (_CASE_NO,),
+            )
+            assert cursor.fetchone()["assignment_id"] == assignment_id
     finally:
         connection.close()
         _drop_database()

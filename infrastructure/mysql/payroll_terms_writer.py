@@ -14,7 +14,8 @@ from infrastructure.mysql.effective_case_service_rate import (
 
 def persist_payroll_terms_impact(cursor, command) -> None:
     _insert_special_pay_events(cursor, command)
-    _insert_carried_rate_snapshots(cursor, command)
+    if not command.reuse_existing_assignments:
+        _insert_carried_rate_snapshots(cursor, command)
     for ordinal, action in enumerate(command.candidate.actions, start=1):
         if not _action_requires_event(action):
             continue

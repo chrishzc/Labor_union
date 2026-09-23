@@ -350,6 +350,7 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_09_15_client_legacy_virtual_accounts_v1.json",
     "labor_union_2026_09_15_order_details_owner_dates_v1.json",
     "labor_union_2026_09_22_order_terms_optional_downstream_versions_v1.json",
+    "labor_union_2026_09_22_order_terms_optional_scheduling_receipt_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -2374,6 +2375,16 @@ def _modified_parent_predecessor_absent_state(
                 },
             },
         },
+        "1045_order_terms_optional_scheduling_receipt.sql": {
+            "order_terms_apply_receipts": {
+                "scheduling_command_receipt_id": {
+                    "column_type": "bigint",
+                    "is_nullable": "NO",
+                    "column_default": None,
+                    "extra": "",
+                },
+            },
+        },
     }.get(artifact)
     if predecessor_columns is None:
         return None
@@ -3514,7 +3525,38 @@ def _local_capture_backup_rows(
         connection.close()
 
 
-def _local_verify_backup_rows(config: Any, source: str, expected: Mapping[str, Any]) -> None:
+def _local_row_projection(config: Any, source: str, table: str) -> dict[str, Any]:
+    """Hash every value in an existing table, independent of its physical layout."""
+    connection = _local_connect(config, source, LOCAL_ADDITIVE_MAX_DURATION_MS)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema=DATABASE() AND table_name=%s ORDER BY ordinal_position",
+                (table,),
+            )
+            columns = [_normalized_row(row)["column_name"] for row in cursor.fetchall()]
+            if not columns:
+                raise LocalAdditiveBlocked("preserved table is absent", code="backup_required")
+            return _table_projection_evidence(config, source, table, columns)
+    finally:
+        connection.close()
+
+
+def _local_altered_tables(statements: Iterable[str]) -> set[str]:
+    tables: set[str] = set()
+    for statement in statements:
+        match = re.match(r"\s*ALTER\s+TABLE\s+`?([A-Za-z][A-Za-z0-9_]*)`?(?=\s|$)", statement, re.I)
+        if match:
+            tables.add(match.group(1))
+    return tables
+
+
+def _local_verify_backup_rows(
+    config: Any, source: str, expected: Mapping[str, Any], *,
+    reference_database: str | None = None,
+    altered_tables: Iterable[str] = (),
+) -> None:
     """Verify stable row evidence before and after any in-place DDL."""
     counts = expected.get("data_row_counts")
     fingerprints = expected.get("data_fingerprints")
@@ -3537,6 +3579,22 @@ def _local_verify_backup_rows(config: Any, source: str, expected: Mapping[str, A
             actual["data_fingerprints"][table] = absent
             normalized_empty_table = True
     if normalized_empty_table:
+        actual["data_fingerprint_sha256"] = _local_data_fingerprint(actual["data_fingerprints"])
+    changed = {
+        table for table in fingerprints
+        if actual["data_fingerprints"].get(table) != fingerprints[table]
+    }
+    if changed and changed <= set(altered_tables):
+        saved_projections = expected.get("data_row_projections")
+        for table in changed:
+            reference = (
+                _local_row_projection(config, reference_database, table)
+                if reference_database else
+                (saved_projections or {}).get(table)
+            )
+            if not isinstance(reference, Mapping) or _local_row_projection(config, source, table) != reference:
+                raise LocalAdditiveBlocked("source backup row fingerprint changed", code="backup_required")
+            actual["data_fingerprints"][table] = fingerprints[table]
         actual["data_fingerprint_sha256"] = _local_data_fingerprint(actual["data_fingerprints"])
     if actual["data_fingerprints"] != dict(fingerprints):
         raise LocalAdditiveBlocked("source backup row fingerprint changed", code="backup_required")
@@ -3619,6 +3677,15 @@ def _local_classify_statement(statement: str) -> str:
                 .read_text(encoding="utf-8")
             )[0].strip(),
         ).casefold()
+        canonical_1045 = re.sub(
+            r"\s+",
+            " ",
+            split_sql(
+                (ROOT / "db" / "schema_parts" /
+                 "1045_order_terms_optional_scheduling_receipt.sql")
+                .read_text(encoding="utf-8")
+            )[0].strip(),
+        ).casefold()
         controlled_parent_replacement = (
             normalized.startswith("alter table controlled_file_staging_objects ")
             and "modify column purpose enum(" in normalized
@@ -3652,6 +3719,8 @@ def _local_classify_statement(statement: str) -> str:
             return "contract_external_signing_state_constraint_replacement"
         if normalized == canonical_1044:
             return "order_terms_downstream_version_nullability_widen"
+        if normalized == canonical_1045:
+            return "order_terms_scheduling_receipt_nullability_widen"
         if re.search(r"\b(drop|modify|change|rename|truncate)\b", normalized):
             raise LocalAdditiveBlocked("destructive ALTER is outside additive allowlist", code="forbidden_sql_effect")
         if not re.search(r"\badd\s+(column|index|unique|constraint|fulltext|spatial)\b", normalized):
@@ -4055,6 +4124,14 @@ def local_additive_prepare_backup(
     before_rows = _local_capture_backup_rows(
         config, source, reference_counts.keys()
     )
+    canonical_artifact = qualification.get("_canonical_artifact")
+    altered_tables = _local_altered_tables(
+        split_sql((ROOT / canonical_artifact["relative_path"]).read_text(encoding="utf-8"))
+    ) if canonical_artifact else set()
+    altered_tables &= set(before_rows["data_row_counts"])
+    before_rows["data_row_projections"] = {
+        table: _local_row_projection(config, source, table) for table in sorted(altered_tables)
+    }
     temporary_dump = dump_path.with_suffix(dump_path.suffix + ".preparing")
     temporary_receipt = receipt_path.with_suffix(
         receipt_path.suffix + ".preparing"
@@ -4074,6 +4151,9 @@ def local_additive_prepare_backup(
     after_rows = _local_capture_backup_rows(
         config, source, reference_counts.keys()
     )
+    after_rows["data_row_projections"] = {
+        table: _local_row_projection(config, source, table) for table in sorted(altered_tables)
+    }
     if after_snapshot["sha256"] != before_snapshot["sha256"] or after_rows != before_rows:
         raise LocalAdditiveBlocked(
             "source changed while backup was created", code="source_changed"
@@ -4226,7 +4306,7 @@ def local_additive_apply(
         descriptor = local_additive_release_qualification(qualification["release_id"], artifact["name"])["schema_artifacts"][0]["descriptor"]
         if local_additive_descriptor_state(after, descriptor, artifact["name"]) != "exact":
             raise LocalAdditiveBlocked("post-apply descriptor is not exact", code="descriptor_drift")
-        _local_verify_backup_rows(config, source, local_backup)
+        _local_verify_backup_rows(config, source, local_backup, altered_tables=_local_altered_tables(statements))
     elapsed = int((time_module.monotonic() - started) * 1000)
     result = {
         **preview,
@@ -4239,6 +4319,81 @@ def local_additive_apply(
     previous = _local_append_event(receipt_root, source, qualification["release_id"], "completed", previous, source_database=source, source_schema_sha256=baseline, post_schema_sha256=after["sha256"], elapsed_ms=elapsed, backup_receipt=local_backup["receipt_path"], backup_dump_sha256=local_backup["sha256"])
     _local_write_receipt(receipt_root, source, result)
     return result
+
+
+def local_additive_recover_verified_ddl(
+    config: Any, source: str, *, receipt_root: Path,
+    backup_dump_path: Path, backup_receipt_path: Path,
+    reference_database: str,
+    qualification_path: Path | None = None,
+) -> dict[str, Any]:
+    """Finish an interrupted schema-only release after independent row proof.
+
+    The reference must retain the backup's original rows. No DDL is executed.
+    """
+    if (not IDENTIFIER.fullmatch(reference_database)
+            or not reference_database.startswith("lu_test_")
+            or reference_database == source):
+        raise LocalAdditiveBlocked("recovery reference must be a separate test database", code="backup_required")
+    with _local_maintenance_lock(config, source, LOCAL_ADDITIVE_LOCK_TIMEOUT_SECONDS):
+        preview = local_additive_plan(config, source, receipt_root=receipt_root,
+                                      qualification_path=qualification_path)
+        if preview["status"] != "current":
+            raise LocalAdditiveBlocked("DDL is not fully applied", code="descriptor_drift")
+        release_id = preview["release_id"]
+        qualification = _local_discover_qualification(
+            qualification_path, release_id=release_id
+        ) if qualification_path else _local_discover_qualification(release_id=release_id)
+        artifact = qualification["_canonical_artifact"]
+        statements = split_sql((ROOT / artifact["relative_path"]).read_text(encoding="utf-8"))
+        statement_hashes = [_local_digest(statement.encode("utf-8")) for statement in statements]
+        events = _local_read_events(receipt_root, source, release_id)
+        if not events or events[-1]["state"] == "completed":
+            raise LocalAdditiveBlocked("no interrupted release to recover", code="journal_conflict")
+        baseline, verified = _local_resume_context(events, release_id, source,
+                                                   statement_hashes, preview["source_schema_sha256"])
+        if set(verified) != set(range(1, len(statements) + 1)):
+            raise LocalAdditiveBlocked("DDL journal is incomplete", code="resume_uncertain")
+        receipt = read_receipt(backup_receipt_path)
+        identity = server_identity(config, source)
+        dump = validate_dump(backup_dump_path, backup_receipt_path, source, identity)
+        required = {
+            "kind": "local_additive_source_backup", "release_id": release_id,
+            "database": source, "server": identity["server"],
+            "host": identity["host"], "port": identity["port"],
+            "schema_sha256": baseline,
+        }
+        if any(receipt.get(key) != value for key, value in required.items()):
+            raise LocalAdditiveBlocked("recovery backup identity differs", code="backup_required")
+        if events[0].get("data_fingerprint_sha256") != receipt.get("data_fingerprint_sha256"):
+            raise LocalAdditiveBlocked("recovery journal backup differs", code="journal_conflict")
+        _local_verify_backup_rows(config, reference_database, receipt)
+        _local_verify_backup_rows(config, source, receipt,
+                                  reference_database=reference_database,
+                                  altered_tables=_local_altered_tables(statements))
+        after = local_additive_source_snapshot(config, source)["snapshot"]
+        descriptor = local_additive_release_qualification(
+            release_id, artifact["name"]
+        )["schema_artifacts"][0]["descriptor"]
+        if local_additive_descriptor_state(after, descriptor, artifact["name"]) != "exact":
+            raise LocalAdditiveBlocked("post-apply descriptor is not exact", code="descriptor_drift")
+        result = {
+            **preview, "status": "completed", "recovered": True,
+            "post_schema_sha256": after["sha256"],
+            "backup_receipt": str(Path(backup_receipt_path).resolve()),
+            "backup_dump_sha256": dump["sha256"],
+            "recovery_reference_database": reference_database,
+        }
+        _local_append_event(
+            receipt_root, source, release_id, "completed", events[-1],
+            source_database=source, source_schema_sha256=baseline,
+            post_schema_sha256=after["sha256"],
+            backup_receipt=result["backup_receipt"],
+            backup_dump_sha256=dump["sha256"],
+            recovery_reference_database=reference_database,
+        )
+        _local_write_receipt(receipt_root, source, result)
+        return result
 
 
 def build_plan(
@@ -5385,6 +5540,12 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
                 "bigint unsigned", "YES", None
             ),
         }
+    if part_name == "1045_order_terms_optional_scheduling_receipt.sql":
+        descriptor["parent_columns"]["order_terms_apply_receipts"] = {
+            "scheduling_command_receipt_id": _column_contract(
+                "bigint", "YES", None
+            ),
+        }
     if part_name == "1041_historical_manual_beclass_origin.sql":
         descriptor["parent_columns"]["beclass_records"] = {
             "record_origin": _column_contract(
@@ -5952,6 +6113,7 @@ def _release_descriptor_metadata_state(
         "1040_order_service_hours_half_precision.sql",
         "1041_historical_manual_beclass_origin.sql",
         "1044_order_terms_optional_downstream_versions.sql",
+        "1045_order_terms_optional_scheduling_receipt.sql",
     }:
         if released.get("parent_columns") != canonical.get("parent_columns"):
             raise UpgradeBlocked(

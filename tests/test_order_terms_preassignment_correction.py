@@ -226,6 +226,8 @@ class _AssignedPersistenceRepository(_Repository):
         self.stored_receipts = {}
         self.pending_order_terms = None
         self.writes = []
+        self.payroll_commands = []
+        self.receipt_commands = []
 
     def preflight_impacted_staff_ids(self, _case_no):
         return (3,)
@@ -270,8 +272,9 @@ class _AssignedPersistenceRepository(_Repository):
     def persist_client_finance_impact(self, _command):
         self.writes.append("client_finance")
 
-    def persist_payroll_impact(self, _command):
+    def persist_payroll_impact(self, command):
         self.writes.append("payroll")
+        self.payroll_commands.append(command)
 
     def persist_lifecycle_impact(self, _command):
         self.writes.append("lifecycle")
@@ -286,6 +289,7 @@ class _AssignedPersistenceRepository(_Repository):
 
     def save_receipt(self, command):
         self.writes.append("receipt")
+        self.receipt_commands.append(command)
         self.stored_receipt = command.stored_receipt
         self.stored_receipts[command.key.value] = command.stored_receipt
         if self.pending_order_terms is not None:
@@ -482,7 +486,8 @@ def test_preassignment_start_date_shift_replaces_confirmed_service_dates():
         if isinstance(item, terms_workflow.ConfirmedServiceDateCandidate)
     )
     assert replacement.order_version == 1
-    assert replacement.scheduling_version == 1
+    assert preview.scheduling_replacement_required is False
+    assert replacement.scheduling_version == 0
     assert replacement.service_dates == tuple(
         date(2026, 9, 13 + offset) for offset in range(5)
     )
@@ -715,6 +720,7 @@ def test_assigned_start_date_shift_rebuilds_owned_impacts_and_replays_receipt():
 
     assignment = preview.scheduling.assignments[0]
     assert preview.scheduling.generation_number == 5
+    assert preview.scheduling_replacement_required is True
     assert preview.scheduling.cancelled_assignment_ids == (9,)
     assert assignment.source_assignment_id == 9
     assert assignment.assigned_start_date == date(2026, 9, 13)
@@ -745,7 +751,8 @@ def test_assigned_start_date_shift_rebuilds_owned_impacts_and_replays_receipt():
 
 def test_assigned_half_hour_terms_keep_fractional_hours_in_finance_and_payroll():
     facts = _assigned_facts()
-    workflow = terms_workflow.OrderTermsWorkflow(_Repository(facts), object(), _Clock())
+    repository = _AssignedPersistenceRepository(facts)
+    workflow = terms_workflow.OrderTermsWorkflow(repository, object(), _Clock())
     proposed = OrderTerms(
         date(2026, 9, 10),
         5,
@@ -756,11 +763,38 @@ def test_assigned_half_hour_terms_keep_fractional_hours_in_finance_and_payroll()
     )
 
     preview = workflow.preview("116990823", proposed)
+    request = terms_workflow.OrderTermsApplyRequest(
+        case_no="116990823",
+        proposed_terms=proposed,
+        expected_order_version=ExpectedVersion(0),
+        expected_scheduling_version=ExpectedVersion(2),
+        expected_client_finance_version=ExpectedVersion(4),
+        expected_payroll_version=ExpectedVersion(7),
+        preview_fingerprint=preview.fingerprint,
+        idempotency_key=IdempotencyKey("terms-assigned-hours-1"),
+        actor=ActorContext("internal-admin"),
+        reason="adjust contracted daily hours",
+        correlation_id=CorrelationId("terms-assigned-hours-correlation"),
+    )
+
+    receipt = workflow.apply_in_current_uow(request)
 
     assert preview.scheduling.assignments[0].actual_hours == 22.5
+    assert preview.scheduling_replacement_required is False
+    assert preview.requires_formal_apply is True
     assert preview.client_finance_impact.actions
     assert preview.payroll_impact.actions
     assert preview.payroll_impact.actions[0].amount.amount == 6750
+    assert "scheduling_generation" not in repository.writes
+    assert repository.payroll_commands[0].assignment_resolution.assignment_id_by_candidate_key == {
+        preview.scheduling.assignments[0].candidate_key: 9,
+    }
+    assert repository.payroll_commands[0].reuse_existing_assignments is True
+    assert receipt.scheduling_version == 2
+    assert receipt.scheduling_generation == 4
+    assert receipt.cancelled_assignment_ids == ()
+    assert receipt.created_assignment_keys == ()
+    assert repository.receipt_commands[0].scheduling_receipt_id is None
 
 
 def test_terms_day_replacement_uses_one_target_before_assignment():
