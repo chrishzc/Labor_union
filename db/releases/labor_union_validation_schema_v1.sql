@@ -1,5 +1,5 @@
 -- GENERATED FILE. Do not edit by hand.
--- Release: labor-union-validation-schema-2026-09-22-v38
+-- Release: labor-union-validation-schema-2026-09-22-v39
 -- Replace __LU_TEST_DATABASE__ with an explicitly confirmed lu_test_* database.
 -- Rebuild with: python scripts/build_validation_schema_release.py
 
