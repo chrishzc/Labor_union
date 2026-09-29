@@ -38,7 +38,7 @@ describe('weekly operations report clients', () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(WEEKLY_OPERATIONS_RESPONSE));
     const report = await weeklyOperationsReportQueryClient.query('2026-08-20', '2026-08-26');
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/operations-reports/weekly?start_date=2026-08-20&end_date=2026-08-26');
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/operations-reports/weekly?start_date=2026-08-20&end_date=2026-08-26&schema_version=operations-report.v4');
     expect(fetchMock.mock.calls[0]?.[1]?.method).toBe('GET');
     expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get('Authorization')).toBe('Bearer weekly-report-token');
     expect(report.case_rows).toHaveLength(2);
@@ -88,6 +88,7 @@ describe('weekly operations report clients', () => {
       status: 200,
       headers: {
         'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'X-Operations-Report-Version': 'operations-report.v4',
         'content-disposition': 'attachment; filename="operations-report-2026-08-20-2026-08-26.xlsx"',
       },
     }));
@@ -120,5 +121,58 @@ describe('weekly operations report clients', () => {
     await weeklyReportMetricsClient.save('2026-08-24', { promotion_count: null, inquiry_count: 0 });
     expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/v1/operations-reports/weekly/metrics/2026-08-24');
     expect(fetchMock.mock.calls[1]?.[1]?.body).toBe(JSON.stringify({ promotion_count: null, inquiry_count: 0 }));
+  });
+});
+
+function legacyResponse() {
+  const data: Record<string, unknown> = { ...WEEKLY_OPERATIONS_REPORT, schema_version: 'operations-report.v3' };
+  delete data.annual_totals;
+  delete data.monthly_subtotals;
+  return { ...WEEKLY_OPERATIONS_RESPONSE, data };
+}
+
+describe('weekly report API version compatibility', () => {
+  beforeEach(() => {
+    vi.spyOn(sessionClient, 'getToken').mockReturnValue('fixture-session');
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it('舊 API 回 v3 時保留原資料，不補統計、不重試或再打另一個 endpoint', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(legacyResponse()));
+    const report = await weeklyOperationsReportQueryClient.query('2026-08-20', '2026-08-26');
+    expect(report.schema_version).toBe('operations-report.v3');
+    expect(report.case_rows).toEqual(WEEKLY_OPERATIONS_REPORT.case_rows);
+    expect(report).not.toHaveProperty('annual_totals');
+    expect(report).not.toHaveProperty('monthly_subtotals');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['annual_totals', 'monthly_subtotals'])('v4 缺少 %s 仍拒絕，不偽裝成舊版', async (field) => {
+    const data: Record<string, unknown> = { ...WEEKLY_OPERATIONS_REPORT };
+    delete data[field];
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({ ...WEEKLY_OPERATIONS_RESPONSE, data }));
+    await expect(weeklyOperationsReportQueryClient.query('2026-08-20', '2026-08-26')).rejects.toThrow('結構異常');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('兩版仍拒絕混合欄位與未知版本', async () => {
+    const legacy = legacyResponse();
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(jsonResponse({ ...legacy, data: { ...legacy.data, annual_totals: [] } }))
+      .mockResolvedValueOnce(jsonResponse({ ...legacy, data: { ...legacy.data, schema_version: 'operations-report.v5' } }));
+    await expect(weeklyOperationsReportQueryClient.query('2026-08-20', '2026-08-26')).rejects.toThrow('結構異常');
+    await expect(weeklyOperationsReportQueryClient.query('2026-08-20', '2026-08-26')).rejects.toThrow('結構異常');
+  });
+
+  it.each([null, 'operations-report.v3'])('匯出版本 %s 不得當作新版 XLSX', async (version) => {
+    const headers: Record<string, string> = { 'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
+    if (version !== null) headers['X-Operations-Report-Version'] = version;
+    const response = new Response(new Uint8Array([80, 75, 3, 4]), { status: 200, headers });
+    const readBlob = vi.spyOn(response, 'blob');
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(response);
+    await expect(weeklyOperationsReportExportClient.download('2026-08-20', '2026-08-26')).rejects.toMatchObject({
+      code: 'WEEKLY_REPORT_EXPORT_VERSION_MISMATCH', retryable: false,
+    });
+    expect(readBlob).not.toHaveBeenCalled();
   });
 });

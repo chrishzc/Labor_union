@@ -5,8 +5,35 @@
 import type { WeeklyOperationsReport } from '../../../api/reports/weekly_operations_report_schemas';
 import { SUBSIDY_REPORT_RESPONSE } from './subsidy_report_query_contract_fixtures';
 
+const STATUS_COUNTS = {
+  '待補件': 0,
+  '洽談中': 0,
+  '訂單成立': 0,
+  '服務中': 1,
+  '訂單完成': 0,
+  '訂單取消': 0,
+  '歷史訂單－未服務': 0,
+  '歷史訂單－服務中': 0,
+  '歷史訂單－服務完成': 0,
+  '歷史訂單－帳務完成': 0,
+  '無訂單／狀態缺值': 1,
+};
+
+const SUMMARY = {
+  application_count: 2,
+  general_eligible_count: 1,
+  general_ineligible_count: null,
+  subsidized_eligible_count: 0,
+  subsidized_ineligible_count: null,
+  rejection_unpartitioned_count: 1,
+  order_established_count: 1,
+  negotiating_count: 0,
+  cancelled_count: 0,
+  incomplete_count: 1,
+};
+
 export const WEEKLY_OPERATIONS_REPORT: WeeklyOperationsReport = {
-  schema_version: 'operations-report.v3',
+  schema_version: 'operations-report.v4',
   period: {
     start_date: '2026-08-20',
     end_date: '2026-08-26',
@@ -15,18 +42,7 @@ export const WEEKLY_OPERATIONS_REPORT: WeeklyOperationsReport = {
   },
   generated_at: '2026-08-23T12:00:00+08:00',
   source_revision: 'weekly-operations-fixture-revision',
-  summary: {
-    application_count: 2,
-    general_eligible_count: 1,
-    general_ineligible_count: null,
-    subsidized_eligible_count: 0,
-    subsidized_ineligible_count: null,
-    rejection_unpartitioned_count: 1,
-    order_established_count: 1,
-    negotiating_count: 0,
-    cancelled_count: 0,
-    incomplete_count: 1,
-  },
+  summary: SUMMARY,
   case_rows: [
     {
       case_no: 'CASE-WEEK-001',
@@ -93,6 +109,16 @@ export const WEEKLY_OPERATIONS_REPORT: WeeklyOperationsReport = {
     { week_start_date: '2026-08-17', week_end_date: '2026-08-23', promotion_count: 12, inquiry_count: 8, updated_at: '2026-08-23T12:00:00+08:00' },
     { week_start_date: '2026-08-24', week_end_date: '2026-08-30', promotion_count: null, inquiry_count: 0, updated_at: null },
   ],
+  annual_totals: [{
+    ...SUMMARY, year: 2026, month: null,
+    start_date: '2026-01-05', end_date: '2026-08-26',
+    promotion_count: null, inquiry_count: null, review_rejected_count: 1, order_status_counts: { ...STATUS_COUNTS },
+  }],
+  monthly_subtotals: [{
+    ...SUMMARY, year: 2026, month: 8,
+    start_date: '2026-08-20', end_date: '2026-08-26',
+    promotion_count: null, inquiry_count: 8, review_rejected_count: 1, order_status_counts: { ...STATUS_COUNTS },
+  }],
   data_quality_issues: [
     { code: 'historical_order_missing', field: 'order_status', row_count: 1, message: '歷史案件缺少訂單資料' },
   ],

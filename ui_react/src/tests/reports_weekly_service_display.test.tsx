@@ -150,8 +150,13 @@ describe('ReportsPage service-hours display', () => {
     render(<ReportsPage />);
 
     expect(await screen.findByText('此期間沒有案件受理資料。')).toBeInTheDocument();
-    expect(screen.getAllByText('2026-08-17～2026-08-23')).not.toHaveLength(0);
-    expect(screen.getByText('12')).toBeInTheDocument();
+    const firstWeek = screen.getByRole('row', { name: '週次 2026-08-17' });
+    expect(firstWeek).toHaveTextContent('2026-08-17～2026-08-23');
+    expect(firstWeek).toHaveTextContent('推廣次數：12');
+    expect(firstWeek).toHaveTextContent('詢問人次：8');
+    const secondWeek = screen.getByRole('row', { name: '週次 2026-08-24' });
+    expect(secondWeek).toHaveTextContent('推廣次數：未登錄／待補正');
+    expect(secondWeek).toHaveTextContent('詢問人次：0');
   });
 
   it('營運報表查詢失敗時顯示錯誤而不是空白', async () => {
