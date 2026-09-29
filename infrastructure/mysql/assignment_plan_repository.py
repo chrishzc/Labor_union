@@ -442,6 +442,7 @@ def _effective_occupancy_rows(cursor, staff_ids, lock):
         "FROM scheduling_effective_occupancy o "
         "JOIN scheduling_generations g ON g.id=o.generation_id "
         f"WHERE o.staff_id IN ({placeholders}) "
+        "AND o.occupancy_type='assignment_interval' "
         "ORDER BY o.staff_id,o.occupancy_date,g.case_no"
         + _lock_suffix(lock),
         staff_ids,

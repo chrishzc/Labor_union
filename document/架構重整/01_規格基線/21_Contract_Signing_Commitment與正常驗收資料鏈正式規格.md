@@ -377,6 +377,12 @@ Preview／確認／Apply／receipt/readback，列為 `completed`；外部 LINE �
 4. 訂金 obligation 由 final Apply 建立；第 8 階段在 final PDF 前不得提前顯示為進行中或完成，final PDF 後依 settlement owner 根事實顯示 blocked／completed。
 5. 既有個別回報、歷史 recovery 與 receipt 仍可查閱，不得回頭成為新主流程門禁。
 
+### 2026-09-29 未綁定 LINE 的外部平台交接裁決
+
+使用者確認：客戶或月嫂未綁定 LINE，仍可記錄已送交外部簽署平台。此節覆蓋上述「所有對象提醒 intent 必須全有」條件：已正確綁定者建立 LINE 提醒，未綁定者以 typed 人工通知對象清單保存在原交接 receipt，同一 outer UoW 完成 session、可建立的提醒 intent 與 receipt；重新查詢及重播均保留送交當時的人工通知要求，不隨後續綁定狀態重算或重新發送。沒有綁定的對象不建立虛構 delivery job，UI 明確提示工會人工通知。
+
+客戶與所有服務區段的 current 未簽 PDF 仍須完整；版本衝突、身分錯配或儲存失敗維持 typed conflict／零 partial write。無完整歷史簽回證據的新案件不顯示歷史人工修復區；最終 PDF 完成主流程沿用既有條件。本次授權本機程式及合成資料驗證，不操作外部簽署平台、LINE provider 或另一主機。
+
 Runtime gap 狀態（2026-08-26）：`approved`。人工已授權本機實作、必要的 `lu_test_*` schema gate、
 controlled-file adapter 與 LINE sandbox 驗收；current renderer 仍僅產生 XLSX，現有 `media_assets` 與
 `contract_document_versions.storage_key` 尚未驗證為 `00` §2.2 的受控 NAS logical object reference／digest／

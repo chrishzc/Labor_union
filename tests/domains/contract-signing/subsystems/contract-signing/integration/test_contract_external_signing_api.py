@@ -51,6 +51,7 @@ class FakeReports:
         self.command = command
         return SimpleNamespace(
             session_id=SESSION_ID,
+            manual_notification_targets=(),
             resulting_status_version=1,
             replayed=False,
         )
@@ -318,6 +319,7 @@ def test_query_returns_only_react_contract_fields() -> None:
     assert set(data) == {
         "case_no", "session_id", "state", "status_version", "matching_plan_id",
         "handoff_recorded", "commitment_id", "unsigned_document", "staff_targets", "client_target",
+        "manual_notification_targets",
     }
     serialized = response.text.lower()
     assert all(term not in serialized for term in ("locator", "digest", "fingerprint", "url", "path"))
@@ -541,6 +543,7 @@ def test_external_platform_handoff_uses_persisted_admin_and_expected_version() -
         "session_id": SESSION_ID,
         "resulting_status_version": 1,
         "replayed": False,
+        "manual_notification_targets": [],
     }
     command = application.reports.command
     assert command.case_no == CASE_NO

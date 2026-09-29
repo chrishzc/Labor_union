@@ -298,6 +298,12 @@ class ClientTargetView(BaseModel):
     reported: bool
 
 
+class ManualSigningNotificationTargetView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    scope: Literal["staff", "client"]
+    subject_reference: str = Field(min_length=1, max_length=191)
+
+
 class ExternalSigningQueryView(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -312,6 +318,7 @@ class ExternalSigningQueryView(BaseModel):
     ]
     status_version: int = Field(ge=0)
     handoff_recorded: bool
+    manual_notification_targets: list[ManualSigningNotificationTargetView] = Field(default_factory=list)
     matching_plan_id: int = Field(ge=1)
     commitment_id: int | None = Field(default=None, ge=1)
     unsigned_document: UnsignedDocumentView | None
@@ -442,6 +449,10 @@ def record_external_signing_handoff(
                 "session_id": receipt.session_id,
                 "resulting_status_version": receipt.resulting_status_version,
                 "replayed": receipt.replayed,
+                "manual_notification_targets": [
+                    {"scope": target.scope.value, "subject_reference": target.subject_reference}
+                    for target in receipt.manual_notification_targets
+                ],
             }
         )
 

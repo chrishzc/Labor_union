@@ -352,6 +352,7 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_09_22_order_terms_optional_downstream_versions_v1.json",
     "labor_union_2026_09_22_order_terms_optional_scheduling_receipt_v1.json",
     "labor_union_2026_09_29_client_zero_obligation_establishment_v1.json",
+    "labor_union_2026_09_29_scheduling_buffer_advisory_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -2492,6 +2493,8 @@ def _metadata_state_for_artifact(
         )
     if artifact == "1046_client_zero_obligation_establishment.sql":
         return _client_zero_obligation_establishment_state(snapshot, descriptor)
+    if artifact == "1047_scheduling_buffer_advisory.sql":
+        return _scheduling_buffer_advisory_state(snapshot, descriptor)
     if artifact == "1013_order_lifecycle_pending_status_constraint.sql":
         return _order_lifecycle_pending_status_constraint_state(
             snapshot,
@@ -3733,6 +3736,12 @@ def _local_classify_statement(statement: str) -> str:
             return "order_terms_scheduling_receipt_nullability_widen"
         if normalized == canonical_1046:
             return "client_zero_obligation_establishment_check_widen"
+        buffer_advisory_alters = {
+            re.sub(r"\s+", " ", value.strip()).casefold()
+            for value in split_sql((ROOT / "db/schema_parts/1047_scheduling_buffer_advisory.sql").read_text(encoding="utf-8"))
+        }
+        if normalized in buffer_advisory_alters:
+            return "scheduling_buffer_advisory_index_widen"
         if re.search(r"\b(drop|modify|change|rename|truncate)\b", normalized):
             raise LocalAdditiveBlocked("destructive ALTER is outside additive allowlist", code="forbidden_sql_effect")
         if not re.search(r"\badd\s+(column|index|unique|constraint|fulltext|spatial)\b", normalized):
@@ -5227,6 +5236,13 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
         None,
     )
     if path is None:
+        if part_name == "109_scheduling_generations.sql" and any(
+            item.name == "1047_scheduling_buffer_advisory.sql" for item in SCHEMA_PARTS
+        ):
+            # The bounded advisory release inherits the immutable owning table
+            # contracts; selecting its descriptor does not select a writer.
+            path = ROOT / "db/schema_parts/109_scheduling_generations.sql"
+    if path is None:
         raise UpgradeBlocked(f"canonical schema part is missing: {part_name}")
     sql = path.read_text(encoding="utf-8")
     descriptor: dict[str, Any] = {
@@ -5563,6 +5579,15 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
         descriptor["checks"][(
             "client_obligation_events", "chk_client_obligation_event_amount",
         )] = _normalize_sql_contract(clause)
+    if part_name == "1047_scheduling_buffer_advisory.sql":
+        predecessor = _canonical_artifact_descriptor("109_scheduling_generations.sql")
+        tables = {"scheduling_buffer_days", "scheduling_effective_occupancy"}
+        for kind in ("tables", "indexes", "foreign_keys", "checks"):
+            descriptor[kind] = {
+                key: value for key, value in predecessor[kind].items()
+                if (key if kind == "tables" else key[0]) in tables
+            }
+        descriptor["indexes"].update(_buffer_advisory_indexes())
     if part_name == "1041_historical_manual_beclass_origin.sql":
         descriptor["parent_columns"]["beclass_records"] = {
             "record_origin": _column_contract(
@@ -6189,6 +6214,8 @@ def _release_descriptor_metadata_state(
         )
     if part_name == "1046_client_zero_obligation_establishment.sql":
         return _client_zero_obligation_establishment_state(snapshot, canonical)
+    if part_name == "1047_scheduling_buffer_advisory.sql":
+        return _scheduling_buffer_advisory_state(snapshot, canonical)
     if part_name == "1013_order_lifecycle_pending_status_constraint.sql":
         return _order_lifecycle_pending_status_constraint_state(
             snapshot,
@@ -6803,7 +6830,7 @@ def _artifact_metadata_state(
     for key, expected in descriptor["indexes"].items():
         actual = indexes.get(key)
         owned_presence.append(actual is not None)
-        if actual is not None and actual != expected:
+        if actual is not None and actual != expected and actual != allowed_later_indexes.get(key):
             return "drift"
     constraints = {
         (row["table_name"], row["constraint_name"]): row
@@ -7100,10 +7127,63 @@ def _matching_coordination_successor_column_type(
     )
 
 
+def _buffer_advisory_indexes() -> dict[tuple[str, str], dict[str, Any]]:
+    return {
+        ("scheduling_buffer_days", "uq_scheduling_buffer_staff_date_active"): {
+            "non_unique": 1, "columns": ("staff_id", "buffer_date", "active_marker"),
+        },
+        ("scheduling_effective_occupancy", "PRIMARY"): {
+            "non_unique": 0, "columns": ("staff_id", "occupancy_date", "occupancy_type"),
+        },
+    }
+
+
+def _scheduling_buffer_advisory_state(snapshot, descriptor) -> str:
+    """Accept only the exact predecessor or exact advisory successor."""
+    indexes = {
+        (row["table_name"], row["index_name"]): {
+            "non_unique": int(row["non_unique"]),
+            "columns": tuple(str(row["columns"]).casefold().split(",")),
+        } for row in snapshot["indexes"]
+    }
+    predecessor = {
+        ("scheduling_buffer_days", "uq_scheduling_buffer_staff_date_active"): {
+            "non_unique": 0, "columns": ("staff_id", "buffer_date", "active_marker"),
+        },
+        ("scheduling_effective_occupancy", "PRIMARY"): {
+            "non_unique": 0, "columns": ("staff_id", "occupancy_date"),
+        },
+    }
+    modes = []
+    matched = dict(descriptor)
+    matched["indexes"] = dict(descriptor["indexes"])
+    for key, successor in _buffer_advisory_indexes().items():
+        actual = indexes.get(key)
+        if actual == successor:
+            modes.append("successor")
+        elif actual == predecessor[key]:
+            modes.append("predecessor")
+        else:
+            return "drift"
+        matched["indexes"][key] = actual
+    state = _artifact_metadata_state(
+        snapshot, matched, "1047_scheduling_buffer_advisory.sql", defer_missing_triggers=False,
+    )
+    if state != "exact":
+        return state
+    if modes == ["successor", "successor"]:
+        return "exact"
+    if modes == ["predecessor", "predecessor"]:
+        return "absent"
+    return "partial"
+
+
 def _allowed_later_artifact_indexes(
     part_name: str,
 ) -> dict[tuple[str, str], dict[str, Any]]:
     """Return exact successor index contracts valid on an earlier artifact."""
+    if part_name == "109_scheduling_generations.sql":
+        return _buffer_advisory_indexes()
     if part_name == "104_order_lifecycle_state_history.sql":
         return {
             (
@@ -8854,6 +8934,21 @@ def verify_candidate(
             or actual.get("primary_key_sha256")
             != evidence.get("primary_key_sha256")
         ):
+            if (
+                table == "scheduling_effective_occupancy"
+                and source_objects.get("1047_scheduling_buffer_advisory.sql") == "absent"
+                and _scheduling_buffer_advisory_state(
+                    candidate_snapshot,
+                    _canonical_artifact_descriptor("1047_scheduling_buffer_advisory.sql"),
+                ) == "exact"
+            ):
+                additive_projection_preservation[table] = {
+                    "mode": "verified_buffer_advisory_primary_key_widen",
+                    **_verify_source_column_projection_preserved(
+                        config, source, candidate, table, source_snapshot,
+                    ),
+                }
+                continue
             if table == "payroll_rate_policies":
                 additive_projection_preservation[table] = (
                     _verify_twins_payroll_policy_seed_preserves_source(

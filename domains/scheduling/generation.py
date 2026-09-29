@@ -190,7 +190,7 @@ def build_generation_candidate(
         _build_buffer(assignment, active=not facts.service_started)
         for assignment in assignments
     )
-    _validate_candidate_occupancy(assignments, buffers)
+    _validate_candidate_occupancy(assignments)
     return SchedulingGenerationCandidate(
         case_no=facts.case_no,
         generation_number=facts.generation_number + 1,
@@ -364,7 +364,6 @@ def _build_buffer(
 
 def _validate_candidate_occupancy(
     assignments: tuple[AssignmentCandidate, ...],
-    buffers: tuple[BufferCandidate, ...],
 ) -> None:
     occupied: set[tuple[int, date]] = set()
     for assignment in assignments:
@@ -373,11 +372,6 @@ def _validate_candidate_occupancy(
             assignment.assigned_end_date,
         ):
             _claim_occupancy(occupied, assignment.staff_id, occupied_date)
-    for buffer in buffers:
-        if not buffer.active:
-            continue
-        for buffer_date in buffer.dates:
-            _claim_occupancy(occupied, buffer.staff_id, buffer_date)
 
 
 def _claim_occupancy(

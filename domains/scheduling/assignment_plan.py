@@ -149,8 +149,8 @@ def build_assignment_plan_candidate(
     _validate_service_conservation(facts, intent)
     assignments = _build_assignments(facts, intent)
     buffers = _build_buffers(assignments, active=not facts.service_started)
-    _validate_internal_occupancy(assignments, buffers)
-    _validate_external_occupancy(facts, assignments, buffers)
+    _validate_internal_occupancy(assignments)
+    _validate_external_occupancy(facts, assignments)
     scheduling = _build_generation(facts, assignments, buffers)
     fingerprint = fingerprint_payload(_candidate_payload(facts, intent, scheduling))
     return AssignmentPlanCandidate(
@@ -336,46 +336,34 @@ def _build_buffer(
 
 def _validate_internal_occupancy(
     assignments: tuple[AssignmentCandidate, ...],
-    buffers: tuple[BufferCandidate, ...],
 ) -> None:
     occupied: set[tuple[int, date]] = set()
     for assignment in assignments:
         _claim_dates(occupied, assignment.staff_id, _assignment_interval(assignment))
-    for buffer in buffers:
-        if buffer.active:
-            _claim_dates(occupied, buffer.staff_id, buffer.dates)
 
 
 def _validate_external_occupancy(
     facts: AssignmentPlanFacts,
     assignments: tuple[AssignmentCandidate, ...],
-    buffers: tuple[BufferCandidate, ...],
 ) -> None:
     external = {
         (item.staff_id, item.occupancy_date)
         for item in facts.external_occupancy
         if item.source_case_no != facts.case_no
     }
-    proposed = _proposed_occupancy(assignments, buffers)
+    proposed = _proposed_occupancy(assignments)
     if external.intersection(proposed):
-        _raise_occupancy("assignment interval or active buffer is occupied")
+        _raise_occupancy("assignment interval is occupied")
 
 
 def _proposed_occupancy(
     assignments: tuple[AssignmentCandidate, ...],
-    buffers: tuple[BufferCandidate, ...],
 ) -> set[tuple[int, date]]:
     occupied = {
         (item.staff_id, value)
         for item in assignments
         for value in _assignment_interval(item)
     }
-    occupied.update(
-        (item.staff_id, value)
-        for item in buffers
-        if item.active
-        for value in item.dates
-    )
     return occupied
 
 

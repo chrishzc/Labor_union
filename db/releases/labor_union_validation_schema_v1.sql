@@ -1,5 +1,5 @@
 -- GENERATED FILE. Do not edit by hand.
--- Release: labor-union-validation-schema-2026-09-29-v40
+-- Release: labor-union-validation-schema-2026-09-29-v41
 -- Replace __LU_TEST_DATABASE__ with an explicitly confirmed lu_test_* database.
 -- Rebuild with: python scripts/build_validation_schema_release.py
 
@@ -21748,3 +21748,16 @@ ALTER TABLE client_obligation_events
         )
     );
 -- END SOURCE: db/schema_parts/1046_client_zero_obligation_establishment.sql
+
+-- BEGIN SOURCE: db/schema_parts/1047_scheduling_buffer_advisory.sql
+-- Preserve every assignment, schedule and buffer fact. Buffers are advisory.
+ALTER TABLE scheduling_buffer_days
+    DROP INDEX uq_scheduling_buffer_staff_date_active,
+    ADD INDEX uq_scheduling_buffer_staff_date_active (staff_id, buffer_date, active_marker);
+
+-- Retain historical buffer projections alongside real service occupancy.
+-- assignment_interval still has one unique staff/date identity.
+ALTER TABLE scheduling_effective_occupancy
+    DROP PRIMARY KEY,
+    ADD PRIMARY KEY (staff_id, occupancy_date, occupancy_type);
+-- END SOURCE: db/schema_parts/1047_scheduling_buffer_advisory.sql

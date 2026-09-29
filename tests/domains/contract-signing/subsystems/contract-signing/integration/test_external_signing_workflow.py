@@ -384,15 +384,76 @@ class FakeCompletionPort:
         return StaffCompletionPrerequisites(44)
 
 
+@pytest.mark.parametrize("bindings, expected_manual, expected_delivery_count", [
+    ({}, [("client", "301"), ("staff", "501"), ("staff", "502")], 0),
+    ({("staff", "501"): "U-staff-501"}, [("client", "301"), ("staff", "502")], 1),
+])
+def test_handoff_records_unbound_targets_for_manual_notification_and_replays_without_resending(
+    bindings, expected_manual, expected_delivery_count,
+):
+    from infrastructure.db.contract_external_signing_repository import _handoff_receipt_snapshot, _stored_handoff_receipt
+    virtual = _virtual_facts()
+    repository = FakeRepository(None, virtual=virtual)
+    deliveries = FakeDeliveryTasks()
+    port = MySqlExternalSigningHandoffNotificationPort(
+        FakeBindingConnection(bindings), FakeUnsignedRepository({101, 102, 201}),
+    )
+    port._delivery_tasks = deliveries
+    uows = FakeUowFactory()
+    workflow = ExternalSigningWorkflow(repository, FakeCompletionPort(), uows, port)
+    command = RecordExternalSigningHandoff(
+        virtual.case_no, ExpectedVersion(0), ActorContext("admin:17"),
+        IdempotencyKey("external-handoff:manual-case"), CorrelationId("corr-manual-case"),
+    )
+    receipt = workflow.record_handoff(command)
+    stored = repository.handoff_receipts[command.idempotency_key.value]
+    # Reload through the persisted receipt parser before replay, not the live binding state.
+    repository.handoff_receipts[command.idempotency_key.value] = _stored_handoff_receipt({
+        "command_kind": "record_external_signing_handoff",
+        "command_fingerprint": stored.command_fingerprint.value,
+        "result_snapshot": _handoff_receipt_snapshot(receipt, command.idempotency_key),
+    }, expected_idempotency_key=command.idempotency_key.value)
+    replay = workflow.record_handoff(command)
+    assert [(t.scope.value, t.subject_reference) for t in receipt.manual_notification_targets] == expected_manual
+    assert replay.manual_notification_targets == receipt.manual_notification_targets
+    assert replay.replayed is True
+    assert len(deliveries.requests) == expected_delivery_count
+    assert repository.writes == ["activate", "handoff_receipt"]
+    assert [uow.commits for uow in uows.instances] == [1, 1]
+
+
+def test_unbound_handoff_still_requires_every_unsigned_pdf_before_writing():
+    virtual = _virtual_facts()
+    repository = FakeRepository(None, virtual=virtual)
+    deliveries = FakeDeliveryTasks()
+    port = MySqlExternalSigningHandoffNotificationPort(
+        FakeBindingConnection({("customer", "301"): "U-client"}), FakeUnsignedRepository({201, 101}),
+    )
+    port._delivery_tasks = deliveries
+    uows = FakeUowFactory()
+    workflow = ExternalSigningWorkflow(repository, FakeCompletionPort(), uows, port)
+    command = RecordExternalSigningHandoff(
+        virtual.case_no, ExpectedVersion(0), ActorContext("admin:17"),
+        IdempotencyKey("external-handoff:missing-pdf"), CorrelationId("corr-missing-pdf"),
+    )
+    with pytest.raises(ExternalSigningTypedError) as error:
+        workflow.record_handoff(command)
+    assert error.value.code == "contract_unsigned_pdf_missing"
+    assert deliveries.requests == []
+    assert repository.writes == []
+    assert uows.instances[0].commits == 0
+
+
 class FakeHandoffNotificationPort:
     def __init__(self, error=None) -> None:
         self.calls = []
         self.error = error
 
-    def enqueue_notifications(self, command, facts) -> None:
+    def enqueue_notifications(self, command, facts):
         self.calls.append((command, facts))
         if self.error is not None:
             raise self.error
+        return ()
 
 
 class FakeUnsignedRepository:

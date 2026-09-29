@@ -369,6 +369,13 @@ def _occupancy_conflicts(cursor: Any, snapshot: dict[str, Any]) -> list[dict[str
         wanted_rows,
         active_buffers,
     )
+    buffer_keys = {
+        (row["staff_id"], row["lock_date"])
+        for row in wanted_rows if row["lock_kind"] == "buffer"
+    }
+    for conflict in conflicts:
+        if (conflict["staff_id"], conflict["lock_date"]) in buffer_keys:
+            conflict["source_type"] = "buffer"
     return normalize_conflicts(conflicts)
 
 
@@ -416,7 +423,7 @@ def _append_buffer_conflict(conflicts, row, wanted_keys) -> None:
         {
             "staff_id": row["staff_id"],
             "lock_date": row["lock_date"],
-            "source_type": "assignment",
+            "source_type": "buffer",
             "source_id": row["source_id"],
         }
     )
@@ -473,7 +480,7 @@ def _append_active_waiting_buffer_conflicts(conflicts, wanted_rows, sources):
                 {
                     "staff_id": item.staff_id,
                     "lock_date": item.occupancy_date,
-                    "source_type": "active_lock",
+                    "source_type": "buffer",
                     "source_id": source["source_id"],
                 }
             )
@@ -648,7 +655,7 @@ def _acquire_caregiver_availability_lock_in_transaction(
             != expected_fingerprint.value
         ):
             raise ValueError("stale_preview")
-        if conflicts:
+        if any(item["source_type"] != "buffer" for item in conflicts):
             raise ValueError(json.dumps({"conflicts": conflicts}, ensure_ascii=False, sort_keys=True))
         cursor.execute(
             "INSERT INTO caregiver_availability_locks (plan_id, status, is_active, created_by) "
@@ -761,7 +768,7 @@ def _build_acquire_preview(snapshot, conflicts):
         ),
         "occupancy": occupancy,
         "conflicts": tuple(conflicts),
-        "apply_allowed": not conflicts,
+        "apply_allowed": not any(item["source_type"] != "buffer" for item in conflicts),
     }
     return {
         **payload,

@@ -87,6 +87,8 @@ describe('candidateContactPoolClient', () => {
     const preview = {
       case_no: 'CASE-POOL-001',
       candidate_id: 17,
+      required_service_days: 15, projected_service_days: 5,
+      date_basis: 'planned', warnings: ['目前日期不足約定天數，請協調。'],
       rows: [{
         serial_number: 1,
         staff_name: '測試月嫂',

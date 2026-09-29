@@ -23,7 +23,7 @@ const PreviewSchema = z.strictObject({
   case_no: z.string().min(1), plan_id: z.number().int().positive(), service_day_count: z.number().int().nonnegative(),
   buffer_day_count: z.number().int().nonnegative(),
   occupancy: z.array(z.strictObject({ segment_id: z.number().int().positive(), staff_id: z.number().int().positive(), occupancy_date: z.string(), kind: z.enum(['service', 'buffer']) })),
-  conflicts: z.array(z.strictObject({ staff_id: z.number().int().positive(), lock_date: z.string(), source_type: z.enum(['assignment', 'schedule', 'active_lock']), source_id: z.number().int().positive() })),
+  conflicts: z.array(z.strictObject({ staff_id: z.number().int().positive(), lock_date: z.string(), source_type: z.enum(['assignment', 'schedule', 'active_lock', 'buffer']), source_id: z.number().int().positive() })),
   apply_allowed: z.boolean(), preview_fingerprint: Fingerprint,
 });
 const ReceiptSchema = z.strictObject({

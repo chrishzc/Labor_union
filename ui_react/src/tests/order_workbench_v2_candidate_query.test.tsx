@@ -163,10 +163,10 @@ describe('待辦看板 Beta 第 2 階正式候選查詢、候選池寫入與回�
       },
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     ));
-    expect(await screen.findByText('符合 1 位')).toBeInTheDocument();
+    expect(await screen.findByText('可詢問 2 位')).toBeInTheDocument();
   });
 
-  it('只顯示 full_case_coverage 的正式候選，不把 partial option 冒充合格人選', async () => {
+  it('保留衝突候選並提示公會協調', async () => {
     mocks.searchInquiryCandidates.mockResolvedValue(availability({ complete_combinations: [] }));
     render(<OrderCandidateQueryPanel caseNo="115000204" />);
 
@@ -179,11 +179,12 @@ describe('待辦看板 Beta 第 2 階正式候選查詢、候選池寫入與回�
     ));
     expect(await screen.findByText('正式合格月嫂')).toBeInTheDocument();
     expect(screen.getByText(/月嫂 #8892/)).toBeInTheDocument();
-    expect(screen.queryByText('部分可用月嫂')).not.toBeInTheDocument();
+    expect(screen.getByText('部分可用月嫂')).toBeInTheDocument();
+    expect(screen.getByText(/有檔期衝突，待公會協調/)).toBeInTheDocument();
     expect(screen.getByText('服務期間：2026-09-01 ～ 2026-09-05')).toBeInTheDocument();
   });
 
-  it('沒有 server 完整候選時顯示明確空結果與正式 conflict', async () => {
+  it('只有衝突候選時仍可選取並加入候選池', async () => {
     mocks.searchInquiryCandidates.mockResolvedValue(availability({
       feasibility: 'partial',
       complete_combinations: [],
@@ -194,10 +195,10 @@ describe('待辦看板 Beta 第 2 階正式候選查詢、候選池寫入與回�
 
     fireEvent.click(screen.getByRole('button', { name: '查詢符合條件月嫂' }));
 
-    expect(await screen.findByText('沒有符合條件')).toBeInTheDocument();
-    expect(screen.getByText('目前沒有可完整承接的月嫂，可調整篩選條件後重新查詢。')).toBeInTheDocument();
-    expect(screen.getByText(/2026-09-01 · 月嫂 #8893 · active_lock/)).toBeInTheDocument();
-    expect(screen.queryByText('部分可用月嫂')).not.toBeInTheDocument();
+    expect(await screen.findByText('可詢問 1 位')).toBeInTheDocument();
+    expect(screen.getByText(/檔期衝突，待協調/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('checkbox', { name: '選擇正式候選 部分可用月嫂' }));
+    expect(screen.getByRole('button', { name: '加入候選池（1）' })).toBeEnabled();
   });
 
   it('查詢 transport 失敗時與既有 domain blocker 使用不同狀態文案', async () => {

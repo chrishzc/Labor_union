@@ -338,7 +338,7 @@ def _validate_current_availability(
     conflicts = availability.get("conflicts")
     if not isinstance(conflicts, list):
         raise ValueError("availability result malformed")
-    if conflicts:
+    if any(item.get("reason_code") != "buffer" for item in conflicts):
         raise ValueError("submitted segments must match a complete combination")
 
     target_signature = _segments_signature(normalized_segments)

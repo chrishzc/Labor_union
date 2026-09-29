@@ -314,7 +314,30 @@ def test_mysql_adapter_projects_case_import_source_before_returning_owner_snapsh
     assert "case_import" in snapshot.owner_fingerprints
 
 
-def test_formal_plan_information_one_excludes_staff_payroll_terms():
+def test_order_information_http_view_serializes_the_typed_query_fingerprint():
+    from api.routes.orders import _order_information_endpoint
+    result = _order_information_endpoint(
+        lambda: OrderInformationQueryService(MySqlOrderInformationRepository(_Connection())).query("tpl_info_01", "CASE-1", 7),
+        "order-information-query",
+    ).model_dump(mode="json")
+    assert result["success"] is True
+    assert len(result["data"]["preview_fingerprint"]) == 64
+
+
+def test_formal_plan_information_one_excludes_staff_payroll_terms(monkeypatch):
+    from types import SimpleNamespace
+    from infrastructure.mysql import order_information_repository as adapter
+
+    monkeypatch.setattr(
+        adapter.MySqlFullContractProjectionRepository,
+        "load_client_projection",
+        lambda self, case_no: SimpleNamespace(facts={
+            "deposit_amount": 12000, "deposit_due_date": date(2026, 9, 20),
+            "first_payment_amount": 48000, "first_payment_due_date": date(2026, 10, 1),
+            "second_payment_amount": 0, "second_payment_due_date": None,
+            "floor_fee": 0, "total_employer_self_pay_payable": 60000,
+        }),
+    )
     rows = MySqlOrderInformationRepository(_Connection()).preview_matching_plan_information(
         "CASE-1", 51, 1
     )
@@ -322,6 +345,10 @@ def test_formal_plan_information_one_excludes_staff_payroll_terms():
     assert len(rows) == 1
     assert "總薪資" not in rows[0]["text"]
     assert "預計發薪日" not in rows[0]["text"]
+    assert "訂金金額：NT$ 12,000" in rows[0]["text"]
+    assert "第一期金額：NT$ 48,000" in rows[0]["text"]
+    assert "客戶應付總額：NT$ 60,000" in rows[0]["text"]
+    assert "預計訂金繳款日：2026-09-20" in rows[0]["text"]
 
 
 def test_candidate_information_one_excludes_staff_payroll_terms():

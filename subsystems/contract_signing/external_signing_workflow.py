@@ -61,10 +61,21 @@ class RecordExternalSigningHandoff:
 
 
 @dataclass(frozen=True, slots=True)
+class ManualSigningNotificationTarget:
+    scope: ExternalCompletionReportScope
+    subject_reference: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.scope, ExternalCompletionReportScope) or not self.subject_reference.strip():
+            raise ValueError("manual notification target is invalid")
+
+
+@dataclass(frozen=True, slots=True)
 class ExternalSigningHandoffReceipt:
     session_id: str
     resulting_status_version: int
     replayed: bool
+    manual_notification_targets: tuple[ManualSigningNotificationTarget, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,7 +174,7 @@ class ExternalSigningHandoffNotificationPort(Protocol):
         self,
         command: RecordExternalSigningHandoff,
         facts: ExternalSigningSessionFacts,
-    ) -> None: ...
+    ) -> tuple[ManualSigningNotificationTarget, ...]: ...
 
 
 class ExternalSigningWorkflowRepository(Protocol):
@@ -361,7 +372,7 @@ class ExternalSigningWorkflow:
             resulting_version = facts.status_version + 1
             if self._handoff_notification_port is None:
                 raise RuntimeError("external_signing_handoff_notification_port_missing")
-            self._handoff_notification_port.enqueue_notifications(command, facts)
+            manual_targets = self._handoff_notification_port.enqueue_notifications(command, facts)
             self._repository.activate_session(
                 facts,
                 actor_id=command.actor.actor_id,
@@ -372,14 +383,14 @@ class ExternalSigningWorkflow:
                 StoredExternalSigningHandoffReceipt(
                     fingerprint,
                     ExternalSigningHandoffReceipt(
-                        facts.session_id, resulting_version, False
+                        facts.session_id, resulting_version, False, manual_targets
                     ),
                 ),
                 command,
             )
             unit_of_work.commit()
             return ExternalSigningHandoffReceipt(
-                facts.session_id, resulting_version, False
+                facts.session_id, resulting_version, False, manual_targets
             )
 
     def preview_final_pdf_readiness(self, session_id: str) -> FinalPdfReadinessPreview:

@@ -219,7 +219,7 @@ def _search_availability(
                 "work_date": _as_optional_date(
                     row["buffer_date"], "scheduling_buffer_days.buffer_date"
                 ).isoformat(),
-                "reason_code": "assignment",
+                "reason_code": "buffer",
             }
         )
     for row in loaded_facts.get("staff_unavailability_rows") or []:
@@ -281,6 +281,7 @@ def _search_availability(
                 segment_drafts,
                 int(order_row.get("scheduling_version") or 0),
                 filter_results,
+                include_unavailable=inquiry,
             )
             if include_candidate_options
             else []
@@ -326,7 +327,7 @@ def _expand_staff_unavailability_days(row, window_start, window_end):
 
 
 def _candidate_options(candidate_rows, staff_rows, required_service_dates, segment_drafts,
-                       scheduling_version, filter_results):
+                       scheduling_version, filter_results, *, include_unavailable=False):
     staff_names = {
         int(row["id"]): str(row.get("name") or "")
         for row in staff_rows
@@ -351,6 +352,16 @@ def _candidate_options(candidate_rows, staff_rows, required_service_dates, segme
         option["available_ranges"].append(
             {"start_date": start_date.isoformat(), "end_date": end_date.isoformat()}
         )
+    if include_unavailable:
+        selected_staff = segment_drafts[0].get("staff_id") if segment_drafts else None
+        for staff_id, staff_name in staff_names.items():
+            if selected_staff is not None and staff_id != selected_staff:
+                continue
+            options.setdefault((0, staff_id), {
+                "segment_index": 0, "staff_id": staff_id, "staff_name": staff_name,
+                "coverage_day_count": 0, "available_ranges": [],
+                "filter_results": filter_results.get(staff_id, {}),
+            })
     return [_coverage_view(options[key], required_service_dates, segment_drafts,
                            scheduling_version) for key in sorted(options)]
 
@@ -504,6 +515,7 @@ def _active_waiting_buffer_days(rows, window_start, window_end):
                 "staff_id": item.staff_id,
                 "lock_date": item.occupancy_date.isoformat(),
                 "active_marker": 1,
+                "reason_code": "buffer",
             }
             for item in occupancy
             if item.kind is WaitingDepositOccupancyKind.BUFFER

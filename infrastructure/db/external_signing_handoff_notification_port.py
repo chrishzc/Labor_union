@@ -12,9 +12,11 @@ from infrastructure.mysql.line_delivery_task_repository import (
 )
 from shared_kernel.identities import IdempotencyKey
 from subsystems.contract_signing.external_signing_contracts import (
+    ExternalCompletionReportScope,
     ExternalSigningTypedError,
 )
 from subsystems.contract_signing.external_signing_workflow import (
+    ManualSigningNotificationTarget,
     RecordExternalSigningHandoff,
 )
 from subsystems.contract_signing.line_delivery import (
@@ -37,7 +39,7 @@ class MySqlExternalSigningHandoffNotificationPort:
         self,
         command: RecordExternalSigningHandoff,
         facts: ExternalSigningSessionFacts,
-    ) -> None:
+    ) -> tuple[ManualSigningNotificationTarget, ...]:
         client_document_id = facts.client_document_version_id
         if client_document_id is None:
             raise self._blocked(
@@ -64,6 +66,7 @@ class MySqlExternalSigningHandoffNotificationPort:
         )
 
         prepared = []
+        manual_targets = []
         for subject_type, subject_reference, document_id, segment_id in targets:
             if self._unsigned_repository.load_current_pdf(facts.case_no, document_id) is None:
                 label = "客戶" if subject_type == "customer" else f"月嫂 {subject_reference}"
@@ -78,6 +81,14 @@ class MySqlExternalSigningHandoffNotificationPort:
                     subject_reference=subject_reference,
                 )
             except ValueError as error:
+                if str(error) == "contract_line_recipient_unbound":
+                    target = ManualSigningNotificationTarget(
+                        ExternalCompletionReportScope.CLIENT if subject_type == "customer" else ExternalCompletionReportScope.STAFF,
+                        subject_reference,
+                    )
+                    if target not in manual_targets:
+                        manual_targets.append(target)
+                    continue
                 label = "客戶" if subject_type == "customer" else f"月嫂 {subject_reference}"
                 raise self._blocked(str(error), f"{label} LINE 身分尚未完成正確綁定。") from error
             prepared.append((recipient, subject_type, document_id, segment_id))
@@ -109,6 +120,7 @@ class MySqlExternalSigningHandoffNotificationPort:
                     correlation_id=command.correlation_id,
                 )
             self._delivery_tasks.enqueue(request)
+        return tuple(manual_targets)
 
     def _binding(self, subject_type: str, subject_reference: str) -> ContractLineBinding:
         with self._connection.cursor() as cursor:

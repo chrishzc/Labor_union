@@ -42,6 +42,7 @@
   precontract service commitment。
 - 訂金逾期只形成異常，不自動釋放。
 - 每個尚未開始服務的 assignment 預計結束日後七天為獨立 buffer；全案第一個正式服務開始時同交易解除全部 buffer。Current Query 亦須以全案第一個正式服務時刻排除已開始／已完成案件的 stale active buffer root，不得讓 persistence marker 覆蓋 `planned／active／completed` lifecycle。
+- 七天 buffer 只作協調提醒；與其他案件 buffer 或實際服務重疊不阻擋 Query、聯繫、等待訂金鎖或正式排班。正式寫入仍須 fresh-lock 驗證完整 assignment interval／實際服務／有效 lock／不可服務事實；實際占用衝突必須零寫入，不提供強制重疊放行。buffer facts 與歷史 projection 保留，buffer 不再混入新的 hard occupancy projection。
 - 國定假日不自動雙倍薪；只接受明確 special-pay event。
 - 全部服務完成後不得取消訂單或縮減月嫂完整履約薪資。
 
@@ -53,7 +54,7 @@
 
 依第 `24` 份正式規格，Availability Query 亦讀取 current `long_leave`／
 `temporarily_unavailable` 期間。與服務需求日期重疊時屬 actual conflict；七日 buffer 必須獨立回傳
-`requires_manual_confirmation`，不得與不可服務期間或正式占用混成同一 hard block。不可服務期間
+`buffer` 提醒，無需額外放行命令，不得與不可服務期間或正式占用混成同一 hard block。不可服務期間
 由 Scheduling 的 versioned Query 同時供 Matching 與 Calendar 使用。
 
 ### Matching Segment Plan
@@ -65,6 +66,7 @@
 只提供 Acquire、Release-to-unbound、Cancel、Convert。訂金有效性由 Client Finance typed port 提供。服務區間與 buffer 同時查衝突，每次轉移保存事件。
 lock day 只對應該分段的正式服務日；固定週休不是 lock day。七日 buffer 是獨立衍生占用，
 不得被 current projection 當成正式服務日，亦不得要求固定週休有 lock day。
+Preview 的 buffer conflict 是非阻擋提醒；只有 actual service／assignment／active lock conflict 阻擋 Acquire。buffer 不使用跨 assignment 的 staff/date 唯一限制；實際服務保留唯一限制。
 
 ### Assignment Plan
 
@@ -87,7 +89,7 @@ lock day 只對應該分段的正式服務日；固定週休不是 lock day。�
    不得換人、重新媒合、跨段挪用服務量或沿用只綁舊日期的假日上班同意。
 5. 全部 segments 的連續區間、每日唯一 ownership、總服務量、actual hours、人員占用、七日 buffer 與
    generation version 必須重新驗證；`actual_end_date` 取最後一段 `assigned_end_date`。任何衝突皆在
-   Preview 顯示並使 Apply 零寫入。
+   Preview 顯示；actual conflict 使 Apply 零寫入，七天 buffer overlap 僅提醒。
 
 Holiday／人工調整 facts 與其版本必須納入 Preview fingerprint；Apply 在同一 outer Unit of Work fresh-lock
 相同 owner facts 後重算，不得由 UI 提供日曆結果，也不得以另一條 DB connection 讀取未綁定版本的假日集合。
@@ -462,12 +464,13 @@ Stable errors：
 
 Scheduling／Matching 擁有 case-owned Candidate Contact Pool。它只擁有候選月嫂聯繫事實：候選人、完整 coverage evidence、資訊-1／資訊-2 發送事件與 delivery 狀態、月嫂意願、拒絕理由、人工補登 actor／時間。它不是 `caregiver_matching_plans` 或 `caregiver_matching_plan_segments`，不得建立 availability lock、正式 assignment、staff schedule、日期表 snapshot、客戶履歷傳送或正式指派資格。
 
-- 一次可加入多位對目前預計服務日期有完整 coverage 的候選人；加入與每次資訊發送皆須 fresh-read availability。
+- 一次可加入多位候選人；對預計服務日期有部分或全部檔期衝突的人選仍可聯繫協調。加入與每次資訊發送皆須 fresh-read availability，保留目前 coverage evidence，不得把有衝突的人選標示成完整無衝突。
 - 初步意願詢問以預計起訖期間檢查檔期，不要求 BeClass 或正式服務日期精算完成；未填需求仍為未知、顯示待確認，不得寫成 false。已填需求才參與啟用的查詢篩選。加入／聯絡時重新檢查占用與不可服務期間，不重新套用使用者查詢偏好；詢問 coverage 不形成正式服務日、工時、薪資、assignment 或方案資格。正式 matching plan 仍須原有正式日期及完整 fresh-fact gates。
 - 發送資訊-1／資訊-2 是詢問接案意願的唯一聯繫動作；不得另建沒有資料效果的「聯繫與確認意願」命令。
 - 每位候選人的意願及兩種資訊寄送紀錄獨立、append-only 且以 candidate entry／event key 冪等；不得由同案其他候選人覆蓋。
 - 候選池 readback 必須以 nullable `latest_willingness_event_id` 回傳該候選人最新有效意願事件的既有 event ID。客戶端只有在此 ID 與自己收到的意願回條相同、且意願值相同時，才能確認該次回覆已儲存；較新的同值或異值事件只代表最新狀態，不得確認原操作。
-- 客戶同意日期調整、且 Orders Terms 已以同日差平移未指派案件的 planned 起訖日後，重新聯繫原候選人必須在同一 Scheduling transaction 以 current Orders 起訖日重驗完整 coverage；通過後更新 candidate contact period／coverage fingerprint、追加前後日期事件並排入新資訊卡，任一步失敗皆 rollback。這不建立正式服務日或 assignment。
+- 客戶同意日期調整、且 Orders Terms 已以同日差平移未指派案件的 planned 起訖日後，重新聯繫原候選人必須在同一 Scheduling transaction 以 current Orders 起訖日重驗 coverage；有衝突仍可繼續協調，更新 candidate contact period／coverage fingerprint、追加前後日期事件並排入新資訊卡，任一步失敗皆 rollback。這不建立正式服務日或 assignment。
+- 未正式排班即可預覽每週服務時間。未有 confirmed service dates 時依候選期間、週休及特殊休假推算並核對 Orders 約定服務天數；不足或超出必須明示，不能靜默視為履約完整。已有 current confirmed dates 時使用精確服務日，包括人工協調的週末上班；同時顯示延長後的 actual conflict 與 buffer 提醒。協調後須重新確認服務日期；正式排班仍以 current owner dates 驗證服務量及實際占用。
 - 管理員僅能從 `willing` 候選人選定一位，重新檢查可用性後建立一個 segment 的正式 matching plan。
 - 正式 matching-plan create command 必須帶 1–191 字元的 `event_key`，並以案件、依序的完整 segments、actor 與 `as_of` 組成 immutable command fingerprint。Apply 先鎖定案件 root、再以 `event_key` 鎖定並重查 receipt；同一完整原命令只回傳已保存的 plan／version／status／segments receipt，不重新檢查已被原命令改變的 availability，也不得依 current plan 或建立時間推測舊結果。相同 key 搭配任一不同 command fact 必須衝突且零寫入。新的 plan、segments 與 receipt 必須在同一 outer UoW 提交；既有歷史 plan 不得回填或臆造 receipt。receipt Query 只證明原命令 identity，unknown-result recovery 仍須另讀 current matching-plan owner state 後才可結束觀測。
 - 多位月嫂共同服務仍是顯式 multi-caregiver fallback plan，不能由候選聯繫池直接轉換。

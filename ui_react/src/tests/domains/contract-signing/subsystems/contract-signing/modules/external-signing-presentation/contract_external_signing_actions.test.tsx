@@ -256,6 +256,61 @@ function handoffRecoveryQuery(caseNo: string, statusVersion = 0) {
 }
 
 describe('ContractExternalSigningActions', () => {
+  it('allows an unbound handoff and keeps manual notification targets after refreshing', async () => {
+    const before = {
+      ...query, state: 'staff_reporting' as const, status_version: 0,
+      handoff_recorded: false, commitment_id: null,
+      staff_targets: query.staff_targets.map((target) => ({ ...target, reported: false })),
+      client_target: { ...query.client_target, reported: false },
+    };
+    const manualTargets = [
+      { scope: 'client' as const, subject_reference: 'CLIENT-001' },
+      { scope: 'staff' as const, subject_reference: 'STAFF-009' },
+    ];
+    const after = { ...before, status_version: 1, handoff_recorded: true, manual_notification_targets: manualTargets };
+    vi.mocked(contractExternalSigningClient.query).mockResolvedValueOnce(before).mockResolvedValue(after);
+    const recovery = {
+      ...handoffRecoveryQuery('CASE-001'),
+      targets: recoveryQuery.targets.map((target) => ({
+        ...target, reported: false, legacy_document_version_id: null, signing_event_id: null,
+        command_receipt_id: null, legacy_media_sha256: null,
+      })),
+    };
+    vi.mocked(contractExternalSigningClient.queryLegacyRecovery).mockResolvedValueOnce(recovery)
+      .mockResolvedValue({ ...recovery, status_version: 1 });
+    vi.mocked(contractExternalSigningClient.recordHandoff).mockResolvedValue({
+      session_id: sessionId, resulting_status_version: 1, replayed: false, manual_notification_targets: manualTargets,
+    });
+    const first = render(<ContractExternalSigningActions caseNo="CASE-001" />);
+    expect(await screen.findByText('待送交外部簽署平台')).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: '歷史簽回人工修復' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '確認契約已送交外部簽署平台' }));
+    expect(await screen.findByRole('region', { name: '需人工通知的簽約對象' })).toHaveTextContent('客戶 CLIENT-001：需人工通知簽約');
+    expect(screen.getByRole('region', { name: '最終簽署 PDF 納管' })).toBeInTheDocument();
+    first.unmount();
+    render(<ContractExternalSigningActions caseNo="CASE-001" />);
+    expect(await screen.findByRole('region', { name: '需人工通知的簽約對象' })).toHaveTextContent('月嫂 STAFF-009：需人工通知簽約');
+    expect(screen.queryByRole('region', { name: '歷史簽回人工修復' })).not.toBeInTheDocument();
+  });
+
+  it('shows missing PDF as the handoff blocker instead of claiming that versions changed', async () => {
+    const before = {
+      ...query, state: 'staff_reporting' as const, status_version: 0,
+      handoff_recorded: false, commitment_id: null,
+      staff_targets: query.staff_targets.map((target) => ({ ...target, reported: false })),
+      client_target: { ...query.client_target, reported: false },
+    };
+    vi.mocked(contractExternalSigningClient.query).mockResolvedValue(before);
+    vi.mocked(contractExternalSigningClient.queryLegacyRecovery).mockResolvedValue(handoffRecoveryQuery('CASE-001'));
+    vi.mocked(contractExternalSigningClient.recordHandoff).mockRejectedValue(new ApiHttpError(
+      409, 'contract_unsigned_pdf_missing', '月嫂 STAFF-009 未簽契約 PDF 尚未備妥。',
+    ));
+    render(<ContractExternalSigningActions caseNo="CASE-001" />);
+    fireEvent.click(await screen.findByRole('button', { name: '確認契約已送交外部簽署平台' }));
+    expect(await screen.findByText('月嫂 STAFF-009 未簽契約 PDF 尚未備妥。')).toBeInTheDocument();
+    expect(screen.queryByText('簽約資料已變更，請重新查詢後再檢查影響。')).not.toBeInTheDocument();
+  });
+
   beforeEach(() => {
     vi.resetAllMocks();
     orderMutationFlowStore.clearAll();

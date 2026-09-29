@@ -311,13 +311,29 @@ class MySqlMatchingNotificationRepository:
 
     def candidate_weekly_service_preview(
         self, case_no: str, candidate_id: int,
-    ) -> tuple[dict[str, object], ...]:
+    ) -> dict[str, object]:
         with self._connection.cursor() as cursor:
             cursor.execute(_CANDIDATE_WEEKLY_FACTS_SQL, (candidate_id, case_no))
             row = cursor.fetchone()
+            cursor.execute(
+                "SELECT d.service_date FROM confirmed_service_date_versions v "
+                "JOIN confirmed_service_date_days d ON d.confirmed_version_id=v.id "
+                "WHERE v.case_no=%s AND v.is_current=1 ORDER BY d.ordinal", (case_no,),
+            )
+            confirmed_dates = frozenset(_date(item["service_date"]) for item in cursor.fetchall())
         if not isinstance(row, Mapping):
             raise LookupError("candidate contact not found")
-        return _proposed_weekly_rows((dict(row),))
+        segment = dict(row)
+        if confirmed_dates:
+            segment.update(assigned_start_date=min(confirmed_dates),
+                           assigned_end_date=max(confirmed_dates), service_dates=confirmed_dates)
+        rows = _proposed_weekly_rows((segment,))
+        return {
+            "rows": rows, "required_service_days": row.get("service_days"),
+            "projected_service_days": sum(item["weekly_work_days"] for item in rows),
+            "date_basis": "confirmed" if confirmed_dates else "planned",
+            "staff_id": int(row["staff_id"]),
+        }
 
     def customer_confirmation_preview(
         self, case_no: str, plan_id: int,
@@ -656,6 +672,7 @@ def _proposed_weekly_rows(segments):
             weekly_rest_days=frozenset(_json_ints(item.get("weekly_rest_days"))),
             service_hours_per_day=float(item["service_hours_per_day"]),
             special_rest_dates=special_dates,
+            service_dates=_json_dates(item["service_dates"]) if item.get("service_dates") is not None else None,
         ) for item in segments
     )
     source = {int(item["segment_id"]): item for item in segments}
@@ -805,7 +822,11 @@ FROM caregiver_matching_plan_segments s JOIN staff st ON st.id=s.staff_id
 WHERE s.plan_id=%s ORDER BY s.segment_order"""
 _CONFIRMATION_SCHEDULE_FACTS_SQL = """SELECT segment.id AS segment_id,segment.staff_id,
 segment.assigned_start_date,segment.assigned_end_date,plan.case_no,client.name AS client_name,
-staff.name AS staff_name,staff.weekly_rest_days,orders.custom_rest_dates,orders.service_hours_per_day
+staff.name AS staff_name,staff.weekly_rest_days,orders.custom_rest_dates,orders.service_hours_per_day,
+(SELECT JSON_ARRAYAGG(d.service_date) FROM confirmed_service_date_versions v
+ JOIN confirmed_service_date_days d ON d.confirmed_version_id=v.id
+ WHERE v.case_no=plan.case_no AND v.is_current=1
+ AND d.service_date BETWEEN segment.assigned_start_date AND segment.assigned_end_date) AS service_dates
 FROM caregiver_matching_plans plan JOIN caregiver_matching_plan_segments segment ON segment.plan_id=plan.id
 JOIN orders ON orders.case_no=plan.case_no JOIN clients client ON client.id=orders.client_id
 JOIN staff ON staff.id=segment.staff_id WHERE plan.id=%s AND plan.case_no=%s
@@ -813,7 +834,7 @@ ORDER BY segment.segment_order,segment.id"""
 _CANDIDATE_WEEKLY_FACTS_SQL = """SELECT entry.id AS segment_id,entry.staff_id,
 entry.service_start_date AS assigned_start_date,entry.service_end_date AS assigned_end_date,
 pool.case_no,client.name AS client_name,staff.name AS staff_name,staff.weekly_rest_days,
-orders.custom_rest_dates,orders.service_hours_per_day
+orders.custom_rest_dates,orders.service_hours_per_day,orders.service_days
 FROM caregiver_candidate_contact_entries entry
 JOIN caregiver_candidate_contact_pools pool ON pool.id=entry.pool_id
 JOIN orders ON orders.case_no=pool.case_no JOIN clients client ON client.id=orders.client_id

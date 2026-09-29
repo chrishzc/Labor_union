@@ -128,8 +128,11 @@ def _extract_blocked_days(
         work_date = _as_strict_date(row.get("work_date"), "assignment_schedule_days.work_date")
         assignment_id = row.get("assignment_id")
         reason_code = row.get("reason_code", "schedule")
-        if reason_code not in {"assignment", "schedule", "staff_unavailability"}:
+        if reason_code not in {"assignment", "schedule", "staff_unavailability", "buffer"}:
             raise ValueError("assignment_schedule_days.reason_code is invalid")
+        if reason_code == "buffer":
+            requires_review.append((staff_id_int, work_date, "buffer"))
+            continue
 
         availability_block_id = row.get("availability_block_id")
         if availability_block_id is not None:
@@ -154,7 +157,7 @@ def _extract_blocked_days(
             raise ValueError("active_lock_days item must be an object")
         _ensure_no_unknown_fields(
             row,
-            {"active_marker", "staff_id", "work_date", "lock_date"},
+            {"active_marker", "staff_id", "work_date", "lock_date", "reason_code"},
             "active_lock_days item",
         )
         staff_id = _as_positive_int(row.get("staff_id"), "active_lock_days.staff_id")
@@ -172,6 +175,13 @@ def _extract_blocked_days(
             continue
         if active_marker != 1:
             raise ValueError("active_lock_days.active_marker must be 0, null, or integer 1")
+
+        reason_code = row.get("reason_code", "active_lock")
+        if reason_code not in {"active_lock", "buffer"}:
+            raise ValueError("active_lock_days.reason_code is invalid")
+        if reason_code == "buffer":
+            requires_review.append((staff_id, work_date, "buffer"))
+            continue
 
         staff_blocked = blocked.setdefault(staff_id, {})
         staff_blocked.setdefault(work_date, set()).add("active_lock")

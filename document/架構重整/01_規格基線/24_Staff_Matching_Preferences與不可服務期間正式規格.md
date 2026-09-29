@@ -131,8 +131,7 @@ focused tests 與 React build 通過，畫面不含 raw workbook／JSON、來源
   `committed_schedule_exception`。Calendar必須同時顯示不可服務宣告與既有服務承諾，不得把任一方隱藏；
   如需改變既有服務，只能另走leave／substitution／cancellation正式流程。
 - 取消只追加事件，不刪除或改寫原期間。
-- Matching 勾選「檔期」時，與 current 不可服務期間重疊者為 actual conflict 並排除；取消檔期 filter
-  時可顯示，但必須保留警告，且建立 matching plan／assignment 前仍 fail closed。
+- 初步 Candidate Contact Pool 可保留與 current 不可服務期間或檔期重疊的人選並提示協調；這不是正式可用性或排班資格。正式 Matching Query 仍回傳 actual conflict，建立 matching plan／assignment 前須完成日期協調並 fresh-read，實際占用衝突仍 fail closed。七天 buffer overlap 只提醒。
 - Calendar 顯示 `staff_unavailability`、kind、期間及原因；不可呈現為可接案、正式服務日、請假代班
   outcome 或七日 buffer。
 - 請假／代班是已有 assignment 後的服務異動；本功能是尚未指派前的個人 availability，兩者不可互相取代。

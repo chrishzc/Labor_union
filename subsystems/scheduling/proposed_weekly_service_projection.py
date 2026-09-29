@@ -23,6 +23,7 @@ class ProposedServiceSegment:
     weekly_rest_days: frozenset[int]
     service_hours_per_day: float | int
     special_rest_dates: frozenset[date] = frozenset()
+    service_dates: frozenset[date] | None = None
 
     def __post_init__(self) -> None:
         if self.segment_id <= 0 or self.staff_id <= 0:
@@ -31,6 +32,10 @@ class ProposedServiceSegment:
             raise ValueError("proposed service segment facts are invalid")
         if any(day < 0 or day > 6 for day in self.weekly_rest_days):
             raise ValueError("weekly rest days are invalid")
+        if self.service_dates is not None and any(
+            value < self.start_date or value > self.end_date for value in self.service_dates
+        ):
+            raise ValueError("confirmed service dates are outside the segment")
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,8 +59,9 @@ def project_proposed_weekly_service(
             start, end = max(segment.start_date, week_start), min(segment.end_date, week_end)
             work_days = sum(
                 1 for value in _dates_between(start, end)
-                if value.weekday() not in segment.weekly_rest_days
-                and value not in segment.special_rest_dates
+                if (value in segment.service_dates if segment.service_dates is not None
+                    else value.weekday() not in segment.weekly_rest_days
+                    and value not in segment.special_rest_dates)
             )
             rows.append(ProposedWeeklyServiceRow(
                 segment.segment_id, segment.staff_id, week_start, week_end,

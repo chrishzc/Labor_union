@@ -201,7 +201,9 @@ export function OrderInformationSheets({ caseNo, assignments, initialKind = 1, o
       {kind === 1 ? <ContractScreenshot sections={projectedSections(1, result)} /> : <><InformationSections sections={projectedSections(2, result)} /><IngredientsReference /></>}
     </article>}
     {kind === 'weekly' && targets.length > 0 && <p role="status">目前方案的每週服務內容可在「推薦月嫂」步驟直接預覽。</p>}
-    {weeklyPreview && <article className="order-information-paper"><header><h3>每週服務時間說明</h3><p>依目前候選服務期間推算，尚未建立正式排班。</p></header>
+    {weeklyPreview && <article className="order-information-paper"><header><h3>每週服務時間說明</h3><p>{weeklyPreview.date_basis === 'confirmed' ? '依目前已確認服務日期計算' : '依目前候選服務期間與休假推算'}，尚未建立正式排班。</p></header>
+      <p>約定服務 {weeklyPreview.required_service_days ?? '待確認'} 天；目前日期可提供 {weeklyPreview.projected_service_days} 天。</p>
+      {weeklyPreview.warnings.map((warning) => <p role="status" key={warning}>{warning}</p>)}
       <div className="formal-recommendation-weekly-preview"><table><thead><tr><th>週次</th><th>服務人員</th><th>期間</th><th>工作日</th><th>時數</th></tr></thead><tbody>
         {weeklyPreview.rows.map((item) => <tr key={item.serial_number}><td>第 {item.serial_number} 週</td><td>{item.staff_name}</td><td>{item.week_start_date}～{item.week_end_date}</td><td>{item.weekly_work_days} 日</td><td>{item.weekly_hours} 小時</td></tr>)}
       </tbody></table></div>

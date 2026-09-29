@@ -1,0 +1,425 @@
+{
+  "columns": [
+    {
+      "table_name": "scheduling_buffer_days",
+      "column_name": "id",
+      "column_type": "bigint",
+      "is_nullable": "NO",
+      "column_default": null,
+      "extra": "auto_increment",
+      "generation_expression": ""
+    },
+    {
+      "table_name": "scheduling_buffer_days",
+      "column_name": "generation_id",
+      "column_type": "bigint",
+      "is_nullable": "NO",
+      "column_default": null,
+      "extra": "",
+      "generation_expression": ""
+    },
+    {
+      "table_name": "scheduling_buffer_days",
+      "column_name": "assignment_id",
+      "column_type": "bigint",
+      "is_nullable": "NO",
+      "column_default": null,
+      "extra": "",
+      "generation_expression": ""
+    },
+    {
+      "table_name": "scheduling_buffer_days",
+      "column_name": "staff_id",
+      "column_type": "int",
+      "is_nullable": "NO",
+      "column_default": null,
+      "extra": "",
+      "generation_expression": ""
+    },
+    {
+      "table_name": "scheduling_buffer_days",
+      "column_name": "buffer_date",
+      "column_type": "date",
+      "is_nullable": "NO",
+      "column_default": null,
+      "extra": "",
+      "generation_expression": ""
+    },
+    {
+      "table_name": "scheduling_buffer_days",
+      "column_name": "status",
+      "column_type": "enum('active','released','cancelled')",
+      "is_nullable": "NO",
+      "column_default": "active",
+      "extra": "",
+      "generation_expression": ""
+    },
+    {
+      "table_name": "scheduling_buffer_days",
+      "column_name": "active_marker",
+      "column_type": "tinyint(1)",
+      "is_nullable": "YES",
+      "column_default": "1",
+      "extra": "",
+      "generation_expression": ""
+    },
+    {
+      "table_name": "scheduling_buffer_days",
+      "column_name": "released_by",
+      "column_type": "varchar(100)",
+      "is_nullable": "YES",
+      "column_default": null,
+      "extra": "",
+      "generation_expression": ""
+    },
+    {
+      "table_name": "scheduling_buffer_days",
+      "column_name": "released_at",
+      "column_type": "timestamp",
+      "is_nullable": "YES",
+      "column_default": null,
+      "extra": "",
+      "generation_expression": ""
+    },
+    {
+      "table_name": "scheduling_buffer_days",
+      "column_name": "created_at",
+      "column_type": "timestamp",
+      "is_nullable": "NO",
+      "column_default": "CURRENT_TIMESTAMP",
+      "extra": "DEFAULT_GENERATED",
+      "generation_expression": ""
+    },
+    {
+      "table_name": "scheduling_effective_occupancy",
+      "column_name": "staff_id",
+      "column_type": "int",
+      "is_nullable": "NO",
+      "column_default": null,
+      "extra": "",
+      "generation_expression": ""
+    },
+    {
+      "table_name": "scheduling_effective_occupancy",
+      "column_name": "occupancy_date",
+      "column_type": "date",
+      "is_nullable": "NO",
+      "column_default": null,
+      "extra": "",
+      "generation_expression": ""
+    },
+    {
+      "table_name": "scheduling_effective_occupancy",
+      "column_name": "generation_id",
+      "column_type": "bigint",
+      "is_nullable": "NO",
+      "column_default": null,
+      "extra": "",
+      "generation_expression": ""
+    },
+    {
+      "table_name": "scheduling_effective_occupancy",
+      "column_name": "assignment_id",
+      "column_type": "bigint",
+      "is_nullable": "NO",
+      "column_default": null,
+      "extra": "",
+      "generation_expression": ""
+    },
+    {
+      "table_name": "scheduling_effective_occupancy",
+      "column_name": "occupancy_type",
+      "column_type": "enum('assignment_interval','buffer')",
+      "is_nullable": "NO",
+      "column_default": null,
+      "extra": "",
+      "generation_expression": ""
+    },
+    {
+      "table_name": "scheduling_effective_occupancy",
+      "column_name": "created_at",
+      "column_type": "timestamp",
+      "is_nullable": "NO",
+      "column_default": "CURRENT_TIMESTAMP",
+      "extra": "DEFAULT_GENERATED",
+      "generation_expression": ""
+    }
+  ],
+  "indexes": [
+    {
+      "table_name": "scheduling_buffer_days",
+      "index_name": "fk_scheduling_buffer_assignment",
+      "non_unique": 1,
+      "columns": "assignment_id,generation_id,staff_id"
+    },
+    {
+      "table_name": "scheduling_buffer_days",
+      "index_name": "fk_scheduling_buffer_generation",
+      "non_unique": 1,
+      "columns": "generation_id"
+    },
+    {
+      "table_name": "scheduling_buffer_days",
+      "index_name": "PRIMARY",
+      "non_unique": 0,
+      "columns": "id"
+    },
+    {
+      "table_name": "scheduling_buffer_days",
+      "index_name": "uq_scheduling_buffer_assignment_date",
+      "non_unique": 0,
+      "columns": "assignment_id,buffer_date"
+    },
+    {
+      "table_name": "scheduling_buffer_days",
+      "index_name": "uq_scheduling_buffer_staff_date_active",
+      "non_unique": 0,
+      "columns": "staff_id,buffer_date,active_marker"
+    },
+    {
+      "table_name": "scheduling_effective_occupancy",
+      "index_name": "fk_scheduling_occupancy_assignment",
+      "non_unique": 1,
+      "columns": "assignment_id,generation_id,staff_id"
+    },
+    {
+      "table_name": "scheduling_effective_occupancy",
+      "index_name": "idx_scheduling_effective_occupancy_generation",
+      "non_unique": 1,
+      "columns": "generation_id"
+    },
+    {
+      "table_name": "scheduling_effective_occupancy",
+      "index_name": "PRIMARY",
+      "non_unique": 0,
+      "columns": "staff_id,occupancy_date"
+    }
+  ],
+  "triggers": [],
+  "views": [],
+  "constraints": [
+    {
+      "table_name": "scheduling_buffer_days",
+      "constraint_name": "chk_scheduling_buffer_state",
+      "constraint_type": "CHECK",
+      "enforced": "YES",
+      "check_clause": "(((`status` = _utf8mb4\\'active\\') and (`active_marker` = 1) and (`released_by` is null) and (`released_at` is null)) or ((`status` in (_utf8mb4\\'released\\',_utf8mb4\\'cancelled\\')) and (`active_marker` is null) and (char_length(trim(`released_by`)) > 0) and (`released_at` is not null)))"
+    },
+    {
+      "table_name": "scheduling_buffer_days",
+      "constraint_name": "fk_scheduling_buffer_assignment",
+      "constraint_type": "FOREIGN KEY",
+      "enforced": "YES",
+      "check_clause": null
+    },
+    {
+      "table_name": "scheduling_buffer_days",
+      "constraint_name": "fk_scheduling_buffer_generation",
+      "constraint_type": "FOREIGN KEY",
+      "enforced": "YES",
+      "check_clause": null
+    },
+    {
+      "table_name": "scheduling_buffer_days",
+      "constraint_name": "PRIMARY",
+      "constraint_type": "PRIMARY KEY",
+      "enforced": "YES",
+      "check_clause": null
+    },
+    {
+      "table_name": "scheduling_buffer_days",
+      "constraint_name": "uq_scheduling_buffer_assignment_date",
+      "constraint_type": "UNIQUE",
+      "enforced": "YES",
+      "check_clause": null
+    },
+    {
+      "table_name": "scheduling_buffer_days",
+      "constraint_name": "uq_scheduling_buffer_staff_date_active",
+      "constraint_type": "UNIQUE",
+      "enforced": "YES",
+      "check_clause": null
+    },
+    {
+      "table_name": "scheduling_effective_occupancy",
+      "constraint_name": "fk_scheduling_occupancy_assignment",
+      "constraint_type": "FOREIGN KEY",
+      "enforced": "YES",
+      "check_clause": null
+    },
+    {
+      "table_name": "scheduling_effective_occupancy",
+      "constraint_name": "fk_scheduling_occupancy_generation",
+      "constraint_type": "FOREIGN KEY",
+      "enforced": "YES",
+      "check_clause": null
+    },
+    {
+      "table_name": "scheduling_effective_occupancy",
+      "constraint_name": "PRIMARY",
+      "constraint_type": "PRIMARY KEY",
+      "enforced": "YES",
+      "check_clause": null
+    }
+  ],
+  "key_columns": [
+    {
+      "table_name": "scheduling_buffer_days",
+      "constraint_name": "fk_scheduling_buffer_assignment",
+      "column_name": "assignment_id",
+      "ordinal_position": 1,
+      "referenced_table_name": "case_staff_assignments",
+      "referenced_column_name": "id"
+    },
+    {
+      "table_name": "scheduling_buffer_days",
+      "constraint_name": "fk_scheduling_buffer_assignment",
+      "column_name": "generation_id",
+      "ordinal_position": 2,
+      "referenced_table_name": "case_staff_assignments",
+      "referenced_column_name": "generation_id"
+    },
+    {
+      "table_name": "scheduling_buffer_days",
+      "constraint_name": "fk_scheduling_buffer_assignment",
+      "column_name": "staff_id",
+      "ordinal_position": 3,
+      "referenced_table_name": "case_staff_assignments",
+      "referenced_column_name": "staff_id"
+    },
+    {
+      "table_name": "scheduling_buffer_days",
+      "constraint_name": "fk_scheduling_buffer_generation",
+      "column_name": "generation_id",
+      "ordinal_position": 1,
+      "referenced_table_name": "scheduling_generations",
+      "referenced_column_name": "id"
+    },
+    {
+      "table_name": "scheduling_buffer_days",
+      "constraint_name": "PRIMARY",
+      "column_name": "id",
+      "ordinal_position": 1,
+      "referenced_table_name": null,
+      "referenced_column_name": null
+    },
+    {
+      "table_name": "scheduling_buffer_days",
+      "constraint_name": "uq_scheduling_buffer_assignment_date",
+      "column_name": "assignment_id",
+      "ordinal_position": 1,
+      "referenced_table_name": null,
+      "referenced_column_name": null
+    },
+    {
+      "table_name": "scheduling_buffer_days",
+      "constraint_name": "uq_scheduling_buffer_assignment_date",
+      "column_name": "buffer_date",
+      "ordinal_position": 2,
+      "referenced_table_name": null,
+      "referenced_column_name": null
+    },
+    {
+      "table_name": "scheduling_buffer_days",
+      "constraint_name": "uq_scheduling_buffer_staff_date_active",
+      "column_name": "staff_id",
+      "ordinal_position": 1,
+      "referenced_table_name": null,
+      "referenced_column_name": null
+    },
+    {
+      "table_name": "scheduling_buffer_days",
+      "constraint_name": "uq_scheduling_buffer_staff_date_active",
+      "column_name": "buffer_date",
+      "ordinal_position": 2,
+      "referenced_table_name": null,
+      "referenced_column_name": null
+    },
+    {
+      "table_name": "scheduling_buffer_days",
+      "constraint_name": "uq_scheduling_buffer_staff_date_active",
+      "column_name": "active_marker",
+      "ordinal_position": 3,
+      "referenced_table_name": null,
+      "referenced_column_name": null
+    },
+    {
+      "table_name": "scheduling_effective_occupancy",
+      "constraint_name": "fk_scheduling_occupancy_assignment",
+      "column_name": "assignment_id",
+      "ordinal_position": 1,
+      "referenced_table_name": "case_staff_assignments",
+      "referenced_column_name": "id"
+    },
+    {
+      "table_name": "scheduling_effective_occupancy",
+      "constraint_name": "fk_scheduling_occupancy_assignment",
+      "column_name": "generation_id",
+      "ordinal_position": 2,
+      "referenced_table_name": "case_staff_assignments",
+      "referenced_column_name": "generation_id"
+    },
+    {
+      "table_name": "scheduling_effective_occupancy",
+      "constraint_name": "fk_scheduling_occupancy_assignment",
+      "column_name": "staff_id",
+      "ordinal_position": 3,
+      "referenced_table_name": "case_staff_assignments",
+      "referenced_column_name": "staff_id"
+    },
+    {
+      "table_name": "scheduling_effective_occupancy",
+      "constraint_name": "fk_scheduling_occupancy_generation",
+      "column_name": "generation_id",
+      "ordinal_position": 1,
+      "referenced_table_name": "scheduling_generations",
+      "referenced_column_name": "id"
+    },
+    {
+      "table_name": "scheduling_effective_occupancy",
+      "constraint_name": "PRIMARY",
+      "column_name": "staff_id",
+      "ordinal_position": 1,
+      "referenced_table_name": null,
+      "referenced_column_name": null
+    },
+    {
+      "table_name": "scheduling_effective_occupancy",
+      "constraint_name": "PRIMARY",
+      "column_name": "occupancy_date",
+      "ordinal_position": 2,
+      "referenced_table_name": null,
+      "referenced_column_name": null
+    }
+  ],
+  "foreign_keys": [
+    {
+      "table_name": "scheduling_buffer_days",
+      "constraint_name": "fk_scheduling_buffer_assignment",
+      "update_rule": "RESTRICT",
+      "delete_rule": "RESTRICT"
+    },
+    {
+      "table_name": "scheduling_buffer_days",
+      "constraint_name": "fk_scheduling_buffer_generation",
+      "update_rule": "RESTRICT",
+      "delete_rule": "RESTRICT"
+    },
+    {
+      "table_name": "scheduling_effective_occupancy",
+      "constraint_name": "fk_scheduling_occupancy_assignment",
+      "update_rule": "RESTRICT",
+      "delete_rule": "RESTRICT"
+    },
+    {
+      "table_name": "scheduling_effective_occupancy",
+      "constraint_name": "fk_scheduling_occupancy_generation",
+      "update_rule": "RESTRICT",
+      "delete_rule": "RESTRICT"
+    }
+  ],
+  "show_create_tables": {
+    "scheduling_buffer_days": "CREATE TABLE `scheduling_buffer_days` (\n  `id` bigint NOT NULL AUTO_INCREMENT,\n  `generation_id` bigint NOT NULL,\n  `assignment_id` bigint NOT NULL,\n  `staff_id` int NOT NULL,\n  `buffer_date` date NOT NULL,\n  `status` enum('active','released','cancelled') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'active',\n  `active_marker` tinyint(1) DEFAULT '1',\n  `released_by` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,\n  `released_at` timestamp NULL DEFAULT NULL,\n  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,\n  PRIMARY KEY (`id`),\n  UNIQUE KEY `uq_scheduling_buffer_assignment_date` (`assignment_id`,`buffer_date`),\n  UNIQUE KEY `uq_scheduling_buffer_staff_date_active` (`staff_id`,`buffer_date`,`active_marker`),\n  KEY `fk_scheduling_buffer_generation` (`generation_id`),\n  KEY `fk_scheduling_buffer_assignment` (`assignment_id`,`generation_id`,`staff_id`),\n  CONSTRAINT `fk_scheduling_buffer_assignment` FOREIGN KEY (`assignment_id`, `generation_id`, `staff_id`) REFERENCES `case_staff_assignments` (`id`, `generation_id`, `staff_id`) ON DELETE RESTRICT ON UPDATE RESTRICT,\n  CONSTRAINT `fk_scheduling_buffer_generation` FOREIGN KEY (`generation_id`) REFERENCES `scheduling_generations` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,\n  CONSTRAINT `chk_scheduling_buffer_state` CHECK ((((`status` = _utf8mb4'active') and (`active_marker` = 1) and (`released_by` is null) and (`released_at` is null)) or ((`status` in (_utf8mb4'released',_utf8mb4'cancelled')) and (`active_marker` is null) and (char_length(trim(`released_by`)) > 0) and (`released_at` is not null))))\n) ENGINE=InnoDB AUTO_INCREMENT=8 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+    "scheduling_effective_occupancy": "CREATE TABLE `scheduling_effective_occupancy` (\n  `staff_id` int NOT NULL,\n  `occupancy_date` date NOT NULL,\n  `generation_id` bigint NOT NULL,\n  `assignment_id` bigint NOT NULL,\n  `occupancy_type` enum('assignment_interval','buffer') COLLATE utf8mb4_unicode_ci NOT NULL,\n  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,\n  PRIMARY KEY (`staff_id`,`occupancy_date`),\n  KEY `idx_scheduling_effective_occupancy_generation` (`generation_id`),\n  KEY `fk_scheduling_occupancy_assignment` (`assignment_id`,`generation_id`,`staff_id`),\n  CONSTRAINT `fk_scheduling_occupancy_assignment` FOREIGN KEY (`assignment_id`, `generation_id`, `staff_id`) REFERENCES `case_staff_assignments` (`id`, `generation_id`, `staff_id`) ON DELETE RESTRICT ON UPDATE RESTRICT,\n  CONSTRAINT `fk_scheduling_occupancy_generation` FOREIGN KEY (`generation_id`) REFERENCES `scheduling_generations` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+  }
+}

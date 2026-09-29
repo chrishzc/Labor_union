@@ -15,6 +15,7 @@
   - `api/schemas/assignment_plan.py`
 
 ## Dependencies
+- 七日 buffer 是獨立提醒 facts，不參與 assignment interval 的 hard occupancy claim；實際服務占用仍唯一。
 - inbound: `orders/order-terms` — Orders Terms workflow 只透過 typed generation candidate 交付排班影響。
 - inbound: Scheduling workflows — 使用 current generation facts 建立正式重建 candidate。
 

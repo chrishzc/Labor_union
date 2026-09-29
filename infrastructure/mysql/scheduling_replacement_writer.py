@@ -209,18 +209,9 @@ def _insert_buffers(cursor, command, generation_id, assignment_ids) -> None:
         f"{assignment.candidate_key}:buffer": assignment.candidate_key
         for assignment in command.candidate.assignments
     }
-    # A multi-day substitute may materialize one assignment per service day.
-    # Buffer occupancy is staff/date-owned, so emitting the same active buffer
-    # once per assignment violates the canonical staff/date uniqueness key.
-    emitted_active: set[tuple[int, object]] = set()
     for buffer in command.candidate.buffers:
         assignment_key = assignment_key_by_buffer[buffer.candidate_key]
         for buffer_date in buffer.dates:
-            if buffer.active:
-                identity = (int(buffer.staff_id), buffer_date)
-                if identity in emitted_active:
-                    continue
-                emitted_active.add(identity)
             _insert_buffer_day(
                 cursor,
                 command,
@@ -415,18 +406,9 @@ def _activate_new_generation(cursor, generation_id) -> None:
 
 
 def _insert_occupancy(cursor, command, generation_id, assignment_ids) -> None:
-    # Contiguous substitute assignments can share a boundary where one
-    # assignment's buffer is the next assignment's service day.  The
-    # effective occupancy projection is staff/date-owned; retain the service
-    # occupancy and suppress the overlapping buffer row.
-    occupancy_rows = list(_assignment_occupancy_rows(command, generation_id, assignment_ids))
-    occupied = {(int(row[0]), row[1]) for row in occupancy_rows}
-    for row in _buffer_occupancy_rows(command, generation_id, assignment_ids):
-        identity = (int(row[0]), row[1])
-        if identity in occupied:
-            continue
-        occupied.add(identity)
-        occupancy_rows.append(row)
+    # Buffer facts remain in scheduling_buffer_days as coordination reminders.
+    # Only assignment intervals reserve the effective service calendar.
+    occupancy_rows = tuple(_assignment_occupancy_rows(command, generation_id, assignment_ids))
     cursor.executemany(
         "INSERT INTO scheduling_effective_occupancy "
         "(staff_id,occupancy_date,generation_id,assignment_id,occupancy_type) "
@@ -447,27 +429,6 @@ def _assignment_occupancy_rows(command, generation_id, assignment_ids):
                 generation_id,
                 assignment_ids[assignment.candidate_key],
                 "assignment_interval",
-            )
-
-
-def _buffer_occupancy_rows(command, generation_id, assignment_ids):
-    assignment_key_by_buffer = {
-        f"{assignment.candidate_key}:buffer": assignment.candidate_key
-        for assignment in command.candidate.assignments
-    }
-    for buffer in command.candidate.buffers:
-        if not buffer.active:
-            continue
-        assignment_id = assignment_ids[
-            assignment_key_by_buffer[buffer.candidate_key]
-        ]
-        for buffer_date in buffer.dates:
-            yield (
-                buffer.staff_id,
-                buffer_date,
-                generation_id,
-                assignment_id,
-                "buffer",
             )
 
 

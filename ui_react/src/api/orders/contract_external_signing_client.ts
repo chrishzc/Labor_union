@@ -129,12 +129,18 @@ export const LegacyRecoveryPreviewSchema = z.strictObject({
   }
 });
 
+const ManualNotificationTargetsSchema = z.array(z.strictObject({
+  scope: z.enum(['client', 'staff']),
+  subject_reference: z.string().min(1).max(191),
+}));
+
 export const ContractExternalSigningQuerySchema = z.strictObject({
   case_no: z.string().min(1).max(50),
   session_id: SessionIdSchema,
   state: ExternalSigningStateSchema,
   status_version: z.number().int().nonnegative(),
   handoff_recorded: z.boolean(),
+  manual_notification_targets: ManualNotificationTargetsSchema.optional(),
   matching_plan_id: z.number().int().positive(),
   commitment_id: z.number().int().positive().nullable(),
   unsigned_document: UnsignedDocumentSchema.nullable(),
@@ -231,6 +237,7 @@ const HandoffReceiptSchema = z.strictObject({
   session_id: SessionIdSchema,
   resulting_status_version: z.number().int().positive(),
   replayed: z.boolean(),
+  manual_notification_targets: ManualNotificationTargetsSchema.optional(),
 });
 
 const FinalReadbackSchema = z.strictObject({

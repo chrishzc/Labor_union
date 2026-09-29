@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from shared_kernel.fingerprints import PreviewFingerprint
 
 
 class OrderInformationFieldView(BaseModel):
@@ -31,6 +32,11 @@ class OrderInformationView(BaseModel):
     warnings: list[str]
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     can_render: bool
+
+    @field_validator("preview_fingerprint", mode="before")
+    @classmethod
+    def project_preview_fingerprint(cls, value):
+        return value.value if isinstance(value, PreviewFingerprint) else value
 
 
 __all__ = ["OrderInformationFieldView", "OrderInformationView"]

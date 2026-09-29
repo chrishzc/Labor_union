@@ -138,6 +138,10 @@ class ContractExternalSigningApplication:
             "state": facts.state.value,
             "status_version": facts.status_version,
             "handoff_recorded": active is not None,
+            "manual_notification_targets": [
+                {"scope": target.scope.value, "subject_reference": target.subject_reference}
+                for target in self.repository.load_handoff_manual_notification_targets(case_no, facts.session_id)
+            ] if active is not None else [],
             "matching_plan_id": facts.matching_plan_id,
             "commitment_id": facts.commitment_id,
             "unsigned_document": document,

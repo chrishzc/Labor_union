@@ -26,6 +26,11 @@
   - `db/schema_parts/212_government_subsidy_return_excess_recovery.sql` (fresh bootstrap owner)
   - `db/schema_parts/214_historical_order_pairing_resolution_reused.sql` (fresh bootstrap successor)
   - `db/schema_parts/226_service_before_replacement.sql` (MySQL 8.4-compatible fresh bootstrap successor; immutable preserve release remains 1012)
+  - `db/schema_parts/1047_scheduling_buffer_advisory.sql` — schema-only；保留 buffer facts／歷史 projection；實際 interval staff/date 仍唯一。
+  - `db/migration_releases/labor_union_2026_09_29_scheduling_buffer_advisory_v1.json`
+  - `db/migration_releases/labor_union_2026_09_29_scheduling_buffer_advisory_v1.descriptors.json`
+  - `validation/receipts/PROV-SCHEDULING-BUFFER-ADVISORY-local-additive-qualification-20260929-lf.json` — current synthetic MySQL fresh／preserve qualification；與 Git LF artifact bytes 綁定，同日實際服務仍唯一，全部歷史資料逐欄保留。
+  - `validation/receipts/PROV-SCHEDULING-BUFFER-ADVISORY-local-additive-qualification-20260929.json` — immutable 初次本機驗證紀錄；已由 LF 回條取代，僅保留驗證追溯，不代表 current artifact identity。
 - current Task 96 release successor:
   - `db/schema_parts/1024_task96_line_identity_revocation_role_binding_fk.sql`
   - `db/migration_releases/labor_union_2026_09_01_task96_line_identity_revocation_role_binding_fk_v1.json`

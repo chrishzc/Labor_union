@@ -136,3 +136,25 @@ def test_empty_dbapi_tuple_is_a_valid_empty_occupancy_result():
             return ()
 
     assert workflow._rows(TupleCursor(), "invalid") == []
+
+
+@pytest.mark.parametrize("service_day,expected_allowed", [(12, False), (15, True)])
+def test_service_collision_blocks_but_proposed_buffer_collision_only_warns(service_day, expected_allowed):
+    snapshot = workflow._canonical_snapshot("CASE-1", 8, _order("訂單成立"), _plan(), [_segment()])
+    cursor = _Cursor([
+        [{"source_id": 7, "staff_id": 99, "assigned_start_date": date(2026, 8, service_day),
+          "assigned_end_date": date(2026, 8, service_day)}],
+        [], [], [], [], [],
+    ])
+    conflicts = workflow._occupancy_conflicts(cursor, snapshot)
+    preview = workflow._build_acquire_preview(snapshot, conflicts)
+    assert preview["apply_allowed"] is expected_allowed
+    assert conflicts[0]["source_type"] == ("buffer" if expected_allowed else "assignment")
+
+
+def test_existing_buffer_on_requested_service_date_is_advisory():
+    snapshot = workflow._canonical_snapshot("CASE-1", 8, _order("訂單成立"), _plan(), [_segment()])
+    cursor = _Cursor([[], [], [{"source_id": 7, "staff_id": 99, "lock_date": date(2026, 8, 12)}], [], [], []])
+    conflicts = workflow._occupancy_conflicts(cursor, snapshot)
+    assert workflow._build_acquire_preview(snapshot, conflicts)["apply_allowed"] is True
+    assert conflicts[0]["source_type"] == "buffer"

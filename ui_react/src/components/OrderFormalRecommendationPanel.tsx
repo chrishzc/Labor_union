@@ -794,7 +794,7 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
                     <>
                       <p>Preview：服務日 {lockPreview.service_day_count} · 防撞期 {lockPreview.buffer_day_count}</p>
                       <p>允許套用：{lockPreview.apply_allowed ? '是' : '否'}</p>
-                      {lockPreview.conflicts.map((conflict, index) => <p key={index}>衝突：月嫂 #{conflict.staff_id} · {conflict.lock_date} · {conflict.source_type} #{conflict.source_id}</p>)}
+                      {lockPreview.conflicts.map((conflict, index) => <p key={index}>{conflict.source_type === 'buffer' ? '七天緩衝重疊，僅提醒' : '服務檔期衝突，須先調整日期'}：月嫂 #{conflict.staff_id} · {conflict.lock_date}</p>)}
                       <button type="button" aria-label={`套用方案 ${current.plan.planId} 等待訂金鎖`} disabled={!lockPreview.apply_allowed} onClick={() => void applyLock()}>套用等待訂金鎖</button>
                     </>
                   )}

@@ -1,0 +1,207 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-scheduling-buffer-advisory-2026-09-29-v1",
+  "descriptors": {
+    "1047_scheduling_buffer_advisory.sql": {
+      "tables": {
+        "scheduling_buffer_days": {
+          "id": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": "auto_increment"
+          },
+          "generation_id": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "assignment_id": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "staff_id": {
+            "column_type": "int",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "buffer_date": {
+            "column_type": "date",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "status": {
+            "column_type": "enum('active','released','cancelled')",
+            "is_nullable": "NO",
+            "column_default": "active",
+            "extra": ""
+          },
+          "active_marker": {
+            "column_type": "tinyint(1)",
+            "is_nullable": "YES",
+            "column_default": "1",
+            "extra": ""
+          },
+          "released_by": {
+            "column_type": "varchar(100)",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "released_at": {
+            "column_type": "timestamp",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "created_at": {
+            "column_type": "timestamp",
+            "is_nullable": "NO",
+            "column_default": "current_timestamp",
+            "extra": "default_generated"
+          }
+        },
+        "scheduling_effective_occupancy": {
+          "staff_id": {
+            "column_type": "int",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "occupancy_date": {
+            "column_type": "date",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "generation_id": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "assignment_id": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "occupancy_type": {
+            "column_type": "enum('assignment_interval','buffer')",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "created_at": {
+            "column_type": "timestamp",
+            "is_nullable": "NO",
+            "column_default": "current_timestamp",
+            "extra": "default_generated"
+          }
+        }
+      },
+      "indexes": {
+        "scheduling_buffer_days.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "scheduling_buffer_days.uq_scheduling_buffer_assignment_date": {
+          "non_unique": 0,
+          "columns": [
+            "assignment_id",
+            "buffer_date"
+          ]
+        },
+        "scheduling_buffer_days.uq_scheduling_buffer_staff_date_active": {
+          "non_unique": 1,
+          "columns": [
+            "staff_id",
+            "buffer_date",
+            "active_marker"
+          ]
+        },
+        "scheduling_effective_occupancy.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "staff_id",
+            "occupancy_date",
+            "occupancy_type"
+          ]
+        },
+        "scheduling_effective_occupancy.idx_scheduling_effective_occupancy_generation": {
+          "non_unique": 1,
+          "columns": [
+            "generation_id"
+          ]
+        }
+      },
+      "foreign_keys": {
+        "scheduling_buffer_days.fk_scheduling_buffer_generation": {
+          "columns": [
+            "generation_id"
+          ],
+          "referenced_table": "scheduling_generations",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "scheduling_buffer_days.fk_scheduling_buffer_assignment": {
+          "columns": [
+            "assignment_id",
+            "generation_id",
+            "staff_id"
+          ],
+          "referenced_table": "case_staff_assignments",
+          "referenced_columns": [
+            "id",
+            "generation_id",
+            "staff_id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "scheduling_effective_occupancy.fk_scheduling_occupancy_generation": {
+          "columns": [
+            "generation_id"
+          ],
+          "referenced_table": "scheduling_generations",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "scheduling_effective_occupancy.fk_scheduling_occupancy_assignment": {
+          "columns": [
+            "assignment_id",
+            "generation_id",
+            "staff_id"
+          ],
+          "referenced_table": "case_staff_assignments",
+          "referenced_columns": [
+            "id",
+            "generation_id",
+            "staff_id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        }
+      },
+      "checks": {
+        "scheduling_buffer_days.chk_scheduling_buffer_state": "or(and(atom(status='active'),atom(active_marker=1),atom(released_byisnull),atom(released_atisnull)),and(atom(statusin('released','cancelled')),atom(active_markerisnull),atom(char_length(trim(released_by))>0),atom(released_atisnotnull)))"
+      },
+      "triggers": [],
+      "parent_columns": {},
+      "views": {}
+    }
+  }
+}

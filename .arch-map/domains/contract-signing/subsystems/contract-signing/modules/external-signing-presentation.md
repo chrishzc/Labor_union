@@ -9,6 +9,8 @@
 
 外部簽約案件 Query 在簽約 facts 尚未備齊時回傳零寫入 `preparing` 文件投影；預覽與未簽 PDF 準備不依賴已接受方案、簽約 session 或正式排班。交接／最終簽回命令沿用原 Domain 條件。
 
+外部平台交接不以 LINE 綁定為門禁：完整 current 未簽 PDF 備妥後，已綁定者建立提醒，未綁定者以 typed 人工通知對象保存於交接 receipt，Query／replay 保留送交當時結果。真正的身分錯配與版本衝突仍拒絕；無歷史簽回證據的新案件不顯示人工修復區。
+
 ## Implementation
 - primary: `ui_react/src/components/ContractExternalSigningActions.tsx`
 - client: `ui_react/src/api/orders/contract_external_signing_client.ts`

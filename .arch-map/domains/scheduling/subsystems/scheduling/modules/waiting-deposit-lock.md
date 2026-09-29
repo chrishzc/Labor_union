@@ -11,10 +11,12 @@
 - primary:
   - `domains/scheduling/waiting_deposit_lock.py`
   - `subsystems/scheduling/availability_lock_acquisition_workflow.py`
+  - `subsystems/scheduling/availability_lock_helpers.py`
   - `subsystems/scheduling/availability_lock_release_workflow.py`
   - `subsystems/scheduling/availability_lock_cancellation_workflow.py`
 - entrypoints:
   - `api/routes/caregiver_availability_locks.py`
+  - `api/schemas/waiting_deposit_lock.py`
 
 ## Dependencies
 - outbound: `orders/orders` — 訂單取消由 Orders outer Unit of Work 傳入已鎖定 lifecycle command envelope。

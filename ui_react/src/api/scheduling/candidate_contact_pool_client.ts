@@ -140,6 +140,9 @@ const InformationPreviewSchema = z.strictObject({
 export type CandidateInformationPreview = z.infer<typeof InformationPreviewSchema>;
 const WeeklyServicePreviewSchema = z.strictObject({
   case_no: z.string().min(1).max(50), candidate_id: z.number().int().positive(),
+  required_service_days: z.number().int().nonnegative().nullable(),
+  projected_service_days: z.number().int().nonnegative(),
+  date_basis: z.enum(['planned', 'confirmed']), warnings: z.array(z.string().min(1)),
   rows: z.array(z.strictObject({
     serial_number: z.number().int().positive(), staff_name: z.string().min(1).max(100),
     week_start_date: IsoDateSchema, week_end_date: IsoDateSchema,

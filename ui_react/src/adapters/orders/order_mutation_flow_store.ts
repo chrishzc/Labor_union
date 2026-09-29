@@ -255,6 +255,7 @@ export interface ExternalSigningHandoffReceipt {
   session_id: string;
   resulting_status_version: number;
   replayed: boolean;
+  manual_notification_targets?: Array<{ scope: 'client' | 'staff'; subject_reference: string }>;
 }
 
 export interface ExternalSigningHandoffFlowState {

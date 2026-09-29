@@ -149,6 +149,7 @@ class MySqlOrderInformationRepository:
         for segment in segments:
             segment_facts = {**segment, **estimates[int(segment["assignment_id"])]}
             facts, issues = _facts(case, segment_facts)
+            _merge_contract_payment_facts(self._connection, case_no, facts)
             text, blockers = build_order_information_message(
                 info_type, facts, issues,
                 "正式推薦方案資訊；服務期間以目前正式媒合方案為準。",

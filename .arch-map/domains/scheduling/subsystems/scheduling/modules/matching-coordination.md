@@ -18,9 +18,10 @@
   - `subsystems/scheduling/matching_plan_workflow.py`
   - `subsystems/scheduling/matching_communication_workflow.py` — 正式媒合方案的 LINE 意願、暫停、恢復與取消溝通事件。
   - `subsystems/scheduling/segmented_availability_query.py`
-  - `subsystems/scheduling/candidate_contact_pool_workflow.py` — 初步候選加入及聯絡重新檢查預計期間 availability；客戶同意日期調整後的重新聯絡會以 current Orders 日期重驗完整 coverage，在同一交易更新 contact period／fingerprint、留存前後日期事件並排入新卡，但不建立正式服務日期。
+  - `subsystems/scheduling/segmented_availability.py` — 純分段 availability；actual conflict 阻擋完整組合，buffer 只提醒。
+  - `subsystems/scheduling/candidate_contact_pool_workflow.py` — 初步候選加入及聯絡 fresh-read 預計期間 availability；衝突候選仍可協調，重聯絡更新 contact period／fingerprint 並保留歷史，不建立正式服務日期。每週 Preview 核對約定天數並顯示 actual／buffer 提醒。
   - `subsystems/scheduling/matching_line_cards.py` — 候選資訊與正式媒合的 pure Flex renderer。
-  - `subsystems/scheduling/proposed_weekly_service_projection.py` — proposed formal plan 以 Monday–Sunday 與實際 work dates 語意產生每周服務中投影；不讀 effective schedule。
+  - `subsystems/scheduling/proposed_weekly_service_projection.py` — 候選與 proposed formal plan 的 Monday–Sunday 工作日投影；current confirmed service dates 優先於偏好週休，不讀 effective schedule。
   - `subsystems/scheduling/customer_confirmation_download.py` — 由 confirmation package 簽發、到期即失效且檔案範圍受限的客戶履歷下載 reference。
   - `subsystems/line/candidate_contact_postback_application.py` — 將候選資訊卡片回覆轉交給 recipient-bound owner adapter。
   - `subsystems/line/candidate_contact_response_application.py` — 驗證 candidate/customer LIFF recipient，追加結構化回應並建立直接協調 delivery task。

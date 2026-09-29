@@ -39,7 +39,8 @@ beforeEach(() => {
     ] : [{ title: '飲食與照護需求', rows: [['服務報酬', '待確認']] }],
     preview_fingerprint: String(kind).repeat(64),
   }));
-  vi.mocked(client.previewWeeklyService).mockResolvedValue({ case_no: 'CASE-1', candidate_id: 3, rows: [{
+  vi.mocked(client.previewWeeklyService).mockResolvedValue({ case_no: 'CASE-1', candidate_id: 3,
+    required_service_days: 2, projected_service_days: 2, date_basis: 'planned', warnings: [], rows: [{
     serial_number: 1, staff_name: '測試月嫂', week_start_date: '2026-09-28', week_end_date: '2026-10-04',
     service_hours_per_day: 8, weekly_work_days: 2, weekly_hours: 16,
   }] });

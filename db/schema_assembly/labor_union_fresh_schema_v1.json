@@ -5,7 +5,7 @@
     "path": "db/schema.sql",
     "sha256": "b9cd84ae5a09a46949b5d4c131659f7f114480306f94e0af1246833d021b1bfb"
   },
-  "active_artifacts_sha256": "76dde921c603691d3a6b3969deaf4b4b78d2f9c3d7bddebed4fc747fe216514a",
+  "active_artifacts_sha256": "ee632f154d0158fec24eb67041b874b74eb0347570b373e9e1e281eae637a19e",
   "active_bootstrap": [
     "db/schema_parts/202_scheduling_staff_leave_intake.sql",
     "db/schema_parts/20_staff_monthly_settlements.sql",
@@ -175,7 +175,8 @@
     "db/schema_parts/225_client_legacy_virtual_accounts.sql",
     "db/schema_parts/227_order_terms_optional_downstream_versions.sql",
     "db/schema_parts/228_order_terms_optional_scheduling_receipt.sql",
-    "db/schema_parts/1046_client_zero_obligation_establishment.sql"
+    "db/schema_parts/1046_client_zero_obligation_establishment.sql",
+    "db/schema_parts/1047_scheduling_buffer_advisory.sql"
   ],
   "classifications": {
     "db/schema_parts/1012_service_before_replacement.sql": "migration-only",

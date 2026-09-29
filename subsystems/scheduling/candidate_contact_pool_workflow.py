@@ -27,6 +27,7 @@ from subsystems.scheduling.ports import unconfigured_connection_factory
 from subsystems.scheduling.matching_line_cards import candidate_contact_information_card
 from subsystems.scheduling.segmented_availability_query import (
     search_candidate_inquiry_availability,
+    search_segmented_caregiver_availability,
 )
 
 
@@ -199,7 +200,7 @@ def _close(resource: Any) -> None:
         closer()
 
 
-def _require_full_coverage(case_no: str, staff_id: int, start_date: str, end_date: str) -> dict[str, Any]:
+def _require_current_candidate(case_no: str, staff_id: int, start_date: str, end_date: str) -> dict[str, Any]:
     availability_kwargs = {
         "case_no": case_no,
         "segment_drafts": [{"staff_id": staff_id, "start_date": start_date, "end_date": end_date}],
@@ -215,7 +216,9 @@ def _require_full_coverage(case_no: str, staff_id: int, start_date: str, end_dat
         (item for item in result.get("candidate_options", []) if item.get("staff_id") == staff_id),
         None,
     )
-    if not isinstance(candidate, Mapping) or not candidate.get("full_case_coverage"):
+    # Contacting a candidate is coordination, not a reservation or assignment.
+    # Keep fresh coverage evidence even when dates need union coordination.
+    if not isinstance(candidate, Mapping):
         raise ValueError("candidate_no_longer_fully_available")
     return dict(candidate)
 
@@ -285,7 +288,7 @@ def add_candidates(case_no: Any, candidates: Any, actor: Any, event_key: Any) ->
         seen.add(staff_id)
         start_date = _required_text(item.get("start_date"), "start_date", 10)
         end_date = _required_text(item.get("end_date"), "end_date", 10)
-        candidate = _require_full_coverage(case_no, staff_id, start_date, end_date)
+        candidate = _require_current_candidate(case_no, staff_id, start_date, end_date)
         candidate["coverage_fingerprint"] = _coverage_fingerprint(case_no, candidate)
         validated.append(candidate)
     return _run_in_application_uow(
@@ -641,7 +644,7 @@ def _apply_manual_information_confirmation_in_transaction(
         if preview["preview_fingerprint"] != preview_fingerprint:
             raise ValueError("candidate_information_preview_stale")
         candidate = next(item for item in state.candidates if item.id == candidate_id)
-        _require_full_coverage(
+        _require_current_candidate(
             case_no,
             candidate.staff_id,
             candidate.service_start_date.isoformat(),
@@ -688,12 +691,46 @@ def preview_weekly_service(case_no: str, candidate_id: int):
     candidate_id = _positive_int(candidate_id, "candidate_id")
     connection = get_connection()
     try:
-        rows = MySqlMatchingNotificationRepository(
+        projection = MySqlMatchingNotificationRepository(
             connection
         ).candidate_weekly_service_preview(case_no, candidate_id)
+        rows = projection["rows"]
+        required_days = projection["required_service_days"]
+        projected_days = projection["projected_service_days"]
+        warnings = []
+        if required_days is None:
+            warnings.append("約定服務天數尚未確認，請先確認需求。")
+        elif projected_days != required_days:
+            warnings.append(f"目前日期可提供 {projected_days} 天，與約定 {required_days} 天不符；請協調休假／服務日期後重新確認。")
+        if projection["date_basis"] == "planned":
+            availability = search_candidate_inquiry_availability(
+                case_no, [{"staff_id": projection["staff_id"]}], date.today().isoformat(),
+                segmented_facts_port, filter_policy={key: False for key in (
+                    "region", "cooking", "preferred_service_days", "daily_service_hours")},
+            )
+        else:
+            availability = search_segmented_caregiver_availability(
+                case_no=case_no, segment_count=1,
+                segment_drafts=[{"staff_id": projection["staff_id"]}],
+                as_of=date.today().isoformat(), facts_port=segmented_facts_port,
+                include_candidate_options=False,
+                filter_policy={key: False for key in (
+                    "region", "cooking", "preferred_service_days", "daily_service_hours")},
+            )
+        for conflict in availability["conflicts"]:
+            if conflict["staff_id"] != projection["staff_id"]:
+                continue
+            message = "七天緩衝期重疊，僅提醒" if conflict["reason_code"] == "buffer" else "服務檔期衝突，請協調日期；正式排班禁止重疊寫入"
+            warning = f'{conflict["work_date"]}：{message}。'
+            if warning not in warnings:
+                warnings.append(warning)
         return {
             "case_no": case_no,
             "candidate_id": candidate_id,
+            "required_service_days": required_days,
+            "projected_service_days": projected_days,
+            "date_basis": projection["date_basis"],
+            "warnings": tuple(warnings),
             "rows": tuple(
                 {
                     "serial_number": row["serial_number"],
@@ -736,7 +773,7 @@ def preview_recontact_information(case_no: str, candidate_id: int, info_type: in
         if row.get("status") != "洽談中":
             raise ValueError("candidate_contact_order_not_negotiating")
         service_period = _current_service_period(row)
-        _require_full_coverage(
+        _require_current_candidate(
             case_no,
             int(row["staff_id"]),
             service_period[0].isoformat(),
@@ -852,7 +889,7 @@ def _send_information_in_transaction(
             service_period = _current_service_period(entry)
         else:
             service_period = (entry["service_start_date"], entry["service_end_date"])
-        coverage = _require_full_coverage(
+        coverage = _require_current_candidate(
             case_no,
             entry["staff_id"],
             str(service_period[0]),

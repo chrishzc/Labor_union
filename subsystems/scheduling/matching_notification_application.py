@@ -942,7 +942,7 @@ def _validate_availability(
             "daily_service_hours": False,
         },
     )
-    if result.get("conflicts"):
+    if any(item.get("reason_code") != "buffer" for item in result.get("conflicts", ())):
         raise MatchingDecisionNotReadyError("matching plan is no longer fully available")
     if result.get("feasibility") != "complete":
         raise MatchingPlanDateMismatchError(

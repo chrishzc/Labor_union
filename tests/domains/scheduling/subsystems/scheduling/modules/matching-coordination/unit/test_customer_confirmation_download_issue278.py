@@ -66,7 +66,9 @@ def test_candidate_weekly_preview_exposes_only_public_projection(monkeypatch):
             "Repository",
             (),
             {
-                "candidate_weekly_service_preview": lambda self, case_no, candidate_id: (
+                "candidate_weekly_service_preview": lambda self, case_no, candidate_id: {
+                    "required_service_days": 15, "projected_service_days": 5,
+                    "date_basis": "planned", "staff_id": 100, "rows": (
                     {
                         "week_number": "10-1",
                         "serial_number": 1,
@@ -79,16 +81,20 @@ def test_candidate_weekly_preview_exposes_only_public_projection(monkeypatch):
                         "weekly_work_days": 5,
                         "weekly_hours": 40,
                     },
-                )
+                )}
             },
         )(),
     )
 
+    monkeypatch.setattr(candidate_workflow, "search_candidate_inquiry_availability", lambda *args, **kwargs: {"conflicts": []})
     result = candidate_workflow.preview_weekly_service("CASE-1", 3)
 
     assert result == {
         "case_no": "CASE-1",
         "candidate_id": 3,
+        "required_service_days": 15, "projected_service_days": 5,
+        "date_basis": "planned",
+        "warnings": ("目前日期可提供 5 天，與約定 15 天不符；請協調休假／服務日期後重新確認。",),
         "rows": (
             {
                 "serial_number": 1,

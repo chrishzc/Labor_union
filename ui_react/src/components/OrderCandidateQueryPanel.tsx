@@ -70,7 +70,7 @@ function queryFailure(error: unknown): CandidateQueryState {
 
 function formalCandidates(data: MatchingAvailability): MatchingCandidateOption[] {
   return data.candidate_options.filter(
-    (candidate) => candidate.segment_index === 0 && candidate.full_case_coverage,
+    (candidate) => candidate.segment_index === 0,
   );
 }
 
@@ -338,8 +338,8 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
           {candidates.length > 0 ? (
             <>
               <div className="order-v2-notice warning" role="status">
-                <strong>符合 {candidates.length} 位</strong>
-                <span>以下月嫂在預計期間無檔期衝突，可先詢問意願；尚未確認的需求待確認，正式服務日期仍須後續確認。</span>
+                <strong>可詢問 {candidates.length} 位</strong>
+                <span>有檔期衝突仍可加入候選池並協調；正式排班前須確認調整後的完整服務日期。</span>
               </div>
               <div className="order-v2-business-summary" aria-label="正式符合條件候選">
                 {candidates.map((candidate) => (
@@ -353,7 +353,9 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
                     />
                     <span>
                       <strong>{candidate.staff_name}</strong><br />
-                      月嫂 #{candidate.staff_id} · 已檢查預計期間 {candidate.supported_day_count}/{candidate.required_day_count} 個日曆日無衝突
+                      月嫂 #{candidate.staff_id} · 預計期間 {candidate.supported_day_count}/{candidate.required_day_count} 個日曆日無衝突
+                      {!candidate.full_case_coverage && <span role="status"> · 有檔期衝突，待公會協調</span>}
+                      {queryState.data.conflicts.filter((conflict) => conflict.staff_id === candidate.staff_id).map((conflict, index) => <span key={`${conflict.work_date}:${conflict.reason_code}:${index}`}><br />{conflict.work_date} · {conflict.reason_code === 'buffer' ? '七天緩衝期重疊，僅提醒' : '檔期衝突，待協調'}</span>)}
                     </span>
                   </label>
                 ))}
@@ -370,7 +372,7 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
           ) : (
             <div className="order-v2-notice blocked" role="status">
               <strong>沒有符合條件</strong>
-              <span>目前沒有可完整承接的月嫂，可調整篩選條件後重新查詢。</span>
+              <span>目前沒有符合查詢條件的月嫂，可調整篩選條件後重新查詢。</span>
               {queryState.data.conflicts.map((conflict, index) => (
                 <span key={`${conflict.segment_index}:${conflict.staff_id ?? 'none'}:${conflict.work_date}:${index}`}>
                   {conflict.work_date} · 月嫂 #{conflict.staff_id ?? '未指定'} · {conflict.reason_code}

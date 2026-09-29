@@ -13,6 +13,7 @@
   - `subsystems/scheduling/assignment_plan_workflow.py`
   - `subsystems/scheduling/assignment_plan_impacts.py`
   - `infrastructure/mysql/matching_schedule_confirmation_repository.py`
+  - `infrastructure/mysql/assignment_plan_repository.py` — fresh-lock actual occupancy；buffer 不構成 hard facts。
 - entrypoints:
   - `api/routes/matching_schedule_confirmation.py`
   - `api/routes/assignment_plan.py`
@@ -33,6 +34,7 @@
 
 ## Verification
 - test_root: `ui_react/src/tests/matching_schedule_confirmation_actions.test.tsx`
+- test_root: `tests/domains/scheduling/subsystems/scheduling/modules/matching-schedule-confirmation/`
 - direct_api_test_root: `tests/domains/scheduling/subsystems/scheduling/modules/matching-schedule-confirmation/`
 - layout_status: `custom_current`
 - higher-boundary integration:

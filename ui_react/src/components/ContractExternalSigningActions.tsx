@@ -75,6 +75,13 @@ function safeErrorMessage(error: unknown): string {
     if (error.code === 'external_signing_session_facts_unavailable') return '外部簽約工作尚未建立；請先完成服務人員媒合與服務區段。';
     if (error.code === 'contract_pdf_external_reference_unresolved') return '契約模板缺少舊版引用內容，尚不能產生可簽署 PDF；請先補齊模板。';
     if (error.code === 'contract_pdf_required_mapping_missing') return '契約必要資料尚未齊全，請先在契約欄位預覽核對案件資料與收款設定。';
+    if (error.code === 'contract_unsigned_pdf_missing') return message || '客戶或服務人員的未簽契約 PDF 尚未備妥，請先下載兩方契約後再確認送交。';
+    if (error.code === 'contract_line_recipient_unbound' || error.code === 'contract_line_recipient_subject_mismatch') {
+      return message || '客戶或服務人員的 LINE 身分尚未完成正確綁定，無法建立簽約提醒。';
+    }
+    if (error.code === 'external_signing_handoff_already_recorded') return '此案件已記錄送交外部簽署平台，請重新讀取目前狀態。';
+    if (error.code === 'external_signing_session_completed') return '此案件已完成簽約，無需再次送交外部簽署平台。';
+    if (error.code === 'external_signing_session_superseded') return '此簽約工作已被新的配對方案取代，請重新讀取目前契約。';
     if (error.status === 409) return '簽約資料已變更，請重新查詢後再檢查影響。';
     if (error.retryable || error.status >= 500) return '簽約服務暫時無法使用，請稍後重新查詢。';
     return '這筆操作未通過簽約檢查，請重新查詢目前狀態。';
@@ -553,6 +560,7 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
       || fresh.session_id !== command.sessionId
       || !fresh.handoff_recorded
       || fresh.status_version < receipt.resulting_status_version
+      || JSON.stringify(fresh.manual_notification_targets ?? []) !== JSON.stringify(receipt.manual_notification_targets ?? [])
     ) {
       throw new Error('交接收據後回讀與原案件、簽約工作或版本不一致；只能重新讀取。');
     }
@@ -560,7 +568,9 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
     if (request !== requestGeneration.current) return;
     setQuery(fresh);
     setUiState({ type: 'ready' });
-    setNotice(receipt.replayed
+    setNotice((receipt.manual_notification_targets?.length ?? 0) > 0
+      ? '已記錄送交外部簽署平台；已綁定者已建立 LINE 提醒，未綁定者請人工通知。'
+      : receipt.replayed
       ? '已重新確認外部平台交接及 LINE 通知工作。'
       : '已記錄送交外部簽署平台，並建立客戶與月嫂的 LINE 通知工作。');
   };
@@ -980,7 +990,7 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
         </section>
       )}
 
-      {recoveryQuery && pendingRecoveryTargets.length > 0 && (
+      {recoveryQuery && recoveryQuery.targets.some(hasCompleteLegacyLineage) && pendingRecoveryTargets.length > 0 && (
         <section aria-label="歷史簽回人工修復" style={{ border: '2px solid #f59e0b', borderRadius: '12px', padding: '14px', display: 'grid', gap: '12px' }}>
           <header>
             <strong>🧾 歷史簽回人工修復</strong>
@@ -1070,6 +1080,16 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
         </section>
       )}
 
+
+      {query?.handoff_recorded
+        && (query.manual_notification_targets?.length ?? 0) > 0 && (
+        <section aria-label="需人工通知的簽約對象" style={{ border: '1px solid #f59e0b', borderRadius: '10px', padding: '12px' }}>
+          <strong>已送交外部簽署平台；以下對象送交時未綁定 LINE，請人工通知</strong>
+          <ul>{query.manual_notification_targets!.map((target) => (
+            <li key={`${target.scope}-${target.subject_reference}`}>{target.scope === 'client' ? '客戶' : '月嫂'} {target.subject_reference}：需人工通知簽約</li>
+          ))}</ul>
+        </section>
+      )}
 
       {query?.handoff_recorded
         && query.state !== 'completed'

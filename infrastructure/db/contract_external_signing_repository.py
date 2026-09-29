@@ -38,6 +38,7 @@ from subsystems.contract_signing.external_signing_contracts import (
     VerifiedReporterBindingSnapshot,
 )
 from subsystems.contract_signing.external_signing_workflow import (
+    ManualSigningNotificationTarget,
     ExternalSigningHandoffReceipt,
     PersistedExternalReport,
     RecordExternalSigningHandoff,
@@ -268,6 +269,22 @@ class MySqlContractExternalSigningRepository:
             if row is None
             else _stored_handoff_receipt(row, expected_idempotency_key=key.value)
         )
+
+    def load_handoff_manual_notification_targets(
+        self, case_no: str, session_id: str,
+    ) -> tuple[ManualSigningNotificationTarget, ...]:
+        row = self._one(
+            "SELECT result_snapshot FROM contract_signing_command_receipts "
+            "WHERE case_no=%s AND command_kind='record_external_signing_handoff' "
+            "AND JSON_UNQUOTE(JSON_EXTRACT(result_snapshot,'$.session_id'))=%s "
+            "ORDER BY id DESC LIMIT 1", (case_no, session_id),
+        )
+        if row is None:
+            return ()
+        snapshot = _json_mapping(row.get("result_snapshot"))
+        if snapshot is None:
+            raise _stored_fact_error("external_signing_handoff_receipt_snapshot_invalid")
+        return _manual_notification_targets(snapshot)
 
     def save_handoff_receipt(
         self,
@@ -693,7 +710,7 @@ def _stored_handoff_receipt(
         return StoredExternalSigningHandoffReceipt(
             PreviewFingerprint(row["command_fingerprint"]),
             ExternalSigningHandoffReceipt(
-                session_id, resulting_status_version, False
+                session_id, resulting_status_version, False, _manual_notification_targets(snapshot)
             ),
         )
     except (KeyError, TypeError, ValueError):
@@ -943,7 +960,34 @@ def _handoff_receipt_snapshot(
         "idempotency_key": key.value,
         "resulting_status_version": receipt.resulting_status_version,
         "session_id": receipt.session_id,
+        "manual_notification_targets": [
+            {"scope": target.scope.value, "subject_reference": target.subject_reference}
+            for target in receipt.manual_notification_targets
+        ],
     }
+
+
+def _manual_notification_targets(snapshot: Mapping[str, object]) -> tuple[ManualSigningNotificationTarget, ...]:
+    # Earlier handoff receipts predate manual notification and notified every target.
+    values = snapshot.get("manual_notification_targets", [])
+    if not isinstance(values, list):
+        raise _stored_fact_error("external_signing_handoff_receipt_snapshot_invalid")
+    try:
+        targets = []
+        for value in values:
+            if not isinstance(value, Mapping) or set(value) != {"scope", "subject_reference"}:
+                raise ValueError("manual notification target is invalid")
+            if not isinstance(value["subject_reference"], str):
+                raise ValueError("manual notification subject is invalid")
+            target = ManualSigningNotificationTarget(
+                ExternalCompletionReportScope(value["scope"]), value["subject_reference"],
+            )
+            if target in targets:
+                raise ValueError("manual notification target is duplicated")
+            targets.append(target)
+        return tuple(targets)
+    except (TypeError, ValueError):
+        raise _stored_fact_error("external_signing_handoff_receipt_snapshot_invalid") from None
 
 
 def _handoff_storage_key(key: IdempotencyKey) -> str:

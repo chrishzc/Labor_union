@@ -80,7 +80,20 @@ def test_candidate_pool_fresh_check_uses_inquiry_not_official_dates(monkeypatch)
     facts = Facts()
     facts.data["confirmed_service_dates"] = []
     monkeypatch.setattr(pool, "segmented_facts_port", facts)
-    assert pool._require_full_coverage("INQUIRY-1", 3, "2026-10-05", "2026-10-05")["staff_id"] == 3
+    assert pool._require_current_candidate("INQUIRY-1", 3, "2026-10-05", "2026-10-05")["staff_id"] == 3
     facts.data["staff_unavailability_rows"] = Facts(occupied=True).data["staff_unavailability_rows"]
-    with pytest.raises(ValueError, match="candidate_no_longer_fully_available"):
-        pool._require_full_coverage("INQUIRY-1", 3, "2026-10-05", "2026-10-05")
+    candidate = pool._require_current_candidate("INQUIRY-1", 3, "2026-10-05", "2026-10-05")
+    assert candidate["full_case_coverage"] is False
+    assert candidate["supported_service_dates"] == []
+    facts.data["staff_rows"] = []
+    with pytest.raises(ValueError, match="not in candidate_staff_ids"):
+        pool._require_current_candidate("INQUIRY-1", 3, "2026-10-05", "2026-10-05")
+
+
+def test_assignment_and_waiting_buffers_are_advisory_for_selected_candidate():
+    facts = Facts()
+    facts.data["buffer_rows"] = [{"assignment_id": 9, "staff_id": 3, "buffer_date": "2026-10-05"}]
+    result = query(facts, cooking=False)
+    assert result["feasibility"] == "complete"
+    assert result["candidate_options"][0]["full_case_coverage"] is True
+    assert any(item["reason_code"] == "buffer" for item in result["conflicts"])
