@@ -268,6 +268,38 @@ def build_client_finance_terms_candidate(
     return _candidate(facts, stage_plans, actions)
 
 
+def build_client_finance_rate_correction_candidate(
+    facts: ClientFinanceTermsFacts,
+    change_identity: str,
+) -> ClientFinanceTermsCandidate:
+    """Update payment terms before matching without inventing service obligations."""
+
+    if facts.charge_days or facts.existing_obligations or facts.open_nonstage_obligation_count:
+        return build_client_finance_terms_candidate(facts, change_identity)
+    _validate_identity(change_identity, "change identity")
+    settlement = ClientSettlementProjection(
+        False,
+        False,
+        fingerprint_payload({"mode": "preassignment", "settlement": "none"}),
+    )
+    return ClientFinanceTermsCandidate(
+        facts.case_no,
+        facts.account_version,
+        facts.account_version + 1,
+        (),
+        (),
+        settlement,
+        (),
+        fingerprint_payload({
+            "change_identity": change_identity,
+            "case_no": facts.case_no,
+            "account_version": facts.account_version,
+            "client_hourly_rate_ntd": facts.payment_terms.client_hourly_rate.amount,
+            "settlement": settlement.fingerprint.value,
+        }),
+    )
+
+
 def build_precontract_deposit_candidate(
     facts: ClientFinanceTermsFacts,
     commitment_identity: str,

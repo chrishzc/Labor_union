@@ -3,6 +3,10 @@
 from datetime import date
 from types import SimpleNamespace
 
+from domains.client_finance.obligation_planning import (
+    ClientFinanceTermsFacts,
+    ClientPaymentTerms,
+)
 from infrastructure.mysql import beclass_financial_sync as module
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from shared_kernel.money import MoneyNTD
@@ -76,7 +80,7 @@ def test_financial_sync_persists_450_terms_and_client_obligation_impact(monkeypa
     )
     monkeypatch.setattr(
         module,
-        "build_client_finance_terms_candidate",
+        "build_client_finance_rate_correction_candidate",
         lambda facts, identity: finance_candidate,
     )
     monkeypatch.setattr(
@@ -104,3 +108,59 @@ def test_financial_sync_persists_450_terms_and_client_obligation_impact(monkeypa
     assert any("UPDATE client_payment_terms" in statement for statement, _ in statements)
     assert persisted[0].candidate is finance_candidate
     assert persisted[0].source_event_id == 9
+
+
+def test_unassigned_40_day_case_corrects_rate_without_creating_obligations(monkeypatch):
+    connection = _Connection()
+    finance_facts = ClientFinanceTermsFacts(
+        case_no="CASE-40-DAYS",
+        account_version=4,
+        service_hours_per_day=8,
+        floor_fee=MoneyNTD(0),
+        charge_days=(),
+        payment_terms=ClientPaymentTerms(
+            deposit_service_days=5,
+            client_hourly_rate=MoneyNTD(450),
+            deposit_due_date=date(2026, 9, 1),
+            first_payment_due_date=date(2026, 10, 1),
+            second_payment_due_date=None,
+        ),
+        existing_obligations=(),
+    )
+    monkeypatch.setattr(module, "preflight_staff_ids", lambda *_: ())
+    monkeypatch.setattr(
+        module,
+        "load_locked_facts",
+        lambda *_: SimpleNamespace(scheduling=SimpleNamespace(segments=())),
+    )
+    monkeypatch.setattr(
+        module, "select_order", lambda *_args, **_kwargs: {"service_days": 40}
+    )
+    monkeypatch.setattr(
+        module,
+        "load_contract_client_finance_facts",
+        lambda *_args, **_kwargs: finance_facts,
+    )
+
+    module.MySqlBeClassFinancialSync(connection).apply(
+        case_no="CASE-40-DAYS",
+        correction_event_id=9,
+        actor=ActorContext("admin"),
+        reason="correct twins before matching",
+        idempotency_key=IdempotencyKey("beclass-correction-unassigned"),
+        correlation_id=CorrelationId("beclass-correction-unassigned"),
+    )
+
+    statements = connection.cursor_value.statements
+    event_values = next(
+        values for statement, values in statements
+        if "INSERT INTO client_payment_terms_events" in statement
+    )
+    assert event_values[2:4] == (450, 5)
+    assert next(
+        values for statement, values in statements
+        if "UPDATE client_finance_accounts" in statement
+    ) == (5, "CASE-40-DAYS", 4)
+    assert any("INSERT INTO client_finance_outbox" in sql for sql, _ in statements)
+    assert not any("INSERT INTO client_obligation" in sql for sql, _ in statements)
+    assert not any("staff_obligation" in sql for sql, _ in statements)

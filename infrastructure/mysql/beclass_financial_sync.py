@@ -6,7 +6,7 @@ from dataclasses import replace
 from typing import Any
 
 from domains.client_finance.obligation_planning import (
-    build_client_finance_terms_candidate,
+    build_client_finance_rate_correction_candidate,
 )
 from domains.scheduling.generation import (
     AssignmentIdentityResolution,
@@ -61,7 +61,7 @@ class MySqlBeClassFinancialSync:
                 reason,
                 _child_key(idempotency_key, "client-payment-terms"),
             )
-            finance_candidate = build_client_finance_terms_candidate(
+            finance_candidate = build_client_finance_rate_correction_candidate(
                 finance_facts, change_identity
             )
             persist_client_finance_terms_impact(

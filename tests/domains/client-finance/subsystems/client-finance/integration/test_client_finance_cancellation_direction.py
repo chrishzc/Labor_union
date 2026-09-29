@@ -3,6 +3,7 @@ File: test_client_finance_cancellation_direction.py
 Description: 驗證取消帳務方向與金額的 server-owned typed contract。
 """
 
+from dataclasses import replace
 from datetime import date, timedelta
 from types import SimpleNamespace
 
@@ -16,7 +17,10 @@ from domains.client_finance.obligation_planning import (
     ClientObligationAction,
     ClientObligationActionKind,
     ClientFinanceTermsSourceFacts,
+    ClientFinanceTermsFacts,
     ClientPaymentTerms,
+    ExistingClientStageObligation,
+    build_client_finance_rate_correction_candidate,
     build_client_finance_terms_candidate,
     build_client_finance_terms_impact,
 )
@@ -33,6 +37,64 @@ from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from subsystems.orders.terms_workflow import ClientFinanceImpactPersistenceCommand
 from domains.client_finance.reconciliation import PaymentStage
 from shared_kernel.money import MoneyNTD
+
+
+def _rate_correction_facts(day_count: int) -> ClientFinanceTermsFacts:
+    return ClientFinanceTermsFacts(
+        "CASE-RATE-CORRECTION",
+        4,
+        8,
+        MoneyNTD(1000),
+        tuple(
+            ClientChargeDay(date(2026, 10, 1) + timedelta(days=i), False)
+            for i in range(day_count)
+        ),
+        ClientPaymentTerms(
+            5, MoneyNTD(450), date(2026, 9, 1), date(2026, 10, 1), None,
+        ),
+        (),
+    )
+
+
+def test_rate_correction_before_matching_advances_version_without_obligations():
+    candidate = build_client_finance_rate_correction_candidate(
+        _rate_correction_facts(0), "beclass-rate-correction:9",
+    )
+    assert (candidate.expected_account_version, candidate.resulting_account_version) == (4, 5)
+    assert candidate.actions == candidate.stage_plans == ()
+    assert candidate.settlement.deposit_settled is False
+    assert candidate.settlement.all_formal_obligations_settled is False
+
+
+def test_rate_correction_with_40_service_dates_keeps_all_stage_amounts():
+    candidate = build_client_finance_rate_correction_candidate(
+        _rate_correction_facts(40), "beclass-rate-correction:9",
+    )
+    assert [len(plan.service_dates) for plan in candidate.stage_plans] == [5, 15, 20]
+    assert [plan.amount.amount for plan in candidate.stage_plans] == [19000, 54000, 72000]
+
+
+def test_rate_correction_does_not_bypass_missing_dates_for_existing_obligations():
+    facts = replace(
+        _rate_correction_facts(0),
+        existing_obligations=(ExistingClientStageObligation(
+            "client-obligation:CASE-RATE-CORRECTION:deposit",
+            PaymentStage.DEPOSIT,
+            MoneyNTD(12000),
+            MoneyNTD(0),
+            date(2026, 9, 1),
+            False,
+        ),),
+    )
+    with pytest.raises(ValueError, match="deposit service days exceed official service days"):
+        build_client_finance_rate_correction_candidate(facts, "beclass-rate-correction:9")
+
+
+def test_rate_correction_keeps_actual_deposit_overflow_validation():
+    with pytest.raises(ValueError, match="deposit service days exceed official service days"):
+        build_client_finance_rate_correction_candidate(
+            _rate_correction_facts(3), "beclass-rate-correction:9",
+        )
 
 
 def test_full_subsidy_terms_do_not_create_client_service_principal() -> None:
