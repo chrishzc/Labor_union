@@ -1,9 +1,10 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ordersQueryClient } from '../../../../../../../api/orders/order_query_client';
 import { orderIntakeCompletionClient } from '../../../../../../../api/orders/order_intake_completion_client';
 import { OrdersIntakeRepairCard } from '../../../../../../../components/OrdersIntakeRepairCard';
 import { OrderIntakeRepairPanel } from '../../../../../../../components/OrderIntakeRepairPanel';
+import { hcmResubmissionClient } from '../../../../../../../api/case_import/hcm_resubmission_client';
 
 const ETAG = 'a'.repeat(64);
 const FP1 = '1'.repeat(64);
@@ -38,9 +39,39 @@ const completeSummary = {
 };
 
 describe('Orders intake repair entry', () => {
+  beforeEach(() => {
+    vi.spyOn(hcmResubmissionClient, 'current').mockResolvedValue({ items: [], next_cursor: null });
+  });
+
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
+  });
+
+  it.each(['居住型態', '手機'])('顯示實際待修正欄位 %s 並區分尚未建立的案件資料', async (field) => {
+    vi.spyOn(orderIntakeCompletionClient, 'previewCompletion').mockResolvedValue({
+      case_no: 'CASE-153', lifecycle_version: 7, current_status: '待補件', target_status: '洽談中',
+      missing_fields: ['start_date', 'service_days'], blockers: [], apply_allowed: false, preview_fingerprint: FP1,
+    });
+    vi.spyOn(ordersQueryClient, 'getOrderDetail').mockRejectedValue(new Error('partial order detail'));
+    vi.mocked(hcmResubmissionClient.current).mockResolvedValue({
+      items: [
+        { source_id: 40, review_identity: 'other', case_no: 'CASE-OTHER', fields: ['其他欄位'], can_correct: true },
+        { source_id: 30, review_identity: 'current', case_no: 'CASE-153', fields: [field], can_correct: true },
+      ],
+      next_cursor: null,
+    });
+    const applyTerms = vi.spyOn(orderIntakeCompletionClient, 'applyTerms');
+    const applyCompletion = vi.spyOn(orderIntakeCompletionClient, 'applyCompletion');
+
+    render(<OrderIntakeRepairPanel caseNo="CASE-153" orderStatus="待補件" />);
+
+    expect(await screen.findByText(`原始進件欄位待修正：${field}`)).toBeInTheDocument();
+    expect(screen.getByText('尚未補齊的案件資料：服務開始日、服務天數')).toBeInTheDocument();
+    expect(screen.queryByText('缺少資料：服務開始日、服務天數')).not.toBeInTheDocument();
+    expect(screen.queryByText(/其他欄位/)).not.toBeInTheDocument();
+    expect(applyTerms).not.toHaveBeenCalled();
+    expect(applyCompletion).not.toHaveBeenCalled();
   });
 
   it('lists every current missing field while leaving complete orders on the existing workbench', async () => {

@@ -924,6 +924,9 @@ def _segment(row, service_dates_by_assignment) -> EffectiveAssignmentSegment:
 
 
 def _order_facts(row: Mapping[str, Any]) -> OrderAggregateFacts:
+    for field in ("start_date", "service_days", "service_hours_per_day", "floor_fee"):
+        if row[field] is None:
+            raise ValueError(f"order_terms_{field}_required")
     terms = OrderTerms(
         planned_start_date=row["start_date"],
         service_days=int(row["service_days"]),

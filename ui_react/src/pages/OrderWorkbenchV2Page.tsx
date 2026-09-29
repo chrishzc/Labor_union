@@ -15,6 +15,7 @@ import './OrdersPage.css';
 import './OrderTrackerPage.css';
 import './OrderWorkbenchV2Page.css';
 import { OrderWorkbenchV2Drawer } from '../components/OrderWorkbenchV2Drawer';
+import { loadCurrentHcmReviewsForCases, type HcmCurrentReview } from '../api/case_import/hcm_resubmission_client';
 import {
   type OrderWorkbenchScope,
   type OrderCoreStageProjectionQueryParams,
@@ -79,6 +80,8 @@ export const OrderWorkbenchV2Page: FC = () => {
   );
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [summaryQueryFailed, setSummaryQueryFailed] = useState(false);
+  const [intakeReviews, setIntakeReviews] = useState<ReadonlyMap<string, HcmCurrentReview>>(new Map());
+  const [intakeReviewsError, setIntakeReviewsError] = useState(false);
   const [selectedStage, setSelectedStage] = useState<CoreStageCode | null>(null);
   const [workbenchScope, setWorkbenchScope] = useState<OrderWorkbenchScope>('in_progress');
   const [search, setSearch] = useState('');
@@ -176,6 +179,23 @@ export const OrderWorkbenchV2Page: FC = () => {
       controller.abort();
     };
   }, [projectionRefreshKey]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setIntakeReviews(new Map());
+    setIntakeReviewsError(false);
+    const caseNos = workbenchScope === 'in_progress'
+      ? (view?.items ?? []).filter((item) => item.lifecycleStatus === '待補件').map((item) => item.id)
+      : [];
+    void loadCurrentHcmReviewsForCases(caseNos, { signal: controller.signal })
+      .then((reviews) => {
+        if (!controller.signal.aborted) setIntakeReviews(new Map(reviews.map((review) => [review.case_no, review])));
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setIntakeReviewsError(true);
+      });
+    return () => controller.abort();
+  }, [view, workbenchScope]);
 
   const displayedItems = (view?.items ?? []).filter((item) => {
     if (!normalizedSearch) return true;
@@ -338,6 +358,16 @@ export const OrderWorkbenchV2Page: FC = () => {
                       <span>客戶端：{item.clientSettlementLabel}</span>
                       <span>月嫂端：{item.staffSettlementLabel}</span>
                     </div>
+                  )}
+                  {intakeReviews.get(item.id) && (
+                    <div className="order-v2-notice warning">
+                      <strong>進件欄位待修正</strong>
+                      <span>{intakeReviews.get(item.id)!.fields.join('、')}</span>
+                      <small>請至資料匯入頁確認欄位問題，重新提交修正來源。</small>
+                    </div>
+                  )}
+                  {intakeReviewsError && item.lifecycleStatus === '待補件' && (
+                    <div className="order-v2-notice warning" role="status">原始進件欄位問題讀取失敗，請重新讀取案件。</div>
                   )}
                   {primaryNotice && (
                     <div className={`order-v2-notice ${item.blockers.length > 0 ? 'blocked' : 'warning'}`}>

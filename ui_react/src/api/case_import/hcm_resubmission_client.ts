@@ -21,14 +21,39 @@ const ReviewStateSchema = z.object({ review_identity: z.string(), case_no: z.str
 const CurrentReviewsSchema = z.object({ items: z.array(z.object({ source_id: z.number().int(), review_identity: z.string(), case_no: z.string(), fields: z.array(z.string()), can_correct: z.boolean(), unavailable_reason: z.string().nullable().optional() }).strict()), next_cursor: z.number().int().nullable() }).strict();
 export type HcmReviewState = z.infer<typeof ReviewStateSchema>;
 export type HcmCurrentReviews = z.infer<typeof CurrentReviewsSchema>;
+export type HcmCurrentReview = HcmCurrentReviews['items'][number];
+
+/** Read the current owner predicate, including cases beyond the first page. */
+export async function loadCurrentHcmReviewsForCases(
+  caseNos: readonly string[],
+  options?: { signal?: AbortSignal },
+): Promise<readonly HcmCurrentReview[]> {
+  const pending = new Set(caseNos);
+  const matches: HcmCurrentReview[] = [];
+  let cursor: number | undefined;
+  while (pending.size > 0) {
+    options?.signal?.throwIfAborted();
+    const page = await hcmResubmissionClient.current(cursor, options);
+    for (const item of page.items) {
+      if (pending.delete(item.case_no)) matches.push(item);
+    }
+    if (page.next_cursor === null || pending.size === 0) return matches;
+    if (page.items.length === 0 || page.next_cursor !== page.items.at(-1)?.source_id
+      || (cursor !== undefined && page.next_cursor >= cursor)) {
+      throw new Error('進件欄位問題分頁無法繼續，請重新讀取。');
+    }
+    cursor = page.next_cursor;
+  }
+  return matches;
+}
 
 export const hcmResubmissionClient = {
   async query(reviewIdentity: string): Promise<HcmReviewState> {
     const raw = await transport.get(`/api/v1/case-import/hcm/reviews/${encodeURIComponent(reviewIdentity)}`, { token: token() });
     return decodePayload(z.object({ data: ReviewStateSchema }), raw).data;
   },
-  async current(beforeId?: number): Promise<HcmCurrentReviews> {
-    const raw = await transport.get('/api/v1/case-import/hcm/reviews', { token: token(), params: { limit: 20, before_id: beforeId } });
+  async current(beforeId?: number, options?: { signal?: AbortSignal }): Promise<HcmCurrentReviews> {
+    const raw = await transport.get('/api/v1/case-import/hcm/reviews', { token: token(), params: { limit: 20, before_id: beforeId }, signal: options?.signal });
     return decodePayload(z.object({ data: CurrentReviewsSchema }), raw).data;
   },
   async preview(snapshot: HcmWorkbookSnapshot, reviewIdentity: string): Promise<HcmResubmissionPreview> {

@@ -12,6 +12,7 @@
   - `ui_react/src/adapters/orders/order_card_projection_adapter.ts`
   - `ui_react/src/pages/OrderWorkbenchV2Page.tsx`
   - `ui_react/src/components/OrdersIntakeRepairCard.tsx`
+  - `ui_react/src/components/OrderIntakeRepairPanel.tsx` — 案件進件資料區分原始 HCM 欄位待修正與尚未補齊的案件資料；保留既有 Preview／Apply 與回讀流程。
   - `ui_react/src/components/OrderTerminalAggregateLane.tsx` — 呈現既有typed結案彙總，不重算結案規則。
   - `ui_react/src/pages/OrdersPage.css`
   - `subsystems/orders/card_projection_query.py`
@@ -20,6 +21,7 @@
 ## Dependencies
 - inbound: Orders React route — 只讀取既有typed projection。
 - outbound: `scheduling/scheduling` — 正式指派資料只顯示typed owner projection，不由React重算。
+- outbound: `case-import/hcm-current-workbook-import` — 透過既有 typed current review Query 顯示本案原始進件欄位問題，不重新判定問題解除或異動匯入 roots。
 
 ## Contracts
 - `document/架構重整/01_規格基線/01_Orders_Domain.md` — Orders root facts。
