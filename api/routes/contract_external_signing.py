@@ -319,6 +319,34 @@ class ExternalSigningQueryView(BaseModel):
     client_target: ClientTargetView
 
 
+class ContractPreparationSegmentView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    segment_id: int = Field(ge=1)
+    staff_id: int = Field(ge=1)
+
+
+class ContractPreparationDocumentView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    document_version_id: int = Field(ge=1)
+    scope: Literal["staff_segment", "client_contract"]
+    role: Literal["template_generated", "signed_return"]
+    target_key: str = Field(min_length=1, max_length=191)
+    mime_type: str = Field(min_length=1, max_length=100)
+
+
+class ContractPreparationQueryView(BaseModel):
+    """A document preparation projection, without a business signing session."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    case_no: str = Field(pattern=_CASE)
+    state: Literal["preparing"]
+    staff_segments: list[ContractPreparationSegmentView]
+    documents: list[ContractPreparationDocumentView]
+
+
 class ExternalSigningReceiptView(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -375,7 +403,10 @@ def _application():
     yield from get_contract_external_signing_application()
 
 
-@router.get("/{case_no}/contract-external-signing")
+@router.get(
+    "/{case_no}/contract-external-signing",
+    response_model=BaseResponse[ExternalSigningQueryView | ContractPreparationQueryView],
+)
 def query_external_signing(
     case_no: str = ApiPath(pattern=_CASE),
     _: AdminPrincipal = Depends(require_persisted_admin),
@@ -894,6 +925,8 @@ def _require_facts(application, case_no):
 
 
 def _public_query(value: Mapping[str, Any]) -> dict[str, Any]:
+    if value.get("state") == "preparing":
+        return ContractPreparationQueryView.model_validate(value).model_dump(mode="json")
     return ExternalSigningQueryView.model_validate(value).model_dump(mode="json")
 
 

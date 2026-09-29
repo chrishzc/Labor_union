@@ -9,5 +9,6 @@ test_root: ui_react/src/tests/domains/contract-signing/subsystems/contract-signi
 - `ui_react/src/tests/domains/contract-signing/subsystems/contract-signing/modules/external-signing-presentation/contract_external_signing_client.test.ts` — typed React transport 與 schema decode。
 - `tests/domains/contract-signing/subsystems/contract-signing/integration/test_contract_completion_workflow.py` — final PDF Apply 與 Orders completion／deposit obligation outer-UoW 邊界。
 - `tests/domains/contract-signing/subsystems/contract-signing/integration/test_full_contract_preview.py` — exact target、typed owner mappings、conditional applicability 與零寫入 Preview。
+- `tests/domains/contract-signing/subsystems/contract-signing/integration/test_contract_external_signing_api.py` — preparation／session Query closed union、零寫入文件準備投影、文件回讀及既有命令門檻。
 - `tests/domains/contract-signing/subsystems/contract-signing/integration/test_contract_external_signing_api.py` — authenticated API contract。
 - `tests/domains/contract-signing/subsystems/contract-signing/integration/test_client_unsigned_preparation.py` — accepted-plan source gate、fresh lock and client source replay archive boundary。

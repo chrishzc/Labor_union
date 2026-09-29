@@ -18,6 +18,7 @@ from infrastructure.db.contract_external_signing_repository import (
 from infrastructure.mysql.contract_full_preview_repository import (
     MySqlFullContractProjectionRepository,
 )
+from infrastructure.mysql.contract_signing_document_query_repository import MySqlContractSigningDocumentQueryRepository
 from infrastructure.db.contract_unsigned_pdf_repository import (
     MySqlContractUnsignedPdfRepository,
 )
@@ -51,6 +52,7 @@ from shared_kernel.clock import SystemBusinessClock
 from shared_kernel.identities import ActorContext, CorrelationId
 from subsystems.contract_signing.external_signing_contracts import ExternalSigningTypedError
 from subsystems.contract_signing.external_signing_workflow import ExternalSigningWorkflow
+from subsystems.contract_signing.document_query import ContractSigningDocumentQueryApplication
 from subsystems.contract_signing.full_contract_preview import FullContractPreviewApplication
 from subsystems.contract_signing.full_contract_preview import FullContractPreviewError
 from subsystems.contract_signing.full_contract_preview import projection_fingerprint
@@ -96,6 +98,7 @@ class ContractExternalSigningApplication:
     full_preview: FullContractPreviewApplication
     staff_documents: StaffContractSigningApplication
     unsigned_persistence: UnsignedContractPdfPersistenceWorkflow
+    document_query: ContractSigningDocumentQueryApplication
 
     def load_facts(self, case_no: str):
         facts = self.repository.load_active_session_by_case(case_no, for_update=False)
@@ -105,8 +108,28 @@ class ContractExternalSigningApplication:
         active = self.repository.load_active_session_by_case(case_no, for_update=False)
         facts = active or self.repository.derive_current_session(case_no, for_update=False)
         if facts is None:
-            self.reports.query_case(case_no)  # raises the canonical typed error
-            raise AssertionError("query_case must return or raise")
+            current = self.document_query.query_status(case_no)
+            if current is None:
+                raise ExternalSigningTypedError(
+                    category="not_found", code="contract_signing_case_not_found",
+                    message="找不到指定案件的契約資料。",
+                )
+            return {
+                "case_no": current.case_no,
+                "state": "preparing",
+                "staff_segments": [
+                    {"segment_id": row.segment_id, "staff_id": row.staff_id}
+                    for row in current.staff_segments
+                ],
+                "documents": [
+                    {
+                        "document_version_id": row.document_version_id,
+                        "scope": row.scope, "role": row.role,
+                        "target_key": row.target_key, "mime_type": row.mime_type,
+                    }
+                    for row in current.documents
+                ],
+            }
         reported = frozenset(facts.reported_staff_segment_ids)
         document = self._representative_unsigned_document(facts)
         return {
@@ -474,6 +497,9 @@ def get_contract_external_signing_application() -> Iterator[ContractExternalSign
                 controlled,
                 unsigned_repository,
                 unit_of_work_factory,
+            ),
+            document_query=ContractSigningDocumentQueryApplication(
+                MySqlContractSigningDocumentQueryRepository(connection)
             ),
         )
     finally:

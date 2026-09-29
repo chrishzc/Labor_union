@@ -6,7 +6,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiHttpError, ApiTimeoutError } from '../../../../../../../api/shared/typed_errors';
 import { ContractExternalSigningActions } from '../../../../../../../components/ContractExternalSigningActions';
-import { contractExternalSigningClient } from '../../../../../../../api/orders/contract_external_signing_client';
+import { contractExternalSigningClient, type ContractPreparationQuery } from '../../../../../../../api/orders/contract_external_signing_client';
 import { contractSigningClient } from '../../../../../../../api/orders/contract_signing_client';
 import { sessionClient } from '../../../../../../../api/auth/session_client';
 import { orderMutationFlowStore } from '../../../../../../../adapters/orders/order_mutation_flow_store';
@@ -40,6 +40,10 @@ vi.mock('../../../../../../../api/orders/contract_signing_client', () => ({
 }));
 
 const sessionId = 'ces_1234567890abcdef1234567890abcdef';
+const preparing: ContractPreparationQuery = {
+  case_no: 'CASE-001', state: 'preparing',
+  staff_segments: [{ segment_id: 41, staff_id: 9 }], documents: [],
+};
 const query = {
   case_no: 'CASE-001',
   session_id: sessionId,
@@ -295,7 +299,7 @@ describe('ContractExternalSigningActions', () => {
 
   afterEach(() => {
     sessionClient.clearSession();
-    orderMutationFlowStore.clearAll();
+    act(() => { orderMutationFlowStore.clearAll(); });
   });
 
   it('aborts a late unsigned-PDF download when the case is remounted', async () => {
@@ -434,11 +438,8 @@ describe('ContractExternalSigningActions', () => {
 
   it('prepares the first staff PDF before a signing session can be derived', async () => {
     vi.mocked(contractExternalSigningClient.query)
-      .mockRejectedValueOnce(new ApiHttpError(409, 'external_signing_session_facts_unavailable', 'facts unavailable'))
+      .mockResolvedValueOnce(preparing)
       .mockResolvedValueOnce(query);
-    vi.mocked(contractSigningClient.query).mockResolvedValueOnce({
-      staff_segments: [{ segment_id: 41 }],
-    } as Awaited<ReturnType<typeof contractSigningClient.query>>);
 
     render(<ContractExternalSigningActions caseNo="CASE-001" />);
     expect(await screen.findByRole('button', { name: '下載客戶契約 PDF' })).toBeEnabled();
@@ -450,19 +451,16 @@ describe('ContractExternalSigningActions', () => {
       expect.objectContaining({ idempotencyKey: expect.any(String) }),
     ));
     expect(await screen.findByText('已產生月嫂分段 #41 未簽 PDF。')).toBeInTheDocument();
+    expect(contractSigningClient.query).not.toHaveBeenCalled();
   });
 
-  it('blocks client PDF preparation when neither successor facts nor legacy service segments exist', async () => {
-    vi.mocked(contractExternalSigningClient.query).mockRejectedValueOnce(
-      new ApiHttpError(409, 'external_signing_session_facts_unavailable', 'facts unavailable'),
-    );
-    vi.mocked(contractSigningClient.query).mockResolvedValueOnce({
-      case_no: 'CASE-001', staff_segments: [], documents: [],
-    } as unknown as Awaited<ReturnType<typeof contractSigningClient.query>>);
+  it('explains absent service targets without turning document preparation into a signing conflict', async () => {
+    vi.mocked(contractExternalSigningClient.query).mockResolvedValueOnce({ ...preparing, staff_segments: [] });
 
     render(<ContractExternalSigningActions caseNo="CASE-001" />);
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('請先完成服務人員媒合與服務區段');
+    expect(await screen.findByText('目前尚無可投影契約的服務人員區段，請先建立配對方案。')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '下載客戶契約 PDF' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '下載客戶契約 PDF' }));
     expect(contractExternalSigningClient.prepareClientUnsignedPdf).not.toHaveBeenCalled();
@@ -470,18 +468,13 @@ describe('ContractExternalSigningActions', () => {
 
   it('keeps the next staff segment available while the full signing session is still incomplete', async () => {
     vi.mocked(contractExternalSigningClient.query)
-      .mockRejectedValue(new ApiHttpError(409, 'external_signing_session_facts_unavailable', 'facts unavailable'));
-    vi.mocked(contractSigningClient.query)
       .mockResolvedValueOnce({
-        case_no: 'CASE-001',
-        staff_segments: [{ segment_id: 41 }, { segment_id: 42 }],
-        documents: [],
-      } as unknown as Awaited<ReturnType<typeof contractSigningClient.query>>)
+        ...preparing, staff_segments: [{ segment_id: 41, staff_id: 9 }, { segment_id: 42, staff_id: 10 }],
+      })
       .mockResolvedValueOnce({
-        case_no: 'CASE-001',
-        staff_segments: [{ segment_id: 41 }, { segment_id: 42 }],
-        documents: [{ document_version_id: 31, scope: 'staff' }],
-      } as unknown as Awaited<ReturnType<typeof contractSigningClient.query>>);
+        ...preparing, staff_segments: [{ segment_id: 41, staff_id: 9 }, { segment_id: 42, staff_id: 10 }],
+        documents: [{ document_version_id: 31, scope: 'staff_segment', role: 'template_generated', target_key: 'staff-segment:41', mime_type: 'application/pdf' }],
+      });
 
     render(<ContractExternalSigningActions caseNo="CASE-001" />);
     fireEvent.click(await screen.findByRole('button', { name: '準備服務人員契約 PDF（服務區段 41）' }));
@@ -516,18 +509,33 @@ describe('ContractExternalSigningActions', () => {
     expect(download).toHaveBeenCalled();
   });
 
+  it('downloads one staff contract while the signing session and other staff documents are still absent', async () => {
+    const current = { ...preparing, staff_segments: [{ segment_id: 41, staff_id: 9 }, { segment_id: 42, staff_id: 10 }] };
+    vi.mocked(contractExternalSigningClient.query)
+      .mockResolvedValueOnce(current)
+      .mockResolvedValueOnce({
+        ...current,
+        documents: [{ document_version_id: 31, scope: 'staff_segment', role: 'template_generated', target_key: 'staff-segment:41', mime_type: 'application/pdf' }],
+      });
+    const download = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    vi.stubGlobal('URL', { createObjectURL: vi.fn().mockReturnValue('blob:staff'), revokeObjectURL: vi.fn() });
+    render(<ContractExternalSigningActions caseNo="CASE-001" />);
+    fireEvent.click(await screen.findByRole('button', { name: '下載服務人員契約 PDF（服務區段 41）' }));
+    await waitFor(() => expect(contractExternalSigningClient.downloadUnsignedPdf).toHaveBeenCalledWith(
+      'CASE-001', 31, expect.any(AbortSignal),
+    ));
+    expect(download).toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: '下載服務人員契約 PDF（服務區段 42）' })).toBeEnabled();
+    expect(contractExternalSigningClient.recordHandoff).not.toHaveBeenCalled();
+  });
+
   it('prepares and downloads the client projection before an external signing session exists', async () => {
-    vi.mocked(contractExternalSigningClient.query).mockRejectedValue(
-      new ApiHttpError(409, 'external_signing_session_facts_unavailable', 'facts unavailable'),
-    );
-    vi.mocked(contractSigningClient.query)
+    vi.mocked(contractExternalSigningClient.query)
+      .mockResolvedValueOnce(preparing)
       .mockResolvedValueOnce({
-        case_no: 'CASE-001', staff_segments: [{ segment_id: 41 }], documents: [],
-      } as unknown as Awaited<ReturnType<typeof contractSigningClient.query>>)
-      .mockResolvedValueOnce({
-        case_no: 'CASE-001', staff_segments: [{ segment_id: 41 }],
-        documents: [{ document_version_id: 92, scope: 'client' }],
-      } as unknown as Awaited<ReturnType<typeof contractSigningClient.query>>);
+        ...preparing,
+        documents: [{ document_version_id: 92, scope: 'client_contract', role: 'template_generated', target_key: 'client-contract', mime_type: 'application/pdf' }],
+      });
     vi.mocked(contractExternalSigningClient.prepareClientUnsignedPdf).mockResolvedValue({
       document_version_id: 92, filename: 'new-client.pdf', mime_type: 'application/pdf', size_bytes: 20, replayed: false,
     });
@@ -542,6 +550,8 @@ describe('ContractExternalSigningActions', () => {
       'CASE-001', 92, expect.any(AbortSignal),
     ));
     expect(download).toHaveBeenCalled();
+    expect(contractSigningClient.query).not.toHaveBeenCalled();
+    expect(contractExternalSigningClient.recordHandoff).not.toHaveBeenCalled();
   });
 
   it('explains the missing current plan without requiring customer acceptance', async () => {
@@ -549,6 +559,34 @@ describe('ContractExternalSigningActions', () => {
     render(<ContractExternalSigningActions caseNo="CASE-001" />);
     expect(await screen.findByRole('alert')).toHaveTextContent('目前尚無可投影契約的有效配對方案。');
     expect(screen.getByRole('button', { name: '下載客戶契約 PDF' })).toBeDisabled();
+  });
+
+  it.each([
+    { label: 'another target', target_key: 'staff-segment:42' },
+    { label: 'an XLSX source', mime_type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+    { label: 'a signed original', role: 'signed_return' as const },
+    { label: 'another document version', document_version_id: 93 },
+  ])('keeps the received PDF receipt pending when preparation readback contains $label', async (mismatch) => {
+    const { label: _label, ...fields } = mismatch;
+    vi.mocked(contractExternalSigningClient.query)
+      .mockResolvedValueOnce(preparing)
+      .mockResolvedValueOnce({
+        ...preparing,
+        documents: [{
+          document_version_id: 92, scope: 'client_contract', role: 'template_generated',
+          target_key: 'client-contract', mime_type: 'application/pdf', ...fields,
+        }],
+      });
+    vi.mocked(contractExternalSigningClient.prepareClientUnsignedPdf).mockResolvedValue({
+      document_version_id: 92, filename: 'new-client.pdf', mime_type: 'application/pdf', size_bytes: 20, replayed: false,
+    });
+    render(<ContractExternalSigningActions caseNo="CASE-001" />);
+    const downloadButton = await screen.findByRole('button', { name: '下載客戶契約 PDF' });
+    await act(async () => { fireEvent.click(downloadButton); });
+    await waitFor(() => expect(orderMutationFlowStore.getExternalSigningUnsignedPreparation('CASE-001')?.status).toBe('observation_failed'));
+    expect(contractExternalSigningClient.downloadUnsignedPdf).not.toHaveBeenCalled();
+    expect(contractExternalSigningClient.prepareClientUnsignedPdf).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: '重新讀取未簽契約準備狀態' })).toBeEnabled();
   });
 
   it('requires final PDF staging and Preview plus explicit confirmation before Apply/readback', async () => {
@@ -745,6 +783,24 @@ describe('ContractExternalSigningActions', () => {
     );
     expect(screen.getByText('已記錄送交外部簽署平台，並建立客戶與月嫂的 LINE 通知工作。')).toBeInTheDocument();
     expect(screen.queryByText(/選用稽核資料/)).not.toBeInTheDocument();
+  });
+
+  it('does not treat a preparation projection as confirmation of a received handoff receipt', async () => {
+    const beforeHandoff = {
+      ...query, state: 'staff_reporting' as const, status_version: 0,
+      handoff_recorded: false, commitment_id: null,
+      staff_targets: query.staff_targets.map((target) => ({ ...target, reported: false })),
+      client_target: { ...query.client_target, reported: false },
+    };
+    vi.mocked(contractExternalSigningClient.query)
+      .mockResolvedValueOnce(beforeHandoff).mockResolvedValueOnce(preparing);
+    vi.mocked(contractExternalSigningClient.queryLegacyRecovery).mockResolvedValueOnce(handoffRecoveryQuery('CASE-001'));
+    render(<ContractExternalSigningActions caseNo="CASE-001" />);
+    fireEvent.click(await screen.findByRole('button', { name: '確認契約已送交外部簽署平台' }));
+    await waitFor(() => expect(orderMutationFlowStore.getExternalSigningHandoff('CASE-001')?.status).toBe('observation_failed'));
+    expect(screen.queryByRole('region', { name: '最終簽署 PDF 納管' })).not.toBeInTheDocument();
+    expect(contractExternalSigningClient.recordHandoff).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: '重新讀取交接狀態' })).toBeEnabled();
   });
 
   it('reuses the original handoff identity after an outcome-unknown timeout', async () => {

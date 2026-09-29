@@ -153,6 +153,24 @@ export const ContractExternalSigningQuerySchema = z.strictObject({
   }
 });
 
+export const ContractPreparationQuerySchema = z.strictObject({
+  case_no: z.string().min(1).max(50),
+  state: z.literal('preparing'),
+  staff_segments: z.array(z.strictObject({
+    segment_id: z.number().int().positive(),
+    staff_id: z.number().int().positive(),
+  })),
+  documents: z.array(z.strictObject({
+    document_version_id: z.number().int().positive(),
+    scope: z.enum(['staff_segment', 'client_contract']),
+    role: z.enum(['template_generated', 'signed_return']),
+    target_key: z.string().min(1).max(191),
+    mime_type: z.string().min(1).max(100),
+  })),
+});
+
+export type ContractPreparationQuery = z.infer<typeof ContractPreparationQuerySchema>;
+
 const ReceiptSchema = z.strictObject({
   receipt_id: ReceiptIdSchema,
   command_type: z.enum(['record_staff_report', 'record_client_report', 'apply_final_signed_contract']),
@@ -386,10 +404,10 @@ function basePath(caseNo: string): string {
 }
 
 export const contractExternalSigningClient = {
-  async query(caseNo: string, options?: { signal?: AbortSignal }): Promise<ContractExternalSigningQuery> {
+  async query(caseNo: string, options?: { signal?: AbortSignal }): Promise<ContractExternalSigningQuery | ContractPreparationQuery> {
     const expectedCaseNo = canonicalCaseNo(caseNo);
     const value = decodePayload(
-      envelope(ContractExternalSigningQuerySchema),
+      envelope(z.union([ContractExternalSigningQuerySchema, ContractPreparationQuerySchema])),
       await transport.get(basePath(expectedCaseNo), { token: authToken(), signal: options?.signal }),
     ).data;
     if (value.case_no !== expectedCaseNo) throw new ApiHttpError(409, 'CONTRACT_CASE_MISMATCH', '外部簽約查詢案件識別不一致。');

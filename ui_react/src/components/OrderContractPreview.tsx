@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { contractExternalSigningClient, type ContractExternalSigningQuery } from '../api/orders/contract_external_signing_client';
+import { contractExternalSigningClient } from '../api/orders/contract_external_signing_client';
 import { previewContractFields, type ContractFullPreview } from '../api/orders/contract_full_preview_client';
 
 const FIELDS = {
@@ -9,8 +9,13 @@ const FIELDS = {
 
 export function OrderContractPreview({ caseNo }: { caseNo: string }) {
   const [scope, setScope] = useState<'client' | 'staff'>('client');
-  const [targets, setTargets] = useState<ContractExternalSigningQuery['staff_targets']>([]);
-  const [segmentId, setSegmentId] = useState<number | null>(null);
+  const [staffQuery, setStaffQuery] = useState<{
+    case_no: string;
+    staff_segments: Array<{ segment_id: number; staff_reference: string }>;
+  } | null>(null);
+  const [selection, setSelection] = useState<{ caseNo: string; segmentId: number | null }>({ caseNo, segmentId: null });
+  const targets = staffQuery?.case_no === caseNo ? staffQuery.staff_segments : [];
+  const segmentId = selection.caseNo === caseNo ? selection.segmentId : null;
   const [result, setResult] = useState<ContractFullPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -22,9 +27,13 @@ export function OrderContractPreview({ caseNo }: { caseNo: string }) {
       if (scope === 'staff' && segmentId === null) {
         const query = await contractExternalSigningClient.query(caseNo, { signal: controller.signal });
         if (controller.signal.aborted) return;
-        setTargets(query.staff_targets);
+        const staff_segments = query.state === 'preparing'
+          ? query.staff_segments.map((row) => ({ segment_id: row.segment_id, staff_reference: String(row.staff_id) }))
+          : query.staff_targets.map((row) => ({ segment_id: row.matching_segment_id, staff_reference: row.staff_subject_reference }));
+        setStaffQuery({ case_no: query.case_no, staff_segments });
+        if (staff_segments.length === 0) throw new Error('目前案件尚未選定可預覽契約的服務人員。');
         // Never substitute a different segment for a user's choice.
-        if (query.staff_targets.length === 1) setSegmentId(query.staff_targets[0]!.matching_segment_id);
+        if (staff_segments.length === 1) setSelection({ caseNo, segmentId: staff_segments[0]!.segment_id });
         return;
       }
       const data = await previewContractFields(caseNo, scope, segmentId, controller.signal);
@@ -43,7 +52,7 @@ export function OrderContractPreview({ caseNo }: { caseNo: string }) {
     <div className="order-information-choice"><button type="button" aria-pressed={scope === 'client'} onClick={() => { setScope('client'); setResult(null); setError(null); }}><strong>客戶服務契約</strong><span>服務約定、費用與付款安排</span></button><button type="button" aria-pressed={scope === 'staff'} onClick={() => { setScope('staff'); setResult(null); setError(null); }}><strong>服務人員委任契約</strong><span>月嫂服務區段、報酬與責任</span></button></div>
     <p className="order-case-review-note">此處僅預覽主要套值欄位，不是完整契約或簽署完成證明。契約顯示預計繳款日；實際入帳日由帳務核銷紀錄。完整 PDF 請至「下載與簽回」。</p>
     <button type="button" disabled={loading} onClick={() => setRevision((value) => value + 1)}>{loading ? '讀取契約資料中…' : '重新讀取契約資料'}</button>
-    {scope === 'staff' && targets.length > 1 && <label>選擇月嫂契約<select value={segmentId ?? ''} onChange={(event) => { setResult(null); setSegmentId(event.target.value ? Number(event.target.value) : null); }}><option value="">請選擇</option>{targets.map((target, index) => <option key={target.matching_segment_id} value={target.matching_segment_id}>月嫂 {target.staff_subject_reference} · 第 {index + 1} 份契約</option>)}</select></label>}
+    {scope === 'staff' && targets.length > 1 && <label>選擇月嫂契約<select value={segmentId ?? ''} onChange={(event) => { setResult(null); setSelection({ caseNo, segmentId: event.target.value ? Number(event.target.value) : null }); }}><option value="">請選擇</option>{targets.map((target, index) => <option key={target.segment_id} value={target.segment_id}>月嫂 {target.staff_reference} · 第 {index + 1} 份契約</option>)}</select></label>}
     {error && <p role="alert">無法取得本案契約資料：{error} 下方僅為版面，不能視為已產生文件。</p>}
     {result && result.warnings.length > 0 && <p role="status">目前資料仍有缺漏；已有內容可繼續預覽與下載，系統不會猜測或補造缺少的值。</p>}
     {result && !result.ready_to_print && <p role="alert">契約模板或文件產生發生技術問題，暫時無法產生文件。</p>}

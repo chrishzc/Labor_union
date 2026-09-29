@@ -55,6 +55,17 @@ const reportReceipt = {
 const envelope = (data: unknown) => ({ success: true, message: 'ok', data, error: null });
 
 describe('contractExternalSigningClient', () => {
+  it('decodes normal preparation data without inventing a signing session', async () => {
+    const preparing = {
+      case_no: 'CASE-001', state: 'preparing',
+      staff_segments: [{ segment_id: 41, staff_id: 9 }], documents: [],
+    };
+    vi.spyOn(transport, 'get').mockResolvedValueOnce(envelope(preparing))
+      .mockResolvedValueOnce(envelope({ ...preparing, session_id: sessionId }));
+    await expect(contractExternalSigningClient.query('CASE-001')).resolves.toEqual(preparing);
+    await expect(contractExternalSigningClient.query('CASE-001')).rejects.toThrow();
+  });
+
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();

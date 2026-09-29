@@ -15,6 +15,7 @@ import pytest
 
 from api.dependencies.admin_auth import require_persisted_admin
 from api.dependencies.contract_external_signing import _preview_token_secret
+from api.dependencies.contract_external_signing import ContractExternalSigningApplication
 from api.routes import contract_external_signing as route
 from domains.contract_signing.external_signing import (
     ExternalSigningSessionFacts,
@@ -23,6 +24,12 @@ from domains.contract_signing.external_signing import (
 )
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.contract_signing.full_contract_preview import ContractPreviewScope
+from subsystems.contract_signing.document_query import (
+    ContractSigningDocumentQueryApplication,
+    ContractSigningStatus,
+    ContractSigningStaffSegment,
+    ContractSigningDocument,
+)
 
 
 CASE_NO = "CASE-EXT-1"
@@ -314,6 +321,72 @@ def test_query_returns_only_react_contract_fields() -> None:
     }
     serialized = response.text.lower()
     assert all(term not in serialized for term in ("locator", "digest", "fingerprint", "url", "path"))
+
+
+def _preparing_application(status):
+    def must_not_mutate(*_args, **_kwargs):
+        raise AssertionError("document preparation query must not mutate or require a signing session")
+
+    return ContractExternalSigningApplication(
+        connection=SimpleNamespace(commit=must_not_mutate, rollback=must_not_mutate),
+        repository=SimpleNamespace(
+            load_active_session_by_case=lambda *_args, **_kwargs: None,
+            derive_current_session=lambda *_args, **_kwargs: None,
+        ),
+        unsigned_repository=None,
+        reports=SimpleNamespace(query_case=must_not_mutate),
+        controlled_files=None, final_documents=None, unsigned_documents=None,
+        full_preview=None, staff_documents=None, unsigned_persistence=None,
+        document_query=ContractSigningDocumentQueryApplication(
+            SimpleNamespace(find_status=lambda _case_no: status)
+        ),
+    )
+
+
+def _preparing_status(documents=()):
+    return ContractSigningStatus(
+        case_no=CASE_NO,
+        staff_segments=(ContractSigningStaffSegment(71, 9, False, False),),
+        commitment_id=None, client_document_sent=False,
+        client_signed_received=False, contract_identity=None, documents=documents,
+    )
+
+
+def test_existing_case_without_ready_signing_facts_returns_zero_write_preparation_data():
+    response = _client(_preparing_application(_preparing_status())).get(
+        f"/api/v1/orders/{CASE_NO}/contract-external-signing"
+    )
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "case_no": CASE_NO, "state": "preparing",
+        "staff_segments": [{"segment_id": 71, "staff_id": 9}], "documents": [],
+    }
+
+
+def test_preparation_query_reads_generated_client_pdf_before_all_staff_documents_exist():
+    document = ContractSigningDocument(
+        92, "client_contract", "template_generated", "client-contract", 2,
+        "contract_client_copy", "a" * 64, "b" * 64, "c" * 64,
+        "application/pdf", 20,
+    )
+    response = _client(_preparing_application(_preparing_status((document,)))).get(
+        f"/api/v1/orders/{CASE_NO}/contract-external-signing"
+    )
+    assert response.status_code == 200
+    assert response.json()["data"]["documents"] == [{
+        "document_version_id": 92, "scope": "client_contract",
+        "role": "template_generated", "target_key": "client-contract",
+        "mime_type": "application/pdf",
+    }]
+    assert "sha256" not in response.text and "session_id" not in response.text
+
+
+def test_preparation_query_still_returns_not_found_for_missing_case():
+    response = _client(_preparing_application(None)).get(
+        f"/api/v1/orders/{CASE_NO}/contract-external-signing"
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"]["error"]["code"] == "contract_signing_case_not_found"
 
 
 def test_full_contract_preview_has_exact_targets_and_typed_values_without_locators() -> None:

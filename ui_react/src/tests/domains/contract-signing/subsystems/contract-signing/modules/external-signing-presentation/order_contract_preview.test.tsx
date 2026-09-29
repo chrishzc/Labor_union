@@ -26,7 +26,7 @@ const basePreview = {
 };
 
 describe('OrderContractPreview', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => vi.resetAllMocks());
 
   it('automatically reads the client projection', async () => {
     vi.mocked(previewContractFields).mockResolvedValue({
@@ -100,7 +100,10 @@ describe('OrderContractPreview', () => {
 
   it('shows the staff projection as one whole payable with a projected payday', async () => {
     vi.mocked(contractExternalSigningClient.query).mockResolvedValue({
-      staff_targets: [{ matching_segment_id: 97 }],
+      state: 'preparing',
+      case_no: 'CASE-001',
+      staff_segments: [{ segment_id: 97, staff_id: 7, sent: false, signed_received: false }],
+      commitment_id: null, documents: [],
     } as never);
     vi.mocked(previewContractFields).mockResolvedValue({
       ...basePreview,
@@ -125,5 +128,48 @@ describe('OrderContractPreview', () => {
     expect(screen.getByText('預估發薪日')).toBeInTheDocument();
     expect(screen.getByText('48000')).toBeInTheDocument();
     expect(screen.getByText('2027-02-15')).toBeInTheDocument();
+  });
+
+  it('requires an exact choice when unsigned current data has multiple staff segments', async () => {
+    vi.mocked(contractExternalSigningClient.query).mockResolvedValue({
+      state: 'preparing',
+      case_no: 'CASE-001', commitment_id: null, documents: [],
+      staff_segments: [
+        { segment_id: 97, staff_id: 7, sent: false, signed_received: false },
+        { segment_id: 98, staff_id: 8, sent: false, signed_received: false },
+      ],
+    } as never);
+    vi.mocked(previewContractFields).mockResolvedValue({
+      ...basePreview, scope: 'staff', template_key: 'contract_staff_service', field_values: { C4: '第二位服務人員' },
+    });
+
+    render(<OrderContractPreview caseNo="CASE-001" />);
+    fireEvent.click(screen.getByRole('button', { name: /服務人員委任契約/ }));
+    const choice = await screen.findByRole('combobox', { name: '選擇月嫂契約' });
+    expect(vi.mocked(previewContractFields).mock.calls.some((call) => call[1] === 'staff')).toBe(false);
+    fireEvent.change(choice, { target: { value: '98' } });
+    await waitFor(() => expect(previewContractFields).toHaveBeenCalledWith(
+      'CASE-001', 'staff', 98, expect.any(AbortSignal),
+    ));
+    expect(await screen.findByText('第二位服務人員')).toBeInTheDocument();
+  });
+
+  it('resolves the new case target instead of reusing the previous case segment', async () => {
+    vi.mocked(contractExternalSigningClient.query)
+      .mockResolvedValueOnce({ state: 'preparing', case_no: 'CASE-001', staff_segments: [{ segment_id: 97, staff_id: 7 }] } as never)
+      .mockResolvedValueOnce({ state: 'preparing', case_no: 'CASE-002', staff_segments: [{ segment_id: 98, staff_id: 8 }] } as never);
+    vi.mocked(previewContractFields).mockResolvedValue({
+      ...basePreview, scope: 'staff', template_key: 'contract_staff_service', field_values: {},
+    });
+    const { rerender } = render(<OrderContractPreview caseNo="CASE-001" />);
+    fireEvent.click(screen.getByRole('button', { name: /服務人員委任契約/ }));
+    await waitFor(() => expect(previewContractFields).toHaveBeenCalledWith(
+      'CASE-001', 'staff', 97, expect.any(AbortSignal),
+    ));
+    rerender(<OrderContractPreview caseNo="CASE-002" />);
+    await waitFor(() => expect(previewContractFields).toHaveBeenCalledWith(
+      'CASE-002', 'staff', 98, expect.any(AbortSignal),
+    ));
+    expect(previewContractFields).not.toHaveBeenCalledWith('CASE-002', 'staff', 97, expect.any(AbortSignal));
   });
 });

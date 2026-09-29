@@ -437,6 +437,13 @@ fingerprint、blockers、preview fingerprint與PDF result。正式document persi
    重複填入每一份個人契約。
 6. 新投影不得覆寫已簽回原始文件，也不得冒充先前已簽內容。本節不新增文件版本、簽章、
    缺件管理或欄位 registry。
+7. 管理端 `GET /api/v1/orders/{case_no}/contract-external-signing` 必須涵蓋文件準備階段。
+   案件存在但尚無可推導的簽約工作時，Query 回傳 HTTP 200 與 `state=preparing`、目前方案的
+   `staff_segments` 及已生成文件的 bounded `documents`，不以 `external_signing_session_facts_unavailable`
+   阻塞預覽／準備／下載。`preparing` 僅辨識文件準備投影，不是 Domain 簽約狀態，不包含虛構的
+   session、commitment 或 business version；Query 零寫入。已有可推導或已保存的簽約工作時沿用
+   原查詢結構。文件準備後依 exact case、scope、target 與 receipt document version 回讀；交接、
+   正式簽回及最終 PDF Apply 仍 fresh-read／lock 並驗證原命令條件。案件不存在回 typed 404。
 
 ### 2026-09-15 客戶契約付款欄位人工裁決
 

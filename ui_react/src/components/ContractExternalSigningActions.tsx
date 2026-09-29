@@ -19,7 +19,6 @@ import {
   type PreparedUnsignedDocument,
 } from '../api/orders/contract_external_signing_client';
 import { ApiHttpError, ApiNetworkError, ApiTimeoutError } from '../api/shared/typed_errors';
-import { contractSigningClient } from '../api/orders/contract_signing_client';
 import { sessionClient } from '../api/auth/session_client';
 import {
   orderMutationFlowStore,
@@ -244,10 +243,18 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
     () => orderMutationFlowStore.getExternalSigningUnsignedPreparation(caseNo),
   );
 
-  const loadQuery = useCallback(async (signal?: AbortSignal): Promise<ContractExternalSigningQuery> => {
+  const loadQuery = useCallback(async (signal?: AbortSignal): Promise<ContractExternalSigningQuery | null> => {
     const generation = ++requestGeneration.current;
     setUiState({ type: 'querying' });
     const value = await contractExternalSigningClient.query(caseNo, { signal });
+    if (value.state === 'preparing') {
+      if (signal?.aborted || generation !== requestGeneration.current) return null;
+      setQuery(null);
+      setPreparationSegments(value.staff_segments.map((segment) => segment.segment_id));
+      setRecoveryQuery(null);
+      setUiState({ type: 'ready' });
+      return null;
+    }
     const recovery = value.state === 'superseded' || value.client_target.document_version_id === null
       ? null
       : await contractExternalSigningClient.queryLegacyRecovery(caseNo, { signal }).catch((error) => {
@@ -258,6 +265,7 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
     if (recovery) assertRecoveryQueryMatchesCurrent(value, recovery);
     if (generation !== requestGeneration.current) return value;
     setQuery(value);
+    setPreparationSegments([]);
     setRecoveryQuery(recovery);
     setUiState({ type: 'ready' });
     return value;
@@ -273,7 +281,7 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
     setFinalFile(null);
     identities.current.clear();
     void loadQuery(controller.signal).then(async (value) => {
-      if (controller.signal.aborted || value.state !== 'completed') return;
+      if (controller.signal.aborted || value === null || value.state !== 'completed') return;
       try {
         setUiState({ type: 'working', operation: 'readback' });
         const readback = await contractExternalSigningClient.getFinalDocumentReadback(caseNo, controller.signal);
@@ -288,20 +296,8 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
       } catch (error) {
         if (!controller.signal.aborted) setUiState({ type: 'error', message: safeErrorMessage(error) });
       }
-    }).catch(async (error) => {
+    }).catch((error) => {
       if (controller.signal.aborted) return;
-      if (error instanceof ApiHttpError && error.code === 'external_signing_session_facts_unavailable') {
-        try {
-          const legacy = await contractSigningClient.query(caseNo, { signal: controller.signal });
-          if (!controller.signal.aborted && legacy.staff_segments.length > 0) {
-            setPreparationSegments(legacy.staff_segments.map((segment) => segment.segment_id));
-            setUiState({ type: 'ready' });
-            return;
-          }
-        } catch {
-          // Preserve the canonical successor error below.
-        }
-      }
       if (!controller.signal.aborted) setUiState({ type: 'error', message: safeErrorMessage(error) });
     });
     return () => {
@@ -381,29 +377,27 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
     const { command, receipt } = state;
     if (!ownsUnsignedPreparationOperation(command.caseNo, state.operationToken)) return;
     orderMutationFlowStore.setExternalSigningUnsignedPreparation(command.caseNo, { ...state, status: 'observing', error: null });
-    let fresh: ContractExternalSigningQuery;
-    try {
-      fresh = await contractExternalSigningClient.query(command.caseNo);
-    } catch (error) {
-      if (!(error instanceof ApiHttpError
-        && error.code === 'external_signing_session_facts_unavailable')) throw error;
-      const legacy = await contractSigningClient.query(command.caseNo);
-      if (!ownsUnsignedPreparationOperation(command.caseNo, state.operationToken)) return;
+    const fresh = await contractExternalSigningClient.query(command.caseNo);
+    if (!ownsUnsignedPreparationOperation(command.caseNo, state.operationToken)) return;
+    if (fresh.state === 'preparing') {
       const targetObserved = command.kind === 'staff'
         ? command.segmentId !== null
-          && legacy.staff_segments.some((segment) => segment.segment_id === command.segmentId)
+          && fresh.staff_segments.some((segment) => segment.segment_id === command.segmentId)
         : true;
-      const documentObserved = legacy.documents.some((document) => (
+      const documentObserved = fresh.documents.some((document) => (
         document.document_version_id === receipt.document_version_id
-        && document.scope === command.kind
+        && document.scope === (command.kind === 'client' ? 'client_contract' : 'staff_segment')
+        && document.role === 'template_generated'
+        && document.mime_type === 'application/pdf'
+        && document.target_key === (command.kind === 'client' ? 'client-contract' : `staff-segment:${command.segmentId}`)
       ));
-      if (!targetObserved || !documentObserved) {
+      if (fresh.case_no !== command.caseNo || command.sessionId !== null || !targetObserved || !documentObserved) {
         throw new Error('未簽契約收據尚未出現在正式契約狀態；只能重新讀取。');
       }
       orderMutationFlowStore.clearExternalSigningUnsignedPreparation(command.caseNo);
       if (request !== requestGeneration.current) return;
       setQuery(null);
-      setPreparationSegments(legacy.staff_segments.map((segment) => segment.segment_id));
+      setPreparationSegments(fresh.staff_segments.map((segment) => segment.segment_id));
       setUiState({ type: 'ready' });
       setNotice(command.kind === 'client'
         ? `${receipt.replayed ? '已重新確認' : '已產生'}客戶未簽契約 PDF。`
@@ -554,7 +548,8 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
     const fresh = await contractExternalSigningClient.query(command.caseNo);
     if (!ownsHandoffOperation(command.caseNo, state.operationToken)) return;
     if (
-      fresh.case_no !== command.caseNo
+      fresh.state === 'preparing'
+      || fresh.case_no !== command.caseNo
       || fresh.session_id !== command.sessionId
       || !fresh.handoff_recorded
       || fresh.status_version < receipt.resulting_status_version
@@ -815,7 +810,8 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
       setUiState({ type: 'observed', receipt, readback });
       const refreshed = await loadQuery();
       if (
-        refreshed.session_id !== receipt.session_id
+        refreshed === null
+        || refreshed.session_id !== receipt.session_id
         || refreshed.state !== 'completed'
         || refreshed.status_version !== receipt.resulting_status_version
       ) {
@@ -934,6 +930,8 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
           <strong>{stateLabel(query)}</strong>
         </div>
       )}
+      {!query && uiState.type === 'ready' && preparationSegments.length > 0 && <p role="status">契約準備中，可依目前配對方案產生文件，無須先正式排班。</p>}
+      {!query && uiState.type === 'ready' && preparationSegments.length === 0 && <p role="status">目前尚無可投影契約的服務人員區段，請先建立配對方案。</p>}
 
       <div className="order-case-document-grid" aria-label="下載兩種契約">
         <article><h3>客戶契約 PDF</h3><p>下載未簽署版本，供客戶確認與簽署。</p>
@@ -954,7 +952,9 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
               return;
             }
             void prepareUnsigned('staff', target.matching_segment_id, true);
-          }}>下載服務人員契約 PDF（{target.staff_subject_reference}）</button>) : <><button type="button" disabled>下載服務人員契約 PDF</button><p>{!query ? '尚未取得可下載文件的確認結果。' : '尚無可下載文件。'}若下方有「準備服務人員契約」，請先完成文件準備。</p></>}
+          }}>下載服務人員契約 PDF（{target.staff_subject_reference}）</button>) : preparationSegments.length > 0
+            ? preparationSegments.map((segmentId) => <button key={segmentId} type="button" disabled={busy || !!unsignedPreparationFlow} onClick={() => void prepareUnsigned('staff', segmentId, true)}>下載服務人員契約 PDF（服務區段 {segmentId}）</button>)
+            : <><button type="button" disabled>下載服務人員契約 PDF</button><p>尚無可預覽契約的服務人員區段。</p></>}
         </article>
       </div>
 
