@@ -385,7 +385,7 @@ def apply_beclass_correction(
 
 def _order_terms_section(application, case_no: str) -> dict[str, Any]:
     try:
-        facts = application.query(case_no)
+        facts = application.query_registry(case_no)
     except ValueError as error:
         code = str(error)
         return {
@@ -400,16 +400,10 @@ def _order_terms_section(application, case_no: str) -> dict[str, Any]:
         "data": OrderTermsQueryView.model_validate({
             "case_no": facts.order.case_no,
             "order_version": facts.order.version,
-            "scheduling_version": facts.scheduling.aggregate_version,
-            "scheduling_generation": facts.scheduling.generation_number,
-            "client_finance_version": (
-                facts.client_finance.account_version
-                if facts.client_finance is not None else None
-            ),
-            "payroll_version": (
-                facts.payroll.payroll_version
-                if facts.payroll is not None else None
-            ),
+            "scheduling_version": facts.scheduling_version,
+            "scheduling_generation": facts.scheduling_generation,
+            "client_finance_version": facts.client_finance_version,
+            "payroll_version": facts.payroll_version,
             "service_data_locked": facts.order.service_data_locked,
             "terms": facts.order.terms.canonical_payload(),
         }),

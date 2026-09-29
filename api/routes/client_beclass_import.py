@@ -4,6 +4,7 @@ Description: 提供 authenticated Client BeClass temporary workbook Preview／Ap
 """
 
 import logging
+from dataclasses import replace
 from pathlib import Path
 import tempfile
 from typing import Annotated
@@ -19,6 +20,7 @@ from shared_kernel.errors import ErrorCategory, TypedError
 from shared_kernel.identities import CorrelationId
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.case_import.client_beclass_workbook_import import ClientBeClassWorkbookConflict, ClientBeClassWorkbookUnavailable
+from subsystems.orders.terms_workflow import TermsWorkflowError
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/case-import/client-beclass/workbooks", tags=["Case Import"])
@@ -73,6 +75,20 @@ async def _with_workbook(workbook: UploadFile, operation, message: str, correlat
         path = await _persist_workbook(workbook)
         result = await run_in_threadpool(operation, path)
         return BaseResponse(data=result.as_dict(), message=message)
+    except TermsWorkflowError as error:
+        status_code = {
+            ErrorCategory.VALIDATION: 422,
+            ErrorCategory.FORBIDDEN: 403,
+            ErrorCategory.NOT_FOUND: 404,
+            ErrorCategory.DOMAIN_BLOCKED: 409,
+            ErrorCategory.CONFLICT: 409,
+            ErrorCategory.IDEMPOTENCY_MISMATCH: 409,
+            ErrorCategory.UNAVAILABLE: 503,
+            ErrorCategory.INTERNAL: 500,
+        }[error.error.category]
+        raise _http_error(
+            status_code, replace(error.error, correlation_id=correlation)
+        ) from error
     except ValueError as error:
         logger.exception("Client BeClass 工作簿處理失敗: %s", error)
         raise _http_error(

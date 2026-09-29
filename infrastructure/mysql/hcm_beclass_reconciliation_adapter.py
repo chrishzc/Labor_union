@@ -139,6 +139,7 @@ class MySqlHcmBeClassReconciliationAdapter:
                 ActorContext("case-import-reconciliation"),
                 "Reconcile uniquely paired Client BeClass cooking requirement.",
                 CorrelationId(f"case-import-cooking:{identity}"),
+                requires_formal_apply=preview.requires_formal_apply,
             )
         )
 

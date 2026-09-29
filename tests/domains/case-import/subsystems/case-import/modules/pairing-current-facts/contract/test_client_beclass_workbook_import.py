@@ -10,6 +10,14 @@ from datetime import date
 from types import SimpleNamespace
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from api.routes import client_beclass_import as workbook_route
+from shared_kernel.errors import ErrorCategory, TypedError
+from shared_kernel.identities import CorrelationId
+from subsystems.access.authentication_session import AdminPrincipal
+from subsystems.orders.terms_workflow import TermsWorkflowError
 
 from domains.orders.terms import OrderTerms, ServiceTimeTerms
 from infrastructure.mysql import hcm_beclass_reconciliation_adapter as reconciliation_adapter
@@ -27,8 +35,51 @@ _DIGEST = "a" * 64
 _SHEET = "b" * 64
 
 
+@pytest.mark.parametrize("category, expected_status", [
+    (ErrorCategory.CONFLICT, 409), (ErrorCategory.DOMAIN_BLOCKED, 409),
+    (ErrorCategory.VALIDATION, 422),
+])
+def test_workbook_preserves_terms_errors_and_removes_temporary_upload(tmp_path, monkeypatch, category, expected_status):
+    uploaded = tmp_path / "workbook.xlsx"
+    uploaded.write_bytes(b"test upload")
+
+    async def persist(_):
+        return uploaded
+
+    def apply(*_):
+        raise TermsWorkflowError(TypedError(
+            category, "terms_apply_mode_changed", "Terms changed after preview.",
+            CorrelationId("inner-terms"),
+        ))
+
+    monkeypatch.setattr(workbook_route, "_persist_workbook", persist)
+    app = FastAPI()
+    app.include_router(workbook_route.router)
+    app.dependency_overrides[workbook_route.require_admin] = lambda: AdminPrincipal(
+        1, "test-admin", "Test Admin", "system_admin",
+    )
+    app.dependency_overrides[workbook_route.get_client_beclass_workbook_import_service] = (
+        lambda: SimpleNamespace(apply=apply)
+    )
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/case-import/client-beclass/workbooks/apply",
+            files={"workbook": ("workbook.xlsx", b"test upload")},
+            data={"preview_fingerprint": "a" * 64},
+            headers={"Idempotency-Key": "test-key", "X-Correlation-ID": "workbook-request"},
+        )
+
+    assert response.status_code == expected_status
+    error = response.json()["detail"]["error"]
+    assert error["category"] == category.value
+    assert error["code"] == "terms_apply_mode_changed"
+    assert error["correlation_id"] == "workbook-request"
+    assert not uploaded.exists()
+
+
 @pytest.mark.parametrize("versions", [(None, None), (0, 0), (4, 7), (None, 7)])
-def test_cooking_reconciliation_preserves_nullable_owner_versions(monkeypatch, versions):
+@pytest.mark.parametrize("requires_formal_apply", [False, True])
+def test_cooking_reconciliation_preserves_preview_contract(monkeypatch, versions, requires_formal_apply):
     terms = OrderTerms(
         date(2026, 9, 10), 5, 8, MoneyNTD(0),
         ServiceTimeTerms(None, None, None), None,
@@ -50,6 +101,7 @@ def test_cooking_reconciliation_preserves_nullable_owner_versions(monkeypatch, v
                 after=proposed_terms, order_version=2, scheduling_version=0,
                 client_finance_version=versions[0], payroll_version=versions[1],
                 fingerprint="preview",
+                requires_formal_apply=requires_formal_apply,
             )
 
         def apply_in_current_uow(self, request):
@@ -73,6 +125,7 @@ def test_cooking_reconciliation_preserves_nullable_owner_versions(monkeypatch, v
     ):
         assert actual == (None if version is None else ExpectedVersion(version))
     assert request.proposed_terms.requires_cooking is True
+    assert request.requires_formal_apply is requires_formal_apply
 
 
 class _Connection:

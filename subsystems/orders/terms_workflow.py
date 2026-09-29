@@ -20,6 +20,7 @@ from domains.orders.lifecycle import (
 )
 from domains.orders.service_date_confirmation import ConfirmedServiceDateCandidate
 from domains.orders.terms import (
+    OrderAggregateFacts,
     is_unique_cooking_requirement_correction,
     validate_terms_change,
 )
@@ -44,6 +45,15 @@ from subsystems.payroll.terms_impact import (
 
 
 _TERMS_SOURCE_EVENT_FAMILY = "order-terms"
+
+
+@dataclass(frozen=True, slots=True)
+class OrderTermsRegistryFacts:
+    order: OrderAggregateFacts
+    scheduling_version: int
+    scheduling_generation: int
+    client_finance_version: int | None
+    payroll_version: int | None
 
 
 @dataclass(frozen=True, slots=True)

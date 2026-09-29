@@ -209,15 +209,14 @@ def test_registry_http_composition_identifies_each_field_owner_and_editability()
                 "service_time": {"start_time": None, "end_time": None, "end_day_offset": None},
             }),
         ),
-        scheduling=SimpleNamespace(aggregate_version=5, generation_number=2),
-        client_finance=SimpleNamespace(account_version=6),
-        payroll=SimpleNamespace(payroll_version=7),
+        scheduling_version=5, scheduling_generation=2,
+        client_finance_version=6, payroll_version=7,
     )
     response = get_client_registry(
         case_no="CASE-001",
         principal=AdminPrincipal(9, "registry-reader", "Registry Reader", "system_admin"),
         application=ClientRegistryQueryApplication(_Repository()),
-        order_terms=SimpleNamespace(query=lambda _case_no: terms),
+        order_terms=SimpleNamespace(query_registry=lambda _case_no: terms),
     )
     payload = response.data.model_dump()
     assert payload["client"]["field_capabilities"]["phone"] == {
@@ -243,16 +242,15 @@ def test_registry_http_composition_allows_preassignment_terms_without_downstream
                 "service_time": {"start_time": None, "end_time": None, "end_day_offset": None},
             }),
         ),
-        scheduling=SimpleNamespace(aggregate_version=5, generation_number=2),
-        client_finance=None,
-        payroll=None,
+        scheduling_version=5, scheduling_generation=2,
+        client_finance_version=None, payroll_version=None,
     )
 
     response = get_client_registry(
         case_no="CASE-001",
         principal=AdminPrincipal(9, "registry-reader", "Registry Reader", "system_admin"),
         application=ClientRegistryQueryApplication(_Repository()),
-        order_terms=SimpleNamespace(query=lambda _case_no: terms),
+        order_terms=SimpleNamespace(query_registry=lambda _case_no: terms),
     )
 
     payload = response.data.model_dump()["order_terms"]

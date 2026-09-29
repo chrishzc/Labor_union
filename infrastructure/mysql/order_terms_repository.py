@@ -22,6 +22,7 @@ from subsystems.orders.terms_workflow import (
     OrderTermsPreview,
     OrderTermsReceipt,
     OrderTermsReceiptPersistenceCommand,
+    OrderTermsRegistryFacts,
     PayrollImpactPersistenceCommand,
     SchedulingReplacementCommand,
     SchedulingReplacementResult,
@@ -32,6 +33,7 @@ from subsystems.orders.terms_workflow import (
 from .client_finance_terms_writer import persist_client_finance_terms_impact
 from .order_terms_read_model import (
     load_order_facts,
+    load_registry_terms_facts,
     load_terms_locked_facts,
     load_terms_preview_facts,
     preflight_staff_ids,
@@ -48,6 +50,10 @@ class MySqlOrderTermsRepository:
     def load_for_preview(self, case_no: str) -> TermsWorkflowFacts:
         with self._connection.cursor() as cursor:
             return load_terms_preview_facts(cursor, case_no)
+
+    def load_for_registry(self, case_no: str) -> OrderTermsRegistryFacts:
+        with self._connection.cursor() as cursor:
+            return load_registry_terms_facts(cursor, case_no)
 
     def load_order_terms(
         self, case_no: str, *, for_update: bool = False

@@ -37,7 +37,7 @@ from shared_kernel.money import MoneyNTD
 from infrastructure.mysql.effective_case_service_rate import (
     load_explicit_case_service_rate,
 )
-from subsystems.orders.terms_workflow import TermsWorkflowFacts
+from subsystems.orders.terms_workflow import OrderTermsRegistryFacts, TermsWorkflowFacts
 from subsystems.orders.actual_start_workflow import ActualStartPayrollVersionFacts
 from subsystems.payroll.terms_impact import (
     CasePayrollPolicyTerms,
@@ -84,6 +84,31 @@ def load_order_facts(
     """Load only the Orders root through a borrowed transaction cursor."""
 
     return _order_facts(select_order(cursor, case_no, lock=for_update))
+
+
+def load_registry_terms_facts(cursor: Any, case_no: str) -> OrderTermsRegistryFacts:
+    """Read persisted terms and versions without mutation eligibility checks."""
+
+    order = load_order_facts(cursor, case_no)
+    aggregate = select_scheduling_aggregate(cursor, case_no, lock=False)
+    generation = _select_generation(cursor, aggregate, lock=False)
+    cursor.execute(
+        "SELECT aggregate_version FROM client_finance_accounts WHERE case_no=%s",
+        (case_no,),
+    )
+    finance = cursor.fetchone()
+    cursor.execute(
+        "SELECT aggregate_version FROM payroll_case_accounts WHERE case_no=%s",
+        (case_no,),
+    )
+    payroll = cursor.fetchone()
+    return OrderTermsRegistryFacts(
+        order=order,
+        scheduling_version=int(aggregate["aggregate_version"]),
+        scheduling_generation=int(generation["generation_number"]) if generation else 0,
+        client_finance_version=int(finance["aggregate_version"]) if finance else None,
+        payroll_version=int(payroll["aggregate_version"]) if payroll else None,
+    )
 
 
 # Kept cohesive because schedule and Finance roots must share one cursor snapshot.

@@ -26,7 +26,7 @@
 
 ## Dependencies
 - outbound: `case-import/case-architecture-bootstrap` — `client_finance_bootstrap_required` 時提供明示 Preview／Apply 修復入口；Client Profile／名冊 Query 不自行建立 financial roots。
-- outbound: `orders/order-terms` — bootstrap status 回報 `missing_start_date` 時，名冊先組合 Orders-owned 契約條件 Preview／Apply，成功後重新查詢 Case Import bootstrap status。
+- outbound: `orders/order-terms` — 名冊 Query 讀取保存條件與版本，不使用 mutation Preview 判定查閱資格；`order_terms_start_date_required`／`order_terms_service_days_required` 或 bootstrap status 缺件時，名冊組合既有 Orders-owned 契約條件 Preview／Apply，成功後重新查詢 Case Import bootstrap status。
 
 ## Entrypoints
 - `GET /api/v1/admin/registries/clients` — bounded selector with optional query, BeClass effective multi-birth-count, order-status, cooking and allowlisted sort filters; the registry editor exhausts its case-number cursor, while the read-only roster uses offset pagination across all supported sorts.

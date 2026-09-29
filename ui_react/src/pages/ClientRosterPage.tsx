@@ -94,7 +94,7 @@ const ReadOnlyFields: React.FC<{ labels: Record<string, string>; values: Record<
 
 const ReadOnlyDetail: React.FC<{ detail: ClientRegistryDetail; onRepaired: () => void | Promise<void> }> = ({ detail, onRepaired }) => {
   const terms = detail.order_terms.data?.terms;
-  const bootstrapRequired = detail.order_terms.code === 'client_finance_bootstrap_required'
+  const bootstrapRequired = ['client_finance_bootstrap_required', 'order_terms_start_date_required', 'order_terms_service_days_required'].includes(detail.order_terms.code ?? '')
     || detail.finance.code === 'client_finance_bootstrap_required';
   const orderTermValues = terms ? {
     planned_start_date: terms.planned_start_date, service_days: terms.service_days,

@@ -2,6 +2,10 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ClientRegistryPage } from '../../../../../../../pages/ClientRegistryPage';
 
+vi.mock('../../../../../../../components/CaseArchitectureBootstrapRepairPanel', () => ({
+  CaseArchitectureBootstrapRepairPanel: ({ caseNo }: { caseNo: string }) => <div aria-label="案件初始資料修復">{caseNo}</div>,
+}));
+
 const mocks = vi.hoisted(() => ({ list: vi.fn(), query: vi.fn(), history: vi.fn(), preview: vi.fn(), apply: vi.fn() }));
 vi.mock('../../../../../../../api/client_registry/client_registry_client', () => ({ clientRegistryClient: mocks }));
 vi.mock('../../../../../../../components/OrderTermsMutationPanel', () => ({ OrderTermsMutationPanel: () => <div>訂單條款 owner</div> }));
@@ -62,6 +66,21 @@ describe('Client registry owner editing', () => {
     mocks.preview.mockResolvedValue({ owner: 'client_profile', aggregate_identity: 'CASE-001', current_version: 2, before: { phone: '0911111111' }, after: { phone: '0933333333' }, preview_fingerprint: 'a'.repeat(64) });
     mocks.apply.mockResolvedValue({ owner: 'client_profile', aggregate_identity: 'CASE-001', resulting_version: 3, changed_fields: ['phone'], preview_fingerprint: 'a'.repeat(64), idempotency_key: 'client-profile-1', replayed: false, readback: { phone: '0933333333' } });
   });
+
+  it.each(['order_terms_start_date_required', 'order_terms_service_days_required'])(
+    'offers the existing repair entry for missing terms (%s)', async (code) => {
+      mocks.query.mockResolvedValue({
+        ...detail,
+        finance: { status: 'not_ready', code: 'unavailable', values: null },
+        order_terms: { status: 'not_ready', code, data: null, field_capabilities: {} },
+      });
+      render(<ClientRegistryPage />);
+      fireEvent.click(screen.getByRole('tab', { name: '名冊資料' }));
+      fireEvent.click(await screen.findByRole('button', { name: /CASE-001/ }));
+      expect(await screen.findByLabelText('案件初始資料修復')).toHaveTextContent('CASE-001');
+      expect(mocks.apply).not.toHaveBeenCalled();
+    },
+  );
 
   it('cancels without writing and applies a preview with one stable idempotency key', async () => {
     render(<ClientRegistryPage />);

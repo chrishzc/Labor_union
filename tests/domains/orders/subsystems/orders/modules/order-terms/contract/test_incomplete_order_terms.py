@@ -9,20 +9,30 @@ from fastapi.testclient import TestClient
 
 from api.dependencies.order_terms import OrderTermsApplication
 from api.routes import client_registry
-from domains.scheduling.generation import SchedulingGenerationFacts
-from infrastructure.mysql.order_terms_read_model import load_order_facts
+from infrastructure.mysql.order_terms_read_model import load_registry_terms_facts
 
 
 class _OrderCursor:
     def __init__(self, row):
         self.row = row
+        self.current = None
 
     def execute(self, sql, parameters):
         assert sql.startswith("SELECT ")
         assert parameters == (self.row["case_no"],)
+        if "FROM orders o " in sql:
+            self.current = self.row
+        elif "FROM scheduling_aggregates " in sql:
+            self.current = None
+        elif "FROM client_finance_accounts " in sql:
+            self.current = self.row.get("finance_account")
+        elif "FROM payroll_case_accounts " in sql:
+            self.current = self.row.get("payroll_account")
+        else:
+            raise AssertionError("registry must not read mutation impact facts")
 
     def fetchone(self):
-        return self.row
+        return self.current
 
 
 @pytest.fixture
@@ -57,17 +67,12 @@ def registry_client(order_row):
         finance=SimpleNamespace(status="not_ready", code="client_finance_bootstrap_required", values=None),
     )
 
-    def load_for_preview(requested_case_no):
-        return SimpleNamespace(
-            order=load_order_facts(_OrderCursor(order_row), requested_case_no),
-            scheduling=SchedulingGenerationFacts(case_no, 0, 0, ()),
-            client_finance=None,
-            payroll=None,
-        )
+    def load_for_registry(requested_case_no):
+        return load_registry_terms_facts(_OrderCursor(order_row), requested_case_no)
 
     terms = OrderTermsApplication(
         connection=None,
-        repository=SimpleNamespace(load_for_preview=load_for_preview),
+        repository=SimpleNamespace(load_for_registry=load_for_registry),
         workflow=None,
     )
     app = FastAPI()
@@ -116,3 +121,21 @@ def test_complete_terms_preserve_zero_fee_false_cooking_and_empty_time(registry_
     assert terms["service_time"] == {
         "start_time": None, "end_time": None, "end_day_offset": None,
     }
+
+
+@pytest.mark.parametrize("locked", [False, True])
+def test_historical_terms_remain_visible_without_daily_schedule(registry_client, order_row, locked):
+    order_row.update(
+        status="歷史訂單－服務完成", service_data_locked=locked,
+        finance_account={"aggregate_version": 7}, payroll_account={"aggregate_version": 8},
+    )
+    response = registry_client.get(f"/api/v1/admin/registries/clients/{order_row['case_no']}")
+
+    assert response.status_code == 200
+    section = response.json()["data"]["order_terms"]
+    assert section["status"] == "ready"
+    assert section["data"]["terms"]["planned_start_date"] == "2026-10-01"
+    assert section["data"]["client_finance_version"] == 7
+    assert section["data"]["payroll_version"] == 8
+    assert section["data"]["service_data_locked"] is locked
+    assert section["field_capabilities"]["planned_start_date"]["editable"] is not locked

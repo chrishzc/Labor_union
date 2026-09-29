@@ -161,11 +161,11 @@ describe('ClientRosterPage', () => {
     await waitFor(() => expect(mocks.query).toHaveBeenCalledTimes(2));
   });
 
-  it('lets an operator fill the missing contractual start date before bootstrap repair', async () => {
+  it.each(['client_finance_bootstrap_required', 'order_terms_start_date_required'])(
+    'lets an operator fill the missing contractual start date before bootstrap repair (%s)', async (code) => {
     const unavailable = {
       ...(await mocks.query()),
-      finance: { status: 'not_ready', code: 'client_finance_bootstrap_required', values: null },
-      order_terms: { status: 'not_ready', code: 'client_finance_bootstrap_required', data: null, field_capabilities: {} },
+      order_terms: { status: 'not_ready', code, data: null, field_capabilities: {} },
     };
     mocks.query.mockReset();
     mocks.query.mockResolvedValue(unavailable);
