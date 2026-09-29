@@ -22,6 +22,7 @@
   - `api/schemas/hcm_import.py`
   - `ui_react/src/api/case_import/hcm_workbook_schemas.ts`
   - `ui_react/src/api/case_import/hcm_resubmission_client.ts`
+    - `loadCurrentHcmReviewsForCases` — 以既有 current review 分頁查詢讀取指定案件的最新欄位問題；支援取消，不寫入或重新判定問題是否解除。
 
 ## Dependencies
 - outbound: `orders` — HCM reconciliation 只透過 Case Import typed boundary 補入已授權 Orders facts。

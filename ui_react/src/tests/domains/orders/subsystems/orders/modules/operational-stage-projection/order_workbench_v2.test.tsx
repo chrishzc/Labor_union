@@ -12,6 +12,7 @@ import {
 } from '../../../../../../../api/orders/order_core_stage_projection_schemas';
 import type { OrderCoreStageProjectionQueryParams } from '../../../../../../../api/orders/order_core_stage_projection_client';
 import { OrderWorkbenchV2Page } from '../../../../../../../pages/OrderWorkbenchV2Page';
+import { hcmResubmissionClient } from '../../../../../../../api/case_import/hcm_resubmission_client';
 
 const clientMocks = vi.hoisted(() => ({
   getCoreStageTimelines: vi.fn(),
@@ -205,9 +206,55 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
   });
 
   beforeEach(() => {
+    vi.spyOn(hcmResubmissionClient, 'current').mockReset().mockResolvedValue({ items: [], next_cursor: null });
     clientMocks.getCoreStageTimelines.mockReset();
     clientMocks.loadSummaries.mockReset();
     clientMocks.loadSummaries.mockResolvedValue(summaryPage([]));
+  });
+
+  it('從後續進件問題分頁顯示住宅型態驗證問題，保留其他案件的服務缺件提示', async () => {
+    clientMocks.getCoreStageTimelines.mockResolvedValue(corePage([
+      timeline('CASE-DATES', 'intake_validation', 'in_progress', {
+        lifecycle: '待補件', blockers: [{ code: 'orders_terms_missing', message: '服務開始日尚未補齊。' }],
+      }),
+      timeline('CASE-RESIDENCE', 'intake_validation', 'in_progress', { lifecycle: '待補件' }),
+    ]));
+    const current = vi.mocked(hcmResubmissionClient.current)
+      .mockResolvedValueOnce({
+        items: [{ source_id: 40, review_identity: 'unrelated', case_no: 'CASE-OTHER', fields: ['手機'], can_correct: true }],
+        next_cursor: 40,
+      })
+      .mockResolvedValueOnce({
+        items: [{ source_id: 30, review_identity: 'residence-review', case_no: 'CASE-RESIDENCE', fields: ['居住型態'], can_correct: true }],
+        next_cursor: null,
+      });
+
+    render(<OrderWorkbenchV2Page />);
+
+    await screen.findByText('居住型態');
+    const residence = cardFor('CASE-RESIDENCE');
+    expect(within(residence).getByText('進件欄位待修正')).toBeInTheDocument();
+    expect(within(residence).queryByText('手機')).not.toBeInTheDocument();
+    expect(within(cardFor('CASE-DATES')).getByText('服務開始日尚未補齊。')).toBeInTheDocument();
+    expect(within(cardFor('CASE-DATES')).queryByText('居住型態')).not.toBeInTheDocument();
+    expect(current).toHaveBeenNthCalledWith(2, 40, expect.objectContaining({ signal: expect.any(AbortSignal) }));
+  });
+
+  it('進件問題續頁失敗時顯示讀取失敗，不以部分清單聲稱問題已完整取得', async () => {
+    clientMocks.getCoreStageTimelines.mockResolvedValue(corePage([
+      timeline('CASE-RESIDENCE', 'intake_validation', 'in_progress', { lifecycle: '待補件' }),
+    ]));
+    vi.mocked(hcmResubmissionClient.current)
+      .mockResolvedValueOnce({
+        items: [{ source_id: 40, review_identity: 'unrelated', case_no: 'CASE-OTHER', fields: ['手機'], can_correct: true }],
+        next_cursor: 40,
+      })
+      .mockRejectedValueOnce(new Error('review page unavailable'));
+
+    render(<OrderWorkbenchV2Page />);
+
+    expect(await screen.findByText('原始進件欄位問題讀取失敗，請重新讀取案件。')).toBeInTheDocument();
+    expect(within(cardFor('CASE-RESIDENCE')).queryByText('手機')).not.toBeInTheDocument();
   });
 
   it('案件卡只顯示目前階段通知，不提前顯示未來客戶結算阻塞', async () => {

@@ -37,6 +37,7 @@
 - outbound: `client-finance/client-finance` — 讀取定金與客戶 obligation projection。
 - outbound: `payroll/payroll` — 讀取月嫂薪資 obligation projection。
 - outbound: `case-import | case-architecture-bootstrap` — 任一正式建立事件皆可提供進件 lineage；不得要求 bootstrap 案件補造 Case Import 收據。
+- outbound: `case-import/hcm-current-workbook-import` — 待補件卡片讀取既有 current HCM review 的欄位清單，顯示原始進件待修正原因；不以服務條件缺漏取代欄位驗證問題，不改變正式階段或 lifecycle。
 
 ## Contracts
 - `api/routes/orders_stage_projection.py` — `/api/orders/operational-timelines` typed read-only contract。

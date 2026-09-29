@@ -9,6 +9,7 @@ import {
   type IntakeTermsPreview,
 } from '../api/orders/order_intake_completion_client';
 import { ordersQueryClient } from '../api/orders/order_query_client';
+import { loadCurrentHcmReviewsForCases, type HcmCurrentReview } from '../api/case_import/hcm_resubmission_client';
 import { ApiHttpError } from '../api/shared/typed_errors';
 import {
   orderMutationFlowStore,
@@ -72,6 +73,8 @@ export function OrderIntakeRepairPanel({
   onChanged,
 }: OrderIntakeRepairPanelProps) {
   const [completion, setCompletion] = useState<IntakeCompletionPreview | null>(null);
+  const [sourceReview, setSourceReview] = useState<HcmCurrentReview | null>(null);
+  const [sourceReviewError, setSourceReviewError] = useState(false);
   const [clientName, setClientName] = useState('');
   const [startDate, setStartDate] = useState('');
   const [serviceDays, setServiceDays] = useState('');
@@ -117,6 +120,8 @@ export function OrderIntakeRepairPanel({
       if (signal?.aborted) return;
       if (currentCompletion.case_no !== caseNo) throw new Error('進件補件回讀案件識別不一致。');
       setCompletion(currentCompletion);
+      setSourceReview(null);
+      setSourceReviewError(false);
       setStartDate(currentCompletion.current_start_date ?? '');
       setServiceDays(
         currentCompletion.current_service_days && currentCompletion.current_service_days > 0
@@ -141,6 +146,16 @@ export function OrderIntakeRepairPanel({
           throw detailResult.reason;
         }
       }
+      if (currentCompletion.current_status === '待補件') {
+        try {
+          const reviews = await loadCurrentHcmReviewsForCases([caseNo], { signal });
+          if (signal?.aborted) return;
+          setSourceReview(reviews[0] ?? null);
+        } catch {
+          if (signal?.aborted) return;
+          setSourceReviewError(true);
+        }
+      }
       return { completion: currentCompletion, detail };
     } finally {
       if (!signal?.aborted) setLoading(false);
@@ -156,6 +171,8 @@ export function OrderIntakeRepairPanel({
     const controller = new AbortController();
     setOperation(null);
     setCompletion(null);
+    setSourceReview(null);
+    setSourceReviewError(false);
     setNamePreview(null);
     setTermsPreview(null);
     setReason('');
@@ -481,8 +498,15 @@ export function OrderIntakeRepairPanel({
 
       {completion && !loading && (
         <>
+          {sourceReview && (
+            <div role="status" style={{ color: '#9a3412' }}>
+              <strong>原始進件欄位待修正：{sourceReview.fields.join('、')}</strong>
+              <p style={{ margin: '4px 0 0' }}>請先在「資料匯入」確認欄位問題並重新提交修正來源，再核對尚未補齊的案件資料。</p>
+            </div>
+          )}
+          {sourceReviewError && <div role="status">原始進件欄位問題讀取失敗，請重新讀取案件。</div>}
           <div style={{ fontSize: '0.84rem', color: '#57423b' }}>
-            缺少資料：{completion.missing_fields.length > 0
+            {sourceReview ? '尚未補齊的案件資料：' : '缺少資料：'}{completion.missing_fields.length > 0
               ? completion.missing_fields.map((field) => FIELD_LABELS[field]).join('、')
               : '無'}
           </div>
