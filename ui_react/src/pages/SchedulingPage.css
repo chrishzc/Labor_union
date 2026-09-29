@@ -821,6 +821,12 @@
   color: #14532d;
 }
 
+.span-rest {
+  background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
+  border: 1.5px solid #f87171;
+  color: #991b1b;
+}
+
 .span-historical {
   background: repeating-linear-gradient(-45deg, #e2e8f0, #e2e8f0 8px, #cbd5e1 8px, #cbd5e1 16px);
   border: 1.5px dashed #64748b;

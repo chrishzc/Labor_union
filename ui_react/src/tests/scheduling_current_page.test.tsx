@@ -11,6 +11,9 @@ import { staffMonthlyScheduleClient } from '../api/scheduling/staff_monthly_sche
 import { schedulingEligibilityCollisionClient } from '../api/scheduling/eligibility_collision_client';
 import { staffAssignmentOptionsClient } from '../api/scheduling/staff_assignment_options_client';
 import { staffLeaveInboxClient } from '../api/scheduling/staff_leave_inbox_client';
+import { leaveSubstitutionClient } from '../api/scheduling/leave_substitution_client';
+import { leaveSubstitutionFlowStore } from '../adapters/scheduling/leave_substitution_flow_store';
+import { LEAVE_ASSIGNMENTS } from './fixtures/scheduling/leave_substitution_contract_fixtures';
 import { SchedulingPage, taipeiCalendarDate } from '../pages/SchedulingPage';
 import {
   SCHEDULING_PROJECTION_EMPTY,
@@ -31,6 +34,8 @@ describe('SchedulingPage query-only presentation', () => {
   afterEach(() => vi.unstubAllGlobals());
   beforeEach(() => {
     vi.restoreAllMocks();
+    leaveSubstitutionFlowStore.clearAll();
+    vi.spyOn(leaveSubstitutionClient, 'listAssignments').mockResolvedValue([...LEAVE_ASSIGNMENTS]);
     coreStageProjectionMocks.loadAll.mockReset();
     observeNextPage = vi.fn();
     vi.stubGlobal('IntersectionObserver', class {
@@ -102,12 +107,12 @@ describe('SchedulingPage query-only presentation', () => {
     }));
   });
 
-  it('從 allowlist deep-link 直接開啟請假代班並安全解碼案件編號', () => {
-    window.location.hash = '#scheduling?tab=leave_sub&case_no=%20CASE-DL-001%20';
+  it('從 allowlist deep-link 直接開啟請假代班並安全解碼合格案件編號', async () => {
+    window.location.hash = '#scheduling?tab=leave_sub&case_no=%20CASE-SCH-001%20';
 
     render(<SchedulingPage />);
 
-    expect(screen.getByRole('textbox', { name: '請假代班訂單編號' })).toHaveValue('CASE-DL-001');
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '請假代班訂單編號' })).toHaveValue('CASE-SCH-001'));
     expect(document.querySelector('[data-surface-id="scheduling.tab.leave_sub"]')).toHaveClass('active');
     expect(document.querySelector('[data-surface-id="scheduling.calendar"]')).not.toBeInTheDocument();
   });
@@ -118,11 +123,11 @@ describe('SchedulingPage query-only presentation', () => {
     render(<SchedulingPage />);
 
     expect(screen.getByRole('region', { name: '排班甘特月曆與服務人員檔期' })).toBeInTheDocument();
-    expect(screen.queryByRole('textbox', { name: '請假代班訂單編號' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: '請假代班訂單編號' })).not.toBeInTheDocument();
     expect(document.querySelector('[data-surface-id="scheduling.tab.calendar"]')).toHaveClass('active');
 
     fireEvent.click(screen.getByRole('button', { name: /服務中請假與代班/ }));
-    expect(screen.getByRole('textbox', { name: '請假代班訂單編號' })).toHaveValue('');
+    expect(screen.getByRole('combobox', { name: '請假代班訂單編號' })).toHaveValue('');
   });
 
   it.each([
@@ -134,7 +139,7 @@ describe('SchedulingPage query-only presentation', () => {
 
     render(<SchedulingPage />);
 
-    expect(screen.getByRole('textbox', { name: '請假代班訂單編號' })).toHaveValue('');
+    expect(screen.getByRole('combobox', { name: '請假代班訂單編號' })).toHaveValue('');
   });
 
   it('anchors calendar today to Asia/Taipei instead of the browser local timezone', () => {
@@ -683,7 +688,8 @@ describe('SchedulingPage query-only presentation', () => {
     expect(screen.getByRole('combobox', { name: '資格查詢案件編號' })).toBeEnabled();
     expect(document.querySelector('[data-control-id="scheduling.candidate-pool.add"]')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /服務中請假與代班/ }));
-    fireEvent.change(screen.getByRole('textbox', { name: '請假代班訂單編號' }), { target: { value: '115000051' } });
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '請假代班訂單編號' })).toBeEnabled());
+    fireEvent.change(screen.getByRole('combobox', { name: '請假代班訂單編號' }), { target: { value: 'CASE-SCH-001' } });
     await waitFor(() => expect(document.querySelector('[data-control-id="scheduling.leave.query"]')).toBeEnabled());
     expect(document.querySelector('[data-control-id="scheduling.leave.preview"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-control-id="scheduling.leave.apply"]')).not.toBeInTheDocument();

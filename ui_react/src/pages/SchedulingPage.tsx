@@ -11,6 +11,7 @@ import { adaptStaffDirectoryPage } from '../adapters/staff/staff_directory_adapt
 import type { StaffDirectoryCardViewModel } from '../adapters/staff/staff_directory_adapter';
 import { schedulingCurrentClient } from '../api/scheduling/scheduling_current_client';
 import { staffMonthlyScheduleClient } from '../api/scheduling/staff_monthly_schedule_client';
+import { leaveSubstitutionClient } from '../api/scheduling/leave_substitution_client';
 import { SchedulingCurrentError } from '../api/scheduling/scheduling_current_errors';
 import { schedulingEligibilityCollisionClient } from '../api/scheduling/eligibility_collision_client';
 import {
@@ -674,6 +675,10 @@ function LeaveSubstitutionWorkspace({
   staffList: readonly StaffDirectoryCardViewModel[];
 }) {
   const [caseNo, setCaseNo] = useState(() => suggestedCaseNo || '');
+  const [caseOptions, setCaseOptions] = useState<readonly { caseNo: string; clientName: string }[]>([]);
+  const [caseOptionsLoading, setCaseOptionsLoading] = useState(true);
+  const [caseOptionsError, setCaseOptionsError] = useState<string | null>(null);
+  const [caseOptionsRevision, setCaseOptionsRevision] = useState(0);
   const [assignmentId, setAssignmentId] = useState<number | null>(null);
   const [scheduleId, setScheduleId] = useState<number | null>(null);
   const [resolutionType, setResolutionType] = useState<LeaveResolutionType>('substitute');
@@ -802,12 +807,46 @@ function LeaveSubstitutionWorkspace({
   );
 
   useEffect(() => {
-    if (suggestedCaseNo && suggestedCaseNo !== caseNo) {
-      setCaseNo(suggestedCaseNo);
-    }
-  }, [suggestedCaseNo, caseNo]);
+    const controller = new AbortController();
+    setCaseOptionsLoading(true);
+    setCaseOptionsError(null);
+    setCaseOptions([]);
+    const loadCases = async () => {
+      try {
+        const page = await loadAllOrderSummaries(
+          ordersQueryClient.getOrderSummaries.bind(ordersQueryClient),
+          { page_size: 200, lifecycle_scope: 'unfinished' },
+          { signal: controller.signal },
+        );
+        const candidates = page.items.filter((item) => item.order_status === '服務中');
+        const options = await Promise.all(candidates.map(async (item) => {
+          const assignments = await leaveSubstitutionClient.listAssignments(
+            item.case_no, { signal: controller.signal },
+          );
+          return assignments.some((assignment) => assignment.official_schedules.length > 0)
+            ? { caseNo: item.case_no, clientName: item.client_name }
+            : null;
+        }));
+        if (!controller.signal.aborted) {
+          setCaseOptions(options.filter((item): item is NonNullable<typeof item> => item !== null));
+        }
+      } catch {
+        if (!controller.signal.aborted) {
+          setCaseOptionsError('服務中案件載入失敗，請重新載入。');
+        }
+      } finally {
+        if (!controller.signal.aborted) setCaseOptionsLoading(false);
+      }
+    };
+    void loadCases();
+    return () => controller.abort();
+  }, [caseOptionsRevision]);
 
-  const normalizedCaseNo = caseNo.trim();
+  useEffect(() => {
+    setCaseNo(suggestedCaseNo || '');
+  }, [suggestedCaseNo]);
+
+  const normalizedCaseNo = caseOptions.some((item) => item.caseNo === caseNo) ? caseNo : '';
 
   const draft = normalizedCaseNo ? leaveSubstitutionFlowStore.get(normalizedCaseNo) : undefined;
   const machine = resolveLeaveSubstitutionMachineState(draft);
@@ -1158,21 +1197,34 @@ function LeaveSubstitutionWorkspace({
         </div>
       )}
 
-      {/* 訂單選擇控制列（支援下拉選單與快速切換標籤） */}
+      {/* 只提供服務中且具備有效正式服務日的案件 */}
       <div className="leave-substitution-query-row" style={{ background: '#fff8f6', padding: '16px 20px', borderRadius: '12px', border: '1.5px solid #fed7aa' }}>
         <div style={{ flex: '1 1 320px' }}>
           <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 700, color: '#9a3412', marginBottom: '6px' }}>
             📋 選擇服務中案件／訂單編號 (支援電話／口頭／LINE 請假調度)
           </label>
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-            <input
+            <select
               aria-label="請假代班訂單編號"
-              value={caseNo}
-              disabled={busy}
-              onChange={(event) => setCaseNo(event.target.value)}
-              placeholder="請輸入正式訂單編號"
+              value={normalizedCaseNo}
+              disabled={busy || caseOptionsLoading || Boolean(caseOptionsError)}
+              onChange={(event) => {
+                setCaseNo(event.target.value);
+                setAssignmentId(null);
+                setScheduleId(null);
+                setConfirmed(false);
+                setSelectedInboxItem(null);
+                setReason('正式處理請假代班');
+              }}
               style={{ flex: 1, minWidth: '260px', padding: '9px 12px', borderRadius: '8px', border: '1px solid #dec0b6', fontSize: '0.92rem' }}
-            />
+            >
+              <option value="">{caseOptionsLoading ? '正在載入服務中案件…' : '請選擇服務中案件'}</option>
+              {caseOptions.map((item) => (
+                <option key={item.caseNo} value={item.caseNo}>
+                  {item.caseNo} ｜ {item.clientName}
+                </option>
+              ))}
+            </select>
 
             <button
               type="button"
@@ -1184,9 +1236,22 @@ function LeaveSubstitutionWorkspace({
               {machine.type === 'query_loading' ? '⏳ 查詢中…' : '🔍 重新整理指派'}
             </button>
           </div>
-          {!normalizedCaseNo && (
+          {caseOptionsError && (
+            <div className="leave-substitution-notice" role="alert">
+              {caseOptionsError}
+              <button type="button" onClick={() => setCaseOptionsRevision((value) => value + 1)}>
+                重新載入案件
+              </button>
+            </div>
+          )}
+          {!caseOptionsLoading && !caseOptionsError && caseOptions.length === 0 && (
+            <small className="leave-substitution-notice" role="status">
+              目前沒有服務中且已有正式排班的案件。
+            </small>
+          )}
+          {!normalizedCaseNo && !caseOptionsLoading && !caseOptionsError && caseOptions.length > 0 && (
             <small className="leave-substitution-notice" data-control-id="scheduling.leave.query-guidance">
-              請先輸入訂單編號，才能查詢正式指派並檢查代班影響。
+              請先選擇服務中且已有正式排班的案件，才能查詢正式指派並檢查代班影響。
             </small>
           )}
         </div>
@@ -1746,7 +1811,7 @@ interface GanttSpan {
   id: string;
   startDay: number;
   endDay: number;
-  tone: 'active' | 'buffer' | 'leave' | 'waiting' | 'available' | 'unavailable' | 'conflict' | 'deposit-conflict' | 'free' | 'historical';
+  tone: 'active' | 'rest' | 'buffer' | 'leave' | 'waiting' | 'available' | 'unavailable' | 'conflict' | 'deposit-conflict' | 'free' | 'historical';
   icon?: string;
   caseText: string;
   statusLabel?: string;
@@ -1835,10 +1900,12 @@ function buildGanttSpans(
     const dayNum = index + 1;
     const isOccupied = day.occupancyKinds.length > 0;
 
-    let tone: GanttSpan['tone'] = day.tone === 'rest' ? 'active' : day.tone;
+    let tone: GanttSpan['tone'] = day.tone === 'rest'
+      ? (day.assignmentStatuses.includes('active') ? 'rest' : 'active')
+      : day.tone;
     let caseText = day.caseLabels.join('、') || (isOccupied ? day.statusLabel : NO_OCCUPANCY_SLOT_TEXT);
     let statusLabel = day.caseLabels.length > 0 ? day.statusLabel : undefined;
-    let icon: string | undefined = tone === 'active' ? '🟢' : tone === 'buffer' ? '🔒' : tone === 'leave' ? '🚑' : tone === 'waiting' ? '🔵' : undefined;
+    let icon: string | undefined = tone === 'active' ? '🟢' : tone === 'rest' ? '🔴' : tone === 'buffer' ? '🔒' : tone === 'leave' ? '🚑' : tone === 'waiting' ? '🔵' : undefined;
 
     if (!current) {
       if (isOccupied) {

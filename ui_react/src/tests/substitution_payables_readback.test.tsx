@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import { staffLeaveInboxClient } from '../api/scheduling/staff_leave_inbox_client';
 import { staffAssignmentOptionsClient } from '../api/scheduling/staff_assignment_options_client';
+import { leaveSubstitutionClient } from '../api/scheduling/leave_substitution_client';
 import { substitutionPayablesLineageClient, type SubstitutionPayablesLineage } from '../api/scheduling/substitution_payables_lineage_client';
 import { staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
 import { leaveSubstitutionFlowStore } from '../adapters/scheduling/leave_substitution_flow_store';
@@ -20,6 +21,10 @@ import {
   LEAVE_PREVIEW_REQUEST,
   LEAVE_RECEIPT,
 } from './fixtures/scheduling/leave_substitution_contract_fixtures';
+
+vi.mock('../api/orders/load_all_core_stage_timelines', () => ({
+  loadAllCoreStageTimelines: vi.fn().mockResolvedValue({ items: [] }),
+}));
 
 function lineage(): SubstitutionPayablesLineage {
   return {
@@ -134,11 +139,18 @@ describe('Scheduling substitution Staff Payables readback', () => {
     });
     vi.spyOn(staffLeaveInboxClient, 'list').mockResolvedValue([]);
     vi.spyOn(ordersQueryClient, 'getOrderSummaries').mockResolvedValue({
-      items: [],
+      items: [{
+        case_no: LEAVE_CASE_NO, client_name: '去敏客戶甲', order_status: '服務中',
+        staff_name: '月嫂甲', identity_status: 'verified',
+        start_date: '2026-08-01', end_date: '2026-08-31',
+        actual_start_date: '2026-08-01', actual_end_date: null,
+        service_days: 20, total_employer_self_pay_payable: 10000,
+      }],
       next_cursor: null,
       etag: 'a'.repeat(64),
     });
     vi.spyOn(staffAssignmentOptionsClient, 'getStaffAssignmentOptions').mockResolvedValue([]);
+    vi.spyOn(leaveSubstitutionClient, 'listAssignments').mockResolvedValue([...LEAVE_ASSIGNMENTS]);
     vi.spyOn(substitutionPayablesLineageClient, 'query').mockResolvedValue(lineage());
   });
 
