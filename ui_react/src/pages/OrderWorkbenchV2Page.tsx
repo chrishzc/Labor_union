@@ -37,6 +37,7 @@ import {
 } from '../adapters/orders/order_core_stage_projection_adapter';
 import {
   adaptOrderSummaryPage,
+  formatServiceRange,
   type OrderSummaryCardViewModel,
 } from '../adapters/orders/order_summary_adapter';
 
@@ -342,6 +343,9 @@ export const OrderWorkbenchV2Page: FC = () => {
                     <div className="order-card-body order-v2-card-summary">
                       <div className="order-client-title"><span aria-hidden="true">👤 </span><span>{summary.clientName.trim() || '客戶姓名未登錄'}</span></div>
                       <div>📅 約定服務：<span>{summary.serviceRange}</span>（{summary.serviceDaysLabel}）</div>
+                      {(summary.actualStartDate !== null || summary.actualEndDate !== null) && (
+                        <div>📅 實際服務：<span>{formatServiceRange(summary.actualStartDate, summary.actualEndDate)}</span></div>
+                      )}
                       <div className="order-doula-box">👩‍🍼 指派月嫂：<strong>{summary.assignedDoulaDisplay}</strong></div>
                     </div>
                   ) : (

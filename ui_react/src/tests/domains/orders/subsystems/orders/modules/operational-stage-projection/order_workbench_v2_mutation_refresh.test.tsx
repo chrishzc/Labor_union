@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { CORE_STAGE_CODES, SUBSTATUS_BY_STAGE_STATUS, substatusCodesForStage, type CoreStageCode } from '../../../../../../../api/orders/order_core_stage_projection_schemas';
+import { CORE_STAGE_CODES, SUBSTATUS_BY_STAGE_STATUS, substatusCodesForStage, type CoreStageCode, type CoreStageProjection } from '../../../../../../../api/orders/order_core_stage_projection_schemas';
 import type { OrderCoreStageProjectionQueryParams } from '../../../../../../../api/orders/order_core_stage_projection_client';
 import { OrderWorkbenchV2Page } from '../../../../../../../pages/OrderWorkbenchV2Page';
 
@@ -36,7 +36,7 @@ function page(selected: CoreStageCode) {
   return {
     items: [{ case_no: 'CASE-REFRESH', base_revision: 1, lifecycle_status: '訂單成立', branch_type: 'normal',
       current_core_stage_code: selected, current_core_stage_ordinal: CORE_STAGE_CODES.indexOf(selected) + 1,
-      core_stages: CORE_STAGE_CODES.map((code, index) => {
+      core_stages: CORE_STAGE_CODES.map((code, index): CoreStageProjection => {
         const status = code === selected ? 'in_progress' : 'completed';
         return { ordinal: index + 1, code, label: labels[code], owner: `owner-${code}`, status,
           substatus_code: SUBSTATUS_BY_STAGE_STATUS[code][status],
@@ -113,5 +113,47 @@ describe('Beta owner mutation 到清單與階段的完整 callback 接線', () =
     expect(input).toBeInTheDocument(); expect(input).toHaveValue('Drawer 保留');
     fireEvent.click(screen.getByRole('button', { name: '關閉整合測試 Drawer' }));
     expect(screen.queryByLabelText('整合測試面板草稿')).not.toBeInTheDocument();
+  });
+
+  it('正式排班回讀後卡片更新狀態與實際期間，保留約定期間', async () => {
+    const before = page('formal_service');
+    before.substatus_counts = {};
+    before.items[0]!.lifecycle_status = '服務中';
+    const formalStage = before.items[0]!.core_stages.find((stage) => stage.code === 'formal_service')!;
+    formalStage.status = 'unavailable';
+    formalStage.substatus_code = 'service_schedule_unavailable';
+    mocks.core.mockResolvedValueOnce(before);
+    const summary = {
+      case_no: 'CASE-REFRESH', client_name: '測試客戶', order_status: '服務中',
+      staff_name: '測試月嫂', identity_status: null,
+      start_date: '2026-09-21', end_date: '2026-10-30',
+      actual_start_date: null, actual_end_date: null,
+      service_days: 30, total_employer_self_pay_payable: null,
+    };
+    mocks.summaries.mockResolvedValueOnce({ items: [summary], next_cursor: null, etag: 'c'.repeat(64) });
+    render(<OrderWorkbenchV2Page />);
+    const card = (await screen.findByText('CASE-REFRESH')).closest('article')!;
+    expect(within(card).getByText('排班資料不可用')).toBeInTheDocument();
+    expect(await within(card).findByText('2026-09-21 ~ 2026-10-30')).toBeInTheDocument();
+    expect(within(card).queryByText(/實際服務/)).not.toBeInTheDocument();
+    fireEvent.click(within(card).getByRole('button', { name: '處理：排班與服務' }));
+
+    const after = page('formal_service');
+    after.substatus_counts = {};
+    after.items[0]!.lifecycle_status = '服務中';
+    mocks.core.mockResolvedValue(after);
+    mocks.summaries.mockResolvedValue({
+      items: [{ ...summary, actual_start_date: '2026-09-14', actual_end_date: '2026-10-23' }],
+      next_cursor: null, etag: 'd'.repeat(64),
+    });
+    const reads = mocks.summaries.mock.calls.length;
+    fireEvent.click(await screen.findByRole('button', { name: '模擬正式 owner 回讀完成' }));
+    await waitFor(() => expect(mocks.summaries.mock.calls.length).toBeGreaterThan(reads));
+    fireEvent.click(screen.getByRole('button', { name: '關閉整合測試 Drawer' }));
+    const updatedCard = (await screen.findByText('CASE-REFRESH')).closest('article')!;
+    expect(await within(updatedCard).findByText('服務進行中')).toBeInTheDocument();
+    expect(await within(updatedCard).findByText('2026-09-14 ~ 2026-10-23')).toBeInTheDocument();
+    expect(within(updatedCard).getByText('2026-09-21 ~ 2026-10-30')).toBeInTheDocument();
+    expect(within(updatedCard).queryByText('排班資料不可用')).not.toBeInTheDocument();
   });
 });

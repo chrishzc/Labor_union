@@ -382,6 +382,9 @@ SELECT o.case_no,
               MIN(CASE WHEN assignment.status NOT IN ('cancelled','replaced') THEN schedule.work_date END) AS assignment_first_service_date,
               MAX(CASE WHEN assignment.status NOT IN ('cancelled','replaced') THEN schedule.work_date END) AS assignment_last_service_date
          FROM case_staff_assignments assignment
+         JOIN scheduling_aggregates current_scheduling
+           ON current_scheduling.case_no = assignment.case_no
+          AND current_scheduling.effective_generation_id = assignment.generation_id
          LEFT JOIN staff_schedule schedule
            ON schedule.assignment_id = assignment.id
           AND schedule.effective_marker = 1
