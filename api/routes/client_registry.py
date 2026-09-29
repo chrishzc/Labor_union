@@ -223,6 +223,7 @@ def get_client_registry(
         detail = application.query(case_no)
         payload = {
             "case_no": detail.case_no,
+            "service_type": detail.service_type,
             "client": {
                 "client_id": detail.client.client_id,
                 "version": detail.client.version,

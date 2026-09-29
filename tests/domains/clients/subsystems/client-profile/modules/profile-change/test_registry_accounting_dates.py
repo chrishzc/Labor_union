@@ -54,7 +54,7 @@ def connection(monkeypatch):
             requires_cooking INTEGER, start_date DATE, status TEXT,
             staff_payment_due_date DATE, actual_end_date DATE);
         CREATE TABLE clients (id INTEGER, name TEXT, phone TEXT, city TEXT,
-            address TEXT, identity_status TEXT);
+            address TEXT, identity_status TEXT, service_type TEXT);
         CREATE TABLE beclass_records (id INTEGER, bound_case_no TEXT, survey_details TEXT);
         CREATE TABLE beclass_record_correction_states (beclass_record_id INTEGER, effective_values_json TEXT);
         CREATE TABLE client_obligations (case_no TEXT, obligation_identity TEXT,
@@ -63,8 +63,8 @@ def connection(monkeypatch):
             obligation_kind TEXT, due_date DATE, staff_id INTEGER, direction TEXT, status TEXT);
         CREATE TABLE staff (id INTEGER, name TEXT);
         CREATE TABLE client_legacy_virtual_accounts (case_no TEXT, virtual_account TEXT);
-        INSERT INTO clients VALUES (1,'客戶甲',NULL,'新竹市','東區','一般市民');
-        INSERT INTO clients VALUES (2,'客戶乙',NULL,NULL,NULL,'補助市民');
+        INSERT INTO clients VALUES (1,'客戶甲',NULL,'新竹市','東區','一般市民','週休2日');
+        INSERT INTO clients VALUES (2,'客戶乙',NULL,NULL,NULL,'補助市民',NULL);
         INSERT INTO orders VALUES ('115000101',1,20,1,'2026-07-01','訂單完成','2026-09-15','2026-08-20');
         INSERT INTO orders VALUES ('115000102',2,40,0,'2026-12-01','歷史訂單－服務完成',NULL,NULL);
         INSERT INTO staff VALUES (7,'月嫂甲');
@@ -107,6 +107,8 @@ def test_stored_values_survive_query_and_http_serialization(connection):
     assert [item.case_no for item in page.items] == ["115000101", "115000102"]
     payload = ClientRegistryPageView.model_validate(page, from_attributes=True).model_dump(mode="json")
     first, historical = payload["items"]
+    assert first["service_type"] == "週休2日"
+    assert historical["service_type"] is None
     assert first["staff_payment_due_date"] == "2026-09-15"
     assert [(entry["staff_name"], entry["due_date"]) for entry in first["staff_obligation_dates"]] == [
         ("月嫂甲", "2026-10-15"), ("月嫂乙", "2026-08-15"), (None, None),

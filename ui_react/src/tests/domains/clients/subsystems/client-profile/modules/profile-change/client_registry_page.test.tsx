@@ -67,6 +67,17 @@ describe('Client registry owner editing', () => {
     mocks.apply.mockResolvedValue({ owner: 'client_profile', aggregate_identity: 'CASE-001', resulting_version: 3, changed_fields: ['phone'], preview_fingerprint: 'a'.repeat(64), idempotency_key: 'client-profile-1', replayed: false, readback: { phone: '0933333333' } });
   });
 
+  it.each(['週休2日', null])('shows saved service type even when order terms are unavailable (%s)', async (serviceType) => {
+    mocks.query.mockResolvedValue({ ...detail, service_type: serviceType });
+    render(<ClientRegistryPage />);
+    fireEvent.click(screen.getByRole('tab', { name: '名冊資料' }));
+    fireEvent.click(await screen.findByRole('button', { name: /CASE-001/ }));
+    const terms = (await screen.findByRole('heading', { name: '目前訂單條件' })).closest('section') as HTMLElement;
+    expect(terms).toHaveTextContent('服務方式');
+    expect(terms).toHaveTextContent(serviceType ?? '尚未登錄');
+    expect(within(terms).queryByRole('combobox', { name: '服務方式' })).not.toBeInTheDocument();
+  });
+
   it.each(['order_terms_start_date_required', 'order_terms_service_days_required'])(
     'offers the existing repair entry for missing terms (%s)', async (code) => {
       mocks.query.mockResolvedValue({

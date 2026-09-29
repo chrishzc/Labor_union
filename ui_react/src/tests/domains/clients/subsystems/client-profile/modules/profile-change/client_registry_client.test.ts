@@ -52,7 +52,7 @@ describe('clientRegistryClient list query', () => {
     }));
   });
 
-  it('accepts absent optional roster fields while requiring current virtual-account fields', async () => {
+  it('decodes saved service type alongside absent optional roster fields', async () => {
     vi.spyOn(transport, 'get').mockResolvedValue({
       success: true,
       message: 'ok',
@@ -65,6 +65,7 @@ describe('clientRegistryClient list query', () => {
           name: '王小明',
           phone: '0912345678',
           city: '新竹市',
+          service_type: '週休2日',
           planned_start_date: null,
           order_status: 'matching',
         }],
@@ -74,7 +75,7 @@ describe('clientRegistryClient list query', () => {
     });
 
     await expect(clientRegistryClient.list()).resolves.toMatchObject({
-      items: [{ multi_birth_count: null, service_days: null, requires_cooking: null }],
+      items: [{ multi_birth_count: null, service_days: null, requires_cooking: null, service_type: '週休2日' }],
     });
   });
 

@@ -110,7 +110,7 @@ const ReadOnlyDetail: React.FC<{ detail: ClientRegistryDetail; onRepaired: () =>
     <section><h3>BeClass 照護與特殊計費</h3>{detail.order_information.status === 'ready' && detail.order_information.values
       ? <ReadOnlyFields labels={orderInformationLabels} values={detail.order_information.values} issues={detail.order_information.field_issues} />
       : <p>{detail.order_information.status === 'duplicate_binding' ? '同一案件綁定多筆 BeClass，無法判定資料。' : '尚無 BeClass 照護資料。'}</p>}</section>
-    <section><h3>訂單條件</h3>{terms
+    <section><h3>訂單條件</h3><ReadOnlyFields labels={{ service_type: '服務方式' }} values={{ service_type: detail.service_type ?? '尚未登錄' }} />{terms
       ? <ReadOnlyFields labels={orderTermLabels} values={orderTermValues} />
       : <p>訂單條件目前不可用（{detail.order_terms.code ?? detail.order_terms.status}）。</p>}</section>
     <section><h3>客戶帳務（唯讀）</h3>{detail.finance.status === 'ready' && detail.finance.values
@@ -242,6 +242,7 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
         <th scope="col"><button type="button" onClick={() => changeSort('customer_name')}>客戶姓名{sortLabel('customer_name')}</button></th>
         <th scope="col">電話</th><th scope="col">行政區</th><th scope="col">BeClass 胎數</th>
         <th scope="col"><button type="button" onClick={() => changeSort('service_days')}>服務天數{sortLabel('service_days')}</button></th>
+        <th scope="col">服務方式</th>
         <th scope="col">下廚需求</th>
         <th scope="col"><button type="button" onClick={() => changeSort('expected_start_date')}>預計服務日期{sortLabel('expected_start_date')}</button></th>
         <th scope="col">案件／訂單狀態</th>
@@ -269,7 +270,7 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
         }}
       >
         <td>{item.case_no}</td><td>{displayImportedVirtualAccounts(item.imported_virtual_accounts)}</td><td>{item.built_in_virtual_account ?? '—'}</td><td>{item.name ?? '—'}</td><td>{item.phone ?? '—'}</td><td>{item.district ?? '未登錄'}</td>
-        <td>{item.multi_birth_count ?? '—'}</td><td>{item.service_days ?? '—'}</td><td>{displayCooking(item.requires_cooking)}</td>
+        <td>{item.multi_birth_count ?? '—'}</td><td>{item.service_days ?? '—'}</td><td>{item.service_type ?? '尚未登錄'}</td><td>{displayCooking(item.requires_cooking)}</td>
         <td>{item.planned_start_date ?? '—'}</td><td>{item.order_status ?? '—'}</td>
         <td>{clientDueDates(item, 'deposit')}</td>
         <td>{clientDueDates(item, 'first')}</td>

@@ -15,7 +15,7 @@ vi.mock('../../../../../../../api/orders/order_intake_completion_client', () => 
 
 const item = {
   client_id: 7, case_no: 'CASE-001', imported_virtual_accounts: ['009978160011500001', '009978160011500009'], built_in_virtual_account: '99781699115001', name: '王小明', phone: '0912345678', city: '新竹市', district: '東區',
-  multi_birth_count: '雙胞胎', service_days: 26, requires_cooking: true,
+  multi_birth_count: '雙胞胎', service_days: 26, service_type: '週休2日', requires_cooking: true,
   planned_start_date: '2026-10-01', order_status: '洽談中',
 };
 
@@ -28,7 +28,7 @@ describe('ClientRosterPage', () => {
     Object.values(intakeMocks).forEach((mock) => mock.mockReset());
     mocks.list.mockResolvedValue({ items: [item], next_cursor: null, next_offset: null });
     mocks.query.mockResolvedValue({
-      case_no: 'CASE-001',
+      case_no: 'CASE-001', service_type: '週休2日',
       client: { client_id: 7, version: 2, values: { name: '王小明', gender: '女', phone: '0912345678', city: '新竹市', address: '測試路1號', residence_type: '電梯大樓', delivery_type: '自然產', baby_info: '單胞胎', notes: '主檔註記' }, field_capabilities: {} },
       beclass: { status: 'ready', record_id: 12, source_kind: 'imported', version: 3, values: { name: '王小明', email: 'client@example.com', phone: '0922222222', tel: '03-1234567', ext: '88', city: '新竹市', zip_code: '300', address: '報名地址', admin_notes: '報名註記', multi_birth_count: '雙胞胎' }, field_capabilities: {} },
       order_information: { status: 'ready', values: { dietary_habits: '不吃牛肉', vegetarian_preference: '可以', alcohol_ratio: '少量', cooking_oil_type: '苦茶油', maternal_allergy: '無', special_care_notes: '留意睡眠', meal_preferences: '少鹽', cooking_tools: '電鍋', bath_water_prep: '家屬準備', breastfeeding_method: '親餵', holiday_pricing_terms: '同意', multi_birth_count: '雙胞胎', stair_floor_fee_mode: '電梯', parking_space_provided: true, other_babies_present: false }, field_issues: {} },
@@ -82,6 +82,8 @@ describe('ClientRosterPage', () => {
     await waitFor(() => expect(mocks.list).toHaveBeenCalledWith(expect.objectContaining({ sortBy: 'case_no', sortOrder: 'asc', limit: 100 })));
     expect(screen.getAllByText('雙胞胎').length).toBeGreaterThan(1);
     expect(screen.getByText('26')).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: '服務方式' })).toBeInTheDocument();
+    expect(screen.getByText('週休2日')).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: '匯入虛擬帳號' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: '內建虛擬帳號' })).toBeInTheDocument();
     expect(screen.getByText('009978160011500001')).toBeInTheDocument();
@@ -120,6 +122,8 @@ describe('ClientRosterPage', () => {
     expect(detail).toHaveTextContent('不吃牛肉');
     expect(detail).toHaveTextContent('訂單條件');
     expect(detail).toHaveTextContent('每日服務時數');
+    expect(detail).toHaveTextContent('服務方式');
+    expect(detail).toHaveTextContent('週休2日');
     expect(detail).toHaveTextContent('客戶帳務（唯讀）');
     expect(detail).toHaveTextContent('客戶應付總額');
     expect(detail).toHaveTextContent('450');

@@ -74,6 +74,22 @@ def test_registry_list_and_detail_keep_case_identity_and_owner_versions():
     assert detail.order_information.values["multi_birth_count"] == "雙胞胎"
 
 
+@pytest.mark.parametrize("service_type", ["週休2日", None])
+def test_registry_preserves_saved_service_type_in_list_and_detail(service_type):
+    class _ServiceTypeRepository(_Repository):
+        def list_page(self, **kwargs):
+            rows, cursor, offset = super().list_page(**kwargs)
+            return tuple({**row, "service_type": service_type} for row in rows), cursor, offset
+
+        def load_detail(self, case_no):
+            return {**super().load_detail(case_no), "service_type": service_type}
+
+    application = ClientRegistryQueryApplication(_ServiceTypeRepository())
+    page = application.list(query="王小明", limit=25, after=None)
+    detail = application.query("CASE-001")
+    assert page.items[0].service_type == detail.service_type == service_type
+
+
 def test_registry_change_history_keeps_repository_order_and_assigns_visible_steps():
     history = ClientRegistryQueryApplication(_Repository()).history(" CASE-001 ")
 
@@ -141,6 +157,7 @@ def test_registry_list_route_preserves_optional_false_and_returns_roster_fields(
         "multi_birth_count": None, "service_days": 26, "requires_cooking": False,
         "planned_start_date": None, "order_status": "洽談中",
         "staff_payment_due_date": None,
+        "service_type": None,
         "client_obligation_dates": (),
         "staff_obligation_dates": (),
         "claim_application_year": None,
@@ -306,6 +323,7 @@ def test_mysql_registry_uses_order_client_owner_and_bound_beclass_case_identity(
 
     statements = [statement for statement, _ in connection.cursor_instance.statements]
     assert "JOIN clients c ON c.id=o.client_id" in statements[0]
+    assert "c.service_type" in statements[0]
     assert "WHERE o.case_no=%s" in statements[0]
     assert "WHERE bound_case_no=%s" in statements[1]
     assert "query_no" not in " ".join(statements)

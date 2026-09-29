@@ -39,6 +39,7 @@ class ClientRegistrySummaryView(_StrictModel):
     district: str | None = None
     multi_birth_count: str | None = None
     service_days: int | None = Field(default=None, gt=0)
+    service_type: str | None = None
     requires_cooking: bool | None = None
     planned_start_date: date | None = None
     order_status: str | None = None
@@ -166,6 +167,7 @@ class RegistryOrderTermsSectionView(_StrictModel):
 
 class ClientRegistryDetailView(_StrictModel):
     case_no: str = Field(min_length=1, max_length=50)
+    service_type: str | None = None
     client: ClientRegistryProfileView
     beclass: ClientRegistryBeClassView
     order_information: ClientRegistryOrderInformationView

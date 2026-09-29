@@ -96,7 +96,7 @@ class MySqlClientRegistryQueryRepository:
             cursor.execute(
                 "SELECT c.id AS client_id,o.case_no,c.name,c.phone,c.city,c.address,"
                 + _BIRTH_COUNT_SQL + " AS multi_birth_count,"
-                "o.service_days,o.requires_cooking,"
+                "o.service_days,o.requires_cooking,c.service_type,"
                 "o.start_date AS planned_start_date,o.status AS order_status,"
                 "o.staff_payment_due_date,o.actual_end_date,c.identity_status "
                 "FROM orders o JOIN clients c ON c.id=o.client_id "
@@ -268,7 +268,7 @@ class MySqlClientRegistryQueryRepository:
     def load_detail(self, case_no: str) -> Mapping[str, Any] | None:
         with self._connection.cursor() as cursor:
             cursor.execute(
-                "SELECT c.id AS client_id,o.case_no,o.status AS order_status,c.client_profile_version,"
+                "SELECT c.id AS client_id,o.case_no,o.status AS order_status,c.client_profile_version,c.service_type,"
                 "EXISTS(SELECT 1 FROM order_service_data_locks service_lock "
                 "WHERE service_lock.case_no=o.case_no) AS service_data_locked,"
                 + ",".join(f"c.{field}" for field in _CLIENT_FIELDS)
@@ -341,6 +341,7 @@ class MySqlClientRegistryQueryRepository:
         )
         return {
             "case_no": str(client["case_no"]),
+            "service_type": client.get("service_type"),
             "client_id": int(client["client_id"]),
             "client_profile_version": int(client.get("client_profile_version") or 0),
             "client_values": {field: client.get(field) for field in _CLIENT_FIELDS},
