@@ -22,6 +22,7 @@ from domains.orders.service_date_confirmation import ConfirmedServiceDateCandida
 from domains.orders.terms import (
     OrderAggregateFacts,
     is_unique_cooking_requirement_correction,
+    validate_cooking_requirement_correction,
     validate_terms_change,
 )
 from domains.scheduling.generation import (
@@ -35,6 +36,7 @@ from shared_kernel.clock import BusinessClock
 from shared_kernel.errors import TypedError
 from shared_kernel.errors import ErrorCategory
 from shared_kernel.fingerprints import fingerprint_payload
+from shared_kernel.identities import CorrelationId, ExpectedVersion
 from shared_kernel.ports import UnitOfWork
 from shared_kernel.validation import require_canonical_text
 from subsystems.payroll.terms_impact import (
@@ -45,6 +47,21 @@ from subsystems.payroll.terms_impact import (
 
 
 _TERMS_SOURCE_EVENT_FAMILY = "order-terms"
+
+
+@dataclass(frozen=True, slots=True)
+class OrderCookingRequirementCorrectionRequest:
+    case_no: str
+    requires_cooking: bool
+    expected_order_version: ExpectedVersion
+    correlation_id: CorrelationId
+
+    def __post_init__(self) -> None:
+        require_canonical_text(self.case_no, "case number", 50)
+        if not isinstance(self.requires_cooking, bool):
+            raise TypeError("requires cooking must be bool")
+        if not isinstance(self.expected_order_version, ExpectedVersion):
+            raise TypeError("expected order version must be ExpectedVersion")
 
 
 @dataclass(frozen=True, slots=True)
@@ -240,6 +257,28 @@ class OrderTermsWorkflow:
         self._repository = repository
         self._unit_of_work_factory = unit_of_work_factory
         self._clock = clock
+
+    def correct_cooking_requirement_in_current_uow(
+        self, request: OrderCookingRequirementCorrectionRequest,
+    ) -> int:
+        facts = self._repository.load_cooking_requirement(request.case_no, for_update=True)
+        if facts.requires_cooking is request.requires_cooking:
+            return facts.version
+        if facts.version != request.expected_order_version.value:
+            raise _workflow_error(request, ErrorCategory.CONFLICT, "order_version_conflict",
+                                  "Orders changed before the cooking correction.")
+        try:
+            validate_cooking_requirement_correction(facts, request.requires_cooking)
+        except ValueError as error:
+            raise _workflow_error(request, ErrorCategory.DOMAIN_BLOCKED, str(error),
+                                  "The cooking requirement cannot be corrected.") from error
+        updated = self._repository.update_cooking_requirement(
+            request.case_no, request.requires_cooking, facts.version,
+        )
+        if not updated:
+            raise _workflow_error(request, ErrorCategory.CONFLICT, "order_version_conflict",
+                                  "Orders changed before the cooking correction.")
+        return facts.version + 1
 
     def preview(self, case_no: str, proposed_terms: Any, *,
                 replacement_service_dates=None, replacement_allocations=()) -> Any:

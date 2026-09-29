@@ -11,6 +11,8 @@
 
 客戶名冊使用獨立的 typed `OrderTermsRegistryFacts` 唯讀 projection，只讀 Orders 條件與 Scheduling／Finance／Payroll 版本；不以 Preview 的逐日排班或義務完整性限制查閱。缺少必要 Orders 欄位仍回 not-ready，服務資料鎖只限制編輯；Preview／Apply 的完整性與版本檢查保持原規則。
 
+Case Import 唯一來源的 unknown→known 下廚需求補正使用 `OrderCookingRequirementCorrectionRequest` 與最小 Orders cooking facts；沿用 caller-owned UoW，fresh lock／版本檢查後只更新 `requires_cooking` 與 Orders version，不要求逐日排班或讀寫既有帳務。服務資料鎖與既有已知料理條款仍阻擋此受限 command；已知條款的異動沿用一般 Terms Preview／Apply。
+
 Issue #326：同一 Terms command 可承接完整替代日期與明確既有指派分配；原有跨 owner transaction 與 immutable versions 保持不變。
 
 既有歷史案件缺少約定服務開始日／服務天數，且尚未建立 Client Finance、Payroll 或服務資料鎖定時，沿用同一 owner-local Query／Preview／Apply 補齊契約條件；保留歷史 lifecycle、實際開工日與既有歷史排班證據。

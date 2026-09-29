@@ -26,6 +26,7 @@ from subsystems.case_import.hcm_beclass_reconciliation import (
     reconcile_hcm_beclass_cooking as reconcile_with_port,
 )
 from subsystems.orders.terms_workflow import (
+    OrderCookingRequirementCorrectionRequest,
     OrderTermsApplyRequest,
     OrderTermsWorkflow,
 )
@@ -95,6 +96,17 @@ class MySqlHcmBeClassReconciliationAdapter:
             _nested_uow_forbidden,
             SystemBusinessClock(),
         )
+        cooking_facts = repository.load_cooking_requirement(case_no)
+        if cooking_facts.requires_cooking is requires_cooking:
+            return
+        if cooking_facts.requires_cooking is None:
+            workflow.correct_cooking_requirement_in_current_uow(
+                OrderCookingRequirementCorrectionRequest(
+                    case_no, requires_cooking, ExpectedVersion(cooking_facts.version),
+                    CorrelationId(f"case-import-cooking:{beclass_id}"),
+                )
+            )
+            return
         try:
             preview_facts = repository.load_for_preview(case_no)
         except ValueError as error:

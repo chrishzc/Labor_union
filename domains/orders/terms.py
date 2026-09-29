@@ -130,6 +130,34 @@ class OrderAggregateFacts:
             raise TypeError("service data locked must be bool")
 
 
+@dataclass(frozen=True, slots=True)
+class OrderCookingRequirementFacts:
+    case_no: str
+    version: int
+    requires_cooking: bool | None
+    service_data_locked: bool
+
+    def __post_init__(self) -> None:
+        require_canonical_text(self.case_no, "case number", _CASE_NUMBER_MAXIMUM_LENGTH)
+        if isinstance(self.version, bool) or not isinstance(self.version, int) or self.version < 0:
+            raise ValueError("order version must be a nonnegative integer")
+        if self.requires_cooking is not None and not isinstance(self.requires_cooking, bool):
+            raise TypeError("requires cooking must be bool or None")
+        if not isinstance(self.service_data_locked, bool):
+            raise TypeError("service data locked must be bool")
+
+
+def validate_cooking_requirement_correction(
+    current: OrderCookingRequirementFacts, requires_cooking: bool,
+) -> None:
+    if not isinstance(requires_cooking, bool):
+        raise TypeError("requires cooking must be bool")
+    if current.service_data_locked:
+        raise ValueError("service_data_locked")
+    if current.requires_cooking is not None:
+        raise ValueError("cooking_requirement_already_known")
+
+
 def is_unique_cooking_requirement_correction(
     current_terms: OrderTerms,
     proposed_terms: OrderTerms,

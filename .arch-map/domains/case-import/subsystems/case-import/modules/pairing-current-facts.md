@@ -29,6 +29,7 @@
 - `POST /api/v1/admin/registries/clients/{case_no}/beclass/{preview|apply}`
 
 ## Correction boundary
+- HCM／Client BeClass 唯一配對後，未知下廚需求由 Orders-owned cooking correction command 在同一 caller UoW 補入；已有帳務或無逐日排班不阻擋此單欄補正，服務資料鎖、fresh version 與已知值異動規則仍由 Orders 擁有。
 - Effective corrections resolve the unique `bound_case_no`; `query_no` remains immutable source provenance and original imported BeClass fields remain unchanged.
 - Any order without a bound BeClass row may create one `record_origin='admin_manual'` container during Apply; Preview remains zero-write, and all entered values continue through the same versioned correction state／event owner.
 - A pre-service effective birth-count correction resolves the versioned rate policy and coordinates Client Finance／Payroll impact in the same outer UoW. Once service has started, birth count is financially locked while non-financial BeClass fields remain independently correctable.

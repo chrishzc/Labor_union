@@ -11,6 +11,7 @@ from typing import Any
 
 from pymysql.err import IntegrityError
 
+from domains.orders.terms import OrderCookingRequirementFacts
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import IdempotencyKey
 from subsystems.orders.terms_workflow import (
@@ -54,6 +55,37 @@ class MySqlOrderTermsRepository:
     def load_for_registry(self, case_no: str) -> OrderTermsRegistryFacts:
         with self._connection.cursor() as cursor:
             return load_registry_terms_facts(cursor, case_no)
+
+    def load_cooking_requirement(
+        self, case_no: str, *, for_update: bool = False,
+    ) -> OrderCookingRequirementFacts:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT o.case_no,o.lifecycle_version,o.requires_cooking,"
+                "EXISTS(SELECT 1 FROM order_service_data_locks l WHERE l.case_no=o.case_no) "
+                "AS service_data_locked FROM orders o WHERE o.case_no=%s"
+                + (" FOR UPDATE" if for_update else ""),
+                (case_no,),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            raise ValueError("order_not_found")
+        return OrderCookingRequirementFacts(
+            str(row["case_no"]), int(row["lifecycle_version"]),
+            None if row["requires_cooking"] is None else bool(row["requires_cooking"]),
+            bool(row["service_data_locked"]),
+        )
+
+    def update_cooking_requirement(
+        self, case_no: str, requires_cooking: bool, expected_order_version: int,
+    ) -> bool:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE orders SET requires_cooking=%s,lifecycle_version=lifecycle_version+1 "
+                "WHERE case_no=%s AND lifecycle_version=%s AND requires_cooking IS NULL",
+                (requires_cooking, case_no, expected_order_version),
+            )
+            return cursor.rowcount == 1
 
     def load_order_terms(
         self, case_no: str, *, for_update: bool = False

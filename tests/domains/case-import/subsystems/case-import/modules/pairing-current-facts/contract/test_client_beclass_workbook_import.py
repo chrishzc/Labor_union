@@ -19,7 +19,7 @@ from shared_kernel.identities import CorrelationId
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.orders.terms_workflow import TermsWorkflowError
 
-from domains.orders.terms import OrderTerms, ServiceTimeTerms
+from domains.orders.terms import OrderCookingRequirementFacts, OrderTerms, ServiceTimeTerms
 from infrastructure.mysql import hcm_beclass_reconciliation_adapter as reconciliation_adapter
 from shared_kernel.identities import ExpectedVersion
 from shared_kernel.money import MoneyNTD
@@ -82,11 +82,12 @@ def test_workbook_preserves_terms_errors_and_removes_temporary_upload(tmp_path, 
 def test_cooking_reconciliation_preserves_preview_contract(monkeypatch, versions, requires_formal_apply):
     terms = OrderTerms(
         date(2026, 9, 10), 5, 8, MoneyNTD(0),
-        ServiceTimeTerms(None, None, None), None,
+        ServiceTimeTerms(None, None, None), False,
     )
     connection = object()
     repository = SimpleNamespace(
-        load_for_preview=lambda case_no: SimpleNamespace(order=SimpleNamespace(terms=terms))
+        load_for_preview=lambda case_no: SimpleNamespace(order=SimpleNamespace(terms=terms)),
+        load_cooking_requirement=lambda case_no: OrderCookingRequirementFacts(case_no, 2, False, False),
     )
     requests = []
 
