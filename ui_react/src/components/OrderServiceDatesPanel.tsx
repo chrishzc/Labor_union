@@ -32,6 +32,10 @@ interface OrderServiceDatesPanelProps {
   projectionRevision?: number;
   onBusyChange?: (busy: boolean) => void;
   currentAssignmentPlan?: AssignmentPlan | null;
+  view?: 'dates' | 'arrangement';
+  onOpenArrangement?: () => void;
+  onOpenDates?: () => void;
+  onArrangementPendingChange?: (pending: boolean) => void;
 }
 
 type WorkingAction = 'load' | 'preview' | 'apply' | null;
@@ -81,7 +85,7 @@ function recoveryFromServiceDatesDraft(caseNo: string): ServiceDatesRecovery | n
   return null;
 }
 
-export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo, onObserved, onOpenActualStart, calculationRevision = 0, projectionRevision = 0, onBusyChange, currentAssignmentPlan }) => {
+export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo, onObserved, onOpenActualStart, calculationRevision = 0, projectionRevision = 0, onBusyChange, currentAssignmentPlan, view = 'dates', onOpenArrangement, onOpenDates, onArrangementPendingChange }) => {
   const [working, setWorking] = useState<WorkingAction>(null);
   const [queryView, setQueryView] = useState<ServiceDateConfirmationQueryView | null>(null);
   const [precision, setPrecision] = useState<SchedulePrecisionResult | null>(null);
@@ -102,8 +106,10 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
   const [inputInvalid, setInputInvalid] = useState(false);
   const [, setRecoveryRevision] = useState(0);
   const [attemptedCalculationRevision, setAttemptedCalculationRevision] = useState(0);
+  const [arrangementBusy, setArrangementBusy] = useState(false);
   const actionInFlight = useRef(new Set<string>());
   const readbackElement = useRef<HTMLDListElement | null>(null);
+  const nextStepElement = useRef<HTMLDivElement | null>(null);
   const calculationSequence = useRef(0);
   const readController = useRef<AbortController | null>(null);
   const renderedCaseNo = useRef(caseNo);
@@ -113,7 +119,8 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
   const needsBasisUpdate = calculationRevision > attemptedCalculationRevision;
   const startFlow = orderMutationFlowStore.getActualStart(caseNo);
   const startUnresolved = startFlow !== undefined && startFlow.status !== 'observed';
-  const saving = working === 'apply';
+  const saving = working === 'apply' || arrangementBusy;
+  const arrangementPending = queryView?.arrangement_pending ?? false;
   const effectiveServiceDates = queryView !== null
     && currentAssignmentPlan?.case_no === caseNo
     && currentAssignmentPlan.scheduling_version === queryView.scheduling_version
@@ -126,9 +133,12 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
     && !sameServiceDates(queryView.current_dates, effectiveServiceDates);
 
   useEffect(() => { onBusyChange?.(saving); return () => onBusyChange?.(false); }, [saving, onBusyChange]);
+  useEffect(() => { onArrangementPendingChange?.(arrangementPending); }, [arrangementPending, onArrangementPendingChange]);
   useEffect(() => {
-    if (success?.startsWith('服務日期已確認並回讀')) readbackElement.current?.focus();
-  }, [success]);
+    if (success?.startsWith('服務日期已確認並回讀')) {
+      (arrangementPending && onOpenArrangement ? nextStepElement.current : readbackElement.current)?.focus();
+    }
+  }, [success, arrangementPending, onOpenArrangement]);
 
   useEffect(() => {
     setAttemptedCalculationRevision(0);
@@ -553,11 +563,16 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
     && !isRecoveryActive
     && !needsBasisUpdate && !inputInvalid && !manualNeedsReview && !startUnresolved && !actualStart?.service_data_locked;
   const canApply = (preview !== null || startConfirmationReady) && canPreview;
+  const arrangementReady = queryView !== null && !isRecoveryActive && !startUnresolved
+    && !needsBasisUpdate && !inputInvalid && startPreview === null
+    && sameServiceDates(selectedDates, queryView.current_dates);
 
   return (
-    <section className="order-service-dates-panel" aria-label={`案件 ${caseNo} 服務日期設定`}>
-      <label>此次試算開始日
-        <input type="date" aria-label="此次試算開始日" value={startDate}
+    <section className="order-service-dates-panel" aria-label={`案件 ${caseNo} 服務日期設定`}
+      hidden={view === 'arrangement' && !arrangementPending && success !== '歷史案件正式安排已建立並回讀。'}>
+      <div hidden={view !== 'dates'}>
+      <label>實際開始日
+        <input type="date" aria-label="實際開始日" value={startDate}
           disabled={saving || working === 'preview' || isRecoveryActive || startUnresolved || actualStart?.service_data_locked}
           onChange={(event) => changeStartDate(event.target.value)} />
       </label>
@@ -581,19 +596,13 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
         <div className="order-case-review-note" aria-label="服務日期計算基準">
           <strong>{calculationBasis.confirmed ? '正式實際開始日' : '此次試算開始日（尚未保存）'}</strong>
           <span>：{calculationBasis.date}</span>
-          {onOpenActualStart !== undefined && (
-            <button type="button" className="order-v2-open-drawer" onClick={onOpenActualStart}>
-              確認／更正實際開始日
-            </button>
-          )}
         </div>
       )}
-      {success !== null && <p role="status">{success}</p>}
       {startPreview?.operation === 'reschedule' && <p role="status">本案確認開始日會同步建立或重排既定人員的正式服務安排。以下建議為後端正式重排日期，請核對後再保存。</p>}
       {startUnresolved && !saving && <div role="status">
         <p>開始日保存或回讀尚未完成，服務日期未確認。請先確認開始日結果再接續。</p>
         {startPreview && <button type="button" onClick={() => void runApply()}>讀取開始日結果並接續保存</button>}
-        {onOpenActualStart && <button type="button" onClick={onOpenActualStart}>查看實際開始日操作</button>}
+        {!startPreview && onOpenActualStart && <button type="button" onClick={onOpenActualStart}>查看實際開始日操作</button>}
       </div>}
       {manualNeedsReview && <div role="status">
         <p>計算條件已變更，原人工選日尚未套用新建議。</p>
@@ -648,20 +657,6 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
               <span>。此歷史綁定已保留，不需重新挑選候選或再次推薦。</span>
             </div>
           )}
-          {queryView.arrangement_pending && !isRecoveryActive && !startUnresolved
-            && sameServiceDates(selectedDates, queryView.current_dates) && (
-              queryView.bound_staff.length === 0
-              ? <p role="alert">歷史案件缺少可核對的既定月嫂，請先處理配對證據，不能建立正式安排。</p>
-              : <HistoricalRestartArrangementPanel
-                caseNo={caseNo}
-                dates={queryView}
-                onObserved={(observed) => {
-                  setQueryView(observed);
-                  setSuccess('歷史案件正式安排已建立並回讀。');
-                  onObserved?.();
-                }}
-              />
-            )}
           {confirmationSupersededBySchedule && (
             <p role="status" className="order-case-review-note">
               先前確認的日期與目前正式排班不同；下方日曆保留事前確認紀錄，不代表目前服務安排。
@@ -684,7 +679,7 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
             <div className="calendar-matrix-card">
               <div className="calendar-month-header">
                 <h3 style={{ fontSize: '1.05rem', fontWeight: 750, color: '#0f766e', margin: 0 }}>
-                  📅 {confirmationSupersededBySchedule ? '先前確認日期（日曆紀錄）' : '正式服務日期確認（日曆排盤）'}
+                  📅 {confirmationSupersededBySchedule ? '先前確認日期（日曆紀錄）' : '服務日期確認（日曆排盤）'}
                 </h3>
                 <span>已選 {selectedDates.length} / {requiredDateCount} 天</span>
               </div>
@@ -759,11 +754,38 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
       )}
 
       {queryView !== null && queryView.current_dates.length > 0 && (
-        <dl className="order-v2-business-summary" aria-label={confirmationSupersededBySchedule ? '先前確認日期與目前正式排班回讀' : '正式服務日期回讀'} tabIndex={-1} ref={readbackElement}>
-          <div><dt>{confirmationSupersededBySchedule ? '先前確認版本' : '正式版本'}</dt><dd>{queryView.current_version === null ? '未建立' : `#${queryView.current_version}`}</dd></div>
-          <div><dt>{confirmationSupersededBySchedule ? '先前確認日期' : '正式服務日期'}</dt><dd>{queryView.current_dates.join('、')}</dd></div>
+        <dl className="order-v2-business-summary" aria-label={confirmationSupersededBySchedule ? '先前確認日期與目前正式排班回讀' : '已確認服務日期回讀'} tabIndex={-1} ref={readbackElement}>
+          <div><dt>{confirmationSupersededBySchedule ? '先前確認版本' : '日期確認版本'}</dt><dd>{queryView.current_version === null ? '未建立' : `#${queryView.current_version}`}</dd></div>
+          <div><dt>{confirmationSupersededBySchedule ? '先前確認日期' : '已確認服務日期'}</dt><dd>{queryView.current_dates.join('、')}</dd></div>
           {effectiveServiceDates !== null && <div><dt>目前正式排班服務日</dt><dd>{effectiveServiceDates.join('、')}</dd></div>}
         </dl>
+      )}
+      {arrangementPending && onOpenArrangement && (
+        <div className="order-v2-inline-notice" role="status" tabIndex={-1} ref={nextStepElement} aria-label="服務日期確認後下一步">
+          <strong>{arrangementReady ? '服務日期已保存，正式排班尚未建立。' : '已有保存日期；此次調整尚未完成確認。'}</strong>
+          <p>請接續核對既定月嫂並建立正式安排，完成後才能供週報與帳務使用。</p>
+          <button type="button" className="order-v2-open-drawer" disabled={working !== null || !arrangementReady}
+            onClick={onOpenArrangement}>前往正式排班</button>
+        </div>
+      )}
+      </div>
+      {success !== null && (view === 'dates' || success === '歷史案件正式安排已建立並回讀。') && <p role="status">{success}</p>}
+      {arrangementPending && queryView && (
+        <div hidden={view !== 'arrangement'}>
+          {arrangementReady ? (
+            queryView.bound_staff.length === 0
+              ? <p role="alert">歷史案件缺少可核對的既定月嫂，請先處理配對證據，不能建立正式安排。</p>
+              : <HistoricalRestartArrangementPanel caseNo={caseNo} dates={queryView}
+                  onBusyChange={setArrangementBusy}
+                  onObserved={(observed) => {
+                    setQueryView(observed);
+                    setSuccess('歷史案件正式安排已建立並回讀。');
+                    onObserved?.();
+                  }} />
+          ) : <p role="status">開始日或服務日期尚未完成保存與回讀，請先回到「確認日期」接續確認。</p>}
+          {onOpenDates && <button type="button" className="order-v2-open-drawer" disabled={saving}
+            onClick={onOpenDates}>調整開始日與服務日期</button>}
+        </div>
       )}
     </section>
   );

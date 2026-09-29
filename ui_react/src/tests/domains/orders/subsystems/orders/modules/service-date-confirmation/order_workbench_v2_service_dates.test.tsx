@@ -175,9 +175,9 @@ describe('待辦看板 Beta 第 9 階服務日期', () => {
     );
     expect(screen.getByLabelText('建議服務日期摘要')).toBeInTheDocument();
     expect(screen.getByLabelText('服務日期計算基準')).toHaveTextContent('正式實際開始日：2026-10-01');
-    fireEvent.click(screen.getByRole('button', { name: '確認／更正實際開始日' }));
-    expect(onOpenActualStart).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole('heading', { name: '📅 正式服務日期確認（日曆排盤）' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '確認／更正實際開始日' })).not.toBeInTheDocument();
+    expect(onOpenActualStart).not.toHaveBeenCalled();
+    expect(screen.getByRole('heading', { name: '📅 服務日期確認（日曆排盤）' })).toBeInTheDocument();
     expect(screen.getByText('請逐日核對服務安排；選取國定假日即代表已確認該日安排服務，不需另行登錄協調結果。')).toBeInTheDocument();
     const calendar = screen.getByRole('group', { name: '服務日期月曆' });
     expect(within(calendar).getByRole('button', { name: '服務日期 2026-10-02' })).toHaveAttribute('aria-pressed', 'true');
@@ -208,7 +208,7 @@ describe('待辦看板 Beta 第 9 階服務日期', () => {
     expect(await screen.findByText('服務日期已確認並回讀版本 #1。')).toBeInTheDocument();
     expect(onObserved).toHaveBeenCalledTimes(1);
 
-    const readback = screen.getByLabelText('正式服務日期回讀');
+    const readback = screen.getByLabelText('已確認服務日期回讀');
     expect(within(readback).getByText('#1')).toBeInTheDocument();
     expect(within(readback).getByText('2026-10-01、2026-10-03、2026-10-04')).toBeInTheDocument();
   });
@@ -333,7 +333,7 @@ describe('待辦看板 Beta 第 9 階服務日期', () => {
       arrangement_pending: true,
     });
 
-    render(<OrderServiceDatesPanel caseNo="CASE-SERVICE-DATES" />);
+    render(<OrderServiceDatesPanel caseNo="CASE-SERVICE-DATES" view="arrangement" />);
 
     expect(await screen.findByRole('region', { name: '歷史訂單建立正式安排' })).toBeInTheDocument();
     expect(screen.getByText(/排班與費率快照尚未建立/)).toBeInTheDocument();

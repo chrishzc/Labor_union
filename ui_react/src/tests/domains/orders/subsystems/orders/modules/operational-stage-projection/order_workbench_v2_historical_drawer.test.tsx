@@ -46,17 +46,17 @@ vi.mock('../../../../../../../api/orders/historical_service_accounting_client', 
   },
 }));
 vi.mock('../../../../../../../components/OrderServiceDatesPanel', () => ({
-  OrderServiceDatesPanel: (props: { calculationRevision?: number; onOpenActualStart?: () => void }) => {
+  OrderServiceDatesPanel: (props: { calculationRevision?: number }) => {
     mocks.serviceDatesRender(props);
-    return <div aria-label="服務日期精算工作區">服務日期精算已開啟<button type="button" onClick={props.onOpenActualStart}>確認／更正實際開始日</button></div>;
+    return <div aria-label="服務日期精算工作區">服務日期精算已開啟</div>;
   },
 }));
 vi.mock('../../../../../../../components/OrderActualStartPanel', () => ({
-  OrderActualStartPanel: (props: { onObserved?: () => void; onOpenServiceDates?: () => void }) => {
+  OrderActualStartPanel: (props: { onObserved?: (operation: 'date_only' | 'reschedule') => void; onOpenServiceDates?: () => void }) => {
     mocks.actualStartRender(props);
     return <>
       <button type="button" onClick={props.onOpenServiceDates}>模擬尚未建立正式排班</button>
-      <button type="button" onClick={props.onObserved}>模擬實際開始日正式回讀成功</button>
+      <button type="button" onClick={() => props.onObserved?.('date_only')}>模擬實際開始日正式回讀成功</button>
     </>;
   },
 }));
@@ -316,10 +316,11 @@ describe('historical Drawer immutable evidence boundary', () => {
     expect(mocks.serviceDatesRender).toHaveBeenLastCalledWith(
       expect.objectContaining({ calculationRevision: 1 }),
     );
+    fireEvent.click(screen.getByRole('button', { name: '案件異動' }));
     fireEvent.click(screen.getByRole('button', { name: '確認／更正實際開始日' }));
     fireEvent.click(await screen.findByRole('button', { name: '模擬尚未建立正式排班' }));
     expect(await screen.findByLabelText('服務日期精算工作區')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '確認／更正實際開始日' }));
+    fireEvent.click(screen.getByRole('button', { name: '案件異動' }));
     fireEvent.click(await screen.findByRole('button', { name: '模擬實際開始日正式回讀成功' }));
     expect(await screen.findByLabelText('服務日期精算工作區')).toBeInTheDocument();
     expect(mocks.serviceDatesRender).toHaveBeenLastCalledWith(

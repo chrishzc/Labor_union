@@ -61,8 +61,8 @@ beforeEach(() => {
 });
 
 async function input(date: string) {
-  await waitFor(() => expect(screen.getByLabelText('此次試算開始日')).toHaveValue('2026-10-01'));
-  fireEvent.change(screen.getByLabelText('此次試算開始日'), { target: { value: date } });
+  await waitFor(() => expect(screen.getByLabelText('實際開始日')).toHaveValue('2026-10-01'));
+  fireEvent.change(screen.getByLabelText('實際開始日'), { target: { value: date } });
   await screen.findByLabelText('建議服務日期摘要');
 }
 async function confirm() {
@@ -86,8 +86,8 @@ describe('#335 direct start input and existing writer integration', () => {
     expect(mocks.applyDates).toHaveBeenCalledWith(CASE, expect.objectContaining({ expected_order_version: 2, service_dates: days(date, 3) }), expect.anything());
     const calculations = mocks.calculate.mock.calls.length;
     view.unmount(); render(<OrderServiceDatesPanel caseNo={CASE} />);
-    await waitFor(() => expect(screen.getByLabelText('此次試算開始日')).toHaveValue(date));
-    expect(screen.getByLabelText('正式服務日期回讀')).toHaveTextContent(days(date, 3).join('、'));
+    await waitFor(() => expect(screen.getByLabelText('實際開始日')).toHaveValue(date));
+    expect(screen.getByLabelText('已確認服務日期回讀')).toHaveTextContent(days(date, 3).join('、'));
     expect(mocks.calculate).toHaveBeenCalledTimes(calculations);
     expect(onObserved).toHaveBeenCalled();
   });
@@ -97,7 +97,7 @@ describe('#335 direct start input and existing writer integration', () => {
     fireEvent.click(screen.getByRole('button', { name: '服務日期 2026-09-30' }));
     fireEvent.click(screen.getByRole('button', { name: '服務日期 2026-10-02' }));
     expect(screen.getByLabelText('此次選定服務日期摘要')).toHaveTextContent('2026-10-02');
-    fireEvent.change(screen.getByLabelText('此次試算開始日'), { target: { value: '2026-10-15' } });
+    fireEvent.change(screen.getByLabelText('實際開始日'), { target: { value: '2026-10-15' } });
     await screen.findByRole('button', { name: '採用新建議' });
     expect(screen.getByLabelText('此次選定服務日期摘要')).toHaveTextContent('2026-09-28');
     expect(screen.getByRole('button', { name: '確認服務日期' })).toBeDisabled();
@@ -141,7 +141,7 @@ describe('#335 direct start input and existing writer integration', () => {
     orderVersion++;
     fireEvent.click(screen.getByRole('button', { name: '完成服務日期確認' }));
     await screen.findByText(/已重新讀取正式資料/); expect(mocks.applyDates).not.toHaveBeenCalled(); expect(actual).toBeNull();
-    expect(screen.getByLabelText('此次試算開始日')).toHaveValue('2026-09-28');
+    expect(screen.getByLabelText('實際開始日')).toHaveValue('2026-09-28');
     expect(screen.getByRole('button', { name: '確認服務日期' })).toBeDisabled();
   });
 
@@ -149,22 +149,22 @@ describe('#335 direct start input and existing writer integration', () => {
     let resolve!: (value: ReturnType<typeof result>) => void;
     mocks.calculate.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
     render(<OrderServiceDatesPanel caseNo={CASE} />);
-    await waitFor(() => expect(screen.getByLabelText('此次試算開始日')).toHaveValue('2026-10-01'));
-    fireEvent.change(screen.getByLabelText('此次試算開始日'), { target: { value: '2026-09-28' } });
+    await waitFor(() => expect(screen.getByLabelText('實際開始日')).toHaveValue('2026-10-01'));
+    fireEvent.change(screen.getByLabelText('實際開始日'), { target: { value: '2026-09-28' } });
     await waitFor(() => expect(mocks.calculate).toHaveBeenCalledTimes(1));
-    fireEvent.change(screen.getByLabelText('此次試算開始日'), { target: { value: '2026-10-15' } });
+    fireEvent.change(screen.getByLabelText('實際開始日'), { target: { value: '2026-10-15' } });
     await screen.findByLabelText('建議服務日期摘要');
     await act(async () => resolve(result('2026-09-28')));
     expect(screen.getByLabelText('此次選定服務日期摘要')).toHaveTextContent('2026-10-15');
-    fireEvent.change(screen.getByLabelText('此次試算開始日'), { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText('實際開始日'), { target: { value: '' } });
     expect(screen.getByRole('button', { name: '確認服務日期' })).toBeDisabled();
   });
 
   it('精算超出既有範圍時明示原因，不能靜默裁掉日期或寫入', async () => {
     mocks.calculate.mockResolvedValue({ ...result('2026-09-28'), day_by_day: result('2026-12-20').day_by_day });
     render(<OrderServiceDatesPanel caseNo={CASE} />);
-    await waitFor(() => expect(screen.getByLabelText('此次試算開始日')).toHaveValue('2026-10-01'));
-    fireEvent.change(screen.getByLabelText('此次試算開始日'), { target: { value: '2026-09-28' } });
+    await waitFor(() => expect(screen.getByLabelText('實際開始日')).toHaveValue('2026-10-01'));
+    fireEvent.change(screen.getByLabelText('實際開始日'), { target: { value: '2026-09-28' } });
     await screen.findByText(/精算結果超出目前允許/); expect(mocks.applyStart).not.toHaveBeenCalled();
   });
 
@@ -243,13 +243,13 @@ describe('#335 direct start input and existing writer integration', () => {
     let resolve!: (value: ReturnType<typeof result>) => void;
     mocks.calculate.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
     const view = render(<OrderServiceDatesPanel caseNo={CASE} />);
-    await waitFor(() => expect(screen.getByLabelText('此次試算開始日')).toHaveValue('2026-10-01'));
-    fireEvent.change(screen.getByLabelText('此次試算開始日'), { target: { value: '2026-09-28' } });
+    await waitFor(() => expect(screen.getByLabelText('實際開始日')).toHaveValue('2026-10-01'));
+    fireEvent.change(screen.getByLabelText('實際開始日'), { target: { value: '2026-09-28' } });
     await waitFor(() => expect(mocks.calculate).toHaveBeenCalledTimes(1));
     mocks.getDates.mockResolvedValue({ ...datesQuery(), case_no: 'OTHER' });
     mocks.getStart.mockResolvedValue({ ...startQuery(), case_no: 'OTHER', planned_start_date: '2026-11-01' });
     view.rerender(<OrderServiceDatesPanel caseNo="OTHER" />);
-    await waitFor(() => expect(screen.getByLabelText('此次試算開始日')).toHaveValue('2026-11-01'));
+    await waitFor(() => expect(screen.getByLabelText('實際開始日')).toHaveValue('2026-11-01'));
     await act(async () => resolve(result('2026-09-28')));
     expect(screen.queryByLabelText('建議服務日期摘要')).not.toBeInTheDocument();
     expect(orderMutationFlowStore.getServiceDatesDraft('OTHER')?.selectedDates).toEqual([]);
@@ -258,10 +258,10 @@ describe('#335 direct start input and existing writer integration', () => {
   it('外層投影刷新只更新已保存日期，不重新計算或清空同基準草稿', async () => {
     actual = '2026-10-01'; confirmedVersion = 1; confirmedDates = ['2026-10-01', '2026-10-03', '2026-10-05'];
     const view = render(<OrderServiceDatesPanel caseNo={CASE} projectionRevision={0} />);
-    await screen.findByLabelText('正式服務日期回讀');
+    await screen.findByLabelText('已確認服務日期回讀');
     confirmedVersion = 2; confirmedDates = ['2026-10-01', '2026-10-04', '2026-10-06'];
     view.rerender(<OrderServiceDatesPanel caseNo={CASE} projectionRevision={1} />);
-    await waitFor(() => expect(screen.getByLabelText('正式服務日期回讀')).toHaveTextContent('2026-10-06'));
+    await waitFor(() => expect(screen.getByLabelText('已確認服務日期回讀')).toHaveTextContent('2026-10-06'));
     expect(mocks.calculate).not.toHaveBeenCalled();
   });
 });

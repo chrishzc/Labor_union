@@ -11,6 +11,7 @@ interface OrderAssignmentPlanPanelProps {
   revision?: number;
   onObserved?: () => void;
   onOpenReplacement?: () => void;
+  historicalArrangementPending?: boolean;
 }
 
 type ReadState =
@@ -25,7 +26,7 @@ function errorMessage(error: unknown): string {
     : '正式指派與排班資料讀取失敗';
 }
 
-export const OrderAssignmentPlanPanel: FC<OrderAssignmentPlanPanelProps> = ({ caseNo, onObserved, onOpenReplacement, revision }) => {
+export const OrderAssignmentPlanPanel: FC<OrderAssignmentPlanPanelProps> = ({ caseNo, onObserved, onOpenReplacement, revision, historicalArrangementPending = false }) => {
   const [state, setState] = useState<ReadState>({ status: 'idle' });
   const [replacementOpen, setReplacementOpen] = useState(false);
   const mounted = useRef(false);
@@ -99,8 +100,10 @@ export const OrderAssignmentPlanPanel: FC<OrderAssignmentPlanPanelProps> = ({ ca
 
       {state.status === 'error' && <p role="alert">{state.message}</p>}
 
-      {state.status === 'ready' && matchingPlan === null && (
-        <p role="status">尚無有效媒合方案；請至「推薦確認」確認人選。既有正式指派資料仍顯示於下方。</p>
+      {state.status === 'ready' && matchingPlan === null && !historicalArrangementPending && (
+        <p role="status">{plan && plan.assignments.length > 0
+          ? '尚無有效媒合方案；既有正式指派資料顯示於下方。'
+          : '尚無有效媒合方案；請至「推薦確認」確認人選。既有正式指派資料仍顯示於下方。'}</p>
       )}
 
       {plan !== null && (
@@ -113,7 +116,7 @@ export const OrderAssignmentPlanPanel: FC<OrderAssignmentPlanPanelProps> = ({ ca
           {plan.assignments.length === 0 ? (
             <div className="order-v2-notice blocked" role="status">
               <strong>尚無正式指派</strong>
-              <span>此案件尚未安排正式服務人員。</span>
+              <span>{historicalArrangementPending ? '請在上方沿用既定月嫂建立正式安排。' : '此案件尚未安排正式服務人員。'}</span>
             </div>
           ) : (
             plan.assignments.map((segment) => (
@@ -131,7 +134,7 @@ export const OrderAssignmentPlanPanel: FC<OrderAssignmentPlanPanelProps> = ({ ca
         </>
       )}
 
-      {plan !== null && matchingPlan !== null && (matchingPlan.segments ?? []).length > 0 && (
+      {plan !== null && matchingPlan !== null && !historicalArrangementPending && (matchingPlan.segments ?? []).length > 0 && (
         <MatchingScheduleAndAssignmentActions
           caseNo={caseNo}
           planId={matchingPlan.planId}

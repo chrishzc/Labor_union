@@ -10,6 +10,7 @@ interface Props {
   caseNo: string;
   dates: ServiceDateConfirmationQueryView;
   onObserved: (query: ServiceDateConfirmationQueryView) => void;
+  onBusyChange?: (busy: boolean) => void;
 }
 
 function explicitSegments(
@@ -34,7 +35,7 @@ function explicitSegments(
   return segments;
 }
 
-export function HistoricalRestartArrangementPanel({ caseNo, dates, onObserved }: Props) {
+export function HistoricalRestartArrangementPanel({ caseNo, dates, onObserved, onBusyChange }: Props) {
   const [allocation, setAllocation] = useState<Record<string, number>>({});
   const [preview, setPreview] = useState<HistoricalArrangementPreviewView | null>(null);
   const [reason, setReason] = useState('依已確認服務日期建立歷史案件正式安排');
@@ -42,6 +43,8 @@ export function HistoricalRestartArrangementPanel({ caseNo, dates, onObserved }:
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const operationKey = useRef<string | null>(null);
+
+  useEffect(() => { onBusyChange?.(busy); return () => onBusyChange?.(false); }, [busy, onBusyChange]);
 
   useEffect(() => {
     setAllocation({});
@@ -112,6 +115,10 @@ export function HistoricalRestartArrangementPanel({ caseNo, dates, onObserved }:
   return <section aria-label="歷史訂單建立正式安排" className="order-v2-inline-notice">
     <h3>建立正式安排</h3>
     <p>服務日期已確認，但排班與費率快照尚未建立。請核對每位既定月嫂的連續服務日，再單獨建立正式安排。</p>
+    <dl className="order-v2-business-summary" aria-label="待建立正式安排摘要">
+      <div><dt>既定月嫂</dt><dd>{dates.bound_staff.map((staff) => staff.staff_name).join('、')}</dd></div>
+      <div><dt>已確認服務期間</dt><dd>{dates.current_dates[0]} 至 {dates.current_dates.at(-1)}（{dates.current_dates.length} 天）</dd></div>
+    </dl>
     {dates.bound_staff.length > 1 && <div role="group" aria-label="逐日指定月嫂">
       {dates.current_dates.map((day) => <label key={day}>{day}
         <select

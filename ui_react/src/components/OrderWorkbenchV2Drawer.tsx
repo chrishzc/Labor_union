@@ -67,7 +67,7 @@ const WORK_GROUPS = [
   { id: 'matching', title: '候選與詢問', description: '選擇月嫂、分開提供訂單資訊，再記錄接案意願。', stages: ['matching_pool', 'caregiver_line_delivery', 'caregiver_willingness_reply'] },
   { id: 'recommendation', title: '推薦確認', description: '將願意承接的人選推薦給客戶，確認服務方案。', stages: ['formal_recommendation'] },
   { id: 'contracts', title: '契約與文件', description: '核對客戶與月嫂契約，辦理送簽與簽回文件。', stages: ['external_signing_dispatch', 'external_signing_completion'] },
-  { id: 'service', title: '服務安排', description: '確認實際服務日期、排班與完工；換人及日期異動另由案件異動辦理。', stages: ['confirmed_service_dates', 'formal_service', 'service_completion'] },
+  { id: 'service', title: '服務安排', description: '確認實際開始日、服務日期、排班與完工；換人另由案件異動辦理。', stages: ['confirmed_service_dates', 'formal_service', 'service_completion'] },
   { id: 'finance', title: '收款與結算', description: '查看訂金、客戶收款及月嫂付款；核銷統一由帳務中心處理。', stages: ['deposit_settlement', 'client_settlement', 'staff_payout'] },
 ] as const;
 type WorkGroup = typeof WORK_GROUPS[number]['id'];
@@ -145,6 +145,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
   const [matchingView, setMatchingView] = useState<'list' | 'search' | 'information'>('list');
   const [informationKind, setInformationKind] = useState<1 | 2>(1);
   const [serviceView, setServiceView] = useState<'dates' | 'assignment' | 'completion' | 'correction'>('dates');
+  const [historicalArrangementPending, setHistoricalArrangementPending] = useState(false);
   const [contractView, setContractView] = useState<'overview' | 'signing'>('signing');
   const [signingOpened, setSigningOpened] = useState(true);
   const pageHeadingRef = useRef<HTMLHeadingElement>(null);
@@ -397,9 +398,13 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
               </div>}
               {(activeGroup === 'service' || visitedGroups.includes('service')) && <div hidden={activeGroup !== 'service'}>
                 <nav className="order-case-subnav" aria-label="服務工作"><button type="button" aria-pressed={serviceView === 'dates'} onClick={() => setServiceView('dates')}>確認日期</button><button type="button" aria-pressed={serviceView === 'assignment'} onClick={() => setServiceView('assignment')}>正式排班</button><button type="button" aria-pressed={serviceView === 'completion'} onClick={() => setServiceView('completion')}>完工確認</button><button type="button" aria-pressed={serviceView === 'correction'} onClick={() => setServiceView('correction')}>更正正式日期</button></nav>
-                <div hidden={serviceView !== 'dates'}>
+                <div hidden={serviceView !== 'dates' && serviceView !== 'assignment'}>
                 <OrderServiceDatesPanel
                   caseNo={caseNo}
+                  view={serviceView === 'assignment' ? 'arrangement' : 'dates'}
+                  onOpenArrangement={() => setServiceView('assignment')}
+                  onOpenDates={() => setServiceView('dates')}
+                  onArrangementPendingChange={setHistoricalArrangementPending}
                   calculationRevision={serviceDatesCalculationRevision}
                   projectionRevision={refreshRevision}
                   currentAssignmentPlan={assignmentPlan.status === 'ready' ? assignmentPlan.data : null}
@@ -413,7 +418,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
                 </div><div hidden={serviceView !== 'assignment'}>
                 {datesPending && <p role="status">服務日期尚未完成保存或回讀，請先到「確認日期」接續；目前不能以舊日期辦理正式排班。</p>}
                 <fieldset disabled={datesPending}>
-                <OrderAssignmentPlanPanel caseNo={caseNo} revision={refreshRevision} onObserved={refreshFacts} onOpenReplacement={() => { setDrawerTab('changes'); setReplacementExpanded(true); }} />
+                <OrderAssignmentPlanPanel caseNo={caseNo} revision={refreshRevision} historicalArrangementPending={historicalArrangementPending} onObserved={refreshFacts} onOpenReplacement={() => { setDrawerTab('changes'); setReplacementExpanded(true); }} />
                 </fieldset>
                 </div><div hidden={serviceView !== 'correction'}>{serviceView === 'correction' && <OrderOfficialDateCorrectionPanel caseNo={caseNo} revision={refreshRevision} onObserved={refreshFacts} />}</div><div hidden={serviceView !== 'completion'}>{detail.status === 'ready' && (
                 <OrderServiceCompletionActions caseNo={caseNo} orderStatus={detail.data.order_status} onCompleted={refreshFacts} />
