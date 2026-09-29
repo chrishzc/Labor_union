@@ -351,6 +351,7 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_09_15_order_details_owner_dates_v1.json",
     "labor_union_2026_09_22_order_terms_optional_downstream_versions_v1.json",
     "labor_union_2026_09_22_order_terms_optional_scheduling_receipt_v1.json",
+    "labor_union_2026_09_29_client_zero_obligation_establishment_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -2489,6 +2490,8 @@ def _metadata_state_for_artifact(
             snapshot,
             descriptor,
         )
+    if artifact == "1046_client_zero_obligation_establishment.sql":
+        return _client_zero_obligation_establishment_state(snapshot, descriptor)
     if artifact == "1013_order_lifecycle_pending_status_constraint.sql":
         return _order_lifecycle_pending_status_constraint_state(
             snapshot,
@@ -3686,6 +3689,13 @@ def _local_classify_statement(statement: str) -> str:
                 .read_text(encoding="utf-8")
             )[0].strip(),
         ).casefold()
+        canonical_1046 = re.sub(
+            r"\s+", " ",
+            split_sql(
+                (ROOT / "db/schema_parts/1046_client_zero_obligation_establishment.sql")
+                .read_text(encoding="utf-8")
+            )[0].strip(),
+        ).casefold()
         controlled_parent_replacement = (
             normalized.startswith("alter table controlled_file_staging_objects ")
             and "modify column purpose enum(" in normalized
@@ -3721,6 +3731,8 @@ def _local_classify_statement(statement: str) -> str:
             return "order_terms_downstream_version_nullability_widen"
         if normalized == canonical_1045:
             return "order_terms_scheduling_receipt_nullability_widen"
+        if normalized == canonical_1046:
+            return "client_zero_obligation_establishment_check_widen"
         if re.search(r"\b(drop|modify|change|rename|truncate)\b", normalized):
             raise LocalAdditiveBlocked("destructive ALTER is outside additive allowlist", code="forbidden_sql_effect")
         if not re.search(r"\badd\s+(column|index|unique|constraint|fulltext|spatial)\b", normalized):
@@ -5546,6 +5558,11 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
                 "bigint", "YES", None
             ),
         }
+    if part_name == "1046_client_zero_obligation_establishment.sql":
+        clause, _ = _extract_parenthesized(sql, sql.index("CHECK (") + 6)
+        descriptor["checks"][(
+            "client_obligation_events", "chk_client_obligation_event_amount",
+        )] = _normalize_sql_contract(clause)
     if part_name == "1041_historical_manual_beclass_origin.sql":
         descriptor["parent_columns"]["beclass_records"] = {
             "record_origin": _column_contract(
@@ -6170,6 +6187,8 @@ def _release_descriptor_metadata_state(
             snapshot,
             canonical,
         )
+    if part_name == "1046_client_zero_obligation_establishment.sql":
+        return _client_zero_obligation_establishment_state(snapshot, canonical)
     if part_name == "1013_order_lifecycle_pending_status_constraint.sql":
         return _order_lifecycle_pending_status_constraint_state(
             snapshot,
@@ -6324,6 +6343,41 @@ def _historical_order_adoption_noop_constraint_state(
     if actual == successor:
         return "exact"
     if actual == predecessor:
+        return "absent"
+    return "drift"
+
+
+def _client_zero_obligation_establishment_state(
+    snapshot: Mapping[str, Any], descriptor: Mapping[str, Any],
+) -> str:
+    key = ("client_obligation_events", "chk_client_obligation_event_amount")
+    row = next((
+        row for row in snapshot.get("constraints", ())
+        if (row["table_name"], row["constraint_name"]) == key
+    ), None)
+    if row is None:
+        table_present = any(
+            row.get("table_name") == key[0] for row in snapshot.get("columns", ())
+        )
+        return "partial" if table_present else "absent"
+    if (
+        row.get("constraint_type") != "CHECK"
+        or str(row.get("enforced") or "YES").upper() != "YES"
+    ):
+        return "drift"
+    show_create_checks = {}
+    for sql in snapshot.get("show_create_tables", {}).values():
+        show_create_checks.update(_show_create_check_clauses(sql))
+    actual = _normalize_check_contract(
+        show_create_checks.get(key, row.get("check_clause") or "")
+    )
+    if actual == _normalize_check_contract(descriptor["checks"][key]):
+        return "exact"
+    predecessor_sql = (ROOT / "db/schema_parts/111_client_finance_ledger.sql").read_text(encoding="utf-8")
+    marker = predecessor_sql.index("CONSTRAINT chk_client_obligation_event_amount")
+    opening = predecessor_sql.index("(", predecessor_sql.index("CHECK", marker))
+    predecessor_clause, _ = _extract_parenthesized(predecessor_sql, opening)
+    if actual == _normalize_check_contract(_normalize_sql_contract(predecessor_clause)):
         return "absent"
     return "drift"
 
@@ -7084,6 +7138,11 @@ def _allowed_later_artifact_checks(
     part_name: str,
 ) -> dict[tuple[str, str], tuple[str, ...]]:
     """Return checks whose exact shape is owned by a declared successor."""
+    if part_name == "111_client_finance_ledger.sql":
+        successor = _canonical_artifact_descriptor(
+            "1046_client_zero_obligation_establishment.sql"
+        )
+        return {key: (clause,) for key, clause in successor["checks"].items()}
     if part_name == "104_order_lifecycle_state_history.sql":
         pending_status_successor = _canonical_artifact_descriptor(
             "1013_order_lifecycle_pending_status_constraint.sql"

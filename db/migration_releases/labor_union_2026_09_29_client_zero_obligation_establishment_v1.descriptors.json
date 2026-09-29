@@ -1,0 +1,17 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-client-zero-obligation-establishment-2026-09-29-v1",
+  "descriptors": {
+    "1046_client_zero_obligation_establishment.sql": {
+      "tables": {},
+      "parent_columns": {},
+      "indexes": {},
+      "foreign_keys": {},
+      "checks": {
+        "client_obligation_events.chk_client_obligation_event_amount": "and(atom(before_amount_ntd>=0),atom(after_amount_ntd>=0),or(atom(before_amount_ntd<>after_amount_ntd),not(atom(before_due_date<=>after_due_date)),and(atom(event_type='established'),atom(before_amount_ntd=0),atom(after_amount_ntd=0),atom(before_due_dateisnull),atom(after_due_dateisnull))))"
+      },
+      "triggers": [],
+      "views": {}
+    }
+  }
+}

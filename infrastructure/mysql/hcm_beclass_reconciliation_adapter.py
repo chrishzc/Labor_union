@@ -124,8 +124,16 @@ class MySqlHcmBeClassReconciliationAdapter:
                 preview.after,
                 ExpectedVersion(preview.order_version),
                 ExpectedVersion(preview.scheduling_version),
-                ExpectedVersion(preview.client_finance_version),
-                ExpectedVersion(preview.payroll_version),
+                (
+                    ExpectedVersion(preview.client_finance_version)
+                    if preview.client_finance_version is not None
+                    else None
+                ),
+                (
+                    ExpectedVersion(preview.payroll_version)
+                    if preview.payroll_version is not None
+                    else None
+                ),
                 preview.fingerprint,
                 IdempotencyKey(f"case-import-cooking:{identity}"),
                 ActorContext("case-import-reconciliation"),

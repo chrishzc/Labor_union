@@ -94,6 +94,12 @@
   - `db/migration_releases/labor_union_2026_09_22_order_terms_optional_scheduling_receipt_v1.json`
   - `db/migration_releases/labor_union_2026_09_22_order_terms_optional_scheduling_receipt_v1.descriptors.json`
 
+- current zero client obligation establishment release:
+  - `db/schema_parts/1046_client_zero_obligation_establishment.sql` — shared fresh-bootstrap／preserve-data CHECK successor; only established zero amounts with both due dates null may remain unchanged.
+  - `db/migration_releases/labor_union_2026_09_29_client_zero_obligation_establishment_v1.json`
+  - `db/migration_releases/labor_union_2026_09_29_client_zero_obligation_establishment_v1.descriptors.json`
+  - `validation/receipts/PROV-ZERO-OBLIGATION-local-additive-qualification-20260929.json` — reusable synthetic-MySQL fresh／preserve qualification; machine-local source backup remains mandatory.
+
 ## Contracts
 - Source read-only、candidate identity、release classification、backup／journal／resume及
   replacement boundary — `document/架構重整/01_規格基線/10_Global_保留資料Migration與Cutover_Subsystem.md`

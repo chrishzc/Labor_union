@@ -6,10 +6,15 @@ Description: 驗證 Client BeClass temporary workbook 的 Preview、Apply、repl
 from __future__ import annotations
 
 import json
+from datetime import date
 from types import SimpleNamespace
 
 import pytest
 
+from domains.orders.terms import OrderTerms, ServiceTimeTerms
+from infrastructure.mysql import hcm_beclass_reconciliation_adapter as reconciliation_adapter
+from shared_kernel.identities import ExpectedVersion
+from shared_kernel.money import MoneyNTD
 from domains.case_import.client_beclass_binding import (
     ClientCaseBindingResolution,
     ClientCaseBindingStatus,
@@ -20,6 +25,54 @@ from subsystems.case_import import client_beclass_workbook_import as intake
 
 _DIGEST = "a" * 64
 _SHEET = "b" * 64
+
+
+@pytest.mark.parametrize("versions", [(None, None), (0, 0), (4, 7), (None, 7)])
+def test_cooking_reconciliation_preserves_nullable_owner_versions(monkeypatch, versions):
+    terms = OrderTerms(
+        date(2026, 9, 10), 5, 8, MoneyNTD(0),
+        ServiceTimeTerms(None, None, None), None,
+    )
+    connection = object()
+    repository = SimpleNamespace(
+        load_for_preview=lambda case_no: SimpleNamespace(order=SimpleNamespace(terms=terms))
+    )
+    requests = []
+
+    class Workflow:
+        def __init__(self, selected_repository, uow_factory, clock):
+            assert selected_repository is repository
+
+        def preview(self, case_no, proposed_terms):
+            assert case_no == "CASE-7"
+            assert proposed_terms.requires_cooking is True
+            return SimpleNamespace(
+                after=proposed_terms, order_version=2, scheduling_version=0,
+                client_finance_version=versions[0], payroll_version=versions[1],
+                fingerprint="preview",
+            )
+
+        def apply_in_current_uow(self, request):
+            requests.append(request)
+
+    monkeypatch.setattr(
+        reconciliation_adapter, "MySqlOrderTermsRepository", lambda selected_connection: repository
+    )
+    monkeypatch.setattr(reconciliation_adapter, "OrderTermsWorkflow", Workflow)
+
+    reconciliation_adapter.MySqlHcmBeClassReconciliationAdapter(connection).apply_cooking_terms(
+        "CASE-7", 7, True
+    )
+
+    assert len(requests) == 1
+    request = requests[0]
+    assert request.expected_order_version == ExpectedVersion(2)
+    assert request.expected_scheduling_version == ExpectedVersion(0)
+    for actual, version in zip(
+        (request.expected_client_finance_version, request.expected_payroll_version), versions
+    ):
+        assert actual == (None if version is None else ExpectedVersion(version))
+    assert request.proposed_terms.requires_cooking is True
 
 
 class _Connection:

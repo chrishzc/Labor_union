@@ -81,6 +81,11 @@ def _verify_release_boundary(
             snapshot=snapshot,
         )["state"]
         if (
+            state == "absent"
+            and entry["artifact"]["name"] in migration.LOCAL_RETIRED_ABSENT_ARTIFACTS
+        ):
+            state = "retired_absent"
+        if (
             dependency_gap_seen
             and state not in {"absent", "exact"}
             and migration._local_parent_tables_dependency_pending(
@@ -94,7 +99,7 @@ def _verify_release_boundary(
 
     expected_exact_end = target_index + (1 if applied else 0)
     if require_predecessor_prefix and any(
-        state != "exact" for state in states[:expected_exact_end]
+        state not in {"exact", "retired_absent"} for state in states[:expected_exact_end]
     ):
         raise EngineEvidenceError("release predecessor prefix is not exact")
     target_state = states[target_index]
@@ -111,7 +116,7 @@ def _verify_release_boundary(
             and (target_artifact, future_artifact) in ZERO_EFFECT_SUCCESSOR_PAIRS
         ):
             continue
-        if state not in {"absent", "dependency_pending"}:
+        if state not in {"absent", "dependency_pending", "retired_absent"}:
             raise EngineEvidenceError(f"future release state is {state}")
     return states
 

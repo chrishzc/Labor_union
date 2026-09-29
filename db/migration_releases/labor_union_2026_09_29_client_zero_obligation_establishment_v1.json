@@ -1,0 +1,80 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-client-zero-obligation-establishment-2026-09-29-v1",
+  "release_metadata": {
+    "release_name": "Labor Union zero client obligation establishment",
+    "application_version": "client-zero-obligation-establishment-v1",
+    "published_at": "2026-09-29",
+    "description": "Allow zero initial client obligations with null due dates while retaining all no-change and nonnegative guards for other events"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-order-terms-optional-scheduling-receipt-2026-09-22-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1046_client_zero_obligation_establishment.sql",
+      "relative_path": "db/schema_parts/1046_client_zero_obligation_establishment.sql",
+      "sha256": "34268fcee3fcc9948b483f92be31dbc9fa79864674031a0da9fadaa53b193a66",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "forward-only-after-zero-established-event; discard-candidate-before-entry-switch",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "client-zero-obligation-establishment-check-exact",
+      "phase": "post-schema",
+      "policy": "Only initial established zero amounts with null due dates may be unchanged",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": [
+      "historical-service-accounting-v1",
+      "client-zero-obligation-establishment-v1"
+    ],
+    "required_restart_targets": [
+      "api"
+    ],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": [
+      "client-zero-obligation-establishment-check-exact"
+    ]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_09_29_client_zero_obligation_establishment_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_09_29_client_zero_obligation_establishment_v1.descriptors.json",
+    "sha256": "6581ace51b8a5ccaaeb56cc7ce7ad2d8b221509c7b34dc507f32a144b0de2020",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

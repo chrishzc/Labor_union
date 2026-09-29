@@ -22,6 +22,7 @@
 - schema:
   - `db/schema_parts/215_historical_service_accounting.sql`
   - `db/schema_parts/1028_historical_service_accounting.sql`
+  - `db/schema_parts/1046_client_zero_obligation_establishment.sql` — zero customer baseline obligation retains settled lineage without weakening unchanged later-event guards.
   - `db/migration_releases/labor_union_2026_09_01_historical_service_accounting_v1.json`
 
 ## Dependencies

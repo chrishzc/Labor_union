@@ -1,5 +1,5 @@
 -- GENERATED FILE. Do not edit by hand.
--- Release: labor-union-validation-schema-2026-09-22-v38
+-- Release: labor-union-validation-schema-2026-09-29-v40
 -- Replace __LU_TEST_DATABASE__ with an explicitly confirmed lu_test_* database.
 -- Rebuild with: python scripts/build_validation_schema_release.py
 
@@ -21726,3 +21726,25 @@ ALTER TABLE order_terms_apply_receipts
 ALTER TABLE order_terms_apply_receipts
     MODIFY COLUMN scheduling_command_receipt_id BIGINT NULL;
 -- END SOURCE: db/schema_parts/228_order_terms_optional_scheduling_receipt.sql
+
+-- BEGIN SOURCE: db/schema_parts/1046_client_zero_obligation_establishment.sql
+-- Preserve zero-amount initial obligations and their settlement/source lineage.
+-- Schema only: no existing amount, due date, event or projection is rewritten.
+ALTER TABLE client_obligation_events
+    DROP CHECK chk_client_obligation_event_amount,
+    ADD CONSTRAINT chk_client_obligation_event_amount CHECK (
+        before_amount_ntd >= 0
+        AND after_amount_ntd >= 0
+        AND (
+            before_amount_ntd <> after_amount_ntd
+            OR NOT (before_due_date <=> after_due_date)
+            OR (
+                event_type = 'established'
+                AND before_amount_ntd = 0
+                AND after_amount_ntd = 0
+                AND before_due_date IS NULL
+                AND after_due_date IS NULL
+            )
+        )
+    );
+-- END SOURCE: db/schema_parts/1046_client_zero_obligation_establishment.sql
