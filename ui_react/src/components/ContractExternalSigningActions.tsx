@@ -970,8 +970,8 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
 
       {((query && !query.unsigned_document && query.staff_targets.length > 0)
         || (!query && preparationSegments.length > 0)) && (
-        <section aria-label="準備月嫂未簽契約 PDF" style={{ border: '1px solid #dec0b6', borderRadius: '10px', padding: '12px', display: 'grid', gap: '8px' }}>
-          <strong>準備服務人員契約</strong>
+        <details aria-label="準備月嫂未簽契約 PDF" style={{ border: '1px solid #dec0b6', borderRadius: '10px', padding: '12px', display: 'grid', gap: '8px' }}>
+          <summary>其他文件操作：只準備契約，不下載</summary>
           <div style={{ fontSize: '0.82rem', color: '#74593f' }}>
             依目前案件與服務安排產生未簽署的契約；缺值只會提醒，此操作不會寄送訊息或改變業務狀態。
           </div>
@@ -987,7 +987,7 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
               準備服務人員契約 PDF（服務區段 {segmentId}）
             </button>
           ))}
-        </section>
+        </details>
       )}
 
       {recoveryQuery && recoveryQuery.targets.some(hasCompleteLegacyLineage) && pendingRecoveryTargets.length > 0 && (

@@ -336,6 +336,14 @@
   box-shadow: 0 2px 8px rgba(234, 88, 12, 0.05);
 }
 
+.gantt-case-checks { margin-bottom: 14px; border: 1px solid #fed7aa; border-radius: 10px; background: #fffaf7; }
+.gantt-case-checks > summary { padding: 12px 14px; color: #9a3412; font-size: .88rem; font-weight: 750; cursor: pointer; }
+.gantt-case-checks > summary span { margin-left: 12px; color: #74593f; font-size: .8rem; font-weight: 500; }
+.gantt-case-checks .gantt-case-projection-bar { margin: 0; border: 0; border-top: 1px solid #fed7aa; border-radius: 0 0 10px 10px; box-shadow: none; }
+.gantt-case-selector-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; max-width: 100%; }
+.gantt-case-selector-row .gantt-case-select { min-width: 0; max-width: 100%; }
+.gantt-case-checks > summary:focus-visible { outline: 3px solid #a83f1d; outline-offset: 3px; border-radius: 10px; }
+
 .gantt-case-select {
   padding: 7px 12px;
   border-radius: 8px;
@@ -1404,4 +1412,31 @@
 
 @media (max-width: 760px) {
   .leave-inbox-card { flex-direction: column; }
+  .scheduling-gantt-page { min-width: 0; gap: 10px; }
+  .scheduling-tab-bar { min-width: 0; max-width: 100%; gap: 6px; padding: 8px 0; margin-bottom: 0; }
+  .scheduling-tab-btn { padding: 10px 12px; font-size: .8rem; flex-shrink: 0; }
+  .gantt-hero-card { min-width: 0; padding: 14px 12px; border-radius: 14px; }
+  .gantt-month-navigator, .gantt-filter-controls { width: 100%; min-width: 0; }
+  .gantt-matrix-header-bar { gap: 10px; margin-bottom: 10px; padding-bottom: 10px; }
+  .month-pill-group { flex: 1; justify-content: space-between; padding: 2px; }
+  .month-nav-arrow { padding: 8px 5px; font-size: .8rem; min-height: 40px; }
+  .current-month-display { padding: 0 5px; font-size: .87rem; white-space: nowrap; }
+  .gantt-today-btn { min-height: 40px; }
+  .gantt-search-box { min-width: 0; width: 100%; }
+  .gantt-search-box input { min-width: 0; }
+  .gantt-status-pills { flex-wrap: nowrap; overflow-x: auto; width: 100%; padding-bottom: 3px; }
+  .gantt-status-pills > button { flex-shrink: 0; min-height: 40px; }
+  .gantt-case-checks > summary span { margin-left: 8px; font-size: .75rem; }
+  .gantt-legend-bar-rich { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 10px; gap: 8px; }
+  .gantt-legend-bar-rich .legend-item { gap: 5px; font-size: .75rem; }
+  .gantt-case-projection-bar { padding: 10px; }
+  .gantt-case-select { width: 100%; }
+  .gantt-staff-header-cell, .gantt-staff-info-cell { width: 150px; min-width: 150px; padding: 10px; }
+  .gantt-staff-info-cell .staff-name-line { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 4px 6px; }
+  .gantt-staff-info-cell .staff-avatar { width: 32px; height: 32px; flex-basis: 32px; font-size: 1.2rem; }
+  .gantt-staff-info-cell .staff-name-line strong { font-size: .8rem; overflow-wrap: anywhere; }
+  .gantt-staff-info-cell .staff-code-badge { grid-column: 2; justify-self: start; white-space: nowrap; }
 }
+
+.gantt-case-checks .btn-secondary-action { min-height: 40px; padding: 8px 12px; border: 1px solid #dec0b6; border-radius: 8px; background: #fff; color: #74593f; font: inherit; font-size: .82rem; cursor: pointer; }
+.gantt-case-checks :is(select, button):focus-visible { outline: 3px solid #a83f1d; outline-offset: 3px; }

@@ -63,6 +63,7 @@ def test_candidate_inquiry_keeps_current_order_window_while_loading_old_conflict
             (),
             {"load_case_facts": lambda _self, _case_no: facts},
         )(),
+        filter_policy={"preferred_service_days": False, "daily_service_hours": False},
     )
 
     assert facts["order"]["start_date"] == "2026-09-01"

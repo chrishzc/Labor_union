@@ -73,6 +73,8 @@ describe('DataImport HCM receipt review', () => {
   it('removes the persistent lower HCM section and shows this run inside the HCM card', async () => {
     render(<DataImportPage />);
     expect(screen.queryByText('HCM 目前待處理異常')).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: '目前 HCM 欄位待修正資料' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '讀取目前問題' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '重新整理結果' })).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText('選擇 HCM Current Workbook'), { target: { files: [workbook()] } });
@@ -90,8 +92,18 @@ describe('DataImport HCM receipt review', () => {
     expect(screen.queryByText(/case_import|hcm_identity/)).not.toBeInTheDocument();
     expect(screen.getByText(/既有案件跳過 0 筆（不覆寫既有案件與訂單資料）/)).toBeInTheDocument();
     expect(screen.queryByText(/前往異常審核/)).not.toBeInTheDocument();
+    vi.mocked(hcmResubmissionClient.query).mockRejectedValueOnce(new Error('修正資料讀取失敗'));
+    fireEvent.click(screen.getByRole('button', { name: /在本頁提交修正/ }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('修正資料讀取失敗');
+    vi.mocked(hcmResubmissionClient.query).mockResolvedValueOnce({ review_identity: 'review-2', case_no: '115000002', source_field: '行動電話', review_version: 1, resolved: true });
+    fireEvent.click(screen.getByRole('button', { name: /在本頁提交修正/ }));
+    expect(await screen.findByText('此欄位已在正式資料中補齊，無需再次修正。')).toBeInTheDocument();
+    expect(screen.queryByText('修正案件 115000002')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /在本頁提交修正/ }));
     await waitFor(() => expect(screen.getByText('修正案件 115000002')).toBeInTheDocument());
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByText('此欄位已在正式資料中補齊，無需再次修正。')).not.toBeInTheDocument();
+    expect(hcmResubmissionClient.current).not.toHaveBeenCalled();
   });
 
   it('cancels the selected HCM workbook and clears preview confirmation without Apply', async () => {
@@ -192,22 +204,18 @@ describe('HCM correction cancel and official readback', () => {
     fireEvent.click(screen.getByRole('button', { name: '取消' }));
     expect(onCancel).not.toHaveBeenCalled();
   });
-  it('returns to the current collection after same-case readback and preserves another issue', async () => {
-    const item = { source_id: 2, review_identity: selection.reviewIdentity, case_no: selection.caseNo, fields: ['縣市'], can_correct: true };
-    const other = { ...item, source_id: 1, review_identity: 'review-other', case_no: 'SYNTH-OTHER' };
-    vi.spyOn(hcmResubmissionClient, 'current').mockResolvedValueOnce({ items: [item, other], next_cursor: null }).mockResolvedValue({ items: [other], next_cursor: null });
-    vi.spyOn(hcmResubmissionClient, 'query').mockResolvedValue({ review_identity: selection.reviewIdentity, case_no: selection.caseNo, source_field: '縣市', review_version: 1, resolved: true });
+  it('does not restore the current HCM review section when switching import types', () => {
+    vi.spyOn(hcmResubmissionClient, 'current').mockResolvedValue({ items: [], next_cursor: null });
     render(<DataImportPage />);
-    fireEvent.click(screen.getByRole('button', { name: '讀取目前問題' }));
-    await screen.findByText('案件 SYNTH-326');
-    fireEvent.click(screen.getAllByRole('button', { name: '修正此案件' })[0]);
-    await ready();
-    expect(hcmResubmissionClient.preview).toHaveBeenCalledWith(expect.any(HcmWorkbookSnapshot), selection.reviewIdentity);
-    fireEvent.click(screen.getByRole('button', { name: '確認套用修正' }));
-    await waitFor(() => expect(screen.queryByText('案件 SYNTH-326')).not.toBeInTheDocument());
-    expect(screen.getByText('案件 SYNTH-OTHER')).toBeInTheDocument();
-    expect(hcmResubmissionClient.query).toHaveBeenCalledWith(selection.reviewIdentity);
-    expect(hcmResubmissionClient.current).toHaveBeenCalledTimes(2);
+    for (const name of ['客戶', '月嫂', '歷史訂單', 'HCM']) {
+      fireEvent.click(screen.getByRole('button', { name }));
+      expect(screen.queryByText('目前 HCM 欄位待修正資料')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '讀取目前問題' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '上一頁問題' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '下一頁問題' })).not.toBeInTheDocument();
+    }
+    expect(screen.getByLabelText('選擇 HCM Current Workbook')).toBeInTheDocument();
+    expect(hcmResubmissionClient.current).not.toHaveBeenCalled();
   });
 
   it('a confirmed stale rejection permits a new preview instead of replaying forever', async () => {

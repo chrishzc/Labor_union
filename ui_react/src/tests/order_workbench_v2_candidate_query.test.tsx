@@ -38,11 +38,11 @@ const eligible = {
   available_ranges: [{ start_date: '2026-09-01', end_date: '2026-09-05' }],
   case_period_start: '2026-09-01',
   case_period_end: '2026-09-05',
-  required_service_dates: ['2026-09-01'],
-  supported_service_dates: ['2026-09-01'],
-  supported_ranges: [{ start_date: '2026-09-01', end_date: '2026-09-05', service_day_count: 1 }],
-  supported_day_count: 1,
-  required_day_count: 1,
+  required_service_dates: ['2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04', '2026-09-05'],
+  supported_service_dates: ['2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04', '2026-09-05'],
+  supported_ranges: [{ start_date: '2026-09-01', end_date: '2026-09-05', service_day_count: 5 }],
+  supported_day_count: 5,
+  required_day_count: 5,
   full_case_coverage: true,
   selected_segment_start: '2026-09-01',
   selected_segment_end: '2026-09-05',
@@ -62,7 +62,7 @@ const partial = {
   supported_day_count: 0,
   full_case_coverage: false,
   full_selected_segment_coverage: false,
-  uncovered_segment_dates: ['2026-09-01'],
+  uncovered_segment_dates: ['2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04', '2026-09-05'],
   filter_results: { schedule: false, region: true },
 };
 
@@ -167,7 +167,13 @@ describe('待辦看板 Beta 第 2 階正式候選查詢、候選池寫入與回�
   });
 
   it('保留衝突候選並提示公會協調', async () => {
-    mocks.searchInquiryCandidates.mockResolvedValue(availability({ complete_combinations: [] }));
+    mocks.searchInquiryCandidates.mockResolvedValue(availability({
+      complete_combinations: [],
+      conflicts: [
+        { segment_index: 0, staff_id: 8893, work_date: '2026-09-01', reason_code: 'active_lock' },
+        { segment_index: 0, staff_id: 8893, work_date: '2026-09-02', reason_code: 'buffer' },
+      ],
+    }));
     render(<OrderCandidateQueryPanel caseNo="115000204" />);
 
     fireEvent.click(screen.getByRole('button', { name: '查詢符合條件月嫂' }));
@@ -180,8 +186,13 @@ describe('待辦看板 Beta 第 2 階正式候選查詢、候選池寫入與回�
     expect(await screen.findByText('正式合格月嫂')).toBeInTheDocument();
     expect(screen.getByText(/月嫂 #8892/)).toBeInTheDocument();
     expect(screen.getByText('部分可用月嫂')).toBeInTheDocument();
+    expect(screen.getByText(/月嫂 #8892 · 空閒 5\/5 天/)).toBeInTheDocument();
+    expect(screen.getByText(/月嫂 #8893 · 空閒 0\/5 天/)).toBeInTheDocument();
     expect(screen.getByText(/有檔期衝突，待公會協調/)).toBeInTheDocument();
+    expect(screen.getByText(/七天緩衝期重疊，僅提醒/)).toBeInTheDocument();
     expect(screen.getByText('服務期間：2026-09-01 ～ 2026-09-05')).toBeInTheDocument();
+    expect(screen.queryByText(/2026-09-01 · 檔期衝突/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/2026-09-02 · 七天緩衝期/)).not.toBeInTheDocument();
   });
 
   it('只有衝突候選時仍可選取並加入候選池', async () => {
@@ -196,7 +207,7 @@ describe('待辦看板 Beta 第 2 階正式候選查詢、候選池寫入與回�
     fireEvent.click(screen.getByRole('button', { name: '查詢符合條件月嫂' }));
 
     expect(await screen.findByText('可詢問 1 位')).toBeInTheDocument();
-    expect(screen.getByText(/檔期衝突，待協調/)).toBeInTheDocument();
+    expect(screen.getByText(/有檔期衝突，待公會協調/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('checkbox', { name: '選擇正式候選 部分可用月嫂' }));
     expect(screen.getByRole('button', { name: '加入候選池（1）' })).toBeEnabled();
   });

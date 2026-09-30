@@ -6,6 +6,7 @@ Description: 讀取媒合可用性 fresh facts，遇到來源未備妥時 fail c
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 from typing import Any, Dict, List
 
 from domains.scheduling.waiting_deposit_lock import (
@@ -186,7 +187,7 @@ def _search_availability(
     candidate_rows = [
         row
         for row in candidate_rows
-        if _passes_enabled_filters(filter_results[int(row["id"])], policy)
+        if _passes_enabled_filters(filter_results[int(row["id"])], policy, include_preferences=inquiry)
     ]
     candidate_staff_ids = [row["id"] for row in candidate_rows if row is not None and "id" in row]
     assignments = loaded_facts["assignments"]
@@ -418,6 +419,8 @@ def _staff_filter_results(staff, order, policy):
 
 def _preference_matches(fact, order, tolerance):
     required = order.get(fact.get("order_fact_key"))
+    if isinstance(required, Decimal) and required == required.to_integral_value():
+        required = int(required)
     if isinstance(required, bool) or not isinstance(required, int) or required <= 0:
         return False
     value = fact.get("value") or {}
@@ -433,10 +436,15 @@ def _preference_matches(fact, order, tolerance):
     return False
 
 
-def _passes_enabled_filters(results, policy):
+def _passes_enabled_filters(results, policy, *, include_preferences=False):
     if policy["region"] and not results["region"]:
         return False
     if policy["cooking"] and not results["cooking"]:
+        return False
+    if include_preferences and any(
+        policy[key] and not results.get(key, False)
+        for key in ("preferred_service_days", "daily_service_hours")
+    ):
         return False
     return True
 

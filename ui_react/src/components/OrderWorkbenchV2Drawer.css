@@ -60,6 +60,40 @@
 .order-case-page .order-v2-drawer-section { border: 1px solid #eadfd6; border-radius: 14px; padding: 22px; background: #fff; margin: 0; }
 .order-case-page [role=alert] { border-radius: 9px; padding: 14px; margin: 14px 0; background: #fff3ed; color: #914421; }
 .order-case-page section[aria-label$="多月嫂分段方案"] { margin-top: 24px; padding-top: 20px; border-top: 1px solid #e9ded4; }
+.order-multi-panel > h4 { margin: 0 0 6px; }
+.order-multi-panel > p { margin: 0 0 18px; color: #756358; font-size: .86rem; }
+.order-multi-setup { border: 1px solid #ead6c8; border-radius: 12px; padding: 20px; }
+.order-multi-setup-heading, .order-multi-result-heading, .order-multi-card-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.order-multi-setup-heading h5, .order-multi-result-heading h5 { margin: 0; font-size: 1rem; }
+.order-multi-setup-heading p, .order-multi-result-heading p { margin: 5px 0 0; color: #756358; font-size: .8rem; }
+.order-multi-setup-heading > p { text-align: right; flex-shrink: 0; }
+.order-multi-setup-heading strong { color: #302923; font-size: .87rem; }
+.order-multi-selectors { display: grid; grid-template-columns: 150px repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 18px; padding-top: 18px; border-top: 1px solid #eee2d9; }
+.order-multi-selectors.many { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.order-multi-selectors label, .order-case-page .order-multi-selectors label { display: flex; flex-direction: column; align-items: stretch; gap: 7px; min-width: 0; color: #493526; font-weight: 650; }
+.order-multi-selectors select { width: 100%; }
+.order-multi-hint { margin: 12px 0 16px; color: #756358; font-size: .77rem; }
+.order-multi-setup > .order-v2-open-drawer { width: 100%; background: #b95125; border-color: #b95125; color: #fff; font-weight: 700; }
+.order-case-page .order-multi-setup > .order-v2-open-drawer { background: #b95125 !important; border-color: #b95125 !important; color: #fff !important; }
+.order-multi-results { margin-top: 24px; }
+.order-multi-result-heading > span { flex-shrink: 0; padding: 5px 10px; border-radius: 20px; background: #fff1e7; color: #98431d; font-size: .76rem; font-weight: 700; }
+.order-multi-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 14px; }
+.order-multi-card { min-width: 0; border: 1px solid #e7d5c9; border-radius: 10px; padding: 16px; }
+.order-multi-card-heading h6 { margin: 0; font-size: .91rem; }
+.order-multi-card-heading span { border-radius: 20px; padding: 4px 8px; background: #e8f5ed; color: #257149; font-size: .72rem; font-weight: 700; }
+.order-multi-card ol { list-style: none; padding: 0 0 0 13px; margin: 15px 0; border-left: 2px solid #edd4c6; }
+.order-multi-card li { display: grid; gap: 3px; padding: 0 0 14px; }
+.order-multi-card li:last-child { padding-bottom: 0; }
+.order-multi-card li small { color: #914421; font-size: .73rem; font-weight: 700; }
+.order-multi-card li strong { font-size: .88rem; }
+.order-multi-card li span { color: #62544b; font-size: .78rem; }
+.order-multi-card > p { border-top: 1px solid #eee2d9; padding-top: 10px; color: #765d50; font-size: .78rem; }
+.order-multi-card > button { width: 100%; }
+@media (max-width: 800px) {
+  .order-multi-selectors, .order-multi-selectors.many, .order-multi-cards { grid-template-columns: 1fr; }
+  .order-multi-setup-heading { flex-direction: column; }
+  .order-multi-setup-heading > p { text-align: left; }
+}
 .order-case-data-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
 .order-case-wide { grid-column: 1 / -1; }
 .order-case-facts { display: grid; gap: 14px; margin: 20px 0 0; }
@@ -739,3 +773,8 @@
   .formal-recommendation-candidate { align-items: stretch; flex-direction: column; }
   .formal-recommendation-status { align-self: flex-start; }
 }
+.order-case-secondary-actions { margin-top: 16px; padding-top: 12px; border-top: 1px solid #eee5df; }
+.order-case-secondary-actions summary { cursor: pointer; color: #715d50; padding: 8px 0; }
+.order-case-secondary-actions[open] summary { margin-bottom: 12px; }
+.order-case-page :is(button, input, select, summary, a):focus-visible { outline: 3px solid #a43b16; outline-offset: 3px; }
+.order-case-service-title { margin: 0 0 20px; padding-bottom: 16px; border-bottom: 1px solid #eee5df; font-size: 1.05rem; }

@@ -15,7 +15,12 @@ interface Props {
 
 type QueryState =
   | { status: 'idle' | 'loading' }
-  | { status: 'ready'; data: MatchingAvailability }
+  | { status: 'ready'; data: MatchingAvailability; staffIds: readonly number[] }
+  | { status: 'error'; message: string };
+
+type StaffChoicesState =
+  | { status: 'idle' | 'loading' }
+  | { status: 'ready'; caseNo: string; filterKey: string; periodStart: string; periodEnd: string; staff: readonly { id: number; name: string }[] }
   | { status: 'error'; message: string };
 
 const subscribeFormalPlanCreation = (listener: () => void) => orderMutationFlowStore.subscribe(listener);
@@ -44,9 +49,21 @@ function hasExactReceiptSegments(
   ));
 }
 
+function choicesErrorMessage(error: unknown): string {
+  if (error instanceof ApiHttpError) {
+    if (error.code === 'matching_preference_source_not_ready') return '月嫂媒合偏好資料尚未備妥，請先在月嫂名冊補齊媒合偏好，再重新查詢。';
+    if (error.code === 'official_service_dates_incomplete') return '服務日期尚未完整，請到「服務安排 → 確認日期」完成日期後再查詢。';
+    if (error.code === 'caregiver_availability_stage_conflict') return '目前案件狀態不允許查詢候選，請重新讀取案件進度，確認目前應辦事項。';
+  }
+  return error instanceof Error ? error.message : '可選月嫂載入失敗。';
+}
+
 /** Present only complete combinations returned by the existing Scheduling owner. */
 export const OrderMultiCaregiverPlanPanel: FC<Props> = ({ caseNo, filters, onObserved, onBusyChange }) => {
   const [segmentCount, setSegmentCount] = useState<2 | 3 | 4>(2);
+  const [selectedStaffIds, setSelectedStaffIds] = useState<number[]>([0, 0]);
+  const [staffChoices, setStaffChoices] = useState<StaffChoicesState>({ status: 'idle' });
+  const [choicesRetry, setChoicesRetry] = useState(0);
   const [query, setQuery] = useState<QueryState>({ status: 'idle' });
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
@@ -55,6 +72,7 @@ export const OrderMultiCaregiverPlanPanel: FC<Props> = ({ caseNo, filters, onObs
   const [error, setError] = useState<string | null>(null);
   const sequence = useRef(0);
   const searchController = useRef<AbortController | null>(null);
+  const choicesController = useRef<AbortController | null>(null);
   const filterKey = JSON.stringify(filters);
   const formalPlanCreation = useSyncExternalStore(
     subscribeFormalPlanCreation,
@@ -64,6 +82,32 @@ export const OrderMultiCaregiverPlanPanel: FC<Props> = ({ caseNo, filters, onObs
     || formalPlanCreation?.status === 'outcome_unknown'
     || formalPlanCreation?.status === 'observation_failed'
     || formalPlanCreation?.status === 'observing';
+
+  useEffect(() => {
+    const controller = new AbortController();
+    choicesController.current = controller;
+    setStaffChoices({ status: 'loading' });
+    setSelectedStaffIds((current) => current.map(() => 0));
+    void matchingCandidateWorkflowClient.searchSegmentedCaregivers(caseNo, 1, [], filters, { signal: controller.signal })
+      .then((data) => {
+        if (choicesController.current !== controller) return;
+        if (data.case_no !== caseNo) throw new Error('可選月嫂查詢案件識別不一致。');
+        const staff = data.candidate_options
+          .filter((candidate) => candidate.segment_index === 0)
+          .map((candidate) => ({ id: candidate.staff_id, name: candidate.staff_name }))
+          .sort((left, right) => left.id - right.id);
+        setStaffChoices({ status: 'ready', caseNo, filterKey, periodStart: data.planned_start_date, periodEnd: data.planned_end_date, staff });
+      })
+      .catch((caught) => {
+        if (choicesController.current === controller && !controller.signal.aborted) {
+          setStaffChoices({ status: 'error', message: choicesErrorMessage(caught) });
+        }
+      });
+    return () => {
+      controller.abort();
+      if (choicesController.current === controller) choicesController.current = null;
+    };
+  }, [caseNo, filters, filterKey, choicesRetry]);
 
   useEffect(() => {
     sequence.current += 1;
@@ -82,8 +126,28 @@ export const OrderMultiCaregiverPlanPanel: FC<Props> = ({ caseNo, filters, onObs
   useEffect(() => { onBusyChange?.(busy); }, [busy, onBusyChange]);
   useEffect(() => () => { onBusyChange?.(false); }, [onBusyChange]);
 
+  const selectStaff = (index: number, staffId: number) => {
+    searchController.current?.abort();
+    searchController.current = null;
+    sequence.current += 1;
+    setQuery({ status: 'idle' });
+    setAttempted(false);
+    setMessage(null);
+    setError(null);
+    setSelectedStaffIds((current) => current.map((id, position) => position === index ? staffId : id));
+  };
+
+  const selected = selectedStaffIds.slice(0, segmentCount);
+  const canSearch = staffChoices.status === 'ready'
+    && staffChoices.caseNo === caseNo
+    && staffChoices.filterKey === filterKey
+    && selected.length === segmentCount
+    && selected.every((id) => id > 0 && staffChoices.staff.some((candidate) => candidate.id === id))
+    && new Set(selected).size === segmentCount;
+
   const search = async () => {
-    if (savingRef.current) return;
+    if (savingRef.current || !canSearch) return;
+    const staffIds = [...selected];
     searchController.current?.abort();
     const controller = new AbortController();
     searchController.current = controller;
@@ -93,9 +157,11 @@ export const OrderMultiCaregiverPlanPanel: FC<Props> = ({ caseNo, filters, onObs
     setMessage(null);
     setError(null);
     try {
-      const data = await matchingCandidateWorkflowClient.searchSegmentedCaregivers(caseNo, segmentCount, [], filters, { signal: controller.signal });
+      const data = await matchingCandidateWorkflowClient.searchSegmentedCaregivers(
+        caseNo, segmentCount, staffIds.map((staff_id) => ({ staff_id })), filters, { signal: controller.signal },
+      );
       if (data.case_no !== caseNo) throw new Error('多月嫂候選查詢案件識別不一致。');
-      if (request === sequence.current && searchController.current === controller) setQuery({ status: 'ready', data });
+      if (request === sequence.current && searchController.current === controller) setQuery({ status: 'ready', data, staffIds });
     } catch (caught) {
       if (request === sequence.current && searchController.current === controller) {
         setQuery({ status: 'error', message: caught instanceof Error ? caught.message : '多月嫂候選查詢失敗。' });
@@ -105,7 +171,8 @@ export const OrderMultiCaregiverPlanPanel: FC<Props> = ({ caseNo, filters, onObs
 
   const create = async (combination: MatchingAvailability['complete_combinations'][number]) => {
     if (savingRef.current || attempted || creationProtected || query.status !== 'ready'
-      || !query.data.complete_combinations.includes(combination) || combination.length !== segmentCount) return;
+      || !query.data.complete_combinations.includes(combination) || combination.length !== segmentCount
+      || !combination.every((segment, index) => segment.segment_index === index && segment.staff_id === query.staffIds[index])) return;
     savingRef.current = true;
     setSaving(true);
     setAttempted(true);
@@ -248,33 +315,109 @@ export const OrderMultiCaregiverPlanPanel: FC<Props> = ({ caseNo, filters, onObs
   };
 
   const combinations = query.status === 'ready'
-    ? query.data.complete_combinations.filter((combination) => combination.length === segmentCount)
+    ? query.data.complete_combinations.filter((combination) => (
+      combination.length === segmentCount
+      && combination.every((segment, index) => segment.segment_index === index && segment.staff_id === query.staffIds[index])
+    ))
     : [];
 
+  const staffName = (staffId: number) => staffChoices.status === 'ready'
+    ? staffChoices.staff.find((candidate) => candidate.id === staffId)?.name ?? '月嫂'
+    : '月嫂';
+
   return (
-    <section aria-label={`案件 ${caseNo} 多月嫂分段方案`}>
+    <section className="order-multi-panel" aria-label={`案件 ${caseNo} 多月嫂分段方案`}>
       <h4>多月嫂接續服務</h4>
-      <p>一位月嫂無法全程承接時，可查詢由多位月嫂接續完成服務的方案。</p>
-      <label>服務分段數
-        <select aria-label="多月嫂服務分段數" value={segmentCount} disabled={busy} onChange={(event) => setSegmentCount(Number(event.target.value) as 2 | 3 | 4)}>
-          <option value={2}>2 段</option><option value={3}>3 段</option><option value={4}>4 段</option>
-        </select>
-      </label>
-      <button type="button" disabled={busy} onClick={() => void search()}>查詢多月嫂完整組合</button>
+      <p>先指定各段月嫂，再由系統查詢可完整銜接的交接日期。</p>
+      <div className="order-multi-setup">
+        <div className="order-multi-setup-heading">
+          <div>
+            <h5>指定接續人選</h5>
+            <p>不必先填交接日；系統會依可服務日期提出完整組合。</p>
+          </div>
+          {staffChoices.status === 'ready' && (
+            <p>案件預計服務期間<br /><strong>{staffChoices.periodStart} ～ {staffChoices.periodEnd}</strong></p>
+          )}
+        </div>
+        <div className={`order-multi-selectors${segmentCount > 2 ? ' many' : ''}`}>
+          <label>服務分段數
+            <select aria-label="多月嫂服務分段數" value={segmentCount} disabled={busy} onChange={(event) => {
+              const count = Number(event.target.value) as 2 | 3 | 4;
+              setSegmentCount(count);
+              setSelectedStaffIds((current) => Array.from({ length: count }, (_, index) => current[index] ?? 0));
+            }}>
+              <option value={2}>2 段</option><option value={3}>3 段</option><option value={4}>4 段</option>
+            </select>
+          </label>
+          {Array.from({ length: segmentCount }, (_, index) => (
+            <label key={index}>第 {index + 1} 段 · {index === 0 ? '先服務' : '接續服務'}
+              <select
+                aria-label={`第 ${index + 1} 段月嫂`}
+                value={selectedStaffIds[index] ?? 0}
+                disabled={busy || staffChoices.status !== 'ready'}
+                onChange={(event) => selectStaff(index, Number(event.target.value))}
+              >
+                <option value={0}>請選擇月嫂</option>
+                {staffChoices.status === 'ready' && staffChoices.staff.map((candidate) => (
+                  <option key={candidate.id} value={candidate.id} disabled={selectedStaffIds.some((id, position) => position !== index && id === candidate.id)}>
+                    {candidate.name}（#{candidate.id}）
+                  </option>
+                ))}
+              </select>
+            </label>
+          ))}
+        </div>
+        <p className="order-multi-hint">各段須選不同月嫂；順序會影響可查到的交接方案。</p>
+        {staffChoices.status === 'loading' && <p role="status">正在載入可選月嫂…</p>}
+        {staffChoices.status === 'error' && (
+          <div role="alert">
+            <p>{staffChoices.message}</p>
+            <button type="button" onClick={() => setChoicesRetry((current) => current + 1)}>重新載入可選月嫂</button>
+          </div>
+        )}
+        {staffChoices.status === 'ready' && staffChoices.staff.length < segmentCount && (
+          <p role="status">目前可選月嫂不足 {segmentCount} 位，請調整媒合條件後再查詢。</p>
+        )}
+        <button className="order-v2-open-drawer" type="button" disabled={busy || !canSearch || creationProtected} onClick={() => void search()}>
+          查詢這 {segmentCount} 位月嫂的完整組合
+        </button>
+      </div>
       {query.status === 'loading' && <p role="status">查詢多月嫂組合中…</p>}
       {query.status === 'error' && <p role="alert">{query.message}</p>}
       {query.status === 'ready' && combinations.length === 0 && (
         <div role="status">
-          <p>目前沒有可完整銜接的 {segmentCount} 段方案，請調整分段數或媒合條件後再查詢。</p>
+          <p>這 {segmentCount} 位月嫂目前沒有可完整銜接的方案，請調整人選、順序或媒合條件後再查詢。</p>
           {query.data.conflicts.map((conflict, index) => <p key={index}>{conflict.work_date} · 月嫂 #{conflict.staff_id ?? '未指定'} · {conflict.reason_code}</p>)}
         </div>
       )}
-      {combinations.map((combination, index) => (
-        <article key={index} aria-label={`完整組合 ${index + 1}`}>
-          {combination.map((segment) => <p key={segment.segment_index}>第 {segment.segment_index + 1} 段 · 月嫂 #{segment.staff_id} · {segment.start_date} → {segment.end_date}</p>)}
-          <button type="button" disabled={busy || attempted || creationProtected} onClick={() => void create(combination)}>以完整組合 {index + 1} 建立正式 {segmentCount} 段方案</button>
-        </article>
-      ))}
+      {combinations.length > 0 && (
+        <div className="order-multi-results">
+          <div className="order-multi-result-heading">
+            <div><h5>可行的交接方案</h5><p>所選月嫂可在案件期間完整銜接。</p></div>
+            <span>找到 {combinations.length} 組</span>
+          </div>
+          <div className="order-multi-cards">
+            {combinations.map((combination, index) => (
+              <article className="order-multi-card" key={index} aria-label={`完整組合 ${index + 1}`}>
+                <div className="order-multi-card-heading"><h6>組合 {index + 1}</h6><span>完整銜接</span></div>
+                <ol>
+                  {combination.map((segment) => (
+                    <li key={segment.segment_index}>
+                      <small>第 {segment.segment_index + 1} 段</small>
+                      <strong>{staffName(segment.staff_id)}（#{segment.staff_id}）</strong>
+                      <span>{segment.start_date} ～ {segment.end_date}</span>
+                    </li>
+                  ))}
+                </ol>
+                <p>交接日：{combination.slice(1).map((segment) => segment.start_date).join('、')} · 不中斷服務</p>
+                <button type="button" disabled={busy || attempted || creationProtected} onClick={() => void create(combination)}>
+                  以完整組合 {index + 1} 建立正式 {segmentCount} 段方案
+                </button>
+              </article>
+            ))}
+          </div>
+        </div>
+      )}
       {saving && <p role="status">建立並回讀正式多月嫂方案中…</p>}
       {message && <p role="status">{message}</p>}
       {error && <p role="alert">{error} 請重新查詢正式狀態後確認，不自動重試。</p>}

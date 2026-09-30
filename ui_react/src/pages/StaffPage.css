@@ -221,13 +221,13 @@
   background: #ffffff;
   border: 1.5px solid #dec0b6;
   border-radius: 16px;
-  padding: 22px;
+  padding: 18px;
   box-shadow: 0 4px 14px rgba(74, 69, 67, 0.06);
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: 1fr auto;
   align-items: start;
-  gap: 20px;
+  gap: 12px;
   transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
 }
 
@@ -338,10 +338,7 @@
 }
 
 .staff-card-pref-summary {
-  background: #fff8f6;
-  border: 1px dashed #dec0b6;
-  border-radius: 10px;
-  padding: 8px 12px;
+  padding: 0;
   font-size: 0.8rem;
   color: #74593f;
   display: flex;
@@ -404,6 +401,13 @@
 .staff-card .staff-avatar-name > div:last-child { min-width: 0; }
 .staff-card .staff-name { overflow-wrap: anywhere; }
 .staff-card .staff-id-badge { white-space: nowrap; flex-shrink: 0; }
+
+.staff-quick-query { color: #74593f; font-size: .82rem; }
+.staff-quick-query > summary { cursor: pointer; padding: 10px 0; font-weight: 650; }
+.staff-quick-query > summary:focus-visible { outline: 3px solid #a83f1d; outline-offset: 3px; }
+.staff-quick-query .staff-query-selector { margin: 4px 0 0; padding: 10px 12px; flex-wrap: wrap; }
+.staff-quick-query label { font-size: .82rem; }
+.staff-quick-query select { min-height: 40px; font-size: .82rem; max-width: 100%; }
 
 .staff-close-btn {
   border: 1px solid #b49388;
@@ -1014,6 +1018,7 @@
 }
 
 @media (max-width: 768px) {
+  .staff-page-header h1 { font-size: 1.5rem; }
   .staff-page-header,
   .staff-section-header {
     align-items: stretch;

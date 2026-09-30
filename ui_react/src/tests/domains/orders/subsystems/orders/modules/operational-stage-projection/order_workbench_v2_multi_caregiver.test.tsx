@@ -16,10 +16,18 @@ const CASE = 'CASE-MULTI-BETA';
 const filters = { region: true, cooking: false, preferred_service_days: true, daily_service_hours: true };
 let created: MatchingPlanSegmentInput[] | null;
 function availability(count: number): MatchingAvailability {
-  return { case_no: CASE, planned_start_date: '2026-09-01', planned_end_date: '2026-09-20', feasibility: 'complete',
-    complete_combinations: [Array.from({ length: count }, (_, index) => ({ segment_index: index, staff_id: 100 + index,
+  return { case_no: CASE, planned_start_date: '2026-09-01', planned_end_date: '2026-09-20', feasibility: count === 1 ? 'partial' : 'complete',
+    complete_combinations: count === 1 ? [] : [Array.from({ length: count }, (_, index) => ({ segment_index: index, staff_id: 100 + index,
       start_date: `2026-09-${String(index * 5 + 1).padStart(2, '0')}`, end_date: `2026-09-${String(index * 5 + 5).padStart(2, '0')}` }))],
-    segment_candidates: [], candidate_options: [], conflicts: [] };
+    segment_candidates: [], candidate_options: count === 1 ? [100, 101, 102, 103].map((staffId) => ({
+      segment_index: 0, staff_id: staffId, staff_name: `月嫂 ${staffId}`,
+      coverage_day_count: 1, available_ranges: [{ start_date: '2026-09-01', end_date: '2026-09-01' }],
+      case_period_start: '2026-09-01', case_period_end: '2026-09-20', required_service_dates: ['2026-09-01'],
+      supported_service_dates: ['2026-09-01'], supported_ranges: [{ start_date: '2026-09-01', end_date: '2026-09-01', service_day_count: 1 }],
+      supported_day_count: 1, required_day_count: 1, full_case_coverage: true,
+      selected_segment_start: '2026-09-01', selected_segment_end: '2026-09-01', full_selected_segment_coverage: true,
+      uncovered_segment_dates: [], source_scheduling_version: 1, filter_results: {},
+    })) : [], conflicts: [] };
 }
 function observed() {
   return { planId: 51, status: 'proposed', activeLockId: null, planVersion: 1,
@@ -33,9 +41,17 @@ function planReceipt(command: { caseNo: string; actor: string; asOf: string; key
     segments: command.segments.map((segment, index) => ({ segment_order: index + 1, staff_id: segment.staff_id,
       assigned_start_date: segment.start_date, assigned_end_date: segment.end_date })) };
 }
-async function search(count = 2) {
+async function selectStaff(count = 2) {
   fireEvent.change(screen.getByLabelText('多月嫂服務分段數'), { target: { value: String(count) } });
-  fireEvent.click(screen.getByRole('button', { name: '查詢多月嫂完整組合' }));
+  await waitFor(() => expect(screen.getByLabelText('第 1 段月嫂').querySelector('option[value="100"]')).not.toBeNull());
+  for (let index = 0; index < count; index += 1) {
+    fireEvent.change(screen.getByLabelText(`第 ${index + 1} 段月嫂`), { target: { value: String(100 + index) } });
+  }
+}
+
+async function search(count = 2) {
+  await selectStaff(count);
+  fireEvent.click(screen.getByRole('button', { name: `查詢這 ${count} 位月嫂的完整組合` }));
   return screen.findByRole('button', { name: `以完整組合 1 建立正式 ${count} 段方案` });
 }
 
@@ -59,7 +75,8 @@ describe('Beta server-owned 多月嫂分段方案', () => {
     const onObserved = vi.fn();
     render(<OrderMultiCaregiverPlanPanel caseNo={CASE} filters={filters} onObserved={onObserved} />);
     const create = await search(count);
-    expect(mocks.search).toHaveBeenCalledWith(CASE, count, [], filters, expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(mocks.search).toHaveBeenCalledWith(CASE, count, Array.from({ length: count }, (_, index) => ({ staff_id: 100 + index })), filters,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }));
     fireEvent.click(create);
     await screen.findByText(new RegExp(`正式 ${count} 段多月嫂方案 #51 已建立並完成回讀`));
     expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({
@@ -74,11 +91,12 @@ describe('Beta server-owned 多月嫂分段方案', () => {
   });
 
   it('partial 查詢不從 segment_candidates 拼湊可建立方案', async () => {
-    mocks.search.mockResolvedValue({ ...availability(2), feasibility: 'partial', complete_combinations: [],
+    mocks.search.mockImplementation(async (_caseNo, count) => count === 1 ? availability(1) : { ...availability(2), feasibility: 'partial', complete_combinations: [],
       segment_candidates: availability(2).complete_combinations[0], conflicts: [{ segment_index: 1, staff_id: 101, work_date: '2026-09-07', reason_code: 'occupied' }] });
     render(<OrderMultiCaregiverPlanPanel caseNo={CASE} filters={filters} />);
-    fireEvent.click(screen.getByRole('button', { name: '查詢多月嫂完整組合' }));
-    await screen.findByText('目前沒有可完整銜接的 2 段方案，請調整分段數或媒合條件後再查詢。');
+    await selectStaff();
+    fireEvent.click(screen.getByRole('button', { name: '查詢這 2 位月嫂的完整組合' }));
+    await screen.findByText('這 2 位月嫂目前沒有可完整銜接的方案，請調整人選、順序或媒合條件後再查詢。');
     expect(screen.queryByRole('button', { name: /建立正式/ })).not.toBeInTheDocument();
     expect(mocks.create).not.toHaveBeenCalled();
   });
@@ -114,11 +132,63 @@ describe('Beta server-owned 多月嫂分段方案', () => {
     expect(mocks.create).not.toHaveBeenCalled();
   });
 
+  it('必須依序選不同月嫂；換人後舊組合不可建立', async () => {
+    render(<OrderMultiCaregiverPlanPanel caseNo={CASE} filters={filters} />);
+    const searchButton = screen.getByRole('button', { name: '查詢這 2 位月嫂的完整組合' });
+    await waitFor(() => expect(screen.getByLabelText('第 1 段月嫂').querySelector('option[value="100"]')).not.toBeNull());
+    expect(searchButton).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('第 1 段月嫂'), { target: { value: '100' } });
+    expect(screen.getByLabelText('第 2 段月嫂').querySelector('option[value="100"]')).toBeDisabled();
+    expect(searchButton).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('第 2 段月嫂'), { target: { value: '101' } });
+    expect(searchButton).toBeEnabled();
+    fireEvent.click(searchButton);
+    await screen.findByRole('button', { name: '以完整組合 1 建立正式 2 段方案' });
+    fireEvent.change(screen.getByLabelText('第 1 段月嫂'), { target: { value: '102' } });
+    expect(screen.queryByRole('button', { name: /以完整組合/ })).not.toBeInTheDocument();
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+
+  it('先後人選對調時，查詢草稿保留使用者選定的順序', async () => {
+    mocks.search.mockImplementation(async (_caseNo, count) => count === 1 ? availability(1) : {
+      ...availability(2), complete_combinations: [[
+        { segment_index: 0, staff_id: 101, start_date: '2026-09-01', end_date: '2026-09-10' },
+        { segment_index: 1, staff_id: 100, start_date: '2026-09-11', end_date: '2026-09-20' },
+      ]],
+    });
+    render(<OrderMultiCaregiverPlanPanel caseNo={CASE} filters={filters} />);
+    await waitFor(() => expect(screen.getByLabelText('第 1 段月嫂').querySelector('option[value="101"]')).not.toBeNull());
+    fireEvent.change(screen.getByLabelText('第 1 段月嫂'), { target: { value: '101' } });
+    fireEvent.change(screen.getByLabelText('第 2 段月嫂'), { target: { value: '100' } });
+    fireEvent.click(screen.getByRole('button', { name: '查詢這 2 位月嫂的完整組合' }));
+    await screen.findByRole('button', { name: '以完整組合 1 建立正式 2 段方案' });
+    expect(mocks.search).toHaveBeenCalledWith(CASE, 2, [{ staff_id: 101 }, { staff_id: 100 }], filters,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }));
+  });
+
+  it('伺服器回傳不符指定人選的組合不顯示為可建立方案', async () => {
+    mocks.search.mockImplementation(async (_caseNo, count) => count === 1 ? availability(1) : {
+      ...availability(2), complete_combinations: [[
+        { segment_index: 0, staff_id: 103, start_date: '2026-09-01', end_date: '2026-09-10' },
+        { segment_index: 1, staff_id: 101, start_date: '2026-09-11', end_date: '2026-09-20' },
+      ]],
+    });
+    render(<OrderMultiCaregiverPlanPanel caseNo={CASE} filters={filters} />);
+    await selectStaff();
+    fireEvent.click(screen.getByRole('button', { name: '查詢這 2 位月嫂的完整組合' }));
+    await screen.findByText('這 2 位月嫂目前沒有可完整銜接的方案，請調整人選、順序或媒合條件後再查詢。');
+    expect(screen.queryByRole('button', { name: /以完整組合/ })).not.toBeInTheDocument();
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+
   it('切換案件後舊查詢晚回來不能成為新案件的可操作組合', async () => {
     let resolve!: (data: MatchingAvailability) => void;
-    mocks.search.mockImplementationOnce(() => new Promise<MatchingAvailability>((done) => { resolve = done; }));
+    mocks.search.mockImplementation((_caseNo, count) => count === 1
+      ? Promise.resolve(availability(1))
+      : new Promise<MatchingAvailability>((done) => { resolve = done; }));
     const view = render(<OrderMultiCaregiverPlanPanel caseNo={CASE} filters={filters} />);
-    fireEvent.click(screen.getByRole('button', { name: '查詢多月嫂完整組合' }));
+    await selectStaff();
+    fireEvent.click(screen.getByRole('button', { name: '查詢這 2 位月嫂的完整組合' }));
     view.rerender(<OrderMultiCaregiverPlanPanel caseNo="CASE-OTHER" filters={filters} />);
     await act(async () => { resolve(availability(2)); });
     expect(screen.queryByRole('button', { name: /以完整組合/ })).not.toBeInTheDocument();

@@ -75,9 +75,9 @@ Modules 必須是純函式，不讀 DB、不取得現在時間、不 import API�
 
 ### 3.2 Matching 語意
 
-- 偏好只影響媒合排序與 explanation，不是接案資格或硬性排除條件。filter checkbox 僅控制本次 Query 是否將該偏好納入排序權重／說明，不得因此移除 selectable candidate。
+- 正式媒合中的偏好只影響排序與 explanation，不是接案資格或硬性排除條件；正式媒合 Query 的 checkbox 不得因此移除 selectable candidate。營運工作台「新增候選月嫂」的初步詢問 Query 例外：勾選「偏好服務日」（比對 `orders.service_days`）或「每日服務時數」（比對 `orders.service_hours_per_day`）時，已填案件需求須與月嫂已登錄的對應偏好相符才列入查詢結果；未填案件需求不套用該項篩選。此篩選不改變加入／聯絡時的檔期 fresh-read 或正式媒合資格。
 - integer target 落在月嫂 `[minimum, maximum]` 內，或存在於 integer set 內，為 `matched`；否則 `not_matched`。
-- 月嫂未設定啟用中的偏好時為 `source_not_ready`；仍可列為 selectable，但排序不得把未知值當成 matched，UI 必須明示尚未登錄。
+- 月嫂未設定啟用中的偏好時為 `source_not_ready`；正式媒合仍可列為 selectable，但排序不得把未知值當成 matched，UI 必須明示尚未登錄。初步詢問若啟用該項已填需求的篩選，則不列入查詢結果。
 - Query 回傳 definition identity／version、顯示名稱、target、staff value、result 與 reason code；UI 不解析中文名稱決定規則。
 - Query 結果綁定 Staff preference、Orders 與 Scheduling source versions；選擇或 Apply 前必須 fresh recheck。
 - 單純 `not_matched` 或 `source_not_ready` 不得投影 `SCHEDULE-005` 或任何硬性異常；只有偏好 root 本身違反 schema/version invariant，或正式 assignment／不可服務期間等其他 owner root 衝突時，才由其對應 anomaly code 處理。

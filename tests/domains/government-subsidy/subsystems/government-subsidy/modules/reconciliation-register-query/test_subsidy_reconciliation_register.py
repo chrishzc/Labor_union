@@ -177,11 +177,11 @@ def test_operations_report_annual_rows_select_current_and_prior_year_carry_in_wi
 
     general_rows = result["general_citizen_rows"]
     assert [row["市府訂單號碼"] for row in general_rows] == ["114000003", "115000001"]
-    assert [row["核銷月份"] for row in general_rows] == ["第二季", "第一季"]
+    assert [row["核銷月份"] for row in general_rows] == ["2026年第二季", "2026年第一季"]
     assert general_rows[0]["核銷狀態"] == "結案"
     subsidized_rows = result["subsidized_citizen_rows"]
     assert [row["市府訂單號碼"] for row in subsidized_rows] == ["115000002"]
-    assert subsidized_rows[0]["核銷月份"] == "第一季"
+    assert subsidized_rows[0]["核銷月份"] == "2027年第一季"
     sql, params = connection.cursor_instance.executed[0]
     assert "subsidy_claim_batches" not in sql
     assert "current_revision" not in sql
@@ -201,11 +201,11 @@ def test_operations_report_annual_rows_select_current_and_prior_year_carry_in_wi
 
 
 def test_operations_report_reconciliation_period_uses_service_end_quarter():
-    assert register._operations_reconciliation_period(date(2026, 3, 31)) == (2026, "第一季")
-    assert register._operations_reconciliation_period(date(2026, 4, 1)) == (2026, "第二季")
-    assert register._operations_reconciliation_period(date(2026, 7, 1)) == (2026, "第三季")
-    assert register._operations_reconciliation_period(date(2026, 10, 1)) == (2026, "第四季")
-    assert register._operations_reconciliation_period(date(2027, 1, 1)) == (2027, "第一季")
+    assert register._operations_reconciliation_period(date(2026, 3, 31)) == (2026, "2026年第一季")
+    assert register._operations_reconciliation_period(date(2026, 4, 1)) == (2026, "2026年第二季")
+    assert register._operations_reconciliation_period(date(2026, 7, 1)) == (2026, "2026年第三季")
+    assert register._operations_reconciliation_period(date(2026, 10, 1)) == (2026, "2026年第四季")
+    assert register._operations_reconciliation_period(date(2027, 1, 1)) == (2027, "2027年第一季")
 
 
 def test_invalid_quarter_is_rejected_before_database_access(monkeypatch):

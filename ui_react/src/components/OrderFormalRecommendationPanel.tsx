@@ -199,6 +199,11 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
   const currentSegments = current?.plan.segments ?? [];
   const canCreate = active.status === 'ready' && (current === null
     || (current.plan.activeLockId === null && current.plan.status === 'proposed' && current.contact.customer_decision !== 'accepted'));
+  useEffect(() => {
+    if (canCreate && candidates.status === 'idle') void loadCandidates();
+    // Read candidates once when the current plan allows a recommendation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canCreate, candidates.status]);
   const canCommunicate = current !== null && current.plan.activeLockId === null
     && current.contact.plan.status === 'proposed' && current.contact.customer_decision === 'pending';
   const confirmationPreviewEligible = current !== null && canCommunicate && current.contact.all_willing

@@ -59,18 +59,6 @@ function coreQueryErrorMessage(error: unknown): string {
   return `${ORDER_CORE_STAGE_PROJECTION_UNAVAILABLE} 原因：${detail}`;
 }
 
-function drawerActionLabel(scope: OrderWorkbenchScope, stage: CoreStageCode | undefined): string {
-  if (scope !== 'in_progress') return '查看案件紀錄';
-  if (stage === 'matching_pool') return '處理：建立候選池';
-  if (stage === 'caregiver_line_delivery' || stage === 'caregiver_willingness_reply') return '處理：聯絡月嫂';
-  if (stage === 'formal_recommendation') return '處理：推薦給客戶';
-  if (stage === 'external_signing_dispatch' || stage === 'external_signing_completion') return '處理：契約簽署';
-  if (stage === 'confirmed_service_dates') return '處理：確認服務日期';
-  if (stage === 'formal_service') return '處理：排班與服務';
-  if (stage === 'service_completion') return '處理：完工確認';
-  return '開啟案件工作';
-}
-
 export const OrderWorkbenchV2Page: FC = () => {
   const [view, setView] = useState<OrderCoreStageWorkbenchViewModel | null>(null);
   const [loading, setLoading] = useState(true);
@@ -90,7 +78,6 @@ export const OrderWorkbenchV2Page: FC = () => {
   const [selectedDrawer, setSelectedDrawer] = useState<{
     caseNo: string;
     branchType: CoreStageBranchType;
-    initialView?: 'work' | 'data';
   } | null>(null);
   const requestSequence = useRef(0);
   const lastResolvedQuery = useRef<string | null>(null);
@@ -208,6 +195,7 @@ export const OrderWorkbenchV2Page: FC = () => {
   const selectedDefinition = selectedStage === null ? null : coreStageDefinition(selectedStage);
   const selectedStageCount = selectedStage === null ? view?.items.length ?? 0 : view?.stageCounts[selectedStage] ?? 0;
   const displayedCount = displayedItems.length;
+  const clearFilters = () => { setSearch(''); setSelectedStage(null); };
 
   const selectScope = (scope: OrderWorkbenchScope) => {
     setWorkbenchScope(scope);
@@ -228,7 +216,6 @@ export const OrderWorkbenchV2Page: FC = () => {
           caseNo={selectedDrawer.caseNo}
           branchType={selectedDrawer.branchType}
           workbenchScope={workbenchScope}
-          initialView={selectedDrawer.initialView}
           onClose={closeDrawer}
           onObserved={refreshProjection}
         />
@@ -253,6 +240,7 @@ export const OrderWorkbenchV2Page: FC = () => {
               placeholder="搜尋案件編號或姓名"
             />
           </label>
+          {search && <button type="button" className="tracker-reload-button" onClick={() => setSearch('')}>清除搜尋</button>}
           <button className="tracker-reload-button" type="button" disabled={loading || refreshing} onClick={refreshProjection}>
             重新整理
           </button>
@@ -270,6 +258,18 @@ export const OrderWorkbenchV2Page: FC = () => {
       </nav>
 
       {workbenchScope === 'in_progress' && (
+        <>
+        <label className="order-v2-stage-select">
+          作業階段
+          <select value={selectedStage ?? 'all'} onChange={(event) => selectStage(event.target.value === 'all' ? null : event.target.value as CoreStageCode)}>
+            <option value="all">全部進行中</option>
+            {CORE_STAGE_DEFINITIONS.map((definition) => (
+              <option key={definition.code} value={definition.code}>
+                {definition.ordinal}. {definition.shortLabel}（{view?.stageCounts[definition.code] ?? 0}）
+              </option>
+            ))}
+          </select>
+        </label>
         <section className="pipeline-stepper-nav order-v2-stage-strip" aria-label="13 個核心訂單階段">
           <button type="button" className={`pipeline-step-pill ${selectedStage === null ? 'active' : ''}`}
             aria-pressed={selectedStage === null} onClick={() => selectStage(null)}>全部進行中</button>
@@ -282,7 +282,7 @@ export const OrderWorkbenchV2Page: FC = () => {
               <span className="pipeline-step-badge">{view?.stageCounts[definition.code] ?? 0}</span>
             </button>
           ))}
-        </section>
+        </section></>
       )}
 
       <section className="pipeline-stage-section order-v2-results" aria-label="案件工作清單">
@@ -301,10 +301,15 @@ export const OrderWorkbenchV2Page: FC = () => {
         </div>
         <div className="order-v2-result-count" aria-live="polite">
           顯示 <strong>{displayedCount}</strong>
-          <span>／ {selectedStage === null ? displayedCount : selectedStageCount} 筆</span>
+          <span>／ {selectedStageCount} 筆</span>
         </div>
       </div>
 
+      {(search || selectedStage) && (
+        <div className="order-v2-subfilters" aria-label="待辦篩選">
+          <button type="button" onClick={clearFilters}>清除篩選</button>
+        </div>
+      )}
       {summaryQueryFailed && !loading && !error && (
         <div className="order-v2-summary-warning" role="status">
           案件摘要查詢失敗；案件分類仍可查閱，但客戶、日期與月嫂摘要暫時不可用。
@@ -320,6 +325,7 @@ export const OrderWorkbenchV2Page: FC = () => {
         <div className="stage-empty-state">
           <span className="stage-empty-icon" aria-hidden="true">☕</span>
           <strong className="stage-empty-text">目前沒有符合條件的案件。</strong>
+          {(search || selectedStage) && <button type="button" className="tracker-reload-button" onClick={clearFilters}>清除搜尋與篩選</button>}
           <span className="stage-empty-hint">{workbenchScope === 'in_progress' ? '可切換作業階段，或調整搜尋與篩選條件。' : '可調整搜尋條件，或切換訂單分類。'}</span>
         </div>
       )}
@@ -330,8 +336,26 @@ export const OrderWorkbenchV2Page: FC = () => {
             const summary = summaryIndex.get(item.id) ?? null;
             const stage = item.currentStage;
             const primaryNotice = item.blockers[0] ?? item.warnings[0] ?? null;
+            const entryDisabled = refreshing || error !== null;
+            const openWork = () => {
+              if (!entryDisabled) setSelectedDrawer({ caseNo: item.id, branchType: item.branchType });
+            };
             return (
-              <article className="order-card" key={item.id}>
+              <article
+                className="order-card order-v2-case-entry"
+                key={item.id}
+                role="button"
+                tabIndex={entryDisabled ? -1 : 0}
+                aria-label={`開啟案件 ${item.id} 案件處理`}
+                aria-disabled={entryDisabled}
+                onClick={openWork}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    openWork();
+                  }
+                }}
+              >
                 <div className="order-v2-card-primary">
                   <div className="order-card-top">
                     <strong className="order-id-badge">{item.id}</strong>
@@ -380,16 +404,7 @@ export const OrderWorkbenchV2Page: FC = () => {
                       {item.blockers.length + item.warnings.length > 1 && <small>另有 {item.blockers.length + item.warnings.length - 1} 項，請在案件工作中查看。</small>}
                     </div>
                   )}
-                  <div className="order-v2-card-footer">
-                  <button type="button" className="order-v2-view-data" onClick={() => setSelectedDrawer({ caseNo: item.id, branchType: item.branchType, initialView: 'data' })}>查看資料</button>
-                  <button
-                    type="button"
-                    className="btn-primary-action order-v2-open-work"
-                    onClick={() => setSelectedDrawer({ caseNo: item.id, branchType: item.branchType })}
-                  >
-                    {drawerActionLabel(workbenchScope, stage?.code)}
-                  </button>
-                  </div>
+                  <span className="order-v2-card-open-hint" aria-hidden="true">開啟案件處理 →</span>
                 </div>
               </article>
             );

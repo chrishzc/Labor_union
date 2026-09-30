@@ -1060,22 +1060,30 @@ export const StaffPage: React.FC = () => {
         </div>
         <div className="staff-filter-pills-row">
           <span className="staff-directory-count" role="status">
-            目前已載入 {directory.items.length} 位服務人員
+            {searchQuery.trim()
+              ? directorySearch.status === 'loading' || directorySearch.status === 'idle'
+                ? '搜尋中…'
+                : directorySearch.status === 'error'
+                  ? '搜尋未完成'
+                  : `搜尋結果 ${filteredStaffItems.length} 位服務人員`
+              : `目前已載入 ${directory.items.length} 位服務人員`}
           </span>
-          <div className="staff-query-selector" data-surface-id="staff.selector" style={{ margin: 0, padding: '4px 10px' }}>
-            <label htmlFor="staff-query-staff" style={{ fontSize: '0.82rem', fontWeight: 600 }}>查詢服務人員</label>
+          <details className="staff-quick-query">
+            <summary>快速查詢資格主檔</summary>
+          <div className="staff-query-selector" data-surface-id="staff.selector">
+            <label htmlFor="staff-query-staff">查詢服務人員</label>
             <select
               id="staff-query-staff"
               data-control-id="staff.selector.staff"
               disabled={interactionLocked || selectedStaff !== null}
               value={selectedStaffId ?? ''}
               onChange={(event) => changeSelectedStaff(event.target.value)}
-              style={{ minHeight: '32px', fontSize: '0.82rem' }}
             >
               <option value="">請選擇服務人員</option>
               {staffItems.map((staff) => <option key={staff.id} value={staff.id}>{staff.displayName}（#{staff.id}）</option>)}
             </select>
           </div>
+          </details>
         </div>
       </div>
 
@@ -1165,7 +1173,7 @@ export const StaffPage: React.FC = () => {
                   </div>
 
                   <div className="staff-card-pref-summary" data-surface-id={`staff.card.case-preference.${staff.id}`}>
-                    {selectedStaffId !== staff.id && <span>🎯 選取後載入接案偏好摘要</span>}
+                    {selectedStaffId !== staff.id && <span>完整資格 · 接案偏好 · 任職狀態</span>}
                     {selectedStaffId === staff.id && casePreferenceSummary.status === 'idle' && <span>🎯 接案偏好摘要待查詢</span>}
                     {selectedStaffId === staff.id && casePreferenceSummary.status === 'loading' && <span role="status">🎯 正在載入接案偏好摘要…</span>}
                     {selectedStaffId === staff.id && casePreferenceSummary.status === 'error' && <span>🎯 接案偏好目前無法讀取</span>}

@@ -1,5 +1,6 @@
 """Unknown cooking is not false; explicitly disabling that filter remains usable."""
 from copy import deepcopy
+from decimal import Decimal
 
 import pytest
 
@@ -52,7 +53,10 @@ def test_initial_inquiry_without_beclass_or_official_dates_preserves_source():
     facts = Facts()
     facts.data["confirmed_service_dates"] = []
     before = deepcopy(facts.data)
-    result = search_candidate_inquiry_availability("INQUIRY-1", [], "2026-10-01", facts)
+    result = search_candidate_inquiry_availability(
+        "INQUIRY-1", [], "2026-10-01", facts,
+        filter_policy={"preferred_service_days": False, "daily_service_hours": False},
+    )
     assert result["candidate_options"][0]["full_case_coverage"] is True
     assert result["candidate_options"][0]["required_service_dates"] == ["2026-10-05"]
     assert facts.data == before
@@ -63,16 +67,69 @@ def test_initial_inquiry_without_beclass_or_official_dates_preserves_source():
 def test_initial_inquiry_still_rejects_occupied_planned_days():
     facts = Facts(occupied=True)
     facts.data["confirmed_service_dates"] = []
-    result = search_candidate_inquiry_availability("INQUIRY-1", [], "2026-10-01", facts)
-    assert not any(item["full_case_coverage"] for item in result["candidate_options"])
+    result = search_candidate_inquiry_availability(
+        "INQUIRY-1", [], "2026-10-01", facts,
+        filter_policy={"preferred_service_days": False, "daily_service_hours": False},
+    )
+    assert len(result["candidate_options"]) == 1
+    assert result["candidate_options"][0]["full_case_coverage"] is False
 
 
 def test_initial_inquiry_keeps_known_cooking_filter():
     facts = Facts()
     facts.data["confirmed_service_dates"] = []
     facts.data["order"]["requires_cooking"] = True
-    result = search_candidate_inquiry_availability("INQUIRY-1", [], "2026-10-01", facts)
+    result = search_candidate_inquiry_availability(
+        "INQUIRY-1", [], "2026-10-01", facts,
+        filter_policy={"preferred_service_days": False, "daily_service_hours": False},
+    )
     assert result["candidate_options"] == []
+
+
+def test_inquiry_preference_checkboxes_filter_known_requirements_only():
+    facts = Facts()
+    facts.data["order"].update({"service_days": 1, "service_hours_per_day": Decimal("8.0")})
+
+    def staff(staff_id, minimum_days, hours):
+        return {
+            "id": staff_id,
+            "name": f"月嫂{staff_id}",
+            "matching_preferences": {
+                "preferred_service_days": {
+                    "order_fact_key": "service_days",
+                    "comparison_operator": "range_with_tolerance",
+                    "value": {"minimum": minimum_days, "maximum": minimum_days},
+                },
+                "daily_service_hours": {
+                    "order_fact_key": "service_hours_per_day",
+                    "comparison_operator": "contains_integer",
+                    "value": {"values": [hours]},
+                },
+            },
+        }
+
+    facts.data["staff_rows"] = [
+        staff(3, 1, 8), staff(4, 2, 8), staff(5, 1, 12),
+        {"id": 6, "name": "未登錄偏好的月嫂"},
+    ]
+
+    def matching_ids(*, days, hours):
+        result = search_candidate_inquiry_availability(
+            "INQUIRY-1", [], "2026-10-01", facts,
+            filter_policy={
+                "region": False, "cooking": False,
+                "preferred_service_days": days, "daily_service_hours": hours,
+            },
+        )
+        return [item["staff_id"] for item in result["candidate_options"]]
+
+    assert matching_ids(days=True, hours=True) == [3]
+    assert matching_ids(days=False, hours=True) == [3, 4]
+    assert matching_ids(days=True, hours=False) == [3, 5]
+    assert matching_ids(days=False, hours=False) == [3, 4, 5, 6]
+
+    facts.data["order"]["service_hours_per_day"] = None
+    assert matching_ids(days=True, hours=True) == [3, 5]
 
 
 def test_candidate_pool_fresh_check_uses_inquiry_not_official_dates(monkeypatch):

@@ -13,7 +13,7 @@
   - `subsystems/case_import/hcm_adapter.py`
   - `scripts/imports/import_client_hcm.py`
   - `domains/case_import/client_import_validation.py`
-  - `domains/case_import/hcm_import_review.py`
+  - `domains/case_import/hcm_import_review.py` — 依最新正式 root values 逐欄判定 current 警示；名冊修正有效後自動解除，來源歷史保持不變。
   - `subsystems/case_import/hcm_resubmission_workflow.py`
   - `infrastructure/mysql/hcm_resubmission_repository.py`
 - entrypoints:
@@ -25,6 +25,7 @@
     - `loadCurrentHcmReviewsForCases` — 以既有 current review 分頁查詢讀取指定案件的最新欄位問題；支援取消，不寫入或重新判定問題是否解除。
 
 ## Dependencies
+- outbound: `clients/client-profile/profile-change` — current 欄位警示沿用 Client Profile 正式驗證與名冊允許值；Query 不呼叫 writer。
 - outbound: `orders` — HCM reconciliation 只透過 Case Import typed boundary 補入已授權 Orders facts。
 - inbound: `case-import/case-import` — authenticated HCM workbook intake。
 

@@ -776,7 +776,7 @@ def _case_application_roc_year(case_no: str) -> int | None:
 
 def _operations_reconciliation_period(service_end: date) -> tuple[int, str]:
     quarter_index = (service_end.month - 1) // 3
-    return service_end.year, RECONCILIATION_QUARTER_LABELS[quarter_index]
+    return service_end.year, f"{service_end.year}年{RECONCILIATION_QUARTER_LABELS[quarter_index]}"
 
 
 def build_combined_subsidy_register(

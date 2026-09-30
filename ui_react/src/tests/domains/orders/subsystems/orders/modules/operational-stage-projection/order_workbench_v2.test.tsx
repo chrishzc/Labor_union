@@ -288,6 +288,29 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
     expect(within(card).queryByText(/阻塞 · 客戶端結算/)).not.toBeInTheDocument();
   });
 
+  it('移除阻塞篩選，搜尋清除後保留所有案件與卡片阻塞原因', async () => {
+    clientMocks.loadSummaries.mockResolvedValue(summaryPage([]));
+    clientMocks.getCoreStageTimelines.mockResolvedValue(corePage([
+      timeline('CASE-BLOCKED', 'matching_pool', 'blocked', { blockers: [{ code: 'needs_data', message: '資料待補' }] }),
+      timeline('CASE-OPEN', 'matching_pool'),
+    ], { stageCounts: { matching_pool: 2 } }));
+    render(<OrderWorkbenchV2Page />);
+    await screen.findByText('CASE-OPEN');
+    const count = document.querySelector('.order-v2-result-count')!;
+    fireEvent.change(screen.getByRole('textbox', { name: '搜尋案件編號或姓名' }), { target: { value: 'CASE-OPEN' } });
+    expect(count).toHaveTextContent('顯示 1／ 2 筆');
+    fireEvent.click(screen.getByRole('button', { name: '清除篩選' }));
+    expect(screen.getByText('CASE-OPEN')).toBeInTheDocument();
+    expect(count).toHaveTextContent('顯示 2／ 2 筆');
+    expect(screen.getByText('CASE-BLOCKED')).toBeInTheDocument();
+    expect(within(cardFor('CASE-BLOCKED')).getByText('資料待補')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /有阻塞/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '全部案件' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '開啟案件 CASE-OPEN 案件處理' })).toBe(cardFor('CASE-OPEN'));
+    expect(within(cardFor('CASE-OPEN')).queryByRole('button')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('案件顯示方式')).not.toBeInTheDocument();
+  });
+
   it('保留正式階段總數與案件摘要，不再提供已移除的小狀態篩選', async () => {
     clientMocks.loadSummaries.mockResolvedValue(summaryPage([
       orderSummary('CASE-PLAN-1', '林小芳', null, '2026-10-01', '2026-10-20'),

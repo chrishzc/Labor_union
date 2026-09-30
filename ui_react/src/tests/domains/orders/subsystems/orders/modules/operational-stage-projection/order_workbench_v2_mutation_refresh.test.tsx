@@ -53,7 +53,7 @@ async function selectStage(code: CoreStageCode) {
   const strip = screen.getByRole('region', { name: '13 個核心訂單階段' });
   fireEvent.click(within(strip).getAllByRole('button')[CORE_STAGE_CODES.indexOf(code) + 1]!);
   const card = (await screen.findByText('CASE-REFRESH')).closest('article')!;
-  fireEvent.click(within(card).getAllByRole('button').at(-1)!);
+  fireEvent.click(card);
   return (await screen.findAllByLabelText('整合測試面板草稿'))[0]!;
 }
 
@@ -66,6 +66,29 @@ describe('Beta owner mutation 到清單與階段的完整 callback 接線', () =
       if (query.stage === undefined) result.substatus_counts = {};
       return result;
     });
+  });
+
+  it('清單更新中或更新失敗時，點擊與鍵盤都不能開啟舊案件卡', async () => {
+    render(<OrderWorkbenchV2Page />);
+    const card = await screen.findByRole('button', { name: '開啟案件 CASE-REFRESH 案件處理' });
+    let reject!: (reason: Error) => void;
+    mocks.core.mockImplementationOnce(() => new Promise((_, fail) => { reject = fail; }));
+    fireEvent.click(screen.getByRole('button', { name: '重新整理' }));
+    await waitFor(() => expect(card).toHaveAttribute('aria-disabled', 'true'));
+    expect(card).toHaveAttribute('tabindex', '-1');
+    fireEvent.click(card);
+    fireEvent.keyDown(card, { key: 'Enter' });
+    fireEvent.keyDown(card, { key: ' ' });
+    expect(screen.queryByLabelText('整合測試面板草稿')).not.toBeInTheDocument();
+    await act(async () => { reject(new Error('query unavailable')); });
+    await screen.findByRole('alert');
+    expect(card).toHaveAttribute('aria-disabled', 'true');
+    fireEvent.click(card);
+    expect(screen.queryByLabelText('整合測試面板草稿')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '重新整理' }));
+    await waitFor(() => expect(card).toHaveAttribute('aria-disabled', 'false'));
+    fireEvent.click(card);
+    expect(await screen.findByLabelText('整合測試面板草稿')).toBeInTheDocument();
   });
 
   it.each<CoreStageCode>([
@@ -103,7 +126,7 @@ describe('Beta owner mutation 到清單與階段的完整 callback 接線', () =
 
   it('Drawer 內成功 callback 更新清單及摘要而不關閉或重建 Drawer', async () => {
     render(<OrderWorkbenchV2Page />); await screen.findByText('CASE-REFRESH');
-    fireEvent.click(screen.getByRole('button', { name: '開啟案件工作' }));
+    fireEvent.click(screen.getByRole('button', { name: '開啟案件 CASE-REFRESH 案件處理' }));
     const input = await screen.findByLabelText('整合測試面板草稿');
     fireEvent.change(input, { target: { value: 'Drawer 保留' } });
     const queries = mocks.core.mock.calls.length; const summaries = mocks.summaries.mock.calls.length;
@@ -136,7 +159,7 @@ describe('Beta owner mutation 到清單與階段的完整 callback 接線', () =
     expect(within(card).getByText('排班資料不可用')).toBeInTheDocument();
     expect(await within(card).findByText('2026-09-21 ~ 2026-10-30')).toBeInTheDocument();
     expect(within(card).queryByText(/實際服務/)).not.toBeInTheDocument();
-    fireEvent.click(within(card).getByRole('button', { name: '處理：排班與服務' }));
+    fireEvent.click(card);
 
     const after = page('formal_service');
     after.substatus_counts = {};

@@ -49,6 +49,21 @@ describe('Staff roster profile flow', () => {
     });
   });
 
+  it('shows the search result count and restores the loaded count after clearing an empty search', async () => {
+    vi.mocked(staffDirectoryClient.queryPage).mockResolvedValue({ ...STAFF_PAGE_ONE, next_cursor: null });
+    render(<StaffPage />);
+    await screen.findByText('去敏人員甲');
+    const initialCount = document.querySelector('.staff-directory-count')?.textContent;
+    expect(document.querySelector('.staff-quick-query')).not.toHaveAttribute('open');
+    fireEvent.change(screen.getByLabelText('即時搜尋月嫂'), { target: { value: '沒有符合的人員' } });
+    await screen.findByText('搜尋結果 0 位服務人員');
+    expect(document.querySelector('.staff-grid')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '✕ 清除搜尋' }));
+    expect(document.querySelector('.staff-directory-count')?.textContent).toBe(initialCount);
+    expect(screen.getByText('去敏人員甲')).toBeInTheDocument();
+    expect(staffProfileClient.query).not.toHaveBeenCalled();
+  });
+
   it('shows complete identity, contact facts, bank accounts, and canonical certifications', async () => {
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());

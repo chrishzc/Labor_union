@@ -156,7 +156,7 @@ function card(): HTMLElement {
 async function openTermsPanel(): Promise<HTMLElement> {
   render(<OrderWorkbenchV2Page />);
   await waitFor(() => expect(screen.getByText('CASE-TERMS')).toBeInTheDocument());
-  fireEvent.click(within(card()).getByRole('button', { name: '開啟案件工作' }));
+  fireEvent.click(card());
 
   const dialog = await screen.findByRole('region', { name: '案件 CASE-TERMS' });
   const panel = within(dialog).getByRole('heading', { name: '進件條款預覽與套用' }).closest('section');
@@ -287,7 +287,7 @@ describe('待辦看板 Beta 第 1 階訂單條款操作', () => {
     await waitFor(() => expect(mocks.queryTerms).toHaveBeenCalledWith('CASE-TERMS'));
     expect(await within(panel).findByText(/條款已套用並完成正式回讀；Order version 13，合約服務 21 日。/)).toBeInTheDocument();
     expect(within(panel).getByLabelText('Beta 服務天數')).toHaveValue(21);
-    await screen.findByText('各項工作依自己的正式資料判斷，不要求照編號依序辦理。');
+    await screen.findByText('依目前進度開啟工作，也可切換其他事項。');
     expect(panel).toBeVisible();
     expect(screen.getByRole('button', { name: /1 進件資料 可辦理/ })).toHaveAttribute('aria-current', 'page');
   });

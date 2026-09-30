@@ -81,7 +81,7 @@ const SubsidyPartitionsView: React.FC<{
           <td>{row.serviceDays}</td><td>{row.amount}</td><td>{row.unitPrice}</td><td>{row.employer}</td><td>{row.staff}</td>
         </tr>)}</tbody>
       </table> : <table className="reports-table" aria-label={`${partition.kind === 'general' ? '一般市民' : '補助市民'}補助案件統計明細`}>
-        <thead><tr><th>序號</th><th aria-label="案件編號" /><th aria-label="年度與身分" /><th>年度接案</th><th>訂單號碼</th><th>起日</th><th>訖日</th><th>補助時數</th><th>補助天數</th><th>備註</th><th>補助款金額</th><th>單價</th><th>結案/核銷</th><th>核銷月份</th></tr></thead>
+        <thead><tr><th>序號</th><th aria-label="案件編號" /><th aria-label="年度與身分" /><th>年度接案</th><th>訂單號碼</th><th>起日</th><th>訖日</th><th>補助時數</th><th>補助天數</th><th>備註</th><th>補助款金額</th><th>單價</th><th>結案/核銷</th><th>年度季度</th></tr></thead>
         <tbody>{partition.rows.map((row) => {
           if (!('annualIdentity' in row)) throw new Error('Weekly subsidy row is missing workbook fields.');
           return <tr key={`${partition.kind}-${row.serial}-${row.caseNo}`}>

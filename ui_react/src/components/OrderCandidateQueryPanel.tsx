@@ -55,6 +55,11 @@ const FILTER_OPTIONS: readonly {
 ];
 
 function errorMessage(error: unknown, fallback: string): string {
+  if (error instanceof ApiHttpError) {
+    if (error.code === 'matching_preference_source_not_ready') return '月嫂媒合偏好資料尚未備妥，請先在月嫂名冊補齊媒合偏好，再重新查詢。';
+    if (error.code === 'official_service_dates_incomplete') return '服務日期尚未完整，請到「服務安排 → 確認日期」完成日期後再查詢。';
+    if (error.code === 'caregiver_availability_stage_conflict') return '目前案件狀態不允許查詢候選，請重新讀取案件進度，確認目前應辦事項。';
+  }
   return error instanceof Error && error.message.trim()
     ? error.message.trim()
     : fallback;
@@ -353,9 +358,9 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
                     />
                     <span>
                       <strong>{candidate.staff_name}</strong><br />
-                      月嫂 #{candidate.staff_id} · 預計期間 {candidate.supported_day_count}/{candidate.required_day_count} 個日曆日無衝突
+                      月嫂 #{candidate.staff_id} · 空閒 {candidate.supported_day_count}/{candidate.required_day_count} 天
                       {!candidate.full_case_coverage && <span role="status"> · 有檔期衝突，待公會協調</span>}
-                      {queryState.data.conflicts.filter((conflict) => conflict.staff_id === candidate.staff_id).map((conflict, index) => <span key={`${conflict.work_date}:${conflict.reason_code}:${index}`}><br />{conflict.work_date} · {conflict.reason_code === 'buffer' ? '七天緩衝期重疊，僅提醒' : '檔期衝突，待協調'}</span>)}
+                      {queryState.data.conflicts.some((conflict) => conflict.staff_id === candidate.staff_id && conflict.reason_code === 'buffer') && <span role="status"> · 七天緩衝期重疊，僅提醒</span>}
                     </span>
                   </label>
                 ))}
@@ -373,11 +378,6 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
             <div className="order-v2-notice blocked" role="status">
               <strong>沒有符合條件</strong>
               <span>目前沒有符合查詢條件的月嫂，可調整篩選條件後重新查詢。</span>
-              {queryState.data.conflicts.map((conflict, index) => (
-                <span key={`${conflict.segment_index}:${conflict.staff_id ?? 'none'}:${conflict.work_date}:${index}`}>
-                  {conflict.work_date} · 月嫂 #{conflict.staff_id ?? '未指定'} · {conflict.reason_code}
-                </span>
-              ))}
             </div>
           )}
         </>

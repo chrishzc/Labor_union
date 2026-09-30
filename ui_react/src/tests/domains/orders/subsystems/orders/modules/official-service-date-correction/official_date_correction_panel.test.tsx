@@ -45,7 +45,7 @@ describe('official date correction panel', () => {
       { assignment_id: 13, service_dates: ['2026-09-19', '2026-09-21'] },
     ]));
     fireEvent.change(screen.getByLabelText('更正原因'), { target: { value: '原正式日期登錄錯誤' } });
-    fireEvent.click(screen.getByRole('button', { name: '確認更正正式排班' }));
+    fireEvent.click(screen.getByRole('button', { name: '確認更正完工服務日期' }));
     await waitFor(() => expect(onObserved).toHaveBeenCalledOnce());
     expect(mocks.apply).toHaveBeenCalledWith('ISSUE-346', expect.objectContaining({
       preview_fingerprint: 'a'.repeat(64),
@@ -89,7 +89,7 @@ describe('official date correction panel', () => {
       { assignment_id: 15, service_dates: ['2026-09-21'] },
     ]));
     fireEvent.change(screen.getByLabelText('更正原因'), { target: { value: '代班日期登錄錯誤' } });
-    fireEvent.click(screen.getByRole('button', { name: '確認更正正式排班' }));
+    fireEvent.click(screen.getByRole('button', { name: '確認更正完工服務日期' }));
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('提交後正式排班回讀不一致'));
     expect(onObserved).not.toHaveBeenCalled();
   });

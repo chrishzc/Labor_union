@@ -14,7 +14,7 @@ import { StaffHistoricalWorkbookSnapshot, staffHistoricalWorkbookPreviewClient }
 import { HistoricalOrderWorkbookSnapshot, historicalOrderWorkbookPreviewClient } from '../api/orders/historical_order_workbook/client';
 import { HistoricalOrderReviewRemediationWorkbench } from '../components/HistoricalOrderReviewRemediationWorkbench';
 import { HcmControlledCorrectionWorkbench } from '../components/HcmControlledCorrectionWorkbench';
-import { hcmResubmissionClient, type HcmCurrentReviews } from '../api/case_import/hcm_resubmission_client';
+import { hcmResubmissionClient } from '../api/case_import/hcm_resubmission_client';
 import './DataImportPage.css';
 
 type CasePreviewState<T> =
@@ -382,6 +382,17 @@ const CaseWorkbookPreviewCard: React.FC<CaseWorkbookPreviewCardProps> = ({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const previewGuidanceId = `imports-${id}-preview-guidance`;
   const applyGuidanceId = `imports-${id}-apply-guidance`;
+  const currentStep = applyState.kind === 'ready' || applyState.kind === 'loading'
+    ? 3 : previewState.kind === 'ready' ? 3 : selectedWorkbook ? 2 : 1;
+  const statusText = applyState.kind === 'loading' ? '匯入中…'
+    : applyState.kind === 'error' && applyState.outcomeUnknown ? '結果待確認'
+    : applyState.kind === 'ready' ? `結果：${applyReceiptHeading(applyState.outcome)}`
+    : applyState.kind === 'error' ? '匯入未完成'
+    : previewState.kind === 'reading' ? '正在讀取檔案…'
+    : previewState.kind === 'loading' ? '預覽中…'
+    : previewState.kind === 'error' ? '預覽未完成'
+    : previewState.kind === 'ready' ? '預覽就緒'
+    : selectedWorkbook ? '已選檔，待預覽' : '待選檔';
   return (
     <section className="import-workbench-card" data-surface-id={`imports.${id}.workbench`}>
       <div className="import-card-header">
@@ -389,15 +400,24 @@ const CaseWorkbookPreviewCard: React.FC<CaseWorkbookPreviewCardProps> = ({
           <div className="import-icon-badge">{icon}</div>
           <div className="import-card-title-group">
             <h2>{title}</h2>
-            <p>上傳檔案 • 預覽核對 • 確認匯入</p>
           </div>
         </div>
         <span className={`import-status-pill ${applyState.kind === 'ready' ? 'ready' : previewState.kind === 'ready' ? 'idle' : 'locked'}`}>
-          {applyState.kind === 'ready' ? '✅ 匯入完成' : previewState.kind === 'ready' ? '🔍 預覽就緒' : '待選檔'}
+          {statusText}
         </span>
       </div>
+      <ol className="import-steps" aria-label="匯入進度">
+        {['選擇檔案', '預覽核對', '確認匯入'].map((step, index) => (
+          <li key={step} className={index + 1 === currentStep ? 'current' : index + 1 < currentStep ? 'done' : ''} aria-current={index + 1 === currentStep ? 'step' : undefined}>
+            <span aria-hidden="true">{index + 1}</span>{step}
+          </li>
+        ))}
+      </ol>
       <p className="import-description">先預覽完整工作簿，這一步不會匯入資料；核對檔案與筆數後再確認匯入。</p>
-      {id === 'hcm-current' && <p>預覽只檢查來源欄位，不保證新增或更新。既有案件來源不同會跳過，來源檔改好不代表訂單已更新。姓名、電話等主檔請到客戶名冊編輯；服務日期與天數請到訂單條款；下方專用修正僅處理指定警示欄位。</p>}
+      {id === 'hcm-current' && <>
+        <p className="import-control-guidance">預覽只檢查來源欄位，不保證新增或更新。</p>
+        <details className="import-source-guidance"><summary>既有案件與資料更正說明</summary><p>既有案件來源不同會跳過，來源檔改好不代表訂單已更新。姓名、電話等主檔請到客戶名冊編輯；服務日期與天數請到訂單條款；下方專用修正僅處理指定警示欄位。</p></details>
+      </>}
       <div className="import-file-upload-box">
         <div className="import-file-selector-row">
           <input ref={fileInputRef} id={`file-input-${id}`} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" aria-label={inputLabel} data-control-id={openPreviewControlId} disabled={mutationLocked} onChange={onSelect} className="import-file-native-hidden" />
@@ -462,17 +482,7 @@ export const DataImportPage: React.FC = () => {
   const [historicalReviewIdentities, setHistoricalReviewIdentities] = useState<string[]>([]);
   const [selectedHistoricalReviewIdentity, setSelectedHistoricalReviewIdentity] = useState<string | null>(null);
   const [hcmReviewRows, setHcmReviewRows] = useState<HcmWorkbookRowOutcome[]>([]);
-  const [currentReviews, setCurrentReviews] = useState<HcmCurrentReviews | null>(null);
-  const [currentCursor, setCurrentCursor] = useState<number | undefined>();
-  const [cursorHistory, setCursorHistory] = useState<(number | undefined)[]>([]);
-  const [reviewBusy, setReviewBusy] = useState(false);
-  const [reviewError, setReviewError] = useState<string | null>(null);
-  const loadCurrentReviews = async (cursor?: number) => {
-    setReviewBusy(true); setReviewError(null);
-    try { setCurrentReviews(await hcmResubmissionClient.current(cursor)); setCurrentCursor(cursor); }
-    catch (error) { setReviewError(error instanceof Error ? error.message : '目前問題讀取失敗。'); }
-    finally { setReviewBusy(false); }
-  };
+  const [reviewFeedback, setReviewFeedback] = useState<{ role: 'status' | 'alert'; message: string } | null>(null);
   const [hcmCorrection, setHcmCorrection] = useState<HcmCorrectionSelection | null>(null);
 
   const hcmCurrent = useCaseWorkbookFlow(
@@ -484,6 +494,7 @@ export const DataImportPage: React.FC = () => {
     'HCM 工作簿處理失敗。', 'hcm-current', (receipt) => {
       setHcmReviewRows(receipt.row_outcomes.filter((row) => row.problem_identity !== null || row.outcome === 'review_required' || row.outcome === 'failed'));
       setHcmCorrection(null);
+      setReviewFeedback(null);
     }
   );
   const clientBeClass = useCaseWorkbookFlow(
@@ -530,25 +541,6 @@ export const DataImportPage: React.FC = () => {
     </div>
   );
 
-  const currentReviewList = <section aria-label="目前 HCM 欄位待修正資料">
-    <h3>目前 HCM 欄位待修正資料</h3>
-    <p>依目前正式資料列出每案最新欄位警示；匯入收據只供追溯，不是目前問題清單。</p>
-    <button type="button" disabled={reviewBusy} onClick={() => void loadCurrentReviews(currentCursor)}>讀取目前問題</button>
-    {reviewError && <p role="alert">{reviewError}</p>}
-    {currentReviews?.items.map((item) => <div key={item.review_identity} className="import-result-problem">
-      <strong>案件 {item.case_no}</strong><span>來源：HCM；需核對欄位：{item.fields.join('、')}（缺漏或格式不符）</span>
-      {item.can_correct ? <button type="button" disabled={reviewBusy || hcmCorrection !== null} onClick={() => setHcmCorrection({ caseNo: item.case_no, reviewIdentity: item.review_identity, displayMessage: `需修正：${item.fields.join('、')}` })}>修正此案件</button>
-        : item.unavailable_reason === 'service_data_locked' ? <span>服務條件已鎖定，不能透過 HCM 更正；請由承辦人核對完成紀錄與帳務，保留已履行歷史。</span>
-        : <span>此來源不符合單一欄位更正範圍。姓名、電話等主檔請到客戶名冊編輯；服務日期與天數請到訂單條款，並由承辦人核對未解除的來源警示。</span>}
-    </div>)}
-    {currentReviews?.items.length === 0 && <p>此頁沒有目前待修正欄位。</p>}
-    {currentReviews && <div>
-      <button type="button" disabled={reviewBusy || cursorHistory.length === 0} onClick={() => { const prior = cursorHistory[cursorHistory.length-1]; setCursorHistory((items) => items.slice(0,-1)); void loadCurrentReviews(prior); }}>上一頁問題</button>
-      <span>本頁 {currentReviews.items.length} 筆</span>
-      <button type="button" disabled={reviewBusy || currentReviews.next_cursor === null} onClick={() => { setCursorHistory((items) => [...items, currentCursor]); void loadCurrentReviews(currentReviews.next_cursor ?? undefined); }}>下一頁問題</button>
-    </div>}
-  </section>;
-
   const hcmReviewAction = (
     <div className="import-referral-group" aria-label="本次 HCM 待檢查資料">
       {hcmReviewRows.length === 0 ? (
@@ -563,16 +555,17 @@ export const DataImportPage: React.FC = () => {
             {row.case_no && <span>工作簿來源第 {row.source_row} 筆</span>}
             <span>{row.outcome === 'failed' ? `匯入失敗。${guidance.message}` : guidance.message}</span>
             {canCorrect ? (
-              <button type="button" className="import-referral-btn" onClick={() => { void hcmResubmissionClient.query(row.problem_identity as string).then((state) => {
-                if (state.resolved) { void loadCurrentReviews(currentCursor); return; }
+              <button type="button" className="import-referral-btn" onClick={() => { setReviewFeedback(null); void hcmResubmissionClient.query(row.problem_identity as string).then((state) => {
+                if (state.resolved) { setReviewFeedback({ role: 'status', message: '此欄位已在正式資料中補齊，無需再次修正。' }); return; }
                 setHcmCorrection({ caseNo: state.case_no, displayMessage: guidance.message, reviewIdentity: state.review_identity });
-              }).catch((error) => setReviewError(error instanceof Error ? error.message : '目前問題讀取失敗。')); }}>🛠️ 在本頁提交修正</button>
+              }).catch((error) => setReviewFeedback({ role: 'alert', message: error instanceof Error ? error.message : '修正資料讀取失敗。' })); }}>🛠️ 在本頁提交修正</button>
             ) : (
               <span>{guidance.nextStep}</span>
             )}
           </div>
         );
       })}
+      {reviewFeedback && <p className={reviewFeedback.role === 'alert' ? 'import-error' : undefined} role={reviewFeedback.role}>{reviewFeedback.message}</p>}
     </div>
   );
 
@@ -646,10 +639,9 @@ export const DataImportPage: React.FC = () => {
               }}
             />
           </section>}
-          {activeImportKind === 'hcm-current' && currentReviewList}
           {hcmCorrection && <HcmControlledCorrectionWorkbench key={hcmCorrection.reviewIdentity} {...hcmCorrection} onCancel={() => setHcmCorrection(null)} onApplied={() => {
             setHcmCorrection(null);
-            void loadCurrentReviews(currentCursor);
+            setReviewFeedback(null);
           }} />}
         </div>
     </div>

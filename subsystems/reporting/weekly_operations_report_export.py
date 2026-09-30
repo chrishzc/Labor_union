@@ -277,7 +277,7 @@ def _build_subsidy_sheet(ws, report: WeeklyOperationsReport) -> None:
     headers = (
         "序號", "  ", " ", "年度接案", "訂單號碼",
         "起日", "訖日", "補助時數", "補助天數", "備註",
-        "補助款金額", "單價", "結案/核銷", "核銷月份",
+        "補助款金額", "單價", "結案/核銷", "年度季度",
     )
     ws.append(headers)
     for c in range(1, 15):
@@ -318,7 +318,7 @@ def _build_subsidy_sheet(ws, report: WeeklyOperationsReport) -> None:
 
     # 社福市民區塊
     sub_start = ws.max_row + 2
-    ws.append([None, None, f"社福市民總計: {total_sub}案", None, None, "社福市民總計:", total_sub, "案", "合計", None, None, None, "結案/核銷", "核銷月份"])
+    ws.append([None, None, f"社福市民總計: {total_sub}案", None, None, "社福市民總計:", total_sub, "案", "合計", None, None, None, "結案/核銷", "年度季度"])
     ws.merge_cells(f"I{ws.max_row}:J{ws.max_row}")
     sep_row = ws.max_row
     for c in range(1, 15):

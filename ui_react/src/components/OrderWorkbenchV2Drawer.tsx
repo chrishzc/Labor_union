@@ -72,6 +72,13 @@ const WORK_GROUPS = [
 ] as const;
 type WorkGroup = typeof WORK_GROUPS[number]['id'];
 
+const SERVICE_WORK_VIEWS = [
+  { id: 'dates', label: '確認日期' },
+  { id: 'assignment', label: '正式排班' },
+  { id: 'completion', label: '完工確認' },
+] as const;
+type ServiceWorkView = typeof SERVICE_WORK_VIEWS[number]['id'];
+
 function workGroupStatus(
   stages: readonly { status: string }[],
 ): '已完成' | '可辦理' | '需要處理' | '等待資料' {
@@ -144,14 +151,15 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
   const [visitedGroups, setVisitedGroups] = useState<WorkGroup[]>([]);
   const [matchingView, setMatchingView] = useState<'list' | 'search' | 'information'>('list');
   const [informationKind, setInformationKind] = useState<1 | 2>(1);
-  const [serviceView, setServiceView] = useState<'dates' | 'assignment' | 'completion' | 'correction'>('dates');
+  const initialServiceViewSet = useRef(false);
+  const [serviceView, setServiceView] = useState<ServiceWorkView>('dates');
   const [historicalArrangementPending, setHistoricalArrangementPending] = useState(false);
   const [contractView, setContractView] = useState<'overview' | 'signing'>('signing');
   const [signingOpened, setSigningOpened] = useState(true);
   const pageHeadingRef = useRef<HTMLHeadingElement>(null);
   useEffect(() => { pageHeadingRef.current?.focus(); }, [caseNo]);
   const [replacementExpanded, setReplacementExpanded] = useState(false);
-  const [operation, setOperation] = useState<'cancellation' | 'reopen' | 'actual-start' | null>(null);
+  const [operation, setOperation] = useState<'cancellation' | 'reopen' | 'actual-start' | 'official-dates' | null>(null);
   const [operationBusy, setOperationBusy] = useState(false);
   const datesPending = useSyncExternalStore(
     (listener) => orderMutationFlowStore.subscribe(listener),
@@ -291,6 +299,9 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
     ? historicalCurrentOwnerStage(timeline.data)
     : null;
   const terminalStatus = timeline.status === 'ready' && ['訂單完成', '訂單取消', '歷史訂單－服務完成', '歷史訂單－帳務完成'].includes(timeline.data.lifecycle_status);
+  const completedService = timeline.status === 'ready' && timeline.data.lifecycle_status === '訂單完成';
+  const actualStartActionLabel = assignmentPlan.status === 'ready' && assignmentPlan.data.assignments.some((assignment) => assignment.assignment_id !== null)
+    ? '更正開始日並重排' : '確認／更正實際開始日';
   const currentBranch = timeline.status === 'ready' ? timeline.data.branch_type : branchType;
   const intakeOrderStatus = timeline.status === 'ready'
     ? timeline.data.lifecycle_status
@@ -298,6 +309,12 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
   const currentStageCode: CoreStageCode | null = timeline.status === 'ready'
     ? timeline.data.current_core_stage_code
     : null;
+  useEffect(() => {
+    if (timeline.status !== 'ready' || initialServiceViewSet.current) return;
+    initialServiceViewSet.current = true;
+    if (currentStageCode === 'formal_service') setServiceView('assignment');
+    if (currentStageCode === 'service_completion') setServiceView('completion');
+  }, [timeline.status, currentStageCode]);
   const suggestedGroup = terminalStatus ? 'finance' : WORK_GROUPS.find((group) => (group.stages as readonly string[]).includes(currentStageCode ?? ''))?.id ?? 'intake';
   const activeGroup = selectedGroup ?? suggestedGroup;
   useEffect(() => {
@@ -319,7 +336,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
           <div><p className="order-case-eyebrow">案件 {caseNo}</p><h1 ref={pageHeadingRef} tabIndex={-1}>{selectedTitle}</h1></div>
           <span className="order-case-lifecycle">{intakeOrderStatus ?? '讀取案件中'}</span>
         </div>
-        <p className="order-case-purpose">{drawerTab === 'data' ? '查閱客戶、約定條款與服務安排，不在此頁執行案件流程。' : drawerTab === 'changes' ? '選擇需要辦理的異動，核對影響後再確認。' : '選擇要辦理的工作；各事項依自己的正式資料判斷，不要求依序辦理。'}</p>
+        <p className="order-case-purpose">{drawerTab === 'data' ? '查閱客戶、約定條款與服務安排，不在此頁執行案件流程。' : drawerTab === 'changes' ? '選擇需要辦理的異動，核對影響後再確認。' : '已開啟目前待辦；可切換到其他工作，查看資料或辦理案件異動。'}</p>
         <div className="order-case-context">
           <span><small>客戶</small>{detail.status === 'ready' ? detail.data.client_name || '未登錄' : detail.status === 'error' ? '暫時無法取得' : '讀取中'}</span>
           <span><small>預期開始</small>{detail.status === 'ready' ? detail.data.start_date ?? '尚未設定' : detail.status === 'error' ? '暫時無法取得' : '讀取中'}</span>
@@ -337,7 +354,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
       {timeline.status === 'error' && <div role="alert" className="order-v2-drawer-error">案件進度暫時無法取得，請稍後重新整理。</div>}
       <div hidden={drawerTab !== 'work'} className="order-case-workspace">
         <aside className="order-case-stepper" aria-label="案件辦理事項">
-          <h2>辦理事項</h2><p>各項工作依自己的正式資料判斷，不要求照編號依序辦理。</p>
+          <h2>辦理事項</h2><p>依目前進度開啟工作，也可切換其他事項。</p>
           <ol>
             {WORK_GROUPS.map((group, index) => (
               <li key={group.id}>
@@ -373,7 +390,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
               </div>}
               {(activeGroup === 'matching' || visitedGroups.includes('matching')) && <div hidden={activeGroup !== 'matching'}>
                 <nav className="order-case-subnav" aria-label="候選與詢問工作"><button type="button" aria-pressed={matchingView === 'list'} onClick={() => setMatchingView('list')}>候選月嫂</button><button type="button" aria-pressed={matchingView === 'search'} onClick={() => setMatchingView('search')}>新增候選月嫂</button><button type="button" aria-pressed={matchingView === 'information'} onClick={() => setMatchingView('information')}>訂單資訊預覽</button></nav>
-                <div hidden={matchingView !== 'list'}><OrderCandidateContactStatusPanel caseNo={caseNo} revision={refreshRevision} onObserved={refreshFacts} onPreviewInformation={(kind) => { setInformationKind(kind); setMatchingView('information'); }} /></div>
+                <div hidden={matchingView !== 'list'}><OrderCandidateContactStatusPanel caseNo={caseNo} revision={refreshRevision} onObserved={refreshFacts} focusWillingness={currentStageCode === 'caregiver_willingness_reply'} onAddCandidates={() => setMatchingView('search')} onPreviewInformation={(kind) => { setInformationKind(kind); setMatchingView('information'); }} /></div>
                 <div hidden={matchingView !== 'search'}><h3>尋找合適的月嫂</h3><p>查詢後勾選人選，加入同一份候選清單。</p><OrderCandidateQueryPanel caseNo={caseNo} onPoolReadback={refreshFacts} /></div>
                 {matchingView === 'information' && <OrderInformationSheets caseNo={caseNo} initialKind={informationKind} assignments={assignmentPlan.status === 'ready' ? assignmentPlan.data.assignments : []} onOpenCandidates={() => setMatchingView('list')} />}
               </div>}
@@ -397,7 +414,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
                 {signingOpened && <div hidden={contractView !== 'signing'}><ContractExternalSigningActions caseNo={caseNo} onCommitted={refreshFacts} /></div>}
               </div>}
               {(activeGroup === 'service' || visitedGroups.includes('service')) && <div hidden={activeGroup !== 'service'}>
-                <nav className="order-case-subnav" aria-label="服務工作"><button type="button" aria-pressed={serviceView === 'dates'} onClick={() => setServiceView('dates')}>確認日期</button><button type="button" aria-pressed={serviceView === 'assignment'} onClick={() => setServiceView('assignment')}>正式排班</button><button type="button" aria-pressed={serviceView === 'completion'} onClick={() => setServiceView('completion')}>完工確認</button><button type="button" aria-pressed={serviceView === 'correction'} onClick={() => setServiceView('correction')}>更正正式日期</button></nav>
+                <h3 className="order-case-service-title">{SERVICE_WORK_VIEWS.find((view) => view.id === serviceView)!.label}</h3>
                 <div hidden={serviceView !== 'dates' && serviceView !== 'assignment'}>
                 <OrderServiceDatesPanel
                   caseNo={caseNo}
@@ -420,15 +437,28 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
                 <fieldset disabled={datesPending}>
                 <OrderAssignmentPlanPanel caseNo={caseNo} revision={refreshRevision} historicalArrangementPending={historicalArrangementPending} onObserved={refreshFacts} onOpenReplacement={() => { setDrawerTab('changes'); setReplacementExpanded(true); }} />
                 </fieldset>
-                </div><div hidden={serviceView !== 'correction'}>{serviceView === 'correction' && <OrderOfficialDateCorrectionPanel caseNo={caseNo} revision={refreshRevision} onObserved={refreshFacts} />}</div><div hidden={serviceView !== 'completion'}>{detail.status === 'ready' && (
+                </div><div hidden={serviceView !== 'completion'}>{detail.status === 'ready' && (
                 <OrderServiceCompletionActions caseNo={caseNo} orderStatus={detail.data.order_status} onCompleted={refreshFacts} />
-              )}</div></div>}
-              {activeGroup === 'finance' && <div className="order-case-document-grid"><article><h3>訂金與客戶收款</h3><p>核對訂金、各期款與退款。正常收款依銀行流水核銷。</p><a href={`#finance?tab=client-receipts&case_no=${encodeURIComponent(caseNo)}`}>查看本案客戶收款 →</a><ClientDepositSkipActions caseNo={caseNo} onCommitted={refreshFacts} /></article><article><h3>月嫂付款與結案</h3><p>前往帳務頁選擇月嫂，再核對應付與付款紀錄。</p><a href="#finance?tab=staff-payables">前往月嫂付款 →</a></article><p className="order-case-review-note">銀行流水如需人工核對，請在帳務頁預覽更正內容後確認核銷。</p></div>}
+              )}</div>
+                <details className="order-case-secondary-actions">
+                  <summary>其他服務作業</summary>
+                  <div className="order-case-action-row">
+                    {SERVICE_WORK_VIEWS.filter((view) => view.id !== serviceView).map((view) => (
+                      <button type="button" key={view.id} onClick={(event) => {
+                        setServiceView(view.id);
+                        event.currentTarget.closest('details')?.removeAttribute('open');
+                      }}>{view.label}</button>
+                    ))}
+                  </div>
+                </details>
+              </div>}
+              {activeGroup === 'finance' && <div className="order-case-document-grid"><article><h3>訂金與客戶收款</h3><p>核對訂金、各期款與退款。正常收款依銀行流水核銷。</p><a href={`#finance?tab=client-receipts&case_no=${encodeURIComponent(caseNo)}`}>查看本案客戶收款 →</a><details className="order-case-secondary-actions"><summary>特殊訂金處理</summary><ClientDepositSkipActions caseNo={caseNo} onCommitted={refreshFacts} /></details></article><article><h3>月嫂付款與結案</h3><p>前往帳務頁選擇月嫂，再核對應付與付款紀錄。</p><a href="#finance?tab=staff-payables">前往月嫂付款 →</a></article><p className="order-case-review-note">銀行流水如需人工核對，請在帳務頁預覽更正內容後確認核銷。</p></div>}
             </fieldset>
           </section>
         )}
         {terminalStatus && timeline.status === 'ready' && <section className="order-v2-drawer-section" aria-label="結算狀態">
           <h3>結算狀態</h3>
+          <div className="order-case-action-row"><a href={`#finance?tab=client-receipts&case_no=${encodeURIComponent(caseNo)}`}>查看本案客戶收款 →</a><a href="#finance?tab=staff-payables">前往月嫂付款 →</a></div>
           {timeline.data.core_stages.filter((stage) => stage.code === 'client_settlement' || stage.code === 'staff_payout').map((stage) => <p key={stage.code}>{stage.label}：{coreStageSubstatusLabel(stage.substatus_code)}</p>)}
         </section>}
         {currentBranch === 'historical' && (intakeOrderStatus === '歷史訂單－未服務' || intakeOrderStatus === '歷史訂單－服務中') && (
@@ -453,7 +483,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
           </section>
         )}
 
-          {terminalStatus && <section className="order-v2-drawer-section"><h2>案件處理紀錄</h2><p>此案件目前為「{intakeOrderStatus}」，請由左側流程查閱各步驟狀態，或前往訂單與服務資料。</p></section>}
+          {terminalStatus && <section className="order-v2-drawer-section"><h2>案件處理紀錄</h2><p>此案件目前為「{intakeOrderStatus}」，可查閱各項工作狀態，或前往訂單與服務資料。</p></section>}
           {currentBranch === 'historical' && currentHistoricalOwner && <section className="order-v2-drawer-section"><h2>歷史案件目前進度</h2><p>{currentHistoricalOwner.label}：{coreStageSubstatusLabel(currentHistoricalOwner.substatus_code)}</p></section>}
           {historicalRestart.message && <p role={historicalRestart.status === 'error' ? 'alert' : 'status'}>{historicalRestart.message}</p>}
         </div>
@@ -496,19 +526,25 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
       </div>
       <section hidden={drawerTab !== 'changes'} className="order-v2-drawer-section order-case-changes">
         <h2>選擇要辦理的異動</h2><p>異動會影響案件或服務安排；請先確認對象，再檢查變更內容。</p>
-        {(!terminalStatus || currentBranch === 'cancelled') ? <>
+        {(!terminalStatus || currentBranch === 'cancelled' || completedService) ? <>
+            {!terminalStatus && currentBranch !== 'cancelled' && <p>「確認日期」保存成功後，實際開始日已一併保存；只有開始日需要修正或系統要求重新確認時，才使用下方的開始日功能。</p>}
+            {completedService && <p>完工後的日期更正會保留原完工紀錄；請先核對各月嫂的服務日期。</p>}
             <div className="order-v2-drawer-actions">
-              <button type="button" disabled={operationBusy || factsRefreshing} onClick={() => setOperation('cancellation')}>取消／補登取消服務事實</button>
+              {(!terminalStatus || currentBranch === 'cancelled') && <button type="button" disabled={operationBusy || factsRefreshing} onClick={() => setOperation('cancellation')}>取消／補登取消服務事實</button>}
               {currentBranch === 'cancelled' && (
                 <button type="button" disabled={operationBusy || factsRefreshing} onClick={() => setOperation('reopen')}>受控重開取消案件</button>
               )}
-              {currentBranch !== 'cancelled' && operation !== 'actual-start' && (
-                <button type="button" disabled={operationBusy || factsRefreshing} onClick={() => setOperation('actual-start')}>確認／更正實際開始日</button>
+              {!terminalStatus && currentBranch !== 'cancelled' && operation !== 'actual-start' && (
+                <button type="button" disabled={operationBusy || factsRefreshing} onClick={() => setOperation('actual-start')}>{actualStartActionLabel}</button>
+              )}
+              {completedService && (
+                <button type="button" disabled={operationBusy || factsRefreshing} onClick={() => setOperation('official-dates')}>更正完工服務日期</button>
               )}
             </div>
             {operationBusy && <p role="status">操作結果或正式回讀尚未確認，暫時不能關閉或切換操作。</p>}
             {operation === 'cancellation' && <OrderCancellationPanel key={caseNo} caseNo={caseNo} onObserved={refreshFacts} onBusyChange={onOperationBusyChange} />}
             {operation === 'reopen' && <OrderControlledReopenPanel key={caseNo} caseNo={caseNo} onObserved={refreshFacts} onBusyChange={onOperationBusyChange} />}
+            {operation === 'official-dates' && completedService && <OrderOfficialDateCorrectionPanel key={caseNo} caseNo={caseNo} revision={refreshRevision} onObserved={refreshFacts} />}
             {operation === 'actual-start' && <OrderActualStartPanel key={caseNo} caseNo={caseNo} onObserved={(actualStartOperation) => {
               setDrawerTab('work');
               setServiceView('dates');

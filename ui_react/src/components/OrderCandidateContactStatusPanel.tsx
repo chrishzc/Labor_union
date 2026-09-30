@@ -13,6 +13,8 @@ import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_s
 interface OrderCandidateContactStatusPanelProps {
   caseNo: string;
   onObserved?: () => void;
+  onAddCandidates?: () => void;
+  focusWillingness?: boolean;
   onPreviewInformation?: (kind: 1 | 2) => void;
   revision?: number;
 }
@@ -75,7 +77,7 @@ function deliveryStatus(
   return `${labels[delivery.status]} · ${delivery.sent_at}`;
 }
 
-export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPanelProps> = ({ caseNo, onObserved, revision = 0 }) => {
+export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPanelProps> = ({ caseNo, onObserved, onAddCandidates, focusWillingness = false, revision = 0 }) => {
   const [state, setState] = useState<ContactStatusState>({ status: 'idle' });
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [sendPreview, setSendPreview] = useState<{ candidateId: number; kind: 1 | 2 } | null>(null);
@@ -453,9 +455,10 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
       })}
 
       {state.status === 'ready' && state.data.candidates.length === 0 && (
-        <div className="order-v2-notice blocked" role="status">
+        <div className="order-case-review-note" role="status">
           <strong>尚未加入候選月嫂</strong>
-          <span>請先從「新增候選月嫂」查詢並選擇人選。</span>
+          <p>查詢合適人選，加入清單後即可寄送資訊與記錄回覆。</p>
+          {onAddCandidates && <button type="button" className="btn-primary-action" onClick={onAddCandidates}>尋找並新增候選月嫂</button>}
         </div>
       )}
 
@@ -486,7 +489,7 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
                   {sendPreview?.candidateId === candidate.id && <CandidateInformationSend
                     key={`${caseNo}:${candidate.id}:${sendPreview.kind}`} caseNo={caseNo} candidateId={candidate.id} kind={sendPreview.kind}
                     onClose={() => setSendPreview(null)} onSubmit={(command) => { void submitInformation(command); }} />}
-                  <details open={willingnessProtected || willingnessNotices[candidate.id] !== undefined}>
+                  <details open={focusWillingness || willingnessProtected || willingnessNotices[candidate.id] !== undefined}>
                     <summary>記錄電話或現場詢問結果</summary>
                     <label htmlFor={`candidate-${candidate.id}-willingness-reason`}>
                       詢問結果備註（{candidate.staff_name}）

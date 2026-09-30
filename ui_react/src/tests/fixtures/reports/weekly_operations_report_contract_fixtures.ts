@@ -84,7 +84,7 @@ export const WEEKLY_OPERATIONS_REPORT: WeeklyOperationsReport = {
     rows: partition.rows.map((row) => ({
       ...row,
       application_roc_year: 114,
-      claim_period_label: '第三季',
+      claim_period_label: '2026年第三季',
       reconciliation_status: '結案',
       notes: '',
     })),

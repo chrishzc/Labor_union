@@ -153,7 +153,7 @@ describe('待辦看板 Beta 候選池回讀後刷新正式投影', () => {
 
     await waitFor(() => expect(screen.getByRole('button', { name: /2 候選池 1/ })).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: /2 候選池 1/ }));
-    fireEvent.click(await screen.findByRole('button', { name: '處理：建立候選池' }));
+    fireEvent.click(await screen.findByRole('button', { name: '開啟案件 CASE-READBACK 案件處理' }));
     const refreshButton = await screen.findByRole('button', { name: '模擬 CASE-READBACK 候選池回讀完成' });
     const callsBeforeRefresh = mocks.getCoreStageTimelines.mock.calls.length;
 
@@ -172,7 +172,7 @@ describe('待辦看板 Beta 候選池回讀後刷新正式投影', () => {
     await screen.findByText('回讀前測試客戶');
     const originalSignal = mocks.loadSummaries.mock.calls[0]![2].signal as AbortSignal;
     fireEvent.click(screen.getByRole('button', { name: /2 候選池 1/ }));
-    fireEvent.click(await screen.findByRole('button', { name: '處理：建立候選池' }));
+    fireEvent.click(await screen.findByRole('button', { name: '開啟案件 CASE-READBACK 案件處理' }));
     fireEvent.click(await screen.findByRole('button', { name: '模擬 CASE-READBACK 候選池回讀完成' }));
 
     await waitFor(() => expect(screen.getByRole('button', { name: '關閉測試工作 Drawer' })).toBeEnabled());
@@ -196,7 +196,7 @@ describe('待辦看板 Beta 候選池回讀後刷新正式投影', () => {
     render(<OrderWorkbenchV2Page />);
     await screen.findByText('回讀前測試客戶');
     fireEvent.click(screen.getByRole('button', { name: /^9 / }));
-    fireEvent.click(await screen.findByRole('button', { name: '處理：確認服務日期' }));
+    fireEvent.click(await screen.findByRole('button', { name: '開啟案件 CASE-READBACK 案件處理' }));
     fireEvent.click(await screen.findByRole('button', { name: '模擬服務日期回讀完成' }));
 
     await waitFor(() => expect(screen.getByRole('button', { name: '關閉測試工作 Drawer' })).toBeEnabled());
@@ -214,7 +214,7 @@ describe('待辦看板 Beta 候選池回讀後刷新正式投影', () => {
     mocks.loadSummaries.mockResolvedValueOnce(summaries()).mockResolvedValue(summaries(true));
     render(<OrderWorkbenchV2Page />);
     await screen.findByText('回讀前測試客戶');
-    fireEvent.click(screen.getByRole('button', { name: '開啟案件工作' }));
+    fireEvent.click(screen.getByRole('button', { name: '開啟案件 CASE-READBACK 案件處理' }));
     const before = mocks.getCoreStageTimelines.mock.calls.length;
     fireEvent.click(screen.getByRole('button', { name: '關閉測試工作 Drawer' }));
 
@@ -232,7 +232,7 @@ describe('待辦看板 Beta 候選池回讀後刷新正式投影', () => {
     await screen.findByRole('button', { name: /2 候選池 1/ });
     const originalSignal = mocks.loadSummaries.mock.calls[0]![2].signal as AbortSignal;
     fireEvent.click(screen.getByRole('button', { name: /2 候選池 1/ }));
-    fireEvent.click(await screen.findByRole('button', { name: '處理：建立候選池' }));
+    fireEvent.click(await screen.findByRole('button', { name: '開啟案件 CASE-READBACK 案件處理' }));
     fireEvent.click(await screen.findByRole('button', { name: '模擬 CASE-READBACK 候選池回讀完成' }));
     await waitFor(() => expect(screen.getByRole('button', { name: '關閉測試工作 Drawer' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: '關閉測試工作 Drawer' }));

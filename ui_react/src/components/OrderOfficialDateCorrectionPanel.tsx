@@ -92,7 +92,7 @@ export const OrderOfficialDateCorrectionPanel: FC<Props> = ({ caseNo, revision, 
   };
 
   return <section aria-label={`案件 ${caseNo} 正式排班日期更正`}>
-    <h3>正式排班日期更正</h3>
+    <h3>更正完工服務日期</h3>
     <p>請逐日核對已完成服務的日期。更正會保留原紀錄，並更新有效排班與下次查詢的週報。</p>
     {facts?.order_status !== '訂單完成' && facts && <p role="status">目前案件尚未完成，不能使用完工後日期更正。</p>}
     {facts?.monetary_change_blocker && <p role="status">此案含特殊薪資或其他金額影響，暫不能用純日期更正。</p>}
@@ -109,7 +109,7 @@ export const OrderOfficialDateCorrectionPanel: FC<Props> = ({ caseNo, revision, 
       <p>更正後有效日期：{preview.proposed_assignments.flatMap((item) => item.service_dates).sort().join('、')}</p>
       <p>客戶與月嫂金額義務：維持原狀。</p>
       <label>更正原因<input value={reason} maxLength={500} onChange={(event) => setReason(event.target.value)} /></label>
-      <button type="button" disabled={busy || !reason.trim()} onClick={() => void apply()}>確認更正正式排班</button>
+      <button type="button" disabled={busy || !reason.trim()} onClick={() => void apply()}>確認更正完工服務日期</button>
     </div>}
     {message && <p role="status">{message}</p>}
   </section>;

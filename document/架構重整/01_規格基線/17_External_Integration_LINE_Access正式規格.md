@@ -748,16 +748,23 @@ resubmission Preview／Apply，才屬修正命令。該命令仍須提交完整�
 欄位權威的差異；不提供警示中心或 Streamlit 單欄編輯，也不得修改 immutable source。
 
 Issue #326 的欄位修正 Query 由 Case Import 提供 `/api/v1/case-import/hcm/reviews` 與
-`/reviews/{review_identity}`：主清單只讀每案最新、已綁定案件的欄位 review，沿用更正 owner 的
-current review version 與 root fingerprint exact predicate 判定解除，不使用已停用的 warning tracking。
-更正事件的 after fingerprint 必須綁定 resulting review version；不可用前端刪列或 immutable workbook
-receipt 判定問題已解除。伺服器先套目前問題 predicate 再分頁；一般 workbook preview 的「來源欄位檢查通過」
+`/reviews/{review_identity}`：主清單只讀每案最新、已綁定案件的欄位 review，不使用已停用的 warning tracking。
+2026-09-30 人工裁決：客戶名冊經既有 Client Profile／Orders terms 正式命令儲存後，
+欄位警示由 Case Import Query 依最新 Client／Orders root values 重新驗證。Client Profile 可編輯欄位
+沿用其正式欄位驗證與名冊允許值（不拿來源工作簿舊選項否定有效的住宅型態或生產方式）；其餘可判定
+HCM 欄位沿用既有欄位規則。指定欄位已補齊且通過規則即自動解除，不要求另有 HCM resubmission correction event；只儲存其他欄位、
+資料仍缺漏／格式不符、未支援欄位或無法確認正式 root binding 時，警示仍保留。
+同筆 review 有多個欄位時逐一檢查，只顯示仍未解決的欄位；全部解決才退出主清單。
+Query 維持零寫入，不刪除或改寫原始來源、review、receipt 或稽核歷史，也不新增跨 owner commit。
+更正事件的 after fingerprint 仍綁定 resulting review version，供專用修正命令的版本與稽核使用；
+不可用前端刪列或 immutable workbook receipt 判定問題已解除。伺服器先套目前問題 predicate 再分頁；一般 workbook preview 的「來源欄位檢查通過」
 不承諾新增或更新，Apply 的 skipped_existing 仍為零覆寫。來源／身份／bootstrap 問題保留各自 owner 的入口。
 
-HCM 匯入中心只顯示每個案件最新且尚未解決的一筆 active 異常；成功、exact replay、`skipped_existing`
-與歷史批次不得出現在主清單。畫面使用白話原因，不顯示 internal issue code，並依 owner 分流：HCM 欄位
-錯誤導向 owning resubmission；身份疑義導向身份確認；bootstrap／費率或案件初始設定問題導向系統設定
-與重新檢查，不得誤導為一般 workbook 覆寫。
+2026-09-30 人工裁決：資料中心移除獨立的「目前 HCM 欄位待修正資料」區塊及其讀取、分頁控制。
+客戶資料由客戶名冊修改，儲存後沿用上述 Query 規則自動解除欄位警示；既有 review Query API 保留。
+本次工作簿的問題明細與指定欄位修正仍留在匯入收據內，收據只供本次結果與歷史追溯，不作目前問題主清單。
+畫面使用白話原因，不顯示 internal issue code；身份疑義與 bootstrap／費率或案件初始設定問題
+仍依既有 owner 分流，不得誤導為一般 workbook 覆寫。
 
 WP77／WP92 將 HCM 與 Client BeClass 定義為可獨立存在的兩條 intake lane。HCM 案件編號不得重複；
 IP＋姓名精確命中既有 Client、多候選或其他身份關聯歧義時，案件仍依案件編號建立，但不自動綁定 Client，

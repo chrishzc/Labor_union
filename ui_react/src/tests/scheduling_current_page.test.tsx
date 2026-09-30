@@ -126,7 +126,7 @@ describe('SchedulingPage query-only presentation', () => {
     expect(screen.queryByRole('combobox', { name: '請假代班訂單編號' })).not.toBeInTheDocument();
     expect(document.querySelector('[data-surface-id="scheduling.tab.calendar"]')).toHaveClass('active');
 
-    fireEvent.click(screen.getByRole('button', { name: /服務中請假與代班/ }));
+    fireEvent.click(screen.getByRole('button', { name: /請假與代班/ }));
     expect(screen.getByRole('combobox', { name: '請假代班訂單編號' })).toHaveValue('');
   });
 
@@ -148,6 +148,33 @@ describe('SchedulingPage query-only presentation', () => {
       month: 8,
       day: 23,
     });
+  });
+
+  it('returns from another month and brings today into view with a synchronized date header', async () => {
+    render(<SchedulingPage />);
+    await waitFor(() => expect(document.querySelector('.gantt-matrix-scroll-wrapper')).toBeInTheDocument());
+    const body = document.querySelector('.gantt-matrix-scroll-wrapper') as HTMLElement;
+    const header = document.querySelector('.gantt-matrix-sticky-header') as HTMLElement;
+    Object.defineProperty(body, 'clientWidth', { configurable: true, value: 600 });
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return {
+        left: this.classList.contains('today') ? 1060 : 0,
+        width: this.classList.contains('gantt-staff-header-cell') ? 260 : 40,
+        top: 0, right: 0, bottom: 0, height: 0, x: 0, y: 0, toJSON: () => ({}),
+      };
+    });
+    fireEvent.click(screen.getByRole('button', { name: '查看下個月' }));
+    expect(header.querySelector('.today')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /今天/ }));
+    await waitFor(() => expect(header.querySelector('.today')).not.toBeNull());
+    expect(body.scrollLeft).toBe(650);
+    expect(header.scrollLeft).toBe(650);
+    body.scrollLeft = 0;
+    header.scrollLeft = 0;
+    fireEvent.click(screen.getByRole('button', { name: /今天/ }));
+    expect(body.scrollLeft).toBe(650);
+    expect(header.scrollLeft).toBe(650);
+    expect(document.querySelector('.gantt-case-checks')).not.toHaveAttribute('open');
   });
 
   it('loads one current calendar for every visible staff row without a duplicate query', async () => {
@@ -687,7 +714,7 @@ describe('SchedulingPage query-only presentation', () => {
     expect(screen.getByRole('region', { name: '排班甘特月曆與服務人員檔期' })).toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: '資格查詢案件編號' })).toBeEnabled();
     expect(document.querySelector('[data-control-id="scheduling.candidate-pool.add"]')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /服務中請假與代班/ }));
+    fireEvent.click(screen.getByRole('button', { name: /請假與代班/ }));
     await waitFor(() => expect(screen.getByRole('combobox', { name: '請假代班訂單編號' })).toBeEnabled());
     fireEvent.change(screen.getByRole('combobox', { name: '請假代班訂單編號' }), { target: { value: 'CASE-SCH-001' } });
     await waitFor(() => expect(document.querySelector('[data-control-id="scheduling.leave.query"]')).toBeEnabled());
@@ -700,7 +727,7 @@ describe('SchedulingPage query-only presentation', () => {
     expect(document.querySelector('[data-control-id="scheduling.holiday.preview"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-control-id="scheduling.holiday.apply"]')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /新增國定假日/ })).toBeEnabled();
-    fireEvent.click(screen.getByRole('button', { name: /服務中請假與代班/ }));
+    fireEvent.click(screen.getByRole('button', { name: /請假與代班/ }));
     await waitFor(() => expect(screen.getByText(/目前此狀態沒有待處理的 LINE 請假申請/)).toBeInTheDocument());
     expect(staffLeaveInboxClient.list).toHaveBeenCalledWith('pending');
   });

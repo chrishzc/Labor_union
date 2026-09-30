@@ -251,6 +251,22 @@ describe('待辦看板 Beta 唯讀工作 Drawer', () => {
     expect(screen.getByRole('button', { name: '檢查是否可放行' })).toBeInTheDocument();
   });
 
+  it.each(['Enter', ' '])('案件卡可用 %s 開啟案件處理', async (key) => {
+    const caseNo = 'CASE-CARD-KEYBOARD';
+    clientMocks.getCoreStageTimelines.mockResolvedValue(page([
+      timeline(caseNo, 'intake_validation', { lifecycle: '洽談中' }),
+    ]));
+    setOwnerFacts(caseNo);
+    render(<OrderWorkbenchV2Page />);
+    const card = await screen.findByRole('button', { name: `開啟案件 ${caseNo} 案件處理` });
+    expect(card).toHaveAttribute('tabindex', '0');
+    expect(card).toHaveAttribute('aria-disabled', 'false');
+    card.focus();
+    fireEvent.keyDown(card, { key });
+    const work = await screen.findByRole('region', { name: `案件 ${caseNo}` });
+    expect(within(work).getByRole('heading', { name: '案件處理', level: 1 })).toBeInTheDocument();
+  });
+
   it('資料未補齊使 detail 不可用時仍依正式 intake projection 開啟補件入口', async () => {
     clientMocks.getCoreStageTimelines.mockResolvedValue(page([
       timeline('CASE-INCOMPLETE', 'intake_validation', { lifecycle: '待補件' }),
@@ -281,7 +297,7 @@ describe('待辦看板 Beta 唯讀工作 Drawer', () => {
     render(<OrderWorkbenchV2Page />);
     await waitFor(() => expect(screen.getByText('CASE-DRAWER')).toBeInTheDocument());
 
-    fireEvent.click(within(cardFor('CASE-DRAWER')).getByRole('button', { name: '開啟案件工作' }));
+    fireEvent.click(within(cardFor('CASE-DRAWER')).getByText('CASE-DRAWER'));
     const dialog = await screen.findByRole('region', { name: '案件 CASE-DRAWER' });
 
     await waitFor(() => expect(within(dialog).getAllByText('林小芳').length).toBeGreaterThan(0));
@@ -360,7 +376,7 @@ describe('待辦看板 Beta 唯讀工作 Drawer', () => {
     render(<OrderWorkbenchV2Page />);
     fireEvent.click(await screen.findByRole('button', { name: '完成訂單' }));
     await waitFor(() => expect(screen.getByText('CASE-HISTORY')).toBeInTheDocument());
-    fireEvent.click(within(cardFor('CASE-HISTORY')).getByRole('button', { name: '查看案件紀錄' }));
+    fireEvent.click(cardFor('CASE-HISTORY'));
 
     const dialog = await screen.findByRole('region', { name: '案件 CASE-HISTORY' });
     expect(within(dialog).queryByRole('heading', { name: '13 階段正式進度' })).not.toBeInTheDocument();
@@ -412,7 +428,7 @@ describe('待辦看板 Beta 唯讀工作 Drawer', () => {
 
     render(<OrderWorkbenchV2Page />);
     await waitFor(() => expect(screen.getByText('CASE-STRICT')).toBeInTheDocument());
-    fireEvent.click(within(cardFor('CASE-STRICT')).getByRole('button', { name: '開啟案件工作' }));
+    fireEvent.click(cardFor('CASE-STRICT'));
 
     const dialog = await screen.findByRole('region', { name: '案件 CASE-STRICT' });
     const caseContext = dialog.querySelector('.order-case-context');

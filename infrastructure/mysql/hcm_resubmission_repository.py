@@ -7,6 +7,7 @@ import json
 from datetime import date
 
 from domains.case_import.hcm_resubmission import HcmResubmissionFacts, hcm_field_targets
+from domains.case_import.hcm_import_review import unresolved_hcm_review_fields
 from shared_kernel.fingerprints import fingerprint_payload
 from subsystems.case_import.hcm_resubmission_workflow import HcmResubmissionReceipt
 
@@ -17,13 +18,20 @@ class MySqlHcmResubmissionRepository:
         self._client_port = client_port
         self._orders_port = orders_port
 
-    def load_facts(self, review_identity: str, *, for_update: bool, resulting_review_version: int | None = None) -> HcmResubmissionFacts:
+    def _load_review_row(self, review_identity: str, *, for_update: bool = False):
         suffix = " FOR UPDATE" if for_update else ""
         with self._connection.cursor() as cursor:
             cursor.execute(_FACTS_SQL + suffix, (review_identity,))
             row = cursor.fetchone()
         if row is None:
             raise ValueError("hcm_resubmission_not_available")
+        return row
+
+    def load_facts(self, review_identity: str, *, for_update: bool, resulting_review_version: int | None = None) -> HcmResubmissionFacts:
+        row = self._load_review_row(review_identity, for_update=for_update)
+        return self._facts_from_row(row, resulting_review_version=resulting_review_version)
+
+    def _facts_from_row(self, row, *, resulting_review_version: int | None = None) -> HcmResubmissionFacts:
         logical_code, field_path = _single_owned_field(row["issue_codes"])
         targets = hcm_field_targets(field_path)
         values = {target: row[_column_alias(target)] for target in targets}
@@ -31,7 +39,7 @@ class MySqlHcmResubmissionRepository:
             cursor.execute(
                 "SELECT COALESCE(MAX(resulting_review_version),0) AS review_version "
                 "FROM case_import_hcm_correction_events WHERE canonical_review_identity=%s",
-                (review_identity,),
+                (row["review_identity"],),
             )
             version_row = cursor.fetchone() or {}
         review_version = int(version_row.get("review_version") or 0)
@@ -54,16 +62,9 @@ class MySqlHcmResubmissionRepository:
         )
 
     def query_review(self, review_identity: str):
-        facts = self.load_facts(review_identity, for_update=False)
-        with self._connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT resulting_review_version,root_after_fingerprint FROM case_import_hcm_correction_events "
-                "WHERE canonical_review_identity=%s ORDER BY resulting_review_version DESC LIMIT 1",
-                (review_identity,),
-            )
-            event = cursor.fetchone()
-        resolved = bool(event and int(event["resulting_review_version"]) == facts.review_version
-                        and str(event["root_after_fingerprint"]) == facts.root_fingerprint)
+        row = self._load_review_row(review_identity)
+        facts = self._facts_from_row(row)
+        resolved = not unresolved_hcm_review_fields((facts.field_path,), _current_values(row))
         return {"review_identity": facts.review_identity, "case_no": facts.case_no,
                 "source_field": facts.field_path, "review_version": facts.review_version,
                 "resolved": resolved}
@@ -105,6 +106,15 @@ class MySqlHcmResubmissionRepository:
                         unavailable_reason = "service_data_locked" if locked else None
                     except ValueError as error:
                         if str(error) not in {"hcm_resubmission_review_scope_ambiguous", "hcm_resubmission_field_not_owned", "hcm_resubmission_not_available"}:
+                            raise
+                else:
+                    try:
+                        current = self._load_review_row(str(row["review_identity"]))
+                        fields = list(unresolved_hcm_review_fields(tuple(fields), _current_values(current)))
+                        if not fields:
+                            continue
+                    except ValueError as error:
+                        if str(error) != "hcm_resubmission_not_available":
                             raise
                 items.append({"source_id": cursor_id, "review_identity": str(row["review_identity"]),
                               "case_no": str(row["case_no"]), "fields": fields,
@@ -251,16 +261,22 @@ def _single_owned_field(value: object) -> tuple[str, str]:
     return next(iter(logical_codes)), field_path
 
 
-_TARGET_SELECTS = ",".join(
-    f"{_table_alias(target)}.{target.split('.', 1)[1]} AS {_column_alias(target)}"
-    for target in sorted({target for fields in (
+_TARGETS = sorted({target for fields in (
         hcm_field_targets("報名時間(建檔)"), hcm_field_targets("IP位址"), hcm_field_targets("姓名"),
         hcm_field_targets("性別"), hcm_field_targets("行動電話"), hcm_field_targets("縣市"),
         hcm_field_targets("預產期/預計服務開始月份"), hcm_field_targets("居住型態"),
         hcm_field_targets("生產方式"), hcm_field_targets("寶寶資訊"), hcm_field_targets("服務時間"),
         hcm_field_targets("預計服務日期"), hcm_field_targets("希望服務天數"), hcm_field_targets("服務方式"),
     ) for target in fields})
+_TARGET_SELECTS = ",".join(
+    f"{_table_alias(target)}.{target.split('.', 1)[1]} AS {_column_alias(target)}"
+    for target in _TARGETS
 )
+
+
+def _current_values(row) -> dict[str, object]:
+    return {target: row.get(_column_alias(target)) for target in _TARGETS}
+
 _FACTS_SQL = (
     "SELECT b.id AS binding_id,b.case_no,e.client_id,r.review_identity,r.issue_codes,"
     "r.source_event_identity AS prior_source_event_identity,c.client_hcm_correction_version,"

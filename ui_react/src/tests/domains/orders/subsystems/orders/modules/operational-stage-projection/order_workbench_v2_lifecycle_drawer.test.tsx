@@ -22,6 +22,9 @@ vi.mock('../../../../../../../components/OrderWorkbenchV2OwnerContext', () => ({
 vi.mock('../../../../../../../components/OrderServiceCompletionActions', () => ({ OrderServiceCompletionActions: () => <p>正常完工操作入口</p> }));
 vi.mock('../../../../../../../api/orders/order_core_stage_projection_client', () => ({ orderCoreStageProjectionClient: { getCoreStageTimelines: mocks.core } }));
 vi.mock('../../../../../../../api/orders/order_query_client', () => ({ ordersQueryClient: { getOrderDetail: mocks.detail, getOrderTerms: mocks.terms, getAssignmentPlan: mocks.assignment } }));
+vi.mock('../../../../../../../components/OrderServiceDatesPanel', () => ({ OrderServiceDatesPanel: () => <p>日期操作入口</p> }));
+vi.mock('../../../../../../../components/OrderAssignmentPlanPanel', () => ({ OrderAssignmentPlanPanel: () => <p>排班操作入口</p> }));
+vi.mock('../../../../../../../components/OrderOfficialDateCorrectionPanel', () => ({ OrderOfficialDateCorrectionPanel: () => <p>正式日期更正操作入口</p> }));
 const CASE = 'CASE-LIFECYCLE-DRAWER';
 function page(cancelled = false) {
   return { items: [{ case_no: CASE, branch_type: cancelled ? 'cancelled' : 'normal',
@@ -37,30 +40,96 @@ describe('Beta Drawer 受控操作整合與跨支線回讀', () => {
     mocks.detail.mockResolvedValue({ case_no: CASE, client_name: '測試客戶', client_id: 1, order_status: '服務中', identity_status: null, actual_start_date: '2026-09-01' });
     mocks.terms.mockResolvedValue({ case_no: CASE, order_version: 1, scheduling_version: 1,
       terms: { planned_start_date: '2026-09-01', service_days: 20, service_hours_per_day: 8 } });
-    mocks.assignment.mockResolvedValue({ case_no: CASE, assignments: [] });
+    mocks.assignment.mockResolvedValue({ case_no: CASE, assignments: [{
+      assignment_id: 17, candidate_key: null, staff_id: 7, sequence: 1,
+      assigned_start_date: '2026-09-01', assigned_end_date: '2026-09-01',
+      official_service_dates: ['2026-09-01'], actual_hours: null, lineage_source_assignment_ids: [],
+    }] });
+  });
+
+  it.each([
+    ['formal_service', '正式排班'],
+    ['service_completion', '完工確認'],
+    ['confirmed_service_dates', '確認日期'],
+  ])('依 %s 直接呈現 %s，其他服務作業預設收合', async (stage, label) => {
+    const data = page();
+    data.items[0]!.current_core_stage_code = stage;
+    mocks.core.mockResolvedValue(data);
+    render(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="normal" onClose={vi.fn()} />);
+    await screen.findByRole('heading', { name: label });
+    const summary = screen.getByText('其他服務作業');
+    const secondary = summary.closest('details')!;
+    expect(secondary).not.toHaveAttribute('open');
+    expect(screen.queryByRole('button', { name: '更正完工服務日期' })).not.toBeInTheDocument();
+    fireEvent.click(summary);
+    secondary.open = true;
+    const other = label === '完工確認' ? '確認日期' : '完工確認';
+    fireEvent.click(screen.getByRole('button', { name: other }));
+    expect(screen.getByRole('heading', { name: other })).toBeInTheDocument();
+    expect(secondary).not.toHaveAttribute('open');
   });
 
   it.each([
     ['取消／補登取消服務事實', 'cancellation'],
-    ['確認／更正實際開始日', 'actual-start'],
+    ['更正開始日並重排', 'actual-start'],
   ])('%s 的明確入口能展開對應正式操作面板', async (entry, label) => {
     render(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="normal" onClose={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: '案件異動' }));
-    const button = screen.getByRole('button', { name: entry });
+    const button = await screen.findByRole('button', { name: entry });
     await waitFor(() => expect(button).toBeEnabled());
     expect(screen.queryByLabelText('受控操作草稿')).not.toBeInTheDocument();
     fireEvent.click(button);
     expect(screen.getByRole('region', { name: `操作面板 ${label}` })).toBeInTheDocument();
   });
 
+  it.each(['in_progress', 'completed'] as const)('完工日期更正依正式 lifecycle 開啟，不受 %s 看板分頁限制', async (scope) => {
+    const data = page();
+    data.items[0]!.lifecycle_status = '訂單完成';
+    data.items[0]!.current_core_stage_code = null;
+    mocks.core.mockResolvedValue(data);
+    mocks.detail.mockResolvedValue({ case_no: CASE, client_name: '測試客戶', order_status: '訂單完成', actual_start_date: '2026-09-01' });
+    render(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="normal" workbenchScope={scope} onClose={vi.fn()} />);
+    await screen.findByRole('heading', { name: '結算狀態' });
+    expect(screen.queryByRole('button', { name: '更正完工服務日期' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '案件異動' }));
+    const entry = screen.getByRole('button', { name: '更正完工服務日期' });
+    await waitFor(() => expect(entry).toBeEnabled());
+    expect(screen.queryByRole('button', { name: '更正開始日並重排' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '確認／更正實際開始日' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '取消／補登取消服務事實' })).not.toBeInTheDocument();
+    fireEvent.click(entry);
+    expect(screen.getByText('正式日期更正操作入口')).toBeVisible();
+  });
+
+  it('未完工案件只提供開始日異動，不提供完工日期更正', async () => {
+    render(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="normal" onClose={vi.fn()} />);
+    await screen.findByRole('heading', { name: '正式排班' });
+    fireEvent.click(screen.getByRole('button', { name: '案件異動' }));
+    expect(screen.getByRole('button', { name: '更正開始日並重排' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: '更正完工服務日期' })).not.toBeInTheDocument();
+    expect(screen.getByText(/實際開始日已一併保存/)).toBeVisible();
+  });
+
+  it('尚無正式排班時仍可確認日期，入口不宣稱會重排', async () => {
+    mocks.assignment.mockResolvedValue({ case_no: CASE, assignments: [] });
+    render(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="normal" onClose={vi.fn()} />);
+    await screen.findByRole('heading', { name: '正式排班' });
+    fireEvent.click(screen.getByRole('button', { name: '案件異動' }));
+    const entry = screen.getByRole('button', { name: '確認／更正實際開始日' });
+    expect(entry).toBeEnabled();
+    expect(screen.queryByRole('button', { name: '更正開始日並重排' })).not.toBeInTheDocument();
+    fireEvent.click(entry);
+    expect(screen.getByRole('region', { name: '操作面板 actual-start' })).toBeVisible();
+  });
+
   it('實際開始日面板展開後移除無作用的重複入口', async () => {
     render(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="normal" onClose={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: '案件異動' }));
-    const entry = screen.getByRole('button', { name: '確認／更正實際開始日' });
+    const entry = await screen.findByRole('button', { name: '更正開始日並重排' });
     await waitFor(() => expect(entry).toBeEnabled());
     fireEvent.click(entry);
     expect(screen.getByRole('region', { name: '操作面板 actual-start' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '確認／更正實際開始日' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '更正開始日並重排' })).not.toBeInTheDocument();
   });
 
   it('受控重開入口只在取消支線顯示', async () => {
@@ -75,6 +144,8 @@ describe('Beta Drawer 受控操作整合與跨支線回讀', () => {
     render(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="cancelled" onClose={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: '案件異動' }));
     const button = await screen.findByRole('button', { name: '受控重開取消案件' });
+    expect(screen.queryByRole('button', { name: '更正完工服務日期' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '更正開始日並重排' })).not.toBeInTheDocument();
     fireEvent.click(button);
     expect(screen.getByRole('region', { name: '操作面板 reopen' })).toBeInTheDocument();
   });
@@ -88,7 +159,7 @@ describe('Beta Drawer 受控操作整合與跨支線回讀', () => {
     fireEvent.click(screen.getByRole('button', { name: '模擬結果未明' }));
     const close = screen.getByRole('button', { name: '← 返回待辦看板' });
     expect(close).toBeDisabled();
-    expect(screen.getByRole('button', { name: '確認／更正實際開始日' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '更正開始日並重排' })).toBeDisabled();
     fireEvent.click(close); fireEvent.keyDown(document, { key: 'Escape' });
     expect(view.container.querySelector('.order-v2-drawer-backdrop')).toBeNull();
     expect(onClose).not.toHaveBeenCalled(); expect(screen.getByRole('region', { name: '操作面板 cancellation' })).toBeInTheDocument();

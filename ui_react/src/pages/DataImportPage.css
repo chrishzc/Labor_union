@@ -32,6 +32,17 @@
 .import-status-pill.idle { background: #fff7ed; color: #ea580c; border: 1px solid #fed9b8; }
 .import-status-pill.locked { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
 .import-description { margin: 0; color: #57423b; font-size: .86rem; line-height: 1.5; }
+.import-steps { display: flex; list-style: none; gap: 10px; margin: 0; padding: 0; }
+.import-steps li { display: flex; flex: 1; align-items: center; gap: 8px; padding: 10px; border-radius: 8px; background: #f7f3f1; color: #74593f; font-size: .82rem; }
+.import-steps li > span { display: grid; place-items: center; width: 24px; height: 24px; flex-shrink: 0; border-radius: 50%; background: #e9ded8; font-weight: 750; }
+.import-steps li.current { background: #fff0eb; color: #a43c12; font-weight: 750; }
+.import-steps li.current > span { background: #d85d32; color: white; }
+.import-steps li.done { background: #edf5ee; color: #166534; }
+.import-source-guidance { font-size: .82rem; color: #74593f; }
+.import-source-guidance summary { cursor: pointer; font-weight: 650; min-height: 32px; }
+.import-source-guidance p { margin: 4px 0 0; line-height: 1.6; }
+.import-page-container :is(summary, button, label.import-file-picker-label):focus-visible { outline: 3px solid #a83f1d; outline-offset: 3px; }
+.import-file-upload-box:focus-within { outline: 2px solid #a83f1d; outline-offset: 3px; }
 .import-file-upload-box { background: #fffaf7; border: 1.5px dashed #dec0b6; border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
 .import-file-selector-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .import-file-native-hidden,.sr-only { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0,0,0,0) !important; border: 0 !important; }
@@ -82,6 +93,10 @@
 .import-result-workbench { margin-bottom: 24px; padding: 20px; border: 1px solid #dec0b6; border-radius: 16px; background: #fff; }
 @media (max-width: 960px) { .import-cards-grid { grid-template-columns: 1fr; } }
 @media (max-width: 760px) {
+  .import-workbench-card { padding: 16px; gap: 12px; }
+  .import-card-header { align-items: flex-start; flex-wrap: wrap; }
+  .import-steps { gap: 5px; }
+  .import-steps li { flex-direction: column; gap: 5px; padding: 8px 4px; text-align: center; font-size: .76rem; }
   .import-kind-selector { align-items: stretch; flex-direction: column; }
   .import-kind-selector > div { margin-inline: -4px; padding-inline: 4px; }
   .import-kind-selector button { min-height: 42px; }

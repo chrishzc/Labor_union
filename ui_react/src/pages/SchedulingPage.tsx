@@ -2001,6 +2001,8 @@ export const SchedulingPage: React.FC = () => {
   const directoryPendingCursorRef = useRef<number | null>(null);
   const directorySentinelRef = useRef<HTMLDivElement | null>(null);
   const calendarHeaderScrollRef = useRef<HTMLDivElement | null>(null);
+  const calendarBodyScrollRef = useRef<HTMLDivElement | null>(null);
+  const [pendingTodayScroll, setPendingTodayScroll] = useState(false);
   const calendarControllerRef = useRef<AbortController | null>(null);
   const caseOptionsControllerRef = useRef<AbortController | null>(null);
   const assignmentOptionsByStaffRef = useRef(new Map<number, readonly StaffAssignmentOption[]>());
@@ -2412,6 +2414,22 @@ export const SchedulingPage: React.FC = () => {
     ...day,
     isToday: day.dateStr === taipeiToday,
   })), [month, taipeiToday]);
+
+  useEffect(() => {
+    if (!pendingTodayScroll) return;
+    const header = calendarHeaderScrollRef.current;
+    const body = calendarBodyScrollRef.current;
+    const today = header?.querySelector<HTMLElement>(`[data-date="${taipeiToday}"]`);
+    const staffColumn = header?.querySelector<HTMLElement>('.gantt-staff-header-cell');
+    if (!header || !body || !today || !staffColumn) return;
+    const staffWidth = staffColumn.getBoundingClientRect().width;
+    const todayRect = today.getBoundingClientRect();
+    const left = Math.max(0, todayRect.left - header.getBoundingClientRect().left
+      + header.scrollLeft - staffWidth - (body.clientWidth - staffWidth - todayRect.width) / 2);
+    body.scrollLeft = left;
+    header.scrollLeft = body.scrollLeft;
+    setPendingTodayScroll(false);
+  }, [pendingTodayScroll, month, taipeiToday, filteredStaff.length, activeTab]);
   const eligibilityResult = eligibilityState.kind === 'ready'
     ? eligibilityDisplay(eligibilityState.data)
     : null;
@@ -2487,9 +2505,9 @@ export const SchedulingPage: React.FC = () => {
       {/* Page Header */}
       <header className="page-header-banner scheduling-page-header">
         <div>
-          <h1 className="page-title">📅 多月嫂排班日曆與調度中心</h1>
+          <h1 className="page-title">📅 排班日曆與調度</h1>
           <p className="page-subtitle">
-            全景甘特檔期矩陣、接單資格、撞期判定與預約鎖定均使用正式排班資料。
+            查看每月檔期；需要安排案件時，展開案件排查。
           </p>
         </div>
       </header>
@@ -2502,21 +2520,21 @@ export const SchedulingPage: React.FC = () => {
           aria-current={activeTab === 'calendar' ? 'page' : undefined}
           onClick={() => setActiveTab('calendar')}
         >
-          📅 1. 服務人員排班甘特月曆
+          📅 排班月曆
         </button>
         <button
           data-surface-id="scheduling.tab.leave_sub"
           className={`scheduling-tab-btn ${activeTab === 'leave_sub' ? 'active' : ''}`}
           onClick={() => setActiveTab('leave_sub')}
         >
-          🚑 2. 服務中請假與代班 (含 LINE 待辦)
+          🚑 請假與代班
         </button>
         <button
           data-surface-id="scheduling.tab.holidays"
           className={`scheduling-tab-btn ${activeTab === 'holidays' ? 'active' : ''}`}
           onClick={() => setActiveTab('holidays')}
         >
-          🗓️ 3. 國定假日政策
+          🗓️ 國定假日政策
         </button>
       </nav>
 
@@ -2526,9 +2544,99 @@ export const SchedulingPage: React.FC = () => {
           data-surface-id="scheduling.calendar"
           aria-label="排班甘特月曆與服務人員檔期"
         >
-          {/* Top Case Selection & Ghost Projection Bar */}
+          {/* Top Control Bar: Month Switcher + Search + Filters */}
+          <section className="gantt-matrix-header-bar" aria-label="月曆查詢控制">
+            {/* Left: Month Navigator & Today */}
+            <div className="gantt-month-navigator">
+              <div className="month-pill-group">
+                <button
+                  type="button"
+                  data-control-id="scheduling.calendar.previous-month"
+                  className="month-nav-arrow"
+                  aria-label="查看上個月"
+                  onClick={() => setMonth((value) => moveMonth(value, -1))}
+                >
+                  ◀ {prevMonthName}
+                </button>
+                <span className="current-month-display">
+                  {month.year} 年 {month.month}月
+                </span>
+                <button
+                  type="button"
+                  data-control-id="scheduling.calendar.next-month"
+                  className="month-nav-arrow"
+                  aria-label="查看下個月"
+                  onClick={() => setMonth((value) => moveMonth(value, 1))}
+                >
+                  {nextMonthName} ▶
+                </button>
+              </div>
+
+              <button
+                type="button"
+                className="gantt-today-btn"
+                data-control-id="scheduling.calendar.today"
+                onClick={() => {
+                  setMonth(currentMonth());
+                  setPendingTodayScroll(true);
+                }}
+              >
+                🗓 今天 ({Number(taipeiMonth)}/{Number(taipeiDay)})
+              </button>
+            </div>
+
+            {/* Right: Search + Filter Chips */}
+            <div className="gantt-filter-controls">
+              <div className="gantt-search-box">
+                <span>🔍</span>
+                <input
+                  type="text"
+                  placeholder="按月嫂姓名或編號..."
+                  value={searchKeyword}
+                  onChange={(e) => setSearchKeyword(e.target.value)}
+                />
+                {searchKeyword && (
+                  <button type="button" onClick={() => setSearchKeyword('')}>✕</button>
+                )}
+              </div>
+
+              <div className="gantt-status-pills">
+                <button
+                  type="button"
+                  className={`gantt-pill ${statusFilter === 'all' ? 'active' : ''}`}
+                  onClick={() => setStatusFilter('all')}
+                >
+                  全部月嫂 ({staffList.length})
+                </button>
+                <button
+                  type="button"
+                  className={`gantt-pill ${statusFilter === 'active' ? 'active' : ''}`}
+                  onClick={() => setStatusFilter('active')}
+                >
+                  🟢 正常履約中
+                </button>
+                <button
+                  type="button"
+                  className={`gantt-pill ${statusFilter === 'waiting' ? 'active' : ''}`}
+                  onClick={() => setStatusFilter('waiting')}
+                >
+                  🟡 待派單／防撞期
+                </button>
+                <button
+                  type="button"
+                  className={`gantt-pill ${statusFilter === 'leave' ? 'active' : ''}`}
+                  onClick={() => setStatusFilter('leave')}
+                >
+                  🟣 請假/留停
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <details className="gantt-case-checks" open={selectedCaseNo ? true : undefined}>
+            <summary>案件排查<span>{selectedCaseNo ? `目前案件：${selectedCaseNo}` : '查詢可排人選與檔期衝突'}</span></summary>
           <div className="gantt-case-projection-bar">
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div className="gantt-case-selector-row">
               <span style={{ fontSize: '0.92rem', fontWeight: 750, color: '#9a3412' }}>
                 🔮 選擇排查案件：
               </span>
@@ -2620,92 +2728,7 @@ export const SchedulingPage: React.FC = () => {
               </>
             )}
           </div>
-
-          {/* Top Control Bar: Month Switcher + Search + Filters */}
-          <section className="gantt-matrix-header-bar" aria-label="月曆查詢控制">
-            {/* Left: Month Navigator & Today */}
-            <div className="gantt-month-navigator">
-              <div className="month-pill-group">
-                <button
-                  type="button"
-                  data-control-id="scheduling.calendar.previous-month"
-                  className="month-nav-arrow"
-                  aria-label="查看上個月"
-                  onClick={() => setMonth((value) => moveMonth(value, -1))}
-                >
-                  ◀ {prevMonthName}
-                </button>
-                <span className="current-month-display">
-                  {month.year} 年 {month.month}月
-                </span>
-                <button
-                  type="button"
-                  data-control-id="scheduling.calendar.next-month"
-                  className="month-nav-arrow"
-                  aria-label="查看下個月"
-                  onClick={() => setMonth((value) => moveMonth(value, 1))}
-                >
-                  {nextMonthName} ▶
-                </button>
-              </div>
-
-              <button
-                type="button"
-                className="gantt-today-btn"
-                data-control-id="scheduling.calendar.today"
-                onClick={() => setMonth(currentMonth())}
-              >
-                🗓 今天 ({Number(taipeiMonth)}/{Number(taipeiDay)})
-              </button>
-            </div>
-
-            {/* Right: Search + Filter Chips */}
-            <div className="gantt-filter-controls">
-              <div className="gantt-search-box">
-                <span>🔍</span>
-                <input
-                  type="text"
-                  placeholder="按月嫂姓名或編號..."
-                  value={searchKeyword}
-                  onChange={(e) => setSearchKeyword(e.target.value)}
-                />
-                {searchKeyword && (
-                  <button type="button" onClick={() => setSearchKeyword('')}>✕</button>
-                )}
-              </div>
-
-              <div className="gantt-status-pills">
-                <button
-                  type="button"
-                  className={`gantt-pill ${statusFilter === 'all' ? 'active' : ''}`}
-                  onClick={() => setStatusFilter('all')}
-                >
-                  全部月嫂 ({staffList.length})
-                </button>
-                <button
-                  type="button"
-                  className={`gantt-pill ${statusFilter === 'active' ? 'active' : ''}`}
-                  onClick={() => setStatusFilter('active')}
-                >
-                  🟢 正常履約中
-                </button>
-                <button
-                  type="button"
-                  className={`gantt-pill ${statusFilter === 'waiting' ? 'active' : ''}`}
-                  onClick={() => setStatusFilter('waiting')}
-                >
-                  🟡 待派單／防撞期
-                </button>
-                <button
-                  type="button"
-                  className={`gantt-pill ${statusFilter === 'leave' ? 'active' : ''}`}
-                  onClick={() => setStatusFilter('leave')}
-                >
-                  🟣 請假/留停
-                </button>
-              </div>
-            </div>
-          </section>
+          </details>
 
           {/* Full Legend Bar */}
           <section className="gantt-legend-bar-rich" aria-label="排班檔期圖例">
@@ -2809,6 +2832,7 @@ export const SchedulingPage: React.FC = () => {
               </div>
 
               <div
+                ref={calendarBodyScrollRef}
                 className="gantt-matrix-scroll-wrapper"
                 tabIndex={0}
                 aria-describedby="gantt-scroll-guidance"

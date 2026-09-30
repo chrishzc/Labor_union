@@ -83,7 +83,7 @@ class _Facts:
                     Decimal("40"), Decimal("5"), 20, 12000, 300,
                     "王小美", "陳月嫂", "A123456789", "完整地址",
                     application_roc_year=114,
-                    claim_period_label="第三季",
+                    claim_period_label="2026年第三季",
                 ),
             ),
             subsidized=(),
@@ -108,7 +108,7 @@ class _QuarterlySubsidyFacts(_Facts):
                 Decimal("40"), Decimal("5"), 20, amount, 300,
                 "王小美", "陳月嫂", None, None,
                 application_roc_year=application_roc_year,
-                claim_period_label="第一季",
+                claim_period_label=f"{service_end.year}年{('第一季', '第二季', '第三季', '第四季')[(service_end.month - 1) // 3]}",
             )
 
         return SubsidyFacts(
@@ -203,7 +203,7 @@ def test_weekly_query_is_redacted_and_uses_official_work_days():
     assert data["case_rows"][0]["applicant_name"] == "王小美"
     assert data["subsidy_partitions"][0]["rows"][0]["identity_card"] == "A123456789"
     assert data["subsidy_partitions"][0]["rows"][0]["application_roc_year"] == 114
-    assert data["subsidy_partitions"][0]["rows"][0]["claim_period_label"] == "第三季"
+    assert data["subsidy_partitions"][0]["rows"][0]["claim_period_label"] == "2026年第三季"
     assert data["subsidy_partitions"][0]["rows"][0]["reconciliation_status"] == "結案"
     assert data["subsidy_partitions"][0]["rows"][0]["notes"] == ""
     assert "王小美" in response.text
@@ -439,7 +439,8 @@ def test_weekly_export_has_fixed_three_sheets_and_summary_without_pii():
     assert subsidy_sheet.cell(row=6, column=2).value == "114000007"
     assert subsidy_sheet.cell(row=6, column=3).value == "(114)一般市民"
     assert subsidy_sheet.cell(row=6, column=5).value == "114000007"
-    assert subsidy_sheet.cell(row=6, column=14).value == "第三季"
+    assert subsidy_sheet.cell(row=5, column=14).value == "年度季度"
+    assert subsidy_sheet.cell(row=6, column=14).value == "2026年第三季"
     assert subsidy_sheet.cell(row=6, column=2).number_format == "@"
     assert subsidy_sheet.cell(row=6, column=5).number_format == "@"
     assert subsidy_sheet.cell(row=1, column=6).value == "114市民總計:"
@@ -495,6 +496,8 @@ def test_weekly_export_appends_current_application_year_quarter_amount_summary()
         }
     )
     assert footer_title_row > last_detail_row
+    assert worksheet.cell(row=last_detail_row, column=14).value == "2027年第一季"
+    assert worksheet.cell(row=last_detail_row - 1, column=14).value == "年度季度"
     footer_amounts = {
         worksheet.cell(row=row, column=1).value: worksheet.cell(row=row, column=11).value
         for row in range(footer_title_row + 1, worksheet.max_row + 1)

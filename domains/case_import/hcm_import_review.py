@@ -6,7 +6,10 @@ Description: 定義 HCM review identity、去敏證據與欄位級 warning 展�
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import time, timedelta
 import hashlib
+import math
+import re
 from typing import Mapping
 
 from domains.anomalies.import_warning_tracking import (
@@ -15,6 +18,66 @@ from domains.anomalies.import_warning_tracking import (
     build_import_warning_occurrence,
 )
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
+from domains.case_import.client_import_validation import VALID_CITIES, validate_hcm_row
+from domains.case_import.hcm_resubmission import hcm_field_targets
+from domains.clients.profile import CLIENT_PROFILE_FIELD_SET, ClientProfileValidationError, validate_changes
+
+
+def unresolved_hcm_review_fields(
+    fields: tuple[str, ...], current_values: Mapping[str, object],
+) -> tuple[str, ...]:
+    """Recheck original field warnings against current authoritative roots.
+
+    Historical source evidence stays immutable. Unknown fields remain visible;
+    a save only resolves fields whose current value passes the HCM field rule.
+    """
+    unresolved = []
+    for field in fields:
+        try:
+            targets = hcm_field_targets(field)
+        except ValueError:
+            unresolved.append(field)
+            continue
+        value = current_values.get(targets[0])
+        profile_field = targets[0].removeprefix("clients.")
+        if len(targets) == 1 and targets[0].startswith("clients.") and profile_field in CLIENT_PROFILE_FIELD_SET:
+            try:
+                validate_changes({profile_field: value}, city_allowlist=VALID_CITIES)
+            except ClientProfileValidationError:
+                unresolved.append(field)
+            continue
+        if field == "服務時間":
+            value = _current_service_time(current_values)
+        if value is None or not str(value).strip() or field in validate_hcm_row({field: value}):
+            unresolved.append(field)
+    return tuple(unresolved)
+
+
+def _current_service_time(values: Mapping[str, object]) -> str | None:
+    hours = values.get("orders.service_hours_per_day")
+    try:
+        number = float(hours) if not isinstance(hours, bool) else 0
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number) or not 0 < number <= 24:
+        return None
+    clocks = []
+    for field in ("orders.service_start_time", "orders.service_end_time"):
+        value = values.get(field)
+        if isinstance(value, time):
+            clock = value.strftime("%H:%M")
+        elif isinstance(value, timedelta) and 0 <= value.total_seconds() < 86400:
+            seconds = int(value.total_seconds())
+            clock = f"{seconds // 3600:02d}:{seconds % 3600 // 60:02d}"
+        else:
+            clock = str(value)
+        if not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d(?::00)?", clock):
+            return None
+        clocks.append(clock[:5])
+    offset = values.get("orders.service_end_day_offset")
+    if isinstance(offset, bool) or offset not in (0, 1):
+        return None
+    return f"{number:g}小時 {clocks[0]}-{clocks[1]}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,4 +240,6 @@ __all__ = [
     "build_hcm_warning_occurrences",
     "build_hcm_warning_occurrences_from_review",
     "opened_anomaly_snapshot",
+    "unresolved_hcm_review_fields",
+    "unresolved_hcm_review_fields",
 ]
