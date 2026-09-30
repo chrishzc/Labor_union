@@ -19,15 +19,15 @@ from subsystems.orders.terms_workflow import CommandClaimState
 class ReopenWorkflowFacts:
     order: ReopenOrderFacts
     financial_events: tuple[ReopenFinancialEventFact, ...]
-    client_finance_version: int
-    payroll_version: int
+    client_finance_version: int | None
+    payroll_version: int | None
 
 
 @dataclass(frozen=True, slots=True)
 class OrderReopenPreview:
     candidate: ReopenCandidate
-    client_finance_version: int
-    payroll_version: int
+    client_finance_version: int | None
+    payroll_version: int | None
     fingerprint: PreviewFingerprint
 
 
@@ -35,8 +35,8 @@ class OrderReopenPreview:
 class OrderReopenApplyRequest:
     case_no: str
     expected_order_version: ExpectedVersion
-    expected_client_finance_version: ExpectedVersion
-    expected_payroll_version: ExpectedVersion
+    expected_client_finance_version: ExpectedVersion | None
+    expected_payroll_version: ExpectedVersion | None
     preview_fingerprint: PreviewFingerprint
     idempotency_key: IdempotencyKey
     actor: ActorContext
@@ -162,7 +162,7 @@ def _build_receipt(preview: OrderReopenPreview) -> OrderReopenReceipt:
 
 
 def _validate_expected_versions(request: OrderReopenApplyRequest, facts: ReopenWorkflowFacts) -> None:
-    comparisons = ((request.expected_order_version.value, facts.order.order_version, "order"), (request.expected_client_finance_version.value, facts.client_finance_version, "client_finance"), (request.expected_payroll_version.value, facts.payroll_version, "payroll"))
+    comparisons = ((request.expected_order_version.value, facts.order.order_version, "order"), ((request.expected_client_finance_version.value if request.expected_client_finance_version else None), facts.client_finance_version, "client_finance"), ((request.expected_payroll_version.value if request.expected_payroll_version else None), facts.payroll_version, "payroll"))
     for expected, current, domain in comparisons:
         if expected != current:
             code = "client_finance_candidate_stale" if domain == "client_finance" else f"{domain}_version_conflict"
@@ -180,7 +180,7 @@ def _raise_if_claim_incomplete(request: OrderReopenApplyRequest, claim: CommandC
 
 
 def _command_fingerprint(request: OrderReopenApplyRequest) -> PreviewFingerprint:
-    return fingerprint_payload({"actor": request.actor.actor_id, "case_no": request.case_no, "client_finance_version": request.expected_client_finance_version.value, "order_version": request.expected_order_version.value, "payroll_version": request.expected_payroll_version.value, "preview_fingerprint": request.preview_fingerprint.value, "reason": request.reason})
+    return fingerprint_payload({"actor": request.actor.actor_id, "case_no": request.case_no, "client_finance_version": (request.expected_client_finance_version.value if request.expected_client_finance_version else None), "order_version": request.expected_order_version.value, "payroll_version": (request.expected_payroll_version.value if request.expected_payroll_version else None), "preview_fingerprint": request.preview_fingerprint.value, "reason": request.reason})
 
 
 def _candidate_workflow_error(request: OrderReopenApplyRequest, error: ReopenCandidateError) -> ReopenWorkflowError:

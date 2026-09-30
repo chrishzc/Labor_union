@@ -517,3 +517,18 @@ def test_order_reopen_requires_admin_auth():
 
     res = client.post("/api/v1/orders/CASE-RO-001/reopen/preview")
     assert res.status_code in {401, 403}
+
+
+
+def test_reopen_http_accepts_explicit_absent_versions_and_rejects_omission():
+    repo = InMemoryOrderReopenRepository(replace(_default_facts(), client_finance_version=None, payroll_version=None))
+    client = TestClient(_create_app(repo))
+    preview = client.post("/api/v1/orders/CASE-RO-001/reopen/preview").json()["data"]
+    assert preview["client_finance_version"] is None and preview["payroll_version"] is None
+    body = {"expected_order_version": preview["order_version"], "expected_client_finance_version": None, "expected_payroll_version": None, "preview_fingerprint": preview["preview_fingerprint"], "reason": "取消後重新確認"}
+    headers = {"Idempotency-Key": "reopen-null", "X-Correlation-ID": "reopen-null"}
+    response = client.post("/api/v1/orders/CASE-RO-001/reopen/apply", json=body, headers=headers)
+    assert response.status_code == 200
+    assert response.json()["data"]["requires_fresh_scheduling_preview"] is True
+    del body["expected_payroll_version"]
+    assert client.post("/api/v1/orders/CASE-RO-001/reopen/apply", json=body, headers=headers).status_code == 422

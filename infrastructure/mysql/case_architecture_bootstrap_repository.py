@@ -316,8 +316,22 @@ def _order_facts(row):
         service_days=int(row["service_days"]),
         service_hours_per_day=int(row["service_hours_per_day"]),
         source_identity_status=str(row["identity_status"]),
-        multi_birth_count=_multi_birth_count(row.get("survey_details")),
+        multi_birth_count=_effective_multi_birth_count(row),
     )
+
+
+def _effective_multi_birth_count(row) -> str | None:
+    corrections = row.get("effective_values_json")
+    if isinstance(corrections, str):
+        corrections = json.loads(corrections)
+    if corrections is not None and not isinstance(corrections, Mapping):
+        raise ValueError("beclass_correction_state_invalid")
+    if isinstance(corrections, Mapping) and "multi_birth_count" in corrections:
+        value = corrections["multi_birth_count"]
+        if value not in {"單胞胎", "雙胞胎"}:
+            raise ValueError("beclass_multi_birth_count_invalid")
+        return value
+    return _multi_birth_count(row.get("survey_details"))
 
 
 def _multi_birth_count(survey_details) -> str | None:
@@ -587,7 +601,7 @@ def _lock_suffix(lock: bool) -> str:
 _ORDER_SELECT_SQL = (
     "SELECT o.case_no,o.lifecycle_version,o.start_date,o.service_days,"
     "o.service_hours_per_day,o.service_start_time,o.service_end_time,"
-    "o.service_end_day_offset,c.identity_status,record.survey_details "
+    "o.service_end_day_offset,c.identity_status,record.survey_details,state.effective_values_json "
     "FROM orders o "
     "JOIN clients c ON c.id=o.client_id AND c.case_no=o.case_no "
     "LEFT JOIN beclass_records record ON record.id=("
@@ -595,6 +609,7 @@ _ORDER_SELECT_SQL = (
     "WHERE source.bound_case_no=o.case_no OR "
     "(source.bound_case_no IS NULL AND source.query_no=o.case_no) "
     "ORDER BY source.bound_case_no IS NOT NULL DESC,source.id LIMIT 1) "
+    "LEFT JOIN beclass_record_correction_states state ON state.beclass_record_id=record.id "
     "WHERE o.case_no=%s"
 )
 

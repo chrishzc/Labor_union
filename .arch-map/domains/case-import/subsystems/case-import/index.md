@@ -26,6 +26,7 @@
 
 ## Verification routing
 - default_boundary: Subsystem
+- integration_root: `tests/domains/case-import/subsystems/case-import/integration/` — real registry correction, first-use bootstrap and assigned Payroll coordination.
 - test_root: `tests/subsystems/case_import/`
 - current owner-local HCM resubmission domain/workbook/workflow coverage is routed to this root.
 - higher_boundary: tests/domains/case_import/

@@ -67,6 +67,31 @@ describe('Client registry owner editing', () => {
     mocks.apply.mockResolvedValue({ owner: 'client_profile', aggregate_identity: 'CASE-001', resulting_version: 3, changed_fields: ['phone'], preview_fingerprint: 'a'.repeat(64), idempotency_key: 'client-profile-1', replayed: false, readback: { phone: '0933333333' } });
   });
 
+  it.each(['order_terms_start_date_required', 'order_terms_service_days_required', 'order_terms_floor_fee_required'])(
+    'saves only the edited profile field despite unavailable finance and incomplete terms (%s)', async (code) => {
+      const incomplete = { ...detail,
+        client: { ...detail.client, values: { ...detail.client.values, name: null, city: null } },
+        finance: { status: 'not_ready' as const, code: 'client_finance_bootstrap_required', values: null },
+        order_terms: { status: 'not_ready' as const, code, data: null, field_capabilities: {} },
+      };
+      mocks.query.mockResolvedValueOnce(incomplete).mockResolvedValue({ ...incomplete,
+        client: { ...incomplete.client, version: 3, values: { ...incomplete.client.values, phone: '0933333333' } },
+      });
+      render(<ClientRegistryPage />);
+      fireEvent.click(screen.getByRole('tab', { name: '名冊資料' }));
+      fireEvent.click(await screen.findByRole('button', { name: /CASE-001/ }));
+      const profile = (await screen.findByRole('heading', { name: '客戶主檔' })).closest('section') as HTMLElement;
+      fireEvent.change(within(profile).getByLabelText('手機'), { target: { value: '0933333333' } });
+      fireEvent.click(within(profile).getByRole('button', { name: '預覽變更' }));
+      await waitFor(() => expect(mocks.preview).toHaveBeenCalledWith('CASE-001', 'profile', { phone: '0933333333' }, 2));
+      fireEvent.click(within(profile).getByRole('button', { name: '確認儲存' }));
+      await screen.findByText('客戶主檔已儲存。');
+      expect(mocks.apply).toHaveBeenCalledTimes(1);
+      expect(mocks.apply.mock.calls[0][2]).toEqual({ phone: '0933333333' });
+      expect(within(profile).getByLabelText('手機')).toHaveValue('0933333333');
+    },
+  );
+
   it.each(['週休2日', null])('shows saved service type even when order terms are unavailable (%s)', async (serviceType) => {
     mocks.query.mockResolvedValue({ ...detail, service_type: serviceType });
     render(<ClientRegistryPage />);

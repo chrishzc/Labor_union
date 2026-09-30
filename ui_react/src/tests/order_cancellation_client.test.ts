@@ -4,7 +4,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { sessionClient } from '../api/auth/session_client';
-import { orderCancellationClient } from '../api/orders/order_cancellation_client';
+import { OrderCancellationPreviewSchema, OrderCancellationQuerySchema, OrderCancellationReceiptSchema, OrderCancellationApplyPayloadSchema, orderCancellationClient } from '../api/orders/order_cancellation_client';
 import { transport } from '../api/shared/transport';
 
 const queryFixture = {
@@ -250,5 +250,20 @@ describe('orderCancellationClient', () => {
       }, error: null,
     });
     await expect(orderCancellationClient.preview('CASE-1', [])).rejects.toThrow();
+  });
+});
+
+
+describe('explicit cancellation owner absence', () => {
+  it('accepts null owners in Query, Preview, receipt and Apply; omission remains invalid', () => {
+    const versions = { scheduling_version: null, scheduling_generation: null, client_finance_version: null, payroll_version: null };
+    expect(OrderCancellationQuerySchema.parse({ ...queryFixture, ...versions }).payroll_version).toBeNull();
+    expect(OrderCancellationPreviewSchema.parse({ ...previewFixture, ...versions, scheduling: null, client_finance_impact: null, payroll_impact: null }).scheduling).toBeNull();
+    expect(OrderCancellationReceiptSchema.parse({ ...receiptFixture, ...versions }).scheduling_version).toBeNull();
+    const payload = { confirmed_service_days: [], expected_order_version: 1, expected_scheduling_version: null, expected_client_finance_version: null, expected_payroll_version: null, preview_fingerprint: 'a'.repeat(64), reason: '客戶取消' };
+    expect(OrderCancellationApplyPayloadSchema.parse(payload).expected_payroll_version).toBeNull();
+    const { expected_payroll_version: omitted, ...missing } = payload;
+    void omitted;
+    expect(OrderCancellationApplyPayloadSchema.safeParse(missing).success).toBe(false);
   });
 });

@@ -6,6 +6,7 @@
 
 ## Responsibility
 保存 assignment 建立／替換時的 immutable Payroll rate snapshot，並套用正式 Payroll terms impact。Actual Start 日期 replacement 只可把唯一 source assignment frozen snapshot 原值搬移到 successor，不改 Payroll root、obligation 或金額，且缺少 source snapshot 時不得 fallback；歷史重啟首次建立安排沒有 source snapshot 時，才可使用案件既有 case policy。任何分支都不得自行產生費率。
+BeClass rate correction 保留 Scheduling identity，未付款的 replacement obligation identity 綁定唯一 correction event，支援同一 assignment 反覆補正；既有 frozen rate snapshot 與已付款歷史不覆寫。
 
 ## Implementation
 - primary:
@@ -17,6 +18,7 @@
 - inbound: `orders/orders/module:order-actual-start` — 日期 replacement 建立 successor assignment 時，只搬移唯一 source snapshot，不形成 Payroll root impact。
 - inbound: `orders/orders/module:order-terms` — 將 Orders 的工時與費用轉為 Payroll typed impact candidate；浮點 HTTP 值在此邊界正規化為精確 Decimal。
 - outbound: `scheduling` — 只消費 canonical assignment identity resolution。
+- cross-owner evidence: `tests/domains/case-import/subsystems/case-import/integration/test_registry_correction_disposable_mysql.py` — repeated corrections and subsequent Assignment Plan preview; Case Import subsystem owns this integration proof.
 
 ## Verification
 - test_root: `tests/domains/payroll/subsystems/payroll/modules/assignment-terms-impact/`

@@ -5,7 +5,7 @@
     "path": "db/schema.sql",
     "sha256": "b9cd84ae5a09a46949b5d4c131659f7f114480306f94e0af1246833d021b1bfb"
   },
-  "active_artifacts_sha256": "ee632f154d0158fec24eb67041b874b74eb0347570b373e9e1e281eae637a19e",
+  "active_artifacts_sha256": "d78261b2d1bd31a42178efe0688995862e205d810c2cb7a71ece4e7c1676fbb2",
   "active_bootstrap": [
     "db/schema_parts/202_scheduling_staff_leave_intake.sql",
     "db/schema_parts/20_staff_monthly_settlements.sql",
@@ -176,7 +176,8 @@
     "db/schema_parts/227_order_terms_optional_downstream_versions.sql",
     "db/schema_parts/228_order_terms_optional_scheduling_receipt.sql",
     "db/schema_parts/1046_client_zero_obligation_establishment.sql",
-    "db/schema_parts/1047_scheduling_buffer_advisory.sql"
+    "db/schema_parts/1047_scheduling_buffer_advisory.sql",
+    "db/schema_parts/229_order_cancellation_optional_downstream.sql"
   ],
   "classifications": {
     "db/schema_parts/1012_service_before_replacement.sql": "migration-only",
@@ -201,7 +202,8 @@
     "db/schema_parts/1042_client_legacy_virtual_accounts.sql": "migration-only",
     "db/schema_parts/1043_twins_payroll_order_details_view.sql": "migration-only",
     "db/schema_parts/1044_order_terms_optional_downstream_versions.sql": "migration-only",
-    "db/schema_parts/1045_order_terms_optional_scheduling_receipt.sql": "migration-only"
+    "db/schema_parts/1045_order_terms_optional_scheduling_receipt.sql": "migration-only",
+    "db/schema_parts/1048_order_cancellation_optional_downstream.sql": "migration-only"
   },
   "retirement_contracts": {
     "db/schema_parts/1012_service_before_replacement.sql": {
@@ -410,6 +412,15 @@
       "replay": "CREATE OR REPLACE VIEW accepts either known predecessor and converges to the MySQL-verified owner-date definition",
       "rollback": "retain source backup and discard the candidate before any entry switch",
       "unresolved_policy": "any unknown view definition blocks candidate apply pending explicit remediation"
+    },
+    "db/schema_parts/1048_order_cancellation_optional_downstream.sql": {
+      "source_object": "deployed cancellation receipts with mandatory downstream owners",
+      "successor": "db/schema_parts/229_order_cancellation_optional_downstream.sql",
+      "terminal_schema_evidence": "fresh assembly applies part 229; preserve release applies part 1048",
+      "data_effect": "schema_only; no existing row or financial history is changed",
+      "replay": "accept exact non-null predecessor or nullable successor; partial metadata is drift",
+      "rollback": "discard candidate before switch; after null receipts exist use a compatible forward release",
+      "unresolved_policy": "unexpected type, default or partial nullability blocks apply"
     }
   }
 }

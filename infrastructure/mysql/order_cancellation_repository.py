@@ -421,10 +421,10 @@ def _stored_receipt(row):
     receipt = OrderCancellationReceipt(
         _required_text(payload, "case_no"),
         _required_integer(payload, "order_version"),
-        _required_integer(payload, "scheduling_version"),
-        _required_integer(payload, "scheduling_generation"),
-        _required_integer(payload, "client_finance_version"),
-        _required_integer(payload, "payroll_version"),
+        _optional_integer(payload, "scheduling_version"),
+        _optional_integer(payload, "scheduling_generation"),
+        _optional_integer(payload, "client_finance_version"),
+        _optional_integer(payload, "payroll_version"),
         _lifecycle_status(payload),
         _optional_date(payload, "actual_end_date"),
         _required_integer(payload, "official_service_day_count"),
@@ -460,6 +460,12 @@ def _receipt_payload(receipt):
 
 # Kept cohesive because every duplicated receipt column must compare atomically.
 def _validate_receipt_columns(row, receipt) -> None:
+    if (receipt.scheduling_version is None) != (receipt.scheduling_generation is None):
+        raise ValueError("order_cancellation_receipt_integrity_violation")
+    if receipt.scheduling_version is None and (receipt.cancelled_assignment_ids or receipt.created_assignment_keys):
+        raise ValueError("order_cancellation_receipt_integrity_violation")
+    if receipt.official_service_day_count and any(value is None for value in (receipt.scheduling_version, receipt.client_finance_version, receipt.payroll_version)):
+        raise ValueError("order_cancellation_receipt_integrity_violation")
     expected = (
         receipt.case_no,
         receipt.order_version,
@@ -476,10 +482,10 @@ def _validate_receipt_columns(row, receipt) -> None:
     actual = (
         str(row["case_no"]),
         int(row["order_version"]),
-        int(row["scheduling_version"]),
-        int(row["scheduling_generation"]),
-        int(row["client_finance_version"]),
-        int(row["payroll_version"]),
+        _optional_integer(row, "scheduling_version"),
+        _optional_integer(row, "scheduling_generation"),
+        _optional_integer(row, "client_finance_version"),
+        _optional_integer(row, "payroll_version"),
         str(row["lifecycle_status"]),
         row["actual_end_date"],
         int(row["official_service_day_count"]),
@@ -500,6 +506,10 @@ def _required_text(payload, key):
     if not isinstance(value, str) or not value.strip():
         raise ValueError("order_cancellation_receipt_integrity_violation")
     return value
+
+
+def _optional_integer(payload, key):
+    return None if payload[key] is None else _required_integer(payload, key)
 
 
 def _required_integer(payload, key):

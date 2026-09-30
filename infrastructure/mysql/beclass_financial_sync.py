@@ -16,10 +16,13 @@ from infrastructure.mysql.client_finance_terms_writer import (
     persist_client_finance_terms_impact,
 )
 from infrastructure.mysql.order_terms_read_model import (
+    _select_assignments,
+    _select_generation,
     load_contract_client_finance_facts,
     load_locked_facts,
     preflight_staff_ids,
     select_order,
+    select_scheduling_aggregate,
 )
 from infrastructure.mysql.payroll_terms_writer import persist_payroll_terms_impact
 from shared_kernel.fingerprints import fingerprint_payload
@@ -28,7 +31,7 @@ from subsystems.orders.terms_workflow import (
     ClientFinanceImpactPersistenceCommand,
     PayrollImpactPersistenceCommand,
 )
-from subsystems.payroll.terms_impact import build_payroll_terms_impact
+from subsystems.payroll.terms_impact import build_payroll_rate_correction_impact
 
 
 class MySqlBeClassFinancialSync:
@@ -46,9 +49,16 @@ class MySqlBeClassFinancialSync:
         correlation_id,
     ) -> None:
         with self._connection.cursor() as cursor:
-            staff_ids = preflight_staff_ids(cursor, case_no)
-            facts = load_locked_facts(cursor, case_no, staff_ids)
             order_row = select_order(cursor, case_no, lock=True)
+            has_assignments, finance_present = _load_rate_correction_presence(cursor, case_no)
+            facts = None
+            if has_assignments:
+                staff_ids = preflight_staff_ids(cursor, case_no)
+                facts = load_locked_facts(cursor, case_no, staff_ids)
+            elif not finance_present:
+                # The committed effective birth count is the input for later
+                # bootstrap/rate resolution. No financial root exists to adjust.
+                return
             finance_facts = load_contract_client_finance_facts(
                 cursor, order_row, lock=True
             )
@@ -76,14 +86,14 @@ class MySqlBeClassFinancialSync:
                     source_event_id=correction_event_id,
                 ),
             )
-            if not facts.scheduling.segments:
+            if facts is None:
                 return
             scheduling = build_generation_candidate(
                 facts.scheduling,
                 facts.order.terms,
                 facts.planned_service_dates,
             )
-            payroll_candidate = build_payroll_terms_impact(
+            payroll_candidate = build_payroll_rate_correction_impact(
                 facts.payroll,
                 scheduling,
                 facts.order.terms,
@@ -113,6 +123,37 @@ class MySqlBeClassFinancialSync:
                     source_event_id=correction_event_id,
                 ),
             )
+
+
+def _load_rate_correction_presence(cursor, case_no):
+    # The Orders root is already locked. Discover the branch without taking
+    # downstream locks ahead of the existing staff/occupancy lock sequence.
+    aggregate = select_scheduling_aggregate(cursor, case_no, lock=False)
+    generation = _select_generation(cursor, aggregate, False)
+    assignments = _select_assignments(cursor, generation, False)
+    present = {}
+    for table in (
+        "client_finance_accounts", "client_payment_terms", "payroll_case_accounts",
+        "case_payroll_rate_policy_snapshots", "client_obligations", "client_obligation_events",
+        "client_ledger_entries", "staff_obligations", "staff_obligation_events",
+    ):
+        cursor.execute(f"SELECT case_no FROM {table} WHERE case_no=%s LIMIT 1", (case_no,))
+        present[table] = cursor.fetchone() is not None
+    finance = present["client_finance_accounts"]
+    payroll = present["payroll_case_accounts"]
+    if finance != present["client_payment_terms"] or (not finance and any(
+        present[table] for table in ("client_obligations", "client_obligation_events", "client_ledger_entries")
+    )):
+        raise ValueError("invalid_client_finance_facts")
+    if payroll != present["case_payroll_rate_policy_snapshots"] or (not payroll and any(
+        present[table] for table in ("staff_obligations", "staff_obligation_events")
+    )):
+        raise ValueError("invalid_payroll_facts")
+    if assignments and not (finance and payroll):
+        raise ValueError("beclass_rate_correction_assignment_facts_inconsistent")
+    if not assignments and (present["staff_obligations"] or present["staff_obligation_events"]):
+        raise ValueError("beclass_rate_correction_payroll_facts_inconsistent")
+    return bool(assignments), finance
 
 
 def _persist_effective_client_rate(

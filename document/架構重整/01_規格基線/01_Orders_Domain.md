@@ -469,6 +469,14 @@ Scheduling 規格 2026-09-22 退休獨立 agreement 的最新裁決，不恢復�
 ### 3.5 Cancellation
 
 - 只適用於全部約定服務完成前。
+- 尚無正式 assignment 的日期-only 開始日不代表已服務，不得因此要求逐日服務補登。
+- Cancellation 專用 reader 必須驗證下游 owner 的存在與完整性。尚未服務且 Scheduling、Client Finance、Payroll
+  root 合法不存在時，Query／Preview／Apply 與 receipt 的對應 version、generation、impact／Scheduling receipt link
+  使用 `NULL`，不得自動 bootstrap、補造版本或義務。已初始化 owner 仍維持既有取消 impact；已有收款但未排班
+  仍必須由 Client Finance 處理退款。partial root、孤立財務歷史或正式服務缺必要 root 一律 typed blocker、零寫入。
+- Apply fresh-read 並鎖定 Orders 及既有下游 facts；不存在的 owner 若在 Preview 後建立，或既有 owner version 改變，
+  以原有 typed version conflict／stale preview 拒絕，不得盲目略過。取消事件、取消控制、等待訂金鎖釋放、lifecycle
+  與 committed outbox 仍由同一 outer transaction 保存；只有不存在的下游 writer 可省略。
 - 已開始服務時，Preview 由使用者確認逐日「實際服務日期＋實際月嫂」；現有事實預填，新增或改派必須指定月嫂與原因。
 - Apply 取消舊 assignments、未來 schedule 與 buffer，依確認後服務日建立新 assignments，重算 hours、整數樓層費、Client Finance 與 Staff Finance。
 - 沒有取消費或解約違約金。服務中取消的服務本金固定為已確認實際服務時數乘有效服務單價；已正式
@@ -501,6 +509,8 @@ Scheduling 規格 2026-09-22 退休獨立 agreement 的最新裁決，不恢復�
 ### 3.6 Controlled Reopen
 
 - 只有尚未產生取消相關正式退款、reversal 或 settlement 才可受理。
+- 取消時未初始化的 Finance／Payroll root 可保持不存在；Preview／Apply 版本以明確 `NULL` 表示並做 fresh presence
+  比較。若取消 receipt 無 Payroll version，仍查閱取消後的薪資支付歷史，不得把缺版本解讀為可略過金融資格驗證。
 - 追加 reopen event，不刪除 cancellation history。
 - 不恢復舊 assignment、schedule、lock 或 payment stage。
 - 受理後必須 fresh Preview；已有正式退款或結算時另建新訂單。

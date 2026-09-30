@@ -4,7 +4,7 @@
 - subsystem: `case-import`
 
 ## Responsibility
-以 Case Import named scalar facts 建立 first-use Client Finance、Payroll 與 Scheduling roots。Status 在提供 bootstrap Preview 前先揭露缺少正式開始日或正整數服務天數；由 Orders-owned terms repair 補齊後才可繼續。Payroll rate classification 可由 case 的 authoritative `multi_birth_count` 覆寫 identity classification；Client Finance identity semantics 不變。
+以 Case Import named scalar facts 建立 first-use Client Finance、Payroll 與 Scheduling roots。Status 在提供 bootstrap Preview 前先揭露缺少正式開始日或正整數服務天數；由 Orders-owned terms repair 補齊後才可繼續。Payroll rate classification 優先使用 BeClass 已保存的 effective `multi_birth_count`，無胎數 correction 時才使用原始問卷值；可覆寫 identity classification，Client Finance identity semantics 不變。
 
 ## Implementation
 - `domains/bootstrap/case_architecture.py`
@@ -20,6 +20,7 @@
 - inbound: `case-import/order-information` — BeClass raw survey 僅在 Case Import projection boundary 解析為 named scalar facts。
 - inbound: `clients/client-profile/profile-change` — 客戶名冊只在 owner readback 回報缺少 bootstrap root 時提供既有 Q/P/A 修復入口，不直接寫入 Client Finance、Payroll 或 Scheduling。
 - outbound: `payroll` — rate policy snapshot 是 assignment Payroll terms 的來源。
+- cross-owner evidence: `tests/domains/case-import/subsystems/case-import/integration/test_registry_correction_disposable_mysql.py` — saved effective birth correction survives first-use bootstrap; Case Import subsystem owns this integration proof.
 
 ## Verification
 - test_root: `tests/domains/case-import/subsystems/case-import/modules/case-architecture-bootstrap/`

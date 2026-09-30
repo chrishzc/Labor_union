@@ -1074,5 +1074,6 @@ _STAFF_OBLIGATIONS_SQL = (
     "AS paid_net_amount_ntd "
     "FROM staff_obligations o "
     "JOIN staff_obligation_events e ON e.id=o.current_event_id "
-    "WHERE o.case_no=%s ORDER BY o.assignment_id,o.obligation_identity"
+    "WHERE o.case_no=%s AND o.status<>'cancelled' "
+    "ORDER BY o.assignment_id,o.obligation_identity"
 )

@@ -31,12 +31,12 @@ def _snapshot(clause):
 
 def test_release_is_hash_bound_schema_only_and_selected_by_both_paths():
     manifest = load_migration_release_manifest(ROOT / "db/migration_releases" / MANIFEST, ROOT)
-    assert migration.DEFAULT_RELEASE_MANIFESTS[-1] == MANIFEST
+    assert MANIFEST in migration.DEFAULT_RELEASE_MANIFESTS
     assert manifest.schema_paths(ROOT) == ((ROOT / "db/schema_parts" / ARTIFACT).resolve(),)
     assert manifest.backfills == ()
     raw = json.loads((ROOT / "db/migration_releases" / MANIFEST).read_text(encoding="utf-8"))
     assert raw["artifacts"][0]["data_effect"] == "schema_only"
-    assert load_schema_assembly().active_artifact_paths[-1].name == ARTIFACT
+    assert ARTIFACT in {path.name for path in load_schema_assembly().active_artifact_paths}
     canonical = migration._canonical_artifact_descriptor(ARTIFACT)
     released = manifest.owned_object_descriptors(ROOT)[ARTIFACT]
     assert released["checks"] == canonical["checks"]

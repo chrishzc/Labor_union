@@ -197,8 +197,8 @@ export const OrderReopenPreviewViewSchema = z
   .object({
     case_no: z.string().min(1),
     order_version: z.number().int().min(0),
-    client_finance_version: z.number().int().min(0),
-    payroll_version: z.number().int().min(0),
+    client_finance_version: z.number().int().min(0).nullable(),
+    payroll_version: z.number().int().min(0).nullable(),
     cancellation_event_id: z.number().int().gt(0),
     before_status: z.literal('訂單取消'),
     after_status: z.enum(['洽談中', '訂單成立', '服務中']),
@@ -232,8 +232,8 @@ export type OrderReopenReceiptView = z.infer<
 export const OrderReopenApplyPayloadSchema = z
   .object({
     expected_order_version: z.number().int().min(0),
-    expected_client_finance_version: z.number().int().min(0),
-    expected_payroll_version: z.number().int().min(0),
+    expected_client_finance_version: z.number().int().min(0).nullable(),
+    expected_payroll_version: z.number().int().min(0).nullable(),
     preview_fingerprint: FingerprintSchema,
     reason: ReasonSchema,
   })

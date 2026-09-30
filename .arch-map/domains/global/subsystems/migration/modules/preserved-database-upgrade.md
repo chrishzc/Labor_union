@@ -20,6 +20,10 @@
   - `scripts/launchers/update_local_database.bat`
   - `scripts/launchers/update_local_database.sh`
 - config:
+  - `db/schema_parts/1048_order_cancellation_optional_downstream.sql` — cancellation receipt optional downstream owners。
+  - `db/schema_parts/229_order_cancellation_optional_downstream.sql` — fresh bootstrap successor。
+  - `db/migration_releases/labor_union_2026_09_29_order_cancellation_optional_downstream_v1.json`
+  - `db/migration_releases/labor_union_2026_09_29_order_cancellation_optional_downstream_v1.descriptors.json`
   - `db/schema_assembly/labor_union_fresh_schema_v1.json`
   - `db/cutover_releases/labor_union_validation_schema_v1.json`
   - `db/releases/labor_union_validation_schema_v1.sql`
@@ -106,6 +110,9 @@
   - `validation/receipts/PROV-ZERO-OBLIGATION-local-additive-qualification-20260929.json` — reusable synthetic-MySQL fresh／preserve qualification; machine-local source backup remains mandatory.
 
 ## Contracts
+
+- Cancellation optional downstream receipt release：`db/schema_parts/1048_order_cancellation_optional_downstream.sql`、fresh successor `db/schema_parts/229_order_cancellation_optional_downstream.sql`、`db/migration_releases/labor_union_2026_09_29_order_cancellation_optional_downstream_v1.json` 及其 descriptors。
+- 對應 schema-only nullability／predecessor／drift contract：`tests/domains/global/subsystems/migration/modules/preserved-database-upgrade/contract/test_order_cancellation_optional_downstream_schema.py`。
 - Source read-only、candidate identity、release classification、backup／journal／resume及
   replacement boundary — `document/架構重整/01_規格基線/10_Global_保留資料Migration與Cutover_Subsystem.md`
 

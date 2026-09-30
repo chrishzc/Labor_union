@@ -6,6 +6,8 @@ from collections.abc import Mapping
 import json
 from typing import Any
 
+from .order_cancellation_read_model import _validate_cancellation_owner_presence
+
 from pymysql.err import IntegrityError
 
 from domains.orders.lifecycle import OrderLifecycleStatus
@@ -139,8 +141,8 @@ def _load_facts(cursor, case_no, *, lock):
     return ReopenWorkflowFacts(
         order_facts,
         financial_events,
-        int(versions["client_finance_version"]),
-        int(versions["payroll_version"]),
+        int(versions["client_finance_version"]) if versions["client_finance_version"] is not None else None,
+        int(versions["payroll_version"]) if versions["payroll_version"] is not None else None,
     )
 
 
@@ -164,6 +166,7 @@ def _load_active_cancellation(cursor, case_no, lock):
 
 
 def _load_account_versions(cursor, case_no, lock):
+    _validate_cancellation_owner_presence(cursor, case_no, lock)
     cursor.execute(_ACCOUNT_VERSION_SELECT_SQL + _lock_clause(lock), (case_no,))
     row = cursor.fetchone()
     if not isinstance(row, Mapping):
@@ -253,9 +256,9 @@ def _client_obligation_identities(cursor, case_no, cancellation):
 def _staff_obligation_identities(cursor, case_no, cancellation):
     cursor.execute(
         "SELECT obligation_identity FROM staff_obligation_events "
-        "WHERE case_no=%s AND resulting_payroll_version=%s "
+        "WHERE case_no=%s AND (resulting_payroll_version=%s OR %s IS NULL) "
         "ORDER BY obligation_identity FOR UPDATE",
-        (case_no, int(cancellation["payroll_version"])),
+        (case_no, cancellation["payroll_version"], cancellation["payroll_version"]),
     )
     return _identity_tuple(cursor.fetchall())
 
@@ -294,7 +297,8 @@ def _staff_financial_rows(cursor, case_no, cancellation, lock):
         _STAFF_FINANCIAL_EVENT_SQL + _lock_clause(lock),
         (
             case_no,
-            int(cancellation["payroll_version"]),
+            cancellation["payroll_version"],
+            cancellation["payroll_version"],
             cancellation["cancellation_created_at"],
         ),
     )
@@ -638,9 +642,10 @@ _ACTIVE_CANCELLATION_SELECT_SQL = (
 _ACCOUNT_VERSION_SELECT_SQL = (
     "SELECT client.aggregate_version AS client_finance_version,"
     "payroll.aggregate_version AS payroll_version "
-    "FROM client_finance_accounts client "
-    "JOIN payroll_case_accounts payroll ON payroll.case_no=client.case_no "
-    "WHERE client.case_no=%s"
+    "FROM orders o "
+    "LEFT JOIN client_finance_accounts client ON client.case_no=o.case_no "
+    "LEFT JOIN payroll_case_accounts payroll ON payroll.case_no=o.case_no "
+    "WHERE o.case_no=%s"
 )
 
 _RECONFIRM_SELECT_SQL = (
@@ -678,7 +683,7 @@ _STAFF_FINANCIAL_EVENT_SQL = (
     "ON payout_link.obligation_identity=obligation_event.obligation_identity "
     "JOIN staff_payout_events payout ON payout.id=payout_link.payout_event_id "
     "WHERE obligation_event.case_no=%s "
-    "AND obligation_event.resulting_payroll_version=%s "
+    "AND (obligation_event.resulting_payroll_version=%s OR %s IS NULL) "
     "AND payout.created_at >= %s ORDER BY payout.id"
 )
 

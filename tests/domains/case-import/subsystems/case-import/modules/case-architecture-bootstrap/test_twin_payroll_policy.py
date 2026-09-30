@@ -74,3 +74,15 @@ def _candidate(identity, deposit_days, multi_birth_count, policy_kind):
         "approved-rates-v1",
     )
     return build_case_architecture_bootstrap_candidate(facts, intent)
+
+
+@pytest.mark.parametrize("correction", [{"multi_birth_count": "雙胞胎"}, '{"multi_birth_count":"雙胞胎"}'])
+def test_later_bootstrap_uses_saved_birth_correction_instead_of_original_survey(correction):
+    facts = _order_facts({
+        "case_no": "CASE-1", "lifecycle_version": 0,
+        "start_date": date(2026, 1, 1), "service_days": 5,
+        "service_hours_per_day": 8, "identity_status": "一般市民",
+        "survey_details": {"特殊計費:胎數": "單胞胎"}, "effective_values_json": correction,
+    })
+    assert facts.multi_birth_count == "雙胞胎"
+    assert payroll_policy_kind_for_case(facts.source_identity_status, facts.multi_birth_count) is PayrollPolicyKind.TWINS

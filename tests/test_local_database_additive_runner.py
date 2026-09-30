@@ -984,7 +984,12 @@ def test_apply_keeps_fresh_snapshot_after_maintenance_lock(monkeypatch, tmp_path
     monkeypatch.setattr(migration, "_local_append_event", lambda *_args, **_kwargs: {"sequence": 1})
     monkeypatch.setattr(migration, "_local_maintenance_lock", lambda *_args: Lock())
     monkeypatch.setattr(migration, "_schema_snapshot", schema_snapshot)
-    monkeypatch.setattr(migration, "_owned_classification", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(
+        migration, "_owned_classification",
+        lambda *_args, **_kwargs: pytest.fail(
+            "Apply must use fresh metadata without repeating the plan's full catalog classification"
+        ),
+    )
     monkeypatch.setattr(migration, "_local_connect", lambda *_args: Connection())
     monkeypatch.setattr(migration, "server_identity", lambda *_args: {"database": source})
     monkeypatch.setattr(

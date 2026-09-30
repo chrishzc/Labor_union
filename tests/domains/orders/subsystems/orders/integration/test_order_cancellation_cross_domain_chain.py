@@ -19,7 +19,8 @@ from domains.scheduling.generation import AssignmentIdentityResolution
 from shared_kernel.clock import FixedBusinessClock
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from shared_kernel.money import MoneyNTD
-from subsystems.orders.cancellation_workflow import CancellationWorkflowError, CancellationWorkflowFacts, OrderCancellationApplyRequest, OrderCancellationWorkflow
+from shared_kernel.fingerprints import PreviewFingerprint
+from subsystems.orders.cancellation_workflow import CancellationWorkflowError, CancellationWorkflowFacts, OrderCancellationApplyRequest, OrderCancellationWorkflow, OrderCancellationReceipt
 from subsystems.orders.terms_workflow import CommandClaimState, SchedulingReplacementResult
 from subsystems.payroll.terms_impact import PayrollTermsSourceFacts, SourceAssignmentPayrollTerms
 
@@ -226,3 +227,112 @@ def test_cancellation_receipt_rejects_invalid_hour_values(hours):
 
     with pytest.raises(ValueError, match="receipt_integrity_violation"):
         _required_service_hours({"hours": hours}, "hours")
+
+
+@pytest.mark.parametrize("scheduling_present", [False, True])
+def test_unserved_cancellation_without_financial_roots_keeps_explicit_absence(scheduling_present):
+    facts = _facts()
+    facts = replace(
+        facts,
+        order=replace(facts.order, service_started=False),
+        scheduling=CancellationSchedulingFacts("CASE-1", 2 if scheduling_present else None, 1 if scheduling_present else None, ()),
+        client_finance=None, payroll=None,
+        lifecycle=replace(facts.lifecycle, current_status=OrderLifecycleStatus.ESTABLISHED),
+    )
+    repository = _Repository(facts)
+    workflow = _workflow(repository)
+    preview = workflow.preview("CASE-1", ())
+    request = replace(_request(preview), confirmed_service_days=(), expected_scheduling_version=ExpectedVersion(2) if scheduling_present else None, expected_client_finance_version=None, expected_payroll_version=None)
+    receipt = workflow.apply(request)
+    assert receipt.official_service_day_count == 0
+    assert receipt.official_service_hours == 0
+    assert receipt.client_finance_version is None
+    assert receipt.payroll_version is None
+    assert receipt.scheduling_version == (3 if scheduling_present else None)
+    assert repository.commits == 1
+    assert "lock" in repository.persisted and "control" in repository.persisted and "lifecycle" in repository.persisted
+    assert repository.persisted[-1].scheduling_receipt_id == (13 if scheduling_present else None)
+    assert not any(type(item).__name__ in {"ClientFinanceImpactPersistenceCommand", "PayrollImpactPersistenceCommand"} for item in repository.persisted)
+    before = list(repository.persisted)
+    assert workflow.apply(request) == receipt
+    assert repository.persisted == before
+
+
+@pytest.mark.parametrize("owner", ["scheduling", "client_finance", "payroll"])
+def test_cancellation_rejects_owner_created_after_absent_owner_preview(owner):
+    initialized = _facts()
+    absent = replace(initialized, order=replace(initialized.order, service_started=False), scheduling=CancellationSchedulingFacts("CASE-1", None, None, ()), client_finance=None, payroll=None)
+    repository = _Repository(absent)
+    workflow = _workflow(repository)
+    preview = workflow.preview("CASE-1", ())
+    request = replace(_request(preview), confirmed_service_days=(), expected_scheduling_version=None, expected_client_finance_version=None, expected_payroll_version=None)
+    repository.facts = replace(absent, **{owner: getattr(initialized, owner)})
+    with pytest.raises(CancellationWorkflowError) as failure:
+        workflow.apply(request)
+    assert failure.value.error.category.value == "conflict"
+    assert repository.persisted == []
+    assert repository.commits == 0
+
+
+def test_deposit_refund_without_assignment_does_not_require_payroll_root():
+    facts = _facts()
+    deposit = ExistingClientStageObligation("deposit-existing", PaymentStage.DEPOSIT, MoneyNTD(800), MoneyNTD(800), date(2026, 7, 1), True)
+    facts = replace(facts, order=replace(facts.order, service_started=False), scheduling=replace(facts.scheduling, assignments=()), client_finance=replace(facts.client_finance, existing_obligations=(deposit,)), payroll=None)
+    repository = _Repository(facts)
+    workflow = _workflow(repository)
+    preview = workflow.preview("CASE-1", ())
+    assert any(action.direction is ClientFinanceDirection.REFUND_DUE and action.direction_amount_ntd == 800 for action in preview.client_finance_impact.actions)
+    request = replace(_request(preview), confirmed_service_days=(), expected_payroll_version=None)
+    receipt = workflow.apply(request)
+    assert receipt.client_finance_version == 6
+    assert receipt.payroll_version is None
+    assert not any(type(item).__name__ == "PayrollImpactPersistenceCommand" for item in repository.persisted)
+
+
+def test_nullable_cancellation_receipt_roundtrip_and_integrity():
+    from dataclasses import asdict
+    import json
+    from infrastructure.mysql.order_cancellation_repository import _receipt_payload, _stored_receipt
+    receipt = OrderCancellationReceipt("CASE-1", 5, None, None, None, None, OrderLifecycleStatus.CANCELLED, None, 0, 0, (), (), PreviewFingerprint("a" * 64))
+    row = asdict(receipt)
+    row.update(lifecycle_status=receipt.lifecycle_status.value, preview_fingerprint=receipt.preview_fingerprint.value, command_fingerprint="b" * 64, result_snapshot=json.dumps(_receipt_payload(receipt)))
+    assert _stored_receipt(row).receipt == receipt
+    row["payroll_version"] = 0
+    with pytest.raises(ValueError, match="receipt_integrity_violation"):
+        _stored_receipt(row)
+
+
+
+def test_cancellation_http_query_preview_apply_and_receipt_with_absent_owners():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from api.dependencies.admin_auth import require_system_admin
+    from api.dependencies.order_cancellation import OrderCancellationApplication, get_order_cancellation_application
+    from api.routes.order_cancellation import router
+    from subsystems.access.authentication_session import AdminPrincipal
+    facts = _facts()
+    facts = replace(facts, order=replace(facts.order, service_started=False), scheduling=CancellationSchedulingFacts("CASE-1", None, None, ()), client_finance=None, payroll=None)
+    repository = _Repository(facts)
+    repository.list_caregiver_options = lambda _: ()
+    application = OrderCancellationApplication(repository, _workflow(repository))
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[require_system_admin] = lambda: AdminPrincipal(id=1, username="admin", display_name="Admin", role="system_admin")
+    app.dependency_overrides[get_order_cancellation_application] = lambda: application
+    client = TestClient(app)
+    query = client.get("/api/v1/orders/CASE-1/cancellation")
+    assert query.status_code == 200
+    assert query.json()["data"]["scheduling_version"] is None
+    response = client.post("/api/v1/orders/CASE-1/cancellation/preview", json={"confirmed_service_days": []})
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["scheduling"] is None and data["client_finance_impact"] is None and data["payroll_impact"] is None
+    body = {"confirmed_service_days": [], "expected_order_version": 4, "expected_scheduling_version": None, "expected_client_finance_version": None, "expected_payroll_version": None, "preview_fingerprint": data["preview_fingerprint"], "reason": "客戶確認取消"}
+    headers = {"Idempotency-Key": "cancel-null-http", "X-Correlation-ID": "cancel-null-http"}
+    response = client.post("/api/v1/orders/CASE-1/cancellation/apply", json=body, headers=headers)
+    assert response.status_code == 200
+    assert response.json()["data"]["payroll_version"] is None
+    receipt = client.get("/api/v1/orders/CASE-1/cancellation/receipt", headers={"Idempotency-Key": "cancel-null-http"})
+    assert receipt.json()["data"] == response.json()["data"]
+    del body["expected_client_finance_version"]
+    assert client.post("/api/v1/orders/CASE-1/cancellation/apply", json=body, headers=headers).status_code == 422

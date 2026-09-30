@@ -21,6 +21,7 @@ from api.dependencies.order_cancellation import (
 )
 from api.schemas.base import BaseResponse
 from api.schemas.order_cancellation import (
+    ClientFinanceImpactView,
     OrderCancellationPreviewView,
     OrderCancellationQueryView,
     OrderCancellationReceiptView,
@@ -63,9 +64,9 @@ class OrderCancellationPreviewBody(BaseModel):
 
 class OrderCancellationApplyBody(OrderCancellationPreviewBody):
     expected_order_version: int = Field(ge=0)
-    expected_scheduling_version: int = Field(ge=0)
-    expected_client_finance_version: int = Field(ge=0)
-    expected_payroll_version: int = Field(ge=0)
+    expected_scheduling_version: int | None = Field(ge=0)
+    expected_client_finance_version: int | None = Field(ge=0)
+    expected_payroll_version: int | None = Field(ge=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     reason: str = Field(min_length=1, max_length=500)
 
@@ -182,9 +183,9 @@ def _apply_request(case_no, body, key, correlation, principal):
         case_no,
         _confirmed_service_days(body.confirmed_service_days),
         ExpectedVersion(body.expected_order_version),
-        ExpectedVersion(body.expected_scheduling_version),
-        ExpectedVersion(body.expected_client_finance_version),
-        ExpectedVersion(body.expected_payroll_version),
+        ExpectedVersion(body.expected_scheduling_version) if body.expected_scheduling_version is not None else None,
+        ExpectedVersion(body.expected_client_finance_version) if body.expected_client_finance_version is not None else None,
+        ExpectedVersion(body.expected_payroll_version) if body.expected_payroll_version is not None else None,
         PreviewFingerprint(body.preview_fingerprint),
         IdempotencyKey(key),
         ActorContext(str(principal.username or "").strip()),
@@ -222,8 +223,8 @@ def _query_payload(result) -> dict[str, Any]:
         "order_version": facts.order.order_version,
         "scheduling_version": facts.scheduling.aggregate_version,
         "scheduling_generation": facts.scheduling.generation_number,
-        "client_finance_version": facts.client_finance.account_version,
-        "payroll_version": facts.payroll.payroll_version,
+        "client_finance_version": facts.client_finance.account_version if facts.client_finance else None,
+        "payroll_version": facts.payroll.payroll_version if facts.payroll else None,
         "confirmed_service_days": _current_service_days(facts.scheduling),
         "caregiver_options": list(result.caregiver_options),
     }
@@ -248,13 +249,19 @@ def _preview_payload(preview) -> dict[str, Any]:
         **_preview_business_payload(candidate),
         **_preview_version_payload(preview),
         "scheduling": _materialize(candidate.scheduling),
-        "client_finance_impact": _materialize(
-            preview.client_finance_impact
-        ),
+        "client_finance_impact": _client_finance_impact_payload(preview.client_finance_impact),
         "payroll_impact": _materialize(preview.payroll_impact),
         "lifecycle_impact": _materialize(preview.lifecycle_impact),
         "preview_fingerprint": preview.fingerprint.value,
     }
+
+
+def _client_finance_impact_payload(impact):
+    if impact is None:
+        return None
+    # Internal owner plans are persisted by the workflow. The HTTP projection
+    # contains only the fields owned by its existing public response contract.
+    return {name: _materialize(getattr(impact, name)) for name in ClientFinanceImpactView.model_fields}
 
 
 def _preview_business_payload(candidate):
@@ -275,7 +282,7 @@ def _preview_version_payload(preview):
         "order_version": preview.order_version,
         "scheduling_version": preview.scheduling_version,
         "scheduling_generation": (
-            preview.candidate.scheduling.generation_number
+            preview.candidate.scheduling.generation_number if preview.candidate.scheduling else None
         ),
         "client_finance_version": preview.client_finance_version,
         "payroll_version": preview.payroll_version,

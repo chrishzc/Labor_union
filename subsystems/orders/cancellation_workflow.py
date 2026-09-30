@@ -51,13 +51,13 @@ class CancellationWorkflowFacts:
     order: CancellationOrderFacts
     order_terms: OrderTerms
     scheduling: CancellationSchedulingFacts
-    client_finance: ClientFinanceTermsSourceFacts
-    payroll: PayrollTermsSourceFacts
+    client_finance: ClientFinanceTermsSourceFacts | None
+    payroll: PayrollTermsSourceFacts | None
     lifecycle: OrderLifecycleRootFacts
     historical_cancellation_origin: bool = False
 
     def __post_init__(self) -> None:
-        if len({self.order.case_no, self.scheduling.case_no, self.client_finance.case_no, self.payroll.case_no, self.lifecycle.case_no}) != 1:
+        if len({item.case_no for item in (self.order, self.scheduling, self.client_finance, self.payroll, self.lifecycle) if item is not None}) != 1:
             raise ValueError("cancellation_workflow_case_mismatch")
         if not isinstance(self.historical_cancellation_origin, bool):
             raise TypeError("historical cancellation origin must be bool")
@@ -76,13 +76,13 @@ class CancellationLifecycleImpact:
 @dataclass(frozen=True, slots=True)
 class OrderCancellationPreview:
     candidate: CancellationCandidate
-    client_finance_impact: ClientFinanceTermsCandidate
-    payroll_impact: PayrollTermsImpactCandidate
+    client_finance_impact: ClientFinanceTermsCandidate | None
+    payroll_impact: PayrollTermsImpactCandidate | None
     lifecycle_impact: CancellationLifecycleImpact
     order_version: int
-    scheduling_version: int
-    client_finance_version: int
-    payroll_version: int
+    scheduling_version: int | None
+    client_finance_version: int | None
+    payroll_version: int | None
     fingerprint: PreviewFingerprint
 
 
@@ -91,9 +91,9 @@ class OrderCancellationApplyRequest:
     case_no: str
     confirmed_service_days: tuple[ConfirmedServiceDay, ...]
     expected_order_version: ExpectedVersion
-    expected_scheduling_version: ExpectedVersion
-    expected_client_finance_version: ExpectedVersion
-    expected_payroll_version: ExpectedVersion
+    expected_scheduling_version: ExpectedVersion | None
+    expected_client_finance_version: ExpectedVersion | None
+    expected_payroll_version: ExpectedVersion | None
     preview_fingerprint: PreviewFingerprint
     idempotency_key: IdempotencyKey
     actor: ActorContext
@@ -111,10 +111,10 @@ class OrderCancellationApplyRequest:
 class OrderCancellationReceipt:
     case_no: str
     order_version: int
-    scheduling_version: int
-    scheduling_generation: int
-    client_finance_version: int
-    payroll_version: int
+    scheduling_version: int | None
+    scheduling_generation: int | None
+    client_finance_version: int | None
+    payroll_version: int | None
     lifecycle_status: OrderLifecycleStatus
     actual_end_date: date | None
     official_service_day_count: int
@@ -145,7 +145,7 @@ class CancellationReceiptPersistenceCommand:
     key: IdempotencyKey
     stored_receipt: StoredCancellationReceipt
     cancellation_event_id: int
-    scheduling_receipt_id: int
+    scheduling_receipt_id: int | None
     cancellation_control_event_id: int
     lifecycle_event_id: int
     correlation_id: CorrelationId
@@ -248,12 +248,12 @@ class OrderCancellationWorkflow:
     def _persist(self, request: OrderCancellationApplyRequest, preview: OrderCancellationPreview, command_fingerprint: PreviewFingerprint, receipt: OrderCancellationReceipt) -> None:
         event_id = self._repository.append_cancellation_event(request, preview)
         self._repository.cancel_waiting_deposit_lock(request, event_id)
-        scheduling = self._repository.replace_scheduling_generation(_scheduling_command(request, preview, command_fingerprint))
+        scheduling = (self._repository.replace_scheduling_generation(_scheduling_command(request, preview, command_fingerprint)) if preview.candidate.scheduling is not None else None)
         _persist_finance_and_payroll(self._repository, request, preview, event_id, scheduling)
         control_event_id = self._repository.activate_cancellation_control(request, event_id)
         lifecycle_event_id = self._repository.persist_cancellation_lifecycle(request, preview, control_event_id)
         self._repository.update_cancelled_order(CancellationOrderPersistenceCommand(request.case_no, preview.order_version, receipt.order_version, preview.candidate.actual_start_date, receipt.actual_end_date, receipt.lifecycle_status))
-        self._repository.save_receipt(CancellationReceiptPersistenceCommand(request.idempotency_key, StoredCancellationReceipt(command_fingerprint, receipt), event_id, scheduling.scheduling_receipt_id, control_event_id, lifecycle_event_id, request.correlation_id))
+        self._repository.save_receipt(CancellationReceiptPersistenceCommand(request.idempotency_key, StoredCancellationReceipt(command_fingerprint, receipt), event_id, scheduling.scheduling_receipt_id if scheduling else None, control_event_id, lifecycle_event_id, request.correlation_id))
 
 
 def _effective_order_facts(facts, confirmed_service_days):
@@ -298,9 +298,13 @@ def _ensure_cancellation_allowed(
 
 
 def _build_impacts(facts, candidate):
+    if candidate.official_service_day_count and (facts.client_finance is None or facts.payroll is None):
+        raise ValueError("cancellation_financial_roots_inconsistent")
+    if candidate.scheduling is None and facts.payroll is not None:
+        raise ValueError("cancellation_scheduling_facts_inconsistent")
     change_identity = f"cancellation:{candidate.fingerprint.value}"
-    finance = build_client_finance_cancellation_impact(facts.client_finance, facts.order_terms, candidate.scheduling, change_identity)
-    payroll = build_payroll_cancellation_impact(facts.payroll, candidate.scheduling, facts.order_terms, change_identity)
+    finance = build_client_finance_cancellation_impact(facts.client_finance, facts.order_terms, candidate.scheduling, change_identity) if facts.client_finance is not None else None
+    payroll = build_payroll_cancellation_impact(facts.payroll, candidate.scheduling, facts.order_terms, change_identity) if facts.payroll is not None else None
     return finance, payroll
 
 
@@ -314,8 +318,8 @@ def _build_lifecycle_impact(facts, candidate):
 
 
 def _preview(facts, candidate, finance, payroll, lifecycle):
-    payload = {"cancellation": candidate.fingerprint.value, "client_finance": finance.fingerprint.value, "payroll": payroll.fingerprint.value, "lifecycle": lifecycle.fingerprint.value, "client_finance_version": facts.client_finance.account_version, "payroll_version": facts.payroll.payroll_version}
-    return OrderCancellationPreview(candidate, finance, payroll, lifecycle, facts.order.order_version, facts.scheduling.aggregate_version, facts.client_finance.account_version, facts.payroll.payroll_version, fingerprint_payload(payload))
+    payload = {"cancellation": candidate.fingerprint.value, "client_finance": finance.fingerprint.value if finance else None, "payroll": payroll.fingerprint.value if payroll else None, "lifecycle": lifecycle.fingerprint.value, "client_finance_version": facts.client_finance.account_version if facts.client_finance else None, "payroll_version": facts.payroll.payroll_version if facts.payroll else None}
+    return OrderCancellationPreview(candidate, finance, payroll, lifecycle, facts.order.order_version, facts.scheduling.aggregate_version, facts.client_finance.account_version if facts.client_finance else None, facts.payroll.payroll_version if facts.payroll else None, fingerprint_payload(payload))
 
 
 def _scheduling_command(request, preview, command_fingerprint):
@@ -323,8 +327,10 @@ def _scheduling_command(request, preview, command_fingerprint):
 
 
 def _persist_finance_and_payroll(repository, request, preview, event_id, scheduling):
-    _persist_client_finance(repository, request, preview, event_id)
-    _persist_payroll(repository, request, preview, event_id, scheduling)
+    if preview.client_finance_impact is not None:
+        _persist_client_finance(repository, request, preview, event_id)
+    if preview.payroll_impact is not None:
+        _persist_payroll(repository, request, preview, event_id, scheduling)
 
 
 def _persist_client_finance(repository, request, preview, event_id):
@@ -337,7 +343,7 @@ def _persist_payroll(repository, request, preview, event_id, scheduling):
 
 def _build_receipt(preview):
     scheduling = preview.candidate.scheduling
-    return OrderCancellationReceipt(preview.candidate.case_no, preview.order_version + 1, scheduling.resulting_aggregate_version, scheduling.generation_number, preview.client_finance_impact.resulting_account_version, preview.payroll_impact.resulting_payroll_version, OrderLifecycleStatus.CANCELLED, preview.candidate.actual_end_date, preview.candidate.official_service_day_count, preview.candidate.official_service_hours, scheduling.cancelled_assignment_ids, tuple(item.candidate_key for item in scheduling.assignments), preview.fingerprint)
+    return OrderCancellationReceipt(preview.candidate.case_no, preview.order_version + 1, scheduling.resulting_aggregate_version if scheduling else None, scheduling.generation_number if scheduling else None, preview.client_finance_impact.resulting_account_version if preview.client_finance_impact else None, preview.payroll_impact.resulting_payroll_version if preview.payroll_impact else None, OrderLifecycleStatus.CANCELLED, preview.candidate.actual_end_date, preview.candidate.official_service_day_count, preview.candidate.official_service_hours, scheduling.cancelled_assignment_ids if scheduling else (), tuple(item.candidate_key for item in scheduling.assignments) if scheduling else (), preview.fingerprint)
 
 
 def _validate_expected_versions(request, facts):
@@ -347,7 +353,7 @@ def _validate_expected_versions(request, facts):
 
 
 def _version_comparisons(request, facts):
-    return ((request.expected_order_version.value, facts.order.order_version, "order"), (request.expected_scheduling_version.value, facts.scheduling.aggregate_version, "scheduling"), (request.expected_client_finance_version.value, facts.client_finance.account_version, "client_finance"), (request.expected_payroll_version.value, facts.payroll.payroll_version, "payroll"))
+    return ((request.expected_order_version.value, facts.order.order_version, "order"), ((request.expected_scheduling_version.value if request.expected_scheduling_version else None), facts.scheduling.aggregate_version, "scheduling"), ((request.expected_client_finance_version.value if request.expected_client_finance_version else None), facts.client_finance.account_version if facts.client_finance else None, "client_finance"), ((request.expected_payroll_version.value if request.expected_payroll_version else None), facts.payroll.payroll_version if facts.payroll else None, "payroll"))
 
 
 def _validate_locked_staff_set(request, facts, preflight_staff_ids):
@@ -359,7 +365,7 @@ def _validate_locked_staff_set(request, facts, preflight_staff_ids):
 
 
 def _raise_if_impacts_blocked(request, preview):
-    blockers = tuple(sorted(set(preview.client_finance_impact.blockers).union(preview.payroll_impact.blockers)))
+    blockers = tuple(sorted({blocker for impact in (preview.client_finance_impact, preview.payroll_impact) if impact is not None for blocker in impact.blockers}))
     if blockers:
         raise CancellationWorkflowError(TypedError(ErrorCategory.DOMAIN_BLOCKED, "cancellation_impact_blocked", "A downstream Domain blocked the cancellation.", request.correlation_id, domain_blockers=blockers))
 
@@ -379,7 +385,7 @@ def _command_fingerprint(request):
 
 
 def _command_payload(request):
-    return {"case_no": request.case_no, "confirmed_service_days": tuple({"service_date": item.service_date.isoformat(), "staff_id": item.staff_id, "reason": item.reason} for item in request.confirmed_service_days), "order_version": request.expected_order_version.value, "scheduling_version": request.expected_scheduling_version.value, "client_finance_version": request.expected_client_finance_version.value, "payroll_version": request.expected_payroll_version.value, "preview_fingerprint": request.preview_fingerprint.value, "actor": request.actor.actor_id, "reason": request.reason}
+    return {"case_no": request.case_no, "confirmed_service_days": tuple({"service_date": item.service_date.isoformat(), "staff_id": item.staff_id, "reason": item.reason} for item in request.confirmed_service_days), "order_version": request.expected_order_version.value, "scheduling_version": (request.expected_scheduling_version.value if request.expected_scheduling_version else None), "client_finance_version": (request.expected_client_finance_version.value if request.expected_client_finance_version else None), "payroll_version": (request.expected_payroll_version.value if request.expected_payroll_version else None), "preview_fingerprint": request.preview_fingerprint.value, "actor": request.actor.actor_id, "reason": request.reason}
 
 
 def _workflow_error(request, category, code, message):

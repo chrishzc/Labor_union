@@ -109,20 +109,21 @@ class ConfirmedServiceDay:
 @dataclass(frozen=True, slots=True)
 class CancellationSchedulingFacts:
     case_no: str
-    aggregate_version: int
-    generation_number: int
+    aggregate_version: int | None
+    generation_number: int | None
     assignments: tuple[CancellationAssignmentFacts, ...]
 
     def __post_init__(self) -> None:
         require_canonical_text(
             self.case_no, "case number", _CASE_NUMBER_MAXIMUM_LENGTH
         )
-        require_nonnegative_integer(
-            self.aggregate_version, "scheduling aggregate version"
-        )
-        require_nonnegative_integer(
-            self.generation_number, "scheduling generation number"
-        )
+        if (self.aggregate_version is None) != (self.generation_number is None):
+            raise ValueError("cancellation_scheduling_facts_inconsistent")
+        if self.aggregate_version is not None:
+            require_nonnegative_integer(self.aggregate_version, "scheduling aggregate version")
+            require_nonnegative_integer(self.generation_number, "scheduling generation number")
+        elif self.assignments:
+            raise ValueError("cancellation_scheduling_facts_inconsistent")
         if not isinstance(self.assignments, tuple):
             raise TypeError("cancellation assignments must be a tuple")
         if any(
@@ -136,7 +137,7 @@ class CancellationSchedulingFacts:
 class CancellationCandidate:
     case_no: str
     expected_order_version: int
-    scheduling: SchedulingGenerationCandidate
+    scheduling: SchedulingGenerationCandidate | None
     cancellation_date: date
     actual_start_date: date | None
     actual_end_date: date | None
@@ -157,7 +158,10 @@ def build_cancellation_candidate(
         order, scheduling, cancellation_date, confirmed_service_days
     )
     assignments = _build_assignments(order, scheduling, confirmed)
-    generation = _generation_candidate(scheduling, assignments)
+    generation = (
+        _generation_candidate(scheduling, assignments)
+        if scheduling.aggregate_version is not None else None
+    )
     return _candidate(order, generation, cancellation_date, confirmed)
 
 
@@ -178,6 +182,8 @@ def _validate_confirmed_days(order, scheduling, cancellation_date, values):
             CancellationBlocker.SERVICE_OWNERSHIP_CONFLICT
         )
     _validate_service_day_count(order, len(values))
+    if values and scheduling.aggregate_version is None:
+        raise ValueError("cancellation_scheduling_facts_inconsistent")
     if not order.service_started and values:
         raise CancellationCandidateError(
             CancellationBlocker.SERVICE_START_FACT_INCONSISTENT
@@ -356,8 +362,8 @@ def _fingerprint_payload(order, generation, cancellation_date, confirmed):
         "contracted_service_days": order.contracted_service_days,
         "service_hours_per_day": order.service_hours_per_day,
         "actual_start_date": _iso_date(order.actual_start_date),
-        "scheduling_version": generation.expected_aggregate_version,
-        "source_generation": generation.generation_number - 1,
+        "scheduling_version": generation.expected_aggregate_version if generation else None,
+        "source_generation": generation.generation_number - 1 if generation else None,
         "cancellation_date": cancellation_date.isoformat(),
         "confirmed_service_days": tuple(
             {

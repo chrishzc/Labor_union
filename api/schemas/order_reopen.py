@@ -12,8 +12,8 @@ class OrderReopenPreviewView(BaseModel):
 
     case_no: str
     order_version: int = Field(ge=0)
-    client_finance_version: int = Field(ge=0)
-    payroll_version: int = Field(ge=0)
+    client_finance_version: int | None = Field(ge=0)
+    payroll_version: int | None = Field(ge=0)
     cancellation_event_id: int = Field(gt=0)
     before_status: str
     after_status: str

@@ -3,6 +3,8 @@
 from datetime import date
 from types import SimpleNamespace
 
+import pytest
+
 from domains.client_finance.obligation_planning import (
     ClientFinanceTermsFacts,
     ClientPaymentTerms,
@@ -32,6 +34,10 @@ class _Cursor:
                 "policy_version": "citizen-v1",
                 "client_hourly_rate_ntd": 300,
             }
+        elif statement.startswith("SELECT case_no FROM client_finance_accounts"):
+            self.current = {"case_no": parameters[0]}
+        elif statement.startswith("SELECT"):
+            self.current = None
         elif "INSERT INTO client_payment_terms_events" in statement:
             self.lastrowid = 31
             self.current = None
@@ -163,4 +169,82 @@ def test_unassigned_40_day_case_corrects_rate_without_creating_obligations(monke
     ) == (5, "CASE-40-DAYS", 4)
     assert any("INSERT INTO client_finance_outbox" in sql for sql, _ in statements)
     assert not any("INSERT INTO client_obligation" in sql for sql, _ in statements)
-    assert not any("staff_obligation" in sql for sql, _ in statements)
+    assert not any("staff_obligation" in sql and not sql.startswith("SELECT") for sql, _ in statements)
+
+
+def _apply(connection):
+    module.MySqlBeClassFinancialSync(connection).apply(
+        case_no="CASE-INCOMPLETE", correction_event_id=9,
+        actor=ActorContext("admin"), reason="correct birth count before service",
+        idempotency_key=IdempotencyKey("beclass-incomplete"), correlation_id=CorrelationId("beclass-test"),
+    )
+
+
+def _presence_connection(monkeypatch, present_tables):
+    connection = _Connection()
+    original = connection.cursor_value.execute
+    def execute(statement, parameters):
+        original(statement, parameters)
+        if statement.startswith("SELECT case_no FROM"):
+            table = statement.split()[3]
+            connection.cursor_value.current = {"case_no": parameters[0]} if table in present_tables else None
+    connection.cursor_value.execute = execute
+    monkeypatch.setattr(module, "select_order", lambda *_args, **_kwargs: {"start_date": None})
+    return connection
+
+
+def test_incomplete_unassigned_case_without_financial_roots_only_keeps_effective_correction(monkeypatch):
+    connection = _presence_connection(monkeypatch, set())
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("missing roots must not request full financial facts or bootstrap")
+    monkeypatch.setattr(module, "load_locked_facts", forbidden)
+    monkeypatch.setattr(module, "load_contract_client_finance_facts", forbidden)
+    _apply(connection)
+    assert all(sql.startswith("SELECT") for sql, _ in connection.cursor_value.statements)
+
+
+@pytest.mark.parametrize("tables,code", [
+    ({"client_finance_accounts"}, "invalid_client_finance_facts"),
+    ({"client_payment_terms"}, "invalid_client_finance_facts"),
+    ({"client_obligation_events"}, "invalid_client_finance_facts"),
+    ({"client_ledger_entries"}, "invalid_client_finance_facts"),
+    ({"payroll_case_accounts"}, "invalid_payroll_facts"),
+    ({"case_payroll_rate_policy_snapshots"}, "invalid_payroll_facts"),
+    ({"staff_obligation_events"}, "invalid_payroll_facts"),
+    ({"payroll_case_accounts", "case_payroll_rate_policy_snapshots", "staff_obligations"},
+     "beclass_rate_correction_payroll_facts_inconsistent"),
+])
+def test_partial_or_orphan_financial_facts_still_block_without_writes(monkeypatch, tables, code):
+    connection = _presence_connection(monkeypatch, tables)
+    with pytest.raises(ValueError, match=f"^{code}$"):
+        _apply(connection)
+    assert all(sql.startswith("SELECT") for sql, _ in connection.cursor_value.statements)
+
+
+def test_existing_assignment_still_updates_both_financial_owners(monkeypatch):
+    connection = _Connection()
+    monkeypatch.setattr(module, "select_order", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(module, "_load_rate_correction_presence", lambda *_: (True, True))
+    monkeypatch.setattr(module, "preflight_staff_ids", lambda *_: (7,))
+    facts = SimpleNamespace(scheduling="schedule", payroll="payroll", order=SimpleNamespace(terms="terms"), planned_service_dates=())
+    monkeypatch.setattr(module, "load_locked_facts", lambda *_: facts)
+    monkeypatch.setattr(module, "load_contract_client_finance_facts", lambda *_args, **_kwargs: "finance")
+    monkeypatch.setattr(module, "_persist_effective_client_rate", lambda *_: None)
+    monkeypatch.setattr(module, "build_client_finance_rate_correction_candidate", lambda *_: "client-impact")
+    calls = []
+    monkeypatch.setattr(module, "persist_client_finance_terms_impact", lambda *_: calls.append("finance"))
+    monkeypatch.setattr(module, "build_generation_candidate", lambda *_: SimpleNamespace(
+        assignments=(SimpleNamespace(candidate_key="existing", source_assignment_id=7),)))
+    monkeypatch.setattr(module, "build_payroll_rate_correction_impact", lambda *_: SimpleNamespace())
+    monkeypatch.setattr(module, "replace", lambda candidate, **_kwargs: candidate)
+    monkeypatch.setattr(module, "persist_payroll_terms_impact", lambda *_: calls.append("payroll"))
+    _apply(connection)
+    assert calls == ["finance", "payroll"]
+
+
+def test_formal_assignment_cannot_skip_missing_financial_roots(monkeypatch):
+    connection = _presence_connection(monkeypatch, set())
+    monkeypatch.setattr(module, "_select_assignments", lambda *_: ({"id": 7},))
+    with pytest.raises(ValueError, match="^beclass_rate_correction_assignment_facts_inconsistent$"):
+        _apply(connection)
+    assert all(sql.startswith("SELECT") for sql, _ in connection.cursor_value.statements)

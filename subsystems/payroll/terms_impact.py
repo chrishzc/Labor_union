@@ -5,7 +5,7 @@ Description: 建立條款異動的薪資影響，並表達未排班案件的零�
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from decimal import Decimal
 from enum import StrEnum
@@ -189,6 +189,22 @@ def build_payroll_terms_impact_candidate(facts: PayrollTermsImpactFacts, change_
 def build_payroll_terms_impact(source_facts: PayrollTermsSourceFacts, scheduling: SchedulingGenerationCandidate, order_terms: OrderTerms, change_identity: str) -> PayrollTermsImpactCandidate:
     facts = _impact_facts(source_facts, scheduling, order_terms)
     return build_payroll_terms_impact_candidate(facts, change_identity)
+
+
+def build_payroll_rate_correction_impact(source_facts: PayrollTermsSourceFacts, scheduling: SchedulingGenerationCandidate, order_terms: OrderTerms, change_identity: str) -> PayrollTermsImpactCandidate:
+    """Rebuild unpaid obligations without replacing their Scheduling identities."""
+    require_canonical_text(change_identity, "change identity", _IDENTITY_MAXIMUM_LENGTH)
+    facts = _impact_facts(source_facts, scheduling, order_terms)
+    payroll, rates = _calculate_payroll(facts)
+    # An unchanged assignment/generation can be corrected more than once.
+    # Each replacement obligation belongs to its immutable correction event.
+    actions = tuple(
+        replace(action, obligation_identity=_obligation_identity(
+            change_identity, facts.case_no, action.candidate_assignment_key
+        )) if action.action is PayrollTermsActionKind.ESTABLISH else action
+        for action in _build_actions(facts, payroll, change_identity)
+    )
+    return _candidate(facts, payroll, rates, actions)
 
 
 def build_preassignment_payroll_noop(

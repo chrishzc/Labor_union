@@ -1,0 +1,48 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-order-cancellation-optional-downstream-2026-09-29-v1",
+  "descriptors": {
+    "1048_order_cancellation_optional_downstream.sql": {
+      "tables": {},
+      "parent_columns": {
+        "order_cancellation_apply_receipts": {
+          "scheduling_command_receipt_id": {
+            "column_type": "bigint",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "scheduling_version": {
+            "column_type": "bigint unsigned",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "scheduling_generation": {
+            "column_type": "int unsigned",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "client_finance_version": {
+            "column_type": "bigint unsigned",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "payroll_version": {
+            "column_type": "bigint unsigned",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          }
+        }
+      },
+      "indexes": {},
+      "foreign_keys": {},
+      "checks": {},
+      "triggers": [],
+      "views": {}
+    }
+  }
+}

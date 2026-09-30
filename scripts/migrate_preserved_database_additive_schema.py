@@ -353,6 +353,7 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_09_22_order_terms_optional_scheduling_receipt_v1.json",
     "labor_union_2026_09_29_client_zero_obligation_establishment_v1.json",
     "labor_union_2026_09_29_scheduling_buffer_advisory_v1.json",
+    "labor_union_2026_09_29_order_cancellation_optional_downstream_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -2377,6 +2378,15 @@ def _modified_parent_predecessor_absent_state(
                 },
             },
         },
+        "1048_order_cancellation_optional_downstream.sql": {
+            "order_cancellation_apply_receipts": {
+                "scheduling_command_receipt_id": {"column_type": "bigint", "is_nullable": "NO", "column_default": None, "extra": ""},
+                "scheduling_version": {"column_type": "bigint unsigned", "is_nullable": "NO", "column_default": None, "extra": ""},
+                "scheduling_generation": {"column_type": "int unsigned", "is_nullable": "NO", "column_default": None, "extra": ""},
+                "client_finance_version": {"column_type": "bigint unsigned", "is_nullable": "NO", "column_default": None, "extra": ""},
+                "payroll_version": {"column_type": "bigint unsigned", "is_nullable": "NO", "column_default": None, "extra": ""},
+            },
+        },
         "1045_order_terms_optional_scheduling_receipt.sql": {
             "order_terms_apply_receipts": {
                 "scheduling_command_receipt_id": {
@@ -3736,6 +3746,12 @@ def _local_classify_statement(statement: str) -> str:
             return "order_terms_scheduling_receipt_nullability_widen"
         if normalized == canonical_1046:
             return "client_zero_obligation_establishment_check_widen"
+        canonical_1048 = re.sub(
+            r"\s+", " ",
+            split_sql((ROOT / "db/schema_parts/1048_order_cancellation_optional_downstream.sql").read_text(encoding="utf-8"))[0].strip(),
+        ).casefold()
+        if normalized == canonical_1048:
+            return "order_cancellation_downstream_nullability_widen"
         buffer_advisory_alters = {
             re.sub(r"\s+", " ", value.strip()).casefold()
             for value in split_sql((ROOT / "db/schema_parts/1047_scheduling_buffer_advisory.sql").read_text(encoding="utf-8"))
@@ -4287,7 +4303,7 @@ def local_additive_apply(
             data_fingerprint_sha256=local_backup["data_fingerprint_sha256"],
         )
     with _local_maintenance_lock(config, source, lock_timeout_seconds):
-        locked_snapshot = local_additive_source_snapshot(config, source)["snapshot"]
+        locked_snapshot = _schema_snapshot(config, source)
         if not events and locked_snapshot["sha256"] != baseline:
             raise LocalAdditiveBlocked("source changed after plan or lock", code="source_changed")
         if server_identity(config, source)["database"] != source:
@@ -4323,7 +4339,7 @@ def local_additive_apply(
             connection.close()
         # Keep the post-DDL descriptor read under the named lock so another
         # local process cannot change the contract between apply and verify.
-        after = local_additive_source_snapshot(config, source)["snapshot"]
+        after = _schema_snapshot(config, source)
         descriptor = local_additive_release_qualification(qualification["release_id"], artifact["name"])["schema_artifacts"][0]["descriptor"]
         if local_additive_descriptor_state(after, descriptor, artifact["name"]) != "exact":
             raise LocalAdditiveBlocked("post-apply descriptor is not exact", code="descriptor_drift")
@@ -5574,6 +5590,17 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
                 "bigint", "YES", None
             ),
         }
+    if part_name == "1048_order_cancellation_optional_downstream.sql":
+        descriptor["parent_columns"]["order_cancellation_apply_receipts"] = {
+            name: _column_contract(kind, "YES", None)
+            for name, kind in {
+                "scheduling_command_receipt_id": "bigint",
+                "scheduling_version": "bigint unsigned",
+                "scheduling_generation": "int unsigned",
+                "client_finance_version": "bigint unsigned",
+                "payroll_version": "bigint unsigned",
+            }.items()
+        }
     if part_name == "1046_client_zero_obligation_establishment.sql":
         clause, _ = _extract_parenthesized(sql, sql.index("CHECK (") + 6)
         descriptor["checks"][(
@@ -6156,6 +6183,7 @@ def _release_descriptor_metadata_state(
         "1041_historical_manual_beclass_origin.sql",
         "1044_order_terms_optional_downstream_versions.sql",
         "1045_order_terms_optional_scheduling_receipt.sql",
+        "1048_order_cancellation_optional_downstream.sql",
     }:
         if released.get("parent_columns") != canonical.get("parent_columns"):
             raise UpgradeBlocked(

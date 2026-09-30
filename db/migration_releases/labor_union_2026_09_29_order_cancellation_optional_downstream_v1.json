@@ -1,0 +1,79 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-order-cancellation-optional-downstream-2026-09-29-v1",
+  "release_metadata": {
+    "release_name": "Labor Union Orders Cancellation optional downstream owners",
+    "application_version": "order-cancellation-optional-downstream-v1",
+    "published_at": "2026-09-29",
+    "description": "Permit cancellation receipts without Scheduling, Client Finance or Payroll roots; existing receipts and financial history remain unchanged"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-scheduling-buffer-advisory-2026-09-29-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1048_order_cancellation_optional_downstream.sql",
+      "relative_path": "db/schema_parts/1048_order_cancellation_optional_downstream.sql",
+      "sha256": "09ee82659def7603ce840071ad70990471afba8c077cf029c87b906b9bd5ffec",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "forward-only-after-null-receipt; discard-candidate-before-entry-switch",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "order-cancellation-receipt-downstream-nullability-exact",
+      "phase": "post-schema",
+      "policy": "Optional cancellation downstream columns retain their original types, foreign keys and all existing values",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": [
+      "order-cancellation-optional-downstream-v1"
+    ],
+    "required_restart_targets": [
+      "api"
+    ],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": [
+      "order-cancellation-receipt-downstream-nullability-exact"
+    ]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_09_29_order_cancellation_optional_downstream_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_09_29_order_cancellation_optional_downstream_v1.descriptors.json",
+    "sha256": "aac747f8b5807077baae3f0e8d3e5677b9155b0ec33671bf651daaaddbc61341",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

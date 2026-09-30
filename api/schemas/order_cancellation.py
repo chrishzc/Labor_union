@@ -100,10 +100,10 @@ class OrderCancellationQueryView(BaseModel):
     historical_mid_service_confirmation_available: bool
     service_data_locked: bool
     order_version: int = Field(ge=0)
-    scheduling_version: int = Field(ge=0)
-    scheduling_generation: int = Field(ge=0)
-    client_finance_version: int = Field(ge=0)
-    payroll_version: int = Field(ge=0)
+    scheduling_version: int | None = Field(ge=0)
+    scheduling_generation: int | None = Field(ge=0)
+    client_finance_version: int | None = Field(ge=0)
+    payroll_version: int | None = Field(ge=0)
     confirmed_service_days: list[CancellationServiceDayView]
     caregiver_options: list[CancellationCaregiverOptionView]
 
@@ -118,13 +118,13 @@ class OrderCancellationPreviewView(BaseModel):
     official_service_day_count: int = Field(ge=0)
     official_service_hours: float = Field(ge=0, multiple_of=0.5)
     order_version: int = Field(ge=0)
-    scheduling_version: int = Field(ge=0)
-    scheduling_generation: int = Field(ge=0)
-    client_finance_version: int = Field(ge=0)
-    payroll_version: int = Field(ge=0)
-    scheduling: dict[str, Any]
-    client_finance_impact: ClientFinanceImpactView
-    payroll_impact: dict[str, Any]
+    scheduling_version: int | None = Field(ge=0)
+    scheduling_generation: int | None = Field(ge=0)
+    client_finance_version: int | None = Field(ge=0)
+    payroll_version: int | None = Field(ge=0)
+    scheduling: dict[str, Any] | None
+    client_finance_impact: ClientFinanceImpactView | None
+    payroll_impact: dict[str, Any] | None
     lifecycle_impact: dict[str, Any]
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
@@ -134,10 +134,10 @@ class OrderCancellationReceiptView(BaseModel):
 
     case_no: str
     order_version: int = Field(ge=0)
-    scheduling_version: int = Field(ge=0)
-    scheduling_generation: int = Field(ge=0)
-    client_finance_version: int = Field(ge=0)
-    payroll_version: int = Field(ge=0)
+    scheduling_version: int | None = Field(ge=0)
+    scheduling_generation: int | None = Field(ge=0)
+    client_finance_version: int | None = Field(ge=0)
+    payroll_version: int | None = Field(ge=0)
     lifecycle_status: str
     actual_end_date: date | None
     official_service_day_count: int = Field(ge=0)

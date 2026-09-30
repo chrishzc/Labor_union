@@ -46,8 +46,8 @@ class OrderReopenApplyBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     expected_order_version: int = Field(ge=0)
-    expected_client_finance_version: int = Field(ge=0)
-    expected_payroll_version: int = Field(ge=0)
+    expected_client_finance_version: int | None = Field(ge=0)
+    expected_payroll_version: int | None = Field(ge=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     reason: str = Field(min_length=1, max_length=500)
 
@@ -123,8 +123,8 @@ def _apply_request(case_no, body, key, correlation, principal):
     return OrderReopenApplyRequest(
         case_no,
         ExpectedVersion(body.expected_order_version),
-        ExpectedVersion(body.expected_client_finance_version),
-        ExpectedVersion(body.expected_payroll_version),
+        ExpectedVersion(body.expected_client_finance_version) if body.expected_client_finance_version is not None else None,
+        ExpectedVersion(body.expected_payroll_version) if body.expected_payroll_version is not None else None,
         PreviewFingerprint(body.preview_fingerprint),
         IdempotencyKey(key),
         ActorContext(str(principal.username or "").strip()),

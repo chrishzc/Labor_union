@@ -1,5 +1,5 @@
 -- GENERATED FILE. Do not edit by hand.
--- Release: labor-union-validation-schema-2026-09-29-v41
+-- Release: labor-union-validation-schema-2026-09-29-v42
 -- Replace __LU_TEST_DATABASE__ with an explicitly confirmed lu_test_* database.
 -- Rebuild with: python scripts/build_validation_schema_release.py
 
@@ -21761,3 +21761,13 @@ ALTER TABLE scheduling_effective_occupancy
     DROP PRIMARY KEY,
     ADD PRIMARY KEY (staff_id, occupancy_date, occupancy_type);
 -- END SOURCE: db/schema_parts/1047_scheduling_buffer_advisory.sql
+
+-- BEGIN SOURCE: db/schema_parts/229_order_cancellation_optional_downstream.sql
+-- Allow absent downstream owners without fabricating cancellation history.
+ALTER TABLE order_cancellation_apply_receipts
+    MODIFY COLUMN scheduling_command_receipt_id BIGINT NULL,
+    MODIFY COLUMN scheduling_version BIGINT UNSIGNED NULL,
+    MODIFY COLUMN scheduling_generation INT UNSIGNED NULL,
+    MODIFY COLUMN client_finance_version BIGINT UNSIGNED NULL,
+    MODIFY COLUMN payroll_version BIGINT UNSIGNED NULL;
+-- END SOURCE: db/schema_parts/229_order_cancellation_optional_downstream.sql

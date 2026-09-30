@@ -30,6 +30,7 @@ import {
   FingerprintSchema,
   OrderReopenReceiptViewSchema,
   OrderReopenPreviewViewSchema,
+  OrderReopenApplyPayloadSchema,
 } from '../api/orders/order_mutation_schemas';
 import {
   realisticServiceDateQueryView,
@@ -745,5 +746,18 @@ describe('OrdersMutationClient Suite (Confirmed Service Dates & Controlled Reope
         })
       ).rejects.toThrow(ApiTimeoutError);
     });
+  });
+});
+
+
+describe('受控重開未初始化版本', () => {
+  it('預覽與確認接受明確空值，仍拒絕遺漏版本', () => {
+    const preview = OrderReopenPreviewViewSchema.parse({ ...realisticOrderReopenPreviewView, client_finance_version: null, payroll_version: null });
+    expect(preview.client_finance_version).toBeNull();
+    const payload = { ...realisticOrderReopenApplyPayload, expected_client_finance_version: null, expected_payroll_version: null };
+    expect(OrderReopenApplyPayloadSchema.parse(payload).expected_payroll_version).toBeNull();
+    const { expected_payroll_version: omitted, ...missing } = payload;
+    void omitted;
+    expect(OrderReopenApplyPayloadSchema.safeParse(missing).success).toBe(false);
   });
 });

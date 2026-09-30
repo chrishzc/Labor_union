@@ -319,7 +319,7 @@ def test_default_catalog_runs_only_the_current_declared_backfill() -> None:
     assert tuple(item.backfill_id for item in runner.RELEASE_MANIFEST.backfills) == (
         "twins-payroll-rate-snapshots-v1",
     )
-    assert tuple(item.release_id for item in runner.RELEASE_MANIFEST.manifests[-9:]) == (
+    assert tuple(item.release_id for item in runner.RELEASE_MANIFEST.manifests[-11:]) == (
         "labor-union-twins-payroll-policy-2026-09-12-v2",
         "labor-union-matching-plan-create-receipts-2026-09-12-v1",
         "labor-union-order-service-hours-half-precision-2026-09-14-v1",
@@ -329,6 +329,8 @@ def test_default_catalog_runs_only_the_current_declared_backfill() -> None:
         "labor-union-order-terms-optional-downstream-versions-2026-09-22-v1",
         "labor-union-order-terms-optional-scheduling-receipt-2026-09-22-v1",
         "labor-union-client-zero-obligation-establishment-2026-09-29-v1",
+        "labor-union-scheduling-buffer-advisory-2026-09-29-v1",
+        "labor-union-order-cancellation-optional-downstream-2026-09-29-v1",
     )
     assert runner.RELEASE_MANIFEST.backfills[0].artifact.sha256 == (
         "5281b8a96620f081494c3339327013c00ff94cbdabea9d0a878851570b2882dd"

@@ -6,6 +6,7 @@
 
 ## Responsibility
 組成訂單取消的 Query／Preview／Apply，驗證 fresh Orders、Scheduling、Client Finance 與 Payroll 根事實，並以單一交易產生取消 receipt／outbox。
+合法不存在的下游 owner 以 NULL 表達；專用 reader 驗證 partial roots／孤立財務歷史，取消不自動 bootstrap。日期-only 開始日不代表已服務。
 
 ## Implementation
 - primary:
@@ -35,6 +36,7 @@
 - static:
   - `.venv/bin/python -m pytest tests/domains/orders/subsystems/orders/modules/cancellation/ tests/domains/orders/subsystems/orders/integration/test_cancelled_order_reentry_guard.py tests/domains/orders/subsystems/orders/integration/test_order_cancellation_cross_domain_chain.py`
 - disposable_mysql: `tests/test_historical_mid_service_cancellation_disposable_mysql_e2e.py`
+- disposable_mysql: `tests/domains/orders/subsystems/orders/integration/test_order_cancellation_absent_roots_disposable_mysql.py`
 - higher_boundary: tests/domains/orders/subsystems/orders/integration/
 - higher_boundary:
   - `ui_react/src/tests/orders_page_real_data.test.tsx`

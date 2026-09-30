@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore, type FC } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type FC } from 'react';
 import { orderCancellationClient, type OrderCancellationPreview, type OrderCancellationQuery,
   type ServiceDay } from '../api/orders/order_cancellation_client';
 import { ApiHttpError } from '../api/shared/typed_errors';
@@ -15,7 +15,6 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
   const [query, setQuery] = useState<OrderCancellationQuery | null>(null);
   const [days, setDays] = useState<DayDraft[]>([]);
   const [reason, setReason] = useState('');
-  const [confirmed, setConfirmed] = useState(false);
   const [preview, setPreview] = useState<OrderCancellationPreview | null>(null);
   const [phase, setPhase] = useState<Phase>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -56,7 +55,7 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
     queryController.current = null;
     previewController.current = null;
     readbackController.current = null;
-    setQuery(null); setDays([]); setReason(''); setPreview(null); setConfirmed(false); setError(null); setPhase('idle');
+    setQuery(null); setDays([]); setReason(''); setPreview(null); setError(null); setPhase('idle');
   }, [caseNo]);
   useEffect(() => {
     mounted.current = true;
@@ -78,18 +77,22 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
   }, []);
   useEffect(() => () => { onBusyChange?.(false); }, [onBusyChange]);
 
-  const isActive = (request: number, requestCaseNo: string) => mounted.current
-    && activeCaseNo.current === requestCaseNo && sequence.current === request;
+  const isActive = useCallback((request: number, requestCaseNo: string) => mounted.current
+    && activeCaseNo.current === requestCaseNo && sequence.current === request, []);
 
-  const invalidate = () => { setPreview(null); setConfirmed(false); setError(null); setPhase('idle'); };
-  const load = async () => {
-    if (busy || inFlight.current.has(caseNo)) return;
-    if (flow?.status === 'observed') orderMutationFlowStore.clearCancellation(caseNo);
+  const invalidate = () => {
+    sequence.current += 1; previewController.current?.abort();
+    setPreview(null); setError(null); setPhase('idle');
+  };
+  const load = useCallback(async () => {
+    const current = orderMutationFlowStore.getCancellation(caseNo);
+    if (inFlight.current.has(caseNo) || (current && current.status !== 'observed')) return;
+    if (current?.status === 'observed') orderMutationFlowStore.clearCancellation(caseNo);
     const request = ++sequence.current;
     queryController.current?.abort();
     const controller = new AbortController();
     queryController.current = controller;
-    setPhase('loading'); setPreview(null); setConfirmed(false); setError(null);
+    setPhase('loading'); setPreview(null); setError(null);
     try {
       const data = await orderCancellationClient.query(caseNo, controller.signal);
       if (data.case_no !== caseNo) throw new Error('訂單取消查詢案件識別不一致。');
@@ -100,10 +103,16 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
     } finally {
       if (queryController.current === controller) queryController.current = null;
     }
-  };
+  }, [caseNo, isActive]);
 
-  const check = async () => {
-    if (!query || alreadyCancelled || busy || inFlight.current.has(caseNo)) return;
+  useEffect(() => { void load(); }, [load]);
+
+  const check = useCallback(async () => {
+    const historicalRepair = query?.lifecycle_status === '訂單取消' && query.historical_mid_service_confirmation_available;
+    const supportsServiceDays = query?.service_started === true || historicalRepair;
+    const current = orderMutationFlowStore.getCancellation(caseNo);
+    if (!query || (query.lifecycle_status === '訂單取消' && !historicalRepair)
+      || inFlight.current.has(caseNo) || current) return;
     setError(null);
     if (days.some((day) => !/^\d{4}-\d{2}-\d{2}$/.test(day.service_date)
       || !Number.isInteger(Number(day.staff_id)) || Number(day.staff_id) <= 0)) {
@@ -121,18 +130,23 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
     previewController.current?.abort();
     const controller = new AbortController();
     previewController.current = controller;
-    setPhase('previewing'); setPreview(null); setConfirmed(false);
+    setPhase('previewing'); setPreview(null);
     try {
       const data = await orderCancellationClient.preview(caseNo, typed.sort((left, right) => left.service_date.localeCompare(right.service_date)), controller.signal);
-      if (data.lifecycle_impact.case_no !== caseNo || data.scheduling.case_no !== caseNo
-        || data.client_finance_impact.case_no !== caseNo || data.payroll_impact.case_no !== caseNo) throw new Error('取消預覽案件識別不一致。');
+      if (data.lifecycle_impact.case_no !== caseNo || (data.scheduling !== null && data.scheduling.case_no !== caseNo)
+        || (data.client_finance_impact !== null && data.client_finance_impact.case_no !== caseNo) || (data.payroll_impact !== null && data.payroll_impact.case_no !== caseNo)) throw new Error('取消預覽案件識別不一致。');
       if (isActive(request, caseNo)) { setPreview(data); setPhase('idle'); }
     } catch (caught) {
       if (isActive(request, caseNo)) { setError(caught instanceof Error ? caught.message : '取消預覽失敗。'); setPhase('idle'); }
     } finally {
       if (previewController.current === controller) previewController.current = null;
     }
-  };
+  }, [caseNo, query, days, isActive]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => void check(), 250);
+    return () => { clearTimeout(timer); previewController.current?.abort(); };
+  }, [check]);
 
   const observe = async (command: CancellationCommand, request: number) => {
     const saved = orderMutationFlowStore.getCancellation(command.caseNo);
@@ -147,18 +161,18 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
     const data = await orderCancellationClient.query(command.caseNo, controller.signal);
     if (data.case_no !== command.caseNo || data.lifecycle_status !== receipt.lifecycle_status
       || data.lifecycle_status !== '訂單取消' || data.order_version < receipt.order_version
-      || data.scheduling_version < receipt.scheduling_version) throw new Error('取消已回傳收據，但正式回讀尚未觀察到該版本與取消狀態。');
+      || (receipt.scheduling_version !== null && (data.scheduling_version === null || data.scheduling_version < receipt.scheduling_version))) throw new Error('取消已回傳收據，但正式回讀尚未觀察到該版本與取消狀態。');
     orderMutationFlowStore.setCancellation(command.caseNo, { ...saved, status: 'observed', error: null });
     if (!isActive(request, command.caseNo)) return;
-    setQuery(data); setDays(drafts(data.confirmed_service_days)); setPreview(null); setConfirmed(false);
+    setQuery(data); setDays(drafts(data.confirmed_service_days)); setPreview(null);
     setPhase('observed');
     onBusyChange?.(false); onObserved?.();
   };
 
   const apply = async (retry = false) => {
     if (inFlight.current.has(caseNo)) return;
-    if (!retry && (!preview || !reason.trim() || !confirmed || busy
-      || preview.client_finance_impact.blockers.length > 0 || preview.payroll_impact.blockers.length > 0)) return;
+    if (!retry && (!preview || !reason.trim() || busy
+      || (preview.client_finance_impact !== null && preview.client_finance_impact.blockers.length > 0) || (preview.payroll_impact !== null && preview.payroll_impact.blockers.length > 0))) return;
     const existing = orderMutationFlowStore.getCancellation(caseNo);
     if (retry && existing?.status !== 'outcome_unknown') return;
     if (existing?.status === 'applying' || existing?.status === 'observing' || existing?.receipt) return;
@@ -206,7 +220,7 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
       if (rejected && !recoveringUnknown) {
         orderMutationFlowStore.clearCancellation(command.caseNo);
         if (isActive(request, command.caseNo)) {
-          setPreview(null); setConfirmed(false); setQuery(null); setPhase('idle'); onBusyChange?.(false);
+          setPreview(null); setQuery(null); setPhase('idle'); onBusyChange?.(false);
           setError(`取消未通過檢查，請重新讀取並預覽：${caught.message}`);
         }
       } else {
@@ -250,8 +264,8 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
 
   return (
     <section aria-label={`案件 ${caseNo} 訂單取消`}>
-      <h4>訂單取消／歷史取消實際服務補登</h4>
-      <button type="button" disabled={busy} onClick={() => void load()}>讀取取消狀態</button>
+      <h4>{historicalRepair ? '補登取消前的實際服務' : '取消訂單'}</h4>
+      {!query && phase !== 'loading' && !unresolved && <button type="button" onClick={() => void load()}>重新讀取取消狀態</button>}
       {phase === 'loading' && <p role="status">讀取取消狀態中…</p>}
       {query && (
         <>
@@ -282,7 +296,8 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
               <button type="button" onClick={() => { setDays((current) => [...current, { service_date: '', staff_id: '', reason: '' }]); invalidate(); }}>新增實際服務日</button>
             </fieldset>
           )}
-          <button type="button" disabled={busy || alreadyCancelled} onClick={() => void check()}>檢查取消影響</button>
+          {!alreadyCancelled && <label>取消原因<textarea aria-label="取消原因" value={reason} disabled={busy} maxLength={500} onChange={(event) => setReason(event.target.value)} /></label>}
+          {!alreadyCancelled && !preview && phase === 'idle' && error && <button type="button" onClick={() => void check()}>重新檢查取消影響</button>}
         </>
       )}
       {preview && (
@@ -290,13 +305,14 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
           <p>正式服務：{preview.official_service_day_count} 日／{preview.official_service_hours} 小時；取消日期：{preview.cancellation_date}</p>
           <p>狀態：{preview.lifecycle_impact.before_status} → {preview.lifecycle_impact.after_status}</p>
           <section aria-label="取消帳務與薪資影響">
-            {preview.client_finance_impact.actions.map((action, index) => <p key={`client-${index}`}>客戶 {action.payment_stage}：{action.direction} NT$ {action.direction_amount_ntd}</p>)}
-            {preview.payroll_impact.actions.map((action, index) => <p key={`staff-${index}`}>月嫂 #{action.staff_id}：{action.direction} NT$ {action.amount.amount}</p>)}
-            {[...preview.client_finance_impact.blockers, ...preview.payroll_impact.blockers].map((blocker, index) => <p role="alert" key={index}>{blocker}</p>)}
+            {preview.client_finance_impact === null && <p>沒有客戶帳務需要調整。</p>}
+            {preview.payroll_impact === null && <p>沒有月嫂薪資需要調整。</p>}
+            {preview.client_finance_impact?.actions.map((action, index) => <p key={`client-${index}`}>客戶 {action.payment_stage}：{action.direction} NT$ {action.direction_amount_ntd}</p>)}
+            {preview.payroll_impact?.actions.map((action, index) => <p key={`staff-${index}`}>月嫂 #{action.staff_id}：{action.direction} NT$ {action.amount.amount}</p>)}
+            {[...(preview.client_finance_impact?.blockers ?? []), ...(preview.payroll_impact?.blockers ?? [])].map((blocker, index) => <p role="alert" key={index}>{blocker}</p>)}
           </section>
-          <label>取消原因<textarea aria-label="Beta 取消原因" value={reason} disabled={busy} maxLength={500} onChange={(event) => { setReason(event.target.value); setConfirmed(false); }} /></label>
-          <label><input type="checkbox" checked={confirmed} disabled={busy} onChange={(event) => setConfirmed(event.target.checked)} />我已核對實際服務日、帳務與取消影響</label>
-          <button type="button" disabled={busy || !confirmed || !reason.trim() || preview.client_finance_impact.blockers.length > 0 || preview.payroll_impact.blockers.length > 0} onClick={() => void apply()}>確認取消／補登</button>
+          <p>請核對以上服務日與帳務影響。確認後將{historicalRepair ? '保存實際服務事實' : '取消訂單'}。</p>
+          <button type="button" disabled={busy || !reason.trim() || (preview.client_finance_impact !== null && preview.client_finance_impact.blockers.length > 0) || (preview.payroll_impact !== null && preview.payroll_impact.blockers.length > 0)} onClick={() => void apply()}>{historicalRepair ? '確認補登' : '確認取消訂單'}</button>
         </>
       )}
       {phase === 'previewing' && <p role="status">檢查取消影響中…</p>}

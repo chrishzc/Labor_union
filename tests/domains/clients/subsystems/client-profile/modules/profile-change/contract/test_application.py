@@ -133,6 +133,40 @@ class _Binding:
         return ClientBindingEvidence(identity, client_id, 1, ("customer", "staff"), True, True)
 
 
+@pytest.mark.parametrize("field,value", [
+    ("name", "合成測試姓名"), ("phone", "0999000000"),
+    ("address", "合成測試地址"), ("notes", "合成測試註記"),
+])
+def test_admin_can_save_one_profile_field_when_every_other_profile_field_is_missing(field, value):
+    repository = _Repository()
+    for profile_field in ("name", "gender", "phone", "city", "address", "residence_type", "delivery_type", "baby_info", "notes"):
+        repository.profile[profile_field] = None
+    application = _application(repository)
+    preview = application.preview_admin("CASE-001", {field: value}, ExpectedVersion(0))
+    application.apply_admin("CASE-001", {field: value}, ExpectedVersion(0), ActorContext("admin"),
+        "補正單一主檔欄位", preview.preview_fingerprint, IdempotencyKey(f"profile-partial-{field}"), CorrelationId("profile-partial"))
+    assert application.query_admin("CASE-001").values[field] == value
+    assert all(repository.profile[other] is None for other in
+        ("name", "gender", "phone", "city", "address", "residence_type", "delivery_type", "baby_info", "notes") if other != field)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("name", "合成測試姓名"), ("phone", "0999000000"),
+    ("address", "合成測試地址"), ("notes", "合成測試註記"),
+])
+def test_admin_can_save_one_profile_field_when_every_other_profile_field_is_missing(field, value):
+    repository = _Repository()
+    for profile_field in ("name", "gender", "phone", "city", "address", "residence_type", "delivery_type", "baby_info", "notes"):
+        repository.profile[profile_field] = None
+    application = _application(repository)
+    preview = application.preview_admin("CASE-001", {field: value}, ExpectedVersion(0))
+    application.apply_admin("CASE-001", {field: value}, ExpectedVersion(0), ActorContext("admin"),
+        "補正單一主檔欄位", preview.preview_fingerprint, IdempotencyKey(f"profile-partial-{field}"), CorrelationId("profile-partial"))
+    assert application.query_admin("CASE-001").values[field] == value
+    assert all(repository.profile[other] is None for other in
+        ("name", "gender", "phone", "city", "address", "residence_type", "delivery_type", "baby_info", "notes") if other != field)
+
+
 def test_profile_validation_is_closed_and_reuses_injected_city_allowlist():
     assert validate_changes({"name": " 王小美 ", "city": "新竹市"}, city_allowlist={"新竹市"}) == {"city": "新竹市", "name": "王小美"}
     with pytest.raises(ClientProfileValidationError):

@@ -409,10 +409,10 @@ def build_preassignment_client_finance_noop(
 def build_client_finance_cancellation_impact(
     source_facts: ClientFinanceTermsSourceFacts,
     order_terms: OrderTerms,
-    scheduling: SchedulingGenerationCandidate,
+    scheduling: SchedulingGenerationCandidate | None,
     change_identity: str,
 ) -> ClientFinanceTermsCandidate:
-    service_dates = _scheduling_service_dates(scheduling)
+    service_dates = _scheduling_service_dates(scheduling) if scheduling is not None else ()
     earned_floor_fee = prorate_floor_fee(
         order_terms.floor_fee,
         order_terms.service_days,
@@ -422,12 +422,12 @@ def build_client_finance_cancellation_impact(
     cancellation_source = _cancellation_source_facts(
         source_facts, service_dates
     )
-    candidate = build_client_finance_terms_impact(
-        cancellation_source,
-        cancellation_terms,
-        scheduling,
-        change_identity,
+    facts = (
+        _materialize_terms_facts(cancellation_source, cancellation_terms, scheduling)
+        if scheduling is not None
+        else _terms_facts_from_service_dates(cancellation_source, cancellation_terms, ())
     )
+    candidate = build_client_finance_terms_candidate(facts, change_identity)
     plan = _cancellation_subsidy_return_plan(
         cancellation_source,
         cancellation_terms,
@@ -525,6 +525,10 @@ def _materialize_terms_facts(source_facts, order_terms, scheduling):
     if source_facts.case_no != scheduling.case_no:
         raise ValueError("Client Finance and Scheduling case numbers must match")
     service_dates = _scheduling_service_dates(scheduling)
+    return _terms_facts_from_service_dates(source_facts, order_terms, service_dates)
+
+
+def _terms_facts_from_service_dates(source_facts, order_terms, service_dates):
     charge_days = _charge_days(service_dates, source_facts.double_pay_dates)
     client_service_charge_waived = False
     if source_facts.identity_status is not None:

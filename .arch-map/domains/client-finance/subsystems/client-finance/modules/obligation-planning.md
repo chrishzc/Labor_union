@@ -6,6 +6,7 @@
 
 ## Responsibility
 計畫客戶各付款階段的 obligation、日期替換與唯一的客戶現金方向；中途取消依已確認實際服務量重算，並在客戶款已涵蓋實際應付時建立獨立 subsidy-return payable。未結清義務只改到期日不得建立應收或退款。
+尚未排班且 Scheduling root 不存在的取消，以明確零服務量計算既有訂金退款，不補造 Scheduling generation。
 
 ## Implementation
 - primary: `domains/client_finance/obligation_planning.py`
@@ -15,6 +16,7 @@
 ## Contracts
 - `document/架構重整/01_規格基線/04_Client_Finance_Domain.md` — Client Finance direction 與未結清 obligation 規則。
 - `document/架構重整/01_規格基線/01_Orders_Domain.md` — Actual Start 重建未結清 Client Finance projection 與日期，不建立付款或收款事實。
+- cross-owner evidence: `tests/domains/orders/subsystems/orders/integration/test_order_cancellation_absent_roots_disposable_mysql.py` — deposit refund without Scheduling or Payroll, replay and controlled reopen; Orders owns this integration proof.
 
 ## Verification
 - layout_status: `custom_current`
