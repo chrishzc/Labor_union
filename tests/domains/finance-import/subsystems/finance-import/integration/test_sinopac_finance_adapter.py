@@ -2,12 +2,109 @@ from decimal import Decimal
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
+from domains.finance_import.transaction_classifier import classify_finance_transaction
+from infrastructure.mysql.client_receipt_reconciliation_repository import (
+    _bank_row_is_eligible,
+    _cancellation_code,
+)
 from scripts.imports.finance_formats import sinopac
 from scripts.imports.finance_formats.sinopac import normalize_sinopac_rows
+from scripts.imports.finance_statement_normalizer import normalize_workbook
 
 
 SAMPLE = Path("document") / "資料庫、資料處理" / "永豐範例對帳單.xlsx"
+
+
+def _reference_workbook(tmp_path, direction, reference):
+    column = "銷帳編號" if direction == "incoming" else "交易參考編號"
+    row = dict.fromkeys(sinopac.SINOPAC_HEADERS)
+    row.update({
+        "帳號": "12345678901234", "交易日": "2026-09-30",
+        "計息日": "2026-09-30", "入帳日": "2026-09-30", "幣別": "TWD",
+        "摘要": "轉帳", "支出": 12000 if direction == "outgoing" else 0,
+        "存入": 12000 if direction == "incoming" else 0, "餘額": 50000,
+        "更正註記": "Y", "備註": "其他內容", column: reference,
+    })
+    path = tmp_path / "reference.xlsx"
+    pd.DataFrame([row], columns=sinopac.SINOPAC_HEADERS).to_excel(path, index=False)
+    return path, column
+
+
+@pytest.mark.parametrize("suffix", ["", "測試甲", " 測試甲"])
+@pytest.mark.parametrize(("direction", "account"), [
+    ("incoming", "99781699114033"),
+    ("outgoing", "001234567890"),
+    ("outgoing", "99781699114033"),
+])
+def test_correct_direction_reference_matches_with_or_without_a_name(
+    tmp_path, direction, account, suffix
+):
+    reference = account + suffix
+    path, column = _reference_workbook(tmp_path, direction, reference)
+    row = normalize_workbook(path)["normalized_rows"][0]
+    decision = classify_finance_transaction(row, {}, {account: [7]})
+
+    assert row["bank_references"][column] == reference
+    assert row["raw_payload"][column] == reference
+    assert row["cancellation_code"] == "Y"
+    if direction == "incoming":
+        assert decision["classification_type"] == "client_receipt"
+        bank = {**row, "classification_type": "client_receipt",
+                "reconciliation_status": "pending", "ledger_entry_id": None}
+        assert _cancellation_code(bank) == account
+        assert _bank_row_is_eligible(bank, "114000033") is True
+    else:
+        assert decision["classification_type"] == "staff_salary"
+        assert decision["matched_identity_ids"] == [7]
+        assert decision["resolved_counterparty_account"] == account
+        assert decision["reason"] == "sinopac_unique_staff_account_in_transaction_reference"
+
+
+@pytest.mark.parametrize(("direction", "reference"), [
+    ("incoming", "997816991140330"),
+    ("incoming", "99781699114033測試甲 99781699114034"),
+    ("outgoing", "9001234567890測試甲"),
+    ("outgoing", "001234567890測試甲 009876543210"),
+])
+def test_reference_never_truncates_a_longer_number_or_picks_one_of_two_accounts(
+    tmp_path, direction, reference
+):
+    path, _ = _reference_workbook(tmp_path, direction, reference)
+    row = normalize_workbook(path)["normalized_rows"][0]
+    decision = classify_finance_transaction(row, {}, {"001234567890": [7]})
+    assert decision["classification_type"] == "non_business_review"
+
+
+def test_outgoing_ignores_account_in_memo_when_transaction_reference_is_missing(tmp_path):
+    path, _ = _reference_workbook(tmp_path, "outgoing", None)
+    frame = pd.read_excel(path, dtype=object)
+    frame.loc[0, "備註"] = "001234567890測試甲"
+    frame.loc[0, "銷帳編號"] = "001234567890"
+    frame.to_excel(path, index=False)
+    row = normalize_workbook(path)["normalized_rows"][0]
+    decision = classify_finance_transaction(row, {}, {"001234567890": [7]})
+    assert decision["classification_type"] == "non_business_review"
+
+
+def test_shared_outgoing_account_requires_review_even_when_a_name_is_present(tmp_path):
+    path, _ = _reference_workbook(tmp_path, "outgoing", "001234567890測試甲")
+    row = normalize_workbook(path)["normalized_rows"][0]
+    decision = classify_finance_transaction(row, {}, {"001234567890": [7, 8]})
+    assert decision["classification_type"] == "non_business_review"
+    assert decision["reason"] == "sinopac_staff_account_identity_ambiguous"
+
+
+def test_incoming_never_uses_correction_marker_or_outgoing_reference_as_virtual_account(tmp_path):
+    path, _ = _reference_workbook(tmp_path, "incoming", None)
+    frame = pd.read_excel(path, dtype=object)
+    frame.loc[0, "更正註記"] = "99781699114033"
+    frame.loc[0, "交易參考編號"] = "99781699114033測試甲"
+    frame.to_excel(path, index=False)
+    row = normalize_workbook(path)["normalized_rows"][0]
+    decision = classify_finance_transaction(row, {}, {})
+    assert decision["classification_type"] == "non_business_review"
 
 
 def test_normalizes_real_sinopac_sample_without_guessing_account_or_reference():

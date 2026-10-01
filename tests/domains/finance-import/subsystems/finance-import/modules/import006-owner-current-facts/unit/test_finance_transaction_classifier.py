@@ -93,11 +93,11 @@ def test_legacy_incoming_does_not_use_raw_bank_reference_fallback():
     }
 
 
-def test_sinopac_incoming_prefers_valid_canonical_projection():
+def test_sinopac_incoming_uses_cancellation_reference_instead_of_correction_marker():
     result = classify_finance_transaction(
         _row(
             cancellation_code="99781699115002",
-            bank_references={"銷帳編號": "invalid"},
+            bank_references={"銷帳編號": "99781699115001測試甲"},
         ),
         {},
         {},
@@ -242,9 +242,10 @@ def test_sinopac_outgoing_without_confirmed_account_never_guesses_from_name():
     }
 
 
-def test_sinopac_outgoing_requires_one_exact_staff_account():
+def test_legacy_outgoing_requires_one_exact_staff_account():
     result = classify_finance_transaction(
         _row(
+            format_id="legacy",
             direction="outgoing",
             debit=Decimal("100"),
             credit=None,
@@ -260,9 +261,10 @@ def test_sinopac_outgoing_requires_one_exact_staff_account():
     assert result["resolved_counterparty_account"] == "S001"
 
 
-def test_sinopac_outgoing_uses_passbook_memo_only_when_memo_has_no_match():
+def test_legacy_outgoing_uses_passbook_memo_only_when_memo_has_no_match():
     result = classify_finance_transaction(
         _row(
+            format_id="legacy",
             direction="outgoing",
             debit=Decimal("100"),
             credit=None,
@@ -281,9 +283,10 @@ def test_sinopac_outgoing_uses_passbook_memo_only_when_memo_has_no_match():
     }
 
 
-def test_sinopac_outgoing_does_not_mix_primary_and_backup_candidates():
+def test_legacy_outgoing_does_not_mix_primary_and_backup_candidates():
     result = classify_finance_transaction(
         _row(
+            format_id="legacy",
             direction="outgoing",
             debit=Decimal("100"),
             credit=None,
@@ -299,9 +302,10 @@ def test_sinopac_outgoing_does_not_mix_primary_and_backup_candidates():
     assert result["resolved_counterparty_account"] == "S001"
 
 
-def test_sinopac_one_staff_with_multiple_registered_accounts_can_match_one():
+def test_legacy_one_staff_with_multiple_registered_accounts_can_match_one():
     result = classify_finance_transaction(
         _row(
+            format_id="legacy",
             direction="outgoing",
             debit=Decimal("100"),
             credit=None,
@@ -315,9 +319,10 @@ def test_sinopac_one_staff_with_multiple_registered_accounts_can_match_one():
     assert result["matched_identity_ids"] == [9]
 
 
-def test_sinopac_multiple_accounts_for_same_staff_still_require_review():
+def test_legacy_multiple_accounts_for_same_staff_still_require_review():
     result = classify_finance_transaction(
         _row(
+            format_id="legacy",
             direction="outgoing",
             debit=Decimal("100"),
             credit=None,
@@ -335,9 +340,10 @@ def test_sinopac_multiple_accounts_for_same_staff_still_require_review():
     }
 
 
-def test_sinopac_numeric_account_must_not_be_embedded_in_a_longer_number():
+def test_legacy_numeric_account_must_not_be_embedded_in_a_longer_number():
     result = classify_finance_transaction(
         _row(
+            format_id="legacy",
             direction="outgoing",
             debit=Decimal("100"),
             credit=None,
@@ -351,9 +357,10 @@ def test_sinopac_numeric_account_must_not_be_embedded_in_a_longer_number():
     assert result["reason"] == "sinopac_staff_account_no_match"
 
 
-def test_sinopac_alphanumeric_account_must_not_be_embedded_in_a_longer_token():
+def test_legacy_alphanumeric_account_must_not_be_embedded_in_a_longer_token():
     result = classify_finance_transaction(
         _row(
+            format_id="legacy",
             direction="outgoing",
             debit=Decimal("100"),
             credit=None,
@@ -387,11 +394,12 @@ def test_sinopac_alphanumeric_account_must_not_be_embedded_in_a_longer_token():
         ),
     ],
 )
-def test_sinopac_outgoing_ambiguous_or_missing_matches_require_review(
+def test_legacy_outgoing_ambiguous_or_missing_matches_require_review(
     memo, staff_accounts, reason
 ):
     result = classify_finance_transaction(
         _row(
+            format_id="legacy",
             direction="outgoing",
             debit=Decimal("100"),
             credit=None,

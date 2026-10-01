@@ -83,13 +83,18 @@ def _pending_receipt(amount=12000):
     )
 
 
-def test_virtual_account_resolves_one_exact_open_client_obligation() -> None:
+@pytest.mark.parametrize(("canonical", "reference"), [
+    (None, "99781699115150"),
+    ("Y", "99781699115150測試甲"),
+    ("99781699115151", "99781699115150 測試甲"),
+])
+def test_virtual_account_resolves_one_exact_open_client_obligation(canonical, reference) -> None:
     connection = _VirtualAccountConnection(
         (
                 {
                     "format_id": "sinopac",
-                    "cancellation_code": None,
-                    "bank_references": '{"銷帳編號":"99781699115150"}',
+                    "cancellation_code": canonical,
+                    "bank_references": {"銷帳編號": reference},
                 },
                 (),
                 ({"case_no": "115000150"},),
@@ -104,6 +109,19 @@ def test_virtual_account_resolves_one_exact_open_client_obligation() -> None:
         "client-obligation:115000150:deposit",
     )
     assert "exact-open-client-obligation" in resolved.evidence
+
+
+def test_named_virtual_account_uses_imported_case_instead_of_formula() -> None:
+    connection = _VirtualAccountConnection((
+        {"format_id": "sinopac", "cancellation_code": "Y",
+         "bank_references": {"銷帳編號": "99781699114033測試甲"}},
+        ({"case_no": "114000018"},),
+        ({"obligation_identity": "client-obligation:114000018:deposit"},),
+    ))
+    resolved = _resolve_client_receipt(connection, _pending_receipt())
+    assert resolved.disposition is FinanceImportDisposition.CREATE
+    assert resolved.target_identities == ("client-obligation:114000018:deposit",)
+    assert connection.cursor_instance.executions[-1][1] == ("114000018", 12000)
 
 
 def test_virtual_account_keeps_underpayment_pending() -> None:

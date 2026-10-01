@@ -14,34 +14,42 @@ from typing import Any
 
 _MAXIMUM_PAGE_SIZE = 100
 _REVIEW_DISPOSITIONS = ("manual_review", "business_pending", "blocked")
-_MATCHED_CLIENT_RECEIPT_PREDICATE = """
+_CLIENT_VIRTUAL_ACCOUNT_SQL = """
+CASE
+    WHEN finance_row.format_id='sinopac' THEN
+        CASE WHEN TRIM(JSON_UNQUOTE(JSON_EXTRACT(
+            finance_row.bank_references, '$."銷帳編號"'
+        ))) REGEXP '^99781699[0-9]{6}([[:space:]]*[[:alpha:]][^[:digit:]]*)?$'
+        THEN LEFT(TRIM(JSON_UNQUOTE(JSON_EXTRACT(
+            finance_row.bank_references, '$."銷帳編號"'
+        ))),14) END
+    WHEN finance_row.cancellation_code REGEXP '^99781699[0-9]{6}$'
+        THEN finance_row.cancellation_code
+END
+"""
+_MATCHED_CLIENT_RECEIPT_PREDICATE = f"""
 event.classification_type='client_receipt'
 AND (
     EXISTS (
         SELECT 1
         FROM client_legacy_virtual_accounts legacy_account
         JOIN orders legacy_order ON legacy_order.case_no=legacy_account.case_no
-        WHERE legacy_account.virtual_account=COALESCE(
-            finance_row.cancellation_code,
-            JSON_UNQUOTE(JSON_EXTRACT(finance_row.bank_references, '$."銷帳編號"'))
-        ) COLLATE utf8mb4_unicode_ci
+        WHERE legacy_account.virtual_account=({_CLIENT_VIRTUAL_ACCOUNT_SQL})
+            COLLATE utf8mb4_unicode_ci
     )
     OR EXISTS (
         SELECT 1
         FROM orders current_order
-        WHERE COALESCE(
-              finance_row.cancellation_code,
-              JSON_UNQUOTE(JSON_EXTRACT(finance_row.bank_references, '$."銷帳編號"'))
-          ) REGEXP '^99781699[0-9]{6}$'
+        WHERE ({_CLIENT_VIRTUAL_ACCOUNT_SQL}) IS NOT NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM client_legacy_virtual_accounts mapped_account
+              WHERE mapped_account.virtual_account=({_CLIENT_VIRTUAL_ACCOUNT_SQL})
+                  COLLATE utf8mb4_unicode_ci
+          )
           AND current_order.case_no=CONCAT(
-              SUBSTRING(COALESCE(
-                  finance_row.cancellation_code,
-                  JSON_UNQUOTE(JSON_EXTRACT(finance_row.bank_references, '$."銷帳編號"'))
-              ), 9, 3),
-              LPAD(CAST(CAST(SUBSTRING(COALESCE(
-                  finance_row.cancellation_code,
-                  JSON_UNQUOTE(JSON_EXTRACT(finance_row.bank_references, '$."銷帳編號"'))
-              ), 12, 3) AS UNSIGNED) AS CHAR), 6, '0')
+              SUBSTRING(({_CLIENT_VIRTUAL_ACCOUNT_SQL}), 9, 3),
+              LPAD(CAST(CAST(SUBSTRING(({_CLIENT_VIRTUAL_ACCOUNT_SQL}), 12, 3)
+                  AS UNSIGNED) AS CHAR), 6, '0')
           ) COLLATE utf8mb4_unicode_ci
     )
 )

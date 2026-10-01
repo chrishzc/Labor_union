@@ -9,7 +9,10 @@ from typing import Any
 import unicodedata
 
 from domains.finance_import.normalized_row import validate_normalized_row
-from domains.finance_import.cancellation_code import resolve_finance_cancellation_code
+from domains.finance_import.cancellation_code import (
+    extract_sinopac_account_reference,
+    resolve_finance_cancellation_code,
+)
 
 
 CLASSIFICATION_TYPES = frozenset(
@@ -179,6 +182,26 @@ def _classify_sinopac_outgoing(
     row: Mapping[str, Any],
     staff_accounts: Mapping[str, Any],
 ) -> dict[str, Any]:
+    account = extract_sinopac_account_reference(
+        row["bank_references"].get("交易參考編號")
+    )
+    staff_ids = _ids_for_account(staff_accounts, account)
+    if not staff_ids:
+        return _review("sinopac_staff_account_no_match")
+    if len(staff_ids) != 1:
+        return _review("sinopac_staff_account_identity_ambiguous")
+    return _result(
+        "staff_salary",
+        staff_ids,
+        "sinopac_unique_staff_account_in_transaction_reference",
+        account,
+    )
+
+
+def _classify_legacy_outgoing(
+    row: Mapping[str, Any],
+    staff_accounts: Mapping[str, Any],
+) -> dict[str, Any]:
     def contains_complete_account(text: str, account: str) -> bool:
         if account.isdecimal():
             return re.search(rf"(?<![0-9]){re.escape(account)}(?![0-9])", text) is not None
@@ -264,7 +287,9 @@ def classify_finance_transaction(
             if heuristic_result is not None:
                 return heuristic_result
             return _review("sinopac_invalid_or_missing_virtual_account")
-        return _classify_sinopac_outgoing(row, staff_accounts)
+        if format_id == "sinopac":
+            return _classify_sinopac_outgoing(row, staff_accounts)
+        return _classify_legacy_outgoing(row, staff_accounts)
 
     if format_id == "taishin":
         if direction == "incoming":

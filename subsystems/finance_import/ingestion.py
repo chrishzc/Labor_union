@@ -27,7 +27,7 @@ from subsystems.finance_import.identity_maps import load_finance_identity_maps
 from subsystems.finance_import.staging import stage_finance_rows
 
 
-_CLASSIFIER_VERSION = "finance-transaction-classifier-v1"
+_CLASSIFIER_VERSION = "finance-transaction-classifier-v2"
 _FINGERPRINT_VERSION = "finance-transaction-fingerprint-v1"
 _INITIAL_CLASSIFICATION_REASON = "initial_bank_classification"
 

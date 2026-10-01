@@ -20,6 +20,7 @@ from domains.client_finance.reconciliation import (
     PaymentStage,
     ReconciliationStatus,
 )
+from domains.finance_import.cancellation_code import resolve_finance_cancellation_code
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.money import MoneyNTD
@@ -557,12 +558,11 @@ def _classification_type(row):
 
 
 def _cancellation_code(row) -> str | None:
-    canonical = row.get("cancellation_code")
-    if isinstance(canonical, str) and canonical.strip():
-        return canonical.strip()
-    references = _json_object(row.get("bank_references"))
-    fallback = references.get("銷帳編號")
-    return fallback.strip() if isinstance(fallback, str) else None
+    return resolve_finance_cancellation_code({
+        "format_id": row.get("format_id"),
+        "cancellation_code": row.get("cancellation_code"),
+        "bank_references": _json_object(row.get("bank_references")),
+    })["cancellation_code"]
 
 
 def _json_array(value) -> list[object]:

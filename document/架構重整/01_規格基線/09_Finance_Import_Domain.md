@@ -96,8 +96,13 @@ Modules：
 - fingerprint 只使用 versioned canonical fields；
 - 合法虛擬帳號固定為 `99781699` 加六碼數字；
 - Legacy 只讀 canonical cancellation code；
-- Sinopac 只有 canonical value 缺失或不合法時，才可精確 fallback 至既有 raw bank reference；
-- fallback 不回寫 canonical raw fact。
+- Sinopac 存入以 `bank_references["銷帳編號"]` 的完整虛擬帳號為來源；支出以
+  `bank_references["交易參考編號"]` 的完整對方帳號為來源，不使用更正註記、備註或存摺備註替代；
+- 2026-10-01 人工確認：上述欄位接受完整 ASCII 數字帳號，或帳號後緊接／空白分隔的姓名。
+  姓名不是帳戶 ownership，不能單獨配對；不截除數字前綴、補零或從多組數字任選帳號。
+  存入抽出的帳號仍須符合 `99781699` 加六碼數字，並沿用匯入虛擬帳號對照優先規則；
+- 欄位判讀只建立衍生 projection，不回寫 canonical raw fact，也不改 fingerprint。
+  新批次使用 `finance-transaction-classifier-v2` 記錄此判讀規則；既有分類紀錄不自動覆寫。
 
 ### 4.2 Canonical Staging／Occurrence
 
