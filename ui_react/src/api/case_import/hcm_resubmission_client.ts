@@ -18,6 +18,8 @@ function token(): string {
 }
 
 const ReviewStateSchema = z.object({ review_identity: z.string(), case_no: z.string(), source_field: z.string(), review_version: z.number().int(), resolved: z.boolean() }).strict();
+const SkipPreviewSchema = z.object({ review_identity: z.string(), case_no: z.string(), source_field: z.literal('不符合原因'), review_version: z.number().int().nonnegative(), preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/) }).strict();
+export type HcmReviewSkipPreview = z.infer<typeof SkipPreviewSchema>;
 const CurrentReviewsSchema = z.object({ items: z.array(z.object({ source_id: z.number().int(), review_identity: z.string(), case_no: z.string(), fields: z.array(z.string()), can_correct: z.boolean(), unavailable_reason: z.string().nullable().optional() }).strict()), next_cursor: z.number().int().nullable() }).strict();
 export type HcmReviewState = z.infer<typeof ReviewStateSchema>;
 export type HcmCurrentReviews = z.infer<typeof CurrentReviewsSchema>;
@@ -48,6 +50,16 @@ export async function loadCurrentHcmReviewsForCases(
 }
 
 export const hcmResubmissionClient = {
+  async previewSkip(reviewIdentity: string): Promise<HcmReviewSkipPreview> {
+    const raw = await transport.post(`/api/v1/case-import/hcm/reviews/${encodeURIComponent(reviewIdentity)}/skip-missing-reject-reason/preview`, {}, { token: token() });
+    return decodePayload(z.object({ data: SkipPreviewSchema }), raw).data;
+  },
+  async applySkip(preview: HcmReviewSkipPreview, idempotencyKey: string): Promise<HcmResubmissionReceipt> {
+    const raw = await transport.post(`/api/v1/case-import/hcm/reviews/${encodeURIComponent(preview.review_identity)}/skip-missing-reject-reason/apply`, {
+      expected_review_version: preview.review_version, preview_fingerprint: preview.preview_fingerprint,
+    }, { token: token(), headers: { 'Idempotency-Key': idempotencyKey, 'X-Correlation-ID': idempotencyKey } });
+    return decodePayload(HcmResubmissionReceiptEnvelopeSchema, raw).data;
+  },
   async query(reviewIdentity: string): Promise<HcmReviewState> {
     const raw = await transport.get(`/api/v1/case-import/hcm/reviews/${encodeURIComponent(reviewIdentity)}`, { token: token() });
     return decodePayload(z.object({ data: ReviewStateSchema }), raw).data;

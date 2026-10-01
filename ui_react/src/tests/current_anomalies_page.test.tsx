@@ -6,12 +6,14 @@ import { anomalyDetailClient } from '../api/anomalies/anomaly_detail_client';
 import { anomalyQueryClient } from '../api/anomalies/anomaly_query_client';
 import { lineNotificationTimelineClient } from '../api/line/notification_timeline_client';
 import { lineNotificationManualReplayClient } from '../api/line/notification_manual_replay_client';
+import { hcmResubmissionClient } from '../api/case_import/hcm_resubmission_client';
 
 const issueKey = `ci_${'b'.repeat(64)}`;
 
 describe('CurrentAnomaliesPage', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.spyOn(hcmResubmissionClient, 'current').mockResolvedValue({ items: [], next_cursor: null });
     vi.spyOn(anomalyQueryClient, 'queryImportWarningTasks').mockResolvedValue([]);
     vi.spyOn(currentAnomalyQueryClient, 'queryCurrentAnomalies').mockResolvedValue({
       items: [{
@@ -137,6 +139,10 @@ describe('CurrentAnomaliesPage', () => {
   });
 
   it('shows active HCM reviews and opens the controlled correction in this page', async () => {
+    vi.mocked(hcmResubmissionClient.current).mockResolvedValue({ items: [{
+      source_id: 2, review_identity: 'review-2', case_no: '115000002',
+      fields: ['行動電話'], can_correct: true,
+    }], next_cursor: null });
     vi.mocked(anomalyQueryClient.queryImportWarningTasks).mockResolvedValueOnce([{
       occurrence_identity: 'warning-phone',
       owning_lane: 'hcm',
@@ -159,12 +165,51 @@ describe('CurrentAnomaliesPage', () => {
 
     render(<CurrentAnomaliesPage />);
     expect(await screen.findByText('案件 115000002')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '檢查並提交修正' }));
+    const link = screen.getByRole('link', { name: '前往客戶名冊補資料' });
+    expect(link).toHaveAttribute('href', '#clients?case=115000002&field=phone');
+    fireEvent.click(screen.getByRole('button', { name: '使用修正版工作簿處理' }));
 
     expect(await screen.findByText('修正案件 115000002')).toBeInTheDocument();
-    expect(anomalyQueryClient.queryImportWarningReferral).toHaveBeenCalledWith({
-      occurrenceIdentity: 'warning-phone', expectedVersion: 1,
+    expect(anomalyQueryClient.queryImportWarningReferral).not.toHaveBeenCalled();
+  });
+
+  it('shows all unresolved fields, skips only the reason after confirmation and re-reads the server', async () => {
+    const item = { source_id: 3, review_identity: 'review-3', case_no: '115000003',
+      fields: ['預產期/預計服務開始月份', '不符合原因'], can_correct: false };
+    vi.mocked(hcmResubmissionClient.current).mockResolvedValueOnce({ items: [item], next_cursor: null })
+      .mockResolvedValue({ items: [{ ...item, fields: ['預產期/預計服務開始月份'] }], next_cursor: null });
+    vi.spyOn(hcmResubmissionClient, 'previewSkip').mockResolvedValue({ review_identity: item.review_identity,
+      case_no: item.case_no, source_field: '不符合原因', review_version: 0, preview_fingerprint: 'a'.repeat(64) });
+    const apply = vi.spyOn(hcmResubmissionClient, 'applySkip').mockResolvedValue({
+      event_identity: 'event-3', review_identity: item.review_identity, case_no: item.case_no,
+      target_fields: ['review.skip_missing_reject_reason'], resulting_review_version: 1, replayed: false,
     });
+    render(<CurrentAnomaliesPage />);
+    expect(await screen.findByText('預產期/預計服務開始月份待補齊或修正')).toBeVisible();
+    expect(screen.getByRole('link', { name: '前往客戶名冊補資料' })).toHaveAttribute('href', '#clients?case=115000003&field=due_month');
+    expect(screen.getByRole('link', { name: '補填不符合原因' })).toHaveAttribute('href', '#clients?case=115000003&field=reject_reason');
+    fireEvent.click(screen.getByRole('button', { name: '略過並解除這項警示' }));
+    await screen.findByRole('button', { name: '確認略過並保存紀錄' });
+    expect(apply).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '確認略過並保存紀錄' }));
+    await waitFor(() => expect(screen.queryByText('不符合原因待補齊或修正')).not.toBeInTheDocument());
+    expect(screen.getByText('預產期/預計服務開始月份待補齊或修正')).toBeVisible();
+    expect(apply).toHaveBeenCalledTimes(1);
+    expect(hcmResubmissionClient.current).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the warning when skip Apply fails and does not fake a successful resolution', async () => {
+    vi.mocked(hcmResubmissionClient.current).mockResolvedValue({ items: [{ source_id: 3,
+      review_identity: 'review-3', case_no: '115000003', fields: ['不符合原因'], can_correct: false }], next_cursor: null });
+    vi.spyOn(hcmResubmissionClient, 'previewSkip').mockResolvedValue({ review_identity: 'review-3',
+      case_no: '115000003', source_field: '不符合原因', review_version: 0, preview_fingerprint: 'a'.repeat(64) });
+    vi.spyOn(hcmResubmissionClient, 'applySkip').mockRejectedValue({ status: 409 });
+    render(<CurrentAnomaliesPage />);
+    fireEvent.click(await screen.findByRole('button', { name: '略過並解除這項警示' }));
+    fireEvent.click(await screen.findByRole('button', { name: '確認略過並保存紀錄' }));
+    await waitFor(() => expect(screen.getAllByRole('alert')[0]).toHaveTextContent('問題資料已變更'));
+    expect(screen.getByText('不符合原因待補齊或修正')).toBeVisible();
+    expect(screen.queryByText(/已保存人工略過紀錄/)).not.toBeInTheDocument();
   });
 
   it('maps unexpected list failures to a closed business error', async () => {

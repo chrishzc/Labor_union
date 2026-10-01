@@ -18,6 +18,10 @@
 - `ui_react/src/api/anomalies/anomaly_query_schemas.ts`
 
 ## Dependencies
+- outbound: `case-import/hcm-current-workbook-import` — HCM 欄位清單使用 canonical current reviews；不符合原因的人工略過經 Case Import Preview／Apply 保存 disposition 並重查，不使用 legacy tracking 作欄位解除判定。
+- outbound: `clients/client-profile/profile-change` — 每一可補欄位提供案件與欄位深連結；原工作簿修正工作台保留次要入口。
+- outbound: `case-import/hcm-current-workbook-import` — HCM 欄位清單使用 canonical current reviews；不符合原因的人工略過經 Case Import Preview／Apply 保存 disposition 並重查，不使用 legacy tracking 作欄位解除判定。
+- outbound: `clients/client-profile/profile-change` — 每一可補欄位提供案件與欄位深連結；原工作簿修正工作台保留次要入口。
 - outbound: `external-integration/line` — 查詢案件通知 timeline，並執行 typed manual replay Preview／Apply。
 
 ## Contracts

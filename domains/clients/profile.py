@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import re
+from datetime import date
 from collections.abc import Collection
 from typing import Mapping
 
 
 CLIENT_PROFILE_FIELDS = (
     "name", "gender", "phone", "city", "address",
-    "residence_type", "delivery_type", "baby_info", "notes",
+    "residence_type", "delivery_type", "baby_info", "notes", "due_month", "reject_reason",
 )
 CLIENT_PROFILE_FIELD_SET = frozenset(CLIENT_PROFILE_FIELDS)
 CLIENT_PROFILE_APPLICANT_FIELDS = frozenset(
@@ -52,6 +53,7 @@ def validate_changes(
             "name": 100, "phone": 10, "city": 20, "address": 255,
             "baby_info": 255, "notes": 1000, "gender": 2,
             "residence_type": 10, "delivery_type": 10,
+            "due_month": 10, "reject_reason": 500,
         }[field]
         if len(value) > maximum:
             raise ClientProfileValidationError("profile_value_too_long", field)
@@ -65,6 +67,13 @@ def validate_changes(
             raise ClientProfileValidationError("profile_residence_type_invalid", field)
         if field == "delivery_type" and value not in VALID_DELIVERY_TYPES:
             raise ClientProfileValidationError("profile_delivery_type_invalid", field)
+        if field == "due_month":
+            try:
+                if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+                    raise ValueError
+                date.fromisoformat(value)
+            except ValueError as error:
+                raise ClientProfileValidationError("profile_due_month_invalid", field) from error
         normalized[field] = value
     return {key: normalized[key] for key in sorted(normalized)}
 

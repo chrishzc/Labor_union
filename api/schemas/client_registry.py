@@ -66,6 +66,8 @@ class ClientRegistryChangeHistoryItemView(_StrictModel):
 
 
 class ClientProfileValuesView(_StrictModel):
+    due_month: str | None = None
+    reject_reason: str | None = None
     name: str | None = None
     gender: str | None = None
     phone: str | None = None
@@ -176,6 +178,8 @@ class ClientRegistryDetailView(_StrictModel):
 
 
 class ClientProfileChangeSet(_StrictModel):
+    due_month: str | None = None
+    reject_reason: str | None = None
     name: str | None = None
     gender: str | None = None
     phone: str | None = None

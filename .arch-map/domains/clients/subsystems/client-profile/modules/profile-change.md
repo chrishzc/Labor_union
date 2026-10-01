@@ -21,6 +21,7 @@
 - `line/static/profile_update.html`
 - `ui_react/src/api/client_registry/`
 - `ui_react/src/pages/ClientRegistryPage.tsx`
+  - 支援案件／欄位 hash 深連結；管理端 `due_month`／`reject_reason` 走既有 Client Profile Preview／Apply，不擴張 applicant 欄位。
 - `ui_react/src/pages/ClientRosterPage.tsx`
 - `ui_react/src/components/CaseArchitectureBootstrapRepairPanel.tsx` — 僅組合 Case Import-owned bootstrap Q/P/A，完成後重讀名冊 owner facts。
 

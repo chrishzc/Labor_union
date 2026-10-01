@@ -531,6 +531,10 @@
   color: #8b7169;
 }
 
+.import-warning-field + .import-warning-field { margin-top: 16px; }
+.import-warning-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.import-warning-actions a { text-decoration: none; display: inline-flex; align-items: center; }
+
 .anomalies-detail-error {
   border: 1px solid #fecdd3;
   background: #fff1f2;

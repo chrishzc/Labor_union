@@ -22,6 +22,20 @@ import {
   type CurrentAnomalyRowViewModel,
 } from '../adapters/anomalies/current_anomaly_adapter';
 import { HcmControlledCorrectionWorkbench } from '../components/HcmControlledCorrectionWorkbench';
+import { hcmResubmissionClient, type HcmCurrentReview, type HcmReviewSkipPreview } from '../api/case_import/hcm_resubmission_client';
+
+const REGISTRY_PROFILE_FIELDS: Readonly<Record<string, string>> = {
+  姓名: 'name', 性別: 'gender', 行動電話: 'phone', 縣市: 'city',
+  '預產期/預計服務開始月份': 'due_month', 不符合原因: 'reject_reason',
+  居住型態: 'residence_type', 生產方式: 'delivery_type', 寶寶資訊: 'baby_info',
+};
+const REGISTRY_ORDER_FIELDS = new Set(['服務時間', '預計服務日期', '希望服務天數']);
+
+function registryHref(caseNo: string, field: string): string {
+  const params = new URLSearchParams({ case: caseNo });
+  if (REGISTRY_PROFILE_FIELDS[field]) params.set('field', REGISTRY_PROFILE_FIELDS[field]);
+  return `#clients?${params}`;
+}
 
 const PAGE_SIZE = 50;
 const MANUAL_REPLAY_ACTION = 'manual_replay_failed_notification';
@@ -95,6 +109,14 @@ export const CurrentAnomaliesPage: React.FC = () => {
   const [importItems, setImportItems] = useState<ImportWarningTaskView[]>([]);
   const [importLoading, setImportLoading] = useState(true);
   const [importError, setImportError] = useState<string | null>(null);
+  const [hcmReviews, setHcmReviews] = useState<HcmCurrentReview[]>([]);
+  const [hcmCursor, setHcmCursor] = useState<number | null>(null);
+  const [hcmLoading, setHcmLoading] = useState(true);
+  const [hcmError, setHcmError] = useState<string | null>(null);
+  const [skip, setSkip] = useState<{ preview: HcmReviewSkipPreview; idempotencyKey: string } | null>(null);
+  const [skipBusy, setSkipBusy] = useState(false);
+  const [skipError, setSkipError] = useState<string | null>(null);
+  const [skipMessage, setSkipMessage] = useState<string | null>(null);
   const [hcmCorrection, setHcmCorrection] = useState<{
     caseNo: string;
     displayMessage: string;
@@ -144,6 +166,8 @@ export const CurrentAnomaliesPage: React.FC = () => {
       const tasks = await anomalyQueryClient.queryImportWarningTasks({ activeOnly: true, limit: 200 });
       const seenSubjects = new Set<string>();
       setImportItems(tasks.filter((task) => {
+        // Spec 17: canonical reviews, rather than retired tracking, own current HCM field warnings.
+        if (task.owning_lane === 'hcm' && ['HCM-FIELD-001', 'HCM-FIELD-002'].includes(task.logical_code)) return false;
         const subjectKey = `${task.owning_lane}:${task.subject}`;
         if (seenSubjects.has(subjectKey)) return false;
         seenSubjects.add(subjectKey);
@@ -156,7 +180,39 @@ export const CurrentAnomaliesPage: React.FC = () => {
     }
   }, []);
 
-  useEffect(() => { void load(); void loadImportWarnings(); }, [load, loadImportWarnings]);
+  const loadHcmReviews = useCallback(async (cursor?: number) => {
+    setHcmLoading(true); setHcmError(null);
+    try {
+      const page = await hcmResubmissionClient.current(cursor);
+      setHcmReviews((existing) => cursor === undefined ? page.items : [...existing, ...page.items]);
+      setHcmCursor(page.next_cursor);
+    } catch (caught) { setHcmError(displayError(caught)); }
+    finally { setHcmLoading(false); }
+  }, []);
+
+  useEffect(() => { void load(); void loadImportWarnings(); void loadHcmReviews(); }, [load, loadImportWarnings, loadHcmReviews]);
+
+  const previewSkip = async (review: HcmCurrentReview) => {
+    setSkipBusy(true); setSkipError(null); setSkipMessage(null);
+    try {
+      const preview = await hcmResubmissionClient.previewSkip(review.review_identity);
+      if (preview.review_identity !== review.review_identity || preview.case_no !== review.case_no) throw new Error('Review binding mismatch');
+      setSkip({ preview, idempotencyKey: operationIdentity('hcm-reason-skip') });
+    } catch (caught) { setSkipError(displayError(caught)); }
+    finally { setSkipBusy(false); }
+  };
+
+  const applySkip = async () => {
+    if (!skip || skipBusy) return;
+    setSkipBusy(true); setSkipError(null);
+    try {
+      await hcmResubmissionClient.applySkip(skip.preview, skip.idempotencyKey);
+      setSkip(null);
+      setSkipMessage('已保存人工略過紀錄；案件狀態不變，其他欄位問題仍須處理。');
+      await loadHcmReviews();
+    } catch (caught) { setSkipError(displayError(caught)); }
+    finally { setSkipBusy(false); }
+  };
 
   const openImportWarning = useCallback(async (task: ImportWarningTaskView) => {
     if (task.owning_lane !== 'hcm' || !['HCM-FIELD-001', 'HCM-FIELD-002'].includes(task.logical_code)) {
@@ -259,14 +315,30 @@ export const CurrentAnomaliesPage: React.FC = () => {
           <h1 id="current-anomalies-title">異常審核</h1>
           <p>顯示目前仍成立的問題，並提供可用的業務處理入口。</p>
         </div>
-        <button type="button" className="anomalies-primary-action" onClick={() => { void load(); void loadImportWarnings(); }} disabled={loading || importLoading}>重新查詢</button>
+        <button type="button" className="anomalies-primary-action" onClick={() => { void load(); void loadImportWarnings(); void loadHcmReviews(); }} disabled={loading || importLoading || hcmLoading}>重新查詢</button>
       </header>
 
       <section aria-labelledby="import-anomalies-title" className="anomalies-section">
         <h2 id="import-anomalies-title" className="anomalies-section-title">匯入資料待檢查</h2>
+        <p>補齊資料後重新查詢，系統會確認哪些警示已解除。</p>
+        {hcmError && <div role="alert" className="error-message">{hcmError}</div>}
+        {skipError && <div role="alert" className="error-message">{skipError}</div>}
+        {skipMessage && <p role="status">{skipMessage}</p>}
         {importError && <div role="alert" className="error-message">匯入待檢查資料暫時無法取得；其他異常仍可使用。{importError}</div>}
-        {!importLoading && importItems.length === 0 && !importError && <p>目前沒有待處理的匯入資料。</p>}
+        {!importLoading && !hcmLoading && importItems.length === 0 && hcmReviews.length === 0 && !importError && !hcmError && <p>目前沒有待處理的匯入資料。</p>}
         <div className="import-warnings-list">
+          {hcmReviews.map((review) => <article className="import-warning-card" key={review.review_identity}>
+            <div className="import-warning-header"><strong>案件 {review.case_no}</strong><span className="import-warning-status-badge">待處理</span></div>
+            {review.fields.map((field) => <div key={field} className="import-warning-field">
+              <p>{field}待補齊或修正</p>
+              <div className="import-warning-actions">
+                {(REGISTRY_PROFILE_FIELDS[field] || REGISTRY_ORDER_FIELDS.has(field)) && <a className="anomalies-action-btn" href={registryHref(review.case_no, field)}>{field === '不符合原因' ? '補填不符合原因' : '前往客戶名冊補資料'}</a>}
+                {field === '不符合原因' && <button className="anomalies-action-btn" type="button" disabled={skipBusy} onClick={() => void previewSkip(review)}>略過並解除這項警示</button>}
+                {!REGISTRY_PROFILE_FIELDS[field] && !REGISTRY_ORDER_FIELDS.has(field) && <a className="anomalies-action-btn" href="#data-import">前往資料匯入確認來源</a>}
+              </div>
+            </div>)}
+            {review.can_correct && <button type="button" className="anomalies-action-btn" onClick={() => setHcmCorrection({ caseNo: review.case_no, displayMessage: review.fields.join('、'), reviewIdentity: review.review_identity })}>使用修正版工作簿處理</button>}
+          </article>)}
           {importItems.map((task) => (
             <article className="import-warning-card" key={task.occurrence_identity}>
               <div className="import-warning-header">
@@ -280,7 +352,15 @@ export const CurrentAnomaliesPage: React.FC = () => {
             </article>
           ))}
         </div>
+        {hcmCursor !== null && <button type="button" disabled={hcmLoading} onClick={() => void loadHcmReviews(hcmCursor)}>載入更多待補資料</button>}
       </section>
+
+      <Drawer isOpen={skip !== null} closeDisabled={skipBusy} onClose={() => { if (!skipBusy) setSkip(null); }} title="確認略過缺少不符合原因" size="normal">
+        {skip && <><p>案件 {skip.preview.case_no}</p><p>將保存人工確認略過紀錄，只解除「缺少不符合原因」警示。案件仍維持原狀態，其他欄位問題會保留。</p>
+          {skipError && <p role="alert">{skipError}</p>}
+          <button type="button" disabled={skipBusy} onClick={() => setSkip(null)}>取消</button>
+          <button type="button" disabled={skipBusy} onClick={() => void applySkip()}>{skipBusy ? '正在保存…' : '確認略過並保存紀錄'}</button></>}
+      </Drawer>
 
       {hcmCorrection && <HcmControlledCorrectionWorkbench
         {...hcmCorrection}
@@ -289,10 +369,10 @@ export const CurrentAnomaliesPage: React.FC = () => {
       />}
 
       {error && <div role="alert" className="error-message">{error}</div>}
-      {!loading && items.length === 0 && !error && <p>目前沒有異常。</p>}
 
       <section aria-label="其他目前異常清單" className="anomalies-section">
         <h2 className="anomalies-section-title">其他目前異常</h2>
+        {!loading && items.length === 0 && !error && <p>目前沒有其他異常。</p>}
         <div className="anomalies-list">
         {items.map((item) => (
           <button

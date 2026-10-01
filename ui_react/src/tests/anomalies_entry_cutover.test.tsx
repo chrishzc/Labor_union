@@ -137,6 +137,9 @@ function installFetchStub(options: FetchStubOptions = {}): {
           options.warningStatus ?? 200
         );
       }
+      if (path === '/api/v1/case-import/hcm/reviews') {
+        return jsonResponse({ success: true, message: '目前欄位待修正', data: { items: [], next_cursor: null }, error: null });
+      }
       if (path.endsWith('/referral')) {
         return jsonResponse({
           success: true,
@@ -175,6 +178,7 @@ function expectOnlyGet(requests: readonly FetchRecord[]): void {
 }
 
 function expectInitialListBudget(requests: readonly FetchRecord[]): void {
+  expect(requests.filter(({ path }) => path === '/api/v1/case-import/hcm/reviews')).toHaveLength(1);
   expect(requests.filter(({ path }) => path === ANOMALY_LIST_ENDPOINT)).toHaveLength(1);
   expect(requests.filter(({ path }) => path === WARNING_LIST_ENDPOINT)).toHaveLength(1);
 }

@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ClientRegistryPage } from '../../../../../../../pages/ClientRegistryPage';
 
@@ -60,11 +61,51 @@ const detail = {
 
 describe('Client registry owner editing', () => {
   beforeEach(() => {
+    window.location.hash = '';
     Object.values(mocks).forEach((mock) => mock.mockReset());
     mocks.list.mockResolvedValue({ items: [{ client_id: 7, case_no: 'CASE-001', name: '王小明', phone: '0911111111', city: '新竹市', planned_start_date: null, order_status: 'matching' }], next_cursor: null });
     mocks.query.mockResolvedValue(detail);
     mocks.preview.mockResolvedValue({ owner: 'client_profile', aggregate_identity: 'CASE-001', current_version: 2, before: { phone: '0911111111' }, after: { phone: '0933333333' }, preview_fingerprint: 'a'.repeat(64) });
     mocks.apply.mockResolvedValue({ owner: 'client_profile', aggregate_identity: 'CASE-001', resulting_version: 3, changed_fields: ['phone'], preview_fingerprint: 'a'.repeat(64), idempotency_key: 'client-profile-1', replayed: false, readback: { phone: '0933333333' } });
+  });
+
+  it('opens an anomaly case and saves its due date and rejection reason through profile Preview/Apply', async () => {
+    window.location.hash = '#clients?case=CASE-001&field=due_month';
+    render(<ClientRegistryPage />);
+    const due = await screen.findByLabelText('預產期／預計服務開始月份');
+    expect(screen.getByRole('tab', { name: '名冊資料' })).toHaveAttribute('aria-selected', 'true');
+    expect(mocks.query).toHaveBeenCalledWith('CASE-001');
+    expect(due).toHaveFocus();
+    fireEvent.change(due, { target: { value: '2026-10-15' } });
+    fireEvent.change(screen.getByLabelText('不符合原因'), { target: { value: '服務地區不符' } });
+    const profile = due.closest('section') as HTMLElement;
+    fireEvent.click(within(profile).getByRole('button', { name: '預覽變更' }));
+    await waitFor(() => expect(mocks.preview).toHaveBeenCalledWith('CASE-001', 'profile', {
+      due_month: '2026-10-15', reject_reason: '服務地區不符',
+    }, 2));
+    fireEvent.click(within(profile).getByRole('button', { name: '確認儲存' }));
+    await waitFor(() => expect(mocks.apply).toHaveBeenCalledTimes(1));
+    expect(mocks.apply.mock.calls[0][2]).toEqual({ due_month: '2026-10-15', reject_reason: '服務地區不符' });
+  });
+
+  it('ignores an older detail response after the user edits and previews the newer loaded case', async () => {
+    window.location.hash = '#clients?case=CASE-001&field=reject_reason';
+    const deferred: { resolve?: (value: typeof detail) => void } = {};
+    mocks.query.mockImplementationOnce(() => new Promise<typeof detail>((resolve) => { deferred.resolve = resolve; }))
+      .mockResolvedValue(detail);
+    render(<StrictMode><ClientRegistryPage /></StrictMode>);
+    const reason = await screen.findByLabelText('不符合原因');
+    expect(mocks.query).toHaveBeenCalledTimes(2);
+    fireEvent.change(reason, { target: { value: '服務地區不符' } });
+    const profile = reason.closest('section') as HTMLElement;
+    fireEvent.click(within(profile).getByRole('button', { name: '預覽變更' }));
+    await waitFor(() => expect(within(profile).getByRole('button', { name: '確認儲存' })).toBeEnabled());
+    await act(async () => { deferred.resolve?.(detail); });
+    expect(screen.getByLabelText('不符合原因')).toHaveValue('服務地區不符');
+    expect(within(profile).getByRole('button', { name: '確認儲存' })).toBeEnabled();
+    fireEvent.click(within(profile).getByRole('button', { name: '確認儲存' }));
+    await waitFor(() => expect(mocks.apply).toHaveBeenCalledTimes(1));
+    expect(mocks.apply.mock.calls[0][2]).toEqual({ reject_reason: '服務地區不符' });
   });
 
   it.each(['order_terms_start_date_required', 'order_terms_service_days_required', 'order_terms_floor_fee_required'])(

@@ -7,9 +7,9 @@ import json
 from datetime import date
 
 from domains.case_import.hcm_resubmission import HcmResubmissionFacts, hcm_field_targets
-from domains.case_import.hcm_import_review import unresolved_hcm_review_fields
+from domains.case_import.hcm_import_review import HCM_SKIP_REJECT_REASON_PATH, unresolved_hcm_review_fields
 from shared_kernel.fingerprints import fingerprint_payload
-from subsystems.case_import.hcm_resubmission_workflow import HcmResubmissionReceipt
+from subsystems.case_import.hcm_resubmission_workflow import HcmResubmissionReceipt, HcmReviewSkipFacts
 
 
 class MySqlHcmResubmissionRepository:
@@ -64,10 +64,55 @@ class MySqlHcmResubmissionRepository:
     def query_review(self, review_identity: str):
         row = self._load_review_row(review_identity)
         facts = self._facts_from_row(row)
-        resolved = not unresolved_hcm_review_fields((facts.field_path,), _current_values(row))
+        resolved = not self._unresolved_fields((facts.field_path,), row)
         return {"review_identity": facts.review_identity, "case_no": facts.case_no,
                 "source_field": facts.field_path, "review_version": facts.review_version,
                 "resolved": resolved}
+
+    def _review_progress(self, review_identity: str):
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT COALESCE(MAX(resulting_review_version),0) AS review_version,"
+                "COALESCE(MAX(JSON_CONTAINS(adopted_field_paths,JSON_QUOTE(%s))),0) AS reason_skipped "
+                "FROM case_import_hcm_correction_events WHERE canonical_review_identity=%s",
+                (HCM_SKIP_REJECT_REASON_PATH, review_identity),
+            )
+            return cursor.fetchone() or {}
+
+    def _unresolved_fields(self, fields, row):
+        unresolved = unresolved_hcm_review_fields(tuple(fields), _current_values(row))
+        if "不符合原因" in unresolved and self._review_progress(str(row["review_identity"])).get("reason_skipped"):
+            return tuple(field for field in unresolved if field != "不符合原因")
+        return unresolved
+
+    def load_skip_facts(self, review_identity: str, *, for_update: bool) -> HcmReviewSkipFacts:
+        row = self._load_review_row(review_identity, for_update=for_update)
+        progress = self._review_progress(review_identity)
+        codes = json.loads(row["issue_codes"]) if isinstance(row["issue_codes"], str) else row["issue_codes"]
+        return HcmReviewSkipFacts(review_identity, str(row["case_no"]),
+                                 int(progress.get("review_version") or 0), str(row["source_fingerprint"]),
+                                 tuple(codes), row.get("clients_reject_reason"),
+                                 bool(progress.get("reason_skipped")), bool(row["is_current"]))
+
+    def apply_skip(self, facts, request) -> str:
+        row = self._load_review_row(facts.review_identity, for_update=True)
+        event_identity = _identity("hcm-review-skip", request.idempotency_key)
+        root_fingerprint = fingerprint_payload({"case_no": facts.case_no, "reject_reason": facts.reject_reason}).value
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO case_import_hcm_correction_events "
+                "(event_identity,case_no,client_id,review_binding_id,canonical_review_identity,"
+                "expected_review_version,resulting_review_version,prior_occurrence_id,source_event_identity,"
+                "source_fingerprint,candidate_fingerprint,adopted_field_paths,root_before_fingerprint,"
+                "root_after_fingerprint,actor,reason,correlation_id) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (event_identity, facts.case_no, int(row["client_id"]), int(row["binding_id"]),
+                 facts.review_identity, facts.review_version, facts.review_version + 1, None,
+                 "hcm-review-disposition:" + event_identity, facts.source_fingerprint,
+                 request.preview_fingerprint, _json([HCM_SKIP_REJECT_REASON_PATH]), root_fingerprint,
+                 root_fingerprint, request.actor, "人工確認略過：缺少不符合原因", request.correlation_id),
+            )
+        return event_identity
 
     def query_current_reviews(self, *, limit: int, before_id: int | None):
         # Paginate the current owner predicate, never a downloaded first page.
@@ -102,7 +147,7 @@ class MySqlHcmResubmissionRepository:
                             continue
                         targets = hcm_field_targets(fields[0])
                         locked = bool(row.get("service_data_locked")) and any(target.startswith("orders.") for target in targets)
-                        can_correct = not locked
+                        can_correct = not locked and fields[0] != "不符合原因"
                         unavailable_reason = "service_data_locked" if locked else None
                     except ValueError as error:
                         if str(error) not in {"hcm_resubmission_review_scope_ambiguous", "hcm_resubmission_field_not_owned", "hcm_resubmission_not_available"}:
@@ -110,7 +155,7 @@ class MySqlHcmResubmissionRepository:
                 else:
                     try:
                         current = self._load_review_row(str(row["review_identity"]))
-                        fields = list(unresolved_hcm_review_fields(tuple(fields), _current_values(current)))
+                        fields = list(self._unresolved_fields(fields, current))
                         if not fields:
                             continue
                     except ValueError as error:
@@ -142,10 +187,10 @@ class MySqlHcmResubmissionRepository:
             raise ValueError("hcm_resubmission_readback_missing")
         return dict(row)
 
-    def find_receipt(self, idempotency_key: str):
+    def find_receipt(self, idempotency_key: str, *, for_update: bool = False):
         with self._connection.cursor() as cursor:
             cursor.execute(
-                "SELECT command_fingerprint,result_snapshot FROM case_import_hcm_correction_receipts WHERE idempotency_key=%s",
+                "SELECT command_fingerprint,result_snapshot FROM case_import_hcm_correction_receipts WHERE idempotency_key=%s" + (" FOR UPDATE" if for_update else ""),
                 (idempotency_key,))
             row = cursor.fetchone()
         if row is None:
@@ -265,6 +310,7 @@ _TARGETS = sorted({target for fields in (
         hcm_field_targets("報名時間(建檔)"), hcm_field_targets("IP位址"), hcm_field_targets("姓名"),
         hcm_field_targets("性別"), hcm_field_targets("行動電話"), hcm_field_targets("縣市"),
         hcm_field_targets("預產期/預計服務開始月份"), hcm_field_targets("居住型態"),
+        hcm_field_targets("不符合原因"),
         hcm_field_targets("生產方式"), hcm_field_targets("寶寶資訊"), hcm_field_targets("服務時間"),
         hcm_field_targets("預計服務日期"), hcm_field_targets("希望服務天數"), hcm_field_targets("服務方式"),
     ) for target in fields})
@@ -278,7 +324,10 @@ def _current_values(row) -> dict[str, object]:
     return {target: row.get(_column_alias(target)) for target in _TARGETS}
 
 _FACTS_SQL = (
-    "SELECT b.id AS binding_id,b.case_no,e.client_id,r.review_identity,r.issue_codes,"
+    "SELECT b.id AS binding_id,b.case_no,e.client_id,r.review_identity,r.issue_codes,r.source_fingerprint,"
+    "NOT EXISTS(SELECT 1 FROM case_import_hcm_review_rows newer "
+    "JOIN case_import_hcm_review_case_bindings nb ON nb.review_row_id=newer.id "
+    "WHERE nb.case_no=b.case_no AND newer.id>r.id) AS is_current,"
     "r.source_event_identity AS prior_source_event_identity,c.client_hcm_correction_version,"
     "ord.lifecycle_version AS order_version," + _TARGET_SELECTS + " FROM case_import_hcm_review_rows r "
     "JOIN case_import_hcm_review_case_bindings b ON b.review_row_id=r.id "

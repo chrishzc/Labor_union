@@ -28,7 +28,8 @@ class Cursor:
             }
             return
         if 'MAX(resulting_review_version)' in sql:
-            self.row = {'review_version': 0}
+            identity = args[-1]
+            self.row = {'review_version': 0, 'reason_skipped': self.roots.get(identity, {}).get('reason_skipped', False)}
             return
         before = args[0]
         self.page = [r for r in self.rows if before is None or r['id'] < before][:100]
@@ -43,6 +44,22 @@ class Connection:
         self.reader = Cursor(rows, roots or {})
     def cursor(self):
         return self.reader
+
+
+def test_missing_reason_can_be_filled_or_audited_skip_without_hiding_other_fields():
+    roots = {'review-1': {'clients_reject_reason': None, 'clients_due_month': None}}
+    connection = Connection([dict(id=1, review_identity='review-1', case_no='SYNTH-1',
+                                 issue_codes=['hcm_field_missing:不符合原因', 'hcm_field_missing:預產期/預計服務開始月份'])], roots)
+    repository = MySqlHcmResubmissionRepository(connection)
+    assert set(repository.query_current_reviews(limit=20, before_id=None)['items'][0]['fields']) == {'不符合原因', '預產期/預計服務開始月份'}
+    roots['review-1']['reason_skipped'] = True
+    assert repository.query_current_reviews(limit=20, before_id=None)['items'][0]['fields'] == ['預產期/預計服務開始月份']
+    roots['review-1']['clients_due_month'] = '2026-10-15'
+    assert repository.query_current_reviews(limit=20, before_id=None)['items'] == []
+    roots['review-1']['reason_skipped'] = False
+    roots['review-1']['clients_reject_reason'] = '服務地區不符'
+    assert repository.query_current_reviews(limit=20, before_id=None)['items'] == []
+    assert all(sql.startswith('SELECT') for sql, _ in connection.reader.calls)
 
 
 def test_current_predicate_scans_past_first_hundred_and_paginates_remaining(monkeypatch):

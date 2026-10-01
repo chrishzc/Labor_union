@@ -15,7 +15,7 @@ from api.dependencies.admin_auth import require_admin
 from api.dependencies.hcm_import import get_hcm_resubmission_workflow, get_hcm_resubmission_workbook_service, get_hcm_workbook_import_service
 from api.schemas.base import BaseResponse
 from api.schemas.hcm_import import (
-    HcmReviewStateView, HcmCurrentReviewPageView,
+    HcmReviewStateView, HcmCurrentReviewPageView, HcmReviewSkipPreviewView, HcmReviewSkipApplyBody,
     HcmResubmissionPreviewView,
     HcmResubmissionReceiptView,
     HcmWorkbookPreviewView,
@@ -25,6 +25,7 @@ from api.schemas.hcm_import import (
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.case_import.hcm_workbook_import import HcmWorkbookConflict, HcmWorkbookUnavailable
 from subsystems.case_import.hcm_resubmission_workbook import HcmResubmissionApplyRequest
+from subsystems.case_import.hcm_resubmission_workflow import ApplyHcmReviewSkip, HcmResubmissionConflict
 
 
 router = APIRouter(prefix="/api/v1/case-import/hcm", tags=["Case Import"])
@@ -51,6 +52,33 @@ def query_hcm_review(review_identity: str,
     del principal
     try:
         return BaseResponse(data=workflow.query_review(review_identity), message="HCM 修正正式讀回")
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail={"code": str(error)}) from error
+
+
+@router.post("/reviews/{review_identity}/skip-missing-reject-reason/preview", response_model=BaseResponse[HcmReviewSkipPreviewView])
+def preview_missing_reject_reason_skip(review_identity: str,
+                                      principal: AdminPrincipal = Depends(require_admin),
+                                      workflow=Depends(get_hcm_resubmission_workflow)):
+    del principal
+    try:
+        return BaseResponse(data=asdict(workflow.preview_skip(review_identity)), message="請確認略過缺少不符合原因")
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail={"code": str(error)}) from error
+
+
+@router.post("/reviews/{review_identity}/skip-missing-reject-reason/apply", response_model=BaseResponse[HcmResubmissionReceiptView])
+def apply_missing_reject_reason_skip(review_identity: str, body: HcmReviewSkipApplyBody,
+                                    idempotency_key: _IdempotencyHeader,
+                                    correlation_id: _CorrelationHeader,
+                                    principal: AdminPrincipal = Depends(require_admin),
+                                    workflow=Depends(get_hcm_resubmission_workflow)):
+    try:
+        request = ApplyHcmReviewSkip(review_identity, body.expected_review_version, body.preview_fingerprint,
+                                     idempotency_key, str(principal.username or "admin"), correlation_id)
+        return BaseResponse(data=asdict(workflow.apply_skip(request)), message="已保存人工略過紀錄")
+    except HcmResubmissionConflict as error:
+        raise HTTPException(status_code=409, detail={"code": str(error)}) from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail={"code": str(error)}) from error
 

@@ -22,6 +22,18 @@ from domains.case_import.client_import_validation import VALID_CITIES, validate_
 from domains.case_import.hcm_resubmission import hcm_field_targets
 from domains.clients.profile import CLIENT_PROFILE_FIELD_SET, ClientProfileValidationError, validate_changes
 
+HCM_SKIP_REJECT_REASON_PATH = "review.skip_missing_reject_reason"
+
+
+def validate_missing_reject_reason_skip(*, issue_codes: tuple[str, ...],
+                                      reject_reason: object, already_skipped: bool,
+                                      is_current: bool) -> None:
+    """An explicit disposition suppresses only this missing-field warning."""
+    if not is_current or already_skipped or reject_reason is not None and str(reject_reason).strip():
+        raise ValueError("hcm_review_skip_no_longer_available")
+    if "hcm_field_missing:不符合原因" not in issue_codes:
+        raise ValueError("hcm_review_skip_field_not_allowed")
+
 
 def unresolved_hcm_review_fields(
     fields: tuple[str, ...], current_values: Mapping[str, object],

@@ -17,7 +17,7 @@ class MySqlClientProfileRepository:
         with self._connection.cursor() as cursor:
             cursor.execute(
                 "SELECT id AS client_id,client_profile_version,name,gender,phone,city,address,"
-                "residence_type,delivery_type,baby_info,notes FROM clients WHERE id=%s" + suffix,
+                "residence_type,delivery_type,baby_info,notes,due_month,reject_reason FROM clients WHERE id=%s" + suffix,
                 (client_id,),
             )
             return cursor.fetchone()
@@ -27,7 +27,7 @@ class MySqlClientProfileRepository:
         with self._connection.cursor() as cursor:
             cursor.execute(
                 "SELECT c.id AS client_id,o.case_no,c.client_profile_version,c.name,c.gender,c.phone,c.city,c.address,"
-                "c.residence_type,c.delivery_type,c.baby_info,c.notes FROM orders o "
+                "c.residence_type,c.delivery_type,c.baby_info,c.notes,c.due_month,c.reject_reason FROM orders o "
                 "JOIN clients c ON c.id=o.client_id WHERE o.case_no=%s" + suffix,
                 (case_no,),
             )

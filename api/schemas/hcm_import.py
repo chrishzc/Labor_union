@@ -104,6 +104,21 @@ class HcmReviewStateView(BaseModel):
     resolved: bool
 
 
+class HcmReviewSkipPreviewView(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    review_identity: str
+    case_no: str
+    source_field: str
+    review_version: int = Field(ge=0)
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class HcmReviewSkipApplyBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    expected_review_version: int = Field(ge=0)
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class HcmCurrentReviewView(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 

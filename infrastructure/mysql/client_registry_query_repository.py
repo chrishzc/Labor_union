@@ -31,7 +31,7 @@ from subsystems.government_subsidy.reconciliation_register_query import (
 
 _CLIENT_FIELDS = (
     "name", "gender", "phone", "city", "address", "residence_type",
-    "delivery_type", "baby_info", "notes",
+    "delivery_type", "baby_info", "notes", "due_month", "reject_reason",
 )
 _BECLASS_FIELDS = (
     "name", "email", "phone", "tel", "ext", "city", "zip_code", "address", "admin_notes",
@@ -384,9 +384,12 @@ class MySqlClientRegistryQueryRepository:
                 "UNION ALL SELECT 'cancellation','訂單取消',e.reason,e.actor,e.created_at,6,e.id "
                 "FROM order_cancellation_events e WHERE e.case_no=%s "
                 "UNION ALL SELECT 'reopen','訂單重啟',e.reason,e.actor,e.created_at,7,e.id "
-                "FROM order_reopen_events e WHERE e.case_no=%s"
+                "FROM order_reopen_events e WHERE e.case_no=%s "
+                "UNION ALL SELECT 'hcm_review_disposition','匯入警示人工略過',e.reason,e.actor,e.created_at,8,e.id "
+                "FROM case_import_hcm_correction_events e WHERE e.case_no=%s "
+                "AND JSON_CONTAINS(e.adopted_field_paths,JSON_QUOTE('review.skip_missing_reject_reason'))"
                 ") history ORDER BY occurred_at,source_order,event_id",
-                (case_no,) * 7,
+                (case_no,) * 8,
             )
             return tuple(cursor.fetchall() or ())
 

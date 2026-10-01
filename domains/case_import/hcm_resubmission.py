@@ -16,6 +16,7 @@ _FIELD_TARGETS = {
     "行動電話": ("clients.phone",),
     "縣市": ("clients.city",),
     "預產期/預計服務開始月份": ("clients.due_month",),
+    "不符合原因": ("clients.reject_reason",),
     "居住型態": ("clients.residence_type",),
     "生產方式": ("clients.delivery_type",),
     "寶寶資訊": ("clients.baby_info",),
@@ -72,7 +73,8 @@ def build_hcm_field_correction_candidate(
         raise ValueError("hcm_resubmission_field_scope_ambiguous")
     field = _required_text(facts.field_path, "field path")
     targets = _FIELD_TARGETS.get(field)
-    if targets is None:
+    # Rejection reasons are read here, but repaired through Client Profile.
+    if targets is None or field == "不符合原因":
         raise ValueError("hcm_resubmission_field_not_owned")
     if field in validation_errors:
         raise ValueError("hcm_resubmission_field_still_invalid")

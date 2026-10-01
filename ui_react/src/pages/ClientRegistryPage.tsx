@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { clientRegistryClient } from '../api/client_registry/client_registry_client';
 import type { BeClassChanges, ClientProfileChanges, ClientRegistryChangeHistoryItem, ClientRegistryDetail, ClientRegistryPage as ClientRegistryPageData, RegistryMutationPreview } from '../api/client_registry/client_registry_schemas';
 import { ApiHttpError } from '../api/shared/typed_errors';
@@ -8,7 +8,7 @@ import { LegacyVirtualAccountImport } from '../components/LegacyVirtualAccountIm
 import { ClientRosterPage } from './ClientRosterPage';
 import './ClientRegistryPage.css';
 
-const profileLabels: Record<string, string> = { name: '姓名', gender: '性別', phone: '手機', city: '縣市', address: '地址', residence_type: '住宅型態', delivery_type: '生產方式', baby_info: '寶寶資訊', notes: '行政註記' };
+const profileLabels: Record<string, string> = { name: '姓名', gender: '性別', phone: '手機', city: '縣市', address: '地址', due_month: '預產期／預計服務開始月份', reject_reason: '不符合原因', residence_type: '住宅型態', delivery_type: '生產方式', baby_info: '寶寶資訊', notes: '行政註記' };
 const beclassLabels: Record<string, string> = { name: '報名姓名', email: 'Email', phone: '手機', tel: '市話', ext: '分機', city: '縣市', zip_code: '郵遞區號', address: '報名地址', admin_notes: '報名註記', multi_birth_count: '胎數（單胞胎／雙胞胎）' };
 const orderInformationLabels = {
   dietary_habits: '飲食習慣與中藥接受度',
@@ -51,8 +51,8 @@ const OrderInformationSection: React.FC<{ detail: ClientRegistryDetail }> = ({ d
   return <section className="registry-editor"><h3>照護與特殊計費資料</h3><small>資料來源：{detail.beclass.source_kind === 'admin_manual' ? '後台人工補登（目前未登錄的欄位顯示為空）' : 'BeClass 原始訂單資訊（唯讀）'}</small><dl className="registry-information-fields">{Object.entries(orderInformationLabels).map(([field, label]) => <div key={field}><dt>{label}</dt><dd className={section.field_issues[field] ? 'source-issue' : undefined}>{section.field_issues[field] ? '來源內容無法判定' : displayOrderInformationValue(section.values?.[field as keyof typeof section.values] ?? null)}</dd></div>)}</dl></section>;
 };
 
-const ClientRegistryEditor: React.FC = () => {
-  const [query, setQuery] = useState('');
+const ClientRegistryEditor: React.FC<{ initialCaseNo?: string; focusField?: string }> = ({ initialCaseNo = '', focusField = '' }) => {
+  const [query, setQuery] = useState(initialCaseNo);
   const [page, setPage] = useState<ClientRegistryPageData | null>(null);
   const [detail, setDetail] = useState<ClientRegistryDetail | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -60,6 +60,7 @@ const ClientRegistryEditor: React.FC = () => {
   const [beclassDraft, setBeclassDraft] = useState<Draft>({});
   const [actions, setActions] = useState<Record<Owner, Action>>({ profile: initialAction, beclass: initialAction });
   const [message, setMessage] = useState('正在載入客戶名冊…');
+  const detailRequestSequence = useRef(0);
 
   const loadList = async (search = query) => {
     setMessage('正在載入客戶名冊…');
@@ -75,15 +76,29 @@ const ClientRegistryEditor: React.FC = () => {
       setPage({ items, next_cursor: null }); setMessage(items.length ? '' : '查無符合條件的案件。');
     } catch (error) { setMessage(error instanceof Error ? error.message : '客戶名冊載入失敗。'); }
   };
-  useEffect(() => { void loadList(''); }, []);
   const loadDetail = async (caseNo: string) => {
+    const sequence = ++detailRequestSequence.current;
     setSelected(caseNo); setDetail(null); setMessage('正在載入案件詳情…');
     try {
       const result = await clientRegistryClient.query(caseNo);
+      if (sequence !== detailRequestSequence.current) return;
       setDetail(result); setProfileDraft(toDraft(result.client.values)); setBeclassDraft(toDraft(result.beclass.values));
       setActions({ profile: initialAction, beclass: initialAction }); setMessage('');
-    } catch (error) { setMessage(error instanceof Error ? error.message : '案件詳情載入失敗。'); }
+    } catch (error) {
+      if (sequence === detailRequestSequence.current) setMessage(error instanceof Error ? error.message : '案件詳情載入失敗。');
+    }
   };
+  useEffect(() => {
+    setQuery(initialCaseNo);
+    void loadList(initialCaseNo);
+    if (initialCaseNo) void loadDetail(initialCaseNo);
+    return () => { ++detailRequestSequence.current; };
+  }, [initialCaseNo]);
+  useEffect(() => {
+    if (detail?.case_no === initialCaseNo && focusField) {
+      document.getElementById(`registry-profile-${focusField}`)?.focus();
+    }
+  }, [detail, initialCaseNo, focusField]);
   const changed = useMemo(() => ({
     profile: detail ? Object.fromEntries(Object.entries(profileDraft).filter(([field, value]) => value !== (detail.client.values[field as keyof typeof detail.client.values] ?? '')).map(([field, value]) => [field, value || null])) : {},
     beclass: detail?.beclass.values ? Object.fromEntries(Object.entries(beclassDraft).filter(([field, value]) => value !== (detail.beclass.values?.[field as keyof typeof detail.beclass.values] ?? '')).map(([field, value]) => [field, value || null])) : {},
@@ -131,7 +146,8 @@ const ClientRegistryEditor: React.FC = () => {
       const lockedReason = capabilities?.[field]?.reason;
       const current = draft[field] ?? '';
       const legacyValue = options && current && !options.includes(current) ? current : null;
-      return <label key={field}>{label}{options ? <select value={current} disabled={action.loading || !editable} onChange={(event) => update(field, event.target.value)}><option value="" disabled>請選擇</option>{legacyValue && <option value={legacyValue} disabled>{legacyValue}（既有值，待修正）</option>}{options.map((option) => <option key={option} value={option}>{option}</option>)}</select> : <input value={current} disabled={action.loading || !editable} onChange={(event) => update(field, event.target.value)} />}{!editable && <small>{lockedReason === 'multi_birth_count_locked_after_service_start' ? '服務已開始，胎數會影響費率，不能在此直接修改。' : '此欄位目前不可修改。'}</small>}</label>;
+      const id = `registry-${owner}-${field}`;
+      return <label key={field} htmlFor={id}>{label}{options ? <select id={id} value={current} disabled={action.loading || !editable} onChange={(event) => update(field, event.target.value)}><option value="" disabled>請選擇</option>{legacyValue && <option value={legacyValue} disabled>{legacyValue}（既有值，待修正）</option>}{options.map((option) => <option key={option} value={option}>{option}</option>)}</select> : <input id={id} type={field === 'due_month' ? 'date' : 'text'} maxLength={field === 'reject_reason' ? 500 : undefined} value={current} disabled={action.loading || !editable} onChange={(event) => update(field, event.target.value)} />}{!editable && <small>{lockedReason === 'multi_birth_count_locked_after_service_start' ? '服務已開始，胎數會影響費率，不能在此直接修改。' : '此欄位目前不可修改。'}</small>}</label>;
     })}</div><div className="registry-actions"><button type="button" disabled={action.loading} onClick={() => { setDraft(toDraft(source ?? null)); setActions((value) => ({ ...value, [owner]: initialAction })); }}>取消變更</button><button type="button" disabled={action.loading} onClick={() => void preview(owner)}>預覽變更</button><button type="button" disabled={action.loading || !action.preview} onClick={() => void apply(owner)}>確認儲存</button></div>{action.preview && <div className="registry-preview"><strong>即將變更：</strong>{Object.keys(action.preview.after).map((field) => labels[field] ?? field).join('、')}</div>}{action.message && <p role="status">{action.message}</p>}</section>;
   };
   const bootstrapRepairRequired = ['client_finance_bootstrap_required', 'order_terms_start_date_required', 'order_terms_service_days_required'].includes(detail?.order_terms.code ?? '') || detail?.finance.code === 'client_finance_bootstrap_required';
@@ -160,7 +176,21 @@ const ClientChangeHistory: React.FC = () => {
 type RegistryTab = 'roster' | 'records' | 'history' | 'virtual-accounts';
 
 export const ClientRegistryPage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<RegistryTab>('roster');
+  const readLocation = () => {
+    const params = new URLSearchParams(window.location.hash.split('?')[1] ?? '');
+    return { caseNo: params.get('case') ?? '', field: params.get('field') ?? '' };
+  };
+  const [location, setLocation] = useState(readLocation);
+  const [activeTab, setActiveTab] = useState<RegistryTab>(() => readLocation().caseNo ? 'records' : 'roster');
+  useEffect(() => {
+    const navigate = () => {
+      const next = readLocation();
+      setLocation(next);
+      if (next.caseNo) setActiveTab('records');
+    };
+    window.addEventListener('hashchange', navigate);
+    return () => window.removeEventListener('hashchange', navigate);
+  }, []);
 
   return <div className="client-registry-hub">
     <header className="client-registry-hub__header">
@@ -173,7 +203,7 @@ export const ClientRegistryPage: React.FC = () => {
       <button type="button" role="tab" aria-selected={activeTab === 'virtual-accounts'} onClick={() => setActiveTab('virtual-accounts')}>虛擬帳號匯入</button>
     </div>
     <section role="tabpanel" aria-label={activeTab === 'roster' ? '客戶清單' : activeTab === 'records' ? '名冊資料' : activeTab === 'history' ? '變更歷程' : '虛擬帳號匯入'}>
-      {activeTab === 'roster' ? <ClientRosterPage embedded /> : activeTab === 'records' ? <ClientRegistryEditor /> : activeTab === 'history' ? <ClientChangeHistory /> : <LegacyVirtualAccountImport />}
+      {activeTab === 'roster' ? <ClientRosterPage embedded /> : activeTab === 'records' ? <ClientRegistryEditor initialCaseNo={location.caseNo} focusField={location.field} /> : activeTab === 'history' ? <ClientChangeHistory /> : <LegacyVirtualAccountImport />}
     </section>
   </div>;
 };

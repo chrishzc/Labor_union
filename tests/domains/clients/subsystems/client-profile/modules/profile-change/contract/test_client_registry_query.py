@@ -125,7 +125,9 @@ def test_mysql_registry_change_history_reads_primary_events_without_derived_dupl
     assert "FROM order_terms_change_events" in statement
     assert "FROM confirmed_service_date_versions" in statement
     assert "client_finance" not in statement and "payroll" not in statement
-    assert parameters == ("CASE-001",) * 7
+    assert "FROM case_import_hcm_correction_events" in statement
+    assert "review.skip_missing_reject_reason" in statement
+    assert parameters == ("CASE-001",) * 8
 
 
 def test_registry_list_route_preserves_optional_false_and_returns_roster_fields():

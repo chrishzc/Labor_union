@@ -5,6 +5,19 @@ from contextlib import AbstractContextManager
 import pytest
 
 from domains.clients.profile import ClientProfileValidationError, validate_changes
+from domains.clients.profile import CLIENT_PROFILE_APPLICANT_FIELDS
+
+
+def test_admin_due_date_and_reject_reason_validation_do_not_expand_applicant_fields():
+    assert validate_changes({'due_month': '2026-10-15', 'reject_reason': '  服務地區不符  '}) == {
+        'due_month': '2026-10-15', 'reject_reason': '服務地區不符',
+    }
+    for invalid in ('2026-02-30', '2026/10/15', 'not-a-date'):
+        with pytest.raises(ClientProfileValidationError, match='profile_due_month_invalid'):
+            validate_changes({'due_month': invalid})
+    for field in ('due_month', 'reject_reason'):
+        with pytest.raises(ClientProfileValidationError, match='profile_field_not_allowed'):
+            validate_changes({field: '2026-10-15'}, allowed_fields=CLIENT_PROFILE_APPLICANT_FIELDS)
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from subsystems.client_profile.application import ClientProfileApplication
@@ -243,6 +256,25 @@ def test_rejection_requires_supplied_preview_and_exact_replay():
     assert result.status == "rejected"
     replay = application.reject_request(1, actor, "資料不完整", ExpectedVersion(0), rejection.preview_fingerprint, IdempotencyKey("reject-key-1"), CorrelationId("corr-6"))
     assert replay.status == "rejected"
+
+
+def test_admin_can_save_due_date_and_reason_without_exposing_them_to_applicant():
+    repository = _Repository()
+    repository.profile.update({'due_month': None, 'reject_reason': None})
+    application = _application(repository)
+    changes = {'due_month': '2026-10-15', 'reject_reason': '服務地區不符'}
+    preview = application.preview_admin('CASE-001', changes, ExpectedVersion(0))
+    assert preview.before == {'due_month': '', 'reject_reason': ''}
+    assert repository.profile['due_month'] is None
+    actor = ActorContext('admin:9', ('data_browser.write',))
+    receipt = application.apply_admin('CASE-001', changes, ExpectedVersion(0), actor, '補齊匯入資料',
+                                      preview.preview_fingerprint, IdempotencyKey('admin-missing-fields'),
+                                      CorrelationId('admin-missing-fields-corr'))
+    assert all(receipt.readback.values[field] == value for field, value in changes.items())
+    assert all(application.query_admin('CASE-001').values[field] == value for field, value in changes.items())
+    applicant = application.query_applicant('line-user-7', 7)
+    assert not {'due_month', 'reject_reason'} & applicant.values.keys()
+    assert repository.profile['client_profile_version'] == 1
 
 
 def test_admin_profile_change_uses_case_identity_and_exact_idempotent_replay():

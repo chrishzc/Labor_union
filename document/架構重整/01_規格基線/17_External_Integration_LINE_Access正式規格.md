@@ -766,6 +766,33 @@ Query 維持零寫入，不刪除或改寫原始來源、review、receipt 或稽
 畫面使用白話原因，不顯示 internal issue code；身份疑義與 bootstrap／費率或案件初始設定問題
 仍依既有 owner 分流，不得誤導為一般 workbook 覆寫。
 
+#### 2026-10-01 人工裁決：異常欄位的實際處理入口
+
+Authority：本次人工要求預產期問題直接開啟客戶名冊、缺少不符合原因可補填或略過；並明確確認
+略過須保留人工紀錄、只解除該項警示、不改案件「不符合」狀態，也不填入虛構原因。
+
+- `HCM-REPAIR-01`：異常頁以既有 canonical current review Query 呈現每案所有仍未解決欄位及分頁；
+  不再以 legacy warning tracking 作 HCM 欄位警示的主清單。姓名、電話、預產期等 Client 欄位直接
+  開啟 `#clients?case=...&field=...` 對應案件的名冊資料；Orders 條件仍使用既有 Orders writer。
+  原工作簿修正功能保留為支援欄位的次要選項及匯入收據入口，沒有退役其 API。
+- `HCM-REPAIR-02`：Client Profile 管理端允許修改既有 `clients.due_month` 與 `clients.reject_reason`。
+  日期以有效 `YYYY-MM-DD` 保存，不符合原因為非空文字、最長 500 字。沿用 profile version、
+  Preview／Apply、audit event 與 receipt；不增加資料欄位、不修改 Orders 狀態機，也不擴張 LIFF
+  applicant 的可修改或可查閱欄位。補填後由原 current Query 逐欄解除。
+- `HCM-REPAIR-03`：Case Import 提供 `/hcm/reviews/{review_identity}/skip-missing-reject-reason/{preview|apply}`。
+  只接受目前已綁定案件的 canonical review 所含 `hcm_field_missing:不符合原因`，且目前原因仍為空。
+  Preview 零寫入；人工明確確認後 Apply fresh-lock、重查 current review 與版本；stale 為 typed 409。
+  不接受其他欄位或格式錯誤的通用略過。
+- disposition 沿用既有 `case_import_hcm_correction_events`／receipt／outbox，
+  `adopted_field_paths=["review.skip_missing_reject_reason"]` 明確表示 review disposition，並非 Client
+  欄位採納。保存 canonical review identity、actor、固定處理原因、review version 與 idempotency；
+  Client／Order 零寫入，root before／after fingerprint 相同。Query 只針對同一 canonical review 的
+  這項 disposition 解除原因警示，其他缺漏仍保留；新 review 不沿用舊略過。
+  客戶名冊的案件變更歷程顯示該筆人工略過的原因、操作人與時間，供人員回查。
+- 驗收：名冊深連結選中案件與欄位；有效日期及原因沿用正式 writer；多欄位逐一顯示；略過須確認且
+  刷新後仍解除該項；Apply 失敗不得假移除；已補原因、舊 review、version conflict 為零寫入；
+  same-key/same-command 回原 receipt，same-key/different-command 衝突。
+
 WP77／WP92 將 HCM 與 Client BeClass 定義為可獨立存在的兩條 intake lane。HCM 案件編號不得重複；
 IP＋姓名精確命中既有 Client、多候選或其他身份關聯歧義時，案件仍依案件編號建立，但不自動綁定 Client，
 並建立獨立 link review 供外部確認。HCM 歷史過渡模式只要符合最低寫入資格，即直接寫入來源的可寫欄位，
