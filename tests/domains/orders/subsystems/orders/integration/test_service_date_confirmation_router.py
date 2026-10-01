@@ -5,7 +5,7 @@ Description: 驗證服務日期確認 HTTP Query、Preview 與 Apply 端點行�
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
 from fastapi import FastAPI
@@ -20,6 +20,13 @@ from api.dependencies.service_date_confirmation import (
 )
 from api.routes.service_date_confirmation import router
 from domains.orders.service_date_confirmation import ConfirmedServiceDateCandidate
+from domains.orders.lifecycle import (
+    OrderLifecycleRootFacts, OrderLifecycleStatus,
+    build_historical_restart_arrangement_lifecycle_impact,
+)
+from domains.orders.terms import OrderTerms, ServiceTimeTerms
+from shared_kernel.clock import TAIPEI_TIME_ZONE
+from shared_kernel.money import MoneyNTD
 from shared_kernel.fingerprints import PreviewFingerprint
 from subsystems.orders.historical_restart_arrangement import (
     HistoricalRestartArrangementPreview,
@@ -238,9 +245,20 @@ def test_historical_arrangement_http_is_separate_from_date_confirmation():
     class Arrangement:
         def preview(self, case_no, segments):
             calls.append(("preview", case_no, segments))
+            candidate = _arrangement_candidate(facts, segments)
+            lifecycle = build_historical_restart_arrangement_lifecycle_impact(
+                OrderLifecycleRootFacts(
+                    case_no, OrderLifecycleStatus.ESTABLISHED, False,
+                    date(2026, 8, 1), True, False, False, True,
+                ),
+                OrderTerms(
+                    date(2026, 8, 1), 2, 8, MoneyNTD(0),
+                    ServiceTimeTerms(None, None, None),
+                ),
+                candidate, datetime(2026, 8, 1, 9, tzinfo=TAIPEI_TIME_ZONE),
+            )
             return HistoricalRestartArrangementPreview(
-                _arrangement_candidate(facts, segments), 2, 1,
-                PreviewFingerprint("a" * 64),
+                candidate, 2, 1, PreviewFingerprint("a" * 64), lifecycle,
             )
 
         def apply(self, case_no, segments, **kwargs):

@@ -6,6 +6,12 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Callable, Protocol
 
+from domains.orders.lifecycle import (
+    LifecycleImpactCandidate,
+    OrderLifecycleRootFacts,
+    build_historical_restart_arrangement_lifecycle_impact,
+)
+from domains.orders.terms import OrderAggregateFacts
 from domains.scheduling.generation import (
     AssignmentCandidate,
     BufferCandidate,
@@ -13,10 +19,14 @@ from domains.scheduling.generation import (
 )
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
+from shared_kernel.clock import BusinessClock, SystemBusinessClock
 from subsystems.orders.service_date_confirmation_workflow import (
     ServiceDateConfirmationFacts,
 )
-from subsystems.orders.terms_workflow import SchedulingReplacementCommand
+from subsystems.orders.terms_workflow import (
+    LifecycleImpactPersistenceCommand,
+    SchedulingReplacementCommand,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,6 +41,13 @@ class HistoricalRestartArrangementPreview:
     order_version: int
     confirmed_version: int
     fingerprint: PreviewFingerprint
+    lifecycle: LifecycleImpactCandidate
+
+
+@dataclass(frozen=True, slots=True)
+class HistoricalRestartArrangementLifecycleFacts:
+    order: OrderAggregateFacts
+    lifecycle: OrderLifecycleRootFacts
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +61,9 @@ class HistoricalRestartArrangementReceipt:
 
 class HistoricalRestartArrangementRepository(Protocol):
     def load(self, case_no: str, *, lock: bool = False) -> ServiceDateConfirmationFacts: ...
+    def load_arrangement_lifecycle(
+        self, case_no: str, *, lock: bool,
+    ) -> HistoricalRestartArrangementLifecycleFacts: ...
     def lock_arrangement_staff(self, staff_ids: tuple[int, ...]) -> None: ...
     def validate_arrangement_availability(
         self, candidate: SchedulingGenerationCandidate, *, lock: bool,
@@ -57,6 +77,9 @@ class HistoricalRestartArrangementRepository(Protocol):
     def persist_arrangement(
         self, command: SchedulingReplacementCommand,
     ) -> HistoricalRestartArrangementReceipt: ...
+    def persist_arrangement_lifecycle(
+        self, command: LifecycleImpactPersistenceCommand,
+    ) -> None: ...
 
 
 class HistoricalRestartArrangementWorkflow:
@@ -64,9 +87,11 @@ class HistoricalRestartArrangementWorkflow:
         self,
         repository: HistoricalRestartArrangementRepository,
         unit_of_work_factory: Callable,
+        clock: BusinessClock | None = None,
     ) -> None:
         self._repository = repository
         self._unit_of_work_factory = unit_of_work_factory
+        self._clock = clock or SystemBusinessClock()
 
     def preview(
         self, case_no: str, segments: tuple[ArrangementSegmentIntent, ...],
@@ -131,11 +156,33 @@ class HistoricalRestartArrangementWorkflow:
                 correlation_id=CorrelationId(correlation_id),
             )
             receipt = self._repository.persist_arrangement(command)
+            self._repository.persist_arrangement_lifecycle(
+                LifecycleImpactPersistenceCommand(
+                    candidate=preview.lifecycle,
+                    expected_order_version=expected_order_version,
+                    resulting_order_version=expected_order_version + 1,
+                    client_settlement_fingerprint=None,
+                    idempotency_key=command.idempotency_key,
+                    actor=command.actor,
+                    reason=command.reason,
+                    correlation_id=command.correlation_id,
+                    trigger_event=command.command_family,
+                )
+            )
             unit_of_work.commit()
             return receipt
 
     def _build_preview(self, facts, segments, *, lock):
         candidate = _arrangement_candidate(facts, segments)
+        lifecycle_facts = self._repository.load_arrangement_lifecycle(
+            facts.case_no, lock=lock,
+        )
+        if lifecycle_facts.order.version != facts.order_version:
+            raise ValueError("historical_arrangement_stale_version")
+        lifecycle = build_historical_restart_arrangement_lifecycle_impact(
+            lifecycle_facts.lifecycle, lifecycle_facts.order.terms,
+            candidate, self._clock.now(),
+        )
         self._repository.validate_arrangement_availability(candidate, lock=lock)
         rate_fingerprint = self._repository.arrangement_rate_fingerprint(
             candidate, lock=lock,
@@ -146,9 +193,10 @@ class HistoricalRestartArrangementWorkflow:
             "confirmed_version": facts.current_version,
             "confirmed_dates": tuple(item.isoformat() for item in facts.current_dates),
             "rate_fingerprint": rate_fingerprint.value,
+            "lifecycle_fingerprint": lifecycle.fingerprint.value,
         })
         return HistoricalRestartArrangementPreview(
-            candidate, facts.order_version, facts.current_version, fingerprint,
+            candidate, facts.order_version, facts.current_version, fingerprint, lifecycle,
         )
 
 

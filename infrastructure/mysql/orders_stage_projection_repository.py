@@ -124,6 +124,7 @@ SELECT o.case_no,
           AND receipt.resulting_generation_id = aggregate.effective_generation_id
           AND receipt.command_family IN (
               'orders_historical_precision_restart',
+              'orders_historical_restart_arrangement',
               'historical_restart_service_dates'
           )
   ) historical_binding_generation

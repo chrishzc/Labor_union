@@ -12,7 +12,17 @@ from pymysql.err import IntegrityError
 
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from subsystems.orders.historical_restart_arrangement import (
+    HistoricalRestartArrangementLifecycleFacts,
     HistoricalRestartArrangementReceipt,
+)
+from infrastructure.mysql.order_terms_read_model import (
+    _load_lifecycle,
+    _order_facts,
+    select_order,
+)
+from infrastructure.mysql.order_lifecycle_impact_writer import (
+    persist_order_lifecycle_impact,
+    persist_order_lifecycle_projection,
 )
 from infrastructure.mysql.payroll_terms_writer import (
     load_historical_restart_arrangement_rates,
@@ -78,6 +88,33 @@ class MySqlServiceDateConfirmationRepository:
         """Expose the owner root through the shared typed M3 read port."""
 
         return self.load(case_no, lock=for_update)
+
+    def load_arrangement_lifecycle(self, case_no, *, lock):
+        with self._connection.cursor() as cursor:
+            order = select_order(cursor, case_no, lock=lock)
+            lifecycle = _load_lifecycle(cursor, order, lock)
+            cursor.execute(
+                "SELECT control_key FROM order_lifecycle_control_state "
+                "WHERE case_no=%s AND control_type='human_hold' "
+                "AND state='active' AND scope IN ('order','enter_service')"
+                + (" FOR UPDATE" if lock else ""),
+                (case_no,),
+            )
+            if cursor.fetchone() is not None:
+                raise ValueError("historical_arrangement_enter_service_hold_blocked")
+            return HistoricalRestartArrangementLifecycleFacts(
+                _order_facts(order), lifecycle,
+            )
+
+    def persist_arrangement_lifecycle(self, command):
+        with self._connection.cursor() as cursor:
+            persist_order_lifecycle_impact(cursor, command)
+            try:
+                persist_order_lifecycle_projection(cursor, command)
+            except RuntimeError as error:
+                if str(error) == "order_version_conflict":
+                    raise ValueError("historical_arrangement_stale_version") from error
+                raise
 
     def lock_arrangement_staff(self, staff_ids):
         if staff_ids != tuple(sorted(set(staff_ids))) or not staff_ids:

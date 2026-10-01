@@ -11,7 +11,8 @@
 - primary:
   - `domains/orders/service_date_confirmation.py`
   - `subsystems/orders/service_date_confirmation_workflow.py`
-  - `subsystems/orders/historical_restart_arrangement.py` — confirmed dates 後獨立的正式安排 Preview／Apply coordinator。
+  - `subsystems/orders/historical_restart_arrangement.py` — confirmed dates 後獨立的正式安排 Preview／Apply coordinator；同一 outer UoW 接續 Orders lifecycle，保存實際結束日與 owner version，依已確認開始日判定服務中，完工仍由 AutoComplete 執行。
+  - `domains/orders/lifecycle.py` — 重啟正式安排沿用 Orders 服務中判定，不補造訂金或契約事實。
   - `subsystems/orders/calendar_detail_query.py`
   - `infrastructure/mysql/service_date_confirmation_repository.py`
   - `api/schemas/service_date_confirmation.py`
@@ -27,6 +28,7 @@
 
 ## Dependencies
 - outbound: `orders/actual-start` — 輸入改變時零寫入 Preview；最後確認才 Apply／readback，取得新 owner versions 後再 Preview／Apply 服務日期。正式或歷史重排候選須與核對集合一致。
+- outbound: `orders/lifecycle-authoritative-facts` — 歷史正式安排以 typed lifecycle candidate 委派現有 Orders writer 保存事件、projection 與 outbox；尚未確認或未來開始日維持訂單成立。
 - outbound: `scheduling/scheduling` — 日期保存不再重建 restart tombstone；後續明確正式安排才呼叫 canonical generation replacement writer。
 - outbound: `staff-payables/payroll` — 日期保存不寫 rate snapshot；後續真正建立安排時才沿 source frozen rate，或在歷史 pairing 無 source snapshot 時使用既有 case payroll policy。
 - inbound: `orders/historical-precision-restart` — completed restart、空 effective generation 與 immutable historical pairing evidence；source assignment identity 可不存在。

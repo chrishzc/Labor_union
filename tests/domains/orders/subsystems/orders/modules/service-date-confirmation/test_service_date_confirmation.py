@@ -5,11 +5,19 @@ Description: 驗證服務日期確認 Candidate、歷史 tombstone 日期-only �
 
 from dataclasses import replace
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from threading import Barrier, Lock
 
 import pytest
 
+from domains.orders.lifecycle import (
+    OrderLifecycleRootFacts,
+    OrderLifecycleStatus,
+    build_historical_restart_arrangement_lifecycle_impact,
+)
+from domains.orders.terms import OrderAggregateFacts, OrderTerms, ServiceTimeTerms
+from shared_kernel.clock import FixedBusinessClock, TAIPEI_TIME_ZONE
+from shared_kernel.money import MoneyNTD
 from domains.orders.service_date_confirmation import (
     ConfirmedServiceDateCandidate,
     group_service_dates_by_calendar_week,
@@ -24,6 +32,7 @@ from shared_kernel.fingerprints import PreviewFingerprint
 from subsystems.orders.historical_restart_arrangement import (
     ArrangementSegmentIntent,
     HistoricalRestartArrangementReceipt,
+    HistoricalRestartArrangementLifecycleFacts,
     HistoricalRestartArrangementWorkflow,
     _arrangement_candidate,
 )
@@ -34,6 +43,8 @@ from subsystems.orders.service_date_confirmation_workflow import (
     ServiceDateConfirmationWorkflow,
     _candidate,
 )
+from subsystems.orders.terms_workflow import LifecycleImpactPersistenceCommand
+from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 class _UnitOfWork:
     committed = False
 
@@ -316,6 +327,23 @@ def test_historical_arrangement_requires_explicit_contiguous_multi_staff_ownersh
     ]
 
 
+def _arrangement_lifecycle_facts(facts, actual_start=date(2026, 9, 6)):
+    return HistoricalRestartArrangementLifecycleFacts(
+        OrderAggregateFacts(
+            facts.case_no, facts.order_version,
+            OrderTerms(
+                date(2026, 9, 6), facts.contracted_service_days, 8,
+                MoneyNTD(0), ServiceTimeTerms(time(9), time(17), 0),
+            ),
+            False, "一般市民",
+        ),
+        OrderLifecycleRootFacts(
+            facts.case_no, OrderLifecycleStatus.ESTABLISHED, False,
+            actual_start, actual_start is not None, False, False, True,
+        ),
+    )
+
+
 def test_historical_arrangement_preview_apply_and_replay_keep_one_generation():
     facts = replace(_pending_arrangement_facts(),
                     restart_assignments=(_pending_arrangement_facts().restart_assignments[0],),
@@ -327,9 +355,14 @@ def test_historical_arrangement_preview_apply_and_replay_keep_one_generation():
             self.command = None
             self.receipt = None
             self.locked = ()
+            self.lifecycle_commands = []
+            self.generation_count = 0
 
         def load(self, _case_no, *, lock=False):
             return facts
+
+        def load_arrangement_lifecycle(self, _case_no, *, lock):
+            return _arrangement_lifecycle_facts(facts)
 
         def lock_arrangement_staff(self, ids):
             self.locked = ids
@@ -344,15 +377,20 @@ def test_historical_arrangement_preview_apply_and_replay_keep_one_generation():
             return self.receipt
 
         def persist_arrangement(self, command):
+            self.generation_count += 1
             self.command = command
             self.receipt = HistoricalRestartArrangementReceipt(
                 facts.case_no, 8, 5, (101,), command.preview_fingerprint,
             )
             return self.receipt
 
+        def persist_arrangement_lifecycle(self, command):
+            self.lifecycle_commands.append(command)
+
     repository = Repository()
     unit = _UnitOfWork()
-    workflow = HistoricalRestartArrangementWorkflow(repository, lambda: unit)
+    clock = FixedBusinessClock(datetime(2026, 10, 1, 11, 30, tzinfo=TAIPEI_TIME_ZONE))
+    workflow = HistoricalRestartArrangementWorkflow(repository, lambda: unit, clock)
     preview = workflow.preview(facts.case_no, (segment,))
     kwargs = dict(
         expected_order_version=3,
@@ -369,6 +407,108 @@ def test_historical_arrangement_preview_apply_and_replay_keep_one_generation():
     assert repository.command.command_family == "orders_historical_restart_arrangement"
     assert repository.locked == (12,)
     assert unit.committed
+    assert repository.generation_count == 1
+    assert len(repository.lifecycle_commands) == 1
+    lifecycle = repository.lifecycle_commands[0]
+    assert lifecycle.candidate.after_status is OrderLifecycleStatus.IN_SERVICE
+    assert lifecycle.candidate.actual_end_date == facts.current_dates[-1]
+    assert lifecycle.expected_order_version == 3
+    assert lifecycle.resulting_order_version == 4
+    assert not lifecycle.candidate.service_completion_reached
+    assert not lifecycle.candidate.service_data_lock_should_exist
+    assert lifecycle.client_settlement_fingerprint is None
+
+
+@pytest.mark.parametrize("actual_start", [None, date(2026, 9, 6)])
+def test_historical_arrangement_does_not_start_unconfirmed_or_future_service(actual_start):
+    facts = _pending_arrangement_facts()
+    candidate = _arrangement_candidate(facts, (
+        ArrangementSegmentIntent(12, facts.current_dates[:2]),
+        ArrangementSegmentIntent(13, facts.current_dates[2:]),
+    ))
+    lifecycle_facts = _arrangement_lifecycle_facts(facts, actual_start)
+    impact = build_historical_restart_arrangement_lifecycle_impact(
+        lifecycle_facts.lifecycle, lifecycle_facts.order.terms, candidate,
+        datetime(2026, 9, 5, 11, 30, tzinfo=TAIPEI_TIME_ZONE),
+    )
+    assert impact.after_status is OrderLifecycleStatus.ESTABLISHED
+    assert impact.actual_end_date == facts.current_dates[-1]
+    assert not impact.service_data_lock_should_exist
+
+
+@pytest.mark.parametrize("root_change", [
+    {"historical_precision_restarted": False},
+    {"cancellation_effective": True},
+    {"service_data_locked": True},
+    {"current_status": OrderLifecycleStatus.COMPLETED},
+])
+def test_historical_arrangement_rejects_non_restart_or_terminal_lifecycle(root_change):
+    facts = _pending_arrangement_facts()
+    candidate = _arrangement_candidate(facts, (
+        ArrangementSegmentIntent(12, facts.current_dates[:2]),
+        ArrangementSegmentIntent(13, facts.current_dates[2:]),
+    ))
+    lifecycle_facts = _arrangement_lifecycle_facts(facts)
+    with pytest.raises(ValueError, match="historical_arrangement_lifecycle_blocked"):
+        build_historical_restart_arrangement_lifecycle_impact(
+            replace(lifecycle_facts.lifecycle, **root_change),
+            lifecycle_facts.order.terms, candidate,
+            datetime(2026, 10, 1, 11, 30, tzinfo=TAIPEI_TIME_ZONE),
+        )
+
+
+@pytest.mark.parametrize("updated_rows", [1, 0])
+def test_arrangement_lifecycle_uses_orders_writer_and_closes_version_conflict(updated_rows):
+    facts = _pending_arrangement_facts()
+    candidate = _arrangement_candidate(facts, (
+        ArrangementSegmentIntent(12, facts.current_dates[:2]),
+        ArrangementSegmentIntent(13, facts.current_dates[2:]),
+    ))
+    lifecycle_facts = _arrangement_lifecycle_facts(facts)
+    impact = build_historical_restart_arrangement_lifecycle_impact(
+        lifecycle_facts.lifecycle, lifecycle_facts.order.terms, candidate,
+        datetime(2026, 10, 1, 11, 30, tzinfo=TAIPEI_TIME_ZONE),
+    )
+
+    class Cursor:
+        lastrowid = 21
+        rowcount = updated_rows
+
+        def __init__(self):
+            self.statements = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, statement, parameters):
+            self.statements.append((statement, parameters))
+
+    cursor = Cursor()
+
+    class Connection:
+        def cursor(self):
+            return cursor
+
+    repository = MySqlServiceDateConfirmationRepository(Connection())
+    command = LifecycleImpactPersistenceCommand(
+        impact, 3, 4, None, IdempotencyKey("arrangement-owner-write"),
+        ActorContext("admin"), "核對既定服務安排", CorrelationId("arrangement-owner-write"),
+        "orders_historical_restart_arrangement",
+    )
+    if updated_rows:
+        repository.persist_arrangement_lifecycle(command)
+    else:
+        with pytest.raises(ValueError, match="historical_arrangement_stale_version"):
+            repository.persist_arrangement_lifecycle(command)
+    statements = cursor.statements
+    assert "INSERT INTO order_lifecycle_state_events" in statements[0][0]
+    assert "INSERT INTO orders_domain_outbox" in statements[1][0]
+    assert "UPDATE orders SET status=%s,actual_end_date=%s,lifecycle_version=%s" in statements[2][0]
+    assert statements[2][1] == ("服務中", facts.current_dates[-1], 4, facts.case_no, 3)
+    assert not any("order_service_data_locks" in sql for sql, _ in statements)
 
 
 def test_historical_arrangement_carries_source_rate_and_uses_case_policy_only_when_missing():

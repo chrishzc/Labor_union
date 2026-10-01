@@ -191,6 +191,38 @@ def build_preassignment_terms_lifecycle_impact(
     )
 
 
+def build_historical_restart_arrangement_lifecycle_impact(
+    root_facts: OrderLifecycleRootFacts,
+    order_terms: OrderTerms,
+    scheduling: SchedulingGenerationCandidate,
+    evaluation_at: datetime,
+) -> LifecycleImpactCandidate:
+    """Resume restarted service only when its formal arrangement is created."""
+    _validate_inputs(root_facts, scheduling, evaluation_at)
+    if (
+        not root_facts.historical_precision_restarted
+        or root_facts.current_status not in {
+            OrderLifecycleStatus.ESTABLISHED, OrderLifecycleStatus.IN_SERVICE,
+        }
+        or root_facts.cancellation_effective
+        or root_facts.service_data_locked
+    ):
+        raise ValueError("historical_arrangement_lifecycle_blocked")
+    actual_end_date = _actual_end_date(scheduling)
+    completion_instant = (
+        order_terms.service_time.completion_instant(actual_end_date)
+        if actual_end_date is not None else None
+    )
+    # Restart provenance exempts the deposit/contract gate.  No settlement fact
+    # is invented, and AutoComplete remains the sole completion command.
+    return _candidate(
+        root_facts, None, actual_end_date, completion_instant,
+        evaluation_at.date(), False,
+        _lifecycle_status(root_facts, None, False, evaluation_at),
+        _alert_codes(root_facts, None, evaluation_at),
+    )
+
+
 def _validate_inputs(root_facts, scheduling, evaluation_at):
     if root_facts.case_no != scheduling.case_no:
         raise ValueError("Orders and Scheduling case numbers must match")
@@ -315,7 +347,9 @@ def _candidate(
         ),
         "service_completion_reached": completion_reached,
         "service_data_lock_should_exist": service_lock,
-        "client_settlement_fingerprint": client_settlement.fingerprint.value,
+        "client_settlement_fingerprint": (
+            client_settlement.fingerprint.value if client_settlement is not None else None
+        ),
         "alert_codes": alerts,
     }
     return LifecycleImpactCandidate(

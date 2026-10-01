@@ -35,6 +35,7 @@ def test_service_completion_projection_reads_the_canonical_orders_receipt() -> N
     assert "GROUP BY case_no, replacement_generation_id" in _PAGE_SQL
     assert "FROM order_auto_completion_apply_receipts" in _PAGE_SQL
     assert "orders-auto-completion-receipt:" in _PAGE_SQL
+    assert "'orders_historical_restart_arrangement'" in _PAGE_SQL
     assert "service_lock.client_settlement_fingerprint AS service_completion_identity" not in _PAGE_SQL
 
 
