@@ -12,11 +12,14 @@
 - client: `ui_react/src/api/client_finance/historical_client_payment_client.ts`
 - composition: `ui_react/src/pages/FinancePage.tsx`
 - payable export adapter: `ui_react/src/api/accounts_payable/accounts_payable_export_client.ts` — FinancePage 既有應付帳款下載入口；呼叫既有 Staff Payables 匯出端點，保留登入檢查與 XLSX 回應驗證，不計算帳務事實。
-- cross-order presentation: `ui_react/src/components/OrderGovernmentSubsidyLane.tsx` — FinancePage 內嵌的補助唯讀摘要；只呈現業務狀態、金額與報表入口，不展示來源識別。補助規則仍由 Government Subsidy 擁有。
+- customer subsidy payable presentation: `ui_react/src/components/ClientSubsidyReturnQueryPanel.tsx` — FinancePage 的客戶補助退款案件清單，預設查所有符合資格案件，支援姓名／案件搜尋、選用應退款月份與分頁；明示後端的預估金額、未知日期，不計算退款資格或金額。
+- customer subsidy payable client: `ui_react/src/api/client_finance/client_subsidy_return_query_client.ts` — strict 解碼 `/api/v1/finance-reports/client-subsidy-returns` typed projection，核對案件唯一性與游標；只做 GET。
 
 ## Contracts
+- `modules/client-subsidy-return-query.md` — 補助退款案件查詢 owner。
 - `modules/historical-payment-settlement.md` — owner application/public contract。
 - `document/架構重整/01_規格基線/06_Anomalies_Domain.md` — owner work item 顯示於 owner page，`#anomalies` 只保留 15 個 current issue。
+- `document/架構重整/01_規格基線/04_Client_Finance_Domain.md` 與 `16_Staff_Payables與Client_Refund正式規格.md` — 客戶補助退還義務與月期應付清單；不重定義退款資格、金額、日期或核銷。
 
 ## Verification
 - layout_status: `custom_current`

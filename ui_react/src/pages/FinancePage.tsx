@@ -5,7 +5,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { FinanceImportCorrectionForm } from '../components/FinanceImportCorrectionForm';
 import './FinancePage.css';
-import './OrderWorkbenchV2Page.css';
 import { loadAllOrderSummaries, ordersQueryClient } from '../api/orders/order_query_client';
 import { adaptOrderSummaryPage } from '../adapters/orders/order_summary_adapter';
 import { loadAllStaffDirectoryPages, staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
@@ -22,8 +21,7 @@ import { FinanceWorkbookSnapshot, financeImportMutationClient, type FinanceImpor
 import { financeImportQueryClient } from '../api/finance_import/finance_import_query_client';
 import { HistoricalClientPaymentWorkbench } from '../components/HistoricalClientPaymentWorkbench';
 import { HistoricalStaffPayoutWorkbench } from '../components/HistoricalStaffPayoutWorkbench';
-import { OrderGovernmentSubsidyLane } from '../components/OrderGovernmentSubsidyLane';
-import { OrderTerminalAggregateLane } from '../components/OrderTerminalAggregateLane';
+import { ClientSubsidyReturnQueryPanel } from '../components/ClientSubsidyReturnQueryPanel';
 import { PaymentDestinationConfigurationPanel } from '../components/PaymentDestinationConfigurationPanel';
 
 type FinanceTab = 'client-receipts' | 'staff-payables' | 'accounts-payable' | 'cross-order' | 'finance-import' | 'payment-destination';
@@ -89,8 +87,7 @@ export const FinancePage: React.FC = () => {
     const params = new URLSearchParams(window.location.hash.split('?')[1] ?? '');
     return { tab: params.get('tab'), caseNo: (params.get('case_no') ?? '').slice(0, 50) };
   });
-  const [activeTab, setActiveTab] = useState<FinanceTab>(entry.tab === 'staff-payables' ? 'staff-payables' : 'client-receipts');
-  const [expandedLane, setExpandedLane] = useState<'subsidy' | 'closure' | null>(null);
+  const [activeTab, setActiveTab] = useState<FinanceTab>(entry.tab === 'staff-payables' || entry.tab === 'cross-order' || entry.tab === 'accounts-payable' ? entry.tab : 'client-receipts');
   const [cases, setCases] = useState<{ id: string; label: string; orderStatus: string }[]>([]);
   const [selectedCase, setSelectedCase] = useState(entry.caseNo);
   const [caseQuery, setCaseQuery] = useState(entry.caseNo);
@@ -402,7 +399,7 @@ export const FinancePage: React.FC = () => {
           ['client-receipts', '客戶收款'],
           ['staff-payables', '月嫂應付款'],
           ['accounts-payable', '應付帳款'],
-          ['cross-order', '補助與結案查詢'],
+          ['cross-order', '客戶補助退款'],
           ['finance-import', '銀行流水匯入'],
         ] as const).map(([id, label]) => (
           <button
@@ -426,7 +423,7 @@ export const FinancePage: React.FC = () => {
         <span>{activeTab === 'finance-import'
           ? '上傳檔案 → 預覽 → 匯入完成'
           : activeTab === 'cross-order'
-            ? '選擇帳務查詢後載入跨訂單結果'
+            ? '依案件查詢應退補助金額與應退款日期'
             : '查詢結果以目前選取頁籤為準'}</span>
         {activeTab !== 'finance-import' && activeTab !== 'cross-order' && (
           <button className="finance-reload-btn" onClick={() => setReload((value) => value + 1)}>
@@ -574,18 +571,8 @@ export const FinancePage: React.FC = () => {
       {activeTab === 'payment-destination' && <PaymentDestinationConfigurationPanel reload={reload} />}
 
       {activeTab === 'cross-order' && (
-        <section className="finance-workspace" aria-labelledby="cross-order-finance-heading">
-          <div className="finance-section-heading">
-            <div>
-              <h2 id="cross-order-finance-heading">補助與結案查詢</h2>
-              <p>查詢政府補助結算與完全結案狀態；結果涵蓋各類訂單。</p>
-            </div>
-          </div>
-          <div className="order-v2-side-lanes">
-            <OrderGovernmentSubsidyLane expanded={expandedLane === 'subsidy'} onExpandedChange={(open) => setExpandedLane(open ? 'subsidy' : null)} />
-            <OrderTerminalAggregateLane expanded={expandedLane === 'closure'} onExpandedChange={(open) => setExpandedLane(open ? 'closure' : null)} />
-          </div>
-        </section>
+        <ClientSubsidyReturnQueryPanel targetMonth={targetMonth} onMonthChange={setTargetMonth}
+          onOpenPayables={() => setActiveTab('accounts-payable')} initialCaseNo={entry.caseNo} />
       )}
 
       {activeTab === 'staff-payables' && (

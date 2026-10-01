@@ -16,6 +16,43 @@
   border-bottom: 1px solid #fed9b8;
 }
 
+.subsidy-refund-period, .subsidy-refund-list-heading, .subsidy-refund-case-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-4, 16px);
+  margin-bottom: 20px;
+}
+.subsidy-refund-period label, .subsidy-refund-list-heading label, .subsidy-refund-case-form label {
+  display: grid;
+  gap: 8px;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.subsidy-refund-period p { flex: 1; min-width: 200px; margin: 0; color: #74593f; font-size: .875rem; }
+.subsidy-refund-list-heading { justify-content: space-between; }
+.subsidy-refund-list-heading h3 { margin: 0; }
+.subsidy-refund-list-heading input { min-width: min(280px, 100%); }
+.subsidy-refund-panel .subsidy-refund-date { font-size: 1.15rem; }
+.subsidy-refund-caption { text-align: left; padding: 0 0 12px; color: #74593f; font-size: .875rem; }
+.subsidy-refund-panel .finance-table { min-width: 640px; }
+.subsidy-refund-panel .finance-table th, .subsidy-refund-panel .finance-table td { white-space: nowrap; }
+.subsidy-refund-money { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.subsidy-refund-estimate { margin-left: 8px; font-size: .8rem; font-weight: 400; color: #74593f; }
+.subsidy-refund-period .subsidy-refund-month-toggle { display: flex; align-items: center; gap: 8px; min-height: 40px; }
+.subsidy-refund-month-toggle input { width: 18px; height: 18px; }
+.subsidy-refund-pagination { display: flex; justify-content: flex-end; gap: 12px; }
+.subsidy-refund-case-button { min-height: 40px; padding: 8px 12px; border: 1px solid #dec0b6; border-radius: 8px; background: #fff; color: #a43c12; cursor: pointer; }
+.subsidy-refund-case-button:focus-visible { outline: 3px solid #ff7f50; outline-offset: 2px; }
+.subsidy-refund-note, .subsidy-refund-case-query > p { color: #74593f; font-size: .875rem; line-height: 1.6; }
+.subsidy-refund-case-query { border-top: 1px solid #dec0b6; padding-top: 20px; margin-top: 24px; scroll-margin-top: 180px; }
+.subsidy-refund-case-query h3 { margin: 0; }
+@media (max-width: 600px) {
+  .subsidy-refund-panel .finance-section-heading { flex-wrap: wrap; gap: 12px; }
+  .subsidy-refund-period label, .subsidy-refund-list-heading label, .subsidy-refund-case-form label { width: 100%; }
+  .subsidy-refund-panel .finance-input { width: 100%; min-width: 0; }
+}
+
 .finance-page-header .page-title {
   margin: 0;
   font-size: 1.45rem;

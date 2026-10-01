@@ -5,6 +5,9 @@ test_root: tests/domains/client-finance/subsystems/client-finance/
 integration_root: tests/domains/client-finance/subsystems/client-finance/integration/
 fixtures_root: tests/fixtures/
 modules:
+  client-subsidy-return-query:
+    test_root: tests/domains/client-finance/subsystems/client-finance/modules/client-subsidy-return-query/
+    architecture: ../../../../../domains/client-finance/subsystems/client-finance/modules/client-subsidy-return-query.md
   deposit-skip:
     layout_status: custom_current
     test_root: tests/domains/client-finance/subsystems/client-finance/integration/test_deposit_skip.py

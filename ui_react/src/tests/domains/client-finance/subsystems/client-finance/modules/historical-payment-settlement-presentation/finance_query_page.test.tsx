@@ -13,6 +13,7 @@ import { clientReceiptQueryClient } from '../../../../../../../api/client_financ
 import { staffPayablesQueryClient } from '../../../../../../../api/staff_payables/staff_payables_query_client';
 import { accountsPayableQueryClient } from '../../../../../../../api/accounts_payable/accounts_payable_query_client';
 import { accountsPayableExportClient } from '../../../../../../../api/accounts_payable/accounts_payable_export_client';
+import { clientSubsidyReturnQueryClient } from '../../../../../../../api/client_finance/client_subsidy_return_query_client';
 import { financeImportBlockerMessage } from '../../../../../../../adapters/finance/finance_import_query_adapter';
 import { FinancePage } from '../../../../../../../pages/FinancePage';
 import { RECEIPT_RESPONSE, STAFF_PAYABLES_RESPONSE, ACCOUNTS_PAYABLE_RESPONSE } from '../../../../../../fixtures/finance/finance_query_contract_fixtures';
@@ -21,6 +22,7 @@ describe('FinancePage query and guarded import presentation', () => {
   afterEach(() => vi.unstubAllGlobals());
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.spyOn(clientSubsidyReturnQueryClient, 'query').mockResolvedValue({ rows: [], next_cursor: null });
     vi.spyOn(ordersQueryClient, 'getOrderSummaries').mockResolvedValue({ items: [{ case_no: 'CASE-FIN-001', client_name: '去敏客戶', order_status: '服務中', staff_name: null, identity_status: null, start_date: null, end_date: null, actual_start_date: null, actual_end_date: null, service_days: null, total_employer_self_pay_payable: null }], next_cursor: null, etag: 'c'.repeat(64) });
     vi.spyOn(ordersQueryClient, 'getAssignmentPlan').mockResolvedValue({
       case_no: 'CASE-FIN-001', order_version: 1, scheduling_version: 1,
@@ -131,7 +133,7 @@ describe('FinancePage query and guarded import presentation', () => {
     expect(document.querySelector('[data-control-id="finance.finance-import.apply"]')).toBeNull();
   });
 
-  it('places cross-order accounting queries in Finance instead of the order workbench', async () => {
+  it('presents customer subsidy refunds and retains the payment month when opening accounts payable', async () => {
     const orderWorkbenchSource = readFileSync('src/pages/OrderWorkbenchV2Page.tsx', 'utf8');
     expect(orderWorkbenchSource).not.toContain('跨訂單帳務查詢');
     expect(orderWorkbenchSource).not.toContain('OrderGovernmentSubsidyLane');
@@ -139,11 +141,15 @@ describe('FinancePage query and guarded import presentation', () => {
 
     render(<FinancePage />);
     await waitFor(() => expect(screen.getByText('OBL-C-1')).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: '補助與結案查詢' }));
+    fireEvent.click(screen.getByRole('button', { name: '客戶補助退款' }));
 
-    expect(screen.getByRole('heading', { name: '補助與結案查詢' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /政府補助結算支線/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /完全結案彙總/ })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '客戶補助退款' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /政府補助結算支線|完全結案彙總/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('依應退款月份篩選'));
+    fireEvent.change(screen.getByLabelText('應退款月份'), { target: { value: '2026-11' } });
+    await waitFor(() => expect(clientSubsidyReturnQueryClient.query).toHaveBeenLastCalledWith(expect.objectContaining({ targetMonth: '2026-11' })));
+    fireEvent.click(screen.getByRole('button', { name: '前往應付帳款' }));
+    expect(screen.getByLabelText('月份')).toHaveValue('2026-11');
   });
 
   it('searches all server pages so a new case can be selected for receipt review', async () => {

@@ -172,6 +172,18 @@ obligation依strictly-newer owner event更新current projection，未被舊event
 雙倍日不增加退還額。只有服務已完工，或中途取消的實際時數已確認，且客戶服務費收齊、資格符合時建立；帳戶不唯一、
 少退、超退、退匯／沖正都進異常，不改義務。
 
+#### 客戶補助退款案件查詢（2026-10-01 人工裁決）
+
+「客戶補助退款」是案件查詢，不是僅限已建立 `subsidy_return` 的付款清單。所有具補助資格、需由客戶先付款的未取消案件都可查詢；全補助且客戶不需付款、非補助資格、已完成補助退款的案件不列入待退清單。使用者不需逐案手動建立退款義務才能查詢。此查詢不更改前述正式退款建立、客戶款收齊、銀行出款或取消帳務規則。
+
+- 已存在正式退款帳務時，金額與日期以 Client Finance owner projection 為準；缺少收款帳戶不使案件從查詢消失。
+- 尚未建立正式退款帳務時，使用既有補助時數上限、有效服務條件及案件凍結付款條款單價呈現明示的「預估」金額；歷史實際服務量已有正式 projection 時優先使用。無足夠條件時保留案件並呈現金額待確認，不以零冒充。
+- 日期只有已結案的實際結案日期或正式退款日期可提供；依既有結案月加兩曆月的 15 日規則呈現。未結案為待結案，不使用預定結束日期冒充實際日期。
+- 預估清單不是正式應付帳款或已收款證據。正式退款仍需經既有 owner writer；查詢零寫入、無 commit、無外部效果。每次退款一次全額退清，不顯示已退／剩餘金額或自行推算到期狀態。
+- `GET /api/v1/finance-reports/client-subsidy-returns` 使用管理員權限，支援 bounded `page_size`（1～200）、`after_case_no`、案件／客戶搜尋、exact `case_no` 與選用的應退款月份；預設不以月份隱藏案件，月份篩選只列已確定日期。typed view 僅輸出案件、客戶名稱、訂單狀態、金額、日期、預估標記與下一頁游標，不輸出銀行帳戶或其他個資。
+
+此案件查詢的 bounded implementation scope 為 Domain projection、Client Finance query、MySQL 唯讀 adapter、Finance Reports transport 與既有 FinancePage 補助頁籤，不改 schema、正式 writer 或付款流程。驗收須覆蓋無退款義務仍可查、取消與全補助排除、凍結單價／補助時數、未知金額日期、正式帳務優先、分頁搜尋與月份切換、實際 localhost GET／Browser 案件金額 readback。其 test roots 與 implementation paths 由 `client-subsidy-return-query` Arch Map leaf 及既有 presentation leaf 管理；完成上述驗收即停止此 slice。
+
 #### 季度撥款與客戶補助退還
 
 政府補助的申請與撥款是 Government Subsidy Domain 的季度流程；客戶補助退還仍由本

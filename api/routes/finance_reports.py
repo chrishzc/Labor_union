@@ -19,6 +19,9 @@ from api.dependencies.accounts_payable_export import (
 )
 from api.error_contracts import internal_query_error, typed_http_error
 from api.schemas.base import BaseResponse
+from api.dependencies.client_subsidy_return_query import get_subsidy_return_query_repository
+from api.schemas.client_subsidy_return_query import ClientSubsidyReturnPageView
+from subsystems.client_finance.subsidy_return_query import query_subsidy_returns, SubsidyReturnQueryRepository
 from api.schemas.accounts_payable_export import (
     AccountsPayableArchiveView,
     AccountsPayablePreviewView,
@@ -37,6 +40,34 @@ from subsystems.government_subsidy import reconciliation_register_query
 
 router = APIRouter(prefix="/api/v1/finance-reports", tags=["Finance Reports"])
 XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+@router.get('/client-subsidy-returns', response_model=BaseResponse[ClientSubsidyReturnPageView])
+def query_client_subsidy_returns(
+    page_size: int = Query(100, ge=1, le=200),
+    after_case_no: str | None = Query(None, min_length=1, max_length=50),
+    case_no: str | None = Query(None, min_length=1, max_length=50),
+    search: str | None = Query(None, min_length=1, max_length=100),
+    target_month: str | None = Query(None, pattern=r'^\d{4}-(0[1-9]|1[0-2])$'),
+    principal: AdminPrincipal = Depends(require_admin),
+    repository: SubsidyReturnQueryRepository = Depends(get_subsidy_return_query_repository),
+):
+    """Include eligible cases even before a payable has been posted."""
+    del principal
+    try:
+        result = query_subsidy_returns(repository, page_size=page_size,
+            after_case_no=after_case_no, case_no=case_no, search=search, target_month=target_month)
+        return BaseResponse(data=ClientSubsidyReturnPageView(
+            rows=[dict(case_no=row.case_no, client_name=row.client_name, order_status=row.order_status,
+                       amount_ntd=row.amount_ntd, due_date=row.due_date, is_estimate=row.is_estimate)
+                  for row in result.rows], next_cursor=result.next_cursor),
+            message='客戶補助退款案件查詢')
+    except (TypeError, ValueError) as exc:
+        raise typed_http_error(400, 'validation', 'client_subsidy_return_query_invalid',
+                               '補助退款查詢條件或案件資料無效。', 'client-subsidy-return-query') from exc
+    except Exception as exc:
+        raise internal_query_error('client_subsidy_return_query_failed',
+                                   '補助退款查詢暫時無法取得。', 'client-subsidy-return-query') from exc
 
 
 class XlsxStreamingResponse(StreamingResponse):
