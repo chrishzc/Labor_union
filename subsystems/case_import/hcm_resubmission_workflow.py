@@ -17,7 +17,10 @@ from domains.case_import.hcm_resubmission import (
 from domains.clients.hcm_correction import ClientHcmCorrectionCommand
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.ports import UnitOfWork
-from domains.case_import.hcm_import_review import HCM_SKIP_REJECT_REASON_PATH, validate_missing_reject_reason_skip
+from domains.case_import.hcm_import_review import (
+    HCM_SKIP_REJECT_REASON_PATH, hcm_field_skip_path,
+    validate_hcm_field_skip, validate_missing_reject_reason_skip,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +33,7 @@ class HcmReviewSkipFacts:
     reject_reason: str | None
     already_skipped: bool
     is_current: bool
+    unresolved_fields: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +53,7 @@ class ApplyHcmReviewSkip:
     idempotency_key: str
     actor: str
     correlation_id: str
+    source_field: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,15 +134,20 @@ class HcmResubmissionRepository(Protocol):
     def append_outbox(self, event_identity: str, review_identity: str) -> None: ...
 
 
-def _skip_preview(facts: HcmReviewSkipFacts) -> HcmReviewSkipPreview:
-    validate_missing_reject_reason_skip(issue_codes=facts.issue_codes, reject_reason=facts.reject_reason,
-                                       already_skipped=facts.already_skipped, is_current=facts.is_current)
+def _skip_preview(facts: HcmReviewSkipFacts, source_field: str | None = None) -> HcmReviewSkipPreview:
+    if source_field is None:
+        validate_missing_reject_reason_skip(issue_codes=facts.issue_codes, reject_reason=facts.reject_reason,
+                                           already_skipped=facts.already_skipped, is_current=facts.is_current)
+    else:
+        validate_hcm_field_skip(source_field=source_field, unresolved_fields=facts.unresolved_fields,
+                                is_current=facts.is_current)
     fingerprint = fingerprint_payload({
-        "operation": HCM_SKIP_REJECT_REASON_PATH, "review_identity": facts.review_identity,
+        "operation": HCM_SKIP_REJECT_REASON_PATH if source_field is None else hcm_field_skip_path(source_field),
+        "review_identity": facts.review_identity,
         "case_no": facts.case_no, "review_version": facts.review_version,
         "source_fingerprint": facts.source_fingerprint,
     }).value
-    return HcmReviewSkipPreview(facts.review_identity, facts.case_no, "不符合原因",
+    return HcmReviewSkipPreview(facts.review_identity, facts.case_no, source_field or "不符合原因",
                                facts.review_version, fingerprint)
 
 
@@ -153,12 +163,13 @@ class HcmResubmissionWorkflow:
     def query_review(self, review_identity: str):
         return self._repository.query_review(review_identity)
 
-    def preview_skip(self, review_identity: str) -> HcmReviewSkipPreview:
-        return _skip_preview(self._repository.load_skip_facts(review_identity, for_update=False))
+    def preview_skip(self, review_identity: str, source_field: str | None = None) -> HcmReviewSkipPreview:
+        return _skip_preview(self._repository.load_skip_facts(review_identity, for_update=False), source_field)
 
     def apply_skip(self, request: ApplyHcmReviewSkip) -> HcmResubmissionReceipt:
         command_fingerprint = fingerprint_payload({
-            "operation": HCM_SKIP_REJECT_REASON_PATH, "review_identity": request.review_identity,
+            "operation": HCM_SKIP_REJECT_REASON_PATH if request.source_field is None else hcm_field_skip_path(request.source_field),
+            "review_identity": request.review_identity,
             "expected_review_version": request.expected_review_version,
             "preview_fingerprint": request.preview_fingerprint, "actor": request.actor,
         }).value
@@ -179,14 +190,15 @@ class HcmResubmissionWorkflow:
             if facts.review_version != request.expected_review_version:
                 raise HcmResubmissionConflict("hcm_review_skip_version_conflict")
             try:
-                preview = _skip_preview(facts)
+                preview = _skip_preview(facts, request.source_field)
             except ValueError as error:
                 raise HcmResubmissionConflict("hcm_review_skip_stale") from error
             if preview.preview_fingerprint != request.preview_fingerprint:
                 raise HcmResubmissionConflict("hcm_review_skip_stale")
             event_identity = self._repository.apply_skip(facts, request)
             receipt = HcmResubmissionReceipt(event_identity, facts.review_identity, facts.case_no,
-                                            (HCM_SKIP_REJECT_REASON_PATH,), facts.review_version + 1, False)
+                                            (HCM_SKIP_REJECT_REASON_PATH if request.source_field is None else hcm_field_skip_path(request.source_field),),
+                                            facts.review_version + 1, False)
             self._repository.save_receipt(request.idempotency_key, command_fingerprint,
                                           preview.preview_fingerprint, receipt)
             self._repository.append_outbox(event_identity, facts.review_identity)

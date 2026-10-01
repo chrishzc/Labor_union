@@ -31,6 +31,13 @@ class Cursor:
             identity = args[-1]
             self.row = {'review_version': 0, 'reason_skipped': self.roots.get(identity, {}).get('reason_skipped', False)}
             return
+        if 'SELECT resulting_review_version,adopted_field_paths' in sql:
+            root = self.roots.get(args[0], {})
+            paths = ['review.skip_field:' + field for field in root.get('skipped_fields', ())]
+            if root.get('reason_skipped'):
+                paths.append('review.skip_missing_reject_reason')
+            self.page = [{'resulting_review_version': 1, 'adopted_field_paths': paths}] if paths else []
+            return
         before = args[0]
         self.page = [r for r in self.rows if before is None or r['id'] < before][:100]
     def fetchall(self):
@@ -76,6 +83,22 @@ def test_current_predicate_scans_past_first_hundred_and_paginates_remaining(monk
     assert second['next_cursor'] is None
     assert len(connection.reader.calls) == 3
     assert connection.reader.calls[1][1] == (3, 3)
+
+
+def test_general_disposition_hides_only_saved_fields_and_keeps_unknown_fields_until_explicit_skip():
+    roots = {'review-1': {'skipped_fields': ['行動電話']}}
+    rows = [dict(id=1, review_identity='review-1', case_no='SYNTH-1',
+                 issue_codes=['hcm_field_invalid:行動電話', 'hcm_field_invalid:查詢序號(案件編號)'])]
+    repository = MySqlHcmResubmissionRepository(Connection(rows, roots))
+    assert repository.query_current_reviews(limit=20, before_id=None)['items'][0]['fields'] == ['查詢序號(案件編號)']
+    roots['review-1']['skipped_fields'].append('查詢序號(案件編號)')
+    assert repository.query_current_reviews(limit=20, before_id=None)['items'] == []
+
+
+def test_single_unsupported_field_also_disappears_after_audited_skip():
+    roots = {'review-1': {'skipped_fields': ['查詢序號(案件編號)']}}
+    rows = [dict(id=1, review_identity='review-1', case_no='SYNTH-1', issue_codes=['hcm_field_invalid:查詢序號(案件編號)'])]
+    assert MySqlHcmResubmissionRepository(Connection(rows, roots)).query_current_reviews(limit=20, before_id=None)['items'] == []
 
 
 def test_multiple_warning_fields_are_visible_without_unusable_correction_button():

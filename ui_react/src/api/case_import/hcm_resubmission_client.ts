@@ -18,7 +18,7 @@ function token(): string {
 }
 
 const ReviewStateSchema = z.object({ review_identity: z.string(), case_no: z.string(), source_field: z.string(), review_version: z.number().int(), resolved: z.boolean() }).strict();
-const SkipPreviewSchema = z.object({ review_identity: z.string(), case_no: z.string(), source_field: z.literal('不符合原因'), review_version: z.number().int().nonnegative(), preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/) }).strict();
+const SkipPreviewSchema = z.object({ review_identity: z.string(), case_no: z.string(), source_field: z.string().min(1).max(191), review_version: z.number().int().nonnegative(), preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/) }).strict();
 export type HcmReviewSkipPreview = z.infer<typeof SkipPreviewSchema>;
 const CurrentReviewsSchema = z.object({ items: z.array(z.object({ source_id: z.number().int(), review_identity: z.string(), case_no: z.string(), fields: z.array(z.string()), can_correct: z.boolean(), unavailable_reason: z.string().nullable().optional() }).strict()), next_cursor: z.number().int().nullable() }).strict();
 export type HcmReviewState = z.infer<typeof ReviewStateSchema>;
@@ -50,6 +50,22 @@ export async function loadCurrentHcmReviewsForCases(
 }
 
 export const hcmResubmissionClient = {
+  async previewFieldSkip(reviewIdentity: string, sourceField: string): Promise<HcmReviewSkipPreview> {
+    const raw = await transport.post(`/api/v1/case-import/hcm/reviews/${encodeURIComponent(reviewIdentity)}/skip-field/preview`,
+      { source_field: sourceField }, { token: token() });
+    const preview = decodePayload(z.object({ data: SkipPreviewSchema }), raw).data;
+    if (preview.review_identity !== reviewIdentity || preview.source_field !== sourceField) throw new Error('警示略過預覽與欄位不一致。');
+    return preview;
+  },
+  async applyFieldSkip(preview: HcmReviewSkipPreview, idempotencyKey: string): Promise<HcmResubmissionReceipt> {
+    const raw = await transport.post(`/api/v1/case-import/hcm/reviews/${encodeURIComponent(preview.review_identity)}/skip-field/apply`, {
+      source_field: preview.source_field, expected_review_version: preview.review_version, preview_fingerprint: preview.preview_fingerprint,
+    }, { token: token(), headers: { 'Idempotency-Key': idempotencyKey, 'X-Correlation-ID': idempotencyKey } });
+    const receipt = decodePayload(HcmResubmissionReceiptEnvelopeSchema, raw).data;
+    if (receipt.review_identity !== preview.review_identity || receipt.case_no !== preview.case_no
+      || !receipt.target_fields.includes(`review.skip_field:${preview.source_field}`)) throw new Error('警示略過收據與欄位不一致。');
+    return receipt;
+  },
   async previewSkip(reviewIdentity: string): Promise<HcmReviewSkipPreview> {
     const raw = await transport.post(`/api/v1/case-import/hcm/reviews/${encodeURIComponent(reviewIdentity)}/skip-missing-reject-reason/preview`, {}, { token: token() });
     return decodePayload(z.object({ data: SkipPreviewSchema }), raw).data;

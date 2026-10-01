@@ -16,6 +16,8 @@ from shared_kernel.validation import require_canonical_text, require_nonnegative
 
 LINE_NOTIFICATION_FAILURE_OWNER_DOMAIN = "line"
 LINE_NOTIFICATION_FAILURE_OWNER_ROOT_TYPE = "notification_failure"
+LINE_NOTIFICATION_WARNING_SKIP_ACTION = "line.notification.warning_skip"
+LINE_NOTIFICATION_WARNING_SKIP_REASON = "人工確認略過：LINE 通知失敗警示"
 
 
 class LineNotificationFailureReason(str, Enum):

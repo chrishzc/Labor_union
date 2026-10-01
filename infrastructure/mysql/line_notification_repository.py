@@ -274,12 +274,34 @@ class MySqlLineNotificationRepository:
                     replay_successors=tuple(replay_by_original[source_id]),
                 )
             )
-        return evaluate_line_notification_failure_current_fact(
+        readback = evaluate_line_notification_failure_current_fact(
             query,
             tuple(sources),
             owner_version=maximum_version,
             authoritative_complete=authoritative_complete,
         )
+        return self._apply_warning_disposition(readback)
+
+    def _apply_warning_disposition(self, readback):
+        from dataclasses import replace
+        from shared_kernel.fingerprints import fingerprint_payload
+        from subsystems.line.notification_failure_current_fact import LINE_NOTIFICATION_WARNING_SKIP_ACTION
+
+        if not readback.authoritative_complete or not readback.predicate_active:
+            return readback
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT id FROM line_domain_audit_events WHERE action=%s AND aggregate_type=%s "
+                "AND aggregate_identity=%s LIMIT 1",
+                (LINE_NOTIFICATION_WARNING_SKIP_ACTION, "line_notification_failure", readback.owner_snapshot_token),
+            )
+            acknowledged = cursor.fetchone() is not None
+        if not acknowledged:
+            return readback
+        # Preserve failure counts and delivery results; only the need for a human reminder changes.
+        return replace(readback, predicate_active=False, owner_snapshot_token=fingerprint_payload({
+            "owner_snapshot_token": readback.owner_snapshot_token, "manually_skipped": True,
+        }).value)
 
     def line006_recheck_targets_for_source(
         self, source_event_id: int

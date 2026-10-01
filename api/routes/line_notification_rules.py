@@ -4,11 +4,12 @@ Description: 提供 LINE 通知規則矩陣、預覽、儲存啟用與安全刪�
 """
 
 import json
+from dataclasses import asdict
 from pathlib import Path
 import re
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Path as ApiPath
 from pymysql.err import InterfaceError, OperationalError
 
 from api.dependencies.admin_auth import (
@@ -39,6 +40,8 @@ from api.schemas.line_notification_rules import (
     SaveLineNotificationRulesRequest,
     SaveLineNotificationRulesView,
     UpdateLineNotificationMessageTemplateRequest,
+    LineNotificationWarningSkipPreviewView, LineNotificationWarningSkipApplyRequest,
+    LineNotificationWarningSkipReceiptView,
 )
 from domains.line.configuration import (
     LineConfigurationKind,
@@ -56,10 +59,37 @@ from subsystems.line.message_configuration import (
     LineMessageConfigurationError,
     validate_message_templates,
 )
+from subsystems.line.notification_manual_replay_application import LineNotificationWarningSkipConflict
+from infrastructure.mysql.current_anomaly_issue_repository import CurrentIssueOwnerSnapshotUnavailable
 
 
 router = APIRouter(prefix="/api/v1/line/notification-rules", tags=["LINE Notification Rules"])
 _TEMPLATE_VARIABLE = re.compile(r"\{([a-zA-Z][a-zA-Z0-9_]*)\}")
+
+
+@router.post("/failures/{issue_key}/skip/preview", response_model=BaseResponse[LineNotificationWarningSkipPreviewView])
+def preview_notification_warning_skip(issue_key: str = ApiPath(pattern=r"^ci_[0-9a-f]{64}$"),
+                                      principal: AdminPrincipal = Depends(require_line_configuration_manager)):
+    try:
+        result = get_line_notification_manual_replay_application().preview_warning_skip(
+            issue_key, admin_actor_context(principal))
+        return BaseResponse(data=asdict(result))
+    except LineNotificationWarningSkipConflict as error:
+        raise typed_http_error(409, "conflict", str(error), "警示資料已變更，請重新查詢。", "line-warning-skip") from error
+
+
+@router.post("/failures/{issue_key}/skip/apply", response_model=BaseResponse[LineNotificationWarningSkipReceiptView])
+def apply_notification_warning_skip(payload: LineNotificationWarningSkipApplyRequest,
+                                    issue_key: str = ApiPath(pattern=r"^ci_[0-9a-f]{64}$"),
+                                    principal: AdminPrincipal = Depends(require_line_configuration_manager)):
+    try:
+        result = get_line_notification_manual_replay_application().apply_warning_skip(issue_key,
+            payload.owner_snapshot_token, payload.preview_fingerprint, admin_actor_context(principal),
+            IdempotencyKey(payload.idempotency_key))
+        return BaseResponse(data=asdict(result))
+    except (LineNotificationWarningSkipConflict, CurrentIssueOwnerSnapshotUnavailable) as error:
+        code = str(error) if isinstance(error, LineNotificationWarningSkipConflict) else "line_warning_skip_busy"
+        raise typed_http_error(409, "conflict", code, "警示資料已變更，請重新查詢。", "line-warning-skip") from error
 
 
 @router.get("", response_model=BaseResponse[LineNotificationRulesCatalogView])

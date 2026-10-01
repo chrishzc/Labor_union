@@ -309,6 +309,15 @@ class _SqlConnection:
         return self.cursor_instance
 
 
+def test_general_skip_history_search_wildcard_survives_mysql_parameter_binding():
+    connection = _SqlConnection([()])
+    MySqlClientRegistryQueryRepository(connection).load_change_history('SYNTH-1')
+    statement, parameters = connection.cursor_instance.statements[0]
+    rendered = statement % tuple("'" + parameter + "'" for parameter in parameters)
+    assert "JSON_SEARCH(e.adopted_field_paths,'one','review.skip_field:%')" in rendered
+    assert 'review.skip_missing_reject_reason' in rendered
+
+
 def test_mysql_registry_uses_order_client_owner_and_bound_beclass_case_identity():
     connection = _SqlConnection([
         {

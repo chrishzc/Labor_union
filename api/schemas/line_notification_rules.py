@@ -26,6 +26,25 @@ class _ClosedModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class LineNotificationWarningSkipPreviewView(_ClosedModel):
+    issue_key: StrictStr
+    case_no: StrictStr
+    notification_reason: StrictStr
+    owner_snapshot_token: Sha256Hex
+    preview_fingerprint: Sha256Hex
+
+
+class LineNotificationWarningSkipApplyRequest(_ClosedModel):
+    owner_snapshot_token: Sha256Hex
+    preview_fingerprint: Sha256Hex
+    idempotency_key: Annotated[StrictStr, Field(min_length=1, max_length=191)]
+
+
+class LineNotificationWarningSkipReceiptView(_ClosedModel):
+    issue_key: StrictStr
+    replayed: StrictBool
+
+
 class ImmediateSchedule(_ClosedModel):
     kind: Literal["immediate"]
 

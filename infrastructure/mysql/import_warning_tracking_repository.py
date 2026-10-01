@@ -26,7 +26,13 @@ class MySqlImportWarningTrackingRepository:
         self._connection = connection
 
     def query_tasks(self, *, active_only: bool, limit: int, offset: int) -> tuple[ImportWarningTask, ...]:
-        predicate = "WHERE t.tracking_status NOT IN ('closed','auto_resolved')" if active_only else ""
+        predicate = (
+            "WHERE t.tracking_status NOT IN ('closed','auto_resolved') "
+            "AND NOT (o.owning_lane='hcm' AND o.logical_code IN ('HCM-FIELD-001','HCM-FIELD-002') "
+            "AND EXISTS (SELECT 1 FROM case_import_hcm_review_rows r "
+            "JOIN case_import_hcm_review_case_bindings b ON b.review_row_id=r.id "
+            "WHERE r.review_identity=o.source_receipt_identity))"
+        ) if active_only else ""
         with _cursor(self._connection) as cursor:
             cursor.execute(
                 _TASK_SELECT.format(predicate=predicate),

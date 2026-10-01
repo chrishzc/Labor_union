@@ -1,4 +1,4 @@
-"""Audited disposition is limited to a current missing rejection reason."""
+"""Audited dispositions dismiss only the selected current review field."""
 from contextlib import AbstractContextManager
 from dataclasses import replace
 
@@ -14,7 +14,7 @@ class Repository:
     def __init__(self):
         self.facts = HcmReviewSkipFacts('review-1', 'SYNTH-1', 0, 'a' * 64,
                                        ('hcm_field_missing:不符合原因', 'hcm_field_missing:姓名'),
-                                       None, False, True)
+                                       None, False, True, ('不符合原因', '姓名'))
         self.receipts = {}
         self.events = []
         self.outbox = []
@@ -28,7 +28,10 @@ class Repository:
 
     def apply_skip(self, facts, request):
         self.events.append((facts, request))
-        self.facts = replace(facts, review_version=facts.review_version + 1, already_skipped=True)
+        field = request.source_field or '不符合原因'
+        self.facts = replace(facts, review_version=facts.review_version + 1,
+                             already_skipped=facts.already_skipped or field == '不符合原因',
+                             unresolved_fields=tuple(value for value in facts.unresolved_fields if value != field))
         return 'event-1'
 
     def save_receipt(self, key, command_fingerprint, preview_fingerprint, receipt):
@@ -91,3 +94,36 @@ def test_other_missing_fields_and_invalid_reason_cannot_use_skip():
         with pytest.raises(ValueError, match='field_not_allowed'):
             workflow.preview_skip('review-1')
     assert not repository.events
+
+
+@pytest.mark.parametrize('field', ['姓名', '预產期', '查詢序號(案件編號)', '行動電話'])
+def test_any_current_missing_invalid_or_unsupported_field_can_be_skipped_individually(field):
+    repository = Repository()
+    repository.facts = replace(repository.facts, unresolved_fields=(field, '不符合原因'))
+    uow = Uow()
+    workflow = HcmResubmissionWorkflow(repository, lambda: uow)
+    preview = workflow.preview_skip('review-1', field)
+    assert preview.source_field == field and uow.commits == 0
+    request = command(preview, source_field=field)
+    receipt = workflow.apply_skip(request)
+    assert receipt.target_fields == ('review.skip_field:' + field,)
+    assert repository.facts.unresolved_fields == ('不符合原因',)
+    assert repository.facts.reject_reason is None and len(repository.events) == 1
+    assert workflow.apply_skip(request).replayed is True
+    assert uow.commits == 1
+    with pytest.raises(HcmResubmissionConflict, match='idempotency_conflict'):
+        workflow.apply_skip(replace(request, source_field='不符合原因'))
+
+
+@pytest.mark.parametrize('change', [
+    {'unresolved_fields': ('不符合原因',)}, {'is_current': False}, {'review_version': 1},
+])
+def test_general_skip_rejects_corrected_disposed_superseded_or_changed_field(change):
+    repository = Repository()
+    uow = Uow()
+    workflow = HcmResubmissionWorkflow(repository, lambda: uow)
+    preview = workflow.preview_skip('review-1', '姓名')
+    repository.facts = replace(repository.facts, **change)
+    with pytest.raises(HcmResubmissionConflict):
+        workflow.apply_skip(command(preview, source_field='姓名'))
+    assert not repository.events and not repository.outbox and uow.commits == 0

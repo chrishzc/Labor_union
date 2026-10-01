@@ -16,6 +16,7 @@ from api.dependencies.hcm_import import get_hcm_resubmission_workflow, get_hcm_r
 from api.schemas.base import BaseResponse
 from api.schemas.hcm_import import (
     HcmReviewStateView, HcmCurrentReviewPageView, HcmReviewSkipPreviewView, HcmReviewSkipApplyBody,
+    HcmReviewFieldSkipPreviewBody, HcmReviewFieldSkipApplyBody,
     HcmResubmissionPreviewView,
     HcmResubmissionReceiptView,
     HcmWorkbookPreviewView,
@@ -76,6 +77,34 @@ def apply_missing_reject_reason_skip(review_identity: str, body: HcmReviewSkipAp
     try:
         request = ApplyHcmReviewSkip(review_identity, body.expected_review_version, body.preview_fingerprint,
                                      idempotency_key, str(principal.username or "admin"), correlation_id)
+        return BaseResponse(data=asdict(workflow.apply_skip(request)), message="已保存人工略過紀錄")
+    except HcmResubmissionConflict as error:
+        raise HTTPException(status_code=409, detail={"code": str(error)}) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail={"code": str(error)}) from error
+
+
+@router.post("/reviews/{review_identity}/skip-field/preview", response_model=BaseResponse[HcmReviewSkipPreviewView])
+def preview_hcm_field_skip(review_identity: str, body: HcmReviewFieldSkipPreviewBody,
+                           principal: AdminPrincipal = Depends(require_admin),
+                           workflow=Depends(get_hcm_resubmission_workflow)):
+    del principal
+    try:
+        return BaseResponse(data=asdict(workflow.preview_skip(review_identity, body.source_field)),
+                            message="請確認略過這項警示")
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail={"code": str(error)}) from error
+
+
+@router.post("/reviews/{review_identity}/skip-field/apply", response_model=BaseResponse[HcmResubmissionReceiptView])
+def apply_hcm_field_skip(review_identity: str, body: HcmReviewFieldSkipApplyBody,
+                         idempotency_key: _IdempotencyHeader, correlation_id: _CorrelationHeader,
+                         principal: AdminPrincipal = Depends(require_admin),
+                         workflow=Depends(get_hcm_resubmission_workflow)):
+    try:
+        request = ApplyHcmReviewSkip(review_identity, body.expected_review_version, body.preview_fingerprint,
+                                    idempotency_key, str(principal.username or "admin"), correlation_id,
+                                    source_field=body.source_field)
         return BaseResponse(data=asdict(workflow.apply_skip(request)), message="已保存人工略過紀錄")
     except HcmResubmissionConflict as error:
         raise HTTPException(status_code=409, detail={"code": str(error)}) from error

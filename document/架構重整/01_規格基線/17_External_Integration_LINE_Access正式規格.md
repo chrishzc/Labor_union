@@ -793,6 +793,30 @@ Authority：本次人工要求預產期問題直接開啟客戶名冊、缺少�
   刷新後仍解除該項；Apply 失敗不得假移除；已補原因、舊 review、version conflict 為零寫入；
   same-key/same-command 回原 receipt，same-key/different-command 衝突。
 
+#### 2026-10-01 後續人工裁決：所有目前警示可逐筆略過
+
+Authority：使用者要求歷史取消訂單直接解除警示，確認只提供每筆略過，並明確包含匯入資料
+及 LINE 通知失敗等其他目前異常。此裁決 supersede 上述只允許缺少不符合原因略過的限制，
+以及 §5.4「異常頁不提供人工 closed」對匯入警示的限制；不授權批次清除或自動略過。
+
+- 所有已綁定 current HCM review 的缺漏／格式欄位均可透過
+  `/hcm/reviews/{review_identity}/skip-field/{preview|apply}` 逐欄略過。
+  `source_field` 必須是該 review 目前仍顯示的欄位；有效補齊、已略過、舊 review 或版本變更拒絕。
+  使用既有 correction event／receipt／outbox，marker 為 `review.skip_field:<source_field>`；
+  舊缺少原因 API 與 marker 保留。Query 只移除同一 review 已保存的略過欄位，新 review 不繼承。
+- 其他匯入警示（含客戶連結疑義、未綁定來源及歷史訂單）沿用既有 tracking Preview／Apply
+  的人工 `closed`，reason_code=`manual_warning_skip`，只解除該 occurrence 的提醒。
+  同案不同 occurrence 不合併成一個待辦；每筆均可單獨處理。
+- `LINE-006` 由 LINE owner 提供 `/line/notification-rules/failures/{issue_key}/skip/{preview|apply}`。
+  Preview 對 exact case/reason fresh readback；Apply 驗證 owner snapshot、同 scope lock、idempotency，
+  在既有 LINE UoW 保存 `line.notification.warning_skip` audit（操作人、時間、固定人工略過原因）
+  與 command receipt。audit 的 aggregate identity 綁定 exact owner snapshot token，不創造送達成功、
+  不取消任務、不重送通知；同一 snapshot 不再需要人工提醒，來源或結果變更後仍可建立新警示。
+  fresh owner readback 完整且 predicate false 後，在同 UoW 移除 current projection，並追加既有 bounded recheck。
+- 全部操作均由使用者逐筆確認，Client／Orders／immutable source／Delivery 結果不被改寫，
+  不增加 schema，不操作 production 或 provider。解除失敗不得由前端假移除；刷新後保持解除，
+  保存人工歷程並保留原處理入口。HCM 欄位略過顯示在客戶名冊變更歷程；其餘沿用各 owner audit。
+
 WP77／WP92 將 HCM 與 Client BeClass 定義為可獨立存在的兩條 intake lane。HCM 案件編號不得重複；
 IP＋姓名精確命中既有 Client、多候選或其他身份關聯歧義時，案件仍依案件編號建立，但不自動綁定 Client，
 並建立獨立 link review 供外部確認。HCM 歷史過渡模式只要符合最低寫入資格，即直接寫入來源的可寫欄位，

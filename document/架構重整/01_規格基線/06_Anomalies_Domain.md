@@ -105,6 +105,13 @@ Operational／readback failure 需由 durable-job／runtime health 處理；若 
 
 ## 6. LINE Identity 非異常規則
 
+2026-10-01 最新人工裁決補充：所有目前異常均可逐筆確認略過，包含 `LINE-006`。
+這是 LINE owner 的人工提醒 disposition，詳細契約見第17份規格「所有目前警示可逐筆略過」。
+同一 exact owner snapshot 已保存人工略過 audit 時不再需要人工提醒；不宣稱 delivery 成功，
+不改通知來源或任務結果。來源／結果變更後可重新成立。fresh 完整 owner readback 證明 predicate false
+才移除 current projection；Anomalies 仍不保存自己的 tracking／resolve 歷史，不恢復退役 generic resolve。
+此裁決 supersede §5.2 對人工處置解除的限制；一般 source 修正及重送仍依原契約。
+
 1. `customer + staff` 雙角色合法；需要時使用既有 role selection，不投影 `LINE-004`。
 2. customer binding 的 `subject_reference` 是 Client root identity，不是 `case_no`。同一 Client 每年新增案件不改 LINE identity binding。
 3. 若 legacy／匯入資料真的把同一人形成兩個 customer roots，LINE Identity 依人工裁決使用 same-type replacement：確認 current／新 Client root 後，以正式 replacement command 讓新 root 取代舊 root，並清除舊 owner projection；不刪舊案件／Client history。

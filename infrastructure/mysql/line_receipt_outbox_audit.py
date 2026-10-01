@@ -31,9 +31,9 @@ class MySqlLineIdempotencyReceiptRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
 
-    def get(self, key: IdempotencyKey) -> IdempotencyReceipt | None:
+    def get(self, key: IdempotencyKey, *, for_update: bool = False) -> IdempotencyReceipt | None:
         with self._connection.cursor() as cursor:
-            cursor.execute(_RECEIPT_SELECT_SQL, (key.value,))
+            cursor.execute(_RECEIPT_SELECT_SQL + (" FOR UPDATE" if for_update else ""), (key.value,))
             row = optional_row(cursor.fetchone())
         if row is None:
             return None

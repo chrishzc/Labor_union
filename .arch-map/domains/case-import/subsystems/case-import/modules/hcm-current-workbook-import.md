@@ -16,11 +16,12 @@
   - `domains/case_import/hcm_import_review.py` — 依最新正式 root values 逐欄判定 current 警示；名冊修正有效後自動解除，來源歷史保持不變。
   - `domains/case_import/hcm_resubmission.py` — HCM review 欄位與正式 root targets 的限定映射。
   - `subsystems/case_import/hcm_resubmission_workflow.py`
-    - `preview_skip`／`apply_skip` — 只對 current canonical review 的缺少不符合原因保存人工 disposition；沿用 review version、correction event／receipt／outbox，不寫入 Client／Order。
+    - `preview_skip`／`apply_skip` — 對 current canonical review 任一未解決欄位逐筆保存人工 disposition；沿用 review version、correction event／receipt／outbox，不寫入 Client／Order。原缺少原因限定入口保留。
   - `infrastructure/mysql/hcm_resubmission_repository.py`
 - entrypoints:
   - `api/routes/hcm_import.py` — 包含 current field review page／single-review readback。
     - `/hcm/reviews/{review_identity}/skip-missing-reject-reason/{preview|apply}` — 限定欄位的人工略過與 typed stale conflict。
+    - `/hcm/reviews/{review_identity}/skip-field/{preview|apply}` — current 缺漏、格式錯誤及未支援欄位均可逐欄略過；新 review 不沿用舊 disposition。
   - `api/dependencies/hcm_import.py`
   - `api/schemas/hcm_import.py`
   - `ui_react/src/api/case_import/hcm_workbook_schemas.ts`

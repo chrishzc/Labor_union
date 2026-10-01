@@ -7,7 +7,9 @@ import json
 from datetime import date
 
 from domains.case_import.hcm_resubmission import HcmResubmissionFacts, hcm_field_targets
-from domains.case_import.hcm_import_review import HCM_SKIP_REJECT_REASON_PATH, unresolved_hcm_review_fields
+from domains.case_import.hcm_import_review import (
+    HCM_SKIP_REJECT_REASON_PATH, HCM_SKIP_FIELD_PREFIX, hcm_field_skip_path, unresolved_hcm_review_fields,
+)
 from shared_kernel.fingerprints import fingerprint_payload
 from subsystems.case_import.hcm_resubmission_workflow import HcmResubmissionReceipt, HcmReviewSkipFacts
 
@@ -69,35 +71,49 @@ class MySqlHcmResubmissionRepository:
                 "source_field": facts.field_path, "review_version": facts.review_version,
                 "resolved": resolved}
 
-    def _review_progress(self, review_identity: str):
+    def _review_progress(self, review_identity: str, *, for_update: bool = False):
         with self._connection.cursor() as cursor:
             cursor.execute(
-                "SELECT COALESCE(MAX(resulting_review_version),0) AS review_version,"
-                "COALESCE(MAX(JSON_CONTAINS(adopted_field_paths,JSON_QUOTE(%s))),0) AS reason_skipped "
-                "FROM case_import_hcm_correction_events WHERE canonical_review_identity=%s",
-                (HCM_SKIP_REJECT_REASON_PATH, review_identity),
+                "SELECT resulting_review_version,adopted_field_paths FROM case_import_hcm_correction_events "
+                "WHERE canonical_review_identity=%s" + (" FOR UPDATE" if for_update else ""),
+                (review_identity,),
             )
-            return cursor.fetchone() or {}
+            events = cursor.fetchall() or ()
+        paths = {path for event in events for path in (
+            json.loads(event["adopted_field_paths"]) if isinstance(event["adopted_field_paths"], str)
+            else event["adopted_field_paths"]
+        )}
+        skipped = {path.removeprefix(HCM_SKIP_FIELD_PREFIX) for path in paths if path.startswith(HCM_SKIP_FIELD_PREFIX)}
+        if HCM_SKIP_REJECT_REASON_PATH in paths:
+            skipped.add("不符合原因")
+        return {"review_version": max((int(event["resulting_review_version"]) for event in events), default=0),
+                "skipped_fields": skipped, "reason_skipped": "不符合原因" in skipped}
 
-    def _unresolved_fields(self, fields, row):
+    def _unresolved_fields(self, fields, row, *, progress=None):
         unresolved = unresolved_hcm_review_fields(tuple(fields), _current_values(row))
-        if "不符合原因" in unresolved and self._review_progress(str(row["review_identity"])).get("reason_skipped"):
-            return tuple(field for field in unresolved if field != "不符合原因")
-        return unresolved
+        if not unresolved:
+            return ()
+        progress = progress if progress is not None else self._review_progress(str(row["review_identity"]))
+        return tuple(field for field in unresolved if field not in progress["skipped_fields"])
 
     def load_skip_facts(self, review_identity: str, *, for_update: bool) -> HcmReviewSkipFacts:
         row = self._load_review_row(review_identity, for_update=for_update)
-        progress = self._review_progress(review_identity)
+        progress = self._review_progress(review_identity, for_update=for_update)
         codes = json.loads(row["issue_codes"]) if isinstance(row["issue_codes"], str) else row["issue_codes"]
+        fields = tuple(sorted({code.split(":", 1)[1] for code in codes
+                               if code.startswith(("hcm_field_missing:", "hcm_field_invalid:"))}))
         return HcmReviewSkipFacts(review_identity, str(row["case_no"]),
                                  int(progress.get("review_version") or 0), str(row["source_fingerprint"]),
                                  tuple(codes), row.get("clients_reject_reason"),
-                                 bool(progress.get("reason_skipped")), bool(row["is_current"]))
+                                 bool(progress.get("reason_skipped")), bool(row["is_current"]),
+                                 self._unresolved_fields(fields, row, progress=progress))
 
     def apply_skip(self, facts, request) -> str:
         row = self._load_review_row(facts.review_identity, for_update=True)
         event_identity = _identity("hcm-review-skip", request.idempotency_key)
-        root_fingerprint = fingerprint_payload({"case_no": facts.case_no, "reject_reason": facts.reject_reason}).value
+        root_fingerprint = hashlib.sha256(_json({"case_no": facts.case_no, "current_values": _current_values(row)}).encode("utf-8")).hexdigest()
+        path = HCM_SKIP_REJECT_REASON_PATH if request.source_field is None else hcm_field_skip_path(request.source_field)
+        reason = "人工確認略過：缺少不符合原因" if request.source_field is None else "人工確認略過：" + request.source_field
         with self._connection.cursor() as cursor:
             cursor.execute(
                 "INSERT INTO case_import_hcm_correction_events "
@@ -109,8 +125,8 @@ class MySqlHcmResubmissionRepository:
                 (event_identity, facts.case_no, int(row["client_id"]), int(row["binding_id"]),
                  facts.review_identity, facts.review_version, facts.review_version + 1, None,
                  "hcm-review-disposition:" + event_identity, facts.source_fingerprint,
-                 request.preview_fingerprint, _json([HCM_SKIP_REJECT_REASON_PATH]), root_fingerprint,
-                 root_fingerprint, request.actor, "人工確認略過：缺少不符合原因", request.correlation_id),
+                 request.preview_fingerprint, _json([path]), root_fingerprint,
+                 root_fingerprint, request.actor, reason, request.correlation_id),
             )
         return event_identity
 
@@ -152,6 +168,11 @@ class MySqlHcmResubmissionRepository:
                     except ValueError as error:
                         if str(error) not in {"hcm_resubmission_review_scope_ambiguous", "hcm_resubmission_field_not_owned", "hcm_resubmission_not_available"}:
                             raise
+                        if str(error) != "hcm_resubmission_not_available":
+                            current = self._load_review_row(str(row["review_identity"]))
+                            fields = list(self._unresolved_fields(fields, current))
+                            if not fields:
+                                continue
                 else:
                     try:
                         current = self._load_review_row(str(row["review_identity"]))

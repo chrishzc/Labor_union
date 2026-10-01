@@ -119,6 +119,15 @@ class HcmReviewSkipApplyBody(BaseModel):
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+class HcmReviewFieldSkipPreviewBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    source_field: str = Field(min_length=1, max_length=191)
+
+
+class HcmReviewFieldSkipApplyBody(HcmReviewSkipApplyBody):
+    source_field: str = Field(min_length=1, max_length=191)
+
+
 class HcmCurrentReviewView(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 

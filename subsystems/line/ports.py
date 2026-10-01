@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 
 def unconfigured_connection_factory() -> Any:
@@ -56,7 +56,7 @@ from domains.line.webhook import (
     LineWebhookInboxSnapshot,
     LineWebhookProcessingStatus,
 )
-from domains.anomalies.current_issue import RecheckIntent
+from domains.anomalies.current_issue import CurrentIssueProjection, RecheckIntent, RecheckScope
 from shared_kernel.clock import BusinessClock
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import (
@@ -669,6 +669,14 @@ class LineNotificationRuleRepositoryPort(Protocol):
 class LineAnomalyRecheckPort(Protocol):
     def append_recheck_intent(self, intent: RecheckIntent) -> None: ...
 
+    def query_current(self, issue_key: str, *, for_update: bool = False) -> CurrentIssueProjection | None: ...
+
+    def lock_scope(self, scope: RecheckScope) -> None: ...
+
+    def release_scope(self, scope: RecheckScope) -> None: ...
+
+    def delete_current(self, issue_key: str) -> None: ...
+
 
 class LineConfigurationRepositoryPort(Protocol):
     def get(self, kind: LineConfigurationKind) -> LineConfigurationSnapshot: ...
@@ -828,7 +836,7 @@ class LineOrderGroupBindingRepositoryPort(Protocol):
 
 
 class LineIdempotencyReceiptPort(Protocol):
-    def get(self, key: IdempotencyKey) -> IdempotencyReceipt | None: ...
+    def get(self, key: IdempotencyKey, *, for_update: bool = False) -> IdempotencyReceipt | None: ...
 
     def append(self, receipt: IdempotencyReceipt) -> None: ...
 
@@ -962,6 +970,8 @@ class OrdersLineAudiencePort(Protocol):
 
 
 class LineUnitOfWorkPort(UnitOfWork, Protocol):
+    def add_after_completion(self, hook: Callable[[], None]) -> None: ...
+
     webhook_inbox: LineWebhookInboxRepositoryPort
     platform_users: LinePlatformUserRepositoryPort
     identity_flows: LineIdentityFlowRepositoryPort

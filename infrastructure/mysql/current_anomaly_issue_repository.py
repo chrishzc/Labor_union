@@ -111,7 +111,7 @@ class MySqlCurrentIssueRepository:
             rows = tuple(cursor.fetchall())
         return tuple(_projection(row) for row in rows)
 
-    def query_current(self, issue_key: str) -> CurrentIssueProjection | None:
+    def query_current(self, issue_key: str, *, for_update: bool = False) -> CurrentIssueProjection | None:
         """Read one current issue by its opaque public key.
 
         This is intentionally a primary-key lookup against the current-only
@@ -127,7 +127,7 @@ class MySqlCurrentIssueRepository:
                 "subject_type, subject_id, subject_identity, owner_snapshot_token, "
                 "owner_version, severity, blocking, details_version, details, "
                 "episode_started_at, last_verified_at "
-                "FROM current_anomaly_issues WHERE issue_key=%s AND definition_code='LINE-006'",
+                "FROM current_anomaly_issues WHERE issue_key=%s AND definition_code='LINE-006'" + (" FOR UPDATE" if for_update else ""),
                 (issue_key,),
             )
             row = cursor.fetchone()

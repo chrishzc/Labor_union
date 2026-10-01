@@ -387,7 +387,8 @@ class MySqlClientRegistryQueryRepository:
                 "FROM order_reopen_events e WHERE e.case_no=%s "
                 "UNION ALL SELECT 'hcm_review_disposition','匯入警示人工略過',e.reason,e.actor,e.created_at,8,e.id "
                 "FROM case_import_hcm_correction_events e WHERE e.case_no=%s "
-                "AND JSON_CONTAINS(e.adopted_field_paths,JSON_QUOTE('review.skip_missing_reject_reason'))"
+                "AND (JSON_CONTAINS(e.adopted_field_paths,JSON_QUOTE('review.skip_missing_reject_reason')) "
+                "OR JSON_SEARCH(e.adopted_field_paths,'one','review.skip_field:%%') IS NOT NULL)"
                 ") history ORDER BY occurred_at,source_order,event_id",
                 (case_no,) * 8,
             )

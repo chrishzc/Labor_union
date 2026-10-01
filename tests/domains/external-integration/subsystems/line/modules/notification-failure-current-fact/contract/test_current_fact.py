@@ -55,6 +55,20 @@ def test_configuration_correction_alone_does_not_replace_manual_replay() -> None
     )
 
 
+def test_mysql_disposition_is_bound_to_exact_snapshot_and_preserves_failure_results():
+    active = _evaluate(_source())
+    cursor = _Cursor(one_rows=({'id': 1}, None))
+    repository = MySqlLineNotificationRepository(_Connection(cursor))
+    dismissed = repository._apply_warning_disposition(active)
+    assert dismissed.predicate_active is False and dismissed.unresolved_source_count == active.unresolved_source_count
+    assert dismissed.unresolved_reason_codes == active.unresolved_reason_codes
+    assert dismissed.owner_snapshot_token != active.owner_snapshot_token
+    changed = _evaluate(_source(_replay(22, ('failed',))))
+    assert repository._apply_warning_disposition(changed).predicate_active is True
+    assert cursor.executed[0][1][-1] == active.owner_snapshot_token
+    assert cursor.executed[1][1][-1] == changed.owner_snapshot_token
+
+
 def test_replay_in_progress_is_not_a_new_business_issue() -> None:
     readback = _evaluate(
         _source(

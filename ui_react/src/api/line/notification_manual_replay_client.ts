@@ -23,6 +23,27 @@ const ApplyReceiptSchema = z.strictObject({
   replayed_source_event_id: z.number().int().positive(),
 });
 
+const WarningSkipPreviewSchema = z.strictObject({ issue_key: z.string(), case_no: z.string(), notification_reason: z.string(),
+  owner_snapshot_token: z.string().regex(/^[0-9a-f]{64}$/), preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/) });
+export type LineNotificationWarningSkipPreview = z.infer<typeof WarningSkipPreviewSchema>;
+
+export const lineNotificationWarningSkipClient = {
+  async preview(issueKey: string): Promise<LineNotificationWarningSkipPreview> {
+    const raw = await transport.post(`/api/v1/line/notification-rules/failures/${encodeURIComponent(issueKey)}/skip/preview`,
+      undefined, requestOptions());
+    const preview = decodePayload(envelope(WarningSkipPreviewSchema), raw).data;
+    if (preview.issue_key !== issueKey) throw new Error('LINE 警示略過預覽不一致。');
+    return preview;
+  },
+  async apply(preview: LineNotificationWarningSkipPreview, idempotencyKey: string) {
+    const raw = await transport.post(`/api/v1/line/notification-rules/failures/${encodeURIComponent(preview.issue_key)}/skip/apply`,
+      { owner_snapshot_token: preview.owner_snapshot_token, preview_fingerprint: preview.preview_fingerprint, idempotency_key: idempotencyKey }, requestOptions());
+    const receipt = decodePayload(envelope(z.strictObject({ issue_key: z.string(), replayed: z.boolean() })), raw).data;
+    if (receipt.issue_key !== preview.issue_key) throw new Error('LINE 警示略過收據不一致。');
+    return receipt;
+  },
+};
+
 function envelope<T extends z.ZodTypeAny>(schema: T) {
   return z.strictObject({
     success: z.literal(true),

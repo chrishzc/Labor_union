@@ -23,6 +23,16 @@ from domains.case_import.hcm_resubmission import hcm_field_targets
 from domains.clients.profile import CLIENT_PROFILE_FIELD_SET, ClientProfileValidationError, validate_changes
 
 HCM_SKIP_REJECT_REASON_PATH = "review.skip_missing_reject_reason"
+HCM_SKIP_FIELD_PREFIX = "review.skip_field:"
+
+
+def hcm_field_skip_path(source_field: str) -> str:
+    return HCM_SKIP_FIELD_PREFIX + source_field
+
+
+def validate_hcm_field_skip(*, source_field: str, unresolved_fields: tuple[str, ...], is_current: bool) -> None:
+    if not is_current or source_field not in unresolved_fields:
+        raise ValueError("hcm_review_skip_no_longer_available")
 
 
 def validate_missing_reject_reason_skip(*, issue_codes: tuple[str, ...],
