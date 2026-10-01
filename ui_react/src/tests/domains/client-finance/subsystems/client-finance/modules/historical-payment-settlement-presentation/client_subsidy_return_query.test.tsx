@@ -45,14 +45,50 @@ describe('case-based customer subsidy query', () => {
     await waitFor(() => expect(query).toHaveBeenLastCalledWith(expect.objectContaining({ search: undefined, targetMonth: undefined })));
   });
 
-  it('keeps later cases accessible when a scanned page has no eligible results', async () => {
+  it('automatically continues when a scanned page has no eligible results', async () => {
     const query = vi.spyOn(clientSubsidyReturnQueryClient, 'query').mockResolvedValueOnce({ rows: [], next_cursor: 'CASE-Z' }).mockResolvedValue(data);
     render(<ClientSubsidyReturnQueryPanel {...props} />);
-    fireEvent.click(await screen.findByRole('button', { name: '下一頁' }));
     expect(await screen.findByText('CASE-A')).toBeInTheDocument();
     expect(query).toHaveBeenLastCalledWith(expect.objectContaining({ afterCaseNo: 'CASE-Z' }));
-    fireEvent.click(screen.getByRole('button', { name: '返回第一頁' }));
-    await waitFor(() => expect(query).toHaveBeenLastCalledWith(expect.objectContaining({ afterCaseNo: undefined })));
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole('button', { name: /下一頁|返回第一頁/ })).not.toBeInTheDocument();
+  });
+
+  it('shows all 13 October matches and the full total when the owner returns 11 then 2', async () => {
+    const rows = Array.from({ length: 13 }, (_, index) => ({ ...data.rows[0],
+      case_no: `OCT-${String(index + 1).padStart(3, '0')}`, amount_ntd: (index + 1) * 1000, due_date: '2026-10-15' }));
+    const fetchMock = vi.fn().mockResolvedValueOnce(response({ rows: [], next_cursor: null }))
+      .mockResolvedValueOnce(response({ rows: rows.slice(0, 11), next_cursor: 'OCT-011' }))
+      .mockResolvedValueOnce(response({ rows: rows.slice(11), next_cursor: null }));
+    vi.stubGlobal('fetch', fetchMock);
+    render(<ClientSubsidyReturnQueryPanel {...props} />);
+    await screen.findByText(/沒有符合條件/);
+    fireEvent.click(screen.getByLabelText('依應退款月份篩選'));
+    expect(await screen.findByText('OCT-013')).toBeInTheDocument();
+    const table = screen.getByRole('table');
+    expect(within(table).getAllByRole('row')).toHaveLength(14);
+    const summary = screen.getByRole('group', { name: '補助退款案件摘要' });
+    expect(summary).toHaveTextContent('13 筆');
+    expect(summary).toHaveTextContent('NT$ 91,000');
+    expect(summary).toHaveTextContent('符合條件案件數');
+    expect(screen.queryByRole('button', { name: /下一頁|返回第一頁/ })).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.slice(1).map(call => call[0])).toEqual([
+      '/api/v1/finance-reports/client-subsidy-returns?page_size=100&target_month=2026-10',
+      '/api/v1/finance-reports/client-subsidy-returns?page_size=100&target_month=2026-10&after_case_no=OCT-011',
+    ]);
+  });
+
+  it('does not present a partial result when a later request fails', async () => {
+    vi.spyOn(clientSubsidyReturnQueryClient, 'query')
+      .mockResolvedValueOnce({ rows: [data.rows[0]], next_cursor: 'CASE-A' })
+      .mockRejectedValueOnce(new ApiHttpError(503, 'unavailable', 'private detail'))
+      .mockResolvedValue(data);
+    render(<ClientSubsidyReturnQueryPanel {...props} />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('補助退款資料暫時無法取得');
+    expect(screen.queryByText('CASE-A')).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: '補助退款案件摘要' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '重新查詢' }));
+    expect(await screen.findByText('CASE-B')).toBeInTheDocument();
   });
 
   it('aborts stale results and keeps safe errors retryable', async () => {

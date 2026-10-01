@@ -41,7 +41,6 @@
 .subsidy-refund-estimate { margin-left: 8px; font-size: .8rem; font-weight: 400; color: #74593f; }
 .subsidy-refund-period .subsidy-refund-month-toggle { display: flex; align-items: center; gap: 8px; min-height: 40px; }
 .subsidy-refund-month-toggle input { width: 18px; height: 18px; }
-.subsidy-refund-pagination { display: flex; justify-content: flex-end; gap: 12px; }
 .subsidy-refund-case-button { min-height: 40px; padding: 8px 12px; border: 1px solid #dec0b6; border-radius: 8px; background: #fff; color: #a43c12; cursor: pointer; }
 .subsidy-refund-case-button:focus-visible { outline: 3px solid #ff7f50; outline-offset: 2px; }
 .subsidy-refund-note, .subsidy-refund-case-query > p { color: #74593f; font-size: .875rem; line-height: 1.6; }

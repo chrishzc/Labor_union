@@ -12,8 +12,8 @@
 - client: `ui_react/src/api/client_finance/historical_client_payment_client.ts`
 - composition: `ui_react/src/pages/FinancePage.tsx`
 - payable export adapter: `ui_react/src/api/accounts_payable/accounts_payable_export_client.ts` — FinancePage 既有應付帳款下載入口；呼叫既有 Staff Payables 匯出端點，保留登入檢查與 XLSX 回應驗證，不計算帳務事實。
-- customer subsidy payable presentation: `ui_react/src/components/ClientSubsidyReturnQueryPanel.tsx` — FinancePage 的客戶補助退款案件清單，預設查所有符合資格案件，支援姓名／案件搜尋、選用應退款月份與分頁；明示後端的預估金額、未知日期，不計算退款資格或金額。
-- customer subsidy payable client: `ui_react/src/api/client_finance/client_subsidy_return_query_client.ts` — strict 解碼 `/api/v1/finance-reports/client-subsidy-returns` typed projection，核對案件唯一性與游標；只做 GET。
+- customer subsidy payable presentation: `ui_react/src/components/ClientSubsidyReturnQueryPanel.tsx` — FinancePage 的客戶補助退款案件清單，支援姓名／案件搜尋與選用應退款月份，一次呈現全部符合條件案件與合計，不提供分頁操作；明示後端的預估金額、未知日期，不計算退款資格或金額。
+- customer subsidy payable client: `ui_react/src/api/client_finance/client_subsidy_return_query_client.ts` — strict 解碼 `/api/v1/finance-reports/client-subsidy-returns` typed projection，`queryAll` 自動循游標取完所有符合結果，核對案件唯一性與游標；只做 GET，條件改變或 unmount 取消整次查詢，失敗不交付部分結果。
 
 ## Contracts
 - `modules/client-subsidy-return-query.md` — 補助退款案件查詢 owner。

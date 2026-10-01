@@ -19,6 +19,23 @@ export type ClientSubsidyReturnQuery = z.infer<typeof QuerySchema>;
 export type ClientSubsidyReturnQueryOptions = { search?: string; caseNo?: string; targetMonth?: string; afterCaseNo?: string; signal?: AbortSignal };
 
 export const clientSubsidyReturnQueryClient = {
+  async queryAll(options: Omit<ClientSubsidyReturnQueryOptions, 'afterCaseNo'> = {}): Promise<ClientSubsidyReturnQuery> {
+    const rows: ClientSubsidyReturnQuery['rows'] = [];
+    const cases = new Set<string>();
+    let afterCaseNo: string | undefined;
+    do {
+      options.signal?.throwIfAborted();
+      const page = await this.query({ ...options, afterCaseNo });
+      options.signal?.throwIfAborted();
+      for (const row of page.rows) {
+        if (cases.has(row.case_no)) throw new ApiDecodeError('補助退款查詢案件重複。');
+        cases.add(row.case_no);
+        rows.push(row);
+      }
+      afterCaseNo = page.next_cursor ?? undefined;
+    } while (afterCaseNo);
+    return { rows, next_cursor: null };
+  },
   async query(options: ClientSubsidyReturnQueryOptions = {}): Promise<ClientSubsidyReturnQuery> {
     const token = sessionClient.getToken();
     if (!token) throw new ApiHttpError(401, 'UNAUTHENTICATED', '請先登入。');

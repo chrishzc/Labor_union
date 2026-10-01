@@ -181,6 +181,7 @@ obligation依strictly-newer owner event更新current projection，未被舊event
 - 日期只有已結案的實際結案日期或正式退款日期可提供；依既有結案月加兩曆月的 15 日規則呈現。未結案為待結案，不使用預定結束日期冒充實際日期。
 - 預估清單不是正式應付帳款或已收款證據。正式退款仍需經既有 owner writer；查詢零寫入、無 commit、無外部效果。每次退款一次全額退清，不顯示已退／剩餘金額或自行推算到期狀態。
 - `GET /api/v1/finance-reports/client-subsidy-returns` 使用管理員權限，支援 bounded `page_size`（1～200）、`after_case_no`、案件／客戶搜尋、exact `case_no` 與選用的應退款月份；預設不以月份隱藏案件，月份篩選只列已確定日期。typed view 僅輸出案件、客戶名稱、訂單狀態、金額、日期、預估標記與下一頁游標，不輸出銀行帳戶或其他個資。
+- 畫面一次顯示全部符合篩選條件的結果與完整筆數／合計，不讓使用者逐頁查閱。前端自動取得既有 bounded API 的所有批次；例如同月 11＋2 筆須合併顯示 13 筆。任一批次失敗不把部分結果當成完整結果，條件變更或離開頁面須取消整次載入。
 
 此案件查詢的 bounded implementation scope 為 Domain projection、Client Finance query、MySQL 唯讀 adapter、Finance Reports transport 與既有 FinancePage 補助頁籤，不改 schema、正式 writer 或付款流程。驗收須覆蓋無退款義務仍可查、取消與全補助排除、凍結單價／補助時數、未知金額日期、正式帳務優先、分頁搜尋與月份切換、實際 localhost GET／Browser 案件金額 readback。其 test roots 與 implementation paths 由 `client-subsidy-return-query` Arch Map leaf 及既有 presentation leaf 管理；完成上述驗收即停止此 slice。
 
