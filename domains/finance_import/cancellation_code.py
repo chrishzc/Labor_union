@@ -35,7 +35,10 @@ def resolve_finance_cancellation_code(row: Mapping[str, Any]) -> dict[str, str |
             "cancellation_code": code,
             "source": "sinopac_bank_reference" if code is not None else "none",
         }
-    canonical_code = _valid_cancellation_code(row.get("cancellation_code"))
+    canonical = row.get("cancellation_code")
+    if row.get("format_id") == "legacy":
+        canonical = extract_sinopac_account_reference(canonical)
+    canonical_code = _valid_cancellation_code(canonical)
     if canonical_code is not None:
         return {"cancellation_code": canonical_code, "source": "canonical"}
     return {"cancellation_code": None, "source": "none"}

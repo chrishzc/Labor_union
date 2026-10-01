@@ -111,9 +111,12 @@ def test_virtual_account_resolves_one_exact_open_client_obligation(canonical, re
     assert "exact-open-client-obligation" in resolved.evidence
 
 
-def test_named_virtual_account_uses_imported_case_instead_of_formula() -> None:
+@pytest.mark.parametrize("format_id", ["sinopac", "legacy"])
+def test_named_virtual_account_uses_imported_case_instead_of_formula(format_id) -> None:
     connection = _VirtualAccountConnection((
-        {"format_id": "sinopac", "cancellation_code": "Y",
+        {"format_id": format_id, "cancellation_code": (
+            "99781699114033測試甲" if format_id == "legacy" else "Y"
+         ),
          "bank_references": {"銷帳編號": "99781699114033測試甲"}},
         ({"case_no": "114000018"},),
         ({"obligation_identity": "client-obligation:114000018:deposit"},),

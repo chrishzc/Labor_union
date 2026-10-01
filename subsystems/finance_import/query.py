@@ -23,6 +23,10 @@ CASE
         THEN LEFT(TRIM(JSON_UNQUOTE(JSON_EXTRACT(
             finance_row.bank_references, '$."銷帳編號"'
         ))),14) END
+    WHEN finance_row.format_id='legacy' THEN
+        CASE WHEN TRIM(finance_row.cancellation_code)
+            REGEXP '^99781699[0-9]{6}([[:space:]]*[[:alpha:]][^[:digit:]]*)?$'
+        THEN LEFT(TRIM(finance_row.cancellation_code),14) END
     WHEN finance_row.cancellation_code REGEXP '^99781699[0-9]{6}$'
         THEN finance_row.cancellation_code
 END

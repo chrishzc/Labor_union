@@ -102,6 +102,8 @@ def test_review_rows_only_project_client_receipts_whose_virtual_account_matches_
     assert "JOIN orders legacy_order" in statement
     assert "FROM orders current_order" in statement
     assert "WHEN finance_row.format_id='sinopac'" in statement
+    assert "WHEN finance_row.format_id='legacy'" in statement
+    assert "LEFT(TRIM(finance_row.cancellation_code),14)" in statement
     assert "LEFT(TRIM(JSON_UNQUOTE(JSON_EXTRACT(" in statement
     assert "FROM client_legacy_virtual_accounts mapped_account" in statement
     assert "finance_import_source_reviews" not in statement

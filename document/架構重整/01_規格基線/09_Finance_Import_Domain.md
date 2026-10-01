@@ -95,14 +95,16 @@ Modules：
 - 支援的 TWD 流水金額必須是整數；小數金額回 typed anomaly，不進正式核銷；
 - fingerprint 只使用 versioned canonical fields；
 - 合法虛擬帳號固定為 `99781699` 加六碼數字；
-- Legacy 只讀 canonical cancellation code；
+- Legacy 存入讀取來自「銷帳編號」的 canonical cancellation code，支出讀取來自
+  「交易參考編號」的 `bank_references["transaction_reference"]`；不以空白比對欄、姓名貼值或
+  存摺備註替代帳號來源。2026-10-01 人工補充確認歷史對帳單沿用此方向欄位規則；
 - Sinopac 存入以 `bank_references["銷帳編號"]` 的完整虛擬帳號為來源；支出以
   `bank_references["交易參考編號"]` 的完整對方帳號為來源，不使用更正註記、備註或存摺備註替代；
-- 2026-10-01 人工確認：上述欄位接受完整 ASCII 數字帳號，或帳號後緊接／空白分隔的姓名。
+- 2026-10-01 人工確認：上述 Sinopac／Legacy 欄位接受完整 ASCII 數字帳號，或帳號後緊接／空白分隔的姓名。
   姓名不是帳戶 ownership，不能單獨配對；不截除數字前綴、補零或從多組數字任選帳號。
   存入抽出的帳號仍須符合 `99781699` 加六碼數字，並沿用匯入虛擬帳號對照優先規則；
 - 欄位判讀只建立衍生 projection，不回寫 canonical raw fact，也不改 fingerprint。
-  新批次使用 `finance-transaction-classifier-v2` 記錄此判讀規則；既有分類紀錄不自動覆寫。
+  新批次使用 `finance-transaction-classifier-v3` 記錄包含歷史格式的判讀規則；既有分類紀錄不自動覆寫。
 
 ### 4.2 Canonical Staging／Occurrence
 

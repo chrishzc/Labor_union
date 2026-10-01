@@ -2,6 +2,14 @@ from decimal import Decimal
 from pathlib import Path
 
 import pandas as pd
+import pytest
+
+from domains.finance_import.transaction_classifier import classify_finance_transaction
+from infrastructure.mysql.client_receipt_reconciliation_repository import (
+    _bank_row_is_eligible,
+    _cancellation_code,
+)
+from scripts.imports.finance_statement_normalizer import normalize_workbook
 
 from scripts.imports.finance_formats.historical_multisheet import (
     normalize_historical_multisheet_rows,
@@ -9,6 +17,53 @@ from scripts.imports.finance_formats.historical_multisheet import (
 
 
 SAMPLE = Path("document") / "資料庫、資料處理" / "歷史對帳單.xlsx"
+
+
+@pytest.mark.parametrize(("suffix", "eligible"), [
+    ("", True), ("測試甲", True), (" 測試甲", True),
+    ("0", False), ("測試甲 009876543210", False),
+])
+@pytest.mark.parametrize("direction", ["incoming", "outgoing"])
+def test_historical_direction_account_columns_feed_classification(tmp_path, suffix, eligible, direction):
+    headers = [
+        "帳號", "交易日", "計息日", "入帳日", "摘要", "幣別", "支出",
+        "存入", "餘額", "銷帳編號", "交易參考編號", "", "更正註記", "存摺備註",
+        "姓名-貼值",
+    ]
+    account = "99781699114033" if direction == "incoming" else "001234567890"
+    reference = account + suffix
+    values = [
+        "000012345678", "2026/07/15", "2026/07/15", "2026/07/15", "轉帳",
+        "TWD", 12000 if direction == "outgoing" else None,
+        12000 if direction == "incoming" else None, 50000,
+        reference if direction == "incoming" else "99781699114044",
+        reference if direction == "outgoing" else "009876543210",
+        "009876543210其他人", "Y", "009876543210其他人", "其他人",
+    ]
+    path = tmp_path / "historical.xlsx"
+    pd.DataFrame([headers, values]).to_excel(path, index=False, header=False)
+
+    result = normalize_workbook(path)
+    assert result["format_id"] == "legacy"
+    row = result["normalized_rows"][0]
+    decision = classify_finance_transaction(row, {}, {account: [7], "009876543210": [8]})
+    if not eligible:
+        assert decision["classification_type"] == "non_business_review"
+        if direction == "incoming":
+            assert _cancellation_code(row) is None
+    elif direction == "incoming":
+        assert decision["classification_type"] == "client_receipt"
+        assert row["cancellation_code"] == reference
+        assert _cancellation_code(row) == account
+        bank = {**row, "classification_type": "client_receipt",
+                "reconciliation_status": "pending", "ledger_entry_id": None}
+        assert _bank_row_is_eligible(bank, "114000033")
+    else:
+        assert decision["classification_type"] == "staff_salary"
+        assert decision["matched_identity_ids"] == [7]
+        assert decision["resolved_counterparty_account"] == account
+        assert row["bank_references"]["transaction_reference"] == reference
+    assert row["raw_payload"]["銷帳編號" if direction == "incoming" else "交易參考編號"] == reference
 
 
 def test_normalizes_real_historical_statement_and_excludes_footer():

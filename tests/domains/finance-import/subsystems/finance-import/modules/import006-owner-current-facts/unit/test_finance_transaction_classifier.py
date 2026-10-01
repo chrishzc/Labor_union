@@ -249,19 +249,20 @@ def test_legacy_outgoing_requires_one_exact_staff_account():
             direction="outgoing",
             debit=Decimal("100"),
             credit=None,
-            memo="salary transfer to S001",
-            counterparty_account="S001",
+            memo="salary transfer to 001234567890",
+            counterparty_account="001234567890",
+            bank_references={"transaction_reference": "001234567890"},
         ),
         {},
-        {"S001": [9]},
+        {"001234567890": [9]},
     )
 
     assert result["classification_type"] == "staff_salary"
     assert result["matched_identity_ids"] == [9]
-    assert result["resolved_counterparty_account"] == "S001"
+    assert result["resolved_counterparty_account"] == "001234567890"
 
 
-def test_legacy_outgoing_uses_passbook_memo_only_when_memo_has_no_match():
+def test_legacy_outgoing_does_not_use_passbook_memo_as_account_source():
     result = classify_finance_transaction(
         _row(
             format_id="legacy",
@@ -269,37 +270,37 @@ def test_legacy_outgoing_uses_passbook_memo_only_when_memo_has_no_match():
             debit=Decimal("100"),
             credit=None,
             memo="monthly salary",
-            bank_references={"存摺備註": "transfer S001"},
+            bank_references={"存摺備註": "transfer 001234567890"},
         ),
         {},
-        {"S001": [9]},
+        {"001234567890": [9]},
     )
 
     assert result == {
-        "classification_type": "staff_salary",
-        "matched_identity_ids": [9],
-        "resolved_counterparty_account": "S001",
-        "reason": "sinopac_unique_staff_account_in_passbook_memo",
+        "classification_type": "non_business_review",
+        "matched_identity_ids": [],
+        "resolved_counterparty_account": None,
+        "reason": "sinopac_staff_account_no_match",
     }
 
 
-def test_legacy_outgoing_does_not_mix_primary_and_backup_candidates():
+def test_legacy_outgoing_uses_reference_despite_conflicting_memos():
     result = classify_finance_transaction(
         _row(
             format_id="legacy",
             direction="outgoing",
             debit=Decimal("100"),
             credit=None,
-            memo="transfer S001",
-            bank_references={"存摺備註": "transfer S002"},
+            memo="transfer 001234567890",
+            bank_references={"transaction_reference": "001234567890", "存摺備註": "transfer 009876543210"},
         ),
         {},
-        {"S001": [9], "S002": [10]},
+        {"001234567890": [9], "009876543210": [10]},
     )
 
     assert result["classification_type"] == "staff_salary"
     assert result["matched_identity_ids"] == [9]
-    assert result["resolved_counterparty_account"] == "S001"
+    assert result["resolved_counterparty_account"] == "001234567890"
 
 
 def test_legacy_one_staff_with_multiple_registered_accounts_can_match_one():
@@ -309,10 +310,11 @@ def test_legacy_one_staff_with_multiple_registered_accounts_can_match_one():
             direction="outgoing",
             debit=Decimal("100"),
             credit=None,
-            memo="transfer S002",
+            memo="transfer 009876543210",
+            bank_references={"transaction_reference": "009876543210"},
         ),
         {},
-        {"S001": [9], "S002": [9, 9]},
+        {"001234567890": [9], "009876543210": [9, 9]},
     )
 
     assert result["classification_type"] == "staff_salary"
@@ -326,17 +328,18 @@ def test_legacy_multiple_accounts_for_same_staff_still_require_review():
             direction="outgoing",
             debit=Decimal("100"),
             credit=None,
-            memo="transfer S001 and S002",
+            memo="transfer 001234567890 and 009876543210",
+            bank_references={"transaction_reference": "001234567890 and 009876543210"},
         ),
         {},
-        {"S001": [9], "S002": [9]},
+        {"001234567890": [9], "009876543210": [9]},
     )
 
     assert result == {
         "classification_type": "non_business_review",
         "matched_identity_ids": [],
         "resolved_counterparty_account": None,
-        "reason": "sinopac_multiple_staff_accounts_matched",
+        "reason": "sinopac_staff_account_no_match",
     }
 
 
@@ -348,6 +351,7 @@ def test_legacy_numeric_account_must_not_be_embedded_in_a_longer_number():
             debit=Decimal("100"),
             credit=None,
             memo="transfer 91234567890",
+            bank_references={"transaction_reference": "91234567890"},
         ),
         {},
         {"1234567890": [9]},
@@ -364,10 +368,11 @@ def test_legacy_alphanumeric_account_must_not_be_embedded_in_a_longer_token():
             direction="outgoing",
             debit=Decimal("100"),
             credit=None,
-            memo="transfer XS0019",
+            memo="transfer X0012345678909",
+            bank_references={"transaction_reference": "X0012345678909"},
         ),
         {},
-        {"S001": [9]},
+        {"001234567890": [9]},
     )
 
     assert result["classification_type"] == "non_business_review"
@@ -375,27 +380,27 @@ def test_legacy_alphanumeric_account_must_not_be_embedded_in_a_longer_token():
 
 
 @pytest.mark.parametrize(
-    ("memo", "staff_accounts", "reason"),
+    ("reference", "staff_accounts", "reason"),
     [
         (
-            "transfer S001 and S002",
-            {"S001": [9], "S002": [10]},
-            "sinopac_multiple_staff_accounts_matched",
+            "001234567890 and 009876543210",
+            {"001234567890": [9], "009876543210": [10]},
+            "sinopac_staff_account_no_match",
         ),
         (
-            "transfer S001",
-            {"S001": [9, 10]},
+            "001234567890",
+            {"001234567890": [9, 10]},
             "sinopac_staff_account_identity_ambiguous",
         ),
         (
             "transfer unknown",
-            {"S001": [9]},
+            {"001234567890": [9]},
             "sinopac_staff_account_no_match",
         ),
     ],
 )
 def test_legacy_outgoing_ambiguous_or_missing_matches_require_review(
-    memo, staff_accounts, reason
+    reference, staff_accounts, reason
 ):
     result = classify_finance_transaction(
         _row(
@@ -403,7 +408,7 @@ def test_legacy_outgoing_ambiguous_or_missing_matches_require_review(
             direction="outgoing",
             debit=Decimal("100"),
             credit=None,
-            memo=memo,
+            bank_references={"transaction_reference": reference},
         ),
         {},
         staff_accounts,

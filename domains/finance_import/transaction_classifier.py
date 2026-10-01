@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Mapping, Sequence
 from decimal import Decimal
 from typing import Any
@@ -182,9 +181,10 @@ def _classify_sinopac_outgoing(
     row: Mapping[str, Any],
     staff_accounts: Mapping[str, Any],
 ) -> dict[str, Any]:
-    account = extract_sinopac_account_reference(
-        row["bank_references"].get("交易參考編號")
+    reference_key = (
+        "transaction_reference" if row["format_id"] == "legacy" else "交易參考編號"
     )
+    account = extract_sinopac_account_reference(row["bank_references"].get(reference_key))
     staff_ids = _ids_for_account(staff_accounts, account)
     if not staff_ids:
         return _review("sinopac_staff_account_no_match")
@@ -195,65 +195,6 @@ def _classify_sinopac_outgoing(
         staff_ids,
         "sinopac_unique_staff_account_in_transaction_reference",
         account,
-    )
-
-
-def _classify_legacy_outgoing(
-    row: Mapping[str, Any],
-    staff_accounts: Mapping[str, Any],
-) -> dict[str, Any]:
-    def contains_complete_account(text: str, account: str) -> bool:
-        if account.isdecimal():
-            return re.search(rf"(?<![0-9]){re.escape(account)}(?![0-9])", text) is not None
-        return (
-            re.search(
-                rf"(?<![0-9A-Za-z]){re.escape(account)}(?![0-9A-Za-z])",
-                text,
-            )
-            is not None
-        )
-
-    def matches(text: Any) -> tuple[list[str], list[Any]]:
-        if not isinstance(text, str):
-            return [], []
-        matched_accounts: list[str] = []
-        matched_staff_ids: list[Any] = []
-        for account in staff_accounts:
-            if (
-                not isinstance(account, str)
-                or not account
-                or not contains_complete_account(text, account)
-            ):
-                continue
-            ids = _ids_for_account(staff_accounts, account)
-            if not ids:
-                continue
-            matched_accounts.append(account)
-            matched_staff_ids.extend(ids)
-        return (
-            list(dict.fromkeys(matched_accounts)),
-            list(dict.fromkeys(matched_staff_ids)),
-        )
-
-    matched_accounts, staff_ids = matches(row["memo"])
-    source = "memo"
-    if not matched_accounts:
-        matched_accounts, staff_ids = matches(
-            row["bank_references"].get("存摺備註")
-        )
-        source = "passbook_memo"
-
-    if not matched_accounts:
-        return _review("sinopac_staff_account_no_match")
-    if len(matched_accounts) > 1:
-        return _review("sinopac_multiple_staff_accounts_matched")
-    if len(staff_ids) != 1:
-        return _review("sinopac_staff_account_identity_ambiguous")
-    return _result(
-        "staff_salary",
-        staff_ids,
-        f"sinopac_unique_staff_account_in_{source}",
-        matched_accounts[0],
     )
 
 
@@ -287,9 +228,7 @@ def classify_finance_transaction(
             if heuristic_result is not None:
                 return heuristic_result
             return _review("sinopac_invalid_or_missing_virtual_account")
-        if format_id == "sinopac":
-            return _classify_sinopac_outgoing(row, staff_accounts)
-        return _classify_legacy_outgoing(row, staff_accounts)
+        return _classify_sinopac_outgoing(row, staff_accounts)
 
     if format_id == "taishin":
         if direction == "incoming":
