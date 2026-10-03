@@ -144,7 +144,8 @@ def test_reply_token_is_never_used_as_a_precommit_provider_call() -> None:
     assert "reply-event-2" not in unit_of_work.delivery_tasks.requests[0].payload_json
 
 
-def test_service_help_menu_keeps_all_six_approved_categories() -> None:
+def test_service_help_menu_keeps_all_six_approved_categories(monkeypatch) -> None:
+    monkeypatch.setenv("LINE_LIFF_ID", "1234567890-service-help")
     unit_of_work = _unit_of_work()
     application = LineServiceHelpApplication(lambda: datetime(2026, 8, 21, tzinfo=timezone.utc))
 

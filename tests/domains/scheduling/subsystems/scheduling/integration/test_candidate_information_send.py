@@ -70,7 +70,7 @@ def test_sender_enqueues_exact_preview_and_no_provider(monkeypatch, kind):
         preview_fingerprint="a" * 64,
     )
     queued = []
-    monkeypatch.setattr(workflow, "_require_full_coverage", lambda *args: {})
+    monkeypatch.setattr(workflow, "_require_current_candidate", lambda *args: {})
     monkeypatch.setenv("LINE_LIFF_ID", "1234567890-candidate")
     monkeypatch.setattr(workflow, "MySqlOrderInformationRepository", lambda connection: SimpleNamespace(preview_candidate_information=lambda *args, **kwargs: preview))
     monkeypatch.setattr(workflow, "MySqlLineDeliveryTaskRepository", lambda connection: SimpleNamespace(enqueue=lambda request: queued.append(request) or SimpleNamespace(task_id=SimpleNamespace(value=7))))
@@ -115,7 +115,7 @@ def test_sender_enqueues_exact_preview_and_no_provider(monkeypatch, kind):
 
 
 def test_stale_preview_rejects_without_event_or_delivery(monkeypatch):
-    monkeypatch.setattr(workflow, "_require_full_coverage", lambda *args: {})
+    monkeypatch.setattr(workflow, "_require_current_candidate", lambda *args: {})
     monkeypatch.setattr(workflow, "MySqlOrderInformationRepository", lambda connection: SimpleNamespace(preview_candidate_information=lambda *args, **kwargs: SimpleNamespace(preview_fingerprint="b" * 64)))
     monkeypatch.setattr(workflow, "MySqlLineDeliveryTaskRepository", lambda connection: pytest.fail("stale preview must not enqueue"))
     cursor = Cursor()
@@ -159,7 +159,7 @@ def test_recontact_refreshes_candidate_period_from_current_order_before_queue(mo
     )
     monkeypatch.setattr(
         workflow,
-        "_require_full_coverage",
+        "_require_current_candidate",
         lambda *_: {
             "staff_id": 2,
             "case_period_start": "2026-10-04",
