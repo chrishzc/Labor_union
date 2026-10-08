@@ -23,6 +23,8 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if ROOT not in sys.path:
     sys.path.append(ROOT)
 
+from shared_kernel.workbook_resource_limits import validate_xlsx_workbook
+
 from domains.case_import.client_import_validation import (
     HCM_REQUIRED_HEADERS,
     validate_hcm_row,
@@ -253,6 +255,7 @@ def process_import(excel_path):
 
 
 def _load_hcm_frame(excel_path):
+    validate_xlsx_workbook(excel_path)
     print(f"解析 Excel 檔案：{excel_path} ...")
     with pd.ExcelFile(excel_path) as workbook:
         candidates = _hcm_sheet_candidates(workbook)
