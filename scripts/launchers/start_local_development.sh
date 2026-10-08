@@ -134,10 +134,8 @@ trap cleanup_owned EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-LOCAL_BIND_HOST="0.0.0.0"
-if [[ "${ACCESS_CONTROL_PROFILE:-}" == "local_bypass" ]]; then
-  LOCAL_BIND_HOST="127.0.0.1"
-fi
+# Standard local runtime, including local_bypass, is loopback-only.
+LOCAL_BIND_HOST="127.0.0.1"
 
 start_owned "FastAPI" "$PY" -m uvicorn api.main:app --host "$LOCAL_BIND_HOST" --port 8000
 API_PID="$LAST_OWNED_PID"
