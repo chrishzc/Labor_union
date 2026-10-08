@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from io import BytesIO
+
+import pytest
 from unittest.mock import Mock
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.testclient import TestClient
+from starlette.datastructures import Headers
 
 from api.dependencies.admin_auth import require_persisted_admin
 from api.exception_handlers import CorrelationBoundaryMiddleware, install_typed_error_handlers
@@ -212,3 +216,46 @@ def test_staff_resume_stage_requires_pdf_media_type_and_signature() -> None:
     assert wrong_content.json()["detail"]["error"]["code"] == "staff_resume_pdf_required"
     assert valid.status_code == 200
     workflow.stage.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    ("size", "too_large"),
+    [
+        (20 * 1024 * 1024, False),
+        (20 * 1024 * 1024 + 1, True),
+    ],
+)
+def test_staging_upload_read_is_bounded_before_workflow(size: int, too_large: bool) -> None:
+    stream = Mock(wraps=BytesIO(b"x" * size))
+    upload = UploadFile(
+        file=stream,
+        filename="notice.pdf",
+        headers=Headers({"content-type": "application/pdf"}),
+    )
+    workflow = _workflow()
+    arguments = {
+        "document": upload,
+        "owner": ControlledFileOwner.ORDERS,
+        "purpose": ControlledFilePurpose.ORDER_NOTICE,
+        "subject_reference": "ORD-HC019",
+        "object_key": "notice",
+        "logical_folder": "orders/ORD-HC019",
+        "idempotency_key": "controlled-file.stage:ord-hc019",
+        "correlation_id": "controlled-files-stage-limit",
+        "principal": AdminPrincipal(17, "storage-admin", "檔案管理員", "operator"),
+        "workflow": workflow,
+    }
+
+    if too_large:
+        with pytest.raises(HTTPException) as captured:
+            controlled_files.stage_controlled_file(**arguments)
+        assert captured.value.status_code == 409
+        assert captured.value.detail["error"]["code"] == "controlled_file_staging_too_large"
+        workflow.stage.assert_not_called()
+    else:
+        result = controlled_files.stage_controlled_file(**arguments)
+        assert result.data.staging_id == _STAGING_ID
+        assert len(workflow.stage.call_args.args[0].content) == size
+        workflow.stage.assert_called_once()
+
+    stream.read.assert_called_once_with(20 * 1024 * 1024 + 1)
