@@ -144,6 +144,7 @@ jobs:
           src/tests/reports_entry_cross_owner_cutover.test.tsx
           src/tests/reports_weekly_totals.test.tsx
           src/tests/reports_weekly_api_versions.test.tsx
+          src/tests/domains/global/subsystems/application-shell/modules/react-application-shell/webhook_proxy_body_limit.test.ts
       - name: Typecheck and build complete frontend
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: npm run build
