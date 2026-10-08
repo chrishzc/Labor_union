@@ -225,7 +225,7 @@ function Get-ProcessTreeSnapshot {
         $processes = @()
         foreach ($process in @(Get-CimInstance -ClassName Win32_Process)) {
             try {
-                $creation = [System.Management.ManagementDateTimeConverter]::ToDateTime([string]$process.CreationDate).ToUniversalTime()
+                $creation = ([datetime]$process.CreationDate).ToUniversalTime()
                 $processes += [pscustomobject]@{ Pid = [int]$process.ProcessId; ParentPid = [int]$process.ParentProcessId; CreationDate = $creation; State = "known" }
             }
             catch {
@@ -237,6 +237,16 @@ function Get-ProcessTreeSnapshot {
     catch {
         return [pscustomobject]@{ State = "unknown"; Processes = @(); Error = $_.Exception.Message }
     }
+}
+
+function Test-CimCreationTime {
+    param([datetime]$CreationDate, [datetime]$StartTime)
+    # CIM dates have microsecond precision; GetProcessTimes retains 100 ns.
+    # This comparison only corroborates the immutable tree snapshot. Registered
+    # identities and every destructive stop still use exact native StartTime.
+    $cimTicks = $CreationDate.ToUniversalTime().Ticks
+    $nativeTicks = $StartTime.ToUniversalTime().Ticks
+    return ($cimTicks - ($cimTicks % 10)) -eq ($nativeTicks - ($nativeTicks % 10))
 }
 
 function Get-DescendantIds {
@@ -293,7 +303,7 @@ function Refresh-OwnedIdentityRegistry {
         $record = $null
         if ($processById.ContainsKey([int]$root.Pid)) { $record = $processById[[int]$root.Pid] }
         $sameCreation = $null -ne $record -and $record.State -eq "known" -and
-            ([datetime]$record.CreationDate).ToUniversalTime().Ticks -eq ([datetime]$root.StartTime).ToUniversalTime().Ticks
+            (Test-CimCreationTime -CreationDate $record.CreationDate -StartTime $root.StartTime)
         if ($snapshot.State -eq "alive" -and $sameCreation -and (Test-SameProcessIdentity -Entry $root -Snapshot $snapshot)) {
             $root.Process = $snapshot.Process
             if ($null -ne $snapshot.ExitCode) { $root.ExitCode = $snapshot.ExitCode }
@@ -302,8 +312,12 @@ function Refresh-OwnedIdentityRegistry {
         else {
             [void](Get-LastKnownExitCode -Entry $root)
             $knownDescendant = @($script:IdentityRegistry | Where-Object { -not $_.IsRoot -and $_.RootPid -eq $root.Pid }).Count -gt 0
-            if ($snapshot.State -eq "unknown" -or $null -eq $record -or $record.State -eq "unknown" -or
-                (-not $knownDescendant -and $snapshot.State -ne "exited")) { Mark-CleanupUnknown -ProcessId ([int]$root.Pid) }
+            # A registered root that exited is no longer a traversal anchor;
+            # its previously verified descendants remain in the registry.
+            if ($snapshot.State -ne "exited" -and ($snapshot.State -eq "unknown" -or
+                $null -eq $record -or $record.State -eq "unknown" -or -not $knownDescendant)) {
+                Mark-CleanupUnknown -ProcessId ([int]$root.Pid)
+            }
         }
     }
     if ($activeRoots.Count -eq 0) { return }
@@ -323,7 +337,7 @@ function Refresh-OwnedIdentityRegistry {
         $snapshot = Get-ProcessSnapshot -ProcessId $id
         if ($snapshot.State -eq "unknown") { Mark-CleanupUnknown -ProcessId ([int]$id); continue }
         if ($snapshot.State -ne "alive") { continue }
-        if (-not (Test-SameProcessIdentity -Entry ([pscustomobject]@{ StartTime = $record.CreationDate }) -Snapshot $snapshot)) {
+        if (-not (Test-CimCreationTime -CreationDate $record.CreationDate -StartTime $snapshot.StartTime)) {
             Mark-CleanupUnknown -ProcessId ([int]$id)
             continue
         }

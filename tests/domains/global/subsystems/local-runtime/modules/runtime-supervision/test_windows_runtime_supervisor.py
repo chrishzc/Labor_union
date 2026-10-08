@@ -1,6 +1,10 @@
 """Static contracts for the owned Windows runtime supervisor."""
 
 from pathlib import Path
+import os
+import subprocess
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[7]
@@ -48,3 +52,33 @@ def test_windows_launcher_keeps_supervision_failure_visible() -> None:
     failure_exit = launcher.index("exit /b !SUPERVISOR_EXIT!", failure)
 
     assert failure < pause < failure_exit
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows CIM process identity")
+def test_real_cim_dates_match_native_identity_without_weakening_stop_checks() -> None:
+    powershell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+    script = r'''
+$ErrorActionPreference = 'Stop'
+$tokens = $null; $errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($env:SUPERVISOR_TEST_PATH, [ref]$tokens, [ref]$errors)
+if ($errors.Count) { throw 'Supervisor syntax error' }
+$functions = $ast.FindAll({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst]}, $false)
+foreach ($function in $functions) { Invoke-Expression $function.Extent.Text }
+$native = (Get-Process -Id $PID).StartTime.ToUniversalTime()
+$tree = Get-ProcessTreeSnapshot
+$record = @($tree.Processes | Where-Object { $_.Pid -eq $PID })[0]
+if ($record.State -ne 'known') { throw 'Real CIM DateTime was not captured' }
+if (-not (Test-CimCreationTime $record.CreationDate $native)) { throw 'CIM/native precision mismatch' }
+$cim = [datetime]::new($native.Ticks - ($native.Ticks % 10), [DateTimeKind]::Utc)
+if (-not (Test-CimCreationTime $cim $cim.AddTicks(7))) { throw 'Sub-microsecond precision lost' }
+if (Test-CimCreationTime $cim $cim.AddTicks(10)) { throw 'Different CIM timestamp accepted' }
+if (Test-SameProcessIdentity ([pscustomobject]@{StartTime=$cim}) ([pscustomobject]@{StartTime=$cim.AddTicks(7)})) { throw 'Native stop check was weakened' }
+Write-Output 'PASS'
+'''
+    result = subprocess.run(
+        [str(powershell), "-NoProfile", "-Command", script],
+        env={**os.environ, "SUPERVISOR_TEST_PATH": str(SUPERVISOR)},
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "PASS"
