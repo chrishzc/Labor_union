@@ -134,13 +134,18 @@ trap cleanup_owned EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-start_owned "FastAPI" "$PY" -m uvicorn api.main:app --host 0.0.0.0 --port 8000
+LOCAL_BIND_HOST="0.0.0.0"
+if [[ "${ACCESS_CONTROL_PROFILE:-}" == "local_bypass" ]]; then
+  LOCAL_BIND_HOST="127.0.0.1"
+fi
+
+start_owned "FastAPI" "$PY" -m uvicorn api.main:app --host "$LOCAL_BIND_HOST" --port 8000
 API_PID="$LAST_OWNED_PID"
 wait_for_http "http://127.0.0.1:8000/health" "FastAPI"
 if [[ "${REACT_ADMIN_RUNTIME_PROFILE:-}" == "artifact-runtime" ]]; then
   "$PY" -m scripts.run_service_monitor --react-admin-health-check
 fi
-(cd ui_react && exec npm run dev -- --host 0.0.0.0 --port 5173 --strictPort) &
+(cd ui_react && exec npm run dev -- --host "$LOCAL_BIND_HOST" --port 5173 --strictPort) &
 register_owned "React/Vite" "$!"
 REACT_PID="$LAST_OWNED_PID"
 wait_for_http "http://127.0.0.1:5173/admin/" "React/Vite"
