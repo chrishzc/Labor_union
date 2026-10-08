@@ -264,9 +264,9 @@ async def health_check():
         conn.close()
         db_ok = True
         db_msg = "Database connected"
-    except Exception as e:
+    except Exception:
         db_ok = False
-        db_msg = str(e)
+        db_msg = "database_unavailable"
         
     return {
         "status": "healthy",
