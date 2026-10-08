@@ -38,6 +38,7 @@ from subsystems.controlled_files.workflow import (
 
 
 router = APIRouter(prefix="/api/v1/storage", tags=["Controlled Files"])
+_MAXIMUM_STAGING_BYTES = 20 * 1024 * 1024
 
 _FILE_ID_PATTERN = r"^cf_[0-9a-f]{32}$"
 _RECEIPT_ID_PATTERN = r"^cfr_[0-9a-f]{32}$"
@@ -173,7 +174,15 @@ def stage_controlled_file(
     principal: AdminPrincipal = Depends(require_persisted_admin),
     workflow: ControlledFileRouteWorkflow = Depends(get_controlled_file_route_workflow),
 ):
-    content = document.file.read()
+    content = document.file.read(_MAXIMUM_STAGING_BYTES + 1)
+    if len(content) > _MAXIMUM_STAGING_BYTES:
+        raise typed_http_error(
+            409,
+            "conflict",
+            "controlled_file_staging_too_large",
+            "staging 檔案超過容量上限",
+            correlation_id,
+        )
     return _call_workflow(
         lambda: _stage_controlled_file_response(
             workflow, owner, purpose, subject_reference, object_key, logical_folder,
