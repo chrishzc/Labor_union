@@ -640,7 +640,13 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
                     notice.style.borderRadius = '10px';
                     notice.style.padding = '12px 16px';
                     notice.style.lineHeight = '1.5';
-                    notice.innerHTML = `<strong>【市府案件已建立】案件編號：${caseNo}</strong><br><span style="font-size:13px; color:#4a5568;">系統已為您鎖定基本身分，請繼續填寫以下 60 題需求問卷，完成後工會將即刻啟動媒合！</span>`;
+                    const heading = document.createElement('strong');
+                    heading.textContent = `【市府案件已建立】案件編號：${caseNo}`;
+                    const detail = document.createElement('span');
+                    detail.style.fontSize = '13px';
+                    detail.style.color = '#4a5568';
+                    detail.textContent = '系統已為您鎖定基本身分，請繼續填寫以下 60 題需求問卷，完成後工會將即刻啟動媒合！';
+                    notice.append(heading, document.createElement('br'), detail);
                     const form = document.getElementById('registerForm');
                     if (form) form.insertBefore(notice, form.firstChild);
                 }
