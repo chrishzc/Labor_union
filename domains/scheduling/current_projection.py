@@ -528,6 +528,12 @@ def _append_staff_unavailability_entries(
 
 
 def _claim_entry(entries, occupied_dates, occupied_date, entry):
+    if entry.occupancy_kind in {
+        SchedulingOccupancyKind.ASSIGNMENT_BUFFER,
+        SchedulingOccupancyKind.WAITING_DEPOSIT_BUFFER,
+    }:
+        entries.setdefault(occupied_date, []).append(entry)
+        return
     existing = occupied_dates.get(occupied_date)
     if existing is not None:
         blockers = tuple(
@@ -549,10 +555,14 @@ def _claim_entry(entries, occupied_dates, occupied_date, entry):
 def _validate_stored_occupancy(facts):
     expected = _expected_occupancy_set(facts.assignments)
     actual = _stored_occupancy_set(facts.stored_occupancy)
-    if len(actual) != len(facts.stored_occupancy) or actual != expected:
+    hard_occupancy_count = sum(
+        item.occupancy_kind == "assignment_interval"
+        for item in facts.stored_occupancy
+    )
+    if len(actual) != hard_occupancy_count or actual != expected:
         raise SchedulingCurrentDomainError(
             SchedulingCurrentErrorCode.DATA_INTEGRITY,
-            ("effective occupancy does not match assignment and buffer roots",),
+            ("effective occupancy does not match assignment interval roots",),
         )
 
 
@@ -560,7 +570,7 @@ def _expected_occupancy_set(assignments):
     return {
         identity
         for assignment in assignments
-        for identity in _expected_occupancy_identities(assignment)
+        for identity in _assignment_interval_occupancy(assignment)
     }
 
 
@@ -574,14 +584,8 @@ def _stored_occupancy_set(stored_occupancy):
             item.occupancy_kind,
         )
         for item in stored_occupancy
+        if item.occupancy_kind == "assignment_interval"
     }
-
-
-def _expected_occupancy_identities(assignment):
-    return (
-        *_assignment_interval_occupancy(assignment),
-        *_assignment_buffer_occupancy(assignment),
-    )
 
 
 def _assignment_interval_occupancy(assignment):
@@ -597,19 +601,6 @@ def _assignment_interval_occupancy(assignment):
             assignment.assigned_start_date,
             assignment.assigned_end_date,
         )
-    )
-
-
-def _assignment_buffer_occupancy(assignment):
-    return (
-        (
-            assignment.staff_id,
-            value,
-            assignment.generation_id,
-            assignment.assignment_id,
-            "buffer",
-        )
-        for value in assignment.active_buffer_dates
     )
 
 
