@@ -13,6 +13,8 @@ import re
 
 import pandas as pd
 
+from shared_kernel.workbook_resource_limits import validate_xlsx_workbook
+
 from domains.case_import.staff_import_validation import (
     EXCEL_TO_DB_COLUMN,
     matches_staff_beclass_headers,
@@ -51,6 +53,7 @@ class StaffHistoricalWorkbook:
 
 def load_staff_historical_workbook(path: str | Path, source_revision: str | None = None) -> StaffHistoricalWorkbook:
     workbook_path = Path(path)
+    validate_xlsx_workbook(workbook_path)
     with pd.ExcelFile(workbook_path) as workbook:
         matches = _matching_sheets(workbook)
     if len(matches) != 1:
