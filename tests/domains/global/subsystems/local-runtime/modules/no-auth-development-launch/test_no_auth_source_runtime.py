@@ -137,3 +137,29 @@ def test_windows_configuration_helper_keeps_state_and_cursor_key_process_only() 
     assert POWERSHELL_SOURCE.index("if ($DryRun)") < POWERSHELL_SOURCE.index("$desired =")
     assert "ADMIN_ENTRY_TARGET_STATE_PATH" not in POWERSHELL_SOURCE
     assert "ANOMALY_ISSUE_IDENTITY_KEY_V1" not in POWERSHELL_SOURCE
+
+
+def test_no_auth_launchers_keep_api_and_vite_on_loopback() -> None:
+    unix = (ROOT / "scripts/launchers/start_local_development.sh").read_text(
+        encoding="utf-8"
+    )
+    windows = (ROOT / "scripts/launchers/supervise_local_runtime.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    # Unix delegates to a single loopback bind for both services.
+    assert 'LOCAL_BIND_HOST="127.0.0.1"' in unix
+    assert 'LOCAL_BIND_HOST="0.0.0.0"' not in unix
+    assert 'uvicorn api.main:app --host "$LOCAL_BIND_HOST"' in unix
+    assert 'npm run dev -- --host "$LOCAL_BIND_HOST"' in unix
+
+    # Windows must not expose its host processes or a published Vite port.
+    assert '"api.main:app", "--host", "127.0.0.1"' in windows
+    assert '"run", "dev", "--", "--host", "127.0.0.1"' in windows
+    assert '"-p", "127.0.0.1:${ReactPort}:${ReactPort}"' in windows
+
+    # A Docker Vite container cannot proxy to a host loopback-only FastAPI.
+    # No-auth must fail before that fallback can start or publish a port.
+    guard = windows.index('if ($env:ACCESS_CONTROL_PROFILE -eq "local_bypass") {')
+    docker = windows.index('$docker = Get-Command "docker.exe"', guard)
+    assert guard < docker
