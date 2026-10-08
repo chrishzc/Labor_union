@@ -342,3 +342,50 @@ def test_rate_limit_audit_is_committed_without_rollback_of_finalized_transaction
         options = {"session_minutes": 30} if method == "authenticate_admin" else {}
         getattr(authentication_session, method)("synthetic-admin", "synthetic-password", connection_factory=Connection, **options)
     assert events == ["begin", "rate_limited", "rollback" if commit_failure else "commit", "close"]
+
+
+def test_development_root_bootstrap_does_not_activate_a_totp_factor(monkeypatch):
+    from api.dependencies import admin_auth as auth_dependencies
+
+    queries = []
+    created = []
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, statement, params):
+            queries.append((statement, params))
+
+        def fetchone(self):
+            return None
+
+    class Connection:
+        closed = False
+
+        def cursor(self):
+            return Cursor()
+
+        def close(self):
+            self.closed = True
+
+    connection = Connection()
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("DEV_ROOT_USERNAME", "example-root")
+    monkeypatch.setenv("DEV_ROOT_PASSWORD", "synthetic-test-password")
+    monkeypatch.setattr(auth_dependencies, "get_connection", lambda: connection)
+    monkeypatch.setattr(
+        authentication_session, "bootstrap_root_admin", lambda **kwargs: created.append(kwargs)
+    )
+
+    auth_dependencies.ensure_development_root_admin()
+
+    assert len(created) == 1
+    assert created[0]["username"] == "example-root"
+    assert queries == [
+        ("SELECT id FROM admin_users WHERE username=%s", ("example-root",))
+    ]
+    assert connection.closed

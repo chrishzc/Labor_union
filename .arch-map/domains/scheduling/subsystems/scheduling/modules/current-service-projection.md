@@ -22,5 +22,9 @@
 ## Provenance
 - Effective assignment current projection — `source_observed` — `domains/scheduling/current_projection.py`.
 
+## Verification
+- test_root: `tests/domains/scheduling/subsystems/scheduling/modules/current-service-projection/`
+- `test_scheduling_current_projection.py` — buffer reminders, hard occupancy integrity and actual conflicts.
+
 ## Change triggers
 Reconcile when service-period status, completion-instant handling, or effective assignment facts change.

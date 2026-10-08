@@ -5,6 +5,8 @@ test_root: tests/domains/scheduling/subsystems/scheduling/
 integration_root: tests/domains/scheduling/subsystems/scheduling/integration/
 fixtures_root: tests/fixtures/
 modules:
+  current-service-projection:
+    test_root: tests/domains/scheduling/subsystems/scheduling/modules/current-service-projection/
   matching-coordination:
     test_root: tests/domains/scheduling/subsystems/scheduling/modules/matching-coordination/
   staff-monthly-calendar:
