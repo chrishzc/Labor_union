@@ -16,6 +16,7 @@ from openpyxl.utils.datetime import from_excel
 
 from domains.orders.historical_adoption import HistoricalOrderSourceStatus
 from shared_kernel.fingerprints import fingerprint_payload
+from shared_kernel.workbook_resource_limits import validate_xlsx_workbook
 
 
 _FIELD_ALIASES = {
@@ -67,6 +68,7 @@ class HistoricalOrderWorkbook:
 
 def load_historical_order_workbook(path: str | Path, sheet: str | None = None) -> HistoricalOrderWorkbook:
     workbook_path = Path(path)
+    validate_xlsx_workbook(workbook_path)
     content_digest = sha256(workbook_path.read_bytes()).hexdigest()
     workbook = load_workbook(workbook_path, read_only=True, data_only=True)
     try:

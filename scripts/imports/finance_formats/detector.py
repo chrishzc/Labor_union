@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import unicodedata
 from pathlib import Path
+from zipfile import is_zipfile
 from typing import Any
 
 import pandas as pd
+
+from shared_kernel.workbook_resource_limits import validate_xlsx_workbook
 
 
 MAX_HEADER_ROWS = 40
@@ -95,6 +98,8 @@ def detect_statement_format(excel_path: str | Path) -> dict[str, Any]:
 
     assert set(FORMAT_SIGNATURES) == {"legacy", "taishin", "sinopac"}
     path = Path(excel_path)
+    if path.suffix.lower() == ".xlsx" or is_zipfile(path):
+        validate_xlsx_workbook(path)
     candidates: list[dict[str, Any]] = []
     diagnostics: list[dict[str, Any]] = []
 
