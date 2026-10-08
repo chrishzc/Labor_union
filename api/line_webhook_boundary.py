@@ -20,8 +20,29 @@ from subsystems.line.webhook_intake import (
 from subsystems.line.runtime_contracts import LineWebhookVerificationOutcome
 
 
+MAX_LINE_WEBHOOK_BODY_BYTES = 1024 * 1024
+
+
+async def _read_webhook_body(request: Request) -> bytes:
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            declared_size = int(content_length)
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail="invalid Content-Length") from error
+        if declared_size > MAX_LINE_WEBHOOK_BODY_BYTES:
+            raise HTTPException(status_code=413, detail="LINE webhook body too large")
+
+    body = bytearray()
+    async for chunk in request.stream():
+        if len(body) + len(chunk) > MAX_LINE_WEBHOOK_BODY_BYTES:
+            raise HTTPException(status_code=413, detail="LINE webhook body too large")
+        body.extend(chunk)
+    return bytes(body)
+
+
 async def canonical_line_webhook(request: Request) -> dict[str, object]:
-    raw_body = await request.body()
+    raw_body = await _read_webhook_body(request)
     signature = request.headers.get("x-line-signature")
     correlation_id = CorrelationId(
         request.headers.get("x-correlation-id") or f"line-webhook:{uuid4()}"
