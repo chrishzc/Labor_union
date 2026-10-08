@@ -12,6 +12,8 @@ from typing import Callable, Protocol
 
 import pandas as pd
 
+from shared_kernel.workbook_resource_limits import validate_xlsx_workbook
+
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.ports import UnitOfWork
 
@@ -164,6 +166,7 @@ class LegacyVirtualAccountWorkbookService:
 
 def _load_workbook(source_path: str) -> _Workbook:
     path = Path(source_path)
+    validate_xlsx_workbook(path)
     digest = sha256(path.read_bytes()).hexdigest()
     with pd.ExcelFile(path, engine="openpyxl") as excel:
         candidates = []
