@@ -612,7 +612,7 @@ try {
     Initialize-InternalServiceSharedKey
     Write-RuntimeEvent -Event "supervision_started" -Detail ("api_port=" + $ApiPort + ";react_port=" + $ReactPort)
     $api = Start-Owned -Label "FastAPI" -FilePath $PythonPath -ArgumentList @(
-        "-m", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "$ApiPort"
+        "-m", "uvicorn", "api.main:app", "--host", "127.0.0.1", "--port", "$ApiPort"
     )
     Wait-HttpReady -Url "http://127.0.0.1:$ApiPort/health" -Label "FastAPI"
     Assert-PrivateApiAuthentication
@@ -628,10 +628,14 @@ try {
     $npm = Get-Command "npm.cmd" -CommandType Application -ErrorAction SilentlyContinue
     if ($null -ne $npm) {
         $react = Start-Owned -Label "React/Vite" -FilePath $npm.Source -WorkingDirectory $uiRoot -ArgumentList @(
-            "run", "dev", "--", "--host", "0.0.0.0", "--port", "$ReactPort", "--strictPort"
+            "run", "dev", "--", "--host", "127.0.0.1", "--port", "$ReactPort", "--strictPort"
         )
     }
     else {
+        # A Docker Vite container cannot proxy to the host loopback FastAPI listener.
+        if ($env:ACCESS_CONTROL_PROFILE -eq "local_bypass") {
+            throw "local_bypass requires host npm.cmd; Docker cannot proxy a loopback-only FastAPI listener."
+        }
         $docker = Get-Command "docker.exe" -CommandType Application -ErrorAction SilentlyContinue
         if ($null -eq $docker) { throw "React/Vite requires host npm.cmd or docker.exe" }
         & $docker.Source run --rm -v "${uiRoot}:/app" -w "/app" "node:lts" `
@@ -646,7 +650,7 @@ try {
             $dockerArguments += @("-e", "VITE_ACCESS_CONTROL_PROFILE=$($env:VITE_ACCESS_CONTROL_PROFILE)")
         }
         $dockerArguments += @(
-            "-v", "${uiRoot}:/app", "-w", "/app", "-p", "${ReactPort}:${ReactPort}",
+            "-v", "${uiRoot}:/app", "-w", "/app", "-p", "127.0.0.1:${ReactPort}:${ReactPort}",
             "node:lts", "npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "$ReactPort", "--strictPort"
         )
         $react = Start-Owned -Label "React/Vite" -FilePath $docker.Source -ArgumentList $dockerArguments
