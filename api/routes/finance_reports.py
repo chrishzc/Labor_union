@@ -231,10 +231,12 @@ def export_accounts_payable(
 )
 def query_accounts_payable_archive(
     year: int = Query(..., ge=2000, le=9999),
+    principal: AdminPrincipal = Depends(require_admin),
     application: AccountsPayableExportApplication = Depends(
         get_accounts_payable_export_application
     ),
 ):
+    del principal
     try:
         records = application.query_archive(year)
         return BaseResponse(
