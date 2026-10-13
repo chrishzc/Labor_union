@@ -1,0 +1,24 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-client-hcm-email-2026-10-13-v1",
+  "descriptors": {
+    "1049_client_hcm_email.sql": {
+      "tables": {},
+      "parent_columns": {
+        "clients": {
+          "email": {
+            "column_type": "varchar(100)",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          }
+        }
+      },
+      "indexes": {},
+      "foreign_keys": {},
+      "checks": {},
+      "triggers": [],
+      "views": {}
+    }
+  }
+}

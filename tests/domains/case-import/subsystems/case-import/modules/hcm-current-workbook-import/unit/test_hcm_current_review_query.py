@@ -71,7 +71,7 @@ def test_missing_reason_can_be_filled_or_audited_skip_without_hiding_other_field
 
 def test_current_predicate_scans_past_first_hundred_and_paginates_remaining(monkeypatch):
     rows = [dict(id=i, review_identity=f'review-{i}', case_no=f'SYNTH-{i}',
-                 issue_codes=['hcm_field_invalid:縣市']) for i in range(102, 0, -1)]
+                 issue_codes=['hcm_field_invalid:行動電話']) for i in range(102, 0, -1)]
     connection = Connection(rows)
     repository = MySqlHcmResubmissionRepository(connection)
     monkeypatch.setattr(repository, 'query_review', lambda identity: {'resolved': int(identity.split('-')[1]) > 2})
@@ -101,19 +101,31 @@ def test_single_unsupported_field_also_disappears_after_audited_skip():
     assert MySqlHcmResubmissionRepository(Connection(rows, roots)).query_current_reviews(limit=20, before_id=None)['items'] == []
 
 
-def test_multiple_warning_fields_are_visible_without_unusable_correction_button():
+def test_legacy_city_warning_does_not_hide_another_missing_field():
     repository = MySqlHcmResubmissionRepository(Connection([dict(id=1, review_identity='review-1', case_no='SYNTH-1', issue_codes=['hcm_field_invalid:縣市', 'hcm_field_missing:姓名'])]))
     page = repository.query_current_reviews(limit=20, before_id=None)
     assert len(page['items']) == 1
-    assert page['items'][0]['fields'] == ['姓名', '縣市']
+    assert page['items'][0]['fields'] == ['姓名']
     assert page['items'][0]['can_correct'] is False
+
+
+@pytest.mark.parametrize('issue_code', ['hcm_field_invalid:縣市', 'hcm_field_missing:縣市'])
+@pytest.mark.parametrize('city', [None, '', '未知縣市'])
+def test_legacy_city_only_review_is_resolved_without_writes(issue_code, city):
+    row = dict(id=1, review_identity='review-1', case_no='SYNTH-1', issue_codes=[issue_code])
+    connection = Connection([row], {'review-1': {'clients_city': city}})
+    repository = MySqlHcmResubmissionRepository(connection)
+    assert repository.query_review('review-1')['resolved'] is True
+    assert repository.query_current_reviews(limit=20, before_id=None)['items'] == []
+    assert row['issue_codes'] == [issue_code]
+    assert all(sql.startswith('SELECT') for sql, _ in connection.reader.calls)
 
 
 def test_workbook_correction_is_unavailable_for_both_client_and_order_reviews(monkeypatch):
     rows = [dict(id=2, review_identity='order-review', case_no='SYNTH-2',
                  issue_codes=['hcm_field_invalid:希望服務天數'], service_data_locked=1),
             dict(id=1, review_identity='client-review', case_no='SYNTH-1',
-                 issue_codes=['hcm_field_invalid:縣市'], service_data_locked=1)]
+                 issue_codes=['hcm_field_invalid:行動電話'], service_data_locked=1)]
     repository = MySqlHcmResubmissionRepository(Connection(rows))
     monkeypatch.setattr(repository, 'query_review', lambda identity: {'resolved': False})
     page = repository.query_current_reviews(limit=20, before_id=None)
@@ -121,7 +133,7 @@ def test_workbook_correction_is_unavailable_for_both_client_and_order_reviews(mo
     assert page['items'][0]['unavailable_reason'] == 'hcm_workbook_correction_retired'
     assert page['items'][1]['can_correct'] is False
     assert page['items'][1]['unavailable_reason'] == 'hcm_workbook_correction_retired'
-    assert [item['fields'] for item in page['items']] == [['希望服務天數'], ['縣市']]
+    assert [item['fields'] for item in page['items']] == [['希望服務天數'], ['行動電話']]
 
 
 def test_registry_save_resolves_without_a_resubmission_event_and_remains_read_only():
@@ -148,6 +160,17 @@ def test_multiple_fields_resolve_individually_and_invalid_phone_stays_visible():
     assert repository.query_current_reviews(limit=20, before_id=None)['items'][0]['fields'] == ['行動電話']
     roots['review-1']['clients_phone'] = '0912345678'
     assert repository.query_current_reviews(limit=20, before_id=None)['items'] == []
+
+
+@pytest.mark.parametrize('phone', ['0223456789', '032345678', '083623456'])
+def test_valid_landline_resolves_legacy_phone_warning_without_writes(phone):
+    roots = {'review-1': {'clients_phone': phone}}
+    connection = Connection([dict(id=1, review_identity='review-1', case_no='SYNTH-1',
+                                 issue_codes=['hcm_field_invalid:行動電話'])], roots)
+    repository = MySqlHcmResubmissionRepository(connection)
+    assert repository.query_review('review-1')['resolved'] is True
+    assert repository.query_current_reviews(limit=20, before_id=None)['items'] == []
+    assert all(sql.startswith('SELECT') for sql, _ in connection.reader.calls)
 
 
 def test_current_predicate_keeps_unsupported_fields_and_checks_canonical_terms():

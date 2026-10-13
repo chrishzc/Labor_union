@@ -15,11 +15,12 @@ const detail = {
   case_no: 'CASE-001',
   client: {
     client_id: 7, version: 2,
-    values: { name: '王小明', gender: null, phone: '0911111111', city: '新竹市', address: null, residence_type: null, delivery_type: null, baby_info: null, notes: null },
+    values: { name: '王小明', gender: null, phone: '0911111111', email: 'hcm@example.com', city: '新竹市', address: null, residence_type: null, delivery_type: null, baby_info: null, notes: null },
     field_capabilities: {
       name: { owner: 'client_profile', editable: true, reason: null, options: null },
       gender: { owner: 'client_profile', editable: true, reason: null, options: ['女', '男'] },
       phone: { owner: 'client_profile', editable: true, reason: null, options: null },
+      email: { owner: 'client_profile', editable: true, reason: null, options: null },
       city: { owner: 'client_profile', editable: true, reason: null, options: null },
       address: { owner: 'client_profile', editable: true, reason: null, options: null },
       residence_type: { owner: 'client_profile', editable: true, reason: null, options: ['電梯大樓', '公寓', '透天', '其他'] },
@@ -30,7 +31,7 @@ const detail = {
   },
   beclass: {
     status: 'ready' as const, record_id: 12, source_kind: 'imported' as const, version: 3,
-    values: { name: '王小明', email: null, phone: '0922222222', tel: null, ext: null, city: '新竹市', zip_code: null, address: null, admin_notes: null, multi_birth_count: '雙胞胎' },
+    values: { name: '王小明', email: 'beclass@example.com', phone: '0922222222', tel: null, ext: null, city: '新竹市', zip_code: null, address: null, admin_notes: null, multi_birth_count: '雙胞胎' },
     field_capabilities: {
       name: { owner: 'client_beclass', editable: true, reason: null, options: null },
       email: { owner: 'client_beclass', editable: true, reason: null, options: null },
@@ -67,6 +68,24 @@ describe('Client registry owner editing', () => {
     mocks.query.mockResolvedValue(detail);
     mocks.preview.mockResolvedValue({ owner: 'client_profile', aggregate_identity: 'CASE-001', current_version: 2, before: { phone: '0911111111' }, after: { phone: '0933333333' }, preview_fingerprint: 'a'.repeat(64) });
     mocks.apply.mockResolvedValue({ owner: 'client_profile', aggregate_identity: 'CASE-001', resulting_version: 3, changed_fields: ['phone'], preview_fingerprint: 'a'.repeat(64), idempotency_key: 'client-profile-1', replayed: false, readback: { phone: '0933333333' } });
+  });
+
+  it('shows separate email sources and sends each edit to its own writer', async () => {
+    window.location.hash = '#clients?case=CASE-001';
+    render(<ClientRegistryPage />);
+    const hcm = await screen.findByLabelText('HCM Email');
+    const beclass = screen.getByLabelText('BeClass Email');
+    expect(hcm).toHaveValue('hcm@example.com');
+    expect(beclass).toHaveValue('beclass@example.com');
+    expect(hcm).toHaveAttribute('type', 'email');
+    fireEvent.change(hcm, { target: { value: 'hcm-updated@example.com' } });
+    fireEvent.click(within(hcm.closest('section')!).getByRole('button', { name: '預覽變更' }));
+    await waitFor(() => expect(mocks.preview).toHaveBeenCalledWith('CASE-001', 'profile', { email: 'hcm-updated@example.com' }, 2));
+    expect(beclass).toHaveValue('beclass@example.com');
+    fireEvent.change(beclass, { target: { value: 'beclass-updated@example.com' } });
+    fireEvent.click(within(beclass.closest('section')!).getByRole('button', { name: '預覽變更' }));
+    await waitFor(() => expect(mocks.preview).toHaveBeenCalledWith('CASE-001', 'beclass', { email: 'beclass-updated@example.com' }, 3));
+    expect(hcm).toHaveValue('hcm-updated@example.com');
   });
 
   it('opens an anomaly case and saves its due date and rejection reason through profile Preview/Apply', async () => {
@@ -122,14 +141,14 @@ describe('Client registry owner editing', () => {
       fireEvent.click(screen.getByRole('tab', { name: '名冊資料' }));
       fireEvent.click(await screen.findByRole('button', { name: /CASE-001/ }));
       const profile = (await screen.findByRole('heading', { name: '客戶主檔' })).closest('section') as HTMLElement;
-      fireEvent.change(within(profile).getByLabelText('手機'), { target: { value: '0933333333' } });
+      fireEvent.change(within(profile).getByLabelText('電話（手機／市話）'), { target: { value: '0933333333' } });
       fireEvent.click(within(profile).getByRole('button', { name: '預覽變更' }));
       await waitFor(() => expect(mocks.preview).toHaveBeenCalledWith('CASE-001', 'profile', { phone: '0933333333' }, 2));
       fireEvent.click(within(profile).getByRole('button', { name: '確認儲存' }));
       await screen.findByText('客戶主檔已儲存。');
       expect(mocks.apply).toHaveBeenCalledTimes(1);
       expect(mocks.apply.mock.calls[0][2]).toEqual({ phone: '0933333333' });
-      expect(within(profile).getByLabelText('手機')).toHaveValue('0933333333');
+      expect(within(profile).getByLabelText('電話（手機／市話）')).toHaveValue('0933333333');
     },
   );
 
@@ -167,7 +186,7 @@ describe('Client registry owner editing', () => {
     expect(screen.getByRole('tab', { name: '名冊資料' })).toHaveAttribute('aria-selected', 'true');
     fireEvent.click(await screen.findByRole('button', { name: /CASE-001/ }));
     const profile = (await screen.findByRole('heading', { name: '客戶主檔' })).closest('section') as HTMLElement;
-    const phone = within(profile).getByLabelText('手機');
+    const phone = within(profile).getByLabelText('電話（手機／市話）');
 
     fireEvent.change(phone, { target: { value: '0933333333' } });
     fireEvent.click(within(profile).getByRole('button', { name: '取消變更' }));
@@ -226,7 +245,7 @@ describe('Client registry owner editing', () => {
     expect(within(profile).getByRole('textbox', { name: '縣市' })).toHaveValue('新竹市');
     expect(within(profile).getByRole('combobox', { name: '住宅型態' })).toBeInTheDocument();
     expect(within(profile).getByRole('combobox', { name: '生產方式' })).toBeInTheDocument();
-    expect(within(profile).getByRole('textbox', { name: '手機' })).toBeInTheDocument();
+    expect(within(profile).getByRole('textbox', { name: '電話（手機／市話）' })).toBeInTheDocument();
     const beclass = (await screen.findByRole('heading', { name: 'BeClass 有效資料' })).closest('section') as HTMLElement;
     const birthCount = within(beclass).getByRole('combobox', { name: '胎數（單胞胎／雙胞胎）' });
     expect(birthCount).toHaveValue('雙胞胎');

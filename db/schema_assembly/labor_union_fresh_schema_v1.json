@@ -5,7 +5,7 @@
     "path": "db/schema.sql",
     "sha256": "b9cd84ae5a09a46949b5d4c131659f7f114480306f94e0af1246833d021b1bfb"
   },
-  "active_artifacts_sha256": "d78261b2d1bd31a42178efe0688995862e205d810c2cb7a71ece4e7c1676fbb2",
+  "active_artifacts_sha256": "8b624772e011497588effa018b286b336512000f77e1ed14f0d4f51c43df9b3e",
   "active_bootstrap": [
     "db/schema_parts/202_scheduling_staff_leave_intake.sql",
     "db/schema_parts/20_staff_monthly_settlements.sql",
@@ -177,7 +177,8 @@
     "db/schema_parts/228_order_terms_optional_scheduling_receipt.sql",
     "db/schema_parts/1046_client_zero_obligation_establishment.sql",
     "db/schema_parts/1047_scheduling_buffer_advisory.sql",
-    "db/schema_parts/229_order_cancellation_optional_downstream.sql"
+    "db/schema_parts/229_order_cancellation_optional_downstream.sql",
+    "db/schema_parts/230_client_hcm_email.sql"
   ],
   "classifications": {
     "db/schema_parts/1012_service_before_replacement.sql": "migration-only",
@@ -203,7 +204,8 @@
     "db/schema_parts/1043_twins_payroll_order_details_view.sql": "migration-only",
     "db/schema_parts/1044_order_terms_optional_downstream_versions.sql": "migration-only",
     "db/schema_parts/1045_order_terms_optional_scheduling_receipt.sql": "migration-only",
-    "db/schema_parts/1048_order_cancellation_optional_downstream.sql": "migration-only"
+    "db/schema_parts/1048_order_cancellation_optional_downstream.sql": "migration-only",
+    "db/schema_parts/1049_client_hcm_email.sql": "migration-only"
   },
   "retirement_contracts": {
     "db/schema_parts/1012_service_before_replacement.sql": {
@@ -421,6 +423,15 @@
       "replay": "accept exact non-null predecessor or nullable successor; partial metadata is drift",
       "rollback": "discard candidate before switch; after null receipts exist use a compatible forward release",
       "unresolved_policy": "unexpected type, default or partial nullability blocks apply"
+    },
+    "db/schema_parts/1049_client_hcm_email.sql": {
+      "source_object": "existing clients without HCM email",
+      "successor": "db/schema_parts/230_client_hcm_email.sql",
+      "terminal_schema_evidence": "fresh assembly applies part 230; preserve release applies part 1049",
+      "data_effect": "schema_only; new email is NULL and existing Client/BeClass values remain unchanged",
+      "replay": "absent column permits apply; exact nullable varchar(100) is no-op",
+      "rollback": "discard candidate before switch; retain the column after apply",
+      "unresolved_policy": "unexpected type, nullability or default blocks apply"
     }
   }
 }

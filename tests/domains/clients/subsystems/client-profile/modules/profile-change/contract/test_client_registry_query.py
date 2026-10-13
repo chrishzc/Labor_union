@@ -325,12 +325,12 @@ def test_mysql_registry_uses_order_client_owner_and_bound_beclass_case_identity(
     connection = _SqlConnection([
         {
             "client_id": 7, "case_no": "CASE-001", "order_status": "歷史訂單－服務完成", "client_profile_version": 2,
-            "name": "王小明", "gender": None, "phone": "0912345678", "city": "新竹市",
+            "name": "王小明", "gender": None, "phone": "0912345678", "email": "hcm@example.com", "city": "新竹市",
             "address": None, "residence_type": None, "delivery_type": None,
             "baby_info": None, "notes": None,
         },
         ({"beclass_record_id": 12, "record_origin": "imported", "survey_details": '{"特殊計費:胎數":"雙胞胎","餐點喜忌備註":"不吃牛肉"}', "name": "原始姓名", "email": None, "phone": "0911111111", "tel": None, "ext": None, "city": None, "zip_code": None, "address": None, "admin_notes": None},),
-        {"aggregate_version": 3, "effective_values_json": '{"phone":"0922222222","multi_birth_count":"單胞胎"}'},
+        {"aggregate_version": 3, "effective_values_json": '{"phone":"0922222222","email":"beclass-effective@example.com","multi_birth_count":"單胞胎"}'},
     ])
 
     detail = MySqlClientRegistryQueryRepository(connection).load_detail("CASE-001")
@@ -338,6 +338,9 @@ def test_mysql_registry_uses_order_client_owner_and_bound_beclass_case_identity(
     statements = [statement for statement, _ in connection.cursor_instance.statements]
     assert "JOIN clients c ON c.id=o.client_id" in statements[0]
     assert "c.service_type" in statements[0]
+    assert "c.email" in statements[0]
+    assert detail["client_values"]["email"] == "hcm@example.com"
+    assert detail["beclass_values"]["email"] == "beclass-effective@example.com"
     assert "WHERE o.case_no=%s" in statements[0]
     assert "WHERE bound_case_no=%s" in statements[1]
     assert "query_no" not in " ".join(statements)
@@ -355,7 +358,7 @@ def test_mysql_detail_to_http_exposes_service_type_for_direct_intake_repair(monk
     )
     connection = _SqlConnection([
         {"client_id": 7, "case_no": "SYNTH-REPAIR", "order_status": "待補件",
-         "client_profile_version": 2, "name": "合成測試客戶", "service_type": service_type},
+         "client_profile_version": 2, "name": "合成測試客戶", "email": "hcm@example.com", "service_type": service_type},
         (),
     ])
 
@@ -369,6 +372,9 @@ def test_mysql_detail_to_http_exposes_service_type_for_direct_intake_repair(monk
         order_terms=SimpleNamespace(query_registry=unavailable_terms),
     )
     profile = response.data.model_dump()["client"]
+    assert profile["values"]["email"] == "hcm@example.com"
+    assert profile["field_capabilities"]["email"]["owner"] == "client_profile"
+    assert profile["field_capabilities"]["email"]["editable"] is True
     assert profile["values"]["service_type"] == service_type
     assert profile["field_capabilities"]["service_type"] == {
         "owner": "client_profile", "editable": True, "reason": None,

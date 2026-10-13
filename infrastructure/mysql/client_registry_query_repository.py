@@ -33,7 +33,7 @@ from subsystems.government_subsidy.reconciliation_register_query import (
 
 
 _CLIENT_FIELDS = (
-    "name", "gender", "phone", "city", "address", "residence_type",
+    "name", "gender", "phone", "email", "city", "address", "residence_type",
     "delivery_type", "baby_info", "notes", "due_month", "reject_reason", "service_type",
 )
 _BECLASS_FIELDS = (

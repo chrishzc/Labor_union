@@ -147,7 +147,8 @@ class MySqlHcmResubmissionRepository:
                 cursor_id = int(row["id"])
                 codes = json.loads(row["issue_codes"]) if isinstance(row["issue_codes"], str) else row["issue_codes"]
                 fields = sorted({code.split(":", 1)[1] for code in codes
-                                 if code.startswith(("hcm_field_missing:", "hcm_field_invalid:"))})
+                                 if code.startswith(("hcm_field_missing:", "hcm_field_invalid:"))
+                                 and code.split(":", 1)[1] != "縣市"})
                 if not fields:
                     continue
                 can_correct = False
@@ -268,7 +269,7 @@ def _single_owned_field(value: object) -> tuple[str, str]:
 
 _TARGETS = sorted({target for fields in (
         hcm_field_targets("報名時間(建檔)"), hcm_field_targets("IP位址"), hcm_field_targets("姓名"),
-        hcm_field_targets("性別"), hcm_field_targets("行動電話"), hcm_field_targets("縣市"),
+        hcm_field_targets("性別"), hcm_field_targets("行動電話"), hcm_field_targets("email"), hcm_field_targets("縣市"),
         hcm_field_targets("預產期/預計服務開始月份"), hcm_field_targets("居住型態"),
         hcm_field_targets("不符合原因"),
         hcm_field_targets("生產方式"), hcm_field_targets("寶寶資訊"), hcm_field_targets("服務時間"),

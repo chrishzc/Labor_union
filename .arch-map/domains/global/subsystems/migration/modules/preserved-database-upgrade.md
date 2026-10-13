@@ -20,6 +20,11 @@
   - `scripts/launchers/update_local_database.bat`
   - `scripts/launchers/update_local_database.sh`
 - config:
+  - `db/schema_parts/230_client_hcm_email.sql` — fresh nullable HCM email；BeClass email 獨立保存。
+  - `db/schema_parts/1049_client_hcm_email.sql` — schema-only preserve-data email upgrade，無 backfill。
+  - `db/migration_releases/labor_union_2026_10_13_client_hcm_email_v1.json`
+  - `db/migration_releases/labor_union_2026_10_13_client_hcm_email_v1.descriptors.json`
+  - `validation/receipts/PROV-HCM-EMAIL-local-additive-qualification-20261013.json` — synthetic MySQL fresh／preserve qualification；舊 Client／BeClass 資料保留，主檔新 email 為 NULL。
   - `db/schema_parts/1048_order_cancellation_optional_downstream.sql` — cancellation receipt optional downstream owners。
   - `db/schema_parts/229_order_cancellation_optional_downstream.sql` — fresh bootstrap successor。
   - `db/migration_releases/labor_union_2026_09_29_order_cancellation_optional_downstream_v1.json`

@@ -354,6 +354,7 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_09_29_client_zero_obligation_establishment_v1.json",
     "labor_union_2026_09_29_scheduling_buffer_advisory_v1.json",
     "labor_union_2026_09_29_order_cancellation_optional_downstream_v1.json",
+    "labor_union_2026_10_13_client_hcm_email_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -5852,6 +5853,10 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
             "AND expected_review_version IS NOT NULL "
             "AND resulting_review_version = expected_review_version + 1)"
         )
+    if part_name == "1049_client_hcm_email.sql":
+        descriptor["parent_columns"]["clients"] = {
+            "email": _column_contract("varchar(100)", "YES", None),
+        }
     if part_name == "1019_line_identity_role_scope.sql":
         descriptor["parent_columns"]["line_platform_users"] = {
             "selected_identity_role": _column_contract(

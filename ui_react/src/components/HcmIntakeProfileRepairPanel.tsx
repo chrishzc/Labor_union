@@ -4,7 +4,7 @@ import type { ClientProfileChanges, ClientRegistryDetail, RegistryMutationPrevie
 import { ApiHttpError } from '../api/shared/typed_errors';
 
 const PROFILE_FIELDS: Record<string, keyof ClientProfileChanges> = {
-  姓名: 'name', 性別: 'gender', 行動電話: 'phone', 縣市: 'city',
+  姓名: 'name', 性別: 'gender', 行動電話: 'phone', email: 'email', 縣市: 'city',
   '預產期/預計服務開始月份': 'due_month', 不符合原因: 'reject_reason',
   居住型態: 'residence_type', 生產方式: 'delivery_type', 寶寶資訊: 'baby_info',
   服務方式: 'service_type',
@@ -152,13 +152,13 @@ export function HcmIntakeProfileRepairPanel({ caseNo, fields, disabled, onSaved,
           const editable = editableFields.includes(source);
           const id = `hcm-intake-${caseNo}-${field}`;
           const update = (next: string) => { setDraft((current) => ({ ...current, [field]: next })); setApproved(null); setMessage(null); };
-          return <div key={source} style={{ display: 'grid', gap: 4, minWidth: 0 }}><label htmlFor={id}>{source}</label>
+          return <div key={source} style={{ display: 'grid', gap: 4, minWidth: 0 }}><label htmlFor={id}>{field === 'email' ? 'HCM Email' : field === 'phone' ? '電話（手機／市話）' : source}</label>
             {options ? <select id={id} value={value} style={{ width: '100%', minWidth: 0, boxSizing: 'border-box' }} disabled={locked || !editable} onChange={(event) => update(event.target.value)}>
               <option value="" disabled>請選擇</option>
               {value && !options.includes(value) && <option value={value} disabled>{value}（待修正）</option>}
               {options.map((option) => <option key={option}>{option}</option>)}
-            </select> : <input id={id} type={field === 'due_month' ? 'date' : field === 'phone' ? 'tel' : 'text'}
-              value={value} style={{ width: '100%', minWidth: 0, boxSizing: 'border-box' }} maxLength={field === 'reject_reason' ? 500 : undefined} disabled={locked || !editable}
+            </select> : <input id={id} type={field === 'due_month' ? 'date' : field === 'phone' ? 'tel' : field === 'email' ? 'email' : 'text'}
+              value={value} style={{ width: '100%', minWidth: 0, boxSizing: 'border-box' }} maxLength={field === 'reject_reason' ? 500 : field === 'email' ? 100 : undefined} disabled={locked || !editable}
               onChange={(event) => update(event.target.value)} />}
             {!editable && <small>目前不可修改此欄位，請重新確認案件資料。</small>}
           </div>;

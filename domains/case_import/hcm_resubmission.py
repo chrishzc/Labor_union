@@ -13,6 +13,7 @@ _FIELD_TARGETS = {
     "姓名": ("clients.name",),
     "性別": ("clients.gender",),
     "行動電話": ("clients.phone",),
+    "email": ("clients.email",),
     "縣市": ("clients.city",),
     "預產期/預計服務開始月份": ("clients.due_month",),
     "不符合原因": ("clients.reject_reason",),

@@ -16,7 +16,7 @@ class MySqlClientProfileRepository:
         suffix = " FOR UPDATE" if for_update else ""
         with self._connection.cursor() as cursor:
             cursor.execute(
-                "SELECT id AS client_id,client_profile_version,name,gender,phone,city,address,"
+                "SELECT id AS client_id,client_profile_version,name,gender,phone,email,city,address,"
                 "residence_type,delivery_type,baby_info,notes,due_month,reject_reason,service_type FROM clients WHERE id=%s" + suffix,
                 (client_id,),
             )
@@ -26,7 +26,7 @@ class MySqlClientProfileRepository:
         suffix = " FOR UPDATE" if for_update else ""
         with self._connection.cursor() as cursor:
             cursor.execute(
-                "SELECT c.id AS client_id,o.case_no,c.client_profile_version,c.name,c.gender,c.phone,c.city,c.address,"
+                "SELECT c.id AS client_id,o.case_no,c.client_profile_version,c.name,c.gender,c.phone,c.email,c.city,c.address,"
                 "c.residence_type,c.delivery_type,c.baby_info,c.notes,c.due_month,c.reject_reason,c.service_type FROM orders o "
                 "JOIN clients c ON c.id=o.client_id WHERE o.case_no=%s" + suffix,
                 (case_no,),

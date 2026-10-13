@@ -686,6 +686,14 @@ timestamps、unknown boolean 不覆寫。銀行與關聯集合同樣採empty-onl
   合併或阻擋；可保存privacy-safe非阻擋警示供工會後續核對。只有案件編號已存在時才依same-source
   exact replay／conflict規則處理，且不得覆寫既有Client／Order。尚無唯一Client BeClass對方時，仍建立
   Client／Order並讓`requires_cooking = NULL`。
+- 2026-10-13 人工裁決：HCM 工作簿新增 email 資料欄，原始表頭空白，位於「管理員註記」後一欄；
+  既有「管理者註記事項」表頭亦為管理註記位置。adapter 只將此位置的原始空白表頭正規化為 `email`，
+  不依 email 內容猜欄位、不把其他空白欄當成 email；位置歧義或與具名 email 欄衝突時拒絕匯入。
+  此欄 optional，去除值的前後空白後匯入 Client-owned
+  `clients.email`（nullable `VARCHAR(100)`）。缺欄／空白不形成缺件；非空但格式錯誤或超過 100 字
+  形成 `hcm_field_invalid:email`，沿用 partial intake 將該主檔欄位存為 NULL，其餘合法欄位照常採納。
+  主檔 email 與 BeClass original／effective email 各自保存，不互填、不覆寫；既有案件重匯仍維持
+  exact replay／`skipped_existing`，不藉新欄位回填。管理端補登走 Client Profile Preview／Apply。
 - HCM Current 完整案件的訂金到期日固定為`min(報名時間日期 + 3 calendar days, 預計服務日期)`；
   急件不得只因報名距預計開工不足3天而阻擋Client／Order及case architecture bootstrap建立。
 - HCM `服務方式` canonical值固定為`連續服務 | 休周六 | 休周日 | 週休2日`；legacy `週休1日`／
@@ -739,6 +747,22 @@ Case Import immutable source snapshot 保留文字；排班頁讀取原文供人
 保存後重新讀取正式 Client 資料與 current HCM review，才更新缺件顯示。
 日期、天數及其他 Orders 條件沿用 Orders writer。匯入驗證與轉換機制不變，
 原始來源與匯入歷史不改寫。
+
+2026-10-13 最新人工裁決：HCM `縣市` 僅為參考欄位，缺欄、空白或不在縣市清單中均不得產生
+欄位警示、補件理由，或單獨使案件走 partial intake／待補件。沿用既有縣市與地址正規化，
+不因縣市值未列於清單而清空主檔值；其他欄位驗證不變。current review Query 忽略歷史縣市
+警示，包含尚無可讀正式 root 的紀錄；原始來源、歷史 review／receipt 與既有訂單狀態不改寫。
+
+2026-10-13 後續人工裁決：HCM 欄位錯誤只有以下七項可觸發 partial intake／「待補件」：
+`姓名`、`身分資格`、`報名時間(建檔)`、`預計服務日期`、`希望服務天數`、`服務時間`、`服務方式`。
+其中身分資格決定費率／補助，報名時間決定訂金到期日，服務條件決定帳務與服務日計算。
+其他欄位缺漏或格式錯誤僅形成欄位警示，不阻擋完整 Client／Order／case architecture bootstrap
+建立；沿用既有逐欄 NULL 採納規則，合法欄位保留，服務方式原文依前述裁決保留。
+電話（原始表頭仍為 `行動電話`）接受手機與含區碼的市話，沿用 Client-owned 電話正規化及格式規則；
+電話缺漏／格式錯誤僅警示，不觸發待補件。縣市依前述裁決完全不警示。
+Preview 與 Apply 均以可用案件編號為最低建案資格；報名時間錯誤可匯入為待補件，不能在 Preview
+被當成不可匯入列。案件編號缺失或不可用仍不建案，既有案件仍沿用 exact replay／skipped_existing。
+本裁決適用新匯入；不自動改寫既有待補件訂單狀態或歷史 receipt。
 
 HCM 不得以 fabricated default 補造欄位。案件編號是最低寫入資格：有可用案件編號時必須建立／保留
 正式案件，其他欄位缺漏、格式錯誤或身份關聯歧義各自形成 owner validation／review result；只有案件編號

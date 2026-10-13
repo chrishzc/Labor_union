@@ -71,6 +71,7 @@ class ClientRegistryChangeHistoryItemView(_StrictModel):
 
 
 class ClientProfileValuesView(_StrictModel):
+    email: str | None = None
     service_type: str | None = None
     due_month: str | None = None
     reject_reason: str | None = None
@@ -184,6 +185,7 @@ class ClientRegistryDetailView(_StrictModel):
 
 
 class ClientProfileChangeSet(_StrictModel):
+    email: str | None = None
     service_type: str | None = None
     due_month: str | None = None
     reject_reason: str | None = None

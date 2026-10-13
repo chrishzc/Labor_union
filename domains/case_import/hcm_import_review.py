@@ -55,6 +55,8 @@ def unresolved_hcm_review_fields(
     """
     unresolved = []
     for field in fields:
+        if field == "縣市":
+            continue
         try:
             targets = hcm_field_targets(field)
         except ValueError:

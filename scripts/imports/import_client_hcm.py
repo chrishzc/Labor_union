@@ -26,6 +26,7 @@ if ROOT not in sys.path:
 from shared_kernel.workbook_resource_limits import validate_xlsx_workbook
 
 from domains.case_import.client_import_validation import (
+    HCM_INTAKE_BLOCKING_FIELDS,
     HCM_REQUIRED_HEADERS,
     validate_hcm_row,
 )
@@ -33,6 +34,7 @@ from domains.case_import.case_import import (
     HcmIdentityResolution,
     fingerprint_case_import_source,
 )
+from domains.clients.profile import normalize_client_phone
 from api.dependencies.case_import import build_case_import_application
 from infrastructure.mysql.hcm_import_review_repository import MySqlHcmImportReviewRepository
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
@@ -79,6 +81,7 @@ CLIENTS_FIELD_MAPPING = {
     '姓名': 'name',
     '性別': 'gender',
     '行動電話': 'phone',
+    'email': 'email',
     '縣市': 'city',
     '地址': 'address',
     '身分資格': 'identity_status',
@@ -98,12 +101,9 @@ CLIENTS_FIELD_MAPPING = {
 def clean_phone(phone_val):
     if pd.isna(phone_val) or not phone_val:
         return None
-    phone = str(phone_val).replace(" ", "").replace("-", "").strip()
-    phone = re.sub(r'(?<!^)\D', '', phone)
-    if phone.startswith("+886"):
-        phone = "0" + phone[4:]
-    elif phone.startswith("886"):
-        phone = "0" + phone[3:]
+    if isinstance(phone_val, float) and phone_val.is_integer():
+        phone_val = int(phone_val)
+    phone = normalize_client_phone(str(phone_val).strip())
     if len(phone) == 9 and phone.startswith("9"):
         phone = "0" + phone
     return phone
@@ -277,8 +277,29 @@ def _hcm_sheet_candidates(workbook):
         frame = workbook.parse(sheet_name=sheet_name, dtype=object)
         actual_headers = {str(column).strip() for column in frame.columns}
         if not frame.dropna(how="all").empty and HCM_REQUIRED_HEADERS <= actual_headers:
+            source_headers = next(workbook.book[sheet_name].iter_rows(
+                min_row=1, max_row=1, max_col=len(frame.columns), values_only=True,
+            ))
+            frame = _normalize_hcm_email_column(frame, source_headers)
             candidates.append((sheet_name, frame))
     return candidates
+
+
+def _normalize_hcm_email_column(frame, source_headers):
+    """Bind only the source's blank column immediately after the admin note."""
+    anchors = [index for index, value in enumerate(source_headers)
+               if str(value).strip() in {"管理員註記", "管理者註記事項"}]
+    candidates = [index + 1 for index in anchors
+                  if index + 1 < len(frame.columns) and _is_blank_email_header(source_headers[index + 1])]
+    if not candidates:
+        return frame
+    if len(candidates) != 1 or "email" in frame.columns:
+        raise ValueError("hcm_email_column_ambiguous")
+    return frame.rename(columns={frame.columns[candidates[0]]: "email"})
+
+
+def _is_blank_email_header(value):
+    return value is None or isinstance(value, str) and not value.strip()
 
 
 def _connect_database():
@@ -401,7 +422,7 @@ class HcmLegacyRowIntake:
         for _, row in frame.iterrows():
             record = _normalized_record(row)
             validation_errors = validate_hcm_row(row.to_dict())
-            if not record.get("case_no") or not isinstance(record.get("created_at"), datetime):
+            if not record.get("case_no"):
                 outcomes["review_required"] += 1
                 continue
             outcome = "ready_with_warning" if validation_errors else "ready"
@@ -632,13 +653,14 @@ def _find_matching_provisional_registration(cursor, record) -> int | None:
 
 
 def _hcm_import_intent(cursor, record, validation_errors):
-    provisional_registration_id = _find_matching_provisional_registration(cursor, record)
-    if validation_errors:
+    accepted_record = _partial_hcm_record(record, validation_errors)
+    provisional_registration_id = _find_matching_provisional_registration(cursor, accepted_record)
+    if HCM_INTAKE_BLOCKING_FIELDS.intersection(validation_errors):
         return build_hcm_partial_case_import_intent(
-            _partial_hcm_record(record, validation_errors),
+            accepted_record,
             provisional_registration_id=provisional_registration_id,
         )
-    return _case_import_intent(cursor, record, provisional_registration_id=provisional_registration_id)
+    return _case_import_intent(cursor, accepted_record, provisional_registration_id=provisional_registration_id)
 
 
 def _partial_hcm_record(record, validation_errors):
@@ -777,8 +799,10 @@ def normalize_hcm_row(row):
         for excel_column, db_column in CLIENTS_FIELD_MAPPING.items()
         if excel_column in row
     }
+    if "email" in record and not record["email"]:
+        record["email"] = None
     if "phone" in record:
-        record["phone"] = clean_phone(record["phone"])
+        record["phone"] = clean_phone(row["行動電話"])
     city, address = clean_city_and_address(
         record.get("city"),
         record.get("address"),

@@ -38,7 +38,7 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 async function editAndPreview() {
-  fireEvent.change(await screen.findByLabelText('行動電話'), { target: { value: '0912345678' } });
+  fireEvent.change(await screen.findByLabelText('電話（手機／市話）'), { target: { value: '0912345678' } });
   fireEvent.change(screen.getByLabelText('服務方式'), { target: { value: '連續服務' } });
   fireEvent.change(screen.getByLabelText('欄位修正原因'), { target: { value: '補齊電話與服務方式' } });
   fireEvent.click(screen.getByRole('button', { name: '預覽欄位修正' }));
@@ -79,6 +79,24 @@ it('keeps warnings and reads back without another write when the saved result is
   fireEvent.click(screen.getByRole('button', { name: '重新讀取修正結果' }));
   await waitFor(() => expect(onSaved).toHaveBeenCalledOnce());
   expect(clientRegistryClient.apply).toHaveBeenCalledTimes(1);
+});
+
+it('repairs an HCM email warning through the profile writer', async () => {
+  vi.mocked(clientRegistryClient.query).mockResolvedValue({ ...detail, client: { ...detail.client,
+    values: { ...detail.client.values, email: null },
+    field_capabilities: { email: { owner: 'client_profile', editable: true, reason: null, options: null } },
+  } });
+  vi.mocked(clientRegistryClient.preview).mockResolvedValue({
+    owner: 'client_profile', aggregate_identity: detail.case_no, current_version: 2,
+    before: { email: null }, after: { email: 'hcm@example.com' }, preview_fingerprint: fingerprint,
+  });
+  render(<HcmIntakeProfileRepairPanel caseNo={detail.case_no} fields={['email']} disabled={false} onSaved={vi.fn()} onBusyChange={vi.fn()} />);
+  const input = await screen.findByLabelText('HCM Email');
+  expect(input).toHaveAttribute('type', 'email');
+  fireEvent.change(input, { target: { value: 'hcm@example.com' } });
+  fireEvent.change(screen.getByLabelText('欄位修正原因'), { target: { value: '確認來源 email' } });
+  fireEvent.click(screen.getByRole('button', { name: '預覽欄位修正' }));
+  await waitFor(() => expect(clientRegistryClient.preview).toHaveBeenCalledWith(detail.case_no, 'profile', { email: 'hcm@example.com' }, 2));
 });
 
 it('honors owner field capabilities instead of exposing a locked field', async () => {

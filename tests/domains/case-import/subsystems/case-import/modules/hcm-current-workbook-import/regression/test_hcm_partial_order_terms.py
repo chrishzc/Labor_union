@@ -55,7 +55,7 @@ def test_partial_import_persists_each_valid_term_independently(
             "service_days": 20,
             "service_time": "8小時 09:00-17:00",
         },
-        {warning_field: "不可空值"},
+        {"身分資格": "不可空值", warning_field: "不可空值"},
     )
     candidate = build_case_import_candidate(CaseImportFacts(False, None), intent)
     assert candidate.order is None and candidate.bootstrap is None

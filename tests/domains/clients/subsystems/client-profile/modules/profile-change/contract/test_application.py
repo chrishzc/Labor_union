@@ -37,7 +37,7 @@ def test_admin_service_type_repair_uses_existing_profile_writer():
     with pytest.raises(ClientProfileValidationError, match='profile_field_not_allowed'):
         application.preview_applicant('line-user-7', 7, {'service_type': '連續服務'}, ExpectedVersion(1))
     with pytest.raises(ClientProfileValidationError, match='profile_phone_invalid'):
-        application.preview_applicant('line-user-7', 7, {'phone': '031234567'}, ExpectedVersion(1))
+        application.preview_applicant('line-user-7', 7, {'phone': '03123456'}, ExpectedVersion(1))
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from subsystems.client_profile.application import ClientProfileApplication
@@ -46,6 +46,57 @@ from subsystems.client_profile.contracts import (
     ClientProfileRequestConflictError,
     ClientProfileStaleError,
 )
+
+
+@pytest.mark.parametrize("phone,expected", [
+    ("0912-345-678", "0912345678"),
+    ("(02) 2345-6789", "0223456789"),
+    ("03-2345678", "032345678"),
+    ("+886-2-2345-6789", "0223456789"),
+])
+def test_mobile_and_landline_use_existing_profile_preview_apply_readback(phone, expected):
+    repository = _Repository()
+    application = _application(repository)
+    changes = {"phone": phone}
+    applicant_preview = application.preview_applicant('line-user-7', 7, changes, ExpectedVersion(0))
+    assert applicant_preview.requested == {"phone": expected}
+    preview = application.preview_admin("CASE-001", changes, ExpectedVersion(0))
+    assert preview.requested == {"phone": expected}
+    receipt = application.apply_admin(
+        "CASE-001", changes, ExpectedVersion(0), ActorContext("admin"), "更新聯絡電話",
+        preview.preview_fingerprint, IdempotencyKey("phone-format"), CorrelationId("phone-format"),
+    )
+    assert receipt.readback.values["phone"] == expected
+    assert application.query_admin("CASE-001").values["phone"] == expected
+
+
+@pytest.mark.parametrize("phone", ["123", "02234567", "09123456789", "0912abc345678", "02-23456789#123"])
+def test_phone_validation_rejects_invalid_values_without_discarding_letters_or_extensions(phone):
+    with pytest.raises(ClientProfileValidationError):
+        validate_changes({"phone": phone})
+
+
+def test_admin_email_repair_uses_profile_version_receipt_and_keeps_applicant_scope():
+    repository = _Repository()
+    repository.profile["email"] = None
+    application = _application(repository)
+    changes = {"email": "  corrected@example.com  "}
+    preview = application.preview_admin("CASE-001", changes, ExpectedVersion(0))
+    assert preview.before == {"email": ""}
+    assert preview.requested == {"email": "corrected@example.com"}
+    receipt = application.apply_admin(
+        "CASE-001", changes, ExpectedVersion(0), ActorContext("admin:9"),
+        "補登 HCM email", preview.preview_fingerprint, IdempotencyKey("hcm-email-repair"),
+        CorrelationId("hcm-email-repair"),
+    )
+    assert receipt.readback.values["email"] == "corrected@example.com"
+    assert receipt.resulting_version == 1
+    assert "email" not in application.query_applicant("line-user-7", 7).values
+    with pytest.raises(ClientProfileValidationError, match="profile_field_not_allowed"):
+        application.preview_applicant("line-user-7", 7, changes, ExpectedVersion(1))
+    for invalid in ("wrong", "a b@example.com", "user@domain"):
+        with pytest.raises(ClientProfileValidationError, match="profile_email_invalid"):
+            application.preview_admin("CASE-001", {"email": invalid}, ExpectedVersion(1))
 
 
 class _Uow(AbstractContextManager):

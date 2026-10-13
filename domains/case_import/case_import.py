@@ -38,6 +38,7 @@ _ALLOWED_CLIENT_ATTRIBUTES = frozenset(
         "created_at",
         "delivery_type",
         "due_month",
+        "email",
         "gender",
         "identity_status",
         "ip_address",

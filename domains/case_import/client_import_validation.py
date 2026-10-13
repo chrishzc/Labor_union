@@ -11,6 +11,8 @@ from typing import Any
 
 import pandas as pd
 
+from domains.clients.profile import CLIENT_PHONE_PATTERN, normalize_client_phone
+
 GENDER_VALUES = {"男", "女"}
 IDENTITY_STATUS_VALUES = {"一般市民", "補助市民", "低收入戶", "中低收入戶", "非市民"}
 RESIDENCE_TYPE_VALUES = {"公寓", "透天", "大樓", "公寓大廈"}
@@ -19,8 +21,14 @@ SERVICE_TYPE_VALUES = {
     "連續服務", "休周六", "休周日", "週休2日",
     "週休1日", "週休一日", "周休二日",
 }
-PHONE_PATTERN = re.compile(r"^09\d{8}$")
+PHONE_PATTERN = CLIENT_PHONE_PATTERN
+EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 DATE_PATTERN = re.compile(r"^\d{4}/\d{2}/\d{2}$")
+
+HCM_INTAKE_BLOCKING_FIELDS = frozenset({
+    "姓名", "身分資格", "報名時間(建檔)", "預計服務日期",
+    "希望服務天數", "服務時間", "服務方式",
+})
 
 HCM_REQUIRED_HEADERS = frozenset({
     "案件狀態", "查詢序號(案件編號)", "報名時間(建檔)", "姓名", "行動電話",
@@ -41,6 +49,7 @@ EXCEL_TO_DB_COLUMN = {
     "姓名": "name",
     "性別": "gender",
     "行動電話": "phone",
+    "email": "email",
     "縣市": "city",
     "身分資格": "identity_status",
     "服務時間": "service_time",
@@ -65,9 +74,7 @@ def _normalize_phone_digits(value: Any) -> str:
     被讀成 912345678.0），邏輯對齊 import_client_hcm.py 的 clean_phone()。"""
     if isinstance(value, float) and value.is_integer():
         value = int(value)
-    digits = re.sub(r"\D", "", str(value).strip())
-    if digits.startswith("886") and len(digits) == 12:
-        digits = "0" + digits[3:]
+    digits = normalize_client_phone(str(value).strip())
     if len(digits) == 9 and digits.startswith("9"):
         digits = "0" + digits
     return digits
@@ -82,9 +89,12 @@ def _is_valid_integer(value):
 
 def _is_valid_service_time(value):
     text = str(value).strip()
-    hours_match = re.search(r"(?P<hours>\d{1,2})\s*小時", text)
+    hours_match = re.search(r"(?P<hours>\d{1,2}(?:\.5)?)\s*小時", text)
     clocks = tuple(re.finditer(r"(?P<hour>[01]?\d|2[0-3]):(?P<minute>[0-5]\d)", text))
-    return hours_match is not None and len(clocks) == 2
+    if hours_match is None or len(clocks) != 2 or not 0 < float(hours_match.group("hours")) <= 24:
+        return False
+    minutes = tuple(int(clock.group("hour")) * 60 + int(clock.group("minute")) for clock in clocks)
+    return minutes[1] > minutes[0] or re.search(r"(次日|翌日|\+1)", text) is not None
 
 def _is_valid_date(value: Any) -> bool:
     if pd.isna(value):
@@ -95,9 +105,20 @@ def _is_valid_date(value: Any) -> bool:
     if not DATE_PATTERN.match(text):
         # 允許民國年或各種分隔符的日期字串 (與 _parse_roc_datetime 邏輯一致)
         pattern = r"^\s*(\d{2,4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?)?\s*$"
-        if re.match(pattern, text):
-            return True
-        return False
+        match = re.match(pattern, text)
+        if not match:
+            return False
+        year, month, day, hour, minute, second = match.groups()
+        year = int(year)
+        if year < 1911:
+            year += 1911
+        try:
+            hour = int(hour or 0)
+            datetime(year, int(month), int(day), 0 if hour == 24 else hour,
+                     int(minute or 0), int(second or 0))
+        except ValueError:
+            return False
+        return True
     try:
         datetime.strptime(text, "%Y/%m/%d")
     except ValueError:
@@ -138,15 +159,19 @@ def validate_hcm_row(row: dict[str, Any]) -> dict[str, str]:
 
     phone = row.get("行動電話")
     if _is_blank(phone):
-        errors["行動電話"] = "不可空值，需為09開頭的10碼字串"
+        errors["行動電話"] = "不可空值，需為手機或含區碼的市話"
     else:
         phone_digits = _normalize_phone_digits(phone)
-        if not PHONE_PATTERN.match(phone_digits):
-            errors["行動電話"] = f"需要09開頭的10碼字串：{phone}"
+        if not PHONE_PATTERN.fullmatch(phone_digits):
+            errors["行動電話"] = "需要09開頭的10碼手機，或含區碼的9至10碼市話"
 
-    city = row.get("縣市")
-    if not _is_blank(city) and str(city).strip() not in VALID_CITIES:
-        errors["縣市"] = f"不在縣市清單中：{city}"
+    email = row.get("email")
+    if not _is_blank(email):
+        text = str(email).strip()
+        if len(text) > 100 or not EMAIL_PATTERN.fullmatch(text):
+            errors["email"] = "Email 格式不正確或超過 100 字"
+
+    # 縣市僅為參考資料；缺漏或不在清單中均不產生匯入警示／補件理由。
 
     identity_status = row.get("身分資格")
     if _is_blank(identity_status):

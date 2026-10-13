@@ -6,6 +6,7 @@ const optionalNullableText = z.string().nullish().transform((value) => value ?? 
 const optionalNullablePositiveInt = z.number().int().positive().nullish().transform((value) => value ?? null);
 const optionalNullableBoolean = z.boolean().nullish().transform((value) => value ?? null);
 const profileValues = z.strictObject({
+  email: nullableText.optional(),
   service_type: nullableText.optional(),
   due_month: nullableText.optional(), reject_reason: nullableText.optional(),
   name: nullableText, gender: nullableText, phone: nullableText, city: nullableText,

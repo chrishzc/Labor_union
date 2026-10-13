@@ -54,11 +54,11 @@ function clientDueDates(item: RosterItem, stage: NonNullable<RosterItem['client_
 }
 
 const profileLabels = {
-  name: '姓名', gender: '性別', phone: '手機', city: '縣市', address: '地址', residence_type: '住宅型態',
+  name: '姓名', gender: '性別', phone: '手機', email: 'HCM Email', city: '縣市', address: '地址', residence_type: '住宅型態',
   delivery_type: '生產方式', baby_info: '寶寶資訊', notes: '行政註記',
 } as const;
 const beclassLabels = {
-  name: '報名姓名', email: 'Email', phone: '手機', tel: '市話', ext: '分機', city: '縣市',
+  name: '報名姓名', email: 'BeClass Email', phone: '手機', tel: '市話', ext: '分機', city: '縣市',
   zip_code: '郵遞區號', address: '報名地址', admin_notes: '報名註記', multi_birth_count: '胎數',
 } as const;
 const orderInformationLabels = {

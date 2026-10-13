@@ -32,6 +32,8 @@
 - `ui_react/src/components/CaseArchitectureBootstrapRepairPanel.tsx` — 僅組合 Case Import-owned bootstrap Q/P/A，完成後重讀名冊 owner facts。
 
 ## Dependencies
+- Client-owned `clients.phone` 接受手機／含區碼的市話；Client Profile 與 HCM 匯入共用 `domains/clients/profile.py` 的格式規則與正規化。欄位、writer、版本及 BeClass 獨立聯絡欄位保持既有契約。
+- Client-owned `clients.email` 保存 HCM email，管理端 Q/P/A 與名冊／唯讀詳情顯示「HCM Email」；BeClass effective `email` 獨立顯示「BeClass Email」。LIFF applicant 範圍不擴張。
 - outbound: `case-import/case-architecture-bootstrap` — `client_finance_bootstrap_required` 時提供明示 Preview／Apply 修復入口；Client Profile／名冊 Query 不自行建立 financial roots。
 - outbound: `orders/order-terms` — 名冊 Query 讀取保存條件與版本，不使用 mutation Preview 判定查閱資格；`order_terms_start_date_required`／`order_terms_service_days_required` 或 bootstrap status 缺件時，名冊組合既有 Orders-owned 契約條件 Preview／Apply，成功後重新查詢 Case Import bootstrap status。
 

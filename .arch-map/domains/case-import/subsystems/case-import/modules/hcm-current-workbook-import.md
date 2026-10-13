@@ -36,6 +36,9 @@
 - inbound: `case-import/case-import` — authenticated HCM workbook intake。
 
 ## Contracts
+- HCM 只有姓名、身分資格、報名時間、預計服務日期、希望服務天數、服務時間、服務方式錯誤才觸發 partial intake／待補件；其他錯誤僅警示並照常建立完整案件。Preview／Apply 最低建案資格均為可用案件編號。電話使用 Client-owned 手機／市話格式與正規化。
+- HCM `縣市` 為參考欄位：缺漏／非清單值不產生警示或補件理由，不單獨觸發 partial intake；沿用既有正規化。current review Query 忽略歷史縣市警示，不改寫來源、歷史紀錄或既有訂單狀態。
+- HCM 管理註記後的原始空白表頭欄正規化為 optional `email`，映射至 Client-owned `clients.email`；空白／缺欄可匯入，非法非空值形成去敏欄位警示及 NULL 主檔值。BeClass email 不互填，既有案件不重匯覆寫。
 - `document/架構重整/01_規格基線/00_Global_共同契約.md` — canonical payload exact replay 與 idempotency mismatch。
 - `document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md` — HCM Current workbook policy 與 Case Import ownership。
 

@@ -8,6 +8,7 @@ from domains.case_import.hcm_resubmission import hcm_field_targets
 @pytest.mark.parametrize(
     ("field_path", "targets"),
     [
+        ("email", ("clients.email",)),
         ("服務時間", ("orders.service_hours_per_day", "orders.service_start_time", "orders.service_end_time", "orders.service_end_day_offset")),
         ("預計服務日期", ("orders.start_date", "orders.end_date")),
         ("希望服務天數", ("orders.service_days", "orders.end_date")),
