@@ -220,10 +220,7 @@ def validate_hcm_row(row: dict[str, Any]) -> dict[str, str]:
     service_type = row.get("服務方式")
     if _is_blank(service_type):
         errors["服務方式"] = "不可空值"
-    elif str(service_type).strip() not in SERVICE_TYPE_VALUES:
-        errors["服務方式"] = (
-            f"值不在允許範圍內（連續服務,休周六,休周日,週休2日）：{service_type}"
-        )
+    # 非空原文供排班人員參考，不以允許值清單判定格式錯誤。
 
     if _is_blank(row.get("寶寶資訊")):
         errors["寶寶資訊"] = "不可空值"

@@ -98,7 +98,7 @@ def test_city_does_not_warn_or_turn_an_otherwise_complete_import_into_partial(
         ("服務時間", "0小時 09:00-17:00", "service_time", True),
         ("服務時間", "25小時 09:00-17:00", "service_time", True),
         ("服務時間", "8小時 17:00-09:00", "service_time", True),
-        ("服務方式", "無休", "service_type", True),
+        ("服務方式", "", "service_type", True),
         ("行動電話", "123", "phone", False),
         ("行動電話", "", "phone", False),
         ("email", "invalid", "email", False),
@@ -246,12 +246,32 @@ def test_hcm_service_type_normalization_preserves_the_rest_weekday() -> None:
     assert {"休周六", "休周日"} <= SERVICE_TYPE_VALUES
 
 
-@pytest.mark.parametrize('source', ['無休', '休五、日'])
-def test_service_type_requires_explicit_correction_without_automatic_conversion(source):
-    assert import_client_hcm.normalize_hcm_row({'服務方式': source})['service_type'] == source
+@pytest.mark.parametrize('source', ['無休', '休五、日', '排班時確認休假', '  客戶另行約定  '])
+def test_nonempty_service_type_is_reference_text_without_format_warning(monkeypatch, valid_hcm_row, source):
+    expected = source.strip()
+    row = pd.Series({**valid_hcm_row, '服務方式': source})
+    preview, outcome, applied, reviews, reconciled = _exercise_hcm_row(monkeypatch, row)
+    assert preview == {"ready": 1, "ready_with_warning": 0, "review_required": 0}
+    assert outcome == "inserted"
+    assert applied[0].is_complete and applied[0].bootstrap is not None
+    assert {item.name: item.value for item in applied[0].client_attributes}['service_type'] == expected
+    assert reviews == []
+    assert reconciled == [True]
+    assert '服務方式' not in validate_hcm_row({'服務方式': source})
+    assert unresolved_hcm_review_fields(('服務方式',), {'clients.service_type': source}) == ()
+    assert import_client_hcm._partial_hcm_record({'service_type': source}, {'服務方式': '歷史格式警示'})['service_type'] == source
+
+
+@pytest.mark.parametrize('source', [None, '', '  ', float('nan')])
+def test_only_blank_service_type_requires_supplementation(monkeypatch, valid_hcm_row, source):
+    row = pd.Series({**valid_hcm_row, '服務方式': source})
+    preview, outcome, applied, reviews, reconciled = _exercise_hcm_row(monkeypatch, row)
+    assert preview == {"ready": 0, "ready_with_warning": 1, "review_required": 0}
+    assert outcome == "inserted_with_warning"
+    assert not applied[0].is_complete and applied[0].bootstrap is None
+    assert reconciled == []
+    assert reviews[0]['issue_codes'] == ('hcm_field_missing:服務方式',)
     assert '服務方式' in validate_hcm_row({'服務方式': source})
-    assert unresolved_hcm_review_fields(('服務方式',), {'clients.service_type': source}) == ('服務方式',)
-    assert import_client_hcm._partial_hcm_record({'service_type': source}, {'服務方式': '需人工核對'})['service_type'] == source
 
 
 @pytest.mark.parametrize('source', ['周休二日', '週休1日', '週休一日'])
