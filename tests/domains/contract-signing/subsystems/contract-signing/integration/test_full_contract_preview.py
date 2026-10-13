@@ -38,21 +38,22 @@ from subsystems.contract_signing.staff_contract_application import _rest_weekday
 
 
 @pytest.mark.parametrize(
-    "identity,service_days,floor_fee,persisted_days,has_start,expected_amounts,service_mode",
+    "identity,service_days,floor_fee,persisted_days,has_start,expected_amounts,service_mode,stored_second_due",
     [
-        ("一般市民", 20, 0, 0, True, (12000, 45000, 3000, 60000), "連續服務"),
-        ("一般市民", 20, 1000, 0, True, (13000, 45000, 3000, 61000), "連續服務"),
-        ("低收入戶", 12, 0, 0, True, (0, 0, 0, 0), "連續服務"),
-        ("低收入戶", 20, 0, 0, True, (12000, 45000, 3000, 60000), "連續服務"),
-        ("一般市民", 20, 0, 22, True, (12000, 45000, 9000, 66000), "連續服務"),
-        ("一般市民", 20, 0, 0, False, None, "連續服務"),
-        ("一般市民", 20, 0, 0, True, (12000, 45000, 3000, 60000), "無休"),
-        ("一般市民", 20, 0, 0, True, (12000, 45000, 3000, 60000), None),
-        ("一般市民", 20, 0, 0, True, (12000, 45000, 3000, 60000), ""),
+        ("一般市民", 20, 0, 0, True, (12000, 45000, 3000, 60000), "連續服務", date(2026, 10, 20)),
+        ("一般市民", 20, 1000, 0, True, (13000, 45000, 3000, 61000), "連續服務", date(2026, 10, 20)),
+        ("低收入戶", 12, 0, 0, True, (0, 0, 0, 0), "連續服務", date(2026, 10, 20)),
+        ("低收入戶", 20, 0, 0, True, (12000, 45000, 3000, 60000), "連續服務", date(2026, 10, 20)),
+        ("一般市民", 20, 0, 22, True, (12000, 45000, 9000, 66000), "連續服務", date(2026, 10, 20)),
+        ("一般市民", 20, 0, 0, False, None, "連續服務", date(2026, 10, 20)),
+        ("一般市民", 20, 0, 0, True, (12000, 45000, 3000, 60000), "無休", date(2026, 10, 20)),
+        ("一般市民", 20, 0, 0, True, (12000, 45000, 3000, 60000), None, date(2026, 10, 20)),
+        ("一般市民", 20, 0, 0, True, (12000, 45000, 3000, 60000), "", date(2026, 10, 20)),
+        ("一般市民", 30, 0, 0, True, (12000, 45000, 33000, 90000), "無休", None),
     ],
 )
 def test_candidate_payment_preview_without_plan_or_payroll(
-    monkeypatch, identity, service_days, floor_fee, persisted_days, has_start, expected_amounts, service_mode,
+    monkeypatch, identity, service_days, floor_fee, persisted_days, has_start, expected_amounts, service_mode, stored_second_due,
 ):
     from infrastructure.mysql import contract_full_preview_repository as adapter
     from infrastructure.mysql import order_information_repository as information
@@ -102,7 +103,7 @@ def test_candidate_payment_preview_without_plan_or_payroll(
             tuple(ClientChargeDay(date(2026, 10, day), False)
                   for day in range(1, persisted_days + 1)),
             ClientPaymentTerms(4, MoneyNTD(300), date(2026, 9, 20),
-                               date(2026, 10, 1), date(2026, 10, 20)), (),
+                               date(2026, 10, 1), stored_second_due), (),
             client_service_charge_waived=identity == "低收入戶",
         ))
 
@@ -133,8 +134,38 @@ def test_candidate_payment_preview_without_plan_or_payroll(
     assert payments["樓層費"] == f"NT$ {floor_fee:,}"
     assert payments["預計訂金繳款日"] == "2026-09-20"
     assert payments["預計第一期繳款日"] == "2026-10-01"
-    assert payments["預計第二期繳款日"] == "2026-10-20"
+    assert payments["預計第二期繳款日"] == ("2026-10-16" if expected_amounts[2] > 0 else "不適用")
     assert payments["樓層費預計繳款日"] == ("2026-09-20" if floor_fee else "不適用")
+
+
+def test_precontract_projection_exposes_second_date_from_finance_stage_plan(monkeypatch):
+    from contextlib import nullcontext
+    from datetime import timedelta
+    from infrastructure.mysql import contract_full_preview_repository as adapter
+    from domains.client_finance.obligation_planning import ClientFinanceTermsFacts, ClientPaymentTerms
+    from shared_kernel.money import MoneyNTD
+    from subsystems.orders.order_information import build_candidate_information
+
+    finance = ClientFinanceTermsFacts(
+        "CASE-PRECONTRACT-SECOND", 1, 8, MoneyNTD(0), (),
+        ClientPaymentTerms(5, MoneyNTD(400), date(2026, 11, 1), date(2026, 11, 5), None), (),
+    )
+    monkeypatch.setattr(adapter, "select_order", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(adapter, "load_contract_client_finance_facts", lambda *_args, **_kwargs: finance)
+    segment = {"id": 1, "staff_name": "測試月嫂"}
+    plan = {"id": 1, "segments": (segment,), "allocations": tuple(
+        (segment, date(2026, 11, 5) + timedelta(days=i)) for i in range(30)
+    )}
+    facts = {"identity_status": "一般市民", "floor_fee": 0, "service_hours_per_day": 8}
+    adapter._extend_precontract_facts(
+        SimpleNamespace(cursor=lambda: nullcontext(None)), "CASE-PRECONTRACT-SECOND", facts, {}, plan,
+    )
+    assert facts["second_payment_amount"] == 32000
+    assert facts["second_payment_due_date"] == date(2026, 11, 20)
+    preview = build_candidate_information("CASE-PRECONTRACT-SECOND", 1, 1, facts, {}, None)
+    payments = dict(next(section.rows for section in preview.line_sections if section.title == "客戶付款約定"))
+    assert payments["第二期金額"] == "NT$ 32,000"
+    assert payments["預計第二期繳款日"] == "2026-11-20"
 
 
 class _Repository:

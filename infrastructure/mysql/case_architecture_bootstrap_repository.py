@@ -317,6 +317,7 @@ def _order_facts(row):
         service_hours_per_day=int(row["service_hours_per_day"]),
         source_identity_status=str(row["identity_status"]),
         multi_birth_count=_effective_multi_birth_count(row),
+        floor_fee=MoneyNTD(int(row.get("floor_fee", 0))),
     )
 
 
@@ -600,7 +601,7 @@ def _lock_suffix(lock: bool) -> str:
 
 _ORDER_SELECT_SQL = (
     "SELECT o.case_no,o.lifecycle_version,o.start_date,o.service_days,"
-    "o.service_hours_per_day,o.service_start_time,o.service_end_time,"
+    "o.service_hours_per_day,o.floor_fee,o.service_start_time,o.service_end_time,"
     "o.service_end_day_offset,c.identity_status,record.survey_details,state.effective_values_json "
     "FROM orders o "
     "JOIN clients c ON c.id=o.client_id AND c.case_no=o.case_no "

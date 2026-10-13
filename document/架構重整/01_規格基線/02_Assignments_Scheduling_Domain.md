@@ -469,7 +469,7 @@ Scheduling／Matching 擁有 case-owned Candidate Contact Pool。它只擁有候
 - 發送資訊-1／資訊-2 是詢問接案意願的唯一聯繫動作；不得另建沒有資料效果的「聯繫與確認意願」命令。
 - 每位候選人的意願及兩種資訊寄送紀錄獨立、append-only 且以 candidate entry／event key 冪等；不得由同案其他候選人覆蓋。
 - 候選池 readback 必須以 nullable `latest_willingness_event_id` 回傳該候選人最新有效意願事件的既有 event ID。客戶端只有在此 ID 與自己收到的意願回條相同、且意願值相同時，才能確認該次回覆已儲存；較新的同值或異值事件只代表最新狀態，不得確認原操作。
-- 客戶同意日期調整、且 Orders Terms 已以同日差平移未指派案件的 planned 起訖日後，重新聯繫原候選人必須在同一 Scheduling transaction 以 current Orders 起訖日重驗 coverage；有衝突仍可繼續協調，更新 candidate contact period／coverage fingerprint、追加前後日期事件並排入新資訊卡，任一步失敗皆 rollback。這不建立正式服務日或 assignment。
+- 客戶同意日期調整、且 Orders Terms 已修改未指派案件的 planned 起訖日後，一般候選資訊預覽與寄送前內容均讀 current Orders 期間。一般寄送或重新聯繫原候選人必須在同一 Scheduling transaction 以相同 current Orders 起訖日重驗 coverage；有衝突仍可繼續協調，期間有異動時更新 candidate contact period／coverage fingerprint、追加前後日期事件並排入新資訊卡，任一步失敗皆 rollback。Preview 零寫入，既有寄送 receipt 重播保留原內容／任務，不建立正式服務日或 assignment；正式 plan／assignment 的期間仍由各自 owner 擁有。
 - 未正式排班即可預覽每週服務時間。未有 confirmed service dates 時依候選期間、週休及特殊休假推算並核對 Orders 約定服務天數；不足或超出必須明示，不能靜默視為履約完整。已有 current confirmed dates 時使用精確服務日，包括人工協調的週末上班；同時顯示延長後的 actual conflict 與 buffer 提醒。協調後須重新確認服務日期；正式排班仍以 current owner dates 驗證服務量及實際占用。
 - 2026-10-13 人工裁決：前段每週說明顯示 Case Import 原始服務方式，人工週休僅用於當次 server 試算。
   當次日期經 Orders Preview 驗證後零寫入投影；一按「保存預計日期」沿 Orders Service Dates writer 保存，

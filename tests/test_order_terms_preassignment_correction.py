@@ -4,7 +4,7 @@ Description: 驗證未指派案件可補正非排班條款，且排班形狀異�
 """
 
 from dataclasses import replace
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timezone, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -29,6 +29,7 @@ from shared_kernel.identities import (
     IdempotencyKey,
 )
 from shared_kernel.money import MoneyNTD
+from domains.client_finance.reconciliation import PaymentStage
 from subsystems.orders import terms_workflow
 from subsystems.payroll.terms_impact import (
     ExistingStaffObligationTermsFact,
@@ -123,7 +124,7 @@ class _Repository:
     def __init__(self, facts):
         self.facts = facts
 
-    def load_for_preview(self, _case_no):
+    def load_for_preview(self, _case_no, *, proposed_terms=None):
         return self.facts
 
 
@@ -134,7 +135,7 @@ class _PreviewReadRepository:
         self.facts = facts
         self.reads = 0
 
-    def load_for_preview(self, _case_no):
+    def load_for_preview(self, _case_no, *, proposed_terms=None):
         self.reads += 1
         return self.facts
 
@@ -193,14 +194,53 @@ class _NoDownstreamPersistenceRepository(_PersistenceRepository):
     def save_receipt(self, _command):
         pytest.fail("ordinary Terms save must not persist a receipt")
 
-    def load_for_apply(self, _case_no, staff_ids):
+    def load_for_apply(self, _case_no, staff_ids, *, proposed_terms=None):
         assert staff_ids == ()
         return self.facts
+
+
+class _PaymentTermsPersistenceRepository(_PersistenceRepository):
+    def persist_client_finance_impact(self, command):
+        self.saved.append(command)
 
 
 class _Clock:
     def now(self):
         return datetime(2026, 8, 23, tzinfo=timezone.utc)
+
+
+@pytest.mark.parametrize("updates,second_due,second_amount,mutates", [
+    ({"planned_start_date": date(2026, 8, 29)}, date(2026, 9, 13), 24000, True),
+    ({"planned_start_date": date(2026, 9, 13)}, date(2026, 9, 28), 24000, True),
+    ({"service_days": 20}, None, 0, True),
+    ({"service_hours_per_day": 4}, date(2026, 9, 25), 12000, False),
+    ({"floor_fee": MoneyNTD(1000)}, date(2026, 9, 25), 24000, False),
+])
+def test_precontract_terms_replan_payment_dates_without_creating_obligations(
+    updates, second_due, second_amount, mutates,
+):
+    before = _terms(requires_cooking=False, service_days=30)
+    source = replace(_facts().client_finance, payment_terms=ClientPaymentTerms(
+        5, MoneyNTD(300), date(2026, 8, 30), before.planned_start_date,
+        before.planned_start_date + timedelta(days=15),
+    ), identity_status="一般市民")
+    facts = replace(_facts(), order=replace(_facts().order, terms=before),
+                    client_finance=source, payroll=None)
+    workflow = terms_workflow.OrderTermsWorkflow(_Repository(facts), object(), _Clock())
+    preview = workflow.preview(facts.order.case_no, replace(before, **updates))
+    impact = preview.client_finance_impact
+    second = next(stage for stage in impact.stage_plans if stage.payment_stage is PaymentStage.SECOND)
+    assert second.due_date == second_due
+    assert second.amount.amount == second_amount
+    assert impact.actions == ()
+    assert preview.payroll_impact is None
+    assert preview.scheduling.assignments == ()
+    assert preview.requires_formal_apply is mutates
+    if mutates:
+        assert impact.payment_terms.first_payment_due_date == preview.after.planned_start_date
+        assert impact.payment_terms.deposit_due_date == min(source.payment_terms.deposit_due_date, preview.after.planned_start_date)
+        assert impact.payment_terms.second_payment_due_date == second_due
+        assert impact.resulting_account_version == source.account_version + 1
 
 
 class _UnitOfWork:
@@ -250,7 +290,7 @@ class _AssignedPersistenceRepository(_Repository):
             return self.stored_receipts.get(key.value)
         return self.stored_receipt
 
-    def load_for_apply(self, _case_no, staff_ids):
+    def load_for_apply(self, _case_no, staff_ids, *, proposed_terms=None):
         assert staff_ids == (3,)
         return self.facts
 
@@ -458,7 +498,7 @@ def test_preassignment_start_date_shift_replaces_confirmed_service_dates():
             date(2026, 9, 10 + offset) for offset in range(5)
         ),
     )
-    repository = _PersistenceRepository(facts)
+    repository = _PaymentTermsPersistenceRepository(facts)
     workflow = terms_workflow.OrderTermsWorkflow(repository, object(), _Clock())
     preview = workflow.preview(
         "116990823",
@@ -485,6 +525,10 @@ def test_preassignment_start_date_shift_replaces_confirmed_service_dates():
         for item in repository.saved
         if isinstance(item, terms_workflow.ConfirmedServiceDateCandidate)
     )
+    finance_command = next(item for item in repository.saved
+                           if isinstance(item, terms_workflow.ClientFinanceImpactPersistenceCommand))
+    assert finance_command.candidate.payment_terms.first_payment_due_date == date(2026, 9, 13)
+    assert finance_command.candidate.actions == ()
     assert replacement.order_version == 1
     assert preview.scheduling_replacement_required is False
     assert replacement.scheduling_version == 0

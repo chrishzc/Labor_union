@@ -229,6 +229,8 @@ class _Cursor:
             self.rows = [
                 {
                     "case_no": "CASE-1",
+                    "planned_start_date": date(2026, 9, 1),
+                    "planned_end_date": date(2026, 9, 20),
                     "service_days": 20,
                     "service_hours_per_day": 10,
                     "requires_cooking": 1,
@@ -359,6 +361,33 @@ def test_candidate_information_one_excludes_staff_payroll_terms():
     assert all(section.title != "月嫂報酬" for section in preview.line_sections)
     assert "總薪資" not in preview.text
     assert "預計發薪日" not in preview.text
+
+
+@pytest.mark.parametrize("start,end", [
+    (date(2026, 11, 10), date(2026, 12, 9)),
+    (date(2026, 11, 20), date(2026, 12, 19)),
+    (date(2026, 11, 20), date(2026, 12, 9)),
+])
+def test_candidate_preview_uses_current_order_period_not_initial_contact_period(start, end):
+    class Cursor(_Cursor):
+        def execute(self, statement, params):
+            super().execute(statement, params)
+            if "FROM orders" in statement:
+                self.rows[0].update(planned_start_date=start, planned_end_date=end)
+
+    connection = _Connection()
+    connection.cursor_instance = Cursor()
+    preview = MySqlOrderInformationRepository(connection).preview_candidate_information("CASE-1", 17, 1)
+    assert f"預計服務開始日期：{start}" in preview.text
+    assert f"預計服務結束日期：{end}" in preview.text
+    assert all(sql.lstrip().startswith("SELECT") for sql, _ in connection.cursor_instance.executed)
+
+
+def test_candidate_explicit_recontact_period_is_preserved():
+    preview = MySqlOrderInformationRepository(_Connection()).preview_candidate_information(
+        "CASE-1", 17, 1, service_period=(date(2026, 10, 1), date(2026, 10, 15)),
+    )
+    assert "預計服務結束日期：2026-10-15" in preview.text
 
 
 def test_case_import_projection_keeps_missing_and_ambiguous_answers_field_local():

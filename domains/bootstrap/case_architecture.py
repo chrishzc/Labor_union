@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import date
+from dataclasses import dataclass, replace
+from datetime import date, timedelta
+from decimal import Decimal
 from enum import StrEnum
 
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
@@ -13,6 +14,12 @@ from shared_kernel.validation import (
     require_nonnegative_integer,
     require_positive_integer,
 )
+from domains.client_finance.obligation_planning import (
+    ClientChargeDay, ClientFinanceTermsFacts, ClientPaymentTerms,
+    build_client_finance_terms_candidate,
+)
+from domains.client_finance.reconciliation import PaymentStage
+from domains.client_finance.subsidy_coverage import derive_subsidy_coverage
 
 _IDENTITY_MAXIMUM_LENGTH = 191
 _CASE_NUMBER_MAXIMUM_LENGTH = 50
@@ -156,8 +163,11 @@ class CaseRootFacts:
     service_hours_per_day: float | int
     source_identity_status: str
     multi_birth_count: str | None = None
+    floor_fee: MoneyNTD = MoneyNTD(0)
 
     def __post_init__(self) -> None:
+        if not isinstance(self.floor_fee, MoneyNTD) or self.floor_fee.amount < 0:
+            raise ValueError("floor fee must be nonnegative MoneyNTD")
         require_canonical_text(
             self.case_no,
             "case number",
@@ -268,6 +278,9 @@ def build_case_architecture_bootstrap_candidate(
     _validate_case_identity(facts, intent)
     _validate_order_root_facts(facts.order)
     _validate_client_payment_terms(facts.order, intent.client_payment_terms)
+    intent = replace(intent, client_payment_terms=_planned_payment_terms(
+        facts.order, intent.client_payment_terms,
+    ))
     payroll_policy = _require_rate_policy(facts, intent)
     scheduling_version = facts.presence.scheduling_version
     scheduling_generation = facts.presence.scheduling_generation
@@ -352,8 +365,27 @@ def _validate_client_payment_terms(order, payment_terms) -> None:
         _raise_invalid("deposit due date cannot follow service start")
     if payment_terms.first_payment_due_date != order.planned_start_date:
         _raise_invalid("first payment due date must equal planned start date")
-    if payment_terms.second_payment_due_date is not None:
-        _raise_invalid("second payment due date is formed after first settlement")
+
+
+def _planned_payment_terms(order, terms) -> ClientPaymentTermsRootFacts:
+    coverage = derive_subsidy_coverage(
+        order.source_identity_status,
+        Decimal(order.service_days) * Decimal(str(order.service_hours_per_day)),
+        Decimal(order.floor_fee.amount),
+    )
+    finance = ClientFinanceTermsFacts(
+        order.case_no, 0, order.service_hours_per_day, order.floor_fee,
+        tuple(ClientChargeDay(order.planned_start_date + timedelta(days=i), False)
+              for i in range(order.service_days)),
+        ClientPaymentTerms(terms.deposit_service_days, terms.client_hourly_rate,
+                           terms.deposit_due_date, terms.first_payment_due_date,
+                           terms.second_payment_due_date),
+        (), client_service_charge_waived=coverage.is_full_subsidy_order,
+    )
+    candidate = build_client_finance_terms_candidate(finance, f"bootstrap:{order.case_no}")
+    second = next(stage for stage in candidate.stage_plans
+                  if stage.payment_stage is PaymentStage.SECOND)
+    return replace(terms, second_payment_due_date=second.due_date)
 
 
 def _deposit_days_for_identity(identity_status: str) -> int:
@@ -448,7 +480,10 @@ def _client_terms_payload(payment_terms) -> dict[str, object]:
         "first_payment_due_date": (
             payment_terms.first_payment_due_date.isoformat()
         ),
-        "second_payment_due_date": None,
+        "second_payment_due_date": (
+            payment_terms.second_payment_due_date.isoformat()
+            if payment_terms.second_payment_due_date is not None else None
+        ),
     }
 
 

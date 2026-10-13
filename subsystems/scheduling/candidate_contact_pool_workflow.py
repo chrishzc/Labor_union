@@ -887,12 +887,10 @@ def _send_information_in_transaction(
                 "event_id": existing["id"],
                 "line_task_id": _positive_int(task_id, "line_task_id") if task_id is not None else None,
             }
-        if refresh_period_from_order:
-            if entry.get("order_status") != "洽談中":
-                raise ValueError("candidate_contact_order_not_negotiating")
-            service_period = _current_service_period(entry)
-        else:
-            service_period = (entry["service_start_date"], entry["service_end_date"])
+        service_period = _current_service_period(entry)
+        refresh_period_from_order = refresh_period_from_order or service_period != (
+            entry["service_start_date"], entry["service_end_date"],
+        )
         coverage = _require_current_candidate(
             case_no,
             entry["staff_id"],
@@ -904,7 +902,7 @@ def _send_information_in_transaction(
             candidate_id,
             info_type,
             for_update=True,
-            service_period=service_period if refresh_period_from_order else None,
+            service_period=service_period,
         )
         if preview_fingerprint != preview.preview_fingerprint:
             raise ValueError("candidate_information_preview_stale")

@@ -144,6 +144,8 @@ React adapter 不再自行解讀中文狀態縮減集合；focused tests 與 pro
 
 ### 3.2 Terms Preview／Apply
 
+Terms 的唯讀 Query 與 Preview／Apply 的異動資格檢查分離。已有客戶應付義務但尚未建立執行 assignment 是正式簽約流程的合法狀態，不得因此拒絕 Query；Query 回傳已保存條款、各 owner 的實際版本、確認服務日期及目前指派。服務資料鎖仍限制編輯而不限制查閱；Preview／Apply 保留既有下游義務與版本檢查。
+
 Preview 輸入接受 Terms 根事實意圖。依 Issue #326 的本機修復授權，尚未開始服務且已有正式日期／指派的
 合約天數修改，可在同一 Terms Preview／Apply 附上由既有 server 精算得到的完整
 `replacement_service_dates`；已有指派時另由操作者明示每個既有 `assignment_id` 的
@@ -162,7 +164,9 @@ Apply：
 
 1. 驗證 actor、expected version，以及 request 回傳的 `requires_formal_apply` 與 fresh Preview 一致；不得由前端自行降級。
 2. 鎖定並讀取 fresh Orders、Scheduling，以及本次 candidate 實際需要的 Finance／Payroll facts；
-   未建立正式 assignment 且沒有既有下游義務時，不讀取完整帳務、費率或政策，也不要求或偽造其版本。
+   未建立正式 assignment 且沒有既有下游義務時，只在預計開始日、服務天數、每日時數或樓層費異動且
+   已有 Finance root 時讀取該 owner 的付款條款計算 facts；日期異動經同一 Apply 同步付款條款與事件，
+   不建立簽約前正式義務。其餘修改不讀取完整帳務、費率或政策，也不要求或偽造其版本；此分支不新增 Payroll 依賴。
 3. 以相同 candidate builder 重建 Preview。
 4. 驗證 fingerprint。
 5. 若變更不形成 Scheduling、confirmed service dates、Finance、Payroll 或 lifecycle 正式影響，走普通保存：只更新 Orders Terms 與 aggregate version，回傳當次 HTTP result；不要求 reason／idempotency key，不建立 command claim、Terms／lifecycle event、audit／outbox、snapshot／history 或永久 receipt，也不呼叫其他 owner writer。

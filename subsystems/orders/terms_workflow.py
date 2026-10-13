@@ -11,7 +11,7 @@ from enum import StrEnum
 from typing import Any
 
 from domains.client_finance.obligation_planning import (
-    build_preassignment_client_finance_noop,
+    build_preassignment_client_finance_terms_impact,
     build_client_finance_terms_impact,
 )
 from domains.orders.lifecycle import (
@@ -28,6 +28,7 @@ from domains.orders.terms import (
 from domains.scheduling.generation import (
     AssignmentIdentityResolution,
     EmptyAssignmentIdentityResolution,
+    EffectiveAssignmentSegment,
     build_generation_candidate,
     build_preassignment_cooking_correction_candidate,
     build_preassignment_terms_candidate,
@@ -71,6 +72,14 @@ class OrderTermsRegistryFacts:
     scheduling_generation: int
     client_finance_version: int | None
     payroll_version: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class OrderTermsQueryFacts:
+    registry: OrderTermsRegistryFacts
+    assignments: tuple[EffectiveAssignmentSegment, ...]
+    confirmed_service_date_version: int | None
+    confirmed_service_dates: tuple[date, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -283,7 +292,7 @@ class OrderTermsWorkflow:
     def preview(self, case_no: str, proposed_terms: Any, *,
                 replacement_service_dates=None, replacement_allocations=()) -> Any:
         return self._build_preview(
-            self._repository.load_for_preview(case_no), proposed_terms,
+            self._repository.load_for_preview(case_no, proposed_terms=proposed_terms), proposed_terms,
             replacement_service_dates, replacement_allocations,
         )
 
@@ -307,7 +316,9 @@ class OrderTermsWorkflow:
             replay = self._claim_or_replay(request, command_fingerprint)
             if replay is not None:
                 return replay
-        facts = self._repository.load_for_apply(request.case_no, staff_ids)
+        facts = self._repository.load_for_apply(
+            request.case_no, staff_ids, proposed_terms=request.proposed_terms,
+        )
         preview = self._fresh_preview(request, facts, staff_ids)
         receipt = _build_receipt(preview)
         if preview.requires_formal_apply:
@@ -388,18 +399,20 @@ class OrderTermsWorkflow:
                     self._clock.now(),
                 )
             else:
-                client_finance = build_preassignment_client_finance_noop(
-                    facts.client_finance, proposed_terms, scheduling, change_identity
+                client_finance = build_preassignment_client_finance_terms_impact(
+                    facts.client_finance, facts.order.terms, proposed_terms, scheduling, change_identity
                 )
                 payroll = build_preassignment_payroll_noop(
                     facts.payroll, scheduling, proposed_terms, change_identity
-                )
+                ) if facts.payroll is not None else None
                 lifecycle = build_terms_lifecycle_impact(
                     facts.lifecycle,
                     proposed_terms,
                     scheduling,
                     client_finance.settlement,
                     self._clock.now(),
+                ) if payroll is not None else build_preassignment_terms_lifecycle_impact(
+                    facts.lifecycle, scheduling, self._clock.now(),
                 )
         else:
             if facts.client_finance is None or facts.payroll is None:

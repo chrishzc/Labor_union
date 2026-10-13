@@ -28,6 +28,25 @@
 
 依 Orders Terms、服務日根事實及費率政策建立訂金、第一期、第二期及調整義務。樓層費只計入一次。條款變更只重算未核銷義務；已核銷差額建立 adjustment 或 refund obligation。
 
+2026-10-13 第二期繳款日人工裁決：第二期有應付金額時，Client Finance stage plan 的預計繳款日
+固定為第一期款預計入帳日（`first_payment_due_date`）加 15 個曆日；第二期金額為零時不產生日期。
+計算不等待第一期實際入帳，也不使用實際核銷日期。訂單資訊、候選／推薦寄送前預覽及契約共用此
+owner 計算結果；既有保存的第二期日期不取代本公式。預覽零寫入；未結清義務日期的正式異動仍經
+既有 Preview／Apply，已核銷交易與已簽文件不由預覽改寫。
+
+2026-10-13 第二期日期保存裁決：案件初始化正式 Apply 將上述 owner 計算結果保存至
+`client_payment_terms.second_payment_due_date` 與初始付款條款事件；正式期款建立或重算時，
+同一 outer Unit of Work 同步此欄位與新的 immutable payment-terms event，並使用同一 stage plan
+寫入義務日期。第二期金額為零時保存 NULL；查詢與預覽保持零寫入，既有日期補正須走正式 writer。
+
+2026-10-13 條件變更同步裁決：已有付款條款且尚無正式指派／應付義務的案件，修改預計開始日、
+服務天數、每日時數或樓層費時，Terms Preview 以新條件重算預計付款階段；正式 Apply 同步有變化的
+付款條款與 immutable event。第一期預計日隨預計開始日更新，訂金沿用已保存期限且不得晚於新開始日；
+第二期有金額時為第一期預計日＋15 天，無金額時保存 NULL。簽約前只保存條款，不建立正式義務；
+預估金額讀取最新 Orders 與 Finance facts。已有正式指派的條款異動沿用既有正式義務重算流程，
+同步使用新的預計日期，不覆寫既有收款、核銷或簽署 evidence。Finance 日期有異動時納入版本／fingerprint
+與同一 outer Unit of Work；與付款計算無關的修改不新增 Finance／Payroll 依賴。
+
 使用者介面一律稱為「客戶應付」，意思是客戶應付給工會的金額；內部既有 accounting
 `receivable` 型別可保留。服務本金公式固定為 `有效正式服務時數 × 有效服務單價`，雙胞胎為
 每小時 450。服務前的合法胎數更正必須在同一交易同步付款條款與所有 open 義務；已核銷金額

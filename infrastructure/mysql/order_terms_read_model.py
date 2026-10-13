@@ -16,6 +16,7 @@ from domains.client_finance.obligation_planning import (
     ClientFinanceTermsSourceFacts,
     ClientPaymentTerms,
     ExistingClientStageObligation,
+    payment_terms_inputs_changed,
 )
 from domains.client_finance.reconciliation import PaymentStage
 from domains.client_finance.subsidy_coverage import derive_subsidy_coverage
@@ -37,7 +38,9 @@ from shared_kernel.money import MoneyNTD
 from infrastructure.mysql.effective_case_service_rate import (
     load_explicit_case_service_rate,
 )
-from subsystems.orders.terms_workflow import OrderTermsRegistryFacts, TermsWorkflowFacts
+from subsystems.orders.terms_workflow import (
+    OrderTermsQueryFacts, OrderTermsRegistryFacts, TermsWorkflowFacts,
+)
 from subsystems.orders.actual_start_workflow import ActualStartPayrollVersionFacts
 from subsystems.payroll.terms_impact import (
     CasePayrollPolicyTerms,
@@ -64,7 +67,7 @@ def load_actual_start_preview_facts(cursor: Any, case_no: str) -> TermsWorkflowF
     )
 
 
-def load_terms_preview_facts(cursor: Any, case_no: str) -> TermsWorkflowFacts:
+def load_terms_preview_facts(cursor: Any, case_no: str, proposed_terms=None) -> TermsWorkflowFacts:
     """Load only downstream facts that an Orders Terms preview can affect."""
 
     order_row = select_order(cursor, case_no, lock=False)
@@ -75,6 +78,26 @@ def load_terms_preview_facts(cursor: Any, case_no: str) -> TermsWorkflowFacts:
         aggregate_row,
         lock=False,
         omit_preassignment_downstream=True,
+        proposed_terms=proposed_terms,
+    )
+
+
+def load_terms_query_facts(cursor: Any, case_no: str) -> OrderTermsQueryFacts:
+    """Read current terms without enforcing mutation eligibility."""
+
+    registry = load_registry_terms_facts(cursor, case_no)
+    aggregate = select_scheduling_aggregate(cursor, case_no, lock=False)
+    generation = _select_generation(cursor, aggregate, lock=False)
+    assignments = _select_assignments(cursor, generation, lock=False)
+    schedules = _select_schedules(cursor, generation, lock=False)
+    confirmed_version, confirmed_dates = _select_confirmed_service_dates(
+        cursor, case_no, False,
+    )
+    return OrderTermsQueryFacts(
+        registry=registry,
+        assignments=_segments(assignments, _service_dates_by_assignment(schedules)),
+        confirmed_service_date_version=confirmed_version,
+        confirmed_service_dates=confirmed_dates,
     )
 
 
@@ -217,6 +240,7 @@ def load_terms_locked_facts(
     case_no: str,
     preflight_staff_ids: tuple[int, ...],
     after_staff_lock: Callable[[Any], None] | None = None,
+    proposed_terms: OrderTerms | None = None,
 ) -> TermsWorkflowFacts:
     """Lock the current Terms impact set without requiring unrelated roots."""
 
@@ -231,6 +255,7 @@ def load_terms_locked_facts(
         aggregate_row,
         lock=True,
         omit_preassignment_downstream=True,
+        proposed_terms=proposed_terms,
     )
 
 
@@ -287,6 +312,7 @@ def _assemble_facts(
     lock: bool,
     omit_preassignment_downstream: bool = False,
     omit_payroll_details: bool = False,
+    proposed_terms: OrderTerms | None = None,
 ) -> TermsWorkflowFacts:
     generation_row = _select_generation(cursor, aggregate_row, lock)
     assignment_rows = _select_assignments(cursor, generation_row, lock)
@@ -295,12 +321,17 @@ def _assemble_facts(
         _select_confirmed_service_dates(cursor, str(order_row["case_no"]), lock)
     )
     if omit_preassignment_downstream and not assignment_rows:
-        _validate_preassignment_downstream_state(
+        finance_present = _validate_preassignment_downstream_state(
             cursor,
             str(order_row["case_no"]),
             lock,
         )
-        client_finance = None
+        client_finance = (
+            _load_client_finance(cursor, order_row, schedule_rows, lock)
+            if finance_present and proposed_terms is not None
+            and payment_terms_inputs_changed(_order_facts(order_row).terms, proposed_terms)
+            else None
+        )
         payroll = None
     else:
         client_finance = _load_client_finance(cursor, order_row, schedule_rows, lock)
@@ -337,7 +368,7 @@ def _load_actual_start_payroll_version(cursor, case_no):
     return ActualStartPayrollVersionFacts(int(row["aggregate_version"]))
 
 
-def _validate_preassignment_downstream_state(cursor, case_no: str, lock: bool) -> None:
+def _validate_preassignment_downstream_state(cursor, case_no: str, lock: bool) -> bool:
     client_account_present = _row_exists(
         cursor,
         "SELECT case_no FROM client_finance_accounts WHERE case_no=%s",
@@ -381,6 +412,7 @@ def _validate_preassignment_downstream_state(cursor, case_no: str, lock: bool) -
         lock,
     ):
         raise ValueError("preassignment_payroll_obligation_conflict")
+    return client_account_present
 
 
 def _row_exists(cursor, sql: str, case_no: str, lock: bool) -> bool:

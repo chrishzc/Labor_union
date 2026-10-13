@@ -1,4 +1,5 @@
-from datetime import date
+from datetime import date, timedelta
+from dataclasses import replace
 
 import pytest
 
@@ -55,6 +56,35 @@ def test_mysql_bootstrap_uses_case_import_multi_birth_projection():
     assert payroll_policy_kind_for_case(
         facts.source_identity_status, facts.multi_birth_count
     ) is PayrollPolicyKind.TWINS
+
+
+@pytest.mark.parametrize("days,identity,deposit,fee,hours,expected", [
+    (30, "一般市民", 5, 0, 8, date(2026, 11, 16)),
+    (20, "一般市民", 5, 0, 8, None),
+    (30, "補助市民", 0, 0, 8, date(2026, 11, 16)),
+    (30, "補助市民", 0, 0, 1, None),
+    (30, "補助市民", 0, 1000, 1, date(2026, 11, 16)),
+])
+def test_bootstrap_saves_owner_calculated_second_due_date(days, identity, deposit, fee, hours, expected):
+    first = date(2026, 11, 1)
+    kind = PayrollPolicyKind.CITIZEN if identity == "一般市民" else PayrollPolicyKind.SUBSIDIZED_CITIZEN
+    rate = 300 if kind is PayrollPolicyKind.CITIZEN else 350
+    facts = CaseArchitectureBootstrapFacts(
+        CaseRootFacts("CASE-DATE", 0, first, days, hours, identity, floor_fee=MoneyNTD(fee)),
+        RatePolicyFacts("approved-rates-v1", kind, MoneyNTD(rate), date(1900, 1, 1), None),
+        BootstrapPresence(),
+    )
+    intent = CaseArchitectureBootstrapIntent(
+        "CASE-DATE", ClientPaymentTermsRootFacts(
+            "client-v1", MoneyNTD(rate), deposit, first - timedelta(days=16), first,
+        ), "approved-rates-v1",
+    )
+    candidate = build_case_architecture_bootstrap_candidate(facts, intent)
+    assert candidate.client_payment_terms.second_payment_due_date == expected
+    wrong = replace(intent, client_payment_terms=replace(
+        intent.client_payment_terms, second_payment_due_date=date(2020, 1, 1),
+    ))
+    assert build_case_architecture_bootstrap_candidate(facts, wrong).fingerprint == candidate.fingerprint
 
 
 def _candidate(identity, deposit_days, multi_birth_count, policy_kind):

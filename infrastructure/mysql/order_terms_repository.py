@@ -21,6 +21,7 @@ from subsystems.orders.terms_workflow import (
     OrderTermsApplyRequest,
     OrderTermsPersistenceCommand,
     OrderTermsPreview,
+    OrderTermsQueryFacts,
     OrderTermsReceipt,
     OrderTermsReceiptPersistenceCommand,
     OrderTermsRegistryFacts,
@@ -37,6 +38,7 @@ from .order_terms_read_model import (
     load_registry_terms_facts,
     load_terms_locked_facts,
     load_terms_preview_facts,
+    load_terms_query_facts,
     preflight_staff_ids,
 )
 from .order_lifecycle_impact_writer import persist_order_lifecycle_impact
@@ -48,9 +50,13 @@ class MySqlOrderTermsRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
 
-    def load_for_preview(self, case_no: str) -> TermsWorkflowFacts:
+    def load_for_query(self, case_no: str) -> OrderTermsQueryFacts:
         with self._connection.cursor() as cursor:
-            return load_terms_preview_facts(cursor, case_no)
+            return load_terms_query_facts(cursor, case_no)
+
+    def load_for_preview(self, case_no: str, *, proposed_terms=None) -> TermsWorkflowFacts:
+        with self._connection.cursor() as cursor:
+            return load_terms_preview_facts(cursor, case_no, proposed_terms)
 
     def load_for_registry(self, case_no: str) -> OrderTermsRegistryFacts:
         with self._connection.cursor() as cursor:
@@ -103,9 +109,12 @@ class MySqlOrderTermsRepository:
         self,
         case_no: str,
         preflight_staff_ids: tuple[int, ...],
+        *, proposed_terms=None,
     ) -> TermsWorkflowFacts:
         with self._connection.cursor() as cursor:
-            return load_terms_locked_facts(cursor, case_no, preflight_staff_ids)
+            return load_terms_locked_facts(
+                cursor, case_no, preflight_staff_ids, proposed_terms=proposed_terms,
+            )
 
     def claim_command(
         self,

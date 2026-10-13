@@ -227,26 +227,21 @@ def _apply_request(case_no, body, key, correlation, principal):
 
 
 def _query_payload(facts) -> dict[str, Any]:
+    registry = facts.registry
     return {
-        "case_no": facts.order.case_no,
-        "order_version": facts.order.version,
-        "scheduling_version": facts.scheduling.aggregate_version,
-        "scheduling_generation": facts.scheduling.generation_number,
-        "client_finance_version": (
-            facts.client_finance.account_version
-            if facts.client_finance is not None
-            else None
-        ),
-        "payroll_version": (
-            facts.payroll.payroll_version if facts.payroll is not None else None
-        ),
-        "service_data_locked": facts.order.service_data_locked,
-        "terms": facts.order.terms.canonical_payload(),
+        "case_no": registry.order.case_no,
+        "order_version": registry.order.version,
+        "scheduling_version": registry.scheduling_version,
+        "scheduling_generation": registry.scheduling_generation,
+        "client_finance_version": registry.client_finance_version,
+        "payroll_version": registry.payroll_version,
+        "service_data_locked": registry.order.service_data_locked,
+        "terms": registry.order.terms.canonical_payload(),
         "confirmed_service_dates": list(facts.confirmed_service_dates),
         "confirmed_service_date_version": facts.confirmed_service_date_version,
         "assignments": [{"assignment_id": s.assignment_id, "staff_id": s.staff_id,
                          "service_days": s.service_day_count}
-                        for s in sorted(facts.scheduling.segments, key=lambda s: s.sequence)],
+                        for s in sorted(facts.assignments, key=lambda s: s.sequence)],
     }
 
 

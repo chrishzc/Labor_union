@@ -16,6 +16,7 @@ from subsystems.orders.terms_workflow import (
 
 
 def persist_client_finance_terms_impact(cursor, command) -> None:
+    _persist_payment_terms(cursor, command)
     for ordinal, action in enumerate(command.candidate.actions, start=1):
         if action.action is ClientObligationActionKind.UNCHANGED:
             continue
@@ -25,6 +26,56 @@ def persist_client_finance_terms_impact(cursor, command) -> None:
         _persist_subsidy_return(cursor, command)
     _advance_account_version(cursor, command)
     _append_outbox(cursor, command)
+
+
+def _persist_payment_terms(cursor, command):
+    second = next((stage for stage in command.candidate.stage_plans
+                   if stage.payment_stage is PaymentStage.SECOND), None)
+    terms = command.candidate.payment_terms
+    if second is None and terms is None:
+        return
+    cursor.execute(
+        "SELECT policy_version,client_hourly_rate_ntd,deposit_service_days,"
+        "deposit_due_date,first_payment_due_date,second_payment_due_date,current_event_id "
+        "FROM client_payment_terms WHERE case_no=%s FOR UPDATE",
+        (command.candidate.case_no,),
+    )
+    current = cursor.fetchone()
+    if current is None:
+        raise ValueError("client_finance_bootstrap_required")
+    values = {
+        "client_hourly_rate_ntd": terms.client_hourly_rate.amount if terms is not None else current["client_hourly_rate_ntd"],
+        "deposit_service_days": terms.deposit_service_days if terms is not None else current["deposit_service_days"],
+        "deposit_due_date": terms.deposit_due_date if terms is not None else current["deposit_due_date"],
+        "first_payment_due_date": terms.first_payment_due_date if terms is not None else current["first_payment_due_date"],
+        "second_payment_due_date": terms.second_payment_due_date if terms is not None else second.due_date,
+    }
+    if all(current[name] == value for name, value in values.items()):
+        return
+    cursor.execute(
+        "INSERT INTO client_payment_terms_events "
+        "(case_no,policy_version,client_hourly_rate_ntd,deposit_service_days,"
+        "deposit_due_date,first_payment_due_date,second_payment_due_date,"
+        "expected_account_version,source_event_identity,idempotency_key,actor,reason) "
+        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+        (command.candidate.case_no, current["policy_version"],
+         values["client_hourly_rate_ntd"], values["deposit_service_days"],
+         values["deposit_due_date"], values["first_payment_due_date"], values["second_payment_due_date"],
+         command.candidate.expected_account_version,
+         f"{command.source_event_family}:{command.source_event_id}:payment-terms",
+         _child_identity(command, "payment_terms", 1), command.actor.actor_id, command.reason),
+    )
+    event_id = int(cursor.lastrowid)
+    cursor.execute(
+        "UPDATE client_payment_terms SET second_payment_due_date=%s,first_payment_due_date=%s,"
+        "deposit_due_date=%s,client_hourly_rate_ntd=%s,deposit_service_days=%s,current_event_id=%s "
+        "WHERE case_no=%s AND current_event_id=%s",
+        (values["second_payment_due_date"], values["first_payment_due_date"], values["deposit_due_date"],
+         values["client_hourly_rate_ntd"], values["deposit_service_days"], event_id,
+         command.candidate.case_no, current["current_event_id"]),
+    )
+    if cursor.rowcount != 1:
+        raise ValueError("client_finance_payment_terms_conflict")
 
 
 def _append_obligation_event(cursor, command, action, ordinal):

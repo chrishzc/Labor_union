@@ -56,6 +56,34 @@ def _rate_correction_facts(day_count: int) -> ClientFinanceTermsFacts:
     )
 
 
+@pytest.mark.parametrize(
+    "first_due,expected_due",
+    [(date(2026, 10, 1), date(2026, 10, 16)),
+     (date(2026, 12, 22), date(2027, 1, 6)),
+     (date(2028, 2, 20), date(2028, 3, 6))],
+)
+def test_second_due_date_is_first_planned_due_plus_fifteen_days(first_due, expected_due):
+    facts = _rate_correction_facts(30)
+    facts = replace(
+        facts,
+        charge_days=tuple(ClientChargeDay(first_due + timedelta(days=i), False) for i in range(30)),
+        payment_terms=replace(facts.payment_terms, first_payment_due_date=first_due),
+    )
+    candidate = build_client_finance_terms_candidate(facts, "second-planned-date")
+    second = next(plan for plan in candidate.stage_plans if plan.payment_stage is PaymentStage.SECOND)
+    assert second.amount.amount == 36000
+    assert second.due_date == expected_due
+
+
+def test_second_due_date_is_absent_when_no_second_payment_is_due():
+    facts = _rate_correction_facts(20)
+    facts = replace(facts, payment_terms=replace(facts.payment_terms, second_payment_due_date=date(2026, 10, 20)))
+    candidate = build_client_finance_terms_candidate(facts, "no-second-planned-date")
+    second = next(plan for plan in candidate.stage_plans if plan.payment_stage is PaymentStage.SECOND)
+    assert second.amount.amount == 0
+    assert second.due_date is None
+
+
 def test_rate_correction_before_matching_advances_version_without_obligations():
     candidate = build_client_finance_rate_correction_candidate(
         _rate_correction_facts(0), "beclass-rate-correction:9",
@@ -337,6 +365,46 @@ class _Cursor:
             self.lastrowid += 1
 
 
+class _PaymentTermsCursor(_Cursor):
+    def __init__(self, saved_due):
+        super().__init__()
+        self.terms = {
+            "policy_version": "client-v1", "client_hourly_rate_ntd": 450,
+            "deposit_service_days": 5, "deposit_due_date": date(2026, 9, 1),
+            "first_payment_due_date": date(2026, 10, 1),
+            "second_payment_due_date": saved_due, "current_event_id": 10,
+        }
+
+    def fetchone(self):
+        return self.terms
+
+
+@pytest.mark.parametrize("days,saved_due,expected,writes", [
+    (30, None, date(2026, 10, 16), True),
+    (30, date(2026, 10, 20), date(2026, 10, 16), True),
+    (30, date(2026, 10, 16), date(2026, 10, 16), False),
+    (20, date(2026, 10, 16), None, True),
+])
+def test_finance_writer_synchronizes_second_due_date_and_terms_event(days, saved_due, expected, writes):
+    candidate = build_client_finance_terms_candidate(_rate_correction_facts(days), "CASE-DATE-WRITE")
+    cursor = _PaymentTermsCursor(saved_due)
+    command = ClientFinanceImpactPersistenceCommand(
+        candidate, IdempotencyKey("terms-date-sync"), ActorContext("admin"),
+        "second planned due date", CorrelationId("terms-date-sync"), "contract-completion", 9,
+    )
+    persist_client_finance_terms_impact(cursor, command)
+    events = [params for sql, params in cursor.statements
+              if "INSERT INTO client_payment_terms_events" in sql]
+    updates = [params for sql, params in cursor.statements
+               if "UPDATE client_payment_terms SET" in sql]
+    assert bool(events) is writes
+    assert bool(updates) is writes
+    if writes:
+        assert events[0][6] == updates[0][0] == expected
+        assert events[0][7] == candidate.expected_account_version
+        assert updates[0][7] == cursor.terms["current_event_id"]
+
+
 def test_cancellation_writer_persists_subsidy_return_as_separate_client_payable():
     cursor = _Cursor()
     plan = ClientSubsidyReturnPlan(
@@ -348,6 +416,8 @@ def test_cancellation_writer_persists_subsidy_return_as_separate_client_payable(
         case_no="CASE-1",
         expected_account_version=5,
         resulting_account_version=6,
+        stage_plans=(),
+        payment_terms=None,
         actions=(),
         subsidy_return_plan=plan,
         fingerprint=PreviewFingerprint("a" * 64),

@@ -6,7 +6,7 @@
 
 ## Responsibility
 提供既有案件訂單資訊的 typed Query 與管理端 readback；不改寫 Orders root facts。
-初步候選資訊由 candidate-specific 投影重用相同命名欄位；無正式 assignment 時不虛構指派，未知費用待確認，預覽全文與收件對象綁定後交 Scheduling durable sender。資訊一的每日時段、每日時數與是否下廚讀取 current Orders Terms，讓客戶同意調整後的重新詢問不沿用舊表單文字。
+初步候選資訊由 candidate-specific 投影重用相同命名欄位；無正式 assignment 時不虛構指派，未知費用待確認，預覽全文與收件對象綁定後交 Scheduling durable sender。一般候選預覽的服務起訖日讀取 current Orders planned period，不沿用初次加入候選池時的 contact snapshot；明確傳入的重聯絡期間仍由 caller 擁有，正式 plan／assignment 沿用各自 owner 期間。資訊一的每日時段、每日時數與是否下廚讀取 current Orders Terms，讓客戶同意調整後的重新詢問不沿用舊表單文字。
 欄位缺值或來源未決以 warnings 呈現且不阻擋目前資料投影；模板結構等技術錯誤才列為 blockers。
 
 候選、正式推薦與 assignment 的資訊一客戶付款約定均借用 current 客戶契約 typed projection，包含訂金、分期、樓層費及預計繳款日；不另計金額。

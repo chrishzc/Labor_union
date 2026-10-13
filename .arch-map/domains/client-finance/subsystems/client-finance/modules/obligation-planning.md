@@ -7,6 +7,8 @@
 ## Responsibility
 計畫客戶各付款階段的 obligation、日期替換與唯一的客戶現金方向；中途取消依已確認實際服務量重算，並在客戶款已涵蓋實際應付時建立獨立 subsidy-return payable。未結清義務只改到期日不得建立應收或退款。
 尚未排班且 Scheduling root 不存在的取消，以明確零服務量計算既有訂金退款，不補造 Scheduling generation。
+第二期有金額時，stage plan 預計繳款日由第一期預計入帳日加 15 個曆日計算；零金額不產生第二期日期。契約及訂單資訊重用此 owner 日期投影。
+正式 Finance writer 在期款建立／重算的同一交易同步 typed candidate 的付款條款及 immutable payment-terms event；第二期零金額保存 NULL。簽約前相關 Orders 條件變更使用只含預計 stage plans／付款條款異動的 candidate，actions 為空；第一期更新為新的開始日、訂金期限不晚於開始日，第二期由同一 owner 重新判定日期／NULL。日期異動納入 Finance 版本與同一 Terms Apply，不建立義務。
 
 ## Implementation
 - primary: `domains/client_finance/obligation_planning.py`

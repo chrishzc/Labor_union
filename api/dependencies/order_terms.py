@@ -8,7 +8,9 @@ from infrastructure.mysql.order_terms_repository import MySqlOrderTermsRepositor
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from infrastructure.mysql.mysql_adapter import get_connection
 from shared_kernel.clock import SystemBusinessClock
-from subsystems.orders.terms_workflow import OrderTermsRegistryFacts, OrderTermsWorkflow
+from subsystems.orders.terms_workflow import (
+    OrderTermsQueryFacts, OrderTermsRegistryFacts, OrderTermsWorkflow,
+)
 
 
 @dataclass(slots=True)
@@ -17,8 +19,8 @@ class OrderTermsApplication:
     repository: MySqlOrderTermsRepository
     workflow: OrderTermsWorkflow
 
-    def query(self, case_no: str):
-        return self.repository.load_for_preview(case_no)
+    def query(self, case_no: str) -> OrderTermsQueryFacts:
+        return self.repository.load_for_query(case_no)
 
     def query_registry(self, case_no: str) -> OrderTermsRegistryFacts:
         return self.repository.load_for_registry(case_no)

@@ -6,7 +6,7 @@ Description: 規劃客戶帳務義務，並表達未排班條款補正的零寫�
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from enum import StrEnum
 
@@ -213,6 +213,7 @@ class ClientFinanceTermsCandidate:
     blockers: tuple[str, ...]
     fingerprint: PreviewFingerprint
     subsidy_return_plan: ClientSubsidyReturnPlan | None = None
+    payment_terms: ClientPaymentTerms | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -365,8 +366,63 @@ def build_client_finance_terms_impact(
     scheduling: SchedulingGenerationCandidate,
     change_identity: str,
 ) -> ClientFinanceTermsCandidate:
+    source_facts = replace(source_facts, payment_terms=_payment_terms_for_order(
+        source_facts.payment_terms, order_terms,
+    ))
     facts = _materialize_terms_facts(source_facts, order_terms, scheduling)
     return build_client_finance_terms_candidate(facts, change_identity)
+
+
+def payment_terms_inputs_changed(before: OrderTerms, after: OrderTerms) -> bool:
+    return any(getattr(before, name) != getattr(after, name) for name in (
+        "planned_start_date", "service_days", "service_hours_per_day", "floor_fee",
+    ))
+
+
+def _payment_terms_for_order(terms, order_terms):
+    return replace(
+        terms, first_payment_due_date=order_terms.planned_start_date,
+        deposit_due_date=min(terms.deposit_due_date, order_terms.planned_start_date),
+    )
+
+
+def build_preassignment_client_finance_terms_impact(
+    source_facts, before, after, scheduling, change_identity,
+) -> ClientFinanceTermsCandidate:
+    noop = build_preassignment_client_finance_noop(
+        source_facts, after, scheduling, change_identity,
+    )
+    if not payment_terms_inputs_changed(before, after):
+        return noop
+    terms = _payment_terms_for_order(source_facts.payment_terms, after)
+    dates = tuple(after.planned_start_date + timedelta(days=i) for i in range(after.service_days))
+    facts = _terms_facts_from_service_dates(
+        replace(source_facts, payment_terms=terms), after, dates,
+    )
+    plans = _build_stage_plans(facts)
+    second = next(stage for stage in plans if stage.payment_stage is PaymentStage.SECOND)
+    terms = replace(terms, second_payment_due_date=second.due_date)
+    changed = terms != source_facts.payment_terms
+    return replace(
+        noop, stage_plans=plans, payment_terms=terms if changed else None,
+        resulting_account_version=source_facts.account_version + int(changed),
+        fingerprint=fingerprint_payload({
+            "preassignment_terms": noop.fingerprint.value,
+            "stage_plans": tuple(_stage_payload(stage) for stage in plans),
+            "payment_terms": _payment_terms_payload(terms),
+            "mutates": changed,
+        }),
+    )
+
+
+def _payment_terms_payload(terms):
+    return {
+        "deposit_service_days": terms.deposit_service_days,
+        "client_hourly_rate_ntd": terms.client_hourly_rate.amount,
+        "deposit_due_date": _date_text(terms.deposit_due_date),
+        "first_payment_due_date": _date_text(terms.first_payment_due_date),
+        "second_payment_due_date": _date_text(terms.second_payment_due_date),
+    }
 
 
 def build_preassignment_client_finance_noop(
@@ -621,7 +677,7 @@ def _stage_plan(facts, payment_stage, charge_days, floor_fee):
         payment_stage,
         tuple(item.service_date for item in charge_days),
         amount,
-        _stage_due_date(facts.payment_terms, payment_stage),
+        _stage_due_date(facts.payment_terms, payment_stage, amount),
     )
 
 
@@ -644,12 +700,14 @@ def _whole_ntd(value: float | int) -> int:
     return int(value)
 
 
-def _stage_due_date(payment_terms, payment_stage):
+def _stage_due_date(payment_terms, payment_stage, amount):
     if payment_stage is PaymentStage.DEPOSIT:
         return payment_terms.deposit_due_date
     if payment_stage is PaymentStage.FIRST:
         return payment_terms.first_payment_due_date
-    return payment_terms.second_payment_due_date
+    if amount.amount == 0:
+        return None
+    return payment_terms.first_payment_due_date + timedelta(days=15)
 
 
 def _build_stage_action(case_no, change_identity, stage_plan, existing):
@@ -782,6 +840,9 @@ def _candidate(facts, stage_plans, actions):
         "actions": tuple(_action_payload(item) for item in actions),
         "settlement_fingerprint": settlement.fingerprint.value,
     }
+    second = next(stage for stage in stage_plans if stage.payment_stage is PaymentStage.SECOND)
+    payment_terms = replace(facts.payment_terms, second_payment_due_date=second.due_date)
+    payload["payment_terms"] = _payment_terms_payload(payment_terms)
     return ClientFinanceTermsCandidate(
         facts.case_no,
         facts.account_version,
@@ -791,6 +852,7 @@ def _candidate(facts, stage_plans, actions):
         settlement,
         (),
         fingerprint_payload(payload),
+        payment_terms=payment_terms,
     )
 
 

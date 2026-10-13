@@ -7,9 +7,11 @@
 ## Responsibility
 編排 Orders Terms 的 Query／zero-write Preview／fresh-lock Apply。Preview 衍生 `requires_formal_apply`：不形成 Scheduling、confirmed dates、Finance、Payroll 或 lifecycle 正式影響的普通保存只更新 Orders aggregate，不建立 command claim、事件或永久 receipt；有正式影響時才以單一 outer Unit of Work 套用跨 owner 影響並產生可追溯 receipt。Terms caller 另比對 current effective assignments 與 candidate 的 identity／人員／日期／區間形狀；形狀未變時不呼叫 Scheduling replacement writer，沿用 current generation 與真實 assignment identity，Terms receipt 的 Scheduling receipt linkage 為 nullable。尚未建立 assignment 時，起始日平移不虛構排班 segment，並以相同天數平移預計結束日；已有 current confirmed service dates 時保留日期間隔、建立新的 immutable current version 取代舊版。
 
-尚未建立 assignment 且沒有既有下游義務時，Terms 只讀 Orders／Scheduling 與下游完整性的最小存在 facts；Finance／Payroll version 與 impact 明確為 nullable，不建立 root、不讀取完整金額／費率／政策，也不以無關版本阻擋 Apply。已有 assignment 時仍使用完整下游 facts 與版本控制。
+尚未建立 assignment 且沒有既有下游義務時，與付款計算無關的修改只讀 Orders／Scheduling 與下游完整性的最小存在 facts；Finance／Payroll version 與 impact 明確為 nullable。預計開始日、服務天數、每日時數或樓層費異動且已有 Finance root 時，額外讀取 Finance 付款計算 facts，由 owner 重算階段並在日期有變化時同步條款與 immutable event，不建立簽約前義務或新增 Payroll 依賴。已有 assignment 時仍使用完整下游 facts 與版本控制。
 
 客戶名冊使用獨立的 typed `OrderTermsRegistryFacts` 唯讀 projection，只讀 Orders 條件與 Scheduling／Finance／Payroll 版本；不以 Preview 的逐日排班或義務完整性限制查閱。缺少必要 Orders 欄位仍回 not-ready，服務資料鎖只限制編輯；Preview／Apply 的完整性與版本檢查保持原規則。
+
+Terms GET 使用獨立的 typed `OrderTermsQueryFacts`，沿用 registry 的條款／版本讀取並帶回目前指派及確認服務日期；已有客戶應付義務但尚無執行指派時仍可查閱，不執行 Preview／Apply 的下游義務檢查。
 
 Case Import 唯一來源的 unknown→known 下廚需求補正使用 `OrderCookingRequirementCorrectionRequest` 與最小 Orders cooking facts；沿用 caller-owned UoW，fresh lock／版本檢查後只更新 `requires_cooking` 與 Orders version，不要求逐日排班或讀寫既有帳務。服務資料鎖與既有已知料理條款仍阻擋此受限 command；已知條款的異動沿用一般 Terms Preview／Apply。
 

@@ -117,11 +117,13 @@ class MySqlOrderInformationRepository:
             raise ValueError("candidate_contact_not_found")
         if service_period is not None:
             start_date, end_date = service_period
-            candidate = {
-                **candidate,
-                "assigned_start_date": start_date,
-                "assigned_end_date": end_date,
-            }
+        else:
+            start_date, end_date = case.get("planned_start_date"), case.get("planned_end_date")
+        candidate = {
+            **candidate,
+            "assigned_start_date": start_date,
+            "assigned_end_date": end_date,
+        }
         facts, issues = _facts(case, candidate)
         _merge_contract_payment_facts(self._connection, case_no, facts)
         return build_candidate_information(case_no, candidate_id, info_type, facts, issues, candidate.get("line_user_id"))
@@ -460,6 +462,7 @@ _CASE_IMPORT_FACT_KEYS = (
 
 _CASE_SQL = """
 SELECT o.case_no, o.service_days, o.service_hours_per_day, o.requires_cooking,
+       o.start_date AS planned_start_date,o.end_date AS planned_end_date,
        o.service_start_time, o.service_end_time, o.service_end_day_offset,
        o.floor_fee, o.custom_rest_dates, o.staff_payment_due_date,
        c.service_time, c.service_type, c.baby_info,

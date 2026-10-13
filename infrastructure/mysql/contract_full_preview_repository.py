@@ -317,6 +317,7 @@ def _extend_precontract_facts(connection, case_no, facts, owners, plan):
         facts[_stage_fact_key(stage.payment_stage.value, "due_date")] = stage.due_date
     facts["first_payment_amount"] = facts.get("first_amount")
     facts["second_payment_amount"] = facts.get("second_amount")
+    facts["second_payment_due_date"] = facts.get("second_due_date")
     owners["client_finance"] = projection_fingerprint(
         {
             "candidate": candidate.fingerprint.value,
@@ -637,6 +638,7 @@ def _extend_owner_facts(
         )
         facts["first_payment_amount"] = facts.get("first_amount")
         facts["second_payment_amount"] = facts.get("second_amount")
+        facts["second_payment_due_date"] = facts.get("second_due_date")
         owners["client_finance"] = projection_fingerprint(
             {
                 "account_version": finance.account_version,
