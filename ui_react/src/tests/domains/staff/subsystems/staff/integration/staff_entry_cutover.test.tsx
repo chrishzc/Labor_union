@@ -17,9 +17,11 @@ import {
 import {
   STAFF_AVAILABILITY_QUERY_RESPONSE,
 } from '../../../../../fixtures/staff/staff_availability_contract_fixtures';
+import { STAFF_MANUAL_OPTIONS } from './fixtures/staff_manual_options';
 import { STAFF_QUALIFICATION_RESPONSE } from '../../../../../fixtures/staff/staff_qualification_contract_fixtures';
+import { STAFF_PROFILE } from '../modules/staff-roster-profile/fixtures/staff_profile_contract_fixtures';
 
-const STAFF_SUMMARY_ENDPOINT = '/api/v1/staff/summaries';
+const STAFF_ROSTER_ENDPOINT = '/api/v1/staff/roster';
 const STAFF_LIFECYCLE_ENDPOINT = '/api/v1/staff/11/lifecycle';
 const STAFF_QUALIFICATION_ENDPOINT = '/api/v1/staff/11/qualification-master';
 const PREFERENCE_MANUAL_ENDPOINT = '/api/v1/staff/case-preference-manual/11';
@@ -92,8 +94,8 @@ function installFetchStub(): FetchRecord[] {
     if (url.pathname === SYSTEM_STATUS_ENDPOINT) {
       return jsonResponse(PERFORMANCE_RESPONSE);
     }
-    if (url.pathname === STAFF_SUMMARY_ENDPOINT) {
-      return jsonResponse(STAFF_RESPONSE_ONE);
+    if (url.pathname === STAFF_ROSTER_ENDPOINT) {
+      return jsonResponse({ ...STAFF_RESPONSE_ONE, data: { ...STAFF_RESPONSE_ONE.data, items: STAFF_RESPONSE_ONE.data.items.map(item => ({ ...item, profile: { ...STAFF_PROFILE, staff_id: item.id }, service_profile: { ...STAFF_QUALIFICATION_RESPONSE.data.service_profile, cooking_skills: [] } })) } });
     }
     if (url.pathname === STAFF_LIFECYCLE_ENDPOINT) {
       return jsonResponse({
@@ -103,6 +105,9 @@ function installFetchStub(): FetchRecord[] {
     }
     if (url.pathname === STAFF_QUALIFICATION_ENDPOINT) {
       return jsonResponse(STAFF_QUALIFICATION_RESPONSE);
+    }
+    if (url.pathname === '/api/v1/staff/case-preference-manual/options') {
+      return jsonResponse({ success: true, message: 'ok', data: { options: STAFF_MANUAL_OPTIONS }, error: null });
     }
     if (url.pathname === PREFERENCE_MANUAL_ENDPOINT) {
       return jsonResponse(PREFERENCE_MANUAL_RESPONSE);
@@ -139,7 +144,7 @@ describe('Staff #staff entry cutover candidate', () => {
     vi.restoreAllMocks();
   });
 
-  it('actual StrictMode 初始只發一個 Staff summaries GET，未選人員不查詢分片', async () => {
+  it('actual StrictMode 初始只發一個 Staff roster GET，未選人員不查詢分片', async () => {
     authenticate();
     const requests = installFetchStub();
 
@@ -147,7 +152,7 @@ describe('Staff #staff entry cutover candidate', () => {
 
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
     expect(window.location.hash).toBe('#staff');
-    expect(countPath(requests, STAFF_SUMMARY_ENDPOINT)).toBe(1);
+    expect(countPath(requests, STAFF_ROSTER_ENDPOINT)).toBe(1);
     expect(requests.filter((request) => request.path !== SYSTEM_STATUS_ENDPOINT)).toHaveLength(1);
     expectOnlyGet(requests);
   });
@@ -168,19 +173,18 @@ describe('Staff #staff entry cutover candidate', () => {
     expectOnlyGet(requests);
   });
 
-  it('Preferences tab 在 StrictMode cleanup 後只重發一次目前六項 owner snapshot GET', async () => {
+  it('完整資格主檔在 StrictMode cleanup 後只重發一次目前六項 owner snapshot GET', async () => {
     authenticate();
     const requests = installFetchStub();
 
     render(<StrictMode><App /></StrictMode>);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: /查看 去敏人員甲 的詳情/ }));
-    fireEvent.click(screen.getByRole('tab', { name: /接案偏好設定/ }));
 
-    await screen.findByRole('button', { name: '編輯六項偏好' });
+    await screen.findByRole('combobox', { name: '可承接區域值1' });
     expect(countPath(requests, PREFERENCE_MANUAL_ENDPOINT)).toBe(2);
     expect(countPath(requests, STAFF_LIFECYCLE_ENDPOINT)).toBe(1);
-    expect(countPath(requests, AVAILABILITY_ENDPOINT)).toBe(0);
+    expect(countPath(requests, AVAILABILITY_ENDPOINT)).toBe(1);
     expectOnlyGet(requests);
   });
 
@@ -191,7 +195,6 @@ describe('Staff #staff entry cutover candidate', () => {
     render(<StrictMode><App /></StrictMode>);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: /查看 去敏人員甲 的詳情/ }));
-    fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
     await waitFor(() => expect(screen.getByLabelText('查詢服務人員')).toHaveValue('11'));
     await new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -206,9 +209,7 @@ describe('Staff #staff entry cutover candidate', () => {
     render(<StrictMode><App /></StrictMode>);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: /查看 去敏人員甲 的詳情/ }));
-    fireEvent.click(screen.getByRole('tab', { name: /接案偏好設定/ }));
     expect(document.querySelector('[data-control-id="staff.preferences.cooking-skills"]')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
     expect(document.querySelector('[data-control-id="staff.availability.end-pause"]')).toBeDisabled();
     expect(document.querySelector('[data-control-id="staff.master.create"]')).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByText(/人事任職狀態與異動辦理/)).toBeInTheDocument());

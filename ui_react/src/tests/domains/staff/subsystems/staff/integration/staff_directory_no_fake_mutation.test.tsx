@@ -21,13 +21,11 @@ describe('StaffPage zero fake mutation', () => {
     expect(screen.getAllByRole('button', { name: '辦理退役／復職' })[0]).toBeEnabled();
 
     fireEvent.click(screen.getByRole('button', { name: /查看 去敏人員甲 的詳情/ }));
-    fireEvent.click(screen.getByRole('tab', { name: /接案偏好設定/ }));
     expect(screen.queryByRole('button', { name: '預覽變更' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '確認儲存' })).not.toBeInTheDocument();
     expect(document.querySelector('[data-control-id="staff.preferences.cooking-skills"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-control-id="staff.preferences.special-notes"]')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
     for (const id of [
       'staff.availability.create.preview',
       'staff.availability.create.apply',

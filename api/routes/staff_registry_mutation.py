@@ -174,6 +174,10 @@ def apply_staff_bank_account(
 
 def _raise_staff_error(error: Exception, correlation: str, message: str) -> None:
     code = str(error) or "staff_registry_mutation_failed"
+    if code == "staff_union_no_collision":
+        message = "此公會編號已被使用，請輸入其他編號。"
+    elif code == "staff_profile_concurrent_conflict":
+        message = "資料同時被變更，請重新查詢後再試。"
     if isinstance(error, (StaffProfileMutationNotFound, StaffBankAccountNotFound)):
         status, category = 404, "not_found"
     elif isinstance(error, (StaffProfileMutationConflict, StaffBankAccountConflict)) or "stale" in code or "idempotency" in code or "collision" in code:

@@ -5,7 +5,7 @@
 import { sessionClient } from '../auth/session_client';
 import { transport, type RequestOptions } from '../shared/transport';
 import { ApiDecodeError } from '../shared/typed_errors';
-import { StaffDirectoryResponseSchema, type StaffDirectoryPage } from './staff_directory_schemas';
+import { StaffDirectoryResponseSchema, StaffRosterResponseSchema, type StaffDirectoryPage } from './staff_directory_schemas';
 import {
   StaffDirectoryUnauthenticatedError,
   StaffDirectoryValidationError,
@@ -16,6 +16,7 @@ export interface StaffDirectoryQueryParams {
   pageSize?: number;
   afterId?: number;
   staffId?: number;
+  includeProfile?: boolean;
 }
 
 export interface StaffDirectoryQueryOptions {
@@ -32,7 +33,7 @@ export interface StaffDirectoryClient {
 
 export async function loadAllStaffDirectoryPages(
   query: (params?: StaffDirectoryQueryParams, options?: StaffDirectoryQueryOptions) => Promise<StaffDirectoryPage>,
-  params: Pick<StaffDirectoryQueryParams, 'pageSize'> = {},
+  params: Pick<StaffDirectoryQueryParams, 'pageSize' | 'includeProfile'> = {},
   options?: StaffDirectoryQueryOptions,
 ): Promise<StaffDirectoryPage> {
   const items: StaffDirectoryPage['items'] = [];
@@ -85,8 +86,8 @@ function buildRequestOptions(options?: StaffDirectoryQueryOptions): RequestOptio
   };
 }
 
-function decodePage(raw: unknown): StaffDirectoryPage {
-  const decoded = StaffDirectoryResponseSchema.safeParse(raw);
+function decodePage(raw: unknown, includeProfile = false): StaffDirectoryPage {
+  const decoded = (includeProfile ? StaffRosterResponseSchema : StaffDirectoryResponseSchema).safeParse(raw);
   if (!decoded.success) {
     throw new ApiDecodeError(
       '服務人員摘要回應結構異常。',
@@ -135,13 +136,16 @@ class DefaultStaffDirectoryClient implements StaffDirectoryClient {
     if (params.staffId !== undefined) query.staff_id = params.staffId;
 
     try {
-      const raw = await transport.get<unknown>('/api/v1/staff/summaries', {
+      const raw = await transport.get<unknown>(params.includeProfile ? '/api/v1/staff/roster' : '/api/v1/staff/summaries', {
         ...buildRequestOptions(options),
         params: query,
       });
-      const page = decodePage(raw);
+      const page = decodePage(raw, params.includeProfile);
       const pageIds = new Set<number>();
       for (const item of page.items) {
+        if (params.includeProfile && item.profile?.staff_id !== item.id) {
+          throw new StaffDirectoryValidationError('月嫂主檔與清單對象不一致。');
+        }
         if (pageIds.has(item.id) || this.loadedIds.has(item.id)) {
           throw new StaffDirectoryValidationError(`服務人員摘要包含重複 identity：${item.id}。`);
         }

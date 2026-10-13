@@ -131,6 +131,7 @@ from api.routes import (
     staff_registry_mutation,
     staff,
     staff_qualification_master,
+    staff_qualification_editing,
     staff_availability,
     staff_monthly_schedule,
     staff_payout,
@@ -327,6 +328,7 @@ app.include_router(caregiver_availability_locks.router)
 app.include_router(staff.router)
 app.include_router(staff_registry_mutation.router)
 app.include_router(staff_qualification_master.router)
+app.include_router(staff_qualification_editing.router)
 app.include_router(staff_retirement.router)
 app.include_router(staff_availability.router)
 app.include_router(staff_monthly_schedule.router)

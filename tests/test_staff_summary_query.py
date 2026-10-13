@@ -54,6 +54,7 @@ class _Cursor:
                 "name": "測試月嫂",
                 "phone": "0912345678",
                 "education": "高職",
+                "union_no": None,
             }
         ]
 
@@ -75,6 +76,7 @@ def test_staff_summary_exposes_canonical_education():
                     "name": "測試月嫂",
                     "phone": "0912345678",
                     "education": " 高職 ",
+                    "union_no": None,
                 },
             )
         )
@@ -89,6 +91,7 @@ def test_staff_summary_exposes_canonical_education():
         "name": "測試月嫂",
         "phone": "0912345678",
         "education": "高職",
+        "union_no": None,
     }
 
 
@@ -101,6 +104,7 @@ def test_staff_summary_rejects_non_roster_internal_fields():
                     "name": "測試月嫂",
                     "phone": "0912345678",
                     "education": "高職",
+                    "union_no": None,
                     "emergency_contact_name": "內部聯絡人",
                 },
             )

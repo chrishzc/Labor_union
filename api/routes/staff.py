@@ -21,7 +21,7 @@ from api.error_contracts import internal_query_error, typed_http_error
 from api.schemas.base import BaseResponse
 from api.schemas.staff_case_preference_summary import StaffCasePreferenceSummaryView
 from api.schemas.staff_summary import StaffSummaryPageView, StaffSummaryView
-from api.schemas.staff_profile import StaffProfileView
+from api.schemas.staff_profile import StaffProfileView, StaffRosterPageView
 from subsystems.controlled_files.workflow import (
     ControlledFileOwner,
     ControlledFilePurpose,
@@ -55,6 +55,27 @@ class StaffResumeItemView(BaseModel):
 class StaffResumeView(BaseModel):
     staff_id: int
     resume: StaffResumeItemView | None
+
+
+@router.get("/roster", response_model=BaseResponse[StaffRosterPageView])
+def get_staff_roster(
+    page_size: int = Query(default=200, ge=1, le=200),
+    after_id: int | None = Query(default=None, ge=1),
+    staff_id: int | None = Query(default=None, ge=1),
+    principal: AdminPrincipal = Depends(require_registry_reader),
+    application: StaffProfileQueryApplication = Depends(get_staff_profile_application),
+) -> BaseResponse[StaffRosterPageView]:
+    del principal
+    correlation = uuid4().hex
+    try:
+        page = application.query_page(StaffSummaryQueryRequest(page_size, after_id, staff_id))
+    except StaffProfileContractError as error:
+        raise internal_query_error("staff_roster_projection_invalid", "月嫂完整主檔清單目前無法讀取。", correlation) from error
+    except ValueError as error:
+        raise typed_http_error(422, "validation", "staff_roster_query_invalid", "名冊分頁查詢條件不正確。", correlation) from error
+    except (OperationalError, ProgrammingError) as error:
+        raise internal_query_error("staff_roster_database_error", "月嫂完整主檔清單查詢失敗。", correlation) from error
+    return BaseResponse(data=StaffRosterPageView.model_validate(page, from_attributes=True), message="成功取得月嫂完整主檔清單")
 
 
 @router.get("/{staff_id}/profile", response_model=BaseResponse[StaffProfileView])

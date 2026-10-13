@@ -10,7 +10,7 @@
 - `staff-retirement` — lifecycle transition and exact LINE staff-role revocation effect; path: `modules/staff-retirement.md`
 - `case-preference-manual` — six canonical Staff relation Query／Preview／Apply owner; path: `modules/case-preference-manual.md`
 - `staff-roster-profile` — authenticated complete-value personal/contact detail query for one selected Staff; path: `modules/staff-roster-profile.md`
-- `staff-qualification-master` — bounded Staff qualification/certification master query; path: `modules/staff-qualification-master.md`
+- `staff-qualification-master` — bounded qualification query and existing professional facts manual Q/P/A; path: `modules/staff-qualification-master.md`
 
 ## Verification routing
 - layout_status: `custom_current`
@@ -18,6 +18,7 @@
 - test_root: `tests/domains/staff/subsystems/staff/`
 - integration_root: `ui_react/src/tests/domains/staff/subsystems/staff/integration/`
 - integration_root: `ui_react/src/tests/staff_directory_page.test.tsx`
+- integration_root: `ui_react/src/tests/fixtures/staff/staff_directory_contract_fixtures.ts` — Staff directory 的共享去敏 fixture，由名冊與相鄰 selector 共同使用。
 - integration_root: `ui_react/src/tests/staff_directory_request_budget.test.tsx`
 - integration_root: `ui_react/src/tests/staff_lifecycle_flow.test.tsx`
 - integration_root: `ui_react/src/tests/staff_page_real_data.test.tsx`

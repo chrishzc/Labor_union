@@ -1,0 +1,79 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-staff-union-number-2026-10-13-v1",
+  "release_metadata": {
+    "release_name": "Labor Union Staff manual union number",
+    "application_version": "staff-union-number-v1",
+    "published_at": "2026-10-13",
+    "description": "Add nullable Staff-owned manual union number and exact case-sensitive uniqueness; preserve staff identities without backfill"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-client-hcm-email-2026-10-13-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1050_staff_union_number.sql",
+      "relative_path": "db/schema_parts/1050_staff_union_number.sql",
+      "sha256": "ae1bbcd2b158c3448a191832f76c34d3d3797c8fe17d3e92648b0bb386a609e8",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "discard-candidate-before-entry-switch; retain-column-and-use-compatible-forward-release-after-apply",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "staff-union-number-exact",
+      "phase": "post-schema",
+      "policy": "Nullable varchar(50), utf8mb4_0900_bin collation and unique full-column index; old rows remain NULL without backfill",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": [
+      "staff-union-number-v1"
+    ],
+    "required_restart_targets": [
+      "api"
+    ],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": [
+      "staff-union-number-exact"
+    ]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_10_13_staff_union_number_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_10_13_staff_union_number_v1.descriptors.json",
+    "sha256": "53ec577e5d051a7b21fe85bc5392f15d5cbcb091950d7f2167e9d61593e92209",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

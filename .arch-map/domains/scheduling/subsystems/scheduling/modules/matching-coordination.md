@@ -38,6 +38,7 @@
   - `infrastructure/mysql/matching_coordination_facts_adapter.py`
   - `infrastructure/mysql/historical_pending_deposit_matching_repository.py` — 借用 caller transaction 寫入可由 active Matching Query 讀取的正式 plan／segment roots。
   - `infrastructure/mysql/segmented_availability_repository.py` — fresh-read Client-owned `clients.service_type`、Staff-owned `staff_weekly_rest`／`staff_time_slots`，供內建服務方式／每日時數查詢。
+    - 自訂 Staff 時段由 Staff-owned `service_period_fields` 投影服務時數，8.5 小時跨度保有 8 小時服務分類；不修改 Staff facts 或增加起迄重疊 eligibility。
   - `infrastructure/mysql/candidate_contact_pool_line_reply_repository.py` — 以已送出資訊事件和 staff LINE identity 重新驗證回覆後，追加意願事件；原 24 小時內本人可用新事件更正自己的意願，current projection 採每位候選最新回覆，其他候選已願意時仍拒絕。
   - `infrastructure/mysql/matching_notification_repository.py` — current Stage 5 confirmation package 的 plan/履歷/order-information/proposed-weekly preflight projection。
   - `infrastructure/mysql/matching_recommendation_repository.py` — 候選月嫂與占用日期的 read adapter；LINE 收件人只採 canonical bound staff identity。

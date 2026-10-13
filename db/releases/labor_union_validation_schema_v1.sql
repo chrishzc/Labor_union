@@ -1,5 +1,5 @@
 -- GENERATED FILE. Do not edit by hand.
--- Release: labor-union-validation-schema-2026-10-13-v43
+-- Release: labor-union-validation-schema-2026-10-13-v44
 -- Replace __LU_TEST_DATABASE__ with an explicitly confirmed lu_test_* database.
 -- Rebuild with: python scripts/build_validation_schema_release.py
 
@@ -21776,3 +21776,10 @@ ALTER TABLE order_cancellation_apply_receipts
 -- Preserve HCM email independently from the BeClass source/effective email.
 ALTER TABLE clients ADD COLUMN email VARCHAR(100) NULL COMMENT 'HCM Email';
 -- END SOURCE: db/schema_parts/230_client_hcm_email.sql
+
+-- BEGIN SOURCE: db/schema_parts/231_staff_union_number.sql
+-- Staff-owned manual union number; preserve existing roots and leave old rows unset.
+ALTER TABLE staff
+    ADD COLUMN union_no VARCHAR(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NULL COMMENT '公會自訂編號',
+    ADD UNIQUE KEY uq_staff_union_no (union_no);
+-- END SOURCE: db/schema_parts/231_staff_union_number.sql

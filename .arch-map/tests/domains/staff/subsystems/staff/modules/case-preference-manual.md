@@ -11,3 +11,4 @@
 - Query/Preview perform no writes; Apply parent-locks before relation locks.
 - Fresh snapshot and preview fingerprints reject stale Apply; receipt replay is idempotent and payload conflict is typed.
 - The six writable relations preserve detail values; transportation remains a seventh read-only/source_not_ready fact.
+- Staff options Query is authenticated; new notes are rejected while unchanged legacy source details are preserved. Explicit start/end/day-offset windows enforce 4-hour, 8.5-hour-with-break and 24-hour spans before writes. UI adds conditions on demand without note editors and invalidates previews on edits/removal.

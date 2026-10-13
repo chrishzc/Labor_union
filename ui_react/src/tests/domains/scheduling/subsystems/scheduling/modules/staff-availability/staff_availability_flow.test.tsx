@@ -44,7 +44,6 @@ describe('Staff availability flow', () => {
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: '查看 去敏人員甲 的詳情' }));
-    fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
     fireEvent.change(screen.getByLabelText('開始日期'), { target: { value: '2026-09-01' } });
     fireEvent.change(screen.getByLabelText('結束日期'), { target: { value: '2026-10-31' } });
     await waitFor(() => expect(screen.getByText(expectedRow)).toBeInTheDocument());
@@ -55,7 +54,6 @@ describe('Staff availability flow', () => {
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: '查看 去敏人員甲 的詳情' }));
-    fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
 
     expect(await screen.findByText(/是否可派工仍需依案件日期、既有排班與資格條件查詢/)).toBeInTheDocument();
     expect(screen.queryByText(/全時段可供派工排班/)).not.toBeInTheDocument();
@@ -86,7 +84,6 @@ describe('Staff availability flow', () => {
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: '查看 去敏人員甲 的詳情' }));
-    fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
 
     await waitFor(() => expect(staffAvailabilityClient.getBlocks).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.getByText('2026-09-01 ～ 2026-09-30')).toBeInTheDocument());
@@ -134,7 +131,6 @@ describe('Staff availability flow', () => {
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: '查看 去敏人員甲 的詳情' }));
-    fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
 
     const cancelButton = await screen.findByRole('button', { name: '預覽取消' });
     expect(cancelButton).toBeDisabled();
@@ -148,7 +144,6 @@ describe('Staff availability flow', () => {
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: '查看 去敏人員甲 的詳情' }));
-    fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
     await waitFor(() => expect(screen.getByRole('button', { name: '重試不可服務期間' })).toBeInTheDocument());
     expect(screen.queryByText('請先設定日期範圍並查詢。')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '重試不可服務期間' }));

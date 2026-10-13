@@ -13,6 +13,7 @@ describe('staff directory adapter', () => {
   it('maps only the approved summary fields', () => {
     expect(adaptStaffDirectorySummary(STAFF_PAGE_ONE.items[0])).toEqual({
       id: 11,
+      unionNo: 'A001',
       name: '去敏人員甲',
       phone: '09********',
       education: '大學',
@@ -37,6 +38,7 @@ describe('staff directory adapter', () => {
       'id',
       'name',
       'phone',
+      'unionNo',
     ]);
   });
 });

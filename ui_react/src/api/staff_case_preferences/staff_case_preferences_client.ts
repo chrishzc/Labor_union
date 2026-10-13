@@ -10,6 +10,7 @@ import {
   type StaffCasePreferenceManualReceipt,
   type StaffCasePreferenceManualSnapshot,
   type StaffCasePreferenceRelations,
+  StaffCasePreferenceOptionsResponseSchema,
 } from './staff_case_preferences_schemas';
 
 const BASE = '/api/v1/staff/case-preference-manual';
@@ -41,6 +42,11 @@ function decodeReceipt(raw: unknown, staffId: number): StaffCasePreferenceManual
 }
 function validateRelations(relations: StaffCasePreferenceRelations) { return StaffCasePreferenceRelationsSchema.parse(relations); }
 export const staffCasePreferenceManualClient = {
+  async queryOptions(options?: StaffCasePreferenceManualOptions) {
+    const parsed = StaffCasePreferenceOptionsResponseSchema.safeParse(await transport.get<unknown>(BASE + '/options', requestOptions(options)));
+    if (!parsed.success || !parsed.data.success) throw new ApiDecodeError('接案能力選項回應結構異常。', []);
+    return parsed.data.data.options;
+  },
   async query(staffId: number, options?: StaffCasePreferenceManualOptions) {
     requireId(staffId);
     return decodeSnapshot(await transport.get<unknown>(BASE + '/' + staffId, requestOptions(options)), staffId);

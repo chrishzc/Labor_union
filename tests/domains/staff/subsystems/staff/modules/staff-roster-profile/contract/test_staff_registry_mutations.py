@@ -5,8 +5,13 @@ import inspect
 import re
 
 import pytest
+from fastapi import HTTPException
+from pymysql.err import IntegrityError, OperationalError
 
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
+from api.routes.staff_registry_mutation import _raise_staff_error
+from infrastructure.mysql.staff_profile_mutation_repository import MySqlStaffProfileMutationRepository
+from subsystems.staff.profile_workflow import StaffProfileSnapshot
 from infrastructure.mysql.staff_bank_account_repository import MySqlStaffBankAccountRepository
 from subsystems.staff.bank_account_workflow import StaffBankAccountConflict, StaffBankAccountWorkflow
 from subsystems.staff.profile_workflow import StaffProfileMutationConflict, StaffProfileMutationWorkflow
@@ -34,6 +39,11 @@ class _ProfileRepository:
 
     def load(self, staff_id, *, for_update):
         return dict(self.row) if staff_id == 7 else None
+
+    def union_number_owner(self, union_no):
+        if union_no == "A001":
+            return 44
+        return 7 if self.row.get("union_no") == union_no else None
 
     def claim(self, *, staff_id, key, command_fingerprint, correlation_id):
         previous = self.claims.setdefault(key.value, command_fingerprint.value)
@@ -112,6 +122,61 @@ def test_staff_profile_preview_apply_and_replay_are_versioned():
     assert replay.replayed is True
     with pytest.raises(StaffProfileMutationConflict, match="stale_version"):
         workflow.preview(7, {"phone": "0911000000"}, ExpectedVersion(0))
+
+
+def test_union_number_preserves_text_and_rejects_only_exact_duplicates():
+    repository = _ProfileRepository()
+    workflow = StaffProfileMutationWorkflow(repository, _Uow)
+    with pytest.raises(StaffProfileMutationConflict, match="staff_union_no_collision"):
+        workflow.preview(7, {"union_no": "A001"}, ExpectedVersion(0))
+    assert repository.row["staff_profile_version"] == 0
+    actor, correlation = _identity()
+    for version, value in enumerate(("a001", "001", None)):
+        preview = workflow.preview(7, {"union_no": value}, ExpectedVersion(version))
+        receipt = workflow.apply(7, {"union_no": value}, ExpectedVersion(version), preview.preview_fingerprint,
+                                 IdempotencyKey(f"union-number-{version}"), actor, "公會編號核對", correlation)
+        assert receipt.readback.values["union_no"] == value
+        assert receipt.readback.staff_id == 7
+    with pytest.raises(ValueError, match="value_too_long"):
+        workflow.preview(7, {"union_no": "x" * 51}, ExpectedVersion(3))
+
+
+def test_union_number_rechecks_collision_after_preview():
+    repository = _ProfileRepository()
+    workflow = StaffProfileMutationWorkflow(repository, _Uow)
+    preview = workflow.preview(7, {"union_no": "B002"}, ExpectedVersion(0))
+    repository.union_number_owner = lambda _: 44
+    actor, correlation = _identity()
+    with pytest.raises(StaffProfileMutationConflict, match="staff_union_no_collision"):
+        workflow.apply(7, {"union_no": "B002"}, ExpectedVersion(0), preview.preview_fingerprint,
+                       IdempotencyKey("union-number-race"), actor, "公會編號核對", correlation)
+    assert repository.row["staff_profile_version"] == 0
+    assert repository.receipts == {}
+
+
+@pytest.mark.parametrize('database_error,code', [
+    (IntegrityError(1062, "Duplicate entry 'A001' for key 'staff.uq_staff_union_no'"), 'staff_union_no_collision'),
+    (OperationalError(1213, 'Deadlock found'), 'staff_profile_concurrent_conflict'),
+])
+def test_union_number_unique_race_and_deadlock_return_typed_conflicts(database_error, code):
+    class Cursor(AbstractContextManager):
+        def __exit__(self, *_):
+            return False
+        def execute(self, *_):
+            raise database_error
+    class Connection:
+        def cursor(self):
+            return Cursor()
+    repository = MySqlStaffProfileMutationRepository(Connection())
+    actor, correlation = _identity()
+    with pytest.raises(StaffProfileMutationConflict) as captured:
+        repository.persist(snapshot=StaffProfileSnapshot(7, 0, {'union_no':None}), changes={'union_no':'A001'},
+                           actor=actor, reason='編號核對', key=IdempotencyKey('number-race'), correlation_id=correlation)
+    assert str(captured.value) == code
+    with pytest.raises(HTTPException) as http_error:
+        _raise_staff_error(captured.value, correlation.value, '儲存失敗')
+    assert http_error.value.status_code == 409
+    assert http_error.value.detail['error']['code'] == code
 
 
 def test_staff_bank_preview_never_exposes_full_account_and_collision_fails_closed():

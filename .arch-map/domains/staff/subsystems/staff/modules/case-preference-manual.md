@@ -20,8 +20,11 @@ Staff owner Query／Preview／Apply for the six canonical service-capability rel
 - Preview is zero-write and binds before/after plus snapshot fingerprint.
 - Apply locks the staff parent first, then relation tables in sorted table order; it fresh-reads and rejects stale snapshot or preview fingerprints.
 - Apply uses command family staff_case_preference_manual/v1 and existing admin_command_receipts; numeric matching-profile QPA remains a separate owner.
+- Staff-owned RELATION_OPTIONS backs authenticated `/options` and six dropdowns. The same Domain validates explicit 4/8/24-hour clock windows (eight-hour service includes a 30-minute break), encodes their canonical slot identity and projects typed clocks back. New notes are rejected; unchanged source details/rows remain preserved. UI adds conditions on demand and exposes custom clock fields.
 
 ## Verification
+
+Contract: `document/架構重整/01_規格基線/24_Staff_Matching_Preferences與不可服務期間正式規格.md` — 六項接案條件與自訂服務起迄。
 - layout_status: `custom_current`
 - layout_basis: `.arch-map/tests/index.md` permits documented frontend test exceptions; the canonical Staff component oracle remains under `ui_react/src/tests/` and the owner Python oracles remain under the Staff module test root.
 - test_root: `tests/domains/staff/subsystems/staff/modules/case-preference-manual/`

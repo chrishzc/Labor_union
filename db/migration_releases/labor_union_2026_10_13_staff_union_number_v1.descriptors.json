@@ -1,0 +1,33 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-staff-union-number-2026-10-13-v1",
+  "descriptors": {
+    "1050_staff_union_number.sql": {
+      "tables": {},
+      "parent_columns": {
+        "staff": {
+          "union_no": {
+            "column_type": "varchar(50)",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": "",
+            "character_set_name": "utf8mb4",
+            "collation_name": "utf8mb4_0900_bin"
+          }
+        }
+      },
+      "indexes": {
+        "staff.uq_staff_union_no": {
+          "non_unique": 0,
+          "columns": [
+            "union_no"
+          ]
+        }
+      },
+      "foreign_keys": {},
+      "checks": {},
+      "triggers": [],
+      "views": {}
+    }
+  }
+}

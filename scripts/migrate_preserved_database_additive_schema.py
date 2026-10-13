@@ -355,6 +355,7 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_09_29_scheduling_buffer_advisory_v1.json",
     "labor_union_2026_09_29_order_cancellation_optional_downstream_v1.json",
     "labor_union_2026_10_13_client_hcm_email_v1.json",
+    "labor_union_2026_10_13_staff_union_number_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -1299,7 +1300,7 @@ def _schema_snapshot(
         with connection.cursor() as cursor:
             cursor.execute(
                 "SELECT table_name,column_name,column_type,is_nullable,"
-                "column_default,extra,generation_expression "
+                "column_default,extra,generation_expression,character_set_name,collation_name "
                 "FROM information_schema.columns "
                 "WHERE table_schema=%s ORDER BY table_name,ordinal_position",
                 (database,),
@@ -3542,8 +3543,12 @@ def _local_capture_backup_rows(
         connection.close()
 
 
-def _local_row_projection(config: Any, source: str, table: str) -> dict[str, Any]:
-    """Hash every value in an existing table, independent of its physical layout."""
+def _local_row_projection(
+    config: Any, source: str, table: str, columns: list[str] | None = None,
+) -> dict[str, Any]:
+    """Hash preserved columns independently of added columns or physical layout."""
+    if columns is not None:
+        return _table_projection_evidence(config, source, table, columns)
     connection = _local_connect(config, source, LOCAL_ADDITIVE_MAX_DURATION_MS)
     try:
         with connection.cursor() as cursor:
@@ -3609,7 +3614,7 @@ def _local_verify_backup_rows(
                 if reference_database else
                 (saved_projections or {}).get(table)
             )
-            if not isinstance(reference, Mapping) or _local_row_projection(config, source, table) != reference:
+            if not isinstance(reference, Mapping) or _local_row_projection(config, source, table, reference.get("columns")) != reference:
                 raise LocalAdditiveBlocked("source backup row fingerprint changed", code="backup_required")
             actual["data_fingerprints"][table] = fingerprints[table]
         actual["data_fingerprint_sha256"] = _local_data_fingerprint(actual["data_fingerprints"])
@@ -5857,6 +5862,17 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
         descriptor["parent_columns"]["clients"] = {
             "email": _column_contract("varchar(100)", "YES", None),
         }
+    if part_name == "1050_staff_union_number.sql":
+        descriptor["parent_columns"]["staff"] = {
+            "union_no": {
+                **_column_contract("varchar(50)", "YES"),
+                "character_set_name": "utf8mb4",
+                "collation_name": "utf8mb4_0900_bin",
+            },
+        }
+        descriptor["indexes"][("staff", "uq_staff_union_no")] = {
+            "non_unique": 0, "columns": ("union_no",),
+        }
     if part_name == "1019_line_identity_role_scope.sql":
         descriptor["parent_columns"]["line_platform_users"] = {
             "selected_identity_role": _column_contract(
@@ -6189,6 +6205,7 @@ def _release_descriptor_metadata_state(
         "1044_order_terms_optional_downstream_versions.sql",
         "1045_order_terms_optional_scheduling_receipt.sql",
         "1048_order_cancellation_optional_downstream.sql",
+        "1050_staff_union_number.sql",
     }:
         if released.get("parent_columns") != canonical.get("parent_columns"):
             raise UpgradeBlocked(
@@ -6822,6 +6839,7 @@ def _artifact_metadata_state(
                 or row["is_nullable"] != expected["is_nullable"]
                 or actual_default != expected["column_default"]
                 or actual_extra != expected["extra"]
+                or any(row.get(key) != expected[key] for key in ("character_set_name", "collation_name") if key in expected)
             ):
                 return "drift"
         allowed_extra_columns = _allowed_later_artifact_columns(

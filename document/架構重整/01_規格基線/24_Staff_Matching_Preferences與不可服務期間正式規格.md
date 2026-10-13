@@ -287,10 +287,42 @@ Case Import 的 Staff Historical BeClass adoption 只負責把已知 workbook so
 
 ## 2026-10-13 內建媒合條件共用名冊 canonical 來源（SPEC_READY）
 
+### 六項接案條件與自訂服務起迄（2026-10-13 最新人工裁決）
+
+使用者要求按需要新增條件，以標準下拉維護，取消「新增說明」與新的說明儲存，
+並讓可承接時段自訂開始／結束時間，儲存前須符合服務時數與休息規則。
+Staff owner 以 `RELATION_OPTIONS` 提供 authenticated
+`GET /api/v1/staff/case-preference-manual/options` 的 typed 選項；可承接區域提供全台
+22 縣市及新竹既有北區／東區／香山區，下廚沿葷食／素食，節日沿 BeClass 已採納選項，
+胎數沿單胞胎／雙胞胎，排休沿連續服務／週休1日／週休2日與已認可的週一至週五／休周六／休周日。
+新選單不提供依賴自由說明的「其他」；既有非標準值與來源說明保留、唯讀，不批次清除資料。
+人工新增或修改 `detail` 被拒絕；既有完全未變的 relation 保留，SQL 不 delete／reinsert 未變列。
+
+服務時段選 4／8／24 小時，每列接受 typed `service_hours`、`start_time`、`end_time`、
+`end_day_offset`（0 當日／1 次日，HH:MM 24 小時制）。跨日須明確提供 offset，不自行猜測。
+沿 `01_Orders_Domain.md` 的服務時數規則：4 小時班起迄跨度恰為 240 分鐘、不扣休息；
+8 小時班恰為 510 分鐘，含 30 分鐘休息；24 小時班恰為 1440 分鐘。
+不完整、無效時間或跨度不符在 Preview／Apply 均回 typed 422，且零寫入。
+原有未設定起迄的時段可完整原樣保留；新增或異動時段必須符合上述規則。
+
+Staff 純 Domain 將驗證完成的完整 tuple 編為既有 `staff_time_slots.slot_name` 的 canonical
+identity，例如 `4小時(09:00-13:00)`、`8小時(08:30-17:00)`、`24小時(09:00-次日09:00)`；
+此為正式服務時段值，不把時間存入自由說明 `custom_slot_detail`。新時段的 detail 為 NULL，
+同時数可保存不同完整時段，同一完整時段仍須唯一。Query 由同一 Staff Domain 解碼回 typed
+四欄；原有明確上午／下午四小時值可投影其既有時間，未異動時保留原 identity。
+無 schema／migration 或第二份同步副本；沿既有 parent lock、fresh 六 relation snapshot、
+human Preview fingerprint、receipt 與 outer UoW。Matching read adapter 透過 Staff 既有
+時段解碼投影服務時數，8.5 小時跨度仍比對 8 小時服務，不能比成 8.5 小時。
+本步不增加案件與月嫂起迄重疊的 Matching eligibility 條件；MATCH-CAP-02 仍比對每日服務時數。
+
+新增／移除／時間異動使 Preview 失效；未選的新列須選擇或移除後才能 Preview。
+UI 無新增或修改說明控制，不由 UI 判定服務時數是否合法；唯一驗證在 Staff Domain。
+不部署、不更動 production／既有歷史資料、不發送外部 provider 效果。
+
 Authority：使用者明確不接受名冊與媒合不同步，並指定「偏好服務日」是「服務方式，例如周休二日」。本裁決取代內建候選篩選原先以數字偏好比對總服務天數／每日時數的來源選擇。
 
 - **MATCH-CAP-01：服務方式。** UI 顯示「服務方式」，HTTP 的 `preferred_service_days` key 保留。案件讀 Client-owned `clients.service_type`；月嫂讀 `staff_weekly_rest.rest_type` 與 `custom_rest_detail`。比對週間服務／排休方式，不比對 `orders.service_days`，也不套用數字天數 tolerance。保存的原文不改寫；查詢時辨識「周／週」、「一／1」、「二／2」同義寫法；週休二日、週一至週五視為同方式，休周六與休周日保留差異，週休一日沿既有慣例代表休周日，連續服務代表無固定週休。
-- **MATCH-CAP-02：每日服務時數。** 案件需求仍為 `orders.service_hours_per_day`；月嫂唯一來源為 `staff_time_slots.slot_name` 與 `custom_slot_detail`。明確正整數「N小時」及既有四小時上午／下午標準值轉成對應時數；不從 `staff_matching_preference_values` 補值或覆蓋。`其他` 只讀本母題 detail，且只接受上述可明確辨識值，混合／含糊文字不得猜測。
+- **MATCH-CAP-02：每日服務時數。** 案件需求仍為 `orders.service_hours_per_day`；月嫂唯一來源為 `staff_time_slots.slot_name` 與 `custom_slot_detail`。Staff 已驗證自訂完整時段由同一 Domain 投影其服務時數；明確正整數「N小時」及既有四小時上午／下午標準值轉成對應時數；不從 `staff_matching_preference_values` 補值或覆蓋。`其他` 只讀本母題 detail，且只接受上述可明確辨識值，混合／含糊文字不得猜測。
 - **MATCH-CAP-03：一致性與失敗。** 名冊既有 writer 保存後，下一次查詢 fresh-read 原關聯表，無第二份同步副本。案件需求空白時初步詢問不套用對應篩選；已填需求不相符、月嫂資料空白或無法辨識時，勾選的初步篩選不列入該月嫂；取消勾選可詢問並協調。正式分段查詢仍只提供條件結果，不因這兩項排除 selectable candidate。
 - **MATCH-CAP-04：效果上限。** 只修改本機 Domain 比對、Scheduling availability read adapter／query、checkbox 文案、direct tests 與必要正式規格／地圖。Staff／Client writer、交易邊界、資料表、migration、數字偏好 API 與既有資料不變；不部署、不切入口、不發送外部通知。
 

@@ -2,13 +2,14 @@
  * File: staff_action_race_guards.test.tsx
  * Description: 驗證 Staff Preview 與 receipt 後重查不會被過期非同步結果污染。
  */
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { StaffPage } from '../../../../../../pages/StaffPage';
 import { staffAvailabilityClient } from '../../../../../../api/staff_availability/staff_availability_client';
 import { staffDirectoryClient } from '../../../../../../api/staff_directory/staff_directory_client';
 import { staffLifecycleClient } from '../../../../../../api/staff_lifecycle/staff_lifecycle_client';
 import { staffCasePreferenceManualClient } from '../../../../../../api/staff_case_preferences/staff_case_preferences_client';
+import { STAFF_MANUAL_OPTIONS } from './fixtures/staff_manual_options';
 import {
   STAFF_AVAILABILITY_BLOCK,
   STAFF_AVAILABILITY_PREVIEW_RESPONSE,
@@ -53,14 +54,12 @@ async function renderReadyStaff(): Promise<void> {
 async function openPreferences(): Promise<void> {
   await renderReadyStaff();
   fireEvent.click(screen.getByRole('button', { name: /查看 去敏人員甲 的詳情/ }));
-  fireEvent.click(screen.getByRole('tab', { name: /接案偏好設定/ }));
-  await screen.findByRole('button', { name: '編輯六項偏好' });
+  await screen.findByRole('combobox', { name: '可承接區域值1' });
 }
 
 async function openAvailability(): Promise<void> {
   await renderReadyStaff();
   fireEvent.click(screen.getByRole('button', { name: /查看 去敏人員甲 的詳情/ }));
-  fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
   fireEvent.change(screen.getByLabelText('開始日期'), { target: { value: '2026-09-01' } });
   fireEvent.change(screen.getByLabelText('結束日期'), { target: { value: '2026-10-31' } });
   await waitFor(() => expect(screen.getByText('2026-09-01 ～ 2026-09-30')).toBeInTheDocument());
@@ -69,14 +68,16 @@ async function openAvailability(): Promise<void> {
 async function openLifecycle(): Promise<void> {
   await renderReadyStaff();
   fireEvent.click(document.querySelector('[data-control-id="staff.drawer.open.11"]') as HTMLElement);
-  fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
   await waitFor(() => expect(screen.getByText(/人事任職狀態與異動辦理/)).toBeInTheDocument());
   fireEvent.click(await screen.findByRole('button', { name: /辦理退役登記/ }));
 }
 
+const preferenceEditor = () => within(document.querySelector('[data-surface-id="staff.qualification.case-preference-manual"]') as HTMLElement);
+
 describe('Staff action async race guards', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.spyOn(staffCasePreferenceManualClient, 'queryOptions').mockResolvedValue(STAFF_MANUAL_OPTIONS);
     vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue(STAFF_PAGE_ONE);
     vi.spyOn(staffDirectoryClient, 'resetPagination').mockImplementation(() => undefined);
     vi.spyOn(staffCasePreferenceManualClient, 'query').mockResolvedValue(manualSnapshot(11));
@@ -100,8 +101,7 @@ describe('Staff action async race guards', () => {
     const pending = deferred<typeof manualPreview>();
     vi.mocked(staffCasePreferenceManualClient.preview).mockReturnValueOnce(pending.promise);
 
-    fireEvent.click(screen.getByRole('button', { name: '編輯六項偏好' }));
-    fireEvent.click(screen.getByRole('button', { name: '預覽變更' }));
+    fireEvent.click(preferenceEditor().getByRole('button', { name: '預覽變更' }));
     await waitFor(() => expect(staffCasePreferenceManualClient.preview).toHaveBeenCalledTimes(1));
     const signal = vi.mocked(staffCasePreferenceManualClient.preview).mock.calls[0]?.[2]?.signal;
     expect(signal?.aborted).toBe(false);
@@ -116,7 +116,7 @@ describe('Staff action async race guards', () => {
     expect(screen.queryByTestId('staff-case-preference-manual-preview')).not.toBeInTheDocument();
   });
 
-  it('availability late Preview after tab change cannot write the new tab', async () => {
+  it('availability late Preview after selecting another staff cannot write the current staff', async () => {
     await openAvailability();
     const pending = deferred<NonNullable<typeof STAFF_AVAILABILITY_PREVIEW_RESPONSE.data>>();
     vi.mocked(staffAvailabilityClient.previewChange).mockReturnValueOnce(pending.promise);
@@ -124,9 +124,9 @@ describe('Staff action async race guards', () => {
     fireEvent.change(screen.getByLabelText('新增原因'), { target: { value: '去敏預覽競態' } });
     fireEvent.click(screen.getByRole('button', { name: '預覽新增' }));
     await waitFor(() => expect(staffAvailabilityClient.previewChange).toHaveBeenCalledTimes(1));
-    fireEvent.click(screen.getByRole('tab', { name: /完整資格主檔/ }));
+    fireEvent.click(screen.getByRole('button', { name: '關閉' }));
+    fireEvent.click(screen.getByRole('button', { name: /查看 服務人員摘要 #12 的詳情/ }));
     pending.resolve(STAFF_AVAILABILITY_PREVIEW_RESPONSE.data!);
-    fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
 
     await waitFor(() => expect(screen.getByRole('button', { name: '套用新增' })).toBeDisabled());
     expect(screen.queryByText(/Preview 指紋/)).not.toBeInTheDocument();
@@ -224,17 +224,15 @@ describe('Staff action async race guards', () => {
       .mockResolvedValueOnce(manualSnapshot(12, '南區'));
     await renderReadyStaff();
     fireEvent.click(screen.getByRole('button', { name: /查看 去敏人員甲 的詳情/ }));
-    fireEvent.click(screen.getByRole('tab', { name: /接案偏好設定/ }));
     await waitFor(() => expect(staffCasePreferenceManualClient.query).toHaveBeenCalledTimes(1));
     const staleSignal = vi.mocked(staffCasePreferenceManualClient.query).mock.calls[0]?.[1]?.signal;
     fireEvent.click(screen.getByRole('button', { name: '關閉' }));
     fireEvent.click(screen.getByRole('button', { name: /查看 服務人員摘要 #12 的詳情/ }));
-    fireEvent.click(screen.getByRole('tab', { name: /接案偏好設定/ }));
-    expect(await screen.findByText('南區')).toBeInTheDocument();
+    expect(await screen.findByRole('combobox', { name: '可承接區域值1' })).toHaveValue('南區');
     expect(staleSignal?.aborted).toBe(true);
     stale.resolve(manualSnapshot(11, '北區'));
-    await waitFor(() => expect(screen.getByText('南區')).toBeInTheDocument());
-    expect(screen.queryByText('北區')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '可承接區域值1' })).toHaveValue('南區'));
+    expect(screen.getByRole('combobox', { name: '可承接區域值1' })).not.toHaveValue('北區');
   });
 
   it('post-receipt lifecycle requery late response is ignored after unmount', async () => {
@@ -245,7 +243,6 @@ describe('Staff action async race guards', () => {
     const view = render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
     fireEvent.click(document.querySelector('[data-control-id="staff.drawer.open.11"]') as HTMLElement);
-    fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
     await waitFor(() => expect(screen.getByText(/人事任職狀態與異動辦理/)).toBeInTheDocument());
     fireEvent.click(await screen.findByRole('button', { name: /辦理退役登記/ }));
     fireEvent.change(screen.getAllByLabelText('生效時間').at(-1)!, { target: { value: STAFF_LIFECYCLE_PREVIEW_PAYLOAD.effective_at } });

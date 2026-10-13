@@ -8,11 +8,12 @@ from datetime import date, datetime
 
 
 STAFF_PROFILE_FIELDS = (
-    "name", "identity_card", "phone", "tel", "tel_ext", "email", "birthday",
+    "union_no", "name", "identity_card", "phone", "tel", "tel_ext", "email", "birthday",
     "city", "zip_code", "address", "education", "emergency_contact_name",
     "emergency_contact_phone", "admin_notes",
 )
 _MAXIMUMS = {
+    "union_no": 50,
     "name": 100,
     "identity_card": 20,
     "phone": 20,

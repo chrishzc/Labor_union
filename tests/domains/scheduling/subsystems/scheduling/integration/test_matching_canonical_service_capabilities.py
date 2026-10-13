@@ -62,7 +62,8 @@ class CanonicalStore:
         else:
             table = sql.split("FROM ")[1].split()[0]
             if sql.startswith("DELETE"):
-                self.tables[table] = [row for row in self.tables[table] if row["staff_id"] != params[0]]
+                column = sql.split(" AND ")[1].split("=")[0] if " AND " in sql else None
+                self.tables[table] = [row for row in self.tables[table] if row["staff_id"] != params[0] or (column and row[column] != params[1])]
             self.rows = deepcopy(self.tables[table])
 
     def executemany(self, sql, values):
@@ -106,7 +107,7 @@ def test_roster_save_changes_the_next_query_without_numeric_preference_sync(nume
     writer = MySqlStaffCasePreferenceManualRepository(store)
     relations = {key: () for key in RELATION_KEYS}
     relations.update({"service_periods": (RelationValue("12小時"),), "rest_schedule": (RelationValue("週休1日"),)})
-    writer.replace_relations(3, relations)
+    writer.replace_relations(3, relations, before=writer.load_relations(3, for_update=False))
     assert inquiry(store) == []
     assert inquiry(store, mode=False, hours=False)[0]["staff_id"] == 3
     store.order.update({"service_type": "休周日", "service_hours_per_day": Decimal("12.0")})
@@ -129,6 +130,14 @@ def test_service_modes_do_not_use_total_day_count_and_formal_search_keeps_candid
     )
     assert result["candidate_options"][0]["filter_results"]["preferred_service_days"] is False
     assert result["candidate_options"][0]["filter_results"]["daily_service_hours"] is False
+
+
+def test_validated_staff_clock_window_keeps_eight_service_hours_in_matching():
+    store=CanonicalStore()
+    store.tables['staff_time_slots']=[{'staff_id':3,'slot_name':'8小時(08:30-17:00)','custom_slot_detail':None}]
+    assert [item['staff_id'] for item in inquiry(store)] == [3]
+    store.order['service_hours_per_day']=Decimal('4.0')
+    assert inquiry(store)==[]
 
 
 @pytest.mark.parametrize("hours", [Decimal("8.5"), Decimal("NaN"), 0, True])

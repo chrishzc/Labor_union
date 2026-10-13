@@ -35,7 +35,7 @@ describe('StaffPage request budget', () => {
     await waitFor(() => expect(screen.getByText('去敏人員乙')).toBeInTheDocument());
     expect(staffDirectoryClient.queryPage).toHaveBeenCalledTimes(2);
     expect(staffDirectoryClient.queryPage).toHaveBeenLastCalledWith(
-      { pageSize: 200, afterId: 12 },
+      { pageSize: 200, afterId: 12, includeProfile:true },
       expect.objectContaining({ signal: expect.any(AbortSignal) })
     );
   });
@@ -55,7 +55,7 @@ describe('StaffPage request budget', () => {
     await waitFor(() => expect(screen.getByText('去敏人員乙')).toBeInTheDocument());
     expect(staffDirectoryClient.queryPage).toHaveBeenNthCalledWith(
       3,
-      { pageSize: 200, afterId: 12 },
+      { pageSize: 200, afterId: 12, includeProfile:true },
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });

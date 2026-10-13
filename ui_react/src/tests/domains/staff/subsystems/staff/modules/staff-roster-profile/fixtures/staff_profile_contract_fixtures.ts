@@ -3,6 +3,7 @@ import type { StaffProfile } from '../../../../../../../../api/staff_profile/sta
 
 export const STAFF_PROFILE: StaffProfile = {
   staff_id: 11,
+  union_no: 'A001',
   name: '王小美',
   profile_version: 2,
   bank_accounts_version: 3,

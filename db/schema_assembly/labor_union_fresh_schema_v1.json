@@ -5,7 +5,7 @@
     "path": "db/schema.sql",
     "sha256": "b9cd84ae5a09a46949b5d4c131659f7f114480306f94e0af1246833d021b1bfb"
   },
-  "active_artifacts_sha256": "8b624772e011497588effa018b286b336512000f77e1ed14f0d4f51c43df9b3e",
+  "active_artifacts_sha256": "89f9cf30a9dfa37fcd704a5ab73bb1c1660aa9d7fe4acfefc47eb799edc813f1",
   "active_bootstrap": [
     "db/schema_parts/202_scheduling_staff_leave_intake.sql",
     "db/schema_parts/20_staff_monthly_settlements.sql",
@@ -178,7 +178,8 @@
     "db/schema_parts/1046_client_zero_obligation_establishment.sql",
     "db/schema_parts/1047_scheduling_buffer_advisory.sql",
     "db/schema_parts/229_order_cancellation_optional_downstream.sql",
-    "db/schema_parts/230_client_hcm_email.sql"
+    "db/schema_parts/230_client_hcm_email.sql",
+    "db/schema_parts/231_staff_union_number.sql"
   ],
   "classifications": {
     "db/schema_parts/1012_service_before_replacement.sql": "migration-only",
@@ -205,7 +206,8 @@
     "db/schema_parts/1044_order_terms_optional_downstream_versions.sql": "migration-only",
     "db/schema_parts/1045_order_terms_optional_scheduling_receipt.sql": "migration-only",
     "db/schema_parts/1048_order_cancellation_optional_downstream.sql": "migration-only",
-    "db/schema_parts/1049_client_hcm_email.sql": "migration-only"
+    "db/schema_parts/1049_client_hcm_email.sql": "migration-only",
+    "db/schema_parts/1050_staff_union_number.sql": "migration-only"
   },
   "retirement_contracts": {
     "db/schema_parts/1012_service_before_replacement.sql": {
@@ -432,6 +434,15 @@
       "replay": "absent column permits apply; exact nullable varchar(100) is no-op",
       "rollback": "discard candidate before switch; retain the column after apply",
       "unresolved_policy": "unexpected type, nullability or default blocks apply"
+    },
+    "db/schema_parts/1050_staff_union_number.sql": {
+      "source_object": "existing Staff roots without manually maintained union numbers",
+      "successor": "db/schema_parts/231_staff_union_number.sql",
+      "terminal_schema_evidence": "fresh assembly applies part 231; preserve release applies part 1050",
+      "data_effect": "schema_only; old rows remain NULL and staff ids, references and history are unchanged",
+      "replay": "absent column/index permits apply; exact column, binary collation and unique index are no-op",
+      "rollback": "discard candidate before switch; retain column and use compatible forward release after apply",
+      "unresolved_policy": "partial objects or unexpected type, nullability, collation, default or index blocks apply"
     }
   }
 }

@@ -21,6 +21,58 @@ describe('Staff registry owner editing', () => {
     mocks.previewBank.mockResolvedValue({ staff_id: STAFF_PROFILE.staff_id, current_version: STAFF_PROFILE.bank_accounts_version, operation: 'add', before: null, after: { account_id: null, bank_code: '812', branch_code: '0012', account_last4: '7890', is_primary: false, is_active: true }, preview_fingerprint: 'b'.repeat(64) });
   });
 
+  it('sends the manually entered union number through profile preview and apply', async () => {
+    mocks.previewProfile.mockResolvedValue({ staff_id: 11, current_version: 2, before: { union_no: 'A001' }, after: { union_no: 'Ab0007' }, preview_fingerprint: 'a'.repeat(64) });
+    mocks.applyProfile.mockResolvedValue({});
+    const onUpdated = vi.fn();
+    render(<StaffRegistryEditor profile={STAFF_PROFILE} onUpdated={onUpdated} />);
+    const section = screen.getByRole('heading', { name: /編輯個人與聯絡資料/ }).closest('section')!;
+    const input = within(section).getByLabelText('公會編號');
+    expect(input).toHaveValue('A001');
+    fireEvent.change(input, { target: { value: 'Ab0007' } });
+    fireEvent.click(within(section).getByRole('button', { name: '預覽變更' }));
+    await within(section).findByText('預覽完成，請核對後確認儲存。');
+    expect(mocks.previewProfile).toHaveBeenCalledWith(11, { union_no: 'Ab0007' }, 2);
+    fireEvent.change(within(section).getByLabelText('異動原因'), { target: { value: '設定公會編號' } });
+    fireEvent.click(within(section).getByRole('button', { name: '確認儲存' }));
+    await within(section).findByText('個人資料已儲存。');
+    expect(mocks.applyProfile).toHaveBeenCalledWith(11, { union_no: 'Ab0007' }, 2, 'a'.repeat(64), '設定公會編號', expect.any(String));
+    expect(onUpdated).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the draft and prevents apply when the union number is duplicated', async () => {
+    mocks.previewProfile.mockRejectedValue(new Error('此公會編號已被使用，請輸入其他編號。'));
+    render(<StaffRegistryEditor profile={STAFF_PROFILE} onUpdated={vi.fn()} />);
+    const section = screen.getByRole('heading', { name: /編輯個人與聯絡資料/ }).closest('section')!;
+    fireEvent.change(within(section).getByLabelText('公會編號'), { target: { value: 'B002' } });
+    fireEvent.click(within(section).getByRole('button', { name: '預覽變更' }));
+    await within(section).findByText('此公會編號已被使用，請輸入其他編號。');
+    expect(within(section).getByLabelText('公會編號')).toHaveValue('B002');
+    expect(within(section).getByRole('button', { name: '確認儲存' })).toBeDisabled();
+    expect(mocks.applyProfile).not.toHaveBeenCalled();
+  });
+
+  it('keeps bank preview available and explains missing fields without sending an invalid request', async () => {
+    render(<StaffRegistryEditor profile={STAFF_PROFILE} onUpdated={vi.fn()} showResume={false} />);
+    const bank = screen.getByRole('heading', { name: /管理銀行帳戶/ }).closest('section')!;
+    const preview = within(bank).getByRole('button', { name: '預覽變更' });
+    expect(preview).toBeEnabled();
+    expect(within(bank).getByRole('list', { name: '銀行帳戶' })).toHaveTextContent('主要帳戶｜有效');
+    fireEvent.click(preview);
+    expect(within(bank).getByRole('status')).toHaveTextContent('請填寫或選擇銀行代碼、分行代碼、完整新帳號，再預覽變更。');
+    expect(mocks.previewBank).not.toHaveBeenCalled();
+    fireEvent.change(within(bank).getByLabelText('銀行代碼'), { target: { value: '812' } });
+    fireEvent.change(within(bank).getByLabelText('分行代碼'), { target: { value: '0012' } });
+    fireEvent.change(within(bank).getByLabelText('完整新帳號'), { target: { value: '1234567890' } });
+    expect(within(bank).getByText('資料已填齊，可按「預覽變更」；預覽不會儲存資料。')).toBeInTheDocument();
+    fireEvent.click(preview);
+    await within(bank).findByText('只顯示帳號末四碼；請核對後確認儲存。');
+    expect(within(bank).getByText('預覽完成，請填寫異動原因後確認儲存。')).toBeInTheDocument();
+    expect(within(bank).getByRole('button', { name: '確認儲存' })).toBeDisabled();
+    expect(mocks.previewBank).toHaveBeenCalledOnce();
+    expect(mocks.currentResume).not.toHaveBeenCalled();
+  });
+
   it('clears the complete bank account after an uncertain result and prevents duplicate in-flight apply', async () => {
     let rejectApply: (error: Error) => void = () => undefined;
     mocks.applyBank.mockImplementation(() => new Promise((_, reject) => { rejectApply = reject; }));

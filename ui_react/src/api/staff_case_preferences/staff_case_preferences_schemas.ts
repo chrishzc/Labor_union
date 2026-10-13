@@ -8,6 +8,10 @@ export const StaffCasePreferenceRelationKeySchema = z.enum([
 export const StaffCasePreferenceRelationValueSchema = z.strictObject({
   value: z.string().min(1).max(50),
   detail: z.string().max(100).nullable(),
+  service_hours: z.number().int().positive().max(24).nullable().optional(),
+  start_time: z.string().regex(/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/).nullable().optional(),
+  end_time: z.string().regex(/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/).nullable().optional(),
+  end_day_offset: z.number().int().min(0).max(1).nullable().optional(),
 });
 export const StaffCasePreferenceRelationsSchema = z.strictObject({
   service_regions: z.array(StaffCasePreferenceRelationValueSchema),
@@ -17,6 +21,15 @@ export const StaffCasePreferenceRelationsSchema = z.strictObject({
   rest_schedule: z.array(StaffCasePreferenceRelationValueSchema),
   baby_types: z.array(StaffCasePreferenceRelationValueSchema),
 });
+export const StaffCasePreferenceOptionsSchema = z.strictObject({
+  service_regions: z.array(z.string().min(1).max(50)), service_periods: z.array(z.string().min(1).max(50)),
+  cooking_skills: z.array(z.string().min(1).max(50)), holiday_availability: z.array(z.string().min(1).max(50)),
+  rest_schedule: z.array(z.string().min(1).max(50)), baby_types: z.array(z.string().min(1).max(50)),
+});
+export const StaffCasePreferenceOptionsResponseSchema = z.strictObject({
+  success: z.boolean(), message: z.string(), data: z.strictObject({ options: StaffCasePreferenceOptionsSchema }), error: z.string().nullable().optional(),
+});
+export type StaffCasePreferenceOptions = z.infer<typeof StaffCasePreferenceOptionsSchema>;
 export const StaffCasePreferenceManualSnapshotSchema = z.strictObject({
   staff_id: z.number().int().positive(),
   before: StaffCasePreferenceRelationsSchema,

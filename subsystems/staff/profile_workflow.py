@@ -51,6 +51,7 @@ class StaffProfileMutationReceipt:
 
 class StaffProfileMutationRepository(Protocol):
     def load(self, staff_id: int, *, for_update: bool) -> Mapping[str, Any] | None: ...
+    def union_number_owner(self, union_no: str) -> int | None: ...
     def claim(self, *, staff_id: int, key: IdempotencyKey, command_fingerprint: PreviewFingerprint, correlation_id: CorrelationId) -> None: ...
     def load_receipt(self, key: IdempotencyKey, *, for_update: bool) -> Mapping[str, Any] | None: ...
     def persist(self, *, snapshot: StaffProfileSnapshot, changes: Mapping[str, str | None], actor: ActorContext, reason: str, key: IdempotencyKey, correlation_id: CorrelationId) -> int: ...
@@ -68,6 +69,7 @@ class StaffProfileMutationWorkflow:
     def preview(self, staff_id: int, changes: Mapping[str, object], expected_version: ExpectedVersion) -> StaffProfileMutationPreview:
         snapshot = self.query(staff_id)
         normalized = normalize_staff_profile_changes(changes)
+        self._check_union_number(snapshot.staff_id, normalized)
         return self._preview(snapshot, normalized, expected_version)
 
     def apply(
@@ -113,6 +115,7 @@ class StaffProfileMutationWorkflow:
             preview = self._preview(snapshot, normalized, expected_version)
             if preview.preview_fingerprint != preview_fingerprint:
                 raise StaffProfileMutationConflict("staff_profile_stale_preview")
+            self._check_union_number(identity, normalized)
             resulting_version = self._repository.persist(
                 snapshot=snapshot,
                 changes=normalized,
@@ -137,6 +140,13 @@ class StaffProfileMutationWorkflow:
             unit_of_work.commit()
             fresh = _snapshot(self._require(self._repository.load(identity, for_update=False)))
             return _receipt(result, preview_fingerprint, idempotency_key, False, fresh)
+
+    def _check_union_number(self, staff_id: int, changes: Mapping[str, str | None]) -> None:
+        union_no = changes.get("union_no")
+        if union_no is not None:
+            owner = self._repository.union_number_owner(union_no)
+            if owner is not None and owner != staff_id:
+                raise StaffProfileMutationConflict("staff_union_no_collision")
 
     @staticmethod
     def _preview(snapshot: StaffProfileSnapshot, changes: Mapping[str, str | None], expected_version: ExpectedVersion) -> StaffProfileMutationPreview:

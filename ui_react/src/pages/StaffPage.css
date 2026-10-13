@@ -208,41 +208,20 @@
 }
 
 /* ==========================================================================
-   Caregiver Directory Card Grid
+   Caregiver Directory Table
    ========================================================================== */
-.staff-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 290px), 1fr));
-  gap: 18px;
-}
-
-.staff-card {
-  position: relative;
-  background: #ffffff;
-  border: 1.5px solid #dec0b6;
-  border-radius: 16px;
-  padding: 18px;
-  box-shadow: 0 4px 14px rgba(74, 69, 67, 0.06);
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: 1fr auto;
-  align-items: start;
-  gap: 12px;
-  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
-}
-
-.staff-card:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 8px 24px rgba(255, 127, 80, 0.12);
-  border-color: #ff7f50;
-}
-
-.staff-card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 12px;
-}
+.staff-directory-table-wrap { position: relative; max-height: 55vh; overflow: auto; scrollbar-gutter: stable; border: 1px solid #ead3c8; border-radius: 12px; background: #fff; }
+.staff-directory-table { width: 100%; min-width: 4500px; border-collapse: collapse; text-align: left; color: #432c23; }
+.staff-directory-table caption { padding: 11px 14px; text-align: left; color: #74593f; }
+.staff-directory-table th, .staff-directory-table td { padding: 11px 13px; border-top: 1px solid #f1ddd5; vertical-align: middle; }
+.staff-directory-table th { position: sticky; top: 0; z-index: 1; background: #fff7ed; color: #7c2d12; white-space: nowrap; }
+.staff-directory-table td { overflow-wrap: anywhere; }
+.staff-directory-table tbody tr { cursor: pointer; }
+.staff-directory-table tbody tr:hover { background: #fff7ed; }
+.staff-directory-table tbody tr:focus-visible { outline: 3px solid #a83f1d; outline-offset: -3px; }
+.staff-directory-table tbody tr.is-selected { background: #ffedd5; box-shadow: inset 4px 0 #9a3412; }
+.staff-directory-table tbody tr[aria-disabled="true"] { cursor: default; }
+.staff-directory-table .staff-view-btn { white-space: nowrap; }
 
 .staff-avatar-name {
   display: flex;
@@ -321,12 +300,6 @@
   border: 1px solid #dadce0;
 }
 
-.staff-card-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
 .staff-skill-chip {
   padding: 3px 8px;
   background: #fff8f6;
@@ -335,25 +308,6 @@
   font-size: 0.76rem;
   color: #57423b;
   font-weight: 500;
-}
-
-.staff-card-pref-summary {
-  padding: 0;
-  font-size: 0.8rem;
-  color: #74593f;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-
-.staff-card-footer {
-  grid-column: 1;
-  margin-top: 0;
-  padding-top: 0;
-  border-top: 0;
-  display: flex;
-  gap: 8px;
 }
 
 .staff-view-btn,
@@ -390,17 +344,6 @@
 .staff-view-btn {
   flex: 1;
 }
-
-.staff-card .staff-view-btn::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: 16px;
-}
-.staff-card:focus-within { outline: 3px solid #a83f1d; outline-offset: 3px; }
-.staff-card .staff-avatar-name > div:last-child { min-width: 0; }
-.staff-card .staff-name { overflow-wrap: anywhere; }
-.staff-card .staff-id-badge { white-space: nowrap; flex-shrink: 0; }
 
 .staff-quick-query { color: #74593f; font-size: .82rem; }
 .staff-quick-query > summary { cursor: pointer; padding: 10px 0; font-weight: 650; }
@@ -680,7 +623,7 @@
   color: #57423b;
 }
 
-.staff-op-field input, .staff-op-field select {
+.staff-op-field input, .staff-op-field select, .staff-op-field textarea {
   padding: 8px 12px;
   border-radius: 8px;
   border: 1px solid #dec0b6;
@@ -694,8 +637,66 @@
   margin-top: 4px;
 }
 
+.staff-op-field input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  min-height: 18px;
+  padding: 0;
+  justify-self: start;
+}
+
+.staff-manual-condition {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.staff-manual-condition-main {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.staff-manual-condition select {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #dec0b6;
+  border-radius: 8px;
+  background: #fff;
+  font: inherit;
+}
+
+.staff-manual-condition .staff-secondary-btn {
+  padding: 5px 10px;
+  justify-self: start;
+  white-space: nowrap;
+}
+
+.staff-manual-empty {
+  color: #74593f;
+  margin: 6px 0 12px;
+}
+
+.staff-service-time-grid {
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  margin-top: 4px;
+}
+
+.staff-service-time-rule {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #74593f;
+  font-size: 0.82rem;
+}
+
+.staff-source-note {
+  color: #74593f;
+}
+
 /* ==========================================================================
-   Full Profile Drawer (4-Tab System)
+   Full Profile Drawer Sections
    ========================================================================== */
 .staff-drawer-content {
   display: flex;
@@ -896,8 +897,10 @@
 }
 
 .staff-form-card input:not(:disabled),
+.staff-form-card textarea:not(:disabled),
 .staff-form-card select,
 .staff-range-query input:not(:disabled),
+.staff-drawer-section textarea:not(:disabled),
 .staff-drawer-section input {
   background: #ffffff;
   color: #1e1b19;
@@ -1012,11 +1015,6 @@
 /* ==========================================================================
    Responsive Breakpoints
    ========================================================================== */
-@media (max-width: 1100px) {
-  .staff-card { grid-template-columns: minmax(0, 1fr); }
-  .staff-card-footer { grid-column: 1; grid-row: auto; }
-}
-
 @media (max-width: 768px) {
   .staff-page-header h1 { font-size: 1.5rem; }
   .staff-page-header,
@@ -1024,15 +1022,10 @@
     align-items: stretch;
     flex-direction: column;
   }
-  .staff-grid,
   .staff-preference-grid,
   .staff-qual-grid {
     grid-template-columns: 1fr;
   }
-  .staff-card { grid-template-columns: minmax(0, 1fr); }
-  .staff-card-pref-summary,
-  .staff-card-footer { grid-column: 1; grid-row: auto; }
-  .staff-card-footer { padding-top: 10px; border-top: 1px dashed #dec0b6; }
   .staff-form-card.wide {
     grid-column: auto;
   }

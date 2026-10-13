@@ -161,6 +161,11 @@ class StaffServiceProfile:
 
 
 @dataclass(frozen=True, slots=True)
+class StaffRosterServiceProfile(StaffServiceProfile):
+    cooking_skills: tuple[StaffServiceProfileItem, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class StaffQualificationMaster:
     staff_id: int
     staff_name: str

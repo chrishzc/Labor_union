@@ -6,14 +6,14 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './StaffPage.css';
 import { Drawer } from '../components/Drawer';
 import { StaffRegistryEditor } from '../components/StaffRegistryEditor';
+import { StaffQualificationEditor } from '../components/StaffQualificationEditor';
 import {
   loadAllStaffDirectoryPages,
   staffDirectoryClient,
 } from '../api/staff_directory/staff_directory_client';
 import { StaffDirectoryAbortedError } from '../api/staff_directory/staff_directory_errors';
-import { staffCasePreferenceSummaryClient } from '../api/staff_case_preference_summary/staff_case_preference_summary_client';
 import { staffCasePreferenceManualClient } from '../api/staff_case_preferences/staff_case_preferences_client';
-import type { StaffCasePreferenceManualSnapshot, StaffCasePreferenceRelations } from '../api/staff_case_preferences/staff_case_preferences_schemas';
+import type { StaffCasePreferenceManualSnapshot, StaffCasePreferenceRelations, StaffCasePreferenceOptions } from '../api/staff_case_preferences/staff_case_preferences_schemas';
 import { staffAvailabilityClient } from '../api/staff_availability/staff_availability_client';
 import {
   StaffAvailabilityAbortedError,
@@ -46,10 +46,6 @@ import {
   type StaffDirectoryCardViewModel,
 } from '../adapters/staff/staff_directory_adapter';
 import {
-  adaptStaffCasePreferenceSummary,
-  type StaffCasePreferenceSummaryViewModel,
-} from '../adapters/staff/staff_case_preference_summary_adapter';
-import {
   adaptStaffAvailabilityBlocks,
   type StaffAvailabilityBlockViewModel,
 } from '../adapters/staff/staff_availability_adapter';
@@ -65,6 +61,35 @@ import {
   adaptStaffProfile,
   type StaffProfileViewModel,
 } from '../adapters/staff/staff_profile_adapter';
+import type { StaffProfile } from '../api/staff_profile/staff_profile_schemas';
+import type { StaffRosterServiceProfile } from '../api/staff_directory/staff_directory_schemas';
+
+const rosterServiceColumns: Array<[keyof StaffRosterServiceProfile, string]> = [
+  ['care_babies', '最多照顧寶寶數'], ['service_regions', '可承接區域'],
+  ['service_time_slots', '可承接時段'], ['cooking_skills', '下廚能力'],
+  ['transportation', '交通方式'], ['weekly_rest', '週間服務／排休'],
+  ['holiday_availability', '特殊節日意願'], ['baby_types', '可承接胎數'],
+];
+const rosterServiceValue = (profile: StaffRosterServiceProfile | undefined, field: keyof StaffRosterServiceProfile) => {
+  if (!profile) return '未載入';
+  if (field === 'care_babies') return profile.care_babies === null ? '尚未登錄' : `${profile.care_babies} 位`;
+  return profileItemsText(profile[field]);
+};
+
+const rosterProfileColumns: Array<[keyof StaffProfile, string]> = [
+  ['registered_at', '登錄日期'], ['identity_card', '身分證'], ['birthday', '生日'],
+  ['telephone', '市話'], ['telephone_extension', '分機'], ['email', 'Email'],
+  ['city', '縣市'], ['zip_code', '郵遞區號'], ['address', '地址'],
+  ['emergency_contact_name', '緊急聯絡人'], ['emergency_contact_phone', '緊急聯絡電話'],
+  ['admin_notes', '行政註記'],
+];
+const rosterBankColumns = ['銀行代碼', '分行代碼', '銀行帳號', '主要帳戶', '帳戶狀態'];
+const rosterProfileValue = (profile: StaffProfile | undefined, field: keyof StaffProfile) => {
+  if (!profile) return '未載入';
+  const value = profile[field];
+  return value === null || value === undefined || value === '' ? '未登錄'
+    : field === 'registered_at' ? String(value).slice(0, 10) : String(value);
+};
 
 type DirectoryState =
   | { status: 'loading'; items: StaffDirectoryCardViewModel[] }
@@ -146,7 +171,7 @@ export function appendManualDraftRow(current: StaffCasePreferenceRelations, key:
 function requestRelations(draft: StaffCasePreferenceRelations): StaffCasePreferenceRelations {
   return Object.fromEntries(MANUAL_RELATION_KEYS.map((key) => [
     key,
-    draft[key].filter((item) => item.value.trim()).map((item) => ({ value: item.value.trim(), detail: item.detail?.trim() || null })),
+    draft[key].filter((item) => item.value.trim()).map((item) => ({ value: item.value.trim(), detail: item.detail?.trim() || null, ...(key === 'service_periods' ? { ...(item.service_hours !== undefined ? { service_hours: item.service_hours } : {}), ...(item.start_time !== undefined ? { start_time: item.start_time } : {}), ...(item.end_time !== undefined ? { end_time: item.end_time } : {}), ...(item.end_day_offset !== undefined ? { end_day_offset: item.end_day_offset } : {}) } : {}) })),
   ])) as StaffCasePreferenceRelations;
 }
 
@@ -165,12 +190,13 @@ export function StaffCasePreferenceManualPreview({ preview }: { preview: StaffCa
   </div>;
 }
 
-export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.drawer.case-preference-manual' }: { staffId: number; surfaceId?: string }) {
+export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.drawer.case-preference-manual', onUpdated, directEditing = false }: { staffId: number; surfaceId?: string; onUpdated?: () => void | Promise<void>; directEditing?: boolean }) {
   const [snapshot, setSnapshot] = useState<StaffCasePreferenceManualSnapshot | null>(null);
   const [draft, setDraft] = useState<StaffCasePreferenceRelations>(() => EMPTY_MANUAL_RELATIONS);
   const [preview, setPreview] = useState<StaffCasePreferenceManualSnapshot | null>(null);
   const [reason, setReason] = useState('');
   const [status, setStatus] = useState('');
+  const [options, setOptions] = useState<StaffCasePreferenceOptions | null>(null);
   const [phase, setPhase] = useState<'loading' | 'ready' | 'editing' | 'previewing' | 'preview_ready' | 'applying' | 'error'>('loading');
   const loadEpoch = useRef(0);
   const requestControllerRef = useRef<AbortController | null>(null);
@@ -185,11 +211,15 @@ export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.dr
     setReason('');
     setStatus('');
     try {
-      const next = await staffCasePreferenceManualClient.query(staffId, { signal: controller.signal });
+      const [next, choices] = await Promise.all([
+        staffCasePreferenceManualClient.query(staffId, { signal: controller.signal }),
+        staffCasePreferenceManualClient.queryOptions({ signal: controller.signal }),
+      ]);
       if (epoch !== loadEpoch.current) return false;
       setSnapshot(next);
       setDraft(next.after);
-      setPhase('ready');
+      setOptions(choices);
+      setPhase(directEditing ? 'editing' : 'ready');
       return true;
     } catch (error) {
       if (epoch === loadEpoch.current) {
@@ -198,7 +228,7 @@ export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.dr
       }
       return false;
     }
-  }, [staffId]);
+  }, [staffId, directEditing]);
   useEffect(() => {
     void load();
     return () => {
@@ -208,7 +238,11 @@ export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.dr
     };
   }, [load]);
   const doPreview = async () => {
-    if (!snapshot || phase !== 'editing') return;
+    if (!snapshot || (phase !== 'editing' && phase !== 'preview_ready')) return;
+    if (MANUAL_RELATION_KEYS.some(key => draft[key].some(item => !item.value.trim()))) {
+      setStatus('請選擇新增條件，或移除尚未選擇的項目。');
+      return;
+    }
     const epoch = loadEpoch.current;
     requestControllerRef.current?.abort();
     const controller = new AbortController();
@@ -252,32 +286,55 @@ export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.dr
       return;
     }
     if (epoch !== loadEpoch.current) return;
-    if (await load()) setStatus('已儲存並重新查詢六大接案能力。');
+    if (await load()) { setStatus('已儲存並重新查詢六大接案能力。'); await onUpdated?.(); }
   };
   const editing = ['editing', 'previewing', 'preview_ready', 'applying'].includes(phase);
   const locked = phase === 'loading' || phase === 'previewing' || phase === 'applying';
+  const editRow = (key: ManualRelationKey, index: number, field: 'value' | 'detail', value: string) => {
+    setPreview(null); setStatus(''); setPhase('editing');
+    setDraft(current => { const next = updateManualDraftRow(current, key, index, field, value); if (field === 'value' && value !== current[key][index].value) next[key][index].detail = null; return next; });
+  };
+  const editTimeRow = (index: number, changes: Partial<StaffCasePreferenceRelations['service_periods'][number]>) => {
+    setPreview(null); setStatus(''); setPhase('editing');
+    setDraft(current => ({ ...current, service_periods: current.service_periods.map((item, rowIndex) => rowIndex === index ? { ...item, ...changes, detail: null } : item) }));
+  };
   return <section data-surface-id={surfaceId}>
-    <h3>六大接案能力人工維護</h3>
-    <p>直接編輯六項接案能力，預覽後確認儲存。交通方式仍於資格主檔唯讀顯示。</p>
+    <h3>服務能力與接案條件</h3>
+    <p>從選單選擇條件，需要時再新增條件，服務時段可自訂起迄時間，預覽後確認儲存。</p>
     {phase === 'loading' && <p role="status">正在載入六大接案能力…</p>}
     {phase === 'ready' && snapshot && <button type="button" className="staff-next-btn" onClick={() => { setDraft(snapshot.after); setStatus(''); setPhase('editing'); }}>編輯六項偏好</button>}
-    {snapshot && <div className="staff-qual-grid">
+    {snapshot && options && <div className="staff-qual-grid">
       {MANUAL_RELATION_KEYS.map((key) => <div key={key} className="staff-qual-card" role="group" aria-label={MANUAL_RELATION_LABELS[key]}>
         <h4>{MANUAL_RELATION_LABELS[key]}</h4>
         {!editing ? <p>{displayRelations(snapshot.after[key])}</p> : <>
-          {draft[key].map((item, index) => <div key={index}>
-            <input aria-label={MANUAL_RELATION_LABELS[key] + '值' + (index + 1)} disabled={locked} value={item.value} onChange={(event) => { setPreview(null); setStatus(''); setPhase('editing'); setDraft((current) => updateManualDraftRow(current, key, index, 'value', event.target.value)); }} />
-            <input aria-label={MANUAL_RELATION_LABELS[key] + '說明' + (index + 1)} disabled={locked} value={item.detail ?? ''} onChange={(event) => { setPreview(null); setStatus(''); setPhase('editing'); setDraft((current) => updateManualDraftRow(current, key, index, 'detail', event.target.value)); }} />
+          {draft[key].length === 0 && <p className="staff-manual-empty">尚未設定條件</p>}
+          {draft[key].map((item, index) => <div className="staff-manual-condition" key={index}>
+            <div className="staff-manual-condition-main">
+              <select aria-label={MANUAL_RELATION_LABELS[key] + '值' + (index + 1)} disabled={locked} value={key === 'service_periods' && item.service_hours ? `${item.service_hours}小時` : item.value} onChange={event => { if (key === 'service_periods') { const hours = Number(event.target.value.replace('小時', '')); editTimeRow(index, { value: event.target.value, service_hours: hours, end_day_offset: item.end_day_offset ?? (hours === 24 ? 1 : 0) }); } else editRow(key, index, 'value', event.target.value); }}>
+                <option value="">請選擇條件</option>
+                {item.value && !options[key].includes(key === 'service_periods' && item.service_hours ? `${item.service_hours}小時` : item.value) && <option value={key === 'service_periods' && item.service_hours ? `${item.service_hours}小時` : item.value}>既有值：{item.value}</option>}
+                {options[key].map(value => <option key={value} value={value} disabled={key !== 'service_periods' && draft[key].some((row, rowIndex) => rowIndex !== index && row.value === value)}>{value}</option>)}
+              </select>
+              <button type="button" className="staff-secondary-btn" disabled={locked} aria-label={`移除${MANUAL_RELATION_LABELS[key]}第${index + 1}項`} onClick={() => { setPreview(null); setStatus(''); setPhase('editing'); setDraft(current => ({ ...current, [key]: current[key].filter((_, rowIndex) => rowIndex !== index) })); }}>移除</button>
+            </div>
+            {key === 'service_periods' && item.value && <div className="staff-op-grid staff-service-time-grid">
+              <label className="staff-op-field">開始時間<input type="time" aria-label={`可承接時段開始時間${index + 1}`} disabled={locked} value={item.start_time ?? ''} onChange={event => editTimeRow(index, { start_time: event.target.value || null, end_day_offset: item.end_day_offset ?? 0 })} /></label>
+              <label className="staff-op-field">結束時間<input type="time" aria-label={`可承接時段結束時間${index + 1}`} disabled={locked} value={item.end_time ?? ''} onChange={event => editTimeRow(index, { end_time: event.target.value || null, end_day_offset: item.end_day_offset ?? 0 })} /></label>
+              <label className="staff-op-field">結束日<select aria-label={`可承接時段結束日${index + 1}`} disabled={locked} value={item.end_day_offset ?? 0} onChange={event => editTimeRow(index, { end_day_offset: Number(event.target.value) })}><option value={0}>當日</option><option value={1}>次日</option></select></label>
+              <p className="staff-service-time-rule">{item.service_hours === 8 || item.value === '8小時' ? '8 小時服務＋30 分鐘休息，起迄共 8.5 小時。' : item.service_hours === 24 || item.value === '24小時' ? '起迄共 24 小時，結束日請選次日。' : item.service_hours === 4 || item.value === '4小時' ? '4 小時服務，起迄共 4 小時，不扣休息。' : '請先選擇 4、8 或 24 小時，再設定起迄。'}{!item.start_time && !item.end_time && (snapshot.after.service_periods.some(before => before.value === item.value) ? ' 既有未設定時間的條件可保留；修改時段時須填齊。' : ' 請填齊開始與結束時間。')}</p>
+            </div>}
+            {item.detail && <small className="staff-source-note">來源資料：{item.detail}</small>}
           </div>)}
-          <button type="button" disabled={locked} onClick={() => { setPreview(null); setStatus(''); setPhase('editing'); setDraft((current) => appendManualDraftRow(current, key)); }}>新增一列</button>
+          <button type="button" className="staff-secondary-btn" aria-label={`新增${MANUAL_RELATION_LABELS[key]}條件`} disabled={locked || draft[key].some(item => !item.value) || (key !== 'service_periods' && options[key].every(value => draft[key].some(item => item.value === value)))} onClick={() => { setPreview(null); setStatus(''); setPhase('editing'); setDraft(current => appendManualDraftRow(current, key)); }}>＋ 新增條件</button>
         </>}
       </div>)}
     </div>}
-    {editing && <label>變更原因<input aria-label="六大接案能力變更原因" disabled={locked} value={reason} onChange={(event) => setReason(event.target.value)} /></label>}
-    <div className="staff-action-pair">
-      {phase === 'editing' && <button type="button" onClick={() => void doPreview()}>預覽變更</button>}
-      {phase === 'preview_ready' && <button type="button" disabled={!preview?.preview_fingerprint || !reason.trim()} onClick={() => void doApply()}>確認儲存</button>}
-      {phase === 'error' && <button type="button" onClick={() => void load()}>重新查詢</button>}
+    {editing && <label className="staff-op-field">變更原因<input aria-label="六大接案能力變更原因" disabled={locked} value={reason} onChange={(event) => setReason(event.target.value)} /></label>}
+    <div className="staff-op-actions">
+      {editing && <button type="button" className="staff-secondary-btn" disabled={locked} onClick={() => { if (snapshot) setDraft(snapshot.after); setPreview(null); setReason(''); setStatus('已取消變更。'); setPhase(directEditing ? 'editing' : 'ready'); }}>取消變更</button>}
+      {editing && <button type="button" className="staff-primary-btn" disabled={locked} onClick={() => void doPreview()}>預覽變更</button>}
+      {editing && <button type="button" className="staff-primary-btn" disabled={locked || phase !== 'preview_ready' || !preview?.preview_fingerprint || !reason.trim()} onClick={() => void doApply()}>確認儲存</button>}
+      {phase === 'error' && <button type="button" className="staff-secondary-btn" onClick={() => void load()}>重新查詢</button>}
     </div>
     {preview && <StaffCasePreferenceManualPreview preview={preview} />}
     {status && <p role="status">{status}</p>}
@@ -360,10 +417,13 @@ function isEligibleEndPauseBlock(
 
 export const StaffPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
-  const [drawerTab, setDrawerTab] = useState<'management' | 'qualification' | 'preferences' | 'unavailability'>('qualification');
   const [directory, setDirectory] = useState<DirectoryState>({ status: 'loading', items: [] });
   const [directorySearch, setDirectorySearch] = useState<DirectorySearchState>({ status: 'idle', items: [] });
   const [selectedStaff, setSelectedStaff] = useState<StaffDirectoryCardViewModel | null>(null);
+  const drawerStaffId = selectedStaff?.id ?? null;
+  const [openAtStatus, setOpenAtStatus] = useState(false);
+  const statusSectionRef = useRef<HTMLElement>(null);
+  const [resumeContainer, setResumeContainer] = useState<HTMLElement | null>(null);
   const [selectedStaffId, setSelectedStaffId] = useState<number | null>(null);
   const [availability, setAvailability] = useState<QueryState<StaffAvailabilityBlockViewModel[]>>({ status: 'idle' });
   const [availabilityKind, setAvailabilityKind] = useState<'create_long_leave' | 'create_pause'>('create_pause');
@@ -376,7 +436,6 @@ export const StaffPage: React.FC = () => {
   const [lifecycle, setLifecycle] = useState<QueryState<StaffLifecycleViewModel>>({ status: 'idle' });
   const [qualification, setQualification] = useState<QueryState<StaffQualificationMasterViewModel>>({ status: 'idle' });
   const [profile, setProfile] = useState<QueryState<StaffProfileViewModel>>({ status: 'idle' });
-  const [casePreferenceSummary, setCasePreferenceSummary] = useState<QueryState<StaffCasePreferenceSummaryViewModel>>({ status: 'idle' });
   const [lifecycleEffectiveAt, setLifecycleEffectiveAt] = useState('');
   const [lifecycleReasonCode, setLifecycleReasonCode] = useState('');
   const [lifecycleAction, setLifecycleAction] = useState<ActionState<StaffLifecyclePreview, StaffLifecycleApplyReceipt, StaffLifecycleApplyPayload> & { action: StaffLifecycleAction | null }>({
@@ -441,7 +500,7 @@ export const StaffPage: React.FC = () => {
     setDirectory({ status: 'loading', items: [] });
     try {
       const response = await staffDirectoryClient.queryPage(
-        { pageSize: 200 },
+        { pageSize: 200, includeProfile: true },
         { signal: controller.signal }
       );
       if (!mountedRef.current || generation !== requestGenerationRef.current) return;
@@ -503,7 +562,7 @@ export const StaffPage: React.FC = () => {
     const timer = window.setTimeout(() => {
       void loadAllStaffDirectoryPages(
         staffDirectoryClient.queryPage.bind(staffDirectoryClient),
-        { pageSize: 200 },
+        { pageSize: 200, includeProfile: true },
         { signal: controller.signal },
       ).then((page) => {
         if (!mountedRef.current || controller.signal.aborted || generation !== searchGenerationRef.current) return;
@@ -530,7 +589,6 @@ export const StaffPage: React.FC = () => {
     setLifecycle({ status: 'idle' });
     setQualification({ status: 'idle' });
     setProfile({ status: 'idle' });
-    setCasePreferenceSummary({ status: 'idle' });
     setLifecycleAction({ ...initialActionState(), action: null });
     if (selectedStaffId === null) return;
 
@@ -540,19 +598,17 @@ export const StaffPage: React.FC = () => {
       void staffProfileClient.query(currentStaffId, { signal: controller.signal }).then((value) => {
         if (isCurrentSlice(generation, controller.signal)) {
           setProfile({ status: 'ready', data: adaptStaffProfile(value) });
+          const refreshed = adaptStaffDirectoryPage({ items: [{
+            id: value.staff_id, union_no: value.union_no ?? null, name: value.name,
+            phone: value.phone, education: value.education, profile: value,
+          }], next_cursor: null }).items[0];
+          setDirectory((current) => ({ ...current, items: current.items.map((staff) => staff.id === refreshed.id ? { ...staff, ...refreshed } : staff) }));
+          setDirectorySearch((current) => ({ ...current, items: current.items.map((staff) => staff.id === refreshed.id ? { ...staff, ...refreshed } : staff) }));
+          setSelectedStaff((current) => current?.id === refreshed.id ? { ...current, ...refreshed } : current);
         }
       }).catch((error: unknown) => {
         if (!isCurrentSlice(generation, controller.signal)) return;
         setProfile({ status: 'error', message: errorMessage(error, '個人與聯絡資料載入失敗。') });
-      });
-      setCasePreferenceSummary({ status: 'loading' });
-      void staffCasePreferenceSummaryClient.query(currentStaffId, { signal: controller.signal }).then((summary) => {
-        if (isCurrentSlice(generation, controller.signal)) {
-          setCasePreferenceSummary({ status: 'ready', data: adaptStaffCasePreferenceSummary(summary) });
-        }
-      }).catch((error: unknown) => {
-        if (!isCurrentSlice(generation, controller.signal)) return;
-        setCasePreferenceSummary({ status: 'error', message: errorMessage(error, '接案偏好摘要載入失敗。') });
       });
       setLifecycle({ status: 'loading' });
       void staffLifecycleClient.query(currentStaffId, { signal: controller.signal }).then((view) => {
@@ -567,6 +623,16 @@ export const StaffPage: React.FC = () => {
       void staffQualificationMasterClient.query(currentStaffId, todayIsoDate(), { signal: controller.signal }).then((master) => {
         if (isCurrentSlice(generation, controller.signal)) {
           setQualification({ status: 'ready', data: adaptStaffQualificationMaster(master) });
+          const serviceProfile: StaffRosterServiceProfile = {
+            ...master.service_profile,
+            cooking_skills: (master.sections.find(section => section.kind === 'cooking')?.items ?? [])
+              .filter(item => typeof item.value === 'string')
+              .map(item => ({ value: String(item.value), detail: item.detail })),
+          };
+          const refreshService = (staff: StaffDirectoryCardViewModel) => staff.id === currentStaffId ? { ...staff, serviceProfile } : staff;
+          setDirectory(current => ({ ...current, items: current.items.map(refreshService) }));
+          setDirectorySearch(current => ({ ...current, items: current.items.map(refreshService) }));
+          setSelectedStaff(current => current ? refreshService(current) : current);
         }
       }).catch((error: unknown) => {
         if (error instanceof StaffQualificationMasterError && error.code === 'STAFF_QUALIFICATION_ABORTED') return;
@@ -577,7 +643,7 @@ export const StaffPage: React.FC = () => {
   }, [selectedStaffId, sliceRetryGeneration]);
 
   useEffect(() => {
-    if (selectedStaffId !== null && drawerTab === 'unavailability') {
+    if (selectedStaffId !== null && drawerStaffId === selectedStaffId) {
       const from = rangeStart || '2026-01-01';
       const to = rangeEnd || '2026-12-31';
       const { generation, controller } = beginAvailabilityQuery();
@@ -599,7 +665,7 @@ export const StaffPage: React.FC = () => {
         });
       return () => controller.abort();
     }
-  }, [selectedStaffId, drawerTab, rangeStart, rangeEnd]);
+  }, [selectedStaffId, drawerStaffId, rangeStart, rangeEnd]);
 
   const queryAvailability = async () => {
     if (selectedStaffId === null || !rangeStart || !rangeEnd) return;
@@ -630,6 +696,16 @@ export const StaffPage: React.FC = () => {
     const adapted = adaptStaffAvailabilityBlocks(blocks);
     setAvailability({ status: 'ready', data: adapted });
     return adapted;
+  };
+
+  const refreshQualificationSummary = async (staffId: number, signal: AbortSignal, generation: number) => {
+    setQualification({ status: 'loading' });
+    try {
+      const master = await staffQualificationMasterClient.query(staffId, todayIsoDate(), { signal });
+      if (isCurrentSlice(generation, signal)) setQualification({ status: 'ready', data: adaptStaffQualificationMaster(master) });
+    } catch (error) {
+      if (isCurrentSlice(generation, signal)) setQualification({ status: 'error', message: errorMessage(error, '資格主檔重新查詢失敗。') });
+    }
   };
 
   const previewAvailability = async (intent: StaffAvailabilityIntent) => {
@@ -708,9 +784,11 @@ export const StaffPage: React.FC = () => {
               ? '已觀察 server 封閉暫停期間'
               : '變更已受理，但重新查詢尚未看到同一筆暫停期間已結束。',
           }));
+          if (observedClosedPause) void refreshQualificationSummary(currentStaffId, controller.signal, generation);
           return;
         }
         setAvailabilityAction((current) => ({ ...current, phase: 'observed', message: '已觀察最新不可服務期間' }));
+        void refreshQualificationSummary(currentStaffId, controller.signal, generation);
       } catch (error) {
         if (!isCurrentSlice(generation, controller.signal)) return;
         setAvailabilityAction((current) => ({ ...current, phase: 'observation_failed', message: `變更已受理，但重新查詢失敗：${errorMessage(error, '不可服務期間查詢失敗。')}` }));
@@ -829,7 +907,7 @@ export const StaffPage: React.FC = () => {
     setDirectory({ status: 'loading-more', items: existingItems, nextCursor: cursor });
     try {
       const response = await staffDirectoryClient.queryPage(
-        { pageSize: 200, afterId: cursor },
+        { pageSize: 200, afterId: cursor, includeProfile: true },
         { signal: controller.signal }
       );
       if (!mountedRef.current || generation !== requestGenerationRef.current) return;
@@ -885,6 +963,18 @@ export const StaffPage: React.FC = () => {
     setSelectedStaffId(value ? Number(value) : null);
   };
 
+  const openStaffDetail = (staff: StaffDirectoryCardViewModel) => {
+    if (interactionLocked) return;
+    if (selectedStaffId !== staff.id) invalidateSlice();
+    setSelectedStaffId(staff.id);
+    setSelectedStaff(staff);
+    setOpenAtStatus(false);
+  };
+
+  useEffect(() => {
+    if (drawerStaffId !== null && openAtStatus) statusSectionRef.current?.scrollIntoView({ block: 'start' });
+  }, [drawerStaffId, openAtStatus]);
+
   const filteredStaffItems = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     const searchableItems = query && directorySearch.status === 'ready'
@@ -892,7 +982,7 @@ export const StaffPage: React.FC = () => {
       : staffItems;
     return searchableItems.filter((staff) => {
       if (query) {
-        const matchId = String(staff.id).includes(query);
+        const matchId = (staff.unionNo ?? '').toLowerCase().includes(query);
         const matchName = staff.displayName.toLowerCase().includes(query);
         const matchPhone = staff.displayPhone.toLowerCase().includes(query);
         if (!matchId && !matchName && !matchPhone) return false;
@@ -1043,7 +1133,7 @@ export const StaffPage: React.FC = () => {
             <input
               type="text"
               aria-label="即時搜尋月嫂"
-              placeholder="搜尋月嫂姓名、電話或 Staff ID..."
+              placeholder="搜尋公會編號、月嫂姓名或電話…"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
@@ -1080,7 +1170,7 @@ export const StaffPage: React.FC = () => {
               onChange={(event) => changeSelectedStaff(event.target.value)}
             >
               <option value="">請選擇服務人員</option>
-              {staffItems.map((staff) => <option key={staff.id} value={staff.id}>{staff.displayName}（#{staff.id}）</option>)}
+              {staffItems.map((staff) => <option key={staff.id} value={staff.id}>{staff.displayName}（公會編號：{staff.unionNo ?? '未設定'}）</option>)}
             </select>
           </div>
           </details>
@@ -1155,42 +1245,43 @@ export const StaffPage: React.FC = () => {
           )}
 
           {filteredStaffItems.length > 0 && (
-            <div className="staff-grid">
+            <div className="staff-directory-table-wrap" role="region" aria-label="月嫂完整主檔清單，可橫向捲動" tabIndex={0} aria-busy={directory.status === 'loading-more'}>
+              <table className="staff-directory-table">
+                <caption>月嫂名冊清單</caption>
+                <thead><tr>
+                  <th scope="col">公會編號</th><th scope="col">姓名</th>
+                  <th scope="col">電話</th><th scope="col">學歷</th>
+                  {rosterServiceColumns.map(([field, label]) => <th scope="col" key={field}>{label}</th>)}
+                  {rosterProfileColumns.map(([field, label]) => <th scope="col" key={field}>{label}</th>)}
+                  {rosterBankColumns.map((label) => <th scope="col" key={label}>{label}</th>)}
+                  <th scope="col">操作</th>
+                </tr></thead>
+                <tbody>
               {filteredStaffItems.map((staff) => (
-                <article key={staff.id} className="staff-card" data-control-id={`staff.card.${staff.id}`}>
-                  <div className="staff-card-header">
-                    <div className="staff-avatar-name">
-                      <div className="staff-avatar" aria-hidden="true">👩‍🍼</div>
-                      <div>
-                        <div className="staff-name">
-                          {staff.displayName}
-                          <span className="staff-id-badge">#{staff.id}</span>
-                        </div>
-                        <div className="staff-phone">電話：{staff.phone ?? '未登錄'}</div>
-                        <div className="staff-phone">學歷：{staff.displayEducation}</div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="staff-card-pref-summary" data-surface-id={`staff.card.case-preference.${staff.id}`}>
-                    {selectedStaffId !== staff.id && <span>完整資格 · 接案偏好 · 任職狀態</span>}
-                    {selectedStaffId === staff.id && casePreferenceSummary.status === 'idle' && <span>🎯 接案偏好摘要待查詢</span>}
-                    {selectedStaffId === staff.id && casePreferenceSummary.status === 'loading' && <span role="status">🎯 正在載入接案偏好摘要…</span>}
-                    {selectedStaffId === staff.id && casePreferenceSummary.status === 'error' && <span>🎯 接案偏好目前無法讀取</span>}
-                    {selectedStaffId === staff.id && casePreferenceSummary.status === 'ready' && (
-                      <div>
-                        {casePreferenceSummary.data.topics.map((topic) => (
-                          <div key={topic.key} role="group" aria-label={topic.label}>
-                            <strong>{topic.label}</strong>：{topic.valuesText}
-                            {topic.otherDetailStatus === 'ready' && topic.detailText && <small> · {topic.detailText}</small>}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-
-                  <div className="staff-card-footer">
+                <tr key={staff.id} data-control-id={`staff.row.${staff.id}`} tabIndex={interactionLocked ? -1 : 0}
+                  aria-label={`開啟 ${staff.displayName} 的詳情`} aria-haspopup="dialog"
+                  aria-expanded={selectedStaff?.id === staff.id} aria-disabled={interactionLocked}
+                  className={selectedStaff?.id === staff.id ? 'is-selected' : undefined}
+                  onClick={(event) => { if (!interactionLocked) { event.currentTarget.focus(); openStaffDetail(staff); } }}
+                  onKeyDown={(event) => {
+                    if (event.target !== event.currentTarget) return;
+                    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openStaffDetail(staff); }
+                  }}>
+                  <td>{staff.unionNo ?? '未設定'}</td><td>{staff.displayName}</td>
+                  <td>{staff.phone ?? '未登錄'}</td><td>{staff.displayEducation}</td>
+                  {rosterServiceColumns.map(([field]) => <td key={field}>{rosterServiceValue(staff.serviceProfile, field)}</td>)}
+                  {rosterProfileColumns.map(([field]) => <td key={field}>{rosterProfileValue(staff.profile, field)}</td>)}
+                  {rosterBankColumns.map((label, index) => <td key={label}>
+                    {!staff.profile ? '未載入' : staff.profile.bank_accounts.length === 0 ? '未登錄'
+                      : staff.profile.bank_accounts.map((account) => <div key={account.account_id}>
+                        {index === 0 ? account.bank_code ?? '未登錄'
+                          : index === 1 ? account.branch_code ?? '未登錄'
+                          : index === 2 ? account.account_no ?? (account.account_last4 ? `末四碼 ${account.account_last4}` : '未登錄')
+                          : index === 3 ? account.is_primary ? '是' : '否'
+                          : account.is_active ? '有效' : '已停用'}
+                      </div>)}
+                  </td>)}
+                  <td>
                     <button
                       type="button"
                       data-control-id={`staff.drawer.open.${staff.id}`}
@@ -1198,12 +1289,7 @@ export const StaffPage: React.FC = () => {
                       aria-label={`查看 ${staff.displayName} 的詳情`}
                       aria-haspopup="dialog"
                       disabled={interactionLocked}
-                      onClick={() => {
-                        invalidateSlice();
-                        setSelectedStaffId(staff.id);
-                        setSelectedStaff(staff);
-                        setDrawerTab('qualification');
-                      }}
+                      onClick={(event) => { event.stopPropagation(); openStaffDetail(staff); }}
                     >
                       查看詳情 →
                     </button>
@@ -1212,18 +1298,21 @@ export const StaffPage: React.FC = () => {
                       data-control-id={`staff.lifecycle.open.${staff.id}`}
                       className="sr-only"
                       disabled={interactionLocked}
-                      onClick={() => {
+                      onClick={(event) => {
+                        event.stopPropagation();
                         invalidateSlice();
                         setSelectedStaffId(staff.id);
                         setSelectedStaff(staff);
-                        setDrawerTab('unavailability');
+                        setOpenAtStatus(true);
                       }}
                     >
                       辦理退役／復職
                     </button>
-                  </div>
-                </article>
+                  </td>
+                </tr>
               ))}
+                </tbody>
+              </table>
             </div>
           )}
 
@@ -1250,73 +1339,10 @@ export const StaffPage: React.FC = () => {
       >
         {selectedStaff && (
           <div className="staff-drawer-content">
-            <div className="staff-drawer-tabs-nav" role="tablist" aria-label="月嫂個人檔案分頁">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={drawerTab === 'management'}
-                disabled={interactionLocked}
-                className={`staff-drawer-tab-btn ${drawerTab === 'management' ? 'active' : ''}`}
-                onClick={() => setDrawerTab('management')}
-              >
-                ✏️ 個資與履歷管理
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={drawerTab === 'qualification'}
-                disabled={interactionLocked}
-                className={`staff-drawer-tab-btn ${drawerTab === 'qualification' ? 'active' : ''}`}
-                onClick={() => setDrawerTab('qualification')}
-              >
-                📋 完整資格主檔
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={drawerTab === 'preferences'}
-                disabled={interactionLocked}
-                className={`staff-drawer-tab-btn ${drawerTab === 'preferences' ? 'active' : ''}`}
-                onClick={() => setDrawerTab('preferences')}
-              >
-                🎯 接案偏好設定
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={drawerTab === 'unavailability'}
-                disabled={interactionLocked}
-                className={`staff-drawer-tab-btn ${drawerTab === 'unavailability' ? 'active' : ''}`}
-                onClick={() => setDrawerTab('unavailability')}
-              >
-                🏖️ 接案狀態管理 (長假與暫停／退役復職)
-              </button>
-            </div>
-
-            {/* Drawer Tab 1: 個資與履歷管理 */}
-            {drawerTab === 'management' && (
-              <section className="staff-drawer-section" data-surface-id="staff.drawer.management">
-                <h2 className="staff-management-title">個資、履歷與銀行帳戶管理</h2>
-                <p className="staff-management-description">編輯功能集中於本分頁；完整資格主檔維持唯讀瀏覽。</p>
-                {profile.status === 'loading' && <p role="status">正在載入個人資料管理功能…</p>}
-                {profile.status === 'error' && (
-                  <div role="alert">
-                    <p>{profile.message}</p>
-                    <button type="button" className="staff-next-btn" onClick={() => setSliceRetryGeneration((value) => value + 1)}>重試個人資料</button>
-                  </div>
-                )}
-                {profile.status === 'ready' && (
-                  <StaffRegistryEditor
-                    profile={profile.data}
-                    onUpdated={() => setSliceRetryGeneration((value) => value + 1)}
-                  />
-                )}
-              </section>
-            )}
-
-            {/* Drawer Tab 2: 完整資格主檔 */}
-            {drawerTab === 'qualification' && (
-              <section className="staff-drawer-section" data-surface-id="staff.qualification-master">
+            {/* 完整資格主檔：個資、履歷、銀行與接案條件 */}
+              <section className="staff-drawer-section" data-surface-id="staff.qualification-master" aria-label="完整資格主檔">
+                <h2 className="staff-management-title">📋 完整資格主檔</h2>
+                <p>各區分別預覽與儲存。請先儲存本區變更，再修改下一區。</p>
                 {/* 基本資料摘要卡片 */}
                 <div style={{ background: '#fffdfc', border: '1px solid #dec0b6', borderRadius: '12px', padding: '16px', marginBottom: '18px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1324,7 +1350,7 @@ export const StaffPage: React.FC = () => {
                       <div className="staff-avatar" style={{ width: '44px', height: '44px', fontSize: '1.3rem', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#ffe4d6', borderRadius: '50%' }}>👩‍🍼</div>
                       <div>
                         <div style={{ fontSize: '1.15rem', fontWeight: 700, color: '#4a2818' }}>
-                          {selectedStaff.displayName} <span className="staff-id-badge">#{selectedStaff.id}</span>
+                          {selectedStaff.displayName} <span className="staff-id-badge">公會編號：{selectedStaff.unionNo ?? '未設定'}</span>
                         </div>
                         <div style={{ fontSize: '0.85rem', color: '#74593f', marginTop: '2px' }}>聯絡電話：{selectedStaff.displayPhone}</div>
                       </div>
@@ -1349,65 +1375,23 @@ export const StaffPage: React.FC = () => {
                 )}
                 {profile.status === 'ready' && (
                   <div data-surface-id="staff.profile-detail" data-testid="staff-profile-detail">
-                    <div className="staff-qual-grid" style={{ marginBottom: '18px' }}>
-                      {[
-                      ['身分證', profile.data.identityCardLabel],
-                      ['生日', profile.data.birthdayLabel],
-                      ['行動電話', profile.data.phoneLabel],
-                      ['市話', profile.data.telephoneLabel],
-                      ['Email', profile.data.emailLabel],
-                      ['居住地址', profile.data.addressLabel],
-                      ['學歷', profile.data.educationLabel],
-                      ['緊急聯絡人', profile.data.emergencyContactLabel],
-                      ['報名日期', profile.data.registeredAtLabel],
-                      ['內部行政註記', profile.data.adminNotesLabel],
-                      ].map(([label, value]) => (
-                        <div key={label} className="staff-qual-card" role="group" aria-label={label}>
-                          <h4>{label}</h4>
-                          <p style={{ margin: 0 }}>{value}</p>
-                        </div>
-                      ))}
-                    </div>
-                    <h3 className="staff-profile-subheading">🏦 銀行帳戶</h3>
-                    {profile.data.bankAccountLabels.length === 0 ? (
-                      <p className="staff-bank-empty">尚未登錄</p>
-                    ) : (
-                      <ul className="staff-bank-list" aria-label="銀行帳戶">
-                        {profile.data.bankAccountLabels.map((account, index) => (
-                          <li key={`${index}-${account}`}><strong>帳戶 {index + 1}</strong><span>{account}</span></li>
-                        ))}
-                      </ul>
-                    )}
+                    <StaffRegistryEditor profile={profile.data} resumeContainer={resumeContainer} onUpdated={() => setSliceRetryGeneration(value => value + 1)} />
                   </div>
                 )}
 
                 {qualification.status === 'ready' && (
                   <>
-                    <h3 style={{ margin: '0 0 10px', fontSize: '1.05rem', color: '#7c2d12', fontWeight: 700 }}>
-                      🧭 服務能力與接案資料
-                    </h3>
-                    <div className="staff-qual-grid" style={{ marginBottom: '18px' }}>
-                      {[
-                        ['最多照顧寶寶數', qualification.data.service_profile.care_babies === null ? '尚未登錄' : `${qualification.data.service_profile.care_babies} 位`],
-                        ['可承接區域', profileItemsText(qualification.data.service_profile.service_regions)],
-                        ['可承接時段', profileItemsText(qualification.data.service_profile.service_time_slots)],
-                        ['交通方式', profileItemsText(qualification.data.service_profile.transportation)],
-                        ['週間服務／排休', profileItemsText(qualification.data.service_profile.weekly_rest)],
-                        ['特殊節日意願', profileItemsText(qualification.data.service_profile.holiday_availability)],
-                        ['可承接胎數', profileItemsText(qualification.data.service_profile.baby_types)],
-                      ].map(([label, value]) => (
-                        <div key={label} className="staff-qual-card" role="group" aria-label={label}>
-                          <h4>{label}</h4>
-                          <p style={{ margin: 0 }}>{value}</p>
-                        </div>
-                      ))}
-                    </div>
+                    {selectedStaffId !== null && <StaffQualificationEditor staffId={selectedStaffId} onUpdated={() => setSliceRetryGeneration(value => value + 1)} />}
                   </>
                 )}
 
+                <section data-surface-id="staff.qualification.preferences">
+                  {selectedStaffId !== null && <StaffCasePreferenceManualEditor staffId={selectedStaffId} directEditing surfaceId="staff.qualification.case-preference-manual" onUpdated={() => setSliceRetryGeneration(value => value + 1)} />}
+                </section>
+
                 {/* 6 大專業資格審核主檔 */}
                 <h3 style={{ margin: '0 0 10px', fontSize: '1.05rem', color: '#7c2d12', fontWeight: 700 }}>
-                  📋 完整資格與審核主檔 (6 大專業區段)
+                  📋 資格狀態與來源摘要
                 </h3>
                 {qualification.status === 'loading' && <p role="status">正在載入資格主檔…</p>}
                 {qualification.status === 'error' && (
@@ -1419,6 +1403,7 @@ export const StaffPage: React.FC = () => {
                 {qualification.status === 'ready' && (
                   <>
                     <p style={{ margin: '4px 0 14px', color: '#74593f', fontSize: '0.9rem' }}>
+                      系統狀態依正式資料推導；醫療／體檢及有效期尚無登錄來源，不提供人工修改。<br />
                       <strong>整體狀態：</strong>{qualification.data.overallAvailabilityLabel}
                       {' · '}資料基準日：{qualification.data.as_of}
                     </p>
@@ -1452,23 +1437,9 @@ export const StaffPage: React.FC = () => {
                   </>
                 )}
               </section>
-            )}
-
-            {/* Drawer Tab 3: 接案偏好設定 */}
-            {drawerTab === 'preferences' && (
-              <section className="staff-drawer-section" data-surface-id="staff.drawer.preferences">
-                {casePreferenceSummary.status === 'loading' && <p role="status">正在讀取接案偏好…</p>}
-                {casePreferenceSummary.status === 'error' && <p role="alert">接案偏好摘要暫時無法取得。</p>}
-                {casePreferenceSummary.status === 'ready' && <details><summary>查看接案偏好摘要</summary>
-                  {casePreferenceSummary.data.topics.map((topic) => <p key={topic.key}><strong>{topic.label}</strong>：{topic.valuesText}{topic.otherDetailStatus === 'ready' && topic.detailText ? `；${topic.detailText}` : ''}</p>)}
-                </details>}
-                {selectedStaffId !== null && <StaffCasePreferenceManualEditor staffId={selectedStaffId} />}
-              </section>
-            )}
-
-            {/* Drawer Tab 4: 接案狀態管理 (採用國定假日 QUERY → PREVIEW → APPLY → RECEIPT 工作台模式) */}
-            {drawerTab === 'unavailability' && (
-              <section className="staff-drawer-section">
+            {/* 接案狀態管理 (採用國定假日 QUERY → PREVIEW → APPLY → RECEIPT 工作台模式) */}
+              <section className="staff-drawer-section" data-surface-id="staff.availability-management" aria-label="接案狀態管理" ref={statusSectionRef}>
+                <h2 className="staff-management-title">🏖️ 接案狀態管理</h2>
                 {renderAvailabilityWorkbench()}
                 {/* 區塊 1: 📇 人事任職狀態與異動辦理 */}
                 <div className="staff-holiday-workbench" data-surface-id="staff.lifecycle">
@@ -1683,7 +1654,7 @@ export const StaffPage: React.FC = () => {
 
 
               </section>
-            )}
+              {profile.status === 'ready' && <section className="staff-drawer-section" data-surface-id="staff.resume" aria-label="月嫂履歷 PDF" ref={setResumeContainer} />}
           </div>
         )}
       </Drawer>

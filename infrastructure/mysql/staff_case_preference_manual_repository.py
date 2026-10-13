@@ -54,15 +54,20 @@ class MySqlStaffCasePreferenceManualRepository:
             )
             return tuple(RelationValue(str(row[value_column]).strip()) for row in (cursor.fetchall() or ()))
 
-    def replace_relations(self, staff_id: int, relations: Relations) -> None:
+    def replace_relations(self, staff_id: int, relations: Relations, *, before: Relations) -> None:
         with self._connection.cursor() as cursor:
             for key in sorted(RELATION_KEYS, key=lambda item: RELATION_SPECS[item][0]):
                 table, value_column, detail_column = RELATION_SPECS[key]
-                cursor.execute(f"DELETE FROM {table} WHERE staff_id=%s", (staff_id,))
-                if relations[key]:
+                old = {item.value: item for item in before[key]}
+                new = {item.value: item for item in relations[key]}
+                for value, item in old.items():
+                    if new.get(value) != item:
+                        cursor.execute(f"DELETE FROM {table} WHERE staff_id=%s AND {value_column}=%s", (staff_id, value))
+                added = [item for value, item in new.items() if old.get(value) != item]
+                if added:
                     cursor.executemany(
                         f"INSERT INTO {table} (staff_id,{value_column},{detail_column}) VALUES (%s,%s,%s)",
-                        [(staff_id, item.value, item.detail) for item in relations[key]],
+                        [(staff_id, item.value, item.detail) for item in added],
                     )
 
     def find_receipt(self, key: IdempotencyKey, *, for_update: bool):

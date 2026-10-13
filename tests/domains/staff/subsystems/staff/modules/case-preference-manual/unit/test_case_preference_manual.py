@@ -5,6 +5,7 @@ import pytest
 from domains.staff.case_preference_manual import (
     ALL_RELATION_KEYS, READ_ONLY_RELATION_SPECS, RELATION_KEYS, RelationValue,
     normalize_relations, preview_fingerprint, snapshot_fingerprint,
+    RELATION_OPTIONS, canonical_service_period, service_period_fields,
 )
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from shared_kernel.fingerprints import PreviewFingerprint
@@ -47,7 +48,7 @@ class _Repo:
     def find_receipt(self, key, *, for_update):
         self.events.append("receipt_lock" if for_update else "receipt_read")
         return self.receipts.get(key.value)
-    def replace_relations(self, staff_id, relations):
+    def replace_relations(self, staff_id, relations, *, before):
         self.events.append("replace"); self.writes += 1; self.relations = relations
     def save_receipt(self, *, key, request_fingerprint, preview_fingerprint, actor, reason, result):
         self.events.append("save_receipt"); self.receipts[key.value] = {"request_fingerprint": request_fingerprint.value, "result": result}
@@ -116,3 +117,62 @@ def test_domain_contract_is_strict_and_fingerprints_bind_before_after():
             {"value": "其他", "detail": "第一筆"},
             {"value": "其他", "detail": "第二筆"},
         ]})
+
+
+def test_manual_options_prevent_new_free_text_but_keep_existing_legacy_facts():
+    repo = _Repo()
+    repo.relations["cooking_skills"] = [{"value": "可下廚", "detail": None}]
+    workflow = _workflow(repo)
+    assert workflow.preview(531, repo.relations).after["cooking_skills"][0].value == "可下廚"
+    assert "台北市" in RELATION_OPTIONS["service_regions"]
+    with pytest.raises(ValueError, match="time_required"):
+        workflow.preview(531, {**_relations(), "service_periods": [{"value": "8 小時", "detail": None}]})
+    with pytest.raises(ValueError, match="option_invalid"):
+        workflow.preview(531, {**_relations(), "cooking_skills": [{"value": "其他", "detail": None}]})
+    assert repo.writes == 0
+
+
+@pytest.mark.parametrize("key", ["service_regions", "service_periods", "cooking_skills", "holiday_availability", "rest_schedule", "baby_types"])
+def test_new_supplemental_notes_cannot_be_saved(key):
+    workflow = _workflow(_Repo())
+    with pytest.raises(ValueError, match="detail_not_editable"):
+        workflow.preview(531, {**_relations(), key: [{"value": _relations()[key][0]['value'], "detail": "新增的說明"}]})
+
+
+def test_custom_service_period_is_saved_without_a_note_and_read_back():
+    repo = _Repo()
+    workflow = _workflow(repo)
+    proposed = {**_relations(), "service_periods": [{"value": "8小時", "detail": None, "service_hours": 8, "start_time": "08:30", "end_time": "17:00", "end_day_offset": 0}]}
+    preview = workflow.preview(531, proposed)
+    receipt = workflow.apply(531, proposed, _request(preview))
+    assert receipt.relations == workflow.query(531).relations
+    assert receipt.relations["service_periods"][0] == RelationValue("8小時(08:30-17:00)", None)
+    assert service_period_fields(receipt.relations["service_periods"][0].value)['service_hours'] == 8
+
+
+@pytest.mark.parametrize("hours,start,end,offset", [(4,"09:00","13:00",0),(8,"08:30","17:00",0),(24,"09:00","09:00",1),(4,"22:00","02:00",1)])
+def test_service_window_duration_and_explicit_next_day(hours,start,end,offset):
+    slot = canonical_service_period(hours,start,end,offset)
+    assert service_period_fields(slot) == {'service_hours':hours,'start_time':start,'end_time':end,'end_day_offset':offset}
+
+
+@pytest.mark.parametrize("hours,start,end,offset", [(4,"09:00","12:30",0),(8,"09:00","17:00",0),(8,"08:30","17:30",0),(24,"09:00","09:00",0),(4,"22:00","02:00",0)])
+def test_service_window_rejects_wrong_span_before_any_write(hours,start,end,offset):
+    with pytest.raises(ValueError, match="duration_mismatch"):
+        canonical_service_period(hours,start,end,offset)
+
+
+def test_projected_legacy_four_hour_window_is_not_rewritten_when_unchanged():
+    value='4小時(上午8:30-12:30)'
+    raw={**_relations(),'service_periods':[{'value':value,'detail':None,**service_period_fields(value)}]}
+    assert normalize_relations(raw)['service_periods'][0].value == value
+
+
+def test_new_window_cannot_duplicate_an_existing_legacy_window_identity():
+    repo=_Repo()
+    repo.relations['service_periods']=[{'value':'4小時(上午8:30-12:30)','detail':None}]
+    proposed={**repo.relations,'service_periods':[{'value':'4小時(上午8:30-12:30)','detail':None},
+      {'value':'4小時','detail':None,'service_hours':4,'start_time':'08:30','end_time':'12:30','end_day_offset':0}]}
+    with pytest.raises(ValueError,match='relation_duplicate'):
+        _workflow(repo).preview(531,proposed)
+    assert repo.writes==0

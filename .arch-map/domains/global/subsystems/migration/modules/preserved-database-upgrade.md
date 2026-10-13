@@ -11,6 +11,10 @@
 
 ## Implementation
 - primary:
+  - `db/schema_parts/231_staff_union_number.sql` — fresh Staff manual number，nullable binary text 與 unique index。
+  - `db/schema_parts/1050_staff_union_number.sql` — schema-only preserve upgrade，既有人員保持 NULL。
+  - `db/migration_releases/labor_union_2026_10_13_staff_union_number_v1.json`
+  - `db/migration_releases/labor_union_2026_10_13_staff_union_number_v1.descriptors.json` — 必驗 column charset／collation 與 full-column unique index，partial／drift fail closed。
   - `scripts/migrate_preserved_database_additive_schema.py`
   - `scripts/local_database_additive_update.py`
   - `scripts/update_local_database.py`
@@ -123,6 +127,7 @@
 
 ## Verification
 - layout_status: `custom_current`
+- contract: `tests/domains/global/subsystems/migration/modules/preserved-database-upgrade/contract/test_staff_union_number_schema.py`
 - test_root: `tests/domains/global/subsystems/migration/modules/preserved-database-upgrade/`
 - integration_root: `tests/test_collect_local_additive_engine_evidence.py`
 - integration_root: `tests/test_local_database_maintenance.py`

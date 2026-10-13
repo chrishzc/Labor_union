@@ -607,10 +607,14 @@ def _validate_descriptor_shapes(descriptors: dict[str, Any]) -> None:
                 raise TypeError("owned parent column table must be an object")
             for column, contract in columns.items():
                 _validate_owned_metadata_identity(f"{table}.{column}")
-                if not isinstance(contract, dict) or set(contract) != {
-                    "column_type", "is_nullable", "column_default", "extra"
-                }:
+                required = {"column_type", "is_nullable", "column_default", "extra"}
+                text_metadata = {"character_set_name", "collation_name"}
+                if not isinstance(contract, dict) or not required <= set(contract) <= required | text_metadata:
                     raise ValueError("owned parent column contract is invalid")
+                if set(contract).intersection(text_metadata) not in (set(), text_metadata):
+                    raise ValueError("owned parent text metadata must be declared together")
+                if any(not isinstance(contract[key], str) or not contract[key] for key in text_metadata if key in contract):
+                    raise ValueError("owned parent text metadata is invalid")
         if not isinstance(descriptor["triggers"], list):
             raise TypeError("owned triggers must be a list")
         _validate_owned_view_contracts(descriptor.get("views", {}))

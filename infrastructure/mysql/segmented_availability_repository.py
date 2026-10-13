@@ -271,7 +271,13 @@ def _attach_capability_rows(cursor, staff_by_id, table, value_column, detail_col
     for row in cursor.fetchall() or []:
         staff = staff_by_id.get(int(row["staff_id"]))
         if staff is not None:
-            staff.setdefault(target_key, []).append((str(row[value_column]), row.get(detail_column)))
+            value = str(row[value_column])
+            if target_key == "service_periods":
+                from domains.staff.case_preference_manual import service_period_fields
+                period = service_period_fields(value)
+                if period["start_time"] is not None:
+                    value = f"{period['service_hours']}小時"
+            staff.setdefault(target_key, []).append((value, row.get(detail_column)))
 
 
 def _attach_region_rows(cursor, staff_by_id):

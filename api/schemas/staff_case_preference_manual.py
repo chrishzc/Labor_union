@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
 
 RelationKey = Literal[
@@ -24,11 +24,18 @@ class RelationValueBody(BaseModel):
     detail: str | None = Field(default=None, max_length=100)
 
 
+class ServicePeriodBody(RelationValueBody):
+    service_hours: Annotated[StrictInt, Field(gt=0, le=24)] | None = None
+    start_time: str | None = Field(default=None, pattern=r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$")
+    end_time: str | None = Field(default=None, pattern=r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$")
+    end_day_offset: Annotated[StrictInt, Field(ge=0, le=1)] | None = None
+
+
 class RelationsBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     service_regions: list[RelationValueBody]
-    service_periods: list[RelationValueBody]
+    service_periods: list[ServicePeriodBody]
     cooking_skills: list[RelationValueBody]
     holiday_availability: list[RelationValueBody]
     rest_schedule: list[RelationValueBody]
@@ -54,8 +61,12 @@ class ManualApplyBody(RelationsBody):
     reason: str = Field(min_length=1, max_length=500)
 
 
-class ManualRelationView(RelationValueBody):
-    pass
+ManualRelationView = RelationValueBody | ServicePeriodBody
+
+
+class ManualOptionsView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    options: dict[RelationKey, list[str]]
 
 
 class ManualSnapshotView(BaseModel):

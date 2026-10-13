@@ -41,7 +41,12 @@ def test_altered_table_checksum_drift_requires_identical_full_rows(monkeypatch) 
         "data_fingerprints": {"terms": changed},
         "data_fingerprint_sha256": migration._local_data_fingerprint({"terms": changed}),
     })
-    monkeypatch.setattr(migration, "_local_row_projection", lambda *_args: baseline["data_row_projections"]["terms"])
+    def row_projection(_config, _source, _table, columns=None):
+        if columns == ["id", "note"]:
+            return baseline["data_row_projections"]["terms"]
+        return {"columns": ["id", "note", "added_nullable"], "row_count": 2, "rows_sha256": "e" * 64}
+
+    monkeypatch.setattr(migration, "_local_row_projection", row_projection)
     migration._local_verify_backup_rows(None, "source", baseline, altered_tables={"terms"})
     with pytest.raises(migration.LocalAdditiveBlocked, match="fingerprint changed"):
         migration._local_verify_backup_rows(None, "source", baseline)

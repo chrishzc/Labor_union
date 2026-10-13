@@ -45,7 +45,6 @@ describe('Staff lifecycle flow', () => {
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
     fireEvent.click(screen.getAllByRole('button', { name: /查看 .* 的詳情/ })[0]);
-    fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
     await waitFor(() => expect(screen.getByText(/人事任職狀態與異動辦理/)).toBeInTheDocument());
     fireEvent.click(await screen.findByRole('button', { name: /辦理(退役|復職)登記/ }));
   }
@@ -110,7 +109,7 @@ describe('Staff lifecycle flow', () => {
     expect(second[3].idempotencyKey).toBe(first[3].idempotencyKey);
   });
 
-  it('apply_pending 與 outcome_unknown 都鎖定 tabs、selector、close 與 lifecycle inputs', async () => {
+  it('apply_pending 與 outcome_unknown 都鎖定 selector、close 與 lifecycle inputs', async () => {
     const pendingApply = deferred<typeof STAFF_LIFECYCLE_RECEIPT>();
     vi.mocked(staffLifecycleClient.apply).mockReturnValueOnce(pendingApply.promise);
     await openDrawer();
@@ -122,9 +121,7 @@ describe('Staff lifecycle flow', () => {
     await waitFor(() => expect(staffLifecycleClient.apply).toHaveBeenCalledTimes(1));
 
     const expectLocked = () => {
-      for (const name of [/個資與履歷管理/, /完整資格主檔/, /接案偏好設定/, /接案狀態管理/]) {
-        expect(screen.getByRole('tab', { name })).toBeDisabled();
-      }
+      expect(screen.queryByRole('tablist', { name: '月嫂個人檔案分頁' })).not.toBeInTheDocument();
       expect(screen.getByLabelText('查詢服務人員')).toBeDisabled();
       expect(screen.getByRole('button', { name: '關閉' })).toBeDisabled();
       expect(screen.getAllByLabelText('生效時間').at(-1)).toBeDisabled();

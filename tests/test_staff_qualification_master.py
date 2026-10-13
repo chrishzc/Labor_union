@@ -5,6 +5,7 @@ Description: 驗證 Staff qualification master 的 typed sections、PII 邊界�
 
 from datetime import date, datetime
 import re
+from copy import deepcopy
 
 import pytest
 from fastapi import FastAPI
@@ -30,6 +31,131 @@ from subsystems.staff.qualification_master_query import (
     StaffQualificationNotFound,
     UnavailabilitySourceRecord,
 )
+from domains.staff.qualification_editing import normalize_facts, QualificationEditingError
+from subsystems.staff.qualification_editing_workflow import StaffQualificationEditingWorkflow
+
+
+def _editable_facts():
+    return {"special_skills": ["新生兒照護"], "has_massage_cert": None,
+            "certifications": ["托育人員證照"], "care_babies": 1, "transportation": ["機車"]}
+
+
+class _EditingRepository:
+    def __init__(self):
+        self.facts = normalize_facts(_editable_facts())
+        self.receipts = {}
+        self.writes = 0
+        self.locked = False
+        self.fail_receipt = False
+
+    def load(self, staff_id, *, for_update):
+        if staff_id != 7:
+            raise QualificationEditingError("staff_qualification_not_found")
+        self.locked = for_update
+        return self.facts
+
+    def persist(self, staff_id, before, after):
+        assert self.locked
+        self.facts = after
+        self.writes += 1
+
+    def find_receipt(self, key):
+        assert self.locked
+        return self.receipts.get(key)
+
+    def save_receipt(self, key, request_fingerprint, preview, actor, reason, result):
+        if self.fail_receipt:
+            raise RuntimeError("receipt failure")
+        self.receipts[key] = {"request_fingerprint": request_fingerprint, "result": result}
+
+
+class _EditingUow:
+    def __init__(self, repo):
+        self.repo = repo
+        self.committed = False
+
+    def __enter__(self):
+        self.before = deepcopy((self.repo.facts, self.repo.receipts, self.repo.writes))
+        return self
+
+    def commit(self):
+        self.committed = True
+
+    def __exit__(self, kind, error, traceback):
+        if not self.committed:
+            self.repo.facts, self.repo.receipts, self.repo.writes = self.before
+
+
+def _edit_apply(workflow, values, preview, *, key="edit-7", reason="核對證明後補登"):
+    return workflow.apply(7, values, expected_snapshot=preview["snapshot_fingerprint"],
+                          preview=preview["preview_fingerprint"], key=key, actor="admin-7",
+                          reason=reason, correlation="qualification-test")
+
+
+def test_qualification_editing_preview_apply_readback_and_exact_replay():
+    repo = _EditingRepository()
+    workflow = StaffQualificationEditingWorkflow(repo, lambda: _EditingUow(repo))
+    values = {**_editable_facts(), "special_skills": [" 新生兒照護 ", "哺乳協助"],
+              "has_massage_cert": True, "certifications": ["急救證書"], "care_babies": 2,
+              "transportation": ["汽車"]}
+    preview = workflow.preview(7, values)
+    assert repo.writes == 0 and not repo.receipts
+    result = _edit_apply(workflow, values, preview)
+    assert result["before"] == _editable_facts()
+    assert result["after"] == workflow.query(7)["after"]
+    assert result["after"]["has_massage_cert"] is True
+    assert repo.writes == 1
+    assert _edit_apply(workflow, values, preview)["replayed"] is True
+    assert repo.writes == 1
+    with pytest.raises(QualificationEditingError, match="idempotency_conflict"):
+        _edit_apply(workflow, values, preview, reason="另一個命令")
+
+
+def test_qualification_editing_stale_and_receipt_failure_rollback():
+    repo = _EditingRepository()
+    workflow = StaffQualificationEditingWorkflow(repo, lambda: _EditingUow(repo))
+    values = {**_editable_facts(), "has_massage_cert": False, "certifications": [], "transportation": []}
+    preview = workflow.preview(7, values)
+    repo.facts = normalize_facts({**_editable_facts(), "care_babies": 3})
+    with pytest.raises(QualificationEditingError, match="stale_snapshot"):
+        _edit_apply(workflow, values, preview)
+    assert repo.writes == 0
+    preview = workflow.preview(7, values)
+    repo.fail_receipt = True
+    with pytest.raises(RuntimeError, match="receipt failure"):
+        _edit_apply(workflow, values, preview)
+    assert repo.facts.care_babies == 3 and not repo.receipts and repo.writes == 0
+
+
+@pytest.mark.parametrize("changes", [{"care_babies": True}, {"care_babies": 0}, {"has_massage_cert": "true"},
+                                     {"certifications": ["重複", " 重複 "]}, {"transportation": ["X" * 51]}])
+def test_qualification_editing_rejects_invalid_or_duplicate_facts(changes):
+    with pytest.raises(QualificationEditingError):
+        normalize_facts({**_editable_facts(), **changes})
+
+
+def test_qualification_editing_authenticated_http_and_typed_stale_conflict():
+    from api.routes.staff_qualification_editing import router as editing_router, get_qualification_editing_workflow
+    app = FastAPI()
+    install_typed_error_handlers(app)
+    app.include_router(editing_router)
+    repo = _EditingRepository()
+    workflow = StaffQualificationEditingWorkflow(repo, lambda: _EditingUow(repo))
+    app.dependency_overrides[get_qualification_editing_workflow] = lambda: workflow
+    client = TestClient(app)
+    app.dependency_overrides[require_admin] = lambda: (_ for _ in ()).throw(HTTPException(401, "required"))
+    assert client.get("/api/v1/staff/7/qualification-editing").status_code == 401
+    app.dependency_overrides[require_admin] = lambda: AdminPrincipal(9, "staff-editor", "Editor", "admin")
+    assert client.get("/api/v1/staff/7/qualification-editing").json()["data"]["after"] == _editable_facts()
+    assert client.post("/api/v1/staff/7/qualification-editing/preview", json={**_editable_facts(), "medical_passed": True}).status_code == 422
+    preview = client.post("/api/v1/staff/7/qualification-editing/preview", json=_editable_facts()).json()["data"]
+    repo.facts = normalize_facts({**_editable_facts(), "has_massage_cert": True})
+    response = client.post("/api/v1/staff/7/qualification-editing/apply", json={**_editable_facts(),
+        "expected_snapshot_fingerprint": preview["snapshot_fingerprint"], "preview_fingerprint": preview["preview_fingerprint"], "reason": "核對"},
+        headers={"Idempotency-Key": "http-edit", "X-Correlation-ID": "http-edit"})
+    assert response.status_code == 409
+    assert "staff_qualification_stale_snapshot" in response.text
+    assert repo.writes == 0
 
 
 def _source(*, blocks=(), availability_ready=True):
@@ -283,6 +409,44 @@ class _MissingAvailabilityCursor(_Cursor):
         super().execute(sql, params)
         if "scheduling_staff_unavailability_blocks" in sql:
             raise ProgrammingError(1146, "table missing")
+
+
+def test_roster_service_batch_keeps_staff_and_other_details_separate_without_writes():
+    class BatchCursor:
+        def __init__(self):
+            self.executed = []
+        def __enter__(self):
+            return self
+        def __exit__(self, *_):
+            return False
+        def execute(self, sql, params):
+            self.executed.append((sql, params))
+        def fetchall(self):
+            sql = self.executed[-1][0]
+            if 'FROM staff WHERE' in sql:
+                return [{'id':7,'care_babies':2}, {'id':9,'care_babies':None}]
+            if 'FROM staff_regions ' in sql:
+                return [{'staff_id':7,'region_name':'北區','custom_region_detail':'區域說明'},
+                        {'staff_id':9,'region_name':'東區','custom_region_detail':None}]
+            if 'FROM staff_cooking_skills ' in sql:
+                return [{'staff_id':7,'skill_name':'其他','custom_skill_detail':'家常菜'}]
+            if 'FROM staff_transportation ' in sql:
+                return [{'staff_id':7,'vehicle_type':'機車'}]
+            return []
+    cursor = BatchCursor()
+    connection = _Connection(cursor)
+    result = MySqlStaffQualificationMasterRepository(connection).fetch_service_profiles((7,9))
+    assert result[7].care_babies == 2 and result[9].care_babies is None
+    assert result[7].service_regions[0].detail == '區域說明'
+    assert result[9].service_regions[0].value == '東區'
+    assert result[9].cooking_skills == ()
+    assert result[7].cooking_skills[0].detail == '家常菜'
+    assert result[7].transportation[0].value == '機車'
+    assert result[7].transportation[0].detail is None
+    assert len(cursor.executed) == 8
+    assert all(params == (7,9) for _,params in cursor.executed)
+    assert all(re.search(r'\b(?:INSERT|UPDATE|DELETE)\b',sql,re.I) is None for sql,_ in cursor.executed)
+    assert connection.commit_called is False
 
 
 def test_staff_qualification_repository_marks_missing_schedule_table_unavailable():

@@ -9,6 +9,7 @@ from typing import Any, Callable, Protocol
 from domains.staff.case_preference_manual import (
     CasePreferenceManualError, CasePreferenceManualPreview, CasePreferenceManualSnapshot,
     RELATION_KEYS, Relations, normalize_relations, preview_fingerprint, snapshot_fingerprint,
+    validate_proposed_relations,
 )
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
@@ -21,7 +22,7 @@ class StaffCasePreferenceManualRepository(Protocol):
     def lock_staff(self, staff_id: int) -> None: ...
     def load_relations(self, staff_id: int, *, for_update: bool) -> Relations: ...
     def find_receipt(self, key: IdempotencyKey, *, for_update: bool) -> Mapping[str, Any] | None: ...
-    def replace_relations(self, staff_id: int, relations: Relations) -> None: ...
+    def replace_relations(self, staff_id: int, relations: Relations, *, before: Relations) -> None: ...
     def save_receipt(self, *, key: IdempotencyKey, request_fingerprint: PreviewFingerprint,
                      preview_fingerprint: PreviewFingerprint, actor: str, reason: str,
                      result: Mapping[str, Any]) -> None: ...
@@ -60,6 +61,7 @@ class StaffCasePreferenceManualWorkflow:
     def preview(self, staff_id: int, proposed: Mapping[str, object]) -> CasePreferenceManualPreview:
         current = self.query(staff_id)
         after = normalize_relations(proposed)
+        validate_proposed_relations(current.relations, after)
         return CasePreferenceManualPreview(
             staff_id, current.relations, after, current.snapshot_fingerprint,
             preview_fingerprint(staff_id, current.relations, after, current.snapshot_fingerprint),
@@ -91,7 +93,8 @@ class StaffCasePreferenceManualWorkflow:
             expected_preview = preview_fingerprint(staff_id, fresh, after, fresh_snapshot)
             if expected_preview != request.preview_fingerprint:
                 raise CasePreferenceManualError("staff_case_preference_stale_preview")
-            self._repository.replace_relations(staff_id, after)
+            validate_proposed_relations(fresh, after)
+            self._repository.replace_relations(staff_id, after, before=fresh)
             persisted = normalize_relations(self._repository.load_relations(staff_id, for_update=True))
             if persisted != after:
                 raise CasePreferenceManualError("staff_case_preference_persisted_mismatch")

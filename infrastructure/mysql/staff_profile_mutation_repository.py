@@ -6,10 +6,12 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
+from pymysql.err import IntegrityError, OperationalError
+
 from domains.staff.profile import STAFF_PROFILE_FIELDS
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
-from subsystems.staff.profile_workflow import StaffProfileSnapshot
+from subsystems.staff.profile_workflow import StaffProfileMutationConflict, StaffProfileSnapshot
 
 
 _FAMILY = "staff_profile_change/v1"
@@ -28,6 +30,12 @@ class MySqlStaffProfileMutationRepository:
                 (staff_id,),
             )
             return cursor.fetchone()
+
+    def union_number_owner(self, union_no: str) -> int | None:
+        with self._connection.cursor() as cursor:
+            cursor.execute("SELECT id FROM staff WHERE union_no=%s LIMIT 1", (union_no,))
+            row = cursor.fetchone()
+        return int(row["id"]) if row is not None else None
 
     def claim(self, *, staff_id: int, key: IdempotencyKey, command_fingerprint: PreviewFingerprint, correlation_id: CorrelationId) -> None:
         with self._connection.cursor() as cursor:
@@ -70,12 +78,21 @@ class MySqlStaffProfileMutationRepository:
         fields = tuple(sorted(changes))
         resulting_version = snapshot.version + 1
         with self._connection.cursor() as cursor:
-            cursor.execute(
-                "UPDATE staff SET " + ",".join(f"{field}=%s" for field in fields)
-                + ",staff_profile_version=%s WHERE id=%s AND staff_profile_version=%s",
-                tuple(changes[field] for field in fields)
-                + (resulting_version, snapshot.staff_id, snapshot.version),
-            )
+            try:
+                cursor.execute(
+                    "UPDATE staff SET " + ",".join(f"{field}=%s" for field in fields)
+                    + ",staff_profile_version=%s WHERE id=%s AND staff_profile_version=%s",
+                    tuple(changes[field] for field in fields)
+                    + (resulting_version, snapshot.staff_id, snapshot.version),
+                )
+            except IntegrityError as error:
+                if error.args[0] == 1062 and "uq_staff_union_no" in str(error):
+                    raise StaffProfileMutationConflict("staff_union_no_collision") from error
+                raise
+            except OperationalError as error:
+                if error.args[0] == 1213 and "union_no" in changes:
+                    raise StaffProfileMutationConflict("staff_profile_concurrent_conflict") from error
+                raise
             if cursor.rowcount != 1:
                 raise ValueError("staff_profile_stale_version")
             cursor.execute(

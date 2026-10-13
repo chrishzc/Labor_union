@@ -3,6 +3,7 @@
 from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
+from api.schemas.staff_qualification_master import StaffServiceProfileView, StaffServiceProfileItemView
 
 
 class StaffBankAccountView(BaseModel):
@@ -21,6 +22,7 @@ class StaffProfileView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     staff_id: int = Field(gt=0)
+    union_no: str | None = Field(default=None, max_length=50)
     name: str = Field(min_length=1, max_length=100)
     profile_version: int = Field(ge=0)
     bank_accounts_version: int = Field(ge=0)
@@ -41,4 +43,27 @@ class StaffProfileView(BaseModel):
     bank_accounts: tuple[StaffBankAccountView, ...] = Field(max_length=20)
 
 
-__all__ = ["StaffBankAccountView", "StaffProfileView"]
+class StaffRosterServiceProfileView(StaffServiceProfileView):
+    cooking_skills: list[StaffServiceProfileItemView]
+
+
+class StaffRosterItemView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: int = Field(gt=0)
+    union_no: str | None = Field(default=None, max_length=50)
+    name: str
+    phone: str | None
+    education: str | None
+    profile: StaffProfileView
+    service_profile: StaffRosterServiceProfileView
+
+
+class StaffRosterPageView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: tuple[StaffRosterItemView, ...] = Field(max_length=200)
+    next_cursor: int | None = Field(default=None, gt=0)
+
+
+__all__ = ["StaffBankAccountView", "StaffProfileView", "StaffRosterItemView", "StaffRosterPageView"]

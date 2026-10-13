@@ -10,6 +10,7 @@ class StaffSummaryView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: int = Field(gt=0)
+    union_no: str | None = Field(default=None, max_length=50)
     name: str | None = None
     phone: str | None = None
     education: str | None = None

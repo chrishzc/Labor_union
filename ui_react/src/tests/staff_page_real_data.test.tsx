@@ -4,7 +4,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
 import { staffLifecycleClient } from '../api/staff_lifecycle/staff_lifecycle_client';
@@ -31,10 +31,10 @@ describe('StaffPage real data boundary', () => {
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: /查看 去敏人員甲 的詳情/ }));
-    fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
     await waitFor(() => expect(screen.getAllByText(/正常在職中/).length).toBeGreaterThan(0));
-    expect(screen.getByText('電話：09********')).toBeInTheDocument();
-    expect(screen.getByText('學歷：大學')).toBeInTheDocument();
+    const roster = within(screen.getByRole('table', { name: '月嫂名冊清單' }));
+    expect(roster.getByRole('cell', { name: '09********' })).toBeInTheDocument();
+    expect(roster.getByRole('cell', { name: '大學' })).toBeInTheDocument();
     expect(screen.queryByText(/未開放|後端.*提供|unavailable|資料待補/)).not.toBeInTheDocument();
   });
 
@@ -79,13 +79,11 @@ describe('StaffPage real data boundary', () => {
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
     fireEvent.click(screen.getAllByRole('button', { name: /查看 .* 的詳情/ })[0]);
 
-    expect(await screen.findByRole('group', { name: '最多照顧寶寶數' })).toHaveTextContent('2 位');
-    expect(screen.getByRole('group', { name: '可承接區域' })).toHaveTextContent('北區、其他（新竹市）');
-    expect(screen.getByRole('group', { name: '可承接時段' })).toHaveTextContent('8小時');
-    expect(screen.getByRole('group', { name: '交通方式' })).toHaveTextContent('機車');
-    expect(screen.getByRole('group', { name: '週間服務／排休' })).toHaveTextContent('週休1日');
-    expect(screen.getByRole('group', { name: '特殊節日意願' })).toHaveTextContent('中秋節');
-    expect(screen.getByRole('group', { name: '可承接胎數' })).toHaveTextContent('單胞胎、雙胞胎');
+    const roster = within(screen.getByRole('table', { name: '月嫂名冊清單' }));
+    expect(await roster.findByRole('cell', { name: '2 位' })).toBeInTheDocument();
+    for (const value of ['北區、其他（新竹市）', '8小時', '機車', '週休1日', '中秋節', '單胞胎、雙胞胎']) {
+      expect(roster.getByRole('cell', { name: value })).toBeInTheDocument();
+    }
     expect(screen.queryByText(/source_identity|fingerprint|preview_fingerprint/)).not.toBeInTheDocument();
     expect(screen.queryByText(/cooking_skill_|massage_certificate|special_skill_/)).not.toBeInTheDocument();
   });
@@ -152,7 +150,6 @@ describe('StaffPage real data boundary', () => {
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
     fireEvent.click(screen.getAllByRole('button', { name: /查看 .* 的詳情/ })[0]);
-    fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
 
     fireEvent.click(await screen.findByRole('button', { name: '重試任職狀態' }));
     await waitFor(() => expect(screen.getAllByText(/正常在職中/).length).toBeGreaterThan(0));

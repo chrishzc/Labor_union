@@ -9,6 +9,9 @@ import json
 from datetime import date, datetime
 from typing import Any, Mapping
 
+from domains.staff.case_preference_manual import RELATION_SPECS, READ_ONLY_RELATION_SPECS
+from shared_kernel.performance import MAXIMUM_PAGE_SIZE
+
 from pymysql.err import ProgrammingError
 
 from subsystems.staff.qualification_master_query import (
@@ -16,6 +19,8 @@ from subsystems.staff.qualification_master_query import (
     StaffQualificationNotFound,
     StaffQualificationSourceRecord,
     UnavailabilitySourceRecord,
+    StaffRosterServiceProfile,
+    StaffServiceProfileItem,
 )
 
 
@@ -24,6 +29,39 @@ class MySqlStaffQualificationMasterRepository:
 
     def __init__(self, connection: Any) -> None:
         self._connection = connection
+
+    def fetch_service_profiles(self, staff_ids: tuple[int, ...]) -> Mapping[int, StaffRosterServiceProfile]:
+        if not staff_ids:
+            return {}
+        if len(staff_ids) > MAXIMUM_PAGE_SIZE:
+            raise ValueError("staff service profile batch exceeds bounded maximum")
+        placeholders = ",".join(["%s"] * len(staff_ids))
+        relations = {identity: {} for identity in staff_ids}
+        with self._connection.cursor() as cursor:
+            cursor.execute(f"SELECT id,care_babies FROM staff WHERE id IN ({placeholders}) ORDER BY id", staff_ids)
+            capacities = {int(row["id"]): _optional_positive_int(row["care_babies"]) for row in cursor.fetchall()}
+            for key, (table, value_field, detail_field) in {**RELATION_SPECS, **READ_ONLY_RELATION_SPECS}.items():
+                detail_projection = f",{detail_field}" if detail_field else ""
+                cursor.execute(
+                    f"SELECT staff_id,{value_field}{detail_projection} FROM {table} "
+                    f"WHERE staff_id IN ({placeholders}) ORDER BY staff_id,{value_field}", staff_ids,
+                )
+                grouped = {identity: [] for identity in staff_ids}
+                for row in cursor.fetchall():
+                    value_maximum = 50 if key == "cooking_skills" else 100
+                    detail_maximum = 100 if key == "cooking_skills" else 200
+                    grouped[int(row["staff_id"])].append(StaffServiceProfileItem(
+                        _required_text(row, value_field, value_maximum),
+                        _optional_text(row, detail_field, detail_maximum) if detail_field else None,
+                    ))
+                for identity, items in grouped.items():
+                    relations[identity][key] = tuple(items)
+        return {identity: StaffRosterServiceProfile(
+            care_babies=capacities[identity], service_regions=values["service_regions"],
+            service_time_slots=values["service_periods"], transportation=values["transportation"],
+            holiday_availability=values["holiday_availability"], weekly_rest=values["rest_schedule"],
+            baby_types=values["baby_types"], cooking_skills=values["cooking_skills"],
+        ) for identity, values in relations.items() if identity in capacities}
 
     def fetch(self, query: StaffQualificationMasterQuery) -> StaffQualificationSourceRecord:
         with self._connection.cursor() as cursor:

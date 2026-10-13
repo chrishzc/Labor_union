@@ -16,6 +16,7 @@ export const StaffBankAccountSchema = z.strictObject({
 
 export const StaffProfileSchema = z.strictObject({
   staff_id: z.number().int().positive(),
+  union_no: z.string().max(50).nullable().optional(),
   name: z.string().min(1).max(100),
   profile_version: z.number().int().nonnegative(),
   bank_accounts_version: z.number().int().nonnegative(),

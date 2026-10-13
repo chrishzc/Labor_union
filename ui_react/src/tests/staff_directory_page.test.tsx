@@ -14,6 +14,7 @@ import {
 } from './fixtures/staff/staff_directory_contract_fixtures';
 import { STAFF_LIFECYCLE_VIEW } from './fixtures/staff/staff_lifecycle_contract_fixtures';
 import { STAFF_QUALIFICATION_MASTER } from './fixtures/staff/staff_qualification_contract_fixtures';
+import { STAFF_PROFILE } from './domains/staff/subsystems/staff/modules/staff-roster-profile/fixtures/staff_profile_contract_fixtures';
 
 describe('StaffPage directory presentation', () => {
   beforeEach(() => {
@@ -30,8 +31,11 @@ describe('StaffPage directory presentation', () => {
 
     expect(screen.getByText(/正在載入服務人員摘要名冊/)).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
-    expect(screen.getByText('電話：09********')).toBeInTheDocument();
-    expect(screen.getByText('學歷：大學')).toBeInTheDocument();
+    expect(screen.getByRole('table', { name: '月嫂名冊清單' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: '公會編號' })).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: 'A001' })).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: '09********' })).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: '大學' })).toBeInTheDocument();
     expect(screen.getByText('服務人員摘要 #12')).toBeInTheDocument();
     expect(screen.getByText('目前已載入 2 位服務人員')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '🟢 在職中' })).not.toBeInTheDocument();
@@ -40,7 +44,40 @@ describe('StaffPage directory presentation', () => {
     expect(screen.queryByRole('button', { name: '⚪ 已退役' })).not.toBeInTheDocument();
     expect(screen.queryByText(/未開放|後端.*提供|unavailable|資料待補/)).not.toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: '辦理退役／復職' })[0]).toBeEnabled();
-    expect(document.querySelector('[data-control-id="staff.card.11"]')).toBeVisible();
+    expect(document.querySelector('[data-control-id="staff.row.11"]')).toBeVisible();
+    expect(screen.queryByRole('article')).not.toBeInTheDocument();
+  });
+
+  it('shows the complete personal, contact and bank master without requesting every profile', async () => {
+    vi.mocked(staffDirectoryClient.queryPage).mockResolvedValue({ items: [{
+      ...STAFF_PAGE_ONE.items[0], profile: { ...STAFF_PROFILE, bank_accounts: [
+        { ...STAFF_PROFILE.bank_accounts[0], account_no: '123456789012' },
+        STAFF_PROFILE.bank_accounts[1],
+      ] }, service_profile: { ...STAFF_QUALIFICATION_MASTER.service_profile,
+        service_regions:[{value:'北區',detail:'交通需先確認'}],
+        cooking_skills:[{value:'其他',detail:'家常菜'}],
+      },
+    }], next_cursor:null });
+    render(<StaffPage />);
+    await screen.findByRole('table', { name:'月嫂名冊清單' });
+    for (const label of ['登錄日期','身分證','生日','市話','分機','Email','縣市','郵遞區號','地址','緊急聯絡人','緊急聯絡電話','行政註記','銀行代碼','分行代碼','銀行帳號','主要帳戶','帳戶狀態']) {
+      expect(screen.getByRole('columnheader', { name:label })).toBeInTheDocument();
+    }
+    expect(screen.getByRole('cell', { name:'A123456789' })).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name:'staff@example.test' })).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name:'北區測試路 1 號' })).toBeInTheDocument();
+    const bank = screen.getByText('123456789012').closest('td')!;
+    expect(within(bank).getByText('末四碼 1098')).toBeInTheDocument();
+    expect(screen.getByRole('table').querySelectorAll('tbody tr')).toHaveLength(1);
+    expect(staffDirectoryClient.queryPage).toHaveBeenCalledTimes(1);
+    expect(staffDirectoryClient.queryPage).toHaveBeenCalledWith({pageSize:200,includeProfile:true},expect.objectContaining({signal:expect.any(AbortSignal)}));
+    for (const label of ['最多照顧寶寶數','可承接區域','可承接時段','下廚能力','交通方式','週間服務／排休','特殊節日意願','可承接胎數']) {
+      expect(screen.getByRole('columnheader', {name:label})).toBeInTheDocument();
+    }
+    expect(screen.getByRole('cell', {name:'2 位'})).toBeInTheDocument();
+    expect(screen.getByRole('cell', {name:/北區.*交通需先確認/})).toBeInTheDocument();
+    expect(screen.getByRole('cell', {name:/其他.*家常菜/})).toBeInTheDocument();
+    expect(screen.getByRole('cell', {name:'機車'})).toBeInTheDocument();
   });
 
   it('opens summary drawer without another query', async () => {
@@ -50,7 +87,7 @@ describe('StaffPage directory presentation', () => {
 
     const drawer = screen.getByText(/月嫂詳情 — 去敏人員甲/).closest('.drawer-container');
     expect(drawer).not.toBeNull();
-    expect(within(drawer as HTMLElement).getByText(/#11/)).toBeInTheDocument();
+    expect(within(drawer as HTMLElement).getByText('公會編號：A001')).toBeInTheDocument();
     expect(drawer).toHaveTextContent('聯絡電話：09********');
     await waitFor(() => expect(within(drawer as HTMLElement).getAllByText('在職').length).toBeGreaterThan(0));
     await waitFor(() => expect(screen.getByText(/整體狀態/)).toBeInTheDocument());
@@ -58,7 +95,7 @@ describe('StaffPage directory presentation', () => {
     expect(selector).toBeDisabled();
     fireEvent.change(selector, { target: { value: '12' } });
     expect(selector).toHaveValue('11');
-    expect(within(drawer as HTMLElement).getByText(/#11/)).toBeInTheDocument();
+    expect(within(drawer as HTMLElement).getByText('公會編號：A001')).toBeInTheDocument();
     expect(staffDirectoryClient.queryPage).toHaveBeenCalledTimes(1);
   });
 
@@ -68,7 +105,7 @@ describe('StaffPage directory presentation', () => {
 
     fireEvent.change(screen.getByLabelText('即時搜尋月嫂'), { target: { value: '不存在的人員' } });
     await waitFor(() => expect(screen.getByText('找不到符合「不存在的人員」的服務人員。')).toBeInTheDocument());
-    expect(document.querySelector('.staff-grid')).not.toBeInTheDocument();
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getAllByRole('button', { name: '清除搜尋' })[0]);
     expect(screen.getByText('去敏人員甲')).toBeInTheDocument();
@@ -82,9 +119,20 @@ describe('StaffPage directory presentation', () => {
 
     await waitFor(() => expect(screen.getByText('去敏人員乙')).toBeInTheDocument());
     expect(staffDirectoryClient.queryPage).toHaveBeenCalledWith(
-      { pageSize: 200, afterId: 12 },
+      { pageSize: 200, afterId: 12, includeProfile:true },
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
+  });
+
+  it('searches union numbers across pages and opens a row with the keyboard', async () => {
+    render(<StaffPage />);
+    await screen.findByRole('cell', { name: 'A001' });
+    fireEvent.change(screen.getByLabelText('即時搜尋月嫂'), { target: { value: 'B002' } });
+    await screen.findByRole('cell', { name: 'B002' });
+    const row = screen.getByRole('row', { name: '開啟 去敏人員乙 的詳情' });
+    fireEvent.keyDown(row, { key: 'Enter' });
+    expect(screen.getByText('月嫂詳情 — 去敏人員乙')).toBeInTheDocument();
+    expect(screen.getByText('公會編號：B002')).toBeInTheDocument();
   });
 
   it('較舊搜尋回應不會覆蓋較新的查詢結果', async () => {

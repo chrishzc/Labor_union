@@ -13,6 +13,7 @@ class _StrictModel(BaseModel):
 
 
 class StaffProfileChangeSet(_StrictModel):
+    union_no: str | None = Field(default=None, max_length=50)
     name: str | None = None
     identity_card: str | None = None
     phone: str | None = None

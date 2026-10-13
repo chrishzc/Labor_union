@@ -3,6 +3,7 @@
 from datetime import date, datetime
 
 from fastapi import FastAPI
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from api.dependencies.admin_auth import require_registry_reader
@@ -14,6 +15,7 @@ from infrastructure.mysql.staff_profile_query_repository import (
 )
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.staff.profile_query import StaffProfileQueryApplication
+from subsystems.staff.qualification_master_query import StaffRosterServiceProfile, StaffServiceProfileItem
 
 
 RAW_IDENTITY_CARD = "A123456789"
@@ -23,6 +25,7 @@ RAW_EMERGENCY_PHONE = "0987654321"
 def _row():
     return {
         "id": 7,
+        "union_no": "A007",
         "name": "王小美",
         "staff_profile_version": 2,
         "bank_accounts_version": 3,
@@ -44,6 +47,29 @@ def _row():
 
 
 class _Repository:
+    page_reads = 0
+    batch_reads = 0
+    selected_ids = ()
+    service_reads = 0
+
+    def fetch_service_profiles(self, staff_ids):
+        self.service_reads += 1
+        return {identity: StaffRosterServiceProfile(
+            care_babies=2, service_regions=(StaffServiceProfileItem('北區', '交通需先確認'),),
+            service_time_slots=(StaffServiceProfileItem('8小時'),), transportation=(StaffServiceProfileItem('機車'),),
+            holiday_availability=(StaffServiceProfileItem('中秋節'),), weekly_rest=(StaffServiceProfileItem('週休1日'),),
+            baby_types=(StaffServiceProfileItem('雙胞胎'),), cooking_skills=(StaffServiceProfileItem('其他', '家常菜'),),
+        ) for identity in staff_ids}
+
+    def fetch_page(self, **_):
+        self.page_reads += 1
+        return (_row(), {**_row(), 'id':8, 'union_no':'B008'})
+
+    def fetch_bank_accounts_for_staff(self, staff_ids):
+        self.batch_reads += 1
+        self.selected_ids = staff_ids
+        return {identity:self.fetch_bank_accounts(identity) for identity in staff_ids}
+
     def fetch(self, _staff_id):
         return _row()
 
@@ -93,6 +119,7 @@ def test_staff_profile_returns_complete_internal_admin_fields():
     assert response.status_code == 200
     payload = response.json()["data"]
     assert payload["staff_id"] == 7
+    assert payload["union_no"] == "A007"
     assert payload["name"] == "王小美"
     assert payload["profile_version"] == 2
     assert payload["bank_accounts_version"] == 3
@@ -129,6 +156,53 @@ def test_staff_profile_returns_complete_internal_admin_fields():
     assert "line_user_id" not in payload
     assert "123456789012" in serialized
     assert "987654321098" in serialized
+
+
+def test_roster_returns_all_profile_fields_with_bounded_cursor_and_one_account_batch():
+    repository = _Repository()
+    client = _client()
+    client.app.dependency_overrides[get_staff_profile_application] = lambda: StaffProfileQueryApplication(repository)
+    response = client.get('/api/v1/staff/roster', params={'page_size':1})
+    assert response.status_code == 200
+    data = response.json()['data']
+    assert data['next_cursor'] == 7 and len(data['items']) == 1
+    assert data['items'][0]['profile'] == client.get('/api/v1/staff/7/profile').json()['data']
+    assert data['items'][0]['id'] == data['items'][0]['profile']['staff_id'] == 7
+    assert len(data['items'][0]['profile']['bank_accounts']) == 2
+    assert repository.page_reads == repository.batch_reads == 1
+    assert repository.selected_ids == (7,)
+    assert repository.service_reads == 1
+    service = data['items'][0]['service_profile']
+    assert service['care_babies'] == 2
+    assert service['service_regions'] == [{'value':'北區','detail':'交通需先確認'}]
+    assert service['service_time_slots'] == [{'value':'8小時','detail':None}]
+    assert service['cooking_skills'] == [{'value':'其他','detail':'家常菜'}]
+    assert service['transportation'] == [{'value':'機車','detail':None}]
+    assert service['holiday_availability'] == [{'value':'中秋節','detail':None}]
+    assert service['weekly_rest'] == [{'value':'週休1日','detail':None}]
+    assert service['baby_types'] == [{'value':'雙胞胎','detail':None}]
+
+
+def test_roster_requires_the_same_reader_permission_as_sensitive_profile():
+    repository = _Repository()
+    client = _client()
+    client.app.dependency_overrides[get_staff_profile_application] = lambda: StaffProfileQueryApplication(repository)
+    def forbidden():
+        raise HTTPException(403, '缺少主檔讀取權限')
+    client.app.dependency_overrides[require_registry_reader] = forbidden
+    response = client.get('/api/v1/staff/roster')
+    assert response.status_code == 403
+    assert repository.page_reads == repository.batch_reads == 0
+
+
+def test_roster_rejects_conflicting_selector_and_oversized_page_before_reads():
+    repository = _Repository()
+    client = _client()
+    client.app.dependency_overrides[get_staff_profile_application] = lambda: StaffProfileQueryApplication(repository)
+    assert client.get('/api/v1/staff/roster', params={'page_size':201}).status_code == 422
+    response = client.get('/api/v1/staff/roster', params={'after_id':7,'staff_id':8})
+    assert response.status_code == 422
+    assert repository.page_reads == repository.batch_reads == 0
 
 
 class _Cursor:

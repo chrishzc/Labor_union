@@ -11,13 +11,20 @@ from api.dependencies.admin_auth import admin_actor_context, require_admin
 from api.dependencies.staff_case_preference_manual import StaffCasePreferenceManualApplication, get_staff_case_preference_manual_application
 from api.error_contracts import typed_http_error
 from api.schemas.base import BaseResponse
-from api.schemas.staff_case_preference_manual import ManualApplyBody, ManualReceiptView, ManualSnapshotView, RelationsBody
+from api.schemas.staff_case_preference_manual import ManualApplyBody, ManualReceiptView, ManualSnapshotView, ManualOptionsView, RelationsBody
+from domains.staff.case_preference_manual import RELATION_OPTIONS, service_period_fields
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import CorrelationId, IdempotencyKey
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.staff.case_preference_manual_workflow import CasePreferenceManualApplyRequest
 
 router = APIRouter(prefix="/api/v1/staff/case-preference-manual", tags=["Staff Case Preference Manual"])
+
+
+@router.get("/options", response_model=BaseResponse[ManualOptionsView])
+def query_manual_options(principal: AdminPrincipal = Depends(require_admin)):
+    del principal
+    return BaseResponse(data={"options": {key: list(values) for key, values in RELATION_OPTIONS.items()}}, message="成功取得接案能力選項")
 
 
 @router.get("/{staff_id}", response_model=BaseResponse[ManualSnapshotView])
@@ -92,7 +99,7 @@ def _snapshot_payload(snapshot):
 
 def _relations_payload(relations):
     return {
-        key: [{"value": item.value, "detail": item.detail} for item in values]
+        key: [{"value": item.value, "detail": item.detail, **(service_period_fields(item.value, item.detail) if key == "service_periods" else {})} for item in values]
         for key, values in relations.items()
     }
 
@@ -116,7 +123,19 @@ def _raise(error, correlation: str | None = None):
         status, category = 409, "conflict"
     else:
         status, category = 422, "validation"
-    raise typed_http_error(status, category, code, code, correlation or uuid4().hex)
+    messages = {
+        "staff_case_preference_relation_duplicate": "相同的完整服務時段或條件不可重複。",
+        "staff_case_preference_option_invalid": "請使用下拉選單的標準條件；既有條件可保留。",
+        "staff_case_preference_other_detail_required": "選擇其他條件時，請填寫說明。",
+        "staff_case_preference_hours_invalid": "其他服務時段請填正整數小時。",
+        "staff_case_preference_rest_invalid": "其他排休方式請使用標準服務方式選項。",
+        "staff_case_preference_detail_not_editable": "不提供新增或修改說明，請使用條件選單及服務起迄時間。",
+        "staff_case_preference_time_required": "請設定服務開始、結束時間及結束日。",
+        "staff_case_preference_time_invalid": "請確認開始、結束時間與是否跨日。",
+        "staff_case_preference_service_hours_invalid": "服務時數請選擇 4、8 或 24 小時。",
+        "staff_case_preference_time_duration_mismatch": "起迄時間必須符合服務時數：4 小時班共 4 小時；8 小時班共 8.5 小時（含休息 30 分鐘）；24 小時班共 24 小時。",
+    }
+    raise typed_http_error(status, category, code, messages.get(code, code), correlation or uuid4().hex)
 
 
 __all__ = ["router"]

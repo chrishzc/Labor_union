@@ -7,6 +7,9 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Protocol
 
+from subsystems.staff.summary_query import StaffSummaryQueryRequest
+from subsystems.staff.qualification_master_query import StaffRosterServiceProfile
+
 
 _MAX_BANK_ACCOUNTS = 20
 
@@ -51,12 +54,36 @@ class StaffProfile:
     emergency_contact_phone: str | None
     admin_notes: str | None
     bank_accounts: tuple[StaffBankAccount, ...]
+    union_no: str | None = None
 
 
 class StaffProfileRepository(Protocol):
     def fetch(self, staff_id: int) -> Mapping[str, object] | None: ...
 
     def fetch_bank_accounts(self, staff_id: int) -> tuple[Mapping[str, object], ...]: ...
+
+    def fetch_page(self, *, after_id: int | None, page_size: int, staff_id: int | None) -> tuple[Mapping[str, object], ...]: ...
+
+    def fetch_bank_accounts_for_staff(self, staff_ids: tuple[int, ...]) -> Mapping[int, tuple[Mapping[str, object], ...]]: ...
+
+    def fetch_service_profiles(self, staff_ids: tuple[int, ...]) -> Mapping[int, StaffRosterServiceProfile]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class StaffRosterItem:
+    id: int
+    union_no: str | None
+    name: str
+    phone: str | None
+    education: str | None
+    profile: StaffProfile
+    service_profile: StaffRosterServiceProfile
+
+
+@dataclass(frozen=True, slots=True)
+class StaffRosterPage:
+    items: tuple[StaffRosterItem, ...]
+    next_cursor: int | None
 
 
 class StaffProfileQueryApplication:
@@ -76,6 +103,31 @@ class StaffProfileQueryApplication:
             raise StaffProfileContractError("staff profile bank accounts exceed bounded maximum")
         return _profile(row, bank_rows, staff_id)
 
+    def query_page(self, request: StaffSummaryQueryRequest) -> StaffRosterPage:
+        rows = self._repository.fetch_page(after_id=request.after_id, page_size=request.page_size, staff_id=request.staff_id)
+        if not isinstance(rows, tuple) or len(rows) > request.page_size + 1:
+            raise StaffProfileContractError("staff roster page exceeds bounded maximum")
+        selected = rows[:request.page_size]
+        staff_ids = tuple(row["id"] for row in selected)
+        if any(isinstance(identity, bool) or not isinstance(identity, int) or identity <= 0 for identity in staff_ids) or len(set(staff_ids)) != len(staff_ids):
+            raise StaffProfileContractError("staff roster identities are invalid")
+        accounts = self._repository.fetch_bank_accounts_for_staff(staff_ids) if staff_ids else {}
+        try:
+            service_profiles = self._repository.fetch_service_profiles(staff_ids) if staff_ids else {}
+        except (ValueError, TypeError) as error:
+            raise StaffProfileContractError("staff roster service profile source is invalid") from error
+        if set(service_profiles) != set(staff_ids):
+            raise StaffProfileContractError("staff roster service profiles do not match selected identities")
+        items = []
+        for row, staff_id in zip(selected, staff_ids, strict=True):
+            bank_rows = accounts.get(staff_id, ())
+            if len(bank_rows) > _MAX_BANK_ACCOUNTS:
+                raise StaffProfileContractError("staff profile bank accounts exceed bounded maximum")
+            profile = _profile(row, bank_rows, staff_id)
+            items.append(StaffRosterItem(staff_id, profile.union_no, profile.name, profile.phone, profile.education, profile, service_profiles[staff_id]))
+        next_cursor = staff_ids[-1] if request.staff_id is None and len(rows) > request.page_size else None
+        return StaffRosterPage(tuple(items), next_cursor)
+
 
 def _profile(
     row: Mapping[str, object],
@@ -84,6 +136,7 @@ def _profile(
 ) -> StaffProfile:
     fields = {
         "id",
+        "union_no",
         "name",
         "staff_profile_version",
         "bank_accounts_version",
@@ -106,6 +159,7 @@ def _profile(
         raise StaffProfileContractError("staff profile row fields or identity are invalid")
     return StaffProfile(
         staff_id=staff_id,
+        union_no=_optional_text(row["union_no"], "union_no", 50),
         name=_required_text(row["name"], "name", 100),
         profile_version=_non_negative_version(row["staff_profile_version"], "staff_profile_version"),
         bank_accounts_version=_non_negative_version(row["bank_accounts_version"], "bank_accounts_version"),
@@ -233,4 +287,6 @@ __all__ = [
     "StaffProfileNotFound",
     "StaffProfileQueryApplication",
     "StaffProfileRepository",
+    "StaffRosterItem",
+    "StaffRosterPage",
 ]

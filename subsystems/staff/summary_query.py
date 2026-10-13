@@ -38,6 +38,7 @@ class StaffSummary:
     name: str | None
     phone: str | None
     education: str | None
+    union_no: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,7 +85,7 @@ class StaffSummaryQueryService:
 
 
 def _summary_item(row: object) -> StaffSummary:
-    fields = {"id", "name", "phone", "education"}
+    fields = {"id", "name", "phone", "education", "union_no"}
     if not isinstance(row, Mapping) or set(row) != fields:
         raise StaffSummaryContractError("repository row fields are not canonical")
     raw_id = row["id"]
@@ -92,6 +93,7 @@ def _summary_item(row: object) -> StaffSummary:
         raise StaffSummaryContractError("repository row staff id is invalid")
     return StaffSummary(
         id=raw_id,
+        union_no=_optional_text(row["union_no"], "staff union number", 50),
         name=_optional_text(row["name"], "staff name", 100),
         phone=_optional_text(row["phone"], "staff phone", 50),
         education=_optional_text(row["education"], "staff education", 255),

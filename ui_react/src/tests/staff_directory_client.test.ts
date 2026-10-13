@@ -20,6 +20,8 @@ import {
   STAFF_RESPONSE_ONE,
   STAFF_RESPONSE_TWO,
 } from './fixtures/staff/staff_directory_contract_fixtures';
+import { STAFF_PROFILE } from './domains/staff/subsystems/staff/modules/staff-roster-profile/fixtures/staff_profile_contract_fixtures';
+import { STAFF_QUALIFICATION_MASTER } from './fixtures/staff/staff_qualification_contract_fixtures';
 
 function response(body: object, ok = true, status = 200) {
   return {
@@ -60,6 +62,24 @@ describe('staff directory client', () => {
     expect(url).toBe('/api/v1/staff/summaries?page_size=200');
     expect(options?.method).toBe('GET');
     expect(options?.headers).toMatchObject({ Authorization: 'Bearer staff-token-1' });
+  });
+
+  it('uses the authenticated full roster only when the page asks for complete profiles', async () => {
+    const body = { ...STAFF_RESPONSE_ONE, data:{ items:[{...STAFF_RESPONSE_ONE.data.items[0],profile:STAFF_PROFILE, service_profile:{...STAFF_QUALIFICATION_MASTER.service_profile,cooking_skills:[]}}],next_cursor:null } };
+    globalThis.fetch = vi.fn().mockResolvedValue(response(body));
+    const result = await createStaffDirectoryClient().queryPage({pageSize:200,includeProfile:true});
+    expect(vi.mocked(globalThis.fetch).mock.calls[0][0]).toBe('/api/v1/staff/roster?page_size=200');
+    expect(result.items[0].profile?.bank_accounts).toEqual(STAFF_PROFILE.bank_accounts);
+  });
+
+  it('rejects missing or misbound full profiles instead of presenting incomplete master data', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(response(STAFF_RESPONSE_ONE));
+    await expect(createStaffDirectoryClient().queryPage({includeProfile:true})).rejects.toThrow();
+    globalThis.fetch = vi.fn().mockResolvedValue(response({ ...STAFF_RESPONSE_ONE, data:{ items:[{
+      ...STAFF_RESPONSE_ONE.data.items[0], profile:{...STAFF_PROFILE,staff_id:99},
+      service_profile:{...STAFF_QUALIFICATION_MASTER.service_profile,cooking_skills:[]},
+    }],next_cursor:null } }));
+    await expect(createStaffDirectoryClient().queryPage({includeProfile:true})).rejects.toThrow('月嫂主檔與清單對象不一致');
   });
 
   it('reads the rotated token for every request and rejects caller Authorization', async () => {

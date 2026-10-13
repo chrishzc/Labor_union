@@ -8,6 +8,7 @@ import { staffAvailabilityClient } from '../../../../../../api/staff_availabilit
 import { staffDirectoryClient } from '../../../../../../api/staff_directory/staff_directory_client';
 import { staffLifecycleClient } from '../../../../../../api/staff_lifecycle/staff_lifecycle_client';
 import { staffCasePreferenceManualClient } from '../../../../../../api/staff_case_preferences/staff_case_preferences_client';
+import { STAFF_MANUAL_OPTIONS } from './fixtures/staff_manual_options';
 import { StaffPage } from '../../../../../../pages/StaffPage';
 import { STAFF_PAGE_ONE } from '../../../../../fixtures/staff/staff_directory_contract_fixtures';
 import { STAFF_AVAILABILITY_BLOCK } from '../../../../../fixtures/staff/staff_availability_contract_fixtures';
@@ -20,6 +21,7 @@ const manualRelations = {
 
 describe('StaffPage no fake mutation', () => {
   beforeEach(() => {
+    vi.spyOn(staffCasePreferenceManualClient, 'queryOptions').mockResolvedValue(STAFF_MANUAL_OPTIONS);
     vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue(STAFF_PAGE_ONE);
     vi.spyOn(staffDirectoryClient, 'resetPagination').mockImplementation(() => undefined);
     vi.spyOn(staffCasePreferenceManualClient, 'query').mockResolvedValue({
@@ -47,12 +49,10 @@ describe('StaffPage no fake mutation', () => {
     expect(staffAvailabilityClient.applyChange).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: /查看 去敏人員甲 的詳情/ }));
-    fireEvent.click(screen.getByRole('tab', { name: /接案偏好設定/ }));
-    expect(await screen.findByRole('button', { name: '編輯六項偏好' })).toBeEnabled();
+    expect(await screen.findByRole('combobox', { name: '可承接區域值1' })).toBeEnabled();
     expect(document.querySelector('[data-control-id="staff.preferences.cooking-skills"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-control-id="staff.preferences.special-notes"]')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
     expect(screen.getByRole('button', { name: '預覽結束暫停' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '套用取消' })).toBeDisabled();
   });
