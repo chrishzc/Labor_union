@@ -12,6 +12,7 @@
 - `api/schemas/candidate_contact_pool.py`
 - primary:
   - `domains/scheduling/matching_coordination.py`
+  - `domains/scheduling/staff_matching_preferences.py` — 內建服務方式／每日時數的純比對；比對 canonical Staff 排休／時段，不讀或同步數字偏好副本。
   - `domains/scheduling/candidate_contact_response.py` — 候選確認資訊、條件調整、沒有意願與受影響 criteria 的 typed 規則。
   - `subsystems/scheduling/matching_coordination_contracts.py`
   - `subsystems/scheduling/matching_notification_contracts.py` — formal matching contact、customer confirmation preview 與 durable notification typed contracts。
@@ -36,7 +37,7 @@
   - `infrastructure/mysql/matching_coordination_repository.py`
   - `infrastructure/mysql/matching_coordination_facts_adapter.py`
   - `infrastructure/mysql/historical_pending_deposit_matching_repository.py` — 借用 caller transaction 寫入可由 active Matching Query 讀取的正式 plan／segment roots。
-  - `infrastructure/mysql/segmented_availability_repository.py`
+  - `infrastructure/mysql/segmented_availability_repository.py` — fresh-read Client-owned `clients.service_type`、Staff-owned `staff_weekly_rest`／`staff_time_slots`，供內建服務方式／每日時數查詢。
   - `infrastructure/mysql/candidate_contact_pool_line_reply_repository.py` — 以已送出資訊事件和 staff LINE identity 重新驗證回覆後，追加意願事件；原 24 小時內本人可用新事件更正自己的意願，current projection 採每位候選最新回覆，其他候選已願意時仍拒絕。
   - `infrastructure/mysql/matching_notification_repository.py` — current Stage 5 confirmation package 的 plan/履歷/order-information/proposed-weekly preflight projection。
   - `infrastructure/mysql/matching_recommendation_repository.py` — 候選月嫂與占用日期的 read adapter；LINE 收件人只採 canonical bound staff identity。
@@ -58,6 +59,8 @@
 ## Dependencies
 - outbound: `orders/order-information` — 候選資訊使用命名投影；預覽與寄送共用相同內容，不建立虛構 assignment。
 - outbound: `orders/orders` — case/lifecycle boundary.
+- outbound: `clients/client-profile` — `clients.service_type` 原文是案件服務方式唯一來源；此 Query 不取得 writer ownership。
+- outbound: `staff/case-preference-manual` — 內建 checkbox 使用同一份 `staff_weekly_rest`／`staff_time_slots` canonical facts；名冊保存後下次查詢直接反映，數字偏好初始 keys 不覆蓋此投影。
 - outbound: `orders/service-date-confirmation` — 初步候選週說明的當次日期先經 Orders Preview 驗證，保存沿用既有 Q/P/A；客戶寄送內容以 current 日期組成既有不可變快照。
 - outbound: `orders/historical-precision-restart` — restarted `訂單成立` 案件可進入正常媒合；已失效且沒有 generation ownership 的歷史 assignment 不再占用候選檔期。
 - inbound: API transport invokes typed coordination commands, not direct DB writes. The React client/workbench remain isolated-tested without a current App route consumer；candidate LIFF 與 recipient-bound postback 則為 current live LINE inbound，經 application／adapter 追加 candidate-contact events。
@@ -70,6 +73,7 @@
 
 ## Verification
 - test_root: `tests/domains/scheduling/subsystems/scheduling/modules/matching-coordination/`
+- integration_root: `tests/domains/scheduling/subsystems/scheduling/integration/test_matching_canonical_service_capabilities.py` — 同一 canonical relation writer／Matching read adapter 的保存→查詢、方式／時數相符與衝突、舊數字偏好不覆蓋驗證。
 - test_root: `tests/domains/scheduling/subsystems/scheduling/modules/matching-coordination/unit/test_matching_plan_create_receipts.py` — immutable command fingerprint, replay, receipt metadata and read-only receipt Query tests.
 - test_root: `tests/domains/external-integration/subsystems/line/subsystems/test_line_matching_notification_application_stage7.py` — existing direct test double for `matching_notification_application` manual response protocol.
 - test_root: `tests/test_task97_typed_matching_receipts.py` — 既有正式媒合 API response schema、人工回覆 identity 與拒絕未知欄位測試。

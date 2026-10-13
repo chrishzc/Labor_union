@@ -50,7 +50,7 @@ const FILTER_OPTIONS: readonly {
 }[] = [
   { key: 'region', label: '服務地區' },
   { key: 'cooking', label: '下廚料理' },
-  { key: 'preferred_service_days', label: '偏好服務日' },
+  { key: 'preferred_service_days', label: '服務方式' },
   { key: 'daily_service_hours', label: '每日服務時數' },
 ];
 

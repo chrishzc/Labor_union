@@ -140,7 +140,7 @@ describe('待辦看板 Beta 第 2 階正式候選查詢、候選池寫入與回�
     expect(screen.getByRole('button', { name: '查詢符合條件月嫂' })).toBeInTheDocument();
     expect(screen.getByRole('checkbox', { name: '服務地區' })).toBeChecked();
     expect(screen.getByRole('checkbox', { name: '下廚料理' })).toBeChecked();
-    expect(screen.getByRole('checkbox', { name: '偏好服務日' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: '服務方式' })).toBeChecked();
     expect(screen.getByRole('checkbox', { name: '每日服務時數' })).toBeChecked();
     expect(mocks.searchInquiryCandidates).not.toHaveBeenCalled();
   });

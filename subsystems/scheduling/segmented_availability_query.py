@@ -9,6 +9,10 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Dict, List
 
+from domains.scheduling.staff_matching_preferences import (
+    service_hours_matches,
+    service_mode_matches,
+)
 from domains.scheduling.waiting_deposit_lock import (
     WaitingDepositOccupancyKind,
     WaitingDepositSegment,
@@ -155,7 +159,7 @@ def _search_availability(
         # Missing intake answers are pending, not false requirements.  Keep the
         # source unchanged and apply only filters whose case requirement exists.
         for key, fact in (("cooking", "requires_cooking"),
-                          ("preferred_service_days", "service_days"), ("daily_service_hours", "service_hours_per_day")):
+                          ("preferred_service_days", "service_type"), ("daily_service_hours", "service_hours_per_day")):
             if order_row.get(fact) is None or order_row.get(fact) == "":
                 policy[key] = False
         if not any(str(order_row.get(key) or "").strip() for key in ("city", "address")):
@@ -387,11 +391,9 @@ def _filter_policy(raw):
 def _staff_filter_results(staff, order, policy):
     preferences = staff.get("matching_preferences") or {}
     enabled_keys = set(policy["enabled_preference_keys"])
-    enabled_keys.update(
-        key
-        for key in ("preferred_service_days", "daily_service_hours")
-        if policy[key]
-    )
+    # Built-in conditions always use canonical Staff capabilities, including
+    # when a caller repeats their legacy keys in enabled_preference_keys.
+    enabled_keys.difference_update(("preferred_service_days", "daily_service_hours"))
     preference_results = {
         key: _preference_matches(
             fact,
@@ -414,7 +416,19 @@ def _staff_filter_results(staff, order, policy):
         ),
         "cooking": _cooking_matches(order, staff),
         **preference_results,
+        "preferred_service_days": service_mode_matches(
+            order.get("service_type"), staff.get("rest_schedule") or (),
+        ),
+        "daily_service_hours": service_hours_matches(
+            _integer_hours(order.get("service_hours_per_day")), staff.get("service_periods") or (),
+        ),
     }
+
+
+def _integer_hours(value):
+    if isinstance(value, Decimal) and value.is_finite() and value == value.to_integral_value():
+        return int(value)
+    return value
 
 
 def _preference_matches(fact, order, tolerance):

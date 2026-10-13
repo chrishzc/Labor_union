@@ -80,9 +80,9 @@ class CaregiverMatchingFilterPolicy(BaseModel):
 
     schedule: bool = True
     region: bool = True
-    preferred_service_days: bool = True
+    preferred_service_days: bool = Field(default=True, description="比對案件服務方式與月嫂週間服務／排休；不比對總服務天數")
     cooking: bool = True
-    daily_service_hours: bool = True
+    daily_service_hours: bool = Field(default=True, description="比對案件每日時數與月嫂名冊的可承接時段")
     preferred_service_days_tolerance: int = Field(default=0, ge=0, le=60)
     enabled_preference_keys: list[str] = Field(default_factory=list)
 

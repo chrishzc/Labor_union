@@ -48,6 +48,8 @@ Modules 必須是純函式，不讀 DB、不取得現在時間、不 import API�
 
 ## 3. 自訂月嫂偏好
 
+以下數字偏好 definition／value API 保留其獨立數值語意與既有資料。2026-10-13 人工裁決的內建候選篩選改用 Staff canonical 服務能力；本節兩個 initial definitions 不再是候選查詢「服務方式／每日服務時數」的資料來源，也不得覆蓋名冊資料。
+
 ### 3.1 定義
 
 公會人員可以建立自訂顯示名稱的月嫂偏好欄位。第一版正式支援 `integer_range` 與
@@ -75,9 +77,9 @@ Modules 必須是純函式，不讀 DB、不取得現在時間、不 import API�
 
 ### 3.2 Matching 語意
 
-- 正式媒合中的偏好只影響排序與 explanation，不是接案資格或硬性排除條件；正式媒合 Query 的 checkbox 不得因此移除 selectable candidate。營運工作台「新增候選月嫂」的初步詢問 Query 例外：勾選「偏好服務日」（比對 `orders.service_days`）或「每日服務時數」（比對 `orders.service_hours_per_day`）時，已填案件需求須與月嫂已登錄的對應偏好相符才列入查詢結果；未填案件需求不套用該項篩選。此篩選不改變加入／聯絡時的檔期 fresh-read 或正式媒合資格。
+- 正式媒合中的偏好只影響排序與 explanation，不是接案資格或硬性排除條件；正式媒合 Query 的 checkbox 不得因此移除 selectable candidate。營運工作台「新增候選月嫂」的初步詢問 Query 例外：勾選「服務方式」或「每日服務時數」時，已填案件需求須與月嫂名冊已登錄的 canonical 服務能力相符才列入查詢結果；來源與比對依本文件末段 MATCH-CAP-01／02。未填案件需求不套用該項篩選。此篩選不改變加入／聯絡時的檔期 fresh-read 或正式媒合資格。
 - integer target 落在月嫂 `[minimum, maximum]` 內，或存在於 integer set 內，為 `matched`；否則 `not_matched`。
-- 月嫂未設定啟用中的偏好時為 `source_not_ready`；正式媒合仍可列為 selectable，但排序不得把未知值當成 matched，UI 必須明示尚未登錄。初步詢問若啟用該項已填需求的篩選，則不列入查詢結果。
+- 月嫂未設定啟用中的自訂偏好時為 `source_not_ready`；正式媒合仍可列為 selectable，但排序不得把未知值當成 matched，UI 必須明示尚未登錄。初步詢問的服務方式／每日時數依 canonical 服務能力判讀，不以數字偏好有無登錄決定結果；若啟用該項已填需求的篩選，但對應服務能力空白或無法明確比對，則不列入查詢結果。
 - Query 回傳 definition identity／version、顯示名稱、target、staff value、result 與 reason code；UI 不解析中文名稱決定規則。
 - Query 結果綁定 Staff preference、Orders 與 Scheduling source versions；選擇或 Apply 前必須 fresh recheck。
 - 單純 `not_matched` 或 `source_not_ready` 不得投影 `SCHEDULE-005` 或任何硬性異常；只有偏好 root 本身違反 schema/version invariant，或正式 assignment／不可服務期間等其他 owner root 衝突時，才由其對應 anomaly code 處理。
@@ -236,7 +238,7 @@ Staff Matching Preferences／不可服務期間仍由本規格與 Scheduling own
 |---|---|---|---|
 | 最多照顧寶寶數 | Staff scalar `care_babies` | Staff canonical profile fact；可供名冊／Matching read projection | 不得由 preference profile 寫入 |
 | 可承接區域 | relation `staff_regions`：標準值 + topic-local other detail | Staff service capability fact | 只讀；若未來要人工修改，須另由該 fact owner 明確定義 command |
-| 可承接時段 | relation `staff_time_slots`：標準值 + topic-local other detail | Staff service capability fact；可作每日服務時數 migration source evidence | 不得直接等同 `daily_service_hours`；無法唯一解析時不得猜測 |
+| 可承接時段 | relation `staff_time_slots`：標準值 + topic-local other detail | Staff service capability fact；內建每日時數查詢直接使用此唯一來源（MATCH-CAP-02） | 不寫入數字偏好副本；無法唯一解析時不得猜測 |
 | 下廚能力 | relation `staff_cooking_skills`：標準值 + topic-local other detail | Staff capability；Matching 對 Orders `requires_cooking` 消費 | 不得由 preference profile 寫入 |
 | 交通方式 | relation `staff_transportation` | Staff service capability fact | 不得由 preference profile 寫入 |
 | 特殊節日意願 | relation `staff_holiday_availability`：標準值 + topic-local other detail | Staff service capability／availability fact | 不得由 preference profile 寫入 |
@@ -282,3 +284,16 @@ Case Import 的 Staff Historical BeClass adoption 只負責把已知 workbook so
 `staff_regions`、`staff_time_slots`、`staff_cooking_skills`、`staff_holiday_availability`、`staff_weekly_rest`、`staff_baby_types`。每次 Preview 綁定六關係 snapshot fingerprint；Apply 先鎖 Staff parent，再依 table name 排序鎖定六 relation rows，fresh-read 後驗證 fingerprint，並重用 `admin_command_receipts` 的新 command family。
 
 既有 numeric Staff Matching Profile QPA、各 relation 的 canonical adoption 與 transportation 的 `source_not_ready` 唯讀語意均保留；本邊界不新增 version table、schema、migration，也不把 raw workbook 或其他能力欄位升格為可寫偏好。
+
+## 2026-10-13 內建媒合條件共用名冊 canonical 來源（SPEC_READY）
+
+Authority：使用者明確不接受名冊與媒合不同步，並指定「偏好服務日」是「服務方式，例如周休二日」。本裁決取代內建候選篩選原先以數字偏好比對總服務天數／每日時數的來源選擇。
+
+- **MATCH-CAP-01：服務方式。** UI 顯示「服務方式」，HTTP 的 `preferred_service_days` key 保留。案件讀 Client-owned `clients.service_type`；月嫂讀 `staff_weekly_rest.rest_type` 與 `custom_rest_detail`。比對週間服務／排休方式，不比對 `orders.service_days`，也不套用數字天數 tolerance。保存的原文不改寫；查詢時辨識「周／週」、「一／1」、「二／2」同義寫法；週休二日、週一至週五視為同方式，休周六與休周日保留差異，週休一日沿既有慣例代表休周日，連續服務代表無固定週休。
+- **MATCH-CAP-02：每日服務時數。** 案件需求仍為 `orders.service_hours_per_day`；月嫂唯一來源為 `staff_time_slots.slot_name` 與 `custom_slot_detail`。明確正整數「N小時」及既有四小時上午／下午標準值轉成對應時數；不從 `staff_matching_preference_values` 補值或覆蓋。`其他` 只讀本母題 detail，且只接受上述可明確辨識值，混合／含糊文字不得猜測。
+- **MATCH-CAP-03：一致性與失敗。** 名冊既有 writer 保存後，下一次查詢 fresh-read 原關聯表，無第二份同步副本。案件需求空白時初步詢問不套用對應篩選；已填需求不相符、月嫂資料空白或無法辨識時，勾選的初步篩選不列入該月嫂；取消勾選可詢問並協調。正式分段查詢仍只提供條件結果，不因這兩項排除 selectable candidate。
+- **MATCH-CAP-04：效果上限。** 只修改本機 Domain 比對、Scheduling availability read adapter／query、checkbox 文案、direct tests 與必要正式規格／地圖。Staff／Client writer、交易邊界、資料表、migration、數字偏好 API 與既有資料不變；不部署、不切入口、不發送外部通知。
+
+驗收：① 只登錄名冊的週休二日與 8 小時，即可通過相同需求，數字偏好無資料亦可；② 週休二日不可當成休周日，8 小時不可匹配 12 小時，單獨勾選／合併勾選結果皆正確；③ 名冊修改服務方式／時數後下一次查詢反映新值，即使數字偏好殘留舊值也不影響；④ 空白案件需求、其他明確值、未知／含糊值與正式分段行為符合 MATCH-CAP-03；⑤ HTTP key 與候選 schema 相容，UI 顯示「服務方式」。
+
+convergence: READY；blocking gaps: none。已辨識的非阻擋事實：目前本機月嫂保存「週一至週五」、畫面期間的案件保存「休周日」，本裁決下為不相符；不得為產生候選而改寫它們。

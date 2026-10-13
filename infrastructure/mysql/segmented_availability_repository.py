@@ -69,7 +69,7 @@ class MySqlSegmentedAvailabilityFactsRepository:
     def _load_order(self, cursor: Any, case_no: str) -> dict[str, Any] | None:
         cursor.execute(
             "SELECT o.case_no, o.status, o.start_date, o.end_date,"
-            "o.service_days,o.service_hours_per_day,o.requires_cooking,c.city,c.address,"
+            "o.service_days,o.service_hours_per_day,o.requires_cooking,c.city,c.address,c.service_type,"
             "COALESCE(g.aggregate_version, 0) AS scheduling_version "
             "FROM orders o JOIN clients c ON c.id=o.client_id "
             "LEFT JOIN scheduling_aggregates g ON g.case_no=o.case_no "
@@ -113,11 +113,18 @@ class MySqlSegmentedAvailabilityFactsRepository:
         _attach_grouped_rows(
             cursor, by_id, "staff_cooking_skills", "skill_name", "cooking_skills"
         )
+        _attach_capability_rows(
+            cursor, by_id, "staff_time_slots", "slot_name", "custom_slot_detail", "service_periods"
+        )
+        _attach_capability_rows(
+            cursor, by_id, "staff_weekly_rest", "rest_type", "custom_rest_detail", "rest_schedule"
+        )
         cursor.execute(
             "SELECT v.staff_id,d.preference_key,d.order_fact_key,"
             "d.comparison_operator,v.value_json FROM staff_matching_preference_values v "
             "JOIN staff_matching_preference_definitions d ON d.id=v.definition_id "
-            "WHERE d.status='active' AND d.is_filterable=1"
+            "WHERE d.status='active' AND d.is_filterable=1 "
+            "AND d.preference_key NOT IN ('preferred_service_days','daily_service_hours')"
         )
         for value_row in cursor.fetchall() or []:
             staff = by_id.get(int(value_row["staff_id"]))
@@ -257,6 +264,14 @@ def _attach_grouped_rows(cursor, staff_by_id, table, value_column, target_key):
         staff = staff_by_id.get(int(row["staff_id"]))
         if staff is not None:
             staff.setdefault(target_key, []).append(str(row[value_column]))
+
+
+def _attach_capability_rows(cursor, staff_by_id, table, value_column, detail_column, target_key):
+    cursor.execute(f"SELECT staff_id,{value_column},{detail_column} FROM {table}")
+    for row in cursor.fetchall() or []:
+        staff = staff_by_id.get(int(row["staff_id"]))
+        if staff is not None:
+            staff.setdefault(target_key, []).append((str(row[value_column]), row.get(detail_column)))
 
 
 def _attach_region_rows(cursor, staff_by_id):

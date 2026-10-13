@@ -4,7 +4,57 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Mapping
+import re
+from typing import Any, Iterable, Mapping
+
+
+def _service_mode(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = value.strip().replace("周", "週")
+    return {
+        "連續服務": "連續服務",
+        "休週六": "休週六",
+        "休週日": "休週日",
+        "週休1日": "休週日",
+        "週休一日": "休週日",
+        "週休2日": "週休2日",
+        "週休二日": "週休2日",
+        "週一至週五": "週休2日",
+    }.get(text)
+
+
+def _capability_value(value: str, detail: str | None) -> str:
+    return (detail or "").strip() if value.strip() in {"其他", "其它"} else value.strip()
+
+
+def service_mode_matches(
+    required_mode: object, rest_schedule: Iterable[tuple[str, str | None]],
+) -> bool:
+    required = _service_mode(required_mode)
+    return required is not None and any(
+        _service_mode(_capability_value(value, detail)) == required
+        for value, detail in rest_schedule
+    )
+
+
+def service_hours_matches(
+    required_hours: object, service_periods: Iterable[tuple[str, str | None]],
+) -> bool:
+    if isinstance(required_hours, bool) or not isinstance(required_hours, int) or required_hours <= 0:
+        return False
+    four_hour_slots = {
+        "4小時_上午", "4小時_下午",
+        "4小時(上午8:30-12:30)", "4小時(下午13:00-17:00)",
+    }
+    for value, detail in service_periods:
+        text = _capability_value(value, detail)
+        if text in four_hour_slots and required_hours == 4:
+            return True
+        match = re.fullmatch(r"([1-9][0-9]*)小時", text)
+        if match and int(match.group(1)) == required_hours:
+            return True
+    return False
 
 
 class PreferenceValueKind(str, Enum):

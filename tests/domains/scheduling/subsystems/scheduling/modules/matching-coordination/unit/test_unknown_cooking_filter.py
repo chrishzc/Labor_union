@@ -88,28 +88,18 @@ def test_initial_inquiry_keeps_known_cooking_filter():
 
 def test_inquiry_preference_checkboxes_filter_known_requirements_only():
     facts = Facts()
-    facts.data["order"].update({"service_days": 1, "service_hours_per_day": Decimal("8.0")})
+    facts.data["order"].update({"service_days": 1, "service_type": "周休二日", "service_hours_per_day": Decimal("8.0")})
 
-    def staff(staff_id, minimum_days, hours):
+    def staff(staff_id, service_mode, hours):
         return {
             "id": staff_id,
             "name": f"月嫂{staff_id}",
-            "matching_preferences": {
-                "preferred_service_days": {
-                    "order_fact_key": "service_days",
-                    "comparison_operator": "range_with_tolerance",
-                    "value": {"minimum": minimum_days, "maximum": minimum_days},
-                },
-                "daily_service_hours": {
-                    "order_fact_key": "service_hours_per_day",
-                    "comparison_operator": "contains_integer",
-                    "value": {"values": [hours]},
-                },
-            },
+            "rest_schedule": [(service_mode, None)],
+            "service_periods": [(f"{hours}小時", None)],
         }
 
     facts.data["staff_rows"] = [
-        staff(3, 1, 8), staff(4, 2, 8), staff(5, 1, 12),
+        staff(3, "週休2日", 8), staff(4, "週休1日", 8), staff(5, "週一至週五", 12),
         {"id": 6, "name": "未登錄偏好的月嫂"},
     ]
 
@@ -130,6 +120,8 @@ def test_inquiry_preference_checkboxes_filter_known_requirements_only():
 
     facts.data["order"]["service_hours_per_day"] = None
     assert matching_ids(days=True, hours=True) == [3, 5]
+    facts.data["order"]["service_type"] = None
+    assert matching_ids(days=True, hours=True) == [3, 4, 5, 6]
 
 
 def test_candidate_pool_fresh_check_uses_inquiry_not_official_dates(monkeypatch):
