@@ -400,10 +400,7 @@ describe('待辦看板 唯讀工作 Drawer', () => {
       }],
     });
 
-    render(<OrderWorkbenchV2Page />);
-    fireEvent.click(await screen.findByRole('button', { name: '完成訂單' }));
-    await waitFor(() => expect(screen.getByText('CASE-HISTORY')).toBeInTheDocument());
-    fireEvent.click(cardFor('CASE-HISTORY'));
+    render(<OrderWorkbenchV2Drawer caseNo="CASE-HISTORY" branchType="historical" workbenchScope="completed" onClose={vi.fn()} />);
 
     const dialog = await screen.findByRole('region', { name: '案件 CASE-HISTORY' });
     expect(within(dialog).queryByRole('heading', { name: '13 階段正式進度' })).not.toBeInTheDocument();

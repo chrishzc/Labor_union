@@ -15,9 +15,9 @@ import './OrdersPage.css';
 import './OrderTrackerPage.css';
 import './OrderWorkbenchV2Page.css';
 import { OrderWorkbenchV2Drawer } from '../components/OrderWorkbenchV2Drawer';
+import { WorkbenchCaseStatistics } from '../components/WorkbenchCaseStatistics';
 import { loadCurrentHcmReviewsForCases, type HcmCurrentReview } from '../api/case_import/hcm_resubmission_client';
 import {
-  type OrderWorkbenchScope,
   type OrderCoreStageProjectionQueryParams,
 } from '../api/orders/order_core_stage_projection_client';
 import type {
@@ -40,11 +40,6 @@ import {
   formatServiceRange,
   type OrderSummaryCardViewModel,
 } from '../adapters/orders/order_summary_adapter';
-
-const WORKBENCH_SCOPES: readonly OrderWorkbenchScope[] = ['in_progress', 'completed', 'cancelled'];
-const SCOPE_LABELS: Record<OrderWorkbenchScope, string> = {
-  in_progress: '進行中訂單', completed: '完成訂單', cancelled: '取消訂單',
-};
 
 function summaryUnavailableMessage(summaryLoading: boolean, summaryQueryFailed: boolean): string {
   if (summaryLoading) return '正式案件摘要載入中。';
@@ -72,7 +67,6 @@ export const OrderWorkbenchV2Page: FC = () => {
   const [intakeReviews, setIntakeReviews] = useState<ReadonlyMap<string, HcmCurrentReview>>(new Map());
   const [intakeReviewsError, setIntakeReviewsError] = useState(false);
   const [selectedStage, setSelectedStage] = useState<CoreStageCode | null>(null);
-  const [workbenchScope, setWorkbenchScope] = useState<OrderWorkbenchScope>('in_progress');
   const [search, setSearch] = useState('');
   const [projectionRefreshKey, setProjectionRefreshKey] = useState(0);
   const [selectedDrawer, setSelectedDrawer] = useState<{
@@ -96,8 +90,8 @@ export const OrderWorkbenchV2Page: FC = () => {
     const query: OrderCoreStageProjectionQueryParams = {
       page_size: 200,
       lifecycle_scope: 'all',
-      workbench_scope: workbenchScope,
-      stage: workbenchScope === 'in_progress' ? selectedStage ?? undefined : undefined,
+      workbench_scope: 'in_progress',
+      stage: selectedStage ?? undefined,
     };
 
     const queryKey = JSON.stringify(query);
@@ -131,7 +125,6 @@ export const OrderWorkbenchV2Page: FC = () => {
 
     return () => controller.abort();
   }, [
-    workbenchScope,
     projectionRefreshKey,
     selectedStage,
   ]);
@@ -172,9 +165,7 @@ export const OrderWorkbenchV2Page: FC = () => {
     const controller = new AbortController();
     setIntakeReviews(new Map());
     setIntakeReviewsError(false);
-    const caseNos = workbenchScope === 'in_progress'
-      ? (view?.items ?? []).filter((item) => item.lifecycleStatus === '待補件').map((item) => item.id)
-      : [];
+    const caseNos = (view?.items ?? []).filter((item) => item.lifecycleStatus === '待補件').map((item) => item.id);
     void loadCurrentHcmReviewsForCases(caseNos, { signal: controller.signal })
       .then((reviews) => {
         if (!controller.signal.aborted) setIntakeReviews(new Map(reviews.map((review) => [review.case_no, review])));
@@ -183,7 +174,7 @@ export const OrderWorkbenchV2Page: FC = () => {
         if (!controller.signal.aborted) setIntakeReviewsError(true);
       });
     return () => controller.abort();
-  }, [view, workbenchScope]);
+  }, [view]);
 
   const displayedItems = (view?.items ?? []).filter((item) => {
     if (!normalizedSearch) return true;
@@ -196,12 +187,6 @@ export const OrderWorkbenchV2Page: FC = () => {
   const selectedStageCount = selectedStage === null ? view?.items.length ?? 0 : view?.stageCounts[selectedStage] ?? 0;
   const displayedCount = displayedItems.length;
   const clearFilters = () => { setSearch(''); setSelectedStage(null); };
-
-  const selectScope = (scope: OrderWorkbenchScope) => {
-    setWorkbenchScope(scope);
-    setSelectedStage(null);
-    setSelectedDrawer(null);
-  };
 
   const selectStage = (stage: CoreStageCode | null) => {
     setSelectedStage(stage);
@@ -216,7 +201,7 @@ export const OrderWorkbenchV2Page: FC = () => {
           caseNo={selectedDrawer.caseNo}
           branchType={selectedDrawer.branchType}
           summary={summaryIndex.get(selectedDrawer.caseNo)}
-          workbenchScope={workbenchScope}
+          workbenchScope="in_progress"
           onClose={closeDrawer}
           onObserved={refreshProjection}
         />
@@ -248,17 +233,8 @@ export const OrderWorkbenchV2Page: FC = () => {
         </div>
       </header>
 
-      <nav className="tracker-tabs-stitch order-v2-branch-filters" aria-label="訂單狀態分類">
-        {WORKBENCH_SCOPES.map((scope) => (
-          <button type="button" key={scope}
-            className={`tracker-tab-btn ${workbenchScope === scope ? 'active' : ''}`}
-            aria-pressed={workbenchScope === scope} onClick={() => selectScope(scope)}>
-            {SCOPE_LABELS[scope]}
-          </button>
-        ))}
-      </nav>
+      <WorkbenchCaseStatistics refreshKey={projectionRefreshKey} />
 
-      {workbenchScope === 'in_progress' && (
         <>
         <label className="order-v2-stage-select">
           作業階段
@@ -284,20 +260,15 @@ export const OrderWorkbenchV2Page: FC = () => {
             </button>
           ))}
         </section></>
-      )}
 
       <section className="pipeline-stage-section order-v2-results" aria-label="案件工作清單">
       <div className="pipeline-stage-header">
         <div>
           <h2 className="pipeline-stage-title">
-            {selectedDefinition ? `${selectedDefinition.ordinal}. ${selectedDefinition.label}` : SCOPE_LABELS[workbenchScope]}
+            {selectedDefinition ? `${selectedDefinition.ordinal}. ${selectedDefinition.label}` : '進行中訂單'}
           </h2>
           <p className="pipeline-stage-desc">
-            {workbenchScope === 'in_progress'
-              ? '查看所有進行中案件，或依作業階段篩選待辦。'
-              : workbenchScope === 'completed'
-                ? '服務已完成；可查閱案件紀錄，並追蹤客戶與月嫂的結算狀態。'
-                : '查閱取消訂單的案件紀錄與後續處理。'}
+            查看所有進行中案件，或依作業階段篩選待辦。
           </p>
         </div>
         <div className="order-v2-result-count" aria-live="polite">
@@ -327,7 +298,7 @@ export const OrderWorkbenchV2Page: FC = () => {
           <span className="stage-empty-icon" aria-hidden="true">☕</span>
           <strong className="stage-empty-text">目前沒有符合條件的案件。</strong>
           {(search || selectedStage) && <button type="button" className="tracker-reload-button" onClick={clearFilters}>清除搜尋與篩選</button>}
-          <span className="stage-empty-hint">{workbenchScope === 'in_progress' ? '可切換作業階段，或調整搜尋與篩選條件。' : '可調整搜尋條件，或切換訂單分類。'}</span>
+          <span className="stage-empty-hint">可切換作業階段，或調整搜尋與篩選條件。</span>
         </div>
       )}
       {!loading && displayedCount > 0 && (
@@ -382,12 +353,6 @@ export const OrderWorkbenchV2Page: FC = () => {
                 </div>
                 <div className="order-v2-card-task">
                   <div className="order-v2-next-task"><small>目前待辦</small><strong>{stage?.label ?? item.statusLabel}</strong></div>
-                  {workbenchScope === 'completed' && (
-                    <div className="order-v2-settlement-summary" aria-label="結算狀態">
-                      <span>客戶端：{item.clientSettlementLabel}</span>
-                      <span>月嫂端：{item.staffSettlementLabel}</span>
-                    </div>
-                  )}
                   {intakeReviews.get(item.id) && (
                     <div className="order-v2-notice warning">
                       <strong>進件欄位待修正</strong>

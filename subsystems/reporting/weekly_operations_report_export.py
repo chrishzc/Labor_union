@@ -15,6 +15,7 @@ from openpyxl.utils import get_column_letter
 from subsystems.reporting.weekly_operations_report_query import (
     MISSING_ORDER_STATUS,
     ORDER_STATUS_LABELS,
+    reporting_order_status,
     WeeklyCaseRow,
     WeeklyCaseTotals,
     WeeklyOperationsReport,
@@ -72,7 +73,7 @@ def _build_case_sheet(ws, report: WeeklyOperationsReport) -> None:
         *ORDER_STATUS_LABELS, MISSING_ORDER_STATUS,
         *(status for total in (*report.annual_totals, *report.monthly_subtotals)
           for status in total.order_status_counts),
-        *(row.order_status or MISSING_ORDER_STATUS for row in report.case_rows),
+        *(reporting_order_status(row.order_status) for row in report.case_rows),
     ]))
     # A:L 為既有案件／審核欄；其後為所有狀態、獨立審核不符合及服務欄。
     status_last_col = 12 + len(status_labels)
@@ -168,7 +169,7 @@ def _build_case_sheet(ws, report: WeeklyOperationsReport) -> None:
                 p_cell_val, i_cell_val, 1 if row else "",
                 row.general_eligible or "" if row else "", row.general_ineligible or "" if row else "",
                 row.subsidized_eligible or "" if row else "", row.subsidized_ineligible or "" if row else "",
-                *[1 if row and (row.order_status or MISSING_ORDER_STATUS) == status else ""
+                *[1 if row and reporting_order_status(row.order_status) == status else ""
                   for status in status_labels],
                 row.review_rejected or "" if row else "",
                 row.service_days if row and row.service_days is not None else "",

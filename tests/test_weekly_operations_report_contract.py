@@ -3,6 +3,7 @@ File: test_weekly_operations_report_contract.py
 Description: 驗證營運週報週界、彙總、遮罩、正式工時、strict API 與三分頁 XLSX。
 """
 
+from dataclasses import replace
 from datetime import date, datetime
 from decimal import Decimal
 from io import BytesIO
@@ -41,11 +42,153 @@ from infrastructure.mysql.weekly_operations_report_query_adapter import (
 )
 
 
+class _CaseStatisticsFacts:
+    def __init__(self):
+        seed = _Facts().list_case_facts(date(2026, 8, 20), date(2026, 8, 26))[0]
+        entries = [
+            ("2026-01-01", "一般市民", None, "訂單成立"),
+            ("2026-01-04", "補助市民", None, "歷史訂單－未服務"),
+            ("2026-03-31", "一般市民", None, "服務中"),
+            ("2026-04-01", "補助市民", None, "歷史訂單－服務中"),
+            ("2026-04-02", "一般市民", None, "訂單完成"),
+            ("2026-04-03", "補助市民", None, "歷史訂單－服務完成"),
+            ("2026-04-04", "一般市民", None, "歷史訂單－帳務完成"),
+            ("2026-05-31", "一般市民", "資格不符", "訂單取消"),
+            ("2026-06-30", "補助市民", "資格不符", "訂單取消"),
+            ("2026-07-01", None, None, "待補件"),
+            ("2026-12-31", "一般市民", None, "洽談中"),
+            ("2026-06-15", None, None, None),
+            ("2025-12-31", "一般市民", None, "服務中"),
+            ("2027-01-01", "一般市民", None, "服務中"),
+        ]
+        self.rows = [replace(seed, client_id=index, case_no=f"115000{index:03d}", created_at=datetime.fromisoformat(day),
+                             identity_status=identity, reject_reason=reason, order_status=status)
+                     for index, (day, identity, reason, status) in enumerate(entries, start=1)]
+        self.reads = []
+
+    def list_case_facts(self, start_date, end_date):
+        self.reads.append((start_date, end_date))
+        return [row for row in self.rows if start_date <= row.created_at.date() <= end_date]
+
+    def list_case_statistics_facts(self, start_date, end_date):
+        return self.list_case_facts(start_date, end_date)
+
+    def list_case_years(self):
+        return [2027, 2026, 2025]
+
+    def list_service_facts(self, *_args):
+        raise AssertionError("案件統計不得查詢服務工時")
+
+    def list_subsidy_facts(self, *_args):
+        raise AssertionError("案件統計不得查詢補助")
+
+    def list_weekly_metrics(self, *_args):
+        raise AssertionError("案件統計不得查詢週指標")
+
+
+def test_case_statistics_calendar_periods_merge_history_and_preserve_unknowns():
+    facts = _CaseStatisticsFacts()
+    query = WeeklyOperationsReportQuery(facts, lambda: datetime(2026, 10, 13, tzinfo=TAIPEI_TIME_ZONE))
+    annual = query.query_case_statistics(2026)
+    assert annual.start_date == date(2026, 1, 1)
+    assert annual.end_date == date(2026, 12, 31)
+    assert annual.annual_application_count == annual.summary.application_count == 12
+    assert annual.summary.order_status_counts == {"待補件": 1, "洽談中": 1, "訂單成立": 2, "服務中": 2, "訂單完成": 3, "訂單取消": 2}
+    assert annual.summary.other_status_count == 1
+    assert (annual.summary.general_eligible_count, annual.summary.general_ineligible_count,
+            annual.summary.subsidized_eligible_count, annual.summary.subsidized_ineligible_count) == (5, 1, 3, 1)
+    assert annual.summary.unclassified_qualification_count == 2
+    assert sum(query.query_case_statistics(2026, quarter=q).summary.application_count for q in range(1, 5)) == 12
+    april = query.query_case_statistics(2026, quarter=2, month=4)
+    assert april.summary.application_count == 4
+    assert april.annual_application_count == 12
+    assert april.summary.order_status_counts["訂單完成"] == 3
+    assert all(bounds == (date(2026, 1, 1), date(2026, 12, 31)) for bounds in facts.reads)
+    empty = query.query_case_statistics(2024, month=2)
+    assert empty.end_date == date(2024, 2, 29)
+    assert empty.summary.application_count == 0
+    assert all(count == 0 for count in empty.summary.order_status_counts.values())
+
+
+def test_case_statistics_api_is_authenticated_strict_and_rejects_conflicting_filters():
+    facts = _CaseStatisticsFacts()
+    app = _app()
+    app.dependency_overrides[get_weekly_operations_report_query] = lambda: WeeklyOperationsReportQuery(
+        facts, lambda: datetime(2026, 10, 13, tzinfo=TAIPEI_TIME_ZONE))
+    client = TestClient(app)
+    response = client.get("/api/v1/operations-reports/case-statistics", params={"year": 2026, "quarter": 2, "month": 4})
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["summary"]["application_count"] == 4
+    assert data["annual_application_count"] == 12
+    assert data["available_years"] == [2027, 2026, 2025]
+    assert (data["start_date"], data["end_date"]) == ("2026-04-01", "2026-04-30")
+    assert "王小美" not in response.text and "115000" not in response.text
+    assert client.get("/api/v1/operations-reports/case-statistics", params={"year": 2026, "quarter": 2, "month": 8}).status_code == 400
+    assert client.get("/api/v1/operations-reports/case-statistics", params={"year": 2026, "identity": "一般市民"}).status_code == 400
+    assert client.get("/api/v1/operations-reports/case-statistics", params={"year": 2026, "quarter": 5}).status_code in {400, 422}
+    del app.dependency_overrides[require_admin]
+    assert client.get("/api/v1/operations-reports/case-statistics", params={"year": 2026}).status_code in {401, 403}
+
+
+def test_weekly_json_and_xlsx_merge_historical_statuses_without_mutating_facts():
+    class Facts(_CaseStatisticsFacts):
+        def list_service_facts(self, *_args): return []
+        def list_subsidy_facts(self, *_args): return SubsidyFacts((), ())
+        def list_weekly_metrics(self, *_args): return []
+
+    facts = Facts()
+    report = WeeklyOperationsReportQuery(facts, lambda: datetime(2026, 10, 13, tzinfo=TAIPEI_TIME_ZONE)).query(date(2026, 1, 1), date(2026, 12, 31))
+    assert report.annual_totals[0].order_status_counts["訂單成立"] == 2
+    assert report.annual_totals[0].order_status_counts["服務中"] == 2
+    assert report.annual_totals[0].order_status_counts["訂單完成"] == 3
+    assert not any("歷史訂單" in key for key in report.annual_totals[0].order_status_counts)
+    assert any(row.order_status == "歷史訂單－帳務完成" for row in report.case_rows)
+    from subsystems.reporting.weekly_operations_report_export import export_weekly_operations_report
+    worksheet = load_workbook(BytesIO(export_weekly_operations_report(report)), data_only=True)["週報案件受理總表"]
+    headers = [cell.value for cell in worksheet[3]]
+    assert not any("歷史訂單" in str(value) for value in headers)
+    assert worksheet.cell(4, headers.index("訂單完成") + 1).value == 3
+    completion_column = headers.index("訂單完成") + 1
+    assert sum(worksheet.cell(row, completion_column).value == 1 for row in range(5, worksheet.max_row + 1)) == 3
+
+
+def test_workbench_and_weekly_have_identical_known_counts_for_same_calendar_period():
+    class Facts(_CaseStatisticsFacts):
+        def list_service_facts(self, *_args): return []
+        def list_subsidy_facts(self, *_args): return SubsidyFacts((), ())
+        def list_weekly_metrics(self, *_args): return []
+
+    facts = Facts()
+    # 確定沒有不符合案件時，零不得在週報變成「未登錄」。
+    facts.rows = [replace(row, reject_reason=None) for row in facts.rows]
+    query = WeeklyOperationsReportQuery(facts, lambda: datetime(2026, 10, 13, tzinfo=TAIPEI_TIME_ZONE))
+    for quarter, month in ((None, None), (2, None), (2, 4), (4, 11)):
+        statistics = query.query_case_statistics(2026, quarter, month)
+        report = query.query(statistics.start_date, statistics.end_date)
+        for field in ("application_count", "general_eligible_count", "general_ineligible_count", "subsidized_eligible_count", "subsidized_ineligible_count"):
+            assert getattr(statistics.summary, field) == getattr(report.summary, field)
+        statuses = query._case_totals(2026, month, statistics.start_date, statistics.end_date, report.case_rows, ()).order_status_counts
+        assert statistics.summary.order_status_counts == {status: statuses[status] for status in statistics.summary.order_status_counts}
+        assert report.summary.general_ineligible_count == report.summary.subsidized_ineligible_count == 0
+
+    # 尚有未能判定身分的不符合案件時，兩處共同保留未知，不猜成零。
+    facts.rows[11] = replace(facts.rows[11], reject_reason="資格不符")
+    statistics = query.query_case_statistics(2026)
+    report = query.query(statistics.start_date, statistics.end_date)
+    assert statistics.summary.general_ineligible_count is report.summary.general_ineligible_count is None
+    assert statistics.summary.subsidized_ineligible_count is report.summary.subsidized_ineligible_count is None
+    assert statistics.summary.unclassified_qualification_count == 2
+
+
 class _Facts:
+    def list_case_years(self):
+        return [2026]
+
     def list_case_facts(self, start_date, end_date):
         assert (start_date, end_date) in {
             (date(2026, 8, 20), date(2026, 8, 26)),
-            (date(2026, 1, 5), date(2026, 8, 26)),
+            (date(2026, 1, 1), date(2026, 8, 26)),
         }
         return [
             WeeklyCaseFact(
@@ -92,7 +235,7 @@ class _Facts:
     def list_weekly_metrics(self, start_date, end_date):
         assert (start_date, end_date) in {
             (date(2026, 8, 20), date(2026, 8, 26)),
-            (date(2026, 1, 5), date(2026, 8, 26)),
+            (date(2026, 1, 1), date(2026, 8, 26)),
         }
         return [
             WeeklyReportMetric(date(2026, 8, 17), date(2026, 8, 23), 12, 34),
@@ -180,7 +323,7 @@ def test_weekly_query_is_redacted_and_uses_official_work_days():
         "period_label": "2026-08-20 ~ 2026-08-26",
     }
     assert data["annual_totals"][0]["year"] == 2026
-    assert data["annual_totals"][0]["start_date"] == "2026-01-05"
+    assert data["annual_totals"][0]["start_date"] == "2026-01-01"
     assert data["annual_totals"][0]["application_count"] == 2
     assert data["annual_totals"][0]["promotion_count"] is None
     assert data["monthly_subtotals"][0]["month"] == 8
@@ -421,13 +564,12 @@ def test_weekly_export_has_fixed_three_sheets_and_summary_without_pii():
     assert case_values[4][3] == "2026-08-17 ~ 2026-08-23"
     assert case_values[4][5:7] == (12, 34)
     assert case_values[4][7:12] == (1, 1, None, None, None)
-    assert case_values[2][12:23] == (
+    assert case_values[2][12:19] == (
         "待補件", "洽談中", "訂單成立", "服務中", "訂單完成", "訂單取消",
-        "歷史訂單－未服務", "歷史訂單－服務中", "歷史訂單－服務完成", "歷史訂單－帳務完成",
         "無訂單／狀態缺值",
     )
-    assert case_values[4][12:23] == (None, None, None, 1, None, None, None, None, None, None, None)
-    assert case_values[5][22:24] == (1, 1)  # 缺狀態、審核不符合分開列示
+    assert case_values[4][12:19] == (None, None, None, 1, None, None, None)
+    assert case_values[5][18:20] == (1, 1)  # 缺狀態、審核不符合分開列示
     assert case_values[5][3] == "2026-08-24 ~ 2026-08-30"
     assert case_values[6][0] == "115年8月小計"
     assert case_values[6][5:8] == (17, 40, 2)

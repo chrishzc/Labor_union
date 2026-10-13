@@ -13,6 +13,28 @@ import {
 import type { OrderCoreStageProjectionQueryParams } from '../../../../../../../api/orders/order_core_stage_projection_client';
 import { OrderWorkbenchV2Page } from '../../../../../../../pages/OrderWorkbenchV2Page';
 import { hcmResubmissionClient } from '../../../../../../../api/case_import/hcm_resubmission_client';
+import { caseStatisticsQueryClient } from '../../../../../../../api/reports/weekly_operations_report_query_client';
+import { WorkbenchCaseStatistics } from '../../../../../../../components/WorkbenchCaseStatistics';
+import type { CaseStatisticsData } from '../../../../../../../api/reports/weekly_operations_report_schemas';
+
+function statisticsResult(year: number, quarter: number | null, month: number | null): CaseStatisticsData {
+  const startMonth = month ?? (quarter ? (quarter - 1) * 3 + 1 : 1);
+  const endMonth = month ?? (quarter ? quarter * 3 : 12);
+  const count = month ?? quarter ?? 12;
+  return {
+    year, quarter, month,
+    start_date: `${year}-${String(startMonth).padStart(2, '0')}-01`,
+    end_date: `${year}-${String(endMonth).padStart(2, '0')}-${new Date(year, endMonth, 0).getDate()}`,
+    timezone: 'Asia/Taipei', available_years: [2026, 2025, 2024], annual_application_count: 12,
+    generated_at: '2026-10-13T12:00:00+08:00',
+    summary: {
+      application_count: count, general_eligible_count: count, general_ineligible_count: 0,
+      subsidized_eligible_count: 0, subsidized_ineligible_count: 0,
+      order_status_counts: { '待補件': count, '洽談中': 0, '訂單成立': 0, '服務中': 0, '訂單完成': 0, '訂單取消': 0 },
+      unclassified_qualification_count: 0, other_status_count: 0,
+    },
+  };
+}
 
 const clientMocks = vi.hoisted(() => ({
   getCoreStageTimelines: vi.fn(),
@@ -206,6 +228,7 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
   });
 
   beforeEach(() => {
+    vi.spyOn(caseStatisticsQueryClient, 'query').mockReset().mockImplementation(async (year, quarter, month) => statisticsResult(year, quarter, month));
     vi.spyOn(hcmResubmissionClient, 'current').mockReset().mockResolvedValue({ items: [], next_cursor: null });
     clientMocks.getCoreStageTimelines.mockReset();
     clientMocks.loadSummaries.mockReset();
@@ -359,24 +382,8 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
     expect(clientMocks.getCoreStageTimelines.mock.calls.at(-1)![0]).not.toHaveProperty('substatus_code');
   });
 
-  it('在完整集合搜尋案件編號或姓名，且進行中／完成／取消都傳入正式 query', async () => {
+  it('只查詢進行中案件，統計期間只查 Reporting、不改變待辦搜尋', async () => {
     clientMocks.getCoreStageTimelines.mockImplementation(async (params: OrderCoreStageProjectionQueryParams) => {
-      if (params.workbench_scope === 'completed') {
-        return corePage([
-          timeline('CASE-HISTORY', null, 'completed', {
-            lifecycle: '歷史訂單－服務完成',
-            branch: 'historical',
-          }),
-        ]);
-      }
-      if (params.workbench_scope === 'cancelled') {
-        return corePage([
-          timeline('CASE-CANCELLED', null, 'completed', {
-            lifecycle: '訂單取消',
-            branch: 'cancelled',
-          }),
-        ]);
-      }
       return corePage([
         timeline('CASE-NORMAL', 'intake_validation', 'blocked', {
           blockers: [{ code: 'intake_blocked', message: '缺少必要資料' }],
@@ -406,27 +413,74 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
     fireEvent.change(searchInput, { target: { value: '' } });
     await waitFor(() => expect(screen.getByText('CASE-NORMAL')).toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole('button', { name: '完成訂單' }));
-    await waitFor(() => expect(clientMocks.getCoreStageTimelines).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        workbench_scope: 'completed',
-        stage: undefined,
-      }),
-      expect.any(Object),
-    ));
-    await waitFor(() => expect(screen.getByText('CASE-HISTORY')).toBeInTheDocument());
-    expect(screen.queryByRole('region', { name: '13 個核心訂單階段' })).not.toBeInTheDocument();
-    expect(screen.getByText('客戶端：客戶已結清')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '完成訂單' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '取消訂單' })).not.toBeInTheDocument();
+    const statistics = screen.getByRole('region', { name: '案件受理統計' });
+    expect(within(statistics).queryByText('UI 預覽・示意數據')).not.toBeInTheDocument();
+    expect(statistics.querySelectorAll('dt')).toHaveLength(10);
+    await waitFor(() => expect(statistics.querySelector('.workbench-statistics-total strong')!.textContent).toBe('12'));
+    const initialTotal = statistics.querySelector('.workbench-statistics-total strong')!.textContent;
+    fireEvent.change(within(statistics).getByLabelText('季度'), { target: { value: '2' } });
+    expect(within(statistics).getByText('2026/04/01－2026/06/30')).toBeInTheDocument();
+    await waitFor(() => expect(statistics.querySelector('.workbench-statistics-total strong')!.textContent).toBe('2'));
+    expect(statistics.querySelector('.workbench-statistics-total strong')!.textContent).not.toBe(initialTotal);
+    expect(statistics.querySelector('.workbench-statistics-annual strong')!.textContent).toBe('12');
+    expect(within(statistics).getByLabelText('月份').querySelectorAll('option')).toHaveLength(4);
+    fireEvent.change(within(statistics).getByLabelText('月份'), { target: { value: '5' } });
+    expect(within(statistics).getByText('2026/05/01－2026/05/31')).toBeInTheDocument();
+    fireEvent.change(within(statistics).getByLabelText('季度'), { target: { value: '4' } });
+    expect(within(statistics).getByLabelText('月份')).toHaveValue('0');
+    fireEvent.change(within(statistics).getByLabelText('年度'), { target: { value: '2025' } });
+    expect(within(statistics).getByText('2025/10/01－2025/12/31')).toBeInTheDocument();
+    await waitFor(() => expect(caseStatisticsQueryClient.query).toHaveBeenLastCalledWith(2025, 4, null, expect.any(Object)));
+    expect(statistics.querySelectorAll('dt')).toHaveLength(10);
+    expect(screen.getByText('CASE-NORMAL')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: '13 個核心訂單階段' })).toBeInTheDocument();
+    expect(clientMocks.getCoreStageTimelines).toHaveBeenCalledTimes(callsBeforeSearch);
+  });
 
-    fireEvent.click(screen.getByRole('button', { name: '取消訂單' }));
-    await waitFor(() => expect(clientMocks.getCoreStageTimelines).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        workbench_scope: 'cancelled',
-        stage: undefined,
-      }),
-      expect.any(Object),
-    ));
-    await waitFor(() => expect(screen.getByText('CASE-CANCELLED')).toBeInTheDocument());
+  it('統計讀取失敗顯示缺值，可重試；看板重新整理會更新統計', async () => {
+    clientMocks.getCoreStageTimelines.mockResolvedValue(corePage([]));
+    vi.mocked(caseStatisticsQueryClient.query).mockRejectedValueOnce(new Error('unavailable'));
+    render(<OrderWorkbenchV2Page />);
+    const retry = await screen.findByRole('button', { name: '統計讀取失敗・重試' });
+    const statistics = screen.getByRole('region', { name: '案件受理統計' });
+    expect(statistics.querySelector('.workbench-statistics-total strong')).toHaveTextContent('—');
+    expect(statistics.querySelectorAll('dt')).toHaveLength(10);
+    fireEvent.click(retry);
+    await waitFor(() => expect(statistics.querySelector('.workbench-statistics-total strong')).toHaveTextContent('12'));
+    const beforeRefresh = vi.mocked(caseStatisticsQueryClient.query).mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: '重新整理' }));
+    await waitFor(() => expect(caseStatisticsQueryClient.query).toHaveBeenCalledTimes(beforeRefresh + 1));
+  });
+
+  it('快速切換統計月份時取消舊請求，晚到回應不覆蓋新數據', async () => {
+    let resolveInitial!: (value: CaseStatisticsData) => void;
+    vi.mocked(caseStatisticsQueryClient.query).mockReturnValueOnce(new Promise((resolve) => { resolveInitial = resolve; }));
+    render(<WorkbenchCaseStatistics />);
+    await waitFor(() => expect(caseStatisticsQueryClient.query).toHaveBeenCalledTimes(1));
+    const signal = vi.mocked(caseStatisticsQueryClient.query).mock.calls[0][3]!.signal!;
+    fireEvent.change(screen.getByLabelText('月份'), { target: { value: '5' } });
+    const total = document.querySelector('.workbench-statistics-total strong')!;
+    await waitFor(() => expect(total).toHaveTextContent('5'));
+    expect(signal.aborted).toBe(true);
+    resolveInitial(statisticsResult(2026, null, null));
+    await waitFor(() => expect(total).toHaveTextContent('5'));
+    expect(screen.getByText('2026/05/01－2026/05/31')).toBeInTheDocument();
+  });
+
+  it('未分類的不符合案件與週報同樣顯示未知，不將缺值顯示成零', async () => {
+    const response = statisticsResult(2026, null, null);
+    vi.mocked(caseStatisticsQueryClient.query).mockResolvedValue({ ...response, summary: {
+      ...response.summary, general_eligible_count: 11, general_ineligible_count: null,
+      subsidized_ineligible_count: null, unclassified_qualification_count: 1,
+    } });
+    render(<WorkbenchCaseStatistics />);
+    await screen.findByText('部分資料待確認');
+    const cells = document.querySelectorAll('.workbench-statistics-grid.qualifications dd');
+    expect(cells[1]).toHaveTextContent('—');
+    expect(cells[3]).toHaveTextContent('—');
+    expect(document.querySelector('.workbench-statistics-total strong')).toHaveTextContent('12');
   });
 
   it('快速切換篩選時忽略已失效 request 的晚到 response', async () => {

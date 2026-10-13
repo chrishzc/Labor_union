@@ -111,7 +111,7 @@ export const WEEKLY_OPERATIONS_REPORT: WeeklyOperationsReport = {
   ],
   annual_totals: [{
     ...SUMMARY, year: 2026, month: null,
-    start_date: '2026-01-05', end_date: '2026-08-26',
+    start_date: '2026-01-01', end_date: '2026-08-26',
     promotion_count: null, inquiry_count: null, review_rejected_count: 1, order_status_counts: { ...STATUS_COUNTS },
   }],
   monthly_subtotals: [{

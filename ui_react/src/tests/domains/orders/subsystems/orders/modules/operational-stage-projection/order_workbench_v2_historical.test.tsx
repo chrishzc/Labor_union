@@ -79,17 +79,13 @@ describe('待辦看板依目前狀態整合歷史訂單', () => {
     mocks.summaries.mockReset();
     mocks.summaries.mockResolvedValue({ items: [], next_cursor: null, etag: 'd'.repeat(64) });
     mocks.core.mockImplementation(async (params: OrderCoreStageProjectionQueryParams) => {
-      if (params.workbench_scope === 'completed') return page([
-        historical('CASE-C', '歷史訂單－服務完成'), historical('CASE-D', '歷史訂單－帳務完成'),
-      ]);
-      if (params.workbench_scope === 'cancelled') return page([]);
       const result = page([historical('CASE-FUTURE', '歷史訂單－未服務')]);
       return { ...result, stage_counts: { ...counts(), confirmed_service_dates: 1 },
         substatus_counts: params.stage ? Object.fromEntries(substatusCodesForStage(params.stage).map((code) => [code, 1])) : {} };
     });
   });
 
-  it('歷史未服務留在進行中，正式 owner stage 可篩選；完成與取消不顯示13階段', async () => {
+  it('歷史未服務留在進行中，正式 owner stage 可篩選；看板不提供完成與取消分類', async () => {
     render(<OrderWorkbenchV2Page />);
     expect(await screen.findByText('CASE-FUTURE')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '歷史訂單' })).not.toBeInTheDocument();
@@ -98,25 +94,16 @@ describe('待辦看板依目前狀態整合歷史訂單', () => {
       expect.objectContaining({ workbench_scope: 'in_progress', stage: 'confirmed_service_dates' }), expect.any(Object),
     ));
     expect(await screen.findByText('CASE-FUTURE')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '完成訂單' }));
-    expect(await screen.findByText('CASE-C')).toBeInTheDocument();
-    expect(screen.getByText('CASE-D')).toBeInTheDocument();
-    expect(screen.queryByRole('region', { name: '13 個核心訂單階段' })).not.toBeInTheDocument();
-    expect(mocks.core).toHaveBeenLastCalledWith(expect.objectContaining({ workbench_scope: 'completed', stage: undefined }), expect.any(Object));
-    fireEvent.click(screen.getByRole('button', { name: '取消訂單' }));
-    await waitFor(() => expect(mocks.core).toHaveBeenLastCalledWith(expect.objectContaining({ workbench_scope: 'cancelled', stage: undefined }), expect.any(Object)));
-    expect(screen.queryByRole('region', { name: '13 個核心訂單階段' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '進行中訂單' }));
+    expect(screen.queryByRole('button', { name: '完成訂單' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '取消訂單' })).not.toBeInTheDocument();
+    expect(screen.getByRole('region', { name: '13 個核心訂單階段' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '全部進行中' }));
     await waitFor(() => expect(screen.getByRole('button', { name: '全部進行中' })).toHaveAttribute('aria-pressed', 'true'));
   });
 
-  it('拒絕伺服器把洽談中案件回傳到完成清單，避免錯誤分類冒充成功', async () => {
-    mocks.core.mockImplementation(async (params: OrderCoreStageProjectionQueryParams) => page(
-      params.workbench_scope === 'completed'
-        ? [{ ...historical('CASE-WRONG', '洽談中'), branch_type: 'normal' }] : [],
-    ));
+  it('拒絕伺服器把歷史已完成案件回傳到進行中清單，避免錯誤分類冒充成功', async () => {
+    mocks.core.mockResolvedValue(page([historical('CASE-WRONG', '歷史訂單－服務完成')]));
     render(<OrderWorkbenchV2Page />);
-    fireEvent.click(screen.getByRole('button', { name: '完成訂單' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('不符合所選分類');
     expect(screen.queryByText('CASE-WRONG')).not.toBeInTheDocument();
   });

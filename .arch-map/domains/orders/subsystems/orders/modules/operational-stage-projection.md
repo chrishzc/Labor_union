@@ -10,6 +10,7 @@
 ## Implementation
 - 進件條款缺漏提示直接列出 Orders current facts 缺少的開始日、天數、服務時間或樓層加給；待辦看板與案件處理不再以技術描述或階段標題取代欄位名稱。既有階段／完整性判定不變。
 - presentation: 待辦看板以卡片進入獨立案件工作畫面；六個工作群組各自依正式資料顯示狀態，十三階段只作紀錄與導覽，不構成線性操作前置。群組切換不推進後端階段，已開啟表單保留掛載。案件資料與案件異動分開呈現，不在工會操作頁顯示技術來源。正式 Orders 明細缺件時不得持續顯示 loading；歷史分支可並列呈現 immutable adoption evidence 的來源期間，但不冒充正式約定或實際日期。元件沿用原 `OrderWorkbenchV2Drawer` symbol，但不再使用 Drawer overlay；導覽為現有 route 內的本機狀態。
+- presentation: 待辦看板固定查詢 `in_progress`，頂端為單排案件受理統計，提供年度／季度／月份與固定四項資格、六項狀態欄位。透過 Reporting typed GET 讀取正式統計；loading／failure 顯示缺值並可手動重試，取消舊請求以避免 stale 數字。統計期間不改變下方待辦 query；看板重新整理與案件處理後重新讀取統計。
 - primary:
   - `subsystems/orders/stage_projection_query.py`
   - `subsystems/orders/core_stage_projection_query.py`
@@ -20,6 +21,7 @@
   - `ui_react/src/api/orders/order_government_subsidy_projection_client.ts`
   - `ui_react/src/adapters/orders/order_core_stage_projection_adapter.ts`
   - `ui_react/src/pages/OrderWorkbenchV2Page.tsx`
+  - `ui_react/src/components/WorkbenchCaseStatistics.tsx`
   - `ui_react/src/components/OrderWorkbenchV2Drawer.tsx`
   - `ui_react/src/components/OrderWorkbenchV2Drawer.css`
   - `ui_react/src/pages/OrderWorkbenchV2Page.css`
@@ -34,6 +36,7 @@
   - `api/schemas/order_government_subsidy_projection.py`
 
 ## Dependencies
+- outbound: `global/reporting/weekly-operations-report` — 讀取固定十欄、年度總數與曆年期間的案件受理統計；不在 Orders presentation 重算正式分類。
 - outbound: `scheduling/scheduling` — 讀取有效等待訂金鎖、正式服務期間與 service-time terms；有效鎖是推薦確認已跨入契約準備的直接投影證據。
 - outbound: `client-finance/client-finance` — 讀取定金與客戶 obligation projection。
 - outbound: `payroll/payroll` — 讀取月嫂薪資 obligation projection。

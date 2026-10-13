@@ -9,6 +9,8 @@ import { WeeklyOperationsReportError, mapWeeklyOperationsReportError } from './w
 import {
   WeeklyOperationsReportResponseSchema,
   WEEKLY_REPORT_SCHEMA_VERSION,
+  CaseStatisticsResponseSchema,
+  type CaseStatisticsData,
   type WeeklyOperationsReportData,
 } from './weekly_operations_report_schemas';
 
@@ -31,6 +33,37 @@ export function validateOperationsReportDateRange(startDate: string, endDate: st
     throw new WeeklyOperationsReportError('WEEKLY_REPORT_VALIDATION', '起日與迄日必須有效，且起日不得晚於迄日。');
   }
 }
+
+
+export const caseStatisticsQueryClient = {
+  async query(year: number, quarter: number | null, month: number | null, options?: WeeklyOperationsReportQueryOptions): Promise<CaseStatisticsData> {
+    const token = sessionClient.getToken();
+    if (!token) throw new WeeklyOperationsReportError('WEEKLY_REPORT_UNAUTHENTICATED', '請先登入。', false, 401);
+    const raw = await transport.get<unknown>('/api/v1/operations-reports/case-statistics', {
+      signal: options?.signal, timeoutMs: options?.timeoutMs, baseUrl: options?.baseUrl, token,
+      params: { year, quarter, month }, cache: 'no-store',
+    });
+    const decoded = CaseStatisticsResponseSchema.safeParse(raw);
+    if (!decoded.success) throw new ApiDecodeError('案件統計回應結構異常。', decoded.error.issues.map((issue) => ({ path: issue.path.join('.'), message: issue.message, code: issue.code })), raw);
+    const data = decoded.data.data;
+    const startMonth = month ?? (quarter ? (quarter - 1) * 3 + 1 : 1);
+    const endMonth = month ?? (quarter ? quarter * 3 : 12);
+    const expectedStart = `${year}-${String(startMonth).padStart(2, '0')}-01`;
+    const expectedEnd = `${year}-${String(endMonth).padStart(2, '0')}-${new Date(Date.UTC(year, endMonth, 0)).getUTCDate()}`;
+    if (data.year !== year || data.quarter !== quarter || data.month !== month
+      || data.start_date !== expectedStart || data.end_date !== expectedEnd) {
+      throw new WeeklyOperationsReportError('WEEKLY_REPORT_PERIOD_MISMATCH', '案件統計期間與篩選不一致。');
+    }
+    const summary = data.summary;
+    if (Object.values(summary.order_status_counts).reduce((sum, value) => sum + value, 0) + summary.other_status_count !== summary.application_count
+      || summary.general_eligible_count + (summary.general_ineligible_count ?? 0) + summary.subsidized_eligible_count
+        + (summary.subsidized_ineligible_count ?? 0) + summary.unclassified_qualification_count !== summary.application_count
+      || summary.application_count > data.annual_application_count) {
+      throw new WeeklyOperationsReportError('WEEKLY_REPORT_AGGREGATE_MISMATCH', '案件統計合計不一致。');
+    }
+    return data;
+  },
+};
 
 
 function assertWeeklyView(view: WeeklyOperationsReportData, startDate: string, endDate: string): WeeklyOperationsReportData {

@@ -46,6 +46,30 @@ class WeeklyReportCaseTotalsView(WeeklyReportSummaryView):
     order_status_counts: dict[str, Annotated[int, Field(ge=0)]]
 
 
+class CaseStatisticsSummaryView(_StrictModel):
+    application_count: int = Field(ge=0)
+    general_eligible_count: int = Field(ge=0)
+    general_ineligible_count: int | None = Field(ge=0)
+    subsidized_eligible_count: int = Field(ge=0)
+    subsidized_ineligible_count: int | None = Field(ge=0)
+    order_status_counts: dict[Literal["待補件", "洽談中", "訂單成立", "服務中", "訂單完成", "訂單取消"], Annotated[int, Field(ge=0)]]
+    unclassified_qualification_count: int = Field(ge=0)
+    other_status_count: int = Field(ge=0)
+
+
+class CaseStatisticsView(_StrictModel):
+    year: int = Field(ge=1, le=9998)
+    quarter: int | None = Field(ge=1, le=4)
+    month: int | None = Field(ge=1, le=12)
+    start_date: date
+    end_date: date
+    timezone: Literal["Asia/Taipei"]
+    available_years: list[Annotated[int, Field(ge=1, le=9998)]]
+    annual_application_count: int = Field(ge=0)
+    summary: CaseStatisticsSummaryView
+    generated_at: datetime
+
+
 class WeeklyOperationsSubsidyRowView(GovernmentSubsidyReportRowView):
     application_roc_year: int | None = Field(default=None, ge=1)
     claim_period_label: str

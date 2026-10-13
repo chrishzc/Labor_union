@@ -141,3 +141,32 @@ export const WeeklyOperationsReportResponseSchema = z.strictObject({
 
 export type WeeklyOperationsReport = z.infer<typeof WeeklyOperationsReportSchema>;
 export type WeeklyOperationsReportData = z.infer<typeof WeeklyOperationsReportResponseSchema>['data'];
+
+const CaseStatisticsSummarySchema = z.strictObject({
+  application_count: z.number().int().nonnegative(),
+  general_eligible_count: z.number().int().nonnegative(),
+  general_ineligible_count: z.number().int().nonnegative().nullable(),
+  subsidized_eligible_count: z.number().int().nonnegative(),
+  subsidized_ineligible_count: z.number().int().nonnegative().nullable(),
+  order_status_counts: z.strictObject({
+    '待補件': z.number().int().nonnegative(), '洽談中': z.number().int().nonnegative(),
+    '訂單成立': z.number().int().nonnegative(), '服務中': z.number().int().nonnegative(),
+    '訂單完成': z.number().int().nonnegative(), '訂單取消': z.number().int().nonnegative(),
+  }),
+  unclassified_qualification_count: z.number().int().nonnegative(),
+  other_status_count: z.number().int().nonnegative(),
+});
+
+export const CaseStatisticsResponseSchema = z.strictObject({
+  success: z.literal(true), message: z.string(), error: z.string().nullable(),
+  data: z.strictObject({
+    year: z.number().int().min(1).max(9998),
+    quarter: z.number().int().min(1).max(4).nullable(),
+    month: z.number().int().min(1).max(12).nullable(),
+    start_date: DateSchema, end_date: DateSchema, timezone: z.literal('Asia/Taipei'),
+    available_years: z.array(z.number().int().min(1).max(9998)),
+    annual_application_count: z.number().int().nonnegative(),
+    summary: CaseStatisticsSummarySchema, generated_at: z.string(),
+  }),
+});
+export type CaseStatisticsData = z.infer<typeof CaseStatisticsResponseSchema>['data'];

@@ -18,6 +18,7 @@ from api.dependencies.operations_reports import (
 from api.error_contracts import internal_query_error, typed_http_error
 from api.schemas.base import BaseResponse
 from api.schemas.operations_reports import (
+    CaseStatisticsView,
     SaveWeeklyReportMetricRequest,
     WeeklyOperationsReportView,
     WeeklyOperationsReportTotalsView,
@@ -32,6 +33,30 @@ from subsystems.reporting.weekly_report_metrics_service import WeeklyReportMetri
 
 router = APIRouter(prefix="/api/v1/operations-reports", tags=["Operations Reports"])
 XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+@router.get("/case-statistics", response_model=BaseResponse[CaseStatisticsView])
+def query_case_statistics(
+    request: Request,
+    year: int = Query(..., ge=1, le=9998),
+    quarter: int | None = Query(None, ge=1, le=4),
+    month: int | None = Query(None, ge=1, le=12),
+    principal: AdminPrincipal = Depends(require_admin),
+    query: WeeklyOperationsReportQuery = Depends(get_weekly_operations_report_query),
+):
+    del principal
+    try:
+        if set(request.query_params) - {"year", "quarter", "month"}:
+            raise ValueError("case_statistics_period_invalid")
+        report = query.query_case_statistics(year, quarter, month)
+        view = CaseStatisticsView.model_validate({**_slots_dict(report), "summary": _slots_dict(report.summary)})
+    except ValueError as exc:
+        if str(exc) == "case_statistics_period_invalid":
+            raise typed_http_error(400, "validation", "case_statistics_period_invalid", "年度、季度或月份篩選無效。", "case-statistics") from exc
+        raise internal_query_error("case_statistics_source_invalid", "案件統計來源資料不完整。", "case-statistics") from exc
+    except Exception as exc:
+        raise internal_query_error("case_statistics_query_failed", "案件統計查詢失敗。", "case-statistics") from exc
+    return BaseResponse(data=view, message="Case intake statistics")
 
 
 @router.get(

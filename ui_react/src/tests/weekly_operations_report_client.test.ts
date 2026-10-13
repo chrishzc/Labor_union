@@ -9,6 +9,7 @@ import { weeklyReportMetricsClient } from '../api/reports/weekly_report_metrics_
 import {
   weeklyOperationsReportQueryClient,
   validateOperationsReportDateRange,
+  caseStatisticsQueryClient,
 } from '../api/reports/weekly_operations_report_query_client';
 import {
   WEEKLY_OPERATIONS_REPORT,
@@ -32,6 +33,43 @@ describe('weekly operations report clients', () => {
   afterEach(() => {
     sessionClient.clearSession();
     vi.restoreAllMocks();
+  });
+
+  it('案件統計以 authenticated 單一 GET 傳入期間，保留真零值並拒絕錯誤總數／期間／歷史分欄', async () => {
+    const data = {
+      year: 2026, quarter: 2, month: 4, start_date: '2026-04-01', end_date: '2026-04-30',
+      timezone: 'Asia/Taipei', available_years: [2026, 2025], annual_application_count: 12,
+      generated_at: '2026-10-13T12:00:00+08:00',
+      summary: {
+        application_count: 4, general_eligible_count: 1, general_ineligible_count: 0,
+        subsidized_eligible_count: 3, subsidized_ineligible_count: 0,
+        order_status_counts: { '待補件': 0, '洽談中': 0, '訂單成立': 0, '服務中': 1, '訂單完成': 3, '訂單取消': 0 },
+        unclassified_qualification_count: 0, other_status_count: 0,
+      },
+    };
+    const response = (value: unknown) => jsonResponse({ success: true, message: 'ok', error: null, data: value });
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(response(data));
+    const result = await caseStatisticsQueryClient.query(2026, 2, 4);
+    expect(result.summary.general_ineligible_count).toBe(0);
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/operations-reports/case-statistics?year=2026&quarter=2&month=4');
+    expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get('Authorization')).toBe('Bearer weekly-report-token');
+    fetchMock.mockResolvedValueOnce(response({ ...data, summary: { ...data.summary, application_count: 5 } }));
+    await expect(caseStatisticsQueryClient.query(2026, 2, 4)).rejects.toThrow('案件統計合計不一致');
+    fetchMock.mockResolvedValueOnce(response({ ...data, month: 5 }));
+    await expect(caseStatisticsQueryClient.query(2026, 2, 4)).rejects.toThrow('案件統計期間與篩選不一致');
+    fetchMock.mockResolvedValueOnce(response({ ...data, summary: { ...data.summary, order_status_counts: { ...data.summary.order_status_counts, '歷史訂單－服務完成': 3 } } }));
+    await expect(caseStatisticsQueryClient.query(2026, 2, 4)).rejects.toThrow('案件統計回應結構異常');
+    fetchMock.mockResolvedValueOnce(response({ ...data, summary: {
+      ...data.summary, general_eligible_count: 0, general_ineligible_count: null,
+      subsidized_ineligible_count: null, unclassified_qualification_count: 1,
+    } }));
+    const unknown = await caseStatisticsQueryClient.query(2026, 2, 4);
+    expect(unknown.summary.general_ineligible_count).toBeNull();
+    expect(unknown.summary.subsidized_ineligible_count).toBeNull();
+    sessionClient.clearSession();
+    const requestCount = fetchMock.mock.calls.length;
+    await expect(caseStatisticsQueryClient.query(2026, 2, 4)).rejects.toThrow('請先登入');
+    expect(fetchMock).toHaveBeenCalledTimes(requestCount);
   });
 
   it('以 fresh bearer 執行單一週報 GET 並接受 strict 三分頁 view', async () => {

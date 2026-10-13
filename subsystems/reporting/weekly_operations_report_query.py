@@ -6,7 +6,7 @@ Description: 協調營運週報三分頁根事實、遮罩、彙總與資料品�
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Protocol
 
@@ -22,9 +22,15 @@ from subsystems.reporting.weekly_report_metrics_service import (
 
 
 SCHEMA_VERSION = "operations-report.v3"
-SOURCE_REVISION = "operations_report_query_v7"
+SOURCE_REVISION = "operations_report_query_v8"
 TIMEZONE = "Asia/Taipei"
-ORDER_STATUS_LABELS = tuple(status.value for status in OrderLifecycleStatus)
+_HISTORICAL_STATUS_GROUPS = {
+    OrderLifecycleStatus.HISTORICAL_UNSERVED.value: OrderLifecycleStatus.ESTABLISHED.value,
+    OrderLifecycleStatus.HISTORICAL_IN_SERVICE.value: OrderLifecycleStatus.IN_SERVICE.value,
+    OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED.value: OrderLifecycleStatus.COMPLETED.value,
+    OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED.value: OrderLifecycleStatus.COMPLETED.value,
+}
+ORDER_STATUS_LABELS = tuple(status.value for status in OrderLifecycleStatus if status.value not in _HISTORICAL_STATUS_GROUPS)
 MISSING_ORDER_STATUS = "無訂單／狀態缺值"
 GENERAL_CITIZEN = "一般市民"
 SUBSIDIZED_CITIZEN = "補助市民"
@@ -98,6 +104,8 @@ class SubsidyFacts:
 
 
 class WeeklyOperationsReportFacts(Protocol):
+    def list_case_years(self) -> list[int]: ...
+    def list_case_statistics_facts(self, start_date: date, end_date: date) -> list[WeeklyCaseFact]: ...
     def list_case_facts(self, start_date: date, end_date: date) -> list[WeeklyCaseFact]: ...
 
     def list_service_facts(self, start_date: date, end_date: date) -> list[WeeklyServiceFact]: ...
@@ -113,6 +121,32 @@ class DataQualityIssue:
     field: str
     row_count: int
     message: str
+
+
+@dataclass(frozen=True, slots=True)
+class CaseStatisticsSummary:
+    application_count: int
+    general_eligible_count: int
+    general_ineligible_count: int | None
+    subsidized_eligible_count: int
+    subsidized_ineligible_count: int | None
+    order_status_counts: dict[str, int]
+    unclassified_qualification_count: int
+    other_status_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class CaseStatistics:
+    year: int
+    quarter: int | None
+    month: int | None
+    start_date: date
+    end_date: date
+    timezone: str
+    available_years: tuple[int, ...]
+    annual_application_count: int
+    summary: CaseStatisticsSummary
+    generated_at: datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -267,10 +301,61 @@ def _service_status(order_status: str | None) -> str:
     return order_status
 
 
+def reporting_order_status(order_status: str | None) -> str:
+    """只合併報表分類，保留 Orders 原始生命週期根事實。"""
+    return _HISTORICAL_STATUS_GROUPS.get(order_status, order_status) or MISSING_ORDER_STATUS
+
+
+def _order_status_counts(rows: tuple[WeeklyCaseRow, ...]) -> dict[str, int]:
+    counts = dict.fromkeys((*ORDER_STATUS_LABELS, MISSING_ORDER_STATUS), 0)
+    for row in rows:
+        status = reporting_order_status(row.order_status)
+        counts[status] = counts.get(status, 0) + 1
+    return counts
+
+
 class WeeklyOperationsReportQuery:
     def __init__(self, facts: WeeklyOperationsReportFacts, now) -> None:
         self._facts = facts
         self._now = now
+
+    def query_case_statistics(self, year: int, quarter: int | None = None, month: int | None = None) -> CaseStatistics:
+        if not 1 <= year <= 9998 or (quarter is not None and not 1 <= quarter <= 4) or (month is not None and not 1 <= month <= 12):
+            raise ValueError("case_statistics_period_invalid")
+        if quarter is not None and month is not None and (month - 1) // 3 + 1 != quarter:
+            raise ValueError("case_statistics_period_invalid")
+        first_month = month or ((quarter - 1) * 3 + 1 if quarter else 1)
+        last_month = month or (quarter * 3 if quarter else 12)
+        start_date = date(year, first_month, 1)
+        end_date = date(year + (last_month == 12), last_month % 12 + 1, 1) - timedelta(days=1)
+        annual_start, annual_end = date(year, 1, 1), date(year, 12, 31)
+        annual_rows = tuple(
+            self._case_row(fact)
+            for fact in self._facts.list_case_statistics_facts(annual_start, annual_end)
+            if fact.created_at is not None and annual_start <= fact.created_at.date() <= annual_end
+        )
+        rows = tuple(row for row in annual_rows if start_date <= row.application_date <= end_date)
+        status_counts = _order_status_counts(rows)
+        qualifications = tuple(sum(getattr(row, field) for row in rows) for field in (
+            "general_eligible", "general_ineligible", "subsidized_eligible", "subsidized_ineligible",
+        ))
+        qualification_summary = self._summary(rows)
+        generated_at = self._now()
+        return CaseStatistics(
+            year=year, quarter=quarter, month=month, start_date=start_date, end_date=end_date,
+            timezone=TIMEZONE,
+            available_years=tuple(sorted({generated_at.year, year, *self._facts.list_case_years()}, reverse=True)),
+            annual_application_count=len(annual_rows),
+            summary=CaseStatisticsSummary(
+                application_count=len(rows),
+                general_eligible_count=qualifications[0], general_ineligible_count=qualification_summary.general_ineligible_count,
+                subsidized_eligible_count=qualifications[2], subsidized_ineligible_count=qualification_summary.subsidized_ineligible_count,
+                order_status_counts={status: status_counts[status] for status in ORDER_STATUS_LABELS},
+                unclassified_qualification_count=len(rows) - sum(qualifications),
+                other_status_count=len(rows) - sum(status_counts[status] for status in ORDER_STATUS_LABELS),
+            ),
+            generated_at=generated_at,
+        )
 
     def query(
         self,
@@ -320,11 +405,11 @@ class WeeklyOperationsReportQuery:
             ))
 
         # 年度累計另讀年初至迄日，不把自選期間的小計誤當成年度累計。
-        # 年初是該年第一個星期一；跨年週整週歸入星期一所屬年度。
+        # 案件年度按曆年，自 1 月 1 日起算；週指標仍使用實際星期一鍵。
         annual_totals = []
-        for year in dict.fromkeys(week.year for week in weeks):
-            annual_start = monday_of(date(year, 1, 7))
-            annual_end = min(end_date, sunday_of(date(year, 12, 31)))
+        for year in range(start_date.year, end_date.year + 1):
+            annual_start = date(year, 1, 1)
+            annual_end = min(end_date, date(year, 12, 31))
             annual_rows = tuple(
                 self._case_row(fact)
                 for fact in self._facts.list_case_facts(annual_start, annual_end)
@@ -378,10 +463,7 @@ class WeeklyOperationsReportQuery:
 
         # 訂單狀態逐一精確計數，不以「已成立」生命週期群組代替目前狀態。
         # 缺值獨立列示；來源若含額外狀態，保留原值，不悄悄漏算或猜分類。
-        status_counts = dict.fromkeys((*ORDER_STATUS_LABELS, MISSING_ORDER_STATUS), 0)
-        for row in rows:
-            status = row.order_status or MISSING_ORDER_STATUS
-            status_counts[status] = status_counts.get(status, 0) + 1
+        status_counts = _order_status_counts(rows)
 
         return WeeklyCaseTotals(
             **asdict(self._summary(rows)),
@@ -550,12 +632,19 @@ class WeeklyOperationsReportQuery:
     def _summary(
         rows: tuple[WeeklyCaseRow, ...],
     ) -> WeeklySummary:
+        general_ineligible = sum(row.general_ineligible for row in rows)
+        subsidized_ineligible = sum(row.subsidized_ineligible for row in rows)
+        unclassified_rejection = any(
+            row.review_result == "rejected_unpartitioned"
+            and row.identity_status not in {GENERAL_CITIZEN, SUBSIDIZED_CITIZEN}
+            for row in rows
+        )
         return WeeklySummary(
             application_count=len(rows),
             general_eligible_count=sum(row.general_eligible for row in rows),
-            general_ineligible_count=sum(row.general_ineligible for row in rows) if any(row.general_ineligible for row in rows) else None,
+            general_ineligible_count=general_ineligible if general_ineligible or not unclassified_rejection else None,
             subsidized_eligible_count=sum(row.subsidized_eligible for row in rows),
-            subsidized_ineligible_count=sum(row.subsidized_ineligible for row in rows) if any(row.subsidized_ineligible for row in rows) else None,
+            subsidized_ineligible_count=subsidized_ineligible if subsidized_ineligible or not unclassified_rejection else None,
             rejection_unpartitioned_count=sum(row.review_result == "rejected_unpartitioned" for row in rows),
             order_established_count=sum(row.order_established for row in rows),
             negotiating_count=sum(row.negotiating for row in rows),
