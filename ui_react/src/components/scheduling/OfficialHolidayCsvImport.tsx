@@ -123,10 +123,11 @@ export function OfficialHolidayCsvImport({ disabled = false }: OfficialHolidayCs
         <a href="https://data.gov.tw/dataset/14718" target="_blank" rel="noreferrer">
           政府資料開放平臺：辦公日曆表
         </a>
-        <a href="https://www.dgpa.gov.tw/informationlist?uid=41" target="_blank" rel="noreferrer">
-          行政院人事行政總處：辦公日曆表
-        </a>
       </div>
+
+      <p style={{ margin: 0 }}>
+        請下載一般版 CSV，不要使用檔名含「_Google行事曆專用」的檔案（含修正版）；該版本欄位不同，無法匯入。
+      </p>
 
       <label style={{ display: 'grid', gap: '6px', maxWidth: '520px' }}>
         選擇政府官方 CSV
