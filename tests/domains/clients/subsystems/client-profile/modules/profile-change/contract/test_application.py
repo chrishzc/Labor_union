@@ -135,7 +135,6 @@ class _Repository:
 def _application(repository):
     return ClientProfileApplication(
         lambda: _Uow(repository),
-        city_allowlist={"新竹市"},
     )
 
 
@@ -180,12 +179,35 @@ def test_admin_can_save_one_profile_field_when_every_other_profile_field_is_miss
         ("name", "gender", "phone", "city", "address", "residence_type", "delivery_type", "baby_info", "notes") if other != field)
 
 
-def test_profile_validation_is_closed_and_reuses_injected_city_allowlist():
-    assert validate_changes({"name": " 王小美 ", "city": "新竹市"}, city_allowlist={"新竹市"}) == {"city": "新竹市", "name": "王小美"}
+def test_profile_validation_is_closed_and_accepts_free_text_city():
+    assert validate_changes({"name": " 王小美 ", "city": " 東區 "}) == {"city": "東區", "name": "王小美"}
+    assert validate_changes({"city": "區" * 20}) == {"city": "區" * 20}
     with pytest.raises(ClientProfileValidationError):
-        validate_changes({"line_user_id": "other"}, city_allowlist={"新竹市"})
+        validate_changes({"line_user_id": "other"})
     with pytest.raises(ClientProfileValidationError):
-        validate_changes({"phone": "123"}, city_allowlist={"新竹市"})
+        validate_changes({"phone": "123"})
+    for value, code in (("   ", "profile_value_cannot_be_empty"),
+                        (None, "profile_value_must_be_text"),
+                        ("區" * 21, "profile_value_too_long")):
+        with pytest.raises(ClientProfileValidationError) as raised:
+            validate_changes({"city": value})
+        assert raised.value.code == code
+
+
+@pytest.mark.parametrize("city", ["東區", "新竹市香山區", "123"])
+def test_admin_can_preview_apply_and_read_back_free_text_city(city):
+    repository = _Repository()
+    application = _application(repository)
+    preview = application.preview_admin("CASE-001", {"city": city}, ExpectedVersion(0))
+    assert preview.requested == {"city": city}
+    assert repository.profile["city"] == "新竹市"
+    receipt = application.apply_admin(
+        "CASE-001", {"city": city}, ExpectedVersion(0), ActorContext("admin"),
+        "補正行政區", preview.preview_fingerprint,
+        IdempotencyKey("profile-city"), CorrelationId("profile-city"),
+    )
+    assert receipt.readback.values["city"] == city
+    assert application.query_admin("CASE-001").values["city"] == city
 
 
 def test_applicant_preview_is_zero_write_and_apply_creates_pending_request():

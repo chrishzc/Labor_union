@@ -37,7 +37,6 @@ from api.schemas.client_registry import (
 from api.schemas.order_terms import OrderTermsQueryView
 from domains.case_import.beclass_correction import BeClassCorrectionError
 from domains.case_import.beclass_correction import VALID_MULTI_BIRTH_COUNTS
-from domains.case_import.client_import_validation import VALID_CITIES
 from domains.clients.profile import (
     ClientProfileValidationError,
     VALID_DELIVERY_TYPES,
@@ -76,7 +75,6 @@ router = APIRouter(prefix="/api/v1/admin/registries/clients", tags=["Client Regi
 _FIELD_OPTIONS = {
     "client_profile": {
         "gender": ("女", "男"),
-        "city": tuple(VALID_CITIES),
         "residence_type": ("電梯大樓", "公寓", "透天", "其他"),
         "delivery_type": ("自然產", "剖腹產", "未定"),
     },

@@ -20,7 +20,7 @@ const detail = {
       name: { owner: 'client_profile', editable: true, reason: null, options: null },
       gender: { owner: 'client_profile', editable: true, reason: null, options: ['女', '男'] },
       phone: { owner: 'client_profile', editable: true, reason: null, options: null },
-      city: { owner: 'client_profile', editable: true, reason: null, options: ['台北市', '新竹市'] },
+      city: { owner: 'client_profile', editable: true, reason: null, options: null },
       address: { owner: 'client_profile', editable: true, reason: null, options: null },
       residence_type: { owner: 'client_profile', editable: true, reason: null, options: ['電梯大樓', '公寓', '透天', '其他'] },
       delivery_type: { owner: 'client_profile', editable: true, reason: null, options: ['自然產', '剖腹產', '未定'] },
@@ -186,6 +186,36 @@ describe('Client registry owner editing', () => {
     await screen.findByText('客戶主檔已儲存。');
   });
 
+  it('edits a district as free-text city and saves it through profile Preview/Apply', async () => {
+    mocks.query.mockResolvedValueOnce({
+      ...detail, client: { ...detail.client, values: { ...detail.client.values, city: '東區' } },
+    });
+    mocks.preview.mockResolvedValue({
+      owner: 'client_profile', aggregate_identity: 'CASE-001', current_version: 2,
+      before: { city: '東區' }, after: { city: '北區' }, preview_fingerprint: 'a'.repeat(64),
+    });
+    mocks.query.mockResolvedValue({
+      ...detail, client: { ...detail.client, version: 3, values: { ...detail.client.values, city: '北區' } },
+    });
+    render(<ClientRegistryPage />);
+    fireEvent.click(screen.getByRole('tab', { name: '名冊資料' }));
+    fireEvent.click(await screen.findByRole('button', { name: /CASE-001/ }));
+    const profile = (await screen.findByRole('heading', { name: '客戶主檔' })).closest('section') as HTMLElement;
+    const city = within(profile).getByRole('textbox', { name: '縣市' });
+    expect(city).toHaveValue('東區');
+    fireEvent.change(city, { target: { value: '北區' } });
+    fireEvent.click(within(profile).getByRole('button', { name: '預覽變更' }));
+    await waitFor(() => expect(mocks.preview).toHaveBeenCalledWith('CASE-001', 'profile', { city: '北區' }, 2));
+    fireEvent.click(within(profile).getByRole('button', { name: '確認儲存' }));
+    await waitFor(() => expect(mocks.apply).toHaveBeenCalledWith(
+      'CASE-001', 'profile', { city: '北區' }, 2, 'a'.repeat(64),
+      '後台客戶名冊主檔更新', expect.any(String),
+    ));
+    await screen.findByText('客戶主檔已儲存。');
+    const savedProfile = screen.getByRole('heading', { name: '客戶主檔' }).closest('section') as HTMLElement;
+    expect(within(savedProfile).getByRole('textbox', { name: '縣市' })).toHaveValue('北區');
+  });
+
   it('uses selects for enum fields and keeps free-text fields as inputs', async () => {
     render(<ClientRegistryPage />);
     fireEvent.click(screen.getByRole('tab', { name: '名冊資料' }));
@@ -193,7 +223,7 @@ describe('Client registry owner editing', () => {
 
     const profile = (await screen.findByRole('heading', { name: '客戶主檔' })).closest('section') as HTMLElement;
     expect(within(profile).getByRole('combobox', { name: '性別' })).toHaveValue('');
-    expect(within(profile).getByRole('combobox', { name: '縣市' })).toHaveValue('新竹市');
+    expect(within(profile).getByRole('textbox', { name: '縣市' })).toHaveValue('新竹市');
     expect(within(profile).getByRole('combobox', { name: '住宅型態' })).toBeInTheDocument();
     expect(within(profile).getByRole('combobox', { name: '生產方式' })).toBeInTheDocument();
     expect(within(profile).getByRole('textbox', { name: '手機' })).toBeInTheDocument();

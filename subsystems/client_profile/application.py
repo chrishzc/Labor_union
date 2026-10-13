@@ -53,9 +53,8 @@ class ClientProfileUnitOfWork(Protocol):
 
 
 class ClientProfileApplication:
-    def __init__(self, unit_of_work_factory: Callable[[], ClientProfileUnitOfWork], *, city_allowlist=()) -> None:
+    def __init__(self, unit_of_work_factory: Callable[[], ClientProfileUnitOfWork]) -> None:
         self._unit_of_work_factory = unit_of_work_factory
-        self._city_allowlist = frozenset(city_allowlist)
 
     def query_applicant(self, applicant_identity: str, client_id: int) -> ClientProfileView:
         with self._unit_of_work_factory() as unit_of_work:
@@ -78,7 +77,7 @@ class ClientProfileApplication:
         expected_version: ExpectedVersion,
     ) -> ClientProfilePreview:
         case_identity = _case_no(case_no)
-        normalized = validate_changes(changes, city_allowlist=self._city_allowlist)
+        normalized = validate_changes(changes)
         with self._unit_of_work_factory() as unit_of_work:
             profile = _require_profile(
                 unit_of_work.client_profiles.load_profile_by_case_no(case_identity)
@@ -97,7 +96,7 @@ class ClientProfileApplication:
         correlation_id: CorrelationId,
     ) -> ClientProfileAdminReceipt:
         case_identity = _case_no(case_no)
-        normalized = validate_changes(changes, city_allowlist=self._city_allowlist)
+        normalized = validate_changes(changes)
         clean_reason = reason.strip()
         if not clean_reason:
             raise ClientProfileValidationError("profile_reason_required")
@@ -186,7 +185,6 @@ class ClientProfileApplication:
     ) -> ClientProfilePreview:
         normalized = validate_changes(
             changes,
-            city_allowlist=self._city_allowlist,
             allowed_fields=CLIENT_PROFILE_APPLICANT_FIELDS,
         )
         with self._unit_of_work_factory() as unit_of_work:
@@ -207,7 +205,6 @@ class ClientProfileApplication:
     ) -> ClientProfileApplicantReceipt:
         normalized = validate_changes(
             changes,
-            city_allowlist=self._city_allowlist,
             allowed_fields=CLIENT_PROFILE_APPLICANT_FIELDS,
         )
         command_fingerprint = _command_fingerprint(

@@ -106,6 +106,23 @@ describe('ClientRosterPage', () => {
     }));
   });
 
+  it.each(['東區', '北區', '香山區', '竹北市'])('leaves an unrecognized district blank even when city is %s', async (city) => {
+    mocks.list.mockResolvedValue({ items: [{ ...item, city, district: null }], next_cursor: null, next_offset: null });
+    render(<ClientRosterPage />);
+    const row = await screen.findByRole('row', { name: '開啟案件 CASE-001 詳細資料' });
+    const headers = screen.getAllByRole('columnheader');
+    const districtIndex = headers.findIndex((header) => header.textContent === '行政區');
+    expect(districtIndex).toBeGreaterThanOrEqual(0);
+    expect(within(row).getAllByRole('cell')[districtIndex]).toBeEmptyDOMElement();
+  });
+
+  it.each(['東區', '北區', '香山區', '竹北市'])('displays the district supplied by the address projection: %s', async (district) => {
+    mocks.list.mockResolvedValue({ items: [{ ...item, city: '其他地區', district }], next_cursor: null, next_offset: null });
+    render(<ClientRosterPage />);
+    const row = await screen.findByRole('row', { name: '開啟案件 CASE-001 詳細資料' });
+    expect(within(row).getByRole('cell', { name: district })).toBeInTheDocument();
+  });
+
   it('opens every registry section in the system drawer when the order row is selected', async () => {
     render(<ClientRosterPage />);
     const orderRow = await screen.findByRole('row', { name: '開啟案件 CASE-001 詳細資料' });

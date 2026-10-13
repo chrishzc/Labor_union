@@ -242,6 +242,9 @@ def test_registry_http_composition_identifies_each_field_owner_and_editability()
         "owner": "client_profile", "editable": True, "reason": None, "options": None,
     }
     assert payload["client"]["field_capabilities"]["gender"]["options"] == ("女", "男")
+    assert payload["client"]["field_capabilities"]["city"] == {
+        "owner": "client_profile", "editable": True, "reason": None, "options": None,
+    }
     assert payload["beclass"]["field_capabilities"]["phone"]["owner"] == "client_beclass"
     assert payload["beclass"]["field_capabilities"]["multi_birth_count"]["options"] == ("單胞胎", "雙胞胎")
     assert payload["beclass"]["field_capabilities"]["multi_birth_count"]["editable"] is False
@@ -425,6 +428,35 @@ def test_mysql_registry_list_preserves_filters_and_batches_visible_page_dates():
     assert rows[1]["staff_obligation_dates"] == [
         {"obligation_identity": "staff-service", "obligation_kind": "service_pay", "due_date": None, "staff_id": 8, "staff_name": None},
     ]
+
+
+@pytest.mark.parametrize("city,address,expected", [
+    ("東區", "中央路1號", None),
+    ("東區", None, None),
+    ("北區", "中央路1號", None),
+    ("香山區", "", None),
+    ("竹北市", "中央路1號", None),
+    ("東區", "新竹市中央路1號", None),
+    ("北區", "新竹市東區中央路1號", "東區"),
+    ("東區", "新竹市北區中央路1號", "北區"),
+    ("東區", "新竹市香山區中央路1號", "香山區"),
+    (None, "新竹縣竹北市中央路1號", "竹北市"),
+    ("東區", "苗栗縣竹南鎮中央路1號", "竹南鎮"),
+])
+def test_registry_district_comes_only_from_address(city, address, expected):
+    row = {
+        "client_id": 7, "case_no": "115000001", "name": "合成測試客戶",
+        "city": city, "address": address,
+    }
+    connection = _SqlConnection([(row,), (), (), ()])
+    response = list_client_registry(
+        query=None, multi_birth_count=None, order_status=None, requires_cooking=None,
+        sort_by="case_no", sort_order="asc", limit=25, after=None, offset=0,
+        principal=AdminPrincipal(9, "registry-reader", "Registry Reader", "system_admin"),
+        application=ClientRegistryQueryApplication(MySqlClientRegistryQueryRepository(connection)),
+    )
+    assert response.data.items[0].city == city
+    assert response.data.items[0].district == expected
 
 
 def test_mysql_registry_list_keeps_null_distinct_from_explicit_cooking_filter():

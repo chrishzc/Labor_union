@@ -7,7 +7,6 @@ from domains.line.identities import LineUserId
 from infrastructure.line.liff_token_verifier import LineLoginTokenVerifier
 from infrastructure.mysql.line_identity_management_repository import MySqlLineIdentityManagementRepository
 from infrastructure.mysql.mysql_adapter import get_connection
-from domains.case_import.client_import_validation import VALID_CITIES
 from subsystems.line.identity_management_contracts import LineIdentityCurrentFactQuery
 from subsystems.client_profile.application import ClientProfileApplication
 from subsystems.client_profile.mysql_unit_of_work import open_client_profile_unit_of_work
@@ -18,9 +17,6 @@ from subsystems.client_profile.contracts import ClientProfileBindingError
 def get_client_profile_application() -> ClientProfileApplication:
     return ClientProfileApplication(
         open_client_profile_unit_of_work,
-        # Composition reuses the current intake allowlist without creating a
-        # Client -> Case Import dependency inside either owning subsystem.
-        city_allowlist=VALID_CITIES,
     )
 
 

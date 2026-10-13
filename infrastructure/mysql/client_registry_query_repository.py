@@ -120,7 +120,7 @@ class MySqlClientRegistryQueryRepository:
             **row,
             "imported_virtual_accounts": imported_virtual_accounts[str(row["case_no"])],
             "built_in_virtual_account": build_client_virtual_account(row.get("case_no")),
-            "district": _client_district(row.get("city"), row.get("address")),
+            "district": _client_district(row.get("address")),
             **obligation_dates[str(row["case_no"])],
             **_claim_application_month(row),
         } for row in rows[:limit])
@@ -450,8 +450,8 @@ def _registry_filters(
     return where, parameters
 
 
-def _client_district(city: object, address: object) -> str | None:
-    location = f"{city or ''}{address or ''}"
+def _client_district(address: object) -> str | None:
+    location = str(address or "")
     return next((district for district in _SUPPORTED_DISTRICTS if district in location), None)
 
 

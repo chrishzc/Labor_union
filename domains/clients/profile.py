@@ -34,7 +34,6 @@ class ClientProfileValidationError(ValueError):
 def validate_changes(
     changes: Mapping[str, object],
     *,
-    city_allowlist: Collection[str] | None = None,
     allowed_fields: Collection[str] | None = None,
 ) -> dict[str, str]:
     if not isinstance(changes, Mapping) or not changes:
@@ -61,8 +60,6 @@ def validate_changes(
             raise ClientProfileValidationError("profile_gender_invalid", field)
         if field == "phone" and not _PHONE.fullmatch(value):
             raise ClientProfileValidationError("profile_phone_invalid", field)
-        if field == "city" and (city_allowlist is None or value not in city_allowlist):
-            raise ClientProfileValidationError("profile_city_invalid", field)
         if field == "residence_type" and value not in VALID_RESIDENCE_TYPES:
             raise ClientProfileValidationError("profile_residence_type_invalid", field)
         if field == "delivery_type" and value not in VALID_DELIVERY_TYPES:
