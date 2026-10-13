@@ -110,6 +110,18 @@ describe('candidateContactPoolClient', () => {
     );
   });
 
+  it('previews transient dates with a zero-write POST containing only dates', async () => {
+    const post = vi.spyOn(transport, 'post').mockResolvedValue(successEnvelope({
+      case_no: 'CASE-POOL-001', candidate_id: 17, required_service_days: 2, projected_service_days: 2,
+      date_basis: 'draft', warnings: [], rows: [],
+    }));
+    await candidateContactPoolClient.previewWeeklyService('CASE-POOL-001', 17, { serviceDates: ['2026-11-05', '2026-11-07'] });
+    expect(post).toHaveBeenCalledWith(
+      '/api/v1/orders/CASE-POOL-001/candidate-contact-pool/candidates/17/weekly-service/preview',
+      { service_dates: ['2026-11-05', '2026-11-07'] }, { token: 'volatile-token', signal: undefined },
+    );
+  });
+
   it('rejects case identity drift and nested extra fields', async () => {
     vi.spyOn(transport, 'get').mockResolvedValueOnce(successEnvelope({
       ...fixture,

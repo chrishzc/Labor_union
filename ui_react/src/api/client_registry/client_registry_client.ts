@@ -7,6 +7,8 @@ import {
   type BeClassChanges, type ClientProfileChanges, type ClientRegistryChangeHistoryItem, type ClientRegistryDetail,
   type ClientRegistryPage, type ClientRegistrySortBy, type ClientRegistrySortOrder,
   type RegistryMutationPreview, type RegistryMutationReceipt,
+  ClientRegistryFilterOptionsResponseSchema,
+  type ClientRegistryFilterField, type ClientRegistryFilterOptions, type ClientRegistryColumnFilter,
 } from './client_registry_schemas';
 
 type Owner = 'profile' | 'beclass';
@@ -20,6 +22,7 @@ export interface ClientRegistryListQuery {
   limit?: number;
   after?: string;
   offset?: number;
+  columnFilters?: ClientRegistryColumnFilter[];
 }
 export interface ClientRegistryExportArtifact { blob: Blob; filename: string }
 const token = () => {
@@ -42,12 +45,13 @@ const exportParams = (request: ClientRegistryListQuery) => {
   if (request.requiresCooking !== undefined) params.set('requires_cooking', String(request.requiresCooking));
   if (request.sortBy) params.set('sort_by', request.sortBy);
   if (request.sortOrder) params.set('sort_order', request.sortOrder);
+  if (request.columnFilters?.length) params.set('column_filters', JSON.stringify(request.columnFilters));
   return params;
 };
-const exportFilename = (value: string | null) => {
+const exportFilename = (value: string | null, fallback = 'client-order-accounting.xlsx') => {
   const match = value?.match(/filename="?([^";]+)"?/i);
   const candidate = match?.[1]?.trim();
-  return candidate?.toLowerCase().endsWith('.xlsx') ? candidate : 'client-order-accounting.xlsx';
+  return candidate?.toLowerCase().endsWith('.xlsx') ? candidate : fallback;
 };
 
 export const clientRegistryClient = {
@@ -64,9 +68,16 @@ export const clientRegistryClient = {
         limit: request.limit ?? 100,
         after: request.after?.trim() || undefined,
         offset: request.offset,
+        ...(request.columnFilters?.length ? { column_filters: JSON.stringify(request.columnFilters) } : {}),
       },
     });
     return decode(ClientRegistryPageResponseSchema, raw, '客戶名冊回應結構異常');
+  },
+  async filterOptions(field: ClientRegistryFilterField, search = '', offset = 0): Promise<ClientRegistryFilterOptions> {
+    const raw = await transport.get('/api/v1/admin/registries/clients/filter-options', {
+      token: token(), params: { field, search: search.trim() || undefined, limit: 100, offset },
+    });
+    return decode(ClientRegistryFilterOptionsResponseSchema, raw, '篩選選項回應結構異常');
   },
   async query(caseNo: string): Promise<ClientRegistryDetail> {
     const raw = await transport.get(`/api/v1/admin/registries/clients/${encodeURIComponent(caseNo)}`, { token: token() });
@@ -90,6 +101,20 @@ export const clientRegistryClient = {
     const blob = await response.blob();
     if (blob.size === 0) throw new Error('訂單帳務匯出檔案為空。');
     return { blob, filename: exportFilename(response.headers.get('content-disposition')) };
+  },
+  async downloadCaseInspection(request: ClientRegistryListQuery = {}): Promise<ClientRegistryExportArtifact> {
+    const params = exportParams(request);
+    const suffix = params.size ? `?${params.toString()}` : '';
+    const response = await fetch(`/api/v1/admin/registries/clients/export/case-inspection${suffix}`, {
+      method: 'GET', headers: { Authorization: `Bearer ${token()}` },
+    });
+    if (!response.ok) throw new Error(`案件資料檢查匯出失敗（HTTP ${response.status}）。`);
+    if (!response.headers.get('content-type')?.toLowerCase().includes('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')) {
+      throw new Error('案件資料檢查匯出回應不是 Excel 檔案。');
+    }
+    const blob = await response.blob();
+    if (blob.size === 0) throw new Error('案件資料檢查匯出檔案為空。');
+    return { blob, filename: exportFilename(response.headers.get('content-disposition'), 'client-case-inspection.xlsx') };
   },
   async preview(caseNo: string, owner: Owner, changes: ClientProfileChanges | BeClassChanges, expectedVersion: number): Promise<RegistryMutationPreview> {
     const raw = await transport.post(`/api/v1/admin/registries/clients/${encodeURIComponent(caseNo)}/${owner}/preview`, { changes, expected_version: expectedVersion }, { token: token() });

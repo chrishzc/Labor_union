@@ -8,7 +8,7 @@ import { LegacyVirtualAccountImport } from '../components/LegacyVirtualAccountIm
 import { ClientRosterPage } from './ClientRosterPage';
 import './ClientRegistryPage.css';
 
-const profileLabels: Record<string, string> = { name: '姓名', gender: '性別', phone: '手機', city: '縣市', address: '地址', due_month: '預產期／預計服務開始月份', reject_reason: '不符合原因', residence_type: '住宅型態', delivery_type: '生產方式', baby_info: '寶寶資訊', notes: '行政註記' };
+const profileLabels: Record<string, string> = { name: '姓名', gender: '性別', phone: '手機', city: '縣市', address: '地址', due_month: '預產期／預計服務開始月份', reject_reason: '不符合原因', residence_type: '住宅型態', delivery_type: '生產方式', baby_info: '寶寶資訊', notes: '行政註記', service_type: '服務方式' };
 const beclassLabels: Record<string, string> = { name: '報名姓名', email: 'Email', phone: '手機', tel: '市話', ext: '分機', city: '縣市', zip_code: '郵遞區號', address: '報名地址', admin_notes: '報名註記', multi_birth_count: '胎數（單胞胎／雙胞胎）' };
 const orderInformationLabels = {
   dietary_habits: '飲食習慣與中藥接受度',

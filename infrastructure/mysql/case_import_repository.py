@@ -25,6 +25,7 @@ from domains.case_import.case_import import (
     CaseImportIssue,
     HcmIdentityFacts,
     ProvisionalRegistrationFacts,
+    imported_order_intake_terms,
 )
 from domains.case_import.order_information import project_order_information
 from infrastructure.mysql.case_architecture_bootstrap_repository import (
@@ -377,10 +378,11 @@ def _insert_client(cursor, candidate):
 def _insert_order(cursor, candidate, client_id) -> None:
     order = candidate.order
     if order is None:
+        terms = imported_order_intake_terms(candidate)
         cursor.execute(
-            "INSERT INTO orders (case_no,client_id,status,lifecycle_version,service_days,service_hours_per_day) "
-            "VALUES (%s,%s,'待補件',0,NULL,NULL)",
-            (candidate.case_no, client_id),
+            "INSERT INTO orders (case_no,client_id,status,lifecycle_version,start_date,service_days,service_hours_per_day) "
+            "VALUES (%s,%s,'待補件',0,%s,%s,NULL)",
+            (candidate.case_no, client_id, terms.planned_start_date, terms.service_days),
         )
         if int(cursor.rowcount) != 1:
             raise RuntimeError("case_import_partial_order_insert_failed")

@@ -7,7 +7,15 @@ from typing import Any
 
 _ORDER_CALENDAR_DETAIL_SQL = """
 SELECT o.case_no,
-       c.service_type AS service_mode
+       c.service_type AS service_mode,
+       COALESCE(
+           (SELECT JSON_UNQUOTE(JSON_EXTRACT(e.source_snapshot, '$.client_attributes.service_type'))
+              FROM case_import_events e
+             WHERE e.case_no=o.case_no
+               AND JSON_TYPE(JSON_EXTRACT(e.source_snapshot, '$.client_attributes.service_type'))='STRING'
+             ORDER BY e.id LIMIT 1),
+           c.service_type
+       ) AS original_service_type
   FROM orders o
   JOIN clients c ON c.id = o.client_id
  WHERE o.case_no = %s

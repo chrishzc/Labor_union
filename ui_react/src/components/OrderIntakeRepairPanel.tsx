@@ -11,6 +11,7 @@ import {
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import { loadCurrentHcmReviewsForCases, type HcmCurrentReview } from '../api/case_import/hcm_resubmission_client';
 import { ApiHttpError } from '../api/shared/typed_errors';
+import { HcmIntakeProfileRepairPanel, canRepairHcmProfileField } from './HcmIntakeProfileRepairPanel';
 import {
   orderMutationFlowStore,
   type IntakeRepairCommand,
@@ -75,6 +76,7 @@ export function OrderIntakeRepairPanel({
   const [completion, setCompletion] = useState<IntakeCompletionPreview | null>(null);
   const [sourceReview, setSourceReview] = useState<HcmCurrentReview | null>(null);
   const [sourceReviewError, setSourceReviewError] = useState(false);
+  const [profileBusy, setProfileBusy] = useState(false);
   const [clientName, setClientName] = useState('');
   const [startDate, setStartDate] = useState('');
   const [serviceDays, setServiceDays] = useState('');
@@ -106,7 +108,7 @@ export function OrderIntakeRepairPanel({
     (flow): flow is IntakeRepairFlowState => flow !== undefined,
   );
   const protectedFlow = flows.find((flow) => flow.status !== 'observed');
-  const controlsLocked = operation !== null || protectedFlow !== undefined;
+  const controlsLocked = operation !== null || protectedFlow !== undefined || profileBusy;
   const visibleError = protectedFlow?.error ?? error;
 
   const refresh = useCallback(async (
@@ -468,6 +470,8 @@ export function OrderIntakeRepairPanel({
   ) ?? [];
   const missingName = completion?.missing_fields.includes('client_name') ?? false;
   const shouldRender = loading
+    || sourceReview !== null
+    || sourceReviewError
     || visibleError !== null
     || completion === null
     || completion.missing_fields.length > 0
@@ -485,7 +489,7 @@ export function OrderIntakeRepairPanel({
     >
       <header>
         <strong style={{ color: '#9a3412' }}>
-          {completion && completion.missing_fields.length === 0 ? '服務資料' : '缺件'}
+          {completion && completion.missing_fields.length === 0 && !sourceReview ? '服務資料' : '缺件'}
         </strong>
         <div style={{ color: '#74593f', fontSize: '0.82rem', marginTop: '3px' }}>
           系統會依案件目前進度確認可補資料；已進入後續作業的案件，不一定能從進件頁修改。
@@ -501,8 +505,24 @@ export function OrderIntakeRepairPanel({
           {sourceReview && (
             <div role="status" style={{ color: '#9a3412' }}>
               <strong>原始進件欄位待修正：{sourceReview.fields.join('、')}</strong>
-              <p style={{ margin: '4px 0 0' }}>可至客戶名冊修正可編輯欄位；其他沒有編輯入口的來源欄位，可至異常審核核對並逐筆確認略過。</p>
+              <p style={{ margin: '4px 0 0' }}>可編輯欄位可在下方直接修正，儲存後會重新確認哪些問題已解除。</p>
             </div>
+          )}
+          {sourceReview && <HcmIntakeProfileRepairPanel
+            key={`${caseNo}:${sourceReview.review_identity}`}
+            caseNo={caseNo}
+            fields={sourceReview.fields.filter((field) => !(field === '姓名' && repairAllowed && missingName))}
+            disabled={operation !== null || protectedFlow !== undefined}
+            onBusyChange={setProfileBusy}
+            onSaved={async () => {
+              await refresh();
+              setNotice('缺件欄位已儲存並重新讀取目前問題。');
+              await onChanged?.();
+            }}
+          />}
+          {sourceReview?.fields.some((field) => !canRepairHcmProfileField(field)
+            && !['預計服務日期', '希望服務天數'].includes(field)) && (
+            <p>服務時間請使用本案的訂單條件修正；其他沒有編輯入口的來源欄位，可至異常審核核對並逐筆確認略過。</p>
           )}
           {sourceReviewError && <div role="status">原始進件欄位問題讀取失敗，請重新讀取案件。</div>}
           <div style={{ fontSize: '0.84rem', color: '#57423b' }}>
@@ -572,14 +592,14 @@ export function OrderIntakeRepairPanel({
 
           {termsRepairAllowed && (
             <div style={{ borderTop: '1px solid #fed7aa', paddingTop: '10px', display: 'grid', gap: '6px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                <label style={{ display: 'grid', gap: '4px', fontSize: '0.82rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '8px', minWidth: 0 }}>
+                <label style={{ display: 'grid', gap: '4px', fontSize: '0.82rem', minWidth: 0 }}>
                   服務開始日
-                  <input type="date" value={startDate} disabled={controlsLocked} onChange={(event) => { setStartDate(event.target.value); setTermsPreview(null); }} />
+                  <input type="date" value={startDate} style={{ width: '100%', minWidth: 0, boxSizing: 'border-box' }} disabled={controlsLocked} onChange={(event) => { setStartDate(event.target.value); setTermsPreview(null); }} />
                 </label>
-                <label style={{ display: 'grid', gap: '4px', fontSize: '0.82rem' }}>
+                <label style={{ display: 'grid', gap: '4px', fontSize: '0.82rem', minWidth: 0 }}>
                   服務天數
-                  <input type="number" min="1" value={serviceDays} disabled={controlsLocked} onChange={(event) => { setServiceDays(event.target.value); setTermsPreview(null); }} />
+                  <input type="number" min="1" value={serviceDays} style={{ width: '100%', minWidth: 0, boxSizing: 'border-box' }} disabled={controlsLocked} onChange={(event) => { setServiceDays(event.target.value); setTermsPreview(null); }} />
                 </label>
               </div>
               <button type="button" className="btn-secondary-action" disabled={controlsLocked || !startDate || Number(serviceDays) <= 0} onClick={() => void previewTerms()}>

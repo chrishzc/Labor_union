@@ -18,6 +18,7 @@ from api.dependencies.client_profile import get_client_profile_application
 from api.dependencies.client_registry import (
     get_beclass_correction_workflow,
     get_client_registry_order_accounting_export_application,
+    get_client_registry_case_inspection_export_application,
     get_client_registry_query_application,
 )
 from api.dependencies.order_terms import get_order_terms_application
@@ -31,6 +32,7 @@ from api.schemas.client_registry import (
     ClientProfileAdminPreviewRequest,
     ClientRegistryDetailView,
     ClientRegistryPageView,
+    ClientRegistryFilterOptionsView,
     RegistryMutationPreviewView,
     RegistryMutationReceiptView,
 )
@@ -63,11 +65,13 @@ from subsystems.client_profile.registry_query import (
     ClientRegistryNotFound,
     ClientRegistryQueryApplication,
 )
+from subsystems.client_profile.registry_filters import RegistryFilterField, parse_column_filters
 from subsystems.client_profile.order_accounting_export import (
     ClientRegistryOrderAccountingExportApplication,
     OrderAccountingExportQuery,
     XLSX_MEDIA_TYPE,
 )
+from subsystems.client_profile.case_inspection_export import ClientRegistryCaseInspectionExportApplication
 
 
 router = APIRouter(prefix="/api/v1/admin/registries/clients", tags=["Client Registry"])
@@ -77,6 +81,7 @@ _FIELD_OPTIONS = {
         "gender": ("女", "男"),
         "residence_type": ("電梯大樓", "公寓", "透天", "其他"),
         "delivery_type": ("自然產", "剖腹產", "未定"),
+        "service_type": ("連續服務", "休周六", "休周日", "週休2日"),
     },
     "client_beclass": {
         "multi_birth_count": ("單胞胎", "雙胞胎"),
@@ -101,6 +106,7 @@ def list_client_registry(
     offset: int = Query(default=0, ge=0),
     principal: AdminPrincipal = Depends(require_registry_reader),
     application: ClientRegistryQueryApplication = Depends(get_client_registry_query_application),
+    column_filters: Annotated[str | None, Query(max_length=16000)] = None,
 ):
     del principal
     try:
@@ -114,6 +120,7 @@ def list_client_registry(
             limit=limit,
             after=after,
             offset=offset,
+            column_filters=parse_column_filters(column_filters),
         )
         return BaseResponse(
             data=ClientRegistryPageView.model_validate(result, from_attributes=True),
@@ -127,6 +134,26 @@ def list_client_registry(
             "客戶名冊查詢失敗。",
             uuid4().hex,
         ) from error
+
+
+@router.get("/filter-options", response_model=BaseResponse[ClientRegistryFilterOptionsView])
+def client_registry_filter_options(
+    field: RegistryFilterField,
+    search: Annotated[str | None, Query(max_length=100)] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    principal: AdminPrincipal = Depends(require_registry_reader),
+    application: ClientRegistryQueryApplication = Depends(get_client_registry_query_application),
+):
+    del principal
+    correlation = uuid4().hex
+    try:
+        result = application.filter_options(field=field, search=search, limit=limit, offset=offset)
+        return BaseResponse(data=ClientRegistryFilterOptionsView.model_validate(result, from_attributes=True), message="成功取得篩選選項")
+    except (ValueError, ClientRegistryContractError) as error:
+        raise _registry_error(error, correlation) from error
+    except (OperationalError, ProgrammingError) as error:
+        raise internal_query_error("client_registry_query_internal_error", "篩選選項載入失敗。", correlation) from error
 
 
 @router.get(
@@ -145,6 +172,7 @@ def export_client_registry_order_accounting(
     application: ClientRegistryOrderAccountingExportApplication = Depends(
         get_client_registry_order_accounting_export_application
     ),
+    column_filters: Annotated[str | None, Query(max_length=16000)] = None,
 ):
     del principal
     correlation = uuid4().hex
@@ -156,6 +184,7 @@ def export_client_registry_order_accounting(
             requires_cooking=requires_cooking,
             sort_by=sort_by,
             sort_order=sort_order,
+            column_filters=parse_column_filters(column_filters),
         ))
         return Response(
             content=content,
@@ -175,6 +204,42 @@ def export_client_registry_order_accounting(
             "client_registry_order_accounting_export_internal_error",
             "訂單帳務匯出失敗。",
             correlation,
+        ) from error
+
+
+@router.get(
+    "/export/case-inspection",
+    response_class=Response,
+    responses={200: {"content": {XLSX_MEDIA_TYPE: {}}}},
+)
+def export_client_registry_case_inspection(
+    query: str | None = Query(default=None, max_length=100),
+    multi_birth_count: Literal["單胞胎", "雙胞胎"] | None = Query(default=None),
+    order_status: str | None = Query(default=None, min_length=1, max_length=50),
+    requires_cooking: bool | None = Query(default=None),
+    sort_by: Literal["case_no", "customer_name", "service_days", "expected_start_date"] | None = Query(default=None),
+    sort_order: Literal["asc", "desc"] | None = Query(default=None),
+    principal: AdminPrincipal = Depends(require_registry_reader),
+    application: ClientRegistryCaseInspectionExportApplication = Depends(get_client_registry_case_inspection_export_application),
+    column_filters: Annotated[str | None, Query(max_length=16000)] = None,
+):
+    del principal
+    correlation = uuid4().hex
+    try:
+        content = application.export(OrderAccountingExportQuery(
+            query=query, multi_birth_count=multi_birth_count, order_status=order_status,
+            requires_cooking=requires_cooking, sort_by=sort_by, sort_order=sort_order,
+            column_filters=parse_column_filters(column_filters),
+        ))
+        return Response(content=content, media_type=XLSX_MEDIA_TYPE, headers={
+            "Content-Disposition": 'attachment; filename="client-case-inspection.xlsx"',
+            "Cache-Control": "no-store",
+        })
+    except ValueError as error:
+        raise _registry_error(error, correlation) from error
+    except Exception as error:
+        raise internal_query_error(
+            "client_registry_case_inspection_export_internal_error", "案件資料檢查匯出失敗。", correlation,
         ) from error
 
 

@@ -361,6 +361,7 @@ def get_order_calendar_detail(
             data=OrderCalendarDetailView(
                 case_no=detail.case_no,
                 service_mode=detail.service_mode,
+                original_service_type=detail.original_service_type,
             ),
             message="成功取得訂單固定排休條款",
         )

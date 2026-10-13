@@ -18,6 +18,26 @@ def test_admin_due_date_and_reject_reason_validation_do_not_expand_applicant_fie
     for field in ('due_month', 'reject_reason'):
         with pytest.raises(ClientProfileValidationError, match='profile_field_not_allowed'):
             validate_changes({field: '2026-10-15'}, allowed_fields=CLIENT_PROFILE_APPLICANT_FIELDS)
+
+
+def test_admin_service_type_repair_uses_existing_profile_writer():
+    repository = _Repository()
+    repository.profile.update(phone=None, service_type=None)
+    application = _application(repository)
+    changes = {'phone': '0912345678', 'service_type': '連續服務'}
+    preview = application.preview_admin('CASE-001', changes, ExpectedVersion(0))
+    assert preview.requested == {'phone': '0912345678', 'service_type': '連續服務'}
+    receipt = application.apply_admin('CASE-001', changes, ExpectedVersion(0), ActorContext('admin:9'),
+                                      '修正進件欄位', preview.preview_fingerprint, IdempotencyKey('hcm-profile-repair'),
+                                      CorrelationId('hcm-profile-repair'))
+    assert receipt.readback.values['phone'] == '0912345678'
+    assert receipt.readback.values['service_type'] == '連續服務'
+    assert application.query_admin('CASE-001').values['service_type'] == '連續服務'
+    assert 'service_type' not in application.query_applicant('line-user-7', 7).values
+    with pytest.raises(ClientProfileValidationError, match='profile_field_not_allowed'):
+        application.preview_applicant('line-user-7', 7, {'service_type': '連續服務'}, ExpectedVersion(1))
+    with pytest.raises(ClientProfileValidationError, match='profile_phone_invalid'):
+        application.preview_applicant('line-user-7', 7, {'phone': '031234567'}, ExpectedVersion(1))
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from subsystems.client_profile.application import ClientProfileApplication

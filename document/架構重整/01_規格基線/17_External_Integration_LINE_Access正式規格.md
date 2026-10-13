@@ -730,6 +730,16 @@ invalid row 必須保存 privacy-safe root fact；已滿足該 lane 最低 impor
 只產生 Case Import owner review。只有 `BECLASS-001`／`IMPORT-003` current pairing predicate
 成立時才投影 canonical current issue。
 
+2026-10-13 最新人工裁決：HCM 原始服務方式文字保留，不轉換別名、不因格式警示清空。
+Case Import immutable source snapshot 保留文字；排班頁讀取原文供人員對照，人工休假星期
+僅為當次日曆試算條件，確認後只保存服務日期，不新增保存欄位。原始欄位警示與正式日期確認保持各自既有 owner。
+
+待辦看板的案件處理可直接修改 current HCM review 指出的 Client Profile 可編輯欄位，
+沿用 Client Profile Preview／Apply 與既有驗證；服務方式由人員選擇允許值。
+保存後重新讀取正式 Client 資料與 current HCM review，才更新缺件顯示。
+日期、天數及其他 Orders 條件沿用 Orders writer。匯入驗證與轉換機制不變，
+原始來源與匯入歷史不改寫。
+
 HCM 不得以 fabricated default 補造欄位。案件編號是最低寫入資格：有可用案件編號時必須建立／保留
 正式案件，其他欄位缺漏、格式錯誤或身份關聯歧義各自形成 owner validation／review result；只有案件編號
 缺失或不可用時不建案，且只保留來源 review／receipt／outbox 稽核，不投影異常中心。
@@ -775,7 +785,7 @@ Authority：本次人工要求預產期問題直接開啟客戶名冊、缺少�
 - `HCM-REPAIR-01`：異常頁以既有 canonical current review Query 呈現每案所有仍未解決欄位及分頁；
   不再以 legacy warning tracking 作 HCM 欄位警示的主清單。姓名、電話、預產期等 Client 欄位直接
   開啟 `#clients?case=...&field=...` 對應案件的名冊資料；Orders 條件仍使用既有 Orders writer。
-  2026-10-13 人工裁決退役原工作簿修正次要入口及 API。
+  2026-10-13 人工裁決退役原工作簿修正次要入口及 API。服務方式直接開啟 Client Profile 的 `service_type`；
   無正式編輯入口的欄位只保留問題與人工略過，不新增通用 writer。current review 的 `can_correct` 固定為 false，
   `unavailable_reason` 為 `hcm_workbook_correction_retired`，不影響既有 owner 欄位編輯能力。
 - `HCM-REPAIR-02`：Client Profile 管理端允許修改既有 `clients.due_month` 與 `clients.reject_reason`。

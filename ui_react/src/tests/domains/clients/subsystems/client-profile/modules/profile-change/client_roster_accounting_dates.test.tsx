@@ -43,17 +43,17 @@ describe('client roster accounting date columns', () => {
     for (const name of ['訂金應繳日', '第一期應繳日', '第二期應繳日', '訂單月嫂應付日', '月嫂義務應付日', '客戶補助退還日', '補助預計申請年月']) {
       expect(screen.getByRole('columnheader', { name })).toBeInTheDocument();
     }
-    expect(row).toHaveLength(18);
-    expect(row[11]).toHaveTextContent('2026-06-20');
-    expect(row[12]).toHaveTextContent('2026-07-03');
-    expect(row[13]).toHaveTextContent('無值');
-    expect(row[14]).toHaveTextContent('2026-09-15');
-    expect(row[15]).toHaveTextContent('月嫂甲／薪資：2026-10-15');
-    expect(row[15]).toHaveTextContent('月嫂乙／調整：2026-08-15');
-    expect(row[15]).toHaveTextContent('月嫂 #9／薪資：無值');
-    expect(row[16]).toHaveTextContent('2026-10-15');
-    expect(row[16]).toHaveTextContent('2026-11-15');
-    expect(row[17].textContent).toBe('2026-10');
+    expect(row).toHaveLength(19);
+    expect(row[12]).toHaveTextContent('2026-06-20');
+    expect(row[13]).toHaveTextContent('2026-07-03');
+    expect(row[14]).toHaveTextContent('無值');
+    expect(row[15]).toHaveTextContent('2026-09-15');
+    expect(row[16]).toHaveTextContent('月嫂甲／薪資：2026-10-15');
+    expect(row[16]).toHaveTextContent('月嫂乙／調整：2026-08-15');
+    expect(row[16]).toHaveTextContent('月嫂 #9／薪資：無值');
+    expect(row[17]).toHaveTextContent('2026-10-15');
+    expect(row[17]).toHaveTextContent('2026-11-15');
+    expect(row[18].textContent).toBe('2026-10');
     expect(mocks.query).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: /儲存|更新|套用日期|重算/ })).not.toBeInTheDocument();
   });
@@ -63,7 +63,7 @@ describe('client roster accounting date columns', () => {
       client_obligation_dates: [], staff_obligation_dates: [], claim_application_year: null, claim_application_month: null,
     }], next_cursor: null });
     render(<ClientRosterPage />);
-    expect((await cells()).slice(11, 18).map((cell) => cell.textContent)).toEqual(Array(7).fill('無值'));
+    expect((await cells()).slice(12, 19).map((cell) => cell.textContent)).toEqual(Array(7).fill('無值'));
   });
 
   it('does not lose list dates when the existing amount/detail query fails', async () => {
@@ -72,7 +72,7 @@ describe('client roster accounting date columns', () => {
     const row = (await screen.findByText('115000101')).closest('tr')!;
     fireEvent.click(row);
     expect(await screen.findByRole('alert')).toHaveTextContent('帳務詳情無法計算');
-    expect((await cells())[14]).toHaveTextContent('2026-09-15');
+    expect((await cells())[15]).toHaveTextContent('2026-09-15');
     expect(screen.getByRole('alert').closest('[role="dialog"]')).toHaveAccessibleName('案件 115000101 詳細資料');
   });
 
@@ -81,7 +81,7 @@ describe('client roster accounting date columns', () => {
     const decoded = ClientRegistrySummarySchema.parse(legacy);
     mocks.list.mockResolvedValue({ items: [decoded], next_cursor: null });
     render(<ClientRosterPage />);
-    expect((await cells()).slice(11, 18).map((cell) => cell.textContent)).toEqual(Array(7).fill('未載入'));
+    expect((await cells()).slice(12, 19).map((cell) => cell.textContent)).toEqual(Array(7).fill('未載入'));
   });
 
   it('decodes each obligation date without replacing nulls or hiding malformed fields', () => {

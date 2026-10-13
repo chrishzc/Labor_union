@@ -12,9 +12,15 @@ export const SchedulePrecisionRequestSchema = z.strictObject({
   case_no: z.string().min(1).max(50).optional(),
   actual_start_date: DateText,
   target_service_days: z.number().int().positive(),
-  service_mode: z.enum(['休周六', '休周日', '週休2日', '連續服務']),
+  service_mode: z.string().min(1).max(100),
+  custom_rest_weekdays: z.array(z.number().int().min(0).max(6)).max(6).optional(),
   custom_leave_dates: z.array(DateText).optional(),
   custom_work_dates: z.array(DateText).optional(),
+}).superRefine((value, context) => {
+  if (value.custom_rest_weekdays === undefined
+    && !['休周六', '休周日', '週休2日', '連續服務'].includes(value.service_mode)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['custom_rest_weekdays'], message: '請人工選定休假星期。' });
+  }
 });
 const SchedulePrecisionResultSchema = z.strictObject({
   actual_start_date: DateText,

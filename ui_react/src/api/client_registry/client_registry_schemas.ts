@@ -6,6 +6,7 @@ const optionalNullableText = z.string().nullish().transform((value) => value ?? 
 const optionalNullablePositiveInt = z.number().int().positive().nullish().transform((value) => value ?? null);
 const optionalNullableBoolean = z.boolean().nullish().transform((value) => value ?? null);
 const profileValues = z.strictObject({
+  service_type: nullableText.optional(),
   due_month: nullableText.optional(), reject_reason: nullableText.optional(),
   name: nullableText, gender: nullableText, phone: nullableText, city: nullableText,
   address: nullableText, residence_type: nullableText, delivery_type: nullableText,
@@ -74,6 +75,13 @@ export const ClientRegistryPageSchema = z.strictObject({
   items: z.array(ClientRegistrySummarySchema), next_cursor: z.string().nullable(),
   next_offset: z.number().int().positive().nullable().optional(),
 });
+export const ClientRegistryFilterOptionsSchema = z.strictObject({
+  values: z.array(z.string().nullable()), next_offset: z.number().int().positive().nullable(),
+});
+export type ClientRegistryFilterField = 'case_no' | 'name' | 'phone' | 'district' | 'multi_birth_count' | 'order_status' | 'service_type' | 'requires_cooking' | 'service_days' | 'planned_start_date' | 'deposit_due_date' | 'first_due_date' | 'second_due_date' | 'subsidy_return_due_date' | 'staff_payment_due_date';
+export type ClientRegistryFilterOperator = 'in' | 'not_in' | 'contains' | 'starts_with' | 'equals' | 'gt' | 'lt' | 'between' | 'blank';
+export interface ClientRegistryColumnFilter { field: ClientRegistryFilterField; operator: ClientRegistryFilterOperator; values: (string | null)[] }
+export type ClientRegistryFilterOptions = z.infer<typeof ClientRegistryFilterOptionsSchema>;
 export const ClientRegistryChangeHistoryItemSchema = z.strictObject({
   sequence: z.number().int().positive(),
   event_type: z.string().min(1),
@@ -113,6 +121,7 @@ export const RegistryMutationReceiptSchema = z.strictObject({
 });
 const response = <T extends z.ZodTypeAny>(data: T) => z.strictObject({ success: z.boolean(), message: z.string(), data: data.nullable(), error: z.string().nullable() });
 export const ClientRegistryPageResponseSchema = response(ClientRegistryPageSchema);
+export const ClientRegistryFilterOptionsResponseSchema = response(ClientRegistryFilterOptionsSchema);
 export const ClientRegistryDetailResponseSchema = response(ClientRegistryDetailSchema);
 export const ClientRegistryChangeHistoryResponseSchema = response(ClientRegistryChangeHistorySchema);
 export const RegistryMutationPreviewResponseSchema = response(RegistryMutationPreviewSchema);

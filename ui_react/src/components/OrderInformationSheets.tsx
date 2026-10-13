@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { queryOrderInformation, type OrderInformation } from '../api/orders/order_information_client';
 import type { AssignmentPlan } from '../api/orders/order_query_schemas';
 import { candidateContactPoolClient, type CandidateContactPool, type CandidateInformationPreview, type CandidateWeeklyServicePreview } from '../api/scheduling/candidate_contact_pool_client';
+import { CandidatePlannedServiceDates } from './CandidatePlannedServiceDates';
 
 const INFO_FIELDS = {
   1: [
@@ -163,14 +164,7 @@ export function OrderInformationSheets({ caseNo, assignments, initialKind = 1, o
 
   useEffect(() => {
     setWeeklyPreview(null);
-    if (kind !== 'weekly' || targets.length || selectedCandidateId === null) return;
-    const controller = new AbortController();
-    setLoading(true); setError(false);
-    void candidateContactPoolClient.previewWeeklyService(caseNo, selectedCandidateId, { signal: controller.signal })
-      .then((data) => { if (!controller.signal.aborted) setWeeklyPreview(data); })
-      .catch(() => { if (!controller.signal.aborted) setError(true); })
-      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
-    return () => controller.abort();
+    if (kind === 'weekly') { setLoading(false); setError(false); }
   }, [caseNo, kind, selectedCandidateId, targets.length]);
 
   return <section className="order-information-sheets" aria-label="訂單資訊預覽">
@@ -201,7 +195,10 @@ export function OrderInformationSheets({ caseNo, assignments, initialKind = 1, o
       {kind === 1 ? <ContractScreenshot sections={projectedSections(1, result)} /> : <><InformationSections sections={projectedSections(2, result)} /><IngredientsReference /></>}
     </article>}
     {kind === 'weekly' && targets.length > 0 && <p role="status">目前方案的每週服務內容可在「推薦月嫂」步驟直接預覽。</p>}
-    {weeklyPreview && <article className="order-information-paper"><header><h3>每週服務時間說明</h3><p>{weeklyPreview.date_basis === 'confirmed' ? '依目前已確認服務日期計算' : '依目前候選服務期間與休假推算'}，尚未建立正式排班。</p></header>
+    {kind === 'weekly' && !targets.length && selectedCandidateId !== null && candidates.find(item => item.id === selectedCandidateId) && <CandidatePlannedServiceDates
+      key={`${caseNo}:${selectedCandidateId}`} caseNo={caseNo} candidateId={selectedCandidateId}
+      startDate={candidates.find(item => item.id === selectedCandidateId)!.service_start_date} onPreview={setWeeklyPreview} />}
+    {weeklyPreview && kind === 'weekly' && <article className="order-information-paper"><header><h3>每週服務時間說明</h3><p>{weeklyPreview.date_basis === 'confirmed' ? '依目前已保存預計日期計算' : weeklyPreview.date_basis === 'draft' ? '依這次試算日期計算，尚未保存' : '依目前候選服務期間與休假推算'}，尚未建立正式排班。</p></header>
       <p>約定服務 {weeklyPreview.required_service_days ?? '待確認'} 天；目前日期可提供 {weeklyPreview.projected_service_days} 天。</p>
       {weeklyPreview.warnings.map((warning) => <p role="status" key={warning}>{warning}</p>)}
       <div className="formal-recommendation-weekly-preview"><table><thead><tr><th>週次</th><th>服務人員</th><th>期間</th><th>工作日</th><th>時數</th></tr></thead><tbody>

@@ -123,7 +123,10 @@ def calculate_hcm_service_end_date(
     rest_weekdays = {
         "休周六": {5},
         "休周日": {6},
+        "週休1日": {6},
+        "週休一日": {6},
         "週休2日": {5, 6},
+        "周休二日": {5, 6},
         "連續服務": set(),
     }.get(service_type, set())
     current_date = start_date

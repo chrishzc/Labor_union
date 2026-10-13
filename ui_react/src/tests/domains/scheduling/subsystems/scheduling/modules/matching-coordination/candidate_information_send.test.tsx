@@ -13,8 +13,16 @@ vi.mock('../../../../../../../api/scheduling/candidate_contact_pool_client', () 
 vi.mock('../../../../../../../api/orders/order_information_client', () => ({
   queryOrderInformation: vi.fn(),
 }));
+vi.mock('../../../../../../../api/orders/order_query_client', () => ({ ordersQueryClient: {
+  getOrderTerms: vi.fn(async () => ({ case_no: 'CASE-1', order_version: 1, scheduling_version: 0, scheduling_generation: 0, assignments: [] })),
+  getOrderCalendarDetail: vi.fn(async () => ({ case_no: 'CASE-1', service_mode: null, original_service_type: '休五、日' })),
+} }));
+vi.mock('../../../../../../../api/orders/order_mutation_client', () => ({ ordersMutationClient: {
+  getServiceDates: vi.fn(async () => ({ case_no: 'CASE-1', order_version: 1, scheduling_version: 0,
+    current_version: null, current_dates: [], selectable_dates: ['2026-10-01', '2026-10-02'], contracted_service_days: 2 })),
+} }));
 beforeEach(() => {
-  vi.resetAllMocks();
+  vi.clearAllMocks();
   let sentKind: 1 | 2 | null = null;
   vi.mocked(client.query).mockImplementation(async () => ({ case_no: 'CASE-1', pool_id: 1, candidates: [{
     id: 3, staff_id: 2, staff_name: '測試月嫂', status: 'active', willingness: 'pending', reason: null,

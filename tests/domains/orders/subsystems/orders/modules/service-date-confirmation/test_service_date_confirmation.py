@@ -184,8 +184,17 @@ def test_selectable_dates_use_confirmed_actual_start_as_the_only_available_basis
     )
 
     assert selectable[0] == expected_start
-    assert len(selectable) == 40
-    assert selectable[-1] == expected_start + timedelta(days=39)
+    assert len(selectable) == 100
+    assert selectable[-1] == expected_start + timedelta(days=99)
+
+
+def test_selectable_range_covers_twenty_services_with_six_weekdays_off():
+    start = date(2026, 11, 2)
+    selectable = MySqlServiceDateConfirmationRepository._selectable_dates({
+        "start_date": start, "actual_start_date": None, "service_days": 20,
+    })
+    one_service_per_week = tuple(start + timedelta(days=7 * week) for week in range(20))
+    assert set(one_service_per_week) <= set(selectable)
 
 
 def test_selectable_range_exposes_the_first_ten_consecutive_dates_from_actual_start():

@@ -3,7 +3,7 @@ File: orders.py
 Description: 定義 Orders typed HTTP 契約，包含服務日精算的排休、假日與人工服務日覆核。
 """
 
-from typing import Optional, List, Any, Dict, Literal
+from typing import Optional, List, Any, Dict, Literal, Annotated
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -257,7 +257,8 @@ class ScheduleCalculationRequest(BaseModel):
     service_mode: str = Field("休周日", description="排休模式: 休周六/休周日/週休2日/連續服務")
     custom_leave_dates: Optional[List[date]] = Field(None, description="自訂請假日期列表")
     custom_work_dates: Optional[List[date]] = Field(None, description="覆蓋固定週休的人工服務日期列表")
-    custom_rest_weekdays: Optional[List[int]] = Field(None, description="固定排休星期列表")
+    custom_rest_weekdays: Optional[List[Annotated[StrictInt, Field(ge=0, le=6)]]] = Field(
+        None, max_length=6, description="當次試算休假星期，0=星期一、6=星期日；不保存為案件欄位")
     monthly_salary_base: Optional[float] = Field(None, description="月薪試算基準")
 
 class AssignmentRestDatesUpdateRequest(BaseModel):

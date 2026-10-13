@@ -24,6 +24,7 @@
 
 ## Contracts
 - `POST /api/v1/orders/calculate-schedule` — bounded 出勤精算 request／response。
+- `custom_rest_weekdays` 可由排班畫面人工選定，僅為當次零寫入試算；拒絕七日全休，未辨識原文不得推定排休規則。
 - `document/架構重整/01_規格基線/02_Assignments_Scheduling_Domain.md` — Scheduling 服務日精算語意。
 
 ## Verification

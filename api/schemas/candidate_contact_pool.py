@@ -67,13 +67,18 @@ class CandidateWeeklyServiceRowView(BaseModel):
     weekly_hours: float = Field(ge=0, multiple_of=0.5)
 
 
+class CandidateWeeklyServiceDatesPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    service_dates: list[date] = Field(min_length=1)
+
+
 class CandidateWeeklyServicePreviewView(BaseModel):
     model_config = ConfigDict(extra="forbid")
     case_no: str = Field(min_length=1, max_length=50)
     candidate_id: int = Field(gt=0)
     required_service_days: int | None = Field(ge=0)
     projected_service_days: int = Field(ge=0)
-    date_basis: Literal["planned", "confirmed"]
+    date_basis: Literal["planned", "confirmed", "draft"]
     warnings: list[str]
     rows: list[CandidateWeeklyServiceRowView]
 

@@ -645,7 +645,7 @@ def _partial_hcm_record(record, validation_errors):
     partial_record = dict(record)
     for source_field in validation_errors:
         target_field = CLIENTS_FIELD_MAPPING.get(source_field)
-        if target_field is not None:
+        if target_field is not None and target_field != "service_type":
             partial_record[target_field] = None
     return partial_record
 
@@ -788,12 +788,6 @@ def normalize_hcm_row(row):
     record["due_month"] = _parse_date(row.get("預產期/預計服務開始月份"))
     record["service_start_date"] = _parse_date(row.get("預計服務日期"))
     
-    svc_type = record.get("service_type")
-    if svc_type == "周休二日":
-        record["service_type"] = "週休2日"
-    elif svc_type in ["週休1日", "週休一日"]:
-        record["service_type"] = "休周日"
-        
     return record
 
 

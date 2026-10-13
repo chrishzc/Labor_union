@@ -9,11 +9,14 @@ from api.dependencies.admin_auth import (
     require_line_matching_reader,
     require_line_matching_sender,
 )
+from api.dependencies.service_date_confirmation import get_service_date_confirmation_workflow
+from subsystems.orders.service_date_confirmation_workflow import ServiceDateConfirmationWorkflow
 from api.schemas.base import BaseResponse
 from api.schemas.candidate_contact_pool import (
     AddCandidatesRequest,
     CandidateInformationPreviewView,
     CandidateWeeklyServicePreviewView,
+    CandidateWeeklyServiceDatesPreviewRequest,
     AddCandidatesResult,
     CandidateContactPoolView,
     CandidateWillingnessRequest,
@@ -105,6 +108,27 @@ def preview_candidate_weekly_service(
                 workflow.preview_weekly_service(case_no, candidate_id)
             ),
             message="已讀取每周服務中說明",
+        )
+    except (LookupError, ValueError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.post(
+    "/orders/{case_no}/candidate-contact-pool/candidates/{candidate_id}/weekly-service/preview",
+    response_model=BaseResponse[CandidateWeeklyServicePreviewView],
+)
+def preview_candidate_weekly_dates(
+    case_no: str, candidate_id: int, req: CandidateWeeklyServiceDatesPreviewRequest,
+    principal: AdminPrincipal = Depends(require_line_matching_reader),
+    dates_workflow: ServiceDateConfirmationWorkflow = Depends(get_service_date_confirmation_workflow),
+):
+    del principal
+    try:
+        proposed = dates_workflow.preview(case_no, tuple(req.service_dates))
+        return BaseResponse(
+            data=CandidateWeeklyServicePreviewView.model_validate(
+                workflow.preview_weekly_service(case_no, candidate_id, proposed.candidate.service_dates)
+            ), message="已試算每週服務時間，尚未保存日期",
         )
     except (LookupError, ValueError) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error

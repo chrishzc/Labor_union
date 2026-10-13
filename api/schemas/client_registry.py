@@ -56,6 +56,11 @@ class ClientRegistryPageView(_StrictModel):
     next_offset: int | None = Field(default=None, ge=1)
 
 
+class ClientRegistryFilterOptionsView(_StrictModel):
+    values: tuple[str | None, ...]
+    next_offset: int | None = Field(default=None, ge=1)
+
+
 class ClientRegistryChangeHistoryItemView(_StrictModel):
     sequence: int = Field(ge=1)
     event_type: str = Field(min_length=1, max_length=100)
@@ -66,6 +71,7 @@ class ClientRegistryChangeHistoryItemView(_StrictModel):
 
 
 class ClientProfileValuesView(_StrictModel):
+    service_type: str | None = None
     due_month: str | None = None
     reject_reason: str | None = None
     name: str | None = None
@@ -178,6 +184,7 @@ class ClientRegistryDetailView(_StrictModel):
 
 
 class ClientProfileChangeSet(_StrictModel):
+    service_type: str | None = None
     due_month: str | None = None
     reject_reason: str | None = None
     name: str | None = None

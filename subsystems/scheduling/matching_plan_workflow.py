@@ -12,6 +12,7 @@ from subsystems.scheduling.ports import (
     unconfigured_connection_factory,
 )
 from subsystems.scheduling.segmented_availability_query import (
+    search_candidate_inquiry_availability,
     search_segmented_caregiver_availability,
 )
 from subsystems.scheduling.candidate_contact_pool_workflow import query_pool
@@ -306,7 +307,6 @@ def _validate_current_availability(
     facts_port: SegmentedAvailabilityFactsPort,
     require_willing_candidate: bool,
 ) -> None:
-    del require_willing_candidate
     availability_kwargs = {
         "case_no": case_no_value,
         "segment_count": len(normalized_segments),
@@ -325,7 +325,18 @@ def _validate_current_availability(
     # auditable manual selection).  Apply must fresh-check schedule occupancy,
     # not reintroduce optional discovery filters that can reject the exact
     # combination the UI just offered.
-    availability = search_segmented_caregiver_availability(**availability_kwargs)
+    if require_willing_candidate:
+        # Creating a recommendation uses the candidate inquiry window. Saved
+        # date explanations must not become a formal scheduling prerequisite.
+        availability = search_candidate_inquiry_availability(
+            case_no=case_no_value,
+            segment_drafts=availability_kwargs["segment_drafts"],
+            as_of=as_of_value,
+            facts_port=facts_port,
+            filter_policy=availability_kwargs["filter_policy"],
+        )
+    else:
+        availability = search_segmented_caregiver_availability(**availability_kwargs)
 
     complete_combinations = availability.get("complete_combinations")
     if not isinstance(complete_combinations, list):

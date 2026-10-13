@@ -347,6 +347,35 @@ def test_mysql_registry_uses_order_client_owner_and_bound_beclass_case_identity(
     assert detail["order_information_values"]["meal_preferences"] == "不吃牛肉"
 
 
+@pytest.mark.parametrize("service_type", [None, "週休2日"])
+def test_mysql_detail_to_http_exposes_service_type_for_direct_intake_repair(monkeypatch, service_type):
+    monkeypatch.setattr(
+        "infrastructure.mysql.client_registry_query_repository._finance_values",
+        lambda *_: ("not_ready", "client_finance_bootstrap_required", None),
+    )
+    connection = _SqlConnection([
+        {"client_id": 7, "case_no": "SYNTH-REPAIR", "order_status": "待補件",
+         "client_profile_version": 2, "name": "合成測試客戶", "service_type": service_type},
+        (),
+    ])
+
+    def unavailable_terms(_case_no):
+        raise ValueError("order_terms_incomplete")
+
+    response = get_client_registry(
+        case_no="SYNTH-REPAIR",
+        principal=AdminPrincipal(9, "registry-reader", "Registry Reader", "system_admin"),
+        application=ClientRegistryQueryApplication(MySqlClientRegistryQueryRepository(connection)),
+        order_terms=SimpleNamespace(query_registry=unavailable_terms),
+    )
+    profile = response.data.model_dump()["client"]
+    assert profile["values"]["service_type"] == service_type
+    assert profile["field_capabilities"]["service_type"] == {
+        "owner": "client_profile", "editable": True, "reason": None,
+        "options": ("連續服務", "休周六", "休周日", "週休2日"),
+    }
+
+
 def test_mysql_registry_exposes_blank_editable_values_for_historical_case_without_beclass():
     connection = _SqlConnection([
         {

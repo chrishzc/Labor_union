@@ -7,6 +7,9 @@ from collections.abc import Mapping
 from datetime import date
 from decimal import Decimal
 from typing import Any
+from subsystems.client_profile.registry_filters import (
+    FIELD_KINDS, RegistryColumnFilter, RegistryFilterField, RegistryFilterOptions,
+)
 
 from domains.case_import.order_information import project_order_information
 from subsystems.case_import.beclass_correction_workflow import allows_manual_beclass_source
@@ -31,7 +34,7 @@ from subsystems.government_subsidy.reconciliation_register_query import (
 
 _CLIENT_FIELDS = (
     "name", "gender", "phone", "city", "address", "residence_type",
-    "delivery_type", "baby_info", "notes", "due_month", "reject_reason",
+    "delivery_type", "baby_info", "notes", "due_month", "reject_reason", "service_type",
 )
 _BECLASS_FIELDS = (
     "name", "email", "phone", "tel", "ext", "city", "zip_code", "address", "admin_notes",
@@ -75,6 +78,7 @@ class MySqlClientRegistryQueryRepository:
         limit: int,
         after: str | None,
         offset: int,
+        column_filters: tuple[RegistryColumnFilter, ...] = (),
     ):
         where, parameters = _registry_filters(
             query=query,
@@ -82,6 +86,7 @@ class MySqlClientRegistryQueryRepository:
             order_status=order_status,
             requires_cooking=requires_cooking,
             after=after,
+            column_filters=column_filters,
         )
         if sort_by is None:
             order_by = "o.case_no ASC"
@@ -128,6 +133,32 @@ class MySqlClientRegistryQueryRepository:
         next_offset = offset + limit if len(rows) > limit and after is None else None
         return visible, next_cursor, next_offset
 
+    def filter_options(self, *, field: RegistryFilterField, search: str | None, limit: int, offset: int) -> RegistryFilterOptions:
+        expression, extra_join = _filter_option_source(field)
+        value_sql = f"CAST({expression} AS CHAR)"
+        parameters: list[object] = []
+        search_sql = ""
+        if search is not None:
+            search_sql = f" AND {value_sql} LIKE %s ESCAPE '!'"
+            parameters.append(_like_literal(search, "contains"))
+        parameters.extend((limit + 1, offset))
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT DISTINCT " + value_sql + " AS value FROM orders o JOIN clients c ON c.id=o.client_id "
+                "LEFT JOIN (SELECT bound_case_no,MAX(id) AS id,MAX(survey_details) AS survey_details "
+                "FROM beclass_records WHERE bound_case_no IS NOT NULL GROUP BY bound_case_no HAVING COUNT(*)=1) br "
+                "ON br.bound_case_no=o.case_no "
+                "LEFT JOIN beclass_record_correction_states bcs ON bcs.beclass_record_id=br.id "
+                + extra_join + " WHERE o.case_no IS NOT NULL" + search_sql
+                + " ORDER BY value IS NOT NULL,value ASC LIMIT %s OFFSET %s",
+                tuple(parameters),
+            )
+            rows = tuple(cursor.fetchall() or ())
+        return RegistryFilterOptions(
+            tuple(str(row["value"]) if row["value"] is not None else None for row in rows[:limit]),
+            offset + limit if len(rows) > limit else None,
+        )
+
 
     def query_order_accounting_rows(
         self, selection: OrderAccountingExportQuery
@@ -138,6 +169,7 @@ class MySqlClientRegistryQueryRepository:
             order_status=selection.order_status,
             requires_cooking=selection.requires_cooking,
             after=None,
+            column_filters=selection.column_filters,
         )
         if selection.sort_by is None:
             order_by = "o.case_no ASC"
@@ -268,7 +300,7 @@ class MySqlClientRegistryQueryRepository:
     def load_detail(self, case_no: str) -> Mapping[str, Any] | None:
         with self._connection.cursor() as cursor:
             cursor.execute(
-                "SELECT c.id AS client_id,o.case_no,o.status AS order_status,c.client_profile_version,c.service_type,"
+                "SELECT c.id AS client_id,o.case_no,o.status AS order_status,c.client_profile_version,"
                 "EXISTS(SELECT 1 FROM order_service_data_locks service_lock "
                 "WHERE service_lock.case_no=o.case_no) AS service_data_locked,"
                 + ",".join(f"c.{field}" for field in _CLIENT_FIELDS)
@@ -429,6 +461,7 @@ def _registry_filters(
     order_status: str | None,
     requires_cooking: bool | None,
     after: str | None,
+    column_filters: tuple[RegistryColumnFilter, ...] = (),
 ) -> tuple[list[str], list[object]]:
     where = ["o.case_no IS NOT NULL"]
     parameters: list[object] = []
@@ -447,7 +480,92 @@ def _registry_filters(
     if requires_cooking is not None:
         where.append("o.requires_cooking = %s")
         parameters.append(requires_cooking)
+    for predicate in column_filters:
+        condition, values = _column_filter_sql(predicate)
+        where.append(condition)
+        parameters.extend(values)
     return where, parameters
+
+
+_OBLIGATION_FILTER_STAGES = {
+    "deposit_due_date": "deposit", "first_due_date": "first", "second_due_date": "second",
+    "subsidy_return_due_date": "subsidy_return",
+}
+
+
+def _scalar_filter_expression(field: str) -> str:
+    columns = {
+        "case_no": "o.case_no", "name": "c.name", "phone": "c.phone",
+        "order_status": "o.status", "service_type": "c.service_type",
+        "multi_birth_count": _BIRTH_COUNT_SQL, "service_days": "o.service_days",
+        "planned_start_date": "o.start_date", "staff_payment_due_date": "o.staff_payment_due_date",
+        "requires_cooking": "CASE WHEN o.requires_cooking=1 THEN 'true' WHEN o.requires_cooking=0 THEN 'false' END",
+        "district": "CASE " + " ".join(
+            f"WHEN LOCATE('{district}',c.address)>0 THEN '{district}'" for district in _SUPPORTED_DISTRICTS
+        ) + " END",
+    }
+    expression = columns[field]
+    return f"NULLIF(TRIM({expression}),'')" if FIELD_KINDS[field] == "text" else expression
+
+
+def _obligation_scope(field: str, alias: str) -> str:
+    stage = _OBLIGATION_FILTER_STAGES[field]
+    direction = "payable_to_client" if stage == "subsidy_return" else "receivable_from_client"
+    return (
+        f"{alias}.case_no=o.case_no AND {alias}.status<>'cancelled' "
+        f"AND {alias}.obligation_type='{stage}' AND {alias}.direction='{direction}'"
+    )
+
+
+def _filter_option_source(field: str) -> tuple[str, str]:
+    if field in _OBLIGATION_FILTER_STAGES:
+        return "fo.due_date", "LEFT JOIN client_obligations fo ON " + _obligation_scope(field, "fo")
+    return _scalar_filter_expression(field), ""
+
+
+def _like_literal(value: str, operator: str) -> str:
+    escaped = value.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+    return ("%" if operator == "contains" else "") + escaped + "%"
+
+
+def _value_predicate(expression: str, predicate: RegistryColumnFilter) -> tuple[str, list[object]]:
+    operator = predicate.operator
+    values = [int(value) if FIELD_KINDS[predicate.field] == "number" and value is not None else value for value in predicate.values]
+    if operator == "blank":
+        return f"{expression} IS NULL", []
+    if operator == "not_in":
+        included = RegistryColumnFilter(predicate.field, "in", predicate.values)
+        excluded, parameters = _value_predicate(expression, included)
+        return f"({expression} IS NOT NULL AND NOT {excluded})" if None in values else f"({expression} IS NULL OR NOT {excluded})", parameters
+    if operator == "in":
+        present = [value for value in values if value is not None]
+        clauses = [f"{expression} IN (" + ",".join("%s" for _ in present) + ")"] if present else []
+        if None in values:
+            clauses.append(f"{expression} IS NULL")
+        return "(" + " OR ".join(clauses) + ")" if clauses else "1=0", present
+    if operator in {"contains", "starts_with"}:
+        return f"{expression} LIKE %s ESCAPE '!'", [_like_literal(values[0], operator)]
+    if operator == "between":
+        return f"{expression} BETWEEN %s AND %s", values
+    comparison = {"equals": "=", "gt": ">", "lt": "<"}[operator]
+    return f"{expression} {comparison} %s", values
+
+
+def _column_filter_sql(predicate: RegistryColumnFilter) -> tuple[str, list[object]]:
+    if predicate.field not in _OBLIGATION_FILTER_STAGES:
+        return _value_predicate(_scalar_filter_expression(predicate.field), predicate)
+    scope = _obligation_scope(predicate.field, "cf")
+    condition, values = _value_predicate("cf.due_date", predicate)
+    if predicate.operator == "not_in":
+        excluded, parameters = _value_predicate("cf.due_date", RegistryColumnFilter(predicate.field, "in", predicate.values))
+        result = f"NOT EXISTS(SELECT 1 FROM client_obligations cf WHERE {scope} AND {excluded})"
+        if None in predicate.values:
+            result += f" AND EXISTS(SELECT 1 FROM client_obligations cf WHERE {scope})"
+        return "(" + result + ")", parameters
+    exists = f"EXISTS(SELECT 1 FROM client_obligations cf WHERE {scope} AND {condition})"
+    if predicate.operator == "blank" or (predicate.operator == "in" and None in predicate.values):
+        exists = f"({exists} OR NOT EXISTS(SELECT 1 FROM client_obligations cf WHERE {scope}))"
+    return exists, values
 
 
 def _client_district(address: object) -> str | None:

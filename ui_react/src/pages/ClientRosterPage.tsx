@@ -1,32 +1,28 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { clientRegistryClient, type ClientRegistryListQuery } from '../api/client_registry/client_registry_client';
-import type { ClientRegistryDetail, ClientRegistryPage as ClientRegistryPageData, ClientRegistrySortBy, ClientRegistrySortOrder } from '../api/client_registry/client_registry_schemas';
+import type { ClientRegistryColumnFilter, ClientRegistryDetail, ClientRegistryFilterField, ClientRegistryPage as ClientRegistryPageData, ClientRegistrySortBy, ClientRegistrySortOrder } from '../api/client_registry/client_registry_schemas';
+import { ClientRosterColumnFilter } from '../components/ClientRosterColumnFilter';
+import { rosterFilterColumns, rosterFilterSummary } from '../components/client_roster_filter_columns';
 import { CaseArchitectureBootstrapRepairPanel } from '../components/CaseArchitectureBootstrapRepairPanel';
 import { Drawer } from '../components/Drawer';
 import './ClientRosterPage.css';
 
-type SelectBoolean = '' | 'true' | 'false';
-type MultiBirthCount = '' | '單胞胎' | '雙胞胎';
 type RosterFilters = {
   query: string;
-  multiBirthCount: MultiBirthCount;
-  orderStatus: string;
-  requiresCooking: SelectBoolean;
+  columnFilters: ClientRegistryColumnFilter[];
   sortBy: ClientRegistrySortBy;
   sortOrder: ClientRegistrySortOrder;
 };
 
 const defaultFilters: RosterFilters = {
-  query: '', multiBirthCount: '', orderStatus: '', requiresCooking: '', sortBy: 'case_no', sortOrder: 'asc',
+  query: '', columnFilters: [], sortBy: 'case_no', sortOrder: 'asc',
 };
 const pageSize = 100;
 
 function toRequest(filters: RosterFilters, offset?: number): ClientRegistryListQuery {
   return {
     query: filters.query,
-    multiBirthCount: filters.multiBirthCount || undefined,
-    orderStatus: filters.orderStatus || undefined,
-    requiresCooking: filters.requiresCooking === '' ? undefined : filters.requiresCooking === 'true',
+    ...(filters.columnFilters.length ? { columnFilters: filters.columnFilters } : {}),
     sortBy: filters.sortBy,
     sortOrder: filters.sortOrder,
     limit: pageSize,
@@ -35,10 +31,8 @@ function toRequest(filters: RosterFilters, offset?: number): ClientRegistryListQ
 }
 
 function hasActiveFilter(filters: RosterFilters): boolean {
-  return Boolean(filters.query.trim() || filters.multiBirthCount || filters.orderStatus || filters.requiresCooking || filters.sortBy !== 'case_no' || filters.sortOrder !== 'asc');
+  return Boolean(filters.query.trim() || filters.columnFilters.length || filters.sortBy !== 'case_no' || filters.sortOrder !== 'asc');
 }
-
-const orderStatuses = ['待補件', '洽談中', '訂單成立', '服務中', '訂單完成', '訂單取消', '歷史訂單－未服務', '歷史訂單－服務中', '歷史訂單－服務完成', '歷史訂單－帳務完成'];
 
 const displayCooking = (value: boolean | null) => value === true ? '需要' : value === false ? '不需要' : '未登錄';
 const displayValue = (value: unknown) => value === null || value === undefined || value === '' ? '未登錄' : typeof value === 'boolean' ? (value ? '是' : '否') : String(value);
@@ -140,22 +134,26 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
   const [exportMessage, setExportMessage] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const detailRequest = useRef(0);
+  const listRequest = useRef(0);
 
   const load = async (nextFilters: RosterFilters, nextOffset = 0) => {
+    const requestId = ++listRequest.current;
     const request = toRequest(nextFilters, nextOffset || undefined);
     setLoading(true);
     setError(null);
     try {
       const result = await clientRegistryClient.list(request);
+      if (requestId !== listRequest.current) return;
       setPage(result);
       setAppliedFilters(nextFilters);
       setPageOffset(nextOffset);
       setSelectedCaseNo(null);
       setDetail(null);
     } catch (caught) {
+      if (requestId !== listRequest.current) return;
       setError(caught instanceof Error ? caught.message : '客戶名冊清單載入失敗。');
     } finally {
-      setLoading(false);
+      if (requestId === listRequest.current) setLoading(false);
     }
   };
 
@@ -169,11 +167,26 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
     setFilters(defaultFilters);
     void load(defaultFilters);
   };
-  const changeSort = (sortBy: ClientRegistrySortBy) => {
-    const sortOrder: ClientRegistrySortOrder = filters.sortBy === sortBy && filters.sortOrder === 'asc' ? 'desc' : 'asc';
-    const nextFilters = { ...filters, sortBy, sortOrder };
-    setFilters(nextFilters);
+  const changeSort = (sortBy: ClientRegistrySortBy, order?: ClientRegistrySortOrder) => {
+    const sortOrder: ClientRegistrySortOrder = order ?? (appliedFilters.sortBy === sortBy && appliedFilters.sortOrder === 'asc' ? 'desc' : 'asc');
+    const nextFilters = { ...appliedFilters, sortBy, sortOrder };
+    setFilters({ ...nextFilters, query: filters.query });
     void load(nextFilters);
+  };
+  const applyColumn = (field: ClientRegistryFilterField, predicate?: ClientRegistryColumnFilter) => {
+    const columnFilters = appliedFilters.columnFilters.filter((item) => item.field !== field);
+    if (predicate) columnFilters.push(predicate);
+    const nextFilters = { ...appliedFilters, columnFilters };
+    setFilters({ ...nextFilters, query: filters.query });
+    void load(nextFilters);
+  };
+  const columnHeading = (field: ClientRegistryFilterField, sortBy?: ClientRegistrySortBy) => {
+    const column = rosterFilterColumns.find((item) => item.field === field)!;
+    return <div className="client-roster-column-heading">
+      {sortBy ? <button type="button" disabled={loading} onClick={() => changeSort(sortBy)}>{column.label}{sortLabel(sortBy)}</button> : <span>{column.label}</span>}
+      <ClientRosterColumnFilter column={column} active={appliedFilters.columnFilters.find((item) => item.field === field)} disabled={loading}
+        onApply={(predicate) => applyColumn(field, predicate)} onSort={sortBy ? (order) => changeSort(sortBy, order) : undefined} />
+    </div>;
   };
   const previousPage = () => void load(appliedFilters, Math.max(0, pageOffset - pageSize));
   const nextPage = () => {
@@ -181,7 +194,7 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
       void load(appliedFilters, page.next_offset);
     }
   };
-  const sortLabel = (sortBy: ClientRegistrySortBy) => filters.sortBy === sortBy ? (filters.sortOrder === 'asc' ? ' ↑' : ' ↓') : '';
+  const sortLabel = (sortBy: ClientRegistrySortBy) => appliedFilters.sortBy === sortBy ? (appliedFilters.sortOrder === 'asc' ? ' ↑' : ' ↓') : '';
   const openDetail = async (caseNo: string) => {
     const request = ++detailRequest.current;
     setSelectedCaseNo(caseNo); setDetail(null); setDetailError(null); setDetailLoading(true);
@@ -198,17 +211,21 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
     detailRequest.current += 1;
     setSelectedCaseNo(null); setDetail(null); setDetailError(null); setDetailLoading(false);
   };
-  const exportOrderAccounting = async () => {
+  const exportWorkbook = async (kind: 'order-accounting' | 'case-inspection') => {
+    const label = kind === 'case-inspection' ? '案件資料檢查' : '訂單帳務';
     setExporting(true); setExportMessage(null); setExportError(null);
     try {
-      const artifact = await clientRegistryClient.downloadOrderAccounting(toRequest(appliedFilters));
+      const request = toRequest(appliedFilters);
+      const artifact = kind === 'case-inspection'
+        ? await clientRegistryClient.downloadCaseInspection(request)
+        : await clientRegistryClient.downloadOrderAccounting(request);
       const objectUrl = URL.createObjectURL(artifact.blob);
       const anchor = document.createElement('a');
       anchor.href = objectUrl; anchor.download = artifact.filename; anchor.click();
       URL.revokeObjectURL(objectUrl);
-      setExportMessage('訂單帳務 Excel 已下載。');
+      setExportMessage(`${label} Excel 已下載。`);
     } catch (caught) {
-      setExportError(caught instanceof Error ? caught.message : '訂單帳務匯出失敗。');
+      setExportError(caught instanceof Error ? caught.message : `${label}匯出失敗。`);
     } finally {
       setExporting(false);
     }
@@ -216,42 +233,45 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
 
   return <div className={`client-roster-page${embedded ? ' client-roster-page--embedded' : ''}`}>
     {!embedded && <header><div><h1>客戶名冊清單</h1><p>以案件為單位快速瀏覽與比較；此頁只會查詢，不會修改客戶或訂單資料。</p></div></header>}
-    <form className="client-roster-filters" onSubmit={applyFilters}>
-      <label>搜尋<input aria-label="搜尋客戶名冊清單" value={filters.query} placeholder="案件編號、姓名或電話" onChange={(event) => setFilters((value) => ({ ...value, query: event.target.value }))} /></label>
-      <label>BeClass 胎數<select aria-label="BeClass 胎數篩選" value={filters.multiBirthCount} onChange={(event) => setFilters((value) => ({ ...value, multiBirthCount: event.target.value as MultiBirthCount }))}><option value="">全部</option><option value="單胞胎">單胞胎</option><option value="雙胞胎">雙胞胎</option></select></label>
-      <label>案件／訂單狀態<select aria-label="案件／訂單狀態篩選" value={filters.orderStatus} onChange={(event) => setFilters((value) => ({ ...value, orderStatus: event.target.value }))}><option value="">全部</option>{orderStatuses.map((status) => <option key={status} value={status}>{status}</option>)}</select></label>
-      <label>下廚需求<select aria-label="下廚需求篩選" value={filters.requiresCooking} onChange={(event) => setFilters((value) => ({ ...value, requiresCooking: event.target.value as SelectBoolean }))}><option value="">全部</option><option value="true">需要</option><option value="false">不需要</option></select></label>
-      <div className="client-roster-filter-actions"><button type="submit">套用篩選</button><button type="button" onClick={clearFilters}>清除篩選</button><button type="button" disabled={exporting} onClick={() => void exportOrderAccounting()}>{exporting ? '匯出中…' : '匯出訂單帳務'}</button></div>
-    </form>
-    {exportMessage && <p role="status" className="client-roster-message">{exportMessage}</p>}
-    {exportError && <p role="alert" className="client-roster-message">{exportError}</p>}
-    {error && <p role="alert" className="client-roster-message">{error}</p>}
-    {loading && <p role="status" className="client-roster-message">正在載入客戶名冊清單…</p>}
-    {!loading && !error && page?.items.length === 0 && <p role="status" className="client-roster-message">{hasActiveFilter(appliedFilters) ? '沒有符合篩選條件的案件。' : '目前沒有可顯示的案件。'}</p>}
     {!error && page && <nav className="client-roster-pagination" aria-label="客戶名冊分頁">
       <button type="button" disabled={loading || pageOffset === 0} onClick={previousPage}>上一頁</button>
       <span aria-live="polite">第 {Math.floor(pageOffset / pageSize) + 1} 頁<span className="client-roster-page-count">（本頁 {page.items.length} 筆）</span></span>
       <button type="button" disabled={loading || page.next_offset == null} onClick={nextPage}>下一頁</button>
     </nav>}
-    {!loading && !error && page && page.items.length > 0 && <div className="client-roster-table-wrap"><table>
+    <form className="client-roster-filters" onSubmit={applyFilters}>
+      <label>搜尋<input aria-label="搜尋客戶名冊清單" value={filters.query} placeholder="案件編號、姓名或電話" onChange={(event) => setFilters((value) => ({ ...value, query: event.target.value }))} /></label>
+      <div className="client-roster-filter-actions"><button type="submit" disabled={loading}>搜尋</button><button type="button" disabled={loading} onClick={clearFilters}>清除全部篩選</button><button type="button" disabled={exporting || loading || !!error} onClick={() => void exportWorkbook('order-accounting')}>{exporting ? '匯出中…' : '匯出訂單帳務'}</button><button type="button" disabled={exporting || loading || !!error} onClick={() => void exportWorkbook('case-inspection')}>案件資料檢查匯出</button></div>
+    </form>
+    <div className="client-roster-active-filters" aria-label="已套用篩選">
+      <span className="client-roster-filter-help">點欄名旁的 ▾ 篩選；不同欄位的條件會同時套用。</span>
+      {appliedFilters.query.trim() && <span className="client-roster-filter-chip">搜尋：{appliedFilters.query}<button type="button" disabled={loading} aria-label="清除搜尋條件" onClick={() => { const next = { ...appliedFilters, query: '' }; setFilters(next); void load(next); }}>×</button></span>}
+      {appliedFilters.columnFilters.map((predicate) => <span className="client-roster-filter-chip" key={predicate.field}>{rosterFilterSummary(predicate)}<button type="button" disabled={loading} aria-label={`清除${rosterFilterColumns.find((item) => item.field === predicate.field)!.label}篩選`} onClick={() => applyColumn(predicate.field)}>×</button></span>)}
+      {filters.query !== appliedFilters.query && <span role="status">搜尋文字已變更，尚未套用。</span>}
+    </div>
+    {exportMessage && <p role="status" className="client-roster-message">{exportMessage}</p>}
+    {exportError && <p role="alert" className="client-roster-message">{exportError}</p>}
+    {error && <p role="alert" className="client-roster-message">{error}</p>}
+    {loading && <p role="status" className="client-roster-message">正在載入客戶名冊清單…</p>}
+    {!loading && !error && page?.items.length === 0 && <p role="status" className="client-roster-message">{hasActiveFilter(appliedFilters) ? '沒有符合篩選條件的案件。' : '目前沒有可顯示的案件。'}</p>}
+    {!error && page && <div className="client-roster-table-wrap" aria-busy={loading}><table>
       <caption>客戶名冊清單（第 {Math.floor(pageOffset / pageSize) + 1} 頁）</caption>
       <thead><tr>
-        <th scope="col"><button type="button" onClick={() => changeSort('case_no')}>案件編號{sortLabel('case_no')}</button></th>
+        <th scope="col" aria-sort={appliedFilters.sortBy === 'case_no' ? appliedFilters.sortOrder === 'asc' ? 'ascending' : 'descending' : undefined}>{columnHeading('case_no', 'case_no')}</th>
         <th scope="col">匯入虛擬帳號</th>
         <th scope="col">內建虛擬帳號</th>
-        <th scope="col"><button type="button" onClick={() => changeSort('customer_name')}>客戶姓名{sortLabel('customer_name')}</button></th>
-        <th scope="col">電話</th><th scope="col">行政區</th><th scope="col">BeClass 胎數</th>
-        <th scope="col"><button type="button" onClick={() => changeSort('service_days')}>服務天數{sortLabel('service_days')}</button></th>
-        <th scope="col">服務方式</th>
-        <th scope="col">下廚需求</th>
-        <th scope="col"><button type="button" onClick={() => changeSort('expected_start_date')}>預計服務日期{sortLabel('expected_start_date')}</button></th>
-        <th scope="col">案件／訂單狀態</th>
-        <th scope="col" title="client_obligations.due_date（deposit）">訂金應繳日</th>
-        <th scope="col" title="client_obligations.due_date（first）">第一期應繳日</th>
-        <th scope="col" title="client_obligations.due_date（second）">第二期應繳日</th>
-        <th scope="col" title="orders.staff_payment_due_date">訂單月嫂應付日</th>
+        <th scope="col" aria-sort={appliedFilters.sortBy === 'customer_name' ? appliedFilters.sortOrder === 'asc' ? 'ascending' : 'descending' : undefined}>{columnHeading('name', 'customer_name')}</th>
+        <th scope="col">{columnHeading('phone')}</th><th scope="col">{columnHeading('district')}</th><th scope="col">{columnHeading('multi_birth_count')}</th>
+        <th scope="col" aria-sort={appliedFilters.sortBy === 'service_days' ? appliedFilters.sortOrder === 'asc' ? 'ascending' : 'descending' : undefined}>{columnHeading('service_days', 'service_days')}</th>
+        <th scope="col">{columnHeading('service_type')}</th>
+        <th scope="col">{columnHeading('requires_cooking')}</th>
+        <th scope="col" aria-sort={appliedFilters.sortBy === 'expected_start_date' ? appliedFilters.sortOrder === 'asc' ? 'ascending' : 'descending' : undefined}>{columnHeading('planned_start_date', 'expected_start_date')}</th>
+        <th scope="col">{columnHeading('order_status')}</th>
+        <th scope="col" title="client_obligations.due_date（deposit）">{columnHeading('deposit_due_date')}</th>
+        <th scope="col" title="client_obligations.due_date（first）">{columnHeading('first_due_date')}</th>
+        <th scope="col" title="client_obligations.due_date（second）">{columnHeading('second_due_date')}</th>
+        <th scope="col" title="orders.staff_payment_due_date">{columnHeading('staff_payment_due_date')}</th>
         <th scope="col" title="staff_obligations.due_date">月嫂義務應付日</th>
-        <th scope="col" title="client_obligations.due_date（subsidy_return）">客戶補助退還日</th>
+        <th scope="col" title="client_obligations.due_date（subsidy_return）">{columnHeading('subsidy_return_due_date')}</th>
         <th scope="col" title="既有 _claim_schedule(actual_end_date) 投影；非實際送件日">補助預計申請年月</th>
       </tr></thead>
       <tbody>{page.items.map((item) => <tr

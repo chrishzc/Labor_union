@@ -22,6 +22,7 @@
 - inbound: Orders React route — 只讀取既有typed projection。
 - outbound: `scheduling/scheduling` — 正式指派資料只顯示typed owner projection，不由React重算。
 - outbound: `case-import/hcm-current-workbook-import` — 透過既有 typed current review Query 顯示本案原始進件欄位問題，不重新判定問題解除或異動匯入 roots。
+- outbound: `clients/client-profile/profile-change` — 案件處理組合 Client Profile 欄位修正面板，提供電話及服務方式等 current review 欄位的直接修正，保存後重讀 review；Orders 補件命令保持既有 writer。
 
 ## Contracts
 - `document/架構重整/01_規格基線/01_Orders_Domain.md` — Orders root facts。

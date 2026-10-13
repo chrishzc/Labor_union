@@ -14,6 +14,7 @@
   - `subsystems/orders/historical_restart_arrangement.py` — confirmed dates 後獨立的正式安排 Preview／Apply coordinator；同一 outer UoW 接續 Orders lifecycle，保存實際結束日與 owner version，依已確認開始日判定服務中，完工仍由 AutoComplete 執行。
   - `domains/orders/lifecycle.py` — 重啟正式安排沿用 Orders 服務中判定，不補造訂金或契約事實。
   - `subsystems/orders/calendar_detail_query.py`
+  - `infrastructure/mysql/order_calendar_detail_query_repository.py` — 唯讀投影 current 服務方式與 immutable Case Import 原始文字，供當次人工排休試算對照。
   - `infrastructure/mysql/service_date_confirmation_repository.py`
   - `api/schemas/service_date_confirmation.py`
 - entrypoints:
@@ -23,10 +24,13 @@
   - `ui_react/src/adapters/orders/order_mutation_adapter.ts`
   - `ui_react/src/adapters/orders/service_date_start_flow.ts` — 將未保存開始日的建議範圍投影到 UI；人工確認後串接既有 Actual Start 與服務日期 writer，保留第一步結果及第二步恢復狀態。
   - `ui_react/src/components/OrderServiceDatesPanel.tsx`
+    - 顯示 Case Import 原始服務方式；人工休假星期僅作當次 server 精算參數，即時更新建議，最後確認只保存服務日期。
+  - `ui_react/src/components/CandidatePlannedServiceDates.tsx` — 初步候選每週說明的單一保存預計日期操作，重用 Service Dates flow；不串接 Actual Start，星期僅為當次試算。
   - `ui_react/src/components/HistoricalRestartArrangementPanel.tsx`
   - `ui_react/src/api/orders/order_mutation_client.ts`
 
 ## Dependencies
+- outbound: `case-import/hcm-current-workbook-import` — 原始服務方式只讀 Case Import immutable source snapshot，排班試算不改寫來源。
 - outbound: `orders/actual-start` — 輸入改變時零寫入 Preview；最後確認才 Apply／readback，取得新 owner versions 後再 Preview／Apply 服務日期。正式或歷史重排候選須與核對集合一致。
 - outbound: `orders/lifecycle-authoritative-facts` — 歷史正式安排以 typed lifecycle candidate 委派現有 Orders writer 保存事件、projection 與 outbox；尚未確認或未來開始日維持訂單成立。
 - outbound: `scheduling/scheduling` — 日期保存不再重建 restart tombstone；後續明確正式安排才呼叫 canonical generation replacement writer。

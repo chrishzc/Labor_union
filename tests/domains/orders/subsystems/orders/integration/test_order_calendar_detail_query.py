@@ -41,9 +41,17 @@ def test_query_rejects_projection_identity_drift() -> None:
         _service({"case_no": "CASE-2", "service_mode": "週休2日"}).query("CASE-1")
 
 
-def test_query_rejects_unexpected_service_mode() -> None:
-    with pytest.raises(OrderCalendarDetailContractError, match="unsupported service mode"):
-        _service({"case_no": "CASE-1", "service_mode": "unknown"}).query("CASE-1")
+@pytest.mark.parametrize("source", ["無休", "休五、日"])
+def test_query_displays_source_text_without_guessing_a_calendar_rule(source) -> None:
+    detail = _service({"case_no": "CASE-1", "service_mode": source}).query("CASE-1")
+    assert detail.service_mode is None
+    assert detail.original_service_type == source
+
+
+def test_query_preserves_original_import_text_after_manual_profile_correction() -> None:
+    detail = _service({"case_no": "CASE-1", "service_mode": "週休2日", "original_service_type": "休五、日"}).query("CASE-1")
+    assert detail.original_service_type == "休五、日"
+    assert detail.service_mode == "週休2日"
 
 
 def test_query_maps_missing_projection_to_not_found() -> None:

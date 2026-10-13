@@ -31,7 +31,8 @@ class OrderCalendarDetailRepository(Protocol):
 @dataclass(frozen=True)
 class OrderCalendarDetail:
     case_no: str
-    service_mode: str
+    service_mode: str | None
+    original_service_type: str | None = None
 
 
 class OrderCalendarDetailQueryService:
@@ -55,17 +56,23 @@ def _canonical_case_no(value: object) -> str:
 
 
 def _validated_detail(row: Mapping[str, object], expected_case_no: str) -> OrderCalendarDetail:
-    if frozenset(row) != _EXPECTED_FIELDS:
+    if frozenset(row) not in {_EXPECTED_FIELDS, _EXPECTED_FIELDS | {"original_service_type"}}:
         raise OrderCalendarDetailContractError("unexpected projection fields")
     case_no = row.get("case_no")
     service_mode = row.get("service_mode")
+    original = row.get("original_service_type", service_mode)
+    if original is not None and (not isinstance(original, str) or len(original) > 100):
+        raise OrderCalendarDetailContractError("invalid original service type")
+    if service_mode is not None and not isinstance(service_mode, str):
+        raise OrderCalendarDetailContractError("unsupported service mode")
     if isinstance(service_mode, str):
         service_mode = _LEGACY_SERVICE_MODE_ALIASES.get(service_mode, service_mode)
     if case_no != expected_case_no:
         raise OrderCalendarDetailContractError("case identity drift")
+    # Unrecognized source text is display evidence, never an inferred calendar rule.
     if service_mode not in SUPPORTED_SERVICE_MODES:
-        raise OrderCalendarDetailContractError("unsupported service mode")
-    return OrderCalendarDetail(case_no, service_mode)
+        service_mode = None
+    return OrderCalendarDetail(case_no, service_mode, original)
 
 
 __all__ = [

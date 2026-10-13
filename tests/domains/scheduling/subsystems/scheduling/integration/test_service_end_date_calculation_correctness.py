@@ -290,3 +290,33 @@ def test_logic_b_custom_rest_weekdays_overrides_service_mode_default():
         custom_rest_weekdays=[5, 6],  # force Sat+Sun rest instead
     )
     assert result["actual_end_date"] == date(2026, 3, 9)
+
+
+def test_manual_friday_sunday_override_uses_raw_text_without_guessing_or_saving_it():
+    response = calculate_schedule(ScheduleCalculationRequest(
+        actual_start_date=date(2026, 3, 2), target_service_days=6,
+        service_mode="休五、日", custom_rest_weekdays=[4, 6],
+    ), principal=AdminPrincipal(1, "test-admin", "Test", "system_admin"))
+    assert response.data.actual_end_date == date(2026, 3, 9)
+    assert response.data.actual_work_days_count == 6
+    assert [day.date for day in response.data.day_by_day if day.is_work_day] == [
+        date(2026, 3, value) for value in (2, 3, 4, 5, 7, 9)
+    ]
+    assert all(day.date.weekday() not in {4, 6} for day in response.data.day_by_day if day.is_work_day)
+
+
+def test_unknown_raw_text_requires_explicit_manual_weekdays():
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException) as rejected:
+        calculate_schedule(ScheduleCalculationRequest(actual_start_date=date(2026, 3, 2),
+            target_service_days=6, service_mode="休五、日"),
+            principal=AdminPrincipal(1, "test-admin", "Test", "system_admin"))
+    assert rejected.value.status_code == 422
+
+
+@pytest.mark.parametrize("weekdays", [list(range(7)), [-1], [7], [True]])
+def test_invalid_manual_rest_weekdays_are_rejected_before_calculation(weekdays):
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        ScheduleCalculationRequest(actual_start_date=date(2026, 3, 2),
+            target_service_days=6, service_mode="休五、日", custom_rest_weekdays=weekdays)

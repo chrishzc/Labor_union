@@ -5,10 +5,28 @@ import { orderIntakeCompletionClient } from '../../../../../../../api/orders/ord
 import { OrdersIntakeRepairCard } from '../../../../../../../components/OrdersIntakeRepairCard';
 import { OrderIntakeRepairPanel } from '../../../../../../../components/OrderIntakeRepairPanel';
 import { hcmResubmissionClient } from '../../../../../../../api/case_import/hcm_resubmission_client';
+import { clientRegistryClient } from '../../../../../../../api/client_registry/client_registry_client';
+import type { ClientRegistryDetail } from '../../../../../../../api/client_registry/client_registry_schemas';
 
 const ETAG = 'a'.repeat(64);
 const FP1 = '1'.repeat(64);
 const FP2 = '2'.repeat(64);
+
+const profileDetail: ClientRegistryDetail = {
+  case_no: 'CASE-153',
+  client: { client_id: 1, version: 2,
+    values: { name: '測試客戶', gender: null, phone: null, city: null, address: null,
+      residence_type: null, delivery_type: null, baby_info: null, notes: null, service_type: '無休' },
+    field_capabilities: {
+      phone: { owner: 'client_profile', editable: true, reason: null, options: null },
+      service_type: { owner: 'client_profile', editable: true, reason: null, options: ['連續服務', '休周六', '休周日', '週休2日'] },
+    },
+  },
+  beclass: { status: 'unbound', record_id: null, source_kind: null, version: null, values: null, field_capabilities: {} },
+  order_information: { status: 'unbound', values: null, field_issues: {} },
+  finance: { status: 'not_ready', code: 'client_finance_bootstrap_required', values: null },
+  order_terms: { status: 'not_ready', code: 'order_terms_incomplete', data: null, field_capabilities: {} },
+};
 
 const incompleteSummary = {
   case_no: 'CASE-153',
@@ -41,6 +59,48 @@ const completeSummary = {
 describe('Orders intake repair entry', () => {
   beforeEach(() => {
     vi.spyOn(hcmResubmissionClient, 'current').mockResolvedValue({ items: [], next_cursor: null });
+    vi.spyOn(clientRegistryClient, 'query').mockResolvedValue(profileDetail);
+  });
+
+  it('repairs the actual HCM fields in case processing and rereads the remaining warnings without resaving valid terms', async () => {
+    vi.spyOn(orderIntakeCompletionClient, 'previewCompletion').mockResolvedValue({
+      case_no: 'CASE-153', lifecycle_version: 7, current_status: '待補件', target_status: '洽談中',
+      current_start_date: '2026-10-15', current_service_days: 30,
+      missing_fields: [], blockers: ['order_intake_completion_service_data_locked'],
+      apply_allowed: false, preview_fingerprint: FP1,
+    });
+    vi.mocked(hcmResubmissionClient.current)
+      .mockResolvedValueOnce({ items: [{ source_id: 30, review_identity: 'current', case_no: 'CASE-153', fields: ['行動電話', '服務方式'], can_correct: true }], next_cursor: null })
+      .mockResolvedValue({ items: [{ source_id: 30, review_identity: 'current', case_no: 'CASE-153', fields: ['服務方式'], can_correct: true }], next_cursor: null });
+    vi.spyOn(clientRegistryClient, 'preview').mockResolvedValue({
+      owner: 'client_profile', aggregate_identity: 'CASE-153', current_version: 2,
+      before: { phone: null }, after: { phone: '0912345678' }, preview_fingerprint: FP1,
+    });
+    const apply = vi.spyOn(clientRegistryClient, 'apply').mockImplementation(async (caseNo, _owner, _changes, _version, fp, _reason, key) => ({
+      owner: 'client_profile', aggregate_identity: caseNo, resulting_version: 3,
+      changed_fields: ['phone'], preview_fingerprint: fp, idempotency_key: key!, replayed: false,
+      readback: { phone: '0912345678' },
+    }));
+    const applyTerms = vi.spyOn(orderIntakeCompletionClient, 'applyTerms');
+    const onChanged = vi.fn().mockResolvedValue(undefined);
+    render(<OrderIntakeRepairPanel caseNo="CASE-153" orderStatus="待補件" onChanged={onChanged} />);
+    const phone = await screen.findByLabelText('行動電話');
+    expect(screen.getByLabelText('服務方式')).toHaveValue('無休');
+    expect(screen.queryByLabelText('服務開始日')).not.toBeInTheDocument();
+    fireEvent.change(phone, { target: { value: '0912345678' } });
+    fireEvent.change(screen.getByLabelText('欄位修正原因'), { target: { value: '核對並修正電話' } });
+    fireEvent.click(screen.getByRole('button', { name: '預覽欄位修正' }));
+    await screen.findByLabelText('欄位修正前後');
+    vi.mocked(clientRegistryClient.query).mockResolvedValue({ ...profileDetail, client: {
+      ...profileDetail.client, version: 3, values: { ...profileDetail.client.values, phone: '0912345678' },
+    } });
+    fireEvent.click(screen.getByRole('button', { name: '確認儲存缺件資料' }));
+    expect(await screen.findByText('原始進件欄位待修正：服務方式')).toBeInTheDocument();
+    await waitFor(() => expect(onChanged).toHaveBeenCalledOnce());
+    expect(screen.queryByLabelText('行動電話')).not.toBeInTheDocument();
+    expect(await screen.findByLabelText('服務方式')).toHaveValue('無休');
+    expect(apply.mock.calls[0][2]).toEqual({ phone: '0912345678' });
+    expect(applyTerms).not.toHaveBeenCalled();
   });
 
   afterEach(() => {

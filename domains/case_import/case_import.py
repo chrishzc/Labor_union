@@ -220,6 +220,24 @@ class CaseImportCandidate:
     provisional_registration: ProvisionalRegistrationFacts | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class ImportedOrderIntakeTerms:
+    planned_start_date: date | None
+    service_days: int | None
+
+
+def imported_order_intake_terms(candidate: CaseImportCandidate) -> ImportedOrderIntakeTerms:
+    """Retain independently valid intake terms even when another field needs repair."""
+    attributes = {item.name: item.value for item in candidate.client_attributes}
+    start_date = attributes.get("service_start_date")
+    service_days = attributes.get("service_days")
+    if start_date is not None:
+        _require_exact_type(start_date, date, "planned start date")
+    if service_days is not None:
+        require_positive_integer(service_days, "service days")
+    return ImportedOrderIntakeTerms(start_date, service_days)
+
+
 # Kept cohesive so source and bootstrap fingerprints describe one candidate.
 def build_case_import_candidate(
     facts: CaseImportFacts,

@@ -62,7 +62,8 @@ def unresolved_hcm_review_fields(
             continue
         value = current_values.get(targets[0])
         profile_field = targets[0].removeprefix("clients.")
-        if len(targets) == 1 and targets[0].startswith("clients.") and profile_field in CLIENT_PROFILE_FIELD_SET:
+        if (len(targets) == 1 and targets[0].startswith("clients.")
+                and profile_field in CLIENT_PROFILE_FIELD_SET and profile_field != "service_type"):
             try:
                 validate_changes({profile_field: value})
             except ClientProfileValidationError:

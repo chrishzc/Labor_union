@@ -11,6 +11,27 @@ describe('clientRegistryClient list query', () => {
     vi.spyOn(sessionClient, 'getToken').mockReturnValue('test-token');
   });
 
+  it('shares serialized column filters between list and export and pages full-list options', async () => {
+    const columnFilters = [{ field: 'requires_cooking', operator: 'in', values: ['false', null] }] as const;
+    const request = { columnFilters: [{ ...columnFilters[0], values: [...columnFilters[0].values] }] };
+    const get = vi.spyOn(transport, 'get').mockResolvedValue(response);
+    await clientRegistryClient.list(request);
+    expect(get).toHaveBeenLastCalledWith('/api/v1/admin/registries/clients', expect.objectContaining({ params: expect.objectContaining({ column_filters: JSON.stringify(request.columnFilters) }) }));
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(new Blob(['test']), { headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' } }));
+    await clientRegistryClient.downloadOrderAccounting(request);
+    const url = new URL(String(fetchMock.mock.calls[0][0]), 'http://localhost');
+    expect(url.searchParams.get('column_filters')).toBe(JSON.stringify(request.columnFilters));
+    await clientRegistryClient.downloadCaseInspection({ ...request, limit: 1, offset: 100, after: 'CASE-001' });
+    const inspectionUrl = new URL(String(fetchMock.mock.calls[1][0]), 'http://localhost');
+    expect(inspectionUrl.pathname).toBe('/api/v1/admin/registries/clients/export/case-inspection');
+    expect(inspectionUrl.searchParams.get('column_filters')).toBe(JSON.stringify(request.columnFilters));
+    expect([...inspectionUrl.searchParams.keys()]).toEqual(['column_filters']);
+    get.mockResolvedValue({ success: true, message: 'ok', data: { values: [null, '東區'], next_offset: 200 }, error: null });
+    const options = await clientRegistryClient.filterOptions('district', ' 區 ', 100);
+    expect(get).toHaveBeenLastCalledWith('/api/v1/admin/registries/clients/filter-options', { token: 'test-token', params: { field: 'district', search: '區', limit: 100, offset: 100 } });
+    expect(options).toEqual({ values: [null, '東區'], next_offset: 200 });
+  });
+
   it('serializes structured server filters and preserves explicit false', async () => {
     const get = vi.spyOn(transport, 'get').mockResolvedValue(response);
 

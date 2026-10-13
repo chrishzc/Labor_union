@@ -686,14 +686,15 @@ def preview_information(case_no: str, candidate_id: int, info_type: int):
         _close(connection)
 
 
-def preview_weekly_service(case_no: str, candidate_id: int):
+def preview_weekly_service(case_no: str, candidate_id: int, service_dates: tuple[date, ...] | None = None):
     case_no = _required_text(case_no, "case_no", 50)
     candidate_id = _positive_int(candidate_id, "candidate_id")
     connection = get_connection()
     try:
-        projection = MySqlMatchingNotificationRepository(
-            connection
-        ).candidate_weekly_service_preview(case_no, candidate_id)
+        repository = MySqlMatchingNotificationRepository(connection)
+        projection = (repository.candidate_weekly_service_preview(case_no, candidate_id)
+                      if service_dates is None else
+                      repository.candidate_weekly_service_preview(case_no, candidate_id, service_dates))
         rows = projection["rows"]
         required_days = projection["required_service_days"]
         projected_days = projection["projected_service_days"]
@@ -702,7 +703,10 @@ def preview_weekly_service(case_no: str, candidate_id: int):
             warnings.append("約定服務天數尚未確認，請先確認需求。")
         elif projected_days != required_days:
             warnings.append(f"目前日期可提供 {projected_days} 天，與約定 {required_days} 天不符；請協調休假／服務日期後重新確認。")
-        if projection["date_basis"] == "planned":
+        if projection["date_basis"] == "draft":
+            warnings.append("試算日期尚未保存；保存後重新取得檔期提醒。")
+            availability = {"conflicts": ()}
+        elif projection["date_basis"] == "planned":
             availability = search_candidate_inquiry_availability(
                 case_no, [{"staff_id": projection["staff_id"]}], date.today().isoformat(),
                 segmented_facts_port, filter_policy={key: False for key in (

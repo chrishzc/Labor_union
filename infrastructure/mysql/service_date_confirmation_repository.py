@@ -367,7 +367,7 @@ class MySqlServiceDateConfirmationRepository:
         start_date = order["actual_start_date"] or order["start_date"]
         return tuple(
             start_date + timedelta(days=offset)
-            for offset in range(int(order["service_days"]) + 30)
+            for offset in range(int(order["service_days"]) * 7 + 30)
         )
 
     @staticmethod

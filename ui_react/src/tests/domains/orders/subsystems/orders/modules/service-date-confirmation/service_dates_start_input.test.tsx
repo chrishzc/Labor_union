@@ -72,6 +72,64 @@ async function confirm() {
 }
 
 describe('#335 direct start input and existing writer integration', () => {
+  it('對照原始服務方式勾選星期立即重排，人工確認才保存日期，重開不保存星期選項', async () => {
+    mocks.getCalendar.mockResolvedValue({ case_no: CASE, service_mode: null, original_service_type: '休五、日' });
+    mocks.calculate.mockImplementation(async ({ actual_start_date, custom_rest_weekdays }) => {
+      const selected = days(actual_start_date, 30).filter((value) => !custom_rest_weekdays.includes((new Date(value + 'T00:00:00Z').getUTCDay() + 6) % 7)).slice(0, 3);
+      return { ...result(actual_start_date), actual_end_date: selected[2], day_by_day: selected.map((date, i) => ({ date, day_num: i + 1, is_work_day: true, is_rest_day: false, holiday_name: null })) };
+    });
+    const view = render(<OrderServiceDatesPanel caseNo={CASE} />);
+    await waitFor(() => expect(screen.getByLabelText('原始匯入服務方式')).toHaveTextContent('休五、日'));
+    expect(mocks.calculate).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('checkbox', { name: '星期五' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '星期日' }));
+    await waitFor(() => expect(mocks.calculate).toHaveBeenLastCalledWith({ case_no: CASE,
+      actual_start_date: '2026-10-01', target_service_days: 3, service_mode: '休五、日', custom_rest_weekdays: [4, 6] }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '服務日期 2026-10-05' })).toHaveAttribute('aria-pressed', 'true'));
+    expect(screen.getByRole('button', { name: '服務日期 2026-10-02' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: '服務日期 2026-10-04' })).toHaveAttribute('aria-pressed', 'false');
+    expect(mocks.applyStart).not.toHaveBeenCalled(); expect(mocks.applyDates).not.toHaveBeenCalled();
+    await confirm();
+    await screen.findByText('服務日期已確認並回讀版本 #1。');
+    expect(mocks.applyDates.mock.calls[0][1].service_dates).toEqual(['2026-10-01', '2026-10-03', '2026-10-05']);
+    expect(mocks.applyDates.mock.calls[0][1]).not.toHaveProperty('custom_rest_weekdays');
+    view.unmount();
+    const calls = mocks.calculate.mock.calls.length;
+    render(<OrderServiceDatesPanel caseNo={CASE} />);
+    await screen.findByLabelText('已確認服務日期回讀');
+    expect(screen.getByLabelText('原始匯入服務方式')).toHaveTextContent('休五、日');
+    expect(screen.getByRole('checkbox', { name: '星期五' })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: '星期日' })).not.toBeChecked();
+    expect(mocks.calculate).toHaveBeenCalledTimes(calls);
+  });
+
+  it('七天全休會停止計算及確認，不提交保存', async () => {
+    render(<OrderServiceDatesPanel caseNo={CASE} />);
+    await waitFor(() => expect(screen.getByLabelText('實際開始日')).toHaveValue('2026-10-01'));
+    for (const label of ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日']) {
+      fireEvent.click(screen.getByRole('checkbox', { name: label }));
+    }
+    await screen.findByText('不能將每週七天全部設為休假，請保留至少一天服務日。');
+    expect(mocks.applyDates).not.toHaveBeenCalled(); expect(mocks.applyStart).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: '確認服務日期' })).toBeDisabled();
+    expect(mocks.calculate.mock.calls.every(([request]) => request.custom_rest_weekdays.length < 7)).toBe(true);
+  });
+
+  it('快速變更休假星期時，較晚返回的舊建議不能覆蓋新日曆或恢复舊預覽', async () => {
+    let resolve!: (value: ReturnType<typeof result>) => void;
+    mocks.calculate.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    render(<OrderServiceDatesPanel caseNo={CASE} />);
+    await waitFor(() => expect(screen.getByLabelText('實際開始日')).toHaveValue('2026-10-01'));
+    fireEvent.click(screen.getByRole('checkbox', { name: '星期五' }));
+    await waitFor(() => expect(mocks.calculate).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('checkbox', { name: '星期日' }));
+    await screen.findByLabelText('建議服務日期摘要');
+    await act(async () => resolve(result('2026-10-15')));
+    expect(screen.getByLabelText('此次選定服務日期摘要')).toHaveTextContent('2026-10-01');
+    expect(screen.getByLabelText('人工選定休假星期')).toHaveTextContent('此次休假：星期五、星期日');
+    expect(screen.queryByRole('button', { name: '完成服務日期確認' })).not.toBeInTheDocument();
+  });
+
   it.each(['2026-09-28', '2026-10-15', '2026-10-31'])('自動以 %s 試算，核對前零寫入，保存後用新版本接續並可重新開啟', async (date) => {
     const onObserved = vi.fn();
     const view = render(<OrderServiceDatesPanel caseNo={CASE} onObserved={onObserved} />);
@@ -248,6 +306,7 @@ describe('#335 direct start input and existing writer integration', () => {
     await waitFor(() => expect(mocks.calculate).toHaveBeenCalledTimes(1));
     mocks.getDates.mockResolvedValue({ ...datesQuery(), case_no: 'OTHER' });
     mocks.getStart.mockResolvedValue({ ...startQuery(), case_no: 'OTHER', planned_start_date: '2026-11-01' });
+    mocks.getCalendar.mockResolvedValue({ case_no: 'OTHER', service_mode: '連續服務' });
     view.rerender(<OrderServiceDatesPanel caseNo="OTHER" />);
     await waitFor(() => expect(screen.getByLabelText('實際開始日')).toHaveValue('2026-11-01'));
     await act(async () => resolve(result('2026-09-28')));

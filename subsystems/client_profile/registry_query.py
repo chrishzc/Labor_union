@@ -8,6 +8,10 @@ from datetime import datetime, timezone
 from typing import Any, Literal, Protocol
 
 from domains.case_import.beclass_correction import VALID_MULTI_BIRTH_COUNTS
+from subsystems.client_profile.registry_filters import (
+    FIELD_KINDS, RegistryColumnFilter, RegistryFilterField, RegistryFilterOptions,
+    normalize_column_filters,
+)
 
 
 ClientRegistrySortBy = Literal["case_no", "customer_name", "service_days", "expected_start_date"]
@@ -116,7 +120,9 @@ class ClientRegistryRepository(Protocol):
         limit: int,
         after: str | None,
         offset: int,
+        column_filters: tuple[RegistryColumnFilter, ...] = (),
     ) -> tuple[tuple[Mapping[str, Any], ...], str | None, int | None]: ...
+    def filter_options(self, *, field: RegistryFilterField, search: str | None, limit: int, offset: int) -> RegistryFilterOptions: ...
     def load_detail(self, case_no: str) -> Mapping[str, Any] | None: ...
     def load_change_history(self, case_no: str) -> tuple[Mapping[str, Any], ...]: ...
 
@@ -137,6 +143,7 @@ class ClientRegistryQueryApplication:
         limit: int,
         after: str | None,
         offset: int = 0,
+        column_filters: tuple[RegistryColumnFilter, ...] = (),
     ) -> ClientRegistryPage:
         if limit < 1 or limit > 100:
             raise ValueError("client_registry_limit_invalid")
@@ -155,6 +162,7 @@ class ClientRegistryQueryApplication:
             raise ValueError("client_registry_cursor_sort_unsupported")
         if normalized_after is not None and offset:
             raise ValueError("client_registry_pagination_ambiguous")
+        predicates = normalize_column_filters(column_filters)
         rows, next_cursor, next_offset = self._repository.list_page(
             query=normalized_query,
             multi_birth_count=normalized_multi_birth_count,
@@ -165,6 +173,7 @@ class ClientRegistryQueryApplication:
             limit=limit,
             after=normalized_after,
             offset=offset,
+            **({"column_filters": predicates} if predicates else {}),
         )
         items = tuple(_summary(row) for row in rows)
         if cursor_supported and next_cursor is not None and (not items or next_cursor != items[-1].case_no):
@@ -178,6 +187,15 @@ class ClientRegistryQueryApplication:
             next_cursor if cursor_supported else None,
             next_offset if normalized_after is None else None,
         )
+
+    def filter_options(self, *, field: RegistryFilterField, search: str | None = None, limit: int = 100, offset: int = 0) -> RegistryFilterOptions:
+        if field not in FIELD_KINDS:
+            raise ValueError("client_registry_filter_field_invalid")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+            raise ValueError("client_registry_limit_invalid")
+        if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
+            raise ValueError("client_registry_offset_invalid")
+        return self._repository.filter_options(field=field, search=_optional_text(search, 100), limit=limit, offset=offset)
 
     def query(self, case_no: str) -> ClientRegistryDetail:
         identity = _required_text(case_no, 50, "client_registry_case_no_invalid")

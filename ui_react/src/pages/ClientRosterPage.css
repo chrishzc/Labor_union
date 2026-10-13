@@ -2,7 +2,7 @@
 .client-roster-page--embedded { padding: 0; }
 .client-roster-page h1 { margin: 0; color: #7c2d12; }
 .client-roster-page header p { margin: 6px 0 20px; color: #74593f; }
-.client-roster-filters { display: grid; grid-template-columns: minmax(190px, 2fr) repeat(3, minmax(130px, 1fr)) auto; gap: 12px; align-items: end; padding: 14px; border: 1px solid #ead3c8; border-radius: 12px; background: #fffdfa; }
+.client-roster-filters { display: grid; grid-template-columns: minmax(190px, 1fr) auto; gap: 12px; align-items: end; padding: 14px; border: 1px solid #ead3c8; border-radius: 12px; background: #fffdfa; }
 .client-roster-filters label { display: grid; gap: 5px; color: #65483b; font-size: .88rem; }
 .client-roster-filters input, .client-roster-filters select { min-width: 0; border: 1px solid #cfa99a; border-radius: 8px; padding: 9px 10px; background: white; color: #432c23; }
 .client-roster-filter-actions { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -10,7 +10,7 @@
 .client-roster-page button:disabled { cursor: wait; opacity: .65; }
 .client-roster-filter-actions button:first-child { background: #9a3412; color: white; }
 .client-roster-message { margin-top: 16px; padding: 10px; border-radius: 8px; background: #fff7ed; }
-.client-roster-pagination { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 16px; }
+.client-roster-pagination { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin: 0 0 8px; }
 .client-roster-pagination span { color: #65483b; }
 .client-roster-table-wrap { margin-top: 10px; max-height: 45vh; overflow: auto; scrollbar-gutter: stable; border: 1px solid #ead3c8; border-radius: 12px; background: white; }
 .client-roster-table-wrap table { width: 100%; min-width: 1250px; border-collapse: collapse; text-align: left; }
@@ -18,6 +18,29 @@
 .client-roster-table-wrap th, .client-roster-table-wrap td { padding: 11px 13px; border-top: 1px solid #f1ddd5; vertical-align: top; }
 .client-roster-table-wrap th { position: sticky; top: 0; background: #fff7ed; color: #7c2d12; white-space: nowrap; }
 .client-roster-table-wrap th button { padding: 0; border: 0; background: transparent; font: inherit; font-weight: 700; }
+.client-roster-column-heading { display: flex; align-items: center; gap: 8px; }
+.client-roster-table-wrap th .client-roster-filter-trigger { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: 1px solid #d8b9a7; border-radius: 5px; }
+.client-roster-table-wrap th .client-roster-filter-trigger:hover, .client-roster-table-wrap th .client-roster-filter-trigger.is-active { color: white; background: #9a3412; border-color: #9a3412; }
+.client-roster-active-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; font-size: .86rem; }
+.client-roster-filter-help { flex-basis: 100%; color: #74593f; }
+.client-roster-filter-chip { display: inline-flex; align-items: center; gap: 8px; padding: 4px 7px 4px 10px; border: 1px solid #e5bca3; border-radius: 6px; background: #fff7ed; }
+.client-roster-filter-chip button { padding: 0 5px; border: 0; background: transparent; font-size: 1.1rem; }
+.client-roster-column-panel { position: fixed; z-index: 1100; box-sizing: border-box; width: min(320px, calc(100vw - 16px)); overflow: auto; padding: 16px; border: 1px solid #d8b9a7; border-radius: 10px; background: #fffdfa; color: #432c23; box-shadow: 0 8px 28px #432c232b; font-family: inherit; font-size: .88rem; }
+.client-roster-column-panel form { display: grid; gap: 12px; }
+.client-roster-column-panel label { display: grid; gap: 5px; }
+.client-roster-column-panel input:not([type=checkbox]), .client-roster-column-panel select { box-sizing: border-box; width: 100%; min-width: 0; padding: 8px; border: 1px solid #cfa99a; border-radius: 6px; color: #432c23; background: white; font: inherit; }
+.client-roster-column-panel button { padding: 7px 10px; border: 1px solid #cfa99a; border-radius: 6px; background: #fff7ed; color: #7c2d12; cursor: pointer; font: inherit; }
+.client-roster-column-panel button:disabled { opacity: .55; cursor: default; }
+.client-roster-column-panel :focus-visible, .client-roster-page button:focus-visible { outline: 2px solid #9a3412; outline-offset: 2px; }
+.client-roster-column-sort, .client-roster-column-select-actions, .client-roster-column-footer { display: flex; gap: 8px; }
+.client-roster-column-clear { text-align: left; }
+.client-roster-column-hint { margin: 0; font-size: .76rem; color: #74593f; }
+.client-roster-column-values { display: grid; gap: 3px; max-height: 190px; overflow: auto; border: 1px solid #ead3c8; border-radius: 6px; padding: 6px; background: white; }
+.client-roster-column-values label { display: flex; align-items: center; gap: 8px; padding: 5px; overflow-wrap: anywhere; }
+.client-roster-column-values input { accent-color: #9a3412; flex-shrink: 0; }
+.client-roster-column-panel [role=alert] { color: #b42318; margin: 0; }
+.client-roster-column-footer { position: sticky; bottom: 0; justify-content: flex-end; border-top: 1px solid #ead3c8; padding: 12px 0 4px; background: #fffdfa; }
+.client-roster-column-footer button:first-child { background: #9a3412; color: white; border-color: #9a3412; }
 .client-roster-table-wrap tbody tr { cursor: pointer; transition: background-color .15s ease, box-shadow .15s ease; }
 .client-roster-table-wrap tbody tr:hover { background: #fff7ed; }
 .client-roster-table-wrap tbody tr:focus-visible { outline: 3px solid rgba(154, 52, 18, .28); outline-offset: -3px; }

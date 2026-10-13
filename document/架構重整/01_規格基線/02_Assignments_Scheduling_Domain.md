@@ -471,6 +471,15 @@ Scheduling／Matching 擁有 case-owned Candidate Contact Pool。它只擁有候
 - 候選池 readback 必須以 nullable `latest_willingness_event_id` 回傳該候選人最新有效意願事件的既有 event ID。客戶端只有在此 ID 與自己收到的意願回條相同、且意願值相同時，才能確認該次回覆已儲存；較新的同值或異值事件只代表最新狀態，不得確認原操作。
 - 客戶同意日期調整、且 Orders Terms 已以同日差平移未指派案件的 planned 起訖日後，重新聯繫原候選人必須在同一 Scheduling transaction 以 current Orders 起訖日重驗 coverage；有衝突仍可繼續協調，更新 candidate contact period／coverage fingerprint、追加前後日期事件並排入新資訊卡，任一步失敗皆 rollback。這不建立正式服務日或 assignment。
 - 未正式排班即可預覽每週服務時間。未有 confirmed service dates 時依候選期間、週休及特殊休假推算並核對 Orders 約定服務天數；不足或超出必須明示，不能靜默視為履約完整。已有 current confirmed dates 時使用精確服務日，包括人工協調的週末上班；同時顯示延長後的 actual conflict 與 buffer 提醒。協調後須重新確認服務日期；正式排班仍以 current owner dates 驗證服務量及實際占用。
+- 2026-10-13 人工裁決：前段每週說明顯示 Case Import 原始服務方式，人工週休僅用於當次 server 試算。
+  當次日期經 Orders Preview 驗證後零寫入投影；一按「保存預計日期」沿 Orders Service Dates writer 保存，
+  無另一步核對／確認，不保存星期設定或 Actual Start，不建立 Scheduling assignment／occupancy。
+  重開及客戶確認資訊均使用 current 保存日期；寄送仍保存既有不可變內容快照，不自動轉換原文。
+- 2026-10-13 後續人工裁決（只解除建立推薦被預計日期阻擋）：由單一已願意的初步候選建立推薦方案時，
+  fresh availability 沿用候選詢問的預計期間；前段每週說明所保存的日期不參與此步的期間／完整組合 gate。
+  仍核對 active 候選、原詢問期間及初步意願，真正的檔期衝突與不可服務期間維持阻擋。
+  不改寫候選詢問期間、不更換方案期間為預覽日期，也不連動 actual start、正式服務日期或 Scheduling writer。
+  正式排班與既有多月嫂正式分段的日期／完整 coverage 檢查維持既有契約；預計、實際開始日可不同。
 - 管理員僅能從 `willing` 候選人選定一位，重新檢查可用性後建立一個 segment 的正式 matching plan。
 - 正式 matching-plan create command 必須帶 1–191 字元的 `event_key`，並以案件、依序的完整 segments、actor 與 `as_of` 組成 immutable command fingerprint。Apply 先鎖定案件 root、再以 `event_key` 鎖定並重查 receipt；同一完整原命令只回傳已保存的 plan／version／status／segments receipt，不重新檢查已被原命令改變的 availability，也不得依 current plan 或建立時間推測舊結果。相同 key 搭配任一不同 command fact 必須衝突且零寫入。新的 plan、segments 與 receipt 必須在同一 outer UoW 提交；既有歷史 plan 不得回填或臆造 receipt。receipt Query 只證明原命令 identity，unknown-result recovery 仍須另讀 current matching-plan owner state 後才可結束觀測。
 - 多位月嫂共同服務仍是顯式 multi-caregiver fallback plan，不能由候選聯繫池直接轉換。

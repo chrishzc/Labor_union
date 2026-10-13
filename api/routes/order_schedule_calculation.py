@@ -29,6 +29,12 @@ def calculate_schedule(
 ) -> BaseResponse[SchedulePrecisionResultView]:
     """精算服務人員出勤日、扣除排休與國定假日順延完工日"""
     del principal
+    if req.custom_rest_weekdays is None and req.service_mode not in {
+        "休周六", "休周日", "週休1日", "週休一日", "週休2日", "連續服務",
+    }:
+        raise HTTPException(status_code=422, detail={
+            "code": "schedule_rest_weekdays_required", "message": "請人工選定休假星期。",
+        })
     try:
         baseline = attendance_schedule_query.calculate_order_attendance_schedule(
             actual_start_date=req.actual_start_date,

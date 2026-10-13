@@ -310,7 +310,7 @@ class MySqlMatchingNotificationRepository:
         }
 
     def candidate_weekly_service_preview(
-        self, case_no: str, candidate_id: int,
+        self, case_no: str, candidate_id: int, service_dates: tuple[date, ...] | None = None,
     ) -> dict[str, object]:
         with self._connection.cursor() as cursor:
             cursor.execute(_CANDIDATE_WEEKLY_FACTS_SQL, (candidate_id, case_no))
@@ -324,14 +324,17 @@ class MySqlMatchingNotificationRepository:
         if not isinstance(row, Mapping):
             raise LookupError("candidate contact not found")
         segment = dict(row)
-        if confirmed_dates:
-            segment.update(assigned_start_date=min(confirmed_dates),
-                           assigned_end_date=max(confirmed_dates), service_dates=confirmed_dates)
+        selected_dates = confirmed_dates
+        if service_dates is not None:
+            selected_dates = frozenset(service_dates)
+        if selected_dates:
+            segment.update(assigned_start_date=min(selected_dates),
+                           assigned_end_date=max(selected_dates), service_dates=selected_dates)
         rows = _proposed_weekly_rows((segment,))
         return {
             "rows": rows, "required_service_days": row.get("service_days"),
             "projected_service_days": sum(item["weekly_work_days"] for item in rows),
-            "date_basis": "confirmed" if confirmed_dates else "planned",
+            "date_basis": "draft" if service_dates is not None else "confirmed" if confirmed_dates else "planned",
             "staff_id": int(row["staff_id"]),
         }
 

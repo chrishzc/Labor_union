@@ -28,7 +28,7 @@ import { hcmResubmissionClient, type HcmCurrentReview, type HcmReviewSkipPreview
 const REGISTRY_PROFILE_FIELDS: Readonly<Record<string, string>> = {
   姓名: 'name', 性別: 'gender', 行動電話: 'phone', 縣市: 'city',
   '預產期/預計服務開始月份': 'due_month', 不符合原因: 'reject_reason',
-  居住型態: 'residence_type', 生產方式: 'delivery_type', 寶寶資訊: 'baby_info',
+  居住型態: 'residence_type', 生產方式: 'delivery_type', 寶寶資訊: 'baby_info', 服務方式: 'service_type',
 };
 const REGISTRY_ORDER_FIELDS = new Set(['服務時間', '預計服務日期', '希望服務天數']);
 

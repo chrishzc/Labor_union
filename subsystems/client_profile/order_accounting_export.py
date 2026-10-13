@@ -14,6 +14,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from domains.case_import.beclass_correction import VALID_MULTI_BIRTH_COUNTS
+from subsystems.client_profile.registry_filters import RegistryColumnFilter, normalize_column_filters
 from subsystems.client_profile.registry_query import (
     ClientRegistrySortBy,
     ClientRegistrySortOrder,
@@ -43,6 +44,7 @@ class OrderAccountingExportQuery:
     requires_cooking: bool | None = None
     sort_by: ClientRegistrySortBy | None = None
     sort_order: ClientRegistrySortOrder | None = None
+    column_filters: tuple[RegistryColumnFilter, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -212,6 +214,7 @@ def _normalize_query(selection: OrderAccountingExportQuery) -> OrderAccountingEx
         requires_cooking=selection.requires_cooking,
         sort_by=selection.sort_by,
         sort_order=selection.sort_order or ("asc" if selection.sort_by is not None else None),
+        column_filters=normalize_column_filters(selection.column_filters),
     )
 
 

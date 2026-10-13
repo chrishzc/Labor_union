@@ -9,6 +9,54 @@ from api.routes import candidate_contact_pool, matches
 from api.schemas.candidate_contact_pool import CandidateWeeklyServicePreviewView
 
 
+def test_transient_weekly_dates_are_validated_by_orders_preview_without_writes(monkeypatch):
+    from datetime import date
+    seen = []
+
+    class Dates:
+        def preview(self, case_no, service_dates):
+            seen.append((case_no, service_dates))
+            return SimpleNamespace(candidate=SimpleNamespace(service_dates=tuple(sorted(service_dates))))
+
+    def weekly(case_no, candidate_id, service_dates):
+        assert service_dates == (date(2026, 11, 5), date(2026, 11, 7))
+        return {"case_no": case_no, "candidate_id": candidate_id, "required_service_days": 2,
+                "projected_service_days": 2, "date_basis": "draft", "warnings": [], "rows": []}
+
+    monkeypatch.setattr(candidate_contact_pool.workflow, "preview_weekly_service", weekly)
+    app = FastAPI()
+    app.include_router(candidate_contact_pool.router)
+    app.dependency_overrides[candidate_contact_pool.require_line_matching_reader] = lambda: SimpleNamespace(username="reader")
+    app.dependency_overrides[candidate_contact_pool.get_service_date_confirmation_workflow] = Dates
+    response = TestClient(app).post(
+        "/api/v1/orders/CASE-001/candidate-contact-pool/candidates/8/weekly-service/preview",
+        json={"service_dates": ["2026-11-07", "2026-11-05"]},
+    )
+    assert response.status_code == 200, response.text
+    assert len(seen) == 1
+    assert response.json()["data"]["date_basis"] == "draft"
+
+
+def test_invalid_transient_dates_do_not_reach_weekly_projection(monkeypatch):
+    class Dates:
+        def preview(self, *_args):
+            raise ValueError("service_date_confirmation_date_outside_selectable_range")
+
+    def forbidden(*_args):
+        raise AssertionError("invalid dates must not be projected")
+
+    monkeypatch.setattr(candidate_contact_pool.workflow, "preview_weekly_service", forbidden)
+    app = FastAPI()
+    app.include_router(candidate_contact_pool.router)
+    app.dependency_overrides[candidate_contact_pool.require_line_matching_reader] = lambda: SimpleNamespace(username="reader")
+    app.dependency_overrides[candidate_contact_pool.get_service_date_confirmation_workflow] = Dates
+    response = TestClient(app).post(
+        "/api/v1/orders/CASE-001/candidate-contact-pool/candidates/8/weekly-service/preview",
+        json={"service_dates": ["2026-11-05"]},
+    )
+    assert response.status_code == 409
+
+
 def test_candidate_weekly_service_preview_route_returns_typed_rows(monkeypatch):
     monkeypatch.setattr(
         candidate_contact_pool.workflow,
@@ -16,6 +64,8 @@ def test_candidate_weekly_service_preview_route_returns_typed_rows(monkeypatch):
         lambda case_no, candidate_id: {
             "case_no": case_no,
             "candidate_id": candidate_id,
+            "required_service_days": 5, "projected_service_days": 5,
+            "date_basis": "planned", "warnings": [],
             "rows": [{
                 "serial_number": 1,
                 "staff_name": "王美華",

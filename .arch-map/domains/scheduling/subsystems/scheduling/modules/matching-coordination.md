@@ -16,12 +16,15 @@
   - `subsystems/scheduling/matching_coordination_contracts.py`
   - `subsystems/scheduling/matching_notification_contracts.py` — formal matching contact、customer confirmation preview 與 durable notification typed contracts。
   - `subsystems/scheduling/matching_plan_workflow.py`
+    - 單一已願意初步候選的推薦建立借用 inquiry availability 檢查原詢問期間，預計說明日期不成為阻擋；多月嫂正式分段與後續真正排班仍沿既有正式日期檢查。
   - `subsystems/scheduling/matching_communication_workflow.py` — 正式媒合方案的 LINE 意願、暫停、恢復與取消溝通事件。
   - `subsystems/scheduling/segmented_availability_query.py`
   - `subsystems/scheduling/segmented_availability.py` — 純分段 availability；actual conflict 阻擋完整組合，buffer 只提醒。
   - `subsystems/scheduling/candidate_contact_pool_workflow.py` — 初步候選加入及聯絡 fresh-read 預計期間 availability；衝突候選仍可協調，重聯絡更新 contact period／fingerprint 並保留歷史，不建立正式服務日期。每週 Preview 核對約定天數並顯示 actual／buffer 提醒。
   - `subsystems/scheduling/matching_line_cards.py` — 候選資訊與正式媒合的 pure Flex renderer。
   - `subsystems/scheduling/proposed_weekly_service_projection.py` — 候選與 proposed formal plan 的 Monday–Sunday 工作日投影；current confirmed service dates 優先於偏好週休，不讀 effective schedule。
+  - `ui_react/src/components/OrderInformationSheets.tsx` — 前段每週說明嵌入 Orders-owned 預計日期保存介面；週休選項即時試算但不保存，寄送讀 current 事前服務日期。
+  - `ui_react/src/api/scheduling/candidate_contact_pool_client.ts` — weekly GET 讀保存日期；同一路徑 POST Preview 接受當次日期，經 Orders Preview 驗證後零寫入投影每週時數。
   - `subsystems/scheduling/customer_confirmation_download.py` — 由 confirmation package 簽發、到期即失效且檔案範圍受限的客戶履歷下載 reference。
   - `subsystems/line/candidate_contact_postback_application.py` — 將候選資訊卡片回覆轉交給 recipient-bound owner adapter。
   - `subsystems/line/candidate_contact_response_application.py` — 驗證 candidate/customer LIFF recipient，追加結構化回應並建立直接協調 delivery task。
@@ -55,6 +58,7 @@
 ## Dependencies
 - outbound: `orders/order-information` — 候選資訊使用命名投影；預覽與寄送共用相同內容，不建立虛構 assignment。
 - outbound: `orders/orders` — case/lifecycle boundary.
+- outbound: `orders/service-date-confirmation` — 初步候選週說明的當次日期先經 Orders Preview 驗證，保存沿用既有 Q/P/A；客戶寄送內容以 current 日期組成既有不可變快照。
 - outbound: `orders/historical-precision-restart` — restarted `訂單成立` 案件可進入正常媒合；已失效且沒有 generation ownership 的歷史 assignment 不再占用候選檔期。
 - inbound: API transport invokes typed coordination commands, not direct DB writes. The React client/workbench remain isolated-tested without a current App route consumer；candidate LIFF 與 recipient-bound postback 則為 current live LINE inbound，經 application／adapter 追加 candidate-contact events。
 - inbound: `orders/historical-adoption` — 只有 discussion、開始日空白且月嫂唯一可辨識的來源列，才在同一 outer UoW 建立 proposed plan。

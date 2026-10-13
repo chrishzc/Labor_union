@@ -47,6 +47,11 @@ type ServiceDatesRecovery =
   | { caseNo: string; kind: 'superseded'; confirmedVersion: number; currentVersion: number }
   | { caseNo: string; kind: 'observation_in_progress' };
 const AUTOMATIC_CONFIRMATION_REASON = '確認正式服務日期';
+const REST_WEEKDAYS = [
+  { value: 0, label: '星期一' }, { value: 1, label: '星期二' }, { value: 2, label: '星期三' },
+  { value: 3, label: '星期四' }, { value: 4, label: '星期五' }, { value: 5, label: '星期六' },
+  { value: 6, label: '星期日' },
+];
 
 function errorMessage(error: unknown): string {
   return error instanceof Error && error.message.trim()
@@ -90,6 +95,8 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
   const [queryView, setQueryView] = useState<ServiceDateConfirmationQueryView | null>(null);
   const [precision, setPrecision] = useState<SchedulePrecisionResult | null>(null);
   const [serviceMode, setServiceMode] = useState<ServiceMode | null>(null);
+  const [originalServiceType, setOriginalServiceType] = useState<string | null>(null);
+  const [restWeekdays, setRestWeekdays] = useState<number[] | null>(null);
   const [selectedDates, setSelectedDates] = useState<string[]>([]);
   const [preview, setPreview] = useState<ServiceDateConfirmationPreviewView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -146,6 +153,8 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
     setQueryView(null);
     setPrecision(null);
     setServiceMode(null);
+    setOriginalServiceType(null);
+    setRestWeekdays(null);
     setSelectedDates([]);
     setPreview(null);
     setError(null);
@@ -190,7 +199,7 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
     setRecoveryRevision((revision) => revision + 1);
   };
 
-  const loadServiceDates = async (mode: DateLoadMode, inputDate?: string) => {
+  const loadServiceDates = async (mode: DateLoadMode, inputDate?: string, weekdayOverride = restWeekdays, replaceManualDates = false) => {
     const pending = recoveryFromServiceDatesDraft(caseNo);
     if (actionInFlight.current.has(caseNo) || startUnresolved
       || (pending !== null && !(mode === 'resume' && pending.kind === 'superseded'))
@@ -220,11 +229,14 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
     }
     try {
       // Pure reads: stale responses must be discarded BEFORE any shared draft writes.
-      const [serviceDates, currentStart] = await Promise.all([
+      const [serviceDates, currentStart, calendarDetail] = await Promise.all([
         ordersMutationClient.getServiceDates(caseNo, { signal: controller.signal }),
         ordersQueryClient.getActualStart(caseNo, { signal: controller.signal }),
+        ordersQueryClient.getOrderCalendarDetail(caseNo, { signal: controller.signal }),
       ]);
       if (!current()) return;
+      if (calendarDetail.case_no !== caseNo) throw new Error('服務方式回讀案件編號不一致。');
+      setOriginalServiceType(calendarDetail.original_service_type ?? calendarDetail.service_mode);
       if (serviceDates.case_no !== caseNo) throw new Error('服務日期回讀案件編號不一致。');
       if (receipt && serviceDates.current_version !== receipt.confirmed_version) setSuccess(null);
       if (currentStart.case_no !== caseNo) throw new Error('服務日期精算回讀案件編號不一致。');
@@ -242,25 +254,24 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
       }
       let dates = serviceDates.current_dates;
       let calculated: SchedulePrecisionResult | null = null;
-      let modeValue: ServiceMode | null = null;
+      let modeValue: ServiceMode | null = calendarDetail.service_mode;
       let basis: { date: string; confirmed: boolean } | null = null;
       let nextStartPreview: ActualStartPreview | null = null;
       let range = serviceDates.selectable_dates;
       let recommendation: string[] = [];
       if (mode === 'calculate') {
-        const calendarDetail = await ordersQueryClient.getOrderCalendarDetail(caseNo, { signal: controller.signal });
-        if (!current()) return;
-        if (calendarDetail.case_no !== caseNo) {
-          throw new Error('服務日期精算回讀案件編號不一致。');
-        }
         const basisDate = inputDate ?? currentStart.current_actual_start_date ?? currentStart.planned_start_date;
         basis = { date: basisDate, confirmed: basisDate === currentStart.current_actual_start_date };
         modeValue = calendarDetail.service_mode;
+        if (weekdayOverride === null && modeValue === null) {
+          throw new Error('請對照原始服務方式，人工選定休假星期；無固定週休請點選「無固定週休」。');
+        }
         calculated = await schedulePrecisionClient.calculate({
           case_no: caseNo,
           actual_start_date: basis.date,
           target_service_days: serviceDates.contracted_service_days,
-          service_mode: modeValue,
+          service_mode: modeValue ?? calendarDetail.original_service_type ?? '人工排休',
+          ...(weekdayOverride !== null ? { custom_rest_weekdays: weekdayOverride } : {}),
         });
         if (!current()) return;
         if (calculated.actual_start_date !== basis.date || calculated.target_service_days !== serviceDates.contracted_service_days) {
@@ -276,12 +287,17 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
             || (nextStartPreview.scheduling_version ?? 0) !== serviceDates.scheduling_version) {
             throw new Error('開始日核對結果已變更，請重新精算。');
           }
-          if (nextStartPreview.operation === 'reschedule') recommendation = nextStartPreview.actual_start.official_service_dates;
+          if (nextStartPreview.operation === 'reschedule') {
+            if (weekdayOverride !== null && !sameServiceDates(recommendation, nextStartPreview.actual_start.official_service_dates)) {
+              throw new Error('人工選定的休假星期與既有正式重排不同，請使用既有排班異動流程；尚未保存。');
+            }
+            recommendation = nextStartPreview.actual_start.official_service_dates;
+          }
         }
         if (recommendation.length !== serviceDates.contracted_service_days || recommendation.some((date) => !range.includes(date))) {
           throw new Error('精算結果超出目前允許的日期範圍或天數；未刪除任何建議日期，也尚未保存。請核對排休條件。');
         }
-        dates = hasManualChanges ? [...selectedDates] : recommendation;
+        dates = hasManualChanges && !replaceManualDates ? [...selectedDates] : recommendation;
       }
       const liveRecovery = recoveryFromServiceDatesDraft(caseNo);
       if (!current() || actionInFlight.current.has(caseNo)
@@ -316,9 +332,9 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
       setStartPreview(nextStartPreview);
       setInputInvalid(false);
       setSuggestedDates(recommendation);
-      setManualNeedsReview(mode === 'calculate' && hasManualChanges);
+      setManualNeedsReview(mode === 'calculate' && hasManualChanges && !replaceManualDates);
       setPrecision(calculated); setServiceMode(modeValue); setCalculationBasis(basis);
-      setHasManualChanges(keepDraft || (mode === 'calculate' && hasManualChanges));
+      setHasManualChanges(keepDraft || (mode === 'calculate' && hasManualChanges && !replaceManualDates));
       setBasisNotice(basis === null ? null
         : `${basis.confirmed ? '已依正式實際開始日更新' : '已依此次輸入開始日試算'}服務日期，請核對後再確認。${hasManualChanges ? '先前人工選日已保留，請選擇採用新建議或重新核對人工選日。' : ''}`);
       if (continuingStart && mode === 'read') {
@@ -368,6 +384,17 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
       setError('請輸入完整有效的開始日期。'); return;
     }
     void loadServiceDates('calculate', value);
+  };
+
+  const changeRestWeekdays = (next: number[]) => {
+    readController.current?.abort(); readController.current = null;
+    calculationSequence.current += 1;
+    setRestWeekdays(next); setPreview(null); setStartPreview(null); setStartConfirmationReady(false);
+    setPrecision(null); setSuccess(null); setInputInvalid(true); setWorking(null);
+    if (next.length === 7) {
+      setError('不能將每週七天全部設為休假，請保留至少一天服務日。'); return;
+    }
+    void loadServiceDates('calculate', startDate || undefined, next, true);
   };
 
   const finishStartConfirmation = () => {
@@ -571,6 +598,25 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
     <section className="order-service-dates-panel" aria-label={`案件 ${caseNo} 服務日期設定`}
       hidden={view === 'arrangement' && !arrangementPending && success !== '歷史案件正式安排已建立並回讀。'}>
       <div hidden={view !== 'dates'}>
+      <div className="order-case-review-note" aria-label="原始匯入服務方式">
+        <strong>原始匯入服務方式：</strong>{originalServiceType || '未提供'}
+      </div>
+      <fieldset aria-label="人工選定休假星期" style={{ margin: '12px 0', minWidth: 0 }}
+        disabled={saving || working === 'preview' || isRecoveryActive || startUnresolved || actualStart?.service_data_locked}>
+        <legend>人工選定休假星期</legend>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px 16px' }}>
+          {REST_WEEKDAYS.map(({ value, label }) => <label key={value} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <input type="checkbox" checked={restWeekdays?.includes(value) ?? false} onChange={(event) => {
+              const next = new Set(restWeekdays ?? []);
+              if (event.target.checked) next.add(value); else next.delete(value);
+              changeRestWeekdays([...next].sort((a, b) => a - b));
+            }} />{label}
+          </label>)}
+        </div>
+        <button type="button" onClick={() => changeRestWeekdays([])}>無固定週休</button>
+        <p>{restWeekdays === null ? '尚未人工指定；請依原始服務方式核對。' : restWeekdays.length === 0 ? '此次試算：無固定週休。' : `此次休假：${REST_WEEKDAYS.filter((day) => restWeekdays.includes(day.value)).map((day) => day.label).join('、')}。`}
+          勾選後立即更新建議日曆；只供此次試算，確認後才保存服務日期。</p>
+      </fieldset>
       <label>實際開始日
         <input type="date" aria-label="實際開始日" value={startDate}
           disabled={saving || working === 'preview' || isRecoveryActive || startUnresolved || actualStart?.service_data_locked}
@@ -662,8 +708,8 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
               先前確認的日期與目前正式排班不同；下方日曆保留事前確認紀錄，不代表目前服務安排。
             </p>
           )}
-          {precision !== null && serviceMode !== null && <dl className="order-v2-business-summary" aria-label="建議服務日期摘要">
-            <div><dt>排休類型</dt><dd>{serviceMode}</dd></div>
+          {precision !== null && <dl className="order-v2-business-summary" aria-label="建議服務日期摘要">
+            <div><dt>排休類型</dt><dd>{restWeekdays !== null ? '人工選定休假星期' : serviceMode}</dd></div>
             <div><dt>建議開始</dt><dd>{precision.actual_start_date}</dd></div>
             <div><dt>建議完工</dt><dd>{suggestedDates.at(-1) ?? precision.actual_end_date}</dd></div>
             <div><dt>合約服務日</dt><dd>{requiredDateCount} 天</dd></div>
@@ -689,6 +735,7 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
 
               <div
                 className="calendar-days-grid"
+                style={{ maxHeight: '60vh', overflowY: 'auto' }}
                 role="group"
                 aria-label="服務日期月曆"
                 data-surface-id="orders.date.service-date-selection"

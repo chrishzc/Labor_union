@@ -78,7 +78,7 @@ def test_formal_single_plan_rejects_non_willing_candidate(monkeypatch):
         )
 
 
-def test_willing_candidate_plan_uses_schedule_only_availability(monkeypatch):
+def test_willing_candidate_recommendation_uses_inquiry_period_without_preview_date_gate(monkeypatch):
     captured = {}
     segments = [
         {
@@ -107,8 +107,13 @@ def test_willing_candidate_plan_uses_schedule_only_availability(monkeypatch):
 
     monkeypatch.setattr(
         matching_plan_workflow,
-        "search_segmented_caregiver_availability",
+        "search_candidate_inquiry_availability",
         fake_search,
+    )
+    monkeypatch.setattr(
+        matching_plan_workflow,
+        "search_segmented_caregiver_availability",
+        lambda **_kwargs: pytest.fail("saved service dates must not gate a candidate recommendation"),
     )
     monkeypatch.setattr(
         matching_plan_workflow,
@@ -164,7 +169,22 @@ def test_willing_candidate_plan_uses_schedule_only_availability(monkeypatch):
         "preferred_service_days": False,
         "daily_service_hours": False,
     }
-    assert captured["include_candidate_options"] is False
+    assert captured["segment_drafts"] == [{"staff_id": 1, "start_date": "2026-12-21", "end_date": "2027-01-09"}]
+
+
+@pytest.mark.parametrize("reason", ["actual", "unavailability"])
+def test_recommendation_still_blocks_real_candidate_period_conflicts(monkeypatch, reason):
+    monkeypatch.setattr(
+        matching_plan_workflow, "search_candidate_inquiry_availability",
+        lambda **_kwargs: {"feasibility": "complete", "conflicts": [{"reason_code": reason}],
+                          "complete_combinations": [[{"segment_index": 0, "staff_id": 1,
+                                                      "start_date": "2026-11-05", "end_date": "2026-11-24"}]]},
+    )
+    with pytest.raises(ValueError, match="submitted segments must match a complete combination"):
+        matching_plan_workflow._validate_current_availability(
+            "PREVIEW-DATE-DRIFT", [{"staff_id": 1, "assigned_start_date": "2026-11-05", "assigned_end_date": "2026-11-24"}],
+            "2026-10-13", object(), True,
+        )
 
 
 def test_formal_plan_notification_distinguishes_date_drift_from_schedule_conflict(monkeypatch):

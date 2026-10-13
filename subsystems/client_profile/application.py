@@ -388,7 +388,7 @@ def _require_profile(row: Mapping[str, Any] | None) -> ClientProfileView:
     if not row:
         raise ClientProfileNotFoundError("client_profile_not_found")
     values = {field: str(row.get(field) or "") for field in (
-        "name", "gender", "phone", "city", "address", "residence_type", "delivery_type", "baby_info", "notes", "due_month", "reject_reason",
+        "name", "gender", "phone", "city", "address", "residence_type", "delivery_type", "baby_info", "notes", "due_month", "reject_reason", "service_type",
     )}
     return ClientProfileView(int(row["client_id"] if "client_id" in row else row["id"]), int(row.get("client_profile_version", row.get("version", 0))), values)
 
@@ -412,7 +412,7 @@ def _profile_view(profile: ClientProfileView, *, include_admin_fields: bool = Fa
         return profile
     return ClientProfileView(profile.client_id, profile.version,
                              {field: value for field, value in profile.values.items()
-                              if field not in {"due_month", "reject_reason"}})
+                              if field not in {"due_month", "reject_reason", "service_type"}})
 
 
 def _read_binding(

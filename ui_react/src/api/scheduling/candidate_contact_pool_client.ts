@@ -142,7 +142,7 @@ const WeeklyServicePreviewSchema = z.strictObject({
   case_no: z.string().min(1).max(50), candidate_id: z.number().int().positive(),
   required_service_days: z.number().int().nonnegative().nullable(),
   projected_service_days: z.number().int().nonnegative(),
-  date_basis: z.enum(['planned', 'confirmed']), warnings: z.array(z.string().min(1)),
+  date_basis: z.enum(['planned', 'confirmed', 'draft']), warnings: z.array(z.string().min(1)),
   rows: z.array(z.strictObject({
     serial_number: z.number().int().positive(), staff_name: z.string().min(1).max(100),
     week_start_date: IsoDateSchema, week_end_date: IsoDateSchema,
@@ -447,14 +447,15 @@ export const candidateContactPoolClient = {
   async previewWeeklyService(
     caseNo: string,
     candidateId: number,
-    options?: { signal?: AbortSignal },
+    options?: { signal?: AbortSignal; serviceDates?: string[] },
   ): Promise<CandidateWeeklyServicePreview> {
     const canonical = canonicalCaseNo(caseNo);
     const { token } = mutationIdentity();
-    const envelope = decodePayload(mutationEnvelope(WeeklyServicePreviewSchema), await transport.get(
-      `/api/v1/orders/${encodeURIComponent(canonical)}/candidate-contact-pool/candidates/${candidateId}/weekly-service/preview`,
-      { token, signal: options?.signal },
-    ));
+    const path = `/api/v1/orders/${encodeURIComponent(canonical)}/candidate-contact-pool/candidates/${candidateId}/weekly-service/preview`;
+    const raw = options?.serviceDates === undefined
+      ? await transport.get(path, { token, signal: options?.signal })
+      : await transport.post(path, { service_dates: z.array(IsoDateSchema).min(1).parse(options.serviceDates) }, { token, signal: options?.signal });
+    const envelope = decodePayload(mutationEnvelope(WeeklyServicePreviewSchema), raw);
     if (!envelope.success || !envelope.data) throw new Error('無法讀取每周服務中說明。');
     if (envelope.data.case_no !== canonical || envelope.data.candidate_id !== candidateId) throw new Error('每周服務預覽對象不一致。');
     return envelope.data;
