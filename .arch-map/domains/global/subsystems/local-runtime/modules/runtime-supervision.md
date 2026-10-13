@@ -10,11 +10,13 @@
 ## Implementation
 - primary: `scripts/launchers/supervise_local_runtime.ps1`
 - entrypoint: `scripts/launchers/start_local_development.bat`
+- local-bypass Docker transport: `scripts/launchers/local_react_gateway.py`
 
 ## Contracts
 - session key 不寫入 `.env`、不輸出，且不透過 command argument 傳遞。
 - API readiness 不等於 Private API authentication readiness；認證握手失敗時 fail closed，不啟動任何 worker。
 - supervisor 只清理本次建立且可重新驗證身分的 process tree。
+- Windows local-bypass 沒有主機 npm 時，由 Docker 執行 Vite，主機 loopback gateway 轉送 relative API 與前端 HTTP／WebSocket；API、gateway 與 Docker published port 均限 loopback，gateway 納入同一 owned supervision。
 
 ## Verification
 - test_root: `tests/domains/global/subsystems/local-runtime/modules/runtime-supervision/`

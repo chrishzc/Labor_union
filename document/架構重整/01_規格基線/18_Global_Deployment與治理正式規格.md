@@ -108,6 +108,14 @@ Current 與 previous React artifact 可供 React artifact rollback；這不等�
 5. incident worker
 6. 依 current configuration 啟用的 LINE／knowledge workers
 
+Windows `local_bypass` 可使用主機 npm 或 Docker Vite。沒有主機 npm 時，
+`supervise_local_runtime.ps1` 將 Docker Vite 發布於動態分配的 `127.0.0.1` port，
+並啟動 owned `scripts.launchers.local_react_gateway`，在 `127.0.0.1:5173`
+將 `/api`、`/line-`、`/webhook` 請求轉送至主機 loopback FastAPI，
+其他 HTTP 與 Vite WebSocket 轉送至 Docker published port。
+此路徑保留 relative `/api`、免登入 profile 與本機限定存取，不將 FastAPI 改綁外部介面；
+gateway 與 Docker Vite 均須納入 readiness、存活檢查與本次 owned cleanup。
+
 `scripts/launchers/start_local_development.bat` 與 `.sh` 不得啟動 Streamlit、查詢 8501 或引用 `ui/app.py`。
 
 `--dry-run` 只檢查 current dependency；`--smoke-test` 只建立 owned FastAPI＋React process，執行 GET-only readiness 後清理。

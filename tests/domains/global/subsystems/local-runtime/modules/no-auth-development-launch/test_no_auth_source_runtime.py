@@ -156,10 +156,14 @@ def test_no_auth_launchers_keep_api_and_vite_on_loopback() -> None:
     # Windows must not expose its host processes or a published Vite port.
     assert '"api.main:app", "--host", "127.0.0.1"' in windows
     assert '"run", "dev", "--", "--host", "127.0.0.1"' in windows
-    assert '"-p", "127.0.0.1:${ReactPort}:${ReactPort}"' in windows
+    assert '$publishPort = "127.0.0.1:${ReactPort}:${ReactPort}"' in windows
+    assert '$publishPort = "127.0.0.1::${ReactPort}"' in windows
+    assert '"-p", $publishPort' in windows
 
-    # A Docker Vite container cannot proxy to a host loopback-only FastAPI.
-    # No-auth must fail before that fallback can start or publish a port.
-    guard = windows.index('if ($env:ACCESS_CONTROL_PROFILE -eq "local_bypass") {')
-    docker = windows.index('$docker = Get-Command "docker.exe"', guard)
-    assert guard < docker
+    # No-auth Docker uses an owned host gateway for API traffic, never an
+    # externally listening API or a Docker-to-host loopback connection.
+    gateway = windows.index('Start-Owned -Label "Local React Gateway"')
+    container_ready = windows.index('-Label "Docker React/Vite" -RequireHtmlRoot')
+    assert container_ready < gateway
+    assert '"scripts.launchers.local_react_gateway"' in windows
+    assert 'local_bypass requires host npm.cmd' not in windows

@@ -558,6 +558,26 @@ function Test-OwnedAlive {
     return $true
 }
 
+function Get-OwnedReactContainerPort {
+    param([Parameter(Mandatory = $true)]$Docker, [Parameter(Mandatory = $true)]$Entry)
+    for ($attempt = 1; $attempt -le 30; $attempt++) {
+        if (-not (Test-OwnedAlive -Entry $Entry)) { throw "Docker React/Vite exited before publishing its local port" }
+        $previousErrorActionPreference = $ErrorActionPreference
+        $ErrorActionPreference = "SilentlyContinue"
+        try {
+            $binding = & $Docker.Source port $script:ReactContainerName "${ReactPort}/tcp" 2>$null
+            $portExit = $LASTEXITCODE
+        }
+        finally { $ErrorActionPreference = $previousErrorActionPreference }
+        if ($portExit -eq 0 -and [string]$binding -match '^127\.0\.0\.1:([0-9]+)$') {
+            $port = [int]$Matches[1]
+            if ($port -gt 0 -and $port -le 65535) { return $port }
+        }
+        Start-Sleep -Seconds 1
+    }
+    throw "Docker React/Vite did not publish a loopback-only port"
+}
+
 function Wait-HttpReady {
     param(
         [Parameter(Mandatory = $true)][string]$Url,
@@ -646,28 +666,38 @@ try {
         )
     }
     else {
-        # A Docker Vite container cannot proxy to the host loopback FastAPI listener.
-        if ($env:ACCESS_CONTROL_PROFILE -eq "local_bypass") {
-            throw "local_bypass requires host npm.cmd; Docker cannot proxy a loopback-only FastAPI listener."
-        }
         $docker = Get-Command "docker.exe" -CommandType Application -ErrorAction SilentlyContinue
         if ($null -eq $docker) { throw "React/Vite requires host npm.cmd or docker.exe" }
         & $docker.Source run --rm -v "${uiRoot}:/app" -w "/app" "node:lts" `
             npm install --no-audit --no-fund
         if ($LASTEXITCODE -ne 0) { throw "Docker npm install failed with exit code $LASTEXITCODE" }
         $script:ReactContainerName = "labor-union-vite-$($script:RunId)"
+        $localBypass = $env:ACCESS_CONTROL_PROFILE -eq "local_bypass"
+        # Docker cannot reach the host loopback API. In bypass mode, a host
+        # gateway owns 5173 and forwards API requests directly to loopback;
+        # Docker's Vite port is separately published on loopback only.
+        $publishPort = "127.0.0.1:${ReactPort}:${ReactPort}"
+        if ($localBypass) { $publishPort = "127.0.0.1::${ReactPort}" }
         $dockerArguments = @(
-            "run", "--rm", "--name", $script:ReactContainerName,
-            "-e", "VITE_DEV_API_TARGET=http://host.docker.internal:$ApiPort"
+            "run", "--rm", "--name", $script:ReactContainerName
         )
+        if (-not $localBypass) { $dockerArguments += @("-e", "VITE_DEV_API_TARGET=http://host.docker.internal:$ApiPort") }
         if (-not [string]::IsNullOrWhiteSpace($env:VITE_ACCESS_CONTROL_PROFILE)) {
             $dockerArguments += @("-e", "VITE_ACCESS_CONTROL_PROFILE=$($env:VITE_ACCESS_CONTROL_PROFILE)")
         }
         $dockerArguments += @(
-            "-v", "${uiRoot}:/app", "-w", "/app", "-p", "127.0.0.1:${ReactPort}:${ReactPort}",
+            "-v", "${uiRoot}:/app", "-w", "/app", "-p", $publishPort,
             "node:lts", "npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "$ReactPort", "--strictPort"
         )
         $react = Start-Owned -Label "React/Vite" -FilePath $docker.Source -ArgumentList $dockerArguments
+        if ($localBypass) {
+            $vitePort = Get-OwnedReactContainerPort -Docker $docker -Entry $react
+            Wait-HttpReady -Url "http://127.0.0.1:$vitePort/admin/" -Label "Docker React/Vite" -RequireHtmlRoot
+            $gateway = Start-Owned -Label "Local React Gateway" -FilePath $PythonPath -ArgumentList @(
+                "-m", "scripts.launchers.local_react_gateway", "--listen-port", "$ReactPort",
+                "--api-port", "$ApiPort", "--vite-port", "$vitePort"
+            )
+        }
     }
     Wait-HttpReady -Url "http://127.0.0.1:$ReactPort/admin/" -Label "React/Vite" -RequireHtmlRoot
     Refresh-OwnedIdentityRegistry
