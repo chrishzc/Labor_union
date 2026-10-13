@@ -28,6 +28,7 @@ from infrastructure.mysql.order_terms_read_model import (
     load_contract_client_finance_facts,
     load_preview_facts,
     select_order,
+    _select_confirmed_service_dates,
 )
 from domains.client_finance.obligation_planning import build_client_finance_terms_candidate, ClientChargeDay
 from shared_kernel.money import MoneyNTD
@@ -60,7 +61,9 @@ class MySqlFullContractProjectionRepository:
         self._connection = connection
         self._context = MySqlContractContextRepository(connection)
 
-    def load_client_projection(self, case_no: str) -> FullContractOwnerProjection | None:
+    def load_client_projection(
+        self, case_no: str, *, use_current_order_payments: bool = False,
+    ) -> FullContractOwnerProjection | None:
         case = self._context.load_case_facts(case_no)
         if case is None:
             return None
@@ -105,6 +108,12 @@ class MySqlFullContractProjectionRepository:
                 {"multi_birth_count": facts.get("multi_birth_count")}
             ),
         }
+        expected_dates = _expected_service_dates(case) if not current else ()
+        if use_current_order_payments and not current:
+            with self._connection.cursor() as cursor:
+                confirmed_version, confirmed_dates = _select_confirmed_service_dates(cursor, case_no, False)
+            if confirmed_version is not None:
+                expected_dates = confirmed_dates
         _extend_owner_facts(
             self._connection,
             case_no,
@@ -112,9 +121,10 @@ class MySqlFullContractProjectionRepository:
             owners,
             active_assignment_id,
             current[0].get("staff_id") if active_assignment_id is not None else None,
-            expected_service_dates=_expected_service_dates(case) if not current else (),
+            expected_service_dates=expected_dates,
+            use_expected_service_dates=use_current_order_payments and not current,
         )
-        if not current:
+        if not current and not use_current_order_payments:
             plan = _load_precontract_plan(self._connection, case_no, case)
             if plan is not None:
                 _extend_precontract_facts(self._connection, case_no, facts, owners, plan)
@@ -579,6 +589,7 @@ def _extend_owner_facts(
     staff_id: int | None,
     *,
     expected_service_dates: tuple[date, ...] = (),
+    use_expected_service_dates: bool = False,
 ) -> None:
     """Borrow existing typed Finance/Payroll/Scheduling readers when bootstrapped."""
     # Client/Case Import is an independent owner.  Its normalized email read
@@ -598,9 +609,9 @@ def _extend_owner_facts(
             finance = load_contract_client_finance_facts(
                 cursor, order_row, lock=False
             )
-        # Before a plan/commitment exists, use Orders' expected dates only for
-        # this zero-write projection. Persisted charge days always take priority.
-        if not finance.charge_days and expected_service_dates:
+        # Candidate information uses current Orders dates; signed commitment
+        # days remain authoritative for the full contract projection.
+        if expected_service_dates and (use_expected_service_dates or not finance.charge_days):
             total_hours = Decimal(len(expected_service_dates)) * Decimal(
                 str(finance.service_hours_per_day)
             )

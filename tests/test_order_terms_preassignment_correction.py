@@ -14,6 +14,8 @@ from api.routes.order_terms import OrderTermsApplyBody, OrderTermsInput
 from domains.client_finance.obligation_planning import (
     ClientFinanceTermsSourceFacts,
     ClientPaymentTerms,
+    ExistingClientStageObligation,
+    ClientObligationActionKind,
 )
 from domains.orders.lifecycle import OrderLifecycleRootFacts, OrderLifecycleStatus
 from domains.orders.terms import OrderAggregateFacts, OrderTerms, ServiceTimeTerms
@@ -241,6 +243,81 @@ def test_precontract_terms_replan_payment_dates_without_creating_obligations(
         assert impact.payment_terms.deposit_due_date == min(source.payment_terms.deposit_due_date, preview.after.planned_start_date)
         assert impact.payment_terms.second_payment_due_date == second_due
         assert impact.resulting_account_version == source.account_version + 1
+
+
+@pytest.mark.parametrize("updates,second_due,second_amount", [
+    ({"planned_start_date": date(2026, 9, 13)}, date(2026, 9, 28), 24000),
+    ({"service_hours_per_day": 6}, date(2026, 9, 25), 18000),
+    ({"service_days": 20}, None, 0),
+])
+def test_existing_preassignment_obligations_replan_and_repair_saved_payment_dates(
+    updates, second_due, second_amount,
+):
+    before = _terms(requires_cooking=False, service_days=30)
+    obligations = tuple(ExistingClientStageObligation(
+        f"existing:{stage.value}", stage, MoneyNTD(amount), MoneyNTD(0), due, False,
+    ) for stage, amount, due in (
+        (PaymentStage.DEPOSIT, 12000, date(2026, 8, 30)),
+        (PaymentStage.FIRST, 36000, before.planned_start_date),
+        (PaymentStage.SECOND, 24000, None),
+    ))
+    source = replace(_facts().client_finance, payment_terms=ClientPaymentTerms(
+        5, MoneyNTD(300), date(2026, 8, 30), before.planned_start_date, None,
+    ), identity_status="一般市民", existing_obligations=obligations)
+    facts = replace(_facts(), order=replace(_facts().order, terms=before),
+                    planned_end_date=date(2026, 10, 9), client_finance=source, payroll=None)
+    workflow = terms_workflow.OrderTermsWorkflow(_Repository(facts), object(), _Clock())
+    preview = workflow.preview(facts.order.case_no, replace(before, **updates))
+    impact = preview.client_finance_impact
+    second = next(stage for stage in impact.stage_plans if stage.payment_stage is PaymentStage.SECOND)
+    assert second.due_date == second_due
+    assert second.amount.amount == second_amount
+    assert impact.payment_terms.second_payment_due_date == second_due
+    assert impact.payment_terms.first_payment_due_date == preview.after.planned_start_date
+    assert {action.obligation_identity for action in impact.actions} == {item.obligation_identity for item in obligations}
+    assert all(action.action is not ClientObligationActionKind.CREATE_STAGE for action in impact.actions)
+    assert preview.requires_formal_apply
+    assert preview.payroll_impact is None
+    assert preview.scheduling.assignments == ()
+    assert source.existing_obligations == obligations
+
+
+def test_existing_deposit_only_does_not_create_unsigned_first_and_second_obligations():
+    before = _terms(requires_cooking=False, service_days=30)
+    deposit = ExistingClientStageObligation(
+        "existing:deposit", PaymentStage.DEPOSIT, MoneyNTD(12000), MoneyNTD(12000),
+        date(2026, 8, 30), True,
+    )
+    source = replace(_facts().client_finance, payment_terms=ClientPaymentTerms(
+        5, MoneyNTD(300), date(2026, 8, 30), before.planned_start_date, None,
+    ), identity_status="一般市民", existing_obligations=(deposit,))
+    facts = replace(_facts(), order=replace(_facts().order, terms=before),
+                    client_finance=source, payroll=None)
+    preview = terms_workflow.OrderTermsWorkflow(_Repository(facts), object(), _Clock()).preview(
+        facts.order.case_no, replace(before, service_hours_per_day=6),
+    )
+    impact = preview.client_finance_impact
+    assert len(impact.actions) == 1
+    assert impact.actions[0].payment_stage is PaymentStage.DEPOSIT
+    assert impact.actions[0].action is ClientObligationActionKind.CREATE_REFUND
+    assert impact.actions[0].source_obligation_identity == deposit.obligation_identity
+    assert impact.actions[0].obligation_amount == MoneyNTD(3000)
+    assert source.existing_obligations == (deposit,)
+    assert impact.payment_terms.second_payment_due_date == date(2026, 9, 25)
+
+
+def test_preassignment_finance_reuses_exact_confirmed_dates_after_start_shift():
+    before = _terms(requires_cooking=False, service_days=3)
+    dates = (date(2026, 9, 10), date(2026, 9, 12), date(2026, 9, 14))
+    facts = replace(_facts(), order=replace(_facts().order, terms=before),
+                    confirmed_service_date_version=1, confirmed_service_dates=dates,
+                    payroll=None)
+    preview = terms_workflow.OrderTermsWorkflow(_Repository(facts), object(), _Clock()).preview(
+        facts.order.case_no, replace(before, planned_start_date=date(2026, 9, 13)),
+    )
+    finance_dates = tuple(day for stage in preview.client_finance_impact.stage_plans
+                          for day in stage.service_dates)
+    assert finance_dates == tuple(day + timedelta(days=3) for day in dates)
 
 
 class _UnitOfWork:

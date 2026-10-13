@@ -388,18 +388,35 @@ def _payment_terms_for_order(terms, order_terms):
 
 def build_preassignment_client_finance_terms_impact(
     source_facts, before, after, scheduling, change_identity,
+    *, service_dates: tuple[date, ...] | None = None,
 ) -> ClientFinanceTermsCandidate:
-    noop = build_preassignment_client_finance_noop(
-        source_facts, after, scheduling, change_identity,
-    )
+    _validate_identity(change_identity, "change identity")
+    if source_facts.case_no != scheduling.case_no or scheduling.assignments:
+        raise ValueError("preassignment_client_finance_facts_conflict")
+    if source_facts.open_nonstage_obligation_count:
+        raise ValueError("preassignment_client_finance_obligation_conflict")
     if not payment_terms_inputs_changed(before, after):
-        return noop
+        return build_preassignment_client_finance_noop(
+            source_facts, after, scheduling, change_identity,
+        )
     terms = _payment_terms_for_order(source_facts.payment_terms, after)
-    dates = tuple(after.planned_start_date + timedelta(days=i) for i in range(after.service_days))
+    dates = service_dates if service_dates is not None else tuple(
+        after.planned_start_date + timedelta(days=i) for i in range(after.service_days)
+    )
     facts = _terms_facts_from_service_dates(
         replace(source_facts, payment_terms=terms), after, dates,
     )
     plans = _build_stage_plans(facts)
+    if source_facts.existing_obligations:
+        existing = {item.payment_stage: item for item in source_facts.existing_obligations}
+        actions = tuple(
+            _build_stage_action(facts.case_no, change_identity, stage, existing[stage.payment_stage])
+            for stage in plans if stage.payment_stage in existing
+        )
+        return _candidate(facts, plans, actions)
+    noop = build_preassignment_client_finance_noop(
+        source_facts, after, scheduling, change_identity,
+    )
     second = next(stage for stage in plans if stage.payment_stage is PaymentStage.SECOND)
     terms = replace(terms, second_payment_due_date=second.due_date)
     changed = terms != source_facts.payment_terms

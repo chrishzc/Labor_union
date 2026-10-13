@@ -47,6 +47,18 @@ owner 計算結果；既有保存的第二期日期不取代本公式。預覽�
 同步使用新的預計日期，不覆寫既有收款、核銷或簽署 evidence。Finance 日期有異動時納入版本／fingerprint
 與同一 outer Unit of Work；與付款計算無關的修改不新增 Finance／Payroll 依賴。
 
+既有案件修改付款相關條件時，即使尚未建立執行 assignment、但已有正式客戶期款，也須經同一
+Terms Preview／Apply 重算既有期款及保存付款條款日期。優先沿用 current confirmed service dates
+或此次正式替代日期；尚無確認日期時使用 Orders 約定服務量。只異動已存在的期款，不因補正
+提前建立尚未簽回所需的第一期／第二期義務。未核銷期款沿原 identity 更新金額及日期；已核銷
+依既有 owner 差額規則追加 adjustment／refund，保留 ledger、allocation 與已簽 evidence。
+缺漏／過期的第二期條款日期在此次 Apply 由同一公式補正；日期事件、Finance 版本、Terms receipt
+與 Orders 更新同交易保存。未指派案件的差額 identity 綁定此次 Orders 版本，不因空 generation 重用。
+不完整 Finance roots、未指派卻已有 Payroll 義務及既有 nonstage 帳務限制仍維持 typed conflict。
+修改後的候選付款 Query 使用 current Orders 確認／預計服務日期與同一 Finance stage plan，
+不因舊媒合方案期間已過期而抹除付款資訊，也不借用舊 commitment 的服務量。一般完整契約
+查詢與正式簽署保留其原有方案／commitment 過期驗證；Query 不寫入日期、義務或簽署資料。
+
 使用者介面一律稱為「客戶應付」，意思是客戶應付給工會的金額；內部既有 accounting
 `receivable` 型別可保留。服務本金公式固定為 `有效正式服務時數 × 有效服務單價`，雙胞胎為
 每小時 450。服務前的合法胎數更正必須在同一交易同步付款條款與所有 open 義務；已核銷金額

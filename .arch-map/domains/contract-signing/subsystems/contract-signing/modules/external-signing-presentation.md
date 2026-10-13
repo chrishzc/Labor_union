@@ -8,6 +8,7 @@
 呈現外部簽約完成回報、歷史簽回修復、最終 PDF 納管，以及客戶／服務人員 exact-target 完整契約自動套值。Preview 只回傳 typed values；React 不擁有簽約、文件或帳務根事實。
 
 外部簽約案件 Query 在簽約 facts 尚未備齊時回傳零寫入 `preparing` 文件投影；預覽與未簽 PDF 準備不依賴已接受方案、簽約 session 或正式排班。交接／最終簽回命令沿用原 Domain 條件。
+完整契約投影另提供候選資訊限定的 current-order-payment 查詢：未執行指派時使用 Orders current confirmed／預計日期投影 Finance，不要求舊方案仍有效或借用舊 commitment 服務量；一般完整契約查詢保留原方案／commitment 驗證。
 
 外部平台交接不以 LINE 綁定為門禁：完整 current 未簽 PDF 備妥後，已綁定者建立提醒，未綁定者以 typed 人工通知對象保存於交接 receipt，Query／replay 保留送交當時結果。真正的身分錯配與版本衝突仍拒絕；無歷史簽回證據的新案件不顯示人工修復區。
 

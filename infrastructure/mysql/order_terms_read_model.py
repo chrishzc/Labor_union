@@ -321,15 +321,19 @@ def _assemble_facts(
         _select_confirmed_service_dates(cursor, str(order_row["case_no"]), lock)
     )
     if omit_preassignment_downstream and not assignment_rows:
+        payment_inputs_changed = (
+            proposed_terms is not None
+            and payment_terms_inputs_changed(_order_facts(order_row).terms, proposed_terms)
+        )
         finance_present = _validate_preassignment_downstream_state(
             cursor,
             str(order_row["case_no"]),
             lock,
+            allow_client_obligations=payment_inputs_changed,
         )
         client_finance = (
             _load_client_finance(cursor, order_row, schedule_rows, lock)
-            if finance_present and proposed_terms is not None
-            and payment_terms_inputs_changed(_order_facts(order_row).terms, proposed_terms)
+            if finance_present and payment_inputs_changed
             else None
         )
         payroll = None
@@ -368,7 +372,9 @@ def _load_actual_start_payroll_version(cursor, case_no):
     return ActualStartPayrollVersionFacts(int(row["aggregate_version"]))
 
 
-def _validate_preassignment_downstream_state(cursor, case_no: str, lock: bool) -> bool:
+def _validate_preassignment_downstream_state(
+    cursor, case_no: str, lock: bool, *, allow_client_obligations: bool = False,
+) -> bool:
     client_account_present = _row_exists(
         cursor,
         "SELECT case_no FROM client_finance_accounts WHERE case_no=%s",
@@ -388,7 +394,7 @@ def _validate_preassignment_downstream_state(cursor, case_no: str, lock: bool) -
         "SELECT obligation_identity FROM client_obligations WHERE case_no=%s",
         case_no,
         lock,
-    ):
+    ) and not (allow_client_obligations and client_account_present):
         raise ValueError("preassignment_client_finance_obligation_conflict")
 
     payroll_account_present = _row_exists(

@@ -125,7 +125,7 @@ class MySqlOrderInformationRepository:
             "assigned_end_date": end_date,
         }
         facts, issues = _facts(case, candidate)
-        _merge_contract_payment_facts(self._connection, case_no, facts)
+        _merge_contract_payment_facts(self._connection, case_no, facts, use_current_order_payments=True)
         return build_candidate_information(case_no, candidate_id, info_type, facts, issues, candidate.get("line_user_id"))
 
     def preview_matching_plan_information(
@@ -385,12 +385,15 @@ def _merge_contract_payment_facts(
     connection: Any,
     case_no: str,
     facts: dict[str, object],
+    *, use_current_order_payments: bool = False,
 ) -> None:
     """Reuse the client-contract projection for the information-1 payment block."""
     try:
-        projection = MySqlFullContractProjectionRepository(
-            connection
-        ).load_client_projection(case_no)
+        repository = MySqlFullContractProjectionRepository(connection)
+        projection = (
+            repository.load_client_projection(case_no, use_current_order_payments=True)
+            if use_current_order_payments else repository.load_client_projection(case_no)
+        )
         if projection is None:
             return
         service_mode = projection.facts.get("service_type")

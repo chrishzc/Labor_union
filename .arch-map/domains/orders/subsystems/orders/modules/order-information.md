@@ -10,6 +10,7 @@
 欄位缺值或來源未決以 warnings 呈現且不阻擋目前資料投影；模板結構等技術錯誤才列為 blockers。
 
 候選、正式推薦與 assignment 的資訊一客戶付款約定均借用 current 客戶契約 typed projection，包含訂金、分期、樓層費及預計繳款日；不另計金額。
+候選付款查詢使用 current Orders confirmed／預計日期與 Finance stage plan；沒有執行指派時不採舊 commitment 的服務量，也不因舊媒合方案失效而清空付款欄位。正式契約與正式 plan／assignment 的來源及過期驗證保持各自 owner 契約。
 服務方式「無休」及未選休假星期沿用客戶契約投影的「連續服務」，讓資訊一畫面、寄送前預覽與付款金額一致。
 
 ## Implementation

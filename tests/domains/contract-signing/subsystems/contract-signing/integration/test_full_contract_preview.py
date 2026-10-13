@@ -44,7 +44,7 @@ from subsystems.contract_signing.staff_contract_application import _rest_weekday
         ("一般市民", 20, 1000, 0, True, (13000, 45000, 3000, 61000), "連續服務", date(2026, 10, 20)),
         ("低收入戶", 12, 0, 0, True, (0, 0, 0, 0), "連續服務", date(2026, 10, 20)),
         ("低收入戶", 20, 0, 0, True, (12000, 45000, 3000, 60000), "連續服務", date(2026, 10, 20)),
-        ("一般市民", 20, 0, 22, True, (12000, 45000, 9000, 66000), "連續服務", date(2026, 10, 20)),
+        ("一般市民", 20, 0, 22, True, (12000, 45000, 3000, 60000), "連續服務", date(2026, 10, 20)),
         ("一般市民", 20, 0, 0, False, None, "連續服務", date(2026, 10, 20)),
         ("一般市民", 20, 0, 0, True, (12000, 45000, 3000, 60000), "無休", date(2026, 10, 20)),
         ("一般市民", 20, 0, 0, True, (12000, 45000, 3000, 60000), None, date(2026, 10, 20)),
@@ -119,6 +119,10 @@ def test_candidate_payment_preview_without_plan_or_payroll(
             "total_employer_self_pay_payable",
         ))
         return
+    if persisted_days == 22:
+        formal = adapter.MySqlFullContractProjectionRepository(connection).load_client_projection("CASE-1")
+        assert formal.facts["second_payment_amount"] == 9000
+        assert formal.facts["total_employer_self_pay_payable"] == 66000
     preview = information.MySqlOrderInformationRepository(connection).preview_candidate_information(
         "CASE-1", 91, 1,
     )
@@ -166,6 +170,49 @@ def test_precontract_projection_exposes_second_date_from_finance_stage_plan(monk
     payments = dict(next(section.rows for section in preview.line_sections if section.title == "客戶付款約定"))
     assert payments["第二期金額"] == "NT$ 32,000"
     assert payments["預計第二期繳款日"] == "2026-11-20"
+
+
+def test_current_candidate_payments_survive_stale_plan_and_old_commitment_days(monkeypatch):
+    from contextlib import nullcontext
+    from datetime import timedelta
+    from infrastructure.mysql import contract_full_preview_repository as adapter
+    from infrastructure.mysql import order_information_repository as information
+    from domains.client_finance.obligation_planning import ClientChargeDay, ClientFinanceTermsFacts, ClientPaymentTerms
+    from shared_kernel.money import MoneyNTD
+    from subsystems.orders.order_information import build_candidate_information
+
+    first = date(2026, 11, 3)
+    case = {"case_no": "CASE-OLD", "start_date": first, "end_date": date(2026, 11, 22),
+            "service_days": 20, "service_hours_per_day": 6, "floor_fee": 0,
+            "identity_status": "一般市民", "service_type": "連續服務"}
+    finance = ClientFinanceTermsFacts(
+        "CASE-OLD", 4, 6, MoneyNTD(0),
+        tuple(ClientChargeDay(date(2026, 11, 1) + timedelta(days=i), False) for i in range(30)),
+        ClientPaymentTerms(5, MoneyNTD(300), date(2026, 10, 16), first, None), (),
+    )
+    monkeypatch.setattr(adapter.MySqlContractContextRepository, "load_case_facts", lambda *_: case)
+    monkeypatch.setattr(adapter.MySqlContractContextRepository, "load_assignments", lambda *_: ())
+    monkeypatch.setattr(adapter, "_client_virtual_account", lambda *_: None)
+    monkeypatch.setattr(adapter, "select_order", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(adapter, "load_contract_client_finance_facts", lambda *_args, **_kwargs: finance)
+    monkeypatch.setattr(adapter, "load_preview_facts", lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("payroll_bootstrap_required")))
+    confirmed_dates = tuple(first + timedelta(days=i + (2 if i >= 10 else 0)) for i in range(20))
+    monkeypatch.setattr(adapter, "_select_confirmed_service_dates", lambda *_: (2, confirmed_dates))
+    def stale_plan(*_):
+        raise FullContractPreviewError("contract_preview_service_dates_stale", "stale plan")
+    monkeypatch.setattr(adapter, "_load_precontract_plan", stale_plan)
+    connection = SimpleNamespace(cursor=lambda: nullcontext(None))
+    facts = {"staff_name": "測試月嫂"}
+    information._merge_contract_payment_facts(connection, "CASE-OLD", facts, use_current_order_payments=True)
+    preview = build_candidate_information("CASE-OLD", 1, 1, facts, {}, None)
+    payments = dict(next(section.rows for section in preview.line_sections if section.title == "客戶付款約定"))
+    assert payments["訂金金額"] == "NT$ 9,000"
+    assert payments["第一期金額"] == "NT$ 27,000"
+    assert payments["第二期金額"] == "NT$ 0"
+    assert payments["預計第一期繳款日"] == "2026-11-03"
+    assert payments["預計第二期繳款日"] == "不適用"
+    with pytest.raises(FullContractPreviewError, match="stale plan"):
+        adapter.MySqlFullContractProjectionRepository(connection).load_client_projection("CASE-OLD")
 
 
 class _Repository:

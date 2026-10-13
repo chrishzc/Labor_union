@@ -390,6 +390,7 @@ class OrderTermsWorkflow:
         scheduling = _scheduling_candidate(candidate_facts, proposed_terms)
         change_identity = f"terms:{scheduling.case_no}:{scheduling.generation_number}"
         if not facts.scheduling.segments:
+            change_identity = f"terms:{scheduling.case_no}:order:{facts.order.version + 1}"
             if facts.client_finance is None and facts.payroll is None:
                 client_finance = None
                 payroll = None
@@ -399,8 +400,15 @@ class OrderTermsWorkflow:
                     self._clock.now(),
                 )
             else:
+                day_shift = (proposed_terms.planned_start_date - facts.order.terms.planned_start_date).days
+                finance_dates = (
+                    replacement_service_dates if replacement_service_dates is not None else
+                    tuple(value + timedelta(days=day_shift) for value in facts.confirmed_service_dates)
+                    if facts.confirmed_service_date_version is not None else None
+                )
                 client_finance = build_preassignment_client_finance_terms_impact(
-                    facts.client_finance, facts.order.terms, proposed_terms, scheduling, change_identity
+                    facts.client_finance, facts.order.terms, proposed_terms, scheduling, change_identity,
+                    service_dates=finance_dates,
                 )
                 payroll = build_preassignment_payroll_noop(
                     facts.payroll, scheduling, proposed_terms, change_identity

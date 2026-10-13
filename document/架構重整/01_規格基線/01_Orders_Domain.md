@@ -144,7 +144,7 @@ React adapter 不再自行解讀中文狀態縮減集合；focused tests 與 pro
 
 ### 3.2 Terms Preview／Apply
 
-Terms 的唯讀 Query 與 Preview／Apply 的異動資格檢查分離。已有客戶應付義務但尚未建立執行 assignment 是正式簽約流程的合法狀態，不得因此拒絕 Query；Query 回傳已保存條款、各 owner 的實際版本、確認服務日期及目前指派。服務資料鎖仍限制編輯而不限制查閱；Preview／Apply 保留既有下游義務與版本檢查。
+Terms 的唯讀 Query 與 Preview／Apply 的異動資格檢查分離。已有客戶應付義務但尚未建立執行 assignment 是正式簽約流程的合法狀態，不得因此拒絕 Query；Query 回傳已保存條款、各 owner 的實際版本、確認服務日期及目前指派。服務資料鎖仍限制編輯而不限制查閱；Preview／Apply 保留下游完整性與版本檢查。此合法狀態下修改預計開始日、服務天數、每日時數或樓層費，須讀取 current Finance facts，透過 owner 重算已存在期款，並在同一 Apply 同步付款條款與 immutable event；不得僅因已有客戶期款拒絕此次補正，也不得提前建立尚未存在的期款。
 
 Preview 輸入接受 Terms 根事實意圖。依 Issue #326 的本機修復授權，尚未開始服務且已有正式日期／指派的
 合約天數修改，可在同一 Terms Preview／Apply 附上由既有 server 精算得到的完整

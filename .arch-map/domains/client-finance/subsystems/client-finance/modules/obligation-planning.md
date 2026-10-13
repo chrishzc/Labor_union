@@ -9,6 +9,7 @@
 尚未排班且 Scheduling root 不存在的取消，以明確零服務量計算既有訂金退款，不補造 Scheduling generation。
 第二期有金額時，stage plan 預計繳款日由第一期預計入帳日加 15 個曆日計算；零金額不產生第二期日期。契約及訂單資訊重用此 owner 日期投影。
 正式 Finance writer 在期款建立／重算的同一交易同步 typed candidate 的付款條款及 immutable payment-terms event；第二期零金額保存 NULL。簽約前相關 Orders 條件變更使用只含預計 stage plans／付款條款異動的 candidate，actions 為空；第一期更新為新的開始日、訂金期限不晚於開始日，第二期由同一 owner 重新判定日期／NULL。日期異動納入 Finance 版本與同一 Terms Apply，不建立義務。
+既有未指派案件已有客戶期款時，相關條件異動也重算已存在階段及補正過期／缺漏日期；沿用精確確認／替代服務日，保留未建立期款狀態及正式核銷歷史。差額 identity 由此次 Orders 版本提供；不擴張 nonstage／Payroll 不完整狀態的異動資格。
 
 ## Implementation
 - primary: `domains/client_finance/obligation_planning.py`
