@@ -152,7 +152,37 @@ describe('Client registry owner editing', () => {
     },
   );
 
-  it.each(['週休2日', null])('shows saved service type even when order terms are unavailable (%s)', async (serviceType) => {
+  it('preserves and saves free-text service type through the profile editor', async () => {
+    const saved = '週休1日';
+    const requested = '每週依需求排班，含週末服務';
+    const original = { ...detail, client: { ...detail.client,
+      values: { ...detail.client.values, service_type: saved },
+      field_capabilities: { ...detail.client.field_capabilities,
+        service_type: { owner: 'client_profile', editable: true, reason: null, options: null } },
+    } };
+    mocks.query.mockResolvedValueOnce(original).mockResolvedValue({ ...original,
+      client: { ...original.client, version: 3, values: { ...original.client.values, service_type: requested } },
+    });
+    mocks.preview.mockResolvedValue({ owner: 'client_profile', aggregate_identity: 'CASE-001', current_version: 2,
+      before: { service_type: saved }, after: { service_type: requested }, preview_fingerprint: 'a'.repeat(64) });
+    render(<ClientRegistryPage />);
+    fireEvent.click(screen.getByRole('tab', { name: '名冊資料' }));
+    fireEvent.click(await screen.findByRole('button', { name: /CASE-001/ }));
+    const input = await screen.findByRole('textbox', { name: '服務方式' });
+    expect(input).toHaveValue(saved);
+    expect(input).toHaveAttribute('maxlength', '100');
+    expect(screen.queryByRole('combobox', { name: '服務方式' })).not.toBeInTheDocument();
+    const profile = input.closest('section') as HTMLElement;
+    fireEvent.change(input, { target: { value: requested } });
+    fireEvent.click(within(profile).getByRole('button', { name: '預覽變更' }));
+    await waitFor(() => expect(mocks.preview).toHaveBeenCalledWith('CASE-001', 'profile', { service_type: requested }, 2));
+    fireEvent.click(within(profile).getByRole('button', { name: '確認儲存' }));
+    await screen.findByText('客戶主檔已儲存。');
+    expect(mocks.apply.mock.calls[0][2]).toEqual({ service_type: requested });
+    expect(screen.getByRole('textbox', { name: '服務方式' })).toHaveValue(requested);
+  });
+
+  it.each(['週休2日', '每週依需求排班，含週末服務', null])('shows saved service type even when order terms are unavailable (%s)', async (serviceType) => {
     mocks.query.mockResolvedValue({ ...detail, service_type: serviceType });
     render(<ClientRegistryPage />);
     fireEvent.click(screen.getByRole('tab', { name: '名冊資料' }));

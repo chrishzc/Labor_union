@@ -12,6 +12,13 @@ class MySqlClientProfileRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
 
+    def load_email_fill_target(self, case_no: str, *, for_update: bool = False) -> dict[str, Any] | None:
+        suffix = " FOR UPDATE" if for_update else ""
+        with self._connection.cursor() as cursor:
+            cursor.execute("SELECT c.id AS client_id,c.client_profile_version,c.email FROM orders o "
+                           "JOIN clients c ON c.id=o.client_id WHERE o.case_no=%s" + suffix, (case_no,))
+            return cursor.fetchone()
+
     def load_profile(self, client_id: int, *, for_update: bool = False) -> dict[str, Any] | None:
         suffix = " FOR UPDATE" if for_update else ""
         with self._connection.cursor() as cursor:

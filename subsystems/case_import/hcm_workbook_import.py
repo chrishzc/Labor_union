@@ -46,6 +46,7 @@ class HcmWorkbookPreview:
     ready_with_warning_count: int
     review_required_count: int
     preview_fingerprint: str
+    email_fill_count: int = 0
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -55,6 +56,7 @@ class HcmWorkbookPreview:
             "ready_with_warning_count": self.ready_with_warning_count,
             "review_required_count": self.review_required_count,
             "preview_fingerprint": self.preview_fingerprint,
+            "email_fill_count": self.email_fill_count,
         }
 
 
@@ -96,12 +98,14 @@ class HcmWorkbookReceipt:
     row_outcomes_available: bool = False
     legacy_summary_only: bool = True
     row_outcomes: tuple[HcmWorkbookRowOutcome, ...] = ()
+    email_filled_count: int = 0
 
     def as_dict(self) -> dict[str, object]:
         return {
             "source_content_digest": self.source_content_digest,
             "source_row_count": self.source_row_count,
             "inserted_count": self.inserted_count,
+            "email_filled_count": self.email_filled_count,
             "inserted_with_warning_count": self.inserted_with_warning_count,
             "exact_replay_count": self.exact_replay_count,
             "review_required_count": self.review_required_count,
@@ -193,13 +197,16 @@ class HcmWorkbookImportService:
         ready_count = int(outcomes.get("ready", 0))
         ready_with_warning_count = int(outcomes.get("ready_with_warning", 0))
         review_count = int(outcomes.get("review_required", 0))
+        email_fill_count = int(outcomes.get("email_fill", 0))
+        if not 0 <= email_fill_count <= ready_count:
+            raise ValueError("hcm_email_fill_count_invalid")
         if ready_count + ready_with_warning_count + review_count != len(frame):
             raise ValueError("hcm_preview_row_outcomes_not_conserved")
         fingerprint = _preview_fingerprint(
-            digest, len(frame), ready_count, ready_with_warning_count, review_count,
+            digest, len(frame), ready_count, ready_with_warning_count, review_count, email_fill_count,
         )
         return HcmWorkbookPreview(
-            digest, len(frame), ready_count, ready_with_warning_count, review_count, fingerprint,
+            digest, len(frame), ready_count, ready_with_warning_count, review_count, fingerprint, email_fill_count,
         )
 
     def apply(
@@ -211,6 +218,12 @@ class HcmWorkbookImportService:
         actor: str,
         correlation_id: str,
     ) -> HcmWorkbookReceipt:
+        digest = _workbook_digest(source_path)
+        replay = self._stored_replay(key, digest)
+        if replay is None:
+            replay = self._stored_digest_replay(digest)
+        if replay is not None:
+            return replay
         preview = self.preview(frame, source_path)
         if preview.preview_fingerprint != preview_fingerprint:
             raise HcmWorkbookConflict("hcm_workbook_preview_stale")
@@ -282,7 +295,7 @@ def _workbook_digest(source_path: str) -> str:
 
 
 def _preview_fingerprint(
-    digest: str, source_rows: int, ready: int, ready_with_warning: int, review: int,
+    digest: str, source_rows: int, ready: int, ready_with_warning: int, review: int, email_fill: int = 0,
 ) -> str:
     payload = {
         "ready_count": ready,
@@ -290,6 +303,7 @@ def _preview_fingerprint(
         "review_required_count": review,
         "source_content_digest": digest,
         "source_row_count": source_rows,
+        **({"email_fill_count": email_fill} if email_fill else {}),
     }
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return sha256(encoded.encode("utf-8")).hexdigest()
@@ -304,6 +318,7 @@ def _receipt(digest: str, source_rows: int, outcomes: dict[str, object], replaye
         int(outcomes.get("review_required", 0)), int(outcomes.get("failed", 0)), replayed,
         int(outcomes.get("skipped_existing", 0)),
         row_outcomes_available, not row_outcomes_available, row_outcomes if row_outcomes_available else (),
+        email_filled_count=int(outcomes.get("email_filled", 0)),
     )
 
 
@@ -311,7 +326,7 @@ def _assert_terminal_row_outcomes(source_rows: int, outcomes: dict[str, object])
     """A terminal workbook receipt is valid only when every source row has one outcome."""
     terminal_rows = sum(
         int(outcomes.get(name, 0))
-        for name in ("inserted", "inserted_with_warning", "exact_replay", "review_required", "failed", "skipped_existing")
+        for name in ("inserted", "inserted_with_warning", "exact_replay", "review_required", "failed", "skipped_existing", "email_filled")
     )
     if terminal_rows != source_rows:
         raise ValueError("hcm_import_row_outcomes_not_conserved")
@@ -322,7 +337,7 @@ def _assert_terminal_row_outcomes(source_rows: int, outcomes: dict[str, object])
             raise ValueError("hcm_import_row_outcomes_not_conserved")
         expected = {
             name: int(outcomes.get(name, 0))
-            for name in ("inserted", "inserted_with_warning", "exact_replay", "review_required", "failed", "skipped_existing")
+            for name in ("inserted", "inserted_with_warning", "exact_replay", "review_required", "failed", "skipped_existing", "email_filled")
         }
         actual = {name: 0 for name in expected}
         for item in parsed:
@@ -337,7 +352,7 @@ def _row_outcome(value) -> HcmWorkbookRowOutcome:
     if not isinstance(value, dict):
         raise ValueError("hcm_import_row_outcome_invalid")
     outcome = str(value.get("outcome") or "")
-    if outcome not in {"inserted", "inserted_with_warning", "exact_replay", "review_required", "failed", "skipped_existing"}:
+    if outcome not in {"inserted", "inserted_with_warning", "exact_replay", "review_required", "failed", "skipped_existing", "email_filled"}:
         raise ValueError("hcm_import_row_outcome_invalid")
     source_row = value.get("source_row")
     if not isinstance(source_row, int) or isinstance(source_row, bool) or source_row < 1:
@@ -376,6 +391,7 @@ def _receipt_from_payload(payload, *, source_digest: str, replayed: bool) -> Hcm
         available,
         not available,
         rows if available else (),
+        email_filled_count=int(payload.get("email_filled_count", 0)),
     )
     _assert_terminal_row_outcomes(receipt.source_row_count, {
         "inserted": receipt.inserted_count,
@@ -384,6 +400,7 @@ def _receipt_from_payload(payload, *, source_digest: str, replayed: bool) -> Hcm
         "review_required": receipt.review_required_count,
         "failed": receipt.failed_count,
         "skipped_existing": receipt.skipped_existing_count,
+        "email_filled": receipt.email_filled_count,
         **({"row_outcomes": [item.as_dict() for item in receipt.row_outcomes]} if available else {}),
     })
     return receipt

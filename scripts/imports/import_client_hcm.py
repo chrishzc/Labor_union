@@ -38,6 +38,11 @@ from domains.clients.profile import normalize_client_phone
 from api.dependencies.case_import import build_case_import_application
 from infrastructure.mysql.hcm_import_review_repository import MySqlHcmImportReviewRepository
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+from infrastructure.mysql.client_profile_repository import MySqlClientProfileRepository
+from subsystems.client_profile.application import ClientProfileApplication
+from domains.clients.profile import ClientProfileValidationError
+from subsystems.client_profile.contracts import ClientProfileNotFoundError, ClientProfileStaleError, ClientProfileRequestConflictError
+from subsystems.case_import.hcm_workbook_import import HcmWorkbookConflict
 from subsystems.case_import.beclass_review_intake import fingerprint_workbook
 from subsystems.case_import.hcm_import_review_intake import record_hcm_import_review
 from subsystems.case_import.hcm_adapter import (
@@ -225,7 +230,7 @@ def _calculate_service_end_date(start_date, service_days, service_type, holiday_
     return calculate_hcm_service_end_date(start_date, service_days, service_type, holiday_dates)
 
 
-def _result(inserted=0, inserted_with_warning=0, exact_replay=0, review_required=0, failed=0, skipped_existing=0):
+def _result(inserted=0, inserted_with_warning=0, exact_replay=0, review_required=0, failed=0, skipped_existing=0, email_filled=0):
     return {
         "inserted": inserted,
         "inserted_with_warning": inserted_with_warning,
@@ -233,6 +238,7 @@ def _result(inserted=0, inserted_with_warning=0, exact_replay=0, review_required
         "review_required": review_required,
         "failed": failed,
         "skipped_existing": skipped_existing,
+        "email_filled": email_filled,
     }
 
 
@@ -418,13 +424,25 @@ class HcmLegacyRowIntake:
         )
 
     def preview_rows(self, frame, source_path: str) -> dict[str, int]:
-        outcomes = {"ready": 0, "ready_with_warning": 0, "review_required": 0}
+        outcomes = {"ready": 0, "ready_with_warning": 0, "review_required": 0, "email_fill": 0}
+        repository = MySqlClientProfileRepository(self._connection)
         for _, row in frame.iterrows():
             record = _normalized_record(row)
             validation_errors = validate_hcm_row(row.to_dict())
             if not record.get("case_no"):
                 outcomes["review_required"] += 1
                 continue
+            if "email" in record:
+                target = repository.load_email_fill_target(str(record["case_no"]))
+                if target is not None:
+                    try:
+                        preview = ClientProfileApplication.preview_hcm_email_fill(repository, str(record["case_no"]), record["email"])
+                    except ClientProfileValidationError:
+                        outcomes["review_required"] += 1
+                        continue
+                    outcomes["ready"] += 1
+                    outcomes["email_fill"] += int(preview is not None)
+                    continue
             outcome = "ready_with_warning" if validation_errors else "ready"
             outcomes[outcome] += 1
         return outcomes
@@ -463,13 +481,16 @@ def _import_row(
     if not isinstance(record.get("created_at"), datetime):
         validation_errors["報名時間(建檔)"] = "報名時間(建檔) 格式無法轉成 datetime"
     try:
-        intent = _hcm_import_intent(cursor, record, validation_errors)
         correlation = CorrelationId(f"hcm-case-import:{case_no}:{ordinal}")
+        if "email" in record and MySqlClientProfileRepository(connection).load_email_fill_target(str(case_no)) is not None:
+            return _fill_existing_hcm_email(record, connection, source_digest, source_sheet,
+                                            ordinal, correlation, detailed)
         identity_resolution = application.resolve_hcm_identity(
             str(case_no), str(record.get("ip_address") or "").strip(),
             str(record.get("name") or "").strip(),
         )
         if identity_resolution is HcmIdentityResolution.EXISTING_MATCH:
+            intent = _hcm_import_intent(cursor, record, validation_errors)
             outcome = _replay_existing_hcm_case(
                 application,
                 intent,
@@ -483,6 +504,7 @@ def _import_row(
                 current_uow=current_uow,
             )
             return _row_outcome(outcome, ordinal, str(case_no), {}, None, detailed)
+        intent = _hcm_import_intent(cursor, record, validation_errors)
         preview = application.preview(intent, correlation)
         command = _apply_command(intent, preview, correlation, excel_path)
         _apply_case_import(application, command, current_uow=current_uow)
@@ -526,6 +548,23 @@ def _import_row(
         )
     except Exception:
         raise
+
+
+def _fill_existing_hcm_email(record, connection, source_digest, source_sheet, ordinal, correlation, detailed):
+    case_no = str(record["case_no"])
+    identity = f"hcm-workbook:{source_digest}:{source_sheet}:row:{ordinal}:case:{case_no}:email"
+    try:
+        changed = ClientProfileApplication.fill_hcm_email_in_current_uow(
+            MySqlClientProfileRepository(connection), case_no, record.get("email"),
+            source_identity=identity, actor=ActorContext("import-client-hcm"), correlation_id=correlation,
+        )
+    except ClientProfileValidationError:
+        return _row_outcome("review_required", ordinal, case_no, {"email": "Email 格式不正確或超過 100 字"}, None, detailed)
+    except (ClientProfileStaleError, ClientProfileNotFoundError) as error:
+        raise HcmWorkbookConflict("hcm_email_fill_target_changed") from error
+    except ClientProfileRequestConflictError as error:
+        raise HcmWorkbookConflict("hcm_email_fill_idempotency_conflict") from error
+    return _row_outcome("email_filled" if changed else "skipped_existing", ordinal, case_no, {}, None, detailed)
 
 
 def _row_outcome(
@@ -738,6 +777,7 @@ def _report_import_success(counts):
     print(
         "匯入成功：新增 "
         f"{counts['inserted']} 筆，exact replay {counts['exact_replay']} 筆，"
+        f"補入既有案件 email {counts['email_filled']} 筆，"
         f"既有案件跳過 {counts['skipped_existing']} 筆，待確認 {counts['review_required']} 筆。"
     )
 
@@ -762,9 +802,7 @@ def _replay_existing_hcm_case(
         and stored.receipt.source_fingerprint == fingerprint_case_import_source(intent)
     )
     if not source_matches:
-        # Ordinary workbook intake never overwrites an existing case. A
-        # deliberate correction must enter through the dedicated resubmission
-        # Preview/Apply workflow instead of turning a changed row into a review.
+        # Rows without the new email column retain the existing-case skip rule.
         return "skipped_existing"
     if not current_uow:
         command = ApplyCaseImport(

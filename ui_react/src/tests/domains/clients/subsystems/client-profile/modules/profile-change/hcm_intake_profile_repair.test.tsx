@@ -13,7 +13,7 @@ const detail: ClientRegistryDetail = {
       residence_type: null, delivery_type: null, baby_info: null, notes: null, service_type: null },
     field_capabilities: {
       phone: { owner: 'client_profile', editable: true, reason: null, options: null },
-      service_type: { owner: 'client_profile', editable: true, reason: null, options: ['連續服務', '休周六', '休周日', '週休2日'] },
+      service_type: { owner: 'client_profile', editable: true, reason: null, options: null },
     },
   },
   beclass: { status: 'unbound', record_id: null, source_kind: null, version: null, values: null, field_capabilities: {} },
@@ -39,7 +39,7 @@ afterEach(() => vi.restoreAllMocks());
 
 async function editAndPreview() {
   fireEvent.change(await screen.findByLabelText('電話（手機／市話）'), { target: { value: '0912345678' } });
-  fireEvent.change(screen.getByLabelText('服務方式'), { target: { value: '連續服務' } });
+  fireEvent.change(screen.getByRole('textbox', { name: '服務方式' }), { target: { value: '連續服務' } });
   fireEvent.change(screen.getByLabelText('欄位修正原因'), { target: { value: '補齊電話與服務方式' } });
   fireEvent.click(screen.getByRole('button', { name: '預覽欄位修正' }));
   await screen.findByLabelText('欄位修正前後');
@@ -101,7 +101,7 @@ it('repairs an HCM email warning through the profile writer', async () => {
 
 it('honors owner field capabilities instead of exposing a locked field', async () => {
   vi.mocked(clientRegistryClient.query).mockResolvedValue({ ...detail, client: { ...detail.client,
-    field_capabilities: { ...detail.client.field_capabilities, service_type: { owner: 'client_profile', editable: false, reason: 'locked', options: ['連續服務'] } },
+    field_capabilities: { ...detail.client.field_capabilities, service_type: { owner: 'client_profile', editable: false, reason: 'locked', options: null } },
   } });
   render(<HcmIntakeProfileRepairPanel caseNo={detail.case_no} fields={['服務方式']} disabled={false} onSaved={vi.fn()} onBusyChange={vi.fn()} />);
   expect(await screen.findByLabelText('服務方式')).toBeDisabled();

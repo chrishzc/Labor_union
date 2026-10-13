@@ -21,7 +21,6 @@ VALID_RESIDENCE_TYPES = frozenset({"電梯大樓", "公寓", "透天", "其他"}
 VALID_DELIVERY_TYPES = frozenset({"自然產", "剖腹產", "未定"})
 CLIENT_PHONE_PATTERN = re.compile(r"(?:09[0-9]{8}|0[2-8][0-9]{7,8})")
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-VALID_SERVICE_TYPES = frozenset({"連續服務", "休周六", "休周日", "週休2日"})
 
 
 def normalize_client_phone(value: str) -> str:
@@ -66,7 +65,7 @@ def validate_changes(
             "name": 100, "phone": 10, "email": 100, "city": 20, "address": 255,
             "baby_info": 255, "notes": 1000, "gender": 2,
             "residence_type": 10, "delivery_type": 10,
-            "due_month": 10, "reject_reason": 500, "service_type": 10,
+            "due_month": 10, "reject_reason": 500, "service_type": 100,
         }[field]
         if len(value) > maximum:
             raise ClientProfileValidationError("profile_value_too_long", field)
@@ -76,8 +75,6 @@ def validate_changes(
             raise ClientProfileValidationError("profile_phone_invalid", field)
         if field == "email" and not _EMAIL.fullmatch(value):
             raise ClientProfileValidationError("profile_email_invalid", field)
-        if field == "service_type" and value not in VALID_SERVICE_TYPES:
-            raise ClientProfileValidationError("profile_service_type_invalid", field)
         if field == "residence_type" and value not in VALID_RESIDENCE_TYPES:
             raise ClientProfileValidationError("profile_residence_type_invalid", field)
         if field == "delivery_type" and value not in VALID_DELIVERY_TYPES:

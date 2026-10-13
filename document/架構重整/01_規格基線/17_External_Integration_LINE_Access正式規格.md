@@ -693,7 +693,16 @@ timestamps、unknown boolean 不覆寫。銀行與關聯集合同樣採empty-onl
   `clients.email`（nullable `VARCHAR(100)`）。缺欄／空白不形成缺件；非空但格式錯誤或超過 100 字
   形成 `hcm_field_invalid:email`，沿用 partial intake 將該主檔欄位存為 NULL，其餘合法欄位照常採納。
   主檔 email 與 BeClass original／effective email 各自保存，不互填、不覆寫；既有案件重匯仍維持
-  exact replay／`skipped_existing`，不藉新欄位回填。管理端補登走 Client Profile Preview／Apply。
+  exact replay／`skipped_existing`。2026-10-13 後續人工裁決：新版 HCM 對既有案件可僅補入空白的
+  `clients.email`；已有非空值一律保留，來源空白不更新，非法非空值只回報 email 欄位問題。
+  此列以案件編號定位既有案件，不以姓名、IP 或其他來源欄位重判建案身分；
+  不採納姓名、電話、日期、服務條件等其他欄位，不做 BeClass reconciliation 或 bootstrap；
+  BeClass original／effective email 維持獨立。Case Import 委派 Client Profile 的 email-only 補入命令，
+  在工作簿唯一 outer UoW 內 fresh-lock／檢查空白值、沿用 profile version、事件與 receipt；任一失敗全批 rollback。
+  Preview 顯示 `email_fill_count`，Apply／歷史結果顯示 `email_filled_count` 與 `email_filled` 逐列結果。
+  Apply 前可補入筆數改變會使現有 workbook preview stale；鎖定後仍不覆寫非空值。
+  已完成相同 workbook 的 idempotency／digest replay 優先回原 receipt，不能因補入後 eligibility 改變而錯報 stale。
+  管理端人工補登仍走 Client Profile Preview／Apply。
 - HCM Current 完整案件的訂金到期日固定為`min(報名時間日期 + 3 calendar days, 預計服務日期)`；
   急件不得只因報名距預計開工不足3天而阻擋Client／Order及case architecture bootstrap建立。
 - HCM `服務方式` canonical值固定為`連續服務 | 休周六 | 休周日 | 週休2日`；legacy `週休1日`／
@@ -743,7 +752,8 @@ Case Import immutable source snapshot 保留文字；排班頁讀取原文供人
 僅為當次日曆試算條件，確認後只保存服務日期，不新增保存欄位。原始欄位警示與正式日期確認保持各自既有 owner。
 
 待辦看板的案件處理可直接修改 current HCM review 指出的 Client Profile 可編輯欄位，
-沿用 Client Profile Preview／Apply 與既有驗證；服務方式由人員選擇允許值。
+沿用 Client Profile Preview／Apply 與既有驗證；2026-10-13 最新人工裁決：服務方式使用文字輸入，
+保留非空原文、不轉換別名、不限制固定選項；去除前後空白後最多 100 字，符合既有欄位容量。
 保存後重新讀取正式 Client 資料與 current HCM review，才更新缺件顯示。
 日期、天數及其他 Orders 條件沿用 Orders writer。匯入驗證與轉換機制不變，
 原始來源與匯入歷史不改寫。
@@ -782,7 +792,8 @@ HCM、Client／Staff BeClass 與其他 Case Import 來源的 review 是公會人
 LINE 對話原文、完整聯絡資料或把回覆文字直接當成正式 Client／Order／Staff input。正確資料由
 新來源重新走 typed Preview／Apply。2026-09-09 人工裁決補充：一般 HCM workbook intake 遇到相同案件
 編號時不得以不同內容覆寫，也不得因此建立新的待處理異常；來源完全相同時回傳 exact replay，來源不同時
-以 `skipped_existing` 終止該列並保持零業務寫入。2026-10-13 人工裁決退役 HCM 修正版工作簿入口、
+以 `skipped_existing` 終止該列並保持零業務寫入；唯一例外為上述既有案件空白 HCM email 補入。
+2026-10-13 人工裁決退役 HCM 修正版工作簿入口、
 `/api/v1/case-import/hcm/resubmissions/{preview|apply}` 與專用欄位修正命令；各頁面不再提供工作簿覆寫修正。
 既有案件資料只經 Client Profile／Orders 等正式 owner 命令修改；不得修改 immutable source。
 

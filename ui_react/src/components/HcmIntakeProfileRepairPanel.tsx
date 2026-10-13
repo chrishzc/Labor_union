@@ -158,7 +158,7 @@ export function HcmIntakeProfileRepairPanel({ caseNo, fields, disabled, onSaved,
               {value && !options.includes(value) && <option value={value} disabled>{value}（待修正）</option>}
               {options.map((option) => <option key={option}>{option}</option>)}
             </select> : <input id={id} type={field === 'due_month' ? 'date' : field === 'phone' ? 'tel' : field === 'email' ? 'email' : 'text'}
-              value={value} style={{ width: '100%', minWidth: 0, boxSizing: 'border-box' }} maxLength={field === 'reject_reason' ? 500 : field === 'email' ? 100 : undefined} disabled={locked || !editable}
+              value={value} style={{ width: '100%', minWidth: 0, boxSizing: 'border-box' }} maxLength={field === 'reject_reason' ? 500 : field === 'email' || field === 'service_type' ? 100 : undefined} disabled={locked || !editable}
               onChange={(event) => update(event.target.value)} />}
             {!editable && <small>目前不可修改此欄位，請重新確認案件資料。</small>}
           </div>;

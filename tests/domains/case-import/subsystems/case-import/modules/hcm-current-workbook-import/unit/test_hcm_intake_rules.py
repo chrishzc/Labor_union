@@ -28,6 +28,8 @@ def valid_hcm_row():
 
 
 def _exercise_hcm_row(monkeypatch, row):
+    monkeypatch.setattr(import_client_hcm.MySqlClientProfileRepository, "load_email_fill_target",
+                        lambda _self, _case_no, **_kwargs: None)
     applied = []
     reviews = []
     reconciled = []
@@ -74,7 +76,7 @@ def test_city_does_not_warn_or_turn_an_otherwise_complete_import_into_partial(
 ):
     row = pd.Series({**valid_hcm_row, **city_fields})
     preview, outcome, applied, reviews, reconciled = _exercise_hcm_row(monkeypatch, row)
-    assert preview == {"ready": 1, "ready_with_warning": 0, "review_required": 0}
+    assert preview == {"ready": 1, "ready_with_warning": 0, "review_required": 0, "email_fill": 0}
     assert outcome == "inserted"
     assert reviews == []
     assert len(applied) == 1
@@ -116,7 +118,7 @@ def test_only_critical_field_errors_use_partial_intake(
 ):
     row = pd.Series({**valid_hcm_row, source: value})
     preview, outcome, applied, reviews, reconciled = _exercise_hcm_row(monkeypatch, row)
-    assert preview == {"ready": 0, "ready_with_warning": 1, "review_required": 0}
+    assert preview == {"ready": 0, "ready_with_warning": 1, "review_required": 0, "email_fill": 0}
     assert outcome == "inserted_with_warning"
     assert len(applied) == 1
     assert applied[0].is_complete is (not blocking)
@@ -153,7 +155,7 @@ def test_multiple_noncritical_warnings_still_build_complete_case(monkeypatch, va
 def test_mobile_and_landline_import_without_phone_warning(monkeypatch, valid_hcm_row, phone, expected):
     row = pd.Series({**valid_hcm_row, "行動電話": phone})
     preview, outcome, applied, reviews, _ = _exercise_hcm_row(monkeypatch, row)
-    assert preview == {"ready": 1, "ready_with_warning": 0, "review_required": 0}
+    assert preview == {"ready": 1, "ready_with_warning": 0, "review_required": 0, "email_fill": 0}
     assert outcome == "inserted"
     assert applied[0].is_complete
     assert {item.name: item.value for item in applied[0].client_attributes}["phone"] == expected
@@ -251,7 +253,7 @@ def test_nonempty_service_type_is_reference_text_without_format_warning(monkeypa
     expected = source.strip()
     row = pd.Series({**valid_hcm_row, '服務方式': source})
     preview, outcome, applied, reviews, reconciled = _exercise_hcm_row(monkeypatch, row)
-    assert preview == {"ready": 1, "ready_with_warning": 0, "review_required": 0}
+    assert preview == {"ready": 1, "ready_with_warning": 0, "review_required": 0, "email_fill": 0}
     assert outcome == "inserted"
     assert applied[0].is_complete and applied[0].bootstrap is not None
     assert {item.name: item.value for item in applied[0].client_attributes}['service_type'] == expected
@@ -266,7 +268,7 @@ def test_nonempty_service_type_is_reference_text_without_format_warning(monkeypa
 def test_only_blank_service_type_requires_supplementation(monkeypatch, valid_hcm_row, source):
     row = pd.Series({**valid_hcm_row, '服務方式': source})
     preview, outcome, applied, reviews, reconciled = _exercise_hcm_row(monkeypatch, row)
-    assert preview == {"ready": 0, "ready_with_warning": 1, "review_required": 0}
+    assert preview == {"ready": 0, "ready_with_warning": 1, "review_required": 0, "email_fill": 0}
     assert outcome == "inserted_with_warning"
     assert not applied[0].is_complete and applied[0].bootstrap is None
     assert reconciled == []

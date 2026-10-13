@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class HcmWorkbookPreviewView(BaseModel):
+    email_fill_count: int = Field(default=0, ge=0)
     model_config = ConfigDict(extra="forbid", strict=True)
 
     source_content_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -32,6 +33,7 @@ class HcmWorkbookRowOutcomeView(BaseModel):
         "review_required",
         "failed",
         "skipped_existing",
+        "email_filled",
     ]
     problem_identity: str | None = Field(default=None, max_length=191)
     problem_fields: list[str]
@@ -41,6 +43,7 @@ class HcmWorkbookRowOutcomeView(BaseModel):
 
 
 class HcmWorkbookReceiptView(BaseModel):
+    email_filled_count: int = Field(default=0, ge=0)
     model_config = ConfigDict(extra="forbid", strict=True)
 
     source_content_digest: str = Field(pattern=r"^[0-9a-f]{64}$")

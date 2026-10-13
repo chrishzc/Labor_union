@@ -81,7 +81,6 @@ _FIELD_OPTIONS = {
         "gender": ("女", "男"),
         "residence_type": ("電梯大樓", "公寓", "透天", "其他"),
         "delivery_type": ("自然產", "剖腹產", "未定"),
-        "service_type": ("連續服務", "休周六", "休周日", "週休2日"),
     },
     "client_beclass": {
         "multi_birth_count": ("單胞胎", "雙胞胎"),

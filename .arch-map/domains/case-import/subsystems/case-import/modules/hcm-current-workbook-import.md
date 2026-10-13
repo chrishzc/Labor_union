@@ -9,6 +9,11 @@
 
 ## Implementation
 - primary:
+  - `ui_react/src/pages/DataImportPage.tsx` — HCM email 補入預覽／結果摘要，其他 intake 區塊維持各自 owner。
+  - `ui_react/src/api/case_import/hcm_workbook_schemas.ts`
+  - `ui_react/src/api/case_import/hcm_import_result_schemas.ts`
+  - `ui_react/src/adapters/case_import/hcm_workbook_adapter.ts`
+  - `ui_react/src/adapters/case_import/hcm_import_result_adapter.ts`
   - `subsystems/case_import/hcm_workbook_import.py`
   - `subsystems/case_import/hcm_adapter.py`
   - `scripts/imports/import_client_hcm.py`
@@ -31,19 +36,22 @@
     - `loadCurrentHcmReviewsForCases` — 以既有 current review 分頁查詢讀取指定案件的最新欄位問題；支援取消，不寫入或重新判定問題是否解除。
 
 ## Dependencies
-- outbound: `clients/client-profile/profile-change` — current 欄位警示沿用 Client Profile 正式驗證與名冊允許值；Query 不呼叫 writer。
+- outbound: `clients/client-profile/profile-change` — current 欄位警示沿用 Client Profile 正式驗證與名冊允許值；Query 不呼叫 writer。HCM email-only Apply 借用工作簿 outer UoW，委派 Client Profile fresh-lock 空白補入 writer。
 - outbound: `orders` — HCM reconciliation 只透過 Case Import typed boundary 補入已授權 Orders facts。
 - inbound: `case-import/case-import` — authenticated HCM workbook intake。
 
 ## Contracts
 - HCM 只有姓名、身分資格、報名時間、預計服務日期、希望服務天數、服務時間錯誤，或服務方式空值才觸發 partial intake／待補件；非空服務方式原文作排班參考，不產生格式警示，歷史格式警示依 current root 非空規則解除。其他錯誤僅警示並照常建立完整案件。Preview／Apply 最低建案資格均為可用案件編號。電話使用 Client-owned 手機／市話格式與正規化。
 - HCM `縣市` 為參考欄位：缺漏／非清單值不產生警示或補件理由，不單獨觸發 partial intake；沿用既有正規化。current review Query 忽略歷史縣市警示，不改寫來源、歷史紀錄或既有訂單狀態。
-- HCM 管理註記後的原始空白表頭欄正規化為 optional `email`，映射至 Client-owned `clients.email`；空白／缺欄可匯入，非法非空值形成去敏欄位警示及 NULL 主檔值。BeClass email 不互填，既有案件不重匯覆寫。
+- HCM 管理註記後的原始空白表頭欄正規化為 optional `email`，映射至 Client-owned `clients.email`；空白／缺欄可匯入。既有案件只經 Client Profile 補入空白 email，其他欄位及 BeClass 不覆寫；新案件非法非空值形成去敏欄位警示及 NULL 主檔值。
 - `document/架構重整/01_規格基線/00_Global_共同契約.md` — canonical payload exact replay 與 idempotency mismatch。
 - `document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md` — HCM Current workbook policy 與 Case Import ownership。
 
 ## Verification
+- layout_status: `custom_current`
+- layout_basis: Backend tests protect the workbook owner contract; the mirrored React root follows the existing project frontend test layout and verifies the HCM Preview/Apply UI and typed result adapters.
 - test_root: `tests/domains/case-import/subsystems/case-import/modules/hcm-current-workbook-import/`
+- test_root: `ui_react/src/tests/domains/case-import/subsystems/case-import/modules/hcm-current-workbook-import/`
 
 ## Provenance
 - HCM Current workbook 與 Case Import ownership — `architecture_declared` — `17_External_Integration_LINE_Access正式規格.md`。

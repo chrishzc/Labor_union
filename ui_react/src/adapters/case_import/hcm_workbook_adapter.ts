@@ -12,6 +12,7 @@ export interface HcmWorkbookPreviewModel {
   sourceContentDigest: string;
   sourceRowCount: number;
   readyCount: number;
+  emailFillCount?: number;
   readyWithWarningCount: number;
   reviewRequiredCount: number;
   previewFingerprint: string;
@@ -31,10 +32,14 @@ export function adaptHcmWorkbookPreview(
       'HCM Preview aggregate 計數不守恆，預覽已拒絕。'
     );
   }
+  if ((preview.email_fill_count ?? 0) > preview.ready_count) {
+    throw new HcmWorkbookContractError('hcm_email_fill_count_invalid', 'HCM email 補入筆數不符合預覽結果。');
+  }
   return {
     sourceContentDigest: preview.source_content_digest,
     sourceRowCount: preview.source_row_count,
     readyCount: preview.ready_count,
+    ...(preview.email_fill_count === undefined ? {} : { emailFillCount: preview.email_fill_count }),
     readyWithWarningCount: preview.ready_with_warning_count,
     reviewRequiredCount: preview.review_required_count,
     previewFingerprint: preview.preview_fingerprint,

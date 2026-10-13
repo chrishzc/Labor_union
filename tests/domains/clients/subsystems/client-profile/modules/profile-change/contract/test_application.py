@@ -20,24 +20,34 @@ def test_admin_due_date_and_reject_reason_validation_do_not_expand_applicant_fie
             validate_changes({field: '2026-10-15'}, allowed_fields=CLIENT_PROFILE_APPLICANT_FIELDS)
 
 
-def test_admin_service_type_repair_uses_existing_profile_writer():
+@pytest.mark.parametrize('service_type', ['連續服務', '週休1日', '每週依需求排班，含週末服務'])
+def test_admin_service_type_repair_uses_existing_profile_writer(service_type):
     repository = _Repository()
     repository.profile.update(phone=None, service_type=None)
     application = _application(repository)
-    changes = {'phone': '0912345678', 'service_type': '連續服務'}
+    changes = {'phone': '0912345678', 'service_type': service_type}
     preview = application.preview_admin('CASE-001', changes, ExpectedVersion(0))
-    assert preview.requested == {'phone': '0912345678', 'service_type': '連續服務'}
+    assert preview.requested == {'phone': '0912345678', 'service_type': service_type}
     receipt = application.apply_admin('CASE-001', changes, ExpectedVersion(0), ActorContext('admin:9'),
                                       '修正進件欄位', preview.preview_fingerprint, IdempotencyKey('hcm-profile-repair'),
                                       CorrelationId('hcm-profile-repair'))
     assert receipt.readback.values['phone'] == '0912345678'
-    assert receipt.readback.values['service_type'] == '連續服務'
-    assert application.query_admin('CASE-001').values['service_type'] == '連續服務'
+    assert receipt.readback.values['service_type'] == service_type
+    assert application.query_admin('CASE-001').values['service_type'] == service_type
     assert 'service_type' not in application.query_applicant('line-user-7', 7).values
     with pytest.raises(ClientProfileValidationError, match='profile_field_not_allowed'):
         application.preview_applicant('line-user-7', 7, {'service_type': '連續服務'}, ExpectedVersion(1))
     with pytest.raises(ClientProfileValidationError, match='profile_phone_invalid'):
         application.preview_applicant('line-user-7', 7, {'phone': '03123456'}, ExpectedVersion(1))
+
+
+def test_service_type_free_text_respects_existing_storage_capacity():
+    assert validate_changes({'service_type': '  週休1日  '}) == {'service_type': '週休1日'}
+    assert validate_changes({'service_type': '字' * 100}) == {'service_type': '字' * 100}
+    with pytest.raises(ClientProfileValidationError, match='profile_value_too_long:service_type'):
+        validate_changes({'service_type': '字' * 101})
+    with pytest.raises(ClientProfileValidationError, match='profile_value_cannot_be_empty:service_type'):
+        validate_changes({'service_type': '   '})
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from subsystems.client_profile.application import ClientProfileApplication
@@ -119,6 +129,9 @@ class _Uow(AbstractContextManager):
 
 
 class _Repository:
+    def load_email_fill_target(self, case_no, *, for_update=False):
+        row = self.load_profile_by_case_no(case_no, for_update=for_update)
+        return None if row is None else {field: row.get(field) for field in ("client_id", "client_profile_version", "email")}
     def __init__(self):
         self.profile = {
             "client_id": 7, "client_profile_version": 0, "name": "王小明", "gender": "女",
@@ -201,6 +214,50 @@ class _Repository:
             "preview_fingerprint": kwargs["preview_fingerprint"],
             "result": dict(kwargs["result"]),
         }
+
+
+@pytest.mark.parametrize("existing", [None, "", "  "])
+def test_hcm_fill_changes_only_empty_email_and_version_without_owning_a_commit(existing):
+    repository = _Repository()
+    repository.profile["email"] = existing
+    before = dict(repository.profile)
+    application = ClientProfileApplication(lambda: (_ for _ in ()).throw(AssertionError("no nested UoW")))
+    assert application.fill_hcm_email_in_current_uow(repository, "CASE-001", "  hcm@example.com  ",
+        source_identity="synthetic-workbook:row:1", actor=ActorContext("import-client-hcm"),
+        correlation_id=CorrelationId("synthetic-fill")) is True
+    assert repository.profile == {**before, "email": "hcm@example.com", "client_profile_version": 1}
+    assert len(repository.admin_receipts) == 1
+    assert next(iter(repository.admin_receipts.values()))["result"]["changed_fields"] == ["email"]
+    assert application.fill_hcm_email_in_current_uow(repository, "CASE-001", "another@example.com",
+        source_identity="another-workbook:row:1", actor=ActorContext("import-client-hcm"),
+        correlation_id=CorrelationId("synthetic-fill-again")) is False
+    assert repository.profile == {**before, "email": "hcm@example.com", "client_profile_version": 1}
+
+
+@pytest.mark.parametrize("existing,source", [("manual@example.com", "new@example.com"),
+    ("manual@example.com", "invalid"), (None, None), (None, "  ")])
+def test_hcm_fill_skips_nonempty_target_or_empty_source_without_receipts(existing, source):
+    repository = _Repository()
+    repository.profile["email"] = existing
+    before = dict(repository.profile)
+    assert ClientProfileApplication.fill_hcm_email_in_current_uow(repository, "CASE-001", source,
+        source_identity="synthetic-workbook:row:1", actor=ActorContext("import-client-hcm"),
+        correlation_id=CorrelationId("synthetic-no-fill")) is False
+    assert repository.profile == before
+    assert not repository.admin_receipts and not repository.admin_claims
+
+
+def test_hcm_fill_rejects_invalid_source_and_maps_version_conflict(monkeypatch):
+    repository = _Repository()
+    repository.profile["email"] = None
+    arguments = dict(source_identity="synthetic-workbook:row:1", actor=ActorContext("import-client-hcm"),
+                     correlation_id=CorrelationId("synthetic-conflict"))
+    with pytest.raises(ClientProfileValidationError, match="profile_email_invalid"):
+        ClientProfileApplication.fill_hcm_email_in_current_uow(repository, "CASE-001", "invalid", **arguments)
+    monkeypatch.setattr(repository, "apply_admin_change", lambda **_: (_ for _ in ()).throw(RuntimeError("client_profile_version_stale")))
+    with pytest.raises(ClientProfileStaleError, match="client_profile_version_stale"):
+        ClientProfileApplication.fill_hcm_email_in_current_uow(repository, "CASE-001", "hcm@example.com", **arguments)
+    assert repository.profile["email"] is None and not repository.admin_receipts
 
 
 def _application(repository):

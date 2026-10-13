@@ -350,7 +350,7 @@ def test_mysql_registry_uses_order_client_owner_and_bound_beclass_case_identity(
     assert detail["order_information_values"]["meal_preferences"] == "不吃牛肉"
 
 
-@pytest.mark.parametrize("service_type", [None, "週休2日"])
+@pytest.mark.parametrize("service_type", [None, "週休2日", "每週依需求排班，含週末服務"])
 def test_mysql_detail_to_http_exposes_service_type_for_direct_intake_repair(monkeypatch, service_type):
     monkeypatch.setattr(
         "infrastructure.mysql.client_registry_query_repository._finance_values",
@@ -378,7 +378,7 @@ def test_mysql_detail_to_http_exposes_service_type_for_direct_intake_repair(monk
     assert profile["values"]["service_type"] == service_type
     assert profile["field_capabilities"]["service_type"] == {
         "owner": "client_profile", "editable": True, "reason": None,
-        "options": ("連續服務", "休周六", "休周日", "週休2日"),
+        "options": None,
     }
 
 

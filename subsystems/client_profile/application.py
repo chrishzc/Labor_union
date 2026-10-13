@@ -28,6 +28,7 @@ from .contracts import (
 
 
 class ClientProfileRepository(Protocol):
+    def load_email_fill_target(self, case_no: str, *, for_update: bool = False) -> Mapping[str, Any] | None: ...
     def load_profile(self, client_id: int, *, for_update: bool = False) -> Mapping[str, Any] | None: ...
     def load_request(self, request_id: int, *, for_update: bool = False) -> Mapping[str, Any] | None: ...
     def list_requests(self, *, status: str | None, page: int, page_size: int) -> tuple[tuple[Mapping[str, Any], ...], int]: ...
@@ -55,6 +56,52 @@ class ClientProfileUnitOfWork(Protocol):
 class ClientProfileApplication:
     def __init__(self, unit_of_work_factory: Callable[[], ClientProfileUnitOfWork]) -> None:
         self._unit_of_work_factory = unit_of_work_factory
+
+    @staticmethod
+    def preview_hcm_email_fill(repository: ClientProfileRepository, case_no: str, email: object,
+                               *, for_update: bool = False) -> ClientProfilePreview | None:
+        row = repository.load_email_fill_target(_case_no(case_no), for_update=for_update)
+        if row is None:
+            raise ClientProfileNotFoundError("client_profile_not_found")
+        if str(row.get("email") or "").strip() or email is None or not str(email).strip():
+            return None
+        changes = validate_changes({"email": email})
+        profile = ClientProfileView(int(row["client_id"]), int(row["client_profile_version"]),
+                                    {"email": str(row.get("email") or "")})
+        return _preview(profile, changes, ExpectedVersion(profile.version))
+
+    @staticmethod
+    def fill_hcm_email_in_current_uow(repository: ClientProfileRepository, case_no: str, email: object,
+                                      *, source_identity: str, actor: ActorContext,
+                                      correlation_id: CorrelationId) -> bool:
+        """Borrow the workbook transaction; only a fresh, locked empty email can change."""
+        preview = ClientProfileApplication.preview_hcm_email_fill(repository, case_no, email, for_update=True)
+        if preview is None:
+            return False
+        key = "hcm-email-fill:" + fingerprint_payload({"source_identity": source_identity}).value
+        if repository.find_admin_receipt(key, for_update=True) is not None:
+            return False
+        reason = "HCM 工作簿補入既有案件的空白 email"
+        command = _command_fingerprint("client_profile_admin_change/v1", case_no,
+            {"changes": preview.requested, "actor": actor.actor_id}, ExpectedVersion(preview.current_version),
+            reason, preview.preview_fingerprint)
+        try:
+            repository.claim_admin_command(case_no=case_no, idempotency_key=key,
+                command_fingerprint=command.value, correlation_id=correlation_id.value)
+            version = repository.apply_admin_change(client_id=preview.client_id,
+                expected_version=preview.current_version, before=preview.before, requested=preview.requested,
+                actor_id=actor.actor_id, reason=reason, idempotency_key=key, correlation_id=correlation_id.value)
+        except RuntimeError as error:
+            if str(error) == "client_profile_version_stale":
+                raise ClientProfileStaleError("client_profile_version_stale") from error
+            if str(error) == "idempotency_mismatch":
+                raise ClientProfileRequestConflictError("profile_idempotency_conflict") from error
+            raise
+        repository.save_admin_receipt(idempotency_key=key, command_fingerprint=command.value,
+            preview_fingerprint=preview.preview_fingerprint.value, actor_id=actor.actor_id, reason=reason,
+            result={"case_no": case_no, "client_id": preview.client_id,
+                    "resulting_version": version, "changed_fields": ["email"]})
+        return True
 
     def query_applicant(self, applicant_identity: str, client_id: int) -> ClientProfileView:
         with self._unit_of_work_factory() as unit_of_work:

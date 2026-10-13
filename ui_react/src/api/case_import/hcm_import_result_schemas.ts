@@ -10,11 +10,12 @@ const TimestampSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/)
 export const HcmImportRowOutcomeSchema = z.strictObject({
   source_row: z.number().int().positive(),
   case_no: z.string().min(1).max(50).nullable(),
-  outcome: z.enum(['inserted', 'inserted_with_warning', 'exact_replay', 'review_required', 'failed', 'skipped_existing']),
+  outcome: z.enum(['inserted', 'inserted_with_warning', 'exact_replay', 'review_required', 'failed', 'skipped_existing', 'email_filled']),
   problem_identity: z.string().min(1).max(191).nullable(),
   problem_fields: z.array(z.string()),
   issue_codes: z.array(z.string()),
   referral_occurrence_identities: z.array(z.string()),
+  reason_codes: z.array(z.string()).optional(),
 });
 
 export const HcmImportResultRecordSchema = z.strictObject({
@@ -22,6 +23,7 @@ export const HcmImportResultRecordSchema = z.strictObject({
   completed_at: TimestampSchema,
   source_content_digest: Sha256Schema,
   source_row_count: z.number().int().nonnegative(),
+  email_filled_count: z.number().int().nonnegative().optional(),
   inserted_count: z.number().int().nonnegative(),
   inserted_with_warning_count: z.number().int().nonnegative(),
   exact_replay_count: z.number().int().nonnegative(),

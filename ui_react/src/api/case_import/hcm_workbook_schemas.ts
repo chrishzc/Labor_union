@@ -12,6 +12,7 @@ export const HcmWorkbookPreviewSchema = z
   .object({
     source_content_digest: HcmSha256Schema,
     source_row_count: z.number().int().min(0),
+    email_fill_count: z.number().int().min(0).optional(),
     ready_count: z.number().int().min(0),
     ready_with_warning_count: z.number().int().min(0),
     review_required_count: z.number().int().min(0),
@@ -45,6 +46,7 @@ export const HcmWorkbookRowOutcomeSchema = z
       'review_required',
       'failed',
       'skipped_existing',
+      'email_filled',
     ]),
     problem_identity: z.string().max(191).nullable(),
     problem_fields: z.array(z.string()),
@@ -60,6 +62,7 @@ export const HcmWorkbookReceiptSchema = z
   .object({
     source_content_digest: HcmSha256Schema,
     source_row_count: z.number().int().min(0),
+    email_filled_count: z.number().int().min(0).optional(),
     inserted_count: z.number().int().min(0),
     inserted_with_warning_count: z.number().int().min(0),
     exact_replay_count: z.number().int().min(0),
