@@ -621,6 +621,11 @@ must be previewed, sent, and confirmed again before formal assignment can procee
 的下一代 Scheduling generation。此時「尚無正式排班」是允許修改的前提，不得反向成為 blocker，也
 不得為了修改進件資料先虛構 assignment 或逐日服務日期。
 
+2026-10-13 人工裁決：進件補件畫面只顯示 owner Preview 的 `missing_fields` 中實際缺少的
+服務開始日／服務天數；已齊全的欄位不作為補件輸入顯示。補一項時沿用另一項已保存的值，
+仍走既有 Orders Preview／Apply。完整日期／天數的早期異動保留「修改服務日期／天數」明示入口，
+由人員主動展開，不以可異動資格冒充缺件，不改 missing-field 判定、lifecycle 或交易邊界。
+
 此 preassignment Terms Query／Preview／Apply 只讀 Orders、Scheduling 與判斷下游完整性所需的最小
 存在／義務 facts；Client Finance／Payroll root 可合法不存在，回應與 receipt 的對應 version／impact
 使用 `NULL`，不得以 `0`、空金額或自動 bootstrap 冒充完整資料。若 root 已存在但內部關聯不完整，或已

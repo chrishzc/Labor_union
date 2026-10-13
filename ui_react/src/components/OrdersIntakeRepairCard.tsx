@@ -272,7 +272,7 @@ export const OrdersIntakeRepairCard: React.FC<OrdersIntakeRepairCardProps> = ({ 
       {termsMissing && (
         <section aria-label="補齊約定服務資料" style={{ display: 'grid', gap: 8 }}>
           <strong>約定服務資料</strong>
-          <label style={{ display: 'grid', gap: 4 }}>
+          {missingFields.includes('start_date') && <label style={{ display: 'grid', gap: 4 }}>
             約定服務開始日
             <input
               aria-label={`${item.case_no} 約定服務開始日`}
@@ -285,8 +285,8 @@ export const OrdersIntakeRepairCard: React.FC<OrdersIntakeRepairCardProps> = ({ 
                 setError(null);
               }}
             />
-          </label>
-          <label style={{ display: 'grid', gap: 4 }}>
+          </label>}
+          {missingFields.includes('service_days') && <label style={{ display: 'grid', gap: 4 }}>
             服務天數
             <input
               aria-label={`${item.case_no} 服務天數`}
@@ -300,7 +300,7 @@ export const OrdersIntakeRepairCard: React.FC<OrdersIntakeRepairCardProps> = ({ 
                 setError(null);
               }}
             />
-          </label>
+          </label>}
           <button
             type="button"
             disabled={busy !== null || !validTermsDraft || !termsProtectionReady}

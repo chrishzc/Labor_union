@@ -12,7 +12,7 @@
   - `ui_react/src/adapters/orders/order_card_projection_adapter.ts`
   - `ui_react/src/pages/OrderWorkbenchV2Page.tsx`
   - `ui_react/src/components/OrdersIntakeRepairCard.tsx`
-  - `ui_react/src/components/OrderIntakeRepairPanel.tsx` — 案件進件資料區分原始 HCM 欄位待修正與尚未補齊的案件資料；保留既有 Preview／Apply 與回讀流程。
+  - `ui_react/src/components/OrderIntakeRepairPanel.tsx` — 案件進件資料區分原始 HCM 欄位待修正與尚未補齊的案件資料；服務開始日／天數僅顯示實際 missing fields，完整資料的早期修改由人員主動展開；保留既有 Preview／Apply 與回讀流程。
   - `ui_react/src/components/OrderTerminalAggregateLane.tsx` — 呈現既有typed結案彙總，不重算結案規則。
   - `ui_react/src/pages/OrdersPage.css`
   - `subsystems/orders/card_projection_query.py`

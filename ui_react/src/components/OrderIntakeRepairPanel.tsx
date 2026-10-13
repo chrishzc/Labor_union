@@ -83,6 +83,7 @@ export function OrderIntakeRepairPanel({
   const [reason, setReason] = useState('');
   const [namePreview, setNamePreview] = useState<IntakeClientNamePreview | null>(null);
   const [termsPreview, setTermsPreview] = useState<IntakeTermsPreview | null>(null);
+  const [editingTerms, setEditingTerms] = useState(false);
   const [loading, setLoading] = useState(true);
   const [operation, setOperation] = useState<IntakeOperation>(null);
   const [error, setError] = useState<string | null>(null);
@@ -122,6 +123,7 @@ export function OrderIntakeRepairPanel({
       if (signal?.aborted) return;
       if (currentCompletion.case_no !== caseNo) throw new Error('進件補件回讀案件識別不一致。');
       setCompletion(currentCompletion);
+      setEditingTerms(false);
       setSourceReview(null);
       setSourceReviewError(false);
       setStartDate(currentCompletion.current_start_date ?? '');
@@ -462,11 +464,15 @@ export function OrderIntakeRepairPanel({
   const historicalRestartAvailable = orderStatus === '歷史訂單－未服務' || orderStatus === '歷史訂單－服務中';
   const historicalCompleted = orderStatus === '歷史訂單－服務完成' || orderStatus === '歷史訂單－帳務完成';
   const repairAllowed = completion !== null && completion.blockers.length === 0;
-  const termsRepairAllowed = completion !== null
+  const termsRepairEligible = completion !== null
     && (completion.current_status === '待補件' || completion.current_status === '洽談中')
     && completion.blockers.every((blocker) => blocker === 'order_intake_completion_status_not_eligible');
+  const missingStartDate = completion?.missing_fields.includes('start_date') ?? false;
+  const missingServiceDays = completion?.missing_fields.includes('service_days') ?? false;
+  const missingTerms = missingStartDate || missingServiceDays;
+  const termsRepairAllowed = termsRepairEligible && (missingTerms || editingTerms);
   const visibleCompletionBlockers = completion?.blockers.filter(
-    (blocker) => !(termsRepairAllowed && blocker === 'order_intake_completion_status_not_eligible'),
+    (blocker) => !(termsRepairEligible && blocker === 'order_intake_completion_status_not_eligible'),
   ) ?? [];
   const missingName = completion?.missing_fields.includes('client_name') ?? false;
   const shouldRender = loading
@@ -476,7 +482,7 @@ export function OrderIntakeRepairPanel({
     || completion === null
     || completion.missing_fields.length > 0
     || completion.apply_allowed
-    || termsRepairAllowed
+    || termsRepairEligible
     || ((historicalRestartAvailable || historicalCompleted) && completion.blockers.length > 0);
 
   if (!shouldRender) return null;
@@ -590,17 +596,21 @@ export function OrderIntakeRepairPanel({
             </div>
           )}
 
+          {termsRepairEligible && !missingTerms && !editingTerms && (
+            <button type="button" className="btn-secondary-action" disabled={controlsLocked}
+              onClick={() => setEditingTerms(true)}>修改服務日期／天數</button>
+          )}
           {termsRepairAllowed && (
             <div style={{ borderTop: '1px solid #fed7aa', paddingTop: '10px', display: 'grid', gap: '6px' }}>
               <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '8px', minWidth: 0 }}>
-                <label style={{ display: 'grid', gap: '4px', fontSize: '0.82rem', minWidth: 0 }}>
+                {(missingStartDate || editingTerms) && <label style={{ display: 'grid', gap: '4px', fontSize: '0.82rem', minWidth: 0 }}>
                   服務開始日
                   <input type="date" value={startDate} style={{ width: '100%', minWidth: 0, boxSizing: 'border-box' }} disabled={controlsLocked} onChange={(event) => { setStartDate(event.target.value); setTermsPreview(null); }} />
-                </label>
-                <label style={{ display: 'grid', gap: '4px', fontSize: '0.82rem', minWidth: 0 }}>
+                </label>}
+                {(missingServiceDays || editingTerms) && <label style={{ display: 'grid', gap: '4px', fontSize: '0.82rem', minWidth: 0 }}>
                   服務天數
                   <input type="number" min="1" value={serviceDays} style={{ width: '100%', minWidth: 0, boxSizing: 'border-box' }} disabled={controlsLocked} onChange={(event) => { setServiceDays(event.target.value); setTermsPreview(null); }} />
-                </label>
+                </label>}
               </div>
               <button type="button" className="btn-secondary-action" disabled={controlsLocked || !startDate || Number(serviceDays) <= 0} onClick={() => void previewTerms()}>
                 {operation === 'terms-preview' ? '正在檢查日期／天數異動…' : '檢查日期／天數異動影響'}

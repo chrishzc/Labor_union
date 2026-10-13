@@ -19,7 +19,7 @@ const profileDetail: ClientRegistryDetail = {
       residence_type: null, delivery_type: null, baby_info: null, notes: null, service_type: '無休' },
     field_capabilities: {
       phone: { owner: 'client_profile', editable: true, reason: null, options: null },
-      service_type: { owner: 'client_profile', editable: true, reason: null, options: ['連續服務', '休周六', '休周日', '週休2日'] },
+      service_type: { owner: 'client_profile', editable: true, reason: null, options: null },
     },
   },
   beclass: { status: 'unbound', record_id: null, source_kind: null, version: null, values: null, field_capabilities: {} },
@@ -70,8 +70,8 @@ describe('Orders intake repair entry', () => {
       apply_allowed: false, preview_fingerprint: FP1,
     });
     vi.mocked(hcmResubmissionClient.current)
-      .mockResolvedValueOnce({ items: [{ source_id: 30, review_identity: 'current', case_no: 'CASE-153', fields: ['行動電話', '服務方式'], can_correct: true }], next_cursor: null })
-      .mockResolvedValue({ items: [{ source_id: 30, review_identity: 'current', case_no: 'CASE-153', fields: ['服務方式'], can_correct: true }], next_cursor: null });
+      .mockResolvedValueOnce({ items: [{ source_id: 30, review_identity: 'current', case_no: 'CASE-153', fields: ['行動電話'], can_correct: true }], next_cursor: null })
+      .mockResolvedValue({ items: [], next_cursor: null });
     vi.spyOn(clientRegistryClient, 'preview').mockResolvedValue({
       owner: 'client_profile', aggregate_identity: 'CASE-153', current_version: 2,
       before: { phone: null }, after: { phone: '0912345678' }, preview_fingerprint: FP1,
@@ -84,8 +84,8 @@ describe('Orders intake repair entry', () => {
     const applyTerms = vi.spyOn(orderIntakeCompletionClient, 'applyTerms');
     const onChanged = vi.fn().mockResolvedValue(undefined);
     render(<OrderIntakeRepairPanel caseNo="CASE-153" orderStatus="待補件" onChanged={onChanged} />);
-    const phone = await screen.findByLabelText('行動電話');
-    expect(screen.getByLabelText('服務方式')).toHaveValue('無休');
+    const phone = await screen.findByLabelText('電話（手機／市話）');
+    expect(screen.queryByLabelText('服務方式')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('服務開始日')).not.toBeInTheDocument();
     fireEvent.change(phone, { target: { value: '0912345678' } });
     fireEvent.change(screen.getByLabelText('欄位修正原因'), { target: { value: '核對並修正電話' } });
@@ -95,10 +95,9 @@ describe('Orders intake repair entry', () => {
       ...profileDetail.client, version: 3, values: { ...profileDetail.client.values, phone: '0912345678' },
     } });
     fireEvent.click(screen.getByRole('button', { name: '確認儲存缺件資料' }));
-    expect(await screen.findByText('原始進件欄位待修正：服務方式')).toBeInTheDocument();
     await waitFor(() => expect(onChanged).toHaveBeenCalledOnce());
-    expect(screen.queryByLabelText('行動電話')).not.toBeInTheDocument();
-    expect(await screen.findByLabelText('服務方式')).toHaveValue('無休');
+    expect(screen.queryByLabelText('電話（手機／市話）')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('服務方式')).not.toBeInTheDocument();
     expect(apply.mock.calls[0][2]).toEqual({ phone: '0912345678' });
     expect(applyTerms).not.toHaveBeenCalled();
   });
@@ -106,6 +105,62 @@ describe('Orders intake repair entry', () => {
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
+  });
+
+  it('keeps complete service dates and days out of the supplementation form until staff explicitly edits them', async () => {
+    vi.spyOn(orderIntakeCompletionClient, 'previewCompletion').mockResolvedValue({
+      case_no: 'CASE-153', lifecycle_version: 7, current_status: '待補件', target_status: '洽談中',
+      current_start_date: '2026-10-15', current_service_days: 30,
+      missing_fields: [], blockers: [], apply_allowed: true, preview_fingerprint: FP1,
+    });
+    const previewTerms = vi.spyOn(orderIntakeCompletionClient, 'previewTerms');
+    render(<OrderIntakeRepairPanel caseNo="CASE-153" orderStatus="待補件" />);
+    const edit = await screen.findByRole('button', { name: '修改服務日期／天數' });
+    expect(screen.queryByLabelText('服務開始日')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('服務天數')).not.toBeInTheDocument();
+    expect(screen.queryByText('目前不可完成補件')).not.toBeInTheDocument();
+    expect(previewTerms).not.toHaveBeenCalled();
+    fireEvent.click(edit);
+    expect(screen.getByLabelText('服務開始日')).toHaveValue('2026-10-15');
+    expect(screen.getByLabelText('服務天數')).toHaveValue(30);
+  });
+
+  it.each(['start_date', 'service_days'] as const)('drawer only shows missing %s and preserves the other saved term in Preview', async (missing) => {
+    vi.spyOn(orderIntakeCompletionClient, 'previewCompletion').mockResolvedValue({
+      case_no: 'CASE-153', lifecycle_version: 7, current_status: '待補件', target_status: '洽談中',
+      current_start_date: missing === 'start_date' ? null : '2026-10-15',
+      current_service_days: missing === 'service_days' ? null : 30,
+      missing_fields: [missing], blockers: [], apply_allowed: false, preview_fingerprint: FP1,
+    });
+    vi.spyOn(ordersQueryClient, 'getOrderDetail').mockRejectedValue(new Error('partial order detail'));
+    const previewTerms = vi.spyOn(orderIntakeCompletionClient, 'previewTerms').mockResolvedValue({
+      case_no: 'CASE-153', lifecycle_version: 7, before_start_date: null, before_service_days: null,
+      after_start_date: '2026-10-15', after_service_days: 30, changed_fields: [missing],
+      blockers: [], apply_allowed: true, preview_fingerprint: FP1,
+    });
+    render(<OrderIntakeRepairPanel caseNo="CASE-153" orderStatus="待補件" />);
+    const missingLabel = missing === 'start_date' ? '服務開始日' : '服務天數';
+    const savedLabel = missing === 'start_date' ? '服務天數' : '服務開始日';
+    const input = await screen.findByLabelText(missingLabel);
+    expect(screen.queryByLabelText(savedLabel)).not.toBeInTheDocument();
+    fireEvent.change(input, { target: { value: missing === 'start_date' ? '2026-10-15' : '30' } });
+    fireEvent.click(screen.getByRole('button', { name: '檢查日期／天數異動影響' }));
+    await waitFor(() => expect(previewTerms).toHaveBeenCalledWith('CASE-153', '2026-10-15', 30, expect.any(Object)));
+  });
+
+  it.each(['start_date', 'service_days'] as const)('card only shows missing %s rather than a disabled valid field', async (missing) => {
+    vi.spyOn(orderIntakeCompletionClient, 'previewCompletion').mockResolvedValue({
+      case_no: 'CASE-153', lifecycle_version: 7, current_status: '待補件', target_status: '洽談中',
+      missing_fields: [missing], blockers: [], apply_allowed: false, preview_fingerprint: FP1,
+    });
+    render(<OrdersIntakeRepairCard item={{ ...incompleteSummary, client_name: '測試客戶',
+      start_date: missing === 'start_date' ? null : '2026-10-15',
+      service_days: missing === 'service_days' ? null : 30,
+    }} onChanged={vi.fn()} />);
+    const missingLabel = missing === 'start_date' ? 'CASE-153 約定服務開始日' : 'CASE-153 服務天數';
+    const savedLabel = missing === 'start_date' ? 'CASE-153 服務天數' : 'CASE-153 約定服務開始日';
+    expect(await screen.findByLabelText(missingLabel)).toBeInTheDocument();
+    expect(screen.queryByLabelText(savedLabel)).not.toBeInTheDocument();
   });
 
   it.each(['居住型態', '手機'])('顯示實際待修正欄位 %s 並區分尚未建立的案件資料', async (field) => {
@@ -336,6 +391,7 @@ describe('Orders intake repair entry', () => {
 
     render(<OrderIntakeRepairPanel caseNo="CASE-EARLY-CORRECTION" orderStatus="洽談中" />);
 
+    fireEvent.click(await screen.findByRole('button', { name: '修改服務日期／天數' }));
     expect(await screen.findByLabelText('服務開始日')).toHaveValue('2026-09-10');
     expect(screen.getByLabelText('服務天數')).toHaveValue(30);
     fireEvent.change(screen.getByLabelText('服務開始日'), { target: { value: '2026-09-12' } });
