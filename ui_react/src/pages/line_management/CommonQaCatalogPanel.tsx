@@ -53,7 +53,7 @@ const lifecycleLabels: Record<LifecycleStatus, string> = {
 };
 
 const indexLabels: Record<KnowledgeIndex['index_status'], string> = {
-  requested: '等待建立', building: '建立中', ready: 'READY', stale: '需重建', failed: '建立失敗',
+  requested: '等待更新', building: '更新中', ready: '更新完成', stale: '需要更新', failed: '更新失敗',
 };
 
 function requestHeaders(json = false): Record<string, string> {
@@ -94,6 +94,7 @@ function decodeQa(item: KnowledgeItem): ManagedQa | null {
 export const CommonQaCatalogPanel: React.FC = () => {
   const [items, setItems] = useState<ManagedQa[]>([]);
   const [latestIndex, setLatestIndex] = useState<KnowledgeIndex | null>(null);
+  const [readStatus, setReadStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [notice, setNotice] = useState<string | null>(null);
@@ -107,6 +108,7 @@ export const CommonQaCatalogPanel: React.FC = () => {
   });
 
   const loadState = async () => {
+    setReadStatus('loading');
     try {
       const [itemsResponse, indexesResponse] = await Promise.all([
         fetch('/api/v1/knowledge/items?limit=500', { headers: requestHeaders(), credentials: 'include' }),
@@ -118,8 +120,10 @@ export const CommonQaCatalogPanel: React.FC = () => {
       const indexes = await indexesResponse.json() as KnowledgeIndex[];
       setItems(rawItems.map(decodeQa).filter((item): item is ManagedQa => item !== null));
       setLatestIndex(indexes[0] ?? null);
+      setReadStatus('ready');
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : 'Knowledge 題庫讀取失敗。');
+      setReadStatus('error');
+      setNotice(error instanceof Error ? error.message : '問答資料讀取失敗。');
       setNoticeKind('error');
     }
   };
@@ -159,7 +163,7 @@ export const CommonQaCatalogPanel: React.FC = () => {
 
   const requestIndex = () => runMutation(() => fetch('/api/v1/knowledge/indexes', {
     method: 'POST', headers: { ...requestHeaders(), 'Idempotency-Key': operationIdentity('qa-index') }, credentials: 'include',
-  }), '已送出索引建立工作；狀態變成 READY 後才會供 AI 客服使用。');
+  }), '已送出問答搜尋資料更新工作；更新完成後才會供 AI 客服使用。');
 
   const importBuiltinCatalog = async () => {
     if (!window.confirm('將補齊系統內建的 54 題，不會覆寫既有編修。確定繼續？')) return;
@@ -174,7 +178,7 @@ export const CommonQaCatalogPanel: React.FC = () => {
       if (!response.ok) throw new Error(await apiError(response));
       const result = await response.json() as BuiltinCatalogImportResult;
       await loadState();
-      const indexMessage = result.index_job_id === null ? '目前不需重建索引。' : '索引工作已建立，READY 後即啟用。';
+      const indexMessage = result.index_job_id === null ? '目前不需更新問答搜尋資料。' : '問答搜尋資料更新工作已建立，更新完成後才會啟用。';
       setNotice(`內建題庫共 ${result.catalog_count} 題；本次補入 ${result.imported_count} 題、發布 ${result.published_count} 題。${indexMessage}`);
       setNoticeKind('success');
     } catch (error) {
@@ -187,7 +191,7 @@ export const CommonQaCatalogPanel: React.FC = () => {
 
   const transition = (item: ManagedQa, action: 'publish' | 'retire') => {
     const identity = operationIdentity(`qa-${action}`);
-    const success = action === 'publish' ? '已發布，正在更新 AI 索引；READY 後即啟用。' : '已停用，正在更新 AI 索引以移除舊答案。';
+    const success = action === 'publish' ? '新答案已發布，問答搜尋資料更新完成後才會啟用。' : '已停用，正在更新問答搜尋資料以移除舊答案。';
     return runMutation(() => fetch(`/api/v1/knowledge/items/${item.id}/${action}`, {
       method: 'POST',
       headers: { ...requestHeaders(true), 'Idempotency-Key': identity, 'X-Correlation-ID': identity },
@@ -250,29 +254,30 @@ export const CommonQaCatalogPanel: React.FC = () => {
     <div className="ai-editor-card qa-catalog-panel">
       <div className="ai-editor-header qa-catalog-header">
         <div className="qa-catalog-title">
-          <h2><BookOpenCheck aria-hidden="true" />常見 QA Knowledge</h2>
-          <span className="category-badge">共 {items.length} 筆 · {publishedCount} 筆已發布</span>
+          <h2><BookOpenCheck aria-hidden="true" />常見問答</h2>
+          {readStatus === 'ready' && <span className="category-badge">共 {items.length} 筆 · {publishedCount} 筆已發布</span>}
         </div>
         <div className="qa-catalog-actions">
           <button type="button" className="line-secondary-btn" disabled={busy} onClick={() => void importBuiltinCatalog()}><Download aria-hidden="true" />匯入／補齊內建 54 題</button>
-          <button type="button" className="line-secondary-btn" disabled={busy || publishedCount === 0} onClick={() => void requestIndex()}><SearchCheck aria-hidden="true" />手動重建索引</button>
-          <button type="button" className="line-primary-btn" disabled={busy} onClick={openCreate}><Plus aria-hidden="true" />新增 QA</button>
+          <button type="button" className="line-secondary-btn" disabled={busy || publishedCount === 0} onClick={() => void requestIndex()}><SearchCheck aria-hidden="true" />更新問答搜尋資料</button>
+          <button type="button" className="line-primary-btn" disabled={busy} onClick={openCreate}><Plus aria-hidden="true" />新增問答</button>
         </div>
       </div>
 
       <div className="line-warning" role="status">
-        <ShieldCheck aria-hidden="true" /> 系統已載入基礎題庫。編輯會產生草稿版本；「發布」會自動更新索引並啟用，「停用」會保留歷程並自動移除索引中的舊答案。
+        <ShieldCheck aria-hidden="true" /> {readStatus === 'loading' ? '正在讀取問答資料…' : readStatus === 'error' ? '問答資料讀取失敗，請重新整理。' : items.length === 0 ? '目前尚無題目，可匯入內建 54 題。' : `已載入 ${items.length} 筆問答。編輯後需發布新答案；問答搜尋資料更新完成後才會啟用。停用會保留歷程，並更新搜尋資料以移除舊答案。`}
       </div>
       <div className={`qa-index-status is-${latestIndex?.index_status ?? 'missing'}`} role="status">
-        <strong>AI 索引：</strong>{latestIndex ? `v${latestIndex.index_version} · ${indexLabels[latestIndex.index_status]}` : '尚未建立'}
+        <strong>問答搜尋資料：</strong>{readStatus === 'loading' ? '讀取中' : readStatus === 'error' ? '無法確認更新狀態' : latestIndex ? indexLabels[latestIndex.index_status] : '尚未建立'}
+        {readStatus === 'ready' && latestIndex && <details><summary>技術資訊</summary>索引版本：{latestIndex.index_version}</details>}
       </div>
       {notice && <div className={noticeKind === 'error' ? 'line-error' : noticeKind === 'success' ? 'line-success' : 'line-warning'} role="status">{notice}</div>}
 
       <div className="form-group-row qa-catalog-filters">
-        <div className="form-field-half"><label htmlFor="qa-catalog-search">搜尋常見 QA</label><input id="qa-catalog-search" type="search" value={query} placeholder="題號、分類、問題或別名" onChange={(event) => setQuery(event.target.value)} /></div>
-        <div className="form-field-half"><label htmlFor="qa-catalog-status">治理狀態</label><select id="qa-catalog-status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="ALL">全部</option><option value="draft">草稿</option><option value="reviewed">待啟用（舊資料）</option><option value="published">已發布（啟用）</option><option value="retired">已停用</option></select></div>
+        <div className="form-field-half"><label htmlFor="qa-catalog-search">搜尋常見問答</label><input id="qa-catalog-search" type="search" value={query} placeholder="題號、分類、問題或別名" onChange={(event) => setQuery(event.target.value)} /></div>
+        <div className="form-field-half"><label htmlFor="qa-catalog-status">問答狀態</label><select id="qa-catalog-status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="ALL">全部</option><option value="draft">草稿</option><option value="reviewed">待啟用（舊資料）</option><option value="published">已發布</option><option value="retired">已停用</option></select></div>
       </div>
-      <small>顯示 {filteredItems.length}／{items.length} 筆正式 Knowledge 項目</small>
+      {readStatus === 'ready' && <small>顯示 {filteredItems.length}／{items.length} 筆問答項目</small>}
 
       <div className="qa-catalog-list">
         {filteredItems.map((item) => (
@@ -280,7 +285,7 @@ export const CommonQaCatalogPanel: React.FC = () => {
             <summary className="qa-catalog-summary">
               <div><strong>{item.qa.id} · {item.qa.question}</strong><span className="category-badge qa-catalog-category">{item.qa.category} / {item.qa.tag}</span><span className={`qa-lifecycle-badge is-${item.lifecycle_status}`}>{lifecycleLabels[item.lifecycle_status]} · v{item.current_version}</span></div>
               <div className="qa-catalog-actions">
-                {(item.lifecycle_status === 'draft' || item.lifecycle_status === 'reviewed') && <button type="button" className="line-primary-btn" disabled={busy || !item.qa.answer} onClick={(event) => { event.preventDefault(); void transition(item, 'publish'); }}>發布啟用</button>}
+                {(item.lifecycle_status === 'draft' || item.lifecycle_status === 'reviewed') && <button type="button" className="line-primary-btn" disabled={busy || !item.qa.answer} onClick={(event) => { event.preventDefault(); void transition(item, 'publish'); }}>發布</button>}
                 {item.lifecycle_status === 'published' && <button type="button" className="line-danger-btn" disabled={busy} onClick={(event) => { event.preventDefault(); void transition(item, 'retire'); }}>停用</button>}
                 <button type="button" className="line-secondary-btn" disabled={busy} title="編輯此題目" onClick={(event) => { event.preventDefault(); openEdit(item); }}><Pencil aria-hidden="true" />編輯</button>
               </div>
@@ -288,10 +293,10 @@ export const CommonQaCatalogPanel: React.FC = () => {
             <div className="qa-catalog-detail"><div><strong>常見問法：</strong>{item.qa.aliases.join('、') || '—'}</div><div><strong>標準回答：</strong>{item.qa.answer || '尚無答案'}</div>{item.qa.notes && <div><strong>備註：</strong>{item.qa.notes}</div>}<details className="qa-catalog-technical"><summary>技術資訊</summary><small>Knowledge #{item.id} · {item.source_identity} · 來源 {item.qa.source_ref}</small></details></div>
           </details>
         ))}
-        {filteredItems.length === 0 && <div className="line-warning" role="status">{items.length === 0 ? '目前沒有題目，可使用上方「匯入／補齊內建 54 題」。' : '目前沒有符合條件的正式 Knowledge QA。'}</div>}
+        {readStatus === 'ready' && filteredItems.length === 0 && items.length > 0 && <div className="line-warning" role="status">目前沒有符合條件的問答。</div>}
       </div>
 
-      <Drawer isOpen={isCreating || editingItem !== null} onClose={closeEditor} title={isCreating ? '新增 QA 草稿' : `編輯 QA（${editingItem?.qa.id}）`} size="wide" closeDisabled={busy} closeLabel="關閉 QA 編輯器" footer={<div className="line-drawer-footer"><button type="button" disabled={busy} className="line-secondary-btn" onClick={closeEditor}>取消</button><button type="button" disabled={busy} className="line-primary-btn" onClick={save}>{busy ? '儲存中…' : '儲存為草稿'}</button></div>}>
+      <Drawer isOpen={isCreating || editingItem !== null} onClose={closeEditor} title={isCreating ? '新增問答草稿' : `編輯問答（${editingItem?.qa.id}）`} size="wide" closeDisabled={busy} closeLabel="關閉問答編輯器" footer={<div className="line-drawer-footer"><button type="button" disabled={busy} className="line-secondary-btn" onClick={closeEditor}>取消</button><button type="button" disabled={busy} className="line-primary-btn" onClick={save}>{busy ? '儲存中…' : '儲存為草稿'}</button></div>}>
         <form className="qa-editor-form" onSubmit={save} noValidate>
           {modalNotice && <div className="line-error" role="alert">{modalNotice}</div>}
           <label className="qa-editor-field"><span>題目編號 *</span><input required disabled={!isCreating} value={formData.id} placeholder="例如 QA-030" onChange={(event) => setFormData({ ...formData, id: event.target.value })} /></label>

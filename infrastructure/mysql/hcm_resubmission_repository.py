@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import date, time, timedelta
 
 from domains.case_import.hcm_resubmission import HcmResubmissionFacts, hcm_field_targets
 from domains.case_import.hcm_import_review import (
@@ -47,7 +48,8 @@ class MySqlHcmResubmissionRepository:
         client_version = int(row.get("client_hcm_correction_version") or 0)
         order_version = int(row.get("order_version") or 0)
         root_fingerprint = fingerprint_payload({
-            "target_values": values, "client_version": client_version,
+            "target_values": {target: _review_fingerprint_value(value) for target, value in values.items()},
+            "client_version": client_version,
             "order_version": order_version, "review_identity": str(row["review_identity"]),
             "review_version": review_version,
         }).value
@@ -228,6 +230,14 @@ class MySqlHcmResubmissionRepository:
 
 def _column_alias(target: str) -> str:
     return target.replace(".", "_")
+
+
+def _review_fingerprint_value(value):
+    if isinstance(value, (date, time)):
+        return value.isoformat()
+    if isinstance(value, timedelta):
+        return str(value)
+    return value
 
 
 def _table_alias(target: str) -> str:

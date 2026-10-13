@@ -41,7 +41,7 @@ function safeSaveErrorMessage(error: unknown): string {
 
 function connectionResultMessage(code: string | null): string {
   if (code === 'not_configured') return '尚未設定 Gemini API Key。';
-  if (code === 'authentication_failed') return 'Google 拒絕驗證此 API Key，請重新產生或覆寫 Key。';
+  if (code === 'authentication_failed') return 'Google 拒絕驗證此 API Key，請重新產生或更換金鑰。';
   if (code === 'model_unavailable') return `目前無法使用 ${GEMINI_MODEL}。`;
   if (code === 'rate_limited') return '已連到 Google，但目前受到配額或頻率限制。';
   if (code === 'timeout') return 'Gemini 連線測試逾時。';
@@ -208,14 +208,14 @@ export const LlmConfigurationPage: React.FC = () => {
           </div>
           <p id="llm-api-key-help" className="llm-config-help">
             {status?.configured
-              ? '目前已有金鑰。基於安全契約，系統不回傳完整內容或末四碼；送出新值會覆寫原設定。'
+              ? '目前已有金鑰。為保護金鑰，不顯示其內容。儲存新金鑰會取代目前設定。'
               : '金鑰只會送往後端私密儲存，儲存後立即清空。'}
           </p>
 
           <div className="llm-config-actions">
             <button className="llm-config-primary-action" type="submit" disabled={saving || apiKey.trim().length < 8}>
               <Save aria-hidden="true" />
-              {saving ? '儲存中…' : status?.configured ? '覆寫 Gemini API Key' : '儲存 Gemini API Key'}
+              {saving ? '儲存中…' : status?.configured ? '更換 API 金鑰' : '儲存 Gemini API Key'}
             </button>
             <button
               className="llm-config-secondary-action"

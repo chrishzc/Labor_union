@@ -151,7 +151,7 @@ describe('ClientRosterPage', () => {
     expect(detail).toHaveTextContent('主檔註記');
     expect(detail).toHaveTextContent('HCM Email');
     expect(detail).toHaveTextContent('hcm@example.com');
-    expect(detail).toHaveTextContent('BeClass 有效資料');
+    expect(detail).toHaveTextContent('報名問卷資料（BeClass）');
     expect(detail).toHaveTextContent('client@example.com');
     expect(detail).toHaveTextContent('BeClass Email');
     expect(detail).toHaveTextContent('BeClass 照護與特殊計費');
@@ -191,11 +191,11 @@ describe('ClientRosterPage', () => {
     fireEvent.click(await screen.findByRole('row', { name: '開啟案件 CASE-001 詳細資料' }));
 
     const repair = await screen.findByLabelText('案件初始資料修復');
-    expect(repair).toHaveTextContent('這不是排班格式問題');
-    fireEvent.click(await within(repair).findByRole('button', { name: '檢查初始資料補建內容' }));
+    expect(await within(repair).findByText(/客戶帳務、月嫂薪資或排班資料尚未齊全/)).toBeInTheDocument();
+    fireEvent.click(await within(repair).findByRole('button', { name: '預覽帳務與排班資料' }));
     await waitFor(() => expect(bootstrapMocks.preview).toHaveBeenCalledTimes(1));
     expect(repair).toHaveTextContent('客戶時薪：350 元');
-    fireEvent.click(within(repair).getByRole('button', { name: '確認建立案件初始資料' }));
+    fireEvent.click(within(repair).getByRole('button', { name: '建立帳務與排班資料' }));
     await waitFor(() => expect(bootstrapMocks.apply).toHaveBeenCalledTimes(1));
     expect(bootstrapMocks.apply.mock.calls[0][4]).toMatch(/^case-bootstrap-repair-/);
     await waitFor(() => expect(mocks.query).toHaveBeenCalledTimes(2));
@@ -229,13 +229,14 @@ describe('ClientRosterPage', () => {
     fireEvent.click(await screen.findByRole('row', { name: '開啟案件 CASE-001 詳細資料' }));
     const repair = await screen.findByLabelText('案件初始資料修復');
     await waitFor(() => expect(intakeMocks.previewCompletion).toHaveBeenCalledWith('CASE-001'));
+    expect(within(repair).queryByLabelText('服務天數')).not.toBeInTheDocument();
     fireEvent.change(within(repair).getByLabelText('約定服務開始日'), { target: { value: '2026-09-01' } });
-    fireEvent.click(within(repair).getByRole('button', { name: '檢查約定服務資料' }));
+    fireEvent.click(within(repair).getByRole('button', { name: '預覽約定服務資料' }));
     await waitFor(() => expect(intakeMocks.previewTerms).toHaveBeenCalledWith('CASE-001', '2026-09-01', 26));
-    fireEvent.click(within(repair).getByRole('button', { name: '確認套用約定服務資料' }));
+    fireEvent.click(within(repair).getByRole('button', { name: '確認儲存約定服務資料' }));
     await waitFor(() => expect(intakeMocks.applyTerms).toHaveBeenCalledTimes(1));
     expect(intakeMocks.applyTerms.mock.calls[0][3]).toMatch(/^historical-terms-repair-case-bootstrap-repair-/);
-    expect(await within(repair).findByRole('button', { name: '檢查初始資料補建內容' })).toBeInTheDocument();
+    expect(await within(repair).findByRole('button', { name: '預覽帳務與排班資料' })).toBeInTheDocument();
   });
 
   it('asks for service days instead of sending an invalid bootstrap preview', async () => {
@@ -268,9 +269,9 @@ describe('ClientRosterPage', () => {
     fireEvent.click(await screen.findByRole('row', { name: '開啟案件 CASE-001 詳細資料' }));
     const repair = await screen.findByLabelText('案件初始資料修復');
     expect(await within(repair).findByText('請先補齊約定服務天數，再建立案件初始資料。')).toBeInTheDocument();
-    expect(within(repair).getByLabelText('約定服務開始日')).toHaveValue('2026-09-15');
+    expect(within(repair).queryByLabelText('約定服務開始日')).not.toBeInTheDocument();
     expect(within(repair).getByLabelText('服務天數')).toHaveValue(null);
-    expect(within(repair).queryByRole('button', { name: '檢查初始資料補建內容' })).not.toBeInTheDocument();
+    expect(within(repair).queryByRole('button', { name: '預覽帳務與排班資料' })).not.toBeInTheDocument();
     expect(bootstrapMocks.preview).not.toHaveBeenCalled();
   });
 

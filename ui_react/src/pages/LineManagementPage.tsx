@@ -290,7 +290,7 @@ function displayQueryError(error: unknown, fallback: string): string {
 
 const TABS: ReadonlyArray<readonly [LineTab, string, string]> = [
   ['tickets', '客服與案件', 'line.tab.tickets'],
-  ['richmenu', 'Rich Menu', 'line.tab.richmenu'],
+  ['richmenu', '圖文選單', 'line.tab.richmenu'],
   ['binding', '身分與授權', 'line.tab.binding'],
   ['push_queue', '通知與發送', 'line.tab.push-queue'],
   ['order_groups', '三方服務群組', 'line.tab.order-groups'],
@@ -575,7 +575,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
     timedOut: boolean;
   } | null>(null);
 
-  // Rich Menu 本機互動沙盒與比對狀態
+  // 圖文選單 本機互動沙盒與比對狀態
   const [activeSimLiff, setActiveSimLiff] = useState<{
     title: string;
     subtitle: string;
@@ -748,9 +748,9 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
           setRichMenuDraftSnapshot(configurationResult.value);
           setRichMenuConfiguration(loadedState(nextConfiguration));
           setSelectedMenuId((current) => current ?? nextConfiguration.menus[0]?.id ?? null);
-        } else setRichMenuConfiguration(errorState(displayQueryError(configurationResult.reason, 'Rich Menu 設定載入失敗')));
+        } else setRichMenuConfiguration(errorState(displayQueryError(configurationResult.reason, '圖文選單 設定載入失敗')));
         if (publicationResult.status === 'fulfilled') setRichMenuPublications(loadedState(adaptLineRichMenuPublicationPage(publicationResult.value)));
-        else setRichMenuPublications(errorState(displayQueryError(publicationResult.reason, 'Rich Menu 發布紀錄載入失敗')));
+        else setRichMenuPublications(errorState(displayQueryError(publicationResult.reason, '圖文選單 發布紀錄載入失敗')));
       });
     }, 0);
     return () => { cancelled = true; window.clearTimeout(timer); controller.abort(); };
@@ -1392,7 +1392,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
     setSelectedPublication(loadingState());
     void lineConfiguration.getRichMenuPublication(publicationId, { signal: controller.signal })
       .then((publication) => { if (!controller.signal.aborted && generation === publicationGeneration.current) setSelectedPublication(loadedState(adaptLineRichMenuPublication(publication))); })
-      .catch((error: unknown) => { if (!controller.signal.aborted && generation === publicationGeneration.current) setSelectedPublication(errorState(displayQueryError(error, 'Rich Menu 發布明細載入失敗'))); });
+      .catch((error: unknown) => { if (!controller.signal.aborted && generation === publicationGeneration.current) setSelectedPublication(errorState(displayQueryError(error, '圖文選單 發布明細載入失敗'))); });
   };
 
   const closePublication = () => {
@@ -1430,7 +1430,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
           <h1 className="page-title">客服與營運工作台</h1>
           <p className="page-subtitle">處理客服案件、圖文選單、身分、通知與服務群組。</p>
         </div>
-        <span className="line-query-badge">系統流程已連線</span>
+
       </header>}
       {!runtimeOnly && <nav className="line-tab-bar" aria-label="客服與營運功能">
         {(['日常作業', '選單設定'] as const).map((group) => <div key={group} className="line-nav-group" role="group" aria-label={group}>
@@ -1672,7 +1672,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
           <section className="line-table-container" data-control-id="line.richmenu.configuration">
             <div className="line-section-heading">
               <div>
-                <h2>多角色 Rich Menu 管理</h2>
+                <h2>各角色的圖文選單</h2>
             <p>可編輯草稿的背景、名稱與按鈕動作；草稿保存不會發布，正式發布另須檢查影響並由人員確認。</p>
               </div>
               <button
@@ -1685,7 +1685,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
               </button>
             </div>
 
-            <nav className="line-hub-section-tabs richmenu-workspace-tabs" aria-label="Rich Menu 工作區">
+            <nav className="line-hub-section-tabs richmenu-workspace-tabs" aria-label="圖文選單 工作區">
               {([
                 ['overview', '選單概覽'],
                 ['appearance', '外觀編輯'],
@@ -1705,10 +1705,10 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
               ))}
             </nav>
 
-            <LoadingOrError state={richMenuConfiguration} loadingText="正在載入 Rich Menu 設定…" />
+            <LoadingOrError state={richMenuConfiguration} loadingText="正在載入 圖文選單 設定…" />
             {richMenuConfiguration.status === 'loaded' && richMenuConfiguration.value?.isEmpty && (
               <div className="line-empty-state">
-                <h4>目前沒有已核准的 Rich Menu 設定</h4>
+                <h4>目前沒有已核准的 圖文選單 設定</h4>
                 <p>畫面不會以範例選單或未核准 LIFF 路由補齊。</p>
               </div>
             )}
@@ -1929,7 +1929,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                     {activeMenu.chatBarText} ▾
                   </div>
 
-                  {/* Rich Menu Button Grid (可點擊互動) */}
+                  {/* 圖文選單 Button Grid (可點擊互動) */}
                   <div
                     className="richmenu-buttons-grid"
                     data-control-id="line.richmenu.local-preview"
@@ -1990,12 +1990,12 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                             if (act.type === 'POSTBACK' || act.type === 'RICHMENU_SWITCH') {
                               setSimChatMessages([]);
                               setActiveSimLiff({
-                                title: act.type === 'POSTBACK' ? 'Postback 動作本機預覽' : 'Rich Menu 切換本機預覽',
+                                title: act.type === 'POSTBACK' ? 'Postback 動作本機預覽' : '圖文選單 切換本機預覽',
                                 subtitle: '僅顯示草稿中的按鈕動作；不會送出 LINE 訊息。',
                                 badge: '零寫入預覽',
                                 fields: [
                                   { label: 'data', value: act.data ?? '未設定' },
-                                  ...(act.alias ? [{ label: 'Rich Menu alias', value: act.alias }] : []),
+                                  ...(act.alias ? [{ label: '圖文選單 alias', value: act.alias }] : []),
                                 ],
                                 actionButtons: [],
                               });
@@ -2041,7 +2041,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
 
                   <div className="line-table-scroll richmenu-table-spacing">
                     <table className="line-data-table">
-                      <caption className="sr-only">Rich Menu 按鈕動作與熱區</caption>
+                      <caption className="sr-only">圖文選單 按鈕動作與熱區</caption>
                       <thead>
                         <tr>
                           <th scope="col">熱區</th>
@@ -2188,7 +2188,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                 )}
                 {richMenuWorkspaceTab === 'publish'
                   && (activePublicationTracking || activePublicationLock?.state !== 'editable') && (
-                  <section className="richmenu-publish-card" aria-label="Rich Menu 發布狀態">
+                  <section className="richmenu-publish-card" aria-label="圖文選單 發布狀態">
                     {activePublicationTracking ? (
                       <>
                         <h4 className="richmenu-editor-title">
@@ -2236,14 +2236,14 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
             {richMenuWorkspaceTab === 'history' && <div className="richmenu-history-section" data-control-id="line.richmenu.publications">
               <div className="line-section-heading richmenu-history-heading">
                 <div>
-                  <h3 className="line-card-title">Rich Menu 發布歷程紀錄</h3>
+                  <h3 className="line-card-title">圖文選單 發布歷程紀錄</h3>
                   <p className="line-card-description">
                     顯示每次發布的排程、處理狀態與結果，方便追蹤未完成或失敗項目。
                   </p>
                 </div>
               </div>
 
-              {richMenuPublications.status === 'loading' && <div className="line-loading">正在載入 Rich Menu 發布紀錄…</div>}
+              {richMenuPublications.status === 'loading' && <div className="line-loading">正在載入 圖文選單 發布紀錄…</div>}
               {richMenuPublications.status === 'error' && <LineErrorMessage error={richMenuPublications.error} />}
               {richMenuPublications.status === 'loaded' && richMenuPublications.value && (
                 richMenuPublications.value.items.length === 0 ? (
@@ -2261,7 +2261,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                     </div>
                     <div className="line-table-scroll">
                     <table className="line-data-table">
-                      <caption className="sr-only">Rich Menu 發布歷程</caption>
+                      <caption className="sr-only">圖文選單 發布歷程</caption>
                       <thead>
                         <tr>
                           <th scope="col">選單</th>
@@ -2351,7 +2351,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
             <LoadingOrError state={bindingPage} loadingText="正在載入身分綁定…" />
 
             <div className="line-scope-note" data-control-id="line.identity.authority-note">
-              <strong>身分根事實：</strong>正式授權只以 server-side 驗證的 LIFF ID token 與 canonical binding 為準；網址參數或人工輸入的 LINE User ID 都不是身分證明，LIFF onboarding 也不會直接變更客戶、月嫂或管理員角色。
+              <strong>身分驗證：</strong>請從 LINE 登入並完成資料連結。網址參數或手動輸入的 LINE 帳號資訊不能用來驗證身分；完成登記也不會自動變更客戶、月嫂或管理員角色。
             </div>
 
             {bindingPage.status === 'loaded' && bindingPage.value && (
@@ -3338,7 +3338,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                     <>
                       <div className="line-preview-result">
                         <p>已核對目前綁定狀態與解除影響。</p>
-                        <p>Default Rich Menu：{bindingRevocationPreview.value.defaultMenuPublished ? '已發布' : '未發布'}</p>
+                        <p>Default 圖文選單：{bindingRevocationPreview.value.defaultMenuPublished ? '已發布' : '未發布'}</p>
                       </div>
                       {bindingRevocationPreview.value.hasBlockers ? (
                         <ul>{bindingRevocationPreview.value.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>
@@ -3472,7 +3472,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
         )}
       </Drawer>
 
-      <Drawer isOpen={selectedPublication.status !== 'idle'} onClose={closePublication} title="Rich Menu 發布紀錄" footer={<div className="line-drawer-footer"><button type="button" onClick={closePublication}>關閉</button>{selectedPublication.status === 'error' && publicationDetailId.current !== null && <button type="button" onClick={() => openPublication(publicationDetailId.current!)}>重試查詢</button>}</div>}><div className="line-drawer-content"><LoadingOrError state={selectedPublication} loadingText="正在載入發布紀錄明細…" />{selectedPublication.status === 'loaded' && selectedPublication.value && <div className="line-detail-grid"><div><span>選單</span><strong>{richMenuConfiguration.value?.menus.find((menu) => menu.id === selectedPublication.value?.menuDefinitionId)?.name ?? '已發布圖文選單'}</strong></div><div><span>目前狀態</span><strong>{selectedPublication.value.statusLabel}</strong></div></div>}</div></Drawer>
+      <Drawer isOpen={selectedPublication.status !== 'idle'} onClose={closePublication} title="圖文選單 發布紀錄" footer={<div className="line-drawer-footer"><button type="button" onClick={closePublication}>關閉</button>{selectedPublication.status === 'error' && publicationDetailId.current !== null && <button type="button" onClick={() => openPublication(publicationDetailId.current!)}>重試查詢</button>}</div>}><div className="line-drawer-content"><LoadingOrError state={selectedPublication} loadingText="正在載入發布紀錄明細…" />{selectedPublication.status === 'loaded' && selectedPublication.value && <div className="line-detail-grid"><div><span>選單</span><strong>{richMenuConfiguration.value?.menus.find((menu) => menu.id === selectedPublication.value?.menuDefinitionId)?.name ?? '已發布圖文選單'}</strong></div><div><span>目前狀態</span><strong>{selectedPublication.value.statusLabel}</strong></div></div>}</div></Drawer>
     </div>
   );
 };

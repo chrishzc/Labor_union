@@ -136,12 +136,28 @@ class ImportedOrderRootFacts:
 
 
 @dataclass(frozen=True, slots=True)
+class ImportedOrderServiceTime:
+    service_hours_per_day: float | int
+    service_start_time: time
+    service_end_time: time
+    service_end_day_offset: int
+
+    def __post_init__(self) -> None:
+        require_positive_half_hour(self.service_hours_per_day, "service hours per day")
+        _require_exact_type(self.service_start_time, time, "service start time")
+        _require_exact_type(self.service_end_time, time, "service end time")
+        if self.service_end_day_offset not in {0, 1}:
+            _raise_invalid("service end day offset must be zero or one")
+
+
+@dataclass(frozen=True, slots=True)
 class CaseImportIntent:
     case_no: str
     client_attributes: tuple[ClientImportAttribute, ...]
     order: ImportedOrderRootFacts | None
     bootstrap: CaseArchitectureBootstrapIntent | None
     provisional_registration_id: int | None = None
+    partial_service_time: ImportedOrderServiceTime | None = None
 
     def __post_init__(self) -> None:
         _validate_case_no(self.case_no)
@@ -154,6 +170,8 @@ class CaseImportIntent:
             _raise_invalid("order root facts belong to another case")
         if self.bootstrap is not None and self.bootstrap.case_no != self.case_no:
             _raise_invalid("bootstrap intent belongs to another case")
+        if self.partial_service_time is not None and self.is_complete:
+            _raise_invalid("partial service time belongs to incomplete intake only")
         if self.provisional_registration_id is not None:
             require_positive_integer(self.provisional_registration_id, "provisional registration id")
 
@@ -219,12 +237,14 @@ class CaseImportCandidate:
     source_fingerprint: PreviewFingerprint
     fingerprint: PreviewFingerprint
     provisional_registration: ProvisionalRegistrationFacts | None = None
+    partial_service_time: ImportedOrderServiceTime | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class ImportedOrderIntakeTerms:
     planned_start_date: date | None
     service_days: int | None
+    service_time: ImportedOrderServiceTime | None = None
 
 
 def imported_order_intake_terms(candidate: CaseImportCandidate) -> ImportedOrderIntakeTerms:
@@ -236,7 +256,7 @@ def imported_order_intake_terms(candidate: CaseImportCandidate) -> ImportedOrder
         _require_exact_type(start_date, date, "planned start date")
     if service_days is not None:
         require_positive_integer(service_days, "service days")
-    return ImportedOrderIntakeTerms(start_date, service_days)
+    return ImportedOrderIntakeTerms(start_date, service_days, candidate.partial_service_time)
 
 
 # Kept cohesive so source and bootstrap fingerprints describe one candidate.
@@ -266,6 +286,7 @@ def build_case_import_candidate(
         source_fingerprint,
         fingerprint,
         facts.provisional_registration,
+        intent.partial_service_time,
     )
 
 
@@ -336,7 +357,7 @@ def _required_attribute(attributes, name):
 
 
 def _source_payload(intent):
-    return {
+    payload = {
         "case_no": intent.case_no,
         "client_attributes": tuple(
             {
@@ -349,6 +370,15 @@ def _source_payload(intent):
         "bootstrap": None if intent.bootstrap is None else _bootstrap_payload(intent.bootstrap),
         "provisional_registration_id": intent.provisional_registration_id,
     }
+    if intent.partial_service_time is not None:
+        terms = intent.partial_service_time
+        payload["partial_service_time"] = {
+            "service_hours_per_day": terms.service_hours_per_day,
+            "service_start_time": terms.service_start_time.isoformat(),
+            "service_end_time": terms.service_end_time.isoformat(),
+            "service_end_day_offset": terms.service_end_day_offset,
+        }
+    return payload
 
 
 def _order_payload(order):

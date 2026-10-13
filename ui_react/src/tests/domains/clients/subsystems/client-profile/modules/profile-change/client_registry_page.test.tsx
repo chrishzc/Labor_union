@@ -8,6 +8,8 @@ vi.mock('../../../../../../../components/CaseArchitectureBootstrapRepairPanel', 
 }));
 
 const mocks = vi.hoisted(() => ({ list: vi.fn(), query: vi.fn(), history: vi.fn(), preview: vi.fn(), apply: vi.fn() }));
+const completionMocks = vi.hoisted(() => ({ previewCompletion: vi.fn() }));
+vi.mock('../../../../../../../api/orders/order_intake_completion_client', () => ({ orderIntakeCompletionClient: completionMocks }));
 vi.mock('../../../../../../../api/client_registry/client_registry_client', () => ({ clientRegistryClient: mocks }));
 vi.mock('../../../../../../../components/OrderTermsMutationPanel', () => ({ OrderTermsMutationPanel: () => <div>訂單條款 owner</div> }));
 
@@ -64,6 +66,7 @@ describe('Client registry owner editing', () => {
   beforeEach(() => {
     window.location.hash = '';
     Object.values(mocks).forEach((mock) => mock.mockReset());
+    completionMocks.previewCompletion.mockReset().mockResolvedValue({ missing_fields: ['start_date', 'service_days'] });
     mocks.list.mockResolvedValue({ items: [{ client_id: 7, case_no: 'CASE-001', name: '王小明', phone: '0911111111', city: '新竹市', planned_start_date: null, order_status: 'matching' }], next_cursor: null });
     mocks.query.mockResolvedValue(detail);
     mocks.preview.mockResolvedValue({ owner: 'client_profile', aggregate_identity: 'CASE-001', current_version: 2, before: { phone: '0911111111' }, after: { phone: '0933333333' }, preview_fingerprint: 'a'.repeat(64) });
@@ -168,10 +171,10 @@ describe('Client registry owner editing', () => {
     render(<ClientRegistryPage />);
     fireEvent.click(screen.getByRole('tab', { name: '名冊資料' }));
     fireEvent.click(await screen.findByRole('button', { name: /CASE-001/ }));
-    const input = await screen.findByRole('textbox', { name: '服務方式' });
+    const input = await screen.findByRole('textbox', { name: '服務方式（排班參考）' });
     expect(input).toHaveValue(saved);
     expect(input).toHaveAttribute('maxlength', '100');
-    expect(screen.queryByRole('combobox', { name: '服務方式' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: '服務方式（排班參考）' })).not.toBeInTheDocument();
     const profile = input.closest('section') as HTMLElement;
     fireEvent.change(input, { target: { value: requested } });
     fireEvent.click(within(profile).getByRole('button', { name: '預覽變更' }));
@@ -179,7 +182,7 @@ describe('Client registry owner editing', () => {
     fireEvent.click(within(profile).getByRole('button', { name: '確認儲存' }));
     await screen.findByText('客戶主檔已儲存。');
     expect(mocks.apply.mock.calls[0][2]).toEqual({ service_type: requested });
-    expect(screen.getByRole('textbox', { name: '服務方式' })).toHaveValue(requested);
+    expect(screen.getByRole('textbox', { name: '服務方式（排班參考）' })).toHaveValue(requested);
   });
 
   it.each(['週休2日', '每週依需求排班，含週末服務', null])('shows saved service type even when order terms are unavailable (%s)', async (serviceType) => {
@@ -190,7 +193,7 @@ describe('Client registry owner editing', () => {
     const terms = (await screen.findByRole('heading', { name: '目前訂單條件' })).closest('section') as HTMLElement;
     expect(terms).toHaveTextContent('服務方式');
     expect(terms).toHaveTextContent(serviceType ?? '尚未登錄');
-    expect(within(terms).queryByRole('combobox', { name: '服務方式' })).not.toBeInTheDocument();
+    expect(within(terms).queryByRole('combobox', { name: '服務方式（排班參考）' })).not.toBeInTheDocument();
   });
 
   it.each(['order_terms_start_date_required', 'order_terms_service_days_required'])(
@@ -207,6 +210,17 @@ describe('Client registry owner editing', () => {
       expect(mocks.apply).not.toHaveBeenCalled();
     },
   );
+
+  it('lists only actual missing fields instead of treating the first error code as all missing terms', async () => {
+    window.location.hash = '#clients?case=CASE-001';
+    mocks.query.mockResolvedValue({ ...detail, order_terms: { ...detail.order_terms, code: 'order_terms_service_days_required' } });
+    completionMocks.previewCompletion.mockResolvedValue({ current_start_date: '2026-11-01', missing_fields: ['service_days'] });
+    render(<ClientRegistryPage />);
+    expect(await screen.findByText('缺少欄位：服務天數。')).toBeInTheDocument();
+    expect(screen.queryByText('缺少欄位：約定服務開始日、服務天數。')).not.toBeInTheDocument();
+    expect(mocks.apply).not.toHaveBeenCalled();
+    expect(completionMocks.previewCompletion).toHaveBeenCalledWith('CASE-001', expect.objectContaining({ signal: expect.any(AbortSignal) }));
+  });
 
   it('cancels without writing and applies a preview with one stable idempotency key', async () => {
     render(<ClientRegistryPage />);
@@ -276,7 +290,7 @@ describe('Client registry owner editing', () => {
     expect(within(profile).getByRole('combobox', { name: '住宅型態' })).toBeInTheDocument();
     expect(within(profile).getByRole('combobox', { name: '生產方式' })).toBeInTheDocument();
     expect(within(profile).getByRole('textbox', { name: '電話（手機／市話）' })).toBeInTheDocument();
-    const beclass = (await screen.findByRole('heading', { name: 'BeClass 有效資料' })).closest('section') as HTMLElement;
+    const beclass = (await screen.findByRole('heading', { name: '報名問卷資料（BeClass）' })).closest('section') as HTMLElement;
     const birthCount = within(beclass).getByRole('combobox', { name: '胎數（單胞胎／雙胞胎）' });
     expect(birthCount).toHaveValue('雙胞胎');
     fireEvent.change(birthCount, { target: { value: '單胞胎' } });
@@ -307,7 +321,7 @@ describe('Client registry owner editing', () => {
     fireEvent.click(screen.getByRole('tab', { name: '名冊資料' }));
     fireEvent.click(await screen.findByRole('button', { name: /CASE-001/ }));
 
-    const beclass = (await screen.findByRole('heading', { name: 'BeClass 有效資料' })).closest('section') as HTMLElement;
+    const beclass = (await screen.findByRole('heading', { name: '報名問卷資料（BeClass）' })).closest('section') as HTMLElement;
     expect(within(beclass).getByRole('combobox', { name: /胎數（單胞胎／雙胞胎）/ })).toBeDisabled();
     expect(within(beclass).getByText('服務已開始，胎數會影響費率，不能在此直接修改。')).toBeInTheDocument();
     expect(mocks.preview).not.toHaveBeenCalled();
@@ -332,7 +346,7 @@ describe('Client registry owner editing', () => {
     fireEvent.click(screen.getByRole('tab', { name: '名冊資料' }));
     fireEvent.click(await screen.findByRole('button', { name: /CASE-001/ }));
 
-    const beclass = (await screen.findByRole('heading', { name: 'BeClass 有效資料' })).closest('section') as HTMLElement;
+    const beclass = (await screen.findByRole('heading', { name: '報名問卷資料（BeClass）' })).closest('section') as HTMLElement;
     expect(within(beclass).getByText('資料來源：後台人工補登（無 BeClass 匯入紀錄）')).toBeInTheDocument();
     expect(within(beclass).getByRole('textbox', { name: '報名姓名' })).toHaveValue('');
     expect(within(beclass).getByRole('combobox', { name: '胎數（單胞胎／雙胞胎）' })).toHaveValue('');

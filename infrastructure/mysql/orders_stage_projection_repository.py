@@ -30,6 +30,14 @@ SELECT o.case_no,
                   AND o.service_end_time IS NOT NULL
                   AND o.service_end_day_offset IN (0, 1)
             THEN 1 ELSE 0 END AS imported_terms_complete,
+       CASE WHEN o.start_date IS NULL THEN 1 ELSE 0 END AS intake_start_date_missing,
+       CASE WHEN o.service_days IS NULL OR o.service_days <= 0
+            THEN 1 ELSE 0 END AS intake_service_days_missing,
+       CASE WHEN o.service_hours_per_day IS NULL OR o.service_hours_per_day <= 0
+                  OR o.service_start_time IS NULL OR o.service_end_time IS NULL
+                  OR o.service_end_day_offset IS NULL OR o.service_end_day_offset NOT IN (0, 1)
+            THEN 1 ELSE 0 END AS intake_service_time_missing,
+       CASE WHEN o.floor_fee IS NULL THEN 1 ELSE 0 END AS intake_floor_fee_missing,
        historical_binding_generation.receipt_id AS historical_binding_receipt_id,
        historical_binding_generation.created_at AS historical_binding_at,
        COALESCE(historical_binding.bound_staff_count, 0) AS historical_bound_staff_count,

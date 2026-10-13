@@ -529,7 +529,7 @@ describe('LINE 管理頁真實資料呈現', () => {
     expect(requestOptions?.signal?.aborted).toBe(true);
   });
 
-  it('Rich Menu 發布紀錄使用 server page metadata 翻頁，末頁不再提供下一頁', async () => {
+  it('圖文選單 發布紀錄使用 server page metadata 翻頁，末頁不再提供下一頁', async () => {
     const { customer, identity } = clients();
     const publications = Array.from({ length: 26 }, (_, index) => ({
       ...LINE_RICH_MENU_PUBLICATION_FIXTURE,
@@ -575,7 +575,7 @@ describe('LINE 管理頁真實資料呈現', () => {
         richMenuDraft={richMenuDraft}
       />
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Rich Menu' }));
+    fireEvent.click(screen.getByRole('button', { name: '圖文選單' }));
     fireEvent.click(await screen.findByRole('button', { name: '發布歷程' }));
     expect(await screen.findByText(/第 1／2 頁，\s*顯示第 1–25 筆，\s*共 26 筆/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '上一頁' })).toBeDisabled();

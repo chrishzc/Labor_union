@@ -564,7 +564,7 @@ describe('SchedulingPage query-only presentation', () => {
     expect(screen.getAllByText('服務資格').length).toBeGreaterThan(0);
     expect(screen.getByText('資料待補正（無法判定）')).toBeInTheDocument();
     expect(screen.getByText('接單資格根事實不完整')).toBeInTheDocument();
-    expect(screen.getByText(/檔期衝突與 7 天防撞期判定/)).toBeInTheDocument();
+    expect(screen.getByText(/檔期衝突與 7 天排班緩衝期判定/)).toBeInTheDocument();
     expect(screen.getByText(/資料待補正.*需人工確認/)).toBeInTheDocument();
     expect(document.body).toHaveTextContent(/歷史排班\s*來源關聯\s*待人工確認/);
     expect(screen.getByText(/需補齊：每日服務時段尚未完整；補齊後再查詢/)).toBeInTheDocument();

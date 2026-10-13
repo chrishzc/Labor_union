@@ -1,5 +1,5 @@
 """Current HCM field reviews paginate after the owner resolution predicate."""
-from datetime import time, timedelta
+from datetime import date, datetime, time, timedelta
 
 import pytest
 
@@ -149,6 +149,27 @@ def test_registry_save_resolves_without_a_resubmission_event_and_remains_read_on
     assert repository.query_review('review-1')['resolved'] is True
     roots['review-1']['clients_name'] = ' '
     assert repository.query_review('review-1')['resolved'] is False
+    assert all(sql.startswith('SELECT') for sql, _ in connection.reader.calls)
+
+
+@pytest.mark.parametrize('field, roots', [
+    ('預計服務日期', {'orders_start_date': date(2026, 11, 1), 'orders_end_date': None}),
+    ('希望服務天數', {'orders_service_days': 6, 'orders_end_date': date(2026, 11, 6)}),
+    ('報名時間(建檔)', {'clients_created_at': datetime(2026, 10, 1, 9)}),
+    ('服務時間', {'orders_service_hours_per_day': 8, 'orders_service_start_time': time(9),
+                    'orders_service_end_time': time(17), 'orders_service_end_day_offset': 0}),
+    ('服務時間', {'orders_service_hours_per_day': 8, 'orders_service_start_time': timedelta(hours=9),
+                    'orders_service_end_time': timedelta(hours=17), 'orders_service_end_day_offset': 0}),
+])
+def test_current_review_accepts_real_mysql_temporal_values_after_repair(field, roots):
+    row = dict(id=1, review_identity='review-1', case_no='SYNTH-1',
+               issue_codes=['hcm_field_missing:' + field])
+    connection = Connection([row], {'review-1': roots})
+    repository = MySqlHcmResubmissionRepository(connection)
+    before = dict(roots)
+    assert repository.query_review('review-1')['resolved'] is True
+    assert repository.query_current_reviews(limit=20, before_id=None)['items'] == []
+    assert roots == before
     assert all(sql.startswith('SELECT') for sql, _ in connection.reader.calls)
 
 

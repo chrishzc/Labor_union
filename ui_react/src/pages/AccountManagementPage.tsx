@@ -38,7 +38,7 @@ const initialCommandState: QueryState<AccountMutationReceipt> = { status: 'idle'
 function errorMessage(error: unknown, fallback: string): string {
   const code = String((error as { code?: unknown })?.code ?? (error instanceof Error ? error.message : '')).toUpperCase();
   if (code.includes('UNAUTHENTICATED')) return '請先完成管理員登入後再操作。';
-  if (code.includes('FORBIDDEN')) return '帳號中心僅限唯一啟用的 root 帳號；請以 root 身分重新登入。';
+  if (code.includes('FORBIDDEN')) return '僅限最高權限管理員使用。請以具此權限的帳號登入。';
   if (code.includes('STALE') || code.includes('CONFLICT')) return '資料已更新，請重新整理後再操作。';
   if (code.includes('UNAVAILABLE') || code.includes('NETWORK') || code.includes('TIMEOUT')) return '服務目前暫時無法使用，請稍後重試。';
   return fallback;

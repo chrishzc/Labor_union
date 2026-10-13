@@ -35,7 +35,7 @@ function errorMessage(error: unknown): string {
   const status = Number((error as { status?: unknown })?.status ?? 0);
   const code = String((error as { code?: unknown })?.code ?? '');
   if (status === 401) return '登入狀態已失效，請重新登入。';
-  if (status === 403) return '只有 root 管理員可查看或清理技術儲存空間。';
+  if (status === 403) return '僅限最高權限管理員使用。請以具此權限的帳號登入。';
   if (code.includes('STALE')) return '資料已改變，請重新建立清理預覽。';
   if (code.includes('UNCONFIGURED')) return '此來源尚未設定容量上限，無法執行容量清理。';
   if (code.includes('UNCLASSIFIED')) return '此來源尚未完成安全分類，系統不會刪除。';
@@ -135,14 +135,14 @@ export const StorageManagementPage: React.FC = () => {
         <div>
           <p className="storage-management-eyebrow">稽核與系統</p>
           <h1 id="storage-management-title">儲存空間管理</h1>
-          <p>只管理技術 log、AI 客服觀測與舊索引；會員、訂單、財務、合約及正式稽核證據不會被刪除。</p>
+          <p>只管理系統紀錄、AI 客服使用紀錄與舊搜尋資料；會員、訂單、財務、合約及正式稽核證據不會被刪除。</p>
         </div>
-        <button type="button" onClick={() => void load()} disabled={loading || working}>重新查詢</button>
+        <button type="button" onClick={() => void load()} disabled={loading || working}>重新整理</button>
       </header>
 
       <section className="storage-policy-note" aria-label="保留政策">
         <strong>最長保留 30 天</strong>
-        <span>到期自動清理；容量超標時只從 allowlist 中 oldest-first 回收。DB 顯示的是可重用邏輯空間，不代表實體檔案立即縮小。</span>
+        <span>到期自動清理；容量超過上限時，從允許清理的資料中優先移除最舊紀錄。資料庫回報的是可重新使用的空間，檔案大小不一定立即減少。</span>
       </section>
 
       {error && <div className="storage-error" role="alert">{error}</div>}
@@ -183,7 +183,7 @@ export const StorageManagementPage: React.FC = () => {
               清理模式
               <select value={mode} onChange={(event) => { setMode(event.target.value as RetentionMode); setPreview(null); }}>
                 <option value="expired">清理已滿 30 天資料</option>
-                <option value="capacity">容量壓力 oldest-first 清理</option>
+                <option value="capacity">容量超標時優先清理最舊紀錄</option>
               </select>
             </label>
             <label>
@@ -221,7 +221,7 @@ export const StorageManagementPage: React.FC = () => {
       {receipt && (
         <section className={`storage-receipt ${receipt.outcome}`} aria-label="清理 readback" role="status">
           <h2>清理 readback</h2>
-          <p>結果：{receipt.outcome}；刪除 {receipt.deleted_count}，失敗 {receipt.failed_count}，釋放可重用邏輯空間 {formatBytes(receipt.deleted_logical_bytes)}。</p>
+          <p>結果：{receipt.outcome}；刪除 {receipt.deleted_count}，失敗 {receipt.failed_count}，釋放可重新使用的空間 {formatBytes(receipt.deleted_logical_bytes)}。</p>
           <p>Correlation：{receipt.correlation_id}</p>
         </section>
       )}

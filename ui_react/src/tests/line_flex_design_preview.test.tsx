@@ -20,7 +20,7 @@ describe('LINE Flex design preview', () => {
     };
     render(React.createElement(LiffCardStudio, { runtimeConfigClient }));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Flex 卡片 (4)' }));
+    fireEvent.click(screen.getByRole('button', { name: '訊息卡片 (4)' }));
     const expected = [
       ['派案通知卡設計稿', '案件編號：【寄送前依正式案件資料帶入】'],
       ['服務日順延確認卡設計稿', '正式請假日期與順延後結束日會在寄送前核對。'],

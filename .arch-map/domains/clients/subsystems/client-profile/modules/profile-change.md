@@ -27,6 +27,7 @@
   - `service_type` 使用文字輸入與 Client Profile writer 保存非空原文（最多 100 字），不提供固定選單、不轉換別名，不重算 Orders 結束日。
 - `ui_react/src/components/HcmIntakeProfileRepairPanel.tsx` — 由 current HCM review 指定本案可編輯欄位，組合既有 Client Profile Preview／Apply，正式回讀後才刷新警示。
 - `ui_react/src/pages/ClientRosterPage.tsx`
+- `ui_react/src/components/OrderTermsUnavailableNote.tsx` — 名冊編輯與唯讀詳情共用服務條件提示；日期／天數缺件以 Orders completion Preview 的 actual missing fields 顯示，查詢失敗不推定空值，錯誤代碼置於技術資訊。
 - `ui_react/src/components/ClientRosterColumnFilter.tsx` — Excel 式表頭篩選；只讀 allowlisted 全名冊選項，不在單頁上過濾。
 - `ui_react/src/components/client_roster_filter_columns.ts` — 表頭與已套用摘要共用欄位標籤、型別及格式。
 - `ui_react/src/components/CaseArchitectureBootstrapRepairPanel.tsx` — 僅組合 Case Import-owned bootstrap Q/P/A，完成後重讀名冊 owner facts。

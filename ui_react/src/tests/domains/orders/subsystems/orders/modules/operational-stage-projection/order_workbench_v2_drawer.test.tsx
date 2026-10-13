@@ -11,6 +11,7 @@ import {
 } from '../../../../../../../api/orders/order_core_stage_projection_schemas';
 import type { OrderCoreStageProjectionQueryParams } from '../../../../../../../api/orders/order_core_stage_projection_client';
 import { OrderWorkbenchV2Page } from '../../../../../../../pages/OrderWorkbenchV2Page';
+import { adaptOrderSummaryPage } from '../../../../../../../adapters/orders/order_summary_adapter';
 
 const clientMocks = vi.hoisted(() => ({
   getCoreStageTimelines: vi.fn(),
@@ -232,7 +233,7 @@ function setOwnerFacts(caseNo: string, clientName = '林小芳', staffId = 42) {
   clientMocks.getAssignmentPlan.mockResolvedValue(assignment(caseNo, staffId));
 }
 
-describe('待辦看板 Beta 唯讀工作 Drawer', () => {
+describe('待辦看板 唯讀工作 Drawer', () => {
   beforeEach(() => {
     Object.values(clientMocks).forEach((mock) => mock.mockReset());
     clientMocks.loadSummaries.mockResolvedValue(summaryPage());
@@ -281,6 +282,32 @@ describe('待辦看板 Beta 唯讀工作 Drawer', () => {
     fireEvent.click(screen.getByRole('button', { name: '案件處理' }));
   });
 
+  it('keeps known name and dates from the matching case summary when incomplete terms prevent detail reads', async () => {
+    const caseNo = 'CASE-INCOMPLETE';
+    clientMocks.getCoreStageTimelines.mockResolvedValue(page([
+      timeline(caseNo, 'intake_validation', { lifecycle: '待補件' }),
+    ]));
+    clientMocks.getOrderDetail.mockRejectedValue(new Error('order_detail_projection_invalid'));
+    clientMocks.getOrderTerms.mockRejectedValue(new Error('terms_unavailable'));
+    clientMocks.getAssignmentPlan.mockRejectedValue(new Error('assignment_unavailable'));
+    const summary = adaptOrderSummaryPage({ items: [{
+      case_no: caseNo, client_name: '已登錄客戶', order_status: '待補件',
+      staff_name: null, identity_status: null, start_date: '2026-11-01', end_date: null,
+      actual_start_date: null, actual_end_date: null, service_days: null,
+      total_employer_self_pay_payable: null,
+    }], next_cursor: null, etag: 'f'.repeat(64) }).items[0]!;
+    const { container, rerender } = render(<OrderWorkbenchV2Drawer caseNo={caseNo} branchType="normal" summary={summary} onClose={() => {}} />);
+    await screen.findByRole('region', { name: '正式補件入口' });
+    const header = container.querySelector('.order-case-context')!;
+    expect(header).toHaveTextContent('已登錄客戶');
+    expect(header).toHaveTextContent('2026-11-01');
+    expect(header).toHaveTextContent('待補服務天數');
+    expect(header).not.toHaveTextContent('讀取失敗');
+    rerender(<OrderWorkbenchV2Drawer caseNo={caseNo} branchType="normal" summary={{ ...summary, id: 'ANOTHER-CASE' }} onClose={() => {}} />);
+    expect(header).not.toHaveTextContent('已登錄客戶');
+    expect(header).toHaveTextContent('讀取失敗');
+  });
+
   it('由案件卡開啟／關閉，並只用正式 GET owner facts 與 core-stage projection 呈現案件、服務、派案、13 階、notice 與 lineage', async () => {
     const row = timeline('CASE-DRAWER', 'intake_validation', {
       currentStatus: 'blocked',
@@ -302,7 +329,7 @@ describe('待辦看板 Beta 唯讀工作 Drawer', () => {
 
     await waitFor(() => expect(within(dialog).getAllByText('林小芳').length).toBeGreaterThan(0));
     const caseContext = dialog.querySelector('.order-case-context');
-    expect(caseContext).toHaveTextContent('預期開始2026-10-01');
+    expect(caseContext).toHaveTextContent('約定服務開始日2026-10-01');
     expect(caseContext).toHaveTextContent('實際開始2026-10-03');
     fireEvent.click(within(dialog).getByRole('button', { name: '訂單與服務資料' }));
     expect(within(dialog).getAllByText('2026-10-01').length).toBeGreaterThan(0);
@@ -432,7 +459,7 @@ describe('待辦看板 Beta 唯讀工作 Drawer', () => {
 
     const dialog = await screen.findByRole('region', { name: '案件 CASE-STRICT' });
     const caseContext = dialog.querySelector('.order-case-context');
-    expect(caseContext).toHaveTextContent('預期開始1999-01-01');
+    expect(caseContext).toHaveTextContent('約定服務開始日1999-01-01');
     expect(caseContext).toHaveTextContent('服務量20 日 · 每日 9 小時');
     fireEvent.click(within(dialog).getByRole('button', { name: '訂單與服務資料' }));
     await waitFor(() => expect(within(dialog).getByText('約定服務資料暫時無法取得。')).toBeInTheDocument());

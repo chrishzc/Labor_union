@@ -379,10 +379,18 @@ def _insert_order(cursor, candidate, client_id) -> None:
     order = candidate.order
     if order is None:
         terms = imported_order_intake_terms(candidate)
+        service_time = terms.service_time
         cursor.execute(
-            "INSERT INTO orders (case_no,client_id,status,lifecycle_version,start_date,service_days,service_hours_per_day) "
-            "VALUES (%s,%s,'待補件',0,%s,%s,NULL)",
-            (candidate.case_no, client_id, terms.planned_start_date, terms.service_days),
+            "INSERT INTO orders (case_no,client_id,status,lifecycle_version,start_date,service_days,"
+            "service_hours_per_day,service_start_time,service_end_time,service_end_day_offset) "
+            "VALUES (%s,%s,'待補件',0,%s,%s,%s,%s,%s,%s)",
+            (
+                candidate.case_no, client_id, terms.planned_start_date, terms.service_days,
+                None if service_time is None else service_time.service_hours_per_day,
+                None if service_time is None else service_time.service_start_time,
+                None if service_time is None else service_time.service_end_time,
+                None if service_time is None else service_time.service_end_day_offset,
+            ),
         )
         if int(cursor.rowcount) != 1:
             raise RuntimeError("case_import_partial_order_insert_failed")
@@ -466,7 +474,7 @@ def _receipt_payload(receipt):
 
 def _source_snapshot(candidate):
     order = candidate.order
-    return {
+    snapshot = {
         "case_no": candidate.case_no,
         "client_attributes": {
             item.name: _json_value(item.value)
@@ -483,6 +491,15 @@ def _source_snapshot(candidate):
             "service_start_time": order.service_start_time.isoformat(),
         },
     }
+    if candidate.partial_service_time is not None:
+        terms = candidate.partial_service_time
+        snapshot["partial_service_time"] = {
+            "service_hours_per_day": terms.service_hours_per_day,
+            "service_start_time": terms.service_start_time.isoformat(),
+            "service_end_time": terms.service_end_time.isoformat(),
+            "service_end_day_offset": terms.service_end_day_offset,
+        }
+    return snapshot
 
 
 def _client_attribute(intent, name):

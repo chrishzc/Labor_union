@@ -318,12 +318,12 @@ export const CurrentAnomaliesPage: React.FC = () => {
           <h1 id="current-anomalies-title">異常審核</h1>
           <p>顯示目前仍成立的問題，並提供可用的業務處理入口。</p>
         </div>
-        <button type="button" className="anomalies-primary-action" onClick={() => { void load(); void loadImportWarnings(); void loadHcmReviews(); }} disabled={loading || importLoading || hcmLoading}>重新查詢</button>
+        <button type="button" className="anomalies-primary-action" onClick={() => { void load(); void loadImportWarnings(); void loadHcmReviews(); }} disabled={loading || importLoading || hcmLoading}>重新整理</button>
       </header>
 
       <section aria-labelledby="import-anomalies-title" className="anomalies-section">
         <h2 id="import-anomalies-title" className="anomalies-section-title">匯入資料待檢查</h2>
-        <p>可補齊資料，或逐筆略過不需再處理的警示。略過會保存紀錄。</p>
+        <p>請依欄位檢查資料。不需處理的警示可逐筆標記；這只會解除警示並保存紀錄，不會補齊或修改欄位。</p>
         {hcmError && <div role="alert" className="error-message">{hcmError}</div>}
         {skipError && <div role="alert" className="error-message">{skipError}</div>}
         {skipMessage && <p role="status">{skipMessage}</p>}
@@ -333,10 +333,10 @@ export const CurrentAnomaliesPage: React.FC = () => {
           {hcmReviews.map((review) => <article className="import-warning-card" key={review.review_identity}>
             <div className="import-warning-header"><strong>案件 {review.case_no}</strong><span className="import-warning-status-badge">待處理</span></div>
             {review.fields.map((field) => <div key={field} className="import-warning-field">
-              <p>{field}待補齊或修正</p>
+              <p>{field === '不符合原因' ? '缺少欄位：不符合原因。' : `請確認欄位：${field === '行動電話' ? '電話（手機／市話）' : field}。`}</p>
               <div className="import-warning-actions">
-                {(REGISTRY_PROFILE_FIELDS[field] || REGISTRY_ORDER_FIELDS.has(field)) && <a className="anomalies-action-btn" href={registryHref(review.case_no, field)}>{field === '不符合原因' ? '補填不符合原因' : '前往客戶名冊補資料'}</a>}
-                <button className="anomalies-action-btn" type="button" disabled={skipBusy} onClick={() => void previewSkip(review, field)}>略過並解除這項警示</button>
+                {(REGISTRY_PROFILE_FIELDS[field] || REGISTRY_ORDER_FIELDS.has(field)) && <a className="anomalies-action-btn" href={registryHref(review.case_no, field)}>{field === '不符合原因' ? '補填不符合原因' : field === '行動電話' ? '修改電話' : `補齊或修改${field === '希望服務天數' ? '服務天數' : field === '預計服務日期' ? '約定服務開始日' : field}`}</a>}
+                <button className="anomalies-action-btn" type="button" disabled={skipBusy} onClick={() => void previewSkip(review, field)}>標記此警示為不需處理</button>
                 {!REGISTRY_PROFILE_FIELDS[field] && !REGISTRY_ORDER_FIELDS.has(field) && <a className="anomalies-action-btn" href="#data-import">前往資料匯入確認來源</a>}
               </div>
             </div>)}
@@ -351,7 +351,7 @@ export const CurrentAnomaliesPage: React.FC = () => {
               <div className="import-warning-actions"><button className="anomalies-action-btn" type="button" onClick={() => openImportWarning(task)}>
                 前往負責頁面處理
               </button>
-              <button className="anomalies-action-btn" type="button" disabled={skipBusy} onClick={() => void previewImportSkip(task)}>略過並解除這項警示</button></div>
+              <button className="anomalies-action-btn" type="button" disabled={skipBusy} onClick={() => void previewImportSkip(task)}>標記此警示為不需處理</button></div>
             </article>
           ))}
         </div>
@@ -386,7 +386,7 @@ export const CurrentAnomaliesPage: React.FC = () => {
             <span>{ownerLabel(item.ownerDomain)}</span>
             <span>最近確認：{new Date(item.lastVerifiedAt).toLocaleString('zh-TW')}</span>
             </button>
-            <button type="button" className="anomalies-action-btn" disabled={skipBusy} onClick={() => void previewLineSkip(item)}>略過並解除這項警示</button>
+            <button type="button" className="anomalies-action-btn" disabled={skipBusy} onClick={() => void previewLineSkip(item)}>標記此警示為不需處理</button>
           </article>
         ))}
         </div>
@@ -490,7 +490,7 @@ export const CurrentAnomaliesPage: React.FC = () => {
             <button type="button" onClick={() => selected && void openDetail(selected)}>
               重新查詢最新資料
             </button>
-            <button type="button" className="anomalies-action-btn" disabled={skipBusy} onClick={() => selected && void previewLineSkip(selected)}>略過並解除這項警示</button>
+            <button type="button" className="anomalies-action-btn" disabled={skipBusy} onClick={() => selected && void previewLineSkip(selected)}>標記此警示為不需處理</button>
             <p>可依負責流程處理，或確認略過這次警示並保存紀錄。</p>
           </div>
         )}

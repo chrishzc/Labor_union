@@ -29,15 +29,35 @@ function mockKnowledgeApi() {
 describe('正式 Knowledge QA 管理 panel', () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it('顯示治理狀態、已發布數量與索引 freshness', async () => {
+  it('does not claim the catalog is loaded or empty until reads complete, and distinguishes failed reads', async () => {
+    let finishItems!: (value: Response) => void;
+    const pending = new Promise<Response>((resolve) => { finishItems = resolve; });
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => String(url).includes('/knowledge/items?')
+      ? pending : new Response('[]', { status: 200 }));
+    const { unmount } = render(React.createElement(CommonQaCatalogPanel));
+    expect(screen.getByText(/正在讀取問答資料/)).toBeInTheDocument();
+    expect(screen.queryByText(/目前尚無題目/)).not.toBeInTheDocument();
+    finishItems(new Response('[]', { status: 200 }));
+    expect(await screen.findByText(/目前尚無題目，可匯入內建 54 題/)).toBeInTheDocument();
+    expect(screen.queryByText(/已載入/)).not.toBeInTheDocument();
+    unmount();
+    vi.restoreAllMocks();
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 503 }));
+    render(React.createElement(CommonQaCatalogPanel));
+    expect(await screen.findByText(/問答資料讀取失敗，請重新整理/)).toBeInTheDocument();
+    expect(screen.queryByText(/目前尚無題目/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/共 0 筆/)).not.toBeInTheDocument();
+  });
+
+  it('顯示問答狀態、已發布數量與索引 freshness', async () => {
     mockKnowledgeApi();
     render(React.createElement(CommonQaCatalogPanel));
 
     await waitFor(() => expect(screen.getByText(/共 3 筆 · 1 筆已發布/)).toBeInTheDocument());
-    expect(screen.getByText(/AI 索引：/).parentElement).toHaveTextContent('v4 · 需重建');
+    expect(screen.getByText(/問答搜尋資料：/).parentElement).toHaveTextContent('需要更新');
     expect(globalThis.fetch).toHaveBeenCalledWith('/api/v1/knowledge/items?limit=500', expect.objectContaining({ credentials: 'include' }));
 
-    fireEvent.change(screen.getByLabelText('治理狀態'), { target: { value: 'published' } });
+    fireEvent.change(screen.getByLabelText('問答狀態'), { target: { value: 'published' } });
     expect(screen.getByText(/QA-003 · QA-003 的標準問題/)).toBeInTheDocument();
     expect(screen.queryByText(/QA-001 · QA-001 的標準問題/)).not.toBeInTheDocument();
   });
@@ -47,7 +67,7 @@ describe('正式 Knowledge QA 管理 panel', () => {
     render(React.createElement(CommonQaCatalogPanel));
     await waitFor(() => expect(screen.getByText(/共 3 筆/)).toBeInTheDocument());
 
-    expect(screen.getByText(/系統已載入基礎題庫/)).toBeInTheDocument();
+    expect(screen.getByText(/已載入 3 筆問答/)).toBeInTheDocument();
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     fireEvent.click(screen.getByRole('button', { name: '匯入／補齊內建 54 題' }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/v1/knowledge/catalogs/builtin-line-common-qa/import', expect.objectContaining({ method: 'POST' })));
@@ -55,18 +75,18 @@ describe('正式 Knowledge QA 管理 panel', () => {
     expect(await screen.findByText(/本次補入 51 題、發布 39 題/)).toBeInTheDocument();
 
     expect(screen.queryByRole('button', { name: '送審完成' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getAllByRole('button', { name: '發布啟用' })[0]);
+    fireEvent.click(screen.getAllByRole('button', { name: '發布' })[0]);
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/v1/knowledge/items/1/publish', expect.objectContaining({ method: 'POST' })));
-    expect(await screen.findByText('已發布，正在更新 AI 索引；READY 後即啟用。')).toBeInTheDocument();
+    expect(await screen.findByText('新答案已發布，問答搜尋資料更新完成後才會啟用。')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '停用' }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/v1/knowledge/items/3/retire', expect.objectContaining({ method: 'POST' })));
 
-    fireEvent.click(screen.getByRole('button', { name: /手動重建索引/ }));
+    fireEvent.click(screen.getByRole('button', { name: /更新問答搜尋資料/ }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/v1/knowledge/indexes', expect.objectContaining({ method: 'POST' })));
 
     fireEvent.click(screen.getAllByTitle('編輯此題目')[0]);
-    expect(screen.getByRole('heading', { name: '編輯 QA（QA-001）' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '編輯問答（QA-001）' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '儲存為草稿' }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/v1/knowledge/items', expect.objectContaining({ method: 'POST' })));
   });

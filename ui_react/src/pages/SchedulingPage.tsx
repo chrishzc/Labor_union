@@ -432,12 +432,12 @@ function HolidayPolicyWorkspace() {
       </div>
 
       {calendar && (
-        <section className="holiday-policy-calendar" aria-label="國定假日日曆根事實">
+        <section className="holiday-policy-calendar" aria-label="國定假日日曆">
           <div className="holiday-policy-meta">
             <span>區間：{calendar.planning_horizon.from_date} ～ {calendar.planning_horizon.to_date}</span>
           </div>
           {calendar.holidays.length === 0 ? (
-            <p className="holiday-policy-notice">此查詢區間沒有國定假日根事實。</p>
+            <p className="holiday-policy-notice">此期間沒有國定假日資料。</p>
           ) : (
             <ul className="holiday-policy-list" style={{ display: 'grid', gap: '10px' }}>
               {calendar.holidays.map((holiday) => (
@@ -1662,8 +1662,8 @@ function collisionKindLabel(kind: SchedulingEligibilityCollisionViewModel['colli
   const labels: Record<SchedulingEligibilityCollisionViewModel['collisions'][number]['kind'], string> = {
     assignment_interval: '既有指派期間',
     official_schedule: '正式服務日',
-    waiting_deposit_lock: '待定金案件鎖定',
-    seven_day_buffer: '7 天防撞期',
+    waiting_deposit_lock: '等待定金確認，檔期暫時保留',
+    seven_day_buffer: '7 天排班緩衝期',
     staff_unavailability: '不可服務期間',
     legacy_schedule: '歷史排班資料',
     data_integrity: '排班資料完整性',
@@ -1716,7 +1716,7 @@ function getStaffDiagnosticBadge(
   // 案件完整檔期由逐人 typed eligibility 結果決定，不由月曆回傳的稀疏日期陣列反推。
   if (ghostConfig?.active && ghostConfig.startDay && ghostConfig.endDay) {
     if (ghostConfig.outcome === 'hard_conflict') return { tone: 'leave', text: '🔴 整段檔期有衝突' };
-    if (ghostConfig.outcome === 'reservation_conflict') return { tone: 'waiting', text: '🟡 整段受預約／防撞期影響' };
+    if (ghostConfig.outcome === 'reservation_conflict') return { tone: 'waiting', text: '🟡 整段受預約／排班緩衝期影響' };
     if (ghostConfig.outcome === 'available') return { tone: 'active', text: '🟢 完整檔期可排' };
     if (ghostConfig.outcome === 'checking') return { tone: 'unavailable', text: '⚪ 正在確認整段檔期' };
     return { tone: 'unavailable', text: '⚪ 整段檔期待確認' };
@@ -1745,10 +1745,10 @@ function getStaffDiagnosticBadge(
     return { tone: 'active', text: '🟢 已排定待開始' };
   }
   if (hasWaiting) {
-    return { tone: 'waiting', text: '🔵 待定金核銷鎖定中' };
+    return { tone: 'waiting', text: '🔵 等待定金確認，檔期暫時保留' };
   }
   if (hasBuffer) {
-    return { tone: 'waiting', text: '🟡 7 天防撞期鎖定' };
+    return { tone: 'waiting', text: '🟡 7 天排班緩衝期' };
   }
   if (hasUnknownOfficialWorkday) {
     return { tone: 'waiting', text: '⚠️ 服務狀態未知／資料待補正' };
@@ -1839,7 +1839,7 @@ function ghostCaseSpan(
       id: `ghost-reservation-conflict-${startDay}-${endDay}`,
       tone: 'deposit-conflict',
       icon: '⚠️',
-      caseText: '整段檔期受預約／防撞期影響',
+      caseText: '整段檔期受預約／排班緩衝期影響',
       statusLabel: `案件 ${config.caseNo} 完整檔期 ${config.fullStartDate} ～ ${config.fullEndDate} 均標示受影響`,
     };
   }
@@ -2620,7 +2620,7 @@ export const SchedulingPage: React.FC = () => {
                   className={`gantt-pill ${statusFilter === 'waiting' ? 'active' : ''}`}
                   onClick={() => setStatusFilter('waiting')}
                 >
-                  🟡 待派單／防撞期
+                  🟡 待派單／排班緩衝期
                 </button>
                 <button
                   type="button"
@@ -2738,11 +2738,11 @@ export const SchedulingPage: React.FC = () => {
             </div>
             <div className="legend-item">
               <span className="legend-badge buffer" />
-              <span>7 天防撞期鎖定</span>
+              <span>7 天排班緩衝期</span>
             </div>
             <div className="legend-item">
               <span className="legend-badge deposit" />
-              <span>待定金核銷鎖定</span>
+              <span>等待定金確認，檔期暫時保留</span>
             </div>
             <div className="legend-item">
               <span className="legend-badge leave" />
@@ -3154,7 +3154,7 @@ export const SchedulingPage: React.FC = () => {
             <div className="collision-panel-card">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                 <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: '#9a3412' }}>
-                  🛡️ 檔期衝突與 7 天防撞期判定
+                  🛡️ 檔期衝突與 7 天排班緩衝期判定
                 </h3>
                 {eligibilityState.kind === 'ready' && (
                   <span className="contract-status-pill active" style={{ fontSize: '0.8rem' }}>
@@ -3164,7 +3164,7 @@ export const SchedulingPage: React.FC = () => {
               </div>
 
               <p style={{ margin: '0 0 14px 0', fontSize: '0.84rem', color: '#74593f', lineHeight: 1.5 }}>
-                依據服務人員排班履約、請假留停、既有訂單與 7 天防撞期即時檢核。
+                依據服務人員排班履約、請假留停、既有訂單與 7 天排班緩衝期即時檢核。
               </p>
 
               {eligibilityState.kind === 'idle' && (

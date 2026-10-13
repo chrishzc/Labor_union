@@ -113,7 +113,7 @@ export function validateServiceTimeWindow(
   }
   const diffMinutes = endMinutes - startMinutes;
   if (diffMinutes <= 0) {
-    return '每日結束時間須晚於開始時間；若為跨日服務，請將「結束日偏移」設為隔日。';
+    return '每日結束時間須晚於開始時間；若為跨日服務，請將「結束時間是否跨日」設為隔日。';
   }
   if (diffMinutes > 24 * 60) {
     return '單日服務時數不可超過 24 小時。';
@@ -161,7 +161,7 @@ function conflictMessage(error: unknown): string | null {
   if (code === 'scheduling_reallocation_required') return '請填寫每個既有指派的新服務天數，合計須等於新合約天數，再重新檢查。';
   if (code === 'service_data_locked') return '服務條件已鎖定，本次未儲存；請保留已完成服務與帳務歷史。';
   if (code === 'service_started_replacement_blocked') return '本案已開始服務，不能由此替換完整日期；請由承辦人確認保留已履行服務的調整方案。本次未儲存。';
-  if (code === 'replacement_service_date_outside_selectable_range') return '替代日期超出可選期間，請重新精算日期並核對計畫開始日。';
+  if (code === 'replacement_service_date_outside_selectable_range') return '替代日期超出可選期間，請重新精算日期並核對約定服務開始日。';
   if (code === 'stale_preview') {
     return '預覽已過期：正式資料已變更，請重新檢查條款變更後再套用。';
   }
@@ -500,22 +500,22 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
 
   return (
     <section className="order-v2-drawer-section" aria-labelledby="order-v2-terms-mutation-heading">
-      <h3 id="order-v2-terms-mutation-heading">進件條款預覽與套用</h3>
-      <p className="order-v2-drawer-note">尚未建立正式服務日期時，可先修正進件條款；已有日期或排班且需改天數時，請在下方精算替代日期並填寫人員分配，一次確認保存。檢查時不會修改訂單。</p>
+      <h3 id="order-v2-terms-mutation-heading">預覽與儲存服務條件</h3>
+      <p className="order-v2-drawer-note">尚未建立正式服務日期時，可先修正進件條款；已有日期或排班且需改天數時，請在下方計算替代服務日期並填寫人員分配，再確認儲存。預覽不會修改訂單。</p>
       {currentQuery.service_data_locked && (
         <p className="order-v2-drawer-error" role="status">此案件的服務條件已鎖定，依既有規則不可再變更條款。</p>
       )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '10px' }}>
-        <label>計畫服務開始日
-          <input aria-label="Beta 計畫服務開始日" type="date" value={draft.plannedStartDate} disabled={locked} onChange={(event) => updateDraft('plannedStartDate', event.target.value)} />
+        <label>約定服務開始日
+          <input aria-label="約定服務開始日" type="date" value={draft.plannedStartDate} disabled={locked} onChange={(event) => updateDraft('plannedStartDate', event.target.value)} />
         </label>
         <label>服務天數
-          <input aria-label="Beta 服務天數" type="number" min="1" value={draft.serviceDays} disabled={locked} onChange={(event) => updateDraft('serviceDays', event.target.value)} />
+          <input aria-label="服務天數" type="number" min="1" value={draft.serviceDays} disabled={locked} onChange={(event) => updateDraft('serviceDays', event.target.value)} />
         </label>
         <label>每日服務時數
           <input
-            aria-label="Beta 每日服務時數"
+            aria-label="每日服務時數"
             type="number"
             min="1"
             max="24"
@@ -523,18 +523,18 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
             value={draft.serviceHoursPerDay}
             readOnly
             disabled={locked}
-            title="由每日開始時間、結束時間與結束日偏移自動計算"
+            title="由每日開始時間、結束時間與結束時間是否跨日自動計算"
           />
         </label>
         <label>下廚料理需求
-          <select aria-label="Beta 下廚料理需求" value={draft.requiresCooking} disabled={locked} onChange={(event) => updateDraft('requiresCooking', event.target.value as OrderTermsDraft['requiresCooking'])}>
+          <select aria-label="下廚料理需求" value={draft.requiresCooking} disabled={locked} onChange={(event) => updateDraft('requiresCooking', event.target.value as OrderTermsDraft['requiresCooking'])}>
             <option value="">尚未確認（可先保留）</option>
             <option value="yes">需要下廚</option>
             <option value="no">不需下廚</option>
           </select>
         </label>
         <label>樓層加給（NTD）
-          <input aria-label="Beta 樓層加給" type="number" min="0" value={draft.floorFeeNtd} disabled={locked} onChange={(event) => updateDraft('floorFeeNtd', event.target.value)} />
+          <input aria-label="樓層加給" type="number" min="0" value={draft.floorFeeNtd} disabled={locked} onChange={(event) => updateDraft('floorFeeNtd', event.target.value)} />
         </label>
         <div style={{ gridColumn: 'span 2', display: 'flex', flexDirection: 'column', gap: '6px', padding: '10px 12px', background: '#faf6f0', borderRadius: '8px', border: '1px solid #ebdcd0', marginTop: '4px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
@@ -567,7 +567,7 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
 
         <label>每日開始時間
           <select
-            aria-label="Beta 每日開始時間"
+            aria-label="每日開始時間"
             value={draft.startTime}
             disabled={locked}
             onChange={(event) => updateDraft('startTime', event.target.value)}
@@ -580,7 +580,7 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
         </label>
         <label>每日結束時間
           <select
-            aria-label="Beta 每日結束時間"
+            aria-label="每日結束時間"
             value={draft.endTime}
             disabled={locked}
             onChange={(event) => updateDraft('endTime', event.target.value)}
@@ -591,8 +591,8 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
             ))}
           </select>
         </label>
-        <label>結束日偏移
-          <select aria-label="Beta 結束日偏移" value={draft.endDayOffset} disabled={locked} onChange={(event) => updateDraft('endDayOffset', event.target.value as OrderTermsDraft['endDayOffset'])}>
+        <label>結束時間是否跨日
+          <select aria-label="結束時間是否跨日" value={draft.endDayOffset} disabled={locked} onChange={(event) => updateDraft('endDayOffset', event.target.value as OrderTermsDraft['endDayOffset'])}>
             <option value="0">同日</option>
             <option value="1">隔日</option>
           </select>
@@ -619,25 +619,25 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
 
       <div className="order-v2-drawer-actions" style={{ marginTop: '12px' }}>
         <button type="button" disabled={locked || !draftReady || !replacementReady} onClick={() => void previewTerms()}>
-          {status === 'previewing' ? '正在檢查條款變更…' : '檢查訂單條款變更'}
+          {status === 'previewing' ? '正在預覽服務條件變更…' : '預覽服務條件變更'}
         </button>
       </div>
 
       {preview && (
         <div style={{ marginTop: '12px' }}>
-          <strong>條款變更前後</strong>
+          <strong>服務條件變更前後</strong>
           <p>服務天數：{preview.before.service_days} 天 → {preview.after.service_days} 天</p>
           {preview.before.service_hours_per_day !== preview.after.service_hours_per_day && (
             <p>每日時數：{preview.before.service_hours_per_day} 小時 → {preview.after.service_hours_per_day} 小時</p>
           )}
           <p>時段：{preview.before.service_time.start_time}～{preview.before.service_time.end_time} → {preview.after.service_time.start_time}～{preview.after.service_time.end_time}</p>
-          <p>版本：Order {preview.order_version} · Scheduling {preview.scheduling_version} · Client Finance {preview.client_finance_version ?? '未讀取'} · Payroll {preview.payroll_version ?? '未讀取'}</p>
+          <details><summary>技術資訊</summary><p>版本：Order {preview.order_version} · Scheduling {preview.scheduling_version} · Client Finance {preview.client_finance_version ?? '未讀取'} · Payroll {preview.payroll_version ?? '未讀取'}</p></details>
           {preview.requires_formal_apply && <label>變更原因（正式影響必填）
-            <textarea aria-label="Beta 條款變更原因" rows={2} maxLength={500} value={reason} disabled={locked} onChange={(event) => setReason(event.target.value)} />
+            <textarea aria-label="條款變更原因" rows={2} maxLength={500} value={reason} disabled={locked} onChange={(event) => setReason(event.target.value)} />
           </label>}
           <div className="order-v2-drawer-actions" style={{ marginTop: '8px' }}>
             <button type="button" disabled={locked || (preview.requires_formal_apply && reason.trim().length === 0)} onClick={() => void applyTerms()}>
-              {status === 'applying' ? '條款保存中…' : '確認保存訂單條款'}
+              {status === 'applying' ? '正在儲存服務條件…' : '確認儲存服務條件'}
             </button>
           </div>
         </div>
@@ -645,13 +645,13 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
 
       {outcomeUnknown && <button type="button" disabled={status !== 'idle'} onClick={() => void applyTerms()}>重播同一筆條款提交</button>}
       {receipt && readback && !ordinaryApplied && (
-        <p role="status">條款已套用並完成正式回讀；Order version {readback.order_version}，合約服務 {readback.terms.service_days} 日。</p>
+        <p role="status">服務條件已儲存並重新讀取確認；合約服務 {readback.terms.service_days} 日。</p>
       )}
       {ordinaryApplied && readback && (
-        <p role="status">條款已保存並完成正式回讀；Order version {readback.order_version}，合約服務 {readback.terms.service_days} 日。</p>
+        <p role="status">服務條件已儲存並重新讀取確認；合約服務 {readback.terms.service_days} 日。</p>
       )}
       {receipt && !readback && (
-        <div><p role="status">條款已提交、尚未確認正式讀回；Order version {receipt.order_version}。</p>
+        <div><p role="status">服務條件已送出，尚未確認儲存結果。</p>
           <button type="button" disabled={status !== 'idle'} onClick={() => void observeReceipt(receipt)}>重新讀取已提交條款</button></div>
       )}
       {error && <p className="order-v2-drawer-error" role="alert">{error}</p>}

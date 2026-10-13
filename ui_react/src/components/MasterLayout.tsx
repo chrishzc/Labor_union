@@ -95,7 +95,7 @@ export const NAV_ITEMS: NavItem[] = [
   { id: 'line-management', icon: ClipboardList, label: '客服與營運', section: 'line' },
   { id: 'line-ai-events', icon: Bot, label: 'AI 客服工作室', section: 'line' },
   { id: 'line-llm-settings', icon: KeyRound, label: 'AI 模型設定', section: 'line' },
-  { id: 'line-liff-studio', icon: PanelTop, label: 'LIFF 資產工作室', section: 'line' },
+  { id: 'line-liff-studio', icon: PanelTop, label: '表單與卡片', section: 'line' },
   { id: 'line-security', icon: ShieldCheck, label: '群組與安全', section: 'line' },
 
   // Finance Section

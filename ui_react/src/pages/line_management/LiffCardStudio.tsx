@@ -58,7 +58,7 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     endpointUrl: '/line-registration',
     launchPath: '/line-registration',
     authLevel: '後端驗證 LINE 登入憑證；不接受網址列身分',
-    description: '登記資料先顯示去敏摘要，明確確認後才送出；完整建立服務需求調查。',
+    description: '登記資料先顯示隱去個資的摘要，明確確認後才送出；完整建立服務需求調查。',
     apiMapping: '登記資料檢查、確認送出與結果回讀已接通',
     audienceRoles: ['visitor'],
   },
@@ -79,12 +79,12 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     id: 'profile_guard',
     type: 'liff',
     title: '4. profile_guard.html',
-    subtitle: '修改登記資料身分門禁（阻擋未綁定用戶）',
+    subtitle: '修改登記資料前的身分確認',
     badge: '身分門禁查驗',
     endpointUrl: '/line-profile-guard',
     launchPath: '/line-profile-guard',
     authLevel: '伺服器端 Token 檢驗 ｜ 阻擋未綁定身分 ｜ 導流服務綁定',
-    description: '修改登記資料前置門禁。先向伺服器驗證 LINE 登入憑證與客戶綁定資格：已綁定者放行進入 profile_update，未綁定者堅決阻擋並導流至服務綁定或需求填寫。',
+    description: '修改登記資料前置門禁。先向伺服器驗證 LINE 登入憑證與客戶綁定資格：已綁定者可修改資料；未綁定者需先連結客戶資料或填寫需求。',
     apiMapping: '門禁查驗：/api/v1/line/client-profile/query ＋ 資格放行 / 阻擋導流',
     audienceRoles: ['customer'],
   },
@@ -92,12 +92,12 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     id: 'profile_update',
     type: 'liff',
     title: '5. profile_update.html',
-    subtitle: '客戶個人資料異動申請（經門禁放行）',
+    subtitle: '客戶個人資料異動申請',
     badge: '個資異動申請',
     endpointUrl: '/line-profile-update',
     launchPath: '/line-profile-guard',
     authLevel: '必須驗證 LINE 登入憑證與正式客戶綁定',
-    description: '產婦可查詢目前已登記的個人資料，勾選聯絡電話、預產期或寶寶資訊等欄位並送審；服務地址與訂單條件改由 order_update 申請。',
+    description: '產婦可查詢目前已登記的個人資料，勾選聯絡電話、預產期或寶寶資訊等欄位並送審；服務地址與訂單條件請從「訂單資訊異動申請」提出。',
     apiMapping: '客戶資料異動之查詢、預覽與申請流程已接通',
     audienceRoles: ['customer'],
   },
@@ -162,7 +162,7 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     badge: '服務日受控登錄',
     endpointUrl: '/line-staff-baby-log',
     launchPath: '/line-staff-baby-log',
-    authLevel: '後端驗證 LINE 登入憑證、正式月嫂綁定與 assignment/service-day ownership',
+    authLevel: '後端驗證 LINE 登入憑證、正式月嫂綁定與本人排班與服務日期',
     description: '先由正式班表選取服務日，再預覽並送出寶寶日誌；需要下廚時照片會經受控檔案 staging。',
     apiMapping: '服務日選取、日誌與餐食照片 Preview／Apply／Readback 已接通',
     audienceRoles: ['staff'],
@@ -266,9 +266,9 @@ const ASSET_ITEMS: LiffAssetItem[] = [
   {
     id: 'flex_dispatch',
     type: 'flex_card',
-    title: '派案通知卡設計稿（模組三：月嫂派案意願）',
-    subtitle: '【模組三】候選月嫂派案意願調查 ｜ 去敏案件入口',
-    badge: '模組三範本',
+    title: '派案通知卡設計稿',
+    subtitle: '候選月嫂派案意願調查 ｜ 案件摘要入口',
+    badge: '卡片設計稿',
     endpointUrl: '排定於模組三：月嫂派案與媒合 Subsystem',
     authLevel: '候選月嫂專屬 ｜ LINE Flex 去敏安全版面（受派案資格保護）',
     description: '【業務定位】當系統媒合成功時向候選月嫂推播。去敏呈現服務期間、時段與區域，詳細地址不留在對話中；供月嫂查閱案件或回覆接案意願。',
@@ -279,9 +279,9 @@ const ASSET_ITEMS: LiffAssetItem[] = [
   {
     id: 'flex_leave_confirm',
     type: 'flex_card',
-    title: '服務日順延確認卡設計稿（模組三：產婦順延確認）',
-    subtitle: '【模組三】產婦調休/順延雙選項確認 ｜ 雙向決策卡',
-    badge: '模組三範本',
+    title: '服務日順延確認卡設計稿',
+    subtitle: '產婦調休/順延雙選項確認 ｜ 雙向決策卡',
+    badge: '卡片設計稿',
     endpointUrl: '排定於模組三：月嫂排班與請假 Subsystem',
     authLevel: '簽約產婦專屬 ｜ 雙選項互動確認（受簽約案件版本保護）',
     description: '【業務定位】月嫂因故請假時自動推播給產婦。提供「同意順延一日」或「由工會派代班」決策按鈕，回覆後經後端排班狀態機核對生效。',
@@ -292,9 +292,9 @@ const ASSET_ITEMS: LiffAssetItem[] = [
   {
     id: 'flex_alert_critical',
     type: 'flex_card',
-    title: '重大異常通報卡設計稿（模組四：幹部重大告警）',
-    subtitle: '【模組四】工會幹部群重大告警 ｜ 幹部通知版面',
-    badge: '模組四範本',
+    title: '重大異常通報卡設計稿',
+    subtitle: '工會幹部群重大告警 ｜ 幹部通知版面',
+    badge: '卡片設計稿',
     endpointUrl: '排定於模組四：客服與異常處置 Subsystem',
     authLevel: '工會幹部群組專屬 ｜ 去敏高層級告警（僅推播已授權幹部群）',
     description: '【業務定位】重大客訴、連續身分核對異常或重大排班衝突時，自動推播至幹部群組，並附帶一鍵進入手機管理中心審核處理之入口。',
@@ -305,8 +305,8 @@ const ASSET_ITEMS: LiffAssetItem[] = [
   {
     id: 'flex_negotiation',
     type: 'flex_card',
-    title: '媒合條件協調卡（模組三：服務條件調解）',
-    subtitle: '【模組三】候選皆無法承接 ｜ 客戶條件協調卡',
+    title: '媒合條件協調卡',
+    subtitle: '候選皆無法承接 ｜ 客戶條件協調卡',
     badge: '正式流程已接通',
     endpointUrl: '候選回覆彙整 → 客戶 LINE 耐久投遞 → 案件專屬 LIFF 回覆',
     authLevel: '正式綁定客戶專屬 ｜ 候選最新意願與條件彙整 ｜ 收件人驗證',
@@ -687,28 +687,28 @@ export const LiffCardStudio: React.FC<LiffCardStudioProps> = ({
           <span className="line-hub-page-icon" aria-hidden="true"><PanelTop /></span>
           <div>
             <p className="line-hub-eyebrow">LINE 專區</p>
-            <h1>LIFF 資產工作室</h1>
-            <p>檢視 LIFF 與 Flex 設計稿；正式功能須另以 LINE 身分實測，這裡的預覽不代表已驗收。</p>
+            <h1>LINE 表單與訊息卡片</h1>
+            <p>檢視 LINE 表單與訊息卡片的設計預覽；實際功能需登入 LINE 測試。</p>
           </div>
         </div>
       </header>
       <div className="liff-studio-sidebar">
         <div className="liff-sidebar-header">
-          <h2>資產目錄</h2>
+          <h2>表單與卡片清單</h2>
           <label className="liff-search-field">
-            <span className="sr-only">搜尋資產</span>
+            <span className="sr-only">搜尋表單與卡片</span>
             <Search aria-hidden="true" />
             <input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="搜尋名稱或用途" />
           </label>
           <div className="liff-filter-pills">
             <button className={filterType === 'all' ? 'active' : ''} onClick={() => setFilterType('all')}>全部 ({ASSET_ITEMS.length})</button>
-            <button className={filterType === 'liff' ? 'active' : ''} onClick={() => setFilterType('liff')}>LIFF 表單 ({liffCount})</button>
-            <button className={filterType === 'flex_card' ? 'active' : ''} onClick={() => setFilterType('flex_card')}>Flex 卡片 ({flexCount})</button>
+            <button className={filterType === 'liff' ? 'active' : ''} onClick={() => setFilterType('liff')}>LINE 表單 ({liffCount})</button>
+            <button className={filterType === 'flex_card' ? 'active' : ''} onClick={() => setFilterType('flex_card')}>訊息卡片 ({flexCount})</button>
           </div>
           <label className="line-filter-field liff-role-filter">
             <span>適用角色</span>
             <select
-              aria-label="依適用角色篩選資產"
+              aria-label="依適用角色篩選表單與卡片"
               value={filterRole}
               onChange={(event) => setFilterRole(event.target.value as 'all' | LiffAudienceRole)}
             >
@@ -724,7 +724,7 @@ export const LiffCardStudio: React.FC<LiffCardStudioProps> = ({
         <div className="liff-asset-list">
           {filteredItems.length === 0 && (
             <div className="line-empty-state compact" role="status">
-              <strong>找不到符合條件的資產</strong>
+              <strong>找不到符合條件的表單或卡片</strong>
               <button type="button" className="line-secondary-btn" onClick={() => { setSearchQuery(''); setFilterType('all'); setFilterRole('all'); }}>清除條件</button>
             </div>
           )}
@@ -736,7 +736,7 @@ export const LiffCardStudio: React.FC<LiffCardStudioProps> = ({
               onClick={() => setSelectedId(item.id)}
             >
               <div className="liff-card-header"><strong>{item.subtitle}</strong><span className="liff-tag">設計預覽</span></div>
-              <p>{item.title.replace(/^\d+\.\s*/, '')}</p>
+              <p>{item.type === 'liff' ? 'LINE 表單設計預覽' : item.title}</p>
             </button>
           ))}
         </div>
@@ -801,7 +801,7 @@ export const LiffCardStudio: React.FC<LiffCardStudioProps> = ({
 
         <div className="liff-inspector-card">
           <h3><Link2 aria-hidden="true" /> 關聯功能與目前狀態</h3>
-          <div className="code-mapping-box">{selectedItem.apiMapping}</div>
+          <details><summary>查看技術資訊</summary><div className="code-mapping-box">{selectedItem.apiMapping}</div></details>
         </div>
       </div>
     </div>

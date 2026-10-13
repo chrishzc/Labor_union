@@ -26,6 +26,8 @@ _ROW_FIELDS = frozenset({
     "case_no", "lifecycle_status", "replacement_resume_step", "order_version", "order_updated_at",
     "import_receipt_id", "import_created_at", "bootstrap_event_id", "bootstrap_created_at",
     "imported_terms_complete",
+    "intake_start_date_missing", "intake_service_days_missing",
+    "intake_service_time_missing", "intake_floor_fee_missing",
     "historical_binding_receipt_id", "historical_binding_at", "historical_bound_staff_count",
     "terms_event_id", "terms_version", "terms_created_at", "candidate_pool_id", "candidate_pool_created_at",
     "candidate_pool_candidate_count", "candidate_pool_contacted_count", "candidate_pool_contacted_at",
@@ -265,7 +267,14 @@ def _intake_stage(row: Mapping[str, object], case_no: str) -> StageProjection:
     if intake_lineage or terms:
         missing = "orders_terms_missing" if intake_lineage else "intake_lineage_missing"
         message = (
-            "進件已建立，但訂單條款根事實尚未齊備。"
+            "缺少欄位：" + "、".join(
+                label for field, label in (
+                    ("intake_start_date_missing", "服務開始日"),
+                    ("intake_service_days_missing", "服務天數"),
+                    ("intake_service_time_missing", "服務時間"),
+                    ("intake_floor_fee_missing", "樓層加給"),
+                ) if _binary_flag(row, field)
+            ) + "。"
             if intake_lineage
             else "訂單條款已存在，但尚缺正式進件來源紀錄。"
         )

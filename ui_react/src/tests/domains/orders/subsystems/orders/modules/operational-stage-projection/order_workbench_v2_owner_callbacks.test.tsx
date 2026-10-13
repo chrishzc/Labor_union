@@ -42,14 +42,14 @@ function TermsHarness({ onObserved }: { onObserved: () => void }) {
   return <OrderTermsMutationPanel caseNo={CASE} query={query} onObserved={() => { setQuery(terms(true)); onObserved(); }} />;
 }
 async function applyTerms() {
-  fireEvent.change(screen.getByLabelText('Beta 服務天數'), { target: { value: '3' } });
-  fireEvent.click(screen.getByRole('button', { name: '檢查訂單條款變更' }));
-  const reason = await screen.findByLabelText('Beta 條款變更原因');
+  fireEvent.change(screen.getByLabelText('服務天數'), { target: { value: '3' } });
+  fireEvent.click(screen.getByRole('button', { name: '預覽服務條件變更' }));
+  const reason = await screen.findByLabelText('條款變更原因');
   fireEvent.change(reason, { target: { value: '客戶確認延長一天。' } });
-  fireEvent.click(screen.getByRole('button', { name: '確認保存訂單條款' }));
+  fireEvent.click(screen.getByRole('button', { name: '確認儲存服務條件' }));
 }
 
-describe('Beta 實際 owner 元件只在正式回讀成立後通知外層', () => {
+describe('實際 owner 元件只在正式回讀成立後通知外層', () => {
   beforeEach(() => {
     Object.values(mocks).forEach((mock) => mock.mockReset());
     mocks.termsPreview.mockResolvedValue({ before: terms().terms, after: terms(true).terms,
@@ -81,9 +81,9 @@ describe('Beta 實際 owner 元件只在正式回讀成立後通知外層', () =
   it('條款 callback 帶動父查詢更新至同一已觀察版本，不抹去完成證據', async () => {
     const onObserved = vi.fn(); render(<TermsHarness onObserved={onObserved} />);
     await applyTerms();
-    await screen.findByText('條款已套用並完成正式回讀；Order version 3，合約服務 3 日。');
+    await screen.findByText('服務條件已儲存並重新讀取確認；合約服務 3 日。');
     expect(onObserved).toHaveBeenCalledTimes(1);
-    expect(screen.getByLabelText('Beta 服務天數')).toHaveValue(3);
+    expect(screen.getByLabelText('服務天數')).toHaveValue(3);
   });
 
   it('條款回讀比 receipt 舊時不將舊版本當成完成', async () => {
@@ -91,7 +91,7 @@ describe('Beta 實際 owner 元件只在正式回讀成立後通知外層', () =
     const onObserved = vi.fn(); render(<OrderTermsMutationPanel caseNo={CASE} query={terms()} onObserved={onObserved} />);
     await applyTerms(); await screen.findByText(/條款回讀案件識別或版本與收據不一致/);
     expect(onObserved).not.toHaveBeenCalled();
-    expect(screen.queryByText(/條款已套用並完成正式回讀/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/服務條件已儲存並重新讀取確認/)).not.toBeInTheDocument();
   });
 
   it('候選意願需同案件同 candidate 的實際 readback，才通知外層', async () => {

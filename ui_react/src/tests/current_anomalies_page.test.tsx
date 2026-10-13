@@ -149,9 +149,9 @@ describe('CurrentAnomaliesPage', () => {
 
     render(<CurrentAnomaliesPage />);
     expect(await screen.findByText('案件 115000002')).toBeInTheDocument();
-    const link = screen.getByRole('link', { name: '前往客戶名冊補資料' });
+    const link = screen.getByRole('link', { name: '修改電話' });
     expect(link).toHaveAttribute('href', '#clients?case=115000002&field=phone');
-    expect(within(screen.getByRole('region', { name: '匯入資料待檢查' })).getByRole('button', { name: '略過並解除這項警示' })).toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: '匯入資料待檢查' })).getByRole('button', { name: '標記此警示為不需處理' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '使用修正版工作簿處理' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '檢查並提交修正' })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('選擇 HCM 修正版')).not.toBeInTheDocument();
@@ -170,15 +170,15 @@ describe('CurrentAnomaliesPage', () => {
       target_fields: ['review.skip_field:不符合原因'], resulting_review_version: 1, replayed: false,
     });
     render(<CurrentAnomaliesPage />);
-    expect(await screen.findByText('預產期/預計服務開始月份待補齊或修正')).toBeVisible();
-    expect(screen.getByRole('link', { name: '前往客戶名冊補資料' })).toHaveAttribute('href', '#clients?case=115000003&field=due_month');
+    expect(await screen.findByText('請確認欄位：預產期/預計服務開始月份。')).toBeVisible();
+    expect(screen.getByRole('link', { name: '補齊或修改預產期/預計服務開始月份' })).toHaveAttribute('href', '#clients?case=115000003&field=due_month');
     expect(screen.getByRole('link', { name: '補填不符合原因' })).toHaveAttribute('href', '#clients?case=115000003&field=reject_reason');
-    fireEvent.click(within(screen.getByText('不符合原因待補齊或修正').closest('.import-warning-field') as HTMLElement).getByRole('button', { name: '略過並解除這項警示' }));
+    fireEvent.click(within(screen.getByText('缺少欄位：不符合原因。').closest('.import-warning-field') as HTMLElement).getByRole('button', { name: '標記此警示為不需處理' }));
     await screen.findByRole('button', { name: '確認略過並保存紀錄' });
     expect(apply).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '確認略過並保存紀錄' }));
-    await waitFor(() => expect(screen.queryByText('不符合原因待補齊或修正')).not.toBeInTheDocument());
-    expect(screen.getByText('預產期/預計服務開始月份待補齊或修正')).toBeVisible();
+    await waitFor(() => expect(screen.queryByText('缺少欄位：不符合原因。')).not.toBeInTheDocument());
+    expect(screen.getByText('請確認欄位：預產期/預計服務開始月份。')).toBeVisible();
     expect(apply).toHaveBeenCalledTimes(1);
     expect(hcmResubmissionClient.current).toHaveBeenCalledTimes(2);
   });
@@ -190,11 +190,11 @@ describe('CurrentAnomaliesPage', () => {
       case_no: '115000003', source_field: '不符合原因', review_version: 0, preview_fingerprint: 'a'.repeat(64) });
     vi.spyOn(hcmResubmissionClient, 'applyFieldSkip').mockRejectedValue({ status: 409 });
     render(<CurrentAnomaliesPage />);
-    const field = await screen.findByText('不符合原因待補齊或修正');
-    fireEvent.click(within(field.closest('.import-warning-field') as HTMLElement).getByRole('button', { name: '略過並解除這項警示' }));
+    const field = await screen.findByText('缺少欄位：不符合原因。');
+    fireEvent.click(within(field.closest('.import-warning-field') as HTMLElement).getByRole('button', { name: '標記此警示為不需處理' }));
     fireEvent.click(await screen.findByRole('button', { name: '確認略過並保存紀錄' }));
     await waitFor(() => expect(screen.getAllByRole('alert')[0]).toHaveTextContent('問題資料已變更'));
-    expect(screen.getByText('不符合原因待補齊或修正')).toBeVisible();
+    expect(screen.getByText('缺少欄位：不符合原因。')).toBeVisible();
     expect(screen.queryByText(/已保存人工略過紀錄/)).not.toBeInTheDocument();
   });
 
@@ -217,12 +217,12 @@ describe('CurrentAnomaliesPage', () => {
       review_identity: review.review_identity, case_no: review.case_no, target_fields: ['review.skip_field:' + field],
       resulting_review_version: 1, replayed: false });
     render(<CurrentAnomaliesPage />);
-    const warning = await screen.findByText(field + '待補齊或修正');
-    fireEvent.click(within(warning.closest('.import-warning-field') as HTMLElement).getByRole('button', { name: '略過並解除這項警示' }));
+    const warning = await screen.findByText(`請確認欄位：${field === '行動電話' ? '電話（手機／市話）' : field}。`);
+    fireEvent.click(within(warning.closest('.import-warning-field') as HTMLElement).getByRole('button', { name: '標記此警示為不需處理' }));
     expect(await screen.findByText('警示：' + field)).toBeVisible();
     expect(apply).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '確認略過並保存紀錄' }));
-    await waitFor(() => expect(screen.queryByText(field + '待補齊或修正')).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText(`請確認欄位：${field === '行動電話' ? '電話（手機／市話）' : field}。`)).not.toBeInTheDocument());
     expect(hcmResubmissionClient.previewFieldSkip).toHaveBeenCalledWith('review-4', field);
     expect(apply).toHaveBeenCalledWith(preview, expect.any(String));
   });
@@ -243,7 +243,7 @@ describe('CurrentAnomaliesPage', () => {
     render(<CurrentAnomaliesPage />);
     const warning = await screen.findByText(first.display_message);
     expect(screen.getByText(second.display_message)).toBeVisible();
-    const button = within(warning.closest('article') as HTMLElement).getByRole('button', { name: '略過並解除這項警示' });
+    const button = within(warning.closest('article') as HTMLElement).getByRole('button', { name: '標記此警示為不需處理' });
     fireEvent.click(button);
     fireEvent.click(await screen.findByRole('button', { name: '取消' }));
     expect(apply).not.toHaveBeenCalled();
@@ -261,7 +261,7 @@ describe('CurrentAnomaliesPage', () => {
     const apply = vi.spyOn(lineNotificationWarningSkipClient, 'apply').mockResolvedValue({ issue_key: issueKey, replayed: false });
     render(<CurrentAnomaliesPage />);
     const open = await screen.findByRole('button', { name: /LINE-006/ });
-    fireEvent.click(within(open.closest('article') as HTMLElement).getByRole('button', { name: '略過並解除這項警示' }));
+    fireEvent.click(within(open.closest('article') as HTMLElement).getByRole('button', { name: '標記此警示為不需處理' }));
     expect(await screen.findByText('警示：LINE 通知失敗')).toBeVisible();
     expect(apply).not.toHaveBeenCalled();
     vi.mocked(currentAnomalyQueryClient.queryCurrentAnomalies).mockResolvedValue({ items: [], next_cursor: null });

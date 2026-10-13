@@ -21,6 +21,7 @@ import type {
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import type { AssignmentPlan, OrderDetail, OrderTerms } from '../api/orders/order_query_schemas';
 import { coreStageSubstatusLabel } from '../adapters/orders/order_core_stage_projection_adapter';
+import type { OrderSummaryCardViewModel } from '../adapters/orders/order_summary_adapter';
 import { ContractExternalSigningActions } from './ContractExternalSigningActions';
 import { OrderAssignmentPlanPanel } from './OrderAssignmentPlanPanel';
 import { OrderCandidateContactStatusPanel } from './OrderCandidateContactStatusPanel';
@@ -43,6 +44,7 @@ import { ClientDepositSkipActions } from './ClientDepositSkipActions';
 interface OrderWorkbenchV2DrawerProps {
   caseNo: string;
   branchType: CoreStageBranchType;
+  summary?: OrderSummaryCardViewModel;
   workbenchScope?: OrderWorkbenchScope;
   onClose: () => void;
   onObserved?: () => void;
@@ -127,6 +129,7 @@ function evidencePeriod(evidence: HistoricalOrderAdoptionEvidence): string {
 export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
   caseNo,
   branchType,
+  summary,
   workbenchScope = 'in_progress',
   onClose,
   onObserved,
@@ -328,6 +331,17 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
   };
   const navigationLocked = operationBusy || historicalRestart.status === 'applying';
   const selectedTitle = drawerTab === 'data' ? '訂單與服務資料' : drawerTab === 'changes' ? '案件異動' : '案件處理';
+  const currentSummary = summary?.id === caseNo ? summary : undefined;
+  const summaryReadError = detail.status === 'error' ? '讀取失敗' : '讀取中';
+  const clientName = detail.status === 'ready' ? detail.data.client_name || '未登錄姓名'
+    : currentSummary ? currentSummary.clientName || '未登錄姓名' : summaryReadError;
+  const plannedStart = detail.status === 'ready' ? detail.data.start_date ?? '尚未設定'
+    : currentSummary ? currentSummary.startDate ?? '尚未設定' : summaryReadError;
+  const actualStart = detail.status === 'ready' ? detail.data.actual_start_date ?? '尚未確認'
+    : currentSummary ? currentSummary.actualStartDate ?? '尚未確認' : summaryReadError;
+  const serviceVolume = detail.status === 'ready'
+    ? `${detail.data.service_days} 日 · 每日 ${detail.data.service_hours_per_day} 小時`
+    : currentSummary ? currentSummary.serviceDays === null ? '待補服務天數' : `${currentSummary.serviceDays} 日` : summaryReadError;
 
   return (
     <div className="order-case-page" role="region" aria-label={`案件 ${caseNo}`}>
@@ -339,10 +353,10 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
         </div>
         <p className="order-case-purpose">{drawerTab === 'data' ? '查閱客戶、約定條款與服務安排，不在此頁執行案件流程。' : drawerTab === 'changes' ? '選擇需要辦理的異動，核對影響後再確認。' : '已開啟目前待辦；可切換到其他工作，查看資料或辦理案件異動。'}</p>
         <div className="order-case-context">
-          <span><small>客戶</small>{detail.status === 'ready' ? detail.data.client_name || '未登錄' : detail.status === 'error' ? '暫時無法取得' : '讀取中'}</span>
-          <span><small>預期開始</small>{detail.status === 'ready' ? detail.data.start_date ?? '尚未設定' : detail.status === 'error' ? '暫時無法取得' : '讀取中'}</span>
-          <span><small>實際開始</small>{detail.status === 'ready' ? detail.data.actual_start_date ?? '尚未確認' : detail.status === 'error' ? '暫時無法取得' : '讀取中'}</span>
-          <span><small>服務量</small>{detail.status === 'ready' ? `${detail.data.service_days} 日 · 每日 ${detail.data.service_hours_per_day} 小時` : detail.status === 'error' ? '暫時無法取得' : '讀取中'}</span>
+          <span><small>客戶</small>{clientName}</span>
+          <span><small>約定服務開始日</small>{plannedStart}</span>
+          <span><small>實際開始</small>{actualStart}</span>
+          <span><small>服務量</small>{serviceVolume}</span>
           {branchType === 'historical' && historicalEvidence.status === 'ready' && <span><small>歷史匯入期間</small>{evidencePeriod(historicalEvidence.data)}</span>}
         </div>
         <nav className="order-case-view-nav" aria-label="案件頁面">
@@ -372,7 +386,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
           <div className="order-case-work-heading"><div><p className="order-case-eyebrow">案件工作區</p><h2>{groupDefinition.title}</h2><p>{groupDefinition.description}</p></div></div>
         {currentBranch === 'normal' && workbenchScope === 'in_progress' && !terminalStatus && (
           <section className="order-v2-drawer-current-task" aria-label="案件工作內容">
-            {[...blockers, ...warnings].filter((notice) => (groupDefinition.stages as readonly string[]).includes(notice.stageCode)).map((notice) => <p className="order-case-review-note" key={notice.key} role="status"><strong>{notice.stage}</strong>：{notice.message}</p>)}
+            {[...blockers, ...warnings].filter((notice) => (groupDefinition.stages as readonly string[]).includes(notice.stageCode)).map((notice) => <p className="order-case-review-note" key={notice.key} role="status">{notice.key !== 'intake_validation:orders_terms_missing' && <><strong>{notice.stage}</strong>：</>}{notice.message}</p>)}
             <fieldset disabled={operationBusy || factsRefreshing}>
               {(activeGroup === 'intake' || visitedGroups.includes('intake')) && <div hidden={activeGroup !== 'intake'}>
               {intakeOrderStatus !== null && (

@@ -625,6 +625,11 @@ must be previewed, sent, and confirmed again before formal assignment can procee
 服務開始日／服務天數；已齊全的欄位不作為補件輸入顯示。補一項時沿用另一項已保存的值，
 仍走既有 Orders Preview／Apply。完整日期／天數的早期異動保留「修改服務日期／天數」明示入口，
 由人員主動展開，不以可異動資格冒充缺件，不改 missing-field 判定、lifecycle 或交易邊界。
+日期／天數草稿以 Orders intake owner Preview 的 current values 為準，不得被一般訂單明細或
+列表摘要的空值覆蓋。案件初始資料修復入口同樣只顯示實際缺少的日期或天數，另一項沿用
+owner 已保存的值，不要求人員重填合法欄位。
+待辦看板與案件處理中的進件條款缺漏提示直接顯示「缺少欄位：」及實際缺少的欄位名稱；
+不顯示「訂單條款根事實尚未齊備」或以階段標題取代缺件內容。沿用既有完整性判定與階段狀態。
 
 此 preassignment Terms Query／Preview／Apply 只讀 Orders、Scheduling 與判斷下游完整性所需的最小
 存在／義務 facts；Client Finance／Payroll root 可合法不存在，回應與 receipt 的對應 version／impact

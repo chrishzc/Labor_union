@@ -171,9 +171,9 @@ export function LineUnboundPairingWorkbench({
     >
       <div className="line-section-heading">
         <div>
-          <h3 className="line-heading-with-icon"><Link aria-hidden="true" />待配對訂單與狀態 C 產婦手動歸戶</h3>
+          <h3 className="line-heading-with-icon"><Link aria-hidden="true" />手動對應尚待市府派案的客戶與訂單</h3>
           <p>
-            當產婦先於 LINE 完成狀態 C 登記（已提交問卷但市府尚未派案），而市府匯入名冊時因姓名或電話微幅不一致未自動撮合，可於此處選定正式訂單與對應
+            產婦已在 LINE 提交問卷、尚待市府派案時，若匯入名冊後因姓名或電話差異而未自動配對，可在此選擇訂單與對應的
             LINE 產婦登記，執行一鍵手動配對與綁定。
           </p>
         </div>

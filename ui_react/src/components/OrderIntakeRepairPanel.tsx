@@ -22,7 +22,7 @@ import {
 
 const FIELD_LABELS: Record<IntakeMissingField, string> = {
   client_name: '客戶姓名',
-  start_date: '服務開始日',
+  start_date: '約定服務開始日',
   service_days: '服務天數',
 };
 
@@ -64,7 +64,7 @@ function viewOperation(operation: IntakeRepairOperation): Exclude<IntakeOperatio
 
 function successMessage(operation: IntakeRepairOperation): string {
   if (operation === 'client_name') return '客戶姓名已補齊並完成回讀。';
-  if (operation === 'terms') return '服務開始日／天數已更新並完成回讀。';
+  if (operation === 'terms') return '約定服務開始日／天數已更新並完成回讀。';
   return '進件缺件已完成，案件已回讀最新狀態。';
 }
 
@@ -144,8 +144,6 @@ export function OrderIntakeRepairPanel({
           if (detailResult.value.case_no !== caseNo) throw new Error('進件補件明細回讀案件識別不一致。');
           detail = detailResult.value;
           setClientName(detail.client_name.startsWith('待補姓名') ? '' : detail.client_name);
-          setStartDate(detail.start_date ?? '');
-          setServiceDays(detail.service_days > 0 ? String(detail.service_days) : '');
         } else if (requireDetail) {
           throw detailResult.reason;
         }
@@ -421,7 +419,7 @@ export function OrderIntakeRepairPanel({
     if (protectedFlow) return;
     const parsedDays = Number(serviceDays);
     if (!startDate || !Number.isInteger(parsedDays) || parsedDays <= 0) {
-      setError('請輸入有效的服務開始日與正整數服務天數。');
+      setError('請輸入有效的約定服務開始日與正整數服務天數。');
       return;
     }
     previewController.current?.abort();
@@ -554,7 +552,7 @@ export function OrderIntakeRepairPanel({
 
           {((repairAllowed && (missingName || completion.apply_allowed)) || termsRepairAllowed) && (
             <label style={{ display: 'grid', gap: '4px', fontSize: '0.82rem', color: '#57423b' }}>
-              異動／補件原因（套用時必填）
+              修改原因（儲存時必填）
               <input
                 value={reason}
                 maxLength={500}
@@ -589,7 +587,7 @@ export function OrderIntakeRepairPanel({
                     disabled={controlsLocked || !namePreview.apply_allowed || !reason.trim()}
                     onClick={() => void applyName()}
                   >
-                    {operation === 'name-apply' ? '正在套用姓名補件…' : '確認套用姓名補件'}
+                    {operation === 'name-apply' ? '正在儲存姓名…' : '確認儲存姓名'}
                   </button>
                 </div>
               )}
@@ -604,7 +602,7 @@ export function OrderIntakeRepairPanel({
             <div style={{ borderTop: '1px solid #fed7aa', paddingTop: '10px', display: 'grid', gap: '6px' }}>
               <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '8px', minWidth: 0 }}>
                 {(missingStartDate || editingTerms) && <label style={{ display: 'grid', gap: '4px', fontSize: '0.82rem', minWidth: 0 }}>
-                  服務開始日
+                  約定服務開始日
                   <input type="date" value={startDate} style={{ width: '100%', minWidth: 0, boxSizing: 'border-box' }} disabled={controlsLocked} onChange={(event) => { setStartDate(event.target.value); setTermsPreview(null); }} />
                 </label>}
                 {(missingServiceDays || editingTerms) && <label style={{ display: 'grid', gap: '4px', fontSize: '0.82rem', minWidth: 0 }}>
@@ -613,20 +611,20 @@ export function OrderIntakeRepairPanel({
                 </label>}
               </div>
               <button type="button" className="btn-secondary-action" disabled={controlsLocked || !startDate || Number(serviceDays) <= 0} onClick={() => void previewTerms()}>
-                {operation === 'terms-preview' ? '正在檢查日期／天數異動…' : '檢查日期／天數異動影響'}
+                {operation === 'terms-preview' ? '正在預覽日期與天數變更…' : '預覽日期與天數變更'}
               </button>
               {termsPreview && (
                 <div style={{ display: 'grid', gap: '6px' }}>
                   {termsPreview.blockers.length > 0
                     ? <div role="status" style={{ color: '#991b1b' }}>{termsPreview.blockers.map(intakeBlockerMessage).join('；')}</div>
-                    : <div role="status">服務開始日 {termsPreview.after_start_date}；服務天數 {termsPreview.after_service_days} 天。</div>}
+                    : <div role="status">約定服務開始日 {termsPreview.after_start_date}；服務天數 {termsPreview.after_service_days} 天。</div>}
                   <button
                     type="button"
                     className="btn-primary-action"
                     disabled={controlsLocked || !termsPreview.apply_allowed || !reason.trim()}
                     onClick={() => void applyTerms()}
                   >
-                    {operation === 'terms-apply' ? '正在套用日期／天數異動…' : '確認套用日期／天數異動'}
+                    {operation === 'terms-apply' ? '正在儲存日期與天數…' : '確認儲存日期與天數'}
                   </button>
                 </div>
               )}
@@ -647,7 +645,7 @@ export function OrderIntakeRepairPanel({
         </>
       )}
       {protectedFlow?.status === 'applying' || protectedFlow?.status === 'observing' ? (
-        <div role="status">補件套用／回讀中…</div>
+        <div role="status">正在儲存並確認補件結果…</div>
       ) : null}
       {protectedFlow?.status === 'outcome_unknown' ? (
         <button

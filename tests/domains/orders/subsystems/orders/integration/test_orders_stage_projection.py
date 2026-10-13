@@ -63,6 +63,10 @@ def _row(case_no: str = "CASE-001") -> dict[str, object]:
         "bootstrap_event_id": None,
         "bootstrap_created_at": None,
         "imported_terms_complete": 1,
+        "intake_start_date_missing": 0,
+        "intake_service_days_missing": 0,
+        "intake_service_time_missing": 0,
+        "intake_floor_fee_missing": 0,
         "historical_binding_receipt_id": None,
         "historical_binding_at": None,
         "historical_bound_staff_count": 0,
@@ -460,7 +464,14 @@ def test_line_delivery_step_never_completes_without_contact_timestamp_or_willing
     assert item.sop_steps[2].occurred_at is None
 
 
-def test_imported_terms_missing_any_required_root_fact_keep_step_one_in_progress() -> None:
+@pytest.mark.parametrize('fields,labels', [
+    (('intake_start_date_missing',), '服務開始日'),
+    (('intake_service_days_missing',), '服務天數'),
+    (('intake_service_time_missing',), '服務時間'),
+    (('intake_floor_fee_missing',), '樓層加給'),
+    (('intake_start_date_missing','intake_service_days_missing'), '服務開始日、服務天數'),
+])
+def test_imported_terms_missing_any_required_root_fact_keep_step_one_in_progress(fields, labels) -> None:
     row = _row("HCM-INCOMPLETE-TERMS")
     row.update({
         "imported_terms_complete": 0,
@@ -468,12 +479,14 @@ def test_imported_terms_missing_any_required_root_fact_keep_step_one_in_progress
         "terms_version": None,
         "terms_created_at": None,
     })
+    row.update({field: 1 for field in fields})
 
     item = OrderStageProjectionQueryService(_Repository((row,)), BUSINESS_CLOCK).query(
         StageProjectionQuery(50)
     ).items[0]
 
     assert item.sop_steps[0].status == "in_progress"
+    assert item.sop_steps[0].blockers[0].message == f"缺少欄位：{labels}。"
 
 
 def test_preassignment_confirmed_dates_are_not_mislabeled_as_actual_start() -> None:
@@ -518,6 +531,7 @@ def test_in_service_lifecycle_cannot_be_dragged_back_by_intake_gap() -> None:
     row.update({
         "lifecycle_status": OrderLifecycleStatus.IN_SERVICE.value,
         "imported_terms_complete": 0,
+        "intake_start_date_missing": 1,
         "terms_event_id": None,
         "terms_version": None,
         "terms_created_at": None,
@@ -617,6 +631,7 @@ def test_historical_service_completion_stays_in_settlement_despite_old_gaps() ->
     row.update({
         "lifecycle_status": OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED.value,
         "imported_terms_complete": 0,
+        "intake_start_date_missing": 1,
         "terms_event_id": None,
         "terms_version": None,
         "terms_created_at": None,

@@ -68,18 +68,18 @@ describe('AI 事件工作室正式規則 readback', () => {
     mockReadback();
     render(React.createElement(AiEventStudio));
 
-    expect(screen.getByText('尚未執行路由測試。')).toBeInTheDocument();
+    expect(screen.getByText('尚未預覽問句處理方式。')).toBeInTheDocument();
     expect(screen.queryByText(/新竹市月子補助計算與收費說明/)).not.toBeInTheDocument();
     expect(screen.queryByText(/客戶資料與服務異動申請/)).not.toBeInTheDocument();
     expect(screen.queryByText(/服務態度與爭議客訴/)).not.toBeInTheDocument();
     expect(screen.queryByText(/月嫂調休與順延機制說明/)).not.toBeInTheDocument();
 
     await waitFor(() => {
-      expect(screen.getByText(/舊版 4 筆 INITIAL_RULES 本機示範資料已移除/)).toBeInTheDocument();
+      expect(screen.getByText(/查看客服回覆與導向規則/)).toBeInTheDocument();
       expect(screen.getAllByText('profile_update')).toHaveLength(2);
       expect(screen.getByText('修改登記資料')).toBeInTheDocument();
       expect(screen.getByText('我要改資料')).toBeInTheDocument();
-      expect(screen.getByText(/正式 catalog revision 3/)).toBeInTheDocument();
+      expect(screen.getByText(/規則版本 3/)).toBeInTheDocument();
     });
   });
 
@@ -87,14 +87,14 @@ describe('AI 事件工作室正式規則 readback', () => {
     const fetchSpy = mockReadback();
     render(React.createElement(AiEventStudio));
 
-    fireEvent.change(screen.getByLabelText('Server router 測試文字'), {
+    fireEvent.change(screen.getByLabelText('客服測試問句'), {
       target: { value: '我要修改登記資料' },
     });
-    fireEvent.click(screen.getByRole('button', { name: '讀取 server router preview' }));
+    fireEvent.click(screen.getByRole('button', { name: '預覽問句處理方式' }));
 
     await waitFor(() => {
-      expect(screen.getByLabelText('路由測試結果')).toHaveTextContent('semantic bucketroute');
-      expect(screen.getByLabelText('路由測試結果')).toHaveTextContent('routeprofile_update');
+      expect(screen.getByLabelText('問句處理預覽結果')).toHaveTextContent('問句分類route');
+      expect(screen.getByLabelText('問句處理預覽結果')).toHaveTextContent('處理規則profile_update');
     });
     expect(fetchSpy).toHaveBeenCalledWith(
       '/api/v1/line/ai-events/router/preview',

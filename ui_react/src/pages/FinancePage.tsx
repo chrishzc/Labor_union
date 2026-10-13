@@ -1,6 +1,6 @@
 /**
  * File: FinancePage.tsx
- * Description: 呈現Finance查詢與受控銀行流水 Upload、Preview、durable Apply、terminal receipt 工作區。
+ * Description: 呈現Finance查詢與受控銀行交易明細 Upload、Preview、durable Apply、terminal receipt 工作區。
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { FinanceImportCorrectionForm } from '../components/FinanceImportCorrectionForm';
@@ -52,7 +52,7 @@ function currentMonth(): string {
 }
 
 function StateMessage<T>({ state, empty }: { state: LoadState<T>; empty: string }) {
-  if (state.kind === 'loading') return <div className="finance-state" role="status">正在載入真實資料…</div>;
+  if (state.kind === 'loading') return <div className="finance-state" role="status">正在載入資料…</div>;
   if (state.kind === 'empty') return <div className="finance-state">{empty}</div>;
   if (state.kind === 'error') return <div className="finance-state error" role="alert">{state.message}</div>;
   if (state.kind === 'unavailable') return <div className="finance-state unavailable" role="status">{state.message}</div>;
@@ -74,7 +74,7 @@ function financeErrorMessage(error: unknown, fallback: string): string {
   if (status >= 500 || code.includes('unavailable') || code.includes('network') || code.includes('timeout')) {
     return '服務暫時無法使用，請稍後再試。';
   }
-  if (code.includes('file_type')) return '檔案格式不符，請選擇 .xlsx 銀行流水工作簿。';
+  if (code.includes('file_type')) return '檔案格式不符，請選擇 .xlsx 銀行交易明細工作簿。';
   if (code.includes('file_empty')) return '選擇的工作簿沒有內容，請重新選擇檔案。';
   if (code.includes('file_too_large')) return '選擇的工作簿超過允許大小，請改用較小的檔案。';
   if (code.includes('file_changed')) return '工作簿內容已變更，請重新選擇並上傳。';
@@ -105,7 +105,7 @@ export const FinancePage: React.FC = () => {
   const [batchPreview, setBatchPreview] = useState<LoadState<FinanceImportBatchPreview>>({ kind: 'idle' });
   const [sourceReview, setSourceReview] = useState<LoadState<FinanceImportReviewSnapshot>>({ kind: 'idle' });
   const [correctionRow, setCorrectionRow] = useState<FinanceImportReviewSnapshot['items'][number] | null>(null);
-  const [applyReason, setApplyReason] = useState('已核對銀行流水預覽，確認匯入');
+  const [applyReason, setApplyReason] = useState('已核對銀行交易明細預覽，確認匯入');
   const [applyConfirmed, setApplyConfirmed] = useState(false);
   const [applyJob, setApplyJob] = useState<LoadState<FinanceImportJobAccepted>>({ kind: 'idle' });
   const [batchOutcome, setBatchOutcome] = useState<LoadState<FinanceImportBatchOutcome>>({ kind: 'idle' });
@@ -306,13 +306,13 @@ export const FinancePage: React.FC = () => {
   };
 
   const ingestWorkbook = async () => {
-    if (financeWorkbook === null) { setIngestion({ kind: 'error', message: '請先選擇 .xlsx 銀行流水工作簿。' }); return; }
+    if (financeWorkbook === null) { setIngestion({ kind: 'error', message: '請先選擇 .xlsx 銀行交易明細工作簿。' }); return; }
     setIngestion({ kind: 'loading' }); setBatchPreview({ kind: 'idle' }); setSourceReview({ kind: 'idle' }); setApplyConfirmed(false); setApplyJob({ kind: 'idle' }); setBatchOutcome({ kind: 'idle' });
     try {
       const snapshot = await FinanceWorkbookSnapshot.fromFile(financeWorkbook);
       const receipt = await financeImportMutationClient.ingest(snapshot, { idempotencyKey: `ui-finance-ingest-${snapshot.sha256}`, correlationId: `ui-finance-ingest-${crypto.randomUUID()}` });
       setIngestion({ kind: 'ready', data: receipt });
-    } catch (error) { setIngestion({ kind: 'error', message: financeErrorMessage(error, '銀行流水上傳失敗，請重新選擇檔案。') }); }
+    } catch (error) { setIngestion({ kind: 'error', message: financeErrorMessage(error, '銀行交易明細上傳失敗，請重新選擇檔案。') }); }
   };
   const previewImportedBatch = async () => {
     if (ingestion.kind !== 'ready') return;
@@ -385,11 +385,11 @@ export const FinancePage: React.FC = () => {
       <header className="page-header-banner finance-page-header">
         <div>
           <h1 className="page-title">💰 財務查詢與對帳工作台</h1>
-          <p className="page-subtitle">查詢客戶收款、逐人薪資與每月付款，或核對銀行流水。</p>
+          <p className="page-subtitle">查詢客戶收款、逐人薪資與每月付款，或核對銀行交易明細。</p>
         </div>
         <div className="finance-header-actions">
           <span className="finance-status-pill">
-            {activeTab === 'finance-import' ? '● 預覽確認後正式匯入' : '● 即時查詢｜不自動輪詢'}
+            {activeTab === 'finance-import' ? '● 預覽確認後正式匯入' : '● 需要最新資料時請重新整理'}
           </span>
         </div>
       </header>
@@ -400,7 +400,7 @@ export const FinancePage: React.FC = () => {
           ['staff-payables', '月嫂應付款'],
           ['accounts-payable', '應付帳款'],
           ['cross-order', '客戶補助退款'],
-          ['finance-import', '銀行流水匯入'],
+          ['finance-import', '銀行交易明細匯入'],
         ] as const).map(([id, label]) => (
           <button
             key={id}
@@ -427,7 +427,7 @@ export const FinancePage: React.FC = () => {
             : '查詢結果以目前選取頁籤為準'}</span>
         {activeTab !== 'finance-import' && activeTab !== 'cross-order' && (
           <button className="finance-reload-btn" onClick={() => setReload((value) => value + 1)}>
-            重新載入
+            重新整理
           </button>
         )}
       </div>
@@ -437,7 +437,7 @@ export const FinancePage: React.FC = () => {
           <div className="finance-section-heading">
             <div>
               <h2>客戶收款資料</h2>
-              <p>正常收款由銀行流水匯入自動核銷；不唯一或金額不符時，請到「銀行流水匯入」查看該批次的人工核對清單。</p>
+              <p>正常收款由銀行交易明細匯入自動核銷；不唯一或金額不符時，請到「銀行交易明細匯入」查看該批次的人工核對清單。</p>
             </div>
           </div>
 
@@ -473,11 +473,11 @@ export const FinancePage: React.FC = () => {
             <>
               <div className="finance-kpi-grid">
                 <div className="finance-kpi-item">
-                  <span className="finance-kpi-label">案件識別</span>
+                  <span className="finance-kpi-label">案件編號</span>
                   <span className="finance-kpi-value" style={{ fontSize: '1.15rem' }}>{receipt.data.caseNo}</span>
                 </div>
                 <div className="finance-kpi-item">
-                  <span className="finance-kpi-label">收款義務筆數</span>
+                  <span className="finance-kpi-label">應收項目數</span>
                   <span className="finance-kpi-value orange">{receipt.data.obligations.length} 筆</span>
                 </div>
                 <div className="finance-kpi-item">
@@ -494,7 +494,7 @@ export const FinancePage: React.FC = () => {
               <table className="finance-table">
                 <thead>
                   <tr>
-                    <th>義務</th>
+                    <th>收款項目</th>
                     <th>階段</th>
                     <th>應收</th>
                     <th>到期日</th>
@@ -514,20 +514,20 @@ export const FinancePage: React.FC = () => {
 
               <div className="finance-detail-block" role="region" aria-label="本案月嫂應付查核">
                 <h3>本案月嫂應付</h3>
-                <p>逐案核對正式義務或合法歷史唯讀計算；未知金額與日期保持未知，不以零元或預定日期補造。</p>
+                <p>依案件帳務或歷史服務資料顯示應付金額；尚未確認的金額與日期以「未確認」顯示。</p>
                 <StateMessage state={caseStaffPayables} empty="找不到本案可核對的月嫂應付來源。" />
                 {caseStaffPayables.kind === 'ready' && (
                   <div className="finance-table-container">
                     <table className="finance-table">
-                      <thead><tr><th>月嫂</th><th>應付</th><th>待付</th><th>案件既定應付日</th><th>現行義務／計算日</th><th>來源</th><th>月份查核</th></tr></thead>
+                      <thead><tr><th>月嫂</th><th>應付</th><th>待付</th><th>案件既定應付日</th><th>應付項目／試算日期</th><th>來源</th><th>月份查核</th></tr></thead>
                       <tbody>{caseStaffPayables.data.map((item, index) => {
-                        const source = item.source === 'formal_obligation' ? '現行正式義務' : item.source === 'historical_projection' ? '合法歷史唯讀計算' : 'Orders 案件事實';
+                        const source = item.source === 'formal_obligation' ? '已建立的應付項目' : item.source === 'historical_projection' ? '歷史資料試算' : '案件資料';
                         return <tr key={item.obligation_identity ?? `${item.case_no}:${item.staff_id ?? 'unknown'}:${index}`}>
                           <td>{item.recipient_name ?? (item.staff_id === null ? '月嫂尚未確認' : `Staff #${item.staff_id}`)}</td>
-                          <td>{item.amount_due_ntd === null ? '未知' : `NT$ ${item.amount_due_ntd.toLocaleString()}`}</td>
-                          <td>{item.balance_ntd === null ? '未知' : `NT$ ${item.balance_ntd.toLocaleString()}`}</td>
-                          <td>{item.order_due_date ?? '尚未形成'}</td>
-                          <td>{item.effective_due_date ?? '尚未形成'}</td><td>{source}</td>
+                          <td>{item.amount_due_ntd === null ? '未確認' : `NT$ ${item.amount_due_ntd.toLocaleString()}`}</td>
+                          <td>{item.balance_ntd === null ? '未確認' : `NT$ ${item.balance_ntd.toLocaleString()}`}</td>
+                          <td>{item.order_due_date ?? '未確認'}</td>
+                          <td>{item.effective_due_date ?? '未確認'}</td><td>{source}</td>
                           <td>{item.reason}</td>
                         </tr>;
                       })}</tbody>
@@ -580,7 +580,7 @@ export const FinancePage: React.FC = () => {
           <div className="finance-section-heading">
             <div>
               <h2>月嫂應付款與付款事件</h2>
-              <p>正常付款由銀行流水匯入自動核銷；不唯一或金額不符時，請到「銀行流水匯入」查看該批次的人工核對清單。</p>
+              <p>正常付款由銀行交易明細匯入自動核銷；不唯一或金額不符時，請到「銀行交易明細匯入」查看該批次的人工核對清單。</p>
             </div>
           </div>
 
@@ -626,7 +626,7 @@ export const FinancePage: React.FC = () => {
               <table className="finance-table">
                 <thead>
                   <tr>
-                    <th>義務</th>
+                    <th>收款項目</th>
                     <th>案件</th>
                     <th>應付</th>
                     <th>已付</th>
@@ -782,8 +782,8 @@ export const FinancePage: React.FC = () => {
         <section className="finance-workspace">
           <div className="finance-section-heading">
             <div>
-              <h2>銀行流水匯入</h2>
-              <p>選擇銀行流水工作簿、核對預覽，再確認匯入；完成結果會自動顯示。</p>
+              <h2>銀行交易明細匯入</h2>
+              <p>選擇銀行交易明細工作簿、核對預覽，再確認匯入；完成結果會自動顯示。</p>
             </div>
           </div>
 
@@ -793,14 +793,14 @@ export const FinancePage: React.FC = () => {
               <div className="finance-step-num">1</div>
               <div>
                 <div className="finance-step-title">上傳檔案</div>
-                <div className="finance-step-desc">選擇銀行流水工作簿</div>
+                <div className="finance-step-desc">選擇銀行交易明細工作簿</div>
               </div>
             </div>
             <div className={`finance-step-item ${batchPreview.kind === 'ready' || batchPreview.kind === 'loading' ? 'active' : ''}`}>
               <div className="finance-step-num">2</div>
               <div>
                 <div className="finance-step-title">預覽</div>
-                <div className="finance-step-desc">核對匹配與阻擋原因</div>
+                <div className="finance-step-desc">核對配對結果與需處理的問題</div>
               </div>
             </div>
             <div className={`finance-step-item ${applyJob.kind === 'ready' || applyJob.kind === 'loading' || batchOutcome.kind === 'ready' ? 'active' : ''}`}>
@@ -814,14 +814,14 @@ export const FinancePage: React.FC = () => {
 
           <section className="finance-detail-block finance-dropzone" data-surface-id="finance.finance-import.workflow">
             <div style={{ fontSize: '2rem' }}>📥</div>
-            <h3>選擇銀行流水工作簿</h3>
+            <h3>選擇銀行交易明細工作簿</h3>
             <p>上傳後先核對筆數與配對結果，再確認正式匯入。</p>
 
             <div style={{ display: 'flex', justifyContent: 'center', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
               <input
                 type="file"
                 accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                aria-label="選擇銀行流水工作簿"
+                aria-label="選擇銀行交易明細工作簿"
                 className="finance-input"
                 onChange={(event) => {
                   controllers.current.get('batch-preview')?.abort();

@@ -2,13 +2,14 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { clientRegistryClient } from '../api/client_registry/client_registry_client';
 import type { BeClassChanges, ClientProfileChanges, ClientRegistryChangeHistoryItem, ClientRegistryDetail, ClientRegistryPage as ClientRegistryPageData, RegistryMutationPreview } from '../api/client_registry/client_registry_schemas';
 import { ApiHttpError } from '../api/shared/typed_errors';
+import { OrderTermsUnavailableNote } from '../components/OrderTermsUnavailableNote';
 import { OrderTermsMutationPanel } from '../components/OrderTermsMutationPanel';
 import { CaseArchitectureBootstrapRepairPanel } from '../components/CaseArchitectureBootstrapRepairPanel';
 import { LegacyVirtualAccountImport } from '../components/LegacyVirtualAccountImport';
 import { ClientRosterPage } from './ClientRosterPage';
 import './ClientRegistryPage.css';
 
-const profileLabels: Record<string, string> = { name: '姓名', gender: '性別', phone: '電話（手機／市話）', email: 'HCM Email', city: '縣市', address: '地址', due_month: '預產期／預計服務開始月份', reject_reason: '不符合原因', residence_type: '住宅型態', delivery_type: '生產方式', baby_info: '寶寶資訊', notes: '行政註記', service_type: '服務方式' };
+const profileLabels: Record<string, string> = { name: '姓名', gender: '性別', phone: '電話（手機／市話）', email: 'HCM Email', city: '縣市', address: '地址', due_month: '預產期／預計服務開始月份', reject_reason: '不符合原因', residence_type: '住宅型態', delivery_type: '生產方式', baby_info: '寶寶資訊', notes: '行政註記', service_type: '服務方式（排班參考）' };
 const beclassLabels: Record<string, string> = { name: '報名姓名', email: 'BeClass Email', phone: '手機', tel: '市話', ext: '分機', city: '縣市', zip_code: '郵遞區號', address: '報名地址', admin_notes: '報名註記', multi_birth_count: '胎數（單胞胎／雙胞胎）' };
 const orderInformationLabels = {
   dietary_habits: '飲食習慣與中藥接受度',
@@ -33,7 +34,7 @@ type Action = { preview: RegistryMutationPreview | null; message: string | null;
 const initialAction: Action = { preview: null, message: null, loading: false, idempotencyKey: null };
 const toDraft = (values: Record<string, string | null> | null): Draft => Object.fromEntries(Object.entries(values ?? {}).map(([field, value]) => [field, value ?? '']));
 const mutationKey = (owner: Owner) => `client-${owner}-${globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
-const auditReason = (owner: Owner) => owner === 'profile' ? '後台客戶名冊主檔更新' : '後台客戶名冊 BeClass 有效資料更新';
+const auditReason = (owner: Owner) => owner === 'profile' ? '後台客戶名冊主檔更新' : '後台客戶名冊 報名問卷資料（BeClass）更新';
 const mutationErrorMessage = (error: unknown, fallback: string) => error instanceof ApiHttpError
   ? `${error.message}（${error.code}）`
   : error instanceof Error ? error.message : fallback;
@@ -42,6 +43,7 @@ const displayOrderInformationValue = (value: string | boolean | number | null) =
   if (typeof value === 'boolean') return value ? '是' : '否';
   return String(value);
 };
+
 
 const OrderInformationSection: React.FC<{ detail: ClientRegistryDetail }> = ({ detail }) => {
   const section = detail.order_information;
@@ -124,7 +126,7 @@ const ClientRegistryEditor: React.FC<{ initialCaseNo?: string; focusField?: stri
       const version = owner === 'profile' ? detail.client.version : detail.beclass.version ?? 0;
       await clientRegistryClient.apply(detail.case_no, owner, changed[owner] as ClientProfileChanges | BeClassChanges, version, approvedPreview.preview_fingerprint, auditReason(owner), action.idempotencyKey);
       await loadDetail(detail.case_no);
-      setMessage(owner === 'profile' ? '客戶主檔已儲存。' : detail.beclass.source_kind === 'admin_manual' ? '案件補登資料已儲存。' : 'BeClass 有效資料已儲存，原始匯入值未被覆寫。');
+      setMessage(owner === 'profile' ? '客戶主檔已儲存。' : detail.beclass.source_kind === 'admin_manual' ? '案件補登資料已儲存。' : '報名問卷資料（BeClass）已儲存，原始匯入值未被覆寫。');
     } catch (error) { setActions((value) => ({ ...value, [owner]: { ...value[owner], message: mutationErrorMessage(error, '儲存結果未確認，可用相同預覽安全重試。'), loading: false } })); }
   };
   const editor = (owner: Owner, labels: Record<string, string>, draft: Draft, setDraft: React.Dispatch<React.SetStateAction<Draft>>) => {
@@ -136,11 +138,11 @@ const ClientRegistryEditor: React.FC<{ initialCaseNo?: string; focusField?: stri
       setActions((current) => ({ ...current, [owner]: initialAction }));
     };
     const sourceLabel = owner === 'profile'
-      ? 'Client Profile owner'
+      ? '客戶主檔'
       : detail?.beclass.source_kind === 'admin_manual'
         ? '後台人工補登（無 BeClass 匯入紀錄）'
-        : 'Case Import / BeClass correction owner';
-    return <section className="registry-editor"><h3>{owner === 'profile' ? '客戶主檔' : 'BeClass 有效資料'}</h3><small>資料來源：{sourceLabel}</small><div className="registry-fields">{Object.entries(labels).map(([field, label]) => {
+        : '報名問卷修正資料（BeClass）';
+    return <section className="registry-editor"><h3>{owner === 'profile' ? '客戶主檔' : '報名問卷資料（BeClass）'}</h3><small>資料來源：{sourceLabel}</small><div className="registry-fields">{Object.entries(labels).map(([field, label]) => {
       const options = capabilities?.[field]?.options ?? null;
       const editable = capabilities?.[field]?.editable ?? true;
       const lockedReason = capabilities?.[field]?.reason;
@@ -151,7 +153,7 @@ const ClientRegistryEditor: React.FC<{ initialCaseNo?: string; focusField?: stri
     })}</div><div className="registry-actions"><button type="button" disabled={action.loading} onClick={() => { setDraft(toDraft(source ?? null)); setActions((value) => ({ ...value, [owner]: initialAction })); }}>取消變更</button><button type="button" disabled={action.loading} onClick={() => void preview(owner)}>預覽變更</button><button type="button" disabled={action.loading || !action.preview} onClick={() => void apply(owner)}>確認儲存</button></div>{action.preview && <div className="registry-preview"><strong>即將變更：</strong>{Object.keys(action.preview.after).map((field) => labels[field] ?? field).join('、')}</div>}{action.message && <p role="status">{action.message}</p>}</section>;
   };
   const bootstrapRepairRequired = ['client_finance_bootstrap_required', 'order_terms_start_date_required', 'order_terms_service_days_required'].includes(detail?.order_terms.code ?? '') || detail?.finance.code === 'client_finance_bootstrap_required';
-  return <div className="client-registry-page"><header><div><h2>名冊資料</h2><p>以案件編號整合客戶主檔、BeClass、照護與特殊計費資料及訂單條件；可編輯區塊分別儲存。</p></div><form onSubmit={(event) => { event.preventDefault(); void loadList(); }}><input aria-label="搜尋客戶名冊" value={query} placeholder="案件編號、姓名或電話" onChange={(event) => setQuery(event.target.value)} /><button>搜尋</button></form></header><div className="client-registry-layout"><aside aria-label="案件清單">{page?.items.map((item) => <button type="button" className={selected === item.case_no ? 'selected' : ''} key={item.case_no} onClick={() => void loadDetail(item.case_no)}><strong>{item.case_no}</strong><span>{item.name ?? '未登錄姓名'} · {item.phone ?? '未登錄電話'}</span><small>{item.city ?? '未登錄地區'}｜{item.order_status ?? '未有訂單狀態'}</small></button>)}</aside><main>{message && <p role="status" className="registry-message">{message}</p>}{detail && <><div className="registry-case-heading"><h2>{detail.case_no}</h2><span>客戶主檔 v{detail.client.version}</span></div>{editor('profile', profileLabels, profileDraft, setProfileDraft)}{detail.beclass.status === 'ready' ? editor('beclass', beclassLabels, beclassDraft, setBeclassDraft) : <section className="registry-editor"><h3>BeClass 有效資料</h3><p>{detail.beclass.status === 'duplicate_binding' ? '同一案件綁定多筆 BeClass，已停止編輯，請先處理綁定異常。' : '此案件尚未綁定 BeClass 紀錄。'}</p></section>}<OrderInformationSection detail={detail} /><section className="registry-editor"><h3>目前訂單條件</h3><dl className="registry-information-fields"><div><dt>服務方式</dt><dd>{detail.service_type ?? '尚未登錄'}</dd></div></dl>{detail.order_terms.status === 'ready' && detail.order_terms.data ? <OrderTermsMutationPanel caseNo={detail.case_no} query={detail.order_terms.data} onObserved={() => void loadDetail(detail.case_no)} /> : <><p>訂單條件目前不可用（{detail.order_terms.code ?? detail.order_terms.status}）。</p></>}{bootstrapRepairRequired && <CaseArchitectureBootstrapRepairPanel caseNo={detail.case_no} onCompleted={() => loadDetail(detail.case_no)} />}</section></>}</main></div></div>;
+  return <div className="client-registry-page"><header><div><h2>名冊資料</h2><p>以案件編號整合客戶主檔、BeClass、照護與特殊計費資料及訂單條件；可編輯區塊分別儲存。</p></div><form onSubmit={(event) => { event.preventDefault(); void loadList(); }}><input aria-label="搜尋客戶名冊" value={query} placeholder="案件編號、姓名或電話" onChange={(event) => setQuery(event.target.value)} /><button>搜尋</button></form></header><div className="client-registry-layout"><aside aria-label="案件清單">{page?.items.map((item) => <button type="button" className={selected === item.case_no ? 'selected' : ''} key={item.case_no} onClick={() => void loadDetail(item.case_no)}><strong>{item.case_no}</strong><span>{item.name ?? '未登錄姓名'} · {item.phone ?? '未登錄電話'}</span><small>{item.city ?? '未登錄地區'}｜{item.order_status ?? '未有訂單狀態'}</small></button>)}</aside><main>{message && <p role="status" className="registry-message">{message}</p>}{detail && <><div className="registry-case-heading"><h2>{detail.case_no}</h2><details><summary>技術資訊</summary><span>客戶主檔版本：{detail.client.version}</span></details></div>{editor('profile', profileLabels, profileDraft, setProfileDraft)}{detail.beclass.status === 'ready' ? editor('beclass', beclassLabels, beclassDraft, setBeclassDraft) : <section className="registry-editor"><h3>報名問卷資料（BeClass）</h3><p>{detail.beclass.status === 'duplicate_binding' ? '同一案件綁定多筆 BeClass，已停止編輯，請先處理綁定異常。' : '此案件尚未綁定 BeClass 紀錄。'}</p></section>}<OrderInformationSection detail={detail} /><section className="registry-editor"><h3>目前訂單條件</h3><dl className="registry-information-fields"><div><dt>服務方式（排班參考）</dt><dd>{detail.service_type ?? '尚未登錄'}</dd></div></dl>{detail.order_terms.status === 'ready' && detail.order_terms.data ? <OrderTermsMutationPanel caseNo={detail.case_no} query={detail.order_terms.data} onObserved={() => void loadDetail(detail.case_no)} /> : <><OrderTermsUnavailableNote caseNo={detail.case_no} code={detail.order_terms.code} /></>}{bootstrapRepairRequired && <CaseArchitectureBootstrapRepairPanel caseNo={detail.case_no} onCompleted={() => loadDetail(detail.case_no)} />}</section></>}</main></div></div>;
 };
 
 const ClientChangeHistory: React.FC = () => {

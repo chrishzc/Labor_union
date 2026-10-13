@@ -231,14 +231,14 @@ export const AiEventStudio: React.FC = () => {
             id="server-ai-rule-search"
             aria-label="搜尋正式事件規則"
             type="search"
-            placeholder="route、tier 或觸發別名"
+            placeholder="處理規則、分類或常見問法"
             value={searchTerm}
             onChange={(event) => setSearchTerm(event.target.value)}
           />
           <small>
             {catalog
-              ? `正式 catalog revision ${catalog.revision} · ${groupedRules.length} 組 server-owned 規則`
-              : '正在讀取正式 catalog…'}
+              ? `規則版本 ${catalog.revision} · ${groupedRules.length} 組客服處理規則`
+              : '正在讀取客服處理規則…'}
           </small>
         </div>
 
@@ -298,7 +298,7 @@ export const AiEventStudio: React.FC = () => {
 
       <div className="ai-studio-editor-pane">
         <div className="line-success" role="status">
-          舊版 4 筆 INITIAL_RULES 本機示範資料已移除。本頁只接受正式 QA 題庫與 server-owned navigation/event catalog 作為可見來源。
+          查看客服回覆與導向規則，或輸入問句預覽處理方式。
         </div>
 
         {selectedRule ? (
@@ -318,7 +318,7 @@ export const AiEventStudio: React.FC = () => {
             <div className="ai-rule-detail-body">
               <div className="ai-rule-fact-grid">
                 <div className="ai-rule-fact-card">
-                  <strong><Route aria-hidden="true" />路由識別鍵（Route Key）
+                  <strong><Route aria-hidden="true" />處理規則代碼
                   </strong>
                   <code className="ai-route-key">ID: {selectedRule.routeKey}</code>
                 </div>
@@ -422,28 +422,28 @@ export const AiEventStudio: React.FC = () => {
           <section className="ai-router-simulator" aria-labelledby="ai-router-simulator-title">
             <div className="ai-router-simulator-heading">
               <div>
-                <h4 id="ai-router-simulator-title"><Navigation aria-hidden="true" />事件路由模擬器</h4>
-                <p>送到正式 server-owned router 預覽端點；不會套用或儲存變更。</p>
+                <h4 id="ai-router-simulator-title"><Navigation aria-hidden="true" />客服問句處理測試</h4>
+                <p>輸入問句，查看系統會如何處理；此預覽不會儲存變更，也不會產生實際 AI 回覆。</p>
               </div>
             </div>
             <label htmlFor="server-router-input">測試問句</label>
             <div className="ai-router-input-row">
             <input
               id="server-router-input"
-              aria-label="Server router 測試文字"
+              aria-label="客服測試問句"
               value={routerInput}
               onChange={(event) => setRouterInput(event.target.value)}
             />
             <button type="button" className="line-primary-btn" disabled={routerBusy || !routerInput.trim()} onClick={() => void previewServerRouter()}>
-              <Play aria-hidden="true" />{routerBusy ? '測試中…' : '讀取 server router preview'}
+              <Play aria-hidden="true" />{routerBusy ? '測試中…' : '預覽問句處理方式'}
             </button>
             </div>
-            {!routerNotice && !routerPreview && <p className="ai-router-empty">尚未執行路由測試。</p>}
+            {!routerNotice && !routerPreview && <p className="ai-router-empty">尚未預覽問句處理方式。</p>}
             {routerNotice && <div className={`ai-router-notice is-${routerNoticeKind ?? 'info'}`} role="status">{routerNotice}</div>}
             {routerPreview && (
-              <div className="ai-router-result" aria-label="路由測試結果">
-                <div><span>semantic bucket</span><strong>{routerPreview.semantic_bucket}</strong></div>
-                <div><span>route</span><strong>{routerPreview.route_key ?? '未命中固定路由'}</strong></div>
+              <div className="ai-router-result" aria-label="問句處理預覽結果">
+                <div><span>問句分類</span><strong>{routerPreview.semantic_bucket}</strong></div>
+                <div><span>處理規則</span><strong>{routerPreview.route_key ?? '未命中固定路由'}</strong></div>
                 <div><span>信心度</span><strong>{routerPreview.confidence}%</strong></div>
                 <div><span>結果類型</span><strong>{routerPreview.kind}</strong></div>
               </div>

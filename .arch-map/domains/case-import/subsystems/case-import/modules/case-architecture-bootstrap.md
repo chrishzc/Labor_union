@@ -4,7 +4,7 @@
 - subsystem: `case-import`
 
 ## Responsibility
-以 Case Import named scalar facts 建立 first-use Client Finance、Payroll 與 Scheduling roots。Status 在提供 bootstrap Preview 前先揭露缺少正式開始日或正整數服務天數；由 Orders-owned terms repair 補齊後才可繼續。Payroll rate classification 優先使用 BeClass 已保存的 effective `multi_birth_count`，無胎數 correction 時才使用原始問卷值；可覆寫 identity classification，Client Finance identity semantics 不變。
+以 Case Import named scalar facts 建立 first-use Client Finance、Payroll 與 Scheduling roots。Status 在提供 bootstrap Preview 前先揭露缺少正式開始日或正整數服務天數；修復介面只顯示實際缺少欄位，由 Orders-owned terms repair 補齊，另一項沿用 owner 已保存值。Payroll rate classification 優先使用 BeClass 已保存的 effective `multi_birth_count`，無胎數 correction 時才使用原始問卷值；可覆寫 identity classification，Client Finance identity semantics 不變。
 
 ## Implementation
 - `domains/bootstrap/case_architecture.py`

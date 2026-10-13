@@ -45,6 +45,9 @@ export const OrdersIntakeRepairCard: React.FC<OrdersIntakeRepairCardProps> = ({ 
     try {
       const preview = await orderIntakeCompletionClient.previewCompletion(item.case_no);
       setCompletion(preview);
+      setStartDate(preview.current_start_date ?? '');
+      setServiceDays(preview.current_service_days && preview.current_service_days > 0
+        ? String(preview.current_service_days) : '');
       setError(null);
       return preview;
     } catch (caught) {

@@ -41,6 +41,8 @@
 - inbound: `case-import/case-import` — authenticated HCM workbook intake。
 
 ## Contracts
+- Partial intake 逐欄保存合法開始日、天數與 typed 服務時數／完整時段；其他重要欄位錯誤不清空合法 Orders 條款。`regression/test_hcm_partial_order_terms.py` 以實際 INSERT 保存值驗證 Orders 條款 reader 與補件 Query。
+- Current review adapter 將 MySQL 日期／日期時間／TIME 值序列化後計算 root fingerprint，保留原始 typed values 供解除警示判定；補正日期或時段後，警示 Query 不得因非 JSON scalar 回傳 500。
 - HCM 只有姓名、身分資格、報名時間、預計服務日期、希望服務天數、服務時間錯誤，或服務方式空值才觸發 partial intake／待補件；非空服務方式原文作排班參考，不產生格式警示，歷史格式警示依 current root 非空規則解除。其他錯誤僅警示並照常建立完整案件。Preview／Apply 最低建案資格均為可用案件編號。電話使用 Client-owned 手機／市話格式與正規化。
 - HCM `縣市` 為參考欄位：缺漏／非清單值不產生警示或補件理由，不單獨觸發 partial intake；沿用既有正規化。current review Query 忽略歷史縣市警示，不改寫來源、歷史紀錄或既有訂單狀態。
 - HCM 管理註記後的原始空白表頭欄正規化為 optional `email`，映射至 Client-owned `clients.email`；空白／缺欄可匯入。既有案件只經 Client Profile 補入空白 email，其他欄位及 BeClass 不覆寫；新案件非法非空值形成去敏欄位警示及 NULL 主檔值。

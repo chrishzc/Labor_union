@@ -69,7 +69,7 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-const previewButton = () => screen.getByRole('button', { name: '檢查訂單條款變更' });
+const previewButton = () => screen.getByRole('button', { name: '預覽服務條件變更' });
 
 async function submittedTerms() {
   await waitFor(() => expect(orderTermsMutationClient.preview).toHaveBeenCalledTimes(1));
@@ -90,7 +90,7 @@ describe('Issue #337 empty service time', () => {
     const query = queryFixture();
     render(<OrderTermsMutationPanel caseNo={query.case_no} query={query} />);
 
-    fireEvent.change(screen.getByLabelText('Beta 計畫服務開始日'), { target: { value: '2026-10-02' } });
+    fireEvent.change(screen.getByLabelText('約定服務開始日'), { target: { value: '2026-10-02' } });
     expect(previewButton()).toHaveProperty('disabled', false);
     fireEvent.click(previewButton());
 
@@ -101,7 +101,7 @@ describe('Issue #337 empty service time', () => {
     const query = queryFixture();
     render(<OrderTermsMutationPanel caseNo={query.case_no} query={query} />);
 
-    fireEvent.change(screen.getByLabelText('Beta 每日開始時間'), { target: { value: '09:00' } });
+    fireEvent.change(screen.getByLabelText('每日開始時間'), { target: { value: '09:00' } });
 
     expect(previewButton()).toHaveProperty('disabled', true);
     fireEvent.click(previewButton());
@@ -112,8 +112,8 @@ describe('Issue #337 empty service time', () => {
     const query = queryFixture();
     render(<OrderTermsMutationPanel caseNo={query.case_no} query={query} />);
 
-    fireEvent.change(screen.getByLabelText('Beta 每日開始時間'), { target: { value: '09:00' } });
-    fireEvent.change(screen.getByLabelText('Beta 每日結束時間'), { target: { value: '13:30' } });
+    fireEvent.change(screen.getByLabelText('每日開始時間'), { target: { value: '09:00' } });
+    fireEvent.change(screen.getByLabelText('每日結束時間'), { target: { value: '13:30' } });
     fireEvent.click(previewButton());
 
     const proposed = await submittedTerms();
@@ -135,7 +135,7 @@ describe('Issue #337 empty service time', () => {
     };
     render(<OrderTermsMutationPanel caseNo={query.case_no} query={query} />);
 
-    fireEvent.change(screen.getByLabelText('Beta 計畫服務開始日'), { target: { value: '2026-10-02' } });
+    fireEvent.change(screen.getByLabelText('約定服務開始日'), { target: { value: '2026-10-02' } });
     fireEvent.click(previewButton());
 
     expect(await submittedTerms()).toEqual({ ...query.terms, planned_start_date: '2026-10-02' });
@@ -167,17 +167,17 @@ describe('Issue #337 empty service time', () => {
     }));
     render(<OrderTermsMutationPanel caseNo={query.case_no} query={query} onObserved={onObserved} />);
 
-    fireEvent.change(screen.getByLabelText('Beta 計畫服務開始日'), { target: { value: '2026-10-02' } });
+    fireEvent.change(screen.getByLabelText('約定服務開始日'), { target: { value: '2026-10-02' } });
     fireEvent.click(previewButton());
-    fireEvent.click(await screen.findByRole('button', { name: '確認保存訂單條款' }));
+    fireEvent.click(await screen.findByRole('button', { name: '確認儲存服務條件' }));
 
     await waitFor(() => expect(onObserved).toHaveBeenCalledTimes(1));
     expect(vi.mocked(orderTermsMutationClient.apply).mock.calls[0][1].proposed_terms.service_time).toEqual(emptyTime);
     expect(vi.mocked(orderTermsMutationClient.apply).mock.calls[0][1].reason).toBeUndefined();
     expect(vi.mocked(orderTermsMutationClient.apply).mock.calls[0][1].requires_formal_apply).toBe(false);
     expect(vi.mocked(orderTermsMutationClient.apply).mock.calls[0][2].idempotencyKey).toBeUndefined();
-    expect(screen.getByLabelText('Beta 每日開始時間')).toHaveProperty('value', '');
-    fireEvent.change(screen.getByLabelText('Beta 計畫服務開始日'), { target: { value: '2026-10-03' } });
+    expect(screen.getByLabelText('每日開始時間')).toHaveProperty('value', '');
+    fireEvent.change(screen.getByLabelText('約定服務開始日'), { target: { value: '2026-10-03' } });
     expect(previewButton()).toHaveProperty('disabled', false);
   });
 });

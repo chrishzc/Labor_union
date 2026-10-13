@@ -12,7 +12,7 @@ export const rosterFilterColumns: RosterFilterColumn[] = [
   { field: 'requires_cooking', label: '下廚需求', kind: 'boolean' },
   { field: 'planned_start_date', label: '預計服務日期', kind: 'date' },
   { field: 'order_status', label: '案件／訂單狀態', kind: 'text' },
-  { field: 'deposit_due_date', label: '訂金應繳日', kind: 'date' },
+  { field: 'deposit_due_date', label: '定金應繳日', kind: 'date' },
   { field: 'first_due_date', label: '第一期應繳日', kind: 'date' },
   { field: 'second_due_date', label: '第二期應繳日', kind: 'date' },
   { field: 'staff_payment_due_date', label: '訂單月嫂應付日', kind: 'date' },

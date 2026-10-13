@@ -5,6 +5,7 @@ import { ClientRosterColumnFilter } from '../components/ClientRosterColumnFilter
 import { rosterFilterColumns, rosterFilterSummary } from '../components/client_roster_filter_columns';
 import { CaseArchitectureBootstrapRepairPanel } from '../components/CaseArchitectureBootstrapRepairPanel';
 import { Drawer } from '../components/Drawer';
+import { OrderTermsUnavailableNote } from '../components/OrderTermsUnavailableNote';
 import './ClientRosterPage.css';
 
 type RosterFilters = {
@@ -54,7 +55,7 @@ function clientDueDates(item: RosterItem, stage: NonNullable<RosterItem['client_
 }
 
 const profileLabels = {
-  name: '姓名', gender: '性別', phone: '手機', email: 'HCM Email', city: '縣市', address: '地址', residence_type: '住宅型態',
+  name: '姓名', gender: '性別', phone: '電話（手機／市話）', email: 'HCM Email', city: '縣市', address: '地址', residence_type: '住宅型態',
   delivery_type: '生產方式', baby_info: '寶寶資訊', notes: '行政註記',
 } as const;
 const beclassLabels = {
@@ -69,13 +70,13 @@ const orderInformationLabels = {
   stair_floor_fee_mode: '服務樓層方式', parking_space_provided: '停車位', other_babies_present: '服務時間內的其他寶寶',
 } as const;
 const orderTermLabels = {
-  planned_start_date: '計畫服務開始日', service_days: '服務天數', service_hours_per_day: '每日服務時數',
+  planned_start_date: '約定服務開始日', service_days: '服務天數', service_hours_per_day: '每日服務時數',
   requires_cooking: '下廚需求', floor_fee_ntd: '樓層加給', start_time: '每日開始時間', end_time: '每日結束時間',
-  end_day_offset: '結束日偏移',
+  end_day_offset: '結束時間是否跨日',
 } as const;
 const financeLabels = {
   virtual_account: '本案專屬虛擬帳號', service_unit_price_ntd: '服務單價', service_hours: '服務總時數',
-  customer_payable_total_ntd: '客戶應付總額', deposit_amount_ntd: '訂金金額', first_payment_amount_ntd: '第一期金額',
+  customer_payable_total_ntd: '客戶應付總額', deposit_amount_ntd: '定金金額', first_payment_amount_ntd: '第一期金額',
   second_payment_amount_ntd: '第二期金額', received_total_ntd: '已入帳金額', customer_balance_ntd: '客戶待繳／應退差額',
   subsidy_return_amount_ntd: '補助退款金額', subsidy_return_due_date: '補助退款日期', subsidy_return_status: '補助退款狀態',
 } as const;
@@ -98,7 +99,7 @@ const ReadOnlyDetail: React.FC<{ detail: ClientRegistryDetail; onRepaired: () =>
   } : {};
   return <div className="client-roster-detail" aria-label={`${detail.case_no} 全部唯讀欄位`}>
     <section><h3>客戶主檔</h3><ReadOnlyFields labels={profileLabels} values={detail.client.values} /></section>
-    <section><h3>BeClass 有效資料</h3>{detail.beclass.status === 'ready' && detail.beclass.values
+    <section><h3>報名問卷資料（BeClass）</h3>{detail.beclass.status === 'ready' && detail.beclass.values
       ? <ReadOnlyFields labels={beclassLabels} values={detail.beclass.values} />
       : <p>{detail.beclass.status === 'duplicate_binding' ? '同一案件綁定多筆 BeClass，無法判定資料。' : '尚未綁定 BeClass 紀錄。'}</p>}</section>
     <section><h3>BeClass 照護與特殊計費</h3>{detail.order_information.status === 'ready' && detail.order_information.values
@@ -106,10 +107,10 @@ const ReadOnlyDetail: React.FC<{ detail: ClientRegistryDetail; onRepaired: () =>
       : <p>{detail.order_information.status === 'duplicate_binding' ? '同一案件綁定多筆 BeClass，無法判定資料。' : '尚無 BeClass 照護資料。'}</p>}</section>
     <section><h3>訂單條件</h3><ReadOnlyFields labels={{ service_type: '服務方式' }} values={{ service_type: detail.service_type ?? '尚未登錄' }} />{terms
       ? <ReadOnlyFields labels={orderTermLabels} values={orderTermValues} />
-      : <p>訂單條件目前不可用（{detail.order_terms.code ?? detail.order_terms.status}）。</p>}</section>
+      : <OrderTermsUnavailableNote caseNo={detail.case_no} code={detail.order_terms.code} />}</section>
     <section><h3>客戶帳務（唯讀）</h3>{detail.finance.status === 'ready' && detail.finance.values
       ? <ReadOnlyFields labels={financeLabels} values={detail.finance.values} />
-      : <p>客戶帳務目前不可用（{detail.finance.code ?? detail.finance.status}）。</p>}
+      : <><p>{detail.finance.code === 'client_finance_bootstrap_required' ? '尚未建立客戶帳務資料。' : '客戶帳務暫時無法讀取，請重新整理。'}</p>{detail.finance.code && <details><summary>技術資訊</summary><code>{detail.finance.code}</code></details>}</>}
       {bootstrapRequired && <CaseArchitectureBootstrapRepairPanel caseNo={detail.case_no} onCompleted={onRepaired} />}
     </section>
   </div>;

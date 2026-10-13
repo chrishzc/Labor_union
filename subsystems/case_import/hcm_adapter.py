@@ -17,6 +17,7 @@ from domains.case_import.case_import import (
     CaseImportIntent,
     ClientImportAttribute,
     ImportedOrderRootFacts,
+    ImportedOrderServiceTime,
 )
 from shared_kernel.money import MoneyNTD
 
@@ -61,12 +62,19 @@ def build_hcm_partial_case_import_intent(
     provisional_registration_id: int | None = None,
 ) -> CaseImportIntent:
     case_no = _required_text(record, "case_no")
+    service_time = record.get("service_time")
+    partial_service_time = (
+        ImportedOrderServiceTime(*parse_hcm_service_time(service_time))
+        if isinstance(service_time, str) and service_time.strip()
+        else None
+    )
     return CaseImportIntent(
         case_no,
         _client_attributes(record),
         None,
         None,
         provisional_registration_id=provisional_registration_id,
+        partial_service_time=partial_service_time,
     )
 
 

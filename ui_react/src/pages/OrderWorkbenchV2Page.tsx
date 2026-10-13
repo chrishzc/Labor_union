@@ -215,6 +215,7 @@ export const OrderWorkbenchV2Page: FC = () => {
           key={selectedDrawer.caseNo}
           caseNo={selectedDrawer.caseNo}
           branchType={selectedDrawer.branchType}
+          summary={summaryIndex.get(selectedDrawer.caseNo)}
           workbenchScope={workbenchScope}
           onClose={closeDrawer}
           onObserved={refreshProjection}
@@ -399,7 +400,7 @@ export const OrderWorkbenchV2Page: FC = () => {
                   )}
                   {primaryNotice && (
                     <div className={`order-v2-notice ${item.blockers.length > 0 ? 'blocked' : 'warning'}`}>
-                      <strong>{item.blockers.length > 0 ? '阻塞' : '提醒'} · {primaryNotice.stageLabel}</strong>
+                      {primaryNotice.id !== 'intake_validation:orders_terms_missing' && <strong>{item.blockers.length > 0 ? '阻塞' : '提醒'} · {primaryNotice.stageLabel}</strong>}
                       <span>{primaryNotice.message}</span>
                       {item.blockers.length + item.warnings.length > 1 && <small>另有 {item.blockers.length + item.warnings.length - 1} 項，請在案件工作中查看。</small>}
                     </div>

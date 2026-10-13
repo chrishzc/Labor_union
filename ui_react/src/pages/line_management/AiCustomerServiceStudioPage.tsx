@@ -21,14 +21,14 @@ export const AiCustomerServiceStudioPage: React.FC = () => {
           <div>
             <p className="line-hub-eyebrow">LINE 專區</p>
             <h1 id="ai-studio-title">AI 客服工作室</h1>
-            <p>分開管理固定回答、事件導向與真實模型測試，避免在同一長頁混用不同工作。</p>
+            <p>管理常見問答與客服處理規則、測試 AI 回答，並查看使用者回饋。</p>
           </div>
         </div>
       </header>
 
       <nav className="line-hub-section-tabs" aria-label="AI 客服工作室功能">
         <button type="button" className={activeTab === 'qa' ? 'active' : ''} aria-current={activeTab === 'qa' ? 'page' : undefined} onClick={() => setActiveTab('qa')}>
-          <BookOpenText aria-hidden="true" />常見 QA
+          <BookOpenText aria-hidden="true" />常見問答
         </button>
         <button type="button" className={activeTab === 'rules' ? 'active' : ''} aria-current={activeTab === 'rules' ? 'page' : undefined} onClick={() => setActiveTab('rules')}>
           <Workflow aria-hidden="true" />事件規則

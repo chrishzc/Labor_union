@@ -86,7 +86,7 @@ describe('Orders intake repair entry', () => {
     render(<OrderIntakeRepairPanel caseNo="CASE-153" orderStatus="待補件" onChanged={onChanged} />);
     const phone = await screen.findByLabelText('電話（手機／市話）');
     expect(screen.queryByLabelText('服務方式')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('服務開始日')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('約定服務開始日')).not.toBeInTheDocument();
     fireEvent.change(phone, { target: { value: '0912345678' } });
     fireEvent.change(screen.getByLabelText('欄位修正原因'), { target: { value: '核對並修正電話' } });
     fireEvent.click(screen.getByRole('button', { name: '預覽欄位修正' }));
@@ -116,12 +116,12 @@ describe('Orders intake repair entry', () => {
     const previewTerms = vi.spyOn(orderIntakeCompletionClient, 'previewTerms');
     render(<OrderIntakeRepairPanel caseNo="CASE-153" orderStatus="待補件" />);
     const edit = await screen.findByRole('button', { name: '修改服務日期／天數' });
-    expect(screen.queryByLabelText('服務開始日')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('約定服務開始日')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('服務天數')).not.toBeInTheDocument();
     expect(screen.queryByText('目前不可完成補件')).not.toBeInTheDocument();
     expect(previewTerms).not.toHaveBeenCalled();
     fireEvent.click(edit);
-    expect(screen.getByLabelText('服務開始日')).toHaveValue('2026-10-15');
+    expect(screen.getByLabelText('約定服務開始日')).toHaveValue('2026-10-15');
     expect(screen.getByLabelText('服務天數')).toHaveValue(30);
   });
 
@@ -139,13 +139,49 @@ describe('Orders intake repair entry', () => {
       blockers: [], apply_allowed: true, preview_fingerprint: FP1,
     });
     render(<OrderIntakeRepairPanel caseNo="CASE-153" orderStatus="待補件" />);
-    const missingLabel = missing === 'start_date' ? '服務開始日' : '服務天數';
-    const savedLabel = missing === 'start_date' ? '服務天數' : '服務開始日';
+    const missingLabel = missing === 'start_date' ? '約定服務開始日' : '服務天數';
+    const savedLabel = missing === 'start_date' ? '服務天數' : '約定服務開始日';
     const input = await screen.findByLabelText(missingLabel);
     expect(screen.queryByLabelText(savedLabel)).not.toBeInTheDocument();
     fireEvent.change(input, { target: { value: missing === 'start_date' ? '2026-10-15' : '30' } });
-    fireEvent.click(screen.getByRole('button', { name: '檢查日期／天數異動影響' }));
+    fireEvent.click(screen.getByRole('button', { name: '預覽日期與天數變更' }));
     await waitFor(() => expect(previewTerms).toHaveBeenCalledWith('CASE-153', '2026-10-15', 30, expect.any(Object)));
+  });
+
+  it('retains owner dates and days when a missing name causes general detail to return empty terms', async () => {
+    vi.spyOn(orderIntakeCompletionClient, 'previewCompletion').mockResolvedValue({
+      case_no: 'CASE-153', lifecycle_version: 7, current_status: '待補件', target_status: '洽談中',
+      current_start_date: '2026-10-15', current_service_days: 30,
+      missing_fields: ['client_name'], blockers: [], apply_allowed: false, preview_fingerprint: FP1,
+    });
+    vi.spyOn(ordersQueryClient, 'getOrderDetail').mockResolvedValue({
+      ...incompleteSummary, client_name: '待補姓名（CASE-153）', service_days: 0,
+      client_id: 1, staff_id: null, cancel_reason: null, line_group_id: null,
+      contract_identity: null, deposit_date: null, service_hours_per_day: 0,
+      deposit_service_days: null, floor_fee: 0, custom_rest_dates: null,
+    });
+    render(<OrderIntakeRepairPanel caseNo="CASE-153" orderStatus="待補件" />);
+    await screen.findByLabelText('客戶姓名');
+    fireEvent.click(screen.getByRole('button', { name: '修改服務日期／天數' }));
+    expect(screen.getByLabelText('約定服務開始日')).toHaveValue('2026-10-15');
+    expect(screen.getByLabelText('服務天數')).toHaveValue(30);
+  });
+
+  it('card preserves the owner date while repairing days even when summary terms are empty', async () => {
+    vi.spyOn(orderIntakeCompletionClient, 'previewCompletion').mockResolvedValue({
+      case_no: 'CASE-153', lifecycle_version: 7, current_status: '待補件', target_status: '洽談中',
+      current_start_date: '2026-10-15', current_service_days: null,
+      missing_fields: ['service_days'], blockers: [], apply_allowed: false, preview_fingerprint: FP1,
+    });
+    const previewTerms = vi.spyOn(orderIntakeCompletionClient, 'previewTerms').mockResolvedValue({
+      case_no: 'CASE-153', lifecycle_version: 7, before_start_date: '2026-10-15', before_service_days: null,
+      after_start_date: '2026-10-15', after_service_days: 30, changed_fields: ['service_days'],
+      blockers: [], apply_allowed: true, preview_fingerprint: FP1,
+    });
+    render(<OrdersIntakeRepairCard item={{ ...incompleteSummary, client_name: '測試客戶' }} onChanged={vi.fn()} />);
+    fireEvent.change(await screen.findByLabelText('CASE-153 服務天數'), { target: { value: '30' } });
+    fireEvent.click(screen.getByRole('button', { name: '檢查服務資料補件' }));
+    await waitFor(() => expect(previewTerms).toHaveBeenCalledWith('CASE-153', '2026-10-15', 30));
   });
 
   it.each(['start_date', 'service_days'] as const)('card only shows missing %s rather than a disabled valid field', async (missing) => {
@@ -182,8 +218,8 @@ describe('Orders intake repair entry', () => {
     render(<OrderIntakeRepairPanel caseNo="CASE-153" orderStatus="待補件" />);
 
     expect(await screen.findByText(`原始進件欄位待修正：${field}`)).toBeInTheDocument();
-    expect(screen.getByText('尚未補齊的案件資料：服務開始日、服務天數')).toBeInTheDocument();
-    expect(screen.queryByText('缺少資料：服務開始日、服務天數')).not.toBeInTheDocument();
+    expect(screen.getByText('尚未補齊的案件資料：約定服務開始日、服務天數')).toBeInTheDocument();
+    expect(screen.queryByText('缺少資料：約定服務開始日、服務天數')).not.toBeInTheDocument();
     expect(screen.queryByText(/其他欄位/)).not.toBeInTheDocument();
     expect(applyTerms).not.toHaveBeenCalled();
     expect(applyCompletion).not.toHaveBeenCalled();
@@ -392,21 +428,21 @@ describe('Orders intake repair entry', () => {
     render(<OrderIntakeRepairPanel caseNo="CASE-EARLY-CORRECTION" orderStatus="洽談中" />);
 
     fireEvent.click(await screen.findByRole('button', { name: '修改服務日期／天數' }));
-    expect(await screen.findByLabelText('服務開始日')).toHaveValue('2026-09-10');
+    expect(await screen.findByLabelText('約定服務開始日')).toHaveValue('2026-09-10');
     expect(screen.getByLabelText('服務天數')).toHaveValue(30);
-    fireEvent.change(screen.getByLabelText('服務開始日'), { target: { value: '2026-09-12' } });
+    fireEvent.change(screen.getByLabelText('約定服務開始日'), { target: { value: '2026-09-12' } });
     fireEvent.change(screen.getByLabelText('服務天數'), { target: { value: '28' } });
-    fireEvent.change(screen.getByLabelText('異動／補件原因（套用時必填）'), {
+    fireEvent.change(screen.getByLabelText('修改原因（儲存時必填）'), {
       target: { value: '修正剛匯入的服務條件' },
     });
-    fireEvent.click(screen.getByRole('button', { name: '檢查日期／天數異動影響' }));
-    await screen.findByText('服務開始日 2026-09-12；服務天數 28 天。');
-    fireEvent.click(screen.getByRole('button', { name: '確認套用日期／天數異動' }));
+    fireEvent.click(screen.getByRole('button', { name: '預覽日期與天數變更' }));
+    await screen.findByText('約定服務開始日 2026-09-12；服務天數 28 天。');
+    fireEvent.click(screen.getByRole('button', { name: '確認儲存日期與天數' }));
 
     await waitFor(() => expect(applyTerms).toHaveBeenCalled());
     await waitFor(() => expect(previewCompletion).toHaveBeenCalledTimes(2));
     expect(detail).not.toHaveBeenCalled();
-    expect(await screen.findByText('服務開始日／天數已更新並完成回讀。')).toBeInTheDocument();
+    expect(await screen.findByText('約定服務開始日／天數已更新並完成回讀。')).toBeInTheDocument();
   });
 
 });
