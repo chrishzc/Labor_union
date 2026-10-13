@@ -391,6 +391,9 @@ def _merge_contract_payment_facts(
         ).load_client_projection(case_no)
         if projection is None:
             return
+        service_mode = projection.facts.get("service_type")
+        if service_mode is not None:
+            facts["service_type"] = service_mode
         for key in (
             "deposit_amount",
             "deposit_due_date",

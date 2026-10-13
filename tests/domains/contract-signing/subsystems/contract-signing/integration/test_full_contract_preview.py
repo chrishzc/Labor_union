@@ -37,6 +37,106 @@ from infrastructure.mysql.contract_full_preview_repository import (
 from subsystems.contract_signing.staff_contract_application import _rest_weekdays
 
 
+@pytest.mark.parametrize(
+    "identity,service_days,floor_fee,persisted_days,has_start,expected_amounts,service_mode",
+    [
+        ("一般市民", 20, 0, 0, True, (12000, 45000, 3000, 60000), "連續服務"),
+        ("一般市民", 20, 1000, 0, True, (13000, 45000, 3000, 61000), "連續服務"),
+        ("低收入戶", 12, 0, 0, True, (0, 0, 0, 0), "連續服務"),
+        ("低收入戶", 20, 0, 0, True, (12000, 45000, 3000, 60000), "連續服務"),
+        ("一般市民", 20, 0, 22, True, (12000, 45000, 9000, 66000), "連續服務"),
+        ("一般市民", 20, 0, 0, False, None, "連續服務"),
+        ("一般市民", 20, 0, 0, True, (12000, 45000, 3000, 60000), "無休"),
+        ("一般市民", 20, 0, 0, True, (12000, 45000, 3000, 60000), None),
+        ("一般市民", 20, 0, 0, True, (12000, 45000, 3000, 60000), ""),
+    ],
+)
+def test_candidate_payment_preview_without_plan_or_payroll(
+    monkeypatch, identity, service_days, floor_fee, persisted_days, has_start, expected_amounts, service_mode,
+):
+    from infrastructure.mysql import contract_full_preview_repository as adapter
+    from infrastructure.mysql import order_information_repository as information
+    from domains.client_finance.obligation_planning import (
+        ClientChargeDay, ClientFinanceTermsFacts, ClientPaymentTerms,
+    )
+    from shared_kernel.money import MoneyNTD
+
+    case = {
+        "case_no": "CASE-1", "start_date": date(2026, 10, 1) if has_start else None,
+        "service_days": service_days, "service_hours_per_day": 10,
+        "service_type": service_mode, "custom_rest_dates": [],
+        "floor_fee": floor_fee, "client_identity_status": identity,
+        "client_name": "測試客戶", "requires_cooking": False,
+    }
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, statement, params):
+            assert statement.lstrip().startswith("SELECT")
+            self.row = (
+                case if "FROM orders" in statement else
+                {"staff_name": "測試月嫂", "assigned_start_date": case["start_date"],
+                 "assigned_end_date": date(2026, 10, service_days)}
+                if "FROM caregiver_candidate_contact_entries" in statement else None
+            )
+
+        def fetchone(self):
+            return self.row
+
+        def fetchall(self):
+            return []
+
+    connection = SimpleNamespace(cursor=Cursor)
+    monkeypatch.setattr(adapter.MySqlContractContextRepository, "load_case_facts", lambda *_: case)
+    monkeypatch.setattr(adapter.MySqlContractContextRepository, "load_assignments", lambda *_: ())
+    monkeypatch.setattr(adapter, "_client_virtual_account", lambda *_: None)
+    monkeypatch.setattr(adapter, "select_order", lambda *_args, **_kwargs: case)
+    monkeypatch.setattr(adapter, "load_contract_client_finance_facts", lambda *_args, **_kwargs:
+        ClientFinanceTermsFacts(
+            "CASE-1", 1, 10, MoneyNTD(floor_fee),
+            tuple(ClientChargeDay(date(2026, 10, day), False)
+                  for day in range(1, persisted_days + 1)),
+            ClientPaymentTerms(4, MoneyNTD(300), date(2026, 9, 20),
+                               date(2026, 10, 1), date(2026, 10, 20)), (),
+            client_service_charge_waived=identity == "低收入戶",
+        ))
+
+    def unavailable_payroll(*_args):
+        raise ValueError("payroll_bootstrap_required")
+
+    monkeypatch.setattr(adapter, "load_preview_facts", unavailable_payroll)
+    if expected_amounts is None:
+        projection = adapter.MySqlFullContractProjectionRepository(connection).load_client_projection("CASE-1")
+        assert projection is not None
+        assert all(projection.facts.get(key) is None for key in (
+            "deposit_amount", "first_payment_amount", "second_payment_amount",
+            "total_employer_self_pay_payable",
+        ))
+        return
+    preview = information.MySqlOrderInformationRepository(connection).preview_candidate_information(
+        "CASE-1", 91, 1,
+    )
+    service = dict(next(section.rows for section in preview.line_sections
+                        if section.title == "服務約定"))
+    assert service["服務方式"] == "連續服務"
+    payments = dict(next(section.rows for section in preview.line_sections
+                         if section.title == "客戶付款約定"))
+    for label, amount in zip(
+        ("訂金金額", "第一期金額", "第二期金額", "客戶應付總額"), expected_amounts,
+    ):
+        assert payments[label] == f"NT$ {amount:,}"
+    assert payments["樓層費"] == f"NT$ {floor_fee:,}"
+    assert payments["預計訂金繳款日"] == "2026-09-20"
+    assert payments["預計第一期繳款日"] == "2026-10-01"
+    assert payments["預計第二期繳款日"] == "2026-10-20"
+    assert payments["樓層費預計繳款日"] == ("2026-09-20" if floor_fee else "不適用")
+
+
 class _Repository:
     def __init__(self, projection):
         self.projection = projection
@@ -238,9 +338,14 @@ def test_client_service_type_is_an_exact_canonical_rest_mode(value):
     assert _canonical_service_mode(value) == value
 
 
-@pytest.mark.parametrize("value", [None, "care", "居家"])
+@pytest.mark.parametrize("value", ["care", "居家", 42])
 def test_ambiguous_service_type_is_not_reinterpreted(value):
     assert _canonical_service_mode(value) is None
+
+
+@pytest.mark.parametrize("value", [None, "", "   ", "無休", " 無休 "])
+def test_no_rest_selection_is_continuous_service(value):
+    assert _canonical_service_mode(value) == "連續服務"
 
 
 @pytest.mark.parametrize("value", ["週休1日", "週休一日"])

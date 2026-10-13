@@ -10,6 +10,7 @@
 欄位缺值或來源未決以 warnings 呈現且不阻擋目前資料投影；模板結構等技術錯誤才列為 blockers。
 
 候選、正式推薦與 assignment 的資訊一客戶付款約定均借用 current 客戶契約 typed projection，包含訂金、分期、樓層費及預計繳款日；不另計金額。
+服務方式「無休」及未選休假星期沿用客戶契約投影的「連續服務」，讓資訊一畫面、寄送前預覽與付款金額一致。
 
 ## Implementation
 - `subsystems/orders/order_information.py`

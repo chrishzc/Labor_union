@@ -44,6 +44,7 @@ from subsystems.contract_signing.full_contract_preview import (
 
 _CANONICAL_SERVICE_MODES = frozenset({"休周六", "休周日", "週休2日", "連續服務"})
 _LEGACY_SERVICE_MODE_ALIASES = {
+    "無休": "連續服務",
     "週休1日": "休周日",
     "週休一日": "休周日",
     "週休二日": "週休2日",
@@ -111,6 +112,7 @@ class MySqlFullContractProjectionRepository:
             owners,
             active_assignment_id,
             current[0].get("staff_id") if active_assignment_id is not None else None,
+            expected_service_dates=_expected_service_dates(case) if not current else (),
         )
         if not current:
             plan = _load_precontract_plan(self._connection, case_no, case)
@@ -574,6 +576,8 @@ def _extend_owner_facts(
     owners: dict[str, str],
     assignment_id: int | None,
     staff_id: int | None,
+    *,
+    expected_service_dates: tuple[date, ...] = (),
 ) -> None:
     """Borrow existing typed Finance/Payroll/Scheduling readers when bootstrapped."""
     # Client/Case Import is an independent owner.  Its normalized email read
@@ -589,22 +593,25 @@ def _extend_owner_facts(
         client_email = None
     try:
         with connection.cursor() as cursor:
-            typed = load_preview_facts(cursor, case_no)
             order_row = select_order(cursor, case_no, lock=False)
             finance = load_contract_client_finance_facts(
                 cursor, order_row, lock=False
             )
-            commitment = _load_commitment(cursor, case_no)
-            rate = _load_assignment_payroll_rate(cursor, assignment_id)
-            rate_override = load_explicit_case_service_rate(cursor, case_no)
-            refund_destination = _load_client_refund_destination(cursor, case_no)
-        if rate_override is not None:
-            facts["multi_birth_count"] = rate_override.multi_birth_count
-            rate = {
-                "hourly_rate_ntd": rate_override.hourly_rate_ntd,
-                "policy_version": rate_override.policy_version,
-                "policy_kind": rate_override.policy_kind,
-            }
+        # Before a plan/commitment exists, use Orders' expected dates only for
+        # this zero-write projection. Persisted charge days always take priority.
+        if not finance.charge_days and expected_service_dates:
+            total_hours = Decimal(len(expected_service_dates)) * Decimal(
+                str(finance.service_hours_per_day)
+            )
+            coverage = _derive_contract_subsidy_coverage(facts, total_hours)
+            finance = replace(
+                finance,
+                charge_days=tuple(ClientChargeDay(day, False) for day in expected_service_dates),
+                client_service_charge_waived=(
+                    coverage.is_full_subsidy_order if coverage is not None else False
+                ),
+            )
+            facts["total_hours"] = total_hours
         payment = finance.payment_terms
         facts.update(
             {
@@ -644,6 +651,20 @@ def _extend_owner_facts(
                 "client_virtual_account": facts.get("client_virtual_account"),
             }
         )
+        # Client payment fields do not depend on a Payroll bootstrap.
+        with connection.cursor() as cursor:
+            typed = load_preview_facts(cursor, case_no)
+            commitment = _load_commitment(cursor, case_no)
+            rate = _load_assignment_payroll_rate(cursor, assignment_id)
+            rate_override = load_explicit_case_service_rate(cursor, case_no)
+            refund_destination = _load_client_refund_destination(cursor, case_no)
+        if rate_override is not None:
+            facts["multi_birth_count"] = rate_override.multi_birth_count
+            rate = {
+                "hourly_rate_ntd": rate_override.hourly_rate_ntd,
+                "policy_version": rate_override.policy_version,
+                "policy_kind": rate_override.policy_kind,
+            }
         owners["payroll"] = projection_fingerprint(
             {
                 "payroll_version": typed.payroll.payroll_version,
@@ -873,8 +894,13 @@ def _stage_fact_key(stage: str, suffix: str) -> str:
 
 
 def _canonical_service_mode(value: object) -> str | None:
+    if value is None:
+        return "連續服務"
     if not isinstance(value, str):
         return None
+    value = value.strip()
+    if not value:
+        return "連續服務"
     canonical = _LEGACY_SERVICE_MODE_ALIASES.get(value, value)
     return canonical if canonical in _CANONICAL_SERVICE_MODES else None
 
