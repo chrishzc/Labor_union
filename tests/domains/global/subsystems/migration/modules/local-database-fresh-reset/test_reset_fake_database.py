@@ -75,13 +75,17 @@ def test_union_db_requires_explicit_operator_route(monkeypatch, tmp_path):
         )
 
 
-def test_operator_reset_uses_plan_exact_reset_and_no_backup(
+def test_operator_reset_uses_plan_and_preserves_root_before_drop(
     monkeypatch, tmp_path
 ):
     assembly = _assembly(tmp_path)
     plan_path = tmp_path / "plan.json"
     receipt_path = tmp_path / "terminal.json"
     config = _config("union_db")
+    calls = []
+    monkeypatch.setattr(resetter, "capture_root_authentication", lambda *_a, **_k: calls.append("capture") or {})
+    monkeypatch.setattr(resetter, "save_root_authentication", lambda *_a, **_k: calls.append("durable_backup") or {"status": "encrypted_and_verified"})
+    monkeypatch.setattr(resetter, "restore_root_authentication", lambda *_a, **_k: calls.append("restore_and_compare") or {"status": "preserved"})
     monkeypatch.setattr(
         resetter,
         "_canonical_bootstrap_contract",
@@ -99,7 +103,7 @@ def test_operator_reset_uses_plan_exact_reset_and_no_backup(
     monkeypatch.setattr(
         resetter,
         "rebuild_schema",
-        lambda *_args, **_kwargs: {"schema_postcheck": "pass"},
+        lambda *_args, **_kwargs: calls.append("drop_rebuild") or {"schema_postcheck": "pass"},
     )
     resetter.reset(
         operator_reset=True,
@@ -119,8 +123,29 @@ def test_operator_reset_uses_plan_exact_reset_and_no_backup(
         environment={"APP_ENV": "development"},
     )
     assert result["status"] == "completed"
-    assert result["backup_receipt"]["policy"] == "explicit_discard_confirmed"
+    assert result["backup_receipt"]["policy"] == "business_discard_root_auth_preserved"
+    assert result["root_authentication"]["status"] == "preserved"
+    assert calls == ["capture", "durable_backup", "drop_rebuild", "restore_and_compare"]
     assert receipt_path.is_file()
+
+
+def test_operator_backup_failure_never_drops_database(monkeypatch, tmp_path):
+    assembly = _assembly(tmp_path)
+    monkeypatch.setattr(resetter, "_canonical_bootstrap_contract", lambda: (assembly, {"release_id": "r1"}))
+    monkeypatch.setattr(resetter, "_check_connected_identity", lambda *_a, **_k: {})
+    monkeypatch.setattr(resetter, "capture_root_authentication", lambda *_a, **_k: {})
+    def fail_backup(*_args):
+        raise resetter.RootPreservationError("backup failed")
+    monkeypatch.setattr(resetter, "save_root_authentication", fail_backup)
+    monkeypatch.setattr(resetter, "rebuild_schema", lambda *_a, **_k: pytest.fail("must not DROP"))
+    config = _config("union_db")
+    plan = tmp_path / "plan.json"
+    resetter.reset(operator_reset=True, target_database="union_db", config=config,
+                   environment={"APP_ENV": "development"}, plan_receipt=plan)
+    with pytest.raises(resetter.FakeDatabaseResetError, match="backup failed"):
+        resetter.reset(apply=True, operator_reset=True, confirm_apply="RESET", target_database="union_db",
+                       config=config, environment={"APP_ENV": "development"}, plan_receipt=plan,
+                       receipt_path=tmp_path / "receipt.json")
 
 
 def test_connected_identity_query_uses_mapping_rows():

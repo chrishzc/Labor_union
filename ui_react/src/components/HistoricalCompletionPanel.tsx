@@ -47,11 +47,13 @@ const COMPLETION_REASON = '確認歷史訂單客戶款項及月嫂款項皆已�
 export interface HistoricalCompletionPanelProps {
   caseNo: string;
   client?: HistoricalCompletionClient;
+  onCompleted?: () => void;
 }
 
 export function HistoricalCompletionPanel({
   caseNo,
   client = historicalCompletionClient,
+  onCompleted,
 }: HistoricalCompletionPanelProps) {
   const [state, setState] = useState<QueryState>({ kind: 'loading' });
   const [action, setAction] = useState<CompletionActionState>({ kind: 'idle' });
@@ -108,7 +110,9 @@ export function HistoricalCompletionPanel({
           ? error.message
           : '帳務完成套用失敗，請重新預覽後再試一次。',
       });
+      return;
     }
+    onCompleted?.();
   };
   return (
     <section
@@ -118,10 +122,10 @@ export function HistoricalCompletionPanel({
     >
       <p role="status">
         {projection.step_11_completed
-          ? 'Step 11 所需的訂單、排班、客戶帳務與服務人員款項皆已確認完成。'
+          ? '訂單、服務資料、客戶帳務與月嫂款項皆已確認完成。'
           : projection.state === 'unavailable'
-            ? '至少一項必要資料目前無法安全取得；Step 11 保持未完成。'
-            : `尚有 ${projection.active_alerts.length} 項必要資料待處理；Step 11 保持未完成。`}
+            ? '至少一項必要資料目前無法取得，暫時無法確認帳務完成。'
+            : `尚有 ${projection.active_alerts.length} 項必要資料待處理，暫時無法確認帳務完成。`}
       </p>
       {projection.active_alerts.length > 0 && (
         <ul aria-label="待處理項目">

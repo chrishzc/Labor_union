@@ -18,9 +18,11 @@
 ## Dependencies
 - inbound: `orders/orders/module:historical-adoption` — 只讀已提交 adoption receipt 與 current Orders lifecycle。
 - outbound: `orders/orders/module:operational-stage-projection` — overlay 既有 typed timeline，不改寫 base owner facts。
+- outbound: `orders/orders/module:historical-completion` — 歷史服務完成／帳務完成案件的結算子階段沿用 fresh completion oracle，逐 owner 顯示完成、未完成或不可用；Orders 版本變動時拒絕混用快照，不由 lifecycle 標籤推定付款。
 
 ## Contracts
 - `document/架構重整/01_規格基線/01_Orders_Domain.md` §3.8 — Historical Operational Baseline semantics。
+- `document/架構重整/01_規格基線/27_歷史訂單生命週期與服務天數帳務正式規格.md` — 歷史服務天數及雙邊結清權威。
 
 ## Verification
 - test_root: `tests/domains/orders/subsystems/orders/modules/historical-stage-baseline/`

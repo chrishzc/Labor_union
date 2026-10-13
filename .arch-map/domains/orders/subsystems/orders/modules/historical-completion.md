@@ -32,7 +32,7 @@
 - Staff Payables completion evidence accepts either canonical bank payout/allocation lineage or exact current historical payout projection/event/link lineage；Apply locks both lineage families before fresh re-read，且歷史流程只接受 `payable_to_staff` obligations。
 - outbound: Orders canonical lifecycle writer — 追加 lifecycle event/outbox 並以 lifecycle version CAS 更新 Orders projection。
 - outbound: historical service accounting — 服務迄日已過的狀態推進與既有預設帳務建立共用同一 outer UoW；無 Scheduling root 也必須能執行。
-- inbound: Orders tracker — 顯示terminal projection與owner-specific referral，不提供generic resolve。
+- inbound: `ui_react/src/components/OrderWorkbenchV2Drawer.tsx` — 歷史服務完成案件顯示完成狀態與 owner referral，透過 HistoricalCompletionPanel 預覽並確認帳務完成；成功後重新讀取案件狀態。
 
 ## Contracts
 - `document/架構重整/02_決策與退役執行記錄/PROV-20260828-historical-baseline-projector-work-packages.md` — HOB-E composition與UI boundary。

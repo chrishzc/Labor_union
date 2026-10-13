@@ -6,6 +6,16 @@ Description: 建立每次請求專用的 Orders 七階段唯讀 query applicatio
 from __future__ import annotations
 
 from dataclasses import dataclass
+from infrastructure.mysql.historical_client_finance_completion_read_adapter import (
+    MySqlClientFinanceCompletionReadAdapter,
+)
+from infrastructure.mysql.historical_orders_scheduling_completion_read_adapter import (
+    MySqlHistoricalOrdersSchedulingCompletionReadAdapter,
+)
+from infrastructure.mysql.historical_staff_payables_completion_read_adapter import (
+    MySqlStaffPayablesCompletionReadAdapter,
+)
+from subsystems.orders.historical_completion_query import HistoricalCompletionQueryWorkflow
 
 from infrastructure.mysql.historical_orders_stage_projection_repository import (
     MySqlHistoricalAwareOrdersStageProjectionRepository,
@@ -41,6 +51,11 @@ def get_orders_stage_projection_application():
             HistoricalStageBaselineOverlayService(
                 base,
                 MySqlHistoricalStageBaselineRepository(connection),
+                HistoricalCompletionQueryWorkflow(
+                    MySqlHistoricalOrdersSchedulingCompletionReadAdapter(connection),
+                    MySqlClientFinanceCompletionReadAdapter(connection),
+                    MySqlStaffPayablesCompletionReadAdapter(connection),
+                ),
             )
         )
     finally:

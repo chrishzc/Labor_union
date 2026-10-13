@@ -2,7 +2,8 @@
 
 The module keeps two explicit destructive surfaces: disposable ``lu_test_*``
 targets require a target-matching backup, while the operator-only ``union_db``
-route requires an exact ``RESET`` discard confirmation.  Both routes require
+route requires an exact ``RESET`` business-data discard confirmation and preserves
+the existing root account and MFA facts. Both routes require
 a prior dry-run plan and a terminal receipt.  Dry-run, verify, and replay paths
 do not open a database connection.
 """
@@ -16,6 +17,7 @@ import os
 import re
 from pathlib import Path
 from typing import Any, Callable
+from uuid import uuid4
 
 import pymysql
 
@@ -23,6 +25,10 @@ from infrastructure.mysql.mysql_adapter import DB_CONFIG
 from scripts.init_db import load_schema_paths
 from scripts.schema_assembly import SchemaAssembly, load_schema_assembly
 from scripts.sql_statements import split_sql
+from scripts.reset_root_authentication import (
+    RootPreservationError, capture_root_authentication,
+    restore_root_authentication, save_root_authentication,
+)
 from scripts.verify_validation_schema_manifest import (
     DEFAULT_MANIFEST_PATH,
     expected_database_objects,
@@ -156,6 +162,10 @@ def _plan_payload(
         ],
         "business_fixture_rows_loaded": 0,
         "system_seed_policy": "canonical_schema_declared_only",
+        "root_authentication_policy": (
+            "preserve_existing_root_and_mfa_v1" if target_database == _OPERATOR_TARGET
+            else "disposable_target_discard"
+        ),
     }
     payload["plan_fingerprint"] = hashlib.sha256(
         json.dumps(
@@ -412,20 +422,31 @@ def reset(
     _read_prior_plan(plan_receipt, plan)
     backup = (
         {
-            "policy": "explicit_discard_confirmed",
+            "policy": "business_discard_root_auth_preserved",
             "target_database": target,
         }
         if operator_reset
         else _validate_backup(backup_receipt, target)
     )
     identity = _check_connected_identity(config, target, connection_factory)
-    report = rebuild_schema(
-        assembly,
-        manifest,
-        target,
-        config=config,
-        connection_factory=connection_factory,
-    )
+    root_snapshot = None
+    root_backup = None
+    root_report = None
+    try:
+        if operator_reset:
+            root_snapshot = capture_root_authentication(config, connection_factory=connection_factory)
+            backup_path = Path(receipt_path).expanduser().resolve().with_name(
+                f"root-auth-{uuid4().hex}.encrypted.json"
+            )
+            root_backup = save_root_authentication(root_snapshot, config, backup_path)
+        report = rebuild_schema(
+            assembly, manifest, target, config=config, connection_factory=connection_factory,
+        )
+        if root_snapshot is not None:
+            root_report = restore_root_authentication(root_snapshot, config, connection_factory=connection_factory)
+    except (RootPreservationError, FakeDatabaseResetError) as error:
+        retained = f"; encrypted root backup retained: {root_backup['path']}" if root_backup and root_backup.get("path") else ""
+        raise FakeDatabaseResetError(str(error) + retained) from None
     receipt = {
         **plan,
         "status": "completed",
@@ -435,6 +456,8 @@ def reset(
         "schema_report": report,
         "verify": "pass",
         "replay_key": plan["plan_fingerprint"],
+        "root_authentication_backup": root_backup,
+        "root_authentication": root_report,
     }
     resolved = Path(receipt_path).expanduser().resolve()
     _write_json(resolved, receipt)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
@@ -14,11 +14,9 @@ class FakeCursor:
         *,
         existing_user: bool = False,
         fail_query: bool = False,
-        fail_factor_insert: bool = False,
     ) -> None:
         self.existing_user = existing_user
         self.fail_query = fail_query
-        self.fail_factor_insert = fail_factor_insert
         self.execute_calls: list[str] = []
 
     def __enter__(self) -> "FakeCursor":
@@ -31,8 +29,6 @@ class FakeCursor:
         self.execute_calls.append(sql)
         if len(self.execute_calls) == 1 and self.fail_query:
             raise RuntimeError("query failed")
-        if "INSERT INTO admin_totp_factors" in sql and self.fail_factor_insert:
-            raise RuntimeError("factor insert failed")
 
     def fetchone(self):
         return {"id": 1} if self.existing_user else None
@@ -58,14 +54,6 @@ def _enable_root_bootstrap(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("APP_ENV", "development")
     monkeypatch.setenv("DEV_ROOT_USERNAME", "root")
     monkeypatch.setenv("DEV_ROOT_PASSWORD", "test-password")
-
-
-def _install_factor_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(auth_session, "bootstrap_root_admin", lambda **kwargs: 7)
-    cipher = SimpleNamespace(
-        encrypt=lambda value: SimpleNamespace(ciphertext="test-ciphertext", key_version="test-v1")
-    )
-    monkeypatch.setattr(auth_session, "totp_cipher_from_environment", lambda: cipher)
 
 
 @pytest.mark.parametrize(
@@ -101,28 +89,38 @@ def test_existing_root_releases_connection_without_creating_or_committing(
     cursor = FakeCursor(existing_user=True)
     conn = FakeConnection(cursor)
     monkeypatch.setattr(admin_auth, "get_connection", lambda: conn)
+    bootstrap = Mock()
+    monkeypatch.setattr(auth_session, "bootstrap_root_admin", bootstrap)
 
     admin_auth.ensure_development_root_admin()
 
     assert conn.commit_calls == 0
     assert conn.close_calls == 1
     assert len(cursor.execute_calls) == 1
+    bootstrap.assert_not_called()
 
 
-def test_successful_root_bootstrap_commits_factor_and_releases_connection(
+def test_successful_root_bootstrap_creates_account_without_factor_and_releases_connection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _enable_root_bootstrap(monkeypatch)
-    _install_factor_dependencies(monkeypatch)
+    bootstrap = Mock(return_value=7)
+    monkeypatch.setattr(auth_session, "bootstrap_root_admin", bootstrap)
     cursor = FakeCursor()
     conn = FakeConnection(cursor)
     monkeypatch.setattr(admin_auth, "get_connection", lambda: conn)
 
     admin_auth.ensure_development_root_admin()
 
-    assert conn.commit_calls == 1
+    bootstrap.assert_called_once_with(
+        connection_factory=admin_auth.get_connection,
+        username="root",
+        password="test-password",
+        display_name="系統最高管理員",
+    )
+    assert conn.commit_calls == 0
     assert conn.close_calls == 1
-    assert len(cursor.execute_calls) == 2
+    assert cursor.execute_calls == ["SELECT id FROM admin_users WHERE username=%s"]
 
 
 def test_query_failure_still_releases_connection(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -154,14 +152,19 @@ def test_bootstrap_failure_still_releases_connection(monkeypatch: pytest.MonkeyP
     assert conn.close_calls == 1
 
 
-def test_factor_insert_failure_still_releases_connection(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_root_bootstrap_does_not_require_totp_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
     _enable_root_bootstrap(monkeypatch)
-    _install_factor_dependencies(monkeypatch)
-    cursor = FakeCursor(fail_factor_insert=True)
+    bootstrap = Mock(return_value=7)
+    monkeypatch.setattr(auth_session, "bootstrap_root_admin", bootstrap)
+    cipher = Mock(side_effect=RuntimeError("TOTP configuration unavailable"))
+    monkeypatch.setattr(auth_session, "totp_cipher_from_environment", cipher)
+    cursor = FakeCursor()
     conn = FakeConnection(cursor)
     monkeypatch.setattr(admin_auth, "get_connection", lambda: conn)
 
     admin_auth.ensure_development_root_admin()
 
+    bootstrap.assert_called_once()
+    cipher.assert_not_called()
     assert conn.commit_calls == 0
     assert conn.close_calls == 1

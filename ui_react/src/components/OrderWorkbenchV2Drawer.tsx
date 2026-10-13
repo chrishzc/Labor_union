@@ -6,6 +6,7 @@ import './OrderWorkbenchV2Drawer.css';
 import '../pages/OrdersPage.css';
 import { historicalAdoptionEvidenceClient } from '../api/orders/historical_adoption_evidence_client';
 import type { HistoricalOrderAdoptionEvidence } from '../api/orders/historical_adoption_evidence_schemas';
+import { HistoricalCompletionPanel } from './HistoricalCompletionPanel';
 import {
   historicalServiceAccountingClient,
   type HistoricalServiceAccountingQuery,
@@ -458,6 +459,9 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
         )}
         {terminalStatus && timeline.status === 'ready' && <section className="order-v2-drawer-section" aria-label="結算狀態">
           <h3>結算狀態</h3>
+          {currentBranch === 'historical' && timeline.data.lifecycle_status === '歷史訂單－服務完成' && (
+            <HistoricalCompletionPanel key={caseNo} caseNo={caseNo} onCompleted={refreshFacts} />
+          )}
           <div className="order-case-action-row"><a href={`#finance?tab=client-receipts&case_no=${encodeURIComponent(caseNo)}`}>查看本案客戶收款 →</a><a href="#finance?tab=staff-payables">前往月嫂付款 →</a></div>
           {timeline.data.core_stages.filter((stage) => stage.code === 'client_settlement' || stage.code === 'staff_payout').map((stage) => <p key={stage.code}>{stage.label}：{coreStageSubstatusLabel(stage.substatus_code)}</p>)}
         </section>}

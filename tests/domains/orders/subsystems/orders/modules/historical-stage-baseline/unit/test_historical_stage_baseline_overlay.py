@@ -4,6 +4,14 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import date
+from unittest.mock import Mock
+import pytest
+
+from subsystems.orders.historical_completion_oracle import (
+    CompletionOwner, HistoricalOrdersCompletionReadback, HistoricalSettlementReadback,
+    HistoricalSettlementSourceVersion, SettlementSourceKind,
+)
+from subsystems.orders.historical_completion_query import HistoricalCompletionQueryWorkflow
 
 from domains.orders.lifecycle import OrderLifecycleScope, OrderLifecycleStatus
 from subsystems.orders.historical_stage_baseline_overlay import (
@@ -31,6 +39,63 @@ _STAGE_CODES = (
     "active_service",
     "settlement_payout",
 )
+
+
+@pytest.mark.parametrize("status", [OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED, OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED])
+@pytest.mark.parametrize("condition,expected", [
+    ("settled", ("completed", "completed", "completed")),
+    ("client_open", ("completed", "blocked", "completed")),
+    ("staff_open", ("completed", "completed", "blocked")),
+    ("staff_unavailable", ("completed", "completed", "unavailable")),
+    ("service_missing", ("blocked", "completed", "completed")),
+    ("stale_order", ("unavailable", "unavailable", "unavailable")),
+])
+def test_historical_settlement_uses_fresh_owner_evidence(status, condition, expected):
+    orders = HistoricalOrdersCompletionReadback(
+        "CASE-1", 4 if condition == "stale_order" else 3, status,
+        None if condition == "service_missing" else "lifecycle:3",
+        date(2026, 9, 1), None, (), 10, False,
+        historical_service_day_count_identity="days:1",
+        historical_assignment_day_counts=(("assignment:1", 1, 10),),
+    )
+    client = HistoricalSettlementReadback(
+        "CASE-1", CompletionOwner.CLIENT_FINANCE, 2, "client-payment:1", 1,
+        int(condition == "client_open"), "client-link:1",
+    )
+    staff = HistoricalSettlementReadback(
+        "CASE-1", CompletionOwner.STAFF_PAYABLES, None, "staff-payment:1", 1,
+        int(condition == "staff_open"), "staff-link:1",
+        tuple(sorted(HistoricalSettlementSourceVersion(kind, f"{kind.value}:1", 1) for kind in (
+            SettlementSourceKind.PAYROLL_CASE_ACCOUNT, SettlementSourceKind.STAFF_OBLIGATION,
+            SettlementSourceKind.STAFF_OBLIGATION_EVENT, SettlementSourceKind.STAFF_PAYABLE_ACCOUNT,
+            SettlementSourceKind.HISTORICAL_STAFF_PAYOUT_PROJECTION,
+            SettlementSourceKind.HISTORICAL_STAFF_PAYOUT_EVENT, SettlementSourceKind.HISTORICAL_STAFF_PAYOUT_LINK,
+        ))),
+    )
+    ports = [Mock(), Mock(), Mock()]
+    for port, readback in zip(ports, (orders, client, None if condition == "staff_unavailable" else staff)):
+        port.load_completion_readback.return_value = readback
+    original = _timeline(lifecycle_status=status, current_step_ordinal=11, current_stage_code="settlement_payout")
+    service = HistoricalStageBaselineOverlayService(
+        _Base(original), _Facts(HistoricalStageBaselineFacts("CASE-1", 1, status, date(2026, 9, 1))),
+        HistoricalCompletionQueryWorkflow(*ports),
+    )
+    page = service.query(StageProjectionQuery(10))
+    settlement = page.items[0].stages[-1]
+    assert tuple(part.status for part in settlement.settlement) == expected
+    assert page.items[0].sop_steps[-1].status == settlement.status
+    assert page.items[0].projection_digest != original.projection_digest
+    for port in ports:
+        port.load_completion_readback.assert_called_once_with("CASE-1", for_update=False)
+
+def test_normal_lifecycle_does_not_consume_historical_settlement():
+    completion = Mock()
+    original = _timeline(lifecycle_status=OrderLifecycleStatus.COMPLETED)
+    repository = Mock()
+    repository.fetch_for_cases.return_value = ()
+    page = HistoricalStageBaselineOverlayService(_Base(original), repository, completion).query(StageProjectionQuery(10))
+    assert page.items == (original,)
+    completion.query.assert_not_called()
 
 
 class _Base:

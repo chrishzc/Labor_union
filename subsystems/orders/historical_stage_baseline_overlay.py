@@ -17,6 +17,13 @@ import json
 from typing import Mapping, Protocol
 
 from domains.orders.lifecycle import OrderLifecycleStatus
+from shared_kernel.identities import CorrelationId
+from subsystems.orders.historical_completion_oracle import CompletionOwner
+from subsystems.orders.historical_completion_query import (
+    HistoricalCompletionQueryError,
+    HistoricalCompletionQueryRequest,
+    HistoricalCompletionQueryWorkflow,
+)
 from subsystems.orders.stage_projection_query import (
     OrderOperationalTimeline,
     OrderOperationalTimelinePage,
@@ -25,6 +32,7 @@ from subsystems.orders.stage_projection_query import (
     SourceLineage,
     StageProjection,
     StageProjectionQuery,
+    SettlementProjection,
 )
 
 
@@ -56,9 +64,11 @@ class HistoricalStageBaselineOverlayService:
         self,
         base: OperationalTimelineQueryPort,
         repository: HistoricalStageBaselineRepository,
+        completion: HistoricalCompletionQueryWorkflow | None = None,
     ) -> None:
         self._base = base
         self._repository = repository
+        self._completion = completion
 
     def query(self, request: StageProjectionQuery) -> OrderOperationalTimelinePage:
         page = self._base.query(request)
@@ -68,7 +78,10 @@ class HistoricalStageBaselineOverlayService:
                 tuple(item.case_no for item in page.items)
             )
         }
-        items = tuple(_overlay(item, facts.get(item.case_no)) for item in page.items)
+        items = tuple(
+            self._settlement(_overlay(item, facts.get(item.case_no)))
+            for item in page.items
+        )
         counts = {code: 0 for code in page.stage_counts}
         for item in items:
             if item.current_stage_code is not None:
@@ -90,6 +103,83 @@ class HistoricalStageBaselineOverlayService:
             }
         )
         return OrderOperationalTimelinePage(items, counts, page.next_cursor, etag)
+
+    def _settlement(self, timeline: OrderOperationalTimeline) -> OrderOperationalTimeline:
+        if self._completion is None or timeline.lifecycle_status not in {
+            OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED,
+            OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED,
+        }:
+            return timeline
+        try:
+            result = self._completion.query(
+                HistoricalCompletionQueryRequest(timeline.case_no),
+                CorrelationId(f"historical-stage:{timeline.case_no}"),
+            )
+        except HistoricalCompletionQueryError:
+            result = None
+        # A changed Orders snapshot cannot be combined with the earlier timeline.
+        if result is not None and result.orders_readback.readback_available and (
+            result.orders_readback.lifecycle_version != timeline.base_revision
+            or result.orders_readback.canonical_status != timeline.lifecycle_status
+        ):
+            result = None
+        parts = []
+        for code, owner, owners in (
+            ("service_completion", "Orders", (CompletionOwner.ORDERS, CompletionOwner.SCHEDULING)),
+            ("client_settlement", "Client Finance", (CompletionOwner.CLIENT_FINANCE,)),
+            ("staff_payout", "Staff Payables", (CompletionOwner.STAFF_PAYABLES,)),
+        ):
+            missing = tuple(item for item in result.missing_roots if item.owner in owners) if result else ()
+            unavailable = result is None or any(item.code.endswith("readback_unavailable") for item in missing)
+            status = "unavailable" if unavailable else "blocked" if missing else "completed"
+            identity = None
+            version = None
+            if result is not None:
+                if code == "service_completion":
+                    identity = result.orders_readback.completion_lineage_identity
+                    version = result.orders_readback.lifecycle_version
+                else:
+                    readback = next(item for item in result.settlement_readbacks if item.owner in owners)
+                    identity = readback.settlement_lineage_identity
+                    version = readback.aggregate_version
+            parts.append(SettlementProjection(
+                code, status, SourceLineage(owner, identity, version), None,
+                "historical_completion_readback_unavailable" if unavailable else None,
+            ))
+        statuses = {part.status for part in parts}
+        if statuses == {"completed"}:
+            status = "completed"
+        elif "blocked" in statuses:
+            status = "blocked"
+        elif "completed" in statuses:
+            status = "in_progress"
+        else:
+            status = "unavailable"
+        blockers = tuple(
+            ProjectionNotice(f"{part.code}_not_complete", f"{part.source.owner} 尚有資料待完成。")
+            for part in parts if part.status == "blocked"
+        )
+        stages = tuple(
+            replace(
+                stage, status=status, settlement=tuple(parts), blockers=blockers, warnings=(),
+                occurred_at=None, availability_reason=None,
+                source=SourceLineage(
+                    "Historical completion owners",
+                    result.fingerprint.value if result else None, timeline.base_revision,
+                ),
+            ) if stage.code == "settlement_payout" else stage
+            for stage in timeline.stages
+        )
+        steps = tuple(
+            replace(
+                step, status=status, blockers=blockers, warnings=(),
+                occurred_at=None, availability_reason=None,
+            ) if step.ordinal == 11 else step for step in timeline.sop_steps
+        )
+        return _with_projection_digest(
+            timeline, current_stage_code=timeline.current_stage_code,
+            current_step_ordinal=timeline.current_step_ordinal, stages=stages, steps=steps,
+        )
 
 
 def historical_baseline_step(facts: HistoricalStageBaselineFacts) -> int | None:

@@ -9,10 +9,14 @@
 必須先產生 canonical plan 並確認 `RESET`；自動驗收只使用明確 `lu_test_*`
 target。此 Module 不屬於 preserved-data additive upgrade，也不載入 business
 fixture。
+Operator reset preserves the existing root account, MFA factor, recovery-code consumption
+and required root LINE identity parent through an encrypted durable backup and exact
+readback. Sessions and non-root accounts are not preserved; no MFA seed is generated.
 
 ## Implementation
 - primary:
   - `scripts/reset_fake_database.py`
+  - `scripts/reset_root_authentication.py` — root-only capture, encrypted backup and exact restoration.
   - `scripts/bootstrap_disposable_mysql_schema.py` — library-only；沒有獨立命令入口。
   - `scripts/verify_verification_scenarios.py`
 - entrypoints:

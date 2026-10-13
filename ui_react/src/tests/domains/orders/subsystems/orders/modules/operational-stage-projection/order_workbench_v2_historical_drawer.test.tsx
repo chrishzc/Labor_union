@@ -24,6 +24,11 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../../../../../../../api/orders/order_core_stage_projection_client', () => ({
   orderCoreStageProjectionClient: { getCoreStageTimelines: mocks.core },
 }));
+vi.mock('../../../../../../../components/HistoricalCompletionPanel', () => ({
+  HistoricalCompletionPanel: ({ onCompleted }: { onCompleted?: () => void }) => (
+    <button onClick={onCompleted}>模擬帳務完成正式回讀成功</button>
+  ),
+}));
 vi.mock('../../../../../../../api/orders/order_query_client', () => ({
   ordersQueryClient: {
     getOrderDetail: mocks.detail,
@@ -151,6 +156,22 @@ function orderDetail(orderStatus = '歷史訂單－未服務') {
 }
 
 describe('historical Drawer immutable evidence boundary', () => {
+  it('refreshes the case after historical accounting completion and removes the action', async () => {
+    let status = '歷史訂單－服務完成';
+    mocks.core.mockImplementation(async () => ({ items: [timeline(status)] }));
+    mocks.detail.mockImplementation(async () => orderDetail(status));
+    const onObserved = vi.fn();
+    render(<OrderWorkbenchV2Drawer caseNo="CASE-FUTURE" branchType="historical" onClose={vi.fn()} onObserved={onObserved} />);
+    const confirm = await screen.findByRole('button', { name: '模擬帳務完成正式回讀成功' });
+    const readsBefore = mocks.core.mock.calls.length;
+    status = '歷史訂單－帳務完成';
+    fireEvent.click(confirm);
+    await waitFor(() => expect(screen.queryByRole('button', { name: '模擬帳務完成正式回讀成功' })).not.toBeInTheDocument());
+    expect(mocks.core.mock.calls.length).toBeGreaterThan(readsBefore);
+    expect(onObserved).toHaveBeenCalledTimes(1);
+    expect(screen.getAllByText(/歷史訂單－帳務完成/).length).toBeGreaterThan(0);
+  });
+
   beforeEach(() => {
     Object.values(mocks).forEach((mock) => mock.mockReset());
     mocks.core.mockResolvedValue({

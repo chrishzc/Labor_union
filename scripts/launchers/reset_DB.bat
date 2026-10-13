@@ -31,7 +31,10 @@ if errorlevel 1 (
 )
 echo.
 echo Stop API, UI, monitor, and workers before continuing.
-echo This deletes all current union_db data and creates an empty current-schema database.
+echo This resets business data and preserves the existing root account and MFA binding.
+echo Root password, encrypted MFA seed and recovery-code state are retained; no fixed key is generated.
+echo An encrypted root backup is saved before DROP. Keep the existing TOTP encryption keyring.
+echo Login sessions and non-root accounts are cleared. An unbound root still requires initial enrollment.
 echo Canonical system seeds declared by schema artifacts may still be installed; no business fixture is loaded.
 set /p "RESET_CONFIRM=Type RESET to continue: "
 if /I not "!RESET_CONFIRM!"=="RESET" (
@@ -40,6 +43,6 @@ if /I not "!RESET_CONFIRM!"=="RESET" (
 )
 "%PYTHON%" -m scripts.reset_fake_database --operator-reset --target-database union_db --apply --confirm-apply RESET --plan-receipt "%RESET_PLAN%" --receipt-path "%RESET_RECEIPT%"
 set "RESET_EXIT=!ERRORLEVEL!"
-if not "!RESET_EXIT!"=="0" (echo [ERROR] Database reset failed with exit code !RESET_EXIT!.) else (echo Canonical empty database reset completed. Restart local services.)
+if not "!RESET_EXIT!"=="0" (echo [ERROR] Database reset failed with exit code !RESET_EXIT!. Review the retained root backup path.) else (echo Database reset completed with existing root authentication preserved. Restart local services.)
 pause
 exit /b !RESET_EXIT!

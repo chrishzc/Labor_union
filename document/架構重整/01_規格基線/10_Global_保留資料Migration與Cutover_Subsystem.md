@@ -51,6 +51,13 @@ Console output、README、測試名稱、候選 DB 名稱或人工記憶不是 S
    入口，只接受 localhost／development 的 `union_db`、exact `RESET` 確認與 current hash-locked schema
    assembly。它不載入業務 fixture；canonical schema artifacts 明列的 system seed 仍可建立。靜態 catalog／
    digest 預檢必須在 DROP 前完成，重建後必須驗證 validation manifest 宣告的 database objects。
+   依 2026-10-12 人工指示，operator reset 必須保留既有 root 帳號完整值、root designation、
+   encrypted MFA factor／key version／防重放 step、recovery-code consumed facts 與 enrollment challenges；
+   root 有 LINE 外鍵時只保留其必要 identity parent。不保留 session、password login challenges 與非 root 帳號。
+   DROP 前以既有 TOTP encryption keyring 加密 root-only durable backup 並確認可讀，缺 key／factor 無法解密／
+   root 資料不完整時 fail closed。重建後依 FK 順序還原並比對完整值才可回 committed receipt。
+   不生成固定或新的 MFA seed、不把 pending 改成 active；原本未綁定仍須完成首次綁定。
+   DDL 失敗保留 encrypted backup 並回報路徑，不宣稱 rollback；保留現有 keyring 才能復原該備份。
 
 ## 4. Subsystems
 
