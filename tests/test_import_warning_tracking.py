@@ -5,6 +5,8 @@ Description: 驗證匯入警示追蹤、業務顯示文字與 owning screen 導�
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from domains.anomalies.import_warning_tracking import (
@@ -150,10 +152,10 @@ def test_task_query_adds_navigation_descriptor_without_writing_source_data() -> 
     assert result[0].occurrence_identity == task.occurrence_identity
 
 
-def test_hcm_referral_requires_fresh_active_warning_and_never_locks() -> None:
+def test_hcm_counterpart_referral_requires_fresh_active_warning_and_never_locks() -> None:
     task = ImportWarningTask(
-        "warning-referral", "hcm", "HCM-FIELD-002", "服務時間", "hcm-***-0001",
-        ("hcm_field_invalid:服務時間",), ImportWarningTrackingStatus.OPEN, 3, None,
+        "warning-referral", "hcm", "HCM-BECLASS-001", "$pairing", "hcm-***-0001",
+        ("beclass_counterpart_missing",), ImportWarningTrackingStatus.OPEN, 3, None,
         source_receipt_identity="review-referral",
     )
 
@@ -172,11 +174,17 @@ def test_hcm_referral_requires_fresh_active_warning_and_never_locks() -> None:
     referral = application.query_referral("warning-referral", expected_version=3)
 
     assert repository.lock_requests == [False]
-    assert referral.target_command == "preview_hcm_resubmission"
+    assert referral.action_kind == "wait_for_counterpart"
+    assert referral.target_command is None
     assert referral.subject == "hcm-***-0001"
     assert referral.review_identity == "review-referral"
     with pytest.raises(ValueError, match="import_warning_version_conflict"):
         application.query_referral("warning-referral", expected_version=2)
+
+    for code in ("HCM-CASE-002", "HCM-FIELD-001", "HCM-FIELD-002", "HCM-LINK-001", "HCM-LINK-002"):
+        task = replace(task, logical_code=code)
+        with pytest.raises(ValueError, match="import_warning_referral_unavailable"):
+            application.query_referral("warning-referral", expected_version=3)
 
 
 def test_hcm_bootstrap_warning_uses_plain_system_guidance() -> None:

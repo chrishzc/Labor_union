@@ -1,10 +1,9 @@
-"""MySQL adapter for canonical HCM review resubmission."""
+"""MySQL adapter for HCM review queries, audited skips and historical correction evidence."""
 
 from __future__ import annotations
 
 import hashlib
 import json
-from datetime import date
 
 from domains.case_import.hcm_resubmission import HcmResubmissionFacts, hcm_field_targets
 from domains.case_import.hcm_import_review import (
@@ -15,10 +14,8 @@ from subsystems.case_import.hcm_resubmission_workflow import HcmResubmissionRece
 
 
 class MySqlHcmResubmissionRepository:
-    def __init__(self, connection, client_port=None, orders_port=None) -> None:
+    def __init__(self, connection) -> None:
         self._connection = connection
-        self._client_port = client_port
-        self._orders_port = orders_port
 
     def _load_review_row(self, review_identity: str, *, for_update: bool = False):
         suffix = " FOR UPDATE" if for_update else ""
@@ -137,8 +134,7 @@ class MySqlHcmResubmissionRepository:
         while len(items) <= limit:
             with self._connection.cursor() as cursor:
                 cursor.execute(
-                    "SELECT r.id,r.review_identity,b.case_no,r.issue_codes,EXISTS(SELECT 1 FROM order_service_data_locks l "
-                    "WHERE l.case_no=b.case_no) AS service_data_locked FROM case_import_hcm_review_rows r "
+                    "SELECT r.id,r.review_identity,b.case_no,r.issue_codes FROM case_import_hcm_review_rows r "
                     "JOIN case_import_hcm_review_case_bindings b ON b.review_row_id=r.id "
                     "WHERE (%s IS NULL OR r.id<%s) AND NOT EXISTS (SELECT 1 "
                     "FROM case_import_hcm_review_rows newer JOIN case_import_hcm_review_case_bindings nb "
@@ -155,16 +151,12 @@ class MySqlHcmResubmissionRepository:
                 if not fields:
                     continue
                 can_correct = False
-                unavailable_reason = None
+                unavailable_reason = "hcm_workbook_correction_retired"
                 if len(fields) == 1:
                     try:
                         state = self.query_review(str(row["review_identity"]))
                         if state["resolved"]:
                             continue
-                        targets = hcm_field_targets(fields[0])
-                        locked = bool(row.get("service_data_locked")) and any(target.startswith("orders.") for target in targets)
-                        can_correct = not locked and fields[0] != "不符合原因"
-                        unavailable_reason = "service_data_locked" if locked else None
                     except ValueError as error:
                         if str(error) not in {"hcm_resubmission_review_scope_ambiguous", "hcm_resubmission_field_not_owned", "hcm_resubmission_not_available"}:
                             raise
@@ -191,22 +183,6 @@ class MySqlHcmResubmissionRepository:
                 break
         return {"items": items[:limit], "next_cursor": items[limit-1]["source_id"] if len(items) > limit else None}
 
-    def load_holiday_dates(self) -> set[date]:
-        with self._connection.cursor() as cursor:
-            cursor.execute("SELECT holiday_date FROM holidays")
-            rows = cursor.fetchall()
-        return {value for row in rows if isinstance((value := row["holiday_date"]), date)}
-
-    def readback(self, case_no: str):
-        with self._connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT c.id AS client_id,c.case_no,c.client_hcm_correction_version,"
-                "o.lifecycle_version AS order_version,o.end_date,o.actual_end_date "
-                "FROM clients c JOIN orders o ON o.case_no=c.case_no WHERE c.case_no=%s", (case_no,))
-            row = cursor.fetchone()
-        if row is None:
-            raise ValueError("hcm_resubmission_readback_missing")
-        return dict(row)
 
     def find_receipt(self, idempotency_key: str, *, for_update: bool = False):
         with self._connection.cursor() as cursor:
@@ -221,43 +197,6 @@ class MySqlHcmResubmissionRepository:
             str(payload["event_identity"]), str(payload["review_identity"]), str(payload["case_no"]),
             tuple(str(item) for item in payload["target_fields"]), int(payload["resulting_review_version"]), False)
 
-    def apply_field_correction(self, candidate, source, *, actor: str, reason: str,
-                               correlation_id: str, client_command=None) -> str:
-        facts = self.load_facts(candidate.review_identity, for_update=True)
-        if facts.case_no != candidate.case_no:
-            raise ValueError("hcm_resubmission_binding_integrity_failed")
-        if client_command is not None:
-            if self._client_port is None:
-                raise ValueError("client_hcm_correction_owner_unavailable")
-            self._client_port.apply_in_current_uow(client_command)
-        order_values = {key: value for key, value in candidate.target_values.items() if key.startswith("orders.")}
-        if order_values:
-            if self._orders_port is None:
-                raise ValueError("orders_hcm_correction_owner_unavailable")
-            self._orders_port.apply_in_current_uow(
-                candidate.case_no, order_values, source_event_identity=source.source_event_identity,
-                actor=actor, reason=reason, correlation_id=correlation_id,
-                idempotency_key=source.source_event_identity)
-        resulting_review_version = facts.review_version + 1
-        after = self.load_facts(candidate.review_identity, for_update=True,
-                                resulting_review_version=resulting_review_version)
-        event_identity = _identity(
-            "hcm-correction-event",
-            f"{candidate.review_identity}:{source.source_event_identity}:{source.source_fingerprint}")
-        with self._connection.cursor() as cursor:
-            cursor.execute(
-                "INSERT INTO case_import_hcm_correction_events "
-                "(event_identity,case_no,client_id,review_binding_id,canonical_review_identity,"
-                "expected_review_version,resulting_review_version,prior_occurrence_id,source_event_identity,"
-                "source_fingerprint,candidate_fingerprint,adopted_field_paths,root_before_fingerprint,"
-                "root_after_fingerprint,actor,reason,correlation_id) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                (event_identity, facts.case_no, facts.client_id, facts.review_binding_id,
-                 facts.review_identity, facts.review_version, resulting_review_version,
-                 None, source.source_event_identity, source.source_fingerprint,
-                 fingerprint_payload(candidate.target_values).value, _json([candidate.source_field]),
-                 facts.root_fingerprint, after.root_fingerprint, actor, reason, correlation_id))
-        return event_identity
 
     def save_receipt(self, idempotency_key: str, command_fingerprint: str,
                      preview_fingerprint: str, receipt: HcmResubmissionReceipt) -> None:

@@ -251,14 +251,6 @@ def _hcm_referral_action(task: ImportWarningTask) -> tuple[str, str | None] | No
     """Fail closed unless the HCM logical type has an approved owner outcome."""
     if task.owning_lane != "hcm":
         return None
-    if task.logical_code in {
-        "HCM-CASE-002",
-        "HCM-FIELD-001",
-        "HCM-FIELD-002",
-        "HCM-LINK-001",
-        "HCM-LINK-002",
-    }:
-        return ("owner_preview_apply", "preview_hcm_resubmission")
     if task.logical_code in {"HCM-BECLASS-001", "HCM-SYSTEM-001"}:
         return ("wait_for_counterpart", None)
     return None

@@ -157,8 +157,8 @@ export const ImportWarningReferralViewSchema = z
     subject: z.string().min(1),
     display_message: z.string().min(1).max(200),
     navigation_action: z.literal('hcm_import_center'),
-    action_kind: z.enum(['owner_preview_apply', 'wait_for_counterpart']),
-    target_command: z.literal('preview_hcm_resubmission').nullable(),
+    action_kind: z.literal('wait_for_counterpart'),
+    target_command: z.null(),
     review_identity: z.string().min(1).max(191),
   })
   .strict();

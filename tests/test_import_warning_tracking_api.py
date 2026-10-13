@@ -80,13 +80,13 @@ class _Application:
             occurrence_identity="warning-1",
             expected_version=1,
             owning_lane="hcm",
-            logical_code="HCM-FIELD-001",
-            field_path="身分證字號",
+            logical_code="HCM-BECLASS-001",
+            field_path="$pairing",
             subject="masked",
-            display_message="缺少身分證",
+            display_message="等待 BeClass 對應來源",
             navigation_action="hcm_import_center",
-            action_kind="owner_preview_apply",
-            target_command="preview_hcm_resubmission",
+            action_kind="wait_for_counterpart",
+            target_command=None,
             review_identity="review-1",
         )
 
@@ -152,7 +152,7 @@ def test_apply_rejects_corrected_payload_before_application() -> None:
     assert application.applied is False
 
 
-def test_hcm_referral_is_read_only_typed_owner_context_without_corrected_payload() -> None:
+def test_hcm_counterpart_referral_is_read_only_without_a_mutation_command() -> None:
     application = _Application()
 
     response = _client(application).get(
@@ -166,13 +166,13 @@ def test_hcm_referral_is_read_only_typed_owner_context_without_corrected_payload
         "occurrence_identity": "warning-1",
         "expected_version": 1,
         "owning_lane": "hcm",
-        "logical_code": "HCM-FIELD-001",
-        "field_path": "身分證字號",
+        "logical_code": "HCM-BECLASS-001",
+        "field_path": "$pairing",
         "subject": "masked",
-        "display_message": "缺少身分證",
+        "display_message": "等待 BeClass 對應來源",
         "navigation_action": "hcm_import_center",
-        "action_kind": "owner_preview_apply",
-        "target_command": "preview_hcm_resubmission",
+        "action_kind": "wait_for_counterpart",
+        "target_command": None,
         "review_identity": "review-1",
     }
     assert "corrected_fields" not in referral

@@ -109,7 +109,7 @@ def test_multiple_warning_fields_are_visible_without_unusable_correction_button(
     assert page['items'][0]['can_correct'] is False
 
 
-def test_service_lock_blocks_order_correction_but_not_client_field(monkeypatch):
+def test_workbook_correction_is_unavailable_for_both_client_and_order_reviews(monkeypatch):
     rows = [dict(id=2, review_identity='order-review', case_no='SYNTH-2',
                  issue_codes=['hcm_field_invalid:希望服務天數'], service_data_locked=1),
             dict(id=1, review_identity='client-review', case_no='SYNTH-1',
@@ -118,8 +118,10 @@ def test_service_lock_blocks_order_correction_but_not_client_field(monkeypatch):
     monkeypatch.setattr(repository, 'query_review', lambda identity: {'resolved': False})
     page = repository.query_current_reviews(limit=20, before_id=None)
     assert page['items'][0]['can_correct'] is False
-    assert page['items'][0]['unavailable_reason'] == 'service_data_locked'
-    assert page['items'][1]['can_correct'] is True
+    assert page['items'][0]['unavailable_reason'] == 'hcm_workbook_correction_retired'
+    assert page['items'][1]['can_correct'] is False
+    assert page['items'][1]['unavailable_reason'] == 'hcm_workbook_correction_retired'
+    assert [item['fields'] for item in page['items']] == [['希望服務天數'], ['縣市']]
 
 
 def test_registry_save_resolves_without_a_resubmission_event_and_remains_read_only():

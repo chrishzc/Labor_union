@@ -88,16 +88,6 @@ export type HcmWorkbookReceiptEnvelope = z.infer<
   typeof HcmWorkbookReceiptEnvelopeSchema
 >;
 
-export const HcmResubmissionPreviewSchema = z.strictObject({
-  review_identity: z.string().min(1).max(191),
-  case_no: z.string().min(1).max(50),
-  source_field: z.string().min(1).max(191),
-  target_fields: z.array(z.string()).min(1),
-  review_version: z.number().int().nonnegative(),
-  root_fingerprint: HcmSha256Schema,
-  preview_fingerprint: HcmSha256Schema,
-});
-
 export const HcmResubmissionReceiptSchema = z.strictObject({
   event_identity: z.string().min(1).max(191),
   review_identity: z.string().min(1).max(191),
@@ -107,12 +97,8 @@ export const HcmResubmissionReceiptSchema = z.strictObject({
   replayed: z.boolean(),
 });
 
-export const HcmResubmissionPreviewEnvelopeSchema = z.strictObject({
-  success: z.literal(true), message: z.string(), data: HcmResubmissionPreviewSchema, error: z.null(),
-});
 export const HcmResubmissionReceiptEnvelopeSchema = z.strictObject({
   success: z.literal(true), message: z.string(), data: HcmResubmissionReceiptSchema, error: z.null(),
 });
 
-export type HcmResubmissionPreview = z.infer<typeof HcmResubmissionPreviewSchema>;
 export type HcmResubmissionReceipt = z.infer<typeof HcmResubmissionReceiptSchema>;

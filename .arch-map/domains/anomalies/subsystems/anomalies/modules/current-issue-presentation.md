@@ -17,10 +17,11 @@
 - `api/routes/import_warning_tracking.py`
 - `api/schemas/import_warning_tracking.py`
 - `ui_react/src/api/anomalies/anomaly_query_schemas.ts`
+- `ui_react/src/api/anomalies/anomaly_query_client.ts` — 匯入警示 Query 與 wait-only referral，不再提供工作簿修正 command descriptor。
 
 ## Dependencies
 - outbound: `case-import/hcm-current-workbook-import` — HCM 欄位清單使用 canonical current reviews；任一未解決欄位的人工略過經 Case Import Preview／Apply 保存 disposition 並重查，不使用 legacy tracking 作已綁定欄位解除判定。
-- outbound: `clients/client-profile/profile-change` — 每一可補欄位提供案件與欄位深連結；原工作簿修正工作台保留次要入口。
+- outbound: `clients/client-profile/profile-change` — 每一可補欄位提供案件與欄位深連結；原工作簿修正入口已退役，無編輯入口的欄位仍可逐筆略過。
 - outbound: `external-integration/line` — 查詢案件通知 timeline，並執行 typed manual replay 或 snapshot-bound warning skip Preview／Apply。
 
 ## Contracts
@@ -34,6 +35,7 @@
 - test_root: `ui_react/src/tests/import_warning_skip_client.test.ts`
 - test_root: `ui_react/src/tests/current_anomaly_query_client.test.ts`
 - test_root: `ui_react/src/tests/anomaly_query_adapter.test.ts`
+- test_root: `ui_react/src/tests/anomaly_query_client.test.ts` — 既有 typed query consumer 與 closed runtime decoding 契約；沿用本 module 的 custom_current placement。
 - test_root: `ui_react/src/tests/fixtures/anomalies/anomaly_query_contract_fixtures.ts`
 - test_root: `tests/test_import_warning_tracking.py`
 - test_root: `tests/test_import_warning_tracking_api.py`

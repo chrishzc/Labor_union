@@ -69,20 +69,6 @@ class HcmWorkbookResultPageView(BaseModel):
     next_cursor: int | None = Field(default=None, gt=0)
 
 
-class HcmResubmissionPreviewView(BaseModel):
-    """De-identified owner preview; corrected values never cross this API boundary."""
-
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    review_identity: str = Field(min_length=1, max_length=191)
-    case_no: str = Field(min_length=1, max_length=50)
-    source_field: str = Field(min_length=1, max_length=191)
-    target_fields: tuple[str, ...] = Field(min_length=1)
-    review_version: int = Field(ge=0)
-    root_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-
-
 class HcmResubmissionReceiptView(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 

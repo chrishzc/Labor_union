@@ -14,10 +14,11 @@
   - `scripts/imports/import_client_hcm.py`
   - `domains/case_import/client_import_validation.py`
   - `domains/case_import/hcm_import_review.py` — 依最新正式 root values 逐欄判定 current 警示；名冊修正有效後自動解除，來源歷史保持不變。
-  - `domains/case_import/hcm_resubmission.py` — HCM review 欄位與正式 root targets 的限定映射。
-  - `subsystems/case_import/hcm_resubmission_workflow.py`
+  - `domains/case_import/hcm_resubmission.py` — current review 與歷史 correction evidence 所需的正式 root 映射及 readback facts；沒有工作簿修正候選命令。
+  - `subsystems/case_import/hcm_resubmission_workflow.py` — 只保留 Query／skip Preview／Apply；工作簿修正 API、parser、命令與專用 adapters 已退役。
     - `preview_skip`／`apply_skip` — 對 current canonical review 任一未解決欄位逐筆保存人工 disposition；沿用 review version、correction event／receipt／outbox，不寫入 Client／Order。原缺少原因限定入口保留。
-  - `infrastructure/mysql/hcm_resubmission_repository.py`
+  - `infrastructure/mysql/hcm_resubmission_repository.py` — 問題 Query、人工略過、歷史事件／收據；不再提供 Client／Orders mutation。
+  - `subsystems/case_import/hcm_resubmission_outbox_consumer.py` — 保留既有及人工略過 committed events 的 fresh-root 驗證與投遞。
 - entrypoints:
   - `api/routes/hcm_import.py` — 包含 current field review page／single-review readback。
     - `/hcm/reviews/{review_identity}/skip-missing-reject-reason/{preview|apply}` — 限定欄位的人工略過與 typed stale conflict。
@@ -26,6 +27,7 @@
   - `api/schemas/hcm_import.py`
   - `ui_react/src/api/case_import/hcm_workbook_schemas.ts`
   - `ui_react/src/api/case_import/hcm_resubmission_client.ts`
+    - current review `can_correct=false`／`unavailable_reason=hcm_workbook_correction_retired`；讀取問題不影響 Client Profile／Orders 編輯。
     - `loadCurrentHcmReviewsForCases` — 以既有 current review 分頁查詢讀取指定案件的最新欄位問題；支援取消，不寫入或重新判定問題是否解除。
 
 ## Dependencies
@@ -45,4 +47,4 @@
 - implementation、entrypoint 與 replay flow — `source_observed` — current repository。
 
 ## Change triggers
-Reconcile when HCM Current workbook contract、source fingerprint、replay/idempotency、entrypoint、reconciliation boundary 或 test root 改變。
+Reconcile when HCM correction retirement、current review／skip contract、HCM Current workbook contract、source fingerprint、replay/idempotency、entrypoint、reconciliation boundary 或 test root 改變。

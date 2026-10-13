@@ -501,7 +501,7 @@ export function OrderIntakeRepairPanel({
           {sourceReview && (
             <div role="status" style={{ color: '#9a3412' }}>
               <strong>原始進件欄位待修正：{sourceReview.fields.join('、')}</strong>
-              <p style={{ margin: '4px 0 0' }}>請先在「資料匯入」確認欄位問題並重新提交修正來源，再核對尚未補齊的案件資料。</p>
+              <p style={{ margin: '4px 0 0' }}>可至客戶名冊修正可編輯欄位；其他沒有編輯入口的來源欄位，可至異常審核核對並逐筆確認略過。</p>
             </div>
           )}
           {sourceReviewError && <div role="status">原始進件欄位問題讀取失敗，請重新讀取案件。</div>}

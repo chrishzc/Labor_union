@@ -53,7 +53,8 @@ describe('Anomaly Query Adapter Suite', () => {
   it('maps warning referral as neutral typed navigation only', () => {
     const view = adaptImportWarningReferral(VALID_IMPORT_WARNING_REFERRAL_VIEW);
     expect(view.owningLane).toBe('hcm');
-    expect(view.targetCommand).toBe('preview_hcm_resubmission');
+    expect(view.actionKind).toBe('wait_for_counterpart');
+    expect(view.targetCommand).toBeNull();
     expect(view.reviewIdentity).toBe('review-fixture-1');
   });
   describe('Constants and Category Tabs', () => {

@@ -743,9 +743,9 @@ HCM、Client／Staff BeClass 與其他 Case Import 來源的 review 是公會人
 LINE 對話原文、完整聯絡資料或把回覆文字直接當成正式 Client／Order／Staff input。正確資料由
 新來源重新走 typed Preview／Apply。2026-09-09 人工裁決補充：一般 HCM workbook intake 遇到相同案件
 編號時不得以不同內容覆寫，也不得因此建立新的待處理異常；來源完全相同時回傳 exact replay，來源不同時
-以 `skipped_existing` 終止該列並保持零業務寫入。只有操作人由既有 active HCM 異常明確啟動的 owning
-resubmission Preview／Apply，才屬修正命令。該命令仍須提交完整修正來源，並只採納通過驗證且屬 HCM
-欄位權威的差異；不提供警示中心或 Streamlit 單欄編輯，也不得修改 immutable source。
+以 `skipped_existing` 終止該列並保持零業務寫入。2026-10-13 人工裁決退役 HCM 修正版工作簿入口、
+`/api/v1/case-import/hcm/resubmissions/{preview|apply}` 與專用欄位修正命令；各頁面不再提供工作簿覆寫修正。
+既有案件資料只經 Client Profile／Orders 等正式 owner 命令修改；不得修改 immutable source。
 
 Issue #326 的欄位修正 Query 由 Case Import 提供 `/api/v1/case-import/hcm/reviews` 與
 `/reviews/{review_identity}`：主清單只讀每案最新、已綁定案件的欄位 review，不使用已停用的 warning tracking。
@@ -756,13 +756,14 @@ HCM 欄位沿用既有欄位規則。指定欄位已補齊且通過規則即自�
 資料仍缺漏／格式不符、未支援欄位或無法確認正式 root binding 時，警示仍保留。
 同筆 review 有多個欄位時逐一檢查，只顯示仍未解決的欄位；全部解決才退出主清單。
 Query 維持零寫入，不刪除或改寫原始來源、review、receipt 或稽核歷史，也不新增跨 owner commit。
-更正事件的 after fingerprint 仍綁定 resulting review version，供專用修正命令的版本與稽核使用；
+既有更正事件的 after fingerprint 仍綁定 resulting review version，供歷史事件處理與稽核使用；
 不可用前端刪列或 immutable workbook receipt 判定問題已解除。伺服器先套目前問題 predicate 再分頁；一般 workbook preview 的「來源欄位檢查通過」
 不承諾新增或更新，Apply 的 skipped_existing 仍為零覆寫。來源／身份／bootstrap 問題保留各自 owner 的入口。
 
 2026-09-30 人工裁決：資料中心移除獨立的「目前 HCM 欄位待修正資料」區塊及其讀取、分頁控制。
 客戶資料由客戶名冊修改，儲存後沿用上述 Query 規則自動解除欄位警示；既有 review Query API 保留。
-本次工作簿的問題明細與指定欄位修正仍留在匯入收據內，收據只供本次結果與歷史追溯，不作目前問題主清單。
+本次工作簿的問題明細仍留在匯入收據內，收據只供本次結果與歷史追溯，不作目前問題主清單。
+2026-10-13 人工裁決移除匯入頁「在本頁提交修正」及修正區塊，保留結果與問題明細，不替換成異常審核入口。
 畫面使用白話原因，不顯示 internal issue code；身份疑義與 bootstrap／費率或案件初始設定問題
 仍依既有 owner 分流，不得誤導為一般 workbook 覆寫。
 
@@ -774,7 +775,9 @@ Authority：本次人工要求預產期問題直接開啟客戶名冊、缺少�
 - `HCM-REPAIR-01`：異常頁以既有 canonical current review Query 呈現每案所有仍未解決欄位及分頁；
   不再以 legacy warning tracking 作 HCM 欄位警示的主清單。姓名、電話、預產期等 Client 欄位直接
   開啟 `#clients?case=...&field=...` 對應案件的名冊資料；Orders 條件仍使用既有 Orders writer。
-  原工作簿修正功能保留為支援欄位的次要選項及匯入收據入口，沒有退役其 API。
+  2026-10-13 人工裁決退役原工作簿修正次要入口及 API。
+  無正式編輯入口的欄位只保留問題與人工略過，不新增通用 writer。current review 的 `can_correct` 固定為 false，
+  `unavailable_reason` 為 `hcm_workbook_correction_retired`，不影響既有 owner 欄位編輯能力。
 - `HCM-REPAIR-02`：Client Profile 管理端允許修改既有 `clients.due_month` 與 `clients.reject_reason`。
   日期以有效 `YYYY-MM-DD` 保存，不符合原因為非空文字、最長 500 字。沿用 profile version、
   Preview／Apply、audit event 與 receipt；不增加資料欄位、不修改 Orders 狀態機，也不擴張 LIFF
@@ -912,30 +915,18 @@ resolved、tracking state、姓名、電話、case status、source filename或id
 repository-local successor已依此契約完成，synthetic counterpart、same-source accepted receipt與different-source
 accepted lineage均由同一owner readback驗證；runtime DB engine仍須依current release gate另行驗收。
 
-#### HCM resubmission owner-command amendment（2026-08-30 人工裁決）
+#### HCM review 與既有修正證據（2026-10-13 人工退役裁決）
 
-- Client 必須有 versioned root，HCM 修正只能透過 dedicated typed
-  `ClientHcmCorrectionCommand`；不建立 generic profile／root editor，不允許 Case Import adapter
-  直接寫 `clients`。
-- `服務方式` 是 Client root fact，canonical persistence 為 `clients.service_type`；Orders 不新增
-  `service_type`。`end_date` 仍由 Orders terms／lifecycle 依其正式 root facts 衍生，Client correction
-  不得直接寫入或重算它。canonical服務方式、legacy alias與各自排休日依本規格 §5.2.1，所有需要
-  服務日曆的owner consumer必須使用相同typed語意。
-- canonical HCM review identity／version 完整取代 legacy warning occurrence／current-task identity；
-  legacy association 只供 provenance read，不得成為新 Apply 的 mutation root。
-- Preview 零寫入，`preview_fingerprint` 必須覆蓋 source、canonical review、Client、Orders
-  與必要 downstream owner versions。Apply 依 canonical ordering fresh-lock 並重建 fingerprint，
-  先查 replay，再透過 typed Client／Orders ports 執行 mutation。
-- Orders 只能呼叫 `OrderTermsWorkflow.apply_in_current_uow`或等價正式 typed command；
-  Client／Orders infrastructure adapters 只借用 caller connection，不得 commit、rollback 或建立
-  nested Unit of Work。Case Import 是唯一 outer UoW，在同一 commit 寫入 accepted
-  correction、Case Import receipt／event／outbox 與兩個 owner mutation。
-- commit 後必須 fresh-read Client 與 Orders authoritative facts。任一步驟失敗整體 rollback；
-  replay 不重複 mutation；stale owner version 零寫入；readback mismatch 回 typed
-  reconciliation blocker，不得回報成功或盲目重試。
-- Client version／event／receipt persistence 必須以 additive schema release 建立。本裁決只授權
-  本機 schema／code／test package，不授權 production／`union_db`、backfill、deployment
-  或刪除 legacy evidence。
+- HCM 修正版工作簿的 Preview／Apply、`ClientHcmCorrectionCommand` 及專用 Client／Orders adapters 已退役。
+  一般 intake 的 exact replay／`skipped_existing` 契約維持；Client Profile 與 Orders 正式 writer 不受影響。
+- `服務方式` 仍是 Client root fact，canonical persistence 為 `clients.service_type`；Orders 不新增
+  `service_type`。`end_date` 仍由 Orders terms／lifecycle 衍生，Client Profile 不直接重算它。
+- canonical review identity／version、欄位 root 映射與既有更正事件讀回保留，供 current Query、
+  逐欄人工略過及 committed outbox 處理。legacy association 只作 provenance，不再轉介退役命令。
+- `case_import_hcm_correction_*`、Client correction version／event／receipt、既有 schema release、
+  migration、原始來源與稽核歷史均保留。人工略過仍沿用同一 outer UoW、typed stale conflict、receipt／outbox；
+  不以停止工作簿修正為由刪表、改寫事件或停止處理已提交事件。
+- 此退役只授權 local code／test／規格同步；不包含 production DB、migration Apply、deployment 或 provider 實送。
 
 Ports：`CaseImportSourceArchive`、`CaseImportRepository`、`CaseIdentityQuery`、
 `CaseBootstrapGateway`、`CaseImportOutbox`、`CaseImportClock` 與

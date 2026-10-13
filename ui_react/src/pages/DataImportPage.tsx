@@ -13,8 +13,6 @@ import type { HcmWorkbookRowOutcome } from '../api/case_import/hcm_workbook_sche
 import { StaffHistoricalWorkbookSnapshot, staffHistoricalWorkbookPreviewClient } from '../api/case_import/staff_historical_workbook/client';
 import { HistoricalOrderWorkbookSnapshot, historicalOrderWorkbookPreviewClient } from '../api/orders/historical_order_workbook/client';
 import { HistoricalOrderReviewRemediationWorkbench } from '../components/HistoricalOrderReviewRemediationWorkbench';
-import { HcmControlledCorrectionWorkbench } from '../components/HcmControlledCorrectionWorkbench';
-import { hcmResubmissionClient } from '../api/case_import/hcm_resubmission_client';
 import './DataImportPage.css';
 
 type CasePreviewState<T> =
@@ -462,12 +460,6 @@ const CaseWorkbookPreviewCard: React.FC<CaseWorkbookPreviewCardProps> = ({
   );
 };
 
-interface HcmCorrectionSelection {
-  caseNo: string;
-  displayMessage: string;
-  reviewIdentity: string;
-}
-
 type WorkbookImportKind = 'hcm-current' | 'client-beclass' | 'staff-historical' | 'historic-orders';
 
 const WORKBOOK_IMPORT_OPTIONS: ReadonlyArray<{ kind: WorkbookImportKind; label: string; shortLabel: string }> = [
@@ -482,8 +474,6 @@ export const DataImportPage: React.FC = () => {
   const [historicalReviewIdentities, setHistoricalReviewIdentities] = useState<string[]>([]);
   const [selectedHistoricalReviewIdentity, setSelectedHistoricalReviewIdentity] = useState<string | null>(null);
   const [hcmReviewRows, setHcmReviewRows] = useState<HcmWorkbookRowOutcome[]>([]);
-  const [reviewFeedback, setReviewFeedback] = useState<{ role: 'status' | 'alert'; message: string } | null>(null);
-  const [hcmCorrection, setHcmCorrection] = useState<HcmCorrectionSelection | null>(null);
 
   const hcmCurrent = useCaseWorkbookFlow(
     HcmWorkbookSnapshot.fromFile,
@@ -493,8 +483,6 @@ export const DataImportPage: React.FC = () => {
     (receipt) => applyPresentation(receipt.replayed_workbook, `新增 ${receipt.inserted_count} 筆、含警示 ${receipt.inserted_with_warning_count} 筆、既有案件跳過 ${receipt.skipped_existing_count} 筆（不覆寫既有案件與訂單資料）、需檢查 ${receipt.review_required_count} 筆、失敗 ${receipt.failed_count} 筆。`, receipt.inserted_with_warning_count > 0 || receipt.review_required_count > 0 || receipt.failed_count > 0 ? 'needs-review' : receipt.inserted_count === 0 ? 'no-change' : 'applied'),
     'HCM 工作簿處理失敗。', 'hcm-current', (receipt) => {
       setHcmReviewRows(receipt.row_outcomes.filter((row) => row.problem_identity !== null || row.outcome === 'review_required' || row.outcome === 'failed'));
-      setHcmCorrection(null);
-      setReviewFeedback(null);
     }
   );
   const clientBeClass = useCaseWorkbookFlow(
@@ -546,26 +534,16 @@ export const DataImportPage: React.FC = () => {
       {hcmReviewRows.length === 0 ? (
         <p>這次收據沒有提供問題列明細；請修正原始工作簿後重新預覽，畫面不會轉往其他頁面。</p>
       ) : hcmReviewRows.map((row) => {
-        const fieldIssueCodes = row.issue_codes.filter((code) => code.startsWith('hcm_field_missing:') || code.startsWith('hcm_field_invalid:'));
-        const canCorrect = row.case_no !== null && row.problem_identity !== null && new Set(fieldIssueCodes.map((code) => code.split(':', 2)[1])).size === 1;
         const guidance = hcmReviewGuidance(row);
         return (
           <div key={`${row.source_row}-${row.problem_identity ?? row.outcome}`} className="import-result-problem">
             <strong>{row.case_no ? `案件 ${row.case_no}` : `來源第 ${row.source_row} 列`}</strong>
             {row.case_no && <span>工作簿來源第 {row.source_row} 筆</span>}
             <span>{row.outcome === 'failed' ? `匯入失敗。${guidance.message}` : guidance.message}</span>
-            {canCorrect ? (
-              <button type="button" className="import-referral-btn" onClick={() => { setReviewFeedback(null); void hcmResubmissionClient.query(row.problem_identity as string).then((state) => {
-                if (state.resolved) { setReviewFeedback({ role: 'status', message: '此欄位已在正式資料中補齊，無需再次修正。' }); return; }
-                setHcmCorrection({ caseNo: state.case_no, displayMessage: guidance.message, reviewIdentity: state.review_identity });
-              }).catch((error) => setReviewFeedback({ role: 'alert', message: error instanceof Error ? error.message : '修正資料讀取失敗。' })); }}>🛠️ 在本頁提交修正</button>
-            ) : (
-              <span>{guidance.nextStep}</span>
-            )}
+            <span>{guidance.nextStep}</span>
           </div>
         );
       })}
-      {reviewFeedback && <p className={reviewFeedback.role === 'alert' ? 'import-error' : undefined} role={reviewFeedback.role}>{reviewFeedback.message}</p>}
     </div>
   );
 
@@ -639,10 +617,6 @@ export const DataImportPage: React.FC = () => {
               }}
             />
           </section>}
-          {hcmCorrection && <HcmControlledCorrectionWorkbench key={hcmCorrection.reviewIdentity} {...hcmCorrection} onCancel={() => setHcmCorrection(null)} onApplied={() => {
-            setHcmCorrection(null);
-            setReviewFeedback(null);
-          }} />}
         </div>
     </div>
   );

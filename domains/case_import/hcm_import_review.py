@@ -18,7 +18,7 @@ from domains.anomalies.import_warning_tracking import (
     build_import_warning_occurrence,
 )
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
-from domains.case_import.client_import_validation import VALID_CITIES, validate_hcm_row
+from domains.case_import.client_import_validation import validate_hcm_row
 from domains.case_import.hcm_resubmission import hcm_field_targets
 from domains.clients.profile import CLIENT_PROFILE_FIELD_SET, ClientProfileValidationError, validate_changes
 
@@ -64,7 +64,7 @@ def unresolved_hcm_review_fields(
         profile_field = targets[0].removeprefix("clients.")
         if len(targets) == 1 and targets[0].startswith("clients.") and profile_field in CLIENT_PROFILE_FIELD_SET:
             try:
-                validate_changes({profile_field: value}, city_allowlist=VALID_CITIES)
+                validate_changes({profile_field: value})
             except ClientProfileValidationError:
                 unresolved.append(field)
             continue

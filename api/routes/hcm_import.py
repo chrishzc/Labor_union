@@ -8,16 +8,15 @@ from pathlib import Path
 import tempfile
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile, status
 from starlette.concurrency import run_in_threadpool
 
 from api.dependencies.admin_auth import require_admin
-from api.dependencies.hcm_import import get_hcm_resubmission_workflow, get_hcm_resubmission_workbook_service, get_hcm_workbook_import_service
+from api.dependencies.hcm_import import get_hcm_resubmission_workflow, get_hcm_workbook_import_service
 from api.schemas.base import BaseResponse
 from api.schemas.hcm_import import (
     HcmReviewStateView, HcmCurrentReviewPageView, HcmReviewSkipPreviewView, HcmReviewSkipApplyBody,
     HcmReviewFieldSkipPreviewBody, HcmReviewFieldSkipApplyBody,
-    HcmResubmissionPreviewView,
     HcmResubmissionReceiptView,
     HcmWorkbookPreviewView,
     HcmWorkbookResultPageView,
@@ -25,7 +24,6 @@ from api.schemas.hcm_import import (
 )
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.case_import.hcm_workbook_import import HcmWorkbookConflict, HcmWorkbookUnavailable
-from subsystems.case_import.hcm_resubmission_workbook import HcmResubmissionApplyRequest
 from subsystems.case_import.hcm_resubmission_workflow import ApplyHcmReviewSkip, HcmResubmissionConflict
 
 
@@ -150,43 +148,6 @@ async def apply_hcm_workbook(
     return await _run_workbook_command(workbook, service, "apply", arguments)
 
 
-@router.post("/resubmissions/preview", response_model=BaseResponse[HcmResubmissionPreviewView])
-async def preview_hcm_resubmission(
-    workbook: UploadFile = File(...),
-    review_identity: str = Form(min_length=1, max_length=191),
-    principal: AdminPrincipal = Depends(require_admin),
-    service=Depends(get_hcm_resubmission_workbook_service),
-):
-    del principal
-    return await _run_hcm_resubmission_preview(workbook, review_identity, service)
-
-
-@router.post("/resubmissions/apply", response_model=BaseResponse[HcmResubmissionReceiptView])
-async def apply_hcm_resubmission(
-    workbook: UploadFile = File(...),
-    review_identity: str = Form(min_length=1, max_length=191),
-    expected_review_version: int = Form(ge=0),
-    expected_root_fingerprint: str = Form(pattern=r"^[0-9a-f]{64}$"),
-    reason: str = Form(min_length=1, max_length=500),
-    idempotency_key: _IdempotencyHeader = ...,
-    correlation_id: _CorrelationHeader = ...,
-    preview_fingerprint: _PreviewFingerprintHeader = ...,
-    principal: AdminPrincipal = Depends(require_admin),
-    service=Depends(get_hcm_resubmission_workbook_service),
-):
-    request = HcmResubmissionApplyRequest(
-        review_identity,
-        expected_review_version,
-        expected_root_fingerprint,
-        preview_fingerprint,
-        idempotency_key,
-        str(principal.username or "admin"),
-        reason,
-        correlation_id,
-    )
-    return await _run_hcm_resubmission_apply(workbook, request, service)
-
-
 @router.post("/historical-workbooks/preview", response_model=BaseResponse[HcmWorkbookPreviewView])
 async def preview_hcm_historical_workbook(
     workbook: UploadFile = File(...),
@@ -254,33 +215,6 @@ async def _run_workbook_command(workbook, service, operation: str, arguments=())
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": str(error)}) from error
     except HcmWorkbookUnavailable as error:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail={"code": str(error)}) from error
-    finally:
-        if upload_path is not None:
-            upload_path.unlink(missing_ok=True)
-
-
-async def _run_hcm_resubmission_preview(workbook, review_identity: str, service):
-    upload_path = None
-    try:
-        upload_path = await _persist_uploaded_workbook(workbook)
-        result = await run_in_threadpool(service.preview, str(upload_path), review_identity)
-        return BaseResponse(data=asdict(result), message="HCM 修正版 Preview 已完成")
-    except ValueError as error:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail={"code": str(error)}) from error
-    finally:
-        if upload_path is not None:
-            upload_path.unlink(missing_ok=True)
-
-
-async def _run_hcm_resubmission_apply(workbook, request: HcmResubmissionApplyRequest, service):
-    upload_path = None
-    try:
-        upload_path = await _persist_uploaded_workbook(workbook)
-        result = await run_in_threadpool(service.apply, str(upload_path), request)
-        return BaseResponse(data=asdict(result), message="HCM 修正版 Apply 已完成")
-    except ValueError as error:
-        http_status = status.HTTP_409_CONFLICT if "stale" in str(error) or "conflict" in str(error) else status.HTTP_422_UNPROCESSABLE_ENTITY
-        raise HTTPException(status_code=http_status, detail={"code": str(error)}) from error
     finally:
         if upload_path is not None:
             upload_path.unlink(missing_ok=True)

@@ -139,26 +139,22 @@ describe('CurrentAnomaliesPage', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('已建立重新發送來源 201');
   });
 
-  it('shows active HCM reviews and opens the controlled correction in this page', async () => {
+  it('keeps HCM review, registry and skip entries without workbook correction', async () => {
     vi.mocked(hcmResubmissionClient.current).mockResolvedValue({ items: [{
       source_id: 2, review_identity: 'review-2', case_no: '115000002',
       fields: ['行動電話'], can_correct: true,
     }], next_cursor: null });
     vi.mocked(anomalyQueryClient.queryImportWarningTasks).mockResolvedValueOnce([]);
-    vi.spyOn(anomalyQueryClient, 'queryImportWarningReferral').mockResolvedValue({
-      occurrence_identity: 'warning-phone', expected_version: 1, owning_lane: 'hcm',
-      logical_code: 'HCM-FIELD-002', field_path: '行動電話', subject: '115000002',
-      display_message: '行動電話格式錯誤', navigation_action: 'hcm_import_center',
-      action_kind: 'owner_preview_apply', target_command: 'preview_hcm_resubmission', review_identity: 'review-2',
-    });
+    vi.spyOn(anomalyQueryClient, 'queryImportWarningReferral');
 
     render(<CurrentAnomaliesPage />);
     expect(await screen.findByText('案件 115000002')).toBeInTheDocument();
     const link = screen.getByRole('link', { name: '前往客戶名冊補資料' });
     expect(link).toHaveAttribute('href', '#clients?case=115000002&field=phone');
-    fireEvent.click(screen.getByRole('button', { name: '使用修正版工作簿處理' }));
-
-    expect(await screen.findByText('修正案件 115000002')).toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: '匯入資料待檢查' })).getByRole('button', { name: '略過並解除這項警示' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '使用修正版工作簿處理' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '檢查並提交修正' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('選擇 HCM 修正版')).not.toBeInTheDocument();
     expect(anomalyQueryClient.queryImportWarningReferral).not.toHaveBeenCalled();
   });
 

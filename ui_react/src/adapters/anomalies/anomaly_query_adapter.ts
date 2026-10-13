@@ -148,8 +148,8 @@ export interface ImportWarningReferralViewModel {
   subject: string;
   displayMessage: string;
   navigationAction: 'hcm_import_center';
-  actionKind: 'owner_preview_apply' | 'wait_for_counterpart';
-  targetCommand: 'preview_hcm_resubmission' | null;
+  actionKind: 'wait_for_counterpart';
+  targetCommand: null;
   reviewIdentity: string;
 }
 

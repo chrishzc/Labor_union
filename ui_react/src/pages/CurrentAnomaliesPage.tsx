@@ -23,7 +23,6 @@ import {
   adaptCurrentAnomalySummary,
   type CurrentAnomalyRowViewModel,
 } from '../adapters/anomalies/current_anomaly_adapter';
-import { HcmControlledCorrectionWorkbench } from '../components/HcmControlledCorrectionWorkbench';
 import { hcmResubmissionClient, type HcmCurrentReview, type HcmReviewSkipPreview } from '../api/case_import/hcm_resubmission_client';
 
 const REGISTRY_PROFILE_FIELDS: Readonly<Record<string, string>> = {
@@ -123,11 +122,6 @@ export const CurrentAnomaliesPage: React.FC = () => {
   const [skipBusy, setSkipBusy] = useState(false);
   const [skipError, setSkipError] = useState<string | null>(null);
   const [skipMessage, setSkipMessage] = useState<string | null>(null);
-  const [hcmCorrection, setHcmCorrection] = useState<{
-    caseNo: string;
-    displayMessage: string;
-    reviewIdentity: string;
-  } | null>(null);
   const [selected, setSelected] = useState<CurrentAnomalyRowViewModel | null>(null);
   const [detail, setDetail] = useState<CurrentAnomalyRecoveryContextView | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -237,26 +231,12 @@ export const CurrentAnomaliesPage: React.FC = () => {
     finally { setSkipBusy(false); }
   };
 
-  const openImportWarning = useCallback(async (task: ImportWarningTaskView) => {
-    if (task.owning_lane !== 'hcm' || !['HCM-FIELD-001', 'HCM-FIELD-002'].includes(task.logical_code)) {
-      window.location.hash = task.navigation_action === 'finance_import_recovery_center' ? '#finance' : '#data-import';
+  const openImportWarning = useCallback((task: ImportWarningTaskView) => {
+    if (task.owning_lane === 'hcm' && (REGISTRY_PROFILE_FIELDS[task.field_path] || REGISTRY_ORDER_FIELDS.has(task.field_path))) {
+      window.location.hash = registryHref(task.subject, task.field_path);
       return;
     }
-    setImportError(null);
-    try {
-      const referral = await anomalyQueryClient.queryImportWarningReferral({
-        occurrenceIdentity: task.occurrence_identity,
-        expectedVersion: task.tracking_version,
-      });
-      if (referral.target_command !== 'preview_hcm_resubmission') throw new Error('HCM correction referral unavailable');
-      setHcmCorrection({
-        caseNo: task.subject,
-        displayMessage: task.display_message,
-        reviewIdentity: referral.review_identity,
-      });
-    } catch (caught) {
-      setImportError(displayError(caught));
-    }
+    window.location.hash = task.navigation_action === 'finance_import_recovery_center' ? '#finance' : '#data-import';
   }, []);
 
   const openDetail = useCallback(async (item: CurrentAnomalyRowViewModel) => {
@@ -360,7 +340,6 @@ export const CurrentAnomaliesPage: React.FC = () => {
                 {!REGISTRY_PROFILE_FIELDS[field] && !REGISTRY_ORDER_FIELDS.has(field) && <a className="anomalies-action-btn" href="#data-import">前往資料匯入確認來源</a>}
               </div>
             </div>)}
-            {review.can_correct && <button type="button" className="anomalies-action-btn" onClick={() => setHcmCorrection({ caseNo: review.case_no, displayMessage: review.fields.join('、'), reviewIdentity: review.review_identity })}>使用修正版工作簿處理</button>}
           </article>)}
           {importItems.map((task) => (
             <article className="import-warning-card" key={task.occurrence_identity}>
@@ -369,8 +348,8 @@ export const CurrentAnomaliesPage: React.FC = () => {
                 <span className="import-warning-status-badge">待處理</span>
               </div>
               <p>{task.display_message}</p>
-              <div className="import-warning-actions"><button className="anomalies-action-btn" type="button" onClick={() => void openImportWarning(task)}>
-                {task.owning_lane === 'hcm' && ['HCM-FIELD-001', 'HCM-FIELD-002'].includes(task.logical_code) ? '檢查並提交修正' : '前往負責頁面處理'}
+              <div className="import-warning-actions"><button className="anomalies-action-btn" type="button" onClick={() => openImportWarning(task)}>
+                前往負責頁面處理
               </button>
               <button className="anomalies-action-btn" type="button" disabled={skipBusy} onClick={() => void previewImportSkip(task)}>略過並解除這項警示</button></div>
             </article>
@@ -390,11 +369,6 @@ export const CurrentAnomaliesPage: React.FC = () => {
           {skipError && <p role="alert">{skipError}</p>}</>}
       </Drawer>
 
-      {hcmCorrection && <HcmControlledCorrectionWorkbench
-        {...hcmCorrection}
-        onCancel={() => setHcmCorrection(null)}
-        onApplied={() => { setHcmCorrection(null); void loadImportWarnings(); }}
-      />}
 
       {error && <div role="alert" className="error-message">{error}</div>}
 

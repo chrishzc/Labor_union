@@ -28,6 +28,6 @@
 - default_boundary: Subsystem
 - integration_root: `tests/domains/case-import/subsystems/case-import/integration/` — real registry correction, first-use bootstrap and assigned Payroll coordination.
 - test_root: `tests/subsystems/case_import/`
-- current owner-local HCM resubmission domain/workbook/workflow coverage is routed to this root.
+- current owner-local root mapping and historical HCM correction outbox coverage remains here; retired workbook commands no longer have runtime coverage. Current query／skip and retirement contracts use the hcm-current-workbook-import module root.
 - higher_boundary: tests/domains/case_import/
 - layout_gap: `tests/test_wp77_import_contracts.py` remains a protected current legacy path with a direct current inventory consumer.

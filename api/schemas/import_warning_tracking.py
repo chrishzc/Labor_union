@@ -73,8 +73,8 @@ class WarningReferralView(_StrictModel):
     subject: str
     display_message: str = Field(min_length=1, max_length=200)
     navigation_action: Literal["hcm_import_center"]
-    action_kind: Literal["owner_preview_apply", "wait_for_counterpart"]
-    target_command: Literal["preview_hcm_resubmission"] | None = None
+    action_kind: Literal["wait_for_counterpart"]
+    target_command: None = None
     review_identity: str = Field(min_length=1, max_length=191)
 
 

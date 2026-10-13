@@ -1,12 +1,11 @@
 """
 File: hcm_resubmission.py
-Description: 限定 HCM 修正來源只能採納 prior warning 指定欄位的領域契約。
+Description: 保留 HCM 欄位的正式 root 映射與歷史修正事件讀回 facts。
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Mapping
 
 _FIELD_TARGETS = {
     "報名時間(建檔)": ("clients.created_at",),
@@ -49,51 +48,8 @@ class HcmResubmissionFacts:
     order_version: int = 0
 
 
-@dataclass(frozen=True, slots=True)
-class HcmFieldCorrectionCandidate:
-    review_identity: str
-    case_no: str
-    source_field: str
-    target_fields: tuple[str, ...]
-    target_values: Mapping[str, object]
-
-
-def build_hcm_field_correction_candidate(
-    facts: HcmResubmissionFacts,
-    corrected_record: Mapping[str, object],
-    validation_errors: Mapping[str, str],
-    corrected_target_values: Mapping[str, object],
-) -> HcmFieldCorrectionCandidate:
-    """Build a zero-ambiguity, single-warning correction candidate.
-
-    A complete workbook is validation input only.  Its other valid cells never
-    expand the formal write set beyond the warning's field path.
-    """
-    if facts.logical_code not in {"HCM-FIELD-001", "HCM-FIELD-002"}:
-        raise ValueError("hcm_resubmission_field_scope_ambiguous")
-    field = _required_text(facts.field_path, "field path")
-    targets = _FIELD_TARGETS.get(field)
-    # Rejection reasons are read here, but repaired through Client Profile.
-    if targets is None or field == "不符合原因":
-        raise ValueError("hcm_resubmission_field_not_owned")
-    if field in validation_errors:
-        raise ValueError("hcm_resubmission_field_still_invalid")
-    if field not in corrected_record or corrected_record[field] is None:
-        raise ValueError("hcm_resubmission_field_missing")
-    target_values = {str(key): value for key, value in corrected_target_values.items()}
-    if set(target_values) != set(targets) or any(value is None for value in target_values.values()):
-        raise ValueError("hcm_resubmission_target_values_invalid")
-    return HcmFieldCorrectionCandidate(
-        review_identity=_required_text(facts.review_identity, "review identity"),
-        case_no=_required_text(facts.case_no, "case number"),
-        source_field=field,
-        target_fields=targets,
-        target_values=target_values,
-    )
-
-
 def hcm_field_targets(field_path: str) -> tuple[str, ...]:
-    """Return the fixed formal targets for one warning field, or fail closed."""
+    """Return authoritative root targets for review queries and historical evidence."""
     field = _required_text(field_path, "field path")
     if field not in _FIELD_TARGETS:
         raise ValueError("hcm_resubmission_field_not_owned")
@@ -107,8 +63,6 @@ def _required_text(value: object, name: str) -> str:
 
 
 __all__ = [
-    "HcmFieldCorrectionCandidate",
     "HcmResubmissionFacts",
-    "build_hcm_field_correction_candidate",
     "hcm_field_targets",
 ]

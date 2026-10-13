@@ -211,13 +211,13 @@ export const VALID_IMPORT_WARNING_REFERRAL_VIEW: ImportWarningReferralView = {
   occurrence_identity: VALID_IMPORT_WARNING_TASK_HCM.occurrence_identity,
   expected_version: VALID_IMPORT_WARNING_TASK_HCM.tracking_version,
   owning_lane: 'hcm',
-  logical_code: VALID_IMPORT_WARNING_TASK_HCM.logical_code,
-  field_path: VALID_IMPORT_WARNING_TASK_HCM.field_path,
+  logical_code: 'HCM-BECLASS-001',
+  field_path: '$pairing',
   subject: VALID_IMPORT_WARNING_TASK_HCM.subject,
   display_message: VALID_IMPORT_WARNING_TASK_HCM.display_message,
   navigation_action: 'hcm_import_center',
-  action_kind: 'owner_preview_apply',
-  target_command: 'preview_hcm_resubmission',
+  action_kind: 'wait_for_counterpart',
+  target_command: null,
   review_identity: 'review-fixture-1',
 };
 

@@ -808,7 +808,8 @@ describe('Anomaly Query API Client (Phase 2D Integration)', () => {
       const [url, options] = vi.mocked(globalThis.fetch).mock.calls[0];
       expect(url).toContain('/referral?expected_version=1');
       expect(options?.method).toBe('GET');
-      expect(referral.action_kind).toBe('owner_preview_apply');
+      expect(referral.action_kind).toBe('wait_for_counterpart');
+      expect(referral.target_command).toBeNull();
 
       await expect(
         queryImportWarningReferral({ occurrenceIdentity: '', expectedVersion: 1 })
