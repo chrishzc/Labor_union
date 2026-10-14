@@ -2,6 +2,7 @@
 
 from datetime import date, datetime
 
+import pytest
 from fastapi import FastAPI
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -12,6 +13,9 @@ from api.exception_handlers import CorrelationBoundaryMiddleware, install_typed_
 from api.routes.staff import router
 from infrastructure.mysql.staff_profile_query_repository import (
     MySqlStaffProfileQueryRepository,
+)
+from infrastructure.mysql.staff_qualification_master_repository import (
+    MySqlStaffQualificationMasterRepository,
 )
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.staff.profile_query import StaffProfileQueryApplication
@@ -282,3 +286,53 @@ def test_staff_profile_treats_blank_optional_database_values_as_not_recorded():
     assert profile.telephone is None
     assert profile.telephone_extension is None
     assert profile.admin_notes is None
+
+
+@pytest.mark.parametrize(
+    ("raw_detail", "expected_detail"),
+    [(None, None), ("", None), (" \t\r\n\u3000", None), ("  照護說明  ", "照護說明")],
+    ids=["null", "empty", "whitespace", "trimmed-text"],
+)
+def test_roster_normalizes_optional_service_details_through_mysql_adapter(raw_detail, expected_detail):
+    batches = iter([
+        [{"id": 7, "care_babies": 2}, {"id": 8, "care_babies": None}],
+        [{"staff_id": 7, "region_name": "北區", "custom_region_detail": raw_detail}],
+        [{"staff_id": 7, "slot_name": "8小時", "custom_slot_detail": raw_detail}],
+        [{"staff_id": 7, "skill_name": "葷食", "custom_skill_detail": raw_detail}],
+        [{"staff_id": 7, "holiday_name": "中秋節", "custom_holiday_detail": raw_detail}],
+        [{"staff_id": 7, "rest_type": "週休1日", "custom_rest_detail": raw_detail}],
+        [{"staff_id": 7, "baby_type": "單胞胎", "custom_baby_detail": raw_detail}],
+        [{"staff_id": 7, "vehicle_type": "機車"}],
+    ])
+
+    class _ServiceCursor(_Cursor):
+        def fetchall(self):
+            return next(batches)
+
+    connection = _Connection()
+    connection.cursors = [_ServiceCursor()]
+
+    class _ServiceRepository(_Repository):
+        def fetch_service_profiles(self, staff_ids):
+            return MySqlStaffQualificationMasterRepository(connection).fetch_service_profiles(staff_ids)
+
+    client = _client()
+    client.app.dependency_overrides[get_staff_profile_application] = lambda: (
+        StaffProfileQueryApplication(_ServiceRepository())
+    )
+    response = client.get("/api/v1/staff/roster?page_size=200")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert [item["id"] for item in data["items"]] == [7, 8]
+    assert data["next_cursor"] is None
+    service = data["items"][0]["service_profile"]
+    for field, value in {
+        "service_regions": "北區",
+        "service_time_slots": "8小時",
+        "cooking_skills": "葷食",
+        "holiday_availability": "中秋節",
+        "weekly_rest": "週休1日",
+        "baby_types": "單胞胎",
+    }.items():
+        assert service[field] == [{"value": value, "detail": expected_detail}]

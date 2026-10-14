@@ -190,7 +190,7 @@ def _required_text(row: Mapping[str, object], field: str, maximum: int) -> str:
 
 def _optional_text(row: Mapping[str, object], field: str, maximum: int) -> str | None:
     value = row.get(field)
-    if value is None:
+    if value is None or (isinstance(value, str) and not value.strip()):
         return None
     return _required_text(row, field, maximum)
 
