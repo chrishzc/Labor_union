@@ -200,12 +200,14 @@ def _bank_account(row: Mapping[str, object]) -> StaffBankAccount:
         is_primary = bool(primary)
     else:
         raise StaffProfileContractError("staff profile bank account primary flag is invalid")
+    account_no = _optional_text(row.get("account_no"), "account_no", 50)
+    last4 = account_no[-4:] if account_no is not None else row["account_last4"]
     return StaffBankAccount(
         account_id=account_id,
         bank_code=_optional_text(row["bank_code"], "bank_code", 10),
         branch_code=_optional_text(row["branch_code"], "branch_code", 10),
-        account_no=_optional_text(row.get("account_no"), "account_no", 50),
-        account_last4=_optional_last4(row["account_last4"]),
+        account_no=account_no,
+        account_last4=_optional_last4(last4),
         is_primary=is_primary,
         is_active=_boolean(row["is_active"], "is_active"),
     )
@@ -234,8 +236,8 @@ def _boolean(value: object, field: str) -> bool:
 
 def _optional_last4(value: object) -> str | None:
     text = _optional_text(value, "account_last4", 4)
-    if text is not None and (len(text) != 4 or not text.isdigit()):
-        raise StaffProfileContractError("staff profile account_last4 is invalid")
+    if text is not None and (len(text) != 4 or not text.isascii() or not text.isdigit()):
+        return None
     return text
 
 

@@ -288,6 +288,48 @@ def test_staff_profile_treats_blank_optional_database_values_as_not_recorded():
     assert profile.admin_notes is None
 
 
+@pytest.mark.parametrize("endpoint", ["/api/v1/staff/roster?page_size=200", "/api/v1/staff/7/profile"])
+@pytest.mark.parametrize(
+    ("account_no", "source_last4", "expected_account_no", "expected_last4"),
+    [
+        ("123456789012", "9012", "123456789012", "9012"),
+        (" 123456789012 \t\n", "2 \t\n", "123456789012", "9012"),
+        ("123-456-789-012", "-012", "123-456-789-012", None),
+        ("123", "123", "123", None),
+        ("未提供", "未提供", "未提供", None),
+        ("１２３４", "１２３４", "１２３４", None),
+        (" \t\n", " \t\n", None, None),
+        (None, None, None, None),
+        (None, "9012", None, "9012"),
+    ],
+    ids=["digits", "trailing-whitespace", "separator", "short", "placeholder",
+         "non-ascii-digits", "blank", "null", "last4-only"],
+)
+def test_staff_bank_projection_preserves_legacy_accounts_without_invalid_last4(
+    endpoint, account_no, source_last4, expected_account_no, expected_last4,
+):
+    class _BankProjectionRepository(_Repository):
+        def fetch_bank_accounts(self, staff_id):
+            account = super().fetch_bank_accounts(staff_id)[0]
+            return ({**account, "account_no": account_no, "account_last4": source_last4},)
+
+    client = _client()
+    client.app.dependency_overrides[get_staff_profile_application] = lambda: (
+        StaffProfileQueryApplication(_BankProjectionRepository())
+    )
+    response = client.get(endpoint)
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    profiles = [item["profile"] for item in data["items"]] if "items" in data else [data]
+    for profile in profiles:
+        assert profile["bank_accounts"] == [{
+            "account_id": 3, "bank_code": "812", "branch_code": "0012",
+            "account_no": expected_account_no, "account_last4": expected_last4,
+            "is_primary": True, "is_active": True,
+        }]
+
+
 @pytest.mark.parametrize(
     ("raw_detail", "expected_detail"),
     [(None, None), ("", None), (" \t\r\n\u3000", None), ("  照護說明  ", "照護說明")],
