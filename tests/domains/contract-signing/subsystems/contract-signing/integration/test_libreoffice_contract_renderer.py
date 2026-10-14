@@ -6,7 +6,7 @@ Description: 驗證 LibreOffice PDF adapter 的隔離、限制、去敏錯誤與
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import subprocess
 
 import pytest
@@ -16,6 +16,11 @@ from infrastructure.file.libreoffice_contract_renderer import (
     LibreOfficeContractRenderer,
 )
 from subsystems.contract_signing.contract_renderer import ContractRendererError
+
+
+@pytest.fixture(autouse=True)
+def isolate_renderer_configuration(monkeypatch):
+    monkeypatch.delenv('CONTRACT_PDF_RENDERER_EXECUTABLE', raising=False)
 
 
 def _source_files(tmp_path: Path) -> tuple[Path, Path]:
@@ -53,7 +58,12 @@ def test_external_workbook_formula_never_reaches_office_process(tmp_path):
 def test_macos_headless_font_config_uses_existing_system_fonts_and_isolated_cache(tmp_path, monkeypatch):
     from infrastructure.file import libreoffice_contract_renderer as module
     monkeypatch.setattr(module.sys, 'platform', 'darwin')
-    monkeypatch.setattr(module.Path, 'is_dir', lambda path: str(path) == '/System/Library/Fonts/Supplemental')
+    class ExistingFontDirectory(PurePosixPath):
+        def is_dir(self):
+            return True
+
+    monkeypatch.setattr(module, 'Path', lambda value: ExistingFontDirectory(value)
+                        if value == '/System/Library/Fonts/Supplemental' else Path(value))
     monkeypatch.setenv('DB_PASSWORD', 'not-inherited')
     environment = module._renderer_environment(tmp_path)
     assert 'DB_PASSWORD' not in environment

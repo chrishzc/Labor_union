@@ -98,7 +98,8 @@ def test_approved_contract_drops_external_formulas_and_unrelated_historical_cach
         assert not any(path.startswith('xl/externalLinks/') for path in archive.namelist())
     sheet = load_workbook(BytesIO(output)).active
     if key == 'contract_client_copy':
-        assert len(payload['static_cells']) == 38
+        assert sheet['D39'].value == '服務時段：'
+        assert sheet['A40'].value == '預估補助金額'
         assert sheet.row_dimensions[64].height == 42
         for cell, value in payload['static_cells'].items():
             assert sheet[cell].value == value
@@ -106,7 +107,7 @@ def test_approved_contract_drops_external_formulas_and_unrelated_historical_cach
         assert sheet['D13'].value is None  # employer cost must not appear as staff compensation
         assert sheet['A13'].value == '整筆應付金額'
         assert sheet['A14'].value is None
-        assert sheet['C11'].value is None
+        assert sheet['C11'].value == '預計發薪日'
         assert not any('補助費用' in str(cell.value) or '雇主自費' in str(cell.value) for row in sheet for cell in row)
 
 

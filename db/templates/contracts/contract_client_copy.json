@@ -5,6 +5,8 @@
   "template_filename": "contract_client_copy.xlsx",
   "row_heights": {"64": 42, "116": 48, "117": 36, "118": 36},
   "static_cells": {
+    "D39": "服務時段：",
+    "A40": "預估補助金額",
     "B56": "新生兒照護", "C56": "新生兒照護、嬰兒沐浴、臍帶護理",
     "B57": "新生兒照顧", "C57": "餵奶、拍嗝、安撫情緒、更換衣物、尿布",
     "B58": "衛生管理", "C58": "奶瓶消毒、清潔",
@@ -26,7 +28,7 @@
     "B83": "費用申請", "C83": "所有採購費用收據實報實銷"
   },
   "param_mappings": {
-    "B39": {"label": "自費服務天數", "db_table": "Client Finance subsidy coverage projection", "db_key": "client_finance_self_pay_days", "requiredness": "conditional"},
+    "B39": {"label": "服務總天數", "db_table": "Orders current service-day input", "db_key": "service_days", "requiredness": "required"},
     "F1": {
       "label": "訂單單號 (F1)",
       "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
@@ -100,27 +102,28 @@
     },
     "E28": {
       "label": "服務時段 (E28)",
-      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
+      "db_table": "clients.service_time",
       "db_key": "service_time",
       "requiredness": "required"
     },
     "D29": {
-      "label": "服務單價 (D29)",
-      "db_table": "assignment_payroll_rate_snapshots (Payroll typed assignment projection)",
-      "db_key": "assignment_hourly_rate",
-      "requiredness": "conditional"
+      "label": "客戶應付時薪 (D29)",
+      "db_table": "client_payment_terms (Client Finance typed projection)",
+      "db_key": "client_hourly_rate",
+      "requiredness": "required"
     },
     "B30": {
-      "label": "自費天數 (B30)",
-      "db_table": "Client Finance subsidy coverage projection",
-      "db_key": "client_finance_self_pay_days",
-      "requiredness": "conditional"
+      "label": "服務總天數 (B30)",
+      "db_table": "Orders current service-day input",
+      "db_key": "service_days",
+      "requiredness": "required"
     },
     "D30": {
-      "label": "每日服務時數 (D30)",
-      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
-      "db_key": "service_hours_per_day",
-      "requiredness": "required"
+      "label": "請款總時數 (D30)",
+      "db_table": "Scheduling assignment typed projection",
+      "db_key": "total_hours",
+      "requiredness": "conditional",
+      "applicability": "typed_total_hours_present"
     },
   "F30": {
     "label": "費用合計 (F30)",
@@ -215,10 +218,11 @@
     "requiredness": "required"
   },
     "B40": {
-      "label": "補助薪資 (B40)",
-      "db_table": "subsidy_claim_batch_items.approved_amount (Government Subsidy exact approved claim)",
-      "db_key": "subsidy_salary",
+      "label": "預估市府補助金額 (B40)",
+      "db_table": "Client Finance typed subsidy coverage projection",
+      "db_key": "projected_subsidy_amount",
       "requiredness": "conditional",
+      "applicability": "subsidy_eligible",
       "status": "approved"
     },
     "D40": {
@@ -271,7 +275,7 @@
     },
     "A48": {
       "label": "服務時段 (A48)",
-      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
+      "db_table": "clients.service_time",
       "db_key": "service_time",
       "requiredness": "required"
     },
@@ -307,9 +311,9 @@
       "requiredness": "required"
     },
     "E39": {
-      "label": "每日服務時數 (E39)",
-      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
-      "db_key": "service_hours_per_day",
+      "label": "服務時段 (E39)",
+      "db_table": "clients.service_time",
+      "db_key": "service_time",
       "requiredness": "required"
     }
   }

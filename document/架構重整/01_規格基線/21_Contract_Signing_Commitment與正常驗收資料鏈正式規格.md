@@ -456,6 +456,9 @@ fingerprint、blockers、preview fingerprint與PDF result。正式document persi
 
 ### 2026-09-15 客戶契約付款欄位人工裁決
 
+- 2026-10-14 人工確認：客戶契約 D29「服務時薪費用」是客戶應付時薪，與 B25 一樣使用
+  Client Finance 的 `client_hourly_rate`；不得取月嫂的 `assignment_hourly_rate`，也不以正式指派
+  或 Payroll rate snapshot 存在作為填值前提。
 - C34、C35、C36 分別使用 Client Finance 的 `deposit_due_date`、`first_payment_due_date`、
   `second_payment_due_date`；C37 樓層費與訂金一起支付，使用同一筆 `deposit_due_date`。
   實際入帳日不得套入契約，也不得由 Contract Signing 建立第二套日期算法。

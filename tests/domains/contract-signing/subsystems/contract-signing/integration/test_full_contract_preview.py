@@ -597,7 +597,7 @@ def test_staff_legacy_funding_split_cells_stay_blank_and_whole_obligation_popula
     canonical = json.loads(canonical_path.read_text(encoding="utf-8"))
     mapping = tmp_path / "mapping.json"
     split_cells = {}
-    for cell in ("C13", "B15", "C15"):
+    for cell in ("B15", "C15"):
         descriptor = canonical["param_mappings"][cell]
         assert descriptor["status"] == "not_applicable"
         assert descriptor["db_key"] == ""
@@ -605,6 +605,7 @@ def test_staff_legacy_funding_split_cells_stay_blank_and_whole_obligation_popula
     split_cells.update(
         {
             "B13": canonical["param_mappings"]["B13"],
+            "C13": canonical["param_mappings"]["C13"],
             "F10": {"db_key": "staff_payable_total", "requiredness": "required"},
             "B19": {"db_key": "staff_payable_total", "requiredness": "required"},
         }
@@ -615,7 +616,7 @@ def test_staff_legacy_funding_split_cells_stay_blank_and_whole_obligation_popula
     )
     template = tmp_path / "contract.xlsx"
     Workbook().save(template)
-    facts = {"staff_payable_total": 42000}
+    facts = {"staff_payable_total": 42000, "staff_payable_due_date": date(2026, 10, 15)}
 
     assert _mapping_blockers("contract_staff_service", mapping, facts) == ()
     rendered = render_contract_template(
@@ -624,9 +625,10 @@ def test_staff_legacy_funding_split_cells_stay_blank_and_whole_obligation_popula
         facts=facts,
     )
     worksheet = load_workbook(BytesIO(rendered), data_only=False).active
-    for cell in ("C13", "B15", "C15"):
+    for cell in ("B15", "C15"):
         assert worksheet[cell].value is None
     assert worksheet["B13"].value == 42000
+    assert worksheet["C13"].value.date() == date(2026, 10, 15)
     assert worksheet["F10"].value == 42000
     assert worksheet["B19"].value == 42000
 
@@ -647,7 +649,8 @@ def test_real_staff_template_clears_legacy_funding_placeholders():
             "assigned_start_date": "2026-09-01", "assigned_end_date": "2026-09-10",
             "service_days": 10, "assignment_service_days": 10, "service_time": "09:00-17:00",
             "service_type": "週休1日", "service_unit_price": 300,
-            "staff_payable_total": 24000, "payroll_payment_date": "2026-09-15",
+            "staff_payable_total": 24000, "staff_payable_due_date": date(2026, 10, 15),
+            "payroll_payment_date": date(2026, 9, 15),
             "client_city": "新竹市", "client_address": "測試地址", "staff_phone": "0900000000",
             "contract_signed_date": "2026-09-01", "__today__": "2026-09-01",
         }
@@ -659,7 +662,9 @@ def test_real_staff_template_clears_legacy_funding_placeholders():
         facts=facts,
     )
     worksheet = load_workbook(BytesIO(rendered), data_only=False).active
-    assert [worksheet[cell].value for cell in ("B13", "C13", "B15", "C15")] == [24000, None, None, None]
+    assert worksheet["C11"].value == "預計發薪日"
+    assert worksheet["C13"].value.date() == date(2026, 10, 15)
+    assert [worksheet[cell].value for cell in ("B13", "B15", "C15")] == [24000, None, None]
 
 
 def test_real_templates_render_multi_staff_summary_and_personal_service_days():
@@ -801,17 +806,53 @@ def test_client_contract_self_pay_days_follow_uncovered_service_hours(
     assert facts["client_finance_self_pay_days"] == expected_self_pay_days
 
 
-def test_client_contract_self_pay_day_cells_share_the_coverage_projection():
+def test_client_contract_quantity_cells_use_total_service_facts():
     root = Path(__file__).resolve().parents[6]
-    mappings = json.loads(
-        (root / "db/templates/contracts/contract_client_copy.json").read_text(
+    mapping_path = root / "db/templates/contracts/contract_client_copy.json"
+    mapping = json.loads(
+        mapping_path.read_text(
             encoding="utf-8"
         )
-    )["param_mappings"]
+    )
+    mappings = mapping["param_mappings"]
 
     for cell in ("B30", "B39"):
-        assert mappings[cell]["db_key"] == "client_finance_self_pay_days"
-        assert mappings[cell]["db_table"] == "Client Finance subsidy coverage projection"
+        assert mappings[cell]["db_key"] == "service_days"
+    assert mappings["D30"]["db_key"] == "total_hours"
+    assert mappings["D29"]["db_key"] == "client_hourly_rate"
+    assert mappings["E39"]["db_key"] == "service_time"
+    assert mappings["B40"]["db_key"] == "projected_subsidy_amount"
+
+    facts = {
+        "identity_status": "一般市民", "service_days": 10, "total_hours": 80,
+        "service_hours_per_day": 8, "floor_fee": 0, "service_time": "09:00-17:00",
+        "subsidy_salary": 9999,
+        "client_hourly_rate": Decimal("310"), "assignment_hourly_rate": Decimal("280"),
+    }
+    _project_subsidy_coverage(facts, {"client_finance": "a" * 64})
+    assert facts["client_finance_self_pay_days"] == 5
+    content = render_contract_template(
+        template_path=root / "db/templates/contracts/contract_client_copy.xlsx",
+        mapping_path=mapping_path, facts=facts,
+    )
+    worksheet = load_workbook(BytesIO(content), data_only=False).active
+    assert worksheet["F24"].value == worksheet["B30"].value == worksheet["B39"].value == 10
+    assert worksheet["F25"].value == worksheet["D30"].value == 80
+    assert worksheet["B25"].value == worksheet["D29"].value == 310
+    assert worksheet["E28"].value == worksheet["E39"].value == "09:00-17:00"
+    assert worksheet["D39"].value == "服務時段："
+    assert worksheet["A40"].value == "預估補助金額"
+    assert worksheet["B40"].value == 12000
+
+    facts.pop("projected_subsidy_amount")
+    _, warnings, states = _mapping_validation("contract_client_copy", mapping_path, facts)
+    assert "contract_pdf_field_missing:B40" in warnings
+    assert states["B40"] == "missing"
+    content = render_contract_template(
+        template_path=root / "db/templates/contracts/contract_client_copy.xlsx",
+        mapping_path=mapping_path, facts=facts,
+    )
+    assert load_workbook(BytesIO(content), data_only=False).active["B40"].value is None
 
 
 class _PayrollPolicyCursor:

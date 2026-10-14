@@ -8,7 +8,7 @@
     "A13": "整筆應付金額",
     "A14": "",
     "A15": "",
-    "C11": "",
+    "C11": "預計發薪日",
     "D11": "依實際服務調整"
   },
   "param_mappings": {
@@ -32,7 +32,7 @@
     "B94": {"label": "服務人員姓名", "db_table": "staff", "db_key": "staff_name", "requiredness": "required"},
     "B96": {"label": "服務人員電話", "db_table": "staff", "db_key": "staff_phone", "requiredness": "required"},
     "B13": {"label": "整筆應付金額", "db_table": "staff_payables.service_obligation", "db_key": "staff_payable_total", "requiredness": "conditional", "applicability": "staff_payable_obligation_present"},
-    "C13": {"label": "補助費用日期（現行模型無分拆）", "db_table": "Staff Payables whole obligation（legacy funding split absent/not applicable）", "db_key": "", "status": "not_applicable", "requiredness": "conditional", "applicability": "staff_payable_split_present"},
+    "C13": {"label": "整筆報酬預計發薪日", "db_table": "staff_payables.service_obligation.due_date / Payroll typed payment due date projection", "db_key": "staff_payable_due_date", "requiredness": "conditional", "applicability": "staff_payable_obligation_present"},
     "B15": {"label": "自費金額（現行模型無分拆）", "db_table": "Staff Payables whole obligation（legacy funding split absent/not applicable）", "db_key": "", "status": "not_applicable", "requiredness": "conditional", "applicability": "staff_payable_split_present"},
     "C15": {"label": "自費金額日期（現行模型無分拆）", "db_table": "Staff Payables whole obligation（legacy funding split absent/not applicable）", "db_key": "", "status": "not_applicable", "requiredness": "conditional", "applicability": "staff_payable_split_present"},
     "F10": {"label": "費用合計", "db_table": "staff_payables.service_obligation", "db_key": "staff_payable_total", "requiredness": "conditional", "applicability": "staff_payable_obligation_present"},
