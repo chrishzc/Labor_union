@@ -361,9 +361,10 @@ class MySqlClientRegistryQueryRepository:
                 {} if beclass_source_kind == "admin_manual"
                 else dict(order_information.issues)
             )
-            if "multi_birth_count" in effective_values:
-                order_information_values["multi_birth_count"] = effective_values["multi_birth_count"]
-                order_information_issues.pop("multi_birth_count", None)
+            for field in order_information_values:
+                if field in effective_values:
+                    order_information_values[field] = effective_values[field]
+                    order_information_issues.pop(field, None)
             beclass_values["multi_birth_count"] = order_information_values.get("multi_birth_count")
         else:
             order_information_values = None
@@ -420,9 +421,11 @@ class MySqlClientRegistryQueryRepository:
                 "UNION ALL SELECT 'hcm_review_disposition','匯入警示人工略過',e.reason,e.actor,e.created_at,8,e.id "
                 "FROM case_import_hcm_correction_events e WHERE e.case_no=%s "
                 "AND (JSON_CONTAINS(e.adopted_field_paths,JSON_QUOTE('review.skip_missing_reject_reason')) "
-                "OR JSON_SEARCH(e.adopted_field_paths,'one','review.skip_field:%%') IS NOT NULL)"
+                "OR JSON_SEARCH(e.adopted_field_paths,'one','review.skip_field:%%') IS NOT NULL) "
+                "UNION ALL SELECT 'service_before_replacement','服務前更換月嫂',e.replacement_reason,e.actor_id,e.created_at,9,e.id "
+                "FROM scheduling_service_before_replacement_events e WHERE e.case_no=%s"
                 ") history ORDER BY occurred_at,source_order,event_id",
-                (case_no,) * 8,
+                (case_no,) * 9,
             )
             return tuple(cursor.fetchall() or ())
 

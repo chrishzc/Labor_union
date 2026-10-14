@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ClientRosterPage } from '../../../../../../../pages/ClientRosterPage';
+vi.mock('../../../../../../../api/orders/order_query_client', () => ({ ordersQueryClient: { getAssignmentPlan: vi.fn().mockResolvedValue({ case_no: 'CASE-001', assignments: [] }) } }));
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), query: vi.fn(), filterOptions: vi.fn(), downloadOrderAccounting: vi.fn(), downloadCaseInspection: vi.fn() }));
+const mocks = vi.hoisted(() => ({ list: vi.fn(), query: vi.fn(), history: vi.fn(), filterOptions: vi.fn(), downloadOrderAccounting: vi.fn(), downloadCaseInspection: vi.fn() }));
 const bootstrapMocks = vi.hoisted(() => ({ status: vi.fn(), preview: vi.fn(), apply: vi.fn() }));
 const intakeMocks = vi.hoisted(() => ({ previewCompletion: vi.fn(), previewTerms: vi.fn(), applyTerms: vi.fn() }));
 vi.mock('../../../../../../../api/client_registry/client_registry_client', () => ({ clientRegistryClient: mocks }));
@@ -23,6 +24,7 @@ describe('ClientRosterPage', () => {
   beforeEach(() => {
     mocks.list.mockReset();
     mocks.query.mockReset();
+    mocks.history.mockReset().mockResolvedValue([]);
     mocks.filterOptions.mockReset();
     mocks.downloadOrderAccounting.mockReset();
     mocks.downloadCaseInspection.mockReset();
@@ -146,16 +148,16 @@ describe('ClientRosterPage', () => {
     fireEvent.click(orderRow);
     await waitFor(() => expect(mocks.query).toHaveBeenCalledWith('CASE-001'));
     expect(screen.getByRole('dialog', { name: '案件 CASE-001 詳細資料' })).toBeInTheDocument();
-    const detail = await screen.findByLabelText('CASE-001 全部唯讀欄位');
+    const detail = await screen.findByLabelText('CASE-001 案件資料編輯');
     expect(detail).toHaveTextContent('客戶主檔');
-    expect(detail).toHaveTextContent('主檔註記');
+    expect(within(detail).getByLabelText('行政註記')).toHaveValue('主檔註記');
     expect(detail).toHaveTextContent('HCM Email');
-    expect(detail).toHaveTextContent('hcm@example.com');
+    expect(within(detail).getByLabelText('HCM Email')).toHaveValue('hcm@example.com');
     expect(detail).toHaveTextContent('報名問卷資料（BeClass）');
-    expect(detail).toHaveTextContent('client@example.com');
+    expect(within(detail).getByLabelText('BeClass Email')).toHaveValue('client@example.com');
     expect(detail).toHaveTextContent('BeClass Email');
     expect(detail).toHaveTextContent('BeClass 照護與特殊計費');
-    expect(detail).toHaveTextContent('不吃牛肉');
+    expect(within(detail).getByLabelText('飲食習慣與中藥接受度')).toHaveValue('不吃牛肉');
     expect(detail).toHaveTextContent('訂單條件');
     expect(detail).toHaveTextContent('每日服務時數');
     expect(detail).toHaveTextContent('服務方式');
@@ -163,7 +165,7 @@ describe('ClientRosterPage', () => {
     expect(detail).toHaveTextContent('客戶帳務（唯讀）');
     expect(detail).toHaveTextContent('客戶應付總額');
     expect(detail).toHaveTextContent('450');
-    expect(within(detail).queryByRole('button', { name: /儲存|更新|刪除|編輯|套用/ })).not.toBeInTheDocument();
+    expect(within(detail).getAllByRole('button', { name: '預覽變更' })).toHaveLength(3);
 
     fireEvent.click(screen.getByRole('button', { name: '關閉案件詳細資料' }));
     expect(screen.queryByRole('dialog', { name: '案件 CASE-001 詳細資料' })).not.toBeInTheDocument();
@@ -180,6 +182,8 @@ describe('ClientRosterPage', () => {
   });
 
   it('offers the existing Preview and Apply repair when Client Finance bootstrap is missing', async () => {
+    let finish: (() => void) | undefined;
+    bootstrapMocks.apply.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
     const unavailable = {
       ...(await mocks.query()),
       finance: { status: 'not_ready', code: 'client_finance_bootstrap_required', values: null },
@@ -198,7 +202,10 @@ describe('ClientRosterPage', () => {
     fireEvent.click(within(repair).getByRole('button', { name: '建立帳務與排班資料' }));
     await waitFor(() => expect(bootstrapMocks.apply).toHaveBeenCalledTimes(1));
     expect(bootstrapMocks.apply.mock.calls[0][4]).toMatch(/^case-bootstrap-repair-/);
+    expect(screen.getByRole('button', { name: '關閉案件詳細資料' })).toBeDisabled();
+    await act(async () => { finish?.(); });
     await waitFor(() => expect(mocks.query).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByRole('button', { name: '關閉案件詳細資料' })).toBeEnabled());
   });
 
   it.each(['client_finance_bootstrap_required', 'order_terms_start_date_required'])(

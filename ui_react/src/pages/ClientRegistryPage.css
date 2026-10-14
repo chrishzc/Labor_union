@@ -26,6 +26,18 @@
 .registry-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
 .registry-fields label { display: grid; gap: 5px; font-size: .88rem; color: #65483b; }
 .registry-fields input, .registry-fields select { box-sizing: border-box; width: 100%; }
+.client-registry-detail-editor { padding: 0; }
+.client-registry-detail-editor textarea, .client-registry-detail-editor select { box-sizing: border-box; width: 100%; min-width: 0; padding: 9px 10px; border: 1px solid #cfa99a; border-radius: 8px; color: #432c23; background: white; font: inherit; }
+.client-registry-detail-editor textarea { resize: vertical; }
+.client-registry-detail-editor .registry-terms-fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+.client-registry-detail-editor .registry-section-note { font-size: .85rem; color: #74593f; }
+.client-registry-detail-editor .registry-preview dl { display: grid; gap: 8px; }
+.client-registry-detail-editor .registry-preview dd { margin: 3px 0 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.client-registry-detail-editor .source-issue { color: #b42318; }
+.client-registry-detail-editor :focus-visible { outline: 2px solid #9a3412; outline-offset: 2px; }
+.client-registry-detail-editor .order-v2-drawer-section label { display: grid; gap: 5px; }
+.client-registry-detail-editor .registry-history li { overflow-wrap: anywhere; }
+@media (max-width: 820px) { .client-registry-detail-editor .order-v2-drawer-section [style*="grid-column"] { grid-column: auto !important; } }
 .registry-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 .registry-actions button { min-width: 88px; }
 .registry-actions button:last-child { background: #9a3412; color: white; }
@@ -35,6 +47,26 @@
 .registry-history li > div { display: flex; justify-content: space-between; gap: 16px; }
 .registry-history time, .registry-history small { color: #74593f; }
 .registry-history p { margin: 9px 0; white-space: pre-wrap; }
+.registry-history-panel { padding: 12px 16px; }
+.registry-replacement-workflow { margin-top: 18px; padding-top: 16px; border-top: 1px solid #ead3c8; }
+.registry-replacement-steps { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.registry-replacement-steps button[aria-pressed="true"] { background: #9a3412; color: white; }
+.registry-replacement-workflow .order-v2-business-summary { display: grid; gap: 10px; }
+.registry-replacement-workflow .order-v2-business-summary label { display: flex; align-items: flex-start; gap: 8px; padding: 10px; background: #fffaf7; border: 1px solid #ead3c8; border-radius: 8px; }
+.registry-replacement-workflow input[type="checkbox"] { width: auto; flex: 0 0 auto; }
+.registry-replacement-workflow .order-candidate-card,
+.registry-replacement-workflow .formal-recommendation-candidate { margin: 10px 0; padding: 12px; border: 1px solid #ead3c8; border-radius: 8px; }
+.registry-replacement-workflow .formal-recommendation-candidate > div { display: grid; gap: 5px; margin-bottom: 8px; }
+.registry-replacement-workflow .formal-recommendation-weekly-preview { overflow-x: auto; }
+.registry-history-toggle { cursor: pointer; color: #7c2d12; }
+.registry-history-toggle h3 { display: inline; margin: 0; font-size: 1rem; }
+.registry-history-toggle small { margin-left: 12px; font-size: .78rem; font-weight: 400; color: #74593f; }
+.registry-history-scroll { max-height: min(240px, 32vh); overflow: auto; margin-top: 10px; padding-right: 8px; scrollbar-gutter: stable; }
+.registry-history-panel .registry-history { gap: 0; font-size: .86rem; }
+.registry-history-panel .registry-history li { padding: 8px 0; border: 0; border-bottom: 1px solid #f1ddd5; border-radius: 0; }
+.registry-history-panel .registry-history li:last-child { border-bottom: 0; }
+.registry-history-panel .registry-history p { margin: 4px 0; }
+.registry-history-panel .registry-history time, .registry-history-panel .registry-history small { font-size: .76rem; }
 .registry-editor dl { display: flex; gap: 28px; }
 .registry-editor dl div { display: grid; gap: 4px; }
 .registry-editor dd { margin: 0; font-weight: 700; }

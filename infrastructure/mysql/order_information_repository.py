@@ -190,7 +190,7 @@ def _facts(
 ) -> tuple[dict[str, object], Mapping[str, str]]:
     # Case Import is the only boundary allowed to parse the source payload.
     # Consumers receive named facts, never the raw survey mapping.
-    projection = project_order_information(case.get("_case_import_payload"))
+    projection = project_order_information(case.get("_case_import_payload"), case.get("_case_import_corrections"))
     formal_service_time = _formal_service_time(case)
     facts = {
         "case_no": case.get("case_no"),
@@ -472,11 +472,13 @@ SELECT o.case_no, o.service_days, o.service_hours_per_day, o.requires_cooking,
        c.identity_status AS client_identity_status,
        c.name AS client_name, c.phone AS client_phone, c.address AS client_address,
        c.notes AS client_notes, b.survey_details AS _case_import_payload,
+       correction.effective_values_json AS _case_import_corrections,
        payment_terms.client_hourly_rate_ntd,
        payroll_policy.hourly_rate_ntd AS payroll_hourly_rate_ntd
   FROM orders o
   JOIN clients c ON c.id=o.client_id
   LEFT JOIN beclass_records b ON b.bound_case_no=o.case_no
+  LEFT JOIN beclass_record_correction_states correction ON correction.beclass_record_id=b.id
   LEFT JOIN client_payment_terms payment_terms ON payment_terms.case_no=o.case_no
   LEFT JOIN case_payroll_rate_policy_snapshots payroll_policy ON payroll_policy.case_no=o.case_no
  WHERE o.case_no=%s

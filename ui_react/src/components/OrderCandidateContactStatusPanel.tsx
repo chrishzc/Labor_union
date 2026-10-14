@@ -17,6 +17,7 @@ interface OrderCandidateContactStatusPanelProps {
   focusWillingness?: boolean;
   onPreviewInformation?: (kind: 1 | 2) => void;
   revision?: number;
+  onEditStateChange?: (state: { dirty: boolean; busy: boolean }) => void;
 }
 
 type ContactStatusState =
@@ -77,7 +78,7 @@ function deliveryStatus(
   return `${labels[delivery.status]} · ${delivery.sent_at}`;
 }
 
-export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPanelProps> = ({ caseNo, onObserved, onAddCandidates, focusWillingness = false, revision = 0 }) => {
+export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPanelProps> = ({ caseNo, onObserved, onAddCandidates, focusWillingness = false, revision = 0, onEditStateChange }) => {
   const [state, setState] = useState<ContactStatusState>({ status: 'idle' });
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [sendPreview, setSendPreview] = useState<{ candidateId: number; kind: 1 | 2 } | null>(null);
@@ -96,6 +97,12 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
   }>());
   const informationInFlight = useRef(new Set<string>());
   const candidateInformationFlows = orderMutationFlowStore.getCandidateInformationForCase(caseNo);
+  const pendingStatus = (status: string) => ['applying', 'observing', 'outcome_unknown', 'observation_failed'].includes(status);
+  const protectedOperation = candidateInformationFlows.some((flow) => pendingStatus(flow.status))
+    || orderMutationFlowStore.getCandidateWillingnessForCase(caseNo).some((flow) => pendingStatus(flow.status));
+  const hasDraft = Object.values(reasonDrafts).some((value) => value.trim().length > 0);
+  useEffect(() => { onEditStateChange?.({ dirty: hasDraft, busy: protectedOperation }); }, [hasDraft, protectedOperation, onEditStateChange]);
+  useEffect(() => () => { onEditStateChange?.({ dirty: false, busy: false }); }, [onEditStateChange]);
   const cancelWillingnessReadbacks = () => {
     willingnessReadbackControllers.current.forEach(({ controller, caseNo: pendingCaseNo, candidateId }) => {
       controller.abort();
@@ -302,6 +309,7 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
           setState({ status: 'ready', data: readback });
         }
         setWillingnessNotices((notices) => ({ ...notices, [command.candidateId]: '回覆已儲存。' }));
+        setReasonDrafts((drafts) => ({ ...drafts, [command.candidateId]: '' }));
         onObserved?.();
       }
       orderMutationFlowStore.clearCandidateWillingness(command.caseNo, command.candidateId);

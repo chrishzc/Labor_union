@@ -5,6 +5,7 @@ from contextlib import AbstractContextManager
 import pytest
 
 from domains.orders.lifecycle import OrderLifecycleStatus
+from domains.case_import.order_information import ORDER_INFORMATION_KEYS
 from infrastructure.mysql.beclass_correction_repository import MySqlBeClassCorrectionRepository
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from subsystems.case_import.beclass_correction_workflow import (
@@ -151,6 +152,46 @@ def test_every_canonical_order_status_allows_manual_beclass_source() -> None:
     assert allows_manual_beclass_source("unknown-status") is False
 
 
+def test_care_and_bonus_corrections_preserve_original_types_without_financial_effect():
+    repository = _Repository()
+    repository.financial_fields_locked = True
+    repository.original.update({"dietary_habits": "原始飲食", "parking_space_provided": False, "alcohol_ratio": 0.5})
+    sync = _FinancialSync()
+    workflow = BeClassCorrectionWorkflow(repository, _Uow, sync)
+    changes = {"dietary_habits": " 不吃花生 ", "holiday_pricing_terms": "三節獎金由客戶與月嫂協調", "stair_floor_fee_mode": "二樓服務", "other_babies_present": True}
+    preview = workflow.preview("CASE-001", changes, ExpectedVersion(0))
+    assert preview.before["dietary_habits"] == "原始飲食"
+    assert repository.version == 0 and repository.corrections == {}
+    receipt = workflow.apply("CASE-001", changes, ExpectedVersion(0), preview.preview_fingerprint, IdempotencyKey("care-edit"), ActorContext("admin:9"), "協調結果", CorrelationId("care-edit"))
+    assert receipt.readback.original["dietary_habits"] == "原始飲食"
+    assert receipt.readback.effective["dietary_habits"] == "不吃花生"
+    assert receipt.readback.effective["parking_space_provided"] is False
+    assert receipt.readback.effective["alcohol_ratio"] == 0.5
+    assert receipt.readback.effective["other_babies_present"] is True
+    assert sync.calls == []
+    assert workflow.apply("CASE-001", changes, ExpectedVersion(0), preview.preview_fingerprint, IdempotencyKey("care-edit"), ActorContext("admin:9"), "協調結果", CorrelationId("care-edit")).replayed
+    with pytest.raises(BeClassCorrectionConflict):
+        workflow.preview("CASE-001", {"phone": "0933333333"}, ExpectedVersion(0))
+
+
+def test_effective_care_correction_clears_source_ambiguity_and_preserves_explicit_null():
+    from domains.case_import.order_information import project_order_information
+    projection = project_order_information(None, {"dietary_habits": "已核對", "parking_space_provided": None, "other_babies_present": False})
+    assert projection.values["dietary_habits"] == "已核對"
+    assert projection.values["parking_space_provided"] is None
+    assert projection.values["other_babies_present"] is False
+    assert "dietary_habits" not in projection.issues
+    assert "parking_space_provided" not in projection.issues
+    assert projection.issues["maternal_allergy"] == "invalid_payload"
+
+
+@pytest.mark.parametrize("changes", [{"holiday_pricing_terms": True}, {"stair_floor_fee_mode": 300}, {"meal_preferences": ["牛肉"]}, {"alcohol_ratio": float("nan")}])
+def test_care_correction_rejects_non_text_agreements_and_non_scalar_answers(changes):
+    workflow = BeClassCorrectionWorkflow(_Repository(), _Uow)
+    with pytest.raises(ValueError):
+        workflow.preview("CASE-001", changes, ExpectedVersion(0))
+
+
 class _SqlCursor:
     def __init__(self, responses=None):
         self.responses = iter(responses or [
@@ -216,7 +257,7 @@ def test_beclass_mysql_correction_exposes_empty_manual_source_for_historical_ord
         "original": {
             "name": None, "email": None, "phone": None, "tel": None,
             "ext": None, "city": None, "zip_code": None, "address": None,
-            "admin_notes": None, "multi_birth_count": None,
+            "admin_notes": None, **{field: None for field in ORDER_INFORMATION_KEYS},
         },
         "corrections": {},
         "source_kind": "admin_manual",
@@ -239,7 +280,7 @@ def test_beclass_mysql_correction_exposes_empty_manual_source_for_current_order(
         "original": {
             "name": None, "email": None, "phone": None, "tel": None,
             "ext": None, "city": None, "zip_code": None, "address": None,
-            "admin_notes": None, "multi_birth_count": None,
+            "admin_notes": None, **{field: None for field in ORDER_INFORMATION_KEYS},
         },
         "corrections": {},
         "source_kind": "admin_manual",

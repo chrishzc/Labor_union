@@ -27,7 +27,8 @@ const isTermsRepairBlocker = (code: string) => code === 'missing_start_date' || 
 export const CaseArchitectureBootstrapRepairPanel: React.FC<{
   caseNo: string;
   onCompleted: () => void | Promise<void>;
-}> = ({ caseNo, onCompleted }) => {
+  onEditStateChange?: (state: { dirty: boolean; busy: boolean }) => void;
+}> = ({ caseNo, onCompleted, onEditStateChange }) => {
   const [status, setStatus] = useState<CaseArchitectureBootstrapStatus | null>(null);
   const [preview, setPreview] = useState<CaseArchitectureBootstrapPreview | null>(null);
   const [termsPreview, setTermsPreview] = useState<IntakeTermsPreview | null>(null);
@@ -35,8 +36,13 @@ export const CaseArchitectureBootstrapRepairPanel: React.FC<{
   const [serviceDays, setServiceDays] = useState('');
   const [busy, setBusy] = useState<'status' | 'terms-preview' | 'terms-apply' | 'preview' | 'apply' | null>('status');
   const [message, setMessage] = useState<string | null>(null);
+  const [dirty, setDirty] = useState(false);
   const idempotencyKey = useRef(key());
   const termsIdempotencyKey = useRef(`historical-terms-repair-${key()}`);
+  useEffect(() => {
+    onEditStateChange?.({ dirty, busy: busy !== null && busy !== 'status' });
+  }, [dirty, busy, onEditStateChange]);
+  useEffect(() => () => { onEditStateChange?.({ dirty: false, busy: false }); }, [onEditStateChange]);
 
   useEffect(() => {
     let active = true;
@@ -93,6 +99,7 @@ export const CaseArchitectureBootstrapRepairPanel: React.FC<{
       const refreshed = await caseArchitectureBootstrapClient.status(caseNo);
       setStatus(refreshed);
       setTermsPreview(null);
+      setDirty(false);
       setMessage('約定服務資料已補齊，現在可以檢查案件初始資料補建內容。');
     } catch (error) {
       setMessage(intakeRepairErrorMessage(error));
@@ -139,8 +146,8 @@ export const CaseArchitectureBootstrapRepairPanel: React.FC<{
     {status && status.domain_blockers.filter((blocker) => !isTermsRepairBlocker(blocker)).length > 0 && <ul>{status.domain_blockers.filter((blocker) => !isTermsRepairBlocker(blocker)).map((blocker) => <li key={blocker}>{blockerMessage(blocker)}</li>)}</ul>}
     {termsRepairBlockers.length > 0 && <div style={{ display: 'grid', gap: '8px' }}>
       <ul>{termsRepairBlockers.map((blocker) => <li key={blocker}>{blockerMessage(blocker)}</li>)}</ul>
-      {termsRepairBlockers.includes('missing_start_date') && <label>約定服務開始日<input type="date" value={startDate} onChange={(event) => { setStartDate(event.target.value); setTermsPreview(null); }} /></label>}
-      {termsRepairBlockers.includes('missing_service_days') && <label>服務天數<input type="number" min="1" step="1" value={serviceDays} onChange={(event) => { setServiceDays(event.target.value); setTermsPreview(null); }} /></label>}
+      {termsRepairBlockers.includes('missing_start_date') && <label>約定服務開始日<input type="date" value={startDate} onChange={(event) => { setStartDate(event.target.value); setTermsPreview(null); setDirty(true); }} /></label>}
+      {termsRepairBlockers.includes('missing_service_days') && <label>服務天數<input type="number" min="1" step="1" value={serviceDays} onChange={(event) => { setServiceDays(event.target.value); setTermsPreview(null); setDirty(true); }} /></label>}
       <button type="button" disabled={busy !== null || !startDate || Number(serviceDays) <= 0} onClick={() => void runTermsPreview()}>
         {busy === 'terms-preview' ? '正在預覽約定服務資料…' : '預覽約定服務資料'}
       </button>

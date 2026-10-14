@@ -3,9 +3,8 @@ import { clientRegistryClient, type ClientRegistryListQuery } from '../api/clien
 import type { ClientRegistryColumnFilter, ClientRegistryDetail, ClientRegistryFilterField, ClientRegistryPage as ClientRegistryPageData, ClientRegistrySortBy, ClientRegistrySortOrder } from '../api/client_registry/client_registry_schemas';
 import { ClientRosterColumnFilter } from '../components/ClientRosterColumnFilter';
 import { rosterFilterColumns, rosterFilterSummary } from '../components/client_roster_filter_columns';
-import { CaseArchitectureBootstrapRepairPanel } from '../components/CaseArchitectureBootstrapRepairPanel';
+import { ClientRegistryDetailEditor, type RegistryEditState } from '../components/ClientRegistryDetailEditor';
 import { Drawer } from '../components/Drawer';
-import { OrderTermsUnavailableNote } from '../components/OrderTermsUnavailableNote';
 import './ClientRosterPage.css';
 
 type RosterFilters = {
@@ -36,7 +35,6 @@ function hasActiveFilter(filters: RosterFilters): boolean {
 }
 
 const displayCooking = (value: boolean | null) => value === true ? '需要' : value === false ? '不需要' : '未登錄';
-const displayValue = (value: unknown) => value === null || value === undefined || value === '' ? '未登錄' : typeof value === 'boolean' ? (value ? '是' : '否') : String(value);
 const displayImportedVirtualAccounts = (values: string[]) => values.length
   ? values.map((value) => <div key={value}>{value}</div>)
   : '—';
@@ -54,73 +52,14 @@ function clientDueDates(item: RosterItem, stage: NonNullable<RosterItem['client_
   )) : '無值';
 }
 
-const profileLabels = {
-  name: '姓名', gender: '性別', phone: '電話（手機／市話）', email: 'HCM Email', city: '縣市', address: '地址', residence_type: '住宅型態',
-  delivery_type: '生產方式', baby_info: '寶寶資訊', notes: '行政註記',
-} as const;
-const beclassLabels = {
-  name: '報名姓名', email: 'BeClass Email', phone: '手機', tel: '市話', ext: '分機', city: '縣市',
-  zip_code: '郵遞區號', address: '報名地址', admin_notes: '報名註記', multi_birth_count: '胎數',
-} as const;
-const orderInformationLabels = {
-  dietary_habits: '飲食習慣與中藥接受度', vegetarian_preference: '可否接受蛋奶素餐食', alcohol_ratio: '餐飲含酒比例',
-  cooking_oil_type: '料理用油', maternal_allergy: '過敏體質', special_care_notes: '特殊照護注意事項',
-  meal_preferences: '餐點喜忌', cooking_tools: '現有烹煮工具', bath_water_prep: '洗澡水準備',
-  breastfeeding_method: '哺乳方式', holiday_pricing_terms: '三節計費約定', multi_birth_count: '胎數',
-  stair_floor_fee_mode: '服務樓層方式', parking_space_provided: '停車位', other_babies_present: '服務時間內的其他寶寶',
-} as const;
-const orderTermLabels = {
-  planned_start_date: '約定服務開始日', service_days: '服務天數', service_hours_per_day: '每日服務時數',
-  requires_cooking: '下廚需求', floor_fee_ntd: '樓層加給', start_time: '每日開始時間', end_time: '每日結束時間',
-  end_day_offset: '結束時間是否跨日',
-} as const;
-const financeLabels = {
-  virtual_account: '本案專屬虛擬帳號', service_unit_price_ntd: '服務單價', service_hours: '服務總時數',
-  customer_payable_total_ntd: '客戶應付總額', deposit_amount_ntd: '定金金額', first_payment_amount_ntd: '第一期金額',
-  second_payment_amount_ntd: '第二期金額', received_total_ntd: '已入帳金額', customer_balance_ntd: '客戶待繳／應退差額',
-  subsidy_return_amount_ntd: '補助退款金額', subsidy_return_due_date: '補助退款日期', subsidy_return_status: '補助退款狀態',
-} as const;
-
-const ReadOnlyFields: React.FC<{ labels: Record<string, string>; values: Record<string, unknown>; issues?: Record<string, string> }> = ({ labels, values, issues = {} }) => (
-  <dl className="client-roster-detail-fields">
-    {Object.entries(labels).map(([field, label]) => <div key={field}><dt>{label}</dt><dd className={issues[field] ? 'source-issue' : undefined}>{issues[field] ? '來源內容無法判定' : displayValue(values[field])}</dd></div>)}
-  </dl>
-);
-
-const ReadOnlyDetail: React.FC<{ detail: ClientRegistryDetail; onRepaired: () => void | Promise<void> }> = ({ detail, onRepaired }) => {
-  const terms = detail.order_terms.data?.terms;
-  const bootstrapRequired = ['client_finance_bootstrap_required', 'order_terms_start_date_required', 'order_terms_service_days_required'].includes(detail.order_terms.code ?? '')
-    || detail.finance.code === 'client_finance_bootstrap_required';
-  const orderTermValues = terms ? {
-    planned_start_date: terms.planned_start_date, service_days: terms.service_days,
-    service_hours_per_day: terms.service_hours_per_day, requires_cooking: terms.requires_cooking,
-    floor_fee_ntd: terms.floor_fee_ntd, start_time: terms.service_time.start_time,
-    end_time: terms.service_time.end_time, end_day_offset: terms.service_time.end_day_offset === 1 ? '隔日' : '同日',
-  } : {};
-  return <div className="client-roster-detail" aria-label={`${detail.case_no} 全部唯讀欄位`}>
-    <section><h3>客戶主檔</h3><ReadOnlyFields labels={profileLabels} values={detail.client.values} /></section>
-    <section><h3>報名問卷資料（BeClass）</h3>{detail.beclass.status === 'ready' && detail.beclass.values
-      ? <ReadOnlyFields labels={beclassLabels} values={detail.beclass.values} />
-      : <p>{detail.beclass.status === 'duplicate_binding' ? '同一案件綁定多筆 BeClass，無法判定資料。' : '尚未綁定 BeClass 紀錄。'}</p>}</section>
-    <section><h3>BeClass 照護與特殊計費</h3>{detail.order_information.status === 'ready' && detail.order_information.values
-      ? <ReadOnlyFields labels={orderInformationLabels} values={detail.order_information.values} issues={detail.order_information.field_issues} />
-      : <p>{detail.order_information.status === 'duplicate_binding' ? '同一案件綁定多筆 BeClass，無法判定資料。' : '尚無 BeClass 照護資料。'}</p>}</section>
-    <section><h3>訂單條件</h3><ReadOnlyFields labels={{ service_type: '服務方式' }} values={{ service_type: detail.service_type ?? '尚未登錄' }} />{terms
-      ? <ReadOnlyFields labels={orderTermLabels} values={orderTermValues} />
-      : <OrderTermsUnavailableNote caseNo={detail.case_no} code={detail.order_terms.code} />}</section>
-    <section><h3>客戶帳務（唯讀）</h3>{detail.finance.status === 'ready' && detail.finance.values
-      ? <ReadOnlyFields labels={financeLabels} values={detail.finance.values} />
-      : <><p>{detail.finance.code === 'client_finance_bootstrap_required' ? '尚未建立客戶帳務資料。' : '客戶帳務暫時無法讀取，請重新整理。'}</p>{detail.finance.code && <details><summary>技術資訊</summary><code>{detail.finance.code}</code></details>}</>}
-      {bootstrapRequired && <CaseArchitectureBootstrapRepairPanel caseNo={detail.case_no} onCompleted={onRepaired} />}
-    </section>
-  </div>;
-};
-
 export interface ClientRosterPageProps {
   embedded?: boolean;
+  initialCaseNo?: string;
+  focusField?: string;
+  onEditStateChange?: (state: RegistryEditState) => void;
 }
 
-export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = false }) => {
+export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = false, initialCaseNo = '', focusField = '', onEditStateChange }) => {
   const [filters, setFilters] = useState<RosterFilters>(defaultFilters);
   const [appliedFilters, setAppliedFilters] = useState<RosterFilters>(defaultFilters);
   const [page, setPage] = useState<ClientRegistryPageData | null>(null);
@@ -134,6 +73,8 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
   const [exporting, setExporting] = useState(false);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [editState, setEditState] = useState<RegistryEditState>({ dirty: false, busy: false });
+  useEffect(() => { onEditStateChange?.(editState); }, [editState, onEditStateChange]);
   const detailRequest = useRef(0);
   const listRequest = useRef(0);
 
@@ -148,8 +89,6 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
       setPage(result);
       setAppliedFilters(nextFilters);
       setPageOffset(nextOffset);
-      setSelectedCaseNo(null);
-      setDetail(null);
     } catch (caught) {
       if (requestId !== listRequest.current) return;
       setError(caught instanceof Error ? caught.message : '客戶名冊清單載入失敗。');
@@ -208,7 +147,26 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
       if (detailRequest.current === request) setDetailLoading(false);
     }
   };
+  useEffect(() => {
+    if (initialCaseNo) void openDetail(initialCaseNo);
+  }, [initialCaseNo]);
+  useEffect(() => () => { ++detailRequest.current; ++listRequest.current; }, []);
+  const refreshDetail = async () => {
+    if (!selectedCaseNo) throw new Error('未選取案件。');
+    const request = ++detailRequest.current;
+    const result = await clientRegistryClient.query(selectedCaseNo);
+    if (request !== detailRequest.current) throw new Error('案件已切換，請重新開啟。');
+    setDetail(result);
+    const listId = ++listRequest.current;
+    void clientRegistryClient.list(toRequest(appliedFilters, pageOffset || undefined)).then((result) => {
+      if (listId === listRequest.current) setPage(result);
+    }).catch(() => { if (listId === listRequest.current) setError('資料已儲存，但清單更新失敗，請重新搜尋。'); });
+    return result;
+  };
   const closeDetail = () => {
+    if (editState.busy) return;
+    if (editState.dirty && !window.confirm('有尚未儲存的變更，確定放棄並關閉？')) return;
+    setEditState({ dirty: false, busy: false });
     detailRequest.current += 1;
     setSelectedCaseNo(null); setDetail(null); setDetailError(null); setDetailLoading(false);
   };
@@ -233,7 +191,7 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
   };
 
   return <div className={`client-roster-page${embedded ? ' client-roster-page--embedded' : ''}`}>
-    {!embedded && <header><div><h1>客戶名冊清單</h1><p>以案件為單位快速瀏覽與比較；此頁只會查詢，不會修改客戶或訂單資料。</p></div></header>}
+    {!embedded && <header><div><h1>客戶名冊清單</h1><p>以案件為單位快速瀏覽與比較；點選案件即可查看與編輯詳細資料。</p></div></header>}
     {!error && page && <nav className="client-roster-pagination" aria-label="客戶名冊分頁">
       <button type="button" disabled={loading || pageOffset === 0} onClick={previousPage}>上一頁</button>
       <span aria-live="polite">第 {Math.floor(pageOffset / pageSize) + 1} 頁<span className="client-roster-page-count">（本頁 {page.items.length} 筆）</span></span>
@@ -316,10 +274,11 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
       size="wide"
       closeLabel="關閉案件詳細資料"
       className="client-roster-detail-drawer"
+      closeDisabled={editState.busy}
     >
       {detailLoading && <p role="status" className="client-roster-message">正在載入完整客戶資料…</p>}
       {detailError && <p role="alert" className="client-roster-message">{detailError}</p>}
-      {detail?.case_no === selectedCaseNo && <ReadOnlyDetail detail={detail} onRepaired={() => openDetail(detail.case_no)} />}
+      {detail?.case_no === selectedCaseNo && <ClientRegistryDetailEditor key={detail.case_no} detail={detail} focusField={focusField} onRefresh={refreshDetail} onStateChange={setEditState} />}
     </Drawer>
   </div>;
 };

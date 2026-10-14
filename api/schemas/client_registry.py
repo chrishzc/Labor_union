@@ -211,6 +211,20 @@ class BeClassChangeSet(_StrictModel):
     address: str | None = None
     admin_notes: str | None = None
     multi_birth_count: str | None = None
+    dietary_habits: str | bool | int | float | None = None
+    vegetarian_preference: str | bool | int | float | None = None
+    alcohol_ratio: str | bool | int | float | None = None
+    cooking_oil_type: str | bool | int | float | None = None
+    maternal_allergy: str | bool | int | float | None = None
+    special_care_notes: str | bool | int | float | None = None
+    meal_preferences: str | bool | int | float | None = None
+    cooking_tools: str | bool | int | float | None = None
+    bath_water_prep: str | bool | int | float | None = None
+    breastfeeding_method: str | bool | int | float | None = None
+    holiday_pricing_terms: str | None = None
+    stair_floor_fee_mode: str | None = None
+    parking_space_provided: str | bool | int | float | None = None
+    other_babies_present: str | bool | int | float | None = None
 
 
 class ClientProfileAdminPreviewRequest(_StrictModel):
@@ -237,8 +251,8 @@ class RegistryMutationPreviewView(_StrictModel):
     owner: Literal["client_profile", "client_beclass"]
     aggregate_identity: str
     current_version: int = Field(ge=0)
-    before: dict[str, str | None]
-    after: dict[str, str | None]
+    before: dict[str, str | bool | int | float | None]
+    after: dict[str, str | bool | int | float | None]
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
@@ -250,7 +264,7 @@ class RegistryMutationReceiptView(_StrictModel):
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     idempotency_key: str
     replayed: bool
-    readback: dict[str, str | None]
+    readback: dict[str, str | bool | int | float | None]
 
 
 __all__ = [name for name in globals() if name.endswith("View") or name.endswith("Request")]

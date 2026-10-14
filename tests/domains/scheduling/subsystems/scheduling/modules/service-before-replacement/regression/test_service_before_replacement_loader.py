@@ -84,6 +84,31 @@ def test_loader_uses_explicit_scenario_and_only_started_official_moments():
     assert facts.replacement_reason == "人工換人"
 
 
+def test_started_service_referral_does_not_require_an_old_matching_snapshot():
+    class Loader(_Loader):
+        def _candidate_reuse(self, *args, **kwargs):
+            raise ServiceBeforeReplacementSourceUnavailable("replacement_matching_matching_criteria_snapshot_unavailable")
+
+    request = SimpleNamespace(case_no="CASE-1", scenario=ReplacementScenario.R01)
+    facts = Loader(datetime(2026, 8, 28, 9, tzinfo=timezone.utc)).load_facts(request, for_update=False)
+    from domains.scheduling.service_before_replacement import preview_service_before_replacement, ReplacementOutcome
+    candidate = preview_service_before_replacement(facts)
+    assert candidate.outcome is ReplacementOutcome.SUBSTITUTION_REFERRAL
+    assert candidate.blockers == ("actual_service_exists",)
+    assert facts.actual_service_proof.service_dates == (date(2026, 8, 27),)
+    assert facts.candidate_pool_reuse is None
+
+
+def test_unstarted_replacement_still_requires_current_matching_facts():
+    class Loader(_Loader):
+        def _candidate_reuse(self, *args, **kwargs):
+            raise ServiceBeforeReplacementSourceUnavailable("replacement_matching_matching_criteria_snapshot_unavailable")
+
+    request = SimpleNamespace(case_no="CASE-1", scenario=ReplacementScenario.R01)
+    with pytest.raises(ServiceBeforeReplacementSourceUnavailable, match="matching_criteria_snapshot_unavailable"):
+        Loader(datetime(2026, 8, 26, 9, tzinfo=timezone.utc)).load_facts(request, for_update=False)
+
+
 def test_r04_committed_successor_reads_immutable_history_without_rechecking_retired_schedule():
     successor = SuccessorRoundFact(
         "CASE-1",

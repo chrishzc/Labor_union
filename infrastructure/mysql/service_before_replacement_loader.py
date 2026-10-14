@@ -107,9 +107,10 @@ class MySqlServiceBeforeReplacementLoader:
             )
             # A committed R-04 successor carries its own immutable resume step;
             # do not re-evaluate a mutable candidate pool merely to read it.
+            # Actual-service referrals also depend only on the Scheduling proof.
             reuse = (
                 None
-                if scenario is ReplacementScenario.R04 and successor is not None
+                if actual_dates or (scenario is ReplacementScenario.R04 and successor is not None)
                 else self._candidate_reuse(case_no, base, for_update=for_update)
             )
             reason = getattr(request, "reason", None) or "service_before_replacement"

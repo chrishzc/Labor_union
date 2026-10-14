@@ -19,6 +19,8 @@ import { OrderMultiCaregiverPlanPanel } from './OrderMultiCaregiverPlanPanel';
 interface OrderCandidateQueryPanelProps {
   caseNo: string;
   onPoolReadback?: () => void;
+  includeMultiCaregiver?: boolean;
+  onEditStateChange?: (state: { dirty: boolean; busy: boolean }) => void;
 }
 
 type CandidateQueryState =
@@ -92,7 +94,7 @@ export const OrderCandidateQueryPanel: FC<OrderCandidateQueryPanelProps> = (prop
   <CandidateQueryForCase key={props.caseNo} {...props} />
 );
 
-const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPoolReadback }) => {
+const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPoolReadback, includeMultiCaregiver = true, onEditStateChange }) => {
   const mounted = useRef(true);
   const queryController = useRef<AbortController | null>(null);
   useEffect(() => {
@@ -280,6 +282,8 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
   const completedAdd = addState.status === 'success' ? addState : flow?.status === 'observed' && flow.receipt
     ? { status: 'success' as const, data: flow.receipt, readbackStaff: flow.readbackStaff }
     : null;
+  useEffect(() => { onEditStateChange?.({ dirty: selectedStaffIds.size > 0, busy: busy || recoveryPending }); }, [selectedStaffIds, busy, recoveryPending, onEditStateChange]);
+  useEffect(() => () => { onEditStateChange?.({ dirty: false, busy: false }); }, [onEditStateChange]);
 
   return (
     <section aria-label={`案件 ${caseNo} 正式候選查詢`}>
@@ -400,9 +404,9 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
       )}
       {flow?.status === 'outcome_unknown' && <button type="button" onClick={retryCandidatePoolAdd}>以原操作重新確認加入候選池</button>}
       {flow?.status === 'observation_failed' && <button type="button" onClick={retryCandidatePoolReadback}>只重新讀取候選池結果</button>}
-      <fieldset disabled={queryState.status === 'loading' || addState.status === 'saving'} style={{ border: 0, padding: 0 }}>
+      {includeMultiCaregiver && <fieldset disabled={queryState.status === 'loading' || addState.status === 'saving'} style={{ border: 0, padding: 0 }}>
         <OrderMultiCaregiverPlanPanel caseNo={caseNo} filters={filters} onObserved={onPoolReadback} onBusyChange={setMultiBusy} />
-      </fieldset>
+      </fieldset>}
     </section>
   );
 };

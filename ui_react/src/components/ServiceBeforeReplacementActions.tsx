@@ -20,6 +20,9 @@ export interface ServiceBeforeReplacementActionsProps {
   initialScenario?: ServiceBeforeReplacementScenario;
   onCommitted?: (result: ServiceBeforeReplacementApplyResult) => Promise<void> | void;
   onSubstitutionReferral?: (query: ServiceBeforeReplacementQuery) => Promise<void> | void;
+  onEditStateChange?: (state: { dirty: boolean; busy: boolean }) => void;
+  hideScenarioPicker?: boolean;
+  completionLabel?: string;
 }
 
 type UiState =
@@ -90,6 +93,9 @@ export function ServiceBeforeReplacementActions({
   initialScenario,
   onCommitted,
   onSubstitutionReferral,
+  onEditStateChange,
+  hideScenarioPicker = false,
+  completionLabel = '已完成更換',
 }: ServiceBeforeReplacementActionsProps) {
   const [scenario, setScenario] = useState<ServiceBeforeReplacementScenario | ''>(initialScenario ?? '');
   const [expanded, setExpanded] = useState(false);
@@ -97,6 +103,7 @@ export function ServiceBeforeReplacementActions({
   const [reason, setReason] = useState('');
   const [evidenceText, setEvidenceText] = useState('');
   const [uiState, setUiState] = useState<UiState>({ type: 'querying' });
+  const [readingBack, setReadingBack] = useState(false);
   const operationGeneration = useRef(0);
   const expandedCaseNo = useRef<string | null>(null);
   const queryController = useRef<AbortController | null>(null);
@@ -104,6 +111,14 @@ export function ServiceBeforeReplacementActions({
   const applyController = useRef<AbortController | null>(null);
 
   const busy = ['querying', 'previewing', 'applying'].includes(uiState.type);
+  const locked = busy || readingBack || uiState.type === 'outcome_unknown';
+  useEffect(() => {
+    onEditStateChange?.({
+      dirty: expanded && uiState.type !== 'observed' && (reason.trim().length > 0 || evidenceText.trim().length > 0),
+      busy: expanded && locked,
+    });
+  }, [expanded, reason, evidenceText, uiState.type, locked, onEditStateChange]);
+  useEffect(() => () => { onEditStateChange?.({ dirty: false, busy: false }); }, [onEditStateChange]);
 
   const runQuery = useCallback(async (selectedScenario: ServiceBeforeReplacementScenario) => {
     queryController.current?.abort();
@@ -211,11 +226,14 @@ export function ServiceBeforeReplacementActions({
       setUiState({ type: 'error', message: errorMessage(error, '服務前換人提交失敗。') });
       return;
     }
+    setReadingBack(true);
     setUiState({ type: 'observed', result });
     try {
       await onCommitted?.(result);
     } catch {
       // Apply response already contains the canonical post-commit readback.
+    } finally {
+      setReadingBack(false);
     }
   };
 
@@ -234,6 +252,7 @@ export function ServiceBeforeReplacementActions({
       <button
         type="button"
         aria-expanded={expanded}
+        disabled={expanded && locked}
         onClick={() => setExpanded((value) => {
           const next = !value;
           expandedCaseNo.current = next ? caseNo : null;
@@ -249,7 +268,7 @@ export function ServiceBeforeReplacementActions({
           <p style={{ margin: '4px 0 0' }}>案件 {caseNo}。先確認更換影響；原月嫂的歷史紀錄會保留。</p>
         </header>
 
-      <label style={{ display: 'grid', gap: '4px', maxWidth: '420px' }}>
+      {hideScenarioPicker ? <p>更換目前正式指派的月嫂；系統會核對是否已有實際服務。</p> : <label style={{ display: 'grid', gap: '4px', maxWidth: '420px' }}>
         目前進度
         <select
           value={scenario}
@@ -259,7 +278,7 @@ export function ServiceBeforeReplacementActions({
           <option value="">請選擇案件目前進度</option>
           {Object.entries(scenarioLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
         </select>
-      </label>
+      </label>}
 
       {scenario === '' && <div role="status">請依案件實際進度選擇，接著查看可辦理的更換方式。</div>}
 
@@ -321,6 +340,7 @@ export function ServiceBeforeReplacementActions({
                 <input
                   type="checkbox"
                   checked={uiState.confirmed}
+                  disabled={busy}
                   onChange={(event) => setUiState({ ...uiState, confirmed: event.target.checked })}
                 />
                 我已確認更換原因、聯繫紀錄及影響
@@ -346,7 +366,7 @@ export function ServiceBeforeReplacementActions({
       )}
       {uiState.type === 'observed' && (
         <div role="status">
-          <strong>已完成更換（{uiState.result.status === 'replayed' ? '已確認既有結果' : '已套用'}）</strong>
+          <strong>{completionLabel}（{uiState.result.status === 'replayed' ? '已確認既有結果' : '已套用'}）</strong>
           <div>案件已更新。請依下方下一步繼續處理。</div>
           <div>若本案另有待處理異常，請回到異常處理頁確認。</div>
           <div>下一步：{stepLabels[uiState.result.readback.resume_step]}</div>

@@ -40,8 +40,8 @@ class BeClassCorrectionSnapshot:
     beclass_record_id: int | None
     case_no: str
     version: int
-    original: Mapping[str, str | None]
-    effective: Mapping[str, str | None]
+    original: Mapping[str, str | bool | int | float | None]
+    effective: Mapping[str, str | bool | int | float | None]
     source_kind: str = "imported"
     financial_fields_locked: bool = False
 
@@ -51,8 +51,8 @@ class BeClassCorrectionPreview:
     beclass_record_id: int
     case_no: str
     current_version: int
-    before: Mapping[str, str | None]
-    after: Mapping[str, str | None]
+    before: Mapping[str, str | bool | int | float | None]
+    after: Mapping[str, str | bool | int | float | None]
     preview_fingerprint: PreviewFingerprint
 
 
@@ -72,7 +72,7 @@ class BeClassCorrectionRepository(Protocol):
     def load(self, case_no: str, *, for_update: bool) -> Mapping[str, Any] | None: ...
     def claim(self, *, case_no: str, key: IdempotencyKey, command_fingerprint: PreviewFingerprint, correlation_id: CorrelationId) -> None: ...
     def load_receipt(self, key: IdempotencyKey, *, for_update: bool) -> Mapping[str, Any] | None: ...
-    def persist(self, *, snapshot: BeClassCorrectionSnapshot, after: Mapping[str, str | None], actor: ActorContext, reason: str, key: IdempotencyKey, correlation_id: CorrelationId) -> tuple[int, int, int]: ...
+    def persist(self, *, snapshot: BeClassCorrectionSnapshot, after: Mapping[str, str | bool | int | float | None], actor: ActorContext, reason: str, key: IdempotencyKey, correlation_id: CorrelationId) -> tuple[int, int, int]: ...
     def save_receipt(self, *, key: IdempotencyKey, command_fingerprint: PreviewFingerprint, preview_fingerprint: PreviewFingerprint, actor: ActorContext, reason: str, result: Mapping[str, Any]) -> None: ...
 
 
@@ -204,7 +204,7 @@ class BeClassCorrectionWorkflow:
             fresh = _snapshot(self._require_row(self._repository.load(identity, for_update=False)))
             return _receipt(result, preview_fingerprint, idempotency_key, False, fresh)
 
-    def preview_from_snapshot(self, snapshot: BeClassCorrectionSnapshot, normalized: Mapping[str, str | None], expected_version: ExpectedVersion) -> BeClassCorrectionPreview:
+    def preview_from_snapshot(self, snapshot: BeClassCorrectionSnapshot, normalized: Mapping[str, str | bool | int | float | None], expected_version: ExpectedVersion) -> BeClassCorrectionPreview:
         if snapshot.version != expected_version.value:
             raise BeClassCorrectionConflict("beclass_correction_stale_version")
         _validate_financial_field_change(snapshot, normalized)
@@ -254,7 +254,7 @@ def _snapshot(row: Mapping[str, Any]) -> BeClassCorrectionSnapshot:
 
 def _birth_count_changed(
     snapshot: BeClassCorrectionSnapshot,
-    normalized: Mapping[str, str | None],
+    normalized: Mapping[str, str | bool | int | float | None],
 ) -> bool:
     return (
         "multi_birth_count" in normalized
@@ -265,7 +265,7 @@ def _birth_count_changed(
 
 def _validate_financial_field_change(
     snapshot: BeClassCorrectionSnapshot,
-    normalized: Mapping[str, str | None],
+    normalized: Mapping[str, str | bool | int | float | None],
 ) -> None:
     if _birth_count_changed(snapshot, normalized) and snapshot.financial_fields_locked:
         raise BeClassCorrectionBlocked("beclass_multi_birth_count_locked_after_service_start")

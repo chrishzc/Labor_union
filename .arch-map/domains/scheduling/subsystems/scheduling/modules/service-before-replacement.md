@@ -12,6 +12,7 @@
   - `domains/scheduling/service_before_replacement.py`
   - `subsystems/scheduling/service_before_replacement_workflow.py`
   - `infrastructure/mysql/service_before_replacement_loader.py`
+    - 已有正式服務 proof 的轉介不讀無關的舊 Matching reuse snapshot；未服務的 replacement 仍 fail closed 核對來源。
   - `infrastructure/mysql/service_before_replacement_repository.py`
   - `infrastructure/mysql/scheduling_replacement_writer.py`
 - entrypoints:
@@ -20,6 +21,7 @@
   - `api/schemas/service_before_replacement.py`
   - `ui_react/src/api/orders/service_before_replacement_client.ts`
   - `ui_react/src/components/ServiceBeforeReplacementActions.tsx`
+    - 客戶名冊 Drawer 重用同一操作；可回報草稿／處理中／結果未明／正式回讀狀態供外層關閉保護，未確認結果不得收合卸載。
 - migrations:
   - `db/schema_parts/1012_service_before_replacement.sql`
   - `db/migration_releases/labor_union_2026_08_28_service_before_replacement_v1.json`
@@ -29,6 +31,7 @@
 - outbound: `orders/orders` — case/order lifecycle boundary.
 - outbound: `scheduling/matching-coordination` — successor may consume/create Matching lineage through typed owner adapters.
 - outbound: `anomalies/anomalies` — projection/recheck only; anomaly tracking cannot define success.
+- inbound: `clients/profile-change` — 客戶名冊 Drawer 組合同一 Q/P/A，完成後重讀 effective assignments 與案件歷程，不新增 writer 或改變換人分流。
 
 ## Contracts
 - `document/架構重整/01_規格基線/02_Assignments_Scheduling_Domain.md` — Scheduling owner facts.

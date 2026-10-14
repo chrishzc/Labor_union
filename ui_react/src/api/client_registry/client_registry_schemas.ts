@@ -111,14 +111,14 @@ export const ClientRegistryDetailSchema = z.strictObject({
 });
 export const RegistryMutationPreviewSchema = z.strictObject({
   owner: z.enum(['client_profile', 'client_beclass']), aggregate_identity: z.string(),
-  current_version: z.number().int().nonnegative(), before: z.record(nullableText), after: z.record(nullableText),
+  current_version: z.number().int().nonnegative(), before: z.record(orderInformationValue), after: z.record(orderInformationValue),
   preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
 });
 export const RegistryMutationReceiptSchema = z.strictObject({
   owner: z.enum(['client_profile', 'client_beclass']), aggregate_identity: z.string(),
   resulting_version: z.number().int().positive(), changed_fields: z.array(z.string()),
   preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/), idempotency_key: z.string(), replayed: z.boolean(),
-  readback: z.record(z.string(), nullableText),
+  readback: z.record(z.string(), orderInformationValue),
 });
 const response = <T extends z.ZodTypeAny>(data: T) => z.strictObject({ success: z.boolean(), message: z.string(), data: data.nullable(), error: z.string().nullable() });
 export const ClientRegistryPageResponseSchema = response(ClientRegistryPageSchema);
@@ -136,4 +136,4 @@ export type ClientRegistryChangeHistoryItem = z.infer<typeof ClientRegistryChang
 export type RegistryMutationPreview = z.infer<typeof RegistryMutationPreviewSchema>;
 export type RegistryMutationReceipt = z.infer<typeof RegistryMutationReceiptSchema>;
 export type ClientProfileChanges = Partial<z.infer<typeof profileValues>>;
-export type BeClassChanges = Partial<z.infer<typeof beclassValues>>;
+export type BeClassChanges = Partial<z.infer<typeof beclassValues> & z.infer<typeof orderInformationValues>>;

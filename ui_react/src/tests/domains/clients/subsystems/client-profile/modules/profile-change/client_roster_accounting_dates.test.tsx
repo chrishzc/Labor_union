@@ -40,8 +40,8 @@ describe('client roster accounting date columns', () => {
   it('displays all seven columns and distinct source dates without recalculation', async () => {
     render(<ClientRosterPage />);
     const row = await cells();
-    for (const name of ['訂金應繳日', '第一期應繳日', '第二期應繳日', '訂單月嫂應付日', '月嫂義務應付日', '客戶補助退還日', '補助預計申請年月']) {
-      expect(screen.getByRole('columnheader', { name })).toBeInTheDocument();
+    for (const name of ['定金應繳日', '第一期應繳日', '第二期應繳日', '訂單月嫂應付日', '月嫂義務應付日', '客戶補助退還日', '補助預計申請年月']) {
+      expect(screen.getByRole('columnheader', { name: new RegExp(`^${name}`) })).toBeInTheDocument();
     }
     expect(row).toHaveLength(19);
     expect(row[12]).toHaveTextContent('2026-06-20');

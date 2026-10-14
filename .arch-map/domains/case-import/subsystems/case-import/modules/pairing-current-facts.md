@@ -22,6 +22,7 @@
 - `subsystems/case_import/hcm_beclass_reconciliation.py`
 - `infrastructure/mysql/hcm_beclass_reconciliation_adapter.py`
 - `domains/case_import/beclass_correction.py`
+- `domains/case_import/order_information.py` — Case Import-owned 原始照護欄位與有效 correction 的 named scalar projection，供名冊及訂單資訊使用。
 - `subsystems/case_import/beclass_correction_workflow.py`
 - `infrastructure/mysql/beclass_correction_repository.py`
 - `infrastructure/mysql/effective_case_service_rate.py`
@@ -31,6 +32,7 @@
 ## Correction boundary
 - HCM／Client BeClass 唯一配對後，未知下廚需求由 Orders-owned cooking correction command 在同一 caller UoW 補入；已有帳務或無逐日排班不阻擋此單欄補正，服務資料鎖、fresh version 與已知值異動規則仍由 Orders 擁有。
 - Effective corrections resolve the unique `bound_case_no`; `query_no` remains immutable source provenance and original imported BeClass fields remain unchanged.
+- Named care／bonus／floor-agreement fields share the existing BeClass correction state／version／event／receipt and effective projection. Corrected NULL clears an original value／field issue, unchanged bool／number scalars retain their type. Holiday bonus and floor-agreement text do not invoke financial sync; floor-fee amounts use Orders Terms and birth count retains its existing financial coordination.
 - Any order without a bound BeClass row may create one `record_origin='admin_manual'` container during Apply; Preview remains zero-write, and all entered values continue through the same versioned correction state／event owner.
 - A pre-service effective birth-count correction coordinates existing Client Finance／formally assigned Payroll impact in the same outer UoW. Absent financial roots only retain effective correction for later bootstrap; unassigned cases do not require full Payroll facts. Partial roots and orphan history remain blocked. Once service has started, birth count is financially locked while non-financial BeClass fields remain independently correctable.
 

@@ -535,6 +535,10 @@ export class OrderMutationFlowStore {
     this.notify();
   }
 
+  public getCandidateWillingnessForCase(caseNo: string): CandidateWillingnessFlowState[] {
+    return [...this.candidateWillingness.values()].filter((state) => state.command.caseNo === caseNo);
+  }
+
   public clearCandidateWillingness(caseNo: string, candidateId: number): void {
     this.candidateWillingness.delete(this.candidateWillingnessKey(caseNo, candidateId));
     this.notify();

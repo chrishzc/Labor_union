@@ -18,6 +18,7 @@ interface OrderFormalRecommendationPanelProps {
   revision?: number;
   onObserved?: () => void;
   onOpenServiceDates?: () => void;
+  onEditStateChange?: (state: { dirty: boolean; busy: boolean }) => void;
 }
 
 type ReadState<T> =
@@ -94,7 +95,7 @@ async function readCurrentPlan(caseNo: string, expectedPlanId?: number): Promise
   return { plan, contact };
 }
 
-export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelProps> = ({ caseNo, onObserved, onOpenServiceDates, revision = 0 }) => {
+export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelProps> = ({ caseNo, onObserved, onOpenServiceDates, revision = 0, onEditStateChange }) => {
   const [candidates, setCandidates] = useState<ReadState<CandidateContactPool>>({ status: 'idle' });
   const [active, setActive] = useState<ReadState<CurrentPlan | null>>({ status: 'loading' });
   const [busy, setBusy] = useState(false);
@@ -129,6 +130,12 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
     || formalPlanCreation?.status === 'observation_failed'
     || formalPlanCreation?.status === 'observing';
 
+  const hasDraft = willingnessReason.trim().length > 0 || decisionReason.trim().length > 0
+    || resumeNote !== '請查收正式推薦月嫂的完整確認資訊。';
+  const protectedOperation = busy || formalManualProtected || formalPlanCreationProtected;
+  useEffect(() => { onEditStateChange?.({ dirty: hasDraft, busy: protectedOperation }); }, [hasDraft, protectedOperation, onEditStateChange]);
+  useEffect(() => () => { onEditStateChange?.({ dirty: false, busy: false }); }, [onEditStateChange]);
+
   useEffect(() => {
     const request = ++sequence.current;
     activeCase.current = caseNo;
@@ -159,6 +166,7 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
     if (busyRef.current) return;
     const request = ++sequence.current;
     setActive({ status: 'loading' });
+    setCandidates({ status: 'idle' });
     setLockPreview(null);
     setError(null);
     try {
@@ -300,6 +308,8 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
     setActive({ status: 'ready', data });
     setLockPreview(null);
     setNotice(command.kind === 'willingness' ? '正式方案月嫂意願已回讀確認。' : '客戶決定已完成正式回讀。');
+    if (command.kind === 'willingness') setWillingnessReason('');
+    else setDecisionReason('');
     orderMutationFlowStore.clearFormalManualResponse(caseNo);
     onObserved?.();
   };

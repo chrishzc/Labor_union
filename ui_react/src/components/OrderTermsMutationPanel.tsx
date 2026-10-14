@@ -18,6 +18,7 @@ interface OrderTermsMutationPanelProps {
   caseNo: string;
   query: OrderTerms;
   onObserved?: () => void;
+  onEditStateChange?: (state: { dirty: boolean; busy: boolean }) => void;
 }
 
 interface OrderTermsDraft {
@@ -175,7 +176,7 @@ function conflictMessage(error: unknown): string | null {
   return null;
 }
 
-export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ caseNo, query, onObserved }) => {
+export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ caseNo, query, onObserved, onEditStateChange }) => {
   const [draft, setDraft] = useState<OrderTermsDraft>(() => draftFromQuery(query));
   const [preview, setPreview] = useState<OrderTermsPreview | null>(null);
   const [receipt, setReceipt] = useState<OrderTermsReceipt | null>(null);
@@ -295,6 +296,11 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
   const serviceTimeUnchanged = draft.startTime === (currentQuery.terms.service_time.start_time?.slice(0, 5) ?? '')
     && draft.endTime === (currentQuery.terms.service_time.end_time?.slice(0, 5) ?? '')
     && Number(draft.endDayOffset) === (currentQuery.terms.service_time.end_day_offset ?? 0);
+
+  const termsDirty = Object.entries(draft).some(([field, value]) => value !== draftFromQuery(currentQuery)[field as keyof OrderTermsDraft]);
+  useEffect(() => {
+    onEditStateChange?.({ dirty: termsDirty, busy: status !== 'idle' || outcomeUnknown || Boolean(receipt && !readback) });
+  }, [termsDirty, status, outcomeUnknown, receipt, readback, onEditStateChange]);
 
   const proposedTermsPayload = () => ({
     ...(needsReplacement && replacementDates ? {

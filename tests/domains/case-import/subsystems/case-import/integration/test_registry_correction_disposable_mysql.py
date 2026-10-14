@@ -77,6 +77,54 @@ def assert_no_downstream(case_no):
         connection.close()
 
 
+@pytest.mark.parametrize("record_origin", ["imported", "admin_manual"])
+def test_care_bonus_http_roundtrip_preserves_source_and_has_no_billing_effect(registry_database, record_origin):
+    import json
+    case_no = f"REG-DRAWER-CARE-{record_origin}"
+    seed_case(case_no, date(2026, 10, 1))
+    original = json.dumps({"月子餐點調理喜好/飲食習慣": "原始飲食", "提供服務人員轎車停車位": False, "特殊計費:胎數": "單胞胎"}, ensure_ascii=False)
+    connection = mysql_adapter.get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("UPDATE beclass_records SET record_origin=%s,survey_details=%s WHERE bound_case_no=%s", (record_origin, original, case_no))
+            cursor.execute("SELECT survey_details FROM beclass_records WHERE bound_case_no=%s", (case_no,))
+            stored_original = cursor.fetchone()["survey_details"]
+        connection.commit()
+    finally:
+        connection.close()
+    with TestClient(create_app()) as client:
+        base = f"/api/v1/admin/registries/clients/{case_no}"
+        before = client.get(base).json()["data"]
+        assert before["order_information"]["values"]["dietary_habits"] == "原始飲食"
+        changes = {"dietary_habits": "不吃花生", "holiday_pricing_terms": "客戶與月嫂協調三節獎金", "stair_floor_fee_mode": "二樓服務", "other_babies_present": True, "meal_preferences": None}
+        body = {"changes": changes, "expected_version": before["beclass"]["version"]}
+        preview = post(client, base + "/beclass/preview", body, case_no + "-preview")
+        assert preview["after"] == changes
+        assert client.get(base).json()["data"] == before
+        command = {**body, "preview_fingerprint": preview["preview_fingerprint"], "reason": "Synthetic care coordination"}
+        saved = post(client, base + "/beclass/apply", command, case_no + "-apply")
+        assert saved["readback"]["other_babies_present"] is True
+        assert post(client, base + "/beclass/apply", command, case_no + "-apply")["replayed"]
+        observed = client.get(base).json()["data"]
+        for field, value in changes.items():
+            assert observed["order_information"]["values"][field] == value
+            assert field not in observed["order_information"]["field_issues"]
+        assert observed["order_information"]["values"]["parking_space_provided"] is False
+        assert observed["beclass"]["version"] == 1
+        stale = client.post(base + "/beclass/preview", json=body)
+        assert stale.status_code == 409
+        assert_no_downstream(case_no)
+        connection = mysql_adapter.get_connection()
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT survey_details FROM beclass_records WHERE bound_case_no=%s", (case_no,))
+                assert cursor.fetchone()["survey_details"] == stored_original
+                cursor.execute("SELECT COUNT(*) AS n FROM beclass_record_correction_events e JOIN beclass_records b ON b.id=e.beclass_record_id WHERE b.bound_case_no=%s", (case_no,))
+                assert cursor.fetchone()["n"] == 1
+        finally:
+            connection.close()
+
+
 @pytest.mark.parametrize("start_date", [None, date(2026, 10, 1)])
 def test_partial_registry_edits_then_real_terms_repair_and_bootstrap(registry_database, start_date):
     case_no = "REG-ENGINE-NO-START" if start_date is None else "REG-ENGINE-NO-DAYS"

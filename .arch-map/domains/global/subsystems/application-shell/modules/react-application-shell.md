@@ -30,5 +30,5 @@
 Reconcile when React shell navigation、session/auth composition、ErrorBoundary recovery、closed crash presentation或higher-boundary test location changes。
 
 ## Registry entry transition
-- Canonical `#clients` exposes one 客戶名冊 entry with read-only list and editable registry tabs; legacy `#client-roster`、`#data-browser`／`#databrowser` redirect to `#clients`.
+- Canonical `#clients` exposes one 客戶清單 with editable case-detail Drawer; independent 名冊資料 and 變更歷程 tabs are merged. Case／field deep links open the selected Drawer, with case history at the bottom; the virtual-account import tab remains. Legacy `#client-roster`、`#data-browser`／`#databrowser` redirect to `#clients`.
 - Data Import no longer composes the six-source Data Browser tab; the archived server API remains read-only for compatibility.

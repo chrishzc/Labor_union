@@ -403,3 +403,16 @@ def test_case_import_projection_keeps_missing_and_ambiguous_answers_field_local(
     assert result.issues["dietary_habits"] == "ambiguous"
     assert result.values["meal_preferences"] == "清淡"
     assert result.values["cooking_tools"] is None
+
+
+def test_order_information_uses_effective_care_and_bonus_text_instead_of_old_survey():
+    from infrastructure.mysql.order_information_repository import _facts
+    facts, issues = _facts({
+        "_case_import_payload": {"月子餐點調理喜好/飲食習慣": "舊飲食", "特殊計費:甲方同意需另支付當日薪資1倍予乙方。": "舊約定"},
+        "_case_import_corrections": {"dietary_habits": "不吃花生", "holiday_pricing_terms": "客戶與月嫂協調獎金", "parking_space_provided": False},
+    }, {})
+    assert facts["dietary_habits"] == "不吃花生"
+    assert facts["holiday_pricing_terms"] == "客戶與月嫂協調獎金"
+    assert facts["parking_space_provided"] is False
+    assert "dietary_habits" not in issues
+    assert "holiday_pricing_terms" not in issues

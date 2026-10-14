@@ -141,7 +141,7 @@ describe('Retired Data Browser entry redirects to the client registry', () => {
     fireEvent.change(screen.getByRole('textbox', { name: '搜尋客戶名冊清單' }), {
       target: { value: ' CASE-002 ' },
     });
-    fireEvent.click(screen.getByRole('button', { name: '套用篩選' }));
+    fireEvent.click(screen.getByRole('button', { name: '搜尋' }));
 
     await waitFor(() => expect(screen.getByText('CASE-002')).toBeInTheDocument());
     expect(screen.getByText('篩選測試客戶')).toBeInTheDocument();

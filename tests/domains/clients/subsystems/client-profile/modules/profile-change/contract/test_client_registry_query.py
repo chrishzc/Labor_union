@@ -56,6 +56,7 @@ class _Repository:
         return (
             {"event_type": "order_terms", "label": "訂單條件變更", "reason": "調整服務地址", "actor": "admin-1", "occurred_at": datetime(2026, 9, 20, 8)},
             {"event_type": "actual_start", "label": "實際開始日確認", "reason": "確認實際開始日：2026-09-22", "actor": "admin-2", "occurred_at": datetime(2026, 9, 22, 9, 30)},
+            {"event_type": "service_before_replacement", "label": "服務前更換月嫂", "reason": "客戶要求更換", "actor": "admin-3", "occurred_at": datetime(2026, 10, 13, 8)},
         )
 
 
@@ -96,6 +97,7 @@ def test_registry_change_history_keeps_repository_order_and_assigns_visible_step
     assert [(item.sequence, item.label, item.reason) for item in history] == [
         (1, "訂單條件變更", "調整服務地址"),
         (2, "實際開始日確認", "確認實際開始日：2026-09-22"),
+        (3, "服務前更換月嫂", "客戶要求更換"),
     ]
 
 
@@ -109,6 +111,9 @@ def test_registry_change_history_route_exposes_saved_reasons_with_utc_timestamps
     assert response.data[0].sequence == 1
     assert response.data[0].reason == "調整服務地址"
     assert response.data[0].occurred_at.isoformat() == "2026-09-20T08:00:00+00:00"
+    assert response.data[-1].event_type == "service_before_replacement"
+    assert response.data[-1].actor == "admin-3"
+    assert response.data[-1].reason == "客戶要求更換"
 
 
 def test_mysql_registry_change_history_reads_primary_events_without_derived_duplicates():
@@ -127,7 +132,9 @@ def test_mysql_registry_change_history_reads_primary_events_without_derived_dupl
     assert "client_finance" not in statement and "payroll" not in statement
     assert "FROM case_import_hcm_correction_events" in statement
     assert "review.skip_missing_reject_reason" in statement
-    assert parameters == ("CASE-001",) * 8
+    assert "FROM scheduling_service_before_replacement_events" in statement
+    assert "e.replacement_reason,e.actor_id,e.created_at" in statement
+    assert parameters == ("CASE-001",) * 9
 
 
 def test_registry_list_route_preserves_optional_false_and_returns_roster_fields():

@@ -65,7 +65,7 @@ _ALIASES: dict[str, tuple[str, ...]] = {
 }
 
 
-def project_order_information(raw_payload: object) -> OrderInformationProjection:
+def project_order_information(raw_payload: object, corrections: object = None) -> OrderInformationProjection:
     """Normalize one BeClass payload into the current named owner facts.
 
     Missing keys remain ``None``.  Conflicting aliases affect only the
@@ -76,10 +76,10 @@ def project_order_information(raw_payload: object) -> OrderInformationProjection
 
     data = _decode_mapping(raw_payload)
     if data is None:
-        return OrderInformationProjection(
+        return _with_corrections(OrderInformationProjection(
             values={key: None for key in ORDER_INFORMATION_KEYS},
             issues={key: "invalid_payload" for key in ORDER_INFORMATION_KEYS},
-        )
+        ), corrections)
 
     normalized: dict[str, list[object]] = {}
     for raw_key, raw_value in data.items():
@@ -105,6 +105,21 @@ def project_order_information(raw_payload: object) -> OrderInformationProjection
             issues[canonical_key] = "ambiguous"
             continue
         values[canonical_key] = clean[0]
+    return _with_corrections(OrderInformationProjection(values=values, issues=issues), corrections)
+
+
+def _with_corrections(projection: OrderInformationProjection, corrections: object) -> OrderInformationProjection:
+    effective = _decode_mapping(corrections)
+    if not effective:
+        return projection
+    values, issues = dict(projection.values), dict(projection.issues)
+    for field in ORDER_INFORMATION_KEYS:
+        if field not in effective:
+            continue
+        value = effective[field]
+        if value is None or isinstance(value, (str, bool, int, float)):
+            values[field] = value
+            issues.pop(field, None)
     return OrderInformationProjection(values=values, issues=issues)
 
 

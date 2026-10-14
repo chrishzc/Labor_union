@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from math import isfinite
+
+from domains.case_import.order_information import ORDER_INFORMATION_KEYS
 
 
 BECLASS_CORRECTION_FIELDS = (
     "name", "email", "phone", "tel", "ext", "city", "zip_code", "address", "admin_notes",
-    "multi_birth_count",
+    *ORDER_INFORMATION_KEYS,
 )
 _MAXIMUMS = {
     "name": 100,
@@ -21,6 +24,7 @@ _MAXIMUMS = {
     "admin_notes": 2000,
     "multi_birth_count": 4,
 }
+_MAXIMUMS.update({field: 2000 for field in ORDER_INFORMATION_KEYS if field != "multi_birth_count"})
 VALID_MULTI_BIRTH_COUNTS = frozenset({"單胞胎", "雙胞胎"})
 
 
@@ -31,10 +35,10 @@ class BeClassCorrectionError(ValueError):
         super().__init__(code if field is None else f"{code}:{field}")
 
 
-def normalize_beclass_changes(changes: Mapping[str, object]) -> dict[str, str | None]:
+def normalize_beclass_changes(changes: Mapping[str, object]) -> dict[str, str | bool | int | float | None]:
     if not isinstance(changes, Mapping) or not changes:
         raise BeClassCorrectionError("beclass_changes_required")
-    normalized: dict[str, str | None] = {}
+    normalized: dict[str, str | bool | int | float | None] = {}
     for field, raw_value in changes.items():
         if field not in BECLASS_CORRECTION_FIELDS:
             raise BeClassCorrectionError("beclass_field_not_allowed", str(field))
@@ -42,6 +46,11 @@ def normalize_beclass_changes(changes: Mapping[str, object]) -> dict[str, str | 
             if field in {"name", "multi_birth_count"}:
                 raise BeClassCorrectionError("beclass_value_cannot_be_empty", field)
             normalized[field] = None
+            continue
+        if field in ORDER_INFORMATION_KEYS and field not in {"multi_birth_count", "holiday_pricing_terms", "stair_floor_fee_mode"} and isinstance(raw_value, (bool, int, float)):
+            if isinstance(raw_value, float) and not isfinite(raw_value):
+                raise BeClassCorrectionError("beclass_value_must_be_finite", field)
+            normalized[field] = raw_value
             continue
         if not isinstance(raw_value, str):
             raise BeClassCorrectionError("beclass_value_must_be_text", field)

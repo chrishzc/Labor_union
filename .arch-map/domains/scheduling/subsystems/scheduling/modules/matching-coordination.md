@@ -48,6 +48,7 @@
   - `api/routes/line_mobile_admin.py`、`line/static/mobile_admin.html` — 工會媒合人工跟進清單、通知狀態及正式排班工具入口；`system_admin` 綁定者可在同一 LIFF 先經 Orders Terms Query／Preview／Apply，再以 server-verified receipt gate 預覽及重送受影響原候選，初次搜尋零候選不列為通知待辦。
   - `line/static/candidate_contact.html`、`line/static/candidate_contact_customer.html` — 月嫂結構化回應與客戶直接協調介面；LINE identity 只來自 verified ID token。
   - `ui_react/src/api/scheduling/matching_candidate_workflow_client.ts`、`ui_react/src/components/OrderCandidateQueryPanel.tsx` — 待辦工作台初步候選查詢走預計期間入口；多月嫂正式查詢仍走原入口。
+  - `ui_react/src/components/OrderCandidateContactStatusPanel.tsx`、`ui_react/src/components/OrderFormalRecommendationPanel.tsx` — 客戶名冊接任續辦重用既有操作；可回報草稿／pending command 給外層關閉保護。候選保存與意願異動後正式推薦刷新 current 候選，推薦不等於正式指派。
   - `api/routes/matching_coordination.py`
   - `api/schemas/matching_coordination.py`
   - `ui_react/src/api/matching_coordination/matching_coordination_client.ts` — isolated-tested transport client; no current App route consumer.
