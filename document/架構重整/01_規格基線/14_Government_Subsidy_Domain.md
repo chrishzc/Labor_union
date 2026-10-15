@@ -187,27 +187,15 @@ actor、reason、evidence 與可選的 selected disposition target。狀態機�
 
 ```text
 pending_review
-  ├─ authorized offset decision ─> offset_reserved ─> offset_applied
-  └─ authorized return decision ─> return_payable ──canonical outgoing bank fact reconciled──> partially_returned／returned
+  └─ authorized offset decision ─> offset_reserved ─> offset_applied
 ```
 
-#### Government payer 與退款帳戶主檔（2026-08-11 裁決）
+#### Government payer
 
 目前唯一合法付款方固定為 `hccg`／「新竹市政府」。Finance Import 對台新入款 memo 含
-「新竹市政府」時，分類為 Government Subsidy 並指向此 payer identity；一般補助入款不需要
-政府退款帳戶。
-
-`government_payers` 是 singleton master；`government_payer_receiving_accounts` 是其有效期間
-帳戶歷程。退款帳戶可長期不存在。只有人員在 `GOVSUB-006` 選擇「建立退還政府應付」而無有效
-帳戶時，異常中心的同一 typed form 才能讓具 system-admin 權限者新增／更新帳戶。
-
-- 不建立日常「資料維護」分頁；不在一般銀行匯入、補助申請或應付清冊中編輯此主檔；
-- 新增帳戶必填 bank code、account number、account name、effective date、reason、evidence；
-  舊資料不得原地覆寫，改以關閉舊有效期間後新增版本；
-- `ApplyGovernmentSubsidyOverpaymentReturn` fresh-read 取得唯一 active account，並將完整帳戶
-  fingerprint 與遮罩 display 值 snapshot 到政府退還應付；帳戶空白時 Preview fail closed，回
-  `government_subsidy_recipient_account_missing`；
-- offset 一律使用 fixed payer identity `hccg`，因此不再依 UI 或自由文字猜測付款方。
+「新竹市政府」時，分類為 Government Subsidy 並指向此 payer identity。
+`government_payers` 是 singleton master；offset 一律使用 fixed payer identity `hccg`，
+不依 UI 或自由文字猜測付款方。
 
 #### Offset 規則
 
@@ -219,43 +207,13 @@ pending_review
 - offset allocation 使用原 overpayment credit，不新增虛構銀行 receipt；
 - allocation 總額不得超過 overpayment remaining 或 target outstanding；
 - 一次 offset Apply 必須配置完整 overpayment remaining；可依明確順序分配多個 target，最後一個 target 只在 overpayment 原始可用餘額小於其 outstanding 時形成一次 partial allocation。不得由人員任意保留 overpayment remaining，也不得對同一 overpayment／claim item 反覆追加第二次 partial offset；原始匯款金額不足只表示最後一筆 allocation 小於 target outstanding，overpayment credit 本身仍須在該 Apply 歸零並進入 `offset_applied`；
-- 同一 overpayment credit 不得同時成為 return payable。
 
-#### Return payable 規則
+#### Offset command contract
 
-`Preview／ApplyGovernmentSubsidyOverpaymentReturn` 需人工選定有效政府收款資訊 snapshot：
-agency identity/name、bank code、account number masked/display value、account fingerprint、effective
-date、due date、法源／核准 evidence reference。Apply 建立獨立
-`government_overpayment_return` payable obligation；不得使用 client refund 或 staff payable 表示。
-
-該 obligation 是系統唯一可交會計的「政府退款單」，可進下一期應付明細，列型別固定為
-`government_overpayment_return`，輸出 remaining、government recipient snapshot、來源
-overpayment/receipt identity 與 due date。清冊是唯讀交辦資料，不命令、執行或推定會計已匯款。
-
-2026-08-27 人工裁決：不採 offset 的政府入款溢撥，其差額一律建立退回同一 government payer
-有效收款帳戶的 `government_overpayment_return` obligation；此低機率事件仍不得直接沖銷、轉入
-Client Finance／Staff Payables 或留作未來 claim 的無主 credit。帳戶不存在或不唯一時保持
-`pending_review` 並要求先完成政府收款帳戶主檔 Q/P/A。
-
-會計可因緊急情況在清冊日期前先行於系統外匯款；系統只在後續匯入 canonical outgoing bank
-fact 後，以退款對象的 canonical 收款帳戶與金額對回既有退款單，經
-`Preview／ApplyGovernmentOverpaymentReturnReconciliation` 追加不可變對帳紀錄並更新 remaining。
-退款單的 due date／明細產生日期不是配對條件；例如 7/15 退款單可由 7/1 的實際出款列核對。
-若同一對象與金額有多筆合法退款單，Preview 必須要求人員選定唯一退款單；實際多匯不得增加
-原 obligation，少匯保留 remaining。系統不得把「清冊生成」或「會計排程」視為付款事實。
-
-若 canonical outgoing bank fact 已解析為政府收款帳戶、可唯一對應尚未結清的政府退款單，且
-實際金額大於該退款單 remaining，Government Subsidy 必須投影 state-only `GOVSUB-007`。
-它只保留實際出款、原退款單、超額與來源版本的不可變證據；不得部分核銷、不得自動建立新的
-政府退款單、不得抵扣其他補助或 claim。人員仍由既有 Finance Import manual review 依另行核准的
-命令處理；沒有這項命令時 alert 保持 active。
-
-#### Disposition command contract
-
-所有 disposition Apply 必須具 `government_subsidy.overpayment.disposition` capability，並接受
+Offset Apply 必須具 `government_subsidy.overpayment.disposition` capability，並接受
 expected overpayment version、Preview fingerprint、stable idempotency key、actor、reason、evidence
-與 correlation id。Apply 鎖定 bank row、receipt、overpayment、targets、recipient snapshot 與
-active anomaly，fresh rebuild 後同交易寫 events／allocations／payable、CAS version、outbox、receipt。
+與 correlation id。Apply 鎖定 bank row、receipt、overpayment、targets 與
+active anomaly，fresh rebuild 後同交易寫 events／allocations、CAS version、outbox、receipt。
 不同 payload 重用 key、已 disposition、stale target 或跨付款方一律 conflict，零部分寫入。
 
 ### 4.6 Query
@@ -341,8 +299,6 @@ POST /government-subsidy/receipt-overages/preview
 POST /government-subsidy/receipt-overages/apply
 POST /government-subsidy/overpayments/{identity}/offset/preview
 POST /government-subsidy/overpayments/{identity}/offset/apply
-POST /government-subsidy/overpayments/{identity}/return/preview
-POST /government-subsidy/overpayments/{identity}/return/apply
 ```
 
 Apply 只接受 intent、expected aggregate version、Preview fingerprint、actor、reason、
@@ -367,7 +323,6 @@ Stable errors：
 - `government_subsidy_overpayment_target_ambiguous`
 - `government_subsidy_overpayment_target_not_eligible`
 - `government_subsidy_overpayment_already_disposed`
-- `government_subsidy_return_recipient_invalid`
 - `government_subsidy_overpayment_disposition_forbidden`
 - `government_subsidy_version_conflict`
 - `stale_preview`
@@ -385,7 +340,7 @@ Stable errors：
 - `GOVSUB-003`：receipt／allocation／projection integrity 不一致；
 - `GOVSUB-004`：reversal target 或剩餘可沖銷金額不一致；
 - `GOVSUB-005`：claim item 與 assignment service facts 漂移。
-- `GOVSUB-006`：政府入款超過 approved outstanding，等待 offset 或 return disposition。
+- `GOVSUB-006`：政府入款超過 approved outstanding，等待合法 offset 處置；尚無合法 target 時維持 pending review。
 
 異常中心顯示 bank fact、候選批次、item outstanding、既有 allocation 與合法 action。
 人員 action 只能導航至本 Domain Preview，不得直接寫 allocation、paid amount 或 status。
@@ -411,20 +366,10 @@ claim／ledger／allocation roots。
 - `GOVSUB-005`：frozen claim item immutable。未submit draft與已submit claim均以Government Subsidy-owned
   versioned successor/correction lineage承接，exact綁original claim item及fresh Scheduling snapshot
   identity/token/version；既有approval／receipt／allocation不得靜默搬移或改寫。
-- `GOVSUB-007`：合法退款部分核銷existing return obligation，actual超額部分建立Government-owned
-  versioned append-only recovery root；未來只由canonical incoming bank fact typed reconciliation核銷。
-  `actual > lawful remaining`固定使用專用
-  `PreviewGovernmentSubsidyReturnReconciliationWithExcess → Confirm → Apply → receipt → fresh readback`。
-  Apply在單一Government Subsidy outer UoW fresh-lock原return obligation、fresh-read immutable canonical
-  outgoing bank fact，驗payer／recipient／direction／lineage後，以lawful remaining核銷原return並對正差額建立
-  專屬recovery root，append exact bank→payout→recovery lineage、owner event、receipt、outbox及bounded
-  anomaly recheck後一次commit。同一bank fact不得再次reconcile；same-key same-payload replay回原receipt，
-  different payload固定conflict。`actual <= lawful remaining`仍走既有normal／partial reconciliation。
-
 ```yaml
 convergence:
   status: READY
-  ready_requirement_ids: [GOV-ANM-001, GOV-ANM-002, GOV-ANM-003, GOV-ANM-004, GOV-ANM-005, GOV-ANM-007-READBACK, GOV-ANM-READBACK]
+  ready_requirement_ids: [GOV-ANM-001, GOV-ANM-002, GOV-ANM-003, GOV-ANM-004, GOV-ANM-005, GOV-ANM-READBACK]
   acceptance_ids: [GOV-ANM-ACTIVE, GOV-ANM-OWNER-QPA, GOV-ANM-AMOUNT-CONSERVATION, GOV-ANM-TERMINAL, GOV-ANM-FAIL-CLOSED]
   excluded_authority_required: []
   blockers: []
@@ -471,7 +416,7 @@ Government Subsidy 新 owner migration 已完成；若正式 repository、schema
 - partial failure at transaction、allocation、projection、outbox、receipt 時整筆 rollback；
 - borrowed outer UoW 不自行 commit；
 - 人工 allocation 修正後同一 bank fact 正式入帳。
-- overpayment disposition 的 offset／return 互斥、stale target、capability、idempotency 與
+- overpayment disposition 的 offset 處置、stale target、capability、idempotency 與
   transaction rollback。
 
 ### Domain
@@ -480,7 +425,7 @@ Government Subsidy 新 owner migration 已完成；若正式 repository、schema
   CAS、concurrent Apply、reversal 與 exact replay；
 - 多筆 government receipts 對同批次 partial→paid；
 - reversal 後 paid→partially_paid／approved 的正確重開；
-- 溢撥 root 的 pending_review→offset_reserved／return_payable，以及 partial return remaining；
+- 溢撥 root 的 pending_review→offset_reserved→offset_applied；
 - legacy backfill 不改 requested／approved 歷史。
 
 ### Global

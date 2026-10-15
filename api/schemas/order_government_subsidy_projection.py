@@ -54,9 +54,6 @@ class GovernmentSubsidySubstatusCountsView(BaseModel):
     pending_review: int = Field(ge=0)
     offset_reserved: int = Field(ge=0)
     offset_applied: int = Field(ge=0)
-    return_payable: int = Field(ge=0)
-    partially_returned: int = Field(ge=0)
-    returned: int = Field(ge=0)
 
 
 class OrderGovernmentSubsidyProjectionPageView(BaseModel):

@@ -23,9 +23,6 @@ class GovernmentSubsidyOverpaymentStatus(StrEnum):
     PENDING_REVIEW = "pending_review"
     OFFSET_RESERVED = "offset_reserved"
     OFFSET_APPLIED = "offset_applied"
-    RETURN_PAYABLE = "return_payable"
-    PARTIALLY_RETURNED = "partially_returned"
-    RETURNED = "returned"
 
 
 class GovernmentSubsidyOverpaymentError(ValueError):
@@ -51,17 +48,13 @@ class GovernmentSubsidyOverpayment:
             self.remaining_amount_ntd.amount == 0
             and self.status not in {
                 GovernmentSubsidyOverpaymentStatus.OFFSET_APPLIED,
-                GovernmentSubsidyOverpaymentStatus.RETURNED,
             }
         ):
             raise GovernmentSubsidyOverpaymentError("government_subsidy_overpayment_not_open")
         if self.status not in {
             GovernmentSubsidyOverpaymentStatus.PENDING_REVIEW,
             GovernmentSubsidyOverpaymentStatus.OFFSET_RESERVED,
-            GovernmentSubsidyOverpaymentStatus.RETURN_PAYABLE,
-            GovernmentSubsidyOverpaymentStatus.PARTIALLY_RETURNED,
             GovernmentSubsidyOverpaymentStatus.OFFSET_APPLIED,
-            GovernmentSubsidyOverpaymentStatus.RETURNED,
         }:
             raise GovernmentSubsidyOverpaymentError("government_subsidy_overpayment_not_open")
         require_nonnegative_integer(self.version, "overpayment version")
@@ -104,29 +97,6 @@ class GovernmentSubsidyOffsetIntent:
             raise GovernmentSubsidyOverpaymentError("government_subsidy_overpayment_amount_invalid")
 
 
-@dataclass(frozen=True, slots=True)
-class GovernmentRecipientSnapshot:
-    agency_identity: str
-    agency_name: str
-    bank_code: str
-    account_display: str
-    account_fingerprint: str
-    effective_date: str
-    due_date: str
-    evidence_reference: str
-
-    def __post_init__(self) -> None:
-        for value, label in (
-            (self.agency_identity, "agency identity"),
-            (self.agency_name, "agency name"),
-            (self.bank_code, "bank code"),
-            (self.account_display, "account"),
-            (self.account_fingerprint, "account fingerprint"),
-            (self.effective_date, "effective date"),
-            (self.due_date, "due date"),
-            (self.evidence_reference, "evidence reference"),
-        ):
-            _require_text(value, label)
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,49 +112,10 @@ class GovernmentSubsidyOverpaymentCandidate:
     offset_targets: tuple[GovernmentSubsidyOffsetTarget, ...] = ()
 
 
-@dataclass(frozen=True, slots=True)
-class GovernmentOverpaymentReturnReconciliationCandidate:
-    payable_identity: str
-    overpayment_identity: str
-    overpayment_version: int
-    bank_fact_identity: str
-    amount_ntd: MoneyNTD
-    remaining_after_ntd: MoneyNTD
-    resulting_status: GovernmentSubsidyOverpaymentStatus
-    fingerprint: PreviewFingerprint
 
 
-class GovernmentSubsidyReturnExcessRecoveryStatus(StrEnum):
-    """Lifecycle of money owed back after an over-sized government return."""
-
-    OPEN = "open"
-    PARTIALLY_RECOVERED = "partially_recovered"
-    RECOVERED = "recovered"
 
 
-@dataclass(frozen=True, slots=True)
-class GovernmentOverpaymentReturnReconciliationWithExcessCandidate:
-    """Owner candidate for a payout larger than its lawful return payable.
-
-    The lawful portion closes the existing payable.  The excess is a separate
-    Government Subsidy-owned recovery root and is deliberately not folded into
-    the payable, another overpayment, or a client/staff ledger.
-    """
-
-    payable_identity: str
-    overpayment_identity: str
-    overpayment_version: int
-    payable_version: int
-    bank_fact_identity: str
-    actual_amount_ntd: MoneyNTD
-    lawful_amount_ntd: MoneyNTD
-    excess_amount_ntd: MoneyNTD
-    payable_remaining_after_ntd: MoneyNTD
-    overpayment_remaining_after_ntd: MoneyNTD
-    resulting_status: GovernmentSubsidyOverpaymentStatus
-    recovery_identity: str
-    recovery_status: GovernmentSubsidyReturnExcessRecoveryStatus
-    fingerprint: PreviewFingerprint
 
 
 @dataclass(frozen=True, slots=True)
@@ -256,131 +187,10 @@ def build_receipt_with_overage_candidate(
     )
 
 
-def build_overpayment_return_candidate(
-    overpayment: GovernmentSubsidyOverpayment,
-    recipient: GovernmentRecipientSnapshot,
-) -> GovernmentSubsidyOverpaymentCandidate:
-    _require_return_allowed(overpayment)
-    amount = overpayment.remaining_amount_ntd
-    return _candidate(
-        overpayment,
-        amount,
-        amount,
-        GovernmentSubsidyOverpaymentStatus.RETURN_PAYABLE,
-        "return",
-        recipient,
-    )
 
 
-def build_overpayment_return_reconciliation_candidate(
-    overpayment: GovernmentSubsidyOverpayment,
-    payable_identity: str,
-    payable_remaining_ntd: MoneyNTD,
-    payable_version: int,
-    bank_fact: GovernmentBankFact,
-) -> GovernmentOverpaymentReturnReconciliationCandidate:
-    if overpayment.status not in {
-        GovernmentSubsidyOverpaymentStatus.RETURN_PAYABLE,
-        GovernmentSubsidyOverpaymentStatus.PARTIALLY_RETURNED,
-    }:
-        raise GovernmentSubsidyOverpaymentError("government_overpayment_return_reconciliation_conflict")
-    if bank_fact.direction is not GovernmentSubsidyBankDirection.OUTGOING:
-        raise GovernmentSubsidyOverpaymentError("government_subsidy_bank_fact_invalid")
-    if bank_fact.amount_ntd.amount > payable_remaining_ntd.amount:
-        raise GovernmentSubsidyOverpaymentError("government_overpayment_return_outbound_amount_exceeded")
-    remaining = MoneyNTD(payable_remaining_ntd.amount - bank_fact.amount_ntd.amount)
-    status = (
-        GovernmentSubsidyOverpaymentStatus.RETURNED
-        if remaining.amount == 0
-        else GovernmentSubsidyOverpaymentStatus.PARTIALLY_RETURNED
-    )
-    fingerprint = fingerprint_payload({
-        "overpayment_identity": overpayment.identity,
-        "overpayment_version": overpayment.version,
-        "payable_identity": payable_identity,
-        "payable_version": payable_version,
-        "bank_fact_identity": bank_fact.bank_fact_identity,
-        "amount_ntd": bank_fact.amount_ntd.amount,
-    })
-    return GovernmentOverpaymentReturnReconciliationCandidate(
-        payable_identity, overpayment.identity, overpayment.version, bank_fact.bank_fact_identity,
-        bank_fact.amount_ntd, remaining, status, fingerprint,
-    )
 
 
-def build_overpayment_return_reconciliation_with_excess_candidate(
-    overpayment: GovernmentSubsidyOverpayment,
-    payable_identity: str,
-    payable_remaining_ntd: MoneyNTD,
-    payable_version: int,
-    bank_fact: GovernmentBankFact,
-) -> GovernmentOverpaymentReturnReconciliationWithExcessCandidate:
-    """Build the dedicated excess branch for a government return payout.
-
-    This function intentionally does not weaken the normal reconciliation
-    builder.  It only accepts ``actual > lawful remaining`` and therefore
-    makes the operator choose the explicit excess command.
-    """
-
-    if overpayment.status not in {
-        GovernmentSubsidyOverpaymentStatus.RETURN_PAYABLE,
-        GovernmentSubsidyOverpaymentStatus.PARTIALLY_RETURNED,
-    }:
-        raise GovernmentSubsidyOverpaymentError(
-            "government_overpayment_return_reconciliation_conflict"
-        )
-    if bank_fact.direction is not GovernmentSubsidyBankDirection.OUTGOING:
-        raise GovernmentSubsidyOverpaymentError("government_subsidy_bank_fact_invalid")
-    if not isinstance(payable_remaining_ntd, MoneyNTD) or payable_remaining_ntd.amount <= 0:
-        raise GovernmentSubsidyOverpaymentError("government_overpayment_return_not_open")
-    if not isinstance(payable_version, int) or isinstance(payable_version, bool) or payable_version < 0:
-        raise GovernmentSubsidyOverpaymentError("government_overpayment_return_reconciliation_conflict")
-    _require_text(payable_identity, "return payable identity")
-    if overpayment.remaining_amount_ntd != payable_remaining_ntd:
-        # The source roots must agree before an excess can be classified.  A
-        # mismatch is evidence drift, not permission to guess the lawful sum.
-        raise GovernmentSubsidyOverpaymentError(
-            "government_overpayment_return_reconciliation_conflict"
-        )
-    if bank_fact.amount_ntd.amount <= payable_remaining_ntd.amount:
-        raise GovernmentSubsidyOverpaymentError(
-            "government_overpayment_return_excess_not_present"
-        )
-
-    actual = bank_fact.amount_ntd
-    lawful = payable_remaining_ntd
-    excess = MoneyNTD(actual.amount - lawful.amount)
-    recovery_identity = f"government-overpayment-return-excess:{bank_fact.bank_fact_identity}"
-    fingerprint = fingerprint_payload(
-        {
-            "operation": "government_subsidy.return_reconciliation_with_excess.v1",
-            "overpayment_identity": overpayment.identity,
-            "overpayment_version": overpayment.version,
-            "payable_identity": payable_identity,
-            "payable_version": payable_version,
-            "bank_fact_identity": bank_fact.bank_fact_identity,
-            "actual_amount_ntd": actual.amount,
-            "lawful_amount_ntd": lawful.amount,
-            "excess_amount_ntd": excess.amount,
-            "recovery_identity": recovery_identity,
-        }
-    )
-    return GovernmentOverpaymentReturnReconciliationWithExcessCandidate(
-        payable_identity=payable_identity,
-        overpayment_identity=overpayment.identity,
-        overpayment_version=overpayment.version,
-        payable_version=payable_version,
-        bank_fact_identity=bank_fact.bank_fact_identity,
-        actual_amount_ntd=actual,
-        lawful_amount_ntd=lawful,
-        excess_amount_ntd=excess,
-        payable_remaining_after_ntd=MoneyNTD(0),
-        overpayment_remaining_after_ntd=MoneyNTD(0),
-        resulting_status=GovernmentSubsidyOverpaymentStatus.RETURNED,
-        recovery_identity=recovery_identity,
-        recovery_status=GovernmentSubsidyReturnExcessRecoveryStatus.OPEN,
-        fingerprint=fingerprint,
-    )
 
 
 def _require_offset_allowed(overpayment: GovernmentSubsidyOverpayment) -> None:
@@ -391,9 +201,6 @@ def _require_offset_allowed(overpayment: GovernmentSubsidyOverpayment) -> None:
         raise GovernmentSubsidyOverpaymentError("government_subsidy_overpayment_disposition_conflict")
 
 
-def _require_return_allowed(overpayment: GovernmentSubsidyOverpayment) -> None:
-    if overpayment.status is not GovernmentSubsidyOverpaymentStatus.PENDING_REVIEW:
-        raise GovernmentSubsidyOverpaymentError("government_subsidy_overpayment_disposition_conflict")
 
 
 def _unique_offset_intents(intents):
@@ -442,10 +249,6 @@ def _candidate(overpayment, amount, remaining, status, kind, payload):
 
 
 def _fingerprint_payload(value):
-    if isinstance(value, GovernmentRecipientSnapshot):
-        return value.__dict__ if hasattr(value, "__dict__") else {
-            field: getattr(value, field) for field in value.__dataclass_fields__
-        }
     if isinstance(value, tuple) and value and isinstance(value[0], GovernmentSubsidyOffsetTarget):
         return [
             {
@@ -467,14 +270,4 @@ def _require_text(value: str, label: str) -> None:
     require_canonical_text(value, label, _IDENTITY_MAXIMUM_LENGTH)
 
 
-__all__ = [
-    "GovernmentRecipientSnapshot", "GovernmentOverpaymentReturnReconciliationCandidate", "GovernmentSubsidyOffsetIntent",
-    "GovernmentOverpaymentReturnReconciliationWithExcessCandidate",
-    "GovernmentSubsidyOffsetTarget", "GovernmentSubsidyOverpayment",
-    "GovernmentSubsidyOverpaymentCandidate", "GovernmentSubsidyOverpaymentError",
-    "GovernmentSubsidyOverpaymentStatus", "build_overpayment_offset_candidate",
-    "GovernmentSubsidyReceiptWithOverageCandidate", "build_receipt_with_overage_candidate",
-    "build_overpayment_return_candidate", "build_overpayment_return_reconciliation_candidate",
-    "build_overpayment_return_reconciliation_with_excess_candidate",
-    "GovernmentSubsidyReturnExcessRecoveryStatus",
-]
+__all__ = ['GovernmentSubsidyOffsetIntent', 'GovernmentSubsidyOffsetTarget', 'GovernmentSubsidyOverpayment', 'GovernmentSubsidyOverpaymentCandidate', 'GovernmentSubsidyOverpaymentError', 'GovernmentSubsidyOverpaymentStatus', 'build_overpayment_offset_candidate', 'GovernmentSubsidyReceiptWithOverageCandidate', 'build_receipt_with_overage_candidate']

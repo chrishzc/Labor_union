@@ -113,7 +113,7 @@ export const OrderControlledReopenPanel: FC<Props> = ({ caseNo, onObserved, onBu
           <button type="button" onClick={() => void apply('observation')}>只重新讀取重開結果</button>
         </div>
       )}
-      {status === 'observed' && <p role="status">受控重開已完成正式回讀：{draft?.receiptView?.lifecycle_status}。請重新確認正式服務日期與排班。</p>}
+      {status === 'observed' && <p role="status">受控重開已完成正式回讀：{draft?.receiptView?.lifecycle_status}。請重新確認服務日期與排班。</p>}
       {(error || draft?.error) && <p role="alert">{error ?? draft?.error?.message}</p>}
     </section>
   );

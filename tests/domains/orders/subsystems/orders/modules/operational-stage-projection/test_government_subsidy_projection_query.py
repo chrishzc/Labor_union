@@ -300,7 +300,7 @@ def test_open_overpayment_uses_existing_owner_status_and_read_action() -> None:
     overpayment = GovernmentSubsidyOverpaymentProjectionFact(
         identity="gov-overpayment:CASE-1",
         batch_id=10,
-        status=GovernmentSubsidyOverpaymentStatus.RETURN_PAYABLE,
+        status=GovernmentSubsidyOverpaymentStatus.PENDING_REVIEW,
         remaining_amount_ntd=600,
         version=4,
     )
@@ -329,11 +329,11 @@ def test_open_overpayment_uses_existing_owner_status_and_read_action() -> None:
     )
 
     item = page.items[0]
-    assert item.substatus_code == "return_payable"
+    assert item.substatus_code == "pending_review"
     assert item.source.owner == "Government Subsidy Overpayment"
     assert item.source.identity == "gov-overpayment:CASE-1"
     assert item.overpayment_remaining_ntd == 600
-    assert item.blockers[0].code == "government_subsidy_overpayment_return_payable"
+    assert item.blockers[0].code == "government_subsidy_overpayment_pending_review"
     assert item.available_read_actions[0].path.endswith("/gov-overpayment:CASE-1")
 
 

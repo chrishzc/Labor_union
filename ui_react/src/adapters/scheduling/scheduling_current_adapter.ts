@@ -87,9 +87,9 @@ function toneLabel(
 ): string {
   switch (tone) {
     case 'active':
-      return assignmentStatusLabel(statuses, false) ?? '正式服務日';
+      return assignmentStatusLabel(statuses, false) ?? '服務日';
     case 'rest':
-      return assignmentStatusLabel(statuses, true) ?? '正式指派休息日';
+      return assignmentStatusLabel(statuses, true) ?? '指派休息日';
     case 'buffer':
       return '7天防撞期 Buffer 鎖定';
     case 'waiting':

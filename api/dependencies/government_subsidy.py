@@ -80,23 +80,11 @@ class GovernmentSubsidyApplication:
     def apply_overpayment_offset(self, request):
         return self.overpayment_workflow.apply_offset(request)
 
-    def preview_overpayment_return(self, identity, due_date, evidence_reference):
-        return self.overpayment_workflow.preview_return(identity, due_date, evidence_reference)
 
-    def apply_overpayment_return(self, request):
-        return self.overpayment_workflow.apply_return(request)
 
-    def preview_overpayment_return_reconciliation(self, identity, finance_import_row_id):
-        return self.overpayment_workflow.preview_return_reconciliation(identity, finance_import_row_id)
 
-    def apply_overpayment_return_reconciliation(self, request):
-        return self.overpayment_workflow.apply_return_reconciliation(request)
 
-    def preview_overpayment_return_reconciliation_with_excess(self, identity, finance_import_row_id):
-        return self.overpayment_workflow.preview_return_reconciliation_with_excess(identity, finance_import_row_id)
 
-    def apply_overpayment_return_reconciliation_with_excess(self, request):
-        return self.overpayment_workflow.apply_return_reconciliation_with_excess(request)
 
     def query_overpayment(self, overpayment_identity, correlation_id):
         return self.overpayment_query_workflow.query(overpayment_identity, correlation_id)
@@ -135,8 +123,4 @@ def build_government_subsidy_application(connection):
     )
 
 
-__all__ = [
-    "GovernmentSubsidyApplication",
-    "build_government_subsidy_application",
-    "get_government_subsidy_application",
-]
+__all__ = ['GovernmentSubsidyApplication', 'build_government_subsidy_application', 'get_government_subsidy_application']

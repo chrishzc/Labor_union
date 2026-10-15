@@ -140,6 +140,10 @@
   box-shadow: 0 2px 8px rgba(255, 127, 80, 0.3);
 }
 
+.finance-payable-tabs {
+  position: static;
+}
+
 .finance-tab-bar button:focus-visible,
 .finance-toolbar button:focus-visible,
 .finance-workspace select:focus-visible,
@@ -348,6 +352,21 @@
   border-radius: 10px;
   margin: 12px 0 20px;
 }
+
+.cash-requirements-table {
+  min-width: 1120px;
+}
+
+.cash-requirements-table th,
+.cash-requirements-table td:nth-child(1),
+.cash-requirements-table td:nth-child(5),
+.cash-requirements-table td:nth-child(6) {
+  white-space: nowrap;
+}
+
+.cash-requirements-table td:nth-child(7) { min-width: 160px; }
+.cash-requirements-table td:nth-child(8) { min-width: 140px; }
+.cash-requirements-table td:nth-child(9) { min-width: 240px; }
 
 .finance-table {
   width: 100%;

@@ -85,11 +85,8 @@ function mapError(error: unknown): GovernmentOverpaymentRecoveryError {
 function validPreviewRequest(request: GovernmentOverpaymentDispositionPreviewRequest): GovernmentOverpaymentDispositionPreviewRequest {
   const parsed = GovernmentOverpaymentDispositionPreviewRequestSchema.safeParse(request);
   if (!parsed.success) throw new GovernmentOverpaymentRecoveryError('GOVERNMENT_OVERPAYMENT_INPUT_INVALID', '政府溢撥處置輸入不符合 strict 契約。');
-  if (parsed.data.disposition === 'offset' && (parsed.data.targets.length === 0 || parsed.data.due_date != null)) {
-    throw new GovernmentOverpaymentRecoveryError('GOVERNMENT_OVERPAYMENT_OFFSET_INPUT_INVALID', '抵扣處置必須有標的且不得帶退款日期。');
-  }
-  if (parsed.data.disposition === 'return' && (parsed.data.targets.length !== 0 || !parsed.data.due_date)) {
-    throw new GovernmentOverpaymentRecoveryError('GOVERNMENT_OVERPAYMENT_RETURN_INPUT_INVALID', '退還處置只能帶退款日期，不得帶抵扣標的。');
+  if (parsed.data.targets.length === 0) {
+    throw new GovernmentOverpaymentRecoveryError('GOVERNMENT_OVERPAYMENT_OFFSET_INPUT_INVALID', '抵扣處置必須有已核准且尚未清償的標的。');
   }
   return parsed.data;
 }

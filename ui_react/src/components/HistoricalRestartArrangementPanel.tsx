@@ -17,13 +17,13 @@ function explicitSegments(
   dates: ServiceDateConfirmationQueryView,
   allocation: Record<string, number>,
 ): HistoricalArrangementSegmentPayload[] {
-  if (dates.current_dates.length === 0) throw new Error('請先確認正式服務日期。');
+  if (dates.current_dates.length === 0) throw new Error('請先確認服務日期。');
   const segments: HistoricalArrangementSegmentPayload[] = [];
   for (const day of dates.current_dates) {
     const staffId = dates.bound_staff.length === 1
       ? dates.bound_staff[0].staff_id
       : allocation[day];
-    if (!staffId) throw new Error('請明確指定每個正式服務日的月嫂。');
+    if (!staffId) throw new Error('請明確指定每個服務日的月嫂。');
     const previous = segments.at(-1);
     if (previous?.staff_id === staffId) previous.service_dates.push(day);
     else segments.push({ staff_id: staffId, service_dates: [day] });

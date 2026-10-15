@@ -22,9 +22,6 @@ const SUBSTATUS_LABELS: Readonly<Record<GovernmentSubsidySubstatusCode, string>>
   pending_review: '溢撥待檢視',
   offset_reserved: '折抵保留中',
   offset_applied: '折抵完成',
-  return_payable: '退款待支付',
-  partially_returned: '部分退款',
-  returned: '退款完成',
 };
 
 function formatNtd(value: number): string {

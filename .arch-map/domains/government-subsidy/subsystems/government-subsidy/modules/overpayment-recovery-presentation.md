@@ -5,19 +5,20 @@
 - subsystem: `government-subsidy`
 
 ## Responsibility
-呈現GOVSUB-006既有Query／Preview／Confirm／Apply、stale refresh、receipt-only不完成及owner＋current-issue雙重readback。GOVSUB-007 不掛 Anomalies 或本 workbench；其 owner Query 僅以 optional typed recovery projection 提供 committed readback。一般畫面只顯示closed狀態、剩餘金額、合法處置、補助標的、政府退款對象與安全錯誤；owner version與source references不在一般操作畫面顯示。不得改寫offset／return互斥、terminal predicate或重送Apply。
+呈現 GOVSUB-006 的 offset Query／Preview／Confirm／Apply、stale refresh、receipt-only 不完成及既有回讀確認。只接受合法抵扣標的；退回選項、政府退款對象及相關 Query 欄位已移除。一般畫面只顯示狀態、剩餘金額、抵扣標的與安全錯誤，owner version 與 source references 不在一般操作畫面顯示。
 
 ## Implementation
 - primary: `ui_react/src/components/GovernmentOverpaymentRecoveryWorkbench.tsx`
 - typed query decoder: `ui_react/src/api/government_subsidy/government_overpayment_recovery_schemas.ts`
 
 ## Contracts
-- `document/架構重整/01_規格基線/14_Government_Subsidy_Domain.md` — 政府溢撥offset／return、stale、idempotency與readback規則。
+- `document/架構重整/01_規格基線/14_Government_Subsidy_Domain.md` — 政府溢撥 offset、stale、idempotency 與 readback 規則。
 - `document/架構重整/01_規格基線/12_Global_效能與UX體感架構.md` — 一般畫面資訊層級與closed error boundary。
 
 ## Verification
 - layout_status: `custom_current`
 - test_root: `ui_react/src/tests/government_overpayment_recovery_workbench.test.tsx`
+- test_root: `ui_react/src/tests/government_overpayment_recovery_client.test.ts`
 - routing: `.arch-map/tests/domains/government-subsidy/subsystems/government-subsidy/modules/overpayment-recovery-presentation.md`
 
 ## Change triggers

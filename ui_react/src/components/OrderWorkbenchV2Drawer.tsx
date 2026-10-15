@@ -77,7 +77,7 @@ type WorkGroup = typeof WORK_GROUPS[number]['id'];
 
 const SERVICE_WORK_VIEWS = [
   { id: 'dates', label: '確認日期' },
-  { id: 'assignment', label: '正式排班' },
+  { id: 'assignment', label: '排班' },
   { id: 'completion', label: '完工確認' },
 ] as const;
 type ServiceWorkView = typeof SERVICE_WORK_VIEWS[number]['id'];
@@ -448,7 +448,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
                   }}
                 />
                 </div><div hidden={serviceView !== 'assignment'}>
-                {datesPending && <p role="status">服務日期尚未完成保存或回讀，請先到「確認日期」接續；目前不能以舊日期辦理正式排班。</p>}
+                {datesPending && <p role="status">服務日期尚未完成保存或回讀，請先到「確認日期」接續；目前不能以舊日期辦理排班。</p>}
                 <fieldset disabled={datesPending}>
                 <OrderAssignmentPlanPanel caseNo={caseNo} revision={refreshRevision} historicalArrangementPending={historicalArrangementPending} onObserved={refreshFacts} onOpenReplacement={() => { setDrawerTab('changes'); setReplacementExpanded(true); }} />
                 </fieldset>
@@ -530,7 +530,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
           {assignmentPlan.status === 'ready' && assignmentPlan.data.assignments.length === 0 && <p>尚未正式安排月嫂。</p>}
           {assignmentPlan.status === 'ready' && assignmentPlan.data.assignments.map((segment) => <article className="order-case-assignment" key={`${segment.sequence}:${segment.staff_id}`}>
             <strong>第 {segment.sequence} 段 · 月嫂編號 {segment.staff_id}</strong>
-            <span>{segment.assigned_start_date} ～ {segment.assigned_end_date}</span><span>{segment.official_service_dates.length} 個正式服務日</span>
+            <span>{segment.assigned_start_date} ～ {segment.assigned_end_date}</span><span>{segment.official_service_dates.length} 個服務日</span>
           </article>)}
         </section>
         <div className="order-case-wide"><OrderWorkbenchV2OwnerContext caseNo={caseNo} revision={refreshRevision} /></div>

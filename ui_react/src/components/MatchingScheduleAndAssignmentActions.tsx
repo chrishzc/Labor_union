@@ -1,6 +1,6 @@
 /**
  * File: MatchingScheduleAndAssignmentActions.tsx
- * Description: 以人工日期表確認及正式排班 Preview／Apply 完成 waiting-lock conversion。
+ * Description: 以人工日期表確認及排班 Preview／Apply 完成 waiting-lock conversion。
  */
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { orderMutationFlowStore, type AssignmentPlanApplyCommand, type ScheduleMutationCommand } from '../adapters/orders/order_mutation_flow_store';
@@ -242,7 +242,7 @@ export const MatchingScheduleAndAssignmentActions: React.FC<Props> = ({
       const preview = await assignmentPlanMutationClient.preview(caseNo, assignmentSegments, controller.signal);
       if (!controller.signal.aborted) setAssignmentPreview(preview);
     } catch (error) {
-      if (!controller.signal.aborted) setAssignmentLocalError(message(error, '無法檢查正式排班影響。'));
+      if (!controller.signal.aborted) setAssignmentLocalError(message(error, '無法檢查排班影響。'));
     } finally {
       if (!controller.signal.aborted) setAssignmentBusy(false);
     }
@@ -283,10 +283,10 @@ export const MatchingScheduleAndAssignmentActions: React.FC<Props> = ({
         orderMutationFlowStore.clearAssignmentPlan(command.caseNo, command.planId);
       } else {
         orderMutationFlowStore.setAssignmentPlan(command.caseNo, command.planId, {
-          status: 'outcome_unknown', command, acceptedJob: null, job: null, readbackStatus: 'not_started', error: message(error, '無法建立正式排班。'),
+          status: 'outcome_unknown', command, acceptedJob: null, job: null, readbackStatus: 'not_started', error: message(error, '無法建立排班。'),
         });
       }
-      if (isActiveAssignmentScope(activeAssignmentScope, command)) setAssignmentLocalError(message(error, '無法建立正式排班。'));
+      if (isActiveAssignmentScope(activeAssignmentScope, command)) setAssignmentLocalError(message(error, '無法建立排班。'));
     } finally {
       if (isActiveAssignmentScope(activeAssignmentScope, command)) setAssignmentBusy(false);
     }
@@ -310,17 +310,17 @@ export const MatchingScheduleAndAssignmentActions: React.FC<Props> = ({
         });
         if (observed.status === 'failed' || observed.status === 'cancelled') {
           const failure = observed.outcome?.kind === 'failure' ? observed.outcome.error : null;
-          throw new Error(failure ? `${failure.message}（${failure.code}）` : `正式排班工作 ${observed.status}。`);
+          throw new Error(failure ? `${failure.message}（${failure.code}）` : `排班工作 ${observed.status}。`);
         }
         if (observed.status === 'succeeded') {
           if (observed.outcome?.kind !== 'success' || observed.outcome.result_reference !== `assignment_plan:${command.caseNo}`) {
-            throw new Error('正式排班工作回執案件 identity 不一致。');
+            throw new Error('排班工作回執案件 identity 不一致。');
           }
           const readback = await ordersQueryClient.getAssignmentPlan(command.caseNo);
           assertAssignmentReadback(readback, command);
           if (!isActiveAssignmentScope(activeAssignmentScope, command)) {
             orderMutationFlowStore.setAssignmentPlan(command.caseNo, command.planId, {
-              status: 'observation_failed', command, acceptedJob: { job_id: jobId, status_url: '' }, job: observed, readbackStatus: 'failed', error: '案件或方案已切換；回到原案件後重新查詢正式排班結果。',
+              status: 'observation_failed', command, acceptedJob: { job_id: jobId, status_url: '' }, job: observed, readbackStatus: 'failed', error: '案件或方案已切換；回到原案件後重新查詢排班結果。',
             });
             return;
           }
@@ -332,11 +332,11 @@ export const MatchingScheduleAndAssignmentActions: React.FC<Props> = ({
         }
         await new Promise((resolve) => window.setTimeout(resolve, 500));
       }
-      throw new Error('正式排班仍在處理；請重新查詢結果。');
+      throw new Error('排班仍在處理；請重新查詢結果。');
     } catch (error) {
       const current = orderMutationFlowStore.getAssignmentPlan(command.caseNo, command.planId);
       orderMutationFlowStore.setAssignmentPlan(command.caseNo, command.planId, {
-        status: 'observation_failed', command, acceptedJob: current?.acceptedJob ?? { job_id: jobId, status_url: '' }, job: current?.job ?? null, readbackStatus: 'failed', error: message(error, '正式排班結果尚未完成回讀，請重新查詢原結果。'),
+        status: 'observation_failed', command, acceptedJob: current?.acceptedJob ?? { job_id: jobId, status_url: '' }, job: current?.job ?? null, readbackStatus: 'failed', error: message(error, '排班結果尚未完成回讀，請重新查詢原結果。'),
       });
     } finally {
       if (isActiveAssignmentScope(activeAssignmentScope, command)) setAssignmentBusy(false);
@@ -413,24 +413,24 @@ export const MatchingScheduleAndAssignmentActions: React.FC<Props> = ({
         );
       })}
       <div role="status" style={{ color: schedule.gate_passed ? '#166534' : '#74593f' }}>
-        {schedule.gate_passed ? '雙方已確認同一日期版本，可建立正式排班。' : '客戶與所有月嫂皆確認後，才可建立正式排班。'}
+        {schedule.gate_passed ? '雙方已確認同一日期版本，可建立排班。' : '客戶與所有月嫂皆確認後，才可建立排班。'}
       </div>
       {schedule.gate_passed && waitingLockAcquired && !assignmentExists && (
         <div style={{ display: 'grid', gap: '8px', borderTop: '1px solid #dec0b6', paddingTop: '12px' }}>
-          <button type="button" className="matching-action-btn-sm" disabled={assignmentBusy || assignmentFlow !== undefined || assignmentSegments.length === 0} onClick={() => void previewAssignment()}>{assignmentBusy ? '處理中…' : '檢查建立正式排班影響'}</button>
+          <button type="button" className="matching-action-btn-sm" disabled={assignmentBusy || assignmentFlow !== undefined || assignmentSegments.length === 0} onClick={() => void previewAssignment()}>{assignmentBusy ? '處理中…' : '檢查建立排班影響'}</button>
           {assignmentPreviewForDisplay && (
             <>
               <div role="status">影響檢查：將建立 {assignmentPreviewForDisplay.assignments.length} 段正式指派並轉換等待訂金鎖。</div>
-              <label>正式排班原因<input aria-label="正式排班原因" maxLength={500} disabled={assignmentCommand !== null} value={assignmentReasonForDisplay} onChange={(event) => { setAssignmentReason(event.target.value); setAssignmentConfirmed(false); }} /></label>
+              <label>排班原因<input aria-label="排班原因" maxLength={500} disabled={assignmentCommand !== null} value={assignmentReasonForDisplay} onChange={(event) => { setAssignmentReason(event.target.value); setAssignmentConfirmed(false); }} /></label>
               <label><input type="checkbox" disabled={assignmentCommand !== null} checked={retryingOriginalAssignment || assignmentConfirmed} onChange={(event) => setAssignmentConfirmed(event.target.checked)} />我已核對月嫂、日期、契約與訂金。</label>
-              <button type="button" className="orders-load-more-btn" disabled={assignmentBusy || (!retryingOriginalAssignment && (!assignmentConfirmed || !assignmentReasonForDisplay.trim()))} onClick={() => void applyAssignment()}>{assignmentBusy ? '正式排班套用並回讀中…' : retryingOriginalAssignment ? '以原確認操作重新送出' : '確認套用正式排班'}</button>
+              <button type="button" className="orders-load-more-btn" disabled={assignmentBusy || (!retryingOriginalAssignment && (!assignmentConfirmed || !assignmentReasonForDisplay.trim()))} onClick={() => void applyAssignment()}>{assignmentBusy ? '排班套用並回讀中…' : retryingOriginalAssignment ? '以原確認操作重新送出' : '確認套用排班'}</button>
             </>
           )}
           {assignmentJobId && !assignmentReadback && (
-            <div role="status">{assignmentJob?.status === 'succeeded' ? '正式排班處理已完成，正在核對結果。' : '正式排班處理中。'}</div>
+            <div role="status">{assignmentJob?.status === 'succeeded' ? '排班處理已完成，正在核對結果。' : '排班處理中。'}</div>
           )}
-          {assignmentJobId && !assignmentReadback && !assignmentBusy && assignmentCommand && <button type="button" onClick={() => void observeAssignment(assignmentJobId, assignmentCommand)}>重新查詢正式排班結果</button>}
-          {assignmentReadback && <div role="status" style={{ color: '#166534' }}>正式排班已完成並回讀一致。</div>}
+          {assignmentJobId && !assignmentReadback && !assignmentBusy && assignmentCommand && <button type="button" onClick={() => void observeAssignment(assignmentJobId, assignmentCommand)}>重新查詢排班結果</button>}
+          {assignmentReadback && <div role="status" style={{ color: '#166534' }}>排班已完成並回讀一致。</div>}
           {assignmentError && <div role="alert" className="mutation-error-banner">{assignmentError}</div>}
         </div>
       )}
@@ -459,11 +459,11 @@ function assertAssignmentReadback(
   readback: Awaited<ReturnType<typeof ordersQueryClient.getAssignmentPlan>>,
   command: AssignmentPlanApplyCommand,
 ): void {
-  if (readback.case_no !== command.caseNo) throw new Error('正式排班回讀案件 identity 不一致。');
+  if (readback.case_no !== command.caseNo) throw new Error('排班回讀案件 identity 不一致。');
   if (
     readback.scheduling_version !== command.preview.scheduling_version + 1
     || readback.scheduling_generation !== command.preview.scheduling_generation
-  ) throw new Error('正式排班回讀版本不一致。');
+  ) throw new Error('排班回讀版本不一致。');
   if (
     readback.assignments.length !== command.segments.length
     || !command.segments.every((expected, index) => {
@@ -475,7 +475,7 @@ function assertAssignmentReadback(
         && actual.official_service_dates.length === expected.official_service_dates.length
         && actual.official_service_dates.every((date, dateIndex) => date === expected.official_service_dates[dateIndex]);
     })
-  ) throw new Error('正式排班回讀指派與原方案不一致。');
+  ) throw new Error('排班回讀指派與原方案不一致。');
 }
 
 function assertScheduleReceipt(receipt: MatchingScheduleState, command: ScheduleMutationCommand): void {

@@ -28,9 +28,6 @@ def _counts(**overrides):
         "pending_review": 0,
         "offset_reserved": 0,
         "offset_applied": 0,
-        "return_payable": 0,
-        "partially_returned": 0,
-        "returned": 0,
     }
     result.update(overrides)
     return result

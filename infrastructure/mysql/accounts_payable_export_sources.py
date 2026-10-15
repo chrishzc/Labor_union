@@ -25,12 +25,7 @@ from domains.payroll.payment_due_date import (
 )
 from domains.staff_payables.reconciliation import StaffPayableStatus
 from shared_kernel.money import MoneyNTD
-from subsystems.staff_payables.accounts_payable_export import (
-    CaseStaffPayableAuditItem,
-    ClientRefundExportFact,
-    GovernmentOverpaymentReturnExportFact,
-    StaffPayableExportFact,
-)
+from subsystems.staff_payables.accounts_payable_export import CaseStaffPayableAuditItem, ClientRefundExportFact, StaffPayableExportFact
 
 
 class MySqlReadOnlySnapshot:
@@ -108,17 +103,6 @@ class MySqlClientRefundExportSource:
         return tuple(_refund_fact(row) for row in rows)
 
 
-class MySqlGovernmentOverpaymentReturnExportSource:
-    def __init__(self, connection) -> None:
-        self._connection = connection
-
-    def load(
-        self, target_payment_date: date
-    ) -> tuple[GovernmentOverpaymentReturnExportFact, ...]:
-        with self._connection.cursor() as cursor:
-            cursor.execute(_GOVERNMENT_RETURNS_SQL, (target_payment_date,))
-            rows = tuple(cursor.fetchall())
-        return tuple(_government_return_fact(row) for row in rows)
 
 
 def _staff_fact(row) -> StaffPayableExportFact:
@@ -356,16 +340,6 @@ def _refund_fact(row) -> ClientRefundExportFact:
     )
 
 
-def _government_return_fact(row) -> GovernmentOverpaymentReturnExportFact:
-    return GovernmentOverpaymentReturnExportFact(
-        payable_identity=str(row["payable_identity"]),
-        overpayment_identity=str(row["overpayment_identity"]),
-        recipient_name=_clean_text(row["agency_name"]),
-        bank_code=_clean_text(row["bank_code"]),
-        bank_account=_clean_text(row["account_display"]),
-        amount=MoneyNTD(_integer(row["remaining_amount_ntd"], "government return")),
-        payment_date=_date_value(row["due_date"]),
-    )
 def _refund_has_anomaly(
     amount_due: int,
     net_refunded: int,
@@ -636,21 +610,6 @@ ORDER BY obligations.case_no, obligations.obligation_identity
 """
 
 
-_GOVERNMENT_RETURNS_SQL = """
-SELECT payable_identity,overpayment_identity,agency_name,bank_code,account_display,
-       remaining_amount_ntd,due_date
-FROM government_overpayment_return_payables
-WHERE due_date <= %s
-  AND status = 'payable'
-  AND remaining_amount_ntd > 0
-ORDER BY due_date,payable_identity
-"""
 
 
-__all__ = [
-    "MySqlClientRefundExportSource",
-    "MySqlGovernmentOverpaymentReturnExportSource",
-    "MySqlReadOnlySnapshot",
-    "MySqlStaffPayableExportSource",
-    "_HISTORICAL_STAFF_PAYABLE_PROJECTION_SQL",
-]
+__all__ = ['MySqlClientRefundExportSource', 'MySqlReadOnlySnapshot', 'MySqlStaffPayableExportSource', '_HISTORICAL_STAFF_PAYABLE_PROJECTION_SQL']

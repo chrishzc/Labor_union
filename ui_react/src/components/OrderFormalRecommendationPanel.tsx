@@ -801,8 +801,8 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
                   <button className="formal-recommendation-primary" type="button" aria-label={`預覽方案 ${current.plan.planId} 等待訂金鎖`} onClick={() => void previewLock()}>檢查並保留檔期</button>
                   {requiresServiceDates && (
                     <div className="formal-recommendation-readiness-error" role="alert">
-                      <p>請先完成正式服務日期確認，再回來檢查並保留檔期。</p>
-                      {onOpenServiceDates && <button type="button" onClick={onOpenServiceDates}>前往確認正式服務日期</button>}
+                      <p>請先完成服務日期確認，再回來檢查並保留檔期。</p>
+                      {onOpenServiceDates && <button type="button" onClick={onOpenServiceDates}>前往確認服務日期</button>}
                     </div>
                   )}
                   {lockPreview !== null && (

@@ -136,7 +136,7 @@ confirmation、waiting lock、commitment 與排班的 immutable 歷史保留，�
 正式 assignment。轉換前仍必須驗證契約流程完成、服務時間完整，以及 Client Finance 提供的訂金已正式核銷或有效的一般市民訂金未付人工放行；放行不得把訂金投影成已核銷或零元；
 legacy 缺漏只能進異常與人工修正，不得由 Assignment Plan 猜測或補造。
 
-依第 `21` 份正式規格，存在簽約前 commitment 時，第一次 bootstrap 還必須鎖定並驗證
+依第 `21` 份正式規格，存在所有月嫂簽約完成後保存的 commitment 時，第一次 bootstrap 還必須鎖定並驗證
 matching plan/version、staff 與精確日期集合完全相同；不同時回
 `commitment_execution_mismatch` 且零寫入。成功時 assignments、schedules、Payroll impact、
 commitment `converted` terminal event、outbox 與 receipt 同一交易提交。Calendar Read、Payroll
@@ -223,9 +223,36 @@ Batch replay：
 
 ### Calendar Read
 
-逐日顯示 waiting lock、buffer、assignment interval、正式工作日與休假。只組合 typed ViewModel，不在 Query 或 render 時轉移狀態。
+日曆的業務說明使用「排班」「服務日」「工作日」與「歷史指派」，不加「正式」前綴；技術識別名稱維持原名。資料來源與納入時點如下（2026-10-15 澄清）：
 
-Calendar 亦顯示 current 長假／暫停接案的日期、kind 與原因。這些日期不可標為可接案、正式服務日、
+| 顯示內容 | 來源步驟 | 納入條件 |
+|---|---|---|
+| 等待訂金檔期及緩衝提醒 | 媒合決定配對後保留等待訂金檔期 | 有目前有效的 waiting lock／buffer，且日期與查詢期間交集；不表示已有排班工作日 |
+| 排班區間、工作日、休假及服務狀態 | 確認服務日期與排班中的排班建立／安排；後續請假、順延、代班修改沿同一 owner 保存 | 有目前有效 assignment／逐日排班且日期與查詢期間交集；只保存日期或產生前段服務說明不形成這些排班資料 |
+| 已完成案件的歷史指派區間 | 已保存的 completed 歷史 assignment 與起訖日 | 即使未重啟精算且缺逐日排班，仍依下節規則唯讀顯示；重啟精算使舊歷史指派失效後不再覆蓋目前排班 |
+| 長假／暫停接案 | 月嫂不可服務期間設定 | 有目前有效不可服務期間且與查詢期間交集 |
+
+「尋找月嫂與詢問意願」中的每週服務說明不是日曆排班來源。日曆可顯示歷史區間，不表示該區間可計入「每週服務中與工時」；工時表另要求目前有效逐日排班。來源修改套用後，重新查詢取得最新投影。
+
+#### 日曆顯示優先順序與排班替換標準（2026-10-15 澄清）
+
+日曆查詢只讀取、組合目前資料，不寫入或覆寫排班。顯示優先順序與業務操作造成的排班替換分開判定：
+
+| 情況 | 處理標準 |
+|---|---|
+| 新的每週服務說明或只保存服務日期 | 不替換已存在的排班；後續仍須經排班建立／調整操作及相關 gate 驗證 |
+| 同案人員、日期或指派區間有變更 | 經相應改期、換人、請假／順延／代班的 Preview／Apply，通過版本、服務量及占用檢查後，以新有效排班取代舊有效排班；舊紀錄與變更血緣保留，不原地改寫 |
+| 只改費用、每日時數或其他不改人員／日期／區間的條件 | 保留原排班版本；相關帳務或工時依其 owner 更新，不因此另建排班 |
+| 等待訂金檔期轉成排班 | 契約、訂金與日期確認等關卡符合，排班建立成功後由同一交易轉換檔期保留；不能在日曆查詢時自動轉換 |
+| 目前資料與歷史指派區間重疊 | 目前有效排班、檔期保留、緩衝或不可服務資料優先；歷史區間只補沒有目前資料的日期。已重啟精算而失效的舊歷史指派不再補顯示 |
+| 多筆目前占用互相衝突 | 排班、等待訂金服務日與不可服務期間不得靠顯示順序互相覆蓋；回 typed conflict，修改操作零寫入，由人員依相應流程調整 |
+| 緩衝提醒與其他資料重疊 | 緩衝是提醒，可與排班等資料並列；不取代工作日、不改月嫂服務狀態，也不以緩衝重疊阻擋安排 |
+
+替換後只讀新的有效排班作為目前排班，重新查詢日曆顯示結果；保留歷史不代表舊排班仍同時有效。
+
+逐日顯示 waiting lock、buffer、assignment interval、排班工作日與休假。只組合 typed ViewModel，不在 Query 或 render 時轉移狀態。
+
+Calendar 亦顯示 current 長假／暫停接案的日期、kind 與原因。這些日期不可標為可接案、排班服務日、
 assignment leave outcome 或七日 buffer；取消後保留歷史但不再出現在 current availability projection。
 
 Calendar／React 只能顯示 Scheduling typed projection 的 `planned／active／completed` 與逐日
@@ -245,13 +272,13 @@ Calendar 的「可進行出勤精算案件」必須先以 Scheduling 的單一�
   空白占位方塊；空白日期不是一種排班事件。月嫂姓名下方只顯示 server typed 的 current 可排班狀態
   與必要人可讀原因，不得由灰階、cell 是否存在或瀏覽器日期自行推導 availability。
 - 真實 assignment／lock／buffer／不可服務期間仍依各自 typed kind 顯示，不能為了移除灰塊而隱藏
-  正式占用、合法唯讀歷史或 blocker。
+  排班占用、合法唯讀歷史或 blocker。
 - 「可進行出勤精算案件」改為下拉選單。選項由上述單一批次 Scheduling read 與 Orders typed summaries
   的 server／client adapter 組合取得，包含穩定 case identity 與人可讀 label；不得要求操作者手動輸入
   `case_no`，也不得使用 `orders.staff_id`／`staff_name` fallback 或逐案 N+1 查詢補選項。
 - 下拉選單須有 loading、合法空、error、retry、stale request cancellation 與 identity-preserving refresh；
   options query 失敗時不掛載 Preview／Apply，且不得保留上一位月嫂的 stale 案件。
-- 選定排查案件後，每位月嫂的月曆列須以一個連續區間顯示該案件的完整正式服務檔期；若完整檔期內
+- 選定排查案件後，每位月嫂的月曆列須以一個連續區間顯示該案件的完整排班服務檔期；若完整檔期內
   任一天與 assignment、lock、buffer 或不可服務期間衝突，仍顯示整段案件檔期並將整段標示為有衝突，
   衝突天數與原因留在狀態文字／詳細排查中。不得只渲染零碎衝突日期而隱藏同案其餘服務日期。
 
@@ -265,10 +292,10 @@ Calendar 的「可進行出勤精算案件」必須先以 Scheduling 的單一�
 
 完成訂單與 `completed` assignment 一律可在 Calendar 唯讀查閱，完成狀態只禁止
 leave／substitution 等 mutation，不得使歷史區段消失。Query 優先顯示
-assignment-owned `staff_schedule.assignment_id` 的正式每日 ownership；若 historical／legacy
-資料缺少該 daily ownership，但 `case_staff_assignments` 保有 completed assignment 的正式起訖日，
-Calendar 必須以該區段顯示 `historical_assignment`／「歷史正式指派」。此 fallback 是歷史占用
-view，不能宣稱為正式工作日、不能重算 actual hours、不能產生薪資、不能變更 availability
+assignment-owned `staff_schedule.assignment_id` 的每日 ownership；若 historical／legacy
+資料缺少該 daily ownership，但 `case_staff_assignments` 保有 completed assignment 的起訖日，
+Calendar 必須以該區段顯示 `historical_assignment`／「歷史指派」。此 fallback 是歷史占用
+view，不能宣稱為排班工作日、不能重算 actual hours、不能產生薪資、不能變更 availability
 current projection，也不能授權任何 Apply。
 
 同一天若同時存在 assignment-owned daily schedule、waiting lock、buffer 或其他 current fact，

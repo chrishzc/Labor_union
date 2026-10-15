@@ -224,7 +224,7 @@ export async function previewLeaveSubstitutionFlow(caseNo: string, options?: Lea
   if (!request) throw new LeaveSubstitutionValidationError('請先提供完整請假代班 request。');
   const assignments = requireAssignments(draft);
   if (assignments.length === 0) {
-    throw new LeaveSubstitutionValidationError('此訂單沒有可建立 Preview 的正式服務指派。');
+    throw new LeaveSubstitutionValidationError('此訂單沒有可建立 Preview 的服務指派。');
   }
   leaveSubstitutionFlowStore.setPreviewLoading(caseNo);
   try {

@@ -60,7 +60,7 @@ vi.mock('../../../../../../../components/OrderActualStartPanel', () => ({
   OrderActualStartPanel: (props: { onObserved?: (operation: 'date_only' | 'reschedule') => void; onOpenServiceDates?: () => void }) => {
     mocks.actualStartRender(props);
     return <>
-      <button type="button" onClick={props.onOpenServiceDates}>模擬尚未建立正式排班</button>
+      <button type="button" onClick={props.onOpenServiceDates}>模擬尚未建立排班</button>
       <button type="button" onClick={() => props.onObserved?.('date_only')}>模擬實際開始日正式回讀成功</button>
     </>;
   },
@@ -86,7 +86,7 @@ function stage(code: CoreStageCode, index: number) {
   return {
     ordinal: index + 1,
     code,
-    label: code === 'confirmed_service_dates' ? '正式服務日期確認' : code,
+    label: code === 'confirmed_service_dates' ? '服務日期確認' : code,
     owner: baseline ? 'Historical Orders' : current ? 'Orders / Scheduling' : `owner-${code}`,
     status,
     substatus_code: SUBSTATUS_BY_STAGE_STATUS[code][status],
@@ -260,7 +260,7 @@ describe('historical Drawer immutable evidence boundary', () => {
     const ownerHeading = await within(dialog).findByRole('heading', { name: '歷史案件目前進度' });
     const ownerSection = ownerHeading.closest('section');
     if (!(ownerSection instanceof HTMLElement)) throw new Error('找不到目前正式 owner progression 區');
-    expect(within(ownerSection).getByText(/正式服務日期確認/)).toBeInTheDocument();
+    expect(within(ownerSection).getByText(/服務日期確認/)).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole('button', { name: '訂單與服務資料' }));
     const evidenceRegion = within(dialog).getByRole('heading', { name: '歷史服務資料' }).closest('section')!;
     expect(within(dialog).getByText('尚未正式安排月嫂。')).toBeInTheDocument();
@@ -282,7 +282,7 @@ describe('historical Drawer immutable evidence boundary', () => {
     if (!(context instanceof HTMLElement)) throw new Error('找不到案件摘要區');
 
     expect(context).toHaveTextContent('2026-09-03 → 2026-09-22');
-    expect(context).toHaveTextContent('暫時無法取得');
+    expect(context).toHaveTextContent('讀取失敗');
     expect(context).not.toHaveTextContent('讀取中');
   });
 
@@ -339,7 +339,7 @@ describe('historical Drawer immutable evidence boundary', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: '案件異動' }));
     fireEvent.click(screen.getByRole('button', { name: '確認／更正實際開始日' }));
-    fireEvent.click(await screen.findByRole('button', { name: '模擬尚未建立正式排班' }));
+    fireEvent.click(await screen.findByRole('button', { name: '模擬尚未建立排班' }));
     expect(await screen.findByLabelText('服務日期精算工作區')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '案件異動' }));
     fireEvent.click(await screen.findByRole('button', { name: '模擬實際開始日正式回讀成功' }));

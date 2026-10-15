@@ -44,7 +44,7 @@ from domains.government_subsidy.ledger import (
     SourceReceiptFacts,
     reduce_batch_status,
 )
-from domains.government_subsidy.overpayment import GovernmentRecipientSnapshot, GovernmentSubsidyOverpayment, GovernmentSubsidyOverpaymentStatus
+from domains.government_subsidy.overpayment import GovernmentSubsidyOverpayment, GovernmentSubsidyOverpaymentStatus
 from domains.government_subsidy.payer_master import PAYER_IDENTITY, PAYER_NAME
 from shared_kernel.clock import BusinessClock, SystemBusinessClock
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
@@ -69,13 +69,8 @@ from subsystems.government_subsidy.claim_workflow import (
     GovernmentSubsidyClaimReceiptCommand,
     StoredGovernmentSubsidyClaimReceipt,
 )
-from subsystems.government_subsidy.overpayment_workflow import OffsetApplyRequest, ReceiptWithOverageApplyRequest, ReturnApplyRequest, ReturnReconciliationApplyRequest
-from subsystems.government_subsidy.overpayment_query import (
-    GovernmentSubsidyOffsetTargetQueryView,
-    GovernmentSubsidyOverpaymentQueryView,
-    GovernmentSubsidyReturnExcessRecoveryQueryView,
-    GovernmentSubsidyReturnRecipientQueryView,
-)
+from subsystems.government_subsidy.overpayment_workflow import OffsetApplyRequest, ReceiptWithOverageApplyRequest
+from subsystems.government_subsidy.overpayment_query import GovernmentSubsidyOffsetTargetQueryView, GovernmentSubsidyOverpaymentQueryView
 
 _GENERAL_CITIZEN = "一般市民"
 _SUBSIDIZED_CITIZEN = "補助市民"
@@ -87,8 +82,11 @@ def _advance_overpayment(cursor, request, candidate, event_type, evidence_refere
     cursor.execute("INSERT INTO government_subsidy_overpayment_events (overpayment_identity,event_type,before_remaining_ntd,after_remaining_ntd,resulting_status,expected_version,resulting_version,preview_fingerprint,idempotency_key,actor,reason,evidence_reference) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (request.identity, event_type, candidate.remaining_before_ntd.amount, candidate.remaining_after_ntd.amount, candidate.resulting_status.value, request.expected_version.value, request.expected_version.value + 1, candidate.fingerprint.value, request.idempotency_key.value, request.actor.actor_id, request.reason, evidence_reference))
 
 
-def _overpayment_receipt(candidate, payable_identity=None):
-    return {"overpayment_identity": candidate.overpayment_identity, "remaining_after_ntd": candidate.remaining_after_ntd.amount, "status": candidate.resulting_status.value, "preview_fingerprint": candidate.fingerprint.value, "payable_identity": payable_identity}
+def _overpayment_receipt(candidate):
+    return {"overpayment_identity": candidate.overpayment_identity,
+            "remaining_after_ntd": candidate.remaining_after_ntd.amount,
+            "status": candidate.resulting_status.value,
+            "preview_fingerprint": candidate.fingerprint.value}
 
 
 def _overpayment_outbox_lineage(cursor, overpayment_identity):
@@ -229,60 +227,18 @@ class MySqlGovernmentSubsidyRepository:
                 "ORDER BY i.batch_id,i.id",
             )
             target_rows = cursor.fetchall()
-            cursor.execute(
-                "SELECT bank_code,account_number,account_name,effective_from "
-                "FROM government_payer_receiving_accounts "
-                "WHERE payer_identity=%s AND effective_until IS NULL "
-                "ORDER BY effective_from DESC",
-                (PAYER_IDENTITY,),
-            )
-            recipient_rows = cursor.fetchall()
-            excess_recovery = None
-            try:
-                cursor.execute(
-                    "SELECT recovery_identity,source_finance_import_row_id,"
-                    "source_payout_id,original_amount_ntd,remaining_amount_ntd,"
-                    "status,projection_version "
-                    "FROM government_overpayment_return_excess_recoveries "
-                    "WHERE overpayment_identity=%s",
-                    (overpayment_identity,),
-                )
-                recovery = cursor.fetchone()
-            except OperationalError as error:
-                if getattr(error, "args", (None,))[0] != 1146:
-                    raise
-                recovery = None
-            if recovery is not None:
-                excess_recovery = GovernmentSubsidyReturnExcessRecoveryQueryView(
-                    recovery_identity=str(recovery["recovery_identity"]),
-                    source_bank_fact_reference=_redact_query_reference(
-                        "finance-import-row", recovery["source_finance_import_row_id"]
-                    ),
-                    source_payout_reference=_redact_query_reference(
-                        "government-overpayment-return-payout", recovery["source_payout_id"]
-                    ),
-                    original_amount_ntd=int(recovery["original_amount_ntd"]),
-                    remaining_amount_ntd=int(recovery["remaining_amount_ntd"]),
-                    status=str(recovery["status"]),
-                    recovery_version=int(recovery["projection_version"]),
-                )
         targets = tuple(
             _query_offset_target(row) for row in target_rows
             if _query_target_outstanding(row) > 0
         )
-        recipient = _query_return_recipient(recipient_rows, self._clock.today())
         status = str(root["status"])
         remaining = int(root["remaining_amount_ntd"])
         blockers = set()
         if status in {"pending_review", "offset_reserved"} and not targets:
             blockers.add("government_subsidy_overpayment_target_not_eligible")
-        if status == "pending_review" and recipient.blockers:
-            blockers.update(recipient.blockers)
         available_actions = []
         if status in {"pending_review", "offset_reserved"} and remaining > 0 and targets:
             available_actions.append("offset")
-        if status == "pending_review" and remaining > 0 and recipient.ready:
-            available_actions.append("return")
         return GovernmentSubsidyOverpaymentQueryView(
             overpayment_identity=str(root["overpayment_identity"]),
             payer_identity=PAYER_IDENTITY,
@@ -296,10 +252,8 @@ class MySqlGovernmentSubsidyRepository:
                 "government-subsidy-transaction", root["source_transaction_id"]
             ),
             offset_targets=targets,
-            return_recipient=recipient,
             blockers=tuple(sorted(blockers)),
             available_actions=tuple(sorted(available_actions)),
-            return_excess_recovery=excess_recovery,
         )
 
     def find_overpayment_apply_receipt(self, idempotency_key, command_fingerprint):
@@ -361,56 +315,7 @@ class MySqlGovernmentSubsidyRepository:
             for row in rows
         )
 
-    def load_return_recipient(self, due_date, evidence_reference, *, lock):
-        lock_clause = " FOR UPDATE" if lock else ""
-        with self._connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT bank_code,account_number,account_name,effective_from "
-                "FROM government_payer_receiving_accounts "
-                "WHERE payer_identity=%s AND effective_until IS NULL "
-                "ORDER BY effective_from DESC" + lock_clause,
-                (PAYER_IDENTITY,),
-            )
-            accounts = cursor.fetchall()
-        return _return_recipient_snapshot(
-            accounts,
-            due_date,
-            evidence_reference,
-            as_of=self._clock.today(),
-        )
 
-    def load_return_reconciliation_context(self, identity, finance_import_row_id, *, lock):
-        lock_clause = " FOR UPDATE" if lock else ""
-        with self._connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT overpayment_identity,payer_identity,remaining_amount_ntd,status,projection_version "
-                "FROM government_subsidy_overpayments WHERE overpayment_identity=%s" + lock_clause,
-                (identity,),
-            )
-            overpayment = cursor.fetchone()
-            cursor.execute(
-                "SELECT payable_identity,remaining_amount_ntd,projection_version "
-                "FROM government_overpayment_return_payables WHERE overpayment_identity=%s "
-                "AND status IN ('payable','partially_paid')" + lock_clause,
-                (identity,),
-            )
-            payable = cursor.fetchone()
-            bank = _load_bank_fact(cursor, finance_import_row_id, lock)
-            _require_return_recipient_matches_bank(cursor, bank)
-        if overpayment is None:
-            raise ValueError("government_subsidy_overpayment_not_found")
-        if payable is None:
-            raise ValueError("government_overpayment_return_not_open")
-        return (
-            GovernmentSubsidyOverpayment(
-                str(overpayment["overpayment_identity"]), str(overpayment["payer_identity"]),
-                MoneyNTD(int(overpayment["remaining_amount_ntd"])),
-                GovernmentSubsidyOverpaymentStatus(str(overpayment["status"])),
-                int(overpayment["projection_version"]),
-            ),
-            (str(payable["payable_identity"]), MoneyNTD(int(payable["remaining_amount_ntd"])), int(payable["projection_version"])),
-            bank,
-        )
 
     def persist_receipt_with_overage(self, request, candidate, bank, batch):
         with self._connection.cursor() as cursor:
@@ -437,224 +342,8 @@ class MySqlGovernmentSubsidyRepository:
             _apply_offset_target_accounts(cursor, event_id, request, candidate)
         return _overpayment_receipt(candidate)
 
-    def persist_return(self, request: ReturnApplyRequest, candidate, recipient):
-        with self._connection.cursor() as cursor:
-            _advance_overpayment(cursor, request, candidate, "return_payable_created", recipient.evidence_reference)
-            payable_identity = f"government-overpayment-return:{request.identity}"
-            cursor.execute(
-                "INSERT INTO government_overpayment_return_payables (payable_identity,overpayment_identity,amount_due_ntd,remaining_amount_ntd,status,agency_identity,agency_name,bank_code,account_display,account_fingerprint,effective_date,due_date,evidence_reference,projection_version) VALUES (%s,%s,%s,%s,'payable',%s,%s,%s,%s,%s,%s,%s,%s,1)",
-                (payable_identity, request.identity, candidate.disposition_amount_ntd.amount, candidate.disposition_amount_ntd.amount, recipient.agency_identity, recipient.agency_name, recipient.bank_code, recipient.account_display, recipient.account_fingerprint, recipient.effective_date, recipient.due_date, recipient.evidence_reference),
-            )
-        return _overpayment_receipt(candidate, payable_identity)
 
-    def persist_return_reconciliation(self, request: ReturnReconciliationApplyRequest, candidate):
-        with self._connection.cursor() as cursor:
-            cursor.execute(
-                "UPDATE government_overpayment_return_payables SET remaining_amount_ntd=%s,"
-                "status=%s,projection_version=projection_version+1 "
-                "WHERE payable_identity=%s AND remaining_amount_ntd=%s",
-                (candidate.remaining_after_ntd.amount,
-                 "paid" if candidate.remaining_after_ntd.amount == 0 else "partially_paid",
-                 candidate.payable_identity,
-                 candidate.amount_ntd.amount + candidate.remaining_after_ntd.amount),
-            )
-            _require_single_updated_row(cursor)
-            cursor.execute(
-                "UPDATE government_subsidy_overpayments SET remaining_amount_ntd=%s,status=%s,"
-                "projection_version=%s WHERE overpayment_identity=%s AND projection_version=%s",
-                (candidate.remaining_after_ntd.amount, candidate.resulting_status.value,
-                 request.expected_version.value + 1, request.identity,
-                 request.expected_version.value),
-            )
-            _require_single_updated_row(cursor)
-            cursor.execute(
-                "INSERT INTO government_subsidy_overpayment_events "
-                "(overpayment_identity,event_type,before_remaining_ntd,after_remaining_ntd,resulting_status,"
-                "expected_version,resulting_version,preview_fingerprint,idempotency_key,actor,reason,evidence_reference) "
-                "VALUES (%s,'return_reconciled',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                (request.identity, candidate.amount_ntd.amount + candidate.remaining_after_ntd.amount,
-                 candidate.remaining_after_ntd.amount, candidate.resulting_status.value,
-                 request.expected_version.value, request.expected_version.value + 1,
-                 candidate.fingerprint.value, request.idempotency_key.value,
-                 request.actor.actor_id, request.reason, request.evidence_reference),
-            )
-            event_id = int(cursor.lastrowid)
-            cursor.execute(
-                "INSERT INTO government_overpayment_return_payouts "
-                "(overpayment_event_id,payable_identity,finance_import_row_id,amount_ntd,"
-                "preview_fingerprint,idempotency_key,actor,reason,evidence_reference) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                (event_id, candidate.payable_identity, request.finance_import_row_id,
-                 candidate.amount_ntd.amount, candidate.fingerprint.value,
-                 request.idempotency_key.value, request.actor.actor_id, request.reason,
-                 request.evidence_reference),
-            )
-            lineage = _overpayment_outbox_lineage(cursor, request.identity)
-            cursor.execute(
-                _OUTBOX_INSERT_SQL,
-                (*lineage, f"government_overpayment_return_reconciliation:{request.idempotency_key.value}",
-                 "government_overpayment_return_payout", _canonical_json({
-                    "overpayment_identity": request.identity,
-                    "payable_identity": candidate.payable_identity,
-                    "remaining_ntd": candidate.remaining_after_ntd.amount,
-                 })),
-            )
-        return _overpayment_receipt(candidate)
 
-    def persist_return_reconciliation_with_excess(self, request, candidate):
-        """Persist the lawful payout and its separate excess recovery root atomically."""
-        try:
-            with self._connection.cursor() as cursor:
-                cursor.execute(
-                    "SELECT 1 FROM government_overpayment_return_payouts "
-                    "WHERE finance_import_row_id=%s FOR UPDATE",
-                    (request.finance_import_row_id,),
-                )
-                if cursor.fetchone() is not None:
-                    raise ValueError(
-                        "government_subsidy_return_bank_fact_already_reconciled"
-                    )
-                cursor.execute(
-                    "UPDATE government_overpayment_return_payables SET "
-                    "remaining_amount_ntd=0,status='paid',projection_version=projection_version+1 "
-                    "WHERE payable_identity=%s AND remaining_amount_ntd=%s "
-                    "AND projection_version=%s AND status IN ('payable','partially_paid')",
-                    (
-                        candidate.payable_identity,
-                        candidate.lawful_amount_ntd.amount,
-                        candidate.payable_version,
-                    ),
-                )
-                _require_single_updated_row(cursor)
-                cursor.execute(
-                    "UPDATE government_subsidy_overpayments SET remaining_amount_ntd=0,"
-                    "status='returned',projection_version=%s "
-                    "WHERE overpayment_identity=%s AND projection_version=%s",
-                    (
-                        request.expected_version.value + 1,
-                        request.identity,
-                        request.expected_version.value,
-                    ),
-                )
-                _require_single_updated_row(cursor)
-                cursor.execute(
-                    "INSERT INTO government_subsidy_overpayment_events "
-                    "(overpayment_identity,event_type,before_remaining_ntd,"
-                    "after_remaining_ntd,resulting_status,expected_version,"
-                    "resulting_version,preview_fingerprint,idempotency_key,actor,"
-                    "reason,evidence_reference) VALUES "
-                    "(%s,'return_reconciled',%s,0,'returned',%s,%s,%s,%s,%s,%s,%s)",
-                    (
-                        request.identity,
-                        candidate.lawful_amount_ntd.amount,
-                        request.expected_version.value,
-                        request.expected_version.value + 1,
-                        candidate.fingerprint.value,
-                        request.idempotency_key.value,
-                        request.actor.actor_id,
-                        request.reason,
-                        request.evidence_reference,
-                    ),
-                )
-                event_id = int(cursor.lastrowid)
-                cursor.execute(
-                    "INSERT INTO government_overpayment_return_payouts "
-                    "(overpayment_event_id,payable_identity,finance_import_row_id,"
-                    "amount_ntd,preview_fingerprint,idempotency_key,actor,reason,"
-                    "evidence_reference) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                    (
-                        event_id,
-                        candidate.payable_identity,
-                        request.finance_import_row_id,
-                        candidate.actual_amount_ntd.amount,
-                        candidate.fingerprint.value,
-                        request.idempotency_key.value,
-                        request.actor.actor_id,
-                        request.reason,
-                        request.evidence_reference,
-                    ),
-                )
-                payout_id = int(cursor.lastrowid)
-                cursor.execute(
-                    "INSERT INTO government_overpayment_return_excess_recoveries "
-                    "(recovery_identity,overpayment_identity,payable_identity,"
-                    "source_finance_import_row_id,source_payout_id,payer_identity,"
-                    "original_amount_ntd,remaining_amount_ntd,status,projection_version,"
-                    "actor,reason,evidence_reference) VALUES "
-                    "(%s,%s,%s,%s,%s,%s,%s,%s,'open',1,%s,%s,%s)",
-                    (
-                        candidate.recovery_identity,
-                        request.identity,
-                        candidate.payable_identity,
-                        request.finance_import_row_id,
-                        payout_id,
-                        PAYER_IDENTITY,
-                        candidate.excess_amount_ntd.amount,
-                        candidate.excess_amount_ntd.amount,
-                        request.actor.actor_id,
-                        request.reason,
-                        request.evidence_reference,
-                    ),
-                )
-                cursor.execute(
-                    "INSERT INTO government_overpayment_return_excess_recovery_events "
-                    "(recovery_identity,event_type,finance_import_row_id,"
-                    "before_remaining_ntd,after_remaining_ntd,resulting_status,"
-                    "expected_version,resulting_version,preview_fingerprint,"
-                    "idempotency_key,actor,reason,evidence_reference) VALUES "
-                    "(%s,'established',%s,%s,%s,'open',0,1,%s,%s,%s,%s,%s)",
-                    (
-                        candidate.recovery_identity,
-                        request.finance_import_row_id,
-                        candidate.excess_amount_ntd.amount,
-                        candidate.excess_amount_ntd.amount,
-                        candidate.fingerprint.value,
-                        request.idempotency_key.value,
-                        request.actor.actor_id,
-                        request.reason,
-                        request.evidence_reference,
-                    ),
-                )
-                lineage = _overpayment_outbox_lineage(cursor, request.identity)
-                cursor.execute(
-                    _OUTBOX_INSERT_SQL,
-                    (
-                        *lineage,
-                        f"government_overpayment_return_excess:{request.idempotency_key.value}",
-                        "government_overpayment_return_excess_recovery",
-                        _canonical_json(
-                            {
-                                "overpayment_identity": request.identity,
-                                "payable_identity": candidate.payable_identity,
-                                "bank_fact_identity": candidate.bank_fact_identity,
-                                "recovery_identity": candidate.recovery_identity,
-                                "lawful_amount_ntd": candidate.lawful_amount_ntd.amount,
-                                "excess_amount_ntd": candidate.excess_amount_ntd.amount,
-                            }
-                        ),
-                    ),
-                )
-        except OperationalError as error:
-            # A schema older than this owner contract must fail closed.  The
-            # outer UoW rolls back any preceding statements.
-            if getattr(error, "args", [None])[0] == 1146:
-                raise ValueError(
-                    "government_subsidy_return_excess_recovery_schema_required"
-                ) from error
-            raise
-        return {
-            "overpayment_identity": candidate.overpayment_identity,
-            "payable_identity": candidate.payable_identity,
-            "bank_fact_identity": candidate.bank_fact_identity,
-            "amount_ntd": candidate.actual_amount_ntd.amount,
-            "lawful_amount_ntd": candidate.lawful_amount_ntd.amount,
-            "excess_amount_ntd": candidate.excess_amount_ntd.amount,
-            "remaining_after_ntd": candidate.overpayment_remaining_after_ntd.amount,
-            "status": candidate.resulting_status.value,
-            "recovery_identity": candidate.recovery_identity,
-            "recovery_status": candidate.recovery_status.value,
-            "preview_fingerprint": candidate.fingerprint.value,
-        }
 
     def load_batch(
         self,
@@ -1288,20 +977,6 @@ def _load_bank_fact(cursor, row_id, lock):
     )
 
 
-def _require_return_recipient_matches_bank(cursor, bank):
-    if not bank.counterparty_account:
-        raise ValueError("government_overpayment_return_recipient_mismatch")
-    # The refund bill snapshots its recipient; the preserved receiving-account
-    # history is the canonical way to verify that the later bank row targets it.
-    # The bank date deliberately is not part of this predicate.
-    # This helper is called while the canonical bank row is locked.
-    cursor.execute(
-        "SELECT COUNT(*) AS count FROM government_payer_receiving_accounts "
-        "WHERE payer_identity=%s AND account_number=%s",
-        (PAYER_IDENTITY, bank.counterparty_account),
-    )
-    if int(cursor.fetchone()["count"]) != 1:
-        raise ValueError("government_overpayment_return_recipient_mismatch")
 
 
 def _bank_amount_and_direction(row):
@@ -1848,115 +1523,10 @@ def _query_offset_target(row):
     )
 
 
-def _return_recipient_snapshot(rows, due_date, evidence_reference, *, as_of):
-    if not rows:
-        raise ValueError("government_subsidy_recipient_account_missing")
-    if len(rows) != 1:
-        raise ValueError("government_subsidy_recipient_account_ambiguous")
-
-    account = rows[0]
-    if not isinstance(account, Mapping):
-        raise ValueError("government_subsidy_recipient_account_invalid")
-    account_number = str(account.get("account_number") or "").strip()
-    account_name = str(account.get("account_name") or "").strip()
-    bank_code = str(account.get("bank_code") or "").strip()
-    effective_from = account.get("effective_from")
-    if not account_number or not account_name or not bank_code or effective_from is None:
-        raise ValueError("government_subsidy_recipient_account_invalid")
-
-    effective_date = _query_date_text(effective_from)
-    try:
-        effective_date_value = date.fromisoformat(effective_date)
-        due_date_value = date.fromisoformat(str(due_date).strip())
-        as_of_value = date.fromisoformat(str(as_of).strip())
-    except (TypeError, ValueError) as error:
-        raise ValueError("government_subsidy_recipient_account_invalid") from error
-    if effective_date_value > as_of_value or effective_date_value > due_date_value:
-        raise ValueError("government_subsidy_recipient_account_invalid")
-
-    fingerprint = fingerprint_payload(
-        {
-            "payer_identity": PAYER_IDENTITY,
-            "bank_code": bank_code,
-            "account_number": account_number,
-            "account_name": account_name,
-            "effective_date": effective_date,
-        }
-    )
-    display = "*" * max(0, len(account_number) - 4) + account_number[-4:]
-    return GovernmentRecipientSnapshot(
-        PAYER_IDENTITY,
-        PAYER_NAME,
-        bank_code,
-        display,
-        fingerprint.value,
-        effective_date,
-        str(due_date).strip(),
-        evidence_reference,
-    )
 
 
-def _query_return_recipient(rows, as_of):
-    if not rows:
-        return GovernmentSubsidyReturnRecipientQueryView(
-            ready=False,
-            blockers=("government_subsidy_recipient_account_missing",),
-        )
-    if len(rows) != 1:
-        return GovernmentSubsidyReturnRecipientQueryView(
-            ready=False,
-            blockers=("government_subsidy_recipient_account_ambiguous",),
-        )
-    row = rows[0]
-    account_number = str(row.get("account_number") or "").strip()
-    account_name = str(row.get("account_name") or "").strip()
-    bank_code = str(row.get("bank_code") or "").strip()
-    effective_from = row.get("effective_from")
-    if not account_number or not account_name or not bank_code or effective_from is None:
-        return GovernmentSubsidyReturnRecipientQueryView(
-            ready=False,
-            blockers=("government_subsidy_recipient_account_invalid",),
-        )
-    effective_date = _query_date_text(effective_from)
-    try:
-        if date.fromisoformat(effective_date) > date.fromisoformat(str(as_of).strip()):
-            return GovernmentSubsidyReturnRecipientQueryView(
-                ready=False,
-                blockers=("government_subsidy_recipient_account_invalid",),
-            )
-    except ValueError:
-        return GovernmentSubsidyReturnRecipientQueryView(
-            ready=False,
-            blockers=("government_subsidy_recipient_account_invalid",),
-        )
-    fingerprint = fingerprint_payload(
-        {
-            "payer_identity": PAYER_IDENTITY,
-            "bank_code": bank_code,
-            "account_number": account_number,
-            "account_name": account_name,
-            "effective_date": effective_date,
-        }
-    )
-    return GovernmentSubsidyReturnRecipientQueryView(
-        ready=True,
-        blockers=(),
-        agency_identity=PAYER_IDENTITY,
-        agency_name=PAYER_NAME,
-        bank_code=bank_code,
-        account_display="*" * max(0, len(account_number) - 4) + account_number[-4:],
-        account_fingerprint=fingerprint.value,
-        effective_date=effective_date,
-    )
 
 
-def _query_date_text(value):
-    if isinstance(value, date):
-        return value.isoformat()
-    text = str(value).strip()
-    if len(text) < 10:
-        raise ValueError("government_subsidy_recipient_account_invalid")
-    return text[:10]
 
 
 def _redact_query_reference(prefix, value):
@@ -2256,4 +1826,4 @@ _RECEIPT_PAYLOAD_KEYS = frozenset(
 )
 
 
-__all__ = ["MySqlGovernmentSubsidyRepository"]
+__all__ = ['MySqlGovernmentSubsidyRepository']

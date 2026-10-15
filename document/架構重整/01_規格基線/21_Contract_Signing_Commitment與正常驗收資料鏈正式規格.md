@@ -1,4 +1,4 @@
-# Contract Signing、簽約前服務承諾與正常驗收資料鏈正式規格
+# Contract Signing、月嫂與客戶簽約完成及正常驗收資料鏈正式規格
 
 ## 1. 文件狀態
 
@@ -15,16 +15,25 @@
 若舊條款仍把「客戶簽回」「契約完成」「訂金核銷」「訂單成立」視為同一事件，或要求先建立
 execution schedule 才能完成客戶契約，以本規格較新的人工裁決為準。
 
+### 1.1 簽約與應收用詞（2026-10-15 人工裁決）
+
+- 流程、規格說明與使用者介面統一使用「所有月嫂簽約完成」及「客戶簽約完成」，明確指出完成簽約的對象；不得只寫「簽約完成」而省略對象。
+- 「所有月嫂簽約完成」表示目前有效方案的全部月嫂契約均已簽回，且精確服務日完整、無重疊、合計符合訂單服務天數；此時建立一次訂金應收。
+- 「客戶簽約完成」表示客戶簽回證據已驗證，且與 Orders 契約完成事件在同一交易保存；此時保留既有訂金應收，建立其餘尚未建立的期款應收。
+- `commitment` 是所有月嫂簽約完成後保存的人員、方案版本及精確服務日資料，供後續客戶契約與正式排班驗證；它不是另一個供使用者操作的簽約階段。業務流程不得以「簽約前服務承諾」或「形成有效簽約承諾」代替「所有月嫂簽約完成」。
+- 應收不分「正式應收」與「非正式應收」。尚未建立應收時稱「預估金額」；建立後稱「訂金應收」或「期款應收」。`obligation`、`commitment_ready`、`client_signed_received`、`contract_completed` 及既有資料表、API、事件識別名稱維持原名，不由用詞修正新增狀態或改變建立時點。
+- 「簽回」可用於描述簽署文件回收與證據驗證；描述業務流程階段時使用上述簽約完成名稱。預覽不建立應收；已核銷交易與已簽文件不得因用詞修正而改寫。
+
 ## 2. Business scenario 與 Global invariants
 
 ```text
 月嫂表示願意承接候選方案 → 客戶接受推薦方案
 → 工會人員決定正式配對，以 current confirmed service dates 建立 waiting-deposit 檔期鎖
 → 每個月嫂 segment 產生、寄送並回收月嫂契約
-→ 全段簽回且精確服務日守恆，建立簽約前服務承諾
-├─→ 建立唯一簽約前訂金義務 → 訂金可先核銷 → 訂單成立
-└─→ 產生、寄送並回收客戶契約 → 客戶簽回與 Contract Completion 原子完成
-→ 訂金與客戶契約均成立
+→ 所有月嫂簽約完成，保存人員與精確服務日資料（commitment）
+├─→ 建立訂金應收（只建立一次） → 訂金可先核銷 → 訂單成立
+└─→ 產生、寄送並回收客戶契約 → 客戶簽約完成 → 建立其餘期款應收
+→ 訂金已核銷且客戶簽約完成
 → commitment exact conversion 為 execution assignment／effective schedule
 → actual start → 月曆、薪資、補助與完成
 ```
@@ -46,7 +55,7 @@ execution schedule 才能完成客戶契約，以本規格較新的人工裁決�
 |---|---|---|
 | Contract Signing Integration | 核准模板引用、不可變文件版本、月嫂／客戶 sent 與 signed-received events、provider-neutral identity、status version、command receipt | Orders lifecycle、應收金額、execution assignment、LINE attempt 結果 |
 | Scheduling Commitment | matching plan/version snapshot、segment、月嫂、精確服務日、commitment event／terminal event | execution schedule、薪資、補助、Orders status |
-| Client Finance | 簽約前訂金義務、客戶簽回後的剩餘期款、ledger、allocation、settlement | 契約簽署證據、Orders status |
+| Client Finance | 所有月嫂簽約完成後的訂金應收、客戶簽約完成後的其餘期款應收、ledger、allocation、settlement | 契約簽署證據、Orders status |
 | Orders | Contract Completion event、`contract_identity` projection、lifecycle | 外部簽署 payload、LINE delivery、assignment 日 |
 | Assignments／Scheduling | commitment 的 exact conversion、正式 assignment／schedule 與 occupancy | 契約文件、應收、LINE |
 | LINE Integration | 綁定身分、delivery task、attempt 與 retry | 契約或 Orders 成功狀態 |
@@ -75,7 +84,7 @@ execution schedule 才能完成客戶契約，以本規格較新的人工裁決�
 
 ## 4. 狀態機
 
-### 4.1 月嫂 segment 與 commitment
+### 4.1 所有月嫂簽約完成與內部 commitment 狀態
 
 ```text
 draft_generated → staff_contract_sent → staff_signed_received
@@ -93,10 +102,10 @@ customer acceptance root；已取得 lock 的 `accepted` plan 可直接驗證。
 或 customer acceptance 時，人工入口固定拒絕。
 
 - 全部 segment 的精確服務日不得重疊，合計必須等於 `orders.service_days`。
-- `staff_signed_received` 不建立 client receivable、execution、薪資、補助或訂單成立。
+- `staff_signed_received` 是每份月嫂契約的簽回證據；須驗證全部月嫂契約及精確服務日，才能判定所有月嫂簽約完成，並依 §6.1 在同一交易建立訂金應收。月嫂簽回本身不建立 execution、薪資、補助或訂單成立。
 - matching plan/version 變更使舊 commitment `superseded`；不得原地改寫日期或月嫂。
 
-### 4.2 客戶契約與 Orders
+### 4.2 客戶簽約完成與 Orders 契約完成事件
 
 ```text
 commitment_ready → client_draft_generated → client_contract_sent
@@ -107,7 +116,7 @@ commitment_ready → client_draft_generated → client_contract_sent
 → commitment converted → execution assignment／schedule
 ```
 
-- 客戶不得早於全部月嫂簽回。
+- 客戶簽約完成不得早於所有月嫂簽約完成。
 - 自動寄送路徑的簽回只接受與目前有效 sent document、commitment 與案件相符的不可變版本；
   `manual_attested` 路徑則以同交易新建的目前核准模板版本與實際簽回 evidence 對應，兩者都不得
   接受任意未受控文件或偽造 sent event。
@@ -165,15 +174,15 @@ view，不得回 raw persistence dict 或觸發狀態轉換。
 
 ## 6. Transaction、lock 與 partial failure
 
-### 6.1 Send 與月嫂最後一段簽回
+### 6.1 契約寄送與所有月嫂簽約完成
 
 - Send 鎖定案件、plan/segment、status version、文件與 LINE binding；同交易建立 sent event、
   access grant、delivery task/outbox、receipt 與新版本，commit 後才由 worker 傳送。
 - 月嫂簽回按 plan、segment id 固定順序鎖定；驗證文件、事件、日期守恆與版本；append event。
-- 最後一段簽回同交易建立 commitment header/days、簽約前 deposit obligation、兩端
+- 所有月嫂簽約完成時，同交易建立 commitment header/days、訂金應收（deposit obligation）、兩端
   receipt/outbox；任一步失敗全部回滾。
 
-### 6.2 客戶簽回
+### 6.2 客戶簽約完成
 
 鎖定案件、有效 commitment、目前 client document、Orders aggregate、Client Finance account、
 既有 deposit obligation 與 command receipt。單一交易依序：
@@ -181,7 +190,7 @@ view，不得回 raw persistence dict 或觸發狀態轉換。
 1. archive 已成功且 digest 相符才 append client signed event；
 2. 投影唯一 `orders.contract_identity`；
 3. append Orders Contract Completion event；
-4. 保留既有 deposit obligation，只補第一、第二期或 policy 定義的剩餘義務；
+4. 保留既有訂金應收（deposit obligation），建立尚未建立的第一、第二期或 policy 定義的其餘期款應收；
 5. 重評 lifecycle，但不得覆寫已由訂金形成的「訂單成立」；
 6. 寫 versions、audit、outbox 與 receipt；單一 commit。
 
@@ -280,15 +289,15 @@ archive 與 LINE 是 port adapter，不重新判斷狀態機或 commit。
 
 Module：模板／digest、日期守恆、sequence、fingerprint、remaining-obligation 與 exact conversion。
 
-Subsystem：send／return、同 key replay/conflict、stale、archive/DB rollback、delivery retry、最後一段
-commitment、客戶簽回＋Contract Completion 單一交易、conversion mismatch 零寫入。
+Subsystem：send／return、同 key replay/conflict、stale、archive/DB rollback、delivery retry、所有月嫂
+簽約完成時建立 commitment 與訂金應收、客戶簽約完成與其餘期款應收單一交易、conversion mismatch 零寫入。
 
 Domain：
 
-1. 月嫂先簽後只有 commitment，無 contract identity、execution、薪資或補助。
-2. 訂金先核銷時 Orders 為「訂單成立」、契約等待客戶、execution 為零。
-3. 客戶後簽只補剩餘期款，deposit 不重建，contract receipt 唯一。
-4. 訂金＋客戶契約完成後，只有 exact commitment 可轉 execution。
+1. 所有月嫂簽約完成後保存 commitment 並建立訂金應收，尚無客戶 contract identity、execution、薪資或補助。
+2. 訂金先核銷時 Orders 為「訂單成立」，仍等待客戶簽約完成，execution 為零。
+3. 客戶簽約完成時只建立其餘尚未建立的期款應收，deposit 不重建，contract receipt 唯一。
+4. 訂金已核銷且客戶簽約完成後，只有 exact commitment 可轉 execution。
 
 5. 服務中代班不建立新的必需契約／簽回或客戶變更簽署；無 optional substitution supplement
    仍可完成 Scheduling substitution、排班 lineage 與 Payroll，補充文件若存在則只作 evidence。

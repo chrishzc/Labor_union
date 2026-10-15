@@ -739,7 +739,7 @@ function LeaveSubstitutionWorkspace({
           request_status: receipt.status,
           aggregate_version: receipt.version,
         };
-        setInboxReceipt(`已受理 ${item.staff_name} 的請假待辦；尚未完成正式排班，也尚未建立 LINE 通知工作。`);
+        setInboxReceipt(`已受理 ${item.staff_name} 的請假待辦；尚未完成排班，也尚未建立 LINE 通知工作。`);
         await loadInbox();
       }
       setSelectedInboxItem(selectedItem);
@@ -1018,9 +1018,9 @@ function LeaveSubstitutionWorkspace({
     <section className="leave-substitution-workspace" data-surface-id="scheduling.leave-substitution">
       <header className="leave-substitution-header">
         <div>
-          <p className="leave-substitution-kicker">查詢正式排班 → 檢查代班影響 → 人工確認 → 回讀結果</p>
+          <p className="leave-substitution-kicker">查詢排班 → 檢查代班影響 → 人工確認 → 回讀結果</p>
           <h2>🚑 服務中請假與緊急代班調度工作台</h2>
-          <p>整合 LINE 待辦與電話／口頭請假；先檢查正式排班及相關影響，再由管理員確認代班安排。</p>
+          <p>整合 LINE 待辦與電話／口頭請假；先檢查排班及相關影響，再由管理員確認代班安排。</p>
         </div>
         <span className={`leave-substitution-state state-${machine.type}`}>{flowStateLabel(machine.type)}</span>
       </header>
@@ -1197,7 +1197,7 @@ function LeaveSubstitutionWorkspace({
         </div>
       )}
 
-      {/* 只提供服務中且具備有效正式服務日的案件 */}
+      {/* 只提供服務中且具備有效排班服務日的案件 */}
       <div className="leave-substitution-query-row" style={{ background: '#fff8f6', padding: '16px 20px', borderRadius: '12px', border: '1.5px solid #fed7aa' }}>
         <div style={{ flex: '1 1 320px' }}>
           <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 700, color: '#9a3412', marginBottom: '6px' }}>
@@ -1246,12 +1246,12 @@ function LeaveSubstitutionWorkspace({
           )}
           {!caseOptionsLoading && !caseOptionsError && caseOptions.length === 0 && (
             <small className="leave-substitution-notice" role="status">
-              目前沒有服務中且已有正式排班的案件。
+              目前沒有服務中且已有排班的案件。
             </small>
           )}
           {!normalizedCaseNo && !caseOptionsLoading && !caseOptionsError && caseOptions.length > 0 && (
             <small className="leave-substitution-notice" data-control-id="scheduling.leave.query-guidance">
-              請先選擇服務中且已有正式排班的案件，才能查詢正式指派並檢查代班影響。
+              請先選擇服務中且已有排班的案件，才能查詢指派並檢查代班影響。
             </small>
           )}
         </div>
@@ -1259,23 +1259,23 @@ function LeaveSubstitutionWorkspace({
 
       {normalizedCaseNo && (
         <div style={{ padding: '16px 20px', background: '#ffffff', border: '1.5px solid #dec0b6', borderRadius: '12px', boxShadow: '0 2px 8px rgba(74, 69, 67, 0.04)' }}>
-          <strong style={{ fontSize: '1rem', color: '#9a3412' }}>📋 案件 #{normalizedCaseNo} 正式排班資料</strong>
+          <strong style={{ fontSize: '1rem', color: '#9a3412' }}>📋 案件 #{normalizedCaseNo} 排班資料</strong>
           <p style={{ margin: '8px 0 0', color: '#74593f', fontSize: '0.86rem' }}>
-            {draft ? `查得 ${assignments.length} 筆正式指派；服務日期與人員以以下查詢結果為準。` : '尚未查詢；不顯示推測的客戶、地點或服務條件。'}
+            {draft ? `查得 ${assignments.length} 筆指派；服務日期與人員以以下查詢結果為準。` : '尚未查詢；不顯示推測的客戶、地點或服務條件。'}
           </p>
         </div>
       )}
 
       {machine.type === 'query_loading' && (
         <div style={{ padding: '24px', textAlign: 'center', background: '#fff8f6', borderRadius: '12px', border: '1px dashed #dec0b6', color: '#ea580c', fontWeight: 700 }}>
-          ⏳ 正在查詢案件 #{normalizedCaseNo} 的正式排班…
+          ⏳ 正在查詢案件 #{normalizedCaseNo} 的排班…
         </div>
       )}
 
       {draft?.assignments && draft.assignments.length === 0 && machine.type !== 'query_loading' && (
         <div className="leave-substitution-notice" style={{ background: '#fffbeb', border: '1.5px solid #fde68a', borderRadius: '12px', padding: '16px 20px', color: '#92400e' }}>
           <div style={{ fontWeight: 750, fontSize: '0.95rem', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            ℹ️ 案件 #{normalizedCaseNo} 目前尚未建立正式排班
+            ℹ️ 案件 #{normalizedCaseNo} 目前尚未建立排班
           </div>
           <p style={{ margin: '0 0 10px 0', fontSize: '0.85rem', color: '#78350f', lineHeight: 1.5 }}>
             此案件目前處於洽談／媒合階段。若月嫂在<strong>已簽約履約中</strong>發生突發狀況（例如郭萱或王明欣服務中請假），系統將在此工作台提供緊急代班排程調度。
@@ -1315,9 +1315,9 @@ function LeaveSubstitutionWorkspace({
             </select>
           </label>
           <label>
-            請假之正式服務日
+            請假之服務日
             <select
-              aria-label="正式服務日"
+              aria-label="服務日"
               value={scheduleId ?? ''}
               disabled={busy || schedules.length === 0}
               onChange={(event) => {
@@ -1325,7 +1325,7 @@ function LeaveSubstitutionWorkspace({
                 invalidatePreview();
               }}
             >
-              {schedules.length === 0 && <option value="">此指派目前沒有正式服務日</option>}
+              {schedules.length === 0 && <option value="">此指派目前沒有服務日</option>}
               {schedules.map((schedule) => (
                 <option key={schedule.schedule_id} value={schedule.schedule_id}>
                   {schedule.work_date}
@@ -1402,7 +1402,7 @@ function LeaveSubstitutionWorkspace({
       )}
 
       {selectedAssignment && schedules.length === 0 && (
-        <p className="leave-substitution-notice error">此指派目前沒有正式服務日，無法檢查代班影響；請先完成正式排班。</p>
+        <p className="leave-substitution-notice error">此指派目前沒有服務日，無法檢查代班影響；請先完成排班。</p>
       )}
 
       {assignments.length > 0 && (
@@ -1478,7 +1478,7 @@ function LeaveSubstitutionWorkspace({
           ) : (
             <p>本次為人工／電話調度，未關聯 LINE 請假待辦。</p>
           )}
-          <p>{machine.type === 'observed' ? '已重新查詢並確認最新正式指派。' : '變更已受理，正在確認最新正式指派。'}</p>
+          <p>{machine.type === 'observed' ? '已重新查詢並確認最新指派。' : '變更已受理，正在確認最新指派。'}</p>
         </section>
       )}
 
@@ -1538,7 +1538,7 @@ function LeaveSubstitutionWorkspace({
       )}
       {machine.type === 'observation_failed' && (
         <button type="button" onClick={() => void retryLeaveSubstitutionObservationFlow(normalizedCaseNo).catch(() => undefined)}>
-          重新查詢最新正式指派
+          重新查詢最新指派
         </button>
       )}
       {machine.type === 'stale' && <button type="button" onClick={query}>重新查詢最新資料</button>}
@@ -1661,7 +1661,7 @@ function qualificationCheckLabel(code: string): string {
 function collisionKindLabel(kind: SchedulingEligibilityCollisionViewModel['collisions'][number]['kind']): string {
   const labels: Record<SchedulingEligibilityCollisionViewModel['collisions'][number]['kind'], string> = {
     assignment_interval: '既有指派期間',
-    official_schedule: '正式服務日',
+    official_schedule: '服務日',
     waiting_deposit_lock: '等待定金確認，檔期暫時保留',
     seven_day_buffer: '7 天排班緩衝期',
     staff_unavailability: '不可服務期間',
@@ -1682,7 +1682,7 @@ interface SchedulingDiagnosticBadge {
 
 const LOADING_DIAGNOSTIC: SchedulingDiagnosticBadge = {
   tone: 'unavailable',
-  text: '⚪ 正在載入正式排班',
+  text: '⚪ 正在載入排班',
 };
 
 const NO_OCCUPANCY_DIAGNOSTIC: SchedulingDiagnosticBadge = {
@@ -1880,7 +1880,7 @@ function buildGanttSpans(
     return historicalOverlays.map((overlay) => {
       const startDay = Number(overlay.startDate.slice(8, 10));
       const endDay = Number(overlay.endDate.slice(8, 10));
-      return { id: `historical-${overlay.assignmentId}-${startDay}`, startDay, endDay, tone: 'historical', icon: '🕘', caseText: `${overlay.caseNo}｜${overlay.clientName}`, statusLabel: '歷史正式指派區間（非正式工作日）' };
+      return { id: `historical-${overlay.assignmentId}-${startDay}`, startDay, endDay, tone: 'historical', icon: '🕘', caseText: `${overlay.caseNo}｜${overlay.clientName}`, statusLabel: '歷史指派區間（不計入工時）' };
     });
   }
 
@@ -1888,7 +1888,7 @@ function buildGanttSpans(
     return historicalOverlays.map((overlay) => {
       const startDay = Number(overlay.startDate.slice(8, 10));
       const endDay = Number(overlay.endDate.slice(8, 10));
-      return { id: `historical-${overlay.assignmentId}-${startDay}`, startDay, endDay, tone: 'historical', icon: '🕘', caseText: `${overlay.caseNo}｜${overlay.clientName}`, statusLabel: '歷史正式指派區間（非正式工作日）' };
+      return { id: `historical-${overlay.assignmentId}-${startDay}`, startDay, endDay, tone: 'historical', icon: '🕘', caseText: `${overlay.caseNo}｜${overlay.clientName}`, statusLabel: '歷史指派區間（不計入工時）' };
     });
   }
 
@@ -1948,7 +1948,7 @@ function buildGanttSpans(
       if (canRender && segmentStart == null) segmentStart = day;
       if (!canRender && segmentStart != null) {
         const segmentEnd = day - 1;
-        spans.push({ id: `historical-${overlay.assignmentId}-${segmentStart}`, startDay: segmentStart, endDay: segmentEnd, tone: 'historical', icon: '🕘', caseText: `${overlay.caseNo}｜${overlay.clientName}`, statusLabel: '歷史正式指派區間（非正式工作日）' });
+        spans.push({ id: `historical-${overlay.assignmentId}-${segmentStart}`, startDay: segmentStart, endDay: segmentEnd, tone: 'historical', icon: '🕘', caseText: `${overlay.caseNo}｜${overlay.clientName}`, statusLabel: '歷史指派區間（不計入工時）' });
         segmentStart = null;
       }
     }
@@ -2693,12 +2693,12 @@ export const SchedulingPage: React.FC = () => {
             {selectedCaseNo && (
               <>
                 {activeCaseOption ? <div className="gantt-case-info-pill">
-                  <span>📅 正式服務日期：</span>
+                  <span>📅 服務日期：</span>
                   <strong>{ghostSummary}</strong>
                   {!isMatchingGhostMonth && <span style={{ color: '#b45309', marginLeft: '6px' }}>
                     （案件服務月份與目前月曆不同）
                   </span>}
-                </div> : <div className="gantt-case-info-pill">請點選月嫂列查詢正式服務日期與檔期衝突。</div>}
+                </div> : <div className="gantt-case-info-pill">請點選月嫂列查詢服務日期與檔期衝突。</div>}
 
                 {activeCaseOption && !isMatchingGhostMonth && (
                   <button

@@ -23,18 +23,8 @@ const query: GovernmentOverpaymentQuery = {
   source_bank_fact_reference: 'finance-import-row:11',
   source_transaction_reference: 'government-subsidy-transaction:8',
   offset_targets: [{ claim_item_id: 31, claim_batch_id: 4, batch_version: 7, outstanding_amount_ntd: 900, payer_identity: 'hccg' }],
-  return_recipient: {
-    ready: true,
-    blockers: [],
-    agency_identity: 'hccg',
-    agency_name: '新竹市政府',
-    bank_code: '822',
-    account_display: '******1234',
-    account_fingerprint: 'a'.repeat(64),
-    effective_date: '2026-08-01',
-  },
   blockers: [],
-  available_actions: ['offset', 'return'],
+  available_actions: ['offset'],
 };
 
 describe('GovernmentOverpaymentRecoveryWorkbench', () => {
@@ -57,7 +47,6 @@ describe('GovernmentOverpaymentRecoveryWorkbench', () => {
         remaining_after_ntd: 0,
         status: 'offset_applied' as const,
         preview_fingerprint: 'b'.repeat(64),
-        payable_identity: null,
       }),
     };
     const onResolved = vi.fn().mockResolvedValue({ succeeded: true, originalFingerprintPresent: false });
@@ -65,6 +54,8 @@ describe('GovernmentOverpaymentRecoveryWorkbench', () => {
     render(<GovernmentOverpaymentRecoveryWorkbench overpaymentIdentity={identity} anomalyFingerprint={anomalyFingerprint} anomalyClient={anomalyClient} client={client} onResolved={onResolved} />);
 
     await screen.findByText('目前狀態：');
+    expect(screen.queryByText('建立退還政府應付')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('退款應付日期')).not.toBeInTheDocument();
     const evidence = screen.getByLabelText('處置證據');
     fireEvent.change(evidence, { target: { value: 'phone-call:case-11' } });
     fireEvent.change(screen.getByLabelText('人工處置原因'), { target: { value: '依正式規則書核對後抵扣' } });
@@ -93,22 +84,12 @@ describe('GovernmentOverpaymentRecoveryWorkbench', () => {
     expect(screen.getByText(/已從最新問題清單解除/)).toBeInTheDocument();
   });
 
-  it('owner query 沒有合法標的或退款對象時顯示 blocker，不產生假 action', async () => {
+  it('owner query 沒有合法標的時顯示 blocker，不產生假 action', async () => {
     const blockedQuery: GovernmentOverpaymentQuery = {
       ...query,
       offset_targets: [],
-      return_recipient: {
-        ready: false,
-        blockers: ['government_subsidy_recipient_account_missing'],
-        agency_identity: null,
-        agency_name: null,
-        bank_code: null,
-        account_display: null,
-        account_fingerprint: null,
-        effective_date: null,
-      },
       available_actions: [],
-      blockers: ['government_subsidy_recipient_account_missing'],
+      blockers: ['government_subsidy_overpayment_target_not_eligible'],
     };
     const client = {
       query: vi.fn().mockResolvedValue(blockedQuery),
@@ -116,7 +97,7 @@ describe('GovernmentOverpaymentRecoveryWorkbench', () => {
       apply: vi.fn(),
     };
     render(<GovernmentOverpaymentRecoveryWorkbench overpaymentIdentity={identity} anomalyFingerprint={anomalyFingerprint} client={client} />);
-    await screen.findByText(/政府退款帳戶尚未準備完成/);
+    await screen.findByText(/必要資料尚未準備完成/);
     expect(screen.getByRole('button', { name: '檢查處置影響' })).toBeDisabled();
     expect(client.preview).not.toHaveBeenCalled();
   });
@@ -135,7 +116,7 @@ describe('GovernmentOverpaymentRecoveryWorkbench', () => {
         .mockRejectedValueOnce(new GovernmentOverpaymentRecoveryError('GOVERNMENT_OVERPAYMENT_TIMEOUT', 'timeout', true))
         .mockResolvedValueOnce({
           overpayment_identity: identity, remaining_after_ntd: 0, status: 'offset_applied' as const,
-          preview_fingerprint: 'b'.repeat(64), payable_identity: null,
+          preview_fingerprint: 'b'.repeat(64),
         }),
     };
     const anomalyClient = { queryAnomalyDetail: vi.fn().mockResolvedValue(clearedAnomaly) };
@@ -174,7 +155,7 @@ describe('GovernmentOverpaymentRecoveryWorkbench', () => {
       }),
       apply: vi.fn().mockResolvedValue({
         overpayment_identity: identity, remaining_after_ntd: 0, status: 'offset_applied' as const,
-        preview_fingerprint: 'b'.repeat(64), payable_identity: null,
+        preview_fingerprint: 'b'.repeat(64),
       }),
     };
     const onResolved = vi.fn().mockResolvedValue({ succeeded: true, originalFingerprintPresent: false });
@@ -205,7 +186,7 @@ describe('GovernmentOverpaymentRecoveryWorkbench', () => {
       }),
       apply: vi.fn().mockResolvedValue({
         overpayment_identity: identity, remaining_after_ntd: 0, status: 'offset_applied' as const,
-        preview_fingerprint: 'b'.repeat(64), payable_identity: null,
+        preview_fingerprint: 'b'.repeat(64),
       }),
     };
     const anomalyClient = { queryAnomalyDetail: vi.fn().mockResolvedValue(clearedAnomaly) };
@@ -271,7 +252,7 @@ describe('GovernmentOverpaymentRecoveryWorkbench', () => {
         }),
         apply: vi.fn().mockResolvedValue({
           overpayment_identity: identity, remaining_after_ntd: 0, status: 'offset_applied' as const,
-          preview_fingerprint: 'b'.repeat(64), payable_identity: null,
+          preview_fingerprint: 'b'.repeat(64),
         }),
       };
       const onResolved = vi.fn().mockResolvedValue(refresh);

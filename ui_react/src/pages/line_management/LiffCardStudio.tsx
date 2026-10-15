@@ -146,7 +146,7 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     type: 'liff',
     title: '9. staff_schedule.html',
     subtitle: '月嫂月曆、不可服務期間與請假',
-    badge: '正式排班月曆',
+    badge: '排班月曆',
     endpointUrl: '/line-staff-schedule',
     launchPath: '/line-staff-schedule',
     authLevel: '後端驗證 LINE 登入憑證與正式月嫂綁定',
@@ -158,7 +158,7 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     id: 'staff_baby_log',
     type: 'liff',
     title: '10. staff_baby_log.html',
-    subtitle: '正式服務日寶寶日誌與餐食照片',
+    subtitle: '服務日寶寶日誌與餐食照片',
     badge: '服務日受控登錄',
     endpointUrl: '/line-staff-baby-log',
     launchPath: '/line-staff-baby-log',
@@ -493,7 +493,7 @@ function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
       <div className="mock-form-inputs">
         <div className="mock-step-indicator">寶寶日誌</div>
         <label>服務月份</label><input type="month" readOnly />
-        <label>正式服務日</label><input type="text" value="請先載入正式服務日" readOnly />
+        <label>服務日</label><input type="text" value="請先載入服務日" readOnly />
         <label>寶寶日誌</label><textarea rows={2} placeholder="選擇服務日後填寫" readOnly />
         <button type="button" className="mock-primary-btn" disabled>預覽寶寶日誌</button>
       </div>

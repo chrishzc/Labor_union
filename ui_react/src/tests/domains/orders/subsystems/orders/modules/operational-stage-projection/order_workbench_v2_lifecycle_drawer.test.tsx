@@ -48,7 +48,7 @@ describe('Beta Drawer 受控操作整合與跨支線回讀', () => {
   });
 
   it.each([
-    ['formal_service', '正式排班'],
+    ['formal_service', '排班'],
     ['service_completion', '完工確認'],
     ['confirmed_service_dates', '確認日期'],
   ])('依 %s 直接呈現 %s，其他服務作業預設收合', async (stage, label) => {
@@ -103,17 +103,17 @@ describe('Beta Drawer 受控操作整合與跨支線回讀', () => {
 
   it('未完工案件只提供開始日異動，不提供完工日期更正', async () => {
     render(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="normal" onClose={vi.fn()} />);
-    await screen.findByRole('heading', { name: '正式排班' });
+    await screen.findByRole('heading', { name: '排班' });
     fireEvent.click(screen.getByRole('button', { name: '案件異動' }));
     expect(screen.getByRole('button', { name: '更正開始日並重排' })).toBeEnabled();
     expect(screen.queryByRole('button', { name: '更正完工服務日期' })).not.toBeInTheDocument();
     expect(screen.getByText(/實際開始日已一併保存/)).toBeVisible();
   });
 
-  it('尚無正式排班時仍可確認日期，入口不宣稱會重排', async () => {
+  it('尚無排班時仍可確認日期，入口不宣稱會重排', async () => {
     mocks.assignment.mockResolvedValue({ case_no: CASE, assignments: [] });
     render(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="normal" onClose={vi.fn()} />);
-    await screen.findByRole('heading', { name: '正式排班' });
+    await screen.findByRole('heading', { name: '排班' });
     fireEvent.click(screen.getByRole('button', { name: '案件異動' }));
     const entry = screen.getByRole('button', { name: '確認／更正實際開始日' });
     expect(entry).toBeEnabled();

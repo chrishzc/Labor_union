@@ -2,12 +2,10 @@ from datetime import date
 
 from infrastructure.mysql.accounts_payable_export_sources import (
     _CLIENT_REFUNDS_SQL,
-    _GOVERNMENT_RETURNS_SQL,
     _HISTORICAL_STAFF_PAYABLE_PROJECTION_SQL,
     _STAFF_PAYABLES_SQL,
     MySqlStaffPayableExportSource,
     _formal_case_audit_item,
-    _government_return_fact,
     _historical_case_audit_item,
     _missing_case_audit_item,
     _refund_fact,
@@ -60,7 +58,7 @@ def test_staff_payables_only_include_the_selected_payment_date():
     assert "obligations.due_date = %s" in _STAFF_PAYABLES_SQL
     assert "obligations.due_date <= %s" not in _STAFF_PAYABLES_SQL
 
-    for query in (_CLIENT_REFUNDS_SQL, _GOVERNMENT_RETURNS_SQL):
+    for query in (_CLIENT_REFUNDS_SQL,):
         assert "due_date <= %s" in query
 
     assert "obligations.status = 'open'" in _CLIENT_REFUNDS_SQL
@@ -245,19 +243,3 @@ def test_legacy_partially_paid_staff_row_is_an_anomaly_not_a_current_export():
     assert fact.status is StaffPayableStatus.ANOMALY
     assert "'partially_paid'" not in _STAFF_PAYABLES_SQL
     assert "= 'payable'" in _STAFF_PAYABLES_SQL
-
-
-def test_government_return_is_a_next_payment_detail_without_payment_reconciliation():
-    fact = _government_return_fact({
-        "payable_identity": "government-return:1",
-        "overpayment_identity": "overpayment:1",
-        "agency_name": "新竹市政府",
-        "bank_code": "004",
-        "account_display": "****1234",
-        "remaining_amount_ntd": 500,
-        "due_date": date(2026, 3, 15),
-    })
-
-    assert fact.amount.amount == 500
-    assert fact.overpayment_identity == "overpayment:1"
-    assert "finance_import_rows" not in _GOVERNMENT_RETURNS_SQL

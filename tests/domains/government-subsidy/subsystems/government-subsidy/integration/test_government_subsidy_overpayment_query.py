@@ -15,13 +15,7 @@ from infrastructure.mysql.government_subsidy_repository import (
     MySqlGovernmentSubsidyRepository,
 )
 from shared_kernel.identities import CorrelationId
-from subsystems.government_subsidy.overpayment_query import (
-    GovernmentSubsidyOverpaymentQueryError,
-    GovernmentSubsidyOverpaymentQueryWorkflow,
-    GovernmentSubsidyOffsetTargetQueryView,
-    GovernmentSubsidyOverpaymentQueryView,
-    GovernmentSubsidyReturnRecipientQueryView,
-)
+from subsystems.government_subsidy.overpayment_query import GovernmentSubsidyOverpaymentQueryError, GovernmentSubsidyOverpaymentQueryWorkflow, GovernmentSubsidyOffsetTargetQueryView, GovernmentSubsidyOverpaymentQueryView
 
 
 class _Cursor:
@@ -116,26 +110,13 @@ def test_query_uses_owner_root_and_returns_only_eligible_targets_without_writes(
     assert result.payer_identity == "hccg"
     assert result.offset_targets[0].outstanding_amount_ntd == 700
     assert result.offset_targets[0].batch_version == 8
-    assert result.return_recipient.ready is True
-    assert result.return_recipient.account_display.endswith("9012")
-    assert result.return_recipient.account_display != "123456789012"
-    assert result.available_actions == ("offset", "return")
+    assert not any("government_payer_receiving_accounts" in sql or "government_overpayment_return" in sql for sql in connection.cursor_value.statements)
+    assert result.available_actions == ("offset",)
     assert result.blockers == ()
     assert result.source_bank_fact_reference.startswith("redacted:")
     assert all(statement.lstrip().upper().startswith("SELECT") for statement in connection.cursor_value.statements)
 
 
-def test_query_reports_typed_recipient_blocker_and_keeps_offset_action():
-    result = MySqlGovernmentSubsidyRepository(_Connection(recipient=False)).query_overpayment(
-        "government-overpayment:bank-1"
-    )
-
-    assert result.return_recipient.ready is False
-    assert result.return_recipient.blockers == (
-        "government_subsidy_recipient_account_missing",
-    )
-    assert result.available_actions == ("offset",)
-    assert result.blockers == ("government_subsidy_recipient_account_missing",)
 
 
 def test_query_rejects_wrong_government_payer_fail_closed():
@@ -171,18 +152,8 @@ def test_query_route_returns_strict_owner_view():
                 (
                     GovernmentSubsidyOffsetTargetQueryView(31, 41, 8, 700, "hccg"),
                 ),
-                GovernmentSubsidyReturnRecipientQueryView(
-                    True,
-                    (),
-                    "hccg",
-                    "新竹市政府",
-                    "004",
-                    "********9012",
-                    "a" * 64,
-                    "2026-01-01",
-                ),
                 (),
-                ("offset", "return"),
+                ("offset",),
             )
 
     app.dependency_overrides[require_system_admin] = lambda: object()

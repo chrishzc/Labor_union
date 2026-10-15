@@ -52,20 +52,15 @@ function statusLabel(status: GovernmentOverpaymentQuery['status']): string {
     pending_review: '待人工判定',
     offset_reserved: '抵扣處理中',
     offset_applied: '抵扣已完成',
-    return_payable: '已建立政府退還款',
-    partially_returned: '政府退還款部分完成',
-    returned: '政府退還款已完成',
   })[status];
 }
 
-function dispositionLabel(disposition: GovernmentOverpaymentDisposition): string {
-  return disposition === 'offset' ? '抵扣合法補助標的' : '建立政府退還款';
+function dispositionLabel(_disposition: GovernmentOverpaymentDisposition): string {
+  return '抵扣合法補助標的';
 }
 
-function blockerLabel(blocker: string): string {
-  return blocker === 'government_subsidy_recipient_account_missing'
-    ? '政府退款帳戶尚未準備完成'
-    : '必要資料尚未準備完成';
+function blockerLabel(_blocker: string): string {
+  return '必要資料尚未準備完成';
 }
 
 function applyOutcomeUnknown(error: unknown): boolean {
@@ -97,9 +92,7 @@ export const GovernmentOverpaymentRecoveryWorkbench: React.FC<Props> = ({
   requestOptions = {},
 }) => {
   const [query, setQuery] = useState<GovernmentOverpaymentQuery | null>(null);
-  const [disposition, setDisposition] = useState<GovernmentOverpaymentDisposition>('offset');
   const [targetAmounts, setTargetAmounts] = useState<TargetAmounts>({});
-  const [dueDate, setDueDate] = useState('');
   const [reason, setReason] = useState('');
   const [evidence, setEvidence] = useState('');
   const [preview, setPreview] = useState<GovernmentOverpaymentPreview | null>(null);
@@ -155,26 +148,14 @@ export const GovernmentOverpaymentRecoveryWorkbench: React.FC<Props> = ({
   }, [query, targetAmounts]);
 
   const request = useMemo<GovernmentOverpaymentDispositionPreviewRequest | null>(() => {
-    if (!query || !evidence.trim()) return null;
-    if (disposition === 'offset') {
-      if (!targets.length) return null;
-      return {
-        overpayment_identity: query.overpayment_identity,
-        disposition,
-        targets,
-        due_date: null,
-        evidence_reference: evidence.trim(),
-      };
-    }
-    if (!dueDate) return null;
+    if (!query || !evidence.trim() || !targets.length) return null;
     return {
       overpayment_identity: query.overpayment_identity,
-      disposition,
-      targets: [],
-      due_date: dueDate,
+      disposition: 'offset',
+      targets,
       evidence_reference: evidence.trim(),
     };
-  }, [query, disposition, targets, dueDate, evidence]);
+  }, [query, targets, evidence]);
 
   const updateInput = <T,>(setter: React.Dispatch<React.SetStateAction<T>>, value: T) => {
     setter(value);
@@ -334,7 +315,6 @@ export const GovernmentOverpaymentRecoveryWorkbench: React.FC<Props> = ({
   };
 
   const canOffset = query?.available_actions.includes('offset') ?? false;
-  const canReturn = (query?.available_actions.includes('return') && query.return_recipient.ready) ?? false;
   const busy = status === 'loading' || status === 'previewing' || status === 'applying';
   const commandLocked = receipt !== null || outcomeUnknown || readbackUnavailable || needsRecheck || completionVerified || staleOwnerRefreshRequired;
   const effectiveReadback = readback ?? query;
@@ -359,12 +339,11 @@ export const GovernmentOverpaymentRecoveryWorkbench: React.FC<Props> = ({
       ) : (
         <>
           <fieldset disabled={busy || commandLocked} style={{ border: 0, padding: 0, margin: '14px 0' }}>
-            <legend>選擇合法處置</legend>
-            <label><input type="radio" name={`government-overpayment-disposition-${query.overpayment_identity}`} checked={disposition === 'offset'} disabled={!canOffset} onChange={() => updateInput<GovernmentOverpaymentDisposition>(setDisposition, 'offset')} /> 抵扣已核准且仍有 outstanding 的補助標的</label>
-            <label style={{ marginLeft: 16 }}><input type="radio" name={`government-overpayment-disposition-${query.overpayment_identity}`} checked={disposition === 'return'} disabled={!canReturn} onChange={() => updateInput<GovernmentOverpaymentDisposition>(setDisposition, 'return')} /> 建立退還政府應付</label>
+            <legend>處置方式</legend>
+            <span>抵扣已核准且尚未清償的補助標的</span>
           </fieldset>
 
-          {disposition === 'offset' && canOffset && <div>
+          {canOffset && <div>
             <div style={{ fontWeight: 700 }}>可抵扣的已核准補助標的</div>
             {query.offset_targets.length === 0 ? <div role="alert">目前沒有合法抵扣標的，不能猜測未來案件。</div> : query.offset_targets.map((target) => (
               <label key={target.claim_item_id} style={{ display: 'block', marginTop: 8 }}>
@@ -373,12 +352,6 @@ export const GovernmentOverpaymentRecoveryWorkbench: React.FC<Props> = ({
               </label>
             ))}
           </div>}
-
-          {disposition === 'return' && canReturn && <label style={{ display: 'block', marginTop: 12 }}>退款應付日期
-            <input aria-label="退款應付日期" type="date" value={dueDate} disabled={busy || commandLocked} onChange={(event) => updateInput(setDueDate, event.target.value)} />
-            {!query.return_recipient.ready && <div role="alert">退款對象不可用：{query.return_recipient.blockers.join('、') || '政府退款帳戶未準備完成。'}</div>}
-            {query.return_recipient.ready && <div>退款對象：{query.return_recipient.agency_name}／{query.return_recipient.bank_code}／{query.return_recipient.account_display}</div>}
-          </label>}
 
           <label style={{ display: 'block', marginTop: 12 }}>處置證據（獨立欄位）
             <input aria-label="處置證據" type="text" maxLength={500} value={evidence} disabled={busy || commandLocked} onChange={(event) => updateInput(setEvidence, event.target.value)} />

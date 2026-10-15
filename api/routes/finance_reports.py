@@ -5,6 +5,7 @@ Description: 提供受控Finance唯讀報表與既有XLSX輸出端點。
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
@@ -16,6 +17,8 @@ from api.dependencies.admin_auth import require_admin
 from api.dependencies.accounts_payable_export import (
     AccountsPayableExportApplication,
     get_accounts_payable_export_application,
+    CashRequirementsApplication,
+    get_cash_requirements_application,
 )
 from api.error_contracts import internal_query_error, typed_http_error
 from api.schemas.base import BaseResponse
@@ -26,6 +29,7 @@ from api.schemas.accounts_payable_export import (
     AccountsPayableArchiveView,
     AccountsPayablePreviewView,
     CaseStaffPayableAuditView,
+    CashRequirementsPageView,
 )
 from api.schemas.government_subsidy_report import (
     GovernmentSubsidyReportPartitionView,
@@ -40,6 +44,29 @@ from subsystems.government_subsidy import reconciliation_register_query
 
 router = APIRouter(prefix="/api/v1/finance-reports", tags=["Finance Reports"])
 XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+@router.get("/accounts-payable/cash-requirements", response_model=BaseResponse[CashRequirementsPageView])
+def query_accounts_payable_cash_requirements(
+    page_size: int = Query(100, ge=1, le=200),
+    after_case_no: str | None = Query(None, min_length=1, max_length=50),
+    principal: AdminPrincipal = Depends(require_admin),
+    application: CashRequirementsApplication = Depends(get_cash_requirements_application),
+):
+    """Read estimates and existing unpaid amounts; no accounting or payment writes."""
+    del principal
+    try:
+        page = application.query(page_size=page_size, after_case_no=after_case_no)
+        return BaseResponse(data=CashRequirementsPageView.model_validate({
+            "rows": [asdict(row) for row in page.rows],
+            "next_cursor": page.next_cursor,
+        }), message="預估資金需求查詢")
+    except (TypeError, ValueError) as exc:
+        raise typed_http_error(400, "validation", "cash_requirements_query_invalid",
+            "預估資金需求查詢條件或來源資料無效。", "cash-requirements-query") from exc
+    except Exception as exc:
+        raise internal_query_error("cash_requirements_query_failed",
+            "預估資金需求暫時無法取得。", "cash-requirements-query") from exc
 
 
 @router.get('/client-subsidy-returns', response_model=BaseResponse[ClientSubsidyReturnPageView])

@@ -63,8 +63,8 @@ const STAGE_LABELS: Readonly<Record<CoreStageCode, string>> = {
   external_signing_dispatch: '建立契約並送交外部簽署平台',
   deposit_settlement: '客戶定金核銷',
   external_signing_completion: '雙方外部簽署完成',
-  confirmed_service_dates: '正式服務日期確認',
-  formal_service: '正式排班與服務履約',
+  confirmed_service_dates: '服務日期確認',
+  formal_service: '排班與服務履約',
   service_completion: '完工／服務完成確認',
   client_settlement: '客戶端結算',
   staff_payout: '月嫂端結算',
@@ -311,7 +311,7 @@ describe('待辦看板 唯讀工作 Drawer', () => {
   it('由案件卡開啟／關閉，並只用正式 GET owner facts 與 core-stage projection 呈現案件、服務、派案、13 階、notice 與 lineage', async () => {
     const row = timeline('CASE-DRAWER', 'intake_validation', {
       currentStatus: 'blocked',
-      blockers: [{ code: 'service_blocked', message: '正式排班尚未完成' }],
+      blockers: [{ code: 'service_blocked', message: '排班尚未完成' }],
       warnings: [{ code: 'service_warning', message: '確認服務開始資訊' }],
     });
     clientMocks.getCoreStageTimelines.mockImplementation(async (params: OrderCoreStageProjectionQueryParams) => (

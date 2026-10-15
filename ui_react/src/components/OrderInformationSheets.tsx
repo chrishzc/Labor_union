@@ -198,7 +198,7 @@ export function OrderInformationSheets({ caseNo, assignments, initialKind = 1, o
     {kind === 'weekly' && !targets.length && selectedCandidateId !== null && candidates.find(item => item.id === selectedCandidateId) && <CandidatePlannedServiceDates
       key={`${caseNo}:${selectedCandidateId}`} caseNo={caseNo} candidateId={selectedCandidateId}
       startDate={candidates.find(item => item.id === selectedCandidateId)!.service_start_date} onPreview={setWeeklyPreview} />}
-    {weeklyPreview && kind === 'weekly' && <article className="order-information-paper"><header><h3>每週服務時間說明</h3><p>{weeklyPreview.date_basis === 'confirmed' ? '依目前已保存預計日期計算' : weeklyPreview.date_basis === 'draft' ? '依這次試算日期計算，尚未保存' : '依目前候選服務期間與休假推算'}，尚未建立正式排班。</p></header>
+    {weeklyPreview && kind === 'weekly' && <article className="order-information-paper"><header><h3>每週服務時間說明</h3><p>{weeklyPreview.date_basis === 'confirmed' ? '依目前已保存預計日期計算' : weeklyPreview.date_basis === 'draft' ? '依這次試算日期計算，尚未保存' : '依目前候選服務期間與休假推算'}，尚未建立排班。</p></header>
       <p>約定服務 {weeklyPreview.required_service_days ?? '待確認'} 天；目前日期可提供 {weeklyPreview.projected_service_days} 天。</p>
       {weeklyPreview.warnings.map((warning) => <p role="status" key={warning}>{warning}</p>)}
       <div className="formal-recommendation-weekly-preview"><table><thead><tr><th>週次</th><th>服務人員</th><th>期間</th><th>工作日</th><th>時數</th></tr></thead><tbody>

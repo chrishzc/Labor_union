@@ -127,7 +127,7 @@ export const OrderAssignmentPlanPanel: FC<OrderAssignmentPlanPanelProps> = ({ ca
               >
                 <div><dt>月嫂</dt><dd>#{segment.staff_id}</dd></div>
                 <div><dt>指派期間</dt><dd>{segment.assigned_start_date} ~ {segment.assigned_end_date}</dd></div>
-                <div><dt>正式服務日</dt><dd>{segment.official_service_dates.length > 0 ? segment.official_service_dates.join('、') : '尚未回傳'}</dd></div>
+                <div><dt>服務日</dt><dd>{segment.official_service_dates.length > 0 ? segment.official_service_dates.join('、') : '尚未回傳'}</dd></div>
               </dl>
             ))
           )}

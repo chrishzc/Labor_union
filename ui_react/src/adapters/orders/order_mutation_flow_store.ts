@@ -870,7 +870,7 @@ export class OrderMutationFlowStore {
         // The user must explicitly load the current dates before starting a new draft.
         draft.queryView = queryView;
         draft.previewView = null;
-        throw new Error('正式服務日期已被較新版本更新；請載入目前正式日期後核對，不要重送原操作。');
+        throw new Error('服務日期已被較新版本更新；請載入目前正式日期後核對，不要重送原操作。');
       }
       throw new Error('服務日期已收到收據，但正式回讀日期與本次收據不一致；只能重新讀取結果。');
     }

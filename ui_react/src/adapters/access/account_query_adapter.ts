@@ -25,7 +25,7 @@ export interface JobObservationView {
 }
 
 const JOB_COMMAND_LABELS: Record<JobObservation['command_type'], string> = {
-  assignment_plan_apply: '正式排班建立',
+  assignment_plan_apply: '排班建立',
   finance_import_historical_reprocess_apply: '歷史銀行流水重處理',
   finance_import_batch_apply: '銀行流水正式匯入',
   finance_import_correction_apply: '銀行流水更正',

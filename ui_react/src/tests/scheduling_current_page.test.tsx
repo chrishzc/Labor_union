@@ -373,7 +373,7 @@ describe('SchedulingPage query-only presentation', () => {
     const overlay = document.querySelector('.gantt-span-bar.span-historical');
     expect(overlay).toHaveAttribute('data-start-day', '4');
     expect(overlay).toHaveAttribute('data-end-day', '5');
-    expect(overlay).toHaveTextContent('歷史正式指派區間（非正式工作日）');
+    expect(overlay).toHaveTextContent('歷史指派區間（不計入工時）');
     expect(overlay).not.toHaveClass('span-ghost-clickable');
   });
 
@@ -551,7 +551,7 @@ describe('SchedulingPage query-only presentation', () => {
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     ));
     await waitFor(() => expect(document.body).toHaveTextContent(
-      /正式服務日期：\s*2026-08-23 ～ 2026-08-24/,
+      /服務日期：\s*2026-08-23 ～ 2026-08-24/,
     ));
 
     fireEvent.click(screen.getByRole('button', { name: '檢查 去敏人員乙 的資格與檔期' }));

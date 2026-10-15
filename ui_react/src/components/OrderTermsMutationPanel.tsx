@@ -157,7 +157,7 @@ function conflictMessage(error: unknown): string | null {
     return '目前排班資料不完整，無法安全調整既有排班；本次未儲存任何變更。';
   }
   if (code === 'confirmed_service_dates_reconfirmation_required') {
-    return '本案已有正式服務日期；變更服務天數前，請在本面板精算完整替代日期並填寫人員分配；本次未儲存任何變更。';
+    return '本案已有服務日期；變更服務天數前，請在本面板精算完整替代日期並填寫人員分配；本次未儲存任何變更。';
   }
   if (code === 'scheduling_reallocation_required') return '請填寫每個既有指派的新服務天數，合計須等於新合約天數，再重新檢查。';
   if (code === 'service_data_locked') return '服務條件已鎖定，本次未儲存；請保留已完成服務與帳務歷史。';
@@ -507,7 +507,7 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
   return (
     <section className="order-v2-drawer-section" aria-labelledby="order-v2-terms-mutation-heading">
       <h3 id="order-v2-terms-mutation-heading">預覽與儲存服務條件</h3>
-      <p className="order-v2-drawer-note">尚未建立正式服務日期時，可先修正進件條款；已有日期或排班且需改天數時，請在下方計算替代服務日期並填寫人員分配，再確認儲存。預覽不會修改訂單。</p>
+      <p className="order-v2-drawer-note">尚未建立服務日期時，可先修正進件條款；已有日期或排班且需改天數時，請在下方計算替代服務日期並填寫人員分配，再確認儲存。預覽不會修改訂單。</p>
       {currentQuery.service_data_locked && (
         <p className="order-v2-drawer-error" role="status">此案件的服務條件已鎖定，依既有規則不可再變更條款。</p>
       )}

@@ -268,7 +268,7 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
   return (
     <section aria-label={`案件 ${caseNo} 實際開始日`}>
       <h4>確認／更正實際開始日</h4>
-      <p>尚未正式排班時只保存日期；已有正式安排時才由後端預覽並重排服務日期及必要下游影響。</p>
+      <p>尚未排班時只保存日期；已有正式安排時才由後端預覽並重排服務日期及必要下游影響。</p>
       <button type="button" disabled={busy} onClick={() => void load()}>讀取實際開始日</button>
       {phase === 'loading' && <p role="status">讀取實際開始日中…</p>}
       {query && (
@@ -288,7 +288,7 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
         <>
           <p>實際開始：{preview.before_actual_start_date ?? '未確認'} → {preview.after_actual_start_date}</p>
           {preview.operation === 'date_only'
-            ? <p>目前尚無正式排班；本次只保存日期，不建立排班、帳務、薪資或服務完成資料。</p>
+            ? <p>目前尚無排班；本次只保存日期，不建立排班、帳務、薪資或服務完成資料。</p>
             : <>
               <p>以下為尚未儲存的新排班，請逐段核對後再確認。</p>
               <ol>

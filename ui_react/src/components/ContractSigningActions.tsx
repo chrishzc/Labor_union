@@ -213,7 +213,7 @@ export function ContractSigningActions({ caseNo, signing, onCommitted }: Contrac
       <section className="contract-signing-section">
         <h4 className="contract-signing-section-title">👩‍🍼 月嫂分段契約</h4>
         {signing.staff_segments.length === 0 ? (
-          <p className="contract-signing-empty-text">尚無正式月嫂分段，不能寄送或收錄月嫂簽回。</p>
+          <p className="contract-signing-empty-text">尚無月嫂分段，不能寄送或收錄月嫂簽回。</p>
         ) : (
           signing.staff_segments.map((segment) => {
             const version = sentDocumentVersion(signing, 'staff_segment', `staff-segment:${segment.segment_id}`);
@@ -431,7 +431,7 @@ export function ContractSigningActions({ caseNo, signing, onCommitted }: Contrac
                       contractSigningMutationClient.uploadClientSignedReturn(caseNo, clientFile!, version!, currentIntent('client-return'))
                     )}
                   >
-                    📤 確認記錄客戶簽回並完成契約
+                    📤 確認客戶簽約完成
                   </button>
                 </div>
               )}

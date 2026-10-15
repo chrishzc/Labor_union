@@ -33,7 +33,7 @@ Orders 不擁有：
 | lifecycle status | derived_projection | Lifecycle evaluator |
 | cancellation | immutable_event | Cancellation event |
 | controlled reopen | immutable_event | Reopen event；不刪除 cancellation history |
-| service-data lock | 不可逆 derived fact | completed 且客戶正式義務結清 predicate 首次成立 |
+| service-data lock | 不可逆 derived fact | completed 且客戶帳務義務結清 predicate 首次成立 |
 | lifecycle version | concurrency projection | 每個成功非 replay aggregate command 加一 |
 | `orders.staff_id` | compatibility_projection | 禁止作人力、排班或薪資 fallback |
 | `orders.deposit_date` | compatibility_projection | Client Finance 的 deposit due date 才是正式權威 |
@@ -166,7 +166,7 @@ Apply：
 2. 鎖定並讀取 fresh Orders、Scheduling，以及本次 candidate 實際需要的 Finance／Payroll facts；
    未建立正式 assignment 且沒有既有下游義務時，只在預計開始日、服務天數、每日時數或樓層費異動且
    已有 Finance root 時讀取該 owner 的付款條款計算 facts；日期異動經同一 Apply 同步付款條款與事件，
-   不建立簽約前正式義務。其餘修改不讀取完整帳務、費率或政策，也不要求或偽造其版本；此分支不新增 Payroll 依賴。
+   不提前建立訂金或期款應收；建立時點依第 `21` 份正式規格的所有月嫂簽約完成與客戶簽約完成關卡。其餘修改不讀取完整帳務、費率或政策，也不要求或偽造其版本；此分支不新增 Payroll 依賴。
 3. 以相同 candidate builder 重建 Preview。
 4. 驗證 fingerprint。
 5. 若變更不形成 Scheduling、confirmed service dates、Finance、Payroll 或 lifecycle 正式影響，走普通保存：只更新 Orders Terms 與 aggregate version，回傳當次 HTTP result；不要求 reason／idempotency key，不建立 command claim、Terms／lifecycle event、audit／outbox、snapshot／history 或永久 receipt，也不呼叫其他 owner writer。
@@ -263,10 +263,11 @@ review 或 alert status。首版只接受一份僅含該 review 對應列的更�
 
 ### 3.2.1 Contract Completion Preview／Apply
 
-正式契約完成是 Orders 根事實，但客戶應付義務由 Client Finance 擁有。依第 `21` 份正式
-規格，最後一位月嫂簽回並形成有效 commitment 時可先建立唯一 deposit obligation；客戶
-簽回時的 Contract Completion 必須保留該 deposit，只補足尚未建立的剩餘期款。客戶簽回、
-Orders contract event 與 Client Finance 補足義務必須使用同一 outer Unit of Work：
+客戶簽約完成所對應的契約完成事件是 Orders 根事實，但客戶應付義務由 Client Finance 擁有。
+簽約與應收用詞依第 `21` 份正式規格 §1.1，不區分正式／非正式應收。所有月嫂簽約完成時
+建立一次訂金應收（deposit obligation）；客戶簽約完成時的 Contract Completion 必須保留
+該 deposit，建立其餘尚未建立的期款應收。客戶簽回證據、Orders contract event 與
+Client Finance 建立其餘期款應收必須使用同一 outer Unit of Work：
 
 1. Preview 讀取客戶簽回證據、有效 commitment 的精確服務日、完整服務時段、Client Finance
    付款條款、既有 deposit／剩餘義務與兩個 aggregate versions。
@@ -278,8 +279,8 @@ Orders contract event 與 Client Finance 補足義務必須使用同一 outer Un
 4. Preview 顯示既有 deposit 與預計補足義務的筆數、服務日數、整數金額與到期日，並證明
    deposit 金額與 identity 不會被重建或重複計入。
 5. Apply fresh-read 並驗證 Contract Signing status、Orders 與 Client Finance expected version、
-   Preview fingerprint 及 idempotency key；先追加契約完成事件，再委派 Client Finance 補足
-   尚未建立的正式期款，最後
+   Preview fingerprint 及 idempotency key；先追加契約完成事件，再委派 Client Finance 建立
+   其餘尚未建立的期款應收，最後
    重評 lifecycle、寫 outbox 與 receipt，單一 commit。
 6. 任一步失敗時，簽回事件、契約事件、新義務、兩端 outbox、versions 與 receipt 全部回滾；
    相同命令 replay 回傳原 receipt，不得重複建立義務。
@@ -294,7 +295,7 @@ Orders contract event 與 Client Finance 補足義務必須使用同一 outer Un
 - actual start confirmation／reconfirmation；
 - assignment-owned 最後服務結束時刻；
 - Domain 根事實 blockers；
-- 客戶正式義務結清；
+- 客戶帳務義務結清；
 - 不可逆服務資料鎖。
 
 優先序：

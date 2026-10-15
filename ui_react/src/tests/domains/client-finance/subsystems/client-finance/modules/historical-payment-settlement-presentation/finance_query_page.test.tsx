@@ -102,7 +102,7 @@ describe('FinancePage query and guarded import presentation', () => {
     await waitFor(() => expect(screen.getByText('OBL-C-1')).toBeInTheDocument());
     expect(ordersQueryClient.getOrderSummaries).toHaveBeenCalledTimes(1);
     expect(clientReceiptQueryClient.query).toHaveBeenCalledTimes(1);
-    expect(await screen.findByRole('region', { name: '本案月嫂應付查核' })).toHaveTextContent('現行正式義務');
+    expect(await screen.findByRole('region', { name: '本案月嫂應付查核' })).toHaveTextContent('已建立的應付項目');
     expect(screen.getByRole('region', { name: '本案月嫂應付查核' })).toHaveTextContent('NT$ 42,000');
     expect(screen.getByRole('region', { name: '本案月嫂應付查核' })).toHaveTextContent('案件屬於其他付款月份。');
     expect(screen.getByText('此為正常案件；歷史人工收款確認只會在歷史案件顯示。')).toBeInTheDocument();
@@ -125,7 +125,7 @@ describe('FinancePage query and guarded import presentation', () => {
     expect(document.querySelector('[data-control-id="finance.accounts-payable.export-xlsx"]')).toBeEnabled();
     expect(screen.queryByText(/敏感資料已遮罩|去敏保護啟用/)).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '銀行流水匯入' }));
+    fireEvent.click(screen.getByRole('button', { name: '銀行交易明細匯入' }));
     expect(screen.getByText('上傳檔案 → 預覽 → 匯入完成')).toBeInTheDocument();
     expect(screen.queryByText('已載入批次')).not.toBeInTheDocument();
     expect(screen.queryByText('歷史 Reprocess Run（loaded scope）')).not.toBeInTheDocument();
@@ -306,7 +306,7 @@ function installImportHttp(
 }
 
 async function uploadAndPreview(file = IMPORT_FILE): Promise<void> {
-  fireEvent.change(screen.getByLabelText('選擇銀行流水工作簿'), { target: { files: [file] } });
+  fireEvent.change(screen.getByLabelText('選擇銀行交易明細工作簿'), { target: { files: [file] } });
   fireEvent.click(screen.getByRole('button', { name: '上傳檔案' }));
   await waitFor(() => expect(screen.getByRole('button', { name: '預覽匯入結果' })).toBeEnabled());
   fireEvent.click(screen.getByRole('button', { name: '預覽匯入結果' }));
@@ -352,7 +352,7 @@ describe('Finance import preview and replay boundary', () => {
     const { applyRequests } = installImportHttp([plan]);
     const previewSpy = vi.spyOn(financeImportMutationClient, 'preview');
     render(<FinancePage />);
-    fireEvent.click(screen.getByRole('button', { name: '銀行流水匯入' }));
+    fireEvent.click(screen.getByRole('button', { name: '銀行交易明細匯入' }));
     await uploadAndPreview();
     expect(previewSpy).toHaveBeenCalledOnce();
     await expect(previewSpy.mock.results[0].value).resolves.toEqual(plan);
@@ -361,7 +361,7 @@ describe('Finance import preview and replay boundary', () => {
     await screen.findByText('匯入完成：核銷 3、既有 2、待處理 5');
     expect(applyRequests[0].body).toEqual({ batch_identity: plan.batch_identity,
       expected_batch_version: plan.batch_version, preview_fingerprint: plan.preview_fingerprint,
-      reason: '已核對銀行流水預覽，確認匯入' });
+      reason: '已核對銀行交易明細預覽，確認匯入' });
   });
 
   it('renders server blockers and never offers Apply for a blocked Preview', async () => {
@@ -371,7 +371,7 @@ describe('Finance import preview and replay boundary', () => {
     plan.counts.blocked = 2;
     installImportHttp([plan]);
     render(<FinancePage />);
-    fireEvent.click(screen.getByRole('button', { name: '銀行流水匯入' }));
+    fireEvent.click(screen.getByRole('button', { name: '銀行交易明細匯入' }));
     await uploadAndPreview();
     assertPreviewCounts(plan, plan.counts.manual_review);
     expect(screen.getByText(/目前不可匯入：存在可能重複的銀行交易/)).toBeInTheDocument();
@@ -381,7 +381,7 @@ describe('Finance import preview and replay boundary', () => {
   it('replays the exact first command after a lost response and binds the displayed reason', async () => {
     const { applyRequests } = installImportHttp([await importPreview()], { loseFirstApply: true });
     render(<FinancePage />);
-    fireEvent.click(screen.getByRole('button', { name: '銀行流水匯入' }));
+    fireEvent.click(screen.getByRole('button', { name: '銀行交易明細匯入' }));
     await uploadAndPreview();
     fireEvent.change(screen.getByLabelText('正式入帳原因'), { target: { value: '原始原因' } });
     confirmImport();
@@ -399,7 +399,7 @@ describe('Finance import preview and replay boundary', () => {
     const otherFile = new File(['other finance fixture'], 'other.xlsx');
     const { applyRequests } = installImportHttp([plan, await importPreview('c'.repeat(64), otherFile), plan], { loseFirstApply: true });
     render(<FinancePage />);
-    fireEvent.click(screen.getByRole('button', { name: '銀行流水匯入' }));
+    fireEvent.click(screen.getByRole('button', { name: '銀行交易明細匯入' }));
     await uploadAndPreview();
     fireEvent.change(screen.getByLabelText('正式入帳原因'), { target: { value: '第一份原因' } });
     confirmImport();
@@ -421,7 +421,7 @@ describe('Finance import preview and replay boundary', () => {
   it('does not show a completion receipt during queued or running observations', async () => {
     const { applyRequests, fetchSpy } = installImportHttp([await importPreview()], { statuses: ['queued', 'running', 'succeeded'] });
     render(<FinancePage />);
-    fireEvent.click(screen.getByRole('button', { name: '銀行流水匯入' }));
+    fireEvent.click(screen.getByRole('button', { name: '銀行交易明細匯入' }));
     await uploadAndPreview();
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     await act(async () => { confirmImport(); });
@@ -438,7 +438,7 @@ describe('Finance import preview and replay boundary', () => {
   it.each(['failed', 'cancelled'] as const)('%s never becomes a successful import receipt', async (status) => {
     installImportHttp([await importPreview()], { statuses: [status] });
     render(<FinancePage />);
-    fireEvent.click(screen.getByRole('button', { name: '銀行流水匯入' }));
+    fireEvent.click(screen.getByRole('button', { name: '銀行交易明細匯入' }));
     await uploadAndPreview();
     confirmImport();
     await screen.findByText('未完成正式入帳；請重新預覽並查看本頁人工核對清單。');
@@ -471,7 +471,7 @@ describe('Finance import preview and replay boundary', () => {
     }));
     const previewSpy = vi.spyOn(financeImportMutationClient, 'preview');
     render(<FinancePage />);
-    fireEvent.click(screen.getByRole('button', { name: '銀行流水匯入' }));
+    fireEvent.click(screen.getByRole('button', { name: '銀行交易明細匯入' }));
     await uploadAndPreview(file);
     expect(previewSpy).toHaveBeenCalledOnce();
     const decoded = await previewSpy.mock.results[0].value;

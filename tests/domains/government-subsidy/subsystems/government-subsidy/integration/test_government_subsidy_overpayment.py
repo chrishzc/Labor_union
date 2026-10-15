@@ -1,12 +1,4 @@
-from domains.government_subsidy.overpayment import (
-    GovernmentRecipientSnapshot, GovernmentSubsidyOffsetIntent,
-    GovernmentSubsidyOffsetTarget, GovernmentSubsidyOverpayment,
-    GovernmentSubsidyOverpaymentError, GovernmentSubsidyOverpaymentStatus,
-    build_overpayment_offset_candidate, build_overpayment_return_candidate,
-    build_receipt_with_overage_candidate, build_overpayment_return_reconciliation_candidate,
-    build_overpayment_return_reconciliation_with_excess_candidate,
-    GovernmentSubsidyReturnExcessRecoveryStatus,
-)
+from domains.government_subsidy.overpayment import GovernmentSubsidyOffsetIntent, GovernmentSubsidyOffsetTarget, GovernmentSubsidyOverpayment, GovernmentSubsidyOverpaymentError, GovernmentSubsidyOverpaymentStatus, build_overpayment_offset_candidate, build_receipt_with_overage_candidate
 from domains.government_subsidy.ledger import (
     ClaimBatchFacts, ClaimBatchIdentity, ClaimItemSnapshot,
     GovernmentBankFact, GovernmentSubsidyBankDirection,
@@ -59,106 +51,16 @@ def test_offset_preview_fingerprint_binds_target_batch_version() -> None:
     assert initial.fingerprint != changed.fingerprint
 
 
-def test_return_is_exclusive_with_offset_disposition() -> None:
-    candidate = build_overpayment_return_candidate(_overpayment(), _recipient())
-    assert candidate.resulting_status is GovernmentSubsidyOverpaymentStatus.RETURN_PAYABLE
-    try:
-        build_overpayment_offset_candidate(
-            GovernmentSubsidyOverpayment("over-1", "city-a", MoneyNTD(2000), GovernmentSubsidyOverpaymentStatus.RETURN_PAYABLE, 1),
-            (_target(9, 1200),), (GovernmentSubsidyOffsetIntent(9, MoneyNTD(1200)),),
-        )
-    except GovernmentSubsidyOverpaymentError as error:
-        assert str(error) == "government_subsidy_overpayment_disposition_conflict"
-    else:
-        raise AssertionError("return payable may not also be offset")
 
 
-def test_return_creates_a_full_payable_without_an_outgoing_bank_fact() -> None:
-    candidate = build_overpayment_return_candidate(_overpayment(), _recipient())
-
-    assert candidate.disposition_amount_ntd == MoneyNTD(2000)
-    assert candidate.remaining_after_ntd == MoneyNTD(2000)
-    assert candidate.resulting_status is GovernmentSubsidyOverpaymentStatus.RETURN_PAYABLE
 
 
-def test_return_reconciliation_uses_the_canonical_outgoing_bank_fact_not_due_date() -> None:
-    root = GovernmentSubsidyOverpayment(
-        "over-1", "city-a", MoneyNTD(2000),
-        GovernmentSubsidyOverpaymentStatus.RETURN_PAYABLE, 2,
-    )
-    early_bank_fact = GovernmentBankFact(
-        10, "bank-out-10", GovernmentSubsidyBankDirection.OUTGOING,
-        "government_subsidy", MoneyNTD(2000), date(2026, 7, 1),
-    )
-
-    candidate = build_overpayment_return_reconciliation_candidate(
-        root, "return-1", MoneyNTD(2000), 1, early_bank_fact
-    )
-
-    assert candidate.remaining_after_ntd == MoneyNTD(0)
-    assert candidate.resulting_status is GovernmentSubsidyOverpaymentStatus.RETURNED
 
 
-def test_return_reconciliation_with_excess_separates_lawful_and_excess_amounts() -> None:
-    root = GovernmentSubsidyOverpayment(
-        "over-1", "city-a", MoneyNTD(2000),
-        GovernmentSubsidyOverpaymentStatus.RETURN_PAYABLE, 2,
-    )
-    outgoing = GovernmentBankFact(
-        11, "bank-out-11", GovernmentSubsidyBankDirection.OUTGOING,
-        "government_subsidy", MoneyNTD(2300), date(2026, 7, 1),
-    )
-
-    candidate = build_overpayment_return_reconciliation_with_excess_candidate(
-        root, "return-1", MoneyNTD(2000), 3, outgoing
-    )
-
-    assert candidate.actual_amount_ntd == MoneyNTD(2300)
-    assert candidate.lawful_amount_ntd == MoneyNTD(2000)
-    assert candidate.excess_amount_ntd == MoneyNTD(300)
-    assert candidate.payable_remaining_after_ntd == MoneyNTD(0)
-    assert candidate.overpayment_remaining_after_ntd == MoneyNTD(0)
-    assert candidate.resulting_status is GovernmentSubsidyOverpaymentStatus.RETURNED
-    assert candidate.recovery_status is GovernmentSubsidyReturnExcessRecoveryStatus.OPEN
-    assert candidate.recovery_identity == "government-overpayment-return-excess:bank-out-11"
 
 
-def test_normal_reconciliation_builder_remains_fail_closed_for_excess() -> None:
-    root = GovernmentSubsidyOverpayment(
-        "over-1", "city-a", MoneyNTD(2000),
-        GovernmentSubsidyOverpaymentStatus.RETURN_PAYABLE, 2,
-    )
-    outgoing = GovernmentBankFact(
-        11, "bank-out-11", GovernmentSubsidyBankDirection.OUTGOING,
-        "government_subsidy", MoneyNTD(2300), date(2026, 7, 1),
-    )
-    try:
-        build_overpayment_return_reconciliation_candidate(
-            root, "return-1", MoneyNTD(2000), 3, outgoing
-        )
-    except GovernmentSubsidyOverpaymentError as error:
-        assert str(error) == "government_overpayment_return_outbound_amount_exceeded"
-    else:
-        raise AssertionError("normal reconciliation must not absorb an excess payout")
 
 
-def test_excess_branch_rejects_roots_that_do_not_agree_on_lawful_remaining() -> None:
-    root = GovernmentSubsidyOverpayment(
-        "over-1", "city-a", MoneyNTD(1900),
-        GovernmentSubsidyOverpaymentStatus.RETURN_PAYABLE, 2,
-    )
-    outgoing = GovernmentBankFact(
-        11, "bank-out-11", GovernmentSubsidyBankDirection.OUTGOING,
-        "government_subsidy", MoneyNTD(2300), date(2026, 7, 1),
-    )
-    try:
-        build_overpayment_return_reconciliation_with_excess_candidate(
-            root, "return-1", MoneyNTD(2000), 3, outgoing
-        )
-    except GovernmentSubsidyOverpaymentError as error:
-        assert str(error) == "government_overpayment_return_reconciliation_conflict"
-    else:
-        raise AssertionError("root/payable drift must fail closed")
 
 
 def test_receipt_with_overage_keeps_only_approved_amount_in_claim_allocation() -> None:
@@ -182,8 +84,6 @@ def _target(item_id, amount, payer="city-a"):
     )
 
 
-def _recipient():
-    return GovernmentRecipientSnapshot("city-a", "City A", "004", "****1234", "f" * 64, "2026-08-01", "2026-09-05", "notice-1")
 
 
 def _batch():

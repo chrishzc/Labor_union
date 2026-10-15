@@ -105,26 +105,6 @@ class ClientRefundExportFact:
             raise ValueError("client refund type is invalid")
 
 
-@dataclass(frozen=True, slots=True)
-class GovernmentOverpaymentReturnExportFact:
-    payable_identity: str
-    overpayment_identity: str
-    recipient_name: str
-    bank_code: str
-    bank_account: str
-    amount: MoneyNTD
-    payment_date: date
-
-    def __post_init__(self) -> None:
-        for value, field_name in (
-            (self.payable_identity, "government return payable identity"),
-            (self.overpayment_identity, "government overpayment identity"),
-            (self.recipient_name, "government recipient name"),
-            (self.bank_code, "government recipient bank code"),
-            (self.bank_account, "government recipient bank account"),
-        ):
-            require_canonical_text(value, field_name, _TEXT_MAXIMUM_LENGTH)
-        _require_positive_money(self.amount)
 
 
 @dataclass(frozen=True, slots=True)
@@ -174,10 +154,6 @@ class ClientRefundExportSource(Protocol):
     def load(self, target_payment_date: date) -> tuple[ClientRefundExportFact, ...]: ...
 
 
-class GovernmentOverpaymentReturnExportSource(Protocol):
-    def load(
-        self, target_payment_date: date
-    ) -> tuple[GovernmentOverpaymentReturnExportFact, ...]: ...
 
 
 class WorkbookArchivePort(Protocol):
@@ -191,10 +167,9 @@ class ReadSnapshot(Protocol):
 
 
 class AccountsPayableExportWorkflow:
-    def __init__(self, staff_source: StaffPayableExportSource, refund_source: ClientRefundExportSource, government_return_source: GovernmentOverpaymentReturnExportSource, archive: WorkbookArchivePort, read_snapshot_factory: Callable[[], ReadSnapshot], clock: Callable[[], datetime]) -> None:
+    def __init__(self, staff_source: StaffPayableExportSource, refund_source: ClientRefundExportSource, archive: WorkbookArchivePort, read_snapshot_factory: Callable[[], ReadSnapshot], clock: Callable[[], datetime]) -> None:
         self._staff_source = staff_source
         self._refund_source = refund_source
-        self._government_return_source = government_return_source
         self._archive = archive
         self._read_snapshot_factory = read_snapshot_factory
         self._clock = clock
@@ -226,17 +201,15 @@ class AccountsPayableExportWorkflow:
         with self._read_snapshot_factory():
             staff = self._staff_source.load(target_payment_date)
             refunds = self._refund_source.load(target_payment_date)
-            government_returns = self._government_return_source.load(target_payment_date)
-        return aggregate_accounts_payable_rows(staff, refunds, government_returns)
+        return aggregate_accounts_payable_rows(staff, refunds)
 
 
-def aggregate_accounts_payable_rows(staff_facts: tuple[StaffPayableExportFact, ...], refund_facts: tuple[ClientRefundExportFact, ...], government_return_facts: tuple[GovernmentOverpaymentReturnExportFact, ...] = ()) -> tuple[AccountsPayableRow, ...]:
+def aggregate_accounts_payable_rows(staff_facts: tuple[StaffPayableExportFact, ...], refund_facts: tuple[ClientRefundExportFact, ...]) -> tuple[AccountsPayableRow, ...]:
     staff_rows = _aggregate_staff_rows(
         tuple(item for item in staff_facts if item.status is StaffPayableStatus.PAYABLE)
     )
     refund_rows = tuple(_refund_row(item) for item in refund_facts if item.payable and not item.anomaly)
-    government_return_rows = tuple(_government_return_row(item) for item in government_return_facts)
-    return _sort_rows((*staff_rows, *refund_rows, *government_return_rows))
+    return _sort_rows((*staff_rows, *refund_rows))
 
 
 def _sort_rows(rows):
@@ -289,17 +262,6 @@ def _refund_row(item):
     )
 
 
-def _government_return_row(item):
-    return AccountsPayableRow(
-        payment_date=item.payment_date,
-        payment_type="government_overpayment_return",
-        recipient_name=item.recipient_name,
-        bank_code=item.bank_code,
-        bank_account=item.bank_account,
-        amount=item.amount,
-        obligation_identities=(item.payable_identity,),
-        case_numbers=(item.overpayment_identity,),
-    )
 
 
 def build_accounts_payable_workbook(rows: tuple[AccountsPayableRow, ...]) -> bytes:
@@ -384,11 +346,4 @@ def _require_positive_money(value: MoneyNTD) -> None:
     require_positive_integer(value.amount, "export amount")
 
 
-__all__ = [
-    "AccountsPayableExportReceipt", "AccountsPayableExportWorkflow", "AccountsPayableRow",
-    "ArchivedWorkbook", "ArchivedWorkbookRecord", "ClientRefundExportFact",
-    "ClientRefundExportSource", "ReadSnapshot", "StaffPayableExportFact",
-    "StaffPayableExportSource", "GovernmentOverpaymentReturnExportFact",
-    "GovernmentOverpaymentReturnExportSource", "WorkbookArchivePort", "aggregate_accounts_payable_rows",
-    "build_accounts_payable_workbook",
-]
+__all__ = ['AccountsPayableExportReceipt', 'AccountsPayableExportWorkflow', 'AccountsPayableRow', 'ArchivedWorkbook', 'ArchivedWorkbookRecord', 'ClientRefundExportFact', 'ClientRefundExportSource', 'ReadSnapshot', 'StaffPayableExportFact', 'StaffPayableExportSource', 'WorkbookArchivePort', 'aggregate_accounts_payable_rows', 'build_accounts_payable_workbook']

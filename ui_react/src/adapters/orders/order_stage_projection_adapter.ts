@@ -92,7 +92,7 @@ const AVAILABILITY_REASON_LABELS: Record<string, string> = {
   contract_and_deposit_lineage_missing: '尚未形成雙邊簽約與定金紀錄',
   formal_assignment_lineage_missing: '尚未形成正式指派',
   confirmed_service_date_lineage_missing: '尚未形成確認服務日期版本',
-  official_service_period_missing: '正式服務日或服務時段尚未完整',
+  official_service_period_missing: '服務日或服務時段尚未完整',
   service_completion_projection_missing: '尚未完成服務結案',
   obligation_projection_missing: '尚未形成結清義務',
   contract_completion_lineage_missing: '尚未完成契約簽回',

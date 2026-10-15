@@ -23,18 +23,8 @@ const query = {
   source_bank_fact_reference: 'finance-import-row:11',
   source_transaction_reference: 'government-subsidy-transaction:8',
   offset_targets: [{ claim_item_id: 31, claim_batch_id: 4, batch_version: 7, outstanding_amount_ntd: 900, payer_identity: 'hccg' }],
-  return_recipient: {
-    ready: true,
-    blockers: [],
-    agency_identity: 'hccg',
-    agency_name: '新竹市政府',
-    bank_code: '822',
-    account_display: '******1234',
-    account_fingerprint: 'a'.repeat(64),
-    effective_date: '2026-08-01',
-  },
   blockers: [],
-  available_actions: ['offset', 'return'],
+  available_actions: ['offset'],
 };
 
 const preview = {
@@ -53,7 +43,6 @@ const receipt = {
   remaining_after_ntd: 0,
   status: 'offset_applied',
   preview_fingerprint: 'b'.repeat(64),
-  payable_identity: null,
 };
 
 function setSession(): void {
@@ -83,7 +72,6 @@ describe('Government overpayment recovery client', () => {
       overpayment_identity: identity,
       disposition: 'offset' as const,
       targets: [{ claim_item_id: 31, amount_ntd: 900 }],
-      due_date: null,
       evidence_reference: 'phone-call:case-11',
     };
     await expect(governmentOverpaymentRecoveryClient.query(identity)).resolves.toMatchObject({ overpayment_version: 2 });
@@ -111,14 +99,13 @@ describe('Government overpayment recovery client', () => {
     });
   });
 
-  it('offset／return 輸入不符合有限分支時在送出前 fail closed', async () => {
+  it('空標的與已退役的 return 輸入在送出前拒絕', async () => {
     const fetchMock = vi.fn();
     globalThis.fetch = fetchMock;
     await expect(governmentOverpaymentRecoveryClient.preview({
       overpayment_identity: identity,
       disposition: 'offset',
       targets: [],
-      due_date: null,
       evidence_reference: 'evidence:11',
     })).rejects.toMatchObject({ code: 'GOVERNMENT_OVERPAYMENT_OFFSET_INPUT_INVALID' });
     await expect(governmentOverpaymentRecoveryClient.preview({
@@ -127,7 +114,7 @@ describe('Government overpayment recovery client', () => {
       targets: [{ claim_item_id: 31, amount_ntd: 900 }],
       due_date: '2026-08-30',
       evidence_reference: 'evidence:11',
-    })).rejects.toMatchObject({ code: 'GOVERNMENT_OVERPAYMENT_RETURN_INPUT_INVALID' });
+    } as unknown as Parameters<typeof governmentOverpaymentRecoveryClient.preview>[0])).rejects.toMatchObject({ code: 'GOVERNMENT_OVERPAYMENT_INPUT_INVALID' });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

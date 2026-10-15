@@ -17,9 +17,6 @@ vi.mock('../../../../../../../api/orders/order_government_subsidy_projection_cli
     'pending_review',
     'offset_reserved',
     'offset_applied',
-    'return_payable',
-    'partially_returned',
-    'returned',
   ],
   orderGovernmentSubsidyProjectionClient: {
     getProjections: mocks.getSubsidyProjections,
@@ -37,9 +34,6 @@ function counts(overrides: Record<string, number> = {}) {
     pending_review: 0,
     offset_reserved: 0,
     offset_applied: 0,
-    return_payable: 0,
-    partially_returned: 0,
-    returned: 0,
     ...overrides,
   };
 }

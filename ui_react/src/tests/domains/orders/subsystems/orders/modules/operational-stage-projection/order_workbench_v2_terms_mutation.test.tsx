@@ -58,8 +58,8 @@ const STAGE_LABELS: Readonly<Record<CoreStageCode, string>> = {
   external_signing_dispatch: '建立契約並送交外部簽署平台',
   deposit_settlement: '客戶定金核銷',
   external_signing_completion: '雙方外部簽署完成',
-  confirmed_service_dates: '正式服務日期確認',
-  formal_service: '正式排班與服務履約',
+  confirmed_service_dates: '服務日期確認',
+  formal_service: '排班與服務履約',
   service_completion: '完工／服務完成確認',
   client_settlement: '客戶端結算',
   staff_payout: '月嫂端結算',
@@ -350,7 +350,7 @@ describe('待辦看板 第 1 階訂單條款操作', () => {
     }));
     const panel = await openTermsPanel();
     fireEvent.click(within(panel).getByRole('button', { name: '預覽服務條件變更' }));
-    expect(await within(panel).findByRole('alert')).toHaveTextContent('本案已有正式服務日期');
+    expect(await within(panel).findByRole('alert')).toHaveTextContent('本案已有服務日期');
     expect(within(panel).getByRole('alert')).toHaveTextContent('本面板精算完整替代日期');
     expect(within(panel).getByRole('alert')).toHaveTextContent('本次未儲存任何變更');
     expect(mocks.applyTerms).not.toHaveBeenCalled();

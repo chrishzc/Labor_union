@@ -23,6 +23,7 @@ import { HistoricalClientPaymentWorkbench } from '../components/HistoricalClient
 import { HistoricalStaffPayoutWorkbench } from '../components/HistoricalStaffPayoutWorkbench';
 import { ClientSubsidyReturnQueryPanel } from '../components/ClientSubsidyReturnQueryPanel';
 import { PaymentDestinationConfigurationPanel } from '../components/PaymentDestinationConfigurationPanel';
+import { CashRequirementsPanel } from '../components/CashRequirementsPanel';
 
 type FinanceTab = 'client-receipts' | 'staff-payables' | 'accounts-payable' | 'cross-order' | 'finance-import' | 'payment-destination';
 type LoadState<T> = { kind: 'idle' | 'loading' } | { kind: 'ready'; data: T } | { kind: 'empty' } | { kind: 'error'; message: string } | { kind: 'unavailable'; message: string };
@@ -99,6 +100,7 @@ export const FinancePage: React.FC = () => {
   const [historicalStaffCase, setHistoricalStaffCase] = useState('');
   const [targetMonth, setTargetMonth] = useState(currentMonth);
   const [accountsPayable, setAccountsPayable] = useState<LoadState<ReturnType<typeof adaptAccountsPayablePreview>>>({ kind: 'idle' });
+  const [payableView, setPayableView] = useState<'estimate' | 'confirmed'>('confirmed');
   const [payableDownload, setPayableDownload] = useState<LoadState<string>>({ kind: 'idle' });
   const [financeWorkbook, setFinanceWorkbook] = useState<File | null>(null);
   const [ingestion, setIngestion] = useState<LoadState<FinanceWorkbookIngestionReceipt>>({ kind: 'idle' });
@@ -133,7 +135,7 @@ export const FinancePage: React.FC = () => {
   useEffect(() => {
     controllers.current.get('payable-download')?.abort();
     setPayableDownload({ kind: 'idle' });
-  }, [targetMonth, activeTab]);
+  }, [targetMonth, activeTab, payableView]);
 
   const downloadPayables = async () => {
     const { controller, sequence } = start('payable-download');
@@ -261,14 +263,14 @@ export const FinancePage: React.FC = () => {
   }, [payables]);
 
   useEffect(() => {
-    if (activeTab !== 'accounts-payable') return;
+    if (activeTab !== 'accounts-payable' || payableView !== 'confirmed') return;
     return schedule('accounts-payable', (request) => {
       setAccountsPayable({ kind: 'loading' });
       void accountsPayableQueryClient.query(targetMonth, { signal: request.controller.signal })
         .then((data) => { if (current('accounts-payable', request.sequence, request.controller)) setAccountsPayable(data.rows.length ? { kind: 'ready', data: adaptAccountsPayablePreview(data) } : { kind: 'empty' }); })
         .catch((error: unknown) => { if (current('accounts-payable', request.sequence, request.controller)) setAccountsPayable({ kind: 'error', message: financeErrorMessage(error, '應付帳款查詢失敗，請重新整理。') }); });
     });
-  }, [activeTab, targetMonth, reload]);
+  }, [activeTab, targetMonth, reload, payableView]);
 
   const loadSourceReview = async (batchIdentity: string) => {
     const request = start('source-review');
@@ -609,7 +611,7 @@ export const FinancePage: React.FC = () => {
                   <span className="finance-kpi-value" style={{ fontSize: '1.15rem' }}>Staff #{payables.data.staffId}</span>
                 </div>
                 <div className="finance-kpi-item">
-                  <span className="finance-kpi-label">應付義務筆數</span>
+                  <span className="finance-kpi-label">應付項目筆數</span>
                   <span className="finance-kpi-value orange">{payables.data.obligations.length} 筆</span>
                 </div>
                 <div className="finance-kpi-item">
@@ -697,10 +699,29 @@ export const FinancePage: React.FC = () => {
 
       {activeTab === 'accounts-payable' && (
         <section className="finance-workspace">
+          <nav className="finance-tab-bar finance-payable-tabs" role="tablist" aria-label="應付帳款檢視">
+            {([['estimate', '預估資金需求'], ['confirmed', '已確定款項清冊']] as const).map(([view, label]) => (
+              <button key={view} type="button" role="tab"
+                id={view === 'estimate' ? 'cash-requirements-tab' : 'confirmed-payables-tab'}
+                aria-controls={view === 'estimate' ? 'cash-requirements-panel' : 'confirmed-payables-panel'}
+                aria-selected={payableView === view} tabIndex={payableView === view ? 0 : -1}
+                className={payableView === view ? 'active' : ''} onClick={() => setPayableView(view)}
+                onKeyDown={event => {
+                  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+                  event.preventDefault();
+                  const next = event.key === 'Home' ? 'estimate' : event.key === 'End' ? 'confirmed' : view === 'estimate' ? 'confirmed' : 'estimate';
+                  setPayableView(next);
+                  event.currentTarget.parentElement?.querySelector<HTMLButtonElement>(next === 'estimate' ? '#cash-requirements-tab' : '#confirmed-payables-tab')?.focus();
+                }}>
+                {label}
+              </button>
+            ))}
+          </nav>
+          {payableView === 'estimate' ? <CashRequirementsPanel revision={reload} /> : <div role="tabpanel" id="confirmed-payables-panel" aria-labelledby="confirmed-payables-tab">
           <div className="finance-section-heading">
             <div>
-              <h2>應付帳款預覽</h2>
-              <p>核對當月付款資料，下載 Excel 交給會計。下載時會保存一份相同檔案，不會執行付款。</p>
+              <h2>應付帳款清冊（已確定款項）</h2>
+              <p>列出已建立且符合付款日的未付款項；服務或帳務更正後，金額仍可能更新。下載 Excel 交給會計時會保存相同檔案，不會執行付款。</p>
             </div>
           </div>
 
@@ -724,7 +745,7 @@ export const FinancePage: React.FC = () => {
           {payableDownload.kind === 'error' && <div role="alert" className="finance-state error">{payableDownload.message}</div>}
           {payableDownload.kind === 'ready' && <div role="status">已送出下載：{payableDownload.data}</div>}
 
-          <StateMessage state={accountsPayable} empty="本月沒有應付帳款。" />
+          <StateMessage state={accountsPayable} empty="本月沒有符合付款條件的未付款項。已付清或結清、付款日未確定、受款資料待確認的項目不會列入。可到「客戶收款 → 本案月嫂應付」查看個案原因。" />
 
           {accountsPayable.kind === 'ready' && (
             <>
@@ -775,6 +796,7 @@ export const FinancePage: React.FC = () => {
               </table>
             </>
           )}
+          </div>}
         </section>
       )}
 

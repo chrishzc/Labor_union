@@ -17,9 +17,6 @@ export const GOVERNMENT_SUBSIDY_SUBSTATUS_CODES = [
   'pending_review',
   'offset_reserved',
   'offset_applied',
-  'return_payable',
-  'partially_returned',
-  'returned',
 ] as const;
 
 export type GovernmentSubsidySubstatusCode =
@@ -77,9 +74,6 @@ const CountsSchema = z.strictObject({
   pending_review: NonnegativeIntSchema,
   offset_reserved: NonnegativeIntSchema,
   offset_applied: NonnegativeIntSchema,
-  return_payable: NonnegativeIntSchema,
-  partially_returned: NonnegativeIntSchema,
-  returned: NonnegativeIntSchema,
 });
 
 export const OrderGovernmentSubsidyProjectionPageSchema = z.strictObject({

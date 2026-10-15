@@ -229,57 +229,18 @@ class GovernmentSubsidyTypedErrorView(BaseModel):
     current_version: int | None = None
 
 
-class GovernmentRefundAccountInputView(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    bank_code: str = Field(min_length=1, max_length=32)
-    account_number: str = Field(min_length=1, max_length=191)
-    account_name: str = Field(min_length=1, max_length=191)
-    effective_from: str = Field(min_length=10, max_length=10)
-    reason: str = Field(min_length=1, max_length=500)
-    evidence_reference: str = Field(min_length=1, max_length=500)
 
 
-class GovernmentPayerAccountPreviewBody(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    account: GovernmentRefundAccountInputView
 
 
-class GovernmentPayerAccountApplyBody(GovernmentPayerAccountPreviewBody):
-    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
-class GovernmentPayerAccountView(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    bank_code: str
-    account_display: str
-    account_name: str
-    effective_from: str
-    effective_until: str | None = None
 
 
-class GovernmentPayerMasterView(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    payer_identity: str
-    payer_name: str
-    active_refund_account: GovernmentPayerAccountView | None = None
 
 
-class GovernmentPayerAccountPreviewView(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    payer_identity: str
-    effective_from: str
-    previous_effective_from: str | None = None
-    account_display: str
-    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
-class GovernmentPayerAccountReceiptView(GovernmentPayerAccountPreviewView):
-    replayed: bool
 
 class GovernmentSubsidyOverageReceiptIntentView(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -321,44 +282,27 @@ class GovernmentSubsidyOverpaymentOffsetApplyBody(
     evidence_reference: str = Field(min_length=1, max_length=500)
 
 
-class GovernmentSubsidyOverpaymentReturnPreviewBody(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    overpayment_identity: str = Field(min_length=1, max_length=191)
-    due_date: str = Field(min_length=10, max_length=10)
-    evidence_reference: str = Field(min_length=1, max_length=500)
 
 
-class GovernmentSubsidyOverpaymentReturnApplyBody(
-    GovernmentSubsidyOverpaymentReturnPreviewBody
-):
-    expected_overpayment_version: int = Field(ge=0)
-    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    reason: str = Field(min_length=1, max_length=500)
 
 
 class GovernmentSubsidyOverpaymentDispositionPreviewBody(BaseModel):
-    """One typed intent for the finite offset-or-return disposition branch."""
+    """Typed offset intent; retired return commands are rejected by the schema."""
 
     model_config = ConfigDict(extra="forbid")
 
     overpayment_identity: str = Field(min_length=1, max_length=191)
-    disposition: Literal["offset", "return"]
+    disposition: Literal["offset"]
     targets: list[GovernmentSubsidyOverpaymentOffsetIntentView] = Field(
         default_factory=list
     )
-    due_date: str | None = Field(default=None, min_length=10, max_length=10)
     evidence_reference: str = Field(min_length=1, max_length=500)
 
     @model_validator(mode="after")
     def require_the_selected_branch_inputs(self):
-        if self.disposition == "offset" and self.targets and self.due_date is None:
-            return self
-        if self.disposition == "offset":
+        if not self.targets:
             raise ValueError("government_subsidy_overpayment_offset_targets_required")
-        if not self.targets and self.due_date is not None:
-            return self
-        raise ValueError("government_subsidy_overpayment_return_due_date_required")
+        return self
 
 
 class GovernmentSubsidyOverpaymentDispositionApplyBody(
@@ -369,54 +313,12 @@ class GovernmentSubsidyOverpaymentDispositionApplyBody(
     reason: str = Field(min_length=1, max_length=500)
 
 
-class GovernmentOverpaymentReturnReconciliationPreviewBody(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    overpayment_identity: str = Field(min_length=1, max_length=191)
-    finance_import_row_id: int = Field(gt=0)
 
 
-class GovernmentOverpaymentReturnReconciliationApplyBody(
-    GovernmentOverpaymentReturnReconciliationPreviewBody
-):
-    expected_overpayment_version: int = Field(ge=0)
-    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    reason: str = Field(min_length=1, max_length=500)
-    evidence_reference: str = Field(min_length=1, max_length=500)
 
 
-class GovernmentOverpaymentReturnReconciliationPreviewView(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    overpayment_identity: str
-    overpayment_version: int = Field(ge=0)
-    payable_identity: str
-    bank_fact_identity: str
-    amount_ntd: int = Field(gt=0)
-    remaining_after_ntd: int = Field(ge=0)
-    resulting_status: str
-    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
-class GovernmentOverpaymentReturnReconciliationWithExcessPreviewView(BaseModel):
-    """Strict preview for actual outgoing amount above lawful payable."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    overpayment_identity: str
-    overpayment_version: int = Field(ge=0)
-    payable_identity: str
-    payable_version: int = Field(ge=0)
-    bank_fact_identity: str
-    actual_amount_ntd: int = Field(gt=0)
-    lawful_amount_ntd: int = Field(gt=0)
-    excess_amount_ntd: int = Field(gt=0)
-    payable_remaining_after_ntd: int = Field(ge=0)
-    overpayment_remaining_after_ntd: int = Field(ge=0)
-    resulting_status: str
-    recovery_identity: str
-    recovery_status: Literal["open", "partially_recovered", "recovered"]
-    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class GovernmentSubsidyOverpaymentPreviewView(BaseModel):
@@ -428,7 +330,7 @@ class GovernmentSubsidyOverpaymentPreviewView(BaseModel):
     disposition_amount_ntd: int = Field(gt=0)
     remaining_after_ntd: int = Field(ge=0)
     resulting_status: str
-    disposition_kind: str
+    disposition_kind: Literal["offset"]
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
@@ -439,7 +341,6 @@ class GovernmentSubsidyOverpaymentReceiptView(BaseModel):
     remaining_after_ntd: int = Field(ge=0)
     status: str
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    payable_identity: str | None = None
 
 
 class GovernmentSubsidyOffsetTargetQueryView(BaseModel):
@@ -452,29 +353,8 @@ class GovernmentSubsidyOffsetTargetQueryView(BaseModel):
     payer_identity: str = Field(min_length=1, max_length=191)
 
 
-class GovernmentSubsidyReturnRecipientQueryView(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    ready: bool
-    blockers: list[str] = Field(default_factory=list)
-    agency_identity: str | None = None
-    agency_name: str | None = None
-    bank_code: str | None = None
-    account_display: str | None = None
-    account_fingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
-    effective_date: str | None = None
 
 
-class GovernmentSubsidyReturnExcessRecoveryQueryView(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    recovery_identity: str
-    source_bank_fact_reference: str
-    source_payout_reference: str
-    original_amount_ntd: int = Field(gt=0)
-    remaining_amount_ntd: int = Field(ge=0)
-    status: Literal["open", "partially_recovered", "recovered"]
-    recovery_version: int = Field(ge=0)
 
 
 class GovernmentSubsidyOverpaymentQueryView(BaseModel):
@@ -488,53 +368,8 @@ class GovernmentSubsidyOverpaymentQueryView(BaseModel):
     source_bank_fact_reference: str
     source_transaction_reference: str
     offset_targets: list[GovernmentSubsidyOffsetTargetQueryView]
-    return_recipient: GovernmentSubsidyReturnRecipientQueryView
     blockers: list[str] = Field(default_factory=list)
     available_actions: list[str] = Field(default_factory=list)
-    return_excess_recovery: GovernmentSubsidyReturnExcessRecoveryQueryView | None = None
 
 
-__all__ = [
-    "GovernmentSubsidyAllocationCandidateView",
-    "GovernmentSubsidyAllocationIntentView",
-    "GovernmentSubsidyApprovalItemView",
-    "GovernmentSubsidyBatchView",
-    "GovernmentSubsidyClaimApprovalApplyBody",
-    "GovernmentSubsidyClaimApprovalPreviewBody",
-    "GovernmentSubsidyClaimBatchPageView",
-    "GovernmentSubsidyClaimPlanningApplyBody",
-    "GovernmentSubsidyClaimPlanningIntentView",
-    "GovernmentSubsidyClaimPlanningPreviewBody",
-    "GovernmentSubsidyClaimPreviewView",
-    "GovernmentSubsidyClaimReceiptView",
-    "GovernmentSubsidyClaimSubmissionApplyBody",
-    "GovernmentSubsidyClaimSubmissionPreviewBody",
-    "GovernmentSubsidyPreviewView",
-    "GovernmentSubsidyReceiptIntentView",
-    "GovernmentSubsidyReceiptView",
-    "GovernmentSubsidyReversalIntentView",
-    "GovernmentSubsidyTypedErrorView",
-    "GovernmentRefundAccountInputView",
-    "GovernmentPayerAccountPreviewBody",
-    "GovernmentPayerAccountApplyBody",
-    "GovernmentPayerAccountView",
-    "GovernmentPayerMasterView",
-    "GovernmentPayerAccountPreviewView",
-    "GovernmentPayerAccountReceiptView",
-    "GovernmentSubsidyOverpaymentOffsetApplyBody",
-    "GovernmentSubsidyOverpaymentOffsetPreviewBody",
-    "GovernmentSubsidyOverpaymentReturnApplyBody",
-    "GovernmentSubsidyOverpaymentReturnPreviewBody",
-    "GovernmentSubsidyOverpaymentDispositionApplyBody",
-    "GovernmentSubsidyOverpaymentDispositionPreviewBody",
-    "GovernmentOverpaymentReturnReconciliationApplyBody",
-    "GovernmentOverpaymentReturnReconciliationPreviewBody",
-    "GovernmentOverpaymentReturnReconciliationPreviewView",
-    "GovernmentOverpaymentReturnReconciliationWithExcessPreviewView",
-    "GovernmentSubsidyOverpaymentPreviewView",
-    "GovernmentSubsidyOverpaymentReceiptView",
-    "GovernmentSubsidyOffsetTargetQueryView",
-    "GovernmentSubsidyReturnRecipientQueryView",
-    "GovernmentSubsidyReturnExcessRecoveryQueryView",
-    "GovernmentSubsidyOverpaymentQueryView",
-]
+__all__ = ['GovernmentSubsidyAllocationCandidateView', 'GovernmentSubsidyAllocationIntentView', 'GovernmentSubsidyApprovalItemView', 'GovernmentSubsidyBatchView', 'GovernmentSubsidyClaimApprovalApplyBody', 'GovernmentSubsidyClaimApprovalPreviewBody', 'GovernmentSubsidyClaimBatchPageView', 'GovernmentSubsidyClaimPlanningApplyBody', 'GovernmentSubsidyClaimPlanningIntentView', 'GovernmentSubsidyClaimPlanningPreviewBody', 'GovernmentSubsidyClaimPreviewView', 'GovernmentSubsidyClaimReceiptView', 'GovernmentSubsidyClaimSubmissionApplyBody', 'GovernmentSubsidyClaimSubmissionPreviewBody', 'GovernmentSubsidyPreviewView', 'GovernmentSubsidyReceiptIntentView', 'GovernmentSubsidyReceiptView', 'GovernmentSubsidyReversalIntentView', 'GovernmentSubsidyTypedErrorView', 'GovernmentSubsidyOverpaymentOffsetApplyBody', 'GovernmentSubsidyOverpaymentOffsetPreviewBody', 'GovernmentSubsidyOverpaymentDispositionApplyBody', 'GovernmentSubsidyOverpaymentDispositionPreviewBody', 'GovernmentSubsidyOverpaymentPreviewView', 'GovernmentSubsidyOverpaymentReceiptView', 'GovernmentSubsidyOffsetTargetQueryView', 'GovernmentSubsidyOverpaymentQueryView']

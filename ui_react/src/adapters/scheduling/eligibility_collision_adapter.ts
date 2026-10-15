@@ -47,7 +47,7 @@ const PARTIAL_DATA_LABELS: Record<string, string> = {
   buffer_date_missing_or_invalid: '既有防撞期日期不完整',
   case_cooking_requirement_missing: '案件下廚需求尚未登錄',
   case_location_missing: '案件服務地點尚未登錄',
-  schedule_date_missing_or_invalid: '正式服務日資料不完整',
+  schedule_date_missing_or_invalid: '服務日資料不完整',
   service_time_terms_incomplete: '每日服務時段尚未完整',
   staff_cooking_skills_missing: '月嫂料理能力尚未登錄',
   staff_regions_missing: '月嫂服務區域尚未登錄',
@@ -57,7 +57,7 @@ const PARTIAL_DATA_LABELS: Record<string, string> = {
 
 function partialDataLabel(value: string): string {
   if (PARTIAL_DATA_LABELS[value]) return PARTIAL_DATA_LABELS[value];
-  if (value.startsWith('case_preferred_service_days')) return '案件正式服務日尚未完整';
+  if (value.startsWith('case_preferred_service_days')) return '案件服務日尚未完整';
   if (value.startsWith('case_daily_service_hours')) return '案件每日工時尚未完整';
   if (value.startsWith('staff_preferred_service_days')) return '月嫂可接服務天數尚未登錄';
   if (value.startsWith('staff_daily_service_hours')) return '月嫂可接每日工時尚未登錄';

@@ -14,7 +14,7 @@ class AccountsPayableRowView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     payment_date: date
-    payment_type: str
+    payment_type: Literal["staff_payable", "client_refund", "client_subsidy_return"]
     recipient_name: str
     bank_code: str
     bank_account: str
@@ -31,6 +31,29 @@ class AccountsPayablePreviewView(BaseModel):
     row_count: int
     total_amount_ntd: int
     rows: list[AccountsPayableRowView]
+
+
+class CashRequirementRowView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    row_id: str
+    case_no: str
+    recipient_name: str | None
+    payment_type: Literal["staff_payable", "client_refund", "client_subsidy_return"]
+    certainty: Literal["estimated", "confirmed"]
+    source: Literal["staff_obligation", "historical_payroll", "missing_payroll", "client_refund", "subsidy_estimate"]
+    source_amount_ntd: int | None = Field(ge=0)
+    unpaid_amount_ntd: int | None = Field(ge=0)
+    payment_date: date | None
+    date_is_estimate: bool
+    pending_reasons: list[str]
+
+
+class CashRequirementsPageView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    rows: list[CashRequirementRowView]
+    next_cursor: str | None
 
 
 class CaseStaffPayableAuditItemView(BaseModel):

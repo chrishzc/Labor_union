@@ -186,7 +186,7 @@ def get_staff_monthly_calendar_schedule(
                             "staff_name": row["staff_name"],
                             "is_work_day": False,
                             "is_double_pay": False,
-                            "notes": "歷史正式指派區段",
+                            "notes": "歷史指派區段",
                         }
                         grouped_rows[day] = [item]
                         schedule_map[day] = {

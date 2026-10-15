@@ -940,7 +940,7 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
           <strong>{stateLabel(query)}</strong>
         </div>
       )}
-      {!query && uiState.type === 'ready' && preparationSegments.length > 0 && <p role="status">契約準備中，可依目前配對方案產生文件，無須先正式排班。</p>}
+      {!query && uiState.type === 'ready' && preparationSegments.length > 0 && <p role="status">契約準備中，可依目前配對方案產生文件，無須先排班。</p>}
       {!query && uiState.type === 'ready' && preparationSegments.length === 0 && <p role="status">目前尚無可投影契約的服務人員區段，請先建立配對方案。</p>}
 
       <div className="order-case-document-grid" aria-label="下載兩種契約">

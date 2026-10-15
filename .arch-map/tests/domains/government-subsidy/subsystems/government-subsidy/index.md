@@ -16,10 +16,10 @@ modules:
     test_root: tests/domains/government-subsidy/subsystems/government-subsidy/modules/reconciliation-register-query/
 
 # Routing notes
-Focused Government Subsidy owner domain/workflow/query/repository/API, owner-specific schema, payer-master, staff-payout funding and repository outbox-payload contracts live here. Retired GOVSUB anomaly correctness stays under Government Subsidy owner validation/reconciliation/migration evidence; no retired projection is routed to Anomalies. UI/legacy adapters, cross-boundary durable-job acceptance and disposable-MySQL tests remain at their higher owner boundary.
+Focused Government Subsidy owner domain/workflow/query/repository/API, owner-specific schema, staff-payout funding and repository outbox-payload contracts live here. Retired GOVSUB anomaly correctness stays under Government Subsidy owner validation/reconciliation/migration evidence; no retired projection is routed to Anomalies. UI/legacy adapters, cross-boundary durable-job acceptance and disposable-MySQL tests remain at their higher owner boundary.
 
-# GOVSUB-007 closure
-The dedicated actual-over-lawful return reconciliation oracle is in the canonical integration root:
+# Receipt／offset and retirement closure
+The surviving receipt／offset and removed-endpoint oracles are in the canonical integration root:
 `tests/domains/government-subsidy/subsystems/government-subsidy/integration/test_government_subsidy_overpayment.py` and
 `test_government_subsidy_overpayment_workflow.py`. Disposable PyMySQL positive/negative Q/P/A/readback uses an ignored `lu_test_*` database.
 

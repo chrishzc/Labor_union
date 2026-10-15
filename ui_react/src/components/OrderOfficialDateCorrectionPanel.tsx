@@ -34,7 +34,7 @@ export const OrderOfficialDateCorrectionPanel: FC<Props> = ({ caseNo, revision, 
         service_dates: [...item.service_dates],
       })));
     }).catch((error: unknown) => {
-      if (active) setMessage(error instanceof Error ? error.message : '正式排班讀取失敗');
+      if (active) setMessage(error instanceof Error ? error.message : '排班讀取失敗');
     });
     return () => { active = false; };
   }, [caseNo, revision]);
@@ -76,13 +76,13 @@ export const OrderOfficialDateCorrectionPanel: FC<Props> = ({ caseNo, revision, 
       const expected = new Map(receipt.effective_assignments.map((item) => [item.assignment_id, [...item.service_dates].sort()]));
       if (fresh.generation_id !== receipt.generation_id || observed.size !== expected.size ||
         [...expected].some(([assignmentId, dates]) => JSON.stringify(observed.get(assignmentId)) !== JSON.stringify(dates))) {
-        throw new Error('提交後正式排班回讀不一致，請重新查詢');
+        throw new Error('提交後排班回讀不一致，請重新查詢');
       }
       setFacts(fresh);
       setSelections(fresh.assignments.map((item) => ({ assignment_id: item.assignment_id, service_dates: [...item.service_dates] })));
       setPreview(null);
       setKey('');
-      setMessage('正式排班日期已更正；重新查詢週報即可看到新週的服務工時。');
+      setMessage('排班日期已更正；重新查詢週報即可看到新週的服務工時。');
       onObserved?.();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '更正提交或回讀失敗；請重新查詢');
@@ -91,7 +91,7 @@ export const OrderOfficialDateCorrectionPanel: FC<Props> = ({ caseNo, revision, 
     }
   };
 
-  return <section aria-label={`案件 ${caseNo} 正式排班日期更正`}>
+  return <section aria-label={`案件 ${caseNo} 排班日期更正`}>
     <h3>更正完工服務日期</h3>
     <p>請逐日核對已完成服務的日期。更正會保留原紀錄，並更新有效排班與下次查詢的週報。</p>
     {facts?.order_status !== '訂單完成' && facts && <p role="status">目前案件尚未完成，不能使用完工後日期更正。</p>}
@@ -100,7 +100,7 @@ export const OrderOfficialDateCorrectionPanel: FC<Props> = ({ caseNo, revision, 
       <legend>{assignment.staff_name || `月嫂 ${assignment.staff_id}`}</legend>
       {assignment.service_dates.map((original, index) => <label key={`${assignment.assignment_id}-${index}`}>
         原服務日 {original}　更正為
-        <input type="date" aria-label={`${assignment.staff_name} 第 ${index + 1} 個正式服務日`} value={selections.find((item) => item.assignment_id === assignment.assignment_id)?.service_dates[index] ?? original}
+        <input type="date" aria-label={`${assignment.staff_name} 第 ${index + 1} 個服務日`} value={selections.find((item) => item.assignment_id === assignment.assignment_id)?.service_dates[index] ?? original}
           onChange={(event) => changeDate(assignment.assignment_id, index, event.target.value)} />
       </label>)}
     </fieldset>)}

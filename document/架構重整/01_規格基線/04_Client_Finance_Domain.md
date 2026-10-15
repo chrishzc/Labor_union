@@ -26,6 +26,8 @@
 
 ### Payment Terms／Obligation Planning
 
+簽約與應收用詞依第 `21` 份正式規格 §1.1：使用「所有月嫂簽約完成」與「客戶簽約完成」；應收不分正式／非正式，尚未建立應收時僅稱預估金額。
+
 依 Orders Terms、服務日根事實及費率政策建立訂金、第一期、第二期及調整義務。樓層費只計入一次。條款變更只重算未核銷義務；已核銷差額建立 adjustment 或 refund obligation。
 
 2026-10-13 第二期繳款日人工裁決：第二期有應付金額時，Client Finance stage plan 的預計繳款日
@@ -35,22 +37,22 @@ owner 計算結果；既有保存的第二期日期不取代本公式。預覽�
 既有 Preview／Apply，已核銷交易與已簽文件不由預覽改寫。
 
 2026-10-13 第二期日期保存裁決：案件初始化正式 Apply 將上述 owner 計算結果保存至
-`client_payment_terms.second_payment_due_date` 與初始付款條款事件；正式期款建立或重算時，
+`client_payment_terms.second_payment_due_date` 與初始付款條款事件；期款應收建立或重算時，
 同一 outer Unit of Work 同步此欄位與新的 immutable payment-terms event，並使用同一 stage plan
 寫入義務日期。第二期金額為零時保存 NULL；查詢與預覽保持零寫入，既有日期補正須走正式 writer。
 
-2026-10-13 條件變更同步裁決：已有付款條款且尚無正式指派／應付義務的案件，修改預計開始日、
+2026-10-13 條件變更同步裁決：已有付款條款且尚無正式指派／既有帳務義務的案件，修改預計開始日、
 服務天數、每日時數或樓層費時，Terms Preview 以新條件重算預計付款階段；正式 Apply 同步有變化的
 付款條款與 immutable event。第一期預計日隨預計開始日更新，訂金沿用已保存期限且不得晚於新開始日；
-第二期有金額時為第一期預計日＋15 天，無金額時保存 NULL。簽約前只保存條款，不建立正式義務；
-預估金額讀取最新 Orders 與 Finance facts。已有正式指派的條款異動沿用既有正式義務重算流程，
+第二期有金額時為第一期預計日＋15 天，無金額時保存 NULL。對尚無既有應收的案件，此條件變更只保存條款，不提前建立應收；
+預估金額讀取最新 Orders 與 Finance facts。已有正式指派的條款異動沿用既有應收重算流程，
 同步使用新的預計日期，不覆寫既有收款、核銷或簽署 evidence。Finance 日期有異動時納入版本／fingerprint
 與同一 outer Unit of Work；與付款計算無關的修改不新增 Finance／Payroll 依賴。
 
-既有案件修改付款相關條件時，即使尚未建立執行 assignment、但已有正式客戶期款，也須經同一
+既有案件修改付款相關條件時，即使尚未建立執行 assignment、但已有客戶期款應收，也須經同一
 Terms Preview／Apply 重算既有期款及保存付款條款日期。優先沿用 current confirmed service dates
 或此次正式替代日期；尚無確認日期時使用 Orders 約定服務量。只異動已存在的期款，不因補正
-提前建立尚未簽回所需的第一期／第二期義務。未核銷期款沿原 identity 更新金額及日期；已核銷
+提前建立應於客戶簽約完成時才建立的第一期／第二期應收。未核銷期款沿原 identity 更新金額及日期；已核銷
 依既有 owner 差額規則追加 adjustment／refund，保留 ledger、allocation 與已簽 evidence。
 缺漏／過期的第二期條款日期在此次 Apply 由同一公式補正；日期事件、Finance 版本、Terms receipt
 與 Orders 更新同交易保存。未指派案件的差額 identity 綁定此次 Orders 版本，不因空 generation 重用。
@@ -74,10 +76,10 @@ LINE 第三方服務群組不接受上述未付款放行取代核銷；只有
 與核銷。歷史服務量可少於或大於原合約天數，既有已核銷金額差異只能追加 adjustment／refund，不得
 覆寫 immutable ledger。
 
-依第 `21` 份正式規格，最後一位月嫂簽回並形成有效簽約前 commitment 時，只建立一次且
-唯一的 deposit obligation，使用 commitment 的精確服務日、時數、費率與樓層費計算。客戶
-簽回後的 Contract Completion 保留該 deposit identity、金額、ledger 與 allocation，只補足
-尚未建立的剩餘正式期款；不得重建、重複計入或因客戶晚簽而撤銷已合法核銷的 deposit。
+依第 `21` 份正式規格，所有月嫂簽約完成時建立訂金應收（deposit obligation），只建立一次，
+使用同時保存的 commitment 精確服務日、時數、費率與樓層費計算。客戶簽約完成時，
+Contract Completion 保留該 deposit identity、金額、ledger 與 allocation，建立其餘尚未建立的
+期款應收；不得重建、重複計入或因客戶晚簽而撤銷已合法核銷的 deposit。
 
 ### 取消帳務 impact 的公開 direction（2026-08-27 人工裁決）
 

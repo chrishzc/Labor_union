@@ -383,9 +383,9 @@ worker unavailable 才回 typed unavailable。UI 不得依 error message 字串�
   partial-retain與fresh terminal readback。一般畫面只呈現案件、義務類型、日期、金額、可核對銀行流水
   與closed結果；account version、obligation identity與bank row identity只留在預設收合技術詳情，
   owner／root／Idempotency術語及未分類runtime error不得穿透畫面。
-- 2026-08-31 Government Subsidy GOVSUB-006沿用既有offset／return互斥、Preview失效、stale只查最新資料、
+- 2026-08-31 Government Subsidy GOVSUB-006沿用既有offset處置、Preview失效、stale只查最新資料、
   receipt-only不完成、不重送Apply及owner＋current-issue雙重readback。一般畫面只呈現closed狀態、剩餘
-  金額、合法處置、標的與政府退款對象；owner version與source references只留在預設收合技術詳情，
+  金額、合法offset處置與標的；owner version與source references只留在預設收合技術詳情，
   raw blocker/error及owner／predicate／receipt術語不得穿透畫面。
 - 2026-08-31 Current Anomalies canonical live page沿用15-code current-only list/detail、no generic resolve
   與recheck removal。一般畫面只呈現問題代碼、負責流程、影響、必要判斷資料及closed安全處理說明；

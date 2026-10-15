@@ -208,6 +208,25 @@ row、跨月嫂、帳戶不唯一或 mode 不符時零正式寫入。
 read-only reporting application，不是 Staff Payables Domain。它只能透過 Staff Payables
 與 Client Finance typed view ports 組合輸出，不擁有 ledger 或付款狀態。
 
+清冊及業務流程說明使用「月嫂應付款」「客戶退款單」，不使用「義務」作為款項名稱；內部 `obligation`、資料表、API、事件名稱與付款規則維持原名（2026-10-15 用詞裁決）。
+
+月嫂應付款與客戶補助退款的建立時點不同：
+
+- 月嫂應付款：排班成功建立時，由 Payroll 計算並保存；僅確認日期或排班作業尚未成功，不視為已建立。後續合法排班／條件修改依同一 owner 重算。
+- 客戶補助退款：排班確認時可以計算預估補助金額，但此時不建立退款單。服務完成，或中途取消且實際服務量已確認，並符合客戶服務費收齊、補助資格等條件後，由 Client Finance 建立客戶補助退款單。
+- 應付清冊：查詢時才把上述已建立、符合付款日與未清償條件的款項彙整成明細；預估補助金額不能當成待付款明細。
+
+清冊查詢前的來源步驟與納入條件：
+
+| 款項 | 從哪個步驟已有資料 | 清冊讀取來源／納入條件 |
+|---|---|---|
+| 月嫂應付款（一般案件） | 確認服務日期與排班中的排班建立／安排，由 Payroll 同交易計算及保存；換人、代班或相關條件變更沿既有 owner 重算 | Staff Payables 目前應付投影；必須尚待付款、付款日已確定且等於所選目標付款日，並通過帳戶與異常檢查。不因只有前段服務說明而建立，也不以完工狀態單獨判斷是否列入 |
+| 月嫂應付款（歷史完成案件） | 歷史完成訂單採納時依原服務天數建立基準帳務；實際天數設定保存新版後重算 | 不要求重啟精算。缺少 materialized service-pay 帳務的既有採納完成案件，依下列唯讀歷史投影取得金額；已有帳務時不重複投影 |
+| 客戶一般退款 | 取消或帳務更正後，Client Finance 確認已收金額超過應收並建立退款單 | 目前未退完金額、到期日及建單時收款帳戶快照；依目標付款日與正常 review 條件篩選 |
+| 客戶補助退款 | 服務完成，或中途取消且實際服務量已確認，並符合客戶服務費收齊及補助資格條件時，Client Finance 建立退款單 | 已建立的 `subsidy_return` 退款單及未退完金額；只在案件查詢顯示預估補助退款不代表可列入付款清冊 |
+
+來源已存在不代表立即列入所有月份清冊；仍須符合下列 Export 的付款日、未清償、帳戶及異常排除規則。重新查詢讀取最新款項；重新匯出產生新 Excel，舊下載與封存檔不自動改寫。產生清冊不執行匯款，也不將款項改為已付款。
+
 Query：
 
 - `QueryAccountsPayable(target_payment_date)`
@@ -229,8 +248,7 @@ remaining 做 Preview → Apply，全部歸零才解除。日期不參與此流�
 Export：
 
 1. 在一致 read snapshot 讀取 `payable` obligations，以及 review=`normal` 的
-   `pending`／`partially_refunded` 客戶退款義務，以及 Government Subsidy 提供的
-   `government_overpayment_return` typed payable view；
+   `pending`／`partially_refunded` 客戶退款義務；
    對已採納且服務完成、但舊資料尚無 `service_pay` obligation 的歷史訂單，Query 必須在
    同一 snapshot 以最新歷史實際天數 revision 投影；沒有 revision 時使用 Orders 原
    `service_days`。投影沿用 assignment／case rate snapshot、Payroll 公式、調整額與付款到期日
@@ -243,18 +261,67 @@ Export：
    `customer_refund` 或 `subsidy_return`，不得重複輸出已清償金額；
    `subsidy_return` 的 target payment date 是結案月份加兩個曆月的 15 日，且列必須
    顯示為 `client_subsidy_return`，不得與月嫂 payout 合併或抵銷；
-5. government return row 只輸出 remaining、政府收款資訊 snapshot、來源 overpayment identity
-   與 due date；不得與 staff/client 列合併或抵銷；
-6. 只生成一次 workbook bytes；
-7. 使用者下載 bytes 與 archive bytes 必須完全相同；
-8. archive 名稱不可覆蓋，保存 SHA-256 receipt；
-9. Query／下載／歸檔不改變 payable 狀態。
+5. 只生成一次 workbook bytes；
+6. 使用者下載 bytes 與 archive bytes 必須完全相同；
+7. archive 名稱不可覆蓋，保存 SHA-256 receipt；
+8. Query／下載／歸檔不改變 payable 狀態。
 
 清冊列應能追溯 obligation identity、款項類型、案件、收款帳戶 snapshot、remaining amount
 與重開／追償原因。被 anomaly 或付款證據待確認 blocker 排除的義務，必須另有可查詢的
 排除原因與人工處理入口，不能靜默消失。
 
 XLSX 是輸出快照，不是月結 entity。
+
+### 2.5.1 預估資金需求與已確定清冊（2026-10-15 人工裁決）
+
+狀態：`SPEC_READY`；2026-10-15 使用者後續明確授權依本節實作預估 API 與雙頁籤畫面，並驗證既有清冊與付款流程。規格保持已收斂；預估唯讀 API 與雙頁籤已實作，依下列直接驗證確認既有清冊及付款核銷流程。
+
+目的：工會先查看已排班案件未來可能支出的金額與日期，安排資金；交會計的付款清冊只列已建立且符合付款條件的款項。「已確定」表示已有帳務項目，不表示金額永久凍結或已付款；合法服務／帳務更正後仍讀取最新金額。兩者共用既有帳務來源，各自明確標示用途，不新增帳務狀態或寫入 owner root。
+
+顯示位置：「財務查詢與對帳工作台 → 應付帳款」。在「應付帳款」工作區內依序提供兩個頁籤：
+
+- 「預估資金需求」：依本節規則查看已排班案件的未來資金需求，包含尚未建立退款單的預估客戶補助退款，供資金調控使用。
+- 「已確定款項清冊」：沿用 §2.5 的款項來源、付款條件與 Excel 下載／封存流程，供會計核對及安排付款。
+
+進入「應付帳款」時沿用既有已確定款項清冊；可切換至預估資金需求。此為維持既有入口行為的實作選擇，不增加帳務狀態。
+
+| Requirement／Acceptance | 規格與來源 | 驗收 |
+|---|---|---|
+| `CASHPLAN-01` 範圍 | 使用者明確選擇從已建立排班開始，納入尚未成立的預估客戶補助退款；媒合中、只有服務說明或只保存服務日期的案件不納入。已排班案件後續完成仍可追蹤未付款項；取消案件不再估算未履約支出，已建立的未清償款項仍保留 | 相同媒合案件在排班建立前不出現，建立後出現；完成／取消不造成已建立未付款項消失 |
+| `CASHPLAN-02` 月嫂來源 | 既有 Payroll／Staff Payables 目前未付款金額及 owner 付款日；不得由前端以預計天數另算一套薪資，不重複列入已付清金額 | 多位月嫂與代班依各自來源合計守恆；已付清排除，更正後重新查詢更新 |
+| `CASHPLAN-03` 補助退款來源 | 需由客戶代墊服務費的補助案件，讀 Client Finance 的補助上限、排班服務量及凍結單價。未建單金額標為「預估」並列出未滿足的建單條件；全補助且客戶無需支付服務薪資的案件不估算客戶退款。已有退款單時使用實際未退完金額，替代同案預估列 | 未完工或尚未收齊客戶款仍可查看預估；建立退款單後只列一筆，不同時加總預估與已確定金額 |
+| `CASHPLAN-04` 日期與缺值 | 月嫂付款日使用既有 owner 日期。未建客戶補助退款單時，可用目前排班預計結束月份＋兩個曆月的15日顯示「預估付款日」；建單後改讀退款單日期。金額或日期缺足夠來源時標示待確認，不以零或當月代替，也不把預估日期寫入付款條款或退款單 | 預計結束日變更後預估月份更新；日期未知的項目另列待確認；不改寫真正的結案日、到期日或帳務 |
+| `CASHPLAN-05` 呈現與更新 | 預估資金需求顯示案件、款項類型、預估／已確定、來源金額、未付款金額、預估／已確定付款日及待確認原因，按月份彙整。頂部總覽只顯示「已知金額小計」，不顯示「金額待確認」或「付款日期待確認」的筆數統計卡片（2026-10-15 使用者後續指示）。缺金額時不得宣稱完整資金總額；資料確實不足的項目仍在明細標示待確認。查詢唯讀；來源套用後重新查詢更新；已下載檔案不自動更新 | 預估結果不能當作付款指示或造成已付款；與清冊同一已確定項目的金額一致；頂部不再顯示兩張待確認筆數卡片，未知日期／金額仍可從明細查閱 |
+| `CASHPLAN-06` 位置與頁籤 | 顯示於「財務查詢與對帳工作台 → 應付帳款」，在該工作區內依序設置「預估資金需求」及「已確定款項清冊」兩個頁籤；各頁籤依本節及 §2.5 分別顯示資金預估與符合付款條件的清冊 | 從財務工作台進入「應付帳款」即可切換兩個頁籤，名稱與位置一致；尚未建單的預估客戶補助退款只出現在預估頁籤；已確定款項清冊維持既有下載／封存流程 |
+
+實作契約與驗證範圍：
+
+- 新增管理員唯讀 `GET /api/v1/finance-reports/accounts-payable/cash-requirements`；`page_size` 預設 100、範圍 1～200，以 `after_case_no` 按案件排序分批讀取。每批使用一致性唯讀快照，結束時 rollback；不執行 commit、建單或付款。
+- Typed 回應為 `rows` 與 `next_cursor`。每列包含 `row_id`、案件、受款人、款項類型、預估／已確定、來源、來源金額、未付款金額、付款日期、日期是否預估及待確認原因；未知金額／日期保留 null，不輸出銀行帳戶或身分證字號。
+- 畫面完整載入所有批次後才顯示月份小計；批次失敗不顯示部分合計，離開預估頁籤取消查詢。月份篩選保留日期未知的獨立區塊；重新查詢讀取最新 owner 金額與日期。已確定頁籤維持既有付款月份查詢及 Excel 下載／封存。
+- 使用有效指派的目前排班工作日與 Orders 工時取得預估服務量；已完成歷史案件已有歷史實際服務量 projection 時沿用該 owner 資料。正常流程重啟後不得用舊歷史服務量覆蓋目前排班。月嫂金額由既有 Staff Payables 查核來源提供；客戶預估退款使用既有 Client Finance `project_subsidy_return`，不另寫計算公式。
+
+| Acceptance | 直接驗證 |
+|---|---|
+| `CASHPLAN-01`～`04` | `tests/domains/staff-payables/subsystems/staff-payables/integration/test_cash_requirements_query.py`：排班邊界、取消保留未付款、補助上限／全補助排除、正式退款替代、未知值、重新查詢及來源金額守恆 |
+| `CASHPLAN-05`～`06` | 同 root 的 `test_cash_requirements_api.py`：管理員 GET、typed null、無銀行欄位、批次上限及拒絕 POST；既有 Finance presentation root 的 `cash_requirements.test.tsx`：完整載入、部分失敗拒絕、月份小計、未知日期保留、重新查詢與鍵盤頁籤切換 |
+| 既有流程 | 原 accounts-payable source／workflow／archive／case audit、staff payout reconciliation／public contract、client refund overage 與 FinancePage 查詢／下載 regression；本機 DB GET 前後帳務 facts 比較與實際瀏覽器畫面核對 |
+
+Owner：既有跨 Domain Accounts Payable reporting application 負責唯讀組合；Payroll／Staff Payables 與 Client Finance 分別擁有原金額及日期規則。此裁決只增加明示的資金預估投影，不修改應收、應付、退款建立時點或核銷規則，不新增資料表／migration、fingerprint、付款副作用或另一套 writer。
+
+來源追溯：2026-10-15 本次使用者的資金調控目的、「從已建立排班開始，包含尚未成立的預估客戶補助退款」選擇，以及「財務查詢與對帳工作台 → 應付帳款」內設置「預估資金需求」與「已確定款項清冊」兩個頁籤的明確指示（`PRODUCT_REQUIREMENT`）；本規格 §2.5、`04_Client_Finance_Domain.md` 的補助退還與預估金額規則、`03_Payroll_Domain.md` 的付款日及薪資規則。金額計算沿既有 owner，預估付款日為本節明示的預估用途，不替代正式退款日期。
+
+```yaml
+spec_route:
+  status: SPEC_READY
+  requirements: [CASHPLAN-01, CASHPLAN-02, CASHPLAN-03, CASHPLAN-04, CASHPLAN-05, CASHPLAN-06]
+convergence:
+  status: READY
+  blockers: []
+package_route:
+  status: NO_PACKAGE_REQUIRED
+  reason: 同一 reporting owner 的完整執行由本節契約、直接 source/test roots 與驗證矩陣承接；本次無獨立交接、資料 migration、付款或外部副作用，不另建重複 package。
+```
 
 ### 2.6 Typed errors
 
@@ -546,16 +613,16 @@ Client Refund 已具備下列已驗證能力：
 8. writer inventory 證明負收款、原交易覆寫與 legacy refund caller 已退出。
 
 以上 implementation closure 只適用於既有 exact／partial refund、return／reversal 與清冊能力。
-2026-08-11 新增的 client recovery collection／adjustment、staff payout difference／recovery 與
-government return payable contract 在人工確認及相應 E2E 完成前，不得列為 `proven`。
+2026-08-11 新增的 client recovery collection／adjustment 與 staff payout difference／recovery
+在人工確認及相應 E2E 完成前，不得列為 `proven`。
 
 ## 4. 交易與跨 Domain 邊界
 
 - cancellation／adjustment 產生 refund obligation 時，由相應 Global coordinator 的
   outer Unit of Work 同交易委派 Client Finance。
 - 實際銀行退款核銷由 Client Finance 擁有，不回寫 Orders lifecycle。
-- Accounts Payable Export 可以唯讀合併 staff payable、client refund 與 Government Subsidy
-  提供的 government return payable rows，但不能在同一 Query 中互相抵銷。
+- Accounts Payable Export 可以唯讀合併 staff payable 與 client refund rows，
+  但不能在同一 Query 中互相抵銷。
 - Finance Import 只提供 canonical bank facts，透過 borrowed Unit of Work 委派
   Client Finance 或 Staff Payables，不直接寫正式 ledger。
 
@@ -567,7 +634,7 @@ case，在舊銀行／帳務來源不能可靠還原時，才使用owner-specifi
 completion與Orders Step 11是三個不同projection，不得以單一「已付款」或「已結清」跨owner推定。
 
 客戶補助退款是工會付給客戶的Client Finance `subsidy_return`；Government Subsidy只擁有政府撥款、
-claim allocation及政府溢撥退還。工會先墊付客戶補助退款後，政府後續撥款只建立既有墊付款的
+claim allocation及政府入款溢撥的合法 offset 處置。工會先墊付客戶補助退款後，政府後續撥款只建立既有墊付款的
 settlement link，不新增第二筆客戶退款，也不重開已結清client obligation。
 
 完整source、replay、later-event與UI契約由
@@ -596,8 +663,7 @@ settlement link，不新增第二筆客戶退款，也不重開已結清client o
 - 隔離 MySQL 驗證 FK、unique、append-only trigger、row lock 與單次 commit；
 - 同月嫂多訂單聚合不建立月結；
 - 每筆 bank outflow 必須完整表達為 obligation allocation 加上具血緣的 recovery root；
-- staff underpayment remaining、staff/client recovery collection 與 government return payable 均於
-  餘額歸零後才完成。
+- staff underpayment remaining 與 staff/client recovery collection 均於餘額歸零後才完成。
 
 ### Global
 

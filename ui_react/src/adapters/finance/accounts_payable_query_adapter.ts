@@ -8,7 +8,6 @@ const PAYMENT_TYPE_LABELS: Record<string, string> = {
   staff_payable: '月嫂服務費',
   client_subsidy_return: '客戶補助款退回',
   client_refund: '客戶退款',
-  government_overpayment_return: '政府溢付款退回',
 };
 
 export function adaptAccountsPayablePreview(source: AccountsPayablePreview) {

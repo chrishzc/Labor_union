@@ -61,8 +61,8 @@ const STAGE_LABELS: Readonly<Record<CoreStageCode, string>> = {
   external_signing_dispatch: '建立契約並送交外部簽署平台',
   deposit_settlement: '客戶定金核銷',
   external_signing_completion: '雙方外部簽署完成',
-  confirmed_service_dates: '正式服務日期確認',
-  formal_service: '正式排班與服務履約',
+  confirmed_service_dates: '服務日期確認',
+  formal_service: '排班與服務履約',
   service_completion: '完工／服務完成確認',
   client_settlement: '客戶端結算',
   staff_payout: '月嫂端結算',
@@ -307,7 +307,7 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
 
     await screen.findByText('CASE-CURRENT-NOTICE');
     const card = cardFor('CASE-CURRENT-NOTICE');
-    expect(within(card).getByText('正式服務日期確認')).toBeInTheDocument();
+    expect(within(card).getByText('服務日期確認')).toBeInTheDocument();
     expect(within(card).queryByText('Client Finance 子投影尚未完成。')).not.toBeInTheDocument();
     expect(within(card).queryByText(/阻塞 · 客戶端結算/)).not.toBeInTheDocument();
   });

@@ -41,7 +41,6 @@ Anomalies 只表達「目前確實可能發生、而且狀態成立後需要工�
 | `GOVSUB-003` | receipt／allocation／projection 自己不一致只可能是 implementation／migration integrity failure | deterministic validation、tests、migration readback |
 | `GOVSUB-004` | reversal target／amount validation 由正式 Preview／Apply 阻止非法結果 | Government Subsidy normal owner operation；不建立第二套 recovery |
 | `GOVSUB-005` | frozen claim 與 service facts 的合法變更應走正常 revision；非法 drift 是 correctness failure | owner revision／validation tests |
-| `GOVSUB-007` | 實際政府退款超額的處置屬 Government Subsidy 正常 accounting／review／correction，不形成 Anomalies current issue | Government Subsidy owner flow、focused tests與migration readback；不得建立 anomaly producer或public current mapping |
 | `IMPORT-003` | Client BeClass 與 HCM 可合法獨立先後到達；不存在 HCM「補件解除 anomaly」產品流程 | HCM 正常 intake；客戶資料修改走 Client owner profile change |
 | `IMPORT-006` | bank import batch integrity、parser、aggregate、fingerprint correctness 應在上線前與每次 Apply 由 deterministic contract 驗證 | Finance Import tests／validation／operational failure；不做 runtime recovery workbench |
 | `SCHEDULE-002` | 正式 replacement／substitution transaction 應原子保存 successor、daily outcome 與跨域 impacts | Scheduling transaction／migration tests；非法 partial lineage 不作日常產品情境 |
@@ -74,9 +73,9 @@ Anomalies 只表達「目前確實可能發生、而且狀態成立後需要工�
 
 predicate false 後直接刪除 row；同一 canonical subject 日後再次成立時可使用同一 stable `issue_key` 建立新 current episode。不存在 claimed／resolved／reopen history。
 
-## 4. `GOVSUB-007` owner follow-up（非 Anomalies）
+## 4. Government Subsidy owner validation（非 Anomalies）
 
-`GOVSUB-007` 已退出 runtime Anomalies。政府退款超額若需處理，仍由 Government Subsidy 正常 accounting／review／correction flow 擁有；它不是 current issue、不是 Anomalies detector 的輸入，也不得建立 anomaly-owned occurrence、recovery、receipt 或 public mapping。Government Subsidy 的正常 claim、receipt、allocation、reversal、review 與必要 owner correction 保留，非法 reducer／projection 狀態則由 deterministic validation、focused tests與migration readback保護。
+Government Subsidy 的正常 claim、receipt、allocation、reversal、review 與必要 owner correction 保留；非法 reducer／projection 狀態由 deterministic validation、focused tests 與 migration readback 保護，不建立第二套 Anomalies recovery。
 
 ## 5. `LINE-006` current contract
 
@@ -145,9 +144,9 @@ Repository-local後續最小工作只需：
 
 1. registry／typed union／React mapping收斂到唯一 `LINE-006`；
 2. `LINE-006` predicate排除 automatic in-progress／retry/readback-only 狀態；
-3. `GOVSUB-007`退出 runtime producer／public current definition，正常 Government owner flow保留；
+3. Government Subsidy 的正常 claim／receipt／allocation／reversal validation 保留，不形成 Anomalies current issue；
 4. `BECLASS-001`改接 Case Import owner follow-up；
-5. 13碼 producer／consumer／tests逐項判斷為 runtime absence、owner-validation keep或 migration-only keep，不建立 replacement recovery framework；
+5. 退役碼 producer／consumer／tests逐項判斷為 runtime absence、owner-validation keep或 migration-only keep，不建立 replacement recovery framework；
 6. fresh owner recheck只重建 `LINE-006` current rows。
 
 舊 schema／source若已發布且必須作 migration provenance，可保留 artifact，但不得再形成 current runtime requirement。
@@ -157,9 +156,9 @@ Repository-local後續最小工作只需：
 完成本輪 anomaly pruning 必須證明：
 
 - runtime current issue exact set = `{LINE-006}`；
-- `GOVSUB-007`無runtime producer／public current definition，正常 Government owner accounting／review／correction flow仍保留；
+- Government Subsidy 的正常 claim／receipt／allocation／reversal validation 保留；
 - `BECLASS-001`只存在 Case Import／Client owner follow-up，不出現在 `#anomalies`；
-- 13 個退役碼不再有 runtime producer／public current definition／React current mapping；
+- 退役碼不再有 runtime producer／public current definition／React current mapping；
 - Scheduling、Payroll、Government aggregate／allocation、Finance Import integrity等 correctness仍由 focused tests、fresh validation、transaction rollback與migration readback保護；
 - `LINE-006` pending／processing／retryable／readback-incomplete本身不產生 issue，只有需要人工介入才產生；
 - legal customer＋staff dual-role與同一Client多案件不產生 `LINE-004`；same-type replacement走 LINE Identity normal operation；

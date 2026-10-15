@@ -10,7 +10,7 @@ export const AccountsPayablePreviewSchema = z.strictObject({
   total_amount_ntd: z.number().int().nonnegative(),
   rows: z.array(z.strictObject({
     payment_date: DateSchema,
-    payment_type: z.string(),
+    payment_type: z.enum(['staff_payable', 'client_refund', 'client_subsidy_return']),
     recipient_name: z.string(),
     bank_code: z.string(),
     bank_account: z.string(),

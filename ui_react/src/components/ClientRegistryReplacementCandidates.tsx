@@ -29,7 +29,7 @@ export function ClientRegistryReplacementCandidates({ caseNo, disabled, onObserv
   }, [onObserved]);
   return <div className="registry-replacement-workflow" aria-label="接任月嫂選擇與確認">
     <h4>選擇接任月嫂</h4>
-    <p className="registry-section-note">查詢並勾選人選，確認意願後選定正式推薦月嫂。推薦方案仍須完成客戶確認、契約與正式排班，才會列入上方正式指派。</p>
+    <p className="registry-section-note">查詢並勾選人選，確認意願後選定正式推薦月嫂。推薦方案仍須完成客戶確認、契約與排班，才會列入上方正式指派。</p>
     <nav className="registry-replacement-steps" aria-label="接任月嫂辦理步驟">
       {['1. 查詢與選擇人選', '2. 確認接案意願', '3. 選定與確認推薦'].map((label, index) => <button key={label} type="button" aria-pressed={step === index} disabled={disabled || busy} onClick={() => setStep(index)}>{label}</button>)}
     </nav>

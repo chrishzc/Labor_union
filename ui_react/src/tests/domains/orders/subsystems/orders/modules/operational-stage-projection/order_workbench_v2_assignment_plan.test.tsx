@@ -20,7 +20,7 @@ vi.mock('../../../../../../../api/scheduling/waiting_deposit_lock_client', () =>
 
 vi.mock('../../../../../../../components/MatchingScheduleAndAssignmentActions', () => ({
   MatchingScheduleAndAssignmentActions: ({ planId }: { planId: number }) => (
-    <section aria-label="mock 日期表確認與正式排班">matching plan {planId}</section>
+    <section aria-label="mock 日期表確認與排班">matching plan {planId}</section>
   ),
 }));
 
@@ -99,7 +99,7 @@ describe('待辦看板 Beta 第 10 階正式指派與排班回讀', () => {
     expect(await screen.findByText('2 段')).toBeInTheDocument();
     expect(screen.getByText(/尚無有效媒合方案/)).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('mock 日期表確認與正式排班')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('mock 日期表確認與排班')).not.toBeInTheDocument();
   });
 
   it('只使用既有 assignment-plan owner facts 顯示正式指派段與官方服務日', async () => {
@@ -123,7 +123,7 @@ describe('待辦看板 Beta 第 10 階正式指派與排班回讀', () => {
     expect(within(second).getByText('#8892')).toBeInTheDocument();
     expect(within(second).getByText('2026-09-12、2026-09-13')).toBeInTheDocument();
     expect(screen.queryByText(/待開工|服務進行中/)).not.toBeInTheDocument();
-    expect(screen.getByLabelText('mock 日期表確認與正式排班')).toHaveTextContent('matching plan 51');
+    expect(screen.getByLabelText('mock 日期表確認與排班')).toHaveTextContent('matching plan 51');
   });
 
   it('只有明確點擊服務前更換月嫂後才展開既有 workflow，完成後重新讀取正式指派', async () => {

@@ -14,9 +14,12 @@
 - payable export adapter: `ui_react/src/api/accounts_payable/accounts_payable_export_client.ts` — FinancePage 既有應付帳款下載入口；呼叫既有 Staff Payables 匯出端點，保留登入檢查與 XLSX 回應驗證，不計算帳務事實。
 - customer subsidy payable presentation: `ui_react/src/components/ClientSubsidyReturnQueryPanel.tsx` — FinancePage 的客戶補助退款案件清單，支援姓名／案件搜尋與選用應退款月份，一次呈現全部符合條件案件與合計，不提供分頁操作；明示後端的預估金額、未知日期，不計算退款資格或金額。
 - customer subsidy payable client: `ui_react/src/api/client_finance/client_subsidy_return_query_client.ts` — strict 解碼 `/api/v1/finance-reports/client-subsidy-returns` typed projection，`queryAll` 自動循游標取完所有符合結果，核對案件唯一性與游標；只做 GET，條件改變或 unmount 取消整次查詢，失敗不交付部分結果。
+- cash planning presentation: `ui_react/src/components/CashRequirementsPanel.tsx` — FinancePage「應付帳款」內的「預估資金需求」頁籤；依後端金額做月份小計，保留未知金額／日期、來源及待確認原因；另一頁籤「已確定款項清冊」保留既有下載。
+- cash planning client: `ui_react/src/api/accounts_payable/cash_requirements_query_client.ts` — strict bounded GET 分批完整載入；拒絕重複項目及未前進游標，失敗不交付部分合計，離開頁籤取消請求。
 
 ## Contracts
 - `modules/client-subsidy-return-query.md` — 補助退款案件查詢 owner。
+- `staff-payables/staff-payables/module:accounts-payable-export` — 預估資金需求與已確定款項清冊的 reporting owner；presentation 不計算薪資或退款資格。
 - `modules/historical-payment-settlement.md` — owner application/public contract。
 - `document/架構重整/01_規格基線/06_Anomalies_Domain.md` — owner work item 顯示於 owner page，`#anomalies` 只保留 15 個 current issue。
 - `document/架構重整/01_規格基線/04_Client_Finance_Domain.md` 與 `16_Staff_Payables與Client_Refund正式規格.md` — 客戶補助退還義務與月期應付清單；不重定義退款資格、金額、日期或核銷。
@@ -28,6 +31,8 @@
 - test_root: `ui_react/src/tests/finance_query_clients.test.ts`
 - test_root: `ui_react/src/tests/finance_request_lifecycle.test.tsx`
 - integration_root: `ui_react/src/tests/domains/client-finance/subsystems/client-finance/modules/historical-payment-settlement-presentation/`
+
+- integration_root: `ui_react/src/tests/fixtures/finance/finance_query_contract_fixtures.ts` — 同一 FinancePage composition 的 query client／adapter／transport／page／cutover tests 共用 typed fixture；僅此既有檔案，不宣告整個 fixtures 目錄。
 
 ## Change triggers
 Reconcile when owner-page placement、strict client endpoint、direction／selection、confirmation、fresh readback或test root changes。

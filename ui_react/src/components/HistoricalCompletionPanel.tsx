@@ -24,7 +24,7 @@ const OWNER_LABELS: Readonly<Record<string, string>> = {
 const REFERRAL_LABELS: Readonly<Record<string, string>> = {
   'orders.completion': '訂單完成資料',
   'orders.actual_start': '訂單實際開始資料',
-  'scheduling.official_service_facts': '正式排班與服務資料',
+  'scheduling.official_service_facts': '排班與服務資料',
   'client_finance.settlement': '客戶帳務結清',
   'staff_payables.payout': '服務人員款項',
 };

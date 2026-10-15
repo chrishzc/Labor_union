@@ -46,7 +46,7 @@ type ServiceDatesRecovery =
   | { caseNo: string; kind: 'observation_failed'; confirmedVersion: number }
   | { caseNo: string; kind: 'superseded'; confirmedVersion: number; currentVersion: number }
   | { caseNo: string; kind: 'observation_in_progress' };
-const AUTOMATIC_CONFIRMATION_REASON = '確認正式服務日期';
+const AUTOMATIC_CONFIRMATION_REASON = '確認服務日期';
 const REST_WEEKDAYS = [
   { value: 0, label: '星期一' }, { value: 1, label: '星期二' }, { value: 2, label: '星期三' },
   { value: 3, label: '星期四' }, { value: 4, label: '星期五' }, { value: 5, label: '星期六' },
@@ -635,7 +635,7 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
 
       {error !== null && <p role="alert">{error}</p>}
       {error !== null && !isRecoveryActive && !startUnresolved && (
-        <button type="button" disabled={working !== null} onClick={() => void loadServiceDates('read')}>重新讀取正式服務日期</button>
+        <button type="button" disabled={working !== null} onClick={() => void loadServiceDates('read')}>重新讀取服務日期</button>
       )}
       {basisNotice !== null && <p role="status">{basisNotice}</p>}
       {calculationBasis !== null && (
@@ -687,7 +687,7 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
         <div role="status">
           <p>本次收據為版本 #{recovery.confirmedVersion}；目前正式日期已更新為版本 #{recovery.currentVersion}。請載入目前日期核對，不要重送原操作。</p>
           <button type="button" className="order-v2-open-drawer" disabled={working !== null}
-            onClick={() => void loadServiceDates('resume')}>載入目前正式服務日期</button>
+            onClick={() => void loadServiceDates('resume')}>載入目前服務日期</button>
         </div>
       )}
       {recovery?.caseNo === caseNo && recovery.kind === 'observation_in_progress' && (
@@ -705,7 +705,7 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
           )}
           {confirmationSupersededBySchedule && (
             <p role="status" className="order-case-review-note">
-              先前確認的日期與目前正式排班不同；下方日曆保留事前確認紀錄，不代表目前服務安排。
+              先前確認的日期與目前排班不同；下方日曆保留事前確認紀錄，不代表目前服務安排。
             </p>
           )}
           {precision !== null && <dl className="order-v2-business-summary" aria-label="建議服務日期摘要">
@@ -730,7 +730,7 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
                 <span>已選 {selectedDates.length} / {requiredDateCount} 天</span>
               </div>
               <p className="order-case-review-note">{confirmationSupersededBySchedule
-                ? '此日曆為先前確認日期紀錄；目前服務日期請以正式排班為準。'
+                ? '此日曆為先前確認日期紀錄；目前服務日期請以排班為準。'
                 : '請逐日核對服務安排；選取國定假日即代表已確認該日安排服務，不需另行登錄協調結果。'}</p>
 
               <div
@@ -788,7 +788,7 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
             {startPreview && <div><dt>此次確認實際開始日</dt><dd>{startPreview.after_actual_start_date}</dd></div>}
             <div><dt>確認日期</dt><dd>{(preview?.service_dates ?? selectedDates).join('、')}</dd></div>
           </dl>
-          <p>系統會自動記錄「確認正式服務日期」，不需另外填寫原因。</p>
+          <p>系統會自動記錄「確認服務日期」，不需另外填寫原因。</p>
           <button
             type="button"
             className="order-v2-open-drawer"
@@ -801,18 +801,18 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
       )}
 
       {queryView !== null && queryView.current_dates.length > 0 && (
-        <dl className="order-v2-business-summary" aria-label={confirmationSupersededBySchedule ? '先前確認日期與目前正式排班回讀' : '已確認服務日期回讀'} tabIndex={-1} ref={readbackElement}>
+        <dl className="order-v2-business-summary" aria-label={confirmationSupersededBySchedule ? '先前確認日期與目前排班回讀' : '已確認服務日期回讀'} tabIndex={-1} ref={readbackElement}>
           <div><dt>{confirmationSupersededBySchedule ? '先前確認版本' : '日期確認版本'}</dt><dd>{queryView.current_version === null ? '未建立' : `#${queryView.current_version}`}</dd></div>
           <div><dt>{confirmationSupersededBySchedule ? '先前確認日期' : '已確認服務日期'}</dt><dd>{queryView.current_dates.join('、')}</dd></div>
-          {effectiveServiceDates !== null && <div><dt>目前正式排班服務日</dt><dd>{effectiveServiceDates.join('、')}</dd></div>}
+          {effectiveServiceDates !== null && <div><dt>目前排班服務日</dt><dd>{effectiveServiceDates.join('、')}</dd></div>}
         </dl>
       )}
       {arrangementPending && onOpenArrangement && (
         <div className="order-v2-inline-notice" role="status" tabIndex={-1} ref={nextStepElement} aria-label="服務日期確認後下一步">
-          <strong>{arrangementReady ? '服務日期已保存，正式排班尚未建立。' : '已有保存日期；此次調整尚未完成確認。'}</strong>
+          <strong>{arrangementReady ? '服務日期已保存，排班尚未建立。' : '已有保存日期；此次調整尚未完成確認。'}</strong>
           <p>請接續核對既定月嫂並建立正式安排，完成後才能供週報與帳務使用。</p>
           <button type="button" className="order-v2-open-drawer" disabled={working !== null || !arrangementReady}
-            onClick={onOpenArrangement}>前往正式排班</button>
+            onClick={onOpenArrangement}>前往排班</button>
         </div>
       )}
       </div>

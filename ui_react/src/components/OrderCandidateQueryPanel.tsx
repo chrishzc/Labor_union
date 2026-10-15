@@ -348,7 +348,7 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
             <>
               <div className="order-v2-notice warning" role="status">
                 <strong>可詢問 {candidates.length} 位</strong>
-                <span>有檔期衝突仍可加入候選池並協調；正式排班前須確認調整後的完整服務日期。</span>
+                <span>有檔期衝突仍可加入候選池並協調；排班前須確認調整後的完整服務日期。</span>
               </div>
               <div className="order-v2-business-summary" aria-label="正式符合條件候選">
                 {candidates.map((candidate) => (

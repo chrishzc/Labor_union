@@ -187,7 +187,7 @@ const ServiceCompletionForCase: React.FC<Props> = ({
       ) : (
         <>
           <p style={{ margin: '0 0 10px', color: '#57423b', fontSize: '0.86rem' }}>
-            系統會重新核對正式排班、完整服務日、服務結束時刻與可完成條件；不接受手動指定目標狀態。
+            系統會重新核對排班、完整服務日、服務結束時刻與可完成條件；不接受手動指定目標狀態。
           </p>
           <button
             type="button"
@@ -203,7 +203,7 @@ const ServiceCompletionForCase: React.FC<Props> = ({
               <strong>服務完成內容已檢查</strong>
               <div>目前狀態：{preview.current_status}</div>
               <div>完成時刻：{new Date(preview.completion_instant).toLocaleString('zh-TW')}</div>
-              <div>正式服務日：{preview.official_service_dates.join('、')}</div>
+              <div>服務日：{preview.official_service_dates.join('、')}</div>
               <div>確認後訂單會進入服務完成狀態。</div>
               <label style={{ display: 'block', marginTop: '10px', fontWeight: 700 }}>
                 完工確認原因
@@ -227,7 +227,7 @@ const ServiceCompletionForCase: React.FC<Props> = ({
                   disabled={status === 'applying' || status === 'outcome_unknown'}
                   onChange={(event) => setConfirmed(event.target.checked)}
                 />
-                我已核對正式服務日與完成時刻，確認將訂單標記為服務完成。
+                我已核對服務日與完成時刻，確認將訂單標記為服務完成。
               </label>
               <button
                 type="button"

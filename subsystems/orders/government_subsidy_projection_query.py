@@ -33,9 +33,6 @@ GovernmentSubsidySubstatusCode = Literal[
     "pending_review",
     "offset_reserved",
     "offset_applied",
-    "return_payable",
-    "partially_returned",
-    "returned",
 ]
 _SUBSTATUS_CODES: tuple[GovernmentSubsidySubstatusCode, ...] = (
     "claim_lineage_missing",
@@ -47,23 +44,16 @@ _SUBSTATUS_CODES: tuple[GovernmentSubsidySubstatusCode, ...] = (
     "pending_review",
     "offset_reserved",
     "offset_applied",
-    "return_payable",
-    "partially_returned",
-    "returned",
 )
 _ACTIVE_OVERPAYMENT_STATUSES = frozenset(
     {
         GovernmentSubsidyOverpaymentStatus.PENDING_REVIEW,
         GovernmentSubsidyOverpaymentStatus.OFFSET_RESERVED,
-        GovernmentSubsidyOverpaymentStatus.RETURN_PAYABLE,
-        GovernmentSubsidyOverpaymentStatus.PARTIALLY_RETURNED,
     }
 )
 _OVERPAYMENT_PRIORITY = {
     GovernmentSubsidyOverpaymentStatus.PENDING_REVIEW: 0,
     GovernmentSubsidyOverpaymentStatus.OFFSET_RESERVED: 1,
-    GovernmentSubsidyOverpaymentStatus.RETURN_PAYABLE: 1,
-    GovernmentSubsidyOverpaymentStatus.PARTIALLY_RETURNED: 2,
 }
 _CLAIM_PRIORITY = {
     GovernmentSubsidyBatchStatus.DRAFT: 0,
@@ -431,7 +421,6 @@ def _project(
         if item.status
         in {
             GovernmentSubsidyOverpaymentStatus.OFFSET_APPLIED,
-            GovernmentSubsidyOverpaymentStatus.RETURNED,
         }
     )
     if terminal_overpayments:
