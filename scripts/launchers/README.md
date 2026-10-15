@@ -83,6 +83,7 @@ Smoke test 只建立本次 owned 的 FastAPI＋React process，執行 GET-only r
 
 macOS／Linux 使用 `bash ./scripts/launchers/initialize_nas_schema.sh`，參數相同。
 `--dry-run` 只驗設定與正式 schema 雜湊、不連線；無參數會連線並唯讀確認空庫；`--apply` 再檢查一次後初始化。
+Windows 雙擊 `.bat` 只做唯讀預檢，顯示結果後等待按鍵，避免錯誤訊息隨視窗關閉；指定參數執行時不等待按鍵。
 設定直接取自 `.env`，process APP_ENV／DB_* 若有不同值會停止，請先清除 override。
 目標不是 `union_db`、指向 localhost、資料庫不存在或已有 table／view／routine／event 都停止。
 初始化會建立完整結構與正式 artifacts 宣告的必要系統資料，不會匯入業務資料或建立管理員帳號。
