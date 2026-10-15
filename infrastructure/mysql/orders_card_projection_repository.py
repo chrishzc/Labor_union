@@ -96,7 +96,16 @@ SELECT o.case_no,
               )
        ) ELSE NULL END AS historical_paired_staff_name,
        COALESCE(deposit.deposit_obligation_count, 0) AS deposit_obligation_count,
-       deposit_projection.contracted_amount_ntd AS deposit_amount_ntd,
+       COALESCE(
+           deposit_projection.contracted_amount_ntd,
+           CASE WHEN deposit.deposit_obligation_count = 1
+                     AND deposit.obligation_status = 'open'
+                     AND NOT EXISTS (
+                         SELECT 1 FROM client_ledger_entries deposit_history
+                          WHERE deposit_history.case_no = o.case_no
+                     )
+                THEN deposit.amount_due_ntd END
+       ) AS deposit_amount_ntd,
        deposit.obligation_identity AS deposit_obligation_identity,
        deposit.obligation_status AS deposit_obligation_status,
        deposit_projection.settlement_state AS deposit_projection_state,

@@ -326,6 +326,13 @@ def _deposit_settled_on(row: Mapping[str, object]) -> CardProjectionField[date]:
     source_identity = _deposit_source_identity(row)
     source_version = _source_version(row["deposit_source_version"])
     state = row["deposit_projection_state"]
+    if state is None:
+        return _unavailable(
+            "Client Finance",
+            source_identity,
+            source_version,
+            "deposit_settlement_projection_missing",
+        )
     if state != "settled":
         return _unavailable(
             "Client Finance",

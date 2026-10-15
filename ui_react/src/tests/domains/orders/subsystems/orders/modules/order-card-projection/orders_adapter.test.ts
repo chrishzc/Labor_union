@@ -3,6 +3,8 @@
  * Description: 驗證 Orders adapters 只顯示 typed facts，且缺投影時不生成業務結論。
  */
 import { describe, expect, it } from 'vitest';
+import { adaptOrdersCardProjection } from '../../../../../../../adapters/orders/order_card_projection_adapter';
+import type { OrdersCardProjection, OrdersCardProjectionField } from '../../../../../../../api/orders/order_card_projection_schemas';
 import {
   adaptMatchingWorkbenchDrawer,
   adaptOrderCancellationDrawer,
@@ -24,6 +26,83 @@ import {
   realisticOrderSummaryPage,
   realisticOrderTerms,
 } from '../../../../../../fixtures/orders_real_data_fixtures';
+
+function cardField<T>(value: T | null, reason: string | null = null): OrdersCardProjectionField<T> {
+  return {
+    value, owner: 'test-owner', source_identity: 'test-source', source_version: '1',
+    availability: reason ? 'unavailable' : 'available', availability_reason: reason,
+  };
+}
+
+function cardProjection(): OrdersCardProjection {
+  return {
+    case_no: 'CARD-100',
+    contact_phone: cardField('0912000000'),
+    contact_address: cardField('測試地址'),
+    requires_cooking: cardField<boolean>(null, 'orders_requires_cooking_unknown'),
+    floor_fee_ntd: cardField(0),
+    deposit_amount_ntd: cardField(12000),
+    deposit_settlement_state: cardField<'settled' | 'unsettled'>(null, 'deposit_settlement_projection_missing'),
+    deposit_settled_on: cardField<string>(null, 'deposit_settlement_projection_missing'),
+    actual_start_date: cardField('2027-01-04'),
+    actual_end_date: cardField<string>(null, 'actual_end_not_recorded'),
+    assignment_segments: cardField<[]>(null, 'formal_assignment_segments_missing'),
+  };
+}
+
+describe('Orders card status text', () => {
+  it('shows the known deposit amount and describes unknown or unrecorded facts separately', () => {
+    const view = adaptOrdersCardProjection(cardProjection());
+    const text = Object.fromEntries(view.rows.map((row) => [row.key, row.valueText]));
+    expect(text).toMatchObject({
+      requires_cooking: '需求尚待確認', floor_fee_ntd: 'NT$ 0',
+      deposit_amount_ntd: 'NT$ 12,000', deposit_settlement_state: '尚無結清紀錄',
+      deposit_settled_on: '尚無結清紀錄', actual_start_date: '2027-01-04',
+      actual_end_date: '尚未登錄實際結束日',
+    });
+    expect(view.depositSettlementState).toBeNull();
+    expect(view.assignmentSegmentsMessage).toBe('目前尚無正式指派分段。');
+    expect(view.rows.some((row) => row.valueText.includes('資料待補正'))).toBe(false);
+  });
+
+  it.each([
+    ['unsettled', null, 'deposit_not_settled', '尚未結清', '尚未結清'],
+    ['settled', '2026-10-15', null, '已結清', '2026-10-15'],
+    ['settled', null, 'deposit_settlement_date_missing', '已結清', '已結清，日期待確認'],
+  ] as const)('renders %s without inferring a date', (state, date, reason, stateText, dateText) => {
+    const projection = cardProjection();
+    projection.deposit_settlement_state = cardField(state);
+    projection.deposit_settled_on = cardField<string>(date, reason);
+    const view = adaptOrdersCardProjection(projection);
+    const text = Object.fromEntries(view.rows.map((row) => [row.key, row.valueText]));
+    expect(text.deposit_settlement_state).toBe(stateText);
+    expect(text.deposit_settled_on).toBe(dateText);
+    expect(view.depositSettlementState).toBe(state);
+  });
+
+  it('preserves explicit no-cooking and zero-amount facts and does not invent missing amounts', () => {
+    const projection = cardProjection();
+    projection.requires_cooking = cardField(false);
+    projection.deposit_amount_ntd = cardField(0);
+    let view = adaptOrdersCardProjection(projection);
+    expect(view.rows.find((row) => row.key === 'requires_cooking')?.valueText).toBe('否');
+    expect(view.rows.find((row) => row.key === 'deposit_amount_ntd')?.valueText).toBe('NT$ 0');
+    projection.deposit_amount_ntd = cardField<number>(null, 'deposit_obligation_missing');
+    view = adaptOrdersCardProjection(projection);
+    expect(view.rows.find((row) => row.key === 'deposit_amount_ntd')?.valueText).toBe('尚未建立訂金應收');
+  });
+
+  it('keeps blocked facts distinct and uses neutral text for unrecognized reasons', () => {
+    const projection = cardProjection();
+    projection.deposit_amount_ntd = { ...cardField<number>(null, 'deposit_obligation_ambiguous'), availability: 'blocked' };
+    projection.actual_end_date = cardField<string>(null, 'future_unknown_reason');
+    const view = adaptOrdersCardProjection(projection);
+    expect(view.rows.find((row) => row.key === 'deposit_amount_ntd')).toMatchObject({
+      valueText: '資料受阻（定金金額）', availability: 'blocked',
+    });
+    expect(view.rows.find((row) => row.key === 'actual_end_date')?.valueText).toBe('尚無可用資料（已發生實際結束日）');
+  });
+});
 
 describe('Orders summary adapter', () => {
   it('keeps the raw server status and does not create a workflow stage', () => {

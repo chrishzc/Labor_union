@@ -33,9 +33,25 @@ export interface OrdersCardProjectionViewModel {
   assignmentSegmentsMessage: string;
 }
 
+const UNAVAILABLE_REASON_LABELS: Readonly<Record<string, string>> = {
+  client_phone_not_provided: '聯絡電話尚未登錄',
+  client_address_not_provided: '服務地址尚未登錄',
+  orders_requires_cooking_unknown: '需求尚待確認',
+  floor_fee_not_provided: '樓層加給尚未登錄',
+  deposit_obligation_missing: '尚未建立訂金應收',
+  deposit_amount_missing: '訂金金額待確認',
+  deposit_settlement_projection_missing: '尚無結清紀錄',
+  deposit_not_settled: '尚未結清',
+  deposit_settlement_date_missing: '已結清，日期待確認',
+  actual_start_not_confirmed: '尚未確認實際開始日',
+  actual_end_not_recorded: '尚未登錄實際結束日',
+  formal_assignment_segments_missing: '目前尚無正式指派分段。',
+};
+
 function fieldValueText<T>(field: OrdersCardProjectionField<T>, label: string, render: (value: T) => string): string {
-  if (field.availability !== 'available') {
-    return field.availability === 'blocked' ? `資料受阻（${label}）` : `資料待補正（${label}）`;
+  if (field.availability === 'blocked') return `資料受阻（${label}）`;
+  if (field.availability === 'unavailable') {
+    return UNAVAILABLE_REASON_LABELS[field.availability_reason ?? ''] ?? `尚無可用資料（${label}）`;
   }
   if (field.value === null) return `尚未登錄（${label}）`;
   return render(field.value);
@@ -111,7 +127,7 @@ export function adaptOrdersCardProjection(projection: OrdersCardProjection, expe
       row('requires_cooking', '下廚料理', projection.requires_cooking, (value) => value ? '是' : '否'),
       row('floor_fee_ntd', '樓層加給', projection.floor_fee_ntd, (value) => `NT$ ${value.toLocaleString('en-US')}`),
       row('deposit_amount_ntd', '定金金額', projection.deposit_amount_ntd, (value) => `NT$ ${value.toLocaleString('en-US')}`),
-      row('deposit_settlement_state', '定金結清狀態', projection.deposit_settlement_state, String),
+      row('deposit_settlement_state', '定金結清狀態', projection.deposit_settlement_state, (value) => value === 'settled' ? '已結清' : '尚未結清'),
       row('deposit_settled_on', '定金結清日期', projection.deposit_settled_on, dateText),
       ...optionalHistoricalRow(
         'historical_source_start_date',
