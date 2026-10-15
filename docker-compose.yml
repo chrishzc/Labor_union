@@ -15,28 +15,8 @@ services:
     networks:
       - union-network
 
-  # 1. MySQL 資料庫服務
-  db:
-    image: mysql:8.0
-    container_name: mysql_db
-    restart: always
-    environment:
-      MYSQL_DATABASE: ${DB_DATABASE:-union_db}
-      MYSQL_ROOT_PASSWORD: "${DB_PASSWORD:-1234}"  # 與 .env 的 DB_PASSWORD 一致
-    ports:
-      - "127.0.0.1:${DB_PORT:-3306}:3306"  # 僅本機 Python 匯入程式可連線，不公開 MySQL
-    volumes:
-      # 持久化資料庫數據，防止容器重啟時資料遺失
-      - mysql-data:/var/lib/mysql
-      # Docker MySQL 初始化特性：容器首次啟動時會自動執行此資料夾下的 .sql 檔案建表
-      - ./db/schema.sql:/docker-entrypoint-initdb.d/schema.sql
-    networks:
-      - union-network
-
-
-
-volumes:
-  mysql-data:  # 定義持久化資料卷
+# MySQL 由外部主機（例如 NAS）管理；應用程式依 .env 的 DB_* 直接連線。
+# 既有 mysql_db 容器與 mysql-data volume 不由此檔案移除。
 
 networks:
   union-network:

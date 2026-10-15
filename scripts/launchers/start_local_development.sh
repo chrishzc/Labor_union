@@ -21,6 +21,7 @@ if [[ "${1:-}" == "--dry-run" ]]; then
     exit 1
   fi
   "$PY" -m scripts.launcher_preflight --profile local-unix
+  "$PY" -m scripts.check_runtime_database --dry-run
   "$PY" -m scripts.launcher_preflight --profile dual-run
   if [[ "${REACT_ADMIN_RUNTIME_PROFILE:-}" == "artifact-runtime" ]]; then
     "$PY" -m scripts.launcher_preflight --profile artifact-runtime
@@ -53,25 +54,13 @@ fi
 PY="$PWD/.venv/bin/python"
 export APP_ENV="${APP_ENV:-development}"
 export INTERNAL_SERVICE_SHARED_KEY="${INTERNAL_SERVICE_SHARED_KEY:-$("${PY}" -c 'import secrets; print(secrets.token_urlsafe(32))')}"
-export MYSQL_CONTAINER="${MYSQL_CONTAINER:-mysql_db}"
 
 if [[ "${REACT_ADMIN_RUNTIME_PROFILE:-}" == "artifact-runtime" ]]; then
   "$PY" -m scripts.launcher_preflight --profile artifact-runtime
 fi
 
+"$PY" -m scripts.check_runtime_database
 docker compose up -d redis
-if [[ "$(docker inspect --format "{{.State.Running}}" "$MYSQL_CONTAINER" 2>/dev/null || true)" == "true" ]]; then
-  echo "Reusing running MySQL container: $MYSQL_CONTAINER"
-elif docker inspect "$MYSQL_CONTAINER" >/dev/null 2>&1; then
-  docker start "$MYSQL_CONTAINER" >/dev/null
-elif [[ "$MYSQL_CONTAINER" == "mysql_db" ]]; then
-  docker compose up -d db
-else
-  echo "Configured MySQL container does not exist: $MYSQL_CONTAINER" >&2
-  exit 1
-fi
-"$PY" scripts/wait_for_db.py
-"$PY" -m scripts.update_local_database --require-current
 
 set -m
 OWNED_PIDS=()

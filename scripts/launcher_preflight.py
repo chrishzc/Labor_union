@@ -43,10 +43,10 @@ PROFILE_REQUIREMENTS = {
         "modules": ("uvicorn",),
     },
     "local-windows": {
-        "commands": ("docker-compose", "npm"),
+        "commands": ("docker", "npm"),
         "files": (
             "docker-compose.yml",
-            "scripts/wait_for_db.py",
+            "scripts/check_runtime_database.py",
             "ui_react/package.json",
             "ui_react/src/main.tsx",
             "ui_react/index.html",
@@ -63,7 +63,7 @@ PROFILE_REQUIREMENTS = {
         "commands": ("docker", "npm"),
         "files": (
             "docker-compose.yml",
-            "scripts/wait_for_db.py",
+            "scripts/check_runtime_database.py",
             "ui_react/package.json",
             "ui_react/src/main.tsx",
             "ui_react/index.html",

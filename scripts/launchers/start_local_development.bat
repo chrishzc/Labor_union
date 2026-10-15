@@ -20,6 +20,9 @@ if /I "%~1"=="--dry-run" (
     "%PY%" -m scripts.launcher_preflight --profile local-windows
     set "DRY_RUN_EXIT=!ERRORLEVEL!"
     if not "!DRY_RUN_EXIT!"=="0" exit /b !DRY_RUN_EXIT!
+    "%PY%" -m scripts.check_runtime_database --dry-run
+    set "DRY_RUN_EXIT=!ERRORLEVEL!"
+    if not "!DRY_RUN_EXIT!"=="0" exit /b !DRY_RUN_EXIT!
     "%PY%" -m scripts.launcher_preflight --profile dual-run
     set "DRY_RUN_EXIT=!ERRORLEVEL!"
     if /I "%REACT_ADMIN_RUNTIME_PROFILE%"=="artifact-runtime" (
@@ -39,62 +42,29 @@ if /I "%REACT_ADMIN_RUNTIME_PROFILE%"=="artifact-runtime" (
     if errorlevel 1 exit /b !ERRORLEVEL!
 )
 
-:: 1. Launch Docker Compose
-echo [Step 1] Launching Docker Compose (MySQL 8.0)...
-if not defined MYSQL_CONTAINER set "MYSQL_CONTAINER=mysql_db"
-docker-compose up -d redis
-set "DOCKER_EXIT=!ERRORLEVEL!"
-if not "!DOCKER_EXIT!"=="0" (
-    echo [Error] Failed to start Redis through Docker Compose.
-    pause
-    exit /b !DOCKER_EXIT!
-)
-set "MYSQL_RUNNING="
-for /f "usebackq delims=" %%S in (`docker inspect --format "{{.State.Running}}" "!MYSQL_CONTAINER!" 2^>nul`) do set "MYSQL_RUNNING=%%S"
-if /I "!MYSQL_RUNNING!"=="true" (
-    echo [Ready] Reusing running MySQL container: !MYSQL_CONTAINER!
-) else (
-    docker inspect "!MYSQL_CONTAINER!" >nul 2>&1
-    if !ERRORLEVEL! equ 0 (
-        docker start "!MYSQL_CONTAINER!" >nul
-        set "DOCKER_EXIT=!ERRORLEVEL!"
-    ) else if /I "!MYSQL_CONTAINER!"=="mysql_db" (
-        docker-compose up -d db
-        set "DOCKER_EXIT=!ERRORLEVEL!"
-    ) else (
-        echo [Error] Configured MySQL container does not exist: !MYSQL_CONTAINER!
-        exit /b 1
-    )
-    if not "!DOCKER_EXIT!"=="0" (
-        echo [Error] Failed to start MySQL container.
-        pause
-        exit /b !DOCKER_EXIT!
-    )
-)
-
 :: 2. Set Python path
-echo [Step 2] Setting Python environment...
+echo [Step 1] Setting Python environment...
 if not exist .venv\Scripts\python.exe (
     echo [Error] Virtual environment .venv not found. Please install dependencies first.
     pause
     exit /b 1
 )
-:: 3. Wait for database
-echo [Step 3] Waiting for MySQL database to become ready...
-"%PY%" scripts/wait_for_db.py
-if %errorlevel% neq 0 (
-    echo [Error] Database connection timeout!
-    pause
-    exit /b %errorlevel%
-)
-
-echo [Step 4] Verifying the local database schema release...
-"%PY%" -m scripts.update_local_database --require-current
+echo [Step 2] Checking configured MySQL connection and schema, read-only...
+"%PY%" -m scripts.check_runtime_database
 set "READINESS_EXIT=!ERRORLEVEL!"
 if !READINESS_EXIT! neq 0 (
-    echo [Error] Local database schema is not current. Run scripts\launchers\update_local_database.bat first.
+    echo [Error] MySQL readiness failed. Check DB_* settings and provision the target schema separately.
     pause
     exit /b !READINESS_EXIT!
+)
+
+echo [Step 3] Launching Docker Compose Redis...
+docker compose up -d redis
+set "DOCKER_EXIT=!ERRORLEVEL!"
+if not "!DOCKER_EXIT!"=="0" (
+    echo [Error] Failed to start Redis through Docker Compose.
+    pause
+    exit /b !DOCKER_EXIT!
 )
 
 echo ==========================================
@@ -104,7 +74,7 @@ echo [Notice] start_local_development.bat is for local development only; it is n
 echo [Notice] Production readiness validation is intentionally not run by this development launcher.
 
 :: 4. Supervise all local runtime children in one owned process tree.
-echo [Step 5] Starting owned Windows runtime supervision...
+echo [Step 4] Starting owned Windows runtime supervision...
 @REM supervise_local_runtime.ps1 owns api.main:app, React/Vite, monitor and workers.
 @REM artifact-runtime uses --react-admin-health-check inside the supervisor after API readiness.
 @REM Static lifecycle order: start "FastAPI Server" -> call :WAIT_FOR_HTTP "http://127.0.0.1:8000/health"

@@ -11,12 +11,18 @@
 - primary: `scripts/launchers/supervise_local_runtime.ps1`
 - private cycle composition: `api/dependencies/private_operations.py` — check-only handshake／heartbeat；正常 durable cycle 先 discover confirmed arrangements 與 due completion，再執行既有 canonical worker，不自行寫 Domain root。
 - entrypoint: `scripts/launchers/start_local_development.bat`
+- NAS entrypoints: `scripts/launchers/start_nas_development.bat`、`scripts/launchers/start_nas_development.sh` — 設定 development／NAS target，委派標準入口。
+- database readiness: `scripts/check_runtime_database.py` — 沿用 API 的 DB／TLS 設定，以唯讀 session 呼叫 migration canonical schema gate；不執行更新。
+- Unix entrypoint: `scripts/launchers/start_local_development.sh`
+- dependency preflight: `scripts/launcher_preflight.py`
+- Compose: `docker-compose.yml` — 只管理 Redis；MySQL 由 `.env`／process environment 指定的外部服務提供。
 - local-bypass Docker transport: `scripts/launchers/local_react_gateway.py`
 
 ## Contracts
 - session key 不寫入 `.env`、不輸出，且不透過 command argument 傳遞。
 - API readiness 不等於 Private API authentication readiness；認證握手失敗時 fail closed，不啟動任何 worker。
 - supervisor 只清理本次建立且可重新驗證身分的 process tree。
+- 標準入口不再啟動 MySQL 容器；NAS 入口拒絕 loopback DB_HOST，dry-run 零連線，schema 非 current 時不啟動 runtime。
 - Windows local-bypass 沒有主機 npm 時，由 Docker 執行 Vite，主機 loopback gateway 轉送 relative API 與前端 HTTP／WebSocket；API、gateway 與 Docker published port 均限 loopback，gateway 納入同一 owned supervision。
 
 ## Verification

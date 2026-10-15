@@ -8,6 +8,7 @@
 |---|---|
 | `start_local_development.bat` | Windows 本機入口。通過 DB current gate 後，由 `supervise_local_runtime.ps1` 啟動 FastAPI 8000、React/Vite 5173、runtime monitor、durable job worker 與 incident worker。 |
 | `start_local_development.sh` | macOS／Linux 本機入口；服務邊界同 Windows。 |
+| `start_nas_development.bat`／`.sh` | 使用 `.env` 的 NAS MySQL；拒絕 localhost，委派標準開發入口。 |
 | `supervise_local_runtime.ps1` | Windows owned-process supervisor；負責 readiness、存活檢查與 scoped cleanup。 |
 | `start_local_development_no_auth.bat`／`.sh` | 只供隔離本機的 `local_bypass` 包裝；委派標準入口，不複製啟動流程。 |
 | `configure_local_admin_no_auth.bat`／`.ps1` | 修改本機開發認證設定，不啟動服務。 |
@@ -64,6 +65,57 @@ Windows 免登入入口不要求主機安裝 Node.js：有 `npm.cmd` 時直接�
 Smoke test 只建立本次 owned 的 FastAPI＋React process，執行 GET-only readiness 後清理。一般入口才會啟動 monitor 與 workers。
 
 ## Database operations
+
+### NAS MySQL 測試
+
+Compose 現在只啟動 Redis；所有開發入口直接連線 `.env`／process environment 的 MySQL，
+不再啟動或管理 `mysql_db`。既有容器與資料卷保留，請勿使用 `down -v` 或 `--remove-orphans` 清除。
+
+先在 NAS 準備好與目前程式版本一致的 MySQL 測試資料庫及應用程式帳號，再編輯本機 `.env`：
+
+```dotenv
+APP_ENV=development
+DB_HOST=192.168.1.100
+DB_PORT=3306
+DB_USER=union_app
+DB_PASSWORD="replace_with_nas_test_password"
+DB_DATABASE=union_db_test
+REDIS_URL=redis://127.0.0.1:6379/0
+```
+
+IP、port、帳號及資料庫名稱請依 NAS 設定修改；密碼含 `#` 或空白時請保留引號。
+Process environment 的 `DB_*` 優先於 `.env`，readiness 與 API 使用同一組設定。
+若原本使用不同的 Redis port，也要同步修改 `REDIS_PORT` 與 `REDIS_URL`。
+NAS 防火牆與 MySQL 帳號只開放測試電腦的內網來源，不將 MySQL port 轉發至 Internet。
+若 NAS 已配置 mTLS，可沿用既有 `DB_SSL_MODE=verify_identity` 與
+`DB_SSL_CA`、`DB_SSL_CERT`、`DB_SSL_KEY`；檔案放本機私有位置。
+
+Windows：
+
+```powershell
+.\scripts\launchers\start_nas_development.bat --dry-run
+.\scripts\launchers\start_nas_development.bat
+```
+
+macOS／Linux：
+
+```bash
+bash ./scripts/launchers/start_nas_development.sh --dry-run
+bash ./scripts/launchers/start_nas_development.sh
+```
+
+`--dry-run` 不連線 NAS。若要只驗證連線與 schema、不啟動任何服務，可執行：
+
+```powershell
+$env:APP_ENV = 'development'
+$env:RUNTIME_DATABASE_TARGET = 'nas'
+.\.venv\Scripts\python.exe -m scripts.check_runtime_database
+```
+
+啟動前以唯讀 MySQL session 驗證既有 canonical schema，連線失敗或 schema 非 current 即停止，
+不自動建庫、匯入或升級 NAS。既有 `update_local_database`／`reset_DB` 仍限本機資料庫。
+正常啟動後會沿用現行授權設定，啟動 API、React、monitor 與背景 workers；
+workers 仍可能處理待辦工作及已配置的 LINE 通知，請使用隔離的測試資料與 provider 設定。
 
 保留資料更新：
 
