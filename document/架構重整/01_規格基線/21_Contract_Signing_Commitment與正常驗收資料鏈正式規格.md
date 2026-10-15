@@ -204,6 +204,8 @@ reaper 依「無 document root 引用」安全清理，不得把 orphan 誤認�
 完全相同；同交易建立 assignments、schedules、converted event、Payroll impact、outbox、receipt。
 任何 mismatch 或 occupancy conflict 零 partial write。
 
+2026-10-15 最新人工裁決：實際開始日變動沿用既有日期表保存與雙方確認，不新增改期流程、不重簽契約。同一 plan 與每位月嫂的人選、服務天數不變時，首次 execution conversion 可採用 current 日期版本中客戶與所有目標月嫂已確認的 immutable recipient 日期；Preview 與 Apply 分別唯讀／fresh-lock 驗證。原 commitment days、契約文件與簽回歷史保持不變，converted event 保存採用的 schedule snapshot 與 confirmed date version 引用；不得將改期視為換人、增減服務天數、跳過訂金／契約／檔期或沿用過期確認的授權。
+
 ## 7. Idempotency、retry、stale、timeout 與 conflict
 
 - 相同 idempotency key＋相同 fingerprint 回原 receipt，零新增。
@@ -471,17 +473,52 @@ fingerprint、blockers、preview fingerprint與PDF result。正式document persi
 - C34、C35、C36 分別使用 Client Finance 的 `deposit_due_date`、`first_payment_due_date`、
   `second_payment_due_date`；C37 樓層費與訂金一起支付，使用同一筆 `deposit_due_date`。
   實際入帳日不得套入契約，也不得由 Contract Signing 建立第二套日期算法。
+  2026-10-13 第二期日期人工裁決：C36 及訂單資訊－1 的第二期預計繳款日使用 Client Finance
+  stage plan 投影；第二期有金額時為 `first_payment_due_date` 加 15 個曆日，零金額時不適用，
+  不等待實際入帳，不直接採用舊的 `second_payment_due_date` 保存值。
 - D36 固定顯示本案專屬虛擬帳號。帳號以 Client Finance／Finance Import 共用的案件編號規則產生，
   後續銀行核銷以同一帳號解析回唯一案件；不得改用全域工會／代收付帳戶、月嫂帳戶、環境變數或
   Excel placeholder。案件編號無法產生合法虛擬帳號時不得列印。
 
-### 2026-10-15 未簽客戶契約重新產生人工裁決
+### 2026-10-14 管理端契約下載與分開簽回人工裁決
 
-2026-10-15 人工補充：已產生但尚未簽署的客戶契約，修改本案虛擬帳號後可按「重新產生客戶契約」。
-沿用既有 `client/unsigned-pdf` 命令，fresh-read Client Finance 對照與 current owner facts；來源 snapshot 改變時
-append 新 XLSX／PDF 版本，D36 帶入新帳號，不覆寫舊檔。同一來源仍可重用既有 PDF。成功回讀後下載新版，後續下載亦指向新版。
-current plan 的客戶已有 signed-received event、外部簽署回報或案件已有 contract identity 時，後端在原 outer UoW
-內鎖定案件後拒絕重新產生，回 typed conflict；UI 已知簽署／完成時不提供此入口，有客戶簽回草稿時停用。
-重新產生不建立交接、簽署事件、LINE 提醒、帳務義務或外部平台效果；進行中／結果未明沿用原命令身分核對。
-早期已交接工作若保存包含客戶文件的舊文件集合 hash，僅能以同案／同方案的既有客戶文件版本與
-current 月嫂文件集合證明原 hash，才可回讀新客戶版本；不改寫舊 hash，不容許月嫂文件變更或未知 hash。
+依使用者核准的「辦理契約與簽署」UI 預覽，新主流程改為下載契約、記錄已送交簽署、分開回收簽署文件。本節覆蓋上述新提交必須使用單一最終簽署 PDF 的限制；既有 owner、完成條件與單一 outer UoW 維持不變。
+
+1. 客戶服務契約與每段月嫂委任契約各有核對資料、下載 PDF 入口。缺少 current 未簽 PDF 時，由下載操作呼叫既有正式生成命令再回讀下載，不增加人工準備步驟，不建立虛構簽署或排班事實。核對資料僅呈現 exact case、scope、segment 的欄位摘要。
+   2026-10-15 人工補充：已產生但尚未簽署的客戶契約，修改本案虛擬帳號後可按「重新產生客戶契約」。
+   沿用既有 `client/unsigned-pdf` 命令，fresh-read Client Finance 對照與 current owner facts；來源 snapshot 改變時
+   append 新 XLSX／PDF 版本，D36 帶入新帳號，不覆寫舊檔。同一來源仍可重用既有 PDF。成功回讀後下載新版，後續下載亦指向新版。
+   current plan 的客戶已有 signed-received event、外部簽署回報或案件已有 contract identity 時，後端在原 outer UoW
+   內鎖定案件後拒絕重新產生，回 typed conflict；UI 已知簽署／完成時不提供此入口，有客戶簽回草稿時停用。
+   重新產生不建立交接、簽署事件、LINE 提醒、帳務義務或外部平台效果；進行中／結果未明沿用原命令身分核對。
+   早期已交接工作若保存包含客戶文件的舊文件集合 hash，僅能以同案／同方案的既有客戶文件版本與
+   current 月嫂文件集合證明原 hash，才可回讀新客戶版本；不改寫舊 hash，不容許月嫂文件變更或未知 hash。
+2. 每份簽回檔案綁定 current session、status version、scope、matching segment 與未簽文件版本，透過既有 Controlled Files staging／Preview 保存及檢查。部分回收可重新查詢；不完成簽約，也不建立訂金 obligation。重新載入後必須重新檢查保存的 staging。
+3. 最終 Preview 必須包含一份客戶契約與所有 current 月嫂區段的契約；拒絕缺件、重複 target／staging、版本過期或借用其他 target 的文件。既有 opaque Preview token 綁定完整集合及相關 owner versions，並要求操作者明確確認所有文件的簽署。
+4. 最終 Apply fresh-read／lock、驗證完整集合，在同一 outer UoW 納管各份受控文件、保存既有 final-document aggregate 及 immutable receipt 中的 typed 文件成員，完成 session、Commitment、Orders contract identity／completion 與 Client Finance 訂金 obligation。contract identity 由完整文件集合的 target、版本與 digest 推導；任一步失敗不得留下部分業務寫入。原命令重播回讀原 receipt，不再次生成檔案或 obligation。
+5. 新增的 staged returns Query、單份 document Preview 與已簽文件下載為 authenticated bounded API。下載只允許該案完成 receipt 的成員；不暴露儲存路徑，也不重新計算業務事實。
+6. 已完成的歷史單一最終 PDF 保持原始 readback／下載，不回填、不覆寫，也不作為新命令缺少完整集合時的 fallback。此裁決不需要 schema migration，不增加正式排班或外部簽署平台寄送。
+
+### 2026-10-14 本機測試手動跳過簽回文件回收
+
+使用者要求測試時可手動跳過回收。此例外只授權本機測試案件；一般簽回條件、owner、單一 outer UoW 與真實簽署流程不變。
+
+- 後端只在明確 `APP_ENV=development|dev|local|test`、DB host 為 loopback、DB 為 `union_db` 或 `lu_test_*` 且無 deployment profile 時提供 `testing_skip_allowed`。正式／未知環境、遠端 DB 與 reverse-SSH deployment profile 均拒絕測試準備及測試 Apply；管理員仍需通過 persisted authentication。
+- 管理端「測試用：跳過文件回收」呼叫 bounded `final-document/testing-skip`，綁定 current case、session、status version 與每個 current target，逐份經原 Controlled Files staging 產生 `TEST-ONLY-` PDF；PDF 頁面明示無真實簽署。準備階段僅保存 staging 並取得原完整集合 Preview，不完成業務。
+- 操作者須另行確認「測試案件、跳過真實回收、繼續後續收款」。原 Apply 接受互斥的 `signatures_confirmed=true` 或 `testing_skip_confirmed=true`；測試文件只能搭配測試確認，測試確認只能搭配完整測試文件集合。既有 fresh-read／lock、token、typed conflict、atomic completion 與原命令 reconciliation／replay 仍適用。
+- 測試完成使用原流程建立 Commitment、Orders completion 及訂金 obligation；reason 明示測試跳過且未驗證真實簽署，文件成員保留測試檔名。畫面重讀後顯示「測試簽約已完成」及「查看測試文件」。不呼叫外部簽署／LINE provider，不直接改 DB 狀態，也不新增 schema。
+- 本次執行範圍限該 API／composition gate、final-document workflow、typed client、既有管理端元件與對應 current tests／map。驗收包括本機能力 gate、正式環境拒絕、stale 零 staging、完整 target 占位文件、明確確認、零 partial business write、同模式重播與完成回讀；使用合成資料，不對目前畫面案件執行 Apply。
+
+### 2026-10-15 管理端獨立簽署提醒與歷史修復區塊移除
+
+依使用者確認的 UI 預覽與明確施工授權，本節覆蓋 2026-09-29「交接同時建立提醒」的行為；保留既有 owner、文件完成條件與本機測試跳過功能。
+
+1. 管理端沿用「契約文件 → 送交簽署與提醒 → 回收簽署文件」版面。「記錄已送交簽署平台」只驗證完整 current 未簽 PDF，保存交接 session 與原 receipt；不查 LINE 綁定、不建立提醒、不受 LINE 綁定阻擋。
+2. 「發送簽署提醒」有獨立確認視窗，一次涵蓋本案客戶與所有 current 月嫂，無個別對象篩選。操作者確認後，authenticated bounded `POST contract-external-signing/reminders` 依 current session／expected status version fresh-lock；未交接、已完成／被取代、版本過期或身分錯配皆 typed 拒絕。LINE 訊息內容沿用既有模板，外部平台的郵件寄送時序不在本次修改範圍。
+3. 提醒命令在獨立 outer UoW 保存可建立的 committed LINE delivery tasks 與 immutable reminder receipt，未綁定者保存當時的人工通知對象。提醒不推進簽約 status version、Commitment、Orders completion 或 Finance obligation，不使已檢查的文件集合失效；文件回收／完成也不以提醒為門禁。任一步失敗 rollback；只有 committed tasks 可由既有 worker 對 provider 發送。
+4. reminder receipt 使用既有 `contract_signing_command_receipts` 的獨立 command kind，不新增 schema。same-key／same-command 重播回原 receipt，不再次建立提醒；fingerprint 綁定 case、session、expected version、actor 及 receipt identity。管理端保留原命令身分與操作者，逾時／離開畫面時只允許原操作確認；收到 receipt 後保留結果，不能以新命令掩蓋未明結果。
+5. Query 回傳該 current session 的最後提醒紀錄。畫面區分「尚未發送」、「提醒工作已建立」、「需人工通知」與結果未明；建立 task 不宣稱 provider 已送達。舊交接 receipt 缺少 `handoff_included_reminders` 時視為歷史自動通知紀錄；新交接保存 false。既有 immutable receipt 不回填／覆寫，畫面不把舊案件錯列為從未處理通知。
+6. 管理端完全移除「歷史簽回人工修復」區塊、其草稿與背景 Query；新主流程只使用分開文件回收。歷史證據／receipt 不刪除，本次不退役既有 compatibility API 或清理其資料。
+7. 本機測試跳過入口放在回收區的可展開「測試模式 · 跳過文件回收」，沿用 TEST ONLY 文件、互斥確認及後端環境 gate；不隨提醒修改而降低完成條件。
+
+執行範圍及驗收追溯：`../02_決策與退役執行記錄/Contract_Signing_Reminder_Separation_Work_Package.md`。

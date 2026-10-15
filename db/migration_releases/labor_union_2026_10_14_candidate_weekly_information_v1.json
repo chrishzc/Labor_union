@@ -1,0 +1,79 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-candidate-weekly-information-2026-10-14-v1",
+  "release_metadata": {
+    "release_name": "Candidate weekly information delivery",
+    "application_version": "candidate-weekly-information-v1",
+    "published_at": "2026-10-14",
+    "description": "Append independent weekly delivery events; preserve old contacts and willingness rules without backfill"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-staff-union-number-2026-10-13-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1051_candidate_weekly_information.sql",
+      "relative_path": "db/schema_parts/1051_candidate_weekly_information.sql",
+      "sha256": "354d0681cfa6ef2cbe8f47dbe27fba0af70736c37dde1098f9d2bb27e60a2540",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "discard-candidate-before-entry-switch; retain-enum-and-use-compatible-forward-release-after-apply",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "candidate-weekly-information-exact",
+      "phase": "post-schema",
+      "policy": "Exact seven-value enum; preserve existing columns, indexes, foreign keys, checks, triggers, rows and enum ordinals",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": [
+      "candidate-weekly-information-v1"
+    ],
+    "required_restart_targets": [
+      "api"
+    ],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": [
+      "candidate-weekly-information-exact"
+    ]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_10_14_candidate_weekly_information_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_10_14_candidate_weekly_information_v1.descriptors.json",
+    "sha256": "03a133eb0925b659fe3dc6753862c52247b1785218bef8de89c02de12d9544cb",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

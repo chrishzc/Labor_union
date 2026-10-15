@@ -6,6 +6,7 @@
 
 ## Responsibility
 依正式 Scheduling assignment 與 Orders terms 重建 Payroll projection；不得反向改寫來源排班或條款。
+既有正式排班缺漏應付日時，以正式 actual_end_date、Client Finance 衍生客戶應付與補助資格套用既有付款日政策；保留已形成日期，建立 obligation 時保存 candidate 日期。
 
 ## Implementation
 - primary:

@@ -1,4 +1,5 @@
 from typing import Annotated
+from dataclasses import asdict
 from fastapi import APIRouter,Depends,Header,HTTPException,Path
 from pydantic import BaseModel,ConfigDict,Field
 from api.dependencies.admin_auth import admin_actor_context, require_system_admin
@@ -9,6 +10,24 @@ from shared_kernel.identities import CorrelationId,ExpectedVersion,IdempotencyKe
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.client_finance.deposit_skip_workflow import DepositSkipApplyRequest,DepositSkipError,DepositSkipSelection
 router=APIRouter(prefix="/api/v1/orders/{case_no}/client-finance/deposit-skip",tags=["Client Finance"])
+class DepositSkipStatusView(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    case_no: str
+    account_version: int = Field(ge=0)
+    deposit_required_ntd: int = Field(ge=0)
+    deposit_net_received_ntd: int = Field(ge=0)
+    unpaid_progression_allowed: bool
+    blockers: tuple[str, ...]
+
+@router.get('', response_model=BaseResponse[DepositSkipStatusView])
+def query(case_no: str = Path(...), _: AdminPrincipal = Depends(require_system_admin), application: Application = Depends(get_client_deposit_skip_application)):
+    try:
+        current = application.query(DepositSkipSelection(case_no))
+    except ValueError as error:
+        if str(error) != 'deposit_skip.finance_facts_not_found':
+            raise
+        raise HTTPException(404, detail={'category': 'not_found', 'code': str(error), 'message': '本案尚未建立正式財務資料，請先完成名冊補件。'}) from error
+    return BaseResponse(data=asdict(current), message='成功取得目前訂金鎖狀態')
 class ApplyBody(BaseModel):
     model_config=ConfigDict(extra="forbid")
     expected_account_version:int=Field(ge=0)

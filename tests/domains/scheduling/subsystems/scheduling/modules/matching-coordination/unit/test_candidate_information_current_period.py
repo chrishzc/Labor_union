@@ -97,6 +97,30 @@ def test_old_preview_is_rejected_before_any_send_or_period_write(ports):
     assert all(sql.startswith("SELECT") for sql, _ in cursor.statements)
 
 
+def test_weekly_supplement_sends_independently_without_restarting_followup(ports, monkeypatch):
+    def forbidden(*args):
+        raise AssertionError("weekly supplement must not create willingness interactions or cancel followup")
+    monkeypatch.setattr(workflow, "_cancel_pending_manual_followup", forbidden)
+    monkeypatch.setattr(workflow, "_candidate_contact_liff_url", forbidden)
+    cursor = Cursor()
+    cursor.entry.update(service_start_date=cursor.entry["order_start_date"], service_end_date=cursor.entry["order_end_date"])
+    receipt = workflow._send_information_in_transaction(object(), cursor, "CASE-1", 17, 3, "admin", "send-weekly", "current")
+    assert receipt["line_task_id"] == 10
+    events = [values for sql, values in cursor.statements if sql.startswith("INSERT INTO caregiver_candidate_contact_events")]
+    assert len(events) == 1 and events[0][2] == "info_3_sent"
+
+
+def test_weekly_receipt_replays_exactly_and_old_preview_never_enqueues(ports):
+    cursor = Cursor({"id": 20, "pool_id": 3, "candidate_id": 17, "event_type": "info_3_sent",
+                     "actor": "admin", "payload": {"preview_fingerprint": "old", "line_task_id": 10}})
+    receipt = workflow._send_information_in_transaction(object(), cursor, "CASE-1", 17, 3, "admin", "replay-weekly", "old")
+    assert receipt == {"status": "idempotent_replay", "event_id": 20, "line_task_id": 10}
+    assert ports == []
+    with pytest.raises(ValueError, match="candidate_information_preview_stale"):
+        workflow._send_information_in_transaction(object(), Cursor(), "CASE-1", 17, 3, "admin", "stale-weekly", "old")
+    assert not any(call[0] == "enqueue" for call in ports)
+
+
 def test_existing_receipt_replays_without_refreshing_or_sending(ports):
     cursor = Cursor({"id": 20, "pool_id": 3, "candidate_id": 17, "event_type": "info_1_sent",
                      "actor": "admin", "payload": {"preview_fingerprint": "old", "line_task_id": 10}})

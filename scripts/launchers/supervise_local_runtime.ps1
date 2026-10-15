@@ -119,6 +119,41 @@ function Assert-PrivateApiAuthentication {
     Write-RuntimeEvent -Event "ready" -Label "Private API Authentication" -Detail "authenticated no-effect check passed"
 }
 
+function Assert-LocalPortAvailable {
+    param([Parameter(Mandatory = $true)][int]$Port)
+    $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, $Port)
+    $listener.ExclusiveAddressUse = $true
+    try {
+        $listener.Start()
+    }
+    catch {
+        throw "Local runtime port 127.0.0.1:$Port is unavailable. Close the existing local service and retry; no existing process was stopped."
+    }
+    finally {
+        $listener.Stop()
+    }
+}
+
+function Assert-OwnedTcpListener {
+    param(
+        [Parameter(Mandatory = $true)]$Entry,
+        [Parameter(Mandatory = $true)][int]$Port
+    )
+    Refresh-OwnedIdentityRegistry
+    $listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop |
+        Where-Object { $_.LocalAddress -in @("127.0.0.1", "0.0.0.0") })
+    foreach ($listener in $listeners) {
+        foreach ($identity in @($script:IdentityRegistry)) {
+            if ($identity.RootPid -ne $Entry.Pid -or $identity.Pid -ne $listener.OwningProcess) { continue }
+            $snapshot = Get-ProcessSnapshot -ProcessId $identity.Pid
+            if ($snapshot.State -eq "alive" -and (Test-SameProcessIdentity -Entry $identity -Snapshot $snapshot)) {
+                return
+            }
+        }
+    }
+    throw "$($Entry.Label) readiness belongs to another process on 127.0.0.1:$Port. Close the existing local service and retry; no existing process was stopped."
+}
+
 function Get-ProcessSnapshot {
     param([int]$ProcessId)
     try {
@@ -583,9 +618,11 @@ function Wait-HttpReady {
         [Parameter(Mandatory = $true)][string]$Url,
         [Parameter(Mandatory = $true)][string]$Label,
         [int]$Attempts = 30,
-        [switch]$RequireHtmlRoot
+        [switch]$RequireHtmlRoot,
+        $OwnedEntry
     )
     for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        $isReady = $false
         try {
             $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 2
             $isReady = $response.StatusCode -eq 200
@@ -595,12 +632,15 @@ function Wait-HttpReady {
                 # proxy's unrelated 200 response.
                 $isReady = $body -match 'id\s*=\s*["'']root["'']'
             }
-            if ($isReady) {
-                Write-RuntimeEvent -Event "ready" -Label $Label -Detail $Url
-                return
-            }
         }
         catch { }
+        if ($isReady) {
+            if ($null -ne $OwnedEntry) {
+                Assert-OwnedTcpListener -Entry $OwnedEntry -Port ([uri]$Url).Port
+            }
+            Write-RuntimeEvent -Event "ready" -Label $Label -Detail $Url
+            return
+        }
         Start-Sleep -Seconds 1
     }
     throw "$Label did not become ready: $Url"
@@ -643,12 +683,14 @@ try {
         exit 0
     }
 
+    Assert-LocalPortAvailable -Port $ApiPort
+    Assert-LocalPortAvailable -Port $ReactPort
     Initialize-InternalServiceSharedKey
     Write-RuntimeEvent -Event "supervision_started" -Detail ("api_port=" + $ApiPort + ";react_port=" + $ReactPort)
     $api = Start-Owned -Label "FastAPI" -FilePath $PythonPath -ArgumentList @(
         "-m", "uvicorn", "api.main:app", "--host", "127.0.0.1", "--port", "$ApiPort"
     )
-    Wait-HttpReady -Url "http://127.0.0.1:$ApiPort/health" -Label "FastAPI"
+    Wait-HttpReady -Url "http://127.0.0.1:$ApiPort/health" -Label "FastAPI" -OwnedEntry $api
     Assert-PrivateApiAuthentication
     Refresh-OwnedIdentityRegistry
 

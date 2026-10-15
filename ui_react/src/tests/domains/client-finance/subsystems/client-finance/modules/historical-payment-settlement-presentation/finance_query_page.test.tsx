@@ -102,9 +102,11 @@ describe('FinancePage query and guarded import presentation', () => {
     await waitFor(() => expect(screen.getByText('OBL-C-1')).toBeInTheDocument());
     expect(ordersQueryClient.getOrderSummaries).toHaveBeenCalledTimes(1);
     expect(clientReceiptQueryClient.query).toHaveBeenCalledTimes(1);
-    expect(await screen.findByRole('region', { name: '本案月嫂應付查核' })).toHaveTextContent('已建立的應付項目');
-    expect(screen.getByRole('region', { name: '本案月嫂應付查核' })).toHaveTextContent('NT$ 42,000');
-    expect(screen.getByRole('region', { name: '本案月嫂應付查核' })).toHaveTextContent('案件屬於其他付款月份。');
+    const casePayable = await screen.findByRole('region', { name: '本案月嫂應付查核' });
+    expect(casePayable).toHaveTextContent('NT$ 42,000');
+    expect(Array.from(casePayable.querySelectorAll('th')).map(item => item.textContent)).toEqual(['月嫂', '應付', '待付', '應付日期']);
+    expect(casePayable).not.toHaveTextContent('已建立的應付項目');
+    expect(casePayable).not.toHaveTextContent('案件屬於其他付款月份。');
     expect(screen.getByText('此為正常案件；歷史人工收款確認只會在歷史案件顯示。')).toBeInTheDocument();
     expect(screen.queryByText(/Account Version|Account version/)).not.toBeInTheDocument();
     expect(staffDirectoryClient.queryPage).not.toHaveBeenCalled();

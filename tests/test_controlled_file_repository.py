@@ -234,6 +234,9 @@ def test_claim_command_returns_created_or_mismatch_without_hidden_commit() -> No
 
     assert repository.claim_command(IdempotencyKey("controlled-file:1"), fingerprint, CorrelationId("corr-1")) is ControlledFileCommandClaim.CREATED
     assert "INSERT IGNORE" in created_cursor.executions[0][0]
+    # Claim identity must remain the per-file command key; related files share a correlation ID.
+    assert created_cursor.executions[0][1][0] == "controlled-file:1"
+    assert created_cursor.executions[0][1][-1] == "corr-1"
     assert created_connection.commits == 0
 
     mismatch_cursor = ScriptedCursor(
@@ -246,6 +249,7 @@ def test_claim_command_returns_created_or_mismatch_without_hidden_commit() -> No
     )
     assert mismatch is ControlledFileCommandClaim.MISMATCH
     assert mismatch_cursor.executions[1][0].endswith(" FOR UPDATE")
+    assert mismatch_cursor.executions[1][1] == ("controlled-file:1",)
     assert mismatch_connection.commits == 0
 
 

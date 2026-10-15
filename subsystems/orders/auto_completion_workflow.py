@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
-from typing import Any, Callable, Mapping, Protocol
+from typing import Any, Callable, Literal, Mapping, Protocol
 
 from domains.orders.auto_completion import (
     AutoCompletionCandidate,
@@ -86,6 +86,15 @@ class AutoCompletionPreview:
 
 
 @dataclass(frozen=True, slots=True)
+class AutoCompletionStatus:
+    case_no: str
+    current_status: str
+    completion_instant: datetime | None
+    state: Literal['awaiting_schedule', 'awaiting_service', 'waiting', 'due', 'blocked', 'completed', 'cancelled']
+    blockers: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class AutoCompletionReceipt:
     case_no: str
     idempotency_key: IdempotencyKey
@@ -135,6 +144,33 @@ class AutoCompleteOrderService:
     def __init__(self, repository: AutoCompletionWorkflowRepository, unit_of_work_factory: Callable[[], UnitOfWork]) -> None:
         self._repository = repository
         self._unit_of_work_factory = unit_of_work_factory
+
+    def query(self, request: AutoCompletionPreviewRequest) -> AutoCompletionStatus:
+        """Project owner facts without applying completion or fabricating eligibility."""
+        try:
+            envelope = self._repository.load_preview_facts(request)
+            status = str(envelope['locked_order']['status'])
+            facts = validate_order_lifecycle_facts(status, 'evaluation_time_reached', envelope['authoritative_facts']).validated_facts
+            blockers = facts.transition_blockers['auto_complete']
+            if status in {'訂單完成', '歷史訂單－服務完成'}:
+                state = 'completed'
+            elif status == '訂單取消':
+                state = 'cancelled'
+            elif facts.completion_instant is None:
+                state = 'awaiting_schedule'
+            elif blockers:
+                state = 'blocked'
+            elif status not in {'服務中', '歷史訂單－服務中'}:
+                state = 'awaiting_service'
+            elif request.evaluation_at < facts.completion_instant:
+                state = 'waiting'
+            else:
+                state = 'due'
+            return AutoCompletionStatus(request.case_no, status, facts.completion_instant, state, blockers)
+        except AutoCompletionRepositoryNotFoundError as error:
+            raise _error(request, ErrorCategory.NOT_FOUND, 'order_not_found', '找不到此訂單。') from error
+        except (AutoCompletionRepositoryIntegrityError, ValueError, TypeError) as error:
+            raise _error(request, ErrorCategory.DOMAIN_BLOCKED, 'auto_completion_authoritative_facts_invalid', '服務完成資料尚未齊備或不一致。', ('auto_complete.authoritative_facts_invalid',)) from error
 
     def apply(self, request: AutoCompletionApplyRequest) -> AutoCompletionReceipt:
         try:

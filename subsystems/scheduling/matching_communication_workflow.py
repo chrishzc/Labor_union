@@ -197,6 +197,15 @@ def get_active_matching_plan_state(case_no: Any) -> dict[str, Any]:
             raise ValueError("active matching plan not found")
         plan_id = _positive_int(active_plan.get("id"), "plan_id")
         state = _load_contact_state(cursor, case_no, plan_id)
+        # The current notification projection includes inherited candidate consent
+        # and preserves explicit legacy and current formal replies.
+        from infrastructure.mysql.matching_notification_repository import MySqlMatchingNotificationRepository
+        current_contact = MySqlMatchingNotificationRepository(connection).get_contact_state(case_no, plan_id)
+        if current_contact is not None:
+            willingness = {segment.segment_id: segment.willingness.value for segment in current_contact.segments}
+            for segment in state['segments']:
+                segment['willingness'] = willingness.get(segment['segment_id'], segment['willingness'])
+            state['all_willing'] = current_contact.all_willing
         cursor.execute(
             """SELECT id AS lock_id, plan_id, status, created_by, created_at
                  FROM caregiver_availability_locks
@@ -401,6 +410,7 @@ def cancel_matching_plan(
     event_key: Any,
     actor: Any,
     reason: Any,
+    expected_version: int | None = None,
 ) -> dict[str, Any]:
     case_no = _text(case_no, "case_no", 50)
     plan_id = _positive_int(plan_id, "plan_id")
@@ -409,7 +419,7 @@ def cancel_matching_plan(
     reason = _text(reason, "reason", 255)
     return _run_in_application_uow(
         lambda connection, cursor: _cancel_matching_plan_in_transaction(
-            connection, cursor, case_no, plan_id, event_key, actor, reason
+            connection, cursor, case_no, plan_id, event_key, actor, reason, expected_version
         )
     )
 
@@ -422,10 +432,11 @@ def _cancel_matching_plan_in_transaction(
     event_key: str,
     actor: str,
     reason: str,
+    expected_version: int | None = None,
 ) -> dict[str, Any]:
     try:
         cursor.execute(
-            """SELECT p.status, p.is_active, o.status AS order_status
+            """SELECT p.status, p.is_active, p.communication_version, o.status AS order_status
                  FROM caregiver_matching_plans p
                  JOIN orders o ON o.case_no = p.case_no
                 WHERE p.id = %s AND p.case_no = %s FOR UPDATE""",
@@ -435,7 +446,7 @@ def _cancel_matching_plan_in_transaction(
         if not isinstance(plan, Mapping):
             raise ValueError("matching plan not found")
         cursor.execute(
-            """SELECT id, plan_id, segment_id, event_type, payload
+            """SELECT id, plan_id, segment_id, event_type, actor, payload
                  FROM caregiver_matching_plan_events
                 WHERE event_key = %s FOR UPDATE""",
             (event_key,),
@@ -447,13 +458,32 @@ def _cancel_matching_plan_in_transaction(
                 and existing.get("segment_id") is None
                 and existing.get("event_type") == "plan_cancelled"
                 and _event_payload(existing.get("payload")).get("reason") == reason
+                and _event_payload(existing.get("payload")).get("expected_version") == expected_version
+                and existing.get("actor", actor) == actor
             ):
                 return {"status": "idempotent_replay", "event_id": existing["id"]}
             raise ValueError("event_key belongs to a different matching event")
+        if expected_version is not None and plan.get("communication_version") != expected_version:
+            raise ValueError("recommendation_stale")
+        cursor.execute(
+            "SELECT assignment.id FROM case_staff_assignments assignment "
+            "JOIN scheduling_aggregates aggregate ON aggregate.case_no=assignment.case_no "
+            "AND aggregate.effective_generation_id=assignment.generation_id "
+            "WHERE assignment.case_no=%s LIMIT 1 FOR UPDATE",
+            (case_no,),
+        )
+        if cursor.fetchone() is not None:
+            raise ValueError("recommendation_has_assignment")
+        cursor.execute(
+            "SELECT id FROM caregiver_availability_locks WHERE plan_id=%s "
+            "AND status='active' AND is_active=1 LIMIT 1 FOR UPDATE", (plan_id,),
+        )
+        if cursor.fetchone() is not None:
+            raise ValueError("recommendation_lock_release_required")
         if (
             plan.get("status") != "proposed"
             or plan.get("is_active") != 1
-            or plan.get("order_status") != "洽談中"
+            or plan.get("order_status") not in {"洽談中", "訂單成立"}
         ):
             raise ValueError("only an active proposed negotiation plan can be cancelled")
         cursor.execute(
@@ -473,7 +503,7 @@ def _cancel_matching_plan_in_transaction(
                 plan_id,
                 event_key,
                 actor,
-                json.dumps({"reason": reason}, ensure_ascii=False, sort_keys=True),
+                json.dumps({"reason": reason, "expected_version": expected_version}, ensure_ascii=False, sort_keys=True),
             ),
         )
         event_id = _positive_int(cursor.lastrowid, "event_id")

@@ -224,7 +224,17 @@ def test_registry_rejects_invalid_sort_before_it_reaches_repository_and_custom_s
         application.list(query=None, limit=25, after="CASE-001", offset=25)
 
 
-def test_registry_http_composition_identifies_each_field_owner_and_editability():
+@pytest.mark.parametrize('virtual_account', ['SYNTHETIC-VA', None])
+def test_registry_http_composition_identifies_each_field_owner_and_editability(virtual_account):
+    class _FinanceRepository(_Repository):
+        def load_detail(self, case_no):
+            return {**super().load_detail(case_no), 'finance_status': 'ready', 'finance_values': {
+                'virtual_account': virtual_account, 'service_unit_price_ntd': 300,
+                'service_hours': 160, 'customer_payable_total_ntd': 48000,
+                'deposit_amount_ntd': 12000, 'first_payment_amount_ntd': 24000,
+                'second_payment_amount_ntd': 12000, 'received_total_ntd': 0,
+                'customer_balance_ntd': 48000,
+            }}
     terms = SimpleNamespace(
         order=SimpleNamespace(
             case_no="CASE-001", version=4, service_data_locked=False,
@@ -241,10 +251,12 @@ def test_registry_http_composition_identifies_each_field_owner_and_editability()
     response = get_client_registry(
         case_no="CASE-001",
         principal=AdminPrincipal(9, "registry-reader", "Registry Reader", "system_admin"),
-        application=ClientRegistryQueryApplication(_Repository()),
+        application=ClientRegistryQueryApplication(_FinanceRepository()),
         order_terms=SimpleNamespace(query_registry=lambda _case_no: terms),
     )
     payload = response.data.model_dump()
+    assert payload['finance']['values']['virtual_account'] == virtual_account
+    assert payload['finance']['values']['customer_payable_total_ntd'] == 48000
     assert payload["client"]["field_capabilities"]["phone"] == {
         "owner": "client_profile", "editable": True, "reason": None, "options": None,
     }

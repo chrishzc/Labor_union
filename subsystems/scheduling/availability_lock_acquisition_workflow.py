@@ -164,12 +164,22 @@ def _with_current_confirmed_service_dates(
         {row.get("service_date") for row in days}
     ) != len(days):
         raise ValueError("current confirmed service dates mismatch")
+    service_dates = []
+    for row in days:
+        if set(row) != {"service_date"} or row["service_date"].__class__ is not date:
+            raise ValueError("invalid current confirmed service dates")
+        service_dates.append(row["service_date"])
+    if len(snapshot["segments"]) == 1:
+        start, end = min(service_dates).isoformat(), max(service_dates).isoformat()
+        snapshot = {
+            **snapshot,
+            "case_start_date": start,
+            "case_end_date": end,
+            "segments": [{**snapshot["segments"][0], "assigned_start_date": start, "assigned_end_date": end}],
+        }
     lock_rows: list[dict[str, Any]] = []
     used_segments: set[tuple[int, int]] = set()
-    for row in days:
-        service_date = row.get("service_date")
-        if set(row) != {"service_date"} or service_date.__class__ is not date:
-            raise ValueError("invalid current confirmed service dates")
+    for service_date in service_dates:
         owners = [
             segment
             for segment in snapshot["segments"]

@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type FC } from 'react';
 import type {
-  ServiceDateConfirmationPreviewView,
   ServiceDateConfirmationQueryView,
 } from '../api/orders/order_mutation_schemas';
 import { ordersMutationClient } from '../api/orders/order_mutation_client';
@@ -19,6 +18,7 @@ import {
   updateServiceDatesReason,
 } from '../adapters/orders/order_mutation_adapter';
 import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_store';
+import { ApiHttpError } from '../api/shared/typed_errors';
 import { orderActualStartClient, type ActualStartPreview } from '../api/orders/order_actual_start_client';
 import type { ActualStart } from '../api/orders/order_query_schemas';
 import { assertStartDates, isServiceDateConflict, refreshServiceDatesAfterStart, sameServiceDates, saveServiceDatesStart, serviceDateRange } from '../adapters/orders/service_date_start_flow';
@@ -94,20 +94,21 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
   const [working, setWorking] = useState<WorkingAction>(null);
   const [queryView, setQueryView] = useState<ServiceDateConfirmationQueryView | null>(null);
   const [precision, setPrecision] = useState<SchedulePrecisionResult | null>(null);
+  const initialCalculation = useRef('');
   const [serviceMode, setServiceMode] = useState<ServiceMode | null>(null);
   const [originalServiceType, setOriginalServiceType] = useState<string | null>(null);
   const [restWeekdays, setRestWeekdays] = useState<number[] | null>(null);
   const [selectedDates, setSelectedDates] = useState<string[]>([]);
-  const [preview, setPreview] = useState<ServiceDateConfirmationPreviewView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [basisNotice, setBasisNotice] = useState<string | null>(null);
   const [calculationBasis, setCalculationBasis] = useState<{ date: string; confirmed: boolean } | null>(null);
   const [hasManualChanges, setHasManualChanges] = useState(false);
   const [startDate, setStartDate] = useState('');
+  const [calendarMonth, setCalendarMonth] = useState('');
+  useEffect(() => { if (startDate) setCalendarMonth(startDate.slice(0, 7)); }, [startDate]);
   const [actualStart, setActualStart] = useState<ActualStart | null>(null);
   const [startPreview, setStartPreview] = useState<ActualStartPreview | null>(null);
-  const [startConfirmationReady, setStartConfirmationReady] = useState(false);
   const [suggestedDates, setSuggestedDates] = useState<string[]>([]);
   const [manualNeedsReview, setManualNeedsReview] = useState(false);
   const [inputInvalid, setInputInvalid] = useState(false);
@@ -115,7 +116,8 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
   const [attemptedCalculationRevision, setAttemptedCalculationRevision] = useState(0);
   const [arrangementBusy, setArrangementBusy] = useState(false);
   const actionInFlight = useRef(new Set<string>());
-  const readbackElement = useRef<HTMLDListElement | null>(null);
+  const saveDatesIntent = useRef(true);
+  const readbackElement = useRef<HTMLDivElement | null>(null);
   const nextStepElement = useRef<HTMLDivElement | null>(null);
   const calculationSequence = useRef(0);
   const readController = useRef<AbortController | null>(null);
@@ -138,6 +140,9 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
     && queryView !== null
     && queryView.current_dates.length > 0
     && !sameServiceDates(queryView.current_dates, effectiveServiceDates);
+  const displayedDates = effectiveServiceDates ?? selectedDates;
+  const routineCalculationNotice = basisNotice === '已依此次輸入開始日試算服務日期，請核對後再確認。'
+    || basisNotice === '已依正式實際開始日更新服務日期，請核對後再確認。';
 
   useEffect(() => { onBusyChange?.(saving); return () => onBusyChange?.(false); }, [saving, onBusyChange]);
   useEffect(() => { onArrangementPendingChange?.(arrangementPending); }, [arrangementPending, onArrangementPendingChange]);
@@ -156,7 +161,7 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
     setOriginalServiceType(null);
     setRestWeekdays(null);
     setSelectedDates([]);
-    setPreview(null);
+
     setError(null);
     setSuccess(null);
     setBasisNotice(null);
@@ -165,7 +170,7 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
     const retained = orderMutationFlowStore.getServiceDatesDraft(caseNo);
     setStartDate(retained?.calculation?.startDate ?? '');
     setStartPreview(retained?.calculation?.startPreview ?? null);
-    setStartConfirmationReady(false);
+
     setActualStart(null);
     setManualNeedsReview(false);
     setInputInvalid(false);
@@ -218,9 +223,9 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
       && calculationSequence.current === request;
     if (mode === 'calculate') setAttemptedCalculationRevision(calculationRevision);
     setWorking('load');
-    setError(null); setPreview(null);
+    setError(null);
     if (mode !== 'read') setSuccess(null);
-    setStartConfirmationReady(false);
+
     if (mode === 'calculate') {
       setBasisNotice(hasManualChanges
         ? '正在重新精算；先前人工調整將由新建議取代，請重新核對。'
@@ -377,7 +382,7 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
     readController.current?.abort();
     readController.current = null;
     calculationSequence.current += 1;
-    setStartDate(value); setPreview(null); setStartPreview(null); setStartConfirmationReady(false);
+    setStartDate(value); setStartPreview(null);
     setPrecision(null); setSuccess(null); setInputInvalid(true); setWorking(null);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || !Number.isFinite(Date.parse(`${value}T00:00:00Z`))
       || new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) !== value) {
@@ -389,7 +394,7 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
   const changeRestWeekdays = (next: number[]) => {
     readController.current?.abort(); readController.current = null;
     calculationSequence.current += 1;
-    setRestWeekdays(next); setPreview(null); setStartPreview(null); setStartConfirmationReady(false);
+    setRestWeekdays(next); setStartPreview(null);
     setPrecision(null); setSuccess(null); setInputInvalid(true); setWorking(null);
     if (next.length === 7) {
       setError('不能將每週七天全部設為休假，請保留至少一天服務日。'); return;
@@ -397,21 +402,21 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
     void loadServiceDates('calculate', startDate || undefined, next, true);
   };
 
-  const finishStartConfirmation = () => {
-    setStartPreview(null); setStartConfirmationReady(false);
+  const finishStartConfirmation = (completedStart: ActualStartPreview | null = startPreview) => {
+    setStartPreview(null);
     setHasManualChanges(false); setManualNeedsReview(false); setInputInvalid(false);
     orderMutationFlowStore.setServiceDatesCalculation(caseNo, undefined);
-    if (startPreview) {
-      setActualStart((value) => value ? { ...value, current_actual_start_date: startPreview.after_actual_start_date } : value);
-      setCalculationBasis({ date: startPreview.after_actual_start_date, confirmed: true });
+    if (completedStart) {
+      setActualStart((value) => value ? { ...value, current_actual_start_date: completedStart.after_actual_start_date } : value);
+      setCalculationBasis({ date: completedStart.after_actual_start_date, confirmed: true });
       setBasisNotice('實際開始日與此次服務日期已保存並回讀。');
     }
   };
 
   useEffect(() => {
     if (!needsBasisUpdate) return;
-    setPreview(null);
-    setStartConfirmationReady(false);
+
+
     if (isRecoveryActive || actionInFlight.current.has(caseNo)) {
       setBasisNotice('日期基準已變更；待目前操作結果確認後，會接續更新。');
       return;
@@ -430,72 +435,74 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
     const nextDates = [...nextSet].sort();
     selectServiceDates(caseNo, nextDates);
     setSelectedDates(nextDates);
-    setPreview(null);
-    setStartConfirmationReady(false);
+
+
     setSuccess(null);
     setHasManualChanges(true);
   };
 
-  const runPreview = async () => {
+  const runApply = async (saveDates = saveDatesIntent.current) => {
     if (actionInFlight.current.has(caseNo) || isRecoveryActive || needsBasisUpdate || readController.current !== null) return;
-    actionInFlight.current.add(caseNo);
-    const controller = new AbortController();
-    readController.current = controller;
-    const basisSequence = calculationSequence.current;
-    setWorking('preview');
-    setError(null);
-    setSuccess(null);
-    let conflictMessage: string | null = null;
-    try {
-      if (startPreview) {
-        assertStartDates(startPreview, selectedDates);
-        setStartConfirmationReady(true);
-        setSuccess('服務日期確認內容已準備。');
-        return;
-      }
-      const nextPreview = await previewServiceDatesFlow(caseNo, { signal: controller.signal });
-      if (renderedCaseNo.current !== caseNo || calculationSequence.current !== basisSequence) return;
-      if (nextPreview.case_no !== caseNo) {
-        throw new Error('服務日期確認預覽案件識別不一致。');
-      }
-      setPreview(nextPreview);
-      setSuccess('服務日期確認內容已準備。');
-    } catch (caught) {
-      if (renderedCaseNo.current !== caseNo || calculationSequence.current !== basisSequence) return;
-      setError(errorMessage(caught));
-      if (isServiceDateConflict(caught)) conflictMessage = errorMessage(caught);
-    } finally {
-      if (readController.current === controller) readController.current = null;
-      actionInFlight.current.delete(caseNo);
-      if (renderedCaseNo.current === caseNo && calculationSequence.current === basisSequence) setWorking(null);
-      if (conflictMessage && renderedCaseNo.current === caseNo) {
-        await loadServiceDates('read');
-        if (renderedCaseNo.current === caseNo) setError(`${conflictMessage}；已重新讀取正式資料，請重新核對。`);
-      }
-    }
-  };
-
-  const runApply = async () => {
-    if (actionInFlight.current.has(caseNo) || isRecoveryActive || needsBasisUpdate || readController.current !== null) return;
+    saveDatesIntent.current = saveDates;
     actionInFlight.current.add(caseNo);
     const basisSequence = calculationSequence.current;
     setWorking('apply');
     setError(null);
     setSuccess(null);
     let conflictMessage: string | null = null;
+    let candidate = startPreview;
+    const stillCurrent = () => renderedCaseNo.current === caseNo && calculationSequence.current === basisSequence;
     try {
-      if (startPreview) {
-        assertStartDates(startPreview, selectedDates);
-        await saveServiceDatesStart(caseNo, startPreview);
+      if (!candidate && actualStart && startDate && actualStart.current_actual_start_date !== startDate) {
+        candidate = await orderActualStartClient.preview(caseNo, { new_actual_start_date: startDate });
+        if (!stillCurrent()) return;
+        const previewCase = candidate.operation === 'date_only' ? candidate.case_no : candidate.actual_start.case_no;
+        if (previewCase !== caseNo || candidate.after_actual_start_date !== startDate
+          || candidate.order_version !== queryView?.order_version
+          || (candidate.scheduling_version ?? 0) !== queryView?.scheduling_version) {
+          throw new ApiHttpError(409, 'stale_preview', '開始日資料已變更，請重新讀取後核對。');
+        }
+        setStartPreview(candidate);
+        orderMutationFlowStore.setServiceDatesCalculation(caseNo, { startDate, startPreview: candidate });
+      }
+      if (!saveDates && candidate?.operation === 'reschedule') {
+        throw new Error('本案已有排班，請使用更正實際開始日核對各段排班調整。');
+      }
+      if (candidate) {
+        assertStartDates(candidate, selectedDates);
+        await saveServiceDatesStart(caseNo, candidate);
         if (renderedCaseNo.current === caseNo) {
-          setBasisNotice(`實際開始日 ${startPreview.after_actual_start_date} 已保存；服務日期正在接續確認。`);
+          setBasisNotice(`實際開始日 ${candidate.after_actual_start_date} 已保存；服務日期正在接續確認。`);
           onObserved?.();
         }
-        await refreshServiceDatesAfterStart(caseNo, startPreview);
-        const freshPreview = await previewServiceDatesFlow(caseNo);
-        if (freshPreview.case_no !== caseNo || !sameServiceDates(freshPreview.service_dates, selectedDates)) {
-          throw new Error('開始日已保存，但服務日期核對結果不同，請重新核對；未套用新日期。');
+        if (!stillCurrent()) return;
+        if (!saveDates) {
+          const current = await ordersMutationClient.getServiceDates(caseNo);
+          if (!stillCurrent()) return;
+          const startResult = orderMutationFlowStore.getActualStart(caseNo);
+          if (current.case_no !== caseNo || current.order_version !== (startResult?.receipt?.order_version ?? candidate.order_version + 1)) {
+            throw new Error('開始日已保存，但案件資料已更新，請重新讀取核對。');
+          }
+          orderMutationFlowStore.setServiceDatesQueryReady(caseNo, current);
+          orderMutationFlowStore.updateServiceDatesSelection(caseNo, selectedDates);
+          setQueryView(current);
+          setActualStart(value => value ? { ...value, current_actual_start_date: candidate!.after_actual_start_date, order_version: current.order_version } : value);
+          setCalculationBasis({ date: candidate.after_actual_start_date, confirmed: true });
+          setBasisNotice('實際開始日已保存；請核對並儲存服務日期。');
+          setSuccess('實際開始日已儲存；服務日期尚未儲存。');
+          return;
         }
+        await refreshServiceDatesAfterStart(caseNo, candidate);
+        if (!stillCurrent()) return;
+      }
+      if (!saveDates) { setSuccess('實際開始日已儲存。'); return; }
+      const freshPreview = await previewServiceDatesFlow(caseNo);
+      if (!stillCurrent()) return;
+      if (freshPreview.case_no !== caseNo || !sameServiceDates(freshPreview.service_dates, selectedDates)) {
+        throw new Error('服務日期核對結果不同，請重新核對；未套用新日期。');
+      }
+      if (!candidate && (freshPreview.order_version !== queryView?.order_version || freshPreview.scheduling_version !== queryView?.scheduling_version)) {
+        throw new ApiHttpError(409, 'stale_preview', '日期或案件資料已更新，請重新讀取後儲存。');
       }
       const receipt = await applyServiceDatesFlow(caseNo);
       if (renderedCaseNo.current !== caseNo || calculationSequence.current !== basisSequence) return;
@@ -505,16 +512,17 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
       }
       setQueryView(observed.queryView);
       setSelectedDates(observed.queryView.current_dates);
-      setPreview(null);
-      finishStartConfirmation();
+
+      finishStartConfirmation(candidate);
       setSuccess(`服務日期已確認並回讀版本 #${receipt.confirmed_version}。`);
       onObserved?.();
+      onOpenArrangement?.();
     } catch (caught) {
       if (renderedCaseNo.current !== caseNo || calculationSequence.current !== basisSequence) return;
       captureRecovery();
       const startResult = orderMutationFlowStore.getActualStart(caseNo);
-      setError(`${startPreview && startResult?.status === 'observed' ? '實際開始日已保存，服務日期尚未完成。' : ''}${errorMessage(caught)}`);
-      setStartConfirmationReady(false);
+      setError(`${candidate && startResult?.status === 'observed' ? saveDates ? '實際開始日已保存，服務日期尚未完成。' : '實際開始日已保存，回讀尚未完成。' : ''}${errorMessage(caught)}`);
+
       if (isServiceDateConflict(caught)) conflictMessage = errorMessage(caught);
     } finally {
       actionInFlight.current.delete(caseNo);
@@ -540,10 +548,11 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
       }
       setQueryView(observed.queryView);
       setSelectedDates(observed.queryView.current_dates);
-      setPreview(null);
+
       finishStartConfirmation();
       setSuccess(`服務日期已確認並回讀版本 #${receipt.confirmed_version}。`);
       onObserved?.();
+      onOpenArrangement?.();
     } catch (caught) {
       if (renderedCaseNo.current !== caseNo) return;
       captureRecovery();
@@ -567,10 +576,11 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
       }
       setQueryView(observed);
       setSelectedDates(observed.current_dates);
-      setPreview(null);
+
       finishStartConfirmation();
       setSuccess(`服務日期已確認並回讀版本 #${recovery.confirmedVersion}。`);
       onObserved?.();
+      onOpenArrangement?.();
     } catch (caught) {
       if (renderedCaseNo.current !== caseNo) return;
       captureRecovery();
@@ -582,29 +592,54 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
   };
 
   const requiredDateCount = queryView?.contracted_service_days ?? 0;
-  const canPreview = queryView !== null
+  const canSave = queryView !== null
     && selectedDates.length === requiredDateCount
     && selectedDates.length > 0
     && selectedDates.every((date) => queryView.selectable_dates.includes(date))
     && working === null
     && !isRecoveryActive
     && !needsBasisUpdate && !inputInvalid && !manualNeedsReview && !startUnresolved && !actualStart?.service_data_locked;
-  const canApply = (preview !== null || startConfirmationReady) && canPreview;
   const arrangementReady = queryView !== null && !isRecoveryActive && !startUnresolved
     && !needsBasisUpdate && !inputInvalid && startPreview === null
     && sameServiceDates(selectedDates, queryView.current_dates);
+
+  useEffect(() => {
+    if (initialCalculation.current === caseNo || queryView?.case_no !== caseNo || queryView.current_dates.length > 0
+      || selectedDates.length > 0 || serviceMode === null || !actualStart || actualStart.has_formal_assignments
+      || working !== null || isRecoveryActive || startUnresolved || needsBasisUpdate || !startDate) return;
+    initialCalculation.current = caseNo;
+    void loadServiceDates('calculate', startDate);
+    // Only the first empty date table is calculated; saved dates and manual drafts are preserved.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [caseNo, queryView, selectedDates.length, serviceMode, actualStart, working, isRecoveryActive, startUnresolved, needsBasisUpdate, startDate]);
 
   return (
     <section className="order-service-dates-panel" aria-label={`案件 ${caseNo} 服務日期設定`}
       hidden={view === 'arrangement' && !arrangementPending && success !== '歷史案件正式安排已建立並回讀。'}>
       <div hidden={view !== 'dates'}>
-      <div className="order-case-review-note" aria-label="原始匯入服務方式">
-        <strong>原始匯入服務方式：</strong>{originalServiceType || '未提供'}
+      <div className="service-date-heading"><p className="service-date-instruction">{effectiveServiceDates ? '查看現行班表；更正開始日會同步調整各段排班。' : '依開始日與休假選擇計算服務日期，確認後儲存。'}</p>
+        {effectiveServiceDates && onOpenActualStart && <button type="button" disabled={saving || working !== null || isRecoveryActive || startUnresolved} onClick={onOpenActualStart}>更正實際開始日</button>}
       </div>
-      <fieldset aria-label="人工選定休假星期" style={{ margin: '12px 0', minWidth: 0 }}
+      {effectiveServiceDates === null && <div className="service-date-settings">
+        <div className="service-date-start-field">
+          <label>實際開始日
+            <input type="date" aria-label="實際開始日" value={startDate}
+              disabled={saving || working === 'preview' || isRecoveryActive || startUnresolved || actualStart?.service_data_locked}
+              onChange={(event) => changeStartDate(event.target.value)} />
+          </label>
+          {actualStart && <small>約定服務開始日 {actualStart.planned_start_date}</small>}
+          {actualStart && !actualStart.has_formal_assignments && <button className="service-date-save-start" type="button"
+            disabled={working !== null || saving || isRecoveryActive || needsBasisUpdate || startUnresolved || actualStart.service_data_locked || !/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !Number.isFinite(Date.parse(`${startDate}T00:00:00Z`))}
+            onClick={() => void runApply(false)}>儲存實際開始日</button>}
+        </div>
+        <div className="service-date-rest-settings">
+          <div className="service-date-original-type" aria-label="原訂服務方式">
+            <span>訂單原有服務方式</span><strong>{originalServiceType || '未提供'}</strong>
+          </div>
+      <fieldset aria-label="人工選定休假星期"
         disabled={saving || working === 'preview' || isRecoveryActive || startUnresolved || actualStart?.service_data_locked}>
-        <legend>人工選定休假星期</legend>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px 16px' }}>
+        <legend>本次計算的休假星期</legend>
+        <div className="service-date-weekday-choices">
           {REST_WEEKDAYS.map(({ value, label }) => <label key={value} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <input type="checkbox" checked={restWeekdays?.includes(value) ?? false} onChange={(event) => {
               const next = new Set(restWeekdays ?? []);
@@ -612,38 +647,20 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
               changeRestWeekdays([...next].sort((a, b) => a - b));
             }} />{label}
           </label>)}
+          <button className="service-date-no-rest" type="button" onClick={() => changeRestWeekdays([])}>無固定週休</button>
         </div>
-        <button type="button" onClick={() => changeRestWeekdays([])}>無固定週休</button>
-        <p>{restWeekdays === null ? '尚未人工指定；請依原始服務方式核對。' : restWeekdays.length === 0 ? '此次試算：無固定週休。' : `此次休假：${REST_WEEKDAYS.filter((day) => restWeekdays.includes(day.value)).map((day) => day.label).join('、')}。`}
-          勾選後立即更新建議日曆；只供此次試算，確認後才保存服務日期。</p>
+        <small>{restWeekdays === null ? '請依協調結果選擇休假星期。' : restWeekdays.length === 0 ? '此次試算：無固定週休。' : `此次休假：${REST_WEEKDAYS.filter((day) => restWeekdays.includes(day.value)).map((day) => day.label).join('、')}。`}日期會自動更新；這組選擇只用於本次計算。</small>
       </fieldset>
-      <label>實際開始日
-        <input type="date" aria-label="實際開始日" value={startDate}
-          disabled={saving || working === 'preview' || isRecoveryActive || startUnresolved || actualStart?.service_data_locked}
-          onChange={(event) => changeStartDate(event.target.value)} />
-      </label>
-      {actualStart && <p>原訂日：{actualStart.planned_start_date}；已保存實際開始日：{actualStart.current_actual_start_date ?? '尚未確認'}。修改輸入會自動試算，完成確認後才保存。</p>}
+        </div>
+      </div>}
       {actualStart?.service_data_locked && <p role="status">服務資料已鎖定，目前只能查看正式日期。</p>}
-      <button
-        type="button"
-        className="order-v2-open-drawer"
-        disabled={working !== null || isRecoveryActive || startUnresolved || actualStart?.service_data_locked}
-        onClick={() => void loadServiceDates('calculate', startDate || undefined)}
-      >
-        {working === 'load' ? '正在更新服務日期…' : '精算天數並設定服務日期'}
-      </button>
+
 
       {error !== null && <p role="alert">{error}</p>}
       {error !== null && !isRecoveryActive && !startUnresolved && (
         <button type="button" disabled={working !== null} onClick={() => void loadServiceDates('read')}>重新讀取服務日期</button>
       )}
-      {basisNotice !== null && <p role="status">{basisNotice}</p>}
-      {calculationBasis !== null && (
-        <div className="order-case-review-note" aria-label="服務日期計算基準">
-          <strong>{calculationBasis.confirmed ? '正式實際開始日' : '此次試算開始日（尚未保存）'}</strong>
-          <span>：{calculationBasis.date}</span>
-        </div>
-      )}
+      {basisNotice !== null && !routineCalculationNotice && effectiveServiceDates === null && <p className="service-date-inline-status" role="status">{basisNotice}</p>}
       {startPreview?.operation === 'reschedule' && <p role="status">本案確認開始日會同步建立或重排既定人員的正式服務安排。以下建議為後端正式重排日期，請核對後再保存。</p>}
       {startUnresolved && !saving && <div role="status">
         <p>開始日保存或回讀尚未完成，服務日期未確認。請先確認開始日結果再接續。</p>
@@ -654,7 +671,7 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
         <p>計算條件已變更，原人工選日尚未套用新建議。</p>
         <button type="button" disabled={working !== null} onClick={() => {
           selectServiceDates(caseNo, suggestedDates); setSelectedDates(suggestedDates);
-          setManualNeedsReview(false); setHasManualChanges(false); setPreview(null); setStartConfirmationReady(false);
+          setManualNeedsReview(false); setHasManualChanges(false);
         }}>採用新建議</button>
         <button type="button" disabled={working !== null} onClick={() => {
           if (selectedDates.some((date) => !queryView?.selectable_dates.includes(date))) {
@@ -703,49 +720,49 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
               <span>。此歷史綁定已保留，不需重新挑選候選或再次推薦。</span>
             </div>
           )}
-          {confirmationSupersededBySchedule && (
+          {confirmationSupersededBySchedule && effectiveServiceDates === null && (
             <p role="status" className="order-case-review-note">
               先前確認的日期與目前排班不同；下方日曆保留事前確認紀錄，不代表目前服務安排。
             </p>
           )}
-          {precision !== null && <dl className="order-v2-business-summary" aria-label="建議服務日期摘要">
+          {precision !== null && effectiveServiceDates === null && <details className="service-date-calculation-details"><summary>查看試算明細</summary>
+          {routineCalculationNotice && <p>{basisNotice}</p>}
+          {calculationBasis !== null && !calculationBasis.confirmed && <div aria-label="服務日期計算基準">此次試算開始日（尚未保存）：{calculationBasis.date}</div>}
+          <dl className="order-v2-business-summary" aria-label="建議服務日期摘要">
             <div><dt>排休類型</dt><dd>{restWeekdays !== null ? '人工選定休假星期' : serviceMode}</dd></div>
             <div><dt>建議開始</dt><dd>{precision.actual_start_date}</dd></div>
             <div><dt>建議完工</dt><dd>{suggestedDates.at(-1) ?? precision.actual_end_date}</dd></div>
             <div><dt>合約服務日</dt><dd>{requiredDateCount} 天</dd></div>
-          </dl>}
-          <dl className="order-v2-business-summary" aria-label="此次選定服務日期摘要" aria-live="polite">
-            <div><dt>選定開始</dt><dd>{selectedDates[0] ?? '尚未選取'}</dd></div>
-            <div><dt>選定最後服務日</dt><dd>{selectedDates.at(-1) ?? '尚未選取'}</dd></div>
-            <div><dt>已選服務日</dt><dd>{selectedDates.length} / {requiredDateCount} 天</dd></div>
-            {selectedDates.length !== requiredDateCount && <div><dt>待調整</dt><dd>{selectedDates.length < requiredDateCount ? `尚差 ${requiredDateCount - selectedDates.length}` : `超出 ${selectedDates.length - requiredDateCount}`} 天</dd></div>}
+          </dl></details>}
+          <dl className="service-date-summary-strip" aria-label="此次選定服務日期摘要" aria-live="polite">
+            <div><dt>服務開始</dt><dd>{displayedDates[0] ?? '尚未選取'}</dd></div>
+            <div><dt>最後服務日</dt><dd>{displayedDates.at(-1) ?? '尚未選取'}</dd></div>
+            <div><dt>服務天數</dt><dd>{displayedDates.length} / {requiredDateCount} 天</dd></div>
+            {displayedDates.length !== requiredDateCount && <div><dt>待調整</dt><dd>{displayedDates.length < requiredDateCount ? `尚差 ${requiredDateCount - displayedDates.length}` : `超出 ${displayedDates.length - requiredDateCount}`} 天</dd></div>}
           </dl>
 
           <div className="service-calendar-workbench-layout">
             <div className="calendar-matrix-card">
               <div className="calendar-month-header">
-                <h3 style={{ fontSize: '1.05rem', fontWeight: 750, color: '#0f766e', margin: 0 }}>
-                  📅 {confirmationSupersededBySchedule ? '先前確認日期（日曆紀錄）' : '服務日期確認（日曆排盤）'}
+                <h3>
+                  {Number((calendarMonth || startDate.slice(0, 7)).slice(0, 4))} 年 {Number((calendarMonth || startDate.slice(0, 7)).slice(5))} 月
                 </h3>
-                <span>已選 {selectedDates.length} / {requiredDateCount} 天</span>
+                <div className="order-case-action-row">{[-1, 1].map(delta => <button type="button" key={delta} aria-label={delta < 0 ? '上一個月' : '下一個月'} onClick={() => { const current = new Date(`${calendarMonth || startDate.slice(0, 7)}-01T12:00:00`); current.setMonth(current.getMonth() + delta); setCalendarMonth(`${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}`); }}>{delta < 0 ? '‹' : '›'}</button>)}</div>
               </div>
-              <p className="order-case-review-note">{confirmationSupersededBySchedule
-                ? '此日曆為先前確認日期紀錄；目前服務日期請以排班為準。'
-                : '請逐日核對服務安排；選取國定假日即代表已確認該日安排服務，不需另行登錄協調結果。'}</p>
 
               <div
                 className="calendar-days-grid"
-                style={{ maxHeight: '60vh', overflowY: 'auto' }}
                 role="group"
                 aria-label="服務日期月曆"
                 data-surface-id="orders.date.service-date-selection"
               >
                 {['日', '一', '二', '三', '四', '五', '六'].map((weekday) => <span key={weekday} className="service-date-weekday" aria-hidden="true">{weekday}</span>)}
                 {queryView.selectable_dates.length > 0 && Array.from({
-                  length: new Date(`${queryView.selectable_dates[0]}T00:00:00`).getDay(),
+                  length: new Date(`${calendarMonth || startDate.slice(0, 7)}-01T00:00:00`).getDay(),
                 }).map((_, index) => <div key={`calendar-leading-${index}`} aria-hidden="true" />)}
-                {[...new Set([...queryView.selectable_dates, ...selectedDates])].sort().map((date) => {
-                  const selected = selectedDates.includes(date);
+                {Array.from({ length: new Date(Number((calendarMonth || startDate.slice(0, 7)).slice(0, 4)), Number((calendarMonth || startDate.slice(0, 7)).slice(5)), 0).getDate() }, (_, index) => `${calendarMonth || startDate.slice(0, 7)}-${String(index + 1).padStart(2, '0')}`).map((date) => {
+                  const selected = displayedDates.includes(date);
+                  const segmentIndex = currentAssignmentPlan?.assignments.findIndex(segment => segment.official_service_dates.includes(date)) ?? -1;
                   const day = precision?.day_by_day.find((value) => value.date === date);
                   return (
                     <button
@@ -755,57 +772,38 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
                       aria-label={`服務日期 ${date}`}
                       aria-pressed={selected}
                       title={`${date}${day?.holiday_name ? ` ${day.holiday_name}` : day?.is_rest_day ? ' 建議休假' : ''}`}
-                      className={`calendar-date-cell${selected ? ' selected' : ''}`}
-                      disabled={working !== null || isRecoveryActive || needsBasisUpdate || inputInvalid || startUnresolved || actualStart?.service_data_locked}
+                      className={`calendar-date-cell${selected ? ' selected' : ''}${selected && segmentIndex % 2 === 1 ? ' later-segment' : ''}`}
+                      disabled={effectiveServiceDates !== null || !queryView.selectable_dates.includes(date) || working !== null || isRecoveryActive || needsBasisUpdate || inputInvalid || startUnresolved || actualStart?.service_data_locked}
                       onClick={() => changeDate(date, !selected)}
                     >
-                      <time dateTime={date} title={date}>{date.slice(5).replace('-', '/')}</time>
+                      <time dateTime={date} title={date}>{Number(date.slice(8))}</time>
                       {day?.holiday_name && <small className="service-date-holiday" aria-label={day.holiday_name}>假日</small>}
                       {!day?.holiday_name && day?.is_rest_day && !selected && <small>休</small>}
-                      {selected && <span className="calendar-date-cell-badge">服務日</span>}
                     </button>
                   );
                 })}
               </div>
+              <small className="service-date-calendar-hint">{effectiveServiceDates ? '現行服務日期已保存；更正開始日會先核對各段調整結果。' : `選取國定假日即代表已確認該日安排服務；點選日期可調整，需選滿 ${requiredDateCount} 天。`}</small>
             </div>
           </div>
 
-          <button
-            type="button"
-            className="order-v2-open-drawer"
-            disabled={!canPreview}
-            onClick={() => void runPreview()}
-          >
-            {working === 'preview' ? '檢查確認內容中…' : '確認服務日期'}
-          </button>
-        </>
-      )}
-
-      {(preview !== null || startConfirmationReady) && !needsBasisUpdate && (
-        <>
-          <dl className="order-v2-business-summary" aria-label="服務日期確認內容">
-            <div><dt>目前版本</dt><dd>{queryView?.current_version == null ? '首次確認' : `#${queryView.current_version}`}</dd></div>
-            {startPreview && <div><dt>此次確認實際開始日</dt><dd>{startPreview.after_actual_start_date}</dd></div>}
-            <div><dt>確認日期</dt><dd>{(preview?.service_dates ?? selectedDates).join('、')}</dd></div>
-          </dl>
-          <p>系統會自動記錄「確認服務日期」，不需另外填寫原因。</p>
-          <button
-            type="button"
-            className="order-v2-open-drawer"
-            disabled={!canApply}
-            onClick={() => void runApply()}
-          >
-            {working === 'apply' ? '確認並回讀中…' : '完成服務日期確認'}
-          </button>
+          <div className="service-date-footer">
+            <small>{effectiveServiceDates ? '現行班表已保存。' : queryView.current_dates.length > 0 ? '服務日期表已保存；雙方確認後會依條件自動排班。' : '目前尚未保存服務日期。'}</small>
+            {effectiveServiceDates ? onOpenArrangement && <button type="button" onClick={onOpenArrangement}>查看日期確認紀錄 →</button> : <button type="button" className="order-v2-open-drawer service-date-primary" disabled={!canSave} onClick={() => void runApply(true)}>
+              {working === 'apply' ? '儲存並回讀中…' : '儲存服務日期'}
+            </button>}
+          </div>
         </>
       )}
 
       {queryView !== null && queryView.current_dates.length > 0 && (
-        <dl className="order-v2-business-summary" aria-label={confirmationSupersededBySchedule ? '先前確認日期與目前排班回讀' : '已確認服務日期回讀'} tabIndex={-1} ref={readbackElement}>
+        <div tabIndex={-1} ref={readbackElement}><details className="service-date-saved-details"><summary>查看已保存日期與版本</summary>
+          {calculationBasis?.confirmed && <div aria-label="服務日期計算基準">正式實際開始日：{calculationBasis.date}</div>}
+          <dl className="order-v2-business-summary" aria-label={confirmationSupersededBySchedule ? '先前確認日期與目前排班回讀' : '已確認服務日期回讀'}>
           <div><dt>{confirmationSupersededBySchedule ? '先前確認版本' : '日期確認版本'}</dt><dd>{queryView.current_version === null ? '未建立' : `#${queryView.current_version}`}</dd></div>
           <div><dt>{confirmationSupersededBySchedule ? '先前確認日期' : '已確認服務日期'}</dt><dd>{queryView.current_dates.join('、')}</dd></div>
           {effectiveServiceDates !== null && <div><dt>目前排班服務日</dt><dd>{effectiveServiceDates.join('、')}</dd></div>}
-        </dl>
+        </dl></details></div>
       )}
       {arrangementPending && onOpenArrangement && (
         <div className="order-v2-inline-notice" role="status" tabIndex={-1} ref={nextStepElement} aria-label="服務日期確認後下一步">

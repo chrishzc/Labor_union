@@ -28,6 +28,36 @@ class ReconciliationStatus(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class UnreceivedDepositConfirmation:
+    """Finance-owned proof for a case whose formal payment roots have not been established."""
+
+    case_no: str
+    account_version: int | None
+    obligation_identities: tuple[str, ...]
+    obligation_event_ids: tuple[int, ...]
+    ledger_entry_ids: tuple[int, ...]
+
+    def __post_init__(self) -> None:
+        require_canonical_text(self.case_no, "case_no", 50)
+        if self.account_version is not None:
+            if isinstance(self.account_version, bool) or not isinstance(self.account_version, int) or self.account_version < 0:
+                raise ValueError("client_finance_account_version_invalid")
+        for identity in self.obligation_identities:
+            require_canonical_text(identity, "obligation_identity", _IDENTITY_MAXIMUM_LENGTH)
+        for values in (self.obligation_event_ids, self.ledger_entry_ids):
+            for value in values:
+                require_positive_integer(value, "financial_event_id")
+        for values in (self.obligation_identities, self.obligation_event_ids, self.ledger_entry_ids):
+            if not isinstance(values, tuple) or values != tuple(sorted(set(values))):
+                raise ValueError("client_finance_confirmation_sources_not_canonical")
+
+    @property
+    def confirmed(self) -> bool:
+        # A missing settlement projection alone never proves that no deposit was received.
+        return not (self.obligation_identities or self.obligation_event_ids or self.ledger_entry_ids)
+
+
+@dataclass(frozen=True, slots=True)
 class IncomingBankFact:
     identity: str
     amount: MoneyNTD

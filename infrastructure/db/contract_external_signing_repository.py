@@ -17,6 +17,7 @@ from domains.contract_signing.external_signing import (
     ExternalSigningState,
     ExternalSigningTransition,
     StaffSigningReportTarget,
+    SignedContractDocumentTarget,
     derive_external_signing_session_id,
 )
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
@@ -44,9 +45,14 @@ from subsystems.contract_signing.external_signing_workflow import (
     RecordExternalSigningHandoff,
     StaffCompletionPrerequisites,
     StoredExternalSigningHandoffReceipt,
+    SendExternalSigningReminders,
+    ExternalSigningReminderReceipt,
+    StoredExternalSigningReminderReceipt,
 )
 from subsystems.contract_signing.final_document_workflow import (
     FinalContractDocumentReadback,
+    SignedContractDocumentReadback,
+    SignedContractDocumentPreview,
     FinalSignedContractApplyReceipt,
     StoredFinalSignedContractReceipt,
 )
@@ -290,18 +296,47 @@ class MySqlContractExternalSigningRepository:
     def load_handoff_manual_notification_targets(
         self, case_no: str, session_id: str,
     ) -> tuple[ManualSigningNotificationTarget, ...]:
+        receipt = self.load_handoff_notification_facts(case_no, session_id)
+        return () if receipt is None else receipt.manual_notification_targets
+
+    def load_handoff_notification_facts(self, case_no: str, session_id: str) -> ExternalSigningHandoffReceipt | None:
         row = self._one(
-            "SELECT result_snapshot FROM contract_signing_command_receipts "
+            "SELECT command_kind,command_fingerprint,result_snapshot FROM contract_signing_command_receipts "
             "WHERE case_no=%s AND command_kind='record_external_signing_handoff' "
             "AND JSON_UNQUOTE(JSON_EXTRACT(result_snapshot,'$.session_id'))=%s "
             "ORDER BY id DESC LIMIT 1", (case_no, session_id),
         )
         if row is None:
-            return ()
+            return None
         snapshot = _json_mapping(row.get("result_snapshot"))
         if snapshot is None:
             raise _stored_fact_error("external_signing_handoff_receipt_snapshot_invalid")
-        return _manual_notification_targets(snapshot)
+        return _stored_handoff_receipt(row, expected_idempotency_key=str(snapshot.get("idempotency_key", ""))).receipt
+
+    def find_reminder_receipt(self, key: IdempotencyKey, *, for_update: bool) -> StoredExternalSigningReminderReceipt | None:
+        row = self._one(_HANDOFF_RECEIPT_BY_KEY_SQL + _lock_suffix(for_update), (_reminder_storage_key(key),))
+        return None if row is None else _stored_reminder_receipt(row, expected_idempotency_key=key.value)
+
+    def load_latest_reminder_receipt(self, case_no: str, session_id: str) -> ExternalSigningReminderReceipt | None:
+        row = self._one(
+            "SELECT command_kind,command_fingerprint,result_snapshot FROM contract_signing_command_receipts "
+            "WHERE case_no=%s AND command_kind='send_external_signing_reminders' "
+            "AND JSON_UNQUOTE(JSON_EXTRACT(result_snapshot,'$.session_id'))=%s "
+            "ORDER BY id DESC LIMIT 1", (case_no, session_id),
+        )
+        return None if row is None else _stored_reminder_receipt(row).receipt
+
+    def save_reminder_receipt(self, key: IdempotencyKey, stored: StoredExternalSigningReminderReceipt, command: SendExternalSigningReminders) -> None:
+        receipt = stored.receipt
+        snapshot = {"idempotency_key": key.value, "receipt_id": receipt.receipt_id,
+                    "session_id": receipt.session_id, "status_version": receipt.status_version,
+                    "actor_ref": command.actor.actor_id,
+                    "manual_notification_targets": [{"scope": target.scope.value, "subject_reference": target.subject_reference} for target in receipt.manual_notification_targets]}
+        self._insert(_HANDOFF_RECEIPT_INSERT_SQL, (
+            _reminder_storage_key(key), stored.command_fingerprint.value,
+            "send_external_signing_reminders", command.case_no, None, None,
+            command.correlation_id.value, _canonical_json(snapshot),
+        ))
 
     def save_handoff_receipt(
         self,
@@ -619,6 +654,32 @@ class MySqlContractExternalSigningRepository:
             ),
         )
 
+    def load_staged_document(self, case_no, object_key, target):
+        row = self._one(
+            "SELECT staging_id,staging_version,original_filename,content_type,size_bytes "
+            "FROM controlled_file_staging_objects WHERE owner_type='contract_signing' "
+            "AND purpose='final_signed_contract' AND subject_reference=%s AND object_key=%s "
+            "AND staging_state='staged' AND expires_at_utc>UTC_TIMESTAMP(6) "
+            "ORDER BY id DESC LIMIT 1", (case_no, object_key),
+        )
+        if row is None:
+            return None
+        return SignedContractDocumentPreview(
+            target, str(row["staging_id"]), int(row["staging_version"]),
+            str(row["original_filename"]), str(row["content_type"]), int(row["size_bytes"]), (),
+        )
+
+    def get_final_documents(self, case_no):
+        row = self._one(
+            "SELECT receipt.result_snapshot FROM contract_final_document_versions document "
+            "JOIN contract_external_signing_sessions session ON session.id=document.external_signing_session_id "
+            "JOIN contract_external_signing_receipts receipt ON receipt.final_document_version_id=document.id "
+            "WHERE document.case_no=%s AND session.session_state='completed' "
+            "AND receipt.command_type='apply_final_signed_contract' "
+            "ORDER BY document.version_number DESC,document.id DESC LIMIT 1", (case_no,),
+        )
+        return () if row is None else _signed_document_members(row.get("result_snapshot"))
+
     def get_final_document(
         self, case_no: str
     ) -> FinalContractDocumentReadback | None:
@@ -727,13 +788,33 @@ def _stored_handoff_receipt(
         return StoredExternalSigningHandoffReceipt(
             PreviewFingerprint(row["command_fingerprint"]),
             ExternalSigningHandoffReceipt(
-                session_id, resulting_status_version, False, _manual_notification_targets(snapshot)
+                session_id, resulting_status_version, False, _manual_notification_targets(snapshot),
+                snapshot.get("handoff_included_reminders", True),
             ),
         )
     except (KeyError, TypeError, ValueError):
         raise _stored_fact_error(
             "external_signing_handoff_receipt_snapshot_invalid"
         ) from None
+
+
+def _stored_reminder_receipt(row: Mapping[str, object], *, expected_idempotency_key: str | None = None) -> StoredExternalSigningReminderReceipt:
+    if row.get("command_kind") != "send_external_signing_reminders":
+        raise _conflict("contract_signature_idempotency_conflict", "相同命令識別已被其他簽約命令使用。")
+    snapshot = _json_mapping(row.get("result_snapshot"))
+    if snapshot is None or (expected_idempotency_key is not None and snapshot.get("idempotency_key") != expected_idempotency_key):
+        raise _stored_fact_error("external_signing_reminder_receipt_invalid")
+    try:
+        receipt_id, session_id, version = snapshot["receipt_id"], snapshot["session_id"], snapshot["status_version"]
+        if not isinstance(receipt_id, str) or not receipt_id.startswith("cesr_") or not isinstance(session_id, str) or not session_id.startswith("ces_") or type(version) is not int or version < 1:
+            raise ValueError("invalid reminder receipt")
+        return StoredExternalSigningReminderReceipt(PreviewFingerprint(row["command_fingerprint"]), ExternalSigningReminderReceipt(receipt_id, session_id, version, _manual_notification_targets(snapshot)))
+    except (KeyError, TypeError, ValueError):
+        raise _stored_fact_error("external_signing_reminder_receipt_invalid") from None
+
+
+def _reminder_storage_key(key: IdempotencyKey) -> str:
+    return "reminder:sha256:" + hashlib.sha256(key.value.encode("utf-8")).hexdigest()
 
 
 def _legacy_manual_evidence(
@@ -934,6 +1015,7 @@ def _stored_final_receipt(
         resulting_state=ExternalSigningState(str(row["session_state"])),
         document=document,
         contract_identity=str(row["contract_identity"]),
+        documents=_signed_document_members(row.get("result_snapshot")),
     )
     return StoredFinalSignedContractReceipt(
         PreviewFingerprint(str(row["command_fingerprint"])), receipt
@@ -977,6 +1059,7 @@ def _handoff_receipt_snapshot(
         "idempotency_key": key.value,
         "resulting_status_version": receipt.resulting_status_version,
         "session_id": receipt.session_id,
+        "handoff_included_reminders": receipt.handoff_included_reminders,
         "manual_notification_targets": [
             {"scope": target.scope.value, "subject_reference": target.subject_reference}
             for target in receipt.manual_notification_targets
@@ -1018,6 +1101,14 @@ def _final_receipt_snapshot(
     document = receipt.document
     return {
         "contract_identity": receipt.contract_identity,
+        "documents": [{
+            "scope": member.target.scope,
+            "matching_segment_id": member.target.matching_segment_id,
+            "document_version_id": member.target.document_version_id,
+            "controlled_file_id": member.file_id, "version_number": member.version,
+            "filename": member.filename, "mime_type": member.mime_type,
+            "size_bytes": member.size_bytes,
+        } for member in receipt.documents],
         "document": {
             "applied_at": document.applied_at.astimezone(timezone.utc).isoformat(),
             "case_no": document.case_no,
@@ -1034,6 +1125,26 @@ def _final_receipt_snapshot(
         "resulting_status_version": receipt.resulting_status_version,
         "session_id": receipt.session_id,
     }
+
+
+def _signed_document_members(value):
+    snapshot = _json_mapping(value)
+    # Completed aggregate-PDF receipts predate separate-return members and stay readable.
+    if snapshot is None or "documents" not in snapshot:
+        return ()
+    values = snapshot["documents"]
+    if not isinstance(values, list):
+        raise _stored_fact_error("final_contract_document_members_malformed")
+    try:
+        members = tuple(SignedContractDocumentReadback(
+            SignedContractDocumentTarget(row["scope"], row["matching_segment_id"], row["document_version_id"]),
+            row["controlled_file_id"], row["version_number"], row["filename"], row["mime_type"], row["size_bytes"],
+        ) for row in values)
+        if len({row.target.key for row in members}) != len(members) or len({row.file_id for row in members}) != len(members):
+            raise ValueError("duplicate signed document member")
+        return members
+    except (TypeError, KeyError, ValueError):
+        raise _stored_fact_error("final_contract_document_members_malformed") from None
 
 
 def _require_controlled_file_matches(session, receipt, row):
@@ -1333,7 +1444,7 @@ _FINAL_DOCUMENT_READBACK_SQL = (
     "ORDER BY document.version_number DESC,document.id DESC LIMIT 1"
 )
 _FINAL_RECEIPT_SELECT_SQL = (
-    "SELECT receipt.receipt_id,receipt.command_fingerprint,receipt.result_status_version,"
+    "SELECT receipt.receipt_id,receipt.command_fingerprint,receipt.result_status_version,receipt.result_snapshot,"
     "session.external_signing_session_id,document.contract_identity," + _FINAL_READBACK_COLUMNS
     + " FROM contract_external_signing_receipts receipt "
     "JOIN contract_external_signing_sessions session "

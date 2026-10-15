@@ -28,6 +28,12 @@ from infrastructure.mysql.line_runtime_repository import MySqlLineRuntimeReposit
 from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
 from infrastructure.mysql.mysql_adapter import get_connection
 from subsystems.jobs.durable_job_worker import DurableJobWorker
+from subsystems.jobs.command_application import DurableJobCommandApplication
+from subsystems.orders.auto_completion_job_dispatch import AutoCompletionJobDispatcher
+from infrastructure.mysql.order_auto_completion_job_repository import MySqlDueOrderAutoCompletionRepository
+from api.dependencies.service_arrangement_automation import build_service_arrangement_automation
+from shared_kernel.clock import TAIPEI_TIME_ZONE
+from datetime import datetime
 from subsystems.knowledge_retrieval.application import KnowledgeWorker
 from subsystems.line.runtime_monitoring import RuntimeHealthObservation
 from subsystems.line.runtime_alert_application import RuntimeMonitoringApplication
@@ -59,6 +65,11 @@ def run_durable_job_cycle(
         if check_only:
             _write_durable_job_heartbeat(connection, runtime_identity, 0)
             return 0
+        build_service_arrangement_automation(connection).dispatch_pending()
+        AutoCompletionJobDispatcher(
+            MySqlDueOrderAutoCompletionRepository(connection),
+            DurableJobCommandApplication(repository, connection),
+        ).dispatch_due_orders(datetime.now(TAIPEI_TIME_ZONE))
         worker = DurableJobWorker(
             repository,
             connection,

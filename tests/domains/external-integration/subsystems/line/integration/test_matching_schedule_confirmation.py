@@ -347,11 +347,10 @@ def test_schedule_query_projects_old_sent_snapshot_as_outdated_without_reusing_c
             {"id": 4, "version": 2},
             {"line_user_id": "U-client"},
             {"id": 9, "confirmed_version_id": 3, "status": "invalidated", "current_marker": None},
-            {"line_user_id": "U-client"},
         ],
         many_rows=[
             [{"service_date": date(2026, 8, 4)}], [],
-            [{"service_date": date(2026, 8, 3)}], [],
+            [{"payload_snapshot": json.dumps(_schedule_payload("customer", "customer", None, "U-client", ["2026-08-03"]))}],
         ],
     )
     repository = MySqlMatchingScheduleConfirmationRepository(_QueryConnection(cursor))

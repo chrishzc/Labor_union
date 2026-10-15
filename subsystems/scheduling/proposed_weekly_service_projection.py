@@ -78,6 +78,22 @@ def _week_starts(start: date, end: date) -> tuple[date, ...]:
     return tuple(result)
 
 
+def project_order_weekly_service(service_dates: frozenset[date], hours_per_day: float) -> tuple[dict[str, object], ...]:
+    """Project saved Orders dates without inventing a staff or segment identity."""
+    if not service_dates:
+        return ()
+    if hours_per_day <= 0 or hours_per_day > 24 or hours_per_day * 2 != int(hours_per_day * 2):
+        raise ValueError("order_service_hours_invalid")
+    return tuple({
+        "serial_number": index + 1,
+        "week_start_date": start.isoformat(),
+        "week_end_date": sunday_of(start).isoformat(),
+        "service_hours_per_day": hours_per_day,
+        "weekly_work_days": sum(start <= value <= sunday_of(start) for value in service_dates),
+        "weekly_hours": sum(start <= value <= sunday_of(start) for value in service_dates) * hours_per_day,
+    } for index, start in enumerate(_week_starts(min(service_dates), max(service_dates))))
+
+
 def _dates_between(start: date, end: date):
     current = start
     while current <= end:

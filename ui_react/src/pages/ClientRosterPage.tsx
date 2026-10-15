@@ -57,9 +57,11 @@ export interface ClientRosterPageProps {
   initialCaseNo?: string;
   focusField?: string;
   onEditStateChange?: (state: RegistryEditState) => void;
+  onReturnToCase?: (caseNo: string) => void;
+  onOpenServiceArrangement?: (caseNo: string, recalculateDates: boolean) => void;
 }
 
-export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = false, initialCaseNo = '', focusField = '', onEditStateChange }) => {
+export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = false, initialCaseNo = '', focusField = '', onEditStateChange, onReturnToCase, onOpenServiceArrangement }) => {
   const [filters, setFilters] = useState<RosterFilters>(defaultFilters);
   const [appliedFilters, setAppliedFilters] = useState<RosterFilters>(defaultFilters);
   const [page, setPage] = useState<ClientRegistryPageData | null>(null);
@@ -275,9 +277,17 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
       className="client-roster-detail-drawer"
       closeDisabled={editState.busy}
     >
+      {onReturnToCase && selectedCaseNo && <div className="registry-return-row"><button type="button" disabled={editState.busy} onClick={() => {
+        if (editState.busy || (editState.dirty && !window.confirm('有尚未儲存的變更，確定放棄並返回案件？'))) return;
+        onReturnToCase(selectedCaseNo);
+      }}>返回案件處理 →</button></div>}
       {detailLoading && <p role="status" className="client-roster-message">正在載入完整客戶資料…</p>}
       {detailError && <p role="alert" className="client-roster-message">{detailError}</p>}
-      {detail?.case_no === selectedCaseNo && <ClientRegistryDetailEditor key={detail.case_no} detail={detail} focusField={focusField} onRefresh={refreshDetail} onStateChange={setEditState} />}
+      {detail?.case_no === selectedCaseNo && <ClientRegistryDetailEditor key={detail.case_no} detail={detail} focusField={focusField} onRefresh={refreshDetail} onStateChange={setEditState} onOpenServiceArrangement={recalculateDates => {
+        if (editState.busy || (editState.dirty && !window.confirm('有尚未儲存的變更，確定放棄並前往服务安排？'))) return;
+        if (onOpenServiceArrangement) onOpenServiceArrangement(detail.case_no, recalculateDates);
+        else window.location.hash = `#order-workbench-v2?case=${encodeURIComponent(detail.case_no)}&work=service&from=clients${recalculateDates ? '&recalculate=1' : ''}`;
+      }} />}
     </Drawer>
   </div>;
 };

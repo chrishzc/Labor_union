@@ -3,7 +3,7 @@ import { ordersQueryClient } from '../api/orders/order_query_client';
 import type { OrderTerms, OrderCalendarDetail } from '../api/orders/order_query_schemas';
 import { ordersMutationClient } from '../api/orders/order_mutation_client';
 import type { ServiceDateConfirmationQueryView } from '../api/orders/order_mutation_schemas';
-import { candidateContactPoolClient, type CandidateWeeklyServicePreview } from '../api/scheduling/candidate_contact_pool_client';
+import { candidateContactPoolClient, type CandidateWeeklyServicePreview, type CaseWeeklyServicePreview } from '../api/scheduling/candidate_contact_pool_client';
 import { schedulePrecisionClient } from '../api/scheduling/schedule_precision_client';
 import { applyServiceDatesFlow, previewServiceDatesFlow, selectServiceDates, updateServiceDatesReason, retryServiceDatesApplyFlow, retryServiceDatesObservationFlow } from '../adapters/orders/order_mutation_adapter';
 import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_store';
@@ -14,9 +14,11 @@ const sameDates = (a: string[], b: string[]) => a.length === b.length && a.every
 const message = (error: unknown) => error instanceof Error ? error.message : '預計日期操作失敗，請重新讀取。';
 
 /** Only dates enter the existing Orders writer; weekday choices stay in this view. */
-export function CandidatePlannedServiceDates({ caseNo, candidateId, startDate, onPreview }: {
-  caseNo: string; candidateId: number; startDate: string;
-  onPreview: (preview: CandidateWeeklyServicePreview | null) => void;
+export function CandidatePlannedServiceDates({ caseNo, candidateId, startDate, onPreview, onSharedPreview, onEditStateChange }: {
+  caseNo: string; candidateId?: number; startDate: string;
+  onPreview?: (preview: CandidateWeeklyServicePreview | null) => void;
+  onSharedPreview?: (preview: CaseWeeklyServicePreview | null) => void;
+  onEditStateChange?: (state: { dirty: boolean; busy: boolean }) => void;
 }) {
   const [facts, setFacts] = useState<{ terms: OrderTerms; mode: OrderCalendarDetail; dates: ServiceDateConfirmationQueryView } | null>(null);
   const [weekdays, setWeekdays] = useState<number[] | null>(null);
@@ -33,35 +35,45 @@ export function CandidatePlannedServiceDates({ caseNo, candidateId, startDate, o
   const draft = orderMutationFlowStore.getServiceDatesDraft(caseNo);
   const unresolved = draft !== undefined && PENDING.has(draft.status);
   const formal = (facts?.terms.assignments?.length ?? 0) > 0 || (facts?.terms.scheduling_generation ?? 0) > 0;
+  const unsaved = facts !== null && dates.length > 0 && !sameDates(dates, facts.dates.current_dates);
+  useEffect(() => { onEditStateChange?.({ dirty: unsaved, busy: busy !== null || unresolved }); }, [unsaved, busy, unresolved, onEditStateChange]);
+  useEffect(() => () => onEditStateChange?.({ dirty: false, busy: false }), [onEditStateChange]);
+  const emitPreview = (preview: CandidateWeeklyServicePreview | CaseWeeklyServicePreview | null) => {
+    if (candidateId === undefined) onSharedPreview?.(preview);
+    else onPreview?.(preview as CandidateWeeklyServicePreview | null);
+  };
+  const loadWeekly = (options?: { signal?: AbortSignal; serviceDates?: string[] }) => candidateId === undefined
+    ? candidateContactPoolClient.previewCaseWeeklyService(caseNo, options)
+    : candidateContactPoolClient.previewWeeklyService(caseNo, candidateId, options);
 
   useEffect(() => {
     currentIdentity.current = identity;
     const controller = new AbortController();
     sequence.current += 1;
-    setFacts(null); setWeekdays(null); setDates([]); setError(null); setSuccess(null); setBusy('load'); onPreview(null);
+    setFacts(null); setWeekdays(null); setDates([]); setError(null); setSuccess(null); setBusy('load'); emitPreview(null);
     const unsubscribe = orderMutationFlowStore.subscribe(() => refreshRecovery(value => value + 1));
     void Promise.all([
       ordersQueryClient.getOrderTerms(caseNo, { signal: controller.signal }),
       ordersQueryClient.getOrderCalendarDetail(caseNo, { signal: controller.signal }),
       ordersMutationClient.getServiceDates(caseNo, { signal: controller.signal }),
-      candidateContactPoolClient.previewWeeklyService(caseNo, candidateId, { signal: controller.signal }),
+      loadWeekly({ signal: controller.signal }),
     ]).then(([terms, mode, saved, preview]) => {
       if (controller.signal.aborted) return;
       if ([terms.case_no, mode.case_no, saved.case_no].some(value => value !== caseNo)
         || terms.order_version !== saved.order_version || terms.scheduling_version !== saved.scheduling_version) {
         throw new Error('案件資料版本不同，請重新開啟每週服務時間說明。');
       }
-      setFacts({ terms, mode, dates: saved }); setDates(saved.current_dates); onPreview(preview);
+      setFacts({ terms, mode, dates: saved }); setDates(saved.current_dates); emitPreview(preview);
     }).catch(reason => { if (!controller.signal.aborted) setError(message(reason)); })
       .finally(() => { if (!controller.signal.aborted) setBusy(null); });
     return () => { controller.abort(); currentIdentity.current = ''; sequence.current += 1; unsubscribe(); };
-  }, [caseNo, candidateId, onPreview, identity]);
+  }, [caseNo, candidateId, onPreview, onSharedPreview, identity]);
 
   const recalculate = async (next: number[]) => {
     if (!facts || saving.current || unresolved || formal) return;
     const request = ++sequence.current;
     const active = () => currentIdentity.current === identity && sequence.current === request;
-    setWeekdays(next); setDates([]); setError(null); setSuccess(null); onPreview(null);
+    setWeekdays(next); setDates([]); setError(null); setSuccess(null); emitPreview(null);
     if (next.length === 7) { setBusy(null); setError('請至少保留一天可服務的星期。'); return; }
     setBusy('calculate');
     try {
@@ -78,9 +90,9 @@ export function CandidatePlannedServiceDates({ caseNo, candidateId, startDate, o
         || proposed.some(value => !facts.dates.selectable_dates.includes(value))) {
         throw new Error('試算日期與案件天數或可選範圍不同，尚未保存。');
       }
-      const preview = await candidateContactPoolClient.previewWeeklyService(caseNo, candidateId, { serviceDates: proposed });
+      const preview = await loadWeekly({ serviceDates: proposed });
       if (!active()) return;
-      setDates(proposed); onPreview(preview);
+      setDates(proposed); emitPreview(preview);
     } catch (reason) { if (active()) setError(message(reason)); }
     finally { if (active()) setBusy(null); }
   };
@@ -116,8 +128,8 @@ export function CandidatePlannedServiceDates({ caseNo, candidateId, startDate, o
       if (currentIdentity.current !== identity) return;
       setFacts({ ...facts, dates: saved }); setDates(saved.current_dates);
       setSuccess('預計日期已保存，後續寄送將使用這份日期。');
-      const preview = await candidateContactPoolClient.previewWeeklyService(caseNo, candidateId);
-      if (currentIdentity.current === identity) onPreview(preview);
+      const preview = await loadWeekly();
+      if (currentIdentity.current === identity) emitPreview(preview);
     } catch (reason) { if (currentIdentity.current === identity) setError(message(reason)); }
     finally { saving.current = false; if (currentIdentity.current === identity) setBusy(null); }
   };

@@ -216,7 +216,7 @@ export const ServiceBeforeReplacementPreviewSchema = BaseFactsSchema.extend({
   created_roots: z.array(ReplacementRootSchema),
   preview_fingerprint: FingerprintSchema,
   reason: z.string().min(1).max(500),
-  evidence: z.array(z.string().min(1)).min(1).max(20),
+  evidence: z.array(z.string().min(1)).max(20),
   projection_kind: ProjectionKindSchema,
 }).superRefine((value, context) => {
   addBaseFactsIssues(value, context);
@@ -342,7 +342,7 @@ export const ServiceBeforeReplacementApplySchema = z.strictObject({
 const PreviewRequestObjectSchema = z.strictObject({
   scenario: ServiceBeforeReplacementScenarioSchema,
   reason: z.string().min(1).max(500).refine((value) => value === value.trim()),
-  evidence: z.array(z.string().min(1)).min(1).max(20),
+  evidence: z.array(z.string().min(1)).max(20),
 });
 
 function addCanonicalEvidenceIssues(

@@ -18,6 +18,7 @@ import { OrderWorkbenchV2Drawer } from '../components/OrderWorkbenchV2Drawer';
 import { WorkbenchCaseStatistics } from '../components/WorkbenchCaseStatistics';
 import { loadCurrentHcmReviewsForCases, type HcmCurrentReview } from '../api/case_import/hcm_resubmission_client';
 import {
+  orderCoreStageProjectionClient,
   type OrderCoreStageProjectionQueryParams,
 } from '../api/orders/order_core_stage_projection_client';
 import type {
@@ -54,7 +55,7 @@ function coreQueryErrorMessage(error: unknown): string {
   return `${ORDER_CORE_STAGE_PROJECTION_UNAVAILABLE} 原因：${detail}`;
 }
 
-export const OrderWorkbenchV2Page: FC = () => {
+export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ homeNavigationRequest = 0 }) => {
   const [view, setView] = useState<OrderCoreStageWorkbenchViewModel | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -74,14 +75,40 @@ export const OrderWorkbenchV2Page: FC = () => {
     branchType: CoreStageBranchType;
   } | null>(null);
   const requestSequence = useRef(0);
+  const [requestedCase, setRequestedCase] = useState(() => new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('case') ?? '');
+  const [caseLinkError, setCaseLinkError] = useState<string | null>(null);
   const lastResolvedQuery = useRef<string | null>(null);
   const refreshProjection = useCallback(() => setProjectionRefreshKey((current) => current + 1), []);
   const closeDrawer = useCallback(() => {
     setSelectedDrawer(null);
+    setRequestedCase('');
+    setCaseLinkError(null);
+    if (new URLSearchParams(window.location.hash.split('?')[1] ?? '').has('case')) window.history.replaceState(null, '', '#order-workbench-v2');
     refreshProjection();
   }, [refreshProjection]);
+  const previousHomeRequest = useRef(homeNavigationRequest);
+  useEffect(() => {
+    if (previousHomeRequest.current === homeNavigationRequest) return;
+    previousHomeRequest.current = homeNavigationRequest;
+    if (selectedDrawer === null) closeDrawer();
+  }, [homeNavigationRequest, selectedDrawer, closeDrawer]);
 
   const normalizedSearch = search.trim().toLocaleLowerCase();
+
+  useEffect(() => {
+    if (!requestedCase) return;
+    const controller = new AbortController();
+    setCaseLinkError(null);
+    void orderCoreStageProjectionClient.getCoreStageTimelines({ lifecycle_scope: 'all', case_no_search: requestedCase, page_size: 20 }, { signal: controller.signal })
+      .then((page) => {
+        if (controller.signal.aborted) return;
+        const exact = page.items.filter((item) => item.case_no === requestedCase);
+        if (exact.length !== 1) throw new Error('找不到可唯一確認的案件，請重新查詢。');
+        setSelectedDrawer({ caseNo: exact[0]!.case_no, branchType: exact[0]!.branch_type });
+      })
+      .catch((error) => { if (!controller.signal.aborted) setCaseLinkError(error instanceof Error ? error.message : '案件讀取失敗。'); });
+    return () => controller.abort();
+  }, [requestedCase]);
 
   useEffect(() => {
     const requestId = requestSequence.current + 1;
@@ -198,6 +225,7 @@ export const OrderWorkbenchV2Page: FC = () => {
       <fieldset disabled={refreshing || error !== null} style={{ border: 0, padding: 0, margin: 0, minWidth: 0, width: '100%' }}>
         <OrderWorkbenchV2Drawer
           key={selectedDrawer.caseNo}
+          homeNavigationRequest={homeNavigationRequest}
           caseNo={selectedDrawer.caseNo}
           branchType={selectedDrawer.branchType}
           summary={summaryIndex.get(selectedDrawer.caseNo)}
@@ -211,6 +239,7 @@ export const OrderWorkbenchV2Page: FC = () => {
 
   return (
     <div className="order-v2-page">
+      {caseLinkError && <p role="alert">{caseLinkError}</p>}
       <header className="page-header-banner orders-page-header">
         <div>
           <h1 className="page-title">待辦看板</h1>
@@ -233,20 +262,13 @@ export const OrderWorkbenchV2Page: FC = () => {
         </div>
       </header>
 
-      <WorkbenchCaseStatistics refreshKey={projectionRefreshKey} />
+      <details className="order-v2-overview-details">
+        <summary>案件受理統計</summary>
+        <WorkbenchCaseStatistics refreshKey={projectionRefreshKey} />
+      </details>
 
-        <>
-        <label className="order-v2-stage-select">
-          作業階段
-          <select value={selectedStage ?? 'all'} onChange={(event) => selectStage(event.target.value === 'all' ? null : event.target.value as CoreStageCode)}>
-            <option value="all">全部進行中</option>
-            {CORE_STAGE_DEFINITIONS.map((definition) => (
-              <option key={definition.code} value={definition.code}>
-                {definition.ordinal}. {definition.shortLabel}（{view?.stageCounts[definition.code] ?? 0}）
-              </option>
-            ))}
-          </select>
-        </label>
+      <div className="order-v2-overview-details order-v2-stage-overview">
+        <h2>查看全部階段與件數</h2>
         <section className="pipeline-stepper-nav order-v2-stage-strip" aria-label="13 個核心訂單階段">
           <button type="button" className={`pipeline-step-pill ${selectedStage === null ? 'active' : ''}`}
             aria-pressed={selectedStage === null} onClick={() => selectStage(null)}>全部進行中</button>
@@ -259,7 +281,8 @@ export const OrderWorkbenchV2Page: FC = () => {
               <span className="pipeline-step-badge">{view?.stageCounts[definition.code] ?? 0}</span>
             </button>
           ))}
-        </section></>
+        </section>
+      </div>
 
       <section className="pipeline-stage-section order-v2-results" aria-label="案件工作清單">
       <div className="pipeline-stage-header">
@@ -357,7 +380,7 @@ export const OrderWorkbenchV2Page: FC = () => {
                     <div className="order-v2-notice warning">
                       <strong>進件欄位待修正</strong>
                       <span>{intakeReviews.get(item.id)!.fields.join('、')}</span>
-                      <small>可在案件補件區或客戶名冊修正資料；不需處理的欄位問題可至異常審核逐筆確認略過。</small>
+                      <small>可至客戶名冊修正資料；不需處理的欄位問題可至異常審核逐筆確認略過。</small>
                     </div>
                   )}
                   {intakeReviewsError && item.lifecycleStatus === '待補件' && (

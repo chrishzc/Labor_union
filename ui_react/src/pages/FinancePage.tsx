@@ -24,6 +24,7 @@ import { HistoricalStaffPayoutWorkbench } from '../components/HistoricalStaffPay
 import { ClientSubsidyReturnQueryPanel } from '../components/ClientSubsidyReturnQueryPanel';
 import { PaymentDestinationConfigurationPanel } from '../components/PaymentDestinationConfigurationPanel';
 import { CashRequirementsPanel } from '../components/CashRequirementsPanel';
+import { HistoricalCompletionPanel } from '../components/HistoricalCompletionPanel';
 
 type FinanceTab = 'client-receipts' | 'staff-payables' | 'accounts-payable' | 'cross-order' | 'finance-import' | 'payment-destination';
 type LoadState<T> = { kind: 'idle' | 'loading' } | { kind: 'ready'; data: T } | { kind: 'empty' } | { kind: 'error'; message: string } | { kind: 'unavailable'; message: string };
@@ -86,7 +87,7 @@ function financeErrorMessage(error: unknown, fallback: string): string {
 export const FinancePage: React.FC = () => {
   const [entry] = useState(() => {
     const params = new URLSearchParams(window.location.hash.split('?')[1] ?? '');
-    return { tab: params.get('tab'), caseNo: (params.get('case_no') ?? '').slice(0, 50) };
+    return { tab: params.get('tab'), caseNo: (params.get('case_no') ?? '').slice(0, 50), fromWorkbench: params.get('from') === 'workbench' };
   });
   const [activeTab, setActiveTab] = useState<FinanceTab>(entry.tab === 'staff-payables' || entry.tab === 'cross-order' || entry.tab === 'accounts-payable' ? entry.tab : 'client-receipts');
   const [cases, setCases] = useState<{ id: string; label: string; orderStatus: string }[]>([]);
@@ -384,6 +385,7 @@ export const FinancePage: React.FC = () => {
 
   return (
     <div data-surface-id="finance.page">
+      {entry.fromWorkbench && entry.caseNo && <a className="finance-case-return" href={`#order-workbench-v2?case=${encodeURIComponent(entry.caseNo)}`}>← 返回案件處理</a>}
       <header className="page-header-banner finance-page-header">
         <div>
           <h1 className="page-title">💰 財務查詢與對帳工作台</h1>
@@ -521,16 +523,13 @@ export const FinancePage: React.FC = () => {
                 {caseStaffPayables.kind === 'ready' && (
                   <div className="finance-table-container">
                     <table className="finance-table">
-                      <thead><tr><th>月嫂</th><th>應付</th><th>待付</th><th>案件既定應付日</th><th>應付項目／試算日期</th><th>來源</th><th>月份查核</th></tr></thead>
+                      <thead><tr><th>月嫂</th><th>應付</th><th>待付</th><th>應付日期</th></tr></thead>
                       <tbody>{caseStaffPayables.data.map((item, index) => {
-                        const source = item.source === 'formal_obligation' ? '已建立的應付項目' : item.source === 'historical_projection' ? '歷史資料試算' : '案件資料';
                         return <tr key={item.obligation_identity ?? `${item.case_no}:${item.staff_id ?? 'unknown'}:${index}`}>
                           <td>{item.recipient_name ?? (item.staff_id === null ? '月嫂尚未確認' : `Staff #${item.staff_id}`)}</td>
                           <td>{item.amount_due_ntd === null ? '未確認' : `NT$ ${item.amount_due_ntd.toLocaleString()}`}</td>
                           <td>{item.balance_ntd === null ? '未確認' : `NT$ ${item.balance_ntd.toLocaleString()}`}</td>
-                          <td>{item.order_due_date ?? '未確認'}</td>
-                          <td>{item.effective_due_date ?? '未確認'}</td><td>{source}</td>
-                          <td>{item.reason}</td>
+                          <td>{item.effective_due_date ?? item.order_due_date ?? '未確認'}</td>
                         </tr>;
                       })}</tbody>
                     </table>
@@ -562,7 +561,10 @@ export const FinancePage: React.FC = () => {
                 </div>
               </div>
               {cases.find((item) => item.id === selectedCase)?.orderStatus.startsWith('歷史訂單－') ? (
-                <HistoricalClientPaymentWorkbench caseNo={selectedCase} />
+                <>
+                  <HistoricalClientPaymentWorkbench caseNo={selectedCase} />
+                  {cases.find((item) => item.id === selectedCase)?.orderStatus === '歷史訂單－服務完成' && <div className="finance-detail-block"><h3>歷史案件帳務完成</h3><HistoricalCompletionPanel key={`${selectedCase}:${reload}`} caseNo={selectedCase} onCompleted={() => setReload(value => value + 1)} /></div>}
+                </>
               ) : (
                 <div className="finance-state">此為正常案件；歷史人工收款確認只會在歷史案件顯示。</div>
               )}

@@ -152,7 +152,7 @@ class ClientFinanceAssignmentImpactPort(Protocol):
 
 
 class PayrollAssignmentImpactPort(Protocol):
-    def preview_assignment_plan(self, facts: AssignmentPlanWorkflowFacts, scheduling: SchedulingGenerationCandidate) -> VersionedImpactCandidate: ...
+    def preview_assignment_plan(self, facts: AssignmentPlanWorkflowFacts, scheduling: SchedulingGenerationCandidate, client_finance: VersionedImpactCandidate) -> VersionedImpactCandidate: ...
     def persist_assignment_plan(self, candidate: VersionedImpactCandidate, context: AssignmentPlanPersistenceContext, scheduling_result: object) -> None: ...
 
 
@@ -181,7 +181,10 @@ class AssignmentPlanWorkflow:
 
     def preview(self, request: AssignmentPlanPreviewRequest) -> AssignmentPlanPreview:
         _validate_case_number(request.case_no)
-        facts = self._repository.load_for_preview(request.case_no, request.intent)
+        try:
+            facts = self._repository.load_for_preview(request.case_no, request.intent)
+        except CommitmentExecutionMismatch as exception:
+            raise _workflow_error(request.correlation_id, ErrorCategory.DOMAIN_BLOCKED, str(exception), "The commitment does not exactly match the execution candidate.") from exception
         return self._build_preview(facts, request.intent, request.correlation_id)
 
     def apply(self, request: AssignmentPlanApplyRequest) -> AssignmentPlanReceipt:
@@ -241,7 +244,7 @@ class AssignmentPlanWorkflow:
             raise _domain_workflow_error(correlation_id, exception) from exception
         try:
             client_finance = self._client_finance_port.preview_assignment_plan(facts, candidate.scheduling)
-            payroll = self._payroll_port.preview_assignment_plan(facts, candidate.scheduling)
+            payroll = self._payroll_port.preview_assignment_plan(facts, candidate.scheduling, client_finance)
             orders = self._orders_port.preview_assignment_plan(facts, candidate.scheduling, client_finance)
         except ValueError as exception:
             raise _impact_workflow_error(correlation_id, exception) from exception

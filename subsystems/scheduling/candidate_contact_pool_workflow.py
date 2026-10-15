@@ -18,6 +18,7 @@ from domains.line.delivery import (
     LineRecipientType,
 )
 from domains.line.identities import LineUserId
+from infrastructure.mysql.replacement_matching_query import candidate_contact_open
 from infrastructure.mysql.line_delivery_task_repository import MySqlLineDeliveryTaskRepository
 from infrastructure.mysql.order_information_repository import MySqlOrderInformationRepository
 from infrastructure.mysql.matching_notification_repository import MySqlMatchingNotificationRepository
@@ -77,6 +78,7 @@ class CandidateInformationDelivery:
 class CandidateInformationState:
     information_1: CandidateInformationDelivery | None = None
     information_2: CandidateInformationDelivery | None = None
+    information_3: CandidateInformationDelivery | None = None
 
     def __post_init__(self) -> None:
         if self.information_1 is not None and not isinstance(
@@ -87,6 +89,8 @@ class CandidateInformationState:
             self.information_2, CandidateInformationDelivery
         ):
             raise TypeError("information_2_invalid")
+        if self.information_3 is not None and not isinstance(self.information_3, CandidateInformationDelivery):
+            raise TypeError("information_3_invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +113,7 @@ class CandidateContactEventState:
             "candidates_added",
             "info_1_sent",
             "info_2_sent",
+            "info_3_sent",
             "willingness_changed",
         }:
             raise ValueError("event_type_invalid")
@@ -307,8 +312,9 @@ def _add_candidates_in_transaction(
     event_key: str,
 ) -> dict[str, Any]:
     try:
-        cursor.execute("SELECT case_no FROM orders WHERE case_no=%s AND status='洽談中' FOR UPDATE", (case_no,))
-        if not isinstance(cursor.fetchone(), Mapping):
+        cursor.execute("SELECT case_no,status FROM orders WHERE case_no=%s FOR UPDATE", (case_no,))
+        order = cursor.fetchone()
+        if not isinstance(order, Mapping) or not candidate_contact_open(cursor, case_no, order.get("status")):
             raise ValueError("candidate_contact_order_not_negotiating")
         cursor.execute("SELECT id FROM caregiver_candidate_contact_pools WHERE case_no=%s FOR UPDATE", (case_no,))
         pool = cursor.fetchone()
@@ -393,7 +399,14 @@ def query_pool(
         pool_id = _positive_int(pool["id"], "pool_id")
         cursor.execute("SELECT e.id, e.staff_id, e.service_start_date, e.service_end_date, e.status, e.created_at, s.name AS staff_name FROM caregiver_candidate_contact_entries e JOIN staff s ON s.id=e.staff_id WHERE e.pool_id=%s AND e.active_marker=1 ORDER BY e.id" + lock_clause, (pool_id,))
         entries = [dict(row) for row in cursor.fetchall() or []]
-        cursor.execute("SELECT id, candidate_id, event_type, event_key, actor, payload, occurred_at FROM caregiver_candidate_contact_events WHERE pool_id=%s ORDER BY occurred_at,id" + lock_clause, (pool_id,))
+        cursor.execute(
+            "SELECT event.id,event.candidate_id,event.event_type,event.event_key,event.actor,event.payload,event.occurred_at,"
+            "task.processing_status AS current_delivery_status,task.sent_at_utc AS current_sent_at_utc "
+            "FROM caregiver_candidate_contact_events event LEFT JOIN line_delivery_tasks task "
+            "ON task.id=CAST(JSON_UNQUOTE(JSON_EXTRACT(event.payload,'$.line_task_id')) AS UNSIGNED) "
+            "AND task.source_aggregate_identity=event.event_key "
+            "AND task.source_aggregate_type IN ('candidate_matching_willingness_card','candidate_weekly_service_information') "
+            "WHERE event.pool_id=%s ORDER BY event.occurred_at,event.id" + lock_clause, (pool_id,))
         events = [dict(row) for row in cursor.fetchall() or []]
         typed_events: list[CandidateContactEventState] = []
         for event in events:
@@ -532,7 +545,7 @@ def preview_manual_information_confirmation(
         cursor = connection.cursor()
         cursor.execute("SELECT status FROM orders WHERE case_no=%s", (case_no,))
         order = cursor.fetchone()
-        if not isinstance(order, Mapping) or order.get("status") != "洽談中":
+        if not isinstance(order, Mapping) or not candidate_contact_open(cursor, case_no, order.get("status")):
             raise ValueError("candidate_contact_order_not_negotiating")
         state = query_pool(case_no, connection=connection)
         return _manual_information_preview(
@@ -637,7 +650,7 @@ def _apply_manual_information_confirmation_in_transaction(
         preview = _manual_information_preview(
             state, candidate_id, info_type, confirmation_method, reason, actor
         )
-        if not isinstance(order, Mapping) or order.get("status") != "洽談中":
+        if not isinstance(order, Mapping) or not candidate_contact_open(cursor, case_no, order.get("status")):
             raise ValueError("candidate_contact_order_not_negotiating")
         if preview["expected_version"] != expected_version:
             raise ValueError("candidate_contact_pool_version_stale")
@@ -676,9 +689,40 @@ def _apply_manual_information_confirmation_in_transaction(
         pass
 
 
+def preview_case_weekly_service(case_no: str, service_dates: tuple[date, ...] | None = None):
+    case_no = _required_text(case_no, "case_no", 50)
+    connection = get_connection()
+    try:
+        return MySqlMatchingNotificationRepository(connection).case_weekly_service_preview(case_no, service_dates)
+    finally:
+        _close(connection)
+
+
+def preview_case_information(case_no: str, info_type: int):
+    case_no = _required_text(case_no, "case_no", 50)
+    if info_type not in (1, 2, 3):
+        raise ValueError("info_type_invalid")
+    connection = get_connection()
+    try:
+        if info_type == 3:
+            from subsystems.orders.order_information import build_weekly_information
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT start_date FROM orders WHERE case_no=%s", (case_no,))
+                row = cursor.fetchone()
+            if not isinstance(row, Mapping):
+                raise ValueError("order_information_target_not_found")
+            weekly = MySqlMatchingNotificationRepository(connection).case_weekly_service_preview(case_no)
+            return build_weekly_information(case_no, row["start_date"], weekly)
+        return MySqlOrderInformationRepository(connection).preview_case_information(case_no, info_type)
+    finally:
+        _close(connection)
+
+
 def preview_information(case_no: str, candidate_id: int, info_type: int):
     case_no = _required_text(case_no, "case_no", 50)
     candidate_id = _positive_int(candidate_id, "candidate_id")
+    if info_type not in (1, 2, 3):
+        raise ValueError("info_type_invalid")
     connection = get_connection()
     try:
         return MySqlOrderInformationRepository(connection).preview_candidate_information(case_no, candidate_id, info_type)
@@ -798,7 +842,7 @@ def send_information(case_no: Any, candidate_id: Any, info_type: Any, actor: Any
     candidate_id = _positive_int(candidate_id, "candidate_id")
     actor = _required_text(actor, "actor", 100)
     event_key = _required_text(event_key, "event_key", 100)
-    if info_type not in {1, 2}:
+    if info_type not in {1, 2, 3}:
         raise ValueError("info_type_invalid")
     return _run_in_application_uow(
         lambda connection, cursor: _send_information_in_transaction(
@@ -864,7 +908,7 @@ def _send_information_in_transaction(
                        "AND e.status='active' FOR UPDATE", (case_no, candidate_id))
         entry = cursor.fetchone()
         if not isinstance(entry, Mapping): raise ValueError("candidate_contact_not_found")
-        if entry.get("order_status") != "洽談中":
+        if not candidate_contact_open(cursor, case_no, entry.get("order_status")):
             raise ValueError("candidate_contact_order_not_negotiating")
         recipient = entry.get("line_user_id")
         if not isinstance(recipient, str) or not recipient.strip(): raise ValueError("caregiver_has_no_line_delivery_identity")
@@ -960,7 +1004,7 @@ def _send_information_in_transaction(
             info_type,
             tuple((section.title, section.rows) for section in preview.line_sections),
             hashlib.sha256(event_key.encode("utf-8")).hexdigest(),
-            _candidate_contact_liff_url(
+            None if info_type == 3 else _candidate_contact_liff_url(
                 hashlib.sha256(event_key.encode("utf-8")).hexdigest()
             ),
         )
@@ -972,14 +1016,15 @@ def _send_information_in_transaction(
                 datetime.now(timezone.utc),
                 IdempotencyKey(event_key),
                 CorrelationId(f"candidate-contact:{event_key}"),
-                "candidate_matching_willingness_card",
+                "candidate_weekly_service_information" if info_type == 3 else "candidate_matching_willingness_card",
                 event_key,
             )
         )
         task_id = delivery.task_id.value
         cursor.execute("INSERT INTO caregiver_candidate_contact_events (pool_id,candidate_id,event_type,event_key,actor,payload) VALUES (%s,%s,%s,%s,%s,%s)", (entry["pool_id"], candidate_id, f"info_{info_type}_sent", event_key, actor, json.dumps({"line_task_id": task_id, "delivery_status": "queued", "preview_fingerprint": preview_fingerprint}, sort_keys=True)))
         event_id = _positive_int(cursor.lastrowid, "event_id")
-        _cancel_pending_manual_followup(cursor, int(entry["pool_id"]))
+        if info_type != 3:
+            _cancel_pending_manual_followup(cursor, int(entry["pool_id"]))
         return {"status": "queued", "event_id": event_id, "line_task_id": task_id}
     finally:
         pass
@@ -1044,7 +1089,7 @@ def _record_willingness_in_transaction(
         )
         row = cursor.fetchone()
         if not isinstance(row, Mapping): raise ValueError("candidate_contact_not_found")
-        if row.get("order_status") != "洽談中":
+        if not candidate_contact_open(cursor, case_no, row.get("order_status")):
             raise ValueError("candidate_contact_order_not_negotiating")
         payload = {"willingness": willingness, "reason": reason}
         cursor.execute("SELECT id,pool_id,candidate_id,event_type,actor,payload FROM caregiver_candidate_contact_events WHERE event_key=%s FOR UPDATE", (event_key,))
@@ -1101,8 +1146,8 @@ def _cancel_pending_manual_followup(cursor: Any, pool_id: int) -> None:
 def _candidate_projection(events: list[dict[str, Any]]):
     willingness, reason = "pending", None
     latest_willingness_event_id: int | None = None
-    information: dict[str, dict[str, Any] | None] = {"1": None, "2": None}
-    relevant_types = {"willingness_changed", "info_1_sent", "info_2_sent"}
+    information: dict[str, dict[str, Any] | None] = {"1": None, "2": None, "3": None}
+    relevant_types = {"willingness_changed", "info_1_sent", "info_2_sent", "info_3_sent"}
     for event in events:
         event_type = event["event_type"]
         if event_type not in relevant_types:
@@ -1115,9 +1160,14 @@ def _candidate_projection(events: list[dict[str, Any]]):
                     event["id"], "latest_willingness_event_id"
                 )
             continue
+        status = payload["delivery_status"]
+        if event.get("current_delivery_status") is not None:
+            status = {"pending": "queued", "processing": "pending", "sent": "sent",
+                      "retryable_failed": "retryable_failed", "failed": "failed", "cancelled": "cancelled"}[event["current_delivery_status"]]
+        occurred_at = event.get("current_sent_at_utc") if status == "sent" else None
         info_dict: dict[str, Any] = {
-            "status": payload["delivery_status"],
-            "sent_at": event["occurred_at"].isoformat(),
+            "status": status,
+            "sent_at": (occurred_at or event["occurred_at"]).isoformat(),
         }
         if "id" in event and event["id"] is not None:
             info_dict["event_id"] = event["id"]
@@ -1134,6 +1184,7 @@ def _typed_candidate_projection(
     typed_information: dict[str, CandidateInformationDelivery | None] = {
         "1": None,
         "2": None,
+        "3": None,
     }
     for key, value in information.items():
         if value is None:
@@ -1159,6 +1210,7 @@ def _typed_candidate_projection(
         CandidateInformationState(
             information_1=typed_information["1"],
             information_2=typed_information["2"],
+            information_3=typed_information["3"],
         ),
     )
 

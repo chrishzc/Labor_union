@@ -24,6 +24,8 @@ from subsystems.orders.order_information import (
     projection_fingerprint,
     build_candidate_information,
     build_order_information_message,
+    build_case_information,
+    bind_weekly_information,
 )
 
 
@@ -89,6 +91,18 @@ class MySqlOrderInformationRepository:
             field_issues=field_issues,
         )
 
+    def preview_case_information(self, case_no: str, info_type: int, *, for_update: bool = False):
+        with self._connection.cursor() as cursor:
+            cursor.execute(_CASE_SQL + (" FOR UPDATE" if for_update else ""), (case_no,))
+            case = cursor.fetchone()
+            if not isinstance(case, Mapping):
+                raise ValueError("order_information_target_not_found")
+            case = _apply_explicit_rate_correction(cursor, case, case_no)
+        facts, issues = _facts(case, {"assigned_start_date": case.get("planned_start_date"),
+                                   "assigned_end_date": case.get("planned_end_date")})
+        _merge_contract_payment_facts(self._connection, case_no, facts, use_current_order_payments=True)
+        return build_case_information(case_no, info_type, facts, issues)
+
     def preview_candidate_information(
         self,
         case_no: str,
@@ -126,6 +140,12 @@ class MySqlOrderInformationRepository:
         }
         facts, issues = _facts(case, candidate)
         _merge_contract_payment_facts(self._connection, case_no, facts, use_current_order_payments=True)
+        if info_type == 3:
+            from infrastructure.mysql.matching_notification_repository import MySqlMatchingNotificationRepository
+            from subsystems.orders.order_information import build_weekly_information
+            weekly = MySqlMatchingNotificationRepository(self._connection).case_weekly_service_preview(case_no)
+            common = build_weekly_information(case_no, start_date, weekly)
+            return bind_weekly_information(common, candidate_id, str(candidate["staff_name"]), candidate.get("line_user_id"))
         return build_candidate_information(case_no, candidate_id, info_type, facts, issues, candidate.get("line_user_id"))
 
     def preview_matching_plan_information(

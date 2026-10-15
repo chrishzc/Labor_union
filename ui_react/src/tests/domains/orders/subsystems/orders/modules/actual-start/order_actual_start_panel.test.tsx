@@ -35,8 +35,8 @@ it('saves an actual start date before formal assignment without downstream roots
   const onOpenServiceDates = vi.fn();
   render(<OrderActualStartPanel caseNo="MOCK-1" onOpenServiceDates={onOpenServiceDates} />);
   fireEvent.click(screen.getByRole('button', { name: '讀取實際開始日' }));
-  fireEvent.change(await screen.findByLabelText('Beta 實際開始日期'), { target: { value: '2026-09-15' } });
-  fireEvent.click(await screen.findByRole('button', { name: '確認實際開始日' }));
+  fireEvent.change(await screen.findByLabelText('更正實際開始日期'), { target: { value: '2026-09-15' } });
+  fireEvent.click(await screen.findByRole('button', { name: '儲存實際開始日' }));
   expect(await screen.findByText('實際開始日已完成正式回讀：2026-09-15')).toBeInTheDocument();
   expect(apply).toHaveBeenCalledWith('MOCK-1', {
     operation: 'date_only', new_actual_start_date: '2026-09-15',
@@ -68,8 +68,8 @@ it('recovers a date-only unknown outcome by owner readback without a permanent r
   const apply = vi.spyOn(orderActualStartClient, 'apply').mockRejectedValue(new Error('network lost after save'));
   render(<OrderActualStartPanel caseNo="MOCK-2" />);
   fireEvent.click(screen.getByRole('button', { name: '讀取實際開始日' }));
-  fireEvent.change(await screen.findByLabelText('Beta 實際開始日期'), { target: { value: '2026-09-15' } });
-  fireEvent.click(screen.getByRole('button', { name: '確認實際開始日' }));
+  fireEvent.change(await screen.findByLabelText('更正實際開始日期'), { target: { value: '2026-09-15' } });
+  fireEvent.click(screen.getByRole('button', { name: '儲存實際開始日' }));
   fireEvent.click(await screen.findByRole('button', { name: '以原操作重新確認實際開始日' }));
 
   expect(await screen.findByText('實際開始日已完成正式回讀：2026-09-15')).toBeInTheDocument();

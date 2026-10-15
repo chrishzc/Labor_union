@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HistoricalOrderAdoptionEvidenceSchema } from '../../../../../../../api/orders/historical_adoption_evidence_schemas';
 import { CORE_STAGE_CODES, SUBSTATUS_BY_STAGE_STATUS, type CoreStageCode } from '../../../../../../../api/orders/order_core_stage_projection_schemas';
 import { OrderWorkbenchV2Drawer } from '../../../../../../../components/OrderWorkbenchV2Drawer';
+import { ApiHttpError } from '../../../../../../../api/shared/typed_errors';
 
 const mocks = vi.hoisted(() => ({
   core: vi.fn(),
@@ -19,6 +20,10 @@ const mocks = vi.hoisted(() => ({
   restartApply: vi.fn(),
   serviceDatesRender: vi.fn(),
   actualStartRender: vi.fn(),
+  matchingPlan: vi.fn(),
+  matchingContact: vi.fn(),
+  matchingPreview: vi.fn(),
+  candidatePool: vi.fn(),
 }));
 
 vi.mock('../../../../../../../api/orders/order_core_stage_projection_client', () => ({
@@ -35,6 +40,15 @@ vi.mock('../../../../../../../api/orders/order_query_client', () => ({
     getOrderTerms: mocks.terms,
     getAssignmentPlan: mocks.assignment,
   },
+}));
+vi.mock('../../../../../../../api/scheduling/waiting_deposit_lock_client', () => ({
+  waitingDepositLockClient: { queryPlan: mocks.matchingPlan },
+}));
+vi.mock('../../../../../../../api/scheduling/matching_plan_communication_client', () => ({
+  matchingPlanCommunicationClient: { queryContactState: mocks.matchingContact, previewCustomerConfirmation: mocks.matchingPreview },
+}));
+vi.mock('../../../../../../../api/scheduling/candidate_contact_pool_client', () => ({
+  candidateContactPoolClient: { query: mocks.candidatePool },
 }));
 vi.mock('../../../../../../../api/orders/historical_adoption_evidence_client', () => ({
   historicalAdoptionEvidenceClient: { queryByCase: mocks.evidence },
@@ -174,6 +188,7 @@ describe('historical Drawer immutable evidence boundary', () => {
 
   beforeEach(() => {
     Object.values(mocks).forEach((mock) => mock.mockReset());
+    mocks.matchingPlan.mockRejectedValue(new ApiHttpError(404, 'not_found', '尚無有效媒合方案'));
     mocks.core.mockResolvedValue({
       items: [timeline()],
       stage_counts: Object.fromEntries(CORE_STAGE_CODES.map((code) => [code, 0])),
@@ -261,9 +276,15 @@ describe('historical Drawer immutable evidence boundary', () => {
     const ownerSection = ownerHeading.closest('section');
     if (!(ownerSection instanceof HTMLElement)) throw new Error('找不到目前正式 owner progression 區');
     expect(within(ownerSection).getByText(/服務日期確認/)).toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole('button', { name: '訂單與服務資料' }));
+    const serviceEntry = within(dialog).getByRole('button', { name: /確認服務日期與排班/ });
+    await waitFor(() => expect(serviceEntry).toBeEnabled());
+    fireEvent.click(serviceEntry);
+    const caseHeader = within(dialog).getByRole('heading', { name: '案件處理', level: 1 }).closest('header')!;
+    expect(within(caseHeader).getByText('尚未正式指派')).toBeInTheDocument();
     const evidenceRegion = within(dialog).getByRole('heading', { name: '歷史服務資料' }).closest('section')!;
-    expect(within(dialog).getByText('尚未正式安排月嫂。')).toBeInTheDocument();
+    expect(within(caseHeader).queryByText(/陳月嫂/)).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole('region', { name: '案件 CASE-FUTURE 正式指派與排班回讀' })).not.toBeInTheDocument();
+    expect(mocks.serviceDatesRender).not.toHaveBeenCalled();
     expect(within(dialog).getAllByText('尚未確認').length).toBeGreaterThan(0);
 
     expect(within(evidenceRegion).getByText(/2026-09-03 → 2026-09-22/)).toBeInTheDocument();
@@ -314,12 +335,13 @@ describe('historical Drawer immutable evidence boundary', () => {
     });
     render(<OrderWorkbenchV2Drawer caseNo="CASE-FUTURE" branchType="historical" onClose={vi.fn()} />);
     const restart = await screen.findByRole('button', { name: '前往重啟正常流程' });
-    fireEvent.click(screen.getByRole('button', { name: '案件異動' }));
-    const intake = screen.getByRole('region', { name: '訂單缺件' });
-    expect(await within(intake).findByText('目前不可完成補件')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /確認客戶與服務需求/ }));
+    const intake = screen.getByRole('region', { name: '進件缺件摘要' });
+    expect(await within(intake).findByText('order_lifecycle_not_intake')).toBeInTheDocument();
+    expect(within(intake).getByRole('link', { name: '前往補齊案件資料 →' })).toHaveAttribute('href', '#clients?case=CASE-FUTURE&field=intake&from=workbench');
     expect(within(intake).queryByRole('button', { name: '確認完成進件補齊' })).not.toBeInTheDocument();
     expect(screen.getByRole('region', { name: '案件 CASE-FUTURE' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '案件處理' }));
+    fireEvent.click(screen.getByRole('button', { name: /確認服務日期與排班/ }));
     fireEvent.click(restart);
     await screen.findByText(/已重啟正常流程並正式回讀；已接續到服務日期精算/);
     expect(mocks.restartQuery).toHaveBeenCalledWith('CASE-FUTURE');
@@ -337,11 +359,11 @@ describe('historical Drawer immutable evidence boundary', () => {
     expect(mocks.serviceDatesRender).toHaveBeenLastCalledWith(
       expect.objectContaining({ calculationRevision: 1 }),
     );
-    fireEvent.click(screen.getByRole('button', { name: '案件異動' }));
+    fireEvent.click(screen.getByRole('button', { name: /確認服務日期與排班/ }));
     fireEvent.click(screen.getByRole('button', { name: '確認／更正實際開始日' }));
     fireEvent.click(await screen.findByRole('button', { name: '模擬尚未建立排班' }));
     expect(await screen.findByLabelText('服務日期精算工作區')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '案件異動' }));
+    fireEvent.click(screen.getByRole('button', { name: /確認服務日期與排班/ }));
     fireEvent.click(await screen.findByRole('button', { name: '模擬實際開始日正式回讀成功' }));
     expect(await screen.findByLabelText('服務日期精算工作區')).toBeInTheDocument();
     expect(mocks.serviceDatesRender).toHaveBeenLastCalledWith(
@@ -416,7 +438,7 @@ describe('historical Drawer immutable evidence boundary', () => {
     mocks.detail.mockResolvedValue(orderDetail('歷史訂單－服務完成'));
     mocks.accounting.mockRejectedValue(new Error(blocker));
     render(<OrderWorkbenchV2Drawer caseNo="CASE-FUTURE" branchType="historical" onClose={vi.fn()} />);
-    fireEvent.click(screen.getByRole('button', { name: '訂單與服務資料' }));
+    fireEvent.click(screen.getByRole('button', { name: /確認服務日期與排班/ }));
     const evidence = screen.getByRole('heading', { name: '歷史服務資料' }).closest('section')!;
     expect(await within(evidence).findByText(`歷史帳務資料暫時無法取得：${blocker}`)).toBeInTheDocument();
     expect(screen.getByRole('region', { name: '案件 CASE-FUTURE' })).toBeInTheDocument();
@@ -425,6 +447,31 @@ describe('historical Drawer immutable evidence boundary', () => {
   });
 
   it('mounts the existing replacement workflow only after the explicit business entry is selected', async () => {
+    mocks.matchingPlan.mockResolvedValue({
+      planId: 51, status: 'proposed', activeLockId: null, planVersion: 1,
+      segments: [{ segmentId: 71, sequence: 1, staffId: 42, assignedStartDate: '2026-09-03', assignedEndDate: '2026-09-22' }],
+    });
+    mocks.matchingContact.mockResolvedValue({
+      plan: { id: 51, case_no: 'CASE-FUTURE', status: 'proposed', communication_version: 4, is_active: 1 },
+      segments: [{ segment_id: 71, staff_id: 42, staff_name: '陳月嫂', willingness: 'willing' }],
+      all_willing: true, customer_decision: 'accepted', customer_profiles_status: null, customer_profiles_manual_confirmation: null,
+    });
+    mocks.matchingPreview.mockResolvedValue({
+      case_no: 'CASE-FUTURE', plan_id: 51, expected_version: 4,
+      order_information_1_ready: true, order_information_2_ready: true, weekly_service_ready: true,
+      weekly_service_row_count: 1,
+      order_information_1: [{ segment_id: 71, staff_id: 42, staff_name: '陳月嫂', text: '訂單資訊－1' }],
+      order_information_2: [{ segment_id: 71, staff_id: 42, staff_name: '陳月嫂', text: '訂單資訊－2' }],
+      weekly_service_rows: [{ serial_number: 1, staff_name: '陳月嫂', week_start_date: '2026-09-03', week_end_date: '2026-09-09', service_hours_per_day: 9, weekly_work_days: 5, weekly_hours: 45 }],
+      caregiver_resumes: [{ staff_id: 42, staff_name: '陳月嫂', ready: true, filename: 'resume.pdf', version: 1, blocker: null }],
+      blockers: [], send_allowed: true,
+    });
+    mocks.candidatePool.mockResolvedValue({
+      case_no: 'CASE-FUTURE', candidates: [{
+        id: 2, staff_id: 43, staff_name: '候選月嫂乙', status: 'active', willingness: 'willing',
+        service_start_date: '2026-09-03', service_end_date: '2026-09-22',
+      }],
+    });
     mocks.detail.mockResolvedValue(orderDetail('訂單成立'));
     mocks.core.mockResolvedValue({
       items: [{
@@ -440,13 +487,14 @@ describe('historical Drawer immutable evidence boundary', () => {
       substatus_counts: {}, next_cursor: null, etag: 'b'.repeat(64),
     });
     render(<OrderWorkbenchV2Drawer caseNo="CASE-FUTURE" branchType="normal" onClose={vi.fn()} />);
-    fireEvent.click(screen.getByRole('button', { name: '案件異動' }));
-    const entry = await screen.findByRole('button', { name: '服務前更換月嫂' });
+    fireEvent.click(screen.getByRole('button', { name: /確認服務日期與排班/ }));
+    const entry = await screen.findByRole('button', { name: '服務前更換月嫂 →' });
     await waitFor(() => expect(entry).toBeEnabled());
-    expect(screen.queryByRole('option', { name: '候選月嫂尚未定案' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: '更換月嫂' })).not.toBeInTheDocument();
+    expect(mocks.candidatePool).not.toHaveBeenCalled();
     fireEvent.click(entry);
-    const replacementEntry = await screen.findByRole('button', { name: '換人' });
-    fireEvent.click(replacementEntry);
-    expect(await screen.findByRole('option', { name: '候選月嫂尚未定案' })).toHaveValue('R-01');
+    expect(await screen.findByRole('radio', { name: /候選月嫂乙/ })).toHaveAttribute('value', '43');
+    const replacementRegion = screen.getByRole('region', { name: '更換月嫂' });
+    expect(within(replacementRegion).getByRole('button', { name: '檢查換人影響' })).toBeDisabled();
   });
 });

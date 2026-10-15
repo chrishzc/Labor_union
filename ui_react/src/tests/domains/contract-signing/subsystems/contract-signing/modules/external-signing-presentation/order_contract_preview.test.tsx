@@ -45,7 +45,7 @@ describe('OrderContractPreview', () => {
     expect(screen.getByText('12000')).toBeInTheDocument();
     expect(screen.getByText('本案專屬虛擬帳號')).toBeInTheDocument();
     expect(screen.getByText('99781699115157')).toBeInTheDocument();
-    expect(screen.getByText(/契約顯示預計繳款日/)).toBeInTheDocument();
+    expect(screen.getByText(/付款日期顯示預計繳款日/)).toBeInTheDocument();
   });
 
   it('marks absent planned payment stages and notes as optional', async () => {
@@ -171,5 +171,22 @@ describe('OrderContractPreview', () => {
       'CASE-002', 'staff', 98, expect.any(AbortSignal),
     ));
     expect(previewContractFields).not.toHaveBeenCalledWith('CASE-002', 'staff', 97, expect.any(AbortSignal));
+  });
+
+  it('reads the new recommendation instead of preserving the old staff selection on a case revision', async () => {
+    vi.mocked(contractExternalSigningClient.query)
+      .mockResolvedValueOnce({ state: 'preparing', case_no: 'CASE-001', staff_segments: [{ segment_id: 97, staff_id: 7 }] } as never)
+      .mockResolvedValueOnce({ state: 'preparing', case_no: 'CASE-001', staff_segments: [{ segment_id: 98, staff_id: 8 }] } as never);
+    vi.mocked(previewContractFields).mockImplementation(async (_caseNo, scope, segmentId) => ({
+      ...basePreview, scope, template_key: scope === 'client' ? 'contract_client_copy' : 'contract_staff_service',
+      field_values: { C4: segmentId === 97 ? '原推薦月嫂' : '新推薦月嫂' },
+    }));
+    const { rerender } = render(<OrderContractPreview caseNo="CASE-001" revision={0} />);
+    fireEvent.click(screen.getByRole('button', { name: /服務人員委任契約/ }));
+    await screen.findByText('原推薦月嫂');
+    rerender(<OrderContractPreview caseNo="CASE-001" revision={1} />);
+    expect(await screen.findByText('新推薦月嫂')).toBeInTheDocument();
+    expect(screen.queryByText('原推薦月嫂')).not.toBeInTheDocument();
+    expect(vi.mocked(previewContractFields).mock.calls.filter(call => call[1] === 'staff').at(-1)?.[2]).toBe(98);
   });
 });

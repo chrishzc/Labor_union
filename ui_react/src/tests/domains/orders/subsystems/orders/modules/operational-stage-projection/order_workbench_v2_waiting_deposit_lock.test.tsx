@@ -67,7 +67,7 @@ describe('待辦看板 Beta 既有方案等待訂金鎖', () => {
     await open();
     fireEvent.click(screen.getByRole('button', { name: '預覽方案 51 等待訂金鎖' }));
     await screen.findByText('允許套用：否');
-    expect(screen.getByText('衝突：月嫂 #8892 · 2026-09-04 · active_lock #99')).toBeInTheDocument();
+    expect(screen.getByText('服務檔期衝突，須先調整日期：月嫂 #8892 · 2026-09-04')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '套用方案 51 等待訂金鎖' })).toBeDisabled();
     expect(mocks.apply).not.toHaveBeenCalled();
   });

@@ -11,6 +11,7 @@
 - primary: `ui_react/src/components/HistoricalClientPaymentWorkbench.tsx`
 - client: `ui_react/src/api/client_finance/historical_client_payment_client.ts`
 - composition: `ui_react/src/pages/FinancePage.tsx`
+- workbench referral: Finance 客戶收款以 `case_no` 定位原案件，`from=workbench` 提供返回同案入口；所選案件已歷史服務完成時承接 Orders-owned `HistoricalCompletionPanel`，沿用既有 Query／Preview／Apply 與重新讀取，不改寫結清規則。
 - payable export adapter: `ui_react/src/api/accounts_payable/accounts_payable_export_client.ts` — FinancePage 既有應付帳款下載入口；呼叫既有 Staff Payables 匯出端點，保留登入檢查與 XLSX 回應驗證，不計算帳務事實。
 - customer subsidy payable presentation: `ui_react/src/components/ClientSubsidyReturnQueryPanel.tsx` — FinancePage 的客戶補助退款案件清單，支援姓名／案件搜尋與選用應退款月份，一次呈現全部符合條件案件與合計，不提供分頁操作；明示後端的預估金額、未知日期，不計算退款資格或金額。
 - customer subsidy payable client: `ui_react/src/api/client_finance/client_subsidy_return_query_client.ts` — strict 解碼 `/api/v1/finance-reports/client-subsidy-returns` typed projection，`queryAll` 自動循游標取完所有符合結果，核對案件唯一性與游標；只做 GET，條件改變或 unmount 取消整次查詢，失敗不交付部分結果。

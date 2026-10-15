@@ -12,6 +12,7 @@ import { ordersQueryClient } from '../api/orders/order_query_client';
 import { staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
 import { staffPayablesQueryClient } from '../api/staff_payables/staff_payables_query_client';
 import { FinancePage } from '../pages/FinancePage';
+import { historicalCompletionClient } from '../api/orders/historical_completion_client';
 import {
   ACCOUNTS_PAYABLE_RESPONSE,
   FINANCE_BATCH_RESPONSE,
@@ -69,7 +70,26 @@ describe('Finance query request lifecycle', () => {
 
   afterEach(() => {
     cleanup();
+    window.location.hash = '';
     vi.restoreAllMocks();
+  });
+
+  it('opens the exact workbench case and provides a return link to that case', async () => {
+    window.location.hash = '#finance?tab=client-receipts&case_no=CASE-FIN-001&from=workbench';
+    render(<FinancePage />);
+    await screen.findByText('OBL-C-1');
+    expect(screen.getByRole('link', { name: '← 返回案件處理' })).toHaveAttribute('href', '#order-workbench-v2?case=CASE-FIN-001');
+    expect(screen.getByRole('combobox', { name: '案件' })).toHaveValue('CASE-FIN-001');
+    expect(accountsPayableQueryClient.queryCase).toHaveBeenCalledWith('CASE-FIN-001', expect.any(String), expect.objectContaining({ signal: expect.any(AbortSignal) }));
+  });
+
+  it('hosts the existing historical accounting-completion workflow on the selected finance case', async () => {
+    vi.mocked(ordersQueryClient.getOrderSummaries).mockResolvedValue({ ...ORDER_PAGE, items: [{ ...ORDER_PAGE.items[0], order_status: '歷史訂單－服務完成' }] });
+    const query = vi.spyOn(historicalCompletionClient, 'query').mockRejectedValue(new Error('test owner unavailable'));
+    render(<FinancePage />);
+    await screen.findByRole('heading', { name: '歷史案件帳務完成' });
+    await waitFor(() => expect(query).toHaveBeenCalledWith('CASE-FIN-001', expect.objectContaining({ signal: expect.any(AbortSignal) })));
+    expect(await screen.findByRole('alert')).toHaveTextContent('歷史案件完成狀態目前無法載入。');
   });
 
   it('issues one initial query generation under StrictMode', async () => {

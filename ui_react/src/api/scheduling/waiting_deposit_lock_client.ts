@@ -64,6 +64,15 @@ function decode<T>(schema: z.ZodType<T>, raw: unknown, operation: string): T {
 }
 
 export const waitingDepositLockClient = {
+  async previewRelease(caseNo: string, planId: number, lockId: number) {
+    const schema = z.strictObject({ case_no: z.string(), plan_id: z.number().int().positive(), lock_id: z.number().int().positive(), service_day_count: z.number().int().positive(), staff_count: z.number().int().min(1).max(4), apply_allowed: z.boolean(), blockers: z.array(z.string()), preview_fingerprint: Fingerprint });
+    return decode(schema, await transport.post(`/api/v1/orders/${encodeURIComponent(caseNo)}/matching-plans/${planId}/waiting-deposit-locks/${lockId}/release/preview`, undefined, options()), '釋放預覽');
+  },
+  async release(caseNo: string, planId: number, lockId: number, fingerprint: string, reason: string, eventKey: string, expectedActor: string) {
+    if (sessionClient.getUser()?.username.trim() !== expectedActor) throw new ApiHttpError(409, 'RECOMMENDATION_ACTOR_CHANGED', '請以原操作帳號確認換人結果。');
+    const schema = z.strictObject({ result: z.enum(['created', 'existing']), case_no: z.string(), plan_id: z.number().int().positive(), lock_id: z.number().int().positive(), plan_status: z.literal('proposed'), lock_status: z.literal('released'), lock_rows: z.array(z.strictObject({ segment_id: z.number().int().positive(), staff_id: z.number().int().positive(), lock_date: z.string() })) });
+    return decode(schema, await transport.post(`/api/v1/orders/${encodeURIComponent(caseNo)}/matching-plans/${planId}/waiting-deposit-locks/${lockId}/release/apply`, { preview_fingerprint: fingerprint, reason }, options(eventKey)), '釋放確認');
+  },
   async queryPlan(caseNo: string, signal?: AbortSignal): Promise<ActiveWaitingDepositPlan> {
     const raw = await transport.get<unknown>(
       `/api/v1/orders/${encodeURIComponent(caseNo)}/matching-plans/active`,

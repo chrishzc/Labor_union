@@ -29,9 +29,11 @@
 - `ui_react/src/pages/ClientRosterPage.tsx`
 - `ui_react/src/components/ClientRegistryDetailEditor.tsx` — 單一客戶清單 Drawer 直接組合主檔、報名、照護、Orders Terms 與唯讀帳務；各區 Preview／Apply、異步結果 guard、草稿保持及 mutation／回讀關閉鎖。報名／照護共用 BeClass version，保存後舊預覽失效。三節只記錄獎金協調文字，樓層費金額由既有 Orders Terms writer 保存。
   - 虛擬帳號設定借用 Client Finance 單案帳號 Query／Apply 直接儲存，無原因或預覽；名冊不直接寫對照。帳號草稿／結果未明／回讀失敗納入 Drawer 關閉鎖，正式回讀等候名冊詳情與清單完成。
+  - 案件處理缺件入口以 `field=intake&from=workbench` 深連結到本案訂單條件，組合既有 Orders 補件 Preview／Apply；只編輯實際缺漏，保留已存在的日期與天數。儲存、收據及名冊／Orders 回讀完成後再允許返回相同案件；歷史與不適用進件修復的案件保留原 bootstrap 入口。完成補件後仍可開啟既有完整服務條件操作。
   - 變更歷程置於 Drawer 最下方，依選取案件與正式 detail 回讀自動重新 Query；保留 server 時間／流程順序、原因、操作人員及臺北時間。失敗可單獨重讀，晚回應不污染已切換案件；獨立歷程分頁已合併。
 - `ui_react/src/components/OrderTermsUnavailableNote.tsx` — 名冊編輯與唯讀詳情共用服務條件提示；日期／天數缺件以 Orders completion Preview 的 actual missing fields 顯示，查詢失敗不推定空值，錯誤代碼置於技術資訊。
 - `ui_react/src/components/ClientRegistryServiceStaff.tsx` — Drawer 顯示 Scheduling effective assignments，借用 Staff bounded 摘要讀取姓名與公會編號；組合既有服務前換人操作，完成後回讀且保留其他區草稿，已服務轉介請假代班。
+  - 「服務安排與月嫂」倒數第二區加入 Orders actual-start 更正；有指派時原子更新各段排班。草稿／結果未明受既有名冊關閉鎖保護，成功後以相同 case 深連結至 service work group 核對。
 - `ui_react/src/components/ClientRegistryReplacementCandidates.tsx` — 倒數第二區續辦接任人選；組合現有候選查詢／保存、意願紀錄與正式推薦／客戶確認。三步保持草稿、結果未明及回讀關閉鎖；推薦不冒充 effective assignment。
 - `ui_react/src/components/ClientRosterColumnFilter.tsx` — Excel 式表頭篩選；只讀 allowlisted 全名冊選項，不在單頁上過濾。
 - `ui_react/src/components/client_roster_filter_columns.ts` — 表頭與已套用摘要共用欄位標籤、型別及格式。

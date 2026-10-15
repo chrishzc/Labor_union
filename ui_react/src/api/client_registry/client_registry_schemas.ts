@@ -37,7 +37,7 @@ const orderInformationValues = z.strictObject({
   other_babies_present: orderInformationValue,
 });
 const financeValues = z.strictObject({
-  virtual_account: z.string().min(1), service_unit_price_ntd: z.number().int().positive(),
+  virtual_account: z.string().min(1).nullable(), service_unit_price_ntd: z.number().int().positive(),
   service_hours: z.number().nonnegative(), customer_payable_total_ntd: z.number().int().nonnegative(),
   deposit_amount_ntd: z.number().int().nonnegative(), first_payment_amount_ntd: z.number().int().nonnegative(),
   second_payment_amount_ntd: z.number().int().nonnegative(), received_total_ntd: z.number().int().nonnegative(),

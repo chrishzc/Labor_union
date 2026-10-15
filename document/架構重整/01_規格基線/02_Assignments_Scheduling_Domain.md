@@ -137,7 +137,7 @@ confirmation、waiting lock、commitment 與排班的 immutable 歷史保留，�
 legacy 缺漏只能進異常與人工修正，不得由 Assignment Plan 猜測或補造。
 
 依第 `21` 份正式規格，存在所有月嫂簽約完成後保存的 commitment 時，第一次 bootstrap 還必須鎖定並驗證
-matching plan/version、staff 與精確日期集合完全相同；不同時回
+matching plan/version、staff 與精確日期集合完全相同；實際開始日調整適用下述同日最新裁決。人選、服務量或 current 日期確認不符時回
 `commitment_execution_mismatch` 且零寫入。成功時 assignments、schedules、Payroll impact、
 commitment `converted` terminal event、outbox 與 receipt 同一交易提交。Calendar Read、Payroll
 與 Government Subsidy 在 conversion 前不得讀取 commitment days。
@@ -166,6 +166,44 @@ recipient snapshots；不得建立或假造 LINE delivery task。每位 recipien
 idempotency identity 記錄 `manually_confirmed`／`manually_revoked`。Assignment Plan gate 僅接受 current
 lineage 中客戶與目標月嫂全數 `confirmed` 或 `manually_confirmed`；日期、方案、segment 或 fingerprint
 異動仍使舊確認失效。若後續改走 LINE，必須保留人工歷史、明確 invalidated 後建立新的 `sent` snapshot。
+
+2026-10-15 使用者裁決：正常媒合案件的服務安排介面只保留「設定服務日期／確認排班」兩步。
+日期表先由既有 Orders writer 保存，可在正式指派前顯示日曆；原訂服務方式須顯示於排休選擇旁，
+本次排休星期仍只作試算輸入。人工確認只收一份非空確認紀錄；儲存該紀錄即為人員確認操作，
+若尚無 current snapshot，由相同操作接續既有人工快照 Preview／Apply，再確認指定 recipient。
+不增加確認方式選單或重複勾選，不建立 LINE delivery intent，結果未明時沿用原 command identity 恢復。
+
+同日後續 UI 裁決：星期選項與「無固定週休」同列。日期設定直接以「儲存服務日期」作為人員確認，
+在同一操作內沿用既有日期／開始日 Preview、Apply 及正式回讀，不再顯示額外預覽確認步驟；
+只有完整日期表正式回讀成功後，才切換至「確認排班」，失敗或結果未明時留在原步驟續辦。
+尚無指派時，可在上方同一日期欄位下單獨「儲存實際開始日」，只呼叫既有 actual-start writer，
+不保存服務日期表、不自動切換步驟；下方不再重複呈現開始日表單。結果未明續辦須保留此單獨保存意圖，
+不得自行升級成日期表保存。有既有班表時的開始日更正仍沿用原分段預覽與原子重排流程。
+
+current 日期表的客戶及所有目標月嫂確認後，背景 discovery 以 canonical Assignment Plan Preview
+驗證契約、訂金、waiting lock、檔期及精確日期；通過才 enqueue 既有 `assignment_plan_apply`。
+command identity 綁定 case／plan／confirmed-date version／既有 PreviewFingerprint；相同事實只建立
+一份工作，已失敗的同一命令不盲目重送。worker 必須以既有 Apply fresh-read／lock／UoW 完成 conversion，
+不得由 UI 或 discovery 寫 assignments、班表、Orders、Finance 或 Payroll。條件未齊時保留確認證據，
+下一次 discovery 讀取新的 owner facts 後再判定；有效正式指派存在時不得重做 bootstrap。
+
+同日實際 UI 修正：尚無正式指派的單一月嫂方案，以 Orders current confirmed-service-date version 的完整日期作為該月嫂日期表及檔期保留來源，不再與原推薦的預計期間取交集而產生 0 天。首次正式指派的開始日必須等於目前實際開始日（未保存時為第一個服務日），結束日及 official dates 必須與已確認 recipient snapshot 完全一致；仍經原 Preview／Apply 檢查占用、契約、訂金與檔期鎖。等待訂金鎖只調整本次 canonical 候選投影，不改寫原推薦期間。既有快照的日期內容不符時，Query 呈現過期並保留 immutable 舊內容；明確人工確認可建立新快照，舊確認不得滿足新日期表。人工準備的 actor／reason 稽核欄位不構成日期差異。多月嫂仍依明確分段歸屬，不推測新分段。
+
+`GET /api/v1/orders/{case_no}/matching-plans/{plan_id}/automatic-arrangement` 為唯讀狀態投影，
+區分等待確認、等待條件、準備自動排班、queued／running、已生效及失敗；查詢不得 enqueue。
+UI 以 owner assignments 回讀證明排班生效，不以 job accepted 取代完成。介面移除人工建立正式排班按钮，
+但保留既有 API 及已接受命令的結果未明／回讀恢復入口。
+
+2026-10-15 最新人工裁決：實際開始日改變不新增改期或重簽契約流程。首次轉換保留原 commitment、文件與簽回紀錄；同一 plan、同一月嫂及每位月嫂服務天數不變時，execution 日期可採用 current confirmed-service-date version 中客戶與所有目標月嫂最新確認的 immutable recipient 日期。不得由 caller 自稱已確認或改寫原 commitment dates；Preview 唯讀核對，Apply fresh-lock 重驗，轉換事件保存 snapshot／日期版本引用。未確認、不同人選、服務量不符或檔期衝突仍阻擋，既有契約、訂金及等待檔期鎖關卡維持。
+
+服務安排以唯讀 `GET /api/v1/orders/{case_no}/client-finance/deposit-skip` 顯示 Client Finance 的
+目前訂金應收、已核銷額及已生效的放行狀態，不能使用 Preview 的預期結果冒充現況。「未付款人工放行」一鍵接續
+既有 deposit-skip Preview／Apply，保存標準操作原因且正式回讀。它不把未付款改為已付款，也不釋放
+月嫂 reservation；既有適用條件及正式 writer 不變。契約簽回完成的下一步導向同案服務安排，核銷仍由帳務入口辦理。
+
+名冊實際開始日更正沿用 Orders actual-start writer：無指派只保存日期；有正式指派時預覽各段並以
+同一 Apply 原子更新開始日與班表。成功後導向同案服務安排核對，不能留下已改日期與舊班表等待事後補排。
+換人入口導向同案推薦確認並開啟既有換人操作；已服務的既有請假代班裁決不變。
 
 ### Schedule Projection
 
@@ -494,7 +532,11 @@ Scheduling／Matching 擁有 case-owned Candidate Contact Pool。它只擁有候
 - 一次可加入多位候選人；對預計服務日期有部分或全部檔期衝突的人選仍可聯繫協調。加入與每次資訊發送皆須 fresh-read availability，保留目前 coverage evidence，不得把有衝突的人選標示成完整無衝突。
 - 初步意願詢問以預計起訖期間檢查檔期，不要求 BeClass 或正式服務日期精算完成；未填需求仍為未知、顯示待確認，不得寫成 false。已填需求才參與啟用的查詢篩選；「偏好服務日」與「每日服務時數」勾選時，只列出符合已填需求的月嫂，未勾選時不以該項排除。查詢畫面每人只顯示空閒／總天數及彙總衝突提醒，不逐日列出衝突。加入／聯絡時重新檢查占用與不可服務期間，不重新套用使用者查詢偏好；詢問 coverage 不形成正式服務日、工時、薪資、assignment 或方案資格。正式 matching plan 仍須原有正式日期及完整 fresh-fact gates。
 - 發送資訊-1／資訊-2 是詢問接案意願的唯一聯繫動作；不得另建沒有資料效果的「聯繫與確認意願」命令。
-- 每位候選人的意願及兩種資訊寄送紀錄獨立、append-only 且以 candidate entry／event key 冪等；不得由同案其他候選人覆蓋。
+- 每位候選人的意願及資訊寄送紀錄獨立、append-only 且以 candidate entry／event key 冪等；不得由同案其他候選人覆蓋。
+- 2026-10-14 人工裁決：候選與詢問使用同一個案件共用資訊入口，未有候選也能查閱；服務條件與費用、照護與飲食需求、每週服務說明三份內容可各自選擇候選月嫂並分開寄送。收件人確認與 Apply 仍逐人核對 canonical bound LINE identity、current facts、preview fingerprint 及 event key，同一份內容與每人的投遞回條分别保留；共用畫面不建立虛構 candidate／assignment。
+  每週內容只使用 Orders 已保存且天數相符的 current service dates 與每日時數；當次試算仍零寫入，不可寄送。獨立週說明為補充資訊事件 `info_3_sent`，沒有意願回覆按鈕，不重新啟動資訊-1／2 的詢問期限、全池完成 gate 或人工跟進；不連動薪資、正式指派與排班。
+  清單依原 event key／task ID 綁定的 LINE-owned task 投影目前投遞狀態與送達時間；原發送事件不改寫，排入佇列不代表已送達。人工確認沒有 provider task 時仍採其原確認事件。
+  工會工作台以候選清單、抽屜逐筆新增候選與卡片內手動意願表單續辦；「前往客戶確認準備」只帶入已願意的人選，不自動建立方案或客戶決策。「尋找月嫂與詢問意願」提供「候選月嫂／多月嫂分段」入口；分段沿用原查詢與正式分段 writer，查詢不建立方案，只有明確採用完整組合才建立正式推薦方案，收據及分段回讀成功後進入客戶確認準備。正式日期、完整 coverage、接受及鎖定規則維持既有契約。名冊換人入口保持既有流程。
 - 候選池 readback 必須以 nullable `latest_willingness_event_id` 回傳該候選人最新有效意願事件的既有 event ID。客戶端只有在此 ID 與自己收到的意願回條相同、且意願值相同時，才能確認該次回覆已儲存；較新的同值或異值事件只代表最新狀態，不得確認原操作。
 - 客戶同意日期調整、且 Orders Terms 已修改未指派案件的 planned 起訖日後，一般候選資訊預覽與寄送前內容均讀 current Orders 期間。一般寄送或重新聯繫原候選人必須在同一 Scheduling transaction 以相同 current Orders 起訖日重驗 coverage；有衝突仍可繼續協調，期間有異動時更新 candidate contact period／coverage fingerprint、追加前後日期事件並排入新資訊卡，任一步失敗皆 rollback。Preview 零寫入，既有寄送 receipt 重播保留原內容／任務，不建立正式服務日或 assignment；正式 plan／assignment 的期間仍由各自 owner 擁有。
 - 未正式排班即可預覽每週服務時間。未有 confirmed service dates 時依候選期間、週休及特殊休假推算並核對 Orders 約定服務天數；不足或超出必須明示，不能靜默視為履約完整。已有 current confirmed dates 時使用精確服務日，包括人工協調的週末上班；同時顯示延長後的 actual conflict 與 buffer 提醒。協調後須重新確認服務日期；正式排班仍以 current owner dates 驗證服務量及實際占用。
@@ -513,6 +555,61 @@ Scheduling／Matching 擁有 case-owned Candidate Contact Pool。它只擁有候
 - 選定、撤回或取消不得刪除候選聯繫歷史。正式 plan 後的日期表、客戶與月嫂雙方確認及 assignment gate 僅針對該正式 plan recipients。
 
 ### 人工媒合確認（2026-08-24）
+
+2026-10-14 推薦確認人工裁決：同案 active 候選已記錄願意承接，且其詢問期間涵蓋正式方案區段時，
+該紀錄直接作為此區段的接案同意，不要求工會再次按正式同意。這是唯讀意願投影，不追加虛構人工
+同意、LINE 送達或正式指派；無此候選依據者維持 pending，須返回詢問。區段已有正式意願回覆時，
+該回覆優先；月嫂通知不承接可沿既有正式 manual response 記錄 unwilling，仍須 actor、原因、版本、
+原命令冪等識別及回讀。原詢問與通知紀錄保留。
+人工通知更改意願允許 append 新的 willing／unwilling；同一 outer UoW 同步通知該區段期間對應的
+active 初步候選，避免下次推薦又採用舊同意。不建立不存在的候選。工會人工更正仍不作用於已有
+effective assignment 的案件；實際人員異動改走換人或代班。
+
+2026-10-14 LINE 意願更正人工裁決：正式方案的月嫂本人於既有互動有效期限內，可在客戶決策為
+pending／contact_requested 時反覆修改 willing／unwilling；已接受的方案仍允許月嫂通知 unwilling，
+形成換人需求，但不得由 LINE 自行改回 willing 而解除該需求。客戶已 declined 時不開放意願變更。
+每次新回覆沿既有 append-only event、原 webhook idempotency key 與 communication version writer；
+仍核對互動及區段 recipient、有效方案與原到期時間。caregiver_willingness 互動可重複使用，包含尚未
+過期且此前已標 consumed 的月嫂互動；客戶決策互動仍為一次性，取消、過期或失效方案不能重用。
+最新正式通知為不承接者，不論是否已有 effective assignment，推薦確認的唯讀待辦投影皆回到待處理，
+要求換人及重新取得客戶確認。既有客戶接受或檔期保留不得冒充現行接案同意；不回寫 Orders lifecycle、
+歷史決定或指派資料，不自動撤銷檔期、契約或排班。已有指派者由既有換人流程處理；已有 actual-service
+proof 者仍轉介請假代班，LINE 不直接執行 replacement／substitution writer。
+
+2026-10-14 R-04 接續裁決：服務前整案換人 Apply 與原 generation transition 同一 outer UoW
+退役同案仍有效的 caregiver matching plan，追加帶有 replacement event identity 的不可變歷史，
+原方案的月嫂候選 entry 退為 withdrawn，保留原意願、客戶接受與投遞紀錄，不移植至新方案。
+新 round 不以原 package 的候選同意或客戶接受跳過重新推薦；新選定人選仍須 fresh availability、
+current candidate willingness 與日期完整性檢查。沒有新方案時回到選人／推薦準備；R-04 收據僅表示
+換人已啟動，不表示新推薦已建立。前端須正式確認原方案已非 active，才能接續選人；交接回讀失敗
+只重讀，不重送 R-04。新方案必須有不同 plan identity，獨立寄送與重新取得客戶決定。
+Orders lifecycle 保持原狀；只有已提交 R-04 收據綁定 current effective generation、且該 generation
+尚無正式 assignment 時，訂單成立案件可沿既有候選詢問及客戶確認 writer 續辦。過往 R-04、已被
+替代的 generation、已恢復正式指派、取消或服務中的案件不得借此開放媒合。Query／Preview 零寫入，
+不新增另一個 commit owner、schema、付款／契約或 provider writer。
+
+2026-10-15 R-04 跟進一致性：候選 24 小時逾期掃描、工會人工跟進清單／操作與未送通知取消，
+使用同一 current R-04 receipt／effective generation／零 assignment 資格；SQL 掃描先過濾再套用
+批次上限，訂單成立不得單獨作為取消通知的理由。資格失效時，只取消原有 pending／retryable_failed
+人工跟進通知；取消檢查於 canonical LINE delivery 前執行。既有 completed delivery、lease 中的
+processing、其他通知 source、本人驗證及 post-answer Orders Terms receipt gate 均沿原契約。
+
+推薦確認頁提供單一換人入口。尚無 effective assignment 的案件以 Matching-owned 推薦取消、
+檔期釋放與新方案建立續辦：有有效檔期鎖時先完成既有 Release Preview／Apply，再取消原 proposed
+方案，最後明確建立新推薦；每一步分別保留原命令與回條，結果未明不得跳步或換鍵。取消須 fresh
+鎖定並確認沒有 effective assignment、沒有有效檔期鎖，且 caller 提供的 communication version 未變。
+新推薦須重新取得客戶決定，原決定不移植。多月嫂更換保留未更換段落的人員與日期；新建立仍經
+原完整 coverage 與 availability gate。已有 effective assignment 時沿原 service-before-replacement
+Query／Preview／Apply；已有 actual-service proof 則走請假代班，不以推薦取消旁路正式指派。
+
+2026-10-14 財務裁決：尚未建立訂金義務而缺 settlement projection 時，僅在 Client Finance
+完整查核並提供 typed 未收款確認後，才允許原檔期 Release。查核借用原 UoW，確認事實與
+Finance 版本納入既有 Preview fingerprint，Apply fresh-read；Scheduling 不自行認定缺資料等於零。
+未收款確認保存在原 release 事件，換人原因與原命令回條仍沿用既有規則。
+
+換人表單僅必填換人原因，evidence references 可為空，仍保留已有 references 的歷史與原 payload
+fingerprint 語意；不得為省略輸入捏造聯繫紀錄。客戶資訊集中查閱，寄送與人工客戶決策在主頁分別
+明確確認；建立發送工作不代表送達，履歷仍為 optional attachment。
 
 LINE identity、recipient binding 或 delivery 缺漏時，已登入的內部操作者可透過正式 matching-plan
 manual response 記錄特定 segment 的月嫂意願與客戶決策。每筆皆須 actor、非空 reason、目前 plan

@@ -32,6 +32,8 @@ const FormalPlanContactStateSchema = z.strictObject({
   }).passthrough(),
   segments: z.array(z.object({
     segment_id: z.number().int().positive(),
+    staff_name: z.string().optional(),
+    staff_id: z.number().int().positive().optional(),
     willingness: z.enum(['pending', 'willing', 'unwilling']),
   }).passthrough()).min(1),
   all_willing: z.boolean(),
@@ -55,7 +57,7 @@ const CaregiverWillingnessReceiptSchema = z.strictObject({
   event_key: z.string().min(1).max(191),
   communication_version: z.number().int().nonnegative(),
   source: z.literal('admin'),
-  willingness: z.literal('willing'),
+  willingness: z.enum(['willing', 'unwilling']),
   customer_decision: z.null(),
 });
 
@@ -201,6 +203,18 @@ function canonicalCaseNo(caseNo: string): string {
 }
 
 export const matchingPlanCommunicationClient = {
+  async cancelRecommendation(caseNo: string, planId: number, expectedVersion: number, reason: string, eventKey: string, expectedActor: string) {
+    const actor = sessionClient.getUser()?.username.trim();
+    const token = sessionClient.getToken();
+    if (!token || !actor) throw new ApiHttpError(401, 'UNAUTHENTICATED', '請先登入。');
+    if (actor !== expectedActor) throw new ApiHttpError(409, 'RECOMMENDATION_ACTOR_CHANGED', '請以原操作帳號確認換人結果。');
+    const schema = z.strictObject({ success: z.boolean(), message: z.string(), error: z.string().nullable(), data: z.strictObject({ status: z.enum(['cancelled', 'idempotent_replay']), event_id: z.number().int().positive() }).nullable() });
+    const decoded = decodePayload(schema, await transport.post(`/api/v1/orders/${encodeURIComponent(canonicalCaseNo(caseNo))}/matching-plans/${planId}/cancel`, {
+      actor, reason: reason.trim(), expected_version: expectedVersion, event_key: eventKey,
+    }, { token }));
+    if (!decoded.success || decoded.data === null) throw new ApiHttpError(409, 'RECOMMENDATION_CANCELLATION_FAILED', decoded.message);
+    return decoded.data;
+  },
   async queryContactState(caseNo: string, planId: number): Promise<FormalPlanContactState> {
     const canonical = canonicalCaseNo(caseNo);
     const token = sessionClient.getToken();
@@ -382,6 +396,7 @@ export const matchingPlanCommunicationClient = {
     reason: string,
     eventKey?: string,
     expectedActor?: string,
+    willingness: 'willing' | 'unwilling' = 'willing',
   ): Promise<CaregiverWillingnessReceipt> {
     const canonical = canonicalCaseNo(caseNo);
     const actor = sessionClient.getUser()?.username.trim() ?? '';
@@ -403,7 +418,7 @@ export const matchingPlanCommunicationClient = {
         {
           actor,
           event_key: canonicalEventKey,
-          willingness: 'willing',
+          willingness,
           expected_version: expectedVersion,
           reason: canonicalReason,
         },
@@ -419,7 +434,7 @@ export const matchingPlanCommunicationClient = {
       || decoded.data.event_key !== canonicalEventKey
       || decoded.data.communication_version !== expectedVersion + 1
       || decoded.data.source !== 'admin'
-      || decoded.data.willingness !== 'willing'
+      || decoded.data.willingness !== willingness
       || decoded.data.customer_decision !== null) {
       throw new Error('月嫂意願回條 identity 不一致，請重新讀取。');
     }

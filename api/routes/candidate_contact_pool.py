@@ -12,6 +12,7 @@ from api.dependencies.admin_auth import (
 from api.dependencies.service_date_confirmation import get_service_date_confirmation_workflow
 from subsystems.orders.service_date_confirmation_workflow import ServiceDateConfirmationWorkflow
 from api.schemas.base import BaseResponse
+from api.schemas.errors import GlobalErrorCategory, GlobalTypedErrorView
 from api.schemas.candidate_contact_pool import (
     AddCandidatesRequest,
     CandidateInformationPreviewView,
@@ -27,6 +28,8 @@ from api.schemas.candidate_contact_pool import (
     ManualCandidateInformationReceipt,
     SendCandidateInformationRequest,
     SendCandidateInformationResult,
+    CaseInformationPreviewView,
+    CaseWeeklyServicePreviewView,
 )
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.scheduling import candidate_contact_pool_workflow as workflow
@@ -43,6 +46,76 @@ router = APIRouter(prefix="/api/v1", tags=["Matches Candidate Contact Pool"])
 def _require_actor(principal: AdminPrincipal, actor: str) -> None:
     if str(principal.username or "").strip() != actor.strip():
         raise HTTPException(status_code=403, detail="actor does not match authenticated principal")
+
+
+def _information_error(error: ValueError) -> HTTPException:
+    # Translate only known sending failures; the Global boundary sanitizes unknown errors.
+    messages = {
+        "caregiver_has_no_line_delivery_identity": (
+            GlobalErrorCategory.DOMAIN_BLOCKED,
+            "月嫂尚未完成 LINE 綁定，無法寄送資訊。請先完成月嫂的 LINE 綁定後，再重新寄送。",
+        ),
+        "candidate_information_preview_stale": (
+            GlobalErrorCategory.CONFLICT,
+            "訂單內容或月嫂的 LINE 綁定資料已更新。請取消本次寄送，重新開啟寄送確認後再寄送。",
+        ),
+        "candidate_contact_order_not_negotiating": (
+            GlobalErrorCategory.DOMAIN_BLOCKED,
+            "本案目前已非洽談中，不能再寄送候選詢問資訊。請重新讀取案件進度。",
+        ),
+        "candidate_contact_not_found": (
+            GlobalErrorCategory.DOMAIN_BLOCKED,
+            "這位月嫂已不在本案可寄送的候選清單。請重新讀取候選清單後再操作。",
+        ),
+        "candidate_weekly_service_dates_not_ready": (
+            GlobalErrorCategory.DOMAIN_BLOCKED,
+            "每週服務日期尚未保存，或日期與約定服務天數不符。請先確認並保存預計日期後再寄送。",
+        ),
+        "candidate_information_idempotency_conflict": (
+            GlobalErrorCategory.IDEMPOTENCY_MISMATCH,
+            "本次寄送與原寄送操作不一致。請先確認原寄送結果，避免重複寄送。",
+        ),
+    }
+    code = str(error)
+    if code not in messages:
+        return HTTPException(status_code=409, detail=code)
+    category, message = messages[code]
+    view = GlobalTypedErrorView(
+        category=category, code=code, message=message, field_errors=[],
+        domain_blockers=[code] if category == GlobalErrorCategory.DOMAIN_BLOCKED else [],
+        retryable=False, correlation_id="", current_version=None,
+    )
+    return HTTPException(status_code=409, detail={"error": view.model_dump(mode="json")})
+
+
+@router.get("/orders/{case_no}/candidate-contact-pool/information/preview", response_model=BaseResponse[CaseInformationPreviewView])
+def preview_case_information(case_no: str, info_type: int, principal: AdminPrincipal = Depends(require_line_matching_reader)):
+    del principal
+    try:
+        return BaseResponse(data=CaseInformationPreviewView.model_validate(workflow.preview_case_information(case_no, info_type)), message="已讀取訂單共用資訊")
+    except (LookupError, ValueError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.get("/orders/{case_no}/candidate-contact-pool/weekly-service/preview", response_model=BaseResponse[CaseWeeklyServicePreviewView])
+def preview_case_weekly_service(case_no: str, principal: AdminPrincipal = Depends(require_line_matching_reader)):
+    del principal
+    try:
+        return BaseResponse(data=CaseWeeklyServicePreviewView.model_validate(workflow.preview_case_weekly_service(case_no)), message="已讀取共用每週服務說明")
+    except (LookupError, ValueError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.post("/orders/{case_no}/candidate-contact-pool/weekly-service/preview", response_model=BaseResponse[CaseWeeklyServicePreviewView])
+def preview_case_weekly_dates(case_no: str, req: CandidateWeeklyServiceDatesPreviewRequest,
+                             principal: AdminPrincipal = Depends(require_line_matching_reader),
+                             dates_workflow: ServiceDateConfirmationWorkflow = Depends(get_service_date_confirmation_workflow)):
+    del principal
+    try:
+        proposed = dates_workflow.preview(case_no, tuple(req.service_dates))
+        return BaseResponse(data=CaseWeeklyServicePreviewView.model_validate(workflow.preview_case_weekly_service(case_no, proposed.candidate.service_dates)), message="已試算共用每週服務說明，尚未保存")
+    except (LookupError, ValueError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
 
 
 @router.get(
@@ -89,7 +162,7 @@ def preview_candidate_information(case_no: str, candidate_id: int, info_type: in
         return BaseResponse(data=CandidateInformationPreviewView.model_validate(
             workflow.preview_information(case_no, candidate_id, info_type)), message="已讀取寄送內容")
     except ValueError as error:
-        raise HTTPException(status_code=409, detail=str(error)) from error
+        raise _information_error(error) from error
 
 
 @router.get(
@@ -149,7 +222,7 @@ def send_candidate_information(case_no: str, candidate_id: int, req: SendCandida
             message=f"候選月嫂的訂單資訊-{req.info_type} 已建立可靠發送任務",
         )
     except ValueError as error:
-        raise HTTPException(status_code=409, detail=str(error)) from error
+        raise _information_error(error) from error
 
 
 @router.post(

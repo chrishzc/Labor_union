@@ -21,6 +21,13 @@
 *.cmd  text eol=crlf
 scripts/launchers/start_local_development.bat -text whitespace=cr-at-eol
 
+# Preserve the exact bytes of the qualified/applied weekly-information release.
+db/schema_parts/232_candidate_weekly_information.sql -text
+db/schema_parts/1051_candidate_weekly_information.sql -text
+db/migration_releases/labor_union_2026_10_14_candidate_weekly_information_v1.json -text
+db/migration_releases/labor_union_2026_10_14_candidate_weekly_information_v1.descriptors.json -text
+validation/receipts/PROV-CANDIDATE-WEEKLY-INFORMATION-local-additive-qualification-20261014.json -text
+
 *.xlsx binary
 *.xls  binary
 *.png  binary

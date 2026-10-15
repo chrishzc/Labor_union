@@ -16,6 +16,8 @@
 - composition: `api/dependencies/client_deposit_skip.py`
 - api: `api/routes/client_deposit_skip.py`
 - presentation: `ui_react/src/components/ClientDepositSkipActions.tsx`
+- presentation: `ui_react/src/components/ServiceArrangementDepositGate.tsx` — readonly amount／override status；一鍵 canonical Preview／Apply 與未知結果原 identity 恢復。
+- transport: `ui_react/src/api/client_finance/deposit_skip_client.ts`
 
 ## Contracts
 - `document/架構重整/01_規格基線/04_Client_Finance_Domain.md` — 資格、稽核及不修改訂金事實的放行規則。

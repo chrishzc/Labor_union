@@ -6,6 +6,7 @@
 
 ## Responsibility
 由 Client Finance 擁有案件專屬虛擬帳號的確定性產生／解析規則；匯入實際對照優先於公式候選，只有完全沒有匯入對照時才使用公式。驗證客戶收款與應收義務，並編排 fresh Preview／Apply、核銷分配與收據。需人工核對的帳號或金額差異必須在正式帳務寫入前拒絕；明示超收處理沿既有退款義務流程。
+等待訂金檔期釋放可借用原外層 UoW 的唯讀 `query_unreceived_deposit`：完整查核 account 版本、同案 obligations／義務事件／ledger，以 Domain-owned `UnreceivedDepositConfirmation` 提供未建立帳务且未收款證明；不因缺 settlement projection 推定零、不建立 account 或帳務根事實。
 
 ## Implementation
 - primary:
@@ -19,6 +20,7 @@
 ## Dependencies
 - inbound: `finance-import` — 透過 owning-domain composite 委派收款核銷並保留外層交易。
 - outbound: `orders` — 以已提交的 deposit intent 通知訂金核銷結果。
+- inbound: `scheduling/waiting-deposit-lock` — 無 settlement projection 的 Release 借用 typed 未收款確認；Apply fresh-read，來源版本與歷史變更受原 fingerprint 保護。
 
 ## Contracts
 - `document/架構重整/01_規格基線/04_Client_Finance_Domain.md` — 精確分配、超收處理及穩定錯誤。
@@ -28,6 +30,7 @@
 - layout_status: `custom_current`
 - test_root: `tests/domains/client-finance/subsystems/client-finance/integration/test_client_receipt_overage.py`
 - test_root: `tests/domains/client-finance/subsystems/client-finance/integration/test_client_virtual_account_resolution.py`
+- test_root: `tests/domains/client-finance/subsystems/client-finance/modules/receipt-reconciliation/unit/`
 - routing: `.arch-map/tests/domains/client-finance/subsystems/client-finance/index.md`
 
 ## Provenance

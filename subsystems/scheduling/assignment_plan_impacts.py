@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import dataclass, replace
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Any
 
 from domains.client_finance.obligation_planning import build_client_finance_terms_impact
+from domains.client_finance.subsidy_coverage import derive_subsidy_coverage
+from domains.payroll.payment_due_date import calculate_staff_payment_due_date
 from domains.orders.lifecycle import build_terms_lifecycle_impact
 from domains.scheduling.generation import SchedulingGenerationCandidate
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
@@ -30,6 +33,7 @@ class AssignmentPlanDomainImpact(VersionedImpactCandidate):
 class OrdersAssignmentImpactPayload:
     lifecycle: Any
     client_settlement_fingerprint: PreviewFingerprint
+    staff_payment_due_date: date | None = None
 
 
 def build_client_finance_assignment_impact(
@@ -54,9 +58,12 @@ def build_client_finance_assignment_impact(
 def build_payroll_assignment_impact(
     facts: AssignmentPlanWorkflowFacts,
     scheduling: SchedulingGenerationCandidate,
+    client_finance: VersionedImpactCandidate,
 ) -> AssignmentPlanDomainImpact:
     candidate = build_payroll_cancellation_impact(
-        facts.payroll,
+        replace(facts.payroll, staff_payment_due_date=_staff_payment_due_date(
+            facts, scheduling, client_finance,
+        )),
         scheduling,
         facts.order_terms,
         _change_identity(scheduling),
@@ -77,6 +84,7 @@ def build_orders_assignment_impact(
     evaluation_at: datetime,
 ) -> AssignmentPlanDomainImpact:
     settlement = client_finance.payload.settlement
+    payment_due_date = _staff_payment_due_date(facts, scheduling, client_finance)
     blockers = _assignment_plan_readiness_blockers(facts, settlement)
     lifecycle = _build_lifecycle_candidate(
         facts,
@@ -90,6 +98,7 @@ def build_orders_assignment_impact(
             "lifecycle": None if lifecycle is None else lifecycle.fingerprint.value,
             "waiting_lock_ids": facts.assignment_plan.current_waiting_lock_ids,
             "waiting_lock_conversion_blockers": blockers,
+            "staff_payment_due_date": payment_due_date.isoformat() if payment_due_date else None,
         }
     )
     version = facts.assignment_plan.order_version
@@ -101,8 +110,25 @@ def build_orders_assignment_impact(
         OrdersAssignmentImpactPayload(
             lifecycle,
             client_finance.payload.settlement.fingerprint,
+            payment_due_date,
         ),
     )
+
+
+def _staff_payment_due_date(facts, scheduling, client_finance):
+    existing = facts.payroll.staff_payment_due_date
+    if existing is not None:
+        return existing
+    dates = tuple(day for item in scheduling.assignments for day in item.service_dates)
+    if not dates:
+        return None
+    coverage = derive_subsidy_coverage(
+        facts.client_finance.identity_status,
+        Decimal(len(dates)) * Decimal(str(facts.order_terms.service_hours_per_day)),
+        Decimal(facts.order_terms.floor_fee.amount),
+    )
+    client_payable = sum(stage.amount.amount for stage in client_finance.payload.stage_plans)
+    return calculate_staff_payment_due_date(max(dates), client_payable, coverage.is_full_subsidy_order)
 
 
 def _build_lifecycle_candidate(

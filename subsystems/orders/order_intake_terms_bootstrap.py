@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, time
 from typing import Callable, Protocol
 
 from domains.orders.lifecycle import OrderLifecycleStatus
+from domains.orders.terms import ServiceTimeTerms
+from shared_kernel.validation import require_positive_half_hour
 from shared_kernel.fingerprints import fingerprint_payload
 
 
@@ -26,6 +28,43 @@ _TERMS_REPAIR_STATUSES = _EARLY_TERMS_STATUSES | _HISTORICAL_TERMS_REPAIR_STATUS
 
 
 @dataclass(frozen=True, slots=True)
+class IntakeServiceTime:
+    service_hours_per_day: float
+    start_time: time
+    end_time: time
+    end_day_offset: int
+
+    def __post_init__(self):
+        require_positive_half_hour(self.service_hours_per_day, 'service hours per day')
+        ServiceTimeTerms(self.start_time, self.end_time, self.end_day_offset)
+        if any(value.tzinfo is not None or value.second or value.microsecond for value in (self.start_time, self.end_time)):
+            raise ValueError('service time must use local hour and minute values')
+        span = ((self.end_time.hour * 60 + self.end_time.minute)
+                + self.end_day_offset * 1440 - self.start_time.hour * 60 - self.start_time.minute)
+        if not 0 < span <= 1440 or self.service_hours_per_day * 60 > span:
+            raise ValueError('service hours must fit within the service window')
+
+    def canonical_payload(self):
+        return {'service_hours_per_day': self.service_hours_per_day,
+                'start_time': self.start_time.isoformat(), 'end_time': self.end_time.isoformat(),
+                'end_day_offset': self.end_day_offset}
+
+
+@dataclass(frozen=True, slots=True)
+class IntakeServiceTimeSnapshot:
+    service_hours_per_day: float | None
+    start_time: time | None
+    end_time: time | None
+    end_day_offset: int | None
+
+    def canonical_payload(self):
+        return {'service_hours_per_day': self.service_hours_per_day,
+                'start_time': self.start_time.isoformat() if self.start_time else None,
+                'end_time': self.end_time.isoformat() if self.end_time else None,
+                'end_day_offset': self.end_day_offset}
+
+
+@dataclass(frozen=True, slots=True)
 class OrderIntakeTermsBootstrapFacts:
     case_no: str
     status: OrderLifecycleStatus
@@ -39,6 +78,10 @@ class OrderIntakeTermsBootstrapFacts:
     scheduling_present: bool
     scheduling_pristine: bool
     client_name: str | None = None
+    service_hours_per_day: float | None = None
+    service_start_time: time | None = None
+    service_end_time: time | None = None
+    service_end_day_offset: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +96,8 @@ class OrderIntakeTermsBootstrapPreview:
     blockers: tuple[str, ...]
     apply_allowed: bool
     preview_fingerprint: str
+    before_service_time: IntakeServiceTimeSnapshot | None = None
+    after_service_time: IntakeServiceTime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +110,7 @@ class OrderIntakeTermsBootstrapReceipt:
     changed_fields: tuple[str, ...]
     preview_fingerprint: str
     replayed: bool
+    service_time: IntakeServiceTime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +125,7 @@ class OrderIntakeCompletionPreview:
     blockers: tuple[str, ...]
     apply_allowed: bool
     preview_fingerprint: str
+    current_service_time: IntakeServiceTimeSnapshot | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,6 +159,7 @@ class OrderIntakeTermsBootstrapRepository(Protocol):
         *,
         update_start_date: bool,
         update_service_days: bool,
+        service_time: IntakeServiceTime | None = None,
     ) -> int: ...
 
     def complete_intake(
@@ -148,6 +196,8 @@ class OrderIntakeTermsBootstrapApplication:
         case_no: str,
         proposed_start_date: date,
         proposed_service_days: int,
+        *,
+        proposed_service_time: IntakeServiceTime | None = None,
     ) -> OrderIntakeTermsBootstrapPreview:
         return preview_case(
             self._repository,
@@ -155,6 +205,7 @@ class OrderIntakeTermsBootstrapApplication:
             proposed_start_date,
             proposed_service_days,
             for_update=False,
+            proposed_service_time=proposed_service_time,
         )
 
     def apply(
@@ -167,6 +218,8 @@ class OrderIntakeTermsBootstrapApplication:
         idempotency_key: str,
         actor: str,
         reason: str,
+        *,
+        proposed_service_time: IntakeServiceTime | None = None,
     ) -> OrderIntakeTermsBootstrapReceipt:
         _validate_command_fields(
             expected_lifecycle_version,
@@ -187,6 +240,7 @@ class OrderIntakeTermsBootstrapApplication:
                 idempotency_key,
                 actor,
                 reason,
+                proposed_service_time=proposed_service_time,
             )
             unit_of_work.commit()
         return receipt
@@ -232,6 +286,7 @@ def preview_case(
     proposed_service_days: int,
     *,
     for_update: bool,
+    proposed_service_time: IntakeServiceTime | None = None,
 ) -> OrderIntakeTermsBootstrapPreview:
     normalized_case_no = str(case_no).strip()
     if not normalized_case_no:
@@ -247,18 +302,22 @@ def preview_case(
 
     start_changed = facts.start_date != proposed_start_date
     service_days_changed = facts.service_days != proposed_service_days
+    time_changed = proposed_service_time is not None and _service_time_snapshot(facts).canonical_payload() != proposed_service_time.canonical_payload()
     blockers = _blockers(
         facts,
         proposed_start_date,
         proposed_service_days,
         start_changed=start_changed,
         service_days_changed=service_days_changed,
+        service_time_changed=time_changed,
+        service_time_proposed=proposed_service_time is not None,
     )
     changed_fields = tuple(
         field
         for field, changed in (
             ("start_date", start_changed),
             ("service_days", service_days_changed),
+            ("service_time", time_changed),
         )
         if changed
     )
@@ -279,6 +338,9 @@ def preview_case(
         "changed_fields": changed_fields,
         "blockers": blockers,
     }
+    if proposed_service_time is not None:
+        payload['before_service_time'] = _service_time_snapshot(facts).canonical_payload()
+        payload['after_service_time'] = proposed_service_time.canonical_payload()
     return OrderIntakeTermsBootstrapPreview(
         case_no=facts.case_no,
         lifecycle_version=facts.lifecycle_version,
@@ -290,6 +352,8 @@ def preview_case(
         blockers=blockers,
         apply_allowed=not blockers,
         preview_fingerprint=fingerprint_payload(payload).value,
+        before_service_time=_service_time_snapshot(facts) if proposed_service_time is not None else None,
+        after_service_time=proposed_service_time,
     )
 
 
@@ -303,10 +367,11 @@ def apply_case(
     idempotency_key: str,
     actor: str,
     reason: str,
+    *,
+    proposed_service_time: IntakeServiceTime | None = None,
 ) -> OrderIntakeTermsBootstrapReceipt:
     _validate_proposed_terms(proposed_start_date, proposed_service_days)
-    request_fingerprint = fingerprint_payload(
-        {
+    request_payload = {
             "case_no": str(case_no).strip(),
             "proposed_start_date": proposed_start_date.isoformat(),
             "proposed_service_days": proposed_service_days,
@@ -315,7 +380,9 @@ def apply_case(
             "actor": actor.strip(),
             "reason": reason.strip(),
         }
-    ).value
+    if proposed_service_time is not None:
+        request_payload['proposed_service_time'] = proposed_service_time.canonical_payload()
+    request_fingerprint = fingerprint_payload(request_payload).value
     stored = repository.load_receipt(_FAMILY, idempotency_key)
     if stored is not None:
         if stored["request_fingerprint"] != request_fingerprint:
@@ -330,6 +397,7 @@ def apply_case(
         proposed_start_date,
         proposed_service_days,
         for_update=True,
+        proposed_service_time=proposed_service_time,
     )
     if current.lifecycle_version != expected_lifecycle_version:
         raise OrderIntakeTermsBootstrapError(
@@ -345,6 +413,7 @@ def apply_case(
             blockers=current.blockers,
         )
 
+    time_arguments = {'service_time': current.after_service_time} if 'service_time' in current.changed_fields else {}
     new_version = repository.update_early_terms(
         current.case_no,
         current.lifecycle_version,
@@ -352,6 +421,7 @@ def apply_case(
         current.after_service_days,
         update_start_date="start_date" in current.changed_fields,
         update_service_days="service_days" in current.changed_fields,
+        **time_arguments,
     )
     readback = repository.load_case(current.case_no, for_update=True)
     if (
@@ -360,6 +430,7 @@ def apply_case(
         or readback.start_date != current.after_start_date
         or readback.service_days != current.after_service_days
         or readback.status not in _TERMS_REPAIR_STATUSES
+        or (current.after_service_time is not None and _service_time_snapshot(readback).canonical_payload() != current.after_service_time.canonical_payload())
     ):
         raise OrderIntakeTermsBootstrapError(
             "order_intake_terms_bootstrap_readback_failed"
@@ -374,6 +445,7 @@ def apply_case(
         changed_fields=current.changed_fields,
         preview_fingerprint=current.preview_fingerprint,
         replayed=False,
+        service_time=current.after_service_time,
     )
     repository.save_receipt(
         _FAMILY,
@@ -429,6 +501,7 @@ def preview_completion_case(
         blockers=blockers,
         apply_allowed=not missing_fields and not blockers,
         preview_fingerprint=fingerprint_payload(payload).value,
+        current_service_time=_service_time_snapshot(facts),
     )
 
 
@@ -524,11 +597,17 @@ def _blockers(
     *,
     start_changed: bool,
     service_days_changed: bool,
+    service_time_changed: bool = False,
+    service_time_proposed: bool = False,
 ) -> tuple[str, ...]:
     blockers: list[str] = []
     historical_repair = facts.status in _HISTORICAL_TERMS_REPAIR_STATUSES
     if facts.status not in _TERMS_REPAIR_STATUSES:
         blockers.append("order_intake_terms_bootstrap_status_not_eligible")
+    if service_time_proposed and facts.status not in _EARLY_TERMS_STATUSES:
+        blockers.append('order_intake_terms_bootstrap_service_time_status_not_eligible')
+    if service_time_proposed and all(value is not None for value in _service_time_snapshot(facts).canonical_payload().values()):
+        blockers.append('order_intake_terms_bootstrap_service_time_already_complete')
     if facts.actual_start_date is not None and not historical_repair:
         blockers.append("order_intake_terms_bootstrap_actual_start_exists")
     if facts.service_data_locked:
@@ -541,7 +620,7 @@ def _blockers(
         blockers.append("order_intake_terms_bootstrap_scheduling_not_pristine")
     if facts.service_days is not None and facts.service_days < 0:
         blockers.append("order_intake_terms_bootstrap_current_service_days_invalid")
-    if not start_changed and not service_days_changed:
+    if not start_changed and not service_days_changed and not service_time_changed:
         blockers.append("order_intake_terms_bootstrap_nothing_changed")
     return tuple(sorted(set(blockers)))
 
@@ -624,7 +703,7 @@ def _validate_command_fields(
 
 
 def _receipt_payload(receipt: OrderIntakeTermsBootstrapReceipt) -> dict[str, object]:
-    return {
+    payload = {
         "receipt_key": receipt.receipt_key,
         "case_no": receipt.case_no,
         "lifecycle_version": receipt.lifecycle_version,
@@ -633,6 +712,9 @@ def _receipt_payload(receipt: OrderIntakeTermsBootstrapReceipt) -> dict[str, obj
         "changed_fields": list(receipt.changed_fields),
         "preview_fingerprint": receipt.preview_fingerprint,
     }
+    if receipt.service_time is not None:
+        payload['service_time'] = receipt.service_time.canonical_payload()
+    return payload
 
 
 def _receipt_from_snapshot(snapshot, *, replayed: bool) -> OrderIntakeTermsBootstrapReceipt:
@@ -646,6 +728,12 @@ def _receipt_from_snapshot(snapshot, *, replayed: bool) -> OrderIntakeTermsBoots
         changed_fields=tuple(str(value) for value in payload["changed_fields"]),
         preview_fingerprint=str(payload["preview_fingerprint"]),
         replayed=replayed,
+        service_time=IntakeServiceTime(
+            float(payload['service_time']['service_hours_per_day']),
+            time.fromisoformat(payload['service_time']['start_time']),
+            time.fromisoformat(payload['service_time']['end_time']),
+            int(payload['service_time']['end_day_offset']),
+        ) if payload.get('service_time') is not None else None,
     )
 
 
@@ -679,6 +767,11 @@ def _completion_receipt_from_snapshot(
 
 def _iso(value: date | None) -> str | None:
     return None if value is None else value.isoformat()
+
+
+def _service_time_snapshot(facts: OrderIntakeTermsBootstrapFacts) -> IntakeServiceTimeSnapshot:
+    return IntakeServiceTimeSnapshot(facts.service_hours_per_day, facts.service_start_time,
+                                    facts.service_end_time, facts.service_end_day_offset)
 
 
 __all__ = [

@@ -19,9 +19,12 @@ from api.dependencies.order_auto_completion import (
 )
 from api.schemas.base import BaseResponse
 from api.schemas.order_auto_completion import (
+    OrderAutoCompletionStatusView,
     OrderAutoCompletionPreviewView,
     OrderAutoCompletionReceiptView,
 )
+from dataclasses import asdict
+from shared_kernel.clock import TAIPEI_TIME_ZONE
 from shared_kernel.errors import ErrorCategory, TypedError
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
@@ -34,6 +37,20 @@ from subsystems.orders.auto_completion_workflow import (
 
 router = APIRouter(prefix="/api/v1/orders", tags=["Order Service Completion"])
 _RETRYABLE_MYSQL_CODES = frozenset({1205, 1213})
+
+
+@router.get('/{case_no}/service-completion', response_model=BaseResponse[OrderAutoCompletionStatusView])
+def query_order_auto_completion(
+    case_no: str = Path(..., min_length=1, max_length=50),
+    principal: AdminPrincipal = Depends(require_system_admin),
+    application: OrderAutoCompletionApplication = Depends(get_order_auto_completion_application),
+):
+    del principal
+    request = AutoCompletionPreviewRequest(case_no, datetime.now(TAIPEI_TIME_ZONE), CorrelationId(f'auto-completion-status:{case_no}'))
+    try:
+        return BaseResponse(data=asdict(application.query(request)), message='成功取得自動完工狀態')
+    except AutoCompletionWorkflowError as error:
+        raise _typed_http_error(error.error) from error
 
 
 class OrderAutoCompletionApplyBody(BaseModel):

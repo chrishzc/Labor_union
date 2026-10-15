@@ -54,6 +54,13 @@ const reportReceipt = {
 
 const envelope = (data: unknown) => ({ success: true, message: 'ok', data, error: null });
 
+const signedTarget = { scope: 'client' as const, matching_segment_id: null, document_version_id: 32 };
+const finalInput = { session_id: 'ces_1234567890abcdef1234567890abcdef', expected_status_version: 3, documents: [
+  { ...signedTarget, staging_id: 'cfs_1234567890abcdef1234567890abcdef', expected_staging_version: 1 },
+  { scope: 'staff' as const, matching_segment_id: 41, document_version_id: 31, staging_id: 'cfs_abcdefabcdefabcdefabcdefabcdefab', expected_staging_version: 1 },
+] };
+const signedPreviews = finalInput.documents.map(row => ({ ...row, filename: row.scope === 'client' ? 'client-signed.pdf' : 'staff-signed.pdf', mime_type: 'application/pdf' as const, size_bytes: 20, blockers: [], can_apply: true }));
+
 describe('contractExternalSigningClient', () => {
   it('decodes normal preparation data without inventing a signing session', async () => {
     const preparing = {
@@ -70,6 +77,16 @@ describe('contractExternalSigningClient', () => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     vi.spyOn(sessionClient, 'getToken').mockReturnValue('session-token');
+  });
+
+  it('sends an independent reminder with all-target session context and the original command identity', async () => {
+    const identity = createExternalSigningCommandIdentity('signing-reminders');
+    const result = { receipt_id: identity.receiptId, session_id: sessionId, status_version: 3, replayed: false, manual_notification_targets: [] };
+    const post = vi.spyOn(transport, 'post').mockResolvedValue(envelope(result));
+    await expect(contractExternalSigningClient.sendSigningReminders('CASE-001', { session_id: sessionId, expected_status_version: 3 }, identity)).resolves.toEqual(result);
+    expect(post).toHaveBeenCalledWith('/api/v1/orders/CASE-001/contract-external-signing/reminders', { session_id: sessionId, expected_status_version: 3 }, expect.objectContaining({ headers: { 'Idempotency-Key': identity.idempotencyKey, 'X-Correlation-ID': identity.correlationId, 'X-Receipt-ID': identity.receiptId } }));
+    post.mockResolvedValueOnce(envelope({ ...result, status_version: 4 }));
+    await expect(contractExternalSigningClient.sendSigningReminders('CASE-001', { session_id: sessionId, expected_status_version: 3 }, identity)).rejects.toMatchObject({ code: 'SIGNING_REMINDER_RECEIPT_MISMATCH' });
   });
 
   it('strictly decodes the privacy-safe query and rejects storage locator drift', async () => {
@@ -240,31 +257,17 @@ describe('contractExternalSigningClient', () => {
   });
 
   it('keeps final Preview fingerprint private and uses an opaque preview token', async () => {
-    const preview = {
-      preview_token: `cp_${'A'.repeat(43)}`,
-      staging_id: 'cfs_1234567890abcdef1234567890abcdef',
-      expected_staging_version: 1,
-      filename: 'final-signed.pdf',
-      mime_type: 'application/pdf' as const,
-      size_bytes: 20,
-      blockers: [],
-      can_apply: true as const,
-    };
+    const preview = { preview_token: `cp_${'A'.repeat(43)}`, session_id: finalInput.session_id, expected_status_version: 3, documents: signedPreviews, blockers: [], can_apply: true };
     const post = vi.spyOn(transport, 'post').mockResolvedValueOnce(envelope(preview));
-    await expect(contractExternalSigningClient.previewFinalDocument('CASE-001', {
-      staging_id: preview.staging_id,
-      expected_status_version: 3,
-    })).resolves.toEqual(preview);
-
-    vi.mocked(post).mockResolvedValueOnce(envelope({ ...preview, preview_fingerprint: 'a'.repeat(64) }));
-    await expect(contractExternalSigningClient.previewFinalDocument('CASE-001', {
-      staging_id: preview.staging_id,
-      expected_status_version: 3,
-    })).rejects.toThrow();
+    await expect(contractExternalSigningClient.previewFinalDocument('CASE-001', finalInput)).resolves.toEqual(preview);
+    post.mockResolvedValueOnce(envelope({ ...preview, preview_fingerprint: 'a'.repeat(64) }));
+    await expect(contractExternalSigningClient.previewFinalDocument('CASE-001', finalInput)).rejects.toThrow();
   });
 
   it('uses contract-owned staging and rejects any digest leaking from its response', async () => {
     const staged = {
+      ...signedTarget,
+      expected_staging_version: 1,
       staging_id: 'cfs_1234567890abcdef1234567890abcdef',
       filename: 'final-signed.pdf',
       mime_type: 'application/pdf' as const,
@@ -275,7 +278,7 @@ describe('contractExternalSigningClient', () => {
     const identity = createExternalSigningCommandIdentity('final-stage');
     const file = new File(['%PDF-1.7\n%%EOF'], staged.filename, { type: staged.mime_type });
 
-    await expect(contractExternalSigningClient.stageFinalDocument('CASE-001', file, identity)).resolves.toEqual(staged);
+    await expect(contractExternalSigningClient.stageFinalDocument('CASE-001', file, identity, signedTarget, { session_id: finalInput.session_id, expected_status_version: 3 })).resolves.toEqual(staged);
     expect(post).toHaveBeenCalledWith(
       '/api/v1/orders/CASE-001/contract-external-signing/final-document/staging',
       expect.any(FormData),
@@ -288,7 +291,7 @@ describe('contractExternalSigningClient', () => {
     );
 
     vi.mocked(post).mockResolvedValueOnce(envelope({ ...staged, sha256_digest: 'a'.repeat(64) }));
-    await expect(contractExternalSigningClient.stageFinalDocument('CASE-001', file, identity)).rejects.toThrow();
+    await expect(contractExternalSigningClient.stageFinalDocument('CASE-001', file, identity, signedTarget, { session_id: finalInput.session_id, expected_status_version: 3 })).rejects.toThrow();
   });
 
   it('downloads only a current no-store PDF attachment with PDF magic and EOF', async () => {
@@ -352,26 +355,9 @@ describe('contractExternalSigningClient', () => {
     const identity = createExternalSigningCommandIdentity('final-apply');
 
     for (const previewToken of invalidTokens) {
-      post.mockResolvedValueOnce(envelope({
-        preview_token: previewToken,
-        staging_id: 'cfs_1234567890abcdef1234567890abcdef',
-        expected_staging_version: 1,
-        filename: 'final-signed.pdf',
-        mime_type: 'application/pdf',
-        size_bytes: 20,
-        blockers: [],
-        can_apply: true,
-      }));
-      await expect(contractExternalSigningClient.previewFinalDocument('CASE-001', {
-        staging_id: 'cfs_1234567890abcdef1234567890abcdef',
-        expected_status_version: 3,
-      })).rejects.toThrow();
-      await expect(contractExternalSigningClient.applyFinalDocument('CASE-001', {
-        staging_id: 'cfs_1234567890abcdef1234567890abcdef',
-        expected_staging_version: 1,
-        preview_token: previewToken,
-        expected_status_version: 3,
-      }, identity)).rejects.toThrow();
+      post.mockResolvedValueOnce(envelope({ preview_token: previewToken, session_id: finalInput.session_id, expected_status_version: 3, documents: signedPreviews, blockers: [], can_apply: true }));
+      await expect(contractExternalSigningClient.previewFinalDocument('CASE-001', finalInput)).rejects.toThrow();
+      await expect(contractExternalSigningClient.applyFinalDocument('CASE-001', { ...finalInput, preview_token: previewToken, signatures_confirmed: true }, identity)).rejects.toThrow();
     }
   });
 
@@ -439,6 +425,7 @@ describe('contractExternalSigningClient', () => {
       size_bytes: 20,
       status: 'completed' as const,
       integrity_verified: true as const,
+    documents: [],
       applied_at: '2026-08-26T10:00:00Z',
     };
     const get = vi.spyOn(transport, 'get')
@@ -465,6 +452,7 @@ describe('contractExternalSigningClient', () => {
       size_bytes: 20,
       status: 'completed',
       integrity_verified: true,
+      documents: [],
       applied_at: '2026-08-26T10:00:00Z',
     }));
 

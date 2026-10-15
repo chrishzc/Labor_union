@@ -5,12 +5,13 @@
 - subsystem: `orders`
 
 ## Responsibility
-呈現Orders-owned服務完成的既有Preview／Confirm／Apply與完成回讀。一般畫面只顯示目前案件狀態、正式服務日、完成時刻、必要確認與closed結果；owner名稱、lifecycle controls、fingerprint、idempotency及receipt等技術資訊不得穿透。不得改寫服務完成 eligibility、Orders state machine或後續Finance／Payables結算責任。
+一般工作台呈現 Orders-owned 預計服務完成時間與自動完工狀態，移除人工完工按鈕。既有 Preview／Apply 與恢復元件保留供既有 consumer 使用；不得改寫服務完成 eligibility、Orders state machine 或後續 Finance／Payables 結算責任。
 
 ## Implementation
 - primary:
   - `ui_react/src/api/orders/order_service_completion_client.ts`
   - `ui_react/src/components/OrderServiceCompletionActions.tsx`
+  - `ui_react/src/components/OrderAutomaticCompletionStatus.tsx` — completion status Query and owner readback；沒有 completion mutation。
   - `ui_react/src/adapters/orders/order_mutation_flow_store.ts` — per-case completion command／receipt recovery state。
   - `ui_react/src/components/OrderWorkbenchV2Drawer.tsx`
 
@@ -22,7 +23,7 @@
 - layout_status: `custom_current`
 - test_root: `ui_react/src/tests/order_service_completion_actions.test.tsx`
 - test_root: `ui_react/src/tests/order_service_completion_client.test.ts`
-- test_root: `ui_react/src/tests/order_workbench_v2_service_completion.test.tsx` — 既有案件入口至完成操作 callback 測試。
+- test_root: `ui_react/src/tests/order_workbench_v2_service_completion.test.tsx` — automatic status、移除 manual completion、owner refresh callback。
 - routing: `.arch-map/tests/domains/orders/subsystems/orders/modules/service-completion-presentation.md`
 
 ## Change triggers

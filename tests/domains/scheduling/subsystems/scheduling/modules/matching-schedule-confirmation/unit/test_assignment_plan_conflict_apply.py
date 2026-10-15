@@ -1,5 +1,6 @@
 from dataclasses import replace
 from datetime import date
+from domains.scheduling.commitment_execution import CommitmentExecutionMismatch
 import pytest
 from domains.scheduling.assignment_plan import StaffOccupancyFact
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
@@ -29,6 +30,19 @@ def test_actual_conflict_appearing_after_preview_rejects_apply_without_commit():
         workflow.apply(request)
     assert error.value.error.code == "staff_occupancy_conflict"
     assert unit_of_work.committed is False
+
+
+def test_preview_reports_signed_dates_mismatch_before_accepting_a_background_job():
+    client, payroll, orders = _ports()
+    repository = _ReplayRepository(_facts(), None)
+    def mismatch(*_):
+        raise CommitmentExecutionMismatch('commitment_execution_mismatch')
+    repository.load_for_preview = mismatch
+    workflow = AssignmentPlanWorkflow(repository, client, payroll, orders, _UnitOfWork)
+    with pytest.raises(AssignmentPlanWorkflowError) as error:
+        workflow.preview(AssignmentPlanPreviewRequest('CASE-1', _intent(), CorrelationId('preview')))
+    assert error.value.error.category.value == 'domain_blocked'
+    assert error.value.error.code == 'commitment_execution_mismatch'
 
 
 def test_proposed_buffer_overlapping_other_actual_service_does_not_block_preview():

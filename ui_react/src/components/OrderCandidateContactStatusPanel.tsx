@@ -6,9 +6,11 @@ import {
   type CandidateContactPool,
   type CandidateInformationSendCommand,
   type CandidateInformationPreview,
+  type CandidateInformationKind,
 } from '../api/scheduling/candidate_contact_pool_client';
 import { ApiHttpError } from '../api/shared/typed_errors';
 import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_store';
+import { OrderCandidateInformationPanel, OrderCandidateInformationSendPanel, CANDIDATE_INFORMATION_LABELS } from './OrderCandidateInformationPanel';
 
 interface OrderCandidateContactStatusPanelProps {
   caseNo: string;
@@ -18,6 +20,9 @@ interface OrderCandidateContactStatusPanelProps {
   onPreviewInformation?: (kind: 1 | 2) => void;
   revision?: number;
   onEditStateChange?: (state: { dirty: boolean; busy: boolean }) => void;
+  presentation?: 'legacy' | 'workbench';
+  onOpenCustomerConfirmation?: (candidateId: number) => void;
+  focusedCandidateId?: number;
 }
 
 type ContactStatusState =
@@ -71,19 +76,26 @@ function errorMessage(error: unknown): string {
 }
 
 function deliveryStatus(
-  delivery: CandidateContact['information']['1'] | CandidateContact['information']['2'],
+  delivery: CandidateContact['information']['1'] | CandidateContact['information']['2'] | undefined,
+  compact = false,
 ): string {
-  if (delivery === null) return '尚無紀錄';
+  if (delivery == null) return '尚無紀錄';
   const labels = { queued: '等待發送', pending: '處理中', sent: '已發送', manually_confirmed: '已人工確認', retryable_failed: '發送未完成', failed: '發送失敗', cancelled: '已取消發送' };
-  return `${labels[delivery.status]} · ${delivery.sent_at}`;
+  return `${labels[delivery.status]} · ${compact ? delivery.sent_at.replace('T', ' ').slice(0, 16) : delivery.sent_at}`;
 }
 
-export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPanelProps> = ({ caseNo, onObserved, onAddCandidates, focusWillingness = false, revision = 0, onEditStateChange }) => {
+export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPanelProps> = ({ caseNo, onObserved, onAddCandidates, focusWillingness = false, revision = 0, onEditStateChange, presentation = 'legacy', onOpenCustomerConfirmation, focusedCandidateId }) => {
   const [state, setState] = useState<ContactStatusState>({ status: 'idle' });
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [sendPreview, setSendPreview] = useState<{ candidateId: number; kind: 1 | 2 } | null>(null);
   const [reasonDrafts, setReasonDrafts] = useState<Record<number, string>>({});
   const [willingnessNotices, setWillingnessNotices] = useState<Record<number, string>>({});
+  const [sharedInformation, setSharedInformation] = useState<{ kind?: CandidateInformationKind } | null>(null);
+  const [informationTarget, setInformationTarget] = useState<{ candidateId: number; kind: CandidateInformationKind } | null>(null);
+  const [informationBusy, setInformationBusy] = useState(false);
+  const [informationRevision, setInformationRevision] = useState(0);
+  const [responseTarget, setResponseTarget] = useState<{ id: number; name: string } | null>(null);
+  const [responseChoice, setResponseChoice] = useState<'willing' | 'unwilling' | ''>('');
   const [, setFlowRevision] = useState(0);
   const mounted = useRef(false);
   const activeCaseNo = useRef(caseNo);
@@ -96,10 +108,19 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
     candidateId: number;
   }>());
   const informationInFlight = useRef(new Set<string>());
+  const focusedCandidate = useRef<string | null>(null);
+  useEffect(() => {
+    const identity = `${caseNo}:${focusedCandidateId}`;
+    if (presentation === 'workbench' && focusedCandidateId !== undefined && state.status === 'ready' && focusedCandidate.current !== identity) {
+      const card = document.getElementById(`candidate-inquiry-${caseNo}-${focusedCandidateId}`);
+      if (card) { card.focus(); card.scrollIntoView({ block: 'nearest' }); focusedCandidate.current = identity; }
+    }
+  }, [caseNo, focusedCandidateId, state, presentation]);
   const candidateInformationFlows = orderMutationFlowStore.getCandidateInformationForCase(caseNo);
   const pendingStatus = (status: string) => ['applying', 'observing', 'outcome_unknown', 'observation_failed'].includes(status);
-  const protectedOperation = candidateInformationFlows.some((flow) => pendingStatus(flow.status))
+  const mutationPending = candidateInformationFlows.some((flow) => pendingStatus(flow.status))
     || orderMutationFlowStore.getCandidateWillingnessForCase(caseNo).some((flow) => pendingStatus(flow.status));
+  const protectedOperation = mutationPending || informationBusy;
   const hasDraft = Object.values(reasonDrafts).some((value) => value.trim().length > 0);
   useEffect(() => { onEditStateChange?.({ dirty: hasDraft, busy: protectedOperation }); }, [hasDraft, protectedOperation, onEditStateChange]);
   useEffect(() => () => { onEditStateChange?.({ dirty: false, busy: false }); }, [onEditStateChange]);
@@ -190,10 +211,8 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
     try {
       const readback = await candidateContactPoolClient.query(command.caseNo);
       const candidates = readback.candidates.filter((candidate) => candidate.id === command.candidateId);
-      const delivery = candidates[0] && (command.infoType === 1
-        ? candidates[0].information['1']
-        : candidates[0].information['2']);
-      if (readback.case_no !== command.caseNo || candidates.length !== 1 || delivery === null) {
+      const delivery = candidates[0]?.information[String(command.infoType) as '1' | '2' | '3'];
+      if (readback.case_no !== command.caseNo || candidates.length !== 1 || !delivery) {
         throw new Error('寄送任務回讀與本次操作不一致。');
       }
       if (
@@ -241,6 +260,7 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
         status: 'observation_failed', command, receipt, error: null,
       });
       await observeInformation(command);
+      return true;
     } catch (error) {
       const rejected = error instanceof ApiHttpError
         && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429;
@@ -257,17 +277,18 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
             : '寄送結果尚未確認；請確認寄送結果。',
         });
       }
+      return false;
     } finally {
       informationInFlight.current.delete(key);
     }
   };
 
-  const retryInformation = (candidateId: number, infoType: 1 | 2) => {
+  const retryInformation = (candidateId: number, infoType: CandidateInformationKind) => {
     const current = orderMutationFlowStore.getCandidateInformation(caseNo, candidateId, infoType);
     if (current?.status === 'outcome_unknown') void submitInformation(current.command);
   };
 
-  const retryInformationReadback = (candidateId: number, infoType: 1 | 2) => {
+  const retryInformationReadback = (candidateId: number, infoType: CandidateInformationKind) => {
     const current = orderMutationFlowStore.getCandidateInformation(caseNo, candidateId, infoType);
     if (current?.status === 'observation_failed' && current.receipt) void observeInformation(current.command);
   };
@@ -309,10 +330,11 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
           setState({ status: 'ready', data: readback });
         }
         setWillingnessNotices((notices) => ({ ...notices, [command.candidateId]: '回覆已儲存。' }));
-        setReasonDrafts((drafts) => ({ ...drafts, [command.candidateId]: '' }));
+        setReasonDrafts((drafts) => { const next = { ...drafts }; delete next[command.candidateId]; return next; });
         onObserved?.();
       }
       orderMutationFlowStore.clearCandidateWillingness(command.caseNo, command.candidateId);
+      return true;
     } catch {
       if (
         controller.signal.aborted
@@ -344,7 +366,13 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
       ? state.data.candidates.find((candidate) => candidate.id === candidateId)
       : undefined;
     const saved = orderMutationFlowStore.getCandidateWillingness(caseNo, candidateId);
-    if (saved?.status !== 'outcome_unknown' && currentCandidate?.willingness === willingness) return;
+    if (saved?.status !== 'outcome_unknown' && currentCandidate?.willingness === willingness) {
+      if (presentation === 'legacy') return;
+      if ((currentCandidate.reason ?? '') === reason.trim()) {
+        setMutationError('目前已記錄相同意願與備註。');
+        return false;
+      }
+    }
     if (
       saved?.status === 'applying'
       || saved?.status === 'observing'
@@ -386,7 +414,7 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
       orderMutationFlowStore.setCandidateWillingness(command.caseNo, {
         status: 'observation_failed', command, receipt, error: null,
       });
-      await observeWillingness(command.candidateId);
+      return await observeWillingness(command.candidateId);
     } catch (error) {
       const rejected = error instanceof ApiHttpError
         && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429;
@@ -420,7 +448,11 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
 
   return (
     <section className="order-candidate-list" aria-label={`案件 ${caseNo} 候選聯絡狀態`}>
-      <header className="order-candidate-list-heading"><div><h3>候選月嫂</h3><p>人選、聯絡紀錄與回覆集中在這裡，不必切換不同候選池。</p></div>
+      <header className="order-candidate-list-heading"><div><h3>候選月嫂</h3><p>人選、聯絡紀錄與回覆集中在這裡。</p></div>
+      <div className="order-case-action-row">{presentation === 'workbench' && <>
+        <button type="button" disabled={protectedOperation} onClick={() => setSharedInformation({})}>查看訂單資訊</button>
+        <button type="button" className="btn-primary-action" disabled={protectedOperation} onClick={onAddCandidates}>新增候選月嫂</button>
+      </>}
       <button
         type="button"
         className="order-v2-open-drawer"
@@ -429,10 +461,11 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
       >
         {state.status === 'loading' ? '讀取中…' : '重新讀取候選清單'}
       </button>
+      </div>
       </header>
       {state.status === 'idle' && <div className="order-case-empty"><h4>查看已加入的人選</h4><p>讀取候選清單以查看意願與聯絡紀錄；要加入人選，請切換「新增候選月嫂」。</p></div>}
 
-      {mutationError !== null && <p className="order-v2-drawer-error" role="alert">{mutationError}</p>}
+      {mutationError !== null && responseTarget === null && informationTarget === null && <p className="order-v2-drawer-error" role="alert">{mutationError}</p>}
 
       {state.status === 'error' && (
         <div className="order-v2-notice blocked" role="alert">
@@ -484,6 +517,55 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
                 || willingnessFlow?.status === 'observing';
               const informationOne = orderMutationFlowStore.getCandidateInformation(caseNo, candidate.id, 1);
               const informationTwo = orderMutationFlowStore.getCandidateInformation(caseNo, candidate.id, 2);
+              if (presentation === 'workbench') return <article className="order-candidate-card compact" key={candidate.id} id={`candidate-inquiry-${caseNo}-${candidate.id}`} tabIndex={-1}>
+                <div className="candidate-card-identity"><h4>{candidate.staff_name}</h4><p>{candidate.service_start_date} ～ {candidate.service_end_date}</p>
+                  <span className={`order-candidate-willingness ${candidate.willingness}`}>{candidate.status === 'withdrawn' ? '已退出' : candidate.status === 'selected' ? '已選定' : candidate.willingness === 'pending' && !candidate.information['1'] && !candidate.information['2'] ? '尚未詢問' : ({ pending: '待回覆', willing: '願意承接', unwilling: '無意願' })[candidate.willingness]}</span>
+                </div>
+                <dl className="order-candidate-delivery">{([1, 2, 3] as const).map(value => <div key={value}>
+                  <dt>{CANDIDATE_INFORMATION_LABELS[value]}</dt><dd><span>{deliveryStatus(candidate.information[String(value) as '1' | '2' | '3'], true)}</span>
+                  <button type="button" aria-label={`寄送${CANDIDATE_INFORMATION_LABELS[value]}給 ${candidate.staff_name}`}
+                    disabled={candidate.status !== 'active' || protectedOperation} onClick={() => { setMutationError(null); setInformationTarget({ candidateId: candidate.id, kind: value }); }}>寄送</button></dd>
+                </div>)}</dl>
+                {informationTarget?.candidateId === candidate.id && <OrderCandidateInformationSendPanel
+                  key={`${caseNo}:${candidate.id}:${informationTarget.kind}`} caseNo={caseNo} candidate={candidate} kind={informationTarget.kind}
+                  revision={informationRevision} blocked={mutationPending} onSubmit={submitInformation} onClose={() => setInformationTarget(null)}
+                  onBusyChange={setInformationBusy} onViewInformation={kind => setSharedInformation({ kind })} sendError={mutationError} />}
+                {candidate.reason && <p>詢問備註：{candidate.reason}</p>}
+                <div className="order-case-action-row">
+                  <button type="button" aria-label={`手動記錄接案意願（${candidate.staff_name}）`} aria-expanded={responseTarget?.id === candidate.id}
+                    aria-controls={`candidate-willingness-${caseNo}-${candidate.id}`} disabled={candidate.status !== 'active' || protectedOperation} onClick={() => {
+                    if (responseTarget?.id === candidate.id) { setResponseTarget(null); return; }
+                    setResponseTarget({ id: candidate.id, name: candidate.staff_name });
+                    setResponseChoice(candidate.willingness === 'pending' ? '' : candidate.willingness);
+                    setReasonDrafts(drafts => ({ ...drafts, [candidate.id]: drafts[candidate.id] ?? candidate.reason ?? '' }));
+                    setMutationError(null);
+                  }}>手動記錄接案意願</button>
+                  {candidate.willingness === 'willing' && candidate.status === 'active' && <button type="button" className="candidate-confirmation-link" disabled={protectedOperation} onClick={() => onOpenCustomerConfirmation?.(candidate.id)}>前往客戶確認準備 →</button>}
+                </div>
+                {responseTarget?.id === candidate.id && <form className="candidate-willingness-form" id={`candidate-willingness-${caseNo}-${candidate.id}`}
+                  aria-label={`手動記錄接案意願（${candidate.staff_name}）`} onSubmit={event => {
+                    event.preventDefault(); if (!responseChoice) return;
+                    void submitWillingness(candidate.id, responseChoice, reasonDrafts[candidate.id] ?? '').then(saved => { if (saved) setResponseTarget(null); });
+                  }}>
+                  <h4>手動記錄接案意願</h4>
+                  <fieldset disabled={protectedOperation}><legend>初步接案意願</legend>
+                    <label><input type="radio" name="candidate-response" value="willing" required checked={responseChoice === 'willing'} onChange={() => setResponseChoice('willing')} />願意承接</label>
+                    <label><input type="radio" name="candidate-response" value="unwilling" required checked={responseChoice === 'unwilling'} onChange={() => setResponseChoice('unwilling')} />無意願</label>
+                    <label className="candidate-willingness-note">詢問結果備註<textarea rows={3} maxLength={500} required={responseChoice === 'unwilling'} value={reasonDrafts[candidate.id] ?? ''}
+                      onChange={event => setReasonDrafts(drafts => ({ ...drafts, [candidate.id]: event.target.value }))} /></label>
+                    <p>願意承接可留空；無意願需填寫原因。只記錄初步意願，尚未形成正式指派。</p>
+                  </fieldset>
+                  {mutationError && <p role="alert">{mutationError}</p>}
+                  <div className="order-case-action-row">
+                    <button type="submit" className="btn-primary-action" disabled={protectedOperation || !responseChoice}>儲存接案意願</button>
+                    <button type="button" disabled={protectedOperation} onClick={() => setResponseTarget(null)}>收起填寫</button>
+                  </div>
+                </form>}
+                {(willingnessFlow?.status === 'applying' || willingnessFlow?.status === 'observing') && <p role="status">正在保存與確認詢問結果…</p>}
+                {willingnessFlow?.status === 'outcome_unknown' && <p role="alert">{willingnessFlow.error}<button type="button" onClick={() => retryWillingness(candidate.id)}>確認目前回覆</button></p>}
+                {willingnessFlow?.status === 'observation_failed' && <p role="alert">{willingnessFlow.error}<button type="button" onClick={() => retryWillingnessReadback(candidate.id)}>重新讀取最新結果</button></p>}
+                {willingnessNotices[candidate.id] && <p role="status">{willingnessNotices[candidate.id]}</p>}
+              </article>;
               return (
                 <article className="order-candidate-card" key={candidate.id}>
                   <header><h4>{candidate.staff_name}</h4><span className={`order-candidate-willingness ${candidate.willingness}`}>{candidate.status === 'withdrawn' ? '已退出' : candidate.status === 'selected' ? '已選定' : ({ pending: '待回覆', willing: '願意承接', unwilling: '不願承接' })[candidate.willingness]}</span></header>
@@ -554,6 +636,8 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
           </div>
         </>
       )}
+      {presentation === 'workbench' && sharedInformation && <OrderCandidateInformationPanel caseNo={caseNo} initialKind={sharedInformation.kind}
+        onClose={() => { setSharedInformation(null); setInformationRevision(value => value + 1); }} />}
     </section>
   );
 };

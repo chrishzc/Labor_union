@@ -54,6 +54,23 @@ def test_general_citizen_override_keeps_deposit_amount_and_allows_progression() 
     assert candidate.resulting_account_version == 4
 
 
+def test_current_gate_query_does_not_report_the_preview_result_as_an_active_override():
+    class ReadonlyRepository:
+        def load(self, selection, *, for_update):
+            assert selection.case_no == 'CASE-001'
+            assert for_update is False
+            return facts()
+    def forbidden_transaction():
+        raise AssertionError('readonly gate query must not open a write transaction')
+    workflow = DepositSkipWorkflow(ReadonlyRepository(), forbidden_transaction)
+    current = workflow.query(DepositSkipSelection('CASE-001'))
+    expected = workflow.preview(DepositSkipSelection('CASE-001'))
+    assert current.unpaid_progression_allowed is False
+    assert expected.override_active is True
+    assert current.deposit_required_ntd == 12000
+    assert current.deposit_net_received_ntd == 0
+
+
 def test_existing_override_repairs_pending_order_without_changing_finance_version() -> None:
     candidate = build_deposit_skip_candidate(
         DepositSkipFacts("CASE-001", 4, "一般市民", 12000, 0, True, "洽談中")

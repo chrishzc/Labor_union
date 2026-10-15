@@ -9,6 +9,7 @@
 
 ## Implementation
 - primary: `scripts/launchers/supervise_local_runtime.ps1`
+- private cycle composition: `api/dependencies/private_operations.py` — check-only handshake／heartbeat；正常 durable cycle 先 discover confirmed arrangements 與 due completion，再執行既有 canonical worker，不自行寫 Domain root。
 - entrypoint: `scripts/launchers/start_local_development.bat`
 - local-bypass Docker transport: `scripts/launchers/local_react_gateway.py`
 

@@ -13,6 +13,9 @@ from subsystems.orders.auto_completion_workflow import AutoCompleteOrderService
 class OrderAutoCompletionApplication:
     workflow: AutoCompleteOrderService
 
+    def query(self, request):
+        return self.workflow.query(request)
+
     def apply(self, request):
         return self.workflow.apply(request)
 

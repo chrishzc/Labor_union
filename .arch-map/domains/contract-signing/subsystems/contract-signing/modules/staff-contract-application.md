@@ -7,6 +7,8 @@
 ## Responsibility
 執行月嫂契約送出、簽回與人工簽約前承諾 application workflow；不建立 Scheduling execution assignment 或取代 Orders／Client Finance owner。
 
+簽約前承諾服務日沿用「無休／未選休假星期為連續服務」的正式裁決；非空且無法辨識的服務方式仍拒絕，不將未知資料當成連續服務。
+
 ## Implementation
 - primary:
   - `subsystems/contract_signing/staff_contract_application.py`

@@ -144,6 +144,7 @@ class MatchingPlanCustomerDecisionRequest(MatchingPlanEventIdentity):
 
 class MatchingPlanCancellationRequest(MatchingPlanEventIdentity):
     reason: str = Field(..., min_length=1, max_length=255)
+    expected_version: int | None = Field(default=None, ge=0)
 
 
 def _require_matching_actor(principal: AdminPrincipal, actor: str) -> None:
@@ -335,6 +336,8 @@ def record_matching_plan_willingness_route(
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:
+        if str(error) == "recommendation_has_assignment":
+            raise typed_http_error(409, "domain_blocked", "recommendation_has_assignment", "本案已有正式指派，請由正式換人或請假代班處理月嫂意願變更。", "") from error
         raise HTTPException(status_code=409, detail=str(error)) from error
 
 
@@ -514,12 +517,20 @@ def cancel_matching_plan_route(
         return BaseResponse(
             data=MatchingPlanCancellationReceiptView.model_validate(
                 cancel_matching_plan(
-                    case_no, plan_id, req.event_key, req.actor, req.reason
+                    case_no, plan_id, req.event_key, req.actor, req.reason, req.expected_version
                 )
             ),
             message="已取消目前配對組合並保留歷史",
         )
     except ValueError as error:
+        cancellation_errors = {
+            "recommendation_stale": ("conflict", "推薦資料已變更，請重新讀取後再確認換人。"),
+            "recommendation_has_assignment": ("domain_blocked", "本案已有正式指派，請走正式換人或請假代班流程。"),
+            "recommendation_lock_release_required": ("domain_blocked", "請先完成檔期釋放的預覽與確認，再重新推薦月嫂。"),
+        }
+        if str(error) in cancellation_errors:
+            category, message = cancellation_errors[str(error)]
+            raise typed_http_error(409, category, str(error), message, "") from error
         raise HTTPException(status_code=409, detail=str(error)) from error
 
 

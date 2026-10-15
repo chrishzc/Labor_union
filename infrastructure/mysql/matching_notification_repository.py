@@ -16,6 +16,7 @@ from domains.scheduling.matching_communication import (
     CaregiverWillingness,
     CustomerMatchingDecision,
     MatchingCommunicationConflictError,
+    MatchingDecisionNotReadyError,
     MatchingNotificationKind,
     MatchingPlanReference,
     MatchingResponseSource,
@@ -59,6 +60,9 @@ class MySqlMatchingNotificationRepository:
             responses = self._latest_responses(cursor, plan_id)
             deliveries = self._latest_deliveries(cursor, plan_id)
             manual_profiles = self._manual_profile_events(cursor, plan_id)
+            if plan["order_status"] == "訂單成立":
+                from infrastructure.mysql.replacement_matching_query import replacement_matching_open
+                plan["replacement_matching_open"] = replacement_matching_open(cursor, case_no)
         return _contact_state(plan, segments, responses, deliveries, manual_profiles)
 
     def get_manual_customer_profiles_result(
@@ -232,6 +236,14 @@ class MySqlMatchingNotificationRepository:
         existing = self._existing_response(idempotency_key, fingerprint)
         if existing is not None:
             return existing
+        if response_type == 'caregiver_willingness' and source is MatchingResponseSource.ADMIN:
+            with self._connection.cursor() as cursor:
+                cursor.execute('SELECT assignment.id FROM case_staff_assignments assignment '
+                               'JOIN scheduling_aggregates aggregate ON aggregate.case_no=assignment.case_no '
+                               'AND aggregate.effective_generation_id=assignment.generation_id '
+                               'WHERE assignment.case_no=%s LIMIT 1 FOR UPDATE', (plan.case_no,))
+                if cursor.fetchone() is not None:
+                    raise MatchingDecisionNotReadyError('recommendation_has_assignment')
         self._advance_version(plan)
         event_id = self._insert_response(
             plan,
@@ -246,6 +258,8 @@ class MySqlMatchingNotificationRepository:
             fingerprint,
             occurred_at,
         )
+        if response_type == 'caregiver_willingness' and source is MatchingResponseSource.ADMIN:
+            self._append_candidate_notice(plan, segment_id, response_value, actor_id, reason, event_id, occurred_at)
         if token_hash is not None:
             self._consume_interaction(token_hash, line_user_id, occurred_at)
         return MatchingResponseResult(
@@ -263,6 +277,31 @@ class MySqlMatchingNotificationRepository:
             segment_id=segment_id,
             idempotency_key=idempotency_key,
         )
+
+    def _append_candidate_notice(self, plan, segment_id, willingness, actor_id, reason, response_event_id, occurred_at):
+        """Keep a notified consent change in both current views, within the caller's single UoW."""
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                'SELECT entry.id,entry.pool_id FROM caregiver_candidate_contact_entries entry '
+                'JOIN caregiver_candidate_contact_pools pool ON pool.id=entry.pool_id '
+                'JOIN caregiver_matching_plan_segments segment ON segment.staff_id=entry.staff_id '
+                'WHERE pool.case_no=%s AND segment.plan_id=%s AND segment.id=%s '
+                "AND entry.active_marker=1 AND entry.status='active' "
+                'AND entry.service_start_date<=segment.assigned_start_date '
+                'AND entry.service_end_date>=segment.assigned_end_date ORDER BY entry.id FOR UPDATE',
+                (plan.case_no, plan.plan_id, segment_id),
+            )
+            entries = tuple(cursor.fetchall() or ())
+            payload = json.dumps({'willingness': willingness, 'reason': reason, 'source': 'admin',
+                                  'formal_plan_id': plan.plan_id, 'formal_segment_id': segment_id,
+                                  'formal_response_event_id': response_event_id}, ensure_ascii=False, sort_keys=True)
+            for entry in entries:
+                cursor.execute(
+                    'INSERT INTO caregiver_candidate_contact_events '
+                    '(pool_id,candidate_id,event_type,event_key,actor,payload,occurred_at) '
+                    "VALUES (%s,%s,'willingness_changed',%s,%s,%s,%s)",
+                    (entry['pool_id'], entry['id'], f"matching-notice:{response_event_id}:{entry['id']}", actor_id, payload, database_utc(occurred_at)),
+                )
 
     def get_response_result(
         self, idempotency_key: IdempotencyKey, fingerprint: str,
@@ -308,6 +347,34 @@ class MySqlMatchingNotificationRepository:
             "weekly_service_rows": weekly,
             "caregiver_resumes": resumes,
         }
+
+    def case_weekly_service_preview(self, case_no: str, service_dates: tuple[date, ...] | None = None) -> dict[str, object]:
+        from subsystems.scheduling.proposed_weekly_service_projection import project_order_weekly_service
+
+        with self._connection.cursor() as cursor:
+            cursor.execute("SELECT service_days,service_hours_per_day FROM orders WHERE case_no=%s", (case_no,))
+            order = cursor.fetchone()
+            cursor.execute(
+                "SELECT d.service_date FROM confirmed_service_date_versions v "
+                "JOIN confirmed_service_date_days d ON d.confirmed_version_id=v.id "
+                "WHERE v.case_no=%s AND v.is_current=1 ORDER BY d.ordinal", (case_no,),
+            )
+            saved = frozenset(_date(item["service_date"]) for item in cursor.fetchall())
+        if not isinstance(order, Mapping):
+            raise ValueError("order_information_target_not_found")
+        dates = frozenset(service_dates) if service_dates is not None else saved
+        hours = order.get("service_hours_per_day")
+        if hours is None or float(hours) <= 0:
+            raise ValueError("order_service_hours_invalid")
+        rows = project_order_weekly_service(dates, float(hours))
+        warnings = []
+        if not dates:
+            warnings.append("請先試算並保存預計服務日期，才能寄送每週服務說明。")
+        elif len(dates) != order.get("service_days"):
+            warnings.append("預計服務日期與約定天數不同，請重新確認。")
+        return {"case_no": case_no, "required_service_days": order.get("service_days"),
+                "projected_service_days": len(dates), "date_basis": "draft" if service_dates is not None else "confirmed" if saved else "planned",
+                "warnings": warnings, "rows": rows}
 
     def candidate_weekly_service_preview(
         self, case_no: str, candidate_id: int, service_dates: tuple[date, ...] | None = None,
@@ -490,6 +557,7 @@ def _contact_state(plan, segments, responses, deliveries, manual_profiles=()):
         delivery_map.get((None, "customer_profiles")),
         contact_segments,
         _manual_profile_evidence(manual_profiles, segments),
+        bool(plan.get("replacement_matching_open", False)),
     )
 
 
@@ -550,7 +618,10 @@ def _segment_contact(row, responses, deliveries):
         LineUserId(str(row["staff_line_user_id"])) if row.get("staff_line_user_id") else None,
         str(row["assigned_start_date"]),
         str(row["assigned_end_date"]),
-        CaregiverWillingness(responses.get((segment_id, "caregiver_willingness"), "pending")),
+        CaregiverWillingness(responses.get(
+            (segment_id, "caregiver_willingness"),
+            row.get("legacy_willingness") or row.get("candidate_willingness") or "pending",
+        )),
         deliveries.get((segment_id, "caregiver_info_1")),
         deliveries.get((segment_id, "caregiver_info_2")),
     )
@@ -744,7 +815,23 @@ AND customer_binding.line_user_id=c.line_user_id
 WHERE p.id=%s AND p.case_no=%s"""
 _SEGMENTS_SQL = """SELECT s.id AS segment_id,s.segment_order,s.staff_id,
 s.assigned_start_date,s.assigned_end_date,st.name AS staff_name,
-staff_binding.line_user_id AS staff_line_user_id FROM caregiver_matching_plan_segments s
+staff_binding.line_user_id AS staff_line_user_id,
+(SELECT JSON_UNQUOTE(JSON_EXTRACT(event.payload,'$.willingness'))
+ FROM caregiver_matching_plan_events event WHERE event.plan_id=s.plan_id
+ AND event.segment_id=s.id AND event.event_type='willingness_changed'
+ ORDER BY event.occurred_at DESC,event.id DESC LIMIT 1) AS legacy_willingness,
+(SELECT JSON_UNQUOTE(JSON_EXTRACT(event.payload,'$.willingness'))
+ FROM caregiver_candidate_contact_entries entry
+ JOIN caregiver_candidate_contact_pools pool ON pool.id=entry.pool_id
+ JOIN caregiver_matching_plans origin_plan ON origin_plan.case_no=pool.case_no
+ JOIN caregiver_candidate_contact_events event ON event.candidate_id=entry.id
+ AND event.pool_id=pool.id AND event.event_type='willingness_changed'
+ WHERE origin_plan.id=s.plan_id AND entry.staff_id=s.staff_id
+ AND entry.active_marker=1 AND entry.status='active'
+ AND entry.service_start_date<=s.assigned_start_date
+ AND entry.service_end_date>=s.assigned_end_date
+ ORDER BY event.occurred_at DESC,event.id DESC LIMIT 1) AS candidate_willingness
+FROM caregiver_matching_plan_segments s
 JOIN staff st ON st.id=s.staff_id LEFT JOIN staff_lifecycle_states lifecycle ON lifecycle.staff_id=st.id
 LEFT JOIN line_identity_role_bindings staff_binding
 ON staff_binding.subject_type='staff'

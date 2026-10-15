@@ -13,6 +13,34 @@
   .order-service-dates-panel .calendar-month-header { flex-wrap: wrap; gap: 6px; }
 }
 .order-case-page { max-width: 1360px; margin: 0 auto; color: #302923; padding-bottom: 40px; }
+.formal-recommendation-people { display: grid; gap: 10px; margin: 0; }
+.formal-recommendation-person { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 16px; padding: 12px 14px; border: 1px solid #eee5dc; border-radius: 9px; background: #fcfaf7; }
+.formal-recommendation-person-details { display: flex; align-items: center; gap: 8px 24px; flex-wrap: wrap; }
+.formal-recommendation-person strong { font-size: 17px; line-height: 1.5; }
+.formal-recommendation-period { font-size: 15px; line-height: 1.6; }
+.formal-recommendation-person small { display: block; margin-top: 3px; color: #806d60; font-size: 13px; }
+.order-case-page .formal-recommendation-person .formal-recommendation-text-action { font-size: 14px; min-height: 36px; padding: 6px 0 !important; }
+.order-case-page .formal-recommendation-plan > .formal-recommendation-summary h3 { font-size: 18px; }
+.order-case-page .formal-recommendation-plan > .formal-recommendation-summary p { font-size: 14px; }
+.order-case-page .formal-recommendation-plan .formal-recommendation-inline-form > h4 { font-size: 16px; }
+.formal-recommendation-inline-form > p { font-size: 14px; }
+.formal-recommendation-person-status { display: inline-block; padding: 6px 10px; border-radius: 18px; background: #fff0d9; font-size: 13px; }
+.formal-recommendation-person-status.ready { color: #436849; background: #edf4eb; }
+.order-case-page .formal-recommendation-text-action { display: block; border: 0 !important; background: none !important; color: #b95125 !important; text-decoration: underline; text-underline-offset: 4px; padding: 7px 0 !important; }
+.formal-recommendation-customer-info { padding-top: 20px; margin-top: 20px; border-top: 1px solid #e9ded6; }
+.formal-recommendation-sheets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 14px 0; }
+.formal-recommendation-sheets article { display: grid; align-content: start; justify-items: start; gap: 8px; padding: 14px; border-radius: 9px; background: #faf6f1; border: 1px solid #eee5dc; }
+.formal-recommendation-sheets small, .formal-recommendation-hint { color: #806d60; font-size: .8rem; }
+.formal-recommendation-inline-form { padding: 18px; margin-top: 14px; border: 1px solid #e8d4c4; border-radius: 10px; background: #fffaf6; }
+.order-case-page .formal-recommendation-inline-form > label { display: grid; gap: 7px; margin: 12px 0; }
+.formal-recommendation-inline-form textarea { width: 100%; min-height: 76px; }
+.formal-recommendation-inline-form .formal-recommendation-replacement-option { display: flex; flex-wrap: nowrap; gap: 12px; width: 100%; padding: 13px; background: #fff; border: 1px solid #e9ded6; border-radius: 9px; }
+.formal-recommendation-replacement-option > span:first-of-type { flex: 1; }
+.formal-recommendation-replacement-option small { display: block; color: #806d60; }
+.formal-recommendation-footer { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-top: 18px; }
+.formal-confirmation-dialog-body { padding: 24px; overflow-y: auto; }
+.formal-confirmation-dialog-body pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 760px) { .formal-recommendation-person { grid-template-columns: 1fr; gap: 9px; } .formal-recommendation-sheets { grid-template-columns: 1fr; } .formal-confirmation-dialog-body { padding: 16px; } }
 .order-case-page [hidden] { display: none !important; }
 .order-case-back { border: 0; background: none; padding: 8px 0; color: #84634f; cursor: pointer; font: inherit; }
 .order-case-heading-row { display: flex; justify-content: space-between; align-items: center; gap: 20px; margin-top: 20px; }
@@ -105,6 +133,7 @@
 .order-case-referral { color: #a94c25; padding: 12px 0; }
 .order-case-changes > p { color: #806d5e; }
 .order-case-work-heading h2 { font-size: 1.4rem; margin: 8px 0; }
+.order-case-work-heading { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
 .order-case-work-heading p { color: #806d5e; margin-bottom: 0; }
 .order-case-subnav { display: flex; flex-wrap: wrap; gap: 8px; padding-bottom: 20px; margin-bottom: 22px; border-bottom: 1px solid #e9dfd5; }
 .order-case-page .order-case-subnav button[aria-pressed=true], .order-case-page .order-information-choice button[aria-pressed=true] { border-color: #b95125; color: #a3431b; background: #fff0e6; }
@@ -541,6 +570,7 @@
 }
 
 .formal-recommendation-plan {
+  gap: 12px;
   margin: 0;
   padding: 0;
   border: 0;
@@ -778,3 +808,301 @@
 .order-case-secondary-actions[open] summary { margin-bottom: 12px; }
 .order-case-page :is(button, input, select, summary, a):focus-visible { outline: 3px solid #a43b16; outline-offset: 3px; }
 .order-case-service-title { margin: 0 0 20px; padding-bottom: 16px; border-bottom: 1px solid #eee5df; font-size: 1.05rem; }
+.order-case-header { margin-bottom: 24px; padding-bottom: 24px; border-bottom: 1px solid #eadfd6; }
+.order-case-header-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.order-case-page .order-case-header-actions .order-case-reopen { background: #be4214; color: white; border-color: #be4214; }
+.order-case-summary-row { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 24px; padding: 16px 0; border-top: 1px solid #e9ded6; }
+.order-case-summary-row > .order-case-context { flex: 1 1 560px; padding: 0; border-top: 0; }
+.order-case-owner-context-header { display: contents; }
+.order-case-records-toggle { flex: 0 1 auto; }
+.order-case-profile-link { margin-left: auto; font-size: .84rem; }
+.order-case-profile-link[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
+.order-case-related-records > section + section { margin-top: 24px; }
+.order-case-summary-row .order-case-related-records { flex: 1 0 100%; box-sizing: border-box; order: 1; }
+.order-case-related-data { border-top: 1px solid #eadfd6; padding: 16px 0; margin-top: 20px; }
+.order-case-related-data > summary { cursor: pointer; color: #715d50; }
+.order-intake-summary-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.order-intake-summary-heading h3 { margin: 0; }
+.order-intake-summary-heading > span { padding: 6px 12px; border-radius: 20px; background: #fcebdd; color: #9f421a; font-size: .75rem; }
+.order-intake-summary ul { padding-left: 22px; margin: 22px 0; }
+.order-intake-summary li { padding: 12px 0; border-bottom: 1px solid #eadfd6; }
+.order-intake-summary-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; }
+.order-intake-summary-actions p { color: #806d5e; font-size: .82rem; }
+.order-intake-summary-actions a { padding: 12px 16px; border-radius: 8px; background: #b95125; color: white; text-decoration: none; }
+.order-case-operation-dialog { box-sizing: border-box; margin: auto; width: min(900px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); overflow: auto; padding: 24px; border: 1px solid #eadfd6; border-radius: 14px; background: #fffaf7; color: #282019; }
+.order-case-operation-dialog::backdrop { background: rgb(35 25 18 / 45%); }
+.order-case-dialog-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
+.order-case-dialog-heading h2 { margin: 0; font-size: 1.2rem; }
+@media (max-width: 760px) {
+  .order-case-stepper > ol { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); overflow: visible; }
+  .order-case-stepper > ol > li { min-width: 0; }
+  .order-case-header-actions { justify-content: flex-end; }
+  .order-case-operation-dialog { padding: 16px; }
+}
+.candidate-inquiry-dialog { color: #33251d; background: #fffaf7; border: 1px solid #e6c6b5; border-radius: 14px; padding: 0; width: min(560px, calc(100vw - 32px)); max-height: calc(100dvh - 40px); overflow: auto; }
+.candidate-inquiry-dialog.wide { width: min(1080px, calc(100vw - 32px)); }
+.order-case-page .candidate-inquiry-dialog.wide { inset: 0 0 0 auto; margin: 0 0 0 auto; height: 100dvh; max-height: 100dvh; width: min(1080px, calc(100vw - 24px)); max-width: none; border-radius: 14px 0 0 14px; }
+.candidate-inquiry-dialog[open] { display: flex; flex-direction: column; overflow: hidden; }
+.candidate-inquiry-dialog > form { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.candidate-inquiry-dialog-heading, .candidate-inquiry-intro, .candidate-information-tabs, .candidate-inquiry-dialog-footer { flex-shrink: 0; }
+.candidate-inquiry-dialog::backdrop { background: rgba(40, 31, 25, .4); }
+.candidate-inquiry-dialog-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 20px 24px; border-bottom: 1px solid #edd8cc; }
+.candidate-inquiry-dialog-heading h2 { margin: 0; font-size: 22px; }
+.candidate-inquiry-dialog button { cursor: pointer; border: 1px solid #dcbba7; border-radius: 7px; padding: 10px 14px; background: #fffdfb; color: #8b421d; }
+.candidate-inquiry-dialog button:disabled { opacity: .55; cursor: default; }
+.candidate-inquiry-dialog button.btn-primary-action { background: #bd430d; color: white; border-color: #bd430d; }
+.candidate-inquiry-dialog-content { padding: 24px; overflow-y: auto; min-height: 0; }
+.candidate-inquiry-intro { padding: 0 24px; color: #896b5a; }
+.candidate-information-tabs { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 24px 16px; border-bottom: 1px solid #edd8cc; }
+.candidate-information-tabs button[aria-pressed="true"] { color: #9f3508; background: #fff0e5; border-color: #bb430e; }
+.candidate-information-paper { background: white; padding: 20px; border: 1px solid #ead5c8; border-radius: 10px; }
+.candidate-information-paper h3 { color: #934013; font-size: 17px; }
+.candidate-information-paper dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+.candidate-information-paper dt { color: #886c5b; font-size: 12px; }
+.candidate-information-paper dd { margin: 5px 0 0; overflow-wrap: anywhere; }
+.candidate-inquiry-dialog-footer { display: flex; justify-content: space-between; align-items: center; gap: 18px; padding: 18px 24px; border-top: 1px solid #edd8cc; background: #fffaf7; }
+.candidate-inquiry-dialog-footer span { color: #886c5b; font-size: 13px; }
+.candidate-inquiry-dialog-footer > div { display: flex; gap: 8px; }
+.candidate-recipient-selection { margin-top: 24px; padding: 16px; background: #fff5ed; border: 1px solid #ead5c8; border-radius: 10px; }
+.candidate-recipient-selection summary { cursor: pointer; font-weight: 600; }
+.candidate-recipient-row { display: flex; gap: 14px; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #ead5c8; }
+.candidate-recipient-row label { display: flex; align-items: center; gap: 10px; }
+.candidate-recipient-row span { color: #886c5b; font-size: 12px; }
+.candidate-weekly-table { overflow-x: auto; }
+.candidate-weekly-table table { width: 100%; border-collapse: collapse; margin: 18px 0; }
+.candidate-weekly-table th, .candidate-weekly-table td { padding: 10px; text-align: left; border-bottom: 1px solid #ead5c8; white-space: nowrap; }
+.candidate-inquiry-dialog fieldset { border: 0; padding: 0; }
+.candidate-inquiry-dialog fieldset label { display: inline-flex; gap: 10px; margin: 8px 18px 8px 0; align-items: center; }
+.candidate-inquiry-dialog textarea { display: block; width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid #dcbba7; border-radius: 6px; font: inherit; }
+.candidate-inquiry-dialog fieldset label:has(textarea) { display: block; }
+.order-candidate-card.compact { padding: 20px; }
+.order-candidate-card.compact .order-candidate-delivery { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.order-candidate-card.compact .order-candidate-delivery dd { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.order-candidate-card.compact .order-candidate-delivery dd > span { min-width: 0; }
+.order-candidate-card.compact .order-candidate-delivery button { flex-shrink: 0; }
+.candidate-information-send { margin: 16px 0; padding: 16px; border: 1px solid #ead5c8; border-radius: 10px; background: #fffaf5; }
+.candidate-information-send h4 { margin: 0 0 8px; }
+.candidate-willingness-form { margin: 16px 0; padding: 16px; border: 1px solid #ead5c8; border-radius: 10px; background: #fffaf5; }
+.candidate-willingness-form h4 { margin: 0 0 12px; }
+.candidate-willingness-form fieldset > label { margin: 8px 18px 8px 0; }
+.order-case-page .candidate-willingness-form .candidate-willingness-note { display: block; margin-right: 0; }
+.candidate-willingness-form textarea { display: block; width: 100%; box-sizing: border-box; margin-top: 6px; }
+.order-case-page .order-v2-business-summary > .candidate-add-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px; border-bottom: 1px solid #ead5c8; }
+.candidate-add-row:last-child { border-bottom: 0; }
+.candidate-add-row > div { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.order-case-page .candidate-inquiry-dialog .candidate-add-row > button { width: auto; min-width: 96px; flex: 0 0 auto; }
+.order-candidate-card.compact:focus { outline: 2px solid #b95125; outline-offset: 3px; }
+.candidate-card-identity { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; }
+.candidate-card-identity h4, .candidate-card-identity p { margin: 0; }
+.candidate-card-identity .order-candidate-willingness { margin-left: auto; }
+.candidate-confirmation-link { margin-left: auto; }
+.formal-recommendation-candidate.highlighted { border-color: #bd430d; background: #fff3e9; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+@media (max-width: 640px) {
+  .candidate-inquiry-dialog, .candidate-inquiry-dialog.wide { width: calc(100vw - 20px); max-height: calc(100dvh - 20px); }
+  .order-case-page .candidate-inquiry-dialog.wide { width: calc(100vw - 12px); }
+  .candidate-inquiry-dialog-heading, .candidate-inquiry-dialog-content { padding: 16px; }
+  .candidate-information-paper { padding: 14px; }
+  .candidate-information-paper dl { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+  .candidate-inquiry-intro, .candidate-information-tabs { padding-left: 16px; padding-right: 16px; }
+  .candidate-inquiry-dialog-footer, .candidate-inquiry-dialog-footer > div { flex-wrap: wrap; }
+  .candidate-inquiry-dialog-footer { padding: 16px; }
+  .candidate-recipient-row { flex-wrap: wrap; }
+  .candidate-card-identity .order-candidate-willingness, .candidate-confirmation-link { margin-left: 0; }
+  .order-candidate-card.compact .order-candidate-delivery { grid-template-columns: 1fr; }
+}
+
+/* Approved contract workbench: direct downloads and independent signed returns. */
+.order-case-page .order-v2-drawer-current-task.contract-workspace { padding: 0; border: 0; background: transparent; }
+.contract-signing-workflow { display: grid; gap: 16px; }
+.contract-documents-card, .contract-return-card, .contract-signing-actions-card { border: 1px solid #eadfd6; border-radius: 14px; padding: 24px; background: #fff; min-width: 0; }
+.contract-platform-action-row { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 24px; padding: 16px 0; }
+.contract-platform-action-row + .contract-platform-action-row { border-top: 1px solid #e9ded6; }
+.contract-platform-action-row p { margin: 4px 0; font-size: 13px; color: #837061; }
+.contract-platform-action-row small { font-size: 12px; color: #a25e35; }
+.contract-signing-action-controls { display: flex; align-items: center; gap: 14px; flex-shrink: 0; }
+.contract-signing-action-hint { margin: 4px 0 0; font-size: 12px; color: #957c68; }
+.contract-signing-test-tools { margin: 16px 0 4px; border: 1px dashed #e4c6b0; border-radius: 8px; background: #fff9f1; }
+.contract-signing-test-tools summary { padding: 11px 14px; cursor: pointer; font-size: 13px; font-weight: 600; color: #936a42; }
+.contract-signing-test-tools > div { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 0 14px 14px; }
+.contract-signing-test-tools p { margin: 0; font-size: 12px; color: #907661; }
+.candidate-inquiry-dialog:has(.contract-signing-confirm-body) { margin: auto; inset: 0; width: min(490px, calc(100vw - 36px)); }
+.contract-signing-confirm-body { padding: 20px 24px 0; font-size: 13px; color: #806856; overflow-y: auto; }
+.contract-signing-confirm-body small { display: block; margin-top: 10px; font-size: 12px; }
+.contract-signing-confirm-body ul { padding: 12px 16px 12px 34px; margin: 14px 0; border: 1px solid #efdece; border-radius: 8px; background: #fff8f2; }
+.contract-signing-confirm-body li { padding: 4px 0; }
+.contract-signing-confirm-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 22px 24px 24px; }
+.contract-signing-confirm-footer > button { flex: 0 0 auto; }
+.contract-signing-progress { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0 0 22px; padding: 0; list-style: none; }
+.contract-signing-progress li { display: flex; align-items: center; gap: 9px; font-size: 14px; padding-bottom: 15px; border-bottom: 2px solid #e9ded6; color: #806d60; }
+.contract-signing-progress li > span { width: 25px; height: 25px; flex-shrink: 0; display: grid; place-items: center; border: 1px solid #dbcdbf; border-radius: 50%; font-size: 12px; }
+.contract-signing-progress .current { color: #b95125; border-color: #b95125; font-weight: 650; }
+.contract-signing-progress .complete { color: #436849; border-color: #b8cbb2; }
+.contract-documents-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 18px; }
+.contract-documents-heading h3 { margin: 0; font-size: 18px; }
+.contract-documents-list { display: grid; gap: 10px; }
+.contract-document-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 16px; align-items: center; padding: 16px; border: 1px solid #e9ded6; border-radius: 10px; background: #fffdfa; }
+.contract-document-row strong { font-size: 16px; }
+.contract-document-row p, .contract-return-row header p { font-size: 14px; color: #806d60; margin: 5px 0 0; }
+.contract-document-actions { display: flex; gap: 8px; flex-wrap: wrap; grid-column: 3; }
+.contract-document-status { display: inline-flex; white-space: nowrap; border-radius: 20px; padding: 7px 12px; background: #fff0d9; color: #80551b; font-size: 13px; }
+.contract-document-status.complete { background: #edf4eb; color: #436849; }
+.contract-handoff-actions { display: flex; justify-content: flex-end; border-top: 1px solid #e9ded6; margin-top: 20px; padding-top: 18px; }
+.contract-handoff-confirmation { padding: 16px; background: #faf5ed; border-left: 3px solid #d6a476; width: 100%; }
+.contract-handoff-confirmation > div { display: flex; gap: 8px; margin-top: 12px; }
+.contract-return-group { margin-top: 20px; }
+.contract-return-group h4 { font-size: 16px; margin: 0 0 10px; }
+.contract-return-row { padding: 16px; border: 1px solid #e9ded6; border-radius: 10px; background: #fffdfa; min-width: 0; }
+.contract-return-row + .contract-return-row { margin-top: 10px; }
+.contract-return-row > header { display: flex; justify-content: space-between; align-items: start; gap: 12px; }
+.contract-return-row strong { font-size: 15px; }
+.contract-return-file { display: grid; gap: 9px; margin: 16px 0; font-size: 14px; }
+.contract-return-file input { width: 100%; }
+.contract-return-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.contract-return-actions strong, .contract-signed-list span { overflow-wrap: anywhere; min-width: 0; }
+.contract-return-checked { color: #436849; font-size: 14px; }
+.contract-final-confirmation { border-top: 1px solid #e9ded6; padding-top: 18px; margin-top: 20px; }
+.contract-final-confirmation > p { font-size: 14px; color: #806d60; }
+.contract-final-confirmation label { display: flex; gap: 9px; align-items: start; margin: 12px 0 16px; line-height: 1.8; }
+.contract-final-confirmation input { flex-shrink: 0; margin-top: 5px; width: 17px; height: 17px; accent-color: #b95125; }
+.contract-manual-notice { border: 1px solid #efbd9e; border-radius: 9px; background: #fff2e9; color: #8d4020; padding: 14px; margin: 16px 0; }
+.contract-completed-notice { background: #f1f6ef; border: 1px solid #d1dfca; color: #426149; padding: 15px; border-radius: 9px; }
+.contract-completed-notice p { margin-bottom: 0; }
+.contract-signed-list { margin: 14px 0 16px; }
+.contract-signed-list > div { display: flex; justify-content: space-between; gap: 14px; align-items: center; padding: 12px 0; border-bottom: 1px solid #e9ded6; }
+.contract-signed-list button { flex-shrink: 0; }
+.candidate-inquiry-dialog.side { inset: 0 0 0 auto; margin: 0; width: min(650px, calc(100vw - 20px)); max-width: none; height: 100dvh; max-height: 100dvh; border-radius: 0; }
+.contract-review-body { flex: 1; overflow-y: auto; min-height: 0; padding: 24px; }
+.contract-review-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 18px 24px; border-top: 1px solid #e9ded6; }
+.contract-review-footer small { color: #806d60; }
+.service-arrangement-steps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding-bottom: 20px; margin-bottom: 22px; border-bottom: 1px solid #eadbd0; }
+.service-arrangement-steps button { display: flex; align-items: center; gap: 10px; padding: 15px 0; border: 0; border-bottom: 2px solid #e9ded6; border-radius: 0; background: transparent; color: #806d60; text-align: left; }
+.service-arrangement-steps button[aria-current='step'] { color: #b95125; border-color: #b95125; font-weight: 650; }
+.service-arrangement-steps button span { width: 25px; height: 25px; border: 1px solid currentColor; border-radius: 50%; display: grid; place-items: center; }
+.order-case-page .service-arrangement-steps > button { padding: 0 0 12px !important; border: 0 !important; border-bottom: 2px solid #eadbd0 !important; border-radius: 0 !important; background: transparent !important; }
+.order-case-page .service-arrangement-steps > button[aria-current='step'] { border-bottom-color: #ba4d20 !important; color: #ba4d20; }
+.order-case-page .order-case-service-title { border: 0; padding: 0; margin: 0 0 4px; font-size: 18px; }
+.service-arrangement-deposit-slot .service-arrangement-deposit { margin: 0; padding: 14px 16px; background: #fffdf8; border: 1px solid #eadbd0; border-radius: 10px; }
+.service-arrangement-deposit-slot .service-arrangement-deposit h3 { font-size: 15px; margin: 0; }
+.service-arrangement-deposit-slot .service-arrangement-deposit p { font-size: 13px; margin: 4px 0 0; }
+.service-date-instruction { margin: 0 0 18px; color: #857163; font-size: 14px; }
+.service-date-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.service-date-settings { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 22px; margin-bottom: 20px; }
+.order-case-page .service-date-start-field label { display: grid; gap: 6px; font-size: 14px; }
+.service-date-start-field input { width: 100%; box-sizing: border-box; }
+.service-date-start-field > small { display: block; margin-top: 6px; color: #857163; font-size: 13px; }
+.service-date-start-field .service-date-save-start { display: block; width: auto; margin-top: 10px; }
+.service-arrangement-related-actions .order-case-action-row:empty { display: none; }
+.service-date-original-type { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; font-size: 14px; }
+.service-date-original-type strong { font-size: 16px; color: #925031; background: #fcebdd; padding: 3px 10px; border-radius: 6px; }
+.order-case-page .service-date-rest-settings fieldset[aria-label] { display: block; border: 0; padding: 0; margin: 0; background: transparent; }
+.service-date-rest-settings legend { font-weight: 400; font-size: 14px; padding: 0; }
+.service-date-weekday-choices { display: flex; flex-wrap: wrap; gap: 8px 14px; padding: 9px 0; }
+.service-date-weekday-choices .service-date-no-rest { flex-shrink: 0; white-space: nowrap; }
+.service-date-rest-settings small { display: block; color: #857163; font-size: 13px; margin-top: 8px; }
+.order-case-page .service-date-rest-settings button { min-height: 32px; padding: 4px 10px; font-size: 13px; }
+.service-date-inline-status { font-size: 13px; color: #857163; margin: 8px 0; }
+.service-date-calculation-details, .service-date-saved-details { margin: 12px 0; font-size: 13px; color: #857163; }
+.service-date-summary-strip { display: flex; justify-content: space-between; gap: 22px; flex-wrap: wrap; padding: 13px 16px; margin: 18px 0; background: #faf6f0; border-radius: 9px; }
+.service-date-summary-strip > div { display: grid; gap: 4px; }
+.service-date-summary-strip dt { font-size: 13px; color: #857163; }
+.service-date-summary-strip dd { margin: 0; font-size: 16px; }
+.order-case-page .order-service-dates-panel .service-calendar-workbench-layout { display: block; }
+.order-case-page .order-service-dates-panel .calendar-matrix-card { padding: 16px; border: 1px solid #eadbd0; border-radius: 10px; background: #fff; }
+.order-case-page .order-service-dates-panel .calendar-month-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.order-case-page .order-service-dates-panel .calendar-month-header h3 { font-size: 17px; font-weight: 500; color: #302923; margin: 0; }
+.order-case-page .order-service-dates-panel .calendar-month-header .order-case-action-row { margin: 0; }
+.order-case-page .order-service-dates-panel .calendar-month-header button { min-height: 34px; padding: 4px 11px; }
+.order-case-page .order-service-dates-panel .calendar-date-cell { min-height: 44px; border-color: transparent !important; padding: 5px 3px; background: #fff !important; color: #302923; font-size: 14px; box-shadow: none; justify-content: center; }
+.order-case-page .order-service-dates-panel .calendar-date-cell.selected { background: #fcebdd !important; border-color: #e9c5ad !important; color: #973b17; }
+.order-case-page .order-service-dates-panel .calendar-date-cell.selected.later-segment { background: #edf2e8 !important; border-color: #d5dfcc !important; color: #466747; }
+.order-case-page .order-service-dates-panel .calendar-date-cell.selected:disabled { opacity: 1; }
+.service-date-calendar-hint { display: block; margin-top: 12px; font-size: 12px; color: #857163; }
+.service-date-footer { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; margin-top: 22px; padding-top: 18px; border-top: 1px solid #eadbd0; }
+.service-date-footer small { font-size: 13px; color: #857163; }
+.order-case-page .service-date-footer .service-date-primary, .order-case-page .service-date-preview-actions .service-date-primary { width: auto; margin: 0; background: #ba4d20 !important; border-color: #ba4d20 !important; color: #fff !important; }
+.service-date-preview { border: 1px solid #e8d2c2; border-radius: 10px; padding: 18px; margin: 16px 0; background: #fffaf6; }
+.service-date-preview h4 { margin: 0 0 8px; }
+.service-date-preview-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.order-case-page .order-v2-drawer-section.service-arrangement-related-actions { padding: 0; border: 0; background: transparent; }
+.service-arrangement-related-actions > p { font-size: 13px; color: #857163; }
+.service-arrangement-related-actions .service-arrangement-completion .order-v2-business-summary { display: flex; gap: 24px; flex-wrap: wrap; padding: 13px 16px; border: 0; background: #faf6f0; }
+.service-arrangement-related-actions .service-arrangement-completion .order-v2-business-summary > div { display: flex; align-items: baseline; gap: 8px; }
+.service-arrangement-related-actions .service-arrangement-completion dt { white-space: nowrap; }
+.service-arrangement-related-actions .service-arrangement-completion dt { font-size: 13px; }
+.service-arrangement-related-actions .service-arrangement-completion dd { margin: 0; font-size: 15px; }
+.order-case-page .service-arrangement-related-actions > button { display: block; width: auto; margin-left: auto; border: 0 !important; background: transparent !important; padding: 7px 0; text-decoration: underline; text-underline-offset: 4px; }
+.service-arrangement-assignment-details { margin-bottom: 16px; color: #857163; font-size: 13px; }
+.service-arrangement-description { color: #857163; font-size: 14px; margin: 0; }
+.service-arrangement-confirmation .service-date-summary-strip { margin: 8px 0; }
+.service-arrangement-confirmation-count { margin: 4px 0; color: #857163; font-size: 13px; }
+.service-arrangement-date-list summary, .service-arrangement-confirmation-record summary { font-size: 13px; }
+.service-arrangement-section-heading .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+.service-arrangement-automatic-status > header { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.service-arrangement-automatic-status > header h3 { font-size: 16px; margin: 0; }
+.service-arrangement-status-notice { padding: 12px 14px; margin: 12px 0; background: #faf5ed; border-left: 3px solid #c7a080; font-size: 14px; }
+.service-arrangement-status-notice.ready { background: #edf3e9; color: #41623e; border-color: #8aa779; }
+.service-arrangement-status-notice p { margin: 3px 0 0; }
+.order-case-completion .service-arrangement-status-notice h3 { margin: 0 0 8px; font-size: 18px; }
+.order-case-completion-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 28px; margin: 24px 0; }
+.order-case-completion-facts > div { min-width: 0; }
+.order-case-completion-facts dt { color: #806d60; font-size: 14px; margin-bottom: 8px; }
+.order-case-completion-facts dd { margin: 0; overflow-wrap: anywhere; }
+.order-case-completion-finance { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; border-top: 1px solid #e9ded6; padding-top: 16px; }
+.order-case-completion-finance p { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin: 0; padding: 12px; background: #faf6f1; border-radius: 8px; }
+.order-case-completion-finance strong { font-weight: 500; }
+@media (max-width: 760px) {
+  .order-case-completion-facts, .order-case-completion-finance { grid-template-columns: 1fr; }
+}
+.service-arrangement-gates { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.service-arrangement-gates > div { display: flex; justify-content: space-between; gap: 10px; padding: 10px 12px; border-radius: 8px; background: #faf6f0; font-size: 14px; }
+.service-arrangement-gates > div span:last-child { white-space: nowrap; color: #806d60; }
+.service-arrangement-lock-note { margin: 10px 0; color: #857163; font-size: 13px; }
+@media (max-width: 600px) { .service-arrangement-gates { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .service-date-settings { grid-template-columns: 1fr; gap: 16px; } }
+@media (max-width: 600px) {
+  .order-case-page .order-service-dates-panel .calendar-matrix-card { padding: 12px; }
+  .order-case-page .order-service-dates-panel .calendar-date-cell { min-height: 39px; font-size: 13px; }
+  .service-date-footer { align-items: stretch; flex-direction: column; }
+  .order-case-page .service-date-footer .service-date-primary { width: 100%; }
+}
+.service-arrangement-confirmation { display: grid; gap: 14px; }
+.service-arrangement-section-heading, .service-arrangement-party header, .service-arrangement-deposit header { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
+.service-arrangement-section-heading h3, .service-arrangement-deposit h3, .service-arrangement-automatic-status h3 { font-size: 18px; margin: 0 0 8px; }
+.service-arrangement-party { padding: 18px; border: 1px solid #e9ded6; border-radius: 10px; background: #fffdfa; }
+.service-arrangement-party strong { font-size: 16px; }
+.service-arrangement-party p, .service-arrangement-section-heading p, .service-arrangement-deposit p { margin: 7px 0; color: #806d60; }
+.service-arrangement-party header > div:last-child { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.service-status-ready, .service-status-pending { border-radius: 20px; padding: 6px 10px; font-size: 13px; background: #edf4e9; color: #436849; }
+.service-status-pending { background: #fff0df; color: #8d5e2a; }
+.service-arrangement-inline-form { border-top: 1px solid #e9ded6; padding-top: 16px; margin-top: 15px; }
+.service-arrangement-inline-form label { display: grid; gap: 8px; }
+.service-arrangement-inline-form textarea { width: 100%; box-sizing: border-box; min-height: 90px; margin-bottom: 14px; padding: 12px; border: 1px solid #dbc5b6; border-radius: 8px; font: inherit; }
+.service-arrangement-automatic-status, .service-arrangement-deposit { border-top: 1px solid #e9ded6; margin-top: 20px; padding-top: 20px; }
+.service-arrangement-completion { margin: 24px 0 16px; }
+.service-arrangement-correction-segments { padding-left: 22px; line-height: 1.8; }
+.service-arrangement-correction-segments li { padding: 10px 0; border-bottom: 1px solid #e9ded6; }
+.registry-start-correction { margin: 16px 0; padding: 16px 0; border-block: 1px solid #efd5c7; }
+.registry-start-correction > a { display: block; margin-top: 12px; }
+@media (max-width: 760px) {
+  .service-arrangement-party, .service-arrangement-deposit { padding: 14px; }
+  .service-arrangement-party header > div:last-child { width: 100%; justify-content: space-between; }
+  .service-arrangement-section-heading > button, .service-arrangement-deposit header > button { width: 100%; }
+}
+@media (max-width: 760px) {
+  .contract-documents-card, .contract-return-card, .contract-signing-actions-card { padding: 18px; }
+  .contract-platform-action-row { flex-direction: column; align-items: flex-start; gap: 12px; }
+  .contract-signing-action-controls { width: 100%; justify-content: space-between; flex-wrap: wrap; }
+  .contract-signing-test-tools > div { flex-direction: column; align-items: flex-start; }
+  .contract-signing-progress { gap: 8px; }
+  .contract-signing-progress li { font-size: 12px; gap: 5px; align-items: start; }
+  .contract-signing-progress li > span { width: 21px; height: 21px; }
+  .contract-document-row { grid-template-columns: minmax(0, 1fr) auto; padding: 14px; gap: 12px; }
+  .contract-document-actions { grid-column: 1 / -1; }
+  .contract-document-actions button { flex: 1; }
+  .contract-handoff-actions > button, .contract-final-confirmation > button { width: 100%; }
+  .contract-signed-list > div { align-items: start; flex-wrap: wrap; }
+  .contract-review-body { padding: 18px; }
+  .contract-review-footer { padding: 14px; flex-wrap: wrap; }
+  .contract-review-footer button { width: 100%; }
+}

@@ -6,6 +6,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
 
+from infrastructure.mysql.replacement_matching_query import candidate_contact_open
 from domains.line.identities import LineUserId
 from shared_kernel.identities import IdempotencyKey
 
@@ -34,7 +35,7 @@ class MySqlCandidateContactPoolLineReplyRepository:
         with self._connection.cursor() as cursor:
             cursor.execute(
                 "SELECT source_event.id AS source_event_id, source_event.pool_id, "
-                "source_event.candidate_id, entry.status AS candidate_status, "
+                "source_event.candidate_id, pool.case_no, entry.status AS candidate_status, "
                 "staff_binding.line_user_id, orders.status AS order_status, "
                 "COALESCE((SELECT MAX(answer_delivery.sent_at_utc) FROM line_delivery_tasks answer_delivery "
                 "WHERE answer_delivery.source_aggregate_type='candidate_contact_answer' "
@@ -63,7 +64,7 @@ class MySqlCandidateContactPoolLineReplyRepository:
                 raise LookupError("candidate contact interaction not found")
             if str(binding.get("line_user_id") or "") != line_user_id.value:
                 raise LookupError("candidate contact recipient mismatch")
-            if binding.get("candidate_status") != "active" or binding.get("order_status") != "洽談中":
+            if binding.get("candidate_status") != "active" or not candidate_contact_open(cursor, str(binding["case_no"]), binding.get("order_status")):
                 raise ValueError("candidate contact interaction is no longer active")
 
             cursor.execute(

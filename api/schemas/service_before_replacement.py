@@ -423,12 +423,12 @@ class ServiceBeforeReplacementPreviewView(_ReplacementFactsView):
 class ServiceBeforeReplacementPreviewBody(_StrictModel):
     scenario: _Scenario
     reason: str = Field(min_length=1, max_length=500)
-    evidence: list[str] = Field(min_length=1, max_length=20)
+    evidence: list[str] = Field(default_factory=list, max_length=20)
 
     @model_validator(mode="after")
     def validate_evidence(self):
         normalized = tuple(sorted(set(item.strip() for item in self.evidence if item.strip())))
-        if not normalized or tuple(self.evidence) != normalized:
+        if tuple(self.evidence) != normalized:
             raise ValueError("replacement_evidence_must_be_canonical")
         if self.reason != self.reason.strip():
             raise ValueError("replacement_reason_must_be_trimmed")

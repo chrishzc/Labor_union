@@ -102,6 +102,22 @@ def test_auto_completion_applies_only_orders_lifecycle_and_outbox_once():
     assert repository.writes == ["event", "order", "outbox", "receipt"]
 
 
+@pytest.mark.parametrize('status,blockers,evaluation,state', [
+    ('服務中', (), '2026-08-04T16:00:00+08:00', 'waiting'),
+    ('服務中', (), '2026-08-04T17:00:00+08:00', 'due'),
+    ('服務中', ('auto_complete.hold_active',), '2026-08-04T17:00:00+08:00', 'blocked'),
+    ('訂單成立', (), '2026-08-04T17:00:00+08:00', 'awaiting_service'),
+    ('訂單完成', (), '2026-08-04T17:00:00+08:00', 'completed'),
+])
+def test_readonly_completion_status_preserves_authoritative_deadline_without_mutation(status, blockers, evaluation, state):
+    repository = _Repository(_facts(status=status, blockers=blockers))
+    service = AutoCompleteOrderService(repository, _UnitOfWork)
+    result = service.query(AutoCompletionPreviewRequest('G05-CASE', datetime.fromisoformat(evaluation), CorrelationId('completion-status')))
+    assert result.state == state
+    assert result.completion_instant == datetime.fromisoformat('2026-08-04T17:00:00+08:00')
+    assert repository.writes == []
+
+
 class _SqlCursor:
     def __init__(self):
         self.statements = []

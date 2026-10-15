@@ -70,18 +70,35 @@ class MatchingPlanReference:
         require_nonnegative_integer(self.version, "matching plan version")
 
 
+def matching_order_is_open(order_status: str, *, replacement_round: bool = False) -> bool:
+    """R-04 may reopen matching without changing the Orders lifecycle root."""
+    return order_status == "洽談中" or (order_status == "訂單成立" and replacement_round)
+
+
 def record_caregiver_willingness(
     current: CaregiverWillingness,
     target: CaregiverWillingness,
     *,
     plan_is_active: bool,
     recipient_matches: bool,
+    allow_correction: bool = False,
+    customer_decision: CustomerMatchingDecision | None = None,
 ) -> CaregiverWillingness:
     _require_active_plan(plan_is_active)
     _require_matching_recipient(recipient_matches)
     if target is CaregiverWillingness.PENDING:
         raise MatchingCommunicationConflictError("caregiver response cannot return to pending")
-    _require_consistent_response(current, target, "caregiver willingness")
+    if customer_decision is not None:
+        # After acceptance a withdrawal requires replacement; LINE cannot undo it.
+        allow_correction = customer_decision in {
+            CustomerMatchingDecision.PENDING,
+            CustomerMatchingDecision.CONTACT_REQUESTED,
+        } or (
+            customer_decision is CustomerMatchingDecision.ACCEPTED
+            and target is CaregiverWillingness.UNWILLING
+        )
+    if not allow_correction:
+        _require_consistent_response(current, target, "caregiver willingness")
     return target
 
 
@@ -141,6 +158,7 @@ __all__ = [
     "MatchingRecipientMismatchError",
     "MatchingResponseSource",
     "record_caregiver_willingness",
+    "matching_order_is_open",
     "record_customer_decision",
     "waiting_deposit_lock_is_allowed",
 ]

@@ -57,6 +57,8 @@ class ExternalSigningErrorCode(StrEnum):
     COMMITMENT_MISSING = "external_signing_commitment_missing"
     FINAL_PDF_NOT_PENDING = "final_signed_contract_not_pending"
     FINAL_PDF_ALREADY_APPLIED = "final_signed_contract_already_applied"
+    FINAL_DOCUMENT_SET_INCOMPLETE = "final_signed_contract_documents_incomplete"
+    FINAL_DOCUMENT_TARGET_MISMATCH = "final_signed_contract_target_mismatch"
 
 
 _CONFLICT_CODES = frozenset(
@@ -148,6 +150,55 @@ class ExternalSigningTransition:
     create_client_reminder_intent: bool = False
     create_final_pdf_recovery_task: bool = False
     contract_completed: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class SignedContractDocumentTarget:
+    scope: str
+    matching_segment_id: int | None
+    document_version_id: int
+
+    def __post_init__(self) -> None:
+        if self.scope not in {"client", "staff"}:
+            raise ValueError("signed contract scope must be client or staff")
+        if (self.scope == "staff") != (self.matching_segment_id is not None):
+            raise ValueError("signed contract scope and segment must agree")
+        if self.matching_segment_id is not None:
+            require_positive_integer(self.matching_segment_id, "signed contract segment")
+        require_positive_integer(self.document_version_id, "unsigned contract version")
+
+    @property
+    def key(self) -> str:
+        return "client" if self.scope == "client" else f"staff:{self.matching_segment_id}"
+
+
+def require_signed_contract_target(
+    facts: ExternalSigningSessionFacts, target: SignedContractDocumentTarget
+) -> None:
+    if target.scope == "client":
+        if facts.client_document_version_id is None:
+            raise ExternalSigningRuleError(ExternalSigningErrorCode.CLIENT_DOCUMENT_MISSING)
+        if target.document_version_id != facts.client_document_version_id:
+            raise ExternalSigningRuleError(ExternalSigningErrorCode.CLIENT_DOCUMENT_VERSION_STALE)
+        return
+    staff = facts.staff_target(target.matching_segment_id)
+    if staff is None:
+        raise ExternalSigningRuleError(ExternalSigningErrorCode.FINAL_DOCUMENT_TARGET_MISMATCH)
+    if target.document_version_id != staff.document_version_id:
+        raise ExternalSigningRuleError(ExternalSigningErrorCode.STAFF_DOCUMENT_VERSION_STALE)
+
+
+def require_complete_signed_contract_documents(
+    facts: ExternalSigningSessionFacts, targets: tuple[SignedContractDocumentTarget, ...]
+) -> None:
+    keys = tuple(target.key for target in targets)
+    expected = {"client", *(f"staff:{segment}" for segment in facts.required_staff_segment_ids)}
+    if len(keys) != len(set(keys)):
+        raise ExternalSigningRuleError(ExternalSigningErrorCode.FINAL_DOCUMENT_TARGET_MISMATCH)
+    if set(keys) != expected:
+        raise ExternalSigningRuleError(ExternalSigningErrorCode.FINAL_DOCUMENT_SET_INCOMPLETE)
+    for target in targets:
+        require_signed_contract_target(facts, target)
 
 
 def reduce_staff_completion_report(

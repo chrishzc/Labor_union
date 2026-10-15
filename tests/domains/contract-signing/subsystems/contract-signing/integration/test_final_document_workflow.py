@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+import hashlib
 from types import SimpleNamespace
 
 import pytest
@@ -15,6 +16,8 @@ from domains.contract_signing.external_signing import (
     ExternalSigningSessionFacts,
     ExternalSigningState,
     StaffSigningReportTarget,
+    SignedContractDocumentTarget,
+    ExternalSigningRuleError,
 )
 from shared_kernel.clock import FixedBusinessClock
 from shared_kernel.fingerprints import PreviewFingerprint
@@ -33,6 +36,8 @@ from subsystems.contract_signing.final_document_workflow import (
     FinalDocumentWorkflowError,
     FinalSignedContractWorkflow,
     PreviewFinalSignedContractUpload,
+    SignedContractDocumentUpload,
+    signed_contract_intent,
 )
 from subsystems.controlled_files.workflow import (
     ControlledFileApplyOutcome,
@@ -56,13 +61,52 @@ def test_preview_is_zero_write_and_hides_internal_fingerprints() -> None:
 
     assert preview.preview_token.startswith("cp_")
     assert preview.blockers == ()
-    assert preview.mime_type == "application/pdf"
+    assert all(row.mime_type == "application/pdf" for row in preview.documents)
+    assert len(preview.documents) == 2
     assert repository.writes == []
     projection = repr(preview)
     assert "a" * 64 not in projection
     assert "b" * 64 not in projection
     assert controlled.applies == []
     assert orders.applies == []
+
+
+@pytest.mark.parametrize(("testing_documents", "testing_confirmed"), [(True, False), (False, True)])
+def test_test_documents_require_distinct_confirmation_before_business_writes(testing_documents, testing_confirmed):
+    workflow, repository, controlled, orders, uows = _workflow()
+    original = controlled.preview
+
+    def preview_file(intent):
+        preview = original(intent)
+        return replace(preview, candidate=replace(preview.candidate, filename="TEST-ONLY-fixture.pdf")) if testing_documents else preview
+
+    controlled.preview = preview_file
+    preview = workflow.preview(_preview_command())
+    with pytest.raises(FinalDocumentWorkflowError, match="final_contract_testing_confirmation_required"):
+        workflow.apply(replace(_apply_command(preview.preview_token), testing_skip_confirmed=testing_confirmed))
+    assert repository.writes == controlled.applies == orders.applies == []
+    assert uows.instances[-1].commits == 0
+
+
+def test_test_completion_uses_same_atomic_workflow_and_replays_only_same_mode():
+    workflow, repository, controlled, orders, uows = _workflow()
+    original = controlled.preview
+    def preview_file(intent):
+        value = original(intent)
+        return replace(value, candidate=replace(value.candidate, filename="TEST-ONLY-fixture.pdf"))
+
+    controlled.preview = preview_file
+    preview = workflow.preview(_preview_command())
+    command = replace(_apply_command(preview.preview_token), testing_skip_confirmed=True, reason="testing skip; no real signatures")
+    first = workflow.apply(command)
+    second = workflow.apply(command)
+    assert first.resulting_state is ExternalSigningState.COMPLETED
+    assert second.replayed
+    assert len(controlled.applies) == 2 and len(orders.applies) == 1
+    assert all(uow.commits == 1 for uow in uows.instances)
+    assert orders.applies[0].reason == command.reason
+    with pytest.raises(FinalDocumentWorkflowError):
+        workflow.apply(replace(command, testing_skip_confirmed=False))
 
 
 def test_apply_uses_one_outer_uow_and_required_lock_order() -> None:
@@ -78,6 +122,7 @@ def test_apply_uses_one_outer_uow_and_required_lock_order() -> None:
     assert repository.events == [
         "session:lock",
         "file:preview",
+        "file:preview",
         "prerequisites:preview",
         "orders:preview",
         "prerequisites:apply",
@@ -85,11 +130,13 @@ def test_apply_uses_one_outer_uow_and_required_lock_order() -> None:
         "orders:preview",
         "orders:apply",
         "file:apply",
+        "file:apply",
         "final:register",
         "session:complete",
         "receipt:save",
     ]
-    assert len(controlled.applies) == 1
+    assert len(controlled.applies) == 2
+    assert {member.target.key for member in receipt.documents} == {"client", "staff:11"}
     assert len(orders.applies) == 1
     assert orders.applies[0].expected_client_finance_version.value == 5
 
@@ -109,6 +156,29 @@ def test_stale_token_rolls_back_before_domain_writes() -> None:
     assert orders.applies == []
     assert uows.instances[0].commits == 0
     assert uows.instances[0].rollbacks == 1
+
+
+def test_two_staff_segments_require_three_separate_files_and_complete_once():
+    workflow, repository, controlled, orders, uows = _workflow()
+    repository.session = replace(repository.session, staff_targets=(
+        *repository.session.staff_targets, StaffSigningReportTarget(12, "502", 102),
+    ))
+    command = _preview_command()
+    with pytest.raises(ExternalSigningRuleError):
+        workflow.preview(command)
+    assert repository.writes == controlled.applies == orders.applies == []
+    target = SignedContractDocumentTarget("staff", 12, 102)
+    command = replace(command, documents=(*command.documents, SignedContractDocumentUpload(
+        target, signed_contract_intent(command.case_no, command.session_id, target, "cfs_" + "4" * 32), ExpectedVersion(2),
+    )))
+    preview = workflow.preview(command)
+    receipt = workflow.apply(replace(_apply_command(preview.preview_token), preview=command))
+    assert {member.target.key for member in receipt.documents} == {"client", "staff:11", "staff:12"}
+    assert len({member.file_id for member in receipt.documents}) == 3
+    assert len({applied.idempotency_key.value for applied in controlled.applies}) == 3
+    assert len(orders.applies) == 1
+    assert uows.instances[0].commits == 1
+    assert uows.instances[0].rollbacks == 0
 
 
 def test_same_command_replays_without_second_final_write() -> None:
@@ -209,7 +279,7 @@ class FakeControlledFiles:
         self.events.append("file:apply")
         self.applies.append(command)
         readback = ControlledFileReadback(
-            file_id="cf_" + "c" * 32,
+            file_id="cf_" + ("c" * 32 if ":client:" in command.intent.object_key else hashlib.sha256(command.intent.object_key.encode()).hexdigest()[:32]),
             owner=ControlledFileOwner.CONTRACT_SIGNING,
             purpose=ControlledFilePurpose.FINAL_SIGNED_CONTRACT,
             subject_reference="CASE-001",
@@ -236,7 +306,7 @@ class FakeOrders:
         self, case_no, _intent, contract_identity, *, fallback_service_dates
     ):
         self.events.append("orders:preview")
-        assert contract_identity.startswith("external-final:")
+        assert contract_identity.startswith("external-final-set:")
         assert fallback_service_dates == (NOW.date(),)
         account_version = 5 if "prerequisites:apply" in self.events else 4
         return SimpleNamespace(
@@ -330,30 +400,20 @@ def _session():
     )
 
 
-def _intent():
-    return ControlledFileIntent(
-        staging_id="cfs_" + "2" * 32,
-        owner=ControlledFileOwner.CONTRACT_SIGNING,
-        purpose=ControlledFilePurpose.FINAL_SIGNED_CONTRACT,
-        subject_reference="CASE-001",
-        object_key="final-contract",
-        logical_folder="contracts",
-    )
-
-
 def _preview_command():
+    session = _session()
+    targets = (SignedContractDocumentTarget("client", None, 201), SignedContractDocumentTarget("staff", 11, 101))
     return PreviewFinalSignedContractUpload(
-        _session().session_id,
-        "CASE-001",
-        ExpectedVersion(1),
-        _intent(),
+        session.session_id, session.case_no, ExpectedVersion(1),
+        tuple(SignedContractDocumentUpload(target, signed_contract_intent(
+            session.case_no, session.session_id, target, "cfs_" + str(index + 2) * 32
+        ), ExpectedVersion(2)) for index, target in enumerate(targets)),
     )
 
 
 def _apply_command(token):
     return ApplyFinalSignedContractUpload(
         preview=_preview_command(),
-        expected_staging_version=ExpectedVersion(2),
         preview_token=token,
         idempotency_key=IdempotencyKey("contract-final:case-001"),
         actor=ActorContext("admin:1"),
@@ -374,3 +434,44 @@ def _document():
         status="active",
         applied_at=NOW,
     )
+
+
+@pytest.mark.parametrize("documents", [(), _preview_command().documents[:1], (_preview_command().documents[0], _preview_command().documents[0])])
+def test_incomplete_or_duplicate_documents_cannot_complete_contract(documents):
+    workflow, repository, controlled, orders, _ = _workflow()
+    with pytest.raises(ExternalSigningRuleError):
+        workflow.preview(replace(_preview_command(), documents=documents))
+    assert repository.writes == []
+    assert controlled.applies == []
+    assert orders.applies == []
+
+
+def test_file_from_other_target_or_unsigned_version_is_rejected_before_any_write():
+    workflow, repository, controlled, orders, _ = _workflow()
+    command = _preview_command()
+    staff = command.documents[1]
+    wrong = replace(staff, target=replace(staff.target, document_version_id=999))
+    with pytest.raises(ExternalSigningRuleError) as captured:
+        workflow.preview(replace(command, documents=(command.documents[0], wrong)))
+    assert captured.value.code.value == "external_staff_report_document_stale"
+    wrong = replace(staff, controlled_file_intent=command.documents[0].controlled_file_intent)
+    with pytest.raises(FinalDocumentWorkflowError):
+        workflow.preview(replace(command, documents=(command.documents[0], wrong)))
+    assert repository.writes == controlled.applies == orders.applies == []
+
+
+def test_any_member_staging_change_invalidates_whole_confirmed_preview():
+    workflow, repository, controlled, orders, uows = _workflow()
+    preview = workflow.preview(_preview_command())
+    original = controlled.preview
+    def changed(intent):
+        result = original(intent)
+        if "staff:" in intent.object_key:
+            return replace(result, candidate=replace(result.candidate, sha256_digest="f" * 64))
+        return result
+    controlled.preview = changed
+    with pytest.raises(FinalDocumentWorkflowError) as captured:
+        workflow.apply(_apply_command(preview.preview_token))
+    assert captured.value.code == "final_document_preview_stale"
+    assert repository.writes == controlled.applies == orders.applies == []
+    assert uows.instances[0].commits == 0

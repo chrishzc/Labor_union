@@ -116,6 +116,19 @@ def test_incomplete_current_service_dates_cannot_reserve_a_waiting_deposit_lock(
         )
 
 
+def test_single_caregiver_reserves_current_dates_after_actual_period_changes():
+    snapshot = workflow._canonical_snapshot('CASE-1', 8, _order('訂單成立'), _plan(), [_segment()])
+    cursor = _Cursor([
+        {'id': 14, 'service_day_count': 3, 'service_days': 3},
+        [{'service_date': date(2026, 9, day)} for day in (14, 15, 16)],
+    ])
+    current = workflow._with_current_confirmed_service_dates(cursor, 'CASE-1', snapshot, for_update=False)
+    occupancy = workflow._proposed_occupancy_rows(current)
+    assert [row['lock_date'] for row in occupancy if row['lock_kind'] == 'service'] == [date(2026, 9, day) for day in (14, 15, 16)]
+    assert min(row['lock_date'] for row in occupancy if row['lock_kind'] == 'buffer') == date(2026, 9, 17)
+    assert snapshot['case_start_date'] == '2026-08-10'
+
+
 def test_legacy_matching_acceptance_remains_a_valid_customer_gate():
     cursor = _Cursor([None, {"response_value": "accepted"}])
 

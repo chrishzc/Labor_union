@@ -87,6 +87,7 @@ def _row(case_no: str = "CASE-001") -> dict[str, object]:
         "matching_created_at": NOW,
         "matching_customer_decision": "accepted",
         "matching_customer_decision_at": NOW,
+        "matching_unwilling_count": 0,
         "waiting_deposit_lock_id": None,
         "waiting_deposit_lock_created_at": None,
         "willingness_contact_attempt_count": 2,

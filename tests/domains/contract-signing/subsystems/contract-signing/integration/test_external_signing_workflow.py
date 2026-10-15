@@ -33,6 +33,7 @@ from subsystems.contract_signing.external_signing_contracts import (
 )
 from subsystems.contract_signing.external_signing_workflow import (
     ExternalSigningWorkflow,
+    SendExternalSigningReminders,
     RecordExternalSigningHandoff,
     StaffCompletionPrerequisites,
 )
@@ -177,15 +178,16 @@ def test_handoff_activates_the_virtual_session_once_at_version_one() -> None:
     assert replay.resulting_status_version == 1
     assert replay.replayed is True
     assert repository.writes == ["activate", "handoff_receipt"]
-    assert notifications.calls == [(command, virtual)]
+    assert notifications.calls == []
+    assert notifications.validations == [virtual]
     assert [uow.commits for uow in uows.instances] == [1, 1]
 
 
-def test_handoff_notification_failure_prevents_session_activation_and_commit() -> None:
+def test_missing_handoff_documents_prevent_session_activation_and_commit() -> None:
     virtual = _virtual_facts()
     repository = FakeRepository(None, virtual=virtual)
     uows = FakeUowFactory()
-    notifications = FakeHandoffNotificationPort(error=RuntimeError("line binding missing"))
+    notifications = FakeHandoffNotificationPort(error=RuntimeError("PDF missing"))
     workflow = ExternalSigningWorkflow(repository, FakeCompletionPort(), uows, notifications)
     command = RecordExternalSigningHandoff(
         case_no=virtual.case_no,
@@ -195,11 +197,12 @@ def test_handoff_notification_failure_prevents_session_activation_and_commit() -
         correlation_id=CorrelationId("corr-handoff-001"),
     )
 
-    with pytest.raises(RuntimeError, match="line binding missing"):
+    with pytest.raises(RuntimeError, match="PDF missing"):
         workflow.record_handoff(command)
 
     assert repository.writes == []
-    assert notifications.calls == [(command, virtual)]
+    assert notifications.calls == []
+    assert notifications.validations == [virtual]
     assert uows.instances[0].commits == 0
 
 
@@ -299,6 +302,7 @@ class FakeRepository:
         self.writes: list[str] = []
         self.receipts = {}
         self.handoff_receipts = {}
+        self.reminder_receipts = {}
         self.handoff_operations = []
         self.case_exists = True
         self.session_prerequisites = None
@@ -347,6 +351,13 @@ class FakeRepository:
         self.writes.append("handoff_receipt")
         self.handoff_receipts[key.value] = stored
 
+    def find_reminder_receipt(self, key, *, for_update):
+        return self.reminder_receipts.get(key.value)
+
+    def save_reminder_receipt(self, key, stored, command):
+        self.writes.append("reminder_receipt")
+        self.reminder_receipts[key.value] = stored
+
     def find_source_receipt(self, source_event_identity, *, for_update):
         return None
 
@@ -387,11 +398,12 @@ class FakeCompletionPort:
 @pytest.mark.parametrize("bindings, expected_manual, expected_delivery_count", [
     ({}, [("client", "301"), ("staff", "501"), ("staff", "502")], 0),
     ({("staff", "501"): "U-staff-501"}, [("client", "301"), ("staff", "502")], 1),
+    ({("customer", "301"): "U-client", ("staff", "501"): "U-staff-501", ("staff", "502"): "U-staff-502"}, [], 3),
 ])
-def test_handoff_records_unbound_targets_for_manual_notification_and_replays_without_resending(
+def test_separate_reminder_records_manual_targets_and_replays_without_resending(
     bindings, expected_manual, expected_delivery_count,
 ):
-    from infrastructure.db.contract_external_signing_repository import _handoff_receipt_snapshot, _stored_handoff_receipt
+    from infrastructure.db.contract_external_signing_repository import _stored_reminder_receipt
     virtual = _virtual_facts()
     repository = FakeRepository(None, virtual=virtual)
     deliveries = FakeDeliveryTasks()
@@ -405,21 +417,29 @@ def test_handoff_records_unbound_targets_for_manual_notification_and_replays_wit
         virtual.case_no, ExpectedVersion(0), ActorContext("admin:17"),
         IdempotencyKey("external-handoff:manual-case"), CorrelationId("corr-manual-case"),
     )
-    receipt = workflow.record_handoff(command)
-    stored = repository.handoff_receipts[command.idempotency_key.value]
+    handoff = workflow.record_handoff(command)
+    assert deliveries.requests == []
+    assert handoff.handoff_included_reminders is False
+    command = SendExternalSigningReminders(virtual.case_no, virtual.session_id, ExpectedVersion(1), ActorContext("admin:17"),
+        IdempotencyKey("external-reminder:manual-case"), CorrelationId("corr-manual-reminder"), "cesr_" + "1" * 32)
+    receipt = workflow.send_signing_reminders(command)
+    stored = repository.reminder_receipts[command.idempotency_key.value]
     # Reload through the persisted receipt parser before replay, not the live binding state.
-    repository.handoff_receipts[command.idempotency_key.value] = _stored_handoff_receipt({
-        "command_kind": "record_external_signing_handoff",
+    repository.reminder_receipts[command.idempotency_key.value] = _stored_reminder_receipt({
+        "command_kind": "send_external_signing_reminders",
         "command_fingerprint": stored.command_fingerprint.value,
-        "result_snapshot": _handoff_receipt_snapshot(receipt, command.idempotency_key),
+        "result_snapshot": {"idempotency_key": command.idempotency_key.value, "receipt_id": receipt.receipt_id,
+                            "session_id": receipt.session_id, "status_version": receipt.status_version,
+                            "manual_notification_targets": [{"scope": scope, "subject_reference": subject} for scope, subject in expected_manual]},
     }, expected_idempotency_key=command.idempotency_key.value)
-    replay = workflow.record_handoff(command)
+    replay = workflow.send_signing_reminders(command)
     assert [(t.scope.value, t.subject_reference) for t in receipt.manual_notification_targets] == expected_manual
     assert replay.manual_notification_targets == receipt.manual_notification_targets
     assert replay.replayed is True
     assert len(deliveries.requests) == expected_delivery_count
-    assert repository.writes == ["activate", "handoff_receipt"]
-    assert [uow.commits for uow in uows.instances] == [1, 1]
+    assert repository.writes == ["activate", "handoff_receipt", "reminder_receipt"]
+    assert repository.facts.status_version == receipt.status_version == 1
+    assert [uow.commits for uow in uows.instances] == [1, 1, 1]
 
 
 def test_unbound_handoff_still_requires_every_unsigned_pdf_before_writing():
@@ -447,6 +467,7 @@ def test_unbound_handoff_still_requires_every_unsigned_pdf_before_writing():
 class FakeHandoffNotificationPort:
     def __init__(self, error=None) -> None:
         self.calls = []
+        self.validations = []
         self.error = error
 
     def enqueue_notifications(self, command, facts):
@@ -454,6 +475,98 @@ class FakeHandoffNotificationPort:
         if self.error is not None:
             raise self.error
         return ()
+
+    def validate_documents(self, facts):
+        self.validations.append(facts)
+        if self.error is not None:
+            raise self.error
+
+
+@pytest.mark.parametrize("scenario, expected_code", [
+    ("no_handoff", "external_signing_handoff_required"),
+    ("stale", "external_signing_status_version_stale"),
+    ("wrong_session", "external_signing_handoff_required"),
+    ("completed", "external_signing_reminders_closed"),
+    ("missing_case", "external_signing_session_not_found"),
+])
+def test_reminder_requires_current_open_handoff_before_any_write(scenario, expected_code):
+    facts = replace(_virtual_facts(), status_version=1)
+    if scenario == "completed":
+        facts = replace(facts, state=ExternalSigningState.COMPLETED, commitment_id=44)
+    repository = FakeRepository(None if scenario == "no_handoff" else facts)
+    repository.case_exists = scenario != "missing_case"
+    notifications = FakeHandoffNotificationPort()
+    uows = FakeUowFactory()
+    workflow = ExternalSigningWorkflow(repository, FakeCompletionPort(), uows, notifications)
+    command = SendExternalSigningReminders(facts.case_no, "ces_" + "f" * 32 if scenario == "wrong_session" else facts.session_id,
+        ExpectedVersion(2 if scenario == "stale" else 1), ActorContext("admin:17"), IdempotencyKey("reminder:case"), CorrelationId("corr-reminder"), "cesr_" + "2" * 32)
+    with pytest.raises(ExternalSigningTypedError) as error:
+        workflow.send_signing_reminders(command)
+    assert error.value.code == expected_code
+    assert repository.writes == notifications.calls == []
+    assert uows.instances[-1].commits == 0
+
+
+def test_reminder_failure_rolls_back_and_replay_rejects_changed_actor_or_payload():
+    facts = replace(_virtual_facts(), status_version=1)
+    repository = FakeRepository(facts)
+    notifications = FakeHandoffNotificationPort(error=RuntimeError("enqueue failed"))
+    uows = FakeUowFactory()
+    workflow = ExternalSigningWorkflow(repository, FakeCompletionPort(), uows, notifications)
+    command = SendExternalSigningReminders(facts.case_no, facts.session_id, ExpectedVersion(1), ActorContext("admin:17"),
+        IdempotencyKey("reminder:case"), CorrelationId("corr-reminder"), "cesr_" + "3" * 32)
+    with pytest.raises(RuntimeError, match="enqueue failed"):
+        workflow.send_signing_reminders(command)
+    assert repository.writes == [] and uows.instances[-1].commits == 0
+    notifications.error = None
+    receipt = workflow.send_signing_reminders(command)
+    assert receipt.status_version == repository.facts.status_version == 1
+    for changed in (replace(command, actor=ActorContext("admin:18")), replace(command, expected_status_version=ExpectedVersion(2))):
+        with pytest.raises(ExternalSigningTypedError) as error:
+            workflow.send_signing_reminders(changed)
+        assert error.value.code == "contract_signature_idempotency_conflict"
+    assert repository.writes == ["reminder_receipt"]
+
+
+def test_historical_handoff_receipt_preserves_automatic_notification_fact():
+    from infrastructure.db.contract_external_signing_repository import _stored_handoff_receipt
+    stored = _stored_handoff_receipt({"command_kind": "record_external_signing_handoff", "command_fingerprint": "a" * 64,
+        "result_snapshot": {"idempotency_key": "old:handoff", "session_id": _virtual_facts().session_id, "resulting_status_version": 1}}, expected_idempotency_key="old:handoff")
+    assert stored.receipt.handoff_included_reminders is True
+
+
+def test_reminder_repository_preserves_separate_command_snapshot_and_latest_readback():
+    from infrastructure.db.contract_external_signing_repository import MySqlContractExternalSigningRepository
+    from subsystems.contract_signing.external_signing_workflow import StoredExternalSigningReminderReceipt
+    import json
+    facts = replace(_virtual_facts(), status_version=1)
+    fake = FakeRepository(facts)
+    workflow = ExternalSigningWorkflow(fake, FakeCompletionPort(), FakeUowFactory(), FakeHandoffNotificationPort())
+    command = SendExternalSigningReminders(facts.case_no, facts.session_id, ExpectedVersion(1), ActorContext("admin:17"),
+        IdempotencyKey("reminder:stored-case"), CorrelationId("corr-reminder"), "cesr_" + "4" * 32)
+    receipt = workflow.send_signing_reminders(command)
+    stored = fake.reminder_receipts[command.idempotency_key.value]
+    repository = MySqlContractExternalSigningRepository(None)
+    inserts, reads = [], []
+    repository._insert = lambda sql, params: inserts.append((sql, params))
+    repository.save_reminder_receipt(command.idempotency_key, StoredExternalSigningReminderReceipt(stored.command_fingerprint, receipt), command)
+    sql, params = inserts[0]
+    assert "contract_signing_command_receipts" in sql and params[2] == "send_external_signing_reminders"
+    assert params[0].startswith("reminder:sha256:") and len(params[0]) <= 128
+    snapshot = json.loads(params[-1])
+    assert snapshot["actor_ref"] == "admin:17"
+    assert snapshot["idempotency_key"] == command.idempotency_key.value
+    row = {"command_kind": params[2], "command_fingerprint": params[1], "result_snapshot": params[-1]}
+
+    def read(sql, params):
+        reads.append((sql, params))
+        return row
+
+    repository._one = read
+    assert repository.find_reminder_receipt(command.idempotency_key, for_update=True).receipt == receipt
+    assert repository.load_latest_reminder_receipt(facts.case_no, facts.session_id) == receipt
+    assert reads[0][0].endswith("FOR UPDATE")
+    assert reads[1][1] == (facts.case_no, facts.session_id)
 
 
 class FakeUnsignedRepository:

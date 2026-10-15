@@ -19,6 +19,7 @@ from domains.client_finance.reconciliation import (
     IncomingBankFact,
     PaymentStage,
     ReconciliationStatus,
+    UnreceivedDepositConfirmation,
 )
 from domains.finance_import.cancellation_code import resolve_finance_cancellation_code
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
@@ -79,6 +80,23 @@ class MySqlClientReceiptReconciliationRepository:
         self._ledger_entry_ids: dict[str, int] = {}
         self._obligation_amounts: dict[str, int] = {}
         self._settlement_identity: str | None = None
+
+    def query_unreceived_deposit(self, case_no: str) -> UnreceivedDepositConfirmation:
+        """Borrow the release UoW; lock Finance before reading complete formal payment history."""
+        if not isinstance(case_no, str) or not case_no or case_no.strip() != case_no or len(case_no) > 50:
+            raise ValueError("client_finance_case_no_invalid")
+        with _mysql_cursor(self._connection) as cursor:
+            cursor.execute("SELECT aggregate_version FROM client_finance_accounts WHERE case_no=%s FOR UPDATE", (case_no,))
+            account = cursor.fetchone()
+            cursor.execute("SELECT obligation_identity FROM client_obligations WHERE case_no=%s ORDER BY obligation_identity FOR UPDATE", (case_no,))
+            obligations = tuple(sorted(row['obligation_identity'] for row in cursor.fetchall()))
+            cursor.execute("SELECT id FROM client_obligation_events WHERE case_no=%s ORDER BY id FOR UPDATE", (case_no,))
+            events = tuple(row['id'] for row in cursor.fetchall())
+            cursor.execute("SELECT id FROM client_ledger_entries WHERE case_no=%s ORDER BY id FOR UPDATE", (case_no,))
+            entries = tuple(row['id'] for row in cursor.fetchall())
+        return UnreceivedDepositConfirmation(
+            case_no, None if account is None else account['aggregate_version'], obligations, events, entries,
+        )
 
     def bind_apply_request(
         self,

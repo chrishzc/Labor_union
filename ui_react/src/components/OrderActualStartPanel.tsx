@@ -11,6 +11,9 @@ interface Props {
   onObserved?: (operation: 'date_only' | 'reschedule') => void;
   onBusyChange?: (busy: boolean) => void;
   onOpenServiceDates?: () => void;
+  autoLoad?: boolean;
+  staffNames?: Readonly<Record<number, string>>;
+  onEditStateChange?: (state: { dirty: boolean; busy: boolean }) => void;
 }
 type Phase = 'idle' | 'loading' | 'previewing' | 'applying' | 'outcome_unknown' | 'observation_failed' | 'observed';
 const subscribeActualStart = (listener: () => void) => orderMutationFlowStore.subscribe(listener);
@@ -26,7 +29,7 @@ const actualStartErrorMessage = (caught: unknown, fallback: string) => {
   return caught instanceof Error ? caught.message : fallback;
 };
 
-export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyChange, onOpenServiceDates }) => {
+export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyChange, onOpenServiceDates, autoLoad = false, staffNames = {}, onEditStateChange }) => {
   const [query, setQuery] = useState<ActualStart | null>(null);
   const [date, setDate] = useState('');
   const [preview, setPreview] = useState<ActualStartPreview | null>(null);
@@ -91,6 +94,9 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
       if (isActive(request, caseNo)) { setQuery(null); setError(caught instanceof Error ? caught.message : '實際開始日查詢失敗。'); setPhase('idle'); }
     }
   };
+
+  useEffect(() => { if (autoLoad) void load(); }, [caseNo, autoLoad]);
+  useEffect(() => { onEditStateChange?.({ dirty: query !== null && date !== (query.current_actual_start_date ?? query.planned_start_date), busy }); }, [query, date, busy, onEditStateChange]);
 
   const confirm = async () => {
     if (!query || query.service_data_locked || busy) return;
@@ -269,18 +275,18 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
     <section aria-label={`案件 ${caseNo} 實際開始日`}>
       <h4>確認／更正實際開始日</h4>
       <p>尚未排班時只保存日期；已有正式安排時才由後端預覽並重排服務日期及必要下游影響。</p>
-      <button type="button" disabled={busy} onClick={() => void load()}>讀取實際開始日</button>
+      {(!autoLoad || error) && <button type="button" disabled={busy} onClick={() => void load()}>讀取實際開始日</button>}
       {phase === 'loading' && <p role="status">讀取實際開始日中…</p>}
       {query && (
         <>
           <p>目前實際開始：{query.current_actual_start_date ?? '尚未確認'}；計畫開始：{query.planned_start_date}</p>
           {query.service_data_locked && <p role="status">服務資料已鎖定，不可修改實際開始日。</p>}
           <label>實際開始日期
-            <input aria-label="Beta 實際開始日期" type="date" value={date} disabled={busy || query.service_data_locked}
+            <input aria-label="更正實際開始日期" type="date" value={date} disabled={busy || query.service_data_locked}
               onChange={(event) => { sequence.current += 1; setDate(event.target.value); setPreview(null); setError(null); setMissingAssignments(false); setPhase('idle'); }} />
           </label>
           <button type="button" disabled={busy || query.service_data_locked || !date} onClick={() => void confirm()}>
-            {query.has_formal_assignments ? '預覽新排班' : '確認實際開始日'}
+            {query.has_formal_assignments ? '預覽日期與排班調整' : '儲存實際開始日'}
           </button>
         </>
       )}
@@ -291,16 +297,16 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
             ? <p>目前尚無排班；本次只保存日期，不建立排班、帳務、薪資或服務完成資料。</p>
             : <>
               <p>以下為尚未儲存的新排班，請逐段核對後再確認。</p>
-              <ol>
+              <ol className="service-arrangement-correction-segments">
                 {preview.scheduling.assignments.map((assignment) => (
                   <li key={assignment.candidate_key}>
-                    月嫂 {assignment.staff_id}：占用 {assignment.assigned_start_date} 至 {assignment.assigned_end_date}；
+                    {staffNames[assignment.staff_id] ?? `月嫂 #${assignment.staff_id}`}：服務期間 {assignment.assigned_start_date} 至 {assignment.assigned_end_date}；
                     服務日 {assignment.service_dates.join('、')}
                   </li>
                 ))}
               </ol>
               <p>正式結束：{preview.actual_end_date}；狀態：{preview.lifecycle_impact.before_status} → {preview.lifecycle_impact.after_status}</p>
-              <button type="button" disabled={busy} onClick={() => void applyPreview()}>確認並儲存新排班</button>
+              <button type="button" disabled={busy} onClick={() => void applyPreview()}>儲存日期與排班調整</button>
               <button type="button" disabled={busy} onClick={() => setPreview(null)}>取消本次預覽</button>
             </>}
         </>

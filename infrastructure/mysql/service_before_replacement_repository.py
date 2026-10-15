@@ -192,6 +192,8 @@ class MySqlServiceBeforeReplacementRepository:
                 replacement_event_id=event_id,
                 replacement_generation_id=replacement_generation_id,
             )
+        if candidate.scenario is ReplacementScenario.R04:
+            self._retire_r04_recommendations(command, event_id)
         self._insert_roots(event_id, command.case_no, candidate)
         persisted_roots = self._read_root_sets(event_id, command.case_no)
         # A bundle may contain a preview convenience value, but Apply must
@@ -312,6 +314,19 @@ class MySqlServiceBeforeReplacementRepository:
                 superseded_root_ids=roots[1],
                 for_update=for_update,
             )
+        if str(row.get("scenario") or "") == ReplacementScenario.R04.value:
+            with _cursor(self._connection) as cursor:
+                cursor.execute(
+                    "SELECT plan.id FROM caregiver_matching_plan_events event "
+                    "JOIN caregiver_matching_plans plan ON plan.id=event.plan_id "
+                    "WHERE plan.case_no=%s AND event.event_type='plan_cancelled' "
+                    "AND JSON_UNQUOTE(JSON_EXTRACT(event.payload,'$.source'))='R-04' "
+                    "AND CAST(JSON_UNQUOTE(JSON_EXTRACT(event.payload,'$.replacement_event_id')) AS UNSIGNED)=%s "
+                    "AND plan.is_active=1 LIMIT 1" + suffix,
+                    (case_no, event_id),
+                )
+                if cursor.fetchone() is not None:
+                    raise ServiceBeforeReplacementPersistenceError("replacement recommendation retirement readback failed")
         return ReplacementOwnerReadback(
             str(row["case_no"]),
             str(row["replacement_generation_identity"]),
@@ -399,6 +414,41 @@ class MySqlServiceBeforeReplacementRepository:
             if int(cursor.rowcount) != 1:
                 raise ServiceBeforeReplacementPersistenceError("scheduling aggregate transition conflicted")
         return int(prior_generation_id), replacement_generation_id
+
+    def _retire_r04_recommendations(self, command, replacement_event_id):
+        """Retire caregiver-bound gates in the same replacement transaction."""
+        with _cursor(self._connection) as cursor:
+            cursor.execute(
+                "SELECT id,communication_version FROM caregiver_matching_plans "
+                "WHERE case_no=%s AND is_active=1 AND status IN ('proposed','accepted') "
+                "ORDER BY id FOR UPDATE", (command.case_no,),
+            )
+            plans = tuple(cursor.fetchall())
+            for plan in plans:
+                cursor.execute(
+                    "UPDATE caregiver_candidate_contact_entries entry "
+                    "JOIN caregiver_candidate_contact_pools pool ON pool.id=entry.pool_id "
+                    "JOIN caregiver_matching_plan_segments segment ON segment.staff_id=entry.staff_id "
+                    "SET entry.status='withdrawn',entry.active_marker=NULL "
+                    "WHERE pool.case_no=%s AND segment.plan_id=%s AND entry.active_marker=1",
+                    (command.case_no, int(plan['id'])),
+                )
+                cursor.execute(
+                    "UPDATE caregiver_matching_plans SET status='superseded',is_active=NULL,"
+                    "communication_version=communication_version+1 "
+                    "WHERE id=%s AND case_no=%s AND is_active=1 AND communication_version=%s",
+                    (int(plan['id']), command.case_no, int(plan['communication_version'])),
+                )
+                if cursor.rowcount != 1:
+                    raise ServiceBeforeReplacementPersistenceError("replacement recommendation version is stale")
+                cursor.execute(
+                    "INSERT INTO caregiver_matching_plan_events "
+                    "(plan_id,segment_id,event_type,event_key,actor,payload) "
+                    "VALUES (%s,NULL,'plan_cancelled',%s,%s,%s)",
+                    (int(plan['id']), f"r04-recommendation:{replacement_event_id}:{plan['id']}",
+                     command.actor.actor_id, _json({'reason': command.reason, 'source': 'R-04',
+                         'replacement_event_id': replacement_event_id, 'prior_communication_version': int(plan['communication_version'])})),
+                )
 
     def _cancel_r03_waiting_lock(
         self,

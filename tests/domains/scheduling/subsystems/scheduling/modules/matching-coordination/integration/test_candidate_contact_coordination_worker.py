@@ -420,7 +420,7 @@ def test_order_leaving_negotiation_cancels_only_unsent_manual_followup():
     assert cursor.args == ("candidate_contact_manual_followup",)
     assert "SUBSTRING_INDEX(task.source_aggregate_identity,':',1) AS UNSIGNED" in cursor.sql
     assert " LIKE " not in cursor.sql
-    assert "orders.status<>'洽談中'" in cursor.sql
+    assert "AND NOT " + worker_module.CANDIDATE_CONTACT_OPEN_SQL in cursor.sql
     assert "processing_status IN ('pending','retryable_failed')" in cursor.sql
     assert "task.processing_status='cancelled'" in cursor.sql
 

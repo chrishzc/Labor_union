@@ -647,3 +647,5 @@
 .finance-tab-bar button small { display: block; margin-top: 3px; font-size: .75rem; font-weight: 400; }
 .finance-settings-nav { display: flex; align-items: center; gap: 8px; border-left: 1px solid var(--md-sys-color-outline-variant); padding-left: 12px; }
 .finance-settings-nav > span { font-size: .75rem; color: var(--md-sys-color-on-surface-variant); }
+.finance-case-return { display: inline-block; margin-bottom: 18px; color: #9f421a; }
+.finance-case-return:focus-visible { outline: 3px solid #b95125; outline-offset: 4px; }

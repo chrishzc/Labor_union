@@ -63,6 +63,7 @@ function getPageFromHash(): PageType {
 export const App: React.FC = () => {
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => sessionClient.isAuthenticated());
   const [currentPage, setCurrentPage] = useState<PageType>(() => getPageFromHash());
+  const [workbenchHomeRequest, setWorkbenchHomeRequest] = useState(0);
 
   // 永遠自當前頁面確定性派生所屬分區，杜絕 HMR 快取或非同步狀態脫鉤
   const currentSection: SectionType = PAGE_SECTION_MAP[currentPage] || 'operations';
@@ -95,6 +96,10 @@ export const App: React.FC = () => {
   }, []);
 
   const handleSelectPage = (page: PageType) => {
+    if (page === 'order-workbench-v2' && currentPage === page) {
+      setWorkbenchHomeRequest(value => value + 1);
+      return;
+    }
     setCurrentPage(page);
     window.location.hash = `#${page}`;
   };
@@ -137,7 +142,7 @@ export const App: React.FC = () => {
         onLogout={handleLogout}
       >
         {/* Operations Section */}
-        {currentPage === 'order-workbench-v2' && <OrderWorkbenchV2Page />}
+        {currentPage === 'order-workbench-v2' && <OrderWorkbenchV2Page homeNavigationRequest={workbenchHomeRequest} />}
         {currentPage === 'scheduling' && <SchedulingPage />}
         {currentPage === 'staff' && <StaffPage />}
         {currentPage === 'clients' && <ClientRegistryPage />}

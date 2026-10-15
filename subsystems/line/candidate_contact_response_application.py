@@ -16,6 +16,7 @@ from domains.line.delivery import (
     LineRecipient,
     LineRecipientType,
 )
+from infrastructure.mysql.replacement_matching_query import candidate_contact_open
 from domains.line.identities import LineUserId
 from domains.scheduling.candidate_contact_response import (
     CandidateCoordinationResponse,
@@ -55,10 +56,11 @@ class CandidateContactResponseApplication:
                     int(context["pool_id"]),
                     excluding_candidate_id=int(context["candidate_id"]),
                 )
+                contact_open = candidate_contact_open(cursor, str(context["case_no"]), context["order_status"])
             deadline = _deadline(context.get("sent_at_utc"))
             is_open = (
                 context["candidate_status"] == "active"
-                and context["order_status"] == "洽談中"
+                and contact_open
                 and self._now() < deadline
                 and not pool_resolved
             )
@@ -109,7 +111,7 @@ class CandidateContactResponseApplication:
                     excluding_candidate_id=int(context["candidate_id"]),
                 ):
                     raise CandidateContactResponseError("candidate_contact_pool_resolved")
-                if context["candidate_status"] != "active" or context["order_status"] != "洽談中":
+                if context["candidate_status"] != "active" or not candidate_contact_open(cursor, str(context["case_no"]), context["order_status"]):
                     raise CandidateContactResponseError("candidate_contact_closed")
                 if self._now() >= _deadline(context.get("sent_at_utc")):
                     raise CandidateContactResponseError("candidate_contact_response_expired")
@@ -162,6 +164,7 @@ class CandidateContactResponseApplication:
                 pool_resolved = _pool_has_willing_candidate(
                     cursor, int(context["pool_id"])
                 )
+                contact_open = candidate_contact_open(cursor, str(context["case_no"]), context["order_status"])
             payload = _payload(context)
             request_kind = (
                 "condition_adjustment"
@@ -180,7 +183,7 @@ class CandidateContactResponseApplication:
                     "closed"
                     if answered is not None
                     or pool_resolved
-                    or context["order_status"] != "洽談中"
+                    or not contact_open
                     else "open"
                 ),
                 "issues": [
@@ -252,7 +255,7 @@ class CandidateContactResponseApplication:
                     }
                 if _pool_has_willing_candidate(cursor, int(context["pool_id"])):
                     raise CandidateContactResponseError("candidate_contact_pool_resolved")
-                if context["order_status"] != "洽談中":
+                if not candidate_contact_open(cursor, str(context["case_no"]), context["order_status"]):
                     raise CandidateContactResponseError("candidate_contact_closed")
                 if _customer_answer(cursor, int(context["source_event_id"])) is not None:
                     raise CandidateContactResponseError("candidate_contact_answer_already_recorded")

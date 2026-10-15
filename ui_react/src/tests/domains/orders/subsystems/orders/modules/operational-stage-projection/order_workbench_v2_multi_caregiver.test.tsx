@@ -71,6 +71,26 @@ describe('Beta server-owned 多月嫂分段方案', () => {
     mocks.create.mockImplementation(async (command) => planReceipt(command));
   });
 
+  it.each(['choices', 'combination'])('本案下廚需求未填寫時，%s 查詢提示正確補件位置並維持零寫入', async (stage) => {
+    const missing = new ApiHttpError(409, 'matching_preference_source_not_ready', '媒合查詢失敗');
+    if (stage === 'choices') mocks.search.mockRejectedValue(missing);
+    else mocks.search.mockImplementation(async (_caseNo, count) => {
+      if (count > 1) throw missing;
+      return availability(1);
+    });
+    render(<OrderMultiCaregiverPlanPanel caseNo={CASE} filters={{ ...filters, cooking: true }} />);
+    if (stage === 'combination') {
+      await selectStaff();
+      fireEvent.click(screen.getByRole('button', { name: '查詢這 2 位月嫂的完整組合' }));
+    }
+    await screen.findByText(/本案尚未填寫「下廚需求」/);
+    expect(screen.getByText(/客戶名冊補齊本案下廚需求/)).toBeInTheDocument();
+    expect(screen.queryByText(/月嫂名冊補齊媒合偏好/)).not.toBeInTheDocument();
+    if (stage === 'choices') expect(screen.getByRole('button', { name: '查詢這 2 位月嫂的完整組合' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /建立正式/ })).not.toBeInTheDocument();
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+
   it.each([2, 3, 4])('%i 段只傳送 server 完整組合，沿用四項 filter 並回讀每段 identity/日期', async (count) => {
     const onObserved = vi.fn();
     render(<OrderMultiCaregiverPlanPanel caseNo={CASE} filters={filters} onObserved={onObserved} />);

@@ -8,26 +8,29 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import hashlib
 import json
+from io import BytesIO
 from pathlib import Path
 import re
 from typing import Any, Literal, Mapping
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File, Header, HTTPException, Path as ApiPath, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Path as ApiPath, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from starlette.datastructures import Headers
 
 from api.dependencies.admin_auth import admin_actor_context, require_persisted_admin
 from api.dependencies.contract_external_signing import (
     ContractExternalSigningApplication,
     get_contract_external_signing_application,
+    testing_signing_skip_allowed,
 )
 from api.error_contracts import typed_http_error
 from api.schemas.base import BaseResponse
 from api.dependencies.contract_signing import get_client_contract_signing_application
 from subsystems.contract_signing.client_contract_application import ClientContractSigningApplication
 from api.schemas.full_contract_preview import FullContractPreviewView
-from domains.contract_signing.external_signing import ExternalSigningRuleError
+from domains.contract_signing.external_signing import ExternalSigningRuleError, SignedContractDocumentTarget
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import CorrelationId, ExpectedVersion, IdempotencyKey
 from subsystems.access.authentication_session import AdminPrincipal
@@ -43,11 +46,15 @@ from subsystems.contract_signing.external_signing_contracts import (
 )
 from subsystems.contract_signing.external_signing_workflow import (
     RecordExternalSigningHandoff,
+    SendExternalSigningReminders,
 )
 from subsystems.contract_signing.final_document_workflow import (
     ApplyFinalSignedContractUpload,
     FinalDocumentWorkflowError,
     PreviewFinalSignedContractUpload,
+    SignedContractDocumentUpload,
+    signed_contract_intent,
+    signed_contract_object_key,
 )
 from subsystems.contract_signing.full_contract_preview import FullContractPreviewError
 from subsystems.contract_signing.contract_renderer import ContractRendererError
@@ -226,11 +233,37 @@ class LegacyRecoveryPreviewView(BaseModel):
         return self
 
 
+class SignedDocumentTargetBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    scope: Literal["client", "staff"]
+    matching_segment_id: int | None = Field(default=None, ge=1)
+    document_version_id: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def require_target(self):
+        if (self.scope == "staff") != (self.matching_segment_id is not None):
+            raise ValueError("contract scope must match its service segment")
+        return self
+
+    def target(self):
+        return SignedContractDocumentTarget(self.scope, self.matching_segment_id, self.document_version_id)
+
+
+class SignedDocumentUploadBody(SignedDocumentTargetBody):
+    staging_id: str = Field(pattern=_STAGING)
+    expected_staging_version: int = Field(ge=1)
+
+
+class SignedDocumentPreviewBody(SignedDocumentUploadBody):
+    session_id: str = Field(pattern=_SESSION)
+    expected_status_version: int = Field(ge=1)
+
+
 class FinalPreviewBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
-    staging_id: str = Field(pattern=_STAGING)
-    expected_status_version: int = Field(ge=0)
+    session_id: str = Field(pattern=_SESSION)
+    expected_status_version: int = Field(ge=1)
+    documents: list[SignedDocumentUploadBody] = Field(min_length=1, max_length=5)
 
 
 class HandoffBody(BaseModel):
@@ -240,8 +273,21 @@ class HandoffBody(BaseModel):
 
 
 class FinalApplyBody(FinalPreviewBody):
-    expected_staging_version: int = Field(ge=1)
     preview_token: str = Field(pattern=_PREVIEW_TOKEN)
+    signatures_confirmed: bool = False
+    testing_skip_confirmed: bool = False
+
+    @model_validator(mode="after")
+    def require_completion_confirmation(self):
+        if self.signatures_confirmed == self.testing_skip_confirmed:
+            raise ValueError("confirm either real signatures or a testing skip")
+        return self
+
+
+class SigningSessionVersionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    session_id: str = Field(pattern=_SESSION)
+    expected_status_version: int = Field(ge=1)
 
 
 class UnsignedDocumentView(BaseModel):
@@ -304,6 +350,20 @@ class ManualSigningNotificationTargetView(BaseModel):
     subject_reference: str = Field(min_length=1, max_length=191)
 
 
+class SigningReminderView(BaseModel):
+    model_config = ConfigDict(extra="forbid", from_attributes=True)
+    receipt_id: str = Field(pattern=_RECEIPT)
+    session_id: str = Field(pattern=_SESSION)
+    status_version: int = Field(ge=1)
+    replayed: bool
+    manual_notification_targets: list[ManualSigningNotificationTargetView]
+
+
+class UnsignedTargetDocumentView(UnsignedDocumentView):
+    scope: Literal["client", "staff"]
+    matching_segment_id: int | None = Field(default=None, ge=1)
+
+
 class ExternalSigningQueryView(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -318,10 +378,14 @@ class ExternalSigningQueryView(BaseModel):
     ]
     status_version: int = Field(ge=0)
     handoff_recorded: bool
+    handoff_included_reminders: bool = False
+    testing_skip_allowed: bool = False
     manual_notification_targets: list[ManualSigningNotificationTargetView] = Field(default_factory=list)
+    signing_reminder: SigningReminderView | None = None
     matching_plan_id: int = Field(ge=1)
     commitment_id: int | None = Field(default=None, ge=1)
     unsigned_document: UnsignedDocumentView | None
+    unsigned_documents: list[UnsignedTargetDocumentView] = Field(default_factory=list)
     staff_targets: list[StaffTargetView]
     client_target: ClientTargetView
 
@@ -449,6 +513,7 @@ def record_external_signing_handoff(
                 "session_id": receipt.session_id,
                 "resulting_status_version": receipt.resulting_status_version,
                 "replayed": receipt.replayed,
+                "handoff_included_reminders": receipt.handoff_included_reminders,
                 "manual_notification_targets": [
                     {"scope": target.scope.value, "subject_reference": target.subject_reference}
                     for target in receipt.manual_notification_targets
@@ -457,6 +522,22 @@ def record_external_signing_handoff(
         )
 
     return _call(action, correlation_id)
+
+
+@router.post("/{case_no}/contract-external-signing/reminders")
+def send_signing_reminders(
+    body: SigningSessionVersionBody,
+    case_no: str = ApiPath(pattern=_CASE),
+    idempotency_key: str = Header(alias="Idempotency-Key", pattern=_IDEMPOTENCY),
+    receipt_id: str = Header(alias="X-Receipt-ID", pattern=_RECEIPT),
+    correlation_id: str = Header(alias="X-Correlation-ID", pattern=_CORRELATION),
+    principal: AdminPrincipal = Depends(require_persisted_admin),
+    application: ContractExternalSigningApplication = Depends(_application),
+):
+    _require_receipt_identity(idempotency_key, receipt_id, correlation_id)
+    return _call(lambda: BaseResponse(data=_public_reminder(application.reports.send_signing_reminders(
+        SendExternalSigningReminders(case_no, body.session_id, ExpectedVersion(body.expected_status_version), admin_actor_context(principal), IdempotencyKey(idempotency_key), CorrelationId(correlation_id), receipt_id)
+    ))), correlation_id)
 
 
 @router.post(
@@ -775,12 +856,22 @@ def record_client_report(
 def stage_final_document(
     case_no: str = ApiPath(pattern=_CASE),
     document: UploadFile = File(),
+    session_id: str = Form(pattern=_SESSION),
+    expected_status_version: int = Form(ge=1),
+    scope: Literal["client", "staff"] = Form(),
+    document_version_id: int = Form(ge=1),
+    matching_segment_id: int | None = Form(default=None, ge=1),
     idempotency_key: str = Header(alias="Idempotency-Key", pattern=_IDEMPOTENCY),
     correlation_id: str = Header(alias="X-Correlation-ID", pattern=_CORRELATION),
     principal: AdminPrincipal = Depends(require_persisted_admin),
     application: ContractExternalSigningApplication = Depends(_application),
 ):
     def action():
+        target = SignedDocumentTargetBody(scope=scope, matching_segment_id=matching_segment_id, document_version_id=document_version_id).target()
+        current = _require_facts(application, case_no)
+        if current.session_id != session_id:
+            raise FinalDocumentWorkflowError("external_signing_session_superseded")
+        application.final_documents.validate_target(case_no, session_id, ExpectedVersion(expected_status_version), target)
         content = document.file.read(_MAX_PDF_BYTES + 1)
         filename = Path(document.filename or "").name
         if (
@@ -796,7 +887,7 @@ def stage_final_document(
                 owner=ControlledFileOwner.CONTRACT_SIGNING,
                 purpose=ControlledFilePurpose.FINAL_SIGNED_CONTRACT,
                 subject_reference=case_no,
-                object_key="final-signed-contract",
+                object_key=signed_contract_object_key(session_id, target),
                 logical_folder=f"contract-signing/{case_no}",
                 filename=filename,
                 mime_type="application/pdf",
@@ -812,9 +903,107 @@ def stage_final_document(
             "mime_type": result.mime_type,
             "size_bytes": result.size_bytes,
             "expires_at": result.expires_at,
+            "scope": target.scope, "matching_segment_id": target.matching_segment_id,
+            "document_version_id": target.document_version_id,
+            "expected_staging_version": 1,
         })
 
     return _call(action, correlation_id)
+
+
+def _require_testing_skip(correlation_id: str) -> None:
+    if not testing_signing_skip_allowed():
+        raise typed_http_error(403, "forbidden", "contract_testing_skip_unavailable",
+                               "只有本機測試環境可跳過簽署文件回收。", correlation_id)
+
+
+def _testing_placeholder_pdf() -> bytes:
+    """A valid one-page fixture, visibly distinct from a signed contract."""
+    text = b"BT /F1 20 Tf 50 760 Td (TEST ONLY - NOT A SIGNED CONTRACT) Tj 0 -40 Td (Manual testing skip of signed document collection.) Tj ET"
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        b"<< /Length " + str(len(text)).encode() + b" >>\nstream\n" + text + b"\nendstream",
+    ]
+    content = b"%PDF-1.4\n"
+    offsets = []
+    for number, obj in enumerate(objects, 1):
+        offsets.append(len(content))
+        content += str(number).encode() + b" 0 obj\n" + obj + b"\nendobj\n"
+    xref = len(content)
+    content += b"xref\n0 6\n0000000000 65535 f \n"
+    content += b"".join(f"{offset:010d} 00000 n \n".encode() for offset in offsets)
+    return content + f"trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode()
+
+
+@router.post("/{case_no}/contract-external-signing/final-document/testing-skip")
+def prepare_testing_skip(
+    body: SigningSessionVersionBody,
+    case_no: str = ApiPath(pattern=_CASE),
+    idempotency_key: str = Header(alias="Idempotency-Key", pattern=_IDEMPOTENCY),
+    correlation_id: str = Header(alias="X-Correlation-ID", pattern=_CORRELATION),
+    principal: AdminPrincipal = Depends(require_persisted_admin),
+    application: ContractExternalSigningApplication = Depends(_application),
+):
+    _require_testing_skip(correlation_id)
+
+    def action():
+        facts = _require_return_session(application, case_no, body.session_id)
+        if facts.client_document_version_id is None:
+            raise FinalDocumentWorkflowError("final_signed_contract_documents_incomplete")
+        targets = [SignedContractDocumentTarget("client", None, facts.client_document_version_id)]
+        targets.extend(SignedContractDocumentTarget("staff", row.matching_segment_id, row.document_version_id) for row in facts.staff_targets)
+        documents = []
+        for target in targets:
+            lane = "client" if target.scope == "client" else f"staff-{target.matching_segment_id}"
+            filename = f"TEST-ONLY-{lane}-v{target.document_version_id}.pdf"
+            with BytesIO(_testing_placeholder_pdf()) as stream:
+                staged = stage_final_document(
+                    case_no=case_no, document=UploadFile(stream, filename=filename, headers=Headers({"content-type": "application/pdf"})),
+                    session_id=body.session_id, expected_status_version=body.expected_status_version,
+                    scope=target.scope, document_version_id=target.document_version_id,
+                    matching_segment_id=target.matching_segment_id,
+                    idempotency_key="contract-test-stage:" + hashlib.sha256(f"{idempotency_key}:{lane}".encode()).hexdigest(),
+                    correlation_id=correlation_id, principal=principal, application=application,
+                ).data
+            documents.append(SignedDocumentUploadBody.model_validate({key: staged[key] for key in ("scope", "matching_segment_id", "document_version_id", "staging_id", "expected_staging_version")}))
+        return preview_final_document(FinalPreviewBody(session_id=body.session_id, expected_status_version=body.expected_status_version, documents=documents), case_no, principal, application)
+
+    return _call(action, correlation_id)
+
+
+@router.get("/{case_no}/contract-external-signing/final-document/returns")
+def query_signed_document_returns(
+    case_no: str = ApiPath(pattern=_CASE),
+    _: AdminPrincipal = Depends(require_persisted_admin),
+    application: ContractExternalSigningApplication = Depends(_application),
+):
+    def action():
+        facts = _require_facts(application, case_no)
+        documents = application.final_documents.staged_documents(case_no, facts.session_id, ExpectedVersion(facts.status_version))
+        return BaseResponse(data={"case_no": case_no, "session_id": facts.session_id,
+                                  "status_version": facts.status_version,
+                                  "documents": [_public_signed_document_preview(row) for row in documents]})
+    return _call(action, "query")
+
+
+@router.post("/{case_no}/contract-external-signing/final-document/document-preview")
+def preview_signed_document(
+    body: SignedDocumentPreviewBody,
+    case_no: str = ApiPath(pattern=_CASE),
+    _: AdminPrincipal = Depends(require_persisted_admin),
+    application: ContractExternalSigningApplication = Depends(_application),
+):
+    def action():
+        _require_return_session(application, case_no, body.session_id)
+        result = application.final_documents.preview_document(
+            case_no, body.session_id, ExpectedVersion(body.expected_status_version),
+            _signed_document_upload(case_no, body.session_id, body),
+        )
+        return BaseResponse(data=_public_signed_document_preview(result))
+    return _call(action, "preview")
 
 
 @router.post("/{case_no}/contract-external-signing/final-document/preview")
@@ -825,26 +1014,15 @@ def preview_final_document(
     application: ContractExternalSigningApplication = Depends(_application),
 ):
     def action():
-        facts = _require_facts(application, case_no)
-        result = application.final_documents.preview(
-            PreviewFinalSignedContractUpload(
-                facts.session_id,
-                case_no,
-                ExpectedVersion(body.expected_status_version),
-                _final_intent(case_no, body.staging_id),
-            )
-        )
+        _require_return_session(application, case_no, body.session_id)
+        result = application.final_documents.preview(_final_preview_request(case_no, body))
         return BaseResponse(data={
             "preview_token": result.preview_token,
-            "staging_id": body.staging_id,
-            "expected_staging_version": result.expected_staging_version,
-            "filename": result.filename,
-            "mime_type": result.mime_type,
-            "size_bytes": result.size_bytes,
-            "blockers": list(result.blockers),
-            "can_apply": not result.blockers,
+            "session_id": body.session_id,
+            "expected_status_version": result.expected_status_version,
+            "documents": [_public_signed_document_preview(row) for row in result.documents],
+            "blockers": list(result.blockers), "can_apply": not result.blockers,
         })
-
     return _call(action, "preview")
 
 
@@ -859,24 +1037,17 @@ def apply_final_document(
     application: ContractExternalSigningApplication = Depends(_application),
 ):
     _require_receipt_identity(idempotency_key, receipt_id, correlation_id)
+    if body.testing_skip_confirmed:
+        _require_testing_skip(correlation_id)
 
     def action():
-        facts = _require_facts(application, case_no)
-        preview = PreviewFinalSignedContractUpload(
-            facts.session_id,
-            case_no,
-            ExpectedVersion(body.expected_status_version),
-            _final_intent(case_no, body.staging_id),
-        )
+        # An already committed exact command remains replayable even after the session advances.
         receipt = application.final_documents.apply(
             ApplyFinalSignedContractUpload(
-                preview,
-                ExpectedVersion(body.expected_staging_version),
-                body.preview_token,
-                IdempotencyKey(idempotency_key),
-                admin_actor_context(principal),
-                "已驗證並套用最終簽署契約 PDF。",
-                CorrelationId(correlation_id),
+                _final_preview_request(case_no, body), body.preview_token,
+                IdempotencyKey(idempotency_key), admin_actor_context(principal),
+                "測試用：手動跳過簽署文件回收，使用 TEST ONLY 占位文件；未驗證真實簽署。" if body.testing_skip_confirmed else "已分別核對客戶服務契約與所有月嫂委任契約的完整簽署。", CorrelationId(correlation_id),
+                testing_skip_confirmed=body.testing_skip_confirmed,
             )
         )
         view = application.read_receipt(case_no, receipt_id)
@@ -922,6 +1093,7 @@ def readback_final_document(
             "status": result.status,
             "integrity_verified": True,
             "applied_at": result.applied_at,
+            "documents": [_public_signed_document_readback(row) for row in application.final_documents.readback_documents(case_no)],
         })
 
     return _call(action, "readback")
@@ -938,7 +1110,16 @@ def _require_facts(application, case_no):
 def _public_query(value: Mapping[str, Any]) -> dict[str, Any]:
     if value.get("state") == "preparing":
         return ContractPreparationQueryView.model_validate(value).model_dump(mode="json")
-    return ExternalSigningQueryView.model_validate(value).model_dump(mode="json")
+    reminder = value.get("signing_reminder")
+    return ExternalSigningQueryView.model_validate({**value, "signing_reminder": None if reminder is None else _public_reminder(reminder), "testing_skip_allowed": testing_signing_skip_allowed()}).model_dump(mode="json")
+
+
+def _public_reminder(receipt):
+    return SigningReminderView.model_validate({
+        "receipt_id": receipt.receipt_id, "session_id": receipt.session_id,
+        "status_version": receipt.status_version, "replayed": receipt.replayed,
+        "manual_notification_targets": [{"scope": target.scope.value, "subject_reference": target.subject_reference} for target in receipt.manual_notification_targets],
+    }).model_dump(mode="json")
 
 
 def _public_full_preview(value) -> dict[str, Any]:
@@ -1037,15 +1218,61 @@ def _payload_hash(body: BaseModel, case_no: str, segment_id: int | None) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _final_intent(case_no: str, staging_id: str) -> ControlledFileIntent:
-    return ControlledFileIntent(
-        staging_id,
-        ControlledFileOwner.CONTRACT_SIGNING,
-        ControlledFilePurpose.FINAL_SIGNED_CONTRACT,
-        case_no,
-        "final-signed-contract",
-        f"contract-signing/{case_no}",
+def _require_return_session(application, case_no, session_id):
+    facts = _require_facts(application, case_no)
+    if facts.session_id != session_id:
+        raise FinalDocumentWorkflowError("external_signing_session_superseded")
+    return facts
+
+
+def _signed_document_upload(case_no, session_id, body):
+    target = body.target()
+    return SignedContractDocumentUpload(
+        target, signed_contract_intent(case_no, session_id, target, body.staging_id),
+        ExpectedVersion(body.expected_staging_version),
     )
+
+
+def _final_preview_request(case_no, body):
+    return PreviewFinalSignedContractUpload(
+        body.session_id, case_no, ExpectedVersion(body.expected_status_version),
+        tuple(_signed_document_upload(case_no, body.session_id, row) for row in body.documents),
+    )
+
+
+def _public_signed_document_preview(row):
+    return {"scope": row.target.scope, "matching_segment_id": row.target.matching_segment_id,
+            "document_version_id": row.target.document_version_id,
+            "staging_id": row.staging_id, "expected_staging_version": row.expected_staging_version,
+            "filename": row.filename, "mime_type": row.mime_type, "size_bytes": row.size_bytes,
+            "blockers": list(row.blockers), "can_apply": not row.blockers}
+
+
+def _public_signed_document_readback(row):
+    return {"scope": row.target.scope, "matching_segment_id": row.target.matching_segment_id,
+            "document_version_id": row.target.document_version_id, "controlled_file_id": row.file_id,
+            "version_number": row.version, "filename": row.filename,
+            "mime_type": row.mime_type, "size_bytes": row.size_bytes}
+
+
+@router.get("/{case_no}/contract-external-signing/final-document/download/{file_id}")
+def download_signed_document(
+    case_no: str = ApiPath(pattern=_CASE), file_id: str = ApiPath(pattern=r"^cf_[0-9a-f]{32}$"),
+    _: AdminPrincipal = Depends(require_persisted_admin),
+    application: ContractExternalSigningApplication = Depends(_application),
+):
+    def action():
+        result = application.final_documents.readback(case_no)
+        members = application.final_documents.readback_documents(case_no)
+        authorized = {row.file_id for row in members} if members else {result.file_id}
+        if file_id not in authorized:
+            raise FinalDocumentWorkflowError("final_contract_document_not_found", category="not_found")
+        content = application.controlled_files.download(file_id)
+        return Response(content=content.content, media_type="application/pdf", headers={
+            "Content-Disposition": "attachment; filename*=UTF-8''" + quote(content.filename, safe=""),
+            "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
+        })
+    return _call(action, "download")
 
 
 def _require_receipt_identity(idempotency_key: str, receipt_id: str, correlation_id: str) -> None:

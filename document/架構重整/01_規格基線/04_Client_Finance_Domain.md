@@ -278,6 +278,20 @@ Adjustment 必須明確宣告 scope：
 
 從 obligation 與 ledger events 重建各 stage receivable、received、due date、settled at。總額只供顯示，不得掩蓋單期差異。對 Orders 只輸出 typed `ClientSettlementFacts`；取消 impact 的每一筆公開結果必須包含上述 `direction`，不得讓 caller 由 action kind 或 amount 推定。
 
+2026-10-14 人工裁決：已保留等待訂金檔期、但尚未建立訂金應收的案件，Client Finance
+可提供 typed `UnreceivedDepositConfirmation`，確認沒有客戶帳務義務、義務事件或 ledger 歷史後，
+允許 Scheduling 沿原 Release Preview／Apply 釋放檔期並換人。不存在的 settlement projection
+本身不是未收款證據，不得補造零金額義務、結算、收款或退款；既有結算 projection 仍沿用原淨額門禁。
+任何正式財務歷史存在而結算資料缺漏時，回 `deposit_receipt_unconfirmed` 並交財務核對，
+不得把取消過的義務、退款或 reversal 歷史忽略成「未收款」。
+
+此確認 Query 借用 Scheduling 外層交易，先鎖 Finance account，再完整讀取同案的義務、
+義務事件與 ledger；不建立 account、不寫帳務、不自行 commit。account 不存在保留明示的
+`None` 來源版本，與現存 version 0 區別；空根事實須由完整查詢確認，不能由缺列推定。
+來源版本與確認事實納入既有 Release fingerprint；Apply 在同一交易重新查核，發現新收款、
+義務或版本異動時拒絕釋放。成功的確認來源保存於 Scheduling 原檔期釋放事件，原 key 的
+replay 回原操作，不重複釋放或新建財務事實。
+
 ## 4. Ports
 
 輸入：

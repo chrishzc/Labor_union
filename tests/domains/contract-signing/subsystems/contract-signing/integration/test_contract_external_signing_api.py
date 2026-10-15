@@ -16,6 +16,7 @@ import pytest
 from api.dependencies.admin_auth import require_persisted_admin
 from api.dependencies.contract_external_signing import _preview_token_secret
 from api.dependencies.contract_external_signing import ContractExternalSigningApplication
+from api.dependencies import contract_external_signing as dependencies
 from api.routes import contract_external_signing as route
 from domains.contract_signing.external_signing import (
     ExternalSigningSessionFacts,
@@ -47,11 +48,18 @@ class FakeReports:
         self.command = command
         return SimpleNamespace(replayed=False)
 
+    def send_signing_reminders(self, command):
+        self.command = command
+        return SimpleNamespace(receipt_id=command.receipt_id, session_id=command.session_id,
+                               status_version=command.expected_status_version.value, replayed=False,
+                               manual_notification_targets=())
+
     def record_handoff(self, command):
         self.command = command
         return SimpleNamespace(
             session_id=SESSION_ID,
             manual_notification_targets=(),
+            handoff_included_reminders=False,
             resulting_status_version=1,
             replayed=False,
         )
@@ -126,28 +134,31 @@ class FakeControlledFiles:
 
 
 class FakeFinalDocuments:
+    def validate_target(self, case_no, session_id, expected_status_version, target):
+        self.validated = (case_no, session_id, expected_status_version, target)
+
+    def preview_document(self, case_no, session_id, expected_status_version, document):
+        return SimpleNamespace(target=document.target, staging_id=document.controlled_file_intent.staging_id,
+                               expected_staging_version=document.expected_staging_version.value,
+                               filename="signed.pdf", mime_type="application/pdf", size_bytes=18, blockers=())
+
     def preview(self, command):
-        return SimpleNamespace(
-            preview_token="cp_" + "A" * 43,
-            expected_staging_version=1,
-            filename="signed.pdf",
-            mime_type="application/pdf",
-            size_bytes=18,
-            blockers=(),
-        )
+        return SimpleNamespace(preview_token="cp_" + "A" * 43,
+                               expected_status_version=command.expected_status_version.value,
+                               documents=tuple(self.preview_document(command.case_no, command.session_id, command.expected_status_version, row) for row in command.documents),
+                               blockers=())
+
+    def staged_documents(self, *_args):
+        return ()
+
+    def readback_documents(self, case_no):
+        return ()
 
     def readback(self, case_no):
-        return SimpleNamespace(
-            case_no=case_no,
-            final_document_id="cfd_" + UUID,
-            file_id="cf_" + UUID,
-            version=1,
-            filename="signed.pdf",
-            mime_type="application/pdf",
-            size_bytes=18,
-            status="completed",
-            applied_at=datetime(2026, 8, 26, tzinfo=timezone.utc),
-        )
+        return SimpleNamespace(case_no=case_no, final_document_id="cfd_" + UUID,
+                               file_id="cf_" + UUID, version=1, filename="signed.pdf",
+                               mime_type="application/pdf", size_bytes=18, status="completed",
+                               applied_at=datetime(2026, 8, 26, tzinfo=timezone.utc))
 
 
 class FakeFullPreview:
@@ -318,8 +329,8 @@ def test_query_returns_only_react_contract_fields() -> None:
     data = response.json()["data"]
     assert set(data) == {
         "case_no", "session_id", "state", "status_version", "matching_plan_id",
-        "handoff_recorded", "commitment_id", "unsigned_document", "staff_targets", "client_target",
-        "manual_notification_targets",
+        "handoff_recorded", "commitment_id", "unsigned_document", "unsigned_documents", "staff_targets", "client_target",
+        "manual_notification_targets", "testing_skip_allowed", "signing_reminder", "handoff_included_reminders",
     }
     serialized = response.text.lower()
     assert all(term not in serialized for term in ("locator", "digest", "fingerprint", "url", "path"))
@@ -544,6 +555,7 @@ def test_external_platform_handoff_uses_persisted_admin_and_expected_version() -
         "resulting_status_version": 1,
         "replayed": False,
         "manual_notification_targets": [],
+        "handoff_included_reminders": False,
     }
     command = application.reports.command
     assert command.case_no == CASE_NO
@@ -825,9 +837,13 @@ def test_unsigned_download_encodes_non_ascii_filename_in_content_disposition() -
 def test_final_apply_body_rejects_noncanonical_preview_tokens(preview_token: str) -> None:
     with pytest.raises(ValidationError):
         route.FinalApplyBody.model_validate({
-            "staging_id": f"cfs_{UUID}",
-            "expected_status_version": 0,
-            "expected_staging_version": 1,
+            "session_id": "ces_" + UUID,
+            "expected_status_version": 1,
+            "documents": [{"scope": "client", "matching_segment_id": None, "document_version_id": 32,
+                           "staging_id": "cfs_" + UUID, "expected_staging_version": 1},
+                          {"scope": "staff", "matching_segment_id": 71, "document_version_id": 31,
+                           "staging_id": "cfs_" + "a" * 32, "expected_staging_version": 1}],
+            "signatures_confirmed": True,
             "preview_token": preview_token,
         })
 
@@ -890,26 +906,27 @@ def test_public_receipt_accepts_every_legitimate_command_state_union(
 def test_final_staging_and_preview_hide_controlled_file_internals() -> None:
     application = FakeApplication()
     client = _client(application)
+    session_id = application.load_facts(CASE_NO).session_id
     staging = client.post(
         f"/api/v1/orders/{CASE_NO}/contract-external-signing/final-document/staging",
         headers={"Idempotency-Key": "contract-final.stage:" + UUID, "X-Correlation-ID": "corr-stage"},
+        data={"session_id": session_id, "expected_status_version": "1", "scope": "client", "document_version_id": "32"},
         files={"document": ("signed.pdf", b"%PDF-1.4\n%%EOF", "application/pdf")},
     )
-    preview = client.post(
-        f"/api/v1/orders/{CASE_NO}/contract-external-signing/final-document/preview",
-        json={"staging_id": f"cfs_{UUID}", "expected_status_version": 0},
-    )
-
+    documents = [{"scope": "client", "matching_segment_id": None, "document_version_id": 32,
+                  "staging_id": f"cfs_{UUID}", "expected_staging_version": 1},
+                 {"scope": "staff", "matching_segment_id": 71, "document_version_id": 31,
+                  "staging_id": "cfs_" + "a" * 32, "expected_staging_version": 1}]
+    preview = client.post(f"/api/v1/orders/{CASE_NO}/contract-external-signing/final-document/preview",
+                          json={"session_id": session_id, "expected_status_version": 1, "documents": documents})
     assert staging.status_code == 200
-    assert set(staging.json()["data"]) == {
-        "staging_id", "filename", "mime_type", "size_bytes", "expires_at",
-    }
+    assert set(staging.json()["data"]) == {"scope", "matching_segment_id", "document_version_id", "expected_staging_version", "staging_id", "filename", "mime_type", "size_bytes", "expires_at"}
     assert application.controlled_files.command.actor.actor_id == "admin:7"
+    assert ":client:v32" in application.controlled_files.command.object_key
     assert preview.status_code == 200
-    assert set(preview.json()["data"]) == {
-        "preview_token", "staging_id", "expected_staging_version", "filename",
-        "mime_type", "size_bytes", "blockers", "can_apply",
-    }
+    assert set(preview.json()["data"]) == {"preview_token", "session_id", "expected_status_version", "documents", "blockers", "can_apply"}
+    assert len(preview.json()["data"]["documents"]) == 2
+    assert all(word not in preview.text for word in ("storage_locator", "sha256_digest", "preview_fingerprint"))
 
 
 def test_final_readback_uses_only_opaque_identities() -> None:
@@ -922,9 +939,116 @@ def test_final_readback_uses_only_opaque_identities() -> None:
     assert set(data) == {
         "case_no", "session_id", "final_document_id", "controlled_file_id",
         "version_number", "filename", "mime_type", "size_bytes", "status",
-        "integrity_verified", "applied_at",
+        "integrity_verified", "applied_at", "documents",
     }
     assert data["integrity_verified"] is True
+
+
+@pytest.mark.parametrize(("environment", "host", "database", "profile", "allowed"), [
+    ("development", "127.0.0.1", "union_db", "", True),
+    ("test", "localhost", "lu_test_signing", "", True),
+    ("production", "127.0.0.1", "union_db", "", False),
+    ("prod", "127.0.0.1", "union_db", "", False),
+    ("", "127.0.0.1", "union_db", "", False),
+    ("development", "remote.example", "union_db", "", False),
+    ("development", "127.0.0.1", "production_db", "", False),
+    ("development", "127.0.0.1", "union_db", "development_gce_iap_reverse_ssh", False),
+])
+def test_testing_skip_is_bounded_to_local_test_runtime(monkeypatch, environment, host, database, profile, allowed):
+    monkeypatch.setenv("APP_ENV", environment)
+    monkeypatch.setenv("DEPLOYMENT_PROFILE", profile)
+    monkeypatch.setattr(dependencies, "DB_CONFIG", {"host": host, "database": database})
+    assert dependencies.testing_signing_skip_allowed() is allowed
+
+
+def test_testing_skip_and_apply_are_rejected_in_production_before_writes(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "production")
+    application = FakeApplication()
+    client = _client(application)
+    path = f"/api/v1/orders/{CASE_NO}/contract-external-signing/final-document"
+    headers = {"Idempotency-Key": "contract-test:" + UUID, "X-Correlation-ID": "corr-testing", "X-Receipt-ID": RECEIPT_ID}
+    context = {"session_id": SESSION_ID, "expected_status_version": 1}
+    prepared = client.post(path + "/testing-skip", headers=headers, json=context)
+    applied = client.post(path + "/apply", headers=headers, json={**context,
+        "documents": [{"scope": "client", "matching_segment_id": None, "document_version_id": 82,
+                       "staging_id": "cfs_" + UUID, "expected_staging_version": 1}],
+        "preview_token": "cp_" + "A" * 43, "signatures_confirmed": False, "testing_skip_confirmed": True})
+    assert prepared.status_code == applied.status_code == 403
+    assert application.controlled_files.command is None
+
+
+def test_testing_skip_stages_visible_placeholder_for_each_current_target(monkeypatch):
+    monkeypatch.setattr(route, "testing_signing_skip_allowed", lambda: True)
+    application = FakeApplication()
+    stages = []
+    original = application.controlled_files.stage
+
+    def stage(command):
+        stages.append(command)
+        result = original(command)
+        result.staging_id = "cfs_" + str(len(stages)) * 32
+        return result
+
+    application.controlled_files.stage = stage
+    response = _client(application).post(
+        f"/api/v1/orders/{CASE_NO}/contract-external-signing/final-document/testing-skip",
+        headers={"Idempotency-Key": "contract-test:" + UUID, "X-Correlation-ID": "corr-testing"},
+        json={"session_id": SESSION_ID, "expected_status_version": 1})
+    assert response.status_code == 200, response.text
+    assert [row.filename for row in stages] == ["TEST-ONLY-client-v82.pdf", "TEST-ONLY-staff-71-v81.pdf"]
+    assert len({row.idempotency_key.value for row in stages}) == 2
+    assert all(b"TEST ONLY - NOT A SIGNED CONTRACT" in row.content for row in stages)
+    assert all(row.subject_reference == CASE_NO and row.actor.actor_id == "admin:7" for row in stages)
+    assert len(response.json()["data"]["documents"]) == 2
+    assert application.reports.command is None
+
+
+def test_testing_skip_rejects_stale_version_before_staging(monkeypatch):
+    monkeypatch.setattr(route, "testing_signing_skip_allowed", lambda: True)
+    application = FakeApplication()
+
+    def stale(*_args):
+        raise route.FinalDocumentWorkflowError("external_signing_status_version_stale")
+
+    application.final_documents.validate_target = stale
+    response = _client(application).post(
+        f"/api/v1/orders/{CASE_NO}/contract-external-signing/final-document/testing-skip",
+        headers={"Idempotency-Key": "contract-test:" + UUID, "X-Correlation-ID": "corr-testing"},
+        json={"session_id": SESSION_ID, "expected_status_version": 1})
+    assert response.status_code == 409
+    assert application.controlled_files.command is None
+
+
+def test_independent_reminder_api_uses_persisted_actor_and_exact_session():
+    application = FakeApplication()
+    response = _client(application).post(f"/api/v1/orders/{CASE_NO}/contract-external-signing/reminders",
+        headers={"Idempotency-Key": "contract-external.signing-reminders:" + UUID, "X-Correlation-ID": "corr-reminder", "X-Receipt-ID": RECEIPT_ID},
+        json={"session_id": SESSION_ID, "expected_status_version": 1})
+    assert response.status_code == 200, response.text
+    assert response.json()["data"] == {"receipt_id": RECEIPT_ID, "session_id": SESSION_ID, "status_version": 1, "replayed": False, "manual_notification_targets": []}
+    assert application.reports.command.actor.actor_id == "admin:7"
+    assert application.reports.command.case_no == CASE_NO
+
+
+def test_reminder_api_does_not_accept_recipient_filter_or_anonymous_operator():
+    application = FakeApplication()
+    path = f"/api/v1/orders/{CASE_NO}/contract-external-signing/reminders"
+    headers = {"Idempotency-Key": "contract-external.signing-reminders:" + UUID, "X-Correlation-ID": "corr-reminder", "X-Receipt-ID": RECEIPT_ID}
+    body = {"session_id": SESSION_ID, "expected_status_version": 1}
+    assert _client(application).post(path, headers=headers, json={**body, "staff_ids": [9]}).status_code == 422
+    assert _local_bypass_client(application).post(path, headers=headers, json=body).status_code in {401, 403}
+    assert application.reports.command is None
+
+
+def test_query_preserves_last_reminder_snapshot_without_exposing_command_details():
+    application = FakeApplication()
+    query = application.query_case(CASE_NO)
+    query["signing_reminder"] = SimpleNamespace(receipt_id=RECEIPT_ID, session_id=SESSION_ID, status_version=1, replayed=False, manual_notification_targets=())
+    application.query_case = lambda _case: query
+    response = _client(application).get(f"/api/v1/orders/{CASE_NO}/contract-external-signing")
+    assert response.status_code == 200
+    assert response.json()["data"]["signing_reminder"]["receipt_id"] == RECEIPT_ID
+    assert "command_fingerprint" not in response.text
 
 
 def test_production_requires_configured_preview_secret(monkeypatch) -> None:

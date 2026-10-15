@@ -40,7 +40,7 @@ from infrastructure.archive.contract_documents import (
     archive_contract_document,
     discard_uncommitted_contract_document,
 )
-from infrastructure.mysql.mysql_adapter import get_connection
+from infrastructure.mysql.mysql_adapter import DB_CONFIG, get_connection
 from infrastructure.mysql.line_delivery_task_repository import (
     MySqlLineDeliveryTaskRepository,
 )
@@ -84,6 +84,18 @@ from subsystems.orders.contract_completion_workflow import ContractCompletionWor
 
 
 _LOCAL_PREVIEW_SECRET = "local-only-contract-final-preview-token-secret-v1"
+
+
+def testing_signing_skip_allowed() -> bool:
+    """Only explicit local test runtimes may simulate signed returns."""
+    environment = os.getenv("APP_ENV", "").strip().lower()
+    database = str(DB_CONFIG.get("database", ""))
+    return (
+        environment in {"development", "dev", "local", "test"}
+        and DB_CONFIG.get("host") in {"127.0.0.1", "localhost", "::1"}
+        and (database == "union_db" or database.startswith("lu_test_"))
+        and not os.getenv("DEPLOYMENT_PROFILE", "").strip()
+    )
 
 
 @dataclass(slots=True)
@@ -131,7 +143,9 @@ class ContractExternalSigningApplication:
                 ],
             }
         reported = frozenset(facts.reported_staff_segment_ids)
-        document = self._representative_unsigned_document(facts)
+        unsigned_documents = self._unsigned_documents(facts)
+        document = {key: unsigned_documents[0][key] for key in ("document_version_id", "filename", "mime_type", "size_bytes")} if unsigned_documents else None
+        handoff = self.repository.load_handoff_notification_facts(case_no, facts.session_id) if active is not None else None
         return {
             "case_no": facts.case_no,
             "session_id": facts.session_id,
@@ -140,11 +154,14 @@ class ContractExternalSigningApplication:
             "handoff_recorded": active is not None,
             "manual_notification_targets": [
                 {"scope": target.scope.value, "subject_reference": target.subject_reference}
-                for target in self.repository.load_handoff_manual_notification_targets(case_no, facts.session_id)
+                for target in (() if handoff is None else handoff.manual_notification_targets)
             ] if active is not None else [],
+            "handoff_included_reminders": handoff.handoff_included_reminders if handoff is not None else False,
+            "signing_reminder": self.repository.load_latest_reminder_receipt(case_no, facts.session_id) if active is not None else None,
             "matching_plan_id": facts.matching_plan_id,
             "commitment_id": facts.commitment_id,
             "unsigned_document": document,
+            "unsigned_documents": unsigned_documents,
             "staff_targets": [
                 {
                     "matching_segment_id": target.matching_segment_id,
@@ -419,22 +436,19 @@ class ContractExternalSigningApplication:
             "applied_at": _aware_utc(row["applied_at_utc"]),
         }
 
-    def _representative_unsigned_document(self, facts) -> dict[str, object] | None:
-        identities = tuple(
-            target.document_version_id for target in facts.staff_targets
-        )
+    def _unsigned_documents(self, facts) -> list[dict[str, object]]:
+        targets = [("staff", target.matching_segment_id, target.document_version_id) for target in facts.staff_targets]
         if facts.client_document_version_id is not None:
-            identities = (facts.client_document_version_id,) + identities
-        for identity in identities:
+            targets.insert(0, ("client", None, facts.client_document_version_id))
+        documents = []
+        for scope, segment_id, identity in targets:
             stored = self.unsigned_repository.load_current_pdf(facts.case_no, identity)
             if stored is not None:
-                return {
-                    "document_version_id": stored.document_version_id,
-                    "filename": stored.filename,
-                    "mime_type": stored.mime_type,
-                    "size_bytes": stored.size_bytes,
-                }
-        return None
+                documents.append({"scope": scope, "matching_segment_id": segment_id,
+                                  "document_version_id": stored.document_version_id,
+                                  "filename": stored.filename, "mime_type": stored.mime_type,
+                                  "size_bytes": stored.size_bytes})
+        return documents
 
 
 def get_contract_external_signing_application() -> Iterator[ContractExternalSigningApplication]:

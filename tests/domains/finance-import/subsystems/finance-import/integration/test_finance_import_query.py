@@ -221,6 +221,14 @@ def test_business_dispatch_projection_preserves_terminal_outcome_meaning(
     assert disposition is expected
 
 
+def test_manually_reconciled_rows_are_existing_when_original_batch_is_replayed():
+    assert _preview_disposition(
+        {'canonical_batch_id': 5, 'disposition': 'create',
+         'latest_dispatch_outcome': None, 'has_reconciliation_receipt': 1},
+        FinanceClassificationType.CLIENT_RECEIPT, 5,
+    ) is FinanceImportDisposition.EXISTING
+
+
 def test_canonical_rows_follow_the_textual_identity_order_required_by_preview() -> None:
     row_ten = CanonicalFinanceImportRow(
         "finance-import-row:10",

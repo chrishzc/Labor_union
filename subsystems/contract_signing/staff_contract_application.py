@@ -866,6 +866,12 @@ def _allocate_commitment_service_days(terms, segments, holiday_dates):
 
 
 def _rest_weekdays(service_mode):
+    if service_mode is None:
+        return frozenset()
+    if isinstance(service_mode, str):
+        service_mode = service_mode.strip()
+        if service_mode in {"", "無休"}:
+            return frozenset()
     if service_mode == "休周六":
         return frozenset({5})
     if service_mode in {"休周日", "週休1日", "週休一日"}:

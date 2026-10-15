@@ -180,11 +180,11 @@ const result: ServiceBeforeReplacementApplyResult = {
 describe('ServiceBeforeReplacementActions', () => {
   beforeEach(() => {
     vi.mocked(serviceBeforeReplacementClient.query).mockResolvedValue(readyQuery);
-    vi.mocked(serviceBeforeReplacementClient.preview).mockResolvedValue(preview);
+    vi.mocked(serviceBeforeReplacementClient.preview).mockImplementation(async (_caseNo, request) => ({ ...preview, evidence: request.evidence }));
     vi.mocked(serviceBeforeReplacementClient.apply).mockResolvedValue(result);
   });
 
-  it('要求明確情境、原因與證據，並只套用後端決定的 resume step', async () => {
+  it('要求明確情境與單一換人原因，並只套用後端決定的 resume step', async () => {
     const onCommitted = vi.fn();
     render(<ServiceBeforeReplacementActions caseNo="CASE-RPRE-001" initialScenario="R-02" onCommitted={onCommitted} />);
 
@@ -196,7 +196,6 @@ describe('ServiceBeforeReplacementActions', () => {
     expect(serviceBeforeReplacementClient.query).toHaveBeenCalledWith('CASE-RPRE-001', 'R-02', expect.any(AbortSignal));
     expect(screen.getByText('重新挑選候選月嫂')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('換人原因'), { target: { value: ' 客戶要求更換月嫂 ' } });
-    fireEvent.change(screen.getByLabelText('聯繫紀錄或更換依據'), { target: { value: 'ticket:RPRE-1\ncall-log:20260828\nticket:RPRE-1' } });
     fireEvent.click(screen.getByRole('button', { name: '預覽換人影響' }));
 
     await screen.findByText('預覽完成，尚未寫入');
@@ -208,13 +207,13 @@ describe('ServiceBeforeReplacementActions', () => {
       {
         scenario: 'R-02',
         reason: '客戶要求更換月嫂',
-        evidence: ['call-log:20260828', 'ticket:RPRE-1'],
+        evidence: [],
       },
       expect.any(AbortSignal),
     );
     const applyButton = screen.getByRole('button', { name: '確認更換' });
     expect(applyButton).toBeDisabled();
-    fireEvent.click(screen.getByLabelText('我已確認更換原因、聯繫紀錄及影響'));
+    fireEvent.click(screen.getByLabelText('我已確認換人原因及影響'));
     fireEvent.click(applyButton);
 
     await screen.findByText(/已完成更換/);
@@ -302,10 +301,9 @@ describe('ServiceBeforeReplacementActions', () => {
     expandReplacementPanel();
     await screen.findByText('可以辦理更換');
     fireEvent.change(screen.getByLabelText('換人原因'), { target: { value: preview.reason } });
-    fireEvent.change(screen.getByLabelText('聯繫紀錄或更換依據'), { target: { value: preview.evidence.join('\n') } });
     fireEvent.click(screen.getByRole('button', { name: '預覽換人影響' }));
     await screen.findByText('預覽完成，尚未寫入');
-    fireEvent.click(screen.getByLabelText('我已確認更換原因、聯繫紀錄及影響'));
+    fireEvent.click(screen.getByLabelText('我已確認換人原因及影響'));
     fireEvent.click(screen.getByRole('button', { name: '確認更換' }));
 
     await screen.findByText(/沿用原操作安全地確認結果，不會重複建立換人/);
@@ -325,10 +323,9 @@ describe('ServiceBeforeReplacementActions', () => {
     expandReplacementPanel();
     await screen.findByText('可以辦理更換');
     fireEvent.change(screen.getByLabelText('換人原因'), { target: { value: preview.reason } });
-    fireEvent.change(screen.getByLabelText('聯繫紀錄或更換依據'), { target: { value: preview.evidence.join('\n') } });
     fireEvent.click(screen.getByRole('button', { name: '預覽換人影響' }));
     await screen.findByText('預覽完成，尚未寫入');
-    fireEvent.click(screen.getByLabelText('我已確認更換原因、聯繫紀錄及影響'));
+    fireEvent.click(screen.getByLabelText('我已確認換人原因及影響'));
     fireEvent.click(screen.getByRole('button', { name: '確認更換' }));
 
     await screen.findByText(/沿用原操作安全地確認結果，不會重複建立換人/);
@@ -367,10 +364,9 @@ describe('ServiceBeforeReplacementActions', () => {
     expandReplacementPanel();
     await screen.findByText('可以辦理更換');
     fireEvent.change(screen.getByLabelText('換人原因'), { target: { value: preview.reason } });
-    fireEvent.change(screen.getByLabelText('聯繫紀錄或更換依據'), { target: { value: preview.evidence.join('\n') } });
     fireEvent.click(screen.getByRole('button', { name: '預覽換人影響' }));
     await screen.findByText('預覽完成，尚未寫入');
-    fireEvent.click(screen.getByLabelText('我已確認更換原因、聯繫紀錄及影響'));
+    fireEvent.click(screen.getByLabelText('我已確認換人原因及影響'));
     fireEvent.click(screen.getByRole('button', { name: '確認更換' }));
     await screen.findByText(/已完成更換/);
     expect(screen.queryByText('parent refresh failed')).not.toBeInTheDocument();
@@ -381,10 +377,9 @@ describe('ServiceBeforeReplacementActions', () => {
     expandReplacementPanel();
     await screen.findByText('可以辦理更換');
     fireEvent.change(screen.getByLabelText('換人原因'), { target: { value: preview.reason } });
-    fireEvent.change(screen.getByLabelText('聯繫紀錄或更換依據'), { target: { value: preview.evidence.join('\n') } });
     fireEvent.click(screen.getByRole('button', { name: '預覽換人影響' }));
     await screen.findByText('預覽完成，尚未寫入');
-    fireEvent.click(screen.getByLabelText('我已確認更換原因、聯繫紀錄及影響'));
+    fireEvent.click(screen.getByLabelText('我已確認換人原因及影響'));
     fireEvent.click(screen.getByRole('button', { name: '確認更換' }));
     await screen.findByText(/案件已更新/);
     expect(serviceBeforeReplacementClient.query).toHaveBeenCalledTimes(1);
@@ -409,10 +404,9 @@ describe('ServiceBeforeReplacementActions', () => {
     expandReplacementPanel();
     await screen.findByText('可以辦理更換');
     fireEvent.change(screen.getByLabelText('換人原因'), { target: { value: preview.reason } });
-    fireEvent.change(screen.getByLabelText('聯繫紀錄或更換依據'), { target: { value: preview.evidence.join('\n') } });
     fireEvent.click(screen.getByRole('button', { name: '預覽換人影響' }));
     await screen.findByText('預覽完成，尚未寫入');
-    fireEvent.click(screen.getByLabelText('我已確認更換原因、聯繫紀錄及影響'));
+    fireEvent.click(screen.getByLabelText('我已確認換人原因及影響'));
     fireEvent.click(screen.getByRole('button', { name: '確認更換' }));
 
     await screen.findByText(/目前沒有可用候選月嫂/);

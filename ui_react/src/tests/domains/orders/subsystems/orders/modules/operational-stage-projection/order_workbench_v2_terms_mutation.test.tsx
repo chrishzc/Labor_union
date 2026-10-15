@@ -5,7 +5,7 @@ import {
   SUBSTATUS_BY_STAGE_STATUS,
   type CoreStageCode,
 } from '../../../../../../../api/orders/order_core_stage_projection_schemas';
-import { OrderWorkbenchV2Page } from '../../../../../../../pages/OrderWorkbenchV2Page';
+
 import {
   OrderTermsMutationPanel,
   calculateDailyServiceHours,
@@ -147,20 +147,11 @@ function refreshedOrderTerms() {
   };
 }
 
-function card(): HTMLElement {
-  const node = screen.getByText('CASE-TERMS').closest('article');
-  if (!(node instanceof HTMLElement)) throw new Error('找不到 CASE-TERMS 案件卡');
-  return node;
-}
-
 async function openTermsPanel(): Promise<HTMLElement> {
-  render(<OrderWorkbenchV2Page />);
-  await waitFor(() => expect(screen.getByText('CASE-TERMS')).toBeInTheDocument());
-  fireEvent.click(card());
-
-  const dialog = await screen.findByRole('region', { name: '案件 CASE-TERMS' });
-  const panel = within(dialog).getByRole('heading', { name: '預覽與儲存服務條件' }).closest('section');
-  if (!(panel instanceof HTMLElement)) throw new Error('找不到進件條款操作區');
+  const query = await mocks.getOrderTerms('CASE-TERMS');
+  render(<OrderTermsMutationPanel caseNo="CASE-TERMS" query={query} />);
+  const panel = screen.getByRole('heading', { name: '預覽與儲存服務條件' }).closest('section');
+  if (!(panel instanceof HTMLElement)) throw new Error('找不到名冊沿用的訂單條款操作區');
   return panel;
 }
 
@@ -172,7 +163,7 @@ async function previewAndApply(panel: HTMLElement) {
   fireEvent.click(within(panel).getByRole('button', { name: '確認儲存服務條件' }));
 }
 
-describe('待辦看板 第 1 階訂單條款操作', () => {
+describe('名冊沿用訂單條款操作', () => {
   beforeEach(() => {
     Object.values(mocks).forEach((mock) => mock.mockReset());
     mocks.getCoreStageTimelines.mockResolvedValue(corePage());
@@ -287,9 +278,7 @@ describe('待辦看板 第 1 階訂單條款操作', () => {
     await waitFor(() => expect(mocks.queryTerms).toHaveBeenCalledWith('CASE-TERMS'));
     expect(await within(panel).findByText(/服務條件已儲存並重新讀取確認；合約服務 21 日。/)).toBeInTheDocument();
     expect(within(panel).getByLabelText('服務天數')).toHaveValue(21);
-    await screen.findByText('依目前進度開啟工作，也可切換其他事項。');
     expect(panel).toBeVisible();
-    expect(screen.getByRole('button', { name: /1 進件資料 可辦理/ })).toHaveAttribute('aria-current', 'page');
   });
 
   it('普通保存結果不明時只讀回確認，不重播提交', async () => {

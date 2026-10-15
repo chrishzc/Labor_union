@@ -30,5 +30,6 @@
 Reconcile when React shell navigation、session/auth composition、ErrorBoundary recovery、closed crash presentation或higher-boundary test location changes。
 
 ## Registry entry transition
+- 同頁點選「待辦看板」傳遞明確返回請求，由案件工作區沿既有關閉流程回到清單並清除案件深連結；進行中或結果未明的操作不被卸載，稍後解鎖也不自動跳走。
 - Canonical `#clients` exposes one 客戶清單 with editable case-detail Drawer; independent 名冊資料 and 變更歷程 tabs are merged. Case／field deep links open the selected Drawer, with case history at the bottom; the virtual-account import tab remains. Legacy `#client-roster`、`#data-browser`／`#databrowser` redirect to `#clients`.
 - Data Import no longer composes the six-source Data Browser tab; the archived server API remains read-only for compatibility.

@@ -20,6 +20,7 @@ from domains.scheduling.candidate_contact_response import (
     resolve_candidate_pool,
 )
 from infrastructure.mysql.line_delivery_task_repository import MySqlLineDeliveryTaskRepository
+from infrastructure.mysql.replacement_matching_query import CANDIDATE_CONTACT_OPEN_SQL, candidate_contact_open
 from shared_kernel.identities import CorrelationId, IdempotencyKey
 
 
@@ -86,6 +87,8 @@ _FORMAL_TERMS_CATEGORIES = frozenset(
 
 
 class CandidateContactCoordinationWorker:
+    run_before_delivery = True
+
     def __init__(self, connection_factory: Callable[[], Any], now: Callable[[], datetime], *, batch_size: int = 25) -> None:
         self._connection_factory = connection_factory
         self._now = now
@@ -99,7 +102,7 @@ class CandidateContactCoordinationWorker:
                 processed += _cancel_inactive_order_manual_followups(cursor)
                 cursor.execute(
                     "SELECT pool.id,pool.case_no FROM caregiver_candidate_contact_pools pool "
-                    "JOIN orders ON orders.case_no=pool.case_no AND orders.status='洽談中' "
+                    "JOIN orders ON orders.case_no=pool.case_no WHERE " + CANDIDATE_CONTACT_OPEN_SQL + " "
                     "ORDER BY pool.id LIMIT %s FOR UPDATE",
                     (self._batch_size,),
                 )
@@ -123,12 +126,12 @@ def _cancel_inactive_order_manual_followups(cursor) -> int:
         "JOIN orders ON orders.case_no=pool.case_no "
         "SET task.processing_status='cancelled',"
         "task.error_code='candidate_contact_order_inactive',"
-        "task.error_message='candidate contact order left negotiating state',"
+        "task.error_message='candidate contact order is not eligible for matching',"
         "task.lease_owner=NULL,task.lease_acquired_at_utc=NULL,"
         "task.lease_expires_at_utc=NULL "
         "WHERE task.source_aggregate_type=%s "
         "AND task.processing_status IN ('pending','retryable_failed') "
-        "AND orders.status<>'洽談中'",
+        "AND NOT " + CANDIDATE_CONTACT_OPEN_SQL,
         (_MANUAL_FOLLOWUP_SOURCE,),
     )
     return int(cursor.rowcount or 0)
@@ -164,8 +167,8 @@ def query_manual_followups(
             while True:
                 cursor.execute(
                     "SELECT pool.id,pool.case_no FROM caregiver_candidate_contact_pools pool "
-                    "JOIN orders ON orders.case_no=pool.case_no AND orders.status='洽談中' "
-                    "WHERE pool.id>%s ORDER BY pool.id LIMIT 100",
+                    "JOIN orders ON orders.case_no=pool.case_no "
+                    "WHERE pool.id>%s AND " + CANDIDATE_CONTACT_OPEN_SQL + " ORDER BY pool.id LIMIT 100",
                     (after_pool_id,),
                 )
                 pools = tuple(cursor.fetchall() or ())
@@ -238,7 +241,7 @@ def query_manual_followup_operation(
             pool = cursor.fetchone()
             if not isinstance(pool, Mapping):
                 raise ValueError("candidate_contact_manual_followup_not_found")
-            if pool.get("order_status") != "洽談中":
+            if not candidate_contact_open(cursor, canonical_case_no, pool.get("order_status")):
                 raise ValueError("candidate_contact_order_not_negotiating")
             cursor.execute(
                 "SELECT entry.id,staff.name AS staff_name "

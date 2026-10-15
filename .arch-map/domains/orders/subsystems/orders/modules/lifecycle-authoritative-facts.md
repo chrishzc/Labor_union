@@ -15,6 +15,9 @@
   - `subsystems/orders/lifecycle_control_read_facts.py`
   - `subsystems/orders/order_lifecycle_command_envelope.py`
   - `subsystems/orders/auto_completion_workflow.py`
+  - `api/dependencies/order_auto_completion.py`
+  - `api/routes/order_auto_completion.py` — canonical completion commands and readonly automatic-completion status。
+  - `api/schemas/order_auto_completion.py`
 
 ## Dependencies
 - outbound: `scheduling/scheduling` — 有效 generation、正式 assignment 與 official service dates。

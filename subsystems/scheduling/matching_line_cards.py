@@ -27,18 +27,18 @@ def candidate_contact_information_card(
     info_type: int,
     information_sections: Sequence[tuple[str, Sequence[tuple[str, str]]]],
     interaction_reference: str,
-    response_url: str,
+    response_url: str | None,
 ) -> str:
     """Render redacted candidate information as readable table sections."""
     if not isinstance(case_no, str) or not case_no.strip():
         raise ValueError("candidate order number is required")
-    if info_type not in {1, 2}:
+    if info_type not in {1, 2, 3}:
         raise ValueError("candidate information type is invalid")
     if not information_sections:
         raise ValueError("candidate information sections are required")
     if not isinstance(interaction_reference, str) or not interaction_reference.strip():
         raise ValueError("candidate interaction reference is required")
-    if not isinstance(response_url, str) or not response_url.startswith("https://"):
+    if info_type != 3 and (not isinstance(response_url, str) or not response_url.startswith("https://")):
         raise ValueError("candidate response URL must use HTTPS")
     title = f"訂單編號：{case_no.strip()}"
     body = [_title(title)]
@@ -49,6 +49,9 @@ def candidate_contact_information_card(
             ("肉品", "雞腿、雞胸、排骨、豬／牛肉絲、絞肉、雞蛋、魚排"),
             ("蔬菜", "青菜、紅蘿蔔、薑、香菇、其他菇類、豆製品"),
         )))
+    if info_type == 3:
+        body.append(_notice("預計服務日期說明；正式排班仍須由工會確認。"))
+        return canonical_line_payload_json(_bubble_payload(title, body, []))
     body.append(_notice("請確認檔期與條件後回覆是否願意承接。"))
     actions = [
         _candidate_contact_button("願意承接", interaction_reference, "willing", "#06C755"),

@@ -8,6 +8,7 @@ class Application:
     workflow:DepositSkipWorkflow
     connection:object
     def preview(self,s):return self.workflow.preview(s)
+    def query(self,s):return self.workflow.query(s)
     def apply(self,r):
         receipt=self.workflow.apply(r)
         consume_client_finance_orders_case_override(self.connection,r.selection.case_no)

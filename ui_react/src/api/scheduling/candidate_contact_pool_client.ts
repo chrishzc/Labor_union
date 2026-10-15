@@ -42,6 +42,7 @@ const CandidateContactSchema = z.strictObject({
   information: z.strictObject({
     '1': CandidateInformationDeliverySchema.nullable(),
     '2': CandidateInformationDeliverySchema.nullable(),
+    '3': CandidateInformationDeliverySchema.nullable().optional(),
   }),
 }).superRefine((candidate, context) => {
   if (candidate.service_start_date > candidate.service_end_date) {
@@ -130,7 +131,7 @@ const mutationEnvelope = <TSchema extends z.ZodTypeAny>(schema: TSchema) => z.st
 
 export type CandidateContactPool = z.infer<typeof CandidateContactPoolSchema>;
 const InformationPreviewSchema = z.strictObject({
-  case_no: z.string().min(1), candidate_id: z.number().int().positive(), info_type: z.union([z.literal(1), z.literal(2)]),
+  case_no: z.string().min(1), candidate_id: z.number().int().positive(), info_type: z.union([z.literal(1), z.literal(2), z.literal(3)]),
   staff_name: z.string().min(1), text: z.string().min(1),
   line_sections: z.array(z.strictObject({
     title: z.string().min(1), rows: z.array(z.tuple([z.string().min(1), z.string().min(1)])).min(1),
@@ -151,6 +152,17 @@ const WeeklyServicePreviewSchema = z.strictObject({
   })),
 });
 export type CandidateWeeklyServicePreview = z.infer<typeof WeeklyServicePreviewSchema>;
+const CaseWeeklyServicePreviewSchema = WeeklyServicePreviewSchema.omit({ candidate_id: true, rows: true }).extend({
+  rows: z.array(WeeklyServicePreviewSchema.shape.rows.element.omit({ staff_name: true })),
+});
+export type CaseWeeklyServicePreview = z.infer<typeof CaseWeeklyServicePreviewSchema>;
+const CaseInformationPreviewSchema = z.strictObject({
+  case_no: z.string().min(1).max(50), info_type: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+  start_date: IsoDateSchema.nullable(), line_sections: InformationPreviewSchema.shape.line_sections,
+  content_fingerprint: z.string().regex(/^[0-9a-f]{64}$/), send_allowed: z.boolean(),
+});
+export type CaseInformationPreview = z.infer<typeof CaseInformationPreviewSchema>;
+export type CandidateInformationKind = 1 | 2 | 3;
 export type SendCandidateInformationResult = z.infer<typeof SendCandidateInformationResultSchema>;
 export type AddCandidatesResult = z.infer<typeof AddCandidatesResultSchema>;
 export type CandidateWillingnessResult = z.infer<typeof CandidateWillingnessResultSchema>;
@@ -176,7 +188,7 @@ export interface CandidateAddCommand {
 export interface CandidateInformationSendCommand {
   caseNo: string;
   candidateId: number;
-  infoType: 1 | 2;
+  infoType: CandidateInformationKind;
   previewFingerprint: string;
   actor: string;
   eventKey: string;
@@ -259,7 +271,7 @@ export function createCandidateAddCommand(
 export function createCandidateInformationSendCommand(
   caseNo: string,
   candidateId: number,
-  infoType: 1 | 2,
+  infoType: CandidateInformationKind,
   previewFingerprint: string,
 ): CandidateInformationSendCommand {
   const canonical = canonicalCaseNo(caseNo);
@@ -429,7 +441,7 @@ export const candidateContactPoolClient = {
   async previewInformation(
     caseNo: string,
     candidateId: number,
-    infoType: 1 | 2,
+    infoType: CandidateInformationKind,
     options?: { signal?: AbortSignal },
   ): Promise<CandidateInformationPreview> {
     const canonical = canonicalCaseNo(caseNo);
@@ -442,6 +454,28 @@ export const candidateContactPoolClient = {
     const data = envelope.data;
     if (data.case_no !== canonical || data.candidate_id !== candidateId || data.info_type !== infoType) throw new Error('寄送預覽對象不一致。');
     return data;
+  },
+
+  async previewCaseInformation(caseNo: string, infoType: CandidateInformationKind, options?: { signal?: AbortSignal }): Promise<CaseInformationPreview> {
+    const canonical = canonicalCaseNo(caseNo);
+    const { token } = mutationIdentity();
+    const envelope = decodePayload(mutationEnvelope(CaseInformationPreviewSchema), await transport.get(
+      `/api/v1/orders/${encodeURIComponent(canonical)}/candidate-contact-pool/information/preview?info_type=${infoType}`, { token, signal: options?.signal }));
+    if (!envelope.success || !envelope.data) throw new Error('無法讀取訂單共用資訊。');
+    if (envelope.data.case_no !== canonical || envelope.data.info_type !== infoType) throw new Error('訂單共用資訊對象不一致。');
+    return envelope.data;
+  },
+
+  async previewCaseWeeklyService(caseNo: string, options?: { signal?: AbortSignal; serviceDates?: string[] }): Promise<CaseWeeklyServicePreview> {
+    const canonical = canonicalCaseNo(caseNo);
+    const { token } = mutationIdentity();
+    const path = `/api/v1/orders/${encodeURIComponent(canonical)}/candidate-contact-pool/weekly-service/preview`;
+    const raw = options?.serviceDates === undefined ? await transport.get(path, { token, signal: options?.signal })
+      : await transport.post(path, { service_dates: z.array(IsoDateSchema).min(1).parse(options.serviceDates) }, { token, signal: options?.signal });
+    const envelope = decodePayload(mutationEnvelope(CaseWeeklyServicePreviewSchema), raw);
+    if (!envelope.success || !envelope.data) throw new Error('無法讀取共用每週服務說明。');
+    if (envelope.data.case_no !== canonical) throw new Error('共用每週服務說明對象不一致。');
+    return envelope.data;
   },
 
   async previewWeeklyService(

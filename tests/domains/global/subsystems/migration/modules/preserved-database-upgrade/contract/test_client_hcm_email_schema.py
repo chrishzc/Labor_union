@@ -26,7 +26,7 @@ def test_email_release_is_additive_and_in_current_fresh_and_preserve_chain():
     for item in (release["artifacts"][0], release["descriptor_artifact"]):
         assert hashlib.sha256((ROOT / item["relative_path"]).read_bytes()).hexdigest() == item["sha256"]
     assert validate_schema_assembly() == []
-    assert MANIFEST.name == migration.DEFAULT_RELEASE_MANIFESTS[-1]
+    assert MANIFEST.name in migration.DEFAULT_RELEASE_MANIFESTS
     fresh = (ROOT / "db/schema_parts/230_client_hcm_email.sql").read_text(encoding="utf-8")
     bridge = (ROOT / "db/schema_parts" / ARTIFACT).read_text(encoding="utf-8")
     assert fresh == bridge

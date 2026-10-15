@@ -7,6 +7,7 @@ import { OrderIntakeRepairPanel } from '../../../../../../../components/OrderInt
 import { hcmResubmissionClient } from '../../../../../../../api/case_import/hcm_resubmission_client';
 import { clientRegistryClient } from '../../../../../../../api/client_registry/client_registry_client';
 import type { ClientRegistryDetail } from '../../../../../../../api/client_registry/client_registry_schemas';
+import { orderMutationFlowStore } from '../../../../../../../adapters/orders/order_mutation_flow_store';
 
 const ETAG = 'a'.repeat(64);
 const FP1 = '1'.repeat(64);
@@ -60,6 +61,126 @@ describe('Orders intake repair entry', () => {
   beforeEach(() => {
     vi.spyOn(hcmResubmissionClient, 'current').mockResolvedValue({ items: [], next_cursor: null });
     vi.spyOn(clientRegistryClient, 'query').mockResolvedValue(profileDetail);
+  });
+
+  it.each([false, true])('名冊補齊時間後用新版本完成進件；回讀失敗時保留收據及離開限制（回讀失敗=%s）', async (failReadback) => {
+    const caseNo = `REG-REPAIR-${failReadback}`;
+    orderMutationFlowStore.clearAll();
+    const before = { case_no: caseNo, lifecycle_version: 0, current_status: '待補件', target_status: '洽談中',
+      current_start_date: '2026-11-15', current_service_days: 20, missing_fields: [], blockers: [],
+      apply_allowed: true, preview_fingerprint: FP1,
+      current_service_time: { service_hours_per_day: null, start_time: null, end_time: null, end_day_offset: null } };
+    const time = { service_hours_per_day: 8, start_time: '09:00:00', end_time: '17:00:00', end_day_offset: 0 as const };
+    const repaired = { ...before, lifecycle_version: 1, preview_fingerprint: FP2, current_service_time: time };
+    const completed = { ...repaired, lifecycle_version: 2, current_status: '洽談中', apply_allowed: false, blockers: ['order_intake_completion_status_not_eligible'] };
+    let saved = false;
+    let advanced = false;
+    let readbackUnavailable = failReadback;
+    vi.spyOn(orderIntakeCompletionClient, 'previewCompletion').mockImplementation(async () => {
+      if (advanced && readbackUnavailable) throw new Error('readback interrupted');
+      return advanced ? completed : saved ? repaired : before;
+    });
+    vi.spyOn(orderIntakeCompletionClient, 'previewTerms').mockResolvedValue({ case_no: caseNo, lifecycle_version: 0,
+      before_start_date: '2026-11-15', after_start_date: '2026-11-15', before_service_days: 20, after_service_days: 20,
+      before_service_time: before.current_service_time, after_service_time: time, changed_fields: ['service_time'],
+      blockers: [], apply_allowed: true, preview_fingerprint: FP1 });
+    const termsApply = vi.spyOn(orderIntakeCompletionClient, 'applyTerms').mockImplementation(async () => {
+      saved = true;
+      return { receipt_key: 'terms', case_no: caseNo, lifecycle_version: 1, start_date: '2026-11-15', service_days: 20,
+        service_time: time, changed_fields: ['service_time'], preview_fingerprint: FP1, replayed: false };
+    });
+    const completionApply = vi.spyOn(orderIntakeCompletionClient, 'applyCompletion').mockImplementation(async () => {
+      advanced = true;
+      return { receipt_key: 'completion', case_no: caseNo, lifecycle_version: 2, status: '洽談中', preview_fingerprint: FP2, replayed: false };
+    });
+    const stateChanged = vi.fn();
+    render(<OrderIntakeRepairPanel caseNo={caseNo} registry repairServiceTime focusMissing onEditStateChange={stateChanged} />);
+    const start = await screen.findByLabelText('每日開始時間');
+    expect(start).toHaveFocus();
+    expect(screen.queryByRole('button', { name: '確認完成進件補齊' })).not.toBeInTheDocument();
+    fireEvent.change(start, { target: { value: '09:00' } });
+    fireEvent.change(screen.getByLabelText('每日結束時間'), { target: { value: '17:00' } });
+    expect(screen.getByLabelText('每日服務時數')).toHaveValue(8);
+    fireEvent.change(screen.getByLabelText('修改原因（儲存時必填）'), { target: { value: '核對服務時段' } });
+    fireEvent.click(screen.getByRole('button', { name: '預覽服務資料變更' }));
+    fireEvent.click(await screen.findByRole('button', { name: '確認儲存服務資料' }));
+    await waitFor(() => expect(completionApply).toHaveBeenCalledWith(caseNo, repaired, '核對服務時段', expect.stringContaining(`orders-intake-complete-${caseNo}-`)));
+    if (failReadback) {
+      await screen.findByRole('button', { name: '只重新讀取補件結果' });
+      expect(stateChanged).toHaveBeenLastCalledWith(expect.objectContaining({ busy: true }));
+      expect(orderMutationFlowStore.getIntakeRepair(caseNo, 'completion')?.receipt?.lifecycle_version).toBe(2);
+      readbackUnavailable = false;
+      fireEvent.click(screen.getByRole('button', { name: '只重新讀取補件結果' }));
+    }
+    await screen.findByText('進件缺件已完成，案件已回讀最新狀態。');
+    await waitFor(() => expect(stateChanged).toHaveBeenLastCalledWith({ dirty: false, busy: false }));
+    expect(termsApply).toHaveBeenCalledOnce();
+    expect(completionApply).toHaveBeenCalledOnce();
+    expect(orderMutationFlowStore.getIntakeRepair(caseNo, 'completion')).toBeUndefined();
+  });
+
+  it('案件處理缺件摘要只列出缺漏並導向名冊，不提供第二份編輯表單', async () => {
+    vi.spyOn(orderIntakeCompletionClient, 'previewCompletion').mockResolvedValue({
+      case_no: 'CASE-153', lifecycle_version: 0, current_status: '待補件', target_status: '洽談中',
+      current_start_date: '2026-11-15', current_service_days: 20, missing_fields: [], blockers: [], apply_allowed: true, preview_fingerprint: FP1,
+      current_service_time: { start_time: null, end_time: null, end_day_offset: null, service_hours_per_day: null },
+    });
+    render(<OrderIntakeRepairPanel caseNo="CASE-153" repairServiceTime summaryHref="#clients?case=CASE-153&field=intake&from=workbench" />);
+    await screen.findByText('每日服務時數');
+    expect(screen.getByRole('link', { name: '前往補齊案件資料 →' })).toHaveAttribute('href', '#clients?case=CASE-153&field=intake&from=workbench');
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '確認完成進件補齊' })).not.toBeInTheDocument();
+  });
+
+  it('基本補件已齊備時仍指出正式服務條件缺件，不顯示缺少資料為無', async () => {
+    vi.spyOn(orderIntakeCompletionClient, 'previewCompletion').mockResolvedValue({
+      case_no: 'CASE-153', lifecycle_version: 7, current_status: '洽談中', target_status: '洽談中',
+      current_start_date: '2026-10-15', current_service_days: 30, missing_fields: [],
+      blockers: ['order_intake_completion_status_not_eligible'], apply_allowed: false, preview_fingerprint: FP1,
+    });
+    render(<OrderIntakeRepairPanel caseNo="CASE-153" orderStatus="洽談中" remainingServiceIssues={['缺少欄位：服務時間。']} />);
+    expect(await screen.findByText('姓名、日期與天數已齊備；仍需完成上方所列的服務條件。')).toBeInTheDocument();
+    expect(screen.queryByText('缺少資料：無')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '確認完成進件補齊' })).not.toBeInTheDocument();
+  });
+
+  it('缺時數時補齊起訖與協調時數，保留日期天數，且服務時間未正式回讀不得宣稱完成', async () => {
+    const caseNo = 'CASE-TIME-REPAIR';
+    const savedTime = { service_hours_per_day: 8, start_time: '08:00:00', end_time: '17:00:00', end_day_offset: 0 as const };
+    const beforeTime = { service_hours_per_day: null, start_time: null, end_time: null, end_day_offset: null };
+    const completion = { case_no: caseNo, lifecycle_version: 7, current_status: '洽談中', target_status: '洽談中',
+      current_start_date: '2026-11-15', current_service_days: 21, current_service_time: beforeTime,
+      missing_fields: [], blockers: ['order_intake_completion_status_not_eligible'], apply_allowed: false, preview_fingerprint: FP1 };
+    const query = vi.spyOn(orderIntakeCompletionClient, 'previewCompletion').mockResolvedValue(completion);
+    const preview = { case_no: caseNo, lifecycle_version: 7, before_start_date: '2026-11-15', before_service_days: 21,
+      after_start_date: '2026-11-15', after_service_days: 21, before_service_time: beforeTime, after_service_time: savedTime,
+      changed_fields: ['service_time' as const], blockers: [], apply_allowed: true, preview_fingerprint: FP1 };
+    const previewTerms = vi.spyOn(orderIntakeCompletionClient, 'previewTerms').mockResolvedValue(preview);
+    const apply = vi.spyOn(orderIntakeCompletionClient, 'applyTerms').mockResolvedValue({ receipt_key: 'time-repair',
+      case_no: caseNo, lifecycle_version: 8, start_date: '2026-11-15', service_days: 21,
+      service_time: savedTime, changed_fields: ['service_time'], preview_fingerprint: FP1, replayed: false });
+    const onChanged = vi.fn();
+    render(<OrderIntakeRepairPanel caseNo={caseNo} orderStatus="洽談中" repairServiceTime
+      remainingServiceIssues={['缺少欄位：服務時間。']} onChanged={onChanged} />);
+    fireEvent.change(await screen.findByLabelText('每日開始時間'), { target: { value: '08:00' } });
+    fireEvent.change(screen.getByLabelText('每日結束時間'), { target: { value: '17:00' } });
+    expect(screen.getByLabelText('每日服務時數')).toHaveValue(9);
+    fireEvent.change(screen.getByLabelText('每日服務時數'), { target: { value: '8' } });
+    expect(screen.queryByLabelText('約定服務開始日')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('服務天數')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '預覽服務資料變更' }));
+    await screen.findByRole('button', { name: '確認儲存服務資料' });
+    expect(previewTerms).toHaveBeenCalledWith(caseNo, '2026-11-15', 21, expect.objectContaining({ proposedServiceTime: savedTime }));
+    fireEvent.change(screen.getByLabelText('修改原因（儲存時必填）'), { target: { value: '確認每日實際服務八小時' } });
+    query.mockResolvedValue({ ...completion, lifecycle_version: 8 });
+    fireEvent.click(screen.getByRole('button', { name: '確認儲存服務資料' }));
+    await screen.findByRole('button', { name: '只重新讀取補件結果' });
+    expect(apply).toHaveBeenCalledOnce();
+    query.mockResolvedValue({ ...completion, lifecycle_version: 8, current_service_time: savedTime });
+    fireEvent.click(screen.getByRole('button', { name: '只重新讀取補件結果' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: '只重新讀取補件結果' })).not.toBeInTheDocument());
+    expect(apply).toHaveBeenCalledOnce();
+    expect(onChanged).toHaveBeenCalledTimes(2);
   });
 
   it('repairs the actual HCM fields in case processing and rereads the remaining warnings without resaving valid terms', async () => {

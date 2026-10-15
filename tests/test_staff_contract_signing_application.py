@@ -134,6 +134,26 @@ def test_external_unsigned_document_accepts_latest_manual_customer_acceptance():
         })
 
 
+@pytest.mark.parametrize("service_mode", ["無休", "連續服務", None, "", "  "])
+def test_commitment_accepts_continuous_service_inputs(service_mode):
+    segment = {"id": 9, "assigned_start_date": date(2026, 11, 5), "assigned_end_date": date(2026, 11, 9)}
+    allocations = staff_signing._allocate_commitment_service_days(
+        {"start_date": date(2026, 11, 5), "service_days": 5, "service_type": service_mode},
+        [segment], set(),
+    )
+    assert tuple(day for _, day in allocations) == tuple(date(2026, 11, day) for day in range(5, 10))
+    assert all(owner is segment for owner, _ in allocations)
+
+
+def test_commitment_rejects_unknown_nonempty_service_mode():
+    with pytest.raises(ValueError, match="precontract_service_mode_invalid"):
+        staff_signing._allocate_commitment_service_days(
+            {"start_date": date(2026, 11, 5), "service_days": 5, "service_type": "未知休假方式"},
+            [{"id": 9, "assigned_start_date": date(2026, 11, 5), "assigned_end_date": date(2026, 11, 9)}],
+            set(),
+        )
+
+
 def test_manual_staff_attestation_requires_customer_acceptance_for_active_proposal():
     staff_signing._require_manual_staff_snapshot_applicable({
         "status": "proposed", "is_active": 1, "customer_decision": "accepted", "already_signed": 0,

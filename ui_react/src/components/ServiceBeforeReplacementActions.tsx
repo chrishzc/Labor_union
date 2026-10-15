@@ -49,10 +49,6 @@ const stepLabels = {
   step_4: '依已確認的推薦結果繼續安排',
 } as const;
 
-function canonicalEvidence(value: string): string[] {
-  return [...new Set(value.split('\n').map((item) => item.trim()).filter(Boolean))].sort();
-}
-
 function blockerLabel(code: string): string {
   const labels: Record<string, string> = {
     actual_service_exists: '已開始服務，請改由請假代班處理。',
@@ -101,7 +97,6 @@ export function ServiceBeforeReplacementActions({
   const [expanded, setExpanded] = useState(false);
   const [query, setQuery] = useState<ServiceBeforeReplacementQuery | null>(null);
   const [reason, setReason] = useState('');
-  const [evidenceText, setEvidenceText] = useState('');
   const [uiState, setUiState] = useState<UiState>({ type: 'querying' });
   const [readingBack, setReadingBack] = useState(false);
   const operationGeneration = useRef(0);
@@ -114,10 +109,10 @@ export function ServiceBeforeReplacementActions({
   const locked = busy || readingBack || uiState.type === 'outcome_unknown';
   useEffect(() => {
     onEditStateChange?.({
-      dirty: expanded && uiState.type !== 'observed' && (reason.trim().length > 0 || evidenceText.trim().length > 0),
+      dirty: expanded && uiState.type !== 'observed' && reason.trim().length > 0,
       busy: expanded && locked,
     });
-  }, [expanded, reason, evidenceText, uiState.type, locked, onEditStateChange]);
+  }, [expanded, reason, uiState.type, locked, onEditStateChange]);
   useEffect(() => () => { onEditStateChange?.({ dirty: false, busy: false }); }, [onEditStateChange]);
 
   const runQuery = useCallback(async (selectedScenario: ServiceBeforeReplacementScenario) => {
@@ -150,7 +145,6 @@ export function ServiceBeforeReplacementActions({
 
   useEffect(() => {
     setReason('');
-    setEvidenceText('');
     if (!expanded || expandedCaseNo.current !== caseNo || scenario === '') {
       setQuery(null);
       setUiState({ type: 'ready' });
@@ -167,9 +161,9 @@ export function ServiceBeforeReplacementActions({
 
   const preview = async () => {
     const trimmedReason = reason.trim();
-    const evidence = canonicalEvidence(evidenceText);
-    if (!trimmedReason || evidence.length === 0) {
-      setUiState({ type: 'error', message: '請填寫換人原因，並至少提供一筆證據。' });
+    const evidence: string[] = [];
+    if (!trimmedReason) {
+      setUiState({ type: 'error', message: '請填寫換人原因。' });
       return;
     }
     previewController.current?.abort();
@@ -314,15 +308,7 @@ export function ServiceBeforeReplacementActions({
               if (uiState.type === 'preview_ready') setUiState({ type: 'ready' });
             }} />
           </label>
-          <label style={{ display: 'grid', gap: '4px' }}>
-            聯繫紀錄或更換依據
-            <span style={{ fontSize: '0.875rem' }}>請填寫實際聯繫日期、回覆內容或相關紀錄編號；多筆紀錄請分行填寫。</span>
-            <textarea aria-label="聯繫紀錄或更換依據" value={evidenceText} disabled={busy} onChange={(event) => {
-              setEvidenceText(event.target.value);
-              if (uiState.type === 'preview_ready') setUiState({ type: 'ready' });
-            }} />
-          </label>
-          <button type="button" disabled={busy || !reason.trim() || canonicalEvidence(evidenceText).length === 0} onClick={() => void preview()}>
+          <button type="button" disabled={busy || !reason.trim()} onClick={() => void preview()}>
             預覽換人影響
           </button>
         </section>
@@ -343,7 +329,7 @@ export function ServiceBeforeReplacementActions({
                   disabled={busy}
                   onChange={(event) => setUiState({ ...uiState, confirmed: event.target.checked })}
                 />
-                我已確認更換原因、聯繫紀錄及影響
+                我已確認換人原因及影響
               </label>
               <button type="button" disabled={!uiState.confirmed} onClick={() => void startApply()}>確認更換</button>
             </>

@@ -33,12 +33,14 @@ from subsystems.scheduling.availability_lock_acquisition_workflow import (
 from shared_kernel.errors import ErrorCategory, TypedError
 from shared_kernel.identities import CorrelationId
 from infrastructure.mysql.mysql_adapter import get_connection
+from infrastructure.mysql.client_receipt_reconciliation_repository import MySqlClientReceiptReconciliationRepository
 from subsystems.scheduling import availability_lock_acquisition_workflow as _lock_acquisition
 from subsystems.scheduling import availability_lock_release_workflow as _lock_release
 
 
 _lock_acquisition.get_connection = get_connection
 _lock_release.get_connection = get_connection
+_lock_release.get_unreceived_deposit_confirmation = lambda connection, case_no: MySqlClientReceiptReconciliationRepository(connection).query_unreceived_deposit(case_no)
 
 
 router = APIRouter(
@@ -185,8 +187,8 @@ def acquire_availability_lock(
 )
 def preview_waiting_deposit_lock_release(
     case_no: str = Path(..., min_length=1),
-    plan_id: int = Path(..., strict=True, gt=0),
-    lock_id: int = Path(..., strict=True, gt=0),
+    plan_id: int = Path(..., gt=0),
+    lock_id: int = Path(..., gt=0),
     principal: AdminPrincipal = Depends(require_system_admin),
 ):
     del principal
@@ -211,8 +213,8 @@ def preview_waiting_deposit_lock_release(
 def apply_waiting_deposit_lock_release(
     request: WaitingDepositLockReleaseApplyBody,
     case_no: str = Path(..., min_length=1),
-    plan_id: int = Path(..., strict=True, gt=0),
-    lock_id: int = Path(..., strict=True, gt=0),
+    plan_id: int = Path(..., gt=0),
+    lock_id: int = Path(..., gt=0),
     idempotency_key: _IdempotencyHeader = ...,
     correlation_id: _CorrelationHeader = ...,
     principal: AdminPrincipal = Depends(require_system_admin),
@@ -312,6 +314,22 @@ def _waiting_lock_value_error(error, correlation):
             "stale_preview",
             "檔期或配對方案已變更，請重新產生 Preview。",
             correlation,
+        )
+    if message == "client finance deposit settlement projection missing":
+        return _typed_waiting_lock_error(
+            ErrorCategory.DOMAIN_BLOCKED,
+            "deposit_settlement_confirmation_required",
+            "尚無正式訂金結算資料，無法確認是否已收訂金，因此不能釋放檔期。請先確認財務狀態。",
+            correlation,
+            blockers=("deposit_settlement_confirmation_required",),
+        )
+    if message == "client finance unreceived deposit not confirmed":
+        return _typed_waiting_lock_error(
+            ErrorCategory.DOMAIN_BLOCKED,
+            "deposit_receipt_unconfirmed",
+            "本案已有正式帳務或收款歷史，但缺少訂金結算狀態。財務端尚不能確認未收訂金，請先完成財務核對。",
+            correlation,
+            blockers=("deposit_receipt_unconfirmed",),
         )
     if message.startswith('{"conflicts":'):
         return _typed_waiting_lock_error(

@@ -433,6 +433,8 @@ def _preview_disposition(row, classification_type, batch_id):
     stored = FinanceImportDisposition(str(row["disposition"]))
     if classification_type is FinanceClassificationType.NON_BUSINESS_REVIEW:
         return stored
+    if row.get("has_reconciliation_receipt"):
+        return FinanceImportDisposition.EXISTING
     if str(row.get("latest_dispatch_outcome") or "") in {
         "reconciled",
         "existing",
@@ -840,7 +842,9 @@ _BATCH_ROWS_SQL = (
     "classification.disposition,"
     "classification.decision_facts_fingerprint,"
     "classification.target_identities,classification.evidence,"
-    "classification.available_actions,dispatch.outcome AS latest_dispatch_outcome "
+    "classification.available_actions,dispatch.outcome AS latest_dispatch_outcome,"
+    "EXISTS(SELECT 1 FROM finance_import_reconciliation_receipts AS receipt "
+    "WHERE receipt.finance_import_row_id=bank_fact.id) AS has_reconciliation_receipt "
     "FROM finance_import_occurrences AS occurrence "
     "JOIN finance_import_rows AS bank_fact "
     "ON bank_fact.id=occurrence.finance_import_row_id "

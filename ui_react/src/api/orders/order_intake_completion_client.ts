@@ -11,7 +11,19 @@ const DateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const FingerprintSchema = z.string().regex(/^[0-9a-f]{64}$/);
 const VersionSchema = z.number().int().nonnegative();
 const MissingFieldSchema = z.enum(['client_name', 'start_date', 'service_days']);
-const ChangedTermSchema = z.enum(['start_date', 'service_days']);
+const ChangedTermSchema = z.enum(['start_date', 'service_days', 'service_time']);
+const ServiceTimeSchema = z.strictObject({
+  service_hours_per_day: z.number().positive().max(24).multipleOf(0.5),
+  start_time: z.string().regex(/^\d{2}:\d{2}:\d{2}$/),
+  end_time: z.string().regex(/^\d{2}:\d{2}:\d{2}$/),
+  end_day_offset: z.union([z.literal(0), z.literal(1)]),
+});
+const ServiceTimeSnapshotSchema = z.strictObject({
+  service_hours_per_day: z.number().nullable(),
+  start_time: z.string().nullable(), end_time: z.string().nullable(),
+  end_day_offset: z.number().int().nullable(),
+});
+export type IntakeServiceTime = z.infer<typeof ServiceTimeSchema>;
 
 const TermsPreviewSchema = z.strictObject({
   case_no: z.string().min(1),
@@ -24,6 +36,8 @@ const TermsPreviewSchema = z.strictObject({
   blockers: z.array(z.string().min(1)),
   apply_allowed: z.boolean(),
   preview_fingerprint: FingerprintSchema,
+  before_service_time: ServiceTimeSnapshotSchema.nullable().optional(),
+  after_service_time: ServiceTimeSchema.nullable().optional(),
 });
 
 const TermsReceiptSchema = z.strictObject({
@@ -35,6 +49,7 @@ const TermsReceiptSchema = z.strictObject({
   changed_fields: z.array(ChangedTermSchema),
   preview_fingerprint: FingerprintSchema,
   replayed: z.boolean(),
+  service_time: ServiceTimeSchema.nullable().optional(),
 });
 
 const ClientNamePreviewSchema = z.strictObject({
@@ -67,6 +82,7 @@ const CompletionPreviewSchema = z.strictObject({
   blockers: z.array(z.string().min(1)),
   apply_allowed: z.boolean(),
   preview_fingerprint: FingerprintSchema,
+  current_service_time: ServiceTimeSnapshotSchema.nullable().optional(),
 });
 
 const CompletionReceiptSchema = z.strictObject({
@@ -157,7 +173,7 @@ export const orderIntakeCompletionClient = {
     caseNo: string,
     proposedStartDate: string,
     proposedServiceDays: number,
-    source?: IntakeRequestOptions,
+    source?: IntakeRequestOptions & { proposedServiceTime?: IntakeServiceTime },
   ): Promise<IntakeTermsPreview> {
     const canonical = canonicalCaseNo(caseNo);
     const endpoint = `/api/v1/orders/${encodeURIComponent(canonical)}/intake-terms-bootstrap/preview`;
@@ -168,6 +184,7 @@ export const orderIntakeCompletionClient = {
         {
           proposed_start_date: DateSchema.parse(proposedStartDate),
           proposed_service_days: z.number().int().positive().parse(proposedServiceDays),
+          ...(source?.proposedServiceTime ? { proposed_service_time: ServiceTimeSchema.parse(source.proposedServiceTime) } : {}),
         },
         requestOptions(source, headers(canonical, 'terms-preview', source)),
       ),
@@ -191,6 +208,7 @@ export const orderIntakeCompletionClient = {
         {
           proposed_start_date: preview.after_start_date,
           proposed_service_days: preview.after_service_days,
+          ...(preview.after_service_time ? { proposed_service_time: preview.after_service_time } : {}),
           expected_lifecycle_version: preview.lifecycle_version,
           preview_fingerprint: preview.preview_fingerprint,
           reason: z.string().trim().min(1).max(500).parse(reason),
@@ -284,6 +302,8 @@ export const orderIntakeCompletionClient = {
 };
 
 const blockerMessages: Record<string, string> = {
+  order_intake_terms_bootstrap_service_time_status_not_eligible: '服務時間補件只適用於尚未開始服務的待補件或洽談中案件。',
+  order_intake_terms_bootstrap_service_time_already_complete: '服務時間已齊備，請改用完整服務條件的正式修正流程。',
   order_intake_client_name_status_not_eligible: '案件已不在待補件狀態，不能使用姓名補件入口。',
   order_intake_client_name_already_set: '客戶姓名已存在；此入口只允許補齊缺失姓名。',
   order_intake_terms_bootstrap_service_data_locked: '服務資料已鎖定，不能再補改服務日期或天數。',

@@ -105,6 +105,8 @@ Orders 不擁有：
 
 #### 3.1.2.1 Beta 看板依作業狀態分類（2026-09-08 人工裁決）
 
+2026-10-15 案件工作台 UI 裁決：辦理事項保留前五項，移除獨立「客戶收款與月嫂結算」步驟及重複的舊訂金放行表單。訂金關卡沿服務安排的既有入口處理；正式訂金／客戶結算／月嫂結算 current stage 導向第五項，不因移除 UI 改寫階段、結清或 lifecycle。正式 lifecycle 已服務完成時，第五項呈現「服務完工」，顯示 Orders 實際服務期間、完工事件時間、服務月嫂及兩端正式結算子投影；未知狀態不得視為結清。提供帶入同案的「查看本案帳務」及帳務中心返回案件入口。歷史服務完成案件的帳務完成 Preview／Apply 移至帳務中心所選案件下，沿用原 owner 與 fresh readback。
+
 本節只調整 Beta 看板的唯讀查詢與 presentation，覆蓋以 normal／historical 作為主要頁籤的舊做法；不改 lifecycle evaluator、資料來源、歷史採納或任一 mutation owner。
 
 - **WB-STATE-01**：主要分類為「進行中訂單／完成訂單／取消訂單」。Query 依已持久化的 canonical lifecycle 分組，不得在 React 依中文 status、日期或是否由歷史匯入重新判斷。進行中包含 `待補件`、`洽談中`、`訂單成立`、`服務中`、`歷史訂單－未服務`、`歷史訂單－服務中`；完成包含 `訂單完成`、`歷史訂單－服務完成`、`歷史訂單－帳務完成`；取消包含 `訂單取消`。三集合互斥且涵蓋現行 lifecycle enum。
@@ -331,6 +333,13 @@ source outbox，最後單次 commit；不得重建或結清 Client Finance、Pay
 或 authoritative facts 漂移固定回 typed conflict。時刻未到、服務日不完整、effective generation
 矛盾、human hold 或取消固定為 typed `domain_blocked` 且零寫入。automatic discovery 只可將 due
 candidate 放入 durable command queue；worker 仍只能呼叫此 command，不得直接更新 `orders.status`。
+
+2026-10-15 服務安排 UI 裁決：一般工作台移除人工「辦理完工確認」，改以
+`GET /api/v1/orders/{case_no}/service-completion` 唯讀投影 authoritative completion instant、
+目前 lifecycle status、等待排班／等待服務／尚未到時／已到時／blocked／completed／cancelled 狀態。
+查詢不執行完成，也不以介面時計或資料缺漏猜測 eligible。背景 durable-job cycle 先 discover due
+candidate，再由既有 canonical handler 套用；到時後畫面回讀 owner 狀態自動推進。
+人工 Preview／Apply API 與稽核／恢復契約保留，正常頁面不再要求人員按一次完工按鈕。
 
 AutoComplete 與 Scheduling leave-substitution Apply 必須序列化於同一 Orders lifecycle aggregate。
 任一方先提交都會使另一方持有的 Orders expected version 失效；舊 command 不得以舊服務日完成，
@@ -635,6 +644,18 @@ must be previewed, sent, and confirmed again before formal assignment can procee
 owner 已保存的值，不要求人員重填合法欄位。
 待辦看板與案件處理中的進件條款缺漏提示直接顯示「缺少欄位：」及實際缺少的欄位名稱；
 不顯示「訂單條款根事實尚未齊備」或以階段標題取代缺件內容。沿用既有完整性判定與階段狀態。
+
+2026-10-13 人工裁決：待補件／洽談中且尚無下游 Finance、Payroll、非 pristine Scheduling、實際開工
+或服務資料鎖的案件，既有 intake terms bootstrap Preview／Apply 可承接可選的
+`proposed_service_time`（每日服務時數、開始時間、結束時間、跨日值），補齊因每日時數缺失而
+無法開啟一般 Terms 編輯器的案件。沿用 Orders lifecycle version、既有跨 request 預覽確認、
+同一 outer UoW 與 idempotent receipt；只修改明確變更欄位，不建立排班、帳務或外部通知。
+既有日期／天數命令未提供此欄位時保持原 fingerprint／receipt 語意；時間補件不擴及歷史案件。
+進件完成 Preview 額外回傳 typed current service time 供表單與正式回讀比對，不擴張其原本
+姓名／日期／天數 missing-field 判定。介面僅在 current 時間資料不完整時顯示時間补件；
+起訖試算的時數允許人員按協調結果修正，必須為正半小時且不超過排定區間。
+驗收 A 依人工指定保存 `08:00～17:00`、每日 8 小時；不將排定的 9 小時逕作服務時數。
+保存後重新讀取正式階段，符合完整性才接續媒合；不得由 UI 直接改寫 lifecycle／階段。
 
 此 preassignment Terms Query／Preview／Apply 只讀 Orders、Scheduling 與判斷下游完整性所需的最小
 存在／義務 facts；Client Finance／Payroll root 可合法不存在，回應與 receipt 的對應 version／impact

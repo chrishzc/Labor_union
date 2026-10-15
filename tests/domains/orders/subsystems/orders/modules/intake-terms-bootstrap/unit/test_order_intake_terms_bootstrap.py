@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date
+from datetime import date, time
 from threading import Barrier
 
 import pytest
@@ -12,12 +12,107 @@ from subsystems.orders.order_intake_terms_bootstrap import (
     OrderIntakeTermsBootstrapApplication,
     OrderIntakeTermsBootstrapError,
     OrderIntakeTermsBootstrapFacts,
+    IntakeServiceTime,
 )
 
 
 _CASE = "CASE-166"
 _START = date(2026, 9, 10)
 _DAYS = 30
+
+
+def test_missing_service_time_preserves_dates_and_days_and_replays_original_receipt():
+    repository = _Repository(start_date=_START, service_days=_DAYS)
+    repository.case = replace(repository.case, status=OrderLifecycleStatus.DISCUSSION)
+    units = _UnitOfWorkFactory()
+    application = OrderIntakeTermsBootstrapApplication(repository, units)
+    proposed = IntakeServiceTime(8, time(8), time(17), 0)
+    preview = application.preview(_CASE, _START, _DAYS, proposed_service_time=proposed)
+    assert preview.apply_allowed
+    assert preview.changed_fields == ('service_time',)
+    assert preview.before_service_time.service_hours_per_day is None
+    assert repository.update_calls == []
+    arguments = (_CASE, _START, _DAYS, preview.lifecycle_version, preview.preview_fingerprint,
+                 'time-supplement', 'orders-operator', 'confirmed eight service hours')
+    receipt = application.apply(*arguments, proposed_service_time=proposed)
+    assert receipt.service_time == proposed
+    assert repository.case.service_hours_per_day == 8
+    assert repository.case.service_start_time == time(8)
+    assert repository.case.service_end_time == time(17)
+    assert repository.case.start_date == _START
+    assert repository.case.service_days == _DAYS
+    assert repository.case.status is OrderLifecycleStatus.DISCUSSION
+    replay = application.apply(*arguments, proposed_service_time=proposed)
+    assert replay.replayed and replay.service_time == proposed
+    assert len(repository.update_calls) == 1
+    assert application.preview_completion(_CASE).current_service_time.service_hours_per_day == 8
+
+
+@pytest.mark.parametrize('changed', [
+    {'client_finance_present': True}, {'payroll_present': True}, {'service_data_locked': True},
+    {'scheduling_present': True, 'scheduling_pristine': False},
+    {'status': OrderLifecycleStatus.HISTORICAL_UNSERVED},
+])
+def test_service_time_supplement_never_bypasses_existing_downstream_roots_or_historical_rules(changed):
+    repository = _Repository(start_date=_START, service_days=_DAYS)
+    repository.case = replace(repository.case, **changed)
+    application = OrderIntakeTermsBootstrapApplication(repository, _UnitOfWorkFactory())
+    proposed = IntakeServiceTime(8, time(8), time(17), 0)
+    preview = application.preview(_CASE, _START, _DAYS, proposed_service_time=proposed)
+    assert not preview.apply_allowed
+    with pytest.raises(OrderIntakeTermsBootstrapError, match='blocked'):
+        application.apply(_CASE, _START, _DAYS, preview.lifecycle_version, preview.preview_fingerprint,
+                          'blocked-time', 'orders-operator', 'supplement time', proposed_service_time=proposed)
+    assert repository.update_calls == []
+
+
+def test_service_time_supplement_rechecks_version_and_keeps_existing_dates_unchanged():
+    repository = _Repository(start_date=_START, service_days=_DAYS)
+    application = OrderIntakeTermsBootstrapApplication(repository, _UnitOfWorkFactory())
+    proposed = IntakeServiceTime(8, time(8), time(17), 0)
+    preview = application.preview(_CASE, _START, _DAYS, proposed_service_time=proposed)
+    repository.case = replace(repository.case, lifecycle_version=8)
+    with pytest.raises(OrderIntakeTermsBootstrapError, match='stale_preview'):
+        application.apply(_CASE, _START, _DAYS, preview.lifecycle_version, preview.preview_fingerprint,
+                          'stale-time', 'orders-operator', 'supplement time', proposed_service_time=proposed)
+    assert repository.update_calls == []
+
+
+def test_http_time_supplement_preserves_date_only_contract_and_returns_typed_time_readback():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from api.routes.order_intake_terms_bootstrap import router
+    from api.dependencies.admin_auth import require_persisted_admin
+    from api.dependencies.order_intake_terms_bootstrap import get_order_intake_terms_bootstrap_application
+    from subsystems.access.authentication_session import AdminPrincipal
+
+    repository = _Repository(start_date=_START, service_days=_DAYS)
+    application = OrderIntakeTermsBootstrapApplication(repository, _UnitOfWorkFactory())
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[require_persisted_admin] = lambda: AdminPrincipal(1, 'synthetic-operator', 'Synthetic operator', 'system_admin')
+    app.dependency_overrides[get_order_intake_terms_bootstrap_application] = lambda: application
+    client = TestClient(app)
+    base = f'/api/v1/orders/{_CASE}'
+    body = {'proposed_start_date': _START.isoformat(), 'proposed_service_days': _DAYS,
+            'proposed_service_time': {'service_hours_per_day': 8, 'start_time': '08:00:00', 'end_time': '17:00:00', 'end_day_offset': 0}}
+    preview_response = client.post(f'{base}/intake-terms-bootstrap/preview', json=body)
+    assert preview_response.status_code == 200
+    preview = preview_response.json()['data']
+    assert preview['changed_fields'] == ['service_time']
+    assert repository.update_calls == []
+    applied = client.post(f'{base}/intake-terms-bootstrap/apply', json={**body,
+        'expected_lifecycle_version': preview['lifecycle_version'], 'preview_fingerprint': preview['preview_fingerprint'],
+        'reason': 'confirmed eight service hours'}, headers={'Idempotency-Key': 'http-time', 'X-Correlation-ID': 'http-time'})
+    assert applied.status_code == 200
+    assert applied.json()['data']['service_time'] == body['proposed_service_time']
+    observed = client.post(f'{base}/intake-completion/preview')
+    assert observed.json()['data']['current_service_time'] == body['proposed_service_time']
+    for invalid in (0, 8.1, 25):
+        response = client.post(f'{base}/intake-terms-bootstrap/preview', json={**body,
+            'proposed_service_time': {**body['proposed_service_time'], 'service_hours_per_day': invalid}})
+        assert response.status_code == 422
+    assert len(repository.update_calls) == 1
 
 
 def test_missing_start_and_service_days_preview_and_apply_only_fill_missing_terms():
@@ -468,6 +563,7 @@ class _Repository:
         *,
         update_start_date,
         update_service_days,
+        service_time=None,
     ):
         self.update_calls.append(
             (
@@ -485,6 +581,9 @@ class _Repository:
             lifecycle_version=expected_lifecycle_version + 1,
             start_date=start_date if update_start_date else self.case.start_date,
             service_days=service_days if update_service_days else self.case.service_days,
+            **({'service_hours_per_day': service_time.service_hours_per_day,
+                'service_start_time': service_time.start_time, 'service_end_time': service_time.end_time,
+                'service_end_day_offset': service_time.end_day_offset} if service_time is not None else {}),
         )
         return self.case.lifecycle_version
 

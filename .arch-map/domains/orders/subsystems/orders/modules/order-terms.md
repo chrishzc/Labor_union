@@ -21,6 +21,8 @@ Issue #326：同一 Terms command 可承接完整替代日期與明確既有指�
 
 既有歷史案件缺少約定服務開始日／服務天數，且尚未建立 Client Finance、Payroll 或服務資料鎖定時，沿用同一 owner-local Query／Preview／Apply 補齊契約條件；保留歷史 lifecycle、實際開工日與既有歷史排班證據。
 
+待補件／洽談中的受限 intake terms bootstrap 可選擇補齊完整 service-time tuple 與每日時數，仍以 current Orders version、原 Preview／Apply 與 receipt 保存；不擴張歷史案件資格，不建立下游 roots。進件完成 Preview 另回 typed current service time，供 UI 預填與成功回讀比對，姓名／日期／天數的 completion 判定保持原語意。
+
 ## Implementation
 - primary:
   - `domains/orders/terms.py`

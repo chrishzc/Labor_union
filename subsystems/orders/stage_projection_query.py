@@ -33,6 +33,7 @@ _ROW_FIELDS = frozenset({
     "candidate_pool_candidate_count", "candidate_pool_contacted_count", "candidate_pool_contacted_at",
     "candidate_pool_replied_count", "candidate_pool_willing_count", "candidate_pool_replied_at", "matching_plan_id", "matching_plan_version",
     "matching_plan_status", "matching_created_at", "matching_customer_decision", "matching_customer_decision_at",
+    "matching_unwilling_count",
     "waiting_deposit_lock_id", "waiting_deposit_lock_created_at",
     "willingness_contact_attempt_count", "willingness_count", "willingness_replied_count",
     "willingness_accepted_count", "willingness_contacted_at", "willingness_replied_at",
@@ -357,6 +358,14 @@ def _client_review_stage(row: Mapping[str, object], case_no: str) -> StageProjec
     resume_sent_count = _nonnegative_int(row, "resume_sent_count")
     if plan_id is None:
         return _unavailable_stage(3, "client_review", "推薦客戶與確認", "Assignments / Customer Decision", "formal_recommendation_projection_missing")
+    if _nonnegative_int(row, "matching_unwilling_count"):
+        return _stage(
+            3, "client_review", "推薦客戶與確認", "Assignments / Customer Decision", "blocked",
+            _source("Assignments / Scheduling", f"caregiver-matching-plan:{plan_id}", _optional_int(row, "matching_plan_version")),
+            _latest(row, "willingness_replied_at", "matching_customer_decision_at"),
+            blockers=(_notice("recommendation_caregiver_unwilling", "推薦月嫂已通知不承接，請更換月嫂並重新取得客戶確認。"),),
+            actions=(_get("orders.assignment_plan.query", f"/api/v1/orders/{case_no}/assignment-plan"),),
+        )
     waiting_deposit_lock_id = _optional_int(row, "waiting_deposit_lock_id")
     accepted = (
         waiting_deposit_lock_id is not None

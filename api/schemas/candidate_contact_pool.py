@@ -34,7 +34,7 @@ class AddCandidatesRequest(_EventIdentity):
 
 
 class SendCandidateInformationRequest(_EventIdentity):
-    info_type: Literal[1, 2]
+    info_type: Literal[1, 2, 3]
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
@@ -49,11 +49,41 @@ class CandidateInformationPreviewView(BaseModel):
     model_config = ConfigDict(extra="forbid", from_attributes=True)
     case_no: str
     candidate_id: int = Field(gt=0)
-    info_type: Literal[1, 2]
+    info_type: Literal[1, 2, 3]
     staff_name: str
     text: str
     line_sections: list[CandidateInformationSectionView] = Field(min_length=1, max_length=4)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class CaseInformationPreviewView(BaseModel):
+    model_config = ConfigDict(extra="forbid", from_attributes=True)
+    case_no: str = Field(min_length=1, max_length=50)
+    info_type: Literal[1, 2, 3]
+    start_date: date | None
+    line_sections: list[CandidateInformationSectionView] = Field(min_length=1, max_length=4)
+    content_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    send_allowed: bool
+
+
+class CaseWeeklyServiceRowView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    serial_number: int = Field(gt=0)
+    week_start_date: date
+    week_end_date: date
+    service_hours_per_day: float = Field(gt=0, le=24, multiple_of=0.5)
+    weekly_work_days: int = Field(ge=0, le=7)
+    weekly_hours: float = Field(ge=0, multiple_of=0.5)
+
+
+class CaseWeeklyServicePreviewView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    case_no: str = Field(min_length=1, max_length=50)
+    required_service_days: int | None = Field(ge=0)
+    projected_service_days: int = Field(ge=0)
+    date_basis: Literal["planned", "confirmed", "draft"]
+    warnings: list[str]
+    rows: list[CaseWeeklyServiceRowView]
 
 
 class CandidateWeeklyServiceRowView(BaseModel):
@@ -131,6 +161,7 @@ class CandidateInformationMap(BaseModel):
     information_2: CandidateInformationDeliveryView | None = Field(
         default=None, alias="2"
     )
+    information_3: CandidateInformationDeliveryView | None = Field(default=None, alias="3")
 
 
 class CandidateContactView(BaseModel):

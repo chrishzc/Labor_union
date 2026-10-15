@@ -6,6 +6,8 @@ import json
 from datetime import date
 from typing import Any, Callable
 
+from domains.client_finance.reconciliation import UnreceivedDepositConfirmation
+
 from subsystems.scheduling.availability_lock_helpers import normalize_plan_snapshot
 from subsystems.scheduling.ports import unconfigured_connection_factory
 from subsystems.scheduling.occupancy_mutex import lock_staff_occupancy_mutex
@@ -13,6 +15,25 @@ from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 
 
 get_connection = unconfigured_connection_factory
+
+
+def _unconfigured_finance_confirmation(connection: Any, case_no: str) -> UnreceivedDepositConfirmation:
+    raise ValueError("client finance deposit settlement projection missing")
+
+
+# Composition supplies a Finance-owned, read-only port borrowing this workflow's UoW.
+get_unreceived_deposit_confirmation: Callable[[Any, str], UnreceivedDepositConfirmation] = _unconfigured_finance_confirmation
+DepositReleaseFacts = dict[str, Any] | UnreceivedDepositConfirmation
+
+
+def _confirmation_payload(confirmation: UnreceivedDepositConfirmation) -> dict[str, Any]:
+    return {
+        "case_no": confirmation.case_no,
+        "account_version": confirmation.account_version,
+        "obligation_identities": list(confirmation.obligation_identities),
+        "obligation_event_ids": list(confirmation.obligation_event_ids),
+        "ledger_entry_ids": list(confirmation.ledger_entry_ids),
+    }
 
 
 def _close_once(resource: Any, state: dict[str, bool]) -> None:
@@ -196,6 +217,7 @@ def _build_release_event_payload(
     request: dict[str, Any],
     snapshot: dict[str, Any],
     expected_preview_fingerprint: PreviewFingerprint | None = None,
+    finance_confirmation: UnreceivedDepositConfirmation | None = None,
 ) -> dict[str, Any]:
     payload = {
         "case_no": request["case_no"],
@@ -213,6 +235,8 @@ def _build_release_event_payload(
     }
     if expected_preview_fingerprint is not None:
         payload["preview_fingerprint"] = expected_preview_fingerprint.value
+    if finance_confirmation is not None:
+        payload["finance_confirmation"] = _confirmation_payload(finance_confirmation)
     return payload
 
 
@@ -443,21 +467,28 @@ def _normalize_deposit_settlement_projection(row: Any) -> dict[str, Any]:
     }
 
 
-def _assert_zero_deposit(deposit_projection: dict[str, Any]) -> None:
+def _assert_zero_deposit(deposit_projection: DepositReleaseFacts) -> None:
+    if isinstance(deposit_projection, UnreceivedDepositConfirmation):
+        if not deposit_projection.confirmed:
+            raise ValueError("client finance unreceived deposit not confirmed")
+        return
     if deposit_projection["allocated_net_amount_ntd"] != 0:
         raise ValueError("existing deposit net amount must be zero")
 
 
 def _release_blockers(
     order_row: dict[str, Any],
-    deposit_projection: dict[str, Any],
+    deposit_projection: DepositReleaseFacts,
     plan_row: dict[str, Any],
     lock_row: dict[str, Any],
 ) -> list[str]:
     blockers: list[str] = []
     if order_row["status"] != "洽談中":
         blockers.append("case_not_in_negotiation")
-    if deposit_projection["allocated_net_amount_ntd"] != 0:
+    if isinstance(deposit_projection, UnreceivedDepositConfirmation):
+        if not deposit_projection.confirmed:
+            blockers.append("deposit_receipt_unconfirmed")
+    elif deposit_projection["allocated_net_amount_ntd"] != 0:
         blockers.append("deposit_not_zero")
     if lock_row["status"] != "active" or lock_row["is_active"] != 1:
         blockers.append("lock_not_active")
@@ -470,7 +501,7 @@ def _release_blockers(
 def _build_release_preview(
     request: dict[str, Any],
     order_row: dict[str, Any],
-    deposit_projection: dict[str, Any],
+    deposit_projection: DepositReleaseFacts,
     plan_row: dict[str, Any],
     snapshot: dict[str, Any],
     lock_row: dict[str, Any],
@@ -507,6 +538,7 @@ def _raise_release_blocker(blockers: list[str]) -> None:
     messages = {
         "case_not_in_negotiation": "case is not in negotiation",
         "deposit_not_zero": "existing deposit net amount must be zero",
+        "deposit_receipt_unconfirmed": "client finance unreceived deposit not confirmed",
         "lock_not_active": "lock is not active",
         "plan_not_accepted": "plan is not accepted",
     }
@@ -517,7 +549,7 @@ def _raise_release_blocker(blockers: list[str]) -> None:
 def _release_fingerprint_facts(
     request: dict[str, Any],
     order_row: dict[str, Any],
-    deposit_projection: dict[str, Any],
+    deposit_projection: DepositReleaseFacts,
     plan_row: dict[str, Any],
     snapshot: dict[str, Any],
     lock_row: dict[str, Any],
@@ -526,7 +558,8 @@ def _release_fingerprint_facts(
     return {
         **request,
         "order_status": order_row["status"],
-        "deposit_settlement": deposit_projection,
+        "deposit_settlement": ({"confirmation_type": "unreceived_deposit", **_confirmation_payload(deposit_projection)}
+                               if isinstance(deposit_projection, UnreceivedDepositConfirmation) else deposit_projection),
         "plan_status": plan_row["status"],
         "plan_is_active": plan_row["is_active"],
         "plan_snapshot": snapshot,
@@ -559,7 +592,11 @@ def _load_order_snapshot(cursor: Any, case_no: str) -> dict[str, Any]:
 def _load_deposit_settlement_projection(
     cursor: Any,
     case_no: str,
-) -> dict[str, Any]:
+    connection: Any,
+) -> DepositReleaseFacts:
+    confirmation = get_unreceived_deposit_confirmation(connection, case_no)
+    if not isinstance(confirmation, UnreceivedDepositConfirmation) or confirmation.case_no != case_no:
+        raise ValueError("client finance deposit confirmation case_no mismatch")
     cursor.execute(
         "SELECT case_no, deposit_obligation_identity, settlement_state, "
         "contracted_amount_ntd, allocated_net_amount_ntd, settlement_identity, "
@@ -569,7 +606,8 @@ def _load_deposit_settlement_projection(
     )
     row = cursor.fetchone()
     if row is None:
-        raise ValueError("client finance deposit settlement projection missing")
+        _assert_zero_deposit(confirmation)
+        return confirmation
     deposit_projection = _normalize_deposit_settlement_projection(row)
     if deposit_projection["case_no"] != case_no:
         raise ValueError("client finance deposit settlement case_no mismatch")
@@ -597,6 +635,7 @@ def preview_caregiver_availability_lock_release(
         deposit_projection = _load_deposit_settlement_projection(
             cursor,
             request["case_no"],
+            connection,
         )
         plan_row, _segment_rows, snapshot = _load_plan_snapshot(
             cursor,
@@ -666,10 +705,17 @@ def _existing_result(
     if event_row["reason"] != request["reason"]:
         raise ValueError("event reason mismatch")
     payload = _normalize_event_payload(event_row["payload"])
+    stored_confirmation = None
+    if "finance_confirmation" in payload:
+        stored = _exact_row(payload["finance_confirmation"], frozenset({"case_no", "account_version", "obligation_identities", "obligation_event_ids", "ledger_entry_ids"}), "finance_confirmation")
+        stored_confirmation = UnreceivedDepositConfirmation(stored["case_no"], stored["account_version"], tuple(stored["obligation_identities"]), tuple(stored["obligation_event_ids"]), tuple(stored["ledger_entry_ids"]))
+        if stored_confirmation.case_no != request["case_no"] or not stored_confirmation.confirmed:
+            raise ValueError("event finance confirmation mismatch")
     expected_payload = _build_release_event_payload(
         request,
         snapshot,
         expected_preview_fingerprint,
+        stored_confirmation,
     )
     if payload != expected_payload:
         raise ValueError("event payload mismatch")
@@ -773,6 +819,7 @@ def _release_caregiver_availability_lock_in_transaction(
         deposit_projection = _load_deposit_settlement_projection(
             cursor,
             request["case_no"],
+            connection,
         )
 
         plan_row, _segment_rows, snapshot = _load_plan_snapshot(
@@ -830,6 +877,7 @@ def _release_caregiver_availability_lock_in_transaction(
             request,
             snapshot,
             expected_fingerprint,
+            deposit_projection if isinstance(deposit_projection, UnreceivedDepositConfirmation) else None,
         )
         cursor.execute(
             "UPDATE caregiver_availability_lock_days "

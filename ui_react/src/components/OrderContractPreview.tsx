@@ -7,15 +7,16 @@ const FIELDS = {
   staff: [['F1', '案件編號'], ['C4', '服務人員姓名'], ['B5', '客戶姓名'], ['B7', '服務開始日'], ['D7', '服務結束日'], ['G7', '服務天數'], ['B8', '服務時段'], ['B9', '休假方式'], ['projected.service_unit_price', '預估服務單價'], ['projected.staff_payable_total', '預估整筆應付報酬'], ['projected.staff_payable_due_date', '預估發薪日'], ['B24', '服務地址'], ['A97', '契約日期']],
 } as const;
 
-export function OrderContractPreview({ caseNo }: { caseNo: string }) {
-  const [scope, setScope] = useState<'client' | 'staff'>('client');
+export function OrderContractPreview({ caseNo, revision: factsRevision = 0, initialScope = 'client', targetSegmentId = null, showScopeControls = true }: { caseNo: string; revision?: number; initialScope?: 'client' | 'staff'; targetSegmentId?: number | null; showScopeControls?: boolean }) {
+  const [scope, setScope] = useState<'client' | 'staff'>(initialScope);
   const [staffQuery, setStaffQuery] = useState<{
     case_no: string;
+    revision: number;
     staff_segments: Array<{ segment_id: number; staff_reference: string }>;
   } | null>(null);
-  const [selection, setSelection] = useState<{ caseNo: string; segmentId: number | null }>({ caseNo, segmentId: null });
-  const targets = staffQuery?.case_no === caseNo ? staffQuery.staff_segments : [];
-  const segmentId = selection.caseNo === caseNo ? selection.segmentId : null;
+  const [selection, setSelection] = useState<{ caseNo: string; revision: number; segmentId: number | null }>({ caseNo, revision: factsRevision, segmentId: targetSegmentId });
+  const targets = staffQuery?.case_no === caseNo && staffQuery.revision === factsRevision ? staffQuery.staff_segments : [];
+  const segmentId = selection.caseNo === caseNo && selection.revision === factsRevision ? selection.segmentId : null;
   const [result, setResult] = useState<ContractFullPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -30,10 +31,10 @@ export function OrderContractPreview({ caseNo }: { caseNo: string }) {
         const staff_segments = query.state === 'preparing'
           ? query.staff_segments.map((row) => ({ segment_id: row.segment_id, staff_reference: String(row.staff_id) }))
           : query.staff_targets.map((row) => ({ segment_id: row.matching_segment_id, staff_reference: row.staff_subject_reference }));
-        setStaffQuery({ case_no: query.case_no, staff_segments });
+        setStaffQuery({ case_no: query.case_no, revision: factsRevision, staff_segments });
         if (staff_segments.length === 0) throw new Error('目前案件尚未選定可預覽契約的服務人員。');
         // Never substitute a different segment for a user's choice.
-        if (staff_segments.length === 1) setSelection({ caseNo, segmentId: staff_segments[0]!.segment_id });
+        if (staff_segments.length === 1) setSelection({ caseNo, revision: factsRevision, segmentId: staff_segments[0]!.segment_id });
         return;
       }
       const data = await previewContractFields(caseNo, scope, segmentId, controller.signal);
@@ -47,12 +48,12 @@ export function OrderContractPreview({ caseNo }: { caseNo: string }) {
     })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [caseNo, scope, segmentId, revision]);
+  }, [caseNo, scope, segmentId, revision, factsRevision]);
   return <section aria-label="契約套值欄位預覽">
-    <div className="order-information-choice"><button type="button" aria-pressed={scope === 'client'} onClick={() => { setScope('client'); setResult(null); setError(null); }}><strong>客戶服務契約</strong><span>服務約定、費用與付款安排</span></button><button type="button" aria-pressed={scope === 'staff'} onClick={() => { setScope('staff'); setResult(null); setError(null); }}><strong>服務人員委任契約</strong><span>月嫂服務區段、報酬與責任</span></button></div>
-    <p className="order-case-review-note">此處僅預覽主要套值欄位，不是完整契約或簽署完成證明。契約顯示預計繳款日；實際入帳日由帳務核銷紀錄。完整 PDF 請至「下載與簽回」。</p>
+    {showScopeControls && <div className="order-information-choice"><button type="button" aria-pressed={scope === 'client'} onClick={() => { setScope('client'); setResult(null); setError(null); }}><strong>客戶服務契約</strong><span>服務約定、費用與付款安排</span></button><button type="button" aria-pressed={scope === 'staff'} onClick={() => { setScope('staff'); setResult(null); setError(null); }}><strong>服務人員委任契約</strong><span>月嫂服務區段、報酬與責任</span></button></div>}
+    <p className="order-case-review-note">此處是契約欄位摘要；完整條文請核對下載的 PDF。付款日期顯示預計繳款日。</p>
     <button type="button" disabled={loading} onClick={() => setRevision((value) => value + 1)}>{loading ? '讀取契約資料中…' : '重新讀取契約資料'}</button>
-    {scope === 'staff' && targets.length > 1 && <label>選擇月嫂契約<select value={segmentId ?? ''} onChange={(event) => { setResult(null); setSelection({ caseNo, segmentId: event.target.value ? Number(event.target.value) : null }); }}><option value="">請選擇</option>{targets.map((target, index) => <option key={target.segment_id} value={target.segment_id}>月嫂 {target.staff_reference} · 第 {index + 1} 份契約</option>)}</select></label>}
+    {scope === 'staff' && targets.length > 1 && <label>選擇月嫂契約<select value={segmentId ?? ''} onChange={(event) => { setResult(null); setSelection({ caseNo, revision: factsRevision, segmentId: event.target.value ? Number(event.target.value) : null }); }}><option value="">請選擇</option>{targets.map((target, index) => <option key={target.segment_id} value={target.segment_id}>月嫂 {target.staff_reference} · 第 {index + 1} 份契約</option>)}</select></label>}
     {error && <p role="alert">無法取得本案契約資料：{error} 下方僅為版面，不能視為已產生文件。</p>}
     {result && result.warnings.length > 0 && <p role="status">目前資料仍有缺漏；已有內容可繼續預覽與下載，系統不會猜測或補造缺少的值。</p>}
     {result && !result.ready_to_print && <p role="alert">契約模板或文件產生發生技術問題，暫時無法產生文件。</p>}

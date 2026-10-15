@@ -23,6 +23,8 @@ workflow／repository／storage port 保護。
   `modules/api-composition.md`
 - `finalize-runtime` — bounded 1015 finalize-intent worker and storage integrity checkpoint；path:
   `modules/finalize-runtime.md`
+- `file-persistence` — staging/object/receipt SQL mapping and per-file command claims；path:
+  `modules/file-persistence.md`
 
 ## Contracts
 - `document/功能開發計畫/NAS_檔案庫與資料中心管理介面正式規範.md` §9 — exact seven
@@ -32,9 +34,11 @@ workflow／repository／storage port 保護。
   additive schema and developer DB change gates.
 
 ## Verification routing
+- layout_status: `custom_current`
 - default_boundary: Subsystem
 - module verification: `modules/api-composition.md`
 - workflow_tests: `tests/test_controlled_file_workflow.py`
+- repository verification: `modules/file-persistence.md`
 - storage_tests: `tests/test_controlled_file_storage.py`
 - schema_tests: `tests/test_controlled_file_schema_contract.py`
 - finalize_tests: `tests/domains/global/subsystems/controlled-files/integration/test_controlled_file_finalize_runner.py`

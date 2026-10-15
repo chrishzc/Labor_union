@@ -12,11 +12,22 @@ import {
 import type { OrderCoreStageProjectionQueryParams } from '../../../../../../../api/orders/order_core_stage_projection_client';
 import { OrderWorkbenchV2Page } from '../../../../../../../pages/OrderWorkbenchV2Page';
 import { adaptOrderSummaryPage } from '../../../../../../../adapters/orders/order_summary_adapter';
+import { OrderConflictError } from '../../../../../../../api/orders/order_query_errors';
+
+vi.mock('../../../../../../../components/OrderServiceDatesPanel', () => ({ OrderServiceDatesPanel: () => <p>服務日期工作區</p> }));
+vi.mock('../../../../../../../components/OrderAssignmentPlanPanel', () => ({ OrderAssignmentPlanPanel: () => <p>排班工作區</p> }));
+vi.mock('../../../../../../../components/OrderMultiCaregiverPlanPanel', () => ({
+  OrderMultiCaregiverPlanPanel: ({ filters, onObserved }: { filters: Record<string, boolean>; onObserved?: () => void }) => <section aria-label="正式分段工作區">
+    <p>分段下廚篩選：{String(filters.cooking)}</p>
+    <button type="button" onClick={onObserved}>模擬分段方案正式回讀成功</button>
+  </section>,
+}));
 
 const clientMocks = vi.hoisted(() => ({
   getCoreStageTimelines: vi.fn(),
   loadSummaries: vi.fn(),
   getOrderDetail: vi.fn(),
+  getFormManagementContext: vi.fn(),
   getOrderTerms: vi.fn(),
   getAssignmentPlan: vi.fn(),
   historicalQuery: vi.fn(),
@@ -25,8 +36,11 @@ const clientMocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../../../../../../../components/OrderIntakeRepairPanel', () => ({
-  OrderIntakeRepairPanel: ({ caseNo, orderStatus }: { caseNo: string; orderStatus: string }) => (
-    <section aria-label="正式補件入口">{caseNo}：{orderStatus}</section>
+  OrderIntakeRepairPanel: ({ caseNo, orderStatus, summaryHref, onChanged }: { caseNo: string; orderStatus: string; summaryHref: string; onChanged?: () => void }) => (
+    <section aria-label="正式補件入口">{caseNo}：{orderStatus}
+      <a href={summaryHref}>前往補齊案件資料 →</a>
+      <button type="button" onClick={onChanged}>模擬補件回讀</button>
+    </section>
   ),
 }));
 
@@ -41,6 +55,7 @@ vi.mock('../../../../../../../api/orders/order_query_client', () => ({
   ordersQueryClient: {
     getOrderSummaries: vi.fn(),
     getOrderDetail: clientMocks.getOrderDetail,
+    getFormManagementContext: clientMocks.getFormManagementContext,
     getOrderTerms: clientMocks.getOrderTerms,
     getAssignmentPlan: clientMocks.getAssignmentPlan,
   },
@@ -237,9 +252,112 @@ describe('待辦看板 唯讀工作 Drawer', () => {
   beforeEach(() => {
     Object.values(clientMocks).forEach((mock) => mock.mockReset());
     clientMocks.loadSummaries.mockResolvedValue(summaryPage());
+    clientMocks.getFormManagementContext.mockImplementation(async (caseNo: string) => ({
+      case_no: caseNo, service_time: '舊來源時間', service_type: '連續服務', city: '測試縣市',
+      delivery_type: null, residence_type: null, identity_status: '一般市民',
+    }));
   });
 
-  it('在收款與結算的訂金區直接顯示一般市民未付人工放行入口', async () => {
+  it('provides a multi-caregiver entry in candidate inquiry and forwards matching filters', async () => {
+    const caseNo = 'CASE-MULTI-ENTRY';
+    clientMocks.getCoreStageTimelines.mockResolvedValue(page([timeline(caseNo, 'matching_pool', { lifecycle: '洽談中' })]));
+    setOwnerFacts(caseNo);
+    render(<OrderWorkbenchV2Drawer caseNo={caseNo} branchType="normal" onClose={vi.fn()} />);
+    const entry = await screen.findByRole('button', { name: '多月嫂分段' });
+    expect(screen.queryByRole('region', { name: '正式分段工作區' })).not.toBeInTheDocument();
+    fireEvent.click(entry);
+    expect(entry).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('region', { name: '正式分段工作區' })).toBeVisible();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByText('分段下廚篩選：true')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('checkbox', { name: '下廚料理' }));
+    expect(screen.getByText('分段下廚篩選：false')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '候選月嫂' }));
+    expect(screen.getByRole('button', { name: '候選月嫂' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('hands off to customer-confirmation preparation only after the segmented plan was read back', async () => {
+    const caseNo = 'CASE-MULTI-HANDOFF';
+    clientMocks.getCoreStageTimelines.mockResolvedValue(page([timeline(caseNo, 'matching_pool', { lifecycle: '洽談中' })]));
+    setOwnerFacts(caseNo);
+    render(<OrderWorkbenchV2Drawer caseNo={caseNo} branchType="normal" onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: '多月嫂分段' }));
+    expect(screen.getByRole('heading', { name: '尋找月嫂與詢問意願' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '模擬分段方案正式回讀成功' }));
+    expect(await screen.findByRole('heading', { name: '推薦月嫂給客戶確認' })).toBeInTheDocument();
+    expect(screen.queryByText('多月嫂接續方案')).not.toBeInTheDocument();
+  });
+
+  it('上方集中資料編輯入口，進件摘要導向名冊且不重複表單', async () => {
+    const caseNo = 'CASE-STEP-CONTEXT';
+    clientMocks.getCoreStageTimelines.mockResolvedValue(page([timeline(caseNo, 'intake_validation')]));
+    setOwnerFacts(caseNo);
+    const view = render(<OrderWorkbenchV2Drawer caseNo={caseNo} branchType="normal" onClose={vi.fn()} />);
+    await screen.findByRole('region', { name: '正式補件入口' });
+    const header = view.container.querySelector('.order-case-header') as HTMLElement;
+    const body = view.container.querySelector('.order-case-task-body') as HTMLElement;
+    const records = within(header).getByRole('button', { name: '查看相關資料與通知紀錄' });
+    expect(within(header).getByRole('link', { name: '編輯客戶與訂單資料 →' })).toHaveAttribute('href', `#clients?case=${caseNo}&from=workbench`);
+    expect(clientMocks.getFormManagementContext).not.toHaveBeenCalled();
+    expect(within(body).queryByText('確認基本服務需求；待補資料與可先辦事項分開處理。')).not.toBeInTheDocument();
+    expect(within(body).queryByRole('region', { name: '本步驟相關資料' })).not.toBeInTheDocument();
+    expect(within(body).queryByRole('link', { name: '編輯客戶與訂單資料 →' })).not.toBeInTheDocument();
+    fireEvent.click(records);
+    expect(await within(header).findByText('測試縣市')).toBeInTheDocument();
+    expect(clientMocks.getFormManagementContext).toHaveBeenCalledWith(caseNo, { signal: expect.any(AbortSignal) });
+    fireEvent.click(within(header).getByRole('button', { name: '收起相關資料與通知紀錄' }));
+    expect(within(header).queryByRole('heading', { name: '客戶服務資料' })).not.toBeInTheDocument();
+    expect(within(body).getByRole('region', { name: '正式補件入口' })).toBeVisible();
+  });
+
+  it('回讀後依正式進度接續目前待辦，原摘要保持掛載', async () => {
+    const caseNo = 'CASE-INTAKE-ADVANCE';
+    clientMocks.getCoreStageTimelines.mockResolvedValue(page([timeline(caseNo, 'intake_validation', { lifecycle: '待補件' })]));
+    setOwnerFacts(caseNo);
+    render(<OrderWorkbenchV2Drawer caseNo={caseNo} branchType="normal" onClose={vi.fn()} />);
+    const intake = await screen.findByRole('region', { name: '正式補件入口' });
+    expect(within(intake).getByRole('link')).toHaveAttribute('href', `#clients?case=${caseNo}&field=intake&from=workbench`);
+    clientMocks.getCoreStageTimelines.mockResolvedValue(page([timeline(caseNo, 'matching_pool', { lifecycle: '洽談中' })]));
+    fireEvent.click(within(intake).getByRole('button', { name: '模擬補件回讀' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /尋找月嫂與詢問意願/ })).toHaveAttribute('aria-current', 'page'));
+    expect(intake).toBeInTheDocument();
+    expect(intake).not.toBeVisible();
+    expect(screen.getByRole('heading', { name: '尋找月嫂與詢問意願', level: 2 })).toBeInTheDocument();
+  });
+
+  it('重新查詢不拉走使用者手動查閱的工作，可返回目前待辦', async () => {
+    const caseNo = 'CASE-MANUAL-GROUP';
+    clientMocks.getCoreStageTimelines.mockResolvedValue(page([timeline(caseNo, 'intake_validation', { lifecycle: '洽談中' })]));
+    clientMocks.getOrderTerms.mockRejectedValue(new Error('服務条件尚未齊備'));
+    clientMocks.getOrderDetail.mockResolvedValue(detail(caseNo, '測試客戶'));
+    clientMocks.getAssignmentPlan.mockResolvedValue(assignment(caseNo, 42));
+    render(<OrderWorkbenchV2Drawer caseNo={caseNo} branchType="normal" onClose={vi.fn()} />);
+    await screen.findByRole('region', { name: '正式補件入口' });
+    fireEvent.click(screen.getByRole('button', { name: /辦理契約與簽署/ }));
+    clientMocks.getCoreStageTimelines.mockResolvedValue(page([timeline(caseNo, 'matching_pool', { lifecycle: '洽談中' })]));
+    fireEvent.click(screen.getByRole('button', { name: '模擬補件回讀', hidden: true }));
+    await waitFor(() => expect(screen.getByText('洽談中')).toBeInTheDocument());
+    await waitFor(() => expect(clientMocks.getCoreStageTimelines).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole('button', { name: /辦理契約與簽署/ })).toHaveAttribute('aria-current', 'page');
+    fireEvent.click(screen.getByRole('button', { name: '回到目前待辦' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /尋找月嫂與詢問意願/ })).toHaveAttribute('aria-current', 'page'));
+  });
+
+  it('顯示未填每日時數的正式查詢阻塞，不以空白條件或進度推進掩蓋缺件', async () => {
+    const caseNo = 'CASE-MISSING-HOURS';
+    clientMocks.getCoreStageTimelines.mockResolvedValue(page([timeline(caseNo, 'intake_validation', {
+      lifecycle: '洽談中', blockers: [{ code: 'orders_terms_missing', message: '缺少欄位：服務時間。' }],
+    })]));
+    clientMocks.getOrderTerms.mockRejectedValue(new OrderConflictError('Orders Terms request was rejected.', null, [], 'order_terms_service_hours_per_day_required'));
+    clientMocks.getOrderDetail.mockRejectedValue(new Error('detail_unavailable'));
+    clientMocks.getAssignmentPlan.mockResolvedValue(assignment(caseNo, 42));
+    render(<OrderWorkbenchV2Drawer caseNo={caseNo} branchType="normal" onClose={vi.fn()} />);
+    expect(await screen.findByRole('region', { name: '正式補件入口' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /確認客戶與服務需求/ })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByText('缺少欄位：服務時間。')).toBeInTheDocument();
+  });
+
+  it('訂金待辦進入服務安排，不再顯示重複收款步驟或舊放行表單', async () => {
     const caseNo = 'CASE-DEPOSIT-OVERRIDE';
     clientMocks.getCoreStageTimelines.mockResolvedValue(page([
       timeline(caseNo, 'deposit_settlement', { lifecycle: '洽談中' }),
@@ -248,8 +366,10 @@ describe('待辦看板 唯讀工作 Drawer', () => {
 
     render(<OrderWorkbenchV2Drawer caseNo={caseNo} branchType="normal" onClose={vi.fn()} />);
 
-    expect(await screen.findByRole('region', { name: '一般市民訂金未付人工放行' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '檢查是否可放行' })).toBeInTheDocument();
+    await screen.findByRole('heading', { name: '確認服務日期與排班' });
+    expect(screen.getByRole('region', { name: '訂金鎖狀態' })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: '一般市民訂金未付人工放行' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /客戶收款與月嫂結算/ })).not.toBeInTheDocument();
   });
 
   it.each(['Enter', ' '])('案件卡可用 %s 開啟案件處理', async (key) => {
@@ -277,9 +397,22 @@ describe('待辦看板 唯讀工作 Drawer', () => {
     clientMocks.getAssignmentPlan.mockRejectedValue(new Error('assignment_unavailable'));
     render(<OrderWorkbenchV2Drawer caseNo="CASE-INCOMPLETE" branchType="normal" onClose={() => {}} />);
     expect(await screen.findByRole('region', { name: '正式補件入口' })).toHaveTextContent('CASE-INCOMPLETE：待補件');
-    fireEvent.click(screen.getByRole('button', { name: '訂單與服務資料' }));
-    expect(await screen.findByText('客戶與訂單資料暫時無法取得。')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '案件處理' }));
+    expect(screen.queryByText('客戶與訂單資料暫時無法取得。')).not.toBeInTheDocument();
+    expect(screen.queryByText('服務條件尚未就緒')).not.toBeInTheDocument();
+  });
+
+  it('由名冊返回時以正式查詢開啟相同案件的最新待辦，關閉後清除深連結', async () => {
+    const caseNo = 'CASE-REGISTRY-RETURN';
+    window.location.hash = `#order-workbench-v2?case=${caseNo}`;
+    clientMocks.getCoreStageTimelines.mockResolvedValue(page([timeline(caseNo, 'matching_pool', { lifecycle: '洽談中' })]));
+    setOwnerFacts(caseNo);
+    render(<OrderWorkbenchV2Page />);
+    const work = await screen.findByRole('region', { name: `案件 ${caseNo}` });
+    await within(work).findByRole('heading', { name: '尋找月嫂與詢問意願', level: 2 });
+    expect(clientMocks.getCoreStageTimelines).toHaveBeenCalledWith({ lifecycle_scope: 'all', case_no_search: caseNo, page_size: 20 }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    fireEvent.click(within(work).getByRole('button', { name: '← 返回待辦看板' }));
+    await waitFor(() => expect(window.location.hash).toBe('#order-workbench-v2'));
+    window.location.hash = '';
   });
 
   it('keeps known name and dates from the matching case summary when incomplete terms prevent detail reads', async () => {
@@ -331,14 +464,14 @@ describe('待辦看板 唯讀工作 Drawer', () => {
     const caseContext = dialog.querySelector('.order-case-context');
     expect(caseContext).toHaveTextContent('約定服務開始日2026-10-01');
     expect(caseContext).toHaveTextContent('實際開始2026-10-03');
-    fireEvent.click(within(dialog).getByRole('button', { name: '訂單與服務資料' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: /確認服務日期與排班/ }));
     expect(within(dialog).getAllByText('2026-10-01').length).toBeGreaterThan(0);
-    expect(within(dialog).getByText('20 日')).toBeInTheDocument();
+    expect(caseContext).toHaveTextContent('20 日');
     expect(within(dialog).getAllByText('2026-10-03').length).toBeGreaterThan(0);
-    expect(within(dialog).getByText('第 1 段 · 月嫂編號 42')).toBeInTheDocument();
-    expect(within(dialog).getByText('2026-10-01 ～ 2026-10-20')).toBeInTheDocument();
+    expect(caseContext).toHaveTextContent('1 段正式指派');
+    expect(within(dialog).getByText('服務日期工作區')).toBeVisible();
     expect(within(dialog).queryByText(/lineage_source_assignment_ids/)).not.toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole('button', { name: '案件處理' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: /確認客戶與服務需求/ }));
     fireEvent.click(within(dialog).getByText('查看十三階段紀錄'));
     expect(dialog.querySelectorAll('.order-case-progress li')).toHaveLength(13);
     expect(within(dialog).queryByText(/source_projection_digest/)).not.toBeInTheDocument();
@@ -405,10 +538,9 @@ describe('待辦看板 唯讀工作 Drawer', () => {
     const dialog = await screen.findByRole('region', { name: '案件 CASE-HISTORY' });
     expect(within(dialog).queryByRole('heading', { name: '13 階段正式進度' })).not.toBeInTheDocument();
     expect(within(dialog).queryByTestId('drawer-core-stage')).not.toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole('button', { name: '訂單與服務資料' }));
-    const assignmentSection = within(dialog).getByRole('heading', { name: '已安排的月嫂與服務日期' }).closest('section');
-    if (!(assignmentSection instanceof HTMLElement)) throw new Error('找不到正式派案區');
-    await waitFor(() => expect(within(assignmentSection).getByText(/月嫂編號 99/)).toBeInTheDocument());
+    await within(dialog).findByRole('heading', { name: '服務完工' });
+    const assignmentSection = dialog.querySelector('.order-case-context')! as HTMLElement;
+    await waitFor(() => expect(assignmentSection).toHaveTextContent('1 段正式指派'));
     const historicalRegion = within(dialog).getByRole('heading', { name: '歷史服務資料' }).closest('section')!;
     await waitFor(() => expect(within(historicalRegion).getByText(/歷史月嫂/)).toBeInTheDocument());
     expect(within(assignmentSection).queryByText(/歷史月嫂/)).not.toBeInTheDocument();
@@ -429,7 +561,7 @@ describe('待辦看板 唯讀工作 Drawer', () => {
     render(<OrderWorkbenchV2Drawer caseNo="CASE-TERMINAL" branchType={branch} workbenchScope={scope} onClose={vi.fn()} />);
     const dialog = await screen.findByRole('region', { name: '案件 CASE-TERMINAL' });
     expect(within(dialog).queryByRole('heading', { name: '13 階段正式進度' })).not.toBeInTheDocument();
-    await waitFor(() => expect(within(dialog).getByRole('heading', { name: '結算狀態' })).toBeInTheDocument());
+    await waitFor(() => expect(within(dialog).getByRole('heading', { name: scope === 'completed' ? '服務完工' : '案件處理紀錄' })).toBeInTheDocument());
     expect(within(dialog).queryByTestId('drawer-core-stage')).not.toBeInTheDocument();
   });
 
@@ -458,9 +590,10 @@ describe('待辦看板 唯讀工作 Drawer', () => {
     const caseContext = dialog.querySelector('.order-case-context');
     expect(caseContext).toHaveTextContent('約定服務開始日1999-01-01');
     expect(caseContext).toHaveTextContent('服務量20 日 · 每日 9 小時');
-    fireEvent.click(within(dialog).getByRole('button', { name: '訂單與服務資料' }));
-    await waitFor(() => expect(within(dialog).getByText('約定服務資料暫時無法取得。')).toBeInTheDocument());
-    expect(within(dialog).getByRole('button', { name: '訂單與服務資料' })).toHaveAttribute('aria-current', 'page');
+    expect(await within(dialog).findByRole('region', { name: '正式補件入口' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: /確認客戶與服務需求/ })).toHaveAttribute('aria-current', 'page');
+    expect(within(dialog).queryByRole('button', { name: '案件異動' })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: '訂單與服務資料' })).not.toBeInTheDocument();
 
     fireEvent.click(within(dialog).getByRole('button', { name: '← 返回待辦看板' }));
     await waitFor(() => expect(screen.queryByRole('region', { name: '案件 CASE-STRICT' })).not.toBeInTheDocument());

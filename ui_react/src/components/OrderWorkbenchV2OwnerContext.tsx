@@ -14,6 +14,8 @@ import {
 interface OrderWorkbenchV2OwnerContextProps {
   caseNo: string;
   revision?: number;
+  placement?: 'header';
+  disabled?: boolean;
 }
 
 type ReadState<T> =
@@ -28,7 +30,7 @@ function errorMessage(error: unknown): string {
 }
 
 /** Reuse the same bounded, read-only owner clients as the two legacy pages. */
-export const OrderWorkbenchV2OwnerContext: FC<OrderWorkbenchV2OwnerContextProps> = ({ caseNo, revision = 0 }) => {
+export const OrderWorkbenchV2OwnerContext: FC<OrderWorkbenchV2OwnerContextProps> = ({ caseNo, revision = 0, placement, disabled = false }) => {
   const [expanded, setExpanded] = useState(false);
   const [retryRevision, setRetryRevision] = useState(0);
   const [card, setCard] = useState<ReadState<OrdersCardProjectionViewModel>>({ status: 'loading' });
@@ -40,32 +42,39 @@ export const OrderWorkbenchV2OwnerContext: FC<OrderWorkbenchV2OwnerContextProps>
     const controller = new AbortController();
     const current = () => !controller.signal.aborted;
     setCard({ status: 'loading' });
-    setForm({ status: 'loading' });
     setNotifications({ status: 'loading' });
 
-    void orderCardProjectionClient.getCardProjection(caseNo, { signal: controller.signal })
+    void Promise.resolve().then(() => orderCardProjectionClient.getCardProjection(caseNo, { signal: controller.signal }))
       .then((data) => {
         if (current()) setCard({ status: 'ready', data: adaptOrdersCardProjection(data, caseNo) });
       })
       .catch((error) => { if (current()) setCard({ status: 'error', message: errorMessage(error) }); });
-    void ordersQueryClient.getFormManagementContext(caseNo, { signal: controller.signal })
-      .then((data) => {
-        if (!current()) return;
-        if (data.case_no !== caseNo) throw new Error('客戶服務資料案件識別不一致。');
-        setForm({ status: 'ready', data });
-      })
-      .catch((error) => { if (current()) setForm({ status: 'error', message: errorMessage(error) }); });
-    void lineNotificationTimelineClient.query(caseNo, { signal: controller.signal })
+    void Promise.resolve().then(() => lineNotificationTimelineClient.query(caseNo, { signal: controller.signal }))
       .then((data) => { if (current()) setNotifications({ status: 'ready', data }); })
       .catch((error) => { if (current()) setNotifications({ status: 'error', message: errorMessage(error) }); });
 
     return () => controller.abort();
   }, [caseNo, expanded, retryRevision, revision]);
 
+  useEffect(() => {
+    if (!expanded) return;
+    const controller = new AbortController();
+    const current = () => !controller.signal.aborted;
+    setForm({ status: 'loading' });
+    void Promise.resolve().then(() => ordersQueryClient.getFormManagementContext(caseNo, { signal: controller.signal }))
+      .then((data) => {
+        if (!current()) return;
+        if (data.case_no !== caseNo) throw new Error('客戶服務資料案件識別不一致。');
+        setForm({ status: 'ready', data });
+      })
+      .catch((error) => { if (current()) setForm({ status: 'error', message: errorMessage(error) }); });
+    return () => controller.abort();
+  }, [caseNo, expanded, retryRevision, revision]);
+
   return (
-    <section className="order-v2-drawer-section" aria-label="案件聯絡、服務資料與 LINE 歷程">
-      <h3>案件聯絡、服務資料與 LINE 歷程</h3>
-      <button
+    <section className={placement === 'header' ? 'order-case-owner-context-header' : 'order-v2-drawer-section order-case-owner-context'} aria-label="案件聯絡、服務資料與 LINE 歷程">
+      {placement !== 'header' && <h3>案件聯絡、服務資料與 LINE 歷程</h3>}
+      {placement === 'header' ? <button type="button" className="order-case-records-toggle" disabled={disabled} aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? '收起相關資料與通知紀錄' : '查看相關資料與通知紀錄'}</button> : <button
         type="button"
         aria-expanded={expanded}
         onClick={() => {
@@ -74,9 +83,9 @@ export const OrderWorkbenchV2OwnerContext: FC<OrderWorkbenchV2OwnerContextProps>
         }}
       >
         {expanded ? '重新讀取案件聯絡、服務資料與 LINE 歷程' : '讀取案件聯絡、服務資料與 LINE 歷程'}
-      </button>
+      </button>}
       {expanded && (
-        <>
+        <div className={placement === 'header' ? 'order-case-related-records order-v2-drawer-section' : 'order-case-related-records'}>
           <section aria-label="正式案件聯絡與帳務投影">
             <h4>案件聯絡與帳務資料</h4>
             {card.status === 'loading' && <p role="status">載入案件聯絡與帳務資料…</p>}
@@ -127,7 +136,7 @@ export const OrderWorkbenchV2OwnerContext: FC<OrderWorkbenchV2OwnerContextProps>
               </article>
             ))}
           </section>
-        </>
+        </div>
       )}
     </section>
   );

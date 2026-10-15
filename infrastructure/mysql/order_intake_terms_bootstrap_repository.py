@@ -5,9 +5,11 @@ from __future__ import annotations
 from datetime import date
 
 from domains.orders.lifecycle import OrderLifecycleStatus
+from infrastructure.mysql.order_terms_read_model import _mysql_time
 from infrastructure.mysql.admin_command_repository import AdminCommandRepository
 from subsystems.orders.order_intake_terms_bootstrap import (
     OrderIntakeTermsBootstrapFacts,
+    IntakeServiceTime,
 )
 
 
@@ -22,6 +24,7 @@ class MySqlOrderIntakeTermsBootstrapRepository:
             cursor.execute(
                 "SELECT o.case_no,o.status,o.lifecycle_version,o.start_date,"
                 "o.service_days,o.actual_start_date,c.name AS client_name,"
+                "o.service_hours_per_day,o.service_start_time,o.service_end_time,o.service_end_day_offset,"
                 "EXISTS(SELECT 1 FROM order_service_data_locks l "
                 "WHERE l.case_no=o.case_no) AS service_data_locked,"
                 "(EXISTS(SELECT 1 FROM client_finance_accounts f "
@@ -77,6 +80,10 @@ class MySqlOrderIntakeTermsBootstrapRepository:
             scheduling_present=scheduling_present or assignment_exists,
             scheduling_pristine=scheduling_pristine,
             client_name=normalized_client_name,
+            service_hours_per_day=None if row['service_hours_per_day'] is None else float(row['service_hours_per_day']),
+            service_start_time=_mysql_time(row['service_start_time']),
+            service_end_time=_mysql_time(row['service_end_time']),
+            service_end_day_offset=row['service_end_day_offset'],
         )
 
     def update_early_terms(
@@ -88,6 +95,7 @@ class MySqlOrderIntakeTermsBootstrapRepository:
         *,
         update_start_date: bool,
         update_service_days: bool,
+        service_time: IntakeServiceTime | None = None,
     ) -> int:
         assignments: list[str] = []
         parameters: list[object] = []
@@ -97,6 +105,10 @@ class MySqlOrderIntakeTermsBootstrapRepository:
         if update_service_days:
             assignments.append("service_days=%s")
             parameters.append(service_days)
+        if service_time is not None:
+            assignments.extend(('service_hours_per_day=%s', 'service_start_time=%s', 'service_end_time=%s', 'service_end_day_offset=%s'))
+            parameters.extend((service_time.service_hours_per_day, service_time.start_time,
+                               service_time.end_time, service_time.end_day_offset))
         if not assignments:
             raise RuntimeError("order_intake_terms_bootstrap_nothing_to_write")
         assignments.append("lifecycle_version=lifecycle_version+1")

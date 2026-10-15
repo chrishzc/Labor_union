@@ -22,10 +22,13 @@ from api.dependencies.assignment_plan import (
     get_assignment_plan_application,
 )
 from api.schemas.assignment_plan import (
+    AutomaticArrangementStatusView,
     AssignmentPlanPreviewView,
     AssignmentPlanQueryView,
     AssignmentPlanReceiptView,
 )
+from api.dependencies.service_arrangement_automation import get_service_arrangement_automation
+from subsystems.scheduling.automatic_service_arrangement import AutomaticServiceArrangement
 from api.schemas.base import BaseResponse
 from api.schemas.jobs import JobAcceptedResponse
 from api.dependencies.jobs import (
@@ -59,6 +62,21 @@ from subsystems.jobs.contracts import DurableJobCommandConflict
 router = APIRouter(prefix="/api/v1/orders", tags=["Assignment Plan"])
 _RETRYABLE_MYSQL_CODES = frozenset({1205, 1213})
 _SCHEMA_NOT_READY_MYSQL_CODES = frozenset({1054, 1146})
+
+
+@router.get('/{case_no}/matching-plans/{plan_id}/automatic-arrangement', response_model=BaseResponse[AutomaticArrangementStatusView])
+def query_automatic_arrangement(
+    case_no: str = Path(..., min_length=1, max_length=50),
+    plan_id: int = Path(..., gt=0),
+    principal: AdminPrincipal = Depends(require_system_admin),
+    application: AutomaticServiceArrangement = Depends(get_service_arrangement_automation),
+):
+    del principal
+    return _call_endpoint(
+        lambda: _materialize(application.query(case_no, plan_id)),
+        '成功取得自動排班狀態',
+        CorrelationId(f'automatic-arrangement-query:{case_no}'),
+    )
 
 
 class AssignmentPlanSegmentInput(BaseModel):

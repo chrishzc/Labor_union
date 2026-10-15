@@ -1,0 +1,24 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-candidate-weekly-information-2026-10-14-v1",
+  "descriptors": {
+    "1051_candidate_weekly_information.sql": {
+      "tables": {},
+      "parent_columns": {
+        "caregiver_candidate_contact_events": {
+          "event_type": {
+            "column_type": "enum('candidates_added','info_1_sent','info_2_sent','willingness_changed','candidate_selected','candidate_withdrawn','info_3_sent')",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          }
+        }
+      },
+      "indexes": {},
+      "foreign_keys": {},
+      "checks": {},
+      "triggers": [],
+      "views": {}
+    }
+  }
+}

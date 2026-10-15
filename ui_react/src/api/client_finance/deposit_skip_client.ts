@@ -4,6 +4,11 @@ import { transport, type RequestOptions } from '../shared/transport';
 import { ApiDecodeError, ApiHttpError } from '../shared/typed_errors';
 
 const fingerprint = z.string().regex(/^[0-9a-f]{64}$/);
+const StatusSchema = z.strictObject({
+  case_no: z.string().min(1), account_version: z.number().int().nonnegative(),
+  deposit_required_ntd: z.number().int().nonnegative(), deposit_net_received_ntd: z.number().int().nonnegative(),
+  unpaid_progression_allowed: z.boolean(), blockers: z.array(z.string()),
+});
 const PreviewSchema = z.strictObject({
   case_no: z.string().min(1),
   expected_account_version: z.number().int().nonnegative(),
@@ -26,6 +31,7 @@ const envelope = <T extends z.ZodTypeAny>(data: T) => z.object({
 }).passthrough();
 
 export type DepositSkipPreview = z.infer<typeof PreviewSchema>;
+export type DepositSkipStatus = z.infer<typeof StatusSchema>;
 
 function options(idempotencyKey?: string): RequestOptions {
   const token = sessionClient.getToken();
@@ -43,15 +49,21 @@ function decode<T>(schema: z.ZodType<T>, raw: unknown, operation: string): T {
 }
 
 export const depositSkipClient = {
+  async query(caseNo: string): Promise<DepositSkipStatus> {
+    const raw = await transport.get<unknown>(`/api/v1/orders/${encodeURIComponent(caseNo)}/client-finance/deposit-skip`, options());
+    const current = decode(StatusSchema, raw, '現況');
+    if (current.case_no !== caseNo) throw new ApiDecodeError('目前訂金鎖狀態案件不一致。');
+    return current;
+  },
   async preview(caseNo: string): Promise<DepositSkipPreview> {
     const raw = await transport.post<unknown>(`/api/v1/orders/${encodeURIComponent(caseNo)}/client-finance/deposit-skip/preview`, undefined, options());
     return decode(PreviewSchema, raw, '預覽');
   },
-  async apply(caseNo: string, preview: DepositSkipPreview, reason: string): Promise<z.infer<typeof ReceiptSchema>> {
+  async apply(caseNo: string, preview: DepositSkipPreview, reason: string, idempotencyKey = `deposit-skip-${caseNo}-${crypto.randomUUID()}`): Promise<z.infer<typeof ReceiptSchema>> {
     const raw = await transport.post<unknown>(
       `/api/v1/orders/${encodeURIComponent(caseNo)}/client-finance/deposit-skip/apply`,
       { expected_account_version: preview.expected_account_version, preview_fingerprint: preview.preview_fingerprint, reason },
-      options(`deposit-skip-${caseNo}-${crypto.randomUUID()}`),
+      options(idempotencyKey),
     );
     return decode(ReceiptSchema, raw, '套用');
   },

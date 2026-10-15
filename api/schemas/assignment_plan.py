@@ -3,9 +3,20 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+
+class AutomaticArrangementStatusView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    case_no: str
+    plan_id: int = Field(gt=0)
+    state: Literal['awaiting_confirmations', 'awaiting_conditions', 'ready', 'queued', 'running', 'effective', 'failed']
+    blockers: tuple[str, ...] = ()
+    job_id: str | None = None
+    assignment_count: int = Field(default=0, ge=0)
 
 
 class AssignmentPlanSegmentView(BaseModel):

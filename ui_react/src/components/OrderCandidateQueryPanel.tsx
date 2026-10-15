@@ -18,9 +18,10 @@ import { OrderMultiCaregiverPlanPanel } from './OrderMultiCaregiverPlanPanel';
 
 interface OrderCandidateQueryPanelProps {
   caseNo: string;
-  onPoolReadback?: () => void;
+  onPoolReadback?: (candidateIds?: readonly number[]) => void;
   includeMultiCaregiver?: boolean;
   onEditStateChange?: (state: { dirty: boolean; busy: boolean }) => void;
+  presentation?: 'legacy' | 'workbench';
 }
 
 type CandidateQueryState =
@@ -94,7 +95,7 @@ export const OrderCandidateQueryPanel: FC<OrderCandidateQueryPanelProps> = (prop
   <CandidateQueryForCase key={props.caseNo} {...props} />
 );
 
-const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPoolReadback, includeMultiCaregiver = true, onEditStateChange }) => {
+const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPoolReadback, includeMultiCaregiver = true, onEditStateChange, presentation = 'legacy' }) => {
   const mounted = useRef(true);
   const queryController = useRef<AbortController | null>(null);
   useEffect(() => {
@@ -108,6 +109,7 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
   const [filters, setFilters] = useState<MatchingFilterPolicy>(() => ({ ...defaultMatchingFilterPolicy }));
   const [queryState, setQueryState] = useState<CandidateQueryState>({ status: 'idle' });
   const [selectedStaffIds, setSelectedStaffIds] = useState<ReadonlySet<number>>(() => new Set());
+  const [joinedStaffIds, setJoinedStaffIds] = useState<ReadonlySet<number>>(() => new Set());
   const [addState, setAddState] = useState<CandidateAddState>({ status: 'idle' });
   const [multiBusy, setMultiBusy] = useState(false);
   const flow = useSyncExternalStore(subscribeCandidatePoolAdd, () => orderMutationFlowStore.getCandidatePoolAdd(caseNo));
@@ -127,10 +129,13 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
     setSelectedStaffIds(new Set());
     setAddState({ status: 'idle' });
     setQueryState({ status: 'loading' });
-    void matchingCandidateWorkflowClient.searchInquiryCandidates(caseNo, filters, { signal: controller.signal })
-      .then((data) => {
+    void Promise.all([
+      matchingCandidateWorkflowClient.searchInquiryCandidates(caseNo, filters, { signal: controller.signal }),
+      presentation === 'workbench' ? candidateContactPoolClient.query(caseNo, { signal: controller.signal }) : Promise.resolve(null),
+    ]).then(([data, pool]) => {
         if (!mounted.current || queryController.current !== controller) return;
-        if (data.case_no !== caseNo) throw new Error('候選詢問案件識別不一致。');
+        if (data.case_no !== caseNo || (pool && pool.case_no !== caseNo)) throw new Error('候選詢問案件識別不一致。');
+        if (pool) setJoinedStaffIds(new Set(pool.candidates.filter(value => value.status !== 'withdrawn').map(value => value.staff_id)));
         setQueryState({ status: 'ready', data });
       })
       .catch((error) => {
@@ -175,9 +180,10 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
       status: 'observed', command, receipt: data, readbackStaff, error: null,
     });
     if (!mounted.current || command.caseNo !== caseNo) return;
+    if (presentation === 'workbench') setJoinedStaffIds(new Set(pool.candidates.filter(value => value.status !== 'withdrawn').map(value => value.staff_id)));
     setSelectedStaffIds(new Set());
     setAddState({ status: 'success', data, readbackStaff });
-    onPoolReadback?.();
+    onPoolReadback?.(data.candidate_ids);
   };
 
   const failObservation = (command: CandidateAddCommand, error: unknown) => {
@@ -238,11 +244,12 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
     }
   };
 
-  const addSelectedCandidates = () => {
+  const addSelectedCandidates = (staffIds: ReadonlySet<number> = selectedStaffIds) => {
     if (queryState.status !== 'ready' || addInFlight.current
       || flow?.status === 'applying' || flow?.status === 'observing'
       || flow?.status === 'outcome_unknown' || flow?.status === 'observation_failed') return;
-    const selected = formalCandidates(queryState.data).filter((candidate) => selectedStaffIds.has(candidate.staff_id));
+    const selected = formalCandidates(queryState.data).filter((candidate) => staffIds.has(candidate.staff_id)
+      && (presentation !== 'workbench' || !joinedStaffIds.has(candidate.staff_id)));
     if (selected.length === 0) {
       setAddState({ status: 'error', message: '請先選擇至少一位正式候選。' });
       return;
@@ -307,7 +314,7 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
         onClick={queryCandidates}
         disabled={busy}
       >
-        {queryState.status === 'loading' ? '查詢中…' : '查詢符合條件月嫂'}
+        {queryState.status === 'loading' ? '查詢中…' : presentation === 'workbench' ? '查詢合適人選' : '查詢符合條件月嫂'}
       </button>
 
       {queryState.status === 'idle' && (
@@ -351,7 +358,17 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
                 <span>有檔期衝突仍可加入候選池並協調；排班前須確認調整後的完整服務日期。</span>
               </div>
               <div className="order-v2-business-summary" aria-label="正式符合條件候選">
-                {candidates.map((candidate) => (
+                {candidates.map((candidate) => presentation === 'workbench' ? <div key={candidate.staff_id} className="candidate-add-row">
+                  <div><strong>{candidate.staff_name}</strong><br />空閒 {candidate.supported_day_count}/{candidate.required_day_count} 天
+                    {!candidate.full_case_coverage && <span role="status"> · 有檔期衝突，待公會協調</span>}
+                    {queryState.data.conflicts.some(value => value.staff_id === candidate.staff_id && value.reason_code === 'buffer') && <span role="status"> · 七天緩衝期重疊，僅提醒</span>}
+                  </div>
+                  <button type="button" aria-label={`${joinedStaffIds.has(candidate.staff_id) ? '已加入候選池' : '加入候選池'}（${candidate.staff_name}）`}
+                    disabled={joinedStaffIds.has(candidate.staff_id) || busy || recoveryPending}
+                    onClick={() => addSelectedCandidates(new Set([candidate.staff_id]))}>
+                    {joinedStaffIds.has(candidate.staff_id) ? '已加入' : addState.status === 'saving' && flow?.command.candidates.some(value => value.staff_id === candidate.staff_id) ? '加入中…' : '加入候選池'}
+                  </button>
+                </div> : (
                   <label key={candidate.staff_id}>
                     <input
                       type="checkbox"
@@ -369,14 +386,14 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
                   </label>
                 ))}
               </div>
-              <button
+              {presentation === 'legacy' && <button
                 type="button"
                 className="order-v2-open-drawer"
-                onClick={addSelectedCandidates}
+                onClick={() => addSelectedCandidates()}
                 disabled={selectedStaffIds.size === 0 || busy || recoveryPending}
               >
-                {addState.status === 'saving' ? '加入候選池中…' : `加入候選池（${selectedStaffIds.size}）`}
-              </button>
+                {addState.status === 'saving' ? '正在加入…' : `加入候選池（${selectedStaffIds.size}）`}
+              </button>}
             </>
           ) : (
             <div className="order-v2-notice blocked" role="status">
@@ -387,7 +404,8 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
         </>
       )}
 
-      {completedAdd && (
+      {completedAdd && presentation === 'workbench' && <p role="status">已加入：{completedAdd.readbackStaff.map(value => value.staffName).join('、')}。可繼續加入其他人選，或關閉抽屜回到候選清單。</p>}
+      {completedAdd && presentation === 'legacy' && (
         <div className="order-v2-notice warning" role="status">
           <strong>候選池回讀完成</strong>
           <span>

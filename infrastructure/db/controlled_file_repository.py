@@ -166,11 +166,11 @@ class MySqlControlledFileWorkflowRepository:
             cursor.execute(
                 _CLAIM_INSERT_SQL,
                 (
-                    correlation_id.value,
+                    key.value,
                     _COMMAND_FAMILY,
                     _COMMAND_FAMILY,
                     command_fingerprint.value,
-                    key.value,
+                    correlation_id.value,
                 ),
             )
             if cursor.rowcount == 1:

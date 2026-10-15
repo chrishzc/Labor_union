@@ -4,8 +4,18 @@ Description: 定義 Orders 服務完成 Preview 與 Apply receipt 的 typed HTTP
 """
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+
+class OrderAutoCompletionStatusView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    case_no: str
+    current_status: str
+    completion_instant: datetime | None
+    state: Literal['awaiting_schedule', 'awaiting_service', 'waiting', 'due', 'blocked', 'completed', 'cancelled']
+    blockers: tuple[str, ...]
 
 
 class OrderAutoCompletionPreviewView(BaseModel):

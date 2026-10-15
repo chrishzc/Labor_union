@@ -10,10 +10,11 @@ import {
   type IntakeTermsPreview,
 } from '../api/orders/order_intake_completion_client';
 
-const FIELD_LABELS: Record<IntakeMissingField, string> = {
+const FIELD_LABELS: Record<IntakeMissingField | 'service_time', string> = {
   client_name: '客戶姓名',
   start_date: '約定服務開始日',
   service_days: '服務天數',
+  service_time: '服務時間與每日時數',
 };
 
 function operationKey(caseNo: string, operation: string): string {

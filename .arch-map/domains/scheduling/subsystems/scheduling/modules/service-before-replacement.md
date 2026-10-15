@@ -14,6 +14,8 @@
   - `infrastructure/mysql/service_before_replacement_loader.py`
     - 已有正式服務 proof 的轉介不讀無關的舊 Matching reuse snapshot；未服務的 replacement 仍 fail closed 核對來源。
   - `infrastructure/mysql/service_before_replacement_repository.py`
+    - R-04 同一 UoW 退役 active caregiver matching plans 及原人選 entry，保存 replacement-event lineage；readback 不接受原方案仍 active。
+  - `infrastructure/mysql/replacement_matching_query.py` — 以 R-04 receipt、current effective generation 與零 assignment 判定訂單成立案件可續辦候選／客戶確認，舊 round 不授權。
   - `infrastructure/mysql/scheduling_replacement_writer.py`
 - entrypoints:
   - `api/routes/service_before_replacement.py`
@@ -21,6 +23,8 @@
   - `api/schemas/service_before_replacement.py`
   - `ui_react/src/api/orders/service_before_replacement_client.ts`
   - `ui_react/src/components/ServiceBeforeReplacementActions.tsx`
+    - 表單僅必填换人原因，允許空 references 並保留非空歷史 references 的 fingerprint／回讀；推薦頁的已有指派分支重用同一 writer。
+    - 推薦頁區分換人啟動與新推薦完成；R-04 後確認舊方案退役再回選人，交接失敗只重讀，不能重送換人或移植舊客戶接受。
     - 客戶名冊 Drawer 重用同一操作；可回報草稿／處理中／結果未明／正式回讀狀態供外層關閉保護，未確認結果不得收合卸載。
 - migrations:
   - `db/schema_parts/1012_service_before_replacement.sql`

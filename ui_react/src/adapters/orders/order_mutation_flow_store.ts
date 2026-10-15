@@ -34,8 +34,10 @@ import type {
 } from '../../api/orders/order_intake_completion_client';
 import type {
   CaregiverWillingnessReceipt,
+  FormalPlanContactState,
   CustomerDecisionReceipt,
 } from '../../api/scheduling/matching_plan_communication_client';
+import type { ActiveWaitingDepositPlan } from '../../api/scheduling/waiting_deposit_lock_client';
 import type { FormalMatchingPlan, MatchingPlanSegmentInput } from '../../api/scheduling/matching_candidate_workflow_client';
 import type {
   HistoricalClientPaymentIntent,
@@ -201,6 +203,7 @@ export type FormalManualResponseCommand =
     caseNo: string;
     planId: number;
     segmentId: number;
+    willingness?: 'willing' | 'unwilling';
     expectedVersion: number;
     reason: string;
     key: string;
@@ -242,6 +245,23 @@ export interface FormalPlanCreationFlowState {
   observationToken?: string;
 }
 
+export interface RecommendationReplacementFlowState {
+  command: {
+    caseNo: string; planId: number; expectedVersion: number; actor: string; reason: string;
+    lockId: number | null; releaseFingerprint: string | null;
+    releaseKey: string; cancelKey: string; createKey: string; asOf: string;
+    segments: MatchingPlanSegmentInput[];
+    originalPlan: ActiveWaitingDepositPlan;
+    originalContact: FormalPlanContactState;
+  };
+  stage: 'release' | 'cancel' | 'ready' | 'create' | 'observe';
+  released: boolean;
+  cancelled: boolean;
+  cancellationEventId: number | null;
+  receipt: FormalMatchingPlan | null;
+  error: string | null;
+}
+
 /** Handoff recovery retains the original authenticated operator and full POST identity in memory per case. */
 export interface ExternalSigningHandoffCommand {
   caseNo: string;
@@ -255,6 +275,7 @@ export interface ExternalSigningHandoffReceipt {
   session_id: string;
   resulting_status_version: number;
   replayed: boolean;
+  handoff_included_reminders?: boolean;
   manual_notification_targets?: Array<{ scope: 'client' | 'staff'; subject_reference: string }>;
 }
 
@@ -263,6 +284,13 @@ export interface ExternalSigningHandoffFlowState {
   operationToken: number;
   command: ExternalSigningHandoffCommand;
   receipt: ExternalSigningHandoffReceipt | null;
+  error: string | null;
+}
+
+export interface ExternalSigningReminderFlowState {
+  status: 'applying' | 'outcome_unknown' | 'received' | 'failed';
+  command: ExternalSigningHandoffCommand;
+  receipt: import('../../api/orders/contract_external_signing_client').SigningReminderReceipt | null;
   error: string | null;
 }
 
@@ -394,7 +422,9 @@ export class OrderMutationFlowStore {
   private candidateWillingness = new Map<string, CandidateWillingnessFlowState>();
   private formalManualResponses = new Map<string, FormalManualResponseFlowState>();
   private formalPlanCreations = new Map<string, FormalPlanCreationFlowState>();
+  private recommendationReplacements = new Map<string, RecommendationReplacementFlowState>();
   private externalSigningHandoffs = new Map<string, ExternalSigningHandoffFlowState>();
+  private externalSigningReminders = new Map<string, ExternalSigningReminderFlowState>();
   private externalSigningUnsignedPreparations = new Map<string, ExternalSigningUnsignedPreparationFlowState>();
   private historicalClientPayments = new Map<string, HistoricalClientPaymentFlowState>();
   private historicalStaffPayouts = new Map<string, HistoricalStaffPayoutFlowState>();
@@ -512,7 +542,7 @@ export class OrderMutationFlowStore {
     this.notify();
   }
 
-  private candidateInformationKey(caseNo: string, candidateId: number, infoType: 1 | 2): string {
+  private candidateInformationKey(caseNo: string, candidateId: number, infoType: 1 | 2 | 3): string {
     return `${caseNo}:${candidateId}:${infoType}`;
   }
 
@@ -547,7 +577,7 @@ export class OrderMutationFlowStore {
   public getCandidateInformation(
     caseNo: string,
     candidateId: number,
-    infoType: 1 | 2,
+    infoType: 1 | 2 | 3,
   ): CandidateInformationFlowState | undefined {
     return this.candidateInformation.get(this.candidateInformationKey(caseNo, candidateId, infoType));
   }
@@ -558,7 +588,7 @@ export class OrderMutationFlowStore {
     this.notify();
   }
 
-  public clearCandidateInformation(caseNo: string, candidateId: number, infoType: 1 | 2): void {
+  public clearCandidateInformation(caseNo: string, candidateId: number, infoType: 1 | 2 | 3): void {
     this.candidateInformation.delete(this.candidateInformationKey(caseNo, candidateId, infoType));
     this.notify();
   }
@@ -602,8 +632,28 @@ export class OrderMutationFlowStore {
     this.notify();
   }
 
+  public getRecommendationReplacement(caseNo: string) { return this.recommendationReplacements.get(caseNo); }
+  public setRecommendationReplacement(caseNo: string, state: RecommendationReplacementFlowState) {
+    this.recommendationReplacements.set(caseNo, state); this.notify();
+  }
+  public clearRecommendationReplacement(caseNo: string) { this.recommendationReplacements.delete(caseNo); this.notify(); }
+
   public getExternalSigningHandoff(caseNo: string): ExternalSigningHandoffFlowState | undefined {
     return this.externalSigningHandoffs.get(caseNo);
+  }
+
+  public getExternalSigningReminder(caseNo: string): ExternalSigningReminderFlowState | undefined {
+    return this.externalSigningReminders.get(caseNo);
+  }
+
+  public setExternalSigningReminder(caseNo: string, state: ExternalSigningReminderFlowState): void {
+    this.externalSigningReminders.set(caseNo, state);
+    this.notify();
+  }
+
+  public clearExternalSigningReminder(caseNo: string): void {
+    this.externalSigningReminders.delete(caseNo);
+    this.notify();
   }
 
   public setExternalSigningHandoff(caseNo: string, state: ExternalSigningHandoffFlowState): void {
@@ -1091,7 +1141,9 @@ export class OrderMutationFlowStore {
     this.candidateWillingness.clear();
     this.formalManualResponses.clear();
     this.formalPlanCreations.clear();
+    this.recommendationReplacements.clear();
     this.externalSigningHandoffs.clear();
+    this.externalSigningReminders.clear();
     this.externalSigningUnsignedPreparations.clear();
     this.historicalClientPayments.clear();
     this.historicalStaffPayouts.clear();

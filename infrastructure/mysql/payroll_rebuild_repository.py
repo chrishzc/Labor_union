@@ -26,6 +26,8 @@ from domains.payroll.monthly_aggregation import (
     MonthlyPayrollObligationFact,
     build_staff_monthly_payroll_summary,
 )
+from domains.payroll.payment_due_date import calculate_staff_payment_due_date
+from domains.client_finance.subsidy_coverage import derive_subsidy_coverage
 from infrastructure.mysql.effective_case_service_rate import (
     load_explicit_case_service_rate,
 )
@@ -289,8 +291,24 @@ def _rebuild_facts(
         terms=_payroll_terms(root),
         adjustments=_payroll_adjustments(adjustments_by_assignment),
         existing_obligations=_existing_obligations(obligations),
-        staff_payment_due_date=root["staff_payment_due_date"],
+        staff_payment_due_date=_payment_due_date(root),
     )
+
+
+def _payment_due_date(root):
+    existing = root["staff_payment_due_date"]
+    if existing is not None:
+        return existing
+    completed_on = root.get("actual_end_date")
+    payable = root.get("client_payable_ntd")
+    if completed_on is None or payable is None:
+        return None
+    coverage = derive_subsidy_coverage(
+        str(root["identity_status"]),
+        Decimal(str(root["service_days"])) * Decimal(str(root["service_hours_per_day"])),
+        Decimal(str(root["floor_fee"])),
+    )
+    return calculate_staff_payment_due_date(completed_on, payable, coverage.is_full_subsidy_order)
 
 
 def _schedule_index(assignments, schedules):
@@ -391,6 +409,7 @@ def _persist_action(cursor, persistence, action, ordinal):
 # Kept cohesive because event and first projection must share one owner and amount.
 def _create_service_obligation(cursor, persistence, action, ordinal):
     owner = _assignment_owner(cursor, action.assignment_identity)
+    owner["due_date"] = action.due_date
     event_id = _insert_event(
         cursor,
         persistence,
@@ -822,9 +841,15 @@ def _lock_clause(lock):
 
 _ROOT_SELECT_SQL = (
     "SELECT o.case_no,o.service_days,o.service_hours_per_day,o.floor_fee,"
+    "o.status AS order_status,o.actual_end_date,c.identity_status,"
+    "(SELECT SUM(event.after_amount_ntd) FROM client_obligations obligation "
+    "JOIN client_obligation_events event ON event.id=obligation.current_event_id "
+    "WHERE obligation.case_no=o.case_no AND obligation.status IN ('open','settled') "
+    "AND obligation.obligation_type IN ('deposit','first','second','adjustment')) AS client_payable_ntd,"
     "o.staff_payment_due_date,account.aggregate_version,"
     "aggregate.effective_generation_id,generation.status AS generation_status "
-    "FROM orders o JOIN payroll_case_accounts account ON account.case_no=o.case_no "
+    "FROM orders o JOIN clients c ON c.case_no=o.case_no "
+    "JOIN payroll_case_accounts account ON account.case_no=o.case_no "
     "JOIN scheduling_aggregates aggregate ON aggregate.case_no=o.case_no "
     "LEFT JOIN scheduling_generations generation "
     "ON generation.id=aggregate.effective_generation_id "

@@ -29,6 +29,7 @@ from domains.scheduling.matching_communication import (
     MatchingPlanReference,
     MatchingRecipientMismatchError,
     MatchingResponseSource,
+    matching_order_is_open,
     record_caregiver_willingness,
     record_customer_decision,
 )
@@ -123,7 +124,7 @@ class MatchingNotificationApplication:
             blockers: list[str] = []
             if not state.plan_is_active or state.plan_status != "proposed":
                 blockers.append("正式媒合方案已失效或不再處於推薦階段。")
-            if state.order_status != "洽談中":
+            if not matching_order_is_open(state.order_status, replacement_round=state.replacement_matching_open):
                 blockers.append("案件已不在洽談中，不能寄送確認資訊。")
             if not state.all_willing:
                 blockers.append("仍有月嫂尚未確認願意承接正式方案。")
@@ -572,7 +573,7 @@ def _require_sendable_state(state, expected_version):
     _require_expected_state(state, expected_version)
     if not state.plan_is_active or state.plan_status != "proposed":
         raise MatchingCommunicationStaleError("matching plan is not active and proposed")
-    if state.order_status != "洽談中":
+    if not matching_order_is_open(state.order_status, replacement_round=state.replacement_matching_open):
         raise MatchingCommunicationStaleError("order is no longer in negotiation")
 
 
@@ -584,7 +585,11 @@ def _require_expected_state(state, expected_version):
 def _require_active_interaction(interaction, line_user_id, occurred_at):
     if str(interaction["recipient_line_user_id"]) != line_user_id.value:
         raise MatchingRecipientMismatchError("LINE responder does not match the recipient")
-    if str(interaction["interaction_status"]) != "active":
+    reusable_caregiver_response = (
+        interaction.get("action_scope") == "caregiver_willingness"
+        and str(interaction["interaction_status"]) == "consumed"
+    )
+    if str(interaction["interaction_status"]) != "active" and not reusable_caregiver_response:
         raise MatchingCommunicationStaleError("matching interaction is no longer active")
     if aware_datetime(interaction["expires_at_utc"]) <= occurred_at:
         raise MatchingCommunicationStaleError("matching interaction has expired")
@@ -609,6 +614,7 @@ def _append_line_response(unit_of_work, interaction, state, decision, line_user_
             segment.willingness, value,
             plan_is_active=state.plan_is_active,
             recipient_matches=segment.staff_line_user_id == line_user_id,
+            customer_decision=state.customer_decision,
         )
         response_type = scope
     else:
@@ -645,7 +651,7 @@ def _append_line_response(unit_of_work, interaction, state, decision, line_user_
             actor_id=f"line:{line_user_id.value}",
         ),
         occurred_at=occurred_at,
-        token_hash=token_hash,
+        token_hash=None if scope == "caregiver_willingness" else token_hash,
     )
 
 
@@ -744,6 +750,7 @@ def _append_manual_response(unit_of_work, command, state, occurred_at):
             segment.willingness, command.caregiver_willingness,
             plan_is_active=state.plan_is_active,
             recipient_matches=True,
+            allow_correction=True,
         )
         response_type = "caregiver_willingness"
     else:

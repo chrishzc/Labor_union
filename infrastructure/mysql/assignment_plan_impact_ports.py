@@ -60,8 +60,8 @@ class MySqlPayrollAssignmentImpactPort:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
 
-    def preview_assignment_plan(self, facts, scheduling):
-        return build_payroll_assignment_impact(facts, scheduling)
+    def preview_assignment_plan(self, facts, scheduling, client_finance):
+        return build_payroll_assignment_impact(facts, scheduling, client_finance)
 
     def persist_assignment_plan(
         self,
@@ -129,6 +129,7 @@ def _lifecycle_command(impact, payload, context):
         reason=context.reason,
         correlation_id=context.correlation_id,
         trigger_event="assignment_plan_applied",
+        staff_payment_due_date=payload.staff_payment_due_date,
     )
 
 

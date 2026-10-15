@@ -7,6 +7,62 @@ import pytest
 
 from subsystems.scheduling import matching_notification_application, matching_plan_workflow
 from subsystems.scheduling.segmented_availability_query import _passes_enabled_filters
+from infrastructure.mysql.matching_notification_repository import _segment_contact
+from domains.scheduling.matching_communication import CaregiverWillingness, CustomerMatchingDecision, MatchingCommunicationConflictError, record_caregiver_willingness
+
+
+def test_explicit_admin_notice_can_correct_prior_agreement_without_line_decision_context():
+    with pytest.raises(MatchingCommunicationConflictError):
+        record_caregiver_willingness(CaregiverWillingness.WILLING, CaregiverWillingness.UNWILLING,
+                                    plan_is_active=True, recipient_matches=True)
+    assert record_caregiver_willingness(CaregiverWillingness.WILLING, CaregiverWillingness.UNWILLING,
+                                       plan_is_active=True, recipient_matches=True, allow_correction=True) is CaregiverWillingness.UNWILLING
+
+
+@pytest.mark.parametrize('decision', [CustomerMatchingDecision.PENDING, CustomerMatchingDecision.CONTACT_REQUESTED])
+@pytest.mark.parametrize('prior,target', [
+    (CaregiverWillingness.WILLING, CaregiverWillingness.UNWILLING),
+    (CaregiverWillingness.UNWILLING, CaregiverWillingness.WILLING),
+])
+def test_line_consent_can_change_both_ways_before_customer_decision(decision, prior, target):
+    assert record_caregiver_willingness(
+        prior, target, plan_is_active=True, recipient_matches=True, customer_decision=decision,
+    ) is target
+
+
+def test_line_withdrawal_after_customer_acceptance_is_allowed_but_cannot_be_undone():
+    assert record_caregiver_willingness(
+        CaregiverWillingness.WILLING, CaregiverWillingness.UNWILLING,
+        plan_is_active=True, recipient_matches=True, customer_decision=CustomerMatchingDecision.ACCEPTED,
+    ) is CaregiverWillingness.UNWILLING
+    with pytest.raises(MatchingCommunicationConflictError):
+        record_caregiver_willingness(
+            CaregiverWillingness.UNWILLING, CaregiverWillingness.WILLING,
+            plan_is_active=True, recipient_matches=True, customer_decision=CustomerMatchingDecision.ACCEPTED,
+        )
+
+
+def test_line_cannot_change_consent_after_customer_declined():
+    with pytest.raises(MatchingCommunicationConflictError):
+        record_caregiver_willingness(
+            CaregiverWillingness.UNWILLING, CaregiverWillingness.WILLING,
+            plan_is_active=True, recipient_matches=True, customer_decision=CustomerMatchingDecision.DECLINED,
+        )
+
+
+@pytest.mark.parametrize('prior,explicit,expected', [
+    ('willing', None, 'willing'), ('unwilling', None, 'unwilling'),
+    (None, None, 'pending'), ('willing', 'unwilling', 'unwilling'),
+])
+def test_prior_candidate_consent_is_used_without_another_manual_response(prior, explicit, expected):
+    row = {'segment_id': 1, 'segment_order': 1, 'staff_id': 2, 'staff_name': 'Synthetic caregiver',
+           'staff_line_user_id': None, 'assigned_start_date': '2026-11-02', 'assigned_end_date': '2026-11-06',
+           'candidate_willingness': prior}
+    responses = {} if explicit is None else {(1, 'caregiver_willingness'): explicit}
+    segment = _segment_contact(row, responses, {})
+    assert segment.willingness.value == expected
+    assert segment.information_1_status is None
+    assert segment.information_2_status is None
 
 
 def test_matching_preferences_explain_but_do_not_exclude_candidate():

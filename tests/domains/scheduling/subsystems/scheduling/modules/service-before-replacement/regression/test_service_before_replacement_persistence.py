@@ -832,6 +832,66 @@ def test_root_set_digest_uses_sorted_newline_and_empty_sha256():
     assert root_set_digest(("root:b", "root:a")) == sha256(b"root:a\nroot:b").hexdigest()
 
 
+def test_r04_retires_accepted_recommendation_and_incumbent_candidate_without_committing():
+    from infrastructure.mysql.service_before_replacement_repository import MySqlServiceBeforeReplacementRepository
+
+    connection = _Connection(rows=[[{'id': 51, 'communication_version': 4}]])
+    command = SimpleNamespace(case_no='CASE-1', actor=ActorContext('operator:1'), reason='月嫂不接案')
+    MySqlServiceBeforeReplacementRepository(connection)._retire_r04_recommendations(command, 91)
+    updates = [(sql, args) for sql, args in connection.statements if sql.startswith('UPDATE')]
+    assert len(updates) == 2
+    assert "entry.status='withdrawn',entry.active_marker=NULL" in updates[0][0]
+    assert updates[0][1] == ('CASE-1', 51)
+    assert "status='superseded',is_active=NULL" in updates[1][0]
+    assert updates[1][1] == (51, 'CASE-1', 4)
+    event = next(args for sql, args in connection.statements if sql.startswith('INSERT INTO caregiver_matching_plan_events'))
+    assert event[:3] == (51, 'r04-recommendation:91:51', 'operator:1')
+    assert json.loads(event[3]) == {'reason': '月嫂不接案', 'source': 'R-04', 'replacement_event_id': 91, 'prior_communication_version': 4}
+    assert connection.commit_count == connection.rollback_count == 0
+
+
+def test_r04_persist_replacement_retires_native_recommendation_before_receipt_and_outbox(monkeypatch):
+    from dataclasses import dataclass
+    from domains.scheduling.service_before_replacement import ReplacementScenario
+    from infrastructure.mysql.service_before_replacement_repository import MySqlServiceBeforeReplacementRepository
+    from shared_kernel.identities import ExpectedVersion
+
+    @dataclass(frozen=True)
+    class Receipt:
+        matching_package_lineage_id: int | None = None
+        matching_event_id: int | None = None
+
+    connection = _Connection(rows=[[{'id': 51, 'communication_version': 5}]])
+    command = SimpleNamespace(case_no='CASE-1', actor=ActorContext('operator:1'), reason='LINE 拒接後換人',
+                              expected_generation_version=ExpectedVersion(1), expected_aggregate_version=ExpectedVersion(1),
+                              idempotency_key=IdempotencyKey('r04:1'), correlation_id=CorrelationId('r04:1'))
+    candidate = SimpleNamespace(actual_service_proof=SimpleNamespace(service_dates=()), matching_zero_candidate_proof=None,
+                                candidate_pool_reuse_proof=None, resulting_generation_version=2, resulting_aggregate_version=2,
+                                prior_event_identity='prior:1', successor_round_identity='round:2', successor_round_fact=None,
+                                scenario=ReplacementScenario.R04)
+    adapter = SimpleNamespace(persist_successor=lambda request: SimpleNamespace(package_lineage_id=81, matching_event_id=82))
+    repository = MySqlServiceBeforeReplacementRepository(connection, adapter,
+        matching_source_loader=lambda request, *, for_update: _canonical_source_snapshot())
+    monkeypatch.setattr(repository, 'create_replacement_generation', lambda **kwargs: (10, 11))
+    monkeypatch.setattr(repository, '_prior_replacement_event_id', lambda *args, **kwargs: 14)
+    monkeypatch.setattr(repository, '_insert_event', lambda *args: 91)
+    monkeypatch.setattr(repository, '_insert_roots', lambda *args: None)
+    monkeypatch.setattr(repository, '_read_root_sets', lambda *args: ((), (), ()))
+    monkeypatch.setattr(repository, '_insert_successor', lambda *args: 92)
+    persisted = []
+
+    def save_receipt(*args):
+        assert any("status='superseded',is_active=NULL" in sql for sql, _ in connection.statements)
+        persisted.append('receipt')
+
+    monkeypatch.setattr(repository, '_insert_receipt', save_receipt)
+    monkeypatch.setattr(repository, '_insert_outbox', lambda *args: persisted.append('outbox'))
+    receipt = repository.persist_replacement(SimpleNamespace(command=command, candidate=candidate, receipt=Receipt()))
+    assert (receipt.matching_package_lineage_id, receipt.matching_event_id) == (81, 82)
+    assert persisted == ['receipt', 'outbox']
+    assert connection.commit_count == connection.rollback_count == 0
+
+
 def test_repository_requires_matching_source_before_persisting():
     from infrastructure.mysql.service_before_replacement_repository import (
         MySqlServiceBeforeReplacementRepository,

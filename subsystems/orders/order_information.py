@@ -190,6 +190,49 @@ class CandidateInformationPreview:
     preview_fingerprint: str
 
 
+@dataclass(frozen=True, slots=True)
+class CaseInformationPreview:
+    case_no: str
+    info_type: int
+    start_date: date | None
+    line_sections: tuple[CandidateInformationSection, ...]
+    content_fingerprint: str
+    send_allowed: bool
+
+
+def build_case_information(case_no, info_type, facts, issues):
+    require_canonical_text(case_no, "case number", 50)
+    if info_type not in (1, 2):
+        raise ValueError("info_type_invalid")
+    sections = _candidate_line_sections(info_type, facts, issues)
+    return case_information_preview(case_no, info_type, facts.get("assigned_start_date"), sections, True)
+
+
+def case_information_preview(case_no, info_type, start_date, sections, send_allowed):
+    return CaseInformationPreview(case_no, info_type, start_date, sections,
+        projection_fingerprint({"case_no": case_no, "info_type": info_type,
+                                "sections": [{"title": section.title, "rows": section.rows} for section in sections]}), send_allowed)
+
+
+def build_weekly_information(case_no, start_date, weekly):
+    rows = tuple((f"{row['week_start_date']} ～ {row['week_end_date']}",
+                  f"每日 {row['service_hours_per_day']:g} 小時 · {row['weekly_work_days']} 天 · 共 {row['weekly_hours']:g} 小時") for row in weekly["rows"])
+    sections = tuple(CandidateInformationSection("每週服務說明", rows[index:index + 30]) for index in range(0, len(rows), 30))
+    if not sections:
+        sections = (CandidateInformationSection("每週服務說明", (("預計服務日期", "尚未保存"),)),)
+    return case_information_preview(case_no, 3, start_date, sections,
+                                    weekly["date_basis"] == "confirmed" and not weekly["warnings"] and bool(rows))
+
+
+def bind_weekly_information(common, candidate_id, staff_name, recipient):
+    if not common.send_allowed:
+        raise ValueError("candidate_weekly_service_dates_not_ready")
+    fingerprint = projection_fingerprint({"case_no": common.case_no, "candidate_id": candidate_id,
+        "info_type": 3, "content": common.content_fingerprint, "recipient": recipient})
+    text = "\n".join(f"{label}：{value}" for section in common.line_sections for label, value in section.rows)
+    return CandidateInformationPreview(common.case_no, candidate_id, 3, staff_name, text, common.line_sections, fingerprint)
+
+
 def build_candidate_information(case_no, candidate_id, info_type, facts, field_issues, recipient_identity):
     """Reuse sheet projection without inventing an assignment or payroll fact."""
     require_canonical_text(case_no, "case number", 50)

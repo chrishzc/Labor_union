@@ -1,6 +1,8 @@
 from datetime import date
+from types import SimpleNamespace
 
 import pytest
+import infrastructure.mysql.payroll_rebuild_repository as mysql_rebuild
 
 from domains.payroll.calculation import (
     OfficialAssignmentServiceFacts,
@@ -172,3 +174,30 @@ def test_apply_rejects_stale_preview_version_with_typed_conflict():
 
     assert raised.value.error.category is ErrorCategory.CONFLICT
     assert raised.value.error.code == "payroll_candidate_stale"
+
+
+@pytest.mark.parametrize('identity,amount,hours,expected', [
+    ('一般市民',24000,8,date(2026,11,15)),
+    ('補助市民',24000,8,date(2026,11,15)),
+    ('補助市民',0,8,date(2026,12,15)),
+])
+def test_official_schedule_can_form_missing_payment_date_without_waiting_for_completion(identity,amount,hours,expected):
+    root={'staff_payment_due_date':None,'order_status':'訂單完成','actual_end_date':date(2026,10,12),'client_payable_ntd':amount,'identity_status':identity,'service_days':10,'service_hours_per_day':hours,'floor_fee':0}
+    assert mysql_rebuild._payment_due_date(root)==expected
+    root['staff_payment_due_date']=date(2026,9,15)
+    assert mysql_rebuild._payment_due_date(root)==date(2026,9,15)
+    root.update(staff_payment_due_date=None,order_status='服務中')
+    assert mysql_rebuild._payment_due_date(root)==expected
+    root['actual_end_date']=None
+    assert mysql_rebuild._payment_due_date(root) is None
+
+
+def test_created_obligation_persists_preview_payment_date_instead_of_null_compatibility_field(monkeypatch):
+    owner={'due_date':None}
+    monkeypatch.setattr(mysql_rebuild,'_assignment_owner',lambda *_:owner)
+    monkeypatch.setattr(mysql_rebuild,'_insert_event',lambda *_,**__:1)
+    saved=[]
+    monkeypatch.setattr(mysql_rebuild,'_insert_projection',lambda _cursor,_persistence,snapshot,*_:saved.append(dict(snapshot)))
+    action=SimpleNamespace(assignment_identity='assignment:6',obligation_identity='obligation:6',after_amount=MoneyNTD(24000),due_date=date(2026,11,15))
+    mysql_rebuild._create_service_obligation(None,None,action,1)
+    assert saved[0]['due_date']==date(2026,11,15)

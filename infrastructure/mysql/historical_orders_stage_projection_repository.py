@@ -10,6 +10,7 @@ from infrastructure.mysql.orders_stage_projection_repository import (
     _PAGE_SQL,
     _cursor,
     _limit,
+    _settlement_timestamps,
 )
 
 
@@ -68,7 +69,7 @@ class MySqlHistoricalAwareOrdersStageProjectionRepository:
                     result_limit,
                 ),
             )
-            return tuple(cursor.fetchall() or ())
+            return _settlement_timestamps(cursor.fetchall() or ())
 
 
 __all__ = ["MySqlHistoricalAwareOrdersStageProjectionRepository"]

@@ -6,6 +6,7 @@ Description: 依 Orders canonical lifecycle scope，以單一 bounded SQL 讀取
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import datetime, timezone
 from typing import Any
 
 from domains.orders.lifecycle import OrderLifecycleScope, OrderLifecycleStatus
@@ -58,6 +59,7 @@ SELECT o.case_no,
        plan.created_at AS matching_created_at,
        customer_response.response_value AS matching_customer_decision,
        customer_response.occurred_at_utc AS matching_customer_decision_at,
+       COALESCE(response_fact.unwilling_count, 0) AS matching_unwilling_count,
        waiting_deposit_lock.id AS waiting_deposit_lock_id,
        waiting_deposit_lock.created_at AS waiting_deposit_lock_created_at,
        GREATEST(COALESCE(willingness.willingness_count, 0), COALESCE(communication.contact_attempt_count, 0), COALESCE(response_fact.replied_count, 0)) AS willingness_contact_attempt_count,
@@ -106,14 +108,14 @@ SELECT o.case_no,
        TIME_TO_SEC(o.service_end_time) AS service_end_seconds,
        o.service_end_day_offset,
        CONCAT('orders-auto-completion-receipt:', completion_fact.receipt_id) AS service_completion_identity,
-       completion_fact.completed_at AS service_completed_at,
+       UNIX_TIMESTAMP(completion_fact.completed_at) AS service_completed_at,
        COALESCE(client_fact.client_obligation_count, 0) AS client_obligation_count,
        COALESCE(client_fact.client_open_count, 0) AS client_open_count,
-       client_fact.client_updated_at,
+       UNIX_TIMESTAMP(client_fact.client_updated_at) AS client_updated_at,
        COALESCE(staff_fact.staff_obligation_count, 0) AS staff_obligation_count,
        COALESCE(staff_fact.staff_open_count, 0) AS staff_open_count,
        staff_fact.staff_payables_version,
-       staff_fact.staff_updated_at
+       UNIX_TIMESTAMP(staff_fact.staff_updated_at) AS staff_updated_at
   FROM orders o FORCE INDEX (PRIMARY)
   LEFT JOIN (
        SELECT case_no, MAX(id) AS import_receipt_id, MAX(created_at) AS import_created_at
@@ -277,6 +279,7 @@ SELECT o.case_no,
        SELECT response.plan_id,
               COUNT(DISTINCT response.segment_id) AS replied_count,
               COUNT(DISTINCT CASE WHEN response.response_value = 'willing' THEN response.segment_id END) AS willing_count,
+              COUNT(DISTINCT CASE WHEN response.response_value = 'unwilling' THEN response.segment_id END) AS unwilling_count,
               MAX(response.occurred_at_utc) AS replied_at
          FROM matching_response_events response
         WHERE response.response_type = 'caregiver_willingness'
@@ -455,7 +458,16 @@ class MySqlOrdersStageProjectionRepository:
                     result_limit,
                 ),
             )
-            return tuple(cursor.fetchall() or ())
+            return _settlement_timestamps(cursor.fetchall() or ())
+
+
+def _settlement_timestamps(rows):
+    for row in rows:
+        # Settlement timestamps are compared together; carry an explicit zone for each.
+        for field in ("service_completed_at", "client_updated_at", "staff_updated_at"):
+            if row[field] is not None:
+                row[field] = datetime.fromtimestamp(float(row[field]), timezone.utc)
+    return tuple(rows)
 
 
 def _cursor(value: str | None) -> str:

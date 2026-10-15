@@ -14,6 +14,9 @@ from domains.contract_signing.external_signing import (
     ExternalSigningSessionFacts,
     ExternalSigningState,
     final_signed_contract_blockers,
+    SignedContractDocumentTarget,
+    require_complete_signed_contract_documents,
+    require_signed_contract_target,
 )
 from domains.orders.contract_completion import ContractCompletionIntent
 from shared_kernel.clock import BusinessClock
@@ -35,6 +38,8 @@ from subsystems.controlled_files.workflow import (
     ControlledFileApplyReceipt,
     ControlledFileIntent,
     ControlledFilePreview,
+    ControlledFileOwner,
+    ControlledFilePurpose,
 )
 from subsystems.orders.contract_completion_workflow import (
     ContractCompletionApplyRequest,
@@ -44,17 +49,24 @@ from subsystems.orders.contract_completion_workflow import (
 
 
 @dataclass(frozen=True, slots=True)
+class SignedContractDocumentUpload:
+    target: SignedContractDocumentTarget
+    controlled_file_intent: ControlledFileIntent
+    expected_staging_version: ExpectedVersion
+
+
+@dataclass(frozen=True, slots=True)
 class PreviewFinalSignedContractUpload:
     session_id: str
     case_no: str
     expected_status_version: ExpectedVersion
-    controlled_file_intent: ControlledFileIntent
+    documents: tuple[SignedContractDocumentUpload, ...]
 
 
 @dataclass(frozen=True, slots=True)
-class FinalSignedContractPreview:
-    preview_token: str
-    expected_status_version: int
+class SignedContractDocumentPreview:
+    target: SignedContractDocumentTarget
+    staging_id: str
     expected_staging_version: int
     filename: str
     mime_type: str
@@ -63,14 +75,22 @@ class FinalSignedContractPreview:
 
 
 @dataclass(frozen=True, slots=True)
+class FinalSignedContractPreview:
+    preview_token: str
+    expected_status_version: int
+    documents: tuple[SignedContractDocumentPreview, ...]
+    blockers: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class ApplyFinalSignedContractUpload:
     preview: PreviewFinalSignedContractUpload
-    expected_staging_version: ExpectedVersion
     preview_token: str
     idempotency_key: IdempotencyKey
     actor: ActorContext
     reason: str
     correlation_id: CorrelationId
+    testing_skip_confirmed: bool = False
 
     def __post_init__(self) -> None:
         require_canonical_text(self.reason, "final contract completion reason", 500)
@@ -99,6 +119,36 @@ class FinalContractDocumentReadback:
 
 
 @dataclass(frozen=True, slots=True)
+class SignedContractDocumentReadback:
+    target: SignedContractDocumentTarget
+    file_id: str
+    version: int
+    filename: str
+    mime_type: str
+    size_bytes: int
+
+    def __post_init__(self) -> None:
+        require_canonical_text(self.file_id, "signed contract file ID", 64)
+        require_canonical_text(self.filename, "signed contract filename", 255)
+        require_positive_integer(self.version, "signed contract file version")
+        require_positive_integer(self.size_bytes, "signed contract file size")
+        if self.mime_type != "application/pdf":
+            raise ValueError("signed contract must be PDF")
+
+
+def signed_contract_object_key(session_id: str, target: SignedContractDocumentTarget) -> str:
+    return f"signed-contract:{session_id}:{target.key}:v{target.document_version_id}"
+
+
+def signed_contract_intent(case_no: str, session_id: str, target: SignedContractDocumentTarget, staging_id: str) -> ControlledFileIntent:
+    return ControlledFileIntent(
+        staging_id, ControlledFileOwner.CONTRACT_SIGNING,
+        ControlledFilePurpose.FINAL_SIGNED_CONTRACT, case_no,
+        signed_contract_object_key(session_id, target), f"contract-signing/{case_no}",
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class FinalSignedContractApplyReceipt:
     receipt_id: str
     session_id: str
@@ -106,6 +156,7 @@ class FinalSignedContractApplyReceipt:
     resulting_state: ExternalSigningState
     document: FinalContractDocumentReadback
     contract_identity: str
+    documents: tuple[SignedContractDocumentReadback, ...] = ()
     replayed: bool = False
     schema_version: str = "final-signed-contract-apply-receipt.v1"
 
@@ -180,6 +231,10 @@ class FinalDocumentRepository(Protocol):
         applied_at: datetime,
     ) -> None: ...
 
+    def get_final_documents(self, case_no: str) -> tuple[SignedContractDocumentReadback, ...]: ...
+
+    def load_staged_document(self, case_no: str, object_key: str, target: SignedContractDocumentTarget) -> SignedContractDocumentPreview | None: ...
+
     def get_final_document(
         self, case_no: str
     ) -> FinalContractDocumentReadback | None: ...
@@ -240,23 +295,38 @@ class FinalSignedContractWorkflow:
         self._clock = clock
         self._token_codec = token_codec
 
-    def preview(
-        self, command: PreviewFinalSignedContractUpload
-    ) -> FinalSignedContractPreview:
-        session, file_preview, completion_preview = self._fresh_preview(
-            command, for_update=False
+    def validate_target(self, case_no: str, session_id: str, expected_status_version: ExpectedVersion, target: SignedContractDocumentTarget) -> ExternalSigningSessionFacts:
+        session = self._load_session(case_no, session_id, expected_status_version, for_update=False)
+        require_signed_contract_target(session, target)
+        blockers = final_signed_contract_blockers(session)
+        if blockers:
+            raise FinalDocumentWorkflowError(blockers[0].value, category="domain_blocked")
+        return session
+
+    def preview_document(self, case_no: str, session_id: str, expected_status_version: ExpectedVersion, document: SignedContractDocumentUpload) -> SignedContractDocumentPreview:
+        self.validate_target(case_no, session_id, expected_status_version, document.target)
+        self._require_document_intent(case_no, session_id, document)
+        preview = self._controlled_files.preview(document.controlled_file_intent)
+        if preview.expected_staging_version != document.expected_staging_version:
+            raise FinalDocumentWorkflowError("final_document_staging_version_stale")
+        return _document_preview(document, preview)
+
+    def staged_documents(self, case_no: str, session_id: str, expected_status_version: ExpectedVersion) -> tuple[SignedContractDocumentPreview, ...]:
+        session = self._load_session(case_no, session_id, expected_status_version, for_update=False)
+        targets = (SignedContractDocumentTarget("client", None, session.client_document_version_id),) + tuple(
+            SignedContractDocumentTarget("staff", row.matching_segment_id, row.document_version_id) for row in session.staff_targets
         )
-        blockers = _blockers(session, file_preview)
-        payload = _preview_payload(session, file_preview, completion_preview)
-        candidate = file_preview.candidate
+        return tuple(value for target in targets if (value := self._repository.load_staged_document(
+            case_no, signed_contract_object_key(session_id, target), target
+        )) is not None)
+
+    def preview(self, command: PreviewFinalSignedContractUpload) -> FinalSignedContractPreview:
+        session, file_previews, completion_preview = self._fresh_preview(command, for_update=False)
         return FinalSignedContractPreview(
-            preview_token=self._token_codec.issue(payload),
+            preview_token=self._token_codec.issue(_preview_payload(session, file_previews, completion_preview)),
             expected_status_version=session.status_version,
-            expected_staging_version=file_preview.expected_staging_version.value,
-            filename=candidate.filename,
-            mime_type=candidate.mime_type,
-            size_bytes=candidate.size_bytes,
-            blockers=blockers,
+            documents=tuple(_document_preview(upload, preview) for upload, preview in file_previews),
+            blockers=_blockers(session, file_previews),
         )
 
     def apply(
@@ -272,18 +342,25 @@ class FinalSignedContractWorkflow:
                 unit_of_work.commit()
                 return receipt
 
-            session, file_preview, completion_preview = self._fresh_preview(
+            session, file_previews, completion_preview = self._fresh_preview(
                 command.preview, for_update=True
             )
-            blockers = _blockers(session, file_preview)
+            testing_documents = tuple(
+                preview.candidate.filename.startswith("TEST-ONLY-")
+                for _, preview in file_previews
+            )
+            if (
+                command.testing_skip_confirmed and not all(testing_documents)
+                or not command.testing_skip_confirmed and any(testing_documents)
+            ):
+                raise FinalDocumentWorkflowError("final_contract_testing_confirmation_required")
+            blockers = _blockers(session, file_previews)
             if blockers:
                 raise FinalDocumentWorkflowError(blockers[0], category="domain_blocked")
-            if file_preview.expected_staging_version != command.expected_staging_version:
-                raise FinalDocumentWorkflowError("final_document_staging_version_stale")
             try:
                 self._token_codec.verify(
                     command.preview_token,
-                    _preview_payload(session, file_preview, completion_preview),
+                    _preview_payload(session, file_previews, completion_preview),
                 )
             except FinalDocumentPreviewTokenError as error:
                 raise FinalDocumentWorkflowError(error.code) from error
@@ -294,18 +371,19 @@ class FinalSignedContractWorkflow:
                 session,
                 resulting_version,
             )
-            completion_preview = self._completion_preview(session, file_preview)
-            contract_identity = _contract_identity(file_preview)
+            completion_preview = self._completion_preview(session, file_previews)
+            contract_identity = _contract_identity(file_previews)
             orders_receipt = self._contract_completion.apply_borrowed_with_identity(
                 _orders_apply(command, completion_preview), contract_identity
             )
-            controlled_receipt = self._controlled_files.apply_borrowed(
-                _controlled_apply(command, file_preview)
+            controlled_receipts = tuple(
+                self._controlled_files.apply_borrowed(_controlled_apply(command, upload, file_preview))
+                for upload, file_preview in file_previews
             )
             now = _utc(self._clock.now())
             document = self._repository.register_final_document(
                 session,
-                controlled_receipt,
+                controlled_receipts[0],
                 actor=command.actor,
                 contract_identity=orders_receipt.contract_identity,
                 applied_at=now,
@@ -324,6 +402,11 @@ class FinalSignedContractWorkflow:
                 resulting_state=ExternalSigningState.COMPLETED,
                 document=document,
                 contract_identity=orders_receipt.contract_identity,
+                documents=tuple(SignedContractDocumentReadback(
+                    upload.target, controlled.readback.file_id,
+                    controlled.readback.version, controlled.readback.filename,
+                    controlled.readback.mime_type, controlled.readback.size_bytes,
+                ) for (upload, _), controlled in zip(file_previews, controlled_receipts, strict=True)),
             )
             self._repository.save_final_receipt(
                 command.idempotency_key,
@@ -344,6 +427,10 @@ class FinalSignedContractWorkflow:
             )
         return result
 
+    def readback_documents(self, case_no: str) -> tuple[SignedContractDocumentReadback, ...]:
+        self.readback(case_no)
+        return self._repository.get_final_documents(case_no)
+
     def read_receipt(
         self, key: IdempotencyKey
     ) -> FinalSignedContractApplyReceipt:
@@ -354,60 +441,77 @@ class FinalSignedContractWorkflow:
             )
         return stored.receipt
 
-    def _fresh_preview(self, command, *, for_update):
-        session = self._repository.load_final_session(
-            command.case_no, command.session_id, for_update=for_update
-        )
+    def _load_session(self, case_no, session_id, expected_status_version, *, for_update):
+        session = self._repository.load_final_session(case_no, session_id, for_update=for_update)
         if session is None:
-            raise FinalDocumentWorkflowError(
-                "external_signing_session_not_found", category="not_found"
-            )
-        if session.status_version != command.expected_status_version.value:
-            raise FinalDocumentWorkflowError(
-                "external_signing_status_version_stale",
-                current_version=session.status_version,
-            )
-        file_preview = self._controlled_files.preview(command.controlled_file_intent)
-        completion_preview = self._completion_preview(session, file_preview)
-        return session, file_preview, completion_preview
+            raise FinalDocumentWorkflowError("external_signing_session_not_found", category="not_found")
+        if session.status_version != expected_status_version.value:
+            raise FinalDocumentWorkflowError("external_signing_status_version_stale", current_version=session.status_version)
+        return session
 
-    def _completion_preview(self, session, file_preview):
-        fallback_service_dates = self._prerequisites.preview_service_dates(session)
+    def _require_document_intent(self, case_no, session_id, document):
+        expected = signed_contract_intent(case_no, session_id, document.target, document.controlled_file_intent.staging_id)
+        if expected != document.controlled_file_intent:
+            raise FinalDocumentWorkflowError("final_signed_contract_target_mismatch")
+
+    def _fresh_preview(self, command, *, for_update):
+        session = self._load_session(command.case_no, command.session_id, command.expected_status_version, for_update=for_update)
+        require_complete_signed_contract_documents(session, tuple(row.target for row in command.documents))
+        if len({row.controlled_file_intent.staging_id for row in command.documents}) != len(command.documents):
+            raise FinalDocumentWorkflowError("final_signed_contract_target_mismatch")
+        ordered = sorted(command.documents, key=lambda row: (row.target.scope != "client", row.target.matching_segment_id or 0))
+        previews = []
+        for row in ordered:
+            self._require_document_intent(command.case_no, command.session_id, row)
+            preview = self._controlled_files.preview(row.controlled_file_intent)
+            if preview.expected_staging_version != row.expected_staging_version:
+                raise FinalDocumentWorkflowError("final_document_staging_version_stale")
+            previews.append((row, preview))
+        file_previews = tuple(previews)
+        completion_preview = self._completion_preview(session, file_previews)
+        return session, file_previews, completion_preview
+
+    def _completion_preview(self, session, file_previews):
         return self._contract_completion.preview_with_identity(
-            session.case_no,
-            ContractCompletionIntent.CONFIRM_COMPLETED,
-            _contract_identity(file_preview),
-            fallback_service_dates=fallback_service_dates,
+            session.case_no, ContractCompletionIntent.CONFIRM_COMPLETED,
+            _contract_identity(file_previews),
+            fallback_service_dates=self._prerequisites.preview_service_dates(session),
         )
 
 
-def _blockers(
-    session: ExternalSigningSessionFacts,
-    file_preview: ControlledFilePreview,
-) -> tuple[str, ...]:
+def _document_preview(upload, preview):
+    return SignedContractDocumentPreview(
+        upload.target, preview.candidate.staging_id,
+        preview.expected_staging_version.value, preview.candidate.filename,
+        preview.candidate.mime_type, preview.candidate.size_bytes, tuple(preview.blockers),
+    )
+
+
+def _blockers(session, file_previews):
     result = [item.value for item in final_signed_contract_blockers(session)]
-    result.extend(file_preview.blockers)
-    if file_preview.candidate.mime_type != "application/pdf":
-        result.append("final_contract_document_mime_invalid")
-    return tuple(sorted(set(result)))
+    for _, preview in file_previews:
+        result.extend(preview.blockers)
+        if preview.candidate.mime_type != "application/pdf":
+            result.append("final_contract_document_mime_invalid")
+    return tuple(dict.fromkeys(result))
 
 
-def _preview_payload(session, file_preview, completion_preview):
-    candidate = file_preview.candidate
+def _preview_payload(session, file_previews, completion_preview):
     return {
-        "case_no": session.case_no,
-        "session_id": session.session_id,
+        "case_no": session.case_no, "session_id": session.session_id,
         "status_version": session.status_version,
         "document_set_fingerprint": session.document_set_fingerprint,
-        "staging_fingerprint": file_preview.preview_fingerprint.value,
-        "staging_version": file_preview.expected_staging_version.value,
-        "staging_sha256": candidate.sha256_digest,
-        "staging_size": candidate.size_bytes,
+        "documents": [{
+            "target": upload.target.key, "unsigned_version": upload.target.document_version_id,
+            "staging_id": preview.candidate.staging_id,
+            "staging_fingerprint": preview.preview_fingerprint.value,
+            "staging_version": preview.expected_staging_version.value,
+            "staging_sha256": preview.candidate.sha256_digest,
+            "staging_size": preview.candidate.size_bytes,
+        } for upload, preview in file_previews],
         "orders_fingerprint": completion_preview.fingerprint.value,
         "orders_version": completion_preview.candidate.expected_order_version,
-        "client_finance_version": (
-            completion_preview.client_finance_impact.expected_account_version
-        ),
+        "client_finance_version": completion_preview.client_finance_impact.expected_account_version,
     }
 
 
@@ -428,8 +532,13 @@ def _orders_apply(command, preview):
     )
 
 
-def _contract_identity(file_preview: ControlledFilePreview) -> str:
-    return f"external-final:{file_preview.candidate.sha256_digest}"
+def _contract_identity(file_previews) -> str:
+    identity = fingerprint_payload({"documents": [
+        {"target": upload.target.key, "unsigned_version": upload.target.document_version_id,
+         "sha256": preview.candidate.sha256_digest}
+        for upload, preview in file_previews
+    ]})
+    return f"external-final-set:{identity.value}"
 
 
 def _prerequisite_command(command, session):
@@ -442,30 +551,27 @@ def _prerequisite_command(command, session):
     )
 
 
-def _controlled_apply(command, preview):
+def _controlled_apply(command, upload, preview):
     return ApplyControlledFile(
-        intent=command.preview.controlled_file_intent,
-        expected_staging_version=command.expected_staging_version,
+        intent=upload.controlled_file_intent,
+        expected_staging_version=upload.expected_staging_version,
         preview_fingerprint=preview.preview_fingerprint,
-        idempotency_key=_derived_key(command.idempotency_key, "file"),
-        actor=command.actor,
-        correlation_id=command.correlation_id,
+        idempotency_key=_derived_key(command.idempotency_key, "file-" + upload.target.key),
+        actor=command.actor, correlation_id=command.correlation_id,
     )
 
 
 def _command_fingerprint(command):
-    return fingerprint_payload(
-        {
-            "session_id": command.preview.session_id,
-            "case_no": command.preview.case_no,
-            "expected_status_version": command.preview.expected_status_version.value,
-            "staging_id": command.preview.controlled_file_intent.staging_id,
-            "expected_staging_version": command.expected_staging_version.value,
-            "preview_token": command.preview_token,
-            "actor": command.actor.actor_id,
-            "reason": command.reason,
-        }
-    )
+    return fingerprint_payload({
+        "session_id": command.preview.session_id, "case_no": command.preview.case_no,
+        "expected_status_version": command.preview.expected_status_version.value,
+        "documents": [{"target": row.target.key, "unsigned_version": row.target.document_version_id,
+                       "staging_id": row.controlled_file_intent.staging_id,
+                       "expected_staging_version": row.expected_staging_version.value}
+                      for row in sorted(command.preview.documents, key=lambda row: row.target.key)],
+        "preview_token": command.preview_token, "actor": command.actor.actor_id, "reason": command.reason,
+        **({"testing_skip_confirmed": True} if command.testing_skip_confirmed else {}),
+    })
 
 
 def _derived_key(parent: IdempotencyKey, lane: str) -> IdempotencyKey:

@@ -105,12 +105,12 @@ class MySqlServiceBeforeReplacementLoader:
                 source_identity=f"scheduling.official-service:{case_no}:generation:{base['generation_id']}",
                 source_version=_required_int(base, "aggregate_version"),
             )
-            # A committed R-04 successor carries its own immutable resume step;
-            # do not re-evaluate a mutable candidate pool merely to read it.
-            # Actual-service referrals also depend only on the Scheduling proof.
+            # R-04 starts a fresh recommendation round. A prior-round package
+            # cannot carry the withdrawn caregiver's consent into this round.
+            # Completed successors and actual-service referrals need no pool reload.
             reuse = (
                 None
-                if actual_dates or (scenario is ReplacementScenario.R04 and successor is not None)
+                if actual_dates or scenario is ReplacementScenario.R04
                 else self._candidate_reuse(case_no, base, for_update=for_update)
             )
             reason = getattr(request, "reason", None) or "service_before_replacement"

@@ -35,7 +35,7 @@ const MONEY_FIELD_IDS = new Set([
   'f_112_cc', 'f_116_cg', 'f_118_ci', 'f_120_ck', 'f_122_cm',
 ]);
 
-function candidateSections(preview: CandidateInformationPreview): DisplaySection[] {
+function candidateSections(preview: Pick<CandidateInformationPreview, 'line_sections'>): DisplaySection[] {
   return preview.line_sections.map((section) => ({
     title: section.title,
     fields: section.rows.map(([label, value]) => ({ label, value, missing: value === '待確認' })),
@@ -109,6 +109,15 @@ function InformationSections({ sections }: { sections: DisplaySection[] }) {
 
 function IngredientsReference() {
   return <section className="order-information-ingredients"><h4>食材準備參考</h4><p>依原表保留供核對，不代表本案已同意或需要全部採買。</p><div><span><strong>中藥／食材</strong>四物、四君、四神、枸杞、紅棗、黃耆、杜仲、大豐草、黑豆、紅豆、白木耳、紫米、桂圓肉、米酒、麻油</span><span><strong>肉品</strong>雞腿、雞胸、排骨、豬／牛肉絲、絞肉、雞蛋、魚排</span><span><strong>蔬菜</strong>青菜、紅蘿蔔、薑、香菇、其他菇類、豆製品</span></div></section>;
+}
+
+/** Same document rendering for recipient-bound and case-only previews. */
+export function CandidateInformationDocument({ kind, sections }: {
+  kind: 1 | 2; sections: CandidateInformationPreview['line_sections'];
+}) {
+  const display = candidateSections({ line_sections: sections });
+  return kind === 1 ? <ContractScreenshot sections={display} />
+    : <><InformationSections sections={display} /><IngredientsReference /></>;
 }
 
 export function OrderInformationSheets({ caseNo, assignments, initialKind = 1, onOpenCandidates }: {

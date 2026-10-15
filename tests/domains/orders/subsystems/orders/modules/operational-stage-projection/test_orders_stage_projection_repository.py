@@ -1,10 +1,31 @@
 """Verify that service projection reads only current assignment-owned dates."""
 
 import sqlite3
+from datetime import datetime, timezone
+from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 import pytest
 
-from infrastructure.mysql.orders_stage_projection_repository import _PAGE_SQL
+from infrastructure.mysql.orders_stage_projection_repository import _PAGE_SQL, MySqlOrdersStageProjectionRepository
+from infrastructure.mysql.historical_orders_stage_projection_repository import MySqlHistoricalAwareOrdersStageProjectionRepository
+
+
+@pytest.mark.parametrize('repository_type', [MySqlOrdersStageProjectionRepository, MySqlHistoricalAwareOrdersStageProjectionRepository])
+def test_completion_receipt_timestamp_keeps_its_instant_across_browser_and_db_zones(repository_type):
+    instant = datetime(2026, 10, 15, 3, 43, tzinfo=timezone.utc)
+    class Cursor:
+        def __enter__(self): return self
+        def __exit__(self, *_): pass
+        def execute(self, sql, _params):
+            assert 'UNIX_TIMESTAMP(completion_fact.completed_at) AS service_completed_at' in sql
+        def fetchall(self):
+            return [{'service_completed_at': instant.timestamp(), 'client_updated_at': instant.timestamp() - 60, 'staff_updated_at': instant.timestamp() - 120}, {'service_completed_at': None, 'client_updated_at': None, 'staff_updated_at': None}]
+    rows = repository_type(SimpleNamespace(cursor=Cursor)).fetch_page(after_case_no=None, page_size=10)
+    assert rows[0]['service_completed_at'].isoformat() == '2026-10-15T03:43:00+00:00'
+    assert rows[0]['service_completed_at'].astimezone(ZoneInfo('Asia/Taipei')).hour == 11
+    assert max(rows[0].values()) == rows[0]['service_completed_at']
+    assert rows[1]['service_completed_at'] is None
 
 
 @pytest.mark.parametrize("effective_generation_id", [2, 3])

@@ -134,16 +134,29 @@ const ManualNotificationTargetsSchema = z.array(z.strictObject({
   subject_reference: z.string().min(1).max(191),
 }));
 
+export const SigningReminderReceiptSchema = z.strictObject({
+  receipt_id: ReceiptIdSchema,
+  session_id: SessionIdSchema,
+  status_version: z.number().int().positive(),
+  replayed: z.boolean(),
+  manual_notification_targets: ManualNotificationTargetsSchema,
+});
+export type SigningReminderReceipt = z.infer<typeof SigningReminderReceiptSchema>;
+
 export const ContractExternalSigningQuerySchema = z.strictObject({
   case_no: z.string().min(1).max(50),
   session_id: SessionIdSchema,
   state: ExternalSigningStateSchema,
   status_version: z.number().int().nonnegative(),
   handoff_recorded: z.boolean(),
+  handoff_included_reminders: z.boolean().optional(),
+  signing_reminder: SigningReminderReceiptSchema.nullable().optional(),
+  testing_skip_allowed: z.boolean().optional(),
   manual_notification_targets: ManualNotificationTargetsSchema.optional(),
   matching_plan_id: z.number().int().positive(),
   commitment_id: z.number().int().positive().nullable(),
   unsigned_document: UnsignedDocumentSchema.nullable(),
+  unsigned_documents: z.array(UnsignedDocumentSchema.extend({ scope: z.enum(['client', 'staff']), matching_segment_id: z.number().int().positive().nullable() })).optional(),
   staff_targets: z.array(StaffTargetSchema).min(1),
   client_target: ClientTargetSchema,
 }).superRefine((value, context) => {
@@ -210,33 +223,57 @@ const ReceiptSchema = z.strictObject({
   }
 });
 
-const PreviewSchema = z.strictObject({
-  preview_token: PreviewTokenSchema,
+const SignedTargetFields = {
+  scope: z.enum(['client', 'staff']),
+  matching_segment_id: z.number().int().positive().nullable(),
+  document_version_id: z.number().int().positive(),
+};
+function validateSignedTarget(value: { scope: 'client' | 'staff'; matching_segment_id: number | null }, context: z.RefinementCtx) {
+  if ((value.scope === 'staff') !== (value.matching_segment_id !== null)) context.addIssue({ code: z.ZodIssueCode.custom, path: ['matching_segment_id'], message: 'signed document target does not match scope' });
+}
+const SignedDocumentUploadFields = {
+  ...SignedTargetFields,
   staging_id: StagingIdSchema,
   expected_staging_version: z.number().int().positive(),
-  filename: z.string().min(1).max(255),
-  mime_type: PdfMimeSchema,
-  size_bytes: z.number().int().positive(),
-  blockers: z.array(z.string()),
-  can_apply: z.boolean(),
+};
+const SignedDocumentPreviewSchema = z.strictObject({
+  ...SignedDocumentUploadFields,
+  filename: z.string().min(1).max(255), mime_type: PdfMimeSchema,
+  size_bytes: z.number().int().positive(), blockers: z.array(z.string()), can_apply: z.boolean(),
 }).superRefine((value, context) => {
-  if (value.can_apply !== (value.blockers.length === 0)) {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ['can_apply'], message: 'Preview readiness does not match blockers' });
-  }
+  validateSignedTarget(value, context);
+  if (value.can_apply !== (value.blockers.length === 0)) context.addIssue({ code: z.ZodIssueCode.custom, path: ['can_apply'], message: 'signed document readiness does not match blockers' });
 });
-
+const PreviewSchema = z.strictObject({
+  preview_token: PreviewTokenSchema, session_id: SessionIdSchema,
+  expected_status_version: z.number().int().positive(),
+  documents: z.array(SignedDocumentPreviewSchema).min(2).max(5),
+  blockers: z.array(z.string()), can_apply: z.boolean(),
+}).superRefine((value, context) => {
+  const keys = value.documents.map(row => row.scope === 'client' ? 'client' : `staff:${row.matching_segment_id}`);
+  if (value.documents.filter(row => row.scope === 'client').length !== 1 || new Set(keys).size !== keys.length || new Set(value.documents.map(row => row.staging_id)).size !== keys.length) context.addIssue({ code: z.ZodIssueCode.custom, path: ['documents'], message: 'signed document collection must have unique exact targets' });
+  if (value.can_apply !== (value.blockers.length === 0)) context.addIssue({ code: z.ZodIssueCode.custom, path: ['can_apply'], message: 'document collection readiness does not match blockers' });
+});
 const StagingEnvelopeDataSchema = z.strictObject({
-  staging_id: StagingIdSchema,
-  filename: z.string().min(1).max(255),
-  mime_type: PdfMimeSchema,
-  size_bytes: z.number().int().positive(),
-  expires_at: ZonedTimeSchema,
+  ...SignedDocumentUploadFields,
+  filename: z.string().min(1).max(255), mime_type: PdfMimeSchema,
+  size_bytes: z.number().int().positive(), expires_at: ZonedTimeSchema,
+}).superRefine(validateSignedTarget);
+const SignedReturnQuerySchema = z.strictObject({
+  case_no: z.string().min(1).max(50), session_id: SessionIdSchema,
+  status_version: z.number().int().positive(), documents: z.array(SignedDocumentPreviewSchema).max(5),
 });
+const SignedDocumentReadbackSchema = z.strictObject({
+  ...SignedTargetFields, controlled_file_id: ControlledFileIdSchema,
+  version_number: z.number().int().positive(), filename: z.string().min(1).max(255),
+  mime_type: PdfMimeSchema, size_bytes: z.number().int().positive(),
+}).superRefine(validateSignedTarget);
 
 const HandoffReceiptSchema = z.strictObject({
   session_id: SessionIdSchema,
   resulting_status_version: z.number().int().positive(),
   replayed: z.boolean(),
+  handoff_included_reminders: z.boolean().optional(),
   manual_notification_targets: ManualNotificationTargetsSchema.optional(),
 });
 
@@ -252,6 +289,7 @@ const FinalReadbackSchema = z.strictObject({
   status: z.literal('completed'),
   integrity_verified: z.literal(true),
   applied_at: ZonedTimeSchema,
+  documents: z.array(SignedDocumentReadbackSchema).max(5),
 });
 
 function envelope<T extends z.ZodTypeAny>(data: T) {
@@ -266,6 +304,12 @@ function envelope<T extends z.ZodTypeAny>(data: T) {
 export type ContractExternalSigningQuery = z.infer<typeof ContractExternalSigningQuerySchema>;
 export type PreparedUnsignedDocument = z.infer<typeof PreparedUnsignedDocumentSchema>;
 export type ExternalSigningReceipt = z.infer<typeof ReceiptSchema>;
+export type SignedDocumentPreview = z.infer<typeof SignedDocumentPreviewSchema>;
+export type SignedDocumentReadback = z.infer<typeof SignedDocumentReadbackSchema>;
+export type SignedReturnQuery = z.infer<typeof SignedReturnQuerySchema>;
+export type SignedDocumentTarget = { scope: 'client' | 'staff'; matching_segment_id: number | null; document_version_id: number };
+export type SignedDocumentUpload = SignedDocumentTarget & { staging_id: string; expected_staging_version: number };
+export interface FinalDocumentPreviewInput { session_id: string; expected_status_version: number; documents: SignedDocumentUpload[] }
 export type FinalDocumentPreview = z.infer<typeof PreviewSchema>;
 export type FinalDocumentReadback = z.infer<typeof FinalReadbackSchema>;
 export type LegacyRecoveryQuery = z.infer<typeof LegacyRecoveryQuerySchema>;
@@ -286,12 +330,9 @@ export interface CompletionReportInput {
   reason: string;
 }
 
-export interface FinalDocumentApplyInput {
-  staging_id: string;
-  expected_staging_version: number;
+export type FinalDocumentApplyInput = FinalDocumentPreviewInput & {
   preview_token: string;
-  expected_status_version: number;
-}
+} & ({ signatures_confirmed: true; testing_skip_confirmed?: false } | { signatures_confirmed: false; testing_skip_confirmed: true });
 
 const LegacyRecoveryPreviewInputSchema = z.strictObject({
   scope: z.enum(['staff', 'client']),
@@ -450,6 +491,17 @@ export const contractExternalSigningClient = {
     return value;
   },
 
+  async sendSigningReminders(caseNo: string, input: { session_id: string; expected_status_version: number }, identity: ExternalSigningCommandIdentity): Promise<SigningReminderReceipt> {
+    SessionIdSchema.parse(input.session_id);
+    const value = decodePayload(envelope(SigningReminderReceiptSchema), await transport.post(
+      `${basePath(caseNo)}/reminders`, input, commandOptions(identity),
+    )).data;
+    if (value.receipt_id !== identity.receiptId || value.session_id !== input.session_id || value.status_version !== input.expected_status_version) {
+      throw new ApiHttpError(409, 'SIGNING_REMINDER_RECEIPT_MISMATCH', '簽署提醒結果與原操作不一致。');
+    }
+    return value;
+  },
+
   async previewLegacyRecovery(
     caseNo: string,
     input: LegacyRecoveryPreviewInput,
@@ -593,24 +645,62 @@ export const contractExternalSigningClient = {
     ).data;
   },
 
-  async stageFinalDocument(caseNo: string, file: File, identity: ExternalSigningCommandIdentity) {
+  async stageFinalDocument(caseNo: string, file: File, identity: ExternalSigningCommandIdentity, target: SignedDocumentTarget, context: { session_id: string; expected_status_version: number }) {
     if (file.type.toLowerCase() !== 'application/pdf' || !file.name.toLowerCase().endsWith('.pdf') || file.size <= 0) {
       throw new Error('最終簽署文件必須是非空 PDF。');
     }
     const form = new FormData();
     form.set('document', file, file.name);
+    form.set('session_id', SessionIdSchema.parse(context.session_id));
+    form.set('expected_status_version', String(context.expected_status_version));
+    form.set('scope', target.scope);
+    form.set('document_version_id', String(target.document_version_id));
+    if (target.matching_segment_id !== null) form.set('matching_segment_id', String(target.matching_segment_id));
     return decodePayload(
       envelope(StagingEnvelopeDataSchema),
       await transport.post(`${basePath(caseNo)}/final-document/staging`, form, stagingCommandOptions(identity)),
     ).data;
   },
 
-  async previewFinalDocument(caseNo: string, input: { staging_id: string; expected_status_version: number }, signal?: AbortSignal): Promise<FinalDocumentPreview> {
-    StagingIdSchema.parse(input.staging_id);
+  async getSignedDocumentReturns(caseNo: string, signal?: AbortSignal): Promise<SignedReturnQuery> {
+    const value = decodePayload(envelope(SignedReturnQuerySchema), await transport.get(`${basePath(caseNo)}/final-document/returns`, { token: authToken(), signal })).data;
+    if (value.case_no !== canonicalCaseNo(caseNo)) throw new ApiHttpError(409, 'CONTRACT_RETURN_CASE_MISMATCH', '簽回文件案件識別不一致。');
+    return value;
+  },
+
+  async previewSignedDocument(caseNo: string, input: SignedDocumentUpload & { session_id: string; expected_status_version: number }): Promise<SignedDocumentPreview> {
+    return decodePayload(envelope(SignedDocumentPreviewSchema), await transport.post(`${basePath(caseNo)}/final-document/document-preview`, input, { token: authToken() })).data;
+  },
+
+  async downloadSignedPdf(caseNo: string, fileId: string): Promise<PdfDownloadArtifact> {
+    ControlledFileIdSchema.parse(fileId);
+    const token = authToken();
+    const response = await fetch(`${basePath(caseNo)}/final-document/download/${fileId}`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!response.ok) {
+      if (response.status === 401) window.dispatchEvent(new CustomEvent(ADMIN_SESSION_UNAUTHORIZED_EVENT, { detail: { rejectedToken: token } }));
+      throw await downloadError(response);
+    }
+    if (response.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'application/pdf' || !response.headers.get('cache-control')?.toLowerCase().includes('no-store')) throw new ApiHttpError(422, 'SIGNED_PDF_MEDIA_INVALID', '簽署文件下載格式或快取設定不正確。');
+    const filename = filenameFromDisposition(response.headers.get('content-disposition'));
+    if (!filename?.toLowerCase().endsWith('.pdf')) throw new ApiHttpError(422, 'SIGNED_PDF_FILENAME_INVALID', '簽署文件檔名無效。');
+    const blob = await response.blob();
+    await assertPdfBytes(blob);
+    return { blob, filename, mimeType: 'application/pdf' };
+  },
+
+  async previewFinalDocument(caseNo: string, input: FinalDocumentPreviewInput, signal?: AbortSignal): Promise<FinalDocumentPreview> {
+    SessionIdSchema.parse(input.session_id);
     return decodePayload(
       envelope(PreviewSchema),
       await transport.post(`${basePath(caseNo)}/final-document/preview`, input, { token: authToken(), signal }),
     ).data;
+  },
+
+  async prepareTestingSkip(caseNo: string, input: { session_id: string; expected_status_version: number }, identity: ExternalSigningCommandIdentity): Promise<FinalDocumentPreview> {
+    SessionIdSchema.parse(input.session_id);
+    return decodePayload(envelope(PreviewSchema), await transport.post(
+      `${basePath(caseNo)}/final-document/testing-skip`, input, stagingCommandOptions(identity),
+    )).data;
   },
 
   async applyFinalDocument(
@@ -619,7 +709,7 @@ export const contractExternalSigningClient = {
     identity: ExternalSigningCommandIdentity,
     signal?: AbortSignal,
   ): Promise<ExternalSigningReceipt> {
-    StagingIdSchema.parse(input.staging_id);
+    SessionIdSchema.parse(input.session_id);
     PreviewTokenSchema.parse(input.preview_token);
     return decodePayload(
       envelope(ReceiptSchema),

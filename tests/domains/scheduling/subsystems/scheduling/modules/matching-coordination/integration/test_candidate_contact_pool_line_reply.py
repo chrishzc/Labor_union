@@ -64,6 +64,7 @@ def _binding(line_user_id="U-caregiver"):
         "source_event_id": 12,
         "pool_id": 4,
         "candidate_id": 7,
+        "case_no": "CASE-1",
         "candidate_status": "active",
         "line_user_id": line_user_id,
         "order_status": "洽談中",

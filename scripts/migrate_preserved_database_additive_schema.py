@@ -356,6 +356,7 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_09_29_order_cancellation_optional_downstream_v1.json",
     "labor_union_2026_10_13_client_hcm_email_v1.json",
     "labor_union_2026_10_13_staff_union_number_v1.json",
+    "labor_union_2026_10_14_candidate_weekly_information_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -2255,6 +2256,9 @@ def _modified_parent_predecessor_absent_state(
 ) -> str | None:
     """Recognize the exact predecessor before an additive parent-column MODIFY."""
     predecessor_columns = {
+        "1051_candidate_weekly_information.sql": {
+            "caregiver_candidate_contact_events": {"event_type": _column_contract("enum('candidates_added','info_1_sent','info_2_sent','willingness_changed','candidate_selected','candidate_withdrawn')", "NO")},
+        },
         "1015_controlled_file_reference_finalize_leases.sql": {
             "scheduling_service_day_log_attachments": {
                 "provider_media_id": {
@@ -3758,6 +3762,12 @@ def _local_classify_statement(statement: str) -> str:
         ).casefold()
         if normalized == canonical_1048:
             return "order_cancellation_downstream_nullability_widen"
+        canonical_1051 = re.sub(
+            r"\s+", " ",
+            split_sql((ROOT / "db/schema_parts/1051_candidate_weekly_information.sql").read_text(encoding="utf-8"))[0].strip(),
+        ).casefold()
+        if normalized == canonical_1051:
+            return "candidate_weekly_information_enum_widen"
         buffer_advisory_alters = {
             re.sub(r"\s+", " ", value.strip()).casefold()
             for value in split_sql((ROOT / "db/schema_parts/1047_scheduling_buffer_advisory.sql").read_text(encoding="utf-8"))
@@ -5862,6 +5872,10 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
         descriptor["parent_columns"]["clients"] = {
             "email": _column_contract("varchar(100)", "YES", None),
         }
+    if part_name == "1051_candidate_weekly_information.sql":
+        descriptor["parent_columns"]["caregiver_candidate_contact_events"] = {
+            "event_type": _column_contract("enum('candidates_added','info_1_sent','info_2_sent','willingness_changed','candidate_selected','candidate_withdrawn','info_3_sent')", "NO"),
+        }
     if part_name == "1050_staff_union_number.sql":
         descriptor["parent_columns"]["staff"] = {
             "union_no": {
@@ -6206,6 +6220,7 @@ def _release_descriptor_metadata_state(
         "1045_order_terms_optional_scheduling_receipt.sql",
         "1048_order_cancellation_optional_downstream.sql",
         "1050_staff_union_number.sql",
+        "1051_candidate_weekly_information.sql",
     }:
         if released.get("parent_columns") != canonical.get("parent_columns"):
             raise UpgradeBlocked(
@@ -6291,6 +6306,14 @@ def _release_descriptor_metadata_state(
     )
     if predecessor_state is not None:
         return predecessor_state
+    if part_name == "182_candidate_contact_pool.sql":
+        state = _artifact_metadata_state(snapshot, canonical, part_name, defer_missing_triggers=defer_missing_triggers)
+        if state != "drift":
+            return state
+        successor = _canonical_artifact_descriptor("1051_candidate_weekly_information.sql")
+        canonical["tables"]["caregiver_candidate_contact_events"]["event_type"] = deepcopy(
+            successor["parent_columns"]["caregiver_candidate_contact_events"]["event_type"])
+        return _artifact_metadata_state(snapshot, canonical, part_name, defer_missing_triggers=defer_missing_triggers)
     state = _artifact_metadata_state(
         snapshot,
         canonical,

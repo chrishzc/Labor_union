@@ -13,6 +13,8 @@
   - `ui_react/src/pages/OrderWorkbenchV2Page.tsx`
   - `ui_react/src/components/OrdersIntakeRepairCard.tsx`
   - `ui_react/src/components/OrderIntakeRepairPanel.tsx` — 案件進件資料區分原始 HCM 欄位待修正與尚未補齊的案件資料；服務開始日／天數僅顯示實際 missing fields，草稿以 owner Preview 保存值為準，不被一般明細空值覆蓋；完整資料的早期修改由人員主動展開；保留既有 Preview／Apply 與回讀流程。
+  - `ui_react/src/api/orders/order_intake_completion_client.ts` — typed intake Preview／Apply 與 current service-time 解碼；缺時數案件沿用同一補件命令保存時間，回讀必須比對日期、天數及時段／時數。
+  - `OrderIntakeRepairPanel` 在案件處理提供唯讀缺件摘要，在名冊組合正式補件；名冊補件收到收據且回讀一致後，以 fresh completion Preview 判定能否續行既有 completion Apply，不在 UI 推導 lifecycle。結果未明維持原冪等操作，已收到收據則僅回讀，回讀完成前保持離開限制。
   - `ui_react/src/components/OrderTerminalAggregateLane.tsx` — 呈現既有typed結案彙總，不重算結案規則。
   - `ui_react/src/pages/OrdersPage.css`
   - `subsystems/orders/card_projection_query.py`

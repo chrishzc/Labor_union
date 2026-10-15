@@ -51,7 +51,7 @@ function hasExactReceiptSegments(
 
 function choicesErrorMessage(error: unknown): string {
   if (error instanceof ApiHttpError) {
-    if (error.code === 'matching_preference_source_not_ready') return '月嫂媒合偏好資料尚未備妥，請先在月嫂名冊補齊媒合偏好，再重新查詢。';
+    if (error.code === 'matching_preference_source_not_ready') return '本案尚未填寫「下廚需求」，無法依下廚料理篩選。請到客戶名冊補齊本案下廚需求，或先取消勾選「下廚料理」再查詢；取消篩選不會修改案件資料。';
     if (error.code === 'official_service_dates_incomplete') return '服務日期尚未完整，請到「服務安排 → 確認日期」完成日期後再查詢。';
     if (error.code === 'caregiver_availability_stage_conflict') return '目前案件狀態不允許查詢候選，請重新讀取案件進度，確認目前應辦事項。';
   }
@@ -123,7 +123,7 @@ export const OrderMultiCaregiverPlanPanel: FC<Props> = ({ caseNo, filters, onObs
   }, [caseNo, filterKey, segmentCount]);
 
   const busy = saving || query.status === 'loading';
-  useEffect(() => { onBusyChange?.(busy); }, [busy, onBusyChange]);
+  useEffect(() => { onBusyChange?.(busy || creationProtected); }, [busy, creationProtected, onBusyChange]);
   useEffect(() => () => { onBusyChange?.(false); }, [onBusyChange]);
 
   const selectStaff = (index: number, staffId: number) => {
@@ -164,7 +164,7 @@ export const OrderMultiCaregiverPlanPanel: FC<Props> = ({ caseNo, filters, onObs
       if (request === sequence.current && searchController.current === controller) setQuery({ status: 'ready', data, staffIds });
     } catch (caught) {
       if (request === sequence.current && searchController.current === controller) {
-        setQuery({ status: 'error', message: caught instanceof Error ? caught.message : '多月嫂候選查詢失敗。' });
+        setQuery({ status: 'error', message: choicesErrorMessage(caught) });
       }
     }
   };

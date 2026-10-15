@@ -27,17 +27,21 @@ class MySqlMatchingScheduleConfirmationRepository:
             root = cursor.fetchone()
             if not root:
                 raise ValueError("confirmed_service_dates_required")
-            preview = self._preview(cursor, case_no, plan_id, root["id"])
+            payloads = self._payloads(cursor, case_no, plan_id, root["id"])
+            preview = self._preview_from_payloads(payloads)
             snapshot = self._latest_snapshot(cursor, case_no, plan_id)
             status = _snapshot_status(root["id"], snapshot)
+            stored_payloads = self._snapshot_payloads(cursor, snapshot["id"]) if snapshot else []
+            if status in {"sent", "manual_ready"} and stored_payloads != payloads:
+                status = "sent_outdated"
             is_current = status in {"sent", "manual_ready"}
             recipients = self._recipients(cursor, snapshot["id"]) if snapshot and is_current else []
             outdated_preview = (
-                self._preview(cursor, case_no, plan_id, snapshot["confirmed_version_id"])
+                self._preview_from_payloads(stored_payloads)
                 if snapshot and status == "sent_outdated"
                 else None
             )
-        passed = bool(recipients) and all(r["confirmation_status"] in ("confirmed", "manually_confirmed") for r in recipients)
+        passed = bool(recipients) and all(payload["total_service_days"] > 0 for payload in payloads) and all(r["confirmation_status"] in ("confirmed", "manually_confirmed") for r in recipients)
         return {"case_no": case_no, "plan_id": plan_id, "confirmed_service_date_version": root["version"], "snapshot_id": snapshot["id"] if snapshot else None, "snapshot_status": status, "schedule_preview": preview, "outdated_schedule_preview": outdated_preview, "recipients": recipients, "gate_passed": passed}
 
     def invalidate_current_snapshot(self, case_no: str) -> None:
@@ -110,7 +114,9 @@ class MySqlMatchingScheduleConfirmationRepository:
                         result,
                     )
                     return result
-                raise ValueError("manual_schedule_confirmation_current_snapshot_conflict")
+                if self._snapshot_payloads(cursor, current["id"]) == payloads:
+                    raise ValueError("manual_schedule_confirmation_current_snapshot_conflict")
+                cursor.execute("UPDATE matching_schedule_snapshots SET current_marker=NULL,status='invalidated',invalidated_at_utc=UTC_TIMESTAMP(6) WHERE id=%s", (current["id"],))
             cursor.execute(
                 "INSERT INTO matching_schedule_snapshots "
                 "(case_no,plan_id,confirmed_version_id,snapshot_fingerprint,status,current_marker,created_by_actor_id) "
@@ -162,7 +168,7 @@ class MySqlMatchingScheduleConfirmationRepository:
                 raise ValueError("active_matching_plan_required")
             cursor.execute("SELECT id,status FROM matching_schedule_snapshots WHERE case_no=%s AND plan_id=%s AND confirmed_version_id=%s AND current_marker=1 FOR UPDATE", (case_no, plan_id, version["id"]))
             current = cursor.fetchone()
-            if current and current["status"] == "sent":
+            if current and current["status"] == "sent" and self._snapshot_payloads(cursor, current["id"]) == self._payloads(cursor, case_no, plan_id, version["id"]):
                 result = self.query(case_no, plan_id)
                 self._save_command_receipt(
                     cursor,
@@ -366,8 +372,9 @@ class MySqlMatchingScheduleConfirmationRepository:
             "WHERE s.plan_id=%s ORDER BY s.segment_order",
             (plan_id,),
         )
-        for row in cursor.fetchall():
-            own = [d for d in dates if row["assigned_start_date"].isoformat() <= d <= row["assigned_end_date"].isoformat()]
+        segments = cursor.fetchall()
+        for row in segments:
+            own = dates if len(segments) == 1 else [d for d in dates if row["assigned_start_date"].isoformat() <= d <= row["assigned_end_date"].isoformat()]
             result.append(_schedule_payload("caregiver", f"caregiver:{row['id']}", row["id"], row["line_user_id"], own))
         return result
 
@@ -390,6 +397,16 @@ class MySqlMatchingScheduleConfirmationRepository:
             raise ValueError("active_matching_plan_required")
         self._require_active_lifecycle(cursor, plan_id)
         return root, self._payloads(cursor, case_no, plan_id, root["id"])
+
+    @staticmethod
+    def _snapshot_payloads(cursor, snapshot_id):
+        cursor.execute("SELECT payload_snapshot FROM matching_schedule_recipient_snapshots WHERE parent_snapshot_id=%s ORDER BY id", (snapshot_id,))
+        payloads = []
+        for row in cursor.fetchall():
+            payload = json.loads(row["payload_snapshot"]) if isinstance(row["payload_snapshot"], str) else dict(row["payload_snapshot"])
+            payload.pop("manual_preparation", None)
+            payloads.append(payload)
+        return payloads
 
     @staticmethod
     def _latest_snapshot(cursor, case_no, plan_id):

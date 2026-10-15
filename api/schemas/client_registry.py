@@ -147,7 +147,7 @@ class ClientRegistryOrderInformationView(_StrictModel):
 
 
 class ClientRegistryFinanceValuesView(_StrictModel):
-    virtual_account: str
+    virtual_account: str | None
     service_unit_price_ntd: int = Field(gt=0)
     service_hours: float = Field(ge=0)
     customer_payable_total_ntd: int = Field(ge=0)

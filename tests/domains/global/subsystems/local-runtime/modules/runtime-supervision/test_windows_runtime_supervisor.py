@@ -3,7 +3,11 @@
 from pathlib import Path
 import json
 import os
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import socket
 import subprocess
+import sys
+import threading
 
 import pytest
 
@@ -11,6 +15,94 @@ import pytest
 ROOT = Path(__file__).resolve().parents[7]
 SUPERVISOR = ROOT / "scripts" / "launchers" / "supervise_local_runtime.ps1"
 WINDOWS_LAUNCHER = ROOT / "scripts" / "launchers" / "start_local_development.bat"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows runtime port admission")
+@pytest.mark.parametrize("occupied_service", ["api", "react"])
+def test_occupied_port_rejects_startup_without_stopping_existing_service(
+    occupied_service: str,
+) -> None:
+    powershell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+    with socket.socket() as existing_service, socket.socket() as free_port:
+        existing_service.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        existing_service.bind(("127.0.0.1", 0))
+        existing_service.listen()
+        occupied_port = existing_service.getsockname()[1]
+        free_port.bind(("127.0.0.1", 0))
+        available_port = free_port.getsockname()[1]
+        free_port.close()
+        ports = ([occupied_port, available_port] if occupied_service == "api"
+                 else [available_port, occupied_port])
+        result = subprocess.run(
+            [str(powershell), "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+             "-File", str(SUPERVISOR), "-ProjectRoot", str(ROOT), "-PythonPath", sys.executable,
+             "-ApiPort", str(ports[0]), "-ReactPort", str(ports[1])],
+            capture_output=True, text=True, timeout=30,
+        )
+        with socket.create_connection(("127.0.0.1", occupied_port), timeout=2):
+            pass
+    assert result.returncode == 1, result.stderr
+    events = [json.loads(line.removeprefix("RUNTIME_EVENT "))
+              for line in result.stdout.splitlines() if line.startswith("RUNTIME_EVENT ")]
+    assert [event["event"] for event in events] == ["supervision_failed", "cleanup_complete"]
+    assert f"127.0.0.1:{occupied_port} is unavailable" in events[0]["detail"]
+    assert events[1]["detail"] == "owned_identities=none"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows TCP listener identity")
+@pytest.mark.parametrize("owned", [True, False])
+def test_http_readiness_requires_the_owned_listener(owned: bool) -> None:
+    class HealthHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            self.send_response(200)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, *args: object) -> None:
+            pass
+
+    powershell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+    script = r'''
+$ErrorActionPreference = 'Stop'
+$tokens = $null; $errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($env:SUPERVISOR_TEST_PATH, [ref]$tokens, [ref]$errors)
+if ($errors.Count) { throw 'Supervisor syntax error' }
+foreach ($function in $ast.FindAll({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst]}, $false)) {
+    Invoke-Expression $function.Extent.Text
+}
+$script:Owned = [System.Collections.Generic.List[object]]::new()
+$script:IdentityRegistry = [System.Collections.Generic.List[object]]::new()
+$script:UnknownRootPids = [System.Collections.Generic.List[int]]::new()
+$script:CleanupUnknown = $false
+$ownerId = if ($env:LISTENER_OWNED_TEST -eq '1') { [int]$env:LISTENER_PID_TEST } else { $PID }
+$snapshot = Get-ProcessSnapshot -ProcessId $ownerId
+$entry = [pscustomobject]@{Pid=$ownerId; StartTime=$snapshot.StartTime; Process=$snapshot.Process; ExitCode=$null; Label='FastAPI'}
+$script:Owned.Add($entry)
+[void](Add-Identity -ProcessId $ownerId -StartTime $snapshot.StartTime -Label 'FastAPI' -RootPid $ownerId -IsRoot $true -Process $snapshot.Process)
+function Write-RuntimeEvent { param($Event, $Label, $Detail); Write-Output $Event }
+Wait-HttpReady -Url $env:LISTENER_URL_TEST -Label 'FastAPI' -OwnedEntry $entry -Attempts 1
+'''
+    with ThreadingHTTPServer(("127.0.0.1", 0), HealthHandler) as server:
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            result = subprocess.run(
+                [str(powershell), "-NoProfile", "-Command", script],
+                env={**os.environ, "SUPERVISOR_TEST_PATH": str(SUPERVISOR),
+                     "LISTENER_PID_TEST": str(os.getpid()), "LISTENER_OWNED_TEST": "1" if owned else "0",
+                     "LISTENER_URL_TEST": f"http://127.0.0.1:{server.server_port}/health"},
+                capture_output=True, text=True, timeout=30,
+            )
+        finally:
+            server.shutdown()
+            thread.join(timeout=5)
+    if owned:
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "ready"
+    else:
+        assert result.returncode != 0
+        assert "readiness belongs to another process" in result.stderr
+        assert "ready" not in result.stdout
 
 
 def test_supervisor_owns_one_process_scoped_internal_service_key() -> None:

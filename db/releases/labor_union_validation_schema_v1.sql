@@ -1,5 +1,5 @@
 -- GENERATED FILE. Do not edit by hand.
--- Release: labor-union-validation-schema-2026-10-13-v44
+-- Release: labor-union-validation-schema-2026-10-14-v45
 -- Replace __LU_TEST_DATABASE__ with an explicitly confirmed lu_test_* database.
 -- Rebuild with: python scripts/build_validation_schema_release.py
 
@@ -21783,3 +21783,9 @@ ALTER TABLE staff
     ADD COLUMN union_no VARCHAR(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NULL COMMENT '公會自訂編號',
     ADD UNIQUE KEY uq_staff_union_no (union_no);
 -- END SOURCE: db/schema_parts/231_staff_union_number.sql
+
+-- BEGIN SOURCE: db/schema_parts/232_candidate_weekly_information.sql
+-- Append weekly information delivery; retain every existing enum ordinal and event.
+ALTER TABLE caregiver_candidate_contact_events
+    MODIFY COLUMN event_type ENUM('candidates_added','info_1_sent','info_2_sent','willingness_changed','candidate_selected','candidate_withdrawn','info_3_sent') NOT NULL;
+-- END SOURCE: db/schema_parts/232_candidate_weekly_information.sql

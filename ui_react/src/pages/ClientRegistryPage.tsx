@@ -9,7 +9,7 @@ type RegistryTab = 'roster' | 'virtual-accounts';
 export const ClientRegistryPage: React.FC = () => {
   const readLocation = () => {
     const params = new URLSearchParams(window.location.hash.split('?')[1] ?? '');
-    return { caseNo: params.get('case') ?? '', field: params.get('field') ?? '' };
+    return { caseNo: params.get('case') ?? '', field: params.get('field') ?? '', fromWorkbench: params.get('from') === 'workbench' };
   };
   const [location, setLocation] = useState(readLocation);
   const [activeTab, setActiveTab] = useState<RegistryTab>('roster');
@@ -43,7 +43,7 @@ export const ClientRegistryPage: React.FC = () => {
       <button type="button" role="tab" aria-selected={activeTab === 'virtual-accounts'} onClick={() => selectTab('virtual-accounts')}>虛擬帳號匯入</button>
     </div>
     <section role="tabpanel" aria-label={activeTab === 'roster' ? '客戶清單' : '虛擬帳號匯入'}>
-      {activeTab === 'roster' ? <ClientRosterPage embedded initialCaseNo={location.caseNo} focusField={location.field} onEditStateChange={onEditStateChange} /> : <LegacyVirtualAccountImport />}
+      {activeTab === 'roster' ? <ClientRosterPage embedded initialCaseNo={location.caseNo} focusField={location.field} onEditStateChange={onEditStateChange} onOpenServiceArrangement={(caseNo, recalculateDates) => { editState.current = { dirty: false, busy: false }; window.location.hash = `#order-workbench-v2?case=${encodeURIComponent(caseNo)}&work=service&from=clients${recalculateDates ? '&recalculate=1' : ''}`; }} onReturnToCase={location.fromWorkbench ? (caseNo) => { editState.current = { dirty: false, busy: false }; window.location.hash = `#order-workbench-v2?case=${encodeURIComponent(caseNo)}`; } : undefined} /> : <LegacyVirtualAccountImport />}
     </section>
   </div>;
 };

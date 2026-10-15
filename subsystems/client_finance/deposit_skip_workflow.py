@@ -11,6 +11,14 @@ from shared_kernel.validation import require_canonical_text
 class DepositSkipSelection:
     case_no: str
 @dataclass(frozen=True, slots=True)
+class DepositSkipStatus:
+    case_no: str
+    account_version: int
+    deposit_required_ntd: int
+    deposit_net_received_ntd: int
+    unpaid_progression_allowed: bool
+    blockers: tuple[str, ...]
+@dataclass(frozen=True, slots=True)
 class DepositSkipApplyRequest:
     selection: DepositSkipSelection
     expected_account_version: ExpectedVersion
@@ -37,6 +45,10 @@ class Repository(Protocol):
 class DepositSkipWorkflow:
     def __init__(self, repository: Repository, unit_of_work_factory: Callable[[], object]): self.repo=repository; self.uow=unit_of_work_factory
     def preview(self, selection): return build_deposit_skip_candidate(self.repo.load(selection, for_update=False))
+    def query(self, selection):
+        facts = self.repo.load(selection, for_update=False)
+        candidate = build_deposit_skip_candidate(facts)
+        return DepositSkipStatus(facts.case_no, facts.account_version, facts.deposit_required_ntd, facts.deposit_net_received_ntd, facts.override_active, candidate.blockers)
     def apply(self, request):
         command=fingerprint_payload({"case_no":request.selection.case_no,"version":request.expected_account_version.value,"preview":request.preview_fingerprint.value,"actor":request.actor.actor_id,"reason":request.reason})
         with self.uow() as unit:

@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, time
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, Path
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from pymysql.err import OperationalError
 
 from api.dependencies.admin_auth import require_persisted_admin
@@ -24,6 +24,7 @@ from subsystems.orders.order_intake_client_name_repair import (
 from subsystems.orders.order_intake_terms_bootstrap import (
     OrderIntakeTermsBootstrapApplication,
     OrderIntakeTermsBootstrapError,
+    IntakeServiceTime,
 )
 
 
@@ -38,9 +39,32 @@ _IdempotencyHeader = Annotated[
 ]
 
 
+class IntakeServiceTimeBody(BaseModel):
+    service_hours_per_day: float = Field(gt=0, le=24, multiple_of=0.5)
+    start_time: time
+    end_time: time
+    end_day_offset: int = Field(ge=0, le=1)
+
+    def to_domain(self):
+        return IntakeServiceTime(**self.model_dump())
+
+    @model_validator(mode='after')
+    def validate_time(self):
+        self.to_domain()
+        return self
+
+
+class IntakeServiceTimeSnapshotView(BaseModel):
+    service_hours_per_day: float | None
+    start_time: time | None
+    end_time: time | None
+    end_day_offset: int | None
+
+
 class OrderIntakeTermsBootstrapIntent(BaseModel):
     proposed_start_date: date
     proposed_service_days: int = Field(gt=0)
+    proposed_service_time: IntakeServiceTimeBody | None = None
 
 
 class OrderIntakeTermsBootstrapApplyBody(OrderIntakeTermsBootstrapIntent):
@@ -64,6 +88,8 @@ class OrderIntakeTermsBootstrapPreviewView(BaseModel):
     blockers: list[str]
     apply_allowed: bool
     preview_fingerprint: str
+    before_service_time: IntakeServiceTimeSnapshotView | None = None
+    after_service_time: IntakeServiceTimeBody | None = None
 
 
 class OrderIntakeTermsBootstrapReceiptView(BaseModel):
@@ -75,6 +101,7 @@ class OrderIntakeTermsBootstrapReceiptView(BaseModel):
     changed_fields: list[str]
     preview_fingerprint: str
     replayed: bool
+    service_time: IntakeServiceTimeBody | None = None
 
 
 class OrderIntakeClientNameIntent(BaseModel):
@@ -121,6 +148,7 @@ class OrderIntakeCompletionPreviewView(BaseModel):
     blockers: list[str]
     apply_allowed: bool
     preview_fingerprint: str
+    current_service_time: IntakeServiceTimeSnapshotView | None = None
 
 
 class OrderIntakeCompletionApplyBody(BaseModel):
@@ -161,6 +189,7 @@ def preview_order_intake_terms_bootstrap(
             case_no.strip(),
             body.proposed_start_date,
             body.proposed_service_days,
+            **({'proposed_service_time': body.proposed_service_time.to_domain()} if body.proposed_service_time is not None else {}),
         )
         return BaseResponse(
             data=_terms_preview_payload(result),
@@ -202,6 +231,7 @@ def apply_order_intake_terms_bootstrap(
             idempotency_key,
             str(principal.username or "").strip(),
             body.reason.strip(),
+            **({'proposed_service_time': body.proposed_service_time.to_domain()} if body.proposed_service_time is not None else {}),
         )
         return BaseResponse(
             data=_terms_receipt_payload(result),
@@ -373,6 +403,8 @@ def _terms_preview_payload(result):
         "blockers": list(result.blockers),
         "apply_allowed": result.apply_allowed,
         "preview_fingerprint": result.preview_fingerprint,
+        "before_service_time": result.before_service_time.canonical_payload() if result.before_service_time else None,
+        "after_service_time": result.after_service_time.canonical_payload() if result.after_service_time else None,
     }
 
 
@@ -386,6 +418,7 @@ def _terms_receipt_payload(result):
         "changed_fields": list(result.changed_fields),
         "preview_fingerprint": result.preview_fingerprint,
         "replayed": result.replayed,
+        "service_time": result.service_time.canonical_payload() if result.service_time else None,
     }
 
 
@@ -420,6 +453,7 @@ def _completion_preview_payload(result):
         "target_status": result.target_status.value,
         "current_start_date": result.current_start_date,
         "current_service_days": result.current_service_days,
+        "current_service_time": result.current_service_time.canonical_payload() if result.current_service_time else None,
         "missing_fields": list(result.missing_fields),
         "blockers": list(result.blockers),
         "apply_allowed": result.apply_allowed,

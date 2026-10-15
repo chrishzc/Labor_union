@@ -6,6 +6,7 @@ Description: 排班計畫 MySQL repository，於讀取最新事實時保護退�
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import date
 import json
 from typing import Any
 
@@ -82,15 +83,24 @@ def _matching_schedule_segments(cursor, snapshot_id, intent):
     if not requested:
         return None
     cursor.execute(
-        "SELECT r.segment_id,p.staff_id,p.assigned_start_date,p.assigned_end_date "
+        "SELECT r.segment_id,p.staff_id,p.assigned_start_date,p.assigned_end_date,r.payload_snapshot,o.actual_start_date "
         "FROM matching_schedule_recipient_snapshots r "
         "JOIN caregiver_matching_plan_segments p ON p.id=r.segment_id "
+        "JOIN caregiver_matching_plans plan ON plan.id=p.plan_id JOIN orders o ON o.case_no=plan.case_no "
         "WHERE r.parent_snapshot_id=%s AND r.audience_type='caregiver'",
         (snapshot_id,),
     )
+    rows = cursor.fetchall()
+    if len(rows) == len(intent.segments) == 1:
+        row, target = rows[0], intent.segments[0]
+        payload = json.loads(row['payload_snapshot']) if isinstance(row['payload_snapshot'], str) else row['payload_snapshot']
+        dates = tuple(date.fromisoformat(value) for week in payload['weeks'] for value in week['service_dates'])
+        if dates and row['staff_id'] == target.staff_id and dates == target.official_service_dates and target.assigned_start_date == (row['actual_start_date'] or dates[0]) and target.assigned_end_date == dates[-1]:
+            return (row['segment_id'],)
+        return None
     segment_by_identity = {
         (row["staff_id"], row["assigned_start_date"], row["assigned_end_date"]): row["segment_id"]
-        for row in cursor.fetchall()
+        for row in rows
     }
     if not requested.issubset(segment_by_identity):
         return None
@@ -210,7 +220,13 @@ class MySqlAssignmentPlanRepository:
                 case_no,
                 lock=False,
             )
-        return build_assignment_plan_workflow_facts(source, occupancy, lock_ids)
+            facts = build_assignment_plan_workflow_facts(source, occupancy, lock_ids)
+            if not facts.assignment_plan.effective_assignments and lock_ids:
+                _require_exact_commitment_days(cursor, case_no, tuple(
+                    ExecutionServiceDay(segment.staff_id, service_date)
+                    for segment in intent.segments for service_date in segment.official_service_dates
+                ), lock_ids, lock=False)
+        return facts
 
     def preflight_impacted_staff_ids(
         self,
@@ -495,13 +511,22 @@ def _convert_waiting_locks(cursor, command, result, context) -> None:
 
 
 def _require_exact_commitment_execution(cursor, candidate, lock_ids) -> int:
+    days = tuple(
+        ExecutionServiceDay(assignment.staff_id, service_date)
+        for assignment in candidate.assignments for service_date in assignment.service_dates
+    )
+    return _require_exact_commitment_days(cursor, candidate.case_no, days, lock_ids, lock=True)
+
+
+def _require_exact_commitment_days(cursor, case_no, execution_days, lock_ids, *, lock) -> int:
+    suffix = ' FOR UPDATE' if lock else ''
     cursor.execute(
         "SELECT commitment.id,commitment.matching_plan_id,event.id AS terminal_event_id "
         "FROM precontract_service_commitments commitment "
         "LEFT JOIN precontract_service_commitment_events event "
         "ON event.commitment_id=commitment.id "
-        "WHERE commitment.case_no=%s FOR UPDATE",
-        (candidate.case_no,),
+        "WHERE commitment.case_no=%s" + suffix,
+        (case_no,),
     )
     commitment = cursor.fetchone()
     if commitment is None or commitment["terminal_event_id"] is not None:
@@ -509,36 +534,75 @@ def _require_exact_commitment_execution(cursor, candidate, lock_ids) -> int:
     commitment_id = int(commitment["id"])
     cursor.execute(
         "SELECT staff_id,service_date FROM precontract_service_commitment_days "
-        "WHERE commitment_id=%s ORDER BY staff_id,service_date FOR UPDATE",
+        "WHERE commitment_id=%s ORDER BY staff_id,service_date" + suffix,
         (commitment_id,),
     )
     commitment_days = tuple(
         CommitmentServiceDay(int(row["staff_id"]), row["service_date"])
         for row in cursor.fetchall()
     )
-    lock_plan_ids = _locked_waiting_lock_plan_ids(cursor, lock_ids)
-    execution_days = tuple(
-        ExecutionServiceDay(assignment.staff_id, service_date)
-        for assignment in candidate.assignments
-        for service_date in assignment.service_dates
-    )
+    lock_plan_ids = _locked_waiting_lock_plan_ids(cursor, lock_ids, lock=lock)
+    confirmed_days = None
+    if (
+        sorted(day.staff_id for day in commitment_days) == sorted(day.staff_id for day in execution_days)
+        and {(day.staff_id, day.service_date) for day in commitment_days} != {(day.staff_id, day.service_date) for day in execution_days}
+    ):
+        _, confirmed_days = _current_confirmed_execution(
+            cursor, case_no, int(commitment["matching_plan_id"]), lock=lock
+        )
     require_exact_commitment_execution(
         int(commitment["matching_plan_id"]),
         lock_plan_ids,
         commitment_days,
         execution_days,
+        confirmed_days=confirmed_days,
     )
     return commitment_id
 
 
-def _locked_waiting_lock_plan_ids(cursor, lock_ids) -> tuple[int, ...]:
+def _current_confirmed_execution(cursor, case_no, plan_id, *, lock):
+    cursor.execute(
+        "SELECT s.id,s.confirmed_version_id FROM matching_schedule_snapshots s "
+        "JOIN confirmed_service_date_versions v ON v.id=s.confirmed_version_id "
+        "WHERE s.case_no=%s AND s.plan_id=%s AND s.current_marker=1 "
+        "AND s.status IN ('sent','draft') AND v.is_current=1" + _lock_suffix(lock),
+        (case_no, plan_id),
+    )
+    snapshot = cursor.fetchone()
+    if snapshot is None:
+        raise CommitmentExecutionMismatch("matching_schedule_confirmation_required")
+    cursor.execute(
+        "SELECT r.segment_id,p.staff_id,r.payload_snapshot "
+        "FROM matching_schedule_recipient_snapshots r "
+        "JOIN caregiver_matching_plan_segments p ON p.id=r.segment_id "
+        "WHERE r.parent_snapshot_id=%s AND r.audience_type='caregiver' AND p.plan_id=%s "
+        "ORDER BY r.id" + _lock_suffix(lock),
+        (snapshot["id"], plan_id),
+    )
+    rows = cursor.fetchall()
+    segments = tuple(row["segment_id"] for row in rows)
+    if not segments or not _confirmed_schedule_recipients(cursor, snapshot["id"], segments):
+        raise CommitmentExecutionMismatch("matching_schedule_two_party_confirmation_required")
+    days = []
+    for row in rows:
+        payload = row["payload_snapshot"]
+        if isinstance(payload, str):
+            payload = json.loads(payload)
+        days.extend(
+            ExecutionServiceDay(int(row["staff_id"]), date.fromisoformat(value))
+            for week in payload["weeks"] for value in week["service_dates"]
+        )
+    return snapshot, tuple(days)
+
+
+def _locked_waiting_lock_plan_ids(cursor, lock_ids, *, lock=True) -> tuple[int, ...]:
     if not lock_ids:
         return ()
     placeholders = ",".join("%s" for _ in lock_ids)
     cursor.execute(
         "SELECT plan_id FROM caregiver_availability_locks "
         f"WHERE id IN ({placeholders}) AND status='active' AND is_active=1 "
-        "ORDER BY id FOR UPDATE",
+        "ORDER BY id" + (' FOR UPDATE' if lock else ''),
         lock_ids,
     )
     return tuple(int(row["plan_id"]) for row in cursor.fetchall())
@@ -554,6 +618,11 @@ def _append_commitment_conversion(cursor, command, result, context, commitment_i
         "generation_id": result.generation_id,
         "preview_fingerprint": context.preview_fingerprint.value,
     }
+    cursor.execute("SELECT matching_plan_id FROM precontract_service_commitments WHERE id=%s", (commitment_id,))
+    plan = cursor.fetchone()
+    snapshot, _ = _current_confirmed_execution(cursor, command.candidate.case_no, plan["matching_plan_id"], lock=True)
+    payload["schedule_snapshot_id"] = snapshot["id"]
+    payload["confirmed_service_date_version_id"] = snapshot["confirmed_version_id"]
     cursor.execute(
         "INSERT INTO precontract_service_commitment_events "
         "(commitment_id,event_type,event_key,actor,payload) "
