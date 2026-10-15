@@ -386,3 +386,30 @@ metadata 證明零新增效果時，才可 bounded retry；DDL 中斷必須先�
   runtime 不能取代。
 - 本裁決不擴張 package 的業務 scope、owner、public contract、external effect 或 write set；更嚴格的
   scenario data policy 繼續適用。
+
+### 9.2 NAS 已存在空庫的首次初始化
+
+依 2026-10-15 人工明確要求，Global migration 增加獨立的 NAS fresh-bootstrap 入口；
+本段同時固定這次 bounded execution package 的範圍與驗收。入口為
+`scripts/initialize_nas_schema.py` 及 `scripts/launchers/initialize_nas_schema.bat`／`.sh`。
+
+- 只讀專案 `.env`，要求 `APP_ENV=development`、remote `DB_HOST`、`DB_DATABASE=union_db`；
+  process 中存在不同的 APP_ENV／DB_* override 時停止。TLS 沿用 DB_SSL_* 設定，credential 不進參數或紀錄。
+- 目標必須已存在，且沒有 table、view、routine、event。唯讀預檢與 Apply 都驗 connected identity；
+  Apply 取得同名初始化 session lock 後 fresh-read 空庫條件。這個 lock 只協調本入口，operator 必須停止其他 writer。
+- 唯一 schema／system-seed 來源是 hash-locked fresh assembly 及 validation manifest；先在記憶體中完成
+  manifest／digest 驗證與 SQL 固定，再連線。排除 base schema 的 DROP DATABASE、CREATE DATABASE、USE，
+  其餘依 canonical 順序執行，base views 沿用既有 bootstrap 的最後載入規則。出現其他 database control 即停止。
+- Data-effect inventory：schema-only 與 system-seed 只重播 current canonical artifacts；
+  business-row-backfill、業務 fixture、既有資料轉換、建庫／刪庫、provider、啟動服務及部署均不在範圍。
+  既有 local reset／preserve-data upgrade 的 target policy 不變；不為此入口修改 SQL 或重發 release。
+- 無參數是零 DDL／DML 的連線與空庫預檢；`--dry-run` 零連線；`--apply` 重新驗證後執行。
+  每個 statement 前後在 ignored scratch 下寫 durable journal，僅保存 artifact、ordinal、hash 與狀態。
+  MySQL DDL implicit commit 不宣稱可 rollback；失敗保留 partial 與紀錄，不自動 DROP、cleanup、重試或續跑。
+- 完成後驗 validation objects 與既有 runtime canonical descriptor/current gate；兩者通過才回報 passed。
+  測試使用 local disposable `lu_test_*` 呼叫同一 executor，驗完整 fresh、system seed、current gate、
+  非空資料與 view 拒絕、重跑拒絕及失敗紀錄；不碰本機既有 union_db 或 NAS。此入口不支援 preserve-data，
+  因此驗收不執行無關的 dump／candidate／switch。真正 NAS Apply 留給 operator 明確執行。
+
+本次 write set 限新 initializer／launchers、對應 Module tests、launcher README、本節及 migration 地圖；
+沒有新 schema release，current manifest／descriptor 不改。驗收來源為本節與人工空庫初始化要求。

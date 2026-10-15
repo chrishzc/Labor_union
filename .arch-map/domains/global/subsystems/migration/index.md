@@ -8,6 +8,8 @@
 qualification、candidate verification 與 developer-local DB maintenance boundaries。
 
 ## Modules
+- `nas-schema-initialization` — remote 已存在空白 union_db 的 canonical fresh bootstrap；path:
+  `modules/nas-schema-initialization.md`
 - `local-database-fresh-reset` — explicit local canonical empty-schema reset；path:
   `modules/local-database-fresh-reset.md`
 - `preserved-database-upgrade` — preserve-data candidate、ordered release classification與

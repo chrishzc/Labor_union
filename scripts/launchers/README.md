@@ -9,6 +9,7 @@
 | `start_local_development.bat` | Windows 本機入口。通過 DB current gate 後，由 `supervise_local_runtime.ps1` 啟動 FastAPI 8000、React/Vite 5173、runtime monitor、durable job worker 與 incident worker。 |
 | `start_local_development.sh` | macOS／Linux 本機入口；服務邊界同 Windows。 |
 | `start_nas_development.bat`／`.sh` | 使用 `.env` 的 NAS MySQL；拒絕 localhost，委派標準開發入口。 |
+| `initialize_nas_schema.bat`／`.sh` | 首次初始化 NAS 已存在且空白的 `union_db`；無參數唯讀預檢，`--apply` 才建表。 |
 | `supervise_local_runtime.ps1` | Windows owned-process supervisor；負責 readiness、存活檢查與 scoped cleanup。 |
 | `start_local_development_no_auth.bat`／`.sh` | 只供隔離本機的 `local_bypass` 包裝；委派標準入口，不複製啟動流程。 |
 | `configure_local_admin_no_auth.bat`／`.ps1` | 修改本機開發認證設定，不啟動服務。 |
@@ -67,6 +68,27 @@ Smoke test 只建立本次 owned 的 FastAPI＋React process，執行 GET-only r
 ## Database operations
 
 ### NAS MySQL 測試
+
+若 NAS 已建立空白 `union_db`，先在專案 `.env` 設定 `APP_ENV=development`、NAS `DB_HOST`、
+`DB_PORT`、`DB_USER`、`DB_PASSWORD`、`DB_DATABASE=union_db`。初始化帳號必須能讀取完整 schema metadata，
+並具有 canonical DDL／system seed 所需權限（包含 table、index、foreign key、view、trigger 與 routine）；
+不需要刪庫或建庫權限。若 MySQL binary logging 的 trigger／function policy 阻擋，請由 NAS 管理員配置權限，
+腳本不修改全域設定。執行期間停止其他連線 writer。
+
+```powershell
+.\scripts\launchers\initialize_nas_schema.bat --dry-run
+.\scripts\launchers\initialize_nas_schema.bat
+.\scripts\launchers\initialize_nas_schema.bat --apply
+```
+
+macOS／Linux 使用 `bash ./scripts/launchers/initialize_nas_schema.sh`，參數相同。
+`--dry-run` 只驗設定與正式 schema 雜湊、不連線；無參數會連線並唯讀確認空庫；`--apply` 再檢查一次後初始化。
+設定直接取自 `.env`，process APP_ENV／DB_* 若有不同值會停止，請先清除 override。
+目標不是 `union_db`、指向 localhost、資料庫不存在或已有 table／view／routine／event 都停止。
+初始化會建立完整結構與正式 artifacts 宣告的必要系統資料，不會匯入業務資料或建立管理員帳號。
+成功必須通過與 NAS 啟動器相同的 current gate，然後才執行 `start_nas_development`。
+MySQL DDL 可能已提交；失敗時查看 `scratch/nas_schema_initialization/<run>/journal.jsonl`，
+不要直接重跑或執行 reset。腳本不會自動清空 partial database。
 
 Compose 現在只啟動 Redis；所有開發入口直接連線 `.env`／process environment 的 MySQL，
 不再啟動或管理 `mysql_db`。既有容器與資料卷保留，請勿使用 `down -v` 或 `--remove-orphans` 清除。
