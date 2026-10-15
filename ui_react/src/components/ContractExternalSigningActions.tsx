@@ -73,6 +73,7 @@ function safeErrorMessage(error: unknown): string {
     if (error.status === 401 || error.status === 403) return '目前帳號無權處理這筆外部簽約。';
     if (error.code === 'external_signing_accepted_plan_required') return '目前尚無可投影契約的有效配對方案。';
     if (error.code === 'external_signing_session_facts_unavailable') return '外部簽約工作尚未建立；請先完成服務人員媒合與服務區段。';
+    if (error.code === 'contract_client_unsigned_already_signed') return '客戶契約已簽署，不能重新產生未簽契約。';
     if (error.code === 'contract_pdf_external_reference_unresolved') return '契約模板缺少舊版引用內容，尚不能產生可簽署 PDF；請先補齊模板。';
     if (error.code === 'contract_pdf_required_mapping_missing') return '契約必要資料尚未齊全，請先在契約欄位預覽核對案件資料與收款設定。';
     if (error.code === 'contract_unsigned_pdf_missing') return message || '客戶或服務人員的未簽契約 PDF 尚未備妥，請先下載兩方契約後再確認送交。';
@@ -235,6 +236,7 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
   const activeUnsignedPreparationOperation = useRef<{ caseNo: string; operationToken: number } | null>(null);
   const [query, setQuery] = useState<ContractExternalSigningQuery | null>(null);
   const [preparationSegments, setPreparationSegments] = useState<number[]>([]);
+  const [preparationClientDocument, setPreparationClientDocument] = useState<number | null>(null);
   const [recoveryQuery, setRecoveryQuery] = useState<LegacyRecoveryQuery | null>(null);
   const [uiState, setUiState] = useState<ContractExternalSigningUiState>({ type: 'querying' });
   const [notice, setNotice] = useState<string | null>(null);
@@ -258,6 +260,7 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
       if (signal?.aborted || generation !== requestGeneration.current) return null;
       setQuery(null);
       setPreparationSegments(value.staff_segments.map((segment) => segment.segment_id));
+      setPreparationClientDocument(value.documents.find(document => document.scope === 'client_contract' && document.role === 'template_generated' && document.target_key === 'client-contract' && document.mime_type === 'application/pdf')?.document_version_id ?? null);
       setRecoveryQuery(null);
       setUiState({ type: 'ready' });
       return null;
@@ -285,6 +288,7 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
     setPreparationSegments([]);
     setRecoveryQuery(null);
     setNotice(null);
+    setPreparationClientDocument(null);
     setFinalFile(null);
     identities.current.clear();
     void loadQuery(controller.signal).then(async (value) => {
@@ -405,6 +409,7 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
       if (request !== requestGeneration.current) return;
       setQuery(null);
       setPreparationSegments(fresh.staff_segments.map((segment) => segment.segment_id));
+      if (command.kind === 'client') setPreparationClientDocument(receipt.document_version_id);
       setUiState({ type: 'ready' });
       setNotice(command.kind === 'client'
         ? `${receipt.replayed ? '已重新確認' : '已產生'}客戶未簽契約 PDF。`
@@ -950,8 +955,13 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
               void downloadUnsigned(query.client_target.document_version_id, `客戶 ${query.client_target.client_subject_reference} `);
               return;
             }
+            if (!query && preparationClientDocument !== null) {
+              void downloadUnsigned(preparationClientDocument, '客戶');
+              return;
+            }
             void prepareUnsigned('client', null);
           }}>下載客戶契約 PDF</button>
+          {(query ? query.client_target.document_version_id !== null && !query.client_target.reported && query.state !== 'completed' && query.state !== 'superseded' : preparationClientDocument !== null) && <button type="button" disabled={busy || !!unsignedPreparationFlow || !!finalFile} onClick={() => void prepareUnsigned('client', null, true)}>重新產生客戶契約</button>}
           {!query && preparationSegments.length > 0 && <p>可依目前資料直接產生客戶契約；服務人員契約仍各自對應服務區段。</p>}
           {query && (!query.unsigned_document || query.client_target.document_version_id === null) && <p>尚無文件時，點擊下載會依目前資料自動產生契約；不會發送訊息或改變同意、簽約及履約狀態。</p>}
         </article>

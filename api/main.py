@@ -38,6 +38,7 @@ from api.routes import (
     client_profile,
     client_registry,
     legacy_virtual_account_import,
+    case_virtual_account,
     case_architecture_bootstrap,
     client_deposit_reversal,
     client_deposit_skip,
@@ -356,6 +357,7 @@ app.include_router(client_profile.router)
 app.include_router(client_profile.review_router)
 app.include_router(client_registry.router)
 app.include_router(legacy_virtual_account_import.router)
+app.include_router(case_virtual_account.router)
 app.include_router(historical_order_adoption.router)
 app.include_router(historical_calendar_assignment_remediation.router)
 app.include_router(historical_service_accounting.router)

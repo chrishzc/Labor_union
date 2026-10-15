@@ -538,6 +538,48 @@ describe('ContractExternalSigningActions', () => {
     expect(screen.getByRole('button', { name: '準備服務人員契約 PDF（服務區段 42）' })).toBeEnabled();
   });
 
+  it('regenerates an unsigned client PDF and keeps subsequent downloads on the new version', async () => {
+    const unsigned = { ...query, state: 'staff_reporting' as const, client_target: { ...query.client_target, reported: false } };
+    vi.mocked(contractExternalSigningClient.queryLegacyRecovery).mockRejectedValue(new Error('Synthetic recovery query unavailable'));
+    const regenerated = { ...unsigned, client_target: { ...unsigned.client_target, document_version_id: 92 },
+      unsigned_document: { document_version_id: 92, filename: 'new-client.pdf', mime_type: 'application/pdf' as const, size_bytes: 20 } };
+    vi.mocked(contractExternalSigningClient.query).mockResolvedValueOnce(unsigned).mockResolvedValue(regenerated);
+    vi.mocked(contractExternalSigningClient.prepareClientUnsignedPdf).mockResolvedValue({ document_version_id: 92, filename: 'new-client.pdf', mime_type: 'application/pdf', size_bytes: 20, replayed: false });
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    vi.stubGlobal('URL', { createObjectURL: vi.fn().mockReturnValue('blob:new-client'), revokeObjectURL: vi.fn() });
+    render(<ContractExternalSigningActions caseNo="CASE-001" />);
+    fireEvent.click(await screen.findByRole('button', { name: '重新產生客戶契約' }));
+    await waitFor(() => expect(contractExternalSigningClient.prepareClientUnsignedPdf).toHaveBeenCalledWith('CASE-001', expect.objectContaining({ idempotencyKey: expect.any(String) })));
+    await waitFor(() => expect(contractExternalSigningClient.downloadUnsignedPdf).toHaveBeenCalledWith('CASE-001', 92, expect.any(AbortSignal)));
+    await waitFor(() => expect(screen.getByRole('button', { name: '下載客戶契約 PDF' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '下載客戶契約 PDF' }));
+    await waitFor(() => expect(contractExternalSigningClient.downloadUnsignedPdf).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(contractExternalSigningClient.downloadUnsignedPdf).mock.calls.every(call => call[1] === 92)).toBe(true);
+  });
+
+  it('retains the regenerated client PDF while signing facts are still preparing', async () => {
+    const document = { document_version_id: 32, scope: 'client_contract' as const, role: 'template_generated' as const, target_key: 'client-contract', mime_type: 'application/pdf' };
+    vi.mocked(contractExternalSigningClient.query).mockResolvedValueOnce({ ...preparing, documents: [document] })
+      .mockResolvedValue({ ...preparing, documents: [{ ...document, document_version_id: 92 }] });
+    vi.mocked(contractExternalSigningClient.prepareClientUnsignedPdf).mockResolvedValue({ document_version_id: 92, filename: 'new-client.pdf', mime_type: 'application/pdf', size_bytes: 20, replayed: false });
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    vi.stubGlobal('URL', { createObjectURL: vi.fn().mockReturnValue('blob:new-client'), revokeObjectURL: vi.fn() });
+    render(<ContractExternalSigningActions caseNo="CASE-001" />);
+    fireEvent.click(await screen.findByRole('button', { name: '重新產生客戶契約' }));
+    await waitFor(() => expect(contractExternalSigningClient.downloadUnsignedPdf).toHaveBeenCalledWith('CASE-001', 92, expect.any(AbortSignal)));
+    await waitFor(() => expect(screen.getByRole('button', { name: '下載客戶契約 PDF' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '下載客戶契約 PDF' }));
+    await waitFor(() => expect(contractExternalSigningClient.downloadUnsignedPdf).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(contractExternalSigningClient.downloadUnsignedPdf).mock.calls.every(call => call[1] === 92)).toBe(true);
+  });
+
+  it('does not offer regeneration for a client contract already reported signed', async () => {
+    render(<ContractExternalSigningActions caseNo="CASE-001" />);
+    await screen.findByRole('button', { name: '下載客戶契約 PDF' });
+    expect(screen.queryByRole('button', { name: '重新產生客戶契約' })).not.toBeInTheDocument();
+    expect(contractExternalSigningClient.prepareClientUnsignedPdf).not.toHaveBeenCalled();
+  });
+
   it('uses the single client download action to prepare and download when there was no old document', async () => {
     vi.mocked(contractExternalSigningClient.query)
       .mockResolvedValueOnce({

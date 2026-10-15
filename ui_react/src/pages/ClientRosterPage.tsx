@@ -158,9 +158,8 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
     if (request !== detailRequest.current) throw new Error('案件已切換，請重新開啟。');
     setDetail(result);
     const listId = ++listRequest.current;
-    void clientRegistryClient.list(toRequest(appliedFilters, pageOffset || undefined)).then((result) => {
-      if (listId === listRequest.current) setPage(result);
-    }).catch(() => { if (listId === listRequest.current) setError('資料已儲存，但清單更新失敗，請重新搜尋。'); });
+    const refreshedPage = await clientRegistryClient.list(toRequest(appliedFilters, pageOffset || undefined));
+    if (listId === listRequest.current) setPage(refreshedPage);
     return result;
   };
   const closeDetail = () => {

@@ -474,3 +474,14 @@ fingerprint、blockers、preview fingerprint與PDF result。正式document persi
 - D36 固定顯示本案專屬虛擬帳號。帳號以 Client Finance／Finance Import 共用的案件編號規則產生，
   後續銀行核銷以同一帳號解析回唯一案件；不得改用全域工會／代收付帳戶、月嫂帳戶、環境變數或
   Excel placeholder。案件編號無法產生合法虛擬帳號時不得列印。
+
+### 2026-10-15 未簽客戶契約重新產生人工裁決
+
+2026-10-15 人工補充：已產生但尚未簽署的客戶契約，修改本案虛擬帳號後可按「重新產生客戶契約」。
+沿用既有 `client/unsigned-pdf` 命令，fresh-read Client Finance 對照與 current owner facts；來源 snapshot 改變時
+append 新 XLSX／PDF 版本，D36 帶入新帳號，不覆寫舊檔。同一來源仍可重用既有 PDF。成功回讀後下載新版，後續下載亦指向新版。
+current plan 的客戶已有 signed-received event、外部簽署回報或案件已有 contract identity 時，後端在原 outer UoW
+內鎖定案件後拒絕重新產生，回 typed conflict；UI 已知簽署／完成時不提供此入口，有客戶簽回草稿時停用。
+重新產生不建立交接、簽署事件、LINE 提醒、帳務義務或外部平台效果；進行中／結果未明沿用原命令身分核對。
+早期已交接工作若保存包含客戶文件的舊文件集合 hash，僅能以同案／同方案的既有客戶文件版本與
+current 月嫂文件集合證明原 hash，才可回讀新客戶版本；不改寫舊 hash，不容許月嫂文件變更或未知 hash。

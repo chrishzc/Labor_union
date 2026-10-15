@@ -61,3 +61,6 @@
 
 ## Change triggers
 Reconcile when external signing presentation、recovery confirmation、unknown-outcome handling、final PDF readback、technical-detail disclosure or focused test location changes.
+
+已備妥而未簽署的客戶 PDF 可經「重新產生客戶契約」沿既有 prepare 命令重讀 current facts；虛擬帳號改變會產生新來源 snapshot 及新 PDF。回讀後準備中／已交接畫面均保留新版 document ID，未知結果沿用原命令核對。客戶簽回草稿停用入口；client source writer 在原 UoW 鎖定案件、檢查 current plan 客戶簽署事件／外部回報與 contract identity，已簽署回 typed conflict，不覆寫歷史文件。
+舊交接文件集合 hash 可由同案／方案的保存客戶版本證明，並維持 current staff set 相同；回讀新版客戶 PDF 不改舊 session hash，月嫂文件變更仍拒絕。

@@ -553,6 +553,7 @@ def test_registry_balance_uses_paid_adjustment_allocation(monkeypatch):
             {"case_no": "CASE-001"},
             {"received_total_ntd": 70000},
             (),
+            ({"virtual_account": "99781699114999"},),
         ]
     )
     monkeypatch.setattr(
@@ -566,3 +567,4 @@ def test_registry_balance_uses_paid_adjustment_allocation(monkeypatch):
     assert values["customer_payable_total_ntd"] == 70000
     assert values["received_total_ntd"] == 70000
     assert values["customer_balance_ntd"] == 0
+    assert values["virtual_account"] == "99781699114999"

@@ -401,3 +401,39 @@ Stable errors：
   使用現行公式候選。案件對外顯示帳號亦採相同順位：唯一匯入帳號優先；同案存在多個不同匯入帳號時
   必須明確回傳不唯一，不得任選其一或退回公式。
 - 既有版本化工會／代收付帳戶 Query／Preview／Apply 仍保留供其既有用途，但不再是客戶契約來源。
+
+### 8.1 客戶名冊單案虛擬帳號修改（2026-10-15 人工裁決）
+
+狀態：SPEC_READY；convergence：READY，無 blocking gap。Authority：使用者要求在客戶名冊新增修改功能，
+並明確選擇「以新帳號取代本案原有匯入帳號，後續契約與收款辨識使用新帳號」。
+同日最新人工裁決：「不用原因跟預覽功能」；單案修改直接儲存，不填原因、不執行人工或隱藏預覽。
+
+- VA-01：有名冊寫入權限的管理人員可在案件詳細資料新增或修改「匯入虛擬帳號」。
+  新值沿用既有 `99781699` 加六位數字的格式；內建帳號仍依案件編號產生，不可人工改寫。
+- VA-02：Client Finance 提供 `GET /api/v1/admin/client-finance/cases/{case_no}/virtual-account`
+  與同路徑的 `POST /apply`。Query 零寫入，回傳本案全部舊對照與 `mapping_ids`；Apply 不接受原因或 preview fingerprint。
+  Apply 原子取代本案全部匯入對照，其他案件不變；禁止將已匯入對應其他案件的帳號指派給本案。
+  無對照時可新增，多筆舊對照時可整理為單一新帳號；不提供清空或刪除帳號操作。
+- VA-03：沿用既有匯入對照與公式順位。儲存後契約的下一次資料投影及收款辨識讀取新對照；
+  不改寫已簽契約、歷史流水、核銷分配或對外發送文件。移除舊匯入對照不建立帳號停用清單，
+  完全沒有匯入對照的帳號仍依第 8 節公式解析。
+  已產生但未簽的客戶契約可依規格 21 的既有未簽 PDF 命令重新產生新版本，帶入新帳號；由 Contract Signing 擁有文件版本，不由帳號 writer 改檔。
+- VA-04：現有對照無獨立 owner version；Query 回傳不可變 mapping row IDs 作為本案集合的版本依據。
+  Apply 以 `expected_mapping_ids` 對照 fresh-lock 後的 current IDs，防止讀取後被另一個匯入／修改更換對照；
+  不一致回 typed HTTP 409，不自動重試。空集合以空陣列表示，取代同值但 row IDs 改變仍視為 stale。
+  不使用 Preview fingerprint／digest／snapshot token；使用既有匯入 writer 的同一互斥鎖，跨案占用亦在鎖內重查。
+- VA-05：單一 outer UoW 同時保存對照與 `admin_command_receipts` 的 actor、reason、before／after。
+  使用者不填原因；receipt 的 reason 固定記錄「後台客戶名冊虛擬帳號更新」。既有必填 `preview_fingerprint`
+  儲存欄位填入同一 command digest，僅符合既有 schema，不代表預覽契約，也不作 concurrency 檢查。
+  人工來源為 canonical 單列命令的 content digest，`source_row=2` 表示其標準表頭後第一列；
+  receipt 的獨立 command family 區分人工修改與 XLSX 匯入，不假稱上傳過 workbook。
+  同 key／command／actor 回原 receipt，異內容或異 actor 固定拒絕。
+- VA-06：UI 只保留帳號輸入、取消與直接儲存；不提供修改原因、預覽或額外確認步驟。
+  草稿、送出中、結果未明、已儲存但回讀失敗均沿用名冊關閉保護；stale 需重新讀取後再儲存。
+  結果未明以同一 key 核對，成功後回讀帳號、名冊清單及詳情，才顯示完成。
+
+驗收：VA-A1 無／單／多舊對照可改成單一新值且不影響他案；VA-A2 格式錯誤、查無案件、跨案占用、
+stale 與異內容／異 actor replay 均拒絕且零 mutation；VA-A3 同命令 replay 不重做，receipt 保存失敗整筆 rollback；
+VA-A4 契約及核銷沿用既有 resolver 消費新對照；VA-A5 UI 不填原因、不預覽即可直接儲存，回讀及結果未明關閉鎖可驗證。
+來源：最新人工裁決＋第 8 節（格式／順位）＋Global 2.3（concurrency）＋既有 mapping／receipt schema（執行機制）。
+本次僅授權本機程式、測試與規格變更；不含正式資料修改、schema migration、銀行／LINE 外部效果或部署。

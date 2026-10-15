@@ -322,6 +322,16 @@ class ClientContractSigningApplication:
             def persist(connection):
                 nonlocal archive
                 with connection.cursor() as cursor:
+                    cursor.execute(
+                        "SELECT case_no,contract_identity FROM orders WHERE case_no=%s FOR UPDATE",
+                        (command.case_no,),
+                    )
+                    order = cursor.fetchone()
+                if order is None:
+                    raise ValueError("contract_signing_case_facts_not_found")
+                if order.get("contract_identity"):
+                    raise ValueError("contract_client_unsigned_already_signed")
+                with connection.cursor() as cursor:
                     cursor.execute("SELECT plan.id AS matching_plan_id FROM caregiver_matching_plans plan "
                                    "WHERE plan.case_no=%s AND plan.is_active=1 "
                                    "AND plan.status IN ('proposed','accepted') "
@@ -330,6 +340,21 @@ class ClientContractSigningApplication:
                 if len(plans) != 1:
                     raise ValueError("contract_external_signing_accepted_plan_required")
                 facts = dict(plans[0])
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        "SELECT EXISTS(SELECT 1 FROM contract_signing_events event "
+                        "JOIN contract_document_versions document ON document.id=event.document_version_id "
+                        "WHERE event.case_no=%s AND event.event_type='signed_received' "
+                        "AND document.document_scope='client_contract' AND document.matching_plan_id=%s) AS signed_received,"
+                        "EXISTS(SELECT 1 FROM contract_external_completion_reports report "
+                        "JOIN contract_document_versions document ON document.id=report.document_version_id "
+                        "WHERE report.case_no=%s AND report.report_scope='client' "
+                        "AND document.matching_plan_id=%s) AS reported",
+                        (command.case_no, facts["matching_plan_id"], command.case_no, facts["matching_plan_id"]),
+                    )
+                    signing = cursor.fetchone()
+                if signing and (signing["signed_received"] or signing["reported"]):
+                    raise ValueError("contract_client_unsigned_already_signed")
                 template_facts = dict(
                     self._template_facts(connection, command.case_no, facts)
                 )

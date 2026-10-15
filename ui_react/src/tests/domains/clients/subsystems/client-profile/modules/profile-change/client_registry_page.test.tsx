@@ -8,6 +8,10 @@ import { ApiTimeoutError, ApiHttpError } from '../../../../../../../api/shared/t
 import { sessionClient } from '../../../../../../../api/auth/session_client';
 import { orderMutationFlowStore } from '../../../../../../../adapters/orders/order_mutation_flow_store';
 
+vi.mock('../../../../../../../api/client_finance/case_virtual_account_client', () => ({
+  caseVirtualAccountClient: { query: async (caseNo: string) => ({ case_no: caseNo, imported_virtual_accounts: [], built_in_virtual_account: null, mapping_ids: [] }) },
+}));
+
 vi.mock('../../../../../../../components/CaseArchitectureBootstrapRepairPanel', () => ({
   CaseArchitectureBootstrapRepairPanel: ({ caseNo }: { caseNo: string }) => <div aria-label="案件初始資料修復">{caseNo}</div>,
 }));

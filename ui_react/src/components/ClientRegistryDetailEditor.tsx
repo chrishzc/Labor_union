@@ -6,6 +6,7 @@ import { OrderTermsMutationPanel } from './OrderTermsMutationPanel';
 import { OrderTermsUnavailableNote } from './OrderTermsUnavailableNote';
 import { CaseArchitectureBootstrapRepairPanel } from './CaseArchitectureBootstrapRepairPanel';
 import { ClientRegistryServiceStaff } from './ClientRegistryServiceStaff';
+import { ClientRegistryVirtualAccount } from './ClientRegistryVirtualAccount';
 import '../pages/ClientRegistryPage.css';
 
 const profileLabels: Record<string, string> = { name: '姓名', gender: '性別', phone: '電話（手機／市話）', email: 'HCM Email', city: '縣市', address: '地址', due_month: '預產期／預計服務開始月份', reject_reason: '不符合原因', residence_type: '住宅型態', delivery_type: '生產方式', baby_info: '寶寶資訊', notes: '行政註記', service_type: '服務方式（排班參考）' };
@@ -87,6 +88,7 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
   const [termsState, setTermsState] = useState<RegistryEditState>({ dirty: false, busy: false });
   const [repairState, setRepairState] = useState<RegistryEditState>({ dirty: false, busy: false });
   const [staffState, setStaffState] = useState<RegistryEditState>({ dirty: false, busy: false });
+  const [accountState, setAccountState] = useState<RegistryEditState>({ dirty: false, busy: false });
   const [refreshError, setRefreshError] = useState('');
   const previous = useRef(detail);
   const alive = useRef(true);
@@ -115,8 +117,8 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
     if (focusField) (document.getElementById(`registry-profile-${focusField}`) ?? document.getElementById(`registry-beclass-${focusField}`) ?? document.getElementById(`registry-care-${focusField}`))?.focus();
   }, [detail.case_no, focusField]);
   const changes = useMemo(() => ({ profile: diff(drafts.profile, source(detail, 'profile'), 'profile'), beclass: diff(drafts.beclass, source(detail, 'beclass'), 'beclass'), care: diff(drafts.care, source(detail, 'care'), 'care') }), [drafts, detail]);
-  const pending = Object.values(actions).some((action) => action.loading || action.applied || action.unknown) || repairState.busy || staffState.busy;
-  const dirty = Object.values(changes).some((value) => Object.keys(value).length > 0) || termsState.dirty || repairState.dirty || staffState.dirty;
+  const pending = Object.values(actions).some((action) => action.loading || action.applied || action.unknown) || repairState.busy || staffState.busy || accountState.busy;
+  const dirty = Object.values(changes).some((value) => Object.keys(value).length > 0) || termsState.dirty || repairState.dirty || staffState.dirty || accountState.dirty;
   useEffect(() => { onStateChange({ dirty, busy: pending || termsState.busy }); }, [dirty, pending, termsState.busy, onStateChange]);
   const update = (section: Section, field: string, value: Scalar) => {
     setDrafts((current) => ({ ...current, [section]: { ...current[section], [field]: value } }));
@@ -211,12 +213,13 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
       <fieldset disabled={pending} className="registry-terms-fieldset">{detail.order_terms.status === 'ready' && detail.order_terms.data
         ? <OrderTermsMutationPanel caseNo={detail.case_no} query={detail.order_terms.data} onObserved={() => { void refreshRelated(); }} onEditStateChange={setTermsState} />
         : <OrderTermsUnavailableNote caseNo={detail.case_no} code={detail.order_terms.code} />}
-      </fieldset>{bootstrapRequired && <fieldset disabled={Object.values(actions).some((action) => action.loading || action.applied || action.unknown) || termsState.busy} className="registry-terms-fieldset"><CaseArchitectureBootstrapRepairPanel caseNo={detail.case_no} onCompleted={async () => { await onRefresh(); }} onEditStateChange={setRepairState} /></fieldset>}
+      </fieldset>{bootstrapRequired && <fieldset disabled={Object.values(actions).some((action) => action.loading || action.applied || action.unknown) || termsState.busy || accountState.busy} className="registry-terms-fieldset"><CaseArchitectureBootstrapRepairPanel caseNo={detail.case_no} onCompleted={async () => { await onRefresh(); }} onEditStateChange={setRepairState} /></fieldset>}
     </section>
+    <ClientRegistryVirtualAccount caseNo={detail.case_no} disabled={Object.values(actions).some(action => action.loading || action.applied || action.unknown) || termsState.busy || repairState.busy || staffState.busy} onRefresh={onRefresh} onStateChange={setAccountState} />
     <section className="registry-editor"><h3>客戶帳務（唯讀）</h3>{detail.finance.status === 'ready' && detail.finance.values
       ? <dl className="registry-information-fields">{Object.entries(financeLabels).map(([field, label]) => <div key={field}><dt>{label}</dt><dd>{display(detail.finance.values![field as keyof typeof detail.finance.values])}</dd></div>)}</dl>
       : <><p>{detail.finance.code === 'client_finance_bootstrap_required' ? '尚未建立客戶帳務資料。' : '客戶帳務暫時無法讀取，請重新整理。'}</p>{detail.finance.code && <details><summary>技術資訊</summary><code>{detail.finance.code}</code></details>}</>}</section>
-    <ClientRegistryServiceStaff key={detail.case_no} caseNo={detail.case_no} revision={detail} disabled={Object.values(actions).some((action) => action.loading || action.applied || action.unknown) || termsState.busy || repairState.busy} onCommitted={refreshRelated} onStateChange={setStaffState} />
+    <ClientRegistryServiceStaff key={detail.case_no} caseNo={detail.case_no} revision={detail} disabled={Object.values(actions).some((action) => action.loading || action.applied || action.unknown) || termsState.busy || repairState.busy || accountState.busy} onCommitted={refreshRelated} onStateChange={setStaffState} />
     <ClientChangeHistory detail={detail} />
   </div>;
 };

@@ -18,6 +18,7 @@ from domains.contract_signing.external_signing import (
 from infrastructure.db.contract_external_signing_repository import (
     MySqlContractExternalSigningRepository,
     _document_set_fingerprint,
+    _legacy_document_set_fingerprint,
     _legacy_manual_evidence,
     _stored_receipt,
 )
@@ -278,6 +279,7 @@ def test_load_session_rejects_changed_current_document_set() -> None:
         {"id": 44},
         [{"segment_id": 11, "document_version_id": 102}],
         {"client_id": "301", "document_version_id": 201},
+        [],
     ])
 
     repository = MySqlContractExternalSigningRepository(connection)
@@ -288,6 +290,32 @@ def test_load_session_rejects_changed_current_document_set() -> None:
         assert str(error) == "external_signing_document_set_stale"
     else:
         raise AssertionError("stale document set must fail closed")
+
+
+@pytest.mark.parametrize("current_staff_document", [101, 102])
+def test_legacy_handoff_allows_new_client_version_only_with_unchanged_staff_set(current_staff_document):
+    segments = [{"segment_id": 11, "staff_id": "501"}]
+    old_set = _legacy_document_set_fingerprint("CASE-001", 9, segments, {11: 101}, 201)
+    connection = ScriptedConnection([
+        _session_row(old_set), {"case_no": "CASE-001", "client_id": 301}, {"id": 9}, segments, None,
+        [{"segment_id": 11, "document_version_id": current_staff_document}],
+        {"client_id": "301", "document_version_id": 202},
+        [{"document_version_id": 201}, {"document_version_id": 202}], [],
+    ])
+    repository = MySqlContractExternalSigningRepository(connection)
+    if current_staff_document != 101:
+        with pytest.raises(RuntimeError, match="external_signing_document_set_stale"):
+            repository.load_session(_final_session().session_id, for_update=True)
+    else:
+        facts = repository.load_session(_final_session().session_id, for_update=True)
+        assert facts.client_document_version_id == 202
+        assert facts.document_set_fingerprint == old_set
+        assert facts.client_reported is False
+    history_sql, history_parameters = connection.executions[7]
+    assert "document_scope='client_contract'" in history_sql and history_sql.endswith(" FOR UPDATE")
+    assert history_parameters == ("CASE-001", 9)
+    assert connection.commit_calls == connection.rollback_calls == 0
+    assert not any(sql.startswith(("UPDATE", "INSERT", "DELETE")) for sql, _ in connection.executions)
 
 
 def test_legacy_manual_evidence_rejects_unknown_document_scope() -> None:

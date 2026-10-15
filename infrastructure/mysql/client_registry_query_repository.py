@@ -13,7 +13,7 @@ from subsystems.client_profile.registry_filters import (
 
 from domains.case_import.order_information import project_order_information
 from subsystems.case_import.beclass_correction_workflow import allows_manual_beclass_source
-from subsystems.client_finance.virtual_account_resolution import build_client_virtual_account
+from subsystems.client_finance.virtual_account_resolution import build_client_virtual_account, resolve_case_virtual_account
 from domains.client_finance.obligation_planning import build_client_finance_terms_candidate
 from domains.client_finance.order_amount_calculation import _claim_schedule
 from domains.client_finance.subsidy_coverage import normalize_subsidy_policy_identity
@@ -634,6 +634,11 @@ def _claim_application_month(row) -> dict[str, int | None]:
     }
 
 
+def _case_virtual_account(connection, case_no):
+    with connection.cursor() as cursor:
+        return resolve_case_virtual_account(cursor, case_no)["virtual_account"]
+
+
 def _finance_values(connection, case_no):
     try:
         with connection.cursor() as cursor:
@@ -658,7 +663,7 @@ def _finance_values(connection, case_no):
         customer_payable = sum(item.amount.amount for item in candidate.stage_plans)
         subsidy = subsidy_rows[0] if subsidy_rows else None
         return "ready", None, {
-            "virtual_account": build_client_virtual_account(case_no),
+            "virtual_account": _case_virtual_account(connection, case_no),
             "service_unit_price_ntd": facts.payment_terms.client_hourly_rate.amount,
             "service_hours": len(facts.charge_days) * facts.service_hours_per_day,
             "customer_payable_total_ntd": customer_payable,

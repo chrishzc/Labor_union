@@ -120,7 +120,24 @@ class MySqlContractExternalSigningRepository:
             current_document_set,
             legacy_document_set,
         }:
-            raise RuntimeError("external_signing_document_set_stale")
+            # Earlier handoffs included the client PDF in their immutable hash.
+            # A regenerated client PDF is valid only if the old hash can still
+            # be proved against this plan's saved client version and current staff set.
+            prior_clients = self._all(
+                "SELECT id AS document_version_id FROM contract_document_versions "
+                "WHERE case_no=%s AND matching_plan_id=%s "
+                "AND document_scope='client_contract' AND document_role='template_generated' "
+                "ORDER BY id" + suffix,
+                (session["case_no"], session["matching_plan_id"]),
+            )
+            if not any(
+                str(session["current_document_set_sha256"]) == _legacy_document_set_fingerprint(
+                    str(session["case_no"]), int(session["matching_plan_id"]),
+                    segments, document_by_segment, int(row["document_version_id"]),
+                )
+                for row in prior_clients
+            ):
+                raise RuntimeError("external_signing_document_set_stale")
         reports = self._all(_REPORT_TARGETS_SELECT_SQL + suffix, (session["id"],))
         staff_reported = tuple(
             sorted(

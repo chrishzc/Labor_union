@@ -6,6 +6,8 @@ vi.mock('../../../../../../../api/orders/order_query_client', () => ({ ordersQue
 const mocks = vi.hoisted(() => ({ list: vi.fn(), query: vi.fn(), history: vi.fn(), filterOptions: vi.fn(), downloadOrderAccounting: vi.fn(), downloadCaseInspection: vi.fn() }));
 const bootstrapMocks = vi.hoisted(() => ({ status: vi.fn(), preview: vi.fn(), apply: vi.fn() }));
 const intakeMocks = vi.hoisted(() => ({ previewCompletion: vi.fn(), previewTerms: vi.fn(), applyTerms: vi.fn() }));
+const accountMocks = vi.hoisted(() => ({ query: vi.fn(), apply: vi.fn() }));
+vi.mock('../../../../../../../api/client_finance/case_virtual_account_client', () => ({ caseVirtualAccountClient: accountMocks }));
 vi.mock('../../../../../../../api/client_registry/client_registry_client', () => ({ clientRegistryClient: mocks }));
 vi.mock('../../../../../../../api/case_import/case_architecture_bootstrap_client', () => ({ caseArchitectureBootstrapClient: bootstrapMocks }));
 vi.mock('../../../../../../../api/orders/order_intake_completion_client', () => ({
@@ -30,6 +32,8 @@ describe('ClientRosterPage', () => {
     mocks.downloadCaseInspection.mockReset();
     Object.values(bootstrapMocks).forEach((mock) => mock.mockReset());
     Object.values(intakeMocks).forEach((mock) => mock.mockReset());
+    Object.values(accountMocks).forEach((mock) => mock.mockReset());
+    accountMocks.query.mockResolvedValue({ case_no: 'CASE-001', imported_virtual_accounts: [], built_in_virtual_account: null, mapping_ids: [] });
     mocks.list.mockResolvedValue({ items: [item], next_cursor: null, next_offset: null });
     mocks.filterOptions.mockImplementation(async (field: string) => ({ values: field === 'requires_cooking' ? ['true', 'false', null] : field === 'multi_birth_count' ? ['單胞胎', '雙胞胎', null] : ['洽談中', '訂單成立', '服務中', null], next_offset: null }));
     mocks.query.mockResolvedValue({
@@ -122,6 +126,29 @@ describe('ClientRosterPage', () => {
       ],
       sortBy: 'case_no', sortOrder: 'asc', limit: 100,
     }));
+  });
+
+  it('keeps the drawer locked until the saved account and roster list both refresh', async () => {
+    const account = '99781699114999';
+    accountMocks.apply.mockResolvedValue({ case_no: 'CASE-001', before: [], virtual_account: account });
+    let finishList!: (value: unknown) => void;
+    const listReadback = new Promise(resolve => { finishList = resolve; });
+    render(<ClientRosterPage />);
+    await screen.findByText('CASE-001');
+    fireEvent.click(screen.getByRole('row', { name: '開啟案件 CASE-001 詳細資料' }));
+    const panel = await screen.findByRole('region', { name: '虛擬帳號設定' });
+    await within(panel).findByLabelText('匯入虛擬帳號');
+    fireEvent.change(within(panel).getByLabelText('匯入虛擬帳號'), { target: { value: account } });
+    expect(within(panel).queryByLabelText('虛擬帳號修改原因')).not.toBeInTheDocument();
+    accountMocks.query.mockResolvedValue({ case_no: 'CASE-001', imported_virtual_accounts: [account], built_in_virtual_account: null, mapping_ids: [1] });
+    mocks.list.mockReturnValueOnce(listReadback);
+    fireEvent.click(within(panel).getByRole('button', { name: /^儲存虛擬帳號$/ }));
+    await waitFor(() => expect(mocks.list).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole('button', { name: '關閉案件詳細資料' })).toBeDisabled();
+    await act(async () => finishList({ items: [{ ...item, imported_virtual_accounts: [account] }], next_cursor: null, next_offset: null }));
+    await within(panel).findByText('虛擬帳號已儲存，名冊資料已更新。');
+    expect(screen.getByRole('button', { name: '關閉案件詳細資料' })).not.toBeDisabled();
+    expect(within(screen.getByRole('table')).getByText(account)).toBeInTheDocument();
   });
 
   it.each(['東區', '北區', '香山區', '竹北市'])('leaves an unrecognized district blank even when city is %s', async (city) => {
