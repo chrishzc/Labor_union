@@ -30,6 +30,8 @@
   - `ui_react/src/api/orders/order_mutation_client.ts`
 
 ## Dependencies
+
+- outbound: `scheduling/waiting-deposit-lock` — Apply 先借用 occupancy mutex，保存日期及失效日期表後，在同一 outer UoW 自動保留已確認配對；只有條件齊備才鎖，衝突整筆 rollback。Query／Preview 不上鎖，不建立 assignment 或增加 Scheduling version。
 - outbound: `case-import/hcm-current-workbook-import` — 原始服務方式只讀 Case Import immutable source snapshot，排班試算不改寫來源。
 - outbound: `orders/actual-start` — 輸入改變時零寫入 Preview；最後確認才 Apply／readback，取得新 owner versions 後再 Preview／Apply 服務日期。正式或歷史重排候選須與核對集合一致。
 - outbound: `orders/lifecycle-authoritative-facts` — 歷史正式安排以 typed lifecycle candidate 委派現有 Orders writer 保存事件、projection 與 outbox；尚未確認或未來開始日維持訂單成立。

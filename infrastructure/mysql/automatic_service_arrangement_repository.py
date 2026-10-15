@@ -5,6 +5,10 @@ from datetime import date
 from domains.scheduling.assignment_plan import AssignmentPlanIntent, AssignmentPlanSegmentIntent
 from infrastructure.mysql.matching_schedule_confirmation_repository import MySqlMatchingScheduleConfirmationRepository
 from subsystems.scheduling.automatic_service_arrangement import AutomaticArrangementProposal
+from subsystems.scheduling.availability_lock_acquisition_workflow import (
+    lock_current_matching_staff, reserve_confirmed_matching_plan,
+)
+from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 
 
 class MySqlAutomaticServiceArrangementSource:
@@ -12,6 +16,13 @@ class MySqlAutomaticServiceArrangementSource:
         self.connection = connection
         self.assignments = assignment_application
         self.schedules = MySqlMatchingScheduleConfirmationRepository(connection)
+
+    def reserve_waiting_deposit(self, case_no: str) -> None:
+        """Discovery catches pre-upgrade confirmations; Query stays read-only."""
+        with MySqlUnitOfWork(self.connection) as unit:
+            locked_staff = lock_current_matching_staff(self.connection, case_no)
+            reserve_confirmed_matching_plan(self.connection, case_no, 'system:automatic-waiting-deposit-lock', locked_staff)
+            unit.commit()
 
     def proposal(self, case_no: str, plan_id: int) -> AutomaticArrangementProposal:
         facts = self.assignments.query(case_no).assignment_plan
@@ -40,7 +51,7 @@ class MySqlAutomaticServiceArrangementSource:
         if not 1 <= limit <= 200:
             raise ValueError('automatic arrangement page size is invalid')
         with self.connection.cursor() as cursor:
-            cursor.execute('SELECT s.case_no,MAX(s.plan_id) AS plan_id FROM matching_schedule_snapshots s JOIN confirmed_service_date_versions v ON v.id=s.confirmed_version_id AND v.is_current=1 JOIN orders o ON o.case_no=s.case_no WHERE s.current_marker=1 AND s.case_no>%s AND o.status IN (\'洽談中\',\'訂單成立\',\'服務中\') AND NOT EXISTS (SELECT 1 FROM scheduling_aggregates a JOIN case_staff_assignments assignment ON assignment.generation_id=a.effective_generation_id AND assignment.status IN (\'active\',\'planned\',\'completed\') WHERE a.case_no=s.case_no) GROUP BY s.case_no ORDER BY s.case_no LIMIT %s', (after_case_no, limit))
+            cursor.execute('SELECT p.case_no,MAX(p.id) AS plan_id FROM caregiver_matching_plans p JOIN confirmed_service_date_versions v ON v.case_no=p.case_no AND v.is_current=1 JOIN orders o ON o.case_no=p.case_no WHERE p.is_active=1 AND p.status IN (\'proposed\',\'accepted\') AND p.case_no>%s AND o.status IN (\'洽談中\',\'訂單成立\',\'服務中\') AND NOT EXISTS (SELECT 1 FROM scheduling_aggregates a JOIN case_staff_assignments assignment ON assignment.generation_id=a.effective_generation_id AND assignment.status IN (\'active\',\'planned\',\'completed\') WHERE a.case_no=p.case_no) GROUP BY p.case_no ORDER BY p.case_no LIMIT %s', (after_case_no, limit))
             return tuple((row['case_no'], row['plan_id']) for row in cursor.fetchall())
 
     def job_state(self, identity: str):

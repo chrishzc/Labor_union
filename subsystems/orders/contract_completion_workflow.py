@@ -171,8 +171,9 @@ class ContractCompletionWorkflow:
         self._unit_of_work_factory = unit_of_work_factory
         self._clock = clock
 
-    def query(self, case_no: str) -> ContractCompletionQuery:
-        facts = self._repository.load_for_preview(case_no)
+    def query(self, case_no: str, *, for_update: bool = False) -> ContractCompletionQuery:
+        facts = (self._repository.load_for_apply(case_no) if for_update
+                 else self._repository.load_for_preview(case_no))
         blockers = _workflow_blockers(facts)
         return ContractCompletionQuery(facts.order, facts.client_finance.account_version, not blockers, blockers)
 

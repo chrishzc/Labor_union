@@ -44,6 +44,14 @@ class MySqlMatchingScheduleConfirmationRepository:
         passed = bool(recipients) and all(payload["total_service_days"] > 0 for payload in payloads) and all(r["confirmation_status"] in ("confirmed", "manually_confirmed") for r in recipients)
         return {"case_no": case_no, "plan_id": plan_id, "confirmed_service_date_version": root["version"], "snapshot_id": snapshot["id"] if snapshot else None, "snapshot_status": status, "schedule_preview": preview, "outdated_schedule_preview": outdated_preview, "recipients": recipients, "gate_passed": passed}
 
+    def lock_waiting_deposit_staff(self, case_no: str) -> tuple[int, ...]:
+        from subsystems.scheduling.availability_lock_acquisition_workflow import lock_current_matching_staff
+        return lock_current_matching_staff(self.connection, case_no)
+
+    def reserve_waiting_deposit(self, case_no: str, actor: str, locked_staff_ids: tuple[int, ...]) -> None:
+        from subsystems.scheduling.availability_lock_acquisition_workflow import reserve_confirmed_matching_plan
+        reserve_confirmed_matching_plan(self.connection, case_no, actor, locked_staff_ids)
+
     def invalidate_current_snapshot(self, case_no: str) -> None:
         """Invalidate Scheduling's current snapshot in the caller's transaction."""
         with self.connection.cursor() as cursor:

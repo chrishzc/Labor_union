@@ -152,6 +152,7 @@ class ContractExternalSigningApplication:
             "state": facts.state.value,
             "status_version": facts.status_version,
             "handoff_recorded": active is not None,
+            "signing_blockers": list(self.reports.signing_blockers(facts)),
             "manual_notification_targets": [
                 {"scope": target.scope.value, "subject_reference": target.subject_reference}
                 for target in (() if handoff is None else handoff.manual_notification_targets)
@@ -254,9 +255,6 @@ class ContractExternalSigningApplication:
             source_id, replayed = client_documents.prepare_external_document(
                 PrepareExternalClientContractCommand(case_no, actor.actor_id, idempotency_key, correlation_id))
         except ValueError as error:
-            if str(error) == "contract_client_unsigned_already_signed":
-                raise ExternalSigningTypedError(category="conflict", code="contract_client_unsigned_already_signed",
-                    message="客戶契約已簽署，不能重新產生未簽契約。") from error
             if str(error) == "contract_external_signing_accepted_plan_required":
                 raise ExternalSigningTypedError(category="conflict", code="external_signing_accepted_plan_required",
                     message="目前案件尚未具備可投影的有效配對方案。") from error

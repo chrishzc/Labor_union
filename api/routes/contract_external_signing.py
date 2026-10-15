@@ -378,6 +378,7 @@ class ExternalSigningQueryView(BaseModel):
     ]
     status_version: int = Field(ge=0)
     handoff_recorded: bool
+    signing_blockers: list[str] = Field(default_factory=list)
     handoff_included_reminders: bool = False
     testing_skip_allowed: bool = False
     manual_notification_targets: list[ManualSigningNotificationTargetView] = Field(default_factory=list)

@@ -44,6 +44,7 @@ from subsystems.scheduling.proposed_weekly_service_projection import (
 class MySqlMatchingNotificationRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
+        self._locked_waiting_staff: dict[str, tuple[int, ...]] = {}
 
     def get_contact_state(
         self,
@@ -52,6 +53,9 @@ class MySqlMatchingNotificationRepository:
         *,
         lock: bool = False,
     ) -> MatchingContactState | None:
+        if lock:
+            from subsystems.scheduling.availability_lock_acquisition_workflow import lock_current_matching_staff
+            self._locked_waiting_staff[case_no] = lock_current_matching_staff(self._connection, case_no)
         with self._connection.cursor() as cursor:
             plan = self._plan_row(cursor, case_no, plan_id, lock)
             if plan is None:
@@ -262,6 +266,9 @@ class MySqlMatchingNotificationRepository:
             self._append_candidate_notice(plan, segment_id, response_value, actor_id, reason, event_id, occurred_at)
         if token_hash is not None:
             self._consume_interaction(token_hash, line_user_id, occurred_at)
+        if response_type == 'customer_decision' and response_value == 'accepted':
+            from subsystems.scheduling.availability_lock_acquisition_workflow import reserve_confirmed_matching_plan
+            reserve_confirmed_matching_plan(self._connection, plan.case_no, actor_id, self._locked_waiting_staff.get(plan.case_no, ()))
         return MatchingResponseResult(
             event_id,
             MatchingPlanReference(plan.case_no, plan.plan_id, plan.version + 1),

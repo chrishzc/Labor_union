@@ -149,6 +149,7 @@ export const ContractExternalSigningQuerySchema = z.strictObject({
   state: ExternalSigningStateSchema,
   status_version: z.number().int().nonnegative(),
   handoff_recorded: z.boolean(),
+  signing_blockers: z.array(z.string()).optional(),
   handoff_included_reminders: z.boolean().optional(),
   signing_reminder: SigningReminderReceiptSchema.nullable().optional(),
   testing_skip_allowed: z.boolean().optional(),

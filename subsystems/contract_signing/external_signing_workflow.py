@@ -186,6 +186,8 @@ class LegacyManualRecoveryPreview:
 class ExternalStaffCompletionPort(Protocol):
     """Runs inside the caller-owned transaction; never commits or opens a UoW."""
 
+    def signing_blockers(self, facts: ExternalSigningSessionFacts, *, for_update: bool = False) -> tuple[str, ...]: ...
+
     def establish_prerequisites(
         self,
         command: object,
@@ -357,20 +359,22 @@ class ExternalSigningWorkflow:
                         "external_signing_status_version_stale",
                         "簽約狀態版本已變更。",
                     )
-                if active.state is ExternalSigningState.COMPLETED:
-                    raise _typed_error(
-                        "external_signing_session_completed",
-                        "已完成的外部簽約 session 不可重複交接。",
-                    )
                 if active.state is ExternalSigningState.SUPERSEDED:
                     raise _typed_error(
                         "external_signing_session_superseded",
                         "已被取代的外部簽約 session 不可重複交接。",
                     )
-                raise _typed_error(
-                    "external_signing_handoff_already_recorded",
-                    "外部簽約交接已記錄，請使用原命令識別查詢 receipt。",
+                self._require_signing_available(active)
+                receipt = ExternalSigningHandoffReceipt(
+                    active.session_id, active.status_version, False
                 )
+                self._repository.save_handoff_receipt(
+                    command.idempotency_key,
+                    StoredExternalSigningHandoffReceipt(fingerprint, receipt),
+                    command,
+                )
+                unit_of_work.commit()
+                return receipt
             facts = self._repository.derive_current_session(
                 command.case_no, for_update=True
             )
@@ -403,9 +407,7 @@ class ExternalSigningWorkflow:
                     "簽約狀態版本已變更。",
                 )
             resulting_version = facts.status_version + 1
-            if self._handoff_notification_port is None:
-                raise RuntimeError("external_signing_handoff_notification_port_missing")
-            self._handoff_notification_port.validate_documents(facts)
+            self._require_signing_available(facts)
             manual_targets = ()
             self._repository.activate_session(
                 facts,
@@ -449,6 +451,7 @@ class ExternalSigningWorkflow:
                 raise _typed_error("external_signing_status_version_stale", "簽約狀態版本已變更。")
             if facts.state in {ExternalSigningState.COMPLETED, ExternalSigningState.SUPERSEDED}:
                 raise _typed_error("external_signing_reminders_closed", "已完成或已被取代的簽約不可發送簽署提醒。")
+            self._require_signing_available(facts)
             if self._handoff_notification_port is None:
                 raise RuntimeError("external_signing_handoff_notification_port_missing")
             manual_targets = self._handoff_notification_port.enqueue_notifications(command, facts)
@@ -456,6 +459,16 @@ class ExternalSigningWorkflow:
             self._repository.save_reminder_receipt(command.idempotency_key, StoredExternalSigningReminderReceipt(fingerprint, receipt), command)
             unit_of_work.commit()
             return receipt
+
+    def signing_blockers(self, facts: ExternalSigningSessionFacts, *, for_update: bool = False) -> tuple[str, ...]:
+        if facts.state is ExternalSigningState.COMPLETED:
+            return ()
+        return self._staff_completion_port.signing_blockers(facts, for_update=for_update)
+
+    def _require_signing_available(self, facts: ExternalSigningSessionFacts) -> None:
+        blockers = self.signing_blockers(facts, for_update=True)
+        if blockers:
+            raise _typed_error(blockers[0], "目前推薦月嫂的檔期或服務日期不符合簽約條件，請先更換月嫂或調整日期。")
 
     def preview_final_pdf_readiness(self, session_id: str) -> FinalPdfReadinessPreview:
         facts = self._require_session(session_id, for_update=False)

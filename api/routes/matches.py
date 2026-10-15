@@ -297,6 +297,8 @@ def record_matching_customer_decision_route(
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:
+        if str(error) == "automatic_waiting_deposit_occupancy_conflict":
+            raise typed_http_error(409, "domain_blocked", str(error), "月嫂檔期衝突，無法自動保留，請更換月嫂或調整服務日期。", "matching-decision") from error
         raise HTTPException(status_code=409, detail=str(error)) from error
 
 

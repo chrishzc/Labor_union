@@ -5,6 +5,8 @@ Description: 在外部簽約回報的 borrowed 交易內建立 commitment 與 de
 
 from __future__ import annotations
 
+from datetime import date
+
 import hashlib
 import json
 from typing import Any
@@ -20,6 +22,10 @@ from infrastructure.mysql.order_terms_read_model import (
     load_contract_client_finance_facts,
     select_order,
 )
+from infrastructure.mysql.assignment_plan_repository import load_occupancy_snapshot
+from subsystems.scheduling.segmented_availability import derive_segment_availability
+from subsystems.scheduling.segmented_availability_query import _expand_staff_unavailability_days
+from subsystems.scheduling.availability_lock_acquisition_workflow import _with_current_confirmed_service_dates
 from shared_kernel.identities import IdempotencyKey
 from subsystems.contract_signing.external_signing_contracts import (
     RecordExternalStaffSigningReport,
@@ -40,6 +46,77 @@ class MySqlExternalStaffCompletionPort:
 
     def __init__(self, connection: Any) -> None:
         self._connection = connection
+
+    def signing_blockers(self, facts, *, for_update: bool = False) -> tuple[str, ...]:
+        suffix = " FOR UPDATE" if for_update else ""
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT id,staff_id,assigned_start_date,assigned_end_date "
+                "FROM caregiver_matching_plan_segments WHERE plan_id=%s ORDER BY segment_order,id" + suffix,
+                (facts.matching_plan_id,),
+            )
+            segments = tuple(cursor.fetchall())
+        if {int(row["id"]) for row in segments} != {row.matching_segment_id for row in facts.staff_targets}:
+            return ("signing_service_dates_unavailable",)
+        snapshot = {"segments": [{"segment_id": row["id"], "staff_id": row["staff_id"],
+            "assigned_start_date": row["assigned_start_date"].isoformat(),
+            "assigned_end_date": row["assigned_end_date"].isoformat()} for row in segments]}
+        try:
+            with self._connection.cursor() as cursor:
+                current = _with_current_confirmed_service_dates(cursor, facts.case_no, snapshot, for_update=for_update)
+        except ValueError as error:
+            if str(error) != "current confirmed service dates are required":
+                return ("signing_service_dates_unavailable",)
+            try:
+                allocations = _commitment_service_days(self._connection, facts.case_no, segments)
+            except ValueError as error:
+                if str(error) in {"precontract_service_dates_incomplete", "precontract_service_days_mismatch"}:
+                    return ("signing_service_dates_unavailable",)
+                raise
+        else:
+            segments = tuple({"id": row["segment_id"], "staff_id": row["staff_id"],
+                "assigned_start_date": date.fromisoformat(row["assigned_start_date"]),
+                "assigned_end_date": date.fromisoformat(row["assigned_end_date"])} for row in current["segments"])
+            by_segment = {row["id"]: row for row in segments}
+            allocations = tuple((by_segment[row["segment_id"]], date.fromisoformat(row["lock_date"])) for row in current["lock_rows"])
+        drafts = []
+        for segment in segments:
+            days = tuple(day for owner, day in allocations if owner["id"] == segment["id"])
+            if not days:
+                return ("signing_service_dates_unavailable",)
+            drafts.append({"staff_id": int(segment["staff_id"]), "start_date": segment["assigned_start_date"].isoformat(), "end_date": segment["assigned_end_date"].isoformat()})
+        start = min(row["assigned_start_date"] for row in segments)
+        end = max(row["assigned_end_date"] for row in segments)
+        staff_ids = tuple(sorted({int(row["staff_id"]) for row in segments}))
+        with self._connection.cursor() as cursor:
+            occupancy, _ = load_occupancy_snapshot(cursor, staff_ids, facts.case_no, lock=for_update)
+            placeholders = ",".join("%s" for _ in staff_ids)
+            cursor.execute(
+                "SELECT id,staff_id,start_date,end_date FROM scheduling_staff_unavailability_blocks "
+                "WHERE status='effective' AND staff_id IN (" + placeholders + ") "
+                "AND start_date<=%s AND (end_date IS NULL OR end_date>=%s)" + suffix,
+                (*staff_ids, end, start),
+            )
+            unavailable = tuple(cursor.fetchall())
+        occupied_days = [{"staff_id": row.staff_id, "work_date": row.occupancy_date.isoformat(), "reason_code": "assignment"}
+            for row in occupancy if row.source_case_no != facts.case_no]
+        for row in unavailable:
+            occupied_days.extend(_expand_staff_unavailability_days(row, start, end))
+        availability = derive_segment_availability(start.isoformat(), end.isoformat(), len(drafts), drafts,
+            list(staff_ids), assignment_schedule_days=occupied_days, active_lock_days=[])
+        return ("signing_staff_occupancy_conflict",) if any(
+            row["reason_code"] != "buffer" for row in availability["conflicts"]
+        ) else ()
+
+    def existing_commitment(self, facts, *, for_update: bool) -> int | None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT id FROM precontract_service_commitments WHERE case_no=%s AND matching_plan_id=%s"
+                + (" FOR UPDATE" if for_update else ""),
+                (facts.case_no, facts.matching_plan_id),
+            )
+            row = cursor.fetchone()
+        return None if row is None else int(row["id"])
 
     def establish_prerequisites(
         self,

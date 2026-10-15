@@ -151,23 +151,27 @@ def test_account_change_regenerates_source_with_new_d36_and_preserves_old_workbo
 
 
 @pytest.mark.parametrize("signed_kind", ["contract_identity", "signed_received", "reported"])
-def test_signed_client_contract_cannot_be_regenerated(monkeypatch, tmp_path, signed_kind):
+def test_signed_client_contract_can_be_generated_without_changing_signed_facts(monkeypatch, tmp_path, signed_kind):
     cursor = Cursor([{"matching_plan_id": 17}], None)
     if signed_kind == "contract_identity":
         cursor.order["contract_identity"] = "signed-contract:existing"
     else:
         cursor.signing[signed_kind] = True
     connection = Connection(cursor)
-    monkeypatch.setattr(module, "render_contract_template", lambda **_: pytest.fail("must not render signed contract"))
+    monkeypatch.setattr(module, 'load_approved_template', lambda key: SimpleNamespace(
+        template_key=key, template_filename='client.xlsx', template_sha256='a'*64, mapping_sha256='b'*64))
+    monkeypatch.setattr(module, "render_contract_template", lambda **_: b"new-xlsx")
+    monkeypatch.setattr(module, "_insert_generated_document", lambda *args, **kwargs: 9)
     app = module.ClientContractSigningApplication(lambda: connection, archive_root=tmp_path,
         now=lambda: datetime(2026, 10, 15, tzinfo=timezone.utc),
-        template_facts_loader=lambda *_: pytest.fail("must reject before reading new template facts"),
-        archive_document=lambda *_args, **_kwargs: pytest.fail("must not archive signed contract"))
+        template_facts_loader=lambda *_: {"case_no": "CASE-1", "service_days": 5},
+        archive_document=lambda *_args, **_kwargs: SimpleNamespace(storage_key="new-client.xlsx"))
     command = module.PrepareExternalClientContractCommand("CASE-1", "admin:1", IdempotencyKey("signed:1"), CorrelationId("signed:test"))
-    with pytest.raises(ValueError, match="contract_client_unsigned_already_signed"):
-        app.prepare_external_document(command)
-    assert connection.commits == 0 and connection.rollbacks == 1
+    assert app.prepare_external_document(command) == (9, False)
+    assert connection.commits == 1 and connection.rollbacks == 0
     assert "FOR UPDATE" in cursor.sql[0]
+    assert not any(sql.lstrip().startswith(("UPDATE", "DELETE")) for sql in cursor.sql)
+    assert cursor.order["contract_identity"] == ("signed-contract:existing" if signed_kind == "contract_identity" else None)
 
 
 def test_new_client_source_is_used_for_new_pdf_instead_of_reusing_old_pdf():
@@ -183,11 +187,11 @@ def test_new_client_source_is_used_for_new_pdf_instead_of_reusing_old_pdf():
     assert result["document_version_id"] == 12 and result["replayed"] is False
 
 
-def test_signed_client_rejection_is_a_typed_conflict():
+def test_missing_plan_rejection_is_a_typed_conflict():
     from subsystems.contract_signing.external_signing_contracts import ExternalSigningTypedError
     def reject(_command):
-        raise ValueError("contract_client_unsigned_already_signed")
+        raise ValueError("contract_external_signing_accepted_plan_required")
     with pytest.raises(ExternalSigningTypedError) as caught:
         ContractExternalSigningApplication.prepare_client_unsigned(SimpleNamespace(), "CASE-1", SimpleNamespace(prepare_external_document=reject), ActorContext("admin:1"), IdempotencyKey("signed:pdf"), CorrelationId("signed:pdf"))
     assert caught.value.category == "conflict"
-    assert caught.value.code == "contract_client_unsigned_already_signed"
+    assert caught.value.code == "external_signing_accepted_plan_required"

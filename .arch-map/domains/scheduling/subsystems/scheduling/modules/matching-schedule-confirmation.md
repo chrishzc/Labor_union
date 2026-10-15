@@ -30,6 +30,9 @@
   - `subsystems/line/matching_postback_application.py`
 
 ## Boundaries
+
+- 推薦與排班介面呈現自動等待訂金鎖及已轉正式班表狀態，不要求使用者手動 acquire；保留正式換人／日期調整入口及既有排班條件驗證。
+- 自動排班 discovery 以 active plan／current 日期版本掃描，不依賴日期表 snapshot 已建立；dispatch 在獨立原 UoW 借用 canonical 等待鎖 writer，銜接升級前已確認但從未保留的案件。Query 仍零寫入，明確釋放／已轉換的鎖不自行恢復；衝突維持 awaiting_conditions，不 enqueue 排班。
 - 初次正式排班以完整服務日期與 Client Finance 衍生應付套用 Payroll 付款日政策；同一 outer Apply 由 Orders 保存唯一既定應付日、Payroll 保存相同 obligation due date。後續改期保留既定應付日，不等完工才形成日期。
 - 單一月嫂於正式指派前的日期表、檔期保留與自動排班以 current confirmed dates 銜接實際開始日，不與舊推薦期間取空交集；Assignment gate 核對 immutable child dates、staff 與實際開始日。Query 不將舊 0 天 snapshot 的確認冒充新日期確認，人工稽核 metadata 不算日期漂移。
 - 實際開始日變動不重簽：`domains/scheduling/commitment_execution.py` 保留 signed plan／staff／per-staff days，日期差異須精確對應 current 雙方確認 snapshot；conversion event 保存日期版本引用，不改寫原簽約歷史。

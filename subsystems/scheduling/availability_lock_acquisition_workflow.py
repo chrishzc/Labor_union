@@ -28,6 +28,79 @@ from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 get_connection = unconfigured_connection_factory
 
 
+def lock_current_matching_staff(connection: Any, case_no: str) -> tuple[int, ...]:
+    """Take the existing occupancy mutex before a caller locks Orders/Matching."""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT segment.staff_id FROM caregiver_matching_plan_segments segment "
+            "JOIN caregiver_matching_plans plan ON plan.id=segment.plan_id "
+            "WHERE plan.case_no=%s AND plan.is_active=1 "
+            "AND plan.status IN ('proposed','accepted') ORDER BY segment.staff_id",
+            (case_no,),
+        )
+        staff_ids = sorted({int(row["staff_id"]) for row in cursor.fetchall()})
+        return tuple(lock_staff_occupancy_mutex(cursor, staff_ids)) if staff_ids else ()
+
+
+def reserve_confirmed_matching_plan(connection: Any, case_no: str, actor: str,
+                                    locked_staff_ids: tuple[int, ...]) -> dict[str, Any] | None:
+    """Borrow the caller's UoW; reserve once both matching and dates are confirmed."""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT plan.id,dates.id AS confirmed_version FROM caregiver_matching_plans plan "
+            "JOIN confirmed_service_date_versions dates ON dates.case_no=plan.case_no AND dates.is_current=1 "
+            "JOIN orders ON orders.case_no=plan.case_no "
+            "WHERE plan.case_no=%s AND plan.is_active=1 AND plan.status='proposed' "
+            "AND orders.status IN ('洽談中','訂單成立') "
+            "AND NOT EXISTS (SELECT 1 FROM caregiver_availability_locks locks "
+            "WHERE locks.plan_id=plan.id) "
+            "AND NOT EXISTS (SELECT 1 FROM case_staff_assignments assignment "
+            "JOIN scheduling_aggregates aggregate ON aggregate.effective_generation_id=assignment.generation_id "
+            "AND aggregate.case_no=assignment.case_no WHERE assignment.case_no=plan.case_no) "
+            "AND ((SELECT response_value FROM matching_response_events response "
+            "WHERE response.plan_id=plan.id AND response.response_type='customer_decision' "
+            "ORDER BY response.occurred_at_utc DESC,response.id DESC LIMIT 1)='accepted' "
+            "OR EXISTS (SELECT 1 FROM contract_signing_events event "
+            "JOIN contract_document_versions document ON document.id=event.document_version_id "
+            "WHERE event.case_no=plan.case_no AND event.matching_plan_id=plan.id "
+            "AND event.event_type='signed_received' AND document.document_scope='client_contract')) FOR UPDATE",
+            (case_no,),
+        )
+        ready = cursor.fetchone()
+        if ready is None:
+            return None
+        plan_id = int(ready["id"])
+        plan, segments = _load_prelock_snapshot(cursor, case_no, plan_id)
+        snapshot = normalize_plan_snapshot(case_no, plan_id, plan, segments)
+        if tuple(snapshot["staff_ids"]) != locked_staff_ids:
+            raise ValueError("automatic_waiting_deposit_stale_plan")
+        snapshot = _with_current_confirmed_service_dates(cursor, case_no, snapshot, for_update=True)
+        staff_ids = tuple(snapshot["staff_ids"])
+        placeholders = ",".join("%s" for _ in staff_ids)
+        cursor.execute(
+            "SELECT staff_id,start_date,end_date FROM scheduling_staff_unavailability_blocks "
+            "WHERE status='effective' AND staff_id IN (" + placeholders + ") "
+            "AND start_date<=%s AND (end_date IS NULL OR end_date>=%s) FOR UPDATE",
+            (*staff_ids, max(row["lock_date"] for row in snapshot["lock_rows"]),
+             min(row["lock_date"] for row in snapshot["lock_rows"])),
+        )
+        for block in cursor.fetchall():
+            if any(row["staff_id"] == block["staff_id"]
+                   and block["start_date"].isoformat() <= row["lock_date"]
+                   and (block["end_date"] is None or row["lock_date"] <= block["end_date"].isoformat())
+                   for row in snapshot["lock_rows"]):
+                raise ValueError("automatic_waiting_deposit_occupancy_conflict")
+        request = normalize_lock_acquisition_request(
+            case_no, plan_id, f"auto-waiting-deposit:{plan_id}:{ready['confirmed_version']}", actor, 1,
+        )
+        try:
+            return _acquire_caregiver_availability_lock_in_transaction(connection, cursor, request, None)
+        except ValueError as error:
+            if str(error).startswith('{"conflicts":'):
+                raise ValueError("automatic_waiting_deposit_occupancy_conflict") from error
+            raise
+
+
 def _close_once(resource: Any, closed: dict[str, bool]) -> None:
     """Close a DB resource without allowing cleanup to mask the primary error."""
     if resource is not None and not closed["value"]:

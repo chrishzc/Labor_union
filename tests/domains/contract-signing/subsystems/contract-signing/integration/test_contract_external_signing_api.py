@@ -330,7 +330,7 @@ def test_query_returns_only_react_contract_fields() -> None:
     assert set(data) == {
         "case_no", "session_id", "state", "status_version", "matching_plan_id",
         "handoff_recorded", "commitment_id", "unsigned_document", "unsigned_documents", "staff_targets", "client_target",
-        "manual_notification_targets", "testing_skip_allowed", "signing_reminder", "handoff_included_reminders",
+        "manual_notification_targets", "testing_skip_allowed", "signing_reminder", "handoff_included_reminders", "signing_blockers",
     }
     serialized = response.text.lower()
     assert all(term not in serialized for term in ("locator", "digest", "fingerprint", "url", "path"))

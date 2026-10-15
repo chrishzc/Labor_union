@@ -36,6 +36,7 @@ class AutomaticArrangementStatus:
 
 
 class AutomaticArrangementSource(Protocol):
+    def reserve_waiting_deposit(self, case_no: str) -> None: ...
     def proposal(self, case_no: str, plan_id: int) -> AutomaticArrangementProposal: ...
     def pending(self, after_case_no: str, limit: int) -> tuple[tuple[str, int], ...]: ...
     def job_state(self, identity: str) -> tuple[str, str] | None: ...
@@ -58,6 +59,10 @@ class AutomaticServiceArrangement:
         return status
 
     def dispatch_case(self, case_no: str, plan_id: int) -> AutomaticArrangementStatus:
+        try:
+            self.source.reserve_waiting_deposit(case_no)
+        except ValueError as error:
+            return AutomaticArrangementStatus(case_no, plan_id, 'awaiting_conditions', (str(error),))
         status, command = self._candidate(case_no, plan_id)
         if command is None or status.state != 'ready':
             return status

@@ -18,7 +18,7 @@ const plan = { planId: 51, status: 'proposed', activeLockId: null, planVersion: 
 let active: boolean;
 let created: boolean;
 const onObserved = vi.fn();
-function mount(lock = false) { return render(<OrderRecommendationReplacementPanel caseNo={CASE} plan={{ ...plan, activeLockId: lock ? 88 : null }} contact={contact} onObserved={onObserved} onReplacementStarted={vi.fn()} onClose={vi.fn()} onEditStateChange={vi.fn()} />); }
+function mount(lock = false, onOpenCandidates?: () => void) { return render(<OrderRecommendationReplacementPanel caseNo={CASE} plan={{ ...plan, activeLockId: lock ? 88 : null }} contact={contact} onObserved={onObserved} onReplacementStarted={vi.fn()} onOpenCandidates={onOpenCandidates} onClose={vi.fn()} onEditStateChange={vi.fn()} />); }
 async function preview() {
   fireEvent.click(await screen.findByRole('radio', { name: /月嫂乙/ }));
   fireEvent.change(screen.getByLabelText('換人原因（必填）'), { target: { value: '客戶要求換人' } });
@@ -27,6 +27,15 @@ async function preview() {
   fireEvent.click(screen.getByRole('checkbox', { name: '我已確認換人原因及影響' }));
 }
 describe('推薦頁更換人員沿用原正式操作及收據', () => {
+  it('offers a working candidate repair entry when there is no willing successor', async () => {
+    const onOpenCandidates = vi.fn();
+    mocks.pool.mockResolvedValue({ case_no: CASE, candidates: [] });
+    mount(false, onOpenCandidates);
+    fireEvent.click(await screen.findByRole('button', { name: '前往尋找月嫂與詢問意願' }));
+    expect(onOpenCandidates).toHaveBeenCalledOnce();
+    expect(mocks.cancel).not.toHaveBeenCalled();
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     Object.values(mocks).forEach(mock => mock.mockReset());
     orderMutationFlowStore.clearAll(); onObserved.mockReset(); active = true; created = false;

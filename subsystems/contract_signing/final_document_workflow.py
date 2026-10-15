@@ -44,6 +44,7 @@ from subsystems.controlled_files.workflow import (
 from subsystems.orders.contract_completion_workflow import (
     ContractCompletionApplyRequest,
     ContractCompletionPreview,
+    ContractCompletionQuery,
     ContractCompletionReceipt,
 )
 
@@ -80,6 +81,13 @@ class FinalSignedContractPreview:
     expected_status_version: int
     documents: tuple[SignedContractDocumentPreview, ...]
     blockers: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ExistingTestingContractCompletion:
+    """Recover test documents without repeating an existing Orders completion."""
+    order: ContractCompletionQuery
+    commitment_id: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -249,6 +257,8 @@ class BorrowedControlledFileWorkflow(Protocol):
 
 
 class BorrowedContractCompletionWorkflow(Protocol):
+    def query(self, case_no: str, *, for_update: bool = False) -> ContractCompletionQuery: ...
+
     def preview_with_identity(
         self,
         case_no: str,
@@ -264,6 +274,12 @@ class BorrowedContractCompletionWorkflow(Protocol):
 
 
 class FinalSigningPrerequisitePort(Protocol):
+    def signing_blockers(self, facts: ExternalSigningSessionFacts, *, for_update: bool = False) -> tuple[str, ...]: ...
+
+    def existing_commitment(
+        self, facts: ExternalSigningSessionFacts, *, for_update: bool
+    ) -> int | None: ...
+
     def preview_service_dates(
         self, facts: ExternalSigningSessionFacts
     ) -> tuple: ...
@@ -366,16 +382,22 @@ class FinalSignedContractWorkflow:
                 raise FinalDocumentWorkflowError(error.code) from error
 
             resulting_version = session.status_version + 1
-            prerequisites = self._prerequisites.establish_prerequisites(
-                _prerequisite_command(command, session),
-                session,
-                resulting_version,
-            )
-            completion_preview = self._completion_preview(session, file_previews)
-            contract_identity = _contract_identity(file_previews)
-            orders_receipt = self._contract_completion.apply_borrowed_with_identity(
-                _orders_apply(command, completion_preview), contract_identity
-            )
+            if isinstance(completion_preview, ExistingTestingContractCompletion):
+                commitment_id = completion_preview.commitment_id
+                contract_identity = completion_preview.order.facts.contract_identity
+            else:
+                prerequisites = self._prerequisites.establish_prerequisites(
+                    _prerequisite_command(command, session),
+                    session,
+                    resulting_version,
+                )
+                commitment_id = prerequisites.commitment_id
+                completion_preview = self._completion_preview(session, file_previews, for_update=True)
+                contract_identity = completion_preview.candidate.contract_identity
+                orders_receipt = self._contract_completion.apply_borrowed_with_identity(
+                    _orders_apply(command, completion_preview), contract_identity
+                )
+                contract_identity = orders_receipt.contract_identity
             controlled_receipts = tuple(
                 self._controlled_files.apply_borrowed(_controlled_apply(command, upload, file_preview))
                 for upload, file_preview in file_previews
@@ -385,13 +407,13 @@ class FinalSignedContractWorkflow:
                 session,
                 controlled_receipts[0],
                 actor=command.actor,
-                contract_identity=orders_receipt.contract_identity,
+                contract_identity=contract_identity,
                 applied_at=now,
             )
             self._repository.complete_session_and_recovery(
                 session,
                 document,
-                commitment_id=prerequisites.commitment_id,
+                commitment_id=commitment_id,
                 resulting_status_version=resulting_version,
                 applied_at=now,
             )
@@ -401,7 +423,7 @@ class FinalSignedContractWorkflow:
                 resulting_status_version=resulting_version,
                 resulting_state=ExternalSigningState.COMPLETED,
                 document=document,
-                contract_identity=orders_receipt.contract_identity,
+                contract_identity=contract_identity,
                 documents=tuple(SignedContractDocumentReadback(
                     upload.target, controlled.readback.file_id,
                     controlled.readback.version, controlled.readback.filename,
@@ -468,13 +490,28 @@ class FinalSignedContractWorkflow:
                 raise FinalDocumentWorkflowError("final_document_staging_version_stale")
             previews.append((row, preview))
         file_previews = tuple(previews)
-        completion_preview = self._completion_preview(session, file_previews)
+        completion_preview = self._completion_preview(session, file_previews, for_update=for_update)
         return session, file_previews, completion_preview
 
-    def _completion_preview(self, session, file_previews):
+    def _completion_preview(self, session, file_previews, *, for_update=False):
+        identity = _contract_identity(file_previews)
+        if all(preview.candidate.filename.startswith("TEST-ONLY-") for _, preview in file_previews):
+            current = self._contract_completion.query(session.case_no, for_update=for_update)
+            if current.facts.contract_completed:
+                if current.facts.contract_identity is None:
+                    raise FinalDocumentWorkflowError("contract_identity_missing")
+                commitment_id = self._prerequisites.existing_commitment(session, for_update=for_update)
+                if commitment_id is None:
+                    raise FinalDocumentWorkflowError("contract_testing_completed_commitment_missing")
+                return ExistingTestingContractCompletion(current, commitment_id)
+            if current.facts.contract_identity is not None:
+                identity = current.facts.contract_identity
+        blockers = self._prerequisites.signing_blockers(session, for_update=for_update)
+        if blockers:
+            raise FinalDocumentWorkflowError(blockers[0], category="domain_blocked")
         return self._contract_completion.preview_with_identity(
             session.case_no, ContractCompletionIntent.CONFIRM_COMPLETED,
-            _contract_identity(file_previews),
+            identity,
             fallback_service_dates=self._prerequisites.preview_service_dates(session),
         )
 
@@ -497,7 +534,7 @@ def _blockers(session, file_previews):
 
 
 def _preview_payload(session, file_previews, completion_preview):
-    return {
+    payload = {
         "case_no": session.case_no, "session_id": session.session_id,
         "status_version": session.status_version,
         "document_set_fingerprint": session.document_set_fingerprint,
@@ -509,10 +546,21 @@ def _preview_payload(session, file_previews, completion_preview):
             "staging_sha256": preview.candidate.sha256_digest,
             "staging_size": preview.candidate.size_bytes,
         } for upload, preview in file_previews],
-        "orders_fingerprint": completion_preview.fingerprint.value,
-        "orders_version": completion_preview.candidate.expected_order_version,
-        "client_finance_version": completion_preview.client_finance_impact.expected_account_version,
     }
+    if isinstance(completion_preview, ExistingTestingContractCompletion):
+        payload.update({
+            "existing_testing_completion": True,
+            "contract_identity": completion_preview.order.facts.contract_identity,
+            "orders_version": completion_preview.order.facts.aggregate_version,
+            "commitment_id": completion_preview.commitment_id,
+        })
+    else:
+        payload.update({
+            "orders_fingerprint": completion_preview.fingerprint.value,
+            "orders_version": completion_preview.candidate.expected_order_version,
+            "client_finance_version": completion_preview.client_finance_impact.expected_account_version,
+        })
+    return payload
 
 
 def _orders_apply(command, preview):

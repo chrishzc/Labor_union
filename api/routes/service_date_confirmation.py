@@ -359,7 +359,11 @@ def _raise_value_error(
     error: ValueError, correlation_id: CorrelationId
 ) -> None:
     code = str(error) or "service_date_confirmation_validation_error"
-    if "not_found" in code:
+    if code == "automatic_waiting_deposit_occupancy_conflict":
+        category = ErrorCategory.DOMAIN_BLOCKED
+        status_code = 409
+        message = "月嫂檔期衝突，無法自動保留，請更換月嫂或調整服務日期。"
+    elif "not_found" in code:
         category = ErrorCategory.NOT_FOUND
         status_code = 404
         message = "找不到指定的訂單。"

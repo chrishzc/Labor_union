@@ -271,6 +271,15 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
     expect(mocks.createSingleCaregiverPlan).not.toHaveBeenCalled();
   });
 
+  it.each([null, 88])('已接受推薦以自動保留狀態取代手動上鎖，lock=%s', async lockId => {
+    contact.customer_decision = 'accepted';
+    activeLockId = lockId;
+    await openExisting();
+    expect(await screen.findByText(lockId === null ? '等待服務日期確認' : '推薦已確認・檔期已自動保留')).toBeVisible();
+    expect(screen.queryByRole('button', { name: '確認保留檔期' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '檢查檔期' })).not.toBeInTheDocument();
+  });
+
   it('active-plan 403 不當成沒有方案，不容許新建', async () => {
     mocks.queryPlan.mockRejectedValue(new ApiHttpError(403, 'forbidden', '無讀取權限'));
     render(<OrderFormalRecommendationPanel caseNo={CASE} />);

@@ -214,6 +214,25 @@ def _insert_payroll_root(cursor) -> None:
         "(policy_version,policy_kind,hourly_rate_ntd,effective_from) "
         "VALUES ('g03-policy','citizen',150,'2026-01-01')"
     )
+    cursor.execute(
+        "INSERT INTO case_architecture_bootstrap_events "
+        "(case_no,order_version,client_payment_terms_event_id,client_policy_version,"
+        "client_hourly_rate_ntd,payroll_policy_version,payroll_policy_kind,"
+        "payroll_hourly_rate_ntd,source_identity_status,candidate_fingerprint,"
+        "idempotency_key,actor,reason,correlation_id) "
+        "SELECT case_no,0,current_event_id,'g03-policy',100,'g03-policy',"
+        "'citizen',150,'一般市民',%s,'g03-bootstrap','g03-test','fixture',"
+        "'g03-bootstrap' FROM client_payment_terms WHERE case_no='G03-CASE'",
+        ("0" * 64,),
+    )
+    bootstrap_event_id = cursor.lastrowid
+    cursor.execute(
+        "INSERT INTO case_payroll_rate_policy_snapshots "
+        "(case_no,policy_version,policy_kind,hourly_rate_ntd,"
+        "source_identity_status,source_event_id) "
+        "VALUES ('G03-CASE','g03-policy','citizen',150,'一般市民',%s)",
+        (bootstrap_event_id,),
+    )
     for assignment_id in (1, 2):
         cursor.execute(
             "INSERT INTO assignment_payroll_rate_snapshots "

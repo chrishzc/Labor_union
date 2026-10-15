@@ -110,6 +110,12 @@ class InMemoryServiceDateConfirmationRepository:
 
 
 class InMemorySchedulingSnapshotInvalidationPort:
+    def lock_waiting_deposit_staff(self, case_no):
+        return ()
+
+    def reserve_waiting_deposit(self, case_no, actor, locked_staff_ids):
+        pass
+
     def __init__(self) -> None:
         self.invalidated_case_nos: list[str] = []
 

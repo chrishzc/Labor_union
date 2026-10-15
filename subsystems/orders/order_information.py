@@ -279,7 +279,7 @@ def _candidate_line_sections(
     }
     info_one_payments = {
         "f_112_cc", "f_113_cd", "f_116_cg", "f_117_ch", "f_118_ci",
-        "f_119_cj", "f_120_ck", "f_121_cl", "f_122_cm",
+        "f_119_cj", "f_120_ck", "f_122_cm",
     }
     info_one_other = {"f_114_ce", "f_115_cf"}
     grouped: dict[str, list[tuple[str, str]]] = {}
@@ -291,7 +291,7 @@ def _candidate_line_sections(
         "f_112_cc": "訂金金額", "f_113_cd": "預計訂金繳款日",
         "f_116_cg": "第一期金額", "f_117_ch": "預計第一期繳款日",
         "f_118_ci": "第二期金額", "f_119_cj": "預計第二期繳款日",
-        "f_120_ck": "樓層費", "f_121_cl": "樓層費預計繳款日",
+        "f_120_ck": "樓層費",
         "f_122_cm": "客戶應付總額",
     }
     for item in fields:

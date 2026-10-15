@@ -15,6 +15,10 @@ class Source:
         intent = AssignmentPlanIntent((AssignmentPlanSegmentIntent(9, date(2026, 11, 1), date(2026, 11, 2), (date(2026, 11, 1), date(2026, 11, 2))),))
         self.proposal_value = AutomaticArrangementProposal('CASE-1', 7, 3, confirmed, assignments, intent)
         self.jobs = {}
+        self.reservations = []
+
+    def reserve_waiting_deposit(self, case_no):
+        self.reservations.append(case_no)
 
     def proposal(self, *_args):
         return self.proposal_value
@@ -56,9 +60,21 @@ def ports(**kwargs):
 
 
 def test_query_never_enqueues_even_when_ready():
-    app, _, preview, jobs = ports()
+    app, source, preview, jobs = ports()
     assert app.query('CASE-1', 7).state == 'ready'
     assert preview.calls == 1
+    assert jobs.commands == []
+    assert source.reservations == []
+
+
+def test_dispatch_reserves_existing_confirmations_and_keeps_conflicts_out_of_queue():
+    app, source, _, jobs = ports()
+    def conflict(_):
+        raise ValueError('automatic_waiting_deposit_occupancy_conflict')
+    source.reserve_waiting_deposit = conflict
+    status = app.dispatch_case('CASE-1', 7)
+    assert status.state == 'awaiting_conditions'
+    assert status.blockers == ('automatic_waiting_deposit_occupancy_conflict',)
     assert jobs.commands == []
 
 

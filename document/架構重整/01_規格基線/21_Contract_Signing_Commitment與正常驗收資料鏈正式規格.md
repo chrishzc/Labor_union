@@ -51,6 +51,8 @@ execution schedule 才能完成客戶契約，以本規格較新的人工裁決�
 
 ## 3. Ownership、SSOT 與 non-goals
 
+2026-10-15 自動等待訂金鎖人工裁決：客戶接受正式配對及 Orders current confirmed service dates 齊備後，自動借用既有 Scheduling 鎖定 writer；不再要求管理員另按「保留月嫂檔期」。不論先確認配對或先保存日期，最後條件的 Apply 在原 outer UoW 內完成鎖定；先取得 canonical staff occupancy mutex，再鎖 Orders／Matching，fresh-read current roots。占用或不可服務衝突回 typed conflict 並整筆 rollback，不保留半套確認。依 plan／confirmed version 保存唯一 lock-acquired event；重播不重建鎖。Query／Preview 零寫入，既有有效鎖與已生效排班不重建。既有簽約紀錄不因補確認日期重簽；契約、訂金核銷與雙方日期表確認齊備後，沿既有排班 writer 將等待鎖轉為正式排班。
+
 | Owner | Root facts／責任 | 不擁有 |
 |---|---|---|
 | Contract Signing Integration | 核准模板引用、不可變文件版本、月嫂／客戶 sent 與 signed-received events、provider-neutral identity、status version、command receipt | Orders lifecycle、應收金額、execution assignment、LINE attempt 結果 |
@@ -507,6 +509,8 @@ fingerprint、blockers、preview fingerprint與PDF result。正式document persi
 - 管理端「測試用：跳過文件回收」呼叫 bounded `final-document/testing-skip`，綁定 current case、session、status version 與每個 current target，逐份經原 Controlled Files staging 產生 `TEST-ONLY-` PDF；PDF 頁面明示無真實簽署。準備階段僅保存 staging 並取得原完整集合 Preview，不完成業務。
 - 操作者須另行確認「測試案件、跳過真實回收、繼續後續收款」。原 Apply 接受互斥的 `signatures_confirmed=true` 或 `testing_skip_confirmed=true`；測試文件只能搭配測試確認，測試確認只能搭配完整測試文件集合。既有 fresh-read／lock、token、typed conflict、atomic completion 與原命令 reconciliation／replay 仍適用。
 - 測試完成使用原流程建立 Commitment、Orders completion 及訂金 obligation；reason 明示測試跳過且未驗證真實簽署，文件成員保留測試檔名。畫面重讀後顯示「測試簽約已完成」及「查看測試文件」。不呼叫外部簽署／LINE provider，不直接改 DB 狀態，也不新增 schema。
+  2026-10-15 指定測試案件驗證補充：若 Orders 已有客戶簽約完成根事實，但目前外部簽署工作尚未回收文件，完整 TEST ONLY 文件集合可沿用原契約 identity 及同案／同方案既有 commitment，完成測試文件回收與該 session。此分支不覆寫原簽回文件、契約 identity 或完成事件，不重建 commitment、應收或 outbox；Preview 零寫入，Apply fresh-lock 原完成 facts 與既有 commitment，沿用原完整文件 Preview token 驗版本及文件集合，再於同一 outer UoW 納管文件、完成 session 並保存 receipt。根事實或 commitment 改變使 Preview 失效；缺少原 commitment 不猜補。此例外只適用後端允許的本機測試環境、完整 TEST ONLY 集合及明確 `testing_skip_confirmed`；一般文件仍依原簽約檢查，不可藉此覆蓋其他契約。
+  此規則依 current facts 適用所有案件，不以案件編號分支。新案件由正式流程建立契約 identity、commitment 與應收；已有 identity 但尚無簽約完成事件時，測試流程保留原 identity 並完成一次正式簽約，不用占位文件推導新 identity 去覆蓋原值。已有完成事件時則只完成測試文件回收。三種狀態均沿用相同測試環境、完整文件集合、明確測試確認及版本驗證門禁。
 - 本次執行範圍限該 API／composition gate、final-document workflow、typed client、既有管理端元件與對應 current tests／map。驗收包括本機能力 gate、正式環境拒絕、stale 零 staging、完整 target 占位文件、明確確認、零 partial business write、同模式重播與完成回讀；使用合成資料，不對目前畫面案件執行 Apply。
 
 ### 2026-10-15 管理端獨立簽署提醒與歷史修復區塊移除
@@ -522,3 +526,20 @@ fingerprint、blockers、preview fingerprint與PDF result。正式document persi
 7. 本機測試跳過入口放在回收區的可展開「測試模式 · 跳過文件回收」，沿用 TEST ONLY 文件、互斥確認及後端環境 gate；不隨提醒修改而降低完成條件。
 
 執行範圍及驗收追溯：`../02_決策與退役執行記錄/Contract_Signing_Reminder_Separation_Work_Package.md`。
+
+### 2026-10-15 契約再次下載、重複送交與檢查原因人工裁決
+
+使用者要求移除契約下載及送交紀錄的簽署狀態限制。本節覆蓋前述「已簽署客戶契約不得重新產生」及「交接必須備齊所有未簽 PDF、不得重複記錄」條件。
+
+1. 客戶或月嫂已回報簽署、案件已有 contract identity 或簽約已完成，均不阻擋下載。客戶 PDF 缺漏或需要重新產生時沿既有來源 writer 生成文件；同一 snapshot 重用，來源變更 append 新版本，不覆寫原始簽回文件、舊版本、簽署事件或完成 receipt。
+2. 記錄送交不以所有 current PDF 皆已產生為門禁，也不以已交接或簽約已完成為門禁。已有 current session 時，每次明確操作只 append 交接 receipt，保留原簽署狀態與 status version；初次交接沿既有 current session facts 啟用工作。原命令重播仍回原 receipt，版本衝突及錯案／已被取代的 session 仍 typed 拒絕。
+3. 下載與記錄送交不新增簽署完成、Orders／Finance mutation、LINE 提醒或外部平台寄送。帳號授權、案件／文件對象及資料完整性檢查仍由既有 ports 驗證。
+4. 文件回收檢查通過與最後簽約完成檢查分別顯示。測試跳過或正式完成遭拒時，畫面必須呈現後端的具體原因；已知契約、服務日期、帳務、版本或測試確認原因使用繁體中文。原本已通過的文件檢查保留，不將業務拒絕誤報為檔案檢查失敗，也不以籠統的「未通過簽約檢查」或「資料已變更」取代實際原因。敏感內部路徑、秘密及儲存 locator 不呈現。
+
+### 2026-10-15 簽約前檔期衝突檢查人工裁決
+
+使用者要求已知檔期衝突至少在簽約前阻擋，並建議更換人選。推薦建立時原有的 availability 檢查保留；契約工作區 Query 再投影 current 推薦人員／服務期間的 Scheduling 實際占用、有效等待檔期鎖及不可服務期間，回 typed `signing_blockers`，不等到契約、訂金與日期確認完成後才提示。
+
+- 有 hard conflict 時，簽約工作區顯示原因及「更換推薦月嫂／調整服務日期」，停用送交紀錄。送交、簽署提醒及新簽約完成命令須在各自原 UoW fresh-read，衝突回 typed `signing_staff_occupancy_conflict`，服務日期與推薦不符回 `signing_service_dates_unavailable`；拒絕不得留下 session、通知、簽約或帳務的部分寫入。
+- 重用 Scheduling canonical occupancy／availability 計算；已有 current confirmed service dates 時依該版本核對，尚未確認日期才使用既有簽約預計日期計算，已確認日期不一致不得退回舊日期。固守同案既有檔期不視為跨案衝突、buffer 僅提醒。Query 零寫入，不因檢查自動取得檔期或建立排班。這是目前 facts 的提前檢查，後續正式檔期鎖及排班 Apply 仍須重新驗證並保護 occupancy race。
+- 契約下載仍可使用；既有簽回與已完成事實不撤銷、不改寫。已完成 session 的再次交接紀錄，以及已有 Orders completion 的 TEST ONLY 文件回收沿用既有保存結果，不重新簽約或取得占用。

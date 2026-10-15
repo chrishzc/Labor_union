@@ -87,6 +87,48 @@ class _SnapshotInvalidation:
     def invalidate_current_snapshot(self, case_no):
         self.case_nos.append(case_no)
 
+    def lock_waiting_deposit_staff(self, case_no):
+        return ()
+
+    def reserve_waiting_deposit(self, case_no, actor, locked_staff_ids):
+        pass
+
+
+@pytest.mark.parametrize('conflict', [False, True])
+def test_saved_dates_automatically_reserve_under_the_same_outer_commit(conflict):
+    selected = (date(2026, 9, 3), date(2026, 9, 4))
+    facts = ServiceDateConfirmationFacts('AUTO-LOCK', 3, 7, 2, (), selected, None, ())
+    repository = _RestartRepository(facts)
+    unit = _UnitOfWork()
+    events = []
+
+    class Scheduling(_SnapshotInvalidation):
+        def lock_waiting_deposit_staff(self, case_no):
+            events.append('mutex')
+            assert not hasattr(repository, 'saved_receipt')
+            return (99,)
+        def reserve_waiting_deposit(self, case_no, actor, locked_staff_ids):
+            events.append('reserve')
+            assert repository.saved_receipt.case_no == case_no
+            assert actor == 'admin' and locked_staff_ids == (99,) and not unit.committed
+            if conflict:
+                raise ValueError('automatic_waiting_deposit_occupancy_conflict')
+
+    workflow = ServiceDateConfirmationWorkflow(repository, lambda: unit, Scheduling())
+    preview = workflow.preview(facts.case_no, selected)
+    assert events == []
+    def apply():
+        return workflow.apply(facts.case_no, selected, expected_order_version=3,
+            expected_scheduling_version=7, preview_fingerprint=preview.candidate.fingerprint.value,
+            actor='admin', reason='日期與配對確認', idempotency_key='auto-lock-dates')
+    if conflict:
+        with pytest.raises(ValueError, match='occupancy_conflict'): apply()
+    else:
+        apply()
+        assert apply() == repository.saved_receipt
+    assert events == ['mutex', 'reserve']
+    assert unit.committed is not conflict
+
 
 class _EmptyRestartCursor:
     def __init__(self):
@@ -467,7 +509,8 @@ def test_historical_arrangement_rejects_non_restart_or_terminal_lifecycle(root_c
 
 
 @pytest.mark.parametrize("updated_rows", [1, 0])
-def test_arrangement_lifecycle_uses_orders_writer_and_closes_version_conflict(updated_rows):
+@pytest.mark.parametrize("payment_due_date", [None, date(2026, 10, 15)])
+def test_arrangement_lifecycle_uses_orders_writer_and_closes_version_conflict(updated_rows, payment_due_date):
     facts = _pending_arrangement_facts()
     candidate = _arrangement_candidate(facts, (
         ArrangementSegmentIntent(12, facts.current_dates[:2]),
@@ -506,6 +549,7 @@ def test_arrangement_lifecycle_uses_orders_writer_and_closes_version_conflict(up
         impact, 3, 4, None, IdempotencyKey("arrangement-owner-write"),
         ActorContext("admin"), "核對既定服務安排", CorrelationId("arrangement-owner-write"),
         "orders_historical_restart_arrangement",
+        staff_payment_due_date=payment_due_date,
     )
     if updated_rows:
         repository.persist_arrangement_lifecycle(command)
@@ -515,8 +559,11 @@ def test_arrangement_lifecycle_uses_orders_writer_and_closes_version_conflict(up
     statements = cursor.statements
     assert "INSERT INTO order_lifecycle_state_events" in statements[0][0]
     assert "INSERT INTO orders_domain_outbox" in statements[1][0]
-    assert "UPDATE orders SET status=%s,actual_end_date=%s,lifecycle_version=%s" in statements[2][0]
-    assert statements[2][1] == ("服務中", facts.current_dates[-1], 4, facts.case_no, 3)
+    update_sql, parameters = statements[2]
+    assert update_sql.startswith("UPDATE orders SET status=%s,actual_end_date=%s,")
+    assert "staff_payment_due_date=COALESCE(staff_payment_due_date,%s)" in update_sql
+    assert update_sql.endswith("lifecycle_version=%s WHERE case_no=%s AND lifecycle_version=%s")
+    assert parameters == ("服務中", facts.current_dates[-1], payment_due_date, 4, facts.case_no, 3)
     assert not any("order_service_data_locks" in sql for sql, _ in statements)
 
 

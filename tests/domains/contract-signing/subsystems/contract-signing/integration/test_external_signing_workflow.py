@@ -179,11 +179,11 @@ def test_handoff_activates_the_virtual_session_once_at_version_one() -> None:
     assert replay.replayed is True
     assert repository.writes == ["activate", "handoff_receipt"]
     assert notifications.calls == []
-    assert notifications.validations == [virtual]
+    assert notifications.validations == []
     assert [uow.commits for uow in uows.instances] == [1, 1]
 
 
-def test_missing_handoff_documents_prevent_session_activation_and_commit() -> None:
+def test_missing_handoff_pdfs_do_not_prevent_recording() -> None:
     virtual = _virtual_facts()
     repository = FakeRepository(None, virtual=virtual)
     uows = FakeUowFactory()
@@ -197,12 +197,62 @@ def test_missing_handoff_documents_prevent_session_activation_and_commit() -> No
         correlation_id=CorrelationId("corr-handoff-001"),
     )
 
-    with pytest.raises(RuntimeError, match="PDF missing"):
-        workflow.record_handoff(command)
+    receipt = workflow.record_handoff(command)
 
-    assert repository.writes == []
+    assert receipt.resulting_status_version == 1
+    assert repository.writes == ["activate", "handoff_receipt"]
     assert notifications.calls == []
-    assert notifications.validations == [virtual]
+    assert notifications.validations == []
+    assert uows.instances[0].commits == 1
+
+
+def test_known_occupancy_conflict_blocks_handoff_before_any_contract_or_notification_write():
+    virtual = _virtual_facts()
+    repository = FakeRepository(None, virtual=virtual)
+    port = FakeCompletionPort()
+    port.signing_blockers = lambda *args, **kwargs: ("signing_staff_occupancy_conflict",)
+    uows = FakeUowFactory()
+    workflow = ExternalSigningWorkflow(repository, port, uows)
+    command = RecordExternalSigningHandoff(virtual.case_no, ExpectedVersion(0), ActorContext("admin:17"),
+        IdempotencyKey("handoff:conflict"), CorrelationId("handoff:conflict"))
+    with pytest.raises(ExternalSigningTypedError) as caught:
+        workflow.record_handoff(command)
+    assert caught.value.code == "signing_staff_occupancy_conflict"
+    assert repository.writes == port.calls == []
+    assert uows.instances[0].commits == 0
+
+
+@pytest.mark.parametrize("state", [ExternalSigningState.STAFF_REPORTING, ExternalSigningState.COMPLETED])
+def test_repeated_handoff_only_appends_receipt_and_preserves_signing_state(state):
+    facts = replace(_facts(), state=state, status_version=5,
+        commitment_id=44 if state is ExternalSigningState.COMPLETED else None,
+        reported_staff_segment_ids=(11, 12) if state is ExternalSigningState.COMPLETED else (),
+        client_reported=state is ExternalSigningState.COMPLETED)
+    repository = FakeRepository(facts)
+    uows = FakeUowFactory()
+    workflow = ExternalSigningWorkflow(repository, FakeCompletionPort(), uows)
+    command = RecordExternalSigningHandoff(facts.case_no, ExpectedVersion(facts.status_version),
+        ActorContext("admin:17"), IdempotencyKey("handoff:again"), CorrelationId("handoff:again"))
+    receipt = workflow.record_handoff(command)
+    replay = workflow.record_handoff(command)
+    assert receipt.resulting_status_version == facts.status_version
+    assert receipt.replayed is False and replay.replayed is True
+    assert repository.facts == facts
+    assert repository.writes == ["handoff_receipt"]
+    assert [uow.commits for uow in uows.instances] == [1, 1]
+
+
+def test_repeated_handoff_still_rejects_stale_version_without_writes():
+    facts = _facts()
+    repository = FakeRepository(facts)
+    uows = FakeUowFactory()
+    workflow = ExternalSigningWorkflow(repository, FakeCompletionPort(), uows)
+    command = RecordExternalSigningHandoff(facts.case_no, ExpectedVersion(facts.status_version + 1),
+        ActorContext("admin:17"), IdempotencyKey("handoff:stale"), CorrelationId("handoff:stale"))
+    with pytest.raises(ExternalSigningTypedError) as caught:
+        workflow.record_handoff(command)
+    assert caught.value.code == "external_signing_status_version_stale"
+    assert repository.writes == []
     assert uows.instances[0].commits == 0
 
 
@@ -387,6 +437,9 @@ class FakeRepository:
 
 
 class FakeCompletionPort:
+    def signing_blockers(self, facts, *, for_update=False):
+        return ()
+
     def __init__(self) -> None:
         self.calls = []
 
@@ -442,7 +495,7 @@ def test_separate_reminder_records_manual_targets_and_replays_without_resending(
     assert [uow.commits for uow in uows.instances] == [1, 1, 1]
 
 
-def test_unbound_handoff_still_requires_every_unsigned_pdf_before_writing():
+def test_unbound_handoff_can_be_recorded_before_every_unsigned_pdf_exists():
     virtual = _virtual_facts()
     repository = FakeRepository(None, virtual=virtual)
     deliveries = FakeDeliveryTasks()
@@ -456,12 +509,11 @@ def test_unbound_handoff_still_requires_every_unsigned_pdf_before_writing():
         virtual.case_no, ExpectedVersion(0), ActorContext("admin:17"),
         IdempotencyKey("external-handoff:missing-pdf"), CorrelationId("corr-missing-pdf"),
     )
-    with pytest.raises(ExternalSigningTypedError) as error:
-        workflow.record_handoff(command)
-    assert error.value.code == "contract_unsigned_pdf_missing"
+    receipt = workflow.record_handoff(command)
+    assert receipt.resulting_status_version == 1
     assert deliveries.requests == []
-    assert repository.writes == []
-    assert uows.instances[0].commits == 0
+    assert repository.writes == ["activate", "handoff_receipt"]
+    assert uows.instances[0].commits == 1
 
 
 class FakeHandoffNotificationPort:

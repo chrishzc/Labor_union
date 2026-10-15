@@ -11,12 +11,12 @@ import { ServiceBeforeReplacementActions } from './ServiceBeforeReplacementActio
 import type { ServiceBeforeReplacementApplyResult } from '../api/orders/service_before_replacement_client';
 
 type Props = { caseNo: string; plan: ActiveWaitingDepositPlan; contact: FormalPlanContactState; onClose: () => void;
-  onObserved: () => void; onReplacementStarted: () => Promise<void>; onEditStateChange: (state: { dirty: boolean; busy: boolean }) => void };
+  onObserved: () => void; onReplacementStarted: () => Promise<void>; onOpenCandidates?: () => void; onEditStateChange: (state: { dirty: boolean; busy: boolean }) => void };
 const subscribe = (listener: () => void) => orderMutationFlowStore.subscribe(listener);
 const failure = (error: unknown) => error instanceof Error ? error.message : '換人操作暫時無法完成。';
 
 /** Recommendation replacement never rewrites an effective assignment; each existing owner operation keeps its own receipt. */
-export function OrderRecommendationReplacementPanel({ caseNo, plan, contact, onClose, onObserved, onReplacementStarted, onEditStateChange }: Props) {
+export function OrderRecommendationReplacementPanel({ caseNo, plan, contact, onClose, onObserved, onReplacementStarted, onOpenCandidates, onEditStateChange }: Props) {
   const flow = useSyncExternalStore(subscribe, () => orderMutationFlowStore.getRecommendationReplacement(caseNo));
   const [source, setSource] = useState<{ pool: CandidateContactPool; assigned: boolean; started: boolean } | null>(null);
   const [retry, setRetry] = useState(0);
@@ -154,7 +154,7 @@ export function OrderRecommendationReplacementPanel({ caseNo, plan, contact, onC
       {preview ? <><h4>確認換人影響</h4><p>只更換選定段落的人員，其餘服務日期保留。</p><ul><li>原推薦、意願及客戶回覆紀錄保留。</li><li>新推薦需重新取得客戶確認。</li>{preview.lockId !== null && <li>先依正式流程釋放原檔期，再重新確認契約與服務安排。</li>}</ul><label><input type="checkbox" checked={confirmed} disabled={busy} onChange={event => setConfirmed(event.target.checked)} />我已確認換人原因及影響</label><div className="formal-recommendation-actions"><button className="formal-recommendation-primary" type="button" disabled={busy || !confirmed} onClick={() => void cancelOriginal({ command: preview, stage: preview.lockId === null ? 'cancel' : 'release', released: false, cancelled: false, cancellationEventId: null, receipt: null, error: null })}>確認啟動換人</button><button type="button" disabled={busy} onClick={() => setPreview(null)}>返回修改</button></div></>
         : <>
           {segments.length > 1 && <label>要更換的服務段落<select value={segmentIndex} disabled={busy} onChange={event => { setSegmentIndex(Number(event.target.value)); setStaffId(0); }}>{segments.map((segment, index) => <option key={segment.segmentId} value={index}>第 {index + 1} 段・{contact.segments.find(item => item.segment_id === segment.segmentId)?.staff_name ?? `月嫂 #${segment.staffId}`}</option>)}</select></label>}
-          <fieldset aria-label="選擇新月嫂"><legend>選擇新月嫂</legend>{eligible.map(candidate => <label key={candidate.id} className="formal-recommendation-replacement-option"><input type="radio" name={`replacement-${caseNo}`} value={candidate.staff_id} checked={staffId === candidate.staff_id} disabled={busy} onChange={() => setStaffId(candidate.staff_id)} /><span><strong>{candidate.staff_name}</strong><small>{candidate.service_start_date} ～ {candidate.service_end_date}</small></span><span>已願意承接</span></label>)}{eligible.length === 0 && <p>目前沒有符合此段期間、且已願意承接的新月嫂。請先到「尋找月嫂與詢問意願」新增並確認人選。</p>}</fieldset>
+          <fieldset aria-label="選擇新月嫂"><legend>選擇新月嫂</legend>{eligible.map(candidate => <label key={candidate.id} className="formal-recommendation-replacement-option"><input type="radio" name={`replacement-${caseNo}`} value={candidate.staff_id} checked={staffId === candidate.staff_id} disabled={busy} onChange={() => setStaffId(candidate.staff_id)} /><span><strong>{candidate.staff_name}</strong><small>{candidate.service_start_date} ～ {candidate.service_end_date}</small></span><span>已願意承接</span></label>)}{eligible.length === 0 && <p>目前沒有符合此段期間、且已願意承接的新月嫂。請先到「尋找月嫂與詢問意願」新增並確認人選。{onOpenCandidates && <button type="button" disabled={busy} onClick={onOpenCandidates}>前往尋找月嫂與詢問意願</button>}</p>}</fieldset>
           <label>換人原因（必填）<textarea value={reason} maxLength={255} disabled={busy} onChange={event => setReason(event.target.value)} placeholder="請填寫客戶要求或月嫂通知內容" /></label><button className="formal-recommendation-primary" type="button" disabled={busy || !staffId || !reason.trim()} onClick={() => void inspect()}>檢查換人影響</button>
         </>}
     </>}

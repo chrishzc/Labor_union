@@ -67,6 +67,8 @@ class SchedulingSnapshotInvalidationPort(Protocol):
     """Scheduling-owned invalidation using the caller's active transaction."""
 
     def invalidate_current_snapshot(self, case_no: str) -> None: ...
+    def lock_waiting_deposit_staff(self, case_no: str) -> tuple[int, ...]: ...
+    def reserve_waiting_deposit(self, case_no: str, actor: str, locked_staff_ids: tuple[int, ...]) -> None: ...
 
 
 class UnitOfWork(Protocol):
@@ -112,6 +114,7 @@ class ServiceDateConfirmationWorkflow:
         if replay is not None:
             return replay
         with self._unit_of_work_factory() as unit_of_work:
+            locked_staff_ids = self._scheduling_snapshot_invalidation.lock_waiting_deposit_staff(case_no)
             facts = self._repository.load(case_no, lock=True)
             # Another identical command may have committed while this one waited
             # for the Orders lock. Read its receipt from current committed facts.
@@ -142,6 +145,7 @@ class ServiceDateConfirmationWorkflow:
             self._scheduling_snapshot_invalidation.invalidate_current_snapshot(
                 candidate.case_no
             )
+            self._scheduling_snapshot_invalidation.reserve_waiting_deposit(candidate.case_no, actor, locked_staff_ids)
             unit_of_work.commit()
             return receipt
 

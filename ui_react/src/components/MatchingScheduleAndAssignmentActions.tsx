@@ -357,10 +357,10 @@ export const MatchingScheduleAndAssignmentActions: React.FC<Props> = ({
           { label: '訂金付款關卡', ready: allConditionsVerified || depositReady === true, blocked: depositReady === false || blockerCodes.some(code => code.includes('deposit')) },
           { label: '月嫂檔期檢查', ready: allConditionsVerified, blocked: blockerCodes.some(code => code.includes('occupancy') || code.includes('waiting_lock')) },
         ].map(gate => <div key={gate.label}><span>{gate.label}</span><span>{gate.ready ? '✓ 已完成' : gate.blocked ? '待完成' : '待核對'}</span></div>)}</div>
-        <p className="service-arrangement-lock-note">月嫂檔期：{assignmentExists ? '已轉為正式班表' : waitingLockAcquired ? '已預留，等待正式排班' : '尚未保留，請回推薦確認辦理'}</p>
+        <p className="service-arrangement-lock-note">月嫂檔期：{assignmentExists ? '已轉為正式班表' : waitingLockAcquired ? '已預留，等待正式排班' : '配對及服務日期確認後自動保留'}</p>
         {automatic?.blockers.map(code => <p key={code}>{serviceArrangementBlockerLabel(code)}</p>)}
         {!assignmentExists && <div className="order-case-action-row">
-          {!waitingLockAcquired && onOpenRecommendation && <button type="button" disabled={protectedMutation || editingKey !== null} onClick={onOpenRecommendation}>前往保留月嫂檔期</button>}
+          {!waitingLockAcquired && onOpenRecommendation && <button type="button" disabled={protectedMutation || editingKey !== null} onClick={onOpenRecommendation}>查看配對確認狀態</button>}
           {blockerCodes.some(code => code.includes('occupancy') || code.includes('segment_dates')) && onOpenDates && <button type="button" disabled={protectedMutation || editingKey !== null} onClick={onOpenDates}>調整服務日期</button>}
         </div>}
         {automaticError && <p role="alert">{automaticError}</p>}

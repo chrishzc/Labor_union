@@ -35,6 +35,7 @@ export interface ContractExternalSigningActionsProps {
   onCommitted?: () => Promise<void> | void;
   onOpenFinance?: () => void;
   onOpenServiceDates?: () => void;
+  onOpenRecommendation?: () => void;
 }
 
 type WorkingOperation = 'query' | 'prepare_client' | 'prepare_staff' | 'download' | 'handoff' | 'final_preview' | 'final_apply' | 'receipt' | 'readback';
@@ -63,9 +64,40 @@ export type ContractExternalSigningUiState =
 
 const unsafePublicText = /https?:\/\/|[A-Za-z]:\\|\\\\|\/(?:mnt|Volumes|private|var)\/|[0-9a-f]{64}|preview[_ -]?fingerprint|storage[_ -]?locator|raw[_ -]?cursor/i;
 
+const CONTRACT_CHECK_REASONS: Record<string, string> = {
+  client_finance_bootstrap_required: '本案尚未建立客戶付款條款，請先核對並建立帳務與排班初始資料。',
+  payroll_bootstrap_required: '本案尚未建立月嫂薪資資料，請先核對並建立帳務與排班初始資料。',
+  payroll_case_policy_bootstrap_required: '本案尚未建立月嫂薪資政策，請先核對並建立帳務與排班初始資料。',
+  contract_identity_already_recorded: '本案已有另一份契約的簽約紀錄，本次文件不能覆蓋原契約。',
+  contract_completion_already_recorded: '本案已完成簽約，不能重複完成簽約。',
+  contract_identity_missing: '本次契約尚未建立可核對的文件紀錄。',
+  service_time_terms_incomplete: '本案每日服務時段尚未填寫完整，請先保存服務時段。',
+  official_service_dates_incomplete: '本案服務日期與約定服務天數不一致，請先核對服務期間與休假日。',
+  client_obligation_history_conflict: '本案已有與本次簽約不相容的客戶款項紀錄，請先核對帳務。',
+  final_contract_testing_confirmation_required: '測試占位文件只能搭配「測試案件、跳過文件回收」確認；一般文件需確認真實簽署。',
+  final_document_preview_stale: '檢查後的案件、帳務或文件資料已變更，請重新檢查完整文件。',
+  final_document_preview_token_invalid: '本次完整文件的驗收結果無效，請重新檢查完整文件。',
+  external_signing_status_version_stale: '簽約狀態已在文件檢查後變更，請重新讀取目前狀態。',
+  final_signed_contract_already_applied: '本次簽回文件已完成驗收，請重新讀取完成結果。',
+  final_signed_contract_documents_incomplete: '仍缺少客戶服務契約或月嫂委任契約，請分別上傳並檢查。',
+  final_signed_contract_target_mismatch: '簽回文件的契約對象不一致，請重新選擇對應文件。',
+  contract_testing_skip_unavailable: '目前主機不是允許跳過文件回收的本機測試環境。',
+  contract_testing_completed_commitment_missing: '本案已完成簽約，但目前方案缺少原服務承諾，無法將測試文件接回原簽約紀錄。',
+  signing_staff_occupancy_conflict: '目前推薦月嫂的檔期已衝突，請先更換月嫂或調整服務日期，再送交簽約。',
+  signing_service_dates_unavailable: '目前服務日期與推薦區段不一致，請先調整日期或重新推薦月嫂，再送交簽約。',
+};
+
+function contractCheckReason(code: string): string {
+  return CONTRACT_CHECK_REASONS[code] ?? code;
+}
+
 function safeErrorMessage(error: unknown): string {
   const fallback = '外部簽約操作失敗，請重新查詢目前狀態。';
   const message = error instanceof Error ? error.message : fallback;
+  if (error instanceof ApiHttpError) {
+    const reason = CONTRACT_CHECK_REASONS[error.code] ?? CONTRACT_CHECK_REASONS[message];
+    if (reason) return reason;
+  }
   if (unsafePublicText.test(message)) return fallback;
   if (error instanceof ApiTimeoutError || error instanceof ApiNetworkError) {
     return '連線暫時中斷，結果可能尚未確認，請使用原操作重新確認。';
@@ -84,13 +116,11 @@ function safeErrorMessage(error: unknown): string {
     if (error.code === 'final_signed_contract_target_mismatch') return '簽回文件的契約對象不一致，請重新選擇對應文件。';
     if (['external_staff_report_document_stale', 'external_client_report_document_stale'].includes(error.code)) return '本案契約版本已更新，請重新讀取並核對新版契約。';
     if (error.code === 'final_document_staging_version_stale') return '上傳文件已變更，請重新檢查這一份文件。';
-    if (error.code === 'contract_client_unsigned_already_signed') return '客戶契約已簽署，不能重新產生未簽契約。';
     if (error.code === 'external_signing_handoff_already_recorded') return '此案件已記錄送交外部簽署平台，請重新讀取目前狀態。';
     if (error.code === 'external_signing_session_completed') return '此案件已完成簽約，無需再次送交外部簽署平台。';
     if (error.code === 'external_signing_session_superseded') return '此簽約工作已被新的配對方案取代，請重新讀取目前契約。';
-    if (error.status === 409) return '簽約資料已變更，請重新查詢後再檢查影響。';
     if (error.retryable || error.status >= 500) return '簽約服務暫時無法使用，請稍後重新查詢。';
-    return '這筆操作未通過簽約檢查，請重新查詢目前狀態。';
+    return `簽約檢查未通過：${message || error.code}`;
   }
   return message || fallback;
 }
@@ -148,7 +178,8 @@ function handoffReceiptMatches(
   receipt: { session_id: string; resulting_status_version: number },
 ): boolean {
   return receipt.session_id === command.sessionId
-    && receipt.resulting_status_version === command.expectedStatusVersion + 1;
+    && (receipt.resulting_status_version === command.expectedStatusVersion
+      || receipt.resulting_status_version === command.expectedStatusVersion + 1);
 }
 
 function unsignedPreparationReadbackMatches(
@@ -167,7 +198,7 @@ function unsignedPreparationReadbackMatches(
     && fresh.staff_targets.some((target) => target.matching_segment_id === command.segmentId);
 }
 
-export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitted, onOpenFinance, onOpenServiceDates }: ContractExternalSigningActionsProps) {
+export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitted, onOpenFinance, onOpenServiceDates, onOpenRecommendation }: ContractExternalSigningActionsProps) {
   const observedRevision = useRef(revision);
   const identities = useRef(new Map<string, ExternalSigningCommandIdentity>());
   const requestGeneration = useRef(0);
@@ -650,7 +681,7 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
   };
 
   const recordHandoff = async () => {
-    if (!query || query.handoff_recorded || handoffFlow) return;
+    if (!query || handoffFlow || (query.signing_blockers?.length ?? 0) > 0) return;
     const actor = sessionClient.getUser()?.username.trim() ?? '';
     if (!actor) {
       setUiState({ type: 'error', message: '請先登入後再記錄外部平台交接。' });
@@ -781,6 +812,7 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
     const key = signedTargetKey(target), draft = fileReturns[key];
     if (!draft || (!draft.file && !draft.staged)) return;
     const sessionId = query.session_id, version = query.status_version, generation = requestGeneration.current;
+    let checkingCompletion = false;
     setNotice(null); setUiState({ type: 'working', operation: 'final_preview' });
     try {
       const staged = draft.file ? await contractExternalSigningClient.stageFinalDocument(caseNo, draft.file, currentIdentity(identities.current, `final-stage-${key.replace(':', '-')}`), target, { session_id: sessionId, expected_status_version: version }) : draft.staged!;
@@ -791,12 +823,15 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
       const next = { ...fileReturns, [key]: { file: null, staged: preview, checked: preview.can_apply } };
       setFileReturns(next); identities.current.delete(`final-stage-${key.replace(':', '-')}`); identities.current.delete('final-apply');
       if (requiredReturnTargets.every(row => next[signedTargetKey(row)]?.checked)) {
+        checkingCompletion = true;
         const collection = await contractExternalSigningClient.previewFinalDocument(caseNo, { session_id: sessionId, expected_status_version: version, documents: requiredReturnTargets.map(row => uploadInput(next[signedTargetKey(row)]!.staged!)) });
         if (generation !== requestGeneration.current) return;
         if (collection.session_id !== sessionId || collection.expected_status_version !== version || collection.documents.length !== requiredReturnTargets.length || collection.documents.some(row => !requiredReturnTargets.some(target => signedTargetKey(target) === signedTargetKey(row) && target.document_version_id === row.document_version_id))) throw new Error('完整文件驗收預覽與本次契約對象不一致。');
         setUiState({ type: 'preview_ready', preview: collection, confirmed: false });
       } else setUiState({ type: 'ready' });
-    } catch (error) { if (generation === requestGeneration.current) setUiState({ type: 'error', message: safeErrorMessage(error) }); }
+    } catch (error) { if (generation === requestGeneration.current) setUiState({ type: 'error', message: checkingCompletion
+      ? `文件檢查已通過，但簽約完成檢查未通過：${safeErrorMessage(error)}`
+      : safeErrorMessage(error) }); }
   };
 
   const observeFinalReceipt = async (receipt: ExternalSigningReceipt) => {
@@ -956,6 +991,7 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
 
   const busy = uiState.type === 'working' || uiState.type === 'querying' || reminderFlow?.status === 'applying';
   const finalProtected = uiState.type === 'outcome_unknown' || uiState.type === 'receipt_committed';
+  const signingBlocked = (query?.signing_blockers?.length ?? 0) > 0;
   const unsignedDocumentId = (scope: 'client' | 'staff', segmentId: number | null) => query ? query.unsigned_documents?.find(row => row.scope === scope && row.matching_segment_id === segmentId)?.document_version_id ?? (query.unsigned_document && query.unsigned_document.document_version_id === (scope === 'client' ? query.client_target.document_version_id : query.staff_targets.find(row => row.matching_segment_id === segmentId)?.document_version_id) ? query.unsigned_document.document_version_id : null) : scope === 'client' ? preparationClientDocument : preparationStaffDocuments[segmentId!] ?? null;
   const documentsReady = query !== null && unsignedDocumentId('client', null) !== null && query.staff_targets.every(row => unsignedDocumentId('staff', row.matching_segment_id) !== null);
   const documentRows = [
@@ -989,7 +1025,7 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
       </label>
       {(draft?.file || draft?.staged) && <div className="contract-return-actions"><strong>{draft.file?.name || draft.staged?.filename}</strong><button type="button" disabled={busy || finalProtected} onClick={() => { setFileReturns(previous => ({ ...previous, [key]: { file: null, staged: null, checked: false } })); identities.current.delete(`final-stage-${key.replace(':', '-')}`); identities.current.delete('final-apply'); setUiState({ type: 'ready' }); }}>重新選擇檔案</button></div>}
       {draft?.checked ? <><p className="contract-return-checked">PDF 類型與完整性已確認；簽署內容仍需由人員核對。</p><button type="button" disabled={busy || finalProtected || !!returnReadError} onClick={() => void previewFinalDocument(target)}>重新檢查</button></> : <button type="button" disabled={busy || finalProtected || !!returnReadError || (!draft?.file && !draft?.staged)} onClick={() => void previewFinalDocument(target)}>檢查簽署文件</button>}
-      {draft?.staged && draft.staged.blockers.length > 0 && <ul role="alert">{draft.staged.blockers.map(blocker => <li key={blocker}>{blocker}</li>)}</ul>}
+      {draft?.staged && draft.staged.blockers.length > 0 && <ul role="alert">{draft.staged.blockers.map(blocker => <li key={blocker}>{contractCheckReason(blocker)}</li>)}</ul>}
     </article>;
   };
 
@@ -1005,7 +1041,7 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
           <div><strong>{row.title}{contractMetadata[row.key]?.name ? ` · ${contractMetadata[row.key]!.name}` : ''}</strong><p>{contractMetadata[row.key]?.period || '服務期間待核對'}</p></div>
           {row.documentId !== null && <span className="contract-document-status complete">已備妥</span>}
           <div className="contract-document-actions"><button type="button" disabled={busy || finalProtected} onClick={() => setReviewTarget({ scope: row.scope, segmentId: row.segmentId })}>核對資料</button>
-            {row.scope === 'client' && row.documentId !== null && !query?.client_target.reported && query?.state !== 'completed' && query?.state !== 'superseded' && <button type="button" disabled={busy || finalProtected || !!unsignedPreparationFlow || !!fileReturns.client?.file || !!fileReturns.client?.staged} onClick={() => void prepareUnsigned('client', null, true)}>重新產生客戶契約</button>}
+            {row.scope === 'client' && row.documentId !== null && <button type="button" disabled={busy || finalProtected || !!unsignedPreparationFlow || !!fileReturns.client?.file || !!fileReturns.client?.staged} onClick={() => void prepareUnsigned('client', null, true)}>重新產生客戶契約</button>}
             <button type="button" aria-label={`下載 PDF · ${row.title}${contractMetadata[row.key]?.name ? ` · ${contractMetadata[row.key]!.name}` : ''}`} disabled={busy || finalProtected || !!unsignedPreparationFlow || (!query && preparationSegments.length === 0)} onClick={() => {
               if (row.documentId !== null) void downloadUnsigned(row.documentId, row.scope === 'client' ? '客戶' : '月嫂');
               else void prepareUnsigned(row.scope, row.segmentId, true);
@@ -1014,8 +1050,15 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
       </section>
       <section className="contract-signing-actions-card" aria-label="送交簽署與提醒">
         <header className="contract-documents-heading"><h3>送交簽署與提醒</h3></header>
-        <div className="contract-platform-action-row"><div><strong>外部平台交接</strong><p>確認契約已送交外部簽署平台，只保存交接紀錄。</p></div><div className="contract-signing-action-controls"><span className={`contract-document-status ${query?.handoff_recorded ? 'complete' : ''}`}>{query?.handoff_recorded ? '交接已記錄' : '待記錄'}</span>{!query?.handoff_recorded && !handoffFlow && <button className="formal-recommendation-primary" type="button" disabled={busy || finalProtected || !documentsReady} onClick={() => setHandoffConfirmationOpen(true)}>記錄已送交簽署平台</button>}</div></div>
-        <div className="contract-platform-action-row"><div><strong>簽署提醒</strong><p>需要時另行發送 LINE 提醒，不影響簽署文件回收。</p><small>通知對象：本案客戶及所有月嫂</small></div><div className="contract-signing-action-controls"><span className={`contract-document-status ${reminderReceipt && !allReminderTargetsManual ? 'complete' : ''}`}>{reminderFlow?.status === 'outcome_unknown' ? '結果待確認' : reminderReceipt ? allReminderTargetsManual ? '需人工通知' : '提醒工作已建立' : query?.handoff_included_reminders ? '已有交接通知紀錄' : '尚未發送'}</span><button type="button" disabled={busy || finalProtected || !query?.handoff_recorded || query.state === 'completed' || query.state === 'superseded' || reminderFlow?.status === 'outcome_unknown'} onClick={() => setReminderConfirmationOpen(true)}>發送簽署提醒</button></div></div>
+        {signingBlocked && <div role="alert" className="contract-manual-notice">
+          {query?.signing_blockers?.map(code => <p key={code}>{contractCheckReason(code)}</p>)}
+          <div className="order-case-action-row">
+            {onOpenRecommendation && <button type="button" disabled={busy || finalProtected} onClick={onOpenRecommendation}>更換推薦月嫂</button>}
+            {onOpenServiceDates && <button type="button" disabled={busy || finalProtected} onClick={onOpenServiceDates}>調整服務日期</button>}
+          </div>
+        </div>}
+        <div className="contract-platform-action-row"><div><strong>外部平台交接</strong><p>確認契約已送交外部簽署平台，只保存交接紀錄。</p></div><div className="contract-signing-action-controls"><span className={`contract-document-status ${query?.handoff_recorded ? 'complete' : ''}`}>{query?.handoff_recorded ? '交接已記錄' : '待記錄'}</span>{!handoffFlow && <button className="formal-recommendation-primary" type="button" disabled={busy || finalProtected || !query || signingBlocked} onClick={() => setHandoffConfirmationOpen(true)}>記錄已送交簽署平台</button>}</div></div>
+        <div className="contract-platform-action-row"><div><strong>簽署提醒</strong><p>需要時另行發送 LINE 提醒，不影響簽署文件回收。</p><small>通知對象：本案客戶及所有月嫂</small></div><div className="contract-signing-action-controls"><span className={`contract-document-status ${reminderReceipt && !allReminderTargetsManual ? 'complete' : ''}`}>{reminderFlow?.status === 'outcome_unknown' ? '結果待確認' : reminderReceipt ? allReminderTargetsManual ? '需人工通知' : '提醒工作已建立' : query?.handoff_included_reminders ? '已有交接通知紀錄' : '尚未發送'}</span><button type="button" disabled={busy || finalProtected || signingBlocked || !query?.handoff_recorded || query.state === 'completed' || query.state === 'superseded' || reminderFlow?.status === 'outcome_unknown'} onClick={() => setReminderConfirmationOpen(true)}>發送簽署提醒</button></div></div>
         <p className="contract-signing-action-hint">{query?.handoff_recorded ? '交接已記錄。簽署提醒需另按「發送簽署提醒」，不會自動發送。' : '先記錄外部平台交接，再發送簽署提醒。'}</p>
         {reminderManualTargets.length > 0 && <div className="contract-manual-notice" aria-label="需人工通知的簽約對象"><strong>需人工通知簽約</strong><p>{reminderManualTargets.map(target => reminderTargets.find(row => row.scope === target.scope && row.subject === target.subject_reference)?.name || (target.scope === 'client' ? '客戶' : '月嫂')).join('、')}在這次通知紀錄中尚未綁定 LINE，請人工通知前往外部平台簽署。</p></div>}
         {reminderFlow?.status === 'outcome_unknown' && <div role="alert"><p>{reminderFlow.error}</p><button type="button" disabled={busy} onClick={() => void submitReminders(reminderFlow.command)}>重新確認原提醒結果</button></div>}
@@ -1034,7 +1077,7 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
         <section className="contract-return-group"><h4>月嫂委任契約</h4>{requiredReturnTargets.filter(row => row.scope === 'staff').map(renderReturn)}</section>
         {query.testing_skip_allowed && <details className="contract-signing-test-tools"><summary>測試模式 · 跳過文件回收</summary><div><p>使用 TEST ONLY 占位文件跳過回收。確認後可繼續測試簽約完成與後續收款。</p><button type="button" disabled={busy || finalProtected || testingPreview} onClick={() => void prepareTestingSkip()}>測試用：跳過文件回收</button></div></details>}
         <div className="contract-final-confirmation"><p>{testingPreview ? '測試占位文件已備妥，請確認後繼續測試。' : uiState.type === 'preview_ready' && uiState.preview.can_apply ? '各份文件均已回收並通過檢查，請核對簽署內容。' : '客戶服務契約及所有月嫂委任契約均回收並通過檢查後，才能確認完成。'}</p>
-          {uiState.type === 'preview_ready' && uiState.preview.blockers.length > 0 && <ul role="alert">{uiState.preview.blockers.map(blocker => <li key={blocker}>{blocker}</li>)}</ul>}
+          {uiState.type === 'preview_ready' && uiState.preview.blockers.length > 0 && <ul role="alert">{uiState.preview.blockers.map(blocker => <li key={blocker}>{contractCheckReason(blocker)}</li>)}</ul>}
           <label><input type="checkbox" checked={uiState.type === 'preview_ready' && uiState.confirmed} disabled={busy || finalProtected || uiState.type !== 'preview_ready' || !uiState.preview.can_apply} onChange={event => { if (uiState.type === 'preview_ready') setUiState({ ...uiState, confirmed: event.target.checked }); }} />{testingPreview ? '我確認本案為測試案件，跳過真實簽署文件回收，並繼續測試後續收款。' : '我已核對本案與文件版本，確認客戶服務契約及所有月嫂委任契約的簽署均完整。'}</label>
           <button className="formal-recommendation-primary" type="button" disabled={busy || finalProtected || uiState.type !== 'preview_ready' || !uiState.confirmed || !uiState.preview.can_apply} onClick={() => void applyFinalDocument()}>{testingPreview ? '確認跳過並完成測試簽約' : '確認完成簽署'}</button>
         </div>

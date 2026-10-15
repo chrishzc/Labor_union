@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useSyncExternalStore, type FC } from 'reac
 import { candidateContactPoolClient, type CandidateContactPool } from '../api/scheduling/candidate_contact_pool_client';
 import { matchingCandidateWorkflowClient, defaultMatchingFilterPolicy } from '../api/scheduling/matching_candidate_workflow_client';
 import { matchingPlanCommunicationClient, type CustomerConfirmationPreview, type FormalPlanContactState } from '../api/scheduling/matching_plan_communication_client';
-import { waitingDepositLockClient, type ActiveWaitingDepositPlan, type WaitingDepositPreview } from '../api/scheduling/waiting_deposit_lock_client';
+import { waitingDepositLockClient, type ActiveWaitingDepositPlan } from '../api/scheduling/waiting_deposit_lock_client';
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import { sessionClient } from '../api/auth/session_client';
 import { ApiHttpError } from '../api/shared/typed_errors';
@@ -26,6 +26,7 @@ interface OrderFormalRecommendationPanelProps {
   openReplacementRequest?: number;
   includeMultiCaregiver?: boolean;
   onOpenCandidates?: () => void;
+  assignmentExists?: boolean;
 }
 
 type ReadState<T> =
@@ -103,7 +104,7 @@ async function readCurrentPlan(caseNo: string, expectedPlanId?: number): Promise
   return { plan, contact };
 }
 
-export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelProps> = ({ caseNo, onObserved, onOpenServiceDates, revision = 0, onEditStateChange, initialCandidateId, includeMultiCaregiver = false, onOpenCandidates, openReplacementRequest = 0 }) => {
+export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelProps> = ({ caseNo, onObserved, onOpenServiceDates, revision = 0, onEditStateChange, initialCandidateId, includeMultiCaregiver = false, onOpenCandidates, openReplacementRequest = 0, assignmentExists = false }) => {
   const [candidates, setCandidates] = useState<ReadState<CandidateContactPool>>({ status: 'idle' });
   const [active, setActive] = useState<ReadState<CurrentPlan | null>>({ status: 'loading' });
   const [busy, setBusy] = useState(false);
@@ -126,8 +127,6 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
   const [confirmationPreview, setConfirmationPreview] = useState<ReadState<CustomerConfirmationPreview>>({ status: 'idle' });
   const [confirmationPreviewGeneration, setConfirmationPreviewGeneration] = useState(0);
   const confirmationActionIdentity = useRef<{ signature: string; key: string } | null>(null);
-  const [lockPreview, setLockPreview] = useState<WaitingDepositPreview | null>(null);
-  const [requiresServiceDates, setRequiresServiceDates] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const formalManualResponse = useSyncExternalStore(
@@ -166,8 +165,6 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
     setConfirmationPreview({ status: 'idle' });
     setConfirmationPreviewGeneration(0);
     confirmationActionIdentity.current = null;
-    setLockPreview(null);
-    setRequiresServiceDates(false);
     setError(null);
     setNotice(null);
     setReplacementOpen(openReplacementRequest > 0); setShowManualDecision(false); setSendConfirmationOpen(false); setInformationTab(null); setChangingSegmentId(null);
@@ -187,7 +184,6 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
     const request = ++sequence.current;
     setActive({ status: 'loading' });
     setCandidates({ status: 'idle' });
-    setLockPreview(null);
     setError(null);
     try {
       const data = await readCurrentPlan(caseNo);
@@ -274,7 +270,6 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
       await operation();
     } catch (caught) {
       if (sequence.current === request) {
-        setLockPreview(null);
         setError(errorMessage(caught));
         if (invalidateActiveOnError) {
           // No blind retry after a write or a failed readback. Reload the owner first.
@@ -305,7 +300,6 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
     if (data === null || !validate(data)) throw new Error('操作後正式方案回讀尚未確認預期結果，請重新讀取；不重送操作。');
     if (activeCase.current !== caseNo || sequence.current !== request) return;
     setActive({ status: 'ready', data });
-    setLockPreview(null);
     setNotice(message);
     onObserved?.();
   };
@@ -325,7 +319,6 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
       throw new Error('案件已切換；保留收據，只能重新讀取原案件結果。');
     }
     setActive({ status: 'ready', data });
-    setLockPreview(null);
     setNotice(command.kind === 'willingness' ? '月嫂意願變更已儲存並完成回讀。' : '客戶決定已完成正式回讀。');
     if (command.kind === 'willingness') { setWillingnessReason(''); setWillingnessChoice(''); setChangingSegmentId(null); }
     else { setDecisionReason(''); setShowManualDecision(false); }
@@ -417,7 +410,6 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
         return;
       }
       setActive({ status: 'ready', data });
-      setLockPreview(null);
       setNotice(`正式媒合方案已建立：#${receipt.plan_id}`);
       orderMutationFlowStore.clearFormalPlanCreation(caseNo, 'single');
       onObserved?.();
@@ -614,43 +606,7 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
     });
   };
 
-  const previewLock = () => perform(async () => {
-    const fresh = await freshVisiblePlan();
-    if (fresh.contact.customer_decision !== 'accepted' || fresh.plan.activeLockId !== null) {
-      throw new Error('僅已接受且尚未鎖定的正式方案可建立等待訂金鎖。');
-    }
-    const request = sequence.current;
-    let preview: WaitingDepositPreview;
-    try {
-      preview = await waitingDepositLockClient.preview(caseNo, fresh.plan.planId);
-    } catch (caught) {
-      if (caught instanceof ApiHttpError && caught.code === 'confirmed_service_dates_required') {
-        setRequiresServiceDates(true);
-      }
-      throw caught;
-    }
-    if (preview.case_no !== caseNo || preview.plan_id !== fresh.plan.planId) throw new Error('等待訂金鎖 Preview identity 不一致，已停止套用。');
-    if (activeCase.current === caseNo && sequence.current === request) {
-      setRequiresServiceDates(false);
-      setLockPreview(preview);
-    }
-  }, false);
-
-  const applyLock = () => perform(async () => {
-    if (!lockPreview?.apply_allowed) return;
-    const fresh = await freshVisiblePlan();
-    if (fresh.contact.customer_decision !== 'accepted' || fresh.plan.activeLockId !== null || fresh.plan.planId !== lockPreview.plan_id) {
-      throw new Error('等待訂金鎖方案已變更，請重新預覽。');
-    }
-    const receipt = await waitingDepositLockClient.apply(caseNo, lockPreview.plan_id, lockPreview.preview_fingerprint);
-    if (receipt.case_no !== caseNo || receipt.plan_id !== fresh.plan.planId) throw new Error('等待訂金鎖 receipt identity 不一致。');
-    await observe(receipt.plan_id, (data) => data.plan.activeLockId === receipt.lock_id,
-      `等待訂金鎖已套用：Lock #${receipt.lock_id} · ${receipt.result}`);
-  });
-
-  const pendingWillingnessCount = current?.contact.segments.filter(
-    (segment) => segment.willingness === 'pending',
-  ).length ?? 0;
+  const pendingWillingnessCount = current?.contact.segments.filter(segment => segment.willingness === 'pending').length ?? 0;
   const confirmationDeliveryStatus = current?.contact.customer_confirmation_status
     ?? current?.contact.customer_profiles_status
     ?? null;
@@ -702,7 +658,7 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
             <button type="button" disabled={protectedOperation} onClick={() => { setChangingSegmentId(null); setWillingnessChoice(''); setWillingnessReason(''); }}>取消</button>
           </div>
         </section>}
-        {replacementVisible ? <OrderRecommendationReplacementPanel caseNo={caseNo} plan={current.plan} contact={current.contact} onEditStateChange={setReplacementState} onClose={() => setReplacementOpen(false)} onReplacementStarted={async () => {
+        {replacementVisible ? <OrderRecommendationReplacementPanel caseNo={caseNo} plan={current.plan} contact={current.contact} onOpenCandidates={onOpenCandidates} onEditStateChange={setReplacementState} onClose={() => setReplacementOpen(false)} onReplacementStarted={async () => {
           const fresh = await readCurrentPlan(caseNo);
           if (fresh !== null) throw new Error('換人已登記，但原推薦仍為有效方案；請重新讀取，不重送換人。');
           setActive({ status: 'ready', data: null }); setCandidates({ status: 'idle' }); setReplacementOpen(false);
@@ -721,7 +677,7 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
             {confirmationDeliveryStatus !== null && <p className="formal-recommendation-hint">{['pending', 'processing'].includes(confirmationDeliveryStatus) ? '已建立寄送工作，等待系統送出；尚不代表 LINE 已送達。' : `確認資訊狀態：${profileStatusLabel(confirmationDeliveryStatus)}。`}</p>}
             {current.contact.all_willing && current.contact.customer_decision !== 'declined' && current.plan.activeLockId === null && <><button className="formal-recommendation-text-action" type="button" disabled={protectedOperation} onClick={() => setShowManualDecision(value => !value)}>手動記錄客戶決定</button>{showManualDecision && <section className="formal-recommendation-inline-form" aria-label="手動記錄客戶決定"><h4>手動記錄客戶決定</h4><p>客戶透過電話、面談或其他方式確認時，在此記錄；不會將人工紀錄標示為 LINE 送達。</p><label>客戶回覆依據（必填）<textarea aria-label={`方案 ${current.plan.planId} 客戶決策依據`} value={decisionReason} maxLength={500} disabled={protectedOperation} onChange={event => setDecisionReason(event.target.value)} /></label><div className="formal-recommendation-actions"><button className="formal-recommendation-primary" type="button" aria-label={`記錄方案 ${current.plan.planId} 客戶接受`} disabled={protectedOperation || !decisionReason.trim()} onClick={() => void recordDecision('accepted')}>客戶接受</button><button type="button" aria-label={`記錄方案 ${current.plan.planId} 客戶拒絕`} disabled={protectedOperation || !decisionReason.trim()} onClick={() => void recordDecision('declined')}>客戶拒絕</button><button type="button" disabled={protectedOperation} onClick={() => setShowManualDecision(false)}>取消</button></div></section>}</>}
           </section>}
-          {current.contact.all_willing && current.contact.customer_decision === 'accepted' && <section className="formal-recommendation-customer-info" aria-label={`方案 ${current.plan.planId} 等待訂金鎖`}><h4>{current.plan.activeLockId === null ? '保留月嫂檔期' : '推薦已確認・檔期已保留'}</h4>{current.plan.activeLockId !== null ? <><p>客戶已接受，檔期已保留；契約與排班仍依後續步驟辦理。</p>{onOpenServiceDates && <button type="button" disabled={protectedOperation} onClick={onOpenServiceDates}>接續服務日期與排班</button>}</> : <><p>客戶已接受推薦，請檢查服務日期與檔期後確認保留。</p><button className="formal-recommendation-primary" type="button" aria-label={`預覽方案 ${current.plan.planId} 等待訂金鎖`} disabled={protectedOperation} onClick={() => void previewLock()}>檢查檔期</button>{requiresServiceDates && <div role="alert"><p>請先完成服務日期確認，再回來檢查並保留檔期。</p>{onOpenServiceDates && <button type="button" onClick={onOpenServiceDates}>前往確認服務日期</button>}</div>}{lockPreview !== null && <div className="formal-recommendation-inline-form"><p>服務日 {lockPreview.service_day_count} 日・緩衝提醒 {lockPreview.buffer_day_count} 日</p>{lockPreview.conflicts.map((conflict, index) => <p key={index}>{conflict.source_type === 'buffer' ? '七天緩衝重疊，僅提醒' : '服務檔期衝突，須先調整日期'}：月嫂 #{conflict.staff_id}・{conflict.lock_date}</p>)}<button className="formal-recommendation-primary" type="button" aria-label={`套用方案 ${current.plan.planId} 等待訂金鎖`} disabled={protectedOperation || !lockPreview.apply_allowed} onClick={() => void applyLock()}>確認保留檔期</button></div>}</>}</section>}
+            {current.contact.all_willing && current.contact.customer_decision === 'accepted' && <section className="formal-recommendation-customer-info" aria-label={`方案 ${current.plan.planId} 等待訂金鎖`}><h4>{assignmentExists ? '已轉為正式班表' : current.plan.activeLockId === null ? '等待服務日期確認' : '推薦已確認・檔期已自動保留'}</h4>{assignmentExists ? <p>等待訂金鎖已轉為正式排班，無須再次保留檔期。</p> : current.plan.activeLockId !== null ? <p>配對及服務日期已確認，系統已自動建立等待訂金鎖；契約與排班依後續步驟辦理。</p> : <p>配對及服務日期確認後，系統會自動保留月嫂檔期，不需另行操作。</p>}{onOpenServiceDates && <button type="button" disabled={protectedOperation} onClick={onOpenServiceDates}>{current.plan.activeLockId === null && !assignmentExists ? '前往確認服務日期' : '接續服務日期與排班'}</button>}</section>}
           <footer className="formal-recommendation-footer"><small>本案推薦、寄送及客戶回覆狀態</small><button className="formal-recommendation-text-action" type="button" aria-label={`重新讀取方案 ${current.plan.planId} 確認資訊送達狀態`} disabled={protectedOperation} onClick={() => void reload()}>更新狀態</button></footer>
         </>}
       </div>}

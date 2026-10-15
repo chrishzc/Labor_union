@@ -496,6 +496,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
                 <OrderFormalRecommendationPanel
                   caseNo={caseNo}
                   revision={refreshRevision}
+                  assignmentExists={assignmentPlan.status === 'ready' && assignmentPlan.data.assignments.length > 0}
                   initialCandidateId={recommendedCandidateId}
                   openReplacementRequest={replacementRequest}
                   onOpenCandidates={() => openGroup('matching')}
@@ -509,7 +510,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
                 </fieldset>
               </div>}
               {(activeGroup === 'contracts' || visitedGroups.includes('contracts')) && <div hidden={activeGroup !== 'contracts'}>
-                <ContractExternalSigningActions caseNo={caseNo} revision={refreshRevision} onCommitted={() => { setSelectedGroup('contracts'); refreshFacts(); }} onOpenServiceDates={() => { setServiceView('dates'); openGroup('service'); }} />
+                <ContractExternalSigningActions caseNo={caseNo} revision={refreshRevision} onCommitted={() => { setSelectedGroup('contracts'); refreshFacts(); }} onOpenServiceDates={() => { setServiceView('dates'); openGroup('service'); }} onOpenRecommendation={() => { setReplacementRequest(value => value + 1); openGroup('recommendation'); }} />
               </div>}
               {(activeGroup === 'service' || visitedGroups.includes('service')) && <div hidden={activeGroup !== 'service'}>
                 <nav className="service-arrangement-steps" aria-label="服務安排步驟">
