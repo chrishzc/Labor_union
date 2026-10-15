@@ -32,7 +32,10 @@
 - compact final CREATE/seed，hash-bound source/SQL；retired tables 不進新庫，舊庫不刪表，保留物件結構與系統資料等價。
 - Python／Unix 無參數唯讀預檢；Windows 無參數先預檢，通過後詢問 Y/N，僅 Y 委派 apply，結果按鍵後關閉。
 - dry-run 零連線，apply fresh-read 空庫後才執行；明確命令列參數不進入互動流程。
+- 同入口在寫入前唯讀檢查 MySQL/InnoDB/writable、目前帳號及啟用角色權限、binary log trigger 限制、release files 與 metadata 查詢；Apply 再驗空庫後才寫入，不另要求檢查腳本。
 - 非空或 partial 重跑停止；journal 不保存 SQL、credential 或 provider exception。
+- 非空拒絕時內建 readonly current 診斷，直接說明現有結構是否完整或查核失敗原因；不新增 recovery writer。
+- SQL 已執行完但 object/current 驗證失敗仍 blocked；安全錯誤列 phase、完成數與 MySQL errno，保留 journal，不自動重跑。
 - lock 僅協調本入口；不啟動服務，不轉換既有資料，不改 local reset／preserve-data policy。
 
 ## Verification

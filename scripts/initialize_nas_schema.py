@@ -36,6 +36,151 @@ class InitializationBlocked(RuntimeError):
     """An operator-facing failure containing no provider error or credentials."""
 
 
+class _NonEmptyDatabase(InitializationBlocked):
+    """Reject initialization, then explain existing schema through read-only checks."""
+
+
+def _mysql_reason(error):
+    number = error.args[0] if isinstance(error, pymysql.MySQLError) and error.args and isinstance(error.args[0], int) else None
+    reasons = {
+        1044: "帳號沒有目標資料庫的存取權限",
+        1045: "MySQL 拒絕登入，請確認帳號、密碼及允許連線的來源",
+        1049: "目標資料庫不存在，請先在 NAS 建立 union_db",
+        1050: "資料表已存在，初始化已停止，不會覆蓋",
+        1064: "MySQL 無法解析這條指令，請確認伺服器版本相容性",
+        1142: "帳號缺少執行這項操作的資料庫權限",
+        1227: "帳號缺少 MySQL 要求的管理或物件權限",
+        1290: "MySQL 伺服器設定禁止這項操作，請確認唯讀等限制",
+        1419: "binary log 設定與帳號權限不允許建立觸發器",
+        2003: "無法連線 NAS MySQL，請確認服務、連線位址、防火牆及 TLS 設定",
+        2006: "MySQL 連線已中斷",
+        2013: "等待 MySQL 回應逾時或連線中斷",
+    }
+    if number is not None:
+        return f"{reasons.get(number, 'MySQL 拒絕執行操作')} (MySQL errno: {number})"
+    if isinstance(error, InitializationBlocked):
+        return str(error)
+    if getattr(error, "code", None) == "schema_update_required":
+        return "現有資料庫結構尚未符合目前程式版本，不能視為初始化成功"
+    return f"檢查未能完成 ({type(error).__name__})"
+
+
+def _schema_scope_matches(scope, database, partial_revokes):
+    if scope == "*.*":
+        return True
+    pattern = scope[1:-3].replace("``", "`")
+    if partial_revokes:
+        return pattern == database
+    expression, index = "", 0
+    while index < len(pattern):
+        character = pattern[index]
+        if character == "\\" and index + 1 < len(pattern):
+            index += 1
+            expression += re.escape(pattern[index])
+        else:
+            expression += {"%": ".*", "_": "."}.get(character, re.escape(character))
+        index += 1
+    return re.fullmatch(expression, database) is not None
+
+
+def _effective_privileges(grants, database, partial_revokes, required):
+    global_grants, schema_grants, revoked = set(), set(), set()
+    for grant in grants:
+        match = re.match(r"^(GRANT|REVOKE) ([A-Z_, ]+) ON (\*\.\*|`(?:``|[^`])+`\.\*) (?:TO|FROM) ", grant)
+        if not match:
+            continue
+        command, privileges, scope = match.groups()
+        if not _schema_scope_matches(scope, database, partial_revokes):
+            continue
+        privileges = {value.strip() for value in privileges.split(",")}
+        if "ALL PRIVILEGES" in privileges:
+            privileges = set(required) | ({"SUPER"} if scope == "*.*" else set())
+        if command == "REVOKE":
+            revoked.update(privileges)
+        elif scope == "*.*":
+            global_grants.update(privileges)
+        else:
+            schema_grants.update(privileges)
+    return (global_grants - revoked) | schema_grants, global_grants
+
+
+def _active_role_clause(roles):
+    if roles == "NONE":
+        return ""
+    if not roles:
+        raise InitializationBlocked("無法確認目前啟用角色的權限，尚未寫入資料庫")
+    # Re-quote parsed identifiers, never execute server-returned SQL text.
+    pair = re.compile(r"\s*`((?:``|[^`])*)`@`((?:``|[^`])*)`\s*(,|$)")
+    remaining, quoted = roles, []
+    while remaining:
+        match = pair.match(remaining)
+        if not match:
+            raise InitializationBlocked("無法確認目前啟用角色的權限，尚未寫入資料庫")
+        name, host, separator = match.groups()
+        name, host = name.replace("``", "`"), host.replace("``", "`")
+        quoted.append("`" + name.replace("`", "``") + "`@`" + host.replace("`", "``") + "`")
+        remaining = remaining[match.end():]
+        if separator == "," and not remaining:
+            raise InitializationBlocked("無法確認目前啟用角色的權限，尚未寫入資料庫")
+    return " USING " + ",".join(quoted)
+
+
+def _require_server_ready(cursor, database, plan):
+    cursor.execute("SELECT VERSION() AS mysql_version, @@version_comment AS version_comment")
+    server = cursor.fetchone()
+    version = re.match(r"(\d+)\.(\d+)\.(\d+)", str(server["mysql_version"]))
+    if ("mariadb" in (str(server["mysql_version"]) + str(server["version_comment"])).lower()
+            or not version or tuple(map(int, version.groups())) < (8, 0, 16)):
+        raise InitializationBlocked("版本不相容：初始化需要 MySQL 8.0.16 以上，不支援 MariaDB；尚未寫入資料庫")
+    cursor.execute("SELECT @@read_only AS read_only, @@super_read_only AS super_read_only, @@log_bin AS log_bin, @@log_bin_trust_function_creators AS trust_function_creators, @@partial_revokes AS partial_revokes, CURRENT_ROLE() AS active_roles")
+    capabilities = cursor.fetchone()
+    if capabilities["read_only"] or capabilities["super_read_only"]:
+        raise InitializationBlocked("NAS MySQL 處於唯讀模式，尚未寫入資料庫")
+    cursor.execute("SELECT support AS support FROM information_schema.engines WHERE engine='InnoDB'")
+    engine = cursor.fetchone()
+    if not engine or engine["support"] not in {"YES", "DEFAULT"}:
+        raise InitializationBlocked("NAS MySQL 未啟用 InnoDB，尚未寫入資料庫")
+    required = {"CREATE", "SELECT", "INSERT", "REFERENCES"}
+    if plan["expected"].get("views"):
+        # Current final SQL uses CREATE OR REPLACE VIEW; MySQL requires DROP
+        # for that view even though this entry never drops a database/table.
+        required.update({"CREATE VIEW", "SHOW VIEW", "DROP"})
+    if plan["expected"].get("triggers"):
+        required.add("TRIGGER")
+    cursor.execute("SHOW GRANTS FOR CURRENT_USER" + _active_role_clause(capabilities["active_roles"]))
+    grants = [next(iter(row.values())) for row in cursor.fetchall()]
+    privileges, global_privileges = _effective_privileges(
+        grants, database,
+        bool(capabilities["partial_revokes"]), required,
+    )
+    missing = required - privileges
+    if "DROP" in missing and plan["expected"].get("views"):
+        view_drops = set()
+        for grant in grants:
+            match = re.match(r"^GRANT ([A-Z_, ]+) ON `((?:``|[^`])+)`\.`((?:``|[^`])+)` TO ", grant)
+            if match:
+                permissions, schema, view = match.groups()
+                if schema.replace("``", "`") == database and {"DROP", "ALL PRIVILEGES"} & {value.strip() for value in permissions.split(",")}:
+                    view_drops.add(view.replace("``", "`"))
+        if plan["expected"]["views"] <= view_drops:
+            missing.remove("DROP")
+    if missing:
+        raise InitializationBlocked("初始化前檢查失敗：缺少資料庫權限 " + ", ".join(sorted(missing)) + "；尚未寫入資料庫")
+    if (plan["expected"].get("triggers") and capabilities["log_bin"]
+            and not capabilities["trust_function_creators"] and "SUPER" not in global_privileges):
+        raise InitializationBlocked("NAS 的 binary log 設定禁止目前帳號建立觸發器：缺少 SUPER 且 log_bin_trust_function_creators=0；請管理者確認設定，尚未寫入資料庫")
+    return ".".join(version.groups())
+
+
+def _preflight_metadata(config):
+    from scripts.check_runtime_database import ReadOnlyRuntimeConfig, updater
+    try:
+        updater.migration._local_ordered_upgrade_entries()
+    except Exception:
+        raise InitializationBlocked("本機版本驗證檔案缺漏或不一致，請更新完整專案；尚未寫入資料庫") from None
+    updater.migration._schema_snapshot(ReadOnlyRuntimeConfig(config), config["database"])
+
+
 def load_configuration(path: Path = ROOT / ".env") -> dict:
     if not path.is_file():
         raise InitializationBlocked("Missing .env")
@@ -141,7 +286,7 @@ def _require_empty(cursor, database):
     ):
         cursor.execute(f"SELECT 1 FROM information_schema.{table} WHERE {field}=%s LIMIT 1", (database,))
         if cursor.fetchone():
-            raise InitializationBlocked("Database is not empty; initialization stopped without schema writes")
+            raise _NonEmptyDatabase("Database is not empty; initialization stopped without schema writes")
     return identity
 
 
@@ -165,7 +310,10 @@ def initialize(config, plan, *, apply=False, receipt_root=RECEIPT_ROOT):
                     connect_timeout=5, read_timeout=30, write_timeout=30)
     if not apply:
         settings["init_command"] = "SET SESSION TRANSACTION READ ONLY"
-    connection = pymysql.connect(**settings)
+    try:
+        connection = pymysql.connect(**settings)
+    except pymysql.MySQLError as error:
+        raise InitializationBlocked("連線預檢失敗：" + _mysql_reason(error)) from None
     journal_path = None
     completed = 0
     phase = "preflight"
@@ -176,10 +324,16 @@ def initialize(config, plan, *, apply=False, receipt_root=RECEIPT_ROOT):
                 if cursor.fetchone().get("acquired") != 1:
                     raise InitializationBlocked("Another schema initializer holds the database lock")
             identity = _require_empty(cursor, config["database"])
+            version = _require_server_ready(cursor, config["database"], plan)
+            _preflight_metadata(config)
+            # Metadata checks can take time. Re-read the target immediately
+            # before admitting writes, including after the Windows confirmation.
+            identity = _require_empty(cursor, config["database"])
             result = {
                 "status": "ready", "database": config["database"], "server": identity["server"],
                 "assembly_id": plan["assembly_id"], "release_id": plan["release_id"],
                 "statement_count": len(plan["steps"]), "system_seed_policy": "canonical_schema_only",
+                "mysql_version": version, "preflight": "passed",
             }
             if not apply:
                 return result
@@ -210,14 +364,33 @@ def initialize(config, plan, *, apply=False, receipt_root=RECEIPT_ROOT):
         _journal(journal_path, {"event": "passed", **result})
         return result
     except Exception as error:
+        if journal_path is None and isinstance(error, _NonEmptyDatabase):
+            try:
+                _verify_current(config)
+            except Exception as verification_error:
+                detail = "現有結構尚未通過完整版本查核：" + _mysql_reason(verification_error)
+            else:
+                detail = "現有結構已通過完整版本查核；不需要重新初始化，可直接啟動服務"
+            raise InitializationBlocked(f"{error}. {detail}。未修改資料庫，不會清空或重跑。") from None
         if journal_path is not None:
             errno = error.args[0] if isinstance(error, pymysql.MySQLError) and error.args and isinstance(error.args[0], int) else None
             _journal(journal_path, {"event": "failed_partial", "phase": phase,
                                    "completed_statements": completed, "mysql_errno": errno,
                                    "error_type": type(error).__name__})
+            summary = (
+                "All schema statements completed, but verification failed"
+                if completed == len(plan["steps"])
+                else "Initialization failed before all schema statements completed"
+            )
             raise InitializationBlocked(
-                f"Initialization failed; DDL may be committed. No automatic cleanup or retry. Journal: {journal_path}"
+                f"{summary}; DDL may be committed. "
+                f"Phase: {phase}; completed: {completed}/{len(plan['steps'])}; "
+                f"MySQL errno: {errno if errno is not None else 'unavailable'}. "
+                f"Reason: {_mysql_reason(error)}. "
+                f"No automatic cleanup or retry. Journal: {journal_path}"
             ) from None
+        if not isinstance(error, InitializationBlocked):
+            raise InitializationBlocked("初始化前檢查未通過，尚未寫入資料庫：" + _mysql_reason(error)) from None
         raise
     finally:
         # Closing also releases the session-owned initialization lock.

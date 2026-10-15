@@ -32,12 +32,12 @@ class ReadOnlyRuntimeConfig:
         settings.pop("database", None)
         if database is not None:
             settings["database"] = database
-        timeout = min(float(timeout_seconds or 5), 30)
+        timeout = min(float(timeout_seconds or 30), 30)
         return pymysql.connect(
             **settings,
             cursorclass=pymysql.cursors.DictCursor,
             autocommit=True,
-            connect_timeout=timeout,
+            connect_timeout=min(timeout, 5),
             read_timeout=timeout,
             write_timeout=timeout,
             init_command="SET SESSION TRANSACTION READ ONLY",

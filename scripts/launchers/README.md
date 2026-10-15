@@ -72,7 +72,7 @@ Smoke test 只建立本次 owned 的 FastAPI＋React process，執行 GET-only r
 若 NAS 已建立空白 `union_db`，先在專案 `.env` 設定 `APP_ENV=development`、NAS `DB_HOST`、
 `DB_PORT`、`DB_USER`、`DB_PASSWORD`、`DB_DATABASE=union_db`。初始化帳號必須能讀取完整 schema metadata，
 並具有 canonical DDL／system seed 所需權限（包含 table、index、foreign key、view、trigger 與 routine）；
-不需要刪庫或建庫權限。若 MySQL binary logging 的 trigger／function policy 阻擋，請由 NAS 管理員配置權限，
+腳本不執行刪庫或建庫操作；view 的權限需求見下方。若 MySQL binary logging 的 trigger／function policy 阻擋，請由 NAS 管理員配置權限，
 腳本不修改全域設定。執行期間停止其他連線 writer。
 
 ```powershell
@@ -99,6 +99,17 @@ validation manifest 與退役清單的雜湊；來源改變時會停止並要求
 成功必須通過與 NAS 啟動器相同的 current gate，然後才執行 `start_nas_development`。
 MySQL DDL 可能已提交；失敗時查看 `scratch/nas_schema_initialization/<run>/journal.jsonl`，
 不要直接重跑或執行 reset。腳本不會自動清空 partial database。
+錯誤會區分執行 SQL 與最後驗證，列出 phase、完成指令數及安全的 MySQL 數字錯誤碼。
+`All schema statements completed, but verification failed` 表示指令已執行完，尚未通過完整結構檢查，不能直接視為成功。
+唯讀 schema 查核保留 5 秒連線上限，讀寫等待預設 30 秒；明確較短的 caller budget 仍優先。
+不需另跑檢查腳本：同一個初始化入口先檢查 MySQL 8.0.16+、InnoDB、可寫狀態、目前帳號與啟用角色的
+必要權限、binary log 的 trigger 限制、本機版本驗證檔案及唯讀 metadata 查詢。
+完整預檢通過才詢問 Y/N；按 Y 後重新預檢並再讀空庫條件，通過才建表。預檢不建測試表、不更改 NAS 設定。
+目前 final view 使用 OR REPLACE，MySQL 因此要求該 view 的 DROP 權限，預檢接受只授權該 view，無須擴大至整庫 DROP；腳本不會 DROP 資料庫或資料表。
+缺權限、版本不相容、唯讀及 binary log 限制會直接在同一視窗顯示原因。執行中或最終驗證失敗則顯示
+phase、完成數及安全原因；保留現場，不清空、不重跑，兩層最終驗證通過才回報成功。
+已有物件時仍停止初始化；同一入口會再做唯讀版本查核，直接說明現有結構是否完整或為何無法確認。
+「現有結構已通過完整版本查核」表示可直接啟動服務，並不會允許對非空庫重跑初始化。
 
 Compose 現在只啟動 Redis；所有開發入口直接連線 `.env`／process environment 的 MySQL，
 不再啟動或管理 `mysql_db`。既有容器與資料卷保留，請勿使用 `down -v` 或 `--remove-orphans` 清除。

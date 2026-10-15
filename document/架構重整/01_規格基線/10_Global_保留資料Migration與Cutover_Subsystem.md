@@ -410,6 +410,17 @@ metadata 證明零新增效果時，才可 bounded retry；DDL 中斷必須先�
   每個 statement 前後在 ignored scratch 下寫 durable journal，僅保存 artifact、ordinal、hash 與狀態。
   MySQL DDL implicit commit 不宣稱可 rollback；失敗保留 partial 與紀錄，不自動 DROP、cleanup、重試或續跑。
 - 完成後驗 validation objects 與既有 runtime canonical descriptor/current gate；兩者通過才回報 passed。
+  唯讀查核的連線上限維持 5 秒、單次查詢上限預設 30 秒，明確較短 caller budget 仍有效；不重試或放寬結構驗證。
+  SQL 完成但 object/current 驗證失敗仍 blocked；安全錯誤顯示 phase、完成指令數及數字 errno，不輸出 driver 原文。
+  依人工要求，所有預檢與錯誤原因整合於同一初始化入口，不要求 operator 額外執行檢查腳本。
+  寫入前唯讀驗 MySQL 8.0.16+／非 MariaDB、InnoDB、server writable、SHOW GRANTS 的目前帳號／啟用角色有效
+  權限（含 schema patterns 與 partial revokes）、binary log 的 trigger 建立限制、current release validation files
+  及既有 metadata snapshot 查詢可執行；不建 probe table、不修改 server setting、不自動增加權限。
+  CURRENT_ROLE 回傳值只解析 quoted role pairs 並重新 quote identifier，不能當 SQL 原文執行；grant 原文與帳號不輸出。
+  有預檢問題即零 DDL/DML 停止，Windows 不詢問 Y/N；Apply 在確認後重新預檢，並在 metadata checks 後 fresh-read 空庫。
+  預檢無法保證後續不會遇到斷線／資源變動，因此 SQL 完成後仍保留 object/current 兩層驗證，失敗直接輸出安全原因。
+  目標非空時維持拒絕初始化；同一入口以既有 readonly current gate 解釋現有結構是否完整／查核失敗原因，
+  不要求額外檢查腳本，不新增 recovery writer，不做 DROP、重建或自動續跑；已完整僅提示直接啟動服務。
   測試使用 local disposable `lu_test_*` 呼叫同一 executor，驗完整 fresh、system seed、current gate、
   非空資料與 view 拒絕、重跑拒絕及失敗紀錄；不碰本機既有 union_db 或 NAS。此入口不支援 preserve-data，
   因此驗收不執行無關的 dump／candidate／switch。真正 NAS Apply 留給 operator 明確執行。

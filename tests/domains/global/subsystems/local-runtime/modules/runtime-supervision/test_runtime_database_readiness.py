@@ -69,7 +69,19 @@ def test_schema_connection_preserves_tls_and_is_read_only(database_environment, 
         "ca": "ca.pem", "cert": "client.pem", "key": "client.key", "check_hostname": True,
     }
     assert kwargs["init_command"] == "SET SESSION TRANSACTION READ ONLY"
-    assert kwargs["connect_timeout"] == kwargs["read_timeout"] == 5
+    assert kwargs["connect_timeout"] == 5
+    assert kwargs["read_timeout"] == kwargs["write_timeout"] == 30
+
+
+@pytest.mark.parametrize("requested,connect_timeout,query_timeout", [(0.5, 0.5, 0.5), (7, 5, 7), (60, 5, 30)])
+def test_schema_connection_respects_explicit_timeout_budget(database_environment, monkeypatch, requested, connect_timeout, query_timeout):
+    connect = Mock()
+    monkeypatch.setattr(readiness.pymysql, "connect", connect)
+    config, database = readiness.configured_database(require_remote=True)
+    config.connect(database, timeout_seconds=requested)
+    assert connect.call_args.kwargs["connect_timeout"] == connect_timeout
+    assert connect.call_args.kwargs["read_timeout"] == query_timeout
+    assert connect.call_args.kwargs["write_timeout"] == query_timeout
 
 
 @pytest.mark.parametrize("status", ["ready", "blocked", "preview"])

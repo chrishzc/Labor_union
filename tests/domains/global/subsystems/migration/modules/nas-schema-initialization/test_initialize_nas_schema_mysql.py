@@ -4,6 +4,8 @@ import json
 import difflib
 import os
 import re
+import secrets
+from uuid import uuid4
 
 import pymysql
 import pytest
@@ -15,6 +17,63 @@ from scripts.fresh_schema_policy import retired_fresh_tables
 pytestmark = pytest.mark.skipif(
     not os.getenv("LABOR_UNION_TEST_MYSQL_DATABASE"), reason="requires explicit disposable MySQL",
 )
+
+
+def test_real_permissions_and_enabled_roles_are_checked_before_schema_writes(tmp_path):
+    config = {
+        "host": os.environ["LABOR_UNION_TEST_MYSQL_HOST"],
+        "port": int(os.environ["LABOR_UNION_TEST_MYSQL_PORT"]),
+        "user": os.environ["LABOR_UNION_TEST_MYSQL_USER"],
+        "password": os.environ["LABOR_UNION_TEST_MYSQL_PASSWORD"], "charset": "utf8mb4",
+    }
+    assert config["host"] in {"127.0.0.1", "localhost"}
+    database = os.environ["LABOR_UNION_TEST_MYSQL_DATABASE"] + "_admit"
+    assert re.fullmatch(r"lu_test_[a-z0-9_]+", database)
+    suffix = uuid4().hex[:10]
+    username, role = "lu_test_nas_" + suffix, "lu_test_role_" + suffix + "`q"
+    password = secrets.token_urlsafe(24)
+    server = pymysql.connect(**config, autocommit=True)
+    created_database = created_user = created_role = False
+    try:
+        with server.cursor() as cursor:
+            cursor.execute(f"CREATE DATABASE `{database}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
+            created_database = True
+            cursor.execute("CREATE USER %s@'%%' IDENTIFIED BY %s", (username, password))
+            created_user = True
+            cursor.execute(f"GRANT SELECT,INSERT,CREATE,REFERENCES,CREATE VIEW,SHOW VIEW ON `{database}`.* TO %s@'%%'", (username,))
+            cursor.execute(f"GRANT CREATE,DROP ON `{database}`.`v_order_details` TO %s@'%%'", (username,))
+        applicant = {**config, "database": database, "user": username, "password": password}
+        plan = nas.schema_plan()
+        with pytest.raises(nas.InitializationBlocked, match="缺少資料庫權限 TRIGGER"):
+            nas.initialize(applicant, plan, apply=True, receipt_root=tmp_path)
+        with server.cursor() as cursor:
+            cursor.execute("CREATE ROLE %s@'%%'", (role,))
+            created_role = True
+            cursor.execute(f"GRANT TRIGGER ON `{database}`.* TO %s@'%%'", (role,))
+            cursor.execute("GRANT %s@'%%' TO %s@'%%'", (role, username))
+            cursor.execute("SET DEFAULT ROLE %s@'%%' TO %s@'%%'", (role, username))
+            cursor.execute("SELECT @@log_bin AND NOT @@log_bin_trust_function_creators")
+            binary_log_restricts_triggers = bool(cursor.fetchone()[0])
+        # The quoted role must be decoded/requoted correctly. In a restrictive
+        # server the next blocker is binary logging, not a missing TRIGGER grant.
+        if binary_log_restricts_triggers:
+            with pytest.raises(nas.InitializationBlocked, match="binary log"):
+                nas.initialize(applicant, plan, receipt_root=tmp_path)
+        else:
+            assert nas.initialize(applicant, plan, receipt_root=tmp_path)["preflight"] == "passed"
+        with server.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=%s", (database,))
+            assert cursor.fetchone() == (0,)
+        assert not list(tmp_path.iterdir())
+    finally:
+        with server.cursor() as cursor:
+            if created_user:
+                cursor.execute("DROP USER %s@'%%'", (username,))
+            if created_role:
+                cursor.execute("DROP ROLE %s@'%%'", (role,))
+            if created_database:
+                cursor.execute(f"DROP DATABASE `{database}`")
+        server.close()
 
 
 def test_full_fresh_seed_nonempty_and_replay_guards(tmp_path):
@@ -39,8 +98,9 @@ def test_full_fresh_seed_nonempty_and_replay_guards(tmp_path):
             cursor.execute("CREATE TABLE synthetic_existing(id INT PRIMARY KEY)")
             cursor.execute("INSERT INTO synthetic_existing VALUES (73)")
             plan = nas.schema_plan()
-            with pytest.raises(nas.InitializationBlocked, match="not empty"):
+            with pytest.raises(nas.InitializationBlocked, match="not empty") as incomplete:
                 nas.initialize(config, plan, apply=True, receipt_root=tmp_path)
+            assert "現有結構尚未通過完整版本查核" in str(incomplete.value)
             cursor.execute("SELECT id FROM synthetic_existing")
             assert cursor.fetchone() == (73,)
             cursor.execute("DROP TABLE synthetic_existing")
@@ -53,8 +113,9 @@ def test_full_fresh_seed_nonempty_and_replay_guards(tmp_path):
             assert result["status"] == "passed" and result["schema"] == "current"
             cursor.execute("SELECT COUNT(*) FROM payroll_rate_policies")
             assert cursor.fetchone()[0] > 0
-            with pytest.raises(nas.InitializationBlocked, match="not empty"):
+            with pytest.raises(nas.InitializationBlocked, match="not empty") as existing:
                 nas.initialize(config, plan, apply=True, receipt_root=tmp_path)
+            assert "現有結構已通過完整版本查核" in str(existing.value)
             events = [json.loads(line) for line in open(result["journal"], encoding="utf-8")]
             assert events[-1]["event"] == "passed"
             assert sum(e["event"] == "applied" for e in events) == len(plan["steps"])

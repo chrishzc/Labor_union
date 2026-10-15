@@ -23,6 +23,7 @@
 - API readiness 不等於 Private API authentication readiness；認證握手失敗時 fail closed，不啟動任何 worker。
 - supervisor 只清理本次建立且可重新驗證身分的 process tree。
 - 標準入口不再啟動 MySQL 容器；NAS 入口拒絕 loopback DB_HOST，dry-run 零連線，schema 非 current 時不啟動 runtime。
+- 唯讀 schema 查核：連線最多 5 秒、單次查詢預設最多 30 秒；明確 caller timeout 可縮短，無 retry 或寫入。
 - Windows local-bypass 沒有主機 npm 時，由 Docker 執行 Vite，主機 loopback gateway 轉送 relative API 與前端 HTTP／WebSocket；API、gateway 與 Docker published port 均限 loopback，gateway 納入同一 owned supervision。
 
 ## Verification
