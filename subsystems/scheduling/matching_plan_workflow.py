@@ -25,6 +25,14 @@ _STRICT_YMD = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _EVENT_KEY = re.compile(r"^.{1,191}$", re.DOTALL)
 
 
+class MatchingPlanAvailabilityConflict(ValueError):
+    """Retain the fresh occupancy evidence that rejected a recommendation."""
+
+    def __init__(self, conflicts: tuple[tuple[str, str], ...]):
+        super().__init__('matching_plan_staff_occupancy_conflict')
+        self.conflicts = conflicts
+
+
 def _run_in_application_uow(
     operation: Callable[[Any, Any], dict[str, Any]],
     *,
@@ -342,14 +350,18 @@ def _validate_current_availability(
     if not isinstance(complete_combinations, list):
         raise ValueError("availability result malformed")
 
-    feasibility = availability.get("feasibility")
-    if feasibility != "complete":
-        raise ValueError("submitted segments must match a complete combination")
-
     conflicts = availability.get("conflicts")
     if not isinstance(conflicts, list):
         raise ValueError("availability result malformed")
-    if any(item.get("reason_code") != "buffer" for item in conflicts):
+    hard_conflicts = tuple(sorted({
+        (str(item['reason_code']), str(item['work_date']))
+        for item in conflicts if item.get('reason_code') != 'buffer'
+    }))
+    if hard_conflicts:
+        raise MatchingPlanAvailabilityConflict(hard_conflicts)
+
+    feasibility = availability.get("feasibility")
+    if feasibility != "complete":
         raise ValueError("submitted segments must match a complete combination")
 
     target_signature = _segments_signature(normalized_segments)
@@ -616,7 +628,10 @@ def _lock_matching_plan_case_root(cursor: Any, case_no_value: str) -> None:
     if order_row["status"] not in {"洽談中", "訂單成立"}:
         raise ValueError("case is not in negotiation stage")
     _normalize_db_date(order_row["start_date"], "start_date")
-    _normalize_db_date(order_row["end_date"], "end_date")
+    # Initial inquiry derives this projection from Orders terms when absent.
+    # Fresh availability still validates the exact submitted segment dates.
+    if order_row["end_date"] is not None:
+        _normalize_db_date(order_row["end_date"], "end_date")
 
 
 def get_matching_plan_create_receipt(case_no: Any, event_key: Any) -> dict[str, Any]:

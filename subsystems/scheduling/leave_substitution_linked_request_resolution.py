@@ -87,21 +87,19 @@ class LeaveSubstitutionLinkedRequestResolution:
     ) -> LinkedLeaveRequestResult | None:
         if locked is None:
             return None
-        if self._customer_defer_case_no is not None:
-            try:
-                remaining = self._repository.has_pending_service_days(
-                    locked.request_id, locked.expected_version
-                )
-            except ValueError as error:
-                raise LinkedLeaveRequestResolutionError(str(error)) from error
-            if remaining:
-                # The canonical batch receipt records this case's result. Other
-                # cases/assignments still require their own processing; do not
-                # resolve the entire leave or send a completion notification.
-                return LinkedLeaveRequestResult(
-                    locked.request_id, locked.expected_version, None,
-                    locked.status, receipt_key, "not_requested", locked.staff_id,
-                )
+        try:
+            remaining = self._repository.has_pending_service_days(
+                locked.request_id, locked.expected_version
+            )
+        except ValueError as error:
+            raise LinkedLeaveRequestResolutionError(str(error)) from error
+        if remaining:
+            # A receipt completes only this batch. Keep the request open while
+            # any affected date or case still has the original staff assigned.
+            return LinkedLeaveRequestResult(
+                locked.request_id, locked.expected_version, None,
+                locked.status, receipt_key, "not_requested", locked.staff_id,
+            )
         resolution_key = _resolution_key(
             idempotency_key,
             locked.request_id,
@@ -146,6 +144,11 @@ class LeaveSubstitutionLinkedRequestResolution:
             raise LinkedLeaveRequestResolutionError("leave_request_stale")
         if snapshot.status is not StaffLeaveRequestStatus.ACCEPTED_FOR_PROCESSING:
             raise LinkedLeaveRequestResolutionError("leave_request_not_resolvable")
+        if intent.service_dates:
+            if snapshot.leave_start_date is None or snapshot.leave_end_date is None:
+                raise LinkedLeaveRequestResolutionError("leave_request_dates_missing")
+            if any(not snapshot.leave_start_date <= day <= snapshot.leave_end_date for day in intent.service_dates):
+                raise LinkedLeaveRequestResolutionError("leave_request_dates_outside_window")
         return LinkedLeaveRequestResult(
             snapshot.request_id,
             intent.expected_version,

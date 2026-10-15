@@ -564,6 +564,30 @@ def create_matching_plan_version_route(
             data=MatchingPlanReceiptView.model_validate(result),
             message="成功建立多月嫂配對計畫版本",
         )
+    except _matching_plan_workflow.MatchingPlanAvailabilityConflict as error:
+        labels = {
+            'active_lock': '已由其他案件保留',
+            'assignment': '已有其他正式排班',
+            'schedule': '已有服務排程',
+            'staff_unavailability': '月嫂已登記不能服務',
+            'requires_review': '既有排程歸屬尚待核對',
+            'coverage_gap': '此段服務尚缺可用人選',
+            'outside_case_period': '超出本案服務期間',
+            'draft_overlap': '方案服務段落重疊',
+        }
+        details = []
+        for reason in sorted({reason for reason, _ in error.conflicts}):
+            dates = sorted({day for code, day in error.conflicts if code == reason})
+            date_text = '、'.join(dates[:6])
+            if len(dates) > 6:
+                date_text += f'等共 {len(dates)} 日'
+            details.append(f"{labels.get(reason, '檔期不可用')}：{date_text}")
+        raise typed_http_error(
+            409, 'domain_blocked', 'matching_plan_staff_occupancy_conflict',
+            '推薦月嫂檔期衝突，不能建立方案。' + '；'.join(details)
+            + '。請返回尋找人選改選月嫂，或到服務安排調整日期後重新查詢。',
+            f'matching-plan-create:{case_no}',
+        ) from error
     except ValueError as error:
         message = str(error)
         if message == "case not found":

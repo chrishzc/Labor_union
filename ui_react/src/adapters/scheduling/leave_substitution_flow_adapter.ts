@@ -88,7 +88,7 @@ function isStale(error: LeaveSubstitutionError): boolean {
 
 function isOutcomeUnknown(error: LeaveSubstitutionError): boolean {
   if (error instanceof LeaveSubstitutionAbortedError || error.code === 'LEAVE_SUBSTITUTION_ABORTED') return false;
-  if (error.status === 503) return true;
+  if (error.status !== undefined && [500, 502, 503, 504].includes(error.status)) return true;
   return error.code === 'LEAVE_SUBSTITUTION_TIMEOUT' || error.code === 'LEAVE_SUBSTITUTION_NETWORK';
 }
 

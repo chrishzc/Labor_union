@@ -6,6 +6,7 @@ import {
 import { orderCardProjectionClient } from '../api/orders/order_card_projection_client';
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import type { FormManagementContext } from '../api/orders/order_query_schemas';
+import { officialServiceDateCorrectionClient, type OfficialDateQuery } from '../api/orders/official_service_date_correction_client';
 import {
   lineNotificationTimelineClient,
   type LineNotificationTimeline,
@@ -16,6 +17,7 @@ interface OrderWorkbenchV2OwnerContextProps {
   revision?: number;
   placement?: 'header';
   disabled?: boolean;
+  completedService?: boolean;
 }
 
 type ReadState<T> =
@@ -29,13 +31,47 @@ function errorMessage(error: unknown): string {
     : '正式資料查詢失敗';
 }
 
+function serviceDateRanges(dates: string[]): string {
+  const ranges: string[] = [];
+  let start = dates[0];
+  let end = start;
+  for (const day of dates.slice(1)) {
+    if (Date.parse(day) - Date.parse(end!) === 86400000) end = day;
+    else {
+      ranges.push(start === end ? start! : `${start} ～ ${end}`);
+      start = end = day;
+    }
+  }
+  if (start) ranges.push(start === end ? start : `${start} ～ ${end}`);
+  return ranges.length ? `${ranges.join('、')}（${dates.length} 天）` : '原紀錄未登錄服務日期';
+}
+
+function recordTime(value: string): string {
+  return new Date(value).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false });
+}
+
 /** Reuse the same bounded, read-only owner clients as the two legacy pages. */
-export const OrderWorkbenchV2OwnerContext: FC<OrderWorkbenchV2OwnerContextProps> = ({ caseNo, revision = 0, placement, disabled = false }) => {
+export const OrderWorkbenchV2OwnerContext: FC<OrderWorkbenchV2OwnerContextProps> = ({ caseNo, revision = 0, placement, disabled = false, completedService = false }) => {
   const [expanded, setExpanded] = useState(false);
   const [retryRevision, setRetryRevision] = useState(0);
   const [card, setCard] = useState<ReadState<OrdersCardProjectionViewModel>>({ status: 'loading' });
   const [form, setForm] = useState<ReadState<FormManagementContext>>({ status: 'loading' });
   const [notifications, setNotifications] = useState<ReadState<LineNotificationTimeline>>({ status: 'loading' });
+  const [dateHistory, setDateHistory] = useState<ReadState<OfficialDateQuery['history']>>({ status: 'loading' });
+
+  useEffect(() => {
+    if (!expanded || !completedService) return;
+    const controller = new AbortController();
+    setDateHistory({ status: 'loading' });
+    void Promise.resolve().then(() => officialServiceDateCorrectionClient.query(caseNo, { signal: controller.signal }))
+      .then((data) => {
+        if (controller.signal.aborted) return;
+        if (data.case_no !== caseNo) throw new Error('完工與日期更正紀錄案件識別不一致。');
+        setDateHistory({ status: 'ready', data: data.history });
+      })
+      .catch((error) => { if (!controller.signal.aborted) setDateHistory({ status: 'error', message: errorMessage(error) }); });
+    return () => controller.abort();
+  }, [caseNo, completedService, expanded, retryRevision, revision]);
 
   useEffect(() => {
     if (!expanded) return;
@@ -105,16 +141,35 @@ export const OrderWorkbenchV2OwnerContext: FC<OrderWorkbenchV2OwnerContextProps>
             <h4>客戶服務資料</h4>
             {form.status === 'loading' && <p role="status">載入客戶服務資料…</p>}
             {form.status === 'error' && <p role="alert">客戶服務資料不可用：{form.message}</p>}
-            {form.status === 'ready' && (
-              <dl className="order-v2-business-summary">
+            {completedService && dateHistory.status === 'loading' && <p role="status">載入原完工與日期更正紀錄…</p>}
+            {completedService && dateHistory.status === 'error' && <p role="alert">原完工與日期更正紀錄不可用：{dateHistory.message} 請收起後重新開啟此入口重試。</p>}
+            <dl className="order-v2-business-summary">
+              {form.status === 'ready' && <>
                 <div><dt>服務時間</dt><dd>{form.data.service_time ?? '未登錄'}</dd></div>
                 <div><dt>服務類型</dt><dd>{form.data.service_type ?? '未登錄'}</dd></div>
                 <div><dt>生產方式</dt><dd>{form.data.delivery_type ?? '未登錄'}</dd></div>
                 <div><dt>住宅類型</dt><dd>{form.data.residence_type ?? '未登錄'}</dd></div>
                 <div><dt>服務縣市</dt><dd>{form.data.city ?? '未登錄'}</dd></div>
                 <div><dt>身分類別</dt><dd>{form.data.identity_status ?? '未登錄'}</dd></div>
-              </dl>
-            )}
+              </>}
+              {completedService && dateHistory.status === 'ready' && dateHistory.data.length === 0 && <div><dt>原完工與日期更正紀錄</dt><dd>尚無可查閱紀錄</dd></div>}
+              {completedService && dateHistory.status === 'ready' && dateHistory.data.map((record) => (
+                <div key={record.event_id}>
+                  <dt>{record.event_type === 'original_completion' ? '原完工紀錄' : '日期更正紀錄'} #{record.event_id}</dt>
+                  <dd>
+                    記錄時間：{recordTime(record.recorded_at)}；操作人：{record.actor}
+                    <br />
+                    {record.event_type === 'original_completion' ? <>
+                      {record.completion_instant && <>原服務完成時刻：{recordTime(record.completion_instant)}<br /></>}
+                      原服務日期：{serviceDateRanges(record.after_dates)}
+                    </> : <>
+                      移除日期：{record.before_dates.filter((day) => !record.after_dates.includes(day)).join('、') || '無'}；補入日期：{record.after_dates.filter((day) => !record.before_dates.includes(day)).join('、') || '無'}
+                      <br />更正原因：{record.reason ?? '原紀錄未登錄原因'}
+                    </>}
+                  </dd>
+                </div>
+              ))}
+            </dl>
           </section>
           <section aria-label="LINE 通知唯讀歷程">
             <h4>LINE 通知歷程</h4>

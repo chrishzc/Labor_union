@@ -69,3 +69,4 @@ UI verification follows the same Orders owner hierarchy inside the Vitest source
 - test_root: `ui_react/src/tests/order_workbench_v2_candidate_pool_refresh.test.tsx`
 - test_root: `ui_react/src/tests/order_workbench_v2_mutation_refresh.test.tsx`
 - test_root: `ui_react/src/tests/order_workbench_v2_terms_mutation.test.tsx`
+- test_root: `ui_react/src/tests/order_workbench_v2_owner_context.test.tsx`

@@ -19,6 +19,7 @@ def _facts(
     contract_completed: bool,
     actual_start_date: date | None,
     current_status=OrderLifecycleStatus.DISCUSSION,
+    deposit_gate_override_active=False,
 ):
     return SimpleNamespace(
         current_status=current_status,
@@ -27,6 +28,7 @@ def _facts(
         actual_start_reconfirmed=True,
         contract_completed=contract_completed,
         historical_precision_restarted=False,
+        deposit_gate_override_active=deposit_gate_override_active,
     )
 
 
@@ -80,3 +82,34 @@ def test_pending_completion_order_never_advances_from_lifecycle_evaluation():
     )
 
     assert status is OrderLifecycleStatus.PENDING_COMPLETION
+
+
+def test_unpaid_override_preserves_established_order_before_service():
+    settlement = SimpleNamespace(deposit_settled=False)
+    status = _lifecycle_status(
+        _facts(contract_completed=True, actual_start_date=date(2026, 11, 15),
+               deposit_gate_override_active=True),
+        settlement, False, datetime(2026, 10, 15, tzinfo=timezone.utc),
+    )
+    assert status is OrderLifecycleStatus.ESTABLISHED
+    assert settlement.deposit_settled is False
+
+
+def test_unpaid_override_allows_signed_reconfirmed_order_to_enter_service():
+    from domains.orders.lifecycle import _alert_codes
+    settlement = SimpleNamespace(deposit_settled=False)
+    roots = _facts(contract_completed=True, actual_start_date=date(2026, 9, 14),
+                   deposit_gate_override_active=True)
+    now = datetime(2026, 10, 15, tzinfo=timezone.utc)
+    assert _lifecycle_status(roots, settlement, False, now) is OrderLifecycleStatus.IN_SERVICE
+    assert _alert_codes(roots, settlement, now) == ()
+    assert settlement.deposit_settled is False
+
+
+def test_expired_override_still_blocks_unpaid_order():
+    from domains.orders.lifecycle import _alert_codes
+    roots = _facts(contract_completed=True, actual_start_date=date(2026, 9, 14))
+    settlement = SimpleNamespace(deposit_settled=False)
+    now = datetime(2026, 10, 15, tzinfo=timezone.utc)
+    assert _lifecycle_status(roots, settlement, False, now) is OrderLifecycleStatus.DISCUSSION
+    assert _alert_codes(roots, settlement, now) == ('enter_service.deposit_required_before_service',)

@@ -14,11 +14,14 @@
 - `infrastructure/mysql/case_architecture_bootstrap_repository.py`
 - `infrastructure/mysql/case_import_repository.py`
 - `subsystems/bootstrap/case_architecture_status.py`
+- `subsystems/bootstrap/case_architecture_workflow.py` — `ensure_in_unit_of_work` 沿 caller 的交易，無 nested begin／commit。
 - `api/routes/case_architecture_bootstrap.py`
 - `ui_react/src/api/case_import/case_architecture_bootstrap_client.ts`
 - `ui_react/src/components/CaseArchitectureBootstrapRepairPanel.tsx`
 
 ## Dependencies
+- inbound: `orders/order-terms` — 完成缺件進件或洽談中完整補件時委派初始化，沿用正式政策與缺漏／partial protection，不修改既有付款與薪資資料。
+- inbound: `contract-signing/external-signing-presentation` — 簽約文件缺少付款條款／薪資初始資料時，只顯示具體原因並導向同案客戶名冊；不在簽約頁嵌入補建 Preview／Apply，也不在 Query 自動補建。
 - outbound: `client-finance/obligation-planning` — 第二期預計日與零金額條件重用 Finance stage plan；bootstrap 不建立正式應付義務。
 - inbound: `case-import/order-information` — BeClass raw survey 僅在 Case Import projection boundary 解析為 named scalar facts。
 - inbound: `clients/client-profile/profile-change` — 客戶名冊只在 owner readback 回報缺少 bootstrap root 時提供既有 Q/P/A 修復入口，不直接寫入 Client Finance、Payroll 或 Scheduling。

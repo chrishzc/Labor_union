@@ -81,7 +81,7 @@ describe('Beta reuses legacy canonical owner readbacks', () => {
     expect(await screen.findByText('0200000000')).toBeInTheDocument();
     expect(screen.getByText('測試地址 101 號（非真實個資）')).toBeInTheDocument();
     expect(screen.getByText('NT$ 12,000')).toBeInTheDocument();
-    expect(screen.getByText('unsettled')).toBeInTheDocument();
+    expect(screen.getByText('尚未結清')).toBeInTheDocument();
     expect(screen.getByText('09:00–17:00')).toBeInTheDocument();
     expect(screen.getByText('測試服務類型')).toBeInTheDocument();
     expect(screen.getByText('測試生產方式')).toBeInTheDocument();
@@ -111,8 +111,8 @@ describe('Beta reuses legacy canonical owner readbacks', () => {
     openContext();
 
     expect(await screen.findByText('資料受阻（定金金額）')).toBeInTheDocument();
-    expect(screen.getByText('資料待補正（已發生實際開始日）')).toBeInTheDocument();
-    expect(screen.getByText('unsettled')).toBeInTheDocument();
+    expect(screen.getByText('尚無可用資料（已發生實際開始日）')).toBeInTheDocument();
+    expect(screen.getByText('尚未結清')).toBeInTheDocument();
     expect(screen.queryByText('NT$ 12,000')).not.toBeInTheDocument();
   });
 

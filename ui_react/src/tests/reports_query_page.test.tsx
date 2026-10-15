@@ -100,6 +100,7 @@ describe('ReportsPage query-only presentation', () => {
     expect(startInput).toHaveAttribute('type', 'date');
     fireEvent.change(startInput, { target: { value: '2026-08-13' } });
     expect(screen.queryByText('XLSX 已產生並開始下載。')).not.toBeInTheDocument();
+    fireEvent.blur(startInput);
     await waitFor(() => expect(weeklyOperationsReportQueryClient.query).toHaveBeenLastCalledWith(
       '2026-08-13',
       expect.any(String),
@@ -120,7 +121,9 @@ describe('ReportsPage query-only presentation', () => {
     const startInput = screen.getByLabelText('起日') as HTMLInputElement;
     const endInput = screen.getByLabelText('迄日') as HTMLInputElement;
     fireEvent.change(startInput, { target: { value: '2026-08-20' } });
+    fireEvent.blur(startInput);
     fireEvent.change(endInput, { target: { value: '2026-08-31' } });
+    fireEvent.blur(endInput);
 
     await waitFor(() => expect(weeklyOperationsReportQueryClient.query).toHaveBeenLastCalledWith(
       '2026-08-20',
@@ -129,6 +132,21 @@ describe('ReportsPage query-only presentation', () => {
     ));
     expect(startInput.value).toBe('2026-08-20');
     expect(endInput.value).toBe('2026-08-31');
+  });
+
+  it.each(['起日', '迄日'])('%s 的年份未輸完時不送出跨千年查詢，離開欄位後才查詢', async (label) => {
+    render(<ReportsPage />);
+    await screen.findByText('CASE-WEEK-001');
+    const input = screen.getByLabelText(label);
+    const initialCalls = vi.mocked(weeklyOperationsReportQueryClient.query).mock.calls.length;
+    for (const year of ['0002', '0020', '0202', '2026']) {
+      fireEvent.change(input, { target: { value: `${year}-08-21` } });
+      await act(async () => { await Promise.resolve(); });
+      expect(weeklyOperationsReportQueryClient.query).toHaveBeenCalledTimes(initialCalls);
+    }
+    fireEvent.blur(input);
+    await waitFor(() => expect(weeklyOperationsReportQueryClient.query).toHaveBeenCalledTimes(initialCalls + 1));
+    expect(vi.mocked(weeklyOperationsReportQueryClient.query).mock.lastCall?.[label === '起日' ? 0 : 1]).toBe('2026-08-21');
   });
 
   it('scope 變更後忽略舊週報 export completion', async () => {

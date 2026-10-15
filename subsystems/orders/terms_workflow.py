@@ -13,6 +13,7 @@ from typing import Any
 from domains.client_finance.obligation_planning import (
     build_preassignment_client_finance_terms_impact,
     build_client_finance_terms_impact,
+    deposit_gate_override_survives_terms_impact,
 )
 from domains.orders.lifecycle import (
     build_preassignment_terms_lifecycle_impact,
@@ -415,7 +416,8 @@ class OrderTermsWorkflow:
                     facts.payroll, scheduling, proposed_terms, change_identity
                 ) if facts.payroll is not None else None
                 lifecycle = build_terms_lifecycle_impact(
-                    facts.lifecycle,
+                    replace(facts.lifecycle, deposit_gate_override_active=
+                            deposit_gate_override_survives_terms_impact(facts.client_finance, client_finance)),
                     proposed_terms,
                     scheduling,
                     client_finance.settlement,
@@ -433,7 +435,8 @@ class OrderTermsWorkflow:
                 facts.payroll, scheduling, proposed_terms, change_identity
             )
             lifecycle = build_terms_lifecycle_impact(
-                facts.lifecycle,
+                replace(facts.lifecycle, deposit_gate_override_active=
+                        deposit_gate_override_survives_terms_impact(facts.client_finance, client_finance)),
                 proposed_terms,
                 scheduling,
                 client_finance.settlement,

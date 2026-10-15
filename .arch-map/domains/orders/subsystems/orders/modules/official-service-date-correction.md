@@ -16,7 +16,9 @@
   - `api/dependencies/official_service_date_correction.py`
   - `ui_react/src/api/orders/official_service_date_correction_client.ts`
   - `ui_react/src/components/OrderOfficialDateCorrectionPanel.tsx`
+  - `ui_react/src/components/OrderServiceDatesPanel.tsx` — 完工模式沿用案件內「設定服務日期／確認排班」月曆，經原 official-service-dates Query／Preview／Apply 保存，不走事前確認 writer。
   - `ui_react/src/components/OrderWorkbenchV2Drawer.tsx`
+  - `ui_react/src/components/OrderWorkbenchV2OwnerContext.tsx` — 案件頁既有相關紀錄入口內，於服務資料欄位唯讀呈現原完工及日期更正歷程。
 
 ## Dependencies
 - outbound: `scheduling/schedule-generation` — `infrastructure/mysql/scheduling_replacement_writer.py` 為唯一正式排班世代更換 writer。
@@ -24,6 +26,8 @@
 - outbound: `payroll/assignment-terms-impact` — 薪資率 snapshot 只按 immutable source carry；特殊薪資、調整等金額影響 fail closed。
 
 ## Contracts
+- 既有 Query 以 typed `history` 回傳服務資料鎖所指的原完工事件與 append-only 日期更正事件（時間、操作人、原／新日期及完整原因）；不回傳 raw snapshot，不寫入紀錄或帳務。Preview／Apply 的驗證與 writer 維持原樣。
+- Query 逐項回傳 `monetary_blockers` 的原因與既有核對入口類型；已完工案件的 stale buffer marker 依 Scheduling lifecycle 排除，不屬金額阻擋。真正的特殊薪資／調整／補助退還／薪資快照／雙倍薪／樓層費仍阻擋，fresh Preview／Apply 使用同一判斷。
 - `document/架構重整/01_規格基線/01_Orders_Domain.md` §3.3、Issue #346。
 - `document/架構重整/01_規格基線/02_Assignments_Scheduling_Domain.md` §7。
 

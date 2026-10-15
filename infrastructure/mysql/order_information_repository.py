@@ -166,11 +166,9 @@ class MySqlOrderInformationRepository:
             segments = tuple(cursor.fetchall() or ())
         if not isinstance(case, Mapping) or not segments:
             raise ValueError("matching_plan_information_not_found")
-        estimates = _matching_plan_payroll_estimates(case, segments)
         result: list[dict[str, object]] = []
         for segment in segments:
-            segment_facts = {**segment, **estimates[int(segment["assignment_id"])]}
-            facts, issues = _facts(case, segment_facts)
+            facts, issues = _facts(case, segment)
             _merge_contract_payment_facts(self._connection, case_no, facts)
             text, blockers = build_order_information_message(
                 info_type, facts, issues,

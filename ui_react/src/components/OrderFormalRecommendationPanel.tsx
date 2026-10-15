@@ -85,6 +85,11 @@ function errorMessage(error: unknown): string {
   return error instanceof Error && error.message.trim() ? error.message.trim() : '正式媒合操作失敗';
 }
 
+function isDefinitivePlanRejection(error: unknown): boolean {
+  return error instanceof ApiHttpError && error.status >= 400 && error.status < 500
+    && error.status !== 408 && error.status !== 429 && !error.retryable;
+}
+
 /** The active-plan GET, not a create receipt held in component state, owns continuation. */
 async function readCurrentPlan(caseNo: string, expectedPlanId?: number): Promise<CurrentPlan | null> {
   let plan: ActiveWaitingDepositPlan;
@@ -463,7 +468,8 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
       receipt = await matchingCandidateWorkflowClient.createSingleCaregiverPlan(command);
     } catch (caught) {
       const message = errorMessage(caught);
-      orderMutationFlowStore.setFormalPlanCreation(caseNo, { status: 'outcome_unknown', command, receipt: null, error: message });
+      if (isDefinitivePlanRejection(caught)) orderMutationFlowStore.clearFormalPlanCreation(caseNo, 'single');
+      else orderMutationFlowStore.setFormalPlanCreation(caseNo, { status: 'outcome_unknown', command, receipt: null, error: message });
       throw caught;
     }
     const saved: FormalPlanCreationFlowState = { status: 'observation_failed', command, receipt, error: null };
@@ -499,12 +505,14 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
     if (saved?.status !== 'outcome_unknown') return;
     void runFormalManualResponse(async () => {
       const request = sequence.current;
+      let originalNotRecorded = false;
       try {
         let receipt: FormalPlanCreationFlowState['receipt'];
         try {
           receipt = await matchingCandidateWorkflowClient.queryMatchingPlanReceipt(saved.command);
         } catch (caught) {
           if (!(caught instanceof ApiHttpError) || caught.status !== 404) throw caught;
+          originalNotRecorded = true;
           receipt = await matchingCandidateWorkflowClient.createSingleCaregiverPlan(saved.command);
         }
         const received: FormalPlanCreationFlowState = { ...saved, status: 'observation_failed', receipt, error: null };
@@ -513,7 +521,9 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
       } catch (caught) {
         const message = errorMessage(caught);
         const current = orderMutationFlowStore.getFormalPlanCreation(caseNo, 'single');
-        if (current) {
+        if (current && !current.receipt && originalNotRecorded && isDefinitivePlanRejection(caught)) {
+          orderMutationFlowStore.clearFormalPlanCreation(caseNo, 'single');
+        } else if (current) {
           orderMutationFlowStore.setFormalPlanCreation(caseNo, { ...current, status: current.receipt ? 'observation_failed' : 'outcome_unknown', error: message });
         }
         if (activeCase.current === caseNo && sequence.current === request) setError(message);
@@ -706,6 +716,7 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
       {formalPlanCreation?.status === 'outcome_unknown' && (
         <section aria-label="正式媒合方案建立結果未確定" className="formal-recommendation-next">
           <p role="alert">尚未確認是否建立成功。</p>
+          {formalPlanCreation.error && <p role="alert">原因：{formalPlanCreation.error}</p>}
           <button type="button" data-control-id="orders.formal-plan-creation.reconcile-original" onClick={confirmOriginalFormalPlanCreation}>
             確認建立結果
           </button>
@@ -714,6 +725,7 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
       {(formalPlanCreation?.status === 'observation_failed' || formalPlanCreation?.status === 'observing') && (
         <section aria-label="正式媒合方案建立回讀失敗" className="formal-recommendation-next">
           <p role="alert">方案已建立，請重新讀取最新狀態。</p>
+          {formalPlanCreation.error && <p role="alert">原因：{formalPlanCreation.error}</p>}
           <button type="button" data-control-id="orders.formal-plan-creation.readback" onClick={retryFormalPlanCreationReadback}>
             重新讀取
           </button>
@@ -721,7 +733,7 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
       )}
       {busy && <p role="status">正式媒合操作／回讀中…</p>}
       {notice && <p role="status">{notice}</p>}
-      {error && <p role="alert">{error}</p>}
+      {error && !formalPlanCreation?.error && <p role="alert">{error}</p>}
     </section>
   );
 };

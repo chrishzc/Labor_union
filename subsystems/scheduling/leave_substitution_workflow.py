@@ -4,8 +4,8 @@ Description: 編排請假代班 Preview、跨域單一交易 Apply、linked requ
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import timedelta
+from dataclasses import dataclass, replace
+from datetime import date, timedelta
 from enum import Enum
 from typing import Callable, Mapping, Protocol
 
@@ -54,6 +54,7 @@ class LeaveSubstitutionWorkflowFacts:
 class LinkedLeaveRequestIntent:
     request_id: int
     expected_version: int
+    service_dates: tuple[date, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -257,7 +258,7 @@ class LeaveSubstitutionWorkflow:
         except Exception as exception:
             if _mysql_error_code(exception) in {1205, 1213}:
                 raise
-            raise _workflow_error(request.correlation_id, ErrorCategory.INTERNAL, "transaction_failed", "The leave/substitution transaction failed and was rolled back.") from exception
+            raise _workflow_error(request.correlation_id, ErrorCategory.INTERNAL, "transaction_failed", "代班儲存或確認回應失敗，結果尚未確認；請按「再次確認變更結果」以同一筆操作查核，避免另開重複操作。") from exception
 
     def _apply_transaction(self, request):
         command_fingerprint = _command_fingerprint(request)
@@ -299,6 +300,11 @@ class LeaveSubstitutionWorkflow:
             )
         except RuntimeError as error:
             _raise_replay_repository_error(request, error)
+        except ValueError as error:
+            if str(error) != "assignment_not_found":
+                raise
+            raise _workflow_error(request.correlation_id, ErrorCategory.CONFLICT, "stale_assignment",
+                "原服務指派已變更或不再有效；請按「重新查詢最新資料」，核對最新指派與請假待辦後重新預覽。") from error
         _raise_if_claim_mismatched(request, evidence.claim_state)
         replay = _validate_replay_evidence(request, command_fingerprint, evidence.claim_state, evidence)
         if replay is not None:
@@ -526,14 +532,14 @@ def _validate_locked_staff_set(request, facts, preflight):
     if tuple(sorted(fresh)) != preflight: raise _workflow_error(request.correlation_id, ErrorCategory.CONFLICT, "scheduling_lock_set_stale", "Impacted caregiver set changed after preflight.")
 def _validate_expected_versions(request, facts):
     plan = facts.assignment_plan; expected = (request.expected_order_version.value,request.expected_scheduling_version.value,request.expected_client_finance_version.value,request.expected_payroll_version.value); current = (plan.order_version,plan.scheduling_version,plan.client_finance_version,plan.payroll_version)
-    if expected != current: raise _workflow_error(request.correlation_id, ErrorCategory.CONFLICT, "stale_version", "Leave/substitution source versions changed after Preview.")
+    if expected != current: raise _workflow_error(request.correlation_id, ErrorCategory.CONFLICT, "stale_version", "案件、排班或金額資料已由其他操作更新；請按「重新查詢最新資料」，核對後重新檢查代班影響。")
 def _validate_preview_fingerprint(request, preview):
-    if request.preview_fingerprint != preview.fingerprint: raise _workflow_error(request.correlation_id, ErrorCategory.CONFLICT, "stale_preview", "Leave/substitution facts changed after Preview.")
+    if request.preview_fingerprint != preview.fingerprint: raise _workflow_error(request.correlation_id, ErrorCategory.CONFLICT, "stale_preview", "代班預覽依據已變更；請按「重新查詢最新資料」，核對後重新檢查代班影響。")
 def _raise_if_impacts_blocked(correlation_id, *impacts):
     blockers = tuple(item for impact in impacts for item in impact.blockers)
     if blockers: raise LeaveSubstitutionWorkflowError(TypedError(ErrorCategory.DOMAIN_BLOCKED, "leave_substitution_domain_blocked", "Leave/substitution requires human review before Apply.", correlation_id, domain_blockers=tuple(sorted(set(blockers)))))
 def _raise_if_claim_mismatched(request, claim):
-    if claim is CommandClaimState.MISMATCH: raise _workflow_error(request.correlation_id, ErrorCategory.IDEMPOTENCY_MISMATCH, "batch_key_request_identity_conflict", "Batch key was already used with a different command.")
+    if claim is CommandClaimState.MISMATCH: raise _workflow_error(request.correlation_id, ErrorCategory.IDEMPOTENCY_MISMATCH, "batch_key_request_identity_conflict", "此操作識別已用於不同的代班內容；請先重新整理指派並核對已儲存結果，需改內容時重新預覽。")
 def _raise_replay_integrity(request, message): raise _workflow_error(request.correlation_id, ErrorCategory.DOMAIN_BLOCKED, "invalid_batch_replay_snapshot", message)
 def _command_fingerprint(request): return fingerprint_payload({"family":"scheduling-leave-substitution","batch_key":request.idempotency_key.value,"case_no":request.case_no,"request_fingerprint":_request_fingerprint(request).value,"expected_versions":{"order":request.expected_order_version.value,"scheduling":request.expected_scheduling_version.value,"client_finance":request.expected_client_finance_version.value,"payroll":request.expected_payroll_version.value},"preview_fingerprint":request.preview_fingerprint.value,"actor":request.actor.actor_id,"reason":request.reason})
 def leave_request_fingerprint(intent): return fingerprint_payload({"original_assignment_id":intent.original_assignment_id,"items":tuple({"original_schedule_id":item.original_schedule_id,"work_date":item.work_date.isoformat(),"resolution_type":item.resolution_type.value,"substitute_staff_id":item.substitute_staff_id,"is_double_pay":item.is_double_pay,"replacement_work_date":None if item.replacement_work_date is None else item.replacement_work_date.isoformat()} for item in intent.items)})
@@ -542,11 +548,16 @@ def _request_snapshot(request): return {"case_no":request.case_no,"original_assi
 def _receipt_snapshot(receipt): return {"batch_key":receipt.batch_key,"case_no":receipt.case_no,"order_version":receipt.order_version,"scheduling_generation":receipt.scheduling_generation,"scheduling_version":receipt.scheduling_version,"client_finance_version":receipt.client_finance_version,"payroll_version":receipt.payroll_version,"outcome_event_ids":list(receipt.outcome_event_ids),"preview_fingerprint":receipt.preview_fingerprint.value,"linked_request":_linked_result_payload(receipt.linked_request)}
 def _linked_result_payload(result): return None if result is None else {"request_id":result.request_id,"expected_version":result.expected_version,"resolved_version":result.resolved_version,"status":result.status,"receipt_key":result.receipt_key,"notification_intent":result.notification_intent,"staff_id":result.staff_id}
 def _resolve_linked_preview(resolver, request):
-    try: return resolver.preview(request.linked_request)
+    try: return resolver.preview(_linked_selection(request))
     except LinkedLeaveRequestResolutionError as error: raise _linked_workflow_error(request.correlation_id, error) from error
 def _resolve_linked_apply(resolver, request):
-    try: return resolver.lock_for_apply(request.linked_request)
+    try: return resolver.lock_for_apply(_linked_selection(request))
     except LinkedLeaveRequestResolutionError as error: raise _linked_workflow_error(request.correlation_id, error) from error
+
+def _linked_selection(request):
+    return None if request.linked_request is None else replace(
+        request.linked_request, service_dates=tuple(item.work_date for item in request.intent.items),
+    )
 def _resolve_and_validate_linked_apply(resolver, request, original_staff_id):
     linked = _resolve_linked_apply(resolver, request)
     if linked is not None and linked.staff_id != original_staff_id:
@@ -562,7 +573,13 @@ def _validate_linked_staff_relation(request, facts, linked):
 def _linked_workflow_error(correlation_id, error):
     code = str(error) or "leave_request_invalid"
     category = ErrorCategory.NOT_FOUND if code == "leave_request_not_found" else ErrorCategory.IDEMPOTENCY_MISMATCH if "idempotency" in code else ErrorCategory.DOMAIN_BLOCKED if code == "leave_request_not_resolvable" else ErrorCategory.CONFLICT
-    return _workflow_error(correlation_id, category, code, "Linked leave request rejected the leave/substitution command.")
+    messages = {
+        "leave_request_stale": "請假待辦已由其他操作更新；請按「重新查詢最新資料」，並在收件匣切換狀態核對最新處理結果。",
+        "leave_request_not_resolvable": "這筆請假待辦目前不是已受理處理中，無法再套用代班；請重新整理收件匣並核對待辦狀態。",
+        "leave_request_dates_outside_window": "選取的服務日不在這筆請假申請期間內；請在「請假之服務日」改選申請期間內的日期，再重新檢查代班影響。",
+        "leave_request_dates_missing": "這筆請假申請缺少完整起迄日期；請重新讀取請假待辦並核對申請期間。",
+    }
+    return _workflow_error(correlation_id, category, code, messages.get(code, "Linked leave request rejected the leave/substitution command."))
 def _mysql_error_code(error):
     arguments = getattr(error, "args", ())
     return arguments[0] if arguments and isinstance(arguments[0], int) else 0

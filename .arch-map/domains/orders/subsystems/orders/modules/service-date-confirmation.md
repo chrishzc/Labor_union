@@ -25,6 +25,7 @@
   - `ui_react/src/adapters/orders/service_date_start_flow.ts` — 將未保存開始日的建議範圍投影到 UI；人工確認後串接既有 Actual Start 與服務日期 writer，保留第一步結果及第二步恢復狀態。
   - `ui_react/src/components/OrderServiceDatesPanel.tsx`
     - 顯示 Case Import 原始服務方式；人工休假星期僅作當次 server 精算參數，即時更新建議，最後確認只保存服務日期。
+  - `ui_react/src/components/OrderServiceDateCalendar.tsx` — 案件內既有月曆，事前日期確認與完工後日期更正共用呈現；不擁有日期寫入規則。
   - `ui_react/src/components/CandidatePlannedServiceDates.tsx` — 初步候選每週說明的單一保存預計日期操作，重用 Service Dates flow；不串接 Actual Start，星期僅為當次試算。
   - `ui_react/src/components/HistoricalRestartArrangementPanel.tsx`
   - `ui_react/src/api/orders/order_mutation_client.ts`

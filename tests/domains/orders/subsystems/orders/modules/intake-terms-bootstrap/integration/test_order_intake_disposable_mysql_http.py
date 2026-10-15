@@ -67,8 +67,8 @@ def _seed(connection) -> str:
     with connection.cursor() as cursor:
         for case_no, name, start_date, service_days in cases:
             cursor.execute(
-                "INSERT INTO clients (case_no,name,identity_status) VALUES (%s,%s,%s)",
-                (case_no, name, "一般"),
+                "INSERT INTO clients (case_no,name,identity_status,created_at) VALUES (%s,%s,%s,'2026-09-01')",
+                (case_no, name, "一般市民"),
             )
             client_id = int(cursor.lastrowid)
             cursor.execute(
@@ -354,7 +354,10 @@ def test_issue_218_real_http_acceptance_on_disposable_mysql():
         assert both_after_completion["row"]["start_date"] == both_before_completion_preview["row"]["start_date"]
         assert both_after_completion["row"]["service_days"] == both_before_completion_preview["row"]["service_days"]
         assert both_after_completion["row"]["end_date"] == _END_DATE
-        assert all(value == 0 for value in both_after_completion["owner_counts"].values())
+        initialized = {'client_finance_accounts', 'client_payment_terms', 'payroll_case_accounts',
+                       'case_payroll_rate_policy_snapshots', 'scheduling_aggregates'}
+        assert all(value == int(table in initialized)
+                   for table, value in both_after_completion['owner_counts'].items())
 
         completion_replay = _data(
             client.post(

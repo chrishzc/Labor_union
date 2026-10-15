@@ -16,7 +16,10 @@ from api.dependencies.official_service_date_correction import (
 from api.error_contracts import typed_http_error
 from api.schemas.base import BaseResponse
 from subsystems.access.authentication_session import AdminPrincipal
-from subsystems.orders.official_service_date_correction_workflow import OfficialDateSelection
+from subsystems.orders.official_service_date_correction_workflow import (
+    OfficialDateMonetaryImpactBlocked,
+    OfficialDateSelection,
+)
 
 
 router = APIRouter(prefix="/api/v1/orders", tags=["Official Service Date Correction"])
@@ -102,6 +105,17 @@ def _facts_payload(facts) -> dict[str, Any]:
             "service_dates": item.service_dates,
         } for item in facts.assignments],
         "monetary_change_blocker": facts.monetary_change_blocker,
+        "monetary_blockers": [{"code": code, **_MONETARY_BLOCKERS[code]} for code in facts.monetary_blockers],
+        "history": [{
+            "event_id": item.event_id,
+            "event_type": item.event_type,
+            "recorded_at": item.recorded_at,
+            "actor": item.actor,
+            "before_dates": item.before_dates,
+            "after_dates": item.after_dates,
+            "reason": item.reason,
+            "completion_instant": item.completion_instant,
+        } for item in facts.history],
     }
 
 
@@ -132,6 +146,36 @@ def _receipt_payload(receipt) -> dict[str, Any]:
     }
 
 
+_MONETARY_BLOCKERS = {
+    "special_pay": {"message": "已有特殊薪資紀錄，純日期更正尚不能處理其薪資影響。", "repair_target": "payroll"},
+    "payroll_adjustments": {"message": "已有薪資調整分攤，純日期更正尚不能處理其金額影響。", "repair_target": "payroll"},
+    "subsidy_return": {"message": "已有補助退還義務，純日期更正尚不能處理其補助影響。", "repair_target": "subsidy"},
+    "source_rate_snapshot_missing_or_ambiguous": {"message": "原排班的薪資快照缺漏或不唯一，無法確認更正後沿用原薪資。", "repair_target": "case_profile"},
+    "double_pay": {"message": "原正式服務日含雙倍薪，純日期更正尚不能處理其薪資影響。", "repair_target": "payroll"},
+    "floor_fee": {"message": "原排班已分配樓層費，純日期更正尚不能處理其費用影響。", "repair_target": "case_profile"},
+}
+
+
+_VALIDATION_MESSAGES = {
+    'official_date_no_change': '更正日期與目前正式服務日期相同，無需更正；請先修改需要補正的日期，再重新預覽。',
+    'official_date_dates_not_canonical': '同一位月嫂的服務日期不能重複或留白，請修正日期後重新預覽。',
+    'official_date_service_days_changed': '更正後的服務天數或各月嫂分配天數與原紀錄不一致，請保持原天數並排除重複日期。',
+    'official_date_actual_start_change_unsupported': '純日期更正不能改變實際開始日，請保留原第一個服務日期後重新預覽。',
+    'official_date_future_completed_service_blocked': '已完工的服務日期不能晚於今天，請核對實際服務日期後重新預覽。',
+    'official_date_monetary_impact_unsupported': '本案含特殊薪資或其他金額影響，無法使用純日期更正；請保留原日期並交由管理員核對。',
+    'official_date_completed_assignment_required': '本案必須已完工且有正式排班，才能更正完工服務日期；請返回案件處理核對狀態。',
+    'official_date_assignment_allocation_invalid': '目前月嫂與排班區段和更正內容不一致，請重新讀取排班日期後再預覽。',
+    'official_date_effective_generation_required': '本案缺少有效正式排班，請返回案件處理核對排班紀錄。',
+    'official_date_effective_generation_conflict': '本案有效正式排班已變更，請重新讀取排班日期後再預覽。',
+    'official_date_schedule_ownership_invalid': '服務日期的月嫂或排班歸屬不一致，請重新讀取排班日期；若仍有問題，請由管理員核對排班紀錄。',
+    'official_date_schedule_incomplete': '正式排班缺少完整服務日期，請返回案件處理核對各月嫂的服務紀錄。',
+    'official_date_occupancy_conflict': '更正日期與月嫂其他案件的正式排班衝突，請改選沒有衝突的日期後重新預覽。',
+    'official_date_version_conflict': '案件或排班已被更新，請重新讀取排班日期並重新預覽。',
+    'official_date_preview_stale': '預覽後的案件或排班已變更，請重新讀取排班日期並重新預覽。',
+    'official_date_idempotency_mismatch': '這次操作識別已用於不同的更正內容，請重新讀取排班日期並重新預覽。',
+}
+
+
 def _call(operation):
     try:
         return BaseResponse(data=operation(), message="正式服務日期已取得或更正")
@@ -149,7 +193,10 @@ def _call(operation):
         else:
             status = 422
             category = "validation"
-        raise typed_http_error(status, category, code, "正式排班日期更正未通過驗證，請重新查詢。", "official-service-date-correction") from error
+        message = _VALIDATION_MESSAGES.get(code, '正式排班日期更正未通過驗證，請重新讀取排班日期；若仍有問題，請由管理員核對排班紀錄。')
+        if isinstance(error, OfficialDateMonetaryImpactBlocked) and error.blockers:
+            message = "；".join(_MONETARY_BLOCKERS[item]["message"] for item in error.blockers) + "請重新讀取排班日期，依原因前往對應入口核對。"
+        raise typed_http_error(status, category, code, message, "official-service-date-correction") from error
     except IntegrityError as error:
         if error.args and error.args[0] == 1062:
             raise typed_http_error(409, "conflict", "official_date_occupancy_conflict", "目標日期已有正式排班。", "official-service-date-correction") from error

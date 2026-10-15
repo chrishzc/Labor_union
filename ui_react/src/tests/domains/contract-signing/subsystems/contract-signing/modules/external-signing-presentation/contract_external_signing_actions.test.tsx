@@ -335,6 +335,21 @@ describe('ContractExternalSigningActions', () => {
     expect(screen.queryByText('簽約資料已變更，請重新查詢後再檢查影響。')).not.toBeInTheDocument();
   });
 
+  it.each([
+    ['client_finance_bootstrap_required', '客戶付款條款'],
+    ['payroll_bootstrap_required', '月嫂薪資資料'],
+    ['payroll_case_policy_bootstrap_required', '月嫂薪資政策'],
+  ])('shows the specific %s reason and links to the existing registry without embedding repair controls', async (code, missing) => {
+    vi.mocked(contractExternalSigningClient.query).mockResolvedValue(preparing);
+    vi.mocked(previewContractFields).mockRejectedValue(new ApiHttpError(409, code, code));
+    render(<ContractExternalSigningActions caseNo={query.case_no} />);
+    expect(await screen.findByText(`本案尚未建立${missing}，請至客戶名冊核對並補齊。`, { exact: false })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '前往客戶名冊補齊資料 →' })).toHaveAttribute('href', '#clients?case=CASE-001&from=workbench');
+    expect(screen.queryByRole('button', { name: '預覽帳務與排班資料' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: '補齊簽約所需帳務資料' })).not.toBeInTheDocument();
+    expect(contractExternalSigningClient.query).toHaveBeenCalledTimes(1);
+  });
+
   beforeEach(() => {
     vi.resetAllMocks();
     vi.mocked(previewContractFields).mockImplementation(async (caseNo, scope, segmentId) => ({ case_no: caseNo, scope, assignment_id: null, template_key: scope === 'client' ? 'contract_client_copy' : 'contract_staff_service', template_version: 'a'.repeat(64), owner_fingerprints: {}, field_values: scope === 'client' ? { B8: '測試客戶', B24: '2026-11-01', D24: '2026-11-10', F24: 10 } as Record<string, string | number> : { C4: `月嫂${segmentId}`, B7: '2026-11-01', D7: '2026-11-10', G7: 10 } as Record<string, string | number>, field_states: {}, warnings: [], blockers: [], preview_fingerprint: 'b'.repeat(64), ready_to_print: true }));

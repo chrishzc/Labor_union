@@ -7,7 +7,10 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from domains.client_finance.obligation_planning import build_client_finance_terms_impact
+from domains.client_finance.obligation_planning import (
+    build_client_finance_terms_impact,
+    deposit_gate_override_survives_terms_impact,
+)
 from domains.client_finance.subsidy_coverage import derive_subsidy_coverage
 from domains.payroll.payment_due_date import calculate_staff_payment_due_date
 from domains.orders.lifecycle import build_terms_lifecycle_impact
@@ -84,6 +87,14 @@ def build_orders_assignment_impact(
     evaluation_at: datetime,
 ) -> AssignmentPlanDomainImpact:
     settlement = client_finance.payload.settlement
+    override_active = deposit_gate_override_survives_terms_impact(
+        facts.client_finance, client_finance.payload,
+    )
+    facts = replace(facts, lifecycle=replace(
+        facts.lifecycle, deposit_gate_override_active=override_active,
+    ), client_finance=replace(
+        facts.client_finance, deposit_gate_override_active=override_active,
+    ))
     payment_due_date = _staff_payment_due_date(facts, scheduling, client_finance)
     blockers = _assignment_plan_readiness_blockers(facts, settlement)
     lifecycle = _build_lifecycle_candidate(

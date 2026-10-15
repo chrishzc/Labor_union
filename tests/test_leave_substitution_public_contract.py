@@ -239,3 +239,76 @@ def test_apply_request_has_no_implicit_linked_identity_or_receipt_fields() -> No
     assert request.leave_request_id is None
     assert request.expected_leave_request_version is None
     assert "receipt_key" not in request.model_dump()
+
+
+@pytest.mark.parametrize("code,category", [
+    ("leave_request_stale", "conflict"),
+    ("leave_request_idempotency_conflict", "idempotency_mismatch"),
+])
+def test_review_conflict_retains_specific_reason_through_global_error_boundary(code, category):
+    from types import SimpleNamespace
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from api.dependencies.admin_auth import require_admin
+    from api.dependencies.staff_leave_intake import get_staff_leave_customer_coordination_application
+    from api.exception_handlers import install_typed_error_handlers
+    from api.routes.staff_leave_management import router
+    from subsystems.scheduling.staff_leave_intake_workflow import StaffLeaveIntakeWorkflowError
+    class ConflictApplication:
+        def review(self, command):
+            if code == "leave_request_stale":
+                raise StaffLeaveIntakeWorkflowError(code)
+            raise ValueError(code)
+    app = FastAPI()
+    install_typed_error_handlers(app)
+    app.include_router(router)
+    app.dependency_overrides[require_admin] = lambda: SimpleNamespace(username="fixture")
+    app.dependency_overrides[get_staff_leave_customer_coordination_application] = ConflictApplication
+    response = TestClient(app).post("/api/v1/scheduling/staff-leave-requests/1/review",
+        headers={"Idempotency-Key": "review-conflict-fixture"},
+        json={"expected_version": 1, "action": "accept", "reason": "fixture"})
+    assert response.status_code == 409
+    error = response.json()["detail"]["error"]
+    assert error["code"] == code
+    assert error["category"] == category
+    assert "重新整理" in error["message"]
+    assert error["message"] != "資料版本或目前狀態發生衝突"
+
+
+@pytest.mark.parametrize("code", ["leave_request_stale", "leave_request_state_conflict", "leave_request_idempotency_conflict"])
+def test_staff_cancel_blocker_preserves_reason_and_recovery_through_global_handler(monkeypatch, code):
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from api.dependencies.staff_leave_intake import get_staff_leave_intake_application
+    from api.exception_handlers import install_typed_error_handlers
+    from api.routes import staff_leave_intake as routes
+    from infrastructure.mysql import line_unit_of_work
+    from subsystems.scheduling.staff_leave_intake_workflow import StaffLeaveIntakeWorkflowError
+
+    @contextmanager
+    def line_uow():
+        yield SimpleNamespace(customer_service=SimpleNamespace(staff_subject=lambda _id: None))
+    monkeypatch.setattr(line_unit_of_work, "open_line_unit_of_work", line_uow)
+    monkeypatch.setattr(routes, "_verified_line_user_id", lambda _body: SimpleNamespace(value="Ufixture"))
+    monkeypatch.setattr(routes, "_required_staff", lambda _subject: {"staff_id": 9, "staff_name": "fixture"})
+    class CancelBlocked:
+        def review(self, command):
+            assert command.actor_is_staff and command.actor_staff_id == 9
+            if code == "leave_request_idempotency_conflict":
+                raise ValueError(code)
+            raise StaffLeaveIntakeWorkflowError(code)
+    app = FastAPI()
+    install_typed_error_handlers(app)
+    app.include_router(routes.router)
+    app.dependency_overrides[get_staff_leave_intake_application] = CancelBlocked
+    response = TestClient(app).post("/api/v1/line/staff-self-service/leave-requests/17/cancel",
+        headers={"Idempotency-Key": "staff-cancel-fixture"},
+        json={"line_id_token": "fixture", "expected_version": 2, "reason": "fixture cancellation"})
+    assert response.status_code == 409
+    error = response.json()["detail"]["error"]
+    assert error["code"] == code
+    assert "重新查詢" in error["message"]
+    if code == "leave_request_state_conflict":
+        assert "只能自行取消尚未受理" in error["message"] and "聯繫工會" in error["message"]

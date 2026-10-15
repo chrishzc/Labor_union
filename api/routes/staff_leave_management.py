@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from api.dependencies.admin_auth import require_admin
 from api.dependencies.staff_leave_intake import get_staff_leave_customer_coordination_application
 from api.schemas.base import BaseResponse
+from api.schemas.errors import GlobalErrorCategory, GlobalTypedErrorView
 from api.schemas.staff_leave_management import (
     StaffLeaveCoordinationContextView,
     StaffLeaveInboxItemView,
@@ -85,6 +86,25 @@ def review_staff_leave_request(
             ReviewStaffLeaveRequest(request_id, body.expected_version, body.action, body.reason, False, str(principal.username), idempotency_key)
         )
     except StaffLeaveIntakeWorkflowError as error:
-        raise HTTPException(status_code=409, detail={"code": str(error)}) from error
+        messages = {
+            "leave_request_stale": "這筆請假待辦已由其他人更新；請按「重新整理」，再使用「狀態」篩選核對最新處理結果。",
+            "leave_request_not_found": "找不到這筆請假待辦；請按「重新整理」讀取目前清單。",
+            "leave_request_transition_invalid": "請假待辦目前的狀態無法執行此操作；請按「重新整理」核對最新狀態。",
+        }
+        raise _review_error(str(error), messages.get(str(error), "請假待辦目前無法執行此操作；請重新整理並核對狀態與處理原因。")) from error
+    except ValueError as error:
+        if str(error) != "leave_request_idempotency_conflict":
+            raise
+        raise _review_error(str(error), "此審核操作識別已用於不同內容；請重新整理待辦，核對狀態後重新操作。") from error
 
     return BaseResponse(data={"request_id": result.request_id, "status": result.status.value, "version": result.version, "actor": str(principal.username)})
+
+
+def _review_error(code: str, message: str) -> HTTPException:
+    error = GlobalTypedErrorView(
+        category=GlobalErrorCategory.IDEMPOTENCY_MISMATCH if code == "leave_request_idempotency_conflict" else GlobalErrorCategory.CONFLICT,
+        code=code, message=message,
+        field_errors=[], domain_blockers=[], retryable=False,
+        correlation_id="staff-leave-review", current_version=None,
+    )
+    return HTTPException(status_code=409, detail={"error": error.model_dump(mode="json")})

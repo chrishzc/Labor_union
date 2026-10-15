@@ -84,6 +84,23 @@ interface MonthSelection {
 
 const STAFF_PAGE_SIZE = 20;
 
+const PAYABLES_BLOCKER_MESSAGES: Record<string, string> = {
+  staff_payables_projection_missing: '代班薪資已建立，但月嫂應付款查詢資料尚未更新；請重新查詢，若持續未更新請到本案應付款核對',
+  payroll_obligation_event_missing: '找不到本次代班對應的薪資義務紀錄',
+  payroll_obligation_event_ambiguous: '本次代班對應到多筆薪資義務紀錄，尚無法唯一確認',
+  payroll_obligation_version_mismatch: '代班與薪資義務的版本不一致',
+  payroll_obligation_version_invalid: '薪資義務的前後版本無法銜接',
+  payroll_obligation_assignment_mismatch: '薪資義務的人員或服務指派與代班結果不一致',
+  payroll_obligation_projection_missing: '薪資義務紀錄已存在，但目前義務資料尚未建立',
+  payroll_obligation_current_event_mismatch: '目前薪資義務與本次代班紀錄不一致',
+  payroll_obligation_not_payable: '本次薪資義務目前不是有效的待付款項，請核對是否已結清或取消',
+  staff_payables_amount_mismatch: '月嫂應付款金額與代班薪資義務不一致',
+  staff_payables_balance_mismatch: '月嫂應付款的金額、已付與未結餘額不一致',
+  staff_payables_status_invalid: '月嫂應付款目前的狀態無法確認',
+  scheduling_payroll_version_invalid: '排班與薪資的版本無法銜接',
+  substitution_outcome_missing: '找不到本次代班的處理結果紀錄',
+};
+
 function decodeHashComponent(value: string): string {
   return decodeURIComponent(value.replace(/\+/g, ' '));
 }
@@ -712,6 +729,7 @@ function LeaveSubstitutionWorkspace({
       const items = await staffLeaveInboxClient.list(inboxStatus);
       if (generation === inboxQueryGenerationRef.current) {
         setInboxItems(items);
+        setSelectedInboxItem(current => current ? items.find(item => item.id === current.id) ?? null : null);
       }
     } catch (caught) {
       if (generation === inboxQueryGenerationRef.current) {
@@ -748,7 +766,7 @@ function LeaveSubstitutionWorkspace({
       const matchedAssignment = assignments.find((a) => a.staff_id === item.staff_id);
       if (matchedAssignment) {
         setAssignmentId(matchedAssignment.assignment_id);
-        setScheduleId(matchedAssignment.official_schedules[0]?.schedule_id ?? null);
+        setScheduleId(matchedAssignment.official_schedules.find((day) => day.work_date >= item.leave_start_date && day.work_date <= item.leave_end_date)?.schedule_id ?? null);
       }
     } catch (caught) {
       setInboxError(caught instanceof Error ? caught.message : '受理待辦失敗。');
@@ -892,9 +910,17 @@ function LeaveSubstitutionWorkspace({
 
   useEffect(() => {
     const linkedRequest = observedReceipt?.linked_request;
-    if (!linkedRequest || linkedRequest.status !== 'resolved' || linkedRequest.resolved_version === null) return;
+    if (!linkedRequest) return;
     if (observedInboxReceiptRef.current === observedReceipt.batch_key) return;
     observedInboxReceiptRef.current = observedReceipt.batch_key;
+
+    if (linkedRequest.status === 'accepted_for_processing') {
+      setInboxStatus('accepted_for_processing');
+      setInboxReceipt('本批日期已完成；同一請假仍有其他日期或案件未處理。請按「重新整理指派」，選擇剩餘服務日；其他案件請由案件選單切換後繼續調度。');
+      void loadInbox();
+      return;
+    }
+    if (linkedRequest.status !== 'resolved' || linkedRequest.resolved_version === null) return;
 
     if (linkedRequest.notification_intent !== 'enqueued') {
       setInboxError('本次變更未建立 LINE 通知工作，請改由人工通知並確認。');
@@ -941,19 +967,21 @@ function LeaveSubstitutionWorkspace({
       setScheduleId(null);
       return;
     }
-    if (!assignments.some((item) => item.assignment_id === assignmentId)) {
-      const first = assignments[0];
+    const linkedAssignment = selectedInboxItem && assignments.find((item) => item.staff_id === selectedInboxItem.staff_id);
+    const current = assignments.find((item) => item.assignment_id === assignmentId);
+    if (!current || (linkedAssignment && current.staff_id !== linkedAssignment.staff_id)) {
+      const first = linkedAssignment || assignments[0];
       setAssignmentId(first.assignment_id);
-      setScheduleId(first.official_schedules[0]?.schedule_id ?? null);
+      setScheduleId(first.official_schedules.find((day) => !selectedInboxItem || (day.work_date >= selectedInboxItem.leave_start_date && day.work_date <= selectedInboxItem.leave_end_date))?.schedule_id ?? null);
     }
-  }, [assignmentId, assignments]);
+  }, [assignmentId, assignments, selectedInboxItem]);
 
   useEffect(() => {
     if (!selectedAssignment) return;
     if (!selectedAssignment.official_schedules.some((item) => item.schedule_id === scheduleId)) {
-      setScheduleId(selectedAssignment.official_schedules[0]?.schedule_id ?? null);
+      setScheduleId(selectedAssignment.official_schedules.find((day) => !selectedInboxItem || (day.work_date >= selectedInboxItem.leave_start_date && day.work_date <= selectedInboxItem.leave_end_date))?.schedule_id ?? null);
     }
-  }, [scheduleId, selectedAssignment]);
+  }, [scheduleId, selectedAssignment, selectedInboxItem]);
 
   const buildPreviewRequest = (): LeaveSubstitutionPreviewRequest | null => {
     if (!selectedAssignment || !selectedSchedule) return null;
@@ -986,6 +1014,7 @@ function LeaveSubstitutionWorkspace({
   const query = () => {
     if (!normalizedCaseNo || busy) return;
     setConfirmed(false);
+    void loadInbox();
     void queryLeaveSubstitutionFlow(normalizedCaseNo).catch(() => undefined);
   };
 
@@ -1487,9 +1516,9 @@ function LeaveSubstitutionWorkspace({
           <h3>代班薪資與應付款回讀</h3>
           <p>以下為代班→Payroll→Staff Payables 的版本化血緣與最新唯讀資料；本區不會發動付款、匯出或再次套用代班。</p>
           {payablesBusy && <p>正在查詢受影響服務人員的最新應付款…</p>}
-          {payablesError && (
+          {(payablesError || (payablesReadback && !payablesReadback.authoritative_complete)) && (
             <>
-              <p className="leave-substitution-notice error" role="alert">{payablesError}</p>
+              {payablesError && <p className="leave-substitution-notice error" role="alert">{payablesError}</p>}
               <button type="button" onClick={() => void loadPayablesReadback()}>
                 重新查詢薪資與應付款
               </button>
@@ -1497,7 +1526,8 @@ function LeaveSubstitutionWorkspace({
           )}
           {payablesReadback && !payablesReadback.authoritative_complete && (
             <p className="leave-substitution-notice error" role="alert">
-              跨域薪資血緣尚未完整：{[...payablesReadback.blockers, ...payablesReadback.items.flatMap((item) => item.blockers)].join('、') || '資料待補正'}；不宣稱代班薪資已完成。
+              代班已完成，薪資與應付款回讀尚待確認：{[...new Set([...payablesReadback.blockers, ...payablesReadback.items.flatMap((item) => item.blockers)])].map(code => PAYABLES_BLOCKER_MESSAGES[code] ?? `尚無法核對應付款（${code}）`).join('；') || '資料待補正'}。
+              {' '}<a href={`#finance?tab=client-receipts&case_no=${encodeURIComponent(normalizedCaseNo)}&from=workbench`}>核對本案月嫂應付款 →</a>
             </p>
           )}
           {payablesReadback && payablesReadback.items.map((item) => {
@@ -1521,7 +1551,7 @@ function LeaveSubstitutionWorkspace({
                     </li>
                   </ul>
                 ) : (
-                  <p>本筆代班 Payroll obligation 尚無可驗證的 Staff Payables projection。</p>
+                  <p>尚未取得這筆代班對應的月嫂應付款查詢資料。</p>
                 )}
                 <small>來源血緣：{item.lineage_subject}；Scheduling v{payablesReadback.scheduling_version} → Payroll v{payablesReadback.resulting_payroll_version}</small>
               </div>
@@ -2194,13 +2224,14 @@ export const SchedulingPage: React.FC = () => {
   }, [caseOptionsRetryGeneration, directoryLoading, staffList]);
 
   useEffect(() => {
+    if (activeTab !== 'calendar') return;
     if (caseOptionsState.kind !== 'ready' || !selectedCaseNo.trim()) return;
     if (caseOptionsState.options.some((option) => option.caseNo === selectedCaseNo.trim())) return;
     eligibilityControllerRef.current?.abort();
     setSelectedCaseNo('');
     setEligibilityCaseNo('');
     setEligibilityState({ kind: 'idle' });
-  }, [caseOptionsState, selectedCaseNo]);
+  }, [activeTab, caseOptionsState, selectedCaseNo]);
 
   useEffect(() => {
     caseEligibilityControllerRef.current?.abort();

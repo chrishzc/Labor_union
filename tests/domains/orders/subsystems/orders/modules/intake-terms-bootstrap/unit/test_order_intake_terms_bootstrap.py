@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from unittest.mock import Mock
+
 from dataclasses import replace
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, time
@@ -25,7 +27,7 @@ def test_missing_service_time_preserves_dates_and_days_and_replays_original_rece
     repository = _Repository(start_date=_START, service_days=_DAYS)
     repository.case = replace(repository.case, status=OrderLifecycleStatus.DISCUSSION)
     units = _UnitOfWorkFactory()
-    application = OrderIntakeTermsBootstrapApplication(repository, units)
+    application = OrderIntakeTermsBootstrapApplication(repository, units, Mock())
     proposed = IntakeServiceTime(8, time(8), time(17), 0)
     preview = application.preview(_CASE, _START, _DAYS, proposed_service_time=proposed)
     assert preview.apply_allowed
@@ -56,7 +58,7 @@ def test_missing_service_time_preserves_dates_and_days_and_replays_original_rece
 def test_service_time_supplement_never_bypasses_existing_downstream_roots_or_historical_rules(changed):
     repository = _Repository(start_date=_START, service_days=_DAYS)
     repository.case = replace(repository.case, **changed)
-    application = OrderIntakeTermsBootstrapApplication(repository, _UnitOfWorkFactory())
+    application = OrderIntakeTermsBootstrapApplication(repository, _UnitOfWorkFactory(), Mock())
     proposed = IntakeServiceTime(8, time(8), time(17), 0)
     preview = application.preview(_CASE, _START, _DAYS, proposed_service_time=proposed)
     assert not preview.apply_allowed
@@ -68,7 +70,7 @@ def test_service_time_supplement_never_bypasses_existing_downstream_roots_or_his
 
 def test_service_time_supplement_rechecks_version_and_keeps_existing_dates_unchanged():
     repository = _Repository(start_date=_START, service_days=_DAYS)
-    application = OrderIntakeTermsBootstrapApplication(repository, _UnitOfWorkFactory())
+    application = OrderIntakeTermsBootstrapApplication(repository, _UnitOfWorkFactory(), Mock())
     proposed = IntakeServiceTime(8, time(8), time(17), 0)
     preview = application.preview(_CASE, _START, _DAYS, proposed_service_time=proposed)
     repository.case = replace(repository.case, lifecycle_version=8)
@@ -87,7 +89,7 @@ def test_http_time_supplement_preserves_date_only_contract_and_returns_typed_tim
     from subsystems.access.authentication_session import AdminPrincipal
 
     repository = _Repository(start_date=_START, service_days=_DAYS)
-    application = OrderIntakeTermsBootstrapApplication(repository, _UnitOfWorkFactory())
+    application = OrderIntakeTermsBootstrapApplication(repository, _UnitOfWorkFactory(), Mock())
     app = FastAPI()
     app.include_router(router)
     app.dependency_overrides[require_persisted_admin] = lambda: AdminPrincipal(1, 'synthetic-operator', 'Synthetic operator', 'system_admin')
@@ -118,7 +120,7 @@ def test_http_time_supplement_preserves_date_only_contract_and_returns_typed_tim
 def test_missing_start_and_service_days_preview_and_apply_only_fill_missing_terms():
     repository = _Repository(start_date=None, service_days=0)
     unit_of_work = _UnitOfWorkFactory()
-    application = OrderIntakeTermsBootstrapApplication(repository, unit_of_work)
+    application = OrderIntakeTermsBootstrapApplication(repository, unit_of_work, Mock())
 
     preview = application.preview(_CASE, _START, _DAYS)
 
@@ -160,7 +162,7 @@ def test_missing_start_and_service_days_preview_and_apply_only_fill_missing_term
 
 def test_missing_start_only_preserves_existing_service_days():
     repository = _Repository(start_date=None, service_days=21)
-    application = OrderIntakeTermsBootstrapApplication(repository, _UnitOfWorkFactory())
+    application = OrderIntakeTermsBootstrapApplication(repository, _UnitOfWorkFactory(), Mock())
 
     preview = application.preview(_CASE, _START, 21)
     assert preview.changed_fields == ("start_date",)
@@ -181,7 +183,7 @@ def test_missing_start_only_preserves_existing_service_days():
 
 def test_missing_service_days_only_preserves_existing_start_date():
     repository = _Repository(start_date=_START, service_days=None)
-    application = OrderIntakeTermsBootstrapApplication(repository, _UnitOfWorkFactory())
+    application = OrderIntakeTermsBootstrapApplication(repository, _UnitOfWorkFactory(), Mock())
 
     preview = application.preview(_CASE, _START, _DAYS)
     assert preview.changed_fields == ("service_days",)
@@ -202,7 +204,7 @@ def test_missing_service_days_only_preserves_existing_start_date():
 
 def test_existing_values_can_be_corrected_before_downstream_roots_exist():
     repository = _Repository(start_date=_START, service_days=_DAYS)
-    application = OrderIntakeTermsBootstrapApplication(repository, _UnitOfWorkFactory())
+    application = OrderIntakeTermsBootstrapApplication(repository, _UnitOfWorkFactory(), Mock())
 
     preview = application.preview(_CASE, date(2026, 9, 11), 31)
 
@@ -225,7 +227,7 @@ def test_existing_values_can_be_corrected_before_downstream_roots_exist():
 def test_discussion_case_can_be_corrected_when_downstream_roots_are_still_absent():
     repository = _Repository(start_date=_START, service_days=_DAYS)
     repository.case = replace(repository.case, status=OrderLifecycleStatus.DISCUSSION)
-    application = OrderIntakeTermsBootstrapApplication(repository, _UnitOfWorkFactory())
+    application = OrderIntakeTermsBootstrapApplication(repository, _UnitOfWorkFactory(), Mock())
 
     preview = application.preview(_CASE, date(2026, 9, 12), 29)
 
@@ -248,7 +250,7 @@ def test_historical_in_service_case_can_repair_missing_contract_terms_before_fin
         scheduling_present=True,
         scheduling_pristine=False,
     )
-    application = OrderIntakeTermsBootstrapApplication(repository, _UnitOfWorkFactory())
+    application = OrderIntakeTermsBootstrapApplication(repository, _UnitOfWorkFactory(), Mock())
 
     preview = application.preview(_CASE, _START, _DAYS)
 
@@ -275,7 +277,7 @@ def test_historical_terms_repair_stays_blocked_after_financial_root_exists():
     )
 
     preview = OrderIntakeTermsBootstrapApplication(
-        repository, _UnitOfWorkFactory()
+        repository, _UnitOfWorkFactory(), Mock()
     ).preview(_CASE, _START, _DAYS)
 
     assert preview.apply_allowed is False
@@ -302,7 +304,7 @@ def test_existing_service_or_cross_domain_state_is_explicitly_blocked(
 ):
     repository = _Repository(start_date=None, service_days=None)
     repository.case = replace(repository.case, **overrides)
-    application = OrderIntakeTermsBootstrapApplication(repository, _UnitOfWorkFactory())
+    application = OrderIntakeTermsBootstrapApplication(repository, _UnitOfWorkFactory(), Mock())
 
     preview = application.preview(_CASE, _START, _DAYS)
 
@@ -324,7 +326,7 @@ def test_existing_service_or_cross_domain_state_is_explicitly_blocked(
 
 def test_stale_version_is_rejected_after_locked_recheck():
     repository = _Repository(start_date=None, service_days=None)
-    application = OrderIntakeTermsBootstrapApplication(repository, _UnitOfWorkFactory())
+    application = OrderIntakeTermsBootstrapApplication(repository, _UnitOfWorkFactory(), Mock())
     preview = application.preview(_CASE, _START, _DAYS)
     repository.case = replace(repository.case, lifecycle_version=8)
 
@@ -346,7 +348,7 @@ def test_stale_version_is_rejected_after_locked_recheck():
 
 def test_stale_preview_is_rejected_when_eligibility_facts_change_without_version():
     repository = _Repository(start_date=None, service_days=None)
-    application = OrderIntakeTermsBootstrapApplication(repository, _UnitOfWorkFactory())
+    application = OrderIntakeTermsBootstrapApplication(repository, _UnitOfWorkFactory(), Mock())
     preview = application.preview(_CASE, _START, _DAYS)
     repository.case = replace(repository.case, scheduling_present=True, scheduling_pristine=False)
 
@@ -378,7 +380,7 @@ def test_invalid_proposed_terms_are_rejected_before_repository_read(
     error_code,
 ):
     repository = _Repository(start_date=None, service_days=None)
-    application = OrderIntakeTermsBootstrapApplication(repository, _UnitOfWorkFactory())
+    application = OrderIntakeTermsBootstrapApplication(repository, _UnitOfWorkFactory(), Mock())
 
     with pytest.raises(OrderIntakeTermsBootstrapError, match=error_code):
         application.preview(_CASE, proposed_start_date, proposed_service_days)
@@ -387,7 +389,7 @@ def test_invalid_proposed_terms_are_rejected_before_repository_read(
 
 def test_idempotent_replay_is_safe_and_different_payload_with_same_key_is_rejected():
     repository = _Repository(start_date=None, service_days=None)
-    application = OrderIntakeTermsBootstrapApplication(repository, _UnitOfWorkFactory())
+    application = OrderIntakeTermsBootstrapApplication(repository, _UnitOfWorkFactory(), Mock())
     preview = application.preview(_CASE, _START, _DAYS)
     arguments = (
         _CASE,
@@ -431,7 +433,7 @@ def test_completion_preview_lists_every_missing_field_and_protection_blocker():
         client_name=None,
     )
     repository.case = replace(repository.case, service_data_locked=True)
-    application = OrderIntakeTermsBootstrapApplication(repository, _UnitOfWorkFactory())
+    application = OrderIntakeTermsBootstrapApplication(repository, _UnitOfWorkFactory(), Mock())
 
     preview = application.preview_completion(_CASE)
 
@@ -449,7 +451,7 @@ def test_completion_apply_restores_fully_repaired_order_to_discussion_with_versi
         client_name="王小明",
     )
     unit_of_work = _UnitOfWorkFactory()
-    application = OrderIntakeTermsBootstrapApplication(repository, unit_of_work)
+    application = OrderIntakeTermsBootstrapApplication(repository, unit_of_work, Mock())
 
     preview = application.preview_completion(_CASE)
     assert preview.missing_fields == ()
@@ -483,7 +485,7 @@ def test_completion_rechecks_version_and_fingerprint_before_status_change():
         service_days=_DAYS,
         client_name="王小明",
     )
-    application = OrderIntakeTermsBootstrapApplication(repository, _UnitOfWorkFactory())
+    application = OrderIntakeTermsBootstrapApplication(repository, _UnitOfWorkFactory(), Mock())
     preview = application.preview_completion(_CASE)
     repository.case = replace(repository.case, lifecycle_version=8)
 
@@ -506,7 +508,7 @@ def test_completion_idempotent_replay_is_safe():
         service_days=_DAYS,
         client_name="王小明",
     )
-    application = OrderIntakeTermsBootstrapApplication(repository, _UnitOfWorkFactory())
+    application = OrderIntakeTermsBootstrapApplication(repository, _UnitOfWorkFactory(), Mock())
     preview = application.preview_completion(_CASE)
     arguments = (
         _CASE,

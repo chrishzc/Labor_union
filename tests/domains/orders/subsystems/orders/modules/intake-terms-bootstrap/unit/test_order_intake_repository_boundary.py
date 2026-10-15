@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import Mock
+
 from datetime import date
 from unittest.mock import MagicMock, Mock
 
@@ -77,7 +79,7 @@ def test_terms_preview_uses_only_an_unlocked_owner_read(
     )
     unit_of_work = Mock()
     application = OrderIntakeTermsBootstrapApplication(
-        MySqlOrderIntakeTermsBootstrapRepository(connection), unit_of_work,
+        MySqlOrderIntakeTermsBootstrapRepository(connection), unit_of_work, Mock(),
     )
 
     preview = application.preview(_CASE, _START, _DAYS)
@@ -146,7 +148,7 @@ def test_completion_preview_does_not_complete_or_write_the_order(
     cursor.fetchone.return_value = _case_row(**overrides)
     unit_of_work = Mock()
     application = OrderIntakeTermsBootstrapApplication(
-        MySqlOrderIntakeTermsBootstrapRepository(connection), unit_of_work,
+        MySqlOrderIntakeTermsBootstrapRepository(connection), unit_of_work, Mock(),
     )
 
     preview = application.preview_completion(_CASE)

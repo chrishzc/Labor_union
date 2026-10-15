@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
-from typing import Callable, Protocol
+from typing import Callable, Literal, Protocol
 
 from domains.scheduling.generation import AssignmentCandidate, SchedulingGenerationCandidate
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
@@ -21,6 +21,30 @@ class OfficialAssignmentDates:
     status: str
     service_dates: tuple[date, ...]
     staff_name: str = ""
+
+
+MonetaryBlocker = Literal[
+    "special_pay", "payroll_adjustments", "subsidy_return",
+    "source_rate_snapshot_missing_or_ambiguous", "double_pay", "floor_fee",
+]
+
+
+class OfficialDateMonetaryImpactBlocked(ValueError):
+    def __init__(self, blockers: tuple[MonetaryBlocker, ...]) -> None:
+        super().__init__("official_date_monetary_impact_unsupported")
+        self.blockers = blockers
+
+
+@dataclass(frozen=True, slots=True)
+class OfficialDateHistoryRecord:
+    event_id: int
+    event_type: Literal["original_completion", "service_date_corrected"]
+    recorded_at: datetime
+    actor: str
+    before_dates: tuple[date, ...]
+    after_dates: tuple[date, ...]
+    reason: str | None = None
+    completion_instant: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +64,8 @@ class OfficialDateFacts:
     monetary_change_blocker: bool = False
     client_finance_version: int | None = None
     payroll_version: int | None = None
+    monetary_blockers: tuple[MonetaryBlocker, ...] = ()
+    history: tuple[OfficialDateHistoryRecord, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +95,7 @@ class OfficialDateReceipt:
 
 class OfficialDateRepository(Protocol):
     def load(self, case_no: str, *, lock: bool = False) -> OfficialDateFacts: ...
+    def load_history(self, case_no: str) -> tuple[OfficialDateHistoryRecord, ...]: ...
     def validate_availability(self, candidate: SchedulingGenerationCandidate, *, lock: bool) -> None: ...
     def replay(self, key: str, command_fingerprint: str, *, lock: bool = False) -> OfficialDateReceipt | None: ...
     def replace_and_record(self, command: SchedulingReplacementCommand, preview: OfficialDatePreview) -> OfficialDateReceipt: ...
@@ -86,7 +113,7 @@ class OfficialServiceDateCorrectionWorkflow:
         self._unit_of_work = unit_of_work
 
     def query(self, case_no: str) -> OfficialDateFacts:
-        return self._repository.load(case_no)
+        return replace(self._repository.load(case_no), history=self._repository.load_history(case_no))
 
     def preview(self, case_no: str, selections: tuple[OfficialDateSelection, ...]) -> OfficialDatePreview:
         facts = self._repository.load(case_no)
@@ -146,7 +173,7 @@ def _preview(facts: OfficialDateFacts, selections: tuple[OfficialDateSelection, 
     if facts.order_status != "訂單完成" or not facts.assignments:
         raise ValueError("official_date_completed_assignment_required")
     if facts.monetary_change_blocker:
-        raise ValueError("official_date_monetary_impact_unsupported")
+        raise OfficialDateMonetaryImpactBlocked(facts.monetary_blockers)
     source = {item.assignment_id: item for item in facts.assignments}
     if len(source) != len(facts.assignments) or len(selections) != len(source):
         raise ValueError("official_date_assignment_allocation_invalid")

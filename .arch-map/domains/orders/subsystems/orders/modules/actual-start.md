@@ -25,7 +25,7 @@
 
 ## Dependencies
 - outbound: `scheduling/scheduling` — replacement generation 擁有正式服務日期、assignment lineage 及已核准請假／代班的 active occupancy；Actual Start 只協調同交易重排。
-- outbound: `client-finance/client-finance` — 唯讀既有訂金核銷狀態作一般案件 lifecycle gate；不重算 projection。
+- outbound: `client-finance/client-finance` — 唯讀既有訂金核銷與仍有效的未付人工放行作一般案件 lifecycle gate；不重算 projection，也不把放行視為核銷。
 - inbound: `orders/historical-adoption` — 已付訂金且來源開始日異於 HCM 預定開始日的 historical actual-start assertion 經 typed delegation 進入。
 - inbound: `orders/historical-precision-restart` — 重啟後空 tombstone 的 HTTP Actual Start 為日期-only；歷史採納內部仍可使用 immutable source delegation，不代表一般入口自動建立 Scheduling。
 - outbound: `staff-payables/payroll` — source rate snapshot 唯讀驗證與 successor identity 原值搬移，不寫 Payroll root／obligation。

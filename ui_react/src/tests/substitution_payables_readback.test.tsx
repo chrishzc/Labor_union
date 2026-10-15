@@ -189,4 +189,24 @@ describe('Scheduling substitution Staff Payables readback', () => {
     expect(review).not.toHaveBeenCalled();
     expect(screen.getByText('🎉 代班變更已完成')).toBeInTheDocument();
   });
+
+  it('應付款資料尚未更新時說明具體原因，提供本案核對與唯讀重查入口', async () => {
+    seedObservedReceipt();
+    const pending = lineage();
+    pending.authoritative_complete = false;
+    pending.items[0].blockers = ['staff_payables_projection_missing'];
+    const query = vi.spyOn(substitutionPayablesLineageClient, 'query')
+      .mockResolvedValueOnce(pending).mockResolvedValue(lineage());
+    const review = vi.spyOn(staffLeaveInboxClient, 'review');
+    const apply = vi.spyOn(leaveSubstitutionClient, 'apply');
+    renderLeaveWorkspace();
+    expect(await screen.findByRole('alert')).toHaveTextContent('月嫂應付款查詢資料尚未更新');
+    expect(screen.getByRole('link', { name: '核對本案月嫂應付款 →' }))
+      .toHaveAttribute('href', `#finance?tab=client-receipts&case_no=${LEAVE_CASE_NO}&from=workbench`);
+    fireEvent.click(screen.getByRole('button', { name: '重新查詢薪資與應付款' }));
+    await waitFor(() => expect(query).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByText(/月嫂應付款查詢資料尚未更新/)).not.toBeInTheDocument());
+    expect(review).not.toHaveBeenCalled();
+    expect(apply).not.toHaveBeenCalled();
+  });
 });

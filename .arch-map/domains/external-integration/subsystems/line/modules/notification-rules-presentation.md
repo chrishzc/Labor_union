@@ -14,6 +14,9 @@
   - `api/routes/line_notification_rules.py`
   - `api/schemas/line_notification_rules.py`
 
+  - `subsystems/line/message_configuration.py` — LINE 訊息設定解析與 immutable task payload 組裝。
+  - `subsystems/line/staff_leave_customer_coordination.py` — 請假受理後的客戶詢問與決策協調，業務變更回原 Scheduling owner。
+
 ## Contracts
 - `document/架構重整/01_規格基線/20_LINE客服與月嫂自助服務正式規格.md` — LINE notification configuration與delivery邊界。
 - `document/架構重整/01_規格基線/12_Global_效能與UX體感架構.md` — 一般畫面資訊層級與closed error boundary。

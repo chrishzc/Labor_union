@@ -8,7 +8,7 @@ from infrastructure.mysql.segmented_availability_repository import (
 from subsystems.scheduling import segmented_availability_query as query
 
 
-def _repository_facts(monkeypatch):
+def _repository_facts(monkeypatch, *, end_date="2026-09-03", service_days=3, service_type=None, rest_dates=None):
     repository = MySqlSegmentedAvailabilityFactsRepository(lambda: None)
     loaded_windows = []
     monkeypatch.setattr(
@@ -41,12 +41,37 @@ def _repository_facts(monkeypatch):
         "case_no": "CASE-RECONTACT",
         "status": "洽談中",
         "start_date": "2026-09-01",
-        "end_date": "2026-09-03",
-        "service_days": 3,
+        "end_date": end_date,
+        "service_days": service_days,
+        "service_type": service_type,
+        "custom_rest_dates": rest_dates,
         "scheduling_version": 4,
         "requires_cooking": None,
     }
     return repository._load_negotiation_facts(object(), order), loaded_windows
+
+
+def test_inquiry_projects_missing_end_from_orders_terms_without_confirming_dates(monkeypatch):
+    facts, loaded_windows = _repository_facts(monkeypatch, end_date=None)
+    assert facts["order"]["end_date"] == date(2026, 9, 3)
+    result = query.search_candidate_inquiry_availability(
+        "CASE-RECONTACT", [], "2026-08-31",
+        facts_port=type("Facts", (), {"load_case_facts": lambda _self, _case_no: facts})(),
+        filter_policy={"preferred_service_days": False, "daily_service_hours": False},
+    )
+    assert result["planned_end_date"] == "2026-09-03"
+    assert result["candidate_options"][0]["required_service_dates"] == [
+        "2026-09-01", "2026-09-02", "2026-09-03",
+    ]
+    assert facts["confirmed_service_dates"] == [{"service_date": "2026-08-01"}]
+    assert set(loaded_windows) == {("2026-08-01", "2026-09-03")}
+
+
+def test_missing_planned_end_uses_the_same_rest_rules_as_contract_dates(monkeypatch):
+    facts, _ = _repository_facts(monkeypatch, end_date=None, service_days=5,
+                                 service_type="週休2日", rest_dates='["2026-09-02"]')
+    assert facts["order"]["end_date"] == date(2026, 9, 8)
+    assert facts["confirmed_service_dates"] == [{"service_date": "2026-08-01"}]
 
 
 def test_candidate_inquiry_keeps_current_order_window_while_loading_old_conflicts(

@@ -23,6 +23,8 @@ Issue #326：同一 Terms command 可承接完整替代日期與明確既有指�
 
 待補件／洽談中的受限 intake terms bootstrap 可選擇補齊完整 service-time tuple 與每日時數，仍以 current Orders version、原 Preview／Apply 與 receipt 保存；不擴張歷史案件資格，不建立下游 roots。進件完成 Preview 另回 typed current service time，供 UI 預填與成功回讀比對，姓名／日期／天數的 completion 判定保持原語意。
 
+進件完成 Apply，及洽談中補齊最後一項完整服務條件的 intake Apply，在既有 Orders outer UoW 透過 typed initializer 委派 canonical Case Architecture Bootstrap。待補件的分段保存與歷史修補不初始化；重播原 receipt 不追加初始化。既有 roots 不覆寫，partial roots 拒絕並 rollback，初始付款條款／薪資政策與 Orders receipt 同交易保存，不建立應收應付或正式排班。
+
 ## Implementation
 - primary:
   - `domains/orders/terms.py`
@@ -32,6 +34,8 @@ Issue #326：同一 Terms command 可承接完整替代日期與明確既有指�
   - `infrastructure/mysql/order_terms_repository.py`
   - `infrastructure/mysql/order_lifecycle_impact_writer.py` — 將 typed lifecycle impact 寫入 Orders projection、事件、資料鎖與 outbox；沿用外層 transaction。
   - `infrastructure/mysql/order_intake_terms_bootstrap_repository.py`
+  - `infrastructure/mysql/order_intake_architecture_initializer.py`
+  - `api/dependencies/order_intake_terms_bootstrap.py`
   - `api/schemas/order_terms.py`
   - `api/dependencies/order_terms.py`
 - entrypoints:
@@ -45,6 +49,7 @@ Issue #326：同一 Terms command 可承接完整替代日期與明確既有指�
 - outbound: `scheduling/matching-coordination` — 正式日期 replacement 使既有 matching schedule snapshot 失效；候選與方案 owner facts 不由 Orders 改寫。
 - outbound: `client-finance/client-finance` — 條款變更的客戶應收影響。
 - outbound: `staff-payables/payroll` — 條款變更的薪資影響。
+- outbound: `case-import/case-architecture-bootstrap` — 完成進件後沿用 canonical 政策與 writer，同一 caller-owned transaction 初始化缺少的 owner roots。
 
 ## Contracts
 - `document/架構重整/01_規格基線/01_Orders_Domain.md` — Orders Terms 與 Query／Preview／Apply 語意。
@@ -57,6 +62,7 @@ Issue #326：同一 Terms command 可承接完整替代日期與明確既有指�
 - test_root: `ui_react/src/tests/domains/orders/subsystems/orders/modules/order-terms/`
 - test_root: `ui_react/src/tests/order_terms_mutation_client.test.ts` — 既有 Terms typed-client 契約測試，沿用現行位置。
 - test_root: `tests/domains/orders/subsystems/orders/modules/intake-terms-bootstrap/unit/`
+- test_root: `tests/domains/orders/subsystems/orders/modules/intake-terms-bootstrap/integration/`
 
 ## Provenance
 - Workflow owner and cross-owner transaction boundary — `architecture_declared` — Orders formal spec and current source.

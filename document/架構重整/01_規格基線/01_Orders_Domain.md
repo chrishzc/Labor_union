@@ -294,6 +294,7 @@ Client Finance 建立其餘期款應收必須使用同一 outer Unit of Work：
 - 有效取消事件；
 - 正式契約流程完成事實；
 - 訂金有效核銷；
+- Client Finance 當前有效的訂金未付人工放行（獨立於核銷事實）；
 - actual start confirmation／reconfirmation；
 - assignment-owned 最後服務結束時刻；
 - Domain 根事實 blockers；
@@ -304,7 +305,7 @@ Client Finance 建立其餘期款應收必須使用同一 outer Unit of Work：
 
 1. 全部約定服務尚未完成且有有效取消事件：訂單取消。
 2. 全部約定服務已完成：訂單完成；拒絕後續取消。
-3. 契約完成、訂金有效、execution schedule 有效、actual start 已到且無 reconfirm blocker：服務中。
+3. 契約完成、訂金有效核銷或仍有效的訂金未付人工放行、execution schedule 有效、actual start 已到且無 reconfirm blocker：服務中。正式排班與開始日重排不得因訂金仍未付而把有效人工放行的案件退回洽談中；付款條款正式改變使放行失效時仍須重新確認放行。
 4. 訂金有效，或 Client Finance 已由 system admin 建立有效的一般市民訂金未付人工放行：訂單成立；人工放行不代表訂金已核銷或歸零。此狀態不代表客戶已簽回，也不單獨授權 execution conversion。
 5. 其他：洽談中。
 
@@ -656,6 +657,17 @@ owner 已保存的值，不要求人員重填合法欄位。
 起訖試算的時數允許人員按協調結果修正，必須為正半小時且不超過排定區間。
 驗收 A 依人工指定保存 `08:00～17:00`、每日 8 小時；不將排定的 9 小時逕作服務時數。
 保存後重新讀取正式階段，符合完整性才接續媒合；不得由 UI 直接改寫 lifecycle／階段。
+
+2026-10-15 人工裁決：缺件補齊後必須接續本案初始化，不新增或重排前端區塊。待補件案件的
+「完成進件補齊」Apply，及洽談中案件透過 intake Apply 補齊姓名、日期、正服務天數、每日時數與
+完整時段後，均由 Orders 既有 outer UoW 委派 canonical Case Architecture Bootstrap，使用既有
+Client Finance 付款政策與 Payroll 費率分類建立缺少的本案初始資料。此條覆蓋前述僅在這兩個
+完成時點「不建立下游 roots」的限制；一般分段補件、歷史修補及 Query／Preview 保持零下游寫入。
+初始化與 Orders 保存／進件完成及原命令 receipt 同交易 commit；任何失敗全部 rollback，
+不得保留已完成補件卻未初始化的部分結果。初始化僅建立付款條款、薪資政策與空 aggregate，
+不建立應收、應付、ledger、正式 assignment 或外部通知。same-key 重播回讀原 receipt，
+不重複初始化；既有完整初始資料維持原值，partial roots typed 拒絕，不補零、不覆寫。
+既有案件資料回填不在本次施工範圍，驗證使用 localhost 全新隔離 lu_test_* 合成資料。
 
 此 preassignment Terms Query／Preview／Apply 只讀 Orders、Scheduling 與判斷下游完整性所需的最小
 存在／義務 facts；Client Finance／Payroll root 可合法不存在，回應與 receipt 的對應 version／impact

@@ -11,6 +11,7 @@ from typing import Any
 
 from domains.case_import.order_information import project_order_information
 from domains.orders.actual_start import calculate_service_dates
+from domains.orders.terms import canonical_service_mode
 from domains.client_finance.subsidy_coverage import derive_subsidy_coverage
 from domains.payroll.calculation import (
     AssignmentRateSnapshot,
@@ -43,14 +44,6 @@ from subsystems.contract_signing.full_contract_preview import (
     projection_fingerprint,
 )
 
-_CANONICAL_SERVICE_MODES = frozenset({"休周六", "休周日", "週休2日", "連續服務"})
-_LEGACY_SERVICE_MODE_ALIASES = {
-    "無休": "連續服務",
-    "週休1日": "休周日",
-    "週休一日": "休周日",
-    "週休二日": "週休2日",
-    "周休二日": "週休2日",
-}
 _UNSET_VIRTUAL_ACCOUNT = object()
 
 
@@ -907,15 +900,7 @@ def _stage_fact_key(stage: str, suffix: str) -> str:
 
 
 def _canonical_service_mode(value: object) -> str | None:
-    if value is None:
-        return "連續服務"
-    if not isinstance(value, str):
-        return None
-    value = value.strip()
-    if not value:
-        return "連續服務"
-    canonical = _LEGACY_SERVICE_MODE_ALIASES.get(value, value)
-    return canonical if canonical in _CANONICAL_SERVICE_MODES else None
+    return canonical_service_mode(value)
 
 
 def _special_holidays_text(value: object) -> str | None:

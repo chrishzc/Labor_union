@@ -18,7 +18,8 @@ const plan = { planId: 51, status: 'proposed', activeLockId: null, planVersion: 
 let active: boolean;
 let created: boolean;
 const onObserved = vi.fn();
-function mount(lock = false, onOpenCandidates?: () => void) { return render(<OrderRecommendationReplacementPanel caseNo={CASE} plan={{ ...plan, activeLockId: lock ? 88 : null }} contact={contact} onObserved={onObserved} onReplacementStarted={vi.fn()} onOpenCandidates={onOpenCandidates} onClose={vi.fn()} onEditStateChange={vi.fn()} />); }
+const onReplacementStarted = vi.fn();
+function mount(lock = false, onOpenCandidates?: () => void) { return render(<OrderRecommendationReplacementPanel caseNo={CASE} plan={{ ...plan, activeLockId: lock ? 88 : null }} contact={contact} onObserved={onObserved} onReplacementStarted={onReplacementStarted} onOpenCandidates={onOpenCandidates} onClose={vi.fn()} onEditStateChange={vi.fn()} />); }
 async function preview() {
   fireEvent.click(await screen.findByRole('radio', { name: /月嫂乙/ }));
   fireEvent.change(screen.getByLabelText('換人原因（必填）'), { target: { value: '客戶要求換人' } });
@@ -38,7 +39,7 @@ describe('推薦頁更換人員沿用原正式操作及收據', () => {
   });
   beforeEach(() => {
     Object.values(mocks).forEach(mock => mock.mockReset());
-    orderMutationFlowStore.clearAll(); onObserved.mockReset(); active = true; created = false;
+    orderMutationFlowStore.clearAll(); onObserved.mockReset(); onReplacementStarted.mockReset(); active = true; created = false;
     vi.spyOn(sessionClient, 'getUser').mockReturnValue({ username: 'operator' } as never);
     mocks.assignment.mockResolvedValue({ case_no: CASE, service_started: false, assignments: [] });
     mocks.pool.mockResolvedValue({ case_no: CASE, candidates: [
@@ -112,6 +113,39 @@ describe('推薦頁更換人員沿用原正式操作及收據', () => {
     await waitFor(() => expect(onObserved).toHaveBeenCalledTimes(1));
     expect(mocks.cancel).toHaveBeenCalledTimes(1);
     expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ key: original.createKey }));
+  });
+  it('新推薦確定遭檔期衝突拒絕後，查明無收據及有效方案才返回改選', async () => {
+    mocks.create.mockRejectedValue(new ApiHttpError(409, 'matching_plan_staff_occupancy_conflict', '11/16 已由其他案件保留'));
+    mount(); await preview();
+    fireEvent.click(screen.getByRole('button', { name: '確認啟動換人' }));
+    fireEvent.click(await screen.findByRole('button', { name: '建立新推薦並交客戶確認' }));
+    fireEvent.click(await screen.findByRole('button', { name: '返回改選月嫂' }));
+    await waitFor(() => expect(onReplacementStarted).toHaveBeenCalledOnce());
+    expect(orderMutationFlowStore.getRecommendationReplacement(CASE)).toBeUndefined();
+    expect(mocks.receipt).toHaveBeenCalledTimes(2);
+    expect(mocks.cancel).toHaveBeenCalledTimes(1); expect(mocks.create).toHaveBeenCalledTimes(1);
+  });
+  it('改選查核失敗時保留原操作，不能清掉尚待確認的結果', async () => {
+    mocks.create.mockRejectedValue(new ApiHttpError(409, 'matching_plan_staff_occupancy_conflict', '檔期衝突'));
+    mount(); await preview();
+    fireEvent.click(screen.getByRole('button', { name: '確認啟動換人' }));
+    fireEvent.click(await screen.findByRole('button', { name: '建立新推薦並交客戶確認' }));
+    const repair = await screen.findByRole('button', { name: '返回改選月嫂' });
+    const original = orderMutationFlowStore.getRecommendationReplacement(CASE)!.command;
+    mocks.receipt.mockRejectedValue(new Error('查詢中斷'));
+    fireEvent.click(repair);
+    await screen.findByText('查詢中斷');
+    expect(onReplacementStarted).not.toHaveBeenCalled();
+    expect(orderMutationFlowStore.getRecommendationReplacement(CASE)!.command).toEqual(original);
+  });
+  it('新推薦回應中斷時只允許以原操作查核，不提供改選入口', async () => {
+    mocks.create.mockRejectedValue(new Error('回應中斷'));
+    mount(); await preview();
+    fireEvent.click(screen.getByRole('button', { name: '確認啟動換人' }));
+    fireEvent.click(await screen.findByRole('button', { name: '建立新推薦並交客戶確認' }));
+    await screen.findByRole('button', { name: '重新確認原換人操作' });
+    expect(screen.queryByRole('button', { name: '返回改選月嫂' })).not.toBeInTheDocument();
+    expect(orderMutationFlowStore.getRecommendationReplacement(CASE)).toBeDefined();
   });
   it('已保留檔期沿用正式釋放預覽與回條，釋放失敗不取消原推薦', async () => {
     mocks.queryPlan.mockResolvedValue({ ...plan, activeLockId: 88 });

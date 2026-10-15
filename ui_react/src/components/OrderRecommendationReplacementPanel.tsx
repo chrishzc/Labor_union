@@ -127,7 +127,30 @@ export function OrderRecommendationReplacementPanel({ caseNo, plan, contact, onC
       if (observed.planId !== receipt.plan_id || (observed.planVersion ?? -1) < receipt.version || observed.segments?.length !== command.segments.length
         || [...observed.segments].sort((a, b) => a.sequence - b.sequence).some((segment, index) => segment.staffId !== command.segments[index].staff_id || segment.assignedStartDate !== command.segments[index].start_date || segment.assignedEndDate !== command.segments[index].end_date)) throw new Error('新推薦已建立，但回讀尚未確認原人員與日期，請重新讀取。');
       orderMutationFlowStore.clearRecommendationReplacement(caseNo); onObserved();
-    } catch (caught) { const message = failure(caught); setError(message); persist({ ...current, error: message }); }
+    } catch (caught) {
+      const message = failure(caught); setError(message);
+      persist({ ...current, error: message, stage: !current.receipt && caught instanceof ApiHttpError && caught.status === 409 && caught.code === 'matching_plan_staff_occupancy_conflict' ? 'reselect' : current.stage });
+    }
+    finally { running.current = false; setBusy(false); }
+  };
+  const reselectSuccessor = async (value: RecommendationReplacementFlowState) => {
+    if (running.current || value.stage !== 'reselect') return;
+    running.current = true; setBusy(true); setError(null);
+    try {
+      const command = { caseNo, actor: value.command.actor, asOf: value.command.asOf, key: value.command.createKey, segments: value.command.segments };
+      if (sessionClient.getUser()?.username.trim() !== command.actor) throw new Error('請以原操作帳號確認換人結果。');
+      try {
+        const receipt = await matchingCandidateWorkflowClient.queryMatchingPlanReceipt(command);
+        persist({ ...value, receipt, stage: 'observe', error: null });
+        return;
+      } catch (caught) { if (!(caught instanceof ApiHttpError && caught.status === 404)) throw caught; }
+      try {
+        await waitingDepositLockClient.queryPlan(caseNo);
+        throw new Error('本案已有其他有效推薦，請先確認目前推薦狀態。');
+      } catch (caught) { if (!(caught instanceof ApiHttpError && caught.status === 404)) throw caught; }
+      await onReplacementStarted();
+      orderMutationFlowStore.clearRecommendationReplacement(caseNo);
+    } catch (caught) { const message = failure(caught); setError(message); persist({ ...value, error: message }); }
     finally { running.current = false; setBusy(false); }
   };
   if (source?.started) return <section className="formal-recommendation-inline-form"><h4>本案已有實際服務</h4><p>請由請假代班安排接續人員，保留原月嫂的服務與薪資紀錄。</p><a href={`#scheduling?tab=leave_sub&case_no=${encodeURIComponent(caseNo)}`}>前往請假代班 →</a></section>;
@@ -148,7 +171,8 @@ export function OrderRecommendationReplacementPanel({ caseNo, plan, contact, onC
     {!source && !error && <p role="status">正在確認本案指派與可接任人選…</p>}
     {error && <div role="alert">{error}{!flow && !source && <button type="button" onClick={() => setRetry(value => value + 1)}>重新查詢</button>}</div>}
     {flow ? <>
-      {flow.stage === 'ready' && !flow.error ? <><p>換人已啟動，原推薦與回覆紀錄已保留。請接續建立新推薦，再交由客戶確認。</p><button className="formal-recommendation-primary" type="button" disabled={busy} onClick={() => void createSuccessor(flow)}>建立新推薦並交客戶確認</button></>
+      {flow.stage === 'reselect' ? <><p>新推薦因檔期衝突未能建立。原推薦與回覆紀錄已保留；請改選月嫂，或調整服務日期後重新查詢。</p><button type="button" disabled={busy} onClick={() => void reselectSuccessor(flow)}>返回改選月嫂</button></>
+        : flow.stage === 'ready' && !flow.error ? <><p>換人已啟動，原推薦與回覆紀錄已保留。請接續建立新推薦，再交由客戶確認。</p><button className="formal-recommendation-primary" type="button" disabled={busy} onClick={() => void createSuccessor(flow)}>建立新推薦並交客戶確認</button></>
         : <><p>原操作結果尚需確認；保留原人員、日期及操作編號，不重複建立新操作。</p><button type="button" disabled={busy} onClick={() => void (flow.cancelled && flow.stage !== 'ready' ? createSuccessor(flow) : cancelOriginal(flow))}>{flow.stage === 'observe' ? '重新讀取新推薦結果' : '重新確認原換人操作'}</button></>}
     </> : source && <>
       {preview ? <><h4>確認換人影響</h4><p>只更換選定段落的人員，其餘服務日期保留。</p><ul><li>原推薦、意願及客戶回覆紀錄保留。</li><li>新推薦需重新取得客戶確認。</li>{preview.lockId !== null && <li>先依正式流程釋放原檔期，再重新確認契約與服務安排。</li>}</ul><label><input type="checkbox" checked={confirmed} disabled={busy} onChange={event => setConfirmed(event.target.checked)} />我已確認換人原因及影響</label><div className="formal-recommendation-actions"><button className="formal-recommendation-primary" type="button" disabled={busy || !confirmed} onClick={() => void cancelOriginal({ command: preview, stage: preview.lockId === null ? 'cancel' : 'release', released: false, cancelled: false, cancellationEventId: null, receipt: null, error: null })}>確認啟動換人</button><button type="button" disabled={busy} onClick={() => setPreview(null)}>返回修改</button></div></>

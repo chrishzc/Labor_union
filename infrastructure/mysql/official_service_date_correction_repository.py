@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from infrastructure.mysql.assignment_plan_repository import load_occupancy_snapshot
@@ -19,8 +19,10 @@ from shared_kernel.fingerprints import PreviewFingerprint
 from subsystems.orders.official_service_date_correction_workflow import (
     OfficialAssignmentDates,
     OfficialDateFacts,
+    OfficialDateHistoryRecord,
     OfficialDateReceipt,
     OfficialDateSelection,
+    MonetaryBlocker,
 )
 
 
@@ -81,12 +83,6 @@ class MySqlOfficialServiceDateCorrectionRepository:
             ) for row in rows)
             cursor.execute("SELECT actual_end_date FROM orders WHERE case_no=%s" + suffix, (case_no,))
             actual_end_date = cursor.fetchone()["actual_end_date"]
-            cursor.execute(
-                "SELECT COUNT(*) AS total FROM scheduling_buffer_days "
-                "WHERE generation_id=%s AND active_marker=1" + suffix,
-                (generation_id,),
-            )
-            active_buffers = int(cursor.fetchone()["total"])
             ids = tuple(by_assignment)
             placeholders = ",".join("%s" for _ in ids)
             cursor.execute(
@@ -120,6 +116,17 @@ class MySqlOfficialServiceDateCorrectionRepository:
                 (case_no,),
             )
             payroll = cursor.fetchone()
+        # Completed service has no active buffer under Scheduling lifecycle rules.
+        # A stale persistence marker is neither service occupancy nor monetary impact.
+        blocker_facts: tuple[tuple[MonetaryBlocker, bool | int], ...] = (
+            ("special_pay", special_pay),
+            ("payroll_adjustments", adjustments),
+            ("subsidy_return", subsidy_returns),
+            ("source_rate_snapshot_missing_or_ambiguous", not complete_source_rates),
+            ("double_pay", any(bool(day["is_double_pay"]) for day in schedule)),
+            ("floor_fee", any(int(row["floor_fee_allocated"] or 0) for row in rows)),
+        )
+        monetary_blockers = tuple(code for code, present in blocker_facts if present)
         return OfficialDateFacts(
             case_no=case_no,
             order_version=int(order["lifecycle_version"]),
@@ -133,14 +140,10 @@ class MySqlOfficialServiceDateCorrectionRepository:
             generation_id=int(generation_id),
             generation_number=int(generation["generation_number"]),
             assignments=assignments,
-            monetary_change_blocker=bool(
-                active_buffers or special_pay or adjustments or subsidy_returns
-                or not complete_source_rates
-                or any(bool(day["is_double_pay"]) for day in schedule)
-                or any(int(row["floor_fee_allocated"] or 0) for row in rows)
-            ),
+            monetary_change_blocker=bool(monetary_blockers),
             client_finance_version=int(finance["aggregate_version"]) if finance else None,
             payroll_version=int(payroll["aggregate_version"]) if payroll else None,
+            monetary_blockers=monetary_blockers,
         )
 
     def validate_availability(self, candidate, *, lock: bool) -> None:
@@ -162,6 +165,41 @@ class MySqlOfficialServiceDateCorrectionRepository:
             for fact in occupied
         ):
             raise ValueError("official_date_occupancy_conflict")
+
+    def load_history(self, case_no: str) -> tuple[OfficialDateHistoryRecord, ...]:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT e.id,e.actor,e.created_at,e.facts_snapshot,"
+                "l.lifecycle_event_id AS completion_event_id "
+                "FROM order_lifecycle_state_events e "
+                "LEFT JOIN order_service_data_locks l "
+                "ON l.case_no=e.case_no AND l.lifecycle_event_id=e.id "
+                "WHERE e.case_no=%s AND (l.lifecycle_event_id IS NOT NULL "
+                "OR e.trigger_event='official_service_date_corrected') ORDER BY e.id",
+                (case_no,),
+            )
+            rows = tuple(cursor.fetchall())
+        records = []
+        for row in rows:
+            snapshot = json.loads(row["facts_snapshot"])
+            original = row["completion_event_id"] is not None
+            facts = snapshot.get("authoritative_facts", {}) if original else snapshot
+            before = () if original else tuple(sorted({
+                date.fromisoformat(day) for dates in facts["before"].values() for day in dates
+            }))
+            after = tuple(date.fromisoformat(day) for day in facts.get("official_service_dates", [])) if original else tuple(sorted({
+                date.fromisoformat(day) for dates in facts["after"].values() for day in dates
+            }))
+            instant = snapshot.get("completion_instant") if original else None
+            records.append(OfficialDateHistoryRecord(
+                event_id=int(row["id"]),
+                event_type="original_completion" if original else "service_date_corrected",
+                recorded_at=row["created_at"].replace(tzinfo=timezone.utc),
+                actor=str(row["actor"]), before_dates=before, after_dates=after,
+                reason=None if original else snapshot.get("reason"),
+                completion_instant=datetime.fromisoformat(instant) if instant else None,
+            ))
+        return tuple(records)
 
     def replay(self, key: str, command_fingerprint: str, *, lock: bool = False) -> OfficialDateReceipt | None:
         suffix = " FOR UPDATE" if lock else ""

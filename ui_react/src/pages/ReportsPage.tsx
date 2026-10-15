@@ -260,7 +260,9 @@ export const ReportsPage: React.FC = () => {
   };
 
   const changeDateRange = (nextStartDate: string, nextEndDate: string) => {
+    if (nextStartDate === startDate && nextEndDate === endDate) return;
     clearExportState();
+    setState({ kind: 'loading' });
     setStartDate(nextStartDate);
     setEndDate(nextEndDate);
   };
@@ -383,9 +385,9 @@ export const ReportsPage: React.FC = () => {
           </select>
         </label>
         {reportKind === 'weekly' ? <><label>起日
-          <input type="date" value={startDate} onChange={(event) => changeDateRange(event.target.value, endDate)} />
+          <input type="date" defaultValue={startDate} onChange={clearExportState} onBlur={(event) => changeDateRange(event.target.value, endDate)} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} />
         </label><label>迄日
-          <input type="date" value={endDate} onChange={(event) => changeDateRange(startDate, event.target.value)} />
+          <input type="date" defaultValue={endDate} onChange={clearExportState} onBlur={(event) => changeDateRange(startDate, event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} />
         </label></> : <label>年度
           <input type="number" min="1912" value={year} onChange={(event) => changeYear(Number(event.target.value))} />
         </label>}

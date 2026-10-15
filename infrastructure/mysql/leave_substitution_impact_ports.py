@@ -56,7 +56,8 @@ class MySqlPayrollLeaveImpactPort:
         self._connection = connection
 
     def preview_leave_substitution(self, facts, scheduling):
-        return build_payroll_assignment_impact(facts, scheduling)
+        client_finance = build_client_finance_assignment_impact(facts, scheduling)
+        return build_payroll_assignment_impact(facts, scheduling, client_finance)
 
     def persist_leave_substitution(self, candidate, context, scheduling_result):
         impact = _domain_impact(candidate)

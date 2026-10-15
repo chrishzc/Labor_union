@@ -10,6 +10,31 @@ import type {
   LeaveSubstitutionReceipt,
 } from '../../api/scheduling/leave_substitution_schemas';
 import type { LeaveSubstitutionError } from '../../api/scheduling/leave_substitution_errors';
+import { LeaveSubstitutionUnavailableError } from '../../api/scheduling/leave_substitution_errors';
+import { sessionClient } from '../../api/auth/session_client';
+import { z } from 'zod';
+import {
+  LeaveSubstitutionAssignmentSchema, LeaveSubstitutionPreviewRequestSchema,
+  LeaveSubstitutionPreviewSchema, LeaveSubstitutionApplyRequestSchema,
+} from '../../api/scheduling/leave_substitution_schemas';
+
+const recoveryPrefix = 'union_leave_pending_v1:';
+const RecoverySchema = z.strictObject({
+  caseNo: z.string().min(1).max(50),
+  assignments: z.array(LeaveSubstitutionAssignmentSchema),
+  previewRequest: LeaveSubstitutionPreviewRequestSchema,
+  preview: LeaveSubstitutionPreviewSchema,
+  applyRequest: LeaveSubstitutionApplyRequestSchema,
+  idempotencyKey: z.string().min(1).max(191),
+  correlationId: z.string().min(1).max(191),
+});
+function draftKey(caseNo: string): string {
+  const user = sessionClient.getUser();
+  return `${recoveryPrefix}${encodeURIComponent(user?.username ?? '')}:${encodeURIComponent(caseNo)}`;
+}
+function forgetRecovery(caseNo: string): void {
+  try { globalThis.localStorage?.removeItem(draftKey(caseNo)); } catch { /* Storage may be disabled. */ }
+}
 
 export type LeaveSubstitutionFlowStatus =
   | 'idle'
@@ -107,11 +132,24 @@ export class LeaveSubstitutionFlowStore {
   }
 
   public get(caseNo: string): LeaveSubstitutionFlowDraft | undefined {
-    return this.drafts.get(caseNo);
+    const key = draftKey(caseNo);
+    const existing = this.drafts.get(key);
+    if (existing) return existing;
+    if (!sessionClient.getUser()) return undefined;
+    try {
+      const raw = globalThis.localStorage?.getItem(key);
+      if (!raw) return undefined;
+      const saved = RecoverySchema.parse(JSON.parse(raw));
+      if (saved.caseNo !== caseNo || saved.preview.case_no !== caseNo) return undefined;
+      const draft: MutableDraft = { ...saved, receipt: null, status: 'outcome_unknown',
+        error: new LeaveSubstitutionUnavailableError('上次代班儲存結果尚未確認。請按「再次確認變更結果」，以原操作查核；確認完成前不要重新建立代班。') };
+      this.drafts.set(key, draft);
+      return draft;
+    } catch { return undefined; }
   }
 
   private getOrCreate(caseNo: string): MutableDraft {
-    const existing = this.drafts.get(caseNo);
+    const existing = this.get(caseNo);
     if (existing) return existing;
     const draft: MutableDraft = {
       caseNo,
@@ -125,7 +163,7 @@ export class LeaveSubstitutionFlowStore {
       status: 'idle',
       error: null,
     };
-    this.drafts.set(caseNo, draft);
+    this.drafts.set(draftKey(caseNo), draft);
     return draft;
   }
 
@@ -208,6 +246,13 @@ export class LeaveSubstitutionFlowStore {
     draft.applyRequest = copyApplyRequest(request);
     draft.status = 'apply_pending';
     draft.error = null;
+    if (sessionClient.getUser()) {
+      try {
+        const { caseNo: savedCase, assignments, previewRequest, preview, applyRequest, idempotencyKey, correlationId } = draft;
+        const saved = RecoverySchema.parse({ caseNo: savedCase, assignments, previewRequest, preview, applyRequest, idempotencyKey, correlationId });
+        globalThis.localStorage?.setItem(draftKey(caseNo), JSON.stringify(saved));
+      } catch { /* The in-page same-key recovery remains available. */ }
+    }
     this.notify();
     return draft;
   }
@@ -240,6 +285,7 @@ export class LeaveSubstitutionFlowStore {
     draft.assignments = copyAssignments(assignments);
     draft.status = 'observed';
     draft.error = null;
+    forgetRecovery(caseNo);
     this.notify();
     return draft;
   }
@@ -251,6 +297,7 @@ export class LeaveSubstitutionFlowStore {
     const draft = this.getOrCreate(caseNo);
     draft.status = 'typed_error';
     draft.error = error;
+    forgetRecovery(caseNo);
     this.notify();
     return draft;
   }
@@ -264,6 +311,7 @@ export class LeaveSubstitutionFlowStore {
     draft.applyRequest = null;
     draft.status = 'stale';
     draft.error = error;
+    forgetRecovery(caseNo);
     this.notify();
     return draft;
   }
@@ -291,11 +339,13 @@ export class LeaveSubstitutionFlowStore {
   }
 
   public clear(caseNo: string): void {
-    this.drafts.delete(caseNo);
+    this.drafts.delete(draftKey(caseNo));
+    forgetRecovery(caseNo);
     this.notify();
   }
 
   public clearAll(): void {
+    for (const draft of this.drafts.values()) forgetRecovery(draft.caseNo);
     this.drafts.clear();
     this.notify();
   }

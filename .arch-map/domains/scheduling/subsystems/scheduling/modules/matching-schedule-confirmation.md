@@ -30,6 +30,7 @@
   - `subsystems/line/matching_postback_application.py`
 
 ## Boundaries
+- Assignment Plan Query 僅讀 current Orders／Scheduling 與 nullable 已存在的 Finance／Payroll 版本；缺根或時數不阻擋唯讀，Preview／Apply 保留完整正式驗證。
 
 - 推薦與排班介面呈現自動等待訂金鎖及已轉正式班表狀態，不要求使用者手動 acquire；保留正式換人／日期調整入口及既有排班條件驗證。
 - 自動排班 discovery 以 active plan／current 日期版本掃描，不依賴日期表 snapshot 已建立；dispatch 在獨立原 UoW 借用 canonical 等待鎖 writer，銜接升級前已確認但從未保留的案件。Query 仍零寫入，明確釋放／已轉換的鎖不自行恢復；衝突維持 awaiting_conditions，不 enqueue 排班。

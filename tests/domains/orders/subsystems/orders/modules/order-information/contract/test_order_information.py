@@ -326,6 +326,27 @@ def test_order_information_http_view_serializes_the_typed_query_fingerprint():
     assert len(result["data"]["preview_fingerprint"]) == 64
 
 
+@pytest.mark.parametrize('info_type', [1, 2])
+def test_formal_plan_information_does_not_require_unused_payroll_sources(monkeypatch, info_type):
+    from infrastructure.mysql import order_information_repository as adapter
+
+    original_execute = _Cursor.execute
+
+    def without_rates(cursor, statement, params):
+        original_execute(cursor, statement, params)
+        if "FROM orders" in statement and cursor.rows:
+            cursor.rows[0].update(payroll_hourly_rate_ntd=None, client_hourly_rate_ntd=None)
+
+    monkeypatch.setattr(_Cursor, 'execute', without_rates)
+    monkeypatch.setattr(adapter, '_matching_plan_payroll_estimates',
+                        lambda *_args: pytest.fail('unused payroll calculation must not gate customer information'))
+    rows = MySqlOrderInformationRepository(_Connection()).preview_matching_plan_information('CASE-1', 51, info_type)
+    assert len(rows) == 1
+    assert f'訂單資訊－{info_type}' in rows[0]['text']
+    assert '總薪資' not in rows[0]['text']
+    assert '預計發薪日' not in rows[0]['text']
+
+
 def test_formal_plan_information_one_excludes_staff_payroll_terms(monkeypatch):
     from types import SimpleNamespace
     from infrastructure.mysql import order_information_repository as adapter

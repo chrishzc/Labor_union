@@ -362,6 +362,12 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
                   <div><strong>{candidate.staff_name}</strong><br />空閒 {candidate.supported_day_count}/{candidate.required_day_count} 天
                     {!candidate.full_case_coverage && <span role="status"> · 有檔期衝突，待公會協調</span>}
                     {queryState.data.conflicts.some(value => value.staff_id === candidate.staff_id && value.reason_code === 'buffer') && <span role="status"> · 七天緩衝期重疊，僅提醒</span>}
+                    {queryState.data.conflicts.some(value => value.staff_id === candidate.staff_id) && <details><summary>查看衝突日期與原因</summary><ul>
+                      {Object.entries({ active_lock: '其他案件已保留檔期', assignment: '已有正式排班', schedule: '已有服務排程', staff_unavailability: '月嫂不可服務', requires_review: '既有排程待核對', coverage_gap: '此段服務尚缺可用人選', outside_case_period: '超出本案服務期間', draft_overlap: '方案服務段落重疊', buffer: '七天緩衝期（僅提醒，不阻擋）' }).map(([code, label]) => {
+                        const dates = [...new Set(queryState.data.conflicts.filter(value => value.staff_id === candidate.staff_id && value.reason_code === code).map(value => value.work_date))].sort();
+                        return dates.length > 0 ? <li key={code}>{label}：{dates.join('、')}</li> : null;
+                      })}
+                    </ul></details>}
                   </div>
                   <button type="button" aria-label={`${joinedStaffIds.has(candidate.staff_id) ? '已加入候選池' : '加入候選池'}（${candidate.staff_name}）`}
                     disabled={joinedStaffIds.has(candidate.staff_id) || busy || recoveryPending}

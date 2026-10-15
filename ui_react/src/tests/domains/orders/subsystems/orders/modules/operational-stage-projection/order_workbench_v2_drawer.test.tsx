@@ -14,7 +14,7 @@ import { OrderWorkbenchV2Page } from '../../../../../../../pages/OrderWorkbenchV
 import { adaptOrderSummaryPage } from '../../../../../../../adapters/orders/order_summary_adapter';
 import { OrderConflictError } from '../../../../../../../api/orders/order_query_errors';
 
-vi.mock('../../../../../../../components/OrderServiceDatesPanel', () => ({ OrderServiceDatesPanel: () => <p>服務日期工作區</p> }));
+vi.mock('../../../../../../../components/OrderServiceDatesPanel', () => ({ OrderServiceDatesPanel: ({ completedCorrection }: { completedCorrection?: boolean }) => <p>{completedCorrection ? '完工更正月曆' : '服務日期工作區'}</p> }));
 vi.mock('../../../../../../../components/OrderAssignmentPlanPanel', () => ({ OrderAssignmentPlanPanel: () => <p>排班工作區</p> }));
 vi.mock('../../../../../../../components/OrderMultiCaregiverPlanPanel', () => ({
   OrderMultiCaregiverPlanPanel: ({ filters, onObserved }: { filters: Record<string, boolean>; onObserved?: () => void }) => <section aria-label="正式分段工作區">
@@ -563,6 +563,22 @@ describe('待辦看板 唯讀工作 Drawer', () => {
     expect(within(dialog).queryByRole('heading', { name: '13 階段正式進度' })).not.toBeInTheDocument();
     await waitFor(() => expect(within(dialog).getByRole('heading', { name: scope === 'completed' ? '服務完工' : '案件處理紀錄' })).toBeInTheDocument());
     expect(within(dialog).queryByTestId('drawer-core-stage')).not.toBeInTheDocument();
+    if (scope === 'completed') {
+      fireEvent.click(within(dialog).getByRole('button', { name: /4 辦理契約與簽署/ }));
+      expect(within(dialog).getByRole('region', { name: '完工案件操作說明' })).toHaveTextContent('本案服務已完成');
+      fireEvent.click(within(dialog).getByRole('button', { name: '返回服務完工' }));
+      expect(within(dialog).getByRole('region', { name: '服務完工摘要' })).toBeVisible();
+      expect(within(dialog).queryByRole('region', { name: '案件 CASE-TERMINAL 排班日期更正' })).not.toBeInTheDocument();
+      expect(within(dialog).queryByRole('button', { name: '前往排班更正完工日期' })).not.toBeInTheDocument();
+      fireEvent.click(within(dialog).getByRole('button', { name: '更正完工服務日期' }));
+      expect(within(dialog).getByText('完工更正月曆')).toBeVisible();
+      expect(within(dialog).getByRole('navigation', { name: '服務安排步驟' })).toBeVisible();
+      expect(within(dialog).getByRole('button', { name: /1\s*設定服務日期/ })).toBeVisible();
+      expect(within(dialog).queryByText('排班工作區')).not.toBeInTheDocument();
+      fireEvent.click(within(dialog).getByRole('button', { name: '返回完工摘要' }));
+      expect(within(dialog).getByRole('region', { name: '服務完工摘要' })).toBeVisible();
+      expect(within(dialog).queryByRole('button', { name: '預覽更正' })).not.toBeInTheDocument();
+    }
   });
 
   it('typed query 失敗時只在對應區顯示明確錯誤，仍保留正式 core-stage；Escape 關閉後晚到 response 不會重開 Drawer', async () => {

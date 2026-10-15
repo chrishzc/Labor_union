@@ -50,6 +50,7 @@ class SqlCursor:
         self.owner.calls.append((sql, params))
         # The transaction/locking assertion is outside this SQLite boundary.
         sql = sql.removesuffix(" FOR UPDATE").replace("%s", "?")
+        sql = sql.replace("CAST(o.client_id AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci", "CAST(o.client_id AS TEXT)")
         self.cursor.execute(sql, tuple(
             p.isoformat() if isinstance(p, date) else p for p in params
         ))
@@ -262,12 +263,16 @@ def test_substitute_payload_cannot_use_customer_defer_path(fixture):
     assert candidate.items
 
 
-def test_other_case_keeps_whole_request_open_after_first_case_processed(fixture):
+@pytest.mark.parametrize("customer_defer", [True, False])
+@pytest.mark.parametrize("processed_days", [(11,), (11, 13)])
+def test_other_case_keeps_whole_request_open_after_first_case_processed(fixture, customer_defer, processed_days):
     subject = resolver(fixture, intent(fixture))
+    if not customer_defer:
+        subject = linked_module.LeaveSubstitutionLinkedRequestResolution(fixture[0], Mock(), Mock())
     locked = subject.lock_for_apply(LinkedLeaveRequestIntent(17,3))
     subject._workflow = Mock()
     # Stand in for the canonical replacement, not for a real Apply transaction.
-    fixture[1].execute("UPDATE staff_schedule SET effective_marker=NULL WHERE id IN (11,13)")
+    fixture[1].executemany("UPDATE staff_schedule SET effective_marker=NULL WHERE id=?", [(day,) for day in processed_days])
     result = subject.resolve_and_enqueue(
         locked, receipt_key="first-batch", idempotency_key=IdempotencyKey("apply1"),
         correlation_id=CorrelationId("corr1"),
@@ -280,8 +285,11 @@ def test_other_case_keeps_whole_request_open_after_first_case_processed(fixture)
     subject._line_delivery_repository.enqueue.assert_not_called()
 
 
-def test_last_processed_case_uses_existing_resolution_and_notification(fixture, monkeypatch):
+@pytest.mark.parametrize("customer_defer", [True, False])
+def test_last_processed_case_uses_existing_resolution_and_notification(fixture, monkeypatch, customer_defer):
     subject = resolver(fixture, intent(fixture))
+    if not customer_defer:
+        subject = linked_module.LeaveSubstitutionLinkedRequestResolution(fixture[0], Mock(), Mock())
     locked = subject.lock_for_apply(LinkedLeaveRequestIntent(17,3))
     snapshot = fixture[0].load(17)
     from domains.scheduling.staff_leave_intake import StaffLeaveRequestStatus

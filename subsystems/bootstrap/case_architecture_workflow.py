@@ -98,9 +98,8 @@ class CaseArchitectureBootstrapWorkflow:
             raise _domain_error(correlation_id, exception) from exception
 
     def ensure(self, command: EnsureCaseArchitectureBootstrap) -> CaseArchitectureBootstrapReceipt:
-        command_fingerprint = _command_fingerprint(command)
         try:
-            return self._ensure_transaction(command, command_fingerprint)
+            return self._ensure_transaction(command)
         except CaseArchitectureBootstrapWorkflowError:
             raise
         except BootstrapDomainError as exception:
@@ -113,17 +112,29 @@ class CaseArchitectureBootstrapWorkflow:
                 "The case bootstrap transaction failed and was rolled back.",
             ) from exception
 
-    def _ensure_transaction(self, command: EnsureCaseArchitectureBootstrap, command_fingerprint: PreviewFingerprint) -> CaseArchitectureBootstrapReceipt:
+    def _ensure_transaction(self, command: EnsureCaseArchitectureBootstrap) -> CaseArchitectureBootstrapReceipt:
         with self._unit_of_work_factory() as unit_of_work:
+            receipt, replayed = self._ensure_in_unit_of_work(command)
+            if not replayed:
+                unit_of_work.commit()
+            return receipt
+
+    def ensure_in_unit_of_work(self, command: EnsureCaseArchitectureBootstrap) -> CaseArchitectureBootstrapReceipt:
+        """Delegate initialization to the caller's transaction without beginning or committing it."""
+        return self._ensure_in_unit_of_work(command)[0]
+
+    def _ensure_in_unit_of_work(self, command: EnsureCaseArchitectureBootstrap) -> tuple[CaseArchitectureBootstrapReceipt, bool]:
+        command_fingerprint = _command_fingerprint(command)
+        try:
             claim = self._repository.claim_command(command, command_fingerprint)
             _raise_if_claim_mismatched(command, claim)
             replay = self._find_replay(command, command_fingerprint)
             if replay is not None:
-                return replay
+                return replay, True
             _raise_if_claim_has_no_receipt(command, claim)
-            receipt = self._ensure_fresh(command, command_fingerprint)
-            unit_of_work.commit()
-            return receipt
+            return self._ensure_fresh(command, command_fingerprint), False
+        except BootstrapDomainError as exception:
+            raise _domain_error(command.correlation_id, exception) from exception
 
     def _find_replay(self, command: EnsureCaseArchitectureBootstrap, command_fingerprint: PreviewFingerprint) -> CaseArchitectureBootstrapReceipt | None:
         stored = self._repository.find_receipt(command.idempotency_key, for_update=True)

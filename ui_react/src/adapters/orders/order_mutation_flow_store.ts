@@ -85,7 +85,7 @@ export type ReopenFlowStatus =
 
 export interface ServiceDatesDraftState {
   /** Unsaved input and the existing Actual Start command, retained across drawer reopen. */
-  calculation?: { startDate: string; startPreview: ActualStartPreview | null };
+  calculation?: { startDate: string; startPreview: ActualStartPreview | null; needsManualReview?: boolean; suggestedDates?: string[] };
   caseNo: string;
   queryView: ServiceDateConfirmationQueryView | null;
   selectedDates: string[];
@@ -254,7 +254,7 @@ export interface RecommendationReplacementFlowState {
     originalPlan: ActiveWaitingDepositPlan;
     originalContact: FormalPlanContactState;
   };
-  stage: 'release' | 'cancel' | 'ready' | 'create' | 'observe';
+  stage: 'release' | 'cancel' | 'ready' | 'create' | 'observe' | 'reselect';
   released: boolean;
   cancelled: boolean;
   cancellationEventId: number | null;

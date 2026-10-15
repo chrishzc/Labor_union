@@ -72,6 +72,8 @@ Preview 的 buffer conflict 是非阻擋提醒；只有 actual service／assignm
 
 提供 Query、Preview、Apply；支援 bootstrap、分段增減、換人、日期調整及 Orders Terms 全案重建。Apply 取消舊紀錄並新增新集合，通用 rebuild event 保存一對多／多對一 lineage。
 
+正式指派 Query 只投影 current Orders／Scheduling 與已存在的帳務版本，不要求 Finance／Payroll 初始化或完整服務時數。尚未建立的版本及時數回傳 NULL，不以 0 假造根事實；Preview／Apply 仍須讀齊原有正式條件，Query 不建立初始資料。
+
 #### Actual Start 逐段重新精算（2026-09-23）
 
 已有 effective assignments 的 Actual Start 更正不得整批平移舊日期，也不得以全案新服務日按陣列位置

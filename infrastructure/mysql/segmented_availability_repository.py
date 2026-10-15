@@ -9,6 +9,9 @@ from datetime import date, datetime
 import json
 from typing import Any, Callable, Protocol
 
+from domains.orders.actual_start import calculate_service_dates
+from domains.orders.terms import canonical_service_mode
+
 
 class SegmentedAvailabilityFactsPort(Protocol):
     def load_case_facts(self, case_no: str) -> dict[str, Any]: ...
@@ -69,7 +72,7 @@ class MySqlSegmentedAvailabilityFactsRepository:
     def _load_order(self, cursor: Any, case_no: str) -> dict[str, Any] | None:
         cursor.execute(
             "SELECT o.case_no, o.status, o.start_date, o.end_date,"
-            "o.service_days,o.service_hours_per_day,o.requires_cooking,c.city,c.address,c.service_type,"
+            "o.service_days,o.service_hours_per_day,o.requires_cooking,o.custom_rest_dates,c.city,c.address,c.service_type,"
             "COALESCE(g.aggregate_version, 0) AS scheduling_version "
             "FROM orders o JOIN clients c ON c.id=o.client_id "
             "LEFT JOIN scheduling_aggregates g ON g.case_no=o.case_no "
@@ -79,6 +82,20 @@ class MySqlSegmentedAvailabilityFactsRepository:
         return cursor.fetchone()
 
     def _load_negotiation_facts(self, cursor: Any, order: dict[str, Any]) -> dict[str, Any]:
+        # end_date is an Orders projection, never an extra intake answer.
+        # A missing persisted projection must not block the initial inquiry.
+        order = dict(order)
+        if order.get("end_date") is None:
+            mode = canonical_service_mode(order.get("service_type"))
+            if mode is None:
+                raise ValueError("matching_preference_source_not_ready")
+            rest_dates = order.get("custom_rest_dates") or ()
+            if isinstance(rest_dates, str):
+                rest_dates = json.loads(rest_dates)
+            holidays = tuple(sorted({_as_date(value) for value in rest_dates}))
+            order["end_date"] = calculate_service_dates(
+                _as_date(order["start_date"]), int(order["service_days"]), mode, holidays,
+            )[-1]
         confirmed_service_dates = self._load_confirmed_service_dates(cursor, order["case_no"])
         window_start, window_end = _availability_window(order, confirmed_service_dates)
         return {

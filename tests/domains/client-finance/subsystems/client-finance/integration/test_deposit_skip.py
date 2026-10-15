@@ -32,6 +32,22 @@ def facts(*, identity_status: str = "一般市民", received: int = 0) -> Deposi
     return DepositSkipFacts("CASE-001", 3, identity_status, 12000, received, False, "洽談中")
 
 
+@pytest.mark.parametrize('active,changed,expected', [
+    (True, False, True), (True, True, False), (False, False, False),
+])
+def test_payment_terms_change_expires_unpaid_override(active, changed, expected):
+    from dataclasses import replace
+    from datetime import date
+    from domains.client_finance.obligation_planning import (
+        ClientPaymentTerms, deposit_gate_override_survives_terms_impact,
+    )
+    from shared_kernel.money import MoneyNTD
+    terms = ClientPaymentTerms(5, MoneyNTD(300), date(2026, 10, 16), date(2026, 11, 15), None)
+    source = SimpleNamespace(deposit_gate_override_active=active, payment_terms=terms)
+    candidate = SimpleNamespace(payment_terms=(replace(terms, client_hourly_rate=MoneyNTD(350)) if changed else terms))
+    assert deposit_gate_override_survives_terms_impact(source, candidate) is expected
+
+
 @pytest.mark.parametrize("identity_status", ["低收入戶", "中低收入戶", "非市民"])
 def test_only_general_citizen_can_use_manual_deposit_skip(
     identity_status: str,

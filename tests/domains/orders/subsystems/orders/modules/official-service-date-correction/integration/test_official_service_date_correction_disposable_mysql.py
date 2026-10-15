@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from argparse import Namespace
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import os
+import json
 
 import pymysql
 import pytest
@@ -21,6 +22,7 @@ from scripts.bootstrap_disposable_mysql_schema import bootstrap
 from shared_kernel.clock import TAIPEI_TIME_ZONE
 from subsystems.orders.official_service_date_correction_workflow import (
     OfficialDateSelection,
+    OfficialDateMonetaryImpactBlocked,
     OfficialServiceDateCorrectionWorkflow,
 )
 from subsystems.reporting.weekly_operations_report_query import (
@@ -155,7 +157,10 @@ def _seed(connection):
             "INSERT INTO order_lifecycle_state_events(case_no,trigger_event,before_status,"
             "after_status,actor,business_date,expected_version,idempotency_key,facts_snapshot) "
             "VALUES ('ISSUE-346','auto_complete','服務中','訂單完成','fixture','2026-09-20',"
-            "0,'issue346-completion','{}')"
+            "0,'issue346-completion',%s)",
+            (json.dumps({"completion_instant": "2026-09-20T17:00:00+08:00", "authoritative_facts": {
+                "official_service_dates": ["2026-09-19", "2026-09-20"],
+            }}),),
         )
         completion_event_id = int(cursor.lastrowid)
         cursor.execute(
@@ -304,6 +309,16 @@ def test_completed_date_correction_updates_effective_workdays_and_fresh_weekly_r
     connection = _connect(database)
     try:
         assignment_id, old_generation_id, completion_event_id = _seed(connection)
+        # A real completed case retained these stale markers from its pre-service buffer.
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT staff_id FROM case_staff_assignments WHERE id=%s", (assignment_id,))
+            staff_id = cursor.fetchone()["staff_id"]
+            cursor.executemany(
+                "INSERT INTO scheduling_buffer_days(generation_id,assignment_id,staff_id,buffer_date,status,active_marker) "
+                "VALUES (%s,%s,%s,%s,'active',1)",
+                [(old_generation_id, assignment_id, staff_id, date(2026, 9, 20) + timedelta(days=offset)) for offset in range(1, 8)],
+            )
+        connection.commit()
         workflow = OfficialServiceDateCorrectionWorkflow(
             MySqlOfficialServiceDateCorrectionRepository(connection),
             lambda: MySqlUnitOfWork(connection),
@@ -311,9 +326,15 @@ def test_completed_date_correction_updates_effective_workdays_and_fresh_weekly_r
         assert _weekly(connection) == {date(2026, 9, 14): (2, 16)}
         before = _snapshot(connection)
         monetary_before = _monetary_snapshot(connection)
+        facts = workflow.query("ISSUE-346")
+        assert facts.monetary_change_blocker is False
+        assert facts.monetary_blockers == ()
         selection = (OfficialDateSelection(assignment_id, (date(2026, 9, 19), date(2026, 9, 21))),)
         preview = workflow.preview("ISSUE-346", selection)
         assert _snapshot(connection) == before
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) AS n FROM scheduling_buffer_days WHERE generation_id=%s AND active_marker=1", (old_generation_id,))
+            assert cursor.fetchone()["n"] == 7  # Query/Preview never repairs persistence markers.
         receipt = workflow.apply(
             "ISSUE-346", selection, expected_order_version=1,
             expected_scheduling_version=1, preview_fingerprint=preview.fingerprint.value,
@@ -325,6 +346,16 @@ def test_completed_date_correction_updates_effective_workdays_and_fresh_weekly_r
         assert dates == (date(2026, 9, 19), date(2026, 9, 21))
         assert counts == {"client_obligations": 1, "staff_obligations": 1,
                           "order_service_data_locks": 1, "order_lifecycle_state_events": 2}
+        assert _monetary_snapshot(connection) == monetary_before
+        history = workflow.query("ISSUE-346").history
+        assert [record.event_type for record in history] == ["original_completion", "service_date_corrected"]
+        assert history[0].event_id == completion_event_id
+        assert history[0].after_dates == (date(2026, 9, 19), date(2026, 9, 20))
+        assert history[0].completion_instant.isoformat() == "2026-09-20T17:00:00+08:00"
+        assert history[1].reason == "correct service date"
+        assert history[1].before_dates == (date(2026, 9, 19), date(2026, 9, 20))
+        assert history[1].after_dates == (date(2026, 9, 19), date(2026, 9, 21))
+        assert history[1].recorded_at.utcoffset() == timedelta(0)
         assert _monetary_snapshot(connection) == monetary_before
         assert order["status"] == "訂單完成" and order["actual_end_date"] == date(2026, 9, 21)
         assert _weekly(connection) == {date(2026, 9, 14): (1, 8), date(2026, 9, 21): (1, 8)}
@@ -443,5 +474,39 @@ def test_substituted_multi_staff_dates_remain_attributed_to_correct_staff_in_fre
                 "AND effective_marker=1", (old_generation_id,),
             )
             assert cursor.fetchone()["total"] == 0
+    finally:
+        connection.close()
+
+
+def test_real_monetary_blockers_remain_explicit_without_changing_existing_obligations():
+    database = f"{DATABASE}_monetary_blockers"
+    bootstrap(Namespace(
+        host=os.environ["LABOR_UNION_TEST_MYSQL_HOST"], port=int(os.environ["LABOR_UNION_TEST_MYSQL_PORT"]),
+        user=os.environ["LABOR_UNION_TEST_MYSQL_USER"], password=os.environ["LABOR_UNION_TEST_MYSQL_PASSWORD"],
+        database=database, confirm_database=database,
+    ))
+    connection = _connect(database)
+    try:
+        assignment_id, generation_id, _ = _seed(connection)
+        workflow = OfficialServiceDateCorrectionWorkflow(MySqlOfficialServiceDateCorrectionRepository(connection), lambda: MySqlUnitOfWork(connection))
+        monetary_before = _monetary_snapshot(connection)
+        selection = (OfficialDateSelection(assignment_id, (date(2026, 9, 19), date(2026, 9, 21))),)
+        scenarios = (
+            ("floor_fee", "UPDATE case_staff_assignments SET floor_fee_allocated=100 WHERE id=%s", assignment_id),
+            ("double_pay", "UPDATE staff_schedule SET is_double_pay=1 WHERE generation_id=%s", generation_id),
+            ("source_rate_snapshot_missing_or_ambiguous", "DELETE FROM assignment_payroll_rate_snapshots WHERE assignment_id=%s", assignment_id),
+        )
+        for code, sql, identity in scenarios:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, (identity,))
+            facts = workflow.query("ISSUE-346")
+            assert facts.monetary_change_blocker is True
+            assert facts.monetary_blockers == (code,)
+            with pytest.raises(OfficialDateMonetaryImpactBlocked) as blocked:
+                workflow.preview("ISSUE-346", selection)
+            assert blocked.value.blockers == (code,)
+            connection.rollback()
+            assert workflow.query("ISSUE-346").monetary_blockers == ()
+        assert _monetary_snapshot(connection) == monetary_before
     finally:
         connection.close()

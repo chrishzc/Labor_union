@@ -6,6 +6,7 @@ Description: 提供 Orders Terms transaction 與 borrowed owner facts 的嚴格 
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from datetime import time, timedelta
 from decimal import Decimal
 from typing import Any, Callable
@@ -345,6 +346,11 @@ def _assemble_facts(
             else _load_payroll(cursor, order_row, assignment_rows, lock)
         )
     lifecycle = _load_lifecycle(cursor, order_row, lock)
+    if client_finance is not None:
+        lifecycle = replace(
+            lifecycle,
+            deposit_gate_override_active=client_finance.deposit_gate_override_active,
+        )
     if lock and generation_row is not None:
         _lock_dated_occupancy(cursor, generation_row)
     return _facts_from_rows(

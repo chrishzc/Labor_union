@@ -306,7 +306,7 @@ def _matching_stage(row: Mapping[str, object], case_no: str) -> StageProjection:
         raise OrderStageProjectionContractError("matching_plan_id must be a positive integer")
     if plan_id is not None and status not in {"draft", "proposed", "accepted", "rejected", "superseded", "cancelled"}:
         raise OrderStageProjectionContractError("matching_plan_status is outside the closed contract")
-    if customer_decision not in {None, "pending", "accepted", "rejected"}:
+    if customer_decision not in {None, "pending", "accepted", "rejected", "declined", "contact_requested"}:
         raise OrderStageProjectionContractError("matching customer decision is outside the closed contract")
     willingness_count = _nonnegative_int(row, "willingness_count")
     replied_count = _nonnegative_int(row, "willingness_replied_count")
@@ -331,7 +331,7 @@ def _matching_stage(row: Mapping[str, object], case_no: str) -> StageProjection:
     if waiting_deposit_lock_id is not None or customer_decision == "accepted" or status == "accepted":
         projected: StageStatus = "completed"
         blockers: tuple[ProjectionNotice, ...] = ()
-    elif customer_decision == "rejected" or status in {"rejected", "cancelled"}:
+    elif customer_decision in {"rejected", "declined"} or status in {"rejected", "cancelled"}:
         projected = "blocked"
         blockers = (_notice("matching_plan_not_accepted", "目前媒合方案已拒絕或取消。"),)
     else:
@@ -358,6 +358,14 @@ def _client_review_stage(row: Mapping[str, object], case_no: str) -> StageProjec
     resume_sent_count = _nonnegative_int(row, "resume_sent_count")
     if plan_id is None:
         return _unavailable_stage(3, "client_review", "推薦客戶與確認", "Assignments / Customer Decision", "formal_recommendation_projection_missing")
+    if row['matching_customer_decision'] in {'declined', 'rejected'}:
+        return _stage(
+            3, 'client_review', '推薦客戶與確認', 'Assignments / Customer Decision', 'blocked',
+            _source('Assignments / Customer Decision', f'caregiver-matching-plan:{plan_id}', _optional_int(row, 'matching_plan_version')),
+            _optional_datetime(row, 'matching_customer_decision_at'),
+            blockers=(_notice('recommendation_customer_declined', '客戶已拒絕本次推薦，請確認需求並更換月嫂後重新取得客戶確認。'),),
+            actions=(_get('orders.assignment_plan.query', f'/api/v1/orders/{case_no}/assignment-plan'),),
+        )
     if _nonnegative_int(row, "matching_unwilling_count"):
         return _stage(
             3, "client_review", "推薦客戶與確認", "Assignments / Customer Decision", "blocked",

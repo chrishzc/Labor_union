@@ -3,8 +3,10 @@ parent_subsystem: scheduling
 architecture: ../../../../../../domains/scheduling/subsystems/scheduling/modules/leave-substitution.md
 layout_status: custom_current
 test_root: ui_react/src/tests/substitution_payables_readback.test.tsx
+test_root: ui_react/src/tests/scheduling_leave_substitution_flow.test.tsx
 test_root: tests/test_leave_substitution_public_contract.py
 integration_root: tests/test_g13_leave_cancellation_disposable_mysql_e2e.py
+integration_root: tests/domains/scheduling/subsystems/scheduling/integration/test_staff_leave_customer_defer.py
 integration_root: ui_react/src/tests/scheduling_staff_leave_inbox_flow.test.tsx
 
 ## Current oracle

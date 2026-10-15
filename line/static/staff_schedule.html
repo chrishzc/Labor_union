@@ -291,7 +291,7 @@ function requireLeaveReadback(value) {
 }
 
 function leaveStatusLabel(status) {
-  return ({pending: "等待工會處理", accepted: "已受理處理", rejected: "已拒絕", cancelled: "已取消", resolved: "已完成處理"})[status]
+  return ({pending: "等待工會處理", accepted_for_processing: "已受理處理", rejected: "已拒絕", cancelled: "已取消", resolved: "已完成處理"})[status]
     || "狀態待工會確認";
 }
 
@@ -348,15 +348,29 @@ async function submitLeave() {
   }
 }
 
+let leaveApplyInFlight = false;
+function lockLeaveControls(locked) {
+  for (const id of ["leaveStart", "leaveEnd", "leaveReason", "confirmLeave", "submitLeave"]) {
+    document.getElementById(id).disabled = locked;
+  }
+}
+function offerLeaveResultCheck(message) {
+  document.getElementById("applyLeave").textContent = "重新確認送出結果";
+  document.getElementById("applyLeave").disabled = false;
+  show("leaveStatus", message + "請按「重新確認送出結果」以同一筆操作查核，不會重複建立請假。", true);
+}
 async function applyLeave() {
+  if (leaveApplyInFlight) return;
   if (!leaveCandidate || !document.getElementById("confirmLeave").checked) {
     show("leaveStatus", "請先預覽並勾選確認。", true);
     return;
   }
   const candidate = leaveCandidate;
+  leaveApplyInFlight = true;
   const button = document.getElementById("applyLeave");
   let applyCommitted = false;
   button.disabled = true;
+  lockLeaveControls(true);
   show("leaveStatus", "正在送出請假待辦...");
   try {
     const response = await fetch("/api/v1/line/staff-self-service/leave-requests/apply", {
@@ -369,12 +383,20 @@ async function applyLeave() {
     if (!response.ok || result.success === false || !result.data) {
       show("leaveStatus", responseMessage(result, "請假待辦送出失敗，請保留畫面並聯絡工會人員。"), true);
       showReauthenticationFor(result);
-      button.disabled = false;
+      if (response.status >= 500) {
+        offerLeaveResultCheck("伺服器尚未確認送出結果。");
+      } else {
+        lockLeaveControls(false);
+        invalidateLeavePreview();
+        const code = responseErrorCode(result);
+        show("leaveStatus", code === "leave_request_idempotency_conflict"
+          ? "此操作識別已用於不同請假內容，未覆蓋原申請；請重新預覽並核對原待辦後再送出。"
+          : "請假預覽或目前狀態已變更；請核對欄位後重新預覽，若身分逾期請重新驗證 LINE。", true);
+      }
       return;
     }
     requireLeaveReadback(result.data);
     applyCommitted = true;
-    leaveCandidate = null;
     document.getElementById("confirmLeave").disabled = true;
     const readbackResponse = await fetch(`/api/v1/line/staff-self-service/leave-requests/${result.data.request_id}/query`, {
       method: "POST",
@@ -383,16 +405,23 @@ async function applyLeave() {
     });
     const readbackResult = await responseData(readbackResponse);
     if (!readbackResponse.ok || readbackResult.success === false || !readbackResult.data) {
-      show("leaveStatus", "待辦已送出，但目前無法重新讀取結果。請勿重複送出，並聯絡工會人員查核。", true);
+      offerLeaveResultCheck("待辦已送出，但目前無法重新讀取結果。");
       return;
     }
     const readback = requireLeaveReadback(readbackResult.data);
+    leaveCandidate = null;
+    lockLeaveControls(false);
+    document.getElementById("confirmLeave").disabled = true;
+    document.getElementById("confirmLeave").checked = false;
+    button.textContent = "確認送出";
+    button.disabled = true;
     show("leaveStatus", `待辦 #${readback.request_id} 已送出：${readback.leave_start_date} 至 ${readback.leave_end_date}，${leaveStatusLabel(readback.status)}。`);
   } catch (_) {
-    leaveCandidate = null;
-    show("leaveStatus", applyCommitted
-      ? "待辦已送出，但目前無法重新讀取結果。請勿重複送出，並聯絡工會人員查核。"
-      : "送出結果尚未確認。請勿重複送出，並聯絡工會人員查核。", true);
+    offerLeaveResultCheck(applyCommitted
+      ? "待辦已送出，但連線中斷而無法回讀結果。"
+      : "連線中斷，尚無法確認請假是否已送達。");
+  } finally {
+    leaveApplyInFlight = false;
   }
 }
 

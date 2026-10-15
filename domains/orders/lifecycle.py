@@ -92,6 +92,7 @@ class OrderLifecycleRootFacts:
     cancellation_effective: bool
     service_data_locked: bool
     historical_precision_restarted: bool = False
+    deposit_gate_override_active: bool = False
 
     def __post_init__(self) -> None:
         require_canonical_text(
@@ -289,7 +290,7 @@ def _lifecycle_status(
         and root_facts.current_status is OrderLifecycleStatus.ESTABLISHED
     ):
         return OrderLifecycleStatus.ESTABLISHED
-    if client_settlement.deposit_settled:
+    if _deposit_gate_satisfied(root_facts, client_settlement):
         return OrderLifecycleStatus.ESTABLISHED
     return OrderLifecycleStatus.DISCUSSION
 
@@ -301,7 +302,7 @@ def _service_should_be_active(root_facts, client_settlement, evaluation_at):
         and (
             root_facts.historical_precision_restarted
             or (
-                client_settlement.deposit_settled
+                _deposit_gate_satisfied(root_facts, client_settlement)
                 and root_facts.contract_completed
             )
         )
@@ -316,12 +317,18 @@ def _alert_codes(root_facts, client_settlement, evaluation_at):
         return ()
     if (
         not root_facts.historical_precision_restarted
-        and not client_settlement.deposit_settled
+        and not _deposit_gate_satisfied(root_facts, client_settlement)
     ):
         return ("enter_service.deposit_required_before_service",)
     if not root_facts.actual_start_reconfirmed:
         return ("enter_service.actual_start_reconfirmation_required",)
     return ()
+
+
+def _deposit_gate_satisfied(root_facts, client_settlement):
+    return root_facts.deposit_gate_override_active or (
+        client_settlement is not None and client_settlement.deposit_settled
+    )
 
 
 def _candidate(
@@ -350,6 +357,7 @@ def _candidate(
         "client_settlement_fingerprint": (
             client_settlement.fingerprint.value if client_settlement is not None else None
         ),
+        "deposit_gate_override_active": root_facts.deposit_gate_override_active,
         "alert_codes": alerts,
     }
     return LifecycleImpactCandidate(
@@ -374,6 +382,7 @@ def _validate_boolean_roots(root_facts):
         root_facts.cancellation_effective,
         root_facts.service_data_locked,
         root_facts.historical_precision_restarted,
+        root_facts.deposit_gate_override_active,
     )
     if any(not isinstance(value, bool) for value in values):
         raise TypeError("lifecycle boolean root is invalid")

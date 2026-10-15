@@ -31,6 +31,8 @@ from subsystems.scheduling.assignment_plan_workflow import (
     AssignmentPlanPersistenceContext,
     AssignmentPlanReceipt,
     AssignmentPlanWorkflowFacts,
+    AssignmentPlanQuerySnapshot,
+    AssignmentPlanQueryResult,
     CommandClaimState,
     StoredAssignmentPlanReceipt,
 )
@@ -39,6 +41,13 @@ from .order_terms_read_model import (
     load_locked_facts,
     load_preview_facts,
     preflight_staff_ids,
+    select_order,
+    select_scheduling_aggregate,
+    _select_generation,
+    _select_assignments,
+    _select_schedules,
+    _service_dates_by_assignment,
+    _service_started,
 )
 from .scheduling_replacement_writer import persist_scheduling_replacement
 
@@ -163,10 +172,32 @@ class MySqlAssignmentPlanRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
 
-    def load_for_query(self, case_no: str) -> AssignmentPlanWorkflowFacts:
+    def load_for_query(self, case_no: str) -> AssignmentPlanQueryResult:
+        # Query reports existing roots; downstream mutation readiness belongs to Preview.
         with self._connection.cursor() as cursor:
-            source = load_preview_facts(cursor, case_no)
-        return build_assignment_plan_workflow_facts(source, (), ())
+            order = select_order(cursor, case_no, lock=False)
+            aggregate = select_scheduling_aggregate(cursor, case_no, lock=False)
+            generation = _select_generation(cursor, aggregate, lock=False)
+            rows = _select_assignments(cursor, generation, lock=False)
+            dates = _service_dates_by_assignment(_select_schedules(cursor, generation, lock=False))
+            cursor.execute("SELECT aggregate_version FROM client_finance_accounts WHERE case_no=%s", (case_no,))
+            finance = cursor.fetchone()
+            cursor.execute("SELECT aggregate_version FROM payroll_case_accounts WHERE case_no=%s", (case_no,))
+            payroll = cursor.fetchone()
+        assignments = tuple(EffectiveAssignmentFact(
+            assignment_id=int(row["id"]), staff_id=int(row["staff_id"]), sequence=int(row["assignment_sequence"]),
+            assigned_start_date=row["assigned_start_date"], assigned_end_date=row["assigned_end_date"],
+            official_service_dates=dates.get(int(row["id"]), ()),
+        ) for row in rows)
+        return AssignmentPlanQueryResult(AssignmentPlanQuerySnapshot(
+            case_no=case_no, order_version=int(order["lifecycle_version"]), scheduling_version=int(aggregate["aggregate_version"]),
+            scheduling_generation=int(generation["generation_number"]) if generation else 0,
+            client_finance_version=int(finance["aggregate_version"]) if finance else None,
+            payroll_version=int(payroll["aggregate_version"]) if payroll else None,
+            contracted_service_days=int(order["service_days"]),
+            service_hours_per_day=float(order["service_hours_per_day"]) if order["service_hours_per_day"] is not None else None,
+            service_started=_service_started(order["actual_start_date"], assignments), effective_assignments=assignments,
+        ))
 
     def load_current_assignments(
         self,

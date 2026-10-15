@@ -65,9 +65,9 @@ export type ContractExternalSigningUiState =
 const unsafePublicText = /https?:\/\/|[A-Za-z]:\\|\\\\|\/(?:mnt|Volumes|private|var)\/|[0-9a-f]{64}|preview[_ -]?fingerprint|storage[_ -]?locator|raw[_ -]?cursor/i;
 
 const CONTRACT_CHECK_REASONS: Record<string, string> = {
-  client_finance_bootstrap_required: '本案尚未建立客戶付款條款，請先核對並建立帳務與排班初始資料。',
-  payroll_bootstrap_required: '本案尚未建立月嫂薪資資料，請先核對並建立帳務與排班初始資料。',
-  payroll_case_policy_bootstrap_required: '本案尚未建立月嫂薪資政策，請先核對並建立帳務與排班初始資料。',
+  client_finance_bootstrap_required: '本案尚未建立客戶付款條款，請至客戶名冊核對並補齊。',
+  payroll_bootstrap_required: '本案尚未建立月嫂薪資資料，請至客戶名冊核對並補齊。',
+  payroll_case_policy_bootstrap_required: '本案尚未建立月嫂薪資政策，請至客戶名冊核對並補齊。',
   contract_identity_already_recorded: '本案已有另一份契約的簽約紀錄，本次文件不能覆蓋原契約。',
   contract_completion_already_recorded: '本案已完成簽約，不能重複完成簽約。',
   contract_identity_missing: '本次契約尚未建立可核對的文件紀錄。',
@@ -213,6 +213,7 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
   const [fileReturns, setFileReturns] = useState<Record<string, SignedReturnDraft>>({});
   const [contractMetadata, setContractMetadata] = useState<Record<string, ContractMetadata>>({});
   const [metadataError, setMetadataError] = useState<string | null>(null);
+  const [bootstrapReasons, setBootstrapReasons] = useState<string[]>([]);
   const [returnReadError, setReturnReadError] = useState<string | null>(null);
   const [completedReadback, setCompletedReadback] = useState<FinalDocumentReadback | null>(null);
   const [reviewTarget, setReviewTarget] = useState<{ scope: 'client' | 'staff'; segmentId: number | null } | null>(null);
@@ -264,6 +265,11 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
     });
     setContractMetadata(metadata);
     setMetadataError(metadataResults.some(result => result.status === 'rejected') ? '部分契約資料暫時無法取得，可開啟「核對資料」查看原因。' : null);
+    setBootstrapReasons([...new Set(metadataResults.flatMap(result => {
+      if (result.status !== 'rejected' || !(result.reason instanceof ApiHttpError)) return [];
+      const code = [result.reason.code, result.reason.message].find(value => ['client_finance_bootstrap_required', 'payroll_bootstrap_required', 'payroll_case_policy_bootstrap_required'].includes(value));
+      return code ? [contractCheckReason(code)] : [];
+    }))]);
     if (value.state !== 'preparing' && value.handoff_recorded && value.state !== 'completed' && value.state !== 'superseded') {
       try {
         const returns = await contractExternalSigningClient.getSignedDocumentReturns(caseNo, signal);
@@ -309,7 +315,7 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
     setNotice(null);
     setReminderConfirmationOpen(false);
     setFileReturns({});
-    setContractMetadata({}); setMetadataError(null); setReturnReadError(null); setCompletedReadback(null); setReviewTarget(null); setHandoffConfirmationOpen(false); setPreparationClientDocument(null); setPreparationStaffDocuments({});
+    setContractMetadata({}); setMetadataError(null); setBootstrapReasons([]); setReturnReadError(null); setCompletedReadback(null); setReviewTarget(null); setHandoffConfirmationOpen(false); setPreparationClientDocument(null); setPreparationStaffDocuments({});
     identities.current.clear();
     void loadQuery(controller.signal).then(async (value) => {
       if (controller.signal.aborted || value === null || value.state !== 'completed') return;
@@ -1084,6 +1090,7 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
       </section>}
       {query?.state === 'completed' && <section className="contract-return-card" aria-label="契約完成"><div className="contract-completed-notice"><strong>{testingCompleted ? '測試簽約已完成' : '所有月嫂簽約完成、客戶簽約完成'}</strong><p>{testingCompleted ? '已手動跳過真實簽署文件回收，保存 TEST ONLY 占位文件，可接續確認服務日期與排班。' : completedMembers.length > 0 ? '客戶服務契約與所有月嫂委任契約已分別回收，並確認簽署完整。' : '既有簽署文件已驗收完成。'}</p></div>{completedReadback ? <div className="contract-signed-list">{(completedMembers.length > 0 ? completedMembers.map(member => ({ fileId: member.controlled_file_id, filename: member.filename })) : [{ fileId: completedReadback.controlled_file_id, filename: completedReadback.filename }]).map(row => <div key={row.fileId}><span>{row.filename}</span><button type="button" disabled={busy} onClick={() => void downloadSigned(row.fileId)}>{testingCompleted ? '查看測試文件' : '查看已簽文件'}</button></div>)}</div> : <p>正在讀取已簽文件…</p>}{(onOpenServiceDates || onOpenFinance) && <button className="formal-recommendation-primary" type="button" disabled={busy} onClick={onOpenServiceDates ?? onOpenFinance}>前往確認服務日期與排班 →</button>}<p>接續核對服務日期、雙方確認與訂金鎖狀態；條件齊備後自動排班。</p></section>}
 
+      {bootstrapReasons.length > 0 && <p role="alert">{bootstrapReasons.join(' ')} <a href={`#clients?case=${encodeURIComponent(caseNo)}&from=workbench`} aria-disabled={busy || finalProtected || undefined} onClick={event => { if (busy || finalProtected) event.preventDefault(); }}>前往客戶名冊補齊資料 →</a></p>}
       {uiState.type === 'error' && <div role="alert"><p>{uiState.message}</p><button type="button" disabled={busy || finalProtected} onClick={() => void loadQuery()}>重新讀取契約狀態</button></div>}
       {busy && <p role="status">正在處理契約資料…</p>}
 

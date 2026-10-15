@@ -20,6 +20,22 @@ _CASE_NUMBER_MAXIMUM_LENGTH = 50
 _TAIPEI = ZoneInfo("Asia/Taipei")
 
 
+def canonical_service_mode(value: object) -> str | None:
+    """Normalize the same Orders rest mode for planning and contract projection."""
+    if value is None:
+        return "連續服務"
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    if not value:
+        return "連續服務"
+    canonical = {
+        "無休": "連續服務", "週休1日": "休周日", "週休一日": "休周日",
+        "週休二日": "週休2日", "周休二日": "週休2日",
+    }.get(value, value)
+    return canonical if canonical in {"休周六", "休周日", "週休2日", "連續服務"} else None
+
+
 @dataclass(frozen=True, slots=True)
 class ServiceTimeTerms:
     start_time: time | None

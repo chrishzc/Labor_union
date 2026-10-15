@@ -189,6 +189,25 @@ describe('#335 direct start input and existing writer integration', () => {
     expect(screen.getByRole('button', { name: '儲存服務日期' })).toBeEnabled();
   });
 
+  it('單獨更正開始日後重新讀取仍要求核對舊人工選日，並可採用新建議', async () => {
+    const view = render(<OrderServiceDatesPanel caseNo={CASE} />);
+    await input('2026-09-28');
+    fireEvent.click(screen.getByRole('button', { name: '服務日期 2026-09-30' }));
+    fireEvent.click(screen.getByRole('button', { name: '下一個月' }));
+    fireEvent.click(screen.getByRole('button', { name: '服務日期 2026-10-02' }));
+    fireEvent.change(screen.getByLabelText('實際開始日'), { target: { value: '2026-10-15' } });
+    await screen.findByRole('button', { name: '採用新建議' });
+    fireEvent.click(screen.getByRole('button', { name: '儲存實際開始日' }));
+    await screen.findByText('實際開始日已儲存；服務日期尚未儲存。');
+    view.unmount();
+    render(<OrderServiceDatesPanel caseNo={CASE} />);
+    const adopt = await screen.findByRole('button', { name: '採用新建議' });
+    expect(screen.getByRole('button', { name: '儲存服務日期' })).toBeDisabled();
+    fireEvent.click(adopt);
+    expect(screen.getByLabelText('此次選定服務日期摘要')).toHaveTextContent('2026-10-17');
+    expect(screen.getByRole('button', { name: '儲存服務日期' })).toBeEnabled();
+  });
+
   it('開始日成功而服務日期 Preview 失敗，關閉重開保留部分結果並接續，開始日只保存一次', async () => {
     mocks.previewDates.mockRejectedValueOnce(new Error('服務日期核對暫時失敗'));
     const view = render(<OrderServiceDatesPanel caseNo={CASE} />); await input('2026-09-28'); await confirm();

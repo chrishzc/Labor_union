@@ -36,20 +36,49 @@ class MySqlStaffLeaveIntakeRepository:
     def create(self, command, fingerprint: str) -> StaffLeaveRequestSnapshot:
         with self._connection.cursor() as cursor:
             intent = command.intent
-            cursor.execute(
-                _ROOT_INSERT_SQL,
-                (command.staff_id, command.line_user_id, intent.leave_start_date,
-                 intent.leave_end_date, intent.reason.strip(), fingerprint),
-            )
-            request_id = int(cursor.lastrowid)
-            cursor.execute(
-                _EVENT_INSERT_SQL,
-                (request_id, 1, "submitted", f"line:{command.line_user_id}", intent.reason.strip()),
-            )
-            cursor.execute(
-                _RECEIPT_INSERT_SQL,
-                (command.idempotency_key, request_id, fingerprint, _result_snapshot(request_id, "pending", 1)),
-            )
+            try:
+                cursor.execute(
+                    _ROOT_INSERT_SQL,
+                    (command.staff_id, command.line_user_id, intent.leave_start_date,
+                     intent.leave_end_date, intent.reason.strip(), fingerprint),
+                )
+            except Exception as error:
+                if not _duplicate_key(error):
+                    raise
+                # The unique staff/fingerprint root serializes identical submissions.
+                # A locking read sees the winner even after an earlier replay miss.
+                cursor.execute(
+                    f"SELECT {_ROOT_COLUMNS} FROM scheduling_staff_leave_request_aggregates "
+                    "WHERE staff_id=%s AND request_fingerprint=%s FOR UPDATE",
+                    (command.staff_id, fingerprint),
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    raise
+                snapshot = _snapshot(row)
+                request_id = snapshot.request_id
+            else:
+                request_id = int(cursor.lastrowid)
+                cursor.execute(
+                    _EVENT_INSERT_SQL,
+                    (request_id, 1, "submitted", f"line:{command.line_user_id}", intent.reason.strip()),
+                )
+                cursor.execute(_ROOT_SQL, (request_id,))
+                snapshot = _snapshot(cursor.fetchone())
+            try:
+                cursor.execute(
+                    _RECEIPT_INSERT_SQL,
+                    (command.idempotency_key, request_id, fingerprint,
+                     _result_snapshot(request_id, snapshot.status.value, snapshot.version)),
+                )
+            except Exception as error:
+                if not _duplicate_key(error):
+                    raise
+                cursor.execute(_RECEIPT_SQL + " FOR UPDATE", (command.idempotency_key,))
+                replay = cursor.fetchone()
+                if replay is None or str(replay["request_fingerprint"]) != fingerprint:
+                    raise ValueError("leave_request_idempotency_conflict") from error
+                return _snapshot(replay)
             cursor.execute(_ROOT_SQL, (request_id,))
             return _snapshot(cursor.fetchone())
 
@@ -350,7 +379,7 @@ _COORDINATION_TARGETS_SQL = (
     "JOIN orders o ON o.case_no=g.case_no "
     "LEFT JOIN line_identity_role_bindings binding "
     "ON binding.subject_type='customer' AND binding.binding_status='bound' "
-    "AND binding.subject_reference=CAST(o.client_id AS CHAR) "
+    "AND binding.subject_reference=CAST(o.client_id AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci "
     "WHERE a.staff_id=%s AND a.status NOT IN ('cancelled','replaced') "
     "AND ss.is_work_day=1 AND ss.work_date<=%s AND ss.work_date>=%s "
     "ORDER BY g.case_no"
@@ -375,7 +404,7 @@ _CUSTOMER_DEFER_DAYS_SQL = (
     "JOIN orders o ON o.case_no=g.case_no "
     "LEFT JOIN line_identity_role_bindings binding "
     "ON binding.subject_type='customer' AND binding.binding_status='bound' "
-    "AND binding.subject_reference=CAST(o.client_id AS CHAR) "
+    "AND binding.subject_reference=CAST(o.client_id AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci "
     "WHERE g.case_no=%s AND a.id=%s AND a.staff_id=%s "
     "AND a.status NOT IN ('cancelled','replaced') "
     "AND ss.effective_marker=1 AND ss.is_work_day=1 "

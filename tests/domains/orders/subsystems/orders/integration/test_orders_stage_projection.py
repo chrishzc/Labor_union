@@ -387,6 +387,32 @@ def test_accepted_plan_completes_client_review_without_resume_delivery() -> None
     assert item.current_step_ordinal == 6
 
 
+def test_customer_decline_keeps_the_case_queryable_at_the_recommendation_repair_step():
+    from subsystems.orders.core_stage_projection_query import project_core_stage_timeline
+    row = _row('CUSTOMER-DECLINED')
+    row.update(matching_plan_status='proposed', matching_customer_decision='declined',
+               waiting_deposit_lock_id=None)
+    item = OrderStageProjectionQueryService(_Repository((row,)), BUSINESS_CLOCK).query(
+        StageProjectionQuery(50)
+    ).items[0]
+    assert item.stages[2].status == 'blocked'
+    assert item.sop_steps[4].status == 'blocked'
+    assert '客戶已拒絕' in item.stages[2].blockers[0].message
+    assert '更換月嫂' in item.stages[2].blockers[0].message
+    core = project_core_stage_timeline(item)
+    assert core.current_core_stage_code == 'formal_recommendation'
+    assert core.core_stages[4].blockers[0].code == 'recommendation_customer_declined'
+
+
+def test_contact_requested_is_a_valid_owner_decision_for_stage_query():
+    row = _row('CUSTOMER-CONTACT-REQUESTED')
+    row.update(matching_plan_status='proposed', matching_customer_decision='contact_requested')
+    item = OrderStageProjectionQueryService(_Repository((row,)), BUSINESS_CLOCK).query(
+        StageProjectionQuery(50)
+    ).items[0]
+    assert item.stages[2].status == 'in_progress'
+
+
 def test_active_waiting_deposit_lock_directly_advances_to_contract_documents() -> None:
     row = _row("ACTIVE-WAITING-DEPOSIT-LOCK")
     row.update({

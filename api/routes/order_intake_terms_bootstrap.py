@@ -473,6 +473,11 @@ def _completion_receipt_payload(result):
 
 
 def _workflow_http_error(error, correlation_id):
+    if error.code == 'order_intake_initialization_blocked':
+        exc = typed_http_error(409, 'domain_blocked', error.code,
+            '進件初始化未完成，付款條款或薪資政策資料不完整；本次補件未儲存，既有帳務未變更。', correlation_id)
+        exc.detail['error']['domain_blockers'] = list(error.blockers)
+        return exc
     if error.code in {
         "order_intake_terms_bootstrap_case_not_found",
         "order_intake_completion_case_not_found",

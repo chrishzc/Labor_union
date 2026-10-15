@@ -7,6 +7,7 @@ from infrastructure.mysql.order_intake_terms_bootstrap_repository import (
     MySqlOrderIntakeTermsBootstrapRepository,
 )
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+from infrastructure.mysql.order_intake_architecture_initializer import MySqlOrderIntakeArchitectureInitializer
 from subsystems.orders.order_intake_client_name_repair import (
     OrderIntakeClientNameRepairApplication,
 )
@@ -21,6 +22,7 @@ def get_order_intake_terms_bootstrap_application():
         yield OrderIntakeTermsBootstrapApplication(
             MySqlOrderIntakeTermsBootstrapRepository(connection),
             lambda: MySqlUnitOfWork(connection),
+            MySqlOrderIntakeArchitectureInitializer(connection).ensure,
         )
     finally:
         connection.close()

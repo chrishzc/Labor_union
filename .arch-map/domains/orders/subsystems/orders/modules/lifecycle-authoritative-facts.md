@@ -21,7 +21,7 @@
 
 ## Dependencies
 - outbound: `scheduling/scheduling` — 有效 generation、正式 assignment 與 official service dates。
-- outbound: `client-finance/client-finance` — deposit settlement root fact。
+- outbound: `client-finance/client-finance` — deposit settlement root fact，以及當前有效的 typed 未付人工放行；後者只解除訂金進度關卡，不改核銷事實。
 
 ## Contracts
 - `document/架構重整/01_規格基線/01_Orders_Domain.md` — lifecycle completion instant semantics。

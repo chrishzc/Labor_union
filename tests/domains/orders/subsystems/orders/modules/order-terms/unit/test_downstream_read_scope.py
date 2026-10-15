@@ -1,6 +1,8 @@
 """Issue #336: preassignment Terms reads only the downstream integrity boundary."""
 
 from infrastructure.mysql import order_terms_read_model
+from domains.orders.lifecycle import OrderLifecycleRootFacts, OrderLifecycleStatus
+from types import SimpleNamespace
 import pytest
 
 
@@ -89,10 +91,13 @@ def test_existing_client_obligations_are_readable_only_for_scoped_payment_recalc
         ) is True
 
 
-def test_assigned_terms_reader_keeps_full_downstream_facts(monkeypatch):
-    finance = object()
+@pytest.mark.parametrize('override_active', [False, True])
+def test_assigned_terms_reader_keeps_full_downstream_facts(monkeypatch, override_active):
+    finance = SimpleNamespace(deposit_gate_override_active=override_active)
     payroll = object()
-    lifecycle = object()
+    lifecycle = OrderLifecycleRootFacts(
+        'CASE-336', OrderLifecycleStatus.ESTABLISHED, True, None, False, False, False,
+    )
 
     monkeypatch.setattr(order_terms_read_model, "_select_generation", lambda *_: object())
     monkeypatch.setattr(order_terms_read_model, "_select_assignments", lambda *_: ({"id": 1},))
@@ -117,4 +122,5 @@ def test_assigned_terms_reader_keeps_full_downstream_facts(monkeypatch):
 
     assert result[5] is finance
     assert result[6] is payroll
-    assert result[7] is lifecycle
+    assert result[7].deposit_gate_override_active is override_active
+    assert result[7].current_status is lifecycle.current_status

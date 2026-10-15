@@ -62,6 +62,139 @@ def test_g13_leave_and_cancellation_serialize_shared_occupancy_write():
     _assert_effective_occupancy_is_unique()
 
 
+def test_leave_acceptance_context_handles_mysql8_connection_collation(monkeypatch):
+    """A UTF-8 connection's CAST must compare with the binding owner's collation."""
+    from infrastructure.mysql import mysql_adapter
+    from infrastructure.mysql.staff_leave_intake_repository import MySqlStaffLeaveIntakeRepository
+    from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+    from domains.scheduling.staff_leave_intake import StaffLeaveRequestIntent
+    from subsystems.scheduling.staff_leave_intake_workflow import (
+        ReviewStaffLeaveRequest, StaffLeaveIntakeApplication, SubmitStaffLeaveRequest,
+    )
+
+    arguments = _arguments()
+    arguments.database = f"{DATABASE}_leave_collation"
+    arguments.confirm_database = arguments.database
+    bootstrap(arguments)
+    monkeypatch.setitem(mysql_adapter.DB_CONFIG, "database", arguments.database)
+    _, original_staff_id = _seed_case()
+    with mysql_adapter.get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute("SET collation_connection='utf8mb4_0900_ai_ci'")
+        repository = MySqlStaffLeaveIntakeRepository(connection)
+        application = StaffLeaveIntakeApplication(repository, lambda: MySqlUnitOfWork(connection))
+        request = application.submit(SubmitStaffLeaveRequest(
+            original_staff_id, "U" + "9" * 32,
+            StaffLeaveRequestIntent(date(2026, 8, 4), date(2026, 8, 4), "fixture leave"),
+            "g13-collation-submit",
+        ))
+        accepted = application.review(ReviewStaffLeaveRequest(
+            request.request_id, request.version, "accept", "fixture acceptance", False,
+            "fixture-admin", "g13-collation-accept",
+        ))
+        context = repository.coordination_context(accepted.request_id, accepted.version)
+        assert context["targets"] == [{"case_no": CASE_NO, "client_line_user_id": None}]
+        assert repository.load(accepted.request_id).status.value == "accepted_for_processing"
+        from domains.scheduling.leave_substitution import LeaveResolutionType, LeaveSubstitutionBatchIntent, LeaveSubstitutionItem
+        from shared_kernel.clock import FixedBusinessClock, TAIPEI_TIME_ZONE
+        from shared_kernel.fingerprints import PreviewFingerprint
+        from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
+        from subsystems.scheduling.leave_substitution_linked_request_resolution import LeaveSubstitutionLinkedRequestResolution
+        from subsystems.scheduling.leave_substitution_workflow import (
+            LeaveSubstitutionApplyRequest, LeaveSubstitutionPreviewRequest,
+            LeaveSubstitutionWorkflowError, LinkedLeaveRequestIntent,
+        )
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT assignment_id,id FROM staff_schedule WHERE case_no=%s AND work_date='2026-08-03'", (CASE_NO,))
+            wrong_day = cursor.fetchone()
+        intent = LeaveSubstitutionBatchIntent(wrong_day["assignment_id"], (
+            LeaveSubstitutionItem(wrong_day["id"], date(2026, 8, 3), LeaveResolutionType.SUBSTITUTE, 1),
+        ))
+        workflow, workflow_connection = _leave_workflow()
+        try:
+            workflow._linked_request_resolver = LeaveSubstitutionLinkedRequestResolution(
+                MySqlStaffLeaveIntakeRepository(workflow_connection), None,
+                FixedBusinessClock(datetime(2026, 8, 4, 9, tzinfo=TAIPEI_TIME_ZONE)),
+            )
+            linked = LinkedLeaveRequestIntent(accepted.request_id, accepted.version)
+            preview_request = LeaveSubstitutionPreviewRequest(CASE_NO, intent, CorrelationId("wrong-day-preview"), linked)
+            apply_request = LeaveSubstitutionApplyRequest(
+                CASE_NO, intent, ExpectedVersion(0), ExpectedVersion(1), ExpectedVersion(0), ExpectedVersion(0),
+                PreviewFingerprint("a" * 64), IdempotencyKey("wrong-day-apply"), ActorContext("fixture"),
+                "wrong linked day must not apply", CorrelationId("wrong-day-apply"), linked,
+            )
+            for operation, command in ((workflow.preview, preview_request), (workflow.apply, apply_request)):
+                with pytest.raises(LeaveSubstitutionWorkflowError) as caught:
+                    operation(command)
+                assert caught.value.error.code == "leave_request_dates_outside_window"
+                assert "請假之服務日" in caught.value.error.message
+            with workflow_connection.cursor() as cursor:
+                cursor.execute("SELECT COUNT(*) AS n FROM scheduling_leave_substitution_batches WHERE case_no=%s", (CASE_NO,))
+                assert cursor.fetchone()["n"] == 0
+        finally:
+            workflow_connection.close()
+
+
+def test_identical_leave_submissions_race_replay_without_duplicate_root_or_event(monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from infrastructure.mysql import mysql_adapter
+    from infrastructure.mysql.staff_leave_intake_repository import MySqlStaffLeaveIntakeRepository
+    from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+    from domains.scheduling.staff_leave_intake import StaffLeaveRequestIntent
+    from subsystems.scheduling.staff_leave_intake_workflow import StaffLeaveIntakeApplication, SubmitStaffLeaveRequest
+
+    arguments = _arguments()
+    arguments.database = f"{DATABASE}_intake_race"
+    arguments.confirm_database = arguments.database
+    bootstrap(arguments)
+    monkeypatch.setitem(mysql_adapter.DB_CONFIG, "database", arguments.database)
+    _, staff_id = _seed_case()
+    original_create = MySqlStaffLeaveIntakeRepository.create
+    barrier = Barrier(2)
+    def synchronized_create(self, command, fingerprint):
+        barrier.wait(timeout=10)
+        return original_create(self, command, fingerprint)
+    monkeypatch.setattr(MySqlStaffLeaveIntakeRepository, "create", synchronized_create)
+    command = SubmitStaffLeaveRequest(staff_id, "U" + "9" * 32,
+        StaffLeaveRequestIntent(date(2026, 8, 4), date(2026, 8, 4), "race fixture"), "g13-identical-intake")
+    def submit(value):
+        with mysql_adapter.get_connection() as connection:
+            application = StaffLeaveIntakeApplication(MySqlStaffLeaveIntakeRepository(connection), lambda: MySqlUnitOfWork(connection))
+            return application.submit(value)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        receipts = list(pool.map(submit, (command, command)))
+    assert receipts[0] == receipts[1]
+    monkeypatch.setattr(MySqlStaffLeaveIntakeRepository, "create", original_create)
+    # A fresh UI operation identity for the same intent still resolves the unique root.
+    from dataclasses import replace
+    assert submit(replace(command, idempotency_key="g13-identical-intake-alias")).request_id == receipts[0].request_id
+    with pytest.raises(ValueError, match="leave_request_idempotency_conflict"):
+        submit(replace(command, intent=StaffLeaveRequestIntent(date(2026, 8, 3), date(2026, 8, 3), "changed")))
+    with mysql_adapter.get_connection() as connection, connection.cursor() as cursor:
+        for table, expected in (("scheduling_staff_leave_request_aggregates", 1),
+                                ("scheduling_staff_leave_request_events", 1),
+                                ("scheduling_staff_leave_request_receipts", 2)):
+            cursor.execute(f"SELECT COUNT(*) AS n FROM {table}")
+            assert cursor.fetchone()["n"] == expected
+    # A second operator's old assignment must be a typed conflict, never a 500.
+    from shared_kernel.identities import IdempotencyKey
+    from subsystems.scheduling.leave_substitution_workflow import LeaveSubstitutionWorkflowError
+    stale_command = _leave_apply_request(_leave_preview())
+    workflow, connection = _leave_workflow()
+    try:
+        workflow.apply(stale_command)
+        with pytest.raises(LeaveSubstitutionWorkflowError) as caught:
+            workflow.apply(replace(stale_command, idempotency_key=IdempotencyKey("g13-other-operator")))
+        assert caught.value.error.code == "stale_assignment"
+        assert caught.value.error.category.value == "conflict"
+        assert "重新查詢最新資料" in caught.value.error.message
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) AS n FROM scheduling_leave_substitution_batches WHERE case_no=%s", (CASE_NO,))
+            assert cursor.fetchone()["n"] == 1
+    finally:
+        connection.close()
+
+
 def _apply_leave_after_start(preview, start: Barrier, outcomes: Queue) -> None:
     try:
         start.wait(timeout=10)
@@ -437,6 +570,20 @@ def _insert_roots(cursor, first_assignment_id: int, second_assignment_id: int) -
         "(assignment_id,policy_version,policy_kind,hourly_rate_ntd,source_identity_status) "
         "VALUES (%s,'g13-policy','citizen',150,'fixture')",
         ((first_assignment_id,), (second_assignment_id,)),
+    )
+    # Cancellation requires the complete canonical Payroll root, not just an account.
+    cursor.execute(
+        "INSERT INTO case_architecture_bootstrap_events(case_no,order_version,client_payment_terms_event_id,"
+        "client_policy_version,client_hourly_rate_ntd,payroll_policy_version,payroll_policy_kind,"
+        "payroll_hourly_rate_ntd,source_identity_status,candidate_fingerprint,idempotency_key,actor,reason,correlation_id) "
+        "VALUES (%s,0,%s,'g13-policy',100,'g13-policy','citizen',150,'fixture',%s,'g13-bootstrap','g13-e2e','fixture','g13-bootstrap')",
+        (CASE_NO, event_id, "a" * 64),
+    )
+    bootstrap_event_id = int(cursor.lastrowid)
+    cursor.execute(
+        "INSERT INTO case_payroll_rate_policy_snapshots(case_no,policy_version,policy_kind,hourly_rate_ntd,source_identity_status,source_event_id) "
+        "VALUES (%s,'g13-policy','citizen',150,'fixture',%s)",
+        (CASE_NO, bootstrap_event_id),
     )
 
 

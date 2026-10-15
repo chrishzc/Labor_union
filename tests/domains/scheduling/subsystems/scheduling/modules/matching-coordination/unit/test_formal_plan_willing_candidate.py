@@ -11,6 +11,19 @@ from infrastructure.mysql.matching_notification_repository import _segment_conta
 from domains.scheduling.matching_communication import CaregiverWillingness, CustomerMatchingDecision, MatchingCommunicationConflictError, record_caregiver_willingness
 
 
+@pytest.mark.parametrize('end_date', [None, date(2026, 12, 4)])
+def test_plan_case_lock_does_not_require_manual_planned_end(end_date):
+    class Cursor:
+        def execute(self, _sql, _parameters):
+            pass
+
+        def fetchone(self):
+            return {'case_no': 'CASE-INQUIRY', 'status': '洽談中',
+                    'start_date': date(2026, 11, 15), 'end_date': end_date}
+
+    matching_plan_workflow._lock_matching_plan_case_root(Cursor(), 'CASE-INQUIRY')
+
+
 def test_explicit_admin_notice_can_correct_prior_agreement_without_line_decision_context():
     with pytest.raises(MatchingCommunicationConflictError):
         record_caregiver_willingness(CaregiverWillingness.WILLING, CaregiverWillingness.UNWILLING,
@@ -228,19 +241,40 @@ def test_willing_candidate_recommendation_uses_inquiry_period_without_preview_da
     assert captured["segment_drafts"] == [{"staff_id": 1, "start_date": "2026-12-21", "end_date": "2027-01-09"}]
 
 
-@pytest.mark.parametrize("reason", ["actual", "unavailability"])
+@pytest.mark.parametrize("reason", ["assignment", "staff_unavailability", "active_lock"])
 def test_recommendation_still_blocks_real_candidate_period_conflicts(monkeypatch, reason):
     monkeypatch.setattr(
         matching_plan_workflow, "search_candidate_inquiry_availability",
-        lambda **_kwargs: {"feasibility": "complete", "conflicts": [{"reason_code": reason}],
+        lambda **_kwargs: {"feasibility": "complete", "conflicts": [{"reason_code": reason, "work_date": "2026-11-15"}, {"reason_code": "buffer", "work_date": "2026-11-16"}],
                           "complete_combinations": [[{"segment_index": 0, "staff_id": 1,
                                                       "start_date": "2026-11-05", "end_date": "2026-11-24"}]]},
     )
-    with pytest.raises(ValueError, match="submitted segments must match a complete combination"):
+    with pytest.raises(matching_plan_workflow.MatchingPlanAvailabilityConflict) as caught:
         matching_plan_workflow._validate_current_availability(
             "PREVIEW-DATE-DRIFT", [{"staff_id": 1, "assigned_start_date": "2026-11-05", "assigned_end_date": "2026-11-24"}],
             "2026-10-13", object(), True,
         )
+    assert caught.value.conflicts == ((reason, '2026-11-15'),)
+
+
+def test_recommendation_api_explains_actual_occupancy_and_repair_routes(monkeypatch):
+    from fastapi import HTTPException
+    from api.routes import matches
+    def conflict(**_kwargs):
+        raise matching_plan_workflow.MatchingPlanAvailabilityConflict((('active_lock', '2026-11-15'),))
+    monkeypatch.setattr(matches, 'create_matching_plan_version', conflict)
+    with pytest.raises(HTTPException) as caught:
+        matches.create_matching_plan_version_route(
+            case_no='TEST-CONFLICT', segments=[{'staff_id': 1}], created_by='operator',
+            as_of='2026-10-15', event_key='test-conflict', principal=SimpleNamespace(username='operator'),
+        )
+    error = caught.value.detail['error']
+    assert caught.value.status_code == 409
+    assert error['code'] == 'matching_plan_staff_occupancy_conflict'
+    assert '其他案件保留' in error['message']
+    assert '2026-11-15' in error['message']
+    assert '返回尋找人選' in error['message']
+    assert '調整日期' in error['message']
 
 
 def test_formal_plan_notification_distinguishes_date_drift_from_schedule_conflict(monkeypatch):
@@ -472,7 +506,7 @@ def test_formal_plan_still_rejects_current_schedule_conflict(monkeypatch):
         lambda *_args: pytest.fail("conflicted plan must not enter persistence"),
     )
 
-    with pytest.raises(ValueError, match="submitted segments must match a complete combination"):
+    with pytest.raises(matching_plan_workflow.MatchingPlanAvailabilityConflict):
         matching_plan_workflow.create_matching_plan_version(
             "CASE-2026-S05",
             [

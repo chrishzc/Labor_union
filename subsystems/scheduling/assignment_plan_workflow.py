@@ -14,6 +14,7 @@ from domains.scheduling.assignment_plan import (
     AssignmentPlanDomainError,
     AssignmentPlanFacts,
     AssignmentPlanIntent,
+    EffectiveAssignmentFact,
     build_assignment_plan_candidate,
     impacted_staff_ids,
 )
@@ -33,6 +34,25 @@ from subsystems.payroll.terms_impact import PayrollTermsSourceFacts
 
 _CASE_NUMBER_MAXIMUM_LENGTH = 50
 _REASON_MAXIMUM_LENGTH = 500
+
+
+@dataclass(frozen=True, slots=True)
+class AssignmentPlanQuerySnapshot:
+    case_no: str
+    order_version: int
+    scheduling_version: int
+    scheduling_generation: int
+    client_finance_version: int | None
+    payroll_version: int | None
+    contracted_service_days: int
+    service_hours_per_day: float | None
+    service_started: bool
+    effective_assignments: tuple[EffectiveAssignmentFact, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class AssignmentPlanQueryResult:
+    assignment_plan: AssignmentPlanQuerySnapshot
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,7 +158,7 @@ class VersionedImpactCandidate(Protocol):
 
 
 class AssignmentPlanRepository(Protocol):
-    def load_for_query(self, case_no: str) -> AssignmentPlanWorkflowFacts: ...
+    def load_for_query(self, case_no: str) -> AssignmentPlanQueryResult: ...
     def load_for_preview(self, case_no: str, intent: AssignmentPlanIntent) -> AssignmentPlanWorkflowFacts: ...
     def preflight_impacted_staff_ids(self, case_no: str, intent: AssignmentPlanIntent) -> tuple[int, ...]: ...
     def load_for_apply(self, request: AssignmentPlanApplyRequest, preflight_staff_ids: tuple[int, ...], command_fingerprint: PreviewFingerprint) -> AssignmentPlanApplyEvidence: ...
@@ -175,7 +195,7 @@ class AssignmentPlanWorkflow:
         self._orders_port = orders_port
         self._unit_of_work_factory = unit_of_work_factory
 
-    def query(self, case_no: str) -> AssignmentPlanWorkflowFacts:
+    def query(self, case_no: str) -> AssignmentPlanQueryResult:
         _validate_case_number(case_no)
         return self._repository.load_for_query(case_no)
 

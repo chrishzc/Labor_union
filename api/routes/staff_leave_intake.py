@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from api.dependencies.staff_leave_intake import get_staff_leave_intake_application
 from api.routes.line_staff_self_service import _required_staff, _verified_line_user_id
 from api.schemas.base import BaseResponse
+from api.error_contracts import typed_http_error
 from api.schemas.line_staff_self_service import (
     StaffLeaveRequestApply,
     StaffLeaveRequestCancel,
@@ -178,5 +179,18 @@ def cancel_staff_leave_request(
             )
         )
     except StaffLeaveIntakeWorkflowError as error:
-        raise HTTPException(status_code=409, detail={"code": str(error)}) from error
+        code = str(error)
+        messages = {
+            "leave_request_stale": "請假待辦已由其他人更新；請重新查詢目前狀態後再決定是否取消。",
+            "leave_request_state_conflict": "此請假已受理或結束，月嫂只能自行取消尚未受理的申請；請重新查詢狀態，需撤回已受理申請時請聯繫工會。",
+            "leave_request_not_found": "找不到本人這筆請假待辦；請重新查詢本人的申請。",
+            "leave_request_reason_required": "取消請假必須填寫原因；請補上取消原因後重新送出。",
+        }
+        status = 404 if code == "leave_request_not_found" else 422 if code == "leave_request_reason_required" else 409
+        category = "not_found" if status == 404 else "validation" if status == 422 else "conflict"
+        raise typed_http_error(status, category, code, messages.get(code, "目前無法取消這筆請假；請重新查詢最新狀態或聯繫工會。"), "staff-leave-cancel") from error
+    except ValueError as error:
+        if str(error) != "leave_request_idempotency_conflict":
+            raise
+        raise typed_http_error(409, "idempotency_mismatch", str(error), "此取消操作識別已用於不同內容；請重新查詢請假狀態後再操作。", "staff-leave-cancel") from error
     return BaseResponse(data={"request_id": result.request_id, "status": result.status.value, "staff_id": result.staff_id, "staff_name": staff["staff_name"], "version": result.version}, message="請假申請已取消")

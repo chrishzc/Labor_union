@@ -7,6 +7,8 @@ from types import SimpleNamespace
 import pytest
 
 from domains.line.identities import LineUserId
+from domains.line.configuration import LineConfigurationSnapshot
+from domains.line.identities import LineConfigurationRevision
 from subsystems.line import staff_leave_customer_coordination as coordination
 from subsystems.scheduling.staff_leave_intake_workflow import (
     StaffLeaveIntakeWorkflowError,
@@ -28,6 +30,7 @@ class _UnitOfWork:
     def __init__(self):
         self._connection = object()
         self.delivery_tasks = _Delivery()
+        self.configurations = SimpleNamespace(get=lambda kind: LineConfigurationSnapshot(kind, LineConfigurationRevision(0), '{}'))
         self.customer_service = SimpleNamespace()
 
 

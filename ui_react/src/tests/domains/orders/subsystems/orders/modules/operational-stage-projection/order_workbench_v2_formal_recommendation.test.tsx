@@ -142,6 +142,46 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
     });
   });
 
+  it.each([409, 422])('建立方案明確拒絕 %s 時顯示原因並保留修正入口，不鎖成結果未明', async status => {
+    mocks.createSingleCaregiverPlan.mockRejectedValue(new ApiHttpError(status, 'matching_candidate_no_longer_available', '候選月嫂或檔期已變更，請重新選擇。'));
+    render(<OrderFormalRecommendationPanel caseNo={CASE} onOpenCandidates={vi.fn()} />);
+    await loadCandidates();
+    fireEvent.click(screen.getByRole('button', { name: '以 月嫂甲 建立正式媒合方案' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('候選月嫂或檔期已變更，請重新選擇。');
+    expect(screen.getByRole('button', { name: '返回尋找人選' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: '確認建立結果' })).not.toBeInTheDocument();
+    expect(orderMutationFlowStore.getFormalPlanCreation(CASE, 'single')).toBeUndefined();
+  });
+
+  it('原建立結果未明且收據查詢遭拒時，保留原操作並就地顯示原因', async () => {
+    mocks.createSingleCaregiverPlan.mockRejectedValue(new Error('網路中斷，建立結果待核對。'));
+    mocks.queryMatchingPlanReceipt.mockRejectedValue(new ApiHttpError(403, 'forbidden', '目前無權查詢原操作結果。'));
+    render(<OrderFormalRecommendationPanel caseNo={CASE} />);
+    await loadCandidates();
+    fireEvent.click(screen.getByRole('button', { name: '以 月嫂甲 建立正式媒合方案' }));
+    const confirm = await screen.findByRole('button', { name: '確認建立結果' });
+    expect(screen.getByText('原因：網路中斷，建立結果待核對。')).toBeVisible();
+    const original = orderMutationFlowStore.getFormalPlanCreation(CASE, 'single')!.command;
+    fireEvent.click(confirm);
+    expect(await screen.findByText('原因：目前無權查詢原操作結果。')).toBeVisible();
+    expect(orderMutationFlowStore.getFormalPlanCreation(CASE, 'single')).toMatchObject({ status: 'outcome_unknown', command: original });
+    expect(mocks.createSingleCaregiverPlan).toHaveBeenCalledTimes(1);
+  });
+
+  it('確認原命令未保存後重試遭明確拒絕，解除鎖定並顯示修正原因', async () => {
+    mocks.createSingleCaregiverPlan.mockRejectedValueOnce(new Error('網路中斷'))
+      .mockRejectedValueOnce(new ApiHttpError(409, 'matching_candidate_no_longer_available', '檔期已變更，請返回尋找人選。'));
+    mocks.queryMatchingPlanReceipt.mockRejectedValue(new ApiHttpError(404, 'not_found', '原命令未保存'));
+    render(<OrderFormalRecommendationPanel caseNo={CASE} onOpenCandidates={vi.fn()} />);
+    await loadCandidates();
+    fireEvent.click(screen.getByRole('button', { name: '以 月嫂甲 建立正式媒合方案' }));
+    fireEvent.click(await screen.findByRole('button', { name: '確認建立結果' }));
+    expect(await screen.findByText('檔期已變更，請返回尋找人選。')).toBeVisible();
+    expect(screen.getByRole('button', { name: '返回尋找人選' })).toBeEnabled();
+    expect(orderMutationFlowStore.getFormalPlanCreation(CASE, 'single')).toBeUndefined();
+    expect(mocks.createSingleCaregiverPlan.mock.calls[0][0]).toEqual(mocks.createSingleCaregiverPlan.mock.calls[1][0]);
+  });
+
   it('不再顯示獨立的國定假日雙方協調入口', async () => {
     await openExisting();
     expect(screen.queryByText('國定假日上班雙方協調')).not.toBeInTheDocument();

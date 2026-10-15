@@ -332,10 +332,12 @@ def _client(connection) -> TestClient:
     app.dependency_overrides[require_system_admin] = lambda: SimpleNamespace(username="issue337-admin")
     app.dependency_overrides[require_persisted_admin] = lambda: SimpleNamespace(username="issue337-admin")
     app.dependency_overrides[get_order_terms_application] = lambda: application
+    from infrastructure.mysql.order_intake_architecture_initializer import MySqlOrderIntakeArchitectureInitializer
     intake_repository = MySqlOrderIntakeTermsBootstrapRepository(connection)
     app.dependency_overrides[get_order_intake_terms_bootstrap_application] = lambda: OrderIntakeTermsBootstrapApplication(
         intake_repository,
         lambda: MySqlUnitOfWork(connection),
+        MySqlOrderIntakeArchitectureInitializer(connection).ensure,
     )
     return TestClient(app)
 

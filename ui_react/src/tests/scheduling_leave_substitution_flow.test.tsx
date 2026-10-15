@@ -13,8 +13,10 @@ import {
 } from '../adapters/scheduling/leave_substitution_flow_adapter';
 import {
   leaveSubstitutionFlowStore,
+  LeaveSubstitutionFlowStore,
   type LeaveSubstitutionFlowDraft,
 } from '../adapters/scheduling/leave_substitution_flow_store';
+import { sessionClient } from '../api/auth/session_client';
 import {
   LeaveSubstitutionConflictError,
   LeaveSubstitutionUnavailableError,
@@ -51,7 +53,29 @@ describe('Scheduling leave/substitution bounded flow', () => {
 
   afterEach(() => {
     leaveSubstitutionFlowStore.clearAll();
+    sessionClient.clearSession();
+    localStorage.clear();
     vi.restoreAllMocks();
+  });
+
+  it('重開後恢復同一帳號的未確認操作，保持原命令與識別且確認後清除', () => {
+    sessionClient.setSession('test-token-never-persist-in-recovery', { id: 1, username: 'recovery-admin', display_name: '測試', role: 'system_admin' });
+    const first = new LeaveSubstitutionFlowStore();
+    first.setQueryReady(LEAVE_CASE_NO, LEAVE_ASSIGNMENTS);
+    first.setDraft(LEAVE_CASE_NO, LEAVE_PREVIEW_REQUEST);
+    first.setPreviewReady(LEAVE_CASE_NO, LEAVE_PREVIEW);
+    first.setApplyPending(LEAVE_CASE_NO, LEAVE_APPLY_REQUEST);
+    const original = first.get(LEAVE_CASE_NO)!;
+    const reopened = new LeaveSubstitutionFlowStore();
+    expect(reopened.get(LEAVE_CASE_NO)).toMatchObject({ status: 'outcome_unknown', applyRequest: LEAVE_APPLY_REQUEST, idempotencyKey: original.idempotencyKey, correlationId: original.correlationId });
+    const recovery = Object.keys(localStorage).filter(key => key.startsWith('union_leave_pending_v1:'));
+    expect(recovery).toHaveLength(1);
+    expect(localStorage.getItem(recovery[0])).not.toContain('test-token-never-persist-in-recovery');
+    sessionClient.setSession('other', { id: 2, username: 'other-admin', display_name: '另一位', role: 'system_admin' });
+    expect(reopened.get(LEAVE_CASE_NO)).toBeUndefined();
+    sessionClient.setSession('test-token', { id: 1, username: 'recovery-admin', display_name: '測試', role: 'system_admin' });
+    reopened.setObserved(LEAVE_CASE_NO, LEAVE_OBSERVED_ASSIGNMENTS);
+    expect(new LeaveSubstitutionFlowStore().get(LEAVE_CASE_NO)).toBeUndefined();
   });
 
   it('遵循 query → official schedule selection → Preview → explicit Apply confirmation → receipt → re-query', async () => {
@@ -128,14 +152,14 @@ describe('Scheduling leave/substitution bounded flow', () => {
     expect(client.apply).not.toHaveBeenCalled();
   });
 
-  it('503 outcome_unknown 只能用相同 payload 與相同 idempotency key 重試，成功後才 re-query', async () => {
+  it.each([500, 502, 503, 504])('%i outcome_unknown 只能用相同 payload 與相同 idempotency key 重試，成功後才 re-query', async (status) => {
     const client = fakeClient();
     vi.mocked(client.listAssignments)
       .mockResolvedValueOnce(LEAVE_ASSIGNMENTS)
       .mockResolvedValueOnce(LEAVE_OBSERVED_ASSIGNMENTS);
     vi.mocked(client.preview).mockResolvedValue(LEAVE_PREVIEW);
     vi.mocked(client.apply)
-      .mockRejectedValueOnce(new LeaveSubstitutionUnavailableError('temporary outage'))
+      .mockRejectedValueOnce(new LeaveSubstitutionUnavailableError('temporary outage', { status }))
       .mockResolvedValueOnce(LEAVE_RECEIPT);
     await queryLeaveSubstitutionFlow(LEAVE_CASE_NO, { client });
     setLeaveSubstitutionDraft(LEAVE_CASE_NO, LEAVE_PREVIEW_REQUEST);

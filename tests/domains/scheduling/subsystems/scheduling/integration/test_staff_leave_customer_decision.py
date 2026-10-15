@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import re
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
 
@@ -214,7 +215,8 @@ class _SqlCursor:
         return False
 
     def execute(self, sql, parameters=()):
-        self.cursor.execute(sql.replace("%s", "?").replace(" FOR UPDATE", ""), parameters)
+        sql = re.sub(r'CAST\(([^)]+) AS CHAR CHARACTER SET utf8mb4\)', r'CAST(\1 AS TEXT)', sql)
+        self.cursor.execute(sql.replace(' COLLATE utf8mb4_unicode_ci', '').replace("%s", "?").replace(" FOR UPDATE", ""), parameters)
 
     def fetchone(self):
         row = self.cursor.fetchone()

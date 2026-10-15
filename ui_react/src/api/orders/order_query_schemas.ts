@@ -156,10 +156,10 @@ export const AssignmentPlanSchema = z.strictObject({
   order_version: z.number().int().nonnegative(),
   scheduling_version: z.number().int().nonnegative(),
   scheduling_generation: z.number().int().nonnegative(),
-  client_finance_version: z.number().int().nonnegative(),
-  payroll_version: z.number().int().nonnegative(),
+  client_finance_version: z.number().int().nonnegative().nullable(),
+  payroll_version: z.number().int().nonnegative().nullable(),
   contracted_service_days: z.number().int().positive(),
-  service_hours_per_day: z.number().positive().max(24).multipleOf(0.5),
+  service_hours_per_day: z.number().positive().max(24).multipleOf(0.5).nullable(),
   service_started: z.boolean(),
   assignments: z.array(AssignmentSegmentSchema),
 });

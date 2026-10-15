@@ -187,9 +187,11 @@ class OrderIntakeTermsBootstrapApplication:
         self,
         repository: OrderIntakeTermsBootstrapRepository,
         unit_of_work_factory: Callable[[], object],
+        initialize_completed_intake: Callable[[OrderIntakeTermsBootstrapFacts, str, str, str], None],
     ) -> None:
         self._repository = repository
         self._unit_of_work_factory = unit_of_work_factory
+        self._initialize_completed_intake = initialize_completed_intake
 
     def preview(
         self,
@@ -241,6 +243,7 @@ class OrderIntakeTermsBootstrapApplication:
                 actor,
                 reason,
                 proposed_service_time=proposed_service_time,
+                initialize_completed_intake=self._initialize_completed_intake,
             )
             unit_of_work.commit()
         return receipt
@@ -274,6 +277,7 @@ class OrderIntakeTermsBootstrapApplication:
                 idempotency_key,
                 actor,
                 reason,
+                initialize_completed_intake=self._initialize_completed_intake,
             )
             unit_of_work.commit()
         return receipt
@@ -368,6 +372,7 @@ def apply_case(
     actor: str,
     reason: str,
     *,
+    initialize_completed_intake: Callable[[OrderIntakeTermsBootstrapFacts, str, str, str], None],
     proposed_service_time: IntakeServiceTime | None = None,
 ) -> OrderIntakeTermsBootstrapReceipt:
     _validate_proposed_terms(proposed_start_date, proposed_service_days)
@@ -436,6 +441,11 @@ def apply_case(
             "order_intake_terms_bootstrap_readback_failed"
         )
 
+    if (readback.status is OrderLifecycleStatus.DISCUSSION
+        and not _completion_missing_fields(readback)
+        and all(value is not None for value in (readback.service_hours_per_day,
+            readback.service_start_time, readback.service_end_time, readback.service_end_day_offset))):
+        initialize_completed_intake(readback, actor, reason, idempotency_key)
     receipt = OrderIntakeTermsBootstrapReceipt(
         receipt_key=idempotency_key,
         case_no=current.case_no,
@@ -513,6 +523,8 @@ def apply_completion_case(
     idempotency_key: str,
     actor: str,
     reason: str,
+    *,
+    initialize_completed_intake: Callable[[OrderIntakeTermsBootstrapFacts, str, str, str], None],
 ) -> OrderIntakeCompletionReceipt:
     request_fingerprint = fingerprint_payload(
         {
@@ -570,6 +582,7 @@ def apply_completion_case(
     ):
         raise OrderIntakeTermsBootstrapError("order_intake_completion_readback_failed")
 
+    initialize_completed_intake(readback, actor, reason, idempotency_key)
     receipt = OrderIntakeCompletionReceipt(
         receipt_key=idempotency_key,
         case_no=current.case_no,

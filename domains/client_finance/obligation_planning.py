@@ -248,6 +248,20 @@ class ClientSettlementProjection:
     fingerprint: PreviewFingerprint
 
 
+def deposit_gate_override_survives_terms_impact(
+    source: ClientFinanceTermsSourceFacts,
+    candidate: ClientFinanceTermsCandidate,
+) -> bool:
+    """A real payment-terms change expires the independent unpaid override."""
+    if not source.deposit_gate_override_active:
+        return False
+    if candidate.payment_terms is not None:
+        return candidate.payment_terms == source.payment_terms
+    second = next((stage for stage in candidate.stage_plans
+                   if stage.payment_stage is PaymentStage.SECOND), None)
+    return second is None or second.due_date == source.payment_terms.second_payment_due_date
+
+
 def build_client_finance_terms_candidate(
     facts: ClientFinanceTermsFacts,
     change_identity: str,
