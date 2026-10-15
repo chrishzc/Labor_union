@@ -289,7 +289,7 @@ describe('Client registry owner editing', () => {
     await screen.findByText('客戶決定已完成正式回讀。');
     expect(candidateMocks.decision).toHaveBeenCalledWith('CASE-001', 61, 1, 'accepted', '電話確認客戶同意接任人選', expect.any(String), 'registry-operator');
     expect(await screen.findByText('尚未建立正式指派。')).toBeInTheDocument();
-    expect(screen.getByText(/推薦方案仍須完成客戶確認、契約與正式排班/)).toBeInTheDocument();
+    expect(screen.getByText(/推薦方案仍須完成客戶確認、契約與排班，才會列入上方正式指派。/)).toBeInTheDocument();
     expect(window.location.hash).toBe('#clients?case=CASE-001');
   });
 
