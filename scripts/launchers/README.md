@@ -9,7 +9,7 @@
 | `start_local_development.bat` | Windows 本機入口。通過 DB current gate 後，由 `supervise_local_runtime.ps1` 啟動 FastAPI 8000、React/Vite 5173、runtime monitor、durable job worker 與 incident worker。 |
 | `start_local_development.sh` | macOS／Linux 本機入口；服務邊界同 Windows。 |
 | `start_nas_development.bat`／`.sh` | 使用 `.env` 的 NAS MySQL；拒絕 localhost，委派標準開發入口。 |
-| `initialize_nas_schema.bat`／`.sh` | 首次初始化 NAS 已存在且空白的 `union_db`；Windows 雙擊預檢後按 Y 才建表，命令列可指定 `--apply`。 |
+| `initialize_nas_schema.bat`／`.sh` | 初始化 NAS 空白 `union_db`；Windows 雙擊可確認初始化，或明確確認後清空測試庫重建。`--apply` 僅限空庫。 |
 | `supervise_local_runtime.ps1` | Windows owned-process supervisor；負責 readiness、存活檢查與 scoped cleanup。 |
 | `start_local_development_no_auth.bat`／`.sh` | 只供隔離本機的 `local_bypass` 包裝；委派標準入口，不複製啟動流程。 |
 | `configure_local_admin_no_auth.bat`／`.ps1` | 修改本機開發認證設定，不啟動服務。 |
@@ -72,7 +72,7 @@ Smoke test 只建立本次 owned 的 FastAPI＋React process，執行 GET-only r
 若 NAS 已建立空白 `union_db`，先在專案 `.env` 設定 `APP_ENV=development`、NAS `DB_HOST`、
 `DB_PORT`、`DB_USER`、`DB_PASSWORD`、`DB_DATABASE=union_db`。初始化帳號必須能讀取完整 schema metadata，
 並具有 canonical DDL／system seed 所需權限（包含 table、index、foreign key、view、trigger 與 routine）；
-腳本不執行刪庫或建庫操作；view 的權限需求見下方。若 MySQL binary logging 的 trigger／function policy 阻擋，請由 NAS 管理員配置權限，
+預設不執行刪庫或建庫；只有下述完整確認的清空測試庫操作會刪庫重建。view 的權限需求見下方。若 MySQL binary logging 的 trigger／function policy 阻擋，請由 NAS 管理員配置權限，
 腳本不修改全域設定。執行期間停止其他連線 writer。
 
 ```powershell
@@ -81,13 +81,13 @@ Smoke test 只建立本次 owned 的 FastAPI＋React process，執行 GET-only r
 .\scripts\launchers\initialize_nas_schema.bat --apply
 ```
 
-Windows 可直接雙擊 `initialize_nas_schema.bat`：先唯讀檢查連線與空庫，通過後按 `Y` 初始化，按 `N` 取消；
+Windows 可直接雙擊 `initialize_nas_schema.bat`：先唯讀檢查連線與空庫，通過後輸入 `Y` 並 Enter 初始化，輸入 `N` 取消；
 結束時保留結果，按鍵才關閉，不需要另外輸入 `--apply`。預檢失敗就顯示錯誤，不會進入初始化。
 macOS／Linux 使用 `bash ./scripts/launchers/initialize_nas_schema.sh`，無參數只做唯讀預檢。
 `--dry-run` 只驗設定與正式 schema 雜湊、不連線；明確指定 `--apply` 會再檢查空庫後初始化。
 Windows 指定參數執行時不詢問 Y/N，也不等待按鍵，保留原本的命令列用法。
 設定直接取自 `.env`，process APP_ENV／DB_* 若有不同值會停止，請先清除 override。
-目標不是 `union_db`、指向 localhost、資料庫不存在或已有 table／view／routine／event 都停止。
+目標不是 `union_db`、指向 localhost 或資料庫不存在都停止。已有物件時預設停止，互動模式提供下述清空選項。
 初始化會建立完整結構與正式 artifacts 宣告的必要系統資料，不會匯入業務資料或建立管理員帳號。
 NAS 新庫直接使用 `db/fresh_schema/labor_union_fresh_current.sql` 的最終結構，
 目前為 371 張表、1 個 view、377 個 trigger、758 條指令，不再重播 1,946 條歷史升級指令。
@@ -98,18 +98,29 @@ SQL 與 manifest 由 `scripts/compact_fresh_schema.py` 從新建的本機測試�
 validation manifest 與退役清單的雜湊；來源改變時會停止並要求重新產生，請勿手改 SQL。
 成功必須通過與 NAS 啟動器相同的 current gate，然後才執行 `start_nas_development`。
 MySQL DDL 可能已提交；失敗時查看 `scratch/nas_schema_initialization/<run>/journal.jsonl`，
-不要直接重跑或執行 reset。腳本不會自動清空 partial database。
+腳本不會自動清空 partial database；只有確認資料可丟棄時，才使用下述清空選項。
 錯誤會區分執行 SQL 與最後驗證，列出 phase、完成指令數及安全的 MySQL 數字錯誤碼。
 `All schema statements completed, but verification failed` 表示指令已執行完，尚未通過完整結構檢查，不能直接視為成功。
 唯讀 schema 查核保留 5 秒連線上限，讀寫等待預設 30 秒；明確較短的 caller budget 仍優先。
 不需另跑檢查腳本：同一個初始化入口先檢查 MySQL 8.0.16+、InnoDB、可寫狀態、目前帳號與啟用角色的
 必要權限、binary log 的 trigger 限制、本機版本驗證檔案及唯讀 metadata 查詢。
 完整預檢通過才詢問 Y/N；按 Y 後重新預檢並再讀空庫條件，通過才建表。預檢不建測試表、不更改 NAS 設定。
-目前 final view 使用 OR REPLACE，MySQL 因此要求該 view 的 DROP 權限，預檢接受只授權該 view，無須擴大至整庫 DROP；腳本不會 DROP 資料庫或資料表。
+目前 final view 使用 OR REPLACE，MySQL 因此要求該 view 的 DROP 權限；一般空庫初始化接受只授權該 view。清空重建另要求整個目標資料庫的 CREATE／DROP 權限。
 缺權限、版本不相容、唯讀及 binary log 限制會直接在同一視窗顯示原因。執行中或最終驗證失敗則顯示
 phase、完成數及安全原因；保留現場，不清空、不重跑，兩層最終驗證通過才回報成功。
 已有物件時仍停止初始化；同一入口會再做唯讀版本查核，直接說明現有結構是否完整或為何無法確認。
 「現有結構已通過完整版本查核」表示可直接啟動服務，並不會允許對非空庫重跑初始化。
+
+若 `union_db` 只有可丟棄的測試資料，可在同一個 Windows 視窗選擇清空後重建：
+
+1. 先停止使用該資料庫的服務；雙擊 `initialize_nas_schema.bat`。
+2. 出現非空庫診斷後，輸入 `R` 並 Enter；腳本先檢查重建權限等條件，有問題就停止。
+3. 核對畫面上的 NAS 位址、port、資料庫及 server，再輸入完整 `RESET union_db` 並 Enter。
+
+這會**刪除並重建整個 `union_db`**，移除所有表、檢視、routine、event 與資料，再建立精簡結構和必要系統資料；無法復原。
+輸入 N、空白、錯字或中斷輸入就取消，不修改資料庫。確認後仍會重新預檢；可見其他資料庫有外鍵參照時拒絕清空。
+重建保留原本 default charset/collation，不修改帳號或全域設定；失敗顯示階段、原因與 journal，不會自動重試。
+命令列 `--apply` 仍只接受空庫；需要相同互動時可明確指定 `--interactive`。
 
 Compose 現在只啟動 Redis；所有開發入口直接連線 `.env`／process environment 的 MySQL，
 不再啟動或管理 `mysql_db`。既有容器與資料卷保留，請勿使用 `down -v` 或 `--remove-orphans` 清除。

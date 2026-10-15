@@ -1,4 +1,4 @@
-"""Initialize an existing, empty NAS union_db from the canonical schema assembly."""
+"""Initialize NAS union_db, optionally confirming a destructive test database reset."""
 
 from __future__ import annotations
 
@@ -125,7 +125,7 @@ def _active_role_clause(roles):
     return " USING " + ",".join(quoted)
 
 
-def _require_server_ready(cursor, database, plan):
+def _require_server_ready(cursor, database, plan, *, reset=False):
     cursor.execute("SELECT VERSION() AS mysql_version, @@version_comment AS version_comment")
     server = cursor.fetchone()
     version = re.match(r"(\d+)\.(\d+)\.(\d+)", str(server["mysql_version"]))
@@ -141,6 +141,8 @@ def _require_server_ready(cursor, database, plan):
     if not engine or engine["support"] not in {"YES", "DEFAULT"}:
         raise InitializationBlocked("NAS MySQL 未啟用 InnoDB，尚未寫入資料庫")
     required = {"CREATE", "SELECT", "INSERT", "REFERENCES"}
+    if reset:
+        required.add("DROP")
     if plan["expected"].get("views"):
         # Current final SQL uses CREATE OR REPLACE VIEW; MySQL requires DROP
         # for that view even though this entry never drops a database/table.
@@ -154,7 +156,7 @@ def _require_server_ready(cursor, database, plan):
         bool(capabilities["partial_revokes"]), required,
     )
     missing = required - privileges
-    if "DROP" in missing and plan["expected"].get("views"):
+    if not reset and "DROP" in missing and plan["expected"].get("views"):
         view_drops = set()
         for grant in grants:
             match = re.match(r"^GRANT ([A-Z_, ]+) ON `((?:``|[^`])+)`\.`((?:``|[^`])+)` TO ", grant)
@@ -276,11 +278,16 @@ def schema_plan():
         ) from error
 
 
-def _require_empty(cursor, database):
+def _database_identity(cursor, database):
     cursor.execute("SELECT DATABASE() AS database_name, @@hostname AS server")
     identity = cursor.fetchone()
     if not identity or identity["database_name"] != database or not identity["server"]:
         raise InitializationBlocked("Connected database identity does not match target")
+    return identity
+
+
+def _require_empty(cursor, database):
+    identity = _database_identity(cursor, database)
     for table, field in (
         ("tables", "table_schema"), ("routines", "routine_schema"), ("events", "event_schema"),
     ):
@@ -303,8 +310,10 @@ def _verify_current(config):
     updater.require_current_database(preview)
 
 
-def initialize(config, plan, *, apply=False, receipt_root=RECEIPT_ROOT):
+def initialize(config, plan, *, apply=False, reset=False, confirm_reset=None, receipt_root=RECEIPT_ROOT):
     """The CLI validates NAS union_db; engine tests inject an owned lu_test_* target."""
+    if reset and (not apply or confirm_reset is None):
+        raise InitializationBlocked("清空資料庫必須經互動確認，不接受直接重設")
     settings = dict(config)
     settings.update(autocommit=True, cursorclass=pymysql.cursors.DictCursor,
                     connect_timeout=5, read_timeout=30, write_timeout=30)
@@ -323,12 +332,13 @@ def initialize(config, plan, *, apply=False, receipt_root=RECEIPT_ROOT):
                 cursor.execute("SELECT GET_LOCK(%s, 0) AS acquired", ("nas_schema_init:" + config["database"],))
                 if cursor.fetchone().get("acquired") != 1:
                     raise InitializationBlocked("Another schema initializer holds the database lock")
-            identity = _require_empty(cursor, config["database"])
-            version = _require_server_ready(cursor, config["database"], plan)
+            check_target = _database_identity if reset else _require_empty
+            identity = check_target(cursor, config["database"])
+            version = _require_server_ready(cursor, config["database"], plan, reset=reset)
             _preflight_metadata(config)
             # Metadata checks can take time. Re-read the target immediately
             # before admitting writes, including after the Windows confirmation.
-            identity = _require_empty(cursor, config["database"])
+            identity = check_target(cursor, config["database"])
             result = {
                 "status": "ready", "database": config["database"], "server": identity["server"],
                 "assembly_id": plan["assembly_id"], "release_id": plan["release_id"],
@@ -337,10 +347,39 @@ def initialize(config, plan, *, apply=False, receipt_root=RECEIPT_ROOT):
             }
             if not apply:
                 return result
+            if reset:
+                cursor.execute("SELECT 1 FROM information_schema.key_column_usage WHERE referenced_table_schema=%s AND table_schema<>%s LIMIT 1", (config["database"], config["database"]))
+                if cursor.fetchone():
+                    raise InitializationBlocked("其他資料庫有外鍵參照目標資料庫，為避免影響其他資料庫，尚未清空")
+                cursor.execute("SELECT default_character_set_name AS charset, default_collation_name AS collation FROM information_schema.schemata WHERE schema_name=%s", (config["database"],))
+                defaults = cursor.fetchone()
+                if not defaults or any(not re.fullmatch(r"[a-zA-Z0-9_]+", str(defaults[key])) for key in ("charset", "collation")):
+                    raise InitializationBlocked("無法確認目標資料庫的字元集與定序，尚未清空")
+                if not confirm_reset({**result, "host": config["host"], "port": config.get("port", 3306)}):
+                    return {"status": "cancelled", "database": config["database"], "writes": "not_run"}
+                # Keep the same connection and initialization lock across confirmation.
+                # Recheck permissions/settings before the first destructive statement.
+                _require_server_ready(cursor, config["database"], plan, reset=True)
+                _preflight_metadata(config)
+                if _database_identity(cursor, config["database"]) != identity:
+                    raise InitializationBlocked("確認後連線目標已改變，尚未清空")
             directory = Path(receipt_root) / uuid4().hex
             directory.mkdir(parents=True, exist_ok=False)
             journal_path = directory / "journal.jsonl"
             _journal(journal_path, {"event": "started", **result})
+            if reset:
+                phase = "reset_database"
+                target = "`" + config["database"].replace("`", "``") + "`"
+                for operation, sql in (
+                    ("drop_database", f"DROP DATABASE {target}"),
+                    ("create_database", f"CREATE DATABASE {target} CHARACTER SET {defaults['charset']} COLLATE {defaults['collation']}"),
+                    ("select_database", f"USE {target}"),
+                ):
+                    evidence = {"operation": operation, "statement_sha256": hashlib.sha256(sql.encode("utf-8")).hexdigest()}
+                    _journal(journal_path, {"event": "reset_prepared", **evidence})
+                    cursor.execute(sql)
+                    _journal(journal_path, {"event": "reset_applied", **evidence})
+                _require_empty(cursor, config["database"])
             phase = "statements"
             for step in plan["steps"]:
                 evidence = {
@@ -371,7 +410,7 @@ def initialize(config, plan, *, apply=False, receipt_root=RECEIPT_ROOT):
                 detail = "現有結構尚未通過完整版本查核：" + _mysql_reason(verification_error)
             else:
                 detail = "現有結構已通過完整版本查核；不需要重新初始化，可直接啟動服務"
-            raise InitializationBlocked(f"{error}. {detail}。未修改資料庫，不會清空或重跑。") from None
+            raise _NonEmptyDatabase(f"{error}. {detail}。未修改資料庫，不會自動清空或重跑。") from None
         if journal_path is not None:
             errno = error.args[0] if isinstance(error, pymysql.MySQLError) and error.args and isinstance(error.args[0], int) else None
             _journal(journal_path, {"event": "failed_partial", "phase": phase,
@@ -397,11 +436,43 @@ def initialize(config, plan, *, apply=False, receipt_root=RECEIPT_ROOT):
         connection.close()
 
 
+def _answer(prompt):
+    try:
+        return input(prompt).strip()
+    except (EOFError, KeyboardInterrupt):
+        return ""
+
+
+def _confirm_reset(target):
+    print(f"\n[WARNING] Target: {target['host']}:{target['port']} / {target['database']} (server: {target['server']})")
+    print("This will DELETE and RECREATE this entire database, including ALL tables, views, routines, events and data.")
+    print("This cannot be undone. Stop applications and other database writers before continuing.")
+    expected = "RESET " + target["database"]
+    return _answer(f"Type {expected} exactly to clear and reinitialize, or press Enter to cancel: ") == expected
+
+
+def _interactive_initialize(config, plan):
+    try:
+        preview = initialize(config, plan)
+    except _NonEmptyDatabase as error:
+        print(str(error))
+        answer = _answer("Press R then Enter to reset this test database, or N then Enter to cancel: ")
+        if answer.upper() != "R":
+            return {"status": "cancelled", "writes": "not_run"}
+        return initialize(config, plan, apply=True, reset=True, confirm_reset=_confirm_reset)
+    print(json.dumps(preview, ensure_ascii=False))
+    if _answer("Press Y then Enter to initialize, or N then Enter to cancel: ").upper() != "Y":
+        return {"status": "cancelled", "writes": "not_run"}
+    print("[Info] Initializing NAS schema. All preflight checks will be repeated before writing...")
+    return initialize(config, plan, apply=True)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--apply", action="store_true", help="initialize the existing empty union_db")
     mode.add_argument("--dry-run", action="store_true", help="validate config and canonical SQL without connecting")
+    mode.add_argument("--interactive", action="store_true", help="confirm initialization or destructive test database reset")
     args = parser.parse_args(argv)
     try:
         config = load_configuration()
@@ -409,6 +480,8 @@ def main(argv=None):
         if args.dry_run:
             result = {"status": "configured", "connection": "not_run", "statement_count": len(plan["steps"]),
                       "schema_parts": plan["schema_parts"], "assembly_id": plan["assembly_id"]}
+        elif args.interactive:
+            result = _interactive_initialize(config, plan)
         else:
             result = initialize(config, plan, apply=args.apply)
     except InitializationBlocked as error:
@@ -416,6 +489,11 @@ def main(argv=None):
     except Exception:
         result = {"status": "blocked", "error": "NAS initialization failed; check .env, MySQL permissions, TLS and canonical schema"}
     print(json.dumps(result, ensure_ascii=False))
+    if args.interactive:
+        if result["status"] == "passed":
+            print("[Done] NAS schema initialization completed.")
+        elif result["status"] == "cancelled":
+            print("[Cancelled] No database changes were requested.")
     return 1 if result["status"] == "blocked" else 0
 
 

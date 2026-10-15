@@ -406,7 +406,7 @@ metadata 證明零新增效果時，才可 bounded retry；DDL 中斷必須先�
 - Python／Unix 無參數是零 DDL／DML 的連線與空庫預檢；Windows `.bat` 無參數先委派同一預檢，
   通過後於本機詢問 Y/N，僅 Y 委派 `--apply`，N／輸入中斷取消，預檢失敗不詢問；結果按鍵後關閉。
   這依 2026-10-15 人工雙擊操作需求補上互動，不改變 writer／空庫／schema 邊界。
-  明確傳入參數時不詢問或暫停；`--dry-run` 零連線；`--apply` 重新驗證後執行。
+  除下述明確 `--interactive` 外，傳入參數時不詢問或暫停；`--dry-run` 零連線；`--apply` 重新驗證後執行。
   每個 statement 前後在 ignored scratch 下寫 durable journal，僅保存 artifact、ordinal、hash 與狀態。
   MySQL DDL implicit commit 不宣稱可 rollback；失敗保留 partial 與紀錄，不自動 DROP、cleanup、重試或續跑。
 - 完成後驗 validation objects 與既有 runtime canonical descriptor/current gate；兩者通過才回報 passed。
@@ -419,14 +419,35 @@ metadata 證明零新增效果時，才可 bounded retry；DDL 中斷必須先�
   CURRENT_ROLE 回傳值只解析 quoted role pairs 並重新 quote identifier，不能當 SQL 原文執行；grant 原文與帳號不輸出。
   有預檢問題即零 DDL/DML 停止，Windows 不詢問 Y/N；Apply 在確認後重新預檢，並在 metadata checks 後 fresh-read 空庫。
   預檢無法保證後續不會遇到斷線／資源變動，因此 SQL 完成後仍保留 object/current 兩層驗證，失敗直接輸出安全原因。
-  目標非空時維持拒絕初始化；同一入口以既有 readonly current gate 解釋現有結構是否完整／查核失敗原因，
-  不要求額外檢查腳本，不新增 recovery writer，不做 DROP、重建或自動續跑；已完整僅提示直接啟動服務。
+  目標非空時預設維持拒絕初始化；同一入口以既有 readonly current gate 解釋現有結構是否完整／查核失敗原因，
+  不要求額外檢查腳本，不自動清空或續跑；已完整提示可直接啟動服務。人工明確清空路徑依下段。
   測試使用 local disposable `lu_test_*` 呼叫同一 executor，驗完整 fresh、system seed、current gate、
   非空資料與 view 拒絕、重跑拒絕及失敗紀錄；不碰本機既有 union_db 或 NAS。此入口不支援 preserve-data，
   因此驗收不執行無關的 dump／candidate／switch。真正 NAS Apply 留給 operator 明確執行。
 
 本次 write set 限新 initializer／launchers、對應 Module tests、launcher README、本節及 migration 地圖；
 沒有新 schema release，current manifest／descriptor 不改。驗收來源為本節與人工空庫初始化要求。
+
+後續 Authority（2026-10-15）：人工確認 NAS `union_db` 只有上次初始化留下的測試資料，要求同一 `.bat`
+提供確認後清空並重新初始化。本段為同一 bounded execution package 的 destructive 擴充，取代上方
+僅針對明確確認 reset 操作的「不建庫／刪庫」限制；預設空庫初始化、既有資料保留升級及 local reset 契約不變。
+
+- Windows 無參數改委派 Python `--interactive`。非空時先顯示唯讀診斷，再提供 R／N；R 只要求 reset 預檢，
+  不是刪除授權。空庫仍先預檢、輸入 Y 並 Enter 才初始化。明確 `--apply` 不接受非空庫，也不啟動 reset。
+- reset 預檢須驗 connected identity、同名 session lock、server／trigger policy、release／metadata，並要求
+  目標 schema 層級 CREATE／DROP 權限；僅 view-specific DROP 不足。可見其他 schema incoming FK 時拒絕。
+  顯示 `.env` host／port、database、server，說明整庫物件及資料不可逆刪除，要求停止其他 writer。
+  只有輸入完整 `RESET union_db` 才繼續；N、空白、錯字、EOF 或輸入中斷取消均零 DDL/DML，無 reset journal。
+- 確認與寫入維持同一 connection/session lock；確認後重新預檢並回讀相同 connected identity。
+  先建立 durable journal，再依序 DROP DATABASE、CREATE DATABASE（保留原 default charset/collation）、USE；
+  每個控制指令前後記 operation／hash／狀態，不記 SQL／credential。只作用於確認的 `.env` union_db。
+  重建空庫後共用既有 compact executor／system seed／object/current gate，不複製另一份 schema 或改全域設定。
+- Data effect 為 destructive schema/data replacement + canonical schema-only/system-seed；沒有業務 backfill、
+  provider 或部署。既有 NAS 資料明確放棄，不自動備份／rollback；失敗不 retry 或繼續，顯示 reset_database
+  或既有失敗 phase 及 journal。已刪庫但建庫失敗時也保留錯誤，不宣稱回復成功。
+- 驗收限本機自行新建 lu_test_*：取消保留舊 rows、缺權限／跨庫 FK 在寫入前停止、確認後 partial 庫清空且
+  compact 結構與 system seed 通過 final gate、neighbor schema/rows 保留、失敗 journal、安全錯誤及實際 Windows
+  `.bat` 互動。NAS 真正清空由 operator 在視窗確認執行；Agent 不以本次開發要求直接清空 NAS。
 
 ### 9.3 NAS 新庫結構精簡與退役清單（2026-10-15）
 

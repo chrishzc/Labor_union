@@ -126,6 +126,67 @@ def test_full_fresh_seed_nonempty_and_replay_guards(tmp_path):
         server.close()
 
 
+def test_confirmed_reset_rebuilds_partial_database_and_preserves_other_databases(tmp_path):
+    config = {
+        "host": os.environ["LABOR_UNION_TEST_MYSQL_HOST"],
+        "port": int(os.environ["LABOR_UNION_TEST_MYSQL_PORT"]),
+        "user": os.environ["LABOR_UNION_TEST_MYSQL_USER"],
+        "password": os.environ["LABOR_UNION_TEST_MYSQL_PASSWORD"],
+        "database": os.environ["LABOR_UNION_TEST_MYSQL_DATABASE"] + "_reset", "charset": "utf8mb4",
+    }
+    assert config["host"] in {"127.0.0.1", "localhost"}
+    target = config["database"]
+    neighbor = target + "_neighbor"
+    assert re.fullmatch(r"lu_test_[a-z0-9_]+", target)
+    server = pymysql.connect(**{k: v for k, v in config.items() if k != "database"}, autocommit=True)
+    owned = []
+    try:
+        with server.cursor() as cursor:
+            for database in (target, neighbor):
+                cursor.execute(f"CREATE DATABASE `{database}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
+                owned.append(database)
+            cursor.execute(f"CREATE TABLE `{target}`.old_test_data(id INT PRIMARY KEY)")
+            cursor.execute(f"INSERT INTO `{target}`.old_test_data VALUES (73)")
+            cursor.execute(f"CREATE VIEW `{target}`.old_test_view AS SELECT id FROM `{target}`.old_test_data")
+            cursor.execute(f"CREATE PROCEDURE `{target}`.old_test_routine() SELECT 1")
+            cursor.execute(f"CREATE EVENT `{target}`.old_test_event ON SCHEDULE EVERY 1 DAY DISABLE DO SELECT 1")
+            cursor.execute(f"CREATE TABLE `{neighbor}`.kept(id INT PRIMARY KEY)")
+            cursor.execute(f"INSERT INTO `{neighbor}`.kept VALUES (89)")
+            cursor.execute(f"CREATE TABLE `{neighbor}`.incoming_fk(id INT, FOREIGN KEY(id) REFERENCES `{target}`.old_test_data(id))")
+        plan = nas.schema_plan()
+        with pytest.raises(nas.InitializationBlocked, match="其他資料庫有外鍵"):
+            nas.initialize(config, plan, apply=True, reset=True, confirm_reset=lambda _: pytest.fail("must block before confirmation"), receipt_root=tmp_path)
+        with server.cursor() as cursor:
+            cursor.execute(f"DROP TABLE `{neighbor}`.incoming_fk")
+        result = nas.initialize(config, plan, apply=True, reset=True, confirm_reset=lambda _: False, receipt_root=tmp_path)
+        assert result["status"] == "cancelled" and not list(tmp_path.iterdir())
+        with server.cursor() as cursor:
+            cursor.execute(f"SELECT id FROM `{target}`.old_test_data")
+            assert cursor.fetchone() == (73,)
+        result = nas.initialize(config, plan, apply=True, reset=True, confirm_reset=lambda _: True, receipt_root=tmp_path)
+        assert result["status"] == "passed" and result["schema"] == "current"
+        with server.cursor() as cursor:
+            cursor.execute("SELECT table_name FROM information_schema.tables WHERE table_schema=%s", (target,))
+            names = {row[0] for row in cursor.fetchall()}
+            assert names == plan["expected"]["tables"] | plan["expected"]["views"]
+            cursor.execute("SELECT COUNT(*) FROM information_schema.routines WHERE routine_schema=%s", (target,))
+            assert cursor.fetchone() == (0,)
+            cursor.execute("SELECT COUNT(*) FROM information_schema.events WHERE event_schema=%s", (target,))
+            assert cursor.fetchone() == (0,)
+            cursor.execute(f"SELECT COUNT(*) FROM `{target}`.payroll_rate_policies")
+            assert cursor.fetchone()[0] > 0
+            cursor.execute(f"SELECT id FROM `{neighbor}`.kept")
+            assert cursor.fetchone() == (89,)
+        events = [json.loads(line) for line in open(result["journal"], encoding="utf-8")]
+        assert sum(event["event"] == "reset_applied" for event in events) == 3
+        assert events[-1]["event"] == "passed"
+    finally:
+        with server.cursor() as cursor:
+            for database in reversed(owned):
+                cursor.execute(f"DROP DATABASE `{database}`")
+        server.close()
+
+
 def _metadata_and_seeds(server, database):
     """Independent engine oracle: full final DDL plus effective seeded values."""
     metadata, seeds = {}, {}

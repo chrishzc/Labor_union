@@ -1,4 +1,4 @@
-"""NAS initialization must never turn an existing database into a reset target."""
+"""NAS initialization preserves existing data unless an explicit reset is confirmed."""
 
 import json
 import os
@@ -136,6 +136,10 @@ class Connection:
             self.row = {"support": self.engine}
         elif sql.startswith("SHOW GRANTS"):
             self.rows = [{"grant": grant} for grant in self.grants]
+        elif "default_character_set_name" in sql:
+            self.row = {"charset": "utf8mb4", "collation": "utf8mb4_unicode_ci"}
+        elif sql.startswith("DROP DATABASE"):
+            self.occupied = None
         elif self.occupied and "information_schema." + self.occupied in sql:
             self.row = {"1": 1}
         elif self.fail_insert and sql.startswith("INSERT"):
@@ -345,3 +349,84 @@ def test_cli_sanitizes_connection_errors(monkeypatch, capsys):
     monkeypatch.setattr(nas, "load_configuration", Mock(side_effect=ValueError("synthetic-secret")))
     assert nas.main([]) == 1
     assert "synthetic-secret" not in capsys.readouterr().out
+
+
+def test_reset_requires_confirmation_before_connection(execution, monkeypatch):
+    connect = Mock()
+    monkeypatch.setattr(nas.pymysql, "connect", connect)
+    with pytest.raises(nas.InitializationBlocked, match="互動確認"):
+        nas.initialize(*execution[:2], apply=True, reset=True, receipt_root=execution[2])
+    connect.assert_not_called()
+
+
+@pytest.mark.parametrize("approved", [False, True])
+def test_reset_cancellation_or_rebuild_uses_confirmed_target_and_journal(execution, monkeypatch, approved):
+    connection = Connection(occupied="tables")
+    monkeypatch.setattr(nas.pymysql, "connect", lambda **_: connection)
+    confirm = Mock(return_value=approved)
+    result = nas.initialize(*execution[:2], apply=True, reset=True, confirm_reset=confirm, receipt_root=execution[2])
+    assert confirm.call_args.args[0]["host"] == "nas.test"
+    assert confirm.call_args.args[0]["port"] == 3307
+    assert confirm.call_args.args[0]["database"] == "union_db"
+    writes = [sql for sql in connection.statements if sql.startswith(("DROP", "CREATE", "INSERT", "USE"))]
+    if not approved:
+        assert result["status"] == "cancelled" and not writes
+        assert not list(execution[2].iterdir())
+    else:
+        assert result["status"] == "passed"
+        assert writes[:3] == ["DROP DATABASE `union_db`", "CREATE DATABASE `union_db` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci", "USE `union_db`"]
+        assert writes[3:] == [step["sql"] for step in execution[1]["steps"]]
+        events = [json.loads(line) for line in next(execution[2].glob("*/journal.jsonl")).read_text(encoding="utf-8").splitlines()]
+        assert [event["operation"] for event in events if event["event"] == "reset_applied"] == ["drop_database", "create_database", "select_database"]
+        assert events[-1]["event"] == "passed"
+    assert connection.closed
+
+
+def test_reset_missing_database_drop_privilege_stops_before_confirmation(execution, monkeypatch):
+    connection = Connection(occupied="tables", grants=[
+        "GRANT CREATE,SELECT,INSERT,REFERENCES,CREATE VIEW,SHOW VIEW ON `union_db`.* TO `synthetic`@`%`",
+        "GRANT DROP ON `union_db`.`v_order_details` TO `synthetic`@`%`",
+    ])
+    monkeypatch.setattr(nas.pymysql, "connect", lambda **_: connection)
+    confirm = Mock(return_value=True)
+    with pytest.raises(nas.InitializationBlocked, match="DROP"):
+        nas.initialize(*execution[:2], apply=True, reset=True, confirm_reset=confirm, receipt_root=execution[2])
+    confirm.assert_not_called()
+    assert not any(sql.startswith(("DROP", "CREATE", "INSERT")) for sql in connection.statements)
+
+
+def test_reset_rechecks_permissions_after_confirmation(execution, monkeypatch):
+    connection = Connection(occupied="tables")
+    monkeypatch.setattr(nas.pymysql, "connect", lambda **_: connection)
+    def confirm(_):
+        connection.grants = ["GRANT SELECT ON `union_db`.* TO `synthetic`@`%`"]
+        return True
+    with pytest.raises(nas.InitializationBlocked, match="缺少資料庫權限"):
+        nas.initialize(*execution[:2], apply=True, reset=True, confirm_reset=confirm, receipt_root=execution[2])
+    assert not any(sql.startswith(("DROP", "CREATE", "INSERT")) for sql in connection.statements)
+    assert not list(execution[2].iterdir())
+
+
+def test_failed_database_recreation_stops_with_journal_and_no_retry(execution, monkeypatch):
+    connection = Connection(occupied="tables")
+    original = connection.execute
+    def fail_recreate(sql, params=None):
+        if sql.startswith("CREATE DATABASE"):
+            raise nas.pymysql.err.OperationalError(1044, "synthetic-private-detail")
+        original(sql, params)
+    monkeypatch.setattr(connection, "execute", fail_recreate)
+    monkeypatch.setattr(nas.pymysql, "connect", lambda **_: connection)
+    with pytest.raises(nas.InitializationBlocked, match="Phase: reset_database") as error:
+        nas.initialize(*execution[:2], apply=True, reset=True, confirm_reset=lambda _: True, receipt_root=execution[2])
+    assert "1044" in str(error.value) and "synthetic-private-detail" not in str(error.value)
+    assert connection.statements.count("DROP DATABASE `union_db`") == 1
+    assert not any(sql.startswith("CREATE TABLE") for sql in connection.statements)
+    events = [json.loads(line) for line in next(execution[2].glob("*/journal.jsonl")).read_text(encoding="utf-8").splitlines()]
+    assert events[-1]["event"] == "failed_partial"
+
+
+@pytest.mark.parametrize("answer,confirmed", [("RESET union_db", True), ("Y", False), ("reset union_db", False), ("RESET other_db", False), ("", False)])
+def test_reset_requires_full_database_confirmation(monkeypatch, capsys, answer, confirmed):
+    monkeypatch.setattr("builtins.input", lambda _: answer)
+    assert nas._confirm_reset({"host": "nas.test", "port": 3307, "server": "synthetic", "database": "union_db"}) is confirmed
+    assert "nas.test:3307 / union_db" in capsys.readouterr().out
