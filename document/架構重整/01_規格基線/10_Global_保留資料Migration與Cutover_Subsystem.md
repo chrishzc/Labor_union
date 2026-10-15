@@ -403,7 +403,10 @@ metadata 證明零新增效果時，才可 bounded retry；DDL 中斷必須先�
 - Data-effect inventory：schema-only 與 system-seed 只重播 current canonical artifacts；
   business-row-backfill、業務 fixture、既有資料轉換、建庫／刪庫、provider、啟動服務及部署均不在範圍。
   既有 local reset／preserve-data upgrade 的 target policy 不變；不為此入口修改 SQL 或重發 release。
-- 無參數是零 DDL／DML 的連線與空庫預檢；`--dry-run` 零連線；`--apply` 重新驗證後執行。
+- Python／Unix 無參數是零 DDL／DML 的連線與空庫預檢；Windows `.bat` 無參數先委派同一預檢，
+  通過後於本機詢問 Y/N，僅 Y 委派 `--apply`，N／輸入中斷取消，預檢失敗不詢問；結果按鍵後關閉。
+  這依 2026-10-15 人工雙擊操作需求補上互動，不改變 writer／空庫／schema 邊界。
+  明確傳入參數時不詢問或暫停；`--dry-run` 零連線；`--apply` 重新驗證後執行。
   每個 statement 前後在 ignored scratch 下寫 durable journal，僅保存 artifact、ordinal、hash 與狀態。
   MySQL DDL implicit commit 不宣稱可 rollback；失敗保留 partial 與紀錄，不自動 DROP、cleanup、重試或續跑。
 - 完成後驗 validation objects 與既有 runtime canonical descriptor/current gate；兩者通過才回報 passed。

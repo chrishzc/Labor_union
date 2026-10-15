@@ -9,7 +9,7 @@
 | `start_local_development.bat` | Windows 本機入口。通過 DB current gate 後，由 `supervise_local_runtime.ps1` 啟動 FastAPI 8000、React/Vite 5173、runtime monitor、durable job worker 與 incident worker。 |
 | `start_local_development.sh` | macOS／Linux 本機入口；服務邊界同 Windows。 |
 | `start_nas_development.bat`／`.sh` | 使用 `.env` 的 NAS MySQL；拒絕 localhost，委派標準開發入口。 |
-| `initialize_nas_schema.bat`／`.sh` | 首次初始化 NAS 已存在且空白的 `union_db`；無參數唯讀預檢，`--apply` 才建表。 |
+| `initialize_nas_schema.bat`／`.sh` | 首次初始化 NAS 已存在且空白的 `union_db`；Windows 雙擊預檢後按 Y 才建表，命令列可指定 `--apply`。 |
 | `supervise_local_runtime.ps1` | Windows owned-process supervisor；負責 readiness、存活檢查與 scoped cleanup。 |
 | `start_local_development_no_auth.bat`／`.sh` | 只供隔離本機的 `local_bypass` 包裝；委派標準入口，不複製啟動流程。 |
 | `configure_local_admin_no_auth.bat`／`.ps1` | 修改本機開發認證設定，不啟動服務。 |
@@ -81,9 +81,11 @@ Smoke test 只建立本次 owned 的 FastAPI＋React process，執行 GET-only r
 .\scripts\launchers\initialize_nas_schema.bat --apply
 ```
 
-macOS／Linux 使用 `bash ./scripts/launchers/initialize_nas_schema.sh`，參數相同。
-`--dry-run` 只驗設定與正式 schema 雜湊、不連線；無參數會連線並唯讀確認空庫；`--apply` 再檢查一次後初始化。
-Windows 雙擊 `.bat` 只做唯讀預檢，顯示結果後等待按鍵，避免錯誤訊息隨視窗關閉；指定參數執行時不等待按鍵。
+Windows 可直接雙擊 `initialize_nas_schema.bat`：先唯讀檢查連線與空庫，通過後按 `Y` 初始化，按 `N` 取消；
+結束時保留結果，按鍵才關閉，不需要另外輸入 `--apply`。預檢失敗就顯示錯誤，不會進入初始化。
+macOS／Linux 使用 `bash ./scripts/launchers/initialize_nas_schema.sh`，無參數只做唯讀預檢。
+`--dry-run` 只驗設定與正式 schema 雜湊、不連線；明確指定 `--apply` 會再檢查空庫後初始化。
+Windows 指定參數執行時不詢問 Y/N，也不等待按鍵，保留原本的命令列用法。
 設定直接取自 `.env`，process APP_ENV／DB_* 若有不同值會停止，請先清除 override。
 目標不是 `union_db`、指向 localhost、資料庫不存在或已有 table／view／routine／event 都停止。
 初始化會建立完整結構與正式 artifacts 宣告的必要系統資料，不會匯入業務資料或建立管理員帳號。
