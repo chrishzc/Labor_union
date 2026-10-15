@@ -1,5 +1,7 @@
 from datetime import date
 
+import pytest
+
 from infrastructure.mysql.accounts_payable_export_sources import (
     _CLIENT_REFUNDS_SQL,
     _HISTORICAL_STAFF_PAYABLE_PROJECTION_SQL,
@@ -222,9 +224,8 @@ def test_historical_projection_does_not_include_a_future_due_date():
     assert facts == ()
 
 
-def test_legacy_partially_paid_staff_row_is_an_anomaly_not_a_current_export():
-    fact = _staff_fact(
-        {
+def _partially_paid_staff_row(**overrides):
+    return {
             "obligation_identity": "staff:1",
             "case_no": "C-1",
             "staff_id": 1,
@@ -237,9 +238,44 @@ def test_legacy_partially_paid_staff_row_is_an_anomaly_not_a_current_export():
             "primary_account_count": 1,
             "bank_code": "012",
             "account_no": "1234567890",
+            **overrides,
         }
-    )
 
-    assert fact.status is StaffPayableStatus.ANOMALY
-    assert "'partially_paid'" not in _STAFF_PAYABLES_SQL
-    assert "= 'payable'" in _STAFF_PAYABLES_SQL
+
+def test_partially_paid_staff_exports_only_the_remaining_balance():
+    fact = _staff_fact(_partially_paid_staff_row())
+
+    assert fact.status is StaffPayableStatus.PARTIALLY_PAID
+    assert fact.amount.amount == 1500
+    assert "IN ('payable', 'partially_paid')" in _STAFF_PAYABLES_SQL
+    assert "COALESCE(projection.balance_ntd, obligations.amount_due_ntd) > 0" in _STAFF_PAYABLES_SQL
+
+
+def test_partially_paid_case_audit_preserves_original_amount_and_current_balance():
+    row = _partially_paid_staff_row(order_due_date=date(2026, 3, 15))
+    item = _formal_case_audit_item(row, date(2026, 3, 15))
+    assert item.disposition == "selected_month"
+    assert item.amount_due.amount == 20_000
+    assert item.balance.amount == 1500
+
+    other_month = _formal_case_audit_item(row, date(2026, 4, 15))
+    assert other_month.disposition == "other_month"
+
+    undated = _formal_case_audit_item({**row, "due_date": None}, date(2026, 3, 15))
+    assert undated.disposition == "date_not_formed"
+
+
+@pytest.mark.parametrize("overrides", [
+    {"primary_account_count": 0},
+    {"primary_account_count": 2},
+    {"recipient_name": ""},
+    {"bank_code": ""},
+    {"account_no": ""},
+    {"payout_status": "anomaly"},
+    {"payout_status": "recovery_required"},
+])
+def test_partial_payment_does_not_bypass_other_payment_blockers(overrides):
+    row = _partially_paid_staff_row(**overrides)
+    fact = _staff_fact(row)
+    assert fact.status not in {StaffPayableStatus.PAYABLE, StaffPayableStatus.PARTIALLY_PAID}
+    assert _formal_case_audit_item(row, date(2026, 3, 15)).disposition == "blocked"

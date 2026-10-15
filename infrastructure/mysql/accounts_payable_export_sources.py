@@ -212,7 +212,7 @@ def _formal_case_audit_item(row, target_payment_date: date) -> CaseStaffPayableA
     status = _staff_status(row)
     if historical_confirmation is not None or payout_status == "completed":
         disposition, reason = "paid_or_settled", "已有有效付款／結清證據，不列入待付清冊。"
-    elif status is StaffPayableStatus.ANOMALY or payout_status != "payable":
+    elif status not in {StaffPayableStatus.PAYABLE, StaffPayableStatus.PARTIALLY_PAID}:
         disposition, reason = "blocked", "現行付款狀態或受款資料尚有 blocker。"
     elif due_date is None:
         disposition, reason = "date_not_formed", "月嫂應付日尚未形成。"
@@ -297,9 +297,7 @@ def _missing_case_audit_item(row) -> CaseStaffPayableAuditItem:
 
 def _staff_status(row) -> StaffPayableStatus:
     projected_status = StaffPayableStatus(str(row["payout_status"]))
-    if projected_status is StaffPayableStatus.PARTIALLY_PAID:
-        return StaffPayableStatus.ANOMALY
-    if projected_status is not StaffPayableStatus.PAYABLE:
+    if projected_status not in {StaffPayableStatus.PAYABLE, StaffPayableStatus.PARTIALLY_PAID}:
         return projected_status
     if _integer(row["primary_account_count"], "primary account count") != 1:
         return StaffPayableStatus.ANOMALY
@@ -419,7 +417,8 @@ WHERE obligations.due_date = %s
   AND obligations.direction = 'payable_to_staff'
   AND obligations.status <> 'cancelled'
   AND obligations.amount_due_ntd > 0
-  AND COALESCE(projection.status, 'payable') = 'payable'
+  AND COALESCE(projection.status, 'payable') IN ('payable', 'partially_paid')
+  AND COALESCE(projection.balance_ntd, obligations.amount_due_ntd) > 0
   AND historical_confirmation.obligation_identity IS NULL
 GROUP BY obligations.obligation_identity,
          obligations.case_no,
@@ -427,6 +426,7 @@ GROUP BY obligations.obligation_identity,
          staff.name,
          obligations.amount_due_ntd,
          obligations.due_date,
+         projection.balance_ntd,
          projection.status
 ORDER BY obligations.staff_id, obligations.obligation_identity
 """

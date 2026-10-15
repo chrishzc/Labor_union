@@ -75,13 +75,20 @@ def _refund(identity, amount, *, payable=True, anomaly=False, refund_type="custo
 
 def test_aggregate_merges_same_staff_day_and_excludes_non_payable_or_anomalous_rows():
     rows = aggregate_accounts_payable_rows(
-        (_staff("obligation:2", "CASE-2", 200), _staff("obligation:1", "CASE-1", 300), _staff("obligation:3", "CASE-3", 99, status=StaffPayableStatus.COMPLETED)),
+        (
+            _staff("obligation:2", "CASE-2", 200),
+            _staff("obligation:1", "CASE-1", 300),
+            _staff("obligation:partial", "CASE-P", 1500, status=StaffPayableStatus.PARTIALLY_PAID),
+            _staff("obligation:3", "CASE-3", 99, status=StaffPayableStatus.COMPLETED),
+            _staff("obligation:anomaly", "CASE-A", 100, status=StaffPayableStatus.ANOMALY),
+            _staff("obligation:recovery", "CASE-O", 100, status=StaffPayableStatus.RECOVERY_REQUIRED),
+        ),
         (_refund("refund:1", 120), _refund("refund:2", 88, anomaly=True), _refund("refund:3", 77, payable=False)),
     )
 
     assert [(item.payment_type, item.amount.amount, item.obligation_identities) for item in rows] == [
         ("client_refund", 120, ("refund:1",)),
-        ("staff_payable", 500, ("obligation:1", "obligation:2")),
+        ("staff_payable", 2000, ("obligation:1", "obligation:2", "obligation:partial")),
     ]
 
 

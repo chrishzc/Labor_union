@@ -18,7 +18,7 @@ class AccountsPayableRowView(BaseModel):
     recipient_name: str
     bank_code: str
     bank_account: str
-    amount_ntd: int
+    amount_ntd: int = Field(description="目前未付款金額；月嫂部分付款只列剩餘款，不列原始應付總額。")
     obligation_identities: list[str]
     case_numbers: list[str]
     recipient_identity_card: str
@@ -29,7 +29,7 @@ class AccountsPayablePreviewView(BaseModel):
 
     target_payment_date: date
     row_count: int
-    total_amount_ntd: int
+    total_amount_ntd: int = Field(description="本次清冊各列未付款金額的合計。")
     rows: list[AccountsPayableRowView]
 
 
@@ -64,7 +64,7 @@ class CaseStaffPayableAuditItemView(BaseModel):
     recipient_name: str | None
     obligation_identity: str | None
     amount_due_ntd: int | None = Field(default=None, ge=0)
-    balance_ntd: int | None = Field(default=None, ge=0)
+    balance_ntd: int | None = Field(default=None, ge=0, description="目前未付款餘額；與原始 amount_due_ntd 分開呈現。")
     order_due_date: date | None
     effective_due_date: date | None
     source: Literal["formal_obligation", "historical_projection", "order_facts"]

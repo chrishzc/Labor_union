@@ -8,7 +8,9 @@ import pytest
 from infrastructure.mysql.accounts_payable_export_sources import (
     _STAFF_PAYABLES_SQL,
     MySqlStaffPayableExportSource,
+    _staff_fact,
 )
+from subsystems.staff_payables.accounts_payable_export import aggregate_accounts_payable_rows
 
 
 DATABASE = os.getenv("LABOR_UNION_TEST_MYSQL_DATABASE")
@@ -72,6 +74,63 @@ def test_formal_staff_payable_and_exact_historical_settlement_use_one_mysql_cont
             rows = cursor.fetchall()
             assert len(rows) == 1
             assert rows[0]["export_amount_ntd"] == 43_000
+    finally:
+        connection.close()
+        _drop_database()
+
+
+def test_partial_staff_balance_is_included_by_mysql_without_relisting_paid_or_blocked_items():
+    _create_database()
+    connection = _connection()
+    try:
+        _create_minimum_schema(connection)
+        with connection.cursor() as cursor:
+            cursor.execute("INSERT INTO staff(id,name,identity_card) VALUES (7,'月嫂甲',''),(8,'月嫂乙','')")
+            cursor.execute("INSERT INTO orders(case_no,staff_payment_due_date) VALUES ('CASE-P','2026-10-15')")
+            cursor.execute(
+                "INSERT INTO staff_bank_accounts(id,staff_id,is_primary,bank_code,account_no) "
+                "VALUES (1,7,1,'012','TEST-ACCOUNT')"
+            )
+            rows = (
+                ("partial", 7, "2026-10-15", "open", 1500, "partially_paid"),
+                ("other-month", 7, "2026-09-15", "open", 1500, "partially_paid"),
+                ("cancelled", 7, "2026-10-15", "cancelled", 1500, "partially_paid"),
+                ("completed", 7, "2026-10-15", "open", 0, "completed"),
+                ("zero-balance", 7, "2026-10-15", "open", 0, "partially_paid"),
+                ("anomaly", 7, "2026-10-15", "open", 1500, "anomaly"),
+                ("recovery", 7, "2026-10-15", "open", 1500, "recovery_required"),
+                ("missing-account", 8, "2026-10-15", "open", 1500, "partially_paid"),
+                ("payable", 7, "2026-10-15", "open", 1000, "payable"),
+            )
+            for identity, staff_id, due, state, balance, payout_status in rows:
+                cursor.execute(
+                    "INSERT INTO staff_obligations VALUES (%s,'CASE-P',%s,20000,%s,'payable_to_staff',%s,1)",
+                    (identity, staff_id, due, state),
+                )
+                cursor.execute("INSERT INTO staff_payable_projections VALUES (%s,%s,%s)",
+                               (identity, balance, payout_status))
+            cursor.execute(_STAFF_PAYABLES_SQL, (date(2026, 10, 15),))
+            result = cursor.fetchall()
+            assert {row["obligation_identity"] for row in result} == {"partial", "missing-account", "payable"}
+            exported = aggregate_accounts_payable_rows(tuple(_staff_fact(row) for row in result), ())
+            assert len(exported) == 1
+            assert exported[0].amount.amount == 2500
+            assert exported[0].obligation_identities == ("partial", "payable")
+
+            cursor.execute("UPDATE staff_payable_projections SET balance_ntd=500 WHERE obligation_identity='partial'")
+            cursor.execute(_STAFF_PAYABLES_SQL, (date(2026, 10, 15),))
+            result = cursor.fetchall()
+            exported = aggregate_accounts_payable_rows(tuple(_staff_fact(row) for row in result), ())
+            assert exported[0].amount.amount == 1500
+
+            cursor.execute("UPDATE staff_payable_projections SET balance_ntd=0,status='completed' WHERE obligation_identity='partial'")
+            cursor.execute(_STAFF_PAYABLES_SQL, (date(2026, 10, 15),))
+            result = cursor.fetchall()
+            exported = aggregate_accounts_payable_rows(tuple(_staff_fact(row) for row in result), ())
+            assert exported[0].amount.amount == 1000
+            assert exported[0].obligation_identities == ("payable",)
+            cursor.execute("SELECT amount_due_ntd FROM staff_obligations WHERE obligation_identity='partial'")
+            assert cursor.fetchone()["amount_due_ntd"] == 20_000
     finally:
         connection.close()
         _drop_database()

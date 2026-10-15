@@ -120,7 +120,7 @@ def preview_accounts_payable(
         get_accounts_payable_export_application
     ),
 ):
-    """Return the current payable rows for the selected payment date."""
+    """Return unpaid balances, including partially paid staff, for the selected payment date."""
     del view, principal
     try:
         target_payment_date = _target_payment_date(target_month)
